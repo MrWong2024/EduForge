@@ -21,7 +21,7 @@ EduForge 是一个面向软件工程实践教学的智能化教学平台，目�
 ## 开发辅助
 
 - IDE：Visual Studio Code
-- AI 辅助：GPT-5.2-Codex
+- AI 辅助：OpenAI Codex
 
 ## 工程约定（重要）
 
@@ -33,7 +33,7 @@ EduForge 是一个面向软件工程实践教学的智能化教学平台，目�
 
 ## AI / Agent 使用约定（重要）
 
-本项目在开发过程中允许使用 AI（如 GPT-5.2-Codex）辅助生成代码，
+本项目在开发过程中允许使用 AI（如 OpenAI Codex）辅助生成代码，
 但必须严格遵循以下约定：
 
 ### 1. 架构规范优先

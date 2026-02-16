@@ -15,11 +15,16 @@ import { CurrentUser } from '../../../common/decorators/current-user.decorator';
 import { CreateCourseDto } from '../dto/create-course.dto';
 import { UpdateCourseDto } from '../dto/update-course.dto';
 import { QueryCourseDto } from '../dto/query-course.dto';
+import { QueryCourseOverviewDto } from '../dto/query-course-overview.dto';
+import { CourseOverviewService } from '../services/course-overview.service';
 import { TEACHER_ROLES } from '../../users/schemas/user-roles.constants';
 
 @Controller('courses')
 export class CoursesController {
-  constructor(private readonly coursesService: CoursesService) {}
+  constructor(
+    private readonly coursesService: CoursesService,
+    private readonly courseOverviewService: CourseOverviewService,
+  ) {}
 
   @UseGuards(RolesGuard)
   @Roles(...TEACHER_ROLES)
@@ -57,6 +62,21 @@ export class CoursesController {
   @Get(':id')
   getCourse(@Param('id') id: string, @CurrentUser() user: { id: string }) {
     return this.coursesService.getCourse(id, user.id);
+  }
+
+  @UseGuards(RolesGuard)
+  @Roles(...TEACHER_ROLES)
+  @Get(':courseId/overview')
+  getCourseOverview(
+    @Param('courseId') courseId: string,
+    @Query() query: QueryCourseOverviewDto,
+    @CurrentUser() user: { id: string },
+  ) {
+    return this.courseOverviewService.getCourseOverview(
+      courseId,
+      query,
+      user.id,
+    );
   }
 
   @UseGuards(RolesGuard)

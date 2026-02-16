@@ -15,17 +15,18 @@ import {
 } from '../../../learning-tasks/schemas/feedback.schema';
 
 type AiJobSummaryAgg = {
+  _id: Types.ObjectId;
   total: number;
   avgAttempts: number | null;
 };
 
 type AiJobStatusAgg = {
-  _id: unknown;
+  _id: { classroomTaskId: Types.ObjectId; status: unknown };
   count: number;
 };
 
 type AiJobErrorAgg = {
-  _id: unknown;
+  _id: { classroomTaskId: Types.ObjectId; lastError: unknown };
   count: number;
 };
 
@@ -47,6 +48,19 @@ type NormalizedJobStatus =
   | 'failed'
   | 'dead';
 
+export type AiFeedbackAggregatedJobMetrics = {
+  jobs: {
+    total: number;
+    pending: number;
+    running: number;
+    succeeded: number;
+    failed: number;
+    dead: number;
+  };
+  avgAttempts: number;
+  errors: Array<{ code: string; count: number }>;
+};
+
 @Injectable()
 export class AiFeedbackMetricsAggregator {
   private static readonly KNOWN_ERROR_CODES: AiFeedbackProviderErrorCode[] =
@@ -64,20 +78,57 @@ export class AiFeedbackMetricsAggregator {
     lowerBound: Date,
     timeField: 'createdAt' | 'updatedAt' = 'createdAt',
   ) {
-    const empty = {
-      jobs: {
-        total: 0,
-        pending: 0,
-        running: 0,
-        succeeded: 0,
-        failed: 0,
-        dead: 0,
-      },
-      avgAttempts: 0,
-      errors: [] as Array<{ code: string; count: number }>,
+    const grouped = await this.aggregateJobsGroupedByClassroomTaskIds(
+      classroomTaskIds,
+      lowerBound,
+      timeField,
+    );
+    const jobs = this.createEmptyJobs();
+    let weightedAttempts = 0;
+    let totalForAttempts = 0;
+    const errorCountMap = new Map<string, number>();
+
+    for (const metrics of grouped.values()) {
+      jobs.total += metrics.jobs.total;
+      jobs.pending += metrics.jobs.pending;
+      jobs.running += metrics.jobs.running;
+      jobs.succeeded += metrics.jobs.succeeded;
+      jobs.failed += metrics.jobs.failed;
+      jobs.dead += metrics.jobs.dead;
+      weightedAttempts += metrics.avgAttempts * metrics.jobs.total;
+      totalForAttempts += metrics.jobs.total;
+
+      for (const error of metrics.errors) {
+        const count = errorCountMap.get(error.code) ?? 0;
+        errorCountMap.set(error.code, count + error.count);
+      }
+    }
+
+    const errors = this.toSortedErrors(errorCountMap);
+    return {
+      jobs,
+      avgAttempts:
+        totalForAttempts > 0 ? weightedAttempts / totalForAttempts : 0,
+      errors,
     };
+  }
+
+  async aggregateJobsGroupedByClassroomTaskIds(
+    classroomTaskIds: Types.ObjectId[],
+    lowerBound: Date,
+    timeField: 'createdAt' | 'updatedAt' = 'createdAt',
+    topErrorsLimit?: number,
+  ) {
+    const result = new Map<string, AiFeedbackAggregatedJobMetrics>();
     if (classroomTaskIds.length === 0) {
-      return empty;
+      return result;
+    }
+
+    const uniqueTaskIds = Array.from(
+      new Set(classroomTaskIds.map((id) => id.toString())),
+    );
+    for (const taskId of uniqueTaskIds) {
+      result.set(taskId, this.createEmptyMetrics());
     }
 
     const match: Record<string, unknown> = {
@@ -92,16 +143,31 @@ export class AiFeedbackMetricsAggregator {
           summary: [
             {
               $group: {
-                _id: null,
+                _id: '$classroomTaskId',
                 total: { $sum: 1 },
                 avgAttempts: { $avg: '$attempts' },
               },
             },
           ],
-          statusCounts: [{ $group: { _id: '$status', count: { $sum: 1 } } }],
+          statusCounts: [
+            {
+              $group: {
+                _id: { classroomTaskId: '$classroomTaskId', status: '$status' },
+                count: { $sum: 1 },
+              },
+            },
+          ],
           errors: [
             { $match: { lastError: { $exists: true, $nin: [null, ''] } } },
-            { $group: { _id: '$lastError', count: { $sum: 1 } } },
+            {
+              $group: {
+                _id: {
+                  classroomTaskId: '$classroomTaskId',
+                  lastError: '$lastError',
+                },
+                count: { $sum: 1 },
+              },
+            },
           ],
         },
       },
@@ -111,42 +177,50 @@ export class AiFeedbackMetricsAggregator {
       .aggregate<AiJobsAggregationResult>(pipeline)
       .exec();
     const row = aggregated[0] ?? { summary: [], statusCounts: [], errors: [] };
-    const jobs = {
-      total: row.summary[0]?.total ?? 0,
-      pending: 0,
-      running: 0,
-      succeeded: 0,
-      failed: 0,
-      dead: 0,
-    };
+
+    for (const bucket of row.summary) {
+      const taskId = bucket._id.toString();
+      const current = result.get(taskId) ?? this.createEmptyMetrics();
+      current.jobs.total = bucket.total;
+      current.avgAttempts = bucket.avgAttempts ?? 0;
+      result.set(taskId, current);
+    }
 
     for (const bucket of row.statusCounts) {
-      const mapped = this.mapJobStatus(bucket._id);
+      const taskId = bucket._id.classroomTaskId.toString();
+      const current = result.get(taskId) ?? this.createEmptyMetrics();
+      const mapped = this.mapJobStatus(bucket._id.status);
       if (!mapped) {
         continue;
       }
-      jobs[mapped] += bucket.count;
+      current.jobs[mapped] += bucket.count;
+      result.set(taskId, current);
     }
 
-    const errorCountMap = new Map<string, number>();
+    const taskErrorMap = new Map<string, Map<string, number>>();
     for (const bucket of row.errors) {
-      const code = this.extractErrorCode(bucket._id);
+      const taskId = bucket._id.classroomTaskId.toString();
+      const code = this.extractErrorCode(bucket._id.lastError);
       if (!code) {
         continue;
       }
-      const count = errorCountMap.get(code) ?? 0;
-      errorCountMap.set(code, count + bucket.count);
+      const current = taskErrorMap.get(taskId) ?? new Map<string, number>();
+      const count = current.get(code) ?? 0;
+      current.set(code, count + bucket.count);
+      taskErrorMap.set(taskId, current);
     }
 
-    const errors = Array.from(errorCountMap.entries())
-      .map(([code, count]) => ({ code, count }))
-      .sort((left, right) =>
-        left.count === right.count
-          ? left.code.localeCompare(right.code)
-          : right.count - left.count,
-      );
+    for (const [taskId, codeCountMap] of taskErrorMap.entries()) {
+      const current = result.get(taskId) ?? this.createEmptyMetrics();
+      const errors = this.toSortedErrors(codeCountMap);
+      current.errors =
+        typeof topErrorsLimit === 'number' && topErrorsLimit > 0
+          ? errors.slice(0, topErrorsLimit)
+          : errors;
+      result.set(taskId, current);
+    }
 
-    return { jobs, avgAttempts: row.summary[0]?.avgAttempts ?? 0, errors };
+    return result;
   }
 
   async aggregateTopTagsByClassroomTaskIds(
@@ -223,6 +297,35 @@ export class AiFeedbackMetricsAggregator {
         trimmed.includes(code),
       ) ?? null
     );
+  }
+
+  private createEmptyJobs() {
+    return {
+      total: 0,
+      pending: 0,
+      running: 0,
+      succeeded: 0,
+      failed: 0,
+      dead: 0,
+    };
+  }
+
+  private createEmptyMetrics(): AiFeedbackAggregatedJobMetrics {
+    return {
+      jobs: this.createEmptyJobs(),
+      avgAttempts: 0,
+      errors: [],
+    };
+  }
+
+  private toSortedErrors(errorCountMap: Map<string, number>) {
+    return Array.from(errorCountMap.entries())
+      .map(([code, count]) => ({ code, count }))
+      .sort((left, right) =>
+        left.count === right.count
+          ? left.code.localeCompare(right.code)
+          : right.count - left.count,
+      );
   }
 
   private mapJobStatus(status: unknown): NormalizedJobStatus | null {
