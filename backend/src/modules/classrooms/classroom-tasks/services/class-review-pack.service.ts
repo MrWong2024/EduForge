@@ -66,6 +66,25 @@ type TierStudentItem = {
   attemptsCount: number;
   latestErrorCount: number;
 };
+type CommonIssuesByClassroomTaskFacetResult = {
+  tags: Array<{
+    _id: Types.ObjectId;
+    rows: Array<{ tag: string; count: number }>;
+  }>;
+  types: Array<{
+    _id: Types.ObjectId;
+    rows: Array<{ type: FeedbackType; count: number }>;
+  }>;
+  severities: Array<{
+    _id: Types.ObjectId;
+    rows: Array<{ severity: FeedbackSeverity; count: number }>;
+  }>;
+};
+export type ReviewPackCommonIssues = {
+  topTags: Array<{ tag: string; count: number }>;
+  topTypes: Array<{ type: FeedbackType; count: number }>;
+  topSeverities: Array<{ severity: FeedbackSeverity; count: number }>;
+};
 
 @Injectable()
 export class ClassReviewPackService {
@@ -318,6 +337,201 @@ export class ClassReviewPackService {
       actionItems,
       teacherScript,
     };
+  }
+
+  async aggregateCommonIssuesBySubmissionIds(
+    submissionIds: Types.ObjectId[],
+    topK: number,
+  ): Promise<ReviewPackCommonIssues> {
+    const rows = await this.aggregateReviewFeedbackFacets(
+      submissionIds,
+      topK,
+      ClassReviewPackService.DEFAULT_EXAMPLES_PER_TAG,
+    );
+    const commonIssues = rows[0] ?? {
+      topTags: [],
+      topTypes: [],
+      topSeverities: [],
+    };
+    return {
+      topTags: commonIssues.topTags,
+      topTypes: commonIssues.topTypes,
+      topSeverities: commonIssues.topSeverities,
+    };
+  }
+
+  async aggregateCommonIssuesByClassroomTaskIds(
+    classroomTaskIds: Types.ObjectId[],
+    lowerBound: Date,
+    topK: number,
+    activeStudentIds?: Types.ObjectId[],
+  ) {
+    const result = new Map<string, ReviewPackCommonIssues>();
+    for (const classroomTaskId of classroomTaskIds) {
+      result.set(classroomTaskId.toString(), {
+        topTags: [],
+        topTypes: [],
+        topSeverities: [],
+      });
+    }
+    if (classroomTaskIds.length === 0 || topK <= 0) {
+      return result;
+    }
+    if (activeStudentIds && activeStudentIds.length === 0) {
+      return result;
+    }
+
+    const submissionMatch: Record<string, unknown> = {
+      classroomTaskId: { $in: classroomTaskIds },
+      createdAt: { $gte: lowerBound },
+    };
+    if (activeStudentIds && activeStudentIds.length > 0) {
+      submissionMatch.studentId = { $in: activeStudentIds };
+    }
+
+    const rows = await this.feedbackModel
+      .aggregate<CommonIssuesByClassroomTaskFacetResult>([
+        {
+          $lookup: {
+            from: 'submissions',
+            localField: 'submissionId',
+            foreignField: '_id',
+            pipeline: [
+              {
+                $match: submissionMatch,
+              },
+              { $project: { _id: 1, classroomTaskId: 1 } },
+            ],
+            as: 'submission',
+          },
+        },
+        { $unwind: '$submission' },
+        {
+          $facet: {
+            tags: [
+              { $match: { tags: { $exists: true, $ne: [] } } },
+              { $unwind: '$tags' },
+              {
+                $group: {
+                  _id: {
+                    classroomTaskId: '$submission.classroomTaskId',
+                    tag: '$tags',
+                  },
+                  count: { $sum: 1 },
+                },
+              },
+              {
+                $sort: {
+                  '_id.classroomTaskId': 1,
+                  count: -1,
+                  '_id.tag': 1,
+                },
+              },
+              {
+                $group: {
+                  _id: '$_id.classroomTaskId',
+                  rows: {
+                    $push: {
+                      tag: '$_id.tag',
+                      count: '$count',
+                    },
+                  },
+                },
+              },
+              { $project: { _id: 1, rows: { $slice: ['$rows', topK] } } },
+            ],
+            types: [
+              {
+                $group: {
+                  _id: {
+                    classroomTaskId: '$submission.classroomTaskId',
+                    type: '$type',
+                  },
+                  count: { $sum: 1 },
+                },
+              },
+              {
+                $sort: {
+                  '_id.classroomTaskId': 1,
+                  count: -1,
+                  '_id.type': 1,
+                },
+              },
+              {
+                $group: {
+                  _id: '$_id.classroomTaskId',
+                  rows: {
+                    $push: {
+                      type: '$_id.type',
+                      count: '$count',
+                    },
+                  },
+                },
+              },
+              { $project: { _id: 1, rows: { $slice: ['$rows', topK] } } },
+            ],
+            severities: [
+              {
+                $group: {
+                  _id: {
+                    classroomTaskId: '$submission.classroomTaskId',
+                    severity: '$severity',
+                  },
+                  count: { $sum: 1 },
+                },
+              },
+              {
+                $sort: {
+                  '_id.classroomTaskId': 1,
+                  count: -1,
+                  '_id.severity': 1,
+                },
+              },
+              {
+                $group: {
+                  _id: '$_id.classroomTaskId',
+                  rows: {
+                    $push: {
+                      severity: '$_id.severity',
+                      count: '$count',
+                    },
+                  },
+                },
+              },
+              { $project: { _id: 1, rows: { $slice: ['$rows', topK] } } },
+            ],
+          },
+        },
+      ] as PipelineStage[])
+      .exec();
+    const facet = rows[0] ?? { tags: [], types: [], severities: [] };
+
+    for (const row of facet.tags) {
+      const current = result.get(row._id.toString());
+      if (!current) {
+        continue;
+      }
+      current.topTags = row.rows;
+      result.set(row._id.toString(), current);
+    }
+    for (const row of facet.types) {
+      const current = result.get(row._id.toString());
+      if (!current) {
+        continue;
+      }
+      current.topTypes = row.rows;
+      result.set(row._id.toString(), current);
+    }
+    for (const row of facet.severities) {
+      const current = result.get(row._id.toString());
+      if (!current) {
+        continue;
+      }
+      current.topSeverities = row.rows;
+      result.set(row._id.toString(), current);
+    }
+
+    return result;
   }
 
   private async aggregateReviewFeedbackFacets(

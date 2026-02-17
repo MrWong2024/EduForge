@@ -13,6 +13,7 @@ import { QueryClassroomDto } from '../dto/query-classroom.dto';
 import { JoinClassroomDto } from '../dto/join-classroom.dto';
 import { QueryClassroomWeeklyReportDto } from '../dto/query-classroom-weekly-report.dto';
 import { QueryProcessAssessmentDto } from '../dto/query-process-assessment.dto';
+import { QueryClassroomExportSnapshotDto } from '../dto/query-classroom-export-snapshot.dto';
 import { ClassroomResponseDto } from '../dto/classroom-response.dto';
 import { Course } from '../../courses/schemas/course.schema';
 import { User } from '../../users/schemas/user.schema';
@@ -20,6 +21,7 @@ import { TeacherClassroomDashboardService } from './teacher-classroom-dashboard.
 import { TeacherClassroomWeeklyReportService } from './teacher-classroom-weekly-report.service';
 import { StudentLearningDashboardService } from './student-learning-dashboard.service';
 import { ProcessAssessmentService } from './process-assessment.service';
+import { ClassroomExportSnapshotService } from './classroom-export-snapshot.service';
 import { EnrollmentService } from '../enrollments/services/enrollment.service';
 import {
   STUDENT_ROLES,
@@ -49,6 +51,7 @@ export class ClassroomsService {
     private readonly teacherClassroomWeeklyReportService: TeacherClassroomWeeklyReportService,
     private readonly studentLearningDashboardService: StudentLearningDashboardService,
     private readonly processAssessmentService: ProcessAssessmentService,
+    private readonly classroomExportSnapshotService: ClassroomExportSnapshotService,
   ) {}
 
   async createClassroom(dto: CreateClassroomDto, userId: string) {
@@ -215,6 +218,19 @@ export class ClassroomsService {
   ) {
     await this.ensureTeacher(userId);
     return this.processAssessmentService.exportProcessAssessmentCsv(
+      classroomId,
+      query,
+      userId,
+    );
+  }
+
+  async exportSnapshot(
+    classroomId: string,
+    query: QueryClassroomExportSnapshotDto,
+    userId: string,
+  ) {
+    await this.ensureTeacher(userId);
+    return this.classroomExportSnapshotService.getSnapshot(
       classroomId,
       query,
       userId,

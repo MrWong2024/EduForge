@@ -63,6 +63,38 @@ export class TeacherClassroomWeeklyReportService {
       includeRiskStudentIdsQuery,
     );
     const { window: resolvedWindow, lowerBound } = this.resolveWindow(window);
+    return this.buildWeeklyReport(
+      classroomObjectId,
+      lowerBound,
+      resolvedWindow,
+      includeRiskStudentIds,
+      teacherId,
+    );
+  }
+
+  async getWeeklyReportByLowerBound(
+    classroomId: string,
+    lowerBound: Date,
+    windowLabel: string,
+    teacherId: string,
+  ) {
+    const classroomObjectId = this.parseObjectId(classroomId, 'classroomId');
+    return this.buildWeeklyReport(
+      classroomObjectId,
+      lowerBound,
+      windowLabel,
+      false,
+      teacherId,
+    );
+  }
+
+  private async buildWeeklyReport(
+    classroomObjectId: Types.ObjectId,
+    lowerBound: Date,
+    windowLabel: string,
+    includeRiskStudentIds: boolean,
+    teacherId: string,
+  ) {
     const now = new Date();
 
     const classroom = await this.classroomModel
@@ -149,7 +181,7 @@ export class TeacherClassroomWeeklyReportService {
         courseId: classroom.courseId.toString(),
         status: classroom.status ?? ClassroomStatus.Active,
       },
-      window: resolvedWindow,
+      window: windowLabel,
       generatedAt: now.toISOString(),
       progress: {
         studentsCount,

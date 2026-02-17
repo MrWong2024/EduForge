@@ -88,6 +88,10 @@ type ProcessAssessmentPayload = {
   };
   items: ProcessAssessmentItem[];
 };
+type ProcessAssessmentBuildOptions = {
+  forceAllActiveStudents?: boolean;
+  maxLimit?: number;
+};
 
 @Injectable()
 export class ProcessAssessmentService {
@@ -148,6 +152,28 @@ export class ProcessAssessmentService {
     return this.buildPayload(classroomId, query, teacherId);
   }
 
+  async getProcessAssessmentForSnapshot(
+    classroomId: string,
+    window: ProcessAssessmentWindow | undefined,
+    teacherId: string,
+  ) {
+    return this.buildPayload(
+      classroomId,
+      {
+        window,
+        page: 1,
+        limit: 1000,
+        sort: 'score',
+        order: 'desc',
+      },
+      teacherId,
+      {
+        forceAllActiveStudents: true,
+        maxLimit: 1000,
+      },
+    );
+  }
+
   async exportProcessAssessmentCsv(
     classroomId: string,
     query: QueryProcessAssessmentDto,
@@ -194,12 +220,13 @@ export class ProcessAssessmentService {
     classroomId: string,
     query: QueryProcessAssessmentDto,
     teacherId: string,
+    options?: ProcessAssessmentBuildOptions,
   ): Promise<ProcessAssessmentPayload> {
     const classroomObjectId = this.parseObjectId(classroomId, 'classroomId');
     const page = query.page ?? ProcessAssessmentService.DEFAULT_PAGE;
     const limit = Math.min(
       query.limit ?? ProcessAssessmentService.DEFAULT_LIMIT,
-      100,
+      options?.maxLimit ?? 100,
     );
     const sort = PROCESS_ASSESSMENT_SORT_FIELDS.includes(
       query.sort as ProcessAssessmentSortField,
@@ -245,14 +272,22 @@ export class ProcessAssessmentService {
     const windowTaskIds = windowClassroomTasks.map((task) => task._id);
     const publishedTasksCount = windowTaskIds.length;
 
-    const [total, pageStudentIds] = await Promise.all([
-      this.enrollmentService.countStudents(classroomObjectId.toString()),
-      this.enrollmentService.listActiveStudentIdsByClassroomPage(
-        classroomObjectId,
-        page,
-        limit,
-      ),
-    ]);
+    const [total, pageStudentIds] = options?.forceAllActiveStudents
+      ? await (async () => {
+          const allStudentIds =
+            await this.enrollmentService.listActiveStudentIds(
+              classroomObjectId,
+            );
+          return [allStudentIds.length, allStudentIds] as const;
+        })()
+      : await Promise.all([
+          this.enrollmentService.countStudents(classroomObjectId.toString()),
+          this.enrollmentService.listActiveStudentIdsByClassroomPage(
+            classroomObjectId,
+            page,
+            limit,
+          ),
+        ]);
 
     if (pageStudentIds.length === 0) {
       return {

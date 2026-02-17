@@ -19,6 +19,7 @@ import { QueryClassroomDto } from '../dto/query-classroom.dto';
 import { JoinClassroomDto } from '../dto/join-classroom.dto';
 import { QueryClassroomWeeklyReportDto } from '../dto/query-classroom-weekly-report.dto';
 import { QueryProcessAssessmentDto } from '../dto/query-process-assessment.dto';
+import { QueryClassroomExportSnapshotDto } from '../dto/query-classroom-export-snapshot.dto';
 import {
   MEMBER_OR_OWNER_ROLES,
   STUDENT_ROLES,
@@ -119,6 +120,17 @@ export class ClassroomsController {
       query,
       user.id,
     );
+  }
+
+  @UseGuards(RolesGuard)
+  @Roles(...TEACHER_ROLES)
+  @Get(':classroomId/export/snapshot')
+  exportSnapshot(
+    @Param('classroomId') classroomId: string,
+    @Query() query: QueryClassroomExportSnapshotDto,
+    @CurrentUser() user: { id: string },
+  ) {
+    return this.classroomsService.exportSnapshot(classroomId, query, user.id);
   }
 
   @UseGuards(RolesGuard)

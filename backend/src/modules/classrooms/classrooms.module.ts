@@ -32,6 +32,7 @@ import { TeacherClassroomDashboardService } from './services/teacher-classroom-d
 import { TeacherClassroomWeeklyReportService } from './services/teacher-classroom-weekly-report.service';
 import { StudentLearningDashboardService } from './services/student-learning-dashboard.service';
 import { ProcessAssessmentService } from './services/process-assessment.service';
+import { ClassroomExportSnapshotService } from './services/classroom-export-snapshot.service';
 import {
   Enrollment,
   EnrollmentSchema,
@@ -69,6 +70,7 @@ import { LearningTasksModule } from '../learning-tasks/learning-tasks.module';
     TeacherClassroomWeeklyReportService,
     StudentLearningDashboardService,
     ProcessAssessmentService,
+    ClassroomExportSnapshotService,
   ],
   exports: [EnrollmentService],
 })
