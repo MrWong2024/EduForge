@@ -10,11 +10,18 @@ import {
 type EnrollmentStudentRow = {
   userId: Types.ObjectId;
 };
+type EnrollmentClassroomRow = {
+  classroomId: Types.ObjectId;
+};
 
 type EnrollmentClassroomStatsRow = {
   _id: Types.ObjectId;
   totalRecords: number;
   activeStudentsCount: number;
+};
+type EnrollmentGroupedCountRow = {
+  _id: Types.ObjectId;
+  count: number;
 };
 
 @Injectable()
@@ -102,6 +109,50 @@ export class EnrollmentService {
     });
   }
 
+  async countStudentsGroupedByClassroomIds(classroomIds: Types.ObjectId[]) {
+    const result = new Map<string, number>();
+    if (classroomIds.length === 0) {
+      return result;
+    }
+
+    const rows = await this.enrollmentModel
+      .aggregate<EnrollmentGroupedCountRow>([
+        {
+          $match: {
+            classroomId: { $in: classroomIds },
+            role: EnrollmentRole.Student,
+            status: EnrollmentStatus.Active,
+          },
+        },
+        {
+          $group: {
+            _id: '$classroomId',
+            count: { $sum: 1 },
+          },
+        },
+      ])
+      .exec();
+
+    for (const row of rows) {
+      result.set(row._id.toString(), row.count);
+    }
+    return result;
+  }
+
+  async listActiveClassroomIdsByUser(userId: string | Types.ObjectId) {
+    const userObjectId = this.toObjectId(userId, 'userId');
+    const rows = await this.enrollmentModel
+      .find({
+        userId: userObjectId,
+        role: EnrollmentRole.Student,
+        status: EnrollmentStatus.Active,
+      })
+      .select({ _id: 0, classroomId: 1 })
+      .lean<EnrollmentClassroomRow[]>()
+      .exec();
+    return rows.map((row) => row.classroomId);
+  }
+
   async isStudentActiveInClassroomWithLegacyFallback(
     classroomId: string | Types.ObjectId,
     userId: string | Types.ObjectId,
@@ -179,17 +230,15 @@ export class EnrollmentService {
     legacyStudentIds: Types.ObjectId[] = [],
   ) {
     const classroomObjectId = this.toObjectId(classroomId, 'classroomId');
-    const statsMap = await this.getClassroomEnrollmentStatsByClassroomIds([
-      classroomObjectId,
+    const [groupedActiveMap, statsMap] = await Promise.all([
+      this.countStudentsGroupedByClassroomIds([classroomObjectId]),
+      this.getClassroomEnrollmentStatsByClassroomIds([classroomObjectId]),
     ]);
     const stats = statsMap.get(classroomObjectId.toString());
-    if (!stats) {
+    if (!stats || stats.totalRecords === 0) {
       return legacyStudentIds.length;
     }
-    if (stats.totalRecords === 0) {
-      return legacyStudentIds.length;
-    }
-    return stats.activeStudentsCount;
+    return groupedActiveMap.get(classroomObjectId.toString()) ?? 0;
   }
 
   async getClassroomEnrollmentStatsByClassroomIds(

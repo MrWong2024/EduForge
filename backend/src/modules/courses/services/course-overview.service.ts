@@ -9,11 +9,7 @@ import { Course } from '../schemas/course.schema';
 import { Classroom } from '../../classrooms/schemas/classroom.schema';
 import { ClassroomTask } from '../../classrooms/classroom-tasks/schemas/classroom-task.schema';
 import { Submission } from '../../learning-tasks/schemas/submission.schema';
-import {
-  Enrollment,
-  EnrollmentRole,
-  EnrollmentStatus,
-} from '../../classrooms/enrollments/schemas/enrollment.schema';
+import { EnrollmentService } from '../../classrooms/enrollments/services/enrollment.service';
 import {
   CourseOverviewSortField,
   CourseOverviewSortOrder,
@@ -42,12 +38,6 @@ type ClassroomTasksAgg = {
 type SubmissionDistinctPairAgg = {
   _id: { classroomTaskId: Types.ObjectId; studentId: Types.ObjectId };
 };
-type EnrollmentStatsAgg = {
-  _id: Types.ObjectId;
-  totalRecords: number;
-  activeStudentsCount: number;
-};
-
 type CourseOverviewItem = {
   classroomId: string;
   name: string;
@@ -89,8 +79,7 @@ export class CourseOverviewService {
     private readonly classroomTaskModel: Model<ClassroomTask>,
     @InjectModel(Submission.name)
     private readonly submissionModel: Model<Submission>,
-    @InjectModel(Enrollment.name)
-    private readonly enrollmentModel: Model<Enrollment>,
+    private readonly enrollmentService: EnrollmentService,
     private readonly aiFeedbackMetricsAggregator: AiFeedbackMetricsAggregator,
   ) {}
 
@@ -168,45 +157,12 @@ export class CourseOverviewService {
       };
     }
 
-    const enrollmentStatsRows = await this.enrollmentModel
-      .aggregate<EnrollmentStatsAgg>([
-        {
-          $match: {
-            classroomId: { $in: classroomIds },
-          },
-        },
-        {
-          $group: {
-            _id: '$classroomId',
-            totalRecords: { $sum: 1 },
-            activeStudentsCount: {
-              $sum: {
-                $cond: [
-                  {
-                    $and: [
-                      { $eq: ['$role', EnrollmentRole.Student] },
-                      { $eq: ['$status', EnrollmentStatus.Active] },
-                    ],
-                  },
-                  1,
-                  0,
-                ],
-              },
-            },
-          },
-        },
-      ] as PipelineStage[])
-      .exec();
-    const enrollmentStatsMap = new Map<
-      string,
-      { totalRecords: number; activeStudentsCount: number }
-    >();
-    for (const row of enrollmentStatsRows) {
-      enrollmentStatsMap.set(row._id.toString(), {
-        totalRecords: row.totalRecords,
-        activeStudentsCount: row.activeStudentsCount,
-      });
-    }
+    const [enrollmentCountMap, enrollmentStatsMap] = await Promise.all([
+      this.enrollmentService.countStudentsGroupedByClassroomIds(classroomIds),
+      this.enrollmentService.getClassroomEnrollmentStatsByClassroomIds(
+        classroomIds,
+      ),
+    ]);
 
     // AB metric contract:
     // Use createdAt as the single time-window field for classroomTasks/submissions/jobs.
@@ -318,7 +274,7 @@ export class CourseOverviewService {
       // only fall back to legacy studentIds when enrollment records are absent.
       const studentsCount =
         enrollmentStats && enrollmentStats.totalRecords > 0
-          ? enrollmentStats.activeStudentsCount
+          ? (enrollmentCountMap.get(classroomId) ?? 0)
           : (classroom.studentIds?.length ?? 0);
       const distinctStudentsSubmitted =
         distinctStudentsMap.get(classroomId)?.size ?? 0;

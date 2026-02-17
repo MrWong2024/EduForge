@@ -30,6 +30,7 @@ import {
   FeedbackSchema,
 } from '../learning-tasks/schemas/feedback.schema';
 import { AiFeedbackMetricsAggregator } from '../classrooms/classroom-tasks/services/ai-feedback-metrics-aggregator.service';
+import { EnrollmentService } from '../classrooms/enrollments/services/enrollment.service';
 import { AuthModule } from '../auth/auth.module';
 
 @Module({
@@ -51,6 +52,7 @@ import { AuthModule } from '../auth/auth.module';
     CoursesService,
     CourseOverviewService,
     AiFeedbackMetricsAggregator,
+    EnrollmentService,
   ],
 })
 export class CoursesModule {}

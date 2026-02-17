@@ -7,24 +7,12 @@ import { ClassroomTask } from '../classroom-tasks/schemas/classroom-task.schema'
 import { Submission } from '../../learning-tasks/schemas/submission.schema';
 import { AiFeedbackJobService } from '../../learning-tasks/ai-feedback/services/ai-feedback-job.service';
 import { AiFeedbackStatus } from '../../learning-tasks/ai-feedback/interfaces/ai-feedback-status.enum';
-import {
-  EnrollmentRole,
-  EnrollmentStatus,
-} from '../enrollments/schemas/enrollment.schema';
+import { EnrollmentService } from '../enrollments/services/enrollment.service';
 import { WithId } from '../../../common/types/with-id.type';
 import { WithTimestamps } from '../../../common/types/with-timestamps.type';
 
+type ClassroomLean = Classroom & WithId;
 type SubmissionWithMeta = Submission & WithId & WithTimestamps;
-type ClassroomMembershipAgg = {
-  _id: Types.ObjectId;
-  name: string;
-  courseId: Types.ObjectId;
-  status: string;
-};
-type ClassroomMembershipFacet = {
-  items: ClassroomMembershipAgg[];
-  total: Array<{ total: number }>;
-};
 
 type ClassroomTaskStudentItem = {
   _id: Types.ObjectId;
@@ -44,111 +32,55 @@ export class StudentLearningDashboardService {
     private readonly classroomTaskModel: Model<ClassroomTask>,
     @InjectModel(Submission.name)
     private readonly submissionModel: Model<Submission>,
+    private readonly enrollmentService: EnrollmentService,
     private readonly aiFeedbackJobService: AiFeedbackJobService,
   ) {}
 
   async getMyLearningDashboard(query: QueryClassroomDto, userId: string) {
     const page = query.page ?? 1;
     const limit = Math.min(query.limit ?? 20, 100);
-    const userObjectId = new Types.ObjectId(userId);
-    const filter: Record<string, unknown> = {};
+    const enrollmentClassroomIds =
+      await this.enrollmentService.listActiveClassroomIdsByUser(userId);
+    const enrollmentFilter: Record<string, unknown> = {};
     if (query.status) {
-      filter.status = query.status;
+      enrollmentFilter.status = query.status;
     }
 
-    // Migration fallback (temporary):
-    // membership is enrollment ACTIVE first; fallback to legacy studentIds only
-    // when a classroom has no enrollment records yet.
-    const membershipPipeline: PipelineStage[] = [
-      { $match: filter },
-      {
-        $lookup: {
-          from: 'enrollments',
-          let: { classroomId: '$_id', userId: userObjectId },
-          pipeline: [
-            {
-              $match: {
-                $expr: {
-                  $and: [
-                    { $eq: ['$classroomId', '$$classroomId'] },
-                    { $eq: ['$userId', '$$userId'] },
-                    { $eq: ['$role', EnrollmentRole.Student] },
-                    { $eq: ['$status', EnrollmentStatus.Active] },
-                  ],
-                },
-              },
-            },
-            { $project: { _id: 1 } },
-            { $limit: 1 },
-          ],
-          as: 'activeEnrollment',
-        },
-      },
-      {
-        $lookup: {
-          from: 'enrollments',
-          let: { classroomId: '$_id' },
-          pipeline: [
-            {
-              $match: {
-                $expr: {
-                  $eq: ['$classroomId', '$$classroomId'],
-                },
-              },
-            },
-            { $project: { _id: 1 } },
-            { $limit: 1 },
-          ],
-          as: 'anyEnrollment',
-        },
-      },
-      {
-        $addFields: {
-          hasActiveEnrollment: { $gt: [{ $size: '$activeEnrollment' }, 0] },
-          hasAnyEnrollment: { $gt: [{ $size: '$anyEnrollment' }, 0] },
-          hasLegacyMembership: { $in: [userObjectId, '$studentIds'] },
-        },
-      },
-      {
-        $match: {
-          $expr: {
-            $or: [
-              '$hasActiveEnrollment',
-              {
-                $and: [
-                  { $eq: ['$hasAnyEnrollment', false] },
-                  '$hasLegacyMembership',
-                ],
-              },
-            ],
-          },
-        },
-      },
-      { $sort: { createdAt: -1, _id: 1 } },
-      {
-        $facet: {
-          items: [
-            { $skip: (page - 1) * limit },
-            { $limit: limit },
-            {
-              $project: {
-                _id: 1,
-                name: 1,
-                courseId: 1,
-                status: 1,
-              },
-            },
-          ],
-          total: [{ $count: 'total' }],
-        },
-      },
-    ];
-    const membershipRows = await this.classroomModel
-      .aggregate<ClassroomMembershipFacet>(membershipPipeline)
-      .exec();
-    const membership = membershipRows[0] ?? { items: [], total: [] };
-    const classrooms = membership.items;
-    const total = membership.total[0]?.total ?? 0;
+    let classrooms: ClassroomLean[] = [];
+    let total = 0;
+    if (enrollmentClassroomIds.length > 0) {
+      const filter: Record<string, unknown> = {
+        ...enrollmentFilter,
+        _id: { $in: enrollmentClassroomIds },
+      };
+      [classrooms, total] = await Promise.all([
+        this.classroomModel
+          .find(filter)
+          .sort({ createdAt: -1, _id: 1 })
+          .skip((page - 1) * limit)
+          .limit(limit)
+          .lean<ClassroomLean[]>()
+          .exec(),
+        this.classroomModel.countDocuments(filter),
+      ]);
+    } else {
+      // Migration fallback (temporary):
+      // if enrollment data is absent for this user, read legacy studentIds.
+      const legacyFilter: Record<string, unknown> = {
+        ...enrollmentFilter,
+        studentIds: new Types.ObjectId(userId),
+      };
+      [classrooms, total] = await Promise.all([
+        this.classroomModel
+          .find(legacyFilter)
+          .sort({ createdAt: -1, _id: 1 })
+          .skip((page - 1) * limit)
+          .limit(limit)
+          .lean<ClassroomLean[]>()
+          .exec(),
+        this.classroomModel.countDocuments(legacyFilter),
+      ]);
+    }
 
     if (classrooms.length === 0) {
       return {

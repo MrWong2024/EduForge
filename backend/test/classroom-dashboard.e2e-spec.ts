@@ -6,6 +6,7 @@ import * as bcrypt from 'bcryptjs';
 import cookieParser from 'cookie-parser';
 import request from 'supertest';
 import { App } from 'supertest/types';
+process.env.AI_FEEDBACK_DEBUG_ENABLED = 'true';
 import { AppModule } from '../src/app.module';
 import { User } from '../src/modules/users/schemas/user.schema';
 import { Session } from '../src/modules/auth/schemas/session.schema';
@@ -448,11 +449,15 @@ describe('Classroom Dashboards (e2e)', () => {
         .expect(201);
 
       await outsiderAgent.get(`/api/classrooms/${classroomId}`).expect(403);
-      await outsiderAgent.get(`/api/classrooms/${classroomId}/tasks`).expect(403);
+      await outsiderAgent
+        .get(`/api/classrooms/${classroomId}/tasks`)
+        .expect(403);
       await outsiderAgent
         .get(`/api/classrooms/${classroomId}/tasks/${classroomTaskId}`)
         .expect(403);
-      await studentAgent.get(`/api/classrooms/${classroomId}/dashboard`).expect(403);
+      await studentAgent
+        .get(`/api/classrooms/${classroomId}/dashboard`)
+        .expect(403);
       await request(app.getHttpServer())
         .get(`/api/classrooms/${classroomId}`)
         .expect(401);

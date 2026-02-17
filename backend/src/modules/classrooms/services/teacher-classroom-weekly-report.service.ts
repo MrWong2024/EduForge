@@ -93,11 +93,19 @@ export class TeacherClassroomWeeklyReportService {
     const classroomTaskIds = classroomTasks.map((task) => task._id);
     // Migration fallback (temporary) is encapsulated in EnrollmentService:
     // fall back to legacy studentIds only when classroom enrollments are empty.
-    const classroomStudentIds =
-      await this.enrollmentService.listStudentIdsWithLegacyFallback(
+    const [studentsCount, classroomStudentIdsRaw] = await Promise.all([
+      this.enrollmentService.countStudentsWithLegacyFallback(
         classroom._id,
         classroom.studentIds ?? [],
-      );
+      ),
+      this.enrollmentService.listStudentIdsWithLegacyFallback(
+        classroom._id,
+        classroom.studentIds ?? [],
+      ),
+    ]);
+    const classroomStudentIds = [...classroomStudentIdsRaw].sort(
+      (left, right) => left.localeCompare(right),
+    );
     const classroomStudentObjectIds = classroomStudentIds.map(
       (studentId) => new Types.ObjectId(studentId),
     );
@@ -107,8 +115,8 @@ export class TeacherClassroomWeeklyReportService {
       lowerBound,
     );
 
-    const studentsCount = classroomStudentIds.length;
     const distinctStudentsSubmitted = submittedStudentIdSet.size;
+    // Global rule: when studentsCount is 0, submissionRate is 0.
     const submissionRate =
       studentsCount > 0 ? distinctStudentsSubmitted / studentsCount : 0;
     const riskStudentIds = classroomStudentIds.filter(
