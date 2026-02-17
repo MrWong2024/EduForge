@@ -46,6 +46,15 @@ export class Submission {
   @Prop({ required: true, min: 1 })
   attemptNo!: number;
 
+  @Prop({ required: true, type: Date, default: () => new Date() })
+  submittedAt!: Date;
+
+  @Prop({ required: true, type: Boolean, default: false })
+  isLate!: boolean;
+
+  @Prop({ required: true, type: Number, default: 0, min: 0 })
+  lateBySeconds!: number;
+
   @Prop({ required: true, type: SubmissionContentSchema })
   content!: SubmissionContent;
 
@@ -72,3 +81,7 @@ SubmissionSchema.index({ classroomTaskId: 1, studentId: 1, attemptNo: 1 });
 SubmissionSchema.index({ classroomTaskId: 1, createdAt: -1 });
 // Supports lookup pipelines constrained by classroomTaskId and _id.
 SubmissionSchema.index({ classroomTaskId: 1, _id: 1 });
+// Supports deadline-aware student attempt timelines by classroomTask and submittedAt.
+SubmissionSchema.index({ classroomTaskId: 1, studentId: 1, submittedAt: -1 });
+// Supports late-submission aggregations in classroomTask scope.
+SubmissionSchema.index({ classroomTaskId: 1, isLate: 1, submittedAt: -1 });

@@ -89,7 +89,7 @@ type SubmissionDetailItem = {
 };
 type LearningTrajectorySubmissionRow = Pick<
   Submission,
-  'studentId' | 'attemptNo'
+  'studentId' | 'attemptNo' | 'isLate' | 'lateBySeconds'
 > &
   WithId &
   WithTimestamps;
@@ -110,6 +110,7 @@ type LearningTrajectoryAttempt = {
   attemptNo: number;
   createdAt: string;
   isLate: boolean;
+  lateBySeconds: number;
   aiFeedbackStatus: AiFeedbackStatus;
   feedbackSummary: SubmissionFeedbackSummary;
 };
@@ -182,6 +183,12 @@ export class ClassroomTasksService {
 
     const publishedAt = new Date();
     const dueAt = dto.dueAt ? new Date(dto.dueAt) : undefined;
+    const settings = {
+      allowLate: dto.settings?.allowLate ?? true,
+      ...(dto.settings?.maxAttempts !== undefined
+        ? { maxAttempts: dto.settings.maxAttempts }
+        : {}),
+    };
 
     try {
       const classroomTask = await this.classroomTaskModel.create({
@@ -189,7 +196,7 @@ export class ClassroomTasksService {
         taskId: new Types.ObjectId(dto.taskId),
         publishedAt,
         dueAt,
-        settings: dto.settings,
+        settings,
         createdBy: new Types.ObjectId(userId),
       });
       return this.toClassroomTaskResponse(
@@ -441,7 +448,7 @@ export class ClassroomTasksService {
         studentId: { $in: studentObjectIds },
         createdAt: { $gte: lowerBound },
       })
-      .select('_id studentId attemptNo createdAt')
+      .select('_id studentId attemptNo createdAt isLate lateBySeconds')
       .sort({ studentId: 1, attemptNo: 1, createdAt: 1 })
       .lean<LearningTrajectorySubmissionRow[]>()
       .exec();
@@ -466,7 +473,6 @@ export class ClassroomTasksService {
       submissionsByStudentId.set(studentId, bucket);
     }
 
-    const dueAt = classroomTask.dueAt ?? null;
     const items = studentIds.map((studentId) => {
       const studentSubmissions = submissionsByStudentId.get(studentId) ?? [];
       if (studentSubmissions.length === 0) {
@@ -506,12 +512,12 @@ export class ClassroomTasksService {
               feedbackSummaryMap.get(submission._id.toString()) ??
               this.getEmptyFeedbackSummary();
             const createdAt = submission.createdAt ?? new Date(0);
-            const isLate = !!dueAt && createdAt.getTime() > dueAt.getTime();
             return {
               submissionId: submission._id.toString(),
               attemptNo: submission.attemptNo,
               createdAt: createdAt.toISOString(),
-              isLate,
+              isLate: submission.isLate ?? false,
+              lateBySeconds: submission.lateBySeconds ?? 0,
               aiFeedbackStatus:
                 statusMap.get(submission._id.toString()) ??
                 AiFeedbackStatus.NotRequested,

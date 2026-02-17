@@ -26,7 +26,10 @@ import { AiFeedbackMetricsAggregator } from './ai-feedback-metrics-aggregator.se
 import { WithId } from '../../../../common/types/with-id.type';
 import { WithTimestamps } from '../../../../common/types/with-timestamps.type';
 
-type ReviewSubmissionLean = Pick<Submission, 'studentId' | 'attemptNo'> &
+type ReviewSubmissionLean = Pick<
+  Submission,
+  'studentId' | 'attemptNo' | 'isLate'
+> &
   WithId &
   WithTimestamps;
 type ReviewClassroomTaskLean = Pick<ClassroomTask, 'classroomId'> & WithId;
@@ -168,7 +171,7 @@ export class ClassReviewPackService {
               studentId: { $in: activeStudentObjectIds },
               createdAt: { $gte: lowerBound },
             })
-            .select('_id studentId attemptNo createdAt')
+            .select('_id studentId attemptNo createdAt isLate')
             .sort({ studentId: 1, attemptNo: 1, createdAt: 1 })
             .lean<ReviewSubmissionLean[]>()
             .exec();
@@ -176,10 +179,16 @@ export class ClassReviewPackService {
     const submissionAttemptMap = new Map<string, number>();
     const attemptsCountByStudentId = new Map<string, number>();
     const latestSubmissionByStudentId = new Map<string, ReviewSubmissionLean>();
+    let lateSubmissionsCount = 0;
+    const lateStudentIdSet = new Set<string>();
 
     for (const submission of submissions) {
       const submissionId = submission._id.toString();
       const studentId = submission.studentId.toString();
+      if (submission.isLate ?? false) {
+        lateSubmissionsCount += 1;
+        lateStudentIdSet.add(studentId);
+      }
       submissionAttemptMap.set(submissionId, submission.attemptNo);
       const currentCount = attemptsCountByStudentId.get(studentId) ?? 0;
       attemptsCountByStudentId.set(studentId, currentCount + 1);
@@ -270,6 +279,8 @@ export class ClassReviewPackService {
       feedbackFacet.topSeverities,
       submittedStudentsCount,
       studentsCount,
+      lateSubmissionsCount,
+      lateStudentIdSet.size,
     );
     const teacherScript = includeTeacherScript
       ? this.buildTeacherScript(feedbackFacet.topTags, examples, actionItems)
@@ -285,6 +296,8 @@ export class ClassReviewPackService {
         submittedStudentsCount,
         submissionRate,
         attemptsDistribution,
+        lateSubmissionsCount,
+        lateStudentsCount: lateStudentIdSet.size,
         ai: {
           jobsTotal: jobs.total,
           successRate: jobs.total > 0 ? jobs.succeeded / jobs.total : 0,
@@ -505,6 +518,8 @@ export class ClassReviewPackService {
     topSeverities: IssueSeverityAgg[],
     submittedStudentsCount: number,
     studentsCount: number,
+    lateSubmissionsCount: number,
+    lateStudentsCount: number,
   ) {
     const actions: Array<{ title: string; why: string; how: string }> = [];
     const topTagNames = topTags.map((item) => item.tag.toLowerCase());
@@ -563,6 +578,15 @@ export class ClassReviewPackService {
         how: '要求二次提交附 3 行改进说明：改了什么、为什么改、如何验证结果。',
       });
     }
+
+    actions.push({
+      title: 'Late submission management routine',
+      why:
+        lateSubmissionsCount > 0
+          ? `Detected ${lateSubmissionsCount} late submissions from ${lateStudentsCount} students in this window.`
+          : 'No late submissions were detected, but a fixed routine prevents deadline drift.',
+      how: 'Set reminders at T-24h and T-1h, then run a same-day catch-up slot for late learners and track closure in the next class.',
+    });
 
     if (actions.length < 3) {
       actions.push({

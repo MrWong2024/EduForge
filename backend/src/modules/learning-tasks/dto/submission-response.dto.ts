@@ -16,6 +16,9 @@ export class SubmissionResponseDto {
   };
   status!: SubmissionStatus;
   aiFeedbackStatus!: AiFeedbackStatus;
+  submittedAt!: Date;
+  isLate!: boolean;
+  lateBySeconds!: number;
   createdAt!: Date;
   updatedAt!: Date;
 }

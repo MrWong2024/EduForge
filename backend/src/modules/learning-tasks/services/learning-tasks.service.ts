@@ -41,11 +41,15 @@ type TaskWithMeta = Task & WithId & WithTimestamps;
 type SubmissionWithMeta = Submission & WithId & WithTimestamps;
 type FeedbackWithMeta = Feedback & WithId & WithTimestamps;
 type ClassroomTaskWithClassroom = ClassroomTask & WithId;
+type ClassroomTaskDeadlineConfig = Pick<ClassroomTask, 'dueAt' | 'settings'> &
+  WithId;
 type IdOnly = WithId;
 
 @Injectable()
 export class LearningTasksService {
   private static readonly TOP_TAGS_LIMIT = 5;
+  private static readonly LATE_SUBMISSION_NOT_ALLOWED_CODE =
+    'LATE_SUBMISSION_NOT_ALLOWED';
   private readonly logger = new Logger(LearningTasksService.name);
 
   constructor(
@@ -412,6 +416,10 @@ export class LearningTasksService {
       meta: submission.meta,
       status: submission.status,
       aiFeedbackStatus,
+      submittedAt:
+        submission.submittedAt ?? submission.createdAt ?? new Date(0),
+      isLate: submission.isLate ?? false,
+      lateBySeconds: submission.lateBySeconds ?? 0,
       createdAt: submission.createdAt ?? new Date(0),
       updatedAt: submission.updatedAt ?? new Date(0),
     } as SubmissionResponseDto;
@@ -436,6 +444,31 @@ export class LearningTasksService {
     const classroomTaskObjectId = classroomTaskId
       ? new Types.ObjectId(classroomTaskId)
       : undefined;
+    const classroomTask = classroomTaskObjectId
+      ? await this.classroomTaskModel
+          .findById(classroomTaskObjectId)
+          .select('_id dueAt settings')
+          .lean<ClassroomTaskDeadlineConfig>()
+          .exec()
+      : null;
+    if (classroomTaskObjectId && !classroomTask) {
+      throw new NotFoundException('Classroom task not found');
+    }
+    const submittedAt = new Date();
+    const dueAt = classroomTask?.dueAt ?? undefined;
+    const allowLate = classroomTask?.settings?.allowLate !== false;
+    const isLate = !!dueAt && submittedAt.getTime() > dueAt.getTime();
+    const lateBySeconds =
+      dueAt && isLate
+        ? Math.floor((submittedAt.getTime() - dueAt.getTime()) / 1000)
+        : 0;
+    if (isLate && !allowLate) {
+      throw new ForbiddenException({
+        statusCode: 403,
+        code: LearningTasksService.LATE_SUBMISSION_NOT_ALLOWED_CODE,
+        message: 'Late submission is not allowed for this classroom task',
+      });
+    }
 
     for (let attempt = 0; attempt < 3; attempt += 1) {
       const lastSubmission = await this.submissionModel
@@ -453,6 +486,9 @@ export class LearningTasksService {
           classroomTaskId: classroomTaskObjectId,
           studentId: studentObjectId,
           attemptNo,
+          submittedAt,
+          isLate,
+          lateBySeconds,
           content: dto.content,
           meta: dto.meta,
           status: SubmissionStatus.Submitted,

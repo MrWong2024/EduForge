@@ -31,6 +31,7 @@ import { AiFeedbackJobService } from '../learning-tasks/ai-feedback/services/ai-
 import { TeacherClassroomDashboardService } from './services/teacher-classroom-dashboard.service';
 import { TeacherClassroomWeeklyReportService } from './services/teacher-classroom-weekly-report.service';
 import { StudentLearningDashboardService } from './services/student-learning-dashboard.service';
+import { ProcessAssessmentService } from './services/process-assessment.service';
 import {
   Enrollment,
   EnrollmentSchema,
@@ -67,6 +68,7 @@ import { LearningTasksModule } from '../learning-tasks/learning-tasks.module';
     TeacherClassroomDashboardService,
     TeacherClassroomWeeklyReportService,
     StudentLearningDashboardService,
+    ProcessAssessmentService,
   ],
   exports: [EnrollmentService],
 })

@@ -31,6 +31,8 @@ type SubmissionStats = {
   _id: Types.ObjectId;
   submissionsCount: number;
   distinctStudentsSubmitted: number;
+  lateSubmissionsCount: number;
+  lateStudentIds: Types.ObjectId[];
 };
 
 type AiFeedbackStats = {
@@ -125,12 +127,30 @@ export class TeacherClassroomDashboardService {
           _id: '$classroomTaskId',
           submissionsCount: { $sum: 1 },
           studentIds: { $addToSet: '$studentId' },
+          lateSubmissionsCount: {
+            $sum: {
+              $cond: [{ $ifNull: ['$isLate', false] }, 1, 0],
+            },
+          },
+          lateStudentIdsRaw: {
+            $addToSet: {
+              $cond: [{ $ifNull: ['$isLate', false] }, '$studentId', null],
+            },
+          },
         },
       },
       {
         $project: {
           submissionsCount: 1,
           distinctStudentsSubmitted: { $size: '$studentIds' },
+          lateSubmissionsCount: 1,
+          lateStudentIds: {
+            $filter: {
+              input: '$lateStudentIdsRaw',
+              as: 'studentId',
+              cond: { $ne: ['$$studentId', null] },
+            },
+          },
         },
       },
     ];
@@ -247,11 +267,27 @@ export class TeacherClassroomDashboardService {
       summary: {
         studentsCount,
         publishedTasksCount: classroomTasks.length,
+        lateSubmissionsTotal: classroomTasks.reduce((sum, task) => {
+          const stat = submissionStatsMap.get(task._id.toString());
+          return sum + (stat?.lateSubmissionsCount ?? 0);
+        }, 0),
+        lateStudentsTotal: (() => {
+          const lateStudentSet = new Set<string>();
+          for (const stat of submissionStatsMap.values()) {
+            for (const studentId of stat.lateStudentIds ?? []) {
+              lateStudentSet.add(studentId.toString());
+            }
+          }
+          return lateStudentSet.size;
+        })(),
       },
       tasks: classroomTasks.map((task) => {
         const key = task._id.toString();
         const submissions = submissionStatsMap.get(key);
         const submissionsCount = submissions?.submissionsCount ?? 0;
+        const lateSubmissionsCount = submissions?.lateSubmissionsCount ?? 0;
+        const lateDistinctStudentsCount =
+          submissions?.lateStudentIds.length ?? 0;
         const aiFeedbackCounts = aiFeedbackMap.get(key) ?? {
           pending: 0,
           running: 0,
@@ -278,6 +314,8 @@ export class TeacherClassroomDashboardService {
           submissionsCount,
           distinctStudentsSubmitted:
             submissions?.distinctStudentsSubmitted ?? 0,
+          lateSubmissionsCount,
+          lateDistinctStudentsCount,
           aiFeedback: {
             ...aiFeedbackCounts,
             notRequested,

@@ -20,7 +20,7 @@ export class ClassroomTask {
   @Prop()
   dueAt?: Date;
 
-  @Prop({ type: Object })
+  @Prop({ type: Object, default: () => ({ allowLate: true }) })
   settings?: {
     allowLate?: boolean;
     maxAttempts?: number;

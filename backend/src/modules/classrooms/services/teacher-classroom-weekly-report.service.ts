@@ -23,6 +23,8 @@ type ClassroomTaskWithMeta = ClassroomTask & WithId & WithTimestamps;
 type SubmittedStudentsAgg = {
   _id: null;
   studentIds: Types.ObjectId[];
+  lateSubmissionsCount: number;
+  lateStudentIds: (Types.ObjectId | null)[];
 };
 
 @Injectable()
@@ -101,11 +103,12 @@ export class TeacherClassroomWeeklyReportService {
     const classroomStudentObjectIds = classroomStudentIds.map(
       (studentId) => new Types.ObjectId(studentId),
     );
-    const submittedStudentIdSet = await this.getSubmittedStudentIdSet(
+    const submissionStats = await this.getSubmissionStats(
       classroomTaskIds,
       classroomStudentObjectIds,
       lowerBound,
     );
+    const submittedStudentIdSet = submissionStats.submittedStudentIdSet;
 
     const distinctStudentsSubmitted = submittedStudentIdSet.size;
     // Global rule: when studentsCount is 0, submissionRate is 0.
@@ -156,6 +159,8 @@ export class TeacherClassroomWeeklyReportService {
         ).length,
         distinctStudentsSubmitted,
         submissionRate,
+        lateSubmissionsCount: submissionStats.lateSubmissionsCount,
+        lateStudentsCount: submissionStats.lateStudentsCount,
       },
       atRisk: {
         notSubmittedStudentsCount: riskStudentIds.length,
@@ -177,12 +182,16 @@ export class TeacherClassroomWeeklyReportService {
     };
   }
 
-  private async getSubmittedStudentIdSet(
+  private async getSubmissionStats(
     classroomTaskIds: Types.ObjectId[],
     classroomStudentObjectIds: Types.ObjectId[],
     lowerBound: Date,
   ) {
-    const result = new Set<string>();
+    const result = {
+      submittedStudentIdSet: new Set<string>(),
+      lateSubmissionsCount: 0,
+      lateStudentsCount: 0,
+    };
     if (
       classroomTaskIds.length === 0 ||
       classroomStudentObjectIds.length === 0
@@ -202,6 +211,16 @@ export class TeacherClassroomWeeklyReportService {
         $group: {
           _id: null,
           studentIds: { $addToSet: '$studentId' },
+          lateSubmissionsCount: {
+            $sum: {
+              $cond: [{ $ifNull: ['$isLate', false] }, 1, 0],
+            },
+          },
+          lateStudentIds: {
+            $addToSet: {
+              $cond: [{ $ifNull: ['$isLate', false] }, '$studentId', null],
+            },
+          },
         },
       },
     ];
@@ -210,8 +229,15 @@ export class TeacherClassroomWeeklyReportService {
       .exec();
     const studentIds = aggregated[0]?.studentIds ?? [];
     for (const studentId of studentIds) {
-      result.add(studentId.toString());
+      result.submittedStudentIdSet.add(studentId.toString());
     }
+    result.lateSubmissionsCount = aggregated[0]?.lateSubmissionsCount ?? 0;
+    const lateStudentIds = aggregated[0]?.lateStudentIds ?? [];
+    result.lateStudentsCount = new Set(
+      lateStudentIds
+        .filter((studentId): studentId is Types.ObjectId => !!studentId)
+        .map((studentId) => studentId.toString()),
+    ).size;
     return result;
   }
 

@@ -37,6 +37,8 @@ type ClassroomTasksAgg = {
 
 type SubmissionDistinctPairAgg = {
   _id: { classroomTaskId: Types.ObjectId; studentId: Types.ObjectId };
+  hasLate: number;
+  lateSubmissionsCount: number;
 };
 type CourseOverviewItem = {
   classroomId: string;
@@ -45,6 +47,8 @@ type CourseOverviewItem = {
   publishedClassroomTasks: number;
   distinctStudentsSubmitted: number;
   submissionRate: number;
+  lateSubmissionsCount: number;
+  lateStudentsCount: number;
   ai: {
     jobsTotal: number;
     pendingJobs: number;
@@ -213,12 +217,24 @@ export class CourseOverviewService {
                     classroomTaskId: '$classroomTaskId',
                     studentId: '$studentId',
                   },
+                  hasLate: {
+                    $max: {
+                      $cond: [{ $ifNull: ['$isLate', false] }, 1, 0],
+                    },
+                  },
+                  lateSubmissionsCount: {
+                    $sum: {
+                      $cond: [{ $ifNull: ['$isLate', false] }, 1, 0],
+                    },
+                  },
                 },
               },
             ] as PipelineStage[])
             .exec();
 
     const distinctStudentsMap = new Map<string, Set<string>>();
+    const lateStudentsMap = new Map<string, Set<string>>();
+    const lateSubmissionsCountMap = new Map<string, number>();
     for (const pair of submissionPairs) {
       const classroomId = classroomIdByTaskId.get(
         pair._id.classroomTaskId.toString(),
@@ -229,6 +245,18 @@ export class CourseOverviewService {
       const current = distinctStudentsMap.get(classroomId) ?? new Set<string>();
       current.add(pair._id.studentId.toString());
       distinctStudentsMap.set(classroomId, current);
+      if (pair.hasLate > 0) {
+        const lateStudents =
+          lateStudentsMap.get(classroomId) ?? new Set<string>();
+        lateStudents.add(pair._id.studentId.toString());
+        lateStudentsMap.set(classroomId, lateStudents);
+      }
+      const lateSubmissionsCount =
+        lateSubmissionsCountMap.get(classroomId) ?? 0;
+      lateSubmissionsCountMap.set(
+        classroomId,
+        lateSubmissionsCount + (pair.lateSubmissionsCount ?? 0),
+      );
     }
 
     const aiByClassroomTaskId =
@@ -289,6 +317,8 @@ export class CourseOverviewService {
         publishedClassroomTasks: publishedTasksMap.get(classroomId) ?? 0,
         distinctStudentsSubmitted,
         submissionRate,
+        lateSubmissionsCount: lateSubmissionsCountMap.get(classroomId) ?? 0,
+        lateStudentsCount: lateStudentsMap.get(classroomId)?.size ?? 0,
         ai: {
           jobsTotal: ai.jobsTotal,
           pendingJobs: ai.pendingJobs,

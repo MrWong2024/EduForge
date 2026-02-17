@@ -2,6 +2,7 @@ import {
   Body,
   Controller,
   Get,
+  Header,
   Param,
   Patch,
   Post,
@@ -17,6 +18,7 @@ import { UpdateClassroomDto } from '../dto/update-classroom.dto';
 import { QueryClassroomDto } from '../dto/query-classroom.dto';
 import { JoinClassroomDto } from '../dto/join-classroom.dto';
 import { QueryClassroomWeeklyReportDto } from '../dto/query-classroom-weekly-report.dto';
+import { QueryProcessAssessmentDto } from '../dto/query-process-assessment.dto';
 import {
   MEMBER_OR_OWNER_ROLES,
   STUDENT_ROLES,
@@ -86,6 +88,37 @@ export class ClassroomsController {
     @CurrentUser() user: { id: string },
   ) {
     return this.classroomsService.getDashboard(id, user.id);
+  }
+
+  @UseGuards(RolesGuard)
+  @Roles(...TEACHER_ROLES)
+  @Get(':classroomId/process-assessment')
+  getProcessAssessment(
+    @Param('classroomId') classroomId: string,
+    @Query() query: QueryProcessAssessmentDto,
+    @CurrentUser() user: { id: string },
+  ) {
+    return this.classroomsService.getProcessAssessment(
+      classroomId,
+      query,
+      user.id,
+    );
+  }
+
+  @UseGuards(RolesGuard)
+  @Roles(...TEACHER_ROLES)
+  @Header('Content-Type', 'text/csv; charset=utf-8')
+  @Get(':classroomId/process-assessment.csv')
+  exportProcessAssessmentCsv(
+    @Param('classroomId') classroomId: string,
+    @Query() query: QueryProcessAssessmentDto,
+    @CurrentUser() user: { id: string },
+  ) {
+    return this.classroomsService.exportProcessAssessmentCsv(
+      classroomId,
+      query,
+      user.id,
+    );
   }
 
   @UseGuards(RolesGuard)
