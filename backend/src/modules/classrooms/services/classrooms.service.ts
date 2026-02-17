@@ -18,6 +18,7 @@ import { User } from '../../users/schemas/user.schema';
 import { TeacherClassroomDashboardService } from './teacher-classroom-dashboard.service';
 import { TeacherClassroomWeeklyReportService } from './teacher-classroom-weekly-report.service';
 import { StudentLearningDashboardService } from './student-learning-dashboard.service';
+import { EnrollmentService } from '../enrollments/services/enrollment.service';
 import {
   STUDENT_ROLES,
   TEACHER_ROLES,
@@ -41,6 +42,7 @@ export class ClassroomsService {
     private readonly classroomModel: Model<Classroom>,
     @InjectModel(Course.name) private readonly courseModel: Model<Course>,
     @InjectModel(User.name) private readonly userModel: Model<User>,
+    private readonly enrollmentService: EnrollmentService,
     private readonly teacherClassroomDashboardService: TeacherClassroomDashboardService,
     private readonly teacherClassroomWeeklyReportService: TeacherClassroomWeeklyReportService,
     private readonly studentLearningDashboardService: StudentLearningDashboardService,
@@ -149,15 +151,12 @@ export class ClassroomsService {
     const isTeacher = hasAnyRole(roles, TEACHER_ROLES);
     const isStudent = hasAnyRole(roles, STUDENT_ROLES);
     const isOwner = classroom.teacherId.toString() === userId;
-    const isMember =
-      classroom.studentIds?.some(
-        (studentId) => studentId.toString() === userId,
-      ) ?? false;
 
     if (isTeacher && isOwner) {
       return this.toClassroomResponse(classroom, true);
     }
-    if (isStudent && isMember) {
+    if (isStudent) {
+      await this.assertStudentInClassroomActive(classroom, userId);
       return this.toClassroomResponse(classroom);
     }
 
@@ -220,16 +219,24 @@ export class ClassroomsService {
       throw new BadRequestException('Classroom is archived');
     }
 
-    const updated = await this.classroomModel
-      .findByIdAndUpdate(
-        classroom._id,
+    // Migration strategy (AD): dual-write during transition.
+    // Enrollment is source of truth; classroom.studentIds remains legacy mirror
+    // until backfill + full reader migration are complete.
+    await this.enrollmentService.enrollStudent(
+      classroom._id.toString(),
+      userId,
+    );
+    await this.classroomModel
+      .updateOne(
+        { _id: classroom._id },
         { $addToSet: { studentIds: new Types.ObjectId(userId) } },
-        { new: true },
       )
       .exec();
-    return this.toClassroomResponse(
-      (updated ?? classroom) as ClassroomWithMeta,
-    );
+    const updated = await this.classroomModel
+      .findById(classroom._id)
+      .lean<ClassroomWithMeta>()
+      .exec();
+    return this.toClassroomResponse(updated ?? classroom);
   }
 
   async removeStudent(id: string, studentId: string, userId: string) {
@@ -241,12 +248,19 @@ export class ClassroomsService {
     if (!classroom) {
       throw new NotFoundException('Classroom not found');
     }
-    const updated = await this.classroomModel
-      .findByIdAndUpdate(
-        classroom._id,
+    await this.enrollmentService.removeStudent(
+      classroom._id.toString(),
+      studentId,
+    );
+    await this.classroomModel
+      .updateOne(
+        { _id: classroom._id },
         { $pull: { studentIds: new Types.ObjectId(studentId) } },
-        { new: true },
       )
+      .exec();
+    const updated = await this.classroomModel
+      .findById(classroom._id)
+      .lean<ClassroomWithMeta>()
       .exec();
     return this.toClassroomResponse(
       (updated ?? classroom) as ClassroomWithMeta,
@@ -315,5 +329,20 @@ export class ClassroomsService {
       createdAt: classroom.createdAt ?? new Date(0),
       updatedAt: classroom.updatedAt ?? new Date(0),
     } as ClassroomResponseDto;
+  }
+
+  private async assertStudentInClassroomActive(
+    classroom: ClassroomWithMeta,
+    studentId: string,
+  ) {
+    const isMember =
+      await this.enrollmentService.isStudentActiveInClassroomWithLegacyFallback(
+        classroom._id,
+        studentId,
+        classroom.studentIds ?? [],
+      );
+    if (!isMember) {
+      throw new ForbiddenException('Not allowed to view classroom');
+    }
   }
 }

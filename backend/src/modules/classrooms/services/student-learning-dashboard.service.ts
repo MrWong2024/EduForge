@@ -7,11 +7,24 @@ import { ClassroomTask } from '../classroom-tasks/schemas/classroom-task.schema'
 import { Submission } from '../../learning-tasks/schemas/submission.schema';
 import { AiFeedbackJobService } from '../../learning-tasks/ai-feedback/services/ai-feedback-job.service';
 import { AiFeedbackStatus } from '../../learning-tasks/ai-feedback/interfaces/ai-feedback-status.enum';
+import {
+  EnrollmentRole,
+  EnrollmentStatus,
+} from '../enrollments/schemas/enrollment.schema';
 import { WithId } from '../../../common/types/with-id.type';
 import { WithTimestamps } from '../../../common/types/with-timestamps.type';
 
-type ClassroomLean = Classroom & WithId;
 type SubmissionWithMeta = Submission & WithId & WithTimestamps;
+type ClassroomMembershipAgg = {
+  _id: Types.ObjectId;
+  name: string;
+  courseId: Types.ObjectId;
+  status: string;
+};
+type ClassroomMembershipFacet = {
+  items: ClassroomMembershipAgg[];
+  total: Array<{ total: number }>;
+};
 
 type ClassroomTaskStudentItem = {
   _id: Types.ObjectId;
@@ -37,23 +50,105 @@ export class StudentLearningDashboardService {
   async getMyLearningDashboard(query: QueryClassroomDto, userId: string) {
     const page = query.page ?? 1;
     const limit = Math.min(query.limit ?? 20, 100);
-    const filter: Record<string, unknown> = {
-      studentIds: new Types.ObjectId(userId),
-    };
+    const userObjectId = new Types.ObjectId(userId);
+    const filter: Record<string, unknown> = {};
     if (query.status) {
       filter.status = query.status;
     }
 
-    const [classrooms, total] = await Promise.all([
-      this.classroomModel
-        .find(filter)
-        .sort({ createdAt: -1 })
-        .skip((page - 1) * limit)
-        .limit(limit)
-        .lean<ClassroomLean[]>()
-        .exec(),
-      this.classroomModel.countDocuments(filter),
-    ]);
+    // Migration fallback (temporary):
+    // membership is enrollment ACTIVE first; fallback to legacy studentIds only
+    // when a classroom has no enrollment records yet.
+    const membershipPipeline: PipelineStage[] = [
+      { $match: filter },
+      {
+        $lookup: {
+          from: 'enrollments',
+          let: { classroomId: '$_id', userId: userObjectId },
+          pipeline: [
+            {
+              $match: {
+                $expr: {
+                  $and: [
+                    { $eq: ['$classroomId', '$$classroomId'] },
+                    { $eq: ['$userId', '$$userId'] },
+                    { $eq: ['$role', EnrollmentRole.Student] },
+                    { $eq: ['$status', EnrollmentStatus.Active] },
+                  ],
+                },
+              },
+            },
+            { $project: { _id: 1 } },
+            { $limit: 1 },
+          ],
+          as: 'activeEnrollment',
+        },
+      },
+      {
+        $lookup: {
+          from: 'enrollments',
+          let: { classroomId: '$_id' },
+          pipeline: [
+            {
+              $match: {
+                $expr: {
+                  $eq: ['$classroomId', '$$classroomId'],
+                },
+              },
+            },
+            { $project: { _id: 1 } },
+            { $limit: 1 },
+          ],
+          as: 'anyEnrollment',
+        },
+      },
+      {
+        $addFields: {
+          hasActiveEnrollment: { $gt: [{ $size: '$activeEnrollment' }, 0] },
+          hasAnyEnrollment: { $gt: [{ $size: '$anyEnrollment' }, 0] },
+          hasLegacyMembership: { $in: [userObjectId, '$studentIds'] },
+        },
+      },
+      {
+        $match: {
+          $expr: {
+            $or: [
+              '$hasActiveEnrollment',
+              {
+                $and: [
+                  { $eq: ['$hasAnyEnrollment', false] },
+                  '$hasLegacyMembership',
+                ],
+              },
+            ],
+          },
+        },
+      },
+      { $sort: { createdAt: -1, _id: 1 } },
+      {
+        $facet: {
+          items: [
+            { $skip: (page - 1) * limit },
+            { $limit: limit },
+            {
+              $project: {
+                _id: 1,
+                name: 1,
+                courseId: 1,
+                status: 1,
+              },
+            },
+          ],
+          total: [{ $count: 'total' }],
+        },
+      },
+    ];
+    const membershipRows = await this.classroomModel
+      .aggregate<ClassroomMembershipFacet>(membershipPipeline)
+      .exec();
+    const membership = membershipRows[0] ?? { items: [], total: [] };
+    const classrooms = membership.items;
+    const total = membership.total[0]?.total ?? 0;
 
     if (classrooms.length === 0) {
       return {
@@ -105,12 +200,29 @@ export class StudentLearningDashboardService {
     }
 
     const classroomTaskIds = classroomTasks.map((task) => task._id);
+    const taskIds = classroomTasks.map((task) => task.taskId);
+    const classroomTaskIdsByTaskId = new Map<string, string[]>();
+    for (const task of classroomTasks) {
+      const taskId = task.taskId.toString();
+      const current = classroomTaskIdsByTaskId.get(taskId) ?? [];
+      current.push(task._id.toString());
+      classroomTaskIdsByTaskId.set(taskId, current);
+    }
     const submissions =
       classroomTaskIds.length === 0
         ? []
         : await this.submissionModel
             .find({
-              classroomTaskId: { $in: classroomTaskIds },
+              $or: [
+                { classroomTaskId: { $in: classroomTaskIds } },
+                {
+                  taskId: { $in: taskIds },
+                  $or: [
+                    { classroomTaskId: { $exists: false } },
+                    { classroomTaskId: null },
+                  ],
+                },
+              ],
               studentId: new Types.ObjectId(userId),
             })
             .sort({ createdAt: -1 })
@@ -128,7 +240,15 @@ export class StudentLearningDashboardService {
       { count: number; latest?: SubmissionWithMeta }
     >();
     for (const submission of submissions) {
-      const key = submission.classroomTaskId?.toString();
+      let key = submission.classroomTaskId?.toString();
+      if (!key) {
+        const fallbackTaskKeys = classroomTaskIdsByTaskId.get(
+          submission.taskId.toString(),
+        );
+        if (fallbackTaskKeys && fallbackTaskKeys.length === 1) {
+          key = fallbackTaskKeys[0];
+        }
+      }
       if (!key) {
         continue;
       }

@@ -39,8 +39,8 @@ export class Enrollment {
   @Prop({ required: true, default: () => new Date() })
   joinedAt!: Date;
 
-  @Prop()
-  removedAt?: Date | null;
+  @Prop({ type: Date, required: false })
+  removedAt?: Date;
 }
 
 export const EnrollmentSchema = SchemaFactory.createForClass(Enrollment);

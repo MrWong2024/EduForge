@@ -12,6 +12,7 @@ import {
   Feedback,
   FeedbackSource,
 } from '../../learning-tasks/schemas/feedback.schema';
+import { EnrollmentService } from '../enrollments/services/enrollment.service';
 import { WithId } from '../../../common/types/with-id.type';
 
 type ClassroomLean = Classroom & WithId;
@@ -56,6 +57,7 @@ export class TeacherClassroomDashboardService {
     @InjectModel(Feedback.name) private readonly feedbackModel: Model<Feedback>,
     @InjectModel(AiFeedbackJob.name)
     private readonly aiFeedbackJobModel: Model<AiFeedbackJob>,
+    private readonly enrollmentService: EnrollmentService,
   ) {}
 
   async getDashboard(id: string, userId: string) {
@@ -96,6 +98,11 @@ export class TeacherClassroomDashboardService {
       .exec();
 
     const classroomTaskIds = classroomTasks.map((task) => task._id);
+    const studentsCount =
+      await this.enrollmentService.countStudentsWithLegacyFallback(
+        classroom._id,
+        classroom.studentIds ?? [],
+      );
     if (classroomTaskIds.length === 0) {
       return {
         classroom: {
@@ -106,7 +113,7 @@ export class TeacherClassroomDashboardService {
           joinCode: classroom.joinCode,
         },
         summary: {
-          studentsCount: classroom.studentIds?.length ?? 0,
+          studentsCount,
           publishedTasksCount: 0,
         },
         tasks: [],
@@ -240,7 +247,7 @@ export class TeacherClassroomDashboardService {
         joinCode: classroom.joinCode,
       },
       summary: {
-        studentsCount: classroom.studentIds?.length ?? 0,
+        studentsCount,
         publishedTasksCount: classroomTasks.length,
       },
       tasks: classroomTasks.map((task) => {

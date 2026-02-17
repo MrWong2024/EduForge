@@ -11,6 +11,12 @@ type EnrollmentStudentRow = {
   userId: Types.ObjectId;
 };
 
+type EnrollmentClassroomStatsRow = {
+  _id: Types.ObjectId;
+  totalRecords: number;
+  activeStudentsCount: number;
+};
+
 @Injectable()
 export class EnrollmentService {
   constructor(
@@ -25,22 +31,30 @@ export class EnrollmentService {
     const userObjectId = this.parseObjectId(userId, 'userId');
     const now = new Date();
 
-    await this.enrollmentModel
-      .updateOne(
-        { classroomId: classroomObjectId, userId: userObjectId },
-        {
-          $setOnInsert: {
-            role: EnrollmentRole.Student,
-            joinedAt: now,
+    try {
+      await this.enrollmentModel
+        .updateOne(
+          { classroomId: classroomObjectId, userId: userObjectId },
+          {
+            $setOnInsert: {
+              role: EnrollmentRole.Student,
+              joinedAt: now,
+            },
+            $set: {
+              status: EnrollmentStatus.Active,
+              removedAt: null,
+            },
           },
-          $set: {
-            status: EnrollmentStatus.Active,
-            removedAt: null,
-          },
-        },
-        { upsert: true },
-      )
-      .exec();
+          { upsert: true },
+        )
+        .exec();
+    } catch (error) {
+      const mongoError = error as { code?: number };
+      // Concurrent upsert races should converge to the same ACTIVE enrollment.
+      if (mongoError.code !== 11000) {
+        throw error;
+      }
+    }
   }
 
   // Soft-delete and idempotent semantics:
@@ -88,10 +102,157 @@ export class EnrollmentService {
     });
   }
 
+  async isStudentActiveInClassroomWithLegacyFallback(
+    classroomId: string | Types.ObjectId,
+    userId: string | Types.ObjectId,
+    legacyStudentIds: Types.ObjectId[] = [],
+  ) {
+    const classroomObjectId = this.toObjectId(classroomId, 'classroomId');
+    const userObjectId = this.toObjectId(userId, 'userId');
+
+    const activeMembership = await this.enrollmentModel
+      .findOne({
+        classroomId: classroomObjectId,
+        userId: userObjectId,
+        role: EnrollmentRole.Student,
+        status: EnrollmentStatus.Active,
+      })
+      .select('_id')
+      .lean()
+      .exec();
+    if (activeMembership) {
+      return true;
+    }
+
+    const legacyHasStudent = legacyStudentIds.some(
+      (legacyStudentId) =>
+        legacyStudentId.toString() === userObjectId.toString(),
+    );
+    if (!legacyHasStudent) {
+      return false;
+    }
+
+    const statsMap = await this.getClassroomEnrollmentStatsByClassroomIds([
+      classroomObjectId,
+    ]);
+    const stats = statsMap.get(classroomObjectId.toString());
+    const totalRecords = stats?.totalRecords ?? 0;
+
+    // Migration fallback (temporary):
+    // only trust legacy studentIds when enrollment records for the classroom are absent.
+    return totalRecords === 0;
+  }
+
+  async listStudentIdsWithLegacyFallback(
+    classroomId: string | Types.ObjectId,
+    legacyStudentIds: Types.ObjectId[] = [],
+  ) {
+    const classroomObjectId = this.toObjectId(classroomId, 'classroomId');
+
+    const rows = await this.enrollmentModel
+      .find({
+        classroomId: classroomObjectId,
+        role: EnrollmentRole.Student,
+        status: EnrollmentStatus.Active,
+      })
+      .select({ _id: 0, userId: 1 })
+      .lean<EnrollmentStudentRow[]>()
+      .exec();
+    if (rows.length > 0) {
+      return rows.map((row) => row.userId.toString());
+    }
+
+    const statsMap = await this.getClassroomEnrollmentStatsByClassroomIds([
+      classroomObjectId,
+    ]);
+    const stats = statsMap.get(classroomObjectId.toString());
+    const totalRecords = stats?.totalRecords ?? 0;
+    if (totalRecords > 0) {
+      return [];
+    }
+
+    return Array.from(new Set(legacyStudentIds.map((id) => id.toString())));
+  }
+
+  async countStudentsWithLegacyFallback(
+    classroomId: string | Types.ObjectId,
+    legacyStudentIds: Types.ObjectId[] = [],
+  ) {
+    const classroomObjectId = this.toObjectId(classroomId, 'classroomId');
+    const statsMap = await this.getClassroomEnrollmentStatsByClassroomIds([
+      classroomObjectId,
+    ]);
+    const stats = statsMap.get(classroomObjectId.toString());
+    if (!stats) {
+      return legacyStudentIds.length;
+    }
+    if (stats.totalRecords === 0) {
+      return legacyStudentIds.length;
+    }
+    return stats.activeStudentsCount;
+  }
+
+  async getClassroomEnrollmentStatsByClassroomIds(
+    classroomIds: Types.ObjectId[],
+  ) {
+    const statsMap = new Map<
+      string,
+      { totalRecords: number; activeStudentsCount: number }
+    >();
+    if (classroomIds.length === 0) {
+      return statsMap;
+    }
+
+    const rows = await this.enrollmentModel
+      .aggregate<EnrollmentClassroomStatsRow>([
+        {
+          $match: {
+            classroomId: { $in: classroomIds },
+          },
+        },
+        {
+          $group: {
+            _id: '$classroomId',
+            totalRecords: { $sum: 1 },
+            activeStudentsCount: {
+              $sum: {
+                $cond: [
+                  {
+                    $and: [
+                      { $eq: ['$role', EnrollmentRole.Student] },
+                      { $eq: ['$status', EnrollmentStatus.Active] },
+                    ],
+                  },
+                  1,
+                  0,
+                ],
+              },
+            },
+          },
+        },
+      ])
+      .exec();
+
+    for (const row of rows) {
+      statsMap.set(row._id.toString(), {
+        totalRecords: row.totalRecords,
+        activeStudentsCount: row.activeStudentsCount,
+      });
+    }
+    return statsMap;
+  }
+
   private parseObjectId(value: string, fieldName: string) {
     if (!Types.ObjectId.isValid(value)) {
       throw new BadRequestException(`${fieldName} must be a valid ObjectId`);
     }
     return new Types.ObjectId(value);
+  }
+
+  private toObjectId(value: string | Types.ObjectId, fieldName: string) {
+    if (value instanceof Types.ObjectId) {
+      return value;
+    }
+    return this.parseObjectId(value, fieldName);
   }
 }

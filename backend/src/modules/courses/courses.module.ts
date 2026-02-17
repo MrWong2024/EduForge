@@ -18,6 +18,10 @@ import {
   SubmissionSchema,
 } from '../learning-tasks/schemas/submission.schema';
 import {
+  Enrollment,
+  EnrollmentSchema,
+} from '../classrooms/enrollments/schemas/enrollment.schema';
+import {
   AiFeedbackJob,
   AiFeedbackJobSchema,
 } from '../learning-tasks/ai-feedback/schemas/ai-feedback-job.schema';
@@ -36,6 +40,7 @@ import { AuthModule } from '../auth/auth.module';
       { name: Classroom.name, schema: ClassroomSchema },
       { name: ClassroomTask.name, schema: ClassroomTaskSchema },
       { name: Submission.name, schema: SubmissionSchema },
+      { name: Enrollment.name, schema: EnrollmentSchema },
       { name: Feedback.name, schema: FeedbackSchema },
       { name: AiFeedbackJob.name, schema: AiFeedbackJobSchema },
       { name: User.name, schema: UserSchema },

@@ -14,6 +14,7 @@ import {
 } from '../dto/query-classroom-weekly-report.dto';
 import { AI_FEEDBACK_ERROR_CODES } from '../../learning-tasks/ai-feedback/interfaces/ai-feedback-provider.error-codes';
 import { AiFeedbackMetricsAggregator } from '../classroom-tasks/services/ai-feedback-metrics-aggregator.service';
+import { EnrollmentService } from '../enrollments/services/enrollment.service';
 import { WithId } from '../../../common/types/with-id.type';
 import { WithTimestamps } from '../../../common/types/with-timestamps.type';
 
@@ -45,6 +46,7 @@ export class TeacherClassroomWeeklyReportService {
     private readonly classroomTaskModel: Model<ClassroomTask>,
     @InjectModel(Submission.name)
     private readonly submissionModel: Model<Submission>,
+    private readonly enrollmentService: EnrollmentService,
     private readonly aiFeedbackMetricsAggregator: AiFeedbackMetricsAggregator,
   ) {}
 
@@ -89,12 +91,19 @@ export class TeacherClassroomWeeklyReportService {
       .lean<ClassroomTaskWithMeta[]>()
       .exec();
     const classroomTaskIds = classroomTasks.map((task) => task._id);
-    const classroomStudentIds = (classroom.studentIds ?? []).map((id) =>
-      id.toString(),
+    // Migration fallback (temporary) is encapsulated in EnrollmentService:
+    // fall back to legacy studentIds only when classroom enrollments are empty.
+    const classroomStudentIds =
+      await this.enrollmentService.listStudentIdsWithLegacyFallback(
+        classroom._id,
+        classroom.studentIds ?? [],
+      );
+    const classroomStudentObjectIds = classroomStudentIds.map(
+      (studentId) => new Types.ObjectId(studentId),
     );
     const submittedStudentIdSet = await this.getSubmittedStudentIdSet(
       classroomTaskIds,
-      classroom.studentIds ?? [],
+      classroomStudentObjectIds,
       lowerBound,
     );
 

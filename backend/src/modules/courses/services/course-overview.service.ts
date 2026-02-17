@@ -10,6 +10,11 @@ import { Classroom } from '../../classrooms/schemas/classroom.schema';
 import { ClassroomTask } from '../../classrooms/classroom-tasks/schemas/classroom-task.schema';
 import { Submission } from '../../learning-tasks/schemas/submission.schema';
 import {
+  Enrollment,
+  EnrollmentRole,
+  EnrollmentStatus,
+} from '../../classrooms/enrollments/schemas/enrollment.schema';
+import {
   CourseOverviewSortField,
   CourseOverviewSortOrder,
   CourseOverviewWindow,
@@ -36,6 +41,11 @@ type ClassroomTasksAgg = {
 
 type SubmissionDistinctPairAgg = {
   _id: { classroomTaskId: Types.ObjectId; studentId: Types.ObjectId };
+};
+type EnrollmentStatsAgg = {
+  _id: Types.ObjectId;
+  totalRecords: number;
+  activeStudentsCount: number;
 };
 
 type CourseOverviewItem = {
@@ -79,6 +89,8 @@ export class CourseOverviewService {
     private readonly classroomTaskModel: Model<ClassroomTask>,
     @InjectModel(Submission.name)
     private readonly submissionModel: Model<Submission>,
+    @InjectModel(Enrollment.name)
+    private readonly enrollmentModel: Model<Enrollment>,
     private readonly aiFeedbackMetricsAggregator: AiFeedbackMetricsAggregator,
   ) {}
 
@@ -154,6 +166,46 @@ export class CourseOverviewService {
         total,
         items: [],
       };
+    }
+
+    const enrollmentStatsRows = await this.enrollmentModel
+      .aggregate<EnrollmentStatsAgg>([
+        {
+          $match: {
+            classroomId: { $in: classroomIds },
+          },
+        },
+        {
+          $group: {
+            _id: '$classroomId',
+            totalRecords: { $sum: 1 },
+            activeStudentsCount: {
+              $sum: {
+                $cond: [
+                  {
+                    $and: [
+                      { $eq: ['$role', EnrollmentRole.Student] },
+                      { $eq: ['$status', EnrollmentStatus.Active] },
+                    ],
+                  },
+                  1,
+                  0,
+                ],
+              },
+            },
+          },
+        },
+      ] as PipelineStage[])
+      .exec();
+    const enrollmentStatsMap = new Map<
+      string,
+      { totalRecords: number; activeStudentsCount: number }
+    >();
+    for (const row of enrollmentStatsRows) {
+      enrollmentStatsMap.set(row._id.toString(), {
+        totalRecords: row.totalRecords,
+        activeStudentsCount: row.activeStudentsCount,
+      });
     }
 
     // AB metric contract:
@@ -261,7 +313,13 @@ export class CourseOverviewService {
 
     const items = classrooms.map((classroom) => {
       const classroomId = classroom._id.toString();
-      const studentsCount = classroom.studentIds?.length ?? 0;
+      const enrollmentStats = enrollmentStatsMap.get(classroomId);
+      // Migration fallback (temporary):
+      // only fall back to legacy studentIds when enrollment records are absent.
+      const studentsCount =
+        enrollmentStats && enrollmentStats.totalRecords > 0
+          ? enrollmentStats.activeStudentsCount
+          : (classroom.studentIds?.length ?? 0);
       const distinctStudentsSubmitted =
         distinctStudentsMap.get(classroomId)?.size ?? 0;
       const ai = aiByClassroomId.get(classroomId) ?? {

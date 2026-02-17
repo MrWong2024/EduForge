@@ -25,6 +25,7 @@ import { ClassroomStatus } from '../../schemas/classroom.schema';
 import { LearningTasksService } from '../../../learning-tasks/services/learning-tasks.service';
 import { AiFeedbackJobService } from '../../../learning-tasks/ai-feedback/services/ai-feedback-job.service';
 import { AiFeedbackStatus } from '../../../learning-tasks/ai-feedback/interfaces/ai-feedback-status.enum';
+import { EnrollmentService } from '../../enrollments/services/enrollment.service';
 import {
   STUDENT_ROLES,
   TEACHER_ROLES,
@@ -90,6 +91,7 @@ export class ClassroomTasksService {
     private readonly submissionModel: Model<Submission>,
     @InjectModel(Feedback.name) private readonly feedbackModel: Model<Feedback>,
     @InjectModel(User.name) private readonly userModel: Model<User>,
+    private readonly enrollmentService: EnrollmentService,
     private readonly aiFeedbackJobService: AiFeedbackJobService,
     private readonly learningTasksService: LearningTasksService,
   ) {}
@@ -256,9 +258,11 @@ export class ClassroomTasksService {
       throw new NotFoundException('Classroom not found');
     }
     const isMember =
-      classroom.studentIds?.some(
-        (studentId) => studentId.toString() === userId,
-      ) ?? false;
+      await this.enrollmentService.isStudentActiveInClassroomWithLegacyFallback(
+        classroom._id,
+        userId,
+        classroom.studentIds ?? [],
+      );
     if (!isMember) {
       throw new ForbiddenException('Not allowed to submit classroom tasks');
     }
@@ -309,9 +313,11 @@ export class ClassroomTasksService {
       throw new NotFoundException('Classroom not found');
     }
     const isMember =
-      classroom.studentIds?.some(
-        (studentId) => studentId.toString() === studentObjectId.toString(),
-      ) ?? false;
+      await this.enrollmentService.isStudentActiveInClassroomWithLegacyFallback(
+        classroom._id,
+        studentObjectId,
+        classroom.studentIds ?? [],
+      );
     if (!isMember) {
       throw new ForbiddenException('Not allowed to view classroom tasks');
     }
@@ -442,14 +448,19 @@ export class ClassroomTasksService {
     const isTeacher = hasAnyRole(roles, TEACHER_ROLES);
     const isStudent = hasAnyRole(roles, STUDENT_ROLES);
     const isOwner = classroom.teacherId.toString() === userId;
-    const isMember =
-      classroom.studentIds?.some(
-        (studentId) => studentId.toString() === userId,
-      ) ?? false;
     if (isTeacher && isOwner) {
       return;
     }
-    if (isStudent && isMember) {
+    if (isStudent) {
+      const isMember =
+        await this.enrollmentService.isStudentActiveInClassroomWithLegacyFallback(
+          classroom._id,
+          userId,
+          classroom.studentIds ?? [],
+        );
+      if (!isMember) {
+        throw new ForbiddenException('Not allowed to view classroom tasks');
+      }
       return;
     }
     throw new ForbiddenException('Not allowed to view classroom tasks');

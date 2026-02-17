@@ -109,6 +109,37 @@ import {
 违规处理：
 - 任何包含上述重复声明的 Schema 生成或修改，视为 不符合执行规则的无效修改，应回滚并重新执行。
 
+---
+
+### Mongoose Schema @Prop 类型可推断性约束（强制｜红线）
+
+当 Codex 生成或修改 NestJS Mongoose Schema（@nestjs/mongoose）时：
+
+- 对任何 **union / nullable / ambiguous** TypeScript 类型字段（包括但不限于：
+  - `Date | null`
+  - `string | null`
+  - `Types.ObjectId | null`
+  - `A | B`
+  - `X & Y`
+  ），**必须**在 `@Prop()` 中显式声明 `type`，禁止依赖 reflect-metadata 自动推断。
+
+示例（合法）：
+
+```ts
+@Prop({ type: Date, default: null })
+removedAt?: Date | null;
+```
+
+示例（非法｜会导致 CannotDetermineTypeError）：
+```ts
+@Prop()
+removedAt?: Date | null;
+```
+违规处理：
+- 任何未显式声明 type 且使用 **union/nullable/ambiguous** 类型的 Schema 修改，视为不符合执行规则的无效修改，应回滚并重新执行。
+
+---
+
 ### 工具链兼容性写法约束（强制）
 
 - Codex 在生成或修改 Service 层代码时：
