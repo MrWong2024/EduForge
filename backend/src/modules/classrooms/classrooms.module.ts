@@ -9,6 +9,7 @@ import { ClassroomTasksController } from './classroom-tasks/controllers/classroo
 import { ClassroomTasksService } from './classroom-tasks/services/classroom-tasks.service';
 import { AiMetricsService } from './classroom-tasks/services/ai-metrics.service';
 import { AiFeedbackMetricsAggregator } from './classroom-tasks/services/ai-feedback-metrics-aggregator.service';
+import { ClassReviewPackService } from './classroom-tasks/services/class-review-pack.service';
 import {
   ClassroomTask,
   ClassroomTaskSchema,
@@ -58,6 +59,7 @@ import { LearningTasksModule } from '../learning-tasks/learning-tasks.module';
   providers: [
     ClassroomsService,
     ClassroomTasksService,
+    ClassReviewPackService,
     AiMetricsService,
     AiFeedbackMetricsAggregator,
     AiFeedbackJobService,

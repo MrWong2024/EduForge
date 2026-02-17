@@ -60,3 +60,5 @@ FeedbackSchema.index(
 );
 // Indexes below optimize list/report queries; add write overhead on feedback writes.
 FeedbackSchema.index({ submissionId: 1, createdAt: 1 });
+// Supports review-pack facets by submission scope and source filtering.
+FeedbackSchema.index({ submissionId: 1, source: 1, createdAt: -1 });

@@ -16,8 +16,10 @@ import { QueryClassroomTaskDto } from '../dto/query-classroom-task.dto';
 import { QueryAiMetricsDto } from '../dto/query-ai-metrics.dto';
 import { QueryMyTaskDetailDto } from '../dto/query-my-task-detail.dto';
 import { QueryLearningTrajectoryDto } from '../dto/query-learning-trajectory.dto';
+import { QueryClassReviewPackDto } from '../dto/query-class-review-pack.dto';
 import { CreateSubmissionDto } from '../../../learning-tasks/dto/create-submission.dto';
 import { AiMetricsService } from '../services/ai-metrics.service';
+import { ClassReviewPackService } from '../services/class-review-pack.service';
 import {
   MEMBER_OR_OWNER_ROLES,
   STUDENT_ROLES,
@@ -29,6 +31,7 @@ export class ClassroomTasksController {
   constructor(
     private readonly classroomTasksService: ClassroomTasksService,
     private readonly aiMetricsService: AiMetricsService,
+    private readonly classReviewPackService: ClassReviewPackService,
   ) {}
 
   @UseGuards(RolesGuard)
@@ -103,6 +106,23 @@ export class ClassroomTasksController {
     @CurrentUser() user: { id: string },
   ) {
     return this.classroomTasksService.getMyTaskDetail(
+      classroomId,
+      classroomTaskId,
+      query,
+      user.id,
+    );
+  }
+
+  @UseGuards(RolesGuard)
+  @Roles(...TEACHER_ROLES)
+  @Get(':classroomId/tasks/:classroomTaskId/review-pack')
+  getReviewPack(
+    @Param('classroomId') classroomId: string,
+    @Param('classroomTaskId') classroomTaskId: string,
+    @Query() query: QueryClassReviewPackDto,
+    @CurrentUser() user: { id: string },
+  ) {
+    return this.classReviewPackService.getReviewPack(
       classroomId,
       classroomTaskId,
       query,
