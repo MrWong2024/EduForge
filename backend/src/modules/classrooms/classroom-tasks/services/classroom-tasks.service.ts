@@ -257,12 +257,10 @@ export class ClassroomTasksService {
     if (!classroom) {
       throw new NotFoundException('Classroom not found');
     }
-    const isMember =
-      await this.enrollmentService.isStudentActiveInClassroomWithLegacyFallback(
-        classroom._id,
-        userId,
-        classroom.studentIds ?? [],
-      );
+    const isMember = await this.enrollmentService.isStudentActiveInClassroom(
+      classroom._id,
+      userId,
+    );
     if (!isMember) {
       throw new ForbiddenException('Not allowed to submit classroom tasks');
     }
@@ -306,18 +304,16 @@ export class ClassroomTasksService {
 
     const classroom = await this.classroomModel
       .findById(classroomObjectId)
-      .select('_id name courseId studentIds')
+      .select('_id name courseId')
       .lean<ClassroomWithMeta>()
       .exec();
     if (!classroom) {
       throw new NotFoundException('Classroom not found');
     }
-    const isMember =
-      await this.enrollmentService.isStudentActiveInClassroomWithLegacyFallback(
-        classroom._id,
-        studentObjectId,
-        classroom.studentIds ?? [],
-      );
+    const isMember = await this.enrollmentService.isStudentActiveInClassroom(
+      classroom._id,
+      studentObjectId,
+    );
     if (!isMember) {
       throw new ForbiddenException('Not allowed to view classroom tasks');
     }
@@ -452,12 +448,10 @@ export class ClassroomTasksService {
       return;
     }
     if (isStudent) {
-      const isMember =
-        await this.enrollmentService.isStudentActiveInClassroomWithLegacyFallback(
-          classroom._id,
-          userId,
-          classroom.studentIds ?? [],
-        );
+      const isMember = await this.enrollmentService.isStudentActiveInClassroom(
+        classroom._id,
+        userId,
+      );
       if (!isMember) {
         throw new ForbiddenException('Not allowed to view classroom tasks');
       }

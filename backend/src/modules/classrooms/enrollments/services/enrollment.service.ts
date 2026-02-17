@@ -13,12 +13,6 @@ type EnrollmentStudentRow = {
 type EnrollmentClassroomRow = {
   classroomId: Types.ObjectId;
 };
-
-type EnrollmentClassroomStatsRow = {
-  _id: Types.ObjectId;
-  totalRecords: number;
-  activeStudentsCount: number;
-};
 type EnrollmentGroupedCountRow = {
   _id: Types.ObjectId;
   count: number;
@@ -84,7 +78,11 @@ export class EnrollmentService {
   }
 
   async listStudents(classroomId: string) {
-    const classroomObjectId = this.parseObjectId(classroomId, 'classroomId');
+    return this.listActiveStudentIds(classroomId);
+  }
+
+  async listActiveStudentIds(classroomId: string | Types.ObjectId) {
+    const classroomObjectId = this.toObjectId(classroomId, 'classroomId');
 
     const rows = await this.enrollmentModel
       .find({
@@ -153,10 +151,9 @@ export class EnrollmentService {
     return rows.map((row) => row.classroomId);
   }
 
-  async isStudentActiveInClassroomWithLegacyFallback(
+  async isStudentActiveInClassroom(
     classroomId: string | Types.ObjectId,
     userId: string | Types.ObjectId,
-    legacyStudentIds: Types.ObjectId[] = [],
   ) {
     const classroomObjectId = this.toObjectId(classroomId, 'classroomId');
     const userObjectId = this.toObjectId(userId, 'userId');
@@ -171,124 +168,7 @@ export class EnrollmentService {
       .select('_id')
       .lean()
       .exec();
-    if (activeMembership) {
-      return true;
-    }
-
-    const legacyHasStudent = legacyStudentIds.some(
-      (legacyStudentId) =>
-        legacyStudentId.toString() === userObjectId.toString(),
-    );
-    if (!legacyHasStudent) {
-      return false;
-    }
-
-    const statsMap = await this.getClassroomEnrollmentStatsByClassroomIds([
-      classroomObjectId,
-    ]);
-    const stats = statsMap.get(classroomObjectId.toString());
-    const totalRecords = stats?.totalRecords ?? 0;
-
-    // Migration fallback (temporary):
-    // only trust legacy studentIds when enrollment records for the classroom are absent.
-    return totalRecords === 0;
-  }
-
-  async listStudentIdsWithLegacyFallback(
-    classroomId: string | Types.ObjectId,
-    legacyStudentIds: Types.ObjectId[] = [],
-  ) {
-    const classroomObjectId = this.toObjectId(classroomId, 'classroomId');
-
-    const rows = await this.enrollmentModel
-      .find({
-        classroomId: classroomObjectId,
-        role: EnrollmentRole.Student,
-        status: EnrollmentStatus.Active,
-      })
-      .select({ _id: 0, userId: 1 })
-      .lean<EnrollmentStudentRow[]>()
-      .exec();
-    if (rows.length > 0) {
-      return rows.map((row) => row.userId.toString());
-    }
-
-    const statsMap = await this.getClassroomEnrollmentStatsByClassroomIds([
-      classroomObjectId,
-    ]);
-    const stats = statsMap.get(classroomObjectId.toString());
-    const totalRecords = stats?.totalRecords ?? 0;
-    if (totalRecords > 0) {
-      return [];
-    }
-
-    return Array.from(new Set(legacyStudentIds.map((id) => id.toString())));
-  }
-
-  async countStudentsWithLegacyFallback(
-    classroomId: string | Types.ObjectId,
-    legacyStudentIds: Types.ObjectId[] = [],
-  ) {
-    const classroomObjectId = this.toObjectId(classroomId, 'classroomId');
-    const [groupedActiveMap, statsMap] = await Promise.all([
-      this.countStudentsGroupedByClassroomIds([classroomObjectId]),
-      this.getClassroomEnrollmentStatsByClassroomIds([classroomObjectId]),
-    ]);
-    const stats = statsMap.get(classroomObjectId.toString());
-    if (!stats || stats.totalRecords === 0) {
-      return legacyStudentIds.length;
-    }
-    return groupedActiveMap.get(classroomObjectId.toString()) ?? 0;
-  }
-
-  async getClassroomEnrollmentStatsByClassroomIds(
-    classroomIds: Types.ObjectId[],
-  ) {
-    const statsMap = new Map<
-      string,
-      { totalRecords: number; activeStudentsCount: number }
-    >();
-    if (classroomIds.length === 0) {
-      return statsMap;
-    }
-
-    const rows = await this.enrollmentModel
-      .aggregate<EnrollmentClassroomStatsRow>([
-        {
-          $match: {
-            classroomId: { $in: classroomIds },
-          },
-        },
-        {
-          $group: {
-            _id: '$classroomId',
-            totalRecords: { $sum: 1 },
-            activeStudentsCount: {
-              $sum: {
-                $cond: [
-                  {
-                    $and: [
-                      { $eq: ['$role', EnrollmentRole.Student] },
-                      { $eq: ['$status', EnrollmentStatus.Active] },
-                    ],
-                  },
-                  1,
-                  0,
-                ],
-              },
-            },
-          },
-        },
-      ])
-      .exec();
-
-    for (const row of rows) {
-      statsMap.set(row._id.toString(), {
-        totalRecords: row.totalRecords,
-        activeStudentsCount: row.activeStudentsCount,
-      });
-    }
-    return statsMap;
+    return !!activeMembership;
   }
 
   private parseObjectId(value: string, fieldName: string) {

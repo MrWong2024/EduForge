@@ -98,11 +98,9 @@ export class TeacherClassroomDashboardService {
       .exec();
 
     const classroomTaskIds = classroomTasks.map((task) => task._id);
-    const studentsCount =
-      await this.enrollmentService.countStudentsWithLegacyFallback(
-        classroom._id,
-        classroom.studentIds ?? [],
-      );
+    const studentsCount = await this.enrollmentService.countStudents(
+      classroom._id.toString(),
+    );
     if (classroomTaskIds.length === 0) {
       return {
         classroom: {

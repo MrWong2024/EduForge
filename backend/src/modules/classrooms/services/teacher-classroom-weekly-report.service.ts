@@ -68,7 +68,7 @@ export class TeacherClassroomWeeklyReportService {
         _id: classroomObjectId,
         teacherId: new Types.ObjectId(teacherId),
       })
-      .select('_id name courseId status studentIds')
+      .select('_id name courseId status')
       .lean<ClassroomWithMeta>()
       .exec();
     if (!classroom) {
@@ -91,17 +91,9 @@ export class TeacherClassroomWeeklyReportService {
       .lean<ClassroomTaskWithMeta[]>()
       .exec();
     const classroomTaskIds = classroomTasks.map((task) => task._id);
-    // Migration fallback (temporary) is encapsulated in EnrollmentService:
-    // fall back to legacy studentIds only when classroom enrollments are empty.
     const [studentsCount, classroomStudentIdsRaw] = await Promise.all([
-      this.enrollmentService.countStudentsWithLegacyFallback(
-        classroom._id,
-        classroom.studentIds ?? [],
-      ),
-      this.enrollmentService.listStudentIdsWithLegacyFallback(
-        classroom._id,
-        classroom.studentIds ?? [],
-      ),
+      this.enrollmentService.countStudents(classroom._id.toString()),
+      this.enrollmentService.listActiveStudentIds(classroom._id),
     ]);
     const classroomStudentIds = [...classroomStudentIdsRaw].sort(
       (left, right) => left.localeCompare(right),

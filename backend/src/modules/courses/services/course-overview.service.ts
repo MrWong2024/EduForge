@@ -133,7 +133,7 @@ export class CourseOverviewService {
         .sort({ createdAt: -1, _id: 1 })
         .skip((page - 1) * limit)
         .limit(limit)
-        .select('_id name studentIds')
+        .select('_id name')
         .lean<ClassroomLean[]>()
         .exec(),
     ]);
@@ -157,12 +157,10 @@ export class CourseOverviewService {
       };
     }
 
-    const [enrollmentCountMap, enrollmentStatsMap] = await Promise.all([
-      this.enrollmentService.countStudentsGroupedByClassroomIds(classroomIds),
-      this.enrollmentService.getClassroomEnrollmentStatsByClassroomIds(
+    const enrollmentCountMap =
+      await this.enrollmentService.countStudentsGroupedByClassroomIds(
         classroomIds,
-      ),
-    ]);
+      );
 
     // AB metric contract:
     // Use createdAt as the single time-window field for classroomTasks/submissions/jobs.
@@ -269,13 +267,7 @@ export class CourseOverviewService {
 
     const items = classrooms.map((classroom) => {
       const classroomId = classroom._id.toString();
-      const enrollmentStats = enrollmentStatsMap.get(classroomId);
-      // Migration fallback (temporary):
-      // only fall back to legacy studentIds when enrollment records are absent.
-      const studentsCount =
-        enrollmentStats && enrollmentStats.totalRecords > 0
-          ? (enrollmentCountMap.get(classroomId) ?? 0)
-          : (classroom.studentIds?.length ?? 0);
+      const studentsCount = enrollmentCountMap.get(classroomId) ?? 0;
       const distinctStudentsSubmitted =
         distinctStudentsMap.get(classroomId)?.size ?? 0;
       const ai = aiByClassroomId.get(classroomId) ?? {

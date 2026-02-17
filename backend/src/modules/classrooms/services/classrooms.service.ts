@@ -131,7 +131,9 @@ export class ClassroomsService {
     ]);
 
     return {
-      items: items.map((classroom) => this.toClassroomResponse(classroom)),
+      items: await Promise.all(
+        items.map((classroom) => this.toClassroomResponse(classroom)),
+      ),
       total,
       page,
       limit,
@@ -156,7 +158,7 @@ export class ClassroomsService {
       return this.toClassroomResponse(classroom, true);
     }
     if (isStudent) {
-      await this.assertStudentInClassroomActive(classroom, userId);
+      await this.assertStudentInClassroomActive(classroom._id, userId);
       return this.toClassroomResponse(classroom);
     }
 
@@ -312,10 +314,16 @@ export class ClassroomsService {
     return code;
   }
 
-  private toClassroomResponse(
+  private async toClassroomResponse(
     classroom: ClassroomWithMeta,
     includeStudents = false,
   ) {
+    // Legacy output compatibility:
+    // `studentIds` is a derived response field from Enrollment ACTIVE records.
+    // Authorization/statistics must not read classroom.studentIds.
+    const studentIds = includeStudents
+      ? await this.enrollmentService.listActiveStudentIds(classroom._id)
+      : undefined;
     return {
       id: classroom._id.toString(),
       courseId: classroom.courseId.toString(),
@@ -323,24 +331,20 @@ export class ClassroomsService {
       teacherId: classroom.teacherId.toString(),
       joinCode: classroom.joinCode,
       status: classroom.status,
-      studentIds: includeStudents
-        ? classroom.studentIds.map((studentId) => studentId.toString())
-        : undefined,
+      studentIds,
       createdAt: classroom.createdAt ?? new Date(0),
       updatedAt: classroom.updatedAt ?? new Date(0),
     } as ClassroomResponseDto;
   }
 
   private async assertStudentInClassroomActive(
-    classroom: ClassroomWithMeta,
+    classroomId: string | Types.ObjectId,
     studentId: string,
   ) {
-    const isMember =
-      await this.enrollmentService.isStudentActiveInClassroomWithLegacyFallback(
-        classroom._id,
-        studentId,
-        classroom.studentIds ?? [],
-      );
+    const isMember = await this.enrollmentService.isStudentActiveInClassroom(
+      classroomId,
+      studentId,
+    );
     if (!isMember) {
       throw new ForbiddenException('Not allowed to view classroom');
     }

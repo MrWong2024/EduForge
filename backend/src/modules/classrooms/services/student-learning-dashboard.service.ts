@@ -63,23 +63,6 @@ export class StudentLearningDashboardService {
           .exec(),
         this.classroomModel.countDocuments(filter),
       ]);
-    } else {
-      // Migration fallback (temporary):
-      // if enrollment data is absent for this user, read legacy studentIds.
-      const legacyFilter: Record<string, unknown> = {
-        ...enrollmentFilter,
-        studentIds: new Types.ObjectId(userId),
-      };
-      [classrooms, total] = await Promise.all([
-        this.classroomModel
-          .find(legacyFilter)
-          .sort({ createdAt: -1, _id: 1 })
-          .skip((page - 1) * limit)
-          .limit(limit)
-          .lean<ClassroomLean[]>()
-          .exec(),
-        this.classroomModel.countDocuments(legacyFilter),
-      ]);
     }
 
     if (classrooms.length === 0) {
