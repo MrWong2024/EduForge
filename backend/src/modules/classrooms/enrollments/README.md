@@ -14,3 +14,7 @@
 
 ## Removal Plan
 - Remove dual-write and legacy `studentIds` response field once downstream clients no longer depend on it.
+
+## Regression Lock
+- `backend/test/enrollment-only.regression.e2e-spec.ts` locks Enrollment-only behavior.
+- Any future read-path fallback to `classrooms.studentIds` for authorization/statistics should fail e2e.
