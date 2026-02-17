@@ -11,6 +11,15 @@ import { ClassroomTask } from '../schemas/classroom-task.schema';
 import { CreateClassroomTaskDto } from '../dto/create-classroom-task.dto';
 import { QueryClassroomTaskDto } from '../dto/query-classroom-task.dto';
 import { QueryMyTaskDetailDto } from '../dto/query-my-task-detail.dto';
+import {
+  LEARNING_TRAJECTORY_SORT_FIELDS,
+  LEARNING_TRAJECTORY_SORT_ORDERS,
+  LEARNING_TRAJECTORY_WINDOWS,
+  LearningTrajectorySortField,
+  LearningTrajectorySortOrder,
+  LearningTrajectoryWindow,
+  QueryLearningTrajectoryDto,
+} from '../dto/query-learning-trajectory.dto';
 import { ClassroomTaskResponseDto } from '../dto/classroom-task-response.dto';
 import { CreateSubmissionDto } from '../../../learning-tasks/dto/create-submission.dto';
 import { Task, TaskStatus } from '../../../learning-tasks/schemas/task.schema';
@@ -78,9 +87,59 @@ type SubmissionDetailItem = {
     tags?: string[];
   }>;
 };
+type LearningTrajectorySubmissionRow = Pick<
+  Submission,
+  'studentId' | 'attemptNo'
+> &
+  WithId &
+  WithTimestamps;
+type LearningTrajectoryClassroomTaskLean = Pick<
+  ClassroomTask,
+  'classroomId' | 'dueAt'
+> &
+  WithId;
+type LearningTrajectoryTrend = {
+  errorCountFirst: number;
+  errorCountLatest: number;
+  errorDelta: number;
+  topTagsFirst: Array<{ tag: string; count: number }>;
+  topTagsLatest: Array<{ tag: string; count: number }>;
+};
+type LearningTrajectoryAttempt = {
+  submissionId: string;
+  attemptNo: number;
+  createdAt: string;
+  isLate: boolean;
+  aiFeedbackStatus: AiFeedbackStatus;
+  feedbackSummary: SubmissionFeedbackSummary;
+};
+type LearningTrajectoryItem = {
+  studentId: string;
+  attemptsCount: number;
+  latestAttemptAt: string | null;
+  latestAiFeedbackStatus: AiFeedbackStatus | null;
+  trend: LearningTrajectoryTrend;
+  attempts: LearningTrajectoryAttempt[];
+};
 
 @Injectable()
 export class ClassroomTasksService {
+  private static readonly DEFAULT_TRAJECTORY_WINDOW: LearningTrajectoryWindow =
+    '7d';
+  private static readonly DEFAULT_TRAJECTORY_PAGE = 1;
+  private static readonly DEFAULT_TRAJECTORY_LIMIT = 20;
+  private static readonly DEFAULT_TRAJECTORY_SORT: LearningTrajectorySortField =
+    'latestAttemptAt';
+  private static readonly DEFAULT_TRAJECTORY_ORDER: LearningTrajectorySortOrder =
+    'desc';
+  private static readonly TRAJECTORY_WINDOW_MS_MAP: Record<
+    LearningTrajectoryWindow,
+    number
+  > = {
+    '24h': 24 * 60 * 60 * 1000,
+    '7d': 7 * 24 * 60 * 60 * 1000,
+    '30d': 30 * 24 * 60 * 60 * 1000,
+  };
   constructor(
     @InjectModel(Classroom.name)
     private readonly classroomModel: Model<Classroom>,
@@ -284,6 +343,219 @@ export class ClassroomTasksService {
     );
   }
 
+  async getLearningTrajectory(
+    classroomId: string,
+    classroomTaskId: string,
+    query: QueryLearningTrajectoryDto,
+    teacherId: string,
+  ) {
+    const classroomObjectId = this.parseObjectId(classroomId, 'classroomId');
+    const classroomTaskObjectId = this.parseObjectId(
+      classroomTaskId,
+      'classroomTaskId',
+    );
+    const page = query.page ?? ClassroomTasksService.DEFAULT_TRAJECTORY_PAGE;
+    const limit = Math.min(
+      query.limit ?? ClassroomTasksService.DEFAULT_TRAJECTORY_LIMIT,
+      50,
+    );
+    const sort = LEARNING_TRAJECTORY_SORT_FIELDS.includes(
+      query.sort as LearningTrajectorySortField,
+    )
+      ? (query.sort as LearningTrajectorySortField)
+      : ClassroomTasksService.DEFAULT_TRAJECTORY_SORT;
+    const order = LEARNING_TRAJECTORY_SORT_ORDERS.includes(
+      query.order as LearningTrajectorySortOrder,
+    )
+      ? (query.order as LearningTrajectorySortOrder)
+      : ClassroomTasksService.DEFAULT_TRAJECTORY_ORDER;
+    const window = LEARNING_TRAJECTORY_WINDOWS.includes(
+      query.window as LearningTrajectoryWindow,
+    )
+      ? (query.window as LearningTrajectoryWindow)
+      : ClassroomTasksService.DEFAULT_TRAJECTORY_WINDOW;
+    const includeAttempts = this.parseBooleanQuery(query.includeAttempts, true);
+    const includeTagDetails = this.parseBooleanQuery(
+      query.includeTagDetails,
+      true,
+    );
+    const lowerBound = new Date(
+      Date.now() - ClassroomTasksService.TRAJECTORY_WINDOW_MS_MAP[window],
+    );
+
+    // Z4 metric contract:
+    // 1) submissions are isolated by classroomTaskId and filtered by submissions.createdAt window.
+    // 2) Students are sourced from Enrollment ACTIVE only (STUDENT role).
+    // 3) sort is applied within the paged enrollment slice (page-local sort), not globally.
+    // 4) errorRate(v1) uses latest attempt ERROR count for deterministic sorting.
+    const [classroom, classroomTask] = await Promise.all([
+      this.classroomModel
+        .findOne({
+          _id: classroomObjectId,
+          teacherId: new Types.ObjectId(teacherId),
+        })
+        .select('_id')
+        .lean<WithId>()
+        .exec(),
+      this.classroomTaskModel
+        .findOne({ _id: classroomTaskObjectId, classroomId: classroomObjectId })
+        .select('_id classroomId dueAt')
+        .lean<LearningTrajectoryClassroomTaskLean>()
+        .exec(),
+    ]);
+    if (!classroom) {
+      throw new NotFoundException('Classroom not found');
+    }
+    if (!classroomTask) {
+      throw new NotFoundException('Classroom task not found');
+    }
+
+    const [total, studentIds] = await Promise.all([
+      this.enrollmentService.countStudents(classroomObjectId.toString()),
+      this.enrollmentService.listActiveStudentIdsByClassroomPage(
+        classroomObjectId,
+        page,
+        limit,
+      ),
+    ]);
+
+    if (studentIds.length === 0) {
+      return {
+        classroomId,
+        classroomTaskId,
+        window,
+        generatedAt: new Date().toISOString(),
+        page,
+        limit,
+        total,
+        items: [],
+      };
+    }
+
+    const studentObjectIds = studentIds.map(
+      (studentId) => new Types.ObjectId(studentId),
+    );
+    const submissions = await this.submissionModel
+      .find({
+        classroomTaskId: classroomTaskObjectId,
+        studentId: { $in: studentObjectIds },
+        createdAt: { $gte: lowerBound },
+      })
+      .select('_id studentId attemptNo createdAt')
+      .sort({ studentId: 1, attemptNo: 1, createdAt: 1 })
+      .lean<LearningTrajectorySubmissionRow[]>()
+      .exec();
+
+    const submissionIds = submissions.map((submission) => submission._id);
+    const [statusMap, feedbackSummaryMap] = await Promise.all([
+      this.aiFeedbackJobService.getStatusMapBySubmissionIds(submissionIds),
+      this.getFeedbackSummariesBySubmissionIds(
+        submissionIds,
+        includeTagDetails,
+      ),
+    ]);
+
+    const submissionsByStudentId = new Map<
+      string,
+      LearningTrajectorySubmissionRow[]
+    >();
+    for (const submission of submissions) {
+      const studentId = submission.studentId.toString();
+      const bucket = submissionsByStudentId.get(studentId) ?? [];
+      bucket.push(submission);
+      submissionsByStudentId.set(studentId, bucket);
+    }
+
+    const dueAt = classroomTask.dueAt ?? null;
+    const items = studentIds.map((studentId) => {
+      const studentSubmissions = submissionsByStudentId.get(studentId) ?? [];
+      if (studentSubmissions.length === 0) {
+        return {
+          studentId,
+          attemptsCount: 0,
+          latestAttemptAt: null,
+          latestAiFeedbackStatus: null,
+          trend: {
+            errorCountFirst: 0,
+            errorCountLatest: 0,
+            errorDelta: 0,
+            topTagsFirst: [],
+            topTagsLatest: [],
+          },
+          attempts: [],
+        } as LearningTrajectoryItem;
+      }
+
+      const firstSubmission =
+        this.findFirstAttemptSubmission(studentSubmissions);
+      const latestSubmission =
+        this.findLatestAttemptSubmission(studentSubmissions);
+      const firstSummary =
+        feedbackSummaryMap.get(firstSubmission._id.toString()) ??
+        this.getEmptyFeedbackSummary();
+      const latestSummary =
+        feedbackSummaryMap.get(latestSubmission._id.toString()) ??
+        this.getEmptyFeedbackSummary();
+      const latestAiFeedbackStatus =
+        statusMap.get(latestSubmission._id.toString()) ??
+        AiFeedbackStatus.NotRequested;
+
+      const attempts = includeAttempts
+        ? studentSubmissions.map((submission) => {
+            const feedbackSummary =
+              feedbackSummaryMap.get(submission._id.toString()) ??
+              this.getEmptyFeedbackSummary();
+            const createdAt = submission.createdAt ?? new Date(0);
+            const isLate = !!dueAt && createdAt.getTime() > dueAt.getTime();
+            return {
+              submissionId: submission._id.toString(),
+              attemptNo: submission.attemptNo,
+              createdAt: createdAt.toISOString(),
+              isLate,
+              aiFeedbackStatus:
+                statusMap.get(submission._id.toString()) ??
+                AiFeedbackStatus.NotRequested,
+              feedbackSummary,
+            } as LearningTrajectoryAttempt;
+          })
+        : [];
+
+      return {
+        studentId,
+        attemptsCount: studentSubmissions.length,
+        latestAttemptAt: (
+          latestSubmission.createdAt ?? new Date(0)
+        ).toISOString(),
+        latestAiFeedbackStatus,
+        trend: {
+          errorCountFirst: firstSummary.severityBreakdown.ERROR,
+          errorCountLatest: latestSummary.severityBreakdown.ERROR,
+          errorDelta:
+            latestSummary.severityBreakdown.ERROR -
+            firstSummary.severityBreakdown.ERROR,
+          topTagsFirst: firstSummary.topTags,
+          topTagsLatest: latestSummary.topTags,
+        },
+        attempts,
+      } as LearningTrajectoryItem;
+    });
+
+    items.sort((left, right) =>
+      this.compareTrajectoryItems(left, right, sort, order),
+    );
+
+    return {
+      classroomId,
+      classroomTaskId,
+      window,
+      generatedAt: new Date().toISOString(),
+      page,
+      limit,
+      total,
+      items,
+    };
+  }
+
   async getMyTaskDetail(
     classroomId: string,
     classroomTaskId: string,
@@ -480,10 +752,7 @@ export class ClassroomTasksService {
   }
 
   private parseIncludeFeedbackItems(includeFeedbackItems?: string) {
-    if (includeFeedbackItems === undefined) {
-      return false;
-    }
-    return includeFeedbackItems.toLowerCase() === 'true';
+    return this.parseBooleanQuery(includeFeedbackItems, false);
   }
 
   private getEmptyFeedbackSummary(): SubmissionFeedbackSummary {
@@ -494,7 +763,10 @@ export class ClassroomTasksService {
     };
   }
 
-  private async getFeedbackSummariesBySubmissionIds(ids: Types.ObjectId[]) {
+  private async getFeedbackSummariesBySubmissionIds(
+    ids: Types.ObjectId[],
+    includeTagDetails = true,
+  ) {
     const summaryMap = new Map<string, SubmissionFeedbackSummary>();
     if (ids.length === 0) {
       return summaryMap;
@@ -503,8 +775,39 @@ export class ClassroomTasksService {
     type FeedbackSummaryFacetResult = {
       totals: Array<{ _id: Types.ObjectId; totalItems: number }>;
       severities: FeedbackSummarySeverityAgg[];
-      tags: FeedbackSummaryTagAgg[];
+      tags?: FeedbackSummaryTagAgg[];
     };
+
+    const facet: Record<string, PipelineStage[]> = {
+      totals: [{ $group: { _id: '$submissionId', totalItems: { $sum: 1 } } }],
+      severities: [
+        {
+          $group: {
+            _id: {
+              submissionId: '$submissionId',
+              severity: '$severity',
+            },
+            count: { $sum: 1 },
+          },
+        },
+      ],
+    };
+    if (includeTagDetails) {
+      facet.tags = [
+        { $match: { tags: { $exists: true, $ne: [] } } },
+        { $unwind: '$tags' },
+        {
+          $group: {
+            _id: {
+              submissionId: '$submissionId',
+              tag: '$tags',
+            },
+            count: { $sum: 1 },
+          },
+        },
+        { $sort: { '_id.submissionId': 1, count: -1 } },
+      ];
+    }
 
     const result = await this.feedbackModel
       .aggregate<FeedbackSummaryFacetResult>([
@@ -514,38 +817,7 @@ export class ClassroomTasksService {
             source: FeedbackSource.AI,
           },
         },
-        {
-          $facet: {
-            totals: [
-              { $group: { _id: '$submissionId', totalItems: { $sum: 1 } } },
-            ],
-            severities: [
-              {
-                $group: {
-                  _id: {
-                    submissionId: '$submissionId',
-                    severity: '$severity',
-                  },
-                  count: { $sum: 1 },
-                },
-              },
-            ],
-            tags: [
-              { $match: { tags: { $exists: true, $ne: [] } } },
-              { $unwind: '$tags' },
-              {
-                $group: {
-                  _id: {
-                    submissionId: '$submissionId',
-                    tag: '$tags',
-                  },
-                  count: { $sum: 1 },
-                },
-              },
-              { $sort: { '_id.submissionId': 1, count: -1 } },
-            ],
-          },
-        },
+        { $facet: facet },
       ] as PipelineStage[])
       .exec();
 
@@ -574,17 +846,120 @@ export class ClassroomTasksService {
       summaryMap.set(submissionId, current);
     }
 
-    for (const tag of aggregate.tags) {
-      const submissionId = tag._id.submissionId.toString();
-      const current =
-        summaryMap.get(submissionId) ?? this.getEmptyFeedbackSummary();
-      if (current.topTags.length < 5) {
-        current.topTags.push({ tag: tag._id.tag, count: tag.count });
+    if (includeTagDetails) {
+      for (const tag of aggregate.tags ?? []) {
+        const submissionId = tag._id.submissionId.toString();
+        const current =
+          summaryMap.get(submissionId) ?? this.getEmptyFeedbackSummary();
+        if (current.topTags.length < 5) {
+          current.topTags.push({ tag: tag._id.tag, count: tag.count });
+        }
+        summaryMap.set(submissionId, current);
       }
-      summaryMap.set(submissionId, current);
     }
 
     return summaryMap;
+  }
+
+  private findFirstAttemptSubmission(
+    submissions: LearningTrajectorySubmissionRow[],
+  ) {
+    let first = submissions[0];
+    for (const submission of submissions) {
+      if (submission.attemptNo < first.attemptNo) {
+        first = submission;
+        continue;
+      }
+      if (submission.attemptNo === first.attemptNo) {
+        const submissionTime = submission.createdAt?.getTime() ?? 0;
+        const firstTime = first.createdAt?.getTime() ?? 0;
+        if (submissionTime < firstTime) {
+          first = submission;
+        }
+      }
+    }
+    return first;
+  }
+
+  private findLatestAttemptSubmission(
+    submissions: LearningTrajectorySubmissionRow[],
+  ) {
+    let latest = submissions[0];
+    for (const submission of submissions) {
+      const submissionTime = submission.createdAt?.getTime() ?? 0;
+      const latestTime = latest.createdAt?.getTime() ?? 0;
+      if (submissionTime > latestTime) {
+        latest = submission;
+        continue;
+      }
+      if (
+        submissionTime === latestTime &&
+        submission.attemptNo > latest.attemptNo
+      ) {
+        latest = submission;
+      }
+    }
+    return latest;
+  }
+
+  private compareTrajectoryItems(
+    left: LearningTrajectoryItem,
+    right: LearningTrajectoryItem,
+    sort: LearningTrajectorySortField,
+    order: LearningTrajectorySortOrder,
+  ) {
+    if (sort === 'notSubmitted') {
+      const leftNotSubmitted = left.attemptsCount === 0 ? 1 : 0;
+      const rightNotSubmitted = right.attemptsCount === 0 ? 1 : 0;
+      if (leftNotSubmitted !== rightNotSubmitted) {
+        return rightNotSubmitted - leftNotSubmitted;
+      }
+      return left.studentId.localeCompare(right.studentId);
+    }
+
+    if (sort === 'latestAttemptAt') {
+      const leftValue = left.latestAttemptAt
+        ? new Date(left.latestAttemptAt).getTime()
+        : null;
+      const rightValue = right.latestAttemptAt
+        ? new Date(right.latestAttemptAt).getTime()
+        : null;
+      if (leftValue === null || rightValue === null) {
+        if (leftValue === null && rightValue === null) {
+          return left.studentId.localeCompare(right.studentId);
+        }
+        if (order === 'asc') {
+          return leftValue === null ? -1 : 1;
+        }
+        return leftValue === null ? 1 : -1;
+      }
+      if (leftValue !== rightValue) {
+        const diff = leftValue - rightValue;
+        return order === 'asc' ? diff : -diff;
+      }
+      return left.studentId.localeCompare(right.studentId);
+    }
+
+    const leftValue =
+      sort === 'attemptsCount'
+        ? left.attemptsCount
+        : left.trend.errorCountLatest;
+    const rightValue =
+      sort === 'attemptsCount'
+        ? right.attemptsCount
+        : right.trend.errorCountLatest;
+    if (leftValue !== rightValue) {
+      const diff = leftValue - rightValue;
+      return order === 'asc' ? diff : -diff;
+    }
+    return left.studentId.localeCompare(right.studentId);
+  }
+
+  private parseBooleanQuery(value: string | undefined, defaultValue: boolean) {
+    if (value === undefined) {
+      return defaultValue;
+    }
+    return value.toLowerCase() === 'true';
   }
 
   private async getFeedbackItemsPreviewBySubmissionIds(

@@ -15,6 +15,7 @@ import { CreateClassroomTaskDto } from '../dto/create-classroom-task.dto';
 import { QueryClassroomTaskDto } from '../dto/query-classroom-task.dto';
 import { QueryAiMetricsDto } from '../dto/query-ai-metrics.dto';
 import { QueryMyTaskDetailDto } from '../dto/query-my-task-detail.dto';
+import { QueryLearningTrajectoryDto } from '../dto/query-learning-trajectory.dto';
 import { CreateSubmissionDto } from '../../../learning-tasks/dto/create-submission.dto';
 import { AiMetricsService } from '../services/ai-metrics.service';
 import {
@@ -102,6 +103,23 @@ export class ClassroomTasksController {
     @CurrentUser() user: { id: string },
   ) {
     return this.classroomTasksService.getMyTaskDetail(
+      classroomId,
+      classroomTaskId,
+      query,
+      user.id,
+    );
+  }
+
+  @UseGuards(RolesGuard)
+  @Roles(...TEACHER_ROLES)
+  @Get(':classroomId/tasks/:classroomTaskId/learning-trajectory')
+  getLearningTrajectory(
+    @Param('classroomId') classroomId: string,
+    @Param('classroomTaskId') classroomTaskId: string,
+    @Query() query: QueryLearningTrajectoryDto,
+    @CurrentUser() user: { id: string },
+  ) {
+    return this.classroomTasksService.getLearningTrajectory(
       classroomId,
       classroomTaskId,
       query,

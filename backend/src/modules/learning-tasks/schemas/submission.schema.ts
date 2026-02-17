@@ -66,6 +66,8 @@ SubmissionSchema.index({ taskId: 1, studentId: 1 });
 SubmissionSchema.index({ taskId: 1, createdAt: -1 });
 // Supports classroom dashboard queries scoped by classroomTaskId and student.
 SubmissionSchema.index({ classroomTaskId: 1, studentId: 1, createdAt: -1 });
+// Supports classroom trajectory queries grouped by student attempts in a classroomTask.
+SubmissionSchema.index({ classroomTaskId: 1, studentId: 1, attemptNo: 1 });
 // Supports classroom dashboard queries scoped by classroomTaskId with time order.
 SubmissionSchema.index({ classroomTaskId: 1, createdAt: -1 });
 // Supports lookup pipelines constrained by classroomTaskId and _id.

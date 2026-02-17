@@ -81,6 +81,29 @@ export class EnrollmentService {
     return this.listActiveStudentIds(classroomId);
   }
 
+  async listActiveStudentIdsByClassroomPage(
+    classroomId: string | Types.ObjectId,
+    page: number,
+    limit: number,
+  ) {
+    const classroomObjectId = this.toObjectId(classroomId, 'classroomId');
+    const safePage = page < 1 ? 1 : page;
+    const safeLimit = limit < 1 ? 1 : limit;
+    const rows = await this.enrollmentModel
+      .find({
+        classroomId: classroomObjectId,
+        role: EnrollmentRole.Student,
+        status: EnrollmentStatus.Active,
+      })
+      .sort({ userId: 1 })
+      .skip((safePage - 1) * safeLimit)
+      .limit(safeLimit)
+      .select({ _id: 0, userId: 1 })
+      .lean<EnrollmentStudentRow[]>()
+      .exec();
+    return rows.map((row) => row.userId.toString());
+  }
+
   async listActiveStudentIds(classroomId: string | Types.ObjectId) {
     const classroomObjectId = this.toObjectId(classroomId, 'classroomId');
 

@@ -50,3 +50,5 @@ EnrollmentSchema.index({ classroomId: 1, userId: 1 }, { unique: true });
 EnrollmentSchema.index({ userId: 1, status: 1 });
 // Supports querying classroom members by status.
 EnrollmentSchema.index({ classroomId: 1, status: 1 });
+// Supports ACTIVE STUDENT pagination/count by classroom with stable userId sort.
+EnrollmentSchema.index({ classroomId: 1, status: 1, role: 1, userId: 1 });
