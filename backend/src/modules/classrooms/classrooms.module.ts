@@ -30,6 +30,11 @@ import { AiFeedbackJobService } from '../learning-tasks/ai-feedback/services/ai-
 import { TeacherClassroomDashboardService } from './services/teacher-classroom-dashboard.service';
 import { TeacherClassroomWeeklyReportService } from './services/teacher-classroom-weekly-report.service';
 import { StudentLearningDashboardService } from './services/student-learning-dashboard.service';
+import {
+  Enrollment,
+  EnrollmentSchema,
+} from './enrollments/schemas/enrollment.schema';
+import { EnrollmentService } from './enrollments/services/enrollment.service';
 import { AuthModule } from '../auth/auth.module';
 import { LearningTasksModule } from '../learning-tasks/learning-tasks.module';
 
@@ -45,6 +50,7 @@ import { LearningTasksModule } from '../learning-tasks/learning-tasks.module';
       { name: Submission.name, schema: SubmissionSchema },
       { name: Feedback.name, schema: FeedbackSchema },
       { name: AiFeedbackJob.name, schema: AiFeedbackJobSchema },
+      { name: Enrollment.name, schema: EnrollmentSchema },
       { name: User.name, schema: UserSchema },
     ]),
   ],
@@ -55,9 +61,11 @@ import { LearningTasksModule } from '../learning-tasks/learning-tasks.module';
     AiMetricsService,
     AiFeedbackMetricsAggregator,
     AiFeedbackJobService,
+    EnrollmentService,
     TeacherClassroomDashboardService,
     TeacherClassroomWeeklyReportService,
     StudentLearningDashboardService,
   ],
+  exports: [EnrollmentService],
 })
 export class ClassroomsModule {}
