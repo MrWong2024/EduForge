@@ -2,6 +2,12 @@
 
 扫描范围：`backend/src/modules/**` 下全部 `*service.ts`。  
 补充：为满足 Provider 交接完整性，附带 `*.provider.ts` 卡片。
+重点包含：`classrooms/enrollments/services/*` 与 `classrooms/classroom-tasks/services/*` 新增服务域。
+
+全局口径（SoT）：
+- 成员关系：`Enrollment(role=STUDENT,status=ACTIVE)` 是唯一权威来源（Enrollment-only）。
+- 隔离键：课堂分析/报表/复盘/导出统一按 `classroomTaskId` 隔离，禁止用 `taskId` 做跨班兜底聚合。
+- `Classroom.studentIds`：仅 legacy 输出/镜像字段；授权与统计读路径不依赖该字段。
 
 ## Service Card 模板（含新增字段）
 
@@ -102,14 +108,15 @@
   - `createClassroom(dto: CreateClassroomDto, userId: string): Promise<ClassroomResponseDto> — called by POST /classrooms`
   - `listClassrooms(query: QueryClassroomDto, userId: string): Promise<{ items: ClassroomResponseDto[]; total: number; page: number; limit: number }> — called by GET /classrooms`
   - `joinClassroom(dto: JoinClassroomDto, userId: string): Promise<ClassroomResponseDto> — called by POST /classrooms/join`
+  - `removeStudent(id: string, studentId: string, userId: string): Promise<ClassroomResponseDto> — called by POST /classrooms/:id/students/:uid/remove`
   - `getDashboard(id: string, userId: string): Promise<Record<string, unknown>> — delegates to teacher dashboard service`
   - `getMyLearningDashboard(query: QueryClassroomDto, userId: string): Promise<Record<string, unknown>> — delegates to student dashboard service`
 - AuthZ Boundary: `teacher-only`（管理） / `student-only`（加入） / `member-or-owner`（查看）
-- Metrics/Isolation: 班级层隔离按 `teacherId` 与 `studentIds`；下游统计委托 dashboard service（`classroomTaskId` 口径）
-- Consistency/Constraints: joinCode 生成重试上限 `8`；归档班级禁止更新/发布任务
-- Deps/Side Effects: `ClassroomModel`, `CourseModel`, `UserModel`, `TeacherClassroomDashboardService`, `StudentLearningDashboardService`
-- Performance Notes: 列表查询分页 + 索引过滤；join/remove 用 `$addToSet/$pull` 原子更新
-- SoT: `backend/src/modules/classrooms/schemas/classroom.schema.ts`; `backend/src/modules/classrooms/services/classrooms.service.ts`
+- Metrics/Isolation: 班级管理按 `teacherId`；成员判定与统计统一通过 `EnrollmentService`；下游统计统一是 `classroomTaskId` 口径
+- Consistency/Constraints: joinCode 生成重试上限 `8`；归档班级禁止更新；`join/remove` 先写 Enrollment(`ACTIVE/REMOVED`)，`studentIds` 仅作为 legacy 镜像输出，不参与授权/统计
+- Deps/Side Effects: `ClassroomModel`, `CourseModel`, `UserModel`, `EnrollmentService`, `TeacherClassroomDashboardService`, `TeacherClassroomWeeklyReportService`, `StudentLearningDashboardService`, `ProcessAssessmentService`, `ClassroomExportSnapshotService`
+- Performance Notes: 列表查询分页 + 索引过滤；join/remove 采用 Enrollment upsert/update，并可选镜像更新 `studentIds`
+- SoT: `backend/src/modules/classrooms/services/classrooms.service.ts`; `backend/src/modules/classrooms/enrollments/services/enrollment.service.ts`; `backend/src/modules/classrooms/enrollments/README.md`; `backend/src/modules/classrooms/README.md`
 - Failure Modes:
   - 非授权角色 -> `403`
   - 班级/课程不存在 -> `404`
@@ -126,11 +133,11 @@
 - Key Methods:
   - `getDashboard(id: string, userId: string): Promise<Record<string, unknown>> — called by ClassroomsService.getDashboard and /classrooms/:id/dashboard`
 - AuthZ Boundary: `teacher-only + owner-only`（先校验班级 teacherId）
-- Metrics/Isolation: 强制按 `classroomTaskId` 聚合；`notRequested = submissionsCount - requestedCount`（下限 0）
-- Consistency/Constraints: 仅统计 `FeedbackSource.AI` 的 tags；top tags 限制 `5`
-- Deps/Side Effects: `ClassroomModel`, `ClassroomTaskModel`, `SubmissionModel`, `FeedbackModel`, `AiFeedbackJobModel`；只读聚合
+- Metrics/Isolation: 强制按 `classroomTaskId` 聚合；`studentsCount` 来源为 Enrollment count；`notRequested = submissionsCount - requestedCount`（下限 0）
+- Consistency/Constraints: 仅统计 `FeedbackSource.AI` 的 tags；top tags 限制 `5`；迟交维度包含 `lateSubmissionsCount/lateDistinctStudentsCount`
+- Deps/Side Effects: `ClassroomModel`, `ClassroomTaskModel`, `SubmissionModel`, `FeedbackModel`, `AiFeedbackJobModel`, `EnrollmentService`；只读聚合
 - Performance Notes: 多个 `aggregate` 并行 + Map 合并，避免逐 task N+1
-- SoT: `backend/src/modules/classrooms/services/teacher-classroom-dashboard.service.ts`; `backend/src/modules/learning-tasks/ai-feedback/schemas/ai-feedback-job.schema.ts`; `backend/src/modules/learning-tasks/schemas/submission.schema.ts`
+- SoT: `backend/src/modules/classrooms/services/teacher-classroom-dashboard.service.ts`; `backend/src/modules/classrooms/enrollments/services/enrollment.service.ts`; `backend/src/modules/classrooms/README.md`
 - Failure Modes:
   - 非班级教师或班级不存在 -> `404 Classroom not found`
   - 班级无发布任务 -> 返回空 tasks 结构（非异常）
@@ -147,11 +154,11 @@
 - Key Methods:
   - `getMyLearningDashboard(query: QueryClassroomDto, userId: string): Promise<Record<string, unknown>> — called by ClassroomsService and /classrooms/mine/dashboard`
 - AuthZ Boundary: `student-only`（由上层 `ClassroomsService.ensureStudent` 保障）
-- Metrics/Isolation: 全程按 `classroomTaskId` 归并提交；最新提交判定 `attemptNo` 优先，其次 `createdAt`
+- Metrics/Isolation: “我的班级”主路径来自 `EnrollmentService.listActiveClassroomIdsByUser`；提交与状态按 `classroomTaskId` 聚合
 - Consistency/Constraints: 无 job 记录时状态回退 `NOT_REQUESTED`
-- Deps/Side Effects: `ClassroomModel`, `ClassroomTaskModel`, `SubmissionModel`, `AiFeedbackJobService`；只读
+- Deps/Side Effects: `ClassroomModel`, `ClassroomTaskModel`, `SubmissionModel`, `AiFeedbackJobService`, `EnrollmentService`；只读
 - Performance Notes: 先批量取班级任务，再批量取 submissions/statusMap，避免按班级循环查库
-- SoT: `backend/src/modules/classrooms/services/student-learning-dashboard.service.ts`; `backend/src/modules/learning-tasks/ai-feedback/interfaces/ai-feedback-status.enum.ts`
+- SoT: `backend/src/modules/classrooms/services/student-learning-dashboard.service.ts`; `backend/src/modules/classrooms/enrollments/services/enrollment.service.ts`; `backend/src/modules/classrooms/README.md`
 - Failure Modes:
   - 学生未加入任何班级 -> 返回空 `items`
   - 某任务无提交 -> `myLatestSubmission=null`
@@ -160,8 +167,8 @@
 ## Service Card 07
 
 - Service: `backend/src/modules/classrooms/classroom-tasks/services/classroom-tasks.service.ts`
-- Domain: `ClassroomTask + Submission`
-- Actions: `publish-to-classroom`, `list/get-classroom-task`, `submit-classroom-task`
+- Domain: `ClassroomTask + Submission + Z3/Z4 聚合`
+- Actions: `publish-to-classroom`, `list/get-classroom-task`, `submit-classroom-task`, `aggregate-feature-views`
 - I/O Shape:
   - In: `classroomId`, `classroomTaskId`, `CreateClassroomTaskDto`, `QueryClassroomTaskDto`, `CreateSubmissionDto`, `userId`
   - Out: `ClassroomTaskResponseDto` | `{ items, total, page, limit }` | `SubmissionResponseDto`
@@ -170,12 +177,14 @@
   - `listClassroomTasks(classroomId: string, query: QueryClassroomTaskDto, userId: string): Promise<{ items: ClassroomTaskResponseDto[]; total: number; page: number; limit: number }> — called by GET /classrooms/:id/tasks`
   - `getClassroomTask(classroomId: string, classroomTaskId: string, userId: string): Promise<ClassroomTaskResponseDto> — called by GET /classrooms/:id/tasks/:classroomTaskId`
   - `createClassroomTaskSubmission(classroomId: string, classroomTaskId: string, dto: CreateSubmissionDto, userId: string): Promise<SubmissionResponseDto> — called by classroom-task submission endpoint`
+  - `getMyTaskDetail(...): Promise<Record<string, unknown>> — called by /classrooms/:classroomId/tasks/:classroomTaskId/my-task-detail`
+  - `getLearningTrajectory(...): Promise<Record<string, unknown>> — called by /classrooms/:classroomId/tasks/:classroomTaskId/learning-trajectory`
 - AuthZ Boundary: `teacher-only`（发布） / `student-only + member-only`（提交） / `member-or-owner`（查看）
-- Metrics/Isolation: 学生提交通过 `createSubmissionForClassroomTask(..., classroomTaskId)` 绑定隔离主键；ai-metrics 统计按 `classroomTaskId` 隔离；owner 校验由上层保障；与学习任务提交链路通过 `LearningTasksService` 协作
-- Consistency/Constraints: 要求 Task 已 `PUBLISHED`；班级 `ARCHIVED` 禁止发布；`unique(classroomId,taskId)` 防重复发布
-- Deps/Side Effects: `ClassroomModel`, `ClassroomTaskModel`, `TaskModel`, `UserModel`, `LearningTasksService`
+- Metrics/Isolation: 学生提交通过 `createSubmissionForClassroomTask(..., classroomTaskId)` 绑定隔离主键；Z3/Z4 聚合严格按 `classroomTaskId`；学生集合基于 Enrollment ACTIVE
+- Consistency/Constraints: 要求 Task 已 `PUBLISHED`；班级 `ARCHIVED` 禁止发布；`unique(classroomId,taskId)` 防重复发布；**提交门禁分层：`ClassroomTasksService` 负责 `student + Enrollment ACTIVE + classroomTask 归属` 校验；`LearningTasksService.createSubmissionInternal` 仅在存在 `classroomTaskId` 时 enforce `dueAt/allowLate`（超时且 `allowLate=false` -> `403(code=LATE_SUBMISSION_NOT_ALLOWED)`），并持久化/返回 `submittedAt/isLate/lateBySeconds`。**
+- Deps/Side Effects: `ClassroomModel`, `ClassroomTaskModel`, `TaskModel`, `SubmissionModel`, `FeedbackModel`, `UserModel`, `EnrollmentService`, `AiFeedbackJobService`, `LearningTasksService`
 - Performance Notes: 列表使用 `aggregate(basePipeline + totalPipeline)` 一次生成分页数据与总数
-- SoT: `backend/src/modules/classrooms/classroom-tasks/schemas/classroom-task.schema.ts`; `backend/src/modules/classrooms/classroom-tasks/services/classroom-tasks.service.ts`
+- SoT: `backend/src/modules/classrooms/classroom-tasks/services/classroom-tasks.service.ts`; `backend/src/modules/classrooms/classroom-tasks/schemas/classroom-task.schema.ts`; `backend/src/modules/classrooms/enrollments/services/enrollment.service.ts`; `backend/src/modules/classrooms/README.md`
 - Failure Modes:
   - 班级/任务/课堂任务不存在 -> `404`
   - 无权限访问或提交 -> `403`
@@ -188,7 +197,7 @@
 - Actions: `manage-task`, `submit`, `request-ai-feedback`, `feedback`, `stats`
 - I/O Shape:
   - In: `taskId/submissionId/classroomTaskId`, `Create/Update DTO`, `RequestAiFeedbackDto`, `filters/page/limit`, `user/userId`
-  - Out: `TaskResponseDto` | `SubmissionResponseDto` | `FeedbackResponseDto` | `list/paged list/aggregate`
+  - Out: `TaskResponseDto` | `SubmissionResponseDto(含 submittedAt/isLate/lateBySeconds)` | `FeedbackResponseDto` | `list/paged list/aggregate`
 - Key Methods:
   - `createTask(dto: CreateTaskDto, userId: string): Promise<TaskResponseDto> — called by POST /learning-tasks/tasks`
   - `createSubmission(taskId: string, dto: CreateSubmissionDto, userId: string): Promise<SubmissionResponseDto> — called by generic task submission endpoint`
@@ -198,7 +207,7 @@
   - `getStats(taskId: string, userId: string): Promise<Record<string, unknown>> — called by /learning-tasks/tasks/:id/stats`
 - AuthZ Boundary: `teacher-owner`（更新/查看任务提交/反馈写入/统计/手工 request） + `student`（提交/查自己提交/对本人 submission 手工 request）
 - Metrics/Isolation: `Submission.classroomTaskId` 可选；`aiFeedbackStatus` 通过 `AiFeedbackJobService` 推导；top tags 由 feedback 聚合
-- Consistency/Constraints: attemptNo 采用“查询最新 + 最多 3 次重试”；仅 `PUBLISHED` 任务可提交；自动入队采用 attempt-based 策略：默认 `attemptNo==1` 自动入队、`attemptNo>1` 返回 `NOT_REQUESTED`；策略受 `AI_FEEDBACK_AUTO_ON_SUBMIT`（默认 true）与 `AI_FEEDBACK_AUTO_ON_FIRST_ATTEMPT_ONLY`（默认 true）控制；“跳过 enqueue”属于正常策略路径，不是失败
+- Consistency/Constraints: attemptNo 采用“查询最新 + 最多 3 次重试”；仅 `PUBLISHED` 任务可提交；课堂任务提交流程会计算并持久化 `submittedAt/isLate/lateBySeconds`；`dueAt` 存在且 `allowLate=false` 且超时 -> `403 + code=LATE_SUBMISSION_NOT_ALLOWED`；自动入队采用 attempt-based 策略：默认 `attemptNo==1` 自动入队、`attemptNo>1` 返回 `NOT_REQUESTED`；策略受 `AI_FEEDBACK_AUTO_ON_SUBMIT`（默认 true）与 `AI_FEEDBACK_AUTO_ON_FIRST_ATTEMPT_ONLY`（默认 true）控制；`request-ai-feedback` 为产品能力，幂等确保 job（存在返回既有，不存在创建 `PENDING`）
 - Deps/Side Effects: `ConfigService`, `TaskModel`, `SubmissionModel`, `FeedbackModel`, `ClassroomTaskModel`, `ClassroomModel`, `AiFeedbackJobService`；提交后按 env 策略决定是否 `enqueue`，手工 request 走 `ensureJobForSubmission` 幂等创建
 - Performance Notes: 批量查询 + `Promise.all`；状态映射批量取 jobs，避免逐提交查询
 - SoT: `backend/src/modules/learning-tasks/schemas/submission.schema.ts`; `backend/src/modules/learning-tasks/ai-feedback/services/ai-feedback-job.service.ts`; `backend/src/modules/learning-tasks/services/learning-tasks.service.ts`; `backend/src/modules/learning-tasks/controllers/learning-tasks.controller.ts`
@@ -207,6 +216,174 @@
   - 非任务创建者访问教师视图 -> `403`
   - 任务未发布 -> `400 Task is not published`
   - attemptNo 分配冲突连续失败 -> `400 Unable to allocate attempt number`
+
+## Service Card 08A
+
+- Service: `backend/src/modules/classrooms/enrollments/services/enrollment.service.ts`
+- Domain: `Enrollment`
+- Actions: `enroll`, `remove`, `list-active`, `count/group-count`
+- I/O Shape:
+  - In: `classroomId`, `userId`, `page/limit`, `classroomIds[]`
+  - Out: `void` | `studentId[]` | `classroomId[]` | `count | grouped-count-map` | `boolean`
+- Key Methods:
+  - `enrollStudent(classroomId: string, userId: string): Promise<void>`
+  - `removeStudent(classroomId: string, userId: string): Promise<void>`
+  - `listActiveStudentIds(...)`, `listActiveStudentIdsByClassroomPage(...)`
+  - `countStudents(classroomId: string)`, `countStudentsGroupedByClassroomIds(classroomIds: ObjectId[])`
+  - `listActiveClassroomIdsByUser(userId: string)`, `isStudentActiveInClassroom(...)`
+- AuthZ Boundary: `internal-only`（由调用方 service/controller 做 teacher/student/member 约束）
+- Metrics/Isolation: 成员 SoT 仅为 Enrollment（`role=STUDENT,status=ACTIVE`）；所有成员数、成员列表、学生-班级关系从此处读取
+- Consistency/Constraints: `enrollStudent` 幂等 upsert（并发重复键收敛为 ACTIVE）；`removeStudent` 软删除为 `REMOVED` 并写 `removedAt`
+- Deps/Side Effects: `EnrollmentModel`；写入 enrollment 集合，不依赖 `classroom.studentIds`
+- Performance Notes: 提供分页成员读取与 grouped count，避免上层 N+1 计数
+- SoT: `backend/src/modules/classrooms/enrollments/schemas/enrollment.schema.ts`; `backend/src/modules/classrooms/enrollments/services/enrollment.service.ts`; `backend/src/modules/classrooms/enrollments/README.md`
+- Failure Modes:
+  - 非法 ObjectId -> `400`
+  - 并发重复写(`11000`) -> 收敛处理（非失败）
+
+## Service Card 08B
+
+- Service: `backend/src/modules/classrooms/services/teacher-classroom-weekly-report.service.ts`
+- Domain: `Classroom weekly aggregate (AA)`
+- Actions: `resolve-window`, `aggregate-progress`, `aggregate-ai-health`, `build-weekly-report`
+- I/O Shape:
+  - In: `classroomId`, `window`, `includeRiskStudentIds`, `teacherId`
+  - Out: `weekly-report aggregate(progress/atRisk/aiHealth/topTags)`
+- Key Methods:
+  - `getWeeklyReport(...)`
+  - `getWeeklyReportByLowerBound(...)`（供 snapshot 复用）
+- AuthZ Boundary: `teacher-only + owner-only`
+- Metrics/Isolation: `studentsCount` 与成员全集来自 Enrollment ACTIVE；任务/提交/AI 聚合按 `classroomId + classroomTaskId`；风险口径 `risk = activeStudents - submittedDistinctStudents`
+- Consistency/Constraints: 窗口统一用 `createdAt`；迟交维度输出 `lateSubmissionsCount/lateStudentsCount`
+- Deps/Side Effects: `ClassroomModel`, `ClassroomTaskModel`, `SubmissionModel`, `EnrollmentService`, `AiFeedbackMetricsAggregator`；只读
+- Performance Notes: 以 `classroomTaskIds` 为批次聚合，避免按 task 循环查询
+- SoT: `backend/src/modules/classrooms/services/teacher-classroom-weekly-report.service.ts`; `backend/src/modules/classrooms/README.md`
+- Failure Modes:
+  - 班级不存在或非 owner -> `404`
+  - 空任务/空成员 -> 返回零值聚合（非异常）
+
+## Service Card 08C
+
+- Service: `backend/src/modules/courses/services/course-overview.service.ts`
+- Domain: `Course aggregate (AB)`
+- Actions: `authorize-course-owner`, `aggregate-by-classroom`, `merge-ai-metrics`, `sort-page-items`
+- I/O Shape:
+  - In: `courseId`, `window/sort/order/page/limit`, `teacherId`
+  - Out: `{ course, window, generatedAt, page, limit, total, items[] }`
+- Key Methods:
+  - `getCourseOverview(courseId: string, query: QueryCourseOverviewDto, teacherId: string)`
+- AuthZ Boundary: `teacher-only + owner-only`（`course.createdBy === currentUserId`）
+- Metrics/Isolation: 仅统计该 teacher 名下 classrooms；`studentsCount` 批量来自 `EnrollmentService.countStudentsGroupedByClassroomIds`；提交/迟交/AI 全按 `classroomTaskId` 关联回 classroom
+- Consistency/Constraints: late 指标含 `lateSubmissionsCount/lateStudentsCount`；禁止跨班 taskId 兜底聚合
+- Deps/Side Effects: `CourseModel`, `ClassroomModel`, `ClassroomTaskModel`, `SubmissionModel`, `EnrollmentService`, `AiFeedbackMetricsAggregator`；只读
+- Performance Notes: 先按分页取 classrooms，再做 page-scope 聚合并在页内排序（非全量排序）
+- SoT: `backend/src/modules/courses/services/course-overview.service.ts`; `backend/src/modules/classrooms/enrollments/services/enrollment.service.ts`; `backend/src/modules/classrooms/README.md`
+- Failure Modes:
+  - 课程不存在或非 owner -> `404`
+  - 空班级页 -> 返回 `items=[]`
+
+## Service Card 08D（Feature: My Task Detail, Z3）
+
+- Service: `backend/src/modules/classrooms/classroom-tasks/services/classroom-tasks.service.ts#getMyTaskDetail`
+- Domain: `ClassroomTask student aggregate`
+- Actions: `authorize-student-member`, `load-submissions`, `map-ai-status`, `optional-feedback-preview`
+- I/O Shape:
+  - In: `classroomId`, `classroomTaskId`, `userId`, `includeFeedbackItems`, `feedbackLimit`
+  - Out: `{ classroom, classroomTask, task, me, submissions[], latest|null }`
+- Key Methods:
+  - `getMyTaskDetail(classroomId, classroomTaskId, query, userId)`
+- AuthZ Boundary: `student-only + Enrollment ACTIVE`
+- Metrics/Isolation: 当前课堂任务的所有聚合只按 `classroomTaskId`；`aiFeedbackStatus` 无 job 时为 `NOT_REQUESTED`（合法语义）
+- Consistency/Constraints: `includeFeedbackItems=false` 时不拉取 feedback 明细；`feedbackLimit` 截断明细条数
+- Deps/Side Effects: `ClassroomModel`, `ClassroomTaskModel`, `TaskModel`, `SubmissionModel`, `EnrollmentService`, `AiFeedbackJobService`, `FeedbackModel`；只读
+- Performance Notes: `statusMap/feedbackSummary/feedbackItemsPreview` 批量并发拉取
+- SoT: `backend/src/modules/classrooms/classroom-tasks/services/classroom-tasks.service.ts`; `backend/src/modules/classrooms/classroom-tasks/dto/query-my-task-detail.dto.ts`; `backend/src/modules/classrooms/README.md`
+- Failure Modes:
+  - 班级/课堂任务/任务不存在 -> `404`
+  - 非成员学生 -> `403`
+
+## Service Card 08E（Feature: Learning Trajectory, Z4）
+
+- Service: `backend/src/modules/classrooms/classroom-tasks/services/classroom-tasks.service.ts#getLearningTrajectory`
+- Domain: `ClassroomTask teacher aggregate`
+- Actions: `page-students`, `aggregate-attempt-trend`, `optional-tag-details`, `sort-page-items`
+- I/O Shape:
+  - In: `classroomId`, `classroomTaskId`, `teacherId`, `window/page/limit/sort/order/includeAttempts/includeTagDetails`
+  - Out: `{ classroomId, classroomTaskId, window, page, limit, total, items[] }`
+- Key Methods:
+  - `getLearningTrajectory(classroomId, classroomTaskId, query, teacherId)`
+- AuthZ Boundary: `teacher-only + owner-only`
+- Metrics/Isolation: 学生范围来自 Enrollment ACTIVE（分页在学生维度）；`items` 包含未提交学生（`notSubmitted` 维度可排序）；全链路按 `classroomTaskId` 聚合
+- Consistency/Constraints: `includeTagDetails=false` 时跳过 tags 展开聚合；`aiFeedbackStatus` 缺 job 为 `NOT_REQUESTED`
+- Deps/Side Effects: `ClassroomModel`, `ClassroomTaskModel`, `SubmissionModel`, `EnrollmentService`, `AiFeedbackJobService`, `FeedbackModel`；只读
+- Performance Notes: 先分页 enrollment，再用 page-scope studentIds 聚合 submissions/feedback
+- SoT: `backend/src/modules/classrooms/classroom-tasks/services/classroom-tasks.service.ts`; `backend/src/modules/classrooms/classroom-tasks/dto/query-learning-trajectory.dto.ts`; `backend/src/modules/classrooms/README.md`
+- Failure Modes:
+  - 班级或课堂任务不存在 -> `404`
+  - 非班级教师 -> `404`
+
+## Service Card 08F
+
+- Service: `backend/src/modules/classrooms/classroom-tasks/services/class-review-pack.service.ts`
+- Domain: `ClassroomTask review-pack aggregate (Z5)`
+- Actions: `aggregate-overview`, `aggregate-common-issues/examples`, `build-student-tiers`, `build-action-script`
+- I/O Shape:
+  - In: `classroomId`, `classroomTaskId`, `teacherId`, `window/topK/examplesPerTag/includeStudentTiers/includeTeacherScript`
+  - Out: `{ overview, commonIssues, examples, studentTiers, actionItems, teacherScript }`
+- Key Methods:
+  - `getReviewPack(...)`
+  - `aggregateCommonIssuesBySubmissionIds(...)` / `aggregateCommonIssuesByClassroomTaskIds(...)`（供 snapshot 复用）
+- AuthZ Boundary: `teacher-only + owner-only`
+- Metrics/Isolation: 任务相关统计严格按 `classroomTaskId`；成员范围来自 Enrollment ACTIVE
+- Consistency/Constraints: `teacherScript` 为固定模板生成（不调用大模型）；examples 仅包含反馈文本与元数据，不返回 `codeText/prompt/apiKey`
+- Deps/Side Effects: `ClassroomModel`, `ClassroomTaskModel`, `SubmissionModel`, `FeedbackModel`, `EnrollmentService`, `AiFeedbackJobService`, `AiFeedbackMetricsAggregator`；只读
+- Performance Notes: examples 选样按 `severityRank DESC + createdAt DESC`，并按 `examplesPerTag` 截断
+- SoT: `backend/src/modules/classrooms/classroom-tasks/services/class-review-pack.service.ts`; `backend/src/modules/classrooms/classroom-tasks/dto/query-class-review-pack.dto.ts`; `backend/src/modules/classrooms/README.md`
+- Failure Modes:
+  - 班级或课堂任务不存在 -> `404`
+  - 非班级教师 -> `404`
+
+## Service Card 08G
+
+- Service: `backend/src/modules/classrooms/services/process-assessment.service.ts`
+- Domain: `Process assessment aggregate (Z6)`
+- Actions: `build-student-metrics`, `score-risk`, `sort-page-items`, `export-csv`
+- I/O Shape:
+  - In: `classroomId`, `window/page/limit/sort/order`, `teacherId`
+  - Out: `process-assessment payload` | `csv string`
+- Key Methods:
+  - `getProcessAssessment(...)`
+  - `exportProcessAssessmentCsv(...)`
+  - `getProcessAssessmentForSnapshot(...)`（供 snapshot 复用）
+- AuthZ Boundary: `teacher-only + owner-only`
+- Metrics/Isolation: 成员全集与分页来自 Enrollment ACTIVE；任务/提交/AI/反馈聚合均按 `classroomId + classroomTaskId`；迟交指标输出 `lateSubmissionsCount/lateTasksCount`
+- Consistency/Constraints: rubric/score/riskLevel 为过程性指标；CSV 导出使用手写转义（`"` -> `""`）；不输出敏感字段
+- Deps/Side Effects: `ClassroomModel`, `ClassroomTaskModel`, `SubmissionModel`, `AiFeedbackJobModel`, `FeedbackModel`, `EnrollmentService`；只读
+- Performance Notes: Enrollment 稳定分页后页内排序（page-local sort）
+- SoT: `backend/src/modules/classrooms/services/process-assessment.service.ts`; `backend/src/modules/classrooms/dto/query-process-assessment.dto.ts`; `backend/src/modules/classrooms/README.md`
+- Failure Modes:
+  - 班级不存在或非 owner -> `404`
+  - 参数非法 -> `400`
+
+## Service Card 08H
+
+- Service: `backend/src/modules/classrooms/services/classroom-export-snapshot.service.ts`
+- Domain: `Classroom snapshot export (Z9)`
+- Actions: `compose-snapshot`, `reuse-weekly/review/assessment`, `truncate-by-limit`, `emit-notes`
+- I/O Shape:
+  - In: `classroomId`, `window`, `limitStudents`, `limitAssessment`, `includePerTask`, `teacherId`
+  - Out: `{ meta, course, classroom, students, classroomTasks, summary, statsByClassroomTask, statsByStudent, processAssessment }`
+- Key Methods:
+  - `getSnapshot(classroomId, query, teacherId)`
+- AuthZ Boundary: `teacher-only + owner-only`
+- Metrics/Isolation: 复用 weekly/commonIssues/process-assessment 聚合口径；全量按 `classroomId + classroomTaskId`；成员来自 Enrollment ACTIVE
+- Consistency/Constraints: 体积保护由 `limitStudents/limitAssessment/includePerTask` 控制，并在 `meta.notes` 标记截断；不输出敏感字段（`codeText/prompt/apiKey`）
+- Deps/Side Effects: `ClassroomModel`, `CourseModel`, `ClassroomTaskModel`, `SubmissionModel`, `EnrollmentService`, `TeacherClassroomWeeklyReportService`, `ClassReviewPackService`, `ProcessAssessmentService`, `AiFeedbackMetricsAggregator`；只读
+- Performance Notes: 复用聚合服务 + page-scope 截断，避免全量大对象导出
+- SoT: `backend/src/modules/classrooms/services/classroom-export-snapshot.service.ts`; `backend/src/modules/classrooms/dto/query-classroom-export-snapshot.dto.ts`; `docs/operations/classroom-runbook.md`
+- Failure Modes:
+  - 班级/课程不存在或非 owner -> `404`
+  - 参数非法 -> `400`
 
 ## Service Card 09
 
@@ -251,7 +428,7 @@
 - Failure Modes:
   - enqueue 遇重复键(`11000`) -> 忽略并记 debug
   - enqueue 其他写库异常 -> 记 error（不抛到提交主链）
-  - 未知 job status -> 映射为 `FAILED` 并记录 warn/debug 日志（防止与“无 job=NOT_REQUESTED”语义混淆）
+  - 未知 job status -> 映射为 `FAILED` 并记录 warn/debug 日志（避免与“无 job=NOT_REQUESTED”的正常语义混淆）
 
 ## Service Card 11
 
@@ -379,7 +556,7 @@
 - Performance Notes: 单请求超时控制 + 有界重试；解析失败直接终止
 - SoT: `backend/src/modules/learning-tasks/ai-feedback/providers/real/openrouter-feedback.provider.ts`; `backend/src/modules/learning-tasks/ai-feedback/protocol/ai-feedback-json.protocol.ts`; `backend/src/modules/learning-tasks/ai-feedback/prompts/openrouter-feedback.prompt.ts`
 - Failure Modes:
-  - `REAL_ENABLED=false` -> `REAL_DISABLED`（不可重试）
+  - `AI_FEEDBACK_REAL_ENABLED=false` -> `REAL_DISABLED`（不可重试）
   - 无 API key -> `MISSING_API_KEY`（不可重试）
   - HTTP 429/5xx/超时 -> 可重试错误
   - 非法 JSON/越界字段 -> `BAD_RESPONSE`
@@ -402,3 +579,21 @@
 - SoT: `backend/src/modules/learning-tasks/ai-feedback/providers/real/openai-feedback.provider.ts`
 - Failure Modes:
   - 任意调用都会抛出“未实现 + 需人工安装 SDK”错误
+
+## Changelog（本次更新）
+
+- 新增 Service Cards：
+  - `Service Card 08A` `EnrollmentService`
+  - `Service Card 08B` `TeacherClassroomWeeklyReportService`
+  - `Service Card 08C` `CourseOverviewService`
+  - `Service Card 08D` `Feature: My Task Detail (ClassroomTasksService#getMyTaskDetail)`
+  - `Service Card 08E` `Feature: Learning Trajectory (ClassroomTasksService#getLearningTrajectory)`
+  - `Service Card 08F` `ClassReviewPackService`
+  - `Service Card 08G` `ProcessAssessmentService`
+  - `Service Card 08H` `ClassroomExportSnapshotService`
+- 修订 Service Cards：
+  - `Service Card 04` `ClassroomsService`
+  - `Service Card 05` `TeacherClassroomDashboardService`
+  - `Service Card 06` `StudentLearningDashboardService`
+  - `Service Card 07` `ClassroomTasksService`
+  - `Service Card 08` `LearningTasksService`
