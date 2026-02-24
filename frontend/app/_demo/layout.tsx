@@ -1,11 +1,11 @@
 ﻿import Link from "next/link";
 
 const navItems = [
-  { href: "/demo", label: "概览" },
-  { href: "/demo/teacher", label: "任务管理" },
-  { href: "/demo/student", label: "作业提交" },
-  { href: "/demo/jobs", label: "AI 反馈队列" },
-  { href: "/demo/reports", label: "课堂报表" },
+  { href: "/_demo", label: "概览" },
+  { href: "/_demo/teacher", label: "任务管理" },
+  { href: "/_demo/student", label: "作业提交" },
+  { href: "/_demo/jobs", label: "AI 反馈队列" },
+  { href: "/_demo/reports", label: "课堂报表" },
 ];
 
 export default function DemoLayout({ children }: { children: React.ReactNode }) {

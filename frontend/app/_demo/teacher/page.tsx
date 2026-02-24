@@ -18,7 +18,7 @@ export default function TeacherPage() {
   const [loading, setLoading] = useState(false);
 
   const loadTasks = async () => {
-    const res = await fetch("/api/demo/tasks");
+    const res = await fetch("/api/_demo/tasks");
     const data = await res.json();
     setTasks(data.tasks ?? []);
   };
@@ -31,7 +31,7 @@ export default function TeacherPage() {
   const handleCreate = async () => {
     if (!title.trim()) return;
     setLoading(true);
-    await fetch("/api/demo/tasks", {
+    await fetch("/api/_demo/tasks", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ title, description }),
@@ -44,7 +44,7 @@ export default function TeacherPage() {
 
   const handlePublish = async (id: string) => {
     setLoading(true);
-    await fetch(`/api/demo/tasks/${id}/publish`, { method: "POST" });
+    await fetch(`/api/_demo/tasks/${id}/publish`, { method: "POST" });
     await loadTasks();
     setLoading(false);
   };

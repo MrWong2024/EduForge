@@ -4,7 +4,7 @@ const cards = [
   {
     title: "任务管理",
     desc: "创建与发布课程任务，规范学生提交入口。",
-    href: "/demo/teacher",
+    href: "/_demo/teacher",
   },
   {
     title: "作业提交",
@@ -14,7 +14,7 @@ const cards = [
   {
     title: "AI 反馈队列",
     desc: "处理待分析作业并回写反馈状态。",
-    href: "/demo/jobs",
+    href: "/_demo/jobs",
   },
   {
     title: "课堂报表",

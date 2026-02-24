@@ -10,7 +10,7 @@ export async function GET(request: Request) {
   const limit = limitRaw ? Number(limitRaw) : null;
 
   const jobs = store.getJobs({
-    status: status && status !== "ALL" ? status : null,
+    status: status ? status : null,
     limit: Number.isFinite(limit ?? NaN) ? limit : null,
   });
 

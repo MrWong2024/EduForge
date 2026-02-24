@@ -32,7 +32,7 @@ export default function JobsPage() {
     const params = new URLSearchParams();
     if (status !== "ALL") params.set("status", status);
     if (limit) params.set("limit", String(limit));
-    const res = await fetch(`/api/demo/jobs?${params.toString()}`);
+    const res = await fetch(`/api/_demo/jobs?${params.toString()}`);
     const data = await res.json();
     setJobs(data.jobs ?? []);
   };
@@ -43,7 +43,7 @@ export default function JobsPage() {
 
   const handleProcessOnce = async () => {
     setProcessing(true);
-    const res = await fetch("/api/demo/jobs/process-once", {
+    const res = await fetch("/api/_demo/jobs/process-once", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ batchSize }),

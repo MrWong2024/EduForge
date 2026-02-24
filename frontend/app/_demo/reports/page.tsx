@@ -34,7 +34,7 @@ export default function ReportsPage() {
   );
 
   const loadTasks = async () => {
-    const res = await fetch("/api/demo/tasks");
+    const res = await fetch("/api/_demo/tasks");
     const data = await res.json();
     setTasks(data.tasks ?? []);
   };
@@ -42,7 +42,7 @@ export default function ReportsPage() {
   const loadReport = async (currentTaskId: string) => {
     setLoading(true);
     const params = new URLSearchParams({ taskId: currentTaskId });
-    const res = await fetch(`/api/demo/reports/common-issues?${params.toString()}`);
+    const res = await fetch(`/api/_demo/reports/common-issues?${params.toString()}`);
     const data = await res.json();
     setReport(data.report ?? null);
     setLoading(false);

@@ -37,7 +37,7 @@ export default function StudentPage() {
   );
 
   const loadTasks = async () => {
-    const res = await fetch("/api/demo/tasks");
+    const res = await fetch("/api/_demo/tasks");
     const data = await res.json();
     setTasks(data.tasks ?? []);
   };
@@ -51,7 +51,7 @@ export default function StudentPage() {
       taskId: currentTaskId,
       studentId: currentStudentId,
     });
-    const res = await fetch(`/api/demo/submissions?${params.toString()}`);
+    const res = await fetch(`/api/_demo/submissions?${params.toString()}`);
     const data = await res.json();
     setSubmissions(data.submissions ?? []);
   };
@@ -76,7 +76,7 @@ export default function StudentPage() {
   const handleSubmit = async () => {
     if (!taskId) return;
     setLoading(true);
-    await fetch("/api/demo/submissions", {
+    await fetch("/api/_demo/submissions", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ taskId, studentId, codeText }),
