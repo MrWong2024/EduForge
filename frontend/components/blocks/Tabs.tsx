@@ -12,7 +12,7 @@ type TabsProps = {
 
 export function Tabs({ items, activeHref }: TabsProps) {
   return (
-    <nav className="mb-6 border-b border-zinc-200">
+    <nav className="mb-6 border-b border-zinc-200" aria-label="标签页导航">
       <ul className="flex flex-wrap gap-2">
         {items.map((item) => {
           const isActive = activeHref === item.href;

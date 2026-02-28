@@ -1,10 +1,15 @@
-﻿/* eslint-disable react-hooks/set-state-in-effect */
-"use client";
+﻿"use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import type { Job } from "@/lib/demo-types";
 
-const statusOptions = ["ALL", "PENDING", "RUNNING", "SUCCEEDED", "FAILED"] as const;
+const statusOptions = [
+  "ALL",
+  "PENDING",
+  "RUNNING",
+  "SUCCEEDED",
+  "FAILED",
+] as const;
 
 const statusBadge = (status: Job["status"]) => {
   const base = "rounded-full px-2.5 py-1 text-xs font-semibold";
@@ -28,18 +33,24 @@ export default function JobsPage() {
     batchSize: number;
   }>(null);
 
-  const loadJobs = async () => {
-    const params = new URLSearchParams();
-    if (status !== "ALL") params.set("status", status);
-    if (limit) params.set("limit", String(limit));
-    const res = await fetch(`/api/_demo/jobs?${params.toString()}`);
-    const data = await res.json();
-    setJobs(data.jobs ?? []);
-  };
+  const loadJobs = useCallback(async () => {
+    try {
+      setProcessing(true);
+      const params = new URLSearchParams();
+      if (status !== "ALL") params.set("status", status);
+      if (limit) params.set("limit", String(limit));
+
+      const res = await fetch(`/api/_demo/jobs?${params.toString()}`);
+      const data = await res.json();
+      setJobs(data.jobs ?? []);
+    } finally {
+      setProcessing(false);
+    }
+  }, [status, limit]);
 
   useEffect(() => {
     loadJobs();
-  }, [status, limit]);
+  }, [loadJobs]);
 
   const handleProcessOnce = async () => {
     setProcessing(true);
@@ -57,8 +68,12 @@ export default function JobsPage() {
   return (
     <div className="space-y-6">
       <section>
-        <div className="text-xs font-semibold text-slate-400">教学管理 / AI 反馈队列</div>
-        <h1 className="mt-2 text-2xl font-semibold text-slate-900">AI 反馈队列</h1>
+        <div className="text-xs font-semibold text-slate-400">
+          教学管理 / AI 反馈队列
+        </div>
+        <h1 className="mt-2 text-2xl font-semibold text-slate-900">
+          AI 反馈队列
+        </h1>
         <p className="mt-2 text-sm text-slate-600">
           管理待分析作业队列，处理完成后自动回写反馈状态。
         </p>
@@ -67,10 +82,14 @@ export default function JobsPage() {
       <section className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
         <div className="flex flex-wrap items-end gap-4">
           <div>
-            <label className="text-xs font-semibold text-slate-500">状态筛选</label>
+            <label className="text-xs font-semibold text-slate-500">
+              状态筛选
+            </label>
             <select
               value={status}
-              onChange={(event) => setStatus(event.target.value as typeof status)}
+              onChange={(event) =>
+                setStatus(event.target.value as typeof status)
+              }
               className="mt-2 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
             >
               {statusOptions.map((item) => (
@@ -81,7 +100,9 @@ export default function JobsPage() {
             </select>
           </div>
           <div>
-            <label className="text-xs font-semibold text-slate-500">列表数量</label>
+            <label className="text-xs font-semibold text-slate-500">
+              列表数量
+            </label>
             <input
               type="number"
               value={limit}
@@ -90,7 +111,9 @@ export default function JobsPage() {
             />
           </div>
           <div>
-            <label className="text-xs font-semibold text-slate-500">批处理量</label>
+            <label className="text-xs font-semibold text-slate-500">
+              批处理量
+            </label>
             <input
               type="number"
               value={batchSize}
@@ -117,7 +140,8 @@ export default function JobsPage() {
         </div>
         {lastResult && (
           <div className="mt-4 rounded-lg border border-emerald-100 bg-emerald-50 p-3 text-xs text-emerald-700">
-            处理结果：processed {lastResult.processed} / succeeded {lastResult.succeeded} / failed {lastResult.failed}
+            处理结果：processed {lastResult.processed} / succeeded{" "}
+            {lastResult.succeeded} / failed {lastResult.failed}
           </div>
         )}
       </section>
@@ -143,14 +167,22 @@ export default function JobsPage() {
             <tbody className="divide-y divide-slate-100">
               {jobs.map((job) => (
                 <tr key={job.id} className="text-slate-700">
-                  <td className="py-3 pr-4 font-semibold text-slate-900">{job.id}</td>
-                  <td className="py-3 pr-4 text-sm text-slate-600">{job.submissionId}</td>
-                  <td className="py-3 pr-4 text-sm text-slate-600">{job.studentId}</td>
+                  <td className="py-3 pr-4 font-semibold text-slate-900">
+                    {job.id}
+                  </td>
+                  <td className="py-3 pr-4 text-sm text-slate-600">
+                    {job.submissionId}
+                  </td>
+                  <td className="py-3 pr-4 text-sm text-slate-600">
+                    {job.studentId}
+                  </td>
                   <td className="py-3 pr-4 text-sm text-slate-500">
                     {new Date(job.createdAt).toLocaleString()}
                   </td>
                   <td className="py-3 pr-4">
-                    <span className={statusBadge(job.status)}>{job.status}</span>
+                    <span className={statusBadge(job.status)}>
+                      {job.status}
+                    </span>
                   </td>
                 </tr>
               ))}

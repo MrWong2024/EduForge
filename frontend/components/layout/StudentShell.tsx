@@ -11,13 +11,13 @@ export function StudentShell({ children }: StudentShellProps) {
     <div className="min-h-screen bg-zinc-100">
       <header className="border-b border-zinc-200 bg-white">
         <div className="mx-auto flex max-w-6xl items-center justify-between px-4 py-3">
-          <p className="text-sm font-semibold text-zinc-900">EduForge Student</p>
+          <p className="text-sm font-semibold text-zinc-900">EduForge 学生端</p>
           <nav className="flex items-center gap-4 text-sm text-zinc-700">
             <Link href={paths.student.dashboard} className="hover:text-zinc-900">
-              Dashboard
+              总览
             </Link>
             <Link href={paths.student.joinClassroom} className="hover:text-zinc-900">
-              Join
+              加入班级
             </Link>
           </nav>
         </div>
