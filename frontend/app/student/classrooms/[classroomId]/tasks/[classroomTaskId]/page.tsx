@@ -11,10 +11,10 @@ export default async function StudentTaskDetailPage({ params }: StudentTaskDetai
   return (
     <section>
       <PageHeader
-        title="Student Task Detail"
-        description={`classroomId: ${classroomId} | classroomTaskId: ${classroomTaskId}`}
+        title="任务详情"
+        description={`班级 ID: ${classroomId} | 课堂任务 ID: ${classroomTaskId}`}
       />
-      <EmptyState title="Task detail placeholder" description="TODO: integrate my-task-detail and submission APIs." />
+      <EmptyState title="任务详情占位" description="TODO: 接入 my-task-detail 与提交接口。" />
     </section>
   );
 }

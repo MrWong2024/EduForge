@@ -4,8 +4,8 @@ import { PageHeader } from "@/components/blocks/PageHeader";
 export default function TeacherCoursesPage() {
   return (
     <section>
-      <PageHeader title="Teacher Courses" description="Courses list placeholder." />
-      <EmptyState title="No course content yet" description="TODO: integrate GET /api/courses." />
+      <PageHeader title="课程" description="课程列表占位。" />
+      <EmptyState title="暂无课程内容" description="TODO: 接入 GET /api/courses。" />
     </section>
   );
 }

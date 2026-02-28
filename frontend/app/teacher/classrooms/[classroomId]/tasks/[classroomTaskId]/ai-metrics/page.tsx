@@ -9,8 +9,8 @@ export default async function AiMetricsPage({ params }: AiMetricsPageProps) {
 
   return (
     <EmptyState
-      title="AI Metrics placeholder"
-      description={`classroomId: ${classroomId} | classroomTaskId: ${classroomTaskId}`}
+      title="AI 指标"
+      description={`班级 ID: ${classroomId} | 课堂任务 ID: ${classroomTaskId}（占位）`}
     />
   );
 }

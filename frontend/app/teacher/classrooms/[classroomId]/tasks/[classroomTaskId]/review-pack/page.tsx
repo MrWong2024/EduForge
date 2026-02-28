@@ -9,8 +9,8 @@ export default async function ReviewPackPage({ params }: ReviewPackPageProps) {
 
   return (
     <EmptyState
-      title="Review Pack placeholder"
-      description={`classroomId: ${classroomId} | classroomTaskId: ${classroomTaskId}`}
+      title="课堂复盘"
+      description={`班级 ID: ${classroomId} | 课堂任务 ID: ${classroomTaskId}（占位）`}
     />
   );
 }

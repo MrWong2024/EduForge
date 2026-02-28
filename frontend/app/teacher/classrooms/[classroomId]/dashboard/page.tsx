@@ -10,8 +10,8 @@ export default async function ClassroomDashboardPage({ params }: DashboardPagePr
 
   return (
     <section>
-      <PageHeader title="Classroom Dashboard" description={`classroomId: ${classroomId}`} />
-      <EmptyState title="Dashboard placeholder" description="TODO: integrate classroom dashboard data." />
+      <PageHeader title="班级看板" description={`班级 ID: ${classroomId}`} />
+      <EmptyState title="看板内容占位" description="TODO: 接入班级看板数据。" />
     </section>
   );
 }

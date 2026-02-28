@@ -10,10 +10,10 @@ export default async function ProcessAssessmentPage({ params }: ProcessAssessmen
 
   return (
     <section>
-      <PageHeader title="Process Assessment" description={`classroomId: ${classroomId}`} />
+      <PageHeader title="过程性评价" description={`班级 ID: ${classroomId}`} />
       <EmptyState
-        title="Process assessment placeholder"
-        description="TODO: integrate JSON and CSV download flow; keep 404 copy compatible with feature-disabled state."
+        title="过程性评价占位"
+        description="TODO: 接入 JSON 与 CSV 下载；404 文案需兼容功能未启用。"
       />
     </section>
   );

@@ -9,8 +9,8 @@ export default async function LearningTrajectoryPage({ params }: LearningTraject
 
   return (
     <EmptyState
-      title="Learning Trajectory placeholder"
-      description={`classroomId: ${classroomId} | classroomTaskId: ${classroomTaskId}`}
+      title="学习轨迹"
+      description={`班级 ID: ${classroomId} | 课堂任务 ID: ${classroomTaskId}（占位）`}
     />
   );
 }

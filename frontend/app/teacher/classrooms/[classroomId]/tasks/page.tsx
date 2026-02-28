@@ -10,8 +10,8 @@ export default async function ClassroomTasksPage({ params }: ClassroomTasksPageP
 
   return (
     <section>
-      <PageHeader title="Classroom Tasks" description={`classroomId: ${classroomId}`} />
-      <EmptyState title="Task list placeholder" description="TODO: integrate classroom task list." />
+      <PageHeader title="课堂任务" description={`班级 ID: ${classroomId}`} />
+      <EmptyState title="任务列表占位" description="TODO: 接入班级任务列表。" />
     </section>
   );
 }

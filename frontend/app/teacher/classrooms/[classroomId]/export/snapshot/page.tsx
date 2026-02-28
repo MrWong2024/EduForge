@@ -10,10 +10,10 @@ export default async function SnapshotExportPage({ params }: SnapshotExportPageP
 
   return (
     <section>
-      <PageHeader title="Snapshot Export" description={`classroomId: ${classroomId}`} />
+      <PageHeader title="教学快照导出" description={`班级 ID: ${classroomId}`} />
       <EmptyState
-        title="Snapshot export placeholder"
-        description="TODO: integrate snapshot download and preserve content-disposition."
+        title="快照导出占位"
+        description="TODO: 接入 snapshot 下载并保留 content-disposition。"
       />
     </section>
   );

@@ -10,8 +10,8 @@ export default async function ClassroomMembersPage({ params }: MembersPageProps)
 
   return (
     <section>
-      <PageHeader title="Classroom Members" description={`classroomId: ${classroomId}`} />
-      <EmptyState title="Members page placeholder" description="TODO: integrate member-related endpoints." />
+      <PageHeader title="成员" description={`班级 ID: ${classroomId}`} />
+      <EmptyState title="成员页占位" description="TODO: 接入成员相关接口。" />
     </section>
   );
 }

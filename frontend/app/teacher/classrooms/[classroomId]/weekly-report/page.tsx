@@ -10,8 +10,8 @@ export default async function WeeklyReportPage({ params }: WeeklyReportPageProps
 
   return (
     <section>
-      <PageHeader title="Weekly Report" description={`classroomId: ${classroomId}`} />
-      <EmptyState title="Weekly report placeholder" description="TODO: integrate weekly-report data." />
+      <PageHeader title="周报" description={`班级 ID: ${classroomId}`} />
+      <EmptyState title="周报占位" description="TODO: 接入 weekly-report 数据。" />
     </section>
   );
 }
