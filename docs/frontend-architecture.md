@@ -1,7 +1,7 @@
-# EduForge Frontend Architecture Baseline (V1.1.1)
+# EduForge Frontend Architecture Baseline (V1.1.2)
 
-版本：`V1.1.1`  
-更新时间：`2026-02-20`  
+版本：`V1.1.2`  
+更新时间：`2026-02-28`  
 权威后端基线：`docs/handoff/handoff-*.md`、`docs/auth-baseline.md`
 
 ## 0. 文档定位与范围
@@ -17,6 +17,7 @@
 - 课堂统计/报表/复盘/导出统一按 `classroomTaskId` 隔离；禁止按 `taskId` 跨班兜底聚合。
 - 成员授权与统计是 Enrollment-only；禁止读取 `classroom.studentIds` 做 fallback。
 - AI 语义：无 job 等于 `NOT_REQUESTED`，是正常产品状态。
+- `backend/**` 不参与中文化；后端代码与错误 `message` / `code` 保持英文（中文提示仅在前端 UI 层提供）。
 
 ## 2. RSC/Server Actions 调后端（默认路径 + 备选路径）
 ### 2.1 默认方案（必须优先）：BFF 代理（Next Route Handler）
@@ -126,7 +127,7 @@ Student: /student -> /student/classrooms/[classroomId] -> /student/classrooms/[c
 - MUST：`roles` 包含 `TEACHER` 时，默认跳转 `/teacher/classrooms`（可带 `?page=1`）。
 - MUST：否则若 `roles` 包含 `STUDENT`，默认跳转 `/student`。
 - MUST：否则显示 `403`（无可用角色），并提示“请联系管理员开通角色权限”。
-- 说明：未来可扩展“手动切换角色”，但 V1.1.1 仅定义默认跳转策略，不实现切换能力。
+- 说明：本规范仅定义默认跳转策略；不实现 `手动切换角色` 能力（后续如需支持，需另行设计并更新本规范）。
 
 ## 6. 缓存与一致性策略（避免 no-store 一刀切）
 ### 6.1 默认策略
@@ -256,7 +257,7 @@ Snapshot 体积保护 UX：
 - UI 必须暴露导出参数：`limitStudents`、`limitAssessment`、`includePerTask`、`window`。
 - 响应中若含 `meta.notes`，页面必须提示“导出结果已按限制截断”。
 
-## 9. Page Contract Map（V1.1）
+## 9. Page Contract Map
 权限失败规则（默认）：`401 -> /login`，`403 -> 无权限`，`404 -> 资源不存在或功能未启用`。  
 其中 ops/debug 关闭场景的 `404` 固定显示“功能未启用”。
 
@@ -284,6 +285,34 @@ Snapshot 体积保护 UX：
 | `/student/classrooms/[classroomId]` | `GET /api/classrooms/:id`；`GET /api/classrooms/:id/tasks` | 无（handoff 未声明） | 进入任务详情页 | 按默认规则 |
 | `/student/classrooms/[classroomId]/tasks/[classroomTaskId]` | `GET /api/classrooms/:classroomId/tasks/:classroomTaskId/my-task-detail`；`POST /api/classrooms/:classroomId/tasks/:classroomTaskId/submissions` | `includeFeedbackItems,feedbackLimit` | 查看详情、提交作业 | `403` 无权限；`LATE_SUBMISSION_NOT_ALLOWED` 显示截止提示 |
 | `/student/submissions/[submissionId]` | `GET /api/learning-tasks/submissions/:id/feedback`；`POST /api/learning-tasks/submissions/:submissionId/ai-feedback/request` | 以后端 DTO 为准 | 查看反馈、手工请求 AI | 按默认规则 |
+
+## 9.3 UI Copy Strategy（Chinese UI, English Code）
+### A) 总原则
+- 用户可见 UI 文案允许中文（frontend 侧）。
+- 工程结构与标识符必须英文（路径/路由段、paths key、变量/函数/类型/文件名、接口字段名、错误码等）。
+- 后端（backend）不参与中文化。
+
+### B) Scope（允许中文化 vs 必须英文）
+- 允许中文化（User-visible UI copy，`frontend/**`）：
+  - 导航、页面标题、按钮、空态、ErrorState 的中文摘要/解释文字。
+- 必须英文（Engineering / Protocol invariants）：
+  - 路由路径与路由段（`/teacher/**`、`/student/**`）、`paths.ts` key。
+  - 变量/函数/类型/文件名（标识符与工程结构）。
+  - 后端返回的 message / 错误码 / 诊断字段（原样保留英文）。
+  - proxy 502 JSON 字段（`method/path/type`）与日志字段。
+
+### C) Backend Hard Rule
+- **`backend/**` 下所有代码与文案保持英文，且本项目“前端中文化”不得推动任何 backend 改动。**
+- 若需要中文提示，只能在前端提供中文摘要；后端英文 detail 原样展示。
+
+### D) Error Presentation Policy
+- ErrorState：中文摘要 + 英文 detail（原样，不翻译、不改写）。
+- debug/ops gate 的 `404` 必须展示“功能未启用”（与既有规则一致）。
+
+### E) Copy-related Hard Rules
+- 禁止为了中文化修改路由/paths key/后端 message。
+- V1.x 阶段不引入第三方 i18n 依赖。
+- 中文化优先落在壳层组件（Shell / PageHeader / Tabs / EmptyState / ErrorState / TaskContextHeader）。
 
 ## 10. AI 状态与错误码 UX 规范
 `AiFeedbackStatus`：
@@ -325,3 +354,5 @@ Snapshot 体积保护 UX：
 - 是否明确 debug gate 404 = 功能未启用。
 - 是否明确 `classroomTaskId` 隔离与 Enrollment-only。
 - CSV/快照下载是否具备可直接照抄的代理与错误处理约束。
+- 是否遵循“UI 中文、工程结构与标识符英文；`backend/**` 不参与中文化且不改动”。
+- ErrorState 是否支持“中文摘要 + 英文 detail 原样展示”。
