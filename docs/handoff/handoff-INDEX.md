@@ -12,9 +12,12 @@
 | `docs/handoff/handoff-testing-playbook.md` | E2E 测试作战手册与 mock server 注入方式 | 跑回归、复现实验、定位测试失败 |
 | `docs/handoff/handoff-service-map.md` | 服务职责地图（Service Cards） | 需要改某个 service 前先看边界/依赖/失败路径 |
 | `docs/handoff/handoff-decisions.md` | 关键决策记录（Decision/Rationale/Consequences） | 评估改动是否违背既有架构决策 |
+| `docs/handoff/handoff-dto-cheatsheet.md` | 写接口 DTO 最小请求体速查（required/枚举/嵌套/最小 JSON 示例） | 前端/脚本联调遇到 400 校验、需要快速拼请求 body 时 |
 
 ## 统一前提
 
 - 本项目当前不使用 git（本交接包按“工作区事实状态”交接）。
 - Node.js/NestJS/MongoDB 版本策略只引用 `docs/backend-architecture.md`，不重复展开。
 - 系统为新系统，无 legacy 数据；本交接包不包含任何 legacy 迁移策略。
+- `handoff-dto-cheatsheet.md` 仅覆盖 Controller 写接口（POST/PATCH/PUT/DELETE） 的 `@Body()` 最小样例；`@Query`/`@Param` 默认不展开。
+- DTO 以 backend 源码为准；若 `handoff-dto-cheatsheet.md` 与代码不一致，以代码为准并需同步修订 `handoff-dto-cheatsheet.md`。
