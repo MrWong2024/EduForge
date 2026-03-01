@@ -3,22 +3,16 @@ import "server-only";
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { fetchJson, FetchJsonError } from "@/lib/api/client";
+import { hasRole, type RoleAwareMe, getRoleHomePath } from "@/lib/auth/role-home";
 import { paths, type UserRole } from "@/lib/routes/paths";
 
-export type MeResponse = {
+export type MeResponse = RoleAwareMe & {
   id?: string;
-  role?: string | null;
-  roles?: string[] | null;
 };
 
 export type RoleGateResult =
   | { allowed: true; me: MeResponse }
   | { allowed: false; me: MeResponse };
-
-const normalizeRole = (role: string | null | undefined): string =>
-  String(role ?? "")
-    .trim()
-    .toUpperCase();
 
 const getRequestOrigin = (headerMap: Headers): string => {
   const host = headerMap.get("x-forwarded-host") ?? headerMap.get("host") ?? "";
@@ -30,17 +24,7 @@ const getRequestOrigin = (headerMap: Headers): string => {
   return `${protocol}://${host}`;
 };
 
-export const hasRole = (me: MeResponse, role: UserRole): boolean => {
-  if (normalizeRole(me.role) === role) {
-    return true;
-  }
-
-  if (Array.isArray(me.roles)) {
-    return me.roles.some((item) => normalizeRole(item) === role);
-  }
-
-  return false;
-};
+export { hasRole, getRoleHomePath };
 
 export async function getMe(): Promise<MeResponse> {
   const headerMap = await headers();

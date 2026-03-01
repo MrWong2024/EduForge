@@ -305,7 +305,6 @@ if (!globalThis.__EDUFORGE_DEMO_STORE__) {
 export const demoStore = globalThis.__EDUFORGE_DEMO_STORE__;
 
 declare global {
-  // eslint-disable-next-line no-var
   var __EDUFORGE_DEMO_STORE__: DemoStore | undefined;
 }
 

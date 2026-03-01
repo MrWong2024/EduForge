@@ -51,7 +51,8 @@ export async function fetchJson<T>(
 ): Promise<T> {
   const { origin = "", cache, ...requestInit } = options;
   const cleanOrigin = origin ? trimTrailingSlash(origin) : "";
-  const requestUrl = `${cleanOrigin}${buildProxyPath(path)}`;
+  const proxyPath = buildProxyPath(path);
+  const requestUrl = cleanOrigin ? `${cleanOrigin}${proxyPath}` : proxyPath;
 
   const response = await fetch(requestUrl, {
     ...requestInit,
