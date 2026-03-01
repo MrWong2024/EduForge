@@ -80,11 +80,14 @@ export const toClassroomListResponse = (payload: unknown): ClassroomListResponse
 
 export const toClassroomTaskSummary = (value: unknown): ClassroomTaskSummary => {
   const record = asRecord(value);
+  const taskRecord = asRecord(safeGet(record, "task", undefined));
+  const settingsRecord = asRecord(safeGet(record, "settings", undefined));
+
   return {
     classroomTaskId: asString(record.classroomTaskId) ?? asString(record.id),
-    title: asString(record.title) ?? asString(record.name),
+    title: asString(taskRecord.title) ?? asString(record.title) ?? asString(record.name),
     dueAt: asString(record.dueAt),
-    allowLate: asBoolean(record.allowLate),
+    allowLate: asBoolean(settingsRecord.allowLate) ?? asBoolean(record.allowLate),
     aiStatus: asString(record.aiStatus) ?? asString(record.aiFeedbackStatus),
   };
 };
