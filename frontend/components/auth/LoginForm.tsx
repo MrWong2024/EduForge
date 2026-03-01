@@ -4,7 +4,7 @@ import { useState } from "react";
 import type { SubmitEventHandler } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { ErrorState } from "@/components/blocks/ErrorState";
-import { fetchJson, FetchJsonError } from "@/lib/api/client";
+import { fetchJson, BrowserFetchJsonError } from "@/lib/api/browser-client";
 import { getRoleHomePath, type RoleAwareMe } from "@/lib/auth/role-home";
 
 type LoginErrorState = {
@@ -108,7 +108,7 @@ export function LoginForm() {
 
       setNoRole(true);
     } catch (error) {
-      if (error instanceof FetchJsonError) {
+      if (error instanceof BrowserFetchJsonError) {
         if (error.status === 401) {
           setLoginError({
             status: 401,

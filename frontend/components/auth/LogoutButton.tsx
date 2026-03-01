@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { paths } from "@/lib/routes/paths";
-import { buildProxyPath } from "@/lib/api/client";
+import { buildProxyPath } from "@/lib/api/browser-client";
 
 export function LogoutButton() {
   const router = useRouter();
