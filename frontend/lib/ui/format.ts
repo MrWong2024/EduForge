@@ -36,6 +36,74 @@ export const safeGet = <T>(source: unknown, path: PathInput, fallback: T): T => 
   return current as T;
 };
 
+export const getSingleSearchParam = (
+  value: string | string[] | undefined
+): string | undefined => (Array.isArray(value) ? value[0] : value);
+
+type ParsePositiveIntOptions = {
+  min?: number;
+  max?: number;
+};
+
+export const parsePositiveInt = (
+  value: string | undefined,
+  fallback: number,
+  options: ParsePositiveIntOptions = {}
+): number => {
+  const parsed = Number.parseInt(String(value ?? ""), 10);
+  if (!Number.isInteger(parsed)) {
+    return fallback;
+  }
+
+  const min = options.min ?? 1;
+  const max = options.max;
+  if (parsed < min) {
+    return fallback;
+  }
+  if (typeof max === "number" && parsed > max) {
+    return fallback;
+  }
+
+  return parsed;
+};
+
+export const parseBool01 = (value: string | undefined, fallback: boolean): boolean => {
+  if (!value) {
+    return fallback;
+  }
+
+  const normalized = value.trim().toLowerCase();
+  if (normalized === "1" || normalized === "true") {
+    return true;
+  }
+  if (normalized === "0" || normalized === "false") {
+    return false;
+  }
+
+  return fallback;
+};
+
+export const parseEnum = <T extends string>(
+  value: string | undefined,
+  allowed: readonly T[],
+  fallback: T
+): T => (value && allowed.includes(value as T) ? (value as T) : fallback);
+
+export const buildQueryString = (
+  params: Record<string, string | number | boolean | undefined | null>
+): string => {
+  const search = new URLSearchParams();
+
+  for (const [key, rawValue] of Object.entries(params)) {
+    if (rawValue === undefined || rawValue === null || rawValue === "") {
+      continue;
+    }
+    search.set(key, String(rawValue));
+  }
+
+  return search.toString();
+};
+
 export const toDisplayDate = (iso?: string | null): string => {
   if (!iso) {
     return "—";

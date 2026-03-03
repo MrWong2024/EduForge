@@ -46,6 +46,40 @@ export type ClassroomTasksResponse = {
 
 export type DashboardResponse = UnknownRecord;
 
+export type LearningTrajectoryResponse = {
+  classroomId?: string;
+  classroomTaskId?: string;
+  window?: string;
+  page?: number;
+  limit?: number;
+  total?: number;
+  items: UnknownRecord[];
+  raw: UnknownRecord;
+};
+
+export type ReviewPackResponse = {
+  classroomId?: string;
+  classroomTaskId?: string;
+  window?: string;
+  overview: UnknownRecord;
+  actionItems: UnknownRecord[];
+  commonIssues: UnknownRecord;
+  examples: UnknownRecord[];
+  teacherScript: UnknownRecord[];
+  raw: UnknownRecord;
+};
+
+export type AiMetricsResponse = {
+  classroomId?: string;
+  classroomTaskId?: string;
+  window?: string;
+  summary: UnknownRecord;
+  statusBreakdown: UnknownRecord;
+  tags: UnknownRecord[];
+  errors: UnknownRecord[];
+  raw: UnknownRecord;
+};
+
 export const toClassroomSummary = (value: unknown): ClassroomSummary => {
   const record = asRecord(value);
   return {
@@ -111,6 +145,61 @@ export const toClassroomTasksResponse = (payload: unknown): ClassroomTasksRespon
 };
 
 export const toDashboardResponse = (payload: unknown): DashboardResponse => asRecord(payload);
+
+export const toLearningTrajectoryResponse = (payload: unknown): LearningTrajectoryResponse => {
+  const record = asRecord(payload);
+
+  return {
+    classroomId: asString(record.classroomId),
+    classroomTaskId: asString(record.classroomTaskId),
+    window: asString(record.window),
+    page: asNumber(record.page),
+    limit: asNumber(record.limit),
+    total: asNumber(record.total),
+    items: asRecordArray(safeGet(record, "items", undefined)),
+    raw: record,
+  };
+};
+
+export const toReviewPackResponse = (payload: unknown): ReviewPackResponse => {
+  const record = asRecord(payload);
+
+  return {
+    classroomId: asString(record.classroomId),
+    classroomTaskId: asString(record.classroomTaskId),
+    window: asString(record.window),
+    overview: asRecord(safeGet(record, "overview", undefined)),
+    actionItems: asRecordArray(safeGet(record, "actionItems", undefined)),
+    commonIssues: asRecord(safeGet(record, "commonIssues", undefined)),
+    examples: asRecordArray(safeGet(record, "examples", undefined)),
+    teacherScript: asRecordArray(safeGet(record, "teacherScript", undefined)),
+    raw: record,
+  };
+};
+
+export const toAiMetricsResponse = (payload: unknown): AiMetricsResponse => {
+  const record = asRecord(payload);
+  const summary = asRecord(safeGet(record, "summary", undefined));
+  const statusBreakdown =
+    asRecord(safeGet(record, "statusBreakdown", undefined)) ||
+    asRecord(safeGet(summary, "statusBreakdown", undefined));
+  const jobsBreakdown = asRecord(safeGet(summary, "jobs", undefined));
+
+  return {
+    classroomId: asString(record.classroomId),
+    classroomTaskId: asString(record.classroomTaskId),
+    window: asString(record.window),
+    summary,
+    statusBreakdown:
+      Object.keys(statusBreakdown).length > 0 ? statusBreakdown : jobsBreakdown,
+    tags:
+      asRecordArray(safeGet(record, "tags", undefined)).length > 0
+        ? asRecordArray(safeGet(record, "tags", undefined))
+        : asRecordArray(safeGet(record, "feedback.topTags", undefined)),
+    errors: asRecordArray(safeGet(record, "errors", undefined)),
+    raw: record,
+  };
+};
 
 export const getDashboardItems = (dashboard: DashboardResponse): UnknownRecord[] => {
   const candidates = [
