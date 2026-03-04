@@ -31,6 +31,8 @@ export const paths = {
     home: "/student",
     dashboard: "/student/dashboard",
     joinClassroom: "/student/classrooms/join",
+    submissionDetail: (submissionId: string) =>
+      `/student/submissions/${encodeSegment(submissionId)}`,
     taskDetail: (classroomId: string, classroomTaskId: string) =>
       `/student/classrooms/${encodeSegment(classroomId)}/tasks/${encodeSegment(classroomTaskId)}`,
   },

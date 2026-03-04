@@ -60,6 +60,32 @@ export type MyTaskDetailResponse = {
   raw: UnknownRecord;
 };
 
+export type FeedbackItem = {
+  id?: string;
+  submissionId?: string;
+  source?: string;
+  type?: string;
+  severity?: string;
+  message?: string;
+  suggestion?: string;
+  tags: string[];
+  createdAt?: string;
+  raw: UnknownRecord;
+};
+
+export type ListFeedbackResponse = {
+  items: FeedbackItem[];
+  raw: UnknownRecord | UnknownRecord[];
+};
+
+export type RequestAiFeedbackResponse = {
+  submissionId?: string;
+  jobId?: string;
+  status?: string;
+  aiFeedbackStatus?: string;
+  raw: UnknownRecord;
+};
+
 export type CreateSubmissionRequest = {
   content: {
     codeText: string;
@@ -101,6 +127,26 @@ const toStudentDashboardClassroomItem = (value: unknown): StudentDashboardClassr
     tasks: asRecordArray(safeGet(record, "tasks", undefined)).map((item) =>
       toStudentDashboardTaskItem(item)
     ),
+    raw: record,
+  };
+};
+
+const toStringArray = (value: unknown): string[] =>
+  Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : [];
+
+const toFeedbackItem = (value: unknown): FeedbackItem => {
+  const record = asRecord(value);
+
+  return {
+    id: asString(record.id),
+    submissionId: asString(record.submissionId),
+    source: asString(record.source),
+    type: asString(record.type),
+    severity: asString(record.severity),
+    message: asString(record.message),
+    suggestion: asString(record.suggestion),
+    tags: toStringArray(record.tags),
+    createdAt: asString(record.createdAt),
     raw: record,
   };
 };
@@ -151,6 +197,38 @@ export const toMyTaskDetailResponse = (payload: unknown): MyTaskDetailResponse =
     me: asRecord(safeGet(record, "me", undefined)),
     submissions: asRecordArray(safeGet(record, "submissions", undefined)),
     latest: latest && typeof latest === "object" ? asRecord(latest) : null,
+    raw: record,
+  };
+};
+
+export const toListFeedbackResponse = (payload: unknown): ListFeedbackResponse => {
+  if (Array.isArray(payload)) {
+    return {
+      items: payload.map((item) => toFeedbackItem(item)),
+      raw: payload.map((item) => asRecord(item)),
+    };
+  }
+
+  const record = asRecord(payload);
+  const candidateItems =
+    safeGet<unknown>(record, "items", undefined) ??
+    safeGet<unknown>(record, "data.items", undefined) ??
+    safeGet<unknown>(record, "data", undefined);
+
+  return {
+    items: asRecordArray(candidateItems).map((item) => toFeedbackItem(item)),
+    raw: record,
+  };
+};
+
+export const toRequestAiFeedbackResponse = (payload: unknown): RequestAiFeedbackResponse => {
+  const record = asRecord(payload);
+
+  return {
+    submissionId: asString(record.submissionId),
+    jobId: asString(record.jobId),
+    status: asString(record.status),
+    aiFeedbackStatus: asString(record.aiFeedbackStatus),
     raw: record,
   };
 };

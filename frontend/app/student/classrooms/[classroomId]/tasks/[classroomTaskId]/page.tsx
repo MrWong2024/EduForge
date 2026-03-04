@@ -114,6 +114,16 @@ const toAiStatusLabel = (status?: string): string => {
   return status;
 };
 
+const buildSubmissionFeedbackHref = (submissionId: string, aiStatus?: string): string => {
+  const basePath = paths.student.submissionDetail(submissionId);
+  if (!aiStatus) {
+    return basePath;
+  }
+
+  const query = new URLSearchParams({ status: aiStatus });
+  return `${basePath}?${query.toString()}`;
+};
+
 type TaskDetailViewModel =
   | {
       mode: "ready";
@@ -185,7 +195,12 @@ export default async function StudentTaskDetailPage({
   const taskTitle = toDisplayText(safeGet(viewModel.data.task, "title", undefined), "任务详情");
   const dueAt = safeGet<string | null>(viewModel.data.classroomTask, "dueAt", null);
   const allowLate = safeGet<boolean | null>(viewModel.data.classroomTask, "settings.allowLate", null);
-  const latestStatus = toAiStatusLabel(safeGet(viewModel.data.latest, "aiFeedbackStatus", undefined));
+  const latestRawStatus = safeGet<string | undefined>(viewModel.data.latest, "aiFeedbackStatus", undefined);
+  const latestStatus = toAiStatusLabel(latestRawStatus);
+  const latestSubmissionId = safeGet<string | undefined>(viewModel.data.latest, "submissionId", undefined);
+  const latestSubmissionHref = latestSubmissionId
+    ? buildSubmissionFeedbackHref(latestSubmissionId, latestRawStatus)
+    : null;
 
   return (
     <section className="space-y-4">
@@ -205,6 +220,19 @@ export default async function StudentTaskDetailPage({
           <p>允许迟交：{toDisplayText(allowLate)}</p>
           <p>最新 AI 状态：{latestStatus}</p>
         </div>
+        {latestSubmissionHref ? (
+          <p className="mt-2 text-sm text-zinc-700">
+            最新提交反馈：
+            <Link href={latestSubmissionHref} className="ml-1 text-blue-700 hover:underline">
+              查看反馈
+            </Link>
+          </p>
+        ) : null}
+        {latestRawStatus === "NOT_REQUESTED" ? (
+          <p className="mt-2 text-sm text-zinc-700">
+            当前为正常未请求状态。如需 AI 反馈，请进入提交详情后点击“请求 AI 反馈”。
+          </p>
+        ) : null}
       </section>
 
       <section className="rounded-lg border border-zinc-200 bg-white p-4 text-sm">
@@ -255,24 +283,44 @@ export default async function StudentTaskDetailPage({
                 <th className="px-4 py-3">尝试次数</th>
                 <th className="px-4 py-3">提交时间</th>
                 <th className="px-4 py-3">AI 状态</th>
+                <th className="px-4 py-3">操作</th>
               </tr>
             </thead>
             <tbody>
-              {viewModel.data.submissions.map((submission, index) => (
-                <tr
-                  key={String(safeGet(submission, "id", `submission-${index}`))}
-                  className="border-t border-zinc-100"
-                >
-                  <td className="px-4 py-3">{toDisplayText(safeGet(submission, "id", undefined))}</td>
-                  <td className="px-4 py-3">{toDisplayText(safeGet(submission, "attemptNo", undefined))}</td>
-                  <td className="px-4 py-3">
-                    {toDisplayDate(safeGet<string | null>(submission, "createdAt", null))}
-                  </td>
-                  <td className="px-4 py-3">
-                    {toAiStatusLabel(safeGet(submission, "aiFeedbackStatus", undefined))}
-                  </td>
-                </tr>
-              ))}
+              {viewModel.data.submissions.map((submission, index) => {
+                const submissionId = safeGet<string | undefined>(submission, "id", undefined);
+                const submissionAiStatus = safeGet<string | undefined>(
+                  submission,
+                  "aiFeedbackStatus",
+                  undefined
+                );
+                const feedbackHref = submissionId
+                  ? buildSubmissionFeedbackHref(submissionId, submissionAiStatus)
+                  : null;
+
+                return (
+                  <tr
+                    key={String(submissionId ?? `submission-${index}`)}
+                    className="border-t border-zinc-100"
+                  >
+                    <td className="px-4 py-3">{toDisplayText(submissionId)}</td>
+                    <td className="px-4 py-3">{toDisplayText(safeGet(submission, "attemptNo", undefined))}</td>
+                    <td className="px-4 py-3">
+                      {toDisplayDate(safeGet<string | null>(submission, "createdAt", null))}
+                    </td>
+                    <td className="px-4 py-3">{toAiStatusLabel(submissionAiStatus)}</td>
+                    <td className="px-4 py-3">
+                      {feedbackHref ? (
+                        <Link href={feedbackHref} className="text-blue-700 hover:underline">
+                          查看反馈
+                        </Link>
+                      ) : (
+                        <span className="text-zinc-500">缺少 submissionId</span>
+                      )}
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>
