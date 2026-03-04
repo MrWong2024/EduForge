@@ -3,11 +3,12 @@ import { headers } from "next/headers";
 import { EmptyState } from "@/components/blocks/EmptyState";
 import { ErrorState } from "@/components/blocks/ErrorState";
 import { PageHeader } from "@/components/blocks/PageHeader";
+import { AiProcessingHint } from "@/components/student/AiProcessingHint";
 import { RequestAiFeedbackButton } from "@/components/student/RequestAiFeedbackButton";
 import { fetchJson, FetchJsonError } from "@/lib/api/client";
 import { toListFeedbackResponse } from "@/lib/api/types-student";
 import { paths } from "@/lib/routes/paths";
-import { getSingleSearchParam, parseEnum, toDisplayDate, toDisplayText } from "@/lib/ui/format";
+import { getSingleSearchParam, safeGet, toDisplayDate, toDisplayText } from "@/lib/ui/format";
 
 type SubmissionDetailPageProps = {
   params: Promise<{ submissionId: string }>;
@@ -24,6 +25,35 @@ const AI_STATUSES = [
 ] as const;
 
 type AiStatus = (typeof AI_STATUSES)[number];
+
+const parseAiStatus = (value: unknown): AiStatus | null => {
+  if (typeof value !== "string") {
+    return null;
+  }
+
+  const normalized = value.trim().toUpperCase() as AiStatus;
+  return AI_STATUSES.includes(normalized) ? normalized : null;
+};
+
+const resolveAiFeedbackStatus = (payload: unknown, queryStatus: AiStatus | null): AiStatus | null => {
+  const candidates: unknown[] = [
+    safeGet(payload, "aiFeedbackStatus", undefined),
+    safeGet(payload, "status", undefined),
+    safeGet(payload, "data.aiFeedbackStatus", undefined),
+    safeGet(payload, "data.status", undefined),
+    safeGet(payload, "job.status", undefined),
+    queryStatus,
+  ];
+
+  for (const candidate of candidates) {
+    const status = parseAiStatus(candidate);
+    if (status) {
+      return status;
+    }
+  }
+
+  return null;
+};
 
 const getRequestOrigin = async (): Promise<string> => {
   const headerMap = await headers();
@@ -68,7 +98,7 @@ type SubmissionFeedbackViewModel =
   | {
       mode: "ready";
       feedback: ReturnType<typeof toListFeedbackResponse>;
-      initialStatus?: AiStatus;
+      aiFeedbackStatus: AiStatus | null;
     }
   | {
       mode: "error";
@@ -82,7 +112,7 @@ export default async function StudentSubmissionDetailPage({
 }: SubmissionDetailPageProps) {
   const { submissionId } = await params;
   const query = await searchParams;
-  const initialStatus = parseEnum(getSingleSearchParam(query.status), AI_STATUSES, "NOT_REQUESTED");
+  const queryStatus = parseAiStatus(getSingleSearchParam(query.status));
 
   let viewModel: SubmissionFeedbackViewModel = {
     mode: "error",
@@ -103,7 +133,7 @@ export default async function StudentSubmissionDetailPage({
     viewModel = {
       mode: "ready",
       feedback: toListFeedbackResponse(payload),
-      initialStatus,
+      aiFeedbackStatus: resolveAiFeedbackStatus(payload, queryStatus),
     };
   } catch (error) {
     if (error instanceof FetchJsonError) {
@@ -145,7 +175,15 @@ export default async function StudentSubmissionDetailPage({
         }
       />
 
-      <RequestAiFeedbackButton submissionId={submissionId} initialStatus={viewModel.initialStatus} />
+      <AiProcessingHint
+        status={viewModel.aiFeedbackStatus}
+        variant="submission"
+        helpHref={paths.student.aiHelp}
+      />
+      <RequestAiFeedbackButton
+        submissionId={submissionId}
+        initialStatus={viewModel.aiFeedbackStatus ?? undefined}
+      />
 
       {viewModel.feedback.items.length === 0 ? (
         <EmptyState title="暂无反馈" description="当前提交还没有反馈内容，可点击上方按钮请求 AI 反馈。" />

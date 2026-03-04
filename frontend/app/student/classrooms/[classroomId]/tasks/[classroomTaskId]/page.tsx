@@ -3,6 +3,7 @@ import { headers } from "next/headers";
 import { EmptyState } from "@/components/blocks/EmptyState";
 import { ErrorState } from "@/components/blocks/ErrorState";
 import { PageHeader } from "@/components/blocks/PageHeader";
+import { AiProcessingHint } from "@/components/student/AiProcessingHint";
 import { SubmissionForm } from "@/components/student/SubmissionForm";
 import { fetchJson, FetchJsonError } from "@/lib/api/client";
 import { toMyTaskDetailResponse } from "@/lib/api/types-student";
@@ -114,6 +115,29 @@ const toAiStatusLabel = (status?: string): string => {
   return status;
 };
 
+const toAiStatusDescription = (status?: string): string | null => {
+  if (!status) {
+    return null;
+  }
+
+  if (status === "NOT_REQUESTED") {
+    return "当前为正常未请求状态。如需 AI 反馈，请进入提交详情后点击“请求 AI 反馈”。";
+  }
+
+  if (status === "PENDING") {
+    return "AI 反馈已进入队列，正在等待处理。";
+  }
+
+  if (status === "RUNNING") {
+    return "AI 反馈正在处理中，通常需要一点时间。";
+  }
+
+  return null;
+};
+
+const isProcessingAiStatus = (status?: string): boolean =>
+  status === "PENDING" || status === "RUNNING";
+
 const buildSubmissionFeedbackHref = (submissionId: string, aiStatus?: string): string => {
   const basePath = paths.student.submissionDetail(submissionId);
   if (!aiStatus) {
@@ -197,6 +221,7 @@ export default async function StudentTaskDetailPage({
   const allowLate = safeGet<boolean | null>(viewModel.data.classroomTask, "settings.allowLate", null);
   const latestRawStatus = safeGet<string | undefined>(viewModel.data.latest, "aiFeedbackStatus", undefined);
   const latestStatus = toAiStatusLabel(latestRawStatus);
+  const latestStatusDescription = toAiStatusDescription(latestRawStatus);
   const latestSubmissionId = safeGet<string | undefined>(viewModel.data.latest, "submissionId", undefined);
   const latestSubmissionHref = latestSubmissionId
     ? buildSubmissionFeedbackHref(latestSubmissionId, latestRawStatus)
@@ -228,12 +253,19 @@ export default async function StudentTaskDetailPage({
             </Link>
           </p>
         ) : null}
-        {latestRawStatus === "NOT_REQUESTED" ? (
+        {latestStatusDescription ? <p className="mt-2 text-sm text-zinc-700">{latestStatusDescription}</p> : null}
+        {isProcessingAiStatus(latestRawStatus) ? (
           <p className="mt-2 text-sm text-zinc-700">
-            当前为正常未请求状态。如需 AI 反馈，请进入提交详情后点击“请求 AI 反馈”。
+            若等待时间较长，可先查看
+            <Link href={paths.student.aiHelp} className="ml-1 text-blue-700 hover:underline">
+              AI 反馈帮助
+            </Link>
+            。
           </p>
         ) : null}
       </section>
+
+      <AiProcessingHint status={latestRawStatus} variant="taskDetail" helpHref={paths.student.aiHelp} />
 
       <section className="rounded-lg border border-zinc-200 bg-white p-4 text-sm">
         <p className="font-medium text-zinc-900">参数</p>
