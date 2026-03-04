@@ -20,6 +20,10 @@ export const paths = {
       `/teacher/classrooms/${encodeSegment(classroomId)}/export/snapshot`,
     classroomTaskBase: (classroomId: string, classroomTaskId: string) =>
       `/teacher/classrooms/${encodeSegment(classroomId)}/tasks/${encodeSegment(classroomTaskId)}`,
+    classroomTaskDetail: (classroomId: string, classroomTaskId: string) =>
+      `/teacher/classrooms/${encodeSegment(classroomId)}/tasks/${encodeSegment(classroomTaskId)}`,
+    classroomTaskSubmissions: (classroomId: string, classroomTaskId: string) =>
+      `/teacher/classrooms/${encodeSegment(classroomId)}/tasks/${encodeSegment(classroomTaskId)}/submissions`,
     classroomTaskTrajectory: (classroomId: string, classroomTaskId: string) =>
       `/teacher/classrooms/${encodeSegment(classroomId)}/tasks/${encodeSegment(classroomTaskId)}/learning-trajectory`,
     classroomTaskReviewPack: (classroomId: string, classroomTaskId: string) =>

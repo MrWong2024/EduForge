@@ -60,6 +60,79 @@ export type ClassroomTasksResponse = {
 
 export type DashboardResponse = UnknownRecord;
 
+export type ClassroomTask = {
+  id?: string;
+  classroomId?: string;
+  taskId?: string;
+  title?: string;
+  description?: string;
+  dueAt?: string;
+  allowLate?: boolean;
+  feedbackEnabled?: boolean;
+  taskStatus?: string;
+  publishedAt?: string;
+  raw: UnknownRecord;
+};
+
+export type SubmitTaskResponse = ClassroomTask;
+
+export type TaskCreateRequest = {
+  title: string;
+  description: string;
+  dueAt?: string;
+  allowLate?: boolean;
+  feedbackEnabled?: boolean;
+  taskId?: string;
+};
+
+export type PublishClassroomTaskRequest = {
+  taskId: string;
+  dueAt?: string;
+  settings?: {
+    allowLate?: boolean;
+  };
+};
+
+export type LearningTaskOption = {
+  id?: string;
+  title?: string;
+  description?: string;
+  status?: string;
+  knowledgeModule?: string;
+  stage?: number;
+  raw: UnknownRecord;
+};
+
+export type LearningTaskListResponse = {
+  items: LearningTaskOption[];
+  page?: number;
+  limit?: number;
+  total?: number;
+  raw: unknown;
+};
+
+export type ClassroomTaskSubmission = {
+  id?: string;
+  taskId?: string;
+  classroomTaskId?: string;
+  studentId?: string;
+  attemptNo?: number;
+  status?: string;
+  aiFeedbackStatus?: string;
+  submittedAt?: string;
+  isLate?: boolean;
+  lateBySeconds?: number;
+  raw: UnknownRecord;
+};
+
+export type ClassroomTaskSubmissionsResponse = {
+  items: ClassroomTaskSubmission[];
+  page?: number;
+  limit?: number;
+  total?: number;
+  raw: unknown;
+};
+
 export type LearningTrajectoryResponse = {
   classroomId?: string;
   classroomTaskId?: string;
@@ -180,6 +253,65 @@ export const toClassroomTaskSummary = (value: unknown): ClassroomTaskSummary => 
     dueAt: asString(record.dueAt),
     allowLate: asBoolean(settingsRecord.allowLate) ?? asBoolean(record.allowLate),
     aiStatus: asString(record.aiStatus) ?? asString(record.aiFeedbackStatus),
+  };
+};
+
+export const toClassroomTask = (payload: unknown): ClassroomTask => {
+  const record = asRecord(payload);
+  const taskRecord = asRecord(safeGet(record, "task", undefined));
+  const settingsRecord = asRecord(safeGet(record, "settings", undefined));
+
+  return {
+    id: asString(record.id) ?? asString(record.classroomTaskId),
+    classroomId: asString(record.classroomId),
+    taskId: asString(record.taskId),
+    title: asString(taskRecord.title) ?? asString(record.title) ?? asString(record.name),
+    description: asString(taskRecord.description) ?? asString(record.description),
+    dueAt: asString(record.dueAt),
+    allowLate: asBoolean(settingsRecord.allowLate) ?? asBoolean(record.allowLate),
+    feedbackEnabled: asBoolean(settingsRecord.feedbackEnabled),
+    taskStatus: asString(taskRecord.status) ?? asString(record.status),
+    publishedAt: asString(record.publishedAt),
+    raw: record,
+  };
+};
+
+export const toSubmitTaskResponse = (payload: unknown): SubmitTaskResponse =>
+  toClassroomTask(payload);
+
+const toLearningTaskOption = (value: unknown): LearningTaskOption => {
+  const record = asRecord(value);
+  return {
+    id: asString(record.id) ?? asString(record.taskId),
+    title: asString(record.title),
+    description: asString(record.description),
+    status: asString(record.status),
+    knowledgeModule: asString(record.knowledgeModule),
+    stage: asNumber(record.stage),
+    raw: record,
+  };
+};
+
+export const toLearningTaskListResponse = (payload: unknown): LearningTaskListResponse => {
+  if (Array.isArray(payload)) {
+    return {
+      items: payload.map((item) => toLearningTaskOption(item)),
+      raw: payload,
+    };
+  }
+
+  const record = asRecord(payload);
+  const candidateItems =
+    safeGet<unknown>(record, "items", undefined) ??
+    safeGet<unknown>(record, "data.items", undefined) ??
+    safeGet<unknown>(record, "data", undefined);
+
+  return {
+    items: asRecordArray(candidateItems).map((item) => toLearningTaskOption(item)),
+    page: asNumber(record.page),
+    limit: asNumber(record.limit),
+    total: asNumber(record.total),
+    raw: payload,
   };
 };
 
@@ -395,6 +527,49 @@ export const toClassroomStudentsResponse = (payload: unknown): ClassroomStudents
 
   return {
     items: asRecordArray(candidateItems).map((item) => toClassroomStudent(item)),
+    raw: payload,
+  };
+};
+
+const toClassroomTaskSubmission = (value: unknown): ClassroomTaskSubmission => {
+  const record = asRecord(value);
+
+  return {
+    id: asString(record.id),
+    taskId: asString(record.taskId),
+    classroomTaskId: asString(record.classroomTaskId),
+    studentId: asString(record.studentId),
+    attemptNo: asNumber(record.attemptNo),
+    status: asString(record.status),
+    aiFeedbackStatus: asString(record.aiFeedbackStatus),
+    submittedAt: asString(record.submittedAt) ?? asString(record.createdAt),
+    isLate: asBoolean(record.isLate),
+    lateBySeconds: asNumber(record.lateBySeconds),
+    raw: record,
+  };
+};
+
+export const toClassroomTaskSubmissionsResponse = (
+  payload: unknown
+): ClassroomTaskSubmissionsResponse => {
+  if (Array.isArray(payload)) {
+    return {
+      items: payload.map((item) => toClassroomTaskSubmission(item)),
+      raw: payload,
+    };
+  }
+
+  const record = asRecord(payload);
+  const candidateItems =
+    safeGet<unknown>(record, "items", undefined) ??
+    safeGet<unknown>(record, "data.items", undefined) ??
+    safeGet<unknown>(record, "data", undefined);
+
+  return {
+    items: asRecordArray(candidateItems).map((item) => toClassroomTaskSubmission(item)),
+    page: asNumber(record.page),
+    limit: asNumber(record.limit),
+    total: asNumber(record.total),
     raw: payload,
   };
 };
