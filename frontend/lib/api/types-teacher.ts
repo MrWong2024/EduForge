@@ -17,6 +17,20 @@ const asNumber = (value: unknown): number | undefined =>
 const asRecordArray = (value: unknown): UnknownRecord[] =>
   Array.isArray(value) ? value.map((item) => asRecord(item)) : [];
 
+const asStringArray = (value: unknown): string[] =>
+  Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : [];
+
+const pickFirstNonEmptyRecord = (...candidates: unknown[]): UnknownRecord => {
+  for (const candidate of candidates) {
+    const record = asRecord(candidate);
+    if (Object.keys(record).length > 0) {
+      return record;
+    }
+  }
+
+  return {};
+};
+
 export type ClassroomSummary = {
   id?: string;
   name?: string;
@@ -77,6 +91,34 @@ export type AiMetricsResponse = {
   statusBreakdown: UnknownRecord;
   tags: UnknownRecord[];
   errors: UnknownRecord[];
+  raw: UnknownRecord;
+};
+
+export type WeeklyReportResponse = {
+  classroomId?: string;
+  window?: string;
+  summary: UnknownRecord;
+  overview: UnknownRecord;
+  items: UnknownRecord[];
+  raw: UnknownRecord;
+};
+
+export type ProcessAssessmentResponse = {
+  classroomId?: string;
+  window?: string;
+  page?: number;
+  limit?: number;
+  total?: number;
+  items: UnknownRecord[];
+  raw: UnknownRecord;
+};
+
+export type ExportSnapshotResponse = {
+  classroomId?: string;
+  window?: string;
+  meta: UnknownRecord;
+  notes: string[];
+  summary: UnknownRecord;
   raw: UnknownRecord;
 };
 
@@ -197,6 +239,90 @@ export const toAiMetricsResponse = (payload: unknown): AiMetricsResponse => {
         ? asRecordArray(safeGet(record, "tags", undefined))
         : asRecordArray(safeGet(record, "feedback.topTags", undefined)),
     errors: asRecordArray(safeGet(record, "errors", undefined)),
+    raw: record,
+  };
+};
+
+export const toWeeklyReportResponse = (payload: unknown): WeeklyReportResponse => {
+  const record = asRecord(payload);
+  const summary = pickFirstNonEmptyRecord(
+    safeGet(record, "summary", undefined),
+    safeGet(record, "data.summary", undefined)
+  );
+  const overview = pickFirstNonEmptyRecord(
+    safeGet(record, "overview", undefined),
+    safeGet(record, "data.overview", undefined)
+  );
+  const items =
+    asRecordArray(safeGet(record, "items", undefined)).length > 0
+      ? asRecordArray(safeGet(record, "items", undefined))
+      : asRecordArray(safeGet(record, "data.items", undefined));
+
+  return {
+    classroomId: asString(record.classroomId),
+    window: asString(record.window),
+    summary,
+    overview,
+    items,
+    raw: record,
+  };
+};
+
+export const toProcessAssessmentResponse = (payload: unknown): ProcessAssessmentResponse => {
+  const record = asRecord(payload);
+  const itemsCandidates = [
+    safeGet<unknown>(record, "items", undefined),
+    safeGet<unknown>(record, "rows", undefined),
+    safeGet<unknown>(record, "data.items", undefined),
+    safeGet<unknown>(record, "data.rows", undefined),
+    safeGet<unknown>(record, "data", undefined),
+  ];
+
+  let items: UnknownRecord[] = [];
+  for (const candidate of itemsCandidates) {
+    const list = asRecordArray(candidate);
+    if (list.length > 0) {
+      items = list;
+      break;
+    }
+  }
+
+  return {
+    classroomId: asString(record.classroomId),
+    window: asString(record.window),
+    page: asNumber(record.page) ?? asNumber(safeGet(record, "pagination.page", undefined)),
+    limit: asNumber(record.limit) ?? asNumber(safeGet(record, "pagination.limit", undefined)),
+    total: asNumber(record.total) ?? asNumber(safeGet(record, "pagination.total", undefined)),
+    items,
+    raw: record,
+  };
+};
+
+export const toExportSnapshotResponse = (payload: unknown): ExportSnapshotResponse => {
+  const record = asRecord(payload);
+  const meta = pickFirstNonEmptyRecord(
+    safeGet(record, "meta", undefined),
+    safeGet(record, "data.meta", undefined)
+  );
+  const notesRaw = safeGet<unknown>(meta, "notes", undefined);
+  const notes = asStringArray(notesRaw);
+  const summary = pickFirstNonEmptyRecord(
+    safeGet(record, "summary", undefined),
+    safeGet(record, "data.summary", undefined)
+  );
+  const singleNote = asString(notesRaw);
+
+  return {
+    classroomId: asString(record.classroomId),
+    window: asString(record.window),
+    meta,
+    notes:
+      notes.length > 0
+        ? notes
+        : singleNote
+          ? [singleNote]
+          : [],
+    summary,
     raw: record,
   };
 };
