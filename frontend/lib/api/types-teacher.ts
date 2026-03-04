@@ -122,6 +122,21 @@ export type ExportSnapshotResponse = {
   raw: UnknownRecord;
 };
 
+export type ClassroomStudent = {
+  userId?: string;
+  name?: string;
+  email?: string;
+  studentNo?: string;
+  status?: string;
+  enrolledAt?: string;
+  raw: UnknownRecord;
+};
+
+export type ClassroomStudentsResponse = {
+  items: ClassroomStudent[];
+  raw: unknown;
+};
+
 export const toClassroomSummary = (value: unknown): ClassroomSummary => {
   const record = asRecord(value);
   return {
@@ -324,6 +339,63 @@ export const toExportSnapshotResponse = (payload: unknown): ExportSnapshotRespon
           : [],
     summary,
     raw: record,
+  };
+};
+
+const normalizeStudentStatus = (value: unknown): string | undefined => {
+  const status = asString(value);
+  return status ? status.toUpperCase() : undefined;
+};
+
+const toClassroomStudent = (value: unknown): ClassroomStudent => {
+  const record = asRecord(value);
+  const userRecord = asRecord(safeGet(record, "user", undefined));
+  const profileRecord = asRecord(safeGet(record, "profile", undefined));
+
+  return {
+    userId:
+      asString(record.userId) ??
+      asString(record.studentId) ??
+      asString(record.id) ??
+      asString(userRecord.id),
+    name:
+      asString(record.name) ??
+      asString(record.studentName) ??
+      asString(userRecord.name),
+    email: asString(record.email) ?? asString(userRecord.email),
+    studentNo:
+      asString(record.studentNo) ??
+      asString(profileRecord.studentNo) ??
+      asString(safeGet(record, "student.number", undefined)),
+    status:
+      normalizeStudentStatus(record.status) ??
+      normalizeStudentStatus(record.enrollmentStatus) ??
+      "ACTIVE",
+    enrolledAt:
+      asString(record.enrolledAt) ??
+      asString(record.joinedAt) ??
+      asString(record.createdAt),
+    raw: record,
+  };
+};
+
+export const toClassroomStudentsResponse = (payload: unknown): ClassroomStudentsResponse => {
+  if (Array.isArray(payload)) {
+    return {
+      items: payload.map((item) => toClassroomStudent(item)),
+      raw: payload,
+    };
+  }
+
+  const record = asRecord(payload);
+  const candidateItems =
+    safeGet<unknown>(record, "items", undefined) ??
+    safeGet<unknown>(record, "data.items", undefined) ??
+    safeGet<unknown>(record, "data", undefined);
+
+  return {
+    items: asRecordArray(candidateItems).map((item) => toClassroomStudent(item)),
+    raw: payload,
   };
 };
 
