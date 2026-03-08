@@ -30,6 +30,8 @@ export const paths = {
       `/teacher/classrooms/${encodeSegment(classroomId)}/tasks/${encodeSegment(classroomTaskId)}/review-pack`,
     classroomTaskAiMetrics: (classroomId: string, classroomTaskId: string) =>
       `/teacher/classrooms/${encodeSegment(classroomId)}/tasks/${encodeSegment(classroomTaskId)}/ai-metrics`,
+    submissionDetail: (submissionId: string) =>
+      `/teacher/submissions/${encodeSegment(submissionId)}`,
   },
   student: {
     home: "/student",

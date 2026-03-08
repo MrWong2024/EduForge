@@ -1,4 +1,9 @@
 import { safeGet } from "@/lib/ui/format";
+import {
+  toListFeedbackResponse,
+  type FeedbackItem,
+  type ListFeedbackResponse,
+} from "@/lib/api/types-student";
 
 type UnknownRecord = Record<string, unknown>;
 
@@ -132,6 +137,10 @@ export type ClassroomTaskSubmissionsResponse = {
   total?: number;
   raw: unknown;
 };
+
+export type TeacherFeedbackItem = FeedbackItem;
+
+export type TeacherFeedbackListResponse = ListFeedbackResponse;
 
 export type LearningTrajectoryResponse = {
   classroomId?: string;
@@ -573,6 +582,9 @@ export const toClassroomTaskSubmissionsResponse = (
     raw: payload,
   };
 };
+
+export const toTeacherFeedbackListResponse = (payload: unknown): TeacherFeedbackListResponse =>
+  toListFeedbackResponse(payload);
 
 export const getDashboardItems = (dashboard: DashboardResponse): UnknownRecord[] => {
   const candidates = [

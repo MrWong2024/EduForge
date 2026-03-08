@@ -199,20 +199,46 @@ export default async function ClassroomTaskSubmissionsPage({
                 <th className="px-4 py-3">反馈状态</th>
                 <th className="px-4 py-3">提交时间</th>
                 <th className="px-4 py-3">是否迟交</th>
+                <th className="px-4 py-3">操作</th>
               </tr>
             </thead>
             <tbody>
-              {viewModel.submissions.map((submission, index) => (
-                <tr key={submission.id ?? `submission-${index}`} className="border-t border-zinc-100 align-top">
-                  <td className="px-4 py-3">{toDisplayText(submission.id)}</td>
-                  <td className="px-4 py-3">{toDisplayText(submission.studentId)}</td>
-                  <td className="px-4 py-3">{toDisplayText(submission.attemptNo)}</td>
-                  <td className="px-4 py-3">{toDisplayText(submission.status)}</td>
-                  <td className="px-4 py-3">{toDisplayText(submission.aiFeedbackStatus)}</td>
-                  <td className="px-4 py-3">{toDisplayDate(submission.submittedAt)}</td>
-                  <td className="px-4 py-3">{toDisplayText(submission.isLate)}</td>
-                </tr>
-              ))}
+              {viewModel.submissions.map((submission, index) => {
+                const submissionId = submission.id;
+                const baseDetailPath = submissionId
+                  ? paths.teacher.submissionDetail(submissionId)
+                  : null;
+                const detailHref = baseDetailPath
+                  ? `${baseDetailPath}?${new URLSearchParams({
+                      classroomId,
+                      classroomTaskId,
+                    }).toString()}`
+                  : null;
+
+                return (
+                  <tr
+                    key={submission.id ?? `submission-${index}`}
+                    className="border-t border-zinc-100 align-top"
+                  >
+                    <td className="px-4 py-3">{toDisplayText(submission.id)}</td>
+                    <td className="px-4 py-3">{toDisplayText(submission.studentId)}</td>
+                    <td className="px-4 py-3">{toDisplayText(submission.attemptNo)}</td>
+                    <td className="px-4 py-3">{toDisplayText(submission.status)}</td>
+                    <td className="px-4 py-3">{toDisplayText(submission.aiFeedbackStatus)}</td>
+                    <td className="px-4 py-3">{toDisplayDate(submission.submittedAt)}</td>
+                    <td className="px-4 py-3">{toDisplayText(submission.isLate)}</td>
+                    <td className="px-4 py-3">
+                      {detailHref ? (
+                        <Link href={detailHref} className="text-blue-700 hover:underline">
+                          查看详情 / 批阅
+                        </Link>
+                      ) : (
+                        <span className="text-zinc-500">缺少 submissionId</span>
+                      )}
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>
