@@ -53,7 +53,7 @@ export function TeacherFeedbackForm({ submissionId }: TeacherFeedbackFormProps) 
   const router = useRouter();
   const [message, setMessage] = useState("");
   const [suggestion, setSuggestion] = useState("");
-  const [severity, setSeverity] = useState("");
+  const [severity, setSeverity] = useState("INFO");
   const [tagsInput, setTagsInput] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [successText, setSuccessText] = useState<string | null>(null);
@@ -79,7 +79,7 @@ export function TeacherFeedbackForm({ submissionId }: TeacherFeedbackFormProps) 
       const payload: Record<string, unknown> = {
         source: "TEACHER",
         type: "OTHER",
-        severity: severity || "INFO",
+        severity,
         message: normalizedMessage,
       };
       if (suggestion.trim()) {
@@ -101,7 +101,7 @@ export function TeacherFeedbackForm({ submissionId }: TeacherFeedbackFormProps) 
       setSuccessText("已添加教师反馈。");
       setMessage("");
       setSuggestion("");
-      setSeverity("");
+      setSeverity("INFO");
       setTagsInput("");
       router.refresh();
     } catch (error) {
@@ -164,7 +164,6 @@ export function TeacherFeedbackForm({ submissionId }: TeacherFeedbackFormProps) 
               onChange={(event) => setSeverity(event.target.value)}
               className="w-full rounded-md border border-zinc-300 px-3 py-2"
             >
-              <option value="">默认 INFO</option>
               <option value="INFO">INFO</option>
               <option value="WARN">WARN</option>
               <option value="ERROR">ERROR</option>
@@ -172,13 +171,14 @@ export function TeacherFeedbackForm({ submissionId }: TeacherFeedbackFormProps) 
           </label>
 
           <label className="block text-sm">
-            <span className="mb-1 block text-zinc-700">标签（可选，逗号分隔）</span>
+            <span className="mb-1 block text-zinc-700">标签（可选）</span>
             <input
               value={tagsInput}
               onChange={(event) => setTagsInput(event.target.value)}
               className="w-full rounded-md border border-zinc-300 px-3 py-2"
               placeholder="例如：逻辑, 边界条件"
             />
+            <span className="mt-1 block text-xs text-zinc-500">多个标签请用英文逗号分隔。</span>
           </label>
         </div>
 

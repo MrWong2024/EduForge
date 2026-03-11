@@ -142,6 +142,26 @@ export type TeacherFeedbackItem = FeedbackItem;
 
 export type TeacherFeedbackListResponse = ListFeedbackResponse;
 
+export type TeacherSubmissionContext = {
+  submissionId: string;
+  classroomId?: string;
+  classroomTaskId?: string;
+  taskTitle?: string;
+  studentName?: string;
+  language?: string;
+  submittedAt?: string;
+  attemptNo?: number;
+  isLate?: boolean;
+  lateBySeconds?: number;
+  codeText?: string;
+};
+
+export type GroupedTeacherFeedbackItems = {
+  teacher: TeacherFeedbackItem[];
+  ai: TeacherFeedbackItem[];
+  system: TeacherFeedbackItem[];
+};
+
 export type LearningTrajectoryResponse = {
   classroomId?: string;
   classroomTaskId?: string;
@@ -585,6 +605,46 @@ export const toClassroomTaskSubmissionsResponse = (
 
 export const toTeacherFeedbackListResponse = (payload: unknown): TeacherFeedbackListResponse =>
   toListFeedbackResponse(payload);
+
+const toEpochTime = (iso: string | undefined): number => {
+  if (!iso) {
+    return Number.NEGATIVE_INFINITY;
+  }
+  const timestamp = new Date(iso).getTime();
+  return Number.isFinite(timestamp) ? timestamp : Number.NEGATIVE_INFINITY;
+};
+
+const sortFeedbackByCreatedAtDesc = (items: TeacherFeedbackItem[]): TeacherFeedbackItem[] =>
+  [...items].sort((left, right) => toEpochTime(right.createdAt) - toEpochTime(left.createdAt));
+
+export const groupTeacherFeedbackItems = (
+  items: TeacherFeedbackItem[]
+): GroupedTeacherFeedbackItems => {
+  const grouped: GroupedTeacherFeedbackItems = {
+    teacher: [],
+    ai: [],
+    system: [],
+  };
+
+  for (const item of items) {
+    const source = (item.source ?? "").toUpperCase();
+    if (source === "TEACHER") {
+      grouped.teacher.push(item);
+      continue;
+    }
+    if (source === "AI") {
+      grouped.ai.push(item);
+      continue;
+    }
+    grouped.system.push(item);
+  }
+
+  return {
+    teacher: sortFeedbackByCreatedAtDesc(grouped.teacher),
+    ai: sortFeedbackByCreatedAtDesc(grouped.ai),
+    system: sortFeedbackByCreatedAtDesc(grouped.system),
+  };
+};
 
 export const getDashboardItems = (dashboard: DashboardResponse): UnknownRecord[] => {
   const candidates = [

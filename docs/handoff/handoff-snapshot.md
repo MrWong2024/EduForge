@@ -2,7 +2,11 @@
 
 ## 0) 事实前提（强制口径）
 
-- 本项目使用 git/GitHub；交接包以当前仓库代码为准（本文不再讨论 git 流程）。
+- 本项目使用 git/GitHub 进行版本管理。
+- 但在 AI 协作开发中，唯一权威来源是当前工作区目录中的本地代码状态（working tree）。
+- 任何 handoff 文档、分析结论或续接开发，均必须以当前工作区代码为准，而不是 GitHub 仓库状态、commit 历史、分支信息或 PR 记录。
+- 本交接包不依赖 git 工作流。
+- 当文档与代码发生冲突时，以代码为准。
 - 版本策略（Node.js/NestJS/MongoDB）以 `docs/backend-architecture.md` 为准，本文不重复。
 - 该系统为新系统，无历史数据包袱。
 - 因此不需要回填脚本；Enrollment 为权威来源，legacy `studentIds` 不作为任何授权/统计的 fallback。

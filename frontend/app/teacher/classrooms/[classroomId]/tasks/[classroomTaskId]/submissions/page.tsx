@@ -10,7 +10,7 @@ import {
   toClassroomSummary,
 } from "@/lib/api/types-teacher";
 import { paths } from "@/lib/routes/paths";
-import { buildQueryString, toDisplayDate, toDisplayText } from "@/lib/ui/format";
+import { buildQueryString, safeGet, toDisplayDate, toDisplayText } from "@/lib/ui/format";
 
 type ClassroomTaskSubmissionsPageProps = {
   params: Promise<{ classroomId: string; classroomTaskId: string }>;
@@ -53,6 +53,19 @@ const extractRawDetail = (error: FetchJsonError): string | undefined => {
 
 const buildErrorDescription = (summary: string, detail?: string): string =>
   detail ? `${summary} Detail: ${detail}` : summary;
+
+const asString = (value: unknown): string | undefined =>
+  typeof value === "string" && value.trim() ? value.trim() : undefined;
+
+const asCodeText = (value: unknown): string | undefined =>
+  typeof value === "string" && value.length > 0 ? value : undefined;
+
+const maybeCodeTextQueryValue = (value: string | undefined): string | undefined => {
+  if (!value) {
+    return undefined;
+  }
+  return value.length <= 2000 ? value : undefined;
+};
 
 type TaskSubmissionsViewModel =
   | {
@@ -208,11 +221,34 @@ export default async function ClassroomTaskSubmissionsPage({
                 const baseDetailPath = submissionId
                   ? paths.teacher.submissionDetail(submissionId)
                   : null;
+                const submissionRecord = submission.raw;
+                const studentName =
+                  asString(safeGet(submissionRecord, "studentName", undefined)) ??
+                  asString(safeGet(submissionRecord, "student.name", undefined)) ??
+                  asString(safeGet(submissionRecord, "student.displayName", undefined));
+                const language =
+                  asString(safeGet(submissionRecord, "content.language", undefined)) ??
+                  asString(safeGet(submissionRecord, "language", undefined));
+                const codeText = maybeCodeTextQueryValue(
+                  asCodeText(safeGet(submissionRecord, "content.codeText", undefined))
+                );
+
+                const detailQuery = buildQueryString({
+                  classroomId,
+                  classroomTaskId,
+                  taskTitle: viewModel.task.title,
+                  studentName,
+                  language,
+                  submittedAt: submission.submittedAt,
+                  attemptNo: submission.attemptNo,
+                  isLate: submission.isLate,
+                  lateBySeconds: submission.lateBySeconds,
+                  codeText,
+                });
                 const detailHref = baseDetailPath
-                  ? `${baseDetailPath}?${new URLSearchParams({
-                      classroomId,
-                      classroomTaskId,
-                    }).toString()}`
+                  ? detailQuery
+                    ? `${baseDetailPath}?${detailQuery}`
+                    : baseDetailPath
                   : null;
 
                 return (
