@@ -4,8 +4,10 @@ import { EmptyState } from "@/components/blocks/EmptyState";
 import { ErrorState } from "@/components/blocks/ErrorState";
 import { PageHeader } from "@/components/blocks/PageHeader";
 import { buildProxyPath, fetchJson, FetchJsonError } from "@/lib/api/client";
+import { buildErrorDescription, extractRawDetail } from "@/lib/api/error-presenter";
 import { toProcessAssessmentResponse } from "@/lib/api/types-teacher";
 import { paths } from "@/lib/routes/paths";
+import { getCommonErrorSummary } from "@/lib/ui/status";
 import { buildQueryString, getSingleSearchParam, parseEnum, safeGet, toDisplayText } from "@/lib/ui/format";
 
 type ProcessAssessmentPageProps = {
@@ -26,34 +28,6 @@ const getRequestOrigin = async (): Promise<string> => {
   const protocol = headerMap.get("x-forwarded-proto") ?? "http";
   return `${protocol}://${host}`;
 };
-
-const extractRawDetail = (error: FetchJsonError): string | undefined => {
-  if (typeof error.data === "string" && error.data.trim()) {
-    return error.data;
-  }
-
-  if (!error.data || typeof error.data !== "object") {
-    return undefined;
-  }
-
-  const message =
-    "message" in error.data && typeof (error.data as { message?: unknown }).message === "string"
-      ? String((error.data as { message: string }).message)
-      : "";
-  const code =
-    "code" in error.data && typeof (error.data as { code?: unknown }).code === "string"
-      ? String((error.data as { code: string }).code)
-      : "";
-
-  if (message && code) {
-    return `${message} (code: ${code})`;
-  }
-
-  return message || code || undefined;
-};
-
-const buildErrorDescription = (summary: string, detail?: string): string =>
-  detail ? `${summary} Detail: ${detail}` : summary;
 
 const buildWindowHref = (classroomId: string, windowValue: ReportWindow): string => {
   const query = buildQueryString({ window: windowValue });
@@ -112,12 +86,10 @@ export default async function ProcessAssessmentPage({
   } catch (error) {
     if (error instanceof FetchJsonError) {
       const detail = extractRawDetail(error);
-      const summaryByStatus: Record<number, string> = {
-        401: "登录状态已失效，请重新登录。",
-        403: "无权限访问过程性评价页面。",
-        404: "过程性评价功能未启用、不可用或资源不存在。",
-      };
-      const summary = summaryByStatus[error.status] ?? "加载过程性评价失败，请稍后重试。";
+      const summary =
+        error.status === 403
+          ? "无权限访问过程性评价页面。"
+          : getCommonErrorSummary(error.status, "加载过程性评价");
 
       viewModel = {
         mode: "error",
@@ -143,7 +115,7 @@ export default async function ProcessAssessmentPage({
         title="过程性评价"
         description={`班级 ID: ${classroomId} | 窗口: ${viewModel.window}`}
         actions={
-          <div className="flex items-center gap-3 text-sm">
+          <div className="flex flex-wrap items-center gap-3 text-sm">
             <a
               href={viewModel.csvHref}
               target="_blank"
@@ -154,6 +126,12 @@ export default async function ProcessAssessmentPage({
             </a>
             <Link href={paths.teacher.classroomDashboard(classroomId)} className="text-blue-700 hover:underline">
               返回班级看板
+            </Link>
+            <Link href={paths.teacher.classroomWeeklyReport(classroomId)} className="text-blue-700 hover:underline">
+              班级周报
+            </Link>
+            <Link href={paths.teacher.classroomExportSnapshot(classroomId)} className="text-blue-700 hover:underline">
+              教学快照
             </Link>
           </div>
         }

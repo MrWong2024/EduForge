@@ -4,8 +4,10 @@ import { EmptyState } from "@/components/blocks/EmptyState";
 import { ErrorState } from "@/components/blocks/ErrorState";
 import { PageHeader } from "@/components/blocks/PageHeader";
 import { fetchJson, FetchJsonError } from "@/lib/api/client";
+import { buildErrorDescription, extractRawDetail } from "@/lib/api/error-presenter";
 import { toStudentDashboardResponse } from "@/lib/api/types-student";
 import { paths } from "@/lib/routes/paths";
+import { getAiStatusLabel, getCommonErrorSummary } from "@/lib/ui/status";
 import { toDisplayDate, toDisplayText } from "@/lib/ui/format";
 
 const getRequestOrigin = async (): Promise<string> => {
@@ -17,46 +19,6 @@ const getRequestOrigin = async (): Promise<string> => {
 
   const protocol = headerMap.get("x-forwarded-proto") ?? "http";
   return `${protocol}://${host}`;
-};
-
-const extractRawDetail = (error: FetchJsonError): string | undefined => {
-  if (typeof error.data === "string" && error.data.trim()) {
-    return error.data;
-  }
-
-  if (!error.data || typeof error.data !== "object") {
-    return undefined;
-  }
-
-  const message =
-    "message" in error.data && typeof (error.data as { message?: unknown }).message === "string"
-      ? String((error.data as { message: string }).message)
-      : "";
-  const code =
-    "code" in error.data && typeof (error.data as { code?: unknown }).code === "string"
-      ? String((error.data as { code: string }).code)
-      : "";
-
-  if (message && code) {
-    return `${message} (code: ${code})`;
-  }
-
-  return message || code || undefined;
-};
-
-const buildErrorDescription = (summary: string, detail?: string): string =>
-  detail ? `${summary} Detail: ${detail}` : summary;
-
-const toAiStatusLabel = (status?: string): string => {
-  if (!status) {
-    return "暂无状态";
-  }
-
-  if (status === "NOT_REQUESTED") {
-    return "NOT_REQUESTED（未请求/策略未触发，正常）";
-  }
-
-  return status;
 };
 
 type StudentDashboardViewModel =
@@ -91,12 +53,10 @@ export default async function StudentDashboardPage() {
   } catch (error) {
     if (error instanceof FetchJsonError) {
       const detail = extractRawDetail(error);
-      const summaryByStatus: Record<number, string> = {
-        401: "登录状态已失效，请重新登录。",
-        403: "无权限访问学习看板。",
-        404: "学习看板功能未启用、不可用或资源不存在。",
-      };
-      const summary = summaryByStatus[error.status] ?? "加载学习看板失败，请稍后重试。";
+      const summary =
+        error.status === 403
+          ? "无权限访问学习看板。"
+          : getCommonErrorSummary(error.status, "加载学习看板");
 
       viewModel = {
         mode: "error",
@@ -184,7 +144,7 @@ export default async function StudentDashboardPage() {
                               <td className="px-4 py-2">{toDisplayText(task.title, "未命名任务")}</td>
                               <td className="px-4 py-2">{toDisplayDate(task.dueAt)}</td>
                               <td className="px-4 py-2">{toDisplayText(task.mySubmissionsCount, "0")}</td>
-                              <td className="px-4 py-2">{toAiStatusLabel(task.aiFeedbackStatus)}</td>
+                              <td className="px-4 py-2">{getAiStatusLabel(task.aiFeedbackStatus)}</td>
                               <td className="px-4 py-2">
                                 {taskPath ? (
                                   <Link href={taskPath} className="text-blue-700 hover:underline">

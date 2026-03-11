@@ -4,8 +4,10 @@ import { EmptyState } from "@/components/blocks/EmptyState";
 import { ErrorState } from "@/components/blocks/ErrorState";
 import { PageHeader } from "@/components/blocks/PageHeader";
 import { fetchJson, FetchJsonError } from "@/lib/api/client";
+import { buildErrorDescription, extractRawDetail } from "@/lib/api/error-presenter";
 import { toAiMetricsResponse } from "@/lib/api/types-teacher";
 import { paths } from "@/lib/routes/paths";
+import { getAiStatusLabel, getCommonErrorSummary } from "@/lib/ui/status";
 import {
   buildQueryString,
   getSingleSearchParam,
@@ -42,34 +44,6 @@ const getRequestOrigin = async (): Promise<string> => {
   return `${protocol}://${host}`;
 };
 
-const extractRawDetail = (error: FetchJsonError): string | undefined => {
-  if (typeof error.data === "string" && error.data.trim()) {
-    return error.data;
-  }
-
-  if (!error.data || typeof error.data !== "object") {
-    return undefined;
-  }
-
-  const message =
-    "message" in error.data && typeof (error.data as { message?: unknown }).message === "string"
-      ? String((error.data as { message: string }).message)
-      : "";
-  const code =
-    "code" in error.data && typeof (error.data as { code?: unknown }).code === "string"
-      ? String((error.data as { code: string }).code)
-      : "";
-
-  if (message && code) {
-    return `${message} (code: ${code})`;
-  }
-
-  return message || code || undefined;
-};
-
-const buildErrorDescription = (summary: string, detail?: string): string =>
-  detail ? `${summary} Detail: ${detail}` : summary;
-
 const resolveQueryState = (
   query: Awaited<AiMetricsPageProps["searchParams"]>
 ): AiMetricsQueryState => ({
@@ -104,14 +78,6 @@ const toPercent = (value: unknown): string => {
     return "—";
   }
   return `${(value * 100).toFixed(1)}%`;
-};
-
-const formatStatusLabel = (rawStatus: string): string => {
-  const normalized = rawStatus.toUpperCase();
-  if (normalized === "NOT_REQUESTED") {
-    return "NOT_REQUESTED（未请求/策略未触发，正常）";
-  }
-  return rawStatus;
 };
 
 type AiMetricsViewModel =
@@ -152,12 +118,10 @@ export default async function AiMetricsPage({ params, searchParams }: AiMetricsP
   } catch (error) {
     if (error instanceof FetchJsonError) {
       const detail = extractRawDetail(error);
-      const summaryByStatus: Record<number, string> = {
-        401: "登录状态已失效，请重新登录。",
-        403: "无权限访问 AI 指标页面。",
-        404: "AI 指标功能未启用、不可用或资源不存在。",
-      };
-      const summary = summaryByStatus[error.status] ?? "加载 AI 指标失败，请稍后重试。";
+      const summary =
+        error.status === 403
+          ? "无权限访问 AI 指标页面。"
+          : getCommonErrorSummary(error.status, "加载 AI 指标");
 
       viewModel = {
         mode: "error",
@@ -185,9 +149,17 @@ export default async function AiMetricsPage({ params, searchParams }: AiMetricsP
         title="AI 指标"
         description={`班级 ${classroomId} | 课堂任务 ${classroomTaskId}`}
         actions={
-          <Link href={paths.teacher.classroomTasks(classroomId)} className="text-sm text-blue-700 hover:underline">
-            返回任务列表
-          </Link>
+          <div className="flex items-center gap-3 text-sm">
+            <Link href={paths.teacher.classroomTasks(classroomId)} className="text-blue-700 hover:underline">
+              返回任务列表
+            </Link>
+            <Link
+              href={paths.teacher.classroomTaskSubmissions(classroomId, classroomTaskId)}
+              className="text-blue-700 hover:underline"
+            >
+              提交管理
+            </Link>
+          </div>
         }
       />
 
@@ -253,7 +225,7 @@ export default async function AiMetricsPage({ params, searchParams }: AiMetricsP
           <ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-zinc-700">
             {statusEntries.map(([status, value]) => (
               <li key={status}>
-                {formatStatusLabel(status)}: {toDisplayText(value)}
+                {getAiStatusLabel(status)}: {toDisplayText(value)}
               </li>
             ))}
           </ul>

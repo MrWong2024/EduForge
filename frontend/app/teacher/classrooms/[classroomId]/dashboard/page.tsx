@@ -4,6 +4,7 @@ import { EmptyState } from "@/components/blocks/EmptyState";
 import { ErrorState } from "@/components/blocks/ErrorState";
 import { PageHeader } from "@/components/blocks/PageHeader";
 import { fetchJson, FetchJsonError } from "@/lib/api/client";
+import { buildErrorDescription, extractRawDetail } from "@/lib/api/error-presenter";
 import {
   getDashboardAiBreakdown,
   getDashboardItems,
@@ -11,6 +12,7 @@ import {
   toDashboardResponse,
 } from "@/lib/api/types-teacher";
 import { paths } from "@/lib/routes/paths";
+import { getAiStatusLabel, getCommonErrorSummary } from "@/lib/ui/status";
 import { safeGet, toDisplayText } from "@/lib/ui/format";
 
 type DashboardPageProps = {
@@ -26,34 +28,6 @@ const getRequestOrigin = async (): Promise<string> => {
   const protocol = headerMap.get("x-forwarded-proto") ?? "http";
   return `${protocol}://${host}`;
 };
-
-const extractRawDetail = (error: FetchJsonError): string | undefined => {
-  if (typeof error.data === "string" && error.data.trim()) {
-    return error.data;
-  }
-
-  if (!error.data || typeof error.data !== "object") {
-    return undefined;
-  }
-
-  const message =
-    "message" in error.data && typeof (error.data as { message?: unknown }).message === "string"
-      ? String((error.data as { message: string }).message)
-      : "";
-  const code =
-    "code" in error.data && typeof (error.data as { code?: unknown }).code === "string"
-      ? String((error.data as { code: string }).code)
-      : "";
-
-  if (message && code) {
-    return `${message} (code: ${code})`;
-  }
-
-  return message || code || undefined;
-};
-
-const buildErrorDescription = (summary: string, detail?: string): string =>
-  detail ? `${summary} Detail: ${detail}` : summary;
 
 type DashboardViewModel =
   | {
@@ -106,12 +80,10 @@ export default async function ClassroomDashboardPage({ params }: DashboardPagePr
   } catch (error) {
     if (error instanceof FetchJsonError) {
       const detail = extractRawDetail(error);
-      const summaryByStatus: Record<number, string> = {
-        401: "登录状态已失效，请重新登录。",
-        403: "无权限访问该班级看板。",
-        404: "看板功能未启用、不可用或资源不存在。",
-      };
-      const summary = summaryByStatus[error.status] ?? "加载班级看板失败，请稍后重试。";
+      const summary =
+        error.status === 403
+          ? "无权限访问该班级看板。"
+          : getCommonErrorSummary(error.status, "加载班级看板");
       viewModel = {
         mode: "error",
         status: error.status,
@@ -132,12 +104,24 @@ export default async function ClassroomDashboardPage({ params }: DashboardPagePr
         title={`${toDisplayText(viewModel.classroomName, "班级")}看板`}
         description={`班级 ID: ${classroomId}`}
         actions={
-          <div className="flex items-center gap-3 text-sm">
+          <div className="flex flex-wrap items-center gap-3 text-sm">
             <Link href={paths.teacher.classrooms} className="text-blue-700 hover:underline">
               返回班级列表
             </Link>
             <Link href={paths.teacher.classroomTasks(classroomId)} className="text-blue-700 hover:underline">
-              进入任务列表
+              任务列表
+            </Link>
+            <Link href={paths.teacher.classroomMembers(classroomId)} className="text-blue-700 hover:underline">
+              成员管理
+            </Link>
+            <Link href={paths.teacher.classroomWeeklyReport(classroomId)} className="text-blue-700 hover:underline">
+              班级周报
+            </Link>
+            <Link href={paths.teacher.classroomProcessAssessment(classroomId)} className="text-blue-700 hover:underline">
+              过程性评价
+            </Link>
+            <Link href={paths.teacher.classroomExportSnapshot(classroomId)} className="text-blue-700 hover:underline">
+              教学快照
             </Link>
           </div>
         }
@@ -174,7 +158,13 @@ export default async function ClassroomDashboardPage({ params }: DashboardPagePr
                   <td className="px-4 py-3">{toDisplayText(item.title ?? item.name, "未命名任务")}</td>
                   <td className="px-4 py-3">{toDisplayText(item.classroomTaskId ?? item.id ?? item.taskId)}</td>
                   <td className="px-4 py-3">
-                    {toDisplayText(item.aiStatus ?? item.aiFeedbackStatus, "暂无数据")}
+                    {getAiStatusLabel(
+                      typeof item.aiStatus === "string"
+                        ? item.aiStatus
+                        : typeof item.aiFeedbackStatus === "string"
+                          ? item.aiFeedbackStatus
+                          : undefined
+                    )}
                   </td>
                 </tr>
               ))}
@@ -191,7 +181,7 @@ export default async function ClassroomDashboardPage({ params }: DashboardPagePr
           <ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-zinc-700">
             {Object.entries(viewModel.aiBreakdown).map(([status, count]) => (
               <li key={status}>
-                {status}: {toDisplayText(count)}
+                {getAiStatusLabel(status)}: {toDisplayText(count)}
               </li>
             ))}
           </ul>

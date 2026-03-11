@@ -5,41 +5,15 @@ import type { SubmitEventHandler } from "react";
 import { useRouter } from "next/navigation";
 import { ErrorState } from "@/components/blocks/ErrorState";
 import { fetchJson, BrowserFetchJsonError } from "@/lib/api/browser-client";
+import { buildErrorDescription, extractRawDetail } from "@/lib/api/error-presenter";
 import { paths } from "@/lib/routes/paths";
+import { getCommonErrorSummary } from "@/lib/ui/status";
 
 type JoinErrorState = {
   status?: number;
   summary: string;
   detail?: string;
 };
-
-const extractRawDetail = (data: unknown): string | undefined => {
-  if (typeof data === "string" && data.trim()) {
-    return data;
-  }
-
-  if (!data || typeof data !== "object") {
-    return undefined;
-  }
-
-  const message =
-    "message" in data && typeof (data as { message?: unknown }).message === "string"
-      ? String((data as { message: string }).message)
-      : "";
-  const code =
-    "code" in data && typeof (data as { code?: unknown }).code === "string"
-      ? String((data as { code: string }).code)
-      : "";
-
-  if (message && code) {
-    return `${message} (code: ${code})`;
-  }
-
-  return message || code || undefined;
-};
-
-const buildErrorDescription = (summary: string, detail?: string): string =>
-  detail ? `${summary} Detail: ${detail}` : summary;
 
 export function JoinClassroomForm() {
   const router = useRouter();
@@ -75,13 +49,12 @@ export function JoinClassroomForm() {
     } catch (error) {
       if (error instanceof BrowserFetchJsonError) {
         const detail = extractRawDetail(error.data);
-        const summaryByStatus: Record<number, string> = {
-          401: "登录状态已失效，请重新登录。",
+        const summaryByStatus: Partial<Record<number, string>> = {
           400: "加入码无效或班级不存在，请检查后重试。",
           403: "当前账号无权限加入该班级。",
           404: "加入码无效或班级不存在，请检查后重试。",
         };
-        const summary = summaryByStatus[error.status] ?? "加入班级失败，请稍后重试。";
+        const summary = summaryByStatus[error.status] ?? getCommonErrorSummary(error.status, "加入班级");
         setErrorState({
           status: error.status,
           summary,

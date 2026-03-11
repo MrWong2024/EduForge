@@ -5,12 +5,14 @@ import { ErrorState } from "@/components/blocks/ErrorState";
 import { PageHeader } from "@/components/blocks/PageHeader";
 import { TeacherFeedbackForm } from "@/components/teacher/TeacherFeedbackForm";
 import { fetchJson, FetchJsonError } from "@/lib/api/client";
+import { buildErrorDescription, extractRawDetail } from "@/lib/api/error-presenter";
 import {
   groupTeacherFeedbackItems,
   toTeacherFeedbackListResponse,
   type TeacherSubmissionContext,
 } from "@/lib/api/types-teacher";
 import { paths } from "@/lib/routes/paths";
+import { getCommonErrorSummary } from "@/lib/ui/status";
 import { getSingleSearchParam, safeGet, toDisplayDate, toDisplayText } from "@/lib/ui/format";
 
 type TeacherSubmissionDetailPageProps = {
@@ -38,34 +40,6 @@ const getRequestOrigin = async (): Promise<string> => {
   const protocol = headerMap.get("x-forwarded-proto") ?? "http";
   return `${protocol}://${host}`;
 };
-
-const extractRawDetail = (error: FetchJsonError): string | undefined => {
-  if (typeof error.data === "string" && error.data.trim()) {
-    return error.data;
-  }
-
-  if (!error.data || typeof error.data !== "object") {
-    return undefined;
-  }
-
-  const message =
-    "message" in error.data && typeof (error.data as { message?: unknown }).message === "string"
-      ? String((error.data as { message: string }).message)
-      : "";
-  const code =
-    "code" in error.data && typeof (error.data as { code?: unknown }).code === "string"
-      ? String((error.data as { code: string }).code)
-      : "";
-
-  if (message && code) {
-    return `${message} (code: ${code})`;
-  }
-
-  return message || code || undefined;
-};
-
-const buildErrorDescription = (summary: string, detail?: string): string =>
-  detail ? `${summary} Detail: ${detail}` : summary;
 
 type UnknownRecord = Record<string, unknown>;
 
@@ -258,12 +232,10 @@ export default async function TeacherSubmissionDetailPage({
   } catch (error) {
     if (error instanceof FetchJsonError) {
       const detail = extractRawDetail(error);
-      const summaryByStatus: Record<number, string> = {
-        401: "登录状态已失效，请重新登录。",
-        403: "无权限查看或批阅该提交。",
-        404: "提交不存在或功能未启用/不可用。",
-      };
-      const summary = summaryByStatus[error.status] ?? "加载提交反馈失败，请稍后重试。";
+      const summary =
+        error.status === 403
+          ? "无权限查看或批阅该提交。"
+          : getCommonErrorSummary(error.status, "加载提交反馈");
 
       viewModel = {
         mode: "error",
@@ -290,6 +262,10 @@ export default async function TeacherSubmissionDetailPage({
           viewModel.context.classroomTaskId
         )
       : null;
+  const taskHref =
+    viewModel.context.classroomId && viewModel.context.classroomTaskId
+      ? paths.teacher.classroomTaskDetail(viewModel.context.classroomId, viewModel.context.classroomTaskId)
+      : null;
   const groupedFeedback = groupTeacherFeedbackItems(viewModel.feedback.items);
   const groupedSections = [
     { key: "teacher", title: "教师反馈", items: groupedFeedback.teacher },
@@ -307,6 +283,11 @@ export default async function TeacherSubmissionDetailPage({
             {backHref ? (
               <Link href={backHref} className="text-blue-700 hover:underline">
                 返回任务提交列表
+              </Link>
+            ) : null}
+            {taskHref ? (
+              <Link href={taskHref} className="text-blue-700 hover:underline">
+                返回任务详情
               </Link>
             ) : null}
             <Link href={paths.teacher.classrooms} className="text-blue-700 hover:underline">

@@ -4,8 +4,10 @@ import { EmptyState } from "@/components/blocks/EmptyState";
 import { ErrorState } from "@/components/blocks/ErrorState";
 import { PageHeader } from "@/components/blocks/PageHeader";
 import { fetchJson, FetchJsonError } from "@/lib/api/client";
+import { buildErrorDescription, extractRawDetail } from "@/lib/api/error-presenter";
 import { toClassroomListResponse } from "@/lib/api/types-teacher";
 import { paths } from "@/lib/routes/paths";
+import { getCommonErrorSummary } from "@/lib/ui/status";
 import { toDisplayText } from "@/lib/ui/format";
 
 type TeacherClassroomsPageProps = {
@@ -32,34 +34,6 @@ const getRequestOrigin = async (): Promise<string> => {
   const protocol = headerMap.get("x-forwarded-proto") ?? "http";
   return `${protocol}://${host}`;
 };
-
-const extractRawDetail = (error: FetchJsonError): string | undefined => {
-  if (typeof error.data === "string" && error.data.trim()) {
-    return error.data;
-  }
-
-  if (!error.data || typeof error.data !== "object") {
-    return undefined;
-  }
-
-  const message =
-    "message" in error.data && typeof (error.data as { message?: unknown }).message === "string"
-      ? String((error.data as { message: string }).message)
-      : "";
-  const code =
-    "code" in error.data && typeof (error.data as { code?: unknown }).code === "string"
-      ? String((error.data as { code: string }).code)
-      : "";
-
-  if (message && code) {
-    return `${message} (code: ${code})`;
-  }
-
-  return message || code || undefined;
-};
-
-const buildErrorDescription = (summary: string, detail?: string): string =>
-  detail ? `${summary} Detail: ${detail}` : summary;
 
 type ClassroomsViewModel =
   | {
@@ -109,12 +83,10 @@ export default async function TeacherClassroomsPage({ searchParams }: TeacherCla
   } catch (error) {
     if (error instanceof FetchJsonError) {
       const detail = extractRawDetail(error);
-      const summaryByStatus: Record<number, string> = {
-        401: "登录状态已失效，请重新登录。",
-        403: "无权限访问班级列表。",
-        404: "班级列表功能未启用、不可用或资源不存在。",
-      };
-      const summary = summaryByStatus[error.status] ?? "加载班级列表失败，请稍后重试。";
+      const summary =
+        error.status === 403
+          ? "无权限访问班级列表。"
+          : getCommonErrorSummary(error.status, "加载班级列表");
       viewModel = {
         mode: "error",
         status: error.status,

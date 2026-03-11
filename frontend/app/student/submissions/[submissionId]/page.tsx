@@ -6,13 +6,19 @@ import { PageHeader } from "@/components/blocks/PageHeader";
 import { AiProcessingHint } from "@/components/student/AiProcessingHint";
 import { RequestAiFeedbackButton } from "@/components/student/RequestAiFeedbackButton";
 import { fetchJson, FetchJsonError } from "@/lib/api/client";
+import { buildErrorDescription, extractRawDetail } from "@/lib/api/error-presenter";
 import { toListFeedbackResponse } from "@/lib/api/types-student";
 import { paths } from "@/lib/routes/paths";
+import { getCommonErrorSummary } from "@/lib/ui/status";
 import { getSingleSearchParam, safeGet, toDisplayDate, toDisplayText } from "@/lib/ui/format";
 
 type SubmissionDetailPageProps = {
   params: Promise<{ submissionId: string }>;
-  searchParams: Promise<{ status?: string | string[] }>;
+  searchParams: Promise<{
+    status?: string | string[];
+    classroomId?: string | string[];
+    classroomTaskId?: string | string[];
+  }>;
 };
 
 const AI_STATUSES = [
@@ -66,34 +72,6 @@ const getRequestOrigin = async (): Promise<string> => {
   return `${protocol}://${host}`;
 };
 
-const extractRawDetail = (error: FetchJsonError): string | undefined => {
-  if (typeof error.data === "string" && error.data.trim()) {
-    return error.data;
-  }
-
-  if (!error.data || typeof error.data !== "object") {
-    return undefined;
-  }
-
-  const message =
-    "message" in error.data && typeof (error.data as { message?: unknown }).message === "string"
-      ? String((error.data as { message: string }).message)
-      : "";
-  const code =
-    "code" in error.data && typeof (error.data as { code?: unknown }).code === "string"
-      ? String((error.data as { code: string }).code)
-      : "";
-
-  if (message && code) {
-    return `${message} (code: ${code})`;
-  }
-
-  return message || code || undefined;
-};
-
-const buildErrorDescription = (summary: string, detail?: string): string =>
-  detail ? `${summary} Detail: ${detail}` : summary;
-
 type SubmissionFeedbackViewModel =
   | {
       mode: "ready";
@@ -113,6 +91,12 @@ export default async function StudentSubmissionDetailPage({
   const { submissionId } = await params;
   const query = await searchParams;
   const queryStatus = parseAiStatus(getSingleSearchParam(query.status));
+  const classroomId = getSingleSearchParam(query.classroomId);
+  const classroomTaskId = getSingleSearchParam(query.classroomTaskId);
+  const taskDetailHref =
+    classroomId && classroomTaskId
+      ? paths.student.taskDetail(classroomId, classroomTaskId)
+      : null;
 
   let viewModel: SubmissionFeedbackViewModel = {
     mode: "error",
@@ -138,12 +122,10 @@ export default async function StudentSubmissionDetailPage({
   } catch (error) {
     if (error instanceof FetchJsonError) {
       const detail = extractRawDetail(error);
-      const summaryByStatus: Record<number, string> = {
-        401: "登录状态已失效，请重新登录。",
-        403: "无权限访问该提交反馈。",
-        404: "提交反馈不存在或功能未启用/不可用。",
-      };
-      const summary = summaryByStatus[error.status] ?? "加载提交反馈失败，请稍后重试。";
+      const summary =
+        error.status === 403
+          ? "无权限访问该提交反馈。"
+          : getCommonErrorSummary(error.status, "加载提交反馈");
 
       viewModel = {
         mode: "error",
@@ -169,9 +151,16 @@ export default async function StudentSubmissionDetailPage({
         title="提交详情 / 反馈"
         description={`提交 ID: ${submissionId}`}
         actions={
-          <Link href={paths.student.dashboard} className="text-sm text-blue-700 hover:underline">
-            返回学习看板
-          </Link>
+          <div className="flex items-center gap-3 text-sm">
+            {taskDetailHref ? (
+              <Link href={taskDetailHref} className="text-blue-700 hover:underline">
+                返回任务详情
+              </Link>
+            ) : null}
+            <Link href={paths.student.dashboard} className="text-blue-700 hover:underline">
+              返回学习看板
+            </Link>
+          </div>
         }
       />
 

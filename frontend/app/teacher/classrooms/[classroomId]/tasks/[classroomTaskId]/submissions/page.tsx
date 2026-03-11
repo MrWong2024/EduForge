@@ -4,12 +4,14 @@ import { EmptyState } from "@/components/blocks/EmptyState";
 import { ErrorState } from "@/components/blocks/ErrorState";
 import { PageHeader } from "@/components/blocks/PageHeader";
 import { buildProxyPath, fetchJson, FetchJsonError } from "@/lib/api/client";
+import { buildErrorDescription, extractRawDetail } from "@/lib/api/error-presenter";
 import {
   toClassroomTask,
   toClassroomTaskSubmissionsResponse,
   toClassroomSummary,
 } from "@/lib/api/types-teacher";
 import { paths } from "@/lib/routes/paths";
+import { getAiStatusLabel, getCommonErrorSummary } from "@/lib/ui/status";
 import { buildQueryString, safeGet, toDisplayDate, toDisplayText } from "@/lib/ui/format";
 
 type ClassroomTaskSubmissionsPageProps = {
@@ -25,34 +27,6 @@ const getRequestOrigin = async (): Promise<string> => {
   const protocol = headerMap.get("x-forwarded-proto") ?? "http";
   return `${protocol}://${host}`;
 };
-
-const extractRawDetail = (error: FetchJsonError): string | undefined => {
-  if (typeof error.data === "string" && error.data.trim()) {
-    return error.data;
-  }
-
-  if (!error.data || typeof error.data !== "object") {
-    return undefined;
-  }
-
-  const message =
-    "message" in error.data && typeof (error.data as { message?: unknown }).message === "string"
-      ? String((error.data as { message: string }).message)
-      : "";
-  const code =
-    "code" in error.data && typeof (error.data as { code?: unknown }).code === "string"
-      ? String((error.data as { code: string }).code)
-      : "";
-
-  if (message && code) {
-    return `${message} (code: ${code})`;
-  }
-
-  return message || code || undefined;
-};
-
-const buildErrorDescription = (summary: string, detail?: string): string =>
-  detail ? `${summary} Detail: ${detail}` : summary;
 
 const asString = (value: unknown): string | undefined =>
   typeof value === "string" && value.trim() ? value.trim() : undefined;
@@ -140,12 +114,10 @@ export default async function ClassroomTaskSubmissionsPage({
   } catch (error) {
     if (error instanceof FetchJsonError) {
       const detail = extractRawDetail(error);
-      const summaryByStatus: Record<number, string> = {
-        401: "登录状态已失效，请重新登录。",
-        403: "无权限管理任务。",
-        404: "提交管理功能未启用、不可用或资源不存在。",
-      };
-      const summary = summaryByStatus[error.status] ?? "加载任务提交记录失败，请稍后重试。";
+      const summary =
+        error.status === 403
+          ? "无权限管理任务。"
+          : getCommonErrorSummary(error.status, "加载任务提交记录");
 
       viewModel = {
         mode: "error",
@@ -173,10 +145,34 @@ export default async function ClassroomTaskSubmissionsPage({
         actions={
           <div className="flex flex-wrap items-center gap-3 text-sm">
             <Link
+              href={paths.teacher.classroomTasks(classroomId)}
+              className="text-blue-700 hover:underline"
+            >
+              返回任务列表
+            </Link>
+            <Link
               href={paths.teacher.classroomTaskDetail(classroomId, classroomTaskId)}
               className="text-blue-700 hover:underline"
             >
               返回任务详情
+            </Link>
+            <Link
+              href={paths.teacher.classroomTaskTrajectory(classroomId, classroomTaskId)}
+              className="text-blue-700 hover:underline"
+            >
+              学习轨迹
+            </Link>
+            <Link
+              href={paths.teacher.classroomTaskReviewPack(classroomId, classroomTaskId)}
+              className="text-blue-700 hover:underline"
+            >
+              课堂复盘
+            </Link>
+            <Link
+              href={paths.teacher.classroomTaskAiMetrics(classroomId, classroomTaskId)}
+              className="text-blue-700 hover:underline"
+            >
+              AI 指标
             </Link>
             {viewModel.rawSubmissionsHref ? (
               <a
@@ -260,7 +256,7 @@ export default async function ClassroomTaskSubmissionsPage({
                     <td className="px-4 py-3">{toDisplayText(submission.studentId)}</td>
                     <td className="px-4 py-3">{toDisplayText(submission.attemptNo)}</td>
                     <td className="px-4 py-3">{toDisplayText(submission.status)}</td>
-                    <td className="px-4 py-3">{toDisplayText(submission.aiFeedbackStatus)}</td>
+                    <td className="px-4 py-3">{getAiStatusLabel(submission.aiFeedbackStatus)}</td>
                     <td className="px-4 py-3">{toDisplayDate(submission.submittedAt)}</td>
                     <td className="px-4 py-3">{toDisplayText(submission.isLate)}</td>
                     <td className="px-4 py-3">

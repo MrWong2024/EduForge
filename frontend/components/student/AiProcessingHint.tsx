@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { getAiStatusLabel } from "@/lib/ui/status";
 
 type AiProcessingHintProps = {
   status: string | null | undefined;
@@ -33,7 +34,7 @@ export function AiProcessingHint({ status, variant, helpHref }: AiProcessingHint
     <section className="rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900">
       <p className="font-semibold">AI 反馈正在生成</p>
       <p className="mt-1">
-        当前状态为{toPhaseText(normalizedStatus)}，属于正常状态。若长时间未出结果，请联系老师或管理员确认 AI
+        当前状态为{toPhaseText(normalizedStatus)}（{getAiStatusLabel(normalizedStatus)}），属于正常状态。若长时间未出结果，请联系老师或管理员确认 AI
         处理后台是否开启，以及当前配额或网络是否可用。
       </p>
       <p className="mt-1">{toVariantTip(variant)}</p>

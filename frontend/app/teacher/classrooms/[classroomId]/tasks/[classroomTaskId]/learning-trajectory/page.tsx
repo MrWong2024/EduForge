@@ -4,8 +4,10 @@ import { EmptyState } from "@/components/blocks/EmptyState";
 import { ErrorState } from "@/components/blocks/ErrorState";
 import { PageHeader } from "@/components/blocks/PageHeader";
 import { fetchJson, FetchJsonError } from "@/lib/api/client";
+import { buildErrorDescription, extractRawDetail } from "@/lib/api/error-presenter";
 import { toLearningTrajectoryResponse } from "@/lib/api/types-teacher";
 import { paths } from "@/lib/routes/paths";
+import { getAiStatusLabel, getCommonErrorSummary } from "@/lib/ui/status";
 import {
   buildQueryString,
   getSingleSearchParam,
@@ -58,34 +60,6 @@ const getRequestOrigin = async (): Promise<string> => {
   const protocol = headerMap.get("x-forwarded-proto") ?? "http";
   return `${protocol}://${host}`;
 };
-
-const extractRawDetail = (error: FetchJsonError): string | undefined => {
-  if (typeof error.data === "string" && error.data.trim()) {
-    return error.data;
-  }
-
-  if (!error.data || typeof error.data !== "object") {
-    return undefined;
-  }
-
-  const message =
-    "message" in error.data && typeof (error.data as { message?: unknown }).message === "string"
-      ? String((error.data as { message: string }).message)
-      : "";
-  const code =
-    "code" in error.data && typeof (error.data as { code?: unknown }).code === "string"
-      ? String((error.data as { code: string }).code)
-      : "";
-
-  if (message && code) {
-    return `${message} (code: ${code})`;
-  }
-
-  return message || code || undefined;
-};
-
-const buildErrorDescription = (summary: string, detail?: string): string =>
-  detail ? `${summary} Detail: ${detail}` : summary;
 
 const resolveQueryState = (
   query: Awaited<LearningTrajectoryPageProps["searchParams"]>
@@ -178,12 +152,10 @@ export default async function LearningTrajectoryPage({
   } catch (error) {
     if (error instanceof FetchJsonError) {
       const detail = extractRawDetail(error);
-      const summaryByStatus: Record<number, string> = {
-        401: "登录状态已失效，请重新登录。",
-        403: "无权限访问学习轨迹页面。",
-        404: "学习轨迹功能未启用、不可用或资源不存在。",
-      };
-      const summary = summaryByStatus[error.status] ?? "加载学习轨迹失败，请稍后重试。";
+      const summary =
+        error.status === 403
+          ? "无权限访问学习轨迹页面。"
+          : getCommonErrorSummary(error.status, "加载学习轨迹");
 
       viewModel = {
         mode: "error",
@@ -208,9 +180,17 @@ export default async function LearningTrajectoryPage({
         title="学习轨迹"
         description={`班级 ${classroomId} | 课堂任务 ${classroomTaskId}`}
         actions={
-          <Link href={paths.teacher.classroomTasks(classroomId)} className="text-sm text-blue-700 hover:underline">
-            返回任务列表
-          </Link>
+          <div className="flex items-center gap-3 text-sm">
+            <Link href={paths.teacher.classroomTasks(classroomId)} className="text-blue-700 hover:underline">
+              返回任务列表
+            </Link>
+            <Link
+              href={paths.teacher.classroomTaskSubmissions(classroomId, classroomTaskId)}
+              className="text-blue-700 hover:underline"
+            >
+              提交管理
+            </Link>
+          </div>
         }
       />
 
@@ -308,9 +288,7 @@ export default async function LearningTrajectoryPage({
               {viewModel.data.items.map((item, index) => {
                 const status = safeGet<unknown>(item, "latestAiFeedbackStatus", undefined);
                 const displayStatus =
-                  typeof status === "string" && status === "NOT_REQUESTED"
-                    ? "NOT_REQUESTED（未请求，正常）"
-                    : toDisplayText(status);
+                  typeof status === "string" ? getAiStatusLabel(status) : toDisplayText(status);
 
                 return (
                   <tr key={String(safeGet(item, "studentId", `student-${index}`))} className="border-t border-zinc-100">

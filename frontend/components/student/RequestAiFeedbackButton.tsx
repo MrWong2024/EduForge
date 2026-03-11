@@ -4,7 +4,9 @@ import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { ErrorState } from "@/components/blocks/ErrorState";
 import { fetchJson, BrowserFetchJsonError } from "@/lib/api/browser-client";
+import { buildErrorDescription, extractRawDetail } from "@/lib/api/error-presenter";
 import { toRequestAiFeedbackResponse } from "@/lib/api/types-student";
+import { getAiStatusHint, getCommonErrorSummary } from "@/lib/ui/status";
 
 type RequestAiFeedbackButtonProps = {
   submissionId: string;
@@ -19,43 +21,6 @@ type RequestErrorState = {
 
 const toNormalizedStatus = (value?: string): string | undefined =>
   value && value.trim() ? value.trim().toUpperCase() : undefined;
-
-const extractRawDetail = (data: unknown): string | undefined => {
-  if (typeof data === "string" && data.trim()) {
-    return data;
-  }
-
-  if (!data || typeof data !== "object") {
-    return undefined;
-  }
-
-  const message =
-    "message" in data && typeof (data as { message?: unknown }).message === "string"
-      ? String((data as { message: string }).message)
-      : "";
-  const code =
-    "code" in data && typeof (data as { code?: unknown }).code === "string"
-      ? String((data as { code: string }).code)
-      : "";
-
-  if (message && code) {
-    return `${message} (code: ${code})`;
-  }
-
-  return message || code || undefined;
-};
-
-const buildErrorDescription = (summary: string, detail?: string): string =>
-  detail ? `${summary} Detail: ${detail}` : summary;
-
-const statusHintMap: Record<string, string> = {
-  NOT_REQUESTED: "尚未请求 AI 反馈。",
-  PENDING: "AI 反馈排队中，请稍候。",
-  RUNNING: "AI 反馈处理中，请稍候。",
-  SUCCEEDED: "AI 反馈已生成，可查看反馈内容。",
-  FAILED: "上次处理失败，可再次请求 AI 反馈。",
-  DEAD: "AI 任务已终止，不可自动重试，请联系老师。",
-};
 
 const getButtonLabel = (status?: string): string => {
   if (status === "PENDING") {
@@ -94,8 +59,7 @@ export function RequestAiFeedbackButton({
     if (!status) {
       return "可手工触发 AI 反馈请求。";
     }
-
-    return statusHintMap[status] ?? `当前状态：${status}`;
+    return getAiStatusHint(status);
   }, [status]);
 
   const handleRequest = async () => {
@@ -129,12 +93,10 @@ export function RequestAiFeedbackButton({
     } catch (error) {
       if (error instanceof BrowserFetchJsonError) {
         const detail = extractRawDetail(error.data);
-        const summaryByStatus: Record<number, string> = {
-          401: "登录状态已失效，请重新登录。",
-          403: "无权限触发该提交的 AI 反馈请求。",
-          404: "提交不存在或 AI 功能未启用/不可用。",
-        };
-        const summary = summaryByStatus[error.status] ?? "请求 AI 反馈失败，请稍后重试。";
+        const summary =
+          error.status === 403
+            ? "无权限触发该提交的 AI 反馈请求。"
+            : getCommonErrorSummary(error.status, "请求 AI 反馈");
 
         setErrorState({
           status: error.status,

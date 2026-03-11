@@ -5,12 +5,14 @@ import { ErrorState } from "@/components/blocks/ErrorState";
 import { PageHeader } from "@/components/blocks/PageHeader";
 import { RemoveStudentButton } from "@/components/teacher/RemoveStudentButton";
 import { fetchJson, FetchJsonError } from "@/lib/api/client";
+import { buildErrorDescription, extractRawDetail } from "@/lib/api/error-presenter";
 import {
   toClassroomStudentsResponse,
   toClassroomSummary,
   type ClassroomStudent,
 } from "@/lib/api/types-teacher";
 import { paths } from "@/lib/routes/paths";
+import { getCommonErrorSummary } from "@/lib/ui/status";
 import {
   buildQueryString,
   getSingleSearchParam,
@@ -38,34 +40,6 @@ const getRequestOrigin = async (): Promise<string> => {
   const protocol = headerMap.get("x-forwarded-proto") ?? "http";
   return `${protocol}://${host}`;
 };
-
-const extractRawDetail = (error: FetchJsonError): string | undefined => {
-  if (typeof error.data === "string" && error.data.trim()) {
-    return error.data;
-  }
-
-  if (!error.data || typeof error.data !== "object") {
-    return undefined;
-  }
-
-  const message =
-    "message" in error.data && typeof (error.data as { message?: unknown }).message === "string"
-      ? String((error.data as { message: string }).message)
-      : "";
-  const code =
-    "code" in error.data && typeof (error.data as { code?: unknown }).code === "string"
-      ? String((error.data as { code: string }).code)
-      : "";
-
-  if (message && code) {
-    return `${message} (code: ${code})`;
-  }
-
-  return message || code || undefined;
-};
-
-const buildErrorDescription = (summary: string, detail?: string): string =>
-  detail ? `${summary} Detail: ${detail}` : summary;
 
 const resolveQueryState = (
   query: Awaited<MembersPageProps["searchParams"]>
@@ -151,12 +125,10 @@ export default async function ClassroomMembersPage({ params, searchParams }: Mem
   } catch (error) {
     if (error instanceof FetchJsonError) {
       const detail = extractRawDetail(error);
-      const summaryByStatus: Record<number, string> = {
-        401: "登录状态已失效，请重新登录。",
-        403: "无权限管理该班级。",
-        404: "成员管理功能未启用、不可用或资源不存在。",
-      };
-      const summary = summaryByStatus[error.status] ?? "加载班级成员失败，请稍后重试。";
+      const summary =
+        error.status === 403
+          ? "无权限管理该班级。"
+          : getCommonErrorSummary(error.status, "加载班级成员");
       viewModel = {
         mode: "error",
         status: error.status,
@@ -175,9 +147,14 @@ export default async function ClassroomMembersPage({ params, searchParams }: Mem
         title="班级成员"
         description={`${toDisplayText(viewModel.classroomName, "班级")}（ID: ${classroomId}）`}
         actions={
-          <Link href={paths.teacher.classroomDashboard(classroomId)} className="text-sm text-blue-700 hover:underline">
-            返回班级看板
-          </Link>
+          <div className="flex items-center gap-3 text-sm">
+            <Link href={paths.teacher.classroomDashboard(classroomId)} className="text-blue-700 hover:underline">
+              返回班级看板
+            </Link>
+            <Link href={paths.teacher.classroomTasks(classroomId)} className="text-blue-700 hover:underline">
+              课堂任务
+            </Link>
+          </div>
         }
       />
 

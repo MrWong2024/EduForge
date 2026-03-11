@@ -6,8 +6,10 @@ import { PageHeader } from "@/components/blocks/PageHeader";
 import { AiProcessingHint } from "@/components/student/AiProcessingHint";
 import { SubmissionForm } from "@/components/student/SubmissionForm";
 import { fetchJson, FetchJsonError } from "@/lib/api/client";
+import { buildErrorDescription, extractRawDetail } from "@/lib/api/error-presenter";
 import { toMyTaskDetailResponse } from "@/lib/api/types-student";
 import { paths } from "@/lib/routes/paths";
+import { getAiStatusHint, getAiStatusLabel, getCommonErrorSummary } from "@/lib/ui/status";
 import {
   buildQueryString,
   getSingleSearchParam,
@@ -42,34 +44,6 @@ const getRequestOrigin = async (): Promise<string> => {
   return `${protocol}://${host}`;
 };
 
-const extractRawDetail = (error: FetchJsonError): string | undefined => {
-  if (typeof error.data === "string" && error.data.trim()) {
-    return error.data;
-  }
-
-  if (!error.data || typeof error.data !== "object") {
-    return undefined;
-  }
-
-  const message =
-    "message" in error.data && typeof (error.data as { message?: unknown }).message === "string"
-      ? String((error.data as { message: string }).message)
-      : "";
-  const code =
-    "code" in error.data && typeof (error.data as { code?: unknown }).code === "string"
-      ? String((error.data as { code: string }).code)
-      : "";
-
-  if (message && code) {
-    return `${message} (code: ${code})`;
-  }
-
-  return message || code || undefined;
-};
-
-const buildErrorDescription = (summary: string, detail?: string): string =>
-  detail ? `${summary} Detail: ${detail}` : summary;
-
 const resolveQueryState = (
   query: Awaited<StudentTaskDetailPageProps["searchParams"]>
 ): TaskDetailQueryState => ({
@@ -103,48 +77,34 @@ const buildHref = (
   return query ? `${basePath}?${query}` : basePath;
 };
 
-const toAiStatusLabel = (status?: string): string => {
-  if (!status) {
-    return "暂无状态";
-  }
-
-  if (status === "NOT_REQUESTED") {
-    return "NOT_REQUESTED（未请求/策略未触发，正常）";
-  }
-
-  return status;
-};
-
 const toAiStatusDescription = (status?: string): string | null => {
-  if (!status) {
+  const hint = getAiStatusHint(status);
+  if (!status || hint === "当前暂无 AI 状态。") {
     return null;
   }
-
   if (status === "NOT_REQUESTED") {
     return "当前为正常未请求状态。如需 AI 反馈，请进入提交详情后点击“请求 AI 反馈”。";
   }
-
-  if (status === "PENDING") {
-    return "AI 反馈已进入队列，正在等待处理。";
-  }
-
-  if (status === "RUNNING") {
-    return "AI 反馈正在处理中，通常需要一点时间。";
-  }
-
-  return null;
+  return hint;
 };
 
 const isProcessingAiStatus = (status?: string): boolean =>
   status === "PENDING" || status === "RUNNING";
 
-const buildSubmissionFeedbackHref = (submissionId: string, aiStatus?: string): string => {
+const buildSubmissionFeedbackHref = (
+  submissionId: string,
+  classroomId: string,
+  classroomTaskId: string,
+  aiStatus?: string
+): string => {
   const basePath = paths.student.submissionDetail(submissionId);
-  if (!aiStatus) {
-    return basePath;
+  const query = new URLSearchParams({
+    classroomId,
+    classroomTaskId,
+  });
+  if (aiStatus) {
+    query.set("status", aiStatus);
   }
-
-  const query = new URLSearchParams({ status: aiStatus });
   return `${basePath}?${query.toString()}`;
 };
 
@@ -195,12 +155,10 @@ export default async function StudentTaskDetailPage({
   } catch (error) {
     if (error instanceof FetchJsonError) {
       const detail = extractRawDetail(error);
-      const summaryByStatus: Record<number, string> = {
-        401: "登录状态已失效，请重新登录。",
-        403: "无权限访问该任务详情。",
-        404: "任务详情功能未启用、不可用或资源不存在。",
-      };
-      const summary = summaryByStatus[error.status] ?? "加载任务详情失败，请稍后重试。";
+      const summary =
+        error.status === 403
+          ? "无权限访问该任务详情。"
+          : getCommonErrorSummary(error.status, "加载任务详情");
 
       viewModel = {
         mode: "error",
@@ -220,11 +178,11 @@ export default async function StudentTaskDetailPage({
   const dueAt = safeGet<string | null>(viewModel.data.classroomTask, "dueAt", null);
   const allowLate = safeGet<boolean | null>(viewModel.data.classroomTask, "settings.allowLate", null);
   const latestRawStatus = safeGet<string | undefined>(viewModel.data.latest, "aiFeedbackStatus", undefined);
-  const latestStatus = toAiStatusLabel(latestRawStatus);
+  const latestStatus = getAiStatusLabel(latestRawStatus);
   const latestStatusDescription = toAiStatusDescription(latestRawStatus);
   const latestSubmissionId = safeGet<string | undefined>(viewModel.data.latest, "submissionId", undefined);
   const latestSubmissionHref = latestSubmissionId
-    ? buildSubmissionFeedbackHref(latestSubmissionId, latestRawStatus)
+    ? buildSubmissionFeedbackHref(latestSubmissionId, classroomId, classroomTaskId, latestRawStatus)
     : null;
 
   return (
@@ -233,9 +191,14 @@ export default async function StudentTaskDetailPage({
         title={taskTitle}
         description={`班级 ID: ${classroomId} | 课堂任务 ID: ${classroomTaskId}`}
         actions={
-          <Link href={paths.student.dashboard} className="text-sm text-blue-700 hover:underline">
-            返回学习看板
-          </Link>
+          <div className="flex items-center gap-3 text-sm">
+            <Link href={paths.student.dashboard} className="text-blue-700 hover:underline">
+              返回学习看板
+            </Link>
+            <Link href={paths.student.aiHelp} className="text-blue-700 hover:underline">
+              AI 帮助
+            </Link>
+          </div>
         }
       />
 
@@ -327,7 +290,12 @@ export default async function StudentTaskDetailPage({
                   undefined
                 );
                 const feedbackHref = submissionId
-                  ? buildSubmissionFeedbackHref(submissionId, submissionAiStatus)
+                  ? buildSubmissionFeedbackHref(
+                      submissionId,
+                      classroomId,
+                      classroomTaskId,
+                      submissionAiStatus
+                    )
                   : null;
 
                 return (
@@ -340,7 +308,7 @@ export default async function StudentTaskDetailPage({
                     <td className="px-4 py-3">
                       {toDisplayDate(safeGet<string | null>(submission, "createdAt", null))}
                     </td>
-                    <td className="px-4 py-3">{toAiStatusLabel(submissionAiStatus)}</td>
+                    <td className="px-4 py-3">{getAiStatusLabel(submissionAiStatus)}</td>
                     <td className="px-4 py-3">
                       {feedbackHref ? (
                         <Link href={feedbackHref} className="text-blue-700 hover:underline">

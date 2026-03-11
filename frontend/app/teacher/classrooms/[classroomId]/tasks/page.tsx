@@ -5,12 +5,14 @@ import { ErrorState } from "@/components/blocks/ErrorState";
 import { PageHeader } from "@/components/blocks/PageHeader";
 import { PublishClassroomTaskForm } from "@/components/teacher/PublishClassroomTaskForm";
 import { fetchJson, FetchJsonError } from "@/lib/api/client";
+import { buildErrorDescription, extractRawDetail } from "@/lib/api/error-presenter";
 import {
   toClassroomSummary,
   toClassroomTasksResponse,
   toLearningTaskListResponse,
 } from "@/lib/api/types-teacher";
 import { paths } from "@/lib/routes/paths";
+import { getAiStatusLabel, getCommonErrorSummary } from "@/lib/ui/status";
 import { toDisplayDate, toDisplayText } from "@/lib/ui/format";
 
 type ClassroomTasksPageProps = {
@@ -26,34 +28,6 @@ const getRequestOrigin = async (): Promise<string> => {
   const protocol = headerMap.get("x-forwarded-proto") ?? "http";
   return `${protocol}://${host}`;
 };
-
-const extractRawDetail = (error: FetchJsonError): string | undefined => {
-  if (typeof error.data === "string" && error.data.trim()) {
-    return error.data;
-  }
-
-  if (!error.data || typeof error.data !== "object") {
-    return undefined;
-  }
-
-  const message =
-    "message" in error.data && typeof (error.data as { message?: unknown }).message === "string"
-      ? String((error.data as { message: string }).message)
-      : "";
-  const code =
-    "code" in error.data && typeof (error.data as { code?: unknown }).code === "string"
-      ? String((error.data as { code: string }).code)
-      : "";
-
-  if (message && code) {
-    return `${message} (code: ${code})`;
-  }
-
-  return message || code || undefined;
-};
-
-const buildErrorDescription = (summary: string, detail?: string): string =>
-  detail ? `${summary} Detail: ${detail}` : summary;
 
 type TasksViewModel =
   | {
@@ -102,12 +76,10 @@ export default async function ClassroomTasksPage({ params }: ClassroomTasksPageP
   } catch (error) {
     if (error instanceof FetchJsonError) {
       const detail = extractRawDetail(error);
-      const summaryByStatus: Record<number, string> = {
-        401: "登录状态已失效，请重新登录。",
-        403: "无权限管理任务。",
-        404: "任务功能未启用、不可用或资源不存在。",
-      };
-      const summary = summaryByStatus[error.status] ?? "加载班级任务列表失败，请稍后重试。";
+      const summary =
+        error.status === 403
+          ? "无权限管理任务。"
+          : getCommonErrorSummary(error.status, "加载班级任务列表");
       viewModel = {
         mode: "error",
         status: error.status,
@@ -128,12 +100,15 @@ export default async function ClassroomTasksPage({ params }: ClassroomTasksPageP
         title="课堂任务"
         description={`${toDisplayText(viewModel.classroomName, "班级")}（ID: ${classroomId}）`}
         actions={
-          <div className="flex items-center gap-3 text-sm">
+          <div className="flex flex-wrap items-center gap-3 text-sm">
             <Link href={paths.teacher.classrooms} className="text-blue-700 hover:underline">
               返回班级列表
             </Link>
             <Link href={paths.teacher.classroomDashboard(classroomId)} className="text-blue-700 hover:underline">
               查看班级看板
+            </Link>
+            <Link href={paths.teacher.classroomMembers(classroomId)} className="text-blue-700 hover:underline">
+              成员管理
             </Link>
           </div>
         }
@@ -169,7 +144,7 @@ export default async function ClassroomTasksPage({ params }: ClassroomTasksPageP
                     <td className="px-4 py-3">
                       {typeof task.allowLate === "boolean" ? (task.allowLate ? "是" : "否") : "—"}
                     </td>
-                    <td className="px-4 py-3">{toDisplayText(task.aiStatus, "暂无数据")}</td>
+                    <td className="px-4 py-3">{getAiStatusLabel(task.aiStatus)}</td>
                     <td className="px-4 py-3">
                       {classroomTaskId ? (
                         <div className="flex flex-wrap gap-3">

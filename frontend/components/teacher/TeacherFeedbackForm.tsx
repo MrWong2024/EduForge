@@ -4,6 +4,8 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { ErrorState } from "@/components/blocks/ErrorState";
 import { BrowserFetchJsonError, fetchJson } from "@/lib/api/browser-client";
+import { buildErrorDescription, extractRawDetail } from "@/lib/api/error-presenter";
+import { getCommonErrorSummary } from "@/lib/ui/status";
 
 type TeacherFeedbackFormProps = {
   submissionId: string;
@@ -20,34 +22,6 @@ const parseTags = (raw: string): string[] =>
     .split(",")
     .map((part) => part.trim())
     .filter(Boolean);
-
-const extractRawDetail = (data: unknown): string | undefined => {
-  if (typeof data === "string" && data.trim()) {
-    return data;
-  }
-
-  if (!data || typeof data !== "object") {
-    return undefined;
-  }
-
-  const message =
-    "message" in data && typeof (data as { message?: unknown }).message === "string"
-      ? String((data as { message: string }).message)
-      : "";
-  const code =
-    "code" in data && typeof (data as { code?: unknown }).code === "string"
-      ? String((data as { code: string }).code)
-      : "";
-
-  if (message && code) {
-    return `${message} (code: ${code})`;
-  }
-
-  return message || code || undefined;
-};
-
-const buildErrorDescription = (summary: string, detail?: string): string =>
-  detail ? `${summary} Detail: ${detail}` : summary;
 
 export function TeacherFeedbackForm({ submissionId }: TeacherFeedbackFormProps) {
   const router = useRouter();
@@ -107,12 +81,10 @@ export function TeacherFeedbackForm({ submissionId }: TeacherFeedbackFormProps) 
     } catch (error) {
       if (error instanceof BrowserFetchJsonError) {
         const detail = extractRawDetail(error.data);
-        const summaryByStatus: Record<number, string> = {
-          401: "登录状态已失效，请重新登录。",
-          403: "无权限查看或批阅该提交。",
-          404: "提交不存在或功能未启用/不可用。",
-        };
-        const summary = summaryByStatus[error.status] ?? "提交教师反馈失败，请稍后重试。";
+        const summary =
+          error.status === 403
+            ? "无权限查看或批阅该提交。"
+            : getCommonErrorSummary(error.status, "提交教师反馈");
         setErrorState({
           status: error.status,
           summary,

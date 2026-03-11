@@ -5,7 +5,9 @@ import type { FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import { ErrorState } from "@/components/blocks/ErrorState";
 import { fetchJson, BrowserFetchJsonError } from "@/lib/api/browser-client";
+import { buildErrorDescription, extractRawDetail } from "@/lib/api/error-presenter";
 import type { CreateSubmissionRequest } from "@/lib/api/types-student";
+import { getCommonErrorSummary } from "@/lib/ui/status";
 
 type SubmissionFormProps = {
   classroomId: string;
@@ -16,31 +18,6 @@ type SubmissionErrorState = {
   status?: number;
   summary: string;
   detail?: string;
-};
-
-const extractRawDetail = (data: unknown): string | undefined => {
-  if (typeof data === "string" && data.trim()) {
-    return data;
-  }
-
-  if (!data || typeof data !== "object") {
-    return undefined;
-  }
-
-  const message =
-    "message" in data && typeof (data as { message?: unknown }).message === "string"
-      ? String((data as { message: string }).message)
-      : "";
-  const code =
-    "code" in data && typeof (data as { code?: unknown }).code === "string"
-      ? String((data as { code: string }).code)
-      : "";
-
-  if (message && code) {
-    return `${message} (code: ${code})`;
-  }
-
-  return message || code || undefined;
 };
 
 const extractErrorCode = (data: unknown): string | undefined => {
@@ -54,9 +31,6 @@ const extractErrorCode = (data: unknown): string | undefined => {
 
   return undefined;
 };
-
-const buildErrorDescription = (summary: string, detail?: string): string =>
-  detail ? `${summary} Detail: ${detail}` : summary;
 
 const containsLateSubmissionCode = (data: unknown, detail?: string): boolean => {
   const code = extractErrorCode(data);
@@ -127,12 +101,10 @@ export function SubmissionForm({ classroomId, classroomTaskId }: SubmissionFormP
           return;
         }
 
-        const summaryByStatus: Record<number, string> = {
-          401: "登录状态已失效，请重新登录。",
-          403: "无权限提交该课堂任务。",
-          404: "提交功能未启用、不可用或资源不存在。",
-        };
-        const summary = summaryByStatus[error.status] ?? "提交失败，请稍后重试。";
+        const summary =
+          error.status === 403
+            ? "无权限提交该课堂任务。"
+            : getCommonErrorSummary(error.status, "提交作业");
 
         setErrorState({
           status: error.status,

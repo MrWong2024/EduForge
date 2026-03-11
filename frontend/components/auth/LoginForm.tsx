@@ -5,7 +5,9 @@ import type { SubmitEventHandler } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { ErrorState } from "@/components/blocks/ErrorState";
 import { fetchJson, BrowserFetchJsonError } from "@/lib/api/browser-client";
+import { buildErrorDescription, extractRawDetail } from "@/lib/api/error-presenter";
 import { getRoleHomePath, type RoleAwareMe } from "@/lib/auth/role-home";
+import { getCommonErrorSummary } from "@/lib/ui/status";
 
 type LoginErrorState = {
   status?: number;
@@ -24,42 +26,6 @@ const getSafeNextPath = (value: string | null): string | null => {
 
   return value;
 };
-
-const extractRawDetail = (data: unknown): string | undefined => {
-  if (typeof data === "string" && data.trim()) {
-    return data;
-  }
-
-  if (!data || typeof data !== "object") {
-    return undefined;
-  }
-
-  const message =
-    "message" in data && typeof (data as { message?: unknown }).message === "string"
-      ? String((data as { message: string }).message)
-      : "";
-  const code =
-    "code" in data && typeof (data as { code?: unknown }).code === "string"
-      ? String((data as { code: string }).code)
-      : "";
-
-  if (message && code) {
-    return `${message} (code: ${code})`;
-  }
-
-  if (message) {
-    return message;
-  }
-
-  if (code) {
-    return code;
-  }
-
-  return undefined;
-};
-
-const buildErrorDescription = (summary: string, detail?: string): string =>
-  detail ? `${summary} Detail: ${detail}` : summary;
 
 export function LoginForm() {
   const router = useRouter();
@@ -119,7 +85,7 @@ export function LoginForm() {
 
         setLoginError({
           status: error.status,
-          summary: "登录失败，请稍后重试。",
+          summary: getCommonErrorSummary(error.status, "登录"),
           detail: extractRawDetail(error.data),
         });
         return;
