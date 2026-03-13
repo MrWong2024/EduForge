@@ -28,6 +28,7 @@ import {
   Classroom,
   ClassroomSchema,
 } from '../classrooms/schemas/classroom.schema';
+import { User, UserSchema } from '../users/schemas/user.schema';
 
 @Module({
   imports: [
@@ -39,6 +40,7 @@ import {
       { name: AiFeedbackJob.name, schema: AiFeedbackJobSchema },
       { name: ClassroomTask.name, schema: ClassroomTaskSchema },
       { name: Classroom.name, schema: ClassroomSchema },
+      { name: User.name, schema: UserSchema },
     ]),
   ],
   controllers: [LearningTasksController],

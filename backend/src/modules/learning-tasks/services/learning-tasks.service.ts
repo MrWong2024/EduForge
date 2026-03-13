@@ -13,6 +13,7 @@ import { Submission, SubmissionStatus } from '../schemas/submission.schema';
 import { Feedback } from '../schemas/feedback.schema';
 import { ClassroomTask } from '../../classrooms/classroom-tasks/schemas/classroom-task.schema';
 import { Classroom } from '../../classrooms/schemas/classroom.schema';
+import { User } from '../../users/schemas/user.schema';
 import { CreateTaskDto } from '../dto/create-task.dto';
 import { UpdateTaskDto } from '../dto/update-task.dto';
 import { QueryTaskDto } from '../dto/query-task.dto';
@@ -22,6 +23,7 @@ import { RequestAiFeedbackDto } from '../dto/request-ai-feedback.dto';
 import { TaskResponseDto } from '../dto/task-response.dto';
 import { SubmissionResponseDto } from '../dto/submission-response.dto';
 import { FeedbackResponseDto } from '../dto/feedback-response.dto';
+import { SubmissionDetailResponseDto } from '../dto/submission-detail-response.dto';
 import { AiFeedbackJobService } from '../ai-feedback/services/ai-feedback-job.service';
 import { AiFeedbackJobStatus } from '../ai-feedback/schemas/ai-feedback-job.schema';
 import { AiFeedbackStatus } from '../ai-feedback/interfaces/ai-feedback-status.enum';
@@ -43,6 +45,9 @@ type FeedbackWithMeta = Feedback & WithId & WithTimestamps;
 type ClassroomTaskWithClassroom = ClassroomTask & WithId;
 type ClassroomTaskDeadlineConfig = Pick<ClassroomTask, 'dueAt' | 'settings'> &
   WithId;
+type SubmissionDetailTaskLean = Pick<Task, 'title' | 'createdBy'> & WithId;
+type SubmissionDetailStudentLean = Pick<User, 'name'> & WithId;
+type SubmissionDetailClassroomLean = Pick<Classroom, 'teacherId'> & WithId;
 type IdOnly = WithId;
 
 @Injectable()
@@ -62,6 +67,7 @@ export class LearningTasksService {
     private readonly classroomTaskModel: Model<ClassroomTask>,
     @InjectModel(Classroom.name)
     private readonly classroomModel: Model<Classroom>,
+    @InjectModel(User.name) private readonly userModel: Model<User>,
     private readonly aiFeedbackJobService: AiFeedbackJobService,
   ) {}
 
@@ -339,6 +345,60 @@ export class LearningTasksService {
     return feedback.map((item) => this.toFeedbackResponse(item));
   }
 
+  async getSubmissionDetail(
+    submissionId: string,
+    user: { id: string; roles?: string[] },
+  ): Promise<SubmissionDetailResponseDto> {
+    const submission = await this.submissionModel
+      .findById(submissionId)
+      .lean<SubmissionWithMeta>()
+      .exec();
+    if (!submission) {
+      throw new NotFoundException('Submission not found');
+    }
+
+    const [task, student, classroomTask] = await Promise.all([
+      this.taskModel
+        .findById(submission.taskId)
+        .select('_id title createdBy')
+        .lean<SubmissionDetailTaskLean>()
+        .exec(),
+      this.userModel
+        .findById(submission.studentId)
+        .select('_id name')
+        .lean<SubmissionDetailStudentLean>()
+        .exec(),
+      submission.classroomTaskId
+        ? this.classroomTaskModel
+            .findById(submission.classroomTaskId)
+            .select('_id classroomId')
+            .lean<ClassroomTaskWithClassroom>()
+            .exec()
+        : Promise.resolve(null),
+    ]);
+    if (!task) {
+      throw new NotFoundException('Task not found');
+    }
+
+    await this.ensureCanViewSubmissionDetail(
+      submission,
+      task,
+      classroomTask,
+      user,
+    );
+
+    const statusMap =
+      await this.aiFeedbackJobService.getStatusMapBySubmissionIds([
+        submission._id,
+      ]);
+    return this.toSubmissionDetailResponse(
+      submission,
+      task,
+      student ?? null,
+      statusMap.get(submission._id.toString()) ?? AiFeedbackStatus.NotRequested,
+    );
+  }
+
   async getStats(taskId: string, userId: string) {
     const task = await this.taskModel
       .findById(taskId)
@@ -423,6 +483,35 @@ export class LearningTasksService {
       createdAt: submission.createdAt ?? new Date(0),
       updatedAt: submission.updatedAt ?? new Date(0),
     } as SubmissionResponseDto;
+  }
+
+  private toSubmissionDetailResponse(
+    submission: SubmissionWithMeta,
+    task: SubmissionDetailTaskLean,
+    student: SubmissionDetailStudentLean | null,
+    aiFeedbackStatus: AiFeedbackStatus,
+  ): SubmissionDetailResponseDto {
+    const language = submission.content?.language ?? null;
+    return {
+      id: submission._id.toString(),
+      taskId: submission.taskId.toString(),
+      classroomTaskId: submission.classroomTaskId
+        ? submission.classroomTaskId.toString()
+        : null,
+      studentId: submission.studentId.toString(),
+      studentName: student?.name ?? null,
+      taskTitle: task.title ?? null,
+      language,
+      content: {
+        language,
+        codeText: submission.content?.codeText ?? null,
+      },
+      submittedAt: submission.submittedAt ?? submission.createdAt ?? null,
+      attemptNo: submission.attemptNo ?? null,
+      isLate: submission.isLate ?? false,
+      lateBySeconds: submission.lateBySeconds ?? 0,
+      aiFeedbackStatus,
+    } as SubmissionDetailResponseDto;
   }
 
   private async createSubmissionInternal(
@@ -552,6 +641,60 @@ export class LearningTasksService {
     }
 
     throw new ForbiddenException('Not allowed to request AI feedback');
+  }
+
+  private async ensureCanViewSubmissionDetail(
+    submission: SubmissionWithMeta,
+    task: SubmissionDetailTaskLean,
+    classroomTask: ClassroomTaskWithClassroom | null,
+    user: { id: string; roles?: string[] },
+  ) {
+    const roles = user.roles ?? [];
+    const isSubmissionOwner = submission.studentId.toString() === user.id;
+    if (hasAnyRole(roles, STUDENT_ROLES) && isSubmissionOwner) {
+      return;
+    }
+
+    if (hasAnyRole(roles, TEACHER_ROLES)) {
+      await this.ensureTeacherCanViewSubmissionDetail(
+        submission,
+        task,
+        classroomTask,
+        user.id,
+      );
+      return;
+    }
+
+    throw new ForbiddenException('Not allowed to view submission detail');
+  }
+
+  private async ensureTeacherCanViewSubmissionDetail(
+    submission: SubmissionWithMeta,
+    task: SubmissionDetailTaskLean,
+    classroomTask: ClassroomTaskWithClassroom | null,
+    userId: string,
+  ) {
+    if (submission.classroomTaskId) {
+      if (!classroomTask) {
+        throw new NotFoundException('Classroom task not found');
+      }
+      const classroom = await this.classroomModel
+        .findById(classroomTask.classroomId)
+        .select('_id teacherId')
+        .lean<SubmissionDetailClassroomLean>()
+        .exec();
+      if (!classroom) {
+        throw new NotFoundException('Classroom not found');
+      }
+      if (classroom.teacherId.toString() !== userId) {
+        throw new ForbiddenException('Not allowed to view submission detail');
+      }
+      return;
+    }
+
+    if (task.createdBy.toString() !== userId) {
+      throw new ForbiddenException('Not allowed to view submission detail');
+    }
   }
 
   private async ensureTeacherCanRequestAiFeedback(

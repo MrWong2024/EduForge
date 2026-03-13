@@ -63,6 +63,24 @@ type ClassroomTaskSubmissionListResponse = {
   page: number;
   limit: number;
 };
+type SubmissionDetailResponse = {
+  id: string;
+  taskId: string;
+  classroomTaskId: string | null;
+  studentId: string;
+  studentName: string | null;
+  taskTitle: string | null;
+  language: string | null;
+  content: {
+    language: string | null;
+    codeText: string | null;
+  };
+  submittedAt: string | null;
+  attemptNo: number | null;
+  isLate: boolean;
+  lateBySeconds: number;
+  aiFeedbackStatus: string;
+};
 
 describe('Classroom Task Submissions List (e2e)', () => {
   let app: INestApplication<App>;
@@ -421,5 +439,59 @@ describe('Classroom Task Submissions List (e2e)', () => {
       )
       .query({ page: 1, limit: 20 })
       .expect(403);
+  });
+
+  it('submission detail: classroom owner teacher can read and sees codeText + NOT_REQUESTED', async () => {
+    const response = await ownerTeacherAgent
+      .get(`/api/learning-tasks/submissions/${submissionAId}`)
+      .expect(200);
+    const body = response.body as SubmissionDetailResponse;
+
+    expect(body.id).toBe(submissionAId);
+    expect(body.taskId).toBe(taskId);
+    expect(body.classroomTaskId).toBe(classroomTaskAId);
+    expect(body.studentId).toBe(studentAId);
+    expect(body.studentName).toBe('Student Alpha');
+    expect(body.taskTitle).toBe('Shared Submission Task');
+    expect(body.language).toBe('typescript');
+    expect(body.content.language).toBe('typescript');
+    expect(body.content.codeText).toBe('function classA() { return "A"; }');
+    expect(typeof body.submittedAt).toBe('string');
+    expect(body.attemptNo).toBe(1);
+    expect(typeof body.isLate).toBe('boolean');
+    expect(typeof body.lateBySeconds).toBe('number');
+    expect(body.aiFeedbackStatus).toBe('NOT_REQUESTED');
+    expect(body).not.toHaveProperty('passwordHash');
+    expect(body).not.toHaveProperty('feedback');
+    expect(body).not.toHaveProperty('feedbackItems');
+  });
+
+  it('submission detail: owner student can read own submission', async () => {
+    const response = await studentAAgent
+      .get(`/api/learning-tasks/submissions/${submissionAId}`)
+      .expect(200);
+    const body = response.body as SubmissionDetailResponse;
+
+    expect(body.id).toBe(submissionAId);
+    expect(body.studentId).toBe(studentAId);
+    expect(body.content.codeText).toBe('function classA() { return "A"; }');
+  });
+
+  it('submission detail: non-owner teacher gets 403', async () => {
+    await otherTeacherAgent
+      .get(`/api/learning-tasks/submissions/${submissionAId}`)
+      .expect(403);
+  });
+
+  it('submission detail: non-owner student gets 403', async () => {
+    await studentBAgent
+      .get(`/api/learning-tasks/submissions/${submissionAId}`)
+      .expect(403);
+  });
+
+  it('submission detail: missing submission gets 404', async () => {
+    await ownerTeacherAgent
+      .get(`/api/learning-tasks/submissions/${new Types.ObjectId().toString()}`)
+      .expect(404);
   });
 });

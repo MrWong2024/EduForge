@@ -121,6 +121,16 @@ export class LearningTasksController {
   }
 
   @UseGuards(RolesGuard)
+  @Roles(...TEACHER_ROLES, ...STUDENT_ROLES)
+  @Get('submissions/:id')
+  getSubmissionDetail(
+    @Param('id') submissionId: string,
+    @CurrentUser() user: { id: string; roles?: string[] },
+  ) {
+    return this.learningTasksService.getSubmissionDetail(submissionId, user);
+  }
+
+  @UseGuards(RolesGuard)
   @Roles(...TEACHER_ROLES)
   @Post('submissions/:id/feedback')
   createFeedback(

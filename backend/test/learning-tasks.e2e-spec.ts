@@ -50,6 +50,24 @@ type TaskStatsResponse = {
   distinctStudentsCount: number;
   topTags?: string[];
 };
+type SubmissionDetailResponse = {
+  id: string;
+  taskId: string;
+  classroomTaskId: string | null;
+  studentId: string;
+  studentName: string | null;
+  taskTitle: string | null;
+  language: string | null;
+  content: {
+    language: string | null;
+    codeText: string | null;
+  };
+  submittedAt: string | null;
+  attemptNo: number | null;
+  isLate: boolean;
+  lateBySeconds: number;
+  aiFeedbackStatus: string;
+};
 
 describe('LearningTasks (e2e)', () => {
   let app: INestApplication<App>;
@@ -171,6 +189,7 @@ describe('LearningTasks (e2e)', () => {
         : Array.isArray(rawCookies)
           ? rawCookies
           : [rawCookies];
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access
     expect(cookies?.some((cookie) => cookie.includes('ef_session='))).toBe(
       true,
     );
@@ -279,6 +298,31 @@ describe('LearningTasks (e2e)', () => {
     expect(submissionBody.attemptNo).toBe(1);
     submissionId = submissionBody.id;
     expect(submissionBody.aiFeedbackStatus).toBe('PENDING');
+
+    const teacherDetail = await teacherAgent
+      .get(`/api/learning-tasks/submissions/${submissionId}`)
+      .expect(200);
+    const teacherDetailBody = teacherDetail.body as SubmissionDetailResponse;
+    expect(teacherDetailBody.id).toBe(submissionId);
+    expect(teacherDetailBody.taskId).toBe(taskId);
+    expect(teacherDetailBody.classroomTaskId).toBeNull();
+    expect(teacherDetailBody.studentId).toBe(studentId);
+    expect(teacherDetailBody.taskTitle).toBe('Sorting Lab');
+    expect(teacherDetailBody.language).toBe('typescript');
+    expect(teacherDetailBody.content.language).toBe('typescript');
+    expect(teacherDetailBody.content.codeText).toBe(
+      'function quicksort(arr) { return arr; }',
+    );
+    expect(teacherDetailBody.aiFeedbackStatus).toBe('PENDING');
+    expect(teacherDetailBody).not.toHaveProperty('passwordHash');
+
+    const studentDetail = await studentAgent
+      .get(`/api/learning-tasks/submissions/${submissionId}`)
+      .expect(200);
+    const studentDetailBody = studentDetail.body as SubmissionDetailResponse;
+    expect(studentDetailBody.id).toBe(submissionId);
+    expect(studentDetailBody.studentId).toBe(studentId);
+    expect(studentDetailBody.classroomTaskId).toBeNull();
 
     const feedbackPayload = {
       source: 'TEACHER',
