@@ -116,22 +116,20 @@ export type LearningTaskListResponse = {
   raw: unknown;
 };
 
-export type ClassroomTaskSubmission = {
-  id?: string;
-  taskId?: string;
+export type ClassroomTaskSubmissionItem = {
+  submissionId?: string;
   classroomTaskId?: string;
   studentId?: string;
-  attemptNo?: number;
-  status?: string;
-  aiFeedbackStatus?: string;
+  studentName?: string;
   submittedAt?: string;
-  isLate?: boolean;
-  lateBySeconds?: number;
+  aiFeedbackStatus?: string;
+  attemptNo?: number;
+  feedbackCount?: number;
   raw: UnknownRecord;
 };
 
 export type ClassroomTaskSubmissionsResponse = {
-  items: ClassroomTaskSubmission[];
+  items: ClassroomTaskSubmissionItem[];
   page?: number;
   limit?: number;
   total?: number;
@@ -236,6 +234,9 @@ export type ClassroomStudent = {
 
 export type ClassroomStudentsResponse = {
   items: ClassroomStudent[];
+  total?: number;
+  page?: number;
+  limit?: number;
   raw: unknown;
 };
 
@@ -544,11 +545,15 @@ export const toClassroomStudentsResponse = (payload: unknown): ClassroomStudents
   if (Array.isArray(payload)) {
     return {
       items: payload.map((item) => toClassroomStudent(item)),
+      total: payload.length,
+      page: 1,
+      limit: payload.length,
       raw: payload,
     };
   }
 
   const record = asRecord(payload);
+  const dataRecord = asRecord(safeGet(record, "data", undefined));
   const candidateItems =
     safeGet<unknown>(record, "items", undefined) ??
     safeGet<unknown>(record, "data.items", undefined) ??
@@ -556,24 +561,43 @@ export const toClassroomStudentsResponse = (payload: unknown): ClassroomStudents
 
   return {
     items: asRecordArray(candidateItems).map((item) => toClassroomStudent(item)),
+    total:
+      asNumber(record.total) ??
+      asNumber(safeGet(record, "pagination.total", undefined)) ??
+      asNumber(dataRecord.total),
+    page:
+      asNumber(record.page) ??
+      asNumber(safeGet(record, "pagination.page", undefined)) ??
+      asNumber(dataRecord.page),
+    limit:
+      asNumber(record.limit) ??
+      asNumber(safeGet(record, "pagination.limit", undefined)) ??
+      asNumber(dataRecord.limit),
     raw: payload,
   };
 };
 
-const toClassroomTaskSubmission = (value: unknown): ClassroomTaskSubmission => {
+const toClassroomTaskSubmissionItem = (value: unknown): ClassroomTaskSubmissionItem => {
   const record = asRecord(value);
+  const studentRecord = asRecord(safeGet(record, "student", undefined));
 
   return {
-    id: asString(record.id),
-    taskId: asString(record.taskId),
+    submissionId: asString(record.submissionId) ?? asString(record.id),
     classroomTaskId: asString(record.classroomTaskId),
-    studentId: asString(record.studentId),
-    attemptNo: asNumber(record.attemptNo),
-    status: asString(record.status),
-    aiFeedbackStatus: asString(record.aiFeedbackStatus),
+    studentId: asString(record.studentId) ?? asString(studentRecord.id),
+    studentName:
+      asString(record.studentName) ??
+      asString(studentRecord.name) ??
+      asString(studentRecord.displayName),
     submittedAt: asString(record.submittedAt) ?? asString(record.createdAt),
-    isLate: asBoolean(record.isLate),
-    lateBySeconds: asNumber(record.lateBySeconds),
+    aiFeedbackStatus:
+      asString(record.aiFeedbackStatus) ??
+      asString(safeGet(record, "ai.feedbackStatus", undefined)),
+    attemptNo: asNumber(record.attemptNo),
+    feedbackCount:
+      asNumber(record.feedbackCount) ??
+      asNumber(safeGet(record, "feedback.count", undefined)) ??
+      asNumber(safeGet(record, "feedbackItemsCount", undefined)),
     raw: record,
   };
 };
@@ -583,22 +607,35 @@ export const toClassroomTaskSubmissionsResponse = (
 ): ClassroomTaskSubmissionsResponse => {
   if (Array.isArray(payload)) {
     return {
-      items: payload.map((item) => toClassroomTaskSubmission(item)),
+      items: payload.map((item) => toClassroomTaskSubmissionItem(item)),
+      total: payload.length,
+      page: 1,
+      limit: payload.length,
       raw: payload,
     };
   }
 
   const record = asRecord(payload);
+  const dataRecord = asRecord(safeGet(record, "data", undefined));
   const candidateItems =
     safeGet<unknown>(record, "items", undefined) ??
     safeGet<unknown>(record, "data.items", undefined) ??
     safeGet<unknown>(record, "data", undefined);
 
   return {
-    items: asRecordArray(candidateItems).map((item) => toClassroomTaskSubmission(item)),
-    page: asNumber(record.page),
-    limit: asNumber(record.limit),
-    total: asNumber(record.total),
+    items: asRecordArray(candidateItems).map((item) => toClassroomTaskSubmissionItem(item)),
+    page:
+      asNumber(record.page) ??
+      asNumber(safeGet(record, "pagination.page", undefined)) ??
+      asNumber(dataRecord.page),
+    limit:
+      asNumber(record.limit) ??
+      asNumber(safeGet(record, "pagination.limit", undefined)) ??
+      asNumber(dataRecord.limit),
+    total:
+      asNumber(record.total) ??
+      asNumber(safeGet(record, "pagination.total", undefined)) ??
+      asNumber(dataRecord.total),
     raw: payload,
   };
 };

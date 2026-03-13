@@ -72,7 +72,6 @@ type MembersViewModel =
       students: ClassroomStudent[];
       studentsRaw: unknown;
       query: MembersQueryState;
-      listSourcePath: string;
     }
   | {
       mode: "error";
@@ -80,16 +79,23 @@ type MembersViewModel =
       description: string;
     };
 
+const getMembersErrorSummary = (status: number): string => {
+  if (status === 403) {
+    return "无权限访问对应页面。";
+  }
+  if (status >= 500) {
+    return "加载失败，请稍后重试。";
+  }
+  return getCommonErrorSummary(status);
+};
+
 export default async function ClassroomMembersPage({ params, searchParams }: MembersPageProps) {
   const { classroomId } = await params;
   const rawQuery = await searchParams;
   const queryState = resolveQueryState(rawQuery);
-
-  // Current backend has no dedicated GET /classrooms/:id/students endpoint.
-  // Use enrollment-derived process-assessment items as member source (studentId list).
-  const listSourcePath = `classrooms/${encodeURIComponent(
-    classroomId
-  )}/process-assessment?window=30d&page=1&limit=100&sort=score&order=desc`;
+  const studentsPath = `classrooms/${encodeURIComponent(classroomId)}/students?${buildQueryString({
+    includeRemoved: queryState.includeRemoved ? "1" : "0",
+  })}`;
 
   let viewModel: MembersViewModel = {
     mode: "error",
@@ -104,7 +110,7 @@ export default async function ClassroomMembersPage({ params, searchParams }: Mem
         origin,
         cache: "no-store",
       }),
-      fetchJson<unknown>(listSourcePath, {
+      fetchJson<unknown>(studentsPath, {
         origin,
         cache: "no-store",
       }),
@@ -120,19 +126,14 @@ export default async function ClassroomMembersPage({ params, searchParams }: Mem
       students,
       studentsRaw: studentsResponse.raw,
       query: queryState,
-      listSourcePath,
     };
   } catch (error) {
     if (error instanceof FetchJsonError) {
       const detail = extractRawDetail(error);
-      const summary =
-        error.status === 403
-          ? "无权限管理该班级。"
-          : getCommonErrorSummary(error.status, "加载班级成员");
       viewModel = {
         mode: "error",
         status: error.status,
-        description: buildErrorDescription(summary, detail),
+        description: buildErrorDescription(getMembersErrorSummary(error.status), detail),
       };
     }
   }
@@ -160,7 +161,6 @@ export default async function ClassroomMembersPage({ params, searchParams }: Mem
 
       <section className="rounded-lg border border-zinc-200 bg-white p-4 text-sm text-zinc-700">
         <p>成员以 Enrollment 为准；移除仅解除成员关系，不删除历史提交。</p>
-        <p className="mt-1 text-xs text-zinc-500">当前成员列表来源：{viewModel.listSourcePath}</p>
       </section>
 
       <section className="rounded-lg border border-zinc-200 bg-white p-4 text-sm">
@@ -176,7 +176,7 @@ export default async function ClassroomMembersPage({ params, searchParams }: Mem
       </section>
 
       {viewModel.students.length === 0 ? (
-        <EmptyState title="暂无成员数据" description="当前筛选条件下没有可展示成员。" />
+        <EmptyState title="暂无成员" description="当前筛选条件下没有可展示成员。" />
       ) : (
         <div className="overflow-x-auto rounded-lg border border-zinc-200 bg-white">
           <table className="min-w-full border-collapse text-sm">

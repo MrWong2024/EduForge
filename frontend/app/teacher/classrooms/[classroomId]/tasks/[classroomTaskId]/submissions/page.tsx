@@ -3,16 +3,12 @@ import { headers } from "next/headers";
 import { EmptyState } from "@/components/blocks/EmptyState";
 import { ErrorState } from "@/components/blocks/ErrorState";
 import { PageHeader } from "@/components/blocks/PageHeader";
-import { buildProxyPath, fetchJson, FetchJsonError } from "@/lib/api/client";
+import { fetchJson, FetchJsonError } from "@/lib/api/client";
 import { buildErrorDescription, extractRawDetail } from "@/lib/api/error-presenter";
-import {
-  toClassroomTask,
-  toClassroomTaskSubmissionsResponse,
-  toClassroomSummary,
-} from "@/lib/api/types-teacher";
+import { toClassroomTaskSubmissionsResponse, toClassroomSummary } from "@/lib/api/types-teacher";
 import { paths } from "@/lib/routes/paths";
 import { getAiStatusLabel, getCommonErrorSummary } from "@/lib/ui/status";
-import { buildQueryString, safeGet, toDisplayDate, toDisplayText } from "@/lib/ui/format";
+import { buildQueryString, toDisplayDate, toDisplayText } from "@/lib/ui/format";
 
 type ClassroomTaskSubmissionsPageProps = {
   params: Promise<{ classroomId: string; classroomTaskId: string }>;
@@ -28,27 +24,21 @@ const getRequestOrigin = async (): Promise<string> => {
   return `${protocol}://${host}`;
 };
 
-const asString = (value: unknown): string | undefined =>
-  typeof value === "string" && value.trim() ? value.trim() : undefined;
-
-const asCodeText = (value: unknown): string | undefined =>
-  typeof value === "string" && value.length > 0 ? value : undefined;
-
-const maybeCodeTextQueryValue = (value: string | undefined): string | undefined => {
-  if (!value) {
-    return undefined;
+const getSubmissionsErrorSummary = (status: number): string => {
+  if (status === 403) {
+    return "无权限访问对应页面。";
   }
-  return value.length <= 2000 ? value : undefined;
+  if (status >= 500) {
+    return "加载失败，请稍后重试。";
+  }
+  return getCommonErrorSummary(status);
 };
 
 type TaskSubmissionsViewModel =
   | {
       mode: "ready";
       classroomName?: string;
-      task: ReturnType<typeof toClassroomTask>;
       submissions: ReturnType<typeof toClassroomTaskSubmissionsResponse>["items"];
-      submissionsRaw: unknown;
-      rawSubmissionsHref: string | null;
     }
   | {
       mode: "error";
@@ -60,6 +50,10 @@ export default async function ClassroomTaskSubmissionsPage({
   params,
 }: ClassroomTaskSubmissionsPageProps) {
   const { classroomId, classroomTaskId } = await params;
+  const submissionsQuery = buildQueryString({ page: 1, limit: 50 });
+  const submissionsPath = `classrooms/${encodeURIComponent(classroomId)}/tasks/${encodeURIComponent(
+    classroomTaskId
+  )}/submissions?${submissionsQuery}`;
 
   let viewModel: TaskSubmissionsViewModel = {
     mode: "error",
@@ -69,60 +63,30 @@ export default async function ClassroomTaskSubmissionsPage({
 
   try {
     const origin = await getRequestOrigin();
-    const [classroomPayload, classroomTaskPayload] = await Promise.all([
+    const [classroomPayload, submissionsPayload] = await Promise.all([
       fetchJson<unknown>(`classrooms/${encodeURIComponent(classroomId)}`, {
         origin,
         cache: "no-store",
       }),
-      fetchJson<unknown>(
-        `classrooms/${encodeURIComponent(classroomId)}/tasks/${encodeURIComponent(classroomTaskId)}`,
-        {
-          origin,
-          cache: "no-store",
-        }
-      ),
-    ]);
-
-    const task = toClassroomTask(classroomTaskPayload);
-    let submissions: ReturnType<typeof toClassroomTaskSubmissionsResponse>["items"] = [];
-    let submissionsRaw: unknown = { items: [] };
-    let rawSubmissionsHref: string | null = null;
-
-    if (task.taskId) {
-      const submissionsQuery = buildQueryString({ page: 1, limit: 50 });
-      const submissionsPath = `learning-tasks/tasks/${encodeURIComponent(task.taskId)}/submissions?${submissionsQuery}`;
-      const submissionsPayload = await fetchJson<unknown>(submissionsPath, {
+      fetchJson<unknown>(submissionsPath, {
         origin,
         cache: "no-store",
-      });
-      const submissionsResponse = toClassroomTaskSubmissionsResponse(submissionsPayload);
-      submissions = submissionsResponse.items.filter(
-        (submission) => submission.classroomTaskId === classroomTaskId
-      );
-      submissionsRaw = submissionsResponse.raw;
-      rawSubmissionsHref = buildProxyPath(submissionsPath);
-    }
+      }),
+    ]);
 
+    const submissionsResponse = toClassroomTaskSubmissionsResponse(submissionsPayload);
     viewModel = {
       mode: "ready",
       classroomName: toClassroomSummary(classroomPayload).name,
-      task,
-      submissions,
-      submissionsRaw,
-      rawSubmissionsHref,
+      submissions: submissionsResponse.items,
     };
   } catch (error) {
     if (error instanceof FetchJsonError) {
       const detail = extractRawDetail(error);
-      const summary =
-        error.status === 403
-          ? "无权限管理任务。"
-          : getCommonErrorSummary(error.status, "加载任务提交记录");
-
       viewModel = {
         mode: "error",
         status: error.status,
-        description: buildErrorDescription(summary, detail),
+        description: buildErrorDescription(getSubmissionsErrorSummary(error.status), detail),
       };
     }
   }
@@ -174,72 +138,42 @@ export default async function ClassroomTaskSubmissionsPage({
             >
               AI 指标
             </Link>
-            {viewModel.rawSubmissionsHref ? (
-              <a
-                href={viewModel.rawSubmissionsHref}
-                target="_blank"
-                rel="noreferrer"
-                className="text-blue-700 hover:underline"
-              >
-                导出/查看原始提交 JSON
-              </a>
-            ) : null}
           </div>
         }
       />
 
       <section className="rounded-lg border border-zinc-200 bg-white p-4 text-sm text-zinc-700">
-        <p>
-          当前页面按 <code>classroomTaskId</code> 过滤展示提交，避免跨班聚合误读。
-        </p>
+        <p>此页仅展示当前课堂任务的提交记录。</p>
       </section>
 
       {viewModel.submissions.length === 0 ? (
-        <EmptyState title="暂无提交记录" description="当前课堂任务尚未收到学生提交。" />
+        <EmptyState title="当前任务暂无提交" description="该课堂任务暂未收到学生提交。" />
       ) : (
         <div className="overflow-x-auto rounded-lg border border-zinc-200 bg-white">
           <table className="min-w-full border-collapse text-sm">
             <thead className="bg-zinc-50 text-left text-zinc-600">
               <tr>
                 <th className="px-4 py-3">提交 ID</th>
-                <th className="px-4 py-3">学生 ID</th>
-                <th className="px-4 py-3">尝试次数</th>
-                <th className="px-4 py-3">提交状态</th>
-                <th className="px-4 py-3">反馈状态</th>
+                <th className="px-4 py-3">学生</th>
                 <th className="px-4 py-3">提交时间</th>
-                <th className="px-4 py-3">是否迟交</th>
+                <th className="px-4 py-3">AI 反馈状态</th>
+                <th className="px-4 py-3">反馈数</th>
+                <th className="px-4 py-3">尝试次数</th>
                 <th className="px-4 py-3">操作</th>
               </tr>
             </thead>
             <tbody>
               {viewModel.submissions.map((submission, index) => {
-                const submissionId = submission.id;
+                const submissionId = submission.submissionId;
                 const baseDetailPath = submissionId
                   ? paths.teacher.submissionDetail(submissionId)
                   : null;
-                const submissionRecord = submission.raw;
-                const studentName =
-                  asString(safeGet(submissionRecord, "studentName", undefined)) ??
-                  asString(safeGet(submissionRecord, "student.name", undefined)) ??
-                  asString(safeGet(submissionRecord, "student.displayName", undefined));
-                const language =
-                  asString(safeGet(submissionRecord, "content.language", undefined)) ??
-                  asString(safeGet(submissionRecord, "language", undefined));
-                const codeText = maybeCodeTextQueryValue(
-                  asCodeText(safeGet(submissionRecord, "content.codeText", undefined))
-                );
-
                 const detailQuery = buildQueryString({
                   classroomId,
                   classroomTaskId,
-                  taskTitle: viewModel.task.title,
-                  studentName,
-                  language,
+                  studentName: submission.studentName,
                   submittedAt: submission.submittedAt,
                   attemptNo: submission.attemptNo,
-                  isLate: submission.isLate,
-                  lateBySeconds: submission.lateBySeconds,
-                  codeText,
                 });
                 const detailHref = baseDetailPath
                   ? detailQuery
@@ -249,16 +183,20 @@ export default async function ClassroomTaskSubmissionsPage({
 
                 return (
                   <tr
-                    key={submission.id ?? `submission-${index}`}
+                    key={submission.submissionId ?? `submission-${index}`}
                     className="border-t border-zinc-100 align-top"
                   >
-                    <td className="px-4 py-3">{toDisplayText(submission.id)}</td>
-                    <td className="px-4 py-3">{toDisplayText(submission.studentId)}</td>
-                    <td className="px-4 py-3">{toDisplayText(submission.attemptNo)}</td>
-                    <td className="px-4 py-3">{toDisplayText(submission.status)}</td>
-                    <td className="px-4 py-3">{getAiStatusLabel(submission.aiFeedbackStatus)}</td>
+                    <td className="px-4 py-3">{toDisplayText(submission.submissionId)}</td>
+                    <td className="px-4 py-3">
+                      <p className="font-medium text-zinc-900">
+                        {toDisplayText(submission.studentName, "—")}
+                      </p>
+                      <p className="text-xs text-zinc-500">{toDisplayText(submission.studentId, "—")}</p>
+                    </td>
                     <td className="px-4 py-3">{toDisplayDate(submission.submittedAt)}</td>
-                    <td className="px-4 py-3">{toDisplayText(submission.isLate)}</td>
+                    <td className="px-4 py-3">{getAiStatusLabel(submission.aiFeedbackStatus)}</td>
+                    <td className="px-4 py-3">{toDisplayText(submission.feedbackCount, "—")}</td>
+                    <td className="px-4 py-3">{toDisplayText(submission.attemptNo, "—")}</td>
                     <td className="px-4 py-3">
                       {detailHref ? (
                         <Link href={detailHref} className="text-blue-700 hover:underline">
@@ -276,14 +214,6 @@ export default async function ClassroomTaskSubmissionsPage({
         </div>
       )}
 
-      <details className="rounded-lg border border-zinc-200 bg-zinc-50 p-4">
-        <summary className="cursor-pointer text-sm font-medium text-zinc-800">
-          查看原始提交 JSON
-        </summary>
-        <pre className="mt-3 overflow-auto text-xs text-zinc-700">
-          {JSON.stringify(viewModel.submissionsRaw, null, 2)}
-        </pre>
-      </details>
     </section>
   );
 }
