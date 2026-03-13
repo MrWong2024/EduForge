@@ -13,7 +13,7 @@ export class UsersController {
   }
 
   @Patch('me')
-  updateMe(@Body() dto: UpdateProfileDto) {
-    return this.usersService.updateMe(dto);
+  updateMe(@CurrentUser() user: { id: string }, @Body() dto: UpdateProfileDto) {
+    return this.usersService.updateMe(user.id, dto);
   }
 }

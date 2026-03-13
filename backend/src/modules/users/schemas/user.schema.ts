@@ -28,6 +28,15 @@ export class User {
 
   @Prop({ type: String, default: UserStatus.Active })
   status!: UserStatus;
+
+  @Prop({ type: String, trim: true })
+  name?: string;
+
+  @Prop({ type: String, trim: true })
+  studentNo?: string;
+
+  @Prop({ type: String, trim: true })
+  employeeNo?: string;
 }
 
 export const UserSchema = SchemaFactory.createForClass(User);
