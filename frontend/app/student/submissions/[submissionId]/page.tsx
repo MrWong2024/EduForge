@@ -7,10 +7,10 @@ import { AiProcessingHint } from "@/components/student/AiProcessingHint";
 import { RequestAiFeedbackButton } from "@/components/student/RequestAiFeedbackButton";
 import { fetchJson, FetchJsonError } from "@/lib/api/client";
 import { buildErrorDescription, extractRawDetail } from "@/lib/api/error-presenter";
-import { toListFeedbackResponse } from "@/lib/api/types-student";
+import { toListFeedbackResponse, toSubmissionDetailResponse } from "@/lib/api/types-student";
 import { paths } from "@/lib/routes/paths";
 import { getCommonErrorSummary } from "@/lib/ui/status";
-import { getSingleSearchParam, safeGet, toDisplayDate, toDisplayText } from "@/lib/ui/format";
+import { getSingleSearchParam, toDisplayDate, toDisplayText } from "@/lib/ui/format";
 
 type SubmissionDetailPageProps = {
   params: Promise<{ submissionId: string }>;
@@ -18,6 +18,13 @@ type SubmissionDetailPageProps = {
     status?: string | string[];
     classroomId?: string | string[];
     classroomTaskId?: string | string[];
+    taskTitle?: string | string[];
+    language?: string | string[];
+    submittedAt?: string | string[];
+    attemptNo?: string | string[];
+    isLate?: string | string[];
+    lateBySeconds?: string | string[];
+    codeText?: string | string[];
   }>;
 };
 
@@ -36,29 +43,57 @@ const parseAiStatus = (value: unknown): AiStatus | null => {
   if (typeof value !== "string") {
     return null;
   }
-
   const normalized = value.trim().toUpperCase() as AiStatus;
   return AI_STATUSES.includes(normalized) ? normalized : null;
 };
 
-const resolveAiFeedbackStatus = (payload: unknown, queryStatus: AiStatus | null): AiStatus | null => {
-  const candidates: unknown[] = [
-    safeGet(payload, "aiFeedbackStatus", undefined),
-    safeGet(payload, "status", undefined),
-    safeGet(payload, "data.aiFeedbackStatus", undefined),
-    safeGet(payload, "data.status", undefined),
-    safeGet(payload, "job.status", undefined),
-    queryStatus,
-  ];
-
-  for (const candidate of candidates) {
-    const status = parseAiStatus(candidate);
-    if (status) {
-      return status;
+const asNumberLike = (value: unknown): number | undefined => {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return value;
+  }
+  if (typeof value === "string") {
+    const parsed = Number.parseInt(value, 10);
+    if (Number.isFinite(parsed)) {
+      return parsed;
     }
   }
+  return undefined;
+};
 
-  return null;
+const asBooleanLike = (value: unknown): boolean | undefined => {
+  if (typeof value === "boolean") {
+    return value;
+  }
+  if (typeof value === "string") {
+    const normalized = value.trim().toLowerCase();
+    if (normalized === "1" || normalized === "true") {
+      return true;
+    }
+    if (normalized === "0" || normalized === "false") {
+      return false;
+    }
+  }
+  return undefined;
+};
+
+const toLimitedCodeText = (value: string | undefined): string | undefined => {
+  if (!value) {
+    return undefined;
+  }
+  return value.length <= 2000 ? value : undefined;
+};
+
+const getStudentSubmissionErrorSummary = (status: number): string => {
+  if (status === 403) {
+    return "无权限查看该提交。";
+  }
+  if (status === 404) {
+    return "提交不存在或功能未启用/不可用。";
+  }
+  if (status >= 500) {
+    return "加载失败，请稍后重试。";
+  }
+  return getCommonErrorSummary(status);
 };
 
 const getRequestOrigin = async (): Promise<string> => {
@@ -67,7 +102,6 @@ const getRequestOrigin = async (): Promise<string> => {
   if (!host) {
     return "";
   }
-
   const protocol = headerMap.get("x-forwarded-proto") ?? "http";
   return `${protocol}://${host}`;
 };
@@ -75,8 +109,16 @@ const getRequestOrigin = async (): Promise<string> => {
 type SubmissionFeedbackViewModel =
   | {
       mode: "ready";
+      detail: ReturnType<typeof toSubmissionDetailResponse>;
       feedback: ReturnType<typeof toListFeedbackResponse>;
       aiFeedbackStatus: AiStatus | null;
+      taskTitle?: string;
+      language?: string;
+      submittedAt?: string;
+      attemptNo?: number;
+      isLate?: boolean;
+      lateBySeconds?: number;
+      codeText?: string;
     }
   | {
       mode: "error";
@@ -101,36 +143,58 @@ export default async function StudentSubmissionDetailPage({
   let viewModel: SubmissionFeedbackViewModel = {
     mode: "error",
     status: 500,
-    description: "加载提交反馈失败，请稍后重试。",
+    description: "加载提交详情失败，请稍后重试。",
   };
 
   try {
     const origin = await getRequestOrigin();
-    const payload = await fetchJson<unknown>(
-      `learning-tasks/submissions/${encodeURIComponent(submissionId)}/feedback`,
-      {
+    const [detailPayload, feedbackPayload] = await Promise.all([
+      fetchJson<unknown>(`learning-tasks/submissions/${encodeURIComponent(submissionId)}`, {
         origin,
         cache: "no-store",
-      }
-    );
+      }),
+      fetchJson<unknown>(
+        `learning-tasks/submissions/${encodeURIComponent(submissionId)}/feedback`,
+        {
+          origin,
+          cache: "no-store",
+        }
+      ),
+    ]);
 
+    const detail = toSubmissionDetailResponse(detailPayload);
+    const feedback = toListFeedbackResponse(feedbackPayload);
     viewModel = {
       mode: "ready",
-      feedback: toListFeedbackResponse(payload),
-      aiFeedbackStatus: resolveAiFeedbackStatus(payload, queryStatus),
+      detail,
+      feedback,
+      aiFeedbackStatus: parseAiStatus(detail.aiFeedbackStatus) ?? queryStatus,
+      taskTitle: detail.taskTitle ?? getSingleSearchParam(query.taskTitle),
+      language:
+        detail.language ??
+        detail.content.language ??
+        getSingleSearchParam(query.language),
+      submittedAt: detail.submittedAt ?? getSingleSearchParam(query.submittedAt),
+      attemptNo:
+        detail.attemptNo ?? asNumberLike(getSingleSearchParam(query.attemptNo)),
+      isLate: detail.isLate ?? asBooleanLike(getSingleSearchParam(query.isLate)),
+      lateBySeconds:
+        detail.lateBySeconds ??
+        asNumberLike(getSingleSearchParam(query.lateBySeconds)),
+      codeText:
+        detail.content.codeText ??
+        toLimitedCodeText(getSingleSearchParam(query.codeText)),
     };
   } catch (error) {
     if (error instanceof FetchJsonError) {
       const detail = extractRawDetail(error);
-      const summary =
-        error.status === 403
-          ? "无权限访问该提交反馈。"
-          : getCommonErrorSummary(error.status, "加载提交反馈");
-
       viewModel = {
         mode: "error",
         status: error.status,
-        description: buildErrorDescription(summary, detail),
+        description: buildErrorDescription(
+          getStudentSubmissionErrorSummary(error.status),
+          detail
+        ),
       };
     }
   }
@@ -139,7 +203,7 @@ export default async function StudentSubmissionDetailPage({
     return (
       <ErrorState
         status={viewModel.status}
-        title="提交反馈加载失败"
+        title="提交详情加载失败"
         description={viewModel.description}
       />
     );
@@ -164,6 +228,22 @@ export default async function StudentSubmissionDetailPage({
         }
       />
 
+      <section className="rounded-lg border border-zinc-200 bg-white p-4 text-sm text-zinc-700">
+        <div className="grid gap-2 md:grid-cols-2">
+          <p>任务标题：{toDisplayText(viewModel.taskTitle)}</p>
+          <p>语言：{toDisplayText(viewModel.language)}</p>
+          <p>提交时间：{toDisplayDate(viewModel.submittedAt)}</p>
+          <p>尝试次数：{toDisplayText(viewModel.attemptNo)}</p>
+          <p>
+            是否迟交：{toDisplayText(viewModel.isLate)}
+            {viewModel.isLate && viewModel.lateBySeconds !== undefined
+              ? `（超时 ${viewModel.lateBySeconds} 秒）`
+              : ""}
+          </p>
+          <p>课堂任务 ID：{toDisplayText(viewModel.detail.classroomTaskId)}</p>
+        </div>
+      </section>
+
       <AiProcessingHint
         status={viewModel.aiFeedbackStatus}
         variant="submission"
@@ -173,6 +253,17 @@ export default async function StudentSubmissionDetailPage({
         submissionId={submissionId}
         initialStatus={viewModel.aiFeedbackStatus ?? undefined}
       />
+
+      <section className="rounded-lg border border-zinc-200 bg-white p-4">
+        <h2 className="text-base font-semibold text-zinc-900">提交内容</h2>
+        {viewModel.codeText ? (
+          <pre className="mt-3 max-h-[28rem] overflow-auto whitespace-pre-wrap rounded-md bg-zinc-900 p-3 text-xs text-zinc-100">
+            {viewModel.codeText}
+          </pre>
+        ) : (
+          <p className="mt-2 text-sm text-zinc-600">当前接口未返回代码内容。</p>
+        )}
+      </section>
 
       {viewModel.feedback.items.length === 0 ? (
         <EmptyState title="暂无反馈" description="当前提交还没有反馈内容，可点击上方按钮请求 AI 反馈。" />
@@ -206,9 +297,9 @@ export default async function StudentSubmissionDetailPage({
       )}
 
       <details className="rounded-lg border border-zinc-200 bg-zinc-50 p-4">
-        <summary className="cursor-pointer text-sm font-medium text-zinc-800">查看原始反馈 JSON</summary>
+        <summary className="cursor-pointer text-sm font-medium text-zinc-800">查看原始数据 JSON</summary>
         <pre className="mt-3 overflow-auto text-xs text-zinc-700">
-          {JSON.stringify(viewModel.feedback.raw, null, 2)}
+          {JSON.stringify({ detail: viewModel.detail.raw, feedback: viewModel.feedback.raw }, null, 2)}
         </pre>
       </details>
     </section>

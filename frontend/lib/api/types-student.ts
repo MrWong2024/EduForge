@@ -14,6 +14,40 @@ const asNumber = (value: unknown): number | undefined =>
 const asRecordArray = (value: unknown): UnknownRecord[] =>
   Array.isArray(value) ? value.map((item) => asRecord(item)) : [];
 
+const asNullableString = (value: unknown): string | null | undefined => {
+  if (value === null) {
+    return null;
+  }
+  return asString(value);
+};
+
+const asNullableNumber = (value: unknown): number | null | undefined => {
+  if (value === null) {
+    return null;
+  }
+  return asNumber(value);
+};
+
+const asNullableBoolean = (value: unknown): boolean | null | undefined => {
+  if (value === null) {
+    return null;
+  }
+  if (typeof value === "boolean") {
+    return value;
+  }
+  return undefined;
+};
+
+const pickFirstNonEmptyRecord = (...candidates: unknown[]): UnknownRecord => {
+  for (const candidate of candidates) {
+    const record = asRecord(candidate);
+    if (Object.keys(record).length > 0) {
+      return record;
+    }
+  }
+  return {};
+};
+
 export type JoinClassroomResponse = {
   id?: string;
   name?: string;
@@ -57,6 +91,26 @@ export type MyTaskDetailResponse = {
   me: UnknownRecord;
   submissions: UnknownRecord[];
   latest: UnknownRecord | null;
+  raw: UnknownRecord;
+};
+
+export type SubmissionDetailResponse = {
+  id?: string;
+  taskId?: string;
+  classroomTaskId?: string | null;
+  studentId?: string;
+  studentName?: string | null;
+  taskTitle?: string | null;
+  language?: string | null;
+  content: {
+    language?: string | null;
+    codeText?: string | null;
+  };
+  submittedAt?: string | null;
+  attemptNo?: number | null;
+  isLate?: boolean;
+  lateBySeconds?: number;
+  aiFeedbackStatus?: string;
   raw: UnknownRecord;
 };
 
@@ -198,6 +252,37 @@ export const toMyTaskDetailResponse = (payload: unknown): MyTaskDetailResponse =
     submissions: asRecordArray(safeGet(record, "submissions", undefined)),
     latest: latest && typeof latest === "object" ? asRecord(latest) : null,
     raw: record,
+  };
+};
+
+export const toSubmissionDetailResponse = (payload: unknown): SubmissionDetailResponse => {
+  const record = asRecord(payload);
+  const dataRecord = pickFirstNonEmptyRecord(
+    safeGet(record, "data", undefined),
+    safeGet(record, "submission", undefined)
+  );
+  const source = Object.keys(dataRecord).length > 0 ? dataRecord : record;
+  const contentRecord = asRecord(safeGet(source, "content", undefined));
+  const language = asNullableString(source.language) ?? asNullableString(contentRecord.language);
+
+  return {
+    id: asString(source.id),
+    taskId: asString(source.taskId),
+    classroomTaskId: asNullableString(source.classroomTaskId),
+    studentId: asString(source.studentId),
+    studentName: asNullableString(source.studentName),
+    taskTitle: asNullableString(source.taskTitle),
+    language,
+    content: {
+      language,
+      codeText: asNullableString(contentRecord.codeText),
+    },
+    submittedAt: asNullableString(source.submittedAt) ?? asNullableString(source.createdAt),
+    attemptNo: asNullableNumber(source.attemptNo),
+    isLate: asNullableBoolean(source.isLate) ?? false,
+    lateBySeconds: asNumber(source.lateBySeconds) ?? 0,
+    aiFeedbackStatus: asString(source.aiFeedbackStatus),
+    raw: source,
   };
 };
 

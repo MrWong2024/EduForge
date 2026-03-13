@@ -8,12 +8,13 @@ import { fetchJson, FetchJsonError } from "@/lib/api/client";
 import { buildErrorDescription, extractRawDetail } from "@/lib/api/error-presenter";
 import {
   groupTeacherFeedbackItems,
+  toSubmissionDetailResponse,
   toTeacherFeedbackListResponse,
   type TeacherSubmissionContext,
 } from "@/lib/api/types-teacher";
 import { paths } from "@/lib/routes/paths";
-import { getCommonErrorSummary } from "@/lib/ui/status";
-import { getSingleSearchParam, safeGet, toDisplayDate, toDisplayText } from "@/lib/ui/format";
+import { getAiStatusLabel, getCommonErrorSummary } from "@/lib/ui/status";
+import { getSingleSearchParam, toDisplayDate, toDisplayText } from "@/lib/ui/format";
 
 type TeacherSubmissionDetailPageProps = {
   params: Promise<{ submissionId: string }>;
@@ -40,31 +41,6 @@ const getRequestOrigin = async (): Promise<string> => {
   const protocol = headerMap.get("x-forwarded-proto") ?? "http";
   return `${protocol}://${host}`;
 };
-
-type UnknownRecord = Record<string, unknown>;
-
-const asRecord = (value: unknown): UnknownRecord =>
-  value && typeof value === "object" && !Array.isArray(value) ? (value as UnknownRecord) : {};
-
-const pickFirstNonEmptyRecord = (...candidates: unknown[]): UnknownRecord => {
-  for (const candidate of candidates) {
-    const record = asRecord(candidate);
-    if (Object.keys(record).length > 0) {
-      return record;
-    }
-  }
-
-  return {};
-};
-
-const asString = (value: unknown): string | undefined =>
-  typeof value === "string" && value.trim() ? value.trim() : undefined;
-
-const asCodeText = (value: unknown): string | undefined =>
-  typeof value === "string" && value.length > 0 ? value : undefined;
-
-const asNumber = (value: unknown): number | undefined =>
-  typeof value === "number" && Number.isFinite(value) ? value : undefined;
 
 const asNumberLike = (value: unknown): number | undefined => {
   if (typeof value === "number" && Number.isFinite(value)) {
@@ -95,87 +71,57 @@ const asBooleanLike = (value: unknown): boolean | undefined => {
   return undefined;
 };
 
-const getCandidateSubmissionRecord = (raw: unknown): UnknownRecord => {
-  if (Array.isArray(raw)) {
-    return {};
-  }
-  const record = asRecord(raw);
-  return pickFirstNonEmptyRecord(
-    safeGet(record, "submission", undefined),
-    safeGet(record, "data.submission", undefined),
-    safeGet(record, "meta.submission", undefined)
-  );
-};
-
-const mergeContextFromPayload = (
-  fallback: TeacherSubmissionContext,
-  raw: unknown
-): TeacherSubmissionContext => {
-  const record = asRecord(raw);
-  const submissionRecord = getCandidateSubmissionRecord(raw);
-  const contentRecord = pickFirstNonEmptyRecord(
-    safeGet(submissionRecord, "content", undefined),
-    safeGet(record, "content", undefined),
-    safeGet(record, "data.content", undefined)
-  );
-
-  return {
-    submissionId: fallback.submissionId,
-    classroomId:
-      fallback.classroomId ??
-      asString(safeGet(submissionRecord, "classroomId", undefined)) ??
-      asString(safeGet(record, "classroomId", undefined)),
-    classroomTaskId:
-      fallback.classroomTaskId ??
-      asString(safeGet(submissionRecord, "classroomTaskId", undefined)) ??
-      asString(safeGet(record, "classroomTaskId", undefined)),
-    taskTitle:
-      fallback.taskTitle ??
-      asString(safeGet(submissionRecord, "taskTitle", undefined)) ??
-      asString(safeGet(record, "taskTitle", undefined)),
-    studentName:
-      fallback.studentName ??
-      asString(safeGet(submissionRecord, "studentName", undefined)) ??
-      asString(safeGet(record, "studentName", undefined)),
-    language:
-      fallback.language ??
-      asString(safeGet(contentRecord, "language", undefined)) ??
-      asString(safeGet(submissionRecord, "language", undefined)),
-    submittedAt:
-      fallback.submittedAt ??
-      asString(safeGet(submissionRecord, "submittedAt", undefined)) ??
-      asString(safeGet(submissionRecord, "createdAt", undefined)) ??
-      asString(safeGet(record, "submittedAt", undefined)),
-    attemptNo:
-      fallback.attemptNo ??
-      asNumberLike(safeGet(submissionRecord, "attemptNo", undefined)) ??
-      asNumberLike(safeGet(record, "attemptNo", undefined)),
-    isLate:
-      fallback.isLate ??
-      asBooleanLike(safeGet(submissionRecord, "isLate", undefined)) ??
-      asBooleanLike(safeGet(record, "isLate", undefined)),
-    lateBySeconds:
-      fallback.lateBySeconds ??
-      asNumberLike(safeGet(submissionRecord, "lateBySeconds", undefined)) ??
-      asNumberLike(safeGet(record, "lateBySeconds", undefined)),
-    codeText:
-      fallback.codeText ??
-      asCodeText(safeGet(contentRecord, "codeText", undefined)) ??
-      asCodeText(safeGet(submissionRecord, "codeText", undefined)),
-  };
-};
-
-const parseQueryNumber = (value: string | undefined): number | undefined => {
+const toLimitedCodeText = (value: string | undefined): string | undefined => {
   if (!value) {
     return undefined;
   }
-  const parsed = Number.parseInt(value, 10);
-  return Number.isFinite(parsed) ? parsed : undefined;
+  return value.length <= 2000 ? value : undefined;
 };
+
+const getTeacherSubmissionErrorSummary = (status: number): string => {
+  if (status === 403) {
+    return "无权限查看该提交。";
+  }
+  if (status === 404) {
+    return "提交不存在或功能未启用/不可用。";
+  }
+  if (status >= 500) {
+    return "加载失败，请稍后重试。";
+  }
+  return getCommonErrorSummary(status);
+};
+
+const buildContext = (
+  submissionId: string,
+  detail: ReturnType<typeof toSubmissionDetailResponse>,
+  query: Awaited<TeacherSubmissionDetailPageProps["searchParams"]>
+): TeacherSubmissionContext => ({
+  submissionId,
+  classroomId: getSingleSearchParam(query.classroomId),
+  classroomTaskId:
+    detail.classroomTaskId ?? getSingleSearchParam(query.classroomTaskId),
+  taskTitle: detail.taskTitle ?? getSingleSearchParam(query.taskTitle),
+  studentName: detail.studentName ?? getSingleSearchParam(query.studentName),
+  language:
+    detail.language ??
+    detail.content.language ??
+    getSingleSearchParam(query.language),
+  submittedAt: detail.submittedAt ?? getSingleSearchParam(query.submittedAt),
+  attemptNo:
+    detail.attemptNo ?? asNumberLike(getSingleSearchParam(query.attemptNo)),
+  isLate: detail.isLate ?? asBooleanLike(getSingleSearchParam(query.isLate)),
+  lateBySeconds:
+    detail.lateBySeconds ??
+    asNumberLike(getSingleSearchParam(query.lateBySeconds)),
+  codeText:
+    detail.content.codeText ??
+    toLimitedCodeText(getSingleSearchParam(query.codeText)),
+});
 
 type SubmissionFeedbackViewModel =
   | {
       mode: "ready";
+      detail: ReturnType<typeof toSubmissionDetailResponse>;
       feedback: ReturnType<typeof toTeacherFeedbackListResponse>;
       context: TeacherSubmissionContext;
     }
@@ -191,56 +137,47 @@ export default async function TeacherSubmissionDetailPage({
 }: TeacherSubmissionDetailPageProps) {
   const { submissionId } = await params;
   const query = await searchParams;
-  const classroomId = getSingleSearchParam(query.classroomId);
-  const classroomTaskId = getSingleSearchParam(query.classroomTaskId);
-  const queryContext: TeacherSubmissionContext = {
-    submissionId,
-    classroomId,
-    classroomTaskId,
-    taskTitle: getSingleSearchParam(query.taskTitle),
-    studentName: getSingleSearchParam(query.studentName),
-    language: getSingleSearchParam(query.language),
-    submittedAt: getSingleSearchParam(query.submittedAt),
-    attemptNo: parseQueryNumber(getSingleSearchParam(query.attemptNo)),
-    isLate: asBooleanLike(getSingleSearchParam(query.isLate)),
-    lateBySeconds: parseQueryNumber(getSingleSearchParam(query.lateBySeconds)),
-    codeText: getSingleSearchParam(query.codeText),
-  };
 
   let viewModel: SubmissionFeedbackViewModel = {
     mode: "error",
     status: 500,
-    description: "加载提交反馈失败，请稍后重试。",
+    description: "加载提交详情失败，请稍后重试。",
   };
 
   try {
     const origin = await getRequestOrigin();
-    const payload = await fetchJson<unknown>(
-      `learning-tasks/submissions/${encodeURIComponent(submissionId)}/feedback`,
-      {
+    const [detailPayload, feedbackPayload] = await Promise.all([
+      fetchJson<unknown>(`learning-tasks/submissions/${encodeURIComponent(submissionId)}`, {
         origin,
         cache: "no-store",
-      }
-    );
+      }),
+      fetchJson<unknown>(
+        `learning-tasks/submissions/${encodeURIComponent(submissionId)}/feedback`,
+        {
+          origin,
+          cache: "no-store",
+        }
+      ),
+    ]);
 
-    const feedback = toTeacherFeedbackListResponse(payload);
+    const detail = toSubmissionDetailResponse(detailPayload);
+    const feedback = toTeacherFeedbackListResponse(feedbackPayload);
     viewModel = {
       mode: "ready",
+      detail,
       feedback,
-      context: mergeContextFromPayload(queryContext, feedback.raw),
+      context: buildContext(submissionId, detail, query),
     };
   } catch (error) {
     if (error instanceof FetchJsonError) {
       const detail = extractRawDetail(error);
-      const summary =
-        error.status === 403
-          ? "无权限查看或批阅该提交。"
-          : getCommonErrorSummary(error.status, "加载提交反馈");
-
       viewModel = {
         mode: "error",
         status: error.status,
-        description: buildErrorDescription(summary, detail),
+        description: buildErrorDescription(
+          getTeacherSubmissionErrorSummary(error.status),
+          detail
+        ),
       };
     }
   }
@@ -264,7 +201,10 @@ export default async function TeacherSubmissionDetailPage({
       : null;
   const taskHref =
     viewModel.context.classroomId && viewModel.context.classroomTaskId
-      ? paths.teacher.classroomTaskDetail(viewModel.context.classroomId, viewModel.context.classroomTaskId)
+      ? paths.teacher.classroomTaskDetail(
+          viewModel.context.classroomId,
+          viewModel.context.classroomTaskId
+        )
       : null;
   const groupedFeedback = groupTeacherFeedbackItems(viewModel.feedback.items);
   const groupedSections = [
@@ -302,7 +242,9 @@ export default async function TeacherSubmissionDetailPage({
         <div className="mt-3 grid gap-3 text-sm text-zinc-700 md:grid-cols-2">
           <div>
             <p className="text-zinc-500">submissionId</p>
-            <p className="font-medium text-zinc-900">{toDisplayText(viewModel.context.submissionId)}</p>
+            <p className="font-medium text-zinc-900">
+              {toDisplayText(viewModel.context.submissionId)}
+            </p>
           </div>
           <div>
             <p className="text-zinc-500">课堂任务 ID</p>
@@ -312,19 +254,27 @@ export default async function TeacherSubmissionDetailPage({
           </div>
           <div>
             <p className="text-zinc-500">任务标题</p>
-            <p className="font-medium text-zinc-900">{toDisplayText(viewModel.context.taskTitle)}</p>
+            <p className="font-medium text-zinc-900">
+              {toDisplayText(viewModel.context.taskTitle)}
+            </p>
           </div>
           <div>
             <p className="text-zinc-500">学生</p>
-            <p className="font-medium text-zinc-900">{toDisplayText(viewModel.context.studentName)}</p>
+            <p className="font-medium text-zinc-900">
+              {toDisplayText(viewModel.context.studentName ?? viewModel.detail.studentId)}
+            </p>
           </div>
           <div>
             <p className="text-zinc-500">语言</p>
-            <p className="font-medium text-zinc-900">{toDisplayText(viewModel.context.language)}</p>
+            <p className="font-medium text-zinc-900">
+              {toDisplayText(viewModel.context.language)}
+            </p>
           </div>
           <div>
             <p className="text-zinc-500">提交时间</p>
-            <p className="font-medium text-zinc-900">{toDisplayDate(viewModel.context.submittedAt)}</p>
+            <p className="font-medium text-zinc-900">
+              {toDisplayDate(viewModel.context.submittedAt)}
+            </p>
           </div>
           <div>
             <p className="text-zinc-500">尝试次数</p>
@@ -333,10 +283,16 @@ export default async function TeacherSubmissionDetailPage({
             </p>
           </div>
           <div>
+            <p className="text-zinc-500">AI 状态</p>
+            <p className="font-medium text-zinc-900">
+              {getAiStatusLabel(viewModel.detail.aiFeedbackStatus)}
+            </p>
+          </div>
+          <div>
             <p className="text-zinc-500">是否迟交</p>
             <p className="font-medium text-zinc-900">
               {toDisplayText(viewModel.context.isLate)}
-              {viewModel.context.isLate && asNumber(viewModel.context.lateBySeconds) !== undefined
+              {viewModel.context.isLate && viewModel.context.lateBySeconds !== undefined
                 ? `（超时 ${viewModel.context.lateBySeconds} 秒）`
                 : ""}
             </p>
@@ -348,15 +304,15 @@ export default async function TeacherSubmissionDetailPage({
         <h2 className="text-base font-semibold text-zinc-900">提交内容</h2>
         {viewModel.context.codeText ? (
           <details className="mt-3 rounded-md border border-zinc-200 bg-zinc-50 p-3" open>
-            <summary className="cursor-pointer text-sm font-medium text-zinc-800">查看代码内容</summary>
+            <summary className="cursor-pointer text-sm font-medium text-zinc-800">
+              查看代码内容
+            </summary>
             <pre className="mt-3 max-h-[28rem] overflow-auto whitespace-pre-wrap rounded-md bg-zinc-900 p-3 text-xs text-zinc-100">
               {viewModel.context.codeText}
             </pre>
           </details>
         ) : (
-          <p className="mt-2 text-sm text-zinc-600">
-            当前接口未返回代码内容，可通过原始记录确认。
-          </p>
+          <p className="mt-2 text-sm text-zinc-600">当前接口未返回代码内容。</p>
         )}
       </section>
 

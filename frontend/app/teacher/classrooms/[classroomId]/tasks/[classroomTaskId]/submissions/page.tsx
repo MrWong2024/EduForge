@@ -171,9 +171,6 @@ export default async function ClassroomTaskSubmissionsPage({
                 const detailQuery = buildQueryString({
                   classroomId,
                   classroomTaskId,
-                  studentName: submission.studentName,
-                  submittedAt: submission.submittedAt,
-                  attemptNo: submission.attemptNo,
                 });
                 const detailHref = baseDetailPath
                   ? detailQuery

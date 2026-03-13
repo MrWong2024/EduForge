@@ -94,17 +94,13 @@ const isProcessingAiStatus = (status?: string): boolean =>
 const buildSubmissionFeedbackHref = (
   submissionId: string,
   classroomId: string,
-  classroomTaskId: string,
-  aiStatus?: string
+  classroomTaskId: string
 ): string => {
   const basePath = paths.student.submissionDetail(submissionId);
   const query = new URLSearchParams({
     classroomId,
     classroomTaskId,
   });
-  if (aiStatus) {
-    query.set("status", aiStatus);
-  }
   return `${basePath}?${query.toString()}`;
 };
 
@@ -182,7 +178,7 @@ export default async function StudentTaskDetailPage({
   const latestStatusDescription = toAiStatusDescription(latestRawStatus);
   const latestSubmissionId = safeGet<string | undefined>(viewModel.data.latest, "submissionId", undefined);
   const latestSubmissionHref = latestSubmissionId
-    ? buildSubmissionFeedbackHref(latestSubmissionId, classroomId, classroomTaskId, latestRawStatus)
+    ? buildSubmissionFeedbackHref(latestSubmissionId, classroomId, classroomTaskId)
     : null;
 
   return (
@@ -290,12 +286,7 @@ export default async function StudentTaskDetailPage({
                   undefined
                 );
                 const feedbackHref = submissionId
-                  ? buildSubmissionFeedbackHref(
-                      submissionId,
-                      classroomId,
-                      classroomTaskId,
-                      submissionAiStatus
-                    )
+                  ? buildSubmissionFeedbackHref(submissionId, classroomId, classroomTaskId)
                   : null;
 
                 return (

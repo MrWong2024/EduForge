@@ -1,8 +1,10 @@
 import { safeGet } from "@/lib/ui/format";
 import {
   toListFeedbackResponse,
+  toSubmissionDetailResponse as toStudentSubmissionDetailResponse,
   type FeedbackItem,
   type ListFeedbackResponse,
+  type SubmissionDetailResponse as StudentSubmissionDetailResponse,
 } from "@/lib/api/types-student";
 
 type UnknownRecord = Record<string, unknown>;
@@ -139,6 +141,8 @@ export type ClassroomTaskSubmissionsResponse = {
 export type TeacherFeedbackItem = FeedbackItem;
 
 export type TeacherFeedbackListResponse = ListFeedbackResponse;
+
+export type SubmissionDetailResponse = StudentSubmissionDetailResponse;
 
 export type TeacherSubmissionContext = {
   submissionId: string;
@@ -642,6 +646,10 @@ export const toClassroomTaskSubmissionsResponse = (
 
 export const toTeacherFeedbackListResponse = (payload: unknown): TeacherFeedbackListResponse =>
   toListFeedbackResponse(payload);
+
+export const toSubmissionDetailResponse = (
+  payload: unknown
+): SubmissionDetailResponse => toStudentSubmissionDetailResponse(payload);
 
 const toEpochTime = (iso: string | undefined): number => {
   if (!iso) {
