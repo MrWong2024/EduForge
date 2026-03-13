@@ -54,22 +54,21 @@
 
 - Service: `backend/src/modules/users/services/users.service.ts`
 - Domain: `User`
-- Actions: `get-me`, `update-me(placeholder)`
+- Actions: `get-me`, `update-me`
 - I/O Shape:
   - In: `userId`, `UpdateProfileDto`
-  - Out: `user public entity` | `null`
+  - Out: `user public profile`
 - Key Methods:
   - `getMe(userId: string): Promise<Record<string, unknown>> — called by /users/me endpoint`
-  - `updateMe(dto: UpdateProfileDto): null — placeholder called by PATCH /users/me`
+  - `updateMe(userId: string, dto: UpdateProfileDto): Promise<Record<string, unknown>> — called by PATCH /users/me`
 - AuthZ Boundary: `login-only`
 - Metrics/Isolation: 无 `classroomTaskId` 口径
-- Consistency/Constraints: 返回字段白名单（不含 `passwordHash`）
-- Deps/Side Effects: `UserModel`；只读查询
-- Performance Notes: `lean + select` 最小字段读取
+- Consistency/Constraints: `PATCH /users/me` 仅允许更新 `name/studentNo/employeeNo`；`GET/PATCH` 返回口径一致且不含 `passwordHash`
+- Deps/Side Effects: `UserModel`；读写当前用户公开资料字段
+- Performance Notes: `lean + select` 最小字段读取；`undefined` 字段忽略更新（不写入）
 - SoT: `backend/src/modules/users/services/users.service.ts`; `backend/src/modules/users/schemas/user.schema.ts`
 - Failure Modes:
   - 用户不存在 -> `404 User not found`
-  - 更新接口当前未实现 -> 返回 `null`
 
 ## Service Card 03
 
@@ -100,22 +99,23 @@
 
 - Service: `backend/src/modules/classrooms/services/classrooms.service.ts`
 - Domain: `Classroom`
-- Actions: `create/update/list/get`, `join/remove`, `archive`, `dashboard-delegate`
+- Actions: `create/update/list/get`, `join/remove`, `list-students`, `archive`, `dashboard-delegate`
 - I/O Shape:
-  - In: `classroomId`, `JoinClassroomDto(joinCode)`, `QueryClassroomDto`, `userId`
-  - Out: `ClassroomResponseDto` | `{ items, total, page, limit }` | `dashboard aggregate`
+  - In: `classroomId`, `JoinClassroomDto(joinCode)`, `QueryClassroomDto`, `QueryClassroomStudentsDto`, `userId`
+  - Out: `ClassroomResponseDto` | `{ items, total, page, limit }` | `dashboard aggregate` | `classroom students paged list`
 - Key Methods:
   - `createClassroom(dto: CreateClassroomDto, userId: string): Promise<ClassroomResponseDto> — called by POST /classrooms`
   - `listClassrooms(query: QueryClassroomDto, userId: string): Promise<{ items: ClassroomResponseDto[]; total: number; page: number; limit: number }> — called by GET /classrooms`
+  - `listStudents(classroomId: string, query: QueryClassroomStudentsDto, userId: string): Promise<{ items: unknown[]; total: number; page: number; limit: number }> — called by GET /classrooms/:id/students`
   - `joinClassroom(dto: JoinClassroomDto, userId: string): Promise<ClassroomResponseDto> — called by POST /classrooms/join`
   - `removeStudent(id: string, studentId: string, userId: string): Promise<ClassroomResponseDto> — called by POST /classrooms/:id/students/:uid/remove`
   - `getDashboard(id: string, userId: string): Promise<Record<string, unknown>> — delegates to teacher dashboard service`
   - `getMyLearningDashboard(query: QueryClassroomDto, userId: string): Promise<Record<string, unknown>> — delegates to student dashboard service`
 - AuthZ Boundary: `teacher-only`（管理） / `student-only`（加入） / `member-or-owner`（查看）
 - Metrics/Isolation: 班级管理按 `teacherId`；成员判定与统计统一通过 `EnrollmentService`；下游统计统一是 `classroomTaskId` 口径
-- Consistency/Constraints: joinCode 生成重试上限 `8`；归档班级禁止更新；`join/remove` 先写 Enrollment(`ACTIVE/REMOVED`)，`studentIds` 仅作为 legacy 镜像输出，不参与授权/统计
+- Consistency/Constraints: joinCode 生成重试上限 `8`；归档班级禁止更新；`join/remove` 先写 Enrollment(`ACTIVE/REMOVED`)，`studentIds` 仅作为 legacy 镜像输出，不参与授权/统计；`GET /classrooms/:id/students` 只认 Enrollment ACTIVE，默认排序 `joinedAt desc, _id desc`
 - Deps/Side Effects: `ClassroomModel`, `CourseModel`, `UserModel`, `EnrollmentService`, `TeacherClassroomDashboardService`, `TeacherClassroomWeeklyReportService`, `StudentLearningDashboardService`, `ProcessAssessmentService`, `ClassroomExportSnapshotService`
-- Performance Notes: 列表查询分页 + 索引过滤；join/remove 采用 Enrollment upsert/update，并可选镜像更新 `studentIds`
+- Performance Notes: 列表查询分页 + 索引过滤；join/remove 采用 Enrollment upsert/update，并可选镜像更新 `studentIds`；`listStudents` 按页批量拉取用户公开字段避免 N+1
 - SoT: `backend/src/modules/classrooms/services/classrooms.service.ts`; `backend/src/modules/classrooms/enrollments/services/enrollment.service.ts`; `backend/src/modules/classrooms/enrollments/README.md`; `backend/src/modules/classrooms/README.md`
 - Failure Modes:
   - 非授权角色 -> `403`
@@ -168,22 +168,23 @@
 
 - Service: `backend/src/modules/classrooms/classroom-tasks/services/classroom-tasks.service.ts`
 - Domain: `ClassroomTask + Submission + Z3/Z4 聚合`
-- Actions: `publish-to-classroom`, `list/get-classroom-task`, `submit-classroom-task`, `aggregate-feature-views`
+- Actions: `publish-to-classroom`, `list/get-classroom-task`, `submit-classroom-task`, `list-task-submissions`, `aggregate-feature-views`
 - I/O Shape:
-  - In: `classroomId`, `classroomTaskId`, `CreateClassroomTaskDto`, `QueryClassroomTaskDto`, `CreateSubmissionDto`, `userId`
-  - Out: `ClassroomTaskResponseDto` | `{ items, total, page, limit }` | `SubmissionResponseDto`
+  - In: `classroomId`, `classroomTaskId`, `CreateClassroomTaskDto`, `QueryClassroomTaskDto`, `QueryClassroomTaskSubmissionsDto`, `CreateSubmissionDto`, `userId`
+  - Out: `ClassroomTaskResponseDto` | `{ items, total, page, limit }` | `SubmissionResponseDto` | `classroomTask submissions paged list`
 - Key Methods:
   - `createClassroomTask(classroomId: string, dto: CreateClassroomTaskDto, userId: string): Promise<ClassroomTaskResponseDto> — called by POST /classrooms/:id/tasks`
   - `listClassroomTasks(classroomId: string, query: QueryClassroomTaskDto, userId: string): Promise<{ items: ClassroomTaskResponseDto[]; total: number; page: number; limit: number }> — called by GET /classrooms/:id/tasks`
   - `getClassroomTask(classroomId: string, classroomTaskId: string, userId: string): Promise<ClassroomTaskResponseDto> — called by GET /classrooms/:id/tasks/:classroomTaskId`
   - `createClassroomTaskSubmission(classroomId: string, classroomTaskId: string, dto: CreateSubmissionDto, userId: string): Promise<SubmissionResponseDto> — called by classroom-task submission endpoint`
+  - `listClassroomTaskSubmissions(classroomId: string, classroomTaskId: string, query: QueryClassroomTaskSubmissionsDto, teacherId: string): Promise<{ items: unknown[]; total: number; page: number; limit: number }> — called by GET /classrooms/:classroomId/tasks/:classroomTaskId/submissions`
   - `getMyTaskDetail(...): Promise<Record<string, unknown>> — called by /classrooms/:classroomId/tasks/:classroomTaskId/my-task-detail`
   - `getLearningTrajectory(...): Promise<Record<string, unknown>> — called by /classrooms/:classroomId/tasks/:classroomTaskId/learning-trajectory`
 - AuthZ Boundary: `teacher-only`（发布） / `student-only + member-only`（提交） / `member-or-owner`（查看）
-- Metrics/Isolation: 学生提交通过 `createSubmissionForClassroomTask(..., classroomTaskId)` 绑定隔离主键；Z3/Z4 聚合严格按 `classroomTaskId`；学生集合基于 Enrollment ACTIVE
-- Consistency/Constraints: 要求 Task 已 `PUBLISHED`；班级 `ARCHIVED` 禁止发布；`unique(classroomId,taskId)` 防重复发布；**提交门禁分层：`ClassroomTasksService` 负责 `student + Enrollment ACTIVE + classroomTask 归属` 校验；`LearningTasksService.createSubmissionInternal` 仅在存在 `classroomTaskId` 时 enforce `dueAt/allowLate`（超时且 `allowLate=false` -> `403(code=LATE_SUBMISSION_NOT_ALLOWED)`），并持久化/返回 `submittedAt/isLate/lateBySeconds`。**
+- Metrics/Isolation: 学生提交通过 `createSubmissionForClassroomTask(..., classroomTaskId)` 绑定隔离主键；Z3/Z4 聚合严格按 `classroomTaskId`；提交列表读取同样只按 `classroomTaskId`，不按 `taskId` 跨班聚合；学生集合基于 Enrollment ACTIVE
+- Consistency/Constraints: 要求 Task 已 `PUBLISHED`；班级 `ARCHIVED` 禁止发布；`unique(classroomId,taskId)` 防重复发布；**提交门禁分层：`ClassroomTasksService` 负责 `student + Enrollment ACTIVE + classroomTask 归属` 校验；`LearningTasksService.createSubmissionInternal` 仅在存在 `classroomTaskId` 时 enforce `dueAt/allowLate`（超时且 `allowLate=false` -> `403(code=LATE_SUBMISSION_NOT_ALLOWED)`），并持久化/返回 `submittedAt/isLate/lateBySeconds`。**；提交列表 `aiFeedbackStatus` 无 job 显式回填 `NOT_REQUESTED`；不返回 `passwordHash/content.codeText`
 - Deps/Side Effects: `ClassroomModel`, `ClassroomTaskModel`, `TaskModel`, `SubmissionModel`, `FeedbackModel`, `UserModel`, `EnrollmentService`, `AiFeedbackJobService`, `LearningTasksService`
-- Performance Notes: 列表使用 `aggregate(basePipeline + totalPipeline)` 一次生成分页数据与总数
+- Performance Notes: 任务列表使用 `aggregate(basePipeline + totalPipeline)` 一次生成分页数据与总数；提交列表按页查询 submission 后批量查询用户公开信息与 AI 状态，避免 N+1
 - SoT: `backend/src/modules/classrooms/classroom-tasks/services/classroom-tasks.service.ts`; `backend/src/modules/classrooms/classroom-tasks/schemas/classroom-task.schema.ts`; `backend/src/modules/classrooms/enrollments/services/enrollment.service.ts`; `backend/src/modules/classrooms/README.md`
 - Failure Modes:
   - 班级/任务/课堂任务不存在 -> `404`
@@ -228,14 +229,14 @@
 - Key Methods:
   - `enrollStudent(classroomId: string, userId: string): Promise<void>`
   - `removeStudent(classroomId: string, userId: string): Promise<void>`
-  - `listActiveStudentIds(...)`, `listActiveStudentIdsByClassroomPage(...)`
+  - `listActiveStudentIds(...)`, `listActiveStudentIdsByClassroomPage(...)`, `listActiveStudentsByClassroomPage(...)`
   - `countStudents(classroomId: string)`, `countStudentsGroupedByClassroomIds(classroomIds: ObjectId[])`
   - `listActiveClassroomIdsByUser(userId: string)`, `isStudentActiveInClassroom(...)`
 - AuthZ Boundary: `internal-only`（由调用方 service/controller 做 teacher/student/member 约束）
 - Metrics/Isolation: 成员 SoT 仅为 Enrollment（`role=STUDENT,status=ACTIVE`）；所有成员数、成员列表、学生-班级关系从此处读取
 - Consistency/Constraints: `enrollStudent` 幂等 upsert（并发重复键收敛为 ACTIVE）；`removeStudent` 软删除为 `REMOVED` 并写 `removedAt`
 - Deps/Side Effects: `EnrollmentModel`；写入 enrollment 集合，不依赖 `classroom.studentIds`
-- Performance Notes: 提供分页成员读取与 grouped count，避免上层 N+1 计数
+- Performance Notes: 提供分页成员读取（含 `joinedAt`）与 grouped count，避免上层 N+1 计数
 - SoT: `backend/src/modules/classrooms/enrollments/schemas/enrollment.schema.ts`; `backend/src/modules/classrooms/enrollments/services/enrollment.service.ts`; `backend/src/modules/classrooms/enrollments/README.md`
 - Failure Modes:
   - 非法 ObjectId -> `400`

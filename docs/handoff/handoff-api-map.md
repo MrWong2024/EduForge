@@ -20,7 +20,11 @@
 | Method | Path | 用途 |
 |---|---|---|
 | GET | `/api/users/me` | 读取当前会话用户公开信息。 |
-| PATCH | `/api/users/me` | 预留“更新个人资料”入口（当前 service 返回 `null`）。 |
+| PATCH | `/api/users/me` | 更新当前会话用户公开资料（仅 `name/studentNo/employeeNo`）。 |
+
+Notes:
+- `GET /api/users/me` 与 `PATCH /api/users/me` 返回口径一致（公开字段），不返回 `passwordHash`。
+- `PATCH /api/users/me` 仅允许更新 `name/studentNo/employeeNo`，基于当前登录会话识别用户。
 
 ## Courses
 
@@ -53,6 +57,7 @@ Notes:
 | GET | `/api/classrooms/:classroomId/process-assessment.csv` | 过程性评价 CSV（Z6）。 |
 | GET | `/api/classrooms/:classroomId/export/snapshot` | 教学数据快照导出（Z9）。 |
 | GET | `/api/classrooms/:id` | 获取班级详情（teacher owner 或 student member）。 |
+| GET | `/api/classrooms/:id/students` | 教师分页查看班级正式成员列表（Enrollment ACTIVE）。 |
 | POST | `/api/classrooms/:id/archive` | 教师归档班级。 |
 | POST | `/api/classrooms/:id/students/:uid/remove` | 教师移除学生。 |
 
@@ -62,6 +67,7 @@ Notes:
 - `/api/classrooms/:classroomId/process-assessment` Query: `window, page, limit, sort, order`；teacher only；Enrollment-only；返回聚合结果，不返回敏感字段。
 - `/api/classrooms/:classroomId/process-assessment.csv` Query: `window`；teacher only；CSV 为手写转义（双引号转义）；不返回敏感字段。
 - `/api/classrooms/:classroomId/export/snapshot` Query: `window, limitStudents, limitAssessment, includePerTask`；teacher only；体积保护采用 limit 截断并在 `meta.notes` 写明；不返回敏感字段。
+- `/api/classrooms/:id/students`：teacher only + owner only（非 owner 返回 `404`）；成员来源只认 Enrollment（`role=STUDENT,status=ACTIVE`），不读取/不回退 `classroom.studentIds`；默认排序 `joinedAt desc, _id desc`；不返回 `passwordHash`。
 
 ## Classroom Tasks（Classrooms 子资源）
 
@@ -71,6 +77,7 @@ Notes:
 | GET | `/api/classrooms/:id/tasks` | 教师/学生查看班级任务列表。 |
 | GET | `/api/classrooms/:id/tasks/:classroomTaskId` | 教师/学生查看班级任务详情。 |
 | POST | `/api/classrooms/:classroomId/tasks/:classroomTaskId/submissions` | 班级发布实例提交入口（绑定 `classroomTaskId`）。 |
+| GET | `/api/classrooms/:classroomId/tasks/:classroomTaskId/submissions` | 教师分页查看课堂任务实例提交列表（仅 `classroomTaskId`）。 |
 | GET | `/api/classrooms/:classroomId/tasks/:classroomTaskId/my-task-detail` | 学生端任务聚合详情（Z3）。 |
 | GET | `/api/classrooms/:classroomId/tasks/:classroomTaskId/learning-trajectory` | 学习轨迹（Z4）。 |
 | GET | `/api/classrooms/:classroomId/tasks/:classroomTaskId/review-pack` | 课堂复盘包（Z5）。 |
@@ -78,6 +85,7 @@ Notes:
 
 Notes:
 - `/api/classrooms/:classroomId/tasks/:classroomTaskId/submissions`：若 `dueAt` 存在且 `allowLate=false` 且 `now>dueAt`，拒绝（403），`error code = LATE_SUBMISSION_NOT_ALLOWED`；Submission 响应包含 `submittedAt/isLate/lateBySeconds` 语义字段。
+- `GET /api/classrooms/:classroomId/tasks/:classroomTaskId/submissions`：teacher only + owner only（非 owner 返回 `404`）；只按 `classroomTaskId` 分页查询，禁止按 `taskId` 跨班聚合；默认排序 `submittedAt desc, _id desc`；`aiFeedbackStatus` 无 job 时为 `NOT_REQUESTED`；不返回 `passwordHash`、`content.codeText`。
 - `/api/classrooms/:classroomId/tasks/:classroomTaskId/my-task-detail`：student only，且必须 Enrollment ACTIVE；Query: `includeFeedbackItems, feedbackLimit`；`attemptNo>1` 在未手工 request 时可能 `NOT_REQUESTED`（无 job，合法语义）。
 - `/api/classrooms/:classroomId/tasks/:classroomTaskId/learning-trajectory`：teacher only；Query: `window, page, limit, sort, order, includeAttempts, includeTagDetails`；学生范围取 Enrollment ACTIVE；未提交学生也会以 `notSubmitted` 维度出现在 `items`。
 - `/api/classrooms/:classroomId/tasks/:classroomTaskId/review-pack`：teacher only；Query: `window, topK, examplesPerTag, includeStudentTiers, includeTeacherScript`；禁止敏感字段，examples 不包含 `codeText/prompt/apiKey`。

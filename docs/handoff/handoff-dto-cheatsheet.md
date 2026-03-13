@@ -1,6 +1,6 @@
 # DTO Cheatsheet（Write APIs）
 
-更新时间：2026-03-01  
+更新时间：2026-03-13  
 来源：`backend/src/modules/**/controllers/*.controller.ts` + 对应 `dto/*.dto.ts`
 
 ## 用途说明
@@ -12,6 +12,7 @@
 - 仅覆盖 Controller 中声明的写接口。
 - 仅抽取 request body DTO（`@Body()`）。
 - `@Query()` / `@Param()` DTO 默认不展开；若某写接口无 body，本文件会标注 `No body`。
+- 例外：为承接 P0 后端补齐，本文件末尾补充了 2 个正式读取接口的 Query DTO（分页参数）。
 - 运行态路径按全局前缀 `api` 书写为 `/api/...`。
 
 ## 更新规则（必须遵守）
@@ -60,15 +61,25 @@
 
 - Controller & Method: `backend/src/modules/users/controllers/users.controller.ts` -> `UsersController.updateMe`
 - DTO: `UpdateProfileDto` (`backend/src/modules/users/dto/update-profile.dto.ts`)
-- Required fields: None (`UpdateProfileDto` 当前为空 DTO)
+- Required fields: None（全部 `@IsOptional()`）
 - Enums: None
 - Nested structure: None
 - Minimal JSON example:
 
 ```json
-{}
+{
+  "name": "王老师",
+  "studentNo": "20260001",
+  "employeeNo": "T0001"
+}
 ```
-- Notes: Body 允许为空对象 `{}`，不要传 `null`。
+- Optional fields（全部可选）:
+  - `name: string` (`@MaxLength(100)`)
+  - `studentNo: string` (`@MaxLength(64)`)
+  - `employeeNo: string` (`@MaxLength(64)`)
+- Notes:
+  - Body 允许为空对象 `{}`，不要传 `null`。
+  - 仅允许更新上述 3 个字段；不允许 `email/roles/status/passwordHash`。
 
 ---
 
@@ -387,3 +398,36 @@
 - 对于 `Record<string, unknown>`（如 `rubric`），内部结构不可静态推断，示例仅给出保守最小可用体。
 - 对于包含 `codeText` 的提交 DTO，示例值已脱敏；实际联调请使用真实提交内容。
 - 示例中的 `courseId`/`taskId`/`classroomId`/`classroomTaskId`/`submissionId` 等 MongoId 均为占位值；联调时请替换为真实 id，避免将 `404` 误判为 DTO 校验问题。
+
+---
+
+## P0 Query DTO 补充（读取接口）
+
+### GET /api/classrooms/:id/students
+
+- Controller & Method: `backend/src/modules/classrooms/controllers/classrooms.controller.ts` -> `ClassroomsController.listStudents`
+- Query DTO: `QueryClassroomStudentsDto` (`backend/src/modules/classrooms/dto/query-classroom-students.dto.ts`)
+- Fields:
+  - `page?: number` (`@Type(() => Number) @IsInt() @Min(1)`)
+  - `limit?: number` (`@Type(() => Number) @IsInt() @Min(1) @Max(100)`)
+- Example Query:
+  - `/api/classrooms/{id}/students?page=1&limit=20`
+- Response口径（最小说明）:
+  - `items[*]` 包含 `id/email/roles/status/name/studentNo/employeeNo/joinedAt`
+  - 成员来源只认 Enrollment ACTIVE（`role=STUDENT,status=ACTIVE`）
+  - 不返回 `passwordHash`
+
+### GET /api/classrooms/:classroomId/tasks/:classroomTaskId/submissions
+
+- Controller & Method: `backend/src/modules/classrooms/classroom-tasks/controllers/classroom-tasks.controller.ts` -> `ClassroomTasksController.listClassroomTaskSubmissions`
+- Query DTO: `QueryClassroomTaskSubmissionsDto` (`backend/src/modules/classrooms/classroom-tasks/dto/query-classroom-task-submissions.dto.ts`)
+- Fields:
+  - `page?: number` (`@Type(() => Number) @IsInt() @Min(1)`)
+  - `limit?: number` (`@Type(() => Number) @IsInt() @Min(1) @Max(100)`)
+- Example Query:
+  - `/api/classrooms/{classroomId}/tasks/{classroomTaskId}/submissions?page=1&limit=20`
+- Response口径（最小说明）:
+  - `items[*]` 包含 `id/taskId/classroomTaskId/student/attemptNo/submittedAt/isLate/lateBySeconds/status/aiFeedbackStatus`
+  - 列表只按 `classroomTaskId` 查询，不按 `taskId` 跨班聚合
+  - 无 job 时 `aiFeedbackStatus = NOT_REQUESTED`
+  - 不返回 `passwordHash`、不返回 `content.codeText`

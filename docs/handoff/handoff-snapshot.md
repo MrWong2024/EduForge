@@ -87,6 +87,9 @@ backend/
 │  ├─ classroom-process-assessment.e2e-spec.ts
 │  ├─ classroom-task-deadline.e2e-spec.ts
 │  └─ classroom-export-snapshot.e2e-spec.ts
+│  ├─ users-me.e2e-spec.ts
+│  ├─ classroom-students.e2e-spec.ts
+│  └─ classroom-task-submissions.e2e-spec.ts
 └─ scripts/
    └─ sync-indexes.ts
 ```
@@ -155,8 +158,9 @@ backend/
 - 隔离字段来源：当前 schema 无 `classroomTaskId` 直连字段；统计隔离通过 `submissionId -> Submission.classroomTaskId` 关联完成。
 
 ### User（`src/modules/users/schemas/user.schema.ts`）
-- 关键字段：`email`、`passwordHash(select:false)`、`roles[]`、`status(active|suspended)`。
+- 关键字段：`email`、`passwordHash(select:false)`、`roles[]`、`status(active|suspended)`、`name?`、`studentNo?`、`employeeNo?`。
 - 索引/唯一性：`unique(email)`。
+- 用户资料口径：`GET/PATCH /api/users/me` 返回一致的公开字段口径，不返回 `passwordHash`。
 
 ### Session（`src/modules/auth/schemas/session.schema.ts`）
 - 关键字段：`userId`、`token`、`expiresAt`。
@@ -250,6 +254,15 @@ AI Provider 错误码（`ai-feedback-provider.error-codes.ts`）：
 - `AiFeedbackStatus=NOT_REQUESTED` 的两类来源（从未创建 job / 策略跳过入队）均为正常产品语义。
 
 新增/变更产品能力（Z3、AA~AI、Z4~Z9 收口口径）：
+- P0 用户资料闭环（已完成）：
+  - `PATCH /api/users/me`：已落地可用；仅允许更新 `name/studentNo/employeeNo`。
+  - `GET /api/users/me` 与 `PATCH /api/users/me` 返回口径一致，均不返回 `passwordHash`。
+- P0 班级成员列表（已完成）：
+  - `GET /api/classrooms/:id/students`
+  - teacher owner 可访问；成员来源只认 Enrollment ACTIVE；默认排序 `joinedAt desc, _id desc`；不读取 `classroom.studentIds`。
+- P0 课堂任务提交列表（已完成）：
+  - `GET /api/classrooms/:classroomId/tasks/:classroomTaskId/submissions`
+  - teacher owner 可访问；只按 `classroomTaskId` 读取；默认排序 `submittedAt desc, _id desc`；无 job 时 `aiFeedbackStatus=NOT_REQUESTED`；不返回 `passwordHash/content.codeText`。
 - AI 指标看板（已存在）：
   - `GET /api/classrooms/:classroomId/tasks/:classroomTaskId/ai-metrics`
 - Z3 学生端聚合详情：
@@ -273,3 +286,17 @@ AI Provider 错误码（`ai-feedback-provider.error-codes.ts`）：
   - `GET /api/classrooms/:classroomId/export/snapshot`
 - 运维收口产物：
   - `docs/operations/classroom-runbook.md`
+
+## 5) P0 后端补齐状态（交接边界）
+
+已完成（可供前端/BFF 正式接入）：
+- 用户资料字段补齐：`name/studentNo/employeeNo`。
+- `/api/users/me` 更新能力：`PATCH` 真实可用，且与 `GET` 返回口径一致。
+- 班级正式成员列表：`GET /api/classrooms/:id/students`（Enrollment ACTIVE SoT）。
+- 课堂任务实例提交列表：`GET /api/classrooms/:classroomId/tasks/:classroomTaskId/submissions`（`classroomTaskId` 隔离）。
+
+明确未完成（本阶段不包含）：
+- 管理员批量导入用户（Excel/CSV）。
+- 教师手工添加学生到班级。
+- 提交/成员列表高级筛选与全文搜索。
+- 额外导出能力（如提交列表 CSV）。
