@@ -17,6 +17,7 @@ import { QueryAiMetricsDto } from '../dto/query-ai-metrics.dto';
 import { QueryMyTaskDetailDto } from '../dto/query-my-task-detail.dto';
 import { QueryLearningTrajectoryDto } from '../dto/query-learning-trajectory.dto';
 import { QueryClassReviewPackDto } from '../dto/query-class-review-pack.dto';
+import { QueryClassroomTaskSubmissionsDto } from '../dto/query-classroom-task-submissions.dto';
 import { CreateSubmissionDto } from '../../../learning-tasks/dto/create-submission.dto';
 import { AiMetricsService } from '../services/ai-metrics.service';
 import { ClassReviewPackService } from '../services/class-review-pack.service';
@@ -92,6 +93,23 @@ export class ClassroomTasksController {
       classroomId,
       classroomTaskId,
       dto,
+      user.id,
+    );
+  }
+
+  @UseGuards(RolesGuard)
+  @Roles(...TEACHER_ROLES)
+  @Get(':classroomId/tasks/:classroomTaskId/submissions')
+  listClassroomTaskSubmissions(
+    @Param('classroomId') classroomId: string,
+    @Param('classroomTaskId') classroomTaskId: string,
+    @Query() query: QueryClassroomTaskSubmissionsDto,
+    @CurrentUser() user: { id: string },
+  ) {
+    return this.classroomTasksService.listClassroomTaskSubmissions(
+      classroomId,
+      classroomTaskId,
+      query,
       user.id,
     );
   }

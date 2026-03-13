@@ -11,6 +11,7 @@ import { ClassroomTask } from '../schemas/classroom-task.schema';
 import { CreateClassroomTaskDto } from '../dto/create-classroom-task.dto';
 import { QueryClassroomTaskDto } from '../dto/query-classroom-task.dto';
 import { QueryMyTaskDetailDto } from '../dto/query-my-task-detail.dto';
+import { QueryClassroomTaskSubmissionsDto } from '../dto/query-classroom-task-submissions.dto';
 import {
   LEARNING_TRAJECTORY_SORT_FIELDS,
   LEARNING_TRAJECTORY_SORT_ORDERS,
@@ -46,8 +47,54 @@ import { WithTimestamps } from '../../../../common/types/with-timestamps.type';
 type ClassroomTaskWithMeta = ClassroomTask & WithId & WithTimestamps;
 type ClassroomTaskWithTask = ClassroomTaskWithMeta & { task: Task };
 type ClassroomWithMeta = Classroom & WithId & WithTimestamps;
+type ClassroomOwnerLean = Pick<Classroom, 'teacherId'> & WithId;
+type ClassroomTaskOwnerLean = Pick<ClassroomTask, 'classroomId'> & WithId;
 type TaskWithMeta = Task & WithId & WithTimestamps;
 type SubmissionWithMeta = Submission & WithId & WithTimestamps;
+type ClassroomTaskSubmissionLean = Pick<
+  Submission,
+  | 'taskId'
+  | 'classroomTaskId'
+  | 'studentId'
+  | 'attemptNo'
+  | 'submittedAt'
+  | 'isLate'
+  | 'lateBySeconds'
+  | 'status'
+> &
+  WithId &
+  WithTimestamps;
+type SubmissionStudentLean = Pick<
+  User,
+  'email' | 'roles' | 'status' | 'name' | 'studentNo' | 'employeeNo'
+> &
+  WithId;
+type ClassroomTaskSubmissionListItem = {
+  id: string;
+  taskId: string;
+  classroomTaskId: string;
+  student: {
+    id: string;
+    email: string;
+    roles: string[];
+    status: string;
+    name: string | null;
+    studentNo: string | null;
+    employeeNo: string | null;
+  };
+  attemptNo: number;
+  submittedAt: Date;
+  isLate: boolean;
+  lateBySeconds: number;
+  status: Submission['status'];
+  aiFeedbackStatus: AiFeedbackStatus;
+};
+type ListClassroomTaskSubmissionsResponse = {
+  items: ClassroomTaskSubmissionListItem[];
+  total: number;
+  page: number;
+  limit: number;
+};
 type FeedbackSummarySeverityAgg = {
   _id: { submissionId: Types.ObjectId; severity: FeedbackSeverity };
   count: number;
@@ -348,6 +395,97 @@ export class ClassroomTasksService {
       dto,
       userId,
     );
+  }
+
+  async listClassroomTaskSubmissions(
+    classroomId: string,
+    classroomTaskId: string,
+    query: QueryClassroomTaskSubmissionsDto,
+    teacherId: string,
+  ): Promise<ListClassroomTaskSubmissionsResponse> {
+    await this.ensureTeacher(teacherId);
+
+    const classroomObjectId = this.parseObjectId(classroomId, 'classroomId');
+    const classroomTaskObjectId = this.parseObjectId(
+      classroomTaskId,
+      'classroomTaskId',
+    );
+
+    const classroom = await this.classroomModel
+      .findOne({
+        _id: classroomObjectId,
+        teacherId: new Types.ObjectId(teacherId),
+      })
+      .select('_id teacherId')
+      .lean<ClassroomOwnerLean>()
+      .exec();
+    if (!classroom) {
+      throw new NotFoundException('Classroom not found');
+    }
+
+    const classroomTask = await this.classroomTaskModel
+      .findOne({ _id: classroomTaskObjectId, classroomId: classroom._id })
+      .select('_id classroomId')
+      .lean<ClassroomTaskOwnerLean>()
+      .exec();
+    if (!classroomTask) {
+      throw new NotFoundException('Classroom task not found');
+    }
+
+    const page = query.page ?? 1;
+    const limit = Math.min(query.limit ?? 20, 100);
+    const filter = { classroomTaskId: classroomTask._id };
+    const [submissions, total] = await Promise.all([
+      this.submissionModel
+        .find(filter)
+        .sort({ submittedAt: -1, _id: -1 })
+        .skip((page - 1) * limit)
+        .limit(limit)
+        .select(
+          'taskId classroomTaskId studentId attemptNo submittedAt isLate lateBySeconds status createdAt',
+        )
+        .lean<ClassroomTaskSubmissionLean[]>()
+        .exec(),
+      this.submissionModel.countDocuments(filter),
+    ]);
+
+    const statusMap =
+      await this.aiFeedbackJobService.getStatusMapBySubmissionIds(
+        submissions.map((submission) => submission._id),
+      );
+    if (submissions.length === 0) {
+      return { items: [], total, page, limit };
+    }
+
+    const studentIds = Array.from(
+      new Map(
+        submissions.map((submission) => [
+          submission.studentId.toString(),
+          submission.studentId,
+        ]),
+      ).values(),
+    );
+    const students = await this.userModel
+      .find({ _id: { $in: studentIds } })
+      .select('email roles status name studentNo employeeNo')
+      .lean<SubmissionStudentLean[]>()
+      .exec();
+    const studentMap = new Map<string, SubmissionStudentLean>();
+    for (const student of students) {
+      studentMap.set(student._id.toString(), student);
+    }
+
+    const items = submissions.map((submission) =>
+      this.toClassroomTaskSubmissionListItem(
+        submission,
+        studentMap.get(submission.studentId.toString()),
+        statusMap.get(submission._id.toString()) ??
+          AiFeedbackStatus.NotRequested,
+        classroomTaskObjectId,
+      ),
+    );
+
+    return { items, total, page, limit };
   }
 
   async getLearningTrajectory(
@@ -966,6 +1104,37 @@ export class ClassroomTasksService {
       return defaultValue;
     }
     return value.toLowerCase() === 'true';
+  }
+
+  private toClassroomTaskSubmissionListItem(
+    submission: ClassroomTaskSubmissionLean,
+    student: SubmissionStudentLean | undefined,
+    aiFeedbackStatus: AiFeedbackStatus,
+    classroomTaskId: Types.ObjectId,
+  ): ClassroomTaskSubmissionListItem {
+    return {
+      id: submission._id.toString(),
+      taskId: submission.taskId.toString(),
+      classroomTaskId: (
+        submission.classroomTaskId ?? classroomTaskId
+      ).toString(),
+      student: {
+        id: submission.studentId.toString(),
+        email: student?.email ?? '',
+        roles: student?.roles ?? [],
+        status: student?.status ?? '',
+        name: student?.name ?? null,
+        studentNo: student?.studentNo ?? null,
+        employeeNo: student?.employeeNo ?? null,
+      },
+      attemptNo: submission.attemptNo,
+      submittedAt:
+        submission.submittedAt ?? submission.createdAt ?? new Date(0),
+      isLate: submission.isLate ?? false,
+      lateBySeconds: submission.lateBySeconds ?? 0,
+      status: submission.status,
+      aiFeedbackStatus,
+    };
   }
 
   private async getFeedbackItemsPreviewBySubmissionIds(
