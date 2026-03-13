@@ -14,6 +14,7 @@ import { JoinClassroomDto } from '../dto/join-classroom.dto';
 import { QueryClassroomWeeklyReportDto } from '../dto/query-classroom-weekly-report.dto';
 import { QueryProcessAssessmentDto } from '../dto/query-process-assessment.dto';
 import { QueryClassroomExportSnapshotDto } from '../dto/query-classroom-export-snapshot.dto';
+import { QueryClassroomStudentsDto } from '../dto/query-classroom-students.dto';
 import { ClassroomResponseDto } from '../dto/classroom-response.dto';
 import { Course } from '../../courses/schemas/course.schema';
 import { User } from '../../users/schemas/user.schema';
@@ -22,7 +23,10 @@ import { TeacherClassroomWeeklyReportService } from './teacher-classroom-weekly-
 import { StudentLearningDashboardService } from './student-learning-dashboard.service';
 import { ProcessAssessmentService } from './process-assessment.service';
 import { ClassroomExportSnapshotService } from './classroom-export-snapshot.service';
-import { EnrollmentService } from '../enrollments/services/enrollment.service';
+import {
+  ActiveStudentEnrollmentRow,
+  EnrollmentService,
+} from '../enrollments/services/enrollment.service';
 import {
   STUDENT_ROLES,
   TEACHER_ROLES,
@@ -32,6 +36,28 @@ import { WithId } from '../../../common/types/with-id.type';
 import { WithTimestamps } from '../../../common/types/with-timestamps.type';
 
 type ClassroomWithMeta = Classroom & WithId & WithTimestamps;
+type ClassroomOwnerLean = Pick<Classroom, 'teacherId'> & WithId;
+type StudentUserLean = Pick<
+  User,
+  'email' | 'roles' | 'status' | 'name' | 'studentNo' | 'employeeNo'
+> &
+  WithId;
+type ClassroomStudentItem = {
+  id: string;
+  email: string;
+  roles: string[];
+  status: string;
+  name: string | null;
+  studentNo: string | null;
+  employeeNo: string | null;
+  joinedAt: Date;
+};
+type ListClassroomStudentsResponse = {
+  items: ClassroomStudentItem[];
+  total: number;
+  page: number;
+  limit: number;
+};
 
 @Injectable()
 export class ClassroomsService {
@@ -174,6 +200,58 @@ export class ClassroomsService {
   async getDashboard(id: string, userId: string) {
     await this.ensureTeacher(userId);
     return this.teacherClassroomDashboardService.getDashboard(id, userId);
+  }
+
+  async listStudents(
+    classroomId: string,
+    query: QueryClassroomStudentsDto,
+    userId: string,
+  ): Promise<ListClassroomStudentsResponse> {
+    await this.ensureTeacher(userId);
+
+    const classroom = await this.classroomModel
+      .findOne({
+        _id: classroomId,
+        teacherId: new Types.ObjectId(userId),
+      })
+      .select('_id teacherId')
+      .lean<ClassroomOwnerLean>()
+      .exec();
+    if (!classroom) {
+      throw new NotFoundException('Classroom not found');
+    }
+
+    const page = query.page ?? 1;
+    const limit = Math.min(query.limit ?? 20, 100);
+
+    const [memberships, total] = await Promise.all([
+      this.enrollmentService.listActiveStudentsByClassroomPage(
+        classroom._id,
+        page,
+        limit,
+      ),
+      this.enrollmentService.countStudents(classroom._id.toString()),
+    ]);
+
+    if (memberships.length === 0) {
+      return { items: [], total, page, limit };
+    }
+
+    const users = await this.userModel
+      .find({
+        _id: { $in: memberships.map((membership) => membership.userId) },
+      })
+      .select('email roles status name studentNo employeeNo')
+      .lean<StudentUserLean[]>()
+      .exec();
+
+    const userMap = new Map<string, StudentUserLean>();
+    for (const user of users) {
+      userMap.set(user._id.toString(), user);
+    }
+
+    const items = this.toClassroomStudentItems(memberships, userMap);
+    return { items, total, page, limit };
   }
 
   async getWeeklyReport(
@@ -393,5 +471,29 @@ export class ClassroomsService {
     if (!isMember) {
       throw new ForbiddenException('Not allowed to view classroom');
     }
+  }
+
+  private toClassroomStudentItems(
+    memberships: ActiveStudentEnrollmentRow[],
+    userMap: Map<string, StudentUserLean>,
+  ): ClassroomStudentItem[] {
+    const items: ClassroomStudentItem[] = [];
+    for (const membership of memberships) {
+      const user = userMap.get(membership.userId.toString());
+      if (!user) {
+        continue;
+      }
+      items.push({
+        id: user._id.toString(),
+        email: user.email,
+        roles: user.roles,
+        status: user.status,
+        name: user.name ?? null,
+        studentNo: user.studentNo ?? null,
+        employeeNo: user.employeeNo ?? null,
+        joinedAt: membership.joinedAt,
+      });
+    }
+    return items;
   }
 }

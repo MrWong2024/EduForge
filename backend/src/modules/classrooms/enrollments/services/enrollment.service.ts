@@ -17,6 +17,10 @@ type EnrollmentGroupedCountRow = {
   _id: Types.ObjectId;
   count: number;
 };
+export type ActiveStudentEnrollmentRow = {
+  userId: Types.ObjectId;
+  joinedAt: Date;
+};
 
 @Injectable()
 export class EnrollmentService {
@@ -102,6 +106,29 @@ export class EnrollmentService {
       .lean<EnrollmentStudentRow[]>()
       .exec();
     return rows.map((row) => row.userId.toString());
+  }
+
+  async listActiveStudentsByClassroomPage(
+    classroomId: string | Types.ObjectId,
+    page: number,
+    limit: number,
+  ): Promise<ActiveStudentEnrollmentRow[]> {
+    const classroomObjectId = this.toObjectId(classroomId, 'classroomId');
+    const safePage = page < 1 ? 1 : page;
+    const safeLimit = limit < 1 ? 1 : limit;
+
+    return this.enrollmentModel
+      .find({
+        classroomId: classroomObjectId,
+        role: EnrollmentRole.Student,
+        status: EnrollmentStatus.Active,
+      })
+      .sort({ joinedAt: -1, _id: -1 })
+      .skip((safePage - 1) * safeLimit)
+      .limit(safeLimit)
+      .select({ _id: 0, userId: 1, joinedAt: 1 })
+      .lean<ActiveStudentEnrollmentRow[]>()
+      .exec();
   }
 
   async listActiveStudentIds(classroomId: string | Types.ObjectId) {

@@ -20,6 +20,7 @@ import { JoinClassroomDto } from '../dto/join-classroom.dto';
 import { QueryClassroomWeeklyReportDto } from '../dto/query-classroom-weekly-report.dto';
 import { QueryProcessAssessmentDto } from '../dto/query-process-assessment.dto';
 import { QueryClassroomExportSnapshotDto } from '../dto/query-classroom-export-snapshot.dto';
+import { QueryClassroomStudentsDto } from '../dto/query-classroom-students.dto';
 import {
   MEMBER_OR_OWNER_ROLES,
   STUDENT_ROLES,
@@ -142,6 +143,17 @@ export class ClassroomsController {
     @CurrentUser() user: { id: string },
   ) {
     return this.classroomsService.getWeeklyReport(classroomId, query, user.id);
+  }
+
+  @UseGuards(RolesGuard)
+  @Roles(...TEACHER_ROLES)
+  @Get(':id/students')
+  listStudents(
+    @Param('id') id: string,
+    @Query() query: QueryClassroomStudentsDto,
+    @CurrentUser() user: { id: string },
+  ) {
+    return this.classroomsService.listStudents(id, query, user.id);
   }
 
   @UseGuards(RolesGuard)
