@@ -53,6 +53,58 @@ export type ClassroomListResponse = {
   total?: number;
 };
 
+export type CourseSummary = {
+  id?: string;
+  code?: string;
+  name?: string;
+  term?: string;
+  status?: string;
+  createdAt?: string;
+  updatedAt?: string;
+  raw: UnknownRecord;
+};
+
+export type CourseListResponse = {
+  items: CourseSummary[];
+  page?: number;
+  limit?: number;
+  total?: number;
+  raw: unknown;
+};
+
+export type CourseOverviewErrorItem = {
+  code?: string;
+  count?: number;
+};
+
+export type CourseOverviewItem = {
+  classroomId?: string;
+  name?: string;
+  studentsCount?: number;
+  publishedClassroomTasks?: number;
+  distinctStudentsSubmitted?: number;
+  submissionRate?: number;
+  lateSubmissionsCount?: number;
+  lateStudentsCount?: number;
+  aiJobsTotal?: number;
+  aiPendingJobs?: number;
+  aiFailedJobs?: number;
+  aiSuccessRate?: number;
+  topErrors: CourseOverviewErrorItem[];
+  raw: UnknownRecord;
+};
+
+export type CourseOverviewResponse = {
+  course?: CourseSummary;
+  window?: string;
+  generatedAt?: string;
+  page?: number;
+  limit?: number;
+  total?: number;
+  items: CourseOverviewItem[];
+  raw: UnknownRecord;
+};
+
 export type ClassroomTaskSummary = {
   classroomTaskId?: string;
   title?: string;
@@ -273,6 +325,109 @@ export const toClassroomListResponse = (payload: unknown): ClassroomListResponse
     page: asNumber(record.page),
     limit: asNumber(record.limit),
     total: asNumber(record.total),
+  };
+};
+
+export const toCourseSummary = (value: unknown): CourseSummary => {
+  const record = asRecord(value);
+  return {
+    id: asString(record.id),
+    code: asString(record.code),
+    name: asString(record.name),
+    term: asString(record.term),
+    status: asString(record.status),
+    createdAt: asString(record.createdAt),
+    updatedAt: asString(record.updatedAt),
+    raw: record,
+  };
+};
+
+const toCourseOverviewErrorItem = (value: unknown): CourseOverviewErrorItem => {
+  const record = asRecord(value);
+  return {
+    code: asString(record.code),
+    count: asNumber(record.count),
+  };
+};
+
+const toCourseOverviewItem = (value: unknown): CourseOverviewItem => {
+  const record = asRecord(value);
+  const aiRecord = asRecord(safeGet(record, "ai", undefined));
+
+  return {
+    classroomId: asString(record.classroomId),
+    name: asString(record.name),
+    studentsCount: asNumber(record.studentsCount),
+    publishedClassroomTasks: asNumber(record.publishedClassroomTasks),
+    distinctStudentsSubmitted: asNumber(record.distinctStudentsSubmitted),
+    submissionRate: asNumber(record.submissionRate),
+    lateSubmissionsCount: asNumber(record.lateSubmissionsCount),
+    lateStudentsCount: asNumber(record.lateStudentsCount),
+    aiJobsTotal: asNumber(aiRecord.jobsTotal),
+    aiPendingJobs: asNumber(aiRecord.pendingJobs),
+    aiFailedJobs: asNumber(aiRecord.failedJobs),
+    aiSuccessRate: asNumber(aiRecord.aiSuccessRate),
+    topErrors: asRecordArray(safeGet(aiRecord, "topErrors", undefined)).map((item) =>
+      toCourseOverviewErrorItem(item)
+    ),
+    raw: record,
+  };
+};
+
+export const toCourseListResponse = (payload: unknown): CourseListResponse => {
+  if (Array.isArray(payload)) {
+    return {
+      items: payload.map((item) => toCourseSummary(item)),
+      total: payload.length,
+      page: 1,
+      limit: payload.length,
+      raw: payload,
+    };
+  }
+
+  const record = asRecord(payload);
+  const dataRecord = asRecord(safeGet(record, "data", undefined));
+  const candidateItems =
+    safeGet<unknown>(record, "items", undefined) ??
+    safeGet<unknown>(record, "data.items", undefined) ??
+    safeGet<unknown>(record, "data", undefined);
+
+  return {
+    items: asRecordArray(candidateItems).map((item) => toCourseSummary(item)),
+    total:
+      asNumber(record.total) ??
+      asNumber(safeGet(record, "pagination.total", undefined)) ??
+      asNumber(dataRecord.total),
+    page:
+      asNumber(record.page) ??
+      asNumber(safeGet(record, "pagination.page", undefined)) ??
+      asNumber(dataRecord.page),
+    limit:
+      asNumber(record.limit) ??
+      asNumber(safeGet(record, "pagination.limit", undefined)) ??
+      asNumber(dataRecord.limit),
+    raw: payload,
+  };
+};
+
+export const toCourseOverviewResponse = (payload: unknown): CourseOverviewResponse => {
+  const record = asRecord(payload);
+  const dataRecord = asRecord(safeGet(record, "data", undefined));
+  const source = Object.keys(dataRecord).length > 0 ? dataRecord : record;
+
+  return {
+    course: Object.keys(asRecord(safeGet(source, "course", undefined))).length > 0
+      ? toCourseSummary(safeGet(source, "course", undefined))
+      : undefined,
+    window: asString(source.window),
+    generatedAt: asString(source.generatedAt),
+    page: asNumber(source.page),
+    limit: asNumber(source.limit),
+    total: asNumber(source.total),
+    items: asRecordArray(safeGet(source, "items", undefined)).map((item) =>
+      toCourseOverviewItem(item)
+    ),
+    raw: source,
   };
 };
 

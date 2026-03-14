@@ -5,6 +5,8 @@ export const paths = {
   teacher: {
     home: "/teacher",
     courses: "/teacher/courses",
+    courseOverview: (courseId: string) =>
+      `/teacher/courses/${encodeSegment(courseId)}/overview`,
     classrooms: "/teacher/classrooms",
     classroomDashboard: (classroomId: string) =>
       `/teacher/classrooms/${encodeSegment(classroomId)}/dashboard`,
