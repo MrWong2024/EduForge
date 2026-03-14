@@ -62,6 +62,35 @@ PENDING/FAILED -> RUNNING -> FAILED -> (retry with backoff) -> DEAD (when attemp
 - OPENROUTER_TIMEOUT_MS (default: 15000)
 - OPENROUTER_MAX_RETRIES (default: 2)
 
+## Recommended Local Loop (Default Delivery Mode)
+
+Default for local integration and front-backend联调:
+- `AI_FEEDBACK_PROVIDER=stub`
+- `AI_FEEDBACK_REAL_ENABLED=false`
+- `AI_FEEDBACK_WORKER_ENABLED=true`
+- `AI_FEEDBACK_WORKER_INTERVAL_MS=3000` (optional, defaults to 3000)
+- `AI_FEEDBACK_WORKER_BATCH_SIZE=5` (optional, defaults to processor batch size)
+
+Optional mock-provider variant:
+- `AI_FEEDBACK_PROVIDER=openrouter`
+- `AI_FEEDBACK_REAL_ENABLED=true`
+- `OPENROUTER_API_KEY=test-key`
+- `OPENROUTER_BASE_URL=http://127.0.0.1:<mock-port>`
+- `AI_FEEDBACK_WORKER_ENABLED=true`
+
+Validation path (worker mode):
+1. Create submission (or use existing one).
+2. Call `POST /learning-tasks/submissions/:submissionId/ai-feedback/request`.
+3. Job enters `PENDING` first.
+4. Worker consumes and writes feedback.
+5. Read from:
+   - `GET /learning-tasks/submissions/:id` (`aiFeedbackStatus` transitions to success state)
+   - `GET /learning-tasks/submissions/:id/feedback` (AI feedback items exist)
+
+Notes:
+- `process-once` is a debug/ops helper only, not the default delivery mode.
+- Product semantics stay unchanged: no job means `NOT_REQUESTED`.
+
 ## AI Feedback JSON Protocol
 
 Example:

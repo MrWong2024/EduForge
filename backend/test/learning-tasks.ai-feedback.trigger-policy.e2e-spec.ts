@@ -65,6 +65,14 @@ type SubmissionListItem = {
   aiFeedbackStatus: string;
 };
 
+type SubmissionDetailResponse = {
+  id: string;
+  aiFeedbackStatus: string;
+  content?: {
+    codeText?: string | null;
+  };
+};
+
 describe('LearningTasks AI Feedback Trigger Policy (e2e)', () => {
   let app: INestApplication<App>;
   let userModel: Model<User>;
@@ -330,6 +338,14 @@ describe('LearningTasks AI Feedback Trigger Policy (e2e)', () => {
     expect(secondBody.attemptNo).toBe(2);
     expect(secondBody.aiFeedbackStatus).toBe('NOT_REQUESTED');
 
+    const secondDetailBeforeRequest = await studentAgent
+      .get(`/api/learning-tasks/submissions/${secondBody.id}`)
+      .expect(200);
+    expect(
+      (secondDetailBeforeRequest.body as SubmissionDetailResponse)
+        .aiFeedbackStatus,
+    ).toBe('NOT_REQUESTED');
+
     const [firstJobCount, secondJobCount] = await Promise.all([
       aiFeedbackJobModel.countDocuments({
         submissionId: new Types.ObjectId(firstBody.id),
@@ -362,6 +378,14 @@ describe('LearningTasks AI Feedback Trigger Policy (e2e)', () => {
     const requestAgainBody = requestAgain.body as RequestAiFeedbackResponse;
     expect(requestAgainBody.jobId).toBe(requestBody.jobId);
 
+    const secondDetailAfterRequest = await studentAgent
+      .get(`/api/learning-tasks/submissions/${secondBody.id}`)
+      .expect(200);
+    expect(
+      (secondDetailAfterRequest.body as SubmissionDetailResponse)
+        .aiFeedbackStatus,
+    ).toBe('PENDING');
+
     const mineAfterRequest = await studentAgent
       .get(`/api/learning-tasks/tasks/${taskId}/submissions/mine`)
       .expect(200);
@@ -389,6 +413,14 @@ describe('LearningTasks AI Feedback Trigger Policy (e2e)', () => {
       await waitMs(60);
     }
     expect(secondFinalStatus).toBe('SUCCEEDED');
+
+    const secondDetailAfterProcess = await studentAgent
+      .get(`/api/learning-tasks/submissions/${secondBody.id}`)
+      .expect(200);
+    const detailBody =
+      secondDetailAfterProcess.body as SubmissionDetailResponse;
+    expect(detailBody.aiFeedbackStatus).toBe('SUCCEEDED');
+    expect(detailBody.content?.codeText).toContain('secondAttemptPolicy');
 
     const feedbackList = await studentAgent
       .get(`/api/learning-tasks/submissions/${secondBody.id}/feedback`)
