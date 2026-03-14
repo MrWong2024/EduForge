@@ -72,6 +72,21 @@ export type CourseListResponse = {
   raw: unknown;
 };
 
+export type CreateCourseRequest = {
+  code: string;
+  name: string;
+  term: string;
+};
+
+export type CourseCreateResponse = {
+  id?: string;
+  code?: string;
+  name?: string;
+  term?: string;
+  status?: string;
+  raw: unknown;
+};
+
 export type CourseOverviewErrorItem = {
   code?: string;
   count?: number;
@@ -111,6 +126,20 @@ export type ClassroomTaskSummary = {
   dueAt?: string;
   allowLate?: boolean;
   aiStatus?: string;
+};
+
+export type CreateClassroomRequest = {
+  courseId: string;
+  name: string;
+};
+
+export type ClassroomCreateResponse = {
+  id?: string;
+  courseId?: string;
+  name?: string;
+  joinCode?: string;
+  status?: string;
+  raw: unknown;
 };
 
 export type ClassroomTasksResponse = {
@@ -307,6 +336,18 @@ export const toClassroomSummary = (value: unknown): ClassroomSummary => {
   };
 };
 
+export const toClassroomCreateResponse = (payload: unknown): ClassroomCreateResponse => {
+  const record = asRecord(payload);
+  return {
+    id: asString(record.id) ?? asString(record.classroomId),
+    courseId: asString(record.courseId),
+    name: asString(record.name),
+    joinCode: asString(record.joinCode),
+    status: asString(record.status),
+    raw: payload,
+  };
+};
+
 export const toClassroomListResponse = (payload: unknown): ClassroomListResponse => {
   if (Array.isArray(payload)) {
     return {
@@ -339,6 +380,18 @@ export const toCourseSummary = (value: unknown): CourseSummary => {
     createdAt: asString(record.createdAt),
     updatedAt: asString(record.updatedAt),
     raw: record,
+  };
+};
+
+export const toCourseCreateResponse = (payload: unknown): CourseCreateResponse => {
+  const record = asRecord(payload);
+  return {
+    id: asString(record.id) ?? asString(record.courseId),
+    code: asString(record.code),
+    name: asString(record.name),
+    term: asString(record.term),
+    status: asString(record.status),
+    raw: payload,
   };
 };
 

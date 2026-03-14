@@ -166,6 +166,12 @@ export default async function CourseOverviewPage({ params, searchParams }: Cours
             <Link href={paths.teacher.classrooms} className="text-blue-700 hover:underline">
               班级列表
             </Link>
+            <Link
+              href={`${paths.teacher.classrooms}?courseId=${encodeURIComponent(courseId)}`}
+              className="text-blue-700 hover:underline"
+            >
+              基于该课程创建班级
+            </Link>
           </div>
         }
       />

@@ -3,9 +3,10 @@ import { headers } from "next/headers";
 import { EmptyState } from "@/components/blocks/EmptyState";
 import { ErrorState } from "@/components/blocks/ErrorState";
 import { PageHeader } from "@/components/blocks/PageHeader";
+import { CreateClassroomForm } from "@/components/teacher/CreateClassroomForm";
 import { fetchJson, FetchJsonError } from "@/lib/api/client";
 import { buildErrorDescription, extractRawDetail } from "@/lib/api/error-presenter";
-import { toClassroomListResponse } from "@/lib/api/types-teacher";
+import { toClassroomListResponse, toCourseListResponse } from "@/lib/api/types-teacher";
 import { paths } from "@/lib/routes/paths";
 import { getCommonErrorSummary } from "@/lib/ui/status";
 import { toDisplayText } from "@/lib/ui/format";
@@ -14,6 +15,7 @@ type TeacherClassroomsPageProps = {
   searchParams: Promise<{
     page?: string | string[];
     limit?: string | string[];
+    courseId?: string | string[];
   }>;
 };
 
@@ -43,6 +45,8 @@ type ClassroomsViewModel =
       limit: number;
       hasPrev: boolean;
       hasNext: boolean;
+      selectedCourseId?: string;
+      courses: ReturnType<typeof toCourseListResponse>["items"];
     }
   | { mode: "error"; status: number; description: string };
 
@@ -50,10 +54,14 @@ export default async function TeacherClassroomsPage({ searchParams }: TeacherCla
   const query = await searchParams;
   const page = parsePositiveInt(getSingleSearchParam(query.page), 1);
   const limit = Math.min(parsePositiveInt(getSingleSearchParam(query.limit), 20), 100);
+  const selectedCourseId = getSingleSearchParam(query.courseId)?.trim() || undefined;
   const requestQuery = new URLSearchParams({
     page: String(page),
     limit: String(limit),
   });
+  if (selectedCourseId) {
+    requestQuery.set("courseId", selectedCourseId);
+  }
 
   let viewModel: ClassroomsViewModel = {
     mode: "error",
@@ -63,11 +71,19 @@ export default async function TeacherClassroomsPage({ searchParams }: TeacherCla
 
   try {
     const origin = await getRequestOrigin();
-    const payload = await fetchJson<unknown>(`classrooms?${requestQuery.toString()}`, {
-      origin,
-      cache: "no-store",
-    });
-    const list = toClassroomListResponse(payload);
+    const [classroomsPayload, coursesPayload] = await Promise.all([
+      fetchJson<unknown>(`classrooms?${requestQuery.toString()}`, {
+        origin,
+        cache: "no-store",
+      }),
+      fetchJson<unknown>("courses?page=1&limit=100", {
+        origin,
+        cache: "no-store",
+      }),
+    ]);
+
+    const list = toClassroomListResponse(classroomsPayload);
+    const courses = toCourseListResponse(coursesPayload).items;
     const items = list.items;
     const total = list.total;
     const hasPrev = page > 1;
@@ -79,6 +95,8 @@ export default async function TeacherClassroomsPage({ searchParams }: TeacherCla
       limit,
       hasPrev,
       hasNext,
+      selectedCourseId,
+      courses,
     };
   } catch (error) {
     if (error instanceof FetchJsonError) {
@@ -102,8 +120,10 @@ export default async function TeacherClassroomsPage({ searchParams }: TeacherCla
   }
 
   return (
-    <section>
+    <section className="space-y-4">
       <PageHeader title="班级" description={`第 ${viewModel.page} 页，每页 ${viewModel.limit} 条`} />
+
+      <CreateClassroomForm courses={viewModel.courses} initialCourseId={viewModel.selectedCourseId} />
 
       {viewModel.items.length === 0 ? (
         <EmptyState title="暂无班级数据" description="当前账号下没有可访问班级。" />
@@ -151,7 +171,7 @@ export default async function TeacherClassroomsPage({ searchParams }: TeacherCla
       <div className="mt-4 flex items-center gap-4 text-sm">
         {viewModel.hasPrev ? (
           <Link
-            href={`${paths.teacher.classrooms}?page=${viewModel.page - 1}&limit=${viewModel.limit}`}
+            href={buildClassroomListHref(viewModel.page - 1, viewModel.limit, viewModel.selectedCourseId)}
             className="text-blue-700 hover:underline"
           >
             上一页
@@ -162,7 +182,7 @@ export default async function TeacherClassroomsPage({ searchParams }: TeacherCla
 
         {viewModel.hasNext ? (
           <Link
-            href={`${paths.teacher.classrooms}?page=${viewModel.page + 1}&limit=${viewModel.limit}`}
+            href={buildClassroomListHref(viewModel.page + 1, viewModel.limit, viewModel.selectedCourseId)}
             className="text-blue-700 hover:underline"
           >
             下一页
@@ -174,3 +194,18 @@ export default async function TeacherClassroomsPage({ searchParams }: TeacherCla
     </section>
   );
 }
+
+const buildClassroomListHref = (
+  page: number,
+  limit: number,
+  courseId?: string
+): string => {
+  const query = new URLSearchParams({
+    page: String(page),
+    limit: String(limit),
+  });
+  if (courseId) {
+    query.set("courseId", courseId);
+  }
+  return `${paths.teacher.classrooms}?${query.toString()}`;
+};

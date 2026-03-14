@@ -3,6 +3,7 @@ import { headers } from "next/headers";
 import { EmptyState } from "@/components/blocks/EmptyState";
 import { ErrorState } from "@/components/blocks/ErrorState";
 import { PageHeader } from "@/components/blocks/PageHeader";
+import { CreateCourseForm } from "@/components/teacher/CreateCourseForm";
 import { fetchJson, FetchJsonError } from "@/lib/api/client";
 import { buildErrorDescription, extractRawDetail } from "@/lib/api/error-presenter";
 import { toCourseListResponse } from "@/lib/api/types-teacher";
@@ -90,7 +91,17 @@ export default async function TeacherCoursesPage({ searchParams }: TeacherCourse
 
   return (
     <section className="space-y-4">
-      <PageHeader title="课程" description={`第 ${viewModel.page} 页，每页 ${viewModel.limit} 条`} />
+      <PageHeader
+        title="课程"
+        description={`第 ${viewModel.page} 页，每页 ${viewModel.limit} 条`}
+        actions={
+          <Link href={paths.teacher.classrooms} className="text-sm text-blue-700 hover:underline">
+            去班级列表
+          </Link>
+        }
+      />
+
+      <CreateCourseForm />
 
       {viewModel.items.length === 0 ? (
         <EmptyState title="暂无课程" description="请先创建课程后再进入班级管理。" />
@@ -122,7 +133,10 @@ export default async function TeacherCoursesPage({ searchParams }: TeacherCourse
                         >
                           课程总览
                         </Link>
-                        <Link href={paths.teacher.classrooms} className="text-blue-700 hover:underline">
+                        <Link
+                          href={`${paths.teacher.classrooms}?courseId=${encodeURIComponent(course.id)}`}
+                          className="text-blue-700 hover:underline"
+                        >
                           班级列表
                         </Link>
                       </div>
