@@ -119,7 +119,7 @@ export function CreateClassroomForm({ courses, initialCourseId }: CreateClassroo
   };
 
   return (
-    <section className="rounded-lg border border-zinc-200 bg-white p-4">
+    <section id="create-classroom-form" className="rounded-lg border border-zinc-200 bg-white p-4">
       <h2 className="text-base font-semibold text-zinc-900">创建班级</h2>
       <p className="mt-1 text-sm text-zinc-600">
         先选择课程再创建班级，成功后将自动进入班级看板。

@@ -126,7 +126,23 @@ export default async function TeacherClassroomsPage({ searchParams }: TeacherCla
       <CreateClassroomForm courses={viewModel.courses} initialCourseId={viewModel.selectedCourseId} />
 
       {viewModel.items.length === 0 ? (
-        <EmptyState title="暂无班级数据" description="当前账号下没有可访问班级。" />
+        <EmptyState
+          title="还没有班级"
+          description="先选择课程并创建班级，再发布课堂任务。"
+          actions={
+            <div className="flex flex-wrap items-center gap-3">
+              <Link
+                href="#create-classroom-form"
+                className="rounded-md bg-zinc-900 px-3 py-1.5 text-sm font-medium text-white hover:bg-zinc-700"
+              >
+                创建班级
+              </Link>
+              <Link href={paths.teacher.courses} className="text-sm text-blue-700 hover:underline">
+                去课程列表
+              </Link>
+            </div>
+          }
+        />
       ) : (
         <div className="overflow-x-auto rounded-lg border border-zinc-200 bg-white">
           <table className="min-w-full border-collapse text-sm">

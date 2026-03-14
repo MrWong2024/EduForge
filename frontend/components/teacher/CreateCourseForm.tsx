@@ -102,7 +102,7 @@ export function CreateCourseForm() {
   };
 
   return (
-    <section className="rounded-lg border border-zinc-200 bg-white p-4">
+    <section id="create-course-form" className="rounded-lg border border-zinc-200 bg-white p-4">
       <h2 className="text-base font-semibold text-zinc-900">创建课程</h2>
       <p className="mt-1 text-sm text-zinc-600">
         填写最小信息后创建课程，成功后将自动进入课程总览。

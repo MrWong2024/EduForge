@@ -114,10 +114,33 @@ export default async function ClassroomTasksPage({ params }: ClassroomTasksPageP
         }
       />
 
+      <section className="rounded-lg border border-zinc-200 bg-white p-4 text-sm text-zinc-700">
+        <p>此页用于管理当前班级的课堂任务，可发布任务并进入提交管理与三件套分析页。</p>
+      </section>
+
       <PublishClassroomTaskForm classroomId={classroomId} availableTasks={viewModel.availableTasks} />
 
       {viewModel.taskList.items.length === 0 ? (
-        <EmptyState title="暂无课堂任务" description="请先从上方表单发布任务到当前班级。" />
+        <EmptyState
+          title="还没有课堂任务"
+          description="先发布一个课堂任务，学生加入班级后即可开始提交。"
+          actions={
+            <div className="flex flex-wrap items-center gap-3">
+              <Link
+                href="#publish-task-form"
+                className="rounded-md bg-zinc-900 px-3 py-1.5 text-sm font-medium text-white hover:bg-zinc-700"
+              >
+                发布任务
+              </Link>
+              <Link
+                href={paths.teacher.classroomDashboard(classroomId)}
+                className="text-sm text-blue-700 hover:underline"
+              >
+                返回班级看板
+              </Link>
+            </div>
+          }
+        />
       ) : (
         <div className="overflow-x-auto rounded-lg border border-zinc-200 bg-white">
           <table className="min-w-full border-collapse text-sm">

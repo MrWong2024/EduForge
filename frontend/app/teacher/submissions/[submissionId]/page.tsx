@@ -317,7 +317,7 @@ export default async function TeacherSubmissionDetailPage({
       </section>
 
       <section className="rounded-lg border border-zinc-200 bg-white p-4 text-sm text-zinc-700">
-        <p>当前页用于教师批阅闭环：可查看反馈历史并新增教师反馈。</p>
+        <p>此页用于查看提交内容、反馈历史，并新增教师反馈。</p>
       </section>
 
       <TeacherFeedbackForm submissionId={submissionId} />
@@ -371,7 +371,7 @@ export default async function TeacherSubmissionDetailPage({
 
       <details className="rounded-lg border border-zinc-200 bg-zinc-50 p-4">
         <summary className="cursor-pointer text-sm font-medium text-zinc-800">
-          查看原始反馈 JSON
+          查看原始数据（调试用）
         </summary>
         <pre className="mt-3 overflow-auto text-xs text-zinc-700">
           {JSON.stringify(viewModel.feedback.raw, null, 2)}

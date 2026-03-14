@@ -172,7 +172,18 @@ export default async function ClassroomDashboardPage({ params }: DashboardPagePr
           </table>
         </div>
       ) : (
-        <EmptyState title="暂无看板任务数据" description="当前看板未返回任务概览数据。" />
+        <EmptyState
+          title="暂无看板任务数据"
+          description="当前班级还没有可展示的任务概览，请先发布课堂任务。"
+          actions={
+            <Link
+              href={paths.teacher.classroomTasks(classroomId)}
+              className="text-sm text-blue-700 hover:underline"
+            >
+              去任务列表发布任务
+            </Link>
+          }
+        />
       )}
 
       <section className="mb-4 rounded-lg border border-zinc-200 bg-white p-4">
@@ -191,7 +202,9 @@ export default async function ClassroomDashboardPage({ params }: DashboardPagePr
       </section>
 
       <details className="rounded-lg border border-zinc-200 bg-zinc-50 p-4">
-        <summary className="cursor-pointer text-sm font-medium text-zinc-800">查看原始看板 JSON</summary>
+        <summary className="cursor-pointer text-sm font-medium text-zinc-800">
+          查看原始数据（调试用）
+        </summary>
         <pre className="mt-3 overflow-auto text-xs text-zinc-700">
           {JSON.stringify(viewModel.dashboard, null, 2)}
         </pre>

@@ -91,8 +91,16 @@ export default async function StudentDashboardPage() {
 
       {classroomItems.length === 0 ? (
         <EmptyState
-          title="你还没有加入任何班级"
-          description="先加入班级后即可看到课堂任务与提交状态。"
+          title="还没有加入任何班级"
+          description="先输入班级加入码加入班级，再开始做任务。"
+          actions={
+            <Link
+              href={paths.student.joinClassroom}
+              className="rounded-md bg-zinc-900 px-3 py-1.5 text-sm font-medium text-white hover:bg-zinc-700"
+            >
+              去加入班级
+            </Link>
+          }
         />
       ) : (
         <div className="space-y-4">
@@ -168,7 +176,9 @@ export default async function StudentDashboardPage() {
       )}
 
       <details className="mt-4 rounded-lg border border-zinc-200 bg-zinc-50 p-4">
-        <summary className="cursor-pointer text-sm font-medium text-zinc-800">查看原始学习看板 JSON</summary>
+        <summary className="cursor-pointer text-sm font-medium text-zinc-800">
+          查看原始数据（调试用）
+        </summary>
         <pre className="mt-3 overflow-auto text-xs text-zinc-700">
           {JSON.stringify(viewModel.data.raw, null, 2)}
         </pre>

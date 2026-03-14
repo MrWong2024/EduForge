@@ -188,6 +188,11 @@ export default async function StudentTaskDetailPage({
         description={`班级 ID: ${classroomId} | 课堂任务 ID: ${classroomTaskId}`}
         actions={
           <div className="flex items-center gap-3 text-sm">
+            {latestSubmissionHref ? (
+              <Link href={latestSubmissionHref} className="text-blue-700 hover:underline">
+                查看提交反馈
+              </Link>
+            ) : null}
             <Link href={paths.student.dashboard} className="text-blue-700 hover:underline">
               返回学习看板
             </Link>
@@ -318,7 +323,9 @@ export default async function StudentTaskDetailPage({
       )}
 
       <details className="rounded-lg border border-zinc-200 bg-zinc-50 p-4">
-        <summary className="cursor-pointer text-sm font-medium text-zinc-800">查看原始任务详情 JSON</summary>
+        <summary className="cursor-pointer text-sm font-medium text-zinc-800">
+          查看原始数据（调试用）
+        </summary>
         <pre className="mt-3 overflow-auto text-xs text-zinc-700">
           {JSON.stringify(viewModel.data.raw, null, 2)}
         </pre>

@@ -104,7 +104,23 @@ export default async function TeacherCoursesPage({ searchParams }: TeacherCourse
       <CreateCourseForm />
 
       {viewModel.items.length === 0 ? (
-        <EmptyState title="暂无课程" description="请先创建课程后再进入班级管理。" />
+        <EmptyState
+          title="还没有课程"
+          description="先创建一门课程，再基于课程创建班级。"
+          actions={
+            <div className="flex flex-wrap items-center gap-3">
+              <Link
+                href="#create-course-form"
+                className="rounded-md bg-zinc-900 px-3 py-1.5 text-sm font-medium text-white hover:bg-zinc-700"
+              >
+                创建课程
+              </Link>
+              <Link href={paths.teacher.classrooms} className="text-sm text-blue-700 hover:underline">
+                去班级列表
+              </Link>
+            </div>
+          }
+        />
       ) : (
         <div className="overflow-x-auto rounded-lg border border-zinc-200 bg-white">
           <table className="min-w-full border-collapse text-sm">

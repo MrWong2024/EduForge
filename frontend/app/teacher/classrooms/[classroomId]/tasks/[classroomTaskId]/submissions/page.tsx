@@ -143,7 +143,7 @@ export default async function ClassroomTaskSubmissionsPage({
       />
 
       <section className="rounded-lg border border-zinc-200 bg-white p-4 text-sm text-zinc-700">
-        <p>此页仅展示当前课堂任务的提交记录。</p>
+        <p>此页展示当前课堂任务的提交记录，可进入详情查看反馈与批阅。</p>
       </section>
 
       {viewModel.submissions.length === 0 ? (

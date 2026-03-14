@@ -173,6 +173,10 @@ export default async function SnapshotExportPage({
         }
       />
 
+      <section className="rounded-lg border border-zinc-200 bg-white p-4 text-sm text-zinc-700">
+        <p>此页用于导出教学快照；若出现截断提示，请结合体积保护说明理解。</p>
+      </section>
+
       <section className="rounded-lg border border-zinc-200 bg-white p-4 text-sm">
         <p className="font-medium text-zinc-900">导出参数</p>
         <div className="mt-2 flex flex-wrap items-center gap-4 text-zinc-700">
@@ -272,7 +276,7 @@ export default async function SnapshotExportPage({
 
       <details className="rounded-lg border border-zinc-200 bg-zinc-50 p-4">
         <summary className="cursor-pointer text-sm font-medium text-zinc-800">
-          查看原始快照 JSON
+          查看原始数据（调试用）
         </summary>
         <pre className="mt-3 overflow-auto text-xs text-zinc-700">
           {JSON.stringify(viewModel.data.raw, null, 2)}

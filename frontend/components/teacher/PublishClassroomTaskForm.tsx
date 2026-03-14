@@ -197,7 +197,7 @@ export function PublishClassroomTaskForm({
   };
 
   return (
-    <section className="rounded-lg border border-zinc-200 bg-white p-4">
+    <section id="publish-task-form" className="rounded-lg border border-zinc-200 bg-white p-4">
       <h2 className="text-base font-semibold text-zinc-900">发布任务到班级</h2>
       <p className="mt-1 text-sm text-zinc-600">
         可直接选择已发布任务，或填写标题/描述由后端先创建任务（生成 taskId）再发布到班级。

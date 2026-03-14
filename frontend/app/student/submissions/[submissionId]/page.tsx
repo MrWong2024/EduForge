@@ -224,9 +224,16 @@ export default async function StudentSubmissionDetailPage({
             <Link href={paths.student.dashboard} className="text-blue-700 hover:underline">
               返回学习看板
             </Link>
+            <Link href={paths.student.aiHelp} className="text-blue-700 hover:underline">
+              AI 帮助
+            </Link>
           </div>
         }
       />
+
+      <section className="rounded-lg border border-zinc-200 bg-white p-4 text-sm text-zinc-700">
+        <p>此页展示本次提交的反馈结果，也可在此请求 AI 反馈。</p>
+      </section>
 
       <section className="rounded-lg border border-zinc-200 bg-white p-4 text-sm text-zinc-700">
         <div className="grid gap-2 md:grid-cols-2">
@@ -297,7 +304,9 @@ export default async function StudentSubmissionDetailPage({
       )}
 
       <details className="rounded-lg border border-zinc-200 bg-zinc-50 p-4">
-        <summary className="cursor-pointer text-sm font-medium text-zinc-800">查看原始数据 JSON</summary>
+        <summary className="cursor-pointer text-sm font-medium text-zinc-800">
+          查看原始数据（调试用）
+        </summary>
         <pre className="mt-3 overflow-auto text-xs text-zinc-700">
           {JSON.stringify({ detail: viewModel.detail.raw, feedback: viewModel.feedback.raw }, null, 2)}
         </pre>
