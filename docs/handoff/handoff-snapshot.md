@@ -61,7 +61,8 @@ backend/
 │     │  │  ├─ guards/interfaces/lib/prompts/protocol/providers/real/schemas/services
 │     │  ├─ controllers/
 │     │  ├─ dto/
-│     │  │  └─ request-ai-feedback.dto.ts
+│     │  │  ├─ request-ai-feedback.dto.ts
+│     │  │  └─ submission-detail-response.dto.ts
 │     │  ├─ schemas/
 │     │  └─ services/
 │     │  (已上线手工触发接口：`POST /api/learning-tasks/submissions/:submissionId/ai-feedback/request`)
@@ -86,7 +87,7 @@ backend/
 │  ├─ classroom-review-pack.e2e-spec.ts
 │  ├─ classroom-process-assessment.e2e-spec.ts
 │  ├─ classroom-task-deadline.e2e-spec.ts
-│  └─ classroom-export-snapshot.e2e-spec.ts
+│  ├─ classroom-export-snapshot.e2e-spec.ts
 │  ├─ users-me.e2e-spec.ts
 │  ├─ classroom-students.e2e-spec.ts
 │  └─ classroom-task-submissions.e2e-spec.ts
@@ -263,6 +264,15 @@ AI Provider 错误码（`ai-feedback-provider.error-codes.ts`）：
 - P0 课堂任务提交列表（已完成）：
   - `GET /api/classrooms/:classroomId/tasks/:classroomTaskId/submissions`
   - teacher owner 可访问；只按 `classroomTaskId` 读取；默认排序 `submittedAt desc, _id desc`；无 job 时 `aiFeedbackStatus=NOT_REQUESTED`；不返回 `passwordHash/content.codeText`。
+- P0 提交详情稳定读源（已完成）：
+  - `GET /api/learning-tasks/submissions/:id`
+  - 学生本人可访问；若 `classroomTaskId` 存在，仅所属班级 owner teacher 可访问；若 `classroomTaskId` 为空，仅 task owner teacher 可访问。
+  - 返回 submission detail 稳定读源字段（`taskTitle/studentName/content.language/content.codeText/submittedAt/attemptNo/isLate/lateBySeconds/aiFeedbackStatus`）。
+  - 无 job 时 `aiFeedbackStatus=NOT_REQUESTED`。
+- AI 默认联调模式（已固化）：
+  - 推荐 `Stub + worker`：`AI_FEEDBACK_PROVIDER=stub` 且 `AI_FEEDBACK_WORKER_ENABLED=true`。
+  - 产品级 request 仅负责创建/确保 job（新建时为 `PENDING`），worker 负责消费到 `SUCCEEDED`。
+  - `process-once` 仅用于 debug/ops，不作为默认交付运行模式。
 - AI 指标看板（已存在）：
   - `GET /api/classrooms/:classroomId/tasks/:classroomTaskId/ai-metrics`
 - Z3 学生端聚合详情：
@@ -294,6 +304,7 @@ AI Provider 错误码（`ai-feedback-provider.error-codes.ts`）：
 - `/api/users/me` 更新能力：`PATCH` 真实可用，且与 `GET` 返回口径一致。
 - 班级正式成员列表：`GET /api/classrooms/:id/students`（Enrollment ACTIVE SoT）。
 - 课堂任务实例提交列表：`GET /api/classrooms/:classroomId/tasks/:classroomTaskId/submissions`（`classroomTaskId` 隔离）。
+- 提交详情稳定读源：`GET /api/learning-tasks/submissions/:id`（用于 Teacher/Student submission detail 主视图读取，不再主要依赖 query 透传）。
 
 明确未完成（本阶段不包含）：
 - 管理员批量导入用户（Excel/CSV）。

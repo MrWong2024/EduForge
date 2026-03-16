@@ -6,6 +6,7 @@
 - 必须使用测试环境：`NODE_ENV=test`。
 - 必须提供测试库连接：`MONGO_URI`（且应指向 test DB）。
 - 默认应自动清理；仅本地调试时才设置 `KEEP_E2E_DB=1`。
+- 影响模块装配、provider 绑定、guard 行为的 env（如 `AI_FEEDBACK_DEBUG_ENABLED`、`AI_FEEDBACK_PROVIDER`、`AI_FEEDBACK_REAL_ENABLED`、`AI_FEEDBACK_WORKER_ENABLED`）必须在应用初始化 / `AppModule` 导入前设置；否则可能出现与业务无关的 `404` 或 provider/guard 装配偏差。
 
 ## 2) 运行命令（PowerShell）
 
@@ -52,6 +53,12 @@ $env:NODE_ENV="test"
 Remove-Item Env:KEEP_E2E_DB -ErrorAction SilentlyContinue
 npm run test:e2e -- backend/test/classroom-export-snapshot.e2e-spec.ts
 ```
+
+推荐默认联调模式（结论）：
+- `Stub + worker`（用于本地开发 / 前后端联调 / AI 闭环验证）。
+- 最小关键 env：`AI_FEEDBACK_PROVIDER=stub`、`AI_FEEDBACK_REAL_ENABLED=false`、`AI_FEEDBACK_WORKER_ENABLED=true`。
+- 产品级 request 只负责创建/确保 `PENDING` job，worker 负责消费到 `SUCCEEDED`。
+- `process-once` 仅用于 debug/ops 辅助，不作为默认交付运行模式。
 
 ai-feedback e2e 入口：
 - `learning-tasks.ai-feedback.ops.e2e-spec.ts`
@@ -119,15 +126,19 @@ npm run test:e2e -- backend/test/classroom-learning-loop.e2e-spec.ts
   - 覆盖：Z7 `POST /api/classrooms/:classroomId/tasks/:classroomTaskId/submissions` 的截止门禁。
   - 关键断言：`dueAt` 到期且 `allowLate=false` 返回 `LATE_SUBMISSION_NOT_ALLOWED`；`submittedAt/isLate/lateBySeconds` 持久化语义正确。
   - 重要性：保证截止规则与迟交数据链路一致。
+- `backend/test/classroom-task-submissions.e2e-spec.ts`
+  - 覆盖：P0 `GET /api/learning-tasks/submissions/:id` 稳定读源（含 classroomTask 隔离场景）。
+  - 关键断言：学生本人可读；classroom owner teacher 可读；非授权 teacher/student 返回 `403`；返回 `content.codeText`；无 job 时 `aiFeedbackStatus=NOT_REQUESTED`。
 - `backend/test/classroom-export-snapshot.e2e-spec.ts`
   - 覆盖：Z9 `GET /api/classrooms/:classroomId/export/snapshot`。
   - 关键断言：`includePerTask=false` 时 perTask 省略且 `meta.notes` 提示；对 stringify 结果断言不包含 `"codeText"`。
   - 重要性：保证导出体积保护与敏感字段禁出策略。
 
 建议同时关注：
+- submission detail 主视图回归建议成对验证：`GET /api/learning-tasks/submissions/:id` 与 `GET /api/learning-tasks/submissions/:id/feedback`，避免只验 feedback 而漏掉 detail 读源。
 - `backend/test/classroom-dashboard-isolation.e2e-spec.ts`：跨班同 task 的 `classroomTaskId` 隔离口径。
 - `backend/test/classroom-dashboard.e2e-spec.ts`：教师/学生看板与 `aiFeedbackStatus` 变化。
-- `backend/test/learning-tasks.e2e-spec.ts`：learning-tasks 基础闭环。
+- `backend/test/learning-tasks.e2e-spec.ts`：learning-tasks 基础闭环（含 `GET /api/learning-tasks/submissions/:id` 在 `classroomTaskId=null` 场景下 task owner teacher 可读）。
 
 ### 新增能力覆盖矩阵（Z3~Z9）
 
@@ -225,3 +236,5 @@ $env:AI_FEEDBACK_DEBUG_ENABLED="true"
 - `classroom-process-assessment.e2e-spec.ts`
 - `classroom-task-deadline.e2e-spec.ts`
 - `classroom-export-snapshot.e2e-spec.ts`
+- 补充：submission detail 稳定读源测试关注点（`GET /api/learning-tasks/submissions/:id`）。
+- 固化：默认联调模式为 `Stub + worker`，并补充影响模块装配/guard 的 env 设置时机提醒。

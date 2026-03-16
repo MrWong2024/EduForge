@@ -154,3 +154,37 @@ AI 状态推导统一口径：存在 Job 映射为执行态；不存在 Job 视�
 状态推导逻辑必须以“是否存在 Job”为第一判断。  
 后续新增报表或接口不得将“无 Job”误判为执行中。  
 AI 行为从“隐式默认入队”转变为“显式请求驱动”。  
+
+## 13) Submission detail 必须使用稳定读源，且 detail/list 的 `codeText` 边界分离
+
+**Decision**  
+`GET /api/learning-tasks/submissions/:id` 被定义为 submission detail 的稳定读源。  
+Teacher / Student submission detail 主体信息应以该接口为主，而不是主要依赖 query 透传。  
+detail 接口允许返回 `content.codeText`；课堂任务提交列表接口 `GET /api/classrooms/:classroomId/tasks/:classroomTaskId/submissions` 继续不返回 `content.codeText`。  
+
+**Rationale**  
+query 透传只适合承载导航上下文，不适合作为 submission 主体数据的长期来源。  
+detail 主视图需要稳定读取 `taskTitle/studentName/language/submittedAt/attemptNo/isLate/lateBySeconds/aiFeedbackStatus/codeText` 等字段。  
+列表与详情的数据暴露目标不同，必须分离边界：列表保持轻量并避免代码文本外泄，详情在有权访问前提下可返回代码内容。  
+
+**Consequences**  
+前端 submission detail 页统一改接 `GET /api/learning-tasks/submissions/:id`。  
+列表接口继续保持“轻量、分页、无 `content.codeText`”约束。  
+权限边界需稳定执行：学生本人可读；若 `classroomTaskId` 存在仅所属班级 owner teacher 可读；若 `classroomTaskId` 为空仅 task owner teacher 可读。  
+
+## 14) AI 默认联调/验收模式采用 `Stub + worker`，`process-once` 仅作 debug/ops
+
+**Decision**  
+默认联调/验收模式采用 `Stub + worker`。  
+推荐配置为 `AI_FEEDBACK_PROVIDER=stub` 且 `AI_FEEDBACK_WORKER_ENABLED=true`。  
+`process-once` 仅用于 debug/ops 辅助，不作为默认交付运行模式。  
+
+**Rationale**  
+需要一条可重复验证的真实执行链路：request 只负责创建/确保 `PENDING` job，worker 负责持续消费到 `SUCCEEDED`。  
+`process-once` 适合排障与局部验证，但不代表真实运行状态。  
+`Stub + worker` 不依赖真实外部 AI，同时覆盖完整 job 生命周期，最适合作为本地开发、前后端联调与人工验收默认模式。  
+
+**Consequences**  
+AI 闭环验收默认应在 `Stub + worker` 下进行。  
+产品级 request 接口与 debug/process-once 的职责边界保持清晰。  
+`Mock OpenRouter + worker` 可作为更贴近 provider 行为的备选模式，但不是默认前提。  

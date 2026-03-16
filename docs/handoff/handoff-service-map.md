@@ -195,26 +195,30 @@
 
 - Service: `backend/src/modules/learning-tasks/services/learning-tasks.service.ts`
 - Domain: `Task|Submission|Feedback|AiFeedbackJob`
-- Actions: `manage-task`, `submit`, `request-ai-feedback`, `feedback`, `stats`
+- Actions: `manage-task`, `submit`, `read-submission-detail`, `request-ai-feedback`, `feedback`, `stats`
 - I/O Shape:
   - In: `taskId/submissionId/classroomTaskId`, `Create/Update DTO`, `RequestAiFeedbackDto`, `filters/page/limit`, `user/userId`
-  - Out: `TaskResponseDto` | `SubmissionResponseDto(含 submittedAt/isLate/lateBySeconds)` | `FeedbackResponseDto` | `list/paged list/aggregate`
+  - Out: `TaskResponseDto` | `SubmissionResponseDto(含 submittedAt/isLate/lateBySeconds)` | `SubmissionDetailResponseDto` | `FeedbackResponseDto` | `list/paged list/aggregate`
 - Key Methods:
   - `createTask(dto: CreateTaskDto, userId: string): Promise<TaskResponseDto> — called by POST /learning-tasks/tasks`
   - `createSubmission(taskId: string, dto: CreateSubmissionDto, userId: string): Promise<SubmissionResponseDto> — called by generic task submission endpoint`
   - `createSubmissionForClassroomTask(taskId: string, classroomTaskId: string, dto: CreateSubmissionDto, userId: string): Promise<SubmissionResponseDto> — called by ClassroomTasksService for isolated submissions`
+  - `getSubmissionDetail(submissionId: string, user: { id: string; roles?: string[] }): Promise<SubmissionDetailResponseDto> — called by GET /learning-tasks/submissions/:id`
   - `requestAiFeedback(submissionId: string, user: { id: string; roles?: string[] }, dto: RequestAiFeedbackDto): Promise<{ submissionId: string; jobId: string; status: AiFeedbackJobStatus; aiFeedbackStatus: AiFeedbackStatus }> — called by POST /learning-tasks/submissions/:submissionId/ai-feedback/request`
   - `listTaskSubmissions(taskId: string, userId: string, page?: number, limit?: number): Promise<{ items: SubmissionResponseDto[]; total: number; page: number; limit: number }> — called by teacher submissions endpoint`
   - `getStats(taskId: string, userId: string): Promise<Record<string, unknown>> — called by /learning-tasks/tasks/:id/stats`
-- AuthZ Boundary: `teacher-owner`（更新/查看任务提交/反馈写入/统计/手工 request） + `student`（提交/查自己提交/对本人 submission 手工 request）
+- AuthZ Boundary: `teacher-owner`（更新/查看任务提交/反馈写入/统计/手工 request） + `student`（提交/查自己提交/对本人 submission 手工 request）；`getSubmissionDetail` 允许学生本人读取；当 `submission.classroomTaskId` 存在时仅该 `classroomTask` 所属班级 owner teacher 可读；当 `submission.classroomTaskId` 为空时仅 `task.createdBy` 对应 task owner teacher 可读；其他用户禁止访问
 - Metrics/Isolation: `Submission.classroomTaskId` 可选；`aiFeedbackStatus` 通过 `AiFeedbackJobService` 推导；top tags 由 feedback 聚合
-- Consistency/Constraints: attemptNo 采用“查询最新 + 最多 3 次重试”；仅 `PUBLISHED` 任务可提交；课堂任务提交流程会计算并持久化 `submittedAt/isLate/lateBySeconds`；`dueAt` 存在且 `allowLate=false` 且超时 -> `403 + code=LATE_SUBMISSION_NOT_ALLOWED`；自动入队采用 attempt-based 策略：默认 `attemptNo==1` 自动入队、`attemptNo>1` 返回 `NOT_REQUESTED`；策略受 `AI_FEEDBACK_AUTO_ON_SUBMIT`（默认 true）与 `AI_FEEDBACK_AUTO_ON_FIRST_ATTEMPT_ONLY`（默认 true）控制；`request-ai-feedback` 为产品能力，幂等确保 job（存在返回既有，不存在创建 `PENDING`）
-- Deps/Side Effects: `ConfigService`, `TaskModel`, `SubmissionModel`, `FeedbackModel`, `ClassroomTaskModel`, `ClassroomModel`, `AiFeedbackJobService`；提交后按 env 策略决定是否 `enqueue`，手工 request 走 `ensureJobForSubmission` 幂等创建
+- Consistency/Constraints: attemptNo 采用“查询最新 + 最多 3 次重试”；仅 `PUBLISHED` 任务可提交；课堂任务提交流程会计算并持久化 `submittedAt/isLate/lateBySeconds`；`dueAt` 存在且 `allowLate=false` 且超时 -> `403 + code=LATE_SUBMISSION_NOT_ALLOWED`；自动入队采用 attempt-based 策略：默认 `attemptNo==1` 自动入队、`attemptNo>1` 返回 `NOT_REQUESTED`；策略受 `AI_FEEDBACK_AUTO_ON_SUBMIT`（默认 true）与 `AI_FEEDBACK_AUTO_ON_FIRST_ATTEMPT_ONLY`（默认 true）控制；`request-ai-feedback` 为产品能力，幂等确保 job（存在返回既有，不存在创建 `PENDING`）；`getSubmissionDetail` 是 submission detail 稳定读源，允许返回 `content.codeText`，但课堂提交流水列表 `GET /api/classrooms/:classroomId/tasks/:classroomTaskId/submissions` 仍不返回 `content.codeText`
+- Deps/Side Effects: `ConfigService`, `TaskModel`, `SubmissionModel`, `FeedbackModel`, `ClassroomTaskModel`, `ClassroomModel`, `UserModel`, `AiFeedbackJobService`；提交后按 env 策略决定是否 `enqueue`，手工 request 走 `ensureJobForSubmission` 幂等创建
 - Performance Notes: 批量查询 + `Promise.all`；状态映射批量取 jobs，避免逐提交查询
 - SoT: `backend/src/modules/learning-tasks/schemas/submission.schema.ts`; `backend/src/modules/learning-tasks/ai-feedback/services/ai-feedback-job.service.ts`; `backend/src/modules/learning-tasks/services/learning-tasks.service.ts`; `backend/src/modules/learning-tasks/controllers/learning-tasks.controller.ts`
 - Failure Modes:
-  - 任务/提交不存在 -> `404`
+  - 任务不存在 -> `404`
+  - submission 不存在（含 submission detail） -> `404`
   - 非任务创建者访问教师视图 -> `403`
+  - 学生访问非本人 submission detail -> `403`
+  - teacher 非 classroom owner / task owner 访问 submission detail -> `403`
   - 任务未发布 -> `400 Task is not published`
   - attemptNo 分配冲突连续失败 -> `400 Unable to allocate attempt number`
 
@@ -597,4 +601,4 @@
   - `Service Card 05` `TeacherClassroomDashboardService`
   - `Service Card 06` `StudentLearningDashboardService`
   - `Service Card 07` `ClassroomTasksService`
-  - `Service Card 08` `LearningTasksService`
+  - `Service Card 08` `LearningTasksService`（补充 `getSubmissionDetail`、submission detail 权限边界、稳定读源与 `content.codeText` 返回口径）
