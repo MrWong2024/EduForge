@@ -1,0 +1,139 @@
+# 前端全局事实快照（Path Base: `frontend/`）
+
+## 0) 事实前提（强制口径）
+
+- 本快照以当前 `frontend/**` 工作区源码为准。
+- 与会话结论、旧文档冲突时，代码优先。
+- 前端接口访问默认走同域代理：`/api/proxy/**`。
+- 代理目标由 `FRONTEND_BACKEND_ORIGIN` 决定，代理实现位于 `app/api/proxy/[...path]/route.ts`。
+- 与后端对齐口径来自：
+  - `docs/frontend-architecture.md`
+  - `docs/handoff/handoff-api-map.md`
+  - `docs/handoff/handoff-dto-cheatsheet.md`
+  - `docs/handoff/handoff-decisions.md`
+  - `docs/handoff/handoff-snapshot.md`
+  - `docs/handoff/handoff-config-matrix.md`
+
+## 1) 项目骨架（当前前端真实结构）
+
+```text
+frontend/
+├─ app/
+│  ├─ (auth)/login
+│  ├─ teacher/**
+│  ├─ student/**
+│  ├─ api/proxy/[...path]          # 正式 BFF 代理
+│  ├─ _demo/** + api/_demo/**      # 本地 demo 沙箱
+│  └─ {layout,error,not-found,page}
+├─ components/
+│  ├─ layout/{TeacherShell,StudentShell}
+│  ├─ blocks/{PageHeader,EmptyState,ErrorState,Tabs}
+│  ├─ teacher/**                   # 创建/发布/移除/教师反馈
+│  ├─ student/**                   # 加班级/提交/请求AI/处理提示
+│  └─ classroomTask/TaskContextHeader
+└─ lib/
+   ├─ api/{client,browser-client,error-presenter,types-*}
+   ├─ auth/{session,role-home}
+   ├─ routes/paths.ts
+   ├─ ui/{status,format}
+   └─ http/server-cookie.ts
+```
+
+## 2) 路由分区与完成度（摘要）
+
+- `/(auth)/login`：已完成登录与 role-home 跳转（`TEACHER -> /teacher/classrooms`, `STUDENT -> /student`）。
+- `/teacher/**`：教师起步链路、教学链路、批阅链路、三件套、周报/过程性评价/快照已接入真接口。
+- `/student/**`：学习看板、加入班级、任务详情、提交、submission detail、请求 AI 已接入真接口。
+- `/_demo/**`：独立 demo 沙箱，使用 `app/api/_demo/**` 内存数据，不参与主链路交付，不应作为正式 Teacher/Student 主链路实现参考。
+
+## 3) 关键公共机制（已落地）
+
+- 统一路由常量：`lib/routes/paths.ts`。
+- 统一状态文案：`lib/ui/status.ts`（含 `NOT_REQUESTED` 正常语义）。
+- 统一错误展开：`lib/api/error-presenter.ts` + `components/blocks/ErrorState.tsx`。
+- 空态组件：`components/blocks/EmptyState.tsx`。
+- Role gate：
+  - `lib/auth/session.ts` 使用 `GET users/me` 探针
+  - `app/teacher/layout.tsx` / `app/student/layout.tsx` 角色门禁
+- submission detail 稳定读源接入：
+  - 教师页 `app/teacher/submissions/[submissionId]/page.tsx`
+  - 学生页 `app/student/submissions/[submissionId]/page.tsx`
+  - 主体数据均由 `GET learning-tasks/submissions/:id` 拉取，query 透传当前主要承担：
+    - 返回链路上下文（如 `classroomId` / `classroomTaskId`）用于回跳
+    - 极少量短期 fallback 展示
+  - query 透传不再作为 submission detail 主体数据真相源。
+
+## 4) 当前主链路状态
+
+Teacher 起步链路（可用）：
+1. `CreateCourseForm` -> `POST courses`
+2. `CreateClassroomForm` -> `POST classrooms`
+3. `PublishClassroomTaskForm` -> `POST classrooms/:id/tasks`（可选先 `POST learning-tasks/tasks`）
+4. 进入 `/teacher/classrooms/[classroomId]/tasks/[classroomTaskId]/*` 和提交管理页
+
+Teacher 课程视角（可用）：
+- `/teacher/courses` 已支持课程列表与创建课程。
+- `/teacher/courses/[courseId]/overview` 已接入课程总览。
+- 课程视角可作为进入班级创建/班级管理的上游入口（跳转到 `/teacher/classrooms` 或带 `courseId` 的班级页）。
+
+Student 学习链路（可用）：
+1. `/student/classrooms/join` -> `POST classrooms/join`
+2. `/student/classrooms/[classroomId]/tasks/[classroomTaskId]` -> `GET .../my-task-detail`
+3. `SubmissionForm` -> `POST .../submissions`
+4. `/student/submissions/[submissionId]` -> 稳定读源 + feedback 列表 + request AI
+
+Teacher 批阅链路（可用）：
+1. `/teacher/classrooms/[classroomId]/tasks/[classroomTaskId]/submissions`
+2. `/teacher/submissions/[submissionId]`（稳定读源）
+3. `TeacherFeedbackForm` -> `POST learning-tasks/submissions/:id/feedback`
+
+## 5) P0 真接口前端收口情况（现状）
+
+已接入并在页面使用：
+
+- `GET /api/users/me`：登录态探针 + role gate。
+- `GET /api/classrooms/:id/students`：成员页主读源。
+- `GET /api/classrooms/:classroomId/tasks/:classroomTaskId/submissions`：教师提交管理页主读源。
+- `GET /api/learning-tasks/submissions/:id`：Teacher/Student submission detail 主读源（稳定读源）。
+
+补充：
+
+- `PATCH /api/users/me` 后端已可用，但当前前端未提供资料编辑 UI 入口。
+
+## 6) AI 闭环联调模式（默认）
+
+前端产品动作：
+
+- `POST /api/learning-tasks/submissions/:submissionId/ai-feedback/request`（学生提交详情页按钮）。
+
+默认联调模式（与后端决策一致）：
+
+- `Stub + worker`：`AI_FEEDBACK_PROVIDER=stub` + `AI_FEEDBACK_WORKER_ENABLED=true`。
+- `process-once` 仅用于 debug/ops，不是默认交付模式。
+- 前端已按 `NOT_REQUESTED/PENDING/RUNNING/SUCCEEDED/FAILED/DEAD` 全状态展示。
+
+## 7) 当前阶段判断
+
+当前前端已达到“主链路整体可用、教师可自助起步”的阶段，但尚未进入“最终交付定版”阶段。
+
+已达到：
+
+- Teacher / Student 主链路可用。
+- P0 真接口前端收口完成。
+- submission detail 稳定读源已落地（双角色详情页）。
+- AI 闭环前端产品入口已落地（request + 状态提示 + 帮助页）。
+
+未达到：
+
+- 最终交付态 UI 收敛（仍保留大量 raw JSON `<details>` 调试块）。
+- ops/debug 前端专用页面（`/ops/**`）尚未建设。
+
+仍需优先关注：
+
+- 主链路页面仍保留一定工程化痕迹（raw JSON `<details>` 仍较多、主视图信息密度不均）。
+- 浏览器级自动化 smoke 尚未建立（当前 `frontend/package.json` 仅有 `dev/build/start/lint` 脚本）。
+- 用户资料编辑等非主链路能力尚未前端化（后端 `PATCH /api/users/me` 已可用但前端未提供对应页面/表单）。
+
+## 8) Step 12 验收入口
+
+- 手工验收文档位置：`docs/handoff/handoff-frontend-manual-checklist.md`。

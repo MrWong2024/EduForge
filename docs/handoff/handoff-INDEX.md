@@ -15,6 +15,10 @@
 | `docs/handoff/handoff-decisions.md` | 关键决策记录（Decision/Rationale/Consequences） | 评估改动是否违背既有架构决策 |
 | `docs/handoff/handoff-dto-cheatsheet.md` | 写接口 DTO 最小请求体速查（required/枚举/嵌套/最小 JSON 示例） | 前端/脚本联调遇到 400 校验、需要快速拼请求 body 时 |
 
+## 前端入口补充
+
+- 若新会话涉及前端续接，请同时阅读 `docs/handoff/handoff-frontend-INDEX.md`；后端以本文件为入口，前端以 `handoff-frontend-INDEX.md` 为入口。
+
 ## 统一前提
 
 - 本项目当前不使用 git（本交接包按“工作区事实状态”交接）。

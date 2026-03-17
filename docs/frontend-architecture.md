@@ -1,13 +1,14 @@
-# EduForge Frontend Architecture Baseline (V1.1.2)
+# EduForge Frontend Architecture Baseline (V1.1.3)
 
-版本：`V1.1.2`  
-更新时间：`2026-02-28`  
+版本：`V1.1.3`  
+更新时间：`2026-03-17`  
 权威后端基线：`docs/handoff/handoff-*.md`、`docs/auth-baseline.md`
 
 ## 0. 文档定位与范围
 - 目标：提供可直接落地的 Next.js App Router 前端架构规范，支持页面批量开发与一致性验收。
 - 适用范围：`frontend/app/**`、`frontend/lib/**`、前端路由权限、数据获取、错误处理、下载交互。
 - 非目标：不定义视觉稿，不替代后端 API 文档，不扩展新状态管理架构。
+- 当前阶段：前端已进入“主链路整体可用、教师可自助起步”阶段；本文记录的是已落地架构基线，不是纯规划草案。
 
 ## 1. 不可违背约束（从 handoff 抽取）
 - 认证必须是服务端 Session + HttpOnly Cookie `ef_session`。
@@ -75,27 +76,35 @@ export async function GET(req: NextRequest, { params }: { params: { path: string
 推荐路由骨架（开发级）：
 ```text
 app/
-  (public)/login/page.tsx
+  (auth)/login/page.tsx
+  (teacher)/teacher/page.tsx
   (teacher)/teacher/courses/page.tsx
   (teacher)/teacher/courses/[courseId]/overview/page.tsx
   (teacher)/teacher/classrooms/page.tsx
+  (teacher)/teacher/classrooms/[classroomId]/page.tsx
   (teacher)/teacher/classrooms/[classroomId]/dashboard/page.tsx
+  (teacher)/teacher/classrooms/[classroomId]/tasks/page.tsx
+  (teacher)/teacher/classrooms/[classroomId]/tasks/[classroomTaskId]/page.tsx
+  (teacher)/teacher/classrooms/[classroomId]/tasks/[classroomTaskId]/submissions/page.tsx
   (teacher)/teacher/classrooms/[classroomId]/tasks/[classroomTaskId]/learning-trajectory/page.tsx
   (teacher)/teacher/classrooms/[classroomId]/tasks/[classroomTaskId]/review-pack/page.tsx
   (teacher)/teacher/classrooms/[classroomId]/tasks/[classroomTaskId]/ai-metrics/page.tsx
+  (teacher)/teacher/classrooms/[classroomId]/members/page.tsx
   (teacher)/teacher/classrooms/[classroomId]/weekly-report/page.tsx
   (teacher)/teacher/classrooms/[classroomId]/process-assessment/page.tsx
   (teacher)/teacher/classrooms/[classroomId]/export/snapshot/page.tsx
+  (teacher)/teacher/submissions/[submissionId]/page.tsx
   (student)/student/page.tsx
-  (student)/student/join/page.tsx
-  (student)/student/classrooms/[classroomId]/page.tsx
+  (student)/student/dashboard/page.tsx
+  (student)/student/classrooms/join/page.tsx
   (student)/student/classrooms/[classroomId]/tasks/[classroomTaskId]/page.tsx
   (student)/student/submissions/[submissionId]/page.tsx
-  (ops)/ops/ai-feedback-jobs/page.tsx
+  (student)/student/help/ai/page.tsx
+  (ops)/** （规划/隐藏分区，当前未建设前端正式 ops 页）
 ```
 
 动态段命名统一：
-- `[courseId]`、`[classroomId]`、`[classroomTaskId]`、`[taskId]`、`[submissionId]`
+- `[courseId]`、`[classroomId]`、`[classroomTaskId]`、`[submissionId]`
 
 后端 `:id` 映射规则（统一写法）：
 - 前端路由层统一使用语义化 `classroomId/courseId`。
@@ -107,12 +116,14 @@ app/
 导航信息架构图（文字版）：
 ```text
 Login -> Role Home
-Teacher: /teacher/classrooms -> /teacher/classrooms/[classroomId]/dashboard
-        -> /teacher/classrooms/[classroomId]/tasks/[classroomTaskId]/(learning-trajectory|review-pack|ai-metrics)
-        -> /teacher/classrooms/[classroomId]/(weekly-report|process-assessment|export/snapshot)
-        -> /teacher/courses -> /teacher/courses/[courseId]/overview
-Student: /student -> /student/classrooms/[classroomId] -> /student/classrooms/[classroomId]/tasks/[classroomTaskId]
-        -> /student/submissions/[submissionId]
+Teacher: /teacher/courses -> /teacher/courses/[courseId]/overview -> /teacher/classrooms
+        -> /teacher/classrooms/[classroomId]/dashboard -> /teacher/classrooms/[classroomId]/tasks
+        -> /teacher/classrooms/[classroomId]/tasks/[classroomTaskId]
+        -> /teacher/classrooms/[classroomId]/tasks/[classroomTaskId]/submissions
+        -> /teacher/submissions/[submissionId]
+Student: /student -> /student/dashboard -> /student/classrooms/join
+        -> /student/classrooms/[classroomId]/tasks/[classroomTaskId]
+        -> /student/submissions/[submissionId] -> /student/help/ai
 ```
 
 ## 5. 认证、会话与权限策略
@@ -125,7 +136,7 @@ Student: /student -> /student/classrooms/[classroomId] -> /student/classrooms/[c
 
 ### 5.1 角色首页跳转（Role Home Routing Policy）
 - MUST：`roles` 包含 `TEACHER` 时，默认跳转 `/teacher/classrooms`（可带 `?page=1`）。
-- MUST：否则若 `roles` 包含 `STUDENT`，默认跳转 `/student`。
+- MUST：否则若 `roles` 包含 `STUDENT`，默认跳转 `/student`（该路由会立即重定向到 `/student/dashboard`）。
 - MUST：否则显示 `403`（无可用角色），并提示“请联系管理员开通角色权限”。
 - 说明：本规范仅定义默认跳转策略；不实现 `手动切换角色` 能力（后续如需支持，需另行设计并更新本规范）。
 
@@ -154,6 +165,7 @@ Student: /student -> /student/classrooms/[classroomId] -> /student/classrooms/[c
 - `GET /api/users/me`
 - `GET /api/classrooms/mine/dashboard`
 - `GET /api/classrooms/:classroomId/tasks/:classroomTaskId/my-task-detail`
+- `GET /api/learning-tasks/submissions/:id`（submission detail 主读源）
 - `GET /api/learning-tasks/submissions/:id/feedback`（提交后即时查看）
 - 所有与权限判定强相关的入口页数据
 
@@ -265,28 +277,46 @@ Snapshot 体积保护 UX：
 | 页面（route） | 主接口（method + path） | 关键 query | 关键交互 | 权限失败展示 |
 |---|---|---|---|---|
 | `/login` | `POST /api/auth/login`；`GET /api/users/me` | `next` | 登录成功后按角色跳转 | `401` 显示登录失败，不暴露细节 |
-| `/teacher/courses` | `GET /api/courses` | 以后端 DTO 为准（列表分页） | 进入课程总览 | 按默认规则 |
+| `/teacher` | - | - | 重定向到 `/teacher/classrooms` | 按默认规则 |
+| `/teacher/courses` | `GET /api/courses`；`POST /api/courses` | `page,limit` | 课程分页、创建课程、跳课程总览/班级 | 按默认规则 |
 | `/teacher/courses/[courseId]/overview` | `GET /api/courses/:courseId/overview` | `window,page,limit,sort,order` | 窗口/排序切换，跳班级 | 按默认规则 |
-| `/teacher/classrooms` | `GET /api/classrooms` | 以后端 DTO 为准（列表分页） | 进入班级看板 | 按默认规则 |
-| `/teacher/classrooms/[classroomId]/dashboard` | `GET /api/classrooms/:id/dashboard` | 无（handoff 未声明） | 进入任务与报表页 | 按默认规则 |
+| `/teacher/classrooms` | `GET /api/classrooms`；`GET /api/courses`；`POST /api/classrooms` | `page,limit,courseId` | 班级分页、按课程过滤、创建班级 | 按默认规则 |
+| `/teacher/classrooms/[classroomId]` | - | - | 重定向到 dashboard | 按默认规则 |
+| `/teacher/classrooms/[classroomId]/dashboard` | `GET /api/classrooms/:id`；`GET /api/classrooms/:id/dashboard` | 无（handoff 未声明） | 进入任务/成员/报表/导出 | 按默认规则 |
+| `/teacher/classrooms/[classroomId]/tasks` | `GET /api/classrooms/:id`；`GET /api/classrooms/:id/tasks`；`GET /api/learning-tasks/tasks`；`POST /api/classrooms/:id/tasks`；`POST /api/learning-tasks/tasks`（可选） | 无（handoff 未声明） | 发布课堂任务、进入任务详情/提交管理/三件套 | 按默认规则 |
+| `/teacher/classrooms/[classroomId]/tasks/[classroomTaskId]` | `GET /api/classrooms/:id`；`GET /api/classrooms/:id/tasks/:classroomTaskId`；`POST /api/learning-tasks/tasks/:id/publish` | 无（handoff 未声明） | 查看课堂任务与底层 learning task 状态，必要时触发底层 task publish | 按默认规则 |
+| `/teacher/classrooms/[classroomId]/tasks/[classroomTaskId]/submissions` | `GET /api/classrooms/:id`；`GET /api/classrooms/:classroomId/tasks/:classroomTaskId/submissions` | `page,limit` | 查看提交列表并跳转批阅详情 | 按默认规则 |
+| `/teacher/submissions/[submissionId]` | `GET /api/learning-tasks/submissions/:id`；`GET /api/learning-tasks/submissions/:id/feedback`；`POST /api/learning-tasks/submissions/:id/feedback` | `classroomId,classroomTaskId`（用于回跳） | 查看提交内容/反馈历史，新增教师反馈 | 按默认规则 |
 | `/teacher/classrooms/[classroomId]/tasks/[classroomTaskId]/learning-trajectory` | `GET /api/classrooms/:classroomId/tasks/:classroomTaskId/learning-trajectory` | `window,page,limit,sort,order,includeAttempts,includeTagDetails` | 排序筛选、查看学生轨迹 | 按默认规则 |
 | `/teacher/classrooms/[classroomId]/tasks/[classroomTaskId]/review-pack` | `GET /api/classrooms/:classroomId/tasks/:classroomTaskId/review-pack` | `window,topK,examplesPerTag,includeStudentTiers,includeTeacherScript` | 课堂复盘、教学脚本 | 按默认规则 |
 | `/teacher/classrooms/[classroomId]/tasks/[classroomTaskId]/ai-metrics` | `GET /api/classrooms/:classroomId/tasks/:classroomTaskId/ai-metrics` | `window,includeTags` | 查看 AI 状态与分布 | 按默认规则 |
+| `/teacher/classrooms/[classroomId]/members` | `GET /api/classrooms/:id`；`GET /api/classrooms/:id/students`；`POST /api/classrooms/:id/students/:uid/remove` | `includeRemoved` | 成员查看、移除成员 | 按默认规则 |
 | `/teacher/classrooms/[classroomId]/weekly-report` | `GET /api/classrooms/:classroomId/weekly-report` | `window,includeRiskStudentIds` | 周报筛选 | 按默认规则 |
 | `/teacher/classrooms/[classroomId]/process-assessment` | `GET /api/classrooms/:classroomId/process-assessment`；`GET /api/classrooms/:classroomId/process-assessment.csv` | JSON:`window,page,limit,sort,order`；CSV:`window` | 表格浏览、CSV 下载 | 按默认规则 |
 | `/teacher/classrooms/[classroomId]/export/snapshot` | `GET /api/classrooms/:classroomId/export/snapshot` | `window,limitStudents,limitAssessment,includePerTask` | 导出快照、显示截断提示 | 按默认规则 |
-| `/ops/ai-feedback-jobs` | `GET /api/learning-tasks/ai-feedback/jobs`；`POST /api/learning-tasks/ai-feedback/jobs/process-once` | 以后端 DTO 为准 | 观察队列、process-once | `404` 优先显示“功能未启用” |
+| `/ops/**`（预留） | `GET /api/learning-tasks/ai-feedback/jobs`；`POST /api/learning-tasks/ai-feedback/jobs/process-once`（后端可用） | 以后端 DTO 为准 | 当前前端未建设正式 ops 页面；仅保留规划/隐藏分区口径 | debug gate 关闭时 `404` 固定显示“功能未启用” |
 
 ### 9.2 Student
 | 页面（route） | 主接口（method + path） | 关键 query | 关键交互 | 权限失败展示 |
 |---|---|---|---|---|
-| `/student` | `GET /api/classrooms/mine/dashboard` | 无（handoff 未声明） | 进入班级任务 | 按默认规则 |
-| `/student/join` | `POST /api/classrooms/join` | 无 | 输入 joinCode 加入班级 | 按 status 分流：`400`=joinCode 无效/格式错误；`404`=班级不存在或不可加入；`403`=无权限加入（如非学生角色） |
-| `/student/classrooms/[classroomId]` | `GET /api/classrooms/:id`；`GET /api/classrooms/:id/tasks` | 无（handoff 未声明） | 进入任务详情页 | 按默认规则 |
+| `/student` | - | - | 重定向到 `/student/dashboard` | 按默认规则 |
+| `/student/dashboard` | `GET /api/classrooms/mine/dashboard` | 无（handoff 未声明） | 查看班级任务并跳转任务详情 | 按默认规则 |
+| `/student/classrooms/join` | `POST /api/classrooms/join` | 无 | 输入 joinCode 加入班级 | 按 status 分流：`400`=joinCode 无效/格式错误；`404`=班级不存在或不可加入；`403`=无权限加入（如非学生角色） |
 | `/student/classrooms/[classroomId]/tasks/[classroomTaskId]` | `GET /api/classrooms/:classroomId/tasks/:classroomTaskId/my-task-detail`；`POST /api/classrooms/:classroomId/tasks/:classroomTaskId/submissions` | `includeFeedbackItems,feedbackLimit` | 查看详情、提交作业 | `403` 无权限；`LATE_SUBMISSION_NOT_ALLOWED` 显示截止提示 |
-| `/student/submissions/[submissionId]` | `GET /api/learning-tasks/submissions/:id/feedback`；`POST /api/learning-tasks/submissions/:submissionId/ai-feedback/request` | 以后端 DTO 为准 | 查看反馈、手工请求 AI | 按默认规则 |
+| `/student/submissions/[submissionId]` | `GET /api/learning-tasks/submissions/:id`；`GET /api/learning-tasks/submissions/:id/feedback`；`POST /api/learning-tasks/submissions/:submissionId/ai-feedback/request` | `classroomId,classroomTaskId`（用于回跳） | 查看提交内容与反馈、手工请求 AI | 按默认规则 |
+| `/student/help/ai` | - | - | AI 状态语义与排障说明页 | 按默认规则 |
 
-## 9.3 UI Copy Strategy（Chinese UI, English Code）
+### 9.3 submission detail 稳定读源（已落地约束）
+- Teacher / Student submission detail 主体数据必须优先来自 `GET /api/learning-tasks/submissions/:id`。
+- 反馈历史读取接口为 `GET /api/learning-tasks/submissions/:id/feedback`。
+- query 透传只承担两类职责：
+  - 返回链路上下文（如 `classroomId/classroomTaskId`）
+  - 极少量字段 fallback 展示（仅在 detail 字段缺失时）
+- 禁止将 query 透传作为 submission detail 主数据源。
+- `GET /api/learning-tasks/submissions/:id` detail 接口允许返回 `content.codeText`。
+- `GET /api/classrooms/:classroomId/tasks/:classroomTaskId/submissions` 列表接口继续不返回 `content.codeText`。
+
+## 9.4 UI Copy Strategy（Chinese UI, English Code）
 ### A) 总原则
 - 用户可见 UI 文案允许中文（frontend 侧）。
 - 工程结构与标识符必须英文（路径/路由段、paths key、变量/函数/类型/文件名、接口字段名、错误码等）。
@@ -334,6 +364,12 @@ Snapshot 体积保护 UX：
 - `404`：资源不存在或功能未启用（debug gate 场景固定“功能未启用”）。
 - `500`：系统繁忙稍后重试。
 
+### 10.1 默认联调/验收模式（已固化）
+- 默认联调/验收模式为 `Stub + worker`：`AI_FEEDBACK_PROVIDER=stub` + `AI_FEEDBACK_WORKER_ENABLED=true`。
+- `POST /api/learning-tasks/submissions/:submissionId/ai-feedback/request` 负责创建或确保 job（产品入口）。
+- worker 负责消费 job 到 `SUCCEEDED`（或进入失败重试/终态）。
+- `POST /api/learning-tasks/ai-feedback/jobs/process-once` 仅用于 debug/ops，不是默认交付运行模式。
+
 ## 11. Recommended Patterns 与 Hard Rules
 ### Recommended Patterns
 - BFF 代理作为默认后端访问路径。
@@ -348,11 +384,39 @@ Snapshot 体积保护 UX：
 - 禁止将 debug gate 404 显示成 403。
 - 禁止前端自行推导后端口径指标（如风险学生），以接口返回为准。
 
+### 11.1 P0 真接口收口（前端当前基线）
+前端已正式接入并在主链路页面使用：
+- `GET /api/users/me`
+- `GET /api/classrooms/:id/students`
+- `GET /api/classrooms/:classroomId/tasks/:classroomTaskId/submissions`
+- `GET /api/learning-tasks/submissions/:id`
+
+禁止回退：
+- 禁止回退到 `process-assessment` 代替成员读源。
+- 禁止回退到按 `taskId` 的跨班 submissions 过滤兜底。
+- 禁止回退到 query 主读源的 submission detail 实现。
+
+### 11.2 Teacher 起步链路（已可用）
+- `/teacher/courses` 已支持创建课程。
+- `/teacher/classrooms` 已支持创建班级。
+- `/teacher/courses/[courseId]/overview` 已作为课程视角正式入口。
+- 当前新教师起步链路：`创建课程 -> 创建班级 -> 发布任务 -> 学生加入与提交`。
+
+### 11.3 Step 12 交付强化策略（已落地）
+- 空态必须带“下一步动作”，并优先通过 `EmptyState` 的 `actions` 承载跳转/主按钮。
+- raw JSON fallback 可以保留，但默认应折叠为“查看原始数据（调试用）”。
+- 手工验收入口文档固定为 `docs/handoff/handoff-frontend-manual-checklist.md`。
+
 ## 12. 验收清单（文档执行检查）
 - 接口路径是否全部为 `/api/...`。
 - 是否明确默认路径为 BFF 代理，并给出 RSC/Server Actions 带 cookie 落地方式。
 - 是否明确 debug gate 404 = 功能未启用。
 - 是否明确 `classroomTaskId` 隔离与 Enrollment-only。
+- 是否明确 submission detail 稳定读源：`GET /api/learning-tasks/submissions/:id`，且 query 仅承担上下文/少量 fallback。
+- 是否明确 P0 真接口收口：`/users/me`、`/classrooms/:id/students`、`/classrooms/:classroomId/tasks/:classroomTaskId/submissions`、`/learning-tasks/submissions/:id`。
+- 是否明确 AI 默认联调模式为 `Stub + worker`，`process-once` 仅用于 debug/ops。
+- 是否明确 Teacher 起步链路已可用（创建课程、创建班级、课程总览入口）。
+- 是否明确 Step 12 强化策略（空态 actions、raw JSON 默认折叠、manual checklist 入口）。
 - CSV/快照下载是否具备可直接照抄的代理与错误处理约束。
 - 是否遵循“UI 中文、工程结构与标识符英文；`backend/**` 不参与中文化且不改动”。
 - ErrorState 是否支持“中文摘要 + 英文 detail 原样展示”。

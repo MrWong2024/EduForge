@@ -1,0 +1,75 @@
+# 前端组件/模块职责地图（Component Map）
+
+目标：让新会话快速知道“改哪里、不要改哪里”。
+
+## 1) Shell 层（页面外壳与导航）
+
+| 模块 | 文件 | 职责 | 不要在哪改 |
+|---|---|---|---|
+| TeacherShell | `components/layout/TeacherShell.tsx` | 教师端顶栏、主导航、登出入口 | 不要在业务页面重复写教师导航 |
+| StudentShell | `components/layout/StudentShell.tsx` | 学生端顶栏、主导航、登出入口 | 不要在业务页面重复写学生导航 |
+| Teacher Gate | `app/teacher/layout.tsx` | `requireRole("TEACHER")` + 403 fallback | 不要在每个 teacher 页面重复做 role gate |
+| Student Gate | `app/student/layout.tsx` | `requireRole("STUDENT")` + 403 fallback | 不要在每个 student 页面重复做 role gate |
+
+## 2) Blocks（通用展示块）
+
+| 组件 | 文件 | 职责 | 不要在哪改 |
+|---|---|---|---|
+| PageHeader | `components/blocks/PageHeader.tsx` | 页面标题/描述/右侧 actions 标准结构 | 不要在每个页面自定义不同标题骨架 |
+| EmptyState | `components/blocks/EmptyState.tsx` | 空态统一视觉与动作插槽 | 不要各页自写风格不一空态 |
+| ErrorState | `components/blocks/ErrorState.tsx` | 错误态统一展示（含 401/403/404/500 默认文案） | 不要在业务组件散落硬编码错误块 |
+| Tabs | `components/blocks/Tabs.tsx` | 任务工作区 tab 导航 | 不要在三件套页面重复 tab 样式 |
+
+## 3) Teacher 交互组件
+
+| 组件 | 文件 | 真实 API | 作用边界 |
+|---|---|---|---|
+| CreateCourseForm | `components/teacher/CreateCourseForm.tsx` | `POST courses` | 只负责建课表单与成功跳转 |
+| CreateClassroomForm | `components/teacher/CreateClassroomForm.tsx` | `POST classrooms` | 只负责建班表单，不负责班级列表加载 |
+| PublishClassroomTaskForm | `components/teacher/PublishClassroomTaskForm.tsx` | `POST learning-tasks/tasks(可选)` + `POST classrooms/:id/tasks` | 负责“选任务或先建任务再发布” |
+| PublishTaskStatusButton | `components/teacher/PublishTaskStatusButton.tsx` | `POST learning-tasks/tasks/:id/publish` | 仅做 task 发布状态操作 |
+| RemoveStudentButton | `components/teacher/RemoveStudentButton.tsx` | `POST classrooms/:id/students/:uid/remove` | 仅做移除动作，不负责成员列表 |
+| TeacherFeedbackForm | `components/teacher/TeacherFeedbackForm.tsx` | `POST learning-tasks/submissions/:id/feedback` | 仅做教师反馈创建 |
+
+## 4) Student 交互组件
+
+| 组件 | 文件 | 真实 API | 作用边界 |
+|---|---|---|---|
+| JoinClassroomForm | `components/student/JoinClassroomForm.tsx` | `POST classrooms/join` | 仅处理 joinCode 入班 |
+| SubmissionForm | `components/student/SubmissionForm.tsx` | `POST classrooms/:classroomId/tasks/:classroomTaskId/submissions` | 仅处理提交动作与迟交错误分流 |
+| RequestAiFeedbackButton | `components/student/RequestAiFeedbackButton.tsx` | `POST learning-tasks/submissions/:submissionId/ai-feedback/request` | 仅处理 request AI 行为 |
+| AiProcessingHint | `components/student/AiProcessingHint.tsx` | - | 统一 `PENDING/RUNNING` 提示文案 |
+
+## 5) 课堂任务上下文组件
+
+| 组件 | 文件 | 职责 |
+|---|---|---|
+| TaskContextHeader | `components/classroomTask/TaskContextHeader.tsx` | 在 `teacher/.../tasks/[classroomTaskId]/*` 下统一显示任务上下文与三件套 tabs |
+
+边界补充：
+
+- `TaskContextHeader` 只服务 Teacher 的 classroomTask 工作区，不要把 Student 页或非 classroomTask 页强行复用进来。
+
+## 6) API/认证/路由基础模块（lib）
+
+| 模块 | 文件 | 职责 | 不要在哪改 |
+|---|---|---|---|
+| Server API Client | `lib/api/client.ts` | SSR/RSC 请求，自动拼 `/api/proxy/**`，服务端注入 cookie | 不要在 Server Component 直接拼后端绝对 URL |
+| Browser API Client | `lib/api/browser-client.ts` | Client 组件请求，统一 `/api/proxy/**` 与错误类型 | 不要在业务组件直接写 `fetch('/api/proxy/...')` 重复逻辑 |
+| Error Presenter | `lib/api/error-presenter.ts` | detail 提取与错误描述拼接 | 不要各表单重复手写 message/code 拼接 |
+| Teacher Types Adapter | `lib/api/types-teacher.ts` | 教师域 payload 解析与容错映射 | 不要在页面直接散写深层字段访问 |
+| Student Types Adapter | `lib/api/types-student.ts` | 学生域 payload 解析与容错映射 | 同上 |
+| Session/Auth | `lib/auth/session.ts` + `lib/auth/role-home.ts` | `users/me` 探针、role 判断、role-home | 不要在页面自定义角色跳转规则 |
+| Paths | `lib/routes/paths.ts` | 路由常量与参数化路径 | 不要在页面硬编码路径字符串 |
+| UI Status | `lib/ui/status.ts` | AI 状态文案、通用错误摘要 | 不要各页散落不同状态文案口径 |
+| UI Format | `lib/ui/format.ts` | query/date/display/safeGet 工具 | 不要重复造相同 parse 函数 |
+| Proxy Route | `app/api/proxy/[...path]/route.ts` | BFF 转发层，固定 Node runtime，method/body/header/set-cookie 透传 | 不要在业务页绕过 proxy 直连后端，也不要把业务逻辑塞进 proxy |
+
+## 7) 当前“不要改错层”的关键提醒
+
+- 需要改 API 口径时：先改 `lib/api/types-*` 与页面映射，不要直接在 JSX 深层访问原始 payload。
+- 需要改权限行为时：优先看 `lib/auth/session.ts` 与 `app/{teacher,student}/layout.tsx`，不要在单页临时加 gate。
+- 需要改三件套导航时：只改 `TaskContextHeader` 和 `paths.ts`，不要在三个页面分别维护链接。
+- 需要改 AI 状态文案时：统一改 `lib/ui/status.ts` 与 `AiProcessingHint.tsx`，不要在每页复制文案。
+- 需要改 submission detail 相关逻辑时：优先以稳定读源 `GET learning-tasks/submissions/:id` 为主，先看 `lib/api/types-student.ts`、`lib/api/types-teacher.ts` 与 Teacher/Student submission detail 页，不要把 query 透传当主数据源。
+- 若任务仅是 handoff/manual checklist/docs 调整：不要顺手改业务组件或路由实现，先核对 `docs/handoff/*` 与当前代码是否一致再决定是否改代码。
