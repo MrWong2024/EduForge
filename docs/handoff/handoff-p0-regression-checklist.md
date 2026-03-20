@@ -47,5 +47,6 @@
 ## 5) 本步骤非目标防回归
 
 - [ ] 未引入“教师手工加学生”新接口。
-- [ ] 未引入“管理员批量导入用户（Excel/CSV）”能力。
+- [ ] 未引入“产品化管理员批量导入用户（后台页面/管理接口/Excel 上传）”能力。
+- [ ] 已有运维脚本级 CSV 批量导入能力，口径保持为离线脚本：`backend/scripts/import-users.ts` / `npm run import-users -- --file="..." [--dry-run] [--reset-password]`。
 - [ ] 未引入高级筛选/全文搜索/CSV 导出等后续能力。

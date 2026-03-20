@@ -25,5 +25,8 @@
 - Node.js/NestJS/MongoDB 版本策略只引用 `docs/backend-architecture.md`，不重复展开。
 - 系统为新系统，无 legacy 数据；本交接包不包含任何 legacy 迁移策略。
 - P0 / 主链路已同步的后端事实（以代码为准）：`PATCH /api/users/me` 已可用；`GET /api/classrooms/:id/students` 只认 Enrollment ACTIVE；`GET /api/classrooms/:classroomId/tasks/:classroomTaskId/submissions` 只认 `classroomTaskId`；`GET /api/learning-tasks/submissions/:id` 已作为 submission detail 稳定读源。
+- 平台仍不开放公开注册（无前端注册页、无开放注册接口）；仍无产品化管理员批量导入功能（后台页面/管理接口/Excel 上传）。
+- 已有运维脚本级 CSV 导入能力：`backend/scripts/import-users.ts`，执行入口 `npm run import-users -- --file="..." [--dry-run] [--reset-password]`。
+- 连接串口径：应用运行读取 `MONGO_URI`；运维导入脚本读取 `MONGO_ADMIN_URI`。
 - `handoff-dto-cheatsheet.md` 仅覆盖 Controller 写接口（POST/PATCH/PUT/DELETE） 的 `@Body()` 最小样例；`@Query`/`@Param` 默认不展开。
 - DTO 以 backend 源码为准；若 `handoff-dto-cheatsheet.md` 与代码不一致，以代码为准并需同步修订 `handoff-dto-cheatsheet.md`。

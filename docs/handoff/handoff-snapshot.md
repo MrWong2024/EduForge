@@ -11,6 +11,10 @@
 - 该系统为新系统，无历史数据包袱。
 - 因此不需要回填脚本；Enrollment 为权威来源，legacy `studentIds` 不作为任何授权/统计的 fallback。
 - 本次扫描基准目录是 `backend/`，即 `backend/src`、`backend/test`、`backend/scripts`。
+- 平台基线仍为不开放公开注册：无前端注册页、无开放注册 API。
+- 当前仍未提供产品化“管理员批量导入用户”能力（后台页面/管理接口/Excel 上传）。
+- 当前已提供运维脚本级 CSV 批量导入能力：`backend/scripts/import-users.ts`，用于离线导入账号。
+- 连接串口径区分：应用运行读取 `MONGO_URI`；运维导入脚本读取 `MONGO_ADMIN_URI`。
 - `docs/operations/**` 在本次快照中作为运维文档产物被引用（不在 `backend/` 目录树内，但属于工程交付物）。
 - `backend/dist/**` 与 `backend/node_modules/**` 不在扫描范围。
 
@@ -92,7 +96,8 @@ backend/
 │  ├─ classroom-students.e2e-spec.ts
 │  └─ classroom-task-submissions.e2e-spec.ts
 └─ scripts/
-   └─ sync-indexes.ts
+   ├─ sync-indexes.ts
+   └─ import-users.ts
 ```
 
 版本策略引用：
@@ -307,7 +312,16 @@ AI Provider 错误码（`ai-feedback-provider.error-codes.ts`）：
 - 提交详情稳定读源：`GET /api/learning-tasks/submissions/:id`（用于 Teacher/Student submission detail 主视图读取，不再主要依赖 query 透传）。
 
 明确未完成（本阶段不包含）：
-- 管理员批量导入用户（Excel/CSV）。
+- 产品化管理员批量导入用户能力（后台页面/管理接口/Excel 上传）。
 - 教师手工添加学生到班级。
 - 提交/成员列表高级筛选与全文搜索。
 - 额外导出能力（如提交列表 CSV）。
+
+运维脚本补充说明（非产品化后台能力）：
+- 脚本入口：`backend/scripts/import-users.ts`。
+- npm 用法：`npm run import-users -- --file="..." [--dry-run] [--reset-password]`。
+- 输入格式：仅支持 CSV（不支持 xlsx）。
+- 典型用途：在“不开放注册”基线下，供运维/管理员离线批量导入用户账号。
+- 初始化密码：`cqupt@ai`。
+- 默认行为：已存在用户不重置密码；仅显式传入 `--reset-password` 时才重置。
+- 支持 `--dry-run` 只校验与统计，不写库。
