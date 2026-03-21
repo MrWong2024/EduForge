@@ -110,12 +110,28 @@ export default async function ClassroomTasksPage({ params }: ClassroomTasksPageP
             <Link href={paths.teacher.classroomMembers(classroomId)} className="text-blue-700 hover:underline">
               成员管理
             </Link>
+            <Link href={paths.teacher.tasksFromClassroom(classroomId)} className="text-blue-700 hover:underline">
+              任务模板页
+            </Link>
           </div>
         }
       />
 
       <section className="rounded-lg border border-zinc-200 bg-white p-4 text-sm text-zinc-700">
-        <p>此页用于管理当前班级的课堂任务，可发布任务并进入提交管理与三件套分析页。</p>
+        <p>此页管理当前班级的课堂任务实例（classroom task）。</p>
+        <p className="mt-1">
+          这里先选择已发布任务模板，再配置截止时间、迟交与尝试次数等班级实例设置后发布。
+        </p>
+        <p className="mt-2">
+          若没有合适模板，请先前往
+          <Link
+            href={paths.teacher.tasksFromClassroom(classroomId)}
+            className="mx-1 text-blue-700 hover:underline"
+          >
+            任务模板页
+          </Link>
+          准备 `PUBLISHED` 模板，再回到本页发布到班级。
+        </p>
       </section>
 
       <PublishClassroomTaskForm classroomId={classroomId} availableTasks={viewModel.availableTasks} />
@@ -123,7 +139,7 @@ export default async function ClassroomTasksPage({ params }: ClassroomTasksPageP
       {viewModel.taskList.items.length === 0 ? (
         <EmptyState
           title="还没有课堂任务"
-          description="先发布一个课堂任务，学生加入班级后即可开始提交。"
+          description="当前班级还没有已发布任务。请先准备并发布任务模板，再回到本页发布到当前班级。"
           actions={
             <div className="flex flex-wrap items-center gap-3">
               <Link
@@ -138,6 +154,12 @@ export default async function ClassroomTasksPage({ params }: ClassroomTasksPageP
               >
                 返回班级看板
               </Link>
+              <Link
+                href={paths.teacher.tasksFromClassroom(classroomId)}
+                className="text-sm text-blue-700 hover:underline"
+              >
+                去创建任务模板
+              </Link>
             </div>
           }
         />
@@ -149,6 +171,9 @@ export default async function ClassroomTasksPage({ params }: ClassroomTasksPageP
                 <th className="px-4 py-3">任务标题</th>
                 <th className="px-4 py-3">截止时间</th>
                 <th className="px-4 py-3">允许迟交</th>
+                <th className="px-4 py-3">最大尝试次数</th>
+                <th className="px-4 py-3">模板模块</th>
+                <th className="px-4 py-3">模板阶段</th>
                 <th className="px-4 py-3">AI 状态</th>
                 <th className="px-4 py-3">管理</th>
                 <th className="px-4 py-3">三件套入口</th>
@@ -162,11 +187,19 @@ export default async function ClassroomTasksPage({ params }: ClassroomTasksPageP
                     key={classroomTaskId ?? `classroom-task-${index}`}
                     className="border-t border-zinc-100 align-top"
                   >
-                    <td className="px-4 py-3">{toDisplayText(task.title, "未命名任务")}</td>
+                    <td className="px-4 py-3">
+                      <p>{toDisplayText(task.title, "未命名任务")}</p>
+                      <p className="mt-1 text-xs text-zinc-500">
+                        模板状态：{toDisplayText(task.taskStatus)}
+                      </p>
+                    </td>
                     <td className="px-4 py-3">{toDisplayDate(task.dueAt)}</td>
                     <td className="px-4 py-3">
                       {typeof task.allowLate === "boolean" ? (task.allowLate ? "是" : "否") : "—"}
                     </td>
+                    <td className="px-4 py-3">{toDisplayText(task.maxAttempts)}</td>
+                    <td className="px-4 py-3">{toDisplayText(task.knowledgeModule)}</td>
+                    <td className="px-4 py-3">{toDisplayText(task.stage)}</td>
                     <td className="px-4 py-3">{getAiStatusLabel(task.aiStatus)}</td>
                     <td className="px-4 py-3">
                       {classroomTaskId ? (

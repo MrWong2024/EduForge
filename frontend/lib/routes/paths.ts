@@ -4,6 +4,10 @@ export const paths = {
   login: "/login",
   teacher: {
     home: "/teacher",
+    tasks: "/teacher/tasks",
+    tasksFromClassroom: (classroomId: string) =>
+      `/teacher/tasks?fromClassroomId=${encodeSegment(classroomId)}&status=PUBLISHED`,
+    taskEdit: (taskId: string) => `/teacher/tasks/${encodeSegment(taskId)}/edit`,
     courses: "/teacher/courses",
     courseOverview: (courseId: string) =>
       `/teacher/courses/${encodeSegment(courseId)}/overview`,

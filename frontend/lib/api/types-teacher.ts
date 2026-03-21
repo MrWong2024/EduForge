@@ -123,8 +123,13 @@ export type CourseOverviewResponse = {
 export type ClassroomTaskSummary = {
   classroomTaskId?: string;
   title?: string;
+  description?: string;
+  taskStatus?: string;
+  knowledgeModule?: string;
+  stage?: number;
   dueAt?: string;
   allowLate?: boolean;
+  maxAttempts?: number;
   aiStatus?: string;
 };
 
@@ -156,6 +161,7 @@ export type ClassroomTask = {
   description?: string;
   dueAt?: string;
   allowLate?: boolean;
+  maxAttempts?: number;
   feedbackEnabled?: boolean;
   taskStatus?: string;
   publishedAt?: string;
@@ -178,7 +184,29 @@ export type PublishClassroomTaskRequest = {
   dueAt?: string;
   settings?: {
     allowLate?: boolean;
+    maxAttempts?: number;
   };
+};
+
+export const LEARNING_TASK_STATUSES = ["DRAFT", "PUBLISHED", "ARCHIVED"] as const;
+export type LearningTaskStatus = (typeof LEARNING_TASK_STATUSES)[number];
+
+export type CreateLearningTaskRequest = {
+  title: string;
+  description: string;
+  knowledgeModule: string;
+  stage: number;
+  status: LearningTaskStatus;
+  rubric?: Record<string, unknown>;
+};
+
+export type UpdateLearningTaskRequest = {
+  title: string;
+  description: string;
+  knowledgeModule: string;
+  stage: number;
+  status: LearningTaskStatus;
+  rubric?: Record<string, unknown>;
 };
 
 export type LearningTaskOption = {
@@ -188,6 +216,7 @@ export type LearningTaskOption = {
   status?: string;
   knowledgeModule?: string;
   stage?: number;
+  rubric?: Record<string, unknown>;
   raw: UnknownRecord;
 };
 
@@ -198,6 +227,10 @@ export type LearningTaskListResponse = {
   total?: number;
   raw: unknown;
 };
+
+export type LearningTaskDetailResponse = LearningTaskOption;
+export type LearningTaskCreateResponse = LearningTaskOption;
+export type LearningTaskUpdateResponse = LearningTaskOption;
 
 export type ClassroomTaskSubmissionItem = {
   submissionId?: string;
@@ -492,8 +525,13 @@ export const toClassroomTaskSummary = (value: unknown): ClassroomTaskSummary => 
   return {
     classroomTaskId: asString(record.classroomTaskId) ?? asString(record.id),
     title: asString(taskRecord.title) ?? asString(record.title) ?? asString(record.name),
+    description: asString(taskRecord.description) ?? asString(record.description),
+    taskStatus: asString(taskRecord.status) ?? asString(record.status),
+    knowledgeModule: asString(taskRecord.knowledgeModule) ?? asString(record.knowledgeModule),
+    stage: asNumber(taskRecord.stage) ?? asNumber(record.stage),
     dueAt: asString(record.dueAt),
     allowLate: asBoolean(settingsRecord.allowLate) ?? asBoolean(record.allowLate),
+    maxAttempts: asNumber(settingsRecord.maxAttempts) ?? asNumber(record.maxAttempts),
     aiStatus: asString(record.aiStatus) ?? asString(record.aiFeedbackStatus),
   };
 };
@@ -511,6 +549,7 @@ export const toClassroomTask = (payload: unknown): ClassroomTask => {
     description: asString(taskRecord.description) ?? asString(record.description),
     dueAt: asString(record.dueAt),
     allowLate: asBoolean(settingsRecord.allowLate) ?? asBoolean(record.allowLate),
+    maxAttempts: asNumber(settingsRecord.maxAttempts) ?? asNumber(record.maxAttempts),
     feedbackEnabled: asBoolean(settingsRecord.feedbackEnabled),
     taskStatus: asString(taskRecord.status) ?? asString(record.status),
     publishedAt: asString(record.publishedAt),
@@ -521,8 +560,9 @@ export const toClassroomTask = (payload: unknown): ClassroomTask => {
 export const toSubmitTaskResponse = (payload: unknown): SubmitTaskResponse =>
   toClassroomTask(payload);
 
-const toLearningTaskOption = (value: unknown): LearningTaskOption => {
+export const toLearningTaskOption = (value: unknown): LearningTaskOption => {
   const record = asRecord(value);
+  const rubricRecord = asRecord(record.rubric);
   return {
     id: asString(record.id) ?? asString(record.taskId),
     title: asString(record.title),
@@ -530,6 +570,7 @@ const toLearningTaskOption = (value: unknown): LearningTaskOption => {
     status: asString(record.status),
     knowledgeModule: asString(record.knowledgeModule),
     stage: asNumber(record.stage),
+    rubric: Object.keys(rubricRecord).length > 0 ? rubricRecord : undefined,
     raw: record,
   };
 };
@@ -555,6 +596,27 @@ export const toLearningTaskListResponse = (payload: unknown): LearningTaskListRe
     total: asNumber(record.total),
     raw: payload,
   };
+};
+
+export const toLearningTaskDetailResponse = (payload: unknown): LearningTaskDetailResponse => {
+  const record = asRecord(payload);
+  const dataRecord = asRecord(safeGet(record, "data", undefined));
+  const source = Object.keys(dataRecord).length > 0 ? dataRecord : record;
+  return toLearningTaskOption(source);
+};
+
+export const toLearningTaskCreateResponse = (payload: unknown): LearningTaskCreateResponse => {
+  const record = asRecord(payload);
+  const dataRecord = asRecord(safeGet(record, "data", undefined));
+  const source = Object.keys(dataRecord).length > 0 ? dataRecord : record;
+  return toLearningTaskOption(source);
+};
+
+export const toLearningTaskUpdateResponse = (payload: unknown): LearningTaskUpdateResponse => {
+  const record = asRecord(payload);
+  const dataRecord = asRecord(safeGet(record, "data", undefined));
+  const source = Object.keys(dataRecord).length > 0 ? dataRecord : record;
+  return toLearningTaskOption(source);
 };
 
 export const toClassroomTasksResponse = (payload: unknown): ClassroomTasksResponse => {

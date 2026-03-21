@@ -26,7 +26,10 @@
 |---|---|---|---|
 | CreateCourseForm | `components/teacher/CreateCourseForm.tsx` | `POST courses` | 只负责建课表单与成功跳转 |
 | CreateClassroomForm | `components/teacher/CreateClassroomForm.tsx` | `POST classrooms` | 只负责建班表单，不负责班级列表加载 |
-| PublishClassroomTaskForm | `components/teacher/PublishClassroomTaskForm.tsx` | `POST learning-tasks/tasks(可选)` + `POST classrooms/:id/tasks` | 负责“选任务或先建任务再发布” |
+| CreateLearningTaskForm | `components/teacher/CreateLearningTaskForm.tsx` | `POST learning-tasks/tasks` | 只负责模板创建（含基础 rubric 配置），不负责班级实例发布 |
+| EditLearningTaskForm | `components/teacher/EditLearningTaskForm.tsx` | `PATCH learning-tasks/tasks/:id` | 只负责模板编辑（核心字段 + status + rubric），不负责班级实例发布 |
+| LearningTaskFilters | `components/teacher/LearningTaskFilters.tsx` | -（基于已加载模板列表做本地筛选） | 只负责模板层筛选与列表呈现，不发起模板发布请求 |
+| PublishClassroomTaskForm | `components/teacher/PublishClassroomTaskForm.tsx` | `POST classrooms/:id/tasks` | 只负责选择已有 `PUBLISHED` 模板并发布班级实例；可配置 `dueAt/allowLate/maxAttempts`；不负责创建/编辑模板 |
 | PublishTaskStatusButton | `components/teacher/PublishTaskStatusButton.tsx` | `POST learning-tasks/tasks/:id/publish` | 仅做 task 发布状态操作 |
 | RemoveStudentButton | `components/teacher/RemoveStudentButton.tsx` | `POST classrooms/:id/students/:uid/remove` | 仅做移除动作，不负责成员列表 |
 | TeacherFeedbackForm | `components/teacher/TeacherFeedbackForm.tsx` | `POST learning-tasks/submissions/:id/feedback` | 仅做教师反馈创建 |
@@ -60,7 +63,7 @@
 | Teacher Types Adapter | `lib/api/types-teacher.ts` | 教师域 payload 解析与容错映射 | 不要在页面直接散写深层字段访问 |
 | Student Types Adapter | `lib/api/types-student.ts` | 学生域 payload 解析与容错映射 | 同上 |
 | Session/Auth | `lib/auth/session.ts` + `lib/auth/role-home.ts` | `users/me` 探针、role 判断、role-home | 不要在页面自定义角色跳转规则 |
-| Paths | `lib/routes/paths.ts` | 路由常量与参数化路径 | 不要在页面硬编码路径字符串 |
+| Paths | `lib/routes/paths.ts` | 路由常量与参数化路径（含模板页、模板编辑页、班级页到模板页上下文链路） | 不要在页面硬编码路径字符串 |
 | UI Status | `lib/ui/status.ts` | AI 状态文案、通用错误摘要 | 不要各页散落不同状态文案口径 |
 | UI Format | `lib/ui/format.ts` | query/date/display/safeGet 工具 | 不要重复造相同 parse 函数 |
 | Proxy Route | `app/api/proxy/[...path]/route.ts` | BFF 转发层，固定 Node runtime，method/body/header/set-cookie 透传 | 不要在业务页绕过 proxy 直连后端，也不要把业务逻辑塞进 proxy |
@@ -72,4 +75,6 @@
 - 需要改三件套导航时：只改 `TaskContextHeader` 和 `paths.ts`，不要在三个页面分别维护链接。
 - 需要改 AI 状态文案时：统一改 `lib/ui/status.ts` 与 `AiProcessingHint.tsx`，不要在每页复制文案。
 - 需要改 submission detail 相关逻辑时：优先以稳定读源 `GET learning-tasks/submissions/:id` 为主，先看 `lib/api/types-student.ts`、`lib/api/types-teacher.ts` 与 Teacher/Student submission detail 页，不要把 query 透传当主数据源。
+- 模板创建/编辑/rubric 配置属于模板层（`/teacher/tasks*`），不要回退到班级任务页。
+- 班级任务页只负责班级实例发布与任务工作区管理，不要把模板维护能力混回 `PublishClassroomTaskForm`。
 - 若任务仅是 handoff/manual checklist/docs 调整：不要顺手改业务组件或路由实现，先核对 `docs/handoff/*` 与当前代码是否一致再决定是否改代码。

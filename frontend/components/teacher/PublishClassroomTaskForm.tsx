@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { ErrorState } from "@/components/blocks/ErrorState";
 import { BrowserFetchJsonError, fetchJson } from "@/lib/api/browser-client";
@@ -23,8 +23,12 @@ type PublishErrorState = {
   detail?: string;
 };
 
-const DEFAULT_KNOWLEDGE_MODULE = "GENERAL";
-const DEFAULT_STAGE = 1;
+type StageFilter = "ALL" | "1" | "2" | "3" | "4";
+
+type RubricSummary = {
+  configured: boolean;
+  hint: string;
+};
 
 const extractRawDetail = (data: unknown): string | undefined => {
   if (typeof data === "string" && data.trim()) {
@@ -54,6 +58,61 @@ const extractRawDetail = (data: unknown): string | undefined => {
 const buildErrorDescription = (summary: string, detail?: string): string =>
   detail ? `${summary} Detail: ${detail}` : summary;
 
+const toDisplayText = (value: unknown, fallback = "—"): string => {
+  if (typeof value === "string" && value.trim()) {
+    return value.trim();
+  }
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return String(value);
+  }
+  return fallback;
+};
+
+const toDescriptionSnippet = (value: unknown, maxLength = 90): string => {
+  if (typeof value !== "string") {
+    return "—";
+  }
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return "—";
+  }
+  if (trimmed.length <= maxLength) {
+    return trimmed;
+  }
+  return `${trimmed.slice(0, maxLength)}...`;
+};
+
+const toRubricSummary = (rubric: Record<string, unknown> | undefined): RubricSummary => {
+  if (!rubric || Object.keys(rubric).length === 0) {
+    return {
+      configured: false,
+      hint: "未配置评分参考",
+    };
+  }
+
+  const dimensionsRaw = rubric.dimensions;
+  const dimensions =
+    dimensionsRaw && typeof dimensionsRaw === "object" && !Array.isArray(dimensionsRaw)
+      ? (dimensionsRaw as Record<string, unknown>)
+      : undefined;
+  const dimensionCount = dimensions
+    ? Object.values(dimensions).filter((value) => typeof value === "number" && Number.isFinite(value)).length
+    : 0;
+  const hasNotes = typeof rubric.notes === "string" && rubric.notes.trim().length > 0;
+
+  if (dimensionCount > 0 || hasNotes) {
+    return {
+      configured: true,
+      hint: `${dimensionCount > 0 ? `${dimensionCount} 个维度` : "未识别维度"}${hasNotes ? "，含评分说明" : ""}`,
+    };
+  }
+
+  return {
+    configured: true,
+    hint: "已配置评分参考（自定义结构）",
+  };
+};
+
 const toIsoDateTime = (value: string): string | undefined => {
   const trimmed = value.trim();
   if (!trimmed) {
@@ -66,32 +125,93 @@ const toIsoDateTime = (value: string): string | undefined => {
   return date.toISOString();
 };
 
+const parseOptionalPositiveInt = (value: string): number | undefined | null => {
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return undefined;
+  }
+  const parsed = Number.parseInt(trimmed, 10);
+  if (!Number.isInteger(parsed) || parsed <= 0) {
+    return null;
+  }
+  return parsed;
+};
+
 export function PublishClassroomTaskForm({
   classroomId,
   availableTasks,
 }: PublishClassroomTaskFormProps) {
   const router = useRouter();
   const [taskId, setTaskId] = useState<string>("");
-  const [title, setTitle] = useState<string>("");
-  const [description, setDescription] = useState<string>("");
+  const [knowledgeModuleFilter, setKnowledgeModuleFilter] = useState<string>("");
+  const [stageFilter, setStageFilter] = useState<StageFilter>("ALL");
   const [dueAt, setDueAt] = useState<string>("");
   const [allowLate, setAllowLate] = useState<boolean>(true);
-  const [feedbackEnabled, setFeedbackEnabled] = useState<boolean>(true);
+  const [maxAttempts, setMaxAttempts] = useState<string>("");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errorState, setErrorState] = useState<PublishErrorState | null>(null);
   const [createdTaskId, setCreatedTaskId] = useState<string | null>(null);
-  const [createdBaseTaskId, setCreatedBaseTaskId] = useState<string | null>(null);
 
   const selectedTask = useMemo(
     () => availableTasks.find((task) => task.id === taskId),
     [availableTasks, taskId]
   );
+  const selectedRubricSummary = useMemo(
+    () => toRubricSummary(selectedTask?.rubric),
+    [selectedTask]
+  );
 
-  const handleTaskSelect = (nextTaskId: string) => {
-    setTaskId(nextTaskId);
-    const nextTask = availableTasks.find((item) => item.id === nextTaskId);
-    setTitle(nextTask?.title ?? "");
-    setDescription(nextTask?.description ?? "");
+  const knowledgeModuleOptions = useMemo(() => {
+    const moduleSet = new Set<string>();
+    for (const task of availableTasks) {
+      const moduleValue =
+        typeof task.knowledgeModule === "string" ? task.knowledgeModule.trim() : "";
+      if (moduleValue) {
+        moduleSet.add(moduleValue);
+      }
+    }
+    return [...moduleSet].sort((left, right) => left.localeCompare(right, "zh-CN"));
+  }, [availableTasks]);
+
+  const filteredTasks = useMemo(
+    () =>
+      availableTasks.filter((task) => {
+        if (knowledgeModuleFilter) {
+          const moduleValue =
+            typeof task.knowledgeModule === "string" ? task.knowledgeModule.trim() : "";
+          if (moduleValue !== knowledgeModuleFilter) {
+            return false;
+          }
+        }
+
+        if (stageFilter !== "ALL") {
+          const stageValue =
+            typeof task.stage === "number" && Number.isFinite(task.stage)
+              ? String(task.stage)
+              : "";
+          if (stageValue !== stageFilter) {
+            return false;
+          }
+        }
+
+        return true;
+      }),
+    [availableTasks, knowledgeModuleFilter, stageFilter]
+  );
+
+  useEffect(() => {
+    if (!taskId) {
+      return;
+    }
+    const stillVisible = filteredTasks.some((task) => task.id === taskId);
+    if (!stillVisible) {
+      setTaskId("");
+    }
+  }, [filteredTasks, taskId]);
+
+  const resetFilters = () => {
+    setKnowledgeModuleFilter("");
+    setStageFilter("ALL");
   };
 
   const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
@@ -100,57 +220,35 @@ export function PublishClassroomTaskForm({
     setIsSubmitting(true);
     setErrorState(null);
     setCreatedTaskId(null);
-    setCreatedBaseTaskId(null);
 
     try {
-      let publishTaskId = taskId.trim();
+      const publishTaskId = taskId.trim();
       if (!publishTaskId) {
-        if (!title.trim() || !description.trim()) {
-          setErrorState({
-            summary: "未选择任务时，请至少填写任务标题与描述。",
-          });
-          return;
-        }
-
-        const createTaskPayload = await fetchJson<unknown>("learning-tasks/tasks", {
-          method: "POST",
-          headers: {
-            "content-type": "application/json",
-            accept: "application/json",
-          },
-          body: JSON.stringify({
-            title: title.trim(),
-            description: description.trim(),
-            knowledgeModule: DEFAULT_KNOWLEDGE_MODULE,
-            stage: DEFAULT_STAGE,
-            status: "PUBLISHED",
-          }),
+        setErrorState({
+          summary: "请先选择一个已发布任务模板。",
         });
-
-        const generatedTaskId =
-          typeof createTaskPayload === "object" &&
-          createTaskPayload &&
-          "id" in createTaskPayload &&
-          typeof (createTaskPayload as { id?: unknown }).id === "string"
-            ? String((createTaskPayload as { id: string }).id)
-            : "";
-
-        if (!generatedTaskId) {
-          setErrorState({
-            summary: "任务创建成功但未返回 taskId，请稍后重试。",
-          });
-          return;
-        }
-        publishTaskId = generatedTaskId;
-        setCreatedBaseTaskId(generatedTaskId);
+        return;
       }
 
       const dueAtIso = toIsoDateTime(dueAt);
+      const parsedMaxAttempts = parseOptionalPositiveInt(maxAttempts);
+      if (parsedMaxAttempts === null) {
+        setErrorState({
+          summary: "最大尝试次数必须为正整数。",
+        });
+        return;
+      }
+
+      const settings: NonNullable<PublishClassroomTaskRequest["settings"]> = {
+        allowLate,
+      };
+      if (typeof parsedMaxAttempts === "number") {
+        settings.maxAttempts = parsedMaxAttempts;
+      }
+
       const body: PublishClassroomTaskRequest = {
         taskId: publishTaskId,
-        settings: {
-          allowLate,
-        },
+        settings,
       };
       if (dueAtIso) {
         body.dueAt = dueAtIso;
@@ -200,37 +298,193 @@ export function PublishClassroomTaskForm({
     <section id="publish-task-form" className="rounded-lg border border-zinc-200 bg-white p-4">
       <h2 className="text-base font-semibold text-zinc-900">发布任务到班级</h2>
       <p className="mt-1 text-sm text-zinc-600">
-        可直接选择已发布任务，或填写标题/描述由后端先创建任务（生成 taskId）再发布到班级。
+        当前仅支持选择已有任务模板并发布到本班；此处不创建或编辑任务模板。
       </p>
+      <p className="mt-2 text-sm text-zinc-600">
+        没有合适模板？
+        <Link
+          href={paths.teacher.tasksFromClassroom(classroomId)}
+          className="ml-1 text-blue-700 hover:underline"
+        >
+          先去创建任务模板
+        </Link>
+      </p>
+      {availableTasks.length === 0 ? (
+        <div className="mt-3 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+          当前没有可发布的 `PUBLISHED` 模板。请先前往
+          <Link href={paths.teacher.tasksFromClassroom(classroomId)} className="mx-1 underline">
+            任务模板页
+          </Link>
+          创建模板或将模板设为 `PUBLISHED`，再回到本页发布到当前班级。
+        </div>
+      ) : null}
 
       <form onSubmit={handleSubmit} className="mt-4 space-y-4">
+        {availableTasks.length > 0 ? (
+          <section className="rounded-md border border-zinc-200 bg-zinc-50 p-3">
+            <p className="text-sm font-medium text-zinc-900">模板筛选（本地）</p>
+            <p className="mt-1 text-xs text-zinc-600">
+              当前候选均为 `PUBLISHED` 模板。可按模块和阶段缩小范围后再选择。
+            </p>
+            <div className="mt-3 grid gap-3 md:grid-cols-3">
+              <label className="block text-sm">
+                <span className="mb-1 block text-zinc-700">知识模块</span>
+                <select
+                  value={knowledgeModuleFilter}
+                  onChange={(event) => setKnowledgeModuleFilter(event.target.value)}
+                  className="w-full rounded-md border border-zinc-300 px-3 py-2"
+                >
+                  <option value="">全部模块</option>
+                  {knowledgeModuleOptions.map((option) => (
+                    <option key={option} value={option}>
+                      {option}
+                    </option>
+                  ))}
+                </select>
+              </label>
+
+              <label className="block text-sm">
+                <span className="mb-1 block text-zinc-700">阶段</span>
+                <select
+                  value={stageFilter}
+                  onChange={(event) => setStageFilter(event.target.value as StageFilter)}
+                  className="w-full rounded-md border border-zinc-300 px-3 py-2"
+                >
+                  <option value="ALL">全部阶段</option>
+                  <option value="1">阶段 1</option>
+                  <option value="2">阶段 2</option>
+                  <option value="3">阶段 3</option>
+                  <option value="4">阶段 4</option>
+                </select>
+              </label>
+
+              <div className="flex items-end">
+                <button
+                  type="button"
+                  onClick={resetFilters}
+                  className="rounded-md border border-zinc-300 px-3 py-2 text-sm text-zinc-700 hover:bg-zinc-100"
+                >
+                  重置筛选
+                </button>
+              </div>
+            </div>
+            <p className="mt-2 text-xs text-zinc-500">
+              当前显示 {filteredTasks.length} / {availableTasks.length} 个候选模板
+            </p>
+          </section>
+        ) : null}
+
         <label className="block text-sm">
-          <span className="mb-1 block text-zinc-700">选择任务</span>
+          <span className="mb-1 block text-zinc-700">选择任务模板</span>
           <select
             value={taskId}
-            onChange={(event) => handleTaskSelect(event.target.value)}
+            onChange={(event) => setTaskId(event.target.value)}
             className="w-full rounded-md border border-zinc-300 px-3 py-2"
           >
-            <option value="">请选择已发布任务</option>
-            {availableTasks.map((task) => (
+            <option value="">
+              {filteredTasks.length === 0 && availableTasks.length > 0
+                ? "当前筛选下无可选模板"
+                : "请选择已发布任务"}
+            </option>
+            {filteredTasks.map((task) => (
               <option key={task.id ?? task.title} value={task.id}>
-                {task.title ?? "未命名任务"} {task.id ? `(${task.id})` : ""}
+                {task.title ?? "未命名任务"} | {toDisplayText(task.knowledgeModule)} / 阶段{" "}
+                {toDisplayText(task.stage)}
               </option>
             ))}
           </select>
         </label>
 
-        <div className="grid gap-4 md:grid-cols-2">
-          <label className="block text-sm">
-            <span className="mb-1 block text-zinc-700">任务标题</span>
-            <input
-              value={title}
-              onChange={(event) => setTitle(event.target.value)}
-              placeholder="标题来自任务库，当前仅用于展示"
-              className="w-full rounded-md border border-zinc-300 px-3 py-2"
-            />
-          </label>
+        {availableTasks.length > 0 && filteredTasks.length === 0 ? (
+          <div className="rounded-md border border-dashed border-zinc-300 bg-zinc-50 px-3 py-2 text-sm text-zinc-700">
+            当前筛选条件下没有匹配模板。可重置筛选，或前往
+            <Link href={paths.teacher.tasksFromClassroom(classroomId)} className="mx-1 text-blue-700 underline">
+              任务模板页
+            </Link>
+            调整模板状态/信息。
+          </div>
+        ) : null}
 
+        {filteredTasks.length > 0 ? (
+          <section className="rounded-md border border-zinc-200 bg-white p-3">
+            <p className="text-sm font-medium text-zinc-900">模板候选列表</p>
+            <p className="mt-1 text-xs text-zinc-600">点击“选择此模板”可快速回填到发布表单。</p>
+            <ul className="mt-3 space-y-2">
+              {filteredTasks.map((task, index) => {
+                const rubricSummary = toRubricSummary(task.rubric);
+                const isActive = task.id && task.id === taskId;
+                return (
+                  <li
+                    key={task.id ?? `candidate-${index}`}
+                    className={`rounded-md border p-3 ${
+                      isActive ? "border-zinc-900 bg-zinc-50" : "border-zinc-200"
+                    }`}
+                  >
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <p className="text-sm font-medium text-zinc-900">
+                        {toDisplayText(task.title, "未命名任务")}
+                      </p>
+                      <button
+                        type="button"
+                        disabled={!task.id}
+                        onClick={() => setTaskId(task.id ?? "")}
+                        className="rounded-md border border-zinc-300 px-2 py-1 text-xs text-zinc-700 hover:bg-zinc-100 disabled:cursor-not-allowed disabled:opacity-60"
+                      >
+                        {isActive ? "已选中" : "选择此模板"}
+                      </button>
+                    </div>
+                    <p className="mt-1 text-xs text-zinc-500">
+                      模块：{toDisplayText(task.knowledgeModule)} | 阶段：{toDisplayText(task.stage)} | 评分参考：
+                      {rubricSummary.configured ? `已配置（${rubricSummary.hint}）` : "未配置"}
+                    </p>
+                    <p className="mt-2 text-xs text-zinc-600">
+                      描述摘要：{toDescriptionSnippet(task.description)}
+                    </p>
+                  </li>
+                );
+              })}
+            </ul>
+          </section>
+        ) : null}
+
+        {selectedTask ? (
+          <div className="rounded-md border border-zinc-200 bg-zinc-50 p-3 text-sm text-zinc-700">
+            <p className="font-medium text-zinc-900">已选任务模板摘要</p>
+            <div className="mt-2 grid gap-2 md:grid-cols-2">
+              <p>
+                <span className="text-zinc-500">标题：</span>
+                {toDisplayText(selectedTask.title)}
+              </p>
+              <p>
+                <span className="text-zinc-500">状态：</span>
+                {toDisplayText(selectedTask.status)}
+              </p>
+              <p>
+                <span className="text-zinc-500">评分参考：</span>
+                {selectedRubricSummary.configured ? `已配置（${selectedRubricSummary.hint}）` : "未配置"}
+              </p>
+              <p>
+                <span className="text-zinc-500">模块：</span>
+                {toDisplayText(selectedTask.knowledgeModule)}
+              </p>
+              <p>
+                <span className="text-zinc-500">阶段：</span>
+                {toDisplayText(selectedTask.stage)}
+              </p>
+              <p className="md:col-span-2">
+                <span className="text-zinc-500">描述：</span>
+                {toDisplayText(selectedTask.description)}
+              </p>
+              <p className="md:col-span-2 text-xs text-zinc-500">
+                模板 ID：{toDisplayText(selectedTask.id)}
+              </p>
+            </div>
+          </div>
+        ) : (
+          <p className="text-xs text-zinc-500">请选择一个已发布任务模板后再提交发布。</p>
+        )}
+
+        <div className="grid gap-4 md:grid-cols-2">
           <label className="block text-sm">
             <span className="mb-1 block text-zinc-700">截止时间</span>
             <input
@@ -240,57 +494,42 @@ export function PublishClassroomTaskForm({
               className="w-full rounded-md border border-zinc-300 px-3 py-2"
             />
           </label>
+
+          <label className="block text-sm">
+            <span className="mb-1 block text-zinc-700">最大尝试次数（可选）</span>
+            <input
+              type="number"
+              min={1}
+              step={1}
+              inputMode="numeric"
+              value={maxAttempts}
+              onChange={(event) => setMaxAttempts(event.target.value)}
+              placeholder="留空表示按系统默认"
+              className="w-full rounded-md border border-zinc-300 px-3 py-2"
+            />
+          </label>
         </div>
 
-        <label className="block text-sm">
-          <span className="mb-1 block text-zinc-700">任务描述</span>
-          <textarea
-            value={description}
-            onChange={(event) => setDescription(event.target.value)}
-            rows={3}
-            placeholder="描述来自任务库，当前仅用于展示"
-            className="w-full rounded-md border border-zinc-300 px-3 py-2"
+        <label className="flex items-center gap-2 text-sm text-zinc-700">
+          <input
+            type="checkbox"
+            checked={allowLate}
+            onChange={(event) => setAllowLate(event.target.checked)}
           />
+          允许迟交
         </label>
-
-        <div className="grid gap-3 md:grid-cols-2">
-          <label className="flex items-center gap-2 text-sm text-zinc-700">
-            <input
-              type="checkbox"
-              checked={allowLate}
-              onChange={(event) => setAllowLate(event.target.checked)}
-            />
-            允许迟交
-          </label>
-          <label className="flex items-center gap-2 text-sm text-zinc-700">
-            <input
-              type="checkbox"
-              checked={feedbackEnabled}
-              onChange={(event) => setFeedbackEnabled(event.target.checked)}
-            />
-            显示反馈（当前接口暂不接收此字段）
-          </label>
-        </div>
 
         <button
           type="submit"
-          disabled={isSubmitting}
+          disabled={isSubmitting || availableTasks.length === 0}
           className="rounded-md bg-zinc-900 px-4 py-2 text-sm font-medium text-white disabled:cursor-not-allowed disabled:bg-zinc-400"
         >
           {isSubmitting ? "发布中..." : "发布任务"}
         </button>
       </form>
 
-      {selectedTask ? (
-        <p className="mt-3 text-xs text-zinc-500">
-          已选任务状态：{selectedTask.status ?? "—"} | 模块：{selectedTask.knowledgeModule ?? "—"} | 阶段：
-          {selectedTask.stage ?? "—"}
-        </p>
-      ) : null}
-
       {createdTaskId ? (
         <div className="mt-4 rounded-md border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-800">
-          {createdBaseTaskId ? <p>已创建任务，taskId：{createdBaseTaskId}</p> : null}
           <p>任务发布成功，课堂任务 ID：{createdTaskId}</p>
           <div className="mt-1 flex flex-wrap gap-3">
             <Link

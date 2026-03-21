@@ -22,10 +22,12 @@
 | `/teacher` | 教师入口 | - | 重定向到 `/teacher/classrooms` | Done | - |
 | `/teacher/courses` | 课程列表 + 创建课程 | `GET courses`、`POST courses` | 分页、创建课程、跳课程总览/班级 | Done | 真接口 |
 | `/teacher/courses/[courseId]/overview` | 课程总览 | `GET courses/:courseId/overview` | window/sort/order/page 切换 | Done | 真接口 |
+| `/teacher/tasks` | 任务模板页 | `GET learning-tasks/tasks`、`POST learning-tasks/tasks` | 模板列表、创建模板、`status/module/stage` 本地筛选、带 `fromClassroomId` 上下文回跳班级页 | Done | 真接口 |
+| `/teacher/tasks/[taskId]/edit` | 任务模板编辑页 | `GET learning-tasks/tasks/:id`、`PATCH learning-tasks/tasks/:id` | 回填并编辑模板核心字段、维护 rubric 基础配置、状态管理（DRAFT/PUBLISHED/ARCHIVED） | Done | 真接口 |
 | `/teacher/classrooms` | 班级列表 + 创建班级 | `GET classrooms`、`GET courses`、`POST classrooms` | 过滤 courseId、分页、创建班级 | Done | 真接口 |
 | `/teacher/classrooms/[classroomId]` | 班级入口 | - | 重定向到 dashboard | Done | - |
 | `/teacher/classrooms/[classroomId]/dashboard` | 班级看板 | `GET classrooms/:id`、`GET classrooms/:id/dashboard` | 导航到 tasks/members/report/export | Done | 真接口 |
-| `/teacher/classrooms/[classroomId]/tasks` | 班级任务列表 | `GET classrooms/:id`、`GET classrooms/:id/tasks`、`GET learning-tasks/tasks`、`POST classrooms/:id/tasks`、`POST learning-tasks/tasks(可选)` | 发布任务、进入详情/提交/三件套 | Done | 真接口 |
+| `/teacher/classrooms/[classroomId]/tasks` | 班级任务列表/发布页（班级实例层） | `GET classrooms/:id`、`GET classrooms/:id/tasks`、`GET learning-tasks/tasks?status=PUBLISHED...`、`POST classrooms/:id/tasks` | 候选模板本地筛选（module/stage）、选择已发布模板、配置 `dueAt/allowLate/maxAttempts` 并发布实例、进入详情/提交/三件套、跳模板页 | Done | 真接口 |
 | `/teacher/classrooms/[classroomId]/tasks/[classroomTaskId]` | 课堂任务详情 | `GET classrooms/:id`、`GET classrooms/:id/tasks/:classroomTaskId`、`POST learning-tasks/tasks/:id/publish` | 查看课堂任务与其底层 learning task 的基础状态，必要时触发底层 task publish | Done | 真接口 |
 | `/teacher/classrooms/[classroomId]/tasks/[classroomTaskId]/submissions` | 课堂任务提交管理 | `GET classrooms/:id`、`GET classrooms/:classroomId/tasks/:classroomTaskId/submissions` | 查看提交、跳转批阅页 | Done | P0 真接口 |
 | `/teacher/submissions/[submissionId]` | 教师提交详情/批阅 | `GET learning-tasks/submissions/:id`、`GET learning-tasks/submissions/:id/feedback`、`POST learning-tasks/submissions/:id/feedback` | 查看代码与反馈、新增教师反馈 | Done | 稳定读源 + 真接口 |

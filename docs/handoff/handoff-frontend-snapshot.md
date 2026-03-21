@@ -28,7 +28,7 @@ frontend/
 ├─ components/
 │  ├─ layout/{TeacherShell,StudentShell}
 │  ├─ blocks/{PageHeader,EmptyState,ErrorState,Tabs}
-│  ├─ teacher/**                   # 创建/发布/移除/教师反馈
+│  ├─ teacher/**                   # 课程/班级/模板创建编辑筛选/班级发布/教师反馈
 │  ├─ student/**                   # 加班级/提交/请求AI/处理提示
 │  └─ classroomTask/TaskContextHeader
 └─ lib/
@@ -42,13 +42,18 @@ frontend/
 ## 2) 路由分区与完成度（摘要）
 
 - `/(auth)/login`：已完成登录与 role-home 跳转（`TEACHER -> /teacher/classrooms`, `STUDENT -> /student`）。
-- `/teacher/**`：教师起步链路、教学链路、批阅链路、三件套、周报/过程性评价/快照已接入真接口。
+- `/teacher/**`：教师起步链路、模板链路、班级发布链路、批阅链路、三件套、周报/过程性评价/快照已接入真接口。
+- 教师模板层（已落地）：
+  - `/teacher/tasks`：模板列表 + 创建 + 本地筛选（`status/knowledgeModule/stage`）
+  - `/teacher/tasks/[taskId]/edit`：模板编辑与状态管理
+- 教师班级实例层（已收口）：
+  - `/teacher/classrooms/[classroomId]/tasks`：只选择已发布模板并发布到班级实例，不承担模板创建/编辑。
 - `/student/**`：学习看板、加入班级、任务详情、提交、submission detail、请求 AI 已接入真接口。
 - `/_demo/**`：独立 demo 沙箱，使用 `app/api/_demo/**` 内存数据，不参与主链路交付，不应作为正式 Teacher/Student 主链路实现参考。
 
 ## 3) 关键公共机制（已落地）
 
-- 统一路由常量：`lib/routes/paths.ts`。
+- 统一路由常量：`lib/routes/paths.ts`（含 `paths.teacher.tasks`、`taskEdit`、`tasksFromClassroom`）。
 - 统一状态文案：`lib/ui/status.ts`（含 `NOT_REQUESTED` 正常语义）。
 - 统一错误展开：`lib/api/error-presenter.ts` + `components/blocks/ErrorState.tsx`。
 - 空态组件：`components/blocks/EmptyState.tsx`。
@@ -65,11 +70,12 @@ frontend/
 
 ## 4) 当前主链路状态
 
-Teacher 起步链路（可用）：
+Teacher 起步与模板链路（可用）：
 1. `CreateCourseForm` -> `POST courses`
 2. `CreateClassroomForm` -> `POST classrooms`
-3. `PublishClassroomTaskForm` -> `POST classrooms/:id/tasks`（可选先 `POST learning-tasks/tasks`）
-4. 进入 `/teacher/classrooms/[classroomId]/tasks/[classroomTaskId]/*` 和提交管理页
+3. `/teacher/tasks` 进行模板创建/筛选，必要时进入 `/teacher/tasks/[taskId]/edit` 维护模板状态与 rubric
+4. `/teacher/classrooms/[classroomId]/tasks` 选择已发布模板并设置 `dueAt/allowLate/maxAttempts` 后发布（`POST classrooms/:id/tasks`）
+5. 进入 `/teacher/classrooms/[classroomId]/tasks/[classroomTaskId]/*` 和提交管理页
 
 Teacher 课程视角（可用）：
 - `/teacher/courses` 已支持课程列表与创建课程。
@@ -95,6 +101,9 @@ Teacher 批阅链路（可用）：
 - `GET /api/classrooms/:id/students`：成员页主读源。
 - `GET /api/classrooms/:classroomId/tasks/:classroomTaskId/submissions`：教师提交管理页主读源。
 - `GET /api/learning-tasks/submissions/:id`：Teacher/Student submission detail 主读源（稳定读源）。
+- `GET /api/learning-tasks/tasks` + `POST /api/learning-tasks/tasks`：模板页列表与创建。
+- `GET /api/learning-tasks/tasks/:id` + `PATCH /api/learning-tasks/tasks/:id`：模板编辑页详情与更新。
+- `POST /api/classrooms/:id/tasks`：班级任务实例发布。
 
 补充：
 
@@ -114,7 +123,7 @@ Teacher 批阅链路（可用）：
 
 ## 7) 当前阶段判断
 
-当前前端已达到“主链路整体可用、教师可自助起步”的阶段，但尚未进入“最终交付定版”阶段。
+当前前端已达到“主链路整体可用 + 任务模板层与班级实例层边界收口 + 模板主链路可维护”的阶段，但尚未进入“最终交付定版”阶段。
 
 已达到：
 
@@ -122,18 +131,22 @@ Teacher 批阅链路（可用）：
 - P0 真接口前端收口完成。
 - submission detail 稳定读源已落地（双角色详情页）。
 - AI 闭环前端产品入口已落地（request + 状态提示 + 帮助页）。
+- 任务模板页能力已落地：创建、编辑、基础 rubric 配置、筛选与跨页上下文链路。
+- 班级任务页职责已收口：仅发布已有 `PUBLISHED` 模板，且模板选择体验已增强。
 
 未达到：
 
-- 最终交付态 UI 收敛（仍保留大量 raw JSON `<details>` 调试块）。
+- 最终交付态 UI 收敛（仍保留较多 raw JSON `<details>` 调试块）。
 - ops/debug 前端专用页面（`/ops/**`）尚未建设。
+- 模板治理仍为 MVP（删除/复制/批量等能力未提供）。
 
 仍需优先关注：
 
-- 主链路页面仍保留一定工程化痕迹（raw JSON `<details>` 仍较多、主视图信息密度不均）。
+- 继续按手工验收清单做主链路回归，重点覆盖“模板状态 -> 班级发布候选”一致性。
+- 主链路页面仍有一定工程化痕迹（调试信息较多、主视图信息密度不均）。
 - 浏览器级自动化 smoke 尚未建立（当前 `frontend/package.json` 仅有 `dev/build/start/lint` 脚本）。
 - 用户资料编辑等非主链路能力尚未前端化（后端 `PATCH /api/users/me` 已可用但前端未提供对应页面/表单）。
 
-## 8) Step 12 验收入口
+## 8) 手工验收入口
 
 - 手工验收文档位置：`docs/handoff/handoff-frontend-manual-checklist.md`。
