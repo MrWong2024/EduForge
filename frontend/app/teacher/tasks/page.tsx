@@ -1,3 +1,4 @@
+import type { Metadata } from "next";
 import Link from "next/link";
 import { headers } from "next/headers";
 import { ErrorState } from "@/components/blocks/ErrorState";
@@ -10,6 +11,10 @@ import { toLearningTaskListResponse } from "@/lib/api/types-teacher";
 import { paths } from "@/lib/routes/paths";
 import { getSingleSearchParam } from "@/lib/ui/format";
 import { getCommonErrorSummary } from "@/lib/ui/status";
+
+export const metadata: Metadata = {
+  title: "任务模板",
+};
 
 const getRequestOrigin = async (): Promise<string> => {
   const headerMap = await headers();

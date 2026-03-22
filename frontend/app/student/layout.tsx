@@ -1,7 +1,15 @@
+import type { Metadata } from "next";
 import type { ReactNode } from "react";
 import { ErrorState } from "@/components/blocks/ErrorState";
 import { StudentShell } from "@/components/layout/StudentShell";
 import { requireRole } from "@/lib/auth/session";
+
+export const metadata: Metadata = {
+  title: {
+    default: "EduForge 学生端",
+    template: "%s | EduForge 学生端",
+  },
+};
 
 export default async function StudentLayout({
   children,

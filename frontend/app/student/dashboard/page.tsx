@@ -1,3 +1,4 @@
+import type { Metadata } from "next";
 import Link from "next/link";
 import { headers } from "next/headers";
 import { EmptyState } from "@/components/blocks/EmptyState";
@@ -9,6 +10,10 @@ import { toStudentDashboardResponse } from "@/lib/api/types-student";
 import { paths } from "@/lib/routes/paths";
 import { getAiStatusLabel, getCommonErrorSummary } from "@/lib/ui/status";
 import { toDisplayDate, toDisplayText } from "@/lib/ui/format";
+
+export const metadata: Metadata = {
+  title: "学习看板",
+};
 
 const getRequestOrigin = async (): Promise<string> => {
   const headerMap = await headers();

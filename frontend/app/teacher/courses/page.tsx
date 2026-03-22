@@ -1,3 +1,4 @@
+import type { Metadata } from "next";
 import Link from "next/link";
 import { headers } from "next/headers";
 import { EmptyState } from "@/components/blocks/EmptyState";
@@ -10,6 +11,10 @@ import { toCourseListResponse } from "@/lib/api/types-teacher";
 import { paths } from "@/lib/routes/paths";
 import { getCommonErrorSummary } from "@/lib/ui/status";
 import { getSingleSearchParam, parsePositiveInt, toDisplayText } from "@/lib/ui/format";
+
+export const metadata: Metadata = {
+  title: "课程列表",
+};
 
 type TeacherCoursesPageProps = {
   searchParams: Promise<{
