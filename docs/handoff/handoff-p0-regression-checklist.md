@@ -22,8 +22,11 @@
 
 - [ ] `GET /api/classrooms/:id/students?page=1&limit=20` 返回 `200`，结构含 `items/total/page/limit`。
 - [ ] `items[*]` 至少包含：`id/email/roles/status/name/studentNo/employeeNo/joinedAt`。
-- [ ] 列表只返回 Enrollment `role=STUDENT,status=ACTIVE` 成员。
+- [ ] 默认（未传 `includeRemoved`）只返回 Enrollment `role=STUDENT,status=ACTIVE` 成员。
+- [ ] `includeRemoved=0/false` 与默认一致（只返回 ACTIVE）。
+- [ ] `includeRemoved=1/true` 返回 Enrollment `role=STUDENT` 的 `ACTIVE + REMOVED` 成员。
 - [ ] 移除学生后（`POST /api/classrooms/:id/students/:uid/remove`）再次查询，已移除学生不再出现。
+- [ ] 移除学生后，`includeRemoved=1/true` 查询可看到该成员，且 `status=REMOVED`。
 - [ ] 构造 legacy 污染（仅写入 `classroom.studentIds`）不会影响返回结果。
 - [ ] 响应中不包含 `passwordHash`。
 

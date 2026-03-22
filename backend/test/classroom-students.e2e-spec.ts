@@ -102,10 +102,15 @@ describe('Classroom Students List (e2e)', () => {
     agent: ReturnType<typeof request.agent>,
     page: number,
     limit: number,
+    includeRemoved?: '0' | '1' | 'true' | 'false',
   ) => {
+    const query: Record<string, string | number> = { page, limit };
+    if (includeRemoved !== undefined) {
+      query.includeRemoved = includeRemoved;
+    }
     const response = await agent
       .get(`/api/classrooms/${classroomId}/students`)
-      .query({ page, limit })
+      .query(query)
       .expect(200);
     return response.body as ListClassroomStudentsResponse;
   };
@@ -332,7 +337,7 @@ describe('Classroom Students List (e2e)', () => {
     }
   });
 
-  it('removed student is no longer listed and legacy classroom.studentIds pollution does not affect result', async () => {
+  it('includeRemoved query contract works and legacy classroom.studentIds pollution does not affect result', async () => {
     await ownerTeacherAgent
       .post(
         `/api/classrooms/${classroomId}/students/${removedStudentId}/remove`,
@@ -356,13 +361,73 @@ describe('Classroom Students List (e2e)', () => {
       )
       .exec();
 
-    const list = await listStudents(ownerTeacherAgent, 1, 20);
-    const ids = list.items.map((item) => item.id);
+    const defaultList = await listStudents(ownerTeacherAgent, 1, 20);
+    const includeRemovedFalseList = await listStudents(
+      ownerTeacherAgent,
+      1,
+      20,
+      '0',
+    );
+    const includeRemovedTrueList = await listStudents(
+      ownerTeacherAgent,
+      1,
+      20,
+      '1',
+    );
+    const includeRemovedLiteralFalseList = await listStudents(
+      ownerTeacherAgent,
+      1,
+      20,
+      'false',
+    );
+    const includeRemovedLiteralTrueList = await listStudents(
+      ownerTeacherAgent,
+      1,
+      20,
+      'true',
+    );
 
-    expect(list.total).toBe(2);
-    expect(ids).toEqual(expect.arrayContaining([studentAId, studentBId]));
-    expect(ids).not.toContain(removedStudentId);
-    expect(ids).not.toContain(legacyPollutedStudentId);
+    const defaultIds = defaultList.items.map((item) => item.id);
+    const includeRemovedFalseIds = includeRemovedFalseList.items.map(
+      (item) => item.id,
+    );
+    const includeRemovedTrueIds = includeRemovedTrueList.items.map(
+      (item) => item.id,
+    );
+    const includeRemovedLiteralFalseIds = includeRemovedLiteralFalseList.items.map(
+      (item) => item.id,
+    );
+    const includeRemovedLiteralTrueIds = includeRemovedLiteralTrueList.items.map(
+      (item) => item.id,
+    );
+
+    expect(defaultList.total).toBe(2);
+    expect(defaultIds).toEqual(expect.arrayContaining([studentAId, studentBId]));
+    expect(defaultIds).not.toContain(removedStudentId);
+    expect(defaultIds).not.toContain(legacyPollutedStudentId);
+
+    expect(includeRemovedFalseList.total).toBe(2);
+    expect(includeRemovedFalseIds).toEqual(
+      expect.arrayContaining([studentAId, studentBId]),
+    );
+    expect(includeRemovedFalseIds).not.toContain(removedStudentId);
+    expect(includeRemovedFalseIds).not.toContain(legacyPollutedStudentId);
+
+    expect(includeRemovedTrueList.total).toBe(3);
+    expect(includeRemovedTrueIds).toEqual(
+      expect.arrayContaining([studentAId, studentBId, removedStudentId]),
+    );
+    expect(includeRemovedTrueIds).not.toContain(legacyPollutedStudentId);
+    expect(
+      includeRemovedTrueList.items.find((item) => item.id === removedStudentId)
+        ?.status,
+    ).toBe('REMOVED');
+
+    expect(includeRemovedLiteralFalseList.total).toBe(2);
+    expect(includeRemovedLiteralFalseIds).not.toContain(removedStudentId);
+
+    expect(includeRemovedLiteralTrueList.total).toBe(3);
+    expect(includeRemovedLiteralTrueIds).toContain(removedStudentId);
   });
 
   it('non-owner teacher cannot access list and gets 404', async () => {

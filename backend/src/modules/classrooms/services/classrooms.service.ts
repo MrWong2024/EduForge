@@ -24,7 +24,7 @@ import { StudentLearningDashboardService } from './student-learning-dashboard.se
 import { ProcessAssessmentService } from './process-assessment.service';
 import { ClassroomExportSnapshotService } from './classroom-export-snapshot.service';
 import {
-  ActiveStudentEnrollmentRow,
+  ClassroomStudentEnrollmentRow,
   EnrollmentService,
 } from '../enrollments/services/enrollment.service';
 import {
@@ -223,14 +223,19 @@ export class ClassroomsService {
 
     const page = query.page ?? 1;
     const limit = Math.min(query.limit ?? 20, 100);
+    const includeRemoved = this.parseBooleanQuery(query.includeRemoved, false);
 
     const [memberships, total] = await Promise.all([
-      this.enrollmentService.listActiveStudentsByClassroomPage(
+      this.enrollmentService.listStudentsByClassroomPage(
         classroom._id,
         page,
         limit,
+        includeRemoved,
       ),
-      this.enrollmentService.countStudents(classroom._id.toString()),
+      this.enrollmentService.countStudents(
+        classroom._id.toString(),
+        includeRemoved,
+      ),
     ]);
 
     if (memberships.length === 0) {
@@ -474,7 +479,7 @@ export class ClassroomsService {
   }
 
   private toClassroomStudentItems(
-    memberships: ActiveStudentEnrollmentRow[],
+    memberships: ClassroomStudentEnrollmentRow[],
     userMap: Map<string, StudentUserLean>,
   ): ClassroomStudentItem[] {
     const items: ClassroomStudentItem[] = [];
@@ -487,7 +492,7 @@ export class ClassroomsService {
         id: user._id.toString(),
         email: user.email,
         roles: user.roles,
-        status: user.status,
+        status: membership.status,
         name: user.name ?? null,
         studentNo: user.studentNo ?? null,
         employeeNo: user.employeeNo ?? null,
@@ -495,5 +500,13 @@ export class ClassroomsService {
       });
     }
     return items;
+  }
+
+  private parseBooleanQuery(value: string | undefined, defaultValue: boolean) {
+    if (value === undefined) {
+      return defaultValue;
+    }
+    const normalized = value.trim().toLowerCase();
+    return normalized === '1' || normalized === 'true';
   }
 }

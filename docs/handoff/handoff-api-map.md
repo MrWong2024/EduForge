@@ -57,7 +57,7 @@ Notes:
 | GET | `/api/classrooms/:classroomId/process-assessment.csv` | 过程性评价 CSV（Z6）。 |
 | GET | `/api/classrooms/:classroomId/export/snapshot` | 教学数据快照导出（Z9）。 |
 | GET | `/api/classrooms/:id` | 获取班级详情（teacher owner 或 student member）。 |
-| GET | `/api/classrooms/:id/students` | 教师分页查看班级正式成员列表（Enrollment ACTIVE）。 |
+| GET | `/api/classrooms/:id/students` | 教师分页查看班级正式成员列表（默认 Enrollment ACTIVE；`includeRemoved=1/true` 可包含 REMOVED）。 |
 | POST | `/api/classrooms/:id/archive` | 教师归档班级。 |
 | POST | `/api/classrooms/:id/students/:uid/remove` | 教师移除学生。 |
 
@@ -67,7 +67,7 @@ Notes:
 - `/api/classrooms/:classroomId/process-assessment` Query: `window, page, limit, sort, order`；teacher only；Enrollment-only；返回聚合结果，不返回敏感字段。
 - `/api/classrooms/:classroomId/process-assessment.csv` Query: `window`；teacher only；CSV 为手写转义（双引号转义）；不返回敏感字段。
 - `/api/classrooms/:classroomId/export/snapshot` Query: `window, limitStudents, limitAssessment, includePerTask`；teacher only；体积保护采用 limit 截断并在 `meta.notes` 写明；不返回敏感字段。
-- `/api/classrooms/:id/students`：teacher only + owner only（非 owner 返回 `404`）；成员来源只认 Enrollment（`role=STUDENT,status=ACTIVE`），不读取/不回退 `classroom.studentIds`；默认排序 `joinedAt desc, _id desc`；不返回 `passwordHash`。
+- `/api/classrooms/:id/students`：teacher only + owner only（非 owner 返回 `404`）；成员来源只认 Enrollment（`role=STUDENT`）；默认只返回 `status=ACTIVE`，`includeRemoved=1/true` 时返回 `ACTIVE+REMOVED`；不读取/不回退 `classroom.studentIds`；默认排序 `joinedAt desc, _id desc`；不返回 `passwordHash`。
 
 ## Classroom Tasks（Classrooms 子资源）
 

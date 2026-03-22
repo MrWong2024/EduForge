@@ -410,11 +410,13 @@
 - Fields:
   - `page?: number` (`@Type(() => Number) @IsInt() @Min(1)`)
   - `limit?: number` (`@Type(() => Number) @IsInt() @Min(1) @Max(100)`)
+  - `includeRemoved?: string` (`@IsBooleanString()`；支持 `0/1/true/false`)
 - Example Query:
   - `/api/classrooms/{id}/students?page=1&limit=20`
+  - `/api/classrooms/{id}/students?page=1&limit=20&includeRemoved=1`
 - Response口径（最小说明）:
   - `items[*]` 包含 `id/email/roles/status/name/studentNo/employeeNo/joinedAt`
-  - 成员来源只认 Enrollment ACTIVE（`role=STUDENT,status=ACTIVE`）
+  - 成员来源只认 Enrollment（`role=STUDENT`）；默认 `status=ACTIVE`，`includeRemoved=1/true` 时包含 `REMOVED`
   - 不返回 `passwordHash`
 
 ### GET /api/classrooms/:classroomId/tasks/:classroomTaskId/submissions

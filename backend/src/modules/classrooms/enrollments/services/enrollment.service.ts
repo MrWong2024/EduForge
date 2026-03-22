@@ -21,6 +21,11 @@ export type ActiveStudentEnrollmentRow = {
   userId: Types.ObjectId;
   joinedAt: Date;
 };
+export type ClassroomStudentEnrollmentRow = {
+  userId: Types.ObjectId;
+  joinedAt: Date;
+  status: EnrollmentStatus;
+};
 
 @Injectable()
 export class EnrollmentService {
@@ -131,6 +136,33 @@ export class EnrollmentService {
       .exec();
   }
 
+  async listStudentsByClassroomPage(
+    classroomId: string | Types.ObjectId,
+    page: number,
+    limit: number,
+    includeRemoved = false,
+  ): Promise<ClassroomStudentEnrollmentRow[]> {
+    const classroomObjectId = this.toObjectId(classroomId, 'classroomId');
+    const safePage = page < 1 ? 1 : page;
+    const safeLimit = limit < 1 ? 1 : limit;
+    const statuses = includeRemoved
+      ? [EnrollmentStatus.Active, EnrollmentStatus.Removed]
+      : [EnrollmentStatus.Active];
+
+    return this.enrollmentModel
+      .find({
+        classroomId: classroomObjectId,
+        role: EnrollmentRole.Student,
+        status: { $in: statuses },
+      })
+      .sort({ joinedAt: -1, _id: -1 })
+      .skip((safePage - 1) * safeLimit)
+      .limit(safeLimit)
+      .select({ _id: 0, userId: 1, joinedAt: 1, status: 1 })
+      .lean<ClassroomStudentEnrollmentRow[]>()
+      .exec();
+  }
+
   async listActiveStudentIds(classroomId: string | Types.ObjectId) {
     const classroomObjectId = this.toObjectId(classroomId, 'classroomId');
 
@@ -147,13 +179,16 @@ export class EnrollmentService {
     return rows.map((row) => row.userId.toString());
   }
 
-  async countStudents(classroomId: string) {
+  async countStudents(classroomId: string, includeRemoved = false) {
     const classroomObjectId = this.parseObjectId(classroomId, 'classroomId');
+    const statuses = includeRemoved
+      ? [EnrollmentStatus.Active, EnrollmentStatus.Removed]
+      : [EnrollmentStatus.Active];
 
     return this.enrollmentModel.countDocuments({
       classroomId: classroomObjectId,
       role: EnrollmentRole.Student,
-      status: EnrollmentStatus.Active,
+      status: { $in: statuses },
     });
   }
 

@@ -265,7 +265,7 @@ AI Provider 错误码（`ai-feedback-provider.error-codes.ts`）：
   - `GET /api/users/me` 与 `PATCH /api/users/me` 返回口径一致，均不返回 `passwordHash`。
 - P0 班级成员列表（已完成）：
   - `GET /api/classrooms/:id/students`
-  - teacher owner 可访问；成员来源只认 Enrollment ACTIVE；默认排序 `joinedAt desc, _id desc`；不读取 `classroom.studentIds`。
+  - teacher owner 可访问；成员来源只认 Enrollment（`role=STUDENT`）；默认返回 ACTIVE，`includeRemoved=1/true` 时返回 ACTIVE+REMOVED；默认排序 `joinedAt desc, _id desc`；不读取 `classroom.studentIds`。
 - P0 课堂任务提交列表（已完成）：
   - `GET /api/classrooms/:classroomId/tasks/:classroomTaskId/submissions`
   - teacher owner 可访问；只按 `classroomTaskId` 读取；默认排序 `submittedAt desc, _id desc`；无 job 时 `aiFeedbackStatus=NOT_REQUESTED`；不返回 `passwordHash/content.codeText`。
