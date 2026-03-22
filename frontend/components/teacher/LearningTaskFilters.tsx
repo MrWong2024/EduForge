@@ -271,8 +271,17 @@ export function LearningTaskFilters({
         />
       ) : (
         <div className="overflow-x-auto rounded-lg border border-zinc-200 bg-white">
-          <table className="min-w-full border-collapse text-sm">
-            <thead className="bg-zinc-50 text-left text-zinc-600">
+          <table className="min-w-[1100px] w-full table-fixed border-collapse text-sm">
+            <colgroup>
+              <col className="w-[19%]" />
+              <col className="w-[38%]" />
+              <col className="w-[9%]" />
+              <col className="w-[6%]" />
+              <col className="w-[11%]" />
+              <col className="w-[10%]" />
+              <col className="w-[7%]" />
+            </colgroup>
+            <thead className="bg-zinc-50 text-left text-xs font-semibold tracking-wide text-zinc-700">
               <tr>
                 <th className="px-4 py-3">标题</th>
                 <th className="px-4 py-3">描述</th>
@@ -287,11 +296,24 @@ export function LearningTaskFilters({
               {filteredTasks.map((task, index) => {
                 const statusUpper = toStatusUpper(task.status);
                 const rubricSummary = summarizeRubric(task.rubric);
+                const titleText = toDisplayText(task.title, "未命名模板");
+                const descriptionText = toDisplayText(task.description);
                 const rubricHint = rubricSummary.configured
                   ? rubricSummary.dimensionCount > 0 || rubricSummary.hasNotes
                     ? `${rubricSummary.dimensionCount > 0 ? `${rubricSummary.dimensionCount} 个维度` : "未识别维度"}${rubricSummary.hasNotes ? "，含评分说明" : ""}`
                     : "已配置（自定义结构）"
                   : "未配置";
+                const statusBadgeClass =
+                  statusUpper === "PUBLISHED"
+                    ? "border-emerald-200 bg-emerald-100 text-emerald-700"
+                    : statusUpper === "DRAFT"
+                      ? "border-amber-200 bg-amber-100 text-amber-700"
+                      : statusUpper === "ARCHIVED"
+                        ? "border-zinc-300 bg-zinc-200 text-zinc-700"
+                        : "border-zinc-200 bg-zinc-100 text-zinc-700";
+                const rubricBadgeClass = rubricSummary.configured
+                  ? "border-sky-200 bg-sky-100 text-sky-700"
+                  : "border-zinc-200 bg-zinc-100 text-zinc-700";
 
                 return (
                   <tr
@@ -299,35 +321,47 @@ export function LearningTaskFilters({
                     className="border-t border-zinc-100 align-top"
                   >
                     <td className="px-4 py-3">
-                      <p>{toDisplayText(task.title, "未命名模板")}</p>
-                      <p className="mt-1 text-xs text-zinc-500">ID：{toDisplayText(task.id)}</p>
-                    </td>
-                    <td className="px-4 py-3">{toDisplayText(task.description)}</td>
-                    <td className="px-4 py-3">{toDisplayText(task.knowledgeModule)}</td>
-                    <td className="px-4 py-3">{toDisplayText(task.stage)}</td>
-                    <td className="px-4 py-3">
-                      <p>{toDisplayText(task.status)}</p>
-                      <p
-                        className={`mt-1 text-xs ${
-                          statusUpper === "PUBLISHED" ? "text-emerald-700" : "text-zinc-500"
-                        }`}
-                      >
-                        {getStatusHint(task.status)}
+                      <p className="max-h-[3rem] overflow-hidden break-words text-sm font-semibold leading-6 text-zinc-900">
+                        {titleText}
                       </p>
                     </td>
                     <td className="px-4 py-3">
-                      <p>{rubricSummary.configured ? "已配置" : "未配置"}</p>
-                      {rubricSummary.configured ? (
-                        <p className="mt-1 text-xs text-zinc-500">{rubricHint}</p>
-                      ) : null}
+                      <p
+                        className="max-h-[4.5rem] overflow-hidden break-words text-sm leading-6 text-zinc-700"
+                        title={descriptionText}
+                      >
+                        {descriptionText}
+                      </p>
+                    </td>
+                    <td className="px-4 py-3 break-words text-zinc-700">{toDisplayText(task.knowledgeModule)}</td>
+                    <td className="px-4 py-3 text-center font-medium text-zinc-900">{toDisplayText(task.stage)}</td>
+                    <td className="px-4 py-3">
+                      <div className="space-y-1">
+                        <span
+                          className={`inline-flex rounded border px-2 py-0.5 text-xs font-semibold ${statusBadgeClass}`}
+                        >
+                          {toDisplayText(task.status)}
+                        </span>
+                        <p className="text-xs leading-5 text-zinc-500">{getStatusHint(task.status)}</p>
+                      </div>
                     </td>
                     <td className="px-4 py-3">
+                      <div className="space-y-1">
+                        <span
+                          className={`inline-flex rounded border px-2 py-0.5 text-xs font-semibold ${rubricBadgeClass}`}
+                        >
+                          {rubricSummary.configured ? "已配置" : "未配置"}
+                        </span>
+                        <p className="text-xs leading-5 text-zinc-500">{rubricHint}</p>
+                      </div>
+                    </td>
+                    <td className="whitespace-nowrap px-4 py-3">
                       {task.id ? (
                         <Link href={paths.teacher.taskEdit(task.id)} className="text-blue-700 hover:underline">
                           编辑
                         </Link>
                       ) : (
-                        <span className="text-zinc-500">缺少 taskId</span>
+                        <span className="text-zinc-500">缺少模板标识</span>
                       )}
                     </td>
                   </tr>
