@@ -93,6 +93,7 @@ backend/
 │  ├─ classroom-task-deadline.e2e-spec.ts
 │  ├─ classroom-export-snapshot.e2e-spec.ts
 │  ├─ users-me.e2e-spec.ts
+│  ├─ users-change-password.e2e-spec.ts
 │  ├─ classroom-students.e2e-spec.ts
 │  └─ classroom-task-submissions.e2e-spec.ts
 └─ scripts/
@@ -167,6 +168,7 @@ backend/
 - 关键字段：`email`、`passwordHash(select:false)`、`roles[]`、`status(active|suspended)`、`name?`、`studentNo?`、`employeeNo?`。
 - 索引/唯一性：`unique(email)`。
 - 用户资料口径：`GET/PATCH /api/users/me` 返回一致的公开字段口径，不返回 `passwordHash`。
+- 账户安全动作：`POST /api/users/me/change-password` 仅允许当前会话用户改密；成功后保留当前会话并失效其它历史会话。
 
 ### Session（`src/modules/auth/schemas/session.schema.ts`）
 - 关键字段：`userId`、`token`、`expiresAt`。
@@ -263,6 +265,7 @@ AI Provider 错误码（`ai-feedback-provider.error-codes.ts`）：
 - P0 用户资料闭环（已完成）：
   - `PATCH /api/users/me`：已落地可用；仅允许更新 `name/studentNo/employeeNo`。
   - `GET /api/users/me` 与 `PATCH /api/users/me` 返回口径一致，均不返回 `passwordHash`。
+  - `POST /api/users/me/change-password`：已落地可用；需校验 `currentPassword`，`newPassword` 执行 trim 非空与长度校验，且不得与当前密码相同；成功后保留当前会话并失效其它历史会话。
 - P0 班级成员列表（已完成）：
   - `GET /api/classrooms/:id/students`
   - teacher owner 可访问；成员来源只认 Enrollment（`role=STUDENT`）；默认返回 ACTIVE，`includeRemoved=1/true` 时返回 ACTIVE+REMOVED；默认排序 `joinedAt desc, _id desc`；不读取 `classroom.studentIds`。
@@ -307,6 +310,7 @@ AI Provider 错误码（`ai-feedback-provider.error-codes.ts`）：
 已完成（可供前端/BFF 正式接入）：
 - 用户资料字段补齐：`name/studentNo/employeeNo`。
 - `/api/users/me` 更新能力：`PATCH` 真实可用，且与 `GET` 返回口径一致。
+- 当前用户自助改密能力：`POST /api/users/me/change-password` 真实可用（旧密码校验 + 新密码校验 + 会话失效策略）。
 - 班级正式成员列表：`GET /api/classrooms/:id/students`（Enrollment ACTIVE SoT）。
 - 课堂任务实例提交列表：`GET /api/classrooms/:classroomId/tasks/:classroomTaskId/submissions`（`classroomTaskId` 隔离）。
 - 提交详情稳定读源：`GET /api/learning-tasks/submissions/:id`（用于 Teacher/Student submission detail 主视图读取，不再主要依赖 query 透传）。

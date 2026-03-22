@@ -21,10 +21,12 @@
 |---|---|---|
 | GET | `/api/users/me` | 读取当前会话用户公开信息。 |
 | PATCH | `/api/users/me` | 更新当前会话用户公开资料（仅 `name/studentNo/employeeNo`）。 |
+| POST | `/api/users/me/change-password` | 当前登录用户自助修改密码（需校验 `currentPassword`）。 |
 
 Notes:
 - `GET /api/users/me` 与 `PATCH /api/users/me` 返回口径一致（公开字段），不返回 `passwordHash`。
 - `PATCH /api/users/me` 仅允许更新 `name/studentNo/employeeNo`，基于当前登录会话识别用户。
+- `POST /api/users/me/change-password` 请求体：`currentPassword/newPassword`；`newPassword` 会执行 trim 非空、长度与“不得与当前密码相同”校验；改密成功后保留当前会话并失效该用户其它历史会话。
 
 ## Courses
 

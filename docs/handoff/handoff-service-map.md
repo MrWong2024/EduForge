@@ -54,21 +54,24 @@
 
 - Service: `backend/src/modules/users/services/users.service.ts`
 - Domain: `User`
-- Actions: `get-me`, `update-me`
+- Actions: `get-me`, `update-me`, `change-password`
 - I/O Shape:
-  - In: `userId`, `UpdateProfileDto`
-  - Out: `user public profile`
+  - In: `userId`, `UpdateProfileDto`, `ChangePasswordDto`, `currentSessionToken`
+  - Out: `user public profile` | `{ ok: true }`
 - Key Methods:
   - `getMe(userId: string): Promise<Record<string, unknown>> — called by /users/me endpoint`
   - `updateMe(userId: string, dto: UpdateProfileDto): Promise<Record<string, unknown>> — called by PATCH /users/me`
+  - `changePassword(userId: string, dto: ChangePasswordDto, currentSessionToken?: string): Promise<{ ok: true }> — called by POST /users/me/change-password`
 - AuthZ Boundary: `login-only`
 - Metrics/Isolation: 无 `classroomTaskId` 口径
-- Consistency/Constraints: `PATCH /users/me` 仅允许更新 `name/studentNo/employeeNo`；`GET/PATCH` 返回口径一致且不含 `passwordHash`
-- Deps/Side Effects: `UserModel`；读写当前用户公开资料字段
-- Performance Notes: `lean + select` 最小字段读取；`undefined` 字段忽略更新（不写入）
-- SoT: `backend/src/modules/users/services/users.service.ts`; `backend/src/modules/users/schemas/user.schema.ts`
+- Consistency/Constraints: `PATCH /users/me` 仅允许更新 `name/studentNo/employeeNo`；`POST /users/me/change-password` 必须校验当前密码、新密码 trim 后非空、长度下限、且不得与当前密码相同；改密成功后保留当前会话并失效其它历史会话；`GET/PATCH` 返回口径一致且不含 `passwordHash`
+- Deps/Side Effects: `UserModel`, `SessionModel`, `bcrypt`；读写公开资料字段、更新密码哈希、删除历史 sessions
+- Performance Notes: `lean + select` 最小字段读取；`undefined` 字段忽略更新（不写入）；session 清理使用单次 `deleteMany`（按 `token != current`）
+- SoT: `backend/src/modules/users/services/users.service.ts`; `backend/src/modules/users/schemas/user.schema.ts`; `backend/src/modules/auth/schemas/session.schema.ts`
 - Failure Modes:
   - 用户不存在 -> `404 User not found`
+  - 当前密码错误 -> `401 Current password is incorrect`
+  - 新密码不合法（空白/长度不足/与当前相同） -> `400`
 
 ## Service Card 03
 

@@ -1,6 +1,6 @@
 # DTO Cheatsheet（Write APIs）
 
-更新时间：2026-03-13  
+更新时间：2026-03-22  
 来源：`backend/src/modules/**/controllers/*.controller.ts` + 对应 `dto/*.dto.ts`
 
 ## 用途说明
@@ -80,6 +80,29 @@
 - Notes:
   - Body 允许为空对象 `{}`，不要传 `null`。
   - 仅允许更新上述 3 个字段；不允许 `email/roles/status/passwordHash`。
+
+### POST /api/users/me/change-password
+
+- Controller & Method: `backend/src/modules/users/controllers/users.controller.ts` -> `UsersController.changePassword`
+- DTO: `ChangePasswordDto` (`backend/src/modules/users/dto/change-password.dto.ts`)
+- Required fields:
+  - `currentPassword` (`@IsString() @MinLength(1) @MaxLength(128)`)
+  - `newPassword` (`@IsString() @MinLength(8) @MaxLength(128)`)
+- Enums: None
+- Nested structure: None
+- Minimal JSON example:
+
+```json
+{
+  "currentPassword": "TeacherPass123!",
+  "newPassword": "TeacherPass456!"
+}
+```
+- Notes:
+  - 该接口只允许当前登录用户修改自己的密码，不接受 `userId`。
+  - 服务层会对 `newPassword` 做 `trim` 后非空校验，拒绝纯空白密码。
+  - 服务层会拒绝“新密码与当前密码相同”。
+  - 改密成功后保留当前会话，并失效该用户其它历史会话。
 
 ---
 

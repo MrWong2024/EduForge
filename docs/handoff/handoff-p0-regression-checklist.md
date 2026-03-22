@@ -17,6 +17,11 @@
 - [ ] `GET /api/users/me` 与 `PATCH /api/users/me` 返回结构一致。
 - [ ] 响应中不包含 `passwordHash`。
 - [ ] `email/roles/status` 不会被 `PATCH /api/users/me` 改动。
+- [ ] `POST /api/users/me/change-password`（已登录 + 正确 `currentPassword` + 合法 `newPassword`）返回成功。
+- [ ] `POST /api/users/me/change-password` 在 `currentPassword` 错误时返回失败。
+- [ ] `POST /api/users/me/change-password` 在 `newPassword` 与旧密码相同、或 `trim` 后为空时返回失败。
+- [ ] 改密成功后：旧密码登录失败，新密码登录成功。
+- [ ] 改密成功后：当前会话保持有效，其它历史会话失效。
 
 ## 2) Classrooms Members：`/api/classrooms/:id/students`
 
