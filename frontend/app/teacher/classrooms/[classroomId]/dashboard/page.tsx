@@ -13,7 +13,7 @@ import {
 } from "@/lib/api/types-teacher";
 import { paths } from "@/lib/routes/paths";
 import { getAiStatusLabel, getCommonErrorSummary } from "@/lib/ui/status";
-import { safeGet, toDisplayText } from "@/lib/ui/format";
+import { safeGet, toDisplayDate, toDisplayText } from "@/lib/ui/format";
 
 type DashboardPageProps = {
   params: Promise<{ classroomId: string }>;
@@ -102,7 +102,7 @@ export default async function ClassroomDashboardPage({ params }: DashboardPagePr
     <section>
       <PageHeader
         title={`${toDisplayText(viewModel.classroomName, "班级")}看板`}
-        description={`班级 ID: ${classroomId}`}
+        description="查看班级任务进展与 AI 状态概览。"
         actions={
           <div className="flex flex-wrap items-center gap-3 text-sm">
             <Link href={paths.teacher.classrooms} className="text-blue-700 hover:underline">
@@ -148,7 +148,7 @@ export default async function ClassroomDashboardPage({ params }: DashboardPagePr
             <thead className="bg-zinc-50 text-left text-zinc-600">
               <tr>
                 <th className="px-4 py-3">任务标题</th>
-                <th className="px-4 py-3">课堂任务 ID</th>
+                <th className="px-4 py-3">截止时间</th>
                 <th className="px-4 py-3">AI 状态</th>
               </tr>
             </thead>
@@ -156,7 +156,7 @@ export default async function ClassroomDashboardPage({ params }: DashboardPagePr
               {viewModel.dashboardItems.map((item, index) => (
                 <tr key={String(item.classroomTaskId ?? item.id ?? index)} className="border-t border-zinc-100">
                   <td className="px-4 py-3">{toDisplayText(item.title ?? item.name, "未命名任务")}</td>
-                  <td className="px-4 py-3">{toDisplayText(item.classroomTaskId ?? item.id ?? item.taskId)}</td>
+                  <td className="px-4 py-3">{toDisplayDate(safeGet<string | null>(item, "dueAt", null))}</td>
                   <td className="px-4 py-3">
                     {getAiStatusLabel(
                       typeof item.aiStatus === "string"

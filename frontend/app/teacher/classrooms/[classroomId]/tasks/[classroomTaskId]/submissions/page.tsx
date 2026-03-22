@@ -105,7 +105,7 @@ export default async function ClassroomTaskSubmissionsPage({
     <section className="mt-4 space-y-4">
       <PageHeader
         title="任务提交管理"
-        description={`${toDisplayText(viewModel.classroomName, "班级")} | 课堂任务 ID: ${classroomTaskId}`}
+        description={`${toDisplayText(viewModel.classroomName, "班级")} | 当前任务提交记录`}
         actions={
           <div className="flex flex-wrap items-center gap-3 text-sm">
             <Link
@@ -153,7 +153,6 @@ export default async function ClassroomTaskSubmissionsPage({
           <table className="min-w-full border-collapse text-sm">
             <thead className="bg-zinc-50 text-left text-zinc-600">
               <tr>
-                <th className="px-4 py-3">提交 ID</th>
                 <th className="px-4 py-3">学生</th>
                 <th className="px-4 py-3">提交时间</th>
                 <th className="px-4 py-3">AI 反馈状态</th>
@@ -183,12 +182,10 @@ export default async function ClassroomTaskSubmissionsPage({
                     key={submission.submissionId ?? `submission-${index}`}
                     className="border-t border-zinc-100 align-top"
                   >
-                    <td className="px-4 py-3">{toDisplayText(submission.submissionId)}</td>
                     <td className="px-4 py-3">
                       <p className="font-medium text-zinc-900">
                         {toDisplayText(submission.studentName, "—")}
                       </p>
-                      <p className="text-xs text-zinc-500">{toDisplayText(submission.studentId, "—")}</p>
                     </td>
                     <td className="px-4 py-3">{toDisplayDate(submission.submittedAt)}</td>
                     <td className="px-4 py-3">{getAiStatusLabel(submission.aiFeedbackStatus)}</td>
@@ -200,7 +197,7 @@ export default async function ClassroomTaskSubmissionsPage({
                           查看详情 / 批阅
                         </Link>
                       ) : (
-                        <span className="text-zinc-500">缺少 submissionId</span>
+                        <span className="text-zinc-500">缺少提交标识</span>
                       )}
                     </td>
                   </tr>

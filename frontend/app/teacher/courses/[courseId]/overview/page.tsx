@@ -221,7 +221,6 @@ export default async function CourseOverviewPage({ params, searchParams }: Cours
                 <tr key={item.classroomId ?? `classroom-${index}`} className="border-t border-zinc-100">
                   <td className="px-4 py-3">
                     <p className="font-medium text-zinc-900">{toDisplayText(item.name, "未命名班级")}</p>
-                    <p className="text-xs text-zinc-500">{toDisplayText(item.classroomId)}</p>
                   </td>
                   <td className="px-4 py-3">{toDisplayText(item.studentsCount)}</td>
                   <td className="px-4 py-3">{toDisplayText(item.submissionRate)}</td>
@@ -237,7 +236,7 @@ export default async function CourseOverviewPage({ params, searchParams }: Cours
                         进入班级
                       </Link>
                     ) : (
-                      <span className="text-zinc-500">缺少班级 ID</span>
+                      <span className="text-zinc-500">缺少班级标识</span>
                     )}
                   </td>
                 </tr>

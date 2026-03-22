@@ -213,7 +213,7 @@ export default async function StudentSubmissionDetailPage({
     <section className="space-y-4">
       <PageHeader
         title="提交详情 / 反馈"
-        description={`提交 ID: ${submissionId}`}
+        description={`任务：${toDisplayText(viewModel.taskTitle, "未命名任务")} | 提交时间：${toDisplayDate(viewModel.submittedAt)}`}
         actions={
           <div className="flex items-center gap-3 text-sm">
             {taskDetailHref ? (
@@ -247,7 +247,6 @@ export default async function StudentSubmissionDetailPage({
               ? `（超时 ${viewModel.lateBySeconds} 秒）`
               : ""}
           </p>
-          <p>课堂任务 ID：{toDisplayText(viewModel.detail.classroomTaskId)}</p>
         </div>
       </section>
 

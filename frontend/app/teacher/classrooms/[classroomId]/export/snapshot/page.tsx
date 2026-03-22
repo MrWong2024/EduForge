@@ -160,7 +160,7 @@ export default async function SnapshotExportPage({
     <section className="space-y-4">
       <PageHeader
         title="教学快照导出"
-        description={`班级 ID: ${classroomId}`}
+        description="按当前参数导出班级教学快照。"
         actions={
           <div className="flex items-center gap-3 text-sm">
             <Link href={paths.teacher.classroomDashboard(classroomId)} className="text-blue-700 hover:underline">

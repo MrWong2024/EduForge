@@ -146,7 +146,7 @@ export default async function ClassroomMembersPage({ params, searchParams }: Mem
     <section className="space-y-4">
       <PageHeader
         title="班级成员"
-        description={`${toDisplayText(viewModel.classroomName, "班级")}（ID: ${classroomId}）`}
+        description={toDisplayText(viewModel.classroomName, "班级")}
         actions={
           <div className="flex items-center gap-3 text-sm">
             <Link href={paths.teacher.classroomDashboard(classroomId)} className="text-blue-700 hover:underline">
@@ -210,7 +210,7 @@ export default async function ClassroomMembersPage({ params, searchParams }: Mem
                       ) : student.userId ? (
                         <RemoveStudentButton classroomId={classroomId} studentUserId={student.userId} />
                       ) : (
-                        <span className="text-zinc-500">缺少 userId</span>
+                        <span className="text-zinc-500">缺少成员标识</span>
                       )}
                     </td>
                   </tr>

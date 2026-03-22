@@ -23,7 +23,7 @@ export function TaskContextHeader({
     <section>
       <PageHeader
         title="课堂任务工作区"
-        description={`班级 ${classroomId} | 任务 ${classroomTaskId}`}
+        description="围绕当前课堂任务查看学习轨迹、课堂复盘与 AI 指标。"
       />
       <Tabs
         activeHref={pathname}

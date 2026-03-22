@@ -157,7 +157,7 @@ export default async function TeacherCoursesPage({ searchParams }: TeacherCourse
                         </Link>
                       </div>
                     ) : (
-                      <span className="text-zinc-500">缺少课程 ID</span>
+                      <span className="text-zinc-500">缺少课程标识</span>
                     )}
                   </td>
                 </tr>

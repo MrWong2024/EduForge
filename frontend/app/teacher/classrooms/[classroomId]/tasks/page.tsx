@@ -98,7 +98,7 @@ export default async function ClassroomTasksPage({ params }: ClassroomTasksPageP
     <section className="space-y-4">
       <PageHeader
         title="课堂任务"
-        description={`${toDisplayText(viewModel.classroomName, "班级")}（ID: ${classroomId}）`}
+        description={toDisplayText(viewModel.classroomName, "班级")}
         actions={
           <div className="flex flex-wrap items-center gap-3 text-sm">
             <Link href={paths.teacher.classrooms} className="text-blue-700 hover:underline">
@@ -218,7 +218,7 @@ export default async function ClassroomTasksPage({ params }: ClassroomTasksPageP
                           </Link>
                         </div>
                       ) : (
-                        <span className="text-zinc-500">缺少 classroomTaskId</span>
+                        <span className="text-zinc-500">缺少课堂任务标识</span>
                       )}
                     </td>
                     <td className="px-4 py-3">
@@ -244,7 +244,7 @@ export default async function ClassroomTasksPage({ params }: ClassroomTasksPageP
                           </Link>
                         </div>
                       ) : (
-                        <span className="text-zinc-500">缺少 classroomTaskId</span>
+                        <span className="text-zinc-500">缺少课堂任务标识</span>
                       )}
                     </td>
                   </tr>

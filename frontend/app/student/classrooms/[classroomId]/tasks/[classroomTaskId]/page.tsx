@@ -171,6 +171,8 @@ export default async function StudentTaskDetailPage({
   const routePath = paths.student.taskDetail(classroomId, classroomTaskId);
   const queryRecord = toQueryRecord(viewModel.query);
   const taskTitle = toDisplayText(safeGet(viewModel.data.task, "title", undefined), "任务详情");
+  const classroomName = toDisplayText(safeGet(viewModel.data.classroom, "name", undefined), "当前班级");
+  const classroomStatus = toDisplayText(safeGet(viewModel.data.classroom, "status", undefined));
   const dueAt = safeGet<string | null>(viewModel.data.classroomTask, "dueAt", null);
   const allowLate = safeGet<boolean | null>(viewModel.data.classroomTask, "settings.allowLate", null);
   const latestRawStatus = safeGet<string | undefined>(viewModel.data.latest, "aiFeedbackStatus", undefined);
@@ -185,7 +187,7 @@ export default async function StudentTaskDetailPage({
     <section className="space-y-4">
       <PageHeader
         title={taskTitle}
-        description={`班级 ID: ${classroomId} | 课堂任务 ID: ${classroomTaskId}`}
+        description={`${classroomName} | 班级状态: ${classroomStatus}`}
         actions={
           <div className="flex items-center gap-3 text-sm">
             {latestSubmissionHref ? (
@@ -275,7 +277,6 @@ export default async function StudentTaskDetailPage({
           <table className="min-w-full border-collapse text-sm">
             <thead className="bg-zinc-50 text-left text-zinc-600">
               <tr>
-                <th className="px-4 py-3">提交 ID</th>
                 <th className="px-4 py-3">尝试次数</th>
                 <th className="px-4 py-3">提交时间</th>
                 <th className="px-4 py-3">AI 状态</th>
@@ -299,7 +300,6 @@ export default async function StudentTaskDetailPage({
                     key={String(submissionId ?? `submission-${index}`)}
                     className="border-t border-zinc-100"
                   >
-                    <td className="px-4 py-3">{toDisplayText(submissionId)}</td>
                     <td className="px-4 py-3">{toDisplayText(safeGet(submission, "attemptNo", undefined))}</td>
                     <td className="px-4 py-3">
                       {toDisplayDate(safeGet<string | null>(submission, "createdAt", null))}
@@ -311,7 +311,7 @@ export default async function StudentTaskDetailPage({
                           查看反馈
                         </Link>
                       ) : (
-                        <span className="text-zinc-500">缺少 submissionId</span>
+                        <span className="text-zinc-500">缺少提交标识</span>
                       )}
                     </td>
                   </tr>

@@ -217,7 +217,10 @@ export default async function TeacherSubmissionDetailPage({
     <section className="space-y-4">
       <PageHeader
         title="提交详情 / 教师批阅"
-        description={`submissionId: ${viewModel.context.submissionId}`}
+        description={`任务：${toDisplayText(viewModel.context.taskTitle, "未命名任务")} | 学生：${toDisplayText(
+          viewModel.context.studentName,
+          "未知学生"
+        )}`}
         actions={
           <div className="flex flex-wrap items-center gap-3 text-sm">
             {backHref ? (
@@ -241,18 +244,6 @@ export default async function TeacherSubmissionDetailPage({
         <h2 className="text-base font-semibold text-zinc-900">提交概览</h2>
         <div className="mt-3 grid gap-3 text-sm text-zinc-700 md:grid-cols-2">
           <div>
-            <p className="text-zinc-500">submissionId</p>
-            <p className="font-medium text-zinc-900">
-              {toDisplayText(viewModel.context.submissionId)}
-            </p>
-          </div>
-          <div>
-            <p className="text-zinc-500">课堂任务 ID</p>
-            <p className="font-medium text-zinc-900">
-              {toDisplayText(viewModel.context.classroomTaskId)}
-            </p>
-          </div>
-          <div>
             <p className="text-zinc-500">任务标题</p>
             <p className="font-medium text-zinc-900">
               {toDisplayText(viewModel.context.taskTitle)}
@@ -261,7 +252,7 @@ export default async function TeacherSubmissionDetailPage({
           <div>
             <p className="text-zinc-500">学生</p>
             <p className="font-medium text-zinc-900">
-              {toDisplayText(viewModel.context.studentName ?? viewModel.detail.studentId)}
+              {toDisplayText(viewModel.context.studentName, "未知学生")}
             </p>
           </div>
           <div>

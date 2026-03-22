@@ -105,7 +105,7 @@ export default async function WeeklyReportPage({ params, searchParams }: WeeklyR
     <section className="space-y-4">
       <PageHeader
         title="班级周报"
-        description={`班级 ID: ${classroomId} | 窗口: ${viewModel.window}`}
+        description={`统计窗口: ${viewModel.window}`}
         actions={
           <div className="flex items-center gap-3 text-sm">
             <Link href={paths.teacher.classroomDashboard(classroomId)} className="text-blue-700 hover:underline">

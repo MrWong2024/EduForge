@@ -119,6 +119,12 @@ export default async function TeacherClassroomsPage({ searchParams }: TeacherCla
     );
   }
 
+  const courseNameMap = new Map(
+    viewModel.courses
+      .filter((course) => course.id)
+      .map((course) => [course.id as string, toDisplayText(course.name, "未命名课程")])
+  );
+
   return (
     <section className="space-y-4">
       <PageHeader title="班级" description={`第 ${viewModel.page} 页，每页 ${viewModel.limit} 条`} />
@@ -150,7 +156,7 @@ export default async function TeacherClassroomsPage({ searchParams }: TeacherCla
               <tr>
                 <th className="px-4 py-3">班级名称</th>
                 <th className="px-4 py-3">状态</th>
-                <th className="px-4 py-3">课程 ID</th>
+                <th className="px-4 py-3">所属课程</th>
                 <th className="px-4 py-3">加入码</th>
                 <th className="px-4 py-3">操作</th>
               </tr>
@@ -158,11 +164,12 @@ export default async function TeacherClassroomsPage({ searchParams }: TeacherCla
             <tbody>
               {viewModel.items.map((item, index) => {
                 const classroomId = item.id;
+                const courseName = item.courseId ? courseNameMap.get(item.courseId) : undefined;
                 return (
                   <tr key={classroomId ?? `classroom-${index}`} className="border-t border-zinc-100">
                     <td className="px-4 py-3">{toDisplayText(item.name, "未命名班级")}</td>
                     <td className="px-4 py-3">{toDisplayText(item.status)}</td>
-                    <td className="px-4 py-3">{toDisplayText(item.courseId)}</td>
+                    <td className="px-4 py-3">{courseName ?? "未知课程"}</td>
                     <td className="px-4 py-3">{toDisplayText(item.joinCode)}</td>
                     <td className="px-4 py-3">
                       {classroomId ? (
@@ -173,7 +180,7 @@ export default async function TeacherClassroomsPage({ searchParams }: TeacherCla
                           进入班级
                         </Link>
                       ) : (
-                        <span className="text-zinc-500">缺少班级 ID</span>
+                        <span className="text-zinc-500">缺少班级标识</span>
                       )}
                     </td>
                   </tr>

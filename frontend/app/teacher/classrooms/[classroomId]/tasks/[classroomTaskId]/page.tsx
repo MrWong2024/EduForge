@@ -94,7 +94,7 @@ export default async function ClassroomTaskDetailPage({ params }: ClassroomTaskD
     <section className="mt-4 space-y-4">
       <PageHeader
         title={toDisplayText(task.title, "任务详情")}
-        description={`${toDisplayText(viewModel.classroomName, "班级")}（ID: ${classroomId}） | 课堂任务 ID: ${classroomTaskId}`}
+        description={`${toDisplayText(viewModel.classroomName, "班级")} | 课堂任务详情`}
         actions={
           <div className="flex flex-wrap items-center gap-3 text-sm">
             <Link href={paths.teacher.classroomTasks(classroomId)} className="text-blue-700 hover:underline">
@@ -130,7 +130,7 @@ export default async function ClassroomTaskDetailPage({ params }: ClassroomTaskD
 
       <section className="rounded-lg border border-zinc-200 bg-white p-4 text-sm">
         <div className="grid gap-2 md:grid-cols-2">
-          <p>任务 ID：{toDisplayText(task.taskId)}</p>
+          <p>任务名称：{toDisplayText(task.title, "未命名任务")}</p>
           <p>发布状态：{toDisplayText(task.taskStatus, "—")}</p>
           <p>截止时间：{toDisplayDate(task.dueAt)}</p>
           <p>允许迟交：{toDisplayText(task.allowLate)}</p>

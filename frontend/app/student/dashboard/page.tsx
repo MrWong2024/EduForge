@@ -117,7 +117,7 @@ export default async function StudentDashboardPage() {
                       {toDisplayText(classroom.classroomName, "未命名班级")}
                     </h2>
                     <p className="text-sm text-zinc-600">
-                      班级 ID: {toDisplayText(classroom.classroomId)} | 状态: {toDisplayText(classroom.status)}
+                      班级状态: {toDisplayText(classroom.status)}
                     </p>
                   </div>
                   <p className="text-sm text-zinc-600">任务数: {classroom.tasks.length}</p>
@@ -159,7 +159,7 @@ export default async function StudentDashboardPage() {
                                     查看详情
                                   </Link>
                                 ) : (
-                                  <span className="text-zinc-500">缺少 classroomTaskId</span>
+                                  <span className="text-zinc-500">缺少课堂任务标识</span>
                                 )}
                               </td>
                             </tr>

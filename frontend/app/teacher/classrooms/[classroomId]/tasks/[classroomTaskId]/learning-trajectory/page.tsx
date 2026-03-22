@@ -178,7 +178,7 @@ export default async function LearningTrajectoryPage({
     <section className="mt-4 space-y-4">
       <PageHeader
         title="学习轨迹"
-        description={`班级 ${classroomId} | 课堂任务 ${classroomTaskId}`}
+        description="查看学生尝试趋势与近期 AI 状态变化。"
         actions={
           <div className="flex items-center gap-3 text-sm">
             <Link href={paths.teacher.classroomTasks(classroomId)} className="text-blue-700 hover:underline">
@@ -277,7 +277,7 @@ export default async function LearningTrajectoryPage({
           <table className="min-w-full border-collapse text-sm">
             <thead className="bg-zinc-50 text-left text-zinc-600">
               <tr>
-                <th className="px-4 py-3">学生 ID</th>
+                <th className="px-4 py-3">学生</th>
                 <th className="px-4 py-3">尝试次数</th>
                 <th className="px-4 py-3">最近尝试时间</th>
                 <th className="px-4 py-3">最近 AI 状态</th>
@@ -292,7 +292,12 @@ export default async function LearningTrajectoryPage({
 
                 return (
                   <tr key={String(safeGet(item, "studentId", `student-${index}`))} className="border-t border-zinc-100">
-                    <td className="px-4 py-3">{toDisplayText(safeGet(item, "studentId", undefined))}</td>
+                    <td className="px-4 py-3">
+                      {toDisplayText(
+                        safeGet(item, "studentName", undefined) ?? safeGet(item, "name", undefined),
+                        "未知学生"
+                      )}
+                    </td>
                     <td className="px-4 py-3">{toDisplayText(safeGet(item, "attemptsCount", undefined))}</td>
                     <td className="px-4 py-3">
                       {toDisplayDate(safeGet<string | null>(item, "latestAttemptAt", null))}

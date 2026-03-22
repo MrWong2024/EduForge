@@ -147,7 +147,7 @@ export default async function AiMetricsPage({ params, searchParams }: AiMetricsP
     <section className="mt-4 space-y-4">
       <PageHeader
         title="AI 指标"
-        description={`班级 ${classroomId} | 课堂任务 ${classroomTaskId}`}
+        description="查看当前课堂任务的 AI 处理质量与状态分布。"
         actions={
           <div className="flex items-center gap-3 text-sm">
             <Link href={paths.teacher.classroomTasks(classroomId)} className="text-blue-700 hover:underline">

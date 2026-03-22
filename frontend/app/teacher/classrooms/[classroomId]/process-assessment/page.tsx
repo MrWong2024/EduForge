@@ -113,7 +113,7 @@ export default async function ProcessAssessmentPage({
     <section className="space-y-4">
       <PageHeader
         title="过程性评价"
-        description={`班级 ID: ${classroomId} | 窗口: ${viewModel.window}`}
+        description={`统计窗口: ${viewModel.window}`}
         actions={
           <div className="flex flex-wrap items-center gap-3 text-sm">
             <a

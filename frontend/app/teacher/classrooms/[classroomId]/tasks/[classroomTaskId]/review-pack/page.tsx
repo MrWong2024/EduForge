@@ -160,7 +160,7 @@ export default async function ReviewPackPage({ params, searchParams }: ReviewPac
     <section className="mt-4 space-y-4">
       <PageHeader
         title="课堂复盘"
-        description={`班级 ${classroomId} | 课堂任务 ${classroomTaskId}`}
+        description="聚合当前课堂任务的共性问题、行动建议与教学脚本。"
         actions={
           <div className="flex items-center gap-3 text-sm">
             <Link href={paths.teacher.classroomTasks(classroomId)} className="text-blue-700 hover:underline">

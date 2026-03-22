@@ -86,7 +86,9 @@ export default async function EditLearningTaskPage({ params }: EditLearningTaskP
     <section className="space-y-4">
       <PageHeader
         title="编辑任务模板"
-        description={`taskId: ${viewModel.taskId}`}
+        description={`模板：${toDisplayText(viewModel.task.title, "未命名模板")} | 状态：${toDisplayText(
+          viewModel.task.status
+        )}`}
         actions={
           <div className="flex flex-wrap items-center gap-3 text-sm">
             <Link href={paths.teacher.tasks} className="text-blue-700 hover:underline">
