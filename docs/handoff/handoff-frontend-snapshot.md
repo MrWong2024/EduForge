@@ -35,7 +35,7 @@ frontend/
    ├─ api/{client,browser-client,error-presenter,types-*}
    ├─ auth/{session,role-home}
    ├─ routes/paths.ts
-   ├─ ui/{status,format}
+   ├─ ui/{status,format,rubric}
    └─ http/server-cookie.ts
 ```
 
@@ -55,6 +55,7 @@ frontend/
 
 - 统一路由常量：`lib/routes/paths.ts`（含 `paths.teacher.tasks`、`taskEdit`、`tasksFromClassroom`）。
 - 统一状态文案：`lib/ui/status.ts`（含 `NOT_REQUESTED` 正常语义）。
+- 统一 rubric 四维中文映射：`lib/ui/rubric.ts`（`functionality/correctness/codeStyle/design` 与中文文案的单一事实源，供 Teacher/Student 共同复用）。
 - 统一错误展开：`lib/api/error-presenter.ts` + `components/blocks/ErrorState.tsx`。
 - 空态组件：`components/blocks/EmptyState.tsx`。
 - Role gate：
@@ -84,7 +85,7 @@ Teacher 课程视角（可用）：
 
 Student 学习链路（可用）：
 1. `/student/classrooms/join` -> `POST classrooms/join`
-2. `/student/classrooms/[classroomId]/tasks/[classroomTaskId]` -> `GET .../my-task-detail`
+2. `/student/classrooms/[classroomId]/tasks/[classroomTaskId]` -> `GET .../my-task-detail`（页面已是“任务详情 + 提交工作台”，正式展示任务基础信息、任务说明 `task.description`、评分标准 `task.rubric`，并保留提交与历史记录）
 3. `SubmissionForm` -> `POST .../submissions`
 4. `/student/submissions/[submissionId]` -> 稳定读源 + feedback 列表 + request AI
 

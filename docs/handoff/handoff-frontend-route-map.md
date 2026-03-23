@@ -46,7 +46,7 @@
 | `/student` | 学生入口 | - | 重定向到 `/student/dashboard` | Done | - |
 | `/student/dashboard` | 学习看板 | `GET classrooms/mine/dashboard` | 查看班级与任务、跳任务详情 | Done | 真接口 |
 | `/student/classrooms/join` | 加入班级 | `POST classrooms/join` | 输入 joinCode 入班 | Done | 真接口 |
-| `/student/classrooms/[classroomId]/tasks/[classroomTaskId]` | 学生任务详情 | `GET .../my-task-detail`、`POST .../submissions` | 基于 `my-task-detail` 聚合结果展示我的任务详情/历史提交入口，并执行提交后跳 submission detail | Done | 真接口 |
+| `/student/classrooms/[classroomId]/tasks/[classroomTaskId]` | 学生任务详情与提交页 | `GET .../my-task-detail`、`POST .../submissions` | 基于 `my-task-detail` 聚合结果展示任务基础信息、任务说明、评分标准与历史提交；支持提交作业并进入 submission detail 查看反馈 | Done | 真接口 |
 | `/student/submissions/[submissionId]` | 学生提交详情/反馈 | `GET learning-tasks/submissions/:id`、`GET learning-tasks/submissions/:id/feedback`、`POST learning-tasks/submissions/:submissionId/ai-feedback/request` | 查看代码与反馈、请求 AI | Done | 稳定读源 + 真接口 |
 | `/student/help/ai` | AI 状态帮助页 | - | 状态说明与排障建议 | Done | - |
 

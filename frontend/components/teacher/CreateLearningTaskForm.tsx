@@ -11,6 +11,7 @@ import {
   type CreateLearningTaskRequest,
   type LearningTaskStatus,
 } from "@/lib/api/types-teacher";
+import { getRubricDimensionLabel } from "@/lib/ui/rubric";
 
 type CreateLearningTaskFormErrorState = {
   status?: number;
@@ -68,6 +69,11 @@ const parseOptionalNonNegativeInt = (value: string): number | undefined | null =
   }
   return parsed;
 };
+
+const functionalityLabel = getRubricDimensionLabel("functionality");
+const correctnessLabel = getRubricDimensionLabel("correctness");
+const codeStyleLabel = getRubricDimensionLabel("codeStyle");
+const designLabel = getRubricDimensionLabel("design");
 
 export function CreateLearningTaskForm() {
   const router = useRouter();
@@ -130,25 +136,25 @@ export function CreateLearningTaskForm() {
     }
     if (parsedFunctionalityWeight === null) {
       setErrorState({
-        description: "功能完成度权重必须是非负整数。",
+        description: `${functionalityLabel}必须是非负整数。`,
       });
       return;
     }
     if (parsedCorrectnessWeight === null) {
       setErrorState({
-        description: "正确性权重必须是非负整数。",
+        description: `${correctnessLabel}必须是非负整数。`,
       });
       return;
     }
     if (parsedCodeStyleWeight === null) {
       setErrorState({
-        description: "代码规范权重必须是非负整数。",
+        description: `${codeStyleLabel}必须是非负整数。`,
       });
       return;
     }
     if (parsedDesignWeight === null) {
       setErrorState({
-        description: "设计/思路权重必须是非负整数。",
+        description: `${designLabel}必须是非负整数。`,
       });
       return;
     }
@@ -319,7 +325,7 @@ export function CreateLearningTaskForm() {
 
           <div className="mt-3 grid gap-4 md:grid-cols-2">
             <label className="block text-sm">
-              <span className="mb-1 block text-zinc-700">功能完成度权重（可选）</span>
+              <span className="mb-1 block text-zinc-700">{`${functionalityLabel}（可选）`}</span>
               <input
                 type="number"
                 min={0}
@@ -333,7 +339,7 @@ export function CreateLearningTaskForm() {
             </label>
 
             <label className="block text-sm">
-              <span className="mb-1 block text-zinc-700">正确性权重（可选）</span>
+              <span className="mb-1 block text-zinc-700">{`${correctnessLabel}（可选）`}</span>
               <input
                 type="number"
                 min={0}
@@ -347,7 +353,7 @@ export function CreateLearningTaskForm() {
             </label>
 
             <label className="block text-sm">
-              <span className="mb-1 block text-zinc-700">代码规范权重（可选）</span>
+              <span className="mb-1 block text-zinc-700">{`${codeStyleLabel}（可选）`}</span>
               <input
                 type="number"
                 min={0}
@@ -361,7 +367,7 @@ export function CreateLearningTaskForm() {
             </label>
 
             <label className="block text-sm">
-              <span className="mb-1 block text-zinc-700">设计/思路权重（可选）</span>
+              <span className="mb-1 block text-zinc-700">{`${designLabel}（可选）`}</span>
               <input
                 type="number"
                 min={0}

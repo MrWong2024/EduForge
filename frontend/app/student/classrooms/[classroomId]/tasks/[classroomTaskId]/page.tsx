@@ -9,6 +9,7 @@ import { fetchJson, FetchJsonError } from "@/lib/api/client";
 import { buildErrorDescription, extractRawDetail } from "@/lib/api/error-presenter";
 import { toMyTaskDetailResponse } from "@/lib/api/types-student";
 import { paths } from "@/lib/routes/paths";
+import { getRubricDimensionLabel } from "@/lib/ui/rubric";
 import { getAiStatusHint, getAiStatusLabel, getCommonErrorSummary } from "@/lib/ui/status";
 import {
   buildQueryString,
@@ -90,6 +91,62 @@ const toAiStatusDescription = (status?: string): string | null => {
 
 const isProcessingAiStatus = (status?: string): boolean =>
   status === "PENDING" || status === "RUNNING";
+
+const toDisplayDateOrFallback = (value?: string | null): string => {
+  const displayDate = toDisplayDate(value);
+  return displayDate === "—" ? "未设置" : displayDate;
+};
+
+const toAllowLateText = (value: boolean | null): string => {
+  if (value === true) {
+    return "允许";
+  }
+  if (value === false) {
+    return "不允许";
+  }
+  return "未设置";
+};
+
+const toStageText = (value: unknown): string => {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return `阶段 ${value}`;
+  }
+  if (typeof value === "string" && value.trim()) {
+    const trimmed = value.trim();
+    return /^\d+$/.test(trimmed) ? `阶段 ${trimmed}` : trimmed;
+  }
+  return "当前未设置阶段";
+};
+
+const toRubricDimensions = (rubric: unknown): Array<{ key: string; value: string }> => {
+  if (!rubric || typeof rubric !== "object" || Array.isArray(rubric)) {
+    return [];
+  }
+
+  const dimensionsRaw = safeGet<unknown>(rubric, "dimensions", undefined);
+  if (!dimensionsRaw || typeof dimensionsRaw !== "object" || Array.isArray(dimensionsRaw)) {
+    return [];
+  }
+
+  return Object.entries(dimensionsRaw as Record<string, unknown>)
+    .map(([rawKey, rawValue]) => {
+      const key = rawKey.trim();
+      const value = toDisplayText(rawValue, "");
+      if (!key || !value) {
+        return null;
+      }
+      return {
+        key: getRubricDimensionLabel(key),
+        value,
+      };
+    })
+    .filter((item): item is { key: string; value: string } => Boolean(item));
+};
+
+const asRecord = (value: unknown): Record<string, unknown> =>
+  value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : {};
 
 const buildSubmissionFeedbackHref = (
   submissionId: string,
@@ -173,8 +230,22 @@ export default async function StudentTaskDetailPage({
   const taskTitle = toDisplayText(safeGet(viewModel.data.task, "title", undefined), "任务详情");
   const classroomName = toDisplayText(safeGet(viewModel.data.classroom, "name", undefined), "当前班级");
   const classroomStatus = toDisplayText(safeGet(viewModel.data.classroom, "status", undefined));
+  const publishedAt = safeGet<string | null>(viewModel.data.classroomTask, "publishedAt", null);
   const dueAt = safeGet<string | null>(viewModel.data.classroomTask, "dueAt", null);
   const allowLate = safeGet<boolean | null>(viewModel.data.classroomTask, "settings.allowLate", null);
+  const knowledgeModule = toDisplayText(
+    safeGet(viewModel.data.task, "knowledgeModule", undefined),
+    "当前未设置知识模块"
+  );
+  const stageText = toStageText(safeGet(viewModel.data.task, "stage", undefined));
+  const description = toDisplayText(
+    safeGet(viewModel.data.task, "description", undefined),
+    "当前未提供任务说明"
+  );
+  const rubric = asRecord(safeGet<unknown>(viewModel.data.task, "rubric", undefined));
+  const rubricDimensions = toRubricDimensions(rubric);
+  const rubricNotes = toDisplayText(safeGet<unknown>(rubric, "notes", undefined), "");
+  const hasRubricContent = rubricDimensions.length > 0 || Boolean(rubricNotes);
   const latestRawStatus = safeGet<string | undefined>(viewModel.data.latest, "aiFeedbackStatus", undefined);
   const latestStatus = getAiStatusLabel(latestRawStatus);
   const latestStatusDescription = toAiStatusDescription(latestRawStatus);
@@ -206,9 +277,13 @@ export default async function StudentTaskDetailPage({
       />
 
       <section className="rounded-lg border border-zinc-200 bg-white p-4 text-sm">
-        <div className="grid gap-2 md:grid-cols-3">
-          <p>截止时间：{toDisplayDate(dueAt)}</p>
-          <p>允许迟交：{toDisplayText(allowLate)}</p>
+        <h2 className="text-base font-semibold text-zinc-900">任务基础信息</h2>
+        <div className="mt-3 grid gap-2 md:grid-cols-2">
+          <p>发布时间：{toDisplayDateOrFallback(publishedAt)}</p>
+          <p>截止时间：{toDisplayDateOrFallback(dueAt)}</p>
+          <p>是否允许迟交：{toAllowLateText(allowLate)}</p>
+          <p>知识模块：{knowledgeModule}</p>
+          <p>阶段：{stageText}</p>
           <p>最新 AI 状态：{latestStatus}</p>
         </div>
         {latestSubmissionHref ? (
@@ -229,6 +304,39 @@ export default async function StudentTaskDetailPage({
             。
           </p>
         ) : null}
+      </section>
+
+      <section className="rounded-lg border border-zinc-200 bg-white p-4 text-sm">
+        <h2 className="text-base font-semibold text-zinc-900">任务说明</h2>
+        <p className="mt-3 whitespace-pre-wrap break-words text-zinc-700">{description}</p>
+      </section>
+
+      <section className="rounded-lg border border-zinc-200 bg-white p-4 text-sm">
+        <h2 className="text-base font-semibold text-zinc-900">评分标准</h2>
+        {hasRubricContent ? (
+          <div className="mt-3 space-y-3 text-zinc-700">
+            {rubricDimensions.length > 0 ? (
+              <div>
+                <p className="font-medium text-zinc-900">评分维度</p>
+                <ul className="mt-2 space-y-1">
+                  {rubricDimensions.map((dimension, index) => (
+                    <li key={`${dimension.key}-${index}`}>
+                      {dimension.key}：{dimension.value}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ) : null}
+            {rubricNotes ? (
+              <div>
+                <p className="font-medium text-zinc-900">评分说明</p>
+                <p className="mt-1 whitespace-pre-wrap break-words">{rubricNotes}</p>
+              </div>
+            ) : null}
+          </div>
+        ) : (
+          <p className="mt-3 text-zinc-700">当前未提供评分标准说明</p>
+        )}
       </section>
 
       <AiProcessingHint status={latestRawStatus} variant="taskDetail" helpHref={paths.student.aiHelp} />

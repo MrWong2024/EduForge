@@ -26,8 +26,8 @@
 |---|---|---|---|
 | CreateCourseForm | `components/teacher/CreateCourseForm.tsx` | `POST courses` | 只负责建课表单与成功跳转 |
 | CreateClassroomForm | `components/teacher/CreateClassroomForm.tsx` | `POST classrooms` | 只负责建班表单，不负责班级列表加载 |
-| CreateLearningTaskForm | `components/teacher/CreateLearningTaskForm.tsx` | `POST learning-tasks/tasks` | 只负责模板创建（含基础 rubric 配置），不负责班级实例发布 |
-| EditLearningTaskForm | `components/teacher/EditLearningTaskForm.tsx` | `PATCH learning-tasks/tasks/:id` | 只负责模板编辑（核心字段 + status + rubric），不负责班级实例发布 |
+| CreateLearningTaskForm | `components/teacher/CreateLearningTaskForm.tsx` | `POST learning-tasks/tasks` | 只负责模板创建（含基础 rubric 配置，四维中文展示口径复用 `lib/ui/rubric.ts`），不负责班级实例发布 |
+| EditLearningTaskForm | `components/teacher/EditLearningTaskForm.tsx` | `PATCH learning-tasks/tasks/:id` | 只负责模板编辑（核心字段 + status + rubric，四维中文展示口径复用 `lib/ui/rubric.ts`），不负责班级实例发布 |
 | LearningTaskFilters | `components/teacher/LearningTaskFilters.tsx` | -（基于已加载模板列表做本地筛选） | 只负责模板层筛选与列表呈现，不发起模板发布请求 |
 | PublishClassroomTaskForm | `components/teacher/PublishClassroomTaskForm.tsx` | `POST classrooms/:id/tasks` | 只负责选择已有 `PUBLISHED` 模板并发布班级实例；可配置 `dueAt/allowLate/maxAttempts`；不负责创建/编辑模板 |
 | PublishTaskStatusButton | `components/teacher/PublishTaskStatusButton.tsx` | `POST learning-tasks/tasks/:id/publish` | 仅做 task 发布状态操作 |
@@ -65,6 +65,7 @@
 | Session/Auth | `lib/auth/session.ts` + `lib/auth/role-home.ts` | `users/me` 探针、role 判断、role-home | 不要在页面自定义角色跳转规则 |
 | Paths | `lib/routes/paths.ts` | 路由常量与参数化路径（含模板页、模板编辑页、班级页到模板页上下文链路） | 不要在页面硬编码路径字符串 |
 | UI Status | `lib/ui/status.ts` | AI 状态文案、通用错误摘要 | 不要各页散落不同状态文案口径 |
+| UI Rubric | `lib/ui/rubric.ts` | rubric 四维中文映射统一入口（`RUBRIC_DIMENSION_LABELS`、`getRubricDimensionLabel`），供教师创建/编辑与学生任务详情评分标准维度展示复用 | 不要在页面内部各自维护本地 `labelMap` 或手写四份维度中文 |
 | UI Format | `lib/ui/format.ts` | query/date/display/safeGet 工具 | 不要重复造相同 parse 函数 |
 | Proxy Route | `app/api/proxy/[...path]/route.ts` | BFF 转发层，固定 Node runtime，method/body/header/set-cookie 透传 | 不要在业务页绕过 proxy 直连后端，也不要把业务逻辑塞进 proxy |
 
