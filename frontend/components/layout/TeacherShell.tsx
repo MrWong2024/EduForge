@@ -1,13 +1,16 @@
 import type { ReactNode } from "react";
 import Link from "next/link";
+import { AccountNavEntry } from "@/components/account/AccountNavEntry";
 import { LogoutButton } from "@/components/auth/LogoutButton";
+import { type AccountUser } from "@/components/account/account-types";
 import { paths } from "@/lib/routes/paths";
 
 type TeacherShellProps = {
   children: ReactNode;
+  currentUser: AccountUser;
 };
 
-export function TeacherShell({ children }: TeacherShellProps) {
+export function TeacherShell({ children, currentUser }: TeacherShellProps) {
   return (
     <div className="min-h-screen bg-zinc-100">
       <header className="border-b border-zinc-200 bg-white">
@@ -22,6 +25,7 @@ export function TeacherShell({ children }: TeacherShellProps) {
                 班级
               </Link>
             </nav>
+            <AccountNavEntry href={paths.teacher.account} user={currentUser} />
             <LogoutButton />
           </div>
         </div>

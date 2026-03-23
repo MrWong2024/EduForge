@@ -182,17 +182,20 @@ describe('LearningTasks (e2e)', () => {
           );
         }
       });
-    const rawCookies = loginResponse.headers['set-cookie'];
-    const cookies =
+    const headers: Record<string, unknown> = loginResponse.headers;
+    const rawCookies: unknown = headers['set-cookie'];
+    const cookies: string[] =
       rawCookies === undefined
         ? []
-        : Array.isArray(rawCookies)
-          ? rawCookies
-          : [rawCookies];
-    // eslint-disable-next-line @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access
-    expect(cookies?.some((cookie) => cookie.includes('ef_session='))).toBe(
-      true,
-    );
+        : typeof rawCookies === 'string'
+          ? [rawCookies]
+          : Array.isArray(rawCookies)
+            ? rawCookies.filter(
+                (cookie): cookie is string => typeof cookie === 'string',
+              )
+            : [];
+
+    expect(cookies.some((cookie) => cookie.includes('ef_session='))).toBe(true);
 
     await request(app.getHttpServer()).get('/api/users/me').expect(401);
     await request(app.getHttpServer()).post('/api/auth/logout').expect(401);

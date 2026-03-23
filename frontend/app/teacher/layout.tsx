@@ -17,7 +17,7 @@ export default async function TeacherLayout({
   const gate = await requireRole("TEACHER");
 
   return (
-    <TeacherShell>
+    <TeacherShell currentUser={gate.me}>
       {gate.allowed ? (
         children
       ) : (

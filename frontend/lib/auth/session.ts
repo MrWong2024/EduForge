@@ -8,6 +8,11 @@ import { paths, type UserRole } from "@/lib/routes/paths";
 
 export type MeResponse = RoleAwareMe & {
   id?: string;
+  email?: string | null;
+  name?: string | null;
+  status?: string | null;
+  studentNo?: string | null;
+  employeeNo?: string | null;
 };
 
 export type RoleGateResult =

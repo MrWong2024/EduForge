@@ -17,7 +17,7 @@ export default async function StudentLayout({
   const gate = await requireRole("STUDENT");
 
   return (
-    <StudentShell>
+    <StudentShell currentUser={gate.me}>
       {gate.allowed ? (
         children
       ) : (

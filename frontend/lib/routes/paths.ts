@@ -4,6 +4,7 @@ export const paths = {
   login: "/login",
   teacher: {
     home: "/teacher",
+    account: "/teacher/account",
     tasks: "/teacher/tasks",
     tasksFromClassroom: (classroomId: string) =>
       `/teacher/tasks?fromClassroomId=${encodeSegment(classroomId)}&status=PUBLISHED`,
@@ -41,6 +42,7 @@ export const paths = {
   },
   student: {
     home: "/student",
+    account: "/student/account",
     dashboard: "/student/dashboard",
     joinClassroom: "/student/classrooms/join",
     aiHelp: "/student/help/ai",
