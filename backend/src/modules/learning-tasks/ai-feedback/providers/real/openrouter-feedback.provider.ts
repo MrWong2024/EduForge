@@ -4,11 +4,11 @@ import {
   FeedbackSeverity,
   FeedbackType,
 } from '../../../schemas/feedback.schema';
-import type { SubmissionDocument } from '../../../schemas/submission.schema';
 import {
   AiFeedbackItem,
   AiFeedbackProvider,
 } from '../../interfaces/ai-feedback-provider.interface';
+import { AiSubmissionAnalysisContext } from '../../interfaces/ai-submission-analysis-context.interface';
 import { AiFeedbackProviderError } from '../../interfaces/ai-feedback-provider.error';
 import {
   AI_FEEDBACK_ERROR_CODES,
@@ -83,7 +83,7 @@ export class OpenRouterFeedbackProvider implements AiFeedbackProvider {
   constructor(private readonly configService: ConfigService) {}
 
   async analyzeSubmission(
-    submission: SubmissionDocument,
+    context: AiSubmissionAnalysisContext,
   ): Promise<AiFeedbackItem[]> {
     const config = this.getConfig();
 
@@ -100,9 +100,9 @@ export class OpenRouterFeedbackProvider implements AiFeedbackProvider {
       );
     }
 
-    const submissionId = submission._id.toString();
-    const classroomTaskId = submission.classroomTaskId?.toString?.();
-    const request = this.buildRequest(submission, config);
+    const submissionId = context.submissionId;
+    const classroomTaskId = context.classroomTaskId;
+    const request = this.buildRequest(context, config);
     const startMs = Date.now();
     let retryCount = 0;
 
@@ -173,14 +173,14 @@ export class OpenRouterFeedbackProvider implements AiFeedbackProvider {
   }
 
   private buildRequest(
-    submission: SubmissionDocument,
+    context: AiSubmissionAnalysisContext,
     config: OpenRouterConfig,
   ) {
     const baseUrl = config.baseUrl.replace(/\/+$/g, '');
     const endpoint = `${baseUrl}/chat/completions`;
     const systemPrompt = buildSystemPrompt();
     const userPrompt = buildUserPrompt({
-      submission,
+      context,
       maxCodeChars: config.maxCodeChars,
     });
     const payload = {

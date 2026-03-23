@@ -538,7 +538,8 @@ describe('LearningTasks AI Feedback Ops (e2e) - stub worker default loop', () =>
     process.env.AI_FEEDBACK_WORKER_BATCH_SIZE = '2';
     previousAutoOnSubmit = process.env.AI_FEEDBACK_AUTO_ON_SUBMIT;
     process.env.AI_FEEDBACK_AUTO_ON_SUBMIT = 'false';
-    previousFirstAttemptOnly = process.env.AI_FEEDBACK_AUTO_ON_FIRST_ATTEMPT_ONLY;
+    previousFirstAttemptOnly =
+      process.env.AI_FEEDBACK_AUTO_ON_FIRST_ATTEMPT_ONLY;
     process.env.AI_FEEDBACK_AUTO_ON_FIRST_ATTEMPT_ONLY = 'true';
 
     const moduleFixture: TestingModule = await Test.createTestingModule({
@@ -648,16 +649,29 @@ describe('LearningTasks AI Feedback Ops (e2e) - stub worker default loop', () =>
     if (previousFirstAttemptOnly === undefined) {
       delete process.env.AI_FEEDBACK_AUTO_ON_FIRST_ATTEMPT_ONLY;
     } else {
-      process.env.AI_FEEDBACK_AUTO_ON_FIRST_ATTEMPT_ONLY = previousFirstAttemptOnly;
+      process.env.AI_FEEDBACK_AUTO_ON_FIRST_ATTEMPT_ONLY =
+        previousFirstAttemptOnly;
     }
 
     if (!KEEP_DB) {
       const cleanup: Promise<unknown>[] = [];
-      const submissionObjectIds = submissionIds.map((id) => new Types.ObjectId(id));
+      const submissionObjectIds = submissionIds.map(
+        (id) => new Types.ObjectId(id),
+      );
       if (submissionObjectIds.length > 0) {
-        cleanup.push(feedbackModel.deleteMany({ submissionId: { $in: submissionObjectIds } }));
-        cleanup.push(aiFeedbackJobModel.deleteMany({ submissionId: { $in: submissionObjectIds } }));
-        cleanup.push(submissionModel.deleteMany({ _id: { $in: submissionObjectIds } }));
+        cleanup.push(
+          feedbackModel.deleteMany({
+            submissionId: { $in: submissionObjectIds },
+          }),
+        );
+        cleanup.push(
+          aiFeedbackJobModel.deleteMany({
+            submissionId: { $in: submissionObjectIds },
+          }),
+        );
+        cleanup.push(
+          submissionModel.deleteMany({ _id: { $in: submissionObjectIds } }),
+        );
       }
       if (taskId) {
         cleanup.push(taskModel.deleteOne({ _id: taskId }));
@@ -683,7 +697,8 @@ describe('LearningTasks AI Feedback Ops (e2e) - stub worker default loop', () =>
         },
       })
       .expect(201);
-    const submissionId = (createdSubmission.body as CreatedSubmissionResponse).id;
+    const submissionId = (createdSubmission.body as CreatedSubmissionResponse)
+      .id;
     submissionIds.push(submissionId);
 
     const detailBefore = await studentAgent
@@ -694,7 +709,9 @@ describe('LearningTasks AI Feedback Ops (e2e) - stub worker default loop', () =>
     expect(['NOT_REQUESTED', 'PENDING']).toContain(detailBeforeStatus);
 
     const requestResult = await studentAgent
-      .post(`/api/learning-tasks/submissions/${submissionId}/ai-feedback/request`)
+      .post(
+        `/api/learning-tasks/submissions/${submissionId}/ai-feedback/request`,
+      )
       .send({ reason: 'worker-loop-check' })
       .expect(200);
     expect(
@@ -733,7 +750,8 @@ describe('LearningTasks AI Feedback Ops (e2e) - stub worker default loop', () =>
         },
       })
       .expect(201);
-    const submissionId = (createdSubmission.body as CreatedSubmissionResponse).id;
+    const submissionId = (createdSubmission.body as CreatedSubmissionResponse)
+      .id;
     submissionIds.push(submissionId);
 
     await waitMs(500);

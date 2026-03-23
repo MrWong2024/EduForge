@@ -81,6 +81,7 @@ backend/
 │  ├─ learning-tasks.ai-feedback.guards.e2e-spec.ts
 │  ├─ learning-tasks.ai-feedback.ops.e2e-spec.ts
 │  ├─ learning-tasks.ai-feedback.ops.debug-off.e2e-spec.ts
+│  ├─ learning-tasks.ai-feedback.openrouter-context.e2e-spec.ts
 │  ├─ learning-tasks.ai-feedback.trigger-policy.e2e-spec.ts
 │  ├─ classroom-student-task-detail.e2e-spec.ts
 │  ├─ classroom-weekly-report.e2e-spec.ts
@@ -219,6 +220,7 @@ AI Provider 错误码（`ai-feedback-provider.error-codes.ts`）：
 - `type/severity` 必须来自枚举值域；`message` 必须非空。
 - `tags` 必须来自统一词表；未知值归一化为 `other`。
 - 返回必须是单个 JSON 对象（禁止 markdown/code fence/额外字段）。
+- JSON 协议本身未变；本轮变化在 provider 输入契约（`AiSubmissionAnalysisContext`）与 prompt 约束层（task 上下文 + 默认简体中文输出）。
 
 ### 3.3 tags 唯一来源与归一化策略
 
@@ -249,9 +251,9 @@ AI Provider 错误码（`ai-feedback-provider.error-codes.ts`）：
 
 | Provider | 文件 | 说明 |
 |---|---|---|
-| Stub Provider | `default-stub-ai-feedback.provider.ts` | 本地规则反馈，非外部调用 |
-| OpenRouter Provider | `providers/real/openrouter-feedback.provider.ts` | 外部 AI 调用 + 严格 JSON 解析 |
-| OpenAI Provider（占位） | `providers/real/openai-feedback.provider.ts` | 预留实现，当前占位 |
+| Stub Provider | `default-stub-ai-feedback.provider.ts` | 已适配统一契约 `analyzeSubmission(context: AiSubmissionAnalysisContext)`；仍仅基于 `context.codeText` 走本地规则，英文输出与规则行为不变 |
+| OpenRouter Provider | `providers/real/openrouter-feedback.provider.ts` | 已接收 `AiSubmissionAnalysisContext`；prompt 纳入 `taskTitle/taskDescription/taskRubric/codeText` 等上下文；默认要求反馈文本（`message/suggestion`）使用简体中文；外部 AI 调用 + 严格 JSON 解析 |
+| OpenAI Provider（占位） | `providers/real/openai-feedback.provider.ts` | 已同步统一 context 契约签名，但仍为占位实现（调用直接抛未实现错误） |
 
 ## 4) 关键链路概览（隔离口径）
 
@@ -260,6 +262,7 @@ AI Provider 错误码（`ai-feedback-provider.error-codes.ts`）：
 - 关键隔离键：`classroomTaskId`（提交、队列、报表、复盘、导出均按该维度隔离/聚合）。
 - `Classroom.studentIds` 仅为 legacy 输出/镜像；系统授权、统计与 mine 查询均不读该字段（Enrollment only）。
 - `AiFeedbackStatus=NOT_REQUESTED` 的两类来源（从未创建 job / 策略跳过入队）均为正常产品语义。
+- AI feedback provider 契约已统一为 `analyzeSubmission(context: AiSubmissionAnalysisContext)`；`AiFeedbackProcessor` 在消费 job 时会先读取 submission，再按 `submission.taskId` 查询 task 并组装上下文后调用 provider（task 缺失进入失败链路）。
 
 新增/变更产品能力（Z3、AA~AI、Z4~Z9 收口口径）：
 - P0 用户资料闭环（已完成）：
@@ -281,6 +284,8 @@ AI Provider 错误码（`ai-feedback-provider.error-codes.ts`）：
   - 推荐 `Stub + worker`：`AI_FEEDBACK_PROVIDER=stub` 且 `AI_FEEDBACK_WORKER_ENABLED=true`。
   - 产品级 request 仅负责创建/确保 job（新建时为 `PENDING`），worker 负责消费到 `SUCCEEDED`。
   - `process-once` 仅用于 debug/ops，不作为默认交付运行模式。
+  - Real OpenRouter 路径已支持基于 task 上下文（`title/description/rubric`）分析 submission，且 prompt 默认要求教学反馈文本使用简体中文。
+  - Stub provider 已完成统一 context 契约签名适配，但规则逻辑与英文输出保持原样；OpenAI provider 当前仍为占位实现。
 - AI 指标看板（已存在）：
   - `GET /api/classrooms/:classroomId/tasks/:classroomTaskId/ai-metrics`
 - Z3 学生端聚合详情：

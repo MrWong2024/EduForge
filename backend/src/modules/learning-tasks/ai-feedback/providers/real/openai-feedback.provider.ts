@@ -3,7 +3,7 @@ import {
   AiFeedbackItem,
   AiFeedbackProvider,
 } from '../../interfaces/ai-feedback-provider.interface';
-import { Submission } from '../../../schemas/submission.schema';
+import { AiSubmissionAnalysisContext } from '../../interfaces/ai-submission-analysis-context.interface';
 
 export type AiFeedbackRequest = {
   submissionId: string;
@@ -17,8 +17,10 @@ export type AiFeedbackResponse = {
 
 @Injectable()
 export class OpenAiFeedbackProvider implements AiFeedbackProvider {
-  async analyzeSubmission(_submission: Submission): Promise<AiFeedbackItem[]> {
-    await Promise.resolve(_submission);
+  async analyzeSubmission(
+    _context: AiSubmissionAnalysisContext,
+  ): Promise<AiFeedbackItem[]> {
+    await Promise.resolve(_context);
 
     throw new Error(
       'AI_FEEDBACK_PROVIDER=openai is not implemented. ' +

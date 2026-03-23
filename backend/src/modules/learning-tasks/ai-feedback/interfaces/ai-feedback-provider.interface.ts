@@ -1,5 +1,5 @@
-﻿import { FeedbackSeverity, FeedbackType } from '../../schemas/feedback.schema';
-import { Submission } from '../../schemas/submission.schema';
+import { FeedbackSeverity, FeedbackType } from '../../schemas/feedback.schema';
+import { AiSubmissionAnalysisContext } from './ai-submission-analysis-context.interface';
 
 export const AI_FEEDBACK_PROVIDER_TOKEN = 'AI_FEEDBACK_PROVIDER_TOKEN';
 
@@ -13,5 +13,7 @@ export type AiFeedbackItem = {
 };
 
 export interface AiFeedbackProvider {
-  analyzeSubmission(submission: Submission): Promise<AiFeedbackItem[]>;
+  analyzeSubmission(
+    context: AiSubmissionAnalysisContext,
+  ): Promise<AiFeedbackItem[]>;
 }

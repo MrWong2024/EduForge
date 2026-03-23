@@ -1,8 +1,9 @@
-﻿import { Inject, Injectable, Logger } from '@nestjs/common';
+import { Inject, Injectable, Logger } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import { Feedback, FeedbackSource } from '../../schemas/feedback.schema';
 import { Submission } from '../../schemas/submission.schema';
+import { Task } from '../../schemas/task.schema';
 import {
   AiFeedbackJob,
   AiFeedbackJobStatus,
@@ -17,8 +18,16 @@ import { AI_FEEDBACK_ERROR_CODES } from '../interfaces/ai-feedback-provider.erro
 import { AiFeedbackGuardsService } from './ai-feedback-guards.service';
 import { WithId } from '../../../../common/types/with-id.type';
 import { WithTimestamps } from '../../../../common/types/with-timestamps.type';
+import { AiSubmissionAnalysisContext } from '../interfaces/ai-submission-analysis-context.interface';
 
 type AiFeedbackJobWithMeta = AiFeedbackJob & WithId & WithTimestamps;
+type SubmissionAnalysisSource = Pick<
+  Submission,
+  'taskId' | 'classroomTaskId' | 'attemptNo' | 'content' | 'meta'
+> &
+  WithId;
+type TaskAnalysisSource = Pick<Task, 'title' | 'description' | 'rubric'> &
+  WithId;
 
 @Injectable()
 export class AiFeedbackProcessor {
@@ -34,6 +43,8 @@ export class AiFeedbackProcessor {
     private readonly aiFeedbackJobModel: Model<AiFeedbackJob>,
     @InjectModel(Submission.name)
     private readonly submissionModel: Model<Submission>,
+    @InjectModel(Task.name)
+    private readonly taskModel: Model<Task>,
     @InjectModel(Feedback.name)
     private readonly feedbackModel: Model<Feedback>,
     @Inject(AI_FEEDBACK_PROVIDER_TOKEN)
@@ -59,11 +70,19 @@ export class AiFeedbackProcessor {
       try {
         const submission = await this.submissionModel
           .findById(job.submissionId)
-          .lean()
+          .lean<SubmissionAnalysisSource>()
           .exec();
         if (!submission) {
           throw new Error('Submission not found');
         }
+        const task = await this.taskModel
+          .findById(submission.taskId)
+          .lean<TaskAnalysisSource>()
+          .exec();
+        if (!task) {
+          throw new Error('Task not found');
+        }
+        const analysisContext = this.buildAnalysisContext(submission, task);
         const bucketKey = job.classroomTaskId?.toString();
         if (!this.aiFeedbackGuards.tryConsume(bucketKey)) {
           this.logger.debug(
@@ -78,9 +97,8 @@ export class AiFeedbackProcessor {
         const release = await this.aiFeedbackGuards.acquire();
         let items: AiFeedbackItem[] = [];
         try {
-          items = await this.aiFeedbackProvider.analyzeSubmission(
-            submission as Submission,
-          );
+          items =
+            await this.aiFeedbackProvider.analyzeSubmission(analysisContext);
           await this.persistFeedback(job, items);
         } finally {
           release();
@@ -109,6 +127,24 @@ export class AiFeedbackProcessor {
     }
 
     return results;
+  }
+
+  private buildAnalysisContext(
+    submission: SubmissionAnalysisSource,
+    task: TaskAnalysisSource,
+  ): AiSubmissionAnalysisContext {
+    return {
+      submissionId: submission._id.toString(),
+      classroomTaskId: submission.classroomTaskId?.toString?.(),
+      attemptNo: submission.attemptNo,
+      language: submission.content?.language ?? 'unknown',
+      codeText: submission.content?.codeText ?? '',
+      aiUsageDeclaration: submission.meta?.aiUsageDeclaration,
+      taskId: task._id.toString(),
+      taskTitle: task.title,
+      taskDescription: task.description,
+      taskRubric: task.rubric,
+    };
   }
 
   private async claimNextJob(): Promise<AiFeedbackJobWithMeta | null> {

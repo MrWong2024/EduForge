@@ -27,6 +27,13 @@ $env:NODE_ENV="test"
 Remove-Item Env:KEEP_E2E_DB -ErrorAction SilentlyContinue
 npm run test:e2e -- backend/test/learning-tasks.ai-feedback.ops.e2e-spec.ts
 ```
+```powershell
+cd backend
+$env:NODE_ENV="test"
+$env:AI_FEEDBACK_DEBUG_ENABLED="true"
+Remove-Item Env:KEEP_E2E_DB -ErrorAction SilentlyContinue
+npm run test:e2e -- backend/test/learning-tasks.ai-feedback.openrouter-context.e2e-spec.ts
+```
 
 常用单个 spec 入口（新增能力）：
 ```powershell
@@ -64,6 +71,8 @@ ai-feedback e2e 入口：
 - `learning-tasks.ai-feedback.ops.e2e-spec.ts`
 - `learning-tasks.ai-feedback.ops.debug-off.e2e-spec.ts`
 - `learning-tasks.ai-feedback.guards.e2e-spec.ts`
+- `learning-tasks.ai-feedback.trigger-policy.e2e-spec.ts`
+- `learning-tasks.ai-feedback.openrouter-context.e2e-spec.ts`
 
 本地调试保留数据：
 ```powershell
@@ -83,6 +92,10 @@ npm run test:e2e -- backend/test/classroom-learning-loop.e2e-spec.ts
   - 断言维度：jobs 统计、成功率、错误码聚合（含 `RATE_LIMIT_LOCAL` 场景）、feedback 产出、`includeTags` 开关下的 tags 聚合行为。
 - `backend/test/learning-tasks.ai-feedback.guards.e2e-spec.ts`
   - 覆盖：并发护栏、限流与重试窗口、Mock/Real AI provider 路径。
+- `backend/test/learning-tasks.ai-feedback.openrouter-context.e2e-spec.ts`
+  - 覆盖：mock OpenRouter 请求体捕获与 prompt 上下文断言（`TaskTitle/TaskDescription/TaskRubric/Code/AIUsageDeclaration`）。
+  - 关键断言：system prompt 明确要求简体中文输出（教学反馈文本字段默认中文）；反馈主链路可持久化并可查询。
+  - 补充：测试通过直接调用 `aiFeedbackProcessor.processOnce(1)` 推进 job，属于测试辅助推进方式，不是默认产品运行模式。
 - `backend/test/learning-tasks.ai-feedback.ops.debug-off.e2e-spec.ts`
   - 覆盖：debug gate OFF（`AI_FEEDBACK_DEBUG_ENABLED=false`）时 teacher/admin 访问 debug/ops 返回 404。
 - `backend/test/learning-tasks.ai-feedback.ops.e2e-spec.ts`
@@ -167,8 +180,10 @@ npm run test:e2e -- backend/test/classroom-learning-loop.e2e-spec.ts
 
 ## 5) Mock server（存在且已用于 e2e）
 
-来源：`backend/test/learning-tasks.ai-feedback.guards.e2e-spec.ts` 的 `startMockOpenRouter`。
-补充：多数聚合回归可在 stub/mock 下完成；provider 实链路再启用 REAL_AI_E2E。
+来源：
+- `backend/test/learning-tasks.ai-feedback.guards.e2e-spec.ts` 的 `startMockOpenRouter`
+- `backend/test/learning-tasks.ai-feedback.openrouter-context.e2e-spec.ts` 的 `startMockOpenRouter`
+补充：`openrouter-context` spec 的 mock server 会捕获请求体（`messages`），用于断言 task 上下文片段与“默认简体中文输出”prompt 约束。多数聚合回归可在 stub/mock 下完成；provider 实链路再启用 REAL_AI_E2E。
 
 路由：
 - `POST /chat/completions`
@@ -200,6 +215,16 @@ $env:OPENROUTER_API_KEY="test-key"
 $env:OPENROUTER_BASE_URL="http://127.0.0.1:<mock-port>"
 npm run test:e2e -- backend/test/learning-tasks.ai-feedback.guards.e2e-spec.ts
 ```
+```powershell
+cd backend
+$env:NODE_ENV="test"
+$env:AI_FEEDBACK_PROVIDER="openrouter"
+$env:AI_FEEDBACK_REAL_ENABLED="true"
+$env:AI_FEEDBACK_DEBUG_ENABLED="true"
+$env:OPENROUTER_API_KEY="test-key"
+$env:OPENROUTER_BASE_URL="http://127.0.0.1:<mock-port>"
+npm run test:e2e -- backend/test/learning-tasks.ai-feedback.openrouter-context.e2e-spec.ts
+```
 
 Real OpenRouter（仅本地人工联调）：
 ```powershell
@@ -217,6 +242,7 @@ Debug 接口门禁（如需调用 jobs/process-once）：
 $env:AI_FEEDBACK_DEBUG_ENABLED="true"
 ```
 补充：当 `AI_FEEDBACK_DEBUG_ENABLED=false` 时，`POST /api/learning-tasks/ai-feedback/jobs/process-once` 返回 `404` 属正常门禁行为。
+补充：`learning-tasks.ai-feedback.openrouter-context.e2e-spec.ts` 当前实践会设置 `AI_FEEDBACK_DEBUG_ENABLED=true` 作为测试辅助环境；该 spec 推进 job 通过 service 层 `aiFeedbackProcessor.processOnce(1)` 完成，并非依赖 debug 路由，也不改变“默认联调模式为 Stub + worker”的结论。
 
 ## 7) 与 AI 入队触发策略相关的测试要点（attempt-based）
 
@@ -236,5 +262,7 @@ $env:AI_FEEDBACK_DEBUG_ENABLED="true"
 - `classroom-process-assessment.e2e-spec.ts`
 - `classroom-task-deadline.e2e-spec.ts`
 - `classroom-export-snapshot.e2e-spec.ts`
+- `learning-tasks.ai-feedback.openrouter-context.e2e-spec.ts`
 - 补充：submission detail 稳定读源测试关注点（`GET /api/learning-tasks/submissions/:id`）。
 - 固化：默认联调模式为 `Stub + worker`，并补充影响模块装配/guard 的 env 设置时机提醒。
+- 补充：AI feedback context spec 已纳入入口；覆盖 mock OpenRouter prompt 请求体中的 task 上下文片段与简体中文输出约束断言。

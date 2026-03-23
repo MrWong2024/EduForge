@@ -1,10 +1,10 @@
-﻿import { Injectable } from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
 import { FeedbackSeverity, FeedbackType } from '../../schemas/feedback.schema';
-import { Submission } from '../../schemas/submission.schema';
 import {
   AiFeedbackItem,
   AiFeedbackProvider,
 } from '../interfaces/ai-feedback-provider.interface';
+import { AiSubmissionAnalysisContext } from '../interfaces/ai-submission-analysis-context.interface';
 import {
   normalizeFeedbackItems,
   RawFeedbackItem,
@@ -12,9 +12,11 @@ import {
 
 @Injectable()
 export class DefaultStubAiFeedbackProvider implements AiFeedbackProvider {
-  async analyzeSubmission(submission: Submission): Promise<AiFeedbackItem[]> {
+  async analyzeSubmission(
+    context: AiSubmissionAnalysisContext,
+  ): Promise<AiFeedbackItem[]> {
     await Promise.resolve();
-    const codeText = submission.content?.codeText ?? '';
+    const codeText = context.codeText ?? '';
     const items: RawFeedbackItem[] = [];
 
     if (codeText.trim().length === 0) {

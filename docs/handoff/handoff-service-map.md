@@ -494,12 +494,13 @@
   - `processOnce(batchSize?: number): Promise<{ processed: number; succeeded: number; failed: number; dead: number }> — called by worker tick and debug process-once endpoint`
 - AuthZ Boundary: `internal-only`（worker 与 debug process-once 共享）
 - Metrics/Isolation: job 按 `classroomTaskId` 进入限流桶；重试/backoff/attempts 状态机收敛
-- Consistency/Constraints: 锁 TTL=5min；仅 claim `PENDING|FAILED`；指数退避（30s 起，最大 10min）；`UNAUTHORIZED/MISSING_API_KEY/REAL_DISABLED` 直接 `DEAD`
-- Deps/Side Effects: `AiFeedbackJobModel`, `SubmissionModel`, `FeedbackModel`, `AI_FEEDBACK_PROVIDER_TOKEN`, `AiFeedbackGuardsService`；外部 provider 调用 + 反馈写库 + job 状态更新
+- Consistency/Constraints: 锁 TTL=5min；仅 claim `PENDING|FAILED`；指数退避（30s 起，最大 10min）；`UNAUTHORIZED/MISSING_API_KEY/REAL_DISABLED` 直接 `DEAD`；处理链路为“读取 submission -> 按 `submission.taskId` 查询 task -> 组装 `AiSubmissionAnalysisContext` -> 调 provider”
+- Deps/Side Effects: `AiFeedbackJobModel`, `SubmissionModel`, `TaskModel`, `FeedbackModel`, `AI_FEEDBACK_PROVIDER_TOKEN`, `AiFeedbackGuardsService`；外部 provider 调用 + 反馈写库 + job 状态更新
 - Performance Notes: `findOneAndUpdate` 原子 claim（按 createdAt 先来先服务）；`insertMany(ordered:false)` 批量落库并容忍重复键
 - SoT: `backend/src/modules/learning-tasks/ai-feedback/services/ai-feedback-processor.service.ts`; `backend/src/modules/learning-tasks/ai-feedback/interfaces/ai-feedback-provider.error-codes.ts`; `backend/src/modules/learning-tasks/ai-feedback/README.md`
 - Failure Modes:
   - submission 不存在 -> 进入失败处理并重试/死亡
+  - task 不存在 -> 进入失败处理并重试/死亡
   - 本地/上游限流 -> `FAILED` + 设置 `notBefore`
   - 凭据错误或 real 未启用 -> `DEAD`
   - provider 返回坏 JSON -> `BAD_RESPONSE`
@@ -533,13 +534,13 @@
 - Domain: `AiFeedback Provider`
 - Actions: `analyze`, `rule-generate`, `normalize`
 - I/O Shape:
-  - In: `Submission(content.codeText, language)`
+  - In: `AiSubmissionAnalysisContext(codeText, language, task*)`
   - Out: `AiFeedbackItem[]`
 - Key Methods:
-  - `analyzeSubmission(submission: Submission): Promise<AiFeedbackItem[]> — called by processor when provider=stub`
+  - `analyzeSubmission(context: AiSubmissionAnalysisContext): Promise<AiFeedbackItem[]> — called by processor when provider=stub`
 - AuthZ Boundary: `internal-only`
 - Metrics/Isolation: 不依赖 `classroomTaskId`；只处理单提交内容
-- Consistency/Constraints: 输出统一走 `normalizeFeedbackItems`；空代码/短代码/TODO 有固定行为
+- Consistency/Constraints: 输出统一走 `normalizeFeedbackItems`；stub 仅读取 `context.codeText` 复用原有规则；空代码/短代码/TODO 行为与英文 message 保持原样
 - Deps/Side Effects: `feedback-normalizer`；无外部 I/O
 - Performance Notes: 纯内存规则，低成本
 - SoT: `backend/src/modules/learning-tasks/ai-feedback/services/default-stub-ai-feedback.provider.ts`; `backend/src/modules/learning-tasks/ai-feedback/lib/feedback-normalizer.ts`
@@ -553,13 +554,13 @@
 - Domain: `AiFeedback Provider`
 - Actions: `build-request`, `call-openrouter`, `parse-validate-json`, `map-provider-error`
 - I/O Shape:
-  - In: `SubmissionDocument`, `OPENROUTER_*`, `AI_FEEDBACK_*`
+  - In: `AiSubmissionAnalysisContext`, `OPENROUTER_*`, `AI_FEEDBACK_*`
   - Out: `AiFeedbackItem[]`
 - Key Methods:
-  - `analyzeSubmission(submission: SubmissionDocument): Promise<AiFeedbackItem[]> — called by processor when provider=openrouter`
+  - `analyzeSubmission(context: AiSubmissionAnalysisContext): Promise<AiFeedbackItem[]> — called by processor when provider=openrouter`
 - AuthZ Boundary: `internal-only`
 - Metrics/Isolation: 日志带 `submissionId/classroomTaskId/provider/model/duration/retried`
-- Consistency/Constraints: 严格 JSON 协议；字段白名单；最多 `maxItems`；指数退避重试
+- Consistency/Constraints: 严格 JSON 协议；字段白名单；最多 `maxItems`；指数退避重试；system prompt 默认要求 `message/suggestion` 使用简体中文并保持代码元素原文；user prompt 纳入 `taskTitle/taskDescription/taskRubric/codeText/language/attemptNo/aiUsageDeclaration` 并要求结合题目要求分析，避免仅给泛化代码建议
 - Deps/Side Effects: `ConfigService`, `fetch` 外部网络调用、prompt/protocol/normalizer
 - Performance Notes: 单请求超时控制 + 有界重试；解析失败直接终止
 - SoT: `backend/src/modules/learning-tasks/ai-feedback/providers/real/openrouter-feedback.provider.ts`; `backend/src/modules/learning-tasks/ai-feedback/protocol/ai-feedback-json.protocol.ts`; `backend/src/modules/learning-tasks/ai-feedback/prompts/openrouter-feedback.prompt.ts`
@@ -575,13 +576,13 @@
 - Domain: `AiFeedback Provider`
 - Actions: `analyze`, `throw-not-implemented`
 - I/O Shape:
-  - In: `Submission`
+  - In: `AiSubmissionAnalysisContext`
   - Out: `throws Error`
 - Key Methods:
-  - `analyzeSubmission(submission: Submission): Promise<AiFeedbackItem[]> — selected by provider factory if future openai provider is wired`
+  - `analyzeSubmission(context: AiSubmissionAnalysisContext): Promise<AiFeedbackItem[]> — 当前实现仅做统一契约签名适配，调用仍直接抛未实现错误`
 - AuthZ Boundary: `internal-only`
 - Metrics/Isolation: 无
-- Consistency/Constraints: 占位实现；当前调用必抛错
+- Consistency/Constraints: 占位实现；未完成真实 OpenAI 接入；当前调用必抛错
 - Deps/Side Effects: 无外部调用（当前）
 - Performance Notes: 无
 - SoT: `backend/src/modules/learning-tasks/ai-feedback/providers/real/openai-feedback.provider.ts`
@@ -605,3 +606,9 @@
   - `Service Card 06` `StudentLearningDashboardService`
   - `Service Card 07` `ClassroomTasksService`
   - `Service Card 08` `LearningTasksService`（补充 `getSubmissionDetail`、submission detail 权限边界、稳定读源与 `content.codeText` 返回口径）
+  - `Service Card 13` `AiFeedbackProcessor`（补充 task 查询依赖、`AiSubmissionAnalysisContext` 组装、task 缺失失败链路）
+- 修订 Provider Cards：
+  - `Provider Card A` `DefaultStubAiFeedbackProvider`（输入契约切换为 `AiSubmissionAnalysisContext`；仅签名适配，规则逻辑与英文输出不变）
+  - `Provider Card B` `OpenRouterFeedbackProvider`（输入契约切换为 `AiSubmissionAnalysisContext`；prompt 默认简体中文并纳入 task 上下文）
+  - `Provider Card C` `OpenAIFeedbackProvider`（输入契约切换为 `AiSubmissionAnalysisContext`；仍为占位实现）
+- AI feedback 契约同步：`AiFeedbackProvider.analyzeSubmission` 已统一为 `analyzeSubmission(context: AiSubmissionAnalysisContext)`
