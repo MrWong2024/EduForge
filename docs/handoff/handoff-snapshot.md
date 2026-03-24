@@ -274,7 +274,7 @@ AI Provider 错误码（`ai-feedback-provider.error-codes.ts`）：
   - teacher owner 可访问；成员来源只认 Enrollment（`role=STUDENT`）；默认返回 ACTIVE，`includeRemoved=1/true` 时返回 ACTIVE+REMOVED；默认排序 `joinedAt desc, _id desc`；不读取 `classroom.studentIds`。
 - P0 课堂任务提交列表（已完成）：
   - `GET /api/classrooms/:classroomId/tasks/:classroomTaskId/submissions`
-  - teacher owner 可访问；只按 `classroomTaskId` 读取；默认排序 `submittedAt desc, _id desc`；无 job 时 `aiFeedbackStatus=NOT_REQUESTED`；不返回 `passwordHash/content.codeText`。
+  - teacher owner 可访问；只按 `classroomTaskId` 读取；默认排序 `submittedAt desc, _id desc`；无 job 时 `aiFeedbackStatus=NOT_REQUESTED`；`items[*].feedbackCount` 为该 submission 在 Feedback 集合中的总条数（按当前页 submissionIds 批量聚合），无反馈返回 `0`；不返回 `passwordHash/content.codeText`。
 - P0 提交详情稳定读源（已完成）：
   - `GET /api/learning-tasks/submissions/:id`
   - 学生本人可访问；若 `classroomTaskId` 存在，仅所属班级 owner teacher 可访问；若 `classroomTaskId` 为空，仅 task owner teacher 可访问。

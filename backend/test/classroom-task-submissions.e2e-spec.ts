@@ -19,6 +19,12 @@ import { ClassroomTask } from '../src/modules/classrooms/classroom-tasks/schemas
 import { Enrollment } from '../src/modules/classrooms/enrollments/schemas/enrollment.schema';
 import { Task } from '../src/modules/learning-tasks/schemas/task.schema';
 import { Submission } from '../src/modules/learning-tasks/schemas/submission.schema';
+import {
+  Feedback,
+  FeedbackSeverity,
+  FeedbackSource,
+  FeedbackType,
+} from '../src/modules/learning-tasks/schemas/feedback.schema';
 import { AiFeedbackJob } from '../src/modules/learning-tasks/ai-feedback/schemas/ai-feedback-job.schema';
 
 jest.setTimeout(30000);
@@ -58,6 +64,7 @@ type ClassroomTaskSubmissionListResponse = {
     lateBySeconds: number;
     status: string;
     aiFeedbackStatus: string;
+    feedbackCount: number;
   }>;
   total: number;
   page: number;
@@ -92,6 +99,7 @@ describe('Classroom Task Submissions List (e2e)', () => {
   let enrollmentModel: Model<Enrollment>;
   let taskModel: Model<Task>;
   let submissionModel: Model<Submission>;
+  let feedbackModel: Model<Feedback>;
   let aiFeedbackJobModel: Model<AiFeedbackJob>;
 
   let ownerTeacherAgent: ReturnType<typeof request.agent>;
@@ -107,6 +115,7 @@ describe('Classroom Task Submissions List (e2e)', () => {
   let taskId = '';
   let submissionAId = '';
   let submissionBId = '';
+  let submissionASecondId = '';
   let studentAId = '';
   const createdUserIds: string[] = [];
 
@@ -166,6 +175,7 @@ describe('Classroom Task Submissions List (e2e)', () => {
     enrollmentModel = app.get(getModelToken(Enrollment.name));
     taskModel = app.get(getModelToken(Task.name));
     submissionModel = app.get(getModelToken(Submission.name));
+    feedbackModel = app.get(getModelToken(Feedback.name));
     aiFeedbackJobModel = app.get(getModelToken(AiFeedbackJob.name));
 
     const [ownerTeacherHash, otherTeacherHash, studentAHash, studentBHash] =
@@ -326,10 +336,15 @@ describe('Classroom Task Submissions List (e2e)', () => {
 
     if (!KEEP_DB) {
       const cleanup: Promise<unknown>[] = [];
-      if (submissionAId || submissionBId) {
-        const submissionIds = [submissionAId, submissionBId]
+      if (submissionAId || submissionBId || submissionASecondId) {
+        const submissionIds = [submissionAId, submissionBId, submissionASecondId]
           .filter(Boolean)
           .map((id) => new Types.ObjectId(id));
+        cleanup.push(
+          feedbackModel.deleteMany({
+            submissionId: { $in: submissionIds },
+          }),
+        );
         cleanup.push(
           aiFeedbackJobModel.deleteMany({
             submissionId: { $in: submissionIds },
@@ -417,10 +432,59 @@ describe('Classroom Task Submissions List (e2e)', () => {
     expect(typeof item.lateBySeconds).toBe('number');
     expect(item.status).toBe('SUBMITTED');
     expect(item.aiFeedbackStatus).toBe('NOT_REQUESTED');
+    expect(item.feedbackCount).toBe(0);
 
     expect(item).not.toHaveProperty('passwordHash');
     expect(item).not.toHaveProperty('content');
     expect(item).not.toHaveProperty('content.codeText');
+  });
+
+  it('returns feedbackCount for submissions with and without feedback', async () => {
+    const createdSubmission = await studentAAgent
+      .post(
+        `/api/classrooms/${classroomAId}/tasks/${classroomTaskAId}/submissions`,
+      )
+      .send({
+        content: {
+          codeText: 'function classASecondAttempt() { return "A2"; }',
+          language: 'typescript',
+        },
+      })
+      .expect(201);
+    submissionASecondId = (createdSubmission.body as CreatedSubmissionResponse).id;
+
+    await feedbackModel.insertMany([
+      {
+        submissionId: new Types.ObjectId(submissionAId),
+        source: FeedbackSource.Teacher,
+        type: FeedbackType.Style,
+        severity: FeedbackSeverity.Info,
+        message: `Teacher feedback ${Date.now()}`,
+      },
+      {
+        submissionId: new Types.ObjectId(submissionAId),
+        source: FeedbackSource.System,
+        type: FeedbackType.Other,
+        severity: FeedbackSeverity.Warn,
+        message: `System feedback ${Date.now()}`,
+      },
+    ]);
+
+    const response = await ownerTeacherAgent
+      .get(
+        `/api/classrooms/${classroomAId}/tasks/${classroomTaskAId}/submissions`,
+      )
+      .query({ page: 1, limit: 20 })
+      .expect(200);
+    const body = response.body as ClassroomTaskSubmissionListResponse;
+    const itemsById = new Map(body.items.map((item) => [item.id, item]));
+    const withFeedback = itemsById.get(submissionAId);
+    const withoutFeedback = itemsById.get(submissionASecondId);
+
+    expect(withFeedback).toBeDefined();
+    expect(withFeedback?.feedbackCount).toBeGreaterThan(0);
+    expect(withoutFeedback).toBeDefined();
+    expect(withoutFeedback?.feedbackCount).toBe(0);
   });
 
   it('non-owner teacher cannot access and gets 404', async () => {

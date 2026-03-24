@@ -88,6 +88,7 @@ type ClassroomTaskSubmissionListItem = {
   lateBySeconds: number;
   status: Submission['status'];
   aiFeedbackStatus: AiFeedbackStatus;
+  feedbackCount: number;
 };
 type ListClassroomTaskSubmissionsResponse = {
   items: ClassroomTaskSubmissionListItem[];
@@ -113,6 +114,10 @@ type FeedbackItemAgg = {
     suggestion?: string;
     tags?: string[];
   }>;
+};
+type FeedbackCountAgg = {
+  _id: Types.ObjectId;
+  count: number;
 };
 type SubmissionFeedbackSummary = {
   totalItems: number;
@@ -471,14 +476,14 @@ export class ClassroomTasksService {
         .exec(),
       this.submissionModel.countDocuments(filter),
     ]);
-
-    const statusMap =
-      await this.aiFeedbackJobService.getStatusMapBySubmissionIds(
-        submissions.map((submission) => submission._id),
-      );
     if (submissions.length === 0) {
       return { items: [], total, page, limit };
     }
+    const submissionIds = submissions.map((submission) => submission._id);
+    const [statusMap, feedbackCountMap] = await Promise.all([
+      this.aiFeedbackJobService.getStatusMapBySubmissionIds(submissionIds),
+      this.getFeedbackCountsBySubmissionIds(submissionIds),
+    ]);
 
     const studentIds = Array.from(
       new Map(
@@ -504,6 +509,7 @@ export class ClassroomTasksService {
         studentMap.get(submission.studentId.toString()),
         statusMap.get(submission._id.toString()) ??
           AiFeedbackStatus.NotRequested,
+        feedbackCountMap.get(submission._id.toString()) ?? 0,
         classroomTaskObjectId,
       ),
     );
@@ -1176,6 +1182,7 @@ export class ClassroomTasksService {
     submission: ClassroomTaskSubmissionLean,
     student: SubmissionStudentLean | undefined,
     aiFeedbackStatus: AiFeedbackStatus,
+    feedbackCount: number,
     classroomTaskId: Types.ObjectId,
   ): ClassroomTaskSubmissionListItem {
     return {
@@ -1200,7 +1207,26 @@ export class ClassroomTasksService {
       lateBySeconds: submission.lateBySeconds ?? 0,
       status: submission.status,
       aiFeedbackStatus,
+      feedbackCount,
     };
+  }
+
+  private async getFeedbackCountsBySubmissionIds(ids: Types.ObjectId[]) {
+    const countMap = new Map<string, number>();
+    if (ids.length === 0) {
+      return countMap;
+    }
+
+    const rows = await this.feedbackModel
+      .aggregate<FeedbackCountAgg>([
+        { $match: { submissionId: { $in: ids } } },
+        { $group: { _id: '$submissionId', count: { $sum: 1 } } },
+      ])
+      .exec();
+    for (const row of rows) {
+      countMap.set(row._id.toString(), row.count);
+    }
+    return countMap;
   }
 
   private async getFeedbackItemsPreviewBySubmissionIds(

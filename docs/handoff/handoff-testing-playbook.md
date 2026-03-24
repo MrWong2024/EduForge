@@ -140,8 +140,8 @@ npm run test:e2e -- backend/test/classroom-learning-loop.e2e-spec.ts
   - 关键断言：`dueAt` 到期且 `allowLate=false` 返回 `LATE_SUBMISSION_NOT_ALLOWED`；`submittedAt/isLate/lateBySeconds` 持久化语义正确。
   - 重要性：保证截止规则与迟交数据链路一致。
 - `backend/test/classroom-task-submissions.e2e-spec.ts`
-  - 覆盖：P0 `GET /api/learning-tasks/submissions/:id` 稳定读源（含 classroomTask 隔离场景）。
-  - 关键断言：学生本人可读；classroom owner teacher 可读；非授权 teacher/student 返回 `403`；返回 `content.codeText`；无 job 时 `aiFeedbackStatus=NOT_REQUESTED`。
+  - 覆盖：P0 `GET /api/learning-tasks/submissions/:id` 稳定读源（含 classroomTask 隔离场景） + `GET /api/classrooms/:classroomId/tasks/:classroomTaskId/submissions` 列表契约。
+  - 关键断言：学生本人可读；classroom owner teacher 可读；非授权 teacher/student 返回 `403`；返回 `content.codeText`；无 job 时 `aiFeedbackStatus=NOT_REQUESTED`；提交列表 `feedbackCount` 覆盖有反馈 `>0` 与无反馈 `=0` 两种场景。
 - `backend/test/classroom-export-snapshot.e2e-spec.ts`
   - 覆盖：Z9 `GET /api/classrooms/:classroomId/export/snapshot`。
   - 关键断言：`includePerTask=false` 时 perTask 省略且 `meta.notes` 提示；对 stringify 结果断言不包含 `"codeText"`。
