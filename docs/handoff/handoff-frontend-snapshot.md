@@ -94,6 +94,12 @@ Teacher 批阅链路（可用）：
 2. `/teacher/submissions/[submissionId]`（稳定读源）
 3. `TeacherFeedbackForm` -> `POST learning-tasks/submissions/:id/feedback`
 
+Teacher 学习轨迹链路（可用）：
+1. `/teacher/classrooms/[classroomId]/tasks/[classroomTaskId]/learning-trajectory`
+2. 主表保留摘要列（学生/尝试次数/最近尝试时间/最近 AI 状态/错误数变化）。
+3. `错误数变化（最近 vs 首次）` 已在单元格明确展示 `增加/减少/无变化` 语义。
+4. `includeAttempts/includeTagDetails` 已在主视图提供可见扩展区（尝试详情、首次标签/最近标签），不再仅体现在请求参数与 raw JSON。
+
 ## 5) P0 真接口前端收口情况（现状）
 
 已接入并在页面使用：

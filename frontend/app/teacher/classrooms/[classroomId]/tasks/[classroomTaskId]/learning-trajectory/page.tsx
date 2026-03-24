@@ -160,6 +160,79 @@ const toStudentDisplayName = (item: TrajectoryItem): string => {
   return "未知学生";
 };
 
+const toFiniteNumber = (value: unknown): number | null => {
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    return null;
+  }
+  return value;
+};
+
+const toErrorDeltaDisplay = (item: TrajectoryItem): string => {
+  const delta = toFiniteNumber(safeGet(item.trend, "errorDelta", undefined));
+  if (delta === null) {
+    return "—";
+  }
+  if (delta > 0) {
+    return `+${delta}（增加）`;
+  }
+  if (delta < 0) {
+    return `${delta}（减少）`;
+  }
+  return "0（无变化）";
+};
+
+const toTagSummary = (value: unknown): string => {
+  if (!Array.isArray(value)) {
+    return "无";
+  }
+
+  const parts = value
+    .map((item) => {
+      if (!item || typeof item !== "object") {
+        return null;
+      }
+      const record = item as Record<string, unknown>;
+      const tag = pickText(record.tag);
+      if (!tag) {
+        return null;
+      }
+      const count = toFiniteNumber(record.count);
+      return count === null ? tag : `${tag}(${count})`;
+    })
+    .filter((text): text is string => Boolean(text));
+
+  if (parts.length === 0) {
+    return "无";
+  }
+  return parts.join("、");
+};
+
+const toAttemptLabel = (attempt: Record<string, unknown>, index: number): string => {
+  const attemptNo = toFiniteNumber(safeGet(attempt, "attemptNo", undefined));
+  if (attemptNo === null) {
+    return `尝试 ${index + 1}`;
+  }
+  return `第 ${attemptNo} 次`;
+};
+
+const toAttemptFeedbackSummary = (attempt: Record<string, unknown>): string => {
+  const errorCount = toFiniteNumber(
+    safeGet(attempt, "feedbackSummary.severityBreakdown.ERROR", undefined)
+  );
+  const feedbackCount = toFiniteNumber(safeGet(attempt, "feedbackSummary.totalItems", undefined));
+  const pieces: string[] = [];
+  if (errorCount !== null) {
+    pieces.push(`错误 ${errorCount}`);
+  }
+  if (feedbackCount !== null) {
+    pieces.push(`反馈 ${feedbackCount}`);
+  }
+  if (pieces.length === 0) {
+    return "无错误/反馈统计";
+  }
+  return pieces.join("，");
+};
+
 export default async function LearningTrajectoryPage({
   params,
   searchParams,
@@ -331,7 +404,7 @@ export default async function LearningTrajectoryPage({
                 <th className="px-4 py-3">尝试次数</th>
                 <th className="px-4 py-3">最近尝试时间</th>
                 <th className="px-4 py-3">最近 AI 状态</th>
-                <th className="px-4 py-3">错误变化</th>
+                <th className="px-4 py-3">错误数变化（最近 vs 首次）</th>
               </tr>
             </thead>
             <tbody>
@@ -341,17 +414,77 @@ export default async function LearningTrajectoryPage({
                   typeof status === "string" ? getAiStatusLabel(status) : toDisplayText(status);
                 const studentDisplayName = toStudentDisplayName(item);
                 const studentKey = item.studentId ?? item.student?.id ?? `student-${index}`;
+                const showExpandedDetail =
+                  viewModel.query.includeAttempts || viewModel.query.includeTagDetails;
+                const attempts = Array.isArray(item.attempts) ? item.attempts : [];
+                const firstTagsSummary = toTagSummary(safeGet(item.trend, "topTagsFirst", undefined));
+                const latestTagsSummary = toTagSummary(safeGet(item.trend, "topTagsLatest", undefined));
 
                 return (
-                  <tr key={String(studentKey)} className="border-t border-zinc-100">
-                    <td className="px-4 py-3">{studentDisplayName}</td>
-                    <td className="px-4 py-3">{toDisplayText(item.attemptsCount)}</td>
-                    <td className="px-4 py-3">
-                      {toDisplayDate(item.latestAttemptAt ?? null)}
-                    </td>
-                    <td className="px-4 py-3">{displayStatus}</td>
-                    <td className="px-4 py-3">{toDisplayText(safeGet(item.trend, "errorDelta", undefined))}</td>
-                  </tr>
+                  [
+                    <tr key={`${String(studentKey)}-summary`} className="border-t border-zinc-100">
+                      <td className="px-4 py-3">{studentDisplayName}</td>
+                      <td className="px-4 py-3">{toDisplayText(item.attemptsCount)}</td>
+                      <td className="px-4 py-3">{toDisplayDate(item.latestAttemptAt ?? null)}</td>
+                      <td className="px-4 py-3">{displayStatus}</td>
+                      <td className="px-4 py-3">{toErrorDeltaDisplay(item)}</td>
+                    </tr>,
+                    showExpandedDetail ? (
+                      <tr key={`${String(studentKey)}-details`} className="border-t border-zinc-100 bg-zinc-50/40">
+                        <td colSpan={5} className="px-4 pb-3 pt-2">
+                          <div className="space-y-2 rounded-md border border-zinc-200 bg-white p-3 text-xs text-zinc-700">
+                            {viewModel.query.includeAttempts ? (
+                              <section className="space-y-1">
+                                <p className="font-medium text-zinc-800">尝试详情</p>
+                                {attempts.length === 0 ? (
+                                  <p>当前无尝试详情数据。</p>
+                                ) : (
+                                  <ul className="space-y-1">
+                                    {attempts.map((attempt, attemptIndex) => {
+                                      const attemptRecord =
+                                        attempt && typeof attempt === "object"
+                                          ? (attempt as Record<string, unknown>)
+                                          : {};
+                                      const attemptStatusRaw = safeGet(
+                                        attemptRecord,
+                                        "aiFeedbackStatus",
+                                        undefined
+                                      );
+                                      const attemptStatus =
+                                        typeof attemptStatusRaw === "string"
+                                          ? getAiStatusLabel(attemptStatusRaw)
+                                          : toDisplayText(attemptStatusRaw);
+                                      const isLate = safeGet(attemptRecord, "isLate", undefined) === true;
+                                      const attemptTime =
+                                        safeGet(attemptRecord, "createdAt", undefined) ??
+                                        safeGet(attemptRecord, "submittedAt", null);
+
+                                      return (
+                                        <li key={`${String(studentKey)}-attempt-${attemptIndex}`}>
+                                          {toAttemptLabel(attemptRecord, attemptIndex)} · 提交时间{" "}
+                                          {toDisplayDate(attemptTime)} · AI{" "}
+                                          {attemptStatus} · {isLate ? "迟交" : "按时"} ·{" "}
+                                          {toAttemptFeedbackSummary(attemptRecord)}
+                                        </li>
+                                      );
+                                    })}
+                                  </ul>
+                                )}
+                              </section>
+                            ) : null}
+
+                            {viewModel.query.includeTagDetails ? (
+                              <section className="space-y-1">
+                                <p className="font-medium text-zinc-800">标签细节</p>
+                                <p>首次标签：{firstTagsSummary}</p>
+                                <p>最近标签：{latestTagsSummary}</p>
+                              </section>
+                            ) : null}
+                          </div>
+                        </td>
+                      </tr>
+                    ) : null,
+                  ]
                 );
               })}
             </tbody>
