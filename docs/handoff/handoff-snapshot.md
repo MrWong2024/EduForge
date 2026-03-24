@@ -297,6 +297,7 @@ AI Provider 错误码（`ai-feedback-provider.error-codes.ts`）：
 - Z4 学习轨迹（teacher）：
   - `GET /api/classrooms/:classroomId/tasks/:classroomTaskId/learning-trajectory`
   - `items[*]` 已返回结构化学生公开信息 `student:{id,name,studentNo,email}`（兼容 `studentName`），且未提交学生同样返回该信息。
+  - `includeAttempts=true` 时 `items[*].attempts[*]` 已返回 `feedbackCount`（Feedback 全来源总条数，AI/TEACHER/SYSTEM，不区分来源）；同一 attempt 下 `feedbackSummary.totalItems` 继续表示 AI 摘要条目数。
 - Z5 课堂复盘包（teacher）：
   - `GET /api/classrooms/:classroomId/tasks/:classroomTaskId/review-pack`
 - Z6 过程性评价（teacher）：

@@ -175,6 +175,7 @@ type LearningTrajectoryAttempt = {
   isLate: boolean;
   lateBySeconds: number;
   aiFeedbackStatus: AiFeedbackStatus;
+  feedbackCount: number;
   feedbackSummary: SubmissionFeedbackSummary;
 };
 type LearningTrajectoryItem = {
@@ -632,13 +633,18 @@ export class ClassroomTasksService {
     }
 
     const submissionIds = submissions.map((submission) => submission._id);
-    const [statusMap, feedbackSummaryMap] = await Promise.all([
-      this.aiFeedbackJobService.getStatusMapBySubmissionIds(submissionIds),
-      this.getFeedbackSummariesBySubmissionIds(
-        submissionIds,
-        includeTagDetails,
-      ),
-    ]);
+    const [statusMap, feedbackSummaryMap, feedbackCountMap] = await Promise.all(
+      [
+        this.aiFeedbackJobService.getStatusMapBySubmissionIds(submissionIds),
+        this.getFeedbackSummariesBySubmissionIds(
+          submissionIds,
+          includeTagDetails,
+        ),
+        includeAttempts
+          ? this.getFeedbackCountsBySubmissionIds(submissionIds)
+          : Promise.resolve(new Map<string, number>()),
+      ],
+    );
 
     const submissionsByStudentId = new Map<
       string,
@@ -705,6 +711,8 @@ export class ClassroomTasksService {
               aiFeedbackStatus:
                 statusMap.get(submission._id.toString()) ??
                 AiFeedbackStatus.NotRequested,
+              feedbackCount:
+                feedbackCountMap.get(submission._id.toString()) ?? 0,
               feedbackSummary,
             } as LearningTrajectoryAttempt;
           })

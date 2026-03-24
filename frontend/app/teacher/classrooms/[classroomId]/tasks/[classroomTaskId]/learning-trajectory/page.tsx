@@ -216,19 +216,18 @@ const toAttemptLabel = (attempt: Record<string, unknown>, index: number): string
 };
 
 const toAttemptFeedbackSummary = (attempt: Record<string, unknown>): string => {
+  const totalFeedbackCount = toFiniteNumber(safeGet(attempt, "feedbackCount", undefined)) ?? 0;
   const errorCount = toFiniteNumber(
     safeGet(attempt, "feedbackSummary.severityBreakdown.ERROR", undefined)
   );
-  const feedbackCount = toFiniteNumber(safeGet(attempt, "feedbackSummary.totalItems", undefined));
+  const aiSummaryCount = toFiniteNumber(safeGet(attempt, "feedbackSummary.totalItems", undefined));
   const pieces: string[] = [];
+  pieces.push(`总反馈 ${totalFeedbackCount}`);
   if (errorCount !== null) {
     pieces.push(`错误 ${errorCount}`);
   }
-  if (feedbackCount !== null) {
-    pieces.push(`反馈 ${feedbackCount}`);
-  }
-  if (pieces.length === 0) {
-    return "无错误/反馈统计";
+  if (aiSummaryCount !== null) {
+    pieces.push(`AI摘要 ${aiSummaryCount}`);
   }
   return pieces.join("，");
 };

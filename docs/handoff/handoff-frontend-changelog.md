@@ -120,6 +120,13 @@
 - 【不要回退】不要把开关效果再次退回到“只影响 query/raw JSON、主视图无感知”的状态；不要移除错误变化的方向语义文案。
 - 【对新会话的意义】教师在主视图即可感知开关生效并读懂错误趋势，无需依赖 raw JSON 才能确认数据变化。
 
+## UAT-FE-10
+
+- 【本步解决】学习轨迹 attempts 扩展区把 `feedbackSummary.totalItems`（AI 摘要条目数）误当“总反馈数”的口径混淆问题。
+- 【新增事实 / 已收口口径】学习轨迹页 attempts 中“总反馈”已切换为读取 `attempt.feedbackCount`；`feedbackSummary.totalItems` 仅作为 AI 摘要信息展示，不再用于总反馈计数。
+- 【不要回退】不要再使用 `feedbackSummary.totalItems` 渲染“反馈 X”总数文案。
+- 【对新会话的意义】当 `feedbackCount` 与 AI 摘要条目数不一致时，前端显示口径与后端契约保持一致。
+
 ## 当前阶段一句话结论
 
 前端已达到“Teacher/Student 主链路可用 + 任务模板层与班级实例层边界收口 + 教师模板主链路可维护”的工程验收阶段，但尚未进入最终交付定版阶段。

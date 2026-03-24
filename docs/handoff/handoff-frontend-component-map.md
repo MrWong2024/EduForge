@@ -76,6 +76,7 @@
 - 需要改三件套导航时：只改 `TaskContextHeader` 和 `paths.ts`，不要在三个页面分别维护链接。
 - 需要改 AI 状态文案时：统一改 `lib/ui/status.ts` 与 `AiProcessingHint.tsx`，不要在每页复制文案。
 - 需要改学习轨迹页（`teacher/.../learning-trajectory`）时：优先在页面内维护“摘要表 + 开关扩展区（attempts/tag details）”这一最小结构，不要引入独立复杂组件体系。
+- 学习轨迹 attempts 扩展区中的“总反馈”默认读取 `attempt.feedbackCount`；`feedbackSummary.totalItems` 仅作 AI 摘要信息，不要混用口径。
 - 需要改 submission detail 相关逻辑时：优先以稳定读源 `GET learning-tasks/submissions/:id` 为主，先看 `lib/api/types-student.ts`、`lib/api/types-teacher.ts` 与 Teacher/Student submission detail 页，不要把 query 透传当主数据源。
 - 模板创建/编辑/rubric 配置属于模板层（`/teacher/tasks*`），不要回退到班级任务页。
 - 班级任务页只负责班级实例发布与任务工作区管理，不要把模板维护能力混回 `PublishClassroomTaskForm`。

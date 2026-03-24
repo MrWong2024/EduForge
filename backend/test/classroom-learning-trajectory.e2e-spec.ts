@@ -15,7 +15,12 @@ import { ClassroomTask } from '../src/modules/classrooms/classroom-tasks/schemas
 import { Enrollment } from '../src/modules/classrooms/enrollments/schemas/enrollment.schema';
 import { Task } from '../src/modules/learning-tasks/schemas/task.schema';
 import { Submission } from '../src/modules/learning-tasks/schemas/submission.schema';
-import { Feedback } from '../src/modules/learning-tasks/schemas/feedback.schema';
+import {
+  Feedback,
+  FeedbackSeverity,
+  FeedbackSource,
+  FeedbackType,
+} from '../src/modules/learning-tasks/schemas/feedback.schema';
 import { AiFeedbackJob } from '../src/modules/learning-tasks/ai-feedback/schemas/ai-feedback-job.schema';
 import { AiFeedbackProcessor } from '../src/modules/learning-tasks/ai-feedback/services/ai-feedback-processor.service';
 
@@ -67,6 +72,7 @@ type LearningTrajectoryResponse = {
       createdAt: string;
       isLate: boolean;
       aiFeedbackStatus: string;
+      feedbackCount: number;
       feedbackSummary: {
         totalItems: number;
         severityBreakdown: { INFO: number; WARN: number; ERROR: number };
@@ -410,6 +416,22 @@ describe('Classroom Learning Trajectory (e2e)', () => {
     submissionIds.push(secondSubmissionBody.id);
     expect(secondSubmissionBody.attemptNo).toBe(2);
 
+    const thirdSubmission = await studentAAgent
+      .post(
+        `/api/classrooms/${classroomId}/tasks/${classroomTaskId}/submissions`,
+      )
+      .send({
+        content: {
+          codeText: 'function trajectoryAttemptThree() { return "a3"; }',
+          language: 'typescript',
+        },
+      })
+      .expect(201);
+    const thirdSubmissionBody =
+      thirdSubmission.body as CreatedSubmissionResponse;
+    submissionIds.push(thirdSubmissionBody.id);
+    expect(thirdSubmissionBody.attemptNo).toBe(3);
+
     await studentAAgent
       .post(
         `/api/learning-tasks/submissions/${secondSubmissionBody.id}/ai-feedback/request`,
@@ -425,7 +447,9 @@ describe('Classroom Learning Trajectory (e2e)', () => {
         (item) => item.studentId === studentAId,
       );
       const succeeded = !!studentAItem?.attempts.some(
-        (attempt) => attempt.aiFeedbackStatus === 'SUCCEEDED',
+        (attempt) =>
+          attempt.submissionId === secondSubmissionBody.id &&
+          attempt.aiFeedbackStatus === 'SUCCEEDED',
       );
       if (succeeded) {
         hasSucceeded = true;
@@ -434,6 +458,23 @@ describe('Classroom Learning Trajectory (e2e)', () => {
       await waitMs(80);
     }
     expect(hasSucceeded).toBe(true);
+
+    await feedbackModel.insertMany([
+      {
+        submissionId: new Types.ObjectId(secondSubmissionBody.id),
+        source: FeedbackSource.Teacher,
+        type: FeedbackType.Style,
+        severity: FeedbackSeverity.Info,
+        message: `Trajectory teacher feedback ${Date.now()}`,
+      },
+      {
+        submissionId: new Types.ObjectId(secondSubmissionBody.id),
+        source: FeedbackSource.System,
+        type: FeedbackType.Other,
+        severity: FeedbackSeverity.Warn,
+        message: `Trajectory system feedback ${Date.now()}`,
+      },
+    ]);
 
     const trajectory = await fetchTrajectory();
     expect(trajectory.total).toBeGreaterThanOrEqual(2);
@@ -460,13 +501,28 @@ describe('Classroom Learning Trajectory (e2e)', () => {
       studentNo: studentBNo,
       email: studentBEmail.toLowerCase(),
     });
-    expect(studentAItem?.attemptsCount).toBe(2);
+    expect(studentAItem?.attemptsCount).toBe(3);
     expect(studentBItem?.attemptsCount).toBe(0);
     expect(typeof studentAItem?.trend.errorCountFirst).toBe('number');
     expect(typeof studentAItem?.trend.errorCountLatest).toBe('number');
     expect(JSON.stringify(trajectory)).not.toContain('passwordHash');
+    const secondAttempt = studentAItem?.attempts.find(
+      (attempt) => attempt.submissionId === secondSubmissionBody.id,
+    );
+    const thirdAttempt = studentAItem?.attempts.find(
+      (attempt) => attempt.submissionId === thirdSubmissionBody.id,
+    );
+    expect(secondAttempt).toBeDefined();
+    expect(thirdAttempt).toBeDefined();
+    expect(secondAttempt?.feedbackSummary.totalItems).toBeGreaterThan(0);
+    expect(secondAttempt?.feedbackCount).toBeGreaterThan(
+      secondAttempt?.feedbackSummary.totalItems ?? 0,
+    );
+    expect(thirdAttempt?.feedbackSummary.totalItems).toBe(0);
+    expect(thirdAttempt?.feedbackCount).toBe(0);
     for (const attempt of studentAItem?.attempts ?? []) {
       expect(typeof attempt.aiFeedbackStatus).toBe('string');
+      expect(typeof attempt.feedbackCount).toBe('number');
       expect(typeof attempt.feedbackSummary.totalItems).toBe('number');
     }
   });

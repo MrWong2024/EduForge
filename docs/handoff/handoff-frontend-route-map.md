@@ -31,7 +31,7 @@
 | `/teacher/classrooms/[classroomId]/tasks/[classroomTaskId]` | 课堂任务详情 | `GET classrooms/:id`、`GET classrooms/:id/tasks/:classroomTaskId`、`POST learning-tasks/tasks/:id/publish` | 查看课堂任务与其底层 learning task 的基础状态，必要时触发底层 task publish | Done | 真接口 |
 | `/teacher/classrooms/[classroomId]/tasks/[classroomTaskId]/submissions` | 课堂任务提交管理 | `GET classrooms/:id`、`GET classrooms/:classroomId/tasks/:classroomTaskId/submissions` | 查看提交、跳转批阅页 | Done | P0 真接口 |
 | `/teacher/submissions/[submissionId]` | 教师提交详情/批阅 | `GET learning-tasks/submissions/:id`、`GET learning-tasks/submissions/:id/feedback`、`POST learning-tasks/submissions/:id/feedback` | 查看代码与反馈、新增教师反馈 | Done | 稳定读源 + 真接口 |
-| `/teacher/classrooms/[classroomId]/tasks/[classroomTaskId]/learning-trajectory` | 学习轨迹 | `GET .../learning-trajectory` | window/sort/order/include* 切换；主表“错误数变化（最近 vs 首次）”显示增加/减少/无变化语义；`includeAttempts/includeTagDetails` 在主视图显示可见扩展区 | Done | 真接口 |
+| `/teacher/classrooms/[classroomId]/tasks/[classroomTaskId]/learning-trajectory` | 学习轨迹 | `GET .../learning-trajectory` | window/sort/order/include* 切换；主表“错误数变化（最近 vs 首次）”显示增加/减少/无变化语义；`includeAttempts/includeTagDetails` 在主视图显示可见扩展区；attempts 中“总反馈”使用 `feedbackCount`（非 `feedbackSummary.totalItems`） | Done | 真接口 |
 | `/teacher/classrooms/[classroomId]/tasks/[classroomTaskId]/review-pack` | 课堂复盘 | `GET .../review-pack` | topK/examples/window/include* 切换 | Done | 真接口 |
 | `/teacher/classrooms/[classroomId]/tasks/[classroomTaskId]/ai-metrics` | AI 指标 | `GET .../ai-metrics` | window/includeTags 切换 | Done | 真接口 |
 | `/teacher/classrooms/[classroomId]/members` | 班级成员管理 | `GET classrooms/:id`、`GET classrooms/:id/students`、`POST classrooms/:id/students/:uid/remove` | 成员列表、移除成员 | Done | P0 真接口 |

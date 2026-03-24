@@ -99,6 +99,7 @@ Teacher 学习轨迹链路（可用）：
 2. 主表保留摘要列（学生/尝试次数/最近尝试时间/最近 AI 状态/错误数变化）。
 3. `错误数变化（最近 vs 首次）` 已在单元格明确展示 `增加/减少/无变化` 语义。
 4. `includeAttempts/includeTagDetails` 已在主视图提供可见扩展区（尝试详情、首次标签/最近标签），不再仅体现在请求参数与 raw JSON。
+5. attempts 扩展区“总反馈”已消费 `attempt.feedbackCount`（全来源总反馈数）；`feedbackSummary.totalItems` 仅作为 AI 摘要信息展示，不再充当总反馈数。
 
 ## 5) P0 真接口前端收口情况（现状）
 

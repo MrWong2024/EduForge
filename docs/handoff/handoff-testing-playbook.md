@@ -125,7 +125,7 @@ npm run test:e2e -- backend/test/classroom-learning-loop.e2e-spec.ts
   - 重要性：保证学生端聚合详情与 attempt-based 语义一致。
 - `backend/test/classroom-learning-trajectory.e2e-spec.ts`
   - 覆盖：Z4 `GET /api/classrooms/:classroomId/tasks/:classroomTaskId/learning-trajectory`（teacher）。
-  - 关键断言：`items[*].student` 含 `id/name/studentNo/email`（并兼容 `studentName`）；未提交学生也在 `items` 且带 student 公开信息；响应不包含 `passwordHash`；`includeTagDetails=false` 跳过 tags unwind；`attempts[].isLate/lateBySeconds` 存在（Z7）。
+  - 关键断言：`items[*].student` 含 `id/name/studentNo/email`（并兼容 `studentName`）；未提交学生也在 `items` 且带 student 公开信息；响应不包含 `passwordHash`；`includeTagDetails=false` 跳过 tags unwind；`attempts[].isLate/lateBySeconds` 存在（Z7）；`includeAttempts=true` 时 `attempts[*].feedbackCount` 存在且覆盖有反馈 `>0` / 无反馈 `=0`，同时 `feedbackSummary.totalItems` 保留 AI 摘要语义。
   - 重要性：锁定轨迹分页口径与迟交字段传播。
 - `backend/test/classroom-review-pack.e2e-spec.ts`
   - 覆盖：Z5 `GET /api/classrooms/:classroomId/tasks/:classroomTaskId/review-pack`。
