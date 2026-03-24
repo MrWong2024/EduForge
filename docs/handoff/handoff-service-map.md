@@ -185,7 +185,7 @@
   - `getLearningTrajectory(...): Promise<Record<string, unknown>> — called by /classrooms/:classroomId/tasks/:classroomTaskId/learning-trajectory`
 - AuthZ Boundary: `teacher-only`（发布） / `student-only + member-only`（提交） / `member-or-owner`（查看）
 - Metrics/Isolation: 学生提交通过 `createSubmissionForClassroomTask(..., classroomTaskId)` 绑定隔离主键；Z3/Z4 聚合严格按 `classroomTaskId`；提交列表读取同样只按 `classroomTaskId`，不按 `taskId` 跨班聚合；学生集合基于 Enrollment ACTIVE
-- Consistency/Constraints: 要求 Task 已 `PUBLISHED`；班级 `ARCHIVED` 禁止发布；`unique(classroomId,taskId)` 防重复发布；**提交门禁分层：`ClassroomTasksService` 负责 `student + Enrollment ACTIVE + classroomTask 归属` 校验；`LearningTasksService.createSubmissionInternal` 仅在存在 `classroomTaskId` 时 enforce `dueAt/allowLate`（超时且 `allowLate=false` -> `403(code=LATE_SUBMISSION_NOT_ALLOWED)`），并持久化/返回 `submittedAt/isLate/lateBySeconds`。**；提交列表 `aiFeedbackStatus` 无 job 显式回填 `NOT_REQUESTED`；不返回 `passwordHash/content.codeText`
+- Consistency/Constraints: 要求 Task 已 `PUBLISHED`；班级 `ARCHIVED` 禁止发布；`unique(classroomId,taskId)` 防重复发布；**提交门禁分层：`ClassroomTasksService` 负责 `student + Enrollment ACTIVE + classroomTask 归属` 校验；`LearningTasksService.createSubmissionInternal` 仅在存在 `classroomTaskId` 时 enforce `dueAt/allowLate`（超时且 `allowLate=false` -> `403(code=LATE_SUBMISSION_NOT_ALLOWED)`），并持久化/返回 `submittedAt/isLate/lateBySeconds`。**；提交列表 `aiFeedbackStatus` 无 job 显式回填 `NOT_REQUESTED`；learning-trajectory `items[*]` 返回结构化 `student:{id,name,studentNo,email}`（兼容 `studentName`）；不返回 `passwordHash/content.codeText`
 - Deps/Side Effects: `ClassroomModel`, `ClassroomTaskModel`, `TaskModel`, `SubmissionModel`, `FeedbackModel`, `UserModel`, `EnrollmentService`, `AiFeedbackJobService`, `LearningTasksService`
 - Performance Notes: 任务列表使用 `aggregate(basePipeline + totalPipeline)` 一次生成分页数据与总数；提交列表按页查询 submission 后批量查询用户公开信息与 AI 状态，避免 N+1
 - SoT: `backend/src/modules/classrooms/classroom-tasks/services/classroom-tasks.service.ts`; `backend/src/modules/classrooms/classroom-tasks/schemas/classroom-task.schema.ts`; `backend/src/modules/classrooms/enrollments/services/enrollment.service.ts`; `backend/src/modules/classrooms/README.md`
@@ -317,14 +317,14 @@
 - Actions: `page-students`, `aggregate-attempt-trend`, `optional-tag-details`, `sort-page-items`
 - I/O Shape:
   - In: `classroomId`, `classroomTaskId`, `teacherId`, `window/page/limit/sort/order/includeAttempts/includeTagDetails`
-  - Out: `{ classroomId, classroomTaskId, window, page, limit, total, items[] }`
+  - Out: `{ classroomId, classroomTaskId, window, page, limit, total, items[] }`（`items[*]` 至少含 `studentId`、`studentName`、`student:{id,name,studentNo,email}`、attempt/trend）
 - Key Methods:
   - `getLearningTrajectory(classroomId, classroomTaskId, query, teacherId)`
 - AuthZ Boundary: `teacher-only + owner-only`
 - Metrics/Isolation: 学生范围来自 Enrollment ACTIVE（分页在学生维度）；`items` 包含未提交学生（`notSubmitted` 维度可排序）；全链路按 `classroomTaskId` 聚合
-- Consistency/Constraints: `includeTagDetails=false` 时跳过 tags 展开聚合；`aiFeedbackStatus` 缺 job 为 `NOT_REQUESTED`
-- Deps/Side Effects: `ClassroomModel`, `ClassroomTaskModel`, `SubmissionModel`, `EnrollmentService`, `AiFeedbackJobService`, `FeedbackModel`；只读
-- Performance Notes: 先分页 enrollment，再用 page-scope studentIds 聚合 submissions/feedback
+- Consistency/Constraints: `includeTagDetails=false` 时跳过 tags 展开聚合；`aiFeedbackStatus` 缺 job 为 `NOT_REQUESTED`；未提交学生同样携带 `student` 公开信息
+- Deps/Side Effects: `ClassroomModel`, `ClassroomTaskModel`, `SubmissionModel`, `UserModel`, `EnrollmentService`, `AiFeedbackJobService`, `FeedbackModel`；只读
+- Performance Notes: 先分页 enrollment，再用 page-scope studentIds 批量查询 users 与聚合 submissions/feedback，避免 N+1
 - SoT: `backend/src/modules/classrooms/classroom-tasks/services/classroom-tasks.service.ts`; `backend/src/modules/classrooms/classroom-tasks/dto/query-learning-trajectory.dto.ts`; `backend/src/modules/classrooms/README.md`
 - Failure Modes:
   - 班级或课堂任务不存在 -> `404`

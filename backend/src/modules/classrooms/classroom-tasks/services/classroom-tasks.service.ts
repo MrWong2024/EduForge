@@ -145,6 +145,17 @@ type LearningTrajectoryClassroomTaskLean = Pick<
   'classroomId' | 'dueAt'
 > &
   WithId;
+type LearningTrajectoryStudentLean = Pick<
+  User,
+  'email' | 'name' | 'studentNo'
+> &
+  WithId;
+type LearningTrajectoryStudentPublic = {
+  id: string;
+  name: string | null;
+  studentNo: string | null;
+  email: string | null;
+};
 type LearningTrajectoryTrend = {
   errorCountFirst: number;
   errorCountLatest: number;
@@ -163,11 +174,23 @@ type LearningTrajectoryAttempt = {
 };
 type LearningTrajectoryItem = {
   studentId: string;
+  studentName: string | null;
+  student: LearningTrajectoryStudentPublic;
   attemptsCount: number;
   latestAttemptAt: string | null;
   latestAiFeedbackStatus: AiFeedbackStatus | null;
   trend: LearningTrajectoryTrend;
   attempts: LearningTrajectoryAttempt[];
+};
+type LearningTrajectoryResponse = {
+  classroomId: string;
+  classroomTaskId: string;
+  window: LearningTrajectoryWindow;
+  generatedAt: string;
+  page: number;
+  limit: number;
+  total: number;
+  items: LearningTrajectoryItem[];
 };
 
 @Injectable()
@@ -493,7 +516,7 @@ export class ClassroomTasksService {
     classroomTaskId: string,
     query: QueryLearningTrajectoryDto,
     teacherId: string,
-  ) {
+  ): Promise<LearningTrajectoryResponse> {
     const classroomObjectId = this.parseObjectId(classroomId, 'classroomId');
     const classroomTaskObjectId = this.parseObjectId(
       classroomTaskId,
@@ -580,16 +603,27 @@ export class ClassroomTasksService {
     const studentObjectIds = studentIds.map(
       (studentId) => new Types.ObjectId(studentId),
     );
-    const submissions = await this.submissionModel
-      .find({
-        classroomTaskId: classroomTaskObjectId,
-        studentId: { $in: studentObjectIds },
-        createdAt: { $gte: lowerBound },
-      })
-      .select('_id studentId attemptNo createdAt isLate lateBySeconds')
-      .sort({ studentId: 1, attemptNo: 1, createdAt: 1 })
-      .lean<LearningTrajectorySubmissionRow[]>()
-      .exec();
+    const [students, submissions] = await Promise.all([
+      this.userModel
+        .find({ _id: { $in: studentObjectIds } })
+        .select('name studentNo email')
+        .lean<LearningTrajectoryStudentLean[]>()
+        .exec(),
+      this.submissionModel
+        .find({
+          classroomTaskId: classroomTaskObjectId,
+          studentId: { $in: studentObjectIds },
+          createdAt: { $gte: lowerBound },
+        })
+        .select('_id studentId attemptNo createdAt isLate lateBySeconds')
+        .sort({ studentId: 1, attemptNo: 1, createdAt: 1 })
+        .lean<LearningTrajectorySubmissionRow[]>()
+        .exec(),
+    ]);
+    const studentPublicMap = new Map<string, LearningTrajectoryStudentLean>();
+    for (const student of students) {
+      studentPublicMap.set(student._id.toString(), student);
+    }
 
     const submissionIds = submissions.map((submission) => submission._id);
     const [statusMap, feedbackSummaryMap] = await Promise.all([
@@ -612,10 +646,16 @@ export class ClassroomTasksService {
     }
 
     const items = studentIds.map((studentId) => {
+      const studentPublic = this.toLearningTrajectoryStudentPublic(
+        studentId,
+        studentPublicMap.get(studentId),
+      );
       const studentSubmissions = submissionsByStudentId.get(studentId) ?? [];
       if (studentSubmissions.length === 0) {
         return {
           studentId,
+          studentName: studentPublic.name,
+          student: studentPublic,
           attemptsCount: 0,
           latestAttemptAt: null,
           latestAiFeedbackStatus: null,
@@ -666,6 +706,8 @@ export class ClassroomTasksService {
 
       return {
         studentId,
+        studentName: studentPublic.name,
+        student: studentPublic,
         attemptsCount: studentSubmissions.length,
         latestAttemptAt: (
           latestSubmission.createdAt ?? new Date(0)
@@ -1104,6 +1146,30 @@ export class ClassroomTasksService {
       return defaultValue;
     }
     return value.toLowerCase() === 'true';
+  }
+
+  private toLearningTrajectoryStudentPublic(
+    studentId: string,
+    student: LearningTrajectoryStudentLean | undefined,
+  ): LearningTrajectoryStudentPublic {
+    const name =
+      typeof student?.name === 'string' && student.name.trim()
+        ? student.name.trim()
+        : null;
+    const studentNo =
+      typeof student?.studentNo === 'string' && student.studentNo.trim()
+        ? student.studentNo.trim()
+        : null;
+    const email =
+      typeof student?.email === 'string' && student.email.trim()
+        ? student.email.trim()
+        : null;
+    return {
+      id: studentId,
+      name,
+      studentNo,
+      email,
+    };
   }
 
   private toClassroomTaskSubmissionListItem(

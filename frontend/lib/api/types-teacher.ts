@@ -15,6 +15,13 @@ const asRecord = (value: unknown): UnknownRecord =>
 const asString = (value: unknown): string | undefined =>
   typeof value === "string" && value.trim() ? value.trim() : undefined;
 
+const asNullableString = (value: unknown): string | null | undefined => {
+  if (value === null) {
+    return null;
+  }
+  return asString(value);
+};
+
 const asBoolean = (value: unknown): boolean | undefined =>
   typeof value === "boolean" ? value : undefined;
 
@@ -285,7 +292,27 @@ export type LearningTrajectoryResponse = {
   page?: number;
   limit?: number;
   total?: number;
-  items: UnknownRecord[];
+  items: LearningTrajectoryItem[];
+  raw: UnknownRecord;
+};
+
+export type LearningTrajectoryStudentPublic = {
+  id?: string;
+  name?: string | null;
+  studentNo?: string | null;
+  email?: string | null;
+  raw: UnknownRecord;
+};
+
+export type LearningTrajectoryItem = {
+  studentId?: string;
+  studentName?: string | null;
+  student?: LearningTrajectoryStudentPublic;
+  attemptsCount?: number;
+  latestAttemptAt?: string | null;
+  latestAiFeedbackStatus?: string | null;
+  trend: UnknownRecord;
+  attempts: UnknownRecord[];
   raw: UnknownRecord;
 };
 
@@ -639,6 +666,50 @@ export const toClassroomTasksResponse = (payload: unknown): ClassroomTasksRespon
 
 export const toDashboardResponse = (payload: unknown): DashboardResponse => asRecord(payload);
 
+const toLearningTrajectoryStudentPublic = (value: unknown): LearningTrajectoryStudentPublic | undefined => {
+  const record = asRecord(value);
+  if (Object.keys(record).length === 0) {
+    return undefined;
+  }
+
+  return {
+    id: asString(record.id),
+    name: asNullableString(record.name),
+    studentNo: asNullableString(record.studentNo),
+    email: asNullableString(record.email),
+    raw: record,
+  };
+};
+
+const toLearningTrajectoryItem = (value: unknown): LearningTrajectoryItem => {
+  const record = asRecord(value);
+  const studentRecord = asRecord(safeGet(record, "student", undefined));
+  const student = toLearningTrajectoryStudentPublic(studentRecord);
+  const studentId = asString(record.studentId) ?? student?.id;
+
+  return {
+    studentId,
+    studentName:
+      asNullableString(record.studentName) ??
+      asNullableString(student?.name) ??
+      asNullableString(record.name),
+    student:
+      student ??
+      (studentId
+        ? {
+            id: studentId,
+            raw: {},
+          }
+        : undefined),
+    attemptsCount: asNumber(record.attemptsCount),
+    latestAttemptAt: asNullableString(record.latestAttemptAt),
+    latestAiFeedbackStatus: asNullableString(record.latestAiFeedbackStatus),
+    trend: asRecord(safeGet(record, "trend", undefined)),
+    attempts: asRecordArray(safeGet(record, "attempts", undefined)),
+    raw: record,
+  };
+};
+
 export const toLearningTrajectoryResponse = (payload: unknown): LearningTrajectoryResponse => {
   const record = asRecord(payload);
 
@@ -649,7 +720,7 @@ export const toLearningTrajectoryResponse = (payload: unknown): LearningTrajecto
     page: asNumber(record.page),
     limit: asNumber(record.limit),
     total: asNumber(record.total),
-    items: asRecordArray(safeGet(record, "items", undefined)),
+    items: asRecordArray(safeGet(record, "items", undefined)).map((item) => toLearningTrajectoryItem(item)),
     raw: record,
   };
 };

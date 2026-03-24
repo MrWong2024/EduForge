@@ -40,6 +40,18 @@ type TrajectoryWindow = (typeof TRAJECTORY_WINDOWS)[number];
 type TrajectorySortField = (typeof TRAJECTORY_SORT_FIELDS)[number];
 type TrajectorySortOrder = (typeof TRAJECTORY_SORT_ORDERS)[number];
 
+const TRAJECTORY_SORT_FIELD_LABELS: Record<TrajectorySortField, string> = {
+  latestAttemptAt: "最近提交时间",
+  attemptsCount: "提交次数",
+  errorRate: "错误率",
+  notSubmitted: "未提交优先",
+};
+
+const TRAJECTORY_SORT_ORDER_LABELS: Record<TrajectorySortOrder, string> = {
+  asc: "升序",
+  desc: "降序",
+};
+
 type TrajectoryQueryState = {
   window: TrajectoryWindow;
   page: number;
@@ -109,6 +121,44 @@ type TrajectoryViewModel =
       hasNext: boolean;
     }
   | { mode: "error"; status: number; description: string };
+
+type TrajectoryItem = ReturnType<typeof toLearningTrajectoryResponse>["items"][number];
+
+const pickText = (...candidates: unknown[]): string | null => {
+  for (const candidate of candidates) {
+    if (typeof candidate === "string" && candidate.trim()) {
+      return candidate.trim();
+    }
+  }
+  return null;
+};
+
+const toStudentDisplayName = (item: TrajectoryItem): string => {
+  const name = pickText(item.student?.name, item.studentName, safeGet(item.raw, "name", undefined));
+  if (name) {
+    return name;
+  }
+
+  const studentNo = pickText(
+    item.student?.studentNo,
+    safeGet(item.raw, "studentNo", undefined),
+    safeGet(item.raw, "student.studentNo", undefined)
+  );
+  if (studentNo) {
+    return `学号：${studentNo}`;
+  }
+
+  const email = pickText(
+    item.student?.email,
+    safeGet(item.raw, "email", undefined),
+    safeGet(item.raw, "student.email", undefined)
+  );
+  if (email) {
+    return email;
+  }
+
+  return "未知学生";
+};
 
 export default async function LearningTrajectoryPage({
   params,
@@ -223,7 +273,7 @@ export default async function LearningTrajectoryPage({
                   href={buildHref(routePath, queryRecord, { sort: sortValue, page: "1" })}
                   className={active ? "font-semibold text-blue-700" : "text-blue-700 hover:underline"}
                 >
-                  {sortValue}
+                  {TRAJECTORY_SORT_FIELD_LABELS[sortValue]}
                 </Link>
               );
             })}
@@ -238,7 +288,7 @@ export default async function LearningTrajectoryPage({
               })}
               className="text-blue-700 hover:underline"
             >
-              {viewModel.query.order.toUpperCase()}
+              {TRAJECTORY_SORT_ORDER_LABELS[viewModel.query.order]}
             </Link>
           </div>
 
@@ -286,24 +336,21 @@ export default async function LearningTrajectoryPage({
             </thead>
             <tbody>
               {viewModel.data.items.map((item, index) => {
-                const status = safeGet<unknown>(item, "latestAiFeedbackStatus", undefined);
+                const status = item.latestAiFeedbackStatus;
                 const displayStatus =
                   typeof status === "string" ? getAiStatusLabel(status) : toDisplayText(status);
+                const studentDisplayName = toStudentDisplayName(item);
+                const studentKey = item.studentId ?? item.student?.id ?? `student-${index}`;
 
                 return (
-                  <tr key={String(safeGet(item, "studentId", `student-${index}`))} className="border-t border-zinc-100">
+                  <tr key={String(studentKey)} className="border-t border-zinc-100">
+                    <td className="px-4 py-3">{studentDisplayName}</td>
+                    <td className="px-4 py-3">{toDisplayText(item.attemptsCount)}</td>
                     <td className="px-4 py-3">
-                      {toDisplayText(
-                        safeGet(item, "studentName", undefined) ?? safeGet(item, "name", undefined),
-                        "未知学生"
-                      )}
-                    </td>
-                    <td className="px-4 py-3">{toDisplayText(safeGet(item, "attemptsCount", undefined))}</td>
-                    <td className="px-4 py-3">
-                      {toDisplayDate(safeGet<string | null>(item, "latestAttemptAt", null))}
+                      {toDisplayDate(item.latestAttemptAt ?? null)}
                     </td>
                     <td className="px-4 py-3">{displayStatus}</td>
-                    <td className="px-4 py-3">{toDisplayText(safeGet(item, "trend.errorDelta", undefined))}</td>
+                    <td className="px-4 py-3">{toDisplayText(safeGet(item.trend, "errorDelta", undefined))}</td>
                   </tr>
                 );
               })}

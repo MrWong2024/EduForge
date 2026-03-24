@@ -44,6 +44,13 @@ type LearningTrajectoryResponse = {
   total: number;
   items: Array<{
     studentId: string;
+    studentName: string | null;
+    student: {
+      id: string;
+      name: string | null;
+      studentNo: string | null;
+      email: string | null;
+    };
     attemptsCount: number;
     latestAttemptAt: string | null;
     latestAiFeedbackStatus: string | null;
@@ -104,6 +111,10 @@ describe('Classroom Learning Trajectory (e2e)', () => {
   const teacherEmail = `teacher.trajectory.${Date.now()}@example.com`;
   const studentAEmail = `studentA.trajectory.${Date.now()}@example.com`;
   const studentBEmail = `studentB.trajectory.${Date.now()}@example.com`;
+  const studentAName = 'Trajectory Student A';
+  const studentBName = 'Trajectory Student B';
+  const studentANo = `S-A-${Date.now()}`;
+  const studentBNo = `S-B-${Date.now()}`;
   const teacherPassword = 'TeacherPass123!';
   const studentPassword = 'StudentPass123!';
 
@@ -204,11 +215,15 @@ describe('Classroom Learning Trajectory (e2e)', () => {
         email: studentAEmail,
         passwordHash: studentAHash,
         roles: ['student'],
+        name: studentAName,
+        studentNo: studentANo,
       }),
       userModel.create({
         email: studentBEmail,
         passwordHash: studentBHash,
         roles: ['student'],
+        name: studentBName,
+        studentNo: studentBNo,
       }),
     ]);
 
@@ -431,10 +446,25 @@ describe('Classroom Learning Trajectory (e2e)', () => {
     );
     expect(studentAItem).toBeDefined();
     expect(studentBItem).toBeDefined();
+    expect(studentAItem?.studentName).toBe(studentAName);
+    expect(studentAItem?.student).toMatchObject({
+      id: studentAId,
+      name: studentAName,
+      studentNo: studentANo,
+      email: studentAEmail.toLowerCase(),
+    });
+    expect(studentBItem?.studentName).toBe(studentBName);
+    expect(studentBItem?.student).toMatchObject({
+      id: studentBId,
+      name: studentBName,
+      studentNo: studentBNo,
+      email: studentBEmail.toLowerCase(),
+    });
     expect(studentAItem?.attemptsCount).toBe(2);
     expect(studentBItem?.attemptsCount).toBe(0);
     expect(typeof studentAItem?.trend.errorCountFirst).toBe('number');
     expect(typeof studentAItem?.trend.errorCountLatest).toBe('number');
+    expect(JSON.stringify(trajectory)).not.toContain('passwordHash');
     for (const attempt of studentAItem?.attempts ?? []) {
       expect(typeof attempt.aiFeedbackStatus).toBe('string');
       expect(typeof attempt.feedbackSummary.totalItems).toBe('number');
