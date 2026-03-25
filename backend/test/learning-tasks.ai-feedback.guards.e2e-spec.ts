@@ -566,11 +566,11 @@ describe('LearningTasks AI Feedback Guards (e2e)', () => {
     const feedbackCountA = await feedbackModel.countDocuments({
       submissionId: new Types.ObjectId(submissions[0]),
     });
-    expect(feedbackCountA).toBeLessThanOrEqual(20);
+    expect(feedbackCountA).toBeLessThanOrEqual(2);
     const feedbackCountB = await feedbackModel.countDocuments({
       submissionId: new Types.ObjectId(submissions[1]),
     });
-    expect(feedbackCountB).toBeLessThanOrEqual(20);
+    expect(feedbackCountB).toBeLessThanOrEqual(2);
 
     if (!USE_REAL_AI && getMaxInflightObserved) {
       const maxConcurrency = Number(

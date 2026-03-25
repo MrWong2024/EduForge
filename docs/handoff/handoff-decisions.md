@@ -188,3 +188,17 @@ detail 主视图需要稳定读取 `taskTitle/studentName/language/submittedAt/a
 AI 闭环验收默认应在 `Stub + worker` 下进行。  
 产品级 request 接口与 debug/process-once 的职责边界保持清晰。  
 `Mock OpenRouter + worker` 可作为更贴近 provider 行为的备选模式，但不是默认前提。  
+
+## 15) 真实 AI feedback 默认收敛为“主问题导向综合反馈”（落库前收敛）
+
+**Decision**  
+OpenRouter provider 仍返回结构化 `items[]`，但 `AiFeedbackProcessor` 在落库前执行收敛：默认保留 1 条主反馈，仅在问题类别明显独立时保留第 2 条；同类问题按 `type+severity+语义` 聚合，不按出现位置碎片化落库。  
+
+**Rationale**  
+真实模型输出存在“同类问题拆条”和“低价值 INFO 表扬噪音”风险；仅靠 prompt 约束不足以保证稳定质量。  
+收敛放在 processor 层可同时覆盖 worker 与 debug `process-once`，避免执行路径分叉。  
+
+**Consequences**  
+`Feedback` schema 与 API 路径保持不变，兼容现有前端读取。  
+落库前会过滤“存在 ERROR/WARN 时的表扬型 INFO 噪音”，并优先保留阻断运行主问题。  
+`AI_FEEDBACK_MAX_ITEMS` 继续作为兼容上限语义，但最终持久化默认仍以 1 条主反馈、必要时最多 2 条为准。  

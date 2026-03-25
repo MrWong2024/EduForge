@@ -420,12 +420,18 @@ describe('LearningTasks AI Feedback OpenRouter Context (e2e)', () => {
         ?.content ?? '';
     expect(systemPrompt).toContain('message 与 suggestion 默认使用简体中文');
     expect(systemPrompt).toContain('不翻译代码元素');
+    expect(systemPrompt).toContain('默认只输出 1 条主反馈');
+    expect(systemPrompt).toContain('禁止把同类问题按出现位置拆成多条');
+    expect(systemPrompt).toContain('若存在语法/编译/运行阻断问题，必须优先作为主反馈');
     expect(userPrompt).toContain('TaskTitle: OpenRouter Context Task');
     expect(userPrompt).toContain(
       'TaskDescription: 实现一个函数并满足题目要求与评分标准。',
     );
     expect(userPrompt).toContain('TaskRubric:');
     expect(userPrompt).toContain('必须处理边界条件');
+    expect(userPrompt).toContain(
+      'Differentiate between "feature not implemented" and "logic exists but cannot run due to syntax/compile errors".',
+    );
     expect(userPrompt).toContain(
       'AIUsageDeclaration: I used AI for brainstorming only.',
     );

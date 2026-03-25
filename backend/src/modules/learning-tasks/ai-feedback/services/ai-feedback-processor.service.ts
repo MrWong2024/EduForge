@@ -1,4 +1,5 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import { Feedback, FeedbackSource } from '../../schemas/feedback.schema';
@@ -19,6 +20,7 @@ import { AiFeedbackGuardsService } from './ai-feedback-guards.service';
 import { WithId } from '../../../../common/types/with-id.type';
 import { WithTimestamps } from '../../../../common/types/with-timestamps.type';
 import { AiSubmissionAnalysisContext } from '../interfaces/ai-submission-analysis-context.interface';
+import { compactAiFeedbackItems } from '../lib/feedback-item-compactor';
 
 type AiFeedbackJobWithMeta = AiFeedbackJob & WithId & WithTimestamps;
 type SubmissionAnalysisSource = Pick<
@@ -32,6 +34,7 @@ type TaskAnalysisSource = Pick<Task, 'title' | 'description' | 'rubric'> &
 @Injectable()
 export class AiFeedbackProcessor {
   private static readonly DEFAULT_BATCH_SIZE = 5;
+  private static readonly DEFAULT_MAX_ITEMS = 20;
   private static readonly LOCK_TTL_MS = 5 * 60 * 1000;
   private static readonly BASE_BACKOFF_MS = 30 * 1000;
   private static readonly MAX_BACKOFF_MS = 10 * 60 * 1000;
@@ -50,6 +53,7 @@ export class AiFeedbackProcessor {
     @Inject(AI_FEEDBACK_PROVIDER_TOKEN)
     private readonly aiFeedbackProvider: AiFeedbackProvider,
     private readonly aiFeedbackGuards: AiFeedbackGuardsService,
+    private readonly configService: ConfigService,
   ) {}
 
   async processOnce(batchSize = AiFeedbackProcessor.DEFAULT_BATCH_SIZE) {
@@ -99,7 +103,15 @@ export class AiFeedbackProcessor {
         try {
           items =
             await this.aiFeedbackProvider.analyzeSubmission(analysisContext);
-          await this.persistFeedback(job, items);
+          const compactedItems = compactAiFeedbackItems(items, {
+            maxItems: this.getMaxItems(),
+          });
+          if (compactedItems.length !== items.length) {
+            this.logger.debug(
+              `AI feedback compacted before persistence: jobId=${job._id.toString()}, submissionId=${job.submissionId.toString()}, originalItems=${items.length}, compactedItems=${compactedItems.length}`,
+            );
+          }
+          await this.persistFeedback(job, compactedItems);
         } finally {
           release();
         }
@@ -127,6 +139,18 @@ export class AiFeedbackProcessor {
     }
 
     return results;
+  }
+
+  private getMaxItems() {
+    const raw = this.configService.get<string>('AI_FEEDBACK_MAX_ITEMS');
+    if (!raw) {
+      return AiFeedbackProcessor.DEFAULT_MAX_ITEMS;
+    }
+    const parsed = Number.parseInt(raw, 10);
+    if (!Number.isFinite(parsed) || parsed <= 0) {
+      return AiFeedbackProcessor.DEFAULT_MAX_ITEMS;
+    }
+    return parsed;
   }
 
   private buildAnalysisContext(

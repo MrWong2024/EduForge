@@ -486,7 +486,7 @@
 
 - Service: `backend/src/modules/learning-tasks/ai-feedback/services/ai-feedback-processor.service.ts`
 - Domain: `AiFeedback Processor`
-- Actions: `claim-job`, `call-provider`, `persist-feedback`, `transition-failure`
+- Actions: `claim-job`, `call-provider`, `compact-items`, `persist-feedback`, `transition-failure`
 - I/O Shape:
   - In: `batchSize`（默认 `5`）
   - Out: `{ processed: number; succeeded: number; failed: number; dead: number }`
@@ -494,10 +494,10 @@
   - `processOnce(batchSize?: number): Promise<{ processed: number; succeeded: number; failed: number; dead: number }> — called by worker tick and debug process-once endpoint`
 - AuthZ Boundary: `internal-only`（worker 与 debug process-once 共享）
 - Metrics/Isolation: job 按 `classroomTaskId` 进入限流桶；重试/backoff/attempts 状态机收敛
-- Consistency/Constraints: 锁 TTL=5min；仅 claim `PENDING|FAILED`；指数退避（30s 起，最大 10min）；`UNAUTHORIZED/MISSING_API_KEY/REAL_DISABLED` 直接 `DEAD`；处理链路为“读取 submission -> 按 `submission.taskId` 查询 task -> 组装 `AiSubmissionAnalysisContext` -> 调 provider”
-- Deps/Side Effects: `AiFeedbackJobModel`, `SubmissionModel`, `TaskModel`, `FeedbackModel`, `AI_FEEDBACK_PROVIDER_TOKEN`, `AiFeedbackGuardsService`；外部 provider 调用 + 反馈写库 + job 状态更新
-- Performance Notes: `findOneAndUpdate` 原子 claim（按 createdAt 先来先服务）；`insertMany(ordered:false)` 批量落库并容忍重复键
-- SoT: `backend/src/modules/learning-tasks/ai-feedback/services/ai-feedback-processor.service.ts`; `backend/src/modules/learning-tasks/ai-feedback/interfaces/ai-feedback-provider.error-codes.ts`; `backend/src/modules/learning-tasks/ai-feedback/README.md`
+- Consistency/Constraints: 锁 TTL=5min；仅 claim `PENDING|FAILED`；指数退避（30s 起，最大 10min）；`UNAUTHORIZED/MISSING_API_KEY/REAL_DISABLED` 直接 `DEAD`；处理链路为“读取 submission -> 按 `submission.taskId` 查询 task -> 组装 `AiSubmissionAnalysisContext` -> 调 provider -> 落库前收敛”；收敛口径为默认 1 条主反馈、必要时最多 2 条；同类问题聚合、低价值 INFO（存在 ERROR/WARN 时）不独立落库
+- Deps/Side Effects: `AiFeedbackJobModel`, `SubmissionModel`, `TaskModel`, `FeedbackModel`, `AI_FEEDBACK_PROVIDER_TOKEN`, `AiFeedbackGuardsService`, `ConfigService`, `feedback-item-compactor`；外部 provider 调用 + 反馈写库 + job 状态更新
+- Performance Notes: `findOneAndUpdate` 原子 claim（按 createdAt 先来先服务）；`insertMany(ordered:false)` 批量落库并容忍重复键；收敛逻辑基于当前 job 的 `items[]` 内存处理，避免额外数据库 I/O
+- SoT: `backend/src/modules/learning-tasks/ai-feedback/services/ai-feedback-processor.service.ts`; `backend/src/modules/learning-tasks/ai-feedback/lib/feedback-item-compactor.ts`; `backend/src/modules/learning-tasks/ai-feedback/interfaces/ai-feedback-provider.error-codes.ts`; `backend/src/modules/learning-tasks/ai-feedback/README.md`
 - Failure Modes:
   - submission 不存在 -> 进入失败处理并重试/死亡
   - task 不存在 -> 进入失败处理并重试/死亡
@@ -560,7 +560,7 @@
   - `analyzeSubmission(context: AiSubmissionAnalysisContext): Promise<AiFeedbackItem[]> — called by processor when provider=openrouter`
 - AuthZ Boundary: `internal-only`
 - Metrics/Isolation: 日志带 `submissionId/classroomTaskId/provider/model/duration/retried`
-- Consistency/Constraints: 严格 JSON 协议；字段白名单；最多 `maxItems`；指数退避重试；system prompt 默认要求 `message/suggestion` 使用简体中文并保持代码元素原文；user prompt 纳入 `taskTitle/taskDescription/taskRubric/codeText/language/attemptNo/aiUsageDeclaration` 并要求结合题目要求分析，避免仅给泛化代码建议
+- Consistency/Constraints: 严格 JSON 协议；字段白名单；最多 `maxItems`；指数退避重试；system prompt 默认要求 `message/suggestion` 使用简体中文并保持代码元素原文；prompt 已加入“主问题导向综合反馈”约束（默认 1 条，必要时第 2 条；同类问题不按位置拆条；阻断运行问题优先；存在 ERROR/WARN 时不输出表扬型 INFO 噪音）；user prompt 纳入 `taskTitle/taskDescription/taskRubric/codeText/language/attemptNo/aiUsageDeclaration` 并要求结合题目要求分析
 - Deps/Side Effects: `ConfigService`, `fetch` 外部网络调用、prompt/protocol/normalizer
 - Performance Notes: 单请求超时控制 + 有界重试；解析失败直接终止
 - SoT: `backend/src/modules/learning-tasks/ai-feedback/providers/real/openrouter-feedback.provider.ts`; `backend/src/modules/learning-tasks/ai-feedback/protocol/ai-feedback-json.protocol.ts`; `backend/src/modules/learning-tasks/ai-feedback/prompts/openrouter-feedback.prompt.ts`
@@ -610,5 +610,6 @@
 - 修订 Provider Cards：
   - `Provider Card A` `DefaultStubAiFeedbackProvider`（输入契约切换为 `AiSubmissionAnalysisContext`；仅签名适配，规则逻辑与英文输出不变）
   - `Provider Card B` `OpenRouterFeedbackProvider`（输入契约切换为 `AiSubmissionAnalysisContext`；prompt 默认简体中文并纳入 task 上下文）
+- 本轮补充：AI feedback 落库前收敛已落地（默认 1 条主反馈、必要时最多 2 条；同类问题聚合并过滤低价值 INFO 噪音）
   - `Provider Card C` `OpenAIFeedbackProvider`（输入契约切换为 `AiSubmissionAnalysisContext`；仍为占位实现）
 - AI feedback 契约同步：`AiFeedbackProvider.analyzeSubmission` 已统一为 `analyzeSubmission(context: AiSubmissionAnalysisContext)`

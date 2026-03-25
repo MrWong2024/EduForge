@@ -91,10 +91,11 @@ npm run test:e2e -- backend/test/classroom-learning-loop.e2e-spec.ts
   - 覆盖：`GET /api/classrooms/:classroomId/tasks/:classroomTaskId/ai-metrics`。
   - 断言维度：jobs 统计、成功率、错误码聚合（含 `RATE_LIMIT_LOCAL` 场景）、feedback 产出、`includeTags` 开关下的 tags 聚合行为。
 - `backend/test/learning-tasks.ai-feedback.guards.e2e-spec.ts`
-  - 覆盖：并发护栏、限流与重试窗口、Mock/Real AI provider 路径。
+  - 覆盖：并发护栏、限流与重试窗口、Mock/Real AI provider 路径、落库前收敛上限回归。
+  - 关键断言：mock provider 即使返回 25 条 `items`，单 submission 最终 AI feedback 持久化条数仍收敛为 `<=2`。
 - `backend/test/learning-tasks.ai-feedback.openrouter-context.e2e-spec.ts`
   - 覆盖：mock OpenRouter 请求体捕获与 prompt 上下文断言（`TaskTitle/TaskDescription/TaskRubric/Code/AIUsageDeclaration`）。
-  - 关键断言：system prompt 明确要求简体中文输出（教学反馈文本字段默认中文）；反馈主链路可持久化并可查询。
+  - 关键断言：system prompt 明确要求简体中文输出（教学反馈文本字段默认中文）并包含“主问题导向收敛”约束（默认 1 条、同类问题合并、阻断问题优先）；反馈主链路可持久化并可查询。
   - 补充：测试通过直接调用 `aiFeedbackProcessor.processOnce(1)` 推进 job，属于测试辅助推进方式，不是默认产品运行模式。
 - `backend/test/learning-tasks.ai-feedback.ops.debug-off.e2e-spec.ts`
   - 覆盖：debug gate OFF（`AI_FEEDBACK_DEBUG_ENABLED=false`）时 teacher/admin 访问 debug/ops 返回 404。
@@ -266,3 +267,4 @@ $env:AI_FEEDBACK_DEBUG_ENABLED="true"
 - 补充：submission detail 稳定读源测试关注点（`GET /api/learning-tasks/submissions/:id`）。
 - 固化：默认联调模式为 `Stub + worker`，并补充影响模块装配/guard 的 env 设置时机提醒。
 - 补充：AI feedback context spec 已纳入入口；覆盖 mock OpenRouter prompt 请求体中的 task 上下文片段与简体中文输出约束断言。
+- 补充：AI feedback 收敛单测 `src/modules/learning-tasks/ai-feedback/lib/feedback-item-compactor.spec.ts` 已覆盖同类错误合并、低价值 INFO 过滤、ERROR 优先与“最多 2 条”约束。

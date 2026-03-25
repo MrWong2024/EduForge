@@ -53,7 +53,7 @@ PENDING/FAILED -> RUNNING -> FAILED -> (retry with backoff) -> DEAD (when attemp
   - When not 'false', only attemptNo===1 auto-enqueues AI jobs.
   - When set to 'false' and AI_FEEDBACK_AUTO_ON_SUBMIT is 'true', every submission auto-enqueues (legacy behavior).
 - AI_FEEDBACK_MAX_ITEMS (default: 20)
-  - Max feedback items saved per submission (excess items truncated).
+  - Compatibility upper bound for provider output; processor still compacts persisted AI feedback to primary-problem-oriented output (default 1 item, at most 2).
 - OPENROUTER_API_KEY (required when provider=openrouter and AI_FEEDBACK_REAL_ENABLED === 'true')
 - OPENROUTER_BASE_URL (default: https://openrouter.ai/api/v1)
 - OPENROUTER_HTTP_REFERER (default: https://eduforge.local)
