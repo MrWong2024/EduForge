@@ -50,6 +50,7 @@ const DEFAULT_TIMEOUT_MS = 15000;
 const DEFAULT_MAX_RETRIES = 2;
 const DEFAULT_MAX_CODE_CHARS = 12000;
 const DEFAULT_MAX_ITEMS = 20;
+const PROMPT_PROTOCOL_MAX_ITEMS = 2;
 const DEFAULT_REFERER = 'https://eduforge.local';
 const DEFAULT_TITLE = 'EduForge';
 const ALLOWED_ROOT_KEYS = new Set<string>(
@@ -113,7 +114,14 @@ export class OpenRouterFeedbackProvider implements AiFeedbackProvider {
       }
       try {
         const response = await this.callOpenRouter(request, config.timeoutMs);
-        const items = this.parseResponse(response).slice(0, config.maxItems);
+        const parsedItems = this.parseResponse(response);
+        const protocolMaxItems = Math.min(config.maxItems, PROMPT_PROTOCOL_MAX_ITEMS);
+        const items = parsedItems.slice(0, protocolMaxItems);
+        if (parsedItems.length > protocolMaxItems) {
+          this.logger.warn(
+            `OpenRouter feedback items exceeded protocol cap: submissionId=${submissionId}, classroomTaskId=${classroomTaskId ?? 'n/a'}, provider=${PROVIDER_NAME}, model=${config.model}, receivedItems=${parsedItems.length}, cappedTo=${protocolMaxItems}`,
+          );
+        }
         const durationMs = Date.now() - startMs;
         this.logger.debug(
           `OpenRouter feedback success: submissionId=${submissionId}, classroomTaskId=${classroomTaskId ?? 'n/a'}, provider=${PROVIDER_NAME}, model=${config.model}, durationMs=${durationMs}, retried=${retryCount > 0}`,

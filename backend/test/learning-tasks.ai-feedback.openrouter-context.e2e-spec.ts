@@ -421,8 +421,12 @@ describe('LearningTasks AI Feedback OpenRouter Context (e2e)', () => {
     expect(systemPrompt).toContain('message 与 suggestion 默认使用简体中文');
     expect(systemPrompt).toContain('不翻译代码元素');
     expect(systemPrompt).toContain('默认只输出 1 条主反馈');
+    expect(systemPrompt).toContain('Never output more than 2 items');
     expect(systemPrompt).toContain('禁止把同类问题按出现位置拆成多条');
+    expect(systemPrompt).toContain('多处同类语法问题（如多处缺少分号）必须合并为 1 条主问题反馈');
     expect(systemPrompt).toContain('若存在语法/编译/运行阻断问题，必须优先作为主反馈');
+    expect(systemPrompt).toContain('Valid shape example A (1 item)');
+    expect(systemPrompt).toContain('Invalid example C: five praise-only INFO items.');
     expect(userPrompt).toContain('TaskTitle: OpenRouter Context Task');
     expect(userPrompt).toContain(
       'TaskDescription: 实现一个函数并满足题目要求与评分标准。',
@@ -431,6 +435,9 @@ describe('LearningTasks AI Feedback OpenRouter Context (e2e)', () => {
     expect(userPrompt).toContain('必须处理边界条件');
     expect(userPrompt).toContain(
       'Differentiate between "feature not implemented" and "logic exists but cannot run due to syntax/compile errors".',
+    );
+    expect(userPrompt).toContain(
+      'Prefer exactly one item. Output two items only when the second category is clearly independent and improves student understanding.',
     );
     expect(userPrompt).toContain(
       'AIUsageDeclaration: I used AI for brainstorming only.',

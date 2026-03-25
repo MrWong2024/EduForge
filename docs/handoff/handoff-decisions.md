@@ -189,16 +189,17 @@ AI 闭环验收默认应在 `Stub + worker` 下进行。
 产品级 request 接口与 debug/process-once 的职责边界保持清晰。  
 `Mock OpenRouter + worker` 可作为更贴近 provider 行为的备选模式，但不是默认前提。  
 
-## 15) 真实 AI feedback 默认收敛为“主问题导向综合反馈”（落库前收敛）
+## 15) 真实 AI feedback 主控前移到 Prompt / 协议层，compactor 保持轻量兜底
 
 **Decision**  
-OpenRouter provider 仍返回结构化 `items[]`，但 `AiFeedbackProcessor` 在落库前执行收敛：默认保留 1 条主反馈，仅在问题类别明显独立时保留第 2 条；同类问题按 `type+severity+语义` 聚合，不按出现位置碎片化落库。  
+OpenRouter prompt / 输出协议明确要求：默认 1 条主反馈，仅在问题类别明显独立且不可合并时允许第 2 条；同类问题禁止按行号/位置拆条。  
+provider 在协议层增加 `items<=2` 的硬闸门；`AiFeedbackProcessor` compactor 继续保留但定位为轻量兜底。  
 
 **Rationale**  
-真实模型输出存在“同类问题拆条”和“低价值 INFO 表扬噪音”风险；仅靠 prompt 约束不足以保证稳定质量。  
-收敛放在 processor 层可同时覆盖 worker 与 debug `process-once`，避免执行路径分叉。  
+仅靠落库前收敛会让控制责任过度后置，且难以保证模型原始输出质量。  
+把约束前移到 prompt/协议层，可在上游就抑制“多条碎片反馈”和“表扬噪音外溢”。  
 
 **Consequences**  
 `Feedback` schema 与 API 路径保持不变，兼容现有前端读取。  
-落库前会过滤“存在 ERROR/WARN 时的表扬型 INFO 噪音”，并优先保留阻断运行主问题。  
-`AI_FEEDBACK_MAX_ITEMS` 继续作为兼容上限语义，但最终持久化默认仍以 1 条主反馈、必要时最多 2 条为准。  
+主策略由“模型自由输出 + compactor善后”调整为“prompt/协议先约束 + compactor轻量兜底”。  
+`AI_FEEDBACK_MAX_ITEMS` 仍保留兼容语义，但真实 OpenRouter 输出链路默认目标为 1 条、必要时最多 2 条。  
