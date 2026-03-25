@@ -1,4 +1,4 @@
-﻿import {
+import {
   Injectable,
   Logger,
   OnModuleDestroy,
@@ -6,9 +6,11 @@
 } from '@nestjs/common';
 import { AiFeedbackProcessor } from './ai-feedback-processor.service';
 
+type WorkerTickResult = Awaited<ReturnType<AiFeedbackProcessor['processOnce']>>;
+
 @Injectable()
 export class AiFeedbackWorker implements OnModuleInit, OnModuleDestroy {
-  private static readonly DEFAULT_INTERVAL_MS = 3000;
+  private static readonly DEFAULT_INTERVAL_MS = 5000;
   private readonly logger = new Logger(AiFeedbackWorker.name);
   private intervalId?: NodeJS.Timeout;
   private isRunning = false;
@@ -76,14 +78,25 @@ export class AiFeedbackWorker implements OnModuleInit, OnModuleDestroy {
         batchSize === undefined
           ? await this.processor.processOnce()
           : await this.processor.processOnce(batchSize);
-      this.logger.debug(
-        `AI Feedback Worker tick result: processed=${result.processed}, succeeded=${result.succeeded}, failed=${result.failed}, dead=${result.dead}`,
-      );
+      if (!this.isEmptyTickResult(result)) {
+        this.logger.debug(
+          `AI Feedback Worker tick result: processed=${result.processed}, succeeded=${result.succeeded}, failed=${result.failed}, dead=${result.dead}`,
+        );
+      }
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Unknown error';
       this.logger.error(`AI Feedback Worker tick failed: ${message}`);
     } finally {
       this.isRunning = false;
     }
+  }
+
+  private isEmptyTickResult(result: WorkerTickResult) {
+    return (
+      result.processed === 0 &&
+      result.succeeded === 0 &&
+      result.failed === 0 &&
+      result.dead === 0
+    );
   }
 }

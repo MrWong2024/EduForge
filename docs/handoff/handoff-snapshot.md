@@ -282,6 +282,7 @@ AI Provider 错误码（`ai-feedback-provider.error-codes.ts`）：
   - 无 job 时 `aiFeedbackStatus=NOT_REQUESTED`。
 - AI 默认联调模式（已固化）：
   - 推荐 `Stub + worker`：`AI_FEEDBACK_PROVIDER=stub` 且 `AI_FEEDBACK_WORKER_ENABLED=true`。
+  - worker 轮询默认间隔为 `5000ms`（`AI_FEEDBACK_WORKER_INTERVAL_MS` 可覆盖）；空跑 tick（processed/succeeded/failed/dead 全 0）默认不输出结果 DEBUG 日志。
   - 产品级 request 仅负责创建/确保 job（新建时为 `PENDING`），worker 负责消费到 `SUCCEEDED`。
   - `process-once` 仅用于 debug/ops，不作为默认交付运行模式。
   - Real OpenRouter 路径已支持基于 task 上下文（`title/description/rubric`）分析 submission，且 prompt/协议已明确“默认 1 条、必要时最多 2 条、同类问题合并、错误优先、禁止表扬噪音”。

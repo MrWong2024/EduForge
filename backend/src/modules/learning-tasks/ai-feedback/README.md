@@ -23,12 +23,12 @@ PENDING/FAILED -> RUNNING -> FAILED -> (retry with backoff) -> DEAD (when attemp
 - It starts only when AI_FEEDBACK_WORKER_ENABLED === 'true'.
 - It polls using setInterval and calls processOnce(batchSize) per tick.
 - Errors are caught and logged; the worker must not crash or exit the process.
-- No periodic logs when disabled; only startup info and per-tick debug when enabled.
+- No periodic logs when disabled; when enabled, startup info is logged and tick-result debug logs are emitted only for non-empty runs.
 
 ## Environment Variables
 - AI_FEEDBACK_WORKER_ENABLED (default: false)
   - When 'true', the worker starts consuming jobs.
-- AI_FEEDBACK_WORKER_INTERVAL_MS (default: 3000)
+- AI_FEEDBACK_WORKER_INTERVAL_MS (default: 5000)
   - Polling interval in milliseconds.
 - AI_FEEDBACK_WORKER_BATCH_SIZE (default: AiFeedbackProcessor.DEFAULT_BATCH_SIZE)
   - Batch size per tick when provided.
@@ -68,7 +68,7 @@ Default for local integration and front-backend联调:
 - `AI_FEEDBACK_PROVIDER=stub`
 - `AI_FEEDBACK_REAL_ENABLED=false`
 - `AI_FEEDBACK_WORKER_ENABLED=true`
-- `AI_FEEDBACK_WORKER_INTERVAL_MS=3000` (optional, defaults to 3000)
+- `AI_FEEDBACK_WORKER_INTERVAL_MS=5000` (optional, defaults to 5000)
 - `AI_FEEDBACK_WORKER_BATCH_SIZE=5` (optional, defaults to processor batch size)
 
 Optional mock-provider variant:

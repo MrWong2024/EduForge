@@ -64,6 +64,7 @@ npm run test:e2e -- backend/test/classroom-export-snapshot.e2e-spec.ts
 推荐默认联调模式（结论）：
 - `Stub + worker`（用于本地开发 / 前后端联调 / AI 闭环验证）。
 - 最小关键 env：`AI_FEEDBACK_PROVIDER=stub`、`AI_FEEDBACK_REAL_ENABLED=false`、`AI_FEEDBACK_WORKER_ENABLED=true`。
+- worker 默认轮询间隔 `5000ms`（可由 `AI_FEEDBACK_WORKER_INTERVAL_MS` 覆盖）；空跑 tick（processed/succeeded/failed/dead 全 0）默认不输出结果 DEBUG 日志。
 - 产品级 request 只负责创建/确保 `PENDING` job，worker 负责消费到 `SUCCEEDED`。
 - `process-once` 仅用于 debug/ops 辅助，不作为默认交付运行模式。
 
