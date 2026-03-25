@@ -252,7 +252,7 @@ AI Provider 错误码（`ai-feedback-provider.error-codes.ts`）：
 | Provider | 文件 | 说明 |
 |---|---|---|
 | Stub Provider | `default-stub-ai-feedback.provider.ts` | 已适配统一契约 `analyzeSubmission(context: AiSubmissionAnalysisContext)`；仍仅基于 `context.codeText` 走本地规则，英文输出与规则行为不变 |
-| OpenRouter Provider | `providers/real/openrouter-feedback.provider.ts` | 已接收 `AiSubmissionAnalysisContext`；prompt 纳入 `taskTitle/taskDescription/taskRubric/codeText` 等上下文；默认要求反馈文本（`message/suggestion`）使用简体中文，并以“主问题导向综合反馈”为主控（默认 1 条、仅独立问题允许第 2 条、同类问题禁止按位置拆条）；provider 协议层对 `items` 执行 `<=2` 闸门；外部 AI 调用 + 严格 JSON 解析 |
+| OpenRouter Provider | `providers/real/openrouter-feedback.provider.ts` | 已接收 `AiSubmissionAnalysisContext`；prompt 纳入 `taskTitle/taskDescription/taskRubric/codeText` 等上下文；默认要求反馈文本（`message/suggestion`）使用简体中文，并以“主问题导向综合反馈”为主控（默认 1 条、仅独立问题允许第 2 条、同类问题禁止按位置拆条）；空数组仅在“确实无任何可反馈/可建议内容”时允许，基本正确但可改进仍返回 1 条综合反馈；provider 协议层对 `items` 执行 `<=2` 闸门；外部 AI 调用 + 严格 JSON 解析 |
 | OpenAI Provider（占位） | `providers/real/openai-feedback.provider.ts` | 已同步统一 context 契约签名，但仍为占位实现（调用直接抛未实现错误） |
 
 ## 4) 关键链路概览（隔离口径）

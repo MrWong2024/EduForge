@@ -20,6 +20,9 @@ describe('openrouter-feedback prompt constraints', () => {
     );
     expect(systemPrompt).toContain('若代码整体正确，也必须返回 1 条综合反馈');
     expect(systemPrompt).toContain(
+      'For mostly correct or directionally correct submissions, return one integrated feedback item',
+    );
+    expect(systemPrompt).toContain(
       '必须区分“未实现功能”与“已写出逻辑但因语法/编译错误无法运行”',
     );
   });
@@ -30,10 +33,30 @@ describe('openrouter-feedback prompt constraints', () => {
     expect(systemPrompt).toContain('Valid shape example A (1 item)');
     expect(systemPrompt).toContain('Valid shape example B (2 items)');
     expect(systemPrompt).toContain(
+      'Valid boundary example C (correct but improvable): return exactly 1 integrated item with brief acknowledgement + 1~2 actionable improvements.',
+    );
+    expect(systemPrompt).toContain(
+      'Valid boundary example D (truly nothing to improve): {"items":[]}.',
+    );
+    expect(systemPrompt).toContain(
       'Invalid example C: five praise-only INFO items.',
     );
     expect(systemPrompt).toContain(
       'Invalid example D: split same syntax issue by line numbers into many items.',
+    );
+    expect(systemPrompt).toContain(
+      'Invalid example E: mostly correct code with improvable points but returns {"items":[]}.',
+    );
+  });
+
+  it('defines empty-array boundary explicitly', () => {
+    const systemPrompt = buildSystemPrompt();
+
+    expect(systemPrompt).toContain(
+      'Use {"items":[]} only when there is truly nothing worth flagging, no actionable suggestion, and no learning-value improvement point.',
+    );
+    expect(systemPrompt).toContain(
+      'Do not treat "mostly correct but improvable" as no-issues.',
     );
   });
 
@@ -65,6 +88,9 @@ describe('openrouter-feedback prompt constraints', () => {
     );
     expect(userPrompt).toContain(
       'For repeated same-category issues (for example repeated missing semicolons), merge into one integrated item.',
+    );
+    expect(userPrompt).toContain(
+      'Boundary rule: if the submission is mostly correct but still improvable, return one integrated item; return empty items only when truly nothing can be improved.',
     );
   });
 });

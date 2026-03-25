@@ -427,6 +427,18 @@ describe('LearningTasks AI Feedback OpenRouter Context (e2e)', () => {
     expect(systemPrompt).toContain('若存在语法/编译/运行阻断问题，必须优先作为主反馈');
     expect(systemPrompt).toContain('Valid shape example A (1 item)');
     expect(systemPrompt).toContain('Invalid example C: five praise-only INFO items.');
+    expect(systemPrompt).toContain(
+      'Valid boundary example C (correct but improvable): return exactly 1 integrated item with brief acknowledgement + 1~2 actionable improvements.',
+    );
+    expect(systemPrompt).toContain(
+      'Valid boundary example D (truly nothing to improve): {"items":[]}.',
+    );
+    expect(systemPrompt).toContain(
+      'Invalid example E: mostly correct code with improvable points but returns {"items":[]}.',
+    );
+    expect(systemPrompt).toContain(
+      'Use {"items":[]} only when there is truly nothing worth flagging, no actionable suggestion, and no learning-value improvement point.',
+    );
     expect(userPrompt).toContain('TaskTitle: OpenRouter Context Task');
     expect(userPrompt).toContain(
       'TaskDescription: 实现一个函数并满足题目要求与评分标准。',
@@ -438,6 +450,9 @@ describe('LearningTasks AI Feedback OpenRouter Context (e2e)', () => {
     );
     expect(userPrompt).toContain(
       'Prefer exactly one item. Output two items only when the second category is clearly independent and improves student understanding.',
+    );
+    expect(userPrompt).toContain(
+      'Boundary rule: if the submission is mostly correct but still improvable, return one integrated item; return empty items only when truly nothing can be improved.',
     );
     expect(userPrompt).toContain(
       'AIUsageDeclaration: I used AI for brainstorming only.',

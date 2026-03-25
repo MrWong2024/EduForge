@@ -103,6 +103,7 @@ Notes:
 - `items`: array of feedback objects; `type`/`severity` use enum values from `feedback.schema.ts`.
 - `tags`: must come from the list in `feedback-normalizer.ts` (`FEEDBACK_TAGS_LIST`); platform normalizes tags and maps unknown tags to `other`.
 - `scoreHint`: optional numeric hint for scoring.
+- Empty-array boundary: prompt/protocol expects `{"items":[]}` only when truly no issue/suggestion/learning-value improvement exists; "mostly correct but improvable" should still return one integrated item.
 
 ## Testing: Real AI Optional
 
