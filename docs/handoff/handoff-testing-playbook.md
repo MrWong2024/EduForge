@@ -95,7 +95,7 @@ npm run test:e2e -- backend/test/classroom-learning-loop.e2e-spec.ts
   - 关键断言：mock provider 即使返回 25 条 `items`，单 submission 最终 AI feedback 持久化条数仍收敛为 `<=2`。
 - `backend/test/learning-tasks.ai-feedback.openrouter-context.e2e-spec.ts`
   - 覆盖：mock OpenRouter 请求体捕获与 prompt 上下文断言（`TaskTitle/TaskDescription/TaskRubric/Code/AIUsageDeclaration`）。
-  - 关键断言：system prompt 明确要求简体中文输出（教学反馈文本字段默认中文）并包含“主问题导向收敛”硬约束（默认 1 条、最多 2 条、同类问题合并、阻断问题优先、禁止表扬噪音）以及合法/非法输出形状示例；空数组边界已收紧为“仅 truly no-feedback 内容时允许”，正确但可改进场景必须返回 1 条综合反馈；反馈主链路可持久化并可查询。
+  - 关键断言：system prompt 明确要求简体中文输出（教学反馈文本字段默认中文）并包含“主问题导向收敛”硬约束（默认 1 条、最多 2 条、同类问题合并、阻断问题优先、禁止表扬噪音）以及合法/非法输出形状示例；空数组边界已收紧为“仅 truly no-feedback 内容时允许”，正确但可改进场景必须返回 1 条综合反馈；`language` 仅作 hint（缺失/冲突时优先按代码判断语言）；反馈主链路可持久化并可查询。
   - 补充：测试通过直接调用 `aiFeedbackProcessor.processOnce(1)` 推进 job，属于测试辅助推进方式，不是默认产品运行模式。
 - `backend/test/learning-tasks.ai-feedback.ops.debug-off.e2e-spec.ts`
   - 覆盖：debug gate OFF（`AI_FEEDBACK_DEBUG_ENABLED=false`）时 teacher/admin 访问 debug/ops 返回 404。

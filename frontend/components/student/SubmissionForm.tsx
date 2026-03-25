@@ -20,6 +20,17 @@ type SubmissionErrorState = {
   detail?: string;
 };
 
+const LANGUAGE_OPTIONS = [
+  { value: "auto", label: "自动识别（默认）" },
+  { value: "java", label: "Java" },
+  { value: "javascript", label: "JavaScript" },
+  { value: "typescript", label: "TypeScript" },
+  { value: "python", label: "Python" },
+  { value: "c", label: "C" },
+  { value: "cpp", label: "C++" },
+  { value: "other", label: "Other" },
+] as const;
+
 const extractErrorCode = (data: unknown): string | undefined => {
   if (!data || typeof data !== "object") {
     return undefined;
@@ -43,7 +54,7 @@ const containsLateSubmissionCode = (data: unknown, detail?: string): boolean => 
 
 export function SubmissionForm({ classroomId, classroomTaskId }: SubmissionFormProps) {
   const router = useRouter();
-  const [language, setLanguage] = useState("javascript");
+  const [language, setLanguage] = useState("auto");
   const [codeText, setCodeText] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errorState, setErrorState] = useState<SubmissionErrorState | null>(null);
@@ -52,11 +63,11 @@ export function SubmissionForm({ classroomId, classroomTaskId }: SubmissionFormP
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
 
-    const normalizedLanguage = language.trim();
+    const normalizedLanguage = language.trim().toLowerCase() || "auto";
     const normalizedCodeText = codeText.trim();
-    if (!normalizedLanguage || !normalizedCodeText) {
+    if (!normalizedCodeText) {
       setErrorState({
-        summary: "请填写 language 与代码内容后再提交。",
+        summary: "请填写代码内容后再提交。",
       });
       return;
     }
@@ -129,14 +140,20 @@ export function SubmissionForm({ classroomId, classroomTaskId }: SubmissionFormP
           <label className="block text-sm font-medium text-zinc-800" htmlFor="submission-language">
             language
           </label>
-          <input
+          <select
             id="submission-language"
-            type="text"
             required
             value={language}
             onChange={(event) => setLanguage(event.target.value)}
             className="w-full rounded-md border border-zinc-300 px-3 py-2 text-sm outline-none focus:border-zinc-500"
-          />
+          >
+            {LANGUAGE_OPTIONS.map((option) => (
+              <option key={option.value} value={option.value}>
+                {option.label}
+              </option>
+            ))}
+          </select>
+          <p className="text-xs text-zinc-500">未指定具体语言时，将优先按代码内容自动识别。</p>
         </div>
 
         <div className="space-y-1">

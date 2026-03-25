@@ -22,6 +22,13 @@ describe('openrouter-feedback prompt constraints', () => {
     expect(systemPrompt).toContain(
       'For mostly correct or directionally correct submissions, return one integrated feedback item',
     );
+    expect(systemPrompt).toContain('Language is a hint, not ground truth.');
+    expect(systemPrompt).toContain(
+      'If language hint is auto/unknown/empty, infer language mainly from code content.',
+    );
+    expect(systemPrompt).toContain(
+      'If language hint conflicts with code syntax/tokens, trust the code and avoid wrong-language diagnostics.',
+    );
     expect(systemPrompt).toContain(
       '必须区分“未实现功能”与“已写出逻辑但因语法/编译错误无法运行”',
     );
@@ -81,6 +88,9 @@ describe('openrouter-feedback prompt constraints', () => {
       'Focus on primary-problem-oriented integrated feedback',
     );
     expect(userPrompt).toContain(
+      'Treat language as a weak hint. Infer language primarily from code features when needed.',
+    );
+    expect(userPrompt).toContain(
       'Prefer exactly one item. Output two items only when the second category is clearly independent and improves student understanding.',
     );
     expect(userPrompt).toContain(
@@ -91,6 +101,10 @@ describe('openrouter-feedback prompt constraints', () => {
     );
     expect(userPrompt).toContain(
       'Boundary rule: if the submission is mostly correct but still improvable, return one integrated item; return empty items only when truly nothing can be improved.',
+    );
+    expect(userPrompt).toContain('Language hint: typescript');
+    expect(userPrompt).toContain(
+      'Language hint may be missing or incorrect; prioritize code evidence for language-specific judgement.',
     );
   });
 });

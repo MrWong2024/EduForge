@@ -420,13 +420,23 @@ describe('LearningTasks AI Feedback OpenRouter Context (e2e)', () => {
         ?.content ?? '';
     expect(systemPrompt).toContain('message 与 suggestion 默认使用简体中文');
     expect(systemPrompt).toContain('不翻译代码元素');
+    expect(systemPrompt).toContain('Language is a hint, not ground truth.');
+    expect(systemPrompt).toContain(
+      'If language hint is auto/unknown/empty, infer language mainly from code content.',
+    );
     expect(systemPrompt).toContain('默认只输出 1 条主反馈');
     expect(systemPrompt).toContain('Never output more than 2 items');
     expect(systemPrompt).toContain('禁止把同类问题按出现位置拆成多条');
-    expect(systemPrompt).toContain('多处同类语法问题（如多处缺少分号）必须合并为 1 条主问题反馈');
-    expect(systemPrompt).toContain('若存在语法/编译/运行阻断问题，必须优先作为主反馈');
+    expect(systemPrompt).toContain(
+      '多处同类语法问题（如多处缺少分号）必须合并为 1 条主问题反馈',
+    );
+    expect(systemPrompt).toContain(
+      '若存在语法/编译/运行阻断问题，必须优先作为主反馈',
+    );
     expect(systemPrompt).toContain('Valid shape example A (1 item)');
-    expect(systemPrompt).toContain('Invalid example C: five praise-only INFO items.');
+    expect(systemPrompt).toContain(
+      'Invalid example C: five praise-only INFO items.',
+    );
     expect(systemPrompt).toContain(
       'Valid boundary example C (correct but improvable): return exactly 1 integrated item with brief acknowledgement + 1~2 actionable improvements.',
     );
@@ -450,6 +460,13 @@ describe('LearningTasks AI Feedback OpenRouter Context (e2e)', () => {
     );
     expect(userPrompt).toContain(
       'Prefer exactly one item. Output two items only when the second category is clearly independent and improves student understanding.',
+    );
+    expect(userPrompt).toContain(
+      'Treat language as a weak hint. Infer language primarily from code features when needed.',
+    );
+    expect(userPrompt).toContain('Language hint: typescript');
+    expect(userPrompt).toContain(
+      'Language hint may be missing or incorrect; prioritize code evidence for language-specific judgement.',
     );
     expect(userPrompt).toContain(
       'Boundary rule: if the submission is mostly correct but still improvable, return one integrated item; return empty items only when truly nothing can be improved.',

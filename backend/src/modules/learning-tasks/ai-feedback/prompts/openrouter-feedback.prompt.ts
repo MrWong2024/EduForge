@@ -42,6 +42,9 @@ export const buildSystemPrompt = () => {
     `tags must come from this list only: ${tags}.`,
     'message 与 suggestion 默认使用简体中文，表达清晰、直接、可执行，适合中国高校学生阅读。',
     '代码标识符、变量名、函数名、类名、语言关键字保持原文，不翻译代码元素。',
+    'Language is a hint, not ground truth.',
+    'If language hint is auto/unknown/empty, infer language mainly from code content.',
+    'If language hint conflicts with code syntax/tokens, trust the code and avoid wrong-language diagnostics.',
     'Cardinality rule: for normal evaluable submissions, items length must be 1; only when a second issue category is clearly independent and cannot be merged may items length be 2.',
     'Never output more than 2 items.',
     '默认只输出 1 条主反馈；仅当问题类别明显独立且合并会损失可读性时，才允许第 2 条。',
@@ -76,12 +79,15 @@ export const buildUserPrompt = (params: BuildUserPromptParams) => {
   const wasTruncated = originalLen > limit;
   const usedLen = usedText.length;
   const rubricText = toRubricText(params.context.taskRubric);
+  const languageHintRaw = (params.context.language ?? '').trim();
+  const languageHint = languageHintRaw || 'auto';
 
   return [
     'Task: analyze the student submission and return JSON feedback items only.',
     'You must evaluate against the task requirements and rubric, not generic style advice only.',
     'If code deviates from the task goal, misses key requirements, or fails rubric points, point it out directly.',
     'Focus on primary-problem-oriented integrated feedback, not log-style fragmented bullets.',
+    'Treat language as a weak hint. Infer language primarily from code features when needed.',
     'Prefer exactly one item. Output two items only when the second category is clearly independent and improves student understanding.',
     'Differentiate between "feature not implemented" and "logic exists but cannot run due to syntax/compile errors".',
     'For repeated same-category issues (for example repeated missing semicolons), merge into one integrated item.',
@@ -94,7 +100,8 @@ export const buildUserPrompt = (params: BuildUserPromptParams) => {
     `TaskTitle: ${params.context.taskTitle}`,
     `TaskDescription: ${params.context.taskDescription}`,
     `TaskRubric: ${rubricText}`,
-    `Language: ${params.context.language || 'unknown'}`,
+    `Language hint: ${languageHint}`,
+    'Language hint may be missing or incorrect; prioritize code evidence for language-specific judgement.',
     `AttemptNo: ${params.context.attemptNo}`,
     `AIUsageDeclaration: ${params.context.aiUsageDeclaration || 'n/a'}`,
     `CodeTruncated: ${wasTruncated ? 'true' : 'false'}, OriginalLength: ${originalLen}, UsedLength: ${usedLen}`,

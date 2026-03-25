@@ -86,7 +86,7 @@ Teacher 课程视角（可用）：
 Student 学习链路（可用）：
 1. `/student/classrooms/join` -> `POST classrooms/join`
 2. `/student/classrooms/[classroomId]/tasks/[classroomTaskId]` -> `GET .../my-task-detail`（页面已是“任务详情 + 提交工作台”，正式展示任务基础信息、任务说明 `task.description`、评分标准 `task.rubric`，并保留提交与历史记录）
-3. `SubmissionForm` -> `POST .../submissions`
+3. `SubmissionForm` -> `POST .../submissions`（language 默认“自动识别”，未手动指定时提交 `auto`，不再默认 `javascript`）
 4. `/student/submissions/[submissionId]` -> 稳定读源 + feedback 列表 + request AI
 
 Teacher 批阅链路（可用）：
