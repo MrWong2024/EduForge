@@ -89,7 +89,7 @@ Student 学习链路（可用）：
 3. `SubmissionForm` -> `POST .../submissions`（language 默认“自动识别”，未手动指定时提交 `auto`，不再默认 `javascript`）
 4. `/student/submissions/[submissionId]` -> 稳定读源 + feedback 列表 + request AI
    - 反馈主列表已中文化：表头使用“来源/类型/严重程度/反馈内容/修改建议/标签/时间”。
-   - `source/type/severity` 已在页面做稳定中文映射；`message` 与 `suggestion` 分列展示（`suggestion` 为空时显示“暂无”）。
+   - `source/type/severity` 在列表单元格按后端原值直出（英文枚举不翻译）；`message` 与 `suggestion` 分列展示（`suggestion` 为空时显示“暂无”）。
 
 Teacher 批阅链路（可用）：
 1. `/teacher/classrooms/[classroomId]/tasks/[classroomTaskId]/submissions`

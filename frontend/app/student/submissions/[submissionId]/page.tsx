@@ -96,67 +96,6 @@ const getStudentSubmissionErrorSummary = (status: number): string => {
   return getCommonErrorSummary(status);
 };
 
-const normalizeFeedbackEnum = (value: string | undefined): string => {
-  if (!value) {
-    return "";
-  }
-  return value.trim().toUpperCase();
-};
-
-const toFeedbackSourceLabel = (value: string | undefined): string => {
-  const normalized = normalizeFeedbackEnum(value);
-  if (normalized === "AI") {
-    return "AI 反馈";
-  }
-  if (normalized === "TEACHER") {
-    return "教师反馈";
-  }
-  if (normalized === "SYSTEM") {
-    return "系统反馈";
-  }
-  return toDisplayText(value, "未知来源");
-};
-
-const toFeedbackSeverityLabel = (value: string | undefined): string => {
-  const normalized = normalizeFeedbackEnum(value);
-  if (normalized === "ERROR") {
-    return "高优先级";
-  }
-  if (normalized === "WARN") {
-    return "需关注";
-  }
-  if (normalized === "INFO") {
-    return "一般提示";
-  }
-  return toDisplayText(value, "未知程度");
-};
-
-const toFeedbackTypeLabel = (value: string | undefined): string => {
-  const normalized = normalizeFeedbackEnum(value);
-  if (normalized === "SYNTAX") {
-    return "语法问题";
-  }
-  if (normalized === "STYLE") {
-    return "代码风格";
-  }
-  if (normalized === "DESIGN") {
-    return "设计思路";
-  }
-  if (normalized === "BUG") {
-    return "逻辑错误";
-  }
-  if (normalized === "PERFORMANCE") {
-    return "性能问题";
-  }
-  if (normalized === "SECURITY") {
-    return "安全问题";
-  }
-  if (normalized === "OTHER") {
-    return "其他问题";
-  }
-  return toDisplayText(value, "未知类型");
-};
-
 const getRequestOrigin = async (): Promise<string> => {
   const headerMap = await headers();
   const host = headerMap.get("x-forwarded-host") ?? headerMap.get("host") ?? "";
@@ -351,9 +290,9 @@ export default async function StudentSubmissionDetailPage({
             <tbody>
               {viewModel.feedback.items.map((item, index) => (
                 <tr key={item.id ?? `feedback-${index}`} className="border-t border-zinc-100 align-top">
-                  <td className="px-4 py-3">{toFeedbackSourceLabel(item.source)}</td>
-                  <td className="px-4 py-3">{toFeedbackTypeLabel(item.type)}</td>
-                  <td className="px-4 py-3">{toFeedbackSeverityLabel(item.severity)}</td>
+                  <td className="px-4 py-3">{toDisplayText(item.source, "—")}</td>
+                  <td className="px-4 py-3">{toDisplayText(item.type, "—")}</td>
+                  <td className="px-4 py-3">{toDisplayText(item.severity, "—")}</td>
                   <td className="px-4 py-3 whitespace-pre-wrap">{toDisplayText(item.message)}</td>
                   <td className="px-4 py-3 whitespace-pre-wrap">{toDisplayText(item.suggestion, "暂无")}</td>
                   <td className="px-4 py-3">{item.tags.length > 0 ? item.tags.join(", ") : "—"}</td>
