@@ -1,6 +1,8 @@
 ﻿import {
   BadRequestException,
   ForbiddenException,
+  HttpException,
+  HttpStatus,
   Injectable,
   Logger,
   NotFoundException,
@@ -49,12 +51,18 @@ type SubmissionDetailTaskLean = Pick<Task, 'title' | 'createdBy'> & WithId;
 type SubmissionDetailStudentLean = Pick<User, 'name'> & WithId;
 type SubmissionDetailClassroomLean = Pick<Classroom, 'teacherId'> & WithId;
 type IdOnly = WithId;
+type SubmissionCooldownSource = Pick<Submission, 'submittedAt'> &
+  WithId &
+  WithTimestamps;
 
 @Injectable()
 export class LearningTasksService {
   private static readonly TOP_TAGS_LIMIT = 5;
   private static readonly LATE_SUBMISSION_NOT_ALLOWED_CODE =
     'LATE_SUBMISSION_NOT_ALLOWED';
+  private static readonly SUBMISSION_COOLDOWN_ACTIVE_CODE =
+    'SUBMISSION_COOLDOWN_ACTIVE';
+  private static readonly DEFAULT_SUBMISSION_COOLDOWN_MS = 300000;
   private readonly logger = new Logger(LearningTasksService.name);
 
   constructor(
@@ -559,6 +567,12 @@ export class LearningTasksService {
       });
     }
 
+    await this.ensureSubmissionCooldownNotHit(
+      studentObjectId,
+      classroomTaskObjectId,
+      submittedAt,
+    );
+
     for (let attempt = 0; attempt < 3; attempt += 1) {
       const lastSubmission = await this.submissionModel
         .findOne({ taskId: taskObjectId, studentId: studentObjectId })
@@ -621,6 +635,78 @@ export class LearningTasksService {
       return attemptNo === 1;
     }
     return true;
+  }
+
+  private getSubmissionCooldownMs() {
+    const value = this.configService.get<unknown>(
+      'LEARNING_TASK_SUBMISSION_COOLDOWN_MS',
+    );
+    if (typeof value === 'number' && Number.isFinite(value)) {
+      if (value < 0) {
+        return LearningTasksService.DEFAULT_SUBMISSION_COOLDOWN_MS;
+      }
+      return Math.floor(value);
+    }
+    if (typeof value === 'string') {
+      const parsed = Number(value);
+      if (!Number.isFinite(parsed) || parsed < 0) {
+        return LearningTasksService.DEFAULT_SUBMISSION_COOLDOWN_MS;
+      }
+      return Math.floor(parsed);
+    }
+    return LearningTasksService.DEFAULT_SUBMISSION_COOLDOWN_MS;
+  }
+
+  private async ensureSubmissionCooldownNotHit(
+    studentId: Types.ObjectId,
+    classroomTaskId: Types.ObjectId | undefined,
+    submittedAt: Date,
+  ) {
+    if (!classroomTaskId) {
+      return;
+    }
+
+    const cooldownMs = this.getSubmissionCooldownMs();
+    if (cooldownMs <= 0) {
+      return;
+    }
+
+    const latestSubmission = await this.submissionModel
+      .findOne({
+        studentId,
+        classroomTaskId,
+      })
+      .sort({ submittedAt: -1, _id: -1 })
+      .select('_id submittedAt createdAt')
+      .lean<SubmissionCooldownSource>()
+      .exec();
+    if (!latestSubmission) {
+      return;
+    }
+
+    const latestSubmittedAt =
+      latestSubmission.submittedAt ?? latestSubmission.createdAt;
+    if (!latestSubmittedAt) {
+      return;
+    }
+
+    const elapsedMs = submittedAt.getTime() - latestSubmittedAt.getTime();
+    if (elapsedMs >= cooldownMs) {
+      return;
+    }
+
+    const retryAfterMs = Math.max(1, cooldownMs - elapsedMs);
+    const retryAfterSeconds = Math.ceil(retryAfterMs / 1000);
+    throw new HttpException(
+      {
+        statusCode: 429,
+        code: LearningTasksService.SUBMISSION_COOLDOWN_ACTIVE_CODE,
+        message: 'Submission is too frequent. Please wait before retrying.',
+        retryAfterMs,
+        retryAfterSeconds,
+      },
+      HttpStatus.TOO_MANY_REQUESTS,
+    );
   }
 
   private async ensureCanRequestAiFeedback(

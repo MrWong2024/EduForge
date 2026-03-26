@@ -28,7 +28,7 @@ PENDING/FAILED -> RUNNING -> FAILED -> (retry with backoff) -> DEAD (when attemp
 ## Environment Variables
 - AI_FEEDBACK_WORKER_ENABLED (default: false)
   - When 'true', the worker starts consuming jobs.
-- AI_FEEDBACK_WORKER_INTERVAL_MS (default: 5000)
+- AI_FEEDBACK_WORKER_INTERVAL_MS (default: 10000)
   - Polling interval in milliseconds.
 - AI_FEEDBACK_WORKER_BATCH_SIZE (default: AiFeedbackProcessor.DEFAULT_BATCH_SIZE)
   - Batch size per tick when provided.
@@ -68,7 +68,7 @@ Default for local integration and front-backend联调:
 - `AI_FEEDBACK_PROVIDER=stub`
 - `AI_FEEDBACK_REAL_ENABLED=false`
 - `AI_FEEDBACK_WORKER_ENABLED=true`
-- `AI_FEEDBACK_WORKER_INTERVAL_MS=5000` (optional, defaults to 5000)
+- `AI_FEEDBACK_WORKER_INTERVAL_MS=10000` (optional, defaults to 10000)
 - `AI_FEEDBACK_WORKER_BATCH_SIZE=5` (optional, defaults to processor batch size)
 
 Optional mock-provider variant:

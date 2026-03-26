@@ -11,7 +11,7 @@
 
 | 模式 | 执行方式 | 目标 | 必要 env | 可选 env（默认） | 备注 |
 |---|---|---|---|---|---|
-| Stub | `worker` | 本地开发/不触网，后台持续消费 | `MONGO_URI`、`AI_FEEDBACK_PROVIDER=stub`、`AI_FEEDBACK_REAL_ENABLED=false`、`AI_FEEDBACK_WORKER_ENABLED=true` | `AI_FEEDBACK_WORKER_INTERVAL_MS=5000`、`AI_FEEDBACK_WORKER_BATCH_SIZE=5`（未设时走 processor 默认） | 默认不触发外部 AI。 |
+| Stub | `worker` | 本地开发/不触网，后台持续消费 | `MONGO_URI`、`AI_FEEDBACK_PROVIDER=stub`、`AI_FEEDBACK_REAL_ENABLED=false`、`AI_FEEDBACK_WORKER_ENABLED=true` | `AI_FEEDBACK_WORKER_INTERVAL_MS=10000`、`AI_FEEDBACK_WORKER_BATCH_SIZE=5`（未设时走 processor 默认） | 默认不触发外部 AI。 |
 | Stub | `process-once` | 本地排障，一次性处理一批 | `MONGO_URI`、`AI_FEEDBACK_PROVIDER=stub`、`AI_FEEDBACK_REAL_ENABLED=false`、`AI_FEEDBACK_DEBUG_ENABLED=true` | `AI_FEEDBACK_WORKER_ENABLED=false` | 调 `POST /api/learning-tasks/ai-feedback/jobs/process-once`；debug 关闭时返回 `404`（不是 `403`）。 |
 | Mock OpenRouter（E2E） | `worker` | CI/联调仿真 real provider | `MONGO_URI`、`AI_FEEDBACK_PROVIDER=openrouter`、`AI_FEEDBACK_REAL_ENABLED=true`、`OPENROUTER_API_KEY=test-key`、`OPENROUTER_BASE_URL=http://127.0.0.1:<port>`、`AI_FEEDBACK_WORKER_ENABLED=true` | `OPENROUTER_MODEL=openai/gpt-4o-mini`、`OPENROUTER_TIMEOUT_MS=15000`、`OPENROUTER_MAX_RETRIES=2`、worker 两项同上 | 可配本地 mock server。 |
 | Mock OpenRouter（E2E） | `process-once` | CI/联调排障，一次性处理 | `MONGO_URI`、`AI_FEEDBACK_PROVIDER=openrouter`、`AI_FEEDBACK_REAL_ENABLED=true`、`OPENROUTER_API_KEY=test-key`、`OPENROUTER_BASE_URL=http://127.0.0.1:<port>`、`AI_FEEDBACK_DEBUG_ENABLED=true` | 同 mock openrouter 默认项 | 调 `POST /api/learning-tasks/ai-feedback/jobs/process-once`；debug 关闭时返回 `404`。 |
@@ -37,6 +37,7 @@
 | `AI_FEEDBACK_AUTO_ON_SUBMIT` | `true` | Joi | 提交后是否自动尝试创建 AI Job。 |
 | `AI_FEEDBACK_AUTO_ON_FIRST_ATTEMPT_ONLY` | `true` | Joi | 自动入队是否仅限首提（attemptNo=1）。 |
 | `AI_FEEDBACK_MAX_ITEMS` | `20` | Joi | 每次保存反馈条目上限。 |
+| `LEARNING_TASK_SUBMISSION_COOLDOWN_MS` | `300000` | Joi | 学生提交冷却窗口（ms）；按同一 student + classroomTask 判定，`0` 表示关闭冷却。 |
 | `AI_FEEDBACK_DEBUG_ENABLED` | `false` | Joi | debug/ops 路由门禁。 |
 | `AUTHZ_ENFORCE_ROLES` | `true` | Joi | 是否强制 `RolesGuard` 执行。 |
 | `OPENROUTER_BASE_URL` | `https://openrouter.ai/api/v1` | Joi | OpenRouter 基础地址。 |
@@ -46,7 +47,7 @@
 | `OPENROUTER_TIMEOUT_MS` | `15000` | Joi | 上游超时（ms）。 |
 | `OPENROUTER_MAX_RETRIES` | `2` | Joi | provider 重试次数。 |
 | `AI_FEEDBACK_WORKER_ENABLED` | `false` | Worker 源码/README | `true` 才启动常驻轮询；默认关闭。 |
-| `AI_FEEDBACK_WORKER_INTERVAL_MS` | `5000` | Worker 源码/README | 轮询间隔（ms）；非法值回退默认。 |
+| `AI_FEEDBACK_WORKER_INTERVAL_MS` | `10000` | Worker 源码/README | 轮询间隔（ms）；非法值回退默认。 |
 | `AI_FEEDBACK_WORKER_BATCH_SIZE` | `5` | Processor 常量/README | 每 tick 批次；未设置或非法值时走 `processOnce()` 默认批次 `5`。 |
 
 条件必填：
@@ -75,6 +76,10 @@
   - 触发条件：`classroomTask.dueAt` 存在，且 `settings.allowLate=false`，且 `now > dueAt`。
   - HTTP：`403`（当前实现）。
   - 排障要点：若 `dueAt` 为空，则不限制提交，且 `isLate=false`。
+- `SUBMISSION_COOLDOWN_ACTIVE`
+  - 触发条件：同一 `studentId + classroomTaskId` 在冷却窗口内重复提交。
+  - HTTP：`429`（当前实现），并返回 `retryAfterMs/retryAfterSeconds`。
+  - 排障要点：默认冷却 `300000ms`，可通过 `LEARNING_TASK_SUBMISSION_COOLDOWN_MS=0` 关闭。
 
 ## 3) Worker / Debug 默认关闭与开启方式
 
@@ -120,9 +125,10 @@ debug/ops 门禁口径（与当前实现一致）：
 
 补充（worker 专属）：
 - `AI_FEEDBACK_WORKER_ENABLED`：默认 `false`，控制是否启动常驻轮询。
-- `AI_FEEDBACK_WORKER_INTERVAL_MS`：默认 `5000`，控制每次轮询间隔。
+- `AI_FEEDBACK_WORKER_INTERVAL_MS`：默认 `10000`，控制每次轮询间隔。
 - `AI_FEEDBACK_WORKER_BATCH_SIZE`：默认跟随 processor 批次 `5`，控制每次 tick 处理数量。
 - 空跑 tick（processed/succeeded/failed/dead 全 0）默认不输出结果 DEBUG 日志；仅非空跑保留结果日志。
+- `LEARNING_TASK_SUBMISSION_COOLDOWN_MS`：默认 `300000`，控制学生提交冷却窗口（同一 `studentId + classroomTaskId`）；`0` 表示关闭冷却。
 
 成本提醒：
 - 打开 `AI_FEEDBACK_REAL_ENABLED` 后，并发/限流/maxItems 会直接影响调用成本与上游压力。

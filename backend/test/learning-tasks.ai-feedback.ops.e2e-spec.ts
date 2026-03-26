@@ -1,4 +1,5 @@
 import { INestApplication, ValidationPipe } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { Test, TestingModule } from '@nestjs/testing';
 import { getModelToken } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
@@ -162,6 +163,7 @@ describe('LearningTasks AI Feedback Ops (e2e) - pipeline & debug gate ON', () =>
     );
     app.use(cookieParser());
     await app.init();
+    app.get(ConfigService).set('LEARNING_TASK_SUBMISSION_COOLDOWN_MS', 0);
 
     teacherAgent = request.agent(app.getHttpServer());
     studentAgent = request.agent(app.getHttpServer());
@@ -557,6 +559,7 @@ describe('LearningTasks AI Feedback Ops (e2e) - stub worker default loop', () =>
     );
     app.use(cookieParser());
     await app.init();
+    app.get(ConfigService).set('LEARNING_TASK_SUBMISSION_COOLDOWN_MS', 0);
 
     teacherAgent = request.agent(app.getHttpServer());
     studentAgent = request.agent(app.getHttpServer());

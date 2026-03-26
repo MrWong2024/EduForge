@@ -64,7 +64,7 @@ npm run test:e2e -- backend/test/classroom-export-snapshot.e2e-spec.ts
 推荐默认联调模式（结论）：
 - `Stub + worker`（用于本地开发 / 前后端联调 / AI 闭环验证）。
 - 最小关键 env：`AI_FEEDBACK_PROVIDER=stub`、`AI_FEEDBACK_REAL_ENABLED=false`、`AI_FEEDBACK_WORKER_ENABLED=true`。
-- worker 默认轮询间隔 `5000ms`（可由 `AI_FEEDBACK_WORKER_INTERVAL_MS` 覆盖）；空跑 tick（processed/succeeded/failed/dead 全 0）默认不输出结果 DEBUG 日志。
+- worker 默认轮询间隔 `10000ms`（可由 `AI_FEEDBACK_WORKER_INTERVAL_MS` 覆盖）；空跑 tick（processed/succeeded/failed/dead 全 0）默认不输出结果 DEBUG 日志。
 - 产品级 request 只负责创建/确保 `PENDING` job，worker 负责消费到 `SUCCEEDED`。
 - `process-once` 仅用于 debug/ops 辅助，不作为默认交付运行模式。
 
@@ -105,6 +105,7 @@ npm run test:e2e -- backend/test/classroom-learning-loop.e2e-spec.ts
 - `backend/test/learning-tasks.ai-feedback.trigger-policy.e2e-spec.ts`
   - 覆盖：attempt-based 触发策略回归。
   - 关键断言：`attemptNo=1` 自动入队（`PENDING`）；`attemptNo>1` 默认 `NOT_REQUESTED`（无 job）；`POST /api/learning-tasks/submissions/:submissionId/ai-feedback/request` 手工入队幂等并进入 `PENDING`；可选验证 `process-once` 后 `SUCCEEDED` 且可查询 feedback（mock/stub 语境）。
+  - 说明：该 spec 显式将 `LEARNING_TASK_SUBMISSION_COOLDOWN_MS` 设为 `0`，避免提交冷却影响“连续尝试触发策略”断言。
 - `backend/test/enrollments.authority-and-legacy.e2e-spec.ts`
   - 覆盖：Enrollment-only 权威来源收口，成员关系以 Enrollment 为准。
   - 关键断言：`classroom.studentIds` 仅镜像输出，不作为授权/统计读源。
@@ -141,6 +142,9 @@ npm run test:e2e -- backend/test/classroom-learning-loop.e2e-spec.ts
   - 覆盖：Z7 `POST /api/classrooms/:classroomId/tasks/:classroomTaskId/submissions` 的截止门禁。
   - 关键断言：`dueAt` 到期且 `allowLate=false` 返回 `LATE_SUBMISSION_NOT_ALLOWED`；`submittedAt/isLate/lateBySeconds` 持久化语义正确。
   - 重要性：保证截止规则与迟交数据链路一致。
+- `backend/test/classroom-task-submission-cooldown.e2e-spec.ts`
+  - 覆盖：课堂任务提交冷却（同一 `studentId + classroomTaskId`）。
+  - 关键断言：默认冷却命中返回 `429/SUBMISSION_COOLDOWN_ACTIVE`；超窗后允许再次提交；`LEARNING_TASK_SUBMISSION_COOLDOWN_MS=0` 时可连续提交。
 - `backend/test/classroom-task-submissions.e2e-spec.ts`
   - 覆盖：P0 `GET /api/learning-tasks/submissions/:id` 稳定读源（含 classroomTask 隔离场景） + `GET /api/classrooms/:classroomId/tasks/:classroomTaskId/submissions` 列表契约。
   - 关键断言：学生本人可读；classroom owner teacher 可读；非授权 teacher/student 返回 `403`；返回 `content.codeText`；无 job 时 `aiFeedbackStatus=NOT_REQUESTED`；提交列表 `feedbackCount` 覆盖有反馈 `>0` 与无反馈 `=0` 两种场景。
@@ -263,6 +267,7 @@ $env:AI_FEEDBACK_DEBUG_ENABLED="true"
 - `classroom-review-pack.e2e-spec.ts`
 - `classroom-process-assessment.e2e-spec.ts`
 - `classroom-task-deadline.e2e-spec.ts`
+- `classroom-task-submission-cooldown.e2e-spec.ts`
 - `classroom-export-snapshot.e2e-spec.ts`
 - `learning-tasks.ai-feedback.openrouter-context.e2e-spec.ts`
 - 补充：submission detail 稳定读源测试关注点（`GET /api/learning-tasks/submissions/:id`）。

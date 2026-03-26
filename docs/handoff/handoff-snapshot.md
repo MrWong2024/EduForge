@@ -242,6 +242,7 @@ AI Provider 错误码（`ai-feedback-provider.error-codes.ts`）：
   - `AI_FEEDBACK_AUTO_ON_FIRST_ATTEMPT_ONLY`
   - `AI_FEEDBACK_MAX_CONCURRENCY`
   - `AI_FEEDBACK_MAX_PER_CLASSROOMTASK_PER_MINUTE`
+  - `LEARNING_TASK_SUBMISSION_COOLDOWN_MS`
   - `AI_FEEDBACK_WORKER_INTERVAL_MS`
   - `AI_FEEDBACK_WORKER_BATCH_SIZE`
   - `OPENROUTER_API_KEY`（仅 `openrouter + real enabled` 必填）
@@ -282,7 +283,7 @@ AI Provider 错误码（`ai-feedback-provider.error-codes.ts`）：
   - 无 job 时 `aiFeedbackStatus=NOT_REQUESTED`。
 - AI 默认联调模式（已固化）：
   - 推荐 `Stub + worker`：`AI_FEEDBACK_PROVIDER=stub` 且 `AI_FEEDBACK_WORKER_ENABLED=true`。
-  - worker 轮询默认间隔为 `5000ms`（`AI_FEEDBACK_WORKER_INTERVAL_MS` 可覆盖）；空跑 tick（processed/succeeded/failed/dead 全 0）默认不输出结果 DEBUG 日志。
+  - worker 轮询默认间隔为 `10000ms`（`AI_FEEDBACK_WORKER_INTERVAL_MS` 可覆盖）；空跑 tick（processed/succeeded/failed/dead 全 0）默认不输出结果 DEBUG 日志。
   - 产品级 request 仅负责创建/确保 job（新建时为 `PENDING`），worker 负责消费到 `SUCCEEDED`。
   - `process-once` 仅用于 debug/ops，不作为默认交付运行模式。
   - Real OpenRouter 路径已支持基于 task 上下文（`title/description/rubric`）分析 submission，且 prompt/协议已明确“默认 1 条、必要时最多 2 条、同类问题合并、错误优先、禁止表扬噪音”。
@@ -306,6 +307,7 @@ AI Provider 错误码（`ai-feedback-provider.error-codes.ts`）：
   - `GET /api/classrooms/:classroomId/process-assessment.csv`
 - Z7 截止/迟交：
   - 提交门禁：`POST /api/classrooms/:classroomId/tasks/:classroomTaskId/submissions` 在到期且不允许迟交时返回 `LATE_SUBMISSION_NOT_ALLOWED`
+  - 提交冷却：默认 `LEARNING_TASK_SUBMISSION_COOLDOWN_MS=300000`；按同一 `studentId + classroomTaskId` 判定，命中时返回 `429` + `SUBMISSION_COOLDOWN_ACTIVE`（含 `retryAfterMs/retryAfterSeconds`），`0` 表示关闭冷却。
   - 迟交持久字段：`Submission.submittedAt / isLate / lateBySeconds`
   - late 维度已贯穿周报、课程总览、学习轨迹、复盘包、过程性评价、快照导出等聚合接口
 - Z9 教学数据快照导出（teacher）：

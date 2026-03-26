@@ -10,7 +10,7 @@ type WorkerTickResult = Awaited<ReturnType<AiFeedbackProcessor['processOnce']>>;
 
 @Injectable()
 export class AiFeedbackWorker implements OnModuleInit, OnModuleDestroy {
-  private static readonly DEFAULT_INTERVAL_MS = 5000;
+  private static readonly DEFAULT_INTERVAL_MS = 10000;
   private readonly logger = new Logger(AiFeedbackWorker.name);
   private intervalId?: NodeJS.Timeout;
   private isRunning = false;
