@@ -258,6 +258,56 @@ if (previousDebug === undefined) {
 - Debug 路由无法访问
 - 测试结果在不同运行方式下不一致
 
+### 6.6 运行时配置覆写边界（补充）
+
+本节用于补充 6.5 的边界：`ConfigService.set(...)` 不是通用替代方案，只适用于“运行时现读配置”。
+
+#### 6.6.1 必须使用“启动前设 env”的场景
+
+若配置会影响以下任一启动期行为，必须在 `import AppModule` 之前设置 `process.env`：
+
+- 模块装配或模块结构
+- Provider 选择/注册
+- Route/Controller 是否挂载
+- Guard 或 debug gate / ops 路由开关
+- `onModuleInit()` 启动逻辑
+- 定时器 / worker 初始化
+- 启动时读取并缓存的配置值
+
+此类配置不得依赖 `await app.init()` 之后再 `app.get(ConfigService).set(...)`。
+
+#### 6.6.2 允许“启动后 set ConfigService”的场景
+
+仅当同时满足以下条件时，才允许在 `await app.init()` 之后使用：
+
+```ts
+app.get(ConfigService).set('KEY', value);
+```
+
+- 该配置不会影响模块装配、路由挂载、Provider 注册或启动期定时器行为；
+- 被测业务会在“请求处理时/方法执行时”重新读取 `ConfigService`；
+- 该配置属于运行时业务阈值/开关，而非启动期结构性配置。
+
+#### 6.6.3 拿不准时的默认策略
+
+若无法确认配置是“启动期读取并缓存”还是“运行时现读”，默认按更稳妥方式处理：
+
+- 在 `import AppModule` 之前设置 `process.env`。
+
+#### 6.6.4 抽象示例分类（不绑定具体实现）
+
+适合“启动前设 env”的配置类别（示例）：
+
+- debug gate 开关
+- worker enable 开关
+- provider 选择
+- 定时轮询间隔
+
+适合“启动后 set ConfigService(...)”的配置类别（示例）：
+
+- 纯运行时业务阈值
+- 请求处理时即时读取的冷却时间/限制阈值
+- 不改变模块结构的动态测试参数
 ## 7. 禁止事项（红线）
 
 以下行为 **严格禁止**：
