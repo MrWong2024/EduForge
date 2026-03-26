@@ -16,6 +16,7 @@ import { Task } from '../src/modules/learning-tasks/schemas/task.schema';
 import { Submission } from '../src/modules/learning-tasks/schemas/submission.schema';
 import { Feedback } from '../src/modules/learning-tasks/schemas/feedback.schema';
 import { AiFeedbackJob } from '../src/modules/learning-tasks/ai-feedback/schemas/ai-feedback-job.schema';
+import { AiFeedbackProcessor } from '../src/modules/learning-tasks/ai-feedback/services/ai-feedback-processor.service';
 
 const KEEP_DB = process.env.KEEP_E2E_DB === '1';
 
@@ -67,6 +68,7 @@ describe('Classroom Learning Loop (e2e)', () => {
   let submissionModel: Model<Submission>;
   let feedbackModel: Model<Feedback>;
   let aiFeedbackJobModel: Model<AiFeedbackJob>;
+  let aiFeedbackProcessor: AiFeedbackProcessor;
   let teacherAgent: ReturnType<typeof request.agent>;
   let studentAgent: ReturnType<typeof request.agent>;
 
@@ -138,6 +140,7 @@ describe('Classroom Learning Loop (e2e)', () => {
     submissionModel = app.get(getModelToken(Submission.name));
     feedbackModel = app.get(getModelToken(Feedback.name));
     aiFeedbackJobModel = app.get(getModelToken(AiFeedbackJob.name));
+    aiFeedbackProcessor = app.get(AiFeedbackProcessor);
 
     const [teacherHash, studentHash] = await Promise.all([
       bcrypt.hash(teacherPassword, 10),
@@ -299,16 +302,7 @@ describe('Classroom Learning Loop (e2e)', () => {
     expect(submissionBody.attemptNo).toBe(1);
     submissionId = submissionBody.id;
 
-    await teacherAgent
-      .post('/api/learning-tasks/ai-feedback/jobs/process-once')
-      .send({})
-      .expect((res) => {
-        if (![200, 201].includes(res.status)) {
-          throw new Error(
-            `Unexpected process-once status ${res.status}, body=${JSON.stringify(res.body)}`,
-          );
-        }
-      });
+    await aiFeedbackProcessor.processOnce();
 
     await teacherAgent
       .post(`/api/learning-tasks/submissions/${submissionId}/feedback`)
@@ -317,7 +311,7 @@ describe('Classroom Learning Loop (e2e)', () => {
         type: 'STYLE',
         severity: 'WARN',
         message: 'Use clearer naming.',
-        tags: ['clarity'],
+        tags: ['readability'],
       })
       .expect(201);
 
@@ -328,6 +322,6 @@ describe('Classroom Learning Loop (e2e)', () => {
     const reportBody = report.body as CommonIssuesReport;
     const tags = reportBody.topTags.map((item) => item.tag);
     expect(tags.length).toBeGreaterThanOrEqual(1);
-    expect(tags).toContain('clarity');
+    expect(tags).toContain('readability');
   });
 });

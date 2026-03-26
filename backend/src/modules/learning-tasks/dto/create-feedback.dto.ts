@@ -12,6 +12,7 @@ import {
   FeedbackSource,
   FeedbackType,
 } from '../schemas/feedback.schema';
+import { FeedbackTag } from '../ai-feedback/lib/feedback-normalizer';
 
 export class CreateFeedbackDto {
   @IsEnum(FeedbackSource)
@@ -33,7 +34,7 @@ export class CreateFeedbackDto {
   @IsOptional()
   @IsArray()
   @IsString({ each: true })
-  tags?: string[];
+  tags?: FeedbackTag[];
 
   @IsOptional()
   @IsNumber()

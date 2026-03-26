@@ -281,6 +281,10 @@ AI Provider 错误码（`ai-feedback-provider.error-codes.ts`）：
   - 学生本人可访问；若 `classroomTaskId` 存在，仅所属班级 owner teacher 可访问；若 `classroomTaskId` 为空，仅 task owner teacher 可访问。
   - 返回 submission detail 稳定读源字段（`taskTitle/studentName/content.language/content.codeText/submittedAt/attemptNo/isLate/lateBySeconds/aiFeedbackStatus`）。
   - 无 job 时 `aiFeedbackStatus=NOT_REQUESTED`。
+- 教师反馈标签词表收口（已完成）：
+  - `POST /api/learning-tasks/submissions/:id/feedback`
+  - `tags` 与 AI feedback 共用统一词表（同 `feedback-normalizer` 词表来源）；包含未定义标签时返回 `400` + `Invalid tag(s), please select from predefined tags`。
+  - `tags` 未传或清洗后为空时，后端按 `other` 持久化。
 - AI 默认联调模式（已固化）：
   - 推荐 `Stub + worker`：`AI_FEEDBACK_PROVIDER=stub` 且 `AI_FEEDBACK_WORKER_ENABLED=true`。
   - worker 轮询默认间隔为 `10000ms`（`AI_FEEDBACK_WORKER_INTERVAL_MS` 可覆盖）；空跑 tick（processed/succeeded/failed/dead 全 0）默认不输出结果 DEBUG 日志。

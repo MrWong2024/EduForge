@@ -10,7 +10,7 @@ export type RawFeedbackItem = {
   scoreHint?: number;
 };
 
-const FEEDBACK_TAGS_LIST = [
+export const FEEDBACK_TAGS_LIST = [
   'readability',
   'naming',
   'style',
@@ -49,11 +49,13 @@ const FEEDBACK_TAGS_LIST = [
   'dead-code',
   'unused',
   'other',
-];
+] as const;
+
+export type FeedbackTag = (typeof FEEDBACK_TAGS_LIST)[number];
 
 const FEEDBACK_TAGS = new Set<string>(FEEDBACK_TAGS_LIST);
 
-const cleanTag = (tag: string) => {
+export const cleanFeedbackTag = (tag: string) => {
   const trimmed = tag.trim().toLowerCase();
   if (!trimmed) {
     return '';
@@ -61,14 +63,14 @@ const cleanTag = (tag: string) => {
   return trimmed.replace(/[ _]+/g, '-').replace(/-+/g, '-');
 };
 
-const normalizeTags = (tags?: string[]) => {
+export const normalizeFeedbackTags = (tags?: string[]) => {
   if (!tags || tags.length === 0) {
     return undefined;
   }
 
   const normalized = new Set<string>();
   for (const tag of tags) {
-    const cleaned = cleanTag(tag);
+    const cleaned = cleanFeedbackTag(tag);
     if (!cleaned) {
       continue;
     }
@@ -90,7 +92,7 @@ export const normalizeFeedbackItems = (
     severity: item.severity,
     message: item.message,
     suggestion: item.suggestion,
-    tags: normalizeTags(item.tags),
+    tags: normalizeFeedbackTags(item.tags),
     scoreHint: item.scoreHint,
   }));
 

@@ -30,6 +30,10 @@ import { AiFeedbackJobService } from '../ai-feedback/services/ai-feedback-job.se
 import { AiFeedbackJobStatus } from '../ai-feedback/schemas/ai-feedback-job.schema';
 import { AiFeedbackStatus } from '../ai-feedback/interfaces/ai-feedback-status.enum';
 import {
+  cleanFeedbackTag,
+  getFeedbackTags,
+} from '../ai-feedback/lib/feedback-normalizer';
+import {
   STUDENT_ROLES,
   TEACHER_ROLES,
   hasAnyRole,
@@ -60,6 +64,9 @@ export class LearningTasksService {
   private static readonly TOP_TAGS_LIMIT = 5;
   private static readonly LATE_SUBMISSION_NOT_ALLOWED_CODE =
     'LATE_SUBMISSION_NOT_ALLOWED';
+  private static readonly INVALID_FEEDBACK_TAGS_MESSAGE =
+    'Invalid tag(s), please select from predefined tags';
+  private static readonly FEEDBACK_TAGS = new Set<string>(getFeedbackTags());
   private static readonly SUBMISSION_COOLDOWN_ACTIVE_CODE =
     'SUBMISSION_COOLDOWN_ACTIVE';
   private static readonly DEFAULT_SUBMISSION_COOLDOWN_MS = 300000;
@@ -316,9 +323,11 @@ export class LearningTasksService {
       throw new ForbiddenException('Not allowed to add feedback');
     }
 
+    const normalizedTags = this.normalizeTeacherFeedbackTags(dto.tags);
     const feedback = await this.feedbackModel.create({
       submissionId: new Types.ObjectId(submissionId),
       ...dto,
+      tags: normalizedTags,
     });
     return this.toFeedbackResponse(feedback as FeedbackWithMeta);
   }
@@ -619,6 +628,28 @@ export class LearningTasksService {
     }
 
     throw new BadRequestException('Unable to allocate attempt number');
+  }
+
+  private normalizeTeacherFeedbackTags(tags?: string[]) {
+    if (!tags || tags.length === 0) {
+      return ['other'];
+    }
+
+    const normalized = new Set<string>();
+    for (const tag of tags) {
+      const cleaned = cleanFeedbackTag(tag);
+      if (!cleaned) {
+        continue;
+      }
+      if (!LearningTasksService.FEEDBACK_TAGS.has(cleaned)) {
+        throw new BadRequestException(
+          LearningTasksService.INVALID_FEEDBACK_TAGS_MESSAGE,
+        );
+      }
+      normalized.add(cleaned);
+    }
+
+    return normalized.size > 0 ? Array.from(normalized) : ['other'];
   }
 
   private shouldAutoEnqueue(attemptNo: number) {

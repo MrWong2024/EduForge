@@ -40,6 +40,11 @@ type CreatedFeedbackResponse = {
   id: string;
   message: string;
 };
+type InvalidFeedbackTagsResponse = {
+  statusCode: number;
+  message: string;
+  error: string;
+};
 
 type PublishedTaskResponse = {
   status: string;
@@ -327,6 +332,24 @@ describe('LearningTasks (e2e)', () => {
     expect(studentDetailBody.studentId).toBe(studentId);
     expect(studentDetailBody.classroomTaskId).toBeNull();
 
+    const invalidFeedbackPayload = {
+      source: 'TEACHER',
+      type: 'STYLE',
+      severity: 'WARN',
+      message: 'Naming could be clearer.',
+      tags: ['clarity'],
+    };
+
+    const invalidFeedback = await teacherAgent
+      .post(`/api/learning-tasks/submissions/${submissionId}/feedback`)
+      .send(invalidFeedbackPayload)
+      .expect(400);
+    const invalidFeedbackBody =
+      invalidFeedback.body as InvalidFeedbackTagsResponse;
+    expect(invalidFeedbackBody.message).toBe(
+      'Invalid tag(s), please select from predefined tags',
+    );
+
     const feedbackPayload = {
       source: 'TEACHER',
       type: 'STYLE',
@@ -357,6 +380,7 @@ describe('LearningTasks (e2e)', () => {
       });
     }
     expect(persistedFeedback).toBeTruthy();
+    expect(persistedFeedback?.tags).toEqual(['other']);
 
     const feedbackList = await teacherAgent
       .get(`/api/learning-tasks/submissions/${submissionId}/feedback`)

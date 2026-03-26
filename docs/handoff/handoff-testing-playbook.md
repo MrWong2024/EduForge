@@ -157,7 +157,7 @@ npm run test:e2e -- backend/test/classroom-learning-loop.e2e-spec.ts
 - submission detail 主视图回归建议成对验证：`GET /api/learning-tasks/submissions/:id` 与 `GET /api/learning-tasks/submissions/:id/feedback`，避免只验 feedback 而漏掉 detail 读源。
 - `backend/test/classroom-dashboard-isolation.e2e-spec.ts`：跨班同 task 的 `classroomTaskId` 隔离口径。
 - `backend/test/classroom-dashboard.e2e-spec.ts`：教师/学生看板与 `aiFeedbackStatus` 变化。
-- `backend/test/learning-tasks.e2e-spec.ts`：learning-tasks 基础闭环（含 `GET /api/learning-tasks/submissions/:id` 在 `classroomTaskId=null` 场景下 task owner teacher 可读）。
+- `backend/test/learning-tasks.e2e-spec.ts`：learning-tasks 基础闭环（含 `GET /api/learning-tasks/submissions/:id` 在 `classroomTaskId=null` 场景下 task owner teacher 可读，以及教师反馈标签词表校验：未知标签返回 `400` 固定文案、未传 tags 自动落 `other`）。
 
 ### 新增能力覆盖矩阵（Z3~Z9）
 
