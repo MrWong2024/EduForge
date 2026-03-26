@@ -6,6 +6,7 @@ import { ErrorState } from "@/components/blocks/ErrorState";
 import { BrowserFetchJsonError, fetchJson } from "@/lib/api/browser-client";
 import { buildErrorDescription, extractRawDetail } from "@/lib/api/error-presenter";
 import { getCommonErrorSummary } from "@/lib/ui/status";
+import { FEEDBACK_TAG_OPTIONS, type FeedbackTagValue } from "@/lib/ui/feedback-tags";
 
 type TeacherFeedbackFormProps = {
   submissionId: string;
@@ -17,22 +18,26 @@ type FeedbackErrorState = {
   detail?: string;
 };
 
-const parseTags = (raw: string): string[] =>
-  raw
-    .split(",")
-    .map((part) => part.trim())
-    .filter(Boolean);
+const INVALID_TAGS_MESSAGE = "Invalid tag(s), please select from predefined tags";
 
 export function TeacherFeedbackForm({ submissionId }: TeacherFeedbackFormProps) {
   const router = useRouter();
   const [message, setMessage] = useState("");
   const [suggestion, setSuggestion] = useState("");
   const [severity, setSeverity] = useState("INFO");
-  const [tagsInput, setTagsInput] = useState("");
+  const [selectedTags, setSelectedTags] = useState<FeedbackTagValue[]>([]);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [successText, setSuccessText] = useState<string | null>(null);
   const [validationError, setValidationError] = useState<string | null>(null);
   const [errorState, setErrorState] = useState<FeedbackErrorState | null>(null);
+
+  const toggleTag = (tagValue: FeedbackTagValue) => {
+    setSelectedTags((prev) =>
+      prev.includes(tagValue)
+        ? prev.filter((item) => item !== tagValue)
+        : [...prev, tagValue]
+    );
+  };
 
   const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -49,7 +54,6 @@ export function TeacherFeedbackForm({ submissionId }: TeacherFeedbackFormProps) 
     setIsSubmitting(true);
 
     try {
-      const tags = parseTags(tagsInput);
       const payload: Record<string, unknown> = {
         source: "TEACHER",
         type: "OTHER",
@@ -59,8 +63,8 @@ export function TeacherFeedbackForm({ submissionId }: TeacherFeedbackFormProps) 
       if (suggestion.trim()) {
         payload.suggestion = suggestion.trim();
       }
-      if (tags.length > 0) {
-        payload.tags = tags;
+      if (selectedTags.length > 0) {
+        payload.tags = selectedTags;
       }
 
       await fetchJson<unknown>(`learning-tasks/submissions/${encodeURIComponent(submissionId)}/feedback`, {
@@ -76,15 +80,20 @@ export function TeacherFeedbackForm({ submissionId }: TeacherFeedbackFormProps) 
       setMessage("");
       setSuggestion("");
       setSeverity("INFO");
-      setTagsInput("");
+      setSelectedTags([]);
       router.refresh();
     } catch (error) {
       if (error instanceof BrowserFetchJsonError) {
         const detail = extractRawDetail(error.data);
-        const summary =
-          error.status === 403
-            ? "无权限查看或批阅该提交。"
-            : getCommonErrorSummary(error.status, "提交教师反馈");
+        const summary = (() => {
+          if (error.status === 403) {
+            return "无权限查看或批阅该提交。";
+          }
+          if (error.status === 400 && detail?.includes(INVALID_TAGS_MESSAGE)) {
+            return "标签无效，请从预设标签中选择。";
+          }
+          return getCommonErrorSummary(error.status, "提交教师反馈");
+        })();
         setErrorState({
           status: error.status,
           summary,
@@ -142,16 +151,27 @@ export function TeacherFeedbackForm({ submissionId }: TeacherFeedbackFormProps) 
             </select>
           </label>
 
-          <label className="block text-sm">
-            <span className="mb-1 block text-zinc-700">标签（可选）</span>
-            <input
-              value={tagsInput}
-              onChange={(event) => setTagsInput(event.target.value)}
-              className="w-full rounded-md border border-zinc-300 px-3 py-2"
-              placeholder="例如：逻辑, 边界条件"
-            />
-            <span className="mt-1 block text-xs text-zinc-500">多个标签请用英文逗号分隔。</span>
-          </label>
+          <fieldset className="block text-sm">
+            <legend className="mb-2 block text-zinc-700">标签（可选，多选）</legend>
+            <div className="max-h-44 overflow-auto rounded-md border border-zinc-300 p-2">
+              <div className="grid gap-2 sm:grid-cols-2">
+                {FEEDBACK_TAG_OPTIONS.map((option) => (
+                  <label key={option.value} className="flex items-center gap-2 text-xs text-zinc-700">
+                    <input
+                      type="checkbox"
+                      checked={selectedTags.includes(option.value)}
+                      onChange={() => toggleTag(option.value)}
+                      className="h-4 w-4 rounded border-zinc-300"
+                    />
+                    <span>{option.label}</span>
+                  </label>
+                ))}
+              </div>
+            </div>
+            <span className="mt-1 block text-xs text-zinc-500">
+              标签用于归类统计；具体问题说明请写在“反馈内容/建议”中。
+            </span>
+          </fieldset>
         </div>
 
         <button

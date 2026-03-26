@@ -95,6 +95,9 @@ Teacher 批阅链路（可用）：
 1. `/teacher/classrooms/[classroomId]/tasks/[classroomTaskId]/submissions`
 2. `/teacher/submissions/[submissionId]`（稳定读源）
 3. `TeacherFeedbackForm` -> `POST learning-tasks/submissions/:id/feedback`
+   - `tags` 已改为标准标签多选（镜像后端统一词表），移除自由手写输入。
+   - `message` / `suggestion` 保持自由文本输入；未选择标签时沿用后端兜底口径。
+   - 若后端返回 `400/Invalid tag(s), please select from predefined tags`，前端显示中文摘要“标签无效，请从预设标签中选择”。 
 
 Teacher 学习轨迹链路（可用）：
 1. `/teacher/classrooms/[classroomId]/tasks/[classroomTaskId]/learning-trajectory`
