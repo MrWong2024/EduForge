@@ -45,6 +45,13 @@ type ReviewQueryState = {
   includeTeacherScript: boolean;
 };
 
+type OverviewMetricCard = {
+  key: string;
+  title: string;
+  value: string;
+  detail: string;
+};
+
 type IssueDistributionItem = {
   key: string;
   label: string;
@@ -58,6 +65,7 @@ type ExampleCardView = {
   suggestion?: string;
   context?: string;
   source?: string;
+  attemptNo?: number;
 };
 
 type ScriptCardView = {
@@ -148,6 +156,56 @@ const pickNumber = (source: unknown, paths: readonly string[]): number | undefin
   return undefined;
 };
 
+const toTextList = (value: unknown): string[] => {
+  if (Array.isArray(value)) {
+    return value
+      .map((item) => toOptionalText(item))
+      .filter((item): item is string => Boolean(item));
+  }
+  const single = toOptionalText(value);
+  return single ? [single] : [];
+};
+
+const dedupeTexts = (texts: string[]): string[] => {
+  const seen = new Set<string>();
+  const result: string[] = [];
+
+  for (const text of texts) {
+    const normalized = text.trim().toLowerCase();
+    if (!normalized || seen.has(normalized)) {
+      continue;
+    }
+    seen.add(normalized);
+    result.push(text.trim());
+  }
+
+  return result;
+};
+
+const truncateText = (text: string, maxLength = 180): string => {
+  const compact = text.replace(/\s+/g, " ").trim();
+  if (compact.length <= maxLength) {
+    return compact;
+  }
+  return `${compact.slice(0, maxLength - 3)}...`;
+};
+
+const toPercentNumber = (value: number | undefined): number | undefined => {
+  if (typeof value !== "number" || !Number.isFinite(value) || value < 0) {
+    return undefined;
+  }
+  return value <= 1 ? value * 100 : value;
+};
+
+const toPercentText = (value: number | undefined): string => {
+  const percent = toPercentNumber(value);
+  if (typeof percent !== "number") {
+    return "—";
+  }
+  const digits = percent > 0 && percent < 10 ? 1 : 0;
+  return `${percent.toFixed(digits)}%`;
+};
+
 const toIssueDistributionItems = (
   source: unknown[],
   labelPaths: readonly string[]
@@ -181,29 +239,124 @@ const toIssueDigest = (
   return `${title}：${topText}`;
 };
 
-const toExampleCards = (source: unknown[]): ExampleCardView[] =>
-  source.map((item, index) => {
-    const tag = pickText(item, ["tag", "issueTag", "category", "labels.0"]);
-    const type = pickText(item, ["type", "issueType", "problemType"]);
-    const severity = pickText(item, ["severity", "level"]);
-    const categoryParts = [
-      tag ? `标签：${tag}` : undefined,
-      type ? `类型：${type}` : undefined,
-      severity ? `严重程度：${severity}` : undefined,
-    ].filter((part): part is string => Boolean(part));
-    const category = categoryParts.length > 0 ? categoryParts.join(" / ") : "问题归类：待补充";
-    const feedback =
-      pickText(item, ["summary", "feedback", "message", "description", "note"]) ?? "暂无反馈摘要。";
+const extractExampleSummary = (sample: unknown, group: unknown): string => {
+  const summary = pickText(sample, [
+    "message",
+    "summary",
+    "reason",
+    "feedback.message",
+    "feedbackSummary",
+    "feedback.summary",
+    "feedback.text",
+  ]);
+  if (summary) {
+    return truncateText(summary);
+  }
 
-    return {
-      key: pickText(item, ["id", "exampleId"]) ?? `example-${index}`,
-      category,
-      feedback,
-      suggestion: pickText(item, ["suggestion", "how", "recommendation", "teachingTip"]),
-      context: pickText(item, ["context", "contextText", "snippet", "excerpt", "studentNote"]),
-      source: pickText(item, ["source", "studentTier", "tier"]),
-    };
+  const backup = pickText(group, ["summary", "reason"]);
+  if (backup) {
+    return truncateText(backup);
+  }
+
+  const type = pickText(sample, ["type", "feedback.type"]);
+  const severity = pickText(sample, ["severity", "feedback.severity"]);
+  const hint = [type ? `类型：${type}` : undefined, severity ? `严重程度：${severity}` : undefined]
+    .filter((item): item is string => Boolean(item))
+    .join("，");
+
+  return hint
+    ? `该样例未返回完整反馈文本，建议先围绕${hint}组织讲评。`
+    : "该样例未返回完整反馈文本，建议结合问题归类进行讲评。";
+};
+
+const extractExampleSuggestion = (sample: unknown): string | undefined => {
+  const suggestion = pickText(sample, [
+    "suggestion",
+    "feedback.suggestion",
+    "recommendation",
+    "how",
+    "advice",
+  ]);
+  return suggestion ? truncateText(suggestion) : undefined;
+};
+
+const extractExampleContext = (sample: unknown, summary: string, suggestion?: string): string | undefined => {
+  const context = pickText(sample, [
+    "teachingHint",
+    "context",
+    "contextText",
+    "reason",
+    "feedbackSummary",
+    "note",
+    "comment",
+  ]);
+  if (!context) {
+    return undefined;
+  }
+
+  const compact = truncateText(context);
+  if (compact === summary || (suggestion && compact === suggestion)) {
+    return undefined;
+  }
+
+  return compact;
+};
+
+const toExampleCards = (source: unknown[]): ExampleCardView[] => {
+  const cards: ExampleCardView[] = [];
+
+  source.forEach((group, groupIndex) => {
+    const groupTag = pickText(group, ["tag", "name", "label", "value"]);
+    const samples = safeGet<unknown[]>(group, "samples", []);
+    const groupSource = pickText(group, ["source"]);
+
+    if (samples.length === 0) {
+      const summary = extractExampleSummary(group, group);
+      cards.push({
+        key: `example-${groupIndex}-0`,
+        category: groupTag ? `标签：${groupTag}` : "问题归类：待补充",
+        feedback: summary,
+        suggestion: extractExampleSuggestion(group),
+        context: extractExampleContext(group, summary),
+        source: groupSource,
+      });
+      return;
+    }
+
+    samples.forEach((sample, sampleIndex) => {
+      const tags = dedupeTexts([
+        ...toTextList(groupTag),
+        ...toTextList(safeGet(sample, "tag", undefined)),
+        ...toTextList(safeGet(sample, "tags", [])),
+        ...toTextList(safeGet(sample, "labels", [])),
+      ]);
+      const type = pickText(sample, ["type", "feedback.type", "issueType"]);
+      const severity = pickText(sample, ["severity", "feedback.severity", "level"]);
+      const sourceText = pickText(sample, ["source", "feedback.source"]) ?? groupSource;
+      const summary = extractExampleSummary(sample, group);
+      const suggestion = extractExampleSuggestion(sample);
+      const context = extractExampleContext(sample, summary, suggestion);
+      const categoryParts = [
+        tags.length > 0 ? `标签：${tags.join(" / ")}` : undefined,
+        type ? `类型：${type}` : undefined,
+        severity ? `严重程度：${severity}` : undefined,
+        sourceText ? `来源：${sourceText}` : undefined,
+      ].filter((part): part is string => Boolean(part));
+
+      cards.push({
+        key: `example-${groupIndex}-${sampleIndex}`,
+        category: categoryParts.length > 0 ? categoryParts.join(" ｜ ") : "问题归类：待补充",
+        feedback: summary,
+        suggestion,
+        context,
+        source: sourceText,
+        attemptNo: pickNumber(sample, ["attemptNo"]),
+      });
+    });
   });
+
+  return cards;
+};
 
 const toTalkingPoints = (source: unknown): string[] => {
   if (!Array.isArray(source)) {
@@ -231,6 +384,89 @@ const toScriptCards = (source: unknown[]): ScriptCardView[] =>
     talkingPoints: toTalkingPoints(safeGet(item, "talkingPoints", [])),
     focusHint: pickText(item, ["focus", "objective", "goal", "note"]),
   }));
+
+const buildOverviewMetricCards = (
+  overview: unknown,
+  window: ReviewWindow,
+  examplesCount: number,
+  exampleGroupCount: number
+): OverviewMetricCard[] => {
+  const studentsCount = pickNumber(overview, ["studentsCount", "studentCount", "totalStudents"]);
+  const submittedStudentsCount = pickNumber(overview, [
+    "submittedStudentsCount",
+    "submittedCount",
+    "submissionsCount",
+  ]);
+  const submissionRateRaw = pickNumber(overview, ["submissionRate", "submitRate"]);
+  const submissionRateComputed =
+    submissionRateRaw ??
+    (typeof studentsCount === "number" && studentsCount > 0 && typeof submittedStudentsCount === "number"
+      ? submittedStudentsCount / studentsCount
+      : undefined);
+
+  const ai = safeGet<unknown>(overview, "ai", {});
+  const aiJobsTotal = pickNumber(ai, ["jobsTotal", "totalJobs", "jobs"]);
+  const aiSuccessRateRaw = pickNumber(ai, ["successRate", "aiSuccessRate"]);
+  const aiSuccessPercent = toPercentNumber(aiSuccessRateRaw);
+  const aiSucceededEstimate =
+    typeof aiSuccessPercent === "number" && typeof aiJobsTotal === "number"
+      ? Math.round((aiSuccessPercent / 100) * aiJobsTotal)
+      : undefined;
+
+  const lateSubmissionsCount = pickNumber(overview, ["lateSubmissionsCount", "lateCount"]);
+  const lateStudentsCount = pickNumber(overview, ["lateStudentsCount", "lateStudentCount"]);
+
+  const attemptZero = pickNumber(overview, ["attemptsDistribution.0"]);
+  const attemptOne = pickNumber(overview, ["attemptsDistribution.1"]);
+  const attemptTwo = pickNumber(overview, ["attemptsDistribution.2"]);
+  const attemptThreePlus = pickNumber(overview, ["attemptsDistribution.3plus", "attemptsDistribution.3+"]);
+  const hasAttemptDistribution = [attemptZero, attemptOne, attemptTwo, attemptThreePlus].some(
+    (value) => typeof value === "number"
+  );
+
+  return [
+    {
+      key: "coverage",
+      title: "提交覆盖",
+      value: `${typeof submittedStudentsCount === "number" ? submittedStudentsCount : "—"} / ${typeof studentsCount === "number" ? studentsCount : "—"}`,
+      detail:
+        typeof submissionRateComputed === "number"
+          ? `提交率 ${toPercentText(submissionRateComputed)}（${WINDOW_LABELS[window]}）`
+          : `提交率 —（${WINDOW_LABELS[window]}）`,
+    },
+    {
+      key: "ai",
+      title: "AI 反馈成功率",
+      value: toPercentText(aiSuccessRateRaw),
+      detail:
+        typeof aiJobsTotal === "number"
+          ? `成功约 ${typeof aiSucceededEstimate === "number" ? aiSucceededEstimate : "—"} / 总 jobs ${aiJobsTotal}`
+          : "总 jobs：—",
+    },
+    {
+      key: "late",
+      title: "逾期情况",
+      value: `${typeof lateSubmissionsCount === "number" ? lateSubmissionsCount : "—"} 次逾期提交`,
+      detail: `涉及 ${typeof lateStudentsCount === "number" ? lateStudentsCount : "—"} 名学生`,
+    },
+    {
+      key: "examples",
+      title: "典型样例",
+      value: `${examplesCount} 条`,
+      detail: `${exampleGroupCount} 个问题标签分组`,
+    },
+    {
+      key: "attempts",
+      title: "尝试分布",
+      value: hasAttemptDistribution
+        ? `0次：${typeof attemptZero === "number" ? attemptZero : "—"} 人`
+        : "—",
+      detail: hasAttemptDistribution
+        ? `1次：${typeof attemptOne === "number" ? attemptOne : "—"}｜2次：${typeof attemptTwo === "number" ? attemptTwo : "—"}｜3+次：${typeof attemptThreePlus === "number" ? attemptThreePlus : "—"}`
+        : "暂无尝试分布数据",
+    },
+  ];
+};
 
 type ReviewPackViewModel =
   | {
@@ -297,6 +533,12 @@ export default async function ReviewPackPage({ params, searchParams }: ReviewPac
   const topSeverityItems = toIssueDistributionItems(topSeverities, ["severity", "level", "name", "value"]);
   const exampleCards = toExampleCards(viewModel.data.examples);
   const scriptCards = toScriptCards(viewModel.data.teacherScript);
+  const overviewMetricCards = buildOverviewMetricCards(
+    viewModel.data.overview,
+    viewModel.query.window,
+    exampleCards.length,
+    viewModel.data.examples.length
+  );
   const firstAction = viewModel.data.actionItems[0];
   const firstActionTitle = pickText(firstAction, ["title", "action", "summary"]);
   const firstActionHow = pickText(firstAction, ["how", "suggestion", "recommendation"]);
@@ -321,7 +563,7 @@ export default async function ReviewPackPage({ params, searchParams }: ReviewPac
     <section className="mt-4 space-y-4">
       <PageHeader
         title="课堂复盘包"
-        description="先看课堂结论，再按行动建议、高频问题、典型样例组织课堂讲评。"
+        description="先看课堂总览，再按行动建议、高频问题、典型样例组织课堂讲评。"
         actions={
           <div className="flex items-center gap-3 text-sm">
             <Link href={paths.teacher.classroomTasks(classroomId)} className="text-blue-700 hover:underline">
@@ -414,6 +656,19 @@ export default async function ReviewPackPage({ params, searchParams }: ReviewPac
         </div>
       </section>
 
+      <section className="rounded-lg border border-zinc-200 bg-white p-4">
+        <h2 className="text-sm font-semibold text-zinc-900">课堂总览</h2>
+        <div className="mt-3 grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
+          {overviewMetricCards.map((card) => (
+            <article key={card.key} className="rounded-md border border-zinc-200 bg-zinc-50 p-3">
+              <p className="text-xs font-medium text-zinc-600">{card.title}</p>
+              <p className="mt-1 text-lg font-semibold text-zinc-900">{card.value}</p>
+              <p className="mt-1 text-xs text-zinc-500">{card.detail}</p>
+            </article>
+          ))}
+        </div>
+      </section>
+
       <p className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
         隐私提示：复盘样例不包含敏感字段（如 codeText / prompt / apiKey）。
       </p>
@@ -421,8 +676,8 @@ export default async function ReviewPackPage({ params, searchParams }: ReviewPac
       <section className="rounded-lg border border-blue-200 bg-blue-50 p-4">
         <h2 className="text-sm font-semibold text-zinc-900">课堂结论 / 本次复盘摘要</h2>
         <ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-zinc-700">
-          {summaryHighlights.map((item) => (
-            <li key={item}>{item}</li>
+          {summaryHighlights.map((item, index) => (
+            <li key={`${index}-${item}`}>{item}</li>
           ))}
         </ul>
       </section>
@@ -506,9 +761,12 @@ export default async function ReviewPackPage({ params, searchParams }: ReviewPac
             <h2 className="text-sm font-semibold text-zinc-900">典型样例</h2>
             {exampleCards.length > 0 ? (
               <div className="mt-2 space-y-3">
-                {exampleCards.slice(0, 8).map((item, index) => (
+                {exampleCards.slice(0, 10).map((item, index) => (
                   <article key={item.key} className="rounded-md border border-zinc-200 p-3 text-sm text-zinc-700">
-                    <p className="font-medium text-zinc-900">样例 {index + 1}</p>
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <p className="font-medium text-zinc-900">样例 {index + 1}</p>
+                      <p className="text-xs text-zinc-500">{typeof item.attemptNo === "number" ? `尝试次数：${item.attemptNo}` : "尝试次数：—"}</p>
+                    </div>
                     <p className="mt-1 text-xs text-zinc-500">问题归类：{item.category}</p>
                     <p className="mt-2">
                       <span className="font-medium text-zinc-900">反馈摘要：</span>
@@ -516,21 +774,21 @@ export default async function ReviewPackPage({ params, searchParams }: ReviewPac
                     </p>
                     {item.suggestion ? (
                       <p className="mt-1">
-                        <span className="font-medium text-zinc-900">讲评提示：</span>
+                        <span className="font-medium text-zinc-900">修改建议：</span>
                         {item.suggestion}
                       </p>
                     ) : null}
                     {item.context ? (
                       <p className="mt-1">
-                        <span className="font-medium text-zinc-900">上下文：</span>
+                        <span className="font-medium text-zinc-900">讲评提示：</span>
                         {item.context}
                       </p>
                     ) : null}
                     {item.source ? <p className="mt-1 text-xs text-zinc-500">来源：{item.source}</p> : null}
                   </article>
                 ))}
-                {exampleCards.length > 8 ? (
-                  <p className="text-xs text-zinc-500">已展示前 8 条样例，可通过筛选条件缩小范围。</p>
+                {exampleCards.length > 10 ? (
+                  <p className="text-xs text-zinc-500">已展示前 10 条样例，可通过筛选条件缩小范围。</p>
                 ) : null}
               </div>
             ) : (
