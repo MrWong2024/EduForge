@@ -141,8 +141,9 @@ const pickText = (source: unknown, paths: readonly string[]): string | undefined
 };
 
 const pickNumber = (source: unknown, paths: readonly string[]): number | undefined => {
-  for (const path of paths) {
-    const value = safeGet(source, path, undefined);
+  const candidateValues: unknown[] = paths.map((path) => safeGet<unknown>(source, path, undefined));
+
+  for (const value of candidateValues) {
     if (typeof value === "number" && Number.isFinite(value)) {
       return value;
     }
