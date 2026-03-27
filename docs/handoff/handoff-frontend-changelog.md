@@ -155,6 +155,13 @@
 - 【错误提示收口】当后端返回 `400/Invalid tag(s), please select from predefined tags` 时，前端显示中文摘要“标签无效，请从预设标签中选择”，并保留 detail 以便调试。
 - 【不要回退】不要恢复自由手写标签输入，不要在多个页面重复手写标签词表。
 
+## UAT-FE-15
+
+- 【本步解决】教师课堂复盘页信息表达工程化、讲评阅读路径不清晰的问题。
+- 【新增事实 / 已收口口径】`/teacher/classrooms/[classroomId]/tasks/[classroomTaskId]/review-pack` 已重排为“课堂结论摘要 -> 行动建议 -> 高频问题概览 -> 典型样例 -> 教学脚本 -> 原始数据（调试）”；筛选标签与 `Top Tags/Top Types/Top Severities` 已中文化；教学脚本主视图展示前 3 条 talking points 并支持展开更多；原始 JSON 保留但默认折叠。
+- 【不要回退】不要恢复“原始 JSON 与工程字段并列主展示”的旧视图，不要退回“教学脚本仅展示 `talkingPoints.0`”。
+- 【对新会话的意义】课堂讲评准备可先读结论与行动，再快速定位高频问题和可用样例，减少对 raw JSON 的依赖。
+
 ## 当前阶段一句话结论
 
 前端已达到“Teacher/Student 主链路可用 + 任务模板层与班级实例层边界收口 + 教师模板主链路可维护”的工程验收阶段，但尚未进入最终交付定版阶段。
