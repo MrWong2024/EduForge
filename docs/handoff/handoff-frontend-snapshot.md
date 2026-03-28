@@ -108,10 +108,10 @@ Teacher 学习轨迹链路（可用）：
 
 Teacher 课堂复盘链路（可用）：
 1. `/teacher/classrooms/[classroomId]/tasks/[classroomTaskId]/review-pack` 保持真接口与原 query 协议（`window/topK/examplesPerTag/includeStudentTiers`）不变。
-2. 页面主路径已收敛为“课堂结论摘要 -> 行动建议 -> 高频问题概览 -> 典型样例 -> 教学脚本 -> 原始数据（调试）”。
-3. `Top Tags/Top Types/Top Severities` 与筛选标签已中文化；原始 JSON 调试块保留但默认折叠。
-4. 教学脚本不再只显示首条 talking point，主视图展示前 3 条并支持展开更多。
-5. 页面顶部新增“课堂总览”指标卡（提交覆盖、AI 成功率、逾期情况、样例数量、尝试分布）；典型样例已按 `examples(tag + samples)` 展开并优先展示真实反馈摘要/修改建议，减少“空心样例”。
+2. 页面主路径已收敛为“课堂总览 -> 课堂结论摘要 -> 高频问题概览 -> 典型样例 -> 学生分层 -> 原始数据（调试）”。
+3. 页面已移除 `actionItems` 与 `teacherScript` 相关区块，不再展示“行动建议/教学脚本”。
+4. `Top Tags/Top Types/Top Severities` 与筛选标签已中文化；原始 JSON 调试块保留但默认折叠。
+5. 页面顶部保留“课堂总览”指标卡（提交覆盖、AI 成功率、逾期情况、样例数量、尝试分布）；典型样例继续按 `examples(tag + samples)` 展开并优先展示真实反馈摘要/修改建议。
 
 ## 5) P0 真接口前端收口情况（现状）
 

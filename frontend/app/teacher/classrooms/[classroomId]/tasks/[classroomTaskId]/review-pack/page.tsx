@@ -25,7 +25,6 @@ type ReviewPackPageProps = {
     topK?: string | string[];
     examplesPerTag?: string | string[];
     includeStudentTiers?: string | string[];
-    includeTeacherScript?: string | string[];
   }>;
 };
 
@@ -42,7 +41,6 @@ type ReviewQueryState = {
   topK: number;
   examplesPerTag: number;
   includeStudentTiers: boolean;
-  includeTeacherScript: boolean;
 };
 
 type OverviewMetricCard = {
@@ -68,14 +66,6 @@ type ExampleCardView = {
   attemptNo?: number;
 };
 
-type ScriptCardView = {
-  key: string;
-  minute: string;
-  topic: string;
-  talkingPoints: string[];
-  focusHint?: string;
-};
-
 const getRequestOrigin = async (): Promise<string> => {
   const headerMap = await headers();
   const host = headerMap.get("x-forwarded-host") ?? headerMap.get("host") ?? "";
@@ -97,7 +87,6 @@ const resolveQueryState = (
     max: 5,
   }),
   includeStudentTiers: parseBool01(getSingleSearchParam(query.includeStudentTiers), false),
-  includeTeacherScript: parseBool01(getSingleSearchParam(query.includeTeacherScript), true),
 });
 
 const toQueryRecord = (query: ReviewQueryState): Record<string, string> => ({
@@ -105,7 +94,6 @@ const toQueryRecord = (query: ReviewQueryState): Record<string, string> => ({
   topK: String(query.topK),
   examplesPerTag: String(query.examplesPerTag),
   includeStudentTiers: String(query.includeStudentTiers),
-  includeTeacherScript: String(query.includeTeacherScript),
 });
 
 const buildHref = (
@@ -359,32 +347,45 @@ const toExampleCards = (source: unknown[]): ExampleCardView[] => {
   return cards;
 };
 
-const toTalkingPoints = (source: unknown): string[] => {
-  if (!Array.isArray(source)) {
-    return [];
-  }
-
-  return source
-    .map((point) => {
-      if (typeof point === "string") {
-        return toOptionalText(point);
-      }
-      if (point && typeof point === "object") {
-        return pickText(point, ["point", "content", "text", "summary"]);
-      }
-      return undefined;
-    })
-    .filter((point): point is string => Boolean(point));
+type StudentTierCardView = {
+  key: string;
+  title: string;
+  description: string;
+  students: Array<{
+    key: string;
+    studentId: string;
+    attemptsCount?: number;
+    latestErrorCount?: number;
+    latestAiStatus?: string;
+  }>;
 };
 
-const toScriptCards = (source: unknown[]): ScriptCardView[] =>
-  source.map((item, index) => ({
-    key: pickText(item, ["id", "minute", "topic"]) ?? `script-${index}`,
-    minute: pickText(item, ["minute", "time", "phase"]) ?? "时间未标注",
-    topic: pickText(item, ["topic", "title"]) ?? "讲评主题待补充",
-    talkingPoints: toTalkingPoints(safeGet(item, "talkingPoints", [])),
-    focusHint: pickText(item, ["focus", "objective", "goal", "note"]),
-  }));
+const toStudentTierCard = (
+  source: unknown,
+  key: "good" | "watch" | "notSubmitted",
+  title: string,
+  description: string
+): StudentTierCardView => {
+  const rows = safeGet<unknown[]>(source, key, []);
+  const students = rows.map((item, index) => {
+    const studentId = pickText(item, ["studentId", "id", "userId"]) ?? `未标注学生 ${index + 1}`;
+    return {
+      key: `${key}-${studentId}-${index}`,
+      studentId,
+      attemptsCount: pickNumber(item, ["attemptsCount", "attempts", "submissionsCount"]),
+      latestErrorCount: pickNumber(item, ["latestErrorCount", "errorCount", "errors"]),
+      latestAiStatus: pickText(item, ["latestAiFeedbackStatus", "aiStatus", "status"]),
+    };
+  });
+
+  return { key, title, description, students };
+};
+
+const buildStudentTierCards = (studentTiers: unknown): StudentTierCardView[] => [
+  toStudentTierCard(studentTiers, "good", "稳定完成", "完成情况较好，可作为正向参考。"),
+  toStudentTierCard(studentTiers, "watch", "需要关注", "有提交但错误较多，建议课堂重点跟进。"),
+  toStudentTierCard(studentTiers, "notSubmitted", "未提交", "当前窗口内未形成有效提交记录。"),
+];
 
 const buildOverviewMetricCards = (
   overview: unknown,
@@ -533,38 +534,33 @@ export default async function ReviewPackPage({ params, searchParams }: ReviewPac
   const topTypeItems = toIssueDistributionItems(topTypes, ["type", "name", "label", "value"]);
   const topSeverityItems = toIssueDistributionItems(topSeverities, ["severity", "level", "name", "value"]);
   const exampleCards = toExampleCards(viewModel.data.examples);
-  const scriptCards = toScriptCards(viewModel.data.teacherScript);
+  const studentTierCards = buildStudentTierCards(viewModel.data.studentTiers);
+  const hasStudentTierData = studentTierCards.some((card) => card.students.length > 0);
   const overviewMetricCards = buildOverviewMetricCards(
     viewModel.data.overview,
     viewModel.query.window,
     exampleCards.length,
     viewModel.data.examples.length
   );
-  const firstAction = viewModel.data.actionItems[0];
-  const firstActionTitle = pickText(firstAction, ["title", "action", "summary"]);
-  const firstActionHow = pickText(firstAction, ["how", "suggestion", "recommendation"]);
   const summaryHighlights = [
     toIssueDigest("高频问题标签", topTagItems, "暂无明显集中标签"),
     toIssueDigest("高频问题类型", topTypeItems, "暂无明显集中类型"),
     toIssueDigest("严重程度分布", topSeverityItems, "暂无严重程度分布数据"),
-    firstActionTitle
-      ? `建议优先讲评：${firstActionTitle}${firstActionHow ? `（讲评方式：${firstActionHow}）` : ""}`
-      : "建议优先讲评：当前暂无行动建议，可先从高频问题标签切入。",
+    hasStudentTierData ? "学生分层已生成，可结合“需要关注/未提交”名单安排后续跟进。" : "当前未返回有效学生分层数据。",
     exampleCards.length > 0 ? `可直接引用 ${exampleCards.length} 条典型样例进行课堂讲评。` : "当前未返回典型样例。",
   ];
   const allSectionsEmpty =
-    viewModel.data.actionItems.length === 0 &&
     topTagItems.length === 0 &&
     topTypeItems.length === 0 &&
     topSeverityItems.length === 0 &&
     exampleCards.length === 0 &&
-    scriptCards.length === 0;
+    !hasStudentTierData;
 
   return (
     <section className="mt-4 space-y-4">
       <PageHeader
         title="课堂复盘包"
-        description="先看课堂总览，再按行动建议、高频问题、典型样例组织课堂讲评。"
+        description="先看课堂总览，再按高频问题、典型样例与学生分层完成课堂复盘判断。"
         actions={
           <div className="flex items-center gap-3 text-sm">
             <Link href={paths.teacher.classroomTasks(classroomId)} className="text-blue-700 hover:underline">
@@ -643,17 +639,6 @@ export default async function ReviewPackPage({ params, searchParams }: ReviewPac
             </Link>
           </div>
 
-          <div className="flex items-center gap-2">
-            <span>教学脚本:</span>
-            <Link
-              href={buildHref(routePath, queryRecord, {
-                includeTeacherScript: String(!viewModel.query.includeTeacherScript),
-              })}
-              className="text-blue-700 hover:underline"
-            >
-              {viewModel.query.includeTeacherScript ? "开" : "关"}
-            </Link>
-          </div>
         </div>
       </section>
 
@@ -687,24 +672,6 @@ export default async function ReviewPackPage({ params, searchParams }: ReviewPac
         <EmptyState title="暂无课堂复盘数据" description="当前查询条件下没有返回可展示的复盘内容。" />
       ) : (
         <>
-          <section className="rounded-lg border border-zinc-200 bg-white p-4">
-            <h2 className="text-sm font-semibold text-zinc-900">行动建议</h2>
-            <p className="mt-1 text-xs text-zinc-500">建议按优先级逐条讲评，先覆盖人数最多的问题。</p>
-            {viewModel.data.actionItems.length > 0 ? (
-              <ol className="mt-2 list-decimal space-y-2 pl-5 text-sm text-zinc-700">
-                {viewModel.data.actionItems.slice(0, 5).map((item, index) => (
-                  <li key={String(safeGet(item, "title", `action-${index}`))}>
-                    <p className="font-medium text-zinc-900">{toDisplayText(safeGet(item, "title", undefined))}</p>
-                    <p>原因：{toDisplayText(safeGet(item, "why", undefined), "—")}</p>
-                    <p>讲评方式：{toDisplayText(safeGet(item, "how", undefined), "—")}</p>
-                  </li>
-                ))}
-              </ol>
-            ) : (
-              <p className="mt-2 text-sm text-zinc-600">暂无行动建议，可先参考下方高频问题组织讲评。</p>
-            )}
-          </section>
-
           <section className="rounded-lg border border-zinc-200 bg-white p-4">
             <h2 className="text-sm font-semibold text-zinc-900">高频问题概览</h2>
             <div className="mt-3 grid gap-4 md:grid-cols-3">
@@ -798,47 +765,31 @@ export default async function ReviewPackPage({ params, searchParams }: ReviewPac
           </section>
 
           <section className="rounded-lg border border-zinc-200 bg-white p-4">
-            <h2 className="text-sm font-semibold text-zinc-900">教学脚本</h2>
-            {scriptCards.length > 0 ? (
-              <ol className="mt-2 list-decimal space-y-2 pl-5 text-sm text-zinc-700">
-                {scriptCards.map((item) => {
-                  const previewPoints = item.talkingPoints.slice(0, 3);
-                  const remainingPoints = item.talkingPoints.slice(3);
-
-                  return (
-                    <li key={item.key}>
-                      <p className="font-medium text-zinc-900">
-                        {item.minute} · {item.topic}
-                      </p>
-                      {previewPoints.length > 0 ? (
-                        <ul className="mt-1 list-disc space-y-1 pl-5">
-                          {previewPoints.map((point, pointIndex) => (
-                            <li key={`${item.key}-${pointIndex}`}>{point}</li>
-                          ))}
-                        </ul>
-                      ) : (
-                        <p className="mt-1">暂无讲评要点。</p>
-                      )}
-                      {remainingPoints.length > 0 ? (
-                        <details className="mt-1 rounded border border-zinc-200 bg-zinc-50 p-2">
-                          <summary className="cursor-pointer text-xs text-zinc-600">
-                            展开更多讲评要点（+{remainingPoints.length}）
-                          </summary>
-                          <ul className="mt-2 list-disc space-y-1 pl-5">
-                            {remainingPoints.map((point, pointIndex) => (
-                              <li key={`${item.key}-more-${pointIndex}`}>{point}</li>
-                            ))}
-                          </ul>
-                        </details>
-                      ) : null}
-                      {item.focusHint ? <p className="mt-1 text-xs text-zinc-500">讲评提示：{item.focusHint}</p> : null}
-                    </li>
-                  );
-                })}
-              </ol>
-            ) : (
-              <p className="mt-2 text-sm text-zinc-600">未提供教学脚本，建议先按行动建议与高频问题组织讲评。</p>
-            )}
+            <h2 className="text-sm font-semibold text-zinc-900">学生分层</h2>
+            <div className="mt-3 grid gap-3 md:grid-cols-3">
+              {studentTierCards.map((tierCard) => (
+                <article key={tierCard.key} className="rounded-md border border-zinc-200 bg-zinc-50 p-3 text-sm text-zinc-700">
+                  <p className="font-medium text-zinc-900">{tierCard.title}</p>
+                  <p className="mt-1 text-xs text-zinc-500">{tierCard.description}</p>
+                  {tierCard.students.length > 0 ? (
+                    <ul className="mt-2 space-y-1">
+                      {tierCard.students.slice(0, 8).map((student) => (
+                        <li key={student.key} className="rounded border border-zinc-200 bg-white px-2 py-1 text-xs">
+                          <p className="font-medium text-zinc-800">{student.studentId}</p>
+                          <p className="text-zinc-500">
+                            尝试：{typeof student.attemptsCount === "number" ? student.attemptsCount : "—"} · 最近错误：
+                            {typeof student.latestErrorCount === "number" ? student.latestErrorCount : "—"}
+                          </p>
+                          {student.latestAiStatus ? <p className="text-zinc-500">AI：{student.latestAiStatus}</p> : null}
+                        </li>
+                      ))}
+                    </ul>
+                  ) : (
+                    <p className="mt-2 text-xs text-zinc-600">当前分组暂无学生。</p>
+                  )}
+                </article>
+              ))}
+            </div>
           </section>
         </>
       )}

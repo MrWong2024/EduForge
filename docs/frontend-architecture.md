@@ -288,7 +288,7 @@ Snapshot 体积保护 UX：
 | `/teacher/classrooms/[classroomId]/tasks/[classroomTaskId]/submissions` | `GET /api/classrooms/:id`；`GET /api/classrooms/:classroomId/tasks/:classroomTaskId/submissions` | `page,limit` | 查看提交列表并跳转批阅详情 | 按默认规则 |
 | `/teacher/submissions/[submissionId]` | `GET /api/learning-tasks/submissions/:id`；`GET /api/learning-tasks/submissions/:id/feedback`；`POST /api/learning-tasks/submissions/:id/feedback` | `classroomId,classroomTaskId`（用于回跳） | 查看提交内容/反馈历史，新增教师反馈 | 按默认规则 |
 | `/teacher/classrooms/[classroomId]/tasks/[classroomTaskId]/learning-trajectory` | `GET /api/classrooms/:classroomId/tasks/:classroomTaskId/learning-trajectory` | `window,page,limit,sort,order,includeAttempts,includeTagDetails` | 排序筛选、查看学生轨迹 | 按默认规则 |
-| `/teacher/classrooms/[classroomId]/tasks/[classroomTaskId]/review-pack` | `GET /api/classrooms/:classroomId/tasks/:classroomTaskId/review-pack` | `window,topK,examplesPerTag,includeStudentTiers,includeTeacherScript` | 课堂复盘、教学脚本 | 按默认规则 |
+| `/teacher/classrooms/[classroomId]/tasks/[classroomTaskId]/review-pack` | `GET /api/classrooms/:classroomId/tasks/:classroomTaskId/review-pack` | `window,topK,examplesPerTag,includeStudentTiers` | 证据型课堂复盘（总览/问题聚合/样例/分层） | 按默认规则 |
 | `/teacher/classrooms/[classroomId]/tasks/[classroomTaskId]/ai-metrics` | `GET /api/classrooms/:classroomId/tasks/:classroomTaskId/ai-metrics` | `window,includeTags` | 查看 AI 状态与分布 | 按默认规则 |
 | `/teacher/classrooms/[classroomId]/members` | `GET /api/classrooms/:id`；`GET /api/classrooms/:id/students`；`POST /api/classrooms/:id/students/:uid/remove` | `includeRemoved` | 成员查看、移除成员 | 按默认规则 |
 | `/teacher/classrooms/[classroomId]/weekly-report` | `GET /api/classrooms/:classroomId/weekly-report` | `window,includeRiskStudentIds` | 周报筛选 | 按默认规则 |

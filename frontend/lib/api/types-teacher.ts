@@ -321,10 +321,9 @@ export type ReviewPackResponse = {
   classroomTaskId?: string;
   window?: string;
   overview: UnknownRecord;
-  actionItems: UnknownRecord[];
   commonIssues: UnknownRecord;
   examples: UnknownRecord[];
-  teacherScript: UnknownRecord[];
+  studentTiers: UnknownRecord;
   raw: UnknownRecord;
 };
 
@@ -733,10 +732,9 @@ export const toReviewPackResponse = (payload: unknown): ReviewPackResponse => {
     classroomTaskId: asString(record.classroomTaskId),
     window: asString(record.window),
     overview: asRecord(safeGet(record, "overview", undefined)),
-    actionItems: asRecordArray(safeGet(record, "actionItems", undefined)),
     commonIssues: asRecord(safeGet(record, "commonIssues", undefined)),
     examples: asRecordArray(safeGet(record, "examples", undefined)),
-    teacherScript: asRecordArray(safeGet(record, "teacherScript", undefined)),
+    studentTiers: asRecord(safeGet(record, "studentTiers", undefined)),
     raw: record,
   };
 };

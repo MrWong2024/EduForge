@@ -169,6 +169,13 @@
 - 【不要回退】不要再把 `examples` 直接当平铺对象渲染，不要恢复“反馈摘要主要为暂无占位”的样例展示。
 - 【对新会话的意义】教师进入页面即可先看关键课堂指标，再直接拿可读样例做讲评准备，减少对 raw JSON 的依赖。
 
+## UAT-FE-17
+
+- 【本步解决】review-pack 前端仍依赖已删除后端契约（`actionItems/teacherScript/includeTeacherScript`）的问题。
+- 【新增事实 / 已收口口径】review-pack 页面已移除“行动建议/教学脚本”区块与对应 query 开关；当前页面主结构聚焦“课堂总览 -> 课堂结论摘要 -> 高频问题概览 -> 典型样例 -> 学生分层 -> 原始数据（调试）”。`ReviewPackResponse` 前端类型与 `toReviewPackResponse` 适配已同步删除 `actionItems`、`teacherScript`，并接入 `studentTiers`。
+- 【不要回退】不要在前端继续拼接 `includeTeacherScript`，不要保留 `actionItems/teacherScript` 的伪兼容展示。
+- 【对新会话的意义】review-pack 页面叙事从“模板建议/讲稿”回到“证据型复盘”，与后端新契约一致。
+
 ## 当前阶段一句话结论
 
 前端已达到“Teacher/Student 主链路可用 + 任务模板层与班级实例层边界收口 + 教师模板主链路可维护”的工程验收阶段，但尚未进入最终交付定版阶段。
