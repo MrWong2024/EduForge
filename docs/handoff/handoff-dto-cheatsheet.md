@@ -465,9 +465,8 @@
   - `window?: '24h' | '7d' | '30d'`（`@IsIn(CLASS_REVIEW_PACK_WINDOWS)`）
   - `topK?: number`（`@Type(() => Number) @IsInt() @Min(1) @Max(30)`）
   - `examplesPerTag?: number`（`@Type(() => Number) @IsInt() @Min(1) @Max(5)`）
-  - `includeStudentTiers?: string`（`@IsBooleanString()`；支持 `0/1/true/false`）
 - Example Query:
-  - `/api/classrooms/{classroomId}/tasks/{classroomTaskId}/review-pack?window=7d&topK=10&examplesPerTag=2&includeStudentTiers=true`
+  - `/api/classrooms/{classroomId}/tasks/{classroomTaskId}/review-pack?window=7d&topK=10&examplesPerTag=2`
 - Response口径（最小说明）:
   - 核心域：`overview`、`commonIssues`、`examples`、`studentTiers`
   - `examples` 仅返回反馈文本与元数据，不返回 `codeText/prompt/apiKey`

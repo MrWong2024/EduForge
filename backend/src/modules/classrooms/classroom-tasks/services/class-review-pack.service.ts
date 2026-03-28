@@ -92,7 +92,6 @@ export class ClassReviewPackService {
   private static readonly DEFAULT_WINDOW: ClassReviewPackWindow = '7d';
   private static readonly DEFAULT_TOP_K = 10;
   private static readonly DEFAULT_EXAMPLES_PER_TAG = 2;
-  private static readonly DEFAULT_INCLUDE_STUDENT_TIERS = true;
   private static readonly GOOD_TIER_LIMIT = 20;
   private static readonly WATCH_TIER_LIMIT = 20;
   private static readonly NOT_SUBMITTED_TIER_LIMIT = 50;
@@ -137,10 +136,6 @@ export class ClassReviewPackService {
     const topK = query.topK ?? ClassReviewPackService.DEFAULT_TOP_K;
     const examplesPerTag =
       query.examplesPerTag ?? ClassReviewPackService.DEFAULT_EXAMPLES_PER_TAG;
-    const includeStudentTiers = this.parseBooleanQuery(
-      query.includeStudentTiers,
-      ClassReviewPackService.DEFAULT_INCLUDE_STUDENT_TIERS,
-    );
     const lowerBound = new Date(
       Date.now() - ClassReviewPackService.WINDOW_MS_MAP[window],
     );
@@ -149,8 +144,6 @@ export class ClassReviewPackService {
       classroomTaskId,
       window,
       lowerBound: lowerBound.toISOString(),
-      includeStudentTiersRaw: query.includeStudentTiers,
-      includeStudentTiersParsed: includeStudentTiers,
     });
 
     // Z5 metric contract:
@@ -328,7 +321,7 @@ export class ClassReviewPackService {
       latestSubmissionByStudentId.values(),
     ).map((submission) => submission._id);
     const latestAiStatusMap =
-      includeStudentTiers && latestSubmissionIds.length > 0
+      latestSubmissionIds.length > 0
         ? await this.aiFeedbackJobService.getStatusMapBySubmissionIds(
             latestSubmissionIds,
           )
@@ -343,24 +336,16 @@ export class ClassReviewPackService {
           latestAiStatus,
         })),
     });
-    const studentTiers = includeStudentTiers
-      ? this.buildStudentTiers(
-          activeStudentIds,
-          attemptsCountByStudentId,
-          latestSubmissionByStudentId,
-          latestErrorCountBySubmissionId,
-          latestAiStatusMap,
-        )
-      : undefined;
-    const resolvedStudentTiers = studentTiers ?? {
-      good: [],
-      watch: [],
-      notSubmitted: [],
-    };
+    const resolvedStudentTiers = this.buildStudentTiers(
+      activeStudentIds,
+      attemptsCountByStudentId,
+      latestSubmissionByStudentId,
+      latestErrorCountBySubmissionId,
+      latestAiStatusMap,
+    );
     this.debugStudentTiers('studentTiersResult', {
       classroomId,
       classroomTaskId,
-      includeStudentTiersParsed: includeStudentTiers,
       studentsCount,
       submittedStudentsCount,
       good: resolvedStudentTiers.good,
@@ -798,19 +783,5 @@ export class ClassReviewPackService {
       throw new BadRequestException(`${fieldName} must be a valid ObjectId`);
     }
     return new Types.ObjectId(value);
-  }
-
-  private parseBooleanQuery(value: string | undefined, defaultValue: boolean) {
-    if (value === undefined) {
-      return defaultValue;
-    }
-    const normalized = value.trim().toLowerCase();
-    if (normalized === 'true' || normalized === '1') {
-      return true;
-    }
-    if (normalized === 'false' || normalized === '0') {
-      return false;
-    }
-    return defaultValue;
   }
 }

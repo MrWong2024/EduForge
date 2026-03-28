@@ -336,7 +336,7 @@
 - Domain: `ClassroomTask review-pack aggregate (Z5)`
 - Actions: `aggregate-overview`, `aggregate-common-issues/examples`, `build-student-tiers`
 - I/O Shape:
-  - In: `classroomId`, `classroomTaskId`, `teacherId`, `window/topK/examplesPerTag/includeStudentTiers`
+  - In: `classroomId`, `classroomTaskId`, `teacherId`, `window/topK/examplesPerTag`
   - Out: `{ overview, commonIssues, examples, studentTiers }`
 - Key Methods:
   - `getReviewPack(...)`

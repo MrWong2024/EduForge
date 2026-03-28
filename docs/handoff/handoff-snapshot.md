@@ -306,7 +306,7 @@ AI Provider 错误码（`ai-feedback-provider.error-codes.ts`）：
   - `includeAttempts=true` 时 `items[*].attempts[*]` 已返回 `feedbackCount`（Feedback 全来源总条数，AI/TEACHER/SYSTEM，不区分来源）；同一 attempt 下 `feedbackSummary.totalItems` 继续表示 AI 摘要条目数。
 - Z5 课堂复盘包（teacher）：
   - `GET /api/classrooms/:classroomId/tasks/:classroomTaskId/review-pack`
-  - Query：`window, topK, examplesPerTag, includeStudentTiers`（已移除 `includeTeacherScript`）
+  - Query：`window, topK, examplesPerTag`（已移除 `includeStudentTiers`、`includeTeacherScript`）
   - 响应核心域：`overview/commonIssues/examples/studentTiers`（已移除 `actionItems/teacherScript`）
   - `studentTiers` 判定：成员集只取 Enrollment ACTIVE；窗口过滤以 `submission.createdAt` 为准；每个学生只看该 `classroomTaskId` 下窗口内最新提交；`good=AiFeedbackStatus.Succeeded 且 latestErrorCount=0`，`watch=其余已提交`，`notSubmitted=窗口内无提交`；`latestErrorCount` 仅统计该最新提交的 `AI+ERROR`。
 - Z6 过程性评价（teacher）：

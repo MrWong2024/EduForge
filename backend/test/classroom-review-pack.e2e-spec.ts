@@ -531,7 +531,6 @@ describe('Classroom Review Pack (e2e)', () => {
         window: '7d',
         examplesPerTag: 2,
         topK: 10,
-        includeStudentTiers: '1',
       })
       .expect(200);
     const body = reviewPack.body as ReviewPackResponse;
