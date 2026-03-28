@@ -1,7 +1,6 @@
 import {
   BadRequestException,
   Injectable,
-  Logger,
   NotFoundException,
 } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
@@ -101,7 +100,6 @@ export class ClassReviewPackService {
       '7d': 7 * 24 * 60 * 60 * 1000,
       '30d': 30 * 24 * 60 * 60 * 1000,
     };
-  private readonly logger = new Logger(ClassReviewPackService.name);
 
   constructor(
     @InjectModel(Classroom.name)
@@ -139,12 +137,6 @@ export class ClassReviewPackService {
     const lowerBound = new Date(
       Date.now() - ClassReviewPackService.WINDOW_MS_MAP[window],
     );
-    this.debugStudentTiers('query', {
-      classroomId,
-      classroomTaskId,
-      window,
-      lowerBound: lowerBound.toISOString(),
-    });
 
     // Z5 metric contract:
     // 1) All task-bound metrics are isolated by classroomTaskId.
@@ -175,12 +167,6 @@ export class ClassReviewPackService {
     const activeStudentIds =
       await this.enrollmentService.listActiveStudentIds(classroomObjectId);
     const studentsCount = activeStudentIds.length;
-    this.debugStudentTiers('activeStudents', {
-      classroomId,
-      classroomTaskId,
-      studentsCount,
-      studentIds: activeStudentIds,
-    });
     const activeStudentObjectIds = activeStudentIds.map(
       (studentId) => new Types.ObjectId(studentId),
     );
@@ -198,17 +184,6 @@ export class ClassReviewPackService {
             .sort({ studentId: 1, attemptNo: 1, createdAt: 1 })
             .lean<ReviewSubmissionLean[]>()
             .exec();
-    this.debugStudentTiers('submissions', {
-      classroomId,
-      classroomTaskId,
-      count: submissions.length,
-      items: submissions.map((submission) => ({
-        submissionId: submission._id.toString(),
-        studentId: submission.studentId.toString(),
-        attemptNo: submission.attemptNo,
-        createdAt: submission.createdAt?.toISOString() ?? null,
-      })),
-    });
     const submissionIds = submissions.map((submission) => submission._id);
     const submissionAttemptMap = new Map<string, number>();
     const attemptsCountByStudentId = new Map<string, number>();
@@ -241,25 +216,6 @@ export class ClassReviewPackService {
         latestSubmissionByStudentId.set(studentId, submission);
       }
     }
-    this.debugStudentTiers('attemptsCountByStudentId', {
-      classroomId,
-      classroomTaskId,
-      entries: Array.from(attemptsCountByStudentId.entries())
-        .sort((left, right) => left[0].localeCompare(right[0]))
-        .map(([studentId, attemptsCount]) => ({ studentId, attemptsCount })),
-    });
-    this.debugStudentTiers('latestSubmissionByStudentId', {
-      classroomId,
-      classroomTaskId,
-      entries: Array.from(latestSubmissionByStudentId.entries())
-        .sort((left, right) => left[0].localeCompare(right[0]))
-        .map(([studentId, submission]) => ({
-          studentId,
-          submissionId: submission._id.toString(),
-          attemptNo: submission.attemptNo,
-          createdAt: submission.createdAt?.toISOString() ?? null,
-        })),
-    });
 
     const submittedStudentsCount = Array.from(
       attemptsCountByStudentId.values(),
@@ -291,16 +247,6 @@ export class ClassReviewPackService {
     for (const item of feedbackFacet.latestErrorCountsBySubmission) {
       latestErrorCountBySubmissionId.set(item._id.toString(), item.count);
     }
-    this.debugStudentTiers('latestErrorCountBySubmissionId', {
-      classroomId,
-      classroomTaskId,
-      entries: Array.from(latestErrorCountBySubmissionId.entries())
-        .sort((left, right) => left[0].localeCompare(right[0]))
-        .map(([submissionId, latestErrorCount]) => ({
-          submissionId,
-          latestErrorCount,
-        })),
-    });
 
     const examples = feedbackFacet.examplesByTag.map((item) => ({
       tag: item.tag,
@@ -326,16 +272,6 @@ export class ClassReviewPackService {
             latestSubmissionIds,
           )
         : new Map<string, AiFeedbackStatus>();
-    this.debugStudentTiers('latestAiStatusMap', {
-      classroomId,
-      classroomTaskId,
-      entries: Array.from(latestAiStatusMap.entries())
-        .sort((left, right) => left[0].localeCompare(right[0]))
-        .map(([submissionId, latestAiStatus]) => ({
-          submissionId,
-          latestAiStatus,
-        })),
-    });
     const resolvedStudentTiers = this.buildStudentTiers(
       activeStudentIds,
       attemptsCountByStudentId,
@@ -343,19 +279,6 @@ export class ClassReviewPackService {
       latestErrorCountBySubmissionId,
       latestAiStatusMap,
     );
-    this.debugStudentTiers('studentTiersResult', {
-      classroomId,
-      classroomTaskId,
-      studentsCount,
-      submittedStudentsCount,
-      good: resolvedStudentTiers.good,
-      watch: resolvedStudentTiers.watch,
-      notSubmitted: resolvedStudentTiers.notSubmitted,
-      tiersTotal:
-        resolvedStudentTiers.good.length +
-        resolvedStudentTiers.watch.length +
-        resolvedStudentTiers.notSubmitted.length,
-    });
 
     return {
       classroomId,
@@ -765,17 +688,6 @@ export class ClassReviewPackService {
         ClassReviewPackService.NOT_SUBMITTED_TIER_LIMIT,
       ),
     };
-  }
-
-  private isStudentTiersDebugEnabled() {
-    return process.env.DEBUG_REVIEW_PACK_STUDENT_TIERS === 'true';
-  }
-
-  private debugStudentTiers(label: string, payload: unknown) {
-    if (!this.isStudentTiersDebugEnabled()) {
-      return;
-    }
-    this.logger.debug(`[studentTiers] ${label}: ${JSON.stringify(payload)}`);
   }
 
   private parseObjectId(value: string, fieldName: string) {
