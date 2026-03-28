@@ -309,6 +309,7 @@ AI Provider 错误码（`ai-feedback-provider.error-codes.ts`）：
   - Query：`window, topK, examplesPerTag`（已移除 `includeStudentTiers`、`includeTeacherScript`）
   - 响应核心域：`overview/commonIssues/examples/studentTiers`（已移除 `actionItems/teacherScript`）
   - `studentTiers` 判定：成员集只取 Enrollment ACTIVE；窗口过滤以 `submission.createdAt` 为准；每个学生只看该 `classroomTaskId` 下窗口内最新提交；`good=AiFeedbackStatus.Succeeded 且 latestErrorCount=0`，`watch=其余已提交`，`notSubmitted=窗口内无提交`；`latestErrorCount` 仅统计该最新提交的 `AI+ERROR`。
+  - `studentTiers.good/watch/notSubmitted[*]` 均返回可展示学生信息：`studentId/studentName/studentNo`（`studentName` 缺失回落 `未知学生`）。
 - Z6 过程性评价（teacher）：
   - `GET /api/classrooms/:classroomId/process-assessment`
   - `GET /api/classrooms/:classroomId/process-assessment.csv`

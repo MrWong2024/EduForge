@@ -470,4 +470,6 @@
 - Response口径（最小说明）:
   - 核心域：`overview`、`commonIssues`、`examples`、`studentTiers`
   - `examples` 仅返回反馈文本与元数据，不返回 `codeText/prompt/apiKey`
+  - `studentTiers.good/watch/notSubmitted[*]` 统一含 `studentId/studentName/studentNo`，其中 `good/watch` 额外含 `attemptsCount/latestErrorCount`
+  - `studentName` 缺失时回落 `未知学生`
   - 响应不再包含 `actionItems`、`teacherScript`

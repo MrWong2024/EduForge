@@ -19,6 +19,7 @@ import {
   FeedbackType,
 } from '../../../learning-tasks/schemas/feedback.schema';
 import { Submission } from '../../../learning-tasks/schemas/submission.schema';
+import { User } from '../../../users/schemas/user.schema';
 import { EnrollmentService } from '../../enrollments/services/enrollment.service';
 import { AiFeedbackJobService } from '../../../learning-tasks/ai-feedback/services/ai-feedback-job.service';
 import { AiFeedbackStatus } from '../../../learning-tasks/ai-feedback/interfaces/ai-feedback-status.enum';
@@ -63,8 +64,20 @@ type ReviewFeedbackFacetResult = {
 };
 type TierStudentItem = {
   studentId: string;
+  studentName: string;
+  studentNo: string | null;
   attemptsCount: number;
   latestErrorCount: number;
+};
+type TierNotSubmittedItem = {
+  studentId: string;
+  studentName: string;
+  studentNo: string | null;
+};
+type ReviewPackStudentLean = Pick<User, 'name' | 'studentNo'> & WithId;
+type ReviewPackStudentPublic = {
+  studentName: string;
+  studentNo: string | null;
 };
 type CommonIssuesByClassroomTaskFacetResult = {
   tags: Array<{
@@ -110,6 +123,8 @@ export class ClassReviewPackService {
     private readonly submissionModel: Model<Submission>,
     @InjectModel(Feedback.name)
     private readonly feedbackModel: Model<Feedback>,
+    @InjectModel(User.name)
+    private readonly userModel: Model<User>,
     private readonly enrollmentService: EnrollmentService,
     private readonly aiFeedbackJobService: AiFeedbackJobService,
     private readonly aiFeedbackMetricsAggregator: AiFeedbackMetricsAggregator,
@@ -170,6 +185,20 @@ export class ClassReviewPackService {
     const activeStudentObjectIds = activeStudentIds.map(
       (studentId) => new Types.ObjectId(studentId),
     );
+    const studentPublicMap = new Map<string, ReviewPackStudentPublic>();
+    if (activeStudentObjectIds.length > 0) {
+      const students = await this.userModel
+        .find({ _id: { $in: activeStudentObjectIds } })
+        .select('name studentNo')
+        .lean<ReviewPackStudentLean[]>()
+        .exec();
+      for (const student of students) {
+        studentPublicMap.set(
+          student._id.toString(),
+          this.toReviewPackStudentPublic(student),
+        );
+      }
+    }
 
     const submissions =
       activeStudentObjectIds.length === 0
@@ -278,6 +307,7 @@ export class ClassReviewPackService {
       latestSubmissionByStudentId,
       latestErrorCountBySubmissionId,
       latestAiStatusMap,
+      studentPublicMap,
     );
 
     return {
@@ -639,21 +669,35 @@ export class ClassReviewPackService {
     latestSubmissionByStudentId: Map<string, ReviewSubmissionLean>,
     latestErrorCountBySubmissionId: Map<string, number>,
     latestAiStatusMap: Map<string, AiFeedbackStatus>,
+    studentPublicMap: Map<string, ReviewPackStudentPublic>,
   ) {
     const good: TierStudentItem[] = [];
     const watch: TierStudentItem[] = [];
-    const notSubmitted: Array<{ studentId: string }> = [];
+    const notSubmitted: TierNotSubmittedItem[] = [];
 
     for (const studentId of activeStudentIds) {
+      const studentPublic =
+        studentPublicMap.get(studentId) ??
+        this.getFallbackReviewPackStudentPublic();
       const attemptsCount = attemptsCountByStudentId.get(studentId) ?? 0;
       if (attemptsCount === 0) {
-        notSubmitted.push({ studentId });
+        notSubmitted.push({
+          studentId,
+          studentName: studentPublic.studentName,
+          studentNo: studentPublic.studentNo,
+        });
         continue;
       }
 
       const latestSubmission = latestSubmissionByStudentId.get(studentId);
       if (!latestSubmission) {
-        watch.push({ studentId, attemptsCount, latestErrorCount: 0 });
+        watch.push({
+          studentId,
+          studentName: studentPublic.studentName,
+          studentNo: studentPublic.studentNo,
+          attemptsCount,
+          latestErrorCount: 0,
+        });
         continue;
       }
 
@@ -663,7 +707,13 @@ export class ClassReviewPackService {
       const latestAiStatus =
         latestAiStatusMap.get(latestSubmissionId) ??
         AiFeedbackStatus.NotRequested;
-      const entry = { studentId, attemptsCount, latestErrorCount };
+      const entry = {
+        studentId,
+        studentName: studentPublic.studentName,
+        studentNo: studentPublic.studentNo,
+        attemptsCount,
+        latestErrorCount,
+      };
       if (
         latestErrorCount === 0 &&
         latestAiStatus === AiFeedbackStatus.Succeeded
@@ -687,6 +737,30 @@ export class ClassReviewPackService {
         0,
         ClassReviewPackService.NOT_SUBMITTED_TIER_LIMIT,
       ),
+    };
+  }
+
+  private toReviewPackStudentPublic(
+    student: ReviewPackStudentLean,
+  ): ReviewPackStudentPublic {
+    const studentName =
+      typeof student.name === 'string' && student.name.trim()
+        ? student.name.trim()
+        : '未知学生';
+    const studentNo =
+      typeof student.studentNo === 'string' && student.studentNo.trim()
+        ? student.studentNo.trim()
+        : null;
+    return {
+      studentName,
+      studentNo,
+    };
+  }
+
+  private getFallbackReviewPackStudentPublic(): ReviewPackStudentPublic {
+    return {
+      studentName: '未知学生',
+      studentNo: null,
     };
   }
 

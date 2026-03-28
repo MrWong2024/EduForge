@@ -67,15 +67,23 @@ type ReviewPackResponse = {
   studentTiers: {
     good: Array<{
       studentId: string;
+      studentName: string;
+      studentNo: string | null;
       attemptsCount: number;
       latestErrorCount: number;
     }>;
     watch: Array<{
       studentId: string;
+      studentName: string;
+      studentNo: string | null;
       attemptsCount: number;
       latestErrorCount: number;
     }>;
-    notSubmitted: Array<{ studentId: string }>;
+    notSubmitted: Array<{
+      studentId: string;
+      studentName: string;
+      studentNo: string | null;
+    }>;
   };
 };
 
@@ -192,11 +200,15 @@ describe('Classroom Review Pack (e2e)', () => {
         email: studentAEmail,
         passwordHash: studentAHash,
         roles: ['student'],
+        name: 'Student Alpha',
+        studentNo: 'S-A-0001',
       }),
       userModel.create({
         email: studentBEmail,
         passwordHash: studentBHash,
         roles: ['student'],
+        name: 'Student Beta',
+        studentNo: 'S-B-0001',
       }),
     ]);
 
@@ -371,11 +383,15 @@ describe('Classroom Review Pack (e2e)', () => {
         email: `studentC.review.pack.${Date.now()}@example.com`,
         passwordHash: await bcrypt.hash(studentPassword, 10),
         roles: ['student'],
+        name: 'Student Gamma',
+        studentNo: 'S-C-0001',
       },
       {
         email: `studentD.review.pack.${Date.now()}@example.com`,
         passwordHash: await bcrypt.hash(studentPassword, 10),
         roles: ['student'],
+        name: 'Student Delta',
+        studentNo: 'S-D-0001',
       },
       {
         email: `studentE.review.pack.${Date.now()}@example.com`,
@@ -546,6 +562,27 @@ describe('Classroom Review Pack (e2e)', () => {
         expect((sample as Record<string, unknown>).codeText).toBeUndefined();
       }
     }
+    for (const item of body.studentTiers.good) {
+      expect(typeof item.studentName).toBe('string');
+      expect(item.studentName.length).toBeGreaterThan(0);
+      expect(item.studentNo === null || typeof item.studentNo === 'string').toBe(
+        true,
+      );
+    }
+    for (const item of body.studentTiers.watch) {
+      expect(typeof item.studentName).toBe('string');
+      expect(item.studentName.length).toBeGreaterThan(0);
+      expect(item.studentNo === null || typeof item.studentNo === 'string').toBe(
+        true,
+      );
+    }
+    for (const item of body.studentTiers.notSubmitted) {
+      expect(typeof item.studentName).toBe('string');
+      expect(item.studentName.length).toBeGreaterThan(0);
+      expect(item.studentNo === null || typeof item.studentNo === 'string').toBe(
+        true,
+      );
+    }
     expect(body.studentTiers.notSubmitted).toHaveLength(0);
 
     const goodByStudentId = new Map(
@@ -561,6 +598,20 @@ describe('Classroom Review Pack (e2e)', () => {
     expect(Array.from(watchByStudentId.keys()).sort()).toEqual(
       [studentD._id.toString(), studentE._id.toString()].sort(),
     );
+    expect(goodByStudentId.get(studentAId)?.studentName).toBe('Student Alpha');
+    expect(goodByStudentId.get(studentAId)?.studentNo).toBe('S-A-0001');
+    expect(goodByStudentId.get(studentBId)?.studentName).toBe('Student Beta');
+    expect(goodByStudentId.get(studentBId)?.studentNo).toBe('S-B-0001');
+    expect(
+      watchByStudentId.get(studentD._id.toString())?.studentName,
+    ).toBe('Student Delta');
+    expect(watchByStudentId.get(studentD._id.toString())?.studentNo).toBe(
+      'S-D-0001',
+    );
+    expect(
+      watchByStudentId.get(studentE._id.toString())?.studentName,
+    ).toBe('未知学生');
+    expect(watchByStudentId.get(studentE._id.toString())?.studentNo).toBeNull();
     expect(goodByStudentId.get(studentAId)?.latestErrorCount).toBe(0);
     expect(goodByStudentId.get(studentAId)?.attemptsCount).toBe(2);
     expect(
