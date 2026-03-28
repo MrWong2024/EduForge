@@ -712,6 +712,13 @@ export class ClassReviewPackService {
     if (value === undefined) {
       return defaultValue;
     }
-    return value.toLowerCase() === 'true';
+    const normalized = value.trim().toLowerCase();
+    if (normalized === 'true' || normalized === '1') {
+      return true;
+    }
+    if (normalized === 'false' || normalized === '0') {
+      return false;
+    }
+    return defaultValue;
   }
 }

@@ -14,10 +14,20 @@ import { Classroom } from '../src/modules/classrooms/schemas/classroom.schema';
 import { ClassroomTask } from '../src/modules/classrooms/classroom-tasks/schemas/classroom-task.schema';
 import { Enrollment } from '../src/modules/classrooms/enrollments/schemas/enrollment.schema';
 import { Task } from '../src/modules/learning-tasks/schemas/task.schema';
-import { Submission } from '../src/modules/learning-tasks/schemas/submission.schema';
-import { Feedback } from '../src/modules/learning-tasks/schemas/feedback.schema';
-import { AiFeedbackJob } from '../src/modules/learning-tasks/ai-feedback/schemas/ai-feedback-job.schema';
-import { AiFeedbackProcessor } from '../src/modules/learning-tasks/ai-feedback/services/ai-feedback-processor.service';
+import {
+  Submission,
+  SubmissionStatus,
+} from '../src/modules/learning-tasks/schemas/submission.schema';
+import {
+  Feedback,
+  FeedbackSeverity,
+  FeedbackSource,
+  FeedbackType,
+} from '../src/modules/learning-tasks/schemas/feedback.schema';
+import {
+  AiFeedbackJob,
+  AiFeedbackJobStatus,
+} from '../src/modules/learning-tasks/ai-feedback/schemas/ai-feedback-job.schema';
 
 jest.setTimeout(30000);
 
@@ -33,10 +43,10 @@ type CreatedCourseResponse = { id: string };
 type CreatedClassroomResponse = { id: string; joinCode: string };
 type CreatedTaskResponse = { id: string };
 type CreatedClassroomTaskResponse = { id: string };
-type CreatedSubmissionResponse = { id: string; attemptNo: number };
 type ReviewPackResponse = {
   overview: {
     studentsCount: number;
+    submittedStudentsCount: number;
     submissionRate: number;
   };
   commonIssues: {
@@ -55,6 +65,16 @@ type ReviewPackResponse = {
     }>;
   }>;
   studentTiers: {
+    good: Array<{
+      studentId: string;
+      attemptsCount: number;
+      latestErrorCount: number;
+    }>;
+    watch: Array<{
+      studentId: string;
+      attemptsCount: number;
+      latestErrorCount: number;
+    }>;
     notSubmitted: Array<{ studentId: string }>;
   };
 };
@@ -71,7 +91,6 @@ describe('Classroom Review Pack (e2e)', () => {
   let submissionModel: Model<Submission>;
   let feedbackModel: Model<Feedback>;
   let aiFeedbackJobModel: Model<AiFeedbackJob>;
-  let aiFeedbackProcessor: AiFeedbackProcessor;
   let teacherAgent: ReturnType<typeof request.agent>;
   let studentAAgent: ReturnType<typeof request.agent>;
   let studentBAgent: ReturnType<typeof request.agent>;
@@ -83,7 +102,7 @@ describe('Classroom Review Pack (e2e)', () => {
   let classroomId = '';
   let classroomTaskId = '';
   let taskId = '';
-  let submissionId = '';
+  const extraStudentIds: string[] = [];
 
   let previousWorkerEnabled: string | undefined;
   let previousDebugEnabled: string | undefined;
@@ -95,9 +114,6 @@ describe('Classroom Review Pack (e2e)', () => {
   const studentBEmail = `studentB.review.pack.${Date.now()}@example.com`;
   const teacherPassword = 'TeacherPass123!';
   const studentPassword = 'StudentPass123!';
-
-  const waitMs = (ms: number) =>
-    new Promise((resolve) => setTimeout(resolve, ms));
 
   const login = async (
     agent: ReturnType<typeof request.agent>,
@@ -159,7 +175,6 @@ describe('Classroom Review Pack (e2e)', () => {
     submissionModel = app.get(getModelToken(Submission.name));
     feedbackModel = app.get(getModelToken(Feedback.name));
     aiFeedbackJobModel = app.get(getModelToken(AiFeedbackJob.name));
-    aiFeedbackProcessor = app.get(AiFeedbackProcessor);
 
     const [teacherHash, studentAHash, studentBHash] = await Promise.all([
       bcrypt.hash(teacherPassword, 10),
@@ -219,21 +234,31 @@ describe('Classroom Review Pack (e2e)', () => {
 
     if (!KEEP_DB) {
       const cleanup: Promise<unknown>[] = [];
-      if (submissionId) {
-        const submissionObjectId = new Types.ObjectId(submissionId);
+      if (classroomTaskId) {
+        const classroomTaskObjectId = new Types.ObjectId(classroomTaskId);
+        const submissions = await submissionModel
+          .find({ classroomTaskId: classroomTaskObjectId })
+          .select('_id')
+          .lean<Array<{ _id: Types.ObjectId }>>()
+          .exec();
+        const submissionObjectIds = submissions.map((row) => row._id);
+
+        if (submissionObjectIds.length > 0) {
+          cleanup.push(
+            feedbackModel.deleteMany({
+              submissionId: { $in: submissionObjectIds },
+            }),
+          );
+          cleanup.push(
+            aiFeedbackJobModel.deleteMany({
+              submissionId: { $in: submissionObjectIds },
+            }),
+          );
+        }
+
         cleanup.push(
-          feedbackModel.deleteMany({
-            submissionId: submissionObjectId,
-          }),
-        );
-        cleanup.push(
-          aiFeedbackJobModel.deleteMany({
-            submissionId: submissionObjectId,
-          }),
-        );
-        cleanup.push(
-          submissionModel.deleteOne({
-            _id: submissionObjectId,
+          submissionModel.deleteMany({
+            classroomTaskId: classroomTaskObjectId,
           }),
         );
       }
@@ -264,7 +289,12 @@ describe('Classroom Review Pack (e2e)', () => {
           courseModel.deleteOne({ _id: new Types.ObjectId(courseId) }),
         );
       }
-      const userObjectIds = [teacherId, studentAId, studentBId]
+      const userObjectIds = [
+        teacherId,
+        studentAId,
+        studentBId,
+        ...extraStudentIds,
+      ]
         .filter(Boolean)
         .map((id) => new Types.ObjectId(id));
       if (userObjectIds.length > 0) {
@@ -279,7 +309,7 @@ describe('Classroom Review Pack (e2e)', () => {
     await app.close();
   });
 
-  it('returns classroom review pack with overview, common issues, examples and tiers', async () => {
+  it('builds stable student tiers by latest submission with AI status and AI error count', async () => {
     const createdCourse = await teacherAgent
       .post('/api/courses')
       .send({
@@ -336,37 +366,162 @@ describe('Classroom Review Pack (e2e)', () => {
         .expect(201),
     ]);
 
-    const createdSubmission = await studentAAgent
-      .post(
-        `/api/classrooms/${classroomId}/tasks/${classroomTaskId}/submissions`,
-      )
-      .send({
+    const [studentC, studentD, studentE] = await userModel.create([
+      {
+        email: `studentC.review.pack.${Date.now()}@example.com`,
+        passwordHash: await bcrypt.hash(studentPassword, 10),
+        roles: ['student'],
+      },
+      {
+        email: `studentD.review.pack.${Date.now()}@example.com`,
+        passwordHash: await bcrypt.hash(studentPassword, 10),
+        roles: ['student'],
+      },
+      {
+        email: `studentE.review.pack.${Date.now()}@example.com`,
+        passwordHash: await bcrypt.hash(studentPassword, 10),
+        roles: ['student'],
+      },
+    ]);
+    extraStudentIds.push(
+      studentC._id.toString(),
+      studentD._id.toString(),
+      studentE._id.toString(),
+    );
+
+    await enrollmentModel.create([
+      {
+        classroomId: new Types.ObjectId(classroomId),
+        userId: studentC._id,
+      },
+      {
+        classroomId: new Types.ObjectId(classroomId),
+        userId: studentD._id,
+      },
+      {
+        classroomId: new Types.ObjectId(classroomId),
+        userId: studentE._id,
+      },
+    ]);
+
+    const classroomTaskObjectId = new Types.ObjectId(classroomTaskId);
+    const taskObjectId = new Types.ObjectId(taskId);
+
+    const createSubmission = async (
+      studentId: string,
+      attemptNo: number,
+      codeText: string,
+    ) =>
+      submissionModel.create({
+        taskId: taskObjectId,
+        classroomTaskId: classroomTaskObjectId,
+        studentId: new Types.ObjectId(studentId),
+        attemptNo,
+        submittedAt: new Date(),
+        isLate: false,
+        lateBySeconds: 0,
         content: {
-          codeText: 'function reviewPackSubmission() { return "ok"; }',
+          codeText,
           language: 'typescript',
         },
-      })
-      .expect(201);
-    const submissionBody = createdSubmission.body as CreatedSubmissionResponse;
-    submissionId = submissionBody.id;
-    expect(submissionBody.attemptNo).toBe(1);
+        status: SubmissionStatus.Submitted,
+      });
 
-    for (let index = 0; index < 6; index += 1) {
-      await aiFeedbackProcessor.processOnce(10);
-      await waitMs(70);
-    }
+    const studentAAttempt1 = await createSubmission(
+      studentAId,
+      1,
+      'function studentAAttempt1(){return 1;}',
+    );
+    const studentAAttempt2 = await createSubmission(
+      studentAId,
+      2,
+      'function studentAAttempt2(){return 2;}',
+    );
+    const studentBLatest = await createSubmission(
+      studentBId,
+      1,
+      'function studentBLatest(){return 1;}',
+    );
+    const studentCLatest = await createSubmission(
+      studentC._id.toString(),
+      1,
+      'function studentCLatest(){return 1;}',
+    );
+    const studentDLatest = await createSubmission(
+      studentD._id.toString(),
+      1,
+      'function studentDLatest(){return 1;}',
+    );
+    const studentELatest = await createSubmission(
+      studentE._id.toString(),
+      1,
+      'function studentELatest(){return 1;}',
+    );
 
-    await teacherAgent
-      .post(`/api/learning-tasks/submissions/${submissionId}/feedback`)
-      .send({
-        source: 'TEACHER',
-        type: 'STYLE',
-        severity: 'WARN',
-        message: 'Use clearer names for helper functions.',
-        suggestion: 'Rename helper to reflect intent.',
+    await aiFeedbackJobModel.create([
+      {
+        submissionId: studentAAttempt2._id,
+        taskId: taskObjectId,
+        classroomTaskId: classroomTaskObjectId,
+        studentId: studentAAttempt2.studentId,
+        status: AiFeedbackJobStatus.Succeeded,
+      },
+      {
+        submissionId: studentBLatest._id,
+        taskId: taskObjectId,
+        classroomTaskId: classroomTaskObjectId,
+        studentId: studentBLatest.studentId,
+        status: AiFeedbackJobStatus.Succeeded,
+      },
+      {
+        submissionId: studentCLatest._id,
+        taskId: taskObjectId,
+        classroomTaskId: classroomTaskObjectId,
+        studentId: studentCLatest.studentId,
+        status: AiFeedbackJobStatus.Succeeded,
+      },
+      {
+        submissionId: studentDLatest._id,
+        taskId: taskObjectId,
+        classroomTaskId: classroomTaskObjectId,
+        studentId: studentDLatest.studentId,
+        status: AiFeedbackJobStatus.Succeeded,
+      },
+      {
+        submissionId: studentELatest._id,
+        taskId: taskObjectId,
+        classroomTaskId: classroomTaskObjectId,
+        studentId: studentELatest.studentId,
+        status: AiFeedbackJobStatus.Failed,
+      },
+    ]);
+
+    await feedbackModel.create([
+      {
+        submissionId: studentAAttempt1._id,
+        source: FeedbackSource.AI,
+        type: FeedbackType.Bug,
+        severity: FeedbackSeverity.Error,
+        message: 'A old attempt has an AI error',
+        tags: ['logic'],
+      },
+      {
+        submissionId: studentDLatest._id,
+        source: FeedbackSource.AI,
+        type: FeedbackType.Bug,
+        severity: FeedbackSeverity.Error,
+        message: 'D latest attempt has an AI error',
+        tags: ['logic'],
+      },
+      {
+        submissionId: studentCLatest._id,
+        source: FeedbackSource.Teacher,
+        type: FeedbackType.Style,
+        severity: FeedbackSeverity.Error,
+        message: 'Teacher error feedback should not affect latestErrorCount',
         tags: ['readability'],
-      })
-      .expect(201);
+      },
+    ]);
 
     const reviewPack = await teacherAgent
       .get(
@@ -376,12 +531,13 @@ describe('Classroom Review Pack (e2e)', () => {
         window: '7d',
         examplesPerTag: 2,
         topK: 10,
-        includeStudentTiers: true,
+        includeStudentTiers: '1',
       })
       .expect(200);
     const body = reviewPack.body as ReviewPackResponse;
 
-    expect(body.overview.studentsCount).toBeGreaterThanOrEqual(2);
+    expect(body.overview.studentsCount).toBe(5);
+    expect(body.overview.submittedStudentsCount).toBe(5);
     expect(body.overview.submissionRate).toBeGreaterThanOrEqual(0);
     expect(body.overview.submissionRate).toBeLessThanOrEqual(1);
     expect(Array.isArray(body.commonIssues.topTags)).toBe(true);
@@ -391,7 +547,39 @@ describe('Classroom Review Pack (e2e)', () => {
         expect((sample as Record<string, unknown>).codeText).toBeUndefined();
       }
     }
-    expect(body.studentTiers.notSubmitted.length).toBeGreaterThanOrEqual(1);
+    expect(body.studentTiers.notSubmitted).toHaveLength(0);
+
+    const goodByStudentId = new Map(
+      body.studentTiers.good.map((item) => [item.studentId, item]),
+    );
+    const watchByStudentId = new Map(
+      body.studentTiers.watch.map((item) => [item.studentId, item]),
+    );
+
+    expect(Array.from(goodByStudentId.keys()).sort()).toEqual(
+      [studentAId, studentBId, studentC._id.toString()].sort(),
+    );
+    expect(Array.from(watchByStudentId.keys()).sort()).toEqual(
+      [studentD._id.toString(), studentE._id.toString()].sort(),
+    );
+    expect(goodByStudentId.get(studentAId)?.latestErrorCount).toBe(0);
+    expect(goodByStudentId.get(studentAId)?.attemptsCount).toBe(2);
+    expect(
+      watchByStudentId.get(studentD._id.toString())?.latestErrorCount,
+    ).toBe(1);
+    expect(
+      watchByStudentId.get(studentE._id.toString())?.latestErrorCount,
+    ).toBe(0);
+
+    const totalTierCount =
+      body.studentTiers.good.length +
+      body.studentTiers.watch.length +
+      body.studentTiers.notSubmitted.length;
+    expect(totalTierCount).toBe(5);
+    expect(body.studentTiers.good.length + body.studentTiers.watch.length).toBe(
+      body.overview.submittedStudentsCount,
+    );
+
     expect((body as Record<string, unknown>).actionItems).toBeUndefined();
     expect((body as Record<string, unknown>).teacherScript).toBeUndefined();
   });
