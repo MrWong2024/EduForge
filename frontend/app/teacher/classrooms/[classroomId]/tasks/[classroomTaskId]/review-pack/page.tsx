@@ -11,7 +11,6 @@ import { getCommonErrorSummary } from "@/lib/ui/status";
 import {
   buildQueryString,
   getSingleSearchParam,
-  parseBool01,
   parseEnum,
   parsePositiveInt,
   safeGet,
@@ -24,7 +23,6 @@ type ReviewPackPageProps = {
     window?: string | string[];
     topK?: string | string[];
     examplesPerTag?: string | string[];
-    includeStudentTiers?: string | string[];
   }>;
 };
 
@@ -40,7 +38,6 @@ type ReviewQueryState = {
   window: ReviewWindow;
   topK: number;
   examplesPerTag: number;
-  includeStudentTiers: boolean;
 };
 
 type OverviewMetricCard = {
@@ -86,14 +83,12 @@ const resolveQueryState = (
     min: 1,
     max: 5,
   }),
-  includeStudentTiers: parseBool01(getSingleSearchParam(query.includeStudentTiers), false),
 });
 
 const toQueryRecord = (query: ReviewQueryState): Record<string, string> => ({
   window: query.window,
   topK: String(query.topK),
   examplesPerTag: String(query.examplesPerTag),
-  includeStudentTiers: String(query.includeStudentTiers),
 });
 
 const buildHref = (
@@ -625,18 +620,6 @@ export default async function ReviewPackPage({ params, searchParams }: ReviewPac
                 </Link>
               );
             })}
-          </div>
-
-          <div className="flex items-center gap-2">
-            <span>学生分层:</span>
-            <Link
-              href={buildHref(routePath, queryRecord, {
-                includeStudentTiers: String(!viewModel.query.includeStudentTiers),
-              })}
-              className="text-blue-700 hover:underline"
-            >
-              {viewModel.query.includeStudentTiers ? "开" : "关"}
-            </Link>
           </div>
 
         </div>
