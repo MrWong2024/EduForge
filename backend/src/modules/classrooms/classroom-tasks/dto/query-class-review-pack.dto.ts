@@ -33,8 +33,4 @@ export class QueryClassReviewPackDto {
   @IsOptional()
   @IsBooleanString()
   includeStudentTiers?: string;
-
-  @IsOptional()
-  @IsBooleanString()
-  includeTeacherScript?: string;
 }

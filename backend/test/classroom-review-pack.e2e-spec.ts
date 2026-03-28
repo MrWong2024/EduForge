@@ -57,12 +57,6 @@ type ReviewPackResponse = {
   studentTiers: {
     notSubmitted: Array<{ studentId: string }>;
   };
-  actionItems: Array<{ title: string; why: string; how: string }>;
-  teacherScript: Array<{
-    minute: string;
-    topic: string;
-    talkingPoints: string[];
-  }>;
 };
 
 describe('Classroom Review Pack (e2e)', () => {
@@ -383,7 +377,6 @@ describe('Classroom Review Pack (e2e)', () => {
         examplesPerTag: 2,
         topK: 10,
         includeStudentTiers: true,
-        includeTeacherScript: true,
       })
       .expect(200);
     const body = reviewPack.body as ReviewPackResponse;
@@ -399,7 +392,7 @@ describe('Classroom Review Pack (e2e)', () => {
       }
     }
     expect(body.studentTiers.notSubmitted.length).toBeGreaterThanOrEqual(1);
-    expect(body.actionItems.length).toBeGreaterThanOrEqual(3);
-    expect(Array.isArray(body.teacherScript)).toBe(true);
+    expect((body as Record<string, unknown>).actionItems).toBeUndefined();
+    expect((body as Record<string, unknown>).teacherScript).toBeUndefined();
   });
 });

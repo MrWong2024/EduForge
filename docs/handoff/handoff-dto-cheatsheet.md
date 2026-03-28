@@ -456,3 +456,19 @@
   - 列表只按 `classroomTaskId` 查询，不按 `taskId` 跨班聚合
   - 无 job 时 `aiFeedbackStatus = NOT_REQUESTED`
   - 不返回 `passwordHash`、不返回 `content.codeText`
+
+### GET /api/classrooms/:classroomId/tasks/:classroomTaskId/review-pack
+
+- Controller & Method: `backend/src/modules/classrooms/classroom-tasks/controllers/classroom-tasks.controller.ts` -> `ClassroomTasksController.getReviewPack`
+- Query DTO: `QueryClassReviewPackDto` (`backend/src/modules/classrooms/classroom-tasks/dto/query-class-review-pack.dto.ts`)
+- Fields:
+  - `window?: '24h' | '7d' | '30d'`（`@IsIn(CLASS_REVIEW_PACK_WINDOWS)`）
+  - `topK?: number`（`@Type(() => Number) @IsInt() @Min(1) @Max(30)`）
+  - `examplesPerTag?: number`（`@Type(() => Number) @IsInt() @Min(1) @Max(5)`）
+  - `includeStudentTiers?: string`（`@IsBooleanString()`；支持 `0/1/true/false`）
+- Example Query:
+  - `/api/classrooms/{classroomId}/tasks/{classroomTaskId}/review-pack?window=7d&topK=10&examplesPerTag=2&includeStudentTiers=true`
+- Response口径（最小说明）:
+  - 核心域：`overview`、`commonIssues`、`examples`、`studentTiers`
+  - `examples` 仅返回反馈文本与元数据，不返回 `codeText/prompt/apiKey`
+  - 响应不再包含 `actionItems`、`teacherScript`

@@ -92,7 +92,6 @@ export class ClassReviewPackService {
   private static readonly DEFAULT_TOP_K = 10;
   private static readonly DEFAULT_EXAMPLES_PER_TAG = 2;
   private static readonly DEFAULT_INCLUDE_STUDENT_TIERS = true;
-  private static readonly DEFAULT_INCLUDE_TEACHER_SCRIPT = true;
   private static readonly GOOD_TIER_LIMIT = 20;
   private static readonly WATCH_TIER_LIMIT = 20;
   private static readonly NOT_SUBMITTED_TIER_LIMIT = 50;
@@ -139,10 +138,6 @@ export class ClassReviewPackService {
     const includeStudentTiers = this.parseBooleanQuery(
       query.includeStudentTiers,
       ClassReviewPackService.DEFAULT_INCLUDE_STUDENT_TIERS,
-    );
-    const includeTeacherScript = this.parseBooleanQuery(
-      query.includeTeacherScript,
-      ClassReviewPackService.DEFAULT_INCLUDE_TEACHER_SCRIPT,
     );
     const lowerBound = new Date(
       Date.now() - ClassReviewPackService.WINDOW_MS_MAP[window],
@@ -292,19 +287,6 @@ export class ClassReviewPackService {
         )
       : undefined;
 
-    const actionItems = this.buildActionItems(
-      attemptsDistribution,
-      feedbackFacet.topTags,
-      feedbackFacet.topSeverities,
-      submittedStudentsCount,
-      studentsCount,
-      lateSubmissionsCount,
-      lateStudentIdSet.size,
-    );
-    const teacherScript = includeTeacherScript
-      ? this.buildTeacherScript(feedbackFacet.topTags, examples, actionItems)
-      : [];
-
     return {
       classroomId,
       classroomTaskId,
@@ -334,8 +316,6 @@ export class ClassReviewPackService {
         watch: [],
         notSubmitted: [],
       },
-      actionItems,
-      teacherScript,
     };
   }
 
@@ -719,169 +699,6 @@ export class ClassReviewPackService {
         ClassReviewPackService.NOT_SUBMITTED_TIER_LIMIT,
       ),
     };
-  }
-
-  private buildActionItems(
-    attemptsDistribution: {
-      '0': number;
-      '1': number;
-      '2': number;
-      '3plus': number;
-    },
-    topTags: IssueTagAgg[],
-    topSeverities: IssueSeverityAgg[],
-    submittedStudentsCount: number,
-    studentsCount: number,
-    lateSubmissionsCount: number,
-    lateStudentsCount: number,
-  ) {
-    const actions: Array<{ title: string; why: string; how: string }> = [];
-    const topTagNames = topTags.map((item) => item.tag.toLowerCase());
-    const hasReadabilityOrNaming = topTagNames.some(
-      (tag) => tag.includes('readability') || tag.includes('naming'),
-    );
-    if (hasReadabilityOrNaming) {
-      actions.push({
-        title: '可读性与命名规范讲评',
-        why: '高频标签指向代码可读性与命名一致性问题，影响同伴协作和后续维护。',
-        how: '用 1 个正例和 1 个反例对比命名、函数职责与注释粒度，并给出统一命名清单。',
-      });
-    } else {
-      actions.push({
-        title: '代码规范复盘',
-        why: '共性问题集中在基础实现质量，统一规范可快速降低重复错误。',
-        how: '课堂上演示提交前 3 步检查：命名、边界、输出可读性，形成固定提交清单。',
-      });
-    }
-
-    const errorSeverityCount =
-      topSeverities.find((item) => item.severity === FeedbackSeverity.Error)
-        ?.count ?? 0;
-    const totalSeverityCount = topSeverities.reduce(
-      (sum, item) => sum + item.count,
-      0,
-    );
-    const errorRatio =
-      totalSeverityCount > 0 ? errorSeverityCount / totalSeverityCount : 0;
-    if (errorSeverityCount > 0 && errorRatio >= 0.25) {
-      actions.push({
-        title: '边界条件与异常处理强化',
-        why: 'ERROR 级问题占比较高，说明核心逻辑在边界输入下稳定性不足。',
-        how: '安排 10 分钟边界样例演练：空输入、极值、非法参数，各组补齐 guard 条件并复测。',
-      });
-    } else {
-      actions.push({
-        title: '从 WARN 到 ERROR 的预防演练',
-        why: '当前高严重级问题可控，但仍需前置预防避免后续升级。',
-        how: '选 2 条 WARN 反馈进行改写演示，强调如何在编码阶段提前规避风险。',
-      });
-    }
-
-    if (attemptsDistribution['0'] > 0) {
-      actions.push({
-        title: '未提交学生补交与辅导安排',
-        why: `当前未提交 ${attemptsDistribution['0']} 人，已影响整体任务覆盖率。`,
-        how: '课后安排补交流程：24 小时内补交 + 次日 15 分钟答疑；老师跟踪完成清单。',
-      });
-    } else {
-      const retryCount =
-        attemptsDistribution['2'] + attemptsDistribution['3plus'];
-      actions.push({
-        title: '二次提交优化策略',
-        why: `多次尝试学生 ${retryCount} 人，说明迭代意识存在但改进路径需要更明确。`,
-        how: '要求二次提交附 3 行改进说明：改了什么、为什么改、如何验证结果。',
-      });
-    }
-
-    actions.push({
-      title: 'Late submission management routine',
-      why:
-        lateSubmissionsCount > 0
-          ? `Detected ${lateSubmissionsCount} late submissions from ${lateStudentsCount} students in this window.`
-          : 'No late submissions were detected, but a fixed routine prevents deadline drift.',
-      how: 'Set reminders at T-24h and T-1h, then run a same-day catch-up slot for late learners and track closure in the next class.',
-    });
-
-    if (actions.length < 3) {
-      actions.push({
-        title: '课堂目标回收',
-        why: '确保本节复盘形成可落地改进闭环。',
-        how: `按提交覆盖率 ${submittedStudentsCount}/${studentsCount} 复核本次目标并布置下一次达成标准。`,
-      });
-    }
-    return actions.slice(0, 5);
-  }
-
-  private buildTeacherScript(
-    topTags: IssueTagAgg[],
-    examples: Array<{
-      tag: string;
-      count: number;
-      samples: Array<{
-        submissionId: string;
-        attemptNo: number;
-        severity: FeedbackSeverity;
-        type: FeedbackType;
-        message: string;
-        suggestion?: string;
-        source: FeedbackSource;
-      }>;
-    }>,
-    actionItems: Array<{ title: string; why: string; how: string }>,
-  ) {
-    const primaryTags = topTags.slice(0, 3).map((item) => item.tag);
-    const firstExampleMessage = this.truncateScriptMessage(
-      examples[0]?.samples[0]?.message ??
-        '暂无典型样例，先从提交覆盖率和共性问题入手。',
-    );
-    const secondExampleMessage = this.truncateScriptMessage(
-      examples[1]?.samples[0]?.message ?? firstExampleMessage,
-    );
-
-    return [
-      {
-        minute: '0-2',
-        topic: '任务概览与目标',
-        talkingPoints: [
-          '先说明本次任务的达成度：提交覆盖率、尝试次数分布、AI 成功率。',
-          `本节重点标签：${primaryTags.length > 0 ? primaryTags.join(' / ') : '待补充观察'}`,
-        ],
-      },
-      {
-        minute: '2-4',
-        topic: '共性问题讲评',
-        talkingPoints: [
-          `样例 1：${firstExampleMessage}`,
-          '强调如何从反馈的 severity/type 判断优先修复顺序。',
-        ],
-      },
-      {
-        minute: '4-6',
-        topic: '典型样例对照',
-        talkingPoints: [
-          `样例 2：${secondExampleMessage}`,
-          '对照高质量写法，给出可立即套用的修正模板。',
-        ],
-      },
-      {
-        minute: '6-8',
-        topic: '分层教学动作',
-        talkingPoints: actionItems.slice(0, 2).map((item) => item.title),
-      },
-      {
-        minute: '8-10',
-        topic: '课后执行与验收',
-        talkingPoints: actionItems.slice(0, 3).map((item) => item.how),
-      },
-    ];
-  }
-
-  private truncateScriptMessage(message: string) {
-    const trimmed = message.trim();
-    if (trimmed.length <= 120) {
-      return trimmed;
-    }
-    return `${trimmed.slice(0, 117)}...`;
   }
 
   private parseObjectId(value: string, fieldName: string) {

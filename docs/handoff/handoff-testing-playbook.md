@@ -132,7 +132,7 @@ npm run test:e2e -- backend/test/classroom-learning-loop.e2e-spec.ts
   - 重要性：锁定轨迹分页口径与迟交字段传播。
 - `backend/test/classroom-review-pack.e2e-spec.ts`
   - 覆盖：Z5 `GET /api/classrooms/:classroomId/tasks/:classroomTaskId/review-pack`。
-  - 关键断言：examples 不含 `codeText/prompt/apiKey`；`actionItems>=3`；`teacherScript` 可选返回；overview 含 late 维度。
+  - 关键断言：examples 不含 `codeText/prompt/apiKey`；overview 含 late 维度；响应不再包含 `actionItems/teacherScript`。
   - 重要性：保证复盘包可教学使用且无敏感字段泄漏。
 - `backend/test/classroom-process-assessment.e2e-spec.ts`
   - 覆盖：Z6 `GET /api/classrooms/:classroomId/process-assessment` 与 `GET /api/classrooms/:classroomId/process-assessment.csv`。

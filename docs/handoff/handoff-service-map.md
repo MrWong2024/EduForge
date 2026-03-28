@@ -334,16 +334,16 @@
 
 - Service: `backend/src/modules/classrooms/classroom-tasks/services/class-review-pack.service.ts`
 - Domain: `ClassroomTask review-pack aggregate (Z5)`
-- Actions: `aggregate-overview`, `aggregate-common-issues/examples`, `build-student-tiers`, `build-action-script`
+- Actions: `aggregate-overview`, `aggregate-common-issues/examples`, `build-student-tiers`
 - I/O Shape:
-  - In: `classroomId`, `classroomTaskId`, `teacherId`, `window/topK/examplesPerTag/includeStudentTiers/includeTeacherScript`
-  - Out: `{ overview, commonIssues, examples, studentTiers, actionItems, teacherScript }`
+  - In: `classroomId`, `classroomTaskId`, `teacherId`, `window/topK/examplesPerTag/includeStudentTiers`
+  - Out: `{ overview, commonIssues, examples, studentTiers }`
 - Key Methods:
   - `getReviewPack(...)`
   - `aggregateCommonIssuesBySubmissionIds(...)` / `aggregateCommonIssuesByClassroomTaskIds(...)`（供 snapshot 复用）
 - AuthZ Boundary: `teacher-only + owner-only`
 - Metrics/Isolation: 任务相关统计严格按 `classroomTaskId`；成员范围来自 Enrollment ACTIVE
-- Consistency/Constraints: `teacherScript` 为固定模板生成（不调用大模型）；examples 仅包含反馈文本与元数据，不返回 `codeText/prompt/apiKey`
+- Consistency/Constraints: examples 仅包含反馈文本与元数据，不返回 `codeText/prompt/apiKey`
 - Deps/Side Effects: `ClassroomModel`, `ClassroomTaskModel`, `SubmissionModel`, `FeedbackModel`, `EnrollmentService`, `AiFeedbackJobService`, `AiFeedbackMetricsAggregator`；只读
 - Performance Notes: examples 选样按 `severityRank DESC + createdAt DESC`，并按 `examplesPerTag` 截断
 - SoT: `backend/src/modules/classrooms/classroom-tasks/services/class-review-pack.service.ts`; `backend/src/modules/classrooms/classroom-tasks/dto/query-class-review-pack.dto.ts`; `backend/src/modules/classrooms/README.md`

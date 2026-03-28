@@ -107,7 +107,7 @@ Teacher 学习轨迹链路（可用）：
 5. attempts 扩展区“总反馈”已消费 `attempt.feedbackCount`（全来源总反馈数）；`feedbackSummary.totalItems` 仅作为 AI 摘要信息展示，不再充当总反馈数。
 
 Teacher 课堂复盘链路（可用）：
-1. `/teacher/classrooms/[classroomId]/tasks/[classroomTaskId]/review-pack` 保持真接口与原 query 协议（`window/topK/examplesPerTag/includeStudentTiers/includeTeacherScript`）不变。
+1. `/teacher/classrooms/[classroomId]/tasks/[classroomTaskId]/review-pack` 保持真接口与原 query 协议（`window/topK/examplesPerTag/includeStudentTiers`）不变。
 2. 页面主路径已收敛为“课堂结论摘要 -> 行动建议 -> 高频问题概览 -> 典型样例 -> 教学脚本 -> 原始数据（调试）”。
 3. `Top Tags/Top Types/Top Severities` 与筛选标签已中文化；原始 JSON 调试块保留但默认折叠。
 4. 教学脚本不再只显示首条 talking point，主视图展示前 3 条并支持展开更多。

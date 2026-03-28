@@ -45,7 +45,7 @@ type ProviderErrorCode = AiFeedbackProviderErrorCode;
 
 const PROVIDER_NAME = 'openrouter';
 const DEFAULT_BASE_URL = 'https://openrouter.ai/api/v1';
-const DEFAULT_MODEL = 'openai/gpt-4o-mini';
+const DEFAULT_MODEL = '';
 const DEFAULT_TIMEOUT_MS = 15000;
 const DEFAULT_MAX_RETRIES = 2;
 const DEFAULT_MAX_CODE_CHARS = 12000;
@@ -115,7 +115,10 @@ export class OpenRouterFeedbackProvider implements AiFeedbackProvider {
       try {
         const response = await this.callOpenRouter(request, config.timeoutMs);
         const parsedItems = this.parseResponse(response);
-        const protocolMaxItems = Math.min(config.maxItems, PROMPT_PROTOCOL_MAX_ITEMS);
+        const protocolMaxItems = Math.min(
+          config.maxItems,
+          PROMPT_PROTOCOL_MAX_ITEMS,
+        );
         const items = parsedItems.slice(0, protocolMaxItems);
         if (parsedItems.length > protocolMaxItems) {
           this.logger.warn(
