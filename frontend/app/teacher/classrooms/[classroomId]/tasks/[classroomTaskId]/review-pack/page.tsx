@@ -349,6 +349,8 @@ type StudentTierCardView = {
   students: Array<{
     key: string;
     studentId: string;
+    studentName: string;
+    studentNo?: string;
     attemptsCount?: number;
     latestErrorCount?: number;
     latestAiStatus?: string;
@@ -356,27 +358,33 @@ type StudentTierCardView = {
 };
 
 const toStudentTierCard = (
-  source: unknown,
+  source: ReturnType<typeof toReviewPackResponse>["studentTiers"],
   key: "good" | "watch" | "notSubmitted",
   title: string,
   description: string
 ): StudentTierCardView => {
-  const rows = safeGet<unknown[]>(source, key, []);
+  const rows = source[key] ?? [];
   const students = rows.map((item, index) => {
-    const studentId = pickText(item, ["studentId", "id", "userId"]) ?? `未标注学生 ${index + 1}`;
+    const studentId = toOptionalText(item.studentId) ?? `unknown-${key}-${index + 1}`;
+    const studentName = toOptionalText(item.studentName) ?? "未知学生";
+    const studentNo = toOptionalText(item.studentNo);
     return {
       key: `${key}-${studentId}-${index}`,
       studentId,
-      attemptsCount: pickNumber(item, ["attemptsCount", "attempts", "submissionsCount"]),
-      latestErrorCount: pickNumber(item, ["latestErrorCount", "errorCount", "errors"]),
-      latestAiStatus: pickText(item, ["latestAiFeedbackStatus", "aiStatus", "status"]),
+      studentName,
+      studentNo,
+      attemptsCount: typeof item.attemptsCount === "number" ? item.attemptsCount : undefined,
+      latestErrorCount: typeof item.latestErrorCount === "number" ? item.latestErrorCount : undefined,
+      latestAiStatus: toOptionalText(item.latestAiFeedbackStatus),
     };
   });
 
   return { key, title, description, students };
 };
 
-const buildStudentTierCards = (studentTiers: unknown): StudentTierCardView[] => [
+const buildStudentTierCards = (
+  studentTiers: ReturnType<typeof toReviewPackResponse>["studentTiers"]
+): StudentTierCardView[] => [
   toStudentTierCard(studentTiers, "good", "稳定完成", "完成情况较好，可作为正向参考。"),
   toStudentTierCard(studentTiers, "watch", "需要关注", "有提交但错误较多，建议课堂重点跟进。"),
   toStudentTierCard(studentTiers, "notSubmitted", "未提交", "当前窗口内未形成有效提交记录。"),
@@ -758,12 +766,17 @@ export default async function ReviewPackPage({ params, searchParams }: ReviewPac
                     <ul className="mt-2 space-y-1">
                       {tierCard.students.slice(0, 8).map((student) => (
                         <li key={student.key} className="rounded border border-zinc-200 bg-white px-2 py-1 text-xs">
-                          <p className="font-medium text-zinc-800">{student.studentId}</p>
-                          <p className="text-zinc-500">
-                            尝试：{typeof student.attemptsCount === "number" ? student.attemptsCount : "—"} · 最近错误：
-                            {typeof student.latestErrorCount === "number" ? student.latestErrorCount : "—"}
-                          </p>
-                          {student.latestAiStatus ? <p className="text-zinc-500">AI：{student.latestAiStatus}</p> : null}
+                          <p className="font-medium text-zinc-800">{student.studentName}</p>
+                          {student.studentNo ? <p className="text-zinc-500">学号：{student.studentNo}</p> : null}
+                          {tierCard.key !== "notSubmitted" ? (
+                            <p className="text-zinc-500">
+                              尝试：{typeof student.attemptsCount === "number" ? student.attemptsCount : "—"} · 最近错误：
+                              {typeof student.latestErrorCount === "number" ? student.latestErrorCount : "—"}
+                            </p>
+                          ) : null}
+                          {tierCard.key !== "notSubmitted" && student.latestAiStatus ? (
+                            <p className="text-zinc-500">AI：{student.latestAiStatus}</p>
+                          ) : null}
                         </li>
                       ))}
                     </ul>

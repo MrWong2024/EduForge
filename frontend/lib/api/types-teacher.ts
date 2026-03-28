@@ -323,7 +323,24 @@ export type ReviewPackResponse = {
   overview: UnknownRecord;
   commonIssues: UnknownRecord;
   examples: UnknownRecord[];
-  studentTiers: UnknownRecord;
+  studentTiers: ReviewPackStudentTiers;
+  raw: UnknownRecord;
+};
+
+export type ReviewPackTierStudentItem = {
+  studentId?: string;
+  studentName?: string;
+  studentNo?: string | null;
+  attemptsCount?: number;
+  latestErrorCount?: number;
+  latestAiFeedbackStatus?: string | null;
+  raw: UnknownRecord;
+};
+
+export type ReviewPackStudentTiers = {
+  good: ReviewPackTierStudentItem[];
+  watch: ReviewPackTierStudentItem[];
+  notSubmitted: ReviewPackTierStudentItem[];
   raw: UnknownRecord;
 };
 
@@ -724,6 +741,47 @@ export const toLearningTrajectoryResponse = (payload: unknown): LearningTrajecto
   };
 };
 
+const toReviewPackTierStudentItem = (value: unknown): ReviewPackTierStudentItem => {
+  const record = asRecord(value);
+  const studentNameCandidate =
+    asString(record.studentName) ??
+    asString(record.name) ??
+    asString(safeGet(record, "student.name", undefined));
+  const studentName =
+    studentNameCandidate && studentNameCandidate.trim()
+      ? studentNameCandidate.trim()
+      : "未知学生";
+
+  return {
+    studentId:
+      asString(record.studentId) ??
+      asString(record.id) ??
+      asString(record.userId),
+    studentName,
+    studentNo: asNullableString(record.studentNo),
+    attemptsCount: asNumber(record.attemptsCount),
+    latestErrorCount: asNumber(record.latestErrorCount),
+    latestAiFeedbackStatus: asNullableString(record.latestAiFeedbackStatus),
+    raw: record,
+  };
+};
+
+const toReviewPackStudentTiers = (value: unknown): ReviewPackStudentTiers => {
+  const record = asRecord(value);
+  return {
+    good: asRecordArray(safeGet(record, "good", undefined)).map((item) =>
+      toReviewPackTierStudentItem(item)
+    ),
+    watch: asRecordArray(safeGet(record, "watch", undefined)).map((item) =>
+      toReviewPackTierStudentItem(item)
+    ),
+    notSubmitted: asRecordArray(safeGet(record, "notSubmitted", undefined)).map((item) =>
+      toReviewPackTierStudentItem(item)
+    ),
+    raw: record,
+  };
+};
+
 export const toReviewPackResponse = (payload: unknown): ReviewPackResponse => {
   const record = asRecord(payload);
 
@@ -734,7 +792,7 @@ export const toReviewPackResponse = (payload: unknown): ReviewPackResponse => {
     overview: asRecord(safeGet(record, "overview", undefined)),
     commonIssues: asRecord(safeGet(record, "commonIssues", undefined)),
     examples: asRecordArray(safeGet(record, "examples", undefined)),
-    studentTiers: asRecord(safeGet(record, "studentTiers", undefined)),
+    studentTiers: toReviewPackStudentTiers(safeGet(record, "studentTiers", undefined)),
     raw: record,
   };
 };

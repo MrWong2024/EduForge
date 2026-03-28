@@ -176,6 +176,13 @@
 - 【不要回退】不要在前端继续拼接 `includeTeacherScript`，不要保留 `actionItems/teacherScript` 的伪兼容展示。
 - 【对新会话的意义】review-pack 页面叙事从“模板建议/讲稿”回到“证据型复盘”，与后端新契约一致。
 
+## UAT-FE-18
+
+- 【本步解决】review-pack 学生分层仍展示裸 `studentId`，教师阅读成本高的问题。
+- 【新增事实 / 已收口口径】`ReviewPackResponse.studentTiers` 前端适配已接入 `studentName/studentNo`；学生分层卡片主展示改为姓名，学号作为次级信息（存在时显示），`studentId` 仅保留内部标识用途不再对教师直出。
+- 【展示规则】`good/watch` 继续展示 `attemptsCount/latestErrorCount` 辅助判断；`notSubmitted` 只展示学生身份信息，不伪造尝试次数与错误数。
+- 【不要回退】不要恢复在 UI 直接渲染 Mongo ObjectId；姓名缺失时保持“未知学生”兜底。
+
 ## 当前阶段一句话结论
 
 前端已达到“Teacher/Student 主链路可用 + 任务模板层与班级实例层边界收口 + 教师模板主链路可维护”的工程验收阶段，但尚未进入最终交付定版阶段。
