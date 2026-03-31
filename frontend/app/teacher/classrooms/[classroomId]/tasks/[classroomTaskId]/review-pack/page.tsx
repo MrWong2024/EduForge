@@ -112,6 +112,18 @@ const buildHref = (
   return query ? `${basePath}?${query}` : basePath;
 };
 
+const buildSubmissionDetailHref = (
+  submissionId: string | undefined,
+  classroomId: string,
+  classroomTaskId: string
+): string | undefined => {
+  if (!submissionId) {
+    return undefined;
+  }
+  const query = buildQueryString({ classroomId, classroomTaskId });
+  return `${paths.teacher.submissionDetail(submissionId)}?${query}`;
+};
+
 const toOptionalText = (value: unknown): string | undefined => {
   const text = toDisplayText(value, "").trim();
   return text ? text : undefined;
@@ -631,32 +643,46 @@ export default async function ReviewPackPage({ params, searchParams }: ReviewPac
             <h2 className="text-sm font-semibold text-zinc-900">典型样例（已去重）</h2>
             {exampleCards.length > 0 ? (
               <div className="mt-2 space-y-3">
-                {exampleCards.slice(0, 10).map((item, index) => (
-                  <article key={item.key} className="rounded-md border border-zinc-200 p-3 text-sm text-zinc-700">
-                    <div className="flex flex-wrap items-center justify-between gap-2">
-                      <p className="font-medium text-zinc-900">样例 {index + 1}</p>
-                      <p className="text-xs text-zinc-500">{typeof item.attemptNo === "number" ? `尝试次数：${item.attemptNo}` : "尝试次数：—"}</p>
-                    </div>
-                    <p className="mt-1 text-xs text-zinc-500">主标签：{item.primaryTag}</p>
-                    {item.matchedTags.length > 0 ? (
-                      <p className="mt-1 text-xs text-zinc-500">其他命中标签：{item.matchedTags.join(" / ")}</p>
-                    ) : null}
-                    <p className="mt-1 text-xs text-zinc-500">
-                      严重程度：{item.severity ?? "—"} · 类型：{item.issueType ?? "—"}
-                      {item.source ? ` · 来源：${item.source}` : ""}
-                    </p>
-                    <p className="mt-2">
-                      <span className="font-medium text-zinc-900">反馈内容：</span>
-                      {item.message}
-                    </p>
-                    {item.suggestion ? (
-                      <p className="mt-1">
-                        <span className="font-medium text-zinc-900">修改建议：</span>
-                        {item.suggestion}
+                {exampleCards.slice(0, 10).map((item, index) => {
+                  const submissionHref = buildSubmissionDetailHref(
+                    item.submissionId,
+                    classroomId,
+                    classroomTaskId
+                  );
+                  return (
+                    <article key={item.key} className="rounded-md border border-zinc-200 p-3 text-sm text-zinc-700">
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <p className="font-medium text-zinc-900">样例 {index + 1}</p>
+                        <p className="text-xs text-zinc-500">
+                          {typeof item.attemptNo === "number" ? `尝试次数：${item.attemptNo}` : "尝试次数：—"}
+                        </p>
+                      </div>
+                      <p className="mt-1 text-xs text-zinc-500">主标签：{item.primaryTag}</p>
+                      {item.matchedTags.length > 0 ? (
+                        <p className="mt-1 text-xs text-zinc-500">其他命中标签：{item.matchedTags.join(" / ")}</p>
+                      ) : null}
+                      <p className="mt-1 text-xs text-zinc-500">
+                        严重程度：{item.severity ?? "—"} · 类型：{item.issueType ?? "—"}
+                        {item.source ? ` · 来源：${item.source}` : ""}
                       </p>
-                    ) : null}
-                  </article>
-                ))}
+                      <p className="mt-2">
+                        <span className="font-medium text-zinc-900">反馈内容：</span>
+                        {item.message}
+                      </p>
+                      {item.suggestion ? (
+                        <p className="mt-1">
+                          <span className="font-medium text-zinc-900">修改建议：</span>
+                          {item.suggestion}
+                        </p>
+                      ) : null}
+                      {submissionHref ? (
+                        <Link href={submissionHref} className="mt-2 inline-block text-xs text-blue-700 hover:underline">
+                          查看对应提交
+                        </Link>
+                      ) : null}
+                    </article>
+                  );
+                })}
                 {exampleCards.length > 10 ? (
                   <p className="text-xs text-zinc-500">已展示前 10 条样例，可通过筛选条件缩小范围。</p>
                 ) : null}

@@ -190,6 +190,13 @@
 - 【展示规则】每条样例展示 `primaryTag` 与“其他命中标签”，并保留 `severity/type/message/suggestion/attemptNo`；`feedbackId/submissionId` 仅做内部标识，不作为教师主可见文本。
 - 【不要回退】不要恢复 `examples(tag + samples)` 的旧派生逻辑，不要按 `matchedTags` 再展开成重复卡片。
 
+## UAT-FE-20
+
+- 【本步解决】review-pack 典型样例无法快速进入原始提交核查的问题。
+- 【新增事实 / 已收口口径】典型样例卡片新增“查看对应提交”入口，复用现有 `teacher/submissions/[submissionId]` 页面；链接附带 `classroomId/classroomTaskId` 查询参数，保持提交详情页“返回任务提交列表/任务详情”的回跳语义。
+- 【展示规则】入口为样例卡片内次级文本链接，不改变样例主体信息层级，不直出 `submissionId/feedbackId` 作为教师主文本。
+- 【不要回退】不要新增独立样例详情页，不要改后端契约。
+
 ## 当前阶段一句话结论
 
 前端已达到“Teacher/Student 主链路可用 + 任务模板层与班级实例层边界收口 + 教师模板主链路可维护”的工程验收阶段，但尚未进入最终交付定版阶段。
