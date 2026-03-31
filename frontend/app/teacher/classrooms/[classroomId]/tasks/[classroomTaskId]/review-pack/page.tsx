@@ -67,6 +67,8 @@ type ExampleCardView = {
   attemptNo?: number;
 };
 
+const STUDENT_TIER_PREVIEW_COUNT = 6;
+
 const getRequestOrigin = async (): Promise<string> => {
   const headerMap = await headers();
   const host = headerMap.get("x-forwarded-host") ?? headerMap.get("host") ?? "";
@@ -265,6 +267,8 @@ type StudentTierCardView = {
   }>;
 };
 
+type StudentTierStudentView = StudentTierCardView["students"][number];
+
 const toStudentTierCard = (
   source: ReturnType<typeof toReviewPackResponse>["studentTiers"],
   key: "good" | "watch" | "notSubmitted",
@@ -297,6 +301,25 @@ const buildStudentTierCards = (
   toStudentTierCard(studentTiers, "watch", "需要关注", "有提交但错误较多，建议课堂重点跟进。"),
   toStudentTierCard(studentTiers, "notSubmitted", "未提交", "当前窗口内未形成有效提交记录。"),
 ];
+
+const renderStudentTierRow = (
+  student: StudentTierStudentView,
+  tierKey: StudentTierCardView["key"]
+): React.ReactElement => (
+  <li key={student.key} className="rounded border border-zinc-200 bg-white px-2 py-1 text-xs">
+    <p className="font-medium text-zinc-800">{student.studentName}</p>
+    {student.studentNo ? <p className="text-zinc-500">学号：{student.studentNo}</p> : null}
+    {tierKey !== "notSubmitted" ? (
+      <p className="text-zinc-500">
+        尝试：{typeof student.attemptsCount === "number" ? student.attemptsCount : "—"} · 最近错误：
+        {typeof student.latestErrorCount === "number" ? student.latestErrorCount : "—"}
+      </p>
+    ) : null}
+    {tierKey !== "notSubmitted" && student.latestAiStatus ? (
+      <p className="text-zinc-500">AI：{student.latestAiStatus}</p>
+    ) : null}
+  </li>
+);
 
 const buildOverviewMetricCards = (
   overview: unknown,
@@ -371,10 +394,10 @@ const buildOverviewMetricCards = (
       key: "attempts",
       title: "尝试分布",
       value: hasAttemptDistribution
-        ? `0次：${typeof attemptZero === "number" ? attemptZero : "—"} 人`
+        ? "0次 / 1次 / 2次 / 3+次"
         : "—",
       detail: hasAttemptDistribution
-        ? `1次：${typeof attemptOne === "number" ? attemptOne : "—"}｜2次：${typeof attemptTwo === "number" ? attemptTwo : "—"}｜3+次：${typeof attemptThreePlus === "number" ? attemptThreePlus : "—"}`
+        ? `0次：${typeof attemptZero === "number" ? attemptZero : "—"}｜1次：${typeof attemptOne === "number" ? attemptOne : "—"}｜2次：${typeof attemptTwo === "number" ? attemptTwo : "—"}｜3+次：${typeof attemptThreePlus === "number" ? attemptThreePlus : "—"}`
         : "暂无尝试分布数据",
     },
   ];
@@ -561,7 +584,7 @@ export default async function ReviewPackPage({ params, searchParams }: ReviewPac
           </div>
 
           <div className="flex items-center gap-2">
-            <span>展示条数:</span>
+            <span>问题榜单条数:</span>
             {[5, 10, 20, 30].map((value) => {
               const active = value === viewModel.query.topK;
               return (
@@ -577,7 +600,7 @@ export default async function ReviewPackPage({ params, searchParams }: ReviewPac
           </div>
 
           <div className="flex items-center gap-2">
-            <span>每类样例数:</span>
+            <span>每标签候选样例数:</span>
             {[1, 2, 3, 5].map((value) => {
               const active = value === viewModel.query.examplesPerTag;
               return (
@@ -736,26 +759,31 @@ export default async function ReviewPackPage({ params, searchParams }: ReviewPac
             <div className="mt-3 grid gap-3 md:grid-cols-3">
               {studentTierCards.map((tierCard) => (
                 <article key={tierCard.key} className="rounded-md border border-zinc-200 bg-zinc-50 p-3 text-sm text-zinc-700">
-                  <p className="font-medium text-zinc-900">{tierCard.title}</p>
+                  <p className="font-medium text-zinc-900">
+                    {tierCard.title}（{tierCard.students.length}）
+                  </p>
                   <p className="mt-1 text-xs text-zinc-500">{tierCard.description}</p>
                   {tierCard.students.length > 0 ? (
-                    <ul className="mt-2 space-y-1">
-                      {tierCard.students.slice(0, 8).map((student) => (
-                        <li key={student.key} className="rounded border border-zinc-200 bg-white px-2 py-1 text-xs">
-                          <p className="font-medium text-zinc-800">{student.studentName}</p>
-                          {student.studentNo ? <p className="text-zinc-500">学号：{student.studentNo}</p> : null}
-                          {tierCard.key !== "notSubmitted" ? (
-                            <p className="text-zinc-500">
-                              尝试：{typeof student.attemptsCount === "number" ? student.attemptsCount : "—"} · 最近错误：
-                              {typeof student.latestErrorCount === "number" ? student.latestErrorCount : "—"}
-                            </p>
-                          ) : null}
-                          {tierCard.key !== "notSubmitted" && student.latestAiStatus ? (
-                            <p className="text-zinc-500">AI：{student.latestAiStatus}</p>
-                          ) : null}
-                        </li>
-                      ))}
-                    </ul>
+                    <>
+                      <ul className="mt-2 space-y-1">
+                        {tierCard.students
+                          .slice(0, STUDENT_TIER_PREVIEW_COUNT)
+                          .map((student) => renderStudentTierRow(student, tierCard.key))}
+                      </ul>
+                      {tierCard.students.length > STUDENT_TIER_PREVIEW_COUNT ? (
+                        <details className="group mt-2">
+                          <summary className="cursor-pointer text-xs text-blue-700 hover:underline">
+                            <span className="group-open:hidden">展开全部</span>
+                            <span className="hidden group-open:inline">收起</span>
+                          </summary>
+                          <ul className="mt-2 space-y-1">
+                            {tierCard.students
+                              .slice(STUDENT_TIER_PREVIEW_COUNT)
+                              .map((student) => renderStudentTierRow(student, tierCard.key))}
+                          </ul>
+                        </details>
+                      ) : null}
+                    </>
                   ) : (
                     <p className="mt-2 text-xs text-zinc-600">当前分组暂无学生。</p>
                   )}
