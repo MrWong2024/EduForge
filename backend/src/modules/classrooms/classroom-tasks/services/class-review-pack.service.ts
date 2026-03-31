@@ -38,12 +38,15 @@ type IssueTagAgg = { tag: string; count: number };
 type IssueTypeAgg = { type: FeedbackType; count: number };
 type IssueSeverityAgg = { severity: FeedbackSeverity; count: number };
 type ExampleSampleAgg = {
+  feedbackId: Types.ObjectId;
   submissionId: Types.ObjectId;
   severity: FeedbackSeverity;
   type: FeedbackType;
   message: string;
   suggestion?: string;
   source: FeedbackSource;
+  tags: string[];
+  matchedTag: string;
   createdAt?: Date;
 };
 type ExamplesByTagAgg = {
@@ -61,6 +64,19 @@ type ReviewFeedbackFacetResult = {
   topSeverities: IssueSeverityAgg[];
   examplesByTag: ExamplesByTagAgg[];
   latestErrorCountsBySubmission: SubmissionErrorCountAgg[];
+};
+type ReviewPackExampleItem = {
+  feedbackId: string;
+  submissionId: string;
+  attemptNo: number;
+  severity: FeedbackSeverity;
+  type: FeedbackType;
+  message: string;
+  suggestion?: string;
+  source: FeedbackSource;
+  primaryTag: string;
+  matchedTags: string[];
+  tags: string[];
 };
 type TierStudentItem = {
   studentId: string;
@@ -277,20 +293,10 @@ export class ClassReviewPackService {
       latestErrorCountBySubmissionId.set(item._id.toString(), item.count);
     }
 
-    const examples = feedbackFacet.examplesByTag.map((item) => ({
-      tag: item.tag,
-      count: item.count,
-      samples: item.samples.map((sample) => ({
-        submissionId: sample.submissionId.toString(),
-        attemptNo:
-          submissionAttemptMap.get(sample.submissionId.toString()) ?? 0,
-        severity: sample.severity,
-        type: sample.type,
-        message: sample.message,
-        suggestion: sample.suggestion,
-        source: sample.source,
-      })),
-    }));
+    const examples = this.buildReviewPackExamples(
+      feedbackFacet.examplesByTag,
+      submissionAttemptMap,
+    );
 
     const latestSubmissionIds = Array.from(
       latestSubmissionByStudentId.values(),
@@ -572,9 +578,9 @@ export class ClassReviewPackService {
           ],
           examplesByTag: [
             { $match: { tags: { $exists: true, $ne: [] } } },
-            { $unwind: '$tags' },
             {
               $addFields: {
+                allTags: '$tags',
                 severityRank: {
                   $switch: {
                     branches: [
@@ -596,6 +602,7 @@ export class ClassReviewPackService {
                 },
               },
             },
+            { $unwind: '$tags' },
             { $sort: { tags: 1, severityRank: -1, createdAt: -1, _id: 1 } },
             {
               $group: {
@@ -603,12 +610,15 @@ export class ClassReviewPackService {
                 count: { $sum: 1 },
                 samples: {
                   $push: {
+                    feedbackId: '$_id',
                     submissionId: '$submissionId',
                     severity: '$severity',
                     type: '$type',
                     message: '$message',
                     suggestion: '$suggestion',
                     source: '$source',
+                    tags: '$allTags',
+                    matchedTag: '$tags',
                     createdAt: '$createdAt',
                   },
                 },
@@ -641,6 +651,111 @@ export class ClassReviewPackService {
     return this.feedbackModel
       .aggregate<ReviewFeedbackFacetResult>(pipeline)
       .exec();
+  }
+
+  private buildReviewPackExamples(
+    examplesByTag: ExamplesByTagAgg[],
+    submissionAttemptMap: Map<string, number>,
+  ): ReviewPackExampleItem[] {
+    const dedupedByFeedbackId = new Map<
+      string,
+      ReviewPackExampleItem & { matchedTagSet: Set<string> }
+    >();
+
+    for (const group of examplesByTag) {
+      for (const sample of group.samples) {
+        const feedbackId = sample.feedbackId.toString();
+        const submissionId = sample.submissionId.toString();
+        const matchedTag =
+          this.normalizeTagText(sample.matchedTag) ??
+          this.normalizeTagText(group.tag) ??
+          '未分类';
+        const normalizedTags = this.normalizeExampleTags(sample.tags);
+        const tags = normalizedTags.length > 0 ? normalizedTags : [matchedTag];
+        const existing = dedupedByFeedbackId.get(feedbackId);
+
+        if (!existing) {
+          const matchedTagSet = new Set<string>();
+          matchedTagSet.add(matchedTag);
+          dedupedByFeedbackId.set(feedbackId, {
+            feedbackId,
+            submissionId,
+            attemptNo: submissionAttemptMap.get(submissionId) ?? 0,
+            severity: sample.severity,
+            type: sample.type,
+            message: sample.message,
+            suggestion: sample.suggestion,
+            source: sample.source,
+            primaryTag: matchedTag,
+            matchedTags: [],
+            tags,
+            matchedTagSet,
+          });
+          continue;
+        }
+
+        existing.matchedTagSet.add(matchedTag);
+        if (existing.tags.length === 0 && tags.length > 0) {
+          existing.tags = tags;
+        }
+      }
+    }
+
+    return Array.from(dedupedByFeedbackId.values())
+      .sort((left, right) => {
+        const severityDiff =
+          this.getFeedbackSeverityRank(right.severity) -
+          this.getFeedbackSeverityRank(left.severity);
+        if (severityDiff !== 0) {
+          return severityDiff;
+        }
+        return left.feedbackId.localeCompare(right.feedbackId);
+      })
+      .map(({ matchedTagSet, ...item }) => ({
+        ...item,
+        matchedTags: Array.from(matchedTagSet).sort((left, right) =>
+          left.localeCompare(right),
+        ),
+      }));
+  }
+
+  private getFeedbackSeverityRank(severity: FeedbackSeverity) {
+    if (severity === FeedbackSeverity.Error) {
+      return 3;
+    }
+    if (severity === FeedbackSeverity.Warn) {
+      return 2;
+    }
+    if (severity === FeedbackSeverity.Info) {
+      return 1;
+    }
+    return 0;
+  }
+
+  private normalizeExampleTags(tags: string[]) {
+    const result: string[] = [];
+    const seen = new Set<string>();
+    for (const tag of tags) {
+      const normalized = this.normalizeTagText(tag);
+      if (!normalized) {
+        continue;
+      }
+      const normalizedKey = normalized.toLowerCase();
+      if (seen.has(normalizedKey)) {
+        continue;
+      }
+      seen.add(normalizedKey);
+      result.push(normalized);
+    }
+    return result;
+  }
+
+  private normalizeTagText(value: string | null | undefined) {
+    if (typeof value !== 'string') {
+      return undefined;
+    }
+    const normalized = value.trim();
+    return normalized ? normalized : undefined;
   }
 
   private buildAttemptsDistribution(

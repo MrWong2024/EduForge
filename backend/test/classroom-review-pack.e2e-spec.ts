@@ -53,16 +53,17 @@ type ReviewPackResponse = {
     topTags: Array<{ tag: string; count: number }>;
   };
   examples: Array<{
-    tag: string;
-    samples: Array<{
-      submissionId: string;
-      attemptNo: number;
-      severity: string;
-      type: string;
-      message: string;
-      suggestion?: string;
-      source: string;
-    }>;
+    feedbackId: string;
+    submissionId: string;
+    attemptNo: number;
+    severity: string;
+    type: string;
+    message: string;
+    suggestion?: string;
+    source: string;
+    primaryTag: string;
+    matchedTags: string[];
+    tags: string[];
   }>;
   studentTiers: {
     good: Array<{
@@ -526,8 +527,8 @@ describe('Classroom Review Pack (e2e)', () => {
         source: FeedbackSource.AI,
         type: FeedbackType.Bug,
         severity: FeedbackSeverity.Error,
-        message: 'D latest attempt has an AI error',
-        tags: ['logic'],
+        message: 'D latest attempt has a multi-tag AI error',
+        tags: ['correctness', 'bug-risk'],
       },
       {
         submissionId: studentCLatest._id,
@@ -557,11 +558,27 @@ describe('Classroom Review Pack (e2e)', () => {
     expect(body.overview.submissionRate).toBeLessThanOrEqual(1);
     expect(Array.isArray(body.commonIssues.topTags)).toBe(true);
     expect(Array.isArray(body.examples)).toBe(true);
-    for (const group of body.examples) {
-      for (const sample of group.samples) {
-        expect((sample as Record<string, unknown>).codeText).toBeUndefined();
-      }
+    for (const sample of body.examples) {
+      expect((sample as Record<string, unknown>).codeText).toBeUndefined();
     }
+    const topTagsCountByTag = new Map(
+      body.commonIssues.topTags.map((item) => [item.tag, item.count]),
+    );
+    expect(topTagsCountByTag.get('correctness')).toBe(1);
+    expect(topTagsCountByTag.get('bug-risk')).toBe(1);
+    const duplicatedMultiTagExample = body.examples.filter(
+      (example) =>
+        example.message === 'D latest attempt has a multi-tag AI error',
+    );
+    expect(duplicatedMultiTagExample).toHaveLength(1);
+    expect(duplicatedMultiTagExample[0]?.matchedTags.sort()).toEqual([
+      'bug-risk',
+      'correctness',
+    ]);
+    expect(duplicatedMultiTagExample[0]?.tags).toEqual([
+      'correctness',
+      'bug-risk',
+    ]);
     for (const item of body.studentTiers.good) {
       expect(typeof item.studentName).toBe('string');
       expect(item.studentName.length).toBeGreaterThan(0);

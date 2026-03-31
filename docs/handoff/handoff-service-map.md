@@ -337,15 +337,15 @@
 - Actions: `aggregate-overview`, `aggregate-common-issues/examples`, `build-student-tiers`
 - I/O Shape:
   - In: `classroomId`, `classroomTaskId`, `teacherId`, `window/topK/examplesPerTag`
-  - Out: `{ overview, commonIssues, examples, studentTiers }`（`studentTiers.*[*]` 含 `studentId/studentName/studentNo`，`good/watch` 另含 `attemptsCount/latestErrorCount`）
+  - Out: `{ overview, commonIssues, examples, studentTiers }`（`examples[*]` 为去重样例项，含 `feedbackId/submissionId/attemptNo/severity/type/message/suggestion/source/primaryTag/matchedTags/tags`；`studentTiers.*[*]` 含 `studentId/studentName/studentNo`，`good/watch` 另含 `attemptsCount/latestErrorCount`）
 - Key Methods:
   - `getReviewPack(...)`
   - `aggregateCommonIssuesBySubmissionIds(...)` / `aggregateCommonIssuesByClassroomTaskIds(...)`（供 snapshot 复用）
 - AuthZ Boundary: `teacher-only + owner-only`
 - Metrics/Isolation: 任务相关统计严格按 `classroomTaskId`；成员范围来自 Enrollment ACTIVE
-- Consistency/Constraints: examples 仅包含反馈文本与元数据，不返回 `codeText/prompt/apiKey`
+- Consistency/Constraints: `topTags` 维持标签展开计数；`examples` 按 `feedbackId` 去重并保留标签归属信息（`primaryTag/matchedTags/tags`）；不返回 `codeText/prompt/apiKey`
 - Deps/Side Effects: `ClassroomModel`, `ClassroomTaskModel`, `SubmissionModel`, `FeedbackModel`, `UserModel`, `EnrollmentService`, `AiFeedbackJobService`, `AiFeedbackMetricsAggregator`；只读
-- Performance Notes: examples 选样按 `severityRank DESC + createdAt DESC`，并按 `examplesPerTag` 截断
+- Performance Notes: examples 候选集仍按 `severityRank DESC + createdAt DESC` 且按 `examplesPerTag` 截断，再做 `feedbackId` 去重输出样例池
 - SoT: `backend/src/modules/classrooms/classroom-tasks/services/class-review-pack.service.ts`; `backend/src/modules/classrooms/classroom-tasks/dto/query-class-review-pack.dto.ts`; `backend/src/modules/classrooms/README.md`
 - Failure Modes:
   - 班级或课堂任务不存在 -> `404`
