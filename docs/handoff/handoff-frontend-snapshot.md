@@ -106,6 +106,12 @@ Teacher 学习轨迹链路（可用）：
 4. `includeAttempts/includeTagDetails` 已在主视图提供可见扩展区（尝试详情、首次标签/最近标签），不再仅体现在请求参数与 raw JSON。
 5. attempts 扩展区“总反馈”已消费 `attempt.feedbackCount`（全来源总反馈数）；`feedbackSummary.totalItems` 仅作为 AI 摘要信息展示，不再充当总反馈数。
 
+Teacher AI 指标链路（可用）：
+1. `/teacher/classrooms/[classroomId]/tasks/[classroomTaskId]/ai-metrics` 保持真接口与 query 协议（`window/includeTags`）不变。
+2. 筛选区窗口文案已统一为“统计窗口：1h（近1小时）/24h（近24小时）/7d（近7天）”风格，减少工程化简写歧义。
+3. `summary.avgAttempts` 前端文案已收口为“AI 平均重试次数”，避免被误读为学生提交尝试次数。
+4. `summary.avgLatencyMs` 在当前为 `null` 时不再作为主 KPI 卡片展示，改为“平均耗时指标当前暂未采集”说明文案。
+
 Teacher 课堂复盘链路（可用）：
 1. `/teacher/classrooms/[classroomId]/tasks/[classroomTaskId]/review-pack` 保持真接口与 query 协议（`window/topK/examplesPerTag`）不变，`studentTiers` 为固定返回域。
 2. 页面主路径已收敛为“课堂总览 -> 课堂结论摘要 -> 高频问题概览 -> 典型样例 -> 学生分层 -> 原始数据（调试）”。
