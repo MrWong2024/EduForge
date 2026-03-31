@@ -114,6 +114,7 @@ Teacher 课堂复盘链路（可用）：
 5. 页面顶部保留“课堂总览”指标卡（提交覆盖、AI 成功率、逾期情况、样例数量、尝试分布）；典型样例已切换为消费后端去重样例池（`examples[*]`），并展示主标签/命中标签/严重程度/类型/反馈内容/修改建议。
 6. 学生分层项主文案已改为 `studentName`（可附 `studentNo`），不再把 `studentId` 作为教师可见文本；`good/watch` 继续展示 `attemptsCount/latestErrorCount`，`notSubmitted` 仅展示学生身份信息。
 7. 典型样例卡片已新增“查看对应提交”入口，复用现有 `teacher/submissions/[submissionId]` 路由，并附带 `classroomId/classroomTaskId` 回跳上下文参数。
+8. “课堂结论摘要”已收紧为教师决策向的综合结论（覆盖与尝试态势 / 主问题方向 / 学生分层关注点），不再逐项复述“高频问题概览”的标签、类型、严重度榜单。
 
 ## 5) P0 真接口前端收口情况（现状）
 

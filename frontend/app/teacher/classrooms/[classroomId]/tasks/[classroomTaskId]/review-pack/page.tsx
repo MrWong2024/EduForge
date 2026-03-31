@@ -222,23 +222,6 @@ const toIssueDistributionItems = (
     })
     .filter((item) => item.label);
 
-const toIssueDigest = (
-  title: string,
-  items: IssueDistributionItem[],
-  emptyText: string
-): string => {
-  if (items.length === 0) {
-    return `${title}：${emptyText}`;
-  }
-
-  const topText = items
-    .slice(0, 3)
-    .map((item) => `${item.label}${typeof item.count === "number" ? `（${item.count}）` : ""}`)
-    .join("、");
-
-  return `${title}：${topText}`;
-};
-
 const toExampleCards = (
   source: ReturnType<typeof toReviewPackResponse>["examples"]
 ): ExampleCardView[] =>
@@ -397,6 +380,62 @@ const buildOverviewMetricCards = (
   ];
 };
 
+const buildSummaryHighlights = (
+  overview: unknown,
+  window: ReviewWindow,
+  topTagItems: IssueDistributionItem[],
+  examplesCount: number,
+  studentTierCards: StudentTierCardView[]
+): string[] => {
+  const studentsCount = pickNumber(overview, ["studentsCount", "studentCount", "totalStudents"]);
+  const submittedStudentsCount = pickNumber(overview, [
+    "submittedStudentsCount",
+    "submittedCount",
+    "submissionsCount",
+  ]);
+  const submissionRateRaw = pickNumber(overview, ["submissionRate", "submitRate"]);
+  const submissionRateComputed =
+    submissionRateRaw ??
+    (typeof studentsCount === "number" && studentsCount > 0 && typeof submittedStudentsCount === "number"
+      ? submittedStudentsCount / studentsCount
+      : undefined);
+  const attemptThreePlus = pickNumber(overview, ["attemptsDistribution.3plus", "attemptsDistribution.3+"]);
+  const attemptTwo = pickNumber(overview, ["attemptsDistribution.2"]);
+
+  const coverageBase =
+    typeof studentsCount === "number" && typeof submittedStudentsCount === "number"
+      ? `当前窗口（${WINDOW_LABELS[window]}）提交覆盖 ${submittedStudentsCount}/${studentsCount}（提交率 ${toPercentText(submissionRateComputed)}）。`
+      : `当前窗口（${WINDOW_LABELS[window]}）提交覆盖数据暂不完整。`;
+
+  const coverageIteration =
+    typeof attemptThreePlus === "number" && attemptThreePlus > 0
+      ? `有 ${attemptThreePlus} 名学生达到 3 次及以上尝试，建议优先核查反复修改但仍未稳定通过的问题。`
+      : typeof attemptTwo === "number" && attemptTwo > 0
+        ? `有 ${attemptTwo} 名学生进行了 2 次尝试，课堂讲评可重点说明常见返工原因。`
+        : "多数学生尝试次数处于稳定区间，可结合典型样例做集中讲评。";
+
+  const topTag = topTagItems[0];
+  const issueFocus = topTag
+    ? `当前最值得优先讲评的方向是「${topTag.label}」${typeof topTag.count === "number" ? `（${topTag.count} 次）` : ""}，可直接结合 ${examplesCount} 条去重样例展开。`
+    : examplesCount > 0
+      ? `当前未形成明显的单一高频标签，可从 ${examplesCount} 条去重样例中挑选共性问题组织讲评。`
+      : "当前未返回高频标签与典型样例，建议先结合提交管理页核查主要问题。";
+
+  const goodCount = studentTierCards.find((card) => card.key === "good")?.students.length ?? 0;
+  const watchCount = studentTierCards.find((card) => card.key === "watch")?.students.length ?? 0;
+  const notSubmittedCount = studentTierCards.find((card) => card.key === "notSubmitted")?.students.length ?? 0;
+  const tierTotal = goodCount + watchCount + notSubmittedCount;
+
+  const tierFocus =
+    tierTotal === 0
+      ? "当前未返回有效学生分层数据。"
+      : watchCount > 0 || notSubmittedCount > 0
+        ? `学生分层显示：稳定完成 ${goodCount} 人、需要关注 ${watchCount} 人、未提交 ${notSubmittedCount} 人。`
+        : `学生分层显示：当前窗口内学生整体处于稳定完成态（${goodCount} 人）。`;
+
+  return [`${coverageBase}${coverageIteration}`, issueFocus, tierFocus];
+};
+
 type ReviewPackViewModel =
   | {
       mode: "ready";
@@ -468,13 +507,13 @@ export default async function ReviewPackPage({ params, searchParams }: ReviewPac
     viewModel.query.window,
     exampleCards.length
   );
-  const summaryHighlights = [
-    toIssueDigest("高频问题标签", topTagItems, "暂无明显集中标签"),
-    toIssueDigest("高频问题类型", topTypeItems, "暂无明显集中类型"),
-    toIssueDigest("严重程度分布", topSeverityItems, "暂无严重程度分布数据"),
-    hasStudentTierData ? "学生分层已生成，可结合“需要关注/未提交”名单安排后续跟进。" : "当前未返回有效学生分层数据。",
-    exampleCards.length > 0 ? `可直接引用 ${exampleCards.length} 条典型样例进行课堂讲评。` : "当前未返回典型样例。",
-  ];
+  const summaryHighlights = buildSummaryHighlights(
+    viewModel.data.overview,
+    viewModel.query.window,
+    topTagItems,
+    exampleCards.length,
+    studentTierCards
+  );
   const allSectionsEmpty =
     topTagItems.length === 0 &&
     topTypeItems.length === 0 &&
