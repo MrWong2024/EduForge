@@ -40,11 +40,18 @@ type ReviewQueryState = {
   examplesPerTag: number;
 };
 
+type AttemptDistributionItem = {
+  key: string;
+  label: string;
+  count?: number;
+};
+
 type OverviewMetricCard = {
   key: string;
   title: string;
-  value: string;
-  detail: string;
+  value?: string;
+  detail?: string;
+  distributionItems?: AttemptDistributionItem[];
 };
 
 type IssueDistributionItem = {
@@ -355,9 +362,13 @@ const buildOverviewMetricCards = (
   const attemptOne = pickNumber(overview, ["attemptsDistribution.1"]);
   const attemptTwo = pickNumber(overview, ["attemptsDistribution.2"]);
   const attemptThreePlus = pickNumber(overview, ["attemptsDistribution.3plus", "attemptsDistribution.3+"]);
-  const hasAttemptDistribution = [attemptZero, attemptOne, attemptTwo, attemptThreePlus].some(
-    (value) => typeof value === "number"
-  );
+  const attemptDistributionItems: AttemptDistributionItem[] = [
+    { key: "0", label: "0次", count: attemptZero },
+    { key: "1", label: "1次", count: attemptOne },
+    { key: "2", label: "2次", count: attemptTwo },
+    { key: "3plus", label: "3+次", count: attemptThreePlus },
+  ];
+  const hasAttemptDistribution = attemptDistributionItems.some((item) => typeof item.count === "number");
 
   return [
     {
@@ -393,12 +404,8 @@ const buildOverviewMetricCards = (
     {
       key: "attempts",
       title: "尝试分布",
-      value: hasAttemptDistribution
-        ? "0次 / 1次 / 2次 / 3+次"
-        : "—",
-      detail: hasAttemptDistribution
-        ? `0次：${typeof attemptZero === "number" ? attemptZero : "—"}｜1次：${typeof attemptOne === "number" ? attemptOne : "—"}｜2次：${typeof attemptTwo === "number" ? attemptTwo : "—"}｜3+次：${typeof attemptThreePlus === "number" ? attemptThreePlus : "—"}`
-        : "暂无尝试分布数据",
+      distributionItems: attemptDistributionItems,
+      detail: hasAttemptDistribution ? undefined : "暂无尝试分布数据",
     },
   ];
 };
@@ -624,8 +631,29 @@ export default async function ReviewPackPage({ params, searchParams }: ReviewPac
           {overviewMetricCards.map((card) => (
             <article key={card.key} className="rounded-md border border-zinc-200 bg-zinc-50 p-3">
               <p className="text-xs font-medium text-zinc-600">{card.title}</p>
-              <p className="mt-1 text-lg font-semibold text-zinc-900">{card.value}</p>
-              <p className="mt-1 text-xs text-zinc-500">{card.detail}</p>
+              {card.distributionItems ? (
+                <>
+                  <div className="mt-2 flex flex-wrap gap-2">
+                    {card.distributionItems.map((item) => (
+                      <span
+                        key={item.key}
+                        className="inline-flex items-center gap-1 rounded-full border border-zinc-200 bg-white px-2 py-0.5 text-xs text-zinc-700"
+                      >
+                        <span className="font-medium text-zinc-600">{item.label}</span>
+                        <span className="font-semibold text-zinc-900">
+                          {typeof item.count === "number" ? item.count : "—"}
+                        </span>
+                      </span>
+                    ))}
+                  </div>
+                  {card.detail ? <p className="mt-1 text-xs text-zinc-500">{card.detail}</p> : null}
+                </>
+              ) : (
+                <>
+                  <p className="mt-1 text-lg font-semibold text-zinc-900">{card.value ?? "—"}</p>
+                  <p className="mt-1 text-xs text-zinc-500">{card.detail ?? "—"}</p>
+                </>
+              )}
             </article>
           ))}
         </div>
