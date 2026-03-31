@@ -633,18 +633,34 @@ export default async function ReviewPackPage({ params, searchParams }: ReviewPac
               <p className="text-xs font-medium text-zinc-600">{card.title}</p>
               {card.distributionItems ? (
                 <>
-                  <div className="mt-2 flex flex-wrap gap-2">
-                    {card.distributionItems.map((item) => (
-                      <span
-                        key={item.key}
-                        className="inline-flex items-center gap-1 rounded-full border border-zinc-200 bg-white px-2 py-0.5 text-xs text-zinc-700"
-                      >
-                        <span className="font-medium text-zinc-600">{item.label}</span>
-                        <span className="font-semibold text-zinc-900">
-                          {typeof item.count === "number" ? item.count : "—"}
-                        </span>
-                      </span>
-                    ))}
+                  <div className="mt-2 space-y-1.5">
+                    {(() => {
+                      const maxCount = card.distributionItems.reduce((max, item) => {
+                        const count = typeof item.count === "number" && Number.isFinite(item.count) ? item.count : 0;
+                        return count > max ? count : max;
+                      }, 0);
+
+                      return card.distributionItems.map((item) => {
+                        const count = typeof item.count === "number" && Number.isFinite(item.count) ? item.count : 0;
+                        const fillPercent = maxCount > 0 ? Math.max((count / maxCount) * 100, 6) : 6;
+
+                        return (
+                          <div key={item.key} className="grid grid-cols-[2.5rem_1fr_3rem] items-center gap-2 text-xs">
+                            <span className="text-zinc-600">{item.label}</span>
+                            <div className="h-1.5 overflow-hidden rounded-full bg-zinc-200">
+                              <div
+                                className="h-full rounded-full bg-zinc-500"
+                                style={{ width: `${fillPercent}%` }}
+                                aria-hidden="true"
+                              />
+                            </div>
+                            <span className="text-right font-medium text-zinc-700">
+                              {typeof item.count === "number" ? `${item.count}人` : "—"}
+                            </span>
+                          </div>
+                        );
+                      });
+                    })()}
                   </div>
                   {card.detail ? <p className="mt-1 text-xs text-zinc-500">{card.detail}</p> : null}
                 </>
