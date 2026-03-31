@@ -232,6 +232,13 @@
 - 【文案统一】窗口筛选区已统一为“统计窗口：1h（近1小时）/24h（近24小时）/7d（近7天）”风格，与课堂复盘页口径更一致。
 - 【不要回退】不要把 `avgAttempts` 写回“平均尝试次数”泛化表达，不要再以 `—` 形式强展示空 latency KPI。
 
+## UAT-FE-26
+
+- 【本步解决】班级看板顶部指标语义不直观、任务行信息密度不足（缺提交进度/AI 概况/高频标签/下钻入口）的问题。
+- 【新增事实 / 已收口口径】`/teacher/classrooms/[classroomId]/dashboard` 顶部概览已收口为 `summary.studentsCount`、`summary.publishedTasksCount`、`summary.lateStudentsTotal`；任务表已新增提交进度（`distinctStudentsSubmitted / studentsCount`）与任务级 AI 概况（成功/失败/排队/处理中/终止/未请求），并展示 `topTags` 前 2~3 项。
+- 【交互收口】每行任务已新增“提交记录 / 课堂复盘 / AI 指标”快捷入口，分别跳转到 submissions、review-pack、ai-metrics 页面；保持仅使用现有路由与接口，不新增后端契约。
+- 【不要回退】不要恢复“任务级仅单一 AI 状态”的旧展示，不要移除任务行的三类下钻入口，不要把顶部概览改回无关或占位指标。
+
 ## 当前阶段一句话结论
 
 前端已达到“Teacher/Student 主链路可用 + 任务模板层与班级实例层边界收口 + 教师模板主链路可维护”的工程验收阶段，但尚未进入最终交付定版阶段。

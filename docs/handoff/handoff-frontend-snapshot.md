@@ -83,6 +83,12 @@ Teacher 课程视角（可用）：
 - `/teacher/courses/[courseId]/overview` 已接入课程总览。
 - 课程视角可作为进入班级创建/班级管理的上游入口（跳转到 `/teacher/classrooms` 或带 `courseId` 的班级页）。
 
+Teacher 班级看板链路（可用）：
+1. `/teacher/classrooms/[classroomId]/dashboard` 已保持真接口读取（`GET /api/classrooms/:id` + `GET /api/classrooms/:id/dashboard`），不新增请求参数与后端契约。
+2. 顶部概览已收口为 `summary.studentsCount`、`summary.publishedTasksCount`、`summary.lateStudentsTotal` 三个核心指标，不再使用与班级看板语义弱相关的占位值展示。
+3. 任务明细表已补齐“提交进度（distinctStudentsSubmitted / studentsCount）”、“AI 处理概况（成功/失败/排队/处理中/终止/未请求）”与 `topTags` 前 2~3 项摘要。
+4. 每行任务已新增三类快捷入口：`提交记录`（submissions）、`课堂复盘`（review-pack）、`AI 指标`（ai-metrics），用于从看板直接下钻。
+
 Student 学习链路（可用）：
 1. `/student/classrooms/join` -> `POST classrooms/join`
 2. `/student/classrooms/[classroomId]/tasks/[classroomTaskId]` -> `GET .../my-task-detail`（页面已是“任务详情 + 提交工作台”，正式展示任务基础信息、任务说明 `task.description`、评分标准 `task.rubric`，并保留提交与历史记录）
