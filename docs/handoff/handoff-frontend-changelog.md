@@ -165,7 +165,7 @@
 ## UAT-FE-16
 
 - 【本步解决】review-pack 页顶部缺少关键数字总览、典型样例“有标签但缺可讲评文本”的问题。
-- 【新增事实 / 已收口口径】页面顶部新增“课堂总览”指标区（提交覆盖、AI 成功率、逾期情况、样例数量、尝试分布）；指标从 `overview` 现有字段安全提取并在缺字段时显示占位。典型样例改为消费真实 `examples(tag + samples)` 结构，优先提取 `message/summary/reason/feedback.message` 作为反馈摘要，`suggestion/feedback.suggestion` 作为修改建议，并补充来源/类型/严重程度/讲评提示。
+- 【新增事实 / 已收口口径】页面顶部新增“课堂总览”指标区（提交覆盖、AI 成功率、逾期情况、样例数量、尝试分布）；指标从 `overview` 现有字段安全提取并在缺字段时显示占位。典型样例当时接入 `examples(tag + samples)` 结构（历史口径，已在 UAT-FE-19 切换为去重样例池）。
 - 【不要回退】不要再把 `examples` 直接当平铺对象渲染，不要恢复“反馈摘要主要为暂无占位”的样例展示。
 - 【对新会话的意义】教师进入页面即可先看关键课堂指标，再直接拿可读样例做讲评准备，减少对 raw JSON 的依赖。
 
@@ -182,6 +182,13 @@
 - 【新增事实 / 已收口口径】`ReviewPackResponse.studentTiers` 前端适配已接入 `studentName/studentNo`；学生分层卡片主展示改为姓名，学号作为次级信息（存在时显示），`studentId` 仅保留内部标识用途不再对教师直出。
 - 【展示规则】`good/watch` 继续展示 `attemptsCount/latestErrorCount` 辅助判断；`notSubmitted` 只展示学生身份信息，不伪造尝试次数与错误数。
 - 【不要回退】不要恢复在 UI 直接渲染 Mongo ObjectId；姓名缺失时保持“未知学生”兜底。
+
+## UAT-FE-19
+
+- 【本步解决】review-pack 典型样例仍按旧 `tag + samples` 结构渲染，导致新后端去重契约无法被正确消费的问题。
+- 【新增事实 / 已收口口径】`ReviewPackResponse.examples` 前端类型与适配已切换为去重样例池结构（`feedbackId/submissionId/attemptNo/severity/type/message/suggestion/source/primaryTag/matchedTags/tags`）；页面样例区改为直接渲染去重列表，不再按标签分组摊平。
+- 【展示规则】每条样例展示 `primaryTag` 与“其他命中标签”，并保留 `severity/type/message/suggestion/attemptNo`；`feedbackId/submissionId` 仅做内部标识，不作为教师主可见文本。
+- 【不要回退】不要恢复 `examples(tag + samples)` 的旧派生逻辑，不要按 `matchedTags` 再展开成重复卡片。
 
 ## 当前阶段一句话结论
 

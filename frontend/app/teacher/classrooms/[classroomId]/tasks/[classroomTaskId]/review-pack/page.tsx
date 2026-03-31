@@ -55,10 +55,14 @@ type IssueDistributionItem = {
 
 type ExampleCardView = {
   key: string;
-  category: string;
-  feedback: string;
+  feedbackId?: string;
+  submissionId?: string;
+  primaryTag: string;
+  matchedTags: string[];
+  severity?: string;
+  issueType?: string;
+  message: string;
   suggestion?: string;
-  context?: string;
   source?: string;
   attemptNo?: number;
 };
@@ -223,124 +227,33 @@ const toIssueDigest = (
   return `${title}：${topText}`;
 };
 
-const extractExampleSummary = (sample: unknown, group: unknown): string => {
-  const summary = pickText(sample, [
-    "message",
-    "summary",
-    "reason",
-    "feedback.message",
-    "feedbackSummary",
-    "feedback.summary",
-    "feedback.text",
-  ]);
-  if (summary) {
-    return truncateText(summary);
-  }
+const toExampleCards = (
+  source: ReturnType<typeof toReviewPackResponse>["examples"]
+): ExampleCardView[] =>
+  source.map((item, index) => {
+    const primaryTag = toOptionalText(item.primaryTag) ?? "未分类";
+    const matchedTags = dedupeTexts([...toTextList(item.matchedTags), ...toTextList(item.tags)]).filter(
+      (tag) => tag !== primaryTag
+    );
+    const feedbackId = toOptionalText(item.feedbackId);
+    const submissionId = toOptionalText(item.submissionId);
+    const suggestion = toOptionalText(item.suggestion);
+    const key = feedbackId ?? submissionId ?? `example-${index + 1}`;
 
-  const backup = pickText(group, ["summary", "reason"]);
-  if (backup) {
-    return truncateText(backup);
-  }
-
-  const type = pickText(sample, ["type", "feedback.type"]);
-  const severity = pickText(sample, ["severity", "feedback.severity"]);
-  const hint = [type ? `类型：${type}` : undefined, severity ? `严重程度：${severity}` : undefined]
-    .filter((item): item is string => Boolean(item))
-    .join("，");
-
-  return hint
-    ? `该样例未返回完整反馈文本，建议先围绕${hint}组织讲评。`
-    : "该样例未返回完整反馈文本，建议结合问题归类进行讲评。";
-};
-
-const extractExampleSuggestion = (sample: unknown): string | undefined => {
-  const suggestion = pickText(sample, [
-    "suggestion",
-    "feedback.suggestion",
-    "recommendation",
-    "how",
-    "advice",
-  ]);
-  return suggestion ? truncateText(suggestion) : undefined;
-};
-
-const extractExampleContext = (sample: unknown, summary: string, suggestion?: string): string | undefined => {
-  const context = pickText(sample, [
-    "teachingHint",
-    "context",
-    "contextText",
-    "reason",
-    "feedbackSummary",
-    "note",
-    "comment",
-  ]);
-  if (!context) {
-    return undefined;
-  }
-
-  const compact = truncateText(context);
-  if (compact === summary || (suggestion && compact === suggestion)) {
-    return undefined;
-  }
-
-  return compact;
-};
-
-const toExampleCards = (source: unknown[]): ExampleCardView[] => {
-  const cards: ExampleCardView[] = [];
-
-  source.forEach((group, groupIndex) => {
-    const groupTag = pickText(group, ["tag", "name", "label", "value"]);
-    const samples = safeGet<unknown[]>(group, "samples", []);
-    const groupSource = pickText(group, ["source"]);
-
-    if (samples.length === 0) {
-      const summary = extractExampleSummary(group, group);
-      cards.push({
-        key: `example-${groupIndex}-0`,
-        category: groupTag ? `标签：${groupTag}` : "问题归类：待补充",
-        feedback: summary,
-        suggestion: extractExampleSuggestion(group),
-        context: extractExampleContext(group, summary),
-        source: groupSource,
-      });
-      return;
-    }
-
-    samples.forEach((sample, sampleIndex) => {
-      const tags = dedupeTexts([
-        ...toTextList(groupTag),
-        ...toTextList(safeGet(sample, "tag", undefined)),
-        ...toTextList(safeGet(sample, "tags", [])),
-        ...toTextList(safeGet(sample, "labels", [])),
-      ]);
-      const type = pickText(sample, ["type", "feedback.type", "issueType"]);
-      const severity = pickText(sample, ["severity", "feedback.severity", "level"]);
-      const sourceText = pickText(sample, ["source", "feedback.source"]) ?? groupSource;
-      const summary = extractExampleSummary(sample, group);
-      const suggestion = extractExampleSuggestion(sample);
-      const context = extractExampleContext(sample, summary, suggestion);
-      const categoryParts = [
-        tags.length > 0 ? `标签：${tags.join(" / ")}` : undefined,
-        type ? `类型：${type}` : undefined,
-        severity ? `严重程度：${severity}` : undefined,
-        sourceText ? `来源：${sourceText}` : undefined,
-      ].filter((part): part is string => Boolean(part));
-
-      cards.push({
-        key: `example-${groupIndex}-${sampleIndex}`,
-        category: categoryParts.length > 0 ? categoryParts.join(" ｜ ") : "问题归类：待补充",
-        feedback: summary,
-        suggestion,
-        context,
-        source: sourceText,
-        attemptNo: pickNumber(sample, ["attemptNo"]),
-      });
-    });
+    return {
+      key,
+      feedbackId,
+      submissionId,
+      primaryTag,
+      matchedTags,
+      severity: toOptionalText(item.severity),
+      issueType: toOptionalText(item.type),
+      message: truncateText(toOptionalText(item.message) ?? "该样例未返回完整反馈文本。"),
+      suggestion: suggestion ? truncateText(suggestion) : undefined,
+      source: toOptionalText(item.source),
+      attemptNo: typeof item.attemptNo === "number" ? item.attemptNo : undefined,
+    };
   });
-
-  return cards;
-};
 
 type StudentTierCardView = {
   key: string;
@@ -393,8 +306,7 @@ const buildStudentTierCards = (
 const buildOverviewMetricCards = (
   overview: unknown,
   window: ReviewWindow,
-  examplesCount: number,
-  exampleGroupCount: number
+  examplesCount: number
 ): OverviewMetricCard[] => {
   const studentsCount = pickNumber(overview, ["studentsCount", "studentCount", "totalStudents"]);
   const submittedStudentsCount = pickNumber(overview, [
@@ -458,7 +370,7 @@ const buildOverviewMetricCards = (
       key: "examples",
       title: "典型样例",
       value: `${examplesCount} 条`,
-      detail: `${exampleGroupCount} 个问题标签分组`,
+      detail: "去重后样例池",
     },
     {
       key: "attempts",
@@ -542,8 +454,7 @@ export default async function ReviewPackPage({ params, searchParams }: ReviewPac
   const overviewMetricCards = buildOverviewMetricCards(
     viewModel.data.overview,
     viewModel.query.window,
-    exampleCards.length,
-    viewModel.data.examples.length
+    exampleCards.length
   );
   const summaryHighlights = [
     toIssueDigest("高频问题标签", topTagItems, "暂无明显集中标签"),
@@ -717,7 +628,7 @@ export default async function ReviewPackPage({ params, searchParams }: ReviewPac
           </section>
 
           <section className="rounded-lg border border-zinc-200 bg-white p-4">
-            <h2 className="text-sm font-semibold text-zinc-900">典型样例</h2>
+            <h2 className="text-sm font-semibold text-zinc-900">典型样例（已去重）</h2>
             {exampleCards.length > 0 ? (
               <div className="mt-2 space-y-3">
                 {exampleCards.slice(0, 10).map((item, index) => (
@@ -726,10 +637,17 @@ export default async function ReviewPackPage({ params, searchParams }: ReviewPac
                       <p className="font-medium text-zinc-900">样例 {index + 1}</p>
                       <p className="text-xs text-zinc-500">{typeof item.attemptNo === "number" ? `尝试次数：${item.attemptNo}` : "尝试次数：—"}</p>
                     </div>
-                    <p className="mt-1 text-xs text-zinc-500">问题归类：{item.category}</p>
+                    <p className="mt-1 text-xs text-zinc-500">主标签：{item.primaryTag}</p>
+                    {item.matchedTags.length > 0 ? (
+                      <p className="mt-1 text-xs text-zinc-500">其他命中标签：{item.matchedTags.join(" / ")}</p>
+                    ) : null}
+                    <p className="mt-1 text-xs text-zinc-500">
+                      严重程度：{item.severity ?? "—"} · 类型：{item.issueType ?? "—"}
+                      {item.source ? ` · 来源：${item.source}` : ""}
+                    </p>
                     <p className="mt-2">
-                      <span className="font-medium text-zinc-900">反馈摘要：</span>
-                      {item.feedback}
+                      <span className="font-medium text-zinc-900">反馈内容：</span>
+                      {item.message}
                     </p>
                     {item.suggestion ? (
                       <p className="mt-1">
@@ -737,13 +655,6 @@ export default async function ReviewPackPage({ params, searchParams }: ReviewPac
                         {item.suggestion}
                       </p>
                     ) : null}
-                    {item.context ? (
-                      <p className="mt-1">
-                        <span className="font-medium text-zinc-900">讲评提示：</span>
-                        {item.context}
-                      </p>
-                    ) : null}
-                    {item.source ? <p className="mt-1 text-xs text-zinc-500">来源：{item.source}</p> : null}
                   </article>
                 ))}
                 {exampleCards.length > 10 ? (

@@ -322,8 +322,23 @@ export type ReviewPackResponse = {
   window?: string;
   overview: UnknownRecord;
   commonIssues: UnknownRecord;
-  examples: UnknownRecord[];
+  examples: ReviewPackExampleItem[];
   studentTiers: ReviewPackStudentTiers;
+  raw: UnknownRecord;
+};
+
+export type ReviewPackExampleItem = {
+  feedbackId?: string;
+  submissionId?: string;
+  attemptNo?: number;
+  severity?: string;
+  type?: string;
+  message?: string;
+  suggestion?: string;
+  source?: string;
+  primaryTag?: string;
+  matchedTags: string[];
+  tags: string[];
   raw: UnknownRecord;
 };
 
@@ -741,6 +756,24 @@ export const toLearningTrajectoryResponse = (payload: unknown): LearningTrajecto
   };
 };
 
+const toReviewPackExampleItem = (value: unknown): ReviewPackExampleItem => {
+  const record = asRecord(value);
+  return {
+    feedbackId: asString(record.feedbackId),
+    submissionId: asString(record.submissionId),
+    attemptNo: asNumber(record.attemptNo),
+    severity: asString(record.severity),
+    type: asString(record.type),
+    message: asString(record.message),
+    suggestion: asString(record.suggestion),
+    source: asString(record.source),
+    primaryTag: asString(record.primaryTag),
+    matchedTags: asStringArray(safeGet(record, "matchedTags", undefined)),
+    tags: asStringArray(safeGet(record, "tags", undefined)),
+    raw: record,
+  };
+};
+
 const toReviewPackTierStudentItem = (value: unknown): ReviewPackTierStudentItem => {
   const record = asRecord(value);
   const studentNameCandidate =
@@ -791,7 +824,9 @@ export const toReviewPackResponse = (payload: unknown): ReviewPackResponse => {
     window: asString(record.window),
     overview: asRecord(safeGet(record, "overview", undefined)),
     commonIssues: asRecord(safeGet(record, "commonIssues", undefined)),
-    examples: asRecordArray(safeGet(record, "examples", undefined)),
+    examples: asRecordArray(safeGet(record, "examples", undefined)).map((item) =>
+      toReviewPackExampleItem(item)
+    ),
     studentTiers: toReviewPackStudentTiers(safeGet(record, "studentTiers", undefined)),
     raw: record,
   };
