@@ -300,6 +300,9 @@ export function PublishClassroomTaskForm({
       <p className="mt-1 text-sm text-zinc-600">
         当前仅支持选择已有任务模板并发布到本班；此处不创建或编辑任务模板。
       </p>
+      <p className="mt-1 text-sm text-zinc-600">
+        候选池包含你当前可见且已发布的模板（含共享模板）。
+      </p>
       <p className="mt-2 text-sm text-zinc-600">
         没有合适模板？
         <Link
@@ -311,7 +314,7 @@ export function PublishClassroomTaskForm({
       </p>
       {availableTasks.length === 0 ? (
         <div className="mt-3 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
-          当前没有可发布的 `PUBLISHED` 模板。请先前往
+          当前没有可发布的可见 `PUBLISHED` 模板。请先前往
           <Link href={paths.teacher.tasksFromClassroom(classroomId)} className="mx-1 underline">
             任务模板页
           </Link>
@@ -324,7 +327,7 @@ export function PublishClassroomTaskForm({
           <section className="rounded-md border border-zinc-200 bg-zinc-50 p-3">
             <p className="text-sm font-medium text-zinc-900">模板筛选（本地）</p>
             <p className="mt-1 text-xs text-zinc-600">
-              当前候选均为 `PUBLISHED` 模板。可按模块和阶段缩小范围后再选择。
+              当前候选均为你可见的 `PUBLISHED` 模板。可按模块和阶段缩小范围后再选择。
             </p>
             <div className="mt-3 grid gap-3 md:grid-cols-3">
               <label className="block text-sm">

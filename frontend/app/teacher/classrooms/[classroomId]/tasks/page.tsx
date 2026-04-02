@@ -57,7 +57,7 @@ export default async function ClassroomTasksPage({ params }: ClassroomTasksPageP
         origin,
         cache: "no-store",
       }),
-      fetchJson<unknown>("learning-tasks/tasks?status=PUBLISHED&page=1&limit=50", {
+      fetchJson<unknown>("learning-tasks/tasks?scope=all&status=PUBLISHED&page=1&limit=50", {
         origin,
         cache: "no-store",
       }),
@@ -122,6 +122,9 @@ export default async function ClassroomTasksPage({ params }: ClassroomTasksPageP
         <p className="mt-1">
           这里先选择已发布任务模板，再配置截止时间、迟交与尝试次数等班级实例设置后发布。
         </p>
+        <p className="mt-1">
+          候选模板来自你当前可见且已发布的模板（包含你自己的模板与可见的共享模板）。
+        </p>
         <p className="mt-2">
           若没有合适模板，请先前往
           <Link
@@ -139,7 +142,7 @@ export default async function ClassroomTasksPage({ params }: ClassroomTasksPageP
       {viewModel.taskList.items.length === 0 ? (
         <EmptyState
           title="还没有课堂任务"
-          description="当前班级还没有已发布任务。请先准备并发布任务模板，再回到本页发布到当前班级。"
+          description="当前班级还没有已发布任务。请先准备可见的已发布模板（含共享模板），再回到本页发布到当前班级。"
           actions={
             <div className="flex flex-wrap items-center gap-3">
               <Link
