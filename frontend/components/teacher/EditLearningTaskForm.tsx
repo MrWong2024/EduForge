@@ -13,6 +13,11 @@ import {
   type LearningTaskStatus,
   type UpdateLearningTaskRequest,
 } from "@/lib/api/types-teacher";
+import {
+  TASK_COURSE_LABEL_FORM_OPTIONS,
+  TASK_COURSE_LABEL_UNCLASSIFIED,
+  normalizeTaskCourseLabel,
+} from "@/lib/learning-tasks/course-labels";
 import { paths } from "@/lib/routes/paths";
 import { getRubricDimensionLabel } from "@/lib/ui/rubric";
 
@@ -164,9 +169,15 @@ const getUpdateErrorSummary = (status: number): string => {
 export function EditLearningTaskForm({ taskId, initialTask }: EditLearningTaskFormProps) {
   const router = useRouter();
   const rubricSeed = extractRubricFormSeed(initialTask.rubric);
+  const initialCourseLabel = normalizeTaskCourseLabel(initialTask.courseLabel);
   const [title, setTitle] = useState(initialTask.title ?? "");
   const [description, setDescription] = useState(initialTask.description ?? "");
   const [knowledgeModule, setKnowledgeModule] = useState(initialTask.knowledgeModule ?? "");
+  const [courseLabel, setCourseLabel] = useState(
+    initialCourseLabel && initialCourseLabel !== TASK_COURSE_LABEL_UNCLASSIFIED
+      ? initialCourseLabel
+      : ""
+  );
   const [stage, setStage] = useState(
     typeof initialTask.stage === "number" && Number.isInteger(initialTask.stage)
       ? String(initialTask.stage)
@@ -194,6 +205,7 @@ export function EditLearningTaskForm({ taskId, initialTask }: EditLearningTaskFo
     const trimmedTitle = title.trim();
     const trimmedDescription = description.trim();
     const trimmedKnowledgeModule = knowledgeModule.trim();
+    const normalizedCourseLabel = normalizeTaskCourseLabel(courseLabel);
     const trimmedRubricNotes = rubricNotes.trim();
     const parsedStage = parseStage(stage);
     const parsedFunctionalityWeight = parseOptionalNonNegativeInt(functionalityWeight);
@@ -282,6 +294,7 @@ export function EditLearningTaskForm({ taskId, initialTask }: EditLearningTaskFo
       title: trimmedTitle,
       description: trimmedDescription,
       knowledgeModule: trimmedKnowledgeModule,
+      courseLabel: normalizedCourseLabel ?? "",
       stage: parsedStage,
       status,
     };
@@ -363,6 +376,27 @@ export function EditLearningTaskForm({ taskId, initialTask }: EditLearningTaskFo
               placeholder="例如：GENERAL"
               className="w-full rounded-md border border-zinc-300 px-3 py-2"
             />
+          </label>
+        </div>
+
+        <div className="grid gap-4 md:grid-cols-2">
+          <label className="block text-sm">
+            <span className="mb-1 block text-zinc-700">课程分类</span>
+            <select
+              value={courseLabel}
+              onChange={(event) => setCourseLabel(event.target.value)}
+              className="w-full rounded-md border border-zinc-300 px-3 py-2"
+            >
+              <option value="">未分类（通用模板）</option>
+              {TASK_COURSE_LABEL_FORM_OPTIONS.map((label) => (
+                <option key={label} value={label}>
+                  {label}
+                </option>
+              ))}
+            </select>
+            <p className="mt-1 text-xs text-zinc-500">
+              可选字段，仅用于模板治理（筛选/分组/检索辅助），不绑定课程。
+            </p>
           </label>
         </div>
 

@@ -11,6 +11,10 @@ import {
   type CreateLearningTaskRequest,
   type LearningTaskStatus,
 } from "@/lib/api/types-teacher";
+import {
+  TASK_COURSE_LABEL_FORM_OPTIONS,
+  normalizeTaskCourseLabel,
+} from "@/lib/learning-tasks/course-labels";
 import { getRubricDimensionLabel } from "@/lib/ui/rubric";
 
 type CreateLearningTaskFormErrorState = {
@@ -80,6 +84,7 @@ export function CreateLearningTaskForm() {
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
   const [knowledgeModule, setKnowledgeModule] = useState("");
+  const [courseLabel, setCourseLabel] = useState("");
   const [stage, setStage] = useState("1");
   const [status, setStatus] = useState<LearningTaskStatus>("DRAFT");
   const [functionalityWeight, setFunctionalityWeight] = useState("");
@@ -97,6 +102,7 @@ export function CreateLearningTaskForm() {
     const trimmedTitle = title.trim();
     const trimmedDescription = description.trim();
     const trimmedKnowledgeModule = knowledgeModule.trim();
+    const normalizedCourseLabel = normalizeTaskCourseLabel(courseLabel);
     const trimmedRubricNotes = rubricNotes.trim();
     const parsedStage = parseStage(stage);
     const parsedFunctionalityWeight = parseOptionalNonNegativeInt(functionalityWeight);
@@ -187,6 +193,9 @@ export function CreateLearningTaskForm() {
       stage: parsedStage,
       status,
     };
+    if (normalizedCourseLabel) {
+      requestBody.courseLabel = normalizedCourseLabel;
+    }
     if (hasRubric) {
       const rubricPayload: Record<string, unknown> = {};
       if (hasRubricDimensions) {
@@ -220,6 +229,7 @@ export function CreateLearningTaskForm() {
       setTitle("");
       setDescription("");
       setKnowledgeModule("");
+      setCourseLabel("");
       setStage("1");
       setStatus("DRAFT");
       setFunctionalityWeight("");
@@ -273,6 +283,27 @@ export function CreateLearningTaskForm() {
               placeholder="例如：GENERAL"
               className="w-full rounded-md border border-zinc-300 px-3 py-2"
             />
+          </label>
+        </div>
+
+        <div className="grid gap-4 md:grid-cols-2">
+          <label className="block text-sm">
+            <span className="mb-1 block text-zinc-700">课程分类</span>
+            <select
+              value={courseLabel}
+              onChange={(event) => setCourseLabel(event.target.value)}
+              className="w-full rounded-md border border-zinc-300 px-3 py-2"
+            >
+              <option value="">未分类（通用模板）</option>
+              {TASK_COURSE_LABEL_FORM_OPTIONS.map((label) => (
+                <option key={label} value={label}>
+                  {label}
+                </option>
+              ))}
+            </select>
+            <p className="mt-1 text-xs text-zinc-500">
+              可选字段，仅用于模板治理（筛选/分组/检索辅助），不绑定课程。
+            </p>
           </label>
         </div>
 

@@ -1,17 +1,26 @@
 "use client";
 
 import Link from "next/link";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useMemo, useState } from "react";
 import { EmptyState } from "@/components/blocks/EmptyState";
 import { paths } from "@/lib/routes/paths";
 import { toDisplayText } from "@/lib/ui/format";
 import { type LearningTaskOption, type LearningTaskStatus } from "@/lib/api/types-teacher";
+import {
+  TASK_COURSE_LABELS,
+  TASK_COURSE_LABEL_UNCLASSIFIED,
+  normalizeTaskCourseLabel,
+  isUnclassifiedTaskCourseLabel,
+  toTaskCourseLabelDisplayText,
+} from "@/lib/learning-tasks/course-labels";
 
 type LearningTaskFiltersProps = {
   tasks: LearningTaskOption[];
   initialStatus?: string;
   initialKnowledgeModule?: string;
   initialStage?: string;
+  initialCourseLabel?: string;
 };
 
 type TaskStatusFilter = "ALL" | LearningTaskStatus;
@@ -99,7 +108,11 @@ export function LearningTaskFilters({
   initialStatus,
   initialKnowledgeModule,
   initialStage,
+  initialCourseLabel,
 }: LearningTaskFiltersProps) {
+  const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
   const knowledgeModuleOptions = useMemo(() => {
     const moduleSet = new Set<string>();
     for (const task of tasks) {
@@ -123,6 +136,22 @@ export function LearningTaskFilters({
     return knowledgeModuleOptions.includes(normalized) ? normalized : "";
   });
   const [stageFilter, setStageFilter] = useState<StageFilter>(toStageFilter(initialStage));
+  const [courseLabelFilter, setCourseLabelFilter] = useState<string>(() => {
+    const normalized = normalizeTaskCourseLabel(initialCourseLabel);
+    return normalized ?? "";
+  });
+
+  const setCourseLabelFilterAndSync = (nextValue: string) => {
+    setCourseLabelFilter(nextValue);
+    const params = new URLSearchParams(searchParams.toString());
+    if (nextValue) {
+      params.set("courseLabel", nextValue);
+    } else {
+      params.delete("courseLabel");
+    }
+    const nextQuery = params.toString();
+    router.replace(nextQuery ? `${pathname}?${nextQuery}` : pathname);
+  };
 
   const filteredTasks = useMemo(
     () =>
@@ -149,18 +178,33 @@ export function LearningTaskFilters({
           }
         }
 
+        if (courseLabelFilter) {
+          const taskCourseLabel = normalizeTaskCourseLabel(task.courseLabel);
+          if (courseLabelFilter === TASK_COURSE_LABEL_UNCLASSIFIED) {
+            if (!isUnclassifiedTaskCourseLabel(task.courseLabel)) {
+              return false;
+            }
+          } else if (taskCourseLabel !== courseLabelFilter) {
+            return false;
+          }
+        }
+
         return true;
       }),
-    [tasks, statusFilter, knowledgeModuleFilter, stageFilter]
+    [tasks, statusFilter, knowledgeModuleFilter, stageFilter, courseLabelFilter]
   );
 
   const hasActiveFilters =
-    statusFilter !== "ALL" || Boolean(knowledgeModuleFilter) || stageFilter !== "ALL";
+    statusFilter !== "ALL" ||
+    Boolean(knowledgeModuleFilter) ||
+    stageFilter !== "ALL" ||
+    Boolean(courseLabelFilter);
 
   const handleResetFilters = () => {
     setStatusFilter("ALL");
     setKnowledgeModuleFilter("");
     setStageFilter("ALL");
+    setCourseLabelFilterAndSync("");
   };
 
   return (
@@ -170,7 +214,7 @@ export function LearningTaskFilters({
         <p className="mt-1 text-sm text-zinc-600">
           本地筛选，切换后即时生效；优先挑选 `PUBLISHED` 模板用于班级发布。
         </p>
-        <div className="mt-4 grid gap-4 md:grid-cols-4">
+        <div className="mt-4 grid gap-4 md:grid-cols-5">
           <label className="block text-sm">
             <span className="mb-1 block text-zinc-700">状态</span>
             <select
@@ -212,6 +256,22 @@ export function LearningTaskFilters({
               {STAGE_FILTER_OPTIONS.map((option) => (
                 <option key={option.value} value={option.value}>
                   {option.label}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          <label className="block text-sm">
+            <span className="mb-1 block text-zinc-700">课程分类</span>
+            <select
+              value={courseLabelFilter}
+              onChange={(event) => setCourseLabelFilterAndSync(event.target.value)}
+              className="w-full rounded-md border border-zinc-300 px-3 py-2"
+            >
+              <option value="">全部分类</option>
+              {TASK_COURSE_LABELS.map((courseLabelOption) => (
+                <option key={courseLabelOption} value={courseLabelOption}>
+                  {courseLabelOption}
                 </option>
               ))}
             </select>
@@ -271,15 +331,16 @@ export function LearningTaskFilters({
         />
       ) : (
         <div className="overflow-x-auto rounded-lg border border-zinc-200 bg-white">
-          <table className="min-w-[1100px] w-full table-fixed border-collapse text-sm">
+          <table className="min-w-[1240px] w-full table-fixed border-collapse text-sm">
             <colgroup>
-              <col className="w-[19%]" />
-              <col className="w-[38%]" />
+              <col className="w-[17%]" />
+              <col className="w-[31%]" />
               <col className="w-[9%]" />
               <col className="w-[6%]" />
               <col className="w-[11%]" />
               <col className="w-[10%]" />
-              <col className="w-[7%]" />
+              <col className="w-[10%]" />
+              <col className="w-[6%]" />
             </colgroup>
             <thead className="bg-zinc-50 text-left text-xs font-semibold tracking-wide text-zinc-700">
               <tr>
@@ -288,6 +349,7 @@ export function LearningTaskFilters({
                 <th className="px-4 py-3">知识模块</th>
                 <th className="px-4 py-3">阶段</th>
                 <th className="px-4 py-3">状态</th>
+                <th className="px-4 py-3">课程分类</th>
                 <th className="px-4 py-3">评分配置</th>
                 <th className="px-4 py-3">操作</th>
               </tr>
@@ -344,6 +406,17 @@ export function LearningTaskFilters({
                         </span>
                         <p className="text-xs leading-5 text-zinc-500">{getStatusHint(task.status)}</p>
                       </div>
+                    </td>
+                    <td className="px-4 py-3">
+                      <span
+                        className={`inline-flex rounded border px-2 py-0.5 text-xs font-medium ${
+                          isUnclassifiedTaskCourseLabel(task.courseLabel)
+                            ? "border-zinc-200 bg-zinc-100 text-zinc-700"
+                            : "border-indigo-200 bg-indigo-100 text-indigo-700"
+                        }`}
+                      >
+                        {toTaskCourseLabelDisplayText(task.courseLabel)}
+                      </span>
                     </td>
                     <td className="px-4 py-3">
                       <div className="space-y-1">

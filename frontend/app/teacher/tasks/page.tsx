@@ -8,8 +8,9 @@ import { LearningTaskFilters } from "@/components/teacher/LearningTaskFilters";
 import { fetchJson, FetchJsonError } from "@/lib/api/client";
 import { buildErrorDescription, extractRawDetail } from "@/lib/api/error-presenter";
 import { toLearningTaskListResponse } from "@/lib/api/types-teacher";
+import { normalizeTaskCourseLabel } from "@/lib/learning-tasks/course-labels";
 import { paths } from "@/lib/routes/paths";
-import { getSingleSearchParam } from "@/lib/ui/format";
+import { buildQueryString, getSingleSearchParam } from "@/lib/ui/format";
 import { getCommonErrorSummary } from "@/lib/ui/status";
 
 export const metadata: Metadata = {
@@ -39,6 +40,7 @@ type TeacherLearningTasksPageProps = {
     status?: string | string[];
     knowledgeModule?: string | string[];
     stage?: string | string[];
+    courseLabel?: string | string[];
   }>;
 };
 
@@ -51,6 +53,9 @@ export default async function TeacherLearningTasksPage({
   const initialKnowledgeModuleFilter =
     getSingleSearchParam(query.knowledgeModule)?.trim() || undefined;
   const initialStageFilter = getSingleSearchParam(query.stage)?.trim() || undefined;
+  const initialCourseLabelFilter = normalizeTaskCourseLabel(
+    getSingleSearchParam(query.courseLabel)
+  );
 
   let viewModel: LearningTasksViewModel = {
     mode: "error",
@@ -60,7 +65,12 @@ export default async function TeacherLearningTasksPage({
 
   try {
     const origin = await getRequestOrigin();
-    const payload = await fetchJson<unknown>("learning-tasks/tasks?page=1&limit=100", {
+    const listQuery = buildQueryString({
+      page: 1,
+      limit: 100,
+      courseLabel: initialCourseLabelFilter,
+    });
+    const payload = await fetchJson<unknown>(`learning-tasks/tasks?${listQuery}`, {
       origin,
       cache: "no-store",
     });
@@ -121,6 +131,7 @@ export default async function TeacherLearningTasksPage({
         </p>
         <p className="mt-1">先筛选模板，再去班级任务页发布，效率更高。</p>
         <p className="mt-1">rubric 用于模板层的基础评分参考，班级发布页不配置 rubric。</p>
+        <p className="mt-1">课程分类仅用于模板治理，不代表班级绑定课程，也不限制跨课程复用。</p>
         {fromClassroomId ? (
           <p className="mt-2 text-sm text-blue-700">
             你正从班级任务页进入。建议先筛选 `PUBLISHED` 模板，选定后返回班级发布。
@@ -135,6 +146,7 @@ export default async function TeacherLearningTasksPage({
         initialStatus={initialStatusFilter}
         initialKnowledgeModule={initialKnowledgeModuleFilter}
         initialStage={initialStageFilter}
+        initialCourseLabel={initialCourseLabelFilter}
       />
     </section>
   );

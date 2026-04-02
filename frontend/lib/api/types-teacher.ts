@@ -1,4 +1,5 @@
 import { safeGet } from "@/lib/ui/format";
+import type { TaskCourseLabel } from "@/lib/learning-tasks/course-labels";
 import {
   toListFeedbackResponse,
   toSubmissionDetailResponse as toStudentSubmissionDetailResponse,
@@ -202,6 +203,7 @@ export type CreateLearningTaskRequest = {
   title: string;
   description: string;
   knowledgeModule: string;
+  courseLabel?: string;
   stage: number;
   status: LearningTaskStatus;
   rubric?: Record<string, unknown>;
@@ -211,9 +213,19 @@ export type UpdateLearningTaskRequest = {
   title: string;
   description: string;
   knowledgeModule: string;
+  courseLabel?: string;
   stage: number;
   status: LearningTaskStatus;
   rubric?: Record<string, unknown>;
+};
+
+export type ListLearningTasksRequest = {
+  page?: number;
+  limit?: number;
+  status?: LearningTaskStatus;
+  knowledgeModule?: string;
+  courseLabel?: TaskCourseLabel;
+  stage?: number;
 };
 
 export type LearningTaskOption = {
@@ -222,6 +234,7 @@ export type LearningTaskOption = {
   description?: string;
   status?: string;
   knowledgeModule?: string;
+  courseLabel?: string;
   stage?: number;
   rubric?: Record<string, unknown>;
   raw: UnknownRecord;
@@ -627,6 +640,7 @@ export const toLearningTaskOption = (value: unknown): LearningTaskOption => {
     description: asString(record.description),
     status: asString(record.status),
     knowledgeModule: asString(record.knowledgeModule),
+    courseLabel: asString(record.courseLabel),
     stage: asNumber(record.stage),
     rubric: Object.keys(rubricRecord).length > 0 ? rubricRecord : undefined,
     raw: record,

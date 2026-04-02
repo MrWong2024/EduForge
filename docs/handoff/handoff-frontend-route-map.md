@@ -22,8 +22,8 @@
 | `/teacher` | 教师入口 | - | 重定向到 `/teacher/classrooms` | Done | - |
 | `/teacher/courses` | 课程列表 + 创建课程 | `GET courses`、`POST courses` | 分页、创建课程、跳课程总览/班级 | Done | 真接口 |
 | `/teacher/courses/[courseId]/overview` | 课程总览 | `GET courses/:courseId/overview` | window/sort/order/page 切换 | Done | 真接口 |
-| `/teacher/tasks` | 任务模板页 | `GET learning-tasks/tasks`、`POST learning-tasks/tasks` | 模板列表、创建模板、`status/module/stage` 本地筛选、带 `fromClassroomId` 上下文回跳班级页 | Done | 真接口 |
-| `/teacher/tasks/[taskId]/edit` | 任务模板编辑页 | `GET learning-tasks/tasks/:id`、`PATCH learning-tasks/tasks/:id` | 回填并编辑模板核心字段、维护 rubric 基础配置、状态管理（DRAFT/PUBLISHED/ARCHIVED） | Done | 真接口 |
+| `/teacher/tasks` | 任务模板页 | `GET learning-tasks/tasks`、`POST learning-tasks/tasks` | 模板列表、创建模板、`status/module/stage` 本地筛选、`courseLabel`（课程分类）URL 筛选并透传服务端、带 `fromClassroomId` 上下文回跳班级页 | Done | 真接口 |
+| `/teacher/tasks/[taskId]/edit` | 任务模板编辑页 | `GET learning-tasks/tasks/:id`、`PATCH learning-tasks/tasks/:id` | 回填并编辑模板核心字段（含可选 `courseLabel`）、维护 rubric 基础配置、状态管理（DRAFT/PUBLISHED/ARCHIVED） | Done | 真接口 |
 | `/teacher/classrooms` | 班级列表 + 创建班级 | `GET classrooms`、`GET courses`、`POST classrooms` | 过滤 courseId、分页、创建班级 | Done | 真接口 |
 | `/teacher/classrooms/[classroomId]` | 班级入口 | - | 重定向到 dashboard | Done | - |
 | `/teacher/classrooms/[classroomId]/dashboard` | 班级看板 | `GET classrooms/:id`、`GET classrooms/:id/dashboard` | 导航到 tasks/members/report/export | Done | 真接口 |
