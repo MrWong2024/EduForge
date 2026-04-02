@@ -28,7 +28,7 @@
 | CreateClassroomForm | `components/teacher/CreateClassroomForm.tsx` | `POST classrooms` | 只负责建班表单，不负责班级列表加载 |
 | CreateLearningTaskForm | `components/teacher/CreateLearningTaskForm.tsx` | `POST learning-tasks/tasks` | 只负责模板创建（核心字段 + 可选 `courseLabel` + `visibility` 单选 + 基础 rubric 配置，四维中文展示口径复用 `lib/ui/rubric.ts`），不负责班级实例发布 |
 | EditLearningTaskForm | `components/teacher/EditLearningTaskForm.tsx` | `PATCH learning-tasks/tasks/:id` | 只负责模板编辑/只读查看（核心字段 + 可选 `courseLabel` + `visibility` + status + rubric，四维中文展示口径复用 `lib/ui/rubric.ts`）；非作者共享模板仅可读，不负责班级实例发布 |
-| LearningTaskFilters | `components/teacher/LearningTaskFilters.tsx` | `GET learning-tasks/tasks?scope=...&courseLabel=...`（通过 URL query 触发服务端列表过滤） | 负责模板层视图与筛选（`scope` 视图切换 + `status/knowledgeModule/stage` 本地筛选 + `courseLabel` URL 筛选）与列表呈现（含 `visibility` 轻量标签、非作者模板操作边界）；不发起模板发布请求 |
+| LearningTaskFilters | `components/teacher/LearningTaskFilters.tsx` | `GET learning-tasks/tasks?scope=...&courseLabel=...`（通过 URL query 触发服务端列表过滤） | 负责模板层视图与筛选（`scope` 视图切换 + `status/knowledgeModule/stage` 本地筛选 + `courseLabel` URL 筛选）与列表呈现（含 `visibility` 轻量标签、非作者模板操作边界）；默认排序在“筛选后、渲染前”按 scope 策略执行；不发起模板发布请求 |
 | PublishClassroomTaskForm | `components/teacher/PublishClassroomTaskForm.tsx` | `POST classrooms/:id/tasks` | 只负责选择已有 `PUBLISHED` 模板并发布班级实例；可配置 `dueAt/allowLate/maxAttempts`；不负责创建/编辑模板 |
 | PublishTaskStatusButton | `components/teacher/PublishTaskStatusButton.tsx` | `POST learning-tasks/tasks/:id/publish` | 仅做 task 发布状态操作 |
 | RemoveStudentButton | `components/teacher/RemoveStudentButton.tsx` | `POST classrooms/:id/students/:uid/remove` | 仅做移除动作，不负责成员列表 |
@@ -67,6 +67,7 @@
 | UI Status | `lib/ui/status.ts` | AI 状态文案、通用错误摘要 | 不要各页散落不同状态文案口径 |
 | Task Course Labels | `lib/learning-tasks/course-labels.ts` | 任务模板课程分类候选项、未分类口径、显示/归一化工具的前端单一来源 | 不要在表单、筛选器、列表展示处重复硬编码课程分类数组 |
 | Task Template Visibility/Scope | `lib/learning-tasks/template-visibility-scope.ts` | 模板 `visibility`（`PRIVATE/SHARED`）与列表 `scope`（`mine/shared/all`）的前端单一来源（值域、显示文案、normalize） | 不要在页面、表单、筛选栏中散落魔法字符串 |
+| Task Template List Sorting | `lib/learning-tasks/template-list-sorting.ts` | 任务模板列表默认排序单一来源：`mine` 最近更新优先，`shared` 先 `PUBLISHED` 再按时间，`all` 先我的模板再排他人共享 | 不要在 JSX 内散落多套 compare 逻辑 |
 | UI Rubric | `lib/ui/rubric.ts` | rubric 四维中文映射统一入口（`RUBRIC_DIMENSION_LABELS`、`getRubricDimensionLabel`），供教师创建/编辑与学生任务详情评分标准维度展示复用 | 不要在页面内部各自维护本地 `labelMap` 或手写四份维度中文 |
 | UI Format | `lib/ui/format.ts` | query/date/display/safeGet 工具 | 不要重复造相同 parse 函数 |
 | Proxy Route | `app/api/proxy/[...path]/route.ts` | BFF 转发层，固定 Node runtime，method/body/header/set-cookie 透传 | 不要在业务页绕过 proxy 直连后端，也不要把业务逻辑塞进 proxy |

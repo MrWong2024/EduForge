@@ -22,6 +22,7 @@ import {
   normalizeTaskTemplateVisibility,
   type TaskTemplateScope,
 } from "@/lib/learning-tasks/template-visibility-scope";
+import { sortTaskTemplatesByScope } from "@/lib/learning-tasks/template-list-sorting";
 
 type LearningTaskFiltersProps = {
   tasks: LearningTaskOption[];
@@ -56,6 +57,12 @@ const STAGE_FILTER_OPTIONS: Array<{ value: StageFilter; label: string }> = [
   { value: "3", label: "阶段 3" },
   { value: "4", label: "阶段 4" },
 ];
+
+const SCOPE_SORT_HINTS: Record<TaskTemplateScope, string> = {
+  mine: "默认按最近更新时间排序（同时间按创建时间）。",
+  shared: "默认优先展示 PUBLISHED 模板，其次按最近更新时间排序。",
+  all: "默认优先展示我的模板；他人共享模板内优先 PUBLISHED。",
+};
 
 const toStatusUpper = (value: unknown): string =>
   typeof value === "string" ? value.trim().toUpperCase() : "";
@@ -222,6 +229,14 @@ export function LearningTaskFilters({
       }),
     [tasks, statusFilter, knowledgeModuleFilter, stageFilter, courseLabelFilter]
   );
+  const sortedFilteredTasks = useMemo(
+    () =>
+      sortTaskTemplatesByScope(filteredTasks, {
+        scope: currentScope,
+        currentUserId,
+      }),
+    [filteredTasks, currentScope, currentUserId]
+  );
 
   const hasActiveFilters =
     statusFilter !== "ALL" ||
@@ -261,6 +276,7 @@ export function LearningTaskFilters({
         <p className="mt-2 text-xs text-zinc-500">
           当前视图：{TASK_TEMPLATE_SCOPE_LABELS[currentScope]}。共享只影响可见性，不改变作者编辑或发布权限。
         </p>
+        <p className="mt-1 text-xs text-zinc-500">{SCOPE_SORT_HINTS[currentScope]}</p>
       </section>
 
       <section className="rounded-lg border border-zinc-200 bg-white p-4">
@@ -342,7 +358,7 @@ export function LearningTaskFilters({
           </div>
         </div>
         <p className="mt-3 text-xs text-zinc-500">
-          当前显示 {filteredTasks.length} / {tasks.length} 条模板
+          当前显示 {sortedFilteredTasks.length} / {tasks.length} 条模板
         </p>
       </section>
 
@@ -364,7 +380,7 @@ export function LearningTaskFilters({
             </div>
           }
         />
-      ) : filteredTasks.length === 0 ? (
+      ) : sortedFilteredTasks.length === 0 ? (
         <EmptyState
           title="当前筛选条件下没有匹配模板"
           description="可重置筛选，或继续创建新模板。"
@@ -411,7 +427,7 @@ export function LearningTaskFilters({
               </tr>
             </thead>
             <tbody>
-              {filteredTasks.map((task, index) => {
+              {sortedFilteredTasks.map((task, index) => {
                 const statusUpper = toStatusUpper(task.status);
                 const rubricSummary = summarizeRubric(task.rubric);
                 const titleText = toDisplayText(task.title, "未命名模板");

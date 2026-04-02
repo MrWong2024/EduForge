@@ -245,6 +245,8 @@ export type LearningTaskOption = {
   courseLabel?: string;
   visibility?: TaskTemplateVisibility;
   createdById?: string;
+  createdAt?: string;
+  updatedAt?: string;
   stage?: number;
   rubric?: Record<string, unknown>;
   raw: UnknownRecord;
@@ -658,6 +660,8 @@ export const toLearningTaskOption = (value: unknown): LearningTaskOption => {
       asString(createdByRecord.id) ??
       asString(createdByRecord._id) ??
       asString(createdByRecord.userId),
+    createdAt: asString(record.createdAt),
+    updatedAt: asString(record.updatedAt),
     stage: asNumber(record.stage),
     rubric: Object.keys(rubricRecord).length > 0 ? rubricRecord : undefined,
     raw: record,

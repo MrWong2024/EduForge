@@ -44,7 +44,7 @@ frontend/
 - `/(auth)/login`：已完成登录与 role-home 跳转（`TEACHER -> /teacher/classrooms`, `STUDENT -> /student`）。
 - `/teacher/**`：教师起步链路、模板链路、班级发布链路、批阅链路、三件套、周报/过程性评价/快照已接入真接口。
 - 教师模板层（已落地）：
-  - `/teacher/tasks`：模板列表 + 创建 + 视图切换（默认 `scope=mine`，支持 `mine/shared/all`）+ 筛选（`status/knowledgeModule/stage` 本地筛选 + `courseLabel` URL 筛选），并展示模板可见性 `visibility(私有/共享)`
+  - `/teacher/tasks`：模板列表 + 创建 + 视图切换（默认 `scope=mine`，支持 `mine/shared/all`）+ 筛选（`status/knowledgeModule/stage` 本地筛选 + `courseLabel` URL 筛选），并展示模板可见性 `visibility(私有/共享)`；默认排序按 scope 收口（`mine=最近更新优先`、`shared=PUBLISHED 优先`、`all=我的模板优先`）
   - `/teacher/tasks/[taskId]/edit`：模板编辑/查看与状态管理（含可选课程分类、模板可见性；非作者共享模板只读）
 - 教师班级实例层（已收口）：
   - `/teacher/classrooms/[classroomId]/tasks`：只选择已发布模板并发布到班级实例，不承担模板创建/编辑。
@@ -57,6 +57,7 @@ frontend/
 - 模板治理口径单一来源：
   - `lib/learning-tasks/course-labels.ts`：`courseLabel` 候选项与“未分类”显示口径。
   - `lib/learning-tasks/template-visibility-scope.ts`：`visibility(PRIVATE/SHARED)` 与 `scope(mine/shared/all)` 值域、显示文案、normalize。
+  - `lib/learning-tasks/template-list-sorting.ts`：模板列表默认排序策略（前端默认行为，非用户可配置项）。
 - 统一状态文案：`lib/ui/status.ts`（含 `NOT_REQUESTED` 正常语义）。
 - 统一 rubric 四维中文映射：`lib/ui/rubric.ts`（`functionality/correctness/codeStyle/design` 与中文文案的单一事实源，供 Teacher/Student 共同复用）。
 - 统一错误展开：`lib/api/error-presenter.ts` + `components/blocks/ErrorState.tsx`。
@@ -80,6 +81,7 @@ Teacher 起步与模板链路（可用）：
 3. `/teacher/tasks` 进行模板创建/筛选，必要时进入 `/teacher/tasks/[taskId]/edit` 维护模板状态与 rubric
    - 模板层已接入 `courseLabel`（课程分类）与 `visibility`（私有/共享）字段：创建/编辑可维护，列表可筛选并展示；`courseLabel` 与 `visibility` 都是模板治理字段，不绑定课程。
    - 模板列表默认 `scope=mine`，并支持显式切换 `mine/shared/all`；共享只影响读可见性，不改变作者权限边界。
+   - 模板列表默认排序已前端收口：`mine` 按最近更新时间降序（同时间按创建时间）；`shared` 先 `PUBLISHED` 再按最近更新时间；`all` 先“我的模板”再“他人共享模板”。
 4. `/teacher/classrooms/[classroomId]/tasks` 选择已发布模板并设置 `dueAt/allowLate/maxAttempts` 后发布（`POST classrooms/:id/tasks`）
 5. 进入 `/teacher/classrooms/[classroomId]/tasks/[classroomTaskId]/*` 和提交管理页
 
@@ -175,6 +177,7 @@ Teacher 课堂复盘链路（可用）：
 - 任务模板页能力已落地：创建、编辑、基础 rubric 配置、筛选与跨页上下文链路。
 - 任务模板课程分类（`courseLabel`）与模板可见性（`visibility`）已接入前端：`courseLabel` 单选可空、`visibility` 两档单选，均用于模板治理，不绑定课程、不限制跨课程复用。
 - 模板列表视图已接入 `scope`（`mine/shared/all`），默认 `mine`；`shared` 视图可读共享模板，非作者模板不暴露误导性编辑入口。
+- 模板列表默认排序是前端内建行为，不新增 URL 排序参数，也不新增用户可配置排序器。
 - 班级任务页职责已收口：仅发布已有 `PUBLISHED` 模板，且模板选择体验已增强。
 
 未达到：
