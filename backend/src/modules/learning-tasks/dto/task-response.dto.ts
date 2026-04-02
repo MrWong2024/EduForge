@@ -1,4 +1,5 @@
 import { TaskStatus } from '../schemas/task.schema';
+import type { TaskVisibility } from '../task-template-visibility.constants';
 
 export class TaskResponseDto {
   id!: string;
@@ -6,6 +7,7 @@ export class TaskResponseDto {
   description!: string;
   knowledgeModule!: string;
   courseLabel?: string;
+  visibility!: TaskVisibility;
   stage!: number;
   difficulty?: string;
   rubric?: Record<string, unknown>;

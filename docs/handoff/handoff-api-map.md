@@ -114,8 +114,15 @@ Notes:
 
 Notes:
 - `Task.courseLabel`：可选字符串字段（单选课程分类），白名单来源 `backend/src/modules/learning-tasks/task-course-labels.constants.ts`；非 `Course` 外键，不参与权限与发布约束，不限制跨课程复用。
-- `POST/PATCH/GET /api/learning-tasks/tasks*`：入参与出参已支持 `courseLabel`；空值/缺省表示“未分类/通用模板”。
-- `GET /api/learning-tasks/tasks` Query：`status, knowledgeModule, courseLabel, stage, page, limit, createdBy`；`courseLabel=未分类` 时兼容匹配字段缺省任务。
+- `Task.visibility`：模板可见性字段，值域 `PRIVATE | SHARED`（白名单来源 `backend/src/modules/learning-tasks/task-template-visibility.constants.ts`）；新建默认 `PRIVATE`；该字段只影响“读可见性”，不改变作者权限边界。
+- `POST/PATCH/GET /api/learning-tasks/tasks*`：入参与出参已支持 `courseLabel` 与 `visibility`；旧任务缺省 `visibility` 兼容按 `SHARED` 处理。
+- `GET /api/learning-tasks/tasks` Query：`scope, status, knowledgeModule, courseLabel, stage, page, limit, createdBy`；默认 `scope=mine`（不再默认公共池）；`courseLabel=未分类` 时兼容匹配字段缺省任务。
+- `scope` 语义：
+  - `mine`：仅当前教师自己的模板（`PRIVATE + SHARED`）。
+  - `shared`：共享池（`visibility=SHARED` + 旧数据缺省 `visibility`），包含“我自己设为 SHARED 的模板”。
+  - `all`：当前教师可见全集（我的全部 + 共享池）。
+- `createdBy`：仅保留兼容字段；当前列表语义以 `scope` 为主，不再作为越权筛选入口。
+- `GET /api/learning-tasks/tasks/:id`：可见性规则为“作者本人可读；他人仅可读 `SHARED`（含旧数据缺省兼容视为 `SHARED`）；他人 `PRIVATE` 不可读（404）”。
 - `/api/learning-tasks/submissions/:submissionId/ai-feedback/request` 是产品能力，不受 `AI_FEEDBACK_DEBUG_ENABLED` 门禁影响，但受登录 + RBAC + 资源归属校验。
 - 幂等语义：job 已存在则返回既有 job（200）；不存在则创建 `PENDING` job。
 - `GET /api/learning-tasks/submissions/:id` 权限：学生本人可读；若 `classroomTaskId` 存在，仅该 `classroomTask` 所属班级 owner teacher 可读；若 `classroomTaskId` 为空，仅 `task.createdBy` 对应的 task owner teacher 可读；其他用户返回 `403`；submission 不存在返回 `404`。

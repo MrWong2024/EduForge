@@ -292,9 +292,11 @@
   - `status`
 - Optional fields:
   - `courseLabel?: string`（单选课程分类；来源白名单：`backend/src/modules/learning-tasks/task-course-labels.constants.ts`）
+  - `visibility?: string`（模板可见性；来源白名单：`backend/src/modules/learning-tasks/task-template-visibility.constants.ts`）
 - Enums:
   - `status`: `DRAFT | PUBLISHED | ARCHIVED`（from `TaskStatus`）
   - `courseLabel`（可选）: `TASK_COURSE_LABELS`（例如：`未分类`、`通用编程`、`Java 程序设计`、`数据结构`、`人工智能`）
+  - `visibility`（可选）: `PRIVATE | SHARED`（缺省默认 `PRIVATE`）
 - knowledgeModule constraint:
   - `knowledgeModule` 当前仅 `@IsString()`，未做 `@IsEnum`/白名单限制。
 - Nested structure:
@@ -307,6 +309,7 @@
   "description": "完成 for/while 基础练习",
   "knowledgeModule": "control-flow",
   "courseLabel": "程序设计基础",
+  "visibility": "PRIVATE",
   "stage": 1,
   "status": "DRAFT"
 }
@@ -320,6 +323,7 @@
 - Enums:
   - `status`（可选）: `DRAFT | PUBLISHED | ARCHIVED`
   - `courseLabel`（可选）: `TASK_COURSE_LABELS`（单选）
+  - `visibility`（可选）: `PRIVATE | SHARED`
 - knowledgeModule constraint:
   - `knowledgeModule`（可选）当前仅 `@IsString()`，未做 `@IsEnum`/白名单限制。
 - Nested structure:
@@ -334,6 +338,8 @@
 
 - 清空 `courseLabel` 方式：
   - 传空字符串（如 `"courseLabel": "   "`）会在后端 trim 后按未设置处理，不会以脏字符串落库。
+- `visibility` 变更方式：
+  - 作者可在 `PATCH` 中传 `"visibility":"PRIVATE"` 或 `"visibility":"SHARED"` 切换模板是否进入共享池。
 
 ### POST /api/learning-tasks/tasks/:id/publish
 
@@ -490,16 +496,21 @@
 - Controller & Method: `backend/src/modules/learning-tasks/controllers/learning-tasks.controller.ts` -> `LearningTasksController.listTasks`
 - Query DTO: `QueryTaskDto` (`backend/src/modules/learning-tasks/dto/query-task.dto.ts`)
 - Fields:
+  - `scope?: 'mine' | 'shared' | 'all'`（来源白名单 `TASK_TEMPLATE_SCOPES`，默认 `mine`）
   - `status?: TaskStatus`
   - `knowledgeModule?: string`
   - `courseLabel?: string`（单选；来源白名单 `TASK_COURSE_LABELS`）
   - `stage?: number`（`@Type(() => Number) @IsInt() @Min(1) @Max(4)`）
   - `page?: number`（`@Type(() => Number) @IsInt() @Min(1)`）
   - `limit?: number`（`@Type(() => Number) @IsInt() @Min(1) @Max(100)`）
-  - `createdBy?: string`（`@IsMongoId()`）
+  - `createdBy?: string`（`@IsMongoId()`，仅保留兼容；当前以 `scope` 语义为主）
 - Example Query:
-  - `/api/learning-tasks/tasks?page=1&limit=20`
-  - `/api/learning-tasks/tasks?status=PUBLISHED&courseLabel=Java%20%E7%A8%8B%E5%BA%8F%E8%AE%BE%E8%AE%A1&page=1&limit=20`
+  - `/api/learning-tasks/tasks?page=1&limit=20`（默认 `scope=mine`）
+  - `/api/learning-tasks/tasks?scope=shared&status=PUBLISHED&page=1&limit=20`
+  - `/api/learning-tasks/tasks?scope=all&courseLabel=Java%20%E7%A8%8B%E5%BA%8F%E8%AE%BE%E8%AE%A1&page=1&limit=20`
 - Response口径（最小说明）:
-  - `items[*]` 包含 `courseLabel`（可选）
+  - `items[*]` 包含 `courseLabel`（可选）与 `visibility`（必返，旧数据缺省时按 `SHARED` 兼容输出）
+  - `scope=mine`：仅当前教师本人模板（包含本人 `PRIVATE + SHARED`）
+  - `scope=shared`：共享池（`visibility=SHARED`，且包含旧数据缺省 `visibility`；包含“我自己设为 SHARED 的模板”）
+  - `scope=all`：当前教师可见全集（我的全部 + 共享池）
   - 当 `courseLabel=未分类` 时，服务端会同时匹配“字段缺省/空值”任务，保持旧数据兼容。

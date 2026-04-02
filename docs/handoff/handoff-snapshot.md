@@ -135,9 +135,10 @@ backend/
 - 迟交规则：`settings.allowLate` 默认按实现为 `true`；提交门禁与迟交标记以 `dueAt/allowLate` 为准。
 
 ### Task（`src/modules/learning-tasks/schemas/task.schema.ts`）
-- 关键字段：`title`、`description`、`knowledgeModule`、`courseLabel?`、`stage(1..4)`、`difficulty?`、`rubric?`、`status(DRAFT|PUBLISHED|ARCHIVED)`、`createdBy`、`publishedAt?`。
+- 关键字段：`title`、`description`、`knowledgeModule`、`courseLabel?`、`visibility(PRIVATE|SHARED)`、`stage(1..4)`、`difficulty?`、`rubric?`、`status(DRAFT|PUBLISHED|ARCHIVED)`、`createdBy`、`publishedAt?`。
 - `courseLabel` 语义：可选单值课程分类字段（白名单来源 `task-course-labels.constants.ts`）；非 `Course` 外键；仅用于模板治理（筛选/分组/展示辅助）；不参与权限与发布约束。
-- 索引/唯一性：`(createdBy,createdAt)`；`(status,knowledgeModule,stage,createdAt)`；`(status,courseLabel,createdAt)`。
+- `visibility` 语义：模板可见性字段（白名单来源 `task-template-visibility.constants.ts`）；新建默认 `PRIVATE`；旧数据缺省值按 `SHARED` 兼容解释；共享仅影响读可见性，不改变作者写权限。
+- 索引/唯一性：`(createdBy,createdAt)`；`(status,knowledgeModule,stage,createdAt)`；`(status,courseLabel,createdAt)`；`(visibility,createdAt)`。
 
 ### Submission（`src/modules/learning-tasks/schemas/submission.schema.ts`）
 - 关键字段：`taskId`、`classroomTaskId?`、`studentId`、`attemptNo`、`submittedAt`、`isLate`、`lateBySeconds`、`content.codeText`、`content.language`、`meta.aiUsageDeclaration?`、`status(SUBMITTED|EVALUATED)`。
@@ -272,6 +273,13 @@ AI Provider 错误码（`ai-feedback-provider.error-codes.ts`）：
   - `Task.courseLabel` 已接入 schema/DTO/service/query/response；支持创建、更新、详情返回、列表返回与按标签筛选。
   - 字段保持可选，空值语义为“未分类/通用模板”；旧数据不做迁移脚本，保持兼容。
   - `courseLabel` 仅用于任务模板治理，不参与权限、不参与发布到班级一致性校验，不限制跨课程复用。
+- P1 Task 模板可见性与视图范围契约（后端已完成，前端待后续阶段接入）：
+  - `Task.visibility` 已接入 schema/DTO/service/query/response；值域 `PRIVATE|SHARED`，新建默认 `PRIVATE`。
+  - 旧任务缺省 `visibility` 按 `SHARED` 兼容，避免历史模板在升级后大面积隐身。
+  - 列表 query 新增 `scope(mine|shared|all)`，默认 `mine`（默认行为已从“公共池倾向”切换为“只看我的模板”）。
+  - `scope` 语义：`mine=我的全部模板`；`shared=共享池(包含我自己设为 SHARED 的模板)`；`all=我的全部+共享池`。
+  - 模板详情读取同步可见性：作者可读、他人仅可读 `SHARED`（含旧数据兼容）、他人 `PRIVATE` 不可读。
+  - 共享仅影响读可见性，不改变“编辑/发布仍为作者权限”的所有权边界。
 - P0 用户资料闭环（已完成）：
   - `PATCH /api/users/me`：已落地可用；仅允许更新 `name/studentNo/employeeNo`。
   - `GET /api/users/me` 与 `PATCH /api/users/me` 返回口径一致，均不返回 `passwordHash`。

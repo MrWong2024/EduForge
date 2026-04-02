@@ -71,15 +71,15 @@ export class LearningTasksController {
   @UseGuards(RolesGuard)
   @Roles(...TEACHER_ROLES)
   @Get('tasks')
-  listTasks(@Query() query: QueryTaskDto) {
-    return this.learningTasksService.listTasks(query);
+  listTasks(@Query() query: QueryTaskDto, @CurrentUser() user: { id: string }) {
+    return this.learningTasksService.listTasks(query, user.id);
   }
 
   @UseGuards(RolesGuard)
   @Roles(...TEACHER_ROLES)
   @Get('tasks/:id')
-  getTask(@Param('id') id: string) {
-    return this.learningTasksService.getTask(id);
+  getTask(@Param('id') id: string, @CurrentUser() user: { id: string }) {
+    return this.learningTasksService.getTask(id, user.id);
   }
 
   @UseGuards(RolesGuard)

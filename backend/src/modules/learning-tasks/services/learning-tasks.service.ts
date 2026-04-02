@@ -27,6 +27,18 @@ import { SubmissionResponseDto } from '../dto/submission-response.dto';
 import { FeedbackResponseDto } from '../dto/feedback-response.dto';
 import { SubmissionDetailResponseDto } from '../dto/submission-detail-response.dto';
 import { TASK_COURSE_LABEL_UNCLASSIFIED } from '../task-course-labels.constants';
+import {
+  TASK_TEMPLATE_SCOPE_ALL,
+  TASK_TEMPLATE_SCOPE_DEFAULT,
+  TASK_TEMPLATE_SCOPE_MINE,
+  TASK_TEMPLATE_SCOPE_SHARED,
+  TASK_VISIBILITY_PRIVATE,
+  TASK_VISIBILITY_SHARED,
+} from '../task-template-visibility.constants';
+import type {
+  TaskTemplateScope,
+  TaskVisibility,
+} from '../task-template-visibility.constants';
 import { AiFeedbackJobService } from '../ai-feedback/services/ai-feedback-job.service';
 import { AiFeedbackJobStatus } from '../ai-feedback/schemas/ai-feedback-job.schema';
 import { AiFeedbackStatus } from '../ai-feedback/interfaces/ai-feedback-status.enum';
@@ -90,9 +102,12 @@ export class LearningTasksService {
   async createTask(dto: CreateTaskDto, userId: string) {
     const now = new Date();
     const courseLabel = this.toSanitizedCourseLabel(dto.courseLabel);
+    const visibility =
+      this.toSanitizedTaskVisibility(dto.visibility) ?? TASK_VISIBILITY_PRIVATE;
     const task = await this.taskModel.create({
       ...dto,
       courseLabel,
+      visibility,
       createdBy: new Types.ObjectId(userId),
       publishedAt: dto.status === TaskStatus.Published ? now : undefined,
     });
@@ -111,6 +126,8 @@ export class LearningTasksService {
       throw new BadRequestException('Archived tasks cannot be updated');
     }
     const hasCourseLabel = 'courseLabel' in dto;
+    const nextVisibility = this.toSanitizedTaskVisibility(dto.visibility);
+    const hasVisibility = nextVisibility !== undefined;
     if (dto.title !== undefined) {
       task.title = dto.title;
     }
@@ -134,6 +151,9 @@ export class LearningTasksService {
     }
     if (hasCourseLabel) {
       task.courseLabel = this.toSanitizedCourseLabel(dto.courseLabel);
+    }
+    if (hasVisibility) {
+      task.visibility = nextVisibility;
     }
     if (dto.status === TaskStatus.Published && !task.publishedAt) {
       task.publishedAt = new Date();
@@ -161,34 +181,65 @@ export class LearningTasksService {
     return this.toTaskResponse(task as TaskWithMeta);
   }
 
-  async listTasks(query: QueryTaskDto) {
+  async listTasks(query: QueryTaskDto, userId: string) {
     const page = query.page ?? 1;
     const limit = Math.min(query.limit ?? 20, 100);
-    const filter: Record<string, unknown> = {};
+    const userObjectId = new Types.ObjectId(userId);
+    const scope = this.resolveTaskTemplateScope(query.scope);
+    const legacyCreatedBy = query.createdBy?.trim();
+    const andFilters: Record<string, unknown>[] = [];
+    const baseFilter: Record<string, unknown> = {};
     if (query.status) {
-      filter.status = query.status;
+      baseFilter.status = query.status;
     }
     if (query.knowledgeModule) {
-      filter.knowledgeModule = query.knowledgeModule;
+      baseFilter.knowledgeModule = query.knowledgeModule;
     }
     if (query.courseLabel) {
       if (query.courseLabel === TASK_COURSE_LABEL_UNCLASSIFIED) {
-        filter.$or = [
-          { courseLabel: TASK_COURSE_LABEL_UNCLASSIFIED },
-          { courseLabel: { $exists: false } },
-          { courseLabel: null },
-          { courseLabel: '' },
-        ];
+        andFilters.push({
+          $or: [
+            { courseLabel: TASK_COURSE_LABEL_UNCLASSIFIED },
+            { courseLabel: { $exists: false } },
+            { courseLabel: null },
+            { courseLabel: '' },
+          ],
+        });
       } else {
-        filter.courseLabel = query.courseLabel;
+        baseFilter.courseLabel = query.courseLabel;
       }
     }
     if (query.stage) {
-      filter.stage = query.stage;
+      baseFilter.stage = query.stage;
     }
-    if (query.createdBy) {
-      filter.createdBy = new Types.ObjectId(query.createdBy);
+    if (scope === TASK_TEMPLATE_SCOPE_MINE) {
+      if (legacyCreatedBy && legacyCreatedBy !== userId) {
+        this.logger.debug(
+          `Ignoring createdBy filter outside current teacher scope: requested=${legacyCreatedBy}, current=${userId}`,
+        );
+      }
+      // createdBy remains for legacy query compatibility, but mine scope is always current teacher.
+      baseFilter.createdBy = userObjectId;
+    } else if (scope === TASK_TEMPLATE_SCOPE_SHARED) {
+      andFilters.push({ $or: this.getSharedVisibilityConditions() });
+    } else if (scope === TASK_TEMPLATE_SCOPE_ALL) {
+      andFilters.push({
+        $or: [
+          { createdBy: userObjectId },
+          ...this.getSharedVisibilityConditions(),
+        ],
+      });
     }
+
+    if (Object.keys(baseFilter).length > 0) {
+      andFilters.unshift(baseFilter);
+    }
+    const filter =
+      andFilters.length === 0
+        ? {}
+        : andFilters.length === 1
+          ? andFilters[0]
+          : { $and: andFilters };
 
     const [items, total] = await Promise.all([
       this.taskModel
@@ -209,9 +260,13 @@ export class LearningTasksService {
     };
   }
 
-  async getTask(id: string) {
+  async getTask(id: string, userId: string) {
     const task = await this.taskModel.findById(id).lean<TaskWithMeta>().exec();
     if (!task) {
+      throw new NotFoundException('Task not found');
+    }
+    const isOwner = task.createdBy.toString() === userId;
+    if (!isOwner && !this.isTaskSharedVisibility(task.visibility)) {
       throw new NotFoundException('Task not found');
     }
     return this.toTaskResponse(task);
@@ -506,6 +561,7 @@ export class LearningTasksService {
       description: task.description,
       knowledgeModule: task.knowledgeModule,
       courseLabel: this.toSanitizedCourseLabel(task.courseLabel),
+      visibility: this.toTaskVisibilityForRead(task.visibility),
       stage: task.stage,
       difficulty: task.difficulty,
       rubric: task.rubric,
@@ -515,6 +571,34 @@ export class LearningTasksService {
       updatedAt: task.updatedAt ?? new Date(0),
       publishedAt: task.publishedAt,
     } as TaskResponseDto;
+  }
+
+  private resolveTaskTemplateScope(scope: unknown): TaskTemplateScope {
+    if (scope === TASK_TEMPLATE_SCOPE_SHARED) {
+      return TASK_TEMPLATE_SCOPE_SHARED;
+    }
+    if (scope === TASK_TEMPLATE_SCOPE_ALL) {
+      return TASK_TEMPLATE_SCOPE_ALL;
+    }
+    return TASK_TEMPLATE_SCOPE_DEFAULT;
+  }
+
+  private getSharedVisibilityConditions(): Record<string, unknown>[] {
+    return [
+      { visibility: TASK_VISIBILITY_SHARED },
+      { visibility: { $exists: false } },
+      { visibility: null },
+      { visibility: '' },
+    ];
+  }
+
+  private isTaskSharedVisibility(visibility: unknown): boolean {
+    return this.toTaskVisibilityForRead(visibility) === TASK_VISIBILITY_SHARED;
+  }
+
+  private toTaskVisibilityForRead(visibility: unknown): TaskVisibility {
+    const sanitized = this.toSanitizedTaskVisibility(visibility);
+    return sanitized ?? TASK_VISIBILITY_SHARED;
   }
 
   private toSubmissionResponse(
@@ -927,5 +1011,24 @@ export class LearningTasksService {
     }
     const trimmed = value.trim();
     return trimmed ? trimmed : undefined;
+  }
+
+  private toSanitizedTaskVisibility(
+    value: unknown,
+  ): TaskVisibility | undefined {
+    if (typeof value !== 'string') {
+      return undefined;
+    }
+    const trimmed = value.trim().toUpperCase();
+    if (!trimmed) {
+      return undefined;
+    }
+    if (trimmed === TASK_VISIBILITY_PRIVATE) {
+      return TASK_VISIBILITY_PRIVATE;
+    }
+    if (trimmed === TASK_VISIBILITY_SHARED) {
+      return TASK_VISIBILITY_SHARED;
+    }
+    return undefined;
   }
 }
