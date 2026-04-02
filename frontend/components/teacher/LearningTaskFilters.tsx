@@ -168,7 +168,9 @@ export function LearningTaskFilters({
     const params = new URLSearchParams(searchParams.toString());
     updater(params);
     const nextQuery = params.toString();
-    router.replace(nextQuery ? `${pathname}?${nextQuery}` : pathname);
+    router.replace(nextQuery ? `${pathname}?${nextQuery}` : pathname, {
+      scroll: false,
+    });
   };
 
   const setCourseLabelFilterAndSync = (nextValue: string) => {
