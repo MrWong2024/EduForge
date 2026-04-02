@@ -44,8 +44,8 @@ frontend/
 - `/(auth)/login`：已完成登录与 role-home 跳转（`TEACHER -> /teacher/classrooms`, `STUDENT -> /student`）。
 - `/teacher/**`：教师起步链路、模板链路、班级发布链路、批阅链路、三件套、周报/过程性评价/快照已接入真接口。
 - 教师模板层（已落地）：
-  - `/teacher/tasks`：模板列表 + 创建 + 筛选（`status/knowledgeModule/stage` 本地筛选 + `courseLabel` URL 筛选）
-  - `/teacher/tasks/[taskId]/edit`：模板编辑与状态管理（含可选课程分类）
+  - `/teacher/tasks`：模板列表 + 创建 + 视图切换（默认 `scope=mine`，支持 `mine/shared/all`）+ 筛选（`status/knowledgeModule/stage` 本地筛选 + `courseLabel` URL 筛选），并展示模板可见性 `visibility(私有/共享)`
+  - `/teacher/tasks/[taskId]/edit`：模板编辑/查看与状态管理（含可选课程分类、模板可见性；非作者共享模板只读）
 - 教师班级实例层（已收口）：
   - `/teacher/classrooms/[classroomId]/tasks`：只选择已发布模板并发布到班级实例，不承担模板创建/编辑。
 - `/student/**`：学习看板、加入班级、任务详情、提交、submission detail、请求 AI 已接入真接口。
@@ -54,6 +54,9 @@ frontend/
 ## 3) 关键公共机制（已落地）
 
 - 统一路由常量：`lib/routes/paths.ts`（含 `paths.teacher.tasks`、`taskEdit`、`tasksFromClassroom`）。
+- 模板治理口径单一来源：
+  - `lib/learning-tasks/course-labels.ts`：`courseLabel` 候选项与“未分类”显示口径。
+  - `lib/learning-tasks/template-visibility-scope.ts`：`visibility(PRIVATE/SHARED)` 与 `scope(mine/shared/all)` 值域、显示文案、normalize。
 - 统一状态文案：`lib/ui/status.ts`（含 `NOT_REQUESTED` 正常语义）。
 - 统一 rubric 四维中文映射：`lib/ui/rubric.ts`（`functionality/correctness/codeStyle/design` 与中文文案的单一事实源，供 Teacher/Student 共同复用）。
 - 统一错误展开：`lib/api/error-presenter.ts` + `components/blocks/ErrorState.tsx`。
@@ -75,7 +78,8 @@ Teacher 起步与模板链路（可用）：
 1. `CreateCourseForm` -> `POST courses`
 2. `CreateClassroomForm` -> `POST classrooms`
 3. `/teacher/tasks` 进行模板创建/筛选，必要时进入 `/teacher/tasks/[taskId]/edit` 维护模板状态与 rubric
-   - 模板层已接入 `courseLabel`（课程分类）单选可空字段：创建/编辑可维护，列表可筛选并展示；该字段仅用于模板治理，不绑定课程。
+   - 模板层已接入 `courseLabel`（课程分类）与 `visibility`（私有/共享）字段：创建/编辑可维护，列表可筛选并展示；`courseLabel` 与 `visibility` 都是模板治理字段，不绑定课程。
+   - 模板列表默认 `scope=mine`，并支持显式切换 `mine/shared/all`；共享只影响读可见性，不改变作者权限边界。
 4. `/teacher/classrooms/[classroomId]/tasks` 选择已发布模板并设置 `dueAt/allowLate/maxAttempts` 后发布（`POST classrooms/:id/tasks`）
 5. 进入 `/teacher/classrooms/[classroomId]/tasks/[classroomTaskId]/*` 和提交管理页
 
@@ -138,8 +142,8 @@ Teacher 课堂复盘链路（可用）：
 - `GET /api/classrooms/:id/students`：成员页主读源。
 - `GET /api/classrooms/:classroomId/tasks/:classroomTaskId/submissions`：教师提交管理页主读源。
 - `GET /api/learning-tasks/submissions/:id`：Teacher/Student submission detail 主读源（稳定读源）。
-- `GET /api/learning-tasks/tasks` + `POST /api/learning-tasks/tasks`：模板页列表与创建。
-- `GET /api/learning-tasks/tasks/:id` + `PATCH /api/learning-tasks/tasks/:id`：模板编辑页详情与更新。
+- `GET /api/learning-tasks/tasks` + `POST /api/learning-tasks/tasks`：模板页列表与创建（前端已接入 `scope` 查询与 `visibility` 创建字段）。
+- `GET /api/learning-tasks/tasks/:id` + `PATCH /api/learning-tasks/tasks/:id`：模板编辑页详情与更新（前端已接入 `visibility` 回填/更新与非作者只读查看）。
 - `POST /api/classrooms/:id/tasks`：班级任务实例发布。
 
 补充：
@@ -169,7 +173,8 @@ Teacher 课堂复盘链路（可用）：
 - submission detail 稳定读源已落地（双角色详情页）。
 - AI 闭环前端产品入口已落地（request + 状态提示 + 帮助页）。
 - 任务模板页能力已落地：创建、编辑、基础 rubric 配置、筛选与跨页上下文链路。
-- 任务模板课程分类（`courseLabel`）已接入前端：单选、可空、非绑定，仅用于模板治理（筛选/分组/展示辅助），不限制跨课程复用。
+- 任务模板课程分类（`courseLabel`）与模板可见性（`visibility`）已接入前端：`courseLabel` 单选可空、`visibility` 两档单选，均用于模板治理，不绑定课程、不限制跨课程复用。
+- 模板列表视图已接入 `scope`（`mine/shared/all`），默认 `mine`；`shared` 视图可读共享模板，非作者模板不暴露误导性编辑入口。
 - 班级任务页职责已收口：仅发布已有 `PUBLISHED` 模板，且模板选择体验已增强。
 
 未达到：

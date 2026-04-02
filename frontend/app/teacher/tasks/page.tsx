@@ -7,8 +7,13 @@ import { CreateLearningTaskForm } from "@/components/teacher/CreateLearningTaskF
 import { LearningTaskFilters } from "@/components/teacher/LearningTaskFilters";
 import { fetchJson, FetchJsonError } from "@/lib/api/client";
 import { buildErrorDescription, extractRawDetail } from "@/lib/api/error-presenter";
+import { getMe } from "@/lib/auth/session";
 import { toLearningTaskListResponse } from "@/lib/api/types-teacher";
 import { normalizeTaskCourseLabel } from "@/lib/learning-tasks/course-labels";
+import {
+  DEFAULT_TASK_TEMPLATE_SCOPE,
+  normalizeTaskTemplateScope,
+} from "@/lib/learning-tasks/template-visibility-scope";
 import { paths } from "@/lib/routes/paths";
 import { buildQueryString, getSingleSearchParam } from "@/lib/ui/format";
 import { getCommonErrorSummary } from "@/lib/ui/status";
@@ -31,6 +36,7 @@ type LearningTasksViewModel =
   | {
       mode: "ready";
       taskList: ReturnType<typeof toLearningTaskListResponse>;
+      currentUserId?: string;
     }
   | { mode: "error"; status: number; description: string };
 
@@ -41,6 +47,7 @@ type TeacherLearningTasksPageProps = {
     knowledgeModule?: string | string[];
     stage?: string | string[];
     courseLabel?: string | string[];
+    scope?: string | string[];
   }>;
 };
 
@@ -56,6 +63,9 @@ export default async function TeacherLearningTasksPage({
   const initialCourseLabelFilter = normalizeTaskCourseLabel(
     getSingleSearchParam(query.courseLabel)
   );
+  const initialScope =
+    normalizeTaskTemplateScope(getSingleSearchParam(query.scope)) ??
+    DEFAULT_TASK_TEMPLATE_SCOPE;
 
   let viewModel: LearningTasksViewModel = {
     mode: "error",
@@ -68,16 +78,22 @@ export default async function TeacherLearningTasksPage({
     const listQuery = buildQueryString({
       page: 1,
       limit: 100,
+      scope: initialScope,
       courseLabel: initialCourseLabelFilter,
     });
-    const payload = await fetchJson<unknown>(`learning-tasks/tasks?${listQuery}`, {
-      origin,
-      cache: "no-store",
-    });
+    const [payload, me] = await Promise.all([
+      fetchJson<unknown>(`learning-tasks/tasks?${listQuery}`, {
+        origin,
+        cache: "no-store",
+      }),
+      getMe().catch(() => null),
+    ]);
 
     viewModel = {
       mode: "ready",
       taskList: toLearningTaskListResponse(payload),
+      currentUserId:
+        typeof me?.id === "string" && me.id.trim() ? me.id.trim() : undefined,
     };
   } catch (error) {
     if (error instanceof FetchJsonError) {
@@ -132,6 +148,7 @@ export default async function TeacherLearningTasksPage({
         <p className="mt-1">先筛选模板，再去班级任务页发布，效率更高。</p>
         <p className="mt-1">rubric 用于模板层的基础评分参考，班级发布页不配置 rubric。</p>
         <p className="mt-1">课程分类仅用于模板治理，不代表班级绑定课程，也不限制跨课程复用。</p>
+        <p className="mt-1">默认视图为“我的模板”；切换到共享/全部视图只影响可见性，不改变作者权限边界。</p>
         {fromClassroomId ? (
           <p className="mt-2 text-sm text-blue-700">
             你正从班级任务页进入。建议先筛选 `PUBLISHED` 模板，选定后返回班级发布。
@@ -143,6 +160,8 @@ export default async function TeacherLearningTasksPage({
 
       <LearningTaskFilters
         tasks={viewModel.taskList.items}
+        currentUserId={viewModel.currentUserId}
+        initialScope={initialScope}
         initialStatus={initialStatusFilter}
         initialKnowledgeModule={initialKnowledgeModuleFilter}
         initialStage={initialStageFilter}

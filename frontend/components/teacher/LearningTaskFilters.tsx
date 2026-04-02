@@ -14,9 +14,19 @@ import {
   isUnclassifiedTaskCourseLabel,
   toTaskCourseLabelDisplayText,
 } from "@/lib/learning-tasks/course-labels";
+import {
+  TASK_TEMPLATE_SCOPE_LABELS,
+  TASK_TEMPLATE_SCOPES,
+  toTaskTemplateVisibilityLabel,
+  normalizeTaskTemplateScope,
+  normalizeTaskTemplateVisibility,
+  type TaskTemplateScope,
+} from "@/lib/learning-tasks/template-visibility-scope";
 
 type LearningTaskFiltersProps = {
   tasks: LearningTaskOption[];
+  currentUserId?: string;
+  initialScope: TaskTemplateScope;
   initialStatus?: string;
   initialKnowledgeModule?: string;
   initialStage?: string;
@@ -105,6 +115,8 @@ const summarizeRubric = (rubric: Record<string, unknown> | undefined): RubricSum
 
 export function LearningTaskFilters({
   tasks,
+  currentUserId,
+  initialScope,
   initialStatus,
   initialKnowledgeModule,
   initialStage,
@@ -140,17 +152,34 @@ export function LearningTaskFilters({
     const normalized = normalizeTaskCourseLabel(initialCourseLabel);
     return normalized ?? "";
   });
+  const currentScope =
+    normalizeTaskTemplateScope(searchParams.get("scope")) ?? initialScope;
+
+  const replaceSearchQuery = (
+    updater: (params: URLSearchParams) => void
+  ) => {
+    const params = new URLSearchParams(searchParams.toString());
+    updater(params);
+    const nextQuery = params.toString();
+    router.replace(nextQuery ? `${pathname}?${nextQuery}` : pathname);
+  };
 
   const setCourseLabelFilterAndSync = (nextValue: string) => {
     setCourseLabelFilter(nextValue);
-    const params = new URLSearchParams(searchParams.toString());
-    if (nextValue) {
-      params.set("courseLabel", nextValue);
-    } else {
-      params.delete("courseLabel");
-    }
-    const nextQuery = params.toString();
-    router.replace(nextQuery ? `${pathname}?${nextQuery}` : pathname);
+    replaceSearchQuery((params) => {
+      if (nextValue) {
+        params.set("courseLabel", nextValue);
+      } else {
+        params.delete("courseLabel");
+      }
+    });
+  };
+
+  const setScopeAndSync = (nextScope: TaskTemplateScope) => {
+    replaceSearchQuery((params) => {
+      params.set("scope", nextScope);
+      params.delete("page");
+    });
   };
 
   const filteredTasks = useMemo(
@@ -209,6 +238,31 @@ export function LearningTaskFilters({
 
   return (
     <section className="space-y-4">
+      <section className="rounded-lg border border-zinc-200 bg-white p-3">
+        <div className="flex flex-wrap items-center gap-2">
+          {TASK_TEMPLATE_SCOPES.map((scope) => {
+            const isActive = currentScope === scope;
+            return (
+              <button
+                key={scope}
+                type="button"
+                onClick={() => setScopeAndSync(scope)}
+                className={`rounded-md border px-3 py-1.5 text-sm ${
+                  isActive
+                    ? "border-zinc-900 bg-zinc-900 text-white"
+                    : "border-zinc-300 bg-white text-zinc-700 hover:bg-zinc-100"
+                }`}
+              >
+                {TASK_TEMPLATE_SCOPE_LABELS[scope]}
+              </button>
+            );
+          })}
+        </div>
+        <p className="mt-2 text-xs text-zinc-500">
+          当前视图：{TASK_TEMPLATE_SCOPE_LABELS[currentScope]}。共享只影响可见性，不改变作者编辑或发布权限。
+        </p>
+      </section>
+
       <section className="rounded-lg border border-zinc-200 bg-white p-4">
         <h2 className="text-base font-semibold text-zinc-900">模板筛选</h2>
         <p className="mt-1 text-sm text-zinc-600">
@@ -331,15 +385,16 @@ export function LearningTaskFilters({
         />
       ) : (
         <div className="overflow-x-auto rounded-lg border border-zinc-200 bg-white">
-          <table className="min-w-[1240px] w-full table-fixed border-collapse text-sm">
+          <table className="min-w-[1360px] w-full table-fixed border-collapse text-sm">
             <colgroup>
-              <col className="w-[17%]" />
-              <col className="w-[31%]" />
-              <col className="w-[9%]" />
+              <col className="w-[16%]" />
+              <col className="w-[28%]" />
+              <col className="w-[8%]" />
               <col className="w-[6%]" />
-              <col className="w-[11%]" />
               <col className="w-[10%]" />
-              <col className="w-[10%]" />
+              <col className="w-[8%]" />
+              <col className="w-[9%]" />
+              <col className="w-[9%]" />
               <col className="w-[6%]" />
             </colgroup>
             <thead className="bg-zinc-50 text-left text-xs font-semibold tracking-wide text-zinc-700">
@@ -349,6 +404,7 @@ export function LearningTaskFilters({
                 <th className="px-4 py-3">知识模块</th>
                 <th className="px-4 py-3">阶段</th>
                 <th className="px-4 py-3">状态</th>
+                <th className="px-4 py-3">可见性</th>
                 <th className="px-4 py-3">课程分类</th>
                 <th className="px-4 py-3">评分配置</th>
                 <th className="px-4 py-3">操作</th>
@@ -376,6 +432,15 @@ export function LearningTaskFilters({
                 const rubricBadgeClass = rubricSummary.configured
                   ? "border-sky-200 bg-sky-100 text-sky-700"
                   : "border-zinc-200 bg-zinc-100 text-zinc-700";
+                const visibility = normalizeTaskTemplateVisibility(task.visibility);
+                const visibilityBadgeClass =
+                  visibility === "PRIVATE"
+                    ? "border-zinc-300 bg-zinc-100 text-zinc-700"
+                    : "border-emerald-200 bg-emerald-100 text-emerald-700";
+                const canEditTask =
+                  !currentUserId ||
+                  !task.createdById ||
+                  task.createdById === currentUserId;
 
                 return (
                   <tr
@@ -409,6 +474,13 @@ export function LearningTaskFilters({
                     </td>
                     <td className="px-4 py-3">
                       <span
+                        className={`inline-flex rounded border px-2 py-0.5 text-xs font-semibold ${visibilityBadgeClass}`}
+                      >
+                        {toTaskTemplateVisibilityLabel(task.visibility)}
+                      </span>
+                    </td>
+                    <td className="px-4 py-3">
+                      <span
                         className={`inline-flex rounded border px-2 py-0.5 text-xs font-medium ${
                           isUnclassifiedTaskCourseLabel(task.courseLabel)
                             ? "border-zinc-200 bg-zinc-100 text-zinc-700"
@@ -430,9 +502,14 @@ export function LearningTaskFilters({
                     </td>
                     <td className="whitespace-nowrap px-4 py-3">
                       {task.id ? (
-                        <Link href={paths.teacher.taskEdit(task.id)} className="text-blue-700 hover:underline">
-                          编辑
-                        </Link>
+                        <div className="space-y-1">
+                          <Link href={paths.teacher.taskEdit(task.id)} className="text-blue-700 hover:underline">
+                            {canEditTask ? "编辑" : "查看"}
+                          </Link>
+                          {!canEditTask ? (
+                            <p className="text-xs text-zinc-500">非作者模板</p>
+                          ) : null}
+                        </div>
                       ) : (
                         <span className="text-zinc-500">缺少模板标识</span>
                       )}

@@ -1,6 +1,11 @@
 import { safeGet } from "@/lib/ui/format";
 import type { TaskCourseLabel } from "@/lib/learning-tasks/course-labels";
 import {
+  normalizeTaskTemplateVisibility,
+  type TaskTemplateScope,
+  type TaskTemplateVisibility,
+} from "@/lib/learning-tasks/template-visibility-scope";
+import {
   toListFeedbackResponse,
   toSubmissionDetailResponse as toStudentSubmissionDetailResponse,
   type FeedbackItem,
@@ -204,6 +209,7 @@ export type CreateLearningTaskRequest = {
   description: string;
   knowledgeModule: string;
   courseLabel?: string;
+  visibility?: TaskTemplateVisibility;
   stage: number;
   status: LearningTaskStatus;
   rubric?: Record<string, unknown>;
@@ -214,6 +220,7 @@ export type UpdateLearningTaskRequest = {
   description: string;
   knowledgeModule: string;
   courseLabel?: string;
+  visibility?: TaskTemplateVisibility;
   stage: number;
   status: LearningTaskStatus;
   rubric?: Record<string, unknown>;
@@ -222,6 +229,7 @@ export type UpdateLearningTaskRequest = {
 export type ListLearningTasksRequest = {
   page?: number;
   limit?: number;
+  scope?: TaskTemplateScope;
   status?: LearningTaskStatus;
   knowledgeModule?: string;
   courseLabel?: TaskCourseLabel;
@@ -235,6 +243,8 @@ export type LearningTaskOption = {
   status?: string;
   knowledgeModule?: string;
   courseLabel?: string;
+  visibility?: TaskTemplateVisibility;
+  createdById?: string;
   stage?: number;
   rubric?: Record<string, unknown>;
   raw: UnknownRecord;
@@ -633,6 +643,7 @@ export const toSubmitTaskResponse = (payload: unknown): SubmitTaskResponse =>
 
 export const toLearningTaskOption = (value: unknown): LearningTaskOption => {
   const record = asRecord(value);
+  const createdByRecord = asRecord(record.createdBy);
   const rubricRecord = asRecord(record.rubric);
   return {
     id: asString(record.id) ?? asString(record.taskId),
@@ -641,6 +652,12 @@ export const toLearningTaskOption = (value: unknown): LearningTaskOption => {
     status: asString(record.status),
     knowledgeModule: asString(record.knowledgeModule),
     courseLabel: asString(record.courseLabel),
+    visibility: normalizeTaskTemplateVisibility(record.visibility),
+    createdById:
+      asString(record.createdBy) ??
+      asString(createdByRecord.id) ??
+      asString(createdByRecord._id) ??
+      asString(createdByRecord.userId),
     stage: asNumber(record.stage),
     rubric: Object.keys(rubricRecord).length > 0 ? rubricRecord : undefined,
     raw: record,

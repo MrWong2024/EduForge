@@ -15,6 +15,12 @@ import {
   TASK_COURSE_LABEL_FORM_OPTIONS,
   normalizeTaskCourseLabel,
 } from "@/lib/learning-tasks/course-labels";
+import {
+  TASK_TEMPLATE_VISIBILITIES,
+  TASK_TEMPLATE_VISIBILITY_PRIVATE,
+  TASK_TEMPLATE_VISIBILITY_LABELS,
+  type TaskTemplateVisibility,
+} from "@/lib/learning-tasks/template-visibility-scope";
 import { getRubricDimensionLabel } from "@/lib/ui/rubric";
 
 type CreateLearningTaskFormErrorState = {
@@ -85,6 +91,9 @@ export function CreateLearningTaskForm() {
   const [description, setDescription] = useState("");
   const [knowledgeModule, setKnowledgeModule] = useState("");
   const [courseLabel, setCourseLabel] = useState("");
+  const [visibility, setVisibility] = useState<TaskTemplateVisibility>(
+    TASK_TEMPLATE_VISIBILITY_PRIVATE
+  );
   const [stage, setStage] = useState("1");
   const [status, setStatus] = useState<LearningTaskStatus>("DRAFT");
   const [functionalityWeight, setFunctionalityWeight] = useState("");
@@ -190,6 +199,7 @@ export function CreateLearningTaskForm() {
       title: trimmedTitle,
       description: trimmedDescription,
       knowledgeModule: trimmedKnowledgeModule,
+      visibility,
       stage: parsedStage,
       status,
     };
@@ -230,6 +240,7 @@ export function CreateLearningTaskForm() {
       setDescription("");
       setKnowledgeModule("");
       setCourseLabel("");
+      setVisibility(TASK_TEMPLATE_VISIBILITY_PRIVATE);
       setStage("1");
       setStatus("DRAFT");
       setFunctionalityWeight("");
@@ -303,6 +314,26 @@ export function CreateLearningTaskForm() {
             </select>
             <p className="mt-1 text-xs text-zinc-500">
               可选字段，仅用于模板治理（筛选/分组/检索辅助），不绑定课程。
+            </p>
+          </label>
+
+          <label className="block text-sm">
+            <span className="mb-1 block text-zinc-700">模板可见性</span>
+            <select
+              value={visibility}
+              onChange={(event) =>
+                setVisibility(event.target.value as TaskTemplateVisibility)
+              }
+              className="w-full rounded-md border border-zinc-300 px-3 py-2"
+            >
+              {TASK_TEMPLATE_VISIBILITIES.map((item) => (
+                <option key={item} value={item}>
+                  {TASK_TEMPLATE_VISIBILITY_LABELS[item]}
+                </option>
+              ))}
+            </select>
+            <p className="mt-1 text-xs text-zinc-500">
+              共享后其他教师可查看，但不能编辑或发布该模板。
             </p>
           </label>
         </div>

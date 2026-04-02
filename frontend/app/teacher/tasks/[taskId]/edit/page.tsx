@@ -5,6 +5,7 @@ import { PageHeader } from "@/components/blocks/PageHeader";
 import { EditLearningTaskForm } from "@/components/teacher/EditLearningTaskForm";
 import { fetchJson, FetchJsonError } from "@/lib/api/client";
 import { buildErrorDescription, extractRawDetail } from "@/lib/api/error-presenter";
+import { getMe } from "@/lib/auth/session";
 import { toLearningTaskDetailResponse } from "@/lib/api/types-teacher";
 import { paths } from "@/lib/routes/paths";
 import { getCommonErrorSummary } from "@/lib/ui/status";
@@ -29,6 +30,7 @@ type EditTaskViewModel =
       mode: "ready";
       task: ReturnType<typeof toLearningTaskDetailResponse>;
       taskId: string;
+      canEdit: boolean;
     }
   | { mode: "error"; status: number; description: string };
 
@@ -52,18 +54,26 @@ export default async function EditLearningTaskPage({ params }: EditLearningTaskP
 
   try {
     const origin = await getRequestOrigin();
-    const payload = await fetchJson<unknown>(
-      `learning-tasks/tasks/${encodeURIComponent(taskId)}`,
-      {
+    const [payload, me] = await Promise.all([
+      fetchJson<unknown>(`learning-tasks/tasks/${encodeURIComponent(taskId)}`, {
         origin,
         cache: "no-store",
-      }
-    );
+      }),
+      getMe().catch(() => null),
+    ]);
+    const task = toLearningTaskDetailResponse(payload);
+    const currentUserId =
+      typeof me?.id === "string" && me.id.trim() ? me.id.trim() : undefined;
+    const canEdit =
+      !currentUserId ||
+      !task.createdById ||
+      task.createdById === currentUserId;
 
     viewModel = {
       mode: "ready",
-      task: toLearningTaskDetailResponse(payload),
+      task,
       taskId,
+      canEdit,
     };
   } catch (error) {
     if (error instanceof FetchJsonError) {
@@ -85,7 +95,7 @@ export default async function EditLearningTaskPage({ params }: EditLearningTaskP
   return (
     <section className="space-y-4">
       <PageHeader
-        title="编辑任务模板"
+        title={viewModel.canEdit ? "编辑任务模板" : "查看任务模板"}
         description={`模板：${toDisplayText(viewModel.task.title, "未命名模板")} | 状态：${toDisplayText(
           viewModel.task.status
         )}`}
@@ -102,14 +112,22 @@ export default async function EditLearningTaskPage({ params }: EditLearningTaskP
       />
 
       <section className="rounded-lg border border-zinc-200 bg-white p-4 text-sm text-zinc-700">
-        <p>此页用于维护 learning task 模板字段与基础评分配置。</p>
+        <p>
+          {viewModel.canEdit
+            ? "此页用于维护 learning task 模板字段与基础评分配置。"
+            : "此页展示共享模板详情；你当前仅有查看权限。"}
+        </p>
         <p className="mt-1">
           当前模板：{toDisplayText(viewModel.task.title, "未命名模板")}（状态：
           {toDisplayText(viewModel.task.status)}）
         </p>
       </section>
 
-      <EditLearningTaskForm taskId={viewModel.taskId} initialTask={viewModel.task} />
+      <EditLearningTaskForm
+        taskId={viewModel.taskId}
+        initialTask={viewModel.task}
+        readOnly={!viewModel.canEdit}
+      />
     </section>
   );
 }

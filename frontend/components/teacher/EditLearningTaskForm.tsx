@@ -18,12 +18,20 @@ import {
   TASK_COURSE_LABEL_UNCLASSIFIED,
   normalizeTaskCourseLabel,
 } from "@/lib/learning-tasks/course-labels";
+import {
+  TASK_TEMPLATE_VISIBILITIES,
+  TASK_TEMPLATE_VISIBILITY_LABELS,
+  TASK_TEMPLATE_VISIBILITY_SHARED,
+  normalizeTaskTemplateVisibility,
+  type TaskTemplateVisibility,
+} from "@/lib/learning-tasks/template-visibility-scope";
 import { paths } from "@/lib/routes/paths";
 import { getRubricDimensionLabel } from "@/lib/ui/rubric";
 
 type EditLearningTaskFormProps = {
   taskId: string;
   initialTask: LearningTaskDetailResponse;
+  readOnly?: boolean;
 };
 
 type EditLearningTaskFormErrorState = {
@@ -166,10 +174,17 @@ const getUpdateErrorSummary = (status: number): string => {
   return "更新任务模板失败，请稍后重试。";
 };
 
-export function EditLearningTaskForm({ taskId, initialTask }: EditLearningTaskFormProps) {
+export function EditLearningTaskForm({
+  taskId,
+  initialTask,
+  readOnly = false,
+}: EditLearningTaskFormProps) {
   const router = useRouter();
   const rubricSeed = extractRubricFormSeed(initialTask.rubric);
   const initialCourseLabel = normalizeTaskCourseLabel(initialTask.courseLabel);
+  const initialVisibility =
+    normalizeTaskTemplateVisibility(initialTask.visibility) ??
+    TASK_TEMPLATE_VISIBILITY_SHARED;
   const [title, setTitle] = useState(initialTask.title ?? "");
   const [description, setDescription] = useState(initialTask.description ?? "");
   const [knowledgeModule, setKnowledgeModule] = useState(initialTask.knowledgeModule ?? "");
@@ -186,6 +201,8 @@ export function EditLearningTaskForm({ taskId, initialTask }: EditLearningTaskFo
   const [status, setStatus] = useState<LearningTaskStatus>(
     toStatusInitial(initialTask.status)
   );
+  const [visibility, setVisibility] =
+    useState<TaskTemplateVisibility>(initialVisibility);
   const [functionalityWeight, setFunctionalityWeight] = useState(
     rubricSeed.functionalityWeight
   );
@@ -201,6 +218,9 @@ export function EditLearningTaskForm({ taskId, initialTask }: EditLearningTaskFo
 
   const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+    if (readOnly) {
+      return;
+    }
 
     const trimmedTitle = title.trim();
     const trimmedDescription = description.trim();
@@ -295,6 +315,7 @@ export function EditLearningTaskForm({ taskId, initialTask }: EditLearningTaskFo
       description: trimmedDescription,
       knowledgeModule: trimmedKnowledgeModule,
       courseLabel: normalizedCourseLabel ?? "",
+      visibility,
       stage: parsedStage,
       status,
     };
@@ -351,12 +372,20 @@ export function EditLearningTaskForm({ taskId, initialTask }: EditLearningTaskFo
 
   return (
     <section className="rounded-lg border border-zinc-200 bg-white p-4">
-      <h2 className="text-base font-semibold text-zinc-900">编辑任务模板</h2>
+      <h2 className="text-base font-semibold text-zinc-900">
+        {readOnly ? "查看任务模板" : "编辑任务模板"}
+      </h2>
       <p className="mt-1 text-sm text-zinc-600">
         修改的是 learning task 模板本身，不是班级任务实例。
       </p>
+      {readOnly ? (
+        <p className="mt-2 text-xs text-zinc-600">
+          当前模板由其他教师创建，你可以查看内容，但不能编辑或发布该模板。
+        </p>
+      ) : null}
 
       <form onSubmit={handleSubmit} className="mt-4 space-y-4">
+        <fieldset disabled={isSubmitting || readOnly} className="space-y-4">
         <div className="grid gap-4 md:grid-cols-2">
           <label className="block text-sm">
             <span className="mb-1 block text-zinc-700">标题</span>
@@ -396,6 +425,26 @@ export function EditLearningTaskForm({ taskId, initialTask }: EditLearningTaskFo
             </select>
             <p className="mt-1 text-xs text-zinc-500">
               可选字段，仅用于模板治理（筛选/分组/检索辅助），不绑定课程。
+            </p>
+          </label>
+
+          <label className="block text-sm">
+            <span className="mb-1 block text-zinc-700">模板可见性</span>
+            <select
+              value={visibility}
+              onChange={(event) =>
+                setVisibility(event.target.value as TaskTemplateVisibility)
+              }
+              className="w-full rounded-md border border-zinc-300 px-3 py-2"
+            >
+              {TASK_TEMPLATE_VISIBILITIES.map((item) => (
+                <option key={item} value={item}>
+                  {TASK_TEMPLATE_VISIBILITY_LABELS[item]}
+                </option>
+              ))}
+            </select>
+            <p className="mt-1 text-xs text-zinc-500">
+              共享后其他教师可查看，但不能编辑或发布该模板。
             </p>
           </label>
         </div>
@@ -527,17 +576,20 @@ export function EditLearningTaskForm({ taskId, initialTask }: EditLearningTaskFo
         </section>
 
         <div className="flex flex-wrap items-center gap-3">
-          <button
-            type="submit"
-            disabled={isSubmitting}
-            className="rounded-md bg-zinc-900 px-4 py-2 text-sm font-medium text-white disabled:cursor-not-allowed disabled:bg-zinc-400"
-          >
-            {isSubmitting ? "保存中..." : "保存修改"}
-          </button>
+          {!readOnly ? (
+            <button
+              type="submit"
+              disabled={isSubmitting}
+              className="rounded-md bg-zinc-900 px-4 py-2 text-sm font-medium text-white disabled:cursor-not-allowed disabled:bg-zinc-400"
+            >
+              {isSubmitting ? "保存中..." : "保存修改"}
+            </button>
+          ) : null}
           <Link href={paths.teacher.tasks} className="text-sm text-blue-700 hover:underline">
             返回任务模板列表
           </Link>
         </div>
+        </fieldset>
       </form>
 
       {successMessage ? <p className="mt-3 text-sm text-emerald-700">{successMessage}</p> : null}

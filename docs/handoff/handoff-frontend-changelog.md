@@ -247,6 +247,15 @@
 - 【实现约束】前端新增单一来源 `frontend/lib/learning-tasks/course-labels.ts` 维护候选项与“未分类”口径；表单/筛选/列表展示共同复用，避免多处硬编码漂移。
 - 【不要回退】不要把 `courseLabel` 改成多选或自由输入，不要把其文案改为“所属课程/绑定课程”，不要在发布到班级流程增加课程一致性限制。
 
+## UAT-FE-28
+
+- 【本步解决】任务模板页未接入 `visibility/scope`，教师无法显式区分“我的模板/共享池/全部模板”，且共享模板操作边界不清晰的问题。
+- 【新增事实 / 已收口口径】`/teacher/tasks` 默认以 `scope=mine` 拉取模板，并新增 `mine/shared/all` 视图切换（URL query 同步）；列表新增 `visibility`（私有/共享）展示，且与 `courseLabel` 可叠加使用。
+- 【创建/编辑接入】`CreateLearningTaskForm` 与 `EditLearningTaskForm` 已接入 `visibility` 单选（`PRIVATE/SHARED`）；创建默认 `PRIVATE`；编辑可在私有/共享间切换并提交。
+- 【权限边界前端收口】非作者共享模板在列表操作列不再暴露“编辑”语义入口，统一为“查看”；进入 `/teacher/tasks/[taskId]/edit` 时以只读模式展示，避免误导性可写交互。
+- 【单一来源】前端新增 `frontend/lib/learning-tasks/template-visibility-scope.ts` 作为 `visibility/scope` 值域、显示文案与 normalize 的单一来源。
+- 【不要回退】不要恢复“默认公共池”列表行为，不要在非作者共享模板上展示可误导的编辑/发布/删除入口，不要把 `visibility` 与课程绑定语义混用。
+
 ## 当前阶段一句话结论
 
 前端已达到“Teacher/Student 主链路可用 + 任务模板层与班级实例层边界收口 + 教师模板主链路可维护”的工程验收阶段，但尚未进入最终交付定版阶段。
