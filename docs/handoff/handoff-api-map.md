@@ -113,6 +113,9 @@ Notes:
 | GET | `/api/learning-tasks/tasks/:id/reports/common-issues` | common-issues 报表（topTags/topTypes/examples）。 |
 
 Notes:
+- `Task.courseLabel`：可选字符串字段（单选课程分类），白名单来源 `backend/src/modules/learning-tasks/task-course-labels.constants.ts`；非 `Course` 外键，不参与权限与发布约束，不限制跨课程复用。
+- `POST/PATCH/GET /api/learning-tasks/tasks*`：入参与出参已支持 `courseLabel`；空值/缺省表示“未分类/通用模板”。
+- `GET /api/learning-tasks/tasks` Query：`status, knowledgeModule, courseLabel, stage, page, limit, createdBy`；`courseLabel=未分类` 时兼容匹配字段缺省任务。
 - `/api/learning-tasks/submissions/:submissionId/ai-feedback/request` 是产品能力，不受 `AI_FEEDBACK_DEBUG_ENABLED` 门禁影响，但受登录 + RBAC + 资源归属校验。
 - 幂等语义：job 已存在则返回既有 job（200）；不存在则创建 `PENDING` job。
 - `GET /api/learning-tasks/submissions/:id` 权限：学生本人可读；若 `classroomTaskId` 存在，仅该 `classroomTask` 所属班级 owner teacher 可读；若 `classroomTaskId` 为空，仅 `task.createdBy` 对应的 task owner teacher 可读；其他用户返回 `403`；submission 不存在返回 `404`。

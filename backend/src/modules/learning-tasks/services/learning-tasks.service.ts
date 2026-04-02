@@ -26,6 +26,7 @@ import { TaskResponseDto } from '../dto/task-response.dto';
 import { SubmissionResponseDto } from '../dto/submission-response.dto';
 import { FeedbackResponseDto } from '../dto/feedback-response.dto';
 import { SubmissionDetailResponseDto } from '../dto/submission-detail-response.dto';
+import { TASK_COURSE_LABEL_UNCLASSIFIED } from '../task-course-labels.constants';
 import { AiFeedbackJobService } from '../ai-feedback/services/ai-feedback-job.service';
 import { AiFeedbackJobStatus } from '../ai-feedback/schemas/ai-feedback-job.schema';
 import { AiFeedbackStatus } from '../ai-feedback/interfaces/ai-feedback-status.enum';
@@ -88,8 +89,10 @@ export class LearningTasksService {
 
   async createTask(dto: CreateTaskDto, userId: string) {
     const now = new Date();
+    const courseLabel = this.toSanitizedCourseLabel(dto.courseLabel);
     const task = await this.taskModel.create({
       ...dto,
+      courseLabel,
       createdBy: new Types.ObjectId(userId),
       publishedAt: dto.status === TaskStatus.Published ? now : undefined,
     });
@@ -107,7 +110,31 @@ export class LearningTasksService {
     if (task.status === TaskStatus.Archived) {
       throw new BadRequestException('Archived tasks cannot be updated');
     }
-    Object.assign(task, dto);
+    const hasCourseLabel = 'courseLabel' in dto;
+    if (dto.title !== undefined) {
+      task.title = dto.title;
+    }
+    if (dto.description !== undefined) {
+      task.description = dto.description;
+    }
+    if (dto.knowledgeModule !== undefined) {
+      task.knowledgeModule = dto.knowledgeModule;
+    }
+    if (dto.stage !== undefined) {
+      task.stage = dto.stage;
+    }
+    if (dto.difficulty !== undefined) {
+      task.difficulty = dto.difficulty;
+    }
+    if (dto.rubric !== undefined) {
+      task.rubric = dto.rubric;
+    }
+    if (dto.status !== undefined) {
+      task.status = dto.status;
+    }
+    if (hasCourseLabel) {
+      task.courseLabel = this.toSanitizedCourseLabel(dto.courseLabel);
+    }
     if (dto.status === TaskStatus.Published && !task.publishedAt) {
       task.publishedAt = new Date();
     }
@@ -143,6 +170,18 @@ export class LearningTasksService {
     }
     if (query.knowledgeModule) {
       filter.knowledgeModule = query.knowledgeModule;
+    }
+    if (query.courseLabel) {
+      if (query.courseLabel === TASK_COURSE_LABEL_UNCLASSIFIED) {
+        filter.$or = [
+          { courseLabel: TASK_COURSE_LABEL_UNCLASSIFIED },
+          { courseLabel: { $exists: false } },
+          { courseLabel: null },
+          { courseLabel: '' },
+        ];
+      } else {
+        filter.courseLabel = query.courseLabel;
+      }
     }
     if (query.stage) {
       filter.stage = query.stage;
@@ -466,6 +505,7 @@ export class LearningTasksService {
       title: task.title,
       description: task.description,
       knowledgeModule: task.knowledgeModule,
+      courseLabel: this.toSanitizedCourseLabel(task.courseLabel),
       stage: task.stage,
       difficulty: task.difficulty,
       rubric: task.rubric,
@@ -879,5 +919,13 @@ export class LearningTasksService {
       createdAt: feedback.createdAt ?? new Date(0),
       updatedAt: feedback.updatedAt ?? new Date(0),
     } as FeedbackResponseDto;
+  }
+
+  private toSanitizedCourseLabel(value: unknown): string | undefined {
+    if (typeof value !== 'string') {
+      return undefined;
+    }
+    const trimmed = value.trim();
+    return trimmed ? trimmed : undefined;
   }
 }

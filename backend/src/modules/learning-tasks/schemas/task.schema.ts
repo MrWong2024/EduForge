@@ -1,6 +1,7 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
 import { HydratedDocument, Types } from 'mongoose';
 import { User } from '../../users/schemas/user.schema';
+import { TASK_COURSE_LABELS } from '../task-course-labels.constants';
 
 export type TaskDocument = HydratedDocument<Task>;
 
@@ -20,6 +21,9 @@ export class Task {
 
   @Prop({ required: true, trim: true })
   knowledgeModule!: string;
+
+  @Prop({ trim: true, enum: TASK_COURSE_LABELS })
+  courseLabel?: string;
 
   @Prop({ required: true, min: 1, max: 4 })
   stage!: number;
@@ -45,3 +49,5 @@ export const TaskSchema = SchemaFactory.createForClass(Task);
 TaskSchema.index({ createdBy: 1, createdAt: -1 });
 // Supports listTasks composite filters (status/knowledgeModule/stage) with createdAt sort.
 TaskSchema.index({ status: 1, knowledgeModule: 1, stage: 1, createdAt: -1 });
+// Supports listTasks filtering by status + courseLabel with createdAt sort.
+TaskSchema.index({ status: 1, courseLabel: 1, createdAt: -1 });

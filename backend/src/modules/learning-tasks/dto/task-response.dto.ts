@@ -5,6 +5,7 @@ export class TaskResponseDto {
   title!: string;
   description!: string;
   knowledgeModule!: string;
+  courseLabel?: string;
   stage!: number;
   difficulty?: string;
   rubric?: Record<string, unknown>;

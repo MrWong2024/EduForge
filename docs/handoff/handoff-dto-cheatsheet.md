@@ -290,8 +290,11 @@
   - `knowledgeModule`
   - `stage` (1~4)
   - `status`
+- Optional fields:
+  - `courseLabel?: string`（单选课程分类；来源白名单：`backend/src/modules/learning-tasks/task-course-labels.constants.ts`）
 - Enums:
   - `status`: `DRAFT | PUBLISHED | ARCHIVED`（from `TaskStatus`）
+  - `courseLabel`（可选）: `TASK_COURSE_LABELS`（例如：`未分类`、`通用编程`、`Java 程序设计`、`数据结构`、`人工智能`）
 - knowledgeModule constraint:
   - `knowledgeModule` 当前仅 `@IsString()`，未做 `@IsEnum`/白名单限制。
 - Nested structure:
@@ -303,6 +306,7 @@
   "title": "循环结构练习",
   "description": "完成 for/while 基础练习",
   "knowledgeModule": "control-flow",
+  "courseLabel": "程序设计基础",
   "stage": 1,
   "status": "DRAFT"
 }
@@ -315,6 +319,7 @@
 - Required fields: None（全部 `@IsOptional()`）
 - Enums:
   - `status`（可选）: `DRAFT | PUBLISHED | ARCHIVED`
+  - `courseLabel`（可选）: `TASK_COURSE_LABELS`（单选）
 - knowledgeModule constraint:
   - `knowledgeModule`（可选）当前仅 `@IsString()`，未做 `@IsEnum`/白名单限制。
 - Nested structure:
@@ -326,6 +331,9 @@
   "title": "循环结构练习（修订）"
 }
 ```
+
+- 清空 `courseLabel` 方式：
+  - 传空字符串（如 `"courseLabel": "   "`）会在后端 trim 后按未设置处理，不会以脏字符串落库。
 
 ### POST /api/learning-tasks/tasks/:id/publish
 
@@ -476,3 +484,22 @@
   - `studentTiers.good/watch/notSubmitted[*]` 统一含 `studentId/studentName/studentNo`，其中 `good/watch` 额外含 `attemptsCount/latestErrorCount`
   - `studentName` 缺失时回落 `未知学生`
   - 响应不再包含 `actionItems`、`teacherScript`
+
+### GET /api/learning-tasks/tasks
+
+- Controller & Method: `backend/src/modules/learning-tasks/controllers/learning-tasks.controller.ts` -> `LearningTasksController.listTasks`
+- Query DTO: `QueryTaskDto` (`backend/src/modules/learning-tasks/dto/query-task.dto.ts`)
+- Fields:
+  - `status?: TaskStatus`
+  - `knowledgeModule?: string`
+  - `courseLabel?: string`（单选；来源白名单 `TASK_COURSE_LABELS`）
+  - `stage?: number`（`@Type(() => Number) @IsInt() @Min(1) @Max(4)`）
+  - `page?: number`（`@Type(() => Number) @IsInt() @Min(1)`）
+  - `limit?: number`（`@Type(() => Number) @IsInt() @Min(1) @Max(100)`）
+  - `createdBy?: string`（`@IsMongoId()`）
+- Example Query:
+  - `/api/learning-tasks/tasks?page=1&limit=20`
+  - `/api/learning-tasks/tasks?status=PUBLISHED&courseLabel=Java%20%E7%A8%8B%E5%BA%8F%E8%AE%BE%E8%AE%A1&page=1&limit=20`
+- Response口径（最小说明）:
+  - `items[*]` 包含 `courseLabel`（可选）
+  - 当 `courseLabel=未分类` 时，服务端会同时匹配“字段缺省/空值”任务，保持旧数据兼容。

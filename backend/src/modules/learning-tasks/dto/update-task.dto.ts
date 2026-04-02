@@ -1,4 +1,5 @@
 import {
+  IsIn,
   IsEnum,
   IsInt,
   IsObject,
@@ -7,7 +8,18 @@ import {
   Max,
   Min,
 } from 'class-validator';
+import { Transform } from 'class-transformer';
 import { TaskStatus } from '../schemas/task.schema';
+import { TASK_COURSE_LABELS } from '../task-course-labels.constants';
+import type { TaskCourseLabel } from '../task-course-labels.constants';
+
+const trimCourseLabelInput = ({ value }: { value: unknown }): unknown => {
+  if (typeof value !== 'string') {
+    return value;
+  }
+  const trimmed = value.trim();
+  return trimmed ? trimmed : undefined;
+};
 
 export class UpdateTaskDto {
   @IsOptional()
@@ -21,6 +33,11 @@ export class UpdateTaskDto {
   @IsOptional()
   @IsString()
   knowledgeModule?: string;
+
+  @IsOptional()
+  @Transform(trimCourseLabelInput)
+  @IsIn(TASK_COURSE_LABELS)
+  courseLabel?: TaskCourseLabel;
 
   @IsOptional()
   @IsInt()
