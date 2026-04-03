@@ -7,11 +7,13 @@ import {
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, PipelineStage, Types } from 'mongoose';
 import { Classroom } from '../../schemas/classroom.schema';
+import { Course } from '../../../courses/schemas/course.schema';
 import { ClassroomTask } from '../schemas/classroom-task.schema';
 import { CreateClassroomTaskDto } from '../dto/create-classroom-task.dto';
 import { QueryClassroomTaskDto } from '../dto/query-classroom-task.dto';
 import { QueryMyTaskDetailDto } from '../dto/query-my-task-detail.dto';
 import { QueryClassroomTaskSubmissionsDto } from '../dto/query-classroom-task-submissions.dto';
+import { QueryPublishableTaskTemplateDto } from '../dto/query-publishable-task-template.dto';
 import {
   LEARNING_TRAJECTORY_SORT_FIELDS,
   LEARNING_TRAJECTORY_SORT_ORDERS,
@@ -22,8 +24,18 @@ import {
   QueryLearningTrajectoryDto,
 } from '../dto/query-learning-trajectory.dto';
 import { ClassroomTaskResponseDto } from '../dto/classroom-task-response.dto';
+import {
+  PublishableTaskTemplateItemResponseDto,
+  PublishableTaskTemplateListResponseDto,
+} from '../dto/publishable-task-template-response.dto';
 import { CreateSubmissionDto } from '../../../learning-tasks/dto/create-submission.dto';
 import { Task, TaskStatus } from '../../../learning-tasks/schemas/task.schema';
+import { TASK_COURSE_LABEL_UNCLASSIFIED } from '../../../learning-tasks/task-course-labels.constants';
+import {
+  TASK_VISIBILITY_PRIVATE,
+  TASK_VISIBILITY_SHARED,
+} from '../../../learning-tasks/task-template-visibility.constants';
+import type { TaskVisibility } from '../../../learning-tasks/task-template-visibility.constants';
 import {
   Feedback,
   FeedbackSeverity,
@@ -47,9 +59,14 @@ import { WithTimestamps } from '../../../../common/types/with-timestamps.type';
 type ClassroomTaskWithMeta = ClassroomTask & WithId & WithTimestamps;
 type ClassroomTaskWithTask = ClassroomTaskWithMeta & { task: Task };
 type ClassroomWithMeta = Classroom & WithId & WithTimestamps;
+type ClassroomWithCourseLean = Pick<Classroom, 'courseId'> & WithId;
+type CourseWithLabelLean = Pick<Course, 'courseLabel'> & WithId;
 type ClassroomOwnerLean = Pick<Classroom, 'teacherId'> & WithId;
 type ClassroomTaskOwnerLean = Pick<ClassroomTask, 'classroomId'> & WithId;
 type TaskWithMeta = Task & WithId & WithTimestamps;
+type PublishableTaskTemplateAgg = TaskWithMeta & {
+  __courseLabelPriority?: number;
+};
 type SubmissionWithMeta = Submission & WithId & WithTimestamps;
 type ClassroomTaskSubmissionLean = Pick<
   Submission,
@@ -220,6 +237,8 @@ export class ClassroomTasksService {
   constructor(
     @InjectModel(Classroom.name)
     private readonly classroomModel: Model<Classroom>,
+    @InjectModel(Course.name)
+    private readonly courseModel: Model<Course>,
     @InjectModel(ClassroomTask.name)
     private readonly classroomTaskModel: Model<ClassroomTask>,
     @InjectModel(Task.name) private readonly taskModel: Model<Task>,
@@ -286,6 +305,116 @@ export class ClassroomTasksService {
       }
       throw error;
     }
+  }
+
+  async listPublishableTaskTemplates(
+    classroomId: string,
+    query: QueryPublishableTaskTemplateDto,
+    teacherId: string,
+  ): Promise<PublishableTaskTemplateListResponseDto> {
+    await this.ensureTeacher(teacherId);
+
+    const classroomObjectId = this.parseObjectId(classroomId, 'classroomId');
+    const teacherObjectId = new Types.ObjectId(teacherId);
+    const classroom = await this.classroomModel
+      .findOne({ _id: classroomObjectId, teacherId: teacherObjectId })
+      .select('_id courseId')
+      .lean<ClassroomWithCourseLean>()
+      .exec();
+    if (!classroom) {
+      throw new NotFoundException('Classroom not found');
+    }
+
+    const [course, publishedTaskIds] = await Promise.all([
+      this.courseModel
+        .findById(classroom.courseId)
+        .select('_id courseLabel')
+        .lean<CourseWithLabelLean>()
+        .exec(),
+      this.classroomTaskModel
+        .distinct('taskId', { classroomId: classroom._id })
+        .exec(),
+    ]);
+
+    const page = query.page ?? 1;
+    const limit = Math.min(query.limit ?? 20, 100);
+    const andFilters: Record<string, unknown>[] = [];
+    const baseFilter: Record<string, unknown> = {
+      status: TaskStatus.Published,
+    };
+    if (publishedTaskIds.length > 0) {
+      baseFilter._id = { $nin: publishedTaskIds };
+    }
+    if (query.knowledgeModule) {
+      baseFilter.knowledgeModule = query.knowledgeModule;
+    }
+    if (query.stage) {
+      baseFilter.stage = query.stage;
+    }
+    if (query.onlyMine === true) {
+      baseFilter.createdBy = teacherObjectId;
+    } else {
+      andFilters.push({
+        $or: [
+          { createdBy: teacherObjectId },
+          ...this.getSharedVisibilityFilter(),
+        ],
+      });
+    }
+    if (query.courseLabel) {
+      if (query.courseLabel === TASK_COURSE_LABEL_UNCLASSIFIED) {
+        andFilters.push({ $or: this.getUnclassifiedCourseLabelFilter() });
+      } else {
+        baseFilter.courseLabel = query.courseLabel;
+      }
+    }
+    andFilters.unshift(baseFilter);
+    const filter =
+      andFilters.length === 1 ? andFilters[0] : { $and: andFilters };
+
+    const requestedCourseLabel = this.toSanitizedCourseLabel(query.courseLabel);
+    const classroomCourseLabel = this.toSanitizedCourseLabel(
+      course?.courseLabel,
+    );
+    const shouldPrioritizeCourseLabel =
+      !requestedCourseLabel && !!classroomCourseLabel;
+    const addFieldsStage: PipelineStage[] = shouldPrioritizeCourseLabel
+      ? [
+          {
+            $addFields: {
+              __courseLabelPriority: {
+                $cond: [{ $eq: ['$courseLabel', classroomCourseLabel] }, 0, 1],
+              },
+            },
+          },
+        ]
+      : [];
+    const sortStage: PipelineStage.Sort['$sort'] = shouldPrioritizeCourseLabel
+      ? { __courseLabelPriority: 1, updatedAt: -1, createdAt: -1, _id: -1 }
+      : { updatedAt: -1, createdAt: -1, _id: -1 };
+    const itemsPipeline: PipelineStage[] = [
+      { $match: filter },
+      ...addFieldsStage,
+      { $sort: sortStage },
+      { $skip: (page - 1) * limit },
+      { $limit: limit },
+    ];
+
+    const [items, total] = await Promise.all([
+      this.taskModel
+        .aggregate<PublishableTaskTemplateAgg>(itemsPipeline)
+        .exec(),
+      this.taskModel.countDocuments(filter),
+    ]);
+
+    return {
+      items: items.map((task) =>
+        this.toPublishableTaskTemplateItemResponse(task),
+      ),
+      total,
+      page,
+      limit,
+    };
   }
 
   async listClassroomTasks(
@@ -1155,6 +1284,56 @@ export class ClassroomTasksService {
     return left.studentId.localeCompare(right.studentId);
   }
 
+  private getSharedVisibilityFilter(): Record<string, unknown>[] {
+    return [
+      { visibility: TASK_VISIBILITY_SHARED },
+      { visibility: { $exists: false } },
+      { visibility: null },
+      { visibility: '' },
+    ];
+  }
+
+  private getUnclassifiedCourseLabelFilter(): Record<string, unknown>[] {
+    return [
+      { courseLabel: TASK_COURSE_LABEL_UNCLASSIFIED },
+      { courseLabel: { $exists: false } },
+      { courseLabel: null },
+      { courseLabel: '' },
+    ];
+  }
+
+  private toSanitizedTaskVisibility(
+    value: unknown,
+  ): TaskVisibility | undefined {
+    if (typeof value !== 'string') {
+      return undefined;
+    }
+    const trimmed = value.trim().toUpperCase();
+    if (!trimmed) {
+      return undefined;
+    }
+    if (trimmed === TASK_VISIBILITY_PRIVATE) {
+      return TASK_VISIBILITY_PRIVATE;
+    }
+    if (trimmed === TASK_VISIBILITY_SHARED) {
+      return TASK_VISIBILITY_SHARED;
+    }
+    return undefined;
+  }
+
+  private toTaskVisibilityForRead(value: unknown): TaskVisibility {
+    const sanitized = this.toSanitizedTaskVisibility(value);
+    return sanitized ?? TASK_VISIBILITY_SHARED;
+  }
+
+  private toSanitizedCourseLabel(value: unknown): string | undefined {
+    if (typeof value !== 'string') {
+      return undefined;
+    }
+    const trimmed = value.trim();
+    return trimmed ? trimmed : undefined;
+  }
+
   private parseBooleanQuery(value: string | undefined, defaultValue: boolean) {
     if (value === undefined) {
       return defaultValue;
@@ -1290,6 +1469,26 @@ export class ClassroomTasksService {
       itemsMap.set(row._id.toString(), row.items);
     }
     return itemsMap;
+  }
+
+  private toPublishableTaskTemplateItemResponse(task: TaskWithMeta) {
+    const createdById = task.createdBy.toString();
+    return {
+      id: task._id.toString(),
+      title: task.title,
+      description: task.description,
+      knowledgeModule: task.knowledgeModule,
+      courseLabel: this.toSanitizedCourseLabel(task.courseLabel),
+      visibility: this.toTaskVisibilityForRead(task.visibility),
+      stage: task.stage,
+      difficulty: task.difficulty,
+      status: task.status,
+      createdBy: createdById,
+      createdById,
+      createdAt: task.createdAt ?? new Date(0),
+      updatedAt: task.updatedAt ?? new Date(0),
+      publishedAt: task.publishedAt,
+    } as PublishableTaskTemplateItemResponseDto;
   }
 
   private toClassroomTaskResponse(

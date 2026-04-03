@@ -1,6 +1,6 @@
 # DTO Cheatsheet（Write APIs）
 
-更新时间：2026-03-22  
+更新时间：2026-04-04  
 来源：`backend/src/modules/**/controllers/*.controller.ts` + 对应 `dto/*.dto.ts`
 
 ## 用途说明
@@ -116,7 +116,10 @@
   - `code`
   - `name`
   - `term`
-- Enums: None
+- Optional fields:
+  - `courseLabel?: string`（课程分类，白名单来源：`TASK_COURSE_LABELS`）
+- Enums:
+  - `courseLabel`（可选）: `TASK_COURSE_LABELS`（与 `Task.courseLabel` 同值域）
 - Nested structure: None
 - Minimal JSON example:
 
@@ -124,7 +127,8 @@
 {
   "code": "CS101",
   "name": "程序设计基础",
-  "term": "2026-Spring"
+  "term": "2026-Spring",
+  "courseLabel": "程序设计基础"
 }
 ```
 
@@ -133,15 +137,19 @@
 - Controller & Method: `backend/src/modules/courses/controllers/courses.controller.ts` -> `CoursesController.updateCourse`
 - DTO: `UpdateCourseDto` (`backend/src/modules/courses/dto/update-course.dto.ts`)
 - Required fields: None（全部 `@IsOptional()`）
-- Enums: None
+- Enums:
+  - `courseLabel`（可选）: `TASK_COURSE_LABELS`（与 `Task.courseLabel` 同值域）
 - Nested structure: None
 - Minimal JSON example:
 
 ```json
 {
-  "name": "程序设计基础（A班）"
+  "name": "程序设计基础（A班）",
+  "courseLabel": "数据结构"
 }
 ```
+- Notes:
+  - `courseLabel` 支持清空：传空字符串（如 `"courseLabel": "   "`）会在后端 trim 后按未设置处理，不会以脏值落库。
 
 ### POST /api/courses/:id/archive
 
@@ -438,7 +446,7 @@
 
 ---
 
-## P0 Query DTO 补充（读取接口）
+## Query DTO 补充（读取接口）
 
 ### GET /api/classrooms/:id/students
 
@@ -514,3 +522,23 @@
   - `scope=shared`：共享池（`visibility=SHARED`，且包含旧数据缺省 `visibility`；包含“我自己设为 SHARED 的模板”）
   - `scope=all`：当前教师可见全集（我的全部 + 共享池）
   - 当 `courseLabel=未分类` 时，服务端会同时匹配“字段缺省/空值”任务，保持旧数据兼容。
+
+### GET /api/classrooms/:id/publishable-task-templates
+
+- Controller & Method: `backend/src/modules/classrooms/classroom-tasks/controllers/classroom-tasks.controller.ts` -> `ClassroomTasksController.listPublishableTaskTemplates`
+- Query DTO: `QueryPublishableTaskTemplateDto` (`backend/src/modules/classrooms/classroom-tasks/dto/query-publishable-task-template.dto.ts`)
+- Fields:
+  - `courseLabel?: string`（单选；来源白名单 `TASK_COURSE_LABELS`）
+  - `onlyMine?: boolean`（支持 `true/false/1/0`）
+  - `knowledgeModule?: string`
+  - `stage?: number`（`@Type(() => Number) @IsInt() @Min(1) @Max(4)`）
+  - `page?: number`（`@Type(() => Number) @IsInt() @Min(1)`）
+  - `limit?: number`（`@Type(() => Number) @IsInt() @Min(1) @Max(100)`）
+- Example Query:
+  - `/api/classrooms/{id}/publishable-task-templates?page=1&limit=20`
+  - `/api/classrooms/{id}/publishable-task-templates?onlyMine=true&courseLabel=Java%20%E7%A8%8B%E5%BA%8F%E8%AE%BE%E8%AE%A1&page=1&limit=20`
+- Response口径（最小说明）:
+  - 固定内置：只返回当前教师可见模板（自己私有 + 自己共享 + 他人共享）
+  - 固定内置：只返回 `status=PUBLISHED`
+  - 固定内置：自动排除当前班级已发布过的模板（按 `classroomTask.taskId` 去重）
+  - 未显式传 `courseLabel` 且班级课程存在 `courseLabel` 时，排序优先当前课程分类匹配模板

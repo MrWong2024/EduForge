@@ -18,6 +18,7 @@ import { QueryMyTaskDetailDto } from '../dto/query-my-task-detail.dto';
 import { QueryLearningTrajectoryDto } from '../dto/query-learning-trajectory.dto';
 import { QueryClassReviewPackDto } from '../dto/query-class-review-pack.dto';
 import { QueryClassroomTaskSubmissionsDto } from '../dto/query-classroom-task-submissions.dto';
+import { QueryPublishableTaskTemplateDto } from '../dto/query-publishable-task-template.dto';
 import { CreateSubmissionDto } from '../../../learning-tasks/dto/create-submission.dto';
 import { AiMetricsService } from '../services/ai-metrics.service';
 import { ClassReviewPackService } from '../services/class-review-pack.service';
@@ -46,6 +47,21 @@ export class ClassroomTasksController {
     return this.classroomTasksService.createClassroomTask(
       classroomId,
       dto,
+      user.id,
+    );
+  }
+
+  @UseGuards(RolesGuard)
+  @Roles(...TEACHER_ROLES)
+  @Get(':id/publishable-task-templates')
+  listPublishableTaskTemplates(
+    @Param('id') classroomId: string,
+    @Query() query: QueryPublishableTaskTemplateDto,
+    @CurrentUser() user: { id: string },
+  ) {
+    return this.classroomTasksService.listPublishableTaskTemplates(
+      classroomId,
+      query,
       user.id,
     );
   }

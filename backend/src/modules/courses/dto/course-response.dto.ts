@@ -5,6 +5,7 @@ export class CourseResponseDto {
   code!: string;
   name!: string;
   term!: string;
+  courseLabel?: string;
   status!: CourseStatus;
   createdBy!: string;
   createdAt!: Date;

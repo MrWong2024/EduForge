@@ -112,7 +112,8 @@ backend/
 ## 2) 领域模型摘要卡（按模块）
 
 ### Course（`src/modules/courses/schemas/course.schema.ts`）
-- 关键字段：`code`、`name`、`term`、`status(ACTIVE|ARCHIVED)`、`createdBy`。
+- 关键字段：`code`、`name`、`term`、`courseLabel?`、`status(ACTIVE|ARCHIVED)`、`createdBy`。
+- `courseLabel` 语义：可选课程分类字段（与 `Task.courseLabel` 共用 `task-course-labels.constants.ts` 值域）；非外键、可为空；用于课程与模板的分类坐标对齐。
 - 索引/唯一性：`unique(createdBy, code)`。
 
 ### Classroom（`src/modules/classrooms/schemas/classroom.schema.ts`）
@@ -269,6 +270,14 @@ AI Provider 错误码（`ai-feedback-provider.error-codes.ts`）：
 - AI feedback provider 契约已统一为 `analyzeSubmission(context: AiSubmissionAnalysisContext)`；`AiFeedbackProcessor` 在消费 job 时会先读取 submission，再按 `submission.taskId` 查询 task 并组装上下文后调用 provider（task 缺失进入失败链路）；主控约束已前移到 prompt/协议层（默认 1 条、必要时最多 2 条），processor compactor 继续作为轻量兜底。
 
 新增/变更产品能力（Z3、AA~AI、Z4~Z9 收口口径）：
+- P1 班级发布候选查询契约升级（后端已完成，前端待后续阶段接入）：
+  - 新增 `GET /api/classrooms/:id/publishable-task-templates`，专用于班级发布页候选模板分页查询。
+  - 固定内置规则：只返回当前教师可见模板（自己私有+自己共享+他人共享）、只返回 `status=PUBLISHED`、自动排除当前班级已发布过的 `taskId`。
+  - 支持 query：`courseLabel`、`onlyMine`、`knowledgeModule`、`stage`、`page`、`limit`。
+  - 当请求未显式传 `courseLabel` 且班级所属课程存在 `courseLabel` 时，默认排序优先课程分类匹配模板，再按 `updatedAt/createdAt` 倒序。
+- P1 Course 课程分类字段契约（后端已完成，前端待后续阶段接入）：
+  - `Course.courseLabel` 已接入 schema/DTO/service/response，字段可选，空白输入会 trim 并按未设置处理。
+  - `Course.courseLabel` 与 `Task.courseLabel` 共用同一套标准值域，保持“课程分类坐标”一致，未引入 `Task -> Course` 外键绑定。
 - P1 Task 课程分类契约（后端已完成，前端待后续阶段接入）：
   - `Task.courseLabel` 已接入 schema/DTO/service/query/response；支持创建、更新、详情返回、列表返回与按标签筛选。
   - 字段保持可选，空值语义为“未分类/通用模板”；旧数据不做迁移脚本，保持兼容。

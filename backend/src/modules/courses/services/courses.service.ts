@@ -30,9 +30,11 @@ export class CoursesService {
 
   async createCourse(dto: CreateCourseDto, userId: string) {
     await this.ensureTeacher(userId);
+    const courseLabel = this.toSanitizedCourseLabel(dto.courseLabel);
     try {
       const course = await this.courseModel.create({
         ...dto,
+        courseLabel,
         status: CourseStatus.Active,
         createdBy: new Types.ObjectId(userId),
       });
@@ -58,7 +60,19 @@ export class CoursesService {
     if (course.status === CourseStatus.Archived) {
       throw new BadRequestException('Archived courses cannot be updated');
     }
-    Object.assign(course, dto);
+    const hasCourseLabel = 'courseLabel' in dto;
+    if (dto.code !== undefined) {
+      course.code = dto.code;
+    }
+    if (dto.name !== undefined) {
+      course.name = dto.name;
+    }
+    if (dto.term !== undefined) {
+      course.term = dto.term;
+    }
+    if (hasCourseLabel) {
+      course.courseLabel = this.toSanitizedCourseLabel(dto.courseLabel);
+    }
     try {
       await course.save();
       return this.toCourseResponse(course as CourseWithMeta);
@@ -149,10 +163,19 @@ export class CoursesService {
       code: course.code,
       name: course.name,
       term: course.term,
+      courseLabel: this.toSanitizedCourseLabel(course.courseLabel),
       status: course.status,
       createdBy: course.createdBy.toString(),
       createdAt: course.createdAt ?? new Date(0),
       updatedAt: course.updatedAt ?? new Date(0),
     } as CourseResponseDto;
+  }
+
+  private toSanitizedCourseLabel(value: unknown): string | undefined {
+    if (typeof value !== 'string') {
+      return undefined;
+    }
+    const trimmed = value.trim();
+    return trimmed ? trimmed : undefined;
   }
 }

@@ -119,7 +119,7 @@ export class CourseOverviewService {
         _id: courseObjectId,
         createdBy: new Types.ObjectId(teacherId),
       })
-      .select('_id code name term status')
+      .select('_id code name term courseLabel status')
       .lean<CourseLean>()
       .exec();
     if (!course) {
@@ -150,6 +150,7 @@ export class CourseOverviewService {
           code: course.code,
           name: course.name,
           term: course.term,
+          courseLabel: this.toSanitizedCourseLabel(course.courseLabel),
           status: course.status,
         },
         window,
@@ -339,6 +340,7 @@ export class CourseOverviewService {
         code: course.code,
         name: course.name,
         term: course.term,
+        courseLabel: this.toSanitizedCourseLabel(course.courseLabel),
         status: course.status,
       },
       window,
@@ -420,5 +422,13 @@ export class CourseOverviewService {
       throw new BadRequestException(`${fieldName} must be a valid ObjectId`);
     }
     return new Types.ObjectId(value);
+  }
+
+  private toSanitizedCourseLabel(value: unknown): string | undefined {
+    if (typeof value !== 'string') {
+      return undefined;
+    }
+    const trimmed = value.trim();
+    return trimmed ? trimmed : undefined;
   }
 }

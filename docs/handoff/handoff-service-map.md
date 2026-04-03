@@ -89,7 +89,7 @@
   - `archiveCourse(id: string, userId: string): Promise<CourseResponseDto> — called by POST /courses/:id/archive`
 - AuthZ Boundary: `teacher-only`（service 内 `ensureTeacher` 强校验）
 - Metrics/Isolation: 按 `createdBy(userId)` 做课程隔离
-- Consistency/Constraints: `unique(createdBy,code)`；归档课程禁止更新；分页上限 `100`
+- Consistency/Constraints: `unique(createdBy,code)`；归档课程禁止更新；分页上限 `100`；`courseLabel` 为可选单值分类字段（与 `Task.courseLabel` 共用 `TASK_COURSE_LABELS`），创建/更新时会 trim 并拒绝白名单外值，空白输入按未设置处理
 - Deps/Side Effects: `CourseModel`, `UserModel`；写课程文档
 - Performance Notes: `find + countDocuments` 并发执行，避免串行等待
 - SoT: `backend/src/modules/courses/schemas/course.schema.ts`; `backend/src/modules/courses/dto/query-course.dto.ts`
@@ -171,12 +171,13 @@
 
 - Service: `backend/src/modules/classrooms/classroom-tasks/services/classroom-tasks.service.ts`
 - Domain: `ClassroomTask + Submission + Z3/Z4 聚合`
-- Actions: `publish-to-classroom`, `list/get-classroom-task`, `submit-classroom-task`, `list-task-submissions`, `aggregate-feature-views`
+- Actions: `publish-to-classroom`, `query-publishable-templates`, `list/get-classroom-task`, `submit-classroom-task`, `list-task-submissions`, `aggregate-feature-views`
 - I/O Shape:
   - In: `classroomId`, `classroomTaskId`, `CreateClassroomTaskDto`, `QueryClassroomTaskDto`, `QueryClassroomTaskSubmissionsDto`, `CreateSubmissionDto`, `userId`
   - Out: `ClassroomTaskResponseDto` | `{ items, total, page, limit }` | `SubmissionResponseDto` | `classroomTask submissions paged list`
 - Key Methods:
   - `createClassroomTask(classroomId: string, dto: CreateClassroomTaskDto, userId: string): Promise<ClassroomTaskResponseDto> — called by POST /classrooms/:id/tasks`
+  - `listPublishableTaskTemplates(classroomId: string, query: QueryPublishableTaskTemplateDto, teacherId: string): Promise<{ items: PublishableTaskTemplateItemResponseDto[]; total: number; page: number; limit: number }> — called by GET /classrooms/:id/publishable-task-templates`
   - `listClassroomTasks(classroomId: string, query: QueryClassroomTaskDto, userId: string): Promise<{ items: ClassroomTaskResponseDto[]; total: number; page: number; limit: number }> — called by GET /classrooms/:id/tasks`
   - `getClassroomTask(classroomId: string, classroomTaskId: string, userId: string): Promise<ClassroomTaskResponseDto> — called by GET /classrooms/:id/tasks/:classroomTaskId`
   - `createClassroomTaskSubmission(classroomId: string, classroomTaskId: string, dto: CreateSubmissionDto, userId: string): Promise<SubmissionResponseDto> — called by classroom-task submission endpoint`
@@ -185,7 +186,7 @@
   - `getLearningTrajectory(...): Promise<Record<string, unknown>> — called by /classrooms/:classroomId/tasks/:classroomTaskId/learning-trajectory`
 - AuthZ Boundary: `teacher-only`（发布） / `student-only + member-only`（提交） / `member-or-owner`（查看）
 - Metrics/Isolation: 学生提交通过 `createSubmissionForClassroomTask(..., classroomTaskId)` 绑定隔离主键；Z3/Z4 聚合严格按 `classroomTaskId`；提交列表读取同样只按 `classroomTaskId`，不按 `taskId` 跨班聚合；学生集合基于 Enrollment ACTIVE
-- Consistency/Constraints: 要求 Task 已 `PUBLISHED`；班级 `ARCHIVED` 禁止发布；`unique(classroomId,taskId)` 防重复发布；**提交门禁分层：`ClassroomTasksService` 负责 `student + Enrollment ACTIVE + classroomTask 归属` 校验；`LearningTasksService.createSubmissionInternal` 仅在存在 `classroomTaskId` 时 enforce `dueAt/allowLate`（超时且 `allowLate=false` -> `403(code=LATE_SUBMISSION_NOT_ALLOWED)`），并持久化/返回 `submittedAt/isLate/lateBySeconds`。**；提交列表 `aiFeedbackStatus` 无 job 显式回填 `NOT_REQUESTED`；提交列表 `items[*].feedbackCount` 为 Feedback 总条数（按当前页 submissionIds 聚合，缺失回填 `0`）；learning-trajectory `items[*]` 返回结构化 `student:{id,name,studentNo,email}`（兼容 `studentName`）；不返回 `passwordHash/content.codeText`
+- Consistency/Constraints: 要求 Task 已 `PUBLISHED`；班级 `ARCHIVED` 禁止发布；`unique(classroomId,taskId)` 防重复发布；发布候选模板查询固定内置“当前教师可见性 + `status=PUBLISHED` + 排除本班已发布 taskId”，并支持 `courseLabel/onlyMine/knowledgeModule/stage/page/limit`；当请求未显式传 `courseLabel` 且班级课程有 `courseLabel` 时优先排序课程分类匹配模板；**提交门禁分层：`ClassroomTasksService` 负责 `student + Enrollment ACTIVE + classroomTask 归属` 校验；`LearningTasksService.createSubmissionInternal` 仅在存在 `classroomTaskId` 时 enforce `dueAt/allowLate`（超时且 `allowLate=false` -> `403(code=LATE_SUBMISSION_NOT_ALLOWED)`），并持久化/返回 `submittedAt/isLate/lateBySeconds`。**；提交列表 `aiFeedbackStatus` 无 job 显式回填 `NOT_REQUESTED`；提交列表 `items[*].feedbackCount` 为 Feedback 总条数（按当前页 submissionIds 聚合，缺失回填 `0`）；learning-trajectory `items[*]` 返回结构化 `student:{id,name,studentNo,email}`（兼容 `studentName`）；不返回 `passwordHash/content.codeText`
 - Deps/Side Effects: `ClassroomModel`, `ClassroomTaskModel`, `TaskModel`, `SubmissionModel`, `FeedbackModel`, `UserModel`, `EnrollmentService`, `AiFeedbackJobService`, `LearningTasksService`
 - Performance Notes: 任务列表使用 `aggregate(basePipeline + totalPipeline)` 一次生成分页数据与总数；提交列表按页查询 submission 后批量查询用户公开信息、AI 状态与 feedbackCount（Feedback 按 submissionIds group）避免 N+1
 - SoT: `backend/src/modules/classrooms/classroom-tasks/services/classroom-tasks.service.ts`; `backend/src/modules/classrooms/classroom-tasks/schemas/classroom-task.schema.ts`; `backend/src/modules/classrooms/enrollments/services/enrollment.service.ts`; `backend/src/modules/classrooms/README.md`

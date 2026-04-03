@@ -1,6 +1,7 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
 import { HydratedDocument, Types } from 'mongoose';
 import { User } from '../../users/schemas/user.schema';
+import { TASK_COURSE_LABELS } from '../../learning-tasks/task-course-labels.constants';
 
 export type CourseDocument = HydratedDocument<Course>;
 
@@ -19,6 +20,9 @@ export class Course {
 
   @Prop({ required: true })
   term!: string;
+
+  @Prop({ trim: true, enum: TASK_COURSE_LABELS })
+  courseLabel?: string;
 
   @Prop({ required: true, enum: CourseStatus, default: CourseStatus.Active })
   status!: CourseStatus;
