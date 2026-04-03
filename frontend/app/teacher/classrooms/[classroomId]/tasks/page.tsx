@@ -6,6 +6,7 @@ import { PageHeader } from "@/components/blocks/PageHeader";
 import { PublishClassroomTaskForm } from "@/components/teacher/PublishClassroomTaskForm";
 import { fetchJson, FetchJsonError } from "@/lib/api/client";
 import { buildErrorDescription, extractRawDetail } from "@/lib/api/error-presenter";
+import { getMe } from "@/lib/auth/session";
 import {
   toClassroomSummary,
   toClassroomTasksResponse,
@@ -35,6 +36,8 @@ type TasksViewModel =
       classroomName?: string;
       taskList: ReturnType<typeof toClassroomTasksResponse>;
       availableTasks: ReturnType<typeof toLearningTaskListResponse>["items"];
+      currentUserId?: string;
+      publishedTaskTemplateIds: string[];
     }
   | { mode: "error"; status: number; description: string };
 
@@ -48,7 +51,7 @@ export default async function ClassroomTasksPage({ params }: ClassroomTasksPageP
 
   try {
     const origin = await getRequestOrigin();
-    const [classroomPayload, tasksPayload, learningTasksPayload] = await Promise.all([
+    const [classroomPayload, tasksPayload, learningTasksPayload, me] = await Promise.all([
       fetchJson<unknown>(`classrooms/${encodeURIComponent(classroomId)}`, {
         origin,
         cache: "no-store",
@@ -61,17 +64,27 @@ export default async function ClassroomTasksPage({ params }: ClassroomTasksPageP
         origin,
         cache: "no-store",
       }),
+      getMe().catch(() => null),
     ]);
 
     const classroom = toClassroomSummary(classroomPayload);
     const taskList = toClassroomTasksResponse(tasksPayload);
     const learningTasks = toLearningTaskListResponse(learningTasksPayload);
+    const publishedTaskTemplateIds = [
+      ...new Set(
+        taskList.items
+          .map((item) => (typeof item.taskId === "string" ? item.taskId.trim() : ""))
+          .filter((taskId) => taskId.length > 0)
+      ),
+    ];
 
     viewModel = {
       mode: "ready",
       classroomName: classroom.name,
       taskList,
       availableTasks: learningTasks.items,
+      currentUserId: typeof me?.id === "string" && me.id.trim() ? me.id.trim() : undefined,
+      publishedTaskTemplateIds,
     };
   } catch (error) {
     if (error instanceof FetchJsonError) {
@@ -137,7 +150,12 @@ export default async function ClassroomTasksPage({ params }: ClassroomTasksPageP
         </p>
       </section>
 
-      <PublishClassroomTaskForm classroomId={classroomId} availableTasks={viewModel.availableTasks} />
+      <PublishClassroomTaskForm
+        classroomId={classroomId}
+        availableTasks={viewModel.availableTasks}
+        currentUserId={viewModel.currentUserId}
+        publishedTaskTemplateIds={viewModel.publishedTaskTemplateIds}
+      />
 
       {viewModel.taskList.items.length === 0 ? (
         <EmptyState

@@ -29,7 +29,7 @@
 | CreateLearningTaskForm | `components/teacher/CreateLearningTaskForm.tsx` | `POST learning-tasks/tasks` | 只负责模板创建（核心字段 + 可选 `courseLabel` + `visibility` 单选 + 基础 rubric 配置，四维中文展示口径复用 `lib/ui/rubric.ts`），不负责班级实例发布 |
 | EditLearningTaskForm | `components/teacher/EditLearningTaskForm.tsx` | `PATCH learning-tasks/tasks/:id` | 只负责模板编辑/只读查看（核心字段 + 可选 `courseLabel` + `visibility` + status + rubric，四维中文展示口径复用 `lib/ui/rubric.ts`）；非作者共享模板仅可读，不负责班级实例发布 |
 | LearningTaskFilters | `components/teacher/LearningTaskFilters.tsx` | `GET learning-tasks/tasks?scope=...&courseLabel=...`（通过 URL query 触发服务端列表过滤） | 负责模板层视图与筛选（`scope` 视图切换 + `status/knowledgeModule/stage` 本地筛选 + `courseLabel` URL 筛选）与列表呈现（含 `visibility` 轻量标签、非作者模板操作边界）；默认排序在“筛选后、渲染前”按 scope 策略执行；不发起模板发布请求 |
-| PublishClassroomTaskForm | `components/teacher/PublishClassroomTaskForm.tsx` | `POST classrooms/:id/tasks` | 只负责选择“当前教师可见且已发布”的模板（我的 + 可见共享）并发布班级实例；可配置 `dueAt/allowLate/maxAttempts`；不负责创建/编辑模板 |
+| PublishClassroomTaskForm | `components/teacher/PublishClassroomTaskForm.tsx` | `POST classrooms/:id/tasks` | 只负责选择“当前教师可见且已发布”的模板（我的 + 可见共享）并发布班级实例；候选池默认排除“当前班级已发布过”的模板；本地轻筛选支持 `courseLabel`、`onlyMine`、`knowledgeModule`、`stage`；可配置 `dueAt/allowLate/maxAttempts`；不负责创建/编辑模板 |
 | PublishTaskStatusButton | `components/teacher/PublishTaskStatusButton.tsx` | `POST learning-tasks/tasks/:id/publish` | 仅做 task 发布状态操作 |
 | RemoveStudentButton | `components/teacher/RemoveStudentButton.tsx` | `POST classrooms/:id/students/:uid/remove` | 仅做移除动作，不负责成员列表 |
 | TeacherFeedbackForm | `components/teacher/TeacherFeedbackForm.tsx` | `POST learning-tasks/submissions/:id/feedback` | 仅做教师反馈创建 |

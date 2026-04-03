@@ -135,6 +135,7 @@ export type CourseOverviewResponse = {
 
 export type ClassroomTaskSummary = {
   classroomTaskId?: string;
+  taskId?: string;
   title?: string;
   description?: string;
   taskStatus?: string;
@@ -607,6 +608,10 @@ export const toClassroomTaskSummary = (value: unknown): ClassroomTaskSummary => 
 
   return {
     classroomTaskId: asString(record.classroomTaskId) ?? asString(record.id),
+    taskId:
+      asString(record.taskId) ??
+      asString(taskRecord.id) ??
+      asString(taskRecord.taskId),
     title: asString(taskRecord.title) ?? asString(record.title) ?? asString(record.name),
     description: asString(taskRecord.description) ?? asString(record.description),
     taskStatus: asString(taskRecord.status) ?? asString(record.status),
