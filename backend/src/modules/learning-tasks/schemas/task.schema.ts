@@ -64,3 +64,23 @@ TaskSchema.index({ status: 1, knowledgeModule: 1, stage: 1, createdAt: -1 });
 TaskSchema.index({ status: 1, courseLabel: 1, createdAt: -1 });
 // Supports scope=shared queries sorted by createdAt.
 TaskSchema.index({ visibility: 1, createdAt: -1 });
+// Supports publish-candidate query when onlyMine=true with common filters/sorts.
+TaskSchema.index({
+  createdBy: 1,
+  status: 1,
+  courseLabel: 1,
+  knowledgeModule: 1,
+  stage: 1,
+  updatedAt: -1,
+  createdAt: -1,
+});
+// Supports publish-candidate query for shared-visible branch with common filters/sorts.
+TaskSchema.index({
+  visibility: 1,
+  status: 1,
+  courseLabel: 1,
+  knowledgeModule: 1,
+  stage: 1,
+  updatedAt: -1,
+  createdAt: -1,
+});
