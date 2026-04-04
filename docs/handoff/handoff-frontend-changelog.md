@@ -303,6 +303,13 @@
 - 【类型映射同步】`types-teacher.ts` 已补课程更新相关类型/解析（`UpdateCourseRequest`、`toCourseDetailResponse`、`toCourseUpdateResponse`），并统一 `courseLabel` 解析口径。
 - 【边界保持】overview 仍是展示页，不改为编辑页；未改 backend 契约、未改任务模板页与班级发布页、未引入 Course 与 Task 强绑定。
 
+## UAT-FE-35
+
+- 【本步解决】班级发布页候选模板在 `limit=50` 下容易截断，教师无法继续浏览后续候选的问题。
+- 【新增事实 / 已收口口径】`PublishClassroomTaskForm` 已支持“加载更多”：首屏仍由 server 提供 `page=1&limit=50`，当后端 `total` 大于当前已加载数量时可请求下一页并追加候选结果。
+- 【数据流收口】筛选条件（`courseLabel/onlyMine/knowledgeModule/stage`）变化后仍由 URL query 驱动 server 重查第一页；客户端在接收到新第一页后会重置已追加结果，避免跨筛选条件残留。
+- 【边界保持】未引入完整分页器（无页码/无每页条数切换），未改后端分页契约，未改班级任务实例列表与发布主流程。
+
 ## 当前阶段一句话结论
 
 前端已达到“Teacher/Student 主链路可用 + 任务模板层与班级实例层边界收口 + 教师模板主链路可维护”的工程验收阶段，但尚未进入最终交付定版阶段。

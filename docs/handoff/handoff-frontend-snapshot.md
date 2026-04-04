@@ -48,6 +48,7 @@ frontend/
   - `/teacher/tasks/[taskId]/edit`：模板编辑/查看与状态管理（含可选课程分类、模板可见性；非作者共享模板只读）
 - 教师班级实例层（已收口）：
   - `/teacher/classrooms/[classroomId]/tasks`：选择“当前教师可见且已发布”的模板并发布到班级实例；候选池改为实时调用 `GET classrooms/:id/publishable-task-templates`，筛选条件 `courseLabel/onlyMine/knowledgeModule/stage` 透传后端，后端内置“仅 PUBLISHED + 排除本班已发布模板 + 课程优先排序”，不承担模板创建/编辑。
+  - 候选池首屏仍由 server 侧请求 `page=1&limit=50`；发布表单支持“加载更多”按当前筛选追加后续页（非完整分页器）；筛选条件变化时重置回第一页并清空历史追加结果。
 - `/student/**`：学习看板、加入班级、任务详情、提交、submission detail、请求 AI 已接入真接口。
 - `/_demo/**`：独立 demo 沙箱，使用 `app/api/_demo/**` 内存数据，不参与主链路交付，不应作为正式 Teacher/Student 主链路实现参考。
 
@@ -83,6 +84,7 @@ Teacher 起步与模板链路（可用）：
    - 模板列表默认 `scope=mine`，并支持显式切换 `mine/shared/all`；共享只影响读可见性，不改变作者权限边界。
    - 模板列表默认排序已前端收口：`mine` 按最近更新时间降序（同时间按创建时间）；`shared` 先 `PUBLISHED` 再按最近更新时间；`all` 先“我的模板”再“他人共享模板”。
 4. `/teacher/classrooms/[classroomId]/tasks` 选择当前可见且已发布模板（我的 + 可见共享）并设置 `dueAt/allowLate/maxAttempts` 后发布（`POST classrooms/:id/tasks`）；候选池由 `GET classrooms/:id/publishable-task-templates` 按 query 实时检索，`courseLabel/onlyMine/knowledgeModule/stage` 均为后端真实查询条件，且后端已内置排除本班已发布模板
+   - 首次仅加载第一页（`page=1&limit=50`），当 `total` 大于当前已加载数量时可在表单内“加载更多”并追加候选；筛选条件变化后回到第一页结果。
 5. 进入 `/teacher/classrooms/[classroomId]/tasks/[classroomTaskId]/*` 和提交管理页
 
 Teacher 课程视角（可用）：

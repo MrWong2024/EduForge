@@ -1,12 +1,13 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { ErrorState } from "@/components/blocks/ErrorState";
 import { BrowserFetchJsonError, fetchJson } from "@/lib/api/browser-client";
 import {
   type LearningTaskOption,
+  toPublishableTaskTemplateListResponse,
   toSubmitTaskResponse,
   type PublishClassroomTaskRequest,
 } from "@/lib/api/types-teacher";
@@ -16,10 +17,14 @@ import {
   toTaskCourseLabelDisplayText,
 } from "@/lib/learning-tasks/course-labels";
 import { paths } from "@/lib/routes/paths";
+import { buildQueryString } from "@/lib/ui/format";
 
 type PublishClassroomTaskFormProps = {
   classroomId: string;
   availableTasks: LearningTaskOption[];
+  initialAvailableTasksTotal?: number;
+  initialAvailableTasksPage?: number;
+  initialAvailableTasksLimit?: number;
   initialCourseLabelFilter?: string;
   initialOnlyMineFilter: boolean;
   initialKnowledgeModuleFilter?: string;
@@ -156,6 +161,9 @@ const toStageFilter = (value: string | undefined): StageFilter => {
 export function PublishClassroomTaskForm({
   classroomId,
   availableTasks,
+  initialAvailableTasksTotal,
+  initialAvailableTasksPage,
+  initialAvailableTasksLimit,
   initialCourseLabelFilter,
   initialOnlyMineFilter,
   initialKnowledgeModuleFilter,
@@ -178,6 +186,23 @@ export function PublishClassroomTaskForm({
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errorState, setErrorState] = useState<PublishErrorState | null>(null);
   const [createdTaskId, setCreatedTaskId] = useState<string | null>(null);
+  const [loadedTasks, setLoadedTasks] = useState<LearningTaskOption[]>(availableTasks);
+  const [loadedTotal, setLoadedTotal] = useState<number>(
+    typeof initialAvailableTasksTotal === "number" ? initialAvailableTasksTotal : availableTasks.length
+  );
+  const [loadedPage, setLoadedPage] = useState<number>(
+    typeof initialAvailableTasksPage === "number" && initialAvailableTasksPage > 0
+      ? initialAvailableTasksPage
+      : 1
+  );
+  const [loadedLimit, setLoadedLimit] = useState<number>(
+    typeof initialAvailableTasksLimit === "number" && initialAvailableTasksLimit > 0
+      ? initialAvailableTasksLimit
+      : 50
+  );
+  const [isLoadingMore, setIsLoadingMore] = useState(false);
+  const [loadMoreError, setLoadMoreError] = useState<string | null>(null);
+  const loadMoreEpochRef = useRef(0);
 
   useEffect(() => {
     setCourseLabelFilter(initialCourseLabelFilter ?? "");
@@ -195,9 +220,29 @@ export function PublishClassroomTaskForm({
     setStageFilter(toStageFilter(initialStageFilter));
   }, [initialStageFilter]);
 
+  useEffect(() => {
+    loadMoreEpochRef.current += 1;
+    setLoadedTasks(availableTasks);
+    setLoadedTotal(
+      typeof initialAvailableTasksTotal === "number" ? initialAvailableTasksTotal : availableTasks.length
+    );
+    setLoadedPage(
+      typeof initialAvailableTasksPage === "number" && initialAvailableTasksPage > 0
+        ? initialAvailableTasksPage
+        : 1
+    );
+    setLoadedLimit(
+      typeof initialAvailableTasksLimit === "number" && initialAvailableTasksLimit > 0
+        ? initialAvailableTasksLimit
+        : 50
+    );
+    setLoadMoreError(null);
+    setIsLoadingMore(false);
+  }, [availableTasks, initialAvailableTasksTotal, initialAvailableTasksPage, initialAvailableTasksLimit]);
+
   const selectedTask = useMemo(
-    () => availableTasks.find((task) => task.id === taskId),
-    [availableTasks, taskId]
+    () => loadedTasks.find((task) => task.id === taskId),
+    [loadedTasks, taskId]
   );
   const selectedRubricSummary = useMemo(
     () => toRubricSummary(selectedTask?.rubric),
@@ -206,7 +251,7 @@ export function PublishClassroomTaskForm({
 
   const courseLabelOptions = useMemo(() => {
     const optionSet = new Set<string>();
-    for (const task of availableTasks) {
+    for (const task of loadedTasks) {
       const normalized = normalizeTaskCourseLabel(task.courseLabel);
       if (normalized) {
         optionSet.add(normalized);
@@ -227,11 +272,11 @@ export function PublishClassroomTaskForm({
       }
       return left.localeCompare(right, "zh-CN");
     });
-  }, [availableTasks, courseLabelFilter]);
+  }, [loadedTasks, courseLabelFilter]);
 
   const knowledgeModuleOptions = useMemo(() => {
     const moduleSet = new Set<string>();
-    for (const task of availableTasks) {
+    for (const task of loadedTasks) {
       const moduleValue =
         typeof task.knowledgeModule === "string" ? task.knowledgeModule.trim() : "";
       if (moduleValue) {
@@ -243,17 +288,17 @@ export function PublishClassroomTaskForm({
     }
 
     return [...moduleSet].sort((left, right) => left.localeCompare(right, "zh-CN"));
-  }, [availableTasks, knowledgeModuleFilter]);
+  }, [loadedTasks, knowledgeModuleFilter]);
 
   useEffect(() => {
     if (!taskId) {
       return;
     }
-    const stillVisible = availableTasks.some((task) => task.id === taskId);
+    const stillVisible = loadedTasks.some((task) => task.id === taskId);
     if (!stillVisible) {
       setTaskId("");
     }
-  }, [availableTasks, taskId]);
+  }, [loadedTasks, taskId]);
 
   const replaceSearchQuery = (updater: (params: URLSearchParams) => void) => {
     const params = new URLSearchParams(searchParams.toString());
@@ -324,6 +369,88 @@ export function PublishClassroomTaskForm({
 
   const hasActiveQueryFilters =
     Boolean(courseLabelFilter) || onlyMine || Boolean(knowledgeModuleFilter) || stageFilter !== "ALL";
+  const hasMoreTasks = loadedTasks.length < loadedTotal;
+
+  const handleLoadMore = async () => {
+    if (isLoadingMore || !hasMoreTasks) {
+      return;
+    }
+
+    const nextPage = loadedPage + 1;
+    const query = buildQueryString({
+      page: nextPage,
+      limit: loadedLimit,
+      courseLabel: courseLabelFilter || undefined,
+      onlyMine: onlyMine ? "true" : undefined,
+      knowledgeModule: knowledgeModuleFilter || undefined,
+      stage: stageFilter !== "ALL" ? Number(stageFilter) : undefined,
+    });
+
+    setIsLoadingMore(true);
+    setLoadMoreError(null);
+    const requestEpoch = loadMoreEpochRef.current;
+
+    try {
+      const payload = await fetchJson<unknown>(
+        `classrooms/${encodeURIComponent(classroomId)}/publishable-task-templates?${query}`
+      );
+      const response = toPublishableTaskTemplateListResponse(payload);
+      const nextItems = response.items;
+      if (requestEpoch !== loadMoreEpochRef.current) {
+        return;
+      }
+
+      setLoadedTasks((previous) => {
+        const seenIds = new Set(
+          previous
+            .map((task) => (typeof task.id === "string" ? task.id.trim() : ""))
+            .filter((id) => id.length > 0)
+        );
+        const merged = [...previous];
+
+        for (const item of nextItems) {
+          const itemId = typeof item.id === "string" ? item.id.trim() : "";
+          if (itemId && seenIds.has(itemId)) {
+            continue;
+          }
+          if (itemId) {
+            seenIds.add(itemId);
+          }
+          merged.push(item);
+        }
+
+        return merged;
+      });
+
+      setLoadedPage(typeof response.page === "number" && response.page > 0 ? response.page : nextPage);
+      if (typeof response.limit === "number" && response.limit > 0) {
+        setLoadedLimit(response.limit);
+      }
+      if (typeof response.total === "number" && response.total >= 0) {
+        setLoadedTotal(response.total);
+      }
+    } catch (error) {
+      if (requestEpoch !== loadMoreEpochRef.current) {
+        return;
+      }
+      if (error instanceof BrowserFetchJsonError) {
+        const detail = extractRawDetail(error.data);
+        const summaryByStatus: Record<number, string> = {
+          401: "登录状态已失效，请重新登录。",
+          403: "无权限加载更多候选模板。",
+          404: "候选模板检索接口未启用、不可用或资源不存在。",
+        };
+        const summary = summaryByStatus[error.status] ?? "加载更多候选模板失败，请稍后重试。";
+        setLoadMoreError(buildErrorDescription(summary, detail));
+      } else {
+        setLoadMoreError("加载更多候选模板失败，请稍后重试。");
+      }
+    } finally {
+      if (requestEpoch === loadMoreEpochRef.current) {
+        setIsLoadingMore(false);
+      }
+    }
+  };
 
   const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -426,7 +553,7 @@ export function PublishClassroomTaskForm({
           先去创建任务模板
         </Link>
       </p>
-      {availableTasks.length === 0 ? (
+      {loadedTasks.length === 0 ? (
         <div className="mt-3 rounded-md border border-zinc-200 bg-zinc-50 px-3 py-2 text-sm text-zinc-700">
           {hasActiveQueryFilters ? (
             <>
@@ -457,7 +584,7 @@ export function PublishClassroomTaskForm({
       ) : null}
 
       <form onSubmit={handleSubmit} className="mt-4 space-y-4">
-        {availableTasks.length > 0 ? (
+        {loadedTasks.length > 0 ? (
           <section className="rounded-md border border-zinc-200 bg-zinc-50 p-3">
             <p className="text-sm font-medium text-zinc-900">模板筛选（实时查询）</p>
             <p className="mt-1 text-xs text-zinc-600">
@@ -533,7 +660,9 @@ export function PublishClassroomTaskForm({
                 </button>
               </div>
             </div>
-            <p className="mt-2 text-xs text-zinc-500">当前后端返回 {availableTasks.length} 个候选模板</p>
+            <p className="mt-2 text-xs text-zinc-500">
+              当前已显示 {loadedTasks.length} / {loadedTotal} 个候选模板
+            </p>
           </section>
         ) : null}
 
@@ -545,11 +674,11 @@ export function PublishClassroomTaskForm({
             className="w-full rounded-md border border-zinc-300 px-3 py-2"
           >
             <option value="">
-              {availableTasks.length === 0
+              {loadedTasks.length === 0
                 ? "当前筛选下无可选模板"
                 : "请选择已发布任务"}
             </option>
-            {availableTasks.map((task) => (
+            {loadedTasks.map((task) => (
               <option key={task.id ?? task.title} value={task.id}>
                 {task.title ?? "未命名任务"} | {toDisplayText(task.knowledgeModule)} / 阶段{" "}
                 {toDisplayText(task.stage)}
@@ -558,12 +687,12 @@ export function PublishClassroomTaskForm({
           </select>
         </label>
 
-        {availableTasks.length > 0 ? (
+        {loadedTasks.length > 0 ? (
           <section className="rounded-md border border-zinc-200 bg-white p-3">
             <p className="text-sm font-medium text-zinc-900">模板候选列表</p>
             <p className="mt-1 text-xs text-zinc-600">点击“选择此模板”可快速回填到发布表单。</p>
             <ul className="mt-3 space-y-2">
-              {availableTasks.map((task, index) => {
+              {loadedTasks.map((task, index) => {
                 const rubricSummary = toRubricSummary(task.rubric);
                 const isActive = task.id && task.id === taskId;
                 return (
@@ -597,6 +726,24 @@ export function PublishClassroomTaskForm({
                 );
               })}
             </ul>
+            {loadMoreError ? (
+              <p className="mt-3 text-xs text-rose-700">{loadMoreError}</p>
+            ) : null}
+            {hasMoreTasks ? (
+              <div className="mt-3 flex items-center justify-between gap-3">
+                <p className="text-xs text-zinc-500">
+                  当前已显示 {loadedTasks.length} / {loadedTotal} 个候选模板
+                </p>
+                <button
+                  type="button"
+                  onClick={handleLoadMore}
+                  disabled={isLoadingMore}
+                  className="rounded-md border border-zinc-300 px-3 py-1.5 text-xs text-zinc-700 hover:bg-zinc-100 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  {isLoadingMore ? "加载中..." : "加载更多"}
+                </button>
+              </div>
+            ) : null}
           </section>
         ) : null}
 
@@ -674,7 +821,7 @@ export function PublishClassroomTaskForm({
 
         <button
           type="submit"
-          disabled={isSubmitting || availableTasks.length === 0}
+          disabled={isSubmitting || loadedTasks.length === 0}
           className="rounded-md bg-zinc-900 px-4 py-2 text-sm font-medium text-white disabled:cursor-not-allowed disabled:bg-zinc-400"
         >
           {isSubmitting ? "发布中..." : "发布任务"}

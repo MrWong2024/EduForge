@@ -42,6 +42,9 @@ type TasksViewModel =
       classroomName?: string;
       taskList: ReturnType<typeof toClassroomTasksResponse>;
       availableTasks: ReturnType<typeof toPublishableTaskTemplateListResponse>["items"];
+      availableTasksTotal?: number;
+      availableTasksPage?: number;
+      availableTasksLimit?: number;
       initialCourseLabelFilter?: string;
       initialOnlyMineFilter: boolean;
       initialKnowledgeModuleFilter?: string;
@@ -116,6 +119,9 @@ export default async function ClassroomTasksPage({ params, searchParams }: Class
       classroomName: classroom.name,
       taskList,
       availableTasks: learningTasks.items,
+      availableTasksTotal: learningTasks.total,
+      availableTasksPage: learningTasks.page,
+      availableTasksLimit: learningTasks.limit,
       initialCourseLabelFilter,
       initialOnlyMineFilter,
       initialKnowledgeModuleFilter,
@@ -187,6 +193,9 @@ export default async function ClassroomTasksPage({ params, searchParams }: Class
       <PublishClassroomTaskForm
         classroomId={classroomId}
         availableTasks={viewModel.availableTasks}
+        initialAvailableTasksTotal={viewModel.availableTasksTotal}
+        initialAvailableTasksPage={viewModel.availableTasksPage}
+        initialAvailableTasksLimit={viewModel.availableTasksLimit}
         initialCourseLabelFilter={viewModel.initialCourseLabelFilter}
         initialOnlyMineFilter={viewModel.initialOnlyMineFilter}
         initialKnowledgeModuleFilter={viewModel.initialKnowledgeModuleFilter}
