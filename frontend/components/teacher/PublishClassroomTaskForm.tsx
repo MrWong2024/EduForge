@@ -571,87 +571,85 @@ export function PublishClassroomTaskForm({
       ) : null}
 
       <form onSubmit={handleSubmit} className="mt-4 space-y-4">
-        {loadedTasks.length > 0 ? (
-          <section className="rounded-md border border-zinc-200 bg-zinc-50 p-3">
-            <p className="text-sm font-medium text-zinc-900">模板筛选（实时查询）</p>
-            <p className="mt-1 text-xs text-zinc-600">
-              课程分类、仅看我的模板、知识模块、阶段会写入 URL 并触发后端重新检索。
-            </p>
-            <div className="mt-3 grid gap-3 md:grid-cols-5">
-              <label className="block text-sm">
-                <span className="mb-1 block text-zinc-700">课程分类</span>
-                <select
-                  value={courseLabelFilter}
-                  onChange={(event) => setCourseLabelFilterAndSync(event.target.value)}
-                  className="w-full rounded-md border border-zinc-300 px-3 py-2"
-                >
-                  <option value="">全部课程分类</option>
-                  {courseLabelOptions.map((option) => (
-                    <option key={option} value={option}>
-                      {toTaskCourseLabelDisplayText(option)}
-                    </option>
-                  ))}
-                </select>
-              </label>
+        <section className="rounded-md border border-zinc-200 bg-zinc-50 p-3">
+          <p className="text-sm font-medium text-zinc-900">模板筛选（实时查询）</p>
+          <p className="mt-1 text-xs text-zinc-600">
+            课程分类、仅看我的模板、知识模块、阶段会写入 URL 并触发后端重新检索。
+          </p>
+          <div className="mt-3 grid gap-3 md:grid-cols-5">
+            <label className="block text-sm">
+              <span className="mb-1 block text-zinc-700">课程分类</span>
+              <select
+                value={courseLabelFilter}
+                onChange={(event) => setCourseLabelFilterAndSync(event.target.value)}
+                className="w-full rounded-md border border-zinc-300 px-3 py-2"
+              >
+                <option value="">全部课程分类</option>
+                {courseLabelOptions.map((option) => (
+                  <option key={option} value={option}>
+                    {toTaskCourseLabelDisplayText(option)}
+                  </option>
+                ))}
+              </select>
+            </label>
 
-              <label className="block text-sm">
-                <span className="mb-1 block text-zinc-700">知识模块</span>
-                <select
-                  value={knowledgeModuleFilter}
-                  onChange={(event) => setKnowledgeModuleFilterAndSync(event.target.value)}
-                  className="w-full rounded-md border border-zinc-300 px-3 py-2"
-                >
-                  <option value="">全部模块</option>
-                  {knowledgeModuleOptions.map((option) => (
-                    <option key={option} value={option}>
-                      {option}
-                    </option>
-                  ))}
-                </select>
-              </label>
+            <label className="block text-sm">
+              <span className="mb-1 block text-zinc-700">知识模块</span>
+              <select
+                value={knowledgeModuleFilter}
+                onChange={(event) => setKnowledgeModuleFilterAndSync(event.target.value)}
+                className="w-full rounded-md border border-zinc-300 px-3 py-2"
+              >
+                <option value="">全部模块</option>
+                {knowledgeModuleOptions.map((option) => (
+                  <option key={option} value={option}>
+                    {option}
+                  </option>
+                ))}
+              </select>
+            </label>
 
-              <label className="block text-sm">
-                <span className="mb-1 block text-zinc-700">阶段</span>
-                <select
-                  value={stageFilter}
-                  onChange={(event) => setStageFilterAndSync(event.target.value as StageFilter)}
-                  className="w-full rounded-md border border-zinc-300 px-3 py-2"
-                >
-                  <option value="ALL">全部阶段</option>
-                  <option value="1">阶段 1</option>
-                  <option value="2">阶段 2</option>
-                  <option value="3">阶段 3</option>
-                  <option value="4">阶段 4</option>
-                </select>
-              </label>
+            <label className="block text-sm">
+              <span className="mb-1 block text-zinc-700">阶段</span>
+              <select
+                value={stageFilter}
+                onChange={(event) => setStageFilterAndSync(event.target.value as StageFilter)}
+                className="w-full rounded-md border border-zinc-300 px-3 py-2"
+              >
+                <option value="ALL">全部阶段</option>
+                <option value="1">阶段 1</option>
+                <option value="2">阶段 2</option>
+                <option value="3">阶段 3</option>
+                <option value="4">阶段 4</option>
+              </select>
+            </label>
 
-              <label className="block text-sm">
-                <span className="mb-1 block text-zinc-700">模板范围</span>
-                <span className="flex h-[42px] items-center gap-2 rounded-md border border-zinc-300 px-3 py-2 text-zinc-700">
-                  <input
-                    type="checkbox"
-                    checked={onlyMine}
-                    onChange={(event) => setOnlyMineAndSync(event.target.checked)}
-                  />
-                  仅看我的模板
-                </span>
-              </label>
+            <label className="block text-sm">
+              <span className="mb-1 block text-zinc-700">模板范围</span>
+              <span className="flex h-[42px] items-center gap-2 rounded-md border border-zinc-300 px-3 py-2 text-zinc-700">
+                <input
+                  type="checkbox"
+                  checked={onlyMine}
+                  onChange={(event) => setOnlyMineAndSync(event.target.checked)}
+                />
+                仅看我的模板
+              </span>
+            </label>
 
-              <div className="flex items-end">
-                <button
-                  type="button"
-                  onClick={resetFilters}
-                  className="rounded-md border border-zinc-300 px-3 py-2 text-sm text-zinc-700 hover:bg-zinc-100"
-                >
-                  重置筛选
-                </button>
-              </div>
+            <div className="flex items-end">
+              <button
+                type="button"
+                onClick={resetFilters}
+                className="rounded-md border border-zinc-300 px-3 py-2 text-sm text-zinc-700 hover:bg-zinc-100"
+              >
+                重置筛选
+              </button>
             </div>
-            <p className="mt-2 text-xs text-zinc-500">
-              当前已显示 {loadedTasks.length} / {loadedTotal} 个候选模板
-            </p>
-          </section>
-        ) : null}
+          </div>
+          <p className="mt-2 text-xs text-zinc-500">
+            当前已显示 {loadedTasks.length} / {loadedTotal} 个候选模板
+          </p>
+        </section>
 
         <label className="block text-sm">
           <span className="mb-1 block text-zinc-700">选择任务模板</span>
