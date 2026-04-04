@@ -181,6 +181,7 @@ export function PublishClassroomTaskForm({
   );
   const [stageFilter, setStageFilter] = useState<StageFilter>(toStageFilter(initialStageFilter));
   const [dueAt, setDueAt] = useState<string>("");
+  const [isDueAtPickerActive, setIsDueAtPickerActive] = useState(false);
   const [allowLate, setAllowLate] = useState<boolean>(true);
   const [maxAttempts, setMaxAttempts] = useState<string>("");
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -357,6 +358,7 @@ export function PublishClassroomTaskForm({
   const hasActiveQueryFilters =
     Boolean(courseLabelFilter) || onlyMine || Boolean(knowledgeModuleFilter) || stageFilter !== "ALL";
   const hasMoreTasks = loadedTasks.length < loadedTotal;
+  const dueAtInputType = dueAt || isDueAtPickerActive ? "datetime-local" : "text";
 
   const handleLoadMore = async () => {
     if (isLoadingMore || !hasMoreTasks) {
@@ -773,9 +775,12 @@ export function PublishClassroomTaskForm({
           <label className="block text-sm">
             <span className="mb-1 block text-zinc-700">截止时间</span>
             <input
-              type="datetime-local"
+              type={dueAtInputType}
+              placeholder="YYYY/MM/DD HH:mm"
               value={dueAt}
               onChange={(event) => setDueAt(event.target.value)}
+              onFocus={() => setIsDueAtPickerActive(true)}
+              onBlur={() => setIsDueAtPickerActive(Boolean(dueAt))}
               className="w-full rounded-md border border-zinc-300 px-3 py-2"
             />
           </label>
