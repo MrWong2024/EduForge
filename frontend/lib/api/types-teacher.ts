@@ -1,5 +1,8 @@
 import { safeGet } from "@/lib/ui/format";
-import type { TaskCourseLabel } from "@/lib/learning-tasks/course-labels";
+import {
+  normalizeTaskCourseLabel,
+  type TaskCourseLabel,
+} from "@/lib/learning-tasks/course-labels";
 import {
   normalizeTaskTemplateVisibility,
   type TaskTemplateScope,
@@ -71,6 +74,7 @@ export type CourseSummary = {
   code?: string;
   name?: string;
   term?: string;
+  courseLabel?: TaskCourseLabel;
   status?: string;
   createdAt?: string;
   updatedAt?: string;
@@ -89,6 +93,7 @@ export type CreateCourseRequest = {
   code: string;
   name: string;
   term: string;
+  courseLabel?: TaskCourseLabel;
 };
 
 export type CourseCreateResponse = {
@@ -96,6 +101,7 @@ export type CourseCreateResponse = {
   code?: string;
   name?: string;
   term?: string;
+  courseLabel?: TaskCourseLabel;
   status?: string;
   raw: unknown;
 };
@@ -504,6 +510,7 @@ export const toCourseSummary = (value: unknown): CourseSummary => {
     code: asString(record.code),
     name: asString(record.name),
     term: asString(record.term),
+    courseLabel: normalizeTaskCourseLabel(record.courseLabel),
     status: asString(record.status),
     createdAt: asString(record.createdAt),
     updatedAt: asString(record.updatedAt),
@@ -518,6 +525,7 @@ export const toCourseCreateResponse = (payload: unknown): CourseCreateResponse =
     code: asString(record.code),
     name: asString(record.name),
     term: asString(record.term),
+    courseLabel: normalizeTaskCourseLabel(record.courseLabel),
     status: asString(record.status),
     raw: payload,
   };

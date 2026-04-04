@@ -55,7 +55,7 @@ frontend/
 
 - 统一路由常量：`lib/routes/paths.ts`（含 `paths.teacher.tasks`、`taskEdit`、`tasksFromClassroom`）。
 - 模板治理口径单一来源：
-  - `lib/learning-tasks/course-labels.ts`：`courseLabel` 候选项与“未分类”显示口径。
+  - `lib/learning-tasks/course-labels.ts`：`courseLabel` 候选项与“未分类”显示口径（课程模块与任务模板模块复用同一来源）。
   - `lib/learning-tasks/template-visibility-scope.ts`：`visibility(PRIVATE/SHARED)` 与 `scope(mine/shared/all)` 值域、显示文案、normalize。
   - `lib/learning-tasks/template-list-sorting.ts`：模板列表默认排序策略（前端默认行为，非用户可配置项）。
 - 统一状态文案：`lib/ui/status.ts`（含 `NOT_REQUESTED` 正常语义）。
@@ -86,8 +86,8 @@ Teacher 起步与模板链路（可用）：
 5. 进入 `/teacher/classrooms/[classroomId]/tasks/[classroomTaskId]/*` 和提交管理页
 
 Teacher 课程视角（可用）：
-- `/teacher/courses` 已支持课程列表与创建课程。
-- `/teacher/courses/[courseId]/overview` 已接入课程总览。
+- `/teacher/courses` 已支持课程列表与创建课程，`courseLabel`（课程分类）可选录入并在列表展示。
+- `/teacher/courses/[courseId]/overview` 已接入课程总览，并展示课程分类。
 - 课程视角可作为进入班级创建/班级管理的上游入口（跳转到 `/teacher/classrooms` 或带 `courseId` 的班级页）。
 
 Teacher 班级看板链路（可用）：

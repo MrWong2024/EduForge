@@ -9,6 +9,10 @@ import {
   type CreateCourseRequest,
   toCourseCreateResponse,
 } from "@/lib/api/types-teacher";
+import {
+  normalizeTaskCourseLabel,
+  TASK_COURSE_LABEL_FORM_OPTIONS,
+} from "@/lib/learning-tasks/course-labels";
 import { paths } from "@/lib/routes/paths";
 
 type CreateCourseFormErrorState = {
@@ -37,6 +41,7 @@ export function CreateCourseForm() {
   const [code, setCode] = useState("");
   const [name, setName] = useState("");
   const [term, setTerm] = useState("");
+  const [courseLabel, setCourseLabel] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [errorState, setErrorState] = useState<CreateCourseFormErrorState | null>(null);
@@ -46,6 +51,7 @@ export function CreateCourseForm() {
     const trimmedCode = code.trim();
     const trimmedName = name.trim();
     const trimmedTerm = term.trim();
+    const normalizedCourseLabel = normalizeTaskCourseLabel(courseLabel);
 
     if (!trimmedCode || !trimmedName || !trimmedTerm) {
       setErrorState({
@@ -63,6 +69,9 @@ export function CreateCourseForm() {
       name: trimmedName,
       term: trimmedTerm,
     };
+    if (normalizedCourseLabel) {
+      requestBody.courseLabel = normalizedCourseLabel;
+    }
 
     try {
       const payload = await fetchJson<unknown>("courses", {
@@ -108,7 +117,7 @@ export function CreateCourseForm() {
         填写最小信息后创建课程，成功后将自动进入课程总览。
       </p>
 
-      <form onSubmit={handleSubmit} className="mt-4 grid gap-3 md:grid-cols-3">
+      <form onSubmit={handleSubmit} className="mt-4 grid gap-3 md:grid-cols-4">
         <label className="block text-sm">
           <span className="mb-1 block text-zinc-700">课程代码</span>
           <input
@@ -139,7 +148,23 @@ export function CreateCourseForm() {
           />
         </label>
 
-        <div className="md:col-span-3">
+        <label className="block text-sm">
+          <span className="mb-1 block text-zinc-700">课程分类</span>
+          <select
+            value={courseLabel}
+            onChange={(event) => setCourseLabel(event.target.value)}
+            className="w-full rounded-md border border-zinc-300 px-3 py-2"
+          >
+            <option value="">未分类（可不选）</option>
+            {TASK_COURSE_LABEL_FORM_OPTIONS.map((option) => (
+              <option key={option} value={option}>
+                {option}
+              </option>
+            ))}
+          </select>
+        </label>
+
+        <div className="md:col-span-4">
           <button
             type="submit"
             disabled={isSubmitting}

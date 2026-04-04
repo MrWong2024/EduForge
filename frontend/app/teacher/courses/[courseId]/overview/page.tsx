@@ -6,6 +6,7 @@ import { PageHeader } from "@/components/blocks/PageHeader";
 import { fetchJson, FetchJsonError } from "@/lib/api/client";
 import { buildErrorDescription, extractRawDetail } from "@/lib/api/error-presenter";
 import { toCourseOverviewResponse } from "@/lib/api/types-teacher";
+import { toTaskCourseLabelDisplayText } from "@/lib/learning-tasks/course-labels";
 import { paths } from "@/lib/routes/paths";
 import { getCommonErrorSummary } from "@/lib/ui/status";
 import {
@@ -157,7 +158,7 @@ export default async function CourseOverviewPage({ params, searchParams }: Cours
     <section className="space-y-4">
       <PageHeader
         title={toDisplayText(course?.name, "课程总览")}
-        description={`课程代码: ${toDisplayText(course?.code)} | 学期: ${toDisplayText(course?.term)} | 生成时间: ${toDisplayDate(viewModel.data.generatedAt)}`}
+        description={`课程代码: ${toDisplayText(course?.code)} | 学期: ${toDisplayText(course?.term)} | 课程分类: ${toTaskCourseLabelDisplayText(course?.courseLabel)} | 生成时间: ${toDisplayDate(viewModel.data.generatedAt)}`}
         actions={
           <div className="flex items-center gap-3 text-sm">
             <Link href={paths.teacher.courses} className="text-blue-700 hover:underline">

@@ -8,6 +8,10 @@ import { CreateCourseForm } from "@/components/teacher/CreateCourseForm";
 import { fetchJson, FetchJsonError } from "@/lib/api/client";
 import { buildErrorDescription, extractRawDetail } from "@/lib/api/error-presenter";
 import { toCourseListResponse } from "@/lib/api/types-teacher";
+import {
+  isUnclassifiedTaskCourseLabel,
+  toTaskCourseLabelDisplayText,
+} from "@/lib/learning-tasks/course-labels";
 import { paths } from "@/lib/routes/paths";
 import { getCommonErrorSummary } from "@/lib/ui/status";
 import { getSingleSearchParam, parsePositiveInt, toDisplayText } from "@/lib/ui/format";
@@ -134,6 +138,7 @@ export default async function TeacherCoursesPage({ searchParams }: TeacherCourse
                 <th className="px-4 py-3">课程代码</th>
                 <th className="px-4 py-3">课程名称</th>
                 <th className="px-4 py-3">学期</th>
+                <th className="px-4 py-3">课程分类</th>
                 <th className="px-4 py-3">状态</th>
                 <th className="px-4 py-3">操作</th>
               </tr>
@@ -144,6 +149,17 @@ export default async function TeacherCoursesPage({ searchParams }: TeacherCourse
                   <td className="px-4 py-3">{toDisplayText(course.code)}</td>
                   <td className="px-4 py-3">{toDisplayText(course.name)}</td>
                   <td className="px-4 py-3">{toDisplayText(course.term)}</td>
+                  <td className="px-4 py-3">
+                    <span
+                      className={`inline-flex rounded border px-2 py-0.5 text-xs font-medium ${
+                        isUnclassifiedTaskCourseLabel(course.courseLabel)
+                          ? "border-zinc-200 bg-zinc-100 text-zinc-700"
+                          : "border-indigo-200 bg-indigo-100 text-indigo-700"
+                      }`}
+                    >
+                      {toTaskCourseLabelDisplayText(course.courseLabel)}
+                    </span>
+                  </td>
                   <td className="px-4 py-3">{toDisplayText(course.status)}</td>
                   <td className="px-4 py-3">
                     {course.id ? (
