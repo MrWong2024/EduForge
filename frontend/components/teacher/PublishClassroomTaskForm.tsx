@@ -12,8 +12,8 @@ import {
   type PublishClassroomTaskRequest,
 } from "@/lib/api/types-teacher";
 import {
+  TASK_COURSE_LABELS,
   TASK_COURSE_LABEL_UNCLASSIFIED,
-  normalizeTaskCourseLabel,
   toTaskCourseLabelDisplayText,
 } from "@/lib/learning-tasks/course-labels";
 import { paths } from "@/lib/routes/paths";
@@ -250,29 +250,16 @@ export function PublishClassroomTaskForm({
   );
 
   const courseLabelOptions = useMemo(() => {
-    const optionSet = new Set<string>();
-    for (const task of loadedTasks) {
-      const normalized = normalizeTaskCourseLabel(task.courseLabel);
-      if (normalized) {
-        optionSet.add(normalized);
-      } else {
-        optionSet.add(TASK_COURSE_LABEL_UNCLASSIFIED);
-      }
+    if (
+      courseLabelFilter &&
+      !TASK_COURSE_LABELS.includes(courseLabelFilter as (typeof TASK_COURSE_LABELS)[number])
+    ) {
+      return [TASK_COURSE_LABEL_UNCLASSIFIED, courseLabelFilter, ...TASK_COURSE_LABELS.filter(
+        (label) => label !== TASK_COURSE_LABEL_UNCLASSIFIED
+      )];
     }
-    if (courseLabelFilter) {
-      optionSet.add(courseLabelFilter);
-    }
-
-    return [...optionSet].sort((left, right) => {
-      if (left === TASK_COURSE_LABEL_UNCLASSIFIED) {
-        return -1;
-      }
-      if (right === TASK_COURSE_LABEL_UNCLASSIFIED) {
-        return 1;
-      }
-      return left.localeCompare(right, "zh-CN");
-    });
-  }, [loadedTasks, courseLabelFilter]);
+    return [...TASK_COURSE_LABELS];
+  }, [courseLabelFilter]);
 
   const knowledgeModuleOptions = useMemo(() => {
     const moduleSet = new Set<string>();
