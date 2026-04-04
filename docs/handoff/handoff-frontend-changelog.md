@@ -295,6 +295,14 @@
 - 【单一来源复用】课程分类候选项复用 `lib/learning-tasks/course-labels.ts`，与任务模板页保持同一标准值域，不新增第二套硬编码列表。
 - 【边界保持】当前未命中现有课程编辑页入口，因此本步未扩展课程编辑页面；未改 backend 契约、未改任务模板页与班级发布页。
 
+## UAT-FE-34
+
+- 【本步解决】课程分类在创建后无法维护的问题（“创建可填、后续不可改”半接入）。
+- 【新增事实 / 已收口口径】新增课程编辑页 `/teacher/courses/[courseId]/edit`，并新增 `EditCourseForm`；支持编辑 `code/name/term/courseLabel`，`courseLabel` 支持清空。
+- 【入口收口】课程列表操作列与课程总览 actions 已补“编辑课程”入口；保存成功后跳转课程总览，便于立即确认更新结果。
+- 【类型映射同步】`types-teacher.ts` 已补课程更新相关类型/解析（`UpdateCourseRequest`、`toCourseDetailResponse`、`toCourseUpdateResponse`），并统一 `courseLabel` 解析口径。
+- 【边界保持】overview 仍是展示页，不改为编辑页；未改 backend 契约、未改任务模板页与班级发布页、未引入 Course 与 Task 强绑定。
+
 ## 当前阶段一句话结论
 
 前端已达到“Teacher/Student 主链路可用 + 任务模板层与班级实例层边界收口 + 教师模板主链路可维护”的工程验收阶段，但尚未进入最终交付定版阶段。

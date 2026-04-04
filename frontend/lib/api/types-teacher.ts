@@ -96,6 +96,13 @@ export type CreateCourseRequest = {
   courseLabel?: TaskCourseLabel;
 };
 
+export type UpdateCourseRequest = {
+  code: string;
+  name: string;
+  term: string;
+  courseLabel?: TaskCourseLabel | "";
+};
+
 export type CourseCreateResponse = {
   id?: string;
   code?: string;
@@ -105,6 +112,9 @@ export type CourseCreateResponse = {
   status?: string;
   raw: unknown;
 };
+
+export type CourseDetailResponse = CourseSummary;
+export type CourseUpdateResponse = CourseSummary;
 
 export type CourseOverviewErrorItem = {
   code?: string;
@@ -506,7 +516,7 @@ export const toClassroomListResponse = (payload: unknown): ClassroomListResponse
 export const toCourseSummary = (value: unknown): CourseSummary => {
   const record = asRecord(value);
   return {
-    id: asString(record.id),
+    id: asString(record.id) ?? asString(record.courseId),
     code: asString(record.code),
     name: asString(record.name),
     term: asString(record.term),
@@ -529,6 +539,20 @@ export const toCourseCreateResponse = (payload: unknown): CourseCreateResponse =
     status: asString(record.status),
     raw: payload,
   };
+};
+
+export const toCourseDetailResponse = (payload: unknown): CourseDetailResponse => {
+  const record = asRecord(payload);
+  const dataRecord = asRecord(safeGet(record, "data", undefined));
+  const source = Object.keys(dataRecord).length > 0 ? dataRecord : record;
+  return toCourseSummary(source);
+};
+
+export const toCourseUpdateResponse = (payload: unknown): CourseUpdateResponse => {
+  const record = asRecord(payload);
+  const dataRecord = asRecord(safeGet(record, "data", undefined));
+  const source = Object.keys(dataRecord).length > 0 ? dataRecord : record;
+  return toCourseSummary(source);
 };
 
 const toCourseOverviewErrorItem = (value: unknown): CourseOverviewErrorItem => {

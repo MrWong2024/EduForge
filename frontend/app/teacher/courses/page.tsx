@@ -165,6 +165,12 @@ export default async function TeacherCoursesPage({ searchParams }: TeacherCourse
                     {course.id ? (
                       <div className="flex flex-wrap items-center gap-3">
                         <Link
+                          href={paths.teacher.courseEdit(course.id)}
+                          className="text-blue-700 hover:underline"
+                        >
+                          编辑
+                        </Link>
+                        <Link
                           href={paths.teacher.courseOverview(course.id)}
                           className="text-blue-700 hover:underline"
                         >

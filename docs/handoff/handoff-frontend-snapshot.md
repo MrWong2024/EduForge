@@ -88,6 +88,7 @@ Teacher 起步与模板链路（可用）：
 Teacher 课程视角（可用）：
 - `/teacher/courses` 已支持课程列表与创建课程，`courseLabel`（课程分类）可选录入并在列表展示。
 - `/teacher/courses/[courseId]/overview` 已接入课程总览，并展示课程分类。
+- `/teacher/courses/[courseId]/edit` 已支持课程基础信息编辑（`code/name/term/courseLabel`）；`courseLabel` 可修改也可清空。
 - 课程视角可作为进入班级创建/班级管理的上游入口（跳转到 `/teacher/classrooms` 或带 `courseId` 的班级页）。
 
 Teacher 班级看板链路（可用）：
