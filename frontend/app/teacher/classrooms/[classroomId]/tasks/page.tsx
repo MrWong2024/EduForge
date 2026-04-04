@@ -6,18 +6,24 @@ import { PageHeader } from "@/components/blocks/PageHeader";
 import { PublishClassroomTaskForm } from "@/components/teacher/PublishClassroomTaskForm";
 import { fetchJson, FetchJsonError } from "@/lib/api/client";
 import { buildErrorDescription, extractRawDetail } from "@/lib/api/error-presenter";
-import { getMe } from "@/lib/auth/session";
 import {
   toClassroomSummary,
   toClassroomTasksResponse,
-  toLearningTaskListResponse,
+  toPublishableTaskTemplateListResponse,
 } from "@/lib/api/types-teacher";
+import { normalizeTaskCourseLabel } from "@/lib/learning-tasks/course-labels";
 import { paths } from "@/lib/routes/paths";
 import { getAiStatusLabel, getCommonErrorSummary } from "@/lib/ui/status";
-import { toDisplayDate, toDisplayText } from "@/lib/ui/format";
+import { buildQueryString, getSingleSearchParam, toDisplayDate, toDisplayText } from "@/lib/ui/format";
 
 type ClassroomTasksPageProps = {
   params: Promise<{ classroomId: string }>;
+  searchParams: Promise<{
+    courseLabel?: string | string[];
+    onlyMine?: string | string[];
+    knowledgeModule?: string | string[];
+    stage?: string | string[];
+  }>;
 };
 
 const getRequestOrigin = async (): Promise<string> => {
@@ -35,14 +41,38 @@ type TasksViewModel =
       mode: "ready";
       classroomName?: string;
       taskList: ReturnType<typeof toClassroomTasksResponse>;
-      availableTasks: ReturnType<typeof toLearningTaskListResponse>["items"];
-      currentUserId?: string;
-      publishedTaskTemplateIds: string[];
+      availableTasks: ReturnType<typeof toPublishableTaskTemplateListResponse>["items"];
+      initialCourseLabelFilter?: string;
+      initialOnlyMineFilter: boolean;
+      initialKnowledgeModuleFilter?: string;
+      initialStageFilter?: "1" | "2" | "3" | "4";
     }
   | { mode: "error"; status: number; description: string };
 
-export default async function ClassroomTasksPage({ params }: ClassroomTasksPageProps) {
+const parseOnlyMine = (value: string | undefined): boolean => {
+  if (!value) {
+    return false;
+  }
+  const normalized = value.trim().toLowerCase();
+  return normalized === "1" || normalized === "true";
+};
+
+const parseStageFilter = (value: string | undefined): "1" | "2" | "3" | "4" | undefined => {
+  if (value === "1" || value === "2" || value === "3" || value === "4") {
+    return value;
+  }
+  return undefined;
+};
+
+export default async function ClassroomTasksPage({ params, searchParams }: ClassroomTasksPageProps) {
   const { classroomId } = await params;
+  const query = await searchParams;
+  const initialCourseLabelFilter = normalizeTaskCourseLabel(
+    getSingleSearchParam(query.courseLabel)
+  );
+  const initialOnlyMineFilter = parseOnlyMine(getSingleSearchParam(query.onlyMine));
+  const initialKnowledgeModuleFilter = getSingleSearchParam(query.knowledgeModule)?.trim() || undefined;
+  const initialStageFilter = parseStageFilter(getSingleSearchParam(query.stage));
   let viewModel: TasksViewModel = {
     mode: "error",
     status: 500,
@@ -51,7 +81,15 @@ export default async function ClassroomTasksPage({ params }: ClassroomTasksPageP
 
   try {
     const origin = await getRequestOrigin();
-    const [classroomPayload, tasksPayload, learningTasksPayload, me] = await Promise.all([
+    const publishableQuery = buildQueryString({
+      page: 1,
+      limit: 50,
+      courseLabel: initialCourseLabelFilter,
+      onlyMine: initialOnlyMineFilter ? "true" : undefined,
+      knowledgeModule: initialKnowledgeModuleFilter,
+      stage: initialStageFilter ? Number(initialStageFilter) : undefined,
+    });
+    const [classroomPayload, tasksPayload, learningTasksPayload] = await Promise.all([
       fetchJson<unknown>(`classrooms/${encodeURIComponent(classroomId)}`, {
         origin,
         cache: "no-store",
@@ -60,31 +98,28 @@ export default async function ClassroomTasksPage({ params }: ClassroomTasksPageP
         origin,
         cache: "no-store",
       }),
-      fetchJson<unknown>("learning-tasks/tasks?scope=all&status=PUBLISHED&page=1&limit=50", {
-        origin,
-        cache: "no-store",
-      }),
-      getMe().catch(() => null),
+      fetchJson<unknown>(
+        `classrooms/${encodeURIComponent(classroomId)}/publishable-task-templates?${publishableQuery}`,
+        {
+          origin,
+          cache: "no-store",
+        }
+      ),
     ]);
 
     const classroom = toClassroomSummary(classroomPayload);
     const taskList = toClassroomTasksResponse(tasksPayload);
-    const learningTasks = toLearningTaskListResponse(learningTasksPayload);
-    const publishedTaskTemplateIds = [
-      ...new Set(
-        taskList.items
-          .map((item) => (typeof item.taskId === "string" ? item.taskId.trim() : ""))
-          .filter((taskId) => taskId.length > 0)
-      ),
-    ];
+    const learningTasks = toPublishableTaskTemplateListResponse(learningTasksPayload);
 
     viewModel = {
       mode: "ready",
       classroomName: classroom.name,
       taskList,
       availableTasks: learningTasks.items,
-      currentUserId: typeof me?.id === "string" && me.id.trim() ? me.id.trim() : undefined,
-      publishedTaskTemplateIds,
+      initialCourseLabelFilter,
+      initialOnlyMineFilter,
+      initialKnowledgeModuleFilter,
+      initialStageFilter,
     };
   } catch (error) {
     if (error instanceof FetchJsonError) {
@@ -135,9 +170,8 @@ export default async function ClassroomTasksPage({ params }: ClassroomTasksPageP
         <p className="mt-1">
           这里先选择已发布任务模板，再配置截止时间、迟交与尝试次数等班级实例设置后发布。
         </p>
-        <p className="mt-1">
-          候选模板来自你当前可见且已发布的模板（包含你自己的模板与可见的共享模板）。
-        </p>
+        <p className="mt-1">候选模板按当前班级与筛选条件实时检索，包含你自己的模板与可见共享模板。</p>
+        <p className="mt-1">后端已自动排除当前班级已发布过的模板，并处理课程分类优先匹配排序。</p>
         <p className="mt-2">
           若没有合适模板，请先前往
           <Link
@@ -153,8 +187,10 @@ export default async function ClassroomTasksPage({ params }: ClassroomTasksPageP
       <PublishClassroomTaskForm
         classroomId={classroomId}
         availableTasks={viewModel.availableTasks}
-        currentUserId={viewModel.currentUserId}
-        publishedTaskTemplateIds={viewModel.publishedTaskTemplateIds}
+        initialCourseLabelFilter={viewModel.initialCourseLabelFilter}
+        initialOnlyMineFilter={viewModel.initialOnlyMineFilter}
+        initialKnowledgeModuleFilter={viewModel.initialKnowledgeModuleFilter}
+        initialStageFilter={viewModel.initialStageFilter}
       />
 
       {viewModel.taskList.items.length === 0 ? (

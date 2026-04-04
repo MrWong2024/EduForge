@@ -279,6 +279,14 @@
 - 【空态收口】已区分三类空态：无可见 `PUBLISHED` 模板、可见模板均已在本班发布、当前筛选条件下无匹配。
 - 【边界保持】未新增 scope 切换器、未新增排序器、未改后端契约与作者权限边界。
 
+## UAT-FE-32
+
+- 【本步解决】班级发布页仍依赖“固定样本 + 前端核心过滤”，导致筛选命中不稳定的问题。
+- 【新增事实 / 已收口口径】`/teacher/classrooms/[classroomId]/tasks` 候选池已切换为 `GET classrooms/:id/publishable-task-templates`；不再以 `GET learning-tasks/tasks?scope=all&status=PUBLISHED&page=1&limit=50` 作为发布主候选来源。
+- 【查询语义收口】`courseLabel/onlyMine/knowledgeModule/stage` 已改为后端真实查询条件（URL query -> server fetch）；前端不再承担“排除本班已发布模板”的核心去重逻辑。
+- 【交互保持】筛选控件与发布主流程保留原有轻量形态；切换筛选继续使用 `router.replace(..., { scroll: false })`，避免页面突兀回顶。
+- 【边界保持】未改后端契约、未改班级任务实例列表请求、未新增复杂视图切换器、未放宽模板作者权限边界。
+
 ## 当前阶段一句话结论
 
 前端已达到“Teacher/Student 主链路可用 + 任务模板层与班级实例层边界收口 + 教师模板主链路可维护”的工程验收阶段，但尚未进入最终交付定版阶段。

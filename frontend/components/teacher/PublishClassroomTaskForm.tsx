@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
-import { useRouter } from "next/navigation";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { ErrorState } from "@/components/blocks/ErrorState";
 import { BrowserFetchJsonError, fetchJson } from "@/lib/api/browser-client";
 import {
@@ -12,7 +12,6 @@ import {
 } from "@/lib/api/types-teacher";
 import {
   TASK_COURSE_LABEL_UNCLASSIFIED,
-  isUnclassifiedTaskCourseLabel,
   normalizeTaskCourseLabel,
   toTaskCourseLabelDisplayText,
 } from "@/lib/learning-tasks/course-labels";
@@ -21,8 +20,10 @@ import { paths } from "@/lib/routes/paths";
 type PublishClassroomTaskFormProps = {
   classroomId: string;
   availableTasks: LearningTaskOption[];
-  currentUserId?: string;
-  publishedTaskTemplateIds: string[];
+  initialCourseLabelFilter?: string;
+  initialOnlyMineFilter: boolean;
+  initialKnowledgeModuleFilter?: string;
+  initialStageFilter?: "1" | "2" | "3" | "4";
 };
 
 type PublishErrorState = {
@@ -145,24 +146,54 @@ const parseOptionalPositiveInt = (value: string): number | undefined | null => {
   return parsed;
 };
 
+const toStageFilter = (value: string | undefined): StageFilter => {
+  if (value === "1" || value === "2" || value === "3" || value === "4") {
+    return value;
+  }
+  return "ALL";
+};
+
 export function PublishClassroomTaskForm({
   classroomId,
   availableTasks,
-  currentUserId,
-  publishedTaskTemplateIds,
+  initialCourseLabelFilter,
+  initialOnlyMineFilter,
+  initialKnowledgeModuleFilter,
+  initialStageFilter,
 }: PublishClassroomTaskFormProps) {
   const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
+
   const [taskId, setTaskId] = useState<string>("");
-  const [courseLabelFilter, setCourseLabelFilter] = useState<string>("");
-  const [onlyMine, setOnlyMine] = useState<boolean>(false);
-  const [knowledgeModuleFilter, setKnowledgeModuleFilter] = useState<string>("");
-  const [stageFilter, setStageFilter] = useState<StageFilter>("ALL");
+  const [courseLabelFilter, setCourseLabelFilter] = useState<string>(initialCourseLabelFilter ?? "");
+  const [onlyMine, setOnlyMine] = useState<boolean>(initialOnlyMineFilter);
+  const [knowledgeModuleFilter, setKnowledgeModuleFilter] = useState<string>(
+    initialKnowledgeModuleFilter ?? ""
+  );
+  const [stageFilter, setStageFilter] = useState<StageFilter>(toStageFilter(initialStageFilter));
   const [dueAt, setDueAt] = useState<string>("");
   const [allowLate, setAllowLate] = useState<boolean>(true);
   const [maxAttempts, setMaxAttempts] = useState<string>("");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errorState, setErrorState] = useState<PublishErrorState | null>(null);
   const [createdTaskId, setCreatedTaskId] = useState<string | null>(null);
+
+  useEffect(() => {
+    setCourseLabelFilter(initialCourseLabelFilter ?? "");
+  }, [initialCourseLabelFilter]);
+
+  useEffect(() => {
+    setOnlyMine(initialOnlyMineFilter);
+  }, [initialOnlyMineFilter]);
+
+  useEffect(() => {
+    setKnowledgeModuleFilter(initialKnowledgeModuleFilter ?? "");
+  }, [initialKnowledgeModuleFilter]);
+
+  useEffect(() => {
+    setStageFilter(toStageFilter(initialStageFilter));
+  }, [initialStageFilter]);
 
   const selectedTask = useMemo(
     () => availableTasks.find((task) => task.id === taskId),
@@ -172,27 +203,10 @@ export function PublishClassroomTaskForm({
     () => toRubricSummary(selectedTask?.rubric),
     [selectedTask]
   );
-  const publishedTemplateIdSet = useMemo(() => {
-    return new Set(
-      publishedTaskTemplateIds
-        .map((id) => (typeof id === "string" ? id.trim() : ""))
-        .filter((id) => id.length > 0)
-    );
-  }, [publishedTaskTemplateIds]);
-  const baseCandidateTasks = useMemo(
-    () =>
-      availableTasks.filter((task) => {
-        const id = typeof task.id === "string" ? task.id.trim() : "";
-        if (!id) {
-          return true;
-        }
-        return !publishedTemplateIdSet.has(id);
-      }),
-    [availableTasks, publishedTemplateIdSet]
-  );
+
   const courseLabelOptions = useMemo(() => {
     const optionSet = new Set<string>();
-    for (const task of baseCandidateTasks) {
+    for (const task of availableTasks) {
       const normalized = normalizeTaskCourseLabel(task.courseLabel);
       if (normalized) {
         optionSet.add(normalized);
@@ -200,6 +214,10 @@ export function PublishClassroomTaskForm({
         optionSet.add(TASK_COURSE_LABEL_UNCLASSIFIED);
       }
     }
+    if (courseLabelFilter) {
+      optionSet.add(courseLabelFilter);
+    }
+
     return [...optionSet].sort((left, right) => {
       if (left === TASK_COURSE_LABEL_UNCLASSIFIED) {
         return -1;
@@ -209,87 +227,103 @@ export function PublishClassroomTaskForm({
       }
       return left.localeCompare(right, "zh-CN");
     });
-  }, [baseCandidateTasks]);
+  }, [availableTasks, courseLabelFilter]);
 
   const knowledgeModuleOptions = useMemo(() => {
     const moduleSet = new Set<string>();
-    for (const task of baseCandidateTasks) {
+    for (const task of availableTasks) {
       const moduleValue =
         typeof task.knowledgeModule === "string" ? task.knowledgeModule.trim() : "";
       if (moduleValue) {
         moduleSet.add(moduleValue);
       }
     }
+    if (knowledgeModuleFilter) {
+      moduleSet.add(knowledgeModuleFilter);
+    }
+
     return [...moduleSet].sort((left, right) => left.localeCompare(right, "zh-CN"));
-  }, [baseCandidateTasks]);
-
-  const filteredTasks = useMemo(
-    () =>
-      baseCandidateTasks.filter((task) => {
-        if (onlyMine && currentUserId) {
-          const createdById =
-            typeof task.createdById === "string" ? task.createdById.trim() : "";
-          if (!createdById || createdById !== currentUserId) {
-            return false;
-          }
-        }
-
-        if (courseLabelFilter) {
-          if (courseLabelFilter === TASK_COURSE_LABEL_UNCLASSIFIED) {
-            if (!isUnclassifiedTaskCourseLabel(task.courseLabel)) {
-              return false;
-            }
-          } else if (normalizeTaskCourseLabel(task.courseLabel) !== courseLabelFilter) {
-            return false;
-          }
-        }
-
-        if (knowledgeModuleFilter) {
-          const moduleValue =
-            typeof task.knowledgeModule === "string" ? task.knowledgeModule.trim() : "";
-          if (moduleValue !== knowledgeModuleFilter) {
-            return false;
-          }
-        }
-
-        if (stageFilter !== "ALL") {
-          const stageValue =
-            typeof task.stage === "number" && Number.isFinite(task.stage)
-              ? String(task.stage)
-              : "";
-          if (stageValue !== stageFilter) {
-            return false;
-          }
-        }
-
-        return true;
-      }),
-    [
-      baseCandidateTasks,
-      onlyMine,
-      currentUserId,
-      courseLabelFilter,
-      knowledgeModuleFilter,
-      stageFilter,
-    ]
-  );
+  }, [availableTasks, knowledgeModuleFilter]);
 
   useEffect(() => {
     if (!taskId) {
       return;
     }
-    const stillVisible = filteredTasks.some((task) => task.id === taskId);
+    const stillVisible = availableTasks.some((task) => task.id === taskId);
     if (!stillVisible) {
       setTaskId("");
     }
-  }, [filteredTasks, taskId]);
+  }, [availableTasks, taskId]);
+
+  const replaceSearchQuery = (updater: (params: URLSearchParams) => void) => {
+    const params = new URLSearchParams(searchParams.toString());
+    updater(params);
+    params.delete("page");
+    const nextQuery = params.toString();
+    router.replace(nextQuery ? `${pathname}?${nextQuery}` : pathname, {
+      scroll: false,
+    });
+  };
+
+  const setCourseLabelFilterAndSync = (nextValue: string) => {
+    setCourseLabelFilter(nextValue);
+    replaceSearchQuery((params) => {
+      if (nextValue) {
+        params.set("courseLabel", nextValue);
+      } else {
+        params.delete("courseLabel");
+      }
+    });
+  };
+
+  const setOnlyMineAndSync = (nextValue: boolean) => {
+    setOnlyMine(nextValue);
+    replaceSearchQuery((params) => {
+      if (nextValue) {
+        params.set("onlyMine", "true");
+      } else {
+        params.delete("onlyMine");
+      }
+    });
+  };
+
+  const setKnowledgeModuleFilterAndSync = (nextValue: string) => {
+    setKnowledgeModuleFilter(nextValue);
+    replaceSearchQuery((params) => {
+      if (nextValue) {
+        params.set("knowledgeModule", nextValue);
+      } else {
+        params.delete("knowledgeModule");
+      }
+    });
+  };
+
+  const setStageFilterAndSync = (nextValue: StageFilter) => {
+    setStageFilter(nextValue);
+    replaceSearchQuery((params) => {
+      if (nextValue !== "ALL") {
+        params.set("stage", nextValue);
+      } else {
+        params.delete("stage");
+      }
+    });
+  };
 
   const resetFilters = () => {
     setCourseLabelFilter("");
     setOnlyMine(false);
     setKnowledgeModuleFilter("");
     setStageFilter("ALL");
+    replaceSearchQuery((params) => {
+      params.delete("courseLabel");
+      params.delete("onlyMine");
+      params.delete("knowledgeModule");
+      params.delete("stage");
+    });
   };
+
+  const hasActiveQueryFilters =
+    Boolean(courseLabelFilter) || onlyMine || Boolean(knowledgeModuleFilter) || stageFilter !== "ALL";
 
   const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -378,10 +412,10 @@ export function PublishClassroomTaskForm({
         当前仅支持选择已有任务模板并发布到本班；此处不创建或编辑任务模板。
       </p>
       <p className="mt-1 text-sm text-zinc-600">
-        候选池包含你当前可见且已发布的模板（含共享模板）。
+        候选池按当前班级与筛选条件实时检索，默认包含你自己的模板与可见共享模板。
       </p>
       <p className="mt-1 text-sm text-zinc-600">
-        默认已排除当前班级已发布过的模板，可按课程分类与“仅看我的模板”进一步缩小范围。
+        后端已自动排除本班已发布模板，并处理课程优先匹配排序。
       </p>
       <p className="mt-2 text-sm text-zinc-600">
         没有合适模板？
@@ -393,36 +427,48 @@ export function PublishClassroomTaskForm({
         </Link>
       </p>
       {availableTasks.length === 0 ? (
-        <div className="mt-3 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
-          当前没有可发布的可见 `PUBLISHED` 模板。请先前往
-          <Link href={paths.teacher.tasksFromClassroom(classroomId)} className="mx-1 underline">
-            任务模板页
-          </Link>
-          创建模板或将模板设为 `PUBLISHED`，再回到本页发布到当前班级。
-        </div>
-      ) : baseCandidateTasks.length === 0 ? (
         <div className="mt-3 rounded-md border border-zinc-200 bg-zinc-50 px-3 py-2 text-sm text-zinc-700">
-          当前可见的 `PUBLISHED` 模板都已在本班发布过。可前往
-          <Link href={paths.teacher.tasksFromClassroom(classroomId)} className="mx-1 underline">
-            任务模板页
-          </Link>
-          准备新的已发布模板后再发布到本班。
+          {hasActiveQueryFilters ? (
+            <>
+              当前筛选条件下没有匹配的可发布模板。可先
+              <button
+                type="button"
+                onClick={resetFilters}
+                className="mx-1 text-blue-700 underline"
+              >
+                重置筛选
+              </button>
+              ，或前往
+              <Link href={paths.teacher.tasksFromClassroom(classroomId)} className="mx-1 underline">
+                任务模板页
+              </Link>
+              调整模板信息后再发布。
+            </>
+          ) : (
+            <>
+              当前班级暂无新的可发布模板。可前往
+              <Link href={paths.teacher.tasksFromClassroom(classroomId)} className="mx-1 underline">
+                任务模板页
+              </Link>
+              创建并发布模板后，再回到本页发布到班级。
+            </>
+          )}
         </div>
       ) : null}
 
       <form onSubmit={handleSubmit} className="mt-4 space-y-4">
-        {availableTasks.length > 0 && baseCandidateTasks.length > 0 ? (
+        {availableTasks.length > 0 ? (
           <section className="rounded-md border border-zinc-200 bg-zinc-50 p-3">
-            <p className="text-sm font-medium text-zinc-900">模板筛选（本地）</p>
+            <p className="text-sm font-medium text-zinc-900">模板筛选（实时查询）</p>
             <p className="mt-1 text-xs text-zinc-600">
-              当前候选均为你可见且尚未在本班发布的 `PUBLISHED` 模板。可组合筛选后再选择。
+              课程分类、仅看我的模板、知识模块、阶段会写入 URL 并触发后端重新检索。
             </p>
             <div className="mt-3 grid gap-3 md:grid-cols-5">
               <label className="block text-sm">
                 <span className="mb-1 block text-zinc-700">课程分类</span>
                 <select
                   value={courseLabelFilter}
-                  onChange={(event) => setCourseLabelFilter(event.target.value)}
+                  onChange={(event) => setCourseLabelFilterAndSync(event.target.value)}
                   className="w-full rounded-md border border-zinc-300 px-3 py-2"
                 >
                   <option value="">全部课程分类</option>
@@ -438,7 +484,7 @@ export function PublishClassroomTaskForm({
                 <span className="mb-1 block text-zinc-700">知识模块</span>
                 <select
                   value={knowledgeModuleFilter}
-                  onChange={(event) => setKnowledgeModuleFilter(event.target.value)}
+                  onChange={(event) => setKnowledgeModuleFilterAndSync(event.target.value)}
                   className="w-full rounded-md border border-zinc-300 px-3 py-2"
                 >
                   <option value="">全部模块</option>
@@ -454,7 +500,7 @@ export function PublishClassroomTaskForm({
                 <span className="mb-1 block text-zinc-700">阶段</span>
                 <select
                   value={stageFilter}
-                  onChange={(event) => setStageFilter(event.target.value as StageFilter)}
+                  onChange={(event) => setStageFilterAndSync(event.target.value as StageFilter)}
                   className="w-full rounded-md border border-zinc-300 px-3 py-2"
                 >
                   <option value="ALL">全部阶段</option>
@@ -471,8 +517,7 @@ export function PublishClassroomTaskForm({
                   <input
                     type="checkbox"
                     checked={onlyMine}
-                    onChange={(event) => setOnlyMine(event.target.checked)}
-                    disabled={!currentUserId}
+                    onChange={(event) => setOnlyMineAndSync(event.target.checked)}
                   />
                   仅看我的模板
                 </span>
@@ -488,10 +533,7 @@ export function PublishClassroomTaskForm({
                 </button>
               </div>
             </div>
-            <p className="mt-2 text-xs text-zinc-500">
-              当前显示 {filteredTasks.length} / {baseCandidateTasks.length} 个候选模板（基础可选池：
-              {baseCandidateTasks.length}；可见已发布总量：{availableTasks.length}）
-            </p>
+            <p className="mt-2 text-xs text-zinc-500">当前后端返回 {availableTasks.length} 个候选模板</p>
           </section>
         ) : null}
 
@@ -503,11 +545,11 @@ export function PublishClassroomTaskForm({
             className="w-full rounded-md border border-zinc-300 px-3 py-2"
           >
             <option value="">
-              {filteredTasks.length === 0 && baseCandidateTasks.length > 0
+              {availableTasks.length === 0
                 ? "当前筛选下无可选模板"
                 : "请选择已发布任务"}
             </option>
-            {filteredTasks.map((task) => (
+            {availableTasks.map((task) => (
               <option key={task.id ?? task.title} value={task.id}>
                 {task.title ?? "未命名任务"} | {toDisplayText(task.knowledgeModule)} / 阶段{" "}
                 {toDisplayText(task.stage)}
@@ -516,22 +558,12 @@ export function PublishClassroomTaskForm({
           </select>
         </label>
 
-        {baseCandidateTasks.length > 0 && filteredTasks.length === 0 ? (
-          <div className="rounded-md border border-dashed border-zinc-300 bg-zinc-50 px-3 py-2 text-sm text-zinc-700">
-            当前筛选条件下没有匹配模板。可重置筛选，或前往
-            <Link href={paths.teacher.tasksFromClassroom(classroomId)} className="mx-1 text-blue-700 underline">
-              任务模板页
-            </Link>
-            调整模板状态/信息。
-          </div>
-        ) : null}
-
-        {filteredTasks.length > 0 ? (
+        {availableTasks.length > 0 ? (
           <section className="rounded-md border border-zinc-200 bg-white p-3">
             <p className="text-sm font-medium text-zinc-900">模板候选列表</p>
             <p className="mt-1 text-xs text-zinc-600">点击“选择此模板”可快速回填到发布表单。</p>
             <ul className="mt-3 space-y-2">
-              {filteredTasks.map((task, index) => {
+              {availableTasks.map((task, index) => {
                 const rubricSummary = toRubricSummary(task.rubric);
                 const isActive = task.id && task.id === taskId;
                 return (

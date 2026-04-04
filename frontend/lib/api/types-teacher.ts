@@ -237,6 +237,15 @@ export type ListLearningTasksRequest = {
   stage?: number;
 };
 
+export type ListPublishableTaskTemplatesRequest = {
+  page?: number;
+  limit?: number;
+  courseLabel?: TaskCourseLabel;
+  onlyMine?: boolean;
+  knowledgeModule?: string;
+  stage?: number;
+};
+
 export type LearningTaskOption = {
   id?: string;
   title?: string;
@@ -260,6 +269,8 @@ export type LearningTaskListResponse = {
   total?: number;
   raw: unknown;
 };
+
+export type PublishableTaskTemplateListResponse = LearningTaskListResponse;
 
 export type LearningTaskDetailResponse = LearningTaskOption;
 export type LearningTaskCreateResponse = LearningTaskOption;
@@ -695,6 +706,10 @@ export const toLearningTaskListResponse = (payload: unknown): LearningTaskListRe
     raw: payload,
   };
 };
+
+export const toPublishableTaskTemplateListResponse = (
+  payload: unknown
+): PublishableTaskTemplateListResponse => toLearningTaskListResponse(payload);
 
 export const toLearningTaskDetailResponse = (payload: unknown): LearningTaskDetailResponse => {
   const record = asRecord(payload);
