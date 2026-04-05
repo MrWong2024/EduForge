@@ -172,6 +172,10 @@ export type CreateClassroomRequest = {
   name: string;
 };
 
+export type UpdateClassroomRequest = {
+  name: string;
+};
+
 export type ClassroomCreateResponse = {
   id?: string;
   courseId?: string;
@@ -180,6 +184,9 @@ export type ClassroomCreateResponse = {
   status?: string;
   raw: unknown;
 };
+
+export type ClassroomDetailResponse = ClassroomSummary;
+export type ClassroomUpdateResponse = ClassroomSummary;
 
 export type ClassroomTasksResponse = {
   items: ClassroomTaskSummary[];
@@ -505,6 +512,20 @@ export const toClassroomCreateResponse = (payload: unknown): ClassroomCreateResp
     status: asString(record.status),
     raw: payload,
   };
+};
+
+export const toClassroomDetailResponse = (payload: unknown): ClassroomDetailResponse => {
+  const record = asRecord(payload);
+  const dataRecord = asRecord(safeGet(record, "data", undefined));
+  const source = Object.keys(dataRecord).length > 0 ? dataRecord : record;
+  return toClassroomSummary(source);
+};
+
+export const toClassroomUpdateResponse = (payload: unknown): ClassroomUpdateResponse => {
+  const record = asRecord(payload);
+  const dataRecord = asRecord(safeGet(record, "data", undefined));
+  const source = Object.keys(dataRecord).length > 0 ? dataRecord : record;
+  return toClassroomSummary(source);
 };
 
 export const toClassroomListResponse = (payload: unknown): ClassroomListResponse => {

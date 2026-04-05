@@ -15,6 +15,8 @@ export const paths = {
     courseEdit: (courseId: string) =>
       `/teacher/courses/${encodeSegment(courseId)}/edit`,
     classrooms: "/teacher/classrooms",
+    classroomEdit: (classroomId: string) =>
+      `/teacher/classrooms/${encodeSegment(classroomId)}/edit`,
     classroomDashboard: (classroomId: string) =>
       `/teacher/classrooms/${encodeSegment(classroomId)}/dashboard`,
     classroomTasks: (classroomId: string) =>

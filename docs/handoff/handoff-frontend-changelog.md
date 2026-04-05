@@ -353,6 +353,13 @@
 - 【语义收口】“恢复提交”仅恢复状态，不自动修改 `dueAt/allowLate/maxAttempts`；`ACTIVE` 仍显示“关闭任务”，`RECALLED` 仍不提供恢复入口。
 - 【边界保持】未改后端契约、未改实例级配置编辑能力、未新增“撤回发布”前端按钮。
 
+## UAT-FE-42
+
+- 【本步解决】班级模块缺少前端“编辑班级”入口，导致后端 `PATCH classrooms/:id` 能力无法在教师端使用的问题。
+- 【新增事实 / 已收口口径】`/teacher/classrooms` 操作列已新增“编辑班级”入口，新增 `/teacher/classrooms/[classroomId]/edit` 与 `EditClassroomForm`；编辑页加载 `GET classrooms/:id`，提交调用 `PATCH classrooms/:id`。
+- 【字段与边界】当前严格按后端 `UpdateClassroomDto` 收口，仅支持更新班级名称 `name`；`courseId/status/joinCode` 仅做只读展示；不新增删除、归档前端动作。
+- 【错误处理】后端拒绝更新（含 `Archived classrooms cannot be updated`）时，前端显示清晰中文摘要并保留后端 detail，不做吞错处理。
+
 ## 当前阶段一句话结论
 
 前端已达到“Teacher/Student 主链路可用 + 任务模板层与班级实例层边界收口 + 教师模板主链路可维护”的工程验收阶段，但尚未进入最终交付定版阶段。

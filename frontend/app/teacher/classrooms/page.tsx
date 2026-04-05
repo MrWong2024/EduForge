@@ -178,12 +178,20 @@ export default async function TeacherClassroomsPage({ searchParams }: TeacherCla
                     <td className="px-4 py-3">{toDisplayText(item.joinCode)}</td>
                     <td className="px-4 py-3">
                       {classroomId ? (
-                        <Link
-                          href={paths.teacher.classroomDashboard(classroomId)}
-                          className="text-blue-700 hover:underline"
-                        >
-                          进入班级
-                        </Link>
+                        <div className="flex flex-wrap items-center gap-3">
+                          <Link
+                            href={paths.teacher.classroomDashboard(classroomId)}
+                            className="text-blue-700 hover:underline"
+                          >
+                            进入班级
+                          </Link>
+                          <Link
+                            href={paths.teacher.classroomEdit(classroomId)}
+                            className="text-blue-700 hover:underline"
+                          >
+                            编辑班级
+                          </Link>
+                        </div>
                       ) : (
                         <span className="text-zinc-500">缺少班级标识</span>
                       )}
