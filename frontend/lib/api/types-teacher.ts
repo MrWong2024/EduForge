@@ -227,6 +227,12 @@ export type UpdateClassroomTaskStatusRequest = {
   status: Exclude<ClassroomTaskStatus, "ACTIVE">;
 };
 
+export type UpdateClassroomTaskRequest = {
+  dueAt?: string | null;
+  allowLate?: boolean;
+  maxAttempts?: number | null;
+};
+
 export const LEARNING_TASK_STATUSES = ["DRAFT", "PUBLISHED", "ARCHIVED"] as const;
 export type LearningTaskStatus = (typeof LEARNING_TASK_STATUSES)[number];
 

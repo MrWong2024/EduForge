@@ -48,7 +48,7 @@ frontend/
   - `/teacher/tasks/[taskId]/edit`：模板编辑/查看与状态管理（含可选课程分类、模板可见性；非作者共享模板只读）；从模板页进入编辑时携带 `returnTo`（当前完整列表 URL），编辑页顶部/底部返回优先回到该地址，缺失或非法时回退 `/teacher/tasks`
 - 教师班级实例层（已收口）：
   - `/teacher/classrooms/[classroomId]/tasks`：选择“当前教师可见且已发布”的模板并发布到班级实例；候选池改为实时调用 `GET classrooms/:id/publishable-task-templates`，筛选条件 `courseLabel/onlyMine/knowledgeModule/stage` 透传后端，后端内置“仅 PUBLISHED + 排除本班已发布模板 + 课程优先排序”，不承担模板创建/编辑。
-  - 课堂任务实例列表已展示生命周期状态（`ACTIVE/CLOSED/RECALLED` -> `进行中/已关闭/已撤回`）；`ACTIVE` 任务可执行“关闭任务”（`PATCH classrooms/:classroomId/tasks/:classroomTaskId/status`，`status=CLOSED`），非 `ACTIVE` 仅展示状态不再提供状态流操作入口。
+  - 课堂任务实例列表已展示生命周期状态（`ACTIVE/CLOSED/RECALLED` -> `进行中/已关闭/已撤回`）；`ACTIVE` 任务可执行“关闭任务”（`PATCH classrooms/:classroomId/tasks/:classroomTaskId/status`，`status=CLOSED`），且 `ACTIVE/CLOSED` 任务可执行“编辑设置”（`PATCH classrooms/:classroomId/tasks/:classroomTaskId`，更新 `dueAt/allowLate/maxAttempts`）；`RECALLED` 仅展示状态，不提供编辑设置入口。
   - 候选池首屏仍由 server 侧请求 `page=1&limit=50`；发布表单支持“加载更多”按当前筛选追加后续页（非完整分页器）；筛选条件变化时重置回第一页并清空历史追加结果。
   - 发布页“课程分类”下拉已改为复用统一标准课程分类列表（`lib/learning-tasks/course-labels.ts`），不再从当前已加载候选集合倒推选项。
 - `/student/**`：学习看板、加入班级、任务详情、提交、submission detail、请求 AI 已接入真接口。
@@ -89,6 +89,7 @@ Teacher 起步与模板链路（可用）：
 4. `/teacher/classrooms/[classroomId]/tasks` 选择当前可见且已发布模板（我的 + 可见共享）并设置 `dueAt/allowLate/maxAttempts` 后发布（`POST classrooms/:id/tasks`）；候选池由 `GET classrooms/:id/publishable-task-templates` 按 query 实时检索，`courseLabel/onlyMine/knowledgeModule/stage` 均为后端真实查询条件，且后端已内置排除本班已发布模板
    - 首次仅加载第一页（`page=1&limit=50`），当 `total` 大于当前已加载数量时可在表单内“加载更多”并追加候选；筛选条件变化后回到第一页结果。
    - `courseLabel` 下拉使用标准分类全集，选择后通过 URL query 触发后端重查；加载更多不会改变下拉选项集合。
+   - 班级实例列表中支持行内“编辑设置”，用于更新已发布课堂任务的实例级参数（`dueAt/allowLate/maxAttempts`）；该能力与模板编辑解耦，仅在 `ACTIVE/CLOSED` 状态开放。
 5. 进入 `/teacher/classrooms/[classroomId]/tasks/[classroomTaskId]/*` 和提交管理页
 
 Teacher 课程视角（可用）：

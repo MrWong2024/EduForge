@@ -3,6 +3,7 @@ import { headers } from "next/headers";
 import { EmptyState } from "@/components/blocks/EmptyState";
 import { ErrorState } from "@/components/blocks/ErrorState";
 import { PageHeader } from "@/components/blocks/PageHeader";
+import { EditClassroomTaskForm } from "@/components/teacher/EditClassroomTaskForm";
 import { ClassroomTaskLifecycleActions } from "@/components/teacher/ClassroomTaskLifecycleActions";
 import { PublishClassroomTaskForm } from "@/components/teacher/PublishClassroomTaskForm";
 import { fetchJson, FetchJsonError } from "@/lib/api/client";
@@ -278,19 +279,29 @@ export default async function ClassroomTasksPage({ params, searchParams }: Class
                     <td className="px-4 py-3">{getAiStatusLabel(task.aiStatus)}</td>
                     <td className="px-4 py-3">
                       {classroomTaskId ? (
-                        <div className="flex flex-wrap gap-3">
-                          <Link
-                            href={paths.teacher.classroomTaskDetail(classroomId, classroomTaskId)}
-                            className="text-blue-700 hover:underline"
-                          >
-                            任务详情
-                          </Link>
-                          <Link
-                            href={paths.teacher.classroomTaskSubmissions(classroomId, classroomTaskId)}
-                            className="text-blue-700 hover:underline"
-                          >
-                            提交管理
-                          </Link>
+                        <div className="space-y-2">
+                          <div className="flex flex-wrap gap-3">
+                            <Link
+                              href={paths.teacher.classroomTaskDetail(classroomId, classroomTaskId)}
+                              className="text-blue-700 hover:underline"
+                            >
+                              任务详情
+                            </Link>
+                            <Link
+                              href={paths.teacher.classroomTaskSubmissions(classroomId, classroomTaskId)}
+                              className="text-blue-700 hover:underline"
+                            >
+                              提交管理
+                            </Link>
+                          </div>
+                          <EditClassroomTaskForm
+                            classroomId={classroomId}
+                            classroomTaskId={classroomTaskId}
+                            status={task.status}
+                            dueAt={task.dueAt}
+                            allowLate={task.allowLate}
+                            maxAttempts={task.maxAttempts}
+                          />
                         </div>
                       ) : (
                         <span className="text-zinc-500">缺少课堂任务标识</span>
