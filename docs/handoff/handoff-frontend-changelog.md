@@ -332,6 +332,13 @@
 - 【上下文兼容】编辑入口的 `returnTo` 继续携带当前完整列表 URL，分页场景下可自然保留筛选条件与页码。
 - 【不要回退】不要再把 `status/knowledgeModule/stage` 当“前 100 条样本上的本地假过滤”，也不要恢复固定 `page=1&limit=100` 的单页样本模式。
 
+## UAT-FE-39
+
+- 【本步解决】课堂任务页缺少 `ClassroomTask` 生命周期状态展示与状态流操作入口的问题。
+- 【新增事实 / 已收口口径】`/teacher/classrooms/[classroomId]/tasks` 的课堂任务实例列表已展示 `ACTIVE/CLOSED/RECALLED`（进行中/已关闭/已撤回）状态，并新增 `ACTIVE -> CLOSED` 前端操作（`PATCH classrooms/:classroomId/tasks/:classroomTaskId/status`）。
+- 【边界说明】当前列表响应未提供可靠“有无提交”摘要字段，前端本步未拍脑袋接入“撤回发布”按钮；撤回规则仍以后端契约校验为准。
+- 【不要回退】不要把“撤回发布”做成物理删除，不要在非 `ACTIVE` 状态继续暴露状态流操作入口。
+
 ## 当前阶段一句话结论
 
 前端已达到“Teacher/Student 主链路可用 + 任务模板层与班级实例层边界收口 + 教师模板主链路可维护”的工程验收阶段，但尚未进入最终交付定版阶段。

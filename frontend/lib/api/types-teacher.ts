@@ -149,11 +149,15 @@ export type CourseOverviewResponse = {
   raw: UnknownRecord;
 };
 
+export const CLASSROOM_TASK_STATUSES = ["ACTIVE", "CLOSED", "RECALLED"] as const;
+export type ClassroomTaskStatus = (typeof CLASSROOM_TASK_STATUSES)[number];
+
 export type ClassroomTaskSummary = {
   classroomTaskId?: string;
   taskId?: string;
   title?: string;
   description?: string;
+  status?: ClassroomTaskStatus;
   taskStatus?: string;
   knowledgeModule?: string;
   stage?: number;
@@ -187,6 +191,7 @@ export type ClassroomTask = {
   id?: string;
   classroomId?: string;
   taskId?: string;
+  status?: ClassroomTaskStatus;
   title?: string;
   description?: string;
   dueAt?: string;
@@ -216,6 +221,10 @@ export type PublishClassroomTaskRequest = {
     allowLate?: boolean;
     maxAttempts?: number;
   };
+};
+
+export type UpdateClassroomTaskStatusRequest = {
+  status: Exclude<ClassroomTaskStatus, "ACTIVE">;
 };
 
 export const LEARNING_TASK_STATUSES = ["DRAFT", "PUBLISHED", "ARCHIVED"] as const;
@@ -657,7 +666,11 @@ export const toClassroomTaskSummary = (value: unknown): ClassroomTaskSummary => 
       asString(taskRecord.taskId),
     title: asString(taskRecord.title) ?? asString(record.title) ?? asString(record.name),
     description: asString(taskRecord.description) ?? asString(record.description),
-    taskStatus: asString(taskRecord.status) ?? asString(record.status),
+    status: normalizeClassroomTaskStatus(record.status) ?? "ACTIVE",
+    taskStatus:
+      asString(taskRecord.status) ??
+      asString(record.taskStatus) ??
+      asString(record.learningTaskStatus),
     knowledgeModule: asString(taskRecord.knowledgeModule) ?? asString(record.knowledgeModule),
     stage: asNumber(taskRecord.stage) ?? asNumber(record.stage),
     dueAt: asString(record.dueAt),
@@ -676,13 +689,17 @@ export const toClassroomTask = (payload: unknown): ClassroomTask => {
     id: asString(record.id) ?? asString(record.classroomTaskId),
     classroomId: asString(record.classroomId),
     taskId: asString(record.taskId),
+    status: normalizeClassroomTaskStatus(record.status) ?? "ACTIVE",
     title: asString(taskRecord.title) ?? asString(record.title) ?? asString(record.name),
     description: asString(taskRecord.description) ?? asString(record.description),
     dueAt: asString(record.dueAt),
     allowLate: asBoolean(settingsRecord.allowLate) ?? asBoolean(record.allowLate),
     maxAttempts: asNumber(settingsRecord.maxAttempts) ?? asNumber(record.maxAttempts),
     feedbackEnabled: asBoolean(settingsRecord.feedbackEnabled),
-    taskStatus: asString(taskRecord.status) ?? asString(record.status),
+    taskStatus:
+      asString(taskRecord.status) ??
+      asString(record.taskStatus) ??
+      asString(record.learningTaskStatus),
     publishedAt: asString(record.publishedAt),
     raw: record,
   };
@@ -1025,6 +1042,20 @@ export const toExportSnapshotResponse = (payload: unknown): ExportSnapshotRespon
     summary,
     raw: record,
   };
+};
+
+export const normalizeClassroomTaskStatus = (
+  value: unknown
+): ClassroomTaskStatus | undefined => {
+  const status = asString(value);
+  if (!status) {
+    return undefined;
+  }
+  const normalized = status.toUpperCase();
+  if (normalized === "ACTIVE" || normalized === "CLOSED" || normalized === "RECALLED") {
+    return normalized;
+  }
+  return undefined;
 };
 
 const normalizeStudentStatus = (value: unknown): string | undefined => {

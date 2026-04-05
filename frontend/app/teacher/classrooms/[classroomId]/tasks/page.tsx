@@ -3,6 +3,7 @@ import { headers } from "next/headers";
 import { EmptyState } from "@/components/blocks/EmptyState";
 import { ErrorState } from "@/components/blocks/ErrorState";
 import { PageHeader } from "@/components/blocks/PageHeader";
+import { ClassroomTaskLifecycleActions } from "@/components/teacher/ClassroomTaskLifecycleActions";
 import { PublishClassroomTaskForm } from "@/components/teacher/PublishClassroomTaskForm";
 import { fetchJson, FetchJsonError } from "@/lib/api/client";
 import { buildErrorDescription, extractRawDetail } from "@/lib/api/error-presenter";
@@ -240,6 +241,7 @@ export default async function ClassroomTasksPage({ params, searchParams }: Class
                 <th className="px-4 py-3">最大尝试次数</th>
                 <th className="px-4 py-3">模板模块</th>
                 <th className="px-4 py-3">模板阶段</th>
+                <th className="px-4 py-3">任务状态</th>
                 <th className="px-4 py-3">AI 状态</th>
                 <th className="px-4 py-3">管理</th>
                 <th className="px-4 py-3">三件套入口</th>
@@ -266,6 +268,13 @@ export default async function ClassroomTasksPage({ params, searchParams }: Class
                     <td className="px-4 py-3">{toDisplayText(task.maxAttempts)}</td>
                     <td className="px-4 py-3">{toDisplayText(task.knowledgeModule)}</td>
                     <td className="px-4 py-3">{toDisplayText(task.stage)}</td>
+                    <td className="px-4 py-3">
+                      <ClassroomTaskLifecycleActions
+                        classroomId={classroomId}
+                        classroomTaskId={classroomTaskId}
+                        status={task.status}
+                      />
+                    </td>
                     <td className="px-4 py-3">{getAiStatusLabel(task.aiStatus)}</td>
                     <td className="px-4 py-3">
                       {classroomTaskId ? (
