@@ -3,6 +3,7 @@ import {
   Controller,
   Get,
   Param,
+  Patch,
   Post,
   Query,
   UseGuards,
@@ -19,6 +20,7 @@ import { QueryLearningTrajectoryDto } from '../dto/query-learning-trajectory.dto
 import { QueryClassReviewPackDto } from '../dto/query-class-review-pack.dto';
 import { QueryClassroomTaskSubmissionsDto } from '../dto/query-classroom-task-submissions.dto';
 import { QueryPublishableTaskTemplateDto } from '../dto/query-publishable-task-template.dto';
+import { UpdateClassroomTaskStatusDto } from '../dto/update-classroom-task-status.dto';
 import { CreateSubmissionDto } from '../../../learning-tasks/dto/create-submission.dto';
 import { AiMetricsService } from '../services/ai-metrics.service';
 import { ClassReviewPackService } from '../services/class-review-pack.service';
@@ -106,6 +108,23 @@ export class ClassroomTasksController {
     @CurrentUser() user: { id: string },
   ) {
     return this.classroomTasksService.createClassroomTaskSubmission(
+      classroomId,
+      classroomTaskId,
+      dto,
+      user.id,
+    );
+  }
+
+  @UseGuards(RolesGuard)
+  @Roles(...TEACHER_ROLES)
+  @Patch(':classroomId/tasks/:classroomTaskId/status')
+  updateClassroomTaskStatus(
+    @Param('classroomId') classroomId: string,
+    @Param('classroomTaskId') classroomTaskId: string,
+    @Body() dto: UpdateClassroomTaskStatusDto,
+    @CurrentUser() user: { id: string },
+  ) {
+    return this.classroomTasksService.updateClassroomTaskStatus(
       classroomId,
       classroomTaskId,
       dto,

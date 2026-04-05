@@ -273,6 +273,8 @@
   - `content.codeText: string`
   - `content.language: string`
   - `meta.aiUsageDeclaration?: string`
+- Notes:
+  - 提交前会校验 `ClassroomTask.status`：仅 `ACTIVE` 接受新提交；`CLOSED/RECALLED` 会被拒绝。
 - Minimal JSON example（脱敏示例；`codeText` 为必填但值不含真实内容）:
 
 ```json
@@ -283,6 +285,28 @@
   }
 }
 ```
+
+### PATCH /api/classrooms/:classroomId/tasks/:classroomTaskId/status
+
+- Controller & Method: `backend/src/modules/classrooms/classroom-tasks/controllers/classroom-tasks.controller.ts` -> `ClassroomTasksController.updateClassroomTaskStatus`
+- DTO: `UpdateClassroomTaskStatusDto` (`backend/src/modules/classrooms/classroom-tasks/dto/update-classroom-task-status.dto.ts`)
+- Required fields:
+  - `status`
+- Enums:
+  - `status`: `CLOSED | RECALLED`
+- Nested structure: None
+- Minimal JSON example:
+
+```json
+{
+  "status": "CLOSED"
+}
+```
+- Notes:
+  - 仅允许教师操作。
+  - 当前仅允许 `ACTIVE -> CLOSED` 或 `ACTIVE -> RECALLED`。
+  - 撤回（`RECALLED`）前会检查是否已有提交；若已有提交会返回 `400`，提示只能关闭（`CLOSED`）。
+  - 已是 `CLOSED/RECALLED` 的课堂任务不允许再次流转。
 
 ---
 

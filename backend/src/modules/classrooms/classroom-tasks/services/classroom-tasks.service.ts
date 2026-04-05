@@ -14,6 +14,7 @@ import { QueryClassroomTaskDto } from '../dto/query-classroom-task.dto';
 import { QueryMyTaskDetailDto } from '../dto/query-my-task-detail.dto';
 import { QueryClassroomTaskSubmissionsDto } from '../dto/query-classroom-task-submissions.dto';
 import { QueryPublishableTaskTemplateDto } from '../dto/query-publishable-task-template.dto';
+import { UpdateClassroomTaskStatusDto } from '../dto/update-classroom-task-status.dto';
 import {
   LEARNING_TRAJECTORY_SORT_FIELDS,
   LEARNING_TRAJECTORY_SORT_ORDERS,
@@ -55,6 +56,12 @@ import {
 } from '../../../users/schemas/user-roles.constants';
 import { WithId } from '../../../../common/types/with-id.type';
 import { WithTimestamps } from '../../../../common/types/with-timestamps.type';
+import {
+  CLASSROOM_TASK_STATUS_ACTIVE,
+  CLASSROOM_TASK_STATUS_CLOSED,
+  CLASSROOM_TASK_STATUS_RECALLED,
+  type ClassroomTaskStatus,
+} from '../classroom-task-status.constants';
 
 type ClassroomTaskWithMeta = ClassroomTask & WithId & WithTimestamps;
 type ClassroomTaskWithTask = ClassroomTaskWithMeta & { task: Task };
@@ -307,6 +314,84 @@ export class ClassroomTasksService {
     }
   }
 
+  async updateClassroomTaskStatus(
+    classroomId: string,
+    classroomTaskId: string,
+    dto: UpdateClassroomTaskStatusDto,
+    teacherId: string,
+  ) {
+    await this.ensureTeacher(teacherId);
+
+    const classroomObjectId = this.parseObjectId(classroomId, 'classroomId');
+    const classroomTaskObjectId = this.parseObjectId(
+      classroomTaskId,
+      'classroomTaskId',
+    );
+    const teacherObjectId = new Types.ObjectId(teacherId);
+
+    const classroom = await this.classroomModel
+      .findOne({
+        _id: classroomObjectId,
+        teacherId: teacherObjectId,
+      })
+      .select('_id')
+      .lean<ClassroomOwnerLean>()
+      .exec();
+    if (!classroom) {
+      throw new NotFoundException('Classroom not found');
+    }
+
+    const classroomTask = await this.classroomTaskModel
+      .findOne({ _id: classroomTaskObjectId, classroomId: classroomObjectId })
+      .lean<ClassroomTaskWithMeta>()
+      .exec();
+    if (!classroomTask) {
+      throw new NotFoundException('Classroom task not found');
+    }
+
+    const currentStatus = this.toClassroomTaskStatusForRead(
+      classroomTask.status,
+    );
+    if (currentStatus !== CLASSROOM_TASK_STATUS_ACTIVE) {
+      throw new BadRequestException(
+        `Classroom task status is ${currentStatus} and cannot be changed`,
+      );
+    }
+
+    if (dto.status === CLASSROOM_TASK_STATUS_RECALLED) {
+      const hasSubmissions = await this.submissionModel.exists({
+        classroomTaskId: classroomTask._id,
+      });
+      if (hasSubmissions) {
+        throw new BadRequestException(
+          'Classroom task already has submissions and cannot be recalled; close it instead',
+        );
+      }
+    }
+
+    const updatedClassroomTask = await this.classroomTaskModel
+      .findOneAndUpdate(
+        { _id: classroomTaskObjectId, classroomId: classroomObjectId },
+        { $set: { status: dto.status } },
+        { new: true },
+      )
+      .lean<ClassroomTaskWithMeta>()
+      .exec();
+    if (!updatedClassroomTask) {
+      throw new NotFoundException('Classroom task not found');
+    }
+
+    const task = await this.taskModel
+      .findById(updatedClassroomTask.taskId)
+      .lean<TaskWithMeta>()
+      .exec();
+    if (!task) {
+      throw new NotFoundException('Task not found');
+    }
+
+    return this.toClassroomTaskResponse(updatedClassroomTask, task);
+  }
+
   async listPublishableTaskTemplates(
     classroomId: string,
     query: QueryPublishableTaskTemplateDto,
@@ -545,6 +630,14 @@ export class ClassroomTasksService {
       .exec();
     if (!classroomTask) {
       throw new NotFoundException('Classroom task not found');
+    }
+    if (
+      this.toClassroomTaskStatusForRead(classroomTask.status) !==
+      CLASSROOM_TASK_STATUS_ACTIVE
+    ) {
+      throw new BadRequestException(
+        'Classroom task is not active and cannot accept submissions',
+      );
     }
 
     return this.learningTasksService.createSubmissionForClassroomTask(
@@ -993,6 +1086,7 @@ export class ClassroomTasksService {
         id: classroomTask._id.toString(),
         classroomId: classroomTask.classroomId.toString(),
         taskId: classroomTask.taskId.toString(),
+        status: this.toClassroomTaskStatusForRead(classroomTask.status),
         publishedAt: classroomTask.publishedAt,
         dueAt: classroomTask.dueAt,
         settings: classroomTask.settings,
@@ -1491,6 +1585,18 @@ export class ClassroomTasksService {
     } as PublishableTaskTemplateItemResponseDto;
   }
 
+  private toClassroomTaskStatusForRead(
+    status: ClassroomTask['status'] | undefined | null,
+  ): ClassroomTaskStatus {
+    if (status === CLASSROOM_TASK_STATUS_CLOSED) {
+      return CLASSROOM_TASK_STATUS_CLOSED;
+    }
+    if (status === CLASSROOM_TASK_STATUS_RECALLED) {
+      return CLASSROOM_TASK_STATUS_RECALLED;
+    }
+    return CLASSROOM_TASK_STATUS_ACTIVE;
+  }
+
   private toClassroomTaskResponse(
     classroomTask: ClassroomTaskWithMeta,
     task: Task,
@@ -1499,6 +1605,7 @@ export class ClassroomTasksService {
       id: classroomTask._id.toString(),
       classroomId: classroomTask.classroomId.toString(),
       taskId: classroomTask.taskId.toString(),
+      status: this.toClassroomTaskStatusForRead(classroomTask.status),
       publishedAt: classroomTask.publishedAt,
       dueAt: classroomTask.dueAt,
       settings: classroomTask.settings,

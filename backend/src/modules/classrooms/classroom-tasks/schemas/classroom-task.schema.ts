@@ -3,6 +3,11 @@ import { HydratedDocument, Types } from 'mongoose';
 import { Classroom } from '../../schemas/classroom.schema';
 import { Task } from '../../../learning-tasks/schemas/task.schema';
 import { User } from '../../../users/schemas/user.schema';
+import {
+  CLASSROOM_TASK_STATUSES,
+  CLASSROOM_TASK_STATUS_ACTIVE,
+  type ClassroomTaskStatus,
+} from '../classroom-task-status.constants';
 
 export type ClassroomTaskDocument = HydratedDocument<ClassroomTask>;
 
@@ -13,6 +18,13 @@ export class ClassroomTask {
 
   @Prop({ type: Types.ObjectId, ref: Task.name, required: true })
   taskId!: Types.ObjectId;
+
+  @Prop({
+    required: true,
+    enum: CLASSROOM_TASK_STATUSES,
+    default: CLASSROOM_TASK_STATUS_ACTIVE,
+  })
+  status!: ClassroomTaskStatus;
 
   @Prop({ required: true })
   publishedAt!: Date;

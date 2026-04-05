@@ -131,9 +131,10 @@ backend/
 - 权威性声明：Enrollment 是成员关系唯一权威来源；授权/统计只读 Enrollment。
 
 ### ClassroomTask（`src/modules/classrooms/classroom-tasks/schemas/classroom-task.schema.ts`）
-- 关键字段：`classroomId`、`taskId`、`publishedAt`、`dueAt?`、`settings.allowLate?`、`settings.maxAttempts?`、`createdBy`。
+- 关键字段：`classroomId`、`taskId`、`status(ACTIVE|CLOSED|RECALLED)`、`publishedAt`、`dueAt?`、`settings.allowLate?`、`settings.maxAttempts?`、`createdBy`。
 - 索引/唯一性：`unique(classroomId, taskId)`；`(classroomId, createdAt)`。
-- 迟交规则：`settings.allowLate` 默认按实现为 `true`；提交门禁与迟交标记以 `dueAt/allowLate` 为准。
+- 生命周期口径：新发布默认 `ACTIVE`；仅允许 `ACTIVE -> CLOSED` 或 `ACTIVE -> RECALLED`；撤回（`RECALLED`）要求当前“无提交”，有提交时只能关闭（`CLOSED`）；旧数据缺省状态按 `ACTIVE` 兼容读取。
+- 提交门禁：`ClassroomTask.status` 非 `ACTIVE` 时拒绝新提交；`settings.allowLate` 默认按实现为 `true`，迟交标记仍按 `dueAt/allowLate` 计算。
 
 ### Task（`src/modules/learning-tasks/schemas/task.schema.ts`）
 - 关键字段：`title`、`description`、`knowledgeModule`、`courseLabel?`、`visibility(PRIVATE|SHARED)`、`stage(1..4)`、`difficulty?`、`rubric?`、`status(DRAFT|PUBLISHED|ARCHIVED)`、`createdBy`、`publishedAt?`。
@@ -270,6 +271,12 @@ AI Provider 错误码（`ai-feedback-provider.error-codes.ts`）：
 - AI feedback provider 契约已统一为 `analyzeSubmission(context: AiSubmissionAnalysisContext)`；`AiFeedbackProcessor` 在消费 job 时会先读取 submission，再按 `submission.taskId` 查询 task 并组装上下文后调用 provider（task 缺失进入失败链路）；主控约束已前移到 prompt/协议层（默认 1 条、必要时最多 2 条），processor compactor 继续作为轻量兜底。
 
 新增/变更产品能力（Z3、AA~AI、Z4~Z9 收口口径）：
+- P1 课堂任务生命周期状态流契约（后端已完成，前端待后续阶段接入）：
+  - `ClassroomTask` 新增状态字段：`ACTIVE | CLOSED | RECALLED`，默认 `ACTIVE`。
+  - 新增状态流转接口：`PATCH /api/classrooms/:classroomId/tasks/:classroomTaskId/status`（教师端）。
+  - 流转规则：仅允许 `ACTIVE -> CLOSED` 或 `ACTIVE -> RECALLED`；`RECALLED` 前必须无提交；已是 `CLOSED/RECALLED` 不允许再次流转。
+  - 提交门禁同步：`CLOSED/RECALLED` 状态下学生提交入口拒绝新提交。
+  - 保持边界：不做物理删除、不放宽 `unique(classroomId,taskId)`，本阶段不支持同模板同班级重复发布。
 - P1 发布候选模板查询索引补强（后端已完成）：
   - `Task` 新增两组复合索引，分别覆盖发布候选查询的 `onlyMine` 分支与共享可见分支。
   - 本次仅补强索引，不改接口契约、不改查询逻辑、不改前端接入口径。
