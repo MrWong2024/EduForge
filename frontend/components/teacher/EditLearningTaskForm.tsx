@@ -32,6 +32,7 @@ type EditLearningTaskFormProps = {
   taskId: string;
   initialTask: LearningTaskDetailResponse;
   readOnly?: boolean;
+  returnTo?: string;
 };
 
 type EditLearningTaskFormErrorState = {
@@ -174,12 +175,28 @@ const getUpdateErrorSummary = (status: number): string => {
   return "更新任务模板失败，请稍后重试。";
 };
 
+const toSafeTaskListReturnTo = (value: string | undefined): string => {
+  const trimmed = value?.trim();
+  if (!trimmed) {
+    return paths.teacher.tasks;
+  }
+  if (trimmed.startsWith("//")) {
+    return paths.teacher.tasks;
+  }
+  if (!/^\/teacher\/tasks(?:[/?#]|$)/.test(trimmed)) {
+    return paths.teacher.tasks;
+  }
+  return trimmed;
+};
+
 export function EditLearningTaskForm({
   taskId,
   initialTask,
   readOnly = false,
+  returnTo,
 }: EditLearningTaskFormProps) {
   const router = useRouter();
+  const taskListReturnTo = toSafeTaskListReturnTo(returnTo);
   const rubricSeed = extractRubricFormSeed(initialTask.rubric);
   const initialCourseLabel = normalizeTaskCourseLabel(initialTask.courseLabel);
   const initialVisibility =
@@ -585,7 +602,7 @@ export function EditLearningTaskForm({
               {isSubmitting ? "保存中..." : "保存修改"}
             </button>
           ) : null}
-          <Link href={paths.teacher.tasks} className="text-sm text-blue-700 hover:underline">
+          <Link href={taskListReturnTo} className="text-sm text-blue-700 hover:underline">
             返回任务模板列表
           </Link>
         </div>

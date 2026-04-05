@@ -9,10 +9,11 @@ import { getMe } from "@/lib/auth/session";
 import { toLearningTaskDetailResponse } from "@/lib/api/types-teacher";
 import { paths } from "@/lib/routes/paths";
 import { getCommonErrorSummary } from "@/lib/ui/status";
-import { toDisplayText } from "@/lib/ui/format";
+import { getSingleSearchParam, toDisplayText } from "@/lib/ui/format";
 
 type EditLearningTaskPageProps = {
   params: Promise<{ taskId: string }>;
+  searchParams: Promise<{ returnTo?: string | string[] }>;
 };
 
 const getRequestOrigin = async (): Promise<string> => {
@@ -44,8 +45,27 @@ const getTaskLoadSummary = (status: number): string => {
   return getCommonErrorSummary(status, "加载任务模板");
 };
 
-export default async function EditLearningTaskPage({ params }: EditLearningTaskPageProps) {
+const toSafeTaskListReturnTo = (value: string | undefined): string => {
+  const trimmed = value?.trim();
+  if (!trimmed) {
+    return paths.teacher.tasks;
+  }
+  if (trimmed.startsWith("//")) {
+    return paths.teacher.tasks;
+  }
+  if (!/^\/teacher\/tasks(?:[/?#]|$)/.test(trimmed)) {
+    return paths.teacher.tasks;
+  }
+  return trimmed;
+};
+
+export default async function EditLearningTaskPage({
+  params,
+  searchParams,
+}: EditLearningTaskPageProps) {
   const { taskId } = await params;
+  const query = await searchParams;
+  const returnTo = toSafeTaskListReturnTo(getSingleSearchParam(query.returnTo));
   let viewModel: EditTaskViewModel = {
     mode: "error",
     status: 500,
@@ -101,7 +121,7 @@ export default async function EditLearningTaskPage({ params }: EditLearningTaskP
         )}`}
         actions={
           <div className="flex flex-wrap items-center gap-3 text-sm">
-            <Link href={paths.teacher.tasks} className="text-blue-700 hover:underline">
+            <Link href={returnTo} className="text-blue-700 hover:underline">
               返回任务模板页
             </Link>
             <Link href={paths.teacher.classrooms} className="text-blue-700 hover:underline">
@@ -127,6 +147,7 @@ export default async function EditLearningTaskPage({ params }: EditLearningTaskP
         taskId={viewModel.taskId}
         initialTask={viewModel.task}
         readOnly={!viewModel.canEdit}
+        returnTo={returnTo}
       />
     </section>
   );

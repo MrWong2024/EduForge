@@ -161,6 +161,16 @@ export function LearningTaskFilters({
   });
   const currentScope =
     normalizeTaskTemplateScope(searchParams.get("scope")) ?? initialScope;
+  const currentTaskListUrl = useMemo(() => {
+    const currentQuery = searchParams.toString();
+    return currentQuery ? `${pathname}?${currentQuery}` : pathname;
+  }, [pathname, searchParams]);
+
+  const buildTaskEditHref = (taskId: string): string => {
+    const params = new URLSearchParams();
+    params.set("returnTo", currentTaskListUrl);
+    return `${paths.teacher.taskEdit(taskId)}?${params.toString()}`;
+  };
 
   const replaceSearchQuery = (
     updater: (params: URLSearchParams) => void
@@ -521,7 +531,10 @@ export function LearningTaskFilters({
                     <td className="whitespace-nowrap px-4 py-3">
                       {task.id ? (
                         <div className="space-y-1">
-                          <Link href={paths.teacher.taskEdit(task.id)} className="text-blue-700 hover:underline">
+                          <Link
+                            href={buildTaskEditHref(task.id)}
+                            className="text-blue-700 hover:underline"
+                          >
                             {canEditTask ? "编辑" : "查看"}
                           </Link>
                           {!canEditTask ? (

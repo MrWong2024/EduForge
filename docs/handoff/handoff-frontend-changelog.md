@@ -317,6 +317,13 @@
 - 【查询语义保持】用户选择课程分类后，仍通过 URL query 触发后端 `publishable-task-templates` 重新检索第一页；“加载更多”仅扩展结果，不补全筛选项。
 - 【边界保持】未改后端契约、未改分页协议、未改班级任务实例列表、未新增复杂筛选/分页 UI。
 
+## UAT-FE-37
+
+- 【本步解决】任务模板页进入编辑后，顶部/底部返回入口固定跳裸 `/teacher/tasks`，导致来源 query 上下文丢失的问题。
+- 【新增事实 / 已收口口径】`LearningTaskFilters` 的编辑/查看入口已附带 `returnTo`（当前任务模板列表完整 URL，含现有 query）；`/teacher/tasks/[taskId]/edit` 顶部返回与 `EditLearningTaskForm` 底部返回均优先使用该 `returnTo`。
+- 【安全回退】`returnTo` 仅接受以 `/teacher/tasks` 开头的站内相对路径；缺失或非法时统一回退 `/teacher/tasks`，避免开放式跳转。
+- 【兼容性】当前 `scope/courseLabel/status/knowledgeModule/stage/fromClassroomId` query 可随 `returnTo` 一并保留；未来新增分页类 query（如 `page`）可复用同一机制，无需额外改造。
+
 ## 当前阶段一句话结论
 
 前端已达到“Teacher/Student 主链路可用 + 任务模板层与班级实例层边界收口 + 教师模板主链路可维护”的工程验收阶段，但尚未进入最终交付定版阶段。
