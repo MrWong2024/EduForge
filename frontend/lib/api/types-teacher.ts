@@ -224,7 +224,7 @@ export type PublishClassroomTaskRequest = {
 };
 
 export type UpdateClassroomTaskStatusRequest = {
-  status: Exclude<ClassroomTaskStatus, "ACTIVE">;
+  status: ClassroomTaskStatus;
 };
 
 export type UpdateClassroomTaskRequest = {

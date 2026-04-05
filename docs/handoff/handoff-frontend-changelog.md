@@ -346,6 +346,13 @@
 - 【状态边界】前端仅在 `ACTIVE/CLOSED` 状态显示“编辑设置”，`RECALLED` 不显示入口；配置编辑与状态流操作分离，状态仍由 `PATCH .../status` 处理。
 - 【边界保持】未改后端契约、未改发布表单主流程、未接“重新打开任务”与“撤回发布”前端动作。
 
+## UAT-FE-41
+
+- 【本步解决】课堂任务被关闭后，教师端缺少“恢复提交”操作，误点关闭后只能停留在 `CLOSED` 的问题。
+- 【新增事实 / 已收口口径】`ClassroomTaskLifecycleActions` 已补齐 `CLOSED -> ACTIVE` 前端动作：`CLOSED` 状态显示“恢复提交”，调用 `PATCH classrooms/:classroomId/tasks/:classroomTaskId/status` 且请求体为 `status=ACTIVE`；成功后沿用 `router.refresh()` 刷新列表状态。
+- 【语义收口】“恢复提交”仅恢复状态，不自动修改 `dueAt/allowLate/maxAttempts`；`ACTIVE` 仍显示“关闭任务”，`RECALLED` 仍不提供恢复入口。
+- 【边界保持】未改后端契约、未改实例级配置编辑能力、未新增“撤回发布”前端按钮。
+
 ## 当前阶段一句话结论
 
 前端已达到“Teacher/Student 主链路可用 + 任务模板层与班级实例层边界收口 + 教师模板主链路可维护”的工程验收阶段，但尚未进入最终交付定版阶段。
