@@ -44,7 +44,7 @@ frontend/
 - `/(auth)/login`：已完成登录与 role-home 跳转（`TEACHER -> /teacher/classrooms`, `STUDENT -> /student`）。
 - `/teacher/**`：教师起步链路、模板链路、班级发布链路、批阅链路、三件套、周报/过程性评价/快照已接入真接口。
 - 教师模板层（已落地）：
-  - `/teacher/tasks`：模板列表 + 创建 + 视图切换（默认 `scope=mine`，支持 `mine/shared/all`）+ 筛选（`status/knowledgeModule/stage` 本地筛选 + `courseLabel` URL 筛选），并展示模板可见性 `visibility(私有/共享)`；默认排序按 scope 收口（`mine=最近更新优先`、`shared=PUBLISHED 优先`、`all=我的模板优先`）
+  - `/teacher/tasks`：模板列表 + 创建 + 视图切换（默认 `scope=mine`，支持 `mine/shared/all`）+ URL 驱动筛选（`scope/courseLabel/status/knowledgeModule/stage/page`）并展示模板可见性 `visibility(私有/共享)`；列表已切到后端真实查询与标准分页（固定 `limit=20`，`page` 入 URL，筛选变化自动回到第一页）；默认排序按 scope 收口（`mine=最近更新优先`、`shared=PUBLISHED 优先`、`all=我的模板优先`）
   - `/teacher/tasks/[taskId]/edit`：模板编辑/查看与状态管理（含可选课程分类、模板可见性；非作者共享模板只读）；从模板页进入编辑时携带 `returnTo`（当前完整列表 URL），编辑页顶部/底部返回优先回到该地址，缺失或非法时回退 `/teacher/tasks`
 - 教师班级实例层（已收口）：
   - `/teacher/classrooms/[classroomId]/tasks`：选择“当前教师可见且已发布”的模板并发布到班级实例；候选池改为实时调用 `GET classrooms/:id/publishable-task-templates`，筛选条件 `courseLabel/onlyMine/knowledgeModule/stage` 透传后端，后端内置“仅 PUBLISHED + 排除本班已发布模板 + 课程优先排序”，不承担模板创建/编辑。
@@ -83,6 +83,7 @@ Teacher 起步与模板链路（可用）：
 3. `/teacher/tasks` 进行模板创建/筛选，必要时进入 `/teacher/tasks/[taskId]/edit` 维护模板状态与 rubric
    - 模板层已接入 `courseLabel`（课程分类）与 `visibility`（私有/共享）字段：创建/编辑可维护，列表可筛选并展示；`courseLabel` 与 `visibility` 都是模板治理字段，不绑定课程。
    - 模板列表默认 `scope=mine`，并支持显式切换 `mine/shared/all`；共享只影响读可见性，不改变作者权限边界。
+   - 模板筛选已统一走后端真实查询：`scope/courseLabel/status/knowledgeModule/stage` 透传 `GET learning-tasks/tasks`；页面标准分页使用 `page` query（固定 `limit=20`），筛选变化自动重置到第一页。
    - 模板列表默认排序已前端收口：`mine` 按最近更新时间降序（同时间按创建时间）；`shared` 先 `PUBLISHED` 再按最近更新时间；`all` 先“我的模板”再“他人共享模板”。
 4. `/teacher/classrooms/[classroomId]/tasks` 选择当前可见且已发布模板（我的 + 可见共享）并设置 `dueAt/allowLate/maxAttempts` 后发布（`POST classrooms/:id/tasks`）；候选池由 `GET classrooms/:id/publishable-task-templates` 按 query 实时检索，`courseLabel/onlyMine/knowledgeModule/stage` 均为后端真实查询条件，且后端已内置排除本班已发布模板
    - 首次仅加载第一页（`page=1&limit=50`），当 `total` 大于当前已加载数量时可在表单内“加载更多”并追加候选；筛选条件变化后回到第一页结果。

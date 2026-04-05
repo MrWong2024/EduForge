@@ -8,14 +8,22 @@ import { LearningTaskFilters } from "@/components/teacher/LearningTaskFilters";
 import { fetchJson, FetchJsonError } from "@/lib/api/client";
 import { buildErrorDescription, extractRawDetail } from "@/lib/api/error-presenter";
 import { getMe } from "@/lib/auth/session";
-import { toLearningTaskListResponse } from "@/lib/api/types-teacher";
+import {
+  LEARNING_TASK_STATUSES,
+  type LearningTaskStatus,
+  toLearningTaskListResponse,
+} from "@/lib/api/types-teacher";
 import { normalizeTaskCourseLabel } from "@/lib/learning-tasks/course-labels";
 import {
   DEFAULT_TASK_TEMPLATE_SCOPE,
   normalizeTaskTemplateScope,
 } from "@/lib/learning-tasks/template-visibility-scope";
 import { paths } from "@/lib/routes/paths";
-import { buildQueryString, getSingleSearchParam } from "@/lib/ui/format";
+import {
+  buildQueryString,
+  getSingleSearchParam,
+  parsePositiveInt,
+} from "@/lib/ui/format";
 import { getCommonErrorSummary } from "@/lib/ui/status";
 
 export const metadata: Metadata = {
@@ -43,6 +51,7 @@ type LearningTasksViewModel =
 type TeacherLearningTasksPageProps = {
   searchParams: Promise<{
     fromClassroomId?: string | string[];
+    page?: string | string[];
     status?: string | string[];
     knowledgeModule?: string | string[];
     stage?: string | string[];
@@ -51,15 +60,41 @@ type TeacherLearningTasksPageProps = {
   }>;
 };
 
+const TASK_TEMPLATE_PAGE_LIMIT = 20;
+const STAGE_FILTER_VALUES = new Set(["1", "2", "3", "4"]);
+
+const normalizeTaskStatusFilter = (value: string | undefined): LearningTaskStatus | undefined => {
+  const normalized = value?.trim().toUpperCase();
+  if (!normalized) {
+    return undefined;
+  }
+  return LEARNING_TASK_STATUSES.find((status) => status === normalized);
+};
+
+const normalizeKnowledgeModuleFilter = (value: string | undefined): string | undefined => {
+  const normalized = value?.trim();
+  return normalized ? normalized : undefined;
+};
+
+const normalizeStageFilter = (value: string | undefined): string | undefined => {
+  const normalized = value?.trim();
+  if (!normalized || !STAGE_FILTER_VALUES.has(normalized)) {
+    return undefined;
+  }
+  return normalized;
+};
+
 export default async function TeacherLearningTasksPage({
   searchParams,
 }: TeacherLearningTasksPageProps) {
   const query = await searchParams;
   const fromClassroomId = getSingleSearchParam(query.fromClassroomId)?.trim() || undefined;
-  const initialStatusFilter = getSingleSearchParam(query.status)?.trim() || undefined;
-  const initialKnowledgeModuleFilter =
-    getSingleSearchParam(query.knowledgeModule)?.trim() || undefined;
-  const initialStageFilter = getSingleSearchParam(query.stage)?.trim() || undefined;
+  const initialPage = parsePositiveInt(getSingleSearchParam(query.page), 1, { min: 1 });
+  const initialStatusFilter = normalizeTaskStatusFilter(getSingleSearchParam(query.status));
+  const initialKnowledgeModuleFilter = normalizeKnowledgeModuleFilter(
+    getSingleSearchParam(query.knowledgeModule)
+  );
+  const initialStageFilter = normalizeStageFilter(getSingleSearchParam(query.stage));
   const initialCourseLabelFilter = normalizeTaskCourseLabel(
     getSingleSearchParam(query.courseLabel)
   );
@@ -76,10 +111,13 @@ export default async function TeacherLearningTasksPage({
   try {
     const origin = await getRequestOrigin();
     const listQuery = buildQueryString({
-      page: 1,
-      limit: 100,
+      page: initialPage,
+      limit: TASK_TEMPLATE_PAGE_LIMIT,
       scope: initialScope,
       courseLabel: initialCourseLabelFilter,
+      status: initialStatusFilter,
+      knowledgeModule: initialKnowledgeModuleFilter,
+      stage: initialStageFilter,
     });
     const [payload, me] = await Promise.all([
       fetchJson<unknown>(`learning-tasks/tasks?${listQuery}`, {
@@ -166,6 +204,9 @@ export default async function TeacherLearningTasksPage({
         initialKnowledgeModule={initialKnowledgeModuleFilter}
         initialStage={initialStageFilter}
         initialCourseLabel={initialCourseLabelFilter}
+        initialPage={viewModel.taskList.page ?? initialPage}
+        initialLimit={viewModel.taskList.limit ?? TASK_TEMPLATE_PAGE_LIMIT}
+        total={viewModel.taskList.total}
       />
     </section>
   );

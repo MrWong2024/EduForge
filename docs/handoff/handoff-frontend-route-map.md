@@ -23,7 +23,7 @@
 | `/teacher/courses` | 课程列表 + 创建课程 | `GET courses`、`POST courses` | 分页、创建课程；创建支持可选 `courseLabel`（课程分类）；列表展示课程分类；跳课程总览/班级 | Done | 真接口 |
 | `/teacher/courses/[courseId]/overview` | 课程总览 | `GET courses/:courseId/overview` | window/sort/order/page 切换；头部展示课程分类 | Done | 真接口 |
 | `/teacher/courses/[courseId]/edit` | 课程编辑页 | `GET courses/:id`、`PATCH courses/:id` | 从课程列表/课程总览进入编辑；支持修改 `code/name/term/courseLabel`，保存后回课程总览；overview 保持展示页职责 | Done | 真接口 |
-| `/teacher/tasks` | 任务模板页 | `GET learning-tasks/tasks`、`POST learning-tasks/tasks` | 默认 `scope=mine`；支持视图切换 `mine/shared/all` 并同步 URL；模板列表、创建模板、`status/module/stage` 本地筛选、`courseLabel`（课程分类）URL 筛选并透传服务端；列表显示 `visibility(私有/共享)`；非作者模板仅显示“查看”入口；默认排序按视图收口：`mine=最近更新优先`、`shared=PUBLISHED 优先`、`all=我的模板优先` | Done | 真接口 |
+| `/teacher/tasks` | 任务模板页 | `GET learning-tasks/tasks`、`POST learning-tasks/tasks` | 默认 `scope=mine`；支持视图切换 `mine/shared/all` 并同步 URL；`scope/courseLabel/status/knowledgeModule/stage/page` 全部由 URL 驱动并透传后端真实查询；列表采用标准分页（固定 `limit=20`，上一页/下一页）；列表显示 `visibility(私有/共享)`；非作者模板仅显示“查看”入口；默认排序按视图收口：`mine=最近更新优先`、`shared=PUBLISHED 优先`、`all=我的模板优先` | Done | 真接口 |
 | `/teacher/tasks/[taskId]/edit` | 任务模板编辑/查看页 | `GET learning-tasks/tasks/:id`、`PATCH learning-tasks/tasks/:id` | 作者可编辑模板核心字段（含可选 `courseLabel`、`visibility`）、维护 rubric 基础配置、状态管理（DRAFT/PUBLISHED/ARCHIVED）；非作者共享模板进入只读查看模式；支持 `returnTo` 回跳上下文（优先返回原模板列表 URL，缺失/非法时回退 `/teacher/tasks`） | Done | 真接口 |
 | `/teacher/classrooms` | 班级列表 + 创建班级 | `GET classrooms`、`GET courses`、`POST classrooms` | 过滤 courseId、分页、创建班级 | Done | 真接口 |
 | `/teacher/classrooms/[classroomId]` | 班级入口 | - | 重定向到 dashboard | Done | - |

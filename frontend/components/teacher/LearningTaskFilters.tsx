@@ -1,15 +1,14 @@
 "use client";
 
 import Link from "next/link";
+import { useMemo } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { useMemo, useState } from "react";
 import { EmptyState } from "@/components/blocks/EmptyState";
 import { paths } from "@/lib/routes/paths";
-import { toDisplayText } from "@/lib/ui/format";
+import { parsePositiveInt, toDisplayText } from "@/lib/ui/format";
 import { type LearningTaskOption, type LearningTaskStatus } from "@/lib/api/types-teacher";
 import {
   TASK_COURSE_LABELS,
-  TASK_COURSE_LABEL_UNCLASSIFIED,
   normalizeTaskCourseLabel,
   isUnclassifiedTaskCourseLabel,
   toTaskCourseLabelDisplayText,
@@ -32,6 +31,9 @@ type LearningTaskFiltersProps = {
   initialKnowledgeModule?: string;
   initialStage?: string;
   initialCourseLabel?: string;
+  initialPage: number;
+  initialLimit: number;
+  total?: number;
 };
 
 type TaskStatusFilter = "ALL" | LearningTaskStatus;
@@ -109,7 +111,8 @@ const summarizeRubric = (rubric: Record<string, unknown> | undefined): RubricSum
       ? (dimensionsRaw as Record<string, unknown>)
       : undefined;
   const dimensionCount = dimensions
-    ? Object.values(dimensions).filter((value) => typeof value === "number" && Number.isFinite(value)).length
+    ? Object.values(dimensions).filter((value) => typeof value === "number" && Number.isFinite(value))
+        .length
     : 0;
   const hasNotes = typeof rubric.notes === "string" && rubric.notes.trim().length > 0;
 
@@ -128,10 +131,39 @@ export function LearningTaskFilters({
   initialKnowledgeModule,
   initialStage,
   initialCourseLabel,
+  initialPage,
+  initialLimit,
+  total,
 }: LearningTaskFiltersProps) {
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
+
+  const currentScope =
+    normalizeTaskTemplateScope(searchParams.get("scope") ?? initialScope) ?? initialScope;
+  const statusFilter = toStatusFilter(searchParams.get("status") ?? initialStatus);
+  const stageFilter = toStageFilter(searchParams.get("stage") ?? initialStage);
+  const courseLabelFilter =
+    normalizeTaskCourseLabel(searchParams.get("courseLabel") ?? initialCourseLabel) ?? "";
+  const knowledgeModuleFilter = useMemo(() => {
+    const value = searchParams.get("knowledgeModule") ?? initialKnowledgeModule ?? "";
+    return value.trim();
+  }, [searchParams, initialKnowledgeModule]);
+  const currentPage = parsePositiveInt(
+    searchParams.get("page") ?? String(initialPage),
+    initialPage,
+    { min: 1 }
+  );
+
+  const limit = initialLimit > 0 ? initialLimit : 20;
+  const totalCount = typeof total === "number" && total >= 0 ? total : tasks.length;
+  const totalPages = Math.max(1, Math.ceil(totalCount / limit));
+  const canGoPrevious = currentPage > 1;
+  const canGoNext = currentPage < totalPages;
+  const previousPage =
+    currentPage > totalPages ? totalPages : Math.max(1, currentPage - 1);
+  const nextPage = currentPage + 1;
+
   const knowledgeModuleOptions = useMemo(() => {
     const moduleSet = new Set<string>();
     for (const task of tasks) {
@@ -141,26 +173,12 @@ export function LearningTaskFilters({
         moduleSet.add(moduleValue);
       }
     }
-    return [...moduleSet].sort((left, right) => left.localeCompare(right, "zh-CN"));
-  }, [tasks]);
-
-  const [statusFilter, setStatusFilter] = useState<TaskStatusFilter>(
-    toStatusFilter(initialStatus)
-  );
-  const [knowledgeModuleFilter, setKnowledgeModuleFilter] = useState<string>(() => {
-    const normalized = typeof initialKnowledgeModule === "string" ? initialKnowledgeModule.trim() : "";
-    if (!normalized) {
-      return "";
+    if (knowledgeModuleFilter) {
+      moduleSet.add(knowledgeModuleFilter);
     }
-    return knowledgeModuleOptions.includes(normalized) ? normalized : "";
-  });
-  const [stageFilter, setStageFilter] = useState<StageFilter>(toStageFilter(initialStage));
-  const [courseLabelFilter, setCourseLabelFilter] = useState<string>(() => {
-    const normalized = normalizeTaskCourseLabel(initialCourseLabel);
-    return normalized ?? "";
-  });
-  const currentScope =
-    normalizeTaskTemplateScope(searchParams.get("scope")) ?? initialScope;
+    return [...moduleSet].sort((left, right) => left.localeCompare(right, "zh-CN"));
+  }, [tasks, knowledgeModuleFilter]);
+
   const currentTaskListUrl = useMemo(() => {
     const currentQuery = searchParams.toString();
     return currentQuery ? `${pathname}?${currentQuery}` : pathname;
@@ -172,9 +190,7 @@ export function LearningTaskFilters({
     return `${paths.teacher.taskEdit(taskId)}?${params.toString()}`;
   };
 
-  const replaceSearchQuery = (
-    updater: (params: URLSearchParams) => void
-  ) => {
+  const replaceSearchQuery = (updater: (params: URLSearchParams) => void) => {
     const params = new URLSearchParams(searchParams.toString());
     updater(params);
     const nextQuery = params.toString();
@@ -183,71 +199,80 @@ export function LearningTaskFilters({
     });
   };
 
+  const setScopeAndSync = (nextScope: TaskTemplateScope) => {
+    replaceSearchQuery((params) => {
+      params.set("scope", nextScope);
+      params.set("page", "1");
+    });
+  };
+
   const setCourseLabelFilterAndSync = (nextValue: string) => {
-    setCourseLabelFilter(nextValue);
     replaceSearchQuery((params) => {
       if (nextValue) {
         params.set("courseLabel", nextValue);
       } else {
         params.delete("courseLabel");
       }
+      params.set("page", "1");
     });
   };
 
-  const setScopeAndSync = (nextScope: TaskTemplateScope) => {
+  const setStatusFilterAndSync = (nextValue: TaskStatusFilter) => {
     replaceSearchQuery((params) => {
-      params.set("scope", nextScope);
-      params.delete("page");
+      if (nextValue === "ALL") {
+        params.delete("status");
+      } else {
+        params.set("status", nextValue);
+      }
+      params.set("page", "1");
     });
   };
 
-  const filteredTasks = useMemo(
+  const setKnowledgeModuleFilterAndSync = (nextValue: string) => {
+    replaceSearchQuery((params) => {
+      if (nextValue) {
+        params.set("knowledgeModule", nextValue);
+      } else {
+        params.delete("knowledgeModule");
+      }
+      params.set("page", "1");
+    });
+  };
+
+  const setStageFilterAndSync = (nextValue: StageFilter) => {
+    replaceSearchQuery((params) => {
+      if (nextValue === "ALL") {
+        params.delete("stage");
+      } else {
+        params.set("stage", nextValue);
+      }
+      params.set("page", "1");
+    });
+  };
+
+  const goToPage = (page: number) => {
+    replaceSearchQuery((params) => {
+      params.set("page", String(Math.max(1, page)));
+    });
+  };
+
+  const handleResetFilters = () => {
+    replaceSearchQuery((params) => {
+      params.delete("status");
+      params.delete("knowledgeModule");
+      params.delete("stage");
+      params.delete("courseLabel");
+      params.set("page", "1");
+    });
+  };
+
+  const sortedTasks = useMemo(
     () =>
-      tasks.filter((task) => {
-        if (statusFilter !== "ALL" && toStatusUpper(task.status) !== statusFilter) {
-          return false;
-        }
-
-        if (knowledgeModuleFilter) {
-          const moduleValue =
-            typeof task.knowledgeModule === "string" ? task.knowledgeModule.trim() : "";
-          if (moduleValue !== knowledgeModuleFilter) {
-            return false;
-          }
-        }
-
-        if (stageFilter !== "ALL") {
-          const stageValue =
-            typeof task.stage === "number" && Number.isFinite(task.stage)
-              ? String(task.stage)
-              : "";
-          if (stageValue !== stageFilter) {
-            return false;
-          }
-        }
-
-        if (courseLabelFilter) {
-          const taskCourseLabel = normalizeTaskCourseLabel(task.courseLabel);
-          if (courseLabelFilter === TASK_COURSE_LABEL_UNCLASSIFIED) {
-            if (!isUnclassifiedTaskCourseLabel(task.courseLabel)) {
-              return false;
-            }
-          } else if (taskCourseLabel !== courseLabelFilter) {
-            return false;
-          }
-        }
-
-        return true;
-      }),
-    [tasks, statusFilter, knowledgeModuleFilter, stageFilter, courseLabelFilter]
-  );
-  const sortedFilteredTasks = useMemo(
-    () =>
-      sortTaskTemplatesByScope(filteredTasks, {
+      sortTaskTemplatesByScope(tasks, {
         scope: currentScope,
         currentUserId,
       }),
-    [filteredTasks, currentScope, currentUserId]
+    [tasks, currentScope, currentUserId]
   );
 
   const hasActiveFilters =
@@ -255,13 +280,6 @@ export function LearningTaskFilters({
     Boolean(knowledgeModuleFilter) ||
     stageFilter !== "ALL" ||
     Boolean(courseLabelFilter);
-
-  const handleResetFilters = () => {
-    setStatusFilter("ALL");
-    setKnowledgeModuleFilter("");
-    setStageFilter("ALL");
-    setCourseLabelFilterAndSync("");
-  };
 
   return (
     <section className="space-y-4">
@@ -294,14 +312,14 @@ export function LearningTaskFilters({
       <section className="rounded-lg border border-zinc-200 bg-white p-4">
         <h2 className="text-base font-semibold text-zinc-900">模板筛选</h2>
         <p className="mt-1 text-sm text-zinc-600">
-          本地筛选，切换后即时生效；优先挑选 `PUBLISHED` 模板用于班级发布。
+          筛选条件会写入 URL 并触发后端实时查询；筛选变化后自动回到第一页。
         </p>
         <div className="mt-4 grid gap-4 md:grid-cols-5">
           <label className="block text-sm">
             <span className="mb-1 block text-zinc-700">状态</span>
             <select
               value={statusFilter}
-              onChange={(event) => setStatusFilter(event.target.value as TaskStatusFilter)}
+              onChange={(event) => setStatusFilterAndSync(event.target.value as TaskStatusFilter)}
               className="w-full rounded-md border border-zinc-300 px-3 py-2"
             >
               {STATUS_FILTER_OPTIONS.map((option) => (
@@ -316,7 +334,7 @@ export function LearningTaskFilters({
             <span className="mb-1 block text-zinc-700">知识模块</span>
             <select
               value={knowledgeModuleFilter}
-              onChange={(event) => setKnowledgeModuleFilter(event.target.value)}
+              onChange={(event) => setKnowledgeModuleFilterAndSync(event.target.value)}
               className="w-full rounded-md border border-zinc-300 px-3 py-2"
             >
               <option value="">全部模块</option>
@@ -332,7 +350,7 @@ export function LearningTaskFilters({
             <span className="mb-1 block text-zinc-700">阶段</span>
             <select
               value={stageFilter}
-              onChange={(event) => setStageFilter(event.target.value as StageFilter)}
+              onChange={(event) => setStageFilterAndSync(event.target.value as StageFilter)}
               className="w-full rounded-md border border-zinc-300 px-3 py-2"
             >
               {STAGE_FILTER_OPTIONS.map((option) => (
@@ -370,11 +388,11 @@ export function LearningTaskFilters({
           </div>
         </div>
         <p className="mt-3 text-xs text-zinc-500">
-          当前显示 {sortedFilteredTasks.length} / {tasks.length} 条模板
+          当前页显示 {sortedTasks.length} 条，共 {totalCount} 条模板
         </p>
       </section>
 
-      {tasks.length === 0 ? (
+      {sortedTasks.length === 0 && totalCount === 0 && !hasActiveFilters ? (
         <EmptyState
           title="还没有任务模板"
           description="先创建第一个任务模板，之后可在班级任务页选择模板并发布到班级。"
@@ -392,10 +410,10 @@ export function LearningTaskFilters({
             </div>
           }
         />
-      ) : sortedFilteredTasks.length === 0 ? (
+      ) : sortedTasks.length === 0 && hasActiveFilters ? (
         <EmptyState
           title="当前筛选条件下没有匹配模板"
-          description="可重置筛选，或继续创建新模板。"
+          description="可重置筛选，或调整筛选条件后重试。"
           actions={
             <div className="flex flex-wrap items-center gap-3">
               <button
@@ -408,6 +426,33 @@ export function LearningTaskFilters({
               <Link href="#create-learning-task-form" className="text-sm text-blue-700 hover:underline">
                 继续创建模板
               </Link>
+            </div>
+          }
+        />
+      ) : sortedTasks.length === 0 ? (
+        <EmptyState
+          title="当前页没有模板数据"
+          description="可以返回上一页，或调整筛选条件后重试。"
+          actions={
+            <div className="flex flex-wrap items-center gap-3">
+              {canGoPrevious ? (
+                <button
+                  type="button"
+                  onClick={() => goToPage(previousPage)}
+                  className="rounded-md border border-zinc-300 px-3 py-1.5 text-sm text-zinc-700 hover:bg-zinc-100"
+                >
+                  返回上一页
+                </button>
+              ) : null}
+              {hasActiveFilters ? (
+                <button
+                  type="button"
+                  onClick={handleResetFilters}
+                  className="rounded-md border border-zinc-300 px-3 py-1.5 text-sm text-zinc-700 hover:bg-zinc-100"
+                >
+                  清空筛选
+                </button>
+              ) : null}
             </div>
           }
         />
@@ -439,7 +484,7 @@ export function LearningTaskFilters({
               </tr>
             </thead>
             <tbody>
-              {sortedFilteredTasks.map((task, index) => {
+              {sortedTasks.map((task, index) => {
                 const statusUpper = toStatusUpper(task.status);
                 const rubricSummary = summarizeRubric(task.rubric);
                 const titleText = toDisplayText(task.title, "未命名模板");
@@ -472,7 +517,7 @@ export function LearningTaskFilters({
 
                 return (
                   <tr
-                    key={task.id ?? `learning-task-filtered-${index}`}
+                    key={task.id ?? `learning-task-${index}`}
                     className="border-t border-zinc-100 align-top"
                   >
                     <td className="px-4 py-3">
@@ -552,6 +597,34 @@ export function LearningTaskFilters({
           </table>
         </div>
       )}
+
+      {(totalPages > 1 || currentPage > 1) && totalCount > 0 ? (
+        <section className="rounded-lg border border-zinc-200 bg-white p-3">
+          <div className="flex flex-wrap items-center justify-between gap-3 text-sm">
+            <p className="text-zinc-600">
+              第 {currentPage} / {totalPages} 页，共 {totalCount} 条
+            </p>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => goToPage(previousPage)}
+                disabled={!canGoPrevious}
+                className="rounded-md border border-zinc-300 px-3 py-1.5 text-zinc-700 enabled:hover:bg-zinc-100 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                上一页
+              </button>
+              <button
+                type="button"
+                onClick={() => goToPage(nextPage)}
+                disabled={!canGoNext}
+                className="rounded-md border border-zinc-300 px-3 py-1.5 text-zinc-700 enabled:hover:bg-zinc-100 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                下一页
+              </button>
+            </div>
+          </div>
+        </section>
+      ) : null}
 
       {hasActiveFilters ? (
         <p className="text-xs text-zinc-500">

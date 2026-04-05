@@ -324,6 +324,14 @@
 - 【安全回退】`returnTo` 仅接受以 `/teacher/tasks` 开头的站内相对路径；缺失或非法时统一回退 `/teacher/tasks`，避免开放式跳转。
 - 【兼容性】当前 `scope/courseLabel/status/knowledgeModule/stage/fromClassroomId` query 可随 `returnTo` 一并保留；未来新增分页类 query（如 `page`）可复用同一机制，无需额外改造。
 
+## UAT-FE-38
+
+- 【本步解决】任务模板页仍以“后端取样本 + 前端本地筛选”运行，`status/knowledgeModule/stage` 不是后端真实查询条件，且列表没有标准分页的问题。
+- 【新增事实 / 已收口口径】`/teacher/tasks` 已切到 URL 驱动的后端真实查询：`scope/courseLabel/status/knowledgeModule/stage/page` 全部进入 `GET learning-tasks/tasks`；固定 `limit=20`，标准分页改为上一页/下一页（非加载更多）。
+- 【交互收口】切换任一筛选条件时统一重置 `page=1` 并使用 `router.replace(..., { scroll: false })`；分页切换仅改 `page`，保留其他筛选 query。
+- 【上下文兼容】编辑入口的 `returnTo` 继续携带当前完整列表 URL，分页场景下可自然保留筛选条件与页码。
+- 【不要回退】不要再把 `status/knowledgeModule/stage` 当“前 100 条样本上的本地假过滤”，也不要恢复固定 `page=1&limit=100` 的单页样本模式。
+
 ## 当前阶段一句话结论
 
 前端已达到“Teacher/Student 主链路可用 + 任务模板层与班级实例层边界收口 + 教师模板主链路可维护”的工程验收阶段，但尚未进入最终交付定版阶段。
