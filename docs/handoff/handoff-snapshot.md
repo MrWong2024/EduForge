@@ -292,6 +292,9 @@ AI Provider 错误码（`ai-feedback-provider.error-codes.ts`）：
   - `scope` 语义：`mine=我的全部模板`；`shared=共享池(包含我自己设为 SHARED 的模板)`；`all=我的全部+共享池`。
   - 模板详情读取同步可见性：作者可读、他人仅可读 `SHARED`（含旧数据兼容）、他人 `PRIVATE` 不可读。
   - 共享仅影响读可见性，不改变“编辑/发布仍为作者权限”的所有权边界。
+- P1 任务模板列表检索契约升级（后端已完成，前端待后续阶段接入）：
+  - `GET /api/learning-tasks/tasks` 已将 `status/knowledgeModule/stage` 正式纳入数据库级过滤，并可与 `scope/courseLabel/page/limit` 叠加。
+  - 保持原有分页结构与默认排序不变；本次仅升级后端查询契约，前端后续再把这三项从本地过滤切换到 query 透传。
 - P0 用户资料闭环（已完成）：
   - `PATCH /api/users/me`：已落地可用；仅允许更新 `name/studentNo/employeeNo`。
   - `GET /api/users/me` 与 `PATCH /api/users/me` 返回口径一致，均不返回 `passwordHash`。

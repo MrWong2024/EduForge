@@ -521,7 +521,9 @@
   - `scope=mine`：仅当前教师本人模板（包含本人 `PRIVATE + SHARED`）
   - `scope=shared`：共享池（`visibility=SHARED`，且包含旧数据缺省 `visibility`；包含“我自己设为 SHARED 的模板”）
   - `scope=all`：当前教师可见全集（我的全部 + 共享池）
+  - `status/knowledgeModule/stage` 已在后端进入数据库级过滤（与 `scope/courseLabel` 可叠加）。
   - 当 `courseLabel=未分类` 时，服务端会同时匹配“字段缺省/空值”任务，保持旧数据兼容。
+  - 当前前端任务模板页若仍在本地处理 `status/knowledgeModule/stage`，属前端接入阶段问题；后端查询契约已就绪。
 
 ### GET /api/classrooms/:id/publishable-task-templates
 
