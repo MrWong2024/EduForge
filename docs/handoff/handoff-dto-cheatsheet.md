@@ -327,7 +327,7 @@
 - Required fields:
   - `status`
 - Enums:
-  - `status`: `CLOSED | RECALLED`
+  - `status`: `ACTIVE | CLOSED | RECALLED`
 - Nested structure: None
 - Minimal JSON example:
 
@@ -338,9 +338,11 @@
 ```
 - Notes:
   - 仅允许教师操作。
-  - 当前仅允许 `ACTIVE -> CLOSED` 或 `ACTIVE -> RECALLED`。
+  - 当前允许 `ACTIVE -> CLOSED`、`ACTIVE -> RECALLED`、`CLOSED -> ACTIVE`。
   - 撤回（`RECALLED`）前会检查是否已有提交；若已有提交会返回 `400`，提示只能关闭（`CLOSED`）。
-  - 已是 `CLOSED/RECALLED` 的课堂任务不允许再次流转。
+  - `RECALLED` 状态保持封闭：不允许恢复为 `ACTIVE`，也不允许再变更为 `CLOSED`。
+  - `CLOSED -> RECALLED` 不允许；同状态重复变更（如 `ACTIVE -> ACTIVE`）不允许。
+  - 恢复提交（`CLOSED -> ACTIVE`）仅恢复状态，不会自动修改 `dueAt/settings.allowLate/settings.maxAttempts`。
 
 ---
 

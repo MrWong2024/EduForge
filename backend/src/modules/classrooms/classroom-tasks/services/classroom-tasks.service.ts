@@ -456,19 +456,41 @@ export class ClassroomTasksService {
     const currentStatus = this.toClassroomTaskStatusForRead(
       classroomTask.status,
     );
-    if (currentStatus !== CLASSROOM_TASK_STATUS_ACTIVE) {
+    const targetStatus = dto.status;
+
+    if (targetStatus === currentStatus) {
       throw new BadRequestException(
-        `Classroom task status is ${currentStatus} and cannot be changed`,
+        `Classroom task status is already ${currentStatus}`,
       );
     }
 
-    if (dto.status === CLASSROOM_TASK_STATUS_RECALLED) {
-      const hasSubmissions = await this.submissionModel.exists({
-        classroomTaskId: classroomTask._id,
-      });
-      if (hasSubmissions) {
+    if (currentStatus === CLASSROOM_TASK_STATUS_RECALLED) {
+      throw new BadRequestException(
+        'Recalled classroom tasks cannot be reopened or closed',
+      );
+    }
+
+    if (currentStatus === CLASSROOM_TASK_STATUS_ACTIVE) {
+      if (targetStatus === CLASSROOM_TASK_STATUS_CLOSED) {
+        // ACTIVE -> CLOSED is always allowed.
+      } else if (targetStatus === CLASSROOM_TASK_STATUS_RECALLED) {
+        const hasSubmissions = await this.submissionModel.exists({
+          classroomTaskId: classroomTask._id,
+        });
+        if (hasSubmissions) {
+          throw new BadRequestException(
+            'Classroom task already has submissions and cannot be recalled; close it instead',
+          );
+        }
+      } else {
         throw new BadRequestException(
-          'Classroom task already has submissions and cannot be recalled; close it instead',
+          `Transition from ${currentStatus} to ${targetStatus} is not allowed`,
+        );
+      }
+    } else if (currentStatus === CLASSROOM_TASK_STATUS_CLOSED) {
+      if (targetStatus !== CLASSROOM_TASK_STATUS_ACTIVE) {
+        throw new BadRequestException(
+          `Transition from ${currentStatus} to ${targetStatus} is not allowed`,
         );
       }
     }
@@ -476,7 +498,7 @@ export class ClassroomTasksService {
     const updatedClassroomTask = await this.classroomTaskModel
       .findOneAndUpdate(
         { _id: classroomTaskObjectId, classroomId: classroomObjectId },
-        { $set: { status: dto.status } },
+        { $set: { status: targetStatus } },
         { new: true },
       )
       .lean<ClassroomTaskWithMeta>()

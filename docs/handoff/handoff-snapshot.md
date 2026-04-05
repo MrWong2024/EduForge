@@ -133,7 +133,7 @@ backend/
 ### ClassroomTask（`src/modules/classrooms/classroom-tasks/schemas/classroom-task.schema.ts`）
 - 关键字段：`classroomId`、`taskId`、`status(ACTIVE|CLOSED|RECALLED)`、`publishedAt`、`dueAt?`、`settings.allowLate?`、`settings.maxAttempts?`、`createdBy`。
 - 索引/唯一性：`unique(classroomId, taskId)`；`(classroomId, createdAt)`。
-- 生命周期口径：新发布默认 `ACTIVE`；仅允许 `ACTIVE -> CLOSED` 或 `ACTIVE -> RECALLED`；撤回（`RECALLED`）要求当前“无提交”，有提交时只能关闭（`CLOSED`）；旧数据缺省状态按 `ACTIVE` 兼容读取。
+- 生命周期口径：新发布默认 `ACTIVE`；允许 `ACTIVE -> CLOSED`、`ACTIVE -> RECALLED`、`CLOSED -> ACTIVE`；撤回（`RECALLED`）要求当前“无提交”，有提交时只能关闭（`CLOSED`）；`RECALLED` 保持封闭不可恢复，且 `CLOSED -> RECALLED` 不允许；旧数据缺省状态按 `ACTIVE` 兼容读取。
 - 实例级配置口径：新增 `PATCH /api/classrooms/:classroomId/tasks/:classroomTaskId`，仅允许更新 `dueAt/settings.allowLate/settings.maxAttempts`；`ACTIVE/CLOSED` 可编辑，`RECALLED` 不可编辑；状态流仍走独立 `/status` 接口。
 - 提交门禁：`ClassroomTask.status` 非 `ACTIVE` 时拒绝新提交；`settings.allowLate` 默认按实现为 `true`，迟交标记仍按 `dueAt/allowLate` 计算。
 
@@ -275,7 +275,9 @@ AI Provider 错误码（`ai-feedback-provider.error-codes.ts`）：
 - P1 课堂任务生命周期状态流契约（后端已完成，前端待后续阶段接入）：
   - `ClassroomTask` 新增状态字段：`ACTIVE | CLOSED | RECALLED`，默认 `ACTIVE`。
   - 新增状态流转接口：`PATCH /api/classrooms/:classroomId/tasks/:classroomTaskId/status`（教师端）。
-  - 流转规则：仅允许 `ACTIVE -> CLOSED` 或 `ACTIVE -> RECALLED`；`RECALLED` 前必须无提交；已是 `CLOSED/RECALLED` 不允许再次流转。
+  - 流转规则：允许 `ACTIVE -> CLOSED`、`ACTIVE -> RECALLED`、`CLOSED -> ACTIVE`；`RECALLED` 前必须无提交；`RECALLED` 保持封闭不可恢复，且 `CLOSED -> RECALLED` 不允许。
+  - 恢复提交语义：`CLOSED -> ACTIVE` 仅恢复状态，不自动修改 `dueAt/settings.allowLate/settings.maxAttempts`。
+  - 前端现状说明：课堂任务页已接入“关闭任务”，`CLOSED -> ACTIVE` 的“恢复提交”按钮尚未接入（后端契约已可用）。
   - 提交门禁同步：`CLOSED/RECALLED` 状态下学生提交入口拒绝新提交。
   - 保持边界：不做物理删除、不放宽 `unique(classroomId,taskId)`，本阶段不支持同模板同班级重复发布。
 - P1 课堂任务实例级参数编辑契约（后端已完成，前端待后续阶段接入）：
