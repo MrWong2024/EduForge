@@ -259,6 +259,40 @@
 }
 ```
 
+### PATCH /api/classrooms/:classroomId/tasks/:classroomTaskId
+
+- Controller & Method: `backend/src/modules/classrooms/classroom-tasks/controllers/classroom-tasks.controller.ts` -> `ClassroomTasksController.updateClassroomTask`
+- DTO: `UpdateClassroomTaskDto` (`backend/src/modules/classrooms/classroom-tasks/dto/update-classroom-task.dto.ts`)
+- Required fields: None（PATCH 至少传 1 个可更新字段）
+- Allowed fields:
+  - `dueAt?: string | null`（`null` 或空字符串表示清空截止时间）
+  - `allowLate?: boolean`
+  - `maxAttempts?: number | null`（`null` 或空字符串表示清空最大尝试次数）
+- Enums: None
+- Nested structure: None（扁平字段；由 service 映射到 `ClassroomTask.settings`）
+- Minimal JSON example:
+
+```json
+{
+  "dueAt": "2026-04-12T23:59:00.000Z",
+  "allowLate": false,
+  "maxAttempts": 3
+}
+```
+- Clear example:
+
+```json
+{
+  "dueAt": null,
+  "maxAttempts": null
+}
+```
+- Notes:
+  - 仅允许教师操作，且仅限班级 owner。
+  - 仅允许更新实例级字段：`dueAt / settings.allowLate / settings.maxAttempts`。
+  - 不允许更新 `taskId/classroomId/publishedAt/createdBy/status`。
+  - 状态边界：`ACTIVE/CLOSED` 可编辑，`RECALLED` 不可编辑。
+
 ### POST /api/classrooms/:classroomId/tasks/:classroomTaskId/submissions
 
 - Controller & Method: `backend/src/modules/classrooms/classroom-tasks/controllers/classroom-tasks.controller.ts` -> `ClassroomTasksController.createClassroomTaskSubmission`

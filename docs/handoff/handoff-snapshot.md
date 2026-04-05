@@ -134,6 +134,7 @@ backend/
 - 关键字段：`classroomId`、`taskId`、`status(ACTIVE|CLOSED|RECALLED)`、`publishedAt`、`dueAt?`、`settings.allowLate?`、`settings.maxAttempts?`、`createdBy`。
 - 索引/唯一性：`unique(classroomId, taskId)`；`(classroomId, createdAt)`。
 - 生命周期口径：新发布默认 `ACTIVE`；仅允许 `ACTIVE -> CLOSED` 或 `ACTIVE -> RECALLED`；撤回（`RECALLED`）要求当前“无提交”，有提交时只能关闭（`CLOSED`）；旧数据缺省状态按 `ACTIVE` 兼容读取。
+- 实例级配置口径：新增 `PATCH /api/classrooms/:classroomId/tasks/:classroomTaskId`，仅允许更新 `dueAt/settings.allowLate/settings.maxAttempts`；`ACTIVE/CLOSED` 可编辑，`RECALLED` 不可编辑；状态流仍走独立 `/status` 接口。
 - 提交门禁：`ClassroomTask.status` 非 `ACTIVE` 时拒绝新提交；`settings.allowLate` 默认按实现为 `true`，迟交标记仍按 `dueAt/allowLate` 计算。
 
 ### Task（`src/modules/learning-tasks/schemas/task.schema.ts`）
@@ -277,6 +278,11 @@ AI Provider 错误码（`ai-feedback-provider.error-codes.ts`）：
   - 流转规则：仅允许 `ACTIVE -> CLOSED` 或 `ACTIVE -> RECALLED`；`RECALLED` 前必须无提交；已是 `CLOSED/RECALLED` 不允许再次流转。
   - 提交门禁同步：`CLOSED/RECALLED` 状态下学生提交入口拒绝新提交。
   - 保持边界：不做物理删除、不放宽 `unique(classroomId,taskId)`，本阶段不支持同模板同班级重复发布。
+- P1 课堂任务实例级参数编辑契约（后端已完成，前端待后续阶段接入）：
+  - 新增实例配置更新接口：`PATCH /api/classrooms/:classroomId/tasks/:classroomTaskId`（教师端）。
+  - 仅允许修改：`dueAt`、`settings.allowLate`、`settings.maxAttempts`；不允许修改 `taskId/classroomId/publishedAt/createdBy/status`。
+  - 状态边界：`ACTIVE/CLOSED` 允许编辑，`RECALLED` 拒绝编辑；状态流仍由 `PATCH .../status` 独立承载。
+  - 字段清空语义：`dueAt` 与 `maxAttempts` 支持 `null/空字符串` 清空（后端收敛为 unset），不落脏值。
 - P1 发布候选模板查询索引补强（后端已完成）：
   - `Task` 新增两组复合索引，分别覆盖发布候选查询的 `onlyMine` 分支与共享可见分支。
   - 本次仅补强索引，不改接口契约、不改查询逻辑、不改前端接入口径。

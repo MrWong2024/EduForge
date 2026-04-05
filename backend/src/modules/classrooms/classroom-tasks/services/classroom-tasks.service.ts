@@ -14,6 +14,7 @@ import { QueryClassroomTaskDto } from '../dto/query-classroom-task.dto';
 import { QueryMyTaskDetailDto } from '../dto/query-my-task-detail.dto';
 import { QueryClassroomTaskSubmissionsDto } from '../dto/query-classroom-task-submissions.dto';
 import { QueryPublishableTaskTemplateDto } from '../dto/query-publishable-task-template.dto';
+import { UpdateClassroomTaskDto } from '../dto/update-classroom-task.dto';
 import { UpdateClassroomTaskStatusDto } from '../dto/update-classroom-task-status.dto';
 import {
   LEARNING_TRAJECTORY_SORT_FIELDS,
@@ -312,6 +313,109 @@ export class ClassroomTasksService {
       }
       throw error;
     }
+  }
+
+  async updateClassroomTask(
+    classroomId: string,
+    classroomTaskId: string,
+    dto: UpdateClassroomTaskDto,
+    teacherId: string,
+  ) {
+    await this.ensureTeacher(teacherId);
+
+    const classroomObjectId = this.parseObjectId(classroomId, 'classroomId');
+    const classroomTaskObjectId = this.parseObjectId(
+      classroomTaskId,
+      'classroomTaskId',
+    );
+    const teacherObjectId = new Types.ObjectId(teacherId);
+
+    const classroom = await this.classroomModel
+      .findOne({ _id: classroomObjectId, teacherId: teacherObjectId })
+      .select('_id')
+      .lean<ClassroomOwnerLean>()
+      .exec();
+    if (!classroom) {
+      throw new NotFoundException('Classroom not found');
+    }
+
+    const classroomTask = await this.classroomTaskModel
+      .findOne({ _id: classroomTaskObjectId, classroomId: classroomObjectId })
+      .lean<ClassroomTaskWithMeta>()
+      .exec();
+    if (!classroomTask) {
+      throw new NotFoundException('Classroom task not found');
+    }
+
+    const currentStatus = this.toClassroomTaskStatusForRead(
+      classroomTask.status,
+    );
+    if (currentStatus === CLASSROOM_TASK_STATUS_RECALLED) {
+      throw new BadRequestException(
+        'Recalled classroom tasks cannot be updated',
+      );
+    }
+
+    const hasDueAt = Object.hasOwn(dto, 'dueAt');
+    const hasAllowLate = Object.hasOwn(dto, 'allowLate');
+    const hasMaxAttempts = Object.hasOwn(dto, 'maxAttempts');
+    if (!hasDueAt && !hasAllowLate && !hasMaxAttempts) {
+      throw new BadRequestException('At least one updatable field is required');
+    }
+
+    const setPatch: Record<string, unknown> = {};
+    const unsetPatch: Record<string, 1> = {};
+
+    if (hasDueAt) {
+      if (dto.dueAt === null || dto.dueAt === undefined) {
+        unsetPatch.dueAt = 1;
+      } else {
+        setPatch.dueAt = new Date(dto.dueAt);
+      }
+    }
+    if (hasAllowLate) {
+      setPatch['settings.allowLate'] = dto.allowLate;
+    }
+    if (hasMaxAttempts) {
+      if (dto.maxAttempts === null || dto.maxAttempts === undefined) {
+        unsetPatch['settings.maxAttempts'] = 1;
+      } else {
+        setPatch['settings.maxAttempts'] = dto.maxAttempts;
+      }
+    }
+
+    const updatePatch: {
+      $set?: Record<string, unknown>;
+      $unset?: Record<string, 1>;
+    } = {};
+    if (Object.keys(setPatch).length > 0) {
+      updatePatch.$set = setPatch;
+    }
+    if (Object.keys(unsetPatch).length > 0) {
+      updatePatch.$unset = unsetPatch;
+    }
+
+    const updatedClassroomTask = await this.classroomTaskModel
+      .findOneAndUpdate(
+        { _id: classroomTaskObjectId, classroomId: classroomObjectId },
+        updatePatch,
+        { new: true },
+      )
+      .lean<ClassroomTaskWithMeta>()
+      .exec();
+    if (!updatedClassroomTask) {
+      throw new NotFoundException('Classroom task not found');
+    }
+
+    const task = await this.taskModel
+      .findById(updatedClassroomTask.taskId)
+      .lean<TaskWithMeta>()
+      .exec();
+    if (!task) {
+      throw new NotFoundException('Task not found');
+    }
+
+    return this.toClassroomTaskResponse(updatedClassroomTask, task);
   }
 
   async updateClassroomTaskStatus(

@@ -80,6 +80,7 @@ Notes:
 | GET | `/api/classrooms/:id/publishable-task-templates` | 班级发布候选模板分页查询（内置可见性/PUBLISHED/已发布去重规则）。 |
 | GET | `/api/classrooms/:id/tasks` | 教师/学生查看班级任务列表。 |
 | GET | `/api/classrooms/:id/tasks/:classroomTaskId` | 教师/学生查看班级任务详情。 |
+| PATCH | `/api/classrooms/:classroomId/tasks/:classroomTaskId` | 教师更新课堂任务实例级发布参数（截止时间/迟交/尝试次数）。 |
 | PATCH | `/api/classrooms/:classroomId/tasks/:classroomTaskId/status` | 教师更新课堂任务实例生命周期状态（关闭/撤回）。 |
 | POST | `/api/classrooms/:classroomId/tasks/:classroomTaskId/submissions` | 班级发布实例提交入口（绑定 `classroomTaskId`）。 |
 | GET | `/api/classrooms/:classroomId/tasks/:classroomTaskId/submissions` | 教师分页查看课堂任务实例提交列表（仅 `classroomTaskId`）。 |
@@ -92,6 +93,7 @@ Notes:
 - `GET /api/classrooms/:id/publishable-task-templates`：teacher only + owner only（非 owner 返回 `404`）；固定只返回 `status=PUBLISHED` 且当前教师可见模板（自己私有 + 自己共享 + 他人共享）；自动排除当前班级已发布过的 `taskId`；支持 query `courseLabel, onlyMine, knowledgeModule, stage, page, limit`；当请求未显式传 `courseLabel` 且当前班级课程存在 `courseLabel` 时，排序优先课程分类匹配模板，再按 `updatedAt desc, createdAt desc`。
 - 索引口径：`Task` 已补发布候选查询复合索引（`onlyMine` 分支与共享可见分支各一组），用于支撑 `status/courseLabel/knowledgeModule/stage + updatedAt/createdAt` 的组合过滤与排序。
 - `ClassroomTask.status` 生命周期：`ACTIVE | CLOSED | RECALLED`；新发布默认 `ACTIVE`；仅允许 `ACTIVE -> CLOSED` 或 `ACTIVE -> RECALLED`，且撤回要求“无提交”。
+- `PATCH /api/classrooms/:classroomId/tasks/:classroomTaskId`：teacher only + owner only；仅允许更新实例级字段 `dueAt/settings.allowLate/settings.maxAttempts`；`status` 仍走独立 `/status` 接口；状态边界为 `ACTIVE/CLOSED` 可编辑、`RECALLED` 不可编辑。
 - `PATCH /api/classrooms/:classroomId/tasks/:classroomTaskId/status`：teacher only + owner only；`status` 入参仅允许 `CLOSED/RECALLED`；当目标为 `RECALLED` 且已有提交时返回 `400`（提示只能关闭）。
 - 课堂任务返回口径（列表/详情/my-task-detail 的 `classroomTask` 区块）已补 `status` 字段；旧数据缺省状态按 `ACTIVE` 兼容输出。
 - `/api/classrooms/:classroomId/tasks/:classroomTaskId/submissions`：提交前先校验 `ClassroomTask.status=ACTIVE`；`CLOSED/RECALLED` 一律拒绝新提交；此外若 `dueAt` 存在且 `allowLate=false` 且 `now>dueAt`，拒绝（403），`error code = LATE_SUBMISSION_NOT_ALLOWED`；Submission 响应包含 `submittedAt/isLate/lateBySeconds` 语义字段。
