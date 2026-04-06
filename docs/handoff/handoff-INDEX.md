@@ -10,7 +10,6 @@
 | `docs/handoff/handoff-api-map.md` | 控制器接口地图（method/path/用途/门禁） | 要找接口入口、排查某条 API 归属 |
 | `docs/handoff/handoff-config-matrix.md` | 运行模式与环境变量矩阵（stub/mock/real） | 要切换 AI 模式、调 worker/debug 或排查配置 |
 | `docs/handoff/handoff-testing-playbook.md` | E2E 测试作战手册与 mock server 注入方式 | 跑回归、复现实验、定位测试失败 |
-| `docs/handoff/handoff-p0-regression-checklist.md` | P0 后端补齐回归检查清单（users/me、classroom students、classroomTask submissions） | 前端接入前、阶段性交接或冒烟回归 |
 | `docs/handoff/handoff-service-map.md` | 服务职责地图（Service Cards） | 需要改某个 service 前先看边界/依赖/失败路径 |
 | `docs/handoff/handoff-decisions.md` | 关键决策记录（Decision/Rationale/Consequences） | 评估改动是否违背既有架构决策 |
 | `docs/handoff/handoff-dto-cheatsheet.md` | 写接口 DTO 最小请求体速查（required/枚举/嵌套/最小 JSON 示例） | 前端/脚本联调遇到 400 校验、需要快速拼请求 body 时 |

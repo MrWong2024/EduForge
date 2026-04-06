@@ -393,7 +393,7 @@
 - Consistency/Constraints: 体积保护由 `limitStudents/limitAssessment/includePerTask` 控制，并在 `meta.notes` 标记截断；不输出敏感字段（`codeText/prompt/apiKey`）
 - Deps/Side Effects: `ClassroomModel`, `CourseModel`, `ClassroomTaskModel`, `SubmissionModel`, `EnrollmentService`, `TeacherClassroomWeeklyReportService`, `ClassReviewPackService`, `ProcessAssessmentService`, `AiFeedbackMetricsAggregator`；只读
 - Performance Notes: 复用聚合服务 + page-scope 截断，避免全量大对象导出
-- SoT: `backend/src/modules/classrooms/services/classroom-export-snapshot.service.ts`; `backend/src/modules/classrooms/dto/query-classroom-export-snapshot.dto.ts`; `docs/operations/classroom-runbook.md`
+- SoT: `backend/src/modules/classrooms/services/classroom-export-snapshot.service.ts`; `backend/src/modules/classrooms/dto/query-classroom-export-snapshot.dto.ts`; `docs/handoff/handoff-snapshot.md`
 - Failure Modes:
   - 班级/课程不存在或非 owner -> `404`
   - 参数非法 -> `400`

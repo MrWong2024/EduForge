@@ -107,7 +107,7 @@ backend/
 - `docs/backend-architecture.md`
 - 数据库治理补充：`docs/database-conventions.md`
 - E2E 运行基线：`docs/e2e-testing.md`
-- 运维 Runbook：`docs/operations/classroom-runbook.md`
+- 联调与运行口径：`docs/handoff/handoff-config-matrix.md`
 
 ## 2) 领域模型摘要卡（按模块）
 
@@ -367,7 +367,7 @@ AI Provider 错误码（`ai-feedback-provider.error-codes.ts`）：
 - Z9 教学数据快照导出（teacher）：
   - `GET /api/classrooms/:classroomId/export/snapshot`
 - 运维收口产物：
-  - `docs/operations/classroom-runbook.md`
+  - `docs/handoff/handoff-testing-playbook.md`
 
 ## 5) P0 后端补齐状态（交接边界）
 
