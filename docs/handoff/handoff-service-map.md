@@ -119,7 +119,7 @@
 - Consistency/Constraints: joinCode 生成重试上限 `8`；归档班级禁止更新；`join/remove` 先写 Enrollment(`ACTIVE/REMOVED`)，`studentIds` 仅作为 legacy 镜像输出，不参与授权/统计；`GET /classrooms/:id/students` 只认 Enrollment（`role=STUDENT`），默认返回 ACTIVE，`includeRemoved=1/true` 时返回 ACTIVE+REMOVED，默认排序 `joinedAt desc, _id desc`
 - Deps/Side Effects: `ClassroomModel`, `CourseModel`, `UserModel`, `EnrollmentService`, `TeacherClassroomDashboardService`, `TeacherClassroomWeeklyReportService`, `StudentLearningDashboardService`, `ProcessAssessmentService`, `ClassroomExportSnapshotService`
 - Performance Notes: 列表查询分页 + 索引过滤；join/remove 采用 Enrollment upsert/update，并可选镜像更新 `studentIds`；`listStudents` 按页批量拉取用户公开字段避免 N+1
-- SoT: `backend/src/modules/classrooms/services/classrooms.service.ts`; `backend/src/modules/classrooms/enrollments/services/enrollment.service.ts`; `backend/src/modules/classrooms/enrollments/README.md`; `backend/src/modules/classrooms/README.md`
+- SoT: `backend/src/modules/classrooms/services/classrooms.service.ts`; `backend/src/modules/classrooms/enrollments/services/enrollment.service.ts`; `backend/src/modules/classrooms/enrollments/README.md`
 - Failure Modes:
   - 非授权角色 -> `403`
   - 班级/课程不存在 -> `404`
@@ -140,7 +140,7 @@
 - Consistency/Constraints: 仅统计 `FeedbackSource.AI` 的 tags；top tags 限制 `5`；迟交维度包含 `lateSubmissionsCount/lateDistinctStudentsCount`
 - Deps/Side Effects: `ClassroomModel`, `ClassroomTaskModel`, `SubmissionModel`, `FeedbackModel`, `AiFeedbackJobModel`, `EnrollmentService`；只读聚合
 - Performance Notes: 多个 `aggregate` 并行 + Map 合并，避免逐 task N+1
-- SoT: `backend/src/modules/classrooms/services/teacher-classroom-dashboard.service.ts`; `backend/src/modules/classrooms/enrollments/services/enrollment.service.ts`; `backend/src/modules/classrooms/README.md`
+- SoT: `backend/src/modules/classrooms/services/teacher-classroom-dashboard.service.ts`; `backend/src/modules/classrooms/enrollments/services/enrollment.service.ts`
 - Failure Modes:
   - 非班级教师或班级不存在 -> `404 Classroom not found`
   - 班级无发布任务 -> 返回空 tasks 结构（非异常）
@@ -161,7 +161,7 @@
 - Consistency/Constraints: 无 job 记录时状态回退 `NOT_REQUESTED`
 - Deps/Side Effects: `ClassroomModel`, `ClassroomTaskModel`, `SubmissionModel`, `AiFeedbackJobService`, `EnrollmentService`；只读
 - Performance Notes: 先批量取班级任务，再批量取 submissions/statusMap，避免按班级循环查库
-- SoT: `backend/src/modules/classrooms/services/student-learning-dashboard.service.ts`; `backend/src/modules/classrooms/enrollments/services/enrollment.service.ts`; `backend/src/modules/classrooms/README.md`
+- SoT: `backend/src/modules/classrooms/services/student-learning-dashboard.service.ts`; `backend/src/modules/classrooms/enrollments/services/enrollment.service.ts`
 - Failure Modes:
   - 学生未加入任何班级 -> 返回空 `items`
   - 某任务无提交 -> `myLatestSubmission=null`
@@ -191,7 +191,7 @@
 - Consistency/Constraints: 要求 Task 已 `PUBLISHED`；班级 `ARCHIVED` 禁止发布；`unique(classroomId,taskId)` 防重复发布；`ClassroomTask` 生命周期状态为 `ACTIVE/CLOSED/RECALLED`（默认 `ACTIVE`，旧数据缺省按 `ACTIVE` 兼容读取）；实例级配置更新接口（`PATCH /classrooms/:classroomId/tasks/:classroomTaskId`）仅允许修改 `dueAt/settings.allowLate/settings.maxAttempts`，并与状态流接口分离；配置更新状态边界为 `ACTIVE/CLOSED` 可编辑、`RECALLED` 不可编辑；状态流允许 `ACTIVE -> CLOSED`、`ACTIVE -> RECALLED`、`CLOSED -> ACTIVE`（恢复提交），其中撤回前必须“无提交”，`RECALLED` 保持封闭不可恢复，且 `CLOSED -> RECALLED` 不允许；`CLOSED -> ACTIVE` 仅恢复状态，不自动修改 `dueAt/settings.allowLate/settings.maxAttempts`；本阶段不支持撤回后重发同模板；发布候选模板查询固定内置“当前教师可见性 + `status=PUBLISHED` + 排除本班已发布 taskId”，并支持 `courseLabel/onlyMine/knowledgeModule/stage/page/limit`；当请求未显式传 `courseLabel` 且班级课程有 `courseLabel` 时优先排序课程分类匹配模板；**提交门禁分层：`ClassroomTasksService` 负责 `student + Enrollment ACTIVE + classroomTask 归属 + classroomTask.status=ACTIVE` 校验；`LearningTasksService.createSubmissionInternal` 仅在存在 `classroomTaskId` 时 enforce `dueAt/allowLate`（超时且 `allowLate=false` -> `403(code=LATE_SUBMISSION_NOT_ALLOWED)`），并持久化/返回 `submittedAt/isLate/lateBySeconds`。**；提交列表 `aiFeedbackStatus` 无 job 显式回填 `NOT_REQUESTED`；提交列表 `items[*].feedbackCount` 为 Feedback 总条数（按当前页 submissionIds 聚合，缺失回填 `0`）；learning-trajectory `items[*]` 返回结构化 `student:{id,name,studentNo,email}`（兼容 `studentName`）；不返回 `passwordHash/content.codeText`
 - Deps/Side Effects: `ClassroomModel`, `ClassroomTaskModel`, `TaskModel`, `SubmissionModel`, `FeedbackModel`, `UserModel`, `EnrollmentService`, `AiFeedbackJobService`, `LearningTasksService`
 - Performance Notes: 任务列表使用 `aggregate(basePipeline + totalPipeline)` 一次生成分页数据与总数；提交列表按页查询 submission 后批量查询用户公开信息、AI 状态与 feedbackCount（Feedback 按 submissionIds group）避免 N+1
-- SoT: `backend/src/modules/classrooms/classroom-tasks/services/classroom-tasks.service.ts`; `backend/src/modules/classrooms/classroom-tasks/schemas/classroom-task.schema.ts`; `backend/src/modules/classrooms/enrollments/services/enrollment.service.ts`; `backend/src/modules/classrooms/README.md`
+- SoT: `backend/src/modules/classrooms/classroom-tasks/services/classroom-tasks.service.ts`; `backend/src/modules/classrooms/classroom-tasks/schemas/classroom-task.schema.ts`; `backend/src/modules/classrooms/enrollments/services/enrollment.service.ts`
 - Failure Modes:
   - 班级/任务/课堂任务不存在 -> `404`
   - 无权限访问或提交 -> `403`
@@ -270,7 +270,7 @@
 - Consistency/Constraints: 窗口统一用 `createdAt`；迟交维度输出 `lateSubmissionsCount/lateStudentsCount`
 - Deps/Side Effects: `ClassroomModel`, `ClassroomTaskModel`, `SubmissionModel`, `EnrollmentService`, `AiFeedbackMetricsAggregator`；只读
 - Performance Notes: 以 `classroomTaskIds` 为批次聚合，避免按 task 循环查询
-- SoT: `backend/src/modules/classrooms/services/teacher-classroom-weekly-report.service.ts`; `backend/src/modules/classrooms/README.md`
+- SoT: `backend/src/modules/classrooms/services/teacher-classroom-weekly-report.service.ts`
 - Failure Modes:
   - 班级不存在或非 owner -> `404`
   - 空任务/空成员 -> 返回零值聚合（非异常）
@@ -290,7 +290,7 @@
 - Consistency/Constraints: late 指标含 `lateSubmissionsCount/lateStudentsCount`；禁止跨班 taskId 兜底聚合
 - Deps/Side Effects: `CourseModel`, `ClassroomModel`, `ClassroomTaskModel`, `SubmissionModel`, `EnrollmentService`, `AiFeedbackMetricsAggregator`；只读
 - Performance Notes: 先按分页取 classrooms，再做 page-scope 聚合并在页内排序（非全量排序）
-- SoT: `backend/src/modules/courses/services/course-overview.service.ts`; `backend/src/modules/classrooms/enrollments/services/enrollment.service.ts`; `backend/src/modules/classrooms/README.md`
+- SoT: `backend/src/modules/courses/services/course-overview.service.ts`; `backend/src/modules/classrooms/enrollments/services/enrollment.service.ts`
 - Failure Modes:
   - 课程不存在或非 owner -> `404`
   - 空班级页 -> 返回 `items=[]`
@@ -310,7 +310,7 @@
 - Consistency/Constraints: `includeFeedbackItems=false` 时不拉取 feedback 明细；`feedbackLimit` 截断明细条数
 - Deps/Side Effects: `ClassroomModel`, `ClassroomTaskModel`, `TaskModel`, `SubmissionModel`, `EnrollmentService`, `AiFeedbackJobService`, `FeedbackModel`；只读
 - Performance Notes: `statusMap/feedbackSummary/feedbackItemsPreview` 批量并发拉取
-- SoT: `backend/src/modules/classrooms/classroom-tasks/services/classroom-tasks.service.ts`; `backend/src/modules/classrooms/classroom-tasks/dto/query-my-task-detail.dto.ts`; `backend/src/modules/classrooms/README.md`
+- SoT: `backend/src/modules/classrooms/classroom-tasks/services/classroom-tasks.service.ts`; `backend/src/modules/classrooms/classroom-tasks/dto/query-my-task-detail.dto.ts`
 - Failure Modes:
   - 班级/课堂任务/任务不存在 -> `404`
   - 非成员学生 -> `403`
@@ -330,7 +330,7 @@
 - Consistency/Constraints: `includeTagDetails=false` 时跳过 tags 展开聚合；`aiFeedbackStatus` 缺 job 为 `NOT_REQUESTED`；`includeAttempts=true` 时 `attempts[*].feedbackCount` 为 Feedback 全来源总条数（按当前页 submissionIds 聚合，缺失回填 `0`）；`attempts[*].feedbackSummary.totalItems` 继续保留 AI 摘要语义；未提交学生同样携带 `student` 公开信息
 - Deps/Side Effects: `ClassroomModel`, `ClassroomTaskModel`, `SubmissionModel`, `UserModel`, `EnrollmentService`, `AiFeedbackJobService`, `FeedbackModel`；只读
 - Performance Notes: 先分页 enrollment，再用 page-scope studentIds 批量查询 users 与 submissions；对当前页 submissionIds 批量拉取 `statusMap`、AI `feedbackSummary`、全来源 `feedbackCount`，避免 N+1
-- SoT: `backend/src/modules/classrooms/classroom-tasks/services/classroom-tasks.service.ts`; `backend/src/modules/classrooms/classroom-tasks/dto/query-learning-trajectory.dto.ts`; `backend/src/modules/classrooms/README.md`
+- SoT: `backend/src/modules/classrooms/classroom-tasks/services/classroom-tasks.service.ts`; `backend/src/modules/classrooms/classroom-tasks/dto/query-learning-trajectory.dto.ts`
 - Failure Modes:
   - 班级或课堂任务不存在 -> `404`
   - 非班级教师 -> `404`
@@ -351,7 +351,7 @@
 - Consistency/Constraints: `topTags` 维持标签展开计数；`examples` 按 `feedbackId` 去重并保留标签归属信息（`primaryTag/matchedTags/tags`）；不返回 `codeText/prompt/apiKey`
 - Deps/Side Effects: `ClassroomModel`, `ClassroomTaskModel`, `SubmissionModel`, `FeedbackModel`, `UserModel`, `EnrollmentService`, `AiFeedbackJobService`, `AiFeedbackMetricsAggregator`；只读
 - Performance Notes: examples 候选集仍按 `severityRank DESC + createdAt DESC` 且按 `examplesPerTag` 截断，再做 `feedbackId` 去重输出样例池
-- SoT: `backend/src/modules/classrooms/classroom-tasks/services/class-review-pack.service.ts`; `backend/src/modules/classrooms/classroom-tasks/dto/query-class-review-pack.dto.ts`; `backend/src/modules/classrooms/README.md`
+- SoT: `backend/src/modules/classrooms/classroom-tasks/services/class-review-pack.service.ts`; `backend/src/modules/classrooms/classroom-tasks/dto/query-class-review-pack.dto.ts`
 - Failure Modes:
   - 班级或课堂任务不存在 -> `404`
   - 非班级教师 -> `404`
@@ -373,7 +373,7 @@
 - Consistency/Constraints: rubric/score/riskLevel 为过程性指标；CSV 导出使用手写转义（`"` -> `""`）；不输出敏感字段
 - Deps/Side Effects: `ClassroomModel`, `ClassroomTaskModel`, `SubmissionModel`, `AiFeedbackJobModel`, `FeedbackModel`, `EnrollmentService`；只读
 - Performance Notes: Enrollment 稳定分页后页内排序（page-local sort）
-- SoT: `backend/src/modules/classrooms/services/process-assessment.service.ts`; `backend/src/modules/classrooms/dto/query-process-assessment.dto.ts`; `backend/src/modules/classrooms/README.md`
+- SoT: `backend/src/modules/classrooms/services/process-assessment.service.ts`; `backend/src/modules/classrooms/dto/query-process-assessment.dto.ts`
 - Failure Modes:
   - 班级不存在或非 owner -> `404`
   - 参数非法 -> `400`
@@ -502,7 +502,7 @@
 - Consistency/Constraints: 锁 TTL=5min；仅 claim `PENDING|FAILED`；指数退避（30s 起，最大 10min）；`UNAUTHORIZED/MISSING_API_KEY/REAL_DISABLED` 直接 `DEAD`；处理链路为“读取 submission -> 按 `submission.taskId` 查询 task -> 组装 `AiSubmissionAnalysisContext` -> 调 provider -> 落库前收敛”；收敛口径为默认 1 条主反馈、必要时最多 2 条；同类问题聚合、低价值 INFO（存在 ERROR/WARN 时）不独立落库
 - Deps/Side Effects: `AiFeedbackJobModel`, `SubmissionModel`, `TaskModel`, `FeedbackModel`, `AI_FEEDBACK_PROVIDER_TOKEN`, `AiFeedbackGuardsService`, `ConfigService`, `feedback-item-compactor`；外部 provider 调用 + 反馈写库 + job 状态更新
 - Performance Notes: `findOneAndUpdate` 原子 claim（按 createdAt 先来先服务）；`insertMany(ordered:false)` 批量落库并容忍重复键；收敛逻辑基于当前 job 的 `items[]` 内存处理，避免额外数据库 I/O
-- SoT: `backend/src/modules/learning-tasks/ai-feedback/services/ai-feedback-processor.service.ts`; `backend/src/modules/learning-tasks/ai-feedback/lib/feedback-item-compactor.ts`; `backend/src/modules/learning-tasks/ai-feedback/interfaces/ai-feedback-provider.error-codes.ts`; `backend/src/modules/learning-tasks/ai-feedback/README.md`
+- SoT: `backend/src/modules/learning-tasks/ai-feedback/services/ai-feedback-processor.service.ts`; `backend/src/modules/learning-tasks/ai-feedback/lib/feedback-item-compactor.ts`; `backend/src/modules/learning-tasks/ai-feedback/interfaces/ai-feedback-provider.error-codes.ts`
 - Failure Modes:
   - submission 不存在 -> 进入失败处理并重试/死亡
   - task 不存在 -> 进入失败处理并重试/死亡
@@ -527,7 +527,7 @@
 - Consistency/Constraints: 默认禁用；`isRunning` 防重入；destroy 时清理 interval
 - Deps/Side Effects: `AiFeedbackProcessor`；周期调度、日志输出
 - Performance Notes: 定时批处理，batch 可配置；禁用时无轮询开销
-- SoT: `backend/src/modules/learning-tasks/ai-feedback/services/ai-feedback-worker.service.ts`; `backend/src/modules/learning-tasks/ai-feedback/README.md`
+- SoT: `backend/src/modules/learning-tasks/ai-feedback/services/ai-feedback-worker.service.ts`; `backend/src/modules/learning-tasks/ai-feedback/services/ai-feedback-processor.service.ts`
 - Failure Modes:
   - 未开启 `AI_FEEDBACK_WORKER_ENABLED` -> 不启动 worker
   - processor 异常 -> 捕获并记录，worker 不崩溃
