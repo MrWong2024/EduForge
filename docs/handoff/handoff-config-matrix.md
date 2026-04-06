@@ -5,7 +5,7 @@
 - 本系统为新系统，无历史数据包袱。
 - Enrollment-only 已收口：成员权威来源仅为 `Enrollment(role=STUDENT,status=ACTIVE)`；`classroom.studentIds` 仅为 legacy 输出/镜像，不参与任何授权/统计（这是业务口径，不是 env 开关）。
 - env 默认值以 `backend/src/config/env.validation.ts` 为准。
-- `AI_FEEDBACK_WORKER_*` 不在 Joi schema 内；其默认行为来自 worker/processor 源码常量与 `backend/src/modules/learning-tasks/ai-feedback/README.md`。
+- `AI_FEEDBACK_WORKER_*` 不在 Joi schema 内；其默认行为来自 worker/processor 源码常量（`backend/src/modules/learning-tasks/ai-feedback/services/ai-feedback-worker.service.ts`、`backend/src/modules/learning-tasks/ai-feedback/services/ai-feedback-processor.service.ts`）。
 
 ## 1) 运行模式矩阵（最小可运维闭环）
 
@@ -46,9 +46,9 @@
 | `OPENROUTER_MODEL` | `openai/gpt-4o-mini` | Joi | 模型名。 |
 | `OPENROUTER_TIMEOUT_MS` | `15000` | Joi | 上游超时（ms）。 |
 | `OPENROUTER_MAX_RETRIES` | `2` | Joi | provider 重试次数。 |
-| `AI_FEEDBACK_WORKER_ENABLED` | `false` | Worker 源码/README | `true` 才启动常驻轮询；默认关闭。 |
-| `AI_FEEDBACK_WORKER_INTERVAL_MS` | `10000` | Worker 源码/README | 轮询间隔（ms）；非法值回退默认。 |
-| `AI_FEEDBACK_WORKER_BATCH_SIZE` | `5` | Processor 常量/README | 每 tick 批次；未设置或非法值时走 `processOnce()` 默认批次 `5`。 |
+| `AI_FEEDBACK_WORKER_ENABLED` | `false` | Worker 源码（`ai-feedback-worker.service.ts`） | `true` 才启动常驻轮询；默认关闭。 |
+| `AI_FEEDBACK_WORKER_INTERVAL_MS` | `10000` | Worker 源码（`ai-feedback-worker.service.ts`） | 轮询间隔（ms）；非法值回退默认。 |
+| `AI_FEEDBACK_WORKER_BATCH_SIZE` | `5` | Processor 源码（`ai-feedback-processor.service.ts`） | 每 tick 批次；未设置或非法值时走 `processOnce()` 默认批次 `5`。 |
 
 条件必填：
 - 当 `AI_FEEDBACK_PROVIDER=openrouter` 且 `AI_FEEDBACK_REAL_ENABLED=true` 时，`OPENROUTER_API_KEY` 必须存在。
