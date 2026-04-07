@@ -20,6 +20,7 @@ export class ClassroomTask {
   taskId!: Types.ObjectId;
 
   @Prop({
+    type: String,
     required: true,
     enum: CLASSROOM_TASK_STATUSES,
     default: CLASSROOM_TASK_STATUS_ACTIVE,
