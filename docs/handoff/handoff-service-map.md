@@ -119,7 +119,7 @@
 - Consistency/Constraints: joinCode 生成重试上限 `8`；归档班级禁止更新；`join/remove` 先写 Enrollment(`ACTIVE/REMOVED`)，`studentIds` 仅作为 legacy 镜像输出，不参与授权/统计；`GET /classrooms/:id/students` 只认 Enrollment（`role=STUDENT`），默认返回 ACTIVE，`includeRemoved=1/true` 时返回 ACTIVE+REMOVED，默认排序 `joinedAt desc, _id desc`
 - Deps/Side Effects: `ClassroomModel`, `CourseModel`, `UserModel`, `EnrollmentService`, `TeacherClassroomDashboardService`, `TeacherClassroomWeeklyReportService`, `StudentLearningDashboardService`, `ProcessAssessmentService`, `ClassroomExportSnapshotService`
 - Performance Notes: 列表查询分页 + 索引过滤；join/remove 采用 Enrollment upsert/update，并可选镜像更新 `studentIds`；`listStudents` 按页批量拉取用户公开字段避免 N+1
-- SoT: `backend/src/modules/classrooms/services/classrooms.service.ts`; `backend/src/modules/classrooms/enrollments/services/enrollment.service.ts`; `backend/src/modules/classrooms/enrollments/README.md`
+- SoT: `backend/src/modules/classrooms/services/classrooms.service.ts`; `backend/src/modules/classrooms/enrollments/services/enrollment.service.ts`; `backend/src/modules/classrooms/enrollments/schemas/enrollment.schema.ts`
 - Failure Modes:
   - 非授权角色 -> `403`
   - 班级/课程不存在 -> `404`
@@ -249,7 +249,7 @@
 - Consistency/Constraints: `enrollStudent` 幂等 upsert（并发重复键收敛为 ACTIVE）；`removeStudent` 软删除为 `REMOVED` 并写 `removedAt`
 - Deps/Side Effects: `EnrollmentModel`；写入 enrollment 集合，不依赖 `classroom.studentIds`
 - Performance Notes: 提供分页成员读取（含 `joinedAt`）与 grouped count，避免上层 N+1 计数
-- SoT: `backend/src/modules/classrooms/enrollments/schemas/enrollment.schema.ts`; `backend/src/modules/classrooms/enrollments/services/enrollment.service.ts`; `backend/src/modules/classrooms/enrollments/README.md`
+- SoT: `backend/src/modules/classrooms/enrollments/schemas/enrollment.schema.ts`; `backend/src/modules/classrooms/enrollments/services/enrollment.service.ts`
 - Failure Modes:
   - 非法 ObjectId -> `400`
   - 并发重复写(`11000`) -> 收敛处理（非失败）
