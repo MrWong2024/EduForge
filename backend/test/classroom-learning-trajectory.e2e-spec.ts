@@ -1,4 +1,5 @@
 import { INestApplication, ValidationPipe } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { Test, TestingModule } from '@nestjs/testing';
 import { getModelToken } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
@@ -96,6 +97,7 @@ describe('Classroom Learning Trajectory (e2e)', () => {
   let feedbackModel: Model<Feedback>;
   let aiFeedbackJobModel: Model<AiFeedbackJob>;
   let aiFeedbackProcessor: AiFeedbackProcessor;
+  let configService: ConfigService;
   let teacherAgent: ReturnType<typeof request.agent>;
   let studentAAgent: ReturnType<typeof request.agent>;
   let studentBAgent: ReturnType<typeof request.agent>;
@@ -114,6 +116,7 @@ describe('Classroom Learning Trajectory (e2e)', () => {
   let previousDebugEnabled: string | undefined;
   let previousAutoOnSubmit: string | undefined;
   let previousFirstAttemptOnly: string | undefined;
+  let previousSubmissionCooldownMs: string | undefined;
 
   const teacherEmail = `teacher.trajectory.${Date.now()}@example.com`;
   const studentAEmail = `studentA.trajectory.${Date.now()}@example.com`;
@@ -176,6 +179,9 @@ describe('Classroom Learning Trajectory (e2e)', () => {
     previousFirstAttemptOnly =
       process.env.AI_FEEDBACK_AUTO_ON_FIRST_ATTEMPT_ONLY;
     process.env.AI_FEEDBACK_AUTO_ON_FIRST_ATTEMPT_ONLY = 'true';
+    previousSubmissionCooldownMs =
+      process.env.LEARNING_TASK_SUBMISSION_COOLDOWN_MS;
+    process.env.LEARNING_TASK_SUBMISSION_COOLDOWN_MS = '0';
 
     const moduleFixture: TestingModule = await Test.createTestingModule({
       imports: [AppModule],
@@ -192,6 +198,8 @@ describe('Classroom Learning Trajectory (e2e)', () => {
     );
     app.use(cookieParser());
     await app.init();
+    configService = app.get(ConfigService);
+    configService.set('LEARNING_TASK_SUBMISSION_COOLDOWN_MS', 0);
 
     teacherAgent = request.agent(app.getHttpServer());
     studentAAgent = request.agent(app.getHttpServer());
@@ -267,6 +275,12 @@ describe('Classroom Learning Trajectory (e2e)', () => {
     } else {
       process.env.AI_FEEDBACK_AUTO_ON_FIRST_ATTEMPT_ONLY =
         previousFirstAttemptOnly;
+    }
+    if (previousSubmissionCooldownMs === undefined) {
+      delete process.env.LEARNING_TASK_SUBMISSION_COOLDOWN_MS;
+    } else {
+      process.env.LEARNING_TASK_SUBMISSION_COOLDOWN_MS =
+        previousSubmissionCooldownMs;
     }
 
     if (!KEEP_DB) {
@@ -436,14 +450,33 @@ describe('Classroom Learning Trajectory (e2e)', () => {
     submissionIds.push(thirdSubmissionBody.id);
     expect(thirdSubmissionBody.attemptNo).toBe(3);
     const oldSubmissionDate = new Date(Date.now() - 40 * 24 * 60 * 60 * 1000);
-    await submissionModel.updateOne(
-      { _id: new Types.ObjectId(firstSubmissionBody.id) },
+    const firstSubmissionObjectId = new Types.ObjectId(firstSubmissionBody.id);
+    const createdAtPatchResult = await submissionModel.collection.updateOne(
+      { _id: firstSubmissionObjectId },
       {
         $set: {
           createdAt: oldSubmissionDate,
           submittedAt: oldSubmissionDate,
         },
       },
+    );
+    expect(createdAtPatchResult.matchedCount).toBe(1);
+    expect(createdAtPatchResult.modifiedCount).toBe(1);
+    const patchedSubmission = await submissionModel.collection.findOne<{
+      createdAt?: Date;
+      submittedAt?: Date;
+    }>(
+      { _id: firstSubmissionObjectId },
+      { projection: { createdAt: 1, submittedAt: 1 } },
+    );
+    expect(patchedSubmission).toBeDefined();
+    expect(patchedSubmission?.createdAt).toBeDefined();
+    expect(patchedSubmission?.createdAt?.getTime()).toBe(
+      oldSubmissionDate.getTime(),
+    );
+    const sevenDaysLowerBound = Date.now() - 7 * 24 * 60 * 60 * 1000;
+    expect(patchedSubmission?.createdAt?.getTime() ?? 0).toBeLessThan(
+      sevenDaysLowerBound,
     );
 
     await studentAAgent

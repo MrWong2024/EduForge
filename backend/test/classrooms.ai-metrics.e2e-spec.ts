@@ -1,4 +1,5 @@
 import { INestApplication, ValidationPipe } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { Test, TestingModule } from '@nestjs/testing';
 import { getModelToken } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
@@ -96,6 +97,7 @@ describe('Classrooms AI Metrics (e2e)', () => {
   let feedbackModel: Model<Feedback>;
   let aiFeedbackJobModel: Model<AiFeedbackJob>;
   let aiFeedbackProcessor: AiFeedbackProcessor;
+  let configService: ConfigService;
   let teacherAgent: ReturnType<typeof request.agent>;
   let studentAgent: ReturnType<typeof request.agent>;
 
@@ -112,6 +114,7 @@ describe('Classrooms AI Metrics (e2e)', () => {
   let previousMaxPerMinute: string | undefined;
   let previousAutoOnSubmit: string | undefined;
   let previousFirstAttemptOnly: string | undefined;
+  let previousSubmissionCooldownMs: string | undefined;
 
   const teacherEmail = `teacher.metrics.${Date.now()}@example.com`;
   const studentEmail = `student.metrics.${Date.now()}@example.com`;
@@ -196,6 +199,9 @@ describe('Classrooms AI Metrics (e2e)', () => {
     previousFirstAttemptOnly =
       process.env.AI_FEEDBACK_AUTO_ON_FIRST_ATTEMPT_ONLY;
     process.env.AI_FEEDBACK_AUTO_ON_FIRST_ATTEMPT_ONLY = 'false';
+    previousSubmissionCooldownMs =
+      process.env.LEARNING_TASK_SUBMISSION_COOLDOWN_MS;
+    process.env.LEARNING_TASK_SUBMISSION_COOLDOWN_MS = '0';
 
     const moduleFixture: TestingModule = await Test.createTestingModule({
       imports: [AppModule],
@@ -212,6 +218,8 @@ describe('Classrooms AI Metrics (e2e)', () => {
     );
     app.use(cookieParser());
     await app.init();
+    configService = app.get(ConfigService);
+    configService.set('LEARNING_TASK_SUBMISSION_COOLDOWN_MS', 0);
 
     teacherAgent = request.agent(app.getHttpServer());
     studentAgent = request.agent(app.getHttpServer());
@@ -354,6 +362,12 @@ describe('Classrooms AI Metrics (e2e)', () => {
     } else {
       process.env.AI_FEEDBACK_AUTO_ON_FIRST_ATTEMPT_ONLY =
         previousFirstAttemptOnly;
+    }
+    if (previousSubmissionCooldownMs === undefined) {
+      delete process.env.LEARNING_TASK_SUBMISSION_COOLDOWN_MS;
+    } else {
+      process.env.LEARNING_TASK_SUBMISSION_COOLDOWN_MS =
+        previousSubmissionCooldownMs;
     }
 
     if (!KEEP_DB) {
