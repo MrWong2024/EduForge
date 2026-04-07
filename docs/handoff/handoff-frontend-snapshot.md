@@ -136,6 +136,13 @@ Teacher AI 指标链路（可用）：
 3. `summary.avgAttempts` 前端文案已收口为“AI 平均重试次数”，避免被误读为学生提交尝试次数。
 4. `summary.avgLatencyMs` 在当前为 `null` 时不再作为主 KPI 卡片展示，改为“平均耗时指标当前暂未采集”说明文案。
 
+Teacher 统计窗口策略（阶段二已收口）：
+1. 班级级页面（`weekly-report`、`process-assessment`）前端主展示窗口为 `7d/30d/all`，默认窗口为 `all`。
+2. 单任务页面（`learning-trajectory`、`review-pack`）前端主展示窗口为 `all/7d`，默认窗口为 `all`。
+3. 旧链接兼容继续保留：班级级页面允许 URL `window=24h`，单任务页面允许 URL `window=24h/30d`；兼容值可继续请求后端并正常展示数据，但不再出现在主 tabs 中。
+4. `process-assessment.csv` 下载沿用当前页面 `window` 参数（含旧值兼容场景），确保与页面 JSON 统计窗口一致。
+5. `ai-metrics` 页面窗口集合与默认值保持原样（`1h/24h/7d`），本阶段未调整为 `all`。
+
 Teacher 课堂复盘链路（可用）：
 1. `/teacher/classrooms/[classroomId]/tasks/[classroomTaskId]/review-pack` 保持真接口与 query 协议（`window/topK/examplesPerTag`）不变，`studentTiers` 为固定返回域。
 2. 页面主路径已收敛为“课堂总览 -> 课堂结论摘要 -> 高频问题概览 -> 典型样例 -> 学生分层 -> 原始数据（调试）”。

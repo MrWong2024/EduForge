@@ -360,6 +360,14 @@
 - 【字段与边界】当前严格按后端 `UpdateClassroomDto` 收口，仅支持更新班级名称 `name`；`courseId/status/joinCode` 仅做只读展示；不新增删除、归档前端动作。
 - 【错误处理】后端拒绝更新（含 `Archived classrooms cannot be updated`）时，前端显示清晰中文摘要并保留后端 detail，不做吞错处理。
 
+## UAT-FE-43
+
+- 【本步解决】统计窗口前端展示策略仍沿用全站统一 `24h/7d/30d`，与阶段一后端契约（支持 `all` 且默认 `all`）不一致的问题。
+- 【新增事实 / 已收口口径】班级级页面 `weekly-report/process-assessment` 主展示窗口已切到 `7d/30d/all`，默认 `all`；单任务页面 `learning-trajectory/review-pack` 主展示窗口已切到 `all/7d`，默认 `all`。
+- 【旧链接兼容】班级级页面继续兼容 URL `window=24h`，单任务页面继续兼容 URL `window=24h/30d`；兼容值仍会透传给后端并正常渲染数据，但不再出现在主 tabs 中。
+- 【联动收口】`process-assessment.csv` 下载继续沿用当前窗口参数；页面内排序/分页/筛选链接继续透传当前 `window`。
+- 【明确不变】`ai-metrics` 窗口集合与默认值保持原样（`1h/24h/7d`），本步未引入 `all`。
+
 ## 当前阶段一句话结论
 
 前端已达到“Teacher/Student 主链路可用 + 任务模板层与班级实例层边界收口 + 教师模板主链路可维护”的工程验收阶段，但尚未进入最终交付定版阶段。

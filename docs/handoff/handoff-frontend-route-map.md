@@ -33,12 +33,12 @@
 | `/teacher/classrooms/[classroomId]/tasks/[classroomTaskId]` | 课堂任务详情 | `GET classrooms/:id`、`GET classrooms/:id/tasks/:classroomTaskId`、`POST learning-tasks/tasks/:id/publish` | 查看课堂任务与其底层 learning task 的基础状态，必要时触发底层 task publish | Done | 真接口 |
 | `/teacher/classrooms/[classroomId]/tasks/[classroomTaskId]/submissions` | 课堂任务提交管理 | `GET classrooms/:id`、`GET classrooms/:classroomId/tasks/:classroomTaskId/submissions` | 查看提交、跳转批阅页 | Done | P0 真接口 |
 | `/teacher/submissions/[submissionId]` | 教师提交详情/批阅 | `GET learning-tasks/submissions/:id`、`GET learning-tasks/submissions/:id/feedback`、`POST learning-tasks/submissions/:id/feedback` | 查看代码与反馈、新增教师反馈 | Done | 稳定读源 + 真接口 |
-| `/teacher/classrooms/[classroomId]/tasks/[classroomTaskId]/learning-trajectory` | 学习轨迹 | `GET .../learning-trajectory` | window/sort/order/include* 切换；主表“错误数变化（最近 vs 首次）”显示增加/减少/无变化语义；`includeAttempts/includeTagDetails` 在主视图显示可见扩展区；attempts 中“总反馈”使用 `feedbackCount`（非 `feedbackSummary.totalItems`） | Done | 真接口 |
-| `/teacher/classrooms/[classroomId]/tasks/[classroomTaskId]/review-pack` | 课堂复盘（证据型） | `GET .../review-pack` | `window/topK/examplesPerTag` 切换；主视图聚焦总览/问题聚合/典型样例/学生分层；样例卡片可跳转对应提交详情 | Done | 真接口 |
-| `/teacher/classrooms/[classroomId]/tasks/[classroomTaskId]/ai-metrics` | AI 指标 | `GET .../ai-metrics` | window/includeTags 切换 | Done | 真接口 |
+| `/teacher/classrooms/[classroomId]/tasks/[classroomTaskId]/learning-trajectory` | 学习轨迹 | `GET .../learning-trajectory` | 主展示窗口 `all/7d`（默认 `all`）；兼容 URL 旧值 `24h/30d`（继续请求但不在主 tabs 展示）；window/sort/order/include* 切换；主表“错误数变化（最近 vs 首次）”显示增加/减少/无变化语义；`includeAttempts/includeTagDetails` 在主视图显示可见扩展区；attempts 中“总反馈”使用 `feedbackCount`（非 `feedbackSummary.totalItems`） | Done | 真接口 |
+| `/teacher/classrooms/[classroomId]/tasks/[classroomTaskId]/review-pack` | 课堂复盘（证据型） | `GET .../review-pack` | 主展示窗口 `all/7d`（默认 `all`）；兼容 URL 旧值 `24h/30d`（继续请求但不在主 tabs 展示）；`window/topK/examplesPerTag` 切换；主视图聚焦总览/问题聚合/典型样例/学生分层；样例卡片可跳转对应提交详情 | Done | 真接口 |
+| `/teacher/classrooms/[classroomId]/tasks/[classroomTaskId]/ai-metrics` | AI 指标 | `GET .../ai-metrics` | 窗口集合与默认值保持原策略（`1h/24h/7d`），仅做 window/includeTags 切换 | Done | 真接口 |
 | `/teacher/classrooms/[classroomId]/members` | 班级成员管理 | `GET classrooms/:id`、`GET classrooms/:id/students`、`POST classrooms/:id/students/:uid/remove` | 成员列表、移除成员 | Done | P0 真接口 |
-| `/teacher/classrooms/[classroomId]/weekly-report` | 班级周报 | `GET classrooms/:classroomId/weekly-report` | window 切换 | Done | 真接口 |
-| `/teacher/classrooms/[classroomId]/process-assessment` | 过程性评价 | `GET classrooms/:classroomId/process-assessment`、`GET classrooms/:classroomId/process-assessment.csv` | window 切换、CSV 下载 | Done | 真接口 |
+| `/teacher/classrooms/[classroomId]/weekly-report` | 班级周报 | `GET classrooms/:classroomId/weekly-report` | 主展示窗口 `7d/30d/all`（默认 `all`）；兼容 URL 旧值 `24h`（继续请求但不在主 tabs 展示）；window 切换 | Done | 真接口 |
+| `/teacher/classrooms/[classroomId]/process-assessment` | 过程性评价 | `GET classrooms/:classroomId/process-assessment`、`GET classrooms/:classroomId/process-assessment.csv` | 主展示窗口 `7d/30d/all`（默认 `all`）；兼容 URL 旧值 `24h`（继续请求但不在主 tabs 展示）；window 切换、CSV 下载（沿用当前 window） | Done | 真接口 |
 | `/teacher/classrooms/[classroomId]/export/snapshot` | 教学快照 | `GET classrooms/:classroomId/export/snapshot` | window/includePerTask/limit* 切换、显示 `meta.notes` | Done | 真接口 |
 
 ## 3) Student 路由

@@ -15,8 +15,16 @@ type ProcessAssessmentPageProps = {
   searchParams: Promise<{ window?: string | string[] }>;
 };
 
-const REPORT_WINDOWS = ["24h", "7d", "30d"] as const;
-type ReportWindow = (typeof REPORT_WINDOWS)[number];
+const SUPPORTED_REPORT_WINDOWS = ["24h", "7d", "30d", "all"] as const;
+type ReportWindow = (typeof SUPPORTED_REPORT_WINDOWS)[number];
+const DISPLAY_REPORT_WINDOWS = ["7d", "30d", "all"] as const;
+type DisplayReportWindow = (typeof DISPLAY_REPORT_WINDOWS)[number];
+const REPORT_WINDOW_LABELS: Record<ReportWindow, string> = {
+  "24h": "近24小时",
+  "7d": "近7天",
+  "30d": "近30天",
+  all: "全部",
+};
 
 const getRequestOrigin = async (): Promise<string> => {
   const headerMap = await headers();
@@ -29,7 +37,7 @@ const getRequestOrigin = async (): Promise<string> => {
   return `${protocol}://${host}`;
 };
 
-const buildWindowHref = (classroomId: string, windowValue: ReportWindow): string => {
+const buildWindowHref = (classroomId: string, windowValue: DisplayReportWindow): string => {
   const query = buildQueryString({ window: windowValue });
   const basePath = paths.teacher.classroomProcessAssessment(classroomId);
   return query ? `${basePath}?${query}` : basePath;
@@ -54,7 +62,7 @@ export default async function ProcessAssessmentPage({
 }: ProcessAssessmentPageProps) {
   const { classroomId } = await params;
   const query = await searchParams;
-  const window = parseEnum(getSingleSearchParam(query.window), REPORT_WINDOWS, "7d");
+  const window = parseEnum(getSingleSearchParam(query.window), SUPPORTED_REPORT_WINDOWS, "all");
   const queryString = buildQueryString({ window });
   const csvBasePath = buildProxyPath(
     `classrooms/${encodeURIComponent(classroomId)}/process-assessment.csv`
@@ -113,7 +121,7 @@ export default async function ProcessAssessmentPage({
     <section className="space-y-4">
       <PageHeader
         title="过程性评价"
-        description={`统计窗口: ${viewModel.window}`}
+        description={`统计窗口：${REPORT_WINDOW_LABELS[viewModel.window]}`}
         actions={
           <div className="flex flex-wrap items-center gap-3 text-sm">
             <a
@@ -140,7 +148,7 @@ export default async function ProcessAssessmentPage({
       <section className="rounded-lg border border-zinc-200 bg-white p-4 text-sm">
         <p className="font-medium text-zinc-900">时间窗口</p>
         <div className="mt-2 flex flex-wrap items-center gap-3">
-          {REPORT_WINDOWS.map((windowValue) => {
+          {DISPLAY_REPORT_WINDOWS.map((windowValue) => {
             const isActive = windowValue === viewModel.window;
             return (
               <Link
@@ -148,7 +156,7 @@ export default async function ProcessAssessmentPage({
                 href={buildWindowHref(classroomId, windowValue)}
                 className={isActive ? "font-semibold text-blue-700" : "text-blue-700 hover:underline"}
               >
-                {windowValue}
+                {REPORT_WINDOW_LABELS[windowValue]}
               </Link>
             );
           })}

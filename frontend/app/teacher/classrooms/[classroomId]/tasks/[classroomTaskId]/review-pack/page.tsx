@@ -26,12 +26,15 @@ type ReviewPackPageProps = {
   }>;
 };
 
-const REVIEW_WINDOWS = ["24h", "7d", "30d"] as const;
+const REVIEW_WINDOWS = ["24h", "7d", "30d", "all"] as const;
+const DISPLAY_REVIEW_WINDOWS = ["all", "7d"] as const;
 type ReviewWindow = (typeof REVIEW_WINDOWS)[number];
+type DisplayReviewWindow = (typeof DISPLAY_REVIEW_WINDOWS)[number];
 const WINDOW_LABELS: Record<ReviewWindow, string> = {
   "24h": "近24小时",
   "7d": "近7天",
   "30d": "近30天",
+  all: "全部",
 };
 
 type ReviewQueryState = {
@@ -90,7 +93,7 @@ const getRequestOrigin = async (): Promise<string> => {
 const resolveQueryState = (
   query: Awaited<ReviewPackPageProps["searchParams"]>
 ): ReviewQueryState => ({
-  window: parseEnum(getSingleSearchParam(query.window), REVIEW_WINDOWS, "7d"),
+  window: parseEnum(getSingleSearchParam(query.window), REVIEW_WINDOWS, "all"),
   topK: parsePositiveInt(getSingleSearchParam(query.topK), 10, { min: 1, max: 30 }),
   examplesPerTag: parsePositiveInt(getSingleSearchParam(query.examplesPerTag), 2, {
     min: 1,
@@ -576,7 +579,7 @@ export default async function ReviewPackPage({ params, searchParams }: ReviewPac
         <div className="mt-2 flex flex-wrap items-center gap-4 text-zinc-700">
           <div className="flex items-center gap-2">
             <span>统计窗口:</span>
-            {REVIEW_WINDOWS.map((windowValue) => {
+            {DISPLAY_REVIEW_WINDOWS.map((windowValue: DisplayReviewWindow) => {
               const active = windowValue === viewModel.query.window;
               return (
                 <Link
@@ -584,10 +587,11 @@ export default async function ReviewPackPage({ params, searchParams }: ReviewPac
                   href={buildHref(routePath, queryRecord, { window: windowValue })}
                   className={active ? "font-semibold text-blue-700" : "text-blue-700 hover:underline"}
                 >
-                  {windowValue}（{WINDOW_LABELS[windowValue]}）
+                  {WINDOW_LABELS[windowValue]}
                 </Link>
               );
             })}
+            <span className="text-zinc-500">当前：{WINDOW_LABELS[viewModel.query.window]}</span>
           </div>
 
           <div className="flex items-center gap-2">

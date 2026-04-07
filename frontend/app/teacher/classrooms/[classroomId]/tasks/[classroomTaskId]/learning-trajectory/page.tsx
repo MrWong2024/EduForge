@@ -32,13 +32,21 @@ type LearningTrajectoryPageProps = {
   }>;
 };
 
-const TRAJECTORY_WINDOWS = ["24h", "7d", "30d"] as const;
+const TRAJECTORY_WINDOWS = ["24h", "7d", "30d", "all"] as const;
+const TRAJECTORY_DISPLAY_WINDOWS = ["all", "7d"] as const;
 const TRAJECTORY_SORT_FIELDS = ["latestAttemptAt", "attemptsCount", "errorRate", "notSubmitted"] as const;
 const TRAJECTORY_SORT_ORDERS = ["asc", "desc"] as const;
 
 type TrajectoryWindow = (typeof TRAJECTORY_WINDOWS)[number];
+type TrajectoryDisplayWindow = (typeof TRAJECTORY_DISPLAY_WINDOWS)[number];
 type TrajectorySortField = (typeof TRAJECTORY_SORT_FIELDS)[number];
 type TrajectorySortOrder = (typeof TRAJECTORY_SORT_ORDERS)[number];
+const TRAJECTORY_WINDOW_LABELS: Record<TrajectoryWindow, string> = {
+  "24h": "近24小时",
+  "7d": "近7天",
+  "30d": "近30天",
+  all: "全部",
+};
 
 const TRAJECTORY_SORT_FIELD_LABELS: Record<TrajectorySortField, string> = {
   latestAttemptAt: "最近提交时间",
@@ -76,7 +84,7 @@ const getRequestOrigin = async (): Promise<string> => {
 const resolveQueryState = (
   query: Awaited<LearningTrajectoryPageProps["searchParams"]>
 ): TrajectoryQueryState => ({
-  window: parseEnum(getSingleSearchParam(query.window), TRAJECTORY_WINDOWS, "7d"),
+  window: parseEnum(getSingleSearchParam(query.window), TRAJECTORY_WINDOWS, "all"),
   page: parsePositiveInt(getSingleSearchParam(query.page), 1, { min: 1 }),
   limit: parsePositiveInt(getSingleSearchParam(query.limit), 20, { min: 1, max: 50 }),
   sort: parseEnum(getSingleSearchParam(query.sort), TRAJECTORY_SORT_FIELDS, "latestAttemptAt"),
@@ -300,7 +308,7 @@ export default async function LearningTrajectoryPage({
     <section className="mt-4 space-y-4">
       <PageHeader
         title="学习轨迹"
-        description="查看学生尝试趋势与近期 AI 状态变化。"
+        description={`查看学生尝试趋势与当前窗口 AI 状态变化（${TRAJECTORY_WINDOW_LABELS[viewModel.query.window]}）。`}
         actions={
           <div className="flex items-center gap-3 text-sm">
             <Link href={paths.teacher.classroomTasks(classroomId)} className="text-blue-700 hover:underline">
@@ -321,7 +329,7 @@ export default async function LearningTrajectoryPage({
         <div className="mt-2 flex flex-wrap items-center gap-4 text-zinc-700">
           <div className="flex items-center gap-2">
             <span>窗口:</span>
-            {TRAJECTORY_WINDOWS.map((windowValue) => {
+            {TRAJECTORY_DISPLAY_WINDOWS.map((windowValue: TrajectoryDisplayWindow) => {
               const active = windowValue === viewModel.query.window;
               return (
                 <Link
@@ -329,10 +337,11 @@ export default async function LearningTrajectoryPage({
                   href={buildHref(routePath, queryRecord, { window: windowValue, page: "1" })}
                   className={active ? "font-semibold text-blue-700" : "text-blue-700 hover:underline"}
                 >
-                  {windowValue}
+                  {TRAJECTORY_WINDOW_LABELS[windowValue]}
                 </Link>
               );
             })}
+            <span className="text-zinc-500">当前：{TRAJECTORY_WINDOW_LABELS[viewModel.query.window]}</span>
           </div>
 
           <div className="flex items-center gap-2">
