@@ -544,11 +544,11 @@
 - Controller & Method: `backend/src/modules/classrooms/classroom-tasks/controllers/classroom-tasks.controller.ts` -> `ClassroomTasksController.getReviewPack`
 - Query DTO: `QueryClassReviewPackDto` (`backend/src/modules/classrooms/classroom-tasks/dto/query-class-review-pack.dto.ts`)
 - Fields:
-  - `window?: '24h' | '7d' | '30d'`（`@IsIn(CLASS_REVIEW_PACK_WINDOWS)`）
+  - `window?: 'all' | '7d' | '24h' | '30d'`（`@IsIn(CLASS_REVIEW_PACK_WINDOWS)`；默认 `all`）
   - `topK?: number`（`@Type(() => Number) @IsInt() @Min(1) @Max(30)`）
   - `examplesPerTag?: number`（`@Type(() => Number) @IsInt() @Min(1) @Max(5)`）
 - Example Query:
-  - `/api/classrooms/{classroomId}/tasks/{classroomTaskId}/review-pack?window=7d&topK=10&examplesPerTag=2`
+  - `/api/classrooms/{classroomId}/tasks/{classroomTaskId}/review-pack?window=all&topK=10&examplesPerTag=2`
 - Response口径（最小说明）:
   - 核心域：`overview`、`commonIssues`、`examples`、`studentTiers`
   - `examples` 为去重典型样例池（按 `feedbackId` 去重，不再按 tag 分组重复占位）
@@ -558,6 +558,60 @@
   - `studentTiers.good/watch/notSubmitted[*]` 统一含 `studentId/studentName/studentNo`，其中 `good/watch` 额外含 `attemptsCount/latestErrorCount`
   - `studentName` 缺失时回落 `未知学生`
   - 响应不再包含 `actionItems`、`teacherScript`
+
+### GET /api/classrooms/:classroomId/weekly-report
+
+- Controller & Method: `backend/src/modules/classrooms/controllers/classrooms.controller.ts` -> `ClassroomsController.getClassroomWeeklyReport`
+- Query DTO: `QueryClassroomWeeklyReportDto` (`backend/src/modules/classrooms/dto/query-classroom-weekly-report.dto.ts`)
+- Fields:
+  - `window?: 'all' | '7d' | '30d' | '24h' | '1h'`（`@IsIn(CLASSROOM_WEEKLY_REPORT_WINDOWS)`；默认 `all`）
+  - `includeRiskStudentIds?: string`（`@IsBooleanString()`）
+- Example Query:
+  - `/api/classrooms/{classroomId}/weekly-report?window=all&includeRiskStudentIds=true`
+- Window 语义:
+  - `all` = 当前班级报表口径下全部历史记录（无时间下界过滤）
+  - `24h/1h` 为后端兼容窗口，不作为推荐默认窗口
+
+### GET /api/classrooms/:classroomId/process-assessment
+
+- Controller & Method: `backend/src/modules/classrooms/controllers/classrooms.controller.ts` -> `ClassroomsController.getProcessAssessment`
+- Query DTO: `QueryProcessAssessmentDto` (`backend/src/modules/classrooms/dto/query-process-assessment.dto.ts`)
+- Fields:
+  - `window?: 'all' | '7d' | '30d' | 'term'`（`@IsIn(PROCESS_ASSESSMENT_WINDOWS)`；默认 `all`）
+  - `page?: number`（`@Type(() => Number) @IsInt() @Min(1)`）
+  - `limit?: number`（`@Type(() => Number) @IsInt() @Min(1) @Max(100)`）
+  - `sort?: 'score' | 'submissionsCount' | 'submittedTasksCount' | 'aiRequestedCount' | 'riskLevel'`
+  - `order?: 'asc' | 'desc'`
+- Example Query:
+  - `/api/classrooms/{classroomId}/process-assessment?window=all&page=1&limit=50&sort=score&order=desc`
+- Window 语义:
+  - `all` = 当前班级过程性评价口径下全部历史记录（无时间下界过滤）
+  - `term` 为后端兼容窗口
+  - CSV 接口 `GET /api/classrooms/:classroomId/process-assessment.csv` 复用同 DTO/同窗口语义
+
+### GET /api/classrooms/:classroomId/tasks/:classroomTaskId/learning-trajectory
+
+- Controller & Method: `backend/src/modules/classrooms/classroom-tasks/controllers/classroom-tasks.controller.ts` -> `ClassroomTasksController.getLearningTrajectory`
+- Query DTO: `QueryLearningTrajectoryDto` (`backend/src/modules/classrooms/classroom-tasks/dto/query-learning-trajectory.dto.ts`)
+- Fields:
+  - `window?: 'all' | '7d' | '24h' | '30d'`（`@IsIn(LEARNING_TRAJECTORY_WINDOWS)`；默认 `all`）
+  - `page?: number`（`@Type(() => Number) @IsInt() @Min(1)`）
+  - `limit?: number`（`@Type(() => Number) @IsInt() @Min(1) @Max(50)`）
+  - `sort?: 'latestAttemptAt' | 'attemptsCount' | 'errorRate' | 'notSubmitted'`
+  - `order?: 'asc' | 'desc'`
+  - `includeAttempts?: string`（`@IsBooleanString()`）
+  - `includeTagDetails?: string`（`@IsBooleanString()`）
+- Example Query:
+  - `/api/classrooms/{classroomId}/tasks/{classroomTaskId}/learning-trajectory?window=all&page=1&limit=20`
+- Window 语义:
+  - `all` = 当前课堂任务学习轨迹口径下全部历史记录（无时间下界过滤）
+  - `24h/30d` 为后端兼容窗口，下一阶段前端不再主展示
+
+### 统计窗口契约分层说明（阶段一）
+
+- 后端兼容支持集合：以上 Query DTO 的 `@IsIn(...)` 允许值（含兼容窗口）。
+- 前端主展示集合：由下一阶段前端策略决定，不等同于后端兼容集合。
+- `ai-metrics` DTO 保持不变：`window` 仍仅支持 `1h | 24h | 7d`，不引入 `all`。
 
 ### GET /api/learning-tasks/tasks
 

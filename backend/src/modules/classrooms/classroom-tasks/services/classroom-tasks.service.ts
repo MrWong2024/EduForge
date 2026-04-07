@@ -227,7 +227,7 @@ type LearningTrajectoryResponse = {
 @Injectable()
 export class ClassroomTasksService {
   private static readonly DEFAULT_TRAJECTORY_WINDOW: LearningTrajectoryWindow =
-    '7d';
+    'all';
   private static readonly DEFAULT_TRAJECTORY_PAGE = 1;
   private static readonly DEFAULT_TRAJECTORY_LIMIT = 20;
   private static readonly DEFAULT_TRAJECTORY_SORT: LearningTrajectorySortField =
@@ -235,7 +235,7 @@ export class ClassroomTasksService {
   private static readonly DEFAULT_TRAJECTORY_ORDER: LearningTrajectorySortOrder =
     'desc';
   private static readonly TRAJECTORY_WINDOW_MS_MAP: Record<
-    LearningTrajectoryWindow,
+    Exclude<LearningTrajectoryWindow, 'all'>,
     number
   > = {
     '24h': 24 * 60 * 60 * 1000,
@@ -902,9 +902,12 @@ export class ClassroomTasksService {
       query.includeTagDetails,
       true,
     );
-    const lowerBound = new Date(
-      Date.now() - ClassroomTasksService.TRAJECTORY_WINDOW_MS_MAP[window],
-    );
+    const lowerBound =
+      window === 'all'
+        ? null
+        : new Date(
+            Date.now() - ClassroomTasksService.TRAJECTORY_WINDOW_MS_MAP[window],
+          );
 
     // Z4 metric contract:
     // 1) submissions are isolated by classroomTaskId and filtered by submissions.createdAt window.
@@ -958,6 +961,13 @@ export class ClassroomTasksService {
     const studentObjectIds = studentIds.map(
       (studentId) => new Types.ObjectId(studentId),
     );
+    const submissionMatch: Record<string, unknown> = {
+      classroomTaskId: classroomTaskObjectId,
+      studentId: { $in: studentObjectIds },
+    };
+    if (lowerBound) {
+      submissionMatch.createdAt = { $gte: lowerBound };
+    }
     const [students, submissions] = await Promise.all([
       this.userModel
         .find({ _id: { $in: studentObjectIds } })
@@ -965,11 +975,7 @@ export class ClassroomTasksService {
         .lean<LearningTrajectoryStudentLean[]>()
         .exec(),
       this.submissionModel
-        .find({
-          classroomTaskId: classroomTaskObjectId,
-          studentId: { $in: studentObjectIds },
-          createdAt: { $gte: lowerBound },
-        })
+        .find(submissionMatch)
         .select('_id studentId attemptNo createdAt isLate lateBySeconds')
         .sort({ studentId: 1, attemptNo: 1, createdAt: 1 })
         .lean<LearningTrajectorySubmissionRow[]>()

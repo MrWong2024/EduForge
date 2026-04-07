@@ -75,7 +75,7 @@ export class AiFeedbackMetricsAggregator {
 
   async aggregateJobsByClassroomTaskIds(
     classroomTaskIds: Types.ObjectId[],
-    lowerBound: Date,
+    lowerBound: Date | null,
     timeField: 'createdAt' | 'updatedAt' = 'createdAt',
   ) {
     const grouped = await this.aggregateJobsGroupedByClassroomTaskIds(
@@ -115,7 +115,7 @@ export class AiFeedbackMetricsAggregator {
 
   async aggregateJobsGroupedByClassroomTaskIds(
     classroomTaskIds: Types.ObjectId[],
-    lowerBound: Date,
+    lowerBound: Date | null,
     timeField: 'createdAt' | 'updatedAt' = 'createdAt',
     topErrorsLimit?: number,
   ) {
@@ -134,7 +134,9 @@ export class AiFeedbackMetricsAggregator {
     const match: Record<string, unknown> = {
       classroomTaskId: { $in: classroomTaskIds },
     };
-    match[timeField] = { $gte: lowerBound };
+    if (lowerBound) {
+      match[timeField] = { $gte: lowerBound };
+    }
 
     const pipeline: PipelineStage[] = [
       { $match: match },
@@ -225,21 +227,24 @@ export class AiFeedbackMetricsAggregator {
 
   async aggregateTopTagsByClassroomTaskIds(
     classroomTaskIds: Types.ObjectId[],
-    lowerBound: Date,
+    lowerBound: Date | null,
     limit: number,
   ) {
     if (classroomTaskIds.length === 0 || limit <= 0) {
       return [] as TopTagAgg[];
     }
 
+    const topTagsMatch: Record<string, unknown> = {
+      source: FeedbackSource.AI,
+      tags: { $exists: true, $ne: [] },
+    };
+    if (lowerBound) {
+      topTagsMatch.createdAt = { $gte: lowerBound };
+    }
     const rows = await this.feedbackModel
       .aggregate<TopTagAgg>([
         {
-          $match: {
-            source: FeedbackSource.AI,
-            tags: { $exists: true, $ne: [] },
-            createdAt: { $gte: lowerBound },
-          },
+          $match: topTagsMatch,
         },
         {
           $lookup: {

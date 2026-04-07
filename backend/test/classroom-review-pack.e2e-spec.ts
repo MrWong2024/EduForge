@@ -44,6 +44,7 @@ type CreatedClassroomResponse = { id: string; joinCode: string };
 type CreatedTaskResponse = { id: string };
 type CreatedClassroomTaskResponse = { id: string };
 type ReviewPackResponse = {
+  window: string;
   overview: {
     studentsCount: number;
     submittedStudentsCount: number;
@@ -474,6 +475,16 @@ describe('Classroom Review Pack (e2e)', () => {
       1,
       'function studentELatest(){return 1;}',
     );
+    const oldSubmissionDate = new Date(Date.now() - 40 * 24 * 60 * 60 * 1000);
+    await submissionModel.updateOne(
+      { _id: studentELatest._id },
+      {
+        $set: {
+          createdAt: oldSubmissionDate,
+          submittedAt: oldSubmissionDate,
+        },
+      },
+    );
 
     await aiFeedbackJobModel.create([
       {
@@ -545,12 +556,13 @@ describe('Classroom Review Pack (e2e)', () => {
         `/api/classrooms/${classroomId}/tasks/${classroomTaskId}/review-pack`,
       )
       .query({
-        window: '7d',
+        window: 'all',
         examplesPerTag: 2,
         topK: 10,
       })
       .expect(200);
     const body = reviewPack.body as ReviewPackResponse;
+    expect(body.window).toBe('all');
 
     expect(body.overview.studentsCount).toBe(5);
     expect(body.overview.submittedStudentsCount).toBe(5);
@@ -582,23 +594,23 @@ describe('Classroom Review Pack (e2e)', () => {
     for (const item of body.studentTiers.good) {
       expect(typeof item.studentName).toBe('string');
       expect(item.studentName.length).toBeGreaterThan(0);
-      expect(item.studentNo === null || typeof item.studentNo === 'string').toBe(
-        true,
-      );
+      expect(
+        item.studentNo === null || typeof item.studentNo === 'string',
+      ).toBe(true);
     }
     for (const item of body.studentTiers.watch) {
       expect(typeof item.studentName).toBe('string');
       expect(item.studentName.length).toBeGreaterThan(0);
-      expect(item.studentNo === null || typeof item.studentNo === 'string').toBe(
-        true,
-      );
+      expect(
+        item.studentNo === null || typeof item.studentNo === 'string',
+      ).toBe(true);
     }
     for (const item of body.studentTiers.notSubmitted) {
       expect(typeof item.studentName).toBe('string');
       expect(item.studentName.length).toBeGreaterThan(0);
-      expect(item.studentNo === null || typeof item.studentNo === 'string').toBe(
-        true,
-      );
+      expect(
+        item.studentNo === null || typeof item.studentNo === 'string',
+      ).toBe(true);
     }
     expect(body.studentTiers.notSubmitted).toHaveLength(0);
 
@@ -619,15 +631,15 @@ describe('Classroom Review Pack (e2e)', () => {
     expect(goodByStudentId.get(studentAId)?.studentNo).toBe('S-A-0001');
     expect(goodByStudentId.get(studentBId)?.studentName).toBe('Student Beta');
     expect(goodByStudentId.get(studentBId)?.studentNo).toBe('S-B-0001');
-    expect(
-      watchByStudentId.get(studentD._id.toString())?.studentName,
-    ).toBe('Student Delta');
+    expect(watchByStudentId.get(studentD._id.toString())?.studentName).toBe(
+      'Student Delta',
+    );
     expect(watchByStudentId.get(studentD._id.toString())?.studentNo).toBe(
       'S-D-0001',
     );
-    expect(
-      watchByStudentId.get(studentE._id.toString())?.studentName,
-    ).toBe('未知学生');
+    expect(watchByStudentId.get(studentE._id.toString())?.studentName).toBe(
+      '未知学生',
+    );
     expect(watchByStudentId.get(studentE._id.toString())?.studentNo).toBeNull();
     expect(goodByStudentId.get(studentAId)?.latestErrorCount).toBe(0);
     expect(goodByStudentId.get(studentAId)?.attemptsCount).toBe(2);
@@ -649,5 +661,24 @@ describe('Classroom Review Pack (e2e)', () => {
 
     expect((body as Record<string, unknown>).actionItems).toBeUndefined();
     expect((body as Record<string, unknown>).teacherScript).toBeUndefined();
+
+    const reviewPack7d = await teacherAgent
+      .get(
+        `/api/classrooms/${classroomId}/tasks/${classroomTaskId}/review-pack`,
+      )
+      .query({
+        window: '7d',
+        examplesPerTag: 2,
+        topK: 10,
+      })
+      .expect(200);
+    const body7d = reviewPack7d.body as ReviewPackResponse;
+    expect(body7d.window).toBe('7d');
+    expect(body7d.overview.submittedStudentsCount).toBe(4);
+    expect(
+      body7d.studentTiers.notSubmitted.some(
+        (item) => item.studentId === studentE._id.toString(),
+      ),
+    ).toBe(true);
   });
 });

@@ -29,16 +29,17 @@ type SubmittedStudentsAgg = {
 
 @Injectable()
 export class TeacherClassroomWeeklyReportService {
-  private static readonly DEFAULT_WINDOW: ClassroomWeeklyReportWindow = '7d';
+  private static readonly DEFAULT_WINDOW: ClassroomWeeklyReportWindow = 'all';
   private static readonly TOP_TAGS_LIMIT = 5;
   private static readonly SAMPLE_RISK_STUDENT_LIMIT = 10;
   private static readonly WINDOW_MS_MAP: Record<
-    ClassroomWeeklyReportWindow,
+    Exclude<ClassroomWeeklyReportWindow, 'all'>,
     number
   > = {
     '1h': 60 * 60 * 1000,
     '24h': 24 * 60 * 60 * 1000,
     '7d': 7 * 24 * 60 * 60 * 1000,
+    '30d': 30 * 24 * 60 * 60 * 1000,
   };
 
   constructor(
@@ -90,7 +91,7 @@ export class TeacherClassroomWeeklyReportService {
 
   private async buildWeeklyReport(
     classroomObjectId: Types.ObjectId,
-    lowerBound: Date,
+    lowerBound: Date | null,
     windowLabel: string,
     includeRiskStudentIds: boolean,
     teacherId: string,
@@ -116,11 +117,14 @@ export class TeacherClassroomWeeklyReportService {
     // 4) atRisk (v1) means students with zero submissions in-window across all in-window classroomTasks.
     // 5) AI error code extraction is delegated to shared aggregator:
     //    prefer `lastError.code`, fallback to known code tokens only (no long-message parsing).
+    const classroomTaskMatch: Record<string, unknown> = {
+      classroomId: classroomObjectId,
+    };
+    if (lowerBound) {
+      classroomTaskMatch.createdAt = { $gte: lowerBound };
+    }
     const classroomTasks = await this.classroomTaskModel
-      .find({
-        classroomId: classroomObjectId,
-        createdAt: { $gte: lowerBound },
-      })
+      .find(classroomTaskMatch)
       .select('_id dueAt publishedAt createdAt')
       .lean<ClassroomTaskWithMeta[]>()
       .exec();
@@ -217,7 +221,7 @@ export class TeacherClassroomWeeklyReportService {
   private async getSubmissionStats(
     classroomTaskIds: Types.ObjectId[],
     classroomStudentObjectIds: Types.ObjectId[],
-    lowerBound: Date,
+    lowerBound: Date | null,
   ) {
     const result = {
       submittedStudentIdSet: new Set<string>(),
@@ -231,13 +235,16 @@ export class TeacherClassroomWeeklyReportService {
       return result;
     }
 
+    const submissionMatch: Record<string, unknown> = {
+      classroomTaskId: { $in: classroomTaskIds },
+      studentId: { $in: classroomStudentObjectIds },
+    };
+    if (lowerBound) {
+      submissionMatch.createdAt = { $gte: lowerBound };
+    }
     const pipeline: PipelineStage[] = [
       {
-        $match: {
-          classroomTaskId: { $in: classroomTaskIds },
-          studentId: { $in: classroomStudentObjectIds },
-          createdAt: { $gte: lowerBound },
-        },
+        $match: submissionMatch,
       },
       {
         $group: {
@@ -293,6 +300,9 @@ export class TeacherClassroomWeeklyReportService {
     )
       ? (window as ClassroomWeeklyReportWindow)
       : TeacherClassroomWeeklyReportService.DEFAULT_WINDOW;
+    if (resolved === 'all') {
+      return { window: resolved, lowerBound: null };
+    }
     const lowerBound = new Date(
       Date.now() - TeacherClassroomWeeklyReportService.WINDOW_MS_MAP[resolved],
     );

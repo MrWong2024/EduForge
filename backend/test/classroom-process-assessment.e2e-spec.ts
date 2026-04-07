@@ -41,6 +41,7 @@ type CreatedSubmissionResponse = {
   aiFeedbackStatus: string;
 };
 type ProcessAssessmentResponse = {
+  window: string;
   rubric: {
     submittedTasksRate: number;
     submissionsCount: number;
@@ -425,7 +426,6 @@ describe('Classroom Process Assessment (e2e)', () => {
     const processAssessment = await teacherAgent
       .get(`/api/classrooms/${classroomId}/process-assessment`)
       .query({
-        window: '30d',
         page: 1,
         limit: 50,
         sort: 'score',
@@ -433,6 +433,7 @@ describe('Classroom Process Assessment (e2e)', () => {
       })
       .expect(200);
     const body = processAssessment.body as ProcessAssessmentResponse;
+    expect(body.window).toBe('all');
     expect(body.total).toBeGreaterThanOrEqual(2);
     expect(body.rubric).toEqual({
       submittedTasksRate: 0.4,
@@ -454,9 +455,25 @@ describe('Classroom Process Assessment (e2e)', () => {
         (studentAItem?.score ?? 0) >= (studentBItem?.score ?? 0),
     ).toBe(true);
 
+    const explicitAllProcessAssessment = await teacherAgent
+      .get(`/api/classrooms/${classroomId}/process-assessment`)
+      .query({
+        window: 'all',
+        page: 1,
+        limit: 50,
+        sort: 'score',
+        order: 'desc',
+      })
+      .expect(200);
+    const explicitAllBody =
+      explicitAllProcessAssessment.body as ProcessAssessmentResponse;
+    expect(explicitAllBody.window).toBe('all');
+    expect(explicitAllBody.total).toBe(body.total);
+    expect(explicitAllBody.items).toEqual(body.items);
+
     const csvResponse = await teacherAgent
       .get(`/api/classrooms/${classroomId}/process-assessment.csv`)
-      .query({ window: '30d' })
+      .query({ window: 'all' })
       .expect(200);
     const contentType = String(csvResponse.headers['content-type'] ?? '');
     expect(contentType).toContain('text/csv');
@@ -466,5 +483,18 @@ describe('Classroom Process Assessment (e2e)', () => {
     );
     expect(csvText).toContain(studentAId);
     expect(csvText).not.toContain('codeText');
+    const csvLines = csvText.trim().split('\n');
+    expect(csvLines.length - 1).toBe(body.items.length);
+    const csvStudentIds = csvLines.slice(1).map((line) => line.split(',')[0]);
+    expect(csvStudentIds.sort()).toEqual(
+      body.items.map((item) => item.studentId).sort(),
+    );
+  });
+
+  it('rejects invalid process-assessment window', async () => {
+    await teacherAgent
+      .get(`/api/classrooms/${classroomId}/process-assessment`)
+      .query({ window: 'not-supported' })
+      .expect(400);
   });
 });

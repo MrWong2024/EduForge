@@ -267,7 +267,7 @@
   - `getWeeklyReportByLowerBound(...)`（供 snapshot 复用）
 - AuthZ Boundary: `teacher-only + owner-only`
 - Metrics/Isolation: `studentsCount` 与成员全集来自 Enrollment ACTIVE；任务/提交/AI 聚合按 `classroomId + classroomTaskId`；风险口径 `risk = activeStudents - submittedDistinctStudents`
-- Consistency/Constraints: 窗口统一用 `createdAt`；迟交维度输出 `lateSubmissionsCount/lateStudentsCount`
+- Consistency/Constraints: 窗口统一用 `createdAt`；默认窗口为 `all`；后端兼容窗口 `all/7d/30d/24h/1h`；`all` 语义为“无时间下界过滤（不拼 lowerBound 条件）”；迟交维度输出 `lateSubmissionsCount/lateStudentsCount`
 - Deps/Side Effects: `ClassroomModel`, `ClassroomTaskModel`, `SubmissionModel`, `EnrollmentService`, `AiFeedbackMetricsAggregator`；只读
 - Performance Notes: 以 `classroomTaskIds` 为批次聚合，避免按 task 循环查询
 - SoT: `backend/src/modules/classrooms/services/teacher-classroom-weekly-report.service.ts`
@@ -327,7 +327,7 @@
   - `getLearningTrajectory(classroomId, classroomTaskId, query, teacherId)`
 - AuthZ Boundary: `teacher-only + owner-only`
 - Metrics/Isolation: 学生范围来自 Enrollment ACTIVE（分页在学生维度）；`items` 包含未提交学生（`notSubmitted` 维度可排序）；全链路按 `classroomTaskId` 聚合
-- Consistency/Constraints: `includeTagDetails=false` 时跳过 tags 展开聚合；`aiFeedbackStatus` 缺 job 为 `NOT_REQUESTED`；`includeAttempts=true` 时 `attempts[*].feedbackCount` 为 Feedback 全来源总条数（按当前页 submissionIds 聚合，缺失回填 `0`）；`attempts[*].feedbackSummary.totalItems` 继续保留 AI 摘要语义；未提交学生同样携带 `student` 公开信息
+- Consistency/Constraints: 默认窗口为 `all`；后端兼容窗口 `all/7d/24h/30d`；`all` 语义为“无时间下界过滤（submissions 不拼 `createdAt >= lowerBound`）”；`includeTagDetails=false` 时跳过 tags 展开聚合；`aiFeedbackStatus` 缺 job 为 `NOT_REQUESTED`；`includeAttempts=true` 时 `attempts[*].feedbackCount` 为 Feedback 全来源总条数（按当前页 submissionIds 聚合，缺失回填 `0`）；`attempts[*].feedbackSummary.totalItems` 继续保留 AI 摘要语义；未提交学生同样携带 `student` 公开信息
 - Deps/Side Effects: `ClassroomModel`, `ClassroomTaskModel`, `SubmissionModel`, `UserModel`, `EnrollmentService`, `AiFeedbackJobService`, `FeedbackModel`；只读
 - Performance Notes: 先分页 enrollment，再用 page-scope studentIds 批量查询 users 与 submissions；对当前页 submissionIds 批量拉取 `statusMap`、AI `feedbackSummary`、全来源 `feedbackCount`，避免 N+1
 - SoT: `backend/src/modules/classrooms/classroom-tasks/services/classroom-tasks.service.ts`; `backend/src/modules/classrooms/classroom-tasks/dto/query-learning-trajectory.dto.ts`
@@ -348,7 +348,7 @@
   - `aggregateCommonIssuesBySubmissionIds(...)` / `aggregateCommonIssuesByClassroomTaskIds(...)`（供 snapshot 复用）
 - AuthZ Boundary: `teacher-only + owner-only`
 - Metrics/Isolation: 任务相关统计严格按 `classroomTaskId`；成员范围来自 Enrollment ACTIVE
-- Consistency/Constraints: `topTags` 维持标签展开计数；`examples` 按 `feedbackId` 去重并保留标签归属信息（`primaryTag/matchedTags/tags`）；不返回 `codeText/prompt/apiKey`
+- Consistency/Constraints: 默认窗口为 `all`；后端兼容窗口 `all/7d/24h/30d`；`all` 语义为“无时间下界过滤（submissions/jobs/tags 不拼 lowerBound 条件）”；`topTags` 维持标签展开计数；`examples` 按 `feedbackId` 去重并保留标签归属信息（`primaryTag/matchedTags/tags`）；不返回 `codeText/prompt/apiKey`
 - Deps/Side Effects: `ClassroomModel`, `ClassroomTaskModel`, `SubmissionModel`, `FeedbackModel`, `UserModel`, `EnrollmentService`, `AiFeedbackJobService`, `AiFeedbackMetricsAggregator`；只读
 - Performance Notes: examples 候选集仍按 `severityRank DESC + createdAt DESC` 且按 `examplesPerTag` 截断，再做 `feedbackId` 去重输出样例池
 - SoT: `backend/src/modules/classrooms/classroom-tasks/services/class-review-pack.service.ts`; `backend/src/modules/classrooms/classroom-tasks/dto/query-class-review-pack.dto.ts`
@@ -370,7 +370,7 @@
   - `getProcessAssessmentForSnapshot(...)`（供 snapshot 复用）
 - AuthZ Boundary: `teacher-only + owner-only`
 - Metrics/Isolation: 成员全集与分页来自 Enrollment ACTIVE；任务/提交/AI/反馈聚合均按 `classroomId + classroomTaskId`；迟交指标输出 `lateSubmissionsCount/lateTasksCount`
-- Consistency/Constraints: rubric/score/riskLevel 为过程性指标；CSV 导出使用手写转义（`"` -> `""`）；不输出敏感字段
+- Consistency/Constraints: 默认窗口为 `all`；后端兼容窗口 `all/7d/30d/term`；`all` 语义为“无时间下界过滤（tasks/submissions/feedback 不拼 lowerBound）”；rubric/score/riskLevel 为过程性指标；CSV 导出与 JSON 复用同一 payload（窗口口径一致）并使用手写转义（`"` -> `""`）；不输出敏感字段
 - Deps/Side Effects: `ClassroomModel`, `ClassroomTaskModel`, `SubmissionModel`, `AiFeedbackJobModel`, `FeedbackModel`, `EnrollmentService`；只读
 - Performance Notes: Enrollment 稳定分页后页内排序（page-local sort）
 - SoT: `backend/src/modules/classrooms/services/process-assessment.service.ts`; `backend/src/modules/classrooms/dto/query-process-assessment.dto.ts`

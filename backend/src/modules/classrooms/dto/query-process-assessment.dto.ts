@@ -1,7 +1,7 @@
 import { Type } from 'class-transformer';
 import { IsIn, IsInt, IsOptional, Max, Min } from 'class-validator';
 
-export const PROCESS_ASSESSMENT_WINDOWS = ['7d', '30d', 'term'] as const;
+export const PROCESS_ASSESSMENT_WINDOWS = ['7d', '30d', 'term', 'all'] as const;
 export type ProcessAssessmentWindow =
   (typeof PROCESS_ASSESSMENT_WINDOWS)[number];
 

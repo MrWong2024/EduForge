@@ -464,6 +464,13 @@ describe('Classrooms AI Metrics (e2e)', () => {
     expect(bodyB.classroomTaskId).toBe(classroomTaskBId);
     expect(bodyA.summary.jobs.total).toBe(1);
     expect(bodyB.summary.jobs.total).toBe(1);
+
+    await teacherAgent
+      .get(
+        `/api/classrooms/${classroomAId}/tasks/${classroomTaskAId}/ai-metrics`,
+      )
+      .query({ window: 'all' })
+      .expect(400);
   });
 
   it('reports RATE_LIMIT_LOCAL errors when local per-classroomTask throttling triggers', async () => {

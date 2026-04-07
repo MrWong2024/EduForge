@@ -1,7 +1,7 @@
 import { Type } from 'class-transformer';
 import { IsIn, IsInt, IsOptional, Max, Min } from 'class-validator';
 
-export const CLASS_REVIEW_PACK_WINDOWS = ['24h', '7d', '30d'] as const;
+export const CLASS_REVIEW_PACK_WINDOWS = ['24h', '7d', '30d', 'all'] as const;
 export type ClassReviewPackWindow = (typeof CLASS_REVIEW_PACK_WINDOWS)[number];
 
 export class QueryClassReviewPackDto {

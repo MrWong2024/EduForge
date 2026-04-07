@@ -359,6 +359,15 @@ AI Provider 错误码（`ai-feedback-provider.error-codes.ts`）：
 - Z6 过程性评价（teacher）：
   - `GET /api/classrooms/:classroomId/process-assessment`
   - `GET /api/classrooms/:classroomId/process-assessment.csv`
+- 统计窗口收口·阶段一（后端契约已落地，前端待跟进）：
+  - 范围：`weekly-report`、`process-assessment`（含 CSV）、`learning-trajectory`、`review-pack`。
+  - 默认窗口：以上接口默认值统一为 `all`。
+  - `all` 语义：当前资源边界内的全部可统计历史记录；实现为“无时间下界过滤”，非固定天数伪全量。
+  - 后端兼容窗口：
+    - 班级级：`weekly-report` 支持 `all/7d/30d/24h/1h`，`process-assessment` 支持 `all/7d/30d/term`。
+    - 单任务级：`learning-trajectory` 与 `review-pack` 支持 `all/7d/24h/30d`。
+  - 前端状态：当前前端主展示与默认值尚未全部切换到上述新策略，下一阶段前端再收口。
+  - 保护边界：`ai-metrics` 窗口集合保持 `1h/24h/7d`，本阶段未引入 `all`。
 - Z7 截止/迟交：
   - 提交门禁：`POST /api/classrooms/:classroomId/tasks/:classroomTaskId/submissions` 在到期且不允许迟交时返回 `LATE_SUBMISSION_NOT_ALLOWED`
   - 提交冷却：默认 `LEARNING_TASK_SUBMISSION_COOLDOWN_MS=300000`；按同一 `studentId + classroomTaskId` 判定，命中时返回 `429` + `SUBMISSION_COOLDOWN_ACTIVE`（含 `retryAfterMs/retryAfterSeconds`），`0` 表示关闭冷却。

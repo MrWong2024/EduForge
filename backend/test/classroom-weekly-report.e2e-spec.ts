@@ -303,5 +303,22 @@ describe('Classroom Weekly Report (e2e)', () => {
     expect(body.aiHealth.jobs.total).toBeGreaterThanOrEqual(1);
     expect(body.aiHealth.successRate).toBeGreaterThanOrEqual(0);
     expect(Array.isArray(body.topTags)).toBe(true);
+
+    const defaultWindowReport = await teacherAgent
+      .get(`/api/classrooms/${classroomId}/weekly-report`)
+      .expect(200);
+    const defaultWindowBody = defaultWindowReport.body as WeeklyReportResponse;
+    expect(defaultWindowBody.window).toBe('all');
+
+    const allWindowReport = await teacherAgent
+      .get(`/api/classrooms/${classroomId}/weekly-report`)
+      .query({ window: 'all' })
+      .expect(200);
+    const allWindowBody = allWindowReport.body as WeeklyReportResponse;
+
+    expect(defaultWindowBody.progress).toEqual(allWindowBody.progress);
+    expect(defaultWindowBody.aiHealth.jobs).toEqual(
+      allWindowBody.aiHealth.jobs,
+    );
   });
 });

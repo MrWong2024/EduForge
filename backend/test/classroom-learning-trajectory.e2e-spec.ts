@@ -46,6 +46,7 @@ type CreatedSubmissionResponse = {
   aiFeedbackStatus: string;
 };
 type LearningTrajectoryResponse = {
+  window: string;
   total: number;
   items: Array<{
     studentId: string;
@@ -144,18 +145,21 @@ describe('Classroom Learning Trajectory (e2e)', () => {
       });
   };
 
-  const fetchTrajectory = async () => {
+  const fetchTrajectory = async (window?: '7d' | 'all') => {
+    const query: Record<string, unknown> = {
+      page: 1,
+      limit: 20,
+      includeAttempts: true,
+      includeTagDetails: true,
+    };
+    if (window !== undefined) {
+      query.window = window;
+    }
     const response = await teacherAgent
       .get(
         `/api/classrooms/${classroomId}/tasks/${classroomTaskId}/learning-trajectory`,
       )
-      .query({
-        window: '7d',
-        page: 1,
-        limit: 20,
-        includeAttempts: true,
-        includeTagDetails: true,
-      })
+      .query(query)
       .expect(200);
     return response.body as LearningTrajectoryResponse;
   };
@@ -431,6 +435,16 @@ describe('Classroom Learning Trajectory (e2e)', () => {
       thirdSubmission.body as CreatedSubmissionResponse;
     submissionIds.push(thirdSubmissionBody.id);
     expect(thirdSubmissionBody.attemptNo).toBe(3);
+    const oldSubmissionDate = new Date(Date.now() - 40 * 24 * 60 * 60 * 1000);
+    await submissionModel.updateOne(
+      { _id: new Types.ObjectId(firstSubmissionBody.id) },
+      {
+        $set: {
+          createdAt: oldSubmissionDate,
+          submittedAt: oldSubmissionDate,
+        },
+      },
+    );
 
     await studentAAgent
       .post(
@@ -442,7 +456,7 @@ describe('Classroom Learning Trajectory (e2e)', () => {
     let hasSucceeded = false;
     for (let index = 0; index < 10; index += 1) {
       await aiFeedbackProcessor.processOnce(10);
-      const trajectory = await fetchTrajectory();
+      const trajectory = await fetchTrajectory('7d');
       const studentAItem = trajectory.items.find(
         (item) => item.studentId === studentAId,
       );
@@ -476,13 +490,17 @@ describe('Classroom Learning Trajectory (e2e)', () => {
       },
     ]);
 
-    const trajectory = await fetchTrajectory();
-    expect(trajectory.total).toBeGreaterThanOrEqual(2);
+    const defaultWindowTrajectory = await fetchTrajectory(undefined);
+    expect(defaultWindowTrajectory.window).toBe('all');
 
-    const studentAItem = trajectory.items.find(
+    const trajectoryAll = await fetchTrajectory('all');
+    expect(trajectoryAll.window).toBe('all');
+    expect(trajectoryAll.total).toBeGreaterThanOrEqual(2);
+
+    const studentAItem = trajectoryAll.items.find(
       (item) => item.studentId === studentAId,
     );
-    const studentBItem = trajectory.items.find(
+    const studentBItem = trajectoryAll.items.find(
       (item) => item.studentId === studentBId,
     );
     expect(studentAItem).toBeDefined();
@@ -505,7 +523,7 @@ describe('Classroom Learning Trajectory (e2e)', () => {
     expect(studentBItem?.attemptsCount).toBe(0);
     expect(typeof studentAItem?.trend.errorCountFirst).toBe('number');
     expect(typeof studentAItem?.trend.errorCountLatest).toBe('number');
-    expect(JSON.stringify(trajectory)).not.toContain('passwordHash');
+    expect(JSON.stringify(trajectoryAll)).not.toContain('passwordHash');
     const secondAttempt = studentAItem?.attempts.find(
       (attempt) => attempt.submissionId === secondSubmissionBody.id,
     );
@@ -525,5 +543,12 @@ describe('Classroom Learning Trajectory (e2e)', () => {
       expect(typeof attempt.feedbackCount).toBe('number');
       expect(typeof attempt.feedbackSummary.totalItems).toBe('number');
     }
+
+    const trajectory7d = await fetchTrajectory('7d');
+    expect(trajectory7d.window).toBe('7d');
+    const studentAIn7d = trajectory7d.items.find(
+      (item) => item.studentId === studentAId,
+    );
+    expect(studentAIn7d?.attemptsCount).toBe(2);
   });
 });

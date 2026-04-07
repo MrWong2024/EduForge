@@ -117,18 +117,20 @@ export type ReviewPackCommonIssues = {
 
 @Injectable()
 export class ClassReviewPackService {
-  private static readonly DEFAULT_WINDOW: ClassReviewPackWindow = '7d';
+  private static readonly DEFAULT_WINDOW: ClassReviewPackWindow = 'all';
   private static readonly DEFAULT_TOP_K = 10;
   private static readonly DEFAULT_EXAMPLES_PER_TAG = 2;
   private static readonly GOOD_TIER_LIMIT = 20;
   private static readonly WATCH_TIER_LIMIT = 20;
   private static readonly NOT_SUBMITTED_TIER_LIMIT = 50;
-  private static readonly WINDOW_MS_MAP: Record<ClassReviewPackWindow, number> =
-    {
-      '24h': 24 * 60 * 60 * 1000,
-      '7d': 7 * 24 * 60 * 60 * 1000,
-      '30d': 30 * 24 * 60 * 60 * 1000,
-    };
+  private static readonly WINDOW_MS_MAP: Record<
+    Exclude<ClassReviewPackWindow, 'all'>,
+    number
+  > = {
+    '24h': 24 * 60 * 60 * 1000,
+    '7d': 7 * 24 * 60 * 60 * 1000,
+    '30d': 30 * 24 * 60 * 60 * 1000,
+  };
 
   constructor(
     @InjectModel(Classroom.name)
@@ -165,9 +167,10 @@ export class ClassReviewPackService {
     const topK = query.topK ?? ClassReviewPackService.DEFAULT_TOP_K;
     const examplesPerTag =
       query.examplesPerTag ?? ClassReviewPackService.DEFAULT_EXAMPLES_PER_TAG;
-    const lowerBound = new Date(
-      Date.now() - ClassReviewPackService.WINDOW_MS_MAP[window],
-    );
+    const lowerBound =
+      window === 'all'
+        ? null
+        : new Date(Date.now() - ClassReviewPackService.WINDOW_MS_MAP[window]);
 
     // Z5 metric contract:
     // 1) All task-bound metrics are isolated by classroomTaskId.
@@ -216,15 +219,18 @@ export class ClassReviewPackService {
       }
     }
 
+    const submissionMatch: Record<string, unknown> = {
+      classroomTaskId: classroomTaskObjectId,
+      studentId: { $in: activeStudentObjectIds },
+    };
+    if (lowerBound) {
+      submissionMatch.createdAt = { $gte: lowerBound };
+    }
     const submissions =
       activeStudentObjectIds.length === 0
         ? []
         : await this.submissionModel
-            .find({
-              classroomTaskId: classroomTaskObjectId,
-              studentId: { $in: activeStudentObjectIds },
-              createdAt: { $gte: lowerBound },
-            })
+            .find(submissionMatch)
             .select('_id studentId attemptNo createdAt isLate')
             .sort({ studentId: 1, attemptNo: 1, createdAt: 1 })
             .lean<ReviewSubmissionLean[]>()

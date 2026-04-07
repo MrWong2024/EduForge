@@ -115,13 +115,13 @@ export class ProcessAssessmentService {
     MEDIUM: 2,
     HIGH: 3,
   };
-  private static readonly DEFAULT_WINDOW: ProcessAssessmentWindow = '30d';
+  private static readonly DEFAULT_WINDOW: ProcessAssessmentWindow = 'all';
   private static readonly DEFAULT_PAGE = 1;
   private static readonly DEFAULT_LIMIT = 50;
   private static readonly DEFAULT_SORT: ProcessAssessmentSortField = 'score';
   private static readonly DEFAULT_ORDER: ProcessAssessmentSortOrder = 'desc';
   private static readonly WINDOW_MS_MAP: Record<
-    ProcessAssessmentWindow,
+    Exclude<ProcessAssessmentWindow, 'all'>,
     number
   > = {
     '7d': 7 * 24 * 60 * 60 * 1000,
@@ -238,14 +238,7 @@ export class ProcessAssessmentService {
     )
       ? (query.order as ProcessAssessmentSortOrder)
       : ProcessAssessmentService.DEFAULT_ORDER;
-    const window = PROCESS_ASSESSMENT_WINDOWS.includes(
-      query.window as ProcessAssessmentWindow,
-    )
-      ? (query.window as ProcessAssessmentWindow)
-      : ProcessAssessmentService.DEFAULT_WINDOW;
-    const lowerBound = new Date(
-      Date.now() - ProcessAssessmentService.WINDOW_MS_MAP[window],
-    );
+    const { window, lowerBound } = this.resolveWindow(query.window);
 
     const classroom = await this.classroomModel
       .findOne({
@@ -261,11 +254,14 @@ export class ProcessAssessmentService {
 
     // Window task scope uses publishedAt to reflect assessment exposure window.
     // tasks are still isolated by classroomId.
+    const taskMatch: Record<string, unknown> = {
+      classroomId: classroomObjectId,
+    };
+    if (lowerBound) {
+      taskMatch.publishedAt = { $gte: lowerBound };
+    }
     const windowClassroomTasks = await this.classroomTaskModel
-      .find({
-        classroomId: classroomObjectId,
-        publishedAt: { $gte: lowerBound },
-      })
+      .find(taskMatch)
       .select('_id')
       .lean<WithId[]>()
       .exec();
@@ -305,17 +301,20 @@ export class ProcessAssessmentService {
     const pageStudentObjectIds = pageStudentIds.map(
       (studentId) => new Types.ObjectId(studentId),
     );
+    const submissionMatch: Record<string, unknown> = {
+      classroomTaskId: { $in: windowTaskIds },
+      studentId: { $in: pageStudentObjectIds },
+    };
+    if (lowerBound) {
+      submissionMatch.createdAt = { $gte: lowerBound };
+    }
     const submissionAgg =
       windowTaskIds.length === 0
         ? []
         : await this.submissionModel
             .aggregate<SubmissionByStudentAgg>([
               {
-                $match: {
-                  classroomTaskId: { $in: windowTaskIds },
-                  studentId: { $in: pageStudentObjectIds },
-                  createdAt: { $gte: lowerBound },
-                },
+                $match: submissionMatch,
               },
               {
                 $group: {
@@ -368,6 +367,13 @@ export class ProcessAssessmentService {
       ),
     ).map((submissionId) => new Types.ObjectId(submissionId));
 
+    const feedbackMatch: Record<string, unknown> = {
+      submissionId: { $in: submissionIds },
+      source: FeedbackSource.AI,
+    };
+    if (lowerBound) {
+      feedbackMatch.createdAt = { $gte: lowerBound };
+    }
     const [jobsAgg, feedbackFacetAgg] = await Promise.all([
       submissionIds.length === 0
         ? Promise.resolve([] as JobsByStudentAgg[])
@@ -401,11 +407,7 @@ export class ProcessAssessmentService {
         : this.feedbackModel
             .aggregate<FeedbackFacetResult>([
               {
-                $match: {
-                  submissionId: { $in: submissionIds },
-                  source: FeedbackSource.AI,
-                  createdAt: { $gte: lowerBound },
-                },
+                $match: feedbackMatch,
               },
               {
                 $lookup: {
@@ -590,6 +592,21 @@ export class ProcessAssessmentService {
       rubric: { ...ProcessAssessmentService.RUBRIC },
       items,
     };
+  }
+
+  private resolveWindow(window: ProcessAssessmentWindow | undefined) {
+    const resolved = PROCESS_ASSESSMENT_WINDOWS.includes(
+      window as ProcessAssessmentWindow,
+    )
+      ? (window as ProcessAssessmentWindow)
+      : ProcessAssessmentService.DEFAULT_WINDOW;
+    if (resolved === 'all') {
+      return { window: resolved, lowerBound: null };
+    }
+    const lowerBound = new Date(
+      Date.now() - ProcessAssessmentService.WINDOW_MS_MAP[resolved],
+    );
+    return { window: resolved, lowerBound };
   }
 
   private compareItems(

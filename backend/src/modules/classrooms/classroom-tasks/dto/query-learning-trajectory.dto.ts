@@ -8,7 +8,7 @@ import {
   Min,
 } from 'class-validator';
 
-export const LEARNING_TRAJECTORY_WINDOWS = ['24h', '7d', '30d'] as const;
+export const LEARNING_TRAJECTORY_WINDOWS = ['24h', '7d', '30d', 'all'] as const;
 export type LearningTrajectoryWindow =
   (typeof LEARNING_TRAJECTORY_WINDOWS)[number];
 
