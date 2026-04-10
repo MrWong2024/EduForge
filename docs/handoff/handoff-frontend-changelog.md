@@ -380,6 +380,14 @@
 - 【交互收口】动作成功后统一 `router.refresh()`，并保留当前 `statusView/courseId/page/limit` query，不打乱教师当前筛选视图。
 - 【不要回退】不要把删除提升为主操作按钮，不要在删除失败时回退为模糊“操作失败”提示。
 
+## UAT-FE-45
+
+- 【本步解决】班级列表生命周期操作平铺展示导致操作列噪声偏高的问题。
+- 【新增事实 / 已收口口径】`ClassroomLifecycleActions` 已从显性按钮改为“更多”次级菜单：`ACTIVE` 班级显示“归档/删除”，`ARCHIVED` 班级显示“恢复/删除”。
+- 【语义保持】归档/恢复/删除调用契约不变（仍为 `PATCH status` 与 `DELETE`）；删除保留二次确认，且 `409 + CLASSROOM_NOT_EMPTY` 继续显示明确中文提示“该班级已有成员或任务记录，不能删除，只能归档”。
+- 【交互保持】操作成功后仍统一 `router.refresh()`，并保持当前 `statusView/courseId/page/limit` query。
+- 【边界保持】仅前端展示层收口，不涉及 backend 契约、数据结构或新增依赖。
+
 ## 当前阶段一句话结论
 
 前端已达到“Teacher/Student 主链路可用 + 任务模板层与班级实例层边界收口 + 教师模板主链路可维护”的工程验收阶段，但尚未进入最终交付定版阶段。

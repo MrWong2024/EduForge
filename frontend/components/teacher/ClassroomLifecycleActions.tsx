@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { ErrorState } from "@/components/blocks/ErrorState";
 import { BrowserFetchJsonError, fetchJson } from "@/lib/api/browser-client";
@@ -81,18 +81,51 @@ const getDeleteSummary = (status: number, code?: string): string => {
 
 export function ClassroomLifecycleActions({ classroomId, status }: ClassroomLifecycleActionsProps) {
   const router = useRouter();
+  const menuContainerRef = useRef<HTMLDivElement | null>(null);
   const [pendingAction, setPendingAction] = useState<ClassroomLifecycleAction | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [errorState, setErrorState] = useState<ClassroomLifecycleErrorState | null>(null);
+  const [isMenuOpen, setIsMenuOpen] = useState(false);
 
   const isSubmitting = pendingAction !== null;
   const isArchived = status === "ARCHIVED";
+
+  useEffect(() => {
+    if (!isMenuOpen) {
+      return;
+    }
+
+    const handlePointerDown = (event: MouseEvent) => {
+      if (!menuContainerRef.current) {
+        return;
+      }
+      if (menuContainerRef.current.contains(event.target as Node)) {
+        return;
+      }
+      setIsMenuOpen(false);
+    };
+
+    const handleEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setIsMenuOpen(false);
+      }
+    };
+
+    document.addEventListener("mousedown", handlePointerDown);
+    document.addEventListener("keydown", handleEscape);
+
+    return () => {
+      document.removeEventListener("mousedown", handlePointerDown);
+      document.removeEventListener("keydown", handleEscape);
+    };
+  }, [isMenuOpen]);
 
   const handleStatusUpdate = async (targetStatus: ClassroomStatus) => {
     const action: "archive" | "restore" = targetStatus === "ARCHIVED" ? "archive" : "restore";
     if (isSubmitting) {
       return;
     }
+    setIsMenuOpen(false);
 
     const confirmed = window.confirm(
       action === "archive"
@@ -144,6 +177,7 @@ export function ClassroomLifecycleActions({ classroomId, status }: ClassroomLife
     if (isSubmitting) {
       return;
     }
+    setIsMenuOpen(false);
 
     const confirmed = window.confirm("删除班级\n仅空班级允许删除。删除后不可恢复。");
     if (!confirmed) {
@@ -185,36 +219,73 @@ export function ClassroomLifecycleActions({ classroomId, status }: ClassroomLife
 
   return (
     <div className="space-y-2">
-      <div className="flex flex-wrap items-center gap-3">
-        {isArchived ? (
-          <button
-            type="button"
-            onClick={() => handleStatusUpdate("ACTIVE")}
-            disabled={isSubmitting}
-            className="rounded-md border border-emerald-300 px-2.5 py-1 text-xs font-medium text-emerald-700 hover:bg-emerald-50 disabled:cursor-not-allowed disabled:bg-zinc-100 disabled:text-zinc-400"
-          >
-            {pendingAction === "restore" ? "恢复中..." : "恢复"}
-          </button>
-        ) : (
-          <button
-            type="button"
-            onClick={() => handleStatusUpdate("ARCHIVED")}
-            disabled={isSubmitting}
-            className="rounded-md border border-amber-300 px-2.5 py-1 text-xs font-medium text-amber-700 hover:bg-amber-50 disabled:cursor-not-allowed disabled:bg-zinc-100 disabled:text-zinc-400"
-          >
-            {pendingAction === "archive" ? "归档中..." : "归档"}
-          </button>
-        )}
-
+      <div ref={menuContainerRef} className="relative inline-flex">
         <button
           type="button"
-          onClick={handleDelete}
+          onClick={() => setIsMenuOpen((prev) => !prev)}
           disabled={isSubmitting}
-          className="text-xs font-medium text-red-600 hover:text-red-700 hover:underline disabled:cursor-not-allowed disabled:text-zinc-400 disabled:no-underline"
+          aria-haspopup="menu"
+          aria-expanded={isMenuOpen}
+          className="rounded-md border border-zinc-300 px-2.5 py-1 text-xs font-medium text-zinc-700 hover:bg-zinc-50 disabled:cursor-not-allowed disabled:bg-zinc-100 disabled:text-zinc-400"
         >
-          {pendingAction === "delete" ? "删除中..." : "删除"}
+          {isSubmitting ? "处理中..." : "更多"}
         </button>
+
+        {isMenuOpen ? (
+          <div
+            role="menu"
+            className="absolute right-0 top-full z-10 mt-1 w-28 rounded-md border border-zinc-200 bg-white py-1 shadow-lg"
+          >
+            {isArchived ? (
+              <button
+                type="button"
+                role="menuitem"
+                onClick={() => handleStatusUpdate("ACTIVE")}
+                disabled={isSubmitting}
+                className="block w-full px-3 py-1.5 text-left text-xs text-zinc-700 hover:bg-zinc-50 disabled:cursor-not-allowed disabled:text-zinc-400"
+              >
+                恢复
+              </button>
+            ) : (
+              <button
+                type="button"
+                role="menuitem"
+                onClick={() => handleStatusUpdate("ARCHIVED")}
+                disabled={isSubmitting}
+                className="block w-full px-3 py-1.5 text-left text-xs text-zinc-700 hover:bg-zinc-50 disabled:cursor-not-allowed disabled:text-zinc-400"
+              >
+                归档
+              </button>
+            )}
+
+            <div className="my-1 border-t border-zinc-100" />
+
+            <button
+              type="button"
+              role="menuitem"
+              onClick={handleDelete}
+              disabled={isSubmitting}
+              className="block w-full px-3 py-1.5 text-left text-xs text-red-600 hover:bg-red-50 disabled:cursor-not-allowed disabled:text-zinc-400"
+            >
+              删除
+            </button>
+          </div>
+        ) : null}
       </div>
+
+      {isArchived ? (
+        pendingAction === "restore" ? (
+          <p className="text-xs text-zinc-500">正在恢复班级...</p>
+        ) : null
+      ) : (
+        pendingAction === "archive" ? (
+          <p className="text-xs text-zinc-500">正在归档班级...</p>
+        ) : null
+      )}
+
+      {pendingAction === "delete" ? (
+        <p className="text-xs text-zinc-500">正在删除班级...</p>
+      ) : null}
 
       {successMessage ? <p className="text-xs text-emerald-700">{successMessage}</p> : null}
 
