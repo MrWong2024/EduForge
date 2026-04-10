@@ -476,7 +476,7 @@ describe('Classroom Review Pack (e2e)', () => {
       'function studentELatest(){return 1;}',
     );
     const oldSubmissionDate = new Date(Date.now() - 40 * 24 * 60 * 60 * 1000);
-    await submissionModel.updateOne(
+    const backdateResult = await submissionModel.collection.updateOne(
       { _id: studentELatest._id },
       {
         $set: {
@@ -484,6 +484,25 @@ describe('Classroom Review Pack (e2e)', () => {
           submittedAt: oldSubmissionDate,
         },
       },
+    );
+    expect(backdateResult.matchedCount).toBe(1);
+    expect(backdateResult.modifiedCount).toBe(1);
+    const backdatedStudentESubmission = await submissionModel.collection.findOne<{
+      createdAt?: Date;
+      submittedAt?: Date;
+    }>(
+      { _id: studentELatest._id },
+      { projection: { createdAt: 1, submittedAt: 1 } },
+    );
+    expect(backdatedStudentESubmission).toBeDefined();
+    expect(backdatedStudentESubmission?.createdAt?.getTime()).toBe(
+      oldSubmissionDate.getTime(),
+    );
+    expect(backdatedStudentESubmission?.submittedAt?.getTime()).toBe(
+      oldSubmissionDate.getTime(),
+    );
+    expect(backdatedStudentESubmission?.createdAt?.getTime() ?? 0).toBeLessThan(
+      Date.now() - 30 * 24 * 60 * 60 * 1000,
     );
 
     await aiFeedbackJobModel.create([
