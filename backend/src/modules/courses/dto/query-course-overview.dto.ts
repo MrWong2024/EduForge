@@ -1,7 +1,7 @@
 import { Type } from 'class-transformer';
 import { IsIn, IsInt, IsOptional, Max, Min } from 'class-validator';
 
-export const COURSE_OVERVIEW_WINDOWS = ['1h', '24h', '7d'] as const;
+export const COURSE_OVERVIEW_WINDOWS = ['all', '1h', '24h', '7d'] as const;
 export type CourseOverviewWindow = (typeof COURSE_OVERVIEW_WINDOWS)[number];
 
 export const COURSE_OVERVIEW_SORT_FIELDS = [

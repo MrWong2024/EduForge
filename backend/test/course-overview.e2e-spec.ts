@@ -35,11 +35,14 @@ type CreatedClassroomTaskResponse = { id: string };
 type CreatedSubmissionResponse = { id: string };
 
 type CourseOverviewResponse = {
+  window: string;
   total: number;
   items: Array<{
     classroomId: string;
     name: string;
     studentsCount: number;
+    publishedClassroomTasks: number;
+    distinctStudentsSubmitted: number;
     submissionRate: number;
     ai: {
       jobsTotal: number;
@@ -422,5 +425,71 @@ describe('Course Overview (e2e)', () => {
     const pageLimitedBody = pageLimited.body as CourseOverviewResponse;
     expect(pageLimitedBody.total).toBe(2);
     expect(pageLimitedBody.items.length).toBe(1);
+  });
+
+  it('supports window=all and defaults to all while preserving legacy windows', async () => {
+    const legacyWindowOverview = await teacherAgent
+      .get(`/api/courses/${courseId}/overview`)
+      .query({ window: '24h' })
+      .expect(200);
+    const legacyWindowBody = legacyWindowOverview.body as CourseOverviewResponse;
+    expect(legacyWindowBody.window).toBe('24h');
+
+    const defaultWindowOverview = await teacherAgent
+      .get(`/api/courses/${courseId}/overview`)
+      .expect(200);
+    const defaultWindowBody =
+      defaultWindowOverview.body as CourseOverviewResponse;
+    expect(defaultWindowBody.window).toBe('all');
+
+    const oldDate = new Date(Date.now() - 10 * 24 * 60 * 60 * 1000);
+    await classroomTaskModel.collection.updateOne(
+      { _id: new Types.ObjectId(classroomTaskAId) },
+      { $set: { createdAt: oldDate } },
+    );
+
+    const allOverview = await teacherAgent
+      .get(`/api/courses/${courseId}/overview`)
+      .query({ window: 'all' })
+      .expect(200);
+    const allBody = allOverview.body as CourseOverviewResponse;
+    expect(allBody.window).toBe('all');
+
+    const sevenDaysOverview = await teacherAgent
+      .get(`/api/courses/${courseId}/overview`)
+      .query({ window: '7d' })
+      .expect(200);
+    const sevenDaysBody = sevenDaysOverview.body as CourseOverviewResponse;
+    expect(sevenDaysBody.window).toBe('7d');
+
+    const allClassroomA = allBody.items.find(
+      (item) => item.classroomId === classroomAId,
+    );
+    const sevenDaysClassroomA = sevenDaysBody.items.find(
+      (item) => item.classroomId === classroomAId,
+    );
+    expect(allClassroomA?.publishedClassroomTasks).toBe(1);
+    expect(sevenDaysClassroomA?.publishedClassroomTasks).toBe(0);
+    expect(allClassroomA?.distinctStudentsSubmitted).toBe(2);
+    expect(sevenDaysClassroomA?.distinctStudentsSubmitted).toBe(0);
+  });
+
+  it('rejects invalid course overview window', async () => {
+    const invalidWindowResponse = await teacherAgent
+      .get(`/api/courses/${courseId}/overview`)
+      .query({ window: 'not-supported' })
+      .expect(400);
+
+    const message = invalidWindowResponse.body?.message;
+    if (Array.isArray(message)) {
+      const combinedMessage = message.map((item) => String(item)).join(' | ');
+      expect(combinedMessage).toContain(
+        'window must be one of the following values',
+      );
+      expect(combinedMessage).toContain('all');
+      return;
+    }
+    expect(String(message)).toContain('window must be one of the following values');
+    expect(String(message)).toContain('all');
   });
 });

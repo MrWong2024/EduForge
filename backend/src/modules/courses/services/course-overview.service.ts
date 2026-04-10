@@ -60,19 +60,21 @@ type CourseOverviewItem = {
 
 @Injectable()
 export class CourseOverviewService {
-  private static readonly DEFAULT_WINDOW: CourseOverviewWindow = '7d';
+  private static readonly DEFAULT_WINDOW: CourseOverviewWindow = 'all';
   private static readonly DEFAULT_SORT: CourseOverviewSortField =
     'aiSuccessRate';
   private static readonly DEFAULT_ORDER: CourseOverviewSortOrder = 'desc';
   private static readonly DEFAULT_PAGE = 1;
   private static readonly DEFAULT_LIMIT = 20;
   private static readonly MAX_TOP_ERRORS = 5;
-  private static readonly WINDOW_MS_MAP: Record<CourseOverviewWindow, number> =
-    {
-      '1h': 60 * 60 * 1000,
-      '24h': 24 * 60 * 60 * 1000,
-      '7d': 7 * 24 * 60 * 60 * 1000,
-    };
+  private static readonly WINDOW_MS_MAP: Record<
+    Exclude<CourseOverviewWindow, 'all'>,
+    number
+  > = {
+    '1h': 60 * 60 * 1000,
+    '24h': 24 * 60 * 60 * 1000,
+    '7d': 7 * 24 * 60 * 60 * 1000,
+  };
 
   constructor(
     @InjectModel(Course.name)
@@ -110,9 +112,10 @@ export class CourseOverviewService {
     )
       ? (query.window as CourseOverviewWindow)
       : CourseOverviewService.DEFAULT_WINDOW;
-    const lowerBound = new Date(
-      Date.now() - CourseOverviewService.WINDOW_MS_MAP[window],
-    );
+    const lowerBound =
+      window === 'all'
+        ? null
+        : new Date(Date.now() - CourseOverviewService.WINDOW_MS_MAP[window]);
 
     const course = await this.courseModel
       .findOne({
@@ -170,13 +173,16 @@ export class CourseOverviewService {
     // AB metric contract:
     // Use createdAt as the single time-window field for classroomTasks/submissions/jobs.
     // This matches AA weekly-report semantics and keeps cross-endpoint comparisons stable.
+    const classroomTaskMatch: Record<string, unknown> = {
+      classroomId: { $in: classroomIds },
+    };
+    if (lowerBound) {
+      classroomTaskMatch.createdAt = { $gte: lowerBound };
+    }
     const classroomTaskAgg = await this.classroomTaskModel
       .aggregate<ClassroomTasksAgg>([
         {
-          $match: {
-            classroomId: { $in: classroomIds },
-            createdAt: { $gte: lowerBound },
-          },
+          $match: classroomTaskMatch,
         },
         {
           $group: {
@@ -201,16 +207,19 @@ export class CourseOverviewService {
       }
     }
 
+    const submissionMatch: Record<string, unknown> = {
+      classroomTaskId: { $in: classroomTaskIds },
+    };
+    if (lowerBound) {
+      submissionMatch.createdAt = { $gte: lowerBound };
+    }
     const submissionPairs =
       classroomTaskIds.length === 0
         ? []
         : await this.submissionModel
             .aggregate<SubmissionDistinctPairAgg>([
               {
-                $match: {
-                  classroomTaskId: { $in: classroomTaskIds },
-                  createdAt: { $gte: lowerBound },
-                },
+                $match: submissionMatch,
               },
               {
                 $group: {

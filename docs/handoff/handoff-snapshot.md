@@ -360,6 +360,7 @@ AI Provider 错误码（`ai-feedback-provider.error-codes.ts`）：
   - `GET /api/classrooms/:classroomId/weekly-report`
 - AB 课程总览（teacher）：
   - `GET /api/courses/:courseId/overview`
+  - 窗口契约：默认 `window=all`；后端兼容 `all/7d/24h/1h`；`all` 语义为无时间下界过滤。
 - Z4 学习轨迹（teacher）：
   - `GET /api/classrooms/:classroomId/tasks/:classroomTaskId/learning-trajectory`
   - `items[*]` 已返回结构化学生公开信息 `student:{id,name,studentNo,email}`（兼容 `studentName`），且未提交学生同样返回该信息。
@@ -376,12 +377,13 @@ AI Provider 错误码（`ai-feedback-provider.error-codes.ts`）：
   - `GET /api/classrooms/:classroomId/process-assessment`
   - `GET /api/classrooms/:classroomId/process-assessment.csv`
 - 统计窗口收口·阶段一（后端契约已落地，前端待跟进）：
-  - 范围：`weekly-report`、`process-assessment`（含 CSV）、`learning-trajectory`、`review-pack`。
+  - 范围：`weekly-report`、`process-assessment`（含 CSV）、`learning-trajectory`、`review-pack`、`course-overview`。
   - 默认窗口：以上接口默认值统一为 `all`。
   - `all` 语义：当前资源边界内的全部可统计历史记录；实现为“无时间下界过滤”，非固定天数伪全量。
   - 后端兼容窗口：
     - 班级级：`weekly-report` 支持 `all/7d/30d/24h/1h`，`process-assessment` 支持 `all/7d/30d/term`。
     - 单任务级：`learning-trajectory` 与 `review-pack` 支持 `all/7d/24h/30d`。
+    - 课程级：`course-overview` 支持 `all/7d/24h/1h`。
   - 前端状态：当前前端主展示与默认值尚未全部切换到上述新策略，下一阶段前端再收口。
   - 保护边界：`ai-metrics` 窗口集合保持 `1h/24h/7d`，本阶段未引入 `all`。
 - Z7 截止/迟交：

@@ -42,6 +42,8 @@ Notes:
 
 Notes:
 - `/api/courses/:courseId/overview` Query: `window, sort, order, page, limit`。
+- `/api/courses/:courseId/overview` 窗口契约：默认 `window=all`；后端兼容集合为 `all/7d/24h/1h`（旧值继续兼容）。
+- `/api/courses/:courseId/overview` 中 `window=all` 语义：课程总览口径下不拼时间下界（无 `createdAt >= lowerBound` 过滤）。
 - 权限：teacher only，且 `course.createdBy === currentUserId`；仅统计该 teacher 名下 classrooms。
 - 聚合口径：按 `classroomId + classroomTaskId` 隔离；`studentsCount` 来自 Enrollment（`role=STUDENT,status=ACTIVE`）。
 - `Course.courseLabel`：可选课程分类字段（与 `Task.courseLabel` 共用 `TASK_COURSE_LABELS`），用于“班级课程分类坐标”与模板课程分类对齐；非外键、可为空。

@@ -648,6 +648,22 @@
   - `term` 为后端兼容窗口
   - CSV 接口 `GET /api/classrooms/:classroomId/process-assessment.csv` 复用同 DTO/同窗口语义
 
+### GET /api/courses/:courseId/overview
+
+- Controller & Method: `backend/src/modules/courses/controllers/courses.controller.ts` -> `CoursesController.getCourseOverview`
+- Query DTO: `QueryCourseOverviewDto` (`backend/src/modules/courses/dto/query-course-overview.dto.ts`)
+- Fields:
+  - `window?: 'all' | '1h' | '24h' | '7d'`（`@IsIn(COURSE_OVERVIEW_WINDOWS)`；默认 `all`）
+  - `sort?: 'studentsCount' | 'submissionRate' | 'aiSuccessRate' | 'pendingJobs' | 'failedJobs'`
+  - `order?: 'asc' | 'desc'`
+  - `page?: number`（`@Type(() => Number) @IsInt() @Min(1)`）
+  - `limit?: number`（`@Type(() => Number) @IsInt() @Min(1) @Max(50)`）
+- Example Query:
+  - `/api/courses/{courseId}/overview?window=all&sort=aiSuccessRate&order=desc&page=1&limit=20`
+- Window 语义:
+  - `all` = 当前课程总览口径下全部历史记录（无时间下界过滤）
+  - `1h/24h/7d` 为兼容窗口，继续可用
+
 ### GET /api/classrooms/:classroomId/tasks/:classroomTaskId/learning-trajectory
 
 - Controller & Method: `backend/src/modules/classrooms/classroom-tasks/controllers/classroom-tasks.controller.ts` -> `ClassroomTasksController.getLearningTrajectory`
@@ -670,6 +686,7 @@
 
 - 后端兼容支持集合：以上 Query DTO 的 `@IsIn(...)` 允许值（含兼容窗口）。
 - 前端主展示集合：由下一阶段前端策略决定，不等同于后端兼容集合。
+- 课程总览窗口契约：`GET /api/courses/:courseId/overview` 默认 `all`，兼容 `all/1h/24h/7d`，其中 `all` 表示无时间下界过滤。
 - `ai-metrics` DTO 保持不变：`window` 仍仅支持 `1h | 24h | 7d`，不引入 `all`。
 
 ### GET /api/learning-tasks/tasks
