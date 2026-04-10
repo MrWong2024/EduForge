@@ -19,17 +19,18 @@
 | EmptyState | `components/blocks/EmptyState.tsx` | 空态统一视觉与动作插槽 | 不要各页自写风格不一空态 |
 | ErrorState | `components/blocks/ErrorState.tsx` | 错误态统一展示（含 401/403/404/500 默认文案） | 不要在业务组件散落硬编码错误块 |
 | Tabs | `components/blocks/Tabs.tsx` | 任务工作区 tab 导航 | 不要在三件套页面重复 tab 样式 |
+| FloatingMoreMenu | `components/blocks/FloatingMoreMenu.tsx` | 生命周期“更多”菜单的轻量浮层基础组件（Portal + fixed） | 不要在业务组件内重复实现 Portal 定位、视口边界钳制和外部点击/Esc/滚动关闭逻辑 |
 
 ## 3) Teacher 交互组件
 
 | 组件 | 文件 | 真实 API | 作用边界 |
 |---|---|---|---|
 | CreateCourseForm | `components/teacher/CreateCourseForm.tsx` | `POST courses` | 只负责建课表单与成功跳转；支持可选 `courseLabel`（课程分类）录入，候选项复用 `lib/learning-tasks/course-labels.ts` 单一来源 |
-| CourseLifecycleActions | `components/teacher/CourseLifecycleActions.tsx` | `PATCH courses/:id`、`DELETE courses/:id` | 只负责课程生命周期动作菜单（“更多”次级菜单）：`ACTIVE` 显示“归档/删除”、`ARCHIVED` 显示“恢复/删除”；删除为危险项且保留二次确认；删除失败命中 `COURSE_NOT_EMPTY` 时显示明确中文提示；动作成功后 `router.refresh()`，保持当前课程列表 query 视图 |
+| CourseLifecycleActions | `components/teacher/CourseLifecycleActions.tsx` | `PATCH courses/:id`、`DELETE courses/:id` | 只负责课程生命周期动作菜单（“更多”次级菜单）：`ACTIVE` 显示“归档/删除”、`ARCHIVED` 显示“恢复/删除”；菜单通过 `FloatingMoreMenu` 以 Portal 浮层渲染，脱离表格滚动容器；删除为危险项且保留二次确认；删除失败命中 `COURSE_NOT_EMPTY` 时显示明确中文提示；动作成功后 `router.refresh()`，保持当前课程列表 query 视图 |
 | EditCourseForm | `components/teacher/EditCourseForm.tsx` | `PATCH courses/:id` | 只负责课程基础信息编辑（`code/name/term/courseLabel`）与保存；`courseLabel` 候选项复用 `lib/learning-tasks/course-labels.ts` 单一来源，支持清空 |
 | CreateClassroomForm | `components/teacher/CreateClassroomForm.tsx` | `POST classrooms` | 只负责建班表单，不负责班级列表加载 |
 | EditClassroomForm | `components/teacher/EditClassroomForm.tsx` | `PATCH classrooms/:id` | 只负责班级基础信息编辑（当前仅 `name`）；`courseId/status/joinCode` 只读展示；归档班级更新失败按后端错误口径展示，不提供删除/归档动作 |
-| ClassroomLifecycleActions | `components/teacher/ClassroomLifecycleActions.tsx` | `PATCH classrooms/:id`、`DELETE classrooms/:id` | 只负责班级生命周期动作菜单（“更多”次级菜单）：`ACTIVE` 显示“归档/删除”、`ARCHIVED` 显示“恢复/删除”；删除为危险项且保留二次确认；删除失败命中 `CLASSROOM_NOT_EMPTY` 时显示明确中文提示；动作成功后 `router.refresh()`，保持当前列表 query 视图 |
+| ClassroomLifecycleActions | `components/teacher/ClassroomLifecycleActions.tsx` | `PATCH classrooms/:id`、`DELETE classrooms/:id` | 只负责班级生命周期动作菜单（“更多”次级菜单）：`ACTIVE` 显示“归档/删除”、`ARCHIVED` 显示“恢复/删除”；菜单通过 `FloatingMoreMenu` 以 Portal 浮层渲染，脱离表格滚动容器；删除为危险项且保留二次确认；删除失败命中 `CLASSROOM_NOT_EMPTY` 时显示明确中文提示；动作成功后 `router.refresh()`，保持当前列表 query 视图 |
 | CreateLearningTaskForm | `components/teacher/CreateLearningTaskForm.tsx` | `POST learning-tasks/tasks` | 只负责模板创建（核心字段 + 可选 `courseLabel` + `visibility` 单选 + 基础 rubric 配置，四维中文展示口径复用 `lib/ui/rubric.ts`），不负责班级实例发布 |
 | EditLearningTaskForm | `components/teacher/EditLearningTaskForm.tsx` | `PATCH learning-tasks/tasks/:id` | 只负责模板编辑/只读查看（核心字段 + 可选 `courseLabel` + `visibility` + status + rubric，四维中文展示口径复用 `lib/ui/rubric.ts`）；非作者共享模板仅可读，不负责班级实例发布；底部返回入口优先使用 `returnTo` 回到原模板列表上下文（缺失/非法时回退 `/teacher/tasks`） |
 | LearningTaskFilters | `components/teacher/LearningTaskFilters.tsx` | `GET learning-tasks/tasks?scope=...&courseLabel=...&status=...&knowledgeModule=...&stage=...&page=...&limit=20`（通过 URL query 触发服务端真实查询） | 负责模板层视图与筛选（`scope/status/knowledgeModule/stage/courseLabel` 全量 query 驱动）与列表呈现（含 `visibility` 轻量标签、非作者模板操作边界）；筛选变化统一重置 `page=1`，并使用标准分页（上一页/下一页）；编辑/查看入口会附带 `returnTo`（当前列表完整 URL，天然含页码与筛选）以保留回跳上下文；默认排序在“当前页结果渲染前”按 scope 策略执行；不发起模板发布请求 |

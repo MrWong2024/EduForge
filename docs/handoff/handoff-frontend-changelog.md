@@ -411,6 +411,14 @@
 - 【交互保持】操作成功后统一 `router.refresh()`，并保持当前 `statusView/page/limit` query，不打乱教师当前视图。
 - 【边界保持】仅前端展示层与交互接入，不涉及 backend 契约变更与依赖变更。
 
+## UAT-FE-48
+
+- 【本步解决】班级/课程列表“更多”菜单在表格滚动容器内展开时会撑出滚动条的问题。
+- 【新增事实 / 已收口口径】新增轻量共享浮层组件 `FloatingMoreMenu`（`Portal + fixed`），生命周期菜单渲染到 `document.body`，脱离列表滚动容器。
+- 【定位与关闭策略】菜单默认向下展开；下方空间不足时自动上翻；左右超出视口时做边界钳制；保留外部点击关闭、`Esc` 关闭；滚动/resize 时自动关闭，避免定位漂移。
+- 【语义保持】`ClassroomLifecycleActions` 与 `CourseLifecycleActions` 的菜单项语义、确认文案、后端调用、`router.refresh()`、`CLASSROOM_NOT_EMPTY/COURSE_NOT_EMPTY` 定制错误提示全部保持不变。
+- 【边界保持】仅前端展示层浮层化改造，不涉及 backend 契约与依赖变更。
+
 ## 当前阶段一句话结论
 
 前端已达到“Teacher/Student 主链路可用 + 任务模板层与班级实例层边界收口 + 教师模板主链路可维护”的工程验收阶段，但尚未进入最终交付定版阶段。

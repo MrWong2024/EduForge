@@ -1,8 +1,9 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { ErrorState } from "@/components/blocks/ErrorState";
+import { FloatingMoreMenu } from "@/components/blocks/FloatingMoreMenu";
 import { BrowserFetchJsonError, fetchJson } from "@/lib/api/browser-client";
 import { buildErrorDescription, extractRawDetail } from "@/lib/api/error-presenter";
 import { getCommonErrorSummary } from "@/lib/ui/status";
@@ -81,7 +82,6 @@ const getDeleteSummary = (status: number, code?: string): string => {
 
 export function CourseLifecycleActions({ courseId, status }: CourseLifecycleActionsProps) {
   const router = useRouter();
-  const menuContainerRef = useRef<HTMLDivElement | null>(null);
   const [pendingAction, setPendingAction] = useState<CourseLifecycleAction | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [errorState, setErrorState] = useState<CourseLifecycleErrorState | null>(null);
@@ -89,36 +89,6 @@ export function CourseLifecycleActions({ courseId, status }: CourseLifecycleActi
 
   const isSubmitting = pendingAction !== null;
   const isArchived = status === "ARCHIVED";
-
-  useEffect(() => {
-    if (!isMenuOpen) {
-      return;
-    }
-
-    const handlePointerDown = (event: MouseEvent) => {
-      if (!menuContainerRef.current) {
-        return;
-      }
-      if (menuContainerRef.current.contains(event.target as Node)) {
-        return;
-      }
-      setIsMenuOpen(false);
-    };
-
-    const handleEscape = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
-        setIsMenuOpen(false);
-      }
-    };
-
-    document.addEventListener("mousedown", handlePointerDown);
-    document.addEventListener("keydown", handleEscape);
-
-    return () => {
-      document.removeEventListener("mousedown", handlePointerDown);
-      document.removeEventListener("keydown", handleEscape);
-    };
-  }, [isMenuOpen]);
 
   const handleStatusUpdate = async (targetStatus: CourseStatus) => {
     const action: "archive" | "restore" = targetStatus === "ARCHIVED" ? "archive" : "restore";
@@ -219,59 +189,46 @@ export function CourseLifecycleActions({ courseId, status }: CourseLifecycleActi
 
   return (
     <div className="space-y-2">
-      <div ref={menuContainerRef} className="relative inline-flex">
+      <FloatingMoreMenu
+        isOpen={isMenuOpen}
+        onOpenChange={setIsMenuOpen}
+        disabled={isSubmitting}
+        label={isSubmitting ? "处理中..." : "更多"}
+      >
+        {isArchived ? (
+          <button
+            type="button"
+            role="menuitem"
+            onClick={() => handleStatusUpdate("ACTIVE")}
+            disabled={isSubmitting}
+            className="block w-full px-3 py-1.5 text-left text-xs text-zinc-700 hover:bg-zinc-50 disabled:cursor-not-allowed disabled:text-zinc-400"
+          >
+            恢复
+          </button>
+        ) : (
+          <button
+            type="button"
+            role="menuitem"
+            onClick={() => handleStatusUpdate("ARCHIVED")}
+            disabled={isSubmitting}
+            className="block w-full px-3 py-1.5 text-left text-xs text-zinc-700 hover:bg-zinc-50 disabled:cursor-not-allowed disabled:text-zinc-400"
+          >
+            归档
+          </button>
+        )}
+
+        <div className="my-1 border-t border-zinc-100" />
+
         <button
           type="button"
-          onClick={() => setIsMenuOpen((prev) => !prev)}
+          role="menuitem"
+          onClick={handleDelete}
           disabled={isSubmitting}
-          aria-haspopup="menu"
-          aria-expanded={isMenuOpen}
-          className="rounded-md border border-zinc-300 px-2.5 py-1 text-xs font-medium text-zinc-700 hover:bg-zinc-50 disabled:cursor-not-allowed disabled:bg-zinc-100 disabled:text-zinc-400"
+          className="block w-full px-3 py-1.5 text-left text-xs text-red-600 hover:bg-red-50 disabled:cursor-not-allowed disabled:text-zinc-400"
         >
-          {isSubmitting ? "处理中..." : "更多"}
+          删除
         </button>
-
-        {isMenuOpen ? (
-          <div
-            role="menu"
-            className="absolute right-0 top-full z-10 mt-1 w-28 rounded-md border border-zinc-200 bg-white py-1 shadow-lg"
-          >
-            {isArchived ? (
-              <button
-                type="button"
-                role="menuitem"
-                onClick={() => handleStatusUpdate("ACTIVE")}
-                disabled={isSubmitting}
-                className="block w-full px-3 py-1.5 text-left text-xs text-zinc-700 hover:bg-zinc-50 disabled:cursor-not-allowed disabled:text-zinc-400"
-              >
-                恢复
-              </button>
-            ) : (
-              <button
-                type="button"
-                role="menuitem"
-                onClick={() => handleStatusUpdate("ARCHIVED")}
-                disabled={isSubmitting}
-                className="block w-full px-3 py-1.5 text-left text-xs text-zinc-700 hover:bg-zinc-50 disabled:cursor-not-allowed disabled:text-zinc-400"
-              >
-                归档
-              </button>
-            )}
-
-            <div className="my-1 border-t border-zinc-100" />
-
-            <button
-              type="button"
-              role="menuitem"
-              onClick={handleDelete}
-              disabled={isSubmitting}
-              className="block w-full px-3 py-1.5 text-left text-xs text-red-600 hover:bg-red-50 disabled:cursor-not-allowed disabled:text-zinc-400"
-            >
-              删除
-            </button>
-          </div>
-        ) : null}
-      </div>
+      </FloatingMoreMenu>
 
       {isArchived ? (
         pendingAction === "restore" ? (

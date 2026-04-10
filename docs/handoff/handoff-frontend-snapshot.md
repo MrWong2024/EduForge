@@ -45,6 +45,7 @@ frontend/
 - `/teacher/**`：教师起步链路、模板链路、班级发布链路、批阅链路、三件套、周报/过程性评价/快照已接入真接口。
 - 教师班级基础管理层（已落地）：
   - `/teacher/classrooms`：班级列表 + 创建班级；默认按 `进行中/已归档/全部` 视图区分展示，操作列提供“进入班级/编辑班级”，班级生命周期动作统一收进“更多”次级菜单。
+  - 班级生命周期菜单已改为 `Portal + fixed` 浮层（渲染到 `document.body`），脱离表格滚动容器，菜单展开不再撑出列表滚动条。
   - 班级列表空态动作已按 `statusView` 收口：页面主创建入口固定保留 `CreateClassroomForm`；`archived` 空态仅提供“查看进行中班级”动作；`active/all` 空态不再追加“创建班级”按钮，避免与主创建入口重复。
   - 班级生命周期操作已接入后端契约：
     - 归档/恢复：`PATCH classrooms/:id`（`status=ARCHIVED/ACTIVE`）
@@ -72,6 +73,7 @@ frontend/
 - 统一 rubric 四维中文映射：`lib/ui/rubric.ts`（`functionality/correctness/codeStyle/design` 与中文文案的单一事实源，供 Teacher/Student 共同复用）。
 - 统一错误展开：`lib/api/error-presenter.ts` + `components/blocks/ErrorState.tsx`。
 - 空态组件：`components/blocks/EmptyState.tsx`。
+- 浮层菜单组件：`components/blocks/FloatingMoreMenu.tsx`（班级/课程生命周期“更多”菜单共享，负责 Portal 渲染、位置钳制与统一关闭行为）。
 - Role gate：
   - `lib/auth/session.ts` 使用 `GET users/me` 探针
   - `app/teacher/layout.tsx` / `app/student/layout.tsx` 角色门禁
@@ -104,6 +106,7 @@ Teacher 课程视角（可用）：
 - 课程生命周期操作已接入后端契约，统一收进“更多”次级菜单：
   - 归档/恢复：`PATCH courses/:id`（`status=ARCHIVED/ACTIVE`）
   - 删除：`DELETE courses/:id`（前端统一提供入口，失败时按后端 `409 + COURSE_NOT_EMPTY` 显示“该课程下已有班级记录，不能删除，只能归档”）
+- 课程生命周期菜单已改为 `Portal + fixed` 浮层（渲染到 `document.body`），脱离表格滚动容器，菜单展开不再撑出列表滚动条。
 - 课程空态动作已按 `statusView` 收口：页面主创建入口固定保留 `CreateCourseForm`；`archived` 空态仅提供“查看进行中课程”动作；`active/all` 空态不再追加“创建课程”按钮，避免与主创建入口重复。
 - `/teacher/courses/[courseId]/overview` 已接入课程总览，并展示课程分类。
 - `/teacher/courses/[courseId]/edit` 已支持课程基础信息编辑（`code/name/term/courseLabel`）；`courseLabel` 可修改也可清空。
