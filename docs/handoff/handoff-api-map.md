@@ -33,7 +33,8 @@ Notes:
 | Method | Path | 用途 |
 |---|---|---|
 | POST | `/api/courses` | 教师创建课程。 |
-| PATCH | `/api/courses/:id` | 教师更新课程（归属校验 + 归档限制）。 |
+| PATCH | `/api/courses/:id` | 教师更新课程（含 `status` 归档/恢复）。 |
+| DELETE | `/api/courses/:id` | 教师删除空课程（仅无班级引用时允许）。 |
 | GET | `/api/courses` | 教师分页查询课程。 |
 | GET | `/api/courses/:id` | 教师获取单课程详情。 |
 | GET | `/api/courses/:courseId/overview` | 课程总览（AB）。 |
@@ -44,6 +45,10 @@ Notes:
 - 权限：teacher only，且 `course.createdBy === currentUserId`；仅统计该 teacher 名下 classrooms。
 - 聚合口径：按 `classroomId + classroomTaskId` 隔离；`studentsCount` 来自 Enrollment（`role=STUDENT,status=ACTIVE`）。
 - `Course.courseLabel`：可选课程分类字段（与 `Task.courseLabel` 共用 `TASK_COURSE_LABELS`），用于“班级课程分类坐标”与模板课程分类对齐；非外键、可为空。
+- 课程状态契约：`Course.status` 支持 `ACTIVE | ARCHIVED`；`PATCH /api/courses/:id` 可通过 body `status` 实现归档与恢复（`ARCHIVED <-> ACTIVE`）。
+- 课程删除契约：`DELETE /api/courses/:id` 仅在“空课程”允许删除；空课程判定主规则是 `Classroom` 无记录（`Classroom.exists({ courseId }) === false`）。
+- 非空课程删除错误：返回 `409 Conflict`，错误码 `COURSE_NOT_EMPTY`，message=`该课程下已有班级记录，不能删除，只能归档`。
+- 兼容接口：保留 `POST /api/courses/:id/archive`，内部收口到统一状态更新链路。
 
 ## Classrooms
 

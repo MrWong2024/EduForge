@@ -77,7 +77,7 @@
 
 - Service: `backend/src/modules/courses/services/courses.service.ts`
 - Domain: `Course`
-- Actions: `create`, `update`, `list`, `archive`
+- Actions: `create`, `update(status)`, `list/get`, `archive`, `delete-empty-course`
 - I/O Shape:
   - In: `Create/Update/QueryCourseDto`, `courseId`, `userId`
   - Out: `CourseResponseDto` | `{ items, total, page, limit }`
@@ -87,15 +87,17 @@
   - `listCourses(query: QueryCourseDto, userId: string): Promise<{ items: CourseResponseDto[]; total: number; page: number; limit: number }> — called by GET /courses`
   - `getCourse(id: string, userId: string): Promise<CourseResponseDto> — called by GET /courses/:id`
   - `archiveCourse(id: string, userId: string): Promise<CourseResponseDto> — called by POST /courses/:id/archive`
+  - `deleteCourse(id: string, userId: string): Promise<{ ok: true }> — called by DELETE /courses/:id`
 - AuthZ Boundary: `teacher-only`（service 内 `ensureTeacher` 强校验）
 - Metrics/Isolation: 按 `createdBy(userId)` 做课程隔离
-- Consistency/Constraints: `unique(createdBy,code)`；归档课程禁止更新；分页上限 `100`；`courseLabel` 为可选单值分类字段（与 `Task.courseLabel` 共用 `TASK_COURSE_LABELS`），创建/更新时会 trim 并拒绝白名单外值，空白输入按未设置处理
-- Deps/Side Effects: `CourseModel`, `UserModel`；写课程文档
+- Consistency/Constraints: `unique(createdBy,code)`；`PATCH /courses/:id` 支持 `status=ACTIVE|ARCHIVED` 归档/恢复；归档课程禁止更新 `code/name/term/courseLabel`，但允许通过 `status=ACTIVE` 恢复；删除仅允许空课程（`Classroom.exists({ courseId })===false`）；非空删除返回 `409(code=COURSE_NOT_EMPTY)`；分页上限 `100`；`courseLabel` 为可选单值分类字段（与 `Task.courseLabel` 共用 `TASK_COURSE_LABELS`），创建/更新时会 trim 并拒绝白名单外值，空白输入按未设置处理
+- Deps/Side Effects: `CourseModel`, `ClassroomModel`, `UserModel`；写课程文档
 - Performance Notes: `find + countDocuments` 并发执行，避免串行等待
 - SoT: `backend/src/modules/courses/schemas/course.schema.ts`; `backend/src/modules/courses/dto/query-course.dto.ts`
 - Failure Modes:
   - 非教师 -> `403 Not allowed to manage courses`
   - 课程不存在 -> `404`
+  - 非空课程删除 -> `409 Conflict`（`code=COURSE_NOT_EMPTY`，message=`该课程下已有班级记录，不能删除，只能归档`）
   - 重复 code(`11000`) -> `400 Course code already exists`
 
 ## Service Card 04

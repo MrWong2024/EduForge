@@ -87,6 +87,7 @@ backend/
 │  ├─ classroom-student-task-detail.e2e-spec.ts
 │  ├─ classroom-weekly-report.e2e-spec.ts
 │  ├─ course-overview.e2e-spec.ts
+│  ├─ course-lifecycle.e2e-spec.ts
 │  ├─ enrollments.authority-and-legacy.e2e-spec.ts
 │  ├─ enrollment-only.regression.e2e-spec.ts
 │  ├─ classroom-learning-trajectory.e2e-spec.ts
@@ -280,6 +281,13 @@ AI Provider 错误码（`ai-feedback-provider.error-codes.ts`）：
   - 删除禁止条件：存在任一 `ClassroomTask` 或任一 `Enrollment`（包括 `REMOVED` 历史）即不可删，只能归档。
   - 辅助一致性校验：`studentIds` 仅作防御性检查，不作为唯一主判定来源。
   - 非空删除错误口径：`409 Conflict`，`code=CLASSROOM_NOT_EMPTY`，message=`该班级已有成员或任务记录，不能删除，只能归档`。
+- P1 课程归档/删除契约（后端阶段一已完成，前端待后续阶段接入）：
+  - 状态口径：`Course.status` 仅 `ACTIVE | ARCHIVED`，支持通过 `PATCH /api/courses/:id` 的 `status` 字段执行归档/恢复。
+  - 兼容接口：保留 `POST /api/courses/:id/archive`，内部已收口到统一状态更新链路。
+  - 新增删除接口：`DELETE /api/courses/:id`（teacher only + owner only）。
+  - 删除允许条件：`Classroom.exists({ courseId }) === false`。
+  - 删除禁止条件：存在任一 `Classroom` 引用课程即不可删，只能归档。
+  - 非空删除错误口径：`409 Conflict`，`code=COURSE_NOT_EMPTY`，message=`该课程下已有班级记录，不能删除，只能归档`。
 - P1 课堂任务生命周期状态流契约（后端已完成，前端待后续阶段接入）：
   - `ClassroomTask` 新增状态字段：`ACTIVE | CLOSED | RECALLED`，默认 `ACTIVE`。
   - 新增状态流转接口：`PATCH /api/classrooms/:classroomId/tasks/:classroomTaskId/status`（教师端）。

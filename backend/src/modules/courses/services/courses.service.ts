@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  ConflictException,
   ForbiddenException,
   Injectable,
   NotFoundException,
@@ -7,6 +8,7 @@ import {
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import { Course, CourseStatus } from '../schemas/course.schema';
+import { Classroom } from '../../classrooms/schemas/classroom.schema';
 import { CreateCourseDto } from '../dto/create-course.dto';
 import { UpdateCourseDto } from '../dto/update-course.dto';
 import { QueryCourseDto } from '../dto/query-course.dto';
@@ -23,8 +25,14 @@ type CourseWithMeta = Course & WithId & WithTimestamps;
 
 @Injectable()
 export class CoursesService {
+  private static readonly COURSE_NOT_EMPTY_CODE = 'COURSE_NOT_EMPTY';
+  private static readonly COURSE_NOT_EMPTY_MESSAGE =
+    '该课程下已有班级记录，不能删除，只能归档';
+
   constructor(
     @InjectModel(Course.name) private readonly courseModel: Model<Course>,
+    @InjectModel(Classroom.name)
+    private readonly classroomModel: Model<Classroom>,
     @InjectModel(User.name) private readonly userModel: Model<User>,
   ) {}
 
@@ -50,17 +58,16 @@ export class CoursesService {
 
   async updateCourse(id: string, dto: UpdateCourseDto, userId: string) {
     await this.ensureTeacher(userId);
-    const course = await this.courseModel.findOne({
-      _id: id,
-      createdBy: new Types.ObjectId(userId),
-    });
-    if (!course) {
-      throw new NotFoundException('Course not found');
-    }
-    if (course.status === CourseStatus.Archived) {
+    const course = await this.findOwnedCourseOrThrow(id, userId);
+    const hasCourseLabel = dto.courseLabel !== undefined;
+    const hasBaseFieldUpdate =
+      dto.code !== undefined ||
+      dto.name !== undefined ||
+      dto.term !== undefined ||
+      hasCourseLabel;
+    if (course.status === CourseStatus.Archived && hasBaseFieldUpdate) {
       throw new BadRequestException('Archived courses cannot be updated');
     }
-    const hasCourseLabel = 'courseLabel' in dto;
     if (dto.code !== undefined) {
       course.code = dto.code;
     }
@@ -73,8 +80,13 @@ export class CoursesService {
     if (hasCourseLabel) {
       course.courseLabel = this.toSanitizedCourseLabel(dto.courseLabel);
     }
+    if (dto.status !== undefined) {
+      course.status = dto.status;
+    }
     try {
-      await course.save();
+      if (hasBaseFieldUpdate || dto.status !== undefined) {
+        await course.save();
+      }
       return this.toCourseResponse(course as CourseWithMeta);
     } catch (error) {
       const mongoError = error as { code?: number };
@@ -131,19 +143,15 @@ export class CoursesService {
   }
 
   async archiveCourse(id: string, userId: string) {
+    return this.updateCourse(id, { status: CourseStatus.Archived }, userId);
+  }
+
+  async deleteCourse(id: string, userId: string) {
     await this.ensureTeacher(userId);
-    const course = await this.courseModel.findOne({
-      _id: id,
-      createdBy: new Types.ObjectId(userId),
-    });
-    if (!course) {
-      throw new NotFoundException('Course not found');
-    }
-    if (course.status !== CourseStatus.Archived) {
-      course.status = CourseStatus.Archived;
-      await course.save();
-    }
-    return this.toCourseResponse(course as CourseWithMeta);
+    const course = await this.findOwnedCourseOrThrow(id, userId);
+    await this.assertCourseCanBeDeleted(course._id);
+    await this.courseModel.deleteOne({ _id: course._id }).exec();
+    return { ok: true };
   }
 
   private async ensureTeacher(userId: string) {
@@ -177,5 +185,27 @@ export class CoursesService {
     }
     const trimmed = value.trim();
     return trimmed ? trimmed : undefined;
+  }
+
+  private async findOwnedCourseOrThrow(id: string, userId: string) {
+    const course = await this.courseModel.findOne({
+      _id: id,
+      createdBy: new Types.ObjectId(userId),
+    });
+    if (!course) {
+      throw new NotFoundException('Course not found');
+    }
+    return course;
+  }
+
+  private async assertCourseCanBeDeleted(courseId: Types.ObjectId) {
+    const classroom = await this.classroomModel.exists({ courseId }).exec();
+    if (classroom) {
+      throw new ConflictException({
+        statusCode: 409,
+        code: CoursesService.COURSE_NOT_EMPTY_CODE,
+        message: CoursesService.COURSE_NOT_EMPTY_MESSAGE,
+      });
+    }
   }
 }

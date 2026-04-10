@@ -139,6 +139,7 @@
 - Required fields: None（全部 `@IsOptional()`）
 - Enums:
   - `courseLabel`（可选）: `TASK_COURSE_LABELS`（与 `Task.courseLabel` 同值域）
+  - `status`（可选）: `ACTIVE | ARCHIVED`（from `CourseStatus`）
 - Nested structure: None
 - Minimal JSON example:
 
@@ -148,8 +149,24 @@
   "courseLabel": "数据结构"
 }
 ```
+- Archive example:
+
+```json
+{
+  "status": "ARCHIVED"
+}
+```
+
+- Restore example:
+
+```json
+{
+  "status": "ACTIVE"
+}
+```
 - Notes:
   - `courseLabel` 支持清空：传空字符串（如 `"courseLabel": "   "`）会在后端 trim 后按未设置处理，不会以脏值落库。
+  - 归档课程仅允许通过 `status` 做恢复；仍不允许更新 `code/name/term/courseLabel`。
 
 ### POST /api/courses/:id/archive
 
@@ -159,6 +176,18 @@
 - Enums: None
 - Nested structure: None
 - Minimal request: No body (`Content-Length: 0`). Do not send JSON `null`.
+
+### DELETE /api/courses/:id
+
+- Controller & Method: `backend/src/modules/courses/controllers/courses.controller.ts` -> `CoursesController.deleteCourse`
+- DTO: No body
+- Required fields: None
+- Enums: None
+- Nested structure: None
+- Minimal request: No body (`Content-Length: 0`). Do not send JSON `null`.
+- Notes:
+  - 仅允许删除空课程：必须满足 `Classroom.exists({ courseId }) === false`。
+  - 非空删除返回 `409`，`code=COURSE_NOT_EMPTY`，message=`该课程下已有班级记录，不能删除，只能归档`。
 
 ---
 
