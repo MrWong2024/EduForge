@@ -29,7 +29,8 @@ type CourseOverviewPageProps = {
   }>;
 };
 
-const WINDOWS = ["1h", "24h", "7d"] as const;
+const DISPLAY_WINDOWS = ["all", "7d"] as const;
+const OVERVIEW_WINDOWS = ["1h", "24h", "7d", "all"] as const;
 const SORT_FIELDS = [
   "studentsCount",
   "submissionRate",
@@ -39,10 +40,14 @@ const SORT_FIELDS = [
 ] as const;
 const SORT_ORDERS = ["asc", "desc"] as const;
 
-const WINDOW_LABELS: Record<(typeof WINDOWS)[number], string> = {
+type CourseOverviewWindow = (typeof OVERVIEW_WINDOWS)[number];
+type CourseOverviewDisplayWindow = (typeof DISPLAY_WINDOWS)[number];
+
+const WINDOW_LABELS: Record<CourseOverviewWindow, string> = {
   "1h": "近 1 小时",
   "24h": "近 24 小时",
   "7d": "近 7 天",
+  all: "全部",
 };
 
 const SORT_FIELD_LABELS: Record<(typeof SORT_FIELDS)[number], string> = {
@@ -59,7 +64,7 @@ const SORT_ORDER_LABELS: Record<(typeof SORT_ORDERS)[number], string> = {
 };
 
 type CourseOverviewQueryState = {
-  window: (typeof WINDOWS)[number];
+  window: CourseOverviewWindow;
   sort: (typeof SORT_FIELDS)[number];
   order: (typeof SORT_ORDERS)[number];
   page: number;
@@ -68,16 +73,16 @@ type CourseOverviewQueryState = {
 
 type CourseOverviewSummary = {
   classroomsTotal: number;
-  studentsTotalInPage: number;
+  classroomsInPage: number;
   classroomsWithSubmissionInPage: number;
-  aiPendingJobsTotalInPage: number;
-  aiFailedJobsTotalInPage: number;
+  averageSubmissionRateInPage?: number;
+  averageAiSuccessRateInPage?: number;
 };
 
 const resolveQueryState = (
   query: Awaited<CourseOverviewPageProps["searchParams"]>
 ): CourseOverviewQueryState => ({
-  window: parseEnum(getSingleSearchParam(query.window), WINDOWS, "7d"),
+  window: parseEnum(getSingleSearchParam(query.window), OVERVIEW_WINDOWS, "all"),
   sort: parseEnum(getSingleSearchParam(query.sort), SORT_FIELDS, "aiSuccessRate"),
   order: parseEnum(getSingleSearchParam(query.order), SORT_ORDERS, "desc"),
   page: parsePositiveInt(getSingleSearchParam(query.page), 1, { min: 1, max: 100 }),
@@ -97,34 +102,60 @@ const getRequestOrigin = async (): Promise<string> => {
 const asSafeNumber = (value?: number): number =>
   typeof value === "number" && Number.isFinite(value) ? value : 0;
 
+const toPercentNumber = (value: number | undefined): number | undefined => {
+  if (typeof value !== "number" || !Number.isFinite(value) || value < 0) {
+    return undefined;
+  }
+  return value <= 1 ? value * 100 : value;
+};
+
+const toPercentText = (value: number | undefined): string => {
+  const percent = toPercentNumber(value);
+  if (typeof percent !== "number") {
+    return "—";
+  }
+  const digits = percent > 0 && percent < 10 ? 1 : 0;
+  return `${percent.toFixed(digits)}%`;
+};
+
 const buildOverviewSummary = (
   data: ReturnType<typeof toCourseOverviewResponse>
 ): CourseOverviewSummary => {
   const items = data.items;
-  const studentsTotalInPage = items.reduce(
-    (accumulator, item) => accumulator + asSafeNumber(item.studentsCount),
-    0
-  );
+  const classroomsInPage = items.length;
   const classroomsWithSubmissionInPage = items.reduce((accumulator, item) => {
     const hasSubmittedStudents = asSafeNumber(item.distinctStudentsSubmitted) > 0;
     const hasSubmissionRate = asSafeNumber(item.submissionRate) > 0;
     return hasSubmittedStudents || hasSubmissionRate ? accumulator + 1 : accumulator;
   }, 0);
-  const aiPendingJobsTotalInPage = items.reduce(
-    (accumulator, item) => accumulator + asSafeNumber(item.aiPendingJobs),
-    0
-  );
-  const aiFailedJobsTotalInPage = items.reduce(
-    (accumulator, item) => accumulator + asSafeNumber(item.aiFailedJobs),
-    0
-  );
+
+  let submissionRateSum = 0;
+  let submissionRateCount = 0;
+  let aiSuccessRateSum = 0;
+  let aiSuccessRateCount = 0;
+
+  for (const item of items) {
+    const submissionRate = toPercentNumber(item.submissionRate);
+    if (typeof submissionRate === "number") {
+      submissionRateSum += submissionRate;
+      submissionRateCount += 1;
+    }
+
+    const aiSuccessRate = toPercentNumber(item.aiSuccessRate);
+    if (typeof aiSuccessRate === "number") {
+      aiSuccessRateSum += aiSuccessRate;
+      aiSuccessRateCount += 1;
+    }
+  }
 
   return {
     classroomsTotal: typeof data.total === "number" ? data.total : items.length,
-    studentsTotalInPage,
+    classroomsInPage,
     classroomsWithSubmissionInPage,
-    aiPendingJobsTotalInPage,
-    aiFailedJobsTotalInPage,
+    averageSubmissionRateInPage:
+      submissionRateCount > 0 ? submissionRateSum / submissionRateCount : undefined,
+    averageAiSuccessRateInPage:
+      aiSuccessRateCount > 0 ? aiSuccessRateSum / aiSuccessRateCount : undefined,
   };
 };
 
@@ -216,7 +247,7 @@ export default async function CourseOverviewPage({ params, searchParams }: Cours
     })}`;
   };
 
-  const windowItems = WINDOWS.map((windowValue) => ({
+  const windowItems = DISPLAY_WINDOWS.map((windowValue: CourseOverviewDisplayWindow) => ({
     value: windowValue,
     label: WINDOW_LABELS[windowValue],
     href: buildHref({ window: windowValue, page: 1 }),
@@ -263,66 +294,69 @@ export default async function CourseOverviewPage({ params, searchParams }: Cours
         }
       />
 
-      <section className="space-y-3 rounded-lg border border-zinc-200 bg-white p-4">
-        <div className="flex flex-wrap items-center gap-2">
-          <p className="text-xs font-medium text-zinc-500">统计窗口</p>
-          {windowItems.map((item) => (
-            <Link
-              key={item.value}
-              href={item.href}
-              className={
-                item.value === viewModel.query.window
-                  ? "rounded bg-zinc-900 px-2.5 py-1 text-xs font-medium text-white"
-                  : "rounded border border-zinc-300 px-2.5 py-1 text-xs font-medium text-zinc-700 hover:border-zinc-500"
-              }
-            >
-              {item.label}
-            </Link>
-          ))}
-        </div>
-
-        <div className="flex flex-wrap items-center gap-2">
-          <p className="text-xs font-medium text-zinc-500">明细排序</p>
-          {sortItems.map((item) => (
-            <Link
-              key={item.value}
-              href={item.href}
-              className={
-                item.value === viewModel.query.sort
-                  ? "rounded bg-zinc-900 px-2.5 py-1 text-xs font-medium text-white"
-                  : "rounded border border-zinc-300 px-2.5 py-1 text-xs font-medium text-zinc-700 hover:border-zinc-500"
-              }
-            >
-              {item.label}
-            </Link>
-          ))}
-        </div>
-
-        <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-zinc-500">
-          <div className="flex flex-wrap items-center gap-2">
-            <p className="font-medium">排序方向</p>
-            {orderItems.map((item) => (
-              <Link
-                key={item.value}
-                href={item.href}
-                className={
-                  item.value === viewModel.query.order
-                    ? "rounded bg-zinc-900 px-2.5 py-1 text-white"
-                    : "rounded border border-zinc-300 px-2.5 py-1 text-zinc-700 hover:border-zinc-500"
-                }
-              >
-                {item.label}
-              </Link>
-            ))}
+      <section className="rounded-lg border border-zinc-200 bg-white p-4 text-sm">
+        <p className="font-medium text-zinc-900">筛选条件</p>
+        <div className="mt-2 flex flex-wrap items-center gap-4 text-zinc-700">
+          <div className="flex items-center gap-2">
+            <span>统计窗口:</span>
+            {windowItems.map((item) => {
+              const active = item.value === viewModel.query.window;
+              return (
+                <Link
+                  key={item.value}
+                  href={item.href}
+                  className={active ? "font-semibold text-blue-700" : "text-blue-700 hover:underline"}
+                >
+                  {item.label}
+                </Link>
+              );
+            })}
+            {!DISPLAY_WINDOWS.includes(viewModel.query.window as CourseOverviewDisplayWindow) ? (
+              <span className="text-zinc-500">
+                当前：{WINDOW_LABELS[viewModel.query.window]}（旧链接兼容）
+              </span>
+            ) : null}
           </div>
-          <p>统计生成于：{toDisplayDate(viewModel.data.generatedAt)}</p>
+
+          <div className="flex items-center gap-2">
+            <span>明细排序:</span>
+            {sortItems.map((item) => {
+              const active = item.value === viewModel.query.sort;
+              return (
+                <Link
+                  key={item.value}
+                  href={item.href}
+                  className={active ? "font-semibold text-blue-700" : "text-blue-700 hover:underline"}
+                >
+                  {item.label}
+                </Link>
+              );
+            })}
+          </div>
+
+          <div className="flex items-center gap-2">
+            <span>排序方向:</span>
+            {orderItems.map((item) => {
+              const active = item.value === viewModel.query.order;
+              return (
+                <Link
+                  key={item.value}
+                  href={item.href}
+                  className={active ? "font-semibold text-blue-700" : "text-blue-700 hover:underline"}
+                >
+                  {item.label}
+                </Link>
+              );
+            })}
+          </div>
         </div>
+        <p className="mt-2 text-xs text-zinc-500">统计生成于：{toDisplayDate(viewModel.data.generatedAt)}</p>
       </section>
 
       <section className="rounded-lg border border-zinc-200 bg-white p-4">
         <p className="text-sm font-medium text-zinc-900">课程摘要</p>
         <p className="mt-1 text-xs text-zinc-500">
-          班级总数来自 overview `total`。其余指标基于当前页班级明细聚合。
+          班级总数来自 overview `total`。其余指标均基于当前页班级明细聚合，避免误读为全课程总量。
         </p>
         <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-5">
           <div className="rounded-md border border-zinc-200 bg-zinc-50 p-3">
@@ -332,9 +366,9 @@ export default async function CourseOverviewPage({ params, searchParams }: Cours
             </p>
           </div>
           <div className="rounded-md border border-zinc-200 bg-zinc-50 p-3">
-            <p className="text-xs text-zinc-500">当前页学生总数</p>
+            <p className="text-xs text-zinc-500">当前页班级数</p>
             <p className="mt-1 text-lg font-semibold text-zinc-900">
-              {toDisplayText(summary.studentsTotalInPage)}
+              {toDisplayText(summary.classroomsInPage)}
             </p>
           </div>
           <div className="rounded-md border border-zinc-200 bg-zinc-50 p-3">
@@ -344,15 +378,15 @@ export default async function CourseOverviewPage({ params, searchParams }: Cours
             </p>
           </div>
           <div className="rounded-md border border-zinc-200 bg-zinc-50 p-3">
-            <p className="text-xs text-zinc-500">当前页 AI 待处理总量</p>
+            <p className="text-xs text-zinc-500">当前页平均提交率</p>
             <p className="mt-1 text-lg font-semibold text-zinc-900">
-              {toDisplayText(summary.aiPendingJobsTotalInPage)}
+              {toPercentText(summary.averageSubmissionRateInPage)}
             </p>
           </div>
           <div className="rounded-md border border-zinc-200 bg-zinc-50 p-3">
-            <p className="text-xs text-zinc-500">当前页 AI 失败总量</p>
+            <p className="text-xs text-zinc-500">当前页平均 AI 成功率</p>
             <p className="mt-1 text-lg font-semibold text-zinc-900">
-              {toDisplayText(summary.aiFailedJobsTotalInPage)}
+              {toPercentText(summary.averageAiSuccessRateInPage)}
             </p>
           </div>
         </div>
