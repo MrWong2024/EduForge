@@ -419,6 +419,14 @@
 - 【语义保持】`ClassroomLifecycleActions` 与 `CourseLifecycleActions` 的菜单项语义、确认文案、后端调用、`router.refresh()`、`CLASSROOM_NOT_EMPTY/COURSE_NOT_EMPTY` 定制错误提示全部保持不变。
 - 【边界保持】仅前端展示层浮层化改造，不涉及 backend 契约与依赖变更。
 
+## UAT-FE-49
+
+- 【本步解决】课程总览页顶部技术态参数裸露（`window/sort/order/page`）与“总览感不足”的问题。
+- 【新增事实 / 已收口口径】`/teacher/courses/[courseId]/overview` 页面结构已收口为“筛选区 -> 课程摘要 -> 班级明细 -> 分页”，不再直接展示技术参数回显文本。
+- 【筛选表达优化】窗口与排序仍沿用原 query 契约，但改为中文标签按钮组（统计窗口、明细排序、排序方向），并保留原有切换与分页能力。
+- 【摘要补强】在不新增后端字段前提下，基于现有 overview `items/total` 前端聚合课程级轻量摘要：班级总数、当前页学生总数、当前页有提交班级数、当前页 AI 待处理总量、当前页 AI 失败总量。
+- 【边界保持】仅前端表达层收口，不涉及 backend 接口、字段或契约变更。
+
 ## 当前阶段一句话结论
 
 前端已达到“Teacher/Student 主链路可用 + 任务模板层与班级实例层边界收口 + 教师模板主链路可维护”的工程验收阶段，但尚未进入最终交付定版阶段。

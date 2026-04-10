@@ -108,7 +108,8 @@ Teacher 课程视角（可用）：
   - 删除：`DELETE courses/:id`（前端统一提供入口，失败时按后端 `409 + COURSE_NOT_EMPTY` 显示“该课程下已有班级记录，不能删除，只能归档”）
 - 课程生命周期菜单已改为 `Portal + fixed` 浮层（渲染到 `document.body`），脱离表格滚动容器，菜单展开不再撑出列表滚动条。
 - 课程空态动作已按 `statusView` 收口：页面主创建入口固定保留 `CreateCourseForm`；`archived` 空态仅提供“查看进行中课程”动作；`active/all` 空态不再追加“创建课程”按钮，避免与主创建入口重复。
-- `/teacher/courses/[courseId]/overview` 已接入课程总览，并展示课程分类。
+- `/teacher/courses/[courseId]/overview` 已收口为“筛选区 -> 课程摘要 -> 班级明细 -> 分页”的层次化结构；移除 `window/sort/order/page` 技术态参数裸露展示，窗口与排序使用中文标签按钮组。
+- 课程总览页已补充轻量摘要区（复用既有 overview 数据契约，不新增接口）：班级总数（`total`）、当前页学生总数、当前页有提交班级数、当前页 AI 待处理总量、当前页 AI 失败总量。
 - `/teacher/courses/[courseId]/edit` 已支持课程基础信息编辑（`code/name/term/courseLabel`）；`courseLabel` 可修改也可清空。
 - 课程视角可作为进入班级创建/班级管理的上游入口（跳转到 `/teacher/classrooms` 或带 `courseId` 的班级页）。
 
