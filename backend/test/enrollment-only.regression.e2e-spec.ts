@@ -12,6 +12,7 @@ import { Session } from '../src/modules/auth/schemas/session.schema';
 import { Course } from '../src/modules/courses/schemas/course.schema';
 import { Classroom } from '../src/modules/classrooms/schemas/classroom.schema';
 import { Enrollment } from '../src/modules/classrooms/enrollments/schemas/enrollment.schema';
+import { ClassroomTask } from '../src/modules/classrooms/classroom-tasks/schemas/classroom-task.schema';
 
 jest.setTimeout(30000);
 
@@ -55,6 +56,7 @@ describe('Enrollment Only Regression Lock (e2e)', () => {
   let sessionModel: Model<Session>;
   let courseModel: Model<Course>;
   let classroomModel: Model<Classroom>;
+  let classroomTaskModel: Model<ClassroomTask>;
   let enrollmentModel: Model<Enrollment>;
   let teacherAgent: ReturnType<typeof request.agent>;
   let studentAAgent: ReturnType<typeof request.agent>;
@@ -181,6 +183,7 @@ describe('Enrollment Only Regression Lock (e2e)', () => {
     sessionModel = app.get(getModelToken(Session.name));
     courseModel = app.get(getModelToken(Course.name));
     classroomModel = app.get(getModelToken(Classroom.name));
+    classroomTaskModel = app.get(getModelToken(ClassroomTask.name));
     enrollmentModel = app.get(getModelToken(Enrollment.name));
 
     const [
@@ -251,6 +254,13 @@ describe('Enrollment Only Regression Lock (e2e)', () => {
     if (!KEEP_DB) {
       const cleanup: Promise<unknown>[] = [];
       if (createdClassroomIds.length > 0) {
+        cleanup.push(
+          classroomTaskModel.deleteMany({
+            classroomId: {
+              $in: createdClassroomIds.map((id) => new Types.ObjectId(id)),
+            },
+          }),
+        );
         cleanup.push(
           enrollmentModel.deleteMany({
             classroomId: {
@@ -437,5 +447,82 @@ describe('Enrollment Only Regression Lock (e2e)', () => {
     expect(itemB?.studentsCount).toBe(0);
     expect(typeof itemA?.submissionRate).toBe('number');
     expect(typeof itemB?.submissionRate).toBe('number');
+  });
+
+  it('5) allows deleting an empty classroom', async () => {
+    const { classroomId } = await createCourseAndClassroom('DEL-EMPTY');
+
+    const deleted = await teacherAgent
+      .delete(`/api/classrooms/${classroomId}`)
+      .expect(200);
+    expect((deleted.body as { ok?: boolean }).ok).toBe(true);
+
+    await teacherAgent.get(`/api/classrooms/${classroomId}`).expect(404);
+  });
+
+  it('6) rejects deleting classroom with enrollment history (including REMOVED)', async () => {
+    const { classroomId, joinCode } =
+      await createCourseAndClassroom('DEL-ENROLL');
+
+    await studentAAgent
+      .post('/api/classrooms/join')
+      .send({ joinCode })
+      .expect(201);
+    await teacherAgent
+      .post(`/api/classrooms/${classroomId}/students/${studentAId}/remove`)
+      .send({})
+      .expect(201);
+
+    const response = await teacherAgent
+      .delete(`/api/classrooms/${classroomId}`)
+      .expect(409);
+    const body = response.body as { code?: string; message?: string };
+    expect(body.code).toBe('CLASSROOM_NOT_EMPTY');
+    expect(body.message).toBe('该班级已有成员或任务记录，不能删除，只能归档');
+  });
+
+  it('7) rejects deleting classroom when classroomTask exists', async () => {
+    const { classroomId } = await createCourseAndClassroom('DEL-TASK');
+    await classroomTaskModel.create({
+      classroomId: new Types.ObjectId(classroomId),
+      taskId: new Types.ObjectId(),
+      createdBy: new Types.ObjectId(teacherId),
+      publishedAt: new Date(),
+    });
+
+    const response = await teacherAgent
+      .delete(`/api/classrooms/${classroomId}`)
+      .expect(409);
+    const body = response.body as { code?: string };
+    expect(body.code).toBe('CLASSROOM_NOT_EMPTY');
+  });
+
+  it('8) archives classroom via PATCH status', async () => {
+    const { classroomId } = await createCourseAndClassroom('ARCHIVE');
+
+    const patched = await teacherAgent
+      .patch(`/api/classrooms/${classroomId}`)
+      .send({ status: 'ARCHIVED' })
+      .expect(200);
+    expect((patched.body as { status?: string }).status).toBe('ARCHIVED');
+  });
+
+  it('9) restores archived classroom via PATCH status', async () => {
+    const { classroomId } = await createCourseAndClassroom('RESTORE');
+    await teacherAgent
+      .patch(`/api/classrooms/${classroomId}`)
+      .send({ status: 'ARCHIVED' })
+      .expect(200);
+
+    const restored = await teacherAgent
+      .patch(`/api/classrooms/${classroomId}`)
+      .send({ status: 'ACTIVE' })
+      .expect(200);
+    expect((restored.body as { status?: string }).status).toBe('ACTIVE');
+  });
+
+  it('10) keeps classroom management authorization unchanged', async () => {
+    const { classroomId } = await createCourseAndClassroom('AUTHZ');
+    await studentBAgent.delete(`/api/classrooms/${classroomId}`).expect(403);
   });
 });

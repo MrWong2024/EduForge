@@ -187,13 +187,30 @@
 - Controller & Method: `backend/src/modules/classrooms/controllers/classrooms.controller.ts` -> `ClassroomsController.updateClassroom`
 - DTO: `UpdateClassroomDto` (`backend/src/modules/classrooms/dto/update-classroom.dto.ts`)
 - Required fields: None（全部 `@IsOptional()`）
-- Enums: None
+- Enums:
+  - `status`（可选）: `ACTIVE | ARCHIVED`（from `ClassroomStatus`）
 - Nested structure: None
 - Minimal JSON example:
 
 ```json
 {
   "name": "高一(3)班（晚修）"
+}
+```
+
+- Archive example:
+
+```json
+{
+  "status": "ARCHIVED"
+}
+```
+
+- Restore example:
+
+```json
+{
+  "status": "ACTIVE"
 }
 ```
 
@@ -221,6 +238,19 @@
 - Enums: None
 - Nested structure: None
 - Minimal request: No body (`Content-Length: 0`). Do not send JSON `null`.
+
+### DELETE /api/classrooms/:id
+
+- Controller & Method: `backend/src/modules/classrooms/controllers/classrooms.controller.ts` -> `ClassroomsController.deleteClassroom`
+- DTO: No body
+- Required fields: None
+- Enums: None
+- Nested structure: None
+- Minimal request: No body (`Content-Length: 0`). Do not send JSON `null`.
+- Notes:
+  - 仅允许删除空班级：必须同时满足“无 `ClassroomTask` 记录 + 无 `Enrollment` 记录（含 REMOVED 历史）”。
+  - `studentIds` 仅作防御性辅助校验，不是主判定来源。
+  - 非空删除返回 `409`，`code=CLASSROOM_NOT_EMPTY`，message=`该班级已有成员或任务记录，不能删除，只能归档`。
 
 ### POST /api/classrooms/:id/students/:uid/remove
 

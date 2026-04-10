@@ -102,12 +102,14 @@
 
 - Service: `backend/src/modules/classrooms/services/classrooms.service.ts`
 - Domain: `Classroom`
-- Actions: `create/update/list/get`, `join/remove`, `list-students`, `archive`, `dashboard-delegate`
+- Actions: `create/update/list/get`, `join/remove`, `list-students`, `archive/restore`, `delete-empty-classroom`, `dashboard-delegate`
 - I/O Shape:
   - In: `classroomId`, `JoinClassroomDto(joinCode)`, `QueryClassroomDto`, `QueryClassroomStudentsDto`, `userId`
   - Out: `ClassroomResponseDto` | `{ items, total, page, limit }` | `dashboard aggregate` | `classroom students paged list`
 - Key Methods:
   - `createClassroom(dto: CreateClassroomDto, userId: string): Promise<ClassroomResponseDto> — called by POST /classrooms`
+  - `updateClassroom(id: string, dto: UpdateClassroomDto, userId: string): Promise<ClassroomResponseDto> — called by PATCH /classrooms/:id (supports status ACTIVE/ARCHIVED)`
+  - `deleteClassroom(id: string, userId: string): Promise<{ ok: true }> — called by DELETE /classrooms/:id`
   - `listClassrooms(query: QueryClassroomDto, userId: string): Promise<{ items: ClassroomResponseDto[]; total: number; page: number; limit: number }> — called by GET /classrooms`
   - `listStudents(classroomId: string, query: QueryClassroomStudentsDto, userId: string): Promise<{ items: unknown[]; total: number; page: number; limit: number }> — called by GET /classrooms/:id/students`
   - `joinClassroom(dto: JoinClassroomDto, userId: string): Promise<ClassroomResponseDto> — called by POST /classrooms/join`
@@ -116,13 +118,14 @@
   - `getMyLearningDashboard(query: QueryClassroomDto, userId: string): Promise<Record<string, unknown>> — delegates to student dashboard service`
 - AuthZ Boundary: `teacher-only`（管理） / `student-only`（加入） / `member-or-owner`（查看）
 - Metrics/Isolation: 班级管理按 `teacherId`；成员判定与统计统一通过 `EnrollmentService`；下游统计统一是 `classroomTaskId` 口径
-- Consistency/Constraints: joinCode 生成重试上限 `8`；归档班级禁止更新；`join/remove` 先写 Enrollment(`ACTIVE/REMOVED`)，`studentIds` 仅作为 legacy 镜像输出，不参与授权/统计；`GET /classrooms/:id/students` 只认 Enrollment（`role=STUDENT`），默认返回 ACTIVE，`includeRemoved=1/true` 时返回 ACTIVE+REMOVED，默认排序 `joinedAt desc, _id desc`
-- Deps/Side Effects: `ClassroomModel`, `CourseModel`, `UserModel`, `EnrollmentService`, `TeacherClassroomDashboardService`, `TeacherClassroomWeeklyReportService`, `StudentLearningDashboardService`, `ProcessAssessmentService`, `ClassroomExportSnapshotService`
+- Consistency/Constraints: joinCode 生成重试上限 `8`；`PATCH /classrooms/:id` 支持 `status` 归档/恢复；归档状态下禁止改名但允许通过 `status=ACTIVE` 恢复；删除仅允许空班级（主判定：`ClassroomTask.exists({ classroomId })===false` 且 `Enrollment.exists({ classroomId })===false`，其中 Enrollment 判定包含 `REMOVED` 历史记录）；`studentIds` 仅作防御性辅助校验，不作为唯一主判定来源；非空删除返回 `409(code=CLASSROOM_NOT_EMPTY)`；`join/remove` 先写 Enrollment(`ACTIVE/REMOVED`)，`studentIds` 仅作为 legacy 镜像输出，不参与授权/统计；`GET /classrooms/:id/students` 只认 Enrollment（`role=STUDENT`），默认返回 ACTIVE，`includeRemoved=1/true` 时返回 ACTIVE+REMOVED，默认排序 `joinedAt desc, _id desc`
+- Deps/Side Effects: `ClassroomModel`, `ClassroomTaskModel`, `EnrollmentModel`, `CourseModel`, `UserModel`, `EnrollmentService`, `TeacherClassroomDashboardService`, `TeacherClassroomWeeklyReportService`, `StudentLearningDashboardService`, `ProcessAssessmentService`, `ClassroomExportSnapshotService`
 - Performance Notes: 列表查询分页 + 索引过滤；join/remove 采用 Enrollment upsert/update，并可选镜像更新 `studentIds`；`listStudents` 按页批量拉取用户公开字段避免 N+1
 - SoT: `backend/src/modules/classrooms/services/classrooms.service.ts`; `backend/src/modules/classrooms/enrollments/services/enrollment.service.ts`; `backend/src/modules/classrooms/enrollments/schemas/enrollment.schema.ts`
 - Failure Modes:
   - 非授权角色 -> `403`
   - 班级/课程不存在 -> `404`
+  - 非空班级删除 -> `409 Conflict`（`code=CLASSROOM_NOT_EMPTY`，message=`该班级已有成员或任务记录，不能删除，只能归档`）
   - joinCode 冲突或分配失败 -> `400 Unable to allocate join code`
 
 ## Service Card 05

@@ -272,6 +272,14 @@ AI Provider 错误码（`ai-feedback-provider.error-codes.ts`）：
 - AI feedback provider 契约已统一为 `analyzeSubmission(context: AiSubmissionAnalysisContext)`；`AiFeedbackProcessor` 在消费 job 时会先读取 submission，再按 `submission.taskId` 查询 task 并组装上下文后调用 provider（task 缺失进入失败链路）；主控约束已前移到 prompt/协议层（默认 1 条、必要时最多 2 条），processor compactor 继续作为轻量兜底。
 
 新增/变更产品能力（Z3、AA~AI、Z4~Z9 收口口径）：
+- P1 班级归档/删除契约（后端阶段一已完成，前端待后续阶段接入）：
+  - 状态口径：`Classroom.status` 仅 `ACTIVE | ARCHIVED`，支持通过 `PATCH /api/classrooms/:id` 的 `status` 字段执行归档/恢复。
+  - 兼容接口：保留 `POST /api/classrooms/:id/archive`，内部已收口到统一状态更新链路。
+  - 新增删除接口：`DELETE /api/classrooms/:id`（teacher only + owner only）。
+  - 删除允许条件（主规则）：`ClassroomTask.exists({ classroomId }) === false` 且 `Enrollment.exists({ classroomId }) === false`。
+  - 删除禁止条件：存在任一 `ClassroomTask` 或任一 `Enrollment`（包括 `REMOVED` 历史）即不可删，只能归档。
+  - 辅助一致性校验：`studentIds` 仅作防御性检查，不作为唯一主判定来源。
+  - 非空删除错误口径：`409 Conflict`，`code=CLASSROOM_NOT_EMPTY`，message=`该班级已有成员或任务记录，不能删除，只能归档`。
 - P1 课堂任务生命周期状态流契约（后端已完成，前端待后续阶段接入）：
   - `ClassroomTask` 新增状态字段：`ACTIVE | CLOSED | RECALLED`，默认 `ACTIVE`。
   - 新增状态流转接口：`PATCH /api/classrooms/:classroomId/tasks/:classroomTaskId/status`（教师端）。

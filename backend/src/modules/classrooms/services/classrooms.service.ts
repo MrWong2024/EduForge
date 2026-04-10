@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  ConflictException,
   ForbiddenException,
   Injectable,
   NotFoundException,
@@ -27,6 +28,8 @@ import {
   ClassroomStudentEnrollmentRow,
   EnrollmentService,
 } from '../enrollments/services/enrollment.service';
+import { ClassroomTask } from '../classroom-tasks/schemas/classroom-task.schema';
+import { Enrollment } from '../enrollments/schemas/enrollment.schema';
 import {
   STUDENT_ROLES,
   TEACHER_ROLES,
@@ -66,10 +69,17 @@ export class ClassroomsService {
   private static readonly JOIN_CODE_MAX_LENGTH = 8;
   private static readonly JOIN_CODE_CHARS =
     'ABCDEFGHJKLMNPQRSTUVWXYZ0123456789';
+  private static readonly CLASSROOM_NOT_EMPTY_CODE = 'CLASSROOM_NOT_EMPTY';
+  private static readonly CLASSROOM_NOT_EMPTY_MESSAGE =
+    '该班级已有成员或任务记录，不能删除，只能归档';
 
   constructor(
     @InjectModel(Classroom.name)
     private readonly classroomModel: Model<Classroom>,
+    @InjectModel(ClassroomTask.name)
+    private readonly classroomTaskModel: Model<ClassroomTask>,
+    @InjectModel(Enrollment.name)
+    private readonly enrollmentModel: Model<Enrollment>,
     @InjectModel(Course.name) private readonly courseModel: Model<Course>,
     @InjectModel(User.name) private readonly userModel: Model<User>,
     private readonly enrollmentService: EnrollmentService,
@@ -122,19 +132,33 @@ export class ClassroomsService {
 
   async updateClassroom(id: string, dto: UpdateClassroomDto, userId: string) {
     await this.ensureTeacher(userId);
-    const classroom = await this.classroomModel.findOne({
-      _id: id,
-      teacherId: new Types.ObjectId(userId),
-    });
-    if (!classroom) {
-      throw new NotFoundException('Classroom not found');
-    }
-    if (classroom.status === ClassroomStatus.Archived) {
+    const classroom = await this.findOwnedClassroomOrThrow(id, userId);
+    if (
+      classroom.status === ClassroomStatus.Archived &&
+      dto.name !== undefined
+    ) {
       throw new BadRequestException('Archived classrooms cannot be updated');
     }
-    Object.assign(classroom, dto);
-    await classroom.save();
+
+    if (dto.name !== undefined) {
+      classroom.name = dto.name;
+    }
+    if (dto.status !== undefined) {
+      classroom.status = dto.status;
+    }
+
+    if (dto.name !== undefined || dto.status !== undefined) {
+      await classroom.save();
+    }
     return this.toClassroomResponse(classroom as ClassroomWithMeta, true);
+  }
+
+  async deleteClassroom(id: string, userId: string) {
+    await this.ensureTeacher(userId);
+    const classroom = await this.findOwnedClassroomOrThrow(id, userId);
+    await this.assertClassroomCanBeDeleted(classroom._id, classroom.studentIds);
+    await this.classroomModel.deleteOne({ _id: classroom._id }).exec();
+    return { ok: true };
   }
 
   async listClassrooms(query: QueryClassroomDto, userId: string) {
@@ -321,19 +345,11 @@ export class ClassroomsService {
   }
 
   async archiveClassroom(id: string, userId: string) {
-    await this.ensureTeacher(userId);
-    const classroom = await this.classroomModel.findOne({
-      _id: id,
-      teacherId: new Types.ObjectId(userId),
-    });
-    if (!classroom) {
-      throw new NotFoundException('Classroom not found');
-    }
-    if (classroom.status !== ClassroomStatus.Archived) {
-      classroom.status = ClassroomStatus.Archived;
-      await classroom.save();
-    }
-    return this.toClassroomResponse(classroom as ClassroomWithMeta, true);
+    return this.updateClassroom(
+      id,
+      { status: ClassroomStatus.Archived },
+      userId,
+    );
   }
 
   async joinClassroom(dto: JoinClassroomDto, userId: string) {
@@ -508,5 +524,36 @@ export class ClassroomsService {
     }
     const normalized = value.trim().toLowerCase();
     return normalized === '1' || normalized === 'true';
+  }
+
+  private async findOwnedClassroomOrThrow(id: string, userId: string) {
+    const classroom = await this.classroomModel.findOne({
+      _id: id,
+      teacherId: new Types.ObjectId(userId),
+    });
+    if (!classroom) {
+      throw new NotFoundException('Classroom not found');
+    }
+    return classroom;
+  }
+
+  private async assertClassroomCanBeDeleted(
+    classroomId: Types.ObjectId,
+    studentIds: Types.ObjectId[] | undefined,
+  ) {
+    const [classroomTask, enrollment] = await Promise.all([
+      this.classroomTaskModel.exists({ classroomId }).exec(),
+      this.enrollmentModel.exists({ classroomId }).exec(),
+    ]);
+    const hasClassroomTask = !!classroomTask;
+    const hasEnrollment = !!enrollment;
+    const hasLegacyStudentIds = (studentIds?.length ?? 0) > 0;
+    if (hasClassroomTask || hasEnrollment || hasLegacyStudentIds) {
+      throw new ConflictException({
+        statusCode: 409,
+        code: ClassroomsService.CLASSROOM_NOT_EMPTY_CODE,
+        message: ClassroomsService.CLASSROOM_NOT_EMPTY_MESSAGE,
+      });
+    }
   }
 }

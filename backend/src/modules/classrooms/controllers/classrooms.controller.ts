@@ -1,6 +1,7 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
   Header,
   Param,
@@ -50,6 +51,16 @@ export class ClassroomsController {
     @CurrentUser() user: { id: string },
   ) {
     return this.classroomsService.updateClassroom(id, dto, user.id);
+  }
+
+  @UseGuards(RolesGuard)
+  @Roles(...TEACHER_ROLES)
+  @Delete(':id')
+  deleteClassroom(
+    @Param('id') id: string,
+    @CurrentUser() user: { id: string },
+  ) {
+    return this.classroomsService.deleteClassroom(id, user.id);
   }
 
   @UseGuards(RolesGuard)

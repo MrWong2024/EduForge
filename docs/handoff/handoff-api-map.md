@@ -50,7 +50,8 @@ Notes:
 | Method | Path | 用途 |
 |---|---|---|
 | POST | `/api/classrooms` | 教师创建班级并分配 `joinCode`。 |
-| PATCH | `/api/classrooms/:id` | 教师更新班级。 |
+| PATCH | `/api/classrooms/:id` | 教师更新班级（含 `status` 归档/恢复）。 |
+| DELETE | `/api/classrooms/:id` | 教师删除空班级（仅无任务且无 enrollment 历史时允许）。 |
 | GET | `/api/classrooms` | 教师分页查询班级。 |
 | POST | `/api/classrooms/join` | 学生通过 `joinCode` 入班。 |
 | GET | `/api/classrooms/mine/dashboard` | 学生学习看板（按 `classroomTaskId` 聚合个人提交与 AI 状态）。 |
@@ -75,6 +76,9 @@ Notes:
 - 前后端分层说明：本节记录的是“后端兼容支持集合”；前端当前展示项与默认值仍可能滞后，下一阶段前端再切换主展示策略。
 - `/api/classrooms/:classroomId/export/snapshot` Query: `window, limitStudents, limitAssessment, includePerTask`；teacher only；体积保护采用 limit 截断并在 `meta.notes` 写明；不返回敏感字段。
 - `/api/classrooms/:id/students`：teacher only + owner only（非 owner 返回 `404`）；成员来源只认 Enrollment（`role=STUDENT`）；默认只返回 `status=ACTIVE`，`includeRemoved=1/true` 时返回 `ACTIVE+REMOVED`；不读取/不回退 `classroom.studentIds`；默认排序 `joinedAt desc, _id desc`；不返回 `passwordHash`。
+- 班级状态契约：`Classroom.status` 支持 `ACTIVE | ARCHIVED`；`PATCH /api/classrooms/:id` 可通过 body `status` 实现归档与恢复（`ARCHIVED <-> ACTIVE`）。
+- 班级删除契约：`DELETE /api/classrooms/:id` 仅在“空班级”允许删除；空班级判定主规则是 `ClassroomTask` 无记录且 `Enrollment` 无记录（包含 `REMOVED` 历史）；`studentIds` 仅作防御性辅助校验。
+- 非空班级删除错误：返回 `409 Conflict`，错误码 `CLASSROOM_NOT_EMPTY`，message=`该班级已有成员或任务记录，不能删除，只能归档`。
 
 ## Classroom Tasks（Classrooms 子资源）
 
