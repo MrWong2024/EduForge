@@ -24,7 +24,12 @@ export class Course {
   @Prop({ trim: true, enum: TASK_COURSE_LABELS })
   courseLabel?: string;
 
-  @Prop({ required: true, enum: CourseStatus, default: CourseStatus.Active })
+  @Prop({
+    type: String,
+    required: true,
+    enum: CourseStatus,
+    default: CourseStatus.Active,
+  })
   status!: CourseStatus;
 
   @Prop({ type: Types.ObjectId, ref: User.name, required: true })

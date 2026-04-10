@@ -30,6 +30,7 @@ export class AiFeedbackJob {
   studentId!: Types.ObjectId;
 
   @Prop({
+    type: String,
     required: true,
     enum: AiFeedbackJobStatus,
     default: AiFeedbackJobStatus.Pending,

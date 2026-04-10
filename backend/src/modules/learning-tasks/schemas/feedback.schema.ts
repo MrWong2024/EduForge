@@ -31,13 +31,13 @@ export class Feedback {
   @Prop({ type: Types.ObjectId, ref: Submission.name, required: true })
   submissionId!: Types.ObjectId;
 
-  @Prop({ required: true, enum: FeedbackSource })
+  @Prop({ type: String, required: true, enum: FeedbackSource })
   source!: FeedbackSource;
 
-  @Prop({ required: true, enum: FeedbackType })
+  @Prop({ type: String, required: true, enum: FeedbackType })
   type!: FeedbackType;
 
-  @Prop({ required: true, enum: FeedbackSeverity })
+  @Prop({ type: String, required: true, enum: FeedbackSeverity })
   severity!: FeedbackSeverity;
 
   @Prop({ required: true })

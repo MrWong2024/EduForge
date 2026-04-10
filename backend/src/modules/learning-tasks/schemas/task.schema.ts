@@ -45,7 +45,7 @@ export class Task {
   @Prop({ type: Object })
   rubric?: Record<string, unknown>;
 
-  @Prop({ required: true, enum: TaskStatus })
+  @Prop({ type: String, required: true, enum: TaskStatus })
   status!: TaskStatus;
 
   @Prop({ type: Types.ObjectId, ref: User.name, required: true })

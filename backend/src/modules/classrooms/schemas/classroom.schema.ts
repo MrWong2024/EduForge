@@ -28,6 +28,7 @@ export class Classroom {
   studentIds!: Types.ObjectId[];
 
   @Prop({
+    type: String,
     required: true,
     enum: ClassroomStatus,
     default: ClassroomStatus.Active,

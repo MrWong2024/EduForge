@@ -140,6 +140,40 @@ removedAt?: Date | null;
 
 ---
 
+### Mongoose Schema 枚举字段显式 primitive type 约束（强制｜红线）
+
+当 Codex 生成或修改 NestJS Mongoose Schema（`@nestjs/mongoose`）时：
+
+- 对任何字符串/数字枚举字段、字面量联合字段、或具有明确枚举语义的字段（尤其 `status / role / type / source / provider / mode / level / state`），
+- 只要 `@Prop()` 中使用了 `enum`，或该字段 TypeScript 类型不是简单稳定可反射的基础原始类型，
+- 就必须在 `@Prop()` 中显式声明 primitive `type`（如 `String` / `Number`），
+- 禁止依赖 reflect-metadata 自动推断。
+
+示例（合法）：
+
+```ts
+@Prop({ type: String, enum: XXX, default: YYY })
+status!: XxxStatus;
+```
+
+示例（非法）：
+
+```ts
+@Prop({ enum: XXX, default: YYY })
+status!: XxxStatus;
+```
+
+说明：
+- 本规则用于降低 `CannotDetermineTypeError` 与 schema metadata 推断失败风险。
+- 本规则与上一条 **union/nullable/ambiguous** 规则互补：
+  - 上一条覆盖联合/可空/歧义类型；
+  - 本条额外覆盖“枚举语义字段”，即使字段不是 union/nullable，也必须显式声明 primitive `type`。
+
+违规处理：
+- 任何命中上述枚举语义风险模式但未显式声明 primitive `type` 的 Schema 修改，视为不符合执行规则的无效修改，应回滚并重新执行。
+
+---
+
 ### 工具链兼容性写法约束（强制）
 
 - Codex 在生成或修改 Service 层代码时：

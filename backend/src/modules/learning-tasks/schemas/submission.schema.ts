@@ -61,7 +61,7 @@ export class Submission {
   @Prop({ type: SubmissionMetaSchema })
   meta?: SubmissionMeta;
 
-  @Prop({ required: true, enum: SubmissionStatus })
+  @Prop({ type: String, required: true, enum: SubmissionStatus })
   status!: SubmissionStatus;
 }
 

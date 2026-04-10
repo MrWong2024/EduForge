@@ -23,6 +23,7 @@ export class Enrollment {
   userId!: Types.ObjectId;
 
   @Prop({
+    type: String,
     required: true,
     enum: EnrollmentRole,
     default: EnrollmentRole.Student,
@@ -30,6 +31,7 @@ export class Enrollment {
   role!: EnrollmentRole;
 
   @Prop({
+    type: String,
     required: true,
     enum: EnrollmentStatus,
     default: EnrollmentStatus.Active,
