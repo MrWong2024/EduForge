@@ -368,6 +368,18 @@
 - 【联动收口】`process-assessment.csv` 下载继续沿用当前窗口参数；页面内排序/分页/筛选链接继续透传当前 `window`。
 - 【明确不变】`ai-metrics` 窗口集合与默认值保持原样（`1h/24h/7d`），本步未引入 `all`。
 
+## UAT-FE-44
+
+- 【本步解决】班级列表缺少“归档/恢复/删除”前端接入，且无法按进行中/已归档区分浏览的问题。
+- 【新增事实 / 已收口口径】`/teacher/classrooms` 已接入状态视图切换（`进行中/已归档/全部`，默认进行中），并通过 `statusView` query 保持视图状态；列表请求在进行中/已归档视图下透传后端 `status=ACTIVE/ARCHIVED`。
+- 【生命周期动作收口】新增 `ClassroomLifecycleActions`，统一承载：
+  - 归档：`PATCH classrooms/:id` with `status=ARCHIVED`
+  - 恢复：`PATCH classrooms/:id` with `status=ACTIVE`
+  - 删除（次级操作）：`DELETE classrooms/:id`
+- 【错误处理收口】删除命中 `409 + CLASSROOM_NOT_EMPTY` 时，前端明确提示“该班级已有成员或任务记录，不能删除，只能归档”，不再只显示泛化失败文案。
+- 【交互收口】动作成功后统一 `router.refresh()`，并保留当前 `statusView/courseId/page/limit` query，不打乱教师当前筛选视图。
+- 【不要回退】不要把删除提升为主操作按钮，不要在删除失败时回退为模糊“操作失败”提示。
+
 ## 当前阶段一句话结论
 
 前端已达到“Teacher/Student 主链路可用 + 任务模板层与班级实例层边界收口 + 教师模板主链路可维护”的工程验收阶段，但尚未进入最终交付定版阶段。

@@ -58,7 +58,7 @@ export type ClassroomSummary = {
   id?: string;
   name?: string;
   joinCode?: string;
-  status?: string;
+  status?: ClassroomStatus;
   courseId?: string;
 };
 
@@ -172,8 +172,12 @@ export type CreateClassroomRequest = {
   name: string;
 };
 
+export const CLASSROOM_STATUSES = ["ACTIVE", "ARCHIVED"] as const;
+export type ClassroomStatus = (typeof CLASSROOM_STATUSES)[number];
+
 export type UpdateClassroomRequest = {
-  name: string;
+  name?: string;
+  status?: ClassroomStatus;
 };
 
 export type ClassroomCreateResponse = {
@@ -181,7 +185,7 @@ export type ClassroomCreateResponse = {
   courseId?: string;
   name?: string;
   joinCode?: string;
-  status?: string;
+  status?: ClassroomStatus;
   raw: unknown;
 };
 
@@ -497,7 +501,7 @@ export const toClassroomSummary = (value: unknown): ClassroomSummary => {
     id: asString(record.id) ?? asString(record.classroomId),
     name: asString(record.name),
     joinCode: asString(record.joinCode),
-    status: asString(record.status),
+    status: normalizeClassroomStatus(record.status),
     courseId: asString(record.courseId),
   };
 };
@@ -509,7 +513,7 @@ export const toClassroomCreateResponse = (payload: unknown): ClassroomCreateResp
     courseId: asString(record.courseId),
     name: asString(record.name),
     joinCode: asString(record.joinCode),
-    status: asString(record.status),
+    status: normalizeClassroomStatus(record.status),
     raw: payload,
   };
 };
@@ -1080,6 +1084,20 @@ export const normalizeClassroomTaskStatus = (
   }
   const normalized = status.toUpperCase();
   if (normalized === "ACTIVE" || normalized === "CLOSED" || normalized === "RECALLED") {
+    return normalized;
+  }
+  return undefined;
+};
+
+export const normalizeClassroomStatus = (
+  value: unknown
+): ClassroomStatus | undefined => {
+  const status = asString(value);
+  if (!status) {
+    return undefined;
+  }
+  const normalized = status.toUpperCase();
+  if (normalized === "ACTIVE" || normalized === "ARCHIVED") {
     return normalized;
   }
   return undefined;
