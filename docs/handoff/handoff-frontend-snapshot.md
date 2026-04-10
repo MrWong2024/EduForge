@@ -100,7 +100,11 @@ Teacher 起步与模板链路（可用）：
 5. 进入 `/teacher/classrooms/[classroomId]/tasks/[classroomTaskId]/*` 和提交管理页
 
 Teacher 课程视角（可用）：
-- `/teacher/courses` 已支持课程列表与创建课程，`courseLabel`（课程分类）可选录入并在列表展示。
+- `/teacher/courses` 已支持课程列表与创建课程，`courseLabel`（课程分类）可选录入并在列表展示；默认按 `进行中/已归档/全部` 视图区分展示课程（`statusView` query）。
+- 课程生命周期操作已接入后端契约，统一收进“更多”次级菜单：
+  - 归档/恢复：`PATCH courses/:id`（`status=ARCHIVED/ACTIVE`）
+  - 删除：`DELETE courses/:id`（前端统一提供入口，失败时按后端 `409 + COURSE_NOT_EMPTY` 显示“该课程下已有班级记录，不能删除，只能归档”）
+- 课程空态动作已按 `statusView` 收口：页面主创建入口固定保留 `CreateCourseForm`；`archived` 空态仅提供“查看进行中课程”动作；`active/all` 空态不再追加“创建课程”按钮，避免与主创建入口重复。
 - `/teacher/courses/[courseId]/overview` 已接入课程总览，并展示课程分类。
 - `/teacher/courses/[courseId]/edit` 已支持课程基础信息编辑（`code/name/term/courseLabel`）；`courseLabel` 可修改也可清空。
 - 课程视角可作为进入班级创建/班级管理的上游入口（跳转到 `/teacher/classrooms` 或带 `courseId` 的班级页）。

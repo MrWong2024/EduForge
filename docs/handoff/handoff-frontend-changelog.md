@@ -398,6 +398,19 @@
 - 【语义保持】班级生命周期操作（归档/恢复/删除）、列表筛选、`statusView` query、刷新行为均保持不变。
 - 【边界保持】仅前端展示层优化，不涉及 backend 契约变更与依赖变更。
 
+## UAT-FE-47
+
+- 【本步解决】课程列表缺少“归档/恢复/删除”前端接入，且空态存在重复“创建课程”入口的问题。
+- 【新增事实 / 已收口口径】`/teacher/courses` 已接入状态视图切换（`进行中/已归档/全部`，默认进行中），并通过 `statusView` query 保持视图状态；列表请求在进行中/已归档视图下透传后端 `status=ACTIVE/ARCHIVED`。
+- 【课程生命周期动作】新增 `CourseLifecycleActions`，统一收口到“更多”次级菜单：
+  - 归档：`PATCH courses/:id` with `status=ARCHIVED`
+  - 恢复：`PATCH courses/:id` with `status=ACTIVE`
+  - 删除（次级危险操作）：`DELETE courses/:id`
+- 【错误处理收口】删除命中 `409 + COURSE_NOT_EMPTY` 时，前端明确提示“该课程下已有班级记录，不能删除，只能归档”，不再只显示泛化失败文案。
+- 【空态去重】页面主创建入口继续固定为 `CreateCourseForm`；空态动作按 `statusView` 收口：`archived` 空态仅“查看进行中课程”，`active/all` 空态不再额外展示“创建课程”。
+- 【交互保持】操作成功后统一 `router.refresh()`，并保持当前 `statusView/page/limit` query，不打乱教师当前视图。
+- 【边界保持】仅前端展示层与交互接入，不涉及 backend 契约变更与依赖变更。
+
 ## 当前阶段一句话结论
 
 前端已达到“Teacher/Student 主链路可用 + 任务模板层与班级实例层边界收口 + 教师模板主链路可维护”的工程验收阶段，但尚未进入最终交付定版阶段。

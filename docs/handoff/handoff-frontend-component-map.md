@@ -25,6 +25,7 @@
 | 组件 | 文件 | 真实 API | 作用边界 |
 |---|---|---|---|
 | CreateCourseForm | `components/teacher/CreateCourseForm.tsx` | `POST courses` | 只负责建课表单与成功跳转；支持可选 `courseLabel`（课程分类）录入，候选项复用 `lib/learning-tasks/course-labels.ts` 单一来源 |
+| CourseLifecycleActions | `components/teacher/CourseLifecycleActions.tsx` | `PATCH courses/:id`、`DELETE courses/:id` | 只负责课程生命周期动作菜单（“更多”次级菜单）：`ACTIVE` 显示“归档/删除”、`ARCHIVED` 显示“恢复/删除”；删除为危险项且保留二次确认；删除失败命中 `COURSE_NOT_EMPTY` 时显示明确中文提示；动作成功后 `router.refresh()`，保持当前课程列表 query 视图 |
 | EditCourseForm | `components/teacher/EditCourseForm.tsx` | `PATCH courses/:id` | 只负责课程基础信息编辑（`code/name/term/courseLabel`）与保存；`courseLabel` 候选项复用 `lib/learning-tasks/course-labels.ts` 单一来源，支持清空 |
 | CreateClassroomForm | `components/teacher/CreateClassroomForm.tsx` | `POST classrooms` | 只负责建班表单，不负责班级列表加载 |
 | EditClassroomForm | `components/teacher/EditClassroomForm.tsx` | `PATCH classrooms/:id` | 只负责班级基础信息编辑（当前仅 `name`）；`courseId/status/joinCode` 只读展示；归档班级更新失败按后端错误口径展示，不提供删除/归档动作 |

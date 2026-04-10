@@ -20,7 +20,7 @@
 | Route | 页面用途 | 主接口（经 `/api/proxy/**`） | 关键交互 | 完成度 | 稳定读源/真接口 |
 |---|---|---|---|---|---|
 | `/teacher` | 教师入口 | - | 重定向到 `/teacher/classrooms` | Done | - |
-| `/teacher/courses` | 课程列表 + 创建课程 | `GET courses`、`POST courses` | 分页、创建课程；创建支持可选 `courseLabel`（课程分类）；列表展示课程分类；跳课程总览/班级 | Done | 真接口 |
+| `/teacher/courses` | 课程列表 + 创建课程 | `GET courses`、`POST courses`、`PATCH courses/:id`、`DELETE courses/:id` | 默认按 `进行中/已归档/全部` 视图区分展示（`statusView` query 驱动；列表请求在 `active/archived` 视图透传 `status=ACTIVE/ARCHIVED`）；创建支持可选 `courseLabel`（课程分类）；列表展示课程分类与状态标签；课程生命周期动作收进“更多”次级菜单（`ACTIVE: 归档/删除`，`ARCHIVED: 恢复/删除`）；删除作为危险次级操作，命中 `409 + COURSE_NOT_EMPTY` 时给出明确提示“该课程下已有班级记录，不能删除，只能归档”；操作后通过 `router.refresh()` 刷新并保持当前视图 query；空态动作按视图收口：`archived` 空态仅“查看进行中课程”，`active/all` 空态不再额外展示“创建课程” | Done | 真接口 |
 | `/teacher/courses/[courseId]/overview` | 课程总览 | `GET courses/:courseId/overview` | window/sort/order/page 切换；头部展示课程分类 | Done | 真接口 |
 | `/teacher/courses/[courseId]/edit` | 课程编辑页 | `GET courses/:id`、`PATCH courses/:id` | 从课程列表/课程总览进入编辑；支持修改 `code/name/term/courseLabel`，保存后回课程总览；overview 保持展示页职责 | Done | 真接口 |
 | `/teacher/tasks` | 任务模板页 | `GET learning-tasks/tasks`、`POST learning-tasks/tasks` | 默认 `scope=mine`；支持视图切换 `mine/shared/all` 并同步 URL；`scope/courseLabel/status/knowledgeModule/stage/page` 全部由 URL 驱动并透传后端真实查询；列表采用标准分页（固定 `limit=20`，上一页/下一页）；列表显示 `visibility(私有/共享)`；非作者模板仅显示“查看”入口；默认排序按视图收口：`mine=最近更新优先`、`shared=PUBLISHED 优先`、`all=我的模板优先` | Done | 真接口 |

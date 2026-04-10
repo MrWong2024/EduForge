@@ -75,7 +75,7 @@ export type CourseSummary = {
   name?: string;
   term?: string;
   courseLabel?: TaskCourseLabel;
-  status?: string;
+  status?: CourseStatus;
   createdAt?: string;
   updatedAt?: string;
   raw: UnknownRecord;
@@ -97,11 +97,15 @@ export type CreateCourseRequest = {
 };
 
 export type UpdateCourseRequest = {
-  code: string;
-  name: string;
-  term: string;
+  code?: string;
+  name?: string;
+  term?: string;
   courseLabel?: TaskCourseLabel | "";
+  status?: CourseStatus;
 };
+
+export const COURSE_STATUSES = ["ACTIVE", "ARCHIVED"] as const;
+export type CourseStatus = (typeof COURSE_STATUSES)[number];
 
 export type CourseCreateResponse = {
   id?: string;
@@ -109,7 +113,7 @@ export type CourseCreateResponse = {
   name?: string;
   term?: string;
   courseLabel?: TaskCourseLabel;
-  status?: string;
+  status?: CourseStatus;
   raw: unknown;
 };
 
@@ -561,7 +565,7 @@ export const toCourseSummary = (value: unknown): CourseSummary => {
     name: asString(record.name),
     term: asString(record.term),
     courseLabel: normalizeTaskCourseLabel(record.courseLabel),
-    status: asString(record.status),
+    status: normalizeCourseStatus(record.status),
     createdAt: asString(record.createdAt),
     updatedAt: asString(record.updatedAt),
     raw: record,
@@ -576,7 +580,7 @@ export const toCourseCreateResponse = (payload: unknown): CourseCreateResponse =
     name: asString(record.name),
     term: asString(record.term),
     courseLabel: normalizeTaskCourseLabel(record.courseLabel),
-    status: asString(record.status),
+    status: normalizeCourseStatus(record.status),
     raw: payload,
   };
 };
@@ -1092,6 +1096,20 @@ export const normalizeClassroomTaskStatus = (
 export const normalizeClassroomStatus = (
   value: unknown
 ): ClassroomStatus | undefined => {
+  const status = asString(value);
+  if (!status) {
+    return undefined;
+  }
+  const normalized = status.toUpperCase();
+  if (normalized === "ACTIVE" || normalized === "ARCHIVED") {
+    return normalized;
+  }
+  return undefined;
+};
+
+export const normalizeCourseStatus = (
+  value: unknown
+): CourseStatus | undefined => {
   const status = asString(value);
   if (!status) {
     return undefined;

@@ -4,10 +4,15 @@ import { headers } from "next/headers";
 import { EmptyState } from "@/components/blocks/EmptyState";
 import { ErrorState } from "@/components/blocks/ErrorState";
 import { PageHeader } from "@/components/blocks/PageHeader";
+import { Tabs } from "@/components/blocks/Tabs";
 import { CreateCourseForm } from "@/components/teacher/CreateCourseForm";
+import { CourseLifecycleActions } from "@/components/teacher/CourseLifecycleActions";
 import { fetchJson, FetchJsonError } from "@/lib/api/client";
 import { buildErrorDescription, extractRawDetail } from "@/lib/api/error-presenter";
-import { toCourseListResponse } from "@/lib/api/types-teacher";
+import {
+  toCourseListResponse,
+  type CourseStatus,
+} from "@/lib/api/types-teacher";
 import {
   isUnclassifiedTaskCourseLabel,
   toTaskCourseLabelDisplayText,
@@ -20,11 +25,61 @@ export const metadata: Metadata = {
   title: "课程列表",
 };
 
+const COURSE_STATUS_VIEW_VALUES = ["active", "archived", "all"] as const;
+type CourseStatusView = (typeof COURSE_STATUS_VIEW_VALUES)[number];
+
+const COURSE_STATUS_VIEW_LABEL: Record<CourseStatusView, string> = {
+  active: "进行中",
+  archived: "已归档",
+  all: "全部",
+};
+
+const COURSE_STATUS_META: Record<
+  CourseStatus,
+  {
+    label: string;
+    hint: string;
+    badgeClassName: string;
+  }
+> = {
+  ACTIVE: {
+    label: "进行中",
+    hint: "可继续用于创建班级与教学安排。",
+    badgeClassName: "border-emerald-300 bg-emerald-50 text-emerald-700",
+  },
+  ARCHIVED: {
+    label: "已归档",
+    hint: "默认不出现在进行中列表。",
+    badgeClassName: "border-zinc-300 bg-zinc-100 text-zinc-700",
+  },
+};
+
 type TeacherCoursesPageProps = {
   searchParams: Promise<{
     page?: string | string[];
     limit?: string | string[];
+    statusView?: string | string[];
   }>;
+};
+
+const parseStatusView = (value: string | undefined): CourseStatusView => {
+  if (!value) {
+    return "active";
+  }
+  const normalized = value.toLowerCase();
+  return COURSE_STATUS_VIEW_VALUES.includes(normalized as CourseStatusView)
+    ? (normalized as CourseStatusView)
+    : "active";
+};
+
+const toStatusFilter = (statusView: CourseStatusView): CourseStatus | undefined => {
+  if (statusView === "active") {
+    return "ACTIVE";
+  }
+  if (statusView === "archived") {
+    return "ARCHIVED";
+  }
+  return undefined;
 };
 
 const getRequestOrigin = async (): Promise<string> => {
@@ -45,6 +100,7 @@ type CoursesViewModel =
       limit: number;
       hasPrev: boolean;
       hasNext: boolean;
+      statusView: CourseStatusView;
     }
   | { mode: "error"; status: number; description: string };
 
@@ -52,6 +108,16 @@ export default async function TeacherCoursesPage({ searchParams }: TeacherCourse
   const query = await searchParams;
   const page = parsePositiveInt(getSingleSearchParam(query.page), 1, { min: 1, max: 100 });
   const limit = parsePositiveInt(getSingleSearchParam(query.limit), 20, { min: 1, max: 100 });
+  const statusView = parseStatusView(getSingleSearchParam(query.statusView));
+  const statusFilter = toStatusFilter(statusView);
+
+  const requestQuery = new URLSearchParams({
+    page: String(page),
+    limit: String(limit),
+  });
+  if (statusFilter) {
+    requestQuery.set("status", statusFilter);
+  }
 
   let viewModel: CoursesViewModel = {
     mode: "error",
@@ -61,7 +127,7 @@ export default async function TeacherCoursesPage({ searchParams }: TeacherCourse
 
   try {
     const origin = await getRequestOrigin();
-    const payload = await fetchJson<unknown>(`courses?page=${page}&limit=${limit}`, {
+    const payload = await fetchJson<unknown>(`courses?${requestQuery.toString()}`, {
       origin,
       cache: "no-store",
     });
@@ -76,6 +142,7 @@ export default async function TeacherCoursesPage({ searchParams }: TeacherCourse
       limit,
       hasPrev,
       hasNext,
+      statusView,
     };
   } catch (error) {
     if (error instanceof FetchJsonError) {
@@ -98,11 +165,39 @@ export default async function TeacherCoursesPage({ searchParams }: TeacherCourse
     );
   }
 
+  const tabItems = [
+    {
+      label: "进行中",
+      href: buildCourseListHref(1, viewModel.limit, "active"),
+    },
+    {
+      label: "已归档",
+      href: buildCourseListHref(1, viewModel.limit, "archived"),
+    },
+    {
+      label: "全部",
+      href: buildCourseListHref(1, viewModel.limit, "all"),
+    },
+  ];
+
+  const activeTabHref = buildCourseListHref(1, viewModel.limit, viewModel.statusView);
+  const emptyStateTitle =
+    viewModel.statusView === "archived"
+      ? "暂无已归档课程"
+      : viewModel.statusView === "active"
+        ? "还没有进行中课程"
+        : "还没有课程";
+  const emptyStateDescription =
+    viewModel.statusView === "archived"
+      ? "归档后的课程会显示在这里。"
+      : "可使用上方“创建课程”表单创建首门课程，再基于课程创建班级。";
+  const archivedEmptyActionHref = buildCourseListHref(1, viewModel.limit, "active");
+
   return (
     <section className="space-y-4">
       <PageHeader
         title="课程"
-        description={`第 ${viewModel.page} 页，每页 ${viewModel.limit} 条`}
+        description={`当前视图：${COURSE_STATUS_VIEW_LABEL[viewModel.statusView]} · 第 ${viewModel.page} 页，每页 ${viewModel.limit} 条`}
         actions={
           <Link href={paths.teacher.classrooms} className="text-sm text-blue-700 hover:underline">
             去班级列表
@@ -110,24 +205,25 @@ export default async function TeacherCoursesPage({ searchParams }: TeacherCourse
         }
       />
 
+      <Tabs items={tabItems} activeHref={activeTabHref} />
+
       <CreateCourseForm />
 
       {viewModel.items.length === 0 ? (
         <EmptyState
-          title="还没有课程"
-          description="先创建一门课程，再基于课程创建班级。"
+          title={emptyStateTitle}
+          description={emptyStateDescription}
           actions={
-            <div className="flex flex-wrap items-center gap-3">
-              <Link
-                href="#create-course-form"
-                className="rounded-md bg-zinc-900 px-3 py-1.5 text-sm font-medium text-white hover:bg-zinc-700"
-              >
-                创建课程
-              </Link>
-              <Link href={paths.teacher.classrooms} className="text-sm text-blue-700 hover:underline">
-                去班级列表
-              </Link>
-            </div>
+            viewModel.statusView === "archived" ? (
+              <div className="flex flex-wrap items-center gap-3">
+                <Link
+                  href={archivedEmptyActionHref}
+                  className="rounded-md bg-zinc-900 px-3 py-1.5 text-sm font-medium text-white hover:bg-zinc-700"
+                >
+                  查看进行中课程
+                </Link>
+              </div>
+            ) : undefined
           }
         />
       ) : (
@@ -144,51 +240,73 @@ export default async function TeacherCoursesPage({ searchParams }: TeacherCourse
               </tr>
             </thead>
             <tbody>
-              {viewModel.items.map((course, index) => (
-                <tr key={course.id ?? `course-${index}`} className="border-t border-zinc-100">
-                  <td className="px-4 py-3">{toDisplayText(course.code)}</td>
-                  <td className="px-4 py-3">{toDisplayText(course.name)}</td>
-                  <td className="px-4 py-3">{toDisplayText(course.term)}</td>
-                  <td className="px-4 py-3">
-                    <span
-                      className={`inline-flex rounded border px-2 py-0.5 text-xs font-medium ${
-                        isUnclassifiedTaskCourseLabel(course.courseLabel)
-                          ? "border-zinc-200 bg-zinc-100 text-zinc-700"
-                          : "border-indigo-200 bg-indigo-100 text-indigo-700"
-                      }`}
-                    >
-                      {toTaskCourseLabelDisplayText(course.courseLabel)}
-                    </span>
-                  </td>
-                  <td className="px-4 py-3">{toDisplayText(course.status)}</td>
-                  <td className="px-4 py-3">
-                    {course.id ? (
-                      <div className="flex flex-wrap items-center gap-3">
-                        <Link
-                          href={paths.teacher.courseEdit(course.id)}
-                          className="text-blue-700 hover:underline"
-                        >
-                          编辑
-                        </Link>
-                        <Link
-                          href={paths.teacher.courseOverview(course.id)}
-                          className="text-blue-700 hover:underline"
-                        >
-                          课程总览
-                        </Link>
-                        <Link
-                          href={`${paths.teacher.classrooms}?courseId=${encodeURIComponent(course.id)}`}
-                          className="text-blue-700 hover:underline"
-                        >
-                          班级列表
-                        </Link>
-                      </div>
-                    ) : (
-                      <span className="text-zinc-500">缺少课程标识</span>
-                    )}
-                  </td>
-                </tr>
-              ))}
+              {viewModel.items.map((course, index) => {
+                const courseId = course.id;
+                const statusMeta = course.status ? COURSE_STATUS_META[course.status] : undefined;
+
+                return (
+                  <tr key={courseId ?? `course-${index}`} className="border-t border-zinc-100">
+                    <td className="px-4 py-3">{toDisplayText(course.code)}</td>
+                    <td className="px-4 py-3">{toDisplayText(course.name)}</td>
+                    <td className="px-4 py-3">{toDisplayText(course.term)}</td>
+                    <td className="px-4 py-3">
+                      <span
+                        className={`inline-flex rounded border px-2 py-0.5 text-xs font-medium ${
+                          isUnclassifiedTaskCourseLabel(course.courseLabel)
+                            ? "border-zinc-200 bg-zinc-100 text-zinc-700"
+                            : "border-indigo-200 bg-indigo-100 text-indigo-700"
+                        }`}
+                      >
+                        {toTaskCourseLabelDisplayText(course.courseLabel)}
+                      </span>
+                    </td>
+                    <td className="px-4 py-3">
+                      {statusMeta ? (
+                        <div className="space-y-1">
+                          <span
+                            className={`inline-flex rounded border px-2 py-0.5 text-xs font-semibold ${statusMeta.badgeClassName}`}
+                          >
+                            {statusMeta.label}
+                          </span>
+                          <p className="text-xs text-zinc-500">{statusMeta.hint}</p>
+                        </div>
+                      ) : (
+                        <span className="text-zinc-500">{toDisplayText(course.status)}</span>
+                      )}
+                    </td>
+                    <td className="px-4 py-3 align-top">
+                      {courseId ? (
+                        <div className="space-y-2">
+                          <div className="flex flex-wrap items-center gap-3">
+                            <Link
+                              href={paths.teacher.courseEdit(courseId)}
+                              className="text-blue-700 hover:underline"
+                            >
+                              编辑
+                            </Link>
+                            <Link
+                              href={paths.teacher.courseOverview(courseId)}
+                              className="text-blue-700 hover:underline"
+                            >
+                              课程总览
+                            </Link>
+                            <Link
+                              href={`${paths.teacher.classrooms}?courseId=${encodeURIComponent(courseId)}`}
+                              className="text-blue-700 hover:underline"
+                            >
+                              班级列表
+                            </Link>
+                          </div>
+
+                          <CourseLifecycleActions courseId={courseId} status={course.status} />
+                        </div>
+                      ) : (
+                        <span className="text-zinc-500">缺少课程标识</span>
+                      )}
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>
@@ -196,14 +314,20 @@ export default async function TeacherCoursesPage({ searchParams }: TeacherCourse
 
       <div className="flex items-center gap-4 text-sm">
         {viewModel.hasPrev ? (
-          <Link href={`${paths.teacher.courses}?page=${viewModel.page - 1}&limit=${viewModel.limit}`} className="text-blue-700 hover:underline">
+          <Link
+            href={buildCourseListHref(viewModel.page - 1, viewModel.limit, viewModel.statusView)}
+            className="text-blue-700 hover:underline"
+          >
             上一页
           </Link>
         ) : (
           <span className="text-zinc-400">上一页</span>
         )}
         {viewModel.hasNext ? (
-          <Link href={`${paths.teacher.courses}?page=${viewModel.page + 1}&limit=${viewModel.limit}`} className="text-blue-700 hover:underline">
+          <Link
+            href={buildCourseListHref(viewModel.page + 1, viewModel.limit, viewModel.statusView)}
+            className="text-blue-700 hover:underline"
+          >
             下一页
           </Link>
         ) : (
@@ -213,3 +337,16 @@ export default async function TeacherCoursesPage({ searchParams }: TeacherCourse
     </section>
   );
 }
+
+const buildCourseListHref = (
+  page: number,
+  limit: number,
+  statusView: CourseStatusView
+): string => {
+  const query = new URLSearchParams({
+    page: String(page),
+    limit: String(limit),
+    statusView,
+  });
+  return `${paths.teacher.courses}?${query.toString()}`;
+};
