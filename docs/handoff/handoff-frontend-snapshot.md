@@ -45,6 +45,7 @@ frontend/
 - `/teacher/**`：教师起步链路、模板链路、班级发布链路、批阅链路、三件套、周报/过程性评价/快照已接入真接口。
 - 教师班级基础管理层（已落地）：
   - `/teacher/classrooms`：班级列表 + 创建班级；默认按 `进行中/已归档/全部` 视图区分展示，操作列提供“进入班级/编辑班级”，班级生命周期动作统一收进“更多”次级菜单。
+  - 班级列表空态动作已按 `statusView` 收口：页面主创建入口固定保留 `CreateClassroomForm`；`archived` 空态仅提供“查看进行中班级”动作；`active/all` 空态不再追加“创建班级”按钮，避免与主创建入口重复。
   - 班级生命周期操作已接入后端契约：
     - 归档/恢复：`PATCH classrooms/:id`（`status=ARCHIVED/ACTIVE`）
     - 删除：`DELETE classrooms/:id`（前端统一提供入口，失败时按后端 `409 + CLASSROOM_NOT_EMPTY` 显示“该班级已有成员或任务记录，不能删除，只能归档”）
@@ -86,7 +87,7 @@ frontend/
 
 Teacher 起步与模板链路（可用）：
 1. `CreateCourseForm` -> `POST courses`
-2. `CreateClassroomForm` -> `POST classrooms`；在 `/teacher/classrooms` 可执行班级生命周期操作（归档/恢复/删除），必要时进入 `/teacher/classrooms/[classroomId]/edit` 维护班级名称
+2. `CreateClassroomForm` -> `POST classrooms`；在 `/teacher/classrooms` 可执行班级生命周期操作（归档/恢复/删除），必要时进入 `/teacher/classrooms/[classroomId]/edit` 维护班级名称；空态不再重复平铺“创建班级”入口
 3. `/teacher/tasks` 进行模板创建/筛选，必要时进入 `/teacher/tasks/[taskId]/edit` 维护模板状态与 rubric
    - 模板层已接入 `courseLabel`（课程分类）与 `visibility`（私有/共享）字段：创建/编辑可维护，列表可筛选并展示；`courseLabel` 与 `visibility` 都是模板治理字段，不绑定课程。
    - 模板列表默认 `scope=mine`，并支持显式切换 `mine/shared/all`；共享只影响读可见性，不改变作者权限边界。

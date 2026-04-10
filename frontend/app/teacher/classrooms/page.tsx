@@ -215,6 +215,22 @@ export default async function TeacherClassroomsPage({ searchParams }: TeacherCla
     viewModel.selectedCourseId,
     viewModel.statusView
   );
+  const emptyStateTitle =
+    viewModel.statusView === "archived"
+      ? "暂无已归档班级"
+      : viewModel.statusView === "active"
+        ? "还没有进行中班级"
+        : "还没有班级";
+  const emptyStateDescription =
+    viewModel.statusView === "archived"
+      ? "归档后的班级会显示在这里。"
+      : "可使用上方“创建班级”表单创建首个班级，再发布课堂任务。";
+  const archivedEmptyActionHref = buildClassroomListHref(
+    1,
+    viewModel.limit,
+    viewModel.selectedCourseId,
+    "active"
+  );
 
   return (
     <section className="space-y-4">
@@ -229,24 +245,19 @@ export default async function TeacherClassroomsPage({ searchParams }: TeacherCla
 
       {viewModel.items.length === 0 ? (
         <EmptyState
-          title={viewModel.statusView === "archived" ? "还没有已归档班级" : "还没有班级"}
-          description={
-            viewModel.statusView === "archived"
-              ? "可在进行中列表对班级执行归档，归档后会出现在这里。"
-              : "先选择课程并创建班级，再发布课堂任务。"
-          }
+          title={emptyStateTitle}
+          description={emptyStateDescription}
           actions={
-            <div className="flex flex-wrap items-center gap-3">
-              <Link
-                href="#create-classroom-form"
-                className="rounded-md bg-zinc-900 px-3 py-1.5 text-sm font-medium text-white hover:bg-zinc-700"
-              >
-                创建班级
-              </Link>
-              <Link href={paths.teacher.courses} className="text-sm text-blue-700 hover:underline">
-                去课程列表
-              </Link>
-            </div>
+            viewModel.statusView === "archived" ? (
+              <div className="flex flex-wrap items-center gap-3">
+                <Link
+                  href={archivedEmptyActionHref}
+                  className="rounded-md bg-zinc-900 px-3 py-1.5 text-sm font-medium text-white hover:bg-zinc-700"
+                >
+                  查看进行中班级
+                </Link>
+              </div>
+            ) : undefined
           }
         />
       ) : (
