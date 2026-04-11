@@ -41,13 +41,14 @@ type ProcessAssessmentTableRow = {
   progressDisplay: string;
   progressSecondaryText: string;
   progressRate: number | null;
+  scoreDisplay: string;
+  scoreValue: number | null;
   riskDisplay: string;
   riskTone: "high" | "medium" | "low" | "unknown";
   riskRaw: string;
-  noteDisplay: string;
+  issueSummaryDisplay: string;
   aiRequestedCount: number;
   aiSucceededCount: number;
-  lateRecordsCount: number;
 };
 type SummaryMetricCard = {
   key: string;
@@ -82,6 +83,14 @@ const toPercentText = (value: number | null): string => {
   return Number.isInteger(rounded) ? `${rounded}%` : `${rounded.toFixed(1)}%`;
 };
 
+const toScoreText = (value: number | null): string => {
+  if (value === null) {
+    return "—";
+  }
+  const rounded = Math.round(value * 10) / 10;
+  return Number.isInteger(rounded) ? `${rounded}` : rounded.toFixed(1);
+};
+
 const toRiskLabel = (
   value: unknown
 ): { label: string; tone: ProcessAssessmentTableRow["riskTone"]; raw: string } => {
@@ -98,6 +107,25 @@ const toRiskLabel = (
   return { label: "未评估", tone: "unknown", raw: risk };
 };
 
+const TAG_LABEL_MAP: Record<string, string> = {
+  readability: "可读性",
+  correctness: "正确性",
+  style: "风格",
+  naming: "命名",
+  "bug-risk": "缺陷风险",
+  performance: "性能",
+  complexity: "复杂度",
+  robustness: "健壮性",
+};
+
+const toFriendlyTagLabel = (rawTag: string): string => {
+  const normalized = rawTag.trim().toLowerCase();
+  if (!normalized) {
+    return rawTag;
+  }
+  return TAG_LABEL_MAP[normalized] ?? rawTag;
+};
+
 const toTopTagsSummary = (value: unknown): string => {
   if (!Array.isArray(value) || value.length === 0) {
     return "";
@@ -111,10 +139,11 @@ const toTopTagsSummary = (value: unknown): string => {
       if (!tag) {
         return "";
       }
+      const label = toFriendlyTagLabel(tag);
       if (count === null) {
-        return tag;
+        return label;
       }
-      return `${tag}（${count}）`;
+      return `${label}（${count}）`;
     })
     .filter((item) => item.length > 0);
 
@@ -122,8 +151,8 @@ const toTopTagsSummary = (value: unknown): string => {
     return "";
   }
 
-  const preview = tags.slice(0, 2).join("、");
-  return tags.length > 2 ? `${preview} 等 ${tags.length} 项` : preview;
+  const preview = tags.slice(0, 3).join("、");
+  return tags.length > 3 ? `${preview} 等 ${tags.length} 项` : preview;
 };
 
 const toProcessAssessmentTableRows = (items: UnknownRecord[]): ProcessAssessmentTableRow[] =>
@@ -153,6 +182,7 @@ const toProcessAssessmentTableRows = (items: UnknownRecord[]): ProcessAssessment
       submittedTasksCount !== null && publishedTasksCount !== null
         ? `${submittedTasksCount}/${publishedTasksCount} 个任务有提交`
         : "—";
+    const scoreValue = toFiniteNumber(safeGet(item, "score", undefined));
 
     const risk = toRiskLabel(safeGet(item, "riskLevel", undefined) ?? safeGet(item, "risk", undefined));
     const comment = toDisplayText(
@@ -160,12 +190,10 @@ const toProcessAssessmentTableRows = (items: UnknownRecord[]): ProcessAssessment
       ""
     ).trim();
     const tagSummary = toTopTagsSummary(safeGet(item, "topTags", undefined));
-    const noteDisplay = comment || (tagSummary ? `高频问题：${tagSummary}` : "—");
+    const issueSummaryDisplay = comment || (tagSummary ? `主要问题：${tagSummary}` : "—");
 
     const aiRequestedCount = toFiniteNumber(safeGet(item, "aiRequestedCount", undefined)) ?? 0;
     const aiSucceededCount = toFiniteNumber(safeGet(item, "aiSucceededCount", undefined)) ?? 0;
-    const lateSubmissionsCount = toFiniteNumber(safeGet(item, "lateSubmissionsCount", undefined)) ?? 0;
-    const lateTasksCount = toFiniteNumber(safeGet(item, "lateTasksCount", undefined)) ?? 0;
 
     return {
       key: String(studentId || safeGet(item, "id", undefined) || index),
@@ -174,23 +202,20 @@ const toProcessAssessmentTableRows = (items: UnknownRecord[]): ProcessAssessment
       progressDisplay: toPercentText(progressRate),
       progressSecondaryText,
       progressRate,
+      scoreDisplay: toScoreText(scoreValue),
+      scoreValue,
       riskDisplay: risk.label,
       riskTone: risk.tone,
       riskRaw: risk.raw,
-      noteDisplay,
+      issueSummaryDisplay,
       aiRequestedCount,
       aiSucceededCount,
-      lateRecordsCount: lateSubmissionsCount + lateTasksCount,
     };
   });
 
 const toSummaryCards = (rows: ProcessAssessmentTableRow[]): SummaryMetricCard[] => {
   const totalStudents = rows.length;
   const highRiskCount = rows.filter((row) => row.riskRaw === "HIGH").length;
-  const mediumOrHighCount = rows.filter(
-    (row) => row.riskRaw === "HIGH" || row.riskRaw === "MEDIUM"
-  ).length;
-  const lateRecordStudentsCount = rows.filter((row) => row.lateRecordsCount > 0).length;
 
   const progressRateValues = rows
     .map((row) => row.progressRate)
@@ -203,19 +228,49 @@ const toSummaryCards = (rows: ProcessAssessmentTableRow[]): SummaryMetricCard[] 
   const aiRequestedTotal = rows.reduce((sum, row) => sum + row.aiRequestedCount, 0);
   const aiSucceededTotal = rows.reduce((sum, row) => sum + row.aiSucceededCount, 0);
   const aiSuccessRate = aiRequestedTotal > 0 ? aiSucceededTotal / aiRequestedTotal : null;
+  const scoreValues = rows
+    .map((row) => row.scoreValue)
+    .filter((value): value is number => value !== null);
+  const averageScore =
+    scoreValues.length > 0
+      ? scoreValues.reduce((sum, value) => sum + value, 0) / scoreValues.length
+      : null;
 
   return [
-    { key: "totalStudents", label: "学生条目数", value: `${totalStudents}` },
+    { key: "totalStudents", label: "学生人数", value: `${totalStudents}` },
     { key: "highRiskCount", label: "高风险学生数", value: `${highRiskCount}` },
-    { key: "mediumOrHighCount", label: "中高风险学生数", value: `${mediumOrHighCount}` },
     {
       key: "averageProgressRate",
       label: "平均任务提交率",
       value: toPercentText(averageProgressRate),
     },
+    { key: "averageScore", label: "平均得分", value: toScoreText(averageScore) },
     { key: "aiSuccessRate", label: "AI 请求成功率", value: toPercentText(aiSuccessRate) },
-    { key: "lateRecordStudents", label: "有迟交记录人数", value: `${lateRecordStudentsCount}` },
   ];
+};
+
+const toRubricSummaryText = (raw: UnknownRecord): string | null => {
+  const rubric = asRecord(safeGet(raw, "rubric", undefined));
+  const submittedTasksRate = toFiniteNumber(rubric.submittedTasksRate);
+  const submissionsCount = toFiniteNumber(rubric.submissionsCount);
+  const aiRequestQualityProxy = toFiniteNumber(rubric.aiRequestQualityProxy);
+  const codeQualityProxy = toFiniteNumber(rubric.codeQualityProxy);
+
+  if (
+    submittedTasksRate === null ||
+    submissionsCount === null ||
+    aiRequestQualityProxy === null ||
+    codeQualityProxy === null
+  ) {
+    return null;
+  }
+
+  const toWeightPercent = (value: number) => toPercentText(value <= 1 ? value : value / 100);
+  return `当前评价口径：任务提交率 ${toWeightPercent(submittedTasksRate)}，提交次数 ${toWeightPercent(
+    submissionsCount
+  )}，AI 请求质量代理 ${toWeightPercent(aiRequestQualityProxy)}，代码质量代理 ${toWeightPercent(
+    codeQualityProxy
+  )}。`;
 };
 
 const riskToneClassNameMap: Record<ProcessAssessmentTableRow["riskTone"], string> = {
@@ -327,6 +382,7 @@ export default async function ProcessAssessmentPage({
     !DISPLAY_REPORT_WINDOWS.includes(viewModel.window as DisplayReportWindow)
       ? "（旧链接兼容）"
       : "";
+  const rubricSummaryText = toRubricSummaryText(asRecord(viewModel.data.raw));
 
   return (
     <section className="space-y-4">
@@ -400,6 +456,9 @@ export default async function ProcessAssessmentPage({
         <p className="mt-1 text-xs text-zinc-500">
           表格展示当前窗口内过程性评价明细；如需完整结果，请使用上方 CSV 导出。
         </p>
+        {rubricSummaryText ? (
+          <p className="mt-2 text-xs text-zinc-500">{rubricSummaryText}</p>
+        ) : null}
 
         {rows.length === 0 ? (
           <div className="mt-3">
@@ -413,8 +472,9 @@ export default async function ProcessAssessmentPage({
                   <th className="px-4 py-3">序号</th>
                   <th className="px-4 py-3">学生</th>
                   <th className="px-4 py-3">进度</th>
+                  <th className="px-4 py-3">得分</th>
                   <th className="px-4 py-3">风险</th>
-                  <th className="px-4 py-3">备注</th>
+                  <th className="px-4 py-3">备注/问题摘要</th>
                 </tr>
               </thead>
               <tbody>
@@ -431,6 +491,7 @@ export default async function ProcessAssessmentPage({
                       <p className="font-medium text-zinc-900">{row.progressDisplay}</p>
                       <p className="mt-1 text-xs text-zinc-500">{row.progressSecondaryText}</p>
                     </td>
+                    <td className="px-4 py-3 font-medium text-zinc-900">{row.scoreDisplay}</td>
                     <td className="px-4 py-3">
                       <span
                         className={`inline-flex rounded-full px-2 py-0.5 text-xs font-medium ring-1 ${riskToneClassNameMap[row.riskTone]}`}
@@ -439,7 +500,7 @@ export default async function ProcessAssessmentPage({
                       </span>
                     </td>
                     <td className="max-w-xl whitespace-pre-wrap break-words px-4 py-3 text-zinc-700">
-                      {row.noteDisplay}
+                      {row.issueSummaryDisplay}
                     </td>
                   </tr>
                 ))}
