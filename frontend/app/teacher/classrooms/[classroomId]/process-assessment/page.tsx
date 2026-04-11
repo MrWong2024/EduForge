@@ -38,6 +38,7 @@ type ProcessAssessmentTableRow = {
   key: string;
   studentDisplayName: string;
   studentSecondaryText: string;
+  studentTitleText?: string;
   progressDisplay: string;
   progressSecondaryText: string;
   progressRate: number | null;
@@ -47,6 +48,7 @@ type ProcessAssessmentTableRow = {
   riskTone: "high" | "medium" | "low" | "unknown";
   riskRaw: string;
   issueSummaryDisplay: string;
+  issueSummaryTitle?: string;
   aiRequestedCount: number;
   aiSucceededCount: number;
 };
@@ -89,6 +91,17 @@ const toScoreText = (value: number | null): string => {
   }
   const rounded = Math.round(value * 10) / 10;
   return Number.isInteger(rounded) ? `${rounded}` : rounded.toFixed(1);
+};
+
+const toShortId = (value: string): string => {
+  const normalized = value.trim();
+  if (!normalized) {
+    return "";
+  }
+  if (normalized.length <= 14) {
+    return normalized;
+  }
+  return `${normalized.slice(0, 8)}...${normalized.slice(-4)}`;
 };
 
 const toRiskLabel = (
@@ -135,6 +148,20 @@ const toTopTagsSummary = (value: unknown): string => {
   return tags.length > 3 ? `${preview} 等 ${tags.length} 项` : preview;
 };
 
+const toCompactText = (value: string, maxLength = 120): { text: string; title?: string } => {
+  const normalized = value.trim();
+  if (!normalized) {
+    return { text: "—" };
+  }
+  if (normalized.length <= maxLength) {
+    return { text: normalized };
+  }
+  return {
+    text: `${normalized.slice(0, maxLength)}...`,
+    title: normalized,
+  };
+};
+
 const toProcessAssessmentTableRows = (items: UnknownRecord[]): ProcessAssessmentTableRow[] =>
   items.map((item, index) => {
     const studentName = toDisplayText(
@@ -143,13 +170,21 @@ const toProcessAssessmentTableRows = (items: UnknownRecord[]): ProcessAssessment
     ).trim();
     const studentNo = toDisplayText(safeGet(item, "studentNo", undefined), "").trim();
     const studentId = toDisplayText(safeGet(item, "studentId", undefined), "").trim();
-    const studentDisplayName = studentName || (studentNo ? `学号 ${studentNo}` : studentId || `学生 ${index + 1}`);
+    const shortStudentId = studentId ? toShortId(studentId) : "";
+    const studentDisplayName = studentName
+      ? studentName
+      : studentNo
+        ? `学号 ${studentNo}`
+        : shortStudentId
+          ? `ID ${shortStudentId}`
+          : `学生 ${index + 1}`;
     const studentSecondaryText =
       studentName && (studentNo || studentId)
-        ? [studentNo ? `学号 ${studentNo}` : "", studentId ? `ID ${studentId}` : ""]
+        ? [studentNo ? `学号 ${studentNo}` : "", studentId ? `ID ${shortStudentId}` : ""]
             .filter((text) => text.length > 0)
             .join(" · ")
         : "";
+    const studentTitleText = studentId ? `studentId: ${studentId}` : undefined;
 
     const submittedTasksRate = toFiniteNumber(safeGet(item, "submittedTasksRate", undefined));
     const progressFallbackRate = toFiniteNumber(
@@ -170,7 +205,8 @@ const toProcessAssessmentTableRows = (items: UnknownRecord[]): ProcessAssessment
       ""
     ).trim();
     const tagSummary = toTopTagsSummary(safeGet(item, "topTags", undefined));
-    const issueSummaryDisplay = comment || (tagSummary ? `主要问题：${tagSummary}` : "—");
+    const issueSummaryRaw = comment || tagSummary || "";
+    const issueSummary = toCompactText(issueSummaryRaw);
 
     const aiRequestedCount = toFiniteNumber(safeGet(item, "aiRequestedCount", undefined)) ?? 0;
     const aiSucceededCount = toFiniteNumber(safeGet(item, "aiSucceededCount", undefined)) ?? 0;
@@ -179,6 +215,7 @@ const toProcessAssessmentTableRows = (items: UnknownRecord[]): ProcessAssessment
       key: String(studentId || safeGet(item, "id", undefined) || index),
       studentDisplayName,
       studentSecondaryText,
+      studentTitleText,
       progressDisplay: toPercentText(progressRate),
       progressSecondaryText,
       progressRate,
@@ -187,7 +224,8 @@ const toProcessAssessmentTableRows = (items: UnknownRecord[]): ProcessAssessment
       riskDisplay: risk.label,
       riskTone: risk.tone,
       riskRaw: risk.raw,
-      issueSummaryDisplay,
+      issueSummaryDisplay: issueSummary.text,
+      issueSummaryTitle: issueSummary.title,
       aiRequestedCount,
       aiSucceededCount,
     };
@@ -415,17 +453,17 @@ export default async function ProcessAssessmentPage({
             </span>
           </div>
         </div>
-        <p className="mt-2 text-xs text-zinc-500">统计生成于：{generatedAt}</p>
+        <p className="mt-1.5 text-[11px] text-zinc-400">统计生成于：{generatedAt}</p>
       </section>
 
       <section className="rounded-lg border border-zinc-200 bg-white p-4">
         <h2 className="text-sm font-semibold text-zinc-900">过程性评价摘要</h2>
         <p className="mt-1 text-xs text-zinc-500">以下指标基于当前窗口与当前返回明细聚合。</p>
-        <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
+        <div className="mt-2.5 grid grid-cols-1 gap-2.5 sm:grid-cols-2 lg:grid-cols-5">
           {summaryCards.map((card) => (
-            <article key={card.key} className="rounded-md border border-zinc-200 bg-zinc-50 p-3">
-              <p className="text-xs text-zinc-500">{card.label}</p>
-              <p className="mt-1 text-lg font-semibold text-zinc-900">{card.value}</p>
+            <article key={card.key} className="rounded-md border border-zinc-200 bg-zinc-50 p-2.5">
+              <p className="text-[11px] text-zinc-500">{card.label}</p>
+              <p className="mt-1 text-base font-semibold text-zinc-900">{card.value}</p>
             </article>
           ))}
         </div>
@@ -449,37 +487,44 @@ export default async function ProcessAssessmentPage({
             <table className="min-w-full border-collapse text-sm">
               <thead className="bg-zinc-50 text-left text-zinc-600">
                 <tr>
-                  <th className="px-4 py-3">序号</th>
-                  <th className="px-4 py-3">学生</th>
-                  <th className="px-4 py-3">进度</th>
-                  <th className="px-4 py-3">得分</th>
-                  <th className="px-4 py-3">风险</th>
-                  <th className="px-4 py-3">备注/问题摘要</th>
+                  <th className="w-14 px-3 py-2.5 text-center">序号</th>
+                  <th className="w-56 px-3 py-2.5">学生</th>
+                  <th className="w-44 px-3 py-2.5">进度</th>
+                  <th className="w-24 px-3 py-2.5 text-right">得分</th>
+                  <th className="w-28 px-3 py-2.5">风险</th>
+                  <th className="px-3 py-2.5">问题摘要</th>
                 </tr>
               </thead>
               <tbody>
                 {rows.map((row, index) => (
                   <tr key={row.key} className="border-t border-zinc-100 align-top">
-                    <td className="px-4 py-3 text-zinc-700">{index + 1}</td>
-                    <td className="px-4 py-3">
-                      <p className="font-medium text-zinc-900">{row.studentDisplayName}</p>
+                    <td className="px-3 py-2.5 text-center text-zinc-700">{index + 1}</td>
+                    <td className="px-3 py-2.5">
+                      <p className="font-medium text-zinc-900" title={row.studentTitleText}>
+                        {row.studentDisplayName}
+                      </p>
                       {row.studentSecondaryText ? (
-                        <p className="mt-1 text-xs text-zinc-500">{row.studentSecondaryText}</p>
+                        <p className="mt-0.5 text-[11px] text-zinc-500">{row.studentSecondaryText}</p>
                       ) : null}
                     </td>
-                    <td className="px-4 py-3">
-                      <p className="font-medium text-zinc-900">{row.progressDisplay}</p>
-                      <p className="mt-1 text-xs text-zinc-500">{row.progressSecondaryText}</p>
+                    <td className="px-3 py-2.5">
+                      <p className="text-base font-semibold text-zinc-900">{row.progressDisplay}</p>
+                      <p className="mt-0.5 text-[11px] text-zinc-500">{row.progressSecondaryText}</p>
                     </td>
-                    <td className="px-4 py-3 font-medium text-zinc-900">{row.scoreDisplay}</td>
-                    <td className="px-4 py-3">
+                    <td className="px-3 py-2.5 text-right text-base font-semibold text-zinc-900">
+                      {row.scoreDisplay}
+                    </td>
+                    <td className="px-3 py-2.5">
                       <span
                         className={`inline-flex rounded-full px-2 py-0.5 text-xs font-medium ring-1 ${riskToneClassNameMap[row.riskTone]}`}
                       >
                         {row.riskDisplay}
                       </span>
                     </td>
-                    <td className="max-w-xl whitespace-pre-wrap break-words px-4 py-3 text-zinc-700">
+                    <td
+                      className="max-w-xl whitespace-pre-wrap break-words px-3 py-2.5 text-zinc-700"
+                      title={row.issueSummaryTitle}
+                    >
                       {row.issueSummaryDisplay}
                     </td>
                   </tr>
