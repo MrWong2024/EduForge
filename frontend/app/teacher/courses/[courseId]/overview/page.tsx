@@ -114,8 +114,8 @@ const toPercentText = (value: number | undefined): string => {
   if (typeof percent !== "number") {
     return "—";
   }
-  const digits = percent > 0 && percent < 10 ? 1 : 0;
-  return `${percent.toFixed(digits)}%`;
+  const rounded = Math.round(percent * 10) / 10;
+  return Number.isInteger(rounded) ? `${rounded}%` : `${rounded.toFixed(1)}%`;
 };
 
 const buildOverviewSummary = (
@@ -264,6 +264,8 @@ export default async function CourseOverviewPage({ params, searchParams }: Cours
     label: SORT_ORDER_LABELS[orderValue],
     href: buildHref({ order: orderValue, page: 1 }),
   }));
+  const toggledOrder = viewModel.query.order === "asc" ? "desc" : "asc";
+  const orderToggle = orderItems.find((item) => item.value === toggledOrder);
 
   return (
     <section className="space-y-4">
@@ -332,22 +334,15 @@ export default async function CourseOverviewPage({ params, searchParams }: Cours
                 </Link>
               );
             })}
-          </div>
-
-          <div className="flex items-center gap-2">
-            <span>排序方向:</span>
-            {orderItems.map((item) => {
-              const active = item.value === viewModel.query.order;
-              return (
-                <Link
-                  key={item.value}
-                  href={item.href}
-                  className={active ? "font-semibold text-blue-700" : "text-blue-700 hover:underline"}
-                >
-                  {item.label}
-                </Link>
-              );
-            })}
+            {orderToggle ? (
+              <Link
+                href={orderToggle.href}
+                className="ml-1 rounded border border-zinc-300 px-2 py-0.5 text-xs text-zinc-600 hover:bg-zinc-50"
+                aria-label={`切换排序方向，当前${SORT_ORDER_LABELS[viewModel.query.order]}`}
+              >
+                方向：{SORT_ORDER_LABELS[viewModel.query.order]}
+              </Link>
+            ) : null}
           </div>
         </div>
         <p className="mt-2 text-xs text-zinc-500">统计生成于：{toDisplayDate(viewModel.data.generatedAt)}</p>
@@ -415,8 +410,8 @@ export default async function CourseOverviewPage({ params, searchParams }: Cours
                     <p className="font-medium text-zinc-900">{toDisplayText(item.name, "未命名班级")}</p>
                   </td>
                   <td className="px-4 py-3">{toDisplayText(item.studentsCount)}</td>
-                  <td className="px-4 py-3">{toDisplayText(item.submissionRate)}</td>
-                  <td className="px-4 py-3">{toDisplayText(item.aiSuccessRate)}</td>
+                  <td className="px-4 py-3">{toPercentText(item.submissionRate)}</td>
+                  <td className="px-4 py-3">{toPercentText(item.aiSuccessRate)}</td>
                   <td className="px-4 py-3">{toDisplayText(item.aiPendingJobs)}</td>
                   <td className="px-4 py-3">{toDisplayText(item.aiFailedJobs)}</td>
                   <td className="px-4 py-3">
@@ -454,6 +449,15 @@ export default async function CourseOverviewPage({ params, searchParams }: Cours
           <span className="text-zinc-400">下一页</span>
         )}
       </div>
+
+      <details className="rounded-lg border border-zinc-200 bg-zinc-50 p-4">
+        <summary className="cursor-pointer text-sm font-medium text-zinc-800">
+          查看原始 JSON
+        </summary>
+        <pre className="mt-3 overflow-auto text-xs text-zinc-700">
+          {JSON.stringify(viewModel.data.raw, null, 2)}
+        </pre>
+      </details>
     </section>
   );
 }
