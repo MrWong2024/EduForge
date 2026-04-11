@@ -259,11 +259,7 @@ export default async function CourseOverviewPage({ params, searchParams }: Cours
     href: buildHref({ sort: sortField, page: 1 }),
   }));
 
-  const orderItems = SORT_ORDERS.map((orderValue) => ({
-    value: orderValue,
-    label: SORT_ORDER_LABELS[orderValue],
-    href: buildHref({ order: orderValue, page: 1 }),
-  }));
+  const toggledOrder = viewModel.query.order === "asc" ? "desc" : "asc";
 
   return (
     <section className="space-y-4">
@@ -335,20 +331,17 @@ export default async function CourseOverviewPage({ params, searchParams }: Cours
             })}
           </div>
 
-          <div className="flex items-center gap-2 text-zinc-600">
+          <div className="flex items-center gap-2">
             <span>顺序:</span>
-            {orderItems.map((item) => {
-              const active = item.value === viewModel.query.order;
-              return (
-                <Link
-                  key={item.value}
-                  href={item.href}
-                  className={active ? "font-semibold text-blue-700" : "text-blue-700 hover:underline"}
-                >
-                  {item.label}
-                </Link>
-              );
-            })}
+            <Link
+              href={buildHref({
+                order: toggledOrder,
+                page: 1,
+              })}
+              className="text-blue-700 hover:underline"
+            >
+              {SORT_ORDER_LABELS[viewModel.query.order]}
+            </Link>
           </div>
         </div>
         <p className="mt-2 text-xs text-zinc-500">统计生成于：{toDisplayDate(viewModel.data.generatedAt)}</p>
@@ -392,6 +385,10 @@ export default async function CourseOverviewPage({ params, searchParams }: Cours
           </div>
         </div>
       </section>
+
+      <p className="text-xs text-zinc-500">
+        提交率、AI 成功率、AI 待处理、AI 失败等班级指标，按当前窗口内该班全部课堂任务汇总。
+      </p>
 
       {viewModel.data.items.length === 0 ? (
         <EmptyState title="当前课程暂无班级统计" description="该课程在当前窗口没有可展示数据。" />
