@@ -123,6 +123,7 @@ Teacher 班级看板链路（可用）：
 2. 顶部概览已收口为 `summary.studentsCount`、`summary.publishedTasksCount`、`summary.lateStudentsTotal` 三个核心指标，不再使用与班级看板语义弱相关的占位值展示。
 3. 任务明细表已补齐“提交进度（distinctStudentsSubmitted / studentsCount）”、“AI 处理概况（成功/失败/排队/处理中/终止/未请求）”与 `topTags` 前 2~3 项摘要。
 4. 每行任务已新增三类快捷入口：`提交记录`（submissions）、`课堂复盘`（review-pack）、`AI 指标`（ai-metrics），用于从看板直接下钻。
+5. “教学快照”已从看板高频入口中移除，不再与周报/过程性评价同层暴露。
 
 Student 学习链路（可用）：
 1. `/student/classrooms/join` -> `POST classrooms/join`
@@ -170,6 +171,12 @@ Teacher 过程性评价链路（可用）：
 6. 时间窗口策略保持不变：主展示 `7d/30d/all`（默认 `all`），旧值 URL `24h` 继续兼容并提供轻量提示。
 7. CSV 下载与“查看原始过程性评价 JSON”入口继续保留，且 JSON 调试区默认折叠、低权重展示。
 8. 展示层三次抛光已完成：摘要区卡片密度更紧凑、问题摘要列去除重复句式前缀、表格主次层次（进度/得分主值与次级说明）进一步收口，筛选区“统计生成于”已弱化为更低权重信息。
+9. 页面顶部高频操作区已移除“教学快照”显性跳转，避免将快照页继续塑造成正式业务同级入口。
+
+Teacher 教学快照预检页（内部）：
+1. `/teacher/classrooms/[classroomId]/export/snapshot` 路由与后端接口能力保持，页面定位已降级为“教学快照预检（内部）”。
+2. 页面主文案统一为导出前核对/内部诊断语义，不再使用“正式导出页”表述，避免误导为即时下载中心。
+3. 信息架构收口为“预检参数 -> 体积保护提示 -> 元信息/摘要 -> 原始快照数据（调试/核对用）”，其中原始 JSON 区块继续默认折叠、低权重展示。
 
 Teacher 统计窗口策略（阶段二已收口）：
 1. 班级级页面（`weekly-report`、`process-assessment`）前端主展示窗口为 `7d/30d/all`，默认窗口为 `all`。

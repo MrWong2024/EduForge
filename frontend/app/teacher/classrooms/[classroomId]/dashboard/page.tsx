@@ -217,9 +217,6 @@ export default async function ClassroomDashboardPage({ params }: DashboardPagePr
             <Link href={paths.teacher.classroomProcessAssessment(classroomId)} className="text-blue-700 hover:underline">
               过程性评价
             </Link>
-            <Link href={paths.teacher.classroomExportSnapshot(classroomId)} className="text-blue-700 hover:underline">
-              教学快照
-            </Link>
           </div>
         }
       />

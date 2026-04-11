@@ -397,9 +397,6 @@ export default async function ProcessAssessmentPage({
             <Link href={paths.teacher.classroomWeeklyReport(classroomId)} className="text-blue-700 hover:underline">
               班级周报
             </Link>
-            <Link href={paths.teacher.classroomExportSnapshot(classroomId)} className="text-blue-700 hover:underline">
-              教学快照
-            </Link>
           </div>
         }
       />

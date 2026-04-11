@@ -112,7 +112,7 @@ export default async function SnapshotExportPage({
   let viewModel: SnapshotViewModel = {
     mode: "error",
     status: 500,
-    description: "加载教学快照失败，请稍后重试。",
+    description: "加载教学快照预检数据失败，请稍后重试。",
   };
 
   try {
@@ -135,8 +135,8 @@ export default async function SnapshotExportPage({
       const detail = extractRawDetail(error);
       const summary =
         error.status === 403
-          ? "无权限访问教学快照导出页面。"
-          : getCommonErrorSummary(error.status, "加载教学快照");
+          ? "无权限访问教学快照预检页面。"
+          : getCommonErrorSummary(error.status, "加载教学快照预检");
 
       viewModel = {
         mode: "error",
@@ -148,37 +148,39 @@ export default async function SnapshotExportPage({
 
   if (viewModel.mode === "error") {
     return (
-      <ErrorState status={viewModel.status} title="教学快照加载失败" description={viewModel.description} />
+      <ErrorState
+        status={viewModel.status}
+        title="教学快照预检加载失败"
+        description={viewModel.description}
+      />
     );
   }
 
   const queryRecord = toQueryRecord(viewModel.query);
+  const metaEntries = Object.entries(viewModel.data.meta);
   const summaryEntries = Object.entries(viewModel.data.summary);
   const hasData = Object.keys(viewModel.data.raw).length > 0;
 
   return (
     <section className="space-y-4">
       <PageHeader
-        title="教学快照导出"
-        description="按当前参数导出班级教学快照。"
+        title="教学快照预检（内部）"
+        description="用于导出前核对窗口、体积限制与快照摘要，不作为教师高频操作页。"
         actions={
           <div className="flex items-center gap-3 text-sm">
             <Link href={paths.teacher.classroomDashboard(classroomId)} className="text-blue-700 hover:underline">
               返回班级看板
-            </Link>
-            <Link href={paths.teacher.classroomProcessAssessment(classroomId)} className="text-blue-700 hover:underline">
-              过程性评价
             </Link>
           </div>
         }
       />
 
       <section className="rounded-lg border border-zinc-200 bg-white p-4 text-sm text-zinc-700">
-        <p>此页用于导出教学快照；若出现截断提示，请结合体积保护说明理解。</p>
+        <p>此页用于教学快照导出前预检与内部诊断。若出现截断提示，请先调整参数后再执行正式导出流程。</p>
       </section>
 
       <section className="rounded-lg border border-zinc-200 bg-white p-4 text-sm">
-        <p className="font-medium text-zinc-900">导出参数</p>
+        <p className="font-medium text-zinc-900">预检参数</p>
         <div className="mt-2 flex flex-wrap items-center gap-4 text-zinc-700">
           <div className="flex items-center gap-2">
             <span>窗口:</span>
@@ -244,7 +246,7 @@ export default async function SnapshotExportPage({
 
       {viewModel.data.notes.length > 0 ? (
         <section className="rounded-lg border border-amber-300 bg-amber-50 p-4 text-sm text-amber-900">
-          <p className="font-semibold">体积保护提示 / 截断说明</p>
+          <p className="font-semibold">体积保护与截断提示</p>
           <ul className="mt-2 list-disc space-y-1 pl-5">
             {viewModel.data.notes.map((note, index) => (
               <li key={`${note}-${index}`}>{note}</li>
@@ -254,12 +256,26 @@ export default async function SnapshotExportPage({
       ) : null}
 
       {!hasData ? (
-        <EmptyState title="暂无快照数据" description="当前参数下未返回可展示快照内容。" />
+        <EmptyState title="暂无快照预检数据" description="当前参数下未返回可展示快照内容。" />
       ) : (
         <>
+          {metaEntries.length > 0 ? (
+            <section className="rounded-lg border border-zinc-200 bg-white p-4">
+              <h2 className="text-sm font-semibold text-zinc-900">快照元信息（预检）</h2>
+              <div className="mt-2 grid gap-3 md:grid-cols-2">
+                {metaEntries.map(([key, value]) => (
+                  <div key={key} className="rounded border border-zinc-200 p-3 text-sm">
+                    <p className="text-zinc-500">{key}</p>
+                    <p className="mt-1 font-medium text-zinc-900">{toDisplayText(value)}</p>
+                  </div>
+                ))}
+              </div>
+            </section>
+          ) : null}
+
           {summaryEntries.length > 0 ? (
             <section className="rounded-lg border border-zinc-200 bg-white p-4">
-              <h2 className="text-sm font-semibold text-zinc-900">快照摘要</h2>
+              <h2 className="text-sm font-semibold text-zinc-900">快照预检摘要</h2>
               <div className="mt-2 grid gap-3 md:grid-cols-2">
                 {summaryEntries.map(([key, value]) => (
                   <div key={key} className="rounded border border-zinc-200 p-3 text-sm">
@@ -276,7 +292,7 @@ export default async function SnapshotExportPage({
 
       <details className="rounded-lg border border-zinc-200 bg-zinc-50 p-4">
         <summary className="cursor-pointer text-sm font-medium text-zinc-800">
-          查看原始数据（调试用）
+          查看原始快照数据（调试/核对用）
         </summary>
         <pre className="mt-3 overflow-auto text-xs text-zinc-700">
           {JSON.stringify(viewModel.data.raw, null, 2)}
