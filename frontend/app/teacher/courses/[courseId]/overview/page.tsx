@@ -264,8 +264,6 @@ export default async function CourseOverviewPage({ params, searchParams }: Cours
     label: SORT_ORDER_LABELS[orderValue],
     href: buildHref({ order: orderValue, page: 1 }),
   }));
-  const toggledOrder = viewModel.query.order === "asc" ? "desc" : "asc";
-  const orderToggle = orderItems.find((item) => item.value === toggledOrder);
 
   return (
     <section className="space-y-4">
@@ -297,7 +295,7 @@ export default async function CourseOverviewPage({ params, searchParams }: Cours
       />
 
       <section className="rounded-lg border border-zinc-200 bg-white p-4 text-sm">
-        <p className="font-medium text-zinc-900">筛选条件</p>
+        <p className="font-medium text-zinc-900">筛选</p>
         <div className="mt-2 flex flex-wrap items-center gap-4 text-zinc-700">
           <div className="flex items-center gap-2">
             <span>统计窗口:</span>
@@ -313,11 +311,12 @@ export default async function CourseOverviewPage({ params, searchParams }: Cours
                 </Link>
               );
             })}
-            {!DISPLAY_WINDOWS.includes(viewModel.query.window as CourseOverviewDisplayWindow) ? (
-              <span className="text-zinc-500">
-                当前：{WINDOW_LABELS[viewModel.query.window]}（旧链接兼容）
-              </span>
-            ) : null}
+            <span className="text-zinc-500">
+              当前：{WINDOW_LABELS[viewModel.query.window]}
+              {!DISPLAY_WINDOWS.includes(viewModel.query.window as CourseOverviewDisplayWindow)
+                ? "（旧链接兼容）"
+                : ""}
+            </span>
           </div>
 
           <div className="flex items-center gap-2">
@@ -334,15 +333,22 @@ export default async function CourseOverviewPage({ params, searchParams }: Cours
                 </Link>
               );
             })}
-            {orderToggle ? (
-              <Link
-                href={orderToggle.href}
-                className="ml-1 rounded border border-zinc-300 px-2 py-0.5 text-xs text-zinc-600 hover:bg-zinc-50"
-                aria-label={`切换排序方向，当前${SORT_ORDER_LABELS[viewModel.query.order]}`}
-              >
-                方向：{SORT_ORDER_LABELS[viewModel.query.order]}
-              </Link>
-            ) : null}
+          </div>
+
+          <div className="flex items-center gap-2 text-zinc-600">
+            <span>顺序:</span>
+            {orderItems.map((item) => {
+              const active = item.value === viewModel.query.order;
+              return (
+                <Link
+                  key={item.value}
+                  href={item.href}
+                  className={active ? "font-semibold text-blue-700" : "text-blue-700 hover:underline"}
+                >
+                  {item.label}
+                </Link>
+              );
+            })}
           </div>
         </div>
         <p className="mt-2 text-xs text-zinc-500">统计生成于：{toDisplayDate(viewModel.data.generatedAt)}</p>
