@@ -376,6 +376,8 @@ AI Provider 错误码（`ai-feedback-provider.error-codes.ts`）：
 - Z6 过程性评价（teacher）：
   - `GET /api/classrooms/:classroomId/process-assessment`
   - `GET /api/classrooms/:classroomId/process-assessment.csv`
+  - `items[*]` 已返回可展示学生信息：`studentId/studentName/studentNo`（`studentName` 缺失回落 `未知学生`，`studentNo` 缺失返回 `null`）。
+  - CSV 口径已对齐 JSON：列前置为 `studentName,studentNo,studentId,...`（保留 `studentId` 便于核对链路）。
 - 统计窗口收口·阶段一（后端契约已落地，前端待跟进）：
   - 范围：`weekly-report`、`process-assessment`（含 CSV）、`learning-trajectory`、`review-pack`、`course-overview`。
   - 默认窗口：以上接口默认值统一为 `all`。

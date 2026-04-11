@@ -52,6 +52,8 @@ type ProcessAssessmentResponse = {
   total: number;
   items: Array<{
     studentId: string;
+    studentName: string;
+    studentNo: string | null;
     submittedTasksCount: number;
     submissionsCount: number;
     aiRequestedCount: number;
@@ -189,11 +191,14 @@ describe('Classroom Process Assessment (e2e)', () => {
         email: studentAEmail,
         passwordHash: studentAHash,
         roles: ['student'],
+        name: '学生甲',
+        studentNo: 'S-A-001',
       }),
       userModel.create({
         email: studentBEmail,
         passwordHash: studentBHash,
         roles: ['student'],
+        name: '   ',
       }),
     ]);
 
@@ -463,6 +468,10 @@ describe('Classroom Process Assessment (e2e)', () => {
     );
     expect(studentAItem).toBeDefined();
     expect(studentBItem).toBeDefined();
+    expect(studentAItem?.studentName).toBe('学生甲');
+    expect(studentAItem?.studentNo).toBe('S-A-001');
+    expect(studentBItem?.studentName).toBe('未知学生');
+    expect(studentBItem?.studentNo).toBeNull();
     expect(
       (studentAItem?.submittedTasksCount ?? 0) >
         (studentBItem?.submittedTasksCount ?? 0) ||
@@ -493,13 +502,15 @@ describe('Classroom Process Assessment (e2e)', () => {
     expect(contentType).toContain('text/csv');
     const csvText = csvResponse.text ?? '';
     expect(csvText).toContain(
-      'studentId,score,riskLevel,submittedTasksRate,submissionsCount,lateSubmissionsCount,lateTasksCount,aiRequestedCount,aiSucceededCount,avgErrorItems,topTags',
+      'studentName,studentNo,studentId,score,riskLevel,submittedTasksRate,submissionsCount,lateSubmissionsCount,lateTasksCount,aiRequestedCount,aiSucceededCount,avgErrorItems,topTags',
     );
+    expect(csvText).toContain('学生甲');
+    expect(csvText).toContain('S-A-001');
     expect(csvText).toContain(studentAId);
     expect(csvText).not.toContain('codeText');
     const csvLines = csvText.trim().split('\n');
     expect(csvLines.length - 1).toBe(body.items.length);
-    const csvStudentIds = csvLines.slice(1).map((line) => line.split(',')[0]);
+    const csvStudentIds = csvLines.slice(1).map((line) => line.split(',')[2]);
     expect(csvStudentIds.sort()).toEqual(
       body.items.map((item) => item.studentId).sort(),
     );

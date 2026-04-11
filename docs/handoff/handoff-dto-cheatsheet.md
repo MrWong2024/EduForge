@@ -647,6 +647,11 @@
   - `all` = 当前班级过程性评价口径下全部历史记录（无时间下界过滤）
   - `term` 为后端兼容窗口
   - CSV 接口 `GET /api/classrooms/:classroomId/process-assessment.csv` 复用同 DTO/同窗口语义
+- Response 关键口径（items）:
+  - `items[*]` 稳定返回 `studentId/studentName/studentNo`（不再仅有 `studentId`）
+  - `studentName`：优先用户姓名，缺失/空白时回落 `未知学生`
+  - `studentNo`：优先用户学号，缺失/空白时返回 `null`
+  - CSV 同步包含 `studentName,studentNo,studentId` 列（列顺序在前部）
 
 ### GET /api/courses/:courseId/overview
 

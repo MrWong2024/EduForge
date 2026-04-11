@@ -28,6 +28,7 @@ import {
   FeedbackSource,
 } from '../../learning-tasks/schemas/feedback.schema';
 import { WithId } from '../../../common/types/with-id.type';
+import { User } from '../../users/schemas/user.schema';
 
 type SubmissionByStudentAgg = {
   _id: Types.ObjectId;
@@ -57,8 +58,14 @@ type FeedbackFacetResult = {
 };
 
 type ProcessAssessmentRiskLevel = 'LOW' | 'MEDIUM' | 'HIGH';
+type ProcessAssessmentStudentPublicInfo = {
+  studentName: string;
+  studentNo: string | null;
+};
 type ProcessAssessmentItem = {
   studentId: string;
+  studentName: string;
+  studentNo: string | null;
   submittedTasksCount: number;
   publishedTasksCount: number;
   submittedTasksRate: number;
@@ -141,6 +148,8 @@ export class ProcessAssessmentService {
     private readonly aiFeedbackJobModel: Model<AiFeedbackJob>,
     @InjectModel(Feedback.name)
     private readonly feedbackModel: Model<Feedback>,
+    @InjectModel(User.name)
+    private readonly userModel: Model<User>,
     private readonly enrollmentService: EnrollmentService,
   ) {}
 
@@ -181,6 +190,8 @@ export class ProcessAssessmentService {
   ) {
     const payload = await this.buildPayload(classroomId, query, teacherId);
     const headers = [
+      'studentName',
+      'studentNo',
       'studentId',
       'score',
       'riskLevel',
@@ -198,6 +209,8 @@ export class ProcessAssessmentService {
         .map((tag) => `${tag.tag}:${tag.count}`)
         .join(';');
       return [
+        item.studentName,
+        item.studentNo ?? '',
         item.studentId,
         item.score,
         item.riskLevel,
@@ -301,6 +314,8 @@ export class ProcessAssessmentService {
     const pageStudentObjectIds = pageStudentIds.map(
       (studentId) => new Types.ObjectId(studentId),
     );
+    const studentPublicMap =
+      await this.buildStudentPublicInfoMap(pageStudentObjectIds);
     const submissionMatch: Record<string, unknown> = {
       classroomTaskId: { $in: windowTaskIds },
       studentId: { $in: pageStudentObjectIds },
@@ -529,6 +544,8 @@ export class ProcessAssessmentService {
 
     // v1 engineering tradeoff: sorting is page-local after Enrollment stable pagination.
     const items = pageStudentIds.map((studentId) => {
+      const studentPublic =
+        studentPublicMap.get(studentId) ?? this.toFallbackStudentPublicInfo();
       const submissionStats = submissionMap.get(studentId) ?? {
         submissionsCount: 0,
         submittedTasksCount: 0,
@@ -564,6 +581,8 @@ export class ProcessAssessmentService {
       });
       return {
         studentId,
+        studentName: studentPublic.studentName,
+        studentNo: studentPublic.studentNo,
         submittedTasksCount: submissionStats.submittedTasksCount,
         publishedTasksCount,
         submittedTasksRate: Number(submittedTasksRate.toFixed(4)),
@@ -697,5 +716,47 @@ export class ProcessAssessmentService {
       throw new BadRequestException(`${fieldName} must be a valid ObjectId`);
     }
     return new Types.ObjectId(value);
+  }
+
+  private async buildStudentPublicInfoMap(studentIds: Types.ObjectId[]) {
+    const students = await this.userModel
+      .find({ _id: { $in: studentIds } })
+      .select('_id name studentNo')
+      .lean<Array<WithId & { name?: string; studentNo?: string }>>()
+      .exec();
+
+    const studentPublicMap = new Map<string, ProcessAssessmentStudentPublicInfo>();
+    for (const student of students) {
+      studentPublicMap.set(
+        student._id.toString(),
+        this.toStudentPublicInfo(student),
+      );
+    }
+    return studentPublicMap;
+  }
+
+  private toStudentPublicInfo(student: {
+    name?: string;
+    studentNo?: string;
+  }): ProcessAssessmentStudentPublicInfo {
+    const normalizedName = student.name?.trim();
+    const normalizedStudentNo = student.studentNo?.trim();
+    return {
+      studentName:
+        normalizedName && normalizedName.length > 0
+          ? normalizedName
+          : '未知学生',
+      studentNo:
+        normalizedStudentNo && normalizedStudentNo.length > 0
+          ? normalizedStudentNo
+          : null,
+    };
+  }
+
+  private toFallbackStudentPublicInfo(): ProcessAssessmentStudentPublicInfo {
+    return {
+      studentName: '未知学生',
+      studentNo: null,
+    };
   }
 }
