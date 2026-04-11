@@ -229,7 +229,6 @@ export default async function StudentTaskDetailPage({
   const queryRecord = toQueryRecord(viewModel.query);
   const taskTitle = toDisplayText(safeGet(viewModel.data.task, "title", undefined), "任务详情");
   const classroomName = toDisplayText(safeGet(viewModel.data.classroom, "name", undefined), "当前班级");
-  const classroomStatus = toDisplayText(safeGet(viewModel.data.classroom, "status", undefined));
   const publishedAt = safeGet<string | null>(viewModel.data.classroomTask, "publishedAt", null);
   const dueAt = safeGet<string | null>(viewModel.data.classroomTask, "dueAt", null);
   const allowLate = safeGet<boolean | null>(viewModel.data.classroomTask, "settings.allowLate", null);
@@ -258,7 +257,7 @@ export default async function StudentTaskDetailPage({
     <section className="space-y-4">
       <PageHeader
         title={taskTitle}
-        description={`${classroomName} | 班级状态: ${classroomStatus}`}
+        description={classroomName}
         actions={
           <div className="flex items-center gap-3 text-sm">
             {latestSubmissionHref ? (
