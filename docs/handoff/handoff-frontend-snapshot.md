@@ -153,6 +153,13 @@ Teacher AI 指标链路（可用）：
 3. `summary.avgAttempts` 前端文案已收口为“AI 平均重试次数”，避免被误读为学生提交尝试次数。
 4. `summary.avgLatencyMs` 在当前为 `null` 时不再作为主 KPI 卡片展示，改为“平均耗时指标当前暂未采集”说明文案。
 
+Teacher 班级周报链路（可用）：
+1. `/teacher/classrooms/[classroomId]/weekly-report` 已从“最小展示”收口为正式分析页结构：筛选区（时间窗口）-> 周报摘要 -> 周报概览 -> 明细区 -> 原始 JSON 调试区。
+2. `summary` 与 `overview` 已做前端友好化映射，不再直出技术态 `Object.entries`/键值列表；比率类字段统一为百分比展示。
+3. `items` 明细区已从“前 10 条标题”升级为结构化表格预览（最多展示前 30 条），并保留总条数提示。
+4. 时间窗口策略保持不变：主展示 `7d/30d/all`（默认 `all`），旧值 URL `24h` 仍兼容请求且提供轻量提示，不回退到主 tabs。
+5. “查看原始周报 JSON”入口继续保留，默认折叠并置于页面下方，作为低权重调试辅助。
+
 Teacher 统计窗口策略（阶段二已收口）：
 1. 班级级页面（`weekly-report`、`process-assessment`）前端主展示窗口为 `7d/30d/all`，默认窗口为 `all`。
 2. 单任务页面（`learning-trajectory`、`review-pack`）前端主展示窗口为 `all/7d`，默认窗口为 `all`。
