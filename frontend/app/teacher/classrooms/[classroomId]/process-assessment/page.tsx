@@ -107,25 +107,6 @@ const toRiskLabel = (
   return { label: "未评估", tone: "unknown", raw: risk };
 };
 
-const TAG_LABEL_MAP: Record<string, string> = {
-  readability: "可读性",
-  correctness: "正确性",
-  style: "风格",
-  naming: "命名",
-  "bug-risk": "缺陷风险",
-  performance: "性能",
-  complexity: "复杂度",
-  robustness: "健壮性",
-};
-
-const toFriendlyTagLabel = (rawTag: string): string => {
-  const normalized = rawTag.trim().toLowerCase();
-  if (!normalized) {
-    return rawTag;
-  }
-  return TAG_LABEL_MAP[normalized] ?? rawTag;
-};
-
 const toTopTagsSummary = (value: unknown): string => {
   if (!Array.isArray(value) || value.length === 0) {
     return "";
@@ -139,11 +120,10 @@ const toTopTagsSummary = (value: unknown): string => {
       if (!tag) {
         return "";
       }
-      const label = toFriendlyTagLabel(tag);
       if (count === null) {
-        return label;
+        return tag;
       }
-      return `${label}（${count}）`;
+      return `${tag} (${count})`;
     })
     .filter((item) => item.length > 0);
 
