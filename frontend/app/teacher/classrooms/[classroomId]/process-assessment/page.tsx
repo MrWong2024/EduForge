@@ -38,7 +38,6 @@ type ProcessAssessmentTableRow = {
   key: string;
   studentDisplayName: string;
   studentSecondaryText: string;
-  studentTitleText?: string;
   progressDisplay: string;
   progressSecondaryText: string;
   progressRate: number | null;
@@ -91,17 +90,6 @@ const toScoreText = (value: number | null): string => {
   }
   const rounded = Math.round(value * 10) / 10;
   return Number.isInteger(rounded) ? `${rounded}` : rounded.toFixed(1);
-};
-
-const toShortId = (value: string): string => {
-  const normalized = value.trim();
-  if (!normalized) {
-    return "";
-  }
-  if (normalized.length <= 14) {
-    return normalized;
-  }
-  return `${normalized.slice(0, 8)}...${normalized.slice(-4)}`;
 };
 
 const toRiskLabel = (
@@ -170,21 +158,8 @@ const toProcessAssessmentTableRows = (items: UnknownRecord[]): ProcessAssessment
     ).trim();
     const studentNo = toDisplayText(safeGet(item, "studentNo", undefined), "").trim();
     const studentId = toDisplayText(safeGet(item, "studentId", undefined), "").trim();
-    const shortStudentId = studentId ? toShortId(studentId) : "";
-    const studentDisplayName = studentName
-      ? studentName
-      : studentNo
-        ? `学号 ${studentNo}`
-        : shortStudentId
-          ? `ID ${shortStudentId}`
-          : `学生 ${index + 1}`;
-    const studentSecondaryText =
-      studentName && (studentNo || studentId)
-        ? [studentNo ? `学号 ${studentNo}` : "", studentId ? `ID ${shortStudentId}` : ""]
-            .filter((text) => text.length > 0)
-            .join(" · ")
-        : "";
-    const studentTitleText = studentId ? `studentId: ${studentId}` : undefined;
+    const studentDisplayName = studentName || "未知学生";
+    const studentSecondaryText = studentNo ? `学号：${studentNo}` : "";
 
     const submittedTasksRate = toFiniteNumber(safeGet(item, "submittedTasksRate", undefined));
     const progressFallbackRate = toFiniteNumber(
@@ -215,7 +190,6 @@ const toProcessAssessmentTableRows = (items: UnknownRecord[]): ProcessAssessment
       key: String(studentId || safeGet(item, "id", undefined) || index),
       studentDisplayName,
       studentSecondaryText,
-      studentTitleText,
       progressDisplay: toPercentText(progressRate),
       progressSecondaryText,
       progressRate,
@@ -500,9 +474,7 @@ export default async function ProcessAssessmentPage({
                   <tr key={row.key} className="border-t border-zinc-100 align-top">
                     <td className="px-3 py-2.5 text-center text-zinc-700">{index + 1}</td>
                     <td className="px-3 py-2.5">
-                      <p className="font-medium text-zinc-900" title={row.studentTitleText}>
-                        {row.studentDisplayName}
-                      </p>
+                      <p className="font-medium text-zinc-900">{row.studentDisplayName}</p>
                       {row.studentSecondaryText ? (
                         <p className="mt-0.5 text-[11px] text-zinc-500">{row.studentSecondaryText}</p>
                       ) : null}
