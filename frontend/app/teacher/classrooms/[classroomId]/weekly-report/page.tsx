@@ -32,7 +32,6 @@ const REPORT_WINDOW_LABELS: Record<ReportWindow, string> = {
   "30d": "近30天",
   all: "全部",
 };
-const DETAIL_PREVIEW_LIMIT = 30;
 
 type UnknownRecord = Record<string, unknown>;
 type MetricKind = "number" | "percent";
@@ -45,46 +44,6 @@ type WeeklyOverviewGroup = {
   key: string;
   title: string;
   rows: Array<{ label: string; value: string }>;
-};
-type WeeklyDetailColumn = {
-  key: string;
-  label: string;
-};
-
-const FIELD_LABELS: Record<string, string> = {
-  id: "ID",
-  taskId: "任务ID",
-  classroomTaskId: "课堂任务ID",
-  title: "任务标题",
-  name: "名称",
-  studentsCount: "学生数",
-  publishedClassroomTasks: "已发布任务数",
-  dueClassroomTasks: "已截止任务数",
-  distinctStudentsSubmitted: "有提交学生数",
-  submissionRate: "提交率",
-  lateSubmissionsCount: "迟交次数",
-  lateStudentsCount: "迟交学生数",
-  aiSuccessRate: "AI 成功率",
-  aiPendingJobs: "AI 待处理",
-  aiFailedJobs: "AI 失败",
-  total: "总数",
-  succeeded: "成功",
-  failed: "失败",
-  dead: "终止",
-  pending: "排队中",
-  running: "处理中",
-  successRate: "成功率",
-  rateLimitRatio: "限流占比",
-  timeoutRatio: "超时占比",
-  notSubmittedStudentsCount: "未提交学生数",
-  sampleStudentIds: "风险学生样本",
-  tag: "标签",
-  code: "错误码",
-  count: "次数",
-  createdAt: "创建时间",
-  updatedAt: "更新时间",
-  dueAt: "截止时间",
-  publishedAt: "发布时间",
 };
 
 const asRecord = (value: unknown): UnknownRecord =>
@@ -144,17 +103,6 @@ const pickValue = (sources: UnknownRecord[], paths: string[]): unknown => {
     }
   }
   return undefined;
-};
-
-const toFriendlyFieldLabel = (field: string): string => {
-  const mapped = FIELD_LABELS[field];
-  if (mapped) {
-    return mapped;
-  }
-  return field
-    .replace(/([a-z])([A-Z])/g, "$1 $2")
-    .replace(/_/g, " ")
-    .trim();
 };
 
 const formatMetricValue = (value: unknown, kind: MetricKind): string => {
@@ -400,94 +348,6 @@ const toOverviewGroups = (
   ].filter((group) => group.rows.length > 0);
 };
 
-const shouldRenderAsPercent = (field: string): boolean => {
-  const normalized = field.toLowerCase();
-  return (
-    normalized.includes("rate") ||
-    normalized.includes("ratio") ||
-    normalized.includes("percent")
-  );
-};
-
-const toDetailCellText = (field: string, value: unknown): string => {
-  if (!hasMeaningfulValue(value)) {
-    return "—";
-  }
-  if (shouldRenderAsPercent(field)) {
-    return toPercentText(value);
-  }
-  if (field.endsWith("At")) {
-    const iso =
-      typeof value === "string" || typeof value === "number" ? String(value) : null;
-    return toDisplayDate(iso);
-  }
-  if (typeof value === "boolean") {
-    return value ? "是" : "否";
-  }
-  if (Array.isArray(value)) {
-    const texts = value
-      .map((item) => toDisplayText(item, "").trim())
-      .filter((item) => item.length > 0);
-    if (texts.length === 0) {
-      return "—";
-    }
-    const preview = texts.slice(0, 3).join("、");
-    return texts.length > 3 ? `${preview} 等 ${texts.length} 项` : preview;
-  }
-  if (typeof value === "object") {
-    const compact = JSON.stringify(value);
-    return compact.length > 80 ? `${compact.slice(0, 77)}...` : compact;
-  }
-  return toDisplayText(value, "—");
-};
-
-const resolveDetailColumns = (rows: UnknownRecord[]): WeeklyDetailColumn[] => {
-  if (rows.length === 0) {
-    return [];
-  }
-
-  const preferredOrder = [
-    "title",
-    "name",
-    "classroomTaskId",
-    "taskId",
-    "studentsCount",
-    "distinctStudentsSubmitted",
-    "submissionRate",
-    "aiSuccessRate",
-    "aiPendingJobs",
-    "aiFailedJobs",
-    "lateSubmissionsCount",
-    "lateStudentsCount",
-    "dueAt",
-    "publishedAt",
-    "createdAt",
-    "updatedAt",
-  ];
-
-  const availableKeys = new Set<string>();
-  for (const row of rows) {
-    for (const key of Object.keys(row)) {
-      availableKeys.add(key);
-    }
-  }
-
-  const selected = preferredOrder.filter((key) => availableKeys.has(key));
-  if (selected.length === 0) {
-    selected.push(...Object.keys(rows[0]).slice(0, 6));
-  } else if (selected.length < 6) {
-    const additional = Object.keys(rows[0])
-      .filter((key) => !selected.includes(key))
-      .slice(0, 6 - selected.length);
-    selected.push(...additional);
-  }
-
-  return selected.slice(0, 8).map((key) => ({
-    key,
-    label: toFriendlyFieldLabel(key),
-  }));
-};
-
 const getRequestOrigin = async (): Promise<string> => {
   const headerMap = await headers();
   const host = headerMap.get("x-forwarded-host") ?? headerMap.get("host") ?? "";
@@ -574,16 +434,12 @@ export default async function WeeklyReportPage({ params, searchParams }: WeeklyR
   ];
   const summaryCards = toSummaryCards(sources);
   const overviewGroups = toOverviewGroups(sources, rawRecord);
-  const detailRows = asRecordArray(viewModel.data.items);
-  const detailColumns = resolveDetailColumns(detailRows);
-  const detailRowsPreview = detailRows.slice(0, DETAIL_PREVIEW_LIMIT);
   const generatedAtText = toDisplayDate(safeGet(rawRecord, "generatedAt", undefined));
   const compatibilityHint =
     !DISPLAY_REPORT_WINDOWS.includes(viewModel.window as DisplayReportWindow)
       ? "（旧链接兼容）"
       : "";
-  const hasData =
-    summaryCards.length > 0 || overviewGroups.length > 0 || detailRows.length > 0;
+  const hasData = summaryCards.length > 0 || overviewGroups.length > 0;
 
   return (
     <section className="space-y-4">
@@ -666,54 +522,6 @@ export default async function WeeklyReportPage({ params, searchParams }: WeeklyR
               </div>
             </section>
           ) : null}
-
-          <section className="rounded-lg border border-zinc-200 bg-white p-4">
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <h2 className="text-sm font-semibold text-zinc-900">周报明细</h2>
-              <p className="text-xs text-zinc-500">
-                {detailRows.length > DETAIL_PREVIEW_LIMIT
-                  ? `已展示前 ${DETAIL_PREVIEW_LIMIT} 条，共 ${detailRows.length} 条`
-                  : `共 ${detailRows.length} 条`}
-              </p>
-            </div>
-            <p className="mt-1 text-xs text-zinc-500">
-              明细用于辅助定位本窗口内的课堂表现变化，字段已做友好化与比率格式化展示。
-            </p>
-
-            {detailRows.length > 0 && detailColumns.length > 0 ? (
-              <div className="mt-3 overflow-x-auto rounded-lg border border-zinc-200 bg-white">
-                <table className="min-w-full border-collapse text-sm">
-                  <thead className="bg-zinc-50 text-left text-zinc-600">
-                    <tr>
-                      {detailColumns.map((column) => (
-                        <th key={column.key} className="px-4 py-3">
-                          {column.label}
-                        </th>
-                      ))}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {detailRowsPreview.map((row, index) => (
-                      <tr
-                        key={String(row.id ?? row.classroomTaskId ?? row.taskId ?? index)}
-                        className="border-t border-zinc-100 align-top"
-                      >
-                        {detailColumns.map((column) => (
-                          <td key={`${index}-${column.key}`} className="px-4 py-3">
-                            {toDetailCellText(column.key, row[column.key])}
-                          </td>
-                        ))}
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            ) : (
-              <div className="mt-3">
-                <EmptyState title="暂无周报明细" description="当前窗口下未返回可展示的明细条目。" />
-              </div>
-            )}
-          </section>
         </>
       )}
 

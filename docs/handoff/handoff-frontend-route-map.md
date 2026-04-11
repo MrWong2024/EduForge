@@ -37,7 +37,7 @@
 | `/teacher/classrooms/[classroomId]/tasks/[classroomTaskId]/review-pack` | 课堂复盘（证据型） | `GET .../review-pack` | 主展示窗口 `all/7d`（默认 `all`）；兼容 URL 旧值 `24h/30d`（继续请求但不在主 tabs 展示）；`window/topK/examplesPerTag` 切换；主视图聚焦总览/问题聚合/典型样例/学生分层；样例卡片可跳转对应提交详情 | Done | 真接口 |
 | `/teacher/classrooms/[classroomId]/tasks/[classroomTaskId]/ai-metrics` | AI 指标 | `GET .../ai-metrics` | 窗口集合与默认值保持原策略（`1h/24h/7d`），仅做 window/includeTags 切换 | Done | 真接口 |
 | `/teacher/classrooms/[classroomId]/members` | 班级成员管理 | `GET classrooms/:id`、`GET classrooms/:id/students`、`POST classrooms/:id/students/:uid/remove` | 成员列表、移除成员 | Done | P0 真接口 |
-| `/teacher/classrooms/[classroomId]/weekly-report` | 班级周报 | `GET classrooms/:classroomId/weekly-report` | 页面已从最小展示收口为正式分析页结构（筛选区 -> 周报摘要 -> 周报概览 -> 明细区 -> 调试区）；主展示窗口 `7d/30d/all`（默认 `all`），兼容 URL 旧值 `24h`（继续请求但不在主 tabs 展示）；`summary/overview/items` 均做友好化展示与比率格式化；原始 JSON 入口保留但默认折叠 | Done | 真接口 |
+| `/teacher/classrooms/[classroomId]/weekly-report` | 班级周报 | `GET classrooms/:classroomId/weekly-report` | 页面已收口为汇总型分析页（筛选区 -> 周报摘要 -> 周报概览 -> 调试区）；主展示窗口 `7d/30d/all`（默认 `all`），兼容 URL 旧值 `24h`（继续请求但不在主 tabs 展示）；已移除空“周报明细”区块；`topTags` 仅在“风险与问题概览”展示一次；原始 JSON 入口保留且默认折叠 | Done | 真接口 |
 | `/teacher/classrooms/[classroomId]/process-assessment` | 过程性评价 | `GET classrooms/:classroomId/process-assessment`、`GET classrooms/:classroomId/process-assessment.csv` | 主展示窗口 `7d/30d/all`（默认 `all`）；兼容 URL 旧值 `24h`（继续请求但不在主 tabs 展示）；window 切换、CSV 下载（沿用当前 window） | Done | 真接口 |
 | `/teacher/classrooms/[classroomId]/export/snapshot` | 教学快照 | `GET classrooms/:classroomId/export/snapshot` | window/includePerTask/limit* 切换、显示 `meta.notes` | Done | 真接口 |
 
