@@ -8,7 +8,14 @@ import { buildErrorDescription, extractRawDetail } from "@/lib/api/error-present
 import { toProcessAssessmentResponse } from "@/lib/api/types-teacher";
 import { paths } from "@/lib/routes/paths";
 import { getCommonErrorSummary } from "@/lib/ui/status";
-import { buildQueryString, getSingleSearchParam, parseEnum, safeGet, toDisplayText } from "@/lib/ui/format";
+import {
+  buildQueryString,
+  getSingleSearchParam,
+  parseEnum,
+  safeGet,
+  toDisplayDate,
+  toDisplayText,
+} from "@/lib/ui/format";
 
 type ProcessAssessmentPageProps = {
   params: Promise<{ classroomId: string }>;
@@ -24,6 +31,198 @@ const REPORT_WINDOW_LABELS: Record<ReportWindow, string> = {
   "7d": "近7天",
   "30d": "近30天",
   all: "全部",
+};
+
+type UnknownRecord = Record<string, unknown>;
+type ProcessAssessmentTableRow = {
+  key: string;
+  studentDisplayName: string;
+  studentSecondaryText: string;
+  progressDisplay: string;
+  progressSecondaryText: string;
+  progressRate: number | null;
+  riskDisplay: string;
+  riskTone: "high" | "medium" | "low" | "unknown";
+  riskRaw: string;
+  noteDisplay: string;
+  aiRequestedCount: number;
+  aiSucceededCount: number;
+  lateRecordsCount: number;
+};
+type SummaryMetricCard = {
+  key: string;
+  label: string;
+  value: string;
+};
+
+const asRecord = (value: unknown): UnknownRecord =>
+  value && typeof value === "object" && !Array.isArray(value)
+    ? (value as UnknownRecord)
+    : {};
+
+const toFiniteNumber = (value: unknown): number | null => {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return value;
+  }
+  if (typeof value === "string" && value.trim()) {
+    const parsed = Number(value);
+    if (Number.isFinite(parsed)) {
+      return parsed;
+    }
+  }
+  return null;
+};
+
+const toPercentText = (value: number | null): string => {
+  if (value === null) {
+    return "—";
+  }
+  const percent = value <= 1 ? value * 100 : value;
+  const rounded = Math.round(percent * 10) / 10;
+  return Number.isInteger(rounded) ? `${rounded}%` : `${rounded.toFixed(1)}%`;
+};
+
+const toRiskLabel = (
+  value: unknown
+): { label: string; tone: ProcessAssessmentTableRow["riskTone"]; raw: string } => {
+  const risk = toDisplayText(value, "").toUpperCase();
+  if (risk === "HIGH") {
+    return { label: "高风险", tone: "high", raw: "HIGH" };
+  }
+  if (risk === "MEDIUM") {
+    return { label: "中风险", tone: "medium", raw: "MEDIUM" };
+  }
+  if (risk === "LOW") {
+    return { label: "低风险", tone: "low", raw: "LOW" };
+  }
+  return { label: "未评估", tone: "unknown", raw: risk };
+};
+
+const toTopTagsSummary = (value: unknown): string => {
+  if (!Array.isArray(value) || value.length === 0) {
+    return "";
+  }
+
+  const tags = value
+    .map((item) => asRecord(item))
+    .map((item) => {
+      const tag = toDisplayText(item.tag, "").trim();
+      const count = toFiniteNumber(item.count);
+      if (!tag) {
+        return "";
+      }
+      if (count === null) {
+        return tag;
+      }
+      return `${tag}（${count}）`;
+    })
+    .filter((item) => item.length > 0);
+
+  if (tags.length === 0) {
+    return "";
+  }
+
+  const preview = tags.slice(0, 2).join("、");
+  return tags.length > 2 ? `${preview} 等 ${tags.length} 项` : preview;
+};
+
+const toProcessAssessmentTableRows = (items: UnknownRecord[]): ProcessAssessmentTableRow[] =>
+  items.map((item, index) => {
+    const studentName = toDisplayText(
+      safeGet(item, "studentName", undefined) ?? safeGet(item, "name", undefined),
+      ""
+    ).trim();
+    const studentNo = toDisplayText(safeGet(item, "studentNo", undefined), "").trim();
+    const studentId = toDisplayText(safeGet(item, "studentId", undefined), "").trim();
+    const studentDisplayName = studentName || (studentNo ? `学号 ${studentNo}` : studentId || `学生 ${index + 1}`);
+    const studentSecondaryText =
+      studentName && (studentNo || studentId)
+        ? [studentNo ? `学号 ${studentNo}` : "", studentId ? `ID ${studentId}` : ""]
+            .filter((text) => text.length > 0)
+            .join(" · ")
+        : "";
+
+    const submittedTasksRate = toFiniteNumber(safeGet(item, "submittedTasksRate", undefined));
+    const progressFallbackRate = toFiniteNumber(
+      safeGet(item, "completionRate", undefined) ?? safeGet(item, "progress", undefined)
+    );
+    const progressRate = submittedTasksRate ?? progressFallbackRate;
+    const submittedTasksCount = toFiniteNumber(safeGet(item, "submittedTasksCount", undefined));
+    const publishedTasksCount = toFiniteNumber(safeGet(item, "publishedTasksCount", undefined));
+    const progressSecondaryText =
+      submittedTasksCount !== null && publishedTasksCount !== null
+        ? `${submittedTasksCount}/${publishedTasksCount} 个任务有提交`
+        : "—";
+
+    const risk = toRiskLabel(safeGet(item, "riskLevel", undefined) ?? safeGet(item, "risk", undefined));
+    const comment = toDisplayText(
+      safeGet(item, "comment", undefined) ?? safeGet(item, "note", undefined),
+      ""
+    ).trim();
+    const tagSummary = toTopTagsSummary(safeGet(item, "topTags", undefined));
+    const noteDisplay = comment || (tagSummary ? `高频问题：${tagSummary}` : "—");
+
+    const aiRequestedCount = toFiniteNumber(safeGet(item, "aiRequestedCount", undefined)) ?? 0;
+    const aiSucceededCount = toFiniteNumber(safeGet(item, "aiSucceededCount", undefined)) ?? 0;
+    const lateSubmissionsCount = toFiniteNumber(safeGet(item, "lateSubmissionsCount", undefined)) ?? 0;
+    const lateTasksCount = toFiniteNumber(safeGet(item, "lateTasksCount", undefined)) ?? 0;
+
+    return {
+      key: String(studentId || safeGet(item, "id", undefined) || index),
+      studentDisplayName,
+      studentSecondaryText,
+      progressDisplay: toPercentText(progressRate),
+      progressSecondaryText,
+      progressRate,
+      riskDisplay: risk.label,
+      riskTone: risk.tone,
+      riskRaw: risk.raw,
+      noteDisplay,
+      aiRequestedCount,
+      aiSucceededCount,
+      lateRecordsCount: lateSubmissionsCount + lateTasksCount,
+    };
+  });
+
+const toSummaryCards = (rows: ProcessAssessmentTableRow[]): SummaryMetricCard[] => {
+  const totalStudents = rows.length;
+  const highRiskCount = rows.filter((row) => row.riskRaw === "HIGH").length;
+  const mediumOrHighCount = rows.filter(
+    (row) => row.riskRaw === "HIGH" || row.riskRaw === "MEDIUM"
+  ).length;
+  const lateRecordStudentsCount = rows.filter((row) => row.lateRecordsCount > 0).length;
+
+  const progressRateValues = rows
+    .map((row) => row.progressRate)
+    .filter((value): value is number => value !== null);
+  const averageProgressRate =
+    progressRateValues.length > 0
+      ? progressRateValues.reduce((sum, value) => sum + value, 0) / progressRateValues.length
+      : null;
+
+  const aiRequestedTotal = rows.reduce((sum, row) => sum + row.aiRequestedCount, 0);
+  const aiSucceededTotal = rows.reduce((sum, row) => sum + row.aiSucceededCount, 0);
+  const aiSuccessRate = aiRequestedTotal > 0 ? aiSucceededTotal / aiRequestedTotal : null;
+
+  return [
+    { key: "totalStudents", label: "学生条目数", value: `${totalStudents}` },
+    { key: "highRiskCount", label: "高风险学生数", value: `${highRiskCount}` },
+    { key: "mediumOrHighCount", label: "中高风险学生数", value: `${mediumOrHighCount}` },
+    {
+      key: "averageProgressRate",
+      label: "平均任务提交率",
+      value: toPercentText(averageProgressRate),
+    },
+    { key: "aiSuccessRate", label: "AI 请求成功率", value: toPercentText(aiSuccessRate) },
+    { key: "lateRecordStudents", label: "有迟交记录人数", value: `${lateRecordStudentsCount}` },
+  ];
+};
+
+const riskToneClassNameMap: Record<ProcessAssessmentTableRow["riskTone"], string> = {
+  high: "bg-red-50 text-red-700 ring-red-200",
+  medium: "bg-amber-50 text-amber-700 ring-amber-200",
+  low: "bg-emerald-50 text-emerald-700 ring-emerald-200",
+  unknown: "bg-zinc-100 text-zinc-700 ring-zinc-200",
 };
 
 const getRequestOrigin = async (): Promise<string> => {
@@ -117,6 +316,18 @@ export default async function ProcessAssessmentPage({
     );
   }
 
+  const rows = toProcessAssessmentTableRows(viewModel.data.items);
+  const summaryCards = toSummaryCards(rows);
+  const generatedAtValue = safeGet(viewModel.data.raw, "generatedAt", undefined);
+  const generatedAt =
+    typeof generatedAtValue === "string" || typeof generatedAtValue === "number"
+      ? toDisplayDate(String(generatedAtValue))
+      : "—";
+  const compatibilityHint =
+    !DISPLAY_REPORT_WINDOWS.includes(viewModel.window as DisplayReportWindow)
+      ? "（旧链接兼容）"
+      : "";
+
   return (
     <section className="space-y-4">
       <PageHeader
@@ -146,73 +357,97 @@ export default async function ProcessAssessmentPage({
       />
 
       <section className="rounded-lg border border-zinc-200 bg-white p-4 text-sm">
-        <p className="font-medium text-zinc-900">时间窗口</p>
-        <div className="mt-2 flex flex-wrap items-center gap-3">
-          {DISPLAY_REPORT_WINDOWS.map((windowValue) => {
-            const isActive = windowValue === viewModel.window;
-            return (
-              <Link
-                key={windowValue}
-                href={buildWindowHref(classroomId, windowValue)}
-                className={isActive ? "font-semibold text-blue-700" : "text-blue-700 hover:underline"}
-              >
-                {REPORT_WINDOW_LABELS[windowValue]}
-              </Link>
-            );
-          })}
+        <p className="font-medium text-zinc-900">筛选</p>
+        <div className="mt-2 flex flex-wrap items-center gap-4 text-zinc-700">
+          <div className="flex items-center gap-2">
+            <span>统计窗口:</span>
+            {DISPLAY_REPORT_WINDOWS.map((windowValue) => {
+              const isActive = windowValue === viewModel.window;
+              return (
+                <Link
+                  key={windowValue}
+                  href={buildWindowHref(classroomId, windowValue)}
+                  className={isActive ? "font-semibold text-blue-700" : "text-blue-700 hover:underline"}
+                >
+                  {REPORT_WINDOW_LABELS[windowValue]}
+                </Link>
+              );
+            })}
+            <span className="text-zinc-500">
+              当前：{REPORT_WINDOW_LABELS[viewModel.window]}
+              {compatibilityHint}
+            </span>
+          </div>
+        </div>
+        <p className="mt-2 text-xs text-zinc-500">统计生成于：{generatedAt}</p>
+      </section>
+
+      <section className="rounded-lg border border-zinc-200 bg-white p-4">
+        <h2 className="text-sm font-semibold text-zinc-900">过程性评价摘要</h2>
+        <p className="mt-1 text-xs text-zinc-500">以下指标基于当前窗口与当前返回明细聚合。</p>
+        <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
+          {summaryCards.map((card) => (
+            <article key={card.key} className="rounded-md border border-zinc-200 bg-zinc-50 p-3">
+              <p className="text-xs text-zinc-500">{card.label}</p>
+              <p className="mt-1 text-lg font-semibold text-zinc-900">{card.value}</p>
+            </article>
+          ))}
         </div>
       </section>
 
-      {viewModel.data.items.length === 0 ? (
-        <EmptyState title="暂无过程性评价数据" description="当前窗口下未返回可展示条目。" />
-      ) : (
-        <div className="overflow-x-auto rounded-lg border border-zinc-200 bg-white">
-          <table className="min-w-full border-collapse text-sm">
-            <thead className="bg-zinc-50 text-left text-zinc-600">
-              <tr>
-                <th className="px-4 py-3">序号</th>
-                <th className="px-4 py-3">学生</th>
-                <th className="px-4 py-3">进度</th>
-                <th className="px-4 py-3">风险</th>
-                <th className="px-4 py-3">备注</th>
-              </tr>
-            </thead>
-            <tbody>
-              {viewModel.data.items.map((row, index) => (
-                <tr key={String(row.id ?? row.studentId ?? index)} className="border-t border-zinc-100 align-top">
-                  <td className="px-4 py-3">{index + 1}</td>
-                  <td className="px-4 py-3">
-                    {toDisplayText(
-                      safeGet(row, "studentName", undefined) ??
-                        safeGet(row, "studentId", undefined) ??
-                        safeGet(row, "name", undefined),
-                      "—"
-                    )}
-                  </td>
-                  <td className="px-4 py-3">
-                    {toDisplayText(
-                      safeGet(row, "progress", undefined) ?? safeGet(row, "completionRate", undefined),
-                      "—"
-                    )}
-                  </td>
-                  <td className="px-4 py-3">
-                    {toDisplayText(
-                      safeGet(row, "riskLevel", undefined) ?? safeGet(row, "risk", undefined),
-                      "—"
-                    )}
-                  </td>
-                  <td className="px-4 py-3">
-                    {toDisplayText(
-                      safeGet(row, "comment", undefined) ?? safeGet(row, "note", undefined),
-                      "—"
-                    )}
-                  </td>
+      <section className="rounded-lg border border-zinc-200 bg-white p-4">
+        <h2 className="text-sm font-semibold text-zinc-900">过程性评价明细</h2>
+        <p className="mt-1 text-xs text-zinc-500">
+          表格展示当前窗口内过程性评价明细；如需完整结果，请使用上方 CSV 导出。
+        </p>
+
+        {rows.length === 0 ? (
+          <div className="mt-3">
+            <EmptyState title="暂无过程性评价数据" description="当前窗口下未返回可展示条目。" />
+          </div>
+        ) : (
+          <div className="mt-3 overflow-x-auto rounded-lg border border-zinc-200 bg-white">
+            <table className="min-w-full border-collapse text-sm">
+              <thead className="bg-zinc-50 text-left text-zinc-600">
+                <tr>
+                  <th className="px-4 py-3">序号</th>
+                  <th className="px-4 py-3">学生</th>
+                  <th className="px-4 py-3">进度</th>
+                  <th className="px-4 py-3">风险</th>
+                  <th className="px-4 py-3">备注</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
+              </thead>
+              <tbody>
+                {rows.map((row, index) => (
+                  <tr key={row.key} className="border-t border-zinc-100 align-top">
+                    <td className="px-4 py-3 text-zinc-700">{index + 1}</td>
+                    <td className="px-4 py-3">
+                      <p className="font-medium text-zinc-900">{row.studentDisplayName}</p>
+                      {row.studentSecondaryText ? (
+                        <p className="mt-1 text-xs text-zinc-500">{row.studentSecondaryText}</p>
+                      ) : null}
+                    </td>
+                    <td className="px-4 py-3">
+                      <p className="font-medium text-zinc-900">{row.progressDisplay}</p>
+                      <p className="mt-1 text-xs text-zinc-500">{row.progressSecondaryText}</p>
+                    </td>
+                    <td className="px-4 py-3">
+                      <span
+                        className={`inline-flex rounded-full px-2 py-0.5 text-xs font-medium ring-1 ${riskToneClassNameMap[row.riskTone]}`}
+                      >
+                        {row.riskDisplay}
+                      </span>
+                    </td>
+                    <td className="max-w-xl whitespace-pre-wrap break-words px-4 py-3 text-zinc-700">
+                      {row.noteDisplay}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </section>
 
       <details className="rounded-lg border border-zinc-200 bg-zinc-50 p-4">
         <summary className="cursor-pointer text-sm font-medium text-zinc-800">
