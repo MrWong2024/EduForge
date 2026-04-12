@@ -47,13 +47,14 @@ type CourseOverviewItem = {
   publishedClassroomTasks: number;
   distinctStudentsSubmitted: number;
   submissionRate: number;
+  overallSubmissionCoverage: number;
   lateSubmissionsCount: number;
   lateStudentsCount: number;
   ai: {
     jobsTotal: number;
     pendingJobs: number;
     failedJobs: number;
-    aiSuccessRate: number;
+    aiSuccessRate: number | null;
     topErrors: Array<{ code: string; count: number }>;
   };
 };
@@ -245,6 +246,7 @@ export class CourseOverviewService {
     const distinctStudentsMap = new Map<string, Set<string>>();
     const lateStudentsMap = new Map<string, Set<string>>();
     const lateSubmissionsCountMap = new Map<string, number>();
+    const submittedTaskCoverageCountMap = new Map<string, number>();
     for (const pair of submissionPairs) {
       const classroomId = classroomIdByTaskId.get(
         pair._id.classroomTaskId.toString(),
@@ -266,6 +268,12 @@ export class CourseOverviewService {
       lateSubmissionsCountMap.set(
         classroomId,
         lateSubmissionsCount + (pair.lateSubmissionsCount ?? 0),
+      );
+      const submittedTaskCoverageCount =
+        submittedTaskCoverageCountMap.get(classroomId) ?? 0;
+      submittedTaskCoverageCountMap.set(
+        classroomId,
+        submittedTaskCoverageCount + 1,
       );
     }
 
@@ -316,7 +324,15 @@ export class CourseOverviewService {
         errorCountMap: new Map<string, number>(),
       };
       const aiSuccessRate =
-        ai.jobsTotal > 0 ? ai.succeededJobs / ai.jobsTotal : 0;
+        ai.jobsTotal > 0 ? ai.succeededJobs / ai.jobsTotal : null;
+      const publishedClassroomTasks = publishedTasksMap.get(classroomId) ?? 0;
+      const submissionCoverageDenominator =
+        studentsCount * publishedClassroomTasks;
+      const overallSubmissionCoverage =
+        submissionCoverageDenominator > 0
+          ? (submittedTaskCoverageCountMap.get(classroomId) ?? 0) /
+            submissionCoverageDenominator
+          : 0;
       const submissionRate =
         studentsCount > 0 ? distinctStudentsSubmitted / studentsCount : 0;
 
@@ -324,9 +340,10 @@ export class CourseOverviewService {
         classroomId,
         name: classroom.name,
         studentsCount,
-        publishedClassroomTasks: publishedTasksMap.get(classroomId) ?? 0,
+        publishedClassroomTasks,
         distinctStudentsSubmitted,
         submissionRate,
+        overallSubmissionCoverage,
         lateSubmissionsCount: lateSubmissionsCountMap.get(classroomId) ?? 0,
         lateStudentsCount: lateStudentsMap.get(classroomId)?.size ?? 0,
         ai: {
@@ -417,13 +434,16 @@ export class CourseOverviewService {
     if (sortField === 'submissionRate') {
       return item.submissionRate;
     }
+    if (sortField === 'overallSubmissionCoverage') {
+      return item.overallSubmissionCoverage;
+    }
     if (sortField === 'pendingJobs') {
       return item.ai.pendingJobs;
     }
     if (sortField === 'failedJobs') {
       return item.ai.failedJobs;
     }
-    return item.ai.aiSuccessRate;
+    return item.ai.aiSuccessRate ?? -1;
   }
 
   private parseObjectId(value: string, fieldName: string) {

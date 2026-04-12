@@ -42,10 +42,14 @@ Notes:
 
 Notes:
 - `/api/courses/:courseId/overview` Query: `window, sort, order, page, limit`。
+- `/api/courses/:courseId/overview` `sort` 兼容字段：`studentsCount/submissionRate/aiSuccessRate/pendingJobs/failedJobs`，并新增 `overallSubmissionCoverage`。
 - `/api/courses/:courseId/overview` 窗口契约：默认 `window=all`；后端兼容集合为 `all/7d/24h/1h`（旧值继续兼容）。
 - `/api/courses/:courseId/overview` 中 `window=all` 语义：课程总览口径下不拼时间下界（无 `createdAt >= lowerBound` 过滤）。
 - 权限：teacher only，且 `course.createdBy === currentUserId`；仅统计该 teacher 名下 classrooms。
 - 聚合口径：按 `classroomId + classroomTaskId` 隔离；`studentsCount` 来自 Enrollment（`role=STUDENT,status=ACTIVE`）。
+- `items[*].submissionRate` 为兼容字段，语义保持 `distinctStudentsSubmitted / studentsCount`（至少提交过一次的学生覆盖率），不表示“班级全部已发布任务整体完成覆盖度”。
+- `items[*].overallSubmissionCoverage` 为课程总览主比较指标：`sum(distinctStudentsSubmitted per classroomTask) / (studentsCount * publishedClassroomTasks)`；当 `studentsCount=0` 或 `publishedClassroomTasks=0` 返回 `0`。
+- `items[*].ai.aiSuccessRate` 口径：`jobsTotal=0 -> null`；`jobsTotal>0 -> succeededJobs / jobsTotal`。
 - `Course.courseLabel`：可选课程分类字段（与 `Task.courseLabel` 共用 `TASK_COURSE_LABELS`），用于“班级课程分类坐标”与模板课程分类对齐；非外键、可为空。
 - 课程状态契约：`Course.status` 支持 `ACTIVE | ARCHIVED`；`PATCH /api/courses/:id` 可通过 body `status` 实现归档与恢复（`ARCHIVED <-> ACTIVE`）。
 - 课程删除契约：`DELETE /api/courses/:id` 仅在“空课程”允许删除；空课程判定主规则是 `Classroom` 无记录（`Classroom.exists({ courseId }) === false`）。

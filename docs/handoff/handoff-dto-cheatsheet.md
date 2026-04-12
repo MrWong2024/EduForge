@@ -660,7 +660,7 @@
 - Query DTO: `QueryCourseOverviewDto` (`backend/src/modules/courses/dto/query-course-overview.dto.ts`)
 - Fields:
   - `window?: 'all' | '1h' | '24h' | '7d'`（`@IsIn(COURSE_OVERVIEW_WINDOWS)`；默认 `all`）
-  - `sort?: 'studentsCount' | 'submissionRate' | 'aiSuccessRate' | 'pendingJobs' | 'failedJobs'`
+  - `sort?: 'studentsCount' | 'submissionRate' | 'overallSubmissionCoverage' | 'aiSuccessRate' | 'pendingJobs' | 'failedJobs'`
   - `order?: 'asc' | 'desc'`
   - `page?: number`（`@Type(() => Number) @IsInt() @Min(1)`）
   - `limit?: number`（`@Type(() => Number) @IsInt() @Min(1) @Max(50)`）
@@ -669,6 +669,10 @@
 - Window 语义:
   - `all` = 当前课程总览口径下全部历史记录（无时间下界过滤）
   - `1h/24h/7d` 为兼容窗口，继续可用
+- Response 关键口径（items）:
+  - `submissionRate` 保持兼容语义：`distinctStudentsSubmitted / studentsCount`（至少提交过一次的学生覆盖率）
+  - `overallSubmissionCoverage` 为“班级全部已发布课堂任务整体提交覆盖度”：`sum(distinctStudentsSubmitted per classroomTask) / (studentsCount * publishedClassroomTasks)`，分母为 `0` 时返回 `0`
+  - `ai.aiSuccessRate`：`jobsTotal=0` 返回 `null`；`jobsTotal>0` 返回 `succeededJobs / jobsTotal`
 
 ### GET /api/classrooms/:classroomId/tasks/:classroomTaskId/learning-trajectory
 

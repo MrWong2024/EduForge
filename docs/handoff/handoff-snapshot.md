@@ -361,6 +361,10 @@ AI Provider 错误码（`ai-feedback-provider.error-codes.ts`）：
 - AB 课程总览（teacher）：
   - `GET /api/courses/:courseId/overview`
   - 窗口契约：默认 `window=all`；后端兼容 `all/7d/24h/1h`；`all` 语义为无时间下界过滤。
+  - 排序契约：兼容 `studentsCount/submissionRate/aiSuccessRate/pendingJobs/failedJobs`，并新增 `overallSubmissionCoverage`。
+  - `items[*].submissionRate` 保持兼容语义：`distinctStudentsSubmitted / studentsCount`（至少提交过一次的学生覆盖率）。
+  - `items[*].overallSubmissionCoverage` 新增主比较指标：`sum(distinctStudentsSubmitted per classroomTask) / (studentsCount * publishedClassroomTasks)`；当分母为 0 返回 `0`。
+  - `items[*].ai.aiSuccessRate` 空值口径收口：`jobsTotal=0 -> null`，`jobsTotal>0 -> succeededJobs/jobsTotal`。
 - Z4 学习轨迹（teacher）：
   - `GET /api/classrooms/:classroomId/tasks/:classroomTaskId/learning-trajectory`
   - `items[*]` 已返回结构化学生公开信息 `student:{id,name,studentNo,email}`（兼容 `studentName`），且未提交学生同样返回该信息。

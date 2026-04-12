@@ -15,7 +15,10 @@ import { ClassroomTask } from '../src/modules/classrooms/classroom-tasks/schemas
 import { Task } from '../src/modules/learning-tasks/schemas/task.schema';
 import { Submission } from '../src/modules/learning-tasks/schemas/submission.schema';
 import { Feedback } from '../src/modules/learning-tasks/schemas/feedback.schema';
-import { AiFeedbackJob } from '../src/modules/learning-tasks/ai-feedback/schemas/ai-feedback-job.schema';
+import {
+  AiFeedbackJob,
+  AiFeedbackJobStatus,
+} from '../src/modules/learning-tasks/ai-feedback/schemas/ai-feedback-job.schema';
 import { AiFeedbackProcessor } from '../src/modules/learning-tasks/ai-feedback/services/ai-feedback-processor.service';
 
 jest.setTimeout(30000);
@@ -44,11 +47,14 @@ type CourseOverviewResponse = {
     publishedClassroomTasks: number;
     distinctStudentsSubmitted: number;
     submissionRate: number;
+    overallSubmissionCoverage: number;
+    lateSubmissionsCount: number;
+    lateStudentsCount: number;
     ai: {
       jobsTotal: number;
       pendingJobs: number;
       failedJobs: number;
-      aiSuccessRate: number;
+      aiSuccessRate: number | null;
       topErrors: Array<{ code: string; count: number }>;
     };
   }>;
@@ -75,10 +81,14 @@ describe('Course Overview (e2e)', () => {
   let studentBId = '';
   let courseId = '';
   let taskId = '';
+  let secondaryTaskId = '';
   let classroomAId = '';
   let classroomBId = '';
+  let classroomCId = '';
   let classroomTaskAId = '';
+  let classroomTaskASecondId = '';
   let classroomTaskBId = '';
+  let classroomTaskCId = '';
   const submissionIds: string[] = [];
 
   let previousWorkerEnabled: string | undefined;
@@ -230,8 +240,18 @@ describe('Course Overview (e2e)', () => {
           submissionModel.deleteMany({ _id: { $in: submissionObjectIds } }),
         );
       }
-      if (classroomTaskAId || classroomTaskBId) {
-        const classroomTaskIds = [classroomTaskAId, classroomTaskBId]
+      if (
+        classroomTaskAId ||
+        classroomTaskASecondId ||
+        classroomTaskBId ||
+        classroomTaskCId
+      ) {
+        const classroomTaskIds = [
+          classroomTaskAId,
+          classroomTaskASecondId,
+          classroomTaskBId,
+          classroomTaskCId,
+        ]
           .filter(Boolean)
           .map((id) => new Types.ObjectId(id));
         if (classroomTaskIds.length > 0) {
@@ -240,11 +260,16 @@ describe('Course Overview (e2e)', () => {
           );
         }
       }
-      if (taskId) {
-        cleanup.push(taskModel.deleteOne({ _id: new Types.ObjectId(taskId) }));
+      if (taskId || secondaryTaskId) {
+        const taskIds = [taskId, secondaryTaskId]
+          .filter(Boolean)
+          .map((id) => new Types.ObjectId(id));
+        if (taskIds.length > 0) {
+          cleanup.push(taskModel.deleteMany({ _id: { $in: taskIds } }));
+        }
       }
-      if (classroomAId || classroomBId) {
-        const classroomIds = [classroomAId, classroomBId]
+      if (classroomAId || classroomBId || classroomCId) {
+        const classroomIds = [classroomAId, classroomBId, classroomCId]
           .filter(Boolean)
           .map((id) => new Types.ObjectId(id));
         if (classroomIds.length > 0) {
@@ -282,7 +307,8 @@ describe('Course Overview (e2e)', () => {
       .expect(201);
     courseId = (createdCourse.body as CreatedCourseResponse).id;
 
-    const [createdClassroomA, createdClassroomB] = await Promise.all([
+    const [createdClassroomA, createdClassroomB, createdClassroomC] =
+      await Promise.all([
       teacherAgent
         .post('/api/classrooms')
         .send({ courseId, name: 'Overview-Classroom-A' })
@@ -291,11 +317,17 @@ describe('Course Overview (e2e)', () => {
         .post('/api/classrooms')
         .send({ courseId, name: 'Overview-Classroom-B' })
         .expect(201),
-    ]);
+      teacherAgent
+        .post('/api/classrooms')
+        .send({ courseId, name: 'Overview-Classroom-C' })
+        .expect(201),
+      ]);
     const classroomABody = createdClassroomA.body as CreatedClassroomResponse;
     const classroomBBody = createdClassroomB.body as CreatedClassroomResponse;
+    const classroomCBody = createdClassroomC.body as CreatedClassroomResponse;
     classroomAId = classroomABody.id;
     classroomBId = classroomBBody.id;
+    classroomCId = classroomCBody.id;
 
     const createdTask = await teacherAgent
       .post('/api/learning-tasks/tasks')
@@ -314,7 +346,25 @@ describe('Course Overview (e2e)', () => {
       .send({})
       .expect(201);
 
-    const [classroomTaskA, classroomTaskB] = await Promise.all([
+    const secondaryTask = await teacherAgent
+      .post('/api/learning-tasks/tasks')
+      .send({
+        title: 'Course Overview Task Secondary',
+        description: 'Secondary task for classroom-level submission coverage.',
+        knowledgeModule: 'course-overview-secondary',
+        stage: 2,
+        status: 'DRAFT',
+      })
+      .expect(201);
+    secondaryTaskId = (secondaryTask.body as CreatedTaskResponse).id;
+
+    await teacherAgent
+      .post(`/api/learning-tasks/tasks/${secondaryTaskId}/publish`)
+      .send({})
+      .expect(201);
+
+    const [classroomTaskA, classroomTaskB, classroomTaskASecond, classroomTaskC] =
+      await Promise.all([
       teacherAgent
         .post(`/api/classrooms/${classroomAId}/tasks`)
         .send({ taskId })
@@ -323,9 +373,21 @@ describe('Course Overview (e2e)', () => {
         .post(`/api/classrooms/${classroomBId}/tasks`)
         .send({ taskId })
         .expect(201),
-    ]);
+      teacherAgent
+        .post(`/api/classrooms/${classroomAId}/tasks`)
+        .send({ taskId: secondaryTaskId })
+        .expect(201),
+      teacherAgent
+        .post(`/api/classrooms/${classroomCId}/tasks`)
+        .send({ taskId })
+        .expect(201),
+      ]);
     classroomTaskAId = (classroomTaskA.body as CreatedClassroomTaskResponse).id;
     classroomTaskBId = (classroomTaskB.body as CreatedClassroomTaskResponse).id;
+    classroomTaskASecondId = (
+      classroomTaskASecond.body as CreatedClassroomTaskResponse
+    ).id;
+    classroomTaskCId = (classroomTaskC.body as CreatedClassroomTaskResponse).id;
 
     await Promise.all([
       studentAAgent
@@ -335,6 +397,10 @@ describe('Course Overview (e2e)', () => {
       studentAAgent
         .post('/api/classrooms/join')
         .send({ joinCode: classroomBBody.joinCode })
+        .expect(201),
+      studentAAgent
+        .post('/api/classrooms/join')
+        .send({ joinCode: classroomCBody.joinCode })
         .expect(201),
       studentBAgent
         .post('/api/classrooms/join')
@@ -395,11 +461,63 @@ describe('Course Overview (e2e)', () => {
       .expect(200);
     const overviewBody = overview.body as CourseOverviewResponse;
 
-    expect(overviewBody.total).toBeGreaterThanOrEqual(2);
-    expect(overviewBody.items.length).toBeGreaterThanOrEqual(2);
+    expect(overviewBody.total).toBeGreaterThanOrEqual(3);
+    expect(overviewBody.items.length).toBeGreaterThanOrEqual(3);
+
+    const classroomAOverview = overviewBody.items.find(
+      (item) => item.classroomId === classroomAId,
+    );
+    const classroomBOverview = overviewBody.items.find(
+      (item) => item.classroomId === classroomBId,
+    );
+    const classroomCOverview = overviewBody.items.find(
+      (item) => item.classroomId === classroomCId,
+    );
+    expect(classroomAOverview).toBeDefined();
+    expect(classroomBOverview).toBeDefined();
+    expect(classroomCOverview).toBeDefined();
+
+    // Legacy compatibility: submissionRate still means distinct submitted students coverage.
+    expect(classroomAOverview?.submissionRate).toBe(1);
+    expect(classroomBOverview?.submissionRate).toBe(1);
+    expect(classroomCOverview?.submissionRate).toBe(0);
+
+    // New metric: overall coverage across all published classroom tasks.
+    expect(classroomAOverview?.overallSubmissionCoverage).toBe(0.5);
+    expect(classroomBOverview?.overallSubmissionCoverage).toBe(1);
+    expect(classroomCOverview?.overallSubmissionCoverage).toBe(0);
+
+    // AI success rate nullability and formula:
+    // jobsTotal = 0 -> null; jobsTotal > 0 -> succeededJobs/jobsTotal.
+    expect(classroomCOverview?.ai.jobsTotal).toBe(0);
+    expect(classroomCOverview?.ai.aiSuccessRate).toBeNull();
+
+    const classroomAJobTaskIds = [
+      new Types.ObjectId(classroomTaskAId),
+      new Types.ObjectId(classroomTaskASecondId),
+    ];
+    const classroomAJobsTotal = await aiFeedbackJobModel.countDocuments({
+      classroomTaskId: { $in: classroomAJobTaskIds },
+    });
+    const classroomASucceededJobs = await aiFeedbackJobModel.countDocuments({
+      classroomTaskId: { $in: classroomAJobTaskIds },
+      status: AiFeedbackJobStatus.Succeeded,
+    });
+    const expectedClassroomAAiSuccessRate =
+      classroomAJobsTotal > 0 ? classroomASucceededJobs / classroomAJobsTotal : null;
+    expect(classroomAOverview?.ai.jobsTotal).toBe(classroomAJobsTotal);
+    expect(classroomAOverview?.ai.aiSuccessRate).toBe(
+      expectedClassroomAAiSuccessRate,
+    );
+
     for (const item of overviewBody.items) {
       expect(typeof item.submissionRate).toBe('number');
-      expect(typeof item.ai.aiSuccessRate).toBe('number');
+      expect(typeof item.overallSubmissionCoverage).toBe('number');
+      if (item.ai.jobsTotal === 0) {
+        expect(item.ai.aiSuccessRate).toBeNull();
+      } else {
+        expect(typeof item.ai.aiSuccessRate).toBe('number');
+      }
     }
 
     const sortedByStudents = await teacherAgent
@@ -411,8 +529,25 @@ describe('Course Overview (e2e)', () => {
       })
       .expect(200);
     const sortedBody = sortedByStudents.body as CourseOverviewResponse;
-    expect(sortedBody.items.length).toBeGreaterThanOrEqual(2);
+    expect(sortedBody.items.length).toBeGreaterThanOrEqual(3);
     expect(typeof sortedBody.items[0]?.studentsCount).toBe('number');
+
+    const sortedByOverallSubmissionCoverage = await teacherAgent
+      .get(`/api/courses/${courseId}/overview`)
+      .query({
+        window: '7d',
+        sort: 'overallSubmissionCoverage',
+        order: 'desc',
+      })
+      .expect(200);
+    const sortedCoverageBody =
+      sortedByOverallSubmissionCoverage.body as CourseOverviewResponse;
+    const topCoverageClassroom = sortedCoverageBody.items[0];
+    const secondCoverageClassroom = sortedCoverageBody.items[1];
+    expect(topCoverageClassroom?.classroomId).toBe(classroomBId);
+    expect(topCoverageClassroom?.overallSubmissionCoverage).toBe(1);
+    expect(secondCoverageClassroom?.classroomId).toBe(classroomAId);
+    expect(secondCoverageClassroom?.overallSubmissionCoverage).toBe(0.5);
 
     const pageLimited = await teacherAgent
       .get(`/api/courses/${courseId}/overview`)
@@ -423,7 +558,7 @@ describe('Course Overview (e2e)', () => {
       })
       .expect(200);
     const pageLimitedBody = pageLimited.body as CourseOverviewResponse;
-    expect(pageLimitedBody.total).toBe(2);
+    expect(pageLimitedBody.total).toBe(3);
     expect(pageLimitedBody.items.length).toBe(1);
   });
 
@@ -443,8 +578,15 @@ describe('Course Overview (e2e)', () => {
     expect(defaultWindowBody.window).toBe('all');
 
     const oldDate = new Date(Date.now() - 10 * 24 * 60 * 60 * 1000);
-    await classroomTaskModel.collection.updateOne(
-      { _id: new Types.ObjectId(classroomTaskAId) },
+    await classroomTaskModel.collection.updateMany(
+      {
+        _id: {
+          $in: [
+            new Types.ObjectId(classroomTaskAId),
+            new Types.ObjectId(classroomTaskASecondId),
+          ],
+        },
+      },
       { $set: { createdAt: oldDate } },
     );
 
@@ -468,7 +610,7 @@ describe('Course Overview (e2e)', () => {
     const sevenDaysClassroomA = sevenDaysBody.items.find(
       (item) => item.classroomId === classroomAId,
     );
-    expect(allClassroomA?.publishedClassroomTasks).toBe(1);
+    expect(allClassroomA?.publishedClassroomTasks).toBe(2);
     expect(sevenDaysClassroomA?.publishedClassroomTasks).toBe(0);
     expect(allClassroomA?.distinctStudentsSubmitted).toBe(2);
     expect(sevenDaysClassroomA?.distinctStudentsSubmitted).toBe(0);

@@ -7,6 +7,7 @@ export type CourseOverviewWindow = (typeof COURSE_OVERVIEW_WINDOWS)[number];
 export const COURSE_OVERVIEW_SORT_FIELDS = [
   'studentsCount',
   'submissionRate',
+  'overallSubmissionCoverage',
   'aiSuccessRate',
   'pendingJobs',
   'failedJobs',
