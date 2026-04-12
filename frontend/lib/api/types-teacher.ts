@@ -37,6 +37,13 @@ const asBoolean = (value: unknown): boolean | undefined =>
 const asNumber = (value: unknown): number | undefined =>
   typeof value === "number" && Number.isFinite(value) ? value : undefined;
 
+const asNullableNumber = (value: unknown): number | null | undefined => {
+  if (value === null) {
+    return null;
+  }
+  return asNumber(value);
+};
+
 const asRecordArray = (value: unknown): UnknownRecord[] =>
   Array.isArray(value) ? value.map((item) => asRecord(item)) : [];
 
@@ -131,13 +138,14 @@ export type CourseOverviewItem = {
   studentsCount?: number;
   publishedClassroomTasks?: number;
   distinctStudentsSubmitted?: number;
+  overallSubmissionCoverage?: number;
   submissionRate?: number;
   lateSubmissionsCount?: number;
   lateStudentsCount?: number;
   aiJobsTotal?: number;
   aiPendingJobs?: number;
   aiFailedJobs?: number;
-  aiSuccessRate?: number;
+  aiSuccessRate?: number | null;
   topErrors: CourseOverviewErrorItem[];
   raw: UnknownRecord;
 };
@@ -617,13 +625,14 @@ const toCourseOverviewItem = (value: unknown): CourseOverviewItem => {
     studentsCount: asNumber(record.studentsCount),
     publishedClassroomTasks: asNumber(record.publishedClassroomTasks),
     distinctStudentsSubmitted: asNumber(record.distinctStudentsSubmitted),
+    overallSubmissionCoverage: asNumber(record.overallSubmissionCoverage),
     submissionRate: asNumber(record.submissionRate),
     lateSubmissionsCount: asNumber(record.lateSubmissionsCount),
     lateStudentsCount: asNumber(record.lateStudentsCount),
     aiJobsTotal: asNumber(aiRecord.jobsTotal),
     aiPendingJobs: asNumber(aiRecord.pendingJobs),
     aiFailedJobs: asNumber(aiRecord.failedJobs),
-    aiSuccessRate: asNumber(aiRecord.aiSuccessRate),
+    aiSuccessRate: asNullableNumber(aiRecord.aiSuccessRate),
     topErrors: asRecordArray(safeGet(aiRecord, "topErrors", undefined)).map((item) =>
       toCourseOverviewErrorItem(item)
     ),

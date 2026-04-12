@@ -33,6 +33,7 @@ const DISPLAY_WINDOWS = ["all", "7d"] as const;
 const OVERVIEW_WINDOWS = ["1h", "24h", "7d", "all"] as const;
 const SORT_FIELDS = [
   "studentsCount",
+  "overallSubmissionCoverage",
   "submissionRate",
   "aiSuccessRate",
   "pendingJobs",
@@ -52,7 +53,8 @@ const WINDOW_LABELS: Record<CourseOverviewWindow, string> = {
 
 const SORT_FIELD_LABELS: Record<(typeof SORT_FIELDS)[number], string> = {
   studentsCount: "学生数",
-  submissionRate: "提交率",
+  overallSubmissionCoverage: "任务完成度",
+  submissionRate: "学生触达率",
   aiSuccessRate: "AI 成功率",
   pendingJobs: "AI 待处理",
   failedJobs: "AI 失败",
@@ -74,8 +76,7 @@ type CourseOverviewQueryState = {
 type CourseOverviewSummary = {
   classroomsTotal: number;
   classroomsInPage: number;
-  classroomsWithSubmissionInPage: number;
-  averageSubmissionRateInPage?: number;
+  averageOverallSubmissionCoverageInPage?: number;
   averageAiSuccessRateInPage?: number;
 };
 
@@ -83,7 +84,7 @@ const resolveQueryState = (
   query: Awaited<CourseOverviewPageProps["searchParams"]>
 ): CourseOverviewQueryState => ({
   window: parseEnum(getSingleSearchParam(query.window), OVERVIEW_WINDOWS, "all"),
-  sort: parseEnum(getSingleSearchParam(query.sort), SORT_FIELDS, "aiSuccessRate"),
+  sort: parseEnum(getSingleSearchParam(query.sort), SORT_FIELDS, "overallSubmissionCoverage"),
   order: parseEnum(getSingleSearchParam(query.order), SORT_ORDERS, "desc"),
   page: parsePositiveInt(getSingleSearchParam(query.page), 1, { min: 1, max: 100 }),
   limit: parsePositiveInt(getSingleSearchParam(query.limit), 20, { min: 1, max: 50 }),
@@ -99,17 +100,14 @@ const getRequestOrigin = async (): Promise<string> => {
   return `${protocol}://${host}`;
 };
 
-const asSafeNumber = (value?: number): number =>
-  typeof value === "number" && Number.isFinite(value) ? value : 0;
-
-const toPercentNumber = (value: number | undefined): number | undefined => {
+const toPercentNumber = (value: number | null | undefined): number | undefined => {
   if (typeof value !== "number" || !Number.isFinite(value) || value < 0) {
     return undefined;
   }
   return value <= 1 ? value * 100 : value;
 };
 
-const toPercentText = (value: number | undefined): string => {
+const toPercentText = (value: number | null | undefined): string => {
   const percent = toPercentNumber(value);
   if (typeof percent !== "number") {
     return "—";
@@ -123,22 +121,16 @@ const buildOverviewSummary = (
 ): CourseOverviewSummary => {
   const items = data.items;
   const classroomsInPage = items.length;
-  const classroomsWithSubmissionInPage = items.reduce((accumulator, item) => {
-    const hasSubmittedStudents = asSafeNumber(item.distinctStudentsSubmitted) > 0;
-    const hasSubmissionRate = asSafeNumber(item.submissionRate) > 0;
-    return hasSubmittedStudents || hasSubmissionRate ? accumulator + 1 : accumulator;
-  }, 0);
-
-  let submissionRateSum = 0;
-  let submissionRateCount = 0;
+  let overallSubmissionCoverageSum = 0;
+  let overallSubmissionCoverageCount = 0;
   let aiSuccessRateSum = 0;
   let aiSuccessRateCount = 0;
 
   for (const item of items) {
-    const submissionRate = toPercentNumber(item.submissionRate);
-    if (typeof submissionRate === "number") {
-      submissionRateSum += submissionRate;
-      submissionRateCount += 1;
+    const overallSubmissionCoverage = toPercentNumber(item.overallSubmissionCoverage);
+    if (typeof overallSubmissionCoverage === "number") {
+      overallSubmissionCoverageSum += overallSubmissionCoverage;
+      overallSubmissionCoverageCount += 1;
     }
 
     const aiSuccessRate = toPercentNumber(item.aiSuccessRate);
@@ -151,9 +143,10 @@ const buildOverviewSummary = (
   return {
     classroomsTotal: typeof data.total === "number" ? data.total : items.length,
     classroomsInPage,
-    classroomsWithSubmissionInPage,
-    averageSubmissionRateInPage:
-      submissionRateCount > 0 ? submissionRateSum / submissionRateCount : undefined,
+    averageOverallSubmissionCoverageInPage:
+      overallSubmissionCoverageCount > 0
+        ? overallSubmissionCoverageSum / overallSubmissionCoverageCount
+        : undefined,
     averageAiSuccessRateInPage:
       aiSuccessRateCount > 0 ? aiSuccessRateSum / aiSuccessRateCount : undefined,
   };
@@ -352,7 +345,7 @@ export default async function CourseOverviewPage({ params, searchParams }: Cours
         <p className="mt-1 text-xs text-zinc-500">
           班级总数来自 overview `total`。其余指标均基于当前页班级明细聚合，避免误读为全课程总量。
         </p>
-        <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-5">
+        <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
           <div className="rounded-md border border-zinc-200 bg-zinc-50 p-3">
             <p className="text-xs text-zinc-500">班级总数</p>
             <p className="mt-1 text-lg font-semibold text-zinc-900">
@@ -366,15 +359,9 @@ export default async function CourseOverviewPage({ params, searchParams }: Cours
             </p>
           </div>
           <div className="rounded-md border border-zinc-200 bg-zinc-50 p-3">
-            <p className="text-xs text-zinc-500">当前页有提交班级数</p>
+            <p className="text-xs text-zinc-500">当前页平均任务完成度</p>
             <p className="mt-1 text-lg font-semibold text-zinc-900">
-              {toDisplayText(summary.classroomsWithSubmissionInPage)}
-            </p>
-          </div>
-          <div className="rounded-md border border-zinc-200 bg-zinc-50 p-3">
-            <p className="text-xs text-zinc-500">当前页平均提交率</p>
-            <p className="mt-1 text-lg font-semibold text-zinc-900">
-              {toPercentText(summary.averageSubmissionRateInPage)}
+              {toPercentText(summary.averageOverallSubmissionCoverageInPage)}
             </p>
           </div>
           <div className="rounded-md border border-zinc-200 bg-zinc-50 p-3">
@@ -387,7 +374,7 @@ export default async function CourseOverviewPage({ params, searchParams }: Cours
       </section>
 
       <p className="text-xs text-zinc-500">
-        提交率、AI 成功率、AI 待处理、AI 失败等班级指标，按当前窗口内该班全部课堂任务汇总。
+        任务完成度表示当前窗口内该班全部已发布课堂任务的整体提交覆盖度；学生触达率表示至少提交过一次的学生占比；无 AI 活动时 AI 成功率显示为 —。
       </p>
 
       {viewModel.data.items.length === 0 ? (
@@ -399,7 +386,8 @@ export default async function CourseOverviewPage({ params, searchParams }: Cours
               <tr>
                 <th className="px-4 py-3">班级</th>
                 <th className="px-4 py-3">学生数</th>
-                <th className="px-4 py-3">提交率</th>
+                <th className="px-4 py-3">任务完成度</th>
+                <th className="px-4 py-3">学生触达率</th>
                 <th className="px-4 py-3">AI 成功率</th>
                 <th className="px-4 py-3">AI 待处理</th>
                 <th className="px-4 py-3">AI 失败</th>
@@ -413,6 +401,7 @@ export default async function CourseOverviewPage({ params, searchParams }: Cours
                     <p className="font-medium text-zinc-900">{toDisplayText(item.name, "未命名班级")}</p>
                   </td>
                   <td className="px-4 py-3">{toDisplayText(item.studentsCount)}</td>
+                  <td className="px-4 py-3">{toPercentText(item.overallSubmissionCoverage)}</td>
                   <td className="px-4 py-3">{toPercentText(item.submissionRate)}</td>
                   <td className="px-4 py-3">{toPercentText(item.aiSuccessRate)}</td>
                   <td className="px-4 py-3">{toDisplayText(item.aiPendingJobs)}</td>
