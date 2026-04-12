@@ -9,6 +9,9 @@ import { App } from 'supertest/types';
 
 const previousAutoOnSubmit = process.env.AI_FEEDBACK_AUTO_ON_SUBMIT;
 process.env.AI_FEEDBACK_AUTO_ON_SUBMIT = 'false';
+const previousSubmissionCooldownMs =
+  process.env.LEARNING_TASK_SUBMISSION_COOLDOWN_MS;
+process.env.LEARNING_TASK_SUBMISSION_COOLDOWN_MS = '0';
 
 import { AppModule } from '../src/app.module';
 import { User } from '../src/modules/users/schemas/user.schema';
@@ -43,7 +46,7 @@ type CreatedCourseResponse = { id: string };
 type CreatedClassroomResponse = { id: string; joinCode: string };
 type CreatedTaskResponse = { id: string };
 type CreatedClassroomTaskResponse = { id: string };
-type CreatedSubmissionResponse = { id: string };
+type CreatedSubmissionResponse = { id: string; attemptNo: number };
 type ClassroomTaskSubmissionListResponse = {
   items: Array<{
     id: string;
@@ -114,8 +117,10 @@ describe('Classroom Task Submissions List (e2e)', () => {
   let classroomTaskBId = '';
   let taskId = '';
   let submissionAId = '';
+  let submissionAInClassBId = '';
   let submissionBId = '';
   let submissionASecondId = '';
+  let submissionAThirdId = '';
   let studentAId = '';
   const createdUserIds: string[] = [];
 
@@ -295,6 +300,10 @@ describe('Classroom Task Submissions List (e2e)', () => {
       .post('/api/classrooms/join')
       .send({ joinCode: classroomABody.joinCode })
       .expect(201);
+    await studentAAgent
+      .post('/api/classrooms/join')
+      .send({ joinCode: classroomBBody.joinCode })
+      .expect(201);
     await studentBAgent
       .post('/api/classrooms/join')
       .send({ joinCode: classroomBBody.joinCode })
@@ -311,7 +320,26 @@ describe('Classroom Task Submissions List (e2e)', () => {
         },
       })
       .expect(201);
-    submissionAId = (createdSubmissionA.body as CreatedSubmissionResponse).id;
+    const submissionABody =
+      createdSubmissionA.body as CreatedSubmissionResponse;
+    submissionAId = submissionABody.id;
+    expect(submissionABody.attemptNo).toBe(1);
+
+    const createdSubmissionAInClassB = await studentAAgent
+      .post(
+        `/api/classrooms/${classroomBId}/tasks/${classroomTaskBId}/submissions`,
+      )
+      .send({
+        content: {
+          codeText: 'function classBByStudentA() { return "AB"; }',
+          language: 'typescript',
+        },
+      })
+      .expect(201);
+    const submissionAInClassBBody =
+      createdSubmissionAInClassB.body as CreatedSubmissionResponse;
+    submissionAInClassBId = submissionAInClassBBody.id;
+    expect(submissionAInClassBBody.attemptNo).toBe(1);
 
     const createdSubmissionB = await studentBAgent
       .post(
@@ -324,7 +352,10 @@ describe('Classroom Task Submissions List (e2e)', () => {
         },
       })
       .expect(201);
-    submissionBId = (createdSubmissionB.body as CreatedSubmissionResponse).id;
+    const submissionBBody =
+      createdSubmissionB.body as CreatedSubmissionResponse;
+    submissionBId = submissionBBody.id;
+    expect(submissionBBody.attemptNo).toBe(1);
   });
 
   afterAll(async () => {
@@ -333,11 +364,29 @@ describe('Classroom Task Submissions List (e2e)', () => {
     } else {
       process.env.AI_FEEDBACK_AUTO_ON_SUBMIT = previousAutoOnSubmit;
     }
+    if (previousSubmissionCooldownMs === undefined) {
+      delete process.env.LEARNING_TASK_SUBMISSION_COOLDOWN_MS;
+    } else {
+      process.env.LEARNING_TASK_SUBMISSION_COOLDOWN_MS =
+        previousSubmissionCooldownMs;
+    }
 
     if (!KEEP_DB) {
       const cleanup: Promise<unknown>[] = [];
-      if (submissionAId || submissionBId || submissionASecondId) {
-        const submissionIds = [submissionAId, submissionBId, submissionASecondId]
+      if (
+        submissionAId ||
+        submissionAInClassBId ||
+        submissionBId ||
+        submissionASecondId ||
+        submissionAThirdId
+      ) {
+        const submissionIds = [
+          submissionAId,
+          submissionAInClassBId,
+          submissionBId,
+          submissionASecondId,
+          submissionAThirdId,
+        ]
           .filter(Boolean)
           .map((id) => new Types.ObjectId(id));
         cleanup.push(
@@ -426,7 +475,7 @@ describe('Classroom Task Submissions List (e2e)', () => {
     expect(item.student.name).toBe('Student Alpha');
     expect(item.student.studentNo).toBe('A0001');
 
-    expect(typeof item.attemptNo).toBe('number');
+    expect(item.attemptNo).toBe(1);
     expect(typeof item.submittedAt).toBe('string');
     expect(typeof item.isLate).toBe('boolean');
     expect(typeof item.lateBySeconds).toBe('number');
@@ -437,6 +486,21 @@ describe('Classroom Task Submissions List (e2e)', () => {
     expect(item).not.toHaveProperty('passwordHash');
     expect(item).not.toHaveProperty('content');
     expect(item).not.toHaveProperty('content.codeText');
+  });
+
+  it('keeps attemptNo isolated by classroomTask for same student under shared taskId', async () => {
+    const response = await ownerTeacherAgent
+      .get(
+        `/api/classrooms/${classroomBId}/tasks/${classroomTaskBId}/submissions`,
+      )
+      .query({ page: 1, limit: 20 })
+      .expect(200);
+    const body = response.body as ClassroomTaskSubmissionListResponse;
+    expect(body.total).toBe(2);
+
+    const itemsById = new Map(body.items.map((item) => [item.id, item]));
+    expect(itemsById.get(submissionAInClassBId)?.attemptNo).toBe(1);
+    expect(itemsById.get(submissionBId)?.attemptNo).toBe(1);
   });
 
   it('returns feedbackCount for submissions with and without feedback', async () => {
@@ -451,7 +515,10 @@ describe('Classroom Task Submissions List (e2e)', () => {
         },
       })
       .expect(201);
-    submissionASecondId = (createdSubmission.body as CreatedSubmissionResponse).id;
+    const secondSubmissionBody =
+      createdSubmission.body as CreatedSubmissionResponse;
+    submissionASecondId = secondSubmissionBody.id;
+    expect(secondSubmissionBody.attemptNo).toBe(2);
 
     await feedbackModel.insertMany([
       {
@@ -485,6 +552,24 @@ describe('Classroom Task Submissions List (e2e)', () => {
     expect(withFeedback?.feedbackCount).toBeGreaterThan(0);
     expect(withoutFeedback).toBeDefined();
     expect(withoutFeedback?.feedbackCount).toBe(0);
+  });
+
+  it('increments attemptNo continuously within same classroomTask', async () => {
+    const createdSubmission = await studentAAgent
+      .post(
+        `/api/classrooms/${classroomAId}/tasks/${classroomTaskAId}/submissions`,
+      )
+      .send({
+        content: {
+          codeText: 'function classAThirdAttempt() { return "A3"; }',
+          language: 'typescript',
+        },
+      })
+      .expect(201);
+    const thirdSubmissionBody =
+      createdSubmission.body as CreatedSubmissionResponse;
+    submissionAThirdId = thirdSubmissionBody.id;
+    expect(thirdSubmissionBody.attemptNo).toBe(3);
   });
 
   it('non-owner teacher cannot access and gets 404', async () => {

@@ -705,10 +705,19 @@ export class LearningTasksService {
       classroomTaskObjectId,
       submittedAt,
     );
+    const attemptScopeFilter = classroomTaskObjectId
+      ? {
+          classroomTaskId: classroomTaskObjectId,
+          studentId: studentObjectId,
+        }
+      : {
+          taskId: taskObjectId,
+          studentId: studentObjectId,
+        };
 
     for (let attempt = 0; attempt < 3; attempt += 1) {
       const lastSubmission = await this.submissionModel
-        .findOne({ taskId: taskObjectId, studentId: studentObjectId })
+        .findOne(attemptScopeFilter)
         .sort({ attemptNo: -1 })
         .select('attemptNo')
         .lean()

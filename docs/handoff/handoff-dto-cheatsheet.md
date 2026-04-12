@@ -594,6 +594,7 @@
   - `/api/classrooms/{classroomId}/tasks/{classroomTaskId}/submissions?page=1&limit=20`
 - Response口径（最小说明）:
   - `items[*]` 包含 `id/taskId/classroomTaskId/student/attemptNo/submittedAt/isLate/lateBySeconds/status/aiFeedbackStatus`
+  - `items[*].attemptNo` 表示“该学生在当前 `classroomTaskId` 下的第几次提交”，按该 `classroomTaskId` 独立从 `1` 递增
   - 列表只按 `classroomTaskId` 查询，不按 `taskId` 跨班聚合
   - 无 job 时 `aiFeedbackStatus = NOT_REQUESTED`
   - 不返回 `passwordHash`、不返回 `content.codeText`

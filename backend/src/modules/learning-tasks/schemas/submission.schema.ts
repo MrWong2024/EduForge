@@ -67,16 +67,24 @@ export class Submission {
 
 export const SubmissionSchema = SchemaFactory.createForClass(Submission);
 SubmissionSchema.index(
+  { classroomTaskId: 1, studentId: 1, attemptNo: 1 },
+  {
+    unique: true,
+    partialFilterExpression: { classroomTaskId: { $type: 'objectId' } },
+  },
+);
+SubmissionSchema.index(
   { taskId: 1, studentId: 1, attemptNo: 1 },
-  { unique: true },
+  {
+    unique: true,
+    partialFilterExpression: { classroomTaskId: null },
+  },
 );
 SubmissionSchema.index({ taskId: 1, studentId: 1 });
 // Supports teacher list/stats queries on taskId with createdAt sort; adds write overhead.
 SubmissionSchema.index({ taskId: 1, createdAt: -1 });
 // Supports classroom dashboard queries scoped by classroomTaskId and student.
 SubmissionSchema.index({ classroomTaskId: 1, studentId: 1, createdAt: -1 });
-// Supports classroom trajectory queries grouped by student attempts in a classroomTask.
-SubmissionSchema.index({ classroomTaskId: 1, studentId: 1, attemptNo: 1 });
 // Supports classroom dashboard queries scoped by classroomTaskId with time order.
 SubmissionSchema.index({ classroomTaskId: 1, createdAt: -1 });
 // Supports lookup pipelines constrained by classroomTaskId and _id.
