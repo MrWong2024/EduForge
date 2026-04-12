@@ -308,6 +308,40 @@ app.get(ConfigService).set('KEY', value);
 - 纯运行时业务阈值
 - 请求处理时即时读取的冷却时间/限制阈值
 - 不改变模块结构的动态测试参数
+
+### 6.7 Submission Cooldown 门禁变量约定（强制）
+
+本节用于明确 `LEARNING_TASK_SUBMISSION_COOLDOWN_MS` 在 E2E 中的处理方式。该变量属于“运行时业务阈值/门禁值”，会影响同一学生在同一 `classroomTaskId` 下的连续提交行为。
+
+#### 6.7.1 适用场景
+
+当测试目标包含以下链路时，必须显式处理该变量：
+
+- 同一学生对同一 `classroomTaskId` 的连续提交（例如首提后立即二提/三提）
+- 依赖连续 `POST /api/classrooms/:classroomId/tasks/:classroomTaskId/submissions` 成功路径（`201`）的业务断言
+
+若不显式处理，在默认 cooldown 下可能命中 `429`（`SUBMISSION_COOLDOWN_ACTIVE`），造成非目标性误失败。
+
+#### 6.7.2 推荐写法（标准模式）
+
+在 spec 内按以下顺序处理：
+
+1. 备份原值：`const previousSubmissionCooldownMs = process.env.LEARNING_TASK_SUBMISSION_COOLDOWN_MS;`
+2. 初始化前设置：`process.env.LEARNING_TASK_SUBMISSION_COOLDOWN_MS = '0';`
+3. 若测试内已拿到运行态 `ConfigService`，则在 `await app.init()` 后同步：
+   `configService.set('LEARNING_TASK_SUBMISSION_COOLDOWN_MS', 0);`
+4. 在 `afterAll()` 恢复原值：
+   - 原值不存在：`delete process.env.LEARNING_TASK_SUBMISSION_COOLDOWN_MS`
+   - 原值存在：恢复为备份值
+
+恢复原值是强制要求，用于避免污染后续 spec。
+
+#### 6.7.3 禁止做法
+
+- 通过修改生产默认值来迁就测试
+- 通过放宽断言（例如接受 `429`）掩盖门禁问题
+- 依赖外部 shell 预置该变量而不在 spec 内显式设置与恢复
+
 ## 7. 禁止事项（红线）
 
 以下行为 **严格禁止**：
