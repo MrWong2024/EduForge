@@ -232,7 +232,7 @@ export default async function StudentSubmissionDetailPage({
       />
 
       <section className="rounded-lg border border-zinc-200 bg-white p-4 text-sm text-zinc-700">
-        <p>此页展示本次提交的反馈结果，也可在此请求 AI 反馈。</p>
+        <p>此页展示本次提交的反馈结果；处于未请求状态时可在此发起 AI 反馈请求。</p>
       </section>
 
       <section className="rounded-lg border border-zinc-200 bg-white p-4 text-sm text-zinc-700">
@@ -272,7 +272,10 @@ export default async function StudentSubmissionDetailPage({
       </section>
 
       {viewModel.feedback.items.length === 0 ? (
-        <EmptyState title="暂无反馈" description="当前提交还没有反馈内容，可点击上方按钮请求 AI 反馈。" />
+        <EmptyState
+          title="暂无反馈"
+          description="当前提交还没有反馈内容；未请求状态可点击上方按钮请求 AI 反馈，失败状态请稍后刷新查看。"
+        />
       ) : (
         <div className="overflow-x-auto rounded-lg border border-zinc-200 bg-white">
           <table className="min-w-full border-collapse text-sm">

@@ -32,6 +32,9 @@ const getButtonLabel = (status?: string): string => {
   if (status === "SUCCEEDED") {
     return "已生成";
   }
+  if (status === "FAILED") {
+    return "AI 反馈失败";
+  }
   if (status === "DEAD") {
     return "不可重试";
   }
@@ -52,12 +55,15 @@ export function RequestAiFeedbackButton({
   );
 
   const status = latestStatus;
-  const canRequest = !status || status === "NOT_REQUESTED" || status === "FAILED";
+  const canRequest = status === "NOT_REQUESTED";
   const isDisabled = isSubmitting || !canRequest;
 
   const statusHint = useMemo(() => {
+    if (status === "FAILED") {
+      return "AI 反馈失败，当前不可手动重新请求，请稍后刷新查看。";
+    }
     if (!status) {
-      return "可手工触发 AI 反馈请求。";
+      return "当前 AI 状态未就绪，暂不可手工请求。";
     }
     return getAiStatusHint(status);
   }, [status]);

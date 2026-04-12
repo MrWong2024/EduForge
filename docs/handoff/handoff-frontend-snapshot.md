@@ -132,6 +132,7 @@ Student 学习链路（可用）：
 4. `/student/submissions/[submissionId]` -> 稳定读源 + feedback 列表 + request AI
    - 反馈主列表已中文化：表头使用“来源/类型/严重程度/反馈内容/修改建议/标签/时间”。
    - `source/type/severity` 在列表单元格按后端原值直出（英文枚举不翻译）；`message` 与 `suggestion` 分列展示（`suggestion` 为空时显示“暂无”）。
+   - 学生端“请求 AI 反馈”按钮仅在 `NOT_REQUESTED` 可点击；`FAILED` 状态已禁用，不再提供前端手工重试入口（失败后的后续处理由任务机制/worker 负责）。
 
 Teacher 批阅链路（可用）：
 1. `/teacher/classrooms/[classroomId]/tasks/[classroomTaskId]/submissions`
@@ -224,6 +225,7 @@ Teacher 课堂复盘链路（可用）：
 - `Stub + worker`：`AI_FEEDBACK_PROVIDER=stub` + `AI_FEEDBACK_WORKER_ENABLED=true`。
 - `process-once` 仅用于 debug/ops，不是默认交付模式。
 - 前端已按 `NOT_REQUESTED/PENDING/RUNNING/SUCCEEDED/FAILED/DEAD` 全状态展示。
+- `request AI` 按钮的产品语义已收口：仅 `NOT_REQUESTED` 可手工触发；`FAILED` 不再允许手工重发请求，避免误导为“点击即可重置 job”。
 
 ## 7) 当前阶段判断
 
