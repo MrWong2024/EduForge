@@ -137,6 +137,7 @@ Teacher 批阅链路（可用）：
 1. `/teacher/classrooms/[classroomId]/tasks/[classroomTaskId]/submissions`
 2. `/teacher/submissions/[submissionId]`（稳定读源）
 3. `TeacherFeedbackForm` -> `POST learning-tasks/submissions/:id/feedback`
+4. 提交管理页中 `attemptNo` 的前端展示语义已收口为“该学生在当前 classroomTask 下的第几次提交”（表头“本任务第几次提交”），并在页内明确“不跨班级累计”；数据来源仍直接使用接口返回值。
    - `tags` 已改为标准标签多选（镜像后端统一词表），移除自由手写输入。
    - `message` / `suggestion` 保持自由文本输入；未选择标签时沿用后端兜底口径。
    - 若后端返回 `400/Invalid tag(s), please select from predefined tags`，前端显示中文摘要“标签无效，请从预设标签中选择”。 

@@ -105,7 +105,7 @@ export default async function ClassroomTaskSubmissionsPage({
     <section className="mt-4 space-y-4">
       <PageHeader
         title="任务提交管理"
-        description={`${toDisplayText(viewModel.classroomName, "班级")} | 当前任务提交记录`}
+        description={`${toDisplayText(viewModel.classroomName, "班级")} | 当前课堂任务提交记录`}
         actions={
           <div className="flex flex-wrap items-center gap-3 text-sm">
             <Link
@@ -144,6 +144,9 @@ export default async function ClassroomTaskSubmissionsPage({
 
       <section className="rounded-lg border border-zinc-200 bg-white p-4 text-sm text-zinc-700">
         <p>此页展示当前课堂任务的提交记录，可进入详情查看反馈与批阅。</p>
+        <p className="mt-1 text-xs text-zinc-600">
+          “本任务第几次提交”按当前 classroomTask 独立递增，不跨班级累计。
+        </p>
       </section>
 
       {viewModel.submissions.length === 0 ? (
@@ -157,7 +160,12 @@ export default async function ClassroomTaskSubmissionsPage({
                 <th className="px-4 py-3">提交时间</th>
                 <th className="px-4 py-3">AI 反馈状态</th>
                 <th className="px-4 py-3">反馈数</th>
-                <th className="px-4 py-3">尝试次数</th>
+                <th
+                  className="px-4 py-3"
+                  title="表示该学生在当前课堂任务下的第几次提交"
+                >
+                  本任务第几次提交
+                </th>
                 <th className="px-4 py-3">操作</th>
               </tr>
             </thead>
