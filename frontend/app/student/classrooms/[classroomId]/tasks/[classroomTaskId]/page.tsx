@@ -102,15 +102,26 @@ const normalizeAiStatus = (status: unknown): string | null => {
   return normalized || null;
 };
 
-const resolveTaskDetailAutoRefreshStatus = (
+const toTaskDetailAutoRefreshStatuses = (
+  latestStatus: string | undefined,
   submissions: unknown[]
+): Array<string | undefined> => {
+  const statuses: Array<string | undefined> = [latestStatus];
+  for (const submission of submissions) {
+    statuses.push(safeGet<string | undefined>(submission, "aiFeedbackStatus", undefined));
+  }
+  return statuses;
+};
+
+const resolveTaskDetailAutoRefreshStatus = (
+  statuses: Array<string | undefined>
 ): "PENDING" | "RUNNING" | "FAILED" | undefined => {
   let hasPending = false;
   let hasRunning = false;
   let hasFailed = false;
 
-  for (const submission of submissions) {
-    const normalized = normalizeAiStatus(safeGet(submission, "aiFeedbackStatus", undefined));
+  for (const status of statuses) {
+    const normalized = normalizeAiStatus(status);
     if (normalized === "PENDING") {
       hasPending = true;
       continue;
@@ -296,7 +307,11 @@ export default async function StudentTaskDetailPage({
   const latestSubmissionHref = latestSubmissionId
     ? buildSubmissionFeedbackHref(latestSubmissionId, classroomId, classroomTaskId)
     : null;
-  const autoRefreshStatus = resolveTaskDetailAutoRefreshStatus(viewModel.data.submissions);
+  const autoRefreshStatuses = toTaskDetailAutoRefreshStatuses(
+    latestRawStatus,
+    viewModel.data.submissions
+  );
+  const autoRefreshStatus = resolveTaskDetailAutoRefreshStatus(autoRefreshStatuses);
   const isAutoRefreshing = Boolean(autoRefreshStatus);
 
   return (
@@ -388,7 +403,7 @@ export default async function StudentTaskDetailPage({
       </section>
 
       <AiProcessingHint status={latestRawStatus} variant="taskDetail" helpHref={paths.student.aiHelp} />
-      <SubmissionAutoRefresh status={autoRefreshStatus} />
+      <SubmissionAutoRefresh statuses={autoRefreshStatuses} />
 
       <section className="rounded-lg border border-zinc-200 bg-white p-4 text-sm">
         <p className="font-medium text-zinc-900">参数</p>

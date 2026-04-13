@@ -4,7 +4,8 @@ import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from
 import { useRouter } from "next/navigation";
 
 type SubmissionAutoRefreshProps = {
-  status: string | null | undefined;
+  status?: string | null | undefined;
+  statuses?: Array<string | null | undefined>;
 };
 
 type PollableStatus = "PENDING" | "RUNNING" | "FAILED";
@@ -17,9 +18,15 @@ const normalizeStatus = (value: string | null | undefined): string | null => {
   return normalized || null;
 };
 
-const toPollableStatus = (value: string | null): PollableStatus | null => {
-  if (value === "PENDING" || value === "RUNNING" || value === "FAILED") {
-    return value;
+const resolvePollableStatus = (statuses: string[]): PollableStatus | null => {
+  if (statuses.includes("RUNNING")) {
+    return "RUNNING";
+  }
+  if (statuses.includes("PENDING")) {
+    return "PENDING";
+  }
+  if (statuses.includes("FAILED")) {
+    return "FAILED";
   }
   return null;
 };
@@ -39,21 +46,34 @@ const getDelayWithBackoff = (status: PollableStatus, unchangedRounds: number): n
   return Math.min(Math.round(base * factor), cap);
 };
 
-export function SubmissionAutoRefresh({ status }: SubmissionAutoRefreshProps) {
+export function SubmissionAutoRefresh({ status, statuses }: SubmissionAutoRefreshProps) {
   const router = useRouter();
   const [isPageActive, setIsPageActive] = useState(true);
   const [isPending, startTransition] = useTransition();
-  const normalizedStatus = useMemo(() => normalizeStatus(status), [status]);
+  const normalizedStatuses = useMemo(() => {
+    if (statuses && statuses.length > 0) {
+      return statuses
+        .map((item) => normalizeStatus(item))
+        .filter((item): item is string => Boolean(item));
+    }
+    const normalizedStatus = normalizeStatus(status);
+    return normalizedStatus ? [normalizedStatus] : [];
+  }, [status, statuses]);
   const pollableStatus = useMemo(
-    () => toPollableStatus(normalizedStatus),
-    [normalizedStatus]
+    () => resolvePollableStatus(normalizedStatuses),
+    [normalizedStatuses]
+  );
+  const statusSignature = useMemo(
+    () => normalizedStatuses.join("|"),
+    [normalizedStatuses]
   );
 
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const inFlightRef = useRef(false);
   const pendingRef = useRef(false);
   const unchangedRoundsRef = useRef(0);
-  const lastStatusRef = useRef<string | null>(normalizedStatus);
+  const lastStatusSignatureRef = useRef(statusSignature);
+  const tailRefreshRemainingRef = useRef(0);
 
   const clearTimer = useCallback(() => {
     if (!timerRef.current) {
@@ -71,11 +91,17 @@ export function SubmissionAutoRefresh({ status }: SubmissionAutoRefreshProps) {
   }, [isPending]);
 
   useEffect(() => {
-    if (lastStatusRef.current !== normalizedStatus) {
-      lastStatusRef.current = normalizedStatus;
+    if (lastStatusSignatureRef.current !== statusSignature) {
+      lastStatusSignatureRef.current = statusSignature;
       unchangedRoundsRef.current = 0;
     }
-  }, [normalizedStatus]);
+  }, [statusSignature]);
+
+  useEffect(() => {
+    if (pollableStatus) {
+      tailRefreshRemainingRef.current = 1;
+    }
+  }, [pollableStatus]);
 
   useEffect(() => {
     const resolveIsPageActive = (): boolean =>
@@ -100,25 +126,27 @@ export function SubmissionAutoRefresh({ status }: SubmissionAutoRefreshProps) {
   useEffect(() => {
     clearTimer();
 
-    if (!pollableStatus || !isPageActive) {
+    if (!isPageActive) {
       return () => clearTimer();
     }
 
     let cancelled = false;
 
-    const scheduleNext = () => {
+    const scheduleNext = (delay: number) => {
       if (cancelled) {
         return;
       }
 
-      const delay = getDelayWithBackoff(pollableStatus, unchangedRoundsRef.current);
       timerRef.current = setTimeout(() => {
         if (cancelled) {
           return;
         }
 
         if (inFlightRef.current || pendingRef.current) {
-          scheduleNext();
+          const nextDelay = pollableStatus
+            ? getDelayWithBackoff(pollableStatus, unchangedRoundsRef.current)
+            : 1_500;
+          scheduleNext(nextDelay);
           return;
         }
 
@@ -128,11 +156,18 @@ export function SubmissionAutoRefresh({ status }: SubmissionAutoRefreshProps) {
           router.refresh();
         });
 
-        scheduleNext();
+        if (pollableStatus) {
+          scheduleNext(getDelayWithBackoff(pollableStatus, unchangedRoundsRef.current));
+        }
       }, delay);
     };
 
-    scheduleNext();
+    if (pollableStatus) {
+      scheduleNext(getDelayWithBackoff(pollableStatus, unchangedRoundsRef.current));
+    } else if (tailRefreshRemainingRef.current > 0) {
+      tailRefreshRemainingRef.current -= 1;
+      scheduleNext(1_500);
+    }
 
     return () => {
       cancelled = true;
@@ -142,4 +177,3 @@ export function SubmissionAutoRefresh({ status }: SubmissionAutoRefreshProps) {
 
   return null;
 }
-
