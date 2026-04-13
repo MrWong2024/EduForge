@@ -1,4 +1,5 @@
 import { redirect, unstable_rethrow } from "next/navigation";
+import type { ReactNode } from "react";
 import { ErrorState } from "@/components/blocks/ErrorState";
 import { PageHeader } from "@/components/blocks/PageHeader";
 import { LoginForm } from "@/components/auth/LoginForm";
@@ -56,6 +57,33 @@ const extractRawDetail = (error: unknown): string | undefined => {
   }
 };
 
+function LoginFrame({ children }: { children: ReactNode }) {
+  return (
+    <section className="relative mx-auto w-full max-w-4xl px-4 py-10 md:py-14">
+      <div className="pointer-events-none absolute inset-0 -z-10 bg-[radial-gradient(circle_at_top,rgba(59,130,246,0.12),transparent_50%)]" />
+      <div className="overflow-hidden rounded-2xl border border-zinc-200 bg-white shadow-sm">
+        <header className="border-b border-zinc-100 px-6 py-8 text-center md:px-10">
+          <p className="inline-flex items-center rounded-full border border-zinc-300 bg-zinc-50 px-3 py-1 text-xs font-medium text-zinc-700">
+            EduForge · 教学应用版
+          </p>
+          <h1 className="mt-4 text-2xl font-semibold tracking-tight text-zinc-900 md:text-3xl">
+            重庆邮电大学智能化教学平台
+          </h1>
+          <p className="mx-auto mt-3 max-w-2xl text-sm leading-6 text-zinc-600">
+            面向教师与学生的统一教学入口，支持课堂任务、AI 反馈与过程性评价。
+          </p>
+        </header>
+
+        <div className="px-6 py-6 md:px-10 md:py-8">{children}</div>
+
+        <footer className="border-t border-zinc-100 px-6 py-4 text-center text-xs leading-5 text-zinc-500 md:px-10">
+          教师与学生使用统一账号登录，系统将按角色自动进入对应工作区。
+        </footer>
+      </div>
+    </section>
+  );
+}
+
 export default async function LoginPage() {
   let viewModel: LoginPageViewModel = { mode: "form" };
 
@@ -98,28 +126,40 @@ export default async function LoginPage() {
 
   if (viewModel.mode === "forbidden") {
     return (
-      <ErrorState
-        status={403}
-        title="403 无可用角色"
-        description="当前账号未配置 TEACHER 或 STUDENT 角色，请联系管理员。"
-      />
+      <LoginFrame>
+        <PageHeader
+          title="登录入口"
+          description="当前账号已登录，但未分配可用角色。"
+        />
+        <ErrorState
+          status={403}
+          title="403 无可用角色"
+          description="当前账号未配置 TEACHER 或 STUDENT 角色，请联系管理员。"
+        />
+      </LoginFrame>
     );
   }
 
   if (viewModel.mode === "probe-error") {
     return (
-      <ErrorState
-        status={viewModel.status}
-        title="登录状态检查失败"
-        description={viewModel.description}
-      />
+      <LoginFrame>
+        <PageHeader
+          title="登录入口"
+          description="系统正在检查登录状态，请稍后重试。"
+        />
+        <ErrorState
+          status={viewModel.status}
+          title="登录状态检查失败"
+          description={viewModel.description}
+        />
+      </LoginFrame>
     );
   }
 
   return (
-    <section>
-      <PageHeader title="登录" description="请输入账号与密码登录系统。" />
+    <LoginFrame>
+      <PageHeader title="欢迎登录" description="请输入账号与密码，进入教学工作区。" />
       <LoginForm />
-    </section>
+    </LoginFrame>
   );
 }

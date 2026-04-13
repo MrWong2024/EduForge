@@ -41,7 +41,7 @@ frontend/
 
 ## 2) 路由分区与完成度（摘要）
 
-- `/(auth)/login`：已完成登录与 role-home 跳转（`TEACHER -> /teacher/classrooms`, `STUDENT -> /student`）。
+- `/(auth)/login`：已完成登录与 role-home 跳转（`TEACHER -> /teacher/classrooms`, `STUDENT -> /student`）；页面已收口为极简专业型登录入口（主标题“重庆邮电大学智能化教学平台” + 聚焦登录表单），未改变登录链路与错误分流口径。
 - `/teacher/**`：教师起步链路、模板链路、班级发布链路、批阅链路、三件套、周报/过程性评价/快照已接入真接口。
 - 教师班级基础管理层（已落地）：
   - `/teacher/classrooms`：班级列表 + 创建班级；默认按 `进行中/已归档/全部` 视图区分展示，操作列提供“进入班级/编辑班级”，班级生命周期动作统一收进“更多”次级菜单。
