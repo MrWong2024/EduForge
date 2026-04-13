@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { ErrorState } from "@/components/blocks/ErrorState";
 import { fetchJson, BrowserFetchJsonError } from "@/lib/api/browser-client";
@@ -47,12 +47,18 @@ export function RequestAiFeedbackButton({
   initialStatus,
 }: RequestAiFeedbackButtonProps) {
   const router = useRouter();
+  const normalizedInitialStatus = useMemo(
+    () => toNormalizedStatus(initialStatus),
+    [initialStatus]
+  );
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errorState, setErrorState] = useState<RequestErrorState | null>(null);
   const [requestResult, setRequestResult] = useState<unknown>(null);
-  const [latestStatus, setLatestStatus] = useState<string | undefined>(
-    toNormalizedStatus(initialStatus)
-  );
+  const [latestStatus, setLatestStatus] = useState<string | undefined>(normalizedInitialStatus);
+
+  useEffect(() => {
+    setLatestStatus(normalizedInitialStatus);
+  }, [normalizedInitialStatus]);
 
   const status = latestStatus;
   const canRequest = status === "NOT_REQUESTED";

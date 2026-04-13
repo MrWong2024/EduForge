@@ -556,6 +556,12 @@
 - 【防重叠】同页实例内已加入本地互斥（`inFlight + transition pending`），且状态切换/组件卸载会清理旧 timer，避免重复定时器叠加。
 - 【行为保持】未新增后端接口、未引入 WebSocket/SSE；请求按钮仍保持“仅 `NOT_REQUESTED` 可点，`FAILED` 不可手工重试”。
 
+## UAT-FE-65
+
+- 【本步解决】学生提交详情页自动刷新后，`RequestAiFeedbackButton` 可能滞留旧状态文案（如后端已 `DEAD` 仍显示“处理中/自动刷新”）的问题。
+- 【新增事实 / 已收口口径】`RequestAiFeedbackButton` 已补齐父级状态同步：当页面刷新后 `initialStatus` 变化时，本地展示状态会同步覆盖到最新服务端状态。
+- 【行为保持】`NOT_REQUESTED` 首次请求流程不变；`FAILED` 仍不可手动重试；自动刷新机制与频率策略不变。
+
 ## 当前阶段一句话结论
 
 前端已达到“Teacher/Student 主链路可用 + 任务模板层与班级实例层边界收口 + 教师模板主链路可维护”的工程验收阶段，但尚未进入最终交付定版阶段。
