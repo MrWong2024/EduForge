@@ -29,7 +29,7 @@ frontend/
 │  ├─ layout/{TeacherShell,StudentShell}
 │  ├─ blocks/{PageHeader,EmptyState,ErrorState,Tabs}
 │  ├─ teacher/**                   # 课程/班级/模板创建编辑筛选/班级发布/教师反馈
-│  ├─ student/**                   # 加班级/提交/请求AI/处理提示
+│  ├─ student/**                   # 加班级/提交/请求AI/处理提示/提交详情自动刷新
 │  └─ classroomTask/TaskContextHeader
 └─ lib/
    ├─ api/{client,browser-client,error-presenter,types-*}
@@ -133,6 +133,7 @@ Student 学习链路（可用）：
    - 反馈主列表已中文化：表头使用“来源/类型/严重程度/反馈内容/修改建议/标签/时间”。
    - `source/type/severity` 在列表单元格按后端原值直出（英文枚举不翻译）；`message` 与 `suggestion` 分列展示（`suggestion` 为空时显示“暂无”）。
    - 学生端“请求 AI 反馈”按钮仅在 `NOT_REQUESTED` 可点击；`FAILED` 状态已禁用，不再提供前端手工重试入口（失败后的后续处理由任务机制/worker 负责）。
+   - 学生提交详情页已接入“状态驱动自动刷新”：`PENDING/RUNNING` 快速刷新、`FAILED` 慢速刷新；到 `SUCCEEDED/DEAD/NOT_REQUESTED` 自动停止；页面失焦或标签页不可见时暂停，回到前台后按当前状态恢复；同页实例内通过本地互斥避免刷新重叠。
 
 Teacher 批阅链路（可用）：
 1. `/teacher/classrooms/[classroomId]/tasks/[classroomTaskId]/submissions`
@@ -226,6 +227,7 @@ Teacher 课堂复盘链路（可用）：
 - `process-once` 仅用于 debug/ops，不是默认交付模式。
 - 前端已按 `NOT_REQUESTED/PENDING/RUNNING/SUCCEEDED/FAILED/DEAD` 全状态展示。
 - `request AI` 按钮的产品语义已收口：仅 `NOT_REQUESTED` 可手工触发；`FAILED` 不再允许手工重发请求，避免误导为“点击即可重置 job”。
+- 学生提交详情页自动刷新口径：`PENDING/RUNNING` 按较快节奏轮询，`FAILED` 按较慢节奏轮询，并包含“页面不可见暂停 + 长时间状态不变降频 + 同页防重叠”保护。
 
 ## 7) 当前阶段判断
 
@@ -236,7 +238,7 @@ Teacher 课堂复盘链路（可用）：
 - Teacher / Student 主链路可用。
 - P0 真接口前端收口完成。
 - submission detail 稳定读源已落地（双角色详情页）。
-- AI 闭环前端产品入口已落地（request + 状态提示 + 帮助页）。
+- AI 闭环前端产品入口已落地（request + 状态提示 + 帮助页 + submission detail 状态驱动自动刷新）。
 - 任务模板页能力已落地：创建、编辑、基础 rubric 配置、筛选与跨页上下文链路。
 - 任务模板课程分类（`courseLabel`）与模板可见性（`visibility`）已接入前端：`courseLabel` 单选可空、`visibility` 两档单选，均用于模板治理，不绑定课程、不限制跨课程复用。
 - 模板列表视图已接入 `scope`（`mine/shared/all`），默认 `mine`；`shared` 视图可读共享模板，非作者模板不暴露误导性编辑入口。

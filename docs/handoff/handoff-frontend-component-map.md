@@ -49,6 +49,7 @@
 | SubmissionForm | `components/student/SubmissionForm.tsx` | `POST classrooms/:classroomId/tasks/:classroomTaskId/submissions` | 仅处理提交动作与迟交错误分流 |
 | RequestAiFeedbackButton | `components/student/RequestAiFeedbackButton.tsx` | `POST learning-tasks/submissions/:submissionId/ai-feedback/request` | 仅处理 request AI 行为 |
 | AiProcessingHint | `components/student/AiProcessingHint.tsx` | - | 统一 `PENDING/RUNNING` 提示文案 |
+| SubmissionAutoRefresh | `components/student/SubmissionAutoRefresh.tsx` | `router.refresh()`（复用 submission detail 页面现有读源链路） | 仅用于学生提交详情页状态驱动自动刷新；`PENDING/RUNNING` 快速、`FAILED` 慢速；页面失焦/不可见暂停；同页实例内防重叠 |
 
 ## 5) 课堂任务上下文组件
 

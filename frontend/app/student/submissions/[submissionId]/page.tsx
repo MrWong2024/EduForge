@@ -5,6 +5,7 @@ import { ErrorState } from "@/components/blocks/ErrorState";
 import { PageHeader } from "@/components/blocks/PageHeader";
 import { AiProcessingHint } from "@/components/student/AiProcessingHint";
 import { RequestAiFeedbackButton } from "@/components/student/RequestAiFeedbackButton";
+import { SubmissionAutoRefresh } from "@/components/student/SubmissionAutoRefresh";
 import { fetchJson, FetchJsonError } from "@/lib/api/client";
 import { buildErrorDescription, extractRawDetail } from "@/lib/api/error-presenter";
 import { toListFeedbackResponse, toSubmissionDetailResponse } from "@/lib/api/types-student";
@@ -232,7 +233,9 @@ export default async function StudentSubmissionDetailPage({
       />
 
       <section className="rounded-lg border border-zinc-200 bg-white p-4 text-sm text-zinc-700">
-        <p>此页展示本次提交的反馈结果；处于未请求状态时可在此发起 AI 反馈请求。</p>
+        <p>
+          此页展示本次提交的反馈结果；处于未请求状态时可在此发起 AI 反馈请求。排队中、处理中与失败等待处理期间，页面会自动刷新。
+        </p>
       </section>
 
       <section className="rounded-lg border border-zinc-200 bg-white p-4 text-sm text-zinc-700">
@@ -255,6 +258,7 @@ export default async function StudentSubmissionDetailPage({
         variant="submission"
         helpHref={paths.student.aiHelp}
       />
+      <SubmissionAutoRefresh status={viewModel.aiFeedbackStatus} />
       <RequestAiFeedbackButton
         submissionId={submissionId}
         initialStatus={viewModel.aiFeedbackStatus ?? undefined}
@@ -274,7 +278,7 @@ export default async function StudentSubmissionDetailPage({
       {viewModel.feedback.items.length === 0 ? (
         <EmptyState
           title="暂无反馈"
-          description="当前提交还没有反馈内容；未请求状态可点击上方按钮请求 AI 反馈，失败状态请稍后刷新查看。"
+          description="当前提交还没有反馈内容；未请求状态可点击上方按钮请求 AI 反馈，处理中或失败等待处理期间页面会自动刷新。"
         />
       ) : (
         <div className="overflow-x-auto rounded-lg border border-zinc-200 bg-white">

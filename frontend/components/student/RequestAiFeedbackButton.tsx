@@ -59,8 +59,14 @@ export function RequestAiFeedbackButton({
   const isDisabled = isSubmitting || !canRequest;
 
   const statusHint = useMemo(() => {
+    if (status === "PENDING") {
+      return "AI 反馈排队中，页面会自动刷新。";
+    }
+    if (status === "RUNNING") {
+      return "AI 反馈处理中，页面会自动刷新。";
+    }
     if (status === "FAILED") {
-      return "AI 反馈失败，当前不可手动重新请求，请稍后刷新查看。";
+      return "AI 反馈暂时失败，当前不可手动重新请求；系统会继续按机制处理，页面会慢速自动刷新查看结果。";
     }
     if (!status) {
       return "当前 AI 状态未就绪，暂不可手工请求。";

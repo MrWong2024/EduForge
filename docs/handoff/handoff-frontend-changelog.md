@@ -548,6 +548,14 @@
 - 【行为保持】任务基础信息、提交区、AI 状态提示、历史记录、评分说明、query 参数交互均保持不变。
 - 【边界保持】仅前端单页展示修正，不改 backend 契约，不新增依赖。
 
+## UAT-FE-64
+
+- 【本步解决】学生提交详情页 AI 反馈结果需手工刷新才能看到的问题。
+- 【新增事实 / 已收口口径】`/student/submissions/[submissionId]` 已新增状态驱动自动刷新（最小 client 组件 + `router.refresh()`）：`PENDING/RUNNING` 快速刷新、`FAILED` 慢速刷新；到 `SUCCEEDED/DEAD/NOT_REQUESTED` 自动停止。
+- 【资源保护】自动刷新已包含页面可见性保护（标签页不可见或页面失焦时暂停，回到前台后按当前状态恢复）与长时间状态不变降频策略。
+- 【防重叠】同页实例内已加入本地互斥（`inFlight + transition pending`），且状态切换/组件卸载会清理旧 timer，避免重复定时器叠加。
+- 【行为保持】未新增后端接口、未引入 WebSocket/SSE；请求按钮仍保持“仅 `NOT_REQUESTED` 可点，`FAILED` 不可手工重试”。
+
 ## 当前阶段一句话结论
 
 前端已达到“Teacher/Student 主链路可用 + 任务模板层与班级实例层边界收口 + 教师模板主链路可维护”的工程验收阶段，但尚未进入最终交付定版阶段。
