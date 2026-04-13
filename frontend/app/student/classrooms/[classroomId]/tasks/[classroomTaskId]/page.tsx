@@ -4,6 +4,7 @@ import { EmptyState } from "@/components/blocks/EmptyState";
 import { ErrorState } from "@/components/blocks/ErrorState";
 import { PageHeader } from "@/components/blocks/PageHeader";
 import { AiProcessingHint } from "@/components/student/AiProcessingHint";
+import { SubmissionAutoRefresh } from "@/components/student/SubmissionAutoRefresh";
 import { SubmissionForm } from "@/components/student/SubmissionForm";
 import { fetchJson, FetchJsonError } from "@/lib/api/client";
 import { buildErrorDescription, extractRawDetail } from "@/lib/api/error-presenter";
@@ -91,6 +92,49 @@ const toAiStatusDescription = (status?: string): string | null => {
 
 const isProcessingAiStatus = (status?: string): boolean =>
   status === "PENDING" || status === "RUNNING";
+
+const normalizeAiStatus = (status: unknown): string | null => {
+  if (typeof status !== "string") {
+    return null;
+  }
+
+  const normalized = status.trim().toUpperCase();
+  return normalized || null;
+};
+
+const resolveTaskDetailAutoRefreshStatus = (
+  submissions: unknown[]
+): "PENDING" | "RUNNING" | "FAILED" | undefined => {
+  let hasPending = false;
+  let hasRunning = false;
+  let hasFailed = false;
+
+  for (const submission of submissions) {
+    const normalized = normalizeAiStatus(safeGet(submission, "aiFeedbackStatus", undefined));
+    if (normalized === "PENDING") {
+      hasPending = true;
+      continue;
+    }
+    if (normalized === "RUNNING") {
+      hasRunning = true;
+      continue;
+    }
+    if (normalized === "FAILED") {
+      hasFailed = true;
+    }
+  }
+
+  if (hasRunning) {
+    return "RUNNING";
+  }
+  if (hasPending) {
+    return "PENDING";
+  }
+  if (hasFailed) {
+    return "FAILED";
+  }
+  return undefined;
+};
 
 const toDisplayDateOrFallback = (value?: string | null): string => {
   const displayDate = toDisplayDate(value);
@@ -252,6 +296,8 @@ export default async function StudentTaskDetailPage({
   const latestSubmissionHref = latestSubmissionId
     ? buildSubmissionFeedbackHref(latestSubmissionId, classroomId, classroomTaskId)
     : null;
+  const autoRefreshStatus = resolveTaskDetailAutoRefreshStatus(viewModel.data.submissions);
+  const isAutoRefreshing = Boolean(autoRefreshStatus);
 
   return (
     <section className="space-y-4">
@@ -294,6 +340,9 @@ export default async function StudentTaskDetailPage({
           </p>
         ) : null}
         {latestStatusDescription ? <p className="mt-2 text-sm text-zinc-700">{latestStatusDescription}</p> : null}
+        {isAutoRefreshing ? (
+          <p className="mt-2 text-sm text-zinc-700">AI 状态更新中，页面会自动刷新。</p>
+        ) : null}
         {isProcessingAiStatus(latestRawStatus) ? (
           <p className="mt-2 text-sm text-zinc-700">
             若等待时间较长，可先查看
@@ -339,6 +388,7 @@ export default async function StudentTaskDetailPage({
       </section>
 
       <AiProcessingHint status={latestRawStatus} variant="taskDetail" helpHref={paths.student.aiHelp} />
+      <SubmissionAutoRefresh status={autoRefreshStatus} />
 
       <section className="rounded-lg border border-zinc-200 bg-white p-4 text-sm">
         <p className="font-medium text-zinc-900">参数</p>

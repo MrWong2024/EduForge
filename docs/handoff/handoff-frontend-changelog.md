@@ -562,6 +562,14 @@
 - 【新增事实 / 已收口口径】`RequestAiFeedbackButton` 已补齐父级状态同步：当页面刷新后 `initialStatus` 变化时，本地展示状态会同步覆盖到最新服务端状态。
 - 【行为保持】`NOT_REQUESTED` 首次请求流程不变；`FAILED` 仍不可手动重试；自动刷新机制与频率策略不变。
 
+## UAT-FE-66
+
+- 【本步解决】学生任务详情页“最新 AI 状态”与提交记录表“AI 状态”在 AI 状态变化后需手工刷新才能更新的问题。
+- 【新增事实 / 已收口口径】`/student/classrooms/[classroomId]/tasks/[classroomTaskId]` 已接入 AI 状态联动自动刷新：当 `submissions[*].aiFeedbackStatus` 存在 `PENDING/RUNNING` 时快速刷新；仅存在 `FAILED` 时慢速刷新；所有 submission 均非活跃时停止。
+- 【覆盖范围】刷新走整页 `router.refresh()` 链路，顶部“最新 AI 状态”与底部提交表“AI 状态”列同步更新，不做局部前端假更新。
+- 【资源保护与防重叠】沿用页面可见性暂停/恢复、长时间无变化降频、同页实例内互斥防重叠（避免 timer 叠加与并发 refresh）。
+- 【行为保持】不改提交表交互、不改查看反馈跳转、不改后端接口与自动刷新状态机语义。
+
 ## 当前阶段一句话结论
 
 前端已达到“Teacher/Student 主链路可用 + 任务模板层与班级实例层边界收口 + 教师模板主链路可维护”的工程验收阶段，但尚未进入最终交付定版阶段。

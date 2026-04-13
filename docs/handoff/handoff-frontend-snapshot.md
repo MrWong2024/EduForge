@@ -29,7 +29,7 @@ frontend/
 │  ├─ layout/{TeacherShell,StudentShell}
 │  ├─ blocks/{PageHeader,EmptyState,ErrorState,Tabs}
 │  ├─ teacher/**                   # 课程/班级/模板创建编辑筛选/班级发布/教师反馈
-│  ├─ student/**                   # 加班级/提交/请求AI/处理提示/提交详情自动刷新
+│  ├─ student/**                   # 加班级/提交/请求AI/处理提示/提交详情与任务详情自动刷新
 │  └─ classroomTask/TaskContextHeader
 └─ lib/
    ├─ api/{client,browser-client,error-presenter,types-*}
@@ -128,6 +128,8 @@ Teacher 班级看板链路（可用）：
 Student 学习链路（可用）：
 1. `/student/classrooms/join` -> `POST classrooms/join`
 2. `/student/classrooms/[classroomId]/tasks/[classroomTaskId]` -> `GET .../my-task-detail`（页面已是“任务详情 + 提交工作台”，正式展示任务基础信息、任务说明 `task.description`、评分标准 `task.rubric`，并保留提交与历史记录；标题区不再展示“班级状态”占位文案，仅保留班级名称）
+   - 已接入 AI 状态联动自动刷新：当提交列表中存在 `PENDING/RUNNING/FAILED` 时自动刷新；其中 `PENDING/RUNNING` 快速刷新、仅 `FAILED` 时慢速刷新；当提交列表全部进入非活跃状态（如 `SUCCEEDED/DEAD/NOT_REQUESTED`）时停止。
+   - 自动刷新覆盖“最新 AI 状态”与提交记录表“AI 状态”列，使用整页刷新链路同步更新；页面不可见/失焦时暂停，回到前台后按当前状态恢复。
 3. `SubmissionForm` -> `POST .../submissions`（language 默认“自动识别”，未手动指定时提交 `auto`，不再默认 `javascript`）
 4. `/student/submissions/[submissionId]` -> 稳定读源 + feedback 列表 + request AI
    - 反馈主列表已中文化：表头使用“来源/类型/严重程度/反馈内容/修改建议/标签/时间”。
@@ -230,6 +232,7 @@ Teacher 课堂复盘链路（可用）：
 - `request AI` 按钮的产品语义已收口：仅 `NOT_REQUESTED` 可手工触发；`FAILED` 不再允许手工重发请求，避免误导为“点击即可重置 job”。
 - 学生提交详情页自动刷新口径：`PENDING/RUNNING` 按较快节奏轮询，`FAILED` 按较慢节奏轮询，并包含“页面不可见暂停 + 长时间状态不变降频 + 同页防重叠”保护。
 - 学生提交详情页按钮状态口径：服务端刷新后的 `initialStatus` 为按钮真相源，本地状态仅作短暂过渡，不长期覆盖父级新状态。
+- 学生任务详情页自动刷新口径：由当前页 `submissions[*].aiFeedbackStatus` 聚合驱动；存在 `PENDING/RUNNING` 时快速刷新，仅存在 `FAILED` 时慢速刷新；所有 submission 均非活跃时停止，并保持页面可见性暂停/恢复与同页防重叠保护。
 
 ## 7) 当前阶段判断
 
@@ -240,7 +243,7 @@ Teacher 课堂复盘链路（可用）：
 - Teacher / Student 主链路可用。
 - P0 真接口前端收口完成。
 - submission detail 稳定读源已落地（双角色详情页）。
-- AI 闭环前端产品入口已落地（request + 状态提示 + 帮助页 + submission detail 状态驱动自动刷新）。
+- AI 闭环前端产品入口已落地（request + 状态提示 + 帮助页 + submission detail 与 student task detail 状态驱动自动刷新）。
 - 任务模板页能力已落地：创建、编辑、基础 rubric 配置、筛选与跨页上下文链路。
 - 任务模板课程分类（`courseLabel`）与模板可见性（`visibility`）已接入前端：`courseLabel` 单选可空、`visibility` 两档单选，均用于模板治理，不绑定课程、不限制跨课程复用。
 - 模板列表视图已接入 `scope`（`mine/shared/all`），默认 `mine`；`shared` 视图可读共享模板，非作者模板不暴露误导性编辑入口。
