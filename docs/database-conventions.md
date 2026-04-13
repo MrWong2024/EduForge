@@ -61,18 +61,19 @@ Mongoose 的 autoIndex 按环境严格区分：
 | Environment | autoIndex |
 |------------|-----------|
 | development| true      |
-| test       | false     |
+| test       | true      |
 | production | false     |
 
 说明：
 - development：提升开发效率，Schema 变更即时生效
-- test / production：避免启动阻塞与不可控索引创建
+- test：默认允许 autoIndex，降低测试环境索引准备成本
+- production：必须关闭 autoIndex，避免启动阻塞与不可控索引创建
 
 ---
 
-## 4. 索引同步（唯一合法入口）
+## 4. 索引同步（production 唯一合法入口）
 
-当 Schema 中的索引发生变更时，必须通过以下方式同步：
+在 production（及正式索引治理流程）中，当 Schema 索引发生变更时，必须通过以下方式同步：
 
 ```powershell
 npm run sync-indexes
@@ -85,7 +86,7 @@ npm run sync-indexes
 
 索引同步使用 *_db_admin 账号完成
 
-禁止通过 autoIndex 或临时脚本在 test / production 建索引
+禁止在 production 通过 autoIndex 或临时脚本建索引
 
 示例（PowerShell）：
 ```powershell

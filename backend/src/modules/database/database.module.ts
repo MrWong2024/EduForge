@@ -36,7 +36,7 @@ const expectedDatabaseNames: Record<string, string> = {
 
         return {
           uri: mongoUri,
-          autoIndex: env === 'development',
+          autoIndex: env === 'development' || env === 'test',
           serverSelectionTimeoutMS: configService.get<number>(
             'mongo.serverSelectionTimeoutMS',
           ),
