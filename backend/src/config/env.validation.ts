@@ -15,7 +15,13 @@ export const envValidationSchema = Joi.object({
   FRONTEND_URL: Joi.string()
     .uri({ scheme: [/https?/] })
     .default('http://localhost:3000'),
-  MONGO_URI: Joi.string().uri().required(),
+  MONGO_URI: Joi.string()
+    .pattern(/^mongodb(\+srv)?:\/\/\S+$/)
+    .required()
+    .messages({
+      'string.pattern.base':
+        'MONGO_URI must be a valid MongoDB connection string starting with mongodb:// or mongodb+srv://',
+    }),
   MONGO_SERVER_SELECTION_TIMEOUT_MS: Joi.number()
     .integer()
     .min(1000)
