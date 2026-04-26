@@ -309,18 +309,18 @@ describe('Course Overview (e2e)', () => {
 
     const [createdClassroomA, createdClassroomB, createdClassroomC] =
       await Promise.all([
-      teacherAgent
-        .post('/api/classrooms')
-        .send({ courseId, name: 'Overview-Classroom-A' })
-        .expect(201),
-      teacherAgent
-        .post('/api/classrooms')
-        .send({ courseId, name: 'Overview-Classroom-B' })
-        .expect(201),
-      teacherAgent
-        .post('/api/classrooms')
-        .send({ courseId, name: 'Overview-Classroom-C' })
-        .expect(201),
+        teacherAgent
+          .post('/api/classrooms')
+          .send({ courseId, name: 'Overview-Classroom-A' })
+          .expect(201),
+        teacherAgent
+          .post('/api/classrooms')
+          .send({ courseId, name: 'Overview-Classroom-B' })
+          .expect(201),
+        teacherAgent
+          .post('/api/classrooms')
+          .send({ courseId, name: 'Overview-Classroom-C' })
+          .expect(201),
       ]);
     const classroomABody = createdClassroomA.body as CreatedClassroomResponse;
     const classroomBBody = createdClassroomB.body as CreatedClassroomResponse;
@@ -363,8 +363,12 @@ describe('Course Overview (e2e)', () => {
       .send({})
       .expect(201);
 
-    const [classroomTaskA, classroomTaskB, classroomTaskASecond, classroomTaskC] =
-      await Promise.all([
+    const [
+      classroomTaskA,
+      classroomTaskB,
+      classroomTaskASecond,
+      classroomTaskC,
+    ] = await Promise.all([
       teacherAgent
         .post(`/api/classrooms/${classroomAId}/tasks`)
         .send({ taskId })
@@ -381,7 +385,7 @@ describe('Course Overview (e2e)', () => {
         .post(`/api/classrooms/${classroomCId}/tasks`)
         .send({ taskId })
         .expect(201),
-      ]);
+    ]);
     classroomTaskAId = (classroomTaskA.body as CreatedClassroomTaskResponse).id;
     classroomTaskBId = (classroomTaskB.body as CreatedClassroomTaskResponse).id;
     classroomTaskASecondId = (
@@ -504,7 +508,9 @@ describe('Course Overview (e2e)', () => {
       status: AiFeedbackJobStatus.Succeeded,
     });
     const expectedClassroomAAiSuccessRate =
-      classroomAJobsTotal > 0 ? classroomASucceededJobs / classroomAJobsTotal : null;
+      classroomAJobsTotal > 0
+        ? classroomASucceededJobs / classroomAJobsTotal
+        : null;
     expect(classroomAOverview?.ai.jobsTotal).toBe(classroomAJobsTotal);
     expect(classroomAOverview?.ai.aiSuccessRate).toBe(
       expectedClassroomAAiSuccessRate,
@@ -567,7 +573,8 @@ describe('Course Overview (e2e)', () => {
       .get(`/api/courses/${courseId}/overview`)
       .query({ window: '24h' })
       .expect(200);
-    const legacyWindowBody = legacyWindowOverview.body as CourseOverviewResponse;
+    const legacyWindowBody =
+      legacyWindowOverview.body as CourseOverviewResponse;
     expect(legacyWindowBody.window).toBe('24h');
 
     const defaultWindowOverview = await teacherAgent
@@ -631,7 +638,9 @@ describe('Course Overview (e2e)', () => {
       expect(combinedMessage).toContain('all');
       return;
     }
-    expect(String(message)).toContain('window must be one of the following values');
+    expect(String(message)).toContain(
+      'window must be one of the following values',
+    );
     expect(String(message)).toContain('all');
   });
 });

@@ -19,6 +19,7 @@ import { AiFeedbackWorker } from './ai-feedback/services/ai-feedback-worker.serv
 import { AiFeedbackDebugEnabledGuard } from './ai-feedback/guards/ai-feedback-debug-enabled.guard';
 import { AI_FEEDBACK_PROVIDER_TOKEN } from './ai-feedback/interfaces/ai-feedback-provider.interface';
 import { OpenRouterFeedbackProvider } from './ai-feedback/providers/real/openrouter-feedback.provider';
+import { BailianFeedbackProvider } from './ai-feedback/providers/real/bailian-feedback.provider';
 import { AuthModule } from '../auth/auth.module';
 import {
   ClassroomTask,
@@ -52,6 +53,7 @@ import { User, UserSchema } from '../users/schemas/user.schema';
     AiFeedbackProcessor,
     DefaultStubAiFeedbackProvider,
     OpenRouterFeedbackProvider,
+    BailianFeedbackProvider,
     AiFeedbackWorker,
     AiFeedbackDebugEnabledGuard,
     {
@@ -60,11 +62,13 @@ import { User, UserSchema } from '../users/schemas/user.schema';
         ConfigService,
         DefaultStubAiFeedbackProvider,
         OpenRouterFeedbackProvider,
+        BailianFeedbackProvider,
       ],
       useFactory: (
         configService: ConfigService,
         stubProvider: DefaultStubAiFeedbackProvider,
         openRouterProvider: OpenRouterFeedbackProvider,
+        bailianProvider: BailianFeedbackProvider,
       ) => {
         const rawProvider = configService.get<string>('AI_FEEDBACK_PROVIDER');
         const provider = (rawProvider ?? 'stub').toLowerCase();
@@ -74,8 +78,11 @@ import { User, UserSchema } from '../users/schemas/user.schema';
         if (provider === 'openrouter') {
           return openRouterProvider;
         }
+        if (provider === 'bailian') {
+          return bailianProvider;
+        }
         throw new Error(
-          `AI_FEEDBACK_PROVIDER unsupported value "${rawProvider ?? ''}". Supported: stub, openrouter`,
+          `AI_FEEDBACK_PROVIDER unsupported value "${rawProvider ?? ''}". Supported: stub, openrouter, bailian`,
         );
       },
     },

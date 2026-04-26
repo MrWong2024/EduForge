@@ -599,6 +599,28 @@
 - Failure Modes:
   - 任意调用都会抛出“未实现 + 需人工安装 SDK”错误
 
+## Provider Card D
+
+- Service: `backend/src/modules/learning-tasks/ai-feedback/providers/real/bailian-feedback.provider.ts`
+- Domain: `AiFeedback Provider`
+- Actions: `build-request`, `call-bailian`, `parse-validate-json`, `map-provider-error`
+- I/O Shape:
+  - In: `AiSubmissionAnalysisContext`, `BAILIAN_*`, `AI_FEEDBACK_*`
+  - Out: `AiFeedbackItem[]`
+- Key Methods:
+  - `analyzeSubmission(context: AiSubmissionAnalysisContext): Promise<AiFeedbackItem[]> — called by processor when provider=bailian`
+- AuthZ Boundary: `internal-only`
+- Metrics/Isolation: 日志带 `submissionId/classroomTaskId/provider=bailian/model/duration/retried`
+- Consistency/Constraints: 走阿里云百炼 OpenAI Chat Completions 兼容接口；默认 `BAILIAN_BASE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1`、`BAILIAN_MODEL=qwen-plus`；复用 OpenAI-compatible 基类中的 prompt、严格 JSON 协议、字段白名单、`<=2` 协议闸门、指数退避、超时与错误映射；不发送 OpenRouter 专属 `HTTP-Referer/X-Title` 请求头
+- Deps/Side Effects: `ConfigService`, `fetch` 外部网络调用、prompt/protocol/normalizer
+- Performance Notes: 单请求超时控制 + 有界重试；解析失败直接终止
+- SoT: `backend/src/modules/learning-tasks/ai-feedback/providers/real/bailian-feedback.provider.ts`; `backend/src/modules/learning-tasks/ai-feedback/providers/real/openai-compatible-feedback-provider.base.ts`; `backend/src/modules/learning-tasks/ai-feedback/protocol/ai-feedback-json.protocol.ts`; `backend/src/modules/learning-tasks/ai-feedback/prompts/openrouter-feedback.prompt.ts`
+- Failure Modes:
+  - `AI_FEEDBACK_REAL_ENABLED=false` -> `REAL_DISABLED`（不可重试）
+  - 无 `BAILIAN_API_KEY` -> `MISSING_API_KEY`（不可重试）
+  - HTTP 429/5xx/超时 -> 可重试错误
+  - 非法 JSON/越界字段 -> `BAD_RESPONSE`
+
 ## Changelog（本次更新）
 
 - 新增 Service Cards：
@@ -623,3 +645,4 @@
 - 本轮补充：AI feedback 落库前收敛已落地（默认 1 条主反馈、必要时最多 2 条；同类问题聚合并过滤低价值 INFO 噪音）
   - `Provider Card C` `OpenAIFeedbackProvider`（输入契约切换为 `AiSubmissionAnalysisContext`；仍为占位实现）
 - AI feedback 契约同步：`AiFeedbackProvider.analyzeSubmission` 已统一为 `analyzeSubmission(context: AiSubmissionAnalysisContext)`
+- 本轮新增：`BailianFeedbackProvider`，通过 `AI_FEEDBACK_PROVIDER=bailian` 启用；OpenRouter 保留并继续通过 `AI_FEEDBACK_PROVIDER=openrouter` 启用；两者共用 `openai-compatible-feedback-provider.base.ts` 保持 JSON 协议、重试、超时和错误口径一致。

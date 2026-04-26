@@ -725,7 +725,10 @@ export class ProcessAssessmentService {
       .lean<Array<WithId & { name?: string; studentNo?: string }>>()
       .exec();
 
-    const studentPublicMap = new Map<string, ProcessAssessmentStudentPublicInfo>();
+    const studentPublicMap = new Map<
+      string,
+      ProcessAssessmentStudentPublicInfo
+    >();
     for (const student of students) {
       studentPublicMap.set(
         student._id.toString(),

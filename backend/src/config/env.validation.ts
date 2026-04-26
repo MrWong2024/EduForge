@@ -4,6 +4,7 @@ type EnvValidationInput = {
   AI_FEEDBACK_PROVIDER?: string;
   AI_FEEDBACK_REAL_ENABLED?: string;
   OPENROUTER_API_KEY?: string;
+  BAILIAN_API_KEY?: string;
 } & Record<string, unknown>;
 
 export const envValidationSchema = Joi.object({
@@ -27,7 +28,7 @@ export const envValidationSchema = Joi.object({
     .min(1000)
     .default(5000),
   AI_FEEDBACK_PROVIDER: Joi.string()
-    .valid('stub', 'openrouter')
+    .valid('stub', 'openrouter', 'bailian')
     .default('stub'),
   AI_FEEDBACK_REAL_ENABLED: Joi.string()
     .valid('true', 'false')
@@ -69,6 +70,13 @@ export const envValidationSchema = Joi.object({
   OPENROUTER_MODEL: Joi.string().default('openai/gpt-4o-mini'),
   OPENROUTER_TIMEOUT_MS: Joi.number().integer().min(1000).default(15000),
   OPENROUTER_MAX_RETRIES: Joi.number().integer().min(0).default(2),
+  BAILIAN_API_KEY: Joi.string().allow(''),
+  BAILIAN_BASE_URL: Joi.string()
+    .uri({ scheme: [/https?/] })
+    .default('https://dashscope.aliyuncs.com/compatible-mode/v1'),
+  BAILIAN_MODEL: Joi.string().default('qwen-plus'),
+  BAILIAN_TIMEOUT_MS: Joi.number().integer().min(1000).default(15000),
+  BAILIAN_MAX_RETRIES: Joi.number().integer().min(0).default(2),
 })
   .unknown(true)
   .custom((value: EnvValidationInput, helpers) => {
@@ -77,12 +85,21 @@ export const envValidationSchema = Joi.object({
         ? value.AI_FEEDBACK_PROVIDER.toLowerCase()
         : 'stub';
     const realEnabled = value.AI_FEEDBACK_REAL_ENABLED === 'true';
-    const hasApiKey =
+    const hasOpenRouterApiKey =
       typeof value.OPENROUTER_API_KEY === 'string' &&
       value.OPENROUTER_API_KEY.length > 0;
-    if (provider === 'openrouter' && realEnabled && !hasApiKey) {
-      return helpers.error('any.required', { label: 'OPENROUTER_API_KEY' });
+    const hasBailianApiKey =
+      typeof value.BAILIAN_API_KEY === 'string' &&
+      value.BAILIAN_API_KEY.length > 0;
+    if (provider === 'openrouter' && realEnabled && !hasOpenRouterApiKey) {
+      return helpers.error('any.required', {
+        missingKey: 'OPENROUTER_API_KEY',
+      });
+    }
+    if (provider === 'bailian' && realEnabled && !hasBailianApiKey) {
+      return helpers.error('any.required', { missingKey: 'BAILIAN_API_KEY' });
     }
     return value;
   })
+  .messages({ 'any.required': '{{#missingKey}} is required' })
   .options({ abortEarly: false });
