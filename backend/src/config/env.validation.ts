@@ -67,7 +67,7 @@ export const envValidationSchema = Joi.object({
     .uri({ scheme: [/https?/] })
     .default('https://eduforge.local'),
   OPENROUTER_X_TITLE: Joi.string().default('EduForge'),
-  OPENROUTER_MODEL: Joi.string().default('openai/gpt-4o-mini'),
+  OPENROUTER_MODEL: Joi.string().default('openrouter/free'),
   OPENROUTER_TIMEOUT_MS: Joi.number().integer().min(1000).default(15000),
   OPENROUTER_MAX_RETRIES: Joi.number().integer().min(0).default(2),
   BAILIAN_API_KEY: Joi.string().allow(''),
