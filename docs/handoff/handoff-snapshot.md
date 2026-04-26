@@ -218,7 +218,7 @@ AI Provider 错误码（`ai-feedback-provider.error-codes.ts`）：
 
 来源：
 - `ai-feedback-json.protocol.ts`
-- `openrouter-feedback.prompt.ts`
+- `ai-feedback.prompt.ts`
 - `openrouter-feedback.provider.ts`
 
 规则摘要：

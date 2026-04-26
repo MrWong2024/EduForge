@@ -1,7 +1,4 @@
-import {
-  buildSystemPrompt,
-  buildUserPrompt,
-} from './openrouter-feedback.prompt';
+import { buildSystemPrompt, buildUserPrompt } from './ai-feedback.prompt';
 
 describe('openrouter-feedback prompt constraints', () => {
   it('includes hard cardinality, merge and anti-noise constraints in system prompt', () => {

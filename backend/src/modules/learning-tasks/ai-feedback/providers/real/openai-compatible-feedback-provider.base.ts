@@ -21,7 +21,7 @@ import {
 import {
   buildSystemPrompt,
   buildUserPrompt,
-} from '../../prompts/openrouter-feedback.prompt';
+} from '../../prompts/ai-feedback.prompt';
 import { AI_FEEDBACK_JSON_PROTOCOL } from '../../protocol/ai-feedback-json.protocol';
 
 type OpenAiCompatibleChatResponse = {
