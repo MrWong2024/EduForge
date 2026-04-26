@@ -38,7 +38,7 @@
 | `AI_FEEDBACK_MAX_PER_CLASSROOMTASK_PER_MINUTE` | `30` | Joi | 每 `classroomTaskId` 的本地软限流。 |
 | `AI_FEEDBACK_AUTO_ON_SUBMIT` | `true` | Joi | 提交后是否自动尝试创建 AI Job。 |
 | `AI_FEEDBACK_AUTO_ON_FIRST_ATTEMPT_ONLY` | `true` | Joi | 自动入队是否仅限首提（attemptNo=1）。 |
-| `AI_FEEDBACK_MAX_ITEMS` | `20` | Joi | 每次保存反馈条目上限。 |
+| `AI_FEEDBACK_MAX_ITEMS` | `2` | Joi | 每次保存反馈条目上限；允许范围 `1..10`。 |
 | `LEARNING_TASK_SUBMISSION_COOLDOWN_MS` | `300000` | Joi | 学生提交冷却窗口（ms）；按同一 student + classroomTask 判定，`0` 表示关闭冷却。 |
 | `AI_FEEDBACK_DEBUG_ENABLED` | `false` | Joi | debug/ops 路由门禁。 |
 | `AUTHZ_ENFORCE_ROLES` | `true` | Joi | 是否强制 `RolesGuard` 执行。 |
@@ -137,7 +137,7 @@ debug/ops 门禁口径（与当前实现一致）：
 |---|---|---|---|---|
 | 并发信号量 | `AI_FEEDBACK_MAX_CONCURRENCY` | `2` | `1..20` | `2..6` |
 | 软限流（按 classroomTask） | `AI_FEEDBACK_MAX_PER_CLASSROOMTASK_PER_MINUTE` | `30` | `1..600` | `20..120` |
-| 单次落库上限 | `AI_FEEDBACK_MAX_ITEMS` | `20` | `1..100` | `10..30` |
+| 单次落库上限 | `AI_FEEDBACK_MAX_ITEMS` | `2` | `1..10` | `1..2` |
 | 上游超时 | `OPENROUTER_TIMEOUT_MS` | `15000` | `>=1000` | `10000..30000` |
 | provider 重试 | `OPENROUTER_MAX_RETRIES` | `2` | `>=0` | `1..3` |
 | 百炼上游超时 | `BAILIAN_TIMEOUT_MS` | `15000` | `>=1000` | `10000..30000` |
