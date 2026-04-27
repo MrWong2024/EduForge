@@ -28,7 +28,11 @@ type CreatedTaskResponse = { id: string };
 type CreatedClassroomTaskResponse = { id: string };
 type CreatedSubmissionResponse = { id: string; attemptNo: number };
 type SubmissionCooldownResponse = {
+  statusCode: 429;
   code: 'SUBMISSION_COOLDOWN_ACTIVE';
+  message: string;
+  cooldownMs: number;
+  cooldownSeconds: number;
   retryAfterMs: number;
   retryAfterSeconds: number;
 };
@@ -296,6 +300,7 @@ describe('Classroom Task Submission Cooldown (e2e)', () => {
   });
 
   it('rejects immediate second submission by default and allows retry after cooldown window', async () => {
+    configService.set('LEARNING_TASK_SUBMISSION_COOLDOWN_MS', 300000);
     const classroomTaskId = await createPublishedClassroomTask();
 
     const firstSubmission = await submitToClassroomTask(
@@ -314,11 +319,17 @@ describe('Classroom Task Submission Cooldown (e2e)', () => {
     const rejectedBody = rejected.body as SubmissionCooldownResponse;
 
     expect(rejected.status).toBe(429);
+    expect(rejectedBody.statusCode).toBe(429);
     expect(rejectedBody.code).toBe('SUBMISSION_COOLDOWN_ACTIVE');
+    expect(rejectedBody.cooldownMs).toBe(300000);
+    expect(rejectedBody.cooldownSeconds).toBe(300);
     expect(typeof rejectedBody.retryAfterMs).toBe('number');
     expect(rejectedBody.retryAfterMs).toBeGreaterThan(0);
     expect(typeof rejectedBody.retryAfterSeconds).toBe('number');
     expect(rejectedBody.retryAfterSeconds).toBeGreaterThan(0);
+    expect(rejectedBody.message).toBe(
+      `提交过于频繁。当前设置的提交冷却时间为 300 秒，请约 ${rejectedBody.retryAfterSeconds} 秒后再试。`,
+    );
 
     await submissionModel
       .findByIdAndUpdate(firstBody.id, {

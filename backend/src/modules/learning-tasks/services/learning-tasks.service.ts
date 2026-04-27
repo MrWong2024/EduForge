@@ -861,11 +861,14 @@ export class LearningTasksService {
 
     const retryAfterMs = Math.max(1, cooldownMs - elapsedMs);
     const retryAfterSeconds = Math.ceil(retryAfterMs / 1000);
+    const cooldownSeconds = Math.ceil(cooldownMs / 1000);
     throw new HttpException(
       {
         statusCode: 429,
         code: LearningTasksService.SUBMISSION_COOLDOWN_ACTIVE_CODE,
-        message: 'Submission is too frequent. Please wait before retrying.',
+        message: `提交过于频繁。当前设置的提交冷却时间为 ${cooldownSeconds} 秒，请约 ${retryAfterSeconds} 秒后再试。`,
+        cooldownMs,
+        cooldownSeconds,
         retryAfterMs,
         retryAfterSeconds,
       },
