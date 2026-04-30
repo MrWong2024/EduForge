@@ -262,7 +262,7 @@ AI Provider 错误码（`ai-feedback-provider.error-codes.ts`）：
 |---|---|---|
 | Stub Provider | `default-stub-ai-feedback.provider.ts` | 已适配统一契约 `analyzeSubmission(context: AiSubmissionAnalysisContext)`；仍仅基于 `context.codeText` 走本地规则，英文输出与规则行为不变 |
 | OpenRouter Provider | `providers/real/openrouter-feedback.provider.ts` | 已接收 `AiSubmissionAnalysisContext`；prompt 纳入 `taskTitle/taskDescription/taskRubric/codeText` 等上下文；默认要求反馈文本（`message/suggestion`）使用简体中文，并以“主问题导向综合反馈”为主控（默认 1 条、仅独立问题允许第 2 条、同类问题禁止按位置拆条）；空数组仅在“确实无任何可反馈/可建议内容”时允许，基本正确但可改进仍返回 1 条综合反馈；`language` 仅视为 hint，若 hint 缺失/auto/unknown 或与代码冲突，优先依据代码特征判断语言；provider 协议层对 `items` 执行 `<=2` 闸门；外部 AI 调用 + 严格 JSON 解析 |
-| Bailian Provider | `providers/real/bailian-feedback.provider.ts` | 新增阿里云百炼 provider，通过 `AI_FEEDBACK_PROVIDER=bailian` 启用；默认 `BAILIAN_BASE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1`、`BAILIAN_MODEL=qwen-plus`；走 OpenAI Chat Completions 兼容接口 `/chat/completions`；复用 OpenAI-compatible 基类中的 prompt、严格 JSON 协议、字段白名单、`<=2` 闸门、重试、超时和错误映射；日志 provider 字段为 `bailian` |
+| Bailian Provider | `providers/real/bailian-feedback.provider.ts` | 新增阿里云百炼 provider，通过 `AI_FEEDBACK_PROVIDER=bailian` 启用；默认 `BAILIAN_BASE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1`、`BAILIAN_MODEL=qwen-plus`（生产可显式指定 `qwen3.6-plus`）；走 OpenAI Chat Completions 兼容接口 `/chat/completions`；复用 OpenAI-compatible 基类中的 prompt、严格 JSON 协议、字段白名单、`<=2` 闸门、重试、超时和错误映射；日志 provider 字段为 `bailian` |
 | OpenAI Provider（占位） | `providers/real/openai-feedback.provider.ts` | 已同步统一 context 契约签名，但仍为占位实现（调用直接抛未实现错误） |
 
 ## 4) 关键链路概览（隔离口径）

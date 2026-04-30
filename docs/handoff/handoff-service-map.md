@@ -611,7 +611,7 @@
   - `analyzeSubmission(context: AiSubmissionAnalysisContext): Promise<AiFeedbackItem[]> — called by processor when provider=bailian`
 - AuthZ Boundary: `internal-only`
 - Metrics/Isolation: 日志带 `submissionId/classroomTaskId/provider=bailian/model/duration/retried`
-- Consistency/Constraints: 走阿里云百炼 OpenAI Chat Completions 兼容接口；默认 `BAILIAN_BASE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1`、`BAILIAN_MODEL=qwen-plus`；复用 OpenAI-compatible 基类中的 prompt、严格 JSON 协议、字段白名单、`<=2` 协议闸门、指数退避、超时与错误映射；不发送 OpenRouter 专属 `HTTP-Referer/X-Title` 请求头
+- Consistency/Constraints: 走阿里云百炼 OpenAI Chat Completions 兼容接口；默认 `BAILIAN_BASE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1`、`BAILIAN_MODEL=qwen-plus`（生产可显式指定 `qwen3.6-plus`）；复用 OpenAI-compatible 基类中的 prompt、严格 JSON 协议、字段白名单、`<=2` 协议闸门、指数退避、超时与错误映射；不发送 OpenRouter 专属 `HTTP-Referer/X-Title` 请求头
 - Deps/Side Effects: `ConfigService`, `fetch` 外部网络调用、prompt/protocol/normalizer
 - Performance Notes: 单请求超时控制 + 有界重试；解析失败直接终止
 - SoT: `backend/src/modules/learning-tasks/ai-feedback/providers/real/bailian-feedback.provider.ts`; `backend/src/modules/learning-tasks/ai-feedback/providers/real/openai-compatible-feedback-provider.base.ts`; `backend/src/modules/learning-tasks/ai-feedback/protocol/ai-feedback-json.protocol.ts`; `backend/src/modules/learning-tasks/ai-feedback/prompts/ai-feedback.prompt.ts`

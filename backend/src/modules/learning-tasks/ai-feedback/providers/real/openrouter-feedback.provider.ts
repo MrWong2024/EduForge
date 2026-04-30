@@ -12,10 +12,10 @@ type OpenRouterConfig = OpenAiCompatibleProviderConfig & {
 
 const DEFAULT_BASE_URL = 'https://openrouter.ai/api/v1';
 const DEFAULT_MODEL = '';
-const DEFAULT_TIMEOUT_MS = 15000;
-const DEFAULT_MAX_RETRIES = 2;
+const DEFAULT_TIMEOUT_MS = 90000;
+const DEFAULT_MAX_RETRIES = 1;
 const DEFAULT_MAX_CODE_CHARS = 12000;
-const DEFAULT_MAX_ITEMS = 20;
+const DEFAULT_MAX_ITEMS = 2;
 const DEFAULT_REFERER = 'https://eduforge.local';
 const DEFAULT_TITLE = 'EduForge';
 

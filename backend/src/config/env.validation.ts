@@ -68,15 +68,15 @@ export const envValidationSchema = Joi.object({
     .default('https://eduforge.local'),
   OPENROUTER_X_TITLE: Joi.string().default('EduForge'),
   OPENROUTER_MODEL: Joi.string().default('openrouter/free'),
-  OPENROUTER_TIMEOUT_MS: Joi.number().integer().min(1000).default(15000),
-  OPENROUTER_MAX_RETRIES: Joi.number().integer().min(0).default(2),
+  OPENROUTER_TIMEOUT_MS: Joi.number().integer().min(1000).default(90000),
+  OPENROUTER_MAX_RETRIES: Joi.number().integer().min(0).default(1),
   BAILIAN_API_KEY: Joi.string().allow(''),
   BAILIAN_BASE_URL: Joi.string()
     .uri({ scheme: [/https?/] })
     .default('https://dashscope.aliyuncs.com/compatible-mode/v1'),
   BAILIAN_MODEL: Joi.string().default('qwen-plus'),
-  BAILIAN_TIMEOUT_MS: Joi.number().integer().min(1000).default(15000),
-  BAILIAN_MAX_RETRIES: Joi.number().integer().min(0).default(2),
+  BAILIAN_TIMEOUT_MS: Joi.number().integer().min(1000).default(90000),
+  BAILIAN_MAX_RETRIES: Joi.number().integer().min(0).default(1),
 })
   .unknown(true)
   .custom((value: EnvValidationInput, helpers) => {

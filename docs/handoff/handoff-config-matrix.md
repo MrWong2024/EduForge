@@ -13,12 +13,12 @@
 |---|---|---|---|---|---|
 | Stub | `worker` | 本地开发/不触网，后台持续消费 | `MONGO_URI`、`AI_FEEDBACK_PROVIDER=stub`、`AI_FEEDBACK_REAL_ENABLED=false`、`AI_FEEDBACK_WORKER_ENABLED=true` | `AI_FEEDBACK_WORKER_INTERVAL_MS=10000`、`AI_FEEDBACK_WORKER_BATCH_SIZE=5`（未设时走 processor 默认） | 默认不触发外部 AI。 |
 | Stub | `process-once` | 本地排障，一次性处理一批 | `MONGO_URI`、`AI_FEEDBACK_PROVIDER=stub`、`AI_FEEDBACK_REAL_ENABLED=false`、`AI_FEEDBACK_DEBUG_ENABLED=true` | `AI_FEEDBACK_WORKER_ENABLED=false` | 调 `POST /api/learning-tasks/ai-feedback/jobs/process-once`；debug 关闭时返回 `404`（不是 `403`）。 |
-| Mock OpenRouter（E2E） | `worker` | CI/联调仿真 real provider | `MONGO_URI`、`AI_FEEDBACK_PROVIDER=openrouter`、`AI_FEEDBACK_REAL_ENABLED=true`、`OPENROUTER_API_KEY=test-key`、`OPENROUTER_BASE_URL=http://127.0.0.1:<port>`、`AI_FEEDBACK_WORKER_ENABLED=true` | `OPENROUTER_MODEL=openai/gpt-4o-mini`、`OPENROUTER_TIMEOUT_MS=15000`、`OPENROUTER_MAX_RETRIES=2`、worker 两项同上 | 可配本地 mock server。 |
+| Mock OpenRouter（E2E） | `worker` | CI/联调仿真 real provider | `MONGO_URI`、`AI_FEEDBACK_PROVIDER=openrouter`、`AI_FEEDBACK_REAL_ENABLED=true`、`OPENROUTER_API_KEY=test-key`、`OPENROUTER_BASE_URL=http://127.0.0.1:<port>`、`AI_FEEDBACK_WORKER_ENABLED=true` | `OPENROUTER_MODEL=openrouter/free`、`OPENROUTER_TIMEOUT_MS=90000`、`OPENROUTER_MAX_RETRIES=1`、worker 两项同上 | 可配本地 mock server。 |
 | Mock OpenRouter（E2E） | `process-once` | CI/联调排障，一次性处理 | `MONGO_URI`、`AI_FEEDBACK_PROVIDER=openrouter`、`AI_FEEDBACK_REAL_ENABLED=true`、`OPENROUTER_API_KEY=test-key`、`OPENROUTER_BASE_URL=http://127.0.0.1:<port>`、`AI_FEEDBACK_DEBUG_ENABLED=true` | 同 mock openrouter 默认项 | 调 `POST /api/learning-tasks/ai-feedback/jobs/process-once`；debug 关闭时返回 `404`。 |
 | Real OpenRouter | `worker` | 真实上游持续消费 | `MONGO_URI`、`AI_FEEDBACK_PROVIDER=openrouter`、`AI_FEEDBACK_REAL_ENABLED=true`、`OPENROUTER_API_KEY=<real>`、`AI_FEEDBACK_WORKER_ENABLED=true` | `OPENROUTER_BASE_URL=https://openrouter.ai/api/v1`、worker 两项同上 | 缺 key 会在 env 校验阶段 fail-fast。 |
 | Real OpenRouter | `process-once` | 真实上游手工批处理排障 | `MONGO_URI`、`AI_FEEDBACK_PROVIDER=openrouter`、`AI_FEEDBACK_REAL_ENABLED=true`、`OPENROUTER_API_KEY=<real>`、`AI_FEEDBACK_DEBUG_ENABLED=true` | `OPENROUTER_BASE_URL=https://openrouter.ai/api/v1` | 调 `POST /api/learning-tasks/ai-feedback/jobs/process-once`；debug 关闭时返回 `404`。 |
-| Real Bailian（阿里云百炼） | `worker` | 真实上游持续消费 | `MONGO_URI`、`AI_FEEDBACK_PROVIDER=bailian`、`AI_FEEDBACK_REAL_ENABLED=true`、`BAILIAN_API_KEY=<real>`、`AI_FEEDBACK_WORKER_ENABLED=true` | `BAILIAN_BASE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1`、`BAILIAN_MODEL=qwen-plus`、`BAILIAN_TIMEOUT_MS=15000`、`BAILIAN_MAX_RETRIES=2`、worker 两项同上 | 走 OpenAI Chat Completions 兼容接口；缺 key 会在 env 校验阶段 fail-fast。 |
-| Real Bailian（阿里云百炼） | `process-once` | 真实上游手工批处理排障 | `MONGO_URI`、`AI_FEEDBACK_PROVIDER=bailian`、`AI_FEEDBACK_REAL_ENABLED=true`、`BAILIAN_API_KEY=<real>`、`AI_FEEDBACK_DEBUG_ENABLED=true` | `BAILIAN_BASE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1`、`BAILIAN_MODEL=qwen-plus` | 调 `POST /api/learning-tasks/ai-feedback/jobs/process-once`；debug 关闭时返回 `404`。 |
+| Real Bailian（阿里云百炼） | `worker` | 真实上游持续消费 | `MONGO_URI`、`AI_FEEDBACK_PROVIDER=bailian`、`AI_FEEDBACK_REAL_ENABLED=true`、`BAILIAN_API_KEY=<real>`、`AI_FEEDBACK_WORKER_ENABLED=true` | `BAILIAN_BASE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1`、`BAILIAN_MODEL=qwen-plus`（代码默认；生产可显式指定 `qwen3.6-plus`）、`BAILIAN_TIMEOUT_MS=90000`、`BAILIAN_MAX_RETRIES=1`、worker 两项同上 | 走 OpenAI Chat Completions 兼容接口；缺 key 会在 env 校验阶段 fail-fast。 |
+| Real Bailian（阿里云百炼） | `process-once` | 真实上游手工批处理排障 | `MONGO_URI`、`AI_FEEDBACK_PROVIDER=bailian`、`AI_FEEDBACK_REAL_ENABLED=true`、`BAILIAN_API_KEY=<real>`、`AI_FEEDBACK_DEBUG_ENABLED=true` | `BAILIAN_BASE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1`、`BAILIAN_MODEL=qwen-plus`（代码默认；生产可显式指定 `qwen3.6-plus`） | 调 `POST /api/learning-tasks/ai-feedback/jobs/process-once`；debug 关闭时返回 `404`。 |
 
 补充门禁说明：
 - `process-once` 属于 debug/ops 门禁路由：需登录 + RBAC（teacher）+ `AI_FEEDBACK_DEBUG_ENABLED=true`；否则按现实现返回 `404`。
@@ -45,14 +45,14 @@
 | `OPENROUTER_BASE_URL` | `https://openrouter.ai/api/v1` | Joi | OpenRouter 基础地址。 |
 | `OPENROUTER_HTTP_REFERER` | `https://eduforge.local` | Joi | 上游请求头。 |
 | `OPENROUTER_X_TITLE` | `EduForge` | Joi | 上游请求头。 |
-| `OPENROUTER_MODEL` | `openai/gpt-4o-mini` | Joi | 模型名。 |
-| `OPENROUTER_TIMEOUT_MS` | `15000` | Joi | 上游超时（ms）。 |
-| `OPENROUTER_MAX_RETRIES` | `2` | Joi | provider 重试次数。 |
+| `OPENROUTER_MODEL` | `openrouter/free` | Joi | 模型名。 |
+| `OPENROUTER_TIMEOUT_MS` | `90000` | Joi | 上游超时（ms）。 |
+| `OPENROUTER_MAX_RETRIES` | `1` | Joi | provider 重试次数。 |
 | `BAILIAN_API_KEY` | 无 | Joi | 百炼 API Key；仅 `bailian + real enabled` 必填。 |
 | `BAILIAN_BASE_URL` | `https://dashscope.aliyuncs.com/compatible-mode/v1` | Joi | 阿里云百炼大陆站 OpenAI-compatible 基础地址。 |
-| `BAILIAN_MODEL` | `qwen-plus` | Joi | 百炼模型名。 |
-| `BAILIAN_TIMEOUT_MS` | `15000` | Joi | 百炼上游超时（ms）。 |
-| `BAILIAN_MAX_RETRIES` | `2` | Joi | 百炼 provider 重试次数。 |
+| `BAILIAN_MODEL` | `qwen-plus` | Joi | 百炼模型名；生产可显式指定 `qwen3.6-plus` 或后续新版本。 |
+| `BAILIAN_TIMEOUT_MS` | `90000` | Joi | 百炼上游超时（ms）。 |
+| `BAILIAN_MAX_RETRIES` | `1` | Joi | 百炼 provider 重试次数。 |
 | `AI_FEEDBACK_WORKER_ENABLED` | `false` | Worker 源码（`ai-feedback-worker.service.ts`） | `true` 才启动常驻轮询；默认关闭。 |
 | `AI_FEEDBACK_WORKER_INTERVAL_MS` | `10000` | Worker 源码（`ai-feedback-worker.service.ts`） | 轮询间隔（ms）；非法值回退默认。 |
 | `AI_FEEDBACK_WORKER_BATCH_SIZE` | `5` | Processor 源码（`ai-feedback-processor.service.ts`） | 每 tick 批次；未设置或非法值时走 `processOnce()` 默认批次 `5`。 |
@@ -70,7 +70,7 @@ $env:AI_FEEDBACK_WORKER_ENABLED="true"
 $env:BAILIAN_API_KEY_REAL="你的百炼Key"
 $env:BAILIAN_API_KEY = $env:BAILIAN_API_KEY_REAL
 $env:BAILIAN_BASE_URL="https://dashscope.aliyuncs.com/compatible-mode/v1"
-$env:BAILIAN_MODEL="qwen-plus"
+$env:BAILIAN_MODEL="qwen3.6-plus"
 ```
 
 ### 2.1 AI 入队触发策略（attempt-based）组合语义
@@ -138,10 +138,10 @@ debug/ops 门禁口径（与当前实现一致）：
 | 并发信号量 | `AI_FEEDBACK_MAX_CONCURRENCY` | `2` | `1..20` | `2..6` |
 | 软限流（按 classroomTask） | `AI_FEEDBACK_MAX_PER_CLASSROOMTASK_PER_MINUTE` | `30` | `1..600` | `20..120` |
 | 单次落库上限 | `AI_FEEDBACK_MAX_ITEMS` | `2` | `1..10` | `1..2` |
-| 上游超时 | `OPENROUTER_TIMEOUT_MS` | `15000` | `>=1000` | `10000..30000` |
-| provider 重试 | `OPENROUTER_MAX_RETRIES` | `2` | `>=0` | `1..3` |
-| 百炼上游超时 | `BAILIAN_TIMEOUT_MS` | `15000` | `>=1000` | `10000..30000` |
-| 百炼 provider 重试 | `BAILIAN_MAX_RETRIES` | `2` | `>=0` | `1..3` |
+| 上游超时 | `OPENROUTER_TIMEOUT_MS` | `90000` | `>=1000` | `60000..120000` |
+| provider 重试 | `OPENROUTER_MAX_RETRIES` | `1` | `>=0` | `0..1` |
+| 百炼上游超时 | `BAILIAN_TIMEOUT_MS` | `90000` | `>=1000` | `60000..120000` |
+| 百炼 provider 重试 | `BAILIAN_MAX_RETRIES` | `1` | `>=0` | `0..1` |
 | 代码截断上限 | `AI_FEEDBACK_MAX_CODE_CHARS` | `12000` | `500..200000` | `8000..30000` |
 
 补充（worker 专属）：
