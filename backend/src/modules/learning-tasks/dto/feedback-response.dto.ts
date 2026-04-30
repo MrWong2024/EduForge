@@ -7,6 +7,7 @@ import {
 export class FeedbackResponseDto {
   id!: string;
   submissionId!: string;
+  createdBy?: string;
   source!: FeedbackSource;
   type!: FeedbackType;
   severity!: FeedbackSeverity;

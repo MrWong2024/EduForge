@@ -12,7 +12,7 @@ import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import { Task, TaskStatus } from '../schemas/task.schema';
 import { Submission, SubmissionStatus } from '../schemas/submission.schema';
-import { Feedback } from '../schemas/feedback.schema';
+import { Feedback, FeedbackSource } from '../schemas/feedback.schema';
 import { ClassroomTask } from '../../classrooms/classroom-tasks/schemas/classroom-task.schema';
 import { Classroom } from '../../classrooms/schemas/classroom.schema';
 import { User } from '../../users/schemas/user.schema';
@@ -21,6 +21,7 @@ import { UpdateTaskDto } from '../dto/update-task.dto';
 import { QueryTaskDto } from '../dto/query-task.dto';
 import { CreateSubmissionDto } from '../dto/create-submission.dto';
 import { CreateFeedbackDto } from '../dto/create-feedback.dto';
+import { UpdateFeedbackDto } from '../dto/update-feedback.dto';
 import { RequestAiFeedbackDto } from '../dto/request-ai-feedback.dto';
 import { TaskResponseDto } from '../dto/task-response.dto';
 import { SubmissionResponseDto } from '../dto/submission-response.dto';
@@ -406,23 +407,98 @@ export class LearningTasksService {
     if (!submission) {
       throw new NotFoundException('Submission not found');
     }
-    const task = await this.taskModel
-      .findById(submission.taskId)
-      .lean<TaskWithMeta>()
-      .exec();
-    if (!task) {
-      throw new NotFoundException('Task not found');
-    }
-    if (task.createdBy.toString() !== userId) {
-      throw new ForbiddenException('Not allowed to add feedback');
-    }
+    const { task, classroomTask } =
+      await this.loadSubmissionAuthContext(submission);
+    await this.ensureTeacherCanManageSubmission(
+      submission,
+      task,
+      classroomTask,
+      userId,
+      'Not allowed to add feedback',
+    );
 
     const normalizedTags = this.normalizeTeacherFeedbackTags(dto.tags);
     const feedback = await this.feedbackModel.create({
       submissionId: new Types.ObjectId(submissionId),
       ...dto,
+      createdBy:
+        dto.source === FeedbackSource.Teacher
+          ? new Types.ObjectId(userId)
+          : undefined,
       tags: normalizedTags,
     });
+    return this.toFeedbackResponse(feedback as FeedbackWithMeta);
+  }
+
+  async updateFeedback(
+    submissionId: string,
+    feedbackId: string,
+    dto: UpdateFeedbackDto,
+    userId: string,
+  ) {
+    if (!this.hasFeedbackUpdateFields(dto)) {
+      throw new BadRequestException('At least one feedback field is required');
+    }
+    if (dto.message !== undefined && dto.message.length === 0) {
+      throw new BadRequestException('message should not be empty');
+    }
+
+    const submission = await this.submissionModel
+      .findById(submissionId)
+      .lean<SubmissionWithMeta>()
+      .exec();
+    if (!submission) {
+      throw new NotFoundException('Submission not found');
+    }
+
+    const feedback = await this.feedbackModel.findById(feedbackId).exec();
+    if (!feedback) {
+      throw new NotFoundException('Feedback not found');
+    }
+    if (feedback.submissionId.toString() !== submissionId) {
+      throw new NotFoundException('Feedback not found');
+    }
+
+    const { task, classroomTask } =
+      await this.loadSubmissionAuthContext(submission);
+    await this.ensureTeacherCanManageSubmission(
+      submission,
+      task,
+      classroomTask,
+      userId,
+      'Not allowed to update feedback',
+    );
+
+    if (feedback.source !== FeedbackSource.Teacher) {
+      throw new ForbiddenException('Only teacher feedback can be updated');
+    }
+    if (feedback.createdBy && feedback.createdBy.toString() !== userId) {
+      throw new ForbiddenException('Not allowed to update feedback');
+    }
+
+    if (dto.type !== undefined) {
+      feedback.type = dto.type;
+    }
+    if (dto.severity !== undefined) {
+      feedback.severity = dto.severity;
+    }
+    if (dto.message !== undefined) {
+      feedback.message = dto.message;
+    }
+    if (dto.suggestion !== undefined) {
+      feedback.suggestion = dto.suggestion;
+    }
+    if (dto.tags !== undefined) {
+      feedback.tags = this.normalizeTeacherFeedbackTags(dto.tags);
+    }
+    if (dto.scoreHint !== undefined) {
+      feedback.scoreHint = dto.scoreHint;
+    }
+    if (!feedback.createdBy) {
+      feedback.createdBy = new Types.ObjectId(userId);
+    }
+
+    await feedback.save();
     return this.toFeedbackResponse(feedback as FeedbackWithMeta);
   }
 
@@ -434,17 +510,17 @@ export class LearningTasksService {
     if (!submission) {
       throw new NotFoundException('Submission not found');
     }
-    const task = await this.taskModel
-      .findById(submission.taskId)
-      .lean<TaskWithMeta>()
-      .exec();
-    if (!task) {
-      throw new NotFoundException('Task not found');
-    }
+    const { task, classroomTask } =
+      await this.loadSubmissionAuthContext(submission);
     const isOwner = submission.studentId.toString() === userId;
-    const isTeacher = task.createdBy.toString() === userId;
-    if (!isOwner && !isTeacher) {
-      throw new ForbiddenException('Not allowed to view feedback');
+    if (!isOwner) {
+      await this.ensureTeacherCanManageSubmission(
+        submission,
+        task,
+        classroomTask,
+        userId,
+        'Not allowed to view feedback',
+      );
     }
 
     const feedback = await this.feedbackModel
@@ -927,6 +1003,22 @@ export class LearningTasksService {
     classroomTask: ClassroomTaskWithClassroom | null,
     userId: string,
   ) {
+    await this.ensureTeacherCanManageSubmission(
+      submission,
+      task,
+      classroomTask,
+      userId,
+      'Not allowed to view submission detail',
+    );
+  }
+
+  private async ensureTeacherCanManageSubmission(
+    submission: SubmissionWithMeta,
+    task: SubmissionDetailTaskLean,
+    classroomTask: ClassroomTaskWithClassroom | null,
+    userId: string,
+    deniedMessage: string,
+  ) {
     if (submission.classroomTaskId) {
       if (!classroomTask) {
         throw new NotFoundException('Classroom task not found');
@@ -940,14 +1032,46 @@ export class LearningTasksService {
         throw new NotFoundException('Classroom not found');
       }
       if (classroom.teacherId.toString() !== userId) {
-        throw new ForbiddenException('Not allowed to view submission detail');
+        throw new ForbiddenException(deniedMessage);
       }
       return;
     }
 
     if (task.createdBy.toString() !== userId) {
-      throw new ForbiddenException('Not allowed to view submission detail');
+      throw new ForbiddenException(deniedMessage);
     }
+  }
+
+  private async loadSubmissionAuthContext(submission: SubmissionWithMeta) {
+    const [task, classroomTask] = await Promise.all([
+      this.taskModel
+        .findById(submission.taskId)
+        .select('_id title createdBy')
+        .lean<SubmissionDetailTaskLean>()
+        .exec(),
+      submission.classroomTaskId
+        ? this.classroomTaskModel
+            .findById(submission.classroomTaskId)
+            .select('_id classroomId')
+            .lean<ClassroomTaskWithClassroom>()
+            .exec()
+        : Promise.resolve(null),
+    ]);
+    if (!task) {
+      throw new NotFoundException('Task not found');
+    }
+    return { task, classroomTask };
+  }
+
+  private hasFeedbackUpdateFields(dto: UpdateFeedbackDto) {
+    return (
+      dto.type !== undefined ||
+      dto.severity !== undefined ||
+      dto.message !== undefined ||
+      dto.suggestion !== undefined ||
+      dto.tags !== undefined ||
+      dto.scoreHint !== undefined
+    );
   }
 
   private async ensureTeacherCanRequestAiFeedback(
@@ -1005,6 +1129,7 @@ export class LearningTasksService {
     return {
       id: feedback._id.toString(),
       submissionId: feedback.submissionId.toString(),
+      createdBy: feedback.createdBy ? feedback.createdBy.toString() : undefined,
       source: feedback.source,
       type: feedback.type,
       severity: feedback.severity,

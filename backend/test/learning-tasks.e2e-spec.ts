@@ -38,7 +38,13 @@ type CreatedSubmissionResponse = {
 
 type CreatedFeedbackResponse = {
   id: string;
+  createdBy?: string;
   message: string;
+  severity?: string;
+  tags?: string[];
+  scoreHint?: number;
+  createdAt?: string;
+  updatedAt?: string;
 };
 type InvalidFeedbackTagsResponse = {
   statusCode: number;
@@ -83,15 +89,21 @@ describe('LearningTasks (e2e)', () => {
   let feedbackModel: Model<Feedback>;
   let aiFeedbackJobModel: Model<AiFeedbackJob>;
   let teacherAgent: ReturnType<typeof request.agent>;
+  let otherTeacherAgent: ReturnType<typeof request.agent>;
   let studentAgent: ReturnType<typeof request.agent>;
 
   let teacherId = '';
+  let otherTeacherId = '';
   let studentId = '';
   let taskId = '';
   let submissionId = '';
   let feedbackId = '';
+  let mismatchedFeedbackId = '';
+  let aiFeedbackId = '';
+  let systemFeedbackId = '';
 
   const teacherEmail = `teacher.${Date.now()}@example.com`;
+  const otherTeacherEmail = `other.teacher.${Date.now()}@example.com`;
   const studentEmail = `student.${Date.now()}@example.com`;
   const teacherPassword = 'TeacherPass123!';
   const studentPassword = 'StudentPass123!';
@@ -126,6 +138,7 @@ describe('LearningTasks (e2e)', () => {
     await app.init();
 
     teacherAgent = request.agent(app.getHttpServer());
+    otherTeacherAgent = request.agent(app.getHttpServer());
     studentAgent = request.agent(app.getHttpServer());
 
     userModel = app.get(getModelToken(User.name));
@@ -136,15 +149,21 @@ describe('LearningTasks (e2e)', () => {
     aiFeedbackJobModel = app.get(getModelToken(AiFeedbackJob.name));
     console.log('[e2e] feedback collection =', feedbackModel.collection.name);
 
-    const [teacherHash, studentHash] = await Promise.all([
+    const [teacherHash, otherTeacherHash, studentHash] = await Promise.all([
+      bcrypt.hash(teacherPassword, 10),
       bcrypt.hash(teacherPassword, 10),
       bcrypt.hash(studentPassword, 10),
     ]);
 
-    const [teacher, student] = await Promise.all([
+    const [teacher, otherTeacher, student] = await Promise.all([
       userModel.create({
         email: teacherEmail,
         passwordHash: teacherHash,
+        roles: ['teacher'],
+      }),
+      userModel.create({
+        email: otherTeacherEmail,
+        passwordHash: otherTeacherHash,
         roles: ['teacher'],
       }),
       userModel.create({
@@ -155,6 +174,7 @@ describe('LearningTasks (e2e)', () => {
     ]);
 
     teacherId = teacher._id.toString();
+    otherTeacherId = otherTeacher._id.toString();
     studentId = student._id.toString();
   });
 
@@ -226,10 +246,16 @@ describe('LearningTasks (e2e)', () => {
     }
 
     const cleanup: Promise<unknown>[] = [];
-    const userIds = [teacherId, studentId].filter(Boolean);
+    const userIds = [teacherId, otherTeacherId, studentId].filter(Boolean);
 
-    if (feedbackId) {
-      cleanup.push(feedbackModel.deleteOne({ _id: feedbackId }));
+    const feedbackIds = [
+      feedbackId,
+      mismatchedFeedbackId,
+      aiFeedbackId,
+      systemFeedbackId,
+    ].filter(Boolean);
+    if (feedbackIds.length > 0) {
+      cleanup.push(feedbackModel.deleteMany({ _id: { $in: feedbackIds } }));
     }
     if (submissionId) {
       cleanup.push(
@@ -256,6 +282,7 @@ describe('LearningTasks (e2e)', () => {
 
   it('teacher creates task, publishes, student submits, teacher feedback, stats', async () => {
     await login(teacherAgent, teacherEmail, teacherPassword);
+    await login(otherTeacherAgent, otherTeacherEmail, teacherPassword);
     await login(studentAgent, studentEmail, studentPassword);
 
     await teacherAgent.get('/api/users/me').expect(200);
@@ -366,6 +393,9 @@ describe('LearningTasks (e2e)', () => {
 
     expect(typeof feedbackBody.id).toBe('string');
     expect(typeof feedbackBody.message).toBe('string');
+    expect(feedbackBody.createdBy).toBe(teacherId);
+    expect(typeof feedbackBody.createdAt).toBe('string');
+    expect(typeof feedbackBody.updatedAt).toBe('string');
     feedbackId = feedbackBody.id;
 
     const persistedFeedback = await feedbackModel
@@ -381,6 +411,125 @@ describe('LearningTasks (e2e)', () => {
     }
     expect(persistedFeedback).toBeTruthy();
     expect(persistedFeedback?.tags).toEqual(['other']);
+    expect(persistedFeedback?.createdBy?.toString()).toBe(teacherId);
+
+    await studentAgent
+      .patch(
+        `/api/learning-tasks/submissions/${submissionId}/feedback/${feedbackId}`,
+      )
+      .send({ message: 'Student cannot update teacher feedback.' })
+      .expect(403);
+
+    await otherTeacherAgent
+      .patch(
+        `/api/learning-tasks/submissions/${submissionId}/feedback/${feedbackId}`,
+      )
+      .send({ message: 'Other teacher cannot update this feedback.' })
+      .expect(403);
+
+    await teacherAgent
+      .patch(
+        `/api/learning-tasks/submissions/${submissionId}/feedback/${feedbackId}`,
+      )
+      .send({})
+      .expect(400);
+
+    await teacherAgent
+      .patch(
+        `/api/learning-tasks/submissions/${submissionId}/feedback/${feedbackId}`,
+      )
+      .send({ message: '' })
+      .expect(400);
+
+    const invalidUpdate = await teacherAgent
+      .patch(
+        `/api/learning-tasks/submissions/${submissionId}/feedback/${feedbackId}`,
+      )
+      .send({ tags: ['not-in-vocabulary'] })
+      .expect(400);
+    expect((invalidUpdate.body as InvalidFeedbackTagsResponse).message).toBe(
+      'Invalid tag(s), please select from predefined tags',
+    );
+
+    const mismatchedFeedback = await feedbackModel.create({
+      submissionId: new Types.ObjectId(),
+      source: 'TEACHER',
+      type: 'STYLE',
+      severity: 'WARN',
+      message: `Mismatched feedback ${Date.now()}`,
+      tags: ['other'],
+    });
+    mismatchedFeedbackId = mismatchedFeedback._id.toString();
+    await teacherAgent
+      .patch(
+        `/api/learning-tasks/submissions/${submissionId}/feedback/${mismatchedFeedbackId}`,
+      )
+      .send({ message: 'Should not reveal cross-submission feedback.' })
+      .expect(404);
+
+    const [aiFeedback, systemFeedback] = await Promise.all([
+      feedbackModel.create({
+        submissionId: new Types.ObjectId(submissionId),
+        source: 'AI',
+        type: 'BUG',
+        severity: 'ERROR',
+        message: `AI readonly feedback ${Date.now()}`,
+        tags: ['logic'],
+      }),
+      feedbackModel.create({
+        submissionId: new Types.ObjectId(submissionId),
+        source: 'SYSTEM',
+        type: 'OTHER',
+        severity: 'INFO',
+        message: `System readonly feedback ${Date.now()}`,
+        tags: ['other'],
+      }),
+    ]);
+    aiFeedbackId = aiFeedback._id.toString();
+    systemFeedbackId = systemFeedback._id.toString();
+
+    const aiUpdate = await teacherAgent
+      .patch(
+        `/api/learning-tasks/submissions/${submissionId}/feedback/${aiFeedbackId}`,
+      )
+      .send({ message: 'Trying to edit AI feedback.' })
+      .expect(403);
+    expect((aiUpdate.body as InvalidFeedbackTagsResponse).message).toBe(
+      'Only teacher feedback can be updated',
+    );
+
+    const systemUpdate = await teacherAgent
+      .patch(
+        `/api/learning-tasks/submissions/${submissionId}/feedback/${systemFeedbackId}`,
+      )
+      .send({ message: 'Trying to edit system feedback.' })
+      .expect(403);
+    expect((systemUpdate.body as InvalidFeedbackTagsResponse).message).toBe(
+      'Only teacher feedback can be updated',
+    );
+
+    const updatedFeedback = await teacherAgent
+      .patch(
+        `/api/learning-tasks/submissions/${submissionId}/feedback/${feedbackId}`,
+      )
+      .send({
+        message: 'Naming and decomposition should be improved.',
+        severity: 'ERROR',
+        tags: ['readability', 'naming'],
+        scoreHint: 72,
+        suggestion: '',
+      })
+      .expect(200);
+    const updatedFeedbackBody = updatedFeedback.body as CreatedFeedbackResponse;
+    expect(updatedFeedbackBody.id).toBe(feedbackId);
+    expect(updatedFeedbackBody.createdBy).toBe(teacherId);
+    expect(updatedFeedbackBody.message).toBe(
+      'Naming and decomposition should be improved.',
+    );
+    expect(updatedFeedbackBody.severity).toBe('ERROR');
+    expect(updatedFeedbackBody.tags).toEqual(['readability', 'naming']);
+    expect(updatedFeedbackBody.scoreHint).toBe(72);
+    expect(typeof updatedFeedbackBody.updatedAt).toBe('string');
 
     const feedbackList = await teacherAgent
       .get(`/api/learning-tasks/submissions/${submissionId}/feedback`)
@@ -391,6 +540,15 @@ describe('LearningTasks (e2e)', () => {
 
     const listArr = list as unknown[];
     expect(listArr.length).toBeGreaterThanOrEqual(1);
+    const updatedListItem = listArr.find((item) => {
+      const feedback = item as Record<string, unknown>;
+      return feedback.id === feedbackId;
+    }) as CreatedFeedbackResponse | undefined;
+    expect(updatedListItem?.createdBy).toBe(teacherId);
+    expect(updatedListItem?.message).toBe(
+      'Naming and decomposition should be improved.',
+    );
+    expect(typeof updatedListItem?.updatedAt).toBe('string');
 
     const stats = await teacherAgent
       .get(`/api/learning-tasks/tasks/${taskId}/stats`)

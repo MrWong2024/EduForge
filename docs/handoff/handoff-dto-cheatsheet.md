@@ -526,6 +526,44 @@
   "message": "命名可读性需要提升"
 }
 ```
+- Response notes:
+  - 返回单条 feedback response，含 `id/submissionId/source/type/severity/message/suggestion/tags/scoreHint/createdAt/updatedAt`。
+  - 当 `source=TEACHER` 时，新建反馈会写入并返回 `createdBy`。
+
+### PATCH /api/learning-tasks/submissions/:submissionId/feedback/:feedbackId
+
+- Controller & Method: `backend/src/modules/learning-tasks/controllers/learning-tasks.controller.ts` -> `LearningTasksController.updateFeedback`
+- DTO: `UpdateFeedbackDto` (`backend/src/modules/learning-tasks/dto/update-feedback.dto.ts`)
+- Required fields: None（但 service 要求至少传 1 个可更新字段）
+- Allowed fields:
+  - `type?: FeedbackType`
+  - `severity?: FeedbackSeverity`
+  - `message?: string`（空字符串会被拒绝）
+  - `suggestion?: string`（允许空字符串）
+  - `tags?: FeedbackTag[]`（继续走统一词表归一化与白名单校验）
+  - `scoreHint?: number`（0~100）
+- Forbidden fields:
+  - `source/submissionId/createdBy/createdAt/updatedAt` 以及任务、学生、课堂归属字段。
+- Enums:
+  - `type`: `SYNTAX | STYLE | DESIGN | BUG | PERFORMANCE | SECURITY | OTHER`
+  - `severity`: `INFO | WARN | ERROR`
+- Nested structure: None
+- Minimal JSON example:
+
+```json
+{
+  "message": "命名可读性已有改善，但拆分函数会更清晰",
+  "severity": "INFO",
+  "tags": ["readability"],
+  "scoreHint": 86
+}
+```
+
+- Notes:
+  - 仅允许教师修改自己有权管理的 `TEACHER` 来源反馈。
+  - `AI/SYSTEM` 来源反馈只读，返回 `403 Only teacher feedback can be updated`。
+  - 旧 `TEACHER` feedback 缺少 `createdBy` 时，具备 submission 管理权限的教师可更新；更新成功后补写 `createdBy`，不改 `createdAt`。
+  - 返回单条 feedback response，含 `createdBy/createdAt/updatedAt`。
 
 ### POST /api/learning-tasks/submissions/:submissionId/ai-feedback/request
 

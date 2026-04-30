@@ -21,6 +21,7 @@ import { UpdateTaskDto } from '../dto/update-task.dto';
 import { QueryTaskDto } from '../dto/query-task.dto';
 import { CreateSubmissionDto } from '../dto/create-submission.dto';
 import { CreateFeedbackDto } from '../dto/create-feedback.dto';
+import { UpdateFeedbackDto } from '../dto/update-feedback.dto';
 import { RequestAiFeedbackDto } from '../dto/request-ai-feedback.dto';
 import { QueryAiFeedbackJobsDto } from '../dto/query-ai-feedback-jobs.dto';
 import { ProcessAiFeedbackJobsDto } from '../dto/process-ai-feedback-jobs.dto';
@@ -139,6 +140,23 @@ export class LearningTasksController {
     @CurrentUser() user: { id: string },
   ) {
     return this.learningTasksService.createFeedback(submissionId, dto, user.id);
+  }
+
+  @UseGuards(RolesGuard)
+  @Roles(...TEACHER_ROLES)
+  @Patch('submissions/:submissionId/feedback/:feedbackId')
+  updateFeedback(
+    @Param('submissionId') submissionId: string,
+    @Param('feedbackId') feedbackId: string,
+    @Body() dto: UpdateFeedbackDto,
+    @CurrentUser() user: { id: string },
+  ) {
+    return this.learningTasksService.updateFeedback(
+      submissionId,
+      feedbackId,
+      dto,
+      user.id,
+    );
   }
 
   @UseGuards(RolesGuard)

@@ -1,6 +1,7 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
 import { HydratedDocument, Types } from 'mongoose';
 import { Submission } from './submission.schema';
+import { User } from '../../users/schemas/user.schema';
 
 export type FeedbackDocument = HydratedDocument<Feedback>;
 
@@ -30,6 +31,9 @@ export enum FeedbackSeverity {
 export class Feedback {
   @Prop({ type: Types.ObjectId, ref: Submission.name, required: true })
   submissionId!: Types.ObjectId;
+
+  @Prop({ type: Types.ObjectId, ref: User.name })
+  createdBy?: Types.ObjectId;
 
   @Prop({ type: String, required: true, enum: FeedbackSource })
   source!: FeedbackSource;

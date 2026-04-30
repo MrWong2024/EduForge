@@ -168,7 +168,7 @@ backend/
   - “无 job => NOT_REQUESTED” 为正常产品语义。
 
 ### Feedback（`src/modules/learning-tasks/schemas/feedback.schema.ts`）
-- 关键字段：`submissionId`、`source(AI|TEACHER|SYSTEM)`、`type(...)`、`severity(INFO|WARN|ERROR)`、`message`、`suggestion?`、`tags?`、`scoreHint?`。
+- 关键字段：`submissionId`、`createdBy?`、`source(AI|TEACHER|SYSTEM)`、`type(...)`、`severity(INFO|WARN|ERROR)`、`message`、`suggestion?`、`tags?`、`scoreHint?`。
 - 索引/唯一性：`unique(submissionId,source,type,severity,message)`；`(submissionId,createdAt)`；`(submissionId,source,createdAt)`。
 - 隔离字段来源：当前 schema 无 `classroomTaskId` 直连字段；统计隔离通过 `submissionId -> Submission.classroomTaskId` 关联完成。
 
@@ -347,6 +347,11 @@ AI Provider 错误码（`ai-feedback-provider.error-codes.ts`）：
   - `POST /api/learning-tasks/submissions/:id/feedback`
   - `tags` 与 AI feedback 共用统一词表（同 `feedback-normalizer` 词表来源）；包含未定义标签时返回 `400` + `Invalid tag(s), please select from predefined tags`。
   - `tags` 未传或清洗后为空时，后端按 `other` 持久化。
+- 教师反馈修改契约（已完成）：
+  - `PATCH /api/learning-tasks/submissions/:submissionId/feedback/:feedbackId`
+  - 仅 teacher 可调用；教师管理权限与 submission detail 口径一致：有 `classroomTaskId` 时按课堂任务所属班级 owner teacher，缺省时按 task owner teacher。
+  - 仅允许修改 `TEACHER` 来源反馈；`AI/SYSTEM` 反馈保持只读。
+  - `Feedback.createdBy` 为 optional 兼容字段；新建 `TEACHER` 反馈写入当前教师，旧 `TEACHER` 反馈缺失时允许有管理权限的教师更新并补写。
 - AI 默认联调模式（已固化）：
   - 推荐 `Stub + worker`：`AI_FEEDBACK_PROVIDER=stub` 且 `AI_FEEDBACK_WORKER_ENABLED=true`。
   - worker 轮询默认间隔为 `10000ms`（`AI_FEEDBACK_WORKER_INTERVAL_MS` 可覆盖）；空跑 tick（processed/succeeded/failed/dead 全 0）默认不输出结果 DEBUG 日志。

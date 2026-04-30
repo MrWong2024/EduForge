@@ -139,6 +139,7 @@ Notes:
 | GET | `/api/learning-tasks/tasks/:id/submissions` | 教师分页查看某任务提交。 |
 | GET | `/api/learning-tasks/submissions/:id` | 提交详情稳定读源（学生本人或有权教师可见）。 |
 | POST | `/api/learning-tasks/submissions/:id/feedback` | 教师新增反馈（AI/TEACHER/SYSTEM 结构统一）。 |
+| PATCH | `/api/learning-tasks/submissions/:submissionId/feedback/:feedbackId` | 教师修改自己有权管理的 TEACHER 来源反馈。 |
 | GET | `/api/learning-tasks/submissions/:id/feedback` | 提交反馈列表（学生本人或任务教师可见）。 |
 | POST | `/api/learning-tasks/submissions/:submissionId/ai-feedback/request` | 手工触发 AI 入队请求（幂等）。 |
 | GET | `/api/learning-tasks/tasks/:id/stats` | 任务统计（提交数、去重学生数、top tags）。 |
@@ -162,6 +163,8 @@ Notes:
 - `GET /api/learning-tasks/submissions/:id` 权限：学生本人可读；若 `classroomTaskId` 存在，仅该 `classroomTask` 所属班级 owner teacher 可读；若 `classroomTaskId` 为空，仅 `task.createdBy` 对应的 task owner teacher 可读；其他用户返回 `403`；submission 不存在返回 `404`。
 - `GET /api/learning-tasks/submissions/:id` 返回稳定读源字段：`id/taskId/classroomTaskId/studentId/studentName/taskTitle/content.language/content.codeText/submittedAt/attemptNo/isLate/lateBySeconds/aiFeedbackStatus`；不返回 `passwordHash`。
 - `aiFeedbackStatus` 口径：无 job 时显式返回 `NOT_REQUESTED`；`GET /api/learning-tasks/submissions/:id` 允许返回 `content.codeText`，但 `GET /api/classrooms/:classroomId/tasks/:classroomTaskId/submissions` 列表接口仍不返回 `content.codeText`。
+- `PATCH /api/learning-tasks/submissions/:submissionId/feedback/:feedbackId`：teacher only；若 submission 绑定 `classroomTaskId`，仅课堂任务所属班级 owner teacher 可改；未绑定课堂任务时仅 task owner teacher 可改；feedback 不存在或不属于该 submission 返回 `404`；仅允许修改 `source=TEACHER` 的反馈，`AI/SYSTEM` 返回 `403 Only teacher feedback can be updated`；返回单条 feedback response，含 `createdBy/createdAt/updatedAt`。
+- Feedback response 统一返回字段：`id/submissionId/source/type/severity/message/suggestion/tags/scoreHint/createdAt/updatedAt`，教师创建或更新后可返回 `createdBy`；旧数据缺失 `createdBy` 时兼容为缺省。
 
 ## AI Feedback Debug / Ops（门禁接口）
 
