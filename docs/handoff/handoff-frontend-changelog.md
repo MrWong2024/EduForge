@@ -581,9 +581,16 @@
 
 - 【本步解决】教师提交详情页只能新增反馈、无法修改已有教师反馈的问题。
 - 【新增事实 / 已收口口径】`/teacher/submissions/[submissionId]` 已接入 `PATCH learning-tasks/submissions/:submissionId/feedback/:feedbackId`；反馈历史中仅 `source=TEACHER` 且有 `id` 的条目显示“修改”入口，AI/SYSTEM 反馈保持只读。
-- 【交互收口】点击“修改”在当前反馈条目内原地展开编辑表单；支持修改 `type/severity/message/suggestion/tags/scoreHint`；同一时间只展开一个编辑表单；保存成功后 `router.refresh()` 刷新当前页面数据并收起编辑态，取消编辑不丢失页面上下文。
+- 【交互收口】点击“修改”在当前反馈条目内原地展开编辑表单；同一时间只展开一个编辑表单；保存成功后 `router.refresh()` 刷新当前页面数据并收起编辑态，取消编辑不丢失页面上下文。字段开放口径已在 UAT-FE-69 收口。
 - 【错误口径】空 `message` 前端拦截；400 显示“反馈内容不完整或格式不正确，请检查后再保存。”；403 显示“无权限修改该反馈，或该反馈不是可修改的教师反馈。”；404 显示“反馈不存在，可能已被更新或当前提交不匹配，请刷新页面后重试。”；5xx 显示“保存失败，请稍后重试。”。
 - 【边界保持】仅前端接入与 handoff 同步，不改 backend，不新增反馈删除/版本历史/AI 人工改写能力。
+
+## UAT-FE-69
+
+- 【本步解决】新增教师反馈与编辑教师历史反馈字段口径不一致、且 `scoreHint` 容易被误读为正式评分的问题。
+- 【新增事实 / 已收口口径】`TeacherFeedbackForm` 已补齐 `type` 选择；新增与编辑教师反馈的前端操作字段统一为 `type/severity/message/suggestion/tags`。
+- 【scoreHint 口径】后端契约与前端 response 类型/mapper 继续兼容 `scoreHint`；教师前端 UI 暂不展示、不新增、不编辑、不主动提交该字段。
+- 【边界保持】不改 backend 契约，不新增评分体系，不改变 AI/SYSTEM 反馈只读语义，不影响学生端反馈展示。
 
 ## 当前阶段一句话结论
 

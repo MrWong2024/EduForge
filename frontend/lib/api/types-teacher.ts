@@ -366,13 +366,21 @@ export type TeacherFeedbackItem = FeedbackItem;
 
 export type TeacherFeedbackListResponse = ListFeedbackResponse;
 
+export type CreateTeacherFeedbackRequest = {
+  source: "TEACHER";
+  type: string;
+  severity: string;
+  message: string;
+  suggestion?: string;
+  tags?: string[];
+};
+
 export type UpdateTeacherFeedbackRequest = {
   type?: string;
   severity?: string;
   message?: string;
   suggestion?: string;
   tags?: string[];
-  scoreHint?: number;
 };
 
 export type SubmissionDetailResponse = StudentSubmissionDetailResponse;

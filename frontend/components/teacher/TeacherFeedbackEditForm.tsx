@@ -13,6 +13,14 @@ import type {
   UpdateTeacherFeedbackRequest,
 } from "@/lib/api/types-teacher";
 import {
+  FEEDBACK_SEVERITIES,
+  FEEDBACK_TYPES,
+  normalizeFeedbackSeverity,
+  normalizeFeedbackType,
+  type FeedbackSeverityValue,
+  type FeedbackTypeValue,
+} from "@/lib/ui/feedback-options";
+import {
   FEEDBACK_TAG_OPTIONS,
   type FeedbackTagValue,
 } from "@/lib/ui/feedback-tags";
@@ -30,45 +38,10 @@ type FeedbackErrorState = {
   detail?: string;
 };
 
-const FEEDBACK_TYPES = [
-  "SYNTAX",
-  "STYLE",
-  "DESIGN",
-  "BUG",
-  "PERFORMANCE",
-  "SECURITY",
-  "OTHER",
-] as const;
-
-const FEEDBACK_SEVERITIES = ["INFO", "WARN", "ERROR"] as const;
-
-type FeedbackTypeValue = (typeof FEEDBACK_TYPES)[number];
-type FeedbackSeverityValue = (typeof FEEDBACK_SEVERITIES)[number];
-
-const normalizeFeedbackType = (value: string | undefined): FeedbackTypeValue =>
-  FEEDBACK_TYPES.includes(value as FeedbackTypeValue)
-    ? (value as FeedbackTypeValue)
-    : "OTHER";
-
-const normalizeFeedbackSeverity = (
-  value: string | undefined,
-): FeedbackSeverityValue =>
-  FEEDBACK_SEVERITIES.includes(value as FeedbackSeverityValue)
-    ? (value as FeedbackSeverityValue)
-    : "INFO";
-
 const normalizeFeedbackTags = (tags: string[]): FeedbackTagValue[] =>
   tags.filter((tag): tag is FeedbackTagValue =>
     FEEDBACK_TAG_OPTIONS.some((option) => option.value === tag),
   );
-
-const normalizeScoreHint = (value: string): number | undefined => {
-  if (!value.trim()) {
-    return undefined;
-  }
-  const parsed = Number(value);
-  return Number.isFinite(parsed) ? parsed : Number.NaN;
-};
 
 const sameStringArray = (left: string[], right: string[]): boolean =>
   left.length === right.length &&
@@ -104,7 +77,6 @@ export function TeacherFeedbackEditForm({
       message: feedback.message?.trim() ?? "",
       suggestion: feedback.suggestion?.trim() ?? "",
       tags: normalizeFeedbackTags(feedback.tags),
-      scoreHint: feedback.scoreHint,
     }),
     [feedback],
   );
@@ -118,22 +90,10 @@ export function TeacherFeedbackEditForm({
   const [selectedTags, setSelectedTags] = useState<FeedbackTagValue[]>(
     initialValues.tags,
   );
-  const [scoreHintInput, setScoreHintInput] = useState(
-    initialValues.scoreHint === undefined
-      ? ""
-      : String(initialValues.scoreHint),
-  );
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [validationError, setValidationError] = useState<string | null>(null);
   const [errorState, setErrorState] = useState<FeedbackErrorState | null>(null);
 
-  const currentScoreHint = normalizeScoreHint(scoreHintInput);
-  const hasInvalidScoreHint =
-    Number.isNaN(currentScoreHint) ||
-    (currentScoreHint !== undefined &&
-      (currentScoreHint < 0 || currentScoreHint > 100));
-  const isScoreHintCleared =
-    initialValues.scoreHint !== undefined && scoreHintInput.trim() === "";
   const normalizedMessage = message.trim();
   const normalizedSuggestion = suggestion.trim();
   const hasChanges =
@@ -141,8 +101,7 @@ export function TeacherFeedbackEditForm({
     severity !== initialValues.severity ||
     normalizedMessage !== initialValues.message ||
     normalizedSuggestion !== initialValues.suggestion ||
-    !sameStringArray(selectedTags, initialValues.tags) ||
-    currentScoreHint !== initialValues.scoreHint;
+    !sameStringArray(selectedTags, initialValues.tags);
 
   const toggleTag = (tagValue: FeedbackTagValue) => {
     setSelectedTags((prev) =>
@@ -165,10 +124,6 @@ export function TeacherFeedbackEditForm({
       setValidationError("反馈内容不能为空。");
       return;
     }
-    if (isScoreHintCleared || hasInvalidScoreHint) {
-      setValidationError("分数提示必须是 0 到 100 之间的数字。");
-      return;
-    }
     if (!hasChanges) {
       setValidationError("内容未变化。");
       return;
@@ -189,9 +144,6 @@ export function TeacherFeedbackEditForm({
     }
     if (!sameStringArray(selectedTags, initialValues.tags)) {
       payload.tags = selectedTags;
-    }
-    if (currentScoreHint !== initialValues.scoreHint) {
-      payload.scoreHint = currentScoreHint;
     }
 
     setIsSubmitting(true);
@@ -233,7 +185,7 @@ export function TeacherFeedbackEditForm({
       onSubmit={handleSubmit}
       className="mt-4 rounded-md border border-zinc-200 bg-white p-3"
     >
-      <div className="grid gap-3 md:grid-cols-3">
+      <div className="grid gap-3 md:grid-cols-2">
         <label className="block text-sm">
           <span className="mb-1 block text-zinc-700">类型</span>
           <select
@@ -266,19 +218,6 @@ export function TeacherFeedbackEditForm({
               </option>
             ))}
           </select>
-        </label>
-
-        <label className="block text-sm">
-          <span className="mb-1 block text-zinc-700">分数提示（可选）</span>
-          <input
-            type="number"
-            min={0}
-            max={100}
-            value={scoreHintInput}
-            onChange={(event) => setScoreHintInput(event.target.value)}
-            className="w-full rounded-md border border-zinc-300 px-3 py-2"
-            placeholder="0-100"
-          />
         </label>
       </div>
 

@@ -35,9 +35,6 @@ const FeedbackReadonlyBody = ({ item }: { item: TeacherFeedbackItem }) => (
     <p className="mt-1 text-sm text-zinc-700">
       标签：{item.tags.length > 0 ? item.tags.join(", ") : "—"}
     </p>
-    {item.scoreHint !== undefined ? (
-      <p className="mt-1 text-sm text-zinc-700">分数提示：{item.scoreHint}</p>
-    ) : null}
     <div className="mt-1 space-y-1 text-xs text-zinc-500">
       <p>创建于：{toDisplayDate(item.createdAt)}</p>
       {hasUpdatedAtChanged(item) ? (

@@ -4,9 +4,22 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { ErrorState } from "@/components/blocks/ErrorState";
 import { BrowserFetchJsonError, fetchJson } from "@/lib/api/browser-client";
-import { buildErrorDescription, extractRawDetail } from "@/lib/api/error-presenter";
+import {
+  buildErrorDescription,
+  extractRawDetail,
+} from "@/lib/api/error-presenter";
+import type { CreateTeacherFeedbackRequest } from "@/lib/api/types-teacher";
+import {
+  FEEDBACK_SEVERITIES,
+  FEEDBACK_TYPES,
+  type FeedbackSeverityValue,
+  type FeedbackTypeValue,
+} from "@/lib/ui/feedback-options";
 import { getCommonErrorSummary } from "@/lib/ui/status";
-import { FEEDBACK_TAG_OPTIONS, type FeedbackTagValue } from "@/lib/ui/feedback-tags";
+import {
+  FEEDBACK_TAG_OPTIONS,
+  type FeedbackTagValue,
+} from "@/lib/ui/feedback-tags";
 
 type TeacherFeedbackFormProps = {
   submissionId: string;
@@ -22,9 +35,10 @@ const INVALID_TAGS_MESSAGE = "Invalid tag(s), please select from predefined tags
 
 export function TeacherFeedbackForm({ submissionId }: TeacherFeedbackFormProps) {
   const router = useRouter();
+  const [type, setType] = useState<FeedbackTypeValue>("OTHER");
   const [message, setMessage] = useState("");
   const [suggestion, setSuggestion] = useState("");
-  const [severity, setSeverity] = useState("INFO");
+  const [severity, setSeverity] = useState<FeedbackSeverityValue>("INFO");
   const [selectedTags, setSelectedTags] = useState<FeedbackTagValue[]>([]);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [successText, setSuccessText] = useState<string | null>(null);
@@ -54,9 +68,9 @@ export function TeacherFeedbackForm({ submissionId }: TeacherFeedbackFormProps) 
     setIsSubmitting(true);
 
     try {
-      const payload: Record<string, unknown> = {
+      const payload: CreateTeacherFeedbackRequest = {
         source: "TEACHER",
-        type: "OTHER",
+        type,
         severity,
         message: normalizedMessage,
       };
@@ -67,16 +81,20 @@ export function TeacherFeedbackForm({ submissionId }: TeacherFeedbackFormProps) 
         payload.tags = selectedTags;
       }
 
-      await fetchJson<unknown>(`learning-tasks/submissions/${encodeURIComponent(submissionId)}/feedback`, {
-        method: "POST",
-        headers: {
-          "content-type": "application/json",
-          accept: "application/json",
+      await fetchJson<unknown>(
+        `learning-tasks/submissions/${encodeURIComponent(submissionId)}/feedback`,
+        {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            accept: "application/json",
+          },
+          body: JSON.stringify(payload),
         },
-        body: JSON.stringify(payload),
-      });
+      );
 
       setSuccessText("已添加教师反馈。");
+      setType("OTHER");
       setMessage("");
       setSuggestion("");
       setSeverity("INFO");
@@ -139,40 +157,64 @@ export function TeacherFeedbackForm({ submissionId }: TeacherFeedbackFormProps) 
 
         <div className="grid gap-4 md:grid-cols-2">
           <label className="block text-sm">
-            <span className="mb-1 block text-zinc-700">严重级别（可选）</span>
+            <span className="mb-1 block text-zinc-700">类型</span>
             <select
-              value={severity}
-              onChange={(event) => setSeverity(event.target.value)}
+              value={type}
+              onChange={(event) =>
+                setType(event.target.value as FeedbackTypeValue)
+              }
               className="w-full rounded-md border border-zinc-300 px-3 py-2"
             >
-              <option value="INFO">INFO</option>
-              <option value="WARN">WARN</option>
-              <option value="ERROR">ERROR</option>
+              {FEEDBACK_TYPES.map((option) => (
+                <option key={option} value={option}>
+                  {option}
+                </option>
+              ))}
             </select>
           </label>
 
-          <fieldset className="block text-sm">
-            <legend className="mb-2 block text-zinc-700">标签（可选，多选）</legend>
-            <div className="max-h-44 overflow-auto rounded-md border border-zinc-300 p-2">
-              <div className="grid gap-2 sm:grid-cols-2">
-                {FEEDBACK_TAG_OPTIONS.map((option) => (
-                  <label key={option.value} className="flex items-center gap-2 text-xs text-zinc-700">
-                    <input
-                      type="checkbox"
-                      checked={selectedTags.includes(option.value)}
-                      onChange={() => toggleTag(option.value)}
-                      className="h-4 w-4 rounded border-zinc-300"
-                    />
-                    <span>{option.label}</span>
-                  </label>
-                ))}
-              </div>
-            </div>
-            <span className="mt-1 block text-xs text-zinc-500">
-              标签用于归类统计；具体问题说明请写在“反馈内容/建议”中。
-            </span>
-          </fieldset>
+          <label className="block text-sm">
+            <span className="mb-1 block text-zinc-700">严重级别</span>
+            <select
+              value={severity}
+              onChange={(event) =>
+                setSeverity(event.target.value as FeedbackSeverityValue)
+              }
+              className="w-full rounded-md border border-zinc-300 px-3 py-2"
+            >
+              {FEEDBACK_SEVERITIES.map((option) => (
+                <option key={option} value={option}>
+                  {option}
+                </option>
+              ))}
+            </select>
+          </label>
         </div>
+
+        <fieldset className="block text-sm">
+          <legend className="mb-2 block text-zinc-700">标签（可选，多选）</legend>
+          <div className="max-h-44 overflow-auto rounded-md border border-zinc-300 p-2">
+            <div className="grid gap-2 sm:grid-cols-2">
+              {FEEDBACK_TAG_OPTIONS.map((option) => (
+                <label
+                  key={option.value}
+                  className="flex items-center gap-2 text-xs text-zinc-700"
+                >
+                  <input
+                    type="checkbox"
+                    checked={selectedTags.includes(option.value)}
+                    onChange={() => toggleTag(option.value)}
+                    className="h-4 w-4 rounded border-zinc-300"
+                  />
+                  <span>{option.label}</span>
+                </label>
+              ))}
+            </div>
+          </div>
+          <span className="mt-1 block text-xs text-zinc-500">
+            标签用于归类统计；具体问题说明请写在“反馈内容/建议”中。
+          </span>
+        </fieldset>
 
         <button
           type="submit"
@@ -191,7 +233,10 @@ export function TeacherFeedbackForm({ submissionId }: TeacherFeedbackFormProps) 
           <ErrorState
             status={errorState.status}
             title="提交教师反馈失败"
-            description={buildErrorDescription(errorState.summary, errorState.detail)}
+            description={buildErrorDescription(
+              errorState.summary,
+              errorState.detail,
+            )}
           />
         </div>
       ) : null}
