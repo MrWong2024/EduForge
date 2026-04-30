@@ -3,7 +3,9 @@ import { safeGet } from "@/lib/ui/format";
 type UnknownRecord = Record<string, unknown>;
 
 const asRecord = (value: unknown): UnknownRecord =>
-  value && typeof value === "object" && !Array.isArray(value) ? (value as UnknownRecord) : {};
+  value && typeof value === "object" && !Array.isArray(value)
+    ? (value as UnknownRecord)
+    : {};
 
 const asString = (value: unknown): string | undefined =>
   typeof value === "string" && value.trim() ? value.trim() : undefined;
@@ -117,13 +119,16 @@ export type SubmissionDetailResponse = {
 export type FeedbackItem = {
   id?: string;
   submissionId?: string;
+  createdBy?: string;
   source?: string;
   type?: string;
   severity?: string;
   message?: string;
   suggestion?: string;
   tags: string[];
+  scoreHint?: number;
   createdAt?: string;
+  updatedAt?: string;
   raw: UnknownRecord;
 };
 
@@ -150,9 +155,13 @@ export type CreateSubmissionRequest = {
   };
 };
 
-const toStudentDashboardTaskItem = (value: unknown): StudentDashboardTaskItem => {
+const toStudentDashboardTaskItem = (
+  value: unknown,
+): StudentDashboardTaskItem => {
   const record = asRecord(value);
-  const latestSubmission = asRecord(safeGet(record, "myLatestSubmission", undefined));
+  const latestSubmission = asRecord(
+    safeGet(record, "myLatestSubmission", undefined),
+  );
 
   return {
     classroomTaskId: asString(record.classroomTaskId) ?? asString(record.id),
@@ -168,25 +177,32 @@ const toStudentDashboardTaskItem = (value: unknown): StudentDashboardTaskItem =>
   };
 };
 
-const toStudentDashboardClassroomItem = (value: unknown): StudentDashboardClassroomItem => {
+const toStudentDashboardClassroomItem = (
+  value: unknown,
+): StudentDashboardClassroomItem => {
   const record = asRecord(value);
   const classroomRecord = asRecord(safeGet(record, "classroom", undefined));
 
   return {
     classroomId:
-      asString(classroomRecord.id) ?? asString(record.classroomId) ?? asString(record.id),
-    classroomName: asString(classroomRecord.name) ?? asString(record.classroomName),
+      asString(classroomRecord.id) ??
+      asString(record.classroomId) ??
+      asString(record.id),
+    classroomName:
+      asString(classroomRecord.name) ?? asString(record.classroomName),
     courseId: asString(classroomRecord.courseId) ?? asString(record.courseId),
     status: asString(classroomRecord.status) ?? asString(record.status),
     tasks: asRecordArray(safeGet(record, "tasks", undefined)).map((item) =>
-      toStudentDashboardTaskItem(item)
+      toStudentDashboardTaskItem(item),
     ),
     raw: record,
   };
 };
 
 const toStringArray = (value: unknown): string[] =>
-  Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : [];
+  Array.isArray(value)
+    ? value.filter((item): item is string => typeof item === "string")
+    : [];
 
 const toFeedbackItem = (value: unknown): FeedbackItem => {
   const record = asRecord(value);
@@ -194,18 +210,23 @@ const toFeedbackItem = (value: unknown): FeedbackItem => {
   return {
     id: asString(record.id),
     submissionId: asString(record.submissionId),
+    createdBy: asString(record.createdBy),
     source: asString(record.source),
     type: asString(record.type),
     severity: asString(record.severity),
     message: asString(record.message),
     suggestion: asString(record.suggestion),
     tags: toStringArray(record.tags),
+    scoreHint: asNumber(record.scoreHint),
     createdAt: asString(record.createdAt),
+    updatedAt: asString(record.updatedAt),
     raw: record,
   };
 };
 
-export const toJoinClassroomResponse = (payload: unknown): JoinClassroomResponse => {
+export const toJoinClassroomResponse = (
+  payload: unknown,
+): JoinClassroomResponse => {
   const record = asRecord(payload);
 
   return {
@@ -217,7 +238,9 @@ export const toJoinClassroomResponse = (payload: unknown): JoinClassroomResponse
   };
 };
 
-export const toStudentDashboardResponse = (payload: unknown): StudentDashboardResponse => {
+export const toStudentDashboardResponse = (
+  payload: unknown,
+): StudentDashboardResponse => {
   if (Array.isArray(payload)) {
     return {
       items: payload.map((item) => toStudentDashboardClassroomItem(item)),
@@ -232,7 +255,9 @@ export const toStudentDashboardResponse = (payload: unknown): StudentDashboardRe
     safeGet<unknown>(record, "data", undefined);
 
   return {
-    items: asRecordArray(candidateItems).map((item) => toStudentDashboardClassroomItem(item)),
+    items: asRecordArray(candidateItems).map((item) =>
+      toStudentDashboardClassroomItem(item),
+    ),
     total: asNumber(record.total),
     page: asNumber(record.page),
     limit: asNumber(record.limit),
@@ -240,7 +265,9 @@ export const toStudentDashboardResponse = (payload: unknown): StudentDashboardRe
   };
 };
 
-export const toMyTaskDetailResponse = (payload: unknown): MyTaskDetailResponse => {
+export const toMyTaskDetailResponse = (
+  payload: unknown,
+): MyTaskDetailResponse => {
   const record = asRecord(payload);
   const latest = safeGet<unknown>(record, "latest", null);
 
@@ -255,15 +282,19 @@ export const toMyTaskDetailResponse = (payload: unknown): MyTaskDetailResponse =
   };
 };
 
-export const toSubmissionDetailResponse = (payload: unknown): SubmissionDetailResponse => {
+export const toSubmissionDetailResponse = (
+  payload: unknown,
+): SubmissionDetailResponse => {
   const record = asRecord(payload);
   const dataRecord = pickFirstNonEmptyRecord(
     safeGet(record, "data", undefined),
-    safeGet(record, "submission", undefined)
+    safeGet(record, "submission", undefined),
   );
   const source = Object.keys(dataRecord).length > 0 ? dataRecord : record;
   const contentRecord = asRecord(safeGet(source, "content", undefined));
-  const language = asNullableString(source.language) ?? asNullableString(contentRecord.language);
+  const language =
+    asNullableString(source.language) ??
+    asNullableString(contentRecord.language);
 
   return {
     id: asString(source.id),
@@ -277,7 +308,9 @@ export const toSubmissionDetailResponse = (payload: unknown): SubmissionDetailRe
       language,
       codeText: asNullableString(contentRecord.codeText),
     },
-    submittedAt: asNullableString(source.submittedAt) ?? asNullableString(source.createdAt),
+    submittedAt:
+      asNullableString(source.submittedAt) ??
+      asNullableString(source.createdAt),
     attemptNo: asNullableNumber(source.attemptNo),
     isLate: asNullableBoolean(source.isLate) ?? false,
     lateBySeconds: asNumber(source.lateBySeconds) ?? 0,
@@ -286,7 +319,9 @@ export const toSubmissionDetailResponse = (payload: unknown): SubmissionDetailRe
   };
 };
 
-export const toListFeedbackResponse = (payload: unknown): ListFeedbackResponse => {
+export const toListFeedbackResponse = (
+  payload: unknown,
+): ListFeedbackResponse => {
   if (Array.isArray(payload)) {
     return {
       items: payload.map((item) => toFeedbackItem(item)),
@@ -306,7 +341,9 @@ export const toListFeedbackResponse = (payload: unknown): ListFeedbackResponse =
   };
 };
 
-export const toRequestAiFeedbackResponse = (payload: unknown): RequestAiFeedbackResponse => {
+export const toRequestAiFeedbackResponse = (
+  payload: unknown,
+): RequestAiFeedbackResponse => {
   const record = asRecord(payload);
 
   return {

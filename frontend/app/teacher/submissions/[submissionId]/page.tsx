@@ -1,20 +1,26 @@
 import Link from "next/link";
 import { headers } from "next/headers";
-import { EmptyState } from "@/components/blocks/EmptyState";
 import { ErrorState } from "@/components/blocks/ErrorState";
 import { PageHeader } from "@/components/blocks/PageHeader";
 import { TeacherFeedbackForm } from "@/components/teacher/TeacherFeedbackForm";
+import { TeacherFeedbackHistory } from "@/components/teacher/TeacherFeedbackHistory";
 import { fetchJson, FetchJsonError } from "@/lib/api/client";
-import { buildErrorDescription, extractRawDetail } from "@/lib/api/error-presenter";
 import {
-  groupTeacherFeedbackItems,
+  buildErrorDescription,
+  extractRawDetail,
+} from "@/lib/api/error-presenter";
+import {
   toSubmissionDetailResponse,
   toTeacherFeedbackListResponse,
   type TeacherSubmissionContext,
 } from "@/lib/api/types-teacher";
 import { paths } from "@/lib/routes/paths";
 import { getAiStatusLabel, getCommonErrorSummary } from "@/lib/ui/status";
-import { getSingleSearchParam, toDisplayDate, toDisplayText } from "@/lib/ui/format";
+import {
+  getSingleSearchParam,
+  toDisplayDate,
+  toDisplayText,
+} from "@/lib/ui/format";
 
 type TeacherSubmissionDetailPageProps = {
   params: Promise<{ submissionId: string }>;
@@ -94,7 +100,7 @@ const getTeacherSubmissionErrorSummary = (status: number): string => {
 const buildContext = (
   submissionId: string,
   detail: ReturnType<typeof toSubmissionDetailResponse>,
-  query: Awaited<TeacherSubmissionDetailPageProps["searchParams"]>
+  query: Awaited<TeacherSubmissionDetailPageProps["searchParams"]>,
 ): TeacherSubmissionContext => ({
   submissionId,
   classroomId: getSingleSearchParam(query.classroomId),
@@ -147,16 +153,19 @@ export default async function TeacherSubmissionDetailPage({
   try {
     const origin = await getRequestOrigin();
     const [detailPayload, feedbackPayload] = await Promise.all([
-      fetchJson<unknown>(`learning-tasks/submissions/${encodeURIComponent(submissionId)}`, {
-        origin,
-        cache: "no-store",
-      }),
+      fetchJson<unknown>(
+        `learning-tasks/submissions/${encodeURIComponent(submissionId)}`,
+        {
+          origin,
+          cache: "no-store",
+        },
+      ),
       fetchJson<unknown>(
         `learning-tasks/submissions/${encodeURIComponent(submissionId)}/feedback`,
         {
           origin,
           cache: "no-store",
-        }
+        },
       ),
     ]);
 
@@ -176,7 +185,7 @@ export default async function TeacherSubmissionDetailPage({
         status: error.status,
         description: buildErrorDescription(
           getTeacherSubmissionErrorSummary(error.status),
-          detail
+          detail,
         ),
       };
     }
@@ -196,22 +205,16 @@ export default async function TeacherSubmissionDetailPage({
     viewModel.context.classroomId && viewModel.context.classroomTaskId
       ? paths.teacher.classroomTaskSubmissions(
           viewModel.context.classroomId,
-          viewModel.context.classroomTaskId
+          viewModel.context.classroomTaskId,
         )
       : null;
   const taskHref =
     viewModel.context.classroomId && viewModel.context.classroomTaskId
       ? paths.teacher.classroomTaskDetail(
           viewModel.context.classroomId,
-          viewModel.context.classroomTaskId
+          viewModel.context.classroomTaskId,
         )
       : null;
-  const groupedFeedback = groupTeacherFeedbackItems(viewModel.feedback.items);
-  const groupedSections = [
-    { key: "teacher", title: "教师反馈", items: groupedFeedback.teacher },
-    { key: "ai", title: "AI 反馈", items: groupedFeedback.ai },
-    { key: "system", title: "系统反馈", items: groupedFeedback.system },
-  ] as const;
 
   return (
     <section className="space-y-4">
@@ -219,7 +222,7 @@ export default async function TeacherSubmissionDetailPage({
         title="提交详情 / 教师批阅"
         description={`任务：${toDisplayText(viewModel.context.taskTitle, "未命名任务")} | 学生：${toDisplayText(
           viewModel.context.studentName,
-          "未知学生"
+          "未知学生",
         )}`}
         actions={
           <div className="flex flex-wrap items-center gap-3 text-sm">
@@ -233,7 +236,10 @@ export default async function TeacherSubmissionDetailPage({
                 返回任务详情
               </Link>
             ) : null}
-            <Link href={paths.teacher.classrooms} className="text-blue-700 hover:underline">
+            <Link
+              href={paths.teacher.classrooms}
+              className="text-blue-700 hover:underline"
+            >
               返回班级列表
             </Link>
           </div>
@@ -283,7 +289,8 @@ export default async function TeacherSubmissionDetailPage({
             <p className="text-zinc-500">是否迟交</p>
             <p className="font-medium text-zinc-900">
               {toDisplayText(viewModel.context.isLate)}
-              {viewModel.context.isLate && viewModel.context.lateBySeconds !== undefined
+              {viewModel.context.isLate &&
+              viewModel.context.lateBySeconds !== undefined
                 ? `（超时 ${viewModel.context.lateBySeconds} 秒）`
                 : ""}
             </p>
@@ -294,7 +301,10 @@ export default async function TeacherSubmissionDetailPage({
       <section className="rounded-lg border border-zinc-200 bg-white p-4">
         <h2 className="text-base font-semibold text-zinc-900">提交内容</h2>
         {viewModel.context.codeText ? (
-          <details className="mt-3 rounded-md border border-zinc-200 bg-zinc-50 p-3" open>
+          <details
+            className="mt-3 rounded-md border border-zinc-200 bg-zinc-50 p-3"
+            open
+          >
             <summary className="cursor-pointer text-sm font-medium text-zinc-800">
               查看代码内容
             </summary>
@@ -308,56 +318,17 @@ export default async function TeacherSubmissionDetailPage({
       </section>
 
       <section className="rounded-lg border border-zinc-200 bg-white p-4 text-sm text-zinc-700">
-        <p>此页用于查看提交内容、反馈历史，并新增教师反馈。</p>
+        <p>此页用于查看提交内容、反馈历史，并新增或修改教师反馈。</p>
       </section>
 
       <TeacherFeedbackForm submissionId={submissionId} />
 
       <section className="space-y-3">
         <h2 className="text-base font-semibold text-zinc-900">反馈历史</h2>
-        {viewModel.feedback.items.length === 0 ? (
-          <EmptyState title="暂无反馈记录" description="可先在上方填写教师反馈。" />
-        ) : (
-          groupedSections.map((section) => (
-            <section key={section.key} className="rounded-lg border border-zinc-200 bg-white p-4">
-              <h3 className="text-sm font-semibold text-zinc-900">{section.title}</h3>
-              {section.items.length === 0 ? (
-                <p className="mt-2 text-sm text-zinc-500">暂无该来源反馈。</p>
-              ) : (
-                <ul className="mt-3 space-y-3">
-                  {section.items.map((item, index) => (
-                    <li
-                      key={item.id ?? `${section.key}-${index}`}
-                      className="rounded-md border border-zinc-200 bg-zinc-50 p-3"
-                    >
-                      <div className="flex flex-wrap gap-2 text-xs">
-                        <span className="rounded-full bg-zinc-900 px-2 py-1 font-medium text-white">
-                          {toDisplayText(item.source)}
-                        </span>
-                        <span className="rounded-full bg-zinc-200 px-2 py-1 text-zinc-700">
-                          {toDisplayText(item.severity)}
-                        </span>
-                        <span className="rounded-full bg-zinc-200 px-2 py-1 text-zinc-700">
-                          {toDisplayText(item.type)}
-                        </span>
-                      </div>
-                      <p className="mt-3 whitespace-pre-wrap text-sm text-zinc-900">
-                        {toDisplayText(item.message)}
-                      </p>
-                      <p className="mt-2 text-sm text-zinc-700">
-                        建议：{toDisplayText(item.suggestion)}
-                      </p>
-                      <p className="mt-1 text-sm text-zinc-700">
-                        标签：{item.tags.length > 0 ? item.tags.join(", ") : "—"}
-                      </p>
-                      <p className="mt-1 text-xs text-zinc-500">{toDisplayDate(item.createdAt)}</p>
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </section>
-          ))
-        )}
+        <TeacherFeedbackHistory
+          items={viewModel.feedback.items}
+          submissionId={submissionId}
+        />
       </section>
 
       <details className="rounded-lg border border-zinc-200 bg-zinc-50 p-4">

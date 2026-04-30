@@ -40,6 +40,8 @@
 | PublishTaskStatusButton | `components/teacher/PublishTaskStatusButton.tsx` | `POST learning-tasks/tasks/:id/publish` | 仅做 task 发布状态操作 |
 | RemoveStudentButton | `components/teacher/RemoveStudentButton.tsx` | `POST classrooms/:id/students/:uid/remove` | 仅做移除动作，不负责成员列表 |
 | TeacherFeedbackForm | `components/teacher/TeacherFeedbackForm.tsx` | `POST learning-tasks/submissions/:id/feedback` | 仅做教师反馈创建 |
+| TeacherFeedbackHistory | `components/teacher/TeacherFeedbackHistory.tsx` | - | 仅负责教师提交详情页反馈历史展示与编辑态切换；只对 `source=TEACHER` 且有 `id` 的反馈显示“修改”，AI/SYSTEM 反馈保持只读；同一时间只展开一个编辑表单 |
+| TeacherFeedbackEditForm | `components/teacher/TeacherFeedbackEditForm.tsx` | `PATCH learning-tasks/submissions/:submissionId/feedback/:feedbackId` | 仅负责单条教师反馈原地编辑（`type/severity/message/suggestion/tags/scoreHint`）；请求通过 `browser-client.fetchJson` 走 `/api/proxy/**`；保存成功后 `router.refresh()` 并退出编辑态；400/403/404/5xx 分别显示明确中文摘要与后端 detail |
 
 ## 4) Student 交互组件
 

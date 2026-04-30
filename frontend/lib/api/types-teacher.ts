@@ -19,7 +19,9 @@ import {
 type UnknownRecord = Record<string, unknown>;
 
 const asRecord = (value: unknown): UnknownRecord =>
-  value && typeof value === "object" && !Array.isArray(value) ? (value as UnknownRecord) : {};
+  value && typeof value === "object" && !Array.isArray(value)
+    ? (value as UnknownRecord)
+    : {};
 
 const asString = (value: unknown): string | undefined =>
   typeof value === "string" && value.trim() ? value.trim() : undefined;
@@ -48,7 +50,9 @@ const asRecordArray = (value: unknown): UnknownRecord[] =>
   Array.isArray(value) ? value.map((item) => asRecord(item)) : [];
 
 const asStringArray = (value: unknown): string[] =>
-  Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : [];
+  Array.isArray(value)
+    ? value.filter((item): item is string => typeof item === "string")
+    : [];
 
 const pickFirstNonEmptyRecord = (...candidates: unknown[]): UnknownRecord => {
   for (const candidate of candidates) {
@@ -161,7 +165,11 @@ export type CourseOverviewResponse = {
   raw: UnknownRecord;
 };
 
-export const CLASSROOM_TASK_STATUSES = ["ACTIVE", "CLOSED", "RECALLED"] as const;
+export const CLASSROOM_TASK_STATUSES = [
+  "ACTIVE",
+  "CLOSED",
+  "RECALLED",
+] as const;
 export type ClassroomTaskStatus = (typeof CLASSROOM_TASK_STATUSES)[number];
 
 export type ClassroomTaskSummary = {
@@ -256,7 +264,11 @@ export type UpdateClassroomTaskRequest = {
   maxAttempts?: number | null;
 };
 
-export const LEARNING_TASK_STATUSES = ["DRAFT", "PUBLISHED", "ARCHIVED"] as const;
+export const LEARNING_TASK_STATUSES = [
+  "DRAFT",
+  "PUBLISHED",
+  "ARCHIVED",
+] as const;
 export type LearningTaskStatus = (typeof LEARNING_TASK_STATUSES)[number];
 
 export type CreateLearningTaskRequest = {
@@ -353,6 +365,15 @@ export type ClassroomTaskSubmissionsResponse = {
 export type TeacherFeedbackItem = FeedbackItem;
 
 export type TeacherFeedbackListResponse = ListFeedbackResponse;
+
+export type UpdateTeacherFeedbackRequest = {
+  type?: string;
+  severity?: string;
+  message?: string;
+  suggestion?: string;
+  tags?: string[];
+  scoreHint?: number;
+};
 
 export type SubmissionDetailResponse = StudentSubmissionDetailResponse;
 
@@ -518,7 +539,9 @@ export const toClassroomSummary = (value: unknown): ClassroomSummary => {
   };
 };
 
-export const toClassroomCreateResponse = (payload: unknown): ClassroomCreateResponse => {
+export const toClassroomCreateResponse = (
+  payload: unknown,
+): ClassroomCreateResponse => {
   const record = asRecord(payload);
   return {
     id: asString(record.id) ?? asString(record.classroomId),
@@ -530,21 +553,27 @@ export const toClassroomCreateResponse = (payload: unknown): ClassroomCreateResp
   };
 };
 
-export const toClassroomDetailResponse = (payload: unknown): ClassroomDetailResponse => {
+export const toClassroomDetailResponse = (
+  payload: unknown,
+): ClassroomDetailResponse => {
   const record = asRecord(payload);
   const dataRecord = asRecord(safeGet(record, "data", undefined));
   const source = Object.keys(dataRecord).length > 0 ? dataRecord : record;
   return toClassroomSummary(source);
 };
 
-export const toClassroomUpdateResponse = (payload: unknown): ClassroomUpdateResponse => {
+export const toClassroomUpdateResponse = (
+  payload: unknown,
+): ClassroomUpdateResponse => {
   const record = asRecord(payload);
   const dataRecord = asRecord(safeGet(record, "data", undefined));
   const source = Object.keys(dataRecord).length > 0 ? dataRecord : record;
   return toClassroomSummary(source);
 };
 
-export const toClassroomListResponse = (payload: unknown): ClassroomListResponse => {
+export const toClassroomListResponse = (
+  payload: unknown,
+): ClassroomListResponse => {
   if (Array.isArray(payload)) {
     return {
       items: payload.map((item) => toClassroomSummary(item)),
@@ -558,7 +587,9 @@ export const toClassroomListResponse = (payload: unknown): ClassroomListResponse
     safeGet<unknown>(record, "data", undefined);
 
   return {
-    items: asRecordArray(candidateItems).map((item) => toClassroomSummary(item)),
+    items: asRecordArray(candidateItems).map((item) =>
+      toClassroomSummary(item),
+    ),
     page: asNumber(record.page),
     limit: asNumber(record.limit),
     total: asNumber(record.total),
@@ -580,7 +611,9 @@ export const toCourseSummary = (value: unknown): CourseSummary => {
   };
 };
 
-export const toCourseCreateResponse = (payload: unknown): CourseCreateResponse => {
+export const toCourseCreateResponse = (
+  payload: unknown,
+): CourseCreateResponse => {
   const record = asRecord(payload);
   return {
     id: asString(record.id) ?? asString(record.courseId),
@@ -593,14 +626,18 @@ export const toCourseCreateResponse = (payload: unknown): CourseCreateResponse =
   };
 };
 
-export const toCourseDetailResponse = (payload: unknown): CourseDetailResponse => {
+export const toCourseDetailResponse = (
+  payload: unknown,
+): CourseDetailResponse => {
   const record = asRecord(payload);
   const dataRecord = asRecord(safeGet(record, "data", undefined));
   const source = Object.keys(dataRecord).length > 0 ? dataRecord : record;
   return toCourseSummary(source);
 };
 
-export const toCourseUpdateResponse = (payload: unknown): CourseUpdateResponse => {
+export const toCourseUpdateResponse = (
+  payload: unknown,
+): CourseUpdateResponse => {
   const record = asRecord(payload);
   const dataRecord = asRecord(safeGet(record, "data", undefined));
   const source = Object.keys(dataRecord).length > 0 ? dataRecord : record;
@@ -633,8 +670,8 @@ const toCourseOverviewItem = (value: unknown): CourseOverviewItem => {
     aiPendingJobs: asNumber(aiRecord.pendingJobs),
     aiFailedJobs: asNumber(aiRecord.failedJobs),
     aiSuccessRate: asNullableNumber(aiRecord.aiSuccessRate),
-    topErrors: asRecordArray(safeGet(aiRecord, "topErrors", undefined)).map((item) =>
-      toCourseOverviewErrorItem(item)
+    topErrors: asRecordArray(safeGet(aiRecord, "topErrors", undefined)).map(
+      (item) => toCourseOverviewErrorItem(item),
     ),
     raw: record,
   };
@@ -676,28 +713,33 @@ export const toCourseListResponse = (payload: unknown): CourseListResponse => {
   };
 };
 
-export const toCourseOverviewResponse = (payload: unknown): CourseOverviewResponse => {
+export const toCourseOverviewResponse = (
+  payload: unknown,
+): CourseOverviewResponse => {
   const record = asRecord(payload);
   const dataRecord = asRecord(safeGet(record, "data", undefined));
   const source = Object.keys(dataRecord).length > 0 ? dataRecord : record;
 
   return {
-    course: Object.keys(asRecord(safeGet(source, "course", undefined))).length > 0
-      ? toCourseSummary(safeGet(source, "course", undefined))
-      : undefined,
+    course:
+      Object.keys(asRecord(safeGet(source, "course", undefined))).length > 0
+        ? toCourseSummary(safeGet(source, "course", undefined))
+        : undefined,
     window: asString(source.window),
     generatedAt: asString(source.generatedAt),
     page: asNumber(source.page),
     limit: asNumber(source.limit),
     total: asNumber(source.total),
     items: asRecordArray(safeGet(source, "items", undefined)).map((item) =>
-      toCourseOverviewItem(item)
+      toCourseOverviewItem(item),
     ),
     raw: source,
   };
 };
 
-export const toClassroomTaskSummary = (value: unknown): ClassroomTaskSummary => {
+export const toClassroomTaskSummary = (
+  value: unknown,
+): ClassroomTaskSummary => {
   const record = asRecord(value);
   const taskRecord = asRecord(safeGet(record, "task", undefined));
   const settingsRecord = asRecord(safeGet(record, "settings", undefined));
@@ -708,18 +750,25 @@ export const toClassroomTaskSummary = (value: unknown): ClassroomTaskSummary => 
       asString(record.taskId) ??
       asString(taskRecord.id) ??
       asString(taskRecord.taskId),
-    title: asString(taskRecord.title) ?? asString(record.title) ?? asString(record.name),
-    description: asString(taskRecord.description) ?? asString(record.description),
+    title:
+      asString(taskRecord.title) ??
+      asString(record.title) ??
+      asString(record.name),
+    description:
+      asString(taskRecord.description) ?? asString(record.description),
     status: normalizeClassroomTaskStatus(record.status) ?? "ACTIVE",
     taskStatus:
       asString(taskRecord.status) ??
       asString(record.taskStatus) ??
       asString(record.learningTaskStatus),
-    knowledgeModule: asString(taskRecord.knowledgeModule) ?? asString(record.knowledgeModule),
+    knowledgeModule:
+      asString(taskRecord.knowledgeModule) ?? asString(record.knowledgeModule),
     stage: asNumber(taskRecord.stage) ?? asNumber(record.stage),
     dueAt: asString(record.dueAt),
-    allowLate: asBoolean(settingsRecord.allowLate) ?? asBoolean(record.allowLate),
-    maxAttempts: asNumber(settingsRecord.maxAttempts) ?? asNumber(record.maxAttempts),
+    allowLate:
+      asBoolean(settingsRecord.allowLate) ?? asBoolean(record.allowLate),
+    maxAttempts:
+      asNumber(settingsRecord.maxAttempts) ?? asNumber(record.maxAttempts),
     aiStatus: asString(record.aiStatus) ?? asString(record.aiFeedbackStatus),
   };
 };
@@ -734,11 +783,17 @@ export const toClassroomTask = (payload: unknown): ClassroomTask => {
     classroomId: asString(record.classroomId),
     taskId: asString(record.taskId),
     status: normalizeClassroomTaskStatus(record.status) ?? "ACTIVE",
-    title: asString(taskRecord.title) ?? asString(record.title) ?? asString(record.name),
-    description: asString(taskRecord.description) ?? asString(record.description),
+    title:
+      asString(taskRecord.title) ??
+      asString(record.title) ??
+      asString(record.name),
+    description:
+      asString(taskRecord.description) ?? asString(record.description),
     dueAt: asString(record.dueAt),
-    allowLate: asBoolean(settingsRecord.allowLate) ?? asBoolean(record.allowLate),
-    maxAttempts: asNumber(settingsRecord.maxAttempts) ?? asNumber(record.maxAttempts),
+    allowLate:
+      asBoolean(settingsRecord.allowLate) ?? asBoolean(record.allowLate),
+    maxAttempts:
+      asNumber(settingsRecord.maxAttempts) ?? asNumber(record.maxAttempts),
     feedbackEnabled: asBoolean(settingsRecord.feedbackEnabled),
     taskStatus:
       asString(taskRecord.status) ??
@@ -777,7 +832,9 @@ export const toLearningTaskOption = (value: unknown): LearningTaskOption => {
   };
 };
 
-export const toLearningTaskListResponse = (payload: unknown): LearningTaskListResponse => {
+export const toLearningTaskListResponse = (
+  payload: unknown,
+): LearningTaskListResponse => {
   if (Array.isArray(payload)) {
     return {
       items: payload.map((item) => toLearningTaskOption(item)),
@@ -792,7 +849,9 @@ export const toLearningTaskListResponse = (payload: unknown): LearningTaskListRe
     safeGet<unknown>(record, "data", undefined);
 
   return {
-    items: asRecordArray(candidateItems).map((item) => toLearningTaskOption(item)),
+    items: asRecordArray(candidateItems).map((item) =>
+      toLearningTaskOption(item),
+    ),
     page: asNumber(record.page),
     limit: asNumber(record.limit),
     total: asNumber(record.total),
@@ -801,31 +860,39 @@ export const toLearningTaskListResponse = (payload: unknown): LearningTaskListRe
 };
 
 export const toPublishableTaskTemplateListResponse = (
-  payload: unknown
+  payload: unknown,
 ): PublishableTaskTemplateListResponse => toLearningTaskListResponse(payload);
 
-export const toLearningTaskDetailResponse = (payload: unknown): LearningTaskDetailResponse => {
+export const toLearningTaskDetailResponse = (
+  payload: unknown,
+): LearningTaskDetailResponse => {
   const record = asRecord(payload);
   const dataRecord = asRecord(safeGet(record, "data", undefined));
   const source = Object.keys(dataRecord).length > 0 ? dataRecord : record;
   return toLearningTaskOption(source);
 };
 
-export const toLearningTaskCreateResponse = (payload: unknown): LearningTaskCreateResponse => {
+export const toLearningTaskCreateResponse = (
+  payload: unknown,
+): LearningTaskCreateResponse => {
   const record = asRecord(payload);
   const dataRecord = asRecord(safeGet(record, "data", undefined));
   const source = Object.keys(dataRecord).length > 0 ? dataRecord : record;
   return toLearningTaskOption(source);
 };
 
-export const toLearningTaskUpdateResponse = (payload: unknown): LearningTaskUpdateResponse => {
+export const toLearningTaskUpdateResponse = (
+  payload: unknown,
+): LearningTaskUpdateResponse => {
   const record = asRecord(payload);
   const dataRecord = asRecord(safeGet(record, "data", undefined));
   const source = Object.keys(dataRecord).length > 0 ? dataRecord : record;
   return toLearningTaskOption(source);
 };
 
-export const toClassroomTasksResponse = (payload: unknown): ClassroomTasksResponse => {
+export const toClassroomTasksResponse = (
+  payload: unknown,
+): ClassroomTasksResponse => {
   if (Array.isArray(payload)) {
     return {
       items: payload.map((item) => toClassroomTaskSummary(item)),
@@ -839,13 +906,18 @@ export const toClassroomTasksResponse = (payload: unknown): ClassroomTasksRespon
     safeGet<unknown>(record, "data", undefined);
 
   return {
-    items: asRecordArray(candidateItems).map((item) => toClassroomTaskSummary(item)),
+    items: asRecordArray(candidateItems).map((item) =>
+      toClassroomTaskSummary(item),
+    ),
   };
 };
 
-export const toDashboardResponse = (payload: unknown): DashboardResponse => asRecord(payload);
+export const toDashboardResponse = (payload: unknown): DashboardResponse =>
+  asRecord(payload);
 
-const toLearningTrajectoryStudentPublic = (value: unknown): LearningTrajectoryStudentPublic | undefined => {
+const toLearningTrajectoryStudentPublic = (
+  value: unknown,
+): LearningTrajectoryStudentPublic | undefined => {
   const record = asRecord(value);
   if (Object.keys(record).length === 0) {
     return undefined;
@@ -889,7 +961,9 @@ const toLearningTrajectoryItem = (value: unknown): LearningTrajectoryItem => {
   };
 };
 
-export const toLearningTrajectoryResponse = (payload: unknown): LearningTrajectoryResponse => {
+export const toLearningTrajectoryResponse = (
+  payload: unknown,
+): LearningTrajectoryResponse => {
   const record = asRecord(payload);
 
   return {
@@ -899,7 +973,9 @@ export const toLearningTrajectoryResponse = (payload: unknown): LearningTrajecto
     page: asNumber(record.page),
     limit: asNumber(record.limit),
     total: asNumber(record.total),
-    items: asRecordArray(safeGet(record, "items", undefined)).map((item) => toLearningTrajectoryItem(item)),
+    items: asRecordArray(safeGet(record, "items", undefined)).map((item) =>
+      toLearningTrajectoryItem(item),
+    ),
     raw: record,
   };
 };
@@ -922,7 +998,9 @@ const toReviewPackExampleItem = (value: unknown): ReviewPackExampleItem => {
   };
 };
 
-const toReviewPackTierStudentItem = (value: unknown): ReviewPackTierStudentItem => {
+const toReviewPackTierStudentItem = (
+  value: unknown,
+): ReviewPackTierStudentItem => {
   const record = asRecord(value);
   const studentNameCandidate =
     asString(record.studentName) ??
@@ -951,13 +1029,13 @@ const toReviewPackStudentTiers = (value: unknown): ReviewPackStudentTiers => {
   const record = asRecord(value);
   return {
     good: asRecordArray(safeGet(record, "good", undefined)).map((item) =>
-      toReviewPackTierStudentItem(item)
+      toReviewPackTierStudentItem(item),
     ),
     watch: asRecordArray(safeGet(record, "watch", undefined)).map((item) =>
-      toReviewPackTierStudentItem(item)
+      toReviewPackTierStudentItem(item),
     ),
-    notSubmitted: asRecordArray(safeGet(record, "notSubmitted", undefined)).map((item) =>
-      toReviewPackTierStudentItem(item)
+    notSubmitted: asRecordArray(safeGet(record, "notSubmitted", undefined)).map(
+      (item) => toReviewPackTierStudentItem(item),
     ),
     raw: record,
   };
@@ -972,10 +1050,12 @@ export const toReviewPackResponse = (payload: unknown): ReviewPackResponse => {
     window: asString(record.window),
     overview: asRecord(safeGet(record, "overview", undefined)),
     commonIssues: asRecord(safeGet(record, "commonIssues", undefined)),
-    examples: asRecordArray(safeGet(record, "examples", undefined)).map((item) =>
-      toReviewPackExampleItem(item)
+    examples: asRecordArray(safeGet(record, "examples", undefined)).map(
+      (item) => toReviewPackExampleItem(item),
     ),
-    studentTiers: toReviewPackStudentTiers(safeGet(record, "studentTiers", undefined)),
+    studentTiers: toReviewPackStudentTiers(
+      safeGet(record, "studentTiers", undefined),
+    ),
     raw: record,
   };
 };
@@ -1004,15 +1084,17 @@ export const toAiMetricsResponse = (payload: unknown): AiMetricsResponse => {
   };
 };
 
-export const toWeeklyReportResponse = (payload: unknown): WeeklyReportResponse => {
+export const toWeeklyReportResponse = (
+  payload: unknown,
+): WeeklyReportResponse => {
   const record = asRecord(payload);
   const summary = pickFirstNonEmptyRecord(
     safeGet(record, "summary", undefined),
-    safeGet(record, "data.summary", undefined)
+    safeGet(record, "data.summary", undefined),
   );
   const overview = pickFirstNonEmptyRecord(
     safeGet(record, "overview", undefined),
-    safeGet(record, "data.overview", undefined)
+    safeGet(record, "data.overview", undefined),
   );
   const items =
     asRecordArray(safeGet(record, "items", undefined)).length > 0
@@ -1029,7 +1111,9 @@ export const toWeeklyReportResponse = (payload: unknown): WeeklyReportResponse =
   };
 };
 
-export const toProcessAssessmentResponse = (payload: unknown): ProcessAssessmentResponse => {
+export const toProcessAssessmentResponse = (
+  payload: unknown,
+): ProcessAssessmentResponse => {
   const record = asRecord(payload);
   const itemsCandidates = [
     safeGet<unknown>(record, "items", undefined),
@@ -1051,25 +1135,33 @@ export const toProcessAssessmentResponse = (payload: unknown): ProcessAssessment
   return {
     classroomId: asString(record.classroomId),
     window: asString(record.window),
-    page: asNumber(record.page) ?? asNumber(safeGet(record, "pagination.page", undefined)),
-    limit: asNumber(record.limit) ?? asNumber(safeGet(record, "pagination.limit", undefined)),
-    total: asNumber(record.total) ?? asNumber(safeGet(record, "pagination.total", undefined)),
+    page:
+      asNumber(record.page) ??
+      asNumber(safeGet(record, "pagination.page", undefined)),
+    limit:
+      asNumber(record.limit) ??
+      asNumber(safeGet(record, "pagination.limit", undefined)),
+    total:
+      asNumber(record.total) ??
+      asNumber(safeGet(record, "pagination.total", undefined)),
     items,
     raw: record,
   };
 };
 
-export const toExportSnapshotResponse = (payload: unknown): ExportSnapshotResponse => {
+export const toExportSnapshotResponse = (
+  payload: unknown,
+): ExportSnapshotResponse => {
   const record = asRecord(payload);
   const meta = pickFirstNonEmptyRecord(
     safeGet(record, "meta", undefined),
-    safeGet(record, "data.meta", undefined)
+    safeGet(record, "data.meta", undefined),
   );
   const notesRaw = safeGet<unknown>(meta, "notes", undefined);
   const notes = asStringArray(notesRaw);
   const summary = pickFirstNonEmptyRecord(
     safeGet(record, "summary", undefined),
-    safeGet(record, "data.summary", undefined)
+    safeGet(record, "data.summary", undefined),
   );
   const singleNote = asString(notesRaw);
 
@@ -1077,33 +1169,32 @@ export const toExportSnapshotResponse = (payload: unknown): ExportSnapshotRespon
     classroomId: asString(record.classroomId),
     window: asString(record.window),
     meta,
-    notes:
-      notes.length > 0
-        ? notes
-        : singleNote
-          ? [singleNote]
-          : [],
+    notes: notes.length > 0 ? notes : singleNote ? [singleNote] : [],
     summary,
     raw: record,
   };
 };
 
 export const normalizeClassroomTaskStatus = (
-  value: unknown
+  value: unknown,
 ): ClassroomTaskStatus | undefined => {
   const status = asString(value);
   if (!status) {
     return undefined;
   }
   const normalized = status.toUpperCase();
-  if (normalized === "ACTIVE" || normalized === "CLOSED" || normalized === "RECALLED") {
+  if (
+    normalized === "ACTIVE" ||
+    normalized === "CLOSED" ||
+    normalized === "RECALLED"
+  ) {
     return normalized;
   }
   return undefined;
 };
 
 export const normalizeClassroomStatus = (
-  value: unknown
+  value: unknown,
 ): ClassroomStatus | undefined => {
   const status = asString(value);
   if (!status) {
@@ -1117,7 +1208,7 @@ export const normalizeClassroomStatus = (
 };
 
 export const normalizeCourseStatus = (
-  value: unknown
+  value: unknown,
 ): CourseStatus | undefined => {
   const status = asString(value);
   if (!status) {
@@ -1167,7 +1258,9 @@ const toClassroomStudent = (value: unknown): ClassroomStudent => {
   };
 };
 
-export const toClassroomStudentsResponse = (payload: unknown): ClassroomStudentsResponse => {
+export const toClassroomStudentsResponse = (
+  payload: unknown,
+): ClassroomStudentsResponse => {
   if (Array.isArray(payload)) {
     return {
       items: payload.map((item) => toClassroomStudent(item)),
@@ -1186,7 +1279,9 @@ export const toClassroomStudentsResponse = (payload: unknown): ClassroomStudents
     safeGet<unknown>(record, "data", undefined);
 
   return {
-    items: asRecordArray(candidateItems).map((item) => toClassroomStudent(item)),
+    items: asRecordArray(candidateItems).map((item) =>
+      toClassroomStudent(item),
+    ),
     total:
       asNumber(record.total) ??
       asNumber(safeGet(record, "pagination.total", undefined)) ??
@@ -1203,7 +1298,9 @@ export const toClassroomStudentsResponse = (payload: unknown): ClassroomStudents
   };
 };
 
-const toClassroomTaskSubmissionItem = (value: unknown): ClassroomTaskSubmissionItem => {
+const toClassroomTaskSubmissionItem = (
+  value: unknown,
+): ClassroomTaskSubmissionItem => {
   const record = asRecord(value);
   const studentRecord = asRecord(safeGet(record, "student", undefined));
 
@@ -1229,7 +1326,7 @@ const toClassroomTaskSubmissionItem = (value: unknown): ClassroomTaskSubmissionI
 };
 
 export const toClassroomTaskSubmissionsResponse = (
-  payload: unknown
+  payload: unknown,
 ): ClassroomTaskSubmissionsResponse => {
   if (Array.isArray(payload)) {
     return {
@@ -1249,7 +1346,9 @@ export const toClassroomTaskSubmissionsResponse = (
     safeGet<unknown>(record, "data", undefined);
 
   return {
-    items: asRecordArray(candidateItems).map((item) => toClassroomTaskSubmissionItem(item)),
+    items: asRecordArray(candidateItems).map((item) =>
+      toClassroomTaskSubmissionItem(item),
+    ),
     page:
       asNumber(record.page) ??
       asNumber(safeGet(record, "pagination.page", undefined)) ??
@@ -1266,11 +1365,12 @@ export const toClassroomTaskSubmissionsResponse = (
   };
 };
 
-export const toTeacherFeedbackListResponse = (payload: unknown): TeacherFeedbackListResponse =>
-  toListFeedbackResponse(payload);
+export const toTeacherFeedbackListResponse = (
+  payload: unknown,
+): TeacherFeedbackListResponse => toListFeedbackResponse(payload);
 
 export const toSubmissionDetailResponse = (
-  payload: unknown
+  payload: unknown,
 ): SubmissionDetailResponse => toStudentSubmissionDetailResponse(payload);
 
 const toEpochTime = (iso: string | undefined): number => {
@@ -1281,11 +1381,15 @@ const toEpochTime = (iso: string | undefined): number => {
   return Number.isFinite(timestamp) ? timestamp : Number.NEGATIVE_INFINITY;
 };
 
-const sortFeedbackByCreatedAtDesc = (items: TeacherFeedbackItem[]): TeacherFeedbackItem[] =>
-  [...items].sort((left, right) => toEpochTime(right.createdAt) - toEpochTime(left.createdAt));
+const sortFeedbackByCreatedAtDesc = (
+  items: TeacherFeedbackItem[],
+): TeacherFeedbackItem[] =>
+  [...items].sort(
+    (left, right) => toEpochTime(right.createdAt) - toEpochTime(left.createdAt),
+  );
 
 export const groupTeacherFeedbackItems = (
-  items: TeacherFeedbackItem[]
+  items: TeacherFeedbackItem[],
 ): GroupedTeacherFeedbackItems => {
   const grouped: GroupedTeacherFeedbackItems = {
     teacher: [],
@@ -1313,7 +1417,9 @@ export const groupTeacherFeedbackItems = (
   };
 };
 
-export const getDashboardItems = (dashboard: DashboardResponse): UnknownRecord[] => {
+export const getDashboardItems = (
+  dashboard: DashboardResponse,
+): UnknownRecord[] => {
   const candidates = [
     safeGet<unknown>(dashboard, "items", undefined),
     safeGet<unknown>(dashboard, "tasks", undefined),
@@ -1331,7 +1437,9 @@ export const getDashboardItems = (dashboard: DashboardResponse): UnknownRecord[]
   return [];
 };
 
-export const getDashboardAiBreakdown = (dashboard: DashboardResponse): UnknownRecord => {
+export const getDashboardAiBreakdown = (
+  dashboard: DashboardResponse,
+): UnknownRecord => {
   const candidates = [
     safeGet<unknown>(dashboard, "aiStatusBreakdown", undefined),
     safeGet<unknown>(dashboard, "ai.breakdown", undefined),
