@@ -144,10 +144,12 @@ Teacher 批阅链路（可用）：
 2. `/teacher/submissions/[submissionId]`（稳定读源）
 3. `TeacherFeedbackForm` -> `POST learning-tasks/submissions/:id/feedback`
    - 新增教师反馈表单已补齐 `type` 选择；当前新增字段口径统一为 `type/severity/message/suggestion/tags`。
+   - `tags` 可选，前端不做必填校验；不选择时继续不提交 `tags`，由后端归一化为 `other`，教师端仅提示该规则。
    - `scoreHint` 作为后端响应兼容字段保留在前端类型与 mapper 中，但教师前端暂不展示、不新增、不提交。
 4. `TeacherFeedbackHistory` + `TeacherFeedbackEditForm` -> `PATCH learning-tasks/submissions/:submissionId/feedback/:feedbackId`
    - 反馈历史中仅 `source=TEACHER` 且有 `id` 的条目显示“修改”入口；AI/SYSTEM 反馈保持只读。
    - 点击“修改”后在当前条目内原地展开编辑表单，支持 `type/severity/message/suggestion/tags`；保存成功后执行 `router.refresh()` 并退出编辑态。
+   - 编辑表单中的 `tags` 同样可选；反馈历史继续按既有口径展示原始枚举值，不单独将 `other` 中文化。
    - `scoreHint` 暂不作为教师日常操作项展示或提交，避免被误读为正式评分。
    - 前端仅做基础入口与表单校验，不根据 `createdBy` 强判权限；403/404/400/5xx 按状态展示明确中文错误摘要并保留后端 detail。
 5. 提交管理页中 `attemptNo` 的前端展示语义已收口为“该学生在当前 classroomTask 下的第几次提交”（表头“本任务第几次提交”），并在页内明确“不跨班级累计”；数据来源仍直接使用接口返回值。

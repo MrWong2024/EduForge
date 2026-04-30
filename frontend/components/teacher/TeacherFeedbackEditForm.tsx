@@ -244,7 +244,9 @@ export function TeacherFeedbackEditForm({
       </label>
 
       <fieldset className="mt-3 block text-sm">
-        <legend className="mb-2 block text-zinc-700">标签（可选，多选）</legend>
+        <legend className="mb-2 block text-zinc-700">
+          标签（可选，多选；不选将归为 other）
+        </legend>
         <div className="max-h-44 overflow-auto rounded-md border border-zinc-300 p-2">
           <div className="grid gap-2 sm:grid-cols-2">
             {FEEDBACK_TAG_OPTIONS.map((option) => (
@@ -263,6 +265,9 @@ export function TeacherFeedbackEditForm({
             ))}
           </div>
         </div>
+        <span className="mt-1 block text-xs text-zinc-500">
+          用于归类常见问题；不选择时系统会按 other 处理。
+        </span>
       </fieldset>
 
       <div className="mt-4 flex flex-wrap items-center gap-3">

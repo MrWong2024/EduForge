@@ -39,9 +39,9 @@
 | EditClassroomTaskForm | `components/teacher/EditClassroomTaskForm.tsx` | `PATCH classrooms/:classroomId/tasks/:classroomTaskId` | 只负责课堂任务实例级配置编辑（`dueAt/allowLate/maxAttempts`）；以列表行内展开表单承载编辑；仅 `ACTIVE/CLOSED` 显示入口并允许提交，`RECALLED` 不显示入口；不修改模板本体、不修改状态流 |
 | PublishTaskStatusButton | `components/teacher/PublishTaskStatusButton.tsx` | `POST learning-tasks/tasks/:id/publish` | 仅做 task 发布状态操作 |
 | RemoveStudentButton | `components/teacher/RemoveStudentButton.tsx` | `POST classrooms/:id/students/:uid/remove` | 仅做移除动作，不负责成员列表 |
-| TeacherFeedbackForm | `components/teacher/TeacherFeedbackForm.tsx` | `POST learning-tasks/submissions/:id/feedback` | 仅做教师反馈创建；新增字段口径为 `type/severity/message/suggestion/tags`，其中 `type/severity` 复用前端统一反馈选项，`scoreHint` 后端响应兼容但前端不提供新增入口 |
+| TeacherFeedbackForm | `components/teacher/TeacherFeedbackForm.tsx` | `POST learning-tasks/submissions/:id/feedback` | 仅做教师反馈创建；新增字段口径为 `type/severity/message/suggestion/tags`，其中 `type/severity` 复用前端统一反馈选项；`tags` 可选，不选时由后端归一化为 `other`，前端只做规则提示，不改变原始枚举展示；`scoreHint` 后端响应兼容但前端不提供新增入口 |
 | TeacherFeedbackHistory | `components/teacher/TeacherFeedbackHistory.tsx` | - | 仅负责教师提交详情页反馈历史展示与编辑态切换；只对 `source=TEACHER` 且有 `id` 的反馈显示“修改”，AI/SYSTEM 反馈保持只读；同一时间只展开一个编辑表单 |
-| TeacherFeedbackEditForm | `components/teacher/TeacherFeedbackEditForm.tsx` | `PATCH learning-tasks/submissions/:submissionId/feedback/:feedbackId` | 仅负责单条教师反馈原地编辑（`type/severity/message/suggestion/tags`）；请求通过 `browser-client.fetchJson` 走 `/api/proxy/**`；保存成功后 `router.refresh()` 并退出编辑态；400/403/404/5xx 分别显示明确中文摘要与后端 detail；`scoreHint` 后端响应兼容但前端不展示、不提交、不编辑 |
+| TeacherFeedbackEditForm | `components/teacher/TeacherFeedbackEditForm.tsx` | `PATCH learning-tasks/submissions/:submissionId/feedback/:feedbackId` | 仅负责单条教师反馈原地编辑（`type/severity/message/suggestion/tags`）；`tags` 可选，不选时由后端归一化为 `other`，前端只做规则提示，不改变原始枚举展示；请求通过 `browser-client.fetchJson` 走 `/api/proxy/**`；保存成功后 `router.refresh()` 并退出编辑态；400/403/404/5xx 分别显示明确中文摘要与后端 detail；`scoreHint` 后端响应兼容但前端不展示、不提交、不编辑 |
 
 ## 4) Student 交互组件
 
