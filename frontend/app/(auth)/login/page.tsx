@@ -74,6 +74,14 @@ function LoginFrame({ children }: { children: ReactNode }) {
           <div className="mx-auto w-full max-w-lg">{children}</div>
         </div>
       </div>
+      <a
+        href="https://beian.miit.gov.cn/"
+        target="_blank"
+        rel="noopener noreferrer"
+        className="fixed bottom-2 left-0 right-0 text-center text-[11px] text-zinc-400 transition-colors hover:text-zinc-500"
+      >
+        渝ICP备2026008292号-1
+      </a>
     </section>
   );
 }
