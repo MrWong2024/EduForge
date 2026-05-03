@@ -63,6 +63,11 @@ import {
   CLASSROOM_TASK_STATUS_RECALLED,
   type ClassroomTaskStatus,
 } from '../classroom-task-status.constants';
+import {
+  CompletionFeedback,
+  buildCompletionStatus,
+  buildNotSubmittedCompletionStatus,
+} from '../../services/student-task-completion-status';
 
 type ClassroomTaskWithMeta = ClassroomTask & WithId & WithTimestamps;
 type ClassroomTaskWithTask = ClassroomTaskWithMeta & { task: Task };
@@ -1207,6 +1212,15 @@ export class ClassroomTasksService {
     });
 
     const latestSubmission = submissionItems[submissionItems.length - 1];
+    const completionFeedbacks =
+      latestSubmission === undefined
+        ? []
+        : await this.getCompletionFeedbacksBySubmissionId(
+            new Types.ObjectId(latestSubmission.id),
+          );
+    const completionStatus = latestSubmission
+      ? buildCompletionStatus(latestSubmission.id, completionFeedbacks)
+      : buildNotSubmittedCompletionStatus();
 
     return {
       classroom: {
@@ -1235,6 +1249,7 @@ export class ClassroomTasksService {
       },
       me: { studentId: studentObjectId.toString() },
       submissions: submissionItems,
+      completionStatus,
       latest: latestSubmission
         ? {
             submissionId: latestSubmission.id,
@@ -1640,6 +1655,16 @@ export class ClassroomTasksService {
       countMap.set(row._id.toString(), row.count);
     }
     return countMap;
+  }
+
+  private async getCompletionFeedbacksBySubmissionId(id: Types.ObjectId) {
+    return this.feedbackModel
+      .find({
+        submissionId: id,
+        source: { $in: [FeedbackSource.Teacher, FeedbackSource.AI] },
+      })
+      .lean<CompletionFeedback[]>()
+      .exec();
   }
 
   private async getFeedbackItemsPreviewBySubmissionIds(

@@ -281,6 +281,10 @@ AI Provider 错误码（`ai-feedback-provider.error-codes.ts`）：
   - 只纳入 `FeedbackSource.TEACHER` 与 `FeedbackSource.AI`；`SYSTEM` 不参与完成情况判断。
   - 来源优先级为 `TEACHER > AI`；同一来源多条反馈取最严重 `ERROR > WARN > INFO`。
   - 最终映射：`INFO -> QUALIFIED`，`WARN -> QUALIFIED_WITH_WARNINGS`，`ERROR -> UNQUALIFIED`；无提交返回 `NOT_SUBMITTED`；有最新提交但无 TEACHER/AI 反馈返回 `NO_FEEDBACK`。
+- 学生任务详情完成情况契约（后端已完成，前端待后续阶段接入）：
+  - `GET /api/classrooms/:classroomId/tasks/:classroomTaskId/my-task-detail` 顶层新增 `completionStatus`。
+  - `completionStatus` 只基于顶层 `latest.submissionId` 查询完整 TEACHER/AI 反馈；不受历史 `submissions[]`、其它 `classroomTask`、`includeFeedbackItems=false` 或 `feedbackLimit` 截断影响。
+  - 规则与学生看板一致：`TEACHER > AI`，同源多条取最严重 `ERROR > WARN > INFO`；`INFO -> QUALIFIED`，`WARN -> QUALIFIED_WITH_WARNINGS`，`ERROR -> UNQUALIFIED`；无 latest 返回 `NOT_SUBMITTED`，latest 无 TEACHER/AI 反馈返回 `NO_FEEDBACK`。
 - P1 班级归档/删除契约（后端阶段一已完成，前端待后续阶段接入）：
   - 状态口径：`Classroom.status` 仅 `ACTIVE | ARCHIVED`，支持通过 `PATCH /api/classrooms/:id` 的 `status` 字段执行归档/恢复。
   - 兼容接口：保留 `POST /api/classrooms/:id/archive`，内部已收口到统一状态更新链路。

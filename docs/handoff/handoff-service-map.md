@@ -307,21 +307,23 @@
 
 - Service: `backend/src/modules/classrooms/classroom-tasks/services/classroom-tasks.service.ts#getMyTaskDetail`
 - Domain: `ClassroomTask student aggregate`
-- Actions: `authorize-student-member`, `load-submissions`, `map-ai-status`, `optional-feedback-preview`
+- Actions: `authorize-student-member`, `load-submissions`, `map-ai-status`, `optional-feedback-preview`, `derive-completion-status`
 - I/O Shape:
   - In: `classroomId`, `classroomTaskId`, `userId`, `includeFeedbackItems`, `feedbackLimit`
-  - Out: `{ classroom, classroomTask, task, me, submissions[], latest|null }`
+  - Out: `{ classroom, classroomTask, task, me, submissions[], completionStatus, latest|null }`
 - Key Methods:
   - `getMyTaskDetail(classroomId, classroomTaskId, query, userId)`
 - AuthZ Boundary: `student-only + Enrollment ACTIVE`
-- Metrics/Isolation: 当前课堂任务的所有聚合只按 `classroomTaskId`；`aiFeedbackStatus` 无 job 时为 `NOT_REQUESTED`（合法语义）
-- Consistency/Constraints: `includeFeedbackItems=false` 时不拉取 feedback 明细；`feedbackLimit` 截断明细条数
+- Metrics/Isolation: 当前课堂任务的所有聚合只按 `classroomTaskId`；`completionStatus` 只基于顶层 `latest.submissionId` 对应的完整 TEACHER/AI 反馈集合，不读取历史 `submissions[]`，不混入其它 `classroomTask`；`aiFeedbackStatus` 无 job 时为 `NOT_REQUESTED`（合法语义）
+- Consistency/Constraints: 顶层 `completionStatus.status` 值域为 `NOT_SUBMITTED|NO_FEEDBACK|QUALIFIED|QUALIFIED_WITH_WARNINGS|UNQUALIFIED`；反馈来源只纳入 `TEACHER/AI`，`SYSTEM` 不参与；最终来源优先级 `TEACHER > AI`；同一来源多条反馈取最严重 `ERROR > WARN > INFO`；`INFO->QUALIFIED`、`WARN->QUALIFIED_WITH_WARNINGS`、`ERROR->UNQUALIFIED`；无 latest 返回 `NOT_SUBMITTED`，latest 无 TEACHER/AI 反馈返回 `NO_FEEDBACK`；`includeFeedbackItems=false` 时不拉取返回用 feedback 明细，`feedbackLimit` 只截断返回明细条数，均不影响 `completionStatus` 计算
 - Deps/Side Effects: `ClassroomModel`, `ClassroomTaskModel`, `TaskModel`, `SubmissionModel`, `EnrollmentService`, `AiFeedbackJobService`, `FeedbackModel`；只读
-- Performance Notes: `statusMap/feedbackSummary/feedbackItemsPreview` 批量并发拉取
+- Performance Notes: `statusMap/feedbackSummary/feedbackItemsPreview` 批量并发拉取；`completionStatus` 对 latest submissionId 单独查询完整 TEACHER/AI feedback，避免使用被 `feedbackLimit` 截断的 `latest.feedbackItems`
 - SoT: `backend/src/modules/classrooms/classroom-tasks/services/classroom-tasks.service.ts`; `backend/src/modules/classrooms/classroom-tasks/dto/query-my-task-detail.dto.ts`
 - Failure Modes:
   - 班级/课堂任务/任务不存在 -> `404`
   - 非成员学生 -> `403`
+  - 无 latest -> `completionStatus.status=NOT_SUBMITTED`
+  - latest 无 TEACHER/AI 反馈 -> `completionStatus.status=NO_FEEDBACK`
 
 ## Service Card 08E（Feature: Learning Trajectory, Z4）
 
