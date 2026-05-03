@@ -58,14 +58,46 @@ export type JoinClassroomResponse = {
   raw: UnknownRecord;
 };
 
+export type StudentTaskCompletionStatusValue =
+  | "NOT_SUBMITTED"
+  | "NO_FEEDBACK"
+  | "QUALIFIED"
+  | "QUALIFIED_WITH_WARNINGS"
+  | "UNQUALIFIED";
+
+export type StudentTaskCompletionSeverity = "INFO" | "WARN" | "ERROR";
+
+export type StudentTaskCompletionSource = "TEACHER" | "AI";
+
+export type StudentTaskCompletionStatus = {
+  status: StudentTaskCompletionStatusValue;
+  severity: StudentTaskCompletionSeverity | null;
+  source: StudentTaskCompletionSource | null;
+  latestSubmissionId: string | null;
+  teacherFeedbackCount: number;
+  aiFeedbackCount: number;
+  teacherWorstSeverity: StudentTaskCompletionSeverity | null;
+  aiWorstSeverity: StudentTaskCompletionSeverity | null;
+};
+
+export type StudentDashboardLatestSubmission = {
+  submissionId?: string;
+  attemptNo?: number;
+  createdAt?: string;
+  aiFeedbackStatus?: string;
+  raw: UnknownRecord;
+};
+
 export type StudentDashboardTaskItem = {
   classroomTaskId?: string;
   taskId?: string;
   title?: string;
   publishedAt?: string;
   dueAt?: string;
+  myLatestSubmission?: StudentDashboardLatestSubmission | null;
   mySubmissionsCount?: number;
   aiFeedbackStatus?: string;
+  completionStatus?: StudentTaskCompletionStatus;
   raw: UnknownRecord;
 };
 
@@ -159,7 +191,7 @@ const toStudentDashboardTaskItem = (
   value: unknown,
 ): StudentDashboardTaskItem => {
   const record = asRecord(value);
-  const latestSubmission = asRecord(
+  const latestSubmission = toStudentDashboardLatestSubmission(
     safeGet(record, "myLatestSubmission", undefined),
   );
 
@@ -169,11 +201,80 @@ const toStudentDashboardTaskItem = (
     title: asString(record.title) ?? asString(record.name),
     publishedAt: asString(record.publishedAt),
     dueAt: asString(record.dueAt),
+    myLatestSubmission: latestSubmission,
     mySubmissionsCount: asNumber(record.mySubmissionsCount),
     aiFeedbackStatus:
-      asString(safeGet(latestSubmission, "aiFeedbackStatus", undefined)) ??
-      asString(record.aiFeedbackStatus),
+      latestSubmission?.aiFeedbackStatus ?? asString(record.aiFeedbackStatus),
+    completionStatus: toStudentTaskCompletionStatus(record.completionStatus),
     raw: record,
+  };
+};
+
+const isCompletionStatusValue = (
+  value: string | undefined,
+): value is StudentTaskCompletionStatusValue =>
+  value === "NOT_SUBMITTED" ||
+  value === "NO_FEEDBACK" ||
+  value === "QUALIFIED" ||
+  value === "QUALIFIED_WITH_WARNINGS" ||
+  value === "UNQUALIFIED";
+
+const isCompletionSeverity = (
+  value: string | undefined,
+): value is StudentTaskCompletionSeverity =>
+  value === "INFO" || value === "WARN" || value === "ERROR";
+
+const isCompletionSource = (
+  value: string | undefined,
+): value is StudentTaskCompletionSource =>
+  value === "TEACHER" || value === "AI";
+
+const toStudentDashboardLatestSubmission = (
+  value: unknown,
+): StudentDashboardLatestSubmission | null => {
+  if (value === null || value === undefined) {
+    return null;
+  }
+  const record = asRecord(value);
+  if (Object.keys(record).length === 0) {
+    return null;
+  }
+
+  return {
+    submissionId: asString(record.submissionId) ?? asString(record.id),
+    attemptNo: asNumber(record.attemptNo),
+    createdAt: asString(record.createdAt),
+    aiFeedbackStatus: asString(record.aiFeedbackStatus),
+    raw: record,
+  };
+};
+
+const toStudentTaskCompletionStatus = (
+  value: unknown,
+): StudentTaskCompletionStatus | undefined => {
+  const record = asRecord(value);
+  const status = asString(record.status);
+  if (!isCompletionStatusValue(status)) {
+    return undefined;
+  }
+  const severity = asString(record.severity);
+  const source = asString(record.source);
+  const teacherWorstSeverity = asString(record.teacherWorstSeverity);
+  const aiWorstSeverity = asString(record.aiWorstSeverity);
+
+  return {
+    status,
+    severity: isCompletionSeverity(severity) ? severity : null,
+    source: isCompletionSource(source) ? source : null,
+    latestSubmissionId: asNullableString(record.latestSubmissionId) ?? null,
+    teacherFeedbackCount: asNumber(record.teacherFeedbackCount) ?? 0,
+    aiFeedbackCount: asNumber(record.aiFeedbackCount) ?? 0,
+    teacherWorstSeverity: isCompletionSeverity(teacherWorstSeverity)
+      ? teacherWorstSeverity
+      : null,
+    aiWorstSeverity: isCompletionSeverity(aiWorstSeverity)
+      ? aiWorstSeverity
+      : null,
   };
 };
 

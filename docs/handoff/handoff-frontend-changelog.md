@@ -599,6 +599,12 @@
 - 【展示边界】反馈历史中的 `tags` 继续按既有原始枚举值展示，不单独将 `other` 中文化，也不推进 `type/severity/tags` 统一中文化。
 - 【边界保持】不改后端 `normalizeTeacherFeedbackTags`，不改变 POST/PATCH 请求结构，不新增标签必填校验，不恢复 `scoreHint` 前端入口。
 
+## UAT-FE-71
+
+- 【本步解决】学生看板任务列表 AI 状态中英文混排、缺少后端完成结论展示的问题。
+- 【新增事实 / 已收口口径】`/student/dashboard` 的任务列表 AI 状态列已改为中文标签；新增“完成情况”列，直接消费后端 `completionStatus.status` 展示未提交/暂无反馈/已合格/基本合格/不合格。
+- 【边界保持】完成情况不在前端按 `aiFeedbackStatus`、`mySubmissionsCount`、历史提交或额外接口二次推断；仅做旧响应兼容兜底。不改 backend，不新增依赖。
+
 ## 当前阶段一句话结论
 
 前端已达到“Teacher/Student 主链路可用 + 任务模板层与班级实例层边界收口 + 教师模板主链路可维护”的工程验收阶段，但尚未进入最终交付定版阶段。
