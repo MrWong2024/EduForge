@@ -154,22 +154,24 @@
 ## Service Card 06
 
 - Service: `backend/src/modules/classrooms/services/student-learning-dashboard.service.ts`
-- Domain: `ClassroomTask + Submission + AiFeedbackStatus`
-- Actions: `list-my-classrooms`, `aggregate-classroom-tasks`, `pick-latest-submission`, `map-status`
+- Domain: `ClassroomTask + Submission + Feedback + AiFeedbackStatus`
+- Actions: `list-my-classrooms`, `aggregate-classroom-tasks`, `pick-latest-submission`, `map-status`, `derive-completion-status`
 - I/O Shape:
   - In: `QueryClassroomDto(page,limit,status)`, `userId`
   - Out: `student dashboard aggregate`
 - Key Methods:
   - `getMyLearningDashboard(query: QueryClassroomDto, userId: string): Promise<Record<string, unknown>> — called by ClassroomsService and /classrooms/mine/dashboard`
 - AuthZ Boundary: `student-only`（由上层 `ClassroomsService.ensureStudent` 保障）
-- Metrics/Isolation: “我的班级”主路径来自 `EnrollmentService.listActiveClassroomIdsByUser`；提交与状态按 `classroomTaskId` 聚合
-- Consistency/Constraints: 无 job 记录时状态回退 `NOT_REQUESTED`
-- Deps/Side Effects: `ClassroomModel`, `ClassroomTaskModel`, `SubmissionModel`, `AiFeedbackJobService`, `EnrollmentService`；只读
-- Performance Notes: 先批量取班级任务，再批量取 submissions/statusMap，避免按班级循环查库
+- Metrics/Isolation: “我的班级”主路径来自 `EnrollmentService.listActiveClassroomIdsByUser`；提交与状态按 `classroomTaskId` 聚合；`completionStatus` 只基于当前 task 的 `myLatestSubmission.submissionId` 查询反馈，不按 `taskId/classroomTaskId/studentId` 粗暴聚合反馈
+- Consistency/Constraints: 无 job 记录时状态回退 `NOT_REQUESTED`；每个 task item 顶层返回 `completionStatus`，值域为 `NOT_SUBMITTED|NO_FEEDBACK|QUALIFIED|QUALIFIED_WITH_WARNINGS|UNQUALIFIED`；反馈来源只纳入 `TEACHER/AI`，`SYSTEM` 不参与；最终来源优先级 `TEACHER > AI`；同一来源多条反馈取最严重 `ERROR > WARN > INFO`；`INFO->QUALIFIED`、`WARN->QUALIFIED_WITH_WARNINGS`、`ERROR->UNQUALIFIED`；无提交返回 `NOT_SUBMITTED`，有最新提交但无 TEACHER/AI 反馈返回 `NO_FEEDBACK`
+- Deps/Side Effects: `ClassroomModel`, `ClassroomTaskModel`, `SubmissionModel`, `FeedbackModel`, `AiFeedbackJobService`, `EnrollmentService`；只读
+- Performance Notes: 先批量取班级任务，再批量取 submissions/statusMap；`completionStatus` 收集所有 latest submission ids 后批量查询 Feedback 并按 `submissionId` 分组，避免 N+1 与历史提交混入
 - SoT: `backend/src/modules/classrooms/services/student-learning-dashboard.service.ts`; `backend/src/modules/classrooms/enrollments/services/enrollment.service.ts`
 - Failure Modes:
   - 学生未加入任何班级 -> 返回空 `items`
   - 某任务无提交 -> `myLatestSubmission=null`
+  - 某任务无提交 -> `completionStatus.status=NOT_SUBMITTED`
+  - 某任务最新提交无 TEACHER/AI 反馈 -> `completionStatus.status=NO_FEEDBACK`
   - 某提交无 job -> `aiFeedbackStatus=NOT_REQUESTED`
 
 ## Service Card 07

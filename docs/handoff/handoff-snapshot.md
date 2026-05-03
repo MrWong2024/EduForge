@@ -275,6 +275,12 @@ AI Provider 错误码（`ai-feedback-provider.error-codes.ts`）：
 - AI feedback provider 契约已统一为 `analyzeSubmission(context: AiSubmissionAnalysisContext)`；`AiFeedbackProcessor` 在消费 job 时会先读取 submission，再按 `submission.taskId` 查询 task 并组装上下文后调用 provider（task 缺失进入失败链路）；主控约束已前移到 prompt/协议层（默认 1 条、必要时最多 2 条），processor compactor 继续作为轻量兜底。
 
 新增/变更产品能力（Z3、AA~AI、Z4~Z9 收口口径）：
+- 学生看板任务完成情况契约（后端已完成，前端待后续阶段接入）：
+  - `GET /api/classrooms/mine/dashboard` 的每个 task item 顶层新增 `completionStatus`。
+  - `completionStatus` 只基于当前学生该课堂任务的 `myLatestSubmission.submissionId` 查询反馈；不会回退历史提交，也不会混入其它 `classroomTask` 或同 `taskId` 其它课堂任务的反馈。
+  - 只纳入 `FeedbackSource.TEACHER` 与 `FeedbackSource.AI`；`SYSTEM` 不参与完成情况判断。
+  - 来源优先级为 `TEACHER > AI`；同一来源多条反馈取最严重 `ERROR > WARN > INFO`。
+  - 最终映射：`INFO -> QUALIFIED`，`WARN -> QUALIFIED_WITH_WARNINGS`，`ERROR -> UNQUALIFIED`；无提交返回 `NOT_SUBMITTED`；有最新提交但无 TEACHER/AI 反馈返回 `NO_FEEDBACK`。
 - P1 班级归档/删除契约（后端阶段一已完成，前端待后续阶段接入）：
   - 状态口径：`Classroom.status` 仅 `ACTIVE | ARCHIVED`，支持通过 `PATCH /api/classrooms/:id` 的 `status` 字段执行归档/恢复。
   - 兼容接口：保留 `POST /api/classrooms/:id/archive`，内部已收口到统一状态更新链路。
