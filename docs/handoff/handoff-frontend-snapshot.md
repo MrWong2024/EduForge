@@ -133,6 +133,9 @@ Student 学习链路（可用）：
    - 完成情况仅展示后端返回结论；前端不根据 `aiFeedbackStatus`、`mySubmissionsCount`、历史提交或额外接口二次推断合格/不合格。
    - 兼容旧响应：缺少 `completionStatus` 时，无最新提交显示“未提交”，有最新提交显示“暂无结论”。
 3. `/student/classrooms/[classroomId]/tasks/[classroomTaskId]` -> `GET .../my-task-detail`（页面已是“任务详情 + 提交工作台”，正式展示任务基础信息、任务说明 `task.description`、评分标准 `task.rubric`，并保留提交与历史记录；标题区不再展示“班级状态”占位文案，仅保留班级名称）
+   - 页面顶部“最新 AI 状态”和提交记录表“AI 状态”均以中文标签展示：未提交、未请求、排队中、生成中、已生成、生成失败、已终止；不再显示 `SUCCEEDED（已生成）` 这类中英文混排。
+   - 页面顶部新增“完成情况”，直接消费后端顶层 `completionStatus.status`：未提交、暂无反馈、已合格、基本合格、不合格；前端不根据 `submissions[]`、`latest.feedbackSummary`、`latest.feedbackItems` 或 `aiFeedbackStatus` 二次推断合格/不合格。
+   - 兼容旧响应：缺少 `completionStatus` 时，无 latest 显示“未提交”，有 latest 显示“暂无结论”。
    - 已接入 AI 状态联动自动刷新：当提交列表中存在 `PENDING/RUNNING/FAILED` 时自动刷新；其中 `PENDING/RUNNING` 快速刷新、仅 `FAILED` 时慢速刷新；当提交列表全部进入非活跃状态（如 `SUCCEEDED/DEAD/NOT_REQUESTED`）时停止。
    - 自动刷新覆盖“最新 AI 状态”与提交记录表“AI 状态”列，使用整页刷新链路同步更新；页面不可见/失焦时暂停，回到前台后按当前状态恢复。
    - 终态收尾口径已修正：自动刷新驱动改为对齐“latest + submissions”真实状态来源，并在活跃态结束时保留一次最小收尾刷新，`DEAD` 可在自动刷新过程中自然显示，不再依赖手工刷新。

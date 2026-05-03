@@ -125,6 +125,7 @@ export type MyTaskDetailResponse = {
   me: UnknownRecord;
   submissions: UnknownRecord[];
   latest: UnknownRecord | null;
+  completionStatus?: StudentTaskCompletionStatus;
   raw: UnknownRecord;
 };
 
@@ -379,6 +380,7 @@ export const toMyTaskDetailResponse = (
     me: asRecord(safeGet(record, "me", undefined)),
     submissions: asRecordArray(safeGet(record, "submissions", undefined)),
     latest: latest && typeof latest === "object" ? asRecord(latest) : null,
+    completionStatus: toStudentTaskCompletionStatus(record.completionStatus),
     raw: record,
   };
 };

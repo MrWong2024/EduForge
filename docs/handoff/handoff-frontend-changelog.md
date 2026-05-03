@@ -605,6 +605,12 @@
 - 【新增事实 / 已收口口径】`/student/dashboard` 的任务列表 AI 状态列已改为中文标签；新增“完成情况”列，直接消费后端 `completionStatus.status` 展示未提交/暂无反馈/已合格/基本合格/不合格。
 - 【边界保持】完成情况不在前端按 `aiFeedbackStatus`、`mySubmissionsCount`、历史提交或额外接口二次推断；仅做旧响应兼容兜底。不改 backend，不新增依赖。
 
+## UAT-FE-72
+
+- 【本步解决】学生任务详情页 AI 状态中英文混排、且缺少 latest 完成结论展示的问题。
+- 【新增事实 / 已收口口径】`/student/classrooms/[classroomId]/tasks/[classroomTaskId]` 顶部“最新 AI 状态”和历史提交 AI 状态均改为中文标签；顶部新增“完成情况”，直接消费后端顶层 `completionStatus.status` 展示未提交/暂无反馈/已合格/基本合格/不合格。
+- 【边界保持】完成情况不在前端按 `submissions[]`、`latest.feedbackSummary`、`latest.feedbackItems` 或 `aiFeedbackStatus` 二次推断；历史提交 ERROR 不影响 latest 完成情况展示。不改 backend，不新增依赖。
+
 ## 当前阶段一句话结论
 
 前端已达到“Teacher/Student 主链路可用 + 任务模板层与班级实例层边界收口 + 教师模板主链路可维护”的工程验收阶段，但尚未进入最终交付定版阶段。
