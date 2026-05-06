@@ -98,9 +98,15 @@ export class ClassroomsController {
   @Get(':id/dashboard')
   getClassroomDashboard(
     @Param('id') id: string,
+    @Query('includeClosedTasks')
+    includeClosedTasks: string | boolean | undefined,
     @CurrentUser() user: { id: string },
   ) {
-    return this.classroomsService.getDashboard(id, user.id);
+    return this.classroomsService.getDashboard(
+      id,
+      user.id,
+      includeClosedTasks === true || includeClosedTasks === 'true',
+    );
   }
 
   @UseGuards(RolesGuard)

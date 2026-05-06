@@ -275,6 +275,11 @@ AI Provider 错误码（`ai-feedback-provider.error-codes.ts`）：
 - AI feedback provider 契约已统一为 `analyzeSubmission(context: AiSubmissionAnalysisContext)`；`AiFeedbackProcessor` 在消费 job 时会先读取 submission，再按 `submission.taskId` 查询 task 并组装上下文后调用 provider（task 缺失进入失败链路）；主控约束已前移到 prompt/协议层（默认 1 条、必要时最多 2 条），processor compactor 继续作为轻量兜底。
 
 新增/变更产品能力（Z3、AA~AI、Z4~Z9 收口口径）：
+- 教师班级看板已关闭任务可见性契约（后端已完成，前端待后续阶段接入）：
+  - `GET /api/classrooms/:id/dashboard` 默认只返回 `classroomTask.status=ACTIVE` 的任务，用作当前教学看板。
+  - `includeClosedTasks=true` 时返回 `ACTIVE+CLOSED+CLOSE`，其中 `CLOSE` 为历史兼容关闭值；`RECALLED/缺失/未知状态` 仍不返回。
+  - 每个 task item 返回 `classroomTaskStatus`，字段值来自 `ClassroomTask.status`，供前端后续标记已关闭任务。
+  - summary 与任务级统计均基于本次返回任务集合：默认排除 `CLOSED/CLOSE`，显式包含关闭任务时统计随返回集合扩大。
 - 学生看板任务完成情况契约（后端已完成，前端待后续阶段接入）：
   - `GET /api/classrooms/mine/dashboard` 的每个 task item 顶层新增 `completionStatus`。
   - 学生看板定位为当前可参与任务入口，只返回 `classroomTask.status=ACTIVE` 的任务；已关闭或其它非 ACTIVE 课堂任务默认不显示，只有 CLOSED/非 ACTIVE 任务的班级不返回空分组，`total` 按最终返回班级分组统计。

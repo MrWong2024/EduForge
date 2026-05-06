@@ -3,6 +3,10 @@ import { InjectModel } from '@nestjs/mongoose';
 import { Model, PipelineStage, Types } from 'mongoose';
 import { Classroom } from '../schemas/classroom.schema';
 import { ClassroomTask } from '../classroom-tasks/schemas/classroom-task.schema';
+import {
+  CLASSROOM_TASK_STATUS_ACTIVE,
+  CLASSROOM_TASK_STATUS_CLOSED,
+} from '../classroom-tasks/classroom-task-status.constants';
 import { Submission } from '../../learning-tasks/schemas/submission.schema';
 import {
   AiFeedbackJob,
@@ -25,6 +29,7 @@ type ClassroomTaskDashboardItem = {
   knowledgeModule: string;
   publishedAt: Date;
   dueAt?: Date;
+  classroomTaskStatus: string;
 };
 
 type SubmissionStats = {
@@ -48,6 +53,7 @@ type TagStats = {
 @Injectable()
 export class TeacherClassroomDashboardService {
   private static readonly TOP_TAGS_LIMIT = 5;
+  private static readonly HISTORICAL_CLOSED_STATUS = 'CLOSE';
 
   constructor(
     @InjectModel(Classroom.name)
@@ -62,7 +68,7 @@ export class TeacherClassroomDashboardService {
     private readonly enrollmentService: EnrollmentService,
   ) {}
 
-  async getDashboard(id: string, userId: string) {
+  async getDashboard(id: string, userId: string, includeClosedTasks = false) {
     const classroom = await this.classroomModel
       .findOne({ _id: id, teacherId: new Types.ObjectId(userId) })
       .lean<ClassroomLean>()
@@ -71,8 +77,15 @@ export class TeacherClassroomDashboardService {
       throw new NotFoundException('Classroom not found');
     }
 
+    const visibleStatuses =
+      this.getVisibleClassroomTaskStatuses(includeClosedTasks);
     const classroomTaskPipeline: PipelineStage[] = [
-      { $match: { classroomId: new Types.ObjectId(id) } },
+      {
+        $match: {
+          classroomId: new Types.ObjectId(id),
+          status: { $in: visibleStatuses },
+        },
+      },
       {
         $lookup: {
           from: 'tasks',
@@ -86,6 +99,7 @@ export class TeacherClassroomDashboardService {
         $project: {
           _id: 1,
           taskId: 1,
+          classroomTaskStatus: '$status',
           publishedAt: 1,
           dueAt: 1,
           title: '$task.title',
@@ -98,8 +112,12 @@ export class TeacherClassroomDashboardService {
     const classroomTasks = await this.classroomTaskModel
       .aggregate<ClassroomTaskDashboardItem>(classroomTaskPipeline)
       .exec();
+    const visibleStatusSet = new Set<string>(visibleStatuses);
+    const visibleClassroomTasks = classroomTasks.filter((task) =>
+      visibleStatusSet.has(task.classroomTaskStatus),
+    );
 
-    const classroomTaskIds = classroomTasks.map((task) => task._id);
+    const classroomTaskIds = visibleClassroomTasks.map((task) => task._id);
     const studentsCount = await this.enrollmentService.countStudents(
       classroom._id.toString(),
     );
@@ -266,8 +284,8 @@ export class TeacherClassroomDashboardService {
       },
       summary: {
         studentsCount,
-        publishedTasksCount: classroomTasks.length,
-        lateSubmissionsTotal: classroomTasks.reduce((sum, task) => {
+        publishedTasksCount: visibleClassroomTasks.length,
+        lateSubmissionsTotal: visibleClassroomTasks.reduce((sum, task) => {
           const stat = submissionStatsMap.get(task._id.toString());
           return sum + (stat?.lateSubmissionsCount ?? 0);
         }, 0),
@@ -281,7 +299,7 @@ export class TeacherClassroomDashboardService {
           return lateStudentSet.size;
         })(),
       },
-      tasks: classroomTasks.map((task) => {
+      tasks: visibleClassroomTasks.map((task) => {
         const key = task._id.toString();
         const submissions = submissionStatsMap.get(key);
         const submissionsCount = submissions?.submissionsCount ?? 0;
@@ -305,6 +323,7 @@ export class TeacherClassroomDashboardService {
         const notRequested = rawNotRequested > 0 ? rawNotRequested : 0;
         return {
           classroomTaskId: task._id.toString(),
+          classroomTaskStatus: task.classroomTaskStatus,
           taskId: task.taskId.toString(),
           title: task.title,
           stage: task.stage,
@@ -324,5 +343,15 @@ export class TeacherClassroomDashboardService {
         };
       }),
     };
+  }
+
+  private getVisibleClassroomTaskStatuses(includeClosedTasks: boolean) {
+    return includeClosedTasks
+      ? [
+          CLASSROOM_TASK_STATUS_ACTIVE,
+          CLASSROOM_TASK_STATUS_CLOSED,
+          TeacherClassroomDashboardService.HISTORICAL_CLOSED_STATUS,
+        ]
+      : [CLASSROOM_TASK_STATUS_ACTIVE];
   }
 }

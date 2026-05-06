@@ -116,7 +116,7 @@
   - `listStudents(classroomId: string, query: QueryClassroomStudentsDto, userId: string): Promise<{ items: unknown[]; total: number; page: number; limit: number }> — called by GET /classrooms/:id/students`
   - `joinClassroom(dto: JoinClassroomDto, userId: string): Promise<ClassroomResponseDto> — called by POST /classrooms/join`
   - `removeStudent(id: string, studentId: string, userId: string): Promise<ClassroomResponseDto> — called by POST /classrooms/:id/students/:uid/remove`
-  - `getDashboard(id: string, userId: string): Promise<Record<string, unknown>> — delegates to teacher dashboard service`
+  - `getDashboard(id: string, userId: string, includeClosedTasks?: boolean): Promise<Record<string, unknown>> — delegates to teacher dashboard service`
   - `getMyLearningDashboard(query: QueryClassroomDto, userId: string): Promise<Record<string, unknown>> — delegates to student dashboard service`
 - AuthZ Boundary: `teacher-only`（管理） / `student-only`（加入） / `member-or-owner`（查看）
 - Metrics/Isolation: 班级管理按 `teacherId`；成员判定与统计统一通过 `EnrollmentService`；下游统计统一是 `classroomTaskId` 口径
@@ -136,15 +136,15 @@
 - Domain: `ClassroomTask + Submission + Feedback + AiFeedbackJob`
 - Actions: `aggregate-classroom-tasks`, `aggregate-submissions`, `aggregate-ai-status`, `build-dashboard`
 - I/O Shape:
-  - In: `classroomId`, `teacherUserId`
+  - In: `classroomId`, `teacherUserId`, `includeClosedTasks?`
   - Out: `teacher dashboard aggregate`
 - Key Methods:
-  - `getDashboard(id: string, userId: string): Promise<Record<string, unknown>> — called by ClassroomsService.getDashboard and /classrooms/:id/dashboard`
+  - `getDashboard(id: string, userId: string, includeClosedTasks?: boolean): Promise<Record<string, unknown>> — called by ClassroomsService.getDashboard and /classrooms/:id/dashboard`
 - AuthZ Boundary: `teacher-only + owner-only`（先校验班级 teacherId）
-- Metrics/Isolation: 强制按 `classroomTaskId` 聚合；`studentsCount` 来源为 Enrollment count；`notRequested = submissionsCount - requestedCount`（下限 0）
-- Consistency/Constraints: 仅统计 `FeedbackSource.AI` 的 tags；top tags 限制 `5`；迟交维度包含 `lateSubmissionsCount/lateDistinctStudentsCount`
+- Metrics/Isolation: 强制按 `classroomTaskId` 聚合；课堂任务可见性使用 `classroomTask.status` 白名单；默认只返回 `ACTIVE`，`includeClosedTasks=true` 返回 `ACTIVE+CLOSED+CLOSE`，`RECALLED/缺失/未知状态` 不返回；`studentsCount` 来源为 Enrollment count；`notRequested = submissionsCount - requestedCount`（下限 0）
+- Consistency/Constraints: 每个 task item 返回 `classroomTaskStatus`（来自 `ClassroomTask.status`，不可用 `task.status/classroom.status/dueAt` 替代）；默认统计与 tasks 均排除 `CLOSED/CLOSE`，显式包含关闭任务时 summary/任务级统计与返回任务集合一致；仅统计 `FeedbackSource.AI` 的 tags；top tags 限制 `5`；迟交维度包含 `lateSubmissionsCount/lateDistinctStudentsCount`
 - Deps/Side Effects: `ClassroomModel`, `ClassroomTaskModel`, `SubmissionModel`, `FeedbackModel`, `AiFeedbackJobModel`, `EnrollmentService`；只读聚合
-- Performance Notes: 多个 `aggregate` 并行 + Map 合并，避免逐 task N+1
+- Performance Notes: ClassroomTask 聚合阶段前置状态白名单过滤，并在组装前做防御过滤；后续 submissions/AI/tags 聚合只围绕可见 `classroomTaskIds` 展开；多个 `aggregate` 并行 + Map 合并，避免逐 task N+1
 - SoT: `backend/src/modules/classrooms/services/teacher-classroom-dashboard.service.ts`; `backend/src/modules/classrooms/enrollments/services/enrollment.service.ts`
 - Failure Modes:
   - 非班级教师或班级不存在 -> `404 Classroom not found`

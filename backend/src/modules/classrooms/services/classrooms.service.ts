@@ -221,9 +221,13 @@ export class ClassroomsService {
     throw new ForbiddenException('Not allowed to view classroom');
   }
 
-  async getDashboard(id: string, userId: string) {
+  async getDashboard(id: string, userId: string, includeClosedTasks = false) {
     await this.ensureTeacher(userId);
-    return this.teacherClassroomDashboardService.getDashboard(id, userId);
+    return this.teacherClassroomDashboardService.getDashboard(
+      id,
+      userId,
+      includeClosedTasks,
+    );
   }
 
   async listStudents(
