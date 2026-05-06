@@ -1,6 +1,10 @@
 import { Model, Types } from 'mongoose';
 import { Classroom } from '../schemas/classroom.schema';
 import { ClassroomTask } from '../classroom-tasks/schemas/classroom-task.schema';
+import {
+  CLASSROOM_TASK_STATUS_ACTIVE,
+  CLASSROOM_TASK_STATUS_CLOSED,
+} from '../classroom-tasks/classroom-task-status.constants';
 import { Submission } from '../../learning-tasks/schemas/submission.schema';
 import {
   Feedback,
@@ -22,6 +26,7 @@ type ClassroomTaskFixture = {
   _id: Types.ObjectId;
   classroomId: Types.ObjectId;
   taskId: Types.ObjectId;
+  status?: string;
   title: string;
   publishedAt: Date;
   dueAt?: Date;
@@ -70,6 +75,9 @@ const makeAggregate = <T>(result: T) => ({
   exec: jest.fn().mockResolvedValue(result),
 });
 
+const toIdSet = (values: Types.ObjectId[]) =>
+  new Set(values.map((value) => value.toString()));
+
 const createHarness = (data: HarnessData = {}) => {
   const studentId = data.submissions?.[0]?.studentId ?? objectId();
   const classroomId = data.classroomTasks?.[0]?.classroomId ?? objectId();
@@ -91,23 +99,109 @@ const createHarness = (data: HarnessData = {}) => {
     _id: classroomTaskId,
     classroomId,
     taskId,
+    status: CLASSROOM_TASK_STATUS_ACTIVE,
     title: 'Task A',
     publishedAt: new Date('2026-01-01T00:00:00.000Z'),
   };
   const classrooms = data.classrooms ?? [classroom];
-  const classroomTasks = data.classroomTasks ?? [classroomTask];
+  const classroomTasks = (data.classroomTasks ?? [classroomTask]).map(
+    (task) => ({
+      ...task,
+      status: Object.prototype.hasOwnProperty.call(task, 'status')
+        ? task.status
+        : CLASSROOM_TASK_STATUS_ACTIVE,
+    }),
+  );
   const submissions = data.submissions ?? [];
   const feedbacks = data.feedbacks ?? [];
+  const filterClassrooms = (filter: Record<string, unknown>) => {
+    const idFilter = filter._id as { $in?: Types.ObjectId[] } | undefined;
+    const ids = toIdSet(idFilter?.$in ?? []);
+    return classrooms.filter(
+      (item) =>
+        (ids.size === 0 || ids.has(item._id.toString())) &&
+        (!filter.status || item.status === filter.status),
+    );
+  };
+  const filterClassroomTasks = (pipeline: unknown[]) => {
+    const firstStage = pipeline[0] as
+      | {
+          $match?: {
+            classroomId?: { $in?: Types.ObjectId[] };
+            status?: string;
+          };
+        }
+      | undefined;
+    const match = firstStage?.$match ?? {};
+    const ids = toIdSet(match.classroomId?.$in ?? []);
+    return classroomTasks.filter(
+      (task) =>
+        (ids.size === 0 || ids.has(task.classroomId.toString())) &&
+        (!match.status || task.status === match.status),
+    );
+  };
+  const filterSubmissions = (filter: Record<string, unknown>) => {
+    const studentId = filter.studentId as Types.ObjectId | undefined;
+    const orClauses = (filter.$or as Array<Record<string, unknown>>) ?? [];
+    const classroomTaskClause = orClauses[0] as
+      | { classroomTaskId?: { $in?: Types.ObjectId[] } }
+      | undefined;
+    const fallbackClause = orClauses[1] as
+      | { taskId?: { $in?: Types.ObjectId[] } }
+      | undefined;
+    const classroomTaskIds = toIdSet(
+      classroomTaskClause?.classroomTaskId?.$in ?? [],
+    );
+    const taskIds = toIdSet(fallbackClause?.taskId?.$in ?? []);
+    return submissions.filter((submission) => {
+      if (
+        studentId &&
+        submission.studentId.toString() !== studentId.toString()
+      ) {
+        return false;
+      }
+      const classroomTaskId = submission.classroomTaskId?.toString();
+      if (classroomTaskId) {
+        return classroomTaskIds.has(classroomTaskId);
+      }
+      return taskIds.has(submission.taskId.toString());
+    });
+  };
 
   const classroomModel = {
-    find: jest.fn(() => makeQuery(classrooms)),
-    countDocuments: jest.fn().mockResolvedValue(classrooms.length),
+    find: jest.fn((filter: Record<string, unknown>) =>
+      makeQuery(filterClassrooms(filter)),
+    ),
+    countDocuments: jest
+      .fn()
+      .mockImplementation((filter: Record<string, unknown>) =>
+        Promise.resolve(filterClassrooms(filter).length),
+      ),
   };
   const classroomTaskModel = {
-    aggregate: jest.fn(() => makeAggregate(classroomTasks)),
+    aggregate: jest.fn((pipeline: unknown[]) => {
+      const matchedTasks = filterClassroomTasks(pipeline);
+      const hasGroupStage = pipeline.some((stage) =>
+        Boolean((stage as { $group?: unknown }).$group),
+      );
+      if (hasGroupStage) {
+        const grouped = Array.from(
+          new Map(
+            matchedTasks.map((task) => [
+              task.classroomId.toString(),
+              { _id: task.classroomId },
+            ]),
+          ).values(),
+        );
+        return makeAggregate(grouped);
+      }
+      return makeAggregate(matchedTasks);
+    }),
   };
   const submissionModel = {
-    find: jest.fn(() => makeQuery(submissions)),
+    find: jest.fn((filter: Record<string, unknown>) =>
+      makeQuery(filterSubmissions(filter)),
+    ),
   };
   const feedbackModel = {
     find: jest.fn((filter: Record<string, unknown>) => {
@@ -148,6 +242,9 @@ const createHarness = (data: HarnessData = {}) => {
 
   return {
     service,
+    classroomModel,
+    classroomTaskModel,
+    submissionModel,
     feedbackModel,
     ids: { studentId, classroomId, taskId, classroomTaskId },
   };
@@ -455,5 +552,217 @@ describe('StudentLearningDashboardService', () => {
     expect(feedbackFilter.submissionId.$in.map((id) => id.toString())).toEqual([
       latestSubmission._id.toString(),
     ]);
+  });
+
+  it('returns only ACTIVE classroomTasks when a classroom also has CLOSED tasks', async () => {
+    const classroomId = objectId();
+    const studentId = objectId();
+    const activeClassroomTaskId = objectId();
+    const closedClassroomTaskId = objectId();
+    const activeTaskId = objectId();
+    const closedTaskId = objectId();
+    const activeSubmission = {
+      _id: objectId(),
+      classroomTaskId: activeClassroomTaskId,
+      taskId: activeTaskId,
+      studentId,
+      attemptNo: 1,
+      createdAt: new Date('2026-01-02T00:00:00.000Z'),
+    };
+    const closedSubmission = {
+      _id: objectId(),
+      classroomTaskId: closedClassroomTaskId,
+      taskId: closedTaskId,
+      studentId,
+      attemptNo: 1,
+      createdAt: new Date('2026-01-03T00:00:00.000Z'),
+    };
+    const harness = createHarness({
+      classrooms: [
+        {
+          _id: classroomId,
+          name: 'Class A',
+          courseId: objectId(),
+          status: 'ACTIVE',
+        },
+      ],
+      classroomTasks: [
+        {
+          _id: activeClassroomTaskId,
+          classroomId,
+          taskId: activeTaskId,
+          status: CLASSROOM_TASK_STATUS_ACTIVE,
+          title: 'Active Task',
+          publishedAt: new Date('2026-01-01T00:00:00.000Z'),
+        },
+        {
+          _id: closedClassroomTaskId,
+          classroomId,
+          taskId: closedTaskId,
+          status: CLASSROOM_TASK_STATUS_CLOSED,
+          title: 'Closed Task',
+          publishedAt: new Date('2026-01-01T00:00:00.000Z'),
+        },
+      ],
+      submissions: [activeSubmission, closedSubmission],
+      feedbacks: [
+        {
+          submissionId: activeSubmission._id,
+          source: FeedbackSource.AI,
+          severity: FeedbackSeverity.Info,
+        },
+        {
+          submissionId: closedSubmission._id,
+          source: FeedbackSource.Teacher,
+          severity: FeedbackSeverity.Error,
+        },
+      ],
+    });
+
+    const dashboard = await harness.service.getMyLearningDashboard(
+      {},
+      studentId.toString(),
+    );
+
+    expect(dashboard.items).toHaveLength(1);
+    expect(dashboard.items[0].tasks).toHaveLength(1);
+    expect(dashboard.items[0].tasks[0]).toMatchObject({
+      classroomTaskId: activeClassroomTaskId.toString(),
+      title: 'Active Task',
+      completionStatus: {
+        status: 'QUALIFIED',
+        source: FeedbackSource.AI,
+      },
+    });
+    const submissionFilter = harness.submissionModel.find.mock.calls[0][0] as {
+      $or: Array<{ classroomTaskId?: { $in?: Types.ObjectId[] } }>;
+    };
+    expect(
+      submissionFilter.$or[0].classroomTaskId?.$in?.map((id) => id.toString()),
+    ).toEqual([activeClassroomTaskId.toString()]);
+  });
+
+  it('removes classrooms that only have CLOSED classroomTasks and counts final items', async () => {
+    const classroomId = objectId();
+    const closedClassroomTaskId = objectId();
+    const closedTaskId = objectId();
+    const studentId = objectId();
+    const harness = createHarness({
+      classrooms: [
+        {
+          _id: classroomId,
+          name: 'Closed Only Class',
+          courseId: objectId(),
+          status: 'ACTIVE',
+        },
+      ],
+      classroomTasks: [
+        {
+          _id: closedClassroomTaskId,
+          classroomId,
+          taskId: closedTaskId,
+          status: CLASSROOM_TASK_STATUS_CLOSED,
+          title: 'Closed Task',
+          publishedAt: new Date('2026-01-01T00:00:00.000Z'),
+        },
+      ],
+    });
+
+    const dashboard = await harness.service.getMyLearningDashboard(
+      {},
+      studentId.toString(),
+    );
+
+    expect(dashboard.items).toEqual([]);
+    expect(dashboard.total).toBe(0);
+    expect(harness.submissionModel.find).not.toHaveBeenCalled();
+    expect(harness.feedbackModel.find).not.toHaveBeenCalled();
+  });
+
+  it('filters by classroomTask.status instead of task publication state', async () => {
+    const classroomId = objectId();
+    const closedClassroomTaskId = objectId();
+    const closedTaskId = objectId();
+    const studentId = objectId();
+    const harness = createHarness({
+      classrooms: [
+        {
+          _id: classroomId,
+          name: 'Class A',
+          courseId: objectId(),
+          status: 'ACTIVE',
+        },
+      ],
+      classroomTasks: [
+        {
+          _id: closedClassroomTaskId,
+          classroomId,
+          taskId: closedTaskId,
+          status: CLASSROOM_TASK_STATUS_CLOSED,
+          title: 'Published Template But Closed Instance',
+          publishedAt: new Date('2026-01-01T00:00:00.000Z'),
+        },
+      ],
+    });
+
+    const dashboard = await harness.service.getMyLearningDashboard(
+      {},
+      studentId.toString(),
+    );
+
+    expect(dashboard.items).toEqual([]);
+    const aggregateCalls = harness.classroomTaskModel.aggregate.mock
+      .calls as unknown as Array<[unknown[]]>;
+    const activeStatusMatched = (aggregateCalls[0]?.[0] ?? []).some((stage) => {
+      const stageRecord = stage as Record<string, unknown>;
+      const matchRecord = stageRecord.$match as
+        | Record<string, unknown>
+        | undefined;
+      return matchRecord?.status === CLASSROOM_TASK_STATUS_ACTIVE;
+    });
+    expect(activeStatusMatched).toBe(true);
+  });
+
+  it('does not return classroomTasks with missing or unknown status', async () => {
+    const classroomId = objectId();
+    const studentId = objectId();
+    const unknownStatusTaskId = objectId();
+    const missingStatusTaskId = objectId();
+    const harness = createHarness({
+      classrooms: [
+        {
+          _id: classroomId,
+          name: 'Class A',
+          courseId: objectId(),
+          status: 'ACTIVE',
+        },
+      ],
+      classroomTasks: [
+        {
+          _id: objectId(),
+          classroomId,
+          taskId: unknownStatusTaskId,
+          status: 'UNKNOWN',
+          title: 'Unknown Status Task',
+          publishedAt: new Date('2026-01-01T00:00:00.000Z'),
+        },
+        {
+          _id: objectId(),
+          classroomId,
+          taskId: missingStatusTaskId,
+          status: undefined,
+          title: 'Missing Status Task',
+          publishedAt: new Date('2026-01-01T00:00:00.000Z'),
+        },
+      ],
+    });
+
+    const dashboard = await harness.service.getMyLearningDashboard(
+      {},
+      studentId.toString(),
+    );
+
+    expect(dashboard.items).toEqual([]);
+    expect(dashboard.total).toBe(0);
   });
 });

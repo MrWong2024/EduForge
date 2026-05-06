@@ -4,6 +4,7 @@ import { Model, PipelineStage, Types } from 'mongoose';
 import { Classroom } from '../schemas/classroom.schema';
 import { QueryClassroomDto } from '../dto/query-classroom.dto';
 import { ClassroomTask } from '../classroom-tasks/schemas/classroom-task.schema';
+import { CLASSROOM_TASK_STATUS_ACTIVE } from '../classroom-tasks/classroom-task-status.constants';
 import { Submission } from '../../learning-tasks/schemas/submission.schema';
 import {
   Feedback,
@@ -34,6 +35,10 @@ type ClassroomTaskStudentItem = {
   dueAt?: Date;
 };
 
+type ActiveClassroomTaskClassroomItem = {
+  _id: Types.ObjectId;
+};
+
 @Injectable()
 export class StudentLearningDashboardService {
   constructor(
@@ -62,20 +67,36 @@ export class StudentLearningDashboardService {
     let classrooms: ClassroomLean[] = [];
     let total = 0;
     if (enrollmentClassroomIds.length > 0) {
+      const activeClassroomTaskClassroomIds = await this.classroomTaskModel
+        .aggregate<ActiveClassroomTaskClassroomItem>([
+          {
+            $match: {
+              classroomId: { $in: enrollmentClassroomIds },
+              status: CLASSROOM_TASK_STATUS_ACTIVE,
+            },
+          },
+          { $group: { _id: '$classroomId' } },
+        ])
+        .exec();
+      const activeClassroomIds = activeClassroomTaskClassroomIds.map(
+        (item) => item._id,
+      );
       const filter: Record<string, unknown> = {
         ...enrollmentFilter,
-        _id: { $in: enrollmentClassroomIds },
+        _id: { $in: activeClassroomIds },
       };
-      [classrooms, total] = await Promise.all([
-        this.classroomModel
-          .find(filter)
-          .sort({ createdAt: -1, _id: 1 })
-          .skip((page - 1) * limit)
-          .limit(limit)
-          .lean<ClassroomLean[]>()
-          .exec(),
-        this.classroomModel.countDocuments(filter),
-      ]);
+      if (activeClassroomIds.length > 0) {
+        [classrooms, total] = await Promise.all([
+          this.classroomModel
+            .find(filter)
+            .sort({ createdAt: -1, _id: 1 })
+            .skip((page - 1) * limit)
+            .limit(limit)
+            .lean<ClassroomLean[]>()
+            .exec(),
+          this.classroomModel.countDocuments(filter),
+        ]);
+      }
     }
 
     if (classrooms.length === 0) {
@@ -89,7 +110,12 @@ export class StudentLearningDashboardService {
 
     const classroomIds = classrooms.map((classroom) => classroom._id);
     const classroomTaskPipeline: PipelineStage[] = [
-      { $match: { classroomId: { $in: classroomIds } } },
+      {
+        $match: {
+          classroomId: { $in: classroomIds },
+          status: CLASSROOM_TASK_STATUS_ACTIVE,
+        },
+      },
       {
         $lookup: {
           from: 'tasks',

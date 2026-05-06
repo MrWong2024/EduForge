@@ -162,10 +162,10 @@
 - Key Methods:
   - `getMyLearningDashboard(query: QueryClassroomDto, userId: string): Promise<Record<string, unknown>> — called by ClassroomsService and /classrooms/mine/dashboard`
 - AuthZ Boundary: `student-only`（由上层 `ClassroomsService.ensureStudent` 保障）
-- Metrics/Isolation: “我的班级”主路径来自 `EnrollmentService.listActiveClassroomIdsByUser`；提交与状态按 `classroomTaskId` 聚合；`completionStatus` 只基于当前 task 的 `myLatestSubmission.submissionId` 查询反馈，不按 `taskId/classroomTaskId/studentId` 粗暴聚合反馈
-- Consistency/Constraints: 无 job 记录时状态回退 `NOT_REQUESTED`；每个 task item 顶层返回 `completionStatus`，值域为 `NOT_SUBMITTED|NO_FEEDBACK|QUALIFIED|QUALIFIED_WITH_WARNINGS|UNQUALIFIED`；反馈来源只纳入 `TEACHER/AI`，`SYSTEM` 不参与；最终来源优先级 `TEACHER > AI`；同一来源多条反馈取最严重 `ERROR > WARN > INFO`；`INFO->QUALIFIED`、`WARN->QUALIFIED_WITH_WARNINGS`、`ERROR->UNQUALIFIED`；无提交返回 `NOT_SUBMITTED`，有最新提交但无 TEACHER/AI 反馈返回 `NO_FEEDBACK`
+- Metrics/Isolation: “我的班级”主路径来自 `EnrollmentService.listActiveClassroomIdsByUser`；学生看板是当前可参与任务入口，仅返回 `classroomTask.status=ACTIVE` 的任务，`CLOSED/RECALLED/未知或缺失状态` 不出现在 tasks 中；提交与状态按返回的 ACTIVE `classroomTaskId` 聚合；`completionStatus` 只基于当前 task 的 `myLatestSubmission.submissionId` 查询反馈，不按 `taskId/classroomTaskId/studentId` 粗暴聚合反馈
+- Consistency/Constraints: 无 job 记录时状态回退 `NOT_REQUESTED`；每个返回的 ACTIVE task item 顶层返回 `completionStatus`，值域为 `NOT_SUBMITTED|NO_FEEDBACK|QUALIFIED|QUALIFIED_WITH_WARNINGS|UNQUALIFIED`；反馈来源只纳入 `TEACHER/AI`，`SYSTEM` 不参与；最终来源优先级 `TEACHER > AI`；同一来源多条反馈取最严重 `ERROR > WARN > INFO`；`INFO->QUALIFIED`、`WARN->QUALIFIED_WITH_WARNINGS`、`ERROR->UNQUALIFIED`；无提交返回 `NOT_SUBMITTED`，有最新提交但无 TEACHER/AI 反馈返回 `NO_FEEDBACK`；只有 CLOSED/非 ACTIVE 任务的班级不返回空分组，`total` 按最终返回班级分组统计
 - Deps/Side Effects: `ClassroomModel`, `ClassroomTaskModel`, `SubmissionModel`, `FeedbackModel`, `AiFeedbackJobService`, `EnrollmentService`；只读
-- Performance Notes: 先批量取班级任务，再批量取 submissions/statusMap；`completionStatus` 收集所有 latest submission ids 后批量查询 Feedback 并按 `submissionId` 分组，避免 N+1 与历史提交混入
+- Performance Notes: 先按 enrolled classroomIds 聚合出存在 ACTIVE classroomTask 的班级，再分页查询班级与 ACTIVE tasks；后续 submissions/statusMap/completionStatus 只围绕 ACTIVE classroomTaskIds 批量计算，避免 CLOSED 任务额外查询与历史提交混入
 - SoT: `backend/src/modules/classrooms/services/student-learning-dashboard.service.ts`; `backend/src/modules/classrooms/enrollments/services/enrollment.service.ts`
 - Failure Modes:
   - 学生未加入任何班级 -> 返回空 `items`
