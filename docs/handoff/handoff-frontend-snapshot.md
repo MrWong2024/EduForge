@@ -119,11 +119,13 @@ Teacher 课程视角（可用）：
 - 课程视角可作为进入班级创建/班级管理的上游入口（跳转到 `/teacher/classrooms` 或带 `courseId` 的班级页）。
 
 Teacher 班级看板链路（可用）：
-1. `/teacher/classrooms/[classroomId]/dashboard` 已保持真接口读取（`GET /api/classrooms/:id` + `GET /api/classrooms/:id/dashboard`），不新增请求参数与后端契约。
+1. `/teacher/classrooms/[classroomId]/dashboard` 已保持真接口读取（`GET /api/classrooms/:id` + `GET /api/classrooms/:id/dashboard`）；默认不传 `includeClosedTasks`，沿用后端默认只返回 ACTIVE 课堂任务。
 2. 顶部概览已收口为 `summary.studentsCount`、`summary.publishedTasksCount`、`summary.lateStudentsTotal` 三个核心指标，不再使用与班级看板语义弱相关的占位值展示。
 3. 任务明细表已补齐“提交进度（distinctStudentsSubmitted / studentsCount）”、“AI 处理概况（成功/失败/排队/处理中/终止/未请求）”与 `topTags` 前 2~3 项摘要。
-4. 每行任务已新增三类快捷入口：`提交记录`（submissions）、`课堂复盘`（review-pack）、`AI 指标`（ai-metrics），用于从看板直接下钻。
-5. “教学快照”已从看板高频入口中移除，不再与周报/过程性评价同层暴露。
+4. 页面新增“显示已关闭任务”开关：关闭时请求默认 dashboard；打开时请求 `includeClosedTasks=true`，由后端返回 ACTIVE+CLOSED 数据集。前端不通过本地过滤模拟默认隐藏，也不重算 summary。
+5. 任务行消费 `classroomTaskStatus`；当值为 `CLOSED` 时显示“已关闭”标签并做轻量弱化，未知状态不当作已关闭处理。
+6. 每行任务已新增三类快捷入口：`提交记录`（submissions）、`课堂复盘`（review-pack）、`AI 指标`（ai-metrics），用于从看板直接下钻。
+7. “教学快照”已从看板高频入口中移除，不再与周报/过程性评价同层暴露。
 
 Student 学习链路（可用）：
 1. `/student/classrooms/join` -> `POST classrooms/join`

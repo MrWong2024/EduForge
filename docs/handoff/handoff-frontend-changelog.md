@@ -611,6 +611,13 @@
 - 【新增事实 / 已收口口径】`/student/classrooms/[classroomId]/tasks/[classroomTaskId]` 顶部“最新 AI 状态”和历史提交 AI 状态均改为中文标签；顶部新增“完成情况”，直接消费后端顶层 `completionStatus.status` 展示未提交/暂无反馈/已合格/基本合格/不合格。
 - 【边界保持】完成情况不在前端按 `submissions[]`、`latest.feedbackSummary`、`latest.feedbackItems` 或 `aiFeedbackStatus` 二次推断；历史提交 ERROR 不影响 latest 完成情况展示。不改 backend，不新增依赖。
 
+## UAT-FE-73
+
+- 【本步解决】教师班级看板默认视图被已关闭课堂任务干扰、但教师仍需要显式复盘 CLOSED 任务的问题。
+- 【新增事实 / 已收口口径】`/teacher/classrooms/[classroomId]/dashboard` 新增“显示已关闭任务”开关；默认不传 `includeClosedTasks`，打开后请求 `GET classrooms/:id/dashboard?includeClosedTasks=true`，关闭后恢复默认请求。
+- 【展示口径】CLOSED 任务依据 `classroomTaskStatus` 显示“已关闭”标签并做轻量弱化；ACTIVE 保持原展示。
+- 【边界保持】任务集合与 summary 统计均以接口返回为准，前端不本地过滤 CLOSED、不二次扣减或重算统计。不改 backend，不新增依赖。
+
 ## 当前阶段一句话结论
 
 前端已达到“Teacher/Student 主链路可用 + 任务模板层与班级实例层边界收口 + 教师模板主链路可维护”的工程验收阶段，但尚未进入最终交付定版阶段。

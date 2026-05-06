@@ -216,7 +216,19 @@ export type ClassroomTasksResponse = {
   items: ClassroomTaskSummary[];
 };
 
-export type DashboardResponse = UnknownRecord;
+export type TeacherDashboardTaskItem = UnknownRecord & {
+  classroomTaskId?: string;
+  id?: string;
+  title?: string;
+  name?: string;
+  dueAt?: string | null;
+  classroomTaskStatus?: string;
+};
+
+export type DashboardResponse = UnknownRecord & {
+  tasks?: TeacherDashboardTaskItem[];
+  items?: TeacherDashboardTaskItem[];
+};
 
 export type ClassroomTask = {
   id?: string;
@@ -1427,7 +1439,7 @@ export const groupTeacherFeedbackItems = (
 
 export const getDashboardItems = (
   dashboard: DashboardResponse,
-): UnknownRecord[] => {
+): TeacherDashboardTaskItem[] => {
   const candidates = [
     safeGet<unknown>(dashboard, "items", undefined),
     safeGet<unknown>(dashboard, "tasks", undefined),
@@ -1438,7 +1450,7 @@ export const getDashboardItems = (
   for (const candidate of candidates) {
     const list = asRecordArray(candidate);
     if (list.length > 0) {
-      return list;
+      return list as TeacherDashboardTaskItem[];
     }
   }
 
