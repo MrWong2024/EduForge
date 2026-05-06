@@ -53,7 +53,6 @@ type TagStats = {
 @Injectable()
 export class TeacherClassroomDashboardService {
   private static readonly TOP_TAGS_LIMIT = 5;
-  private static readonly HISTORICAL_CLOSED_STATUS = 'CLOSE';
 
   constructor(
     @InjectModel(Classroom.name)
@@ -347,11 +346,7 @@ export class TeacherClassroomDashboardService {
 
   private getVisibleClassroomTaskStatuses(includeClosedTasks: boolean) {
     return includeClosedTasks
-      ? [
-          CLASSROOM_TASK_STATUS_ACTIVE,
-          CLASSROOM_TASK_STATUS_CLOSED,
-          TeacherClassroomDashboardService.HISTORICAL_CLOSED_STATUS,
-        ]
+      ? [CLASSROOM_TASK_STATUS_ACTIVE, CLASSROOM_TASK_STATUS_CLOSED]
       : [CLASSROOM_TASK_STATUS_ACTIVE];
   }
 }

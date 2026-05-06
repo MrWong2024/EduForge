@@ -141,8 +141,8 @@
 - Key Methods:
   - `getDashboard(id: string, userId: string, includeClosedTasks?: boolean): Promise<Record<string, unknown>> — called by ClassroomsService.getDashboard and /classrooms/:id/dashboard`
 - AuthZ Boundary: `teacher-only + owner-only`（先校验班级 teacherId）
-- Metrics/Isolation: 强制按 `classroomTaskId` 聚合；课堂任务可见性使用 `classroomTask.status` 白名单；默认只返回 `ACTIVE`，`includeClosedTasks=true` 返回 `ACTIVE+CLOSED+CLOSE`，`RECALLED/缺失/未知状态` 不返回；`studentsCount` 来源为 Enrollment count；`notRequested = submissionsCount - requestedCount`（下限 0）
-- Consistency/Constraints: 每个 task item 返回 `classroomTaskStatus`（来自 `ClassroomTask.status`，不可用 `task.status/classroom.status/dueAt` 替代）；默认统计与 tasks 均排除 `CLOSED/CLOSE`，显式包含关闭任务时 summary/任务级统计与返回任务集合一致；仅统计 `FeedbackSource.AI` 的 tags；top tags 限制 `5`；迟交维度包含 `lateSubmissionsCount/lateDistinctStudentsCount`
+- Metrics/Isolation: 强制按 `classroomTaskId` 聚合；课堂任务可见性使用 `classroomTask.status` 白名单；默认只返回 `ACTIVE`，`includeClosedTasks=true` 返回 `ACTIVE+CLOSED`，`RECALLED/缺失/未知状态` 不返回；`studentsCount` 来源为 Enrollment count；`notRequested = submissionsCount - requestedCount`（下限 0）
+- Consistency/Constraints: 每个 task item 返回 `classroomTaskStatus`（来自 `ClassroomTask.status`，不可用 `task.status/classroom.status/dueAt` 替代）；默认统计与 tasks 均排除 `CLOSED`，显式包含关闭任务时 summary/任务级统计与返回任务集合一致；仅统计 `FeedbackSource.AI` 的 tags；top tags 限制 `5`；迟交维度包含 `lateSubmissionsCount/lateDistinctStudentsCount`
 - Deps/Side Effects: `ClassroomModel`, `ClassroomTaskModel`, `SubmissionModel`, `FeedbackModel`, `AiFeedbackJobModel`, `EnrollmentService`；只读聚合
 - Performance Notes: ClassroomTask 聚合阶段前置状态白名单过滤，并在组装前做防御过滤；后续 submissions/AI/tags 聚合只围绕可见 `classroomTaskIds` 展开；多个 `aggregate` 并行 + Map 合并，避免逐 task N+1
 - SoT: `backend/src/modules/classrooms/services/teacher-classroom-dashboard.service.ts`; `backend/src/modules/classrooms/enrollments/services/enrollment.service.ts`

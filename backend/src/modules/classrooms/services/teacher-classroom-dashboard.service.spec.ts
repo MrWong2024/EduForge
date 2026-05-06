@@ -320,7 +320,7 @@ describe('TeacherClassroomDashboardService', () => {
           taskId: objectId(),
           classroomId,
           status: 'CLOSE',
-          title: 'Historical Close Task',
+          title: 'Invalid Close Task',
           stage: 1,
           knowledgeModule: 'module',
           publishedAt: new Date('2026-01-03T00:00:00.000Z'),
@@ -434,7 +434,7 @@ describe('TeacherClassroomDashboardService', () => {
     ]);
   });
 
-  it('returns ACTIVE, CLOSED, and CLOSE when includeClosedTasks is true', async () => {
+  it('returns only ACTIVE and CLOSED when includeClosedTasks is true', async () => {
     const classroomId = objectId();
     const activeTaskId = objectId();
     const closedTaskId = objectId();
@@ -469,7 +469,7 @@ describe('TeacherClassroomDashboardService', () => {
           taskId: objectId(),
           classroomId,
           status: 'CLOSE',
-          title: 'Historical Close Task',
+          title: 'Invalid Close Task',
           stage: 1,
           knowledgeModule: 'module',
           publishedAt: new Date('2026-01-03T00:00:00.000Z'),
@@ -520,21 +520,14 @@ describe('TeacherClassroomDashboardService', () => {
     expect(tasks.map((task) => task.classroomTaskStatus)).toEqual([
       CLASSROOM_TASK_STATUS_ACTIVE,
       CLASSROOM_TASK_STATUS_CLOSED,
-      'CLOSE',
     ]);
-    expect(dashboard.tasks).toHaveLength(3);
-    expect(dashboard.summary.publishedTasksCount).toBe(3);
+    expect(dashboard.tasks).toHaveLength(2);
+    expect(dashboard.summary.publishedTasksCount).toBe(2);
     expect(dashboard.tasks[1]).toMatchObject({
       classroomTaskId: closedTaskId.toString(),
       classroomTaskStatus: CLASSROOM_TASK_STATUS_CLOSED,
       submissionsCount: 1,
       aiFeedback: { failed: 1, notRequested: 0 },
-    });
-    expect(dashboard.tasks[2]).toMatchObject({
-      classroomTaskId: closeTaskId.toString(),
-      classroomTaskStatus: 'CLOSE',
-      submissionsCount: 1,
-      aiFeedback: { dead: 1, notRequested: 0 },
     });
   });
 
