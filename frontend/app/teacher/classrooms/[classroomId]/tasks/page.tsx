@@ -15,7 +15,7 @@ import {
 } from "@/lib/api/types-teacher";
 import { normalizeTaskCourseLabel } from "@/lib/learning-tasks/course-labels";
 import { paths } from "@/lib/routes/paths";
-import { getAiStatusLabel, getCommonErrorSummary } from "@/lib/ui/status";
+import { getCommonErrorSummary } from "@/lib/ui/status";
 import { buildQueryString, getSingleSearchParam, toDisplayDate, toDisplayText } from "@/lib/ui/format";
 
 type ClassroomTasksPageProps = {
@@ -339,7 +339,6 @@ export default async function ClassroomTasksPage({ params, searchParams }: Class
                 <th className="px-4 py-3">模板模块</th>
                 <th className="px-4 py-3">模板阶段</th>
                 <th className="px-4 py-3">任务状态</th>
-                <th className="px-4 py-3">AI 状态</th>
                 <th className="px-4 py-3">管理</th>
                 <th className="px-4 py-3">三件套入口</th>
               </tr>
@@ -396,7 +395,6 @@ export default async function ClassroomTasksPage({ params, searchParams }: Class
                         }
                       />
                     </td>
-                    <td className="px-4 py-3">{getAiStatusLabel(task.aiStatus)}</td>
                     <td className="px-4 py-3">
                       {classroomTaskId ? (
                         <div className="space-y-2">
