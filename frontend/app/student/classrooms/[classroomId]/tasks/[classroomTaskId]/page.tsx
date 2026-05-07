@@ -117,12 +117,22 @@ const buildHref = (
   return query ? `${basePath}?${query}` : basePath;
 };
 
-const toAiStatusDescription = (status?: string): string | null => {
+const READ_ONLY_FALLBACK_MESSAGE =
+  "该任务当前仅可查看历史提交与反馈，不能继续提交或请求 AI 反馈。";
+
+const toAiStatusDescription = (
+  status: string | undefined,
+  canRequestAiByStatus: boolean,
+  readOnlyMessage: string,
+): string | null => {
   const hint = getAiStatusHint(status);
   if (!status || hint === "当前暂无 AI 状态。") {
     return null;
   }
   if (status === "NOT_REQUESTED") {
+    if (!canRequestAiByStatus) {
+      return readOnlyMessage;
+    }
     return "当前为正常未请求状态。如需 AI 反馈，请进入提交详情后点击“请求 AI 反馈”。";
   }
   return hint;
@@ -500,7 +510,19 @@ export default async function StudentTaskDetailPage({
     viewModel.data.completionStatus,
     hasLatestSubmission,
   );
-  const latestStatusDescription = toAiStatusDescription(latestRawStatus);
+  const participationStatus = viewModel.data.participationStatus;
+  const readOnly = participationStatus?.readOnly === true;
+  const canSubmitByStatus =
+    !readOnly && participationStatus?.canSubmit !== false;
+  const canRequestAiByStatus =
+    !readOnly && participationStatus?.canRequestAiFeedback !== false;
+  const readOnlyMessage =
+    participationStatus?.message ?? READ_ONLY_FALLBACK_MESSAGE;
+  const latestStatusDescription = toAiStatusDescription(
+    latestRawStatus,
+    canRequestAiByStatus,
+    readOnlyMessage,
+  );
   const latestSubmissionId = safeGet<string | undefined>(
     viewModel.data.latest,
     "submissionId",
@@ -551,6 +573,13 @@ export default async function StudentTaskDetailPage({
           </div>
         }
       />
+
+      {readOnly ? (
+        <section className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+          <p className="font-semibold">当前为只读模式</p>
+          <p className="mt-1">{readOnlyMessage}</p>
+        </section>
+      ) : null}
 
       <section className="rounded-lg border border-zinc-200 bg-white p-4 text-sm">
         <h2 className="text-base font-semibold text-zinc-900">任务基础信息</h2>
@@ -689,10 +718,25 @@ export default async function StudentTaskDetailPage({
         </div>
       </section>
 
-      <SubmissionForm
-        classroomId={classroomId}
-        classroomTaskId={classroomTaskId}
-      />
+      {canSubmitByStatus ? (
+        <SubmissionForm
+          classroomId={classroomId}
+          classroomTaskId={classroomTaskId}
+        />
+      ) : (
+        <section className="rounded-lg border border-zinc-200 bg-zinc-50 p-4 text-sm">
+          <h2 className="text-sm font-semibold text-zinc-900">提交作业</h2>
+          <p className="mt-2 text-zinc-600">{readOnlyMessage}</p>
+          <button
+            type="button"
+            disabled
+            title={readOnlyMessage}
+            className="mt-3 rounded-md bg-zinc-300 px-4 py-2 text-sm font-medium text-zinc-600 disabled:cursor-not-allowed"
+          >
+            提交作业
+          </button>
+        </section>
+      )}
 
       {viewModel.data.submissions.length === 0 ? (
         <EmptyState

@@ -85,6 +85,20 @@ export type StudentTaskVisibilityStatus =
   | "RECENTLY_EXPIRED"
   | "HISTORICAL";
 
+export type StudentTaskParticipationReason =
+  | "ACTIVE"
+  | "CLASSROOM_NOT_ACTIVE"
+  | "CLASSROOM_TASK_NOT_ACTIVE"
+  | "TASK_NOT_PUBLISHED";
+
+export type StudentTaskParticipationStatus = {
+  readOnly: boolean;
+  canSubmit: boolean;
+  canRequestAiFeedback: boolean;
+  reason: StudentTaskParticipationReason;
+  message: string | null;
+};
+
 export type StudentDashboardLatestSubmission = {
   submissionId?: string;
   attemptNo?: number;
@@ -133,6 +147,7 @@ export type MyTaskDetailResponse = {
   submissions: UnknownRecord[];
   latest: UnknownRecord | null;
   completionStatus?: StudentTaskCompletionStatus;
+  participationStatus?: StudentTaskParticipationStatus;
   raw: UnknownRecord;
 };
 
@@ -249,6 +264,14 @@ const isStudentTaskVisibilityStatus = (
   value === "RECENTLY_EXPIRED" ||
   value === "HISTORICAL";
 
+const isStudentTaskParticipationReason = (
+  value: string | undefined,
+): value is StudentTaskParticipationReason =>
+  value === "ACTIVE" ||
+  value === "CLASSROOM_NOT_ACTIVE" ||
+  value === "CLASSROOM_TASK_NOT_ACTIVE" ||
+  value === "TASK_NOT_PUBLISHED";
+
 const toStudentDashboardLatestSubmission = (
   value: unknown,
 ): StudentDashboardLatestSubmission | null => {
@@ -295,6 +318,25 @@ const toStudentTaskCompletionStatus = (
     aiWorstSeverity: isCompletionSeverity(aiWorstSeverity)
       ? aiWorstSeverity
       : null,
+  };
+};
+
+const toStudentTaskParticipationStatus = (
+  value: unknown,
+): StudentTaskParticipationStatus | undefined => {
+  const record = asRecord(value);
+  const reason = asString(record.reason);
+  if (!isStudentTaskParticipationReason(reason)) {
+    return undefined;
+  }
+
+  return {
+    readOnly: asNullableBoolean(record.readOnly) ?? false,
+    canSubmit: asNullableBoolean(record.canSubmit) ?? true,
+    canRequestAiFeedback:
+      asNullableBoolean(record.canRequestAiFeedback) ?? true,
+    reason,
+    message: asNullableString(record.message) ?? null,
   };
 };
 
@@ -400,6 +442,9 @@ export const toMyTaskDetailResponse = (
     submissions: asRecordArray(safeGet(record, "submissions", undefined)),
     latest: latest && typeof latest === "object" ? asRecord(latest) : null,
     completionStatus: toStudentTaskCompletionStatus(record.completionStatus),
+    participationStatus: toStudentTaskParticipationStatus(
+      record.participationStatus,
+    ),
     raw: record,
   };
 };

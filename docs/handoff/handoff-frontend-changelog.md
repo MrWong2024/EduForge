@@ -625,6 +625,12 @@
 - 【展示口径】`RECENTLY_EXPIRED` 任务显示“近期过期”标签；`HISTORICAL` 任务显示“历史任务”标签并做轻量弱化；旧响应缺少 `studentVisibilityStatus/isHistorical` 时按普通当前任务展示。
 - 【边界保持】任务可见性只消费后端 `studentVisibilityStatus/isHistorical`，前端不按 `dueAt/publishedAt` 或本地过滤重算历史任务；任务集合、`total/page/limit` 与完成情况均以接口返回为准。不改 backend，不新增依赖。
 
+## UAT-FE-75
+
+- 【本步解决】学生任务详情页缺少后端状态层只读信号接入，归档班级、关闭课堂任务或非发布任务仍可能展示可提交入口的问题。
+- 【新增事实 / 已收口口径】`/student/classrooms/[classroomId]/tasks/[classroomTaskId]` 已接入 `my-task-detail.participationStatus`；`readOnly=true` 时显示“当前为只读模式”，`canSubmit=false` 时提交入口不可点击。
+- 【边界保持】只读态不在前端按 `classroom.status/classroomTask.status/task.status` 复刻后端门禁，也不混入 `dueAt/allowLate/cooldown/NOT_REQUESTED`；任务详情读取、历史提交、反馈与 `completionStatus` 展示保持不变。不改 backend，不新增依赖。
+
 ## 当前阶段一句话结论
 
 前端已达到“Teacher/Student 主链路可用 + 任务模板层与班级实例层边界收口 + 教师模板主链路可维护”的工程验收阶段，但尚未进入最终交付定版阶段。
