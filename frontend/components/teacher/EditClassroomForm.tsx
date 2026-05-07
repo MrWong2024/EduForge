@@ -21,6 +21,7 @@ type EditClassroomFormProps = {
 
 type EditClassroomFormErrorState = {
   status?: number;
+  title: string;
   description: string;
 };
 
@@ -50,6 +51,25 @@ const getUpdateErrorSummary = (status: number, detail?: string): string => {
     return "更新班级失败，请稍后重试。";
   }
   return "更新班级失败，请稍后重试。";
+};
+
+const getArchiveErrorSummary = (status: number): string => {
+  if (status === 400) {
+    return "归档参数不合法，或当前班级状态不允许归档。";
+  }
+  if (status === 401) {
+    return "登录状态已失效，请重新登录。";
+  }
+  if (status === 403) {
+    return "无权限归档该班级。";
+  }
+  if (status === 404) {
+    return "班级不存在或功能未启用/不可用。";
+  }
+  if (status >= 500) {
+    return "归档班级失败，请稍后重试。";
+  }
+  return "归档班级失败，请稍后重试。";
 };
 
 const getClassroomCourseDisplay = (
@@ -84,16 +104,21 @@ export function EditClassroomForm({ classroomId, initialClassroom }: EditClassro
   const router = useRouter();
   const [name, setName] = useState(initialClassroom.name ?? "");
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isArchiving, setIsArchiving] = useState(false);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [errorState, setErrorState] = useState<EditClassroomFormErrorState | null>(null);
   const courseDisplay = getClassroomCourseDisplay(initialClassroom);
 
   const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+    if (isArchiving) {
+      return;
+    }
     const trimmedName = name.trim();
 
     if (!trimmedName) {
       setErrorState({
+        title: "更新班级失败",
         description: "请填写班级名称。",
       });
       return;
@@ -127,15 +152,70 @@ export function EditClassroomForm({ classroomId, initialClassroom }: EditClassro
         const detail = extractRawDetail(error.data);
         setErrorState({
           status: error.status,
+          title: "更新班级失败",
           description: buildErrorDescription(getUpdateErrorSummary(error.status, detail), detail),
         });
       } else {
         setErrorState({
+          title: "更新班级失败",
           description: "更新班级失败，请稍后重试。",
         });
       }
     } finally {
       setIsSubmitting(false);
+    }
+  };
+
+  const handleArchive = async () => {
+    if (isSubmitting || isArchiving) {
+      return;
+    }
+
+    if (initialClassroom.status !== "ACTIVE") {
+      setErrorState({
+        title: "归档班级失败",
+        description: "当前班级状态不允许归档。",
+      });
+      return;
+    }
+
+    const confirmed = window.confirm(
+      "确认归档该班级吗？归档后学生将不再把该班级作为当前活跃班级参与。历史数据仍会保留。",
+    );
+    if (!confirmed) {
+      return;
+    }
+
+    setIsArchiving(true);
+    setSuccessMessage(null);
+    setErrorState(null);
+
+    try {
+      await fetchJson<unknown>(`classrooms/${encodeURIComponent(classroomId)}/archive`, {
+        method: "POST",
+        headers: {
+          accept: "application/json",
+        },
+      });
+      setSuccessMessage("班级已归档。");
+      router.push(paths.teacher.classroomDashboard(classroomId));
+      router.refresh();
+    } catch (error) {
+      if (error instanceof BrowserFetchJsonError) {
+        const detail = extractRawDetail(error.data);
+        setErrorState({
+          status: error.status,
+          title: "归档班级失败",
+          description: buildErrorDescription(getArchiveErrorSummary(error.status), detail),
+        });
+      } else {
+        setErrorState({
+          title: "归档班级失败",
+          description: "归档班级失败，请稍后重试。",
+        });
+      }
+    } finally {
+      setIsArchiving(false);
     }
   };
 
@@ -174,7 +254,7 @@ export function EditClassroomForm({ classroomId, initialClassroom }: EditClassro
         <div className="md:col-span-2 flex flex-wrap items-center gap-3">
           <button
             type="submit"
-            disabled={isSubmitting}
+            disabled={isSubmitting || isArchiving}
             className="rounded-md bg-zinc-900 px-4 py-2 text-sm font-medium text-white disabled:cursor-not-allowed disabled:bg-zinc-400"
           >
             {isSubmitting ? "保存中..." : "保存修改"}
@@ -188,11 +268,34 @@ export function EditClassroomForm({ classroomId, initialClassroom }: EditClassro
         </div>
       </form>
 
+      <div className="mt-6 rounded-lg border border-red-200 bg-red-50/40 p-4">
+        <h3 className="text-sm font-semibold text-red-900">危险操作</h3>
+        <p className="mt-1 text-sm text-red-800">
+          归档后，班级将不再作为当前活跃班级参与学生当前任务入口展示；历史数据仍保留，可用于回看与统计。
+        </p>
+        {initialClassroom.status === "ACTIVE" ? (
+          <button
+            type="button"
+            onClick={handleArchive}
+            disabled={isSubmitting || isArchiving}
+            className="mt-3 rounded-md border border-red-300 bg-white px-4 py-2 text-sm font-medium text-red-700 hover:bg-red-50 disabled:cursor-not-allowed disabled:border-zinc-200 disabled:text-zinc-400"
+          >
+            {isArchiving ? "归档中..." : "归档班级"}
+          </button>
+        ) : null}
+        {initialClassroom.status === "ARCHIVED" ? (
+          <p className="mt-3 text-sm text-zinc-600">当前班级已归档。</p>
+        ) : null}
+        {!initialClassroom.status ? (
+          <p className="mt-3 text-sm text-zinc-600">当前班级状态暂不可用，不能执行归档操作。</p>
+        ) : null}
+      </div>
+
       {successMessage ? <p className="mt-3 text-sm text-emerald-700">{successMessage}</p> : null}
 
       {errorState ? (
         <div className="mt-4">
-          <ErrorState status={errorState.status} title="更新班级失败" description={errorState.description} />
+          <ErrorState status={errorState.status} title={errorState.title} description={errorState.description} />
         </div>
       ) : null}
     </section>
