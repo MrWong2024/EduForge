@@ -303,13 +303,15 @@ export default async function ClassroomTasksPage({ params, searchParams }: Class
                       </p>
                     </td>
                     <td className="px-4 py-3">
-                      <p>{toDisplayDate(task.dueAt)}</p>
                       <span
                         title={dueTimeStatus.title}
-                        className={`mt-1 inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-medium whitespace-nowrap ${dueTimeStatus.badgeClassName}`}
+                        className={`inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-medium whitespace-nowrap ${dueTimeStatus.badgeClassName}`}
                       >
                         {dueTimeStatus.label}
                       </span>
+                      <p className="mt-1 text-xs text-zinc-500">
+                        {toDisplayDate(task.dueAt)}
+                      </p>
                     </td>
                     <td className="px-4 py-3">
                       {typeof task.allowLate === "boolean" ? (task.allowLate ? "是" : "否") : "—"}
