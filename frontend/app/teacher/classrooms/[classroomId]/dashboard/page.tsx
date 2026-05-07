@@ -281,6 +281,12 @@ export default async function ClassroomDashboardPage({
     );
   }
 
+  const archiveSuggestion = viewModel.dashboard.archiveSuggestion;
+  const shouldShowArchiveSuggestion = archiveSuggestion?.suggested === true;
+  const archiveSuggestionMessage =
+    archiveSuggestion?.message ??
+    "该班级近期无活跃任务和学生提交，可考虑归档。";
+
   return (
     <section className="mt-4 space-y-4">
       <PageHeader
@@ -321,6 +327,36 @@ export default async function ClassroomDashboardPage({
           </div>
         }
       />
+
+      {shouldShowArchiveSuggestion ? (
+        <section className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+            <div>
+              <p className="font-medium">建议归档</p>
+              <p className="mt-1">{archiveSuggestionMessage}</p>
+              <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-amber-800">
+                <span>
+                  最近提交：
+                  {archiveSuggestion?.lastSubmissionAt
+                    ? toDisplayDate(archiveSuggestion.lastSubmissionAt)
+                    : "暂无"}
+                </span>
+                {typeof archiveSuggestion?.inactiveDays === "number" ? (
+                  <span>
+                    已连续 {archiveSuggestion.inactiveDays} 天无近期活动
+                  </span>
+                ) : null}
+              </div>
+            </div>
+            <Link
+              href={paths.teacher.classroomEdit(classroomId)}
+              className="inline-flex w-fit items-center rounded-md border border-amber-300 bg-white px-3 py-1.5 text-xs font-medium text-amber-900 hover:bg-amber-100"
+            >
+              去管理
+            </Link>
+          </div>
+        </section>
+      ) : null}
 
       <section className="rounded-lg border border-zinc-200 bg-white p-4">
         <h2 className="text-sm font-semibold text-zinc-900">班级概览</h2>

@@ -225,9 +225,28 @@ export type TeacherDashboardTaskItem = UnknownRecord & {
   classroomTaskStatus?: string;
 };
 
+export const TEACHER_CLASSROOM_ARCHIVE_SUGGESTION_REASONS = [
+  "NO_ACTIVE_TASKS",
+  "NO_RECENT_SUBMISSIONS",
+  "NO_ACTIVE_TASKS_AND_NO_RECENT_SUBMISSIONS",
+] as const;
+
+export type TeacherClassroomArchiveSuggestionReason =
+  (typeof TEACHER_CLASSROOM_ARCHIVE_SUGGESTION_REASONS)[number];
+
+export type TeacherClassroomArchiveSuggestion = {
+  suggested: boolean;
+  reason: TeacherClassroomArchiveSuggestionReason | null;
+  message: string | null;
+  lastSubmissionAt: string | null;
+  latestActiveTaskDueAt: string | null;
+  inactiveDays: number | null;
+};
+
 export type DashboardResponse = UnknownRecord & {
   tasks?: TeacherDashboardTaskItem[];
   items?: TeacherDashboardTaskItem[];
+  archiveSuggestion?: TeacherClassroomArchiveSuggestion;
 };
 
 export type ClassroomTask = {
@@ -932,8 +951,52 @@ export const toClassroomTasksResponse = (
   };
 };
 
-export const toDashboardResponse = (payload: unknown): DashboardResponse =>
-  asRecord(payload);
+const normalizeTeacherClassroomArchiveSuggestionReason = (
+  value: unknown,
+): TeacherClassroomArchiveSuggestionReason | null => {
+  const reason = asString(value);
+  if (
+    reason === "NO_ACTIVE_TASKS" ||
+    reason === "NO_RECENT_SUBMISSIONS" ||
+    reason === "NO_ACTIVE_TASKS_AND_NO_RECENT_SUBMISSIONS"
+  ) {
+    return reason;
+  }
+  return null;
+};
+
+const toTeacherClassroomArchiveSuggestion = (
+  value: unknown,
+): TeacherClassroomArchiveSuggestion | undefined => {
+  const record = asRecord(value);
+  if (Object.keys(record).length === 0) {
+    return undefined;
+  }
+
+  return {
+    suggested: asBoolean(record.suggested) === true,
+    reason: normalizeTeacherClassroomArchiveSuggestionReason(record.reason),
+    message: asNullableString(record.message) ?? null,
+    lastSubmissionAt: asNullableString(record.lastSubmissionAt) ?? null,
+    latestActiveTaskDueAt:
+      asNullableString(record.latestActiveTaskDueAt) ?? null,
+    inactiveDays: asNullableNumber(record.inactiveDays) ?? null,
+  };
+};
+
+export const toDashboardResponse = (payload: unknown): DashboardResponse => {
+  const record = asRecord(payload);
+  const archiveSuggestion = toTeacherClassroomArchiveSuggestion(
+    record.archiveSuggestion,
+  );
+
+  return archiveSuggestion
+    ? {
+        ...record,
+        archiveSuggestion,
+      }
+    : record;
+};
 
 const toLearningTrajectoryStudentPublic = (
   value: unknown,

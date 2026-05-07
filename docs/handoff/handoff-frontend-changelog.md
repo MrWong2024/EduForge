@@ -631,6 +631,12 @@
 - 【新增事实 / 已收口口径】`/student/classrooms/[classroomId]/tasks/[classroomTaskId]` 已接入 `my-task-detail.participationStatus`；`readOnly=true` 时显示“当前为只读模式”，`canSubmit=false` 时提交入口不可点击。
 - 【边界保持】只读态不在前端按 `classroom.status/classroomTask.status/task.status` 复刻后端门禁，也不混入 `dueAt/allowLate/cooldown/NOT_REQUESTED`；任务详情读取、历史提交、反馈与 `completionStatus` 展示保持不变。不改 backend，不新增依赖。
 
+## UAT-FE-76
+
+- 【本步解决】教师班级看板缺少后端归档建议的前端提示入口，教师不易发现长期无活跃任务和提交的班级可归档。
+- 【新增事实 / 已收口口径】`/teacher/classrooms/[classroomId]/dashboard` 已接入 dashboard 顶层 `archiveSuggestion`；仅 `suggested=true` 时显示“建议归档”轻量提示，正文优先使用后端 `message`，并展示最近提交与连续无近期活动天数。
+- 【边界保持】归档建议完全由后端返回决定，前端不根据 `tasks/dueAt/submissions/includeClosedTasks` 重算，不自动归档，不新增直接归档 API 调用。不改 backend，不新增依赖。
+
 ## 当前阶段一句话结论
 
 前端已达到“Teacher/Student 主链路可用 + 任务模板层与班级实例层边界收口 + 教师模板主链路可维护”的工程验收阶段，但尚未进入最终交付定版阶段。

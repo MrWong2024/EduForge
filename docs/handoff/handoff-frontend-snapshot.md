@@ -124,8 +124,9 @@ Teacher 班级看板链路（可用）：
 3. 任务明细表已补齐“提交进度（distinctStudentsSubmitted / studentsCount）”、“AI 处理概况（成功/失败/排队/处理中/终止/未请求）”与 `topTags` 前 2~3 项摘要。
 4. 页面新增“显示已关闭任务”开关：关闭时请求默认 dashboard；打开时请求 `includeClosedTasks=true`，由后端返回 ACTIVE+CLOSED 数据集。前端不通过本地过滤模拟默认隐藏，也不重算 summary。
 5. 任务行消费 `classroomTaskStatus`；当值为 `CLOSED` 时显示“已关闭”标签并做轻量弱化，未知状态不当作已关闭处理。
-6. 每行任务已新增三类快捷入口：`提交记录`（submissions）、`课堂复盘`（review-pack）、`AI 指标`（ai-metrics），用于从看板直接下钻。
-7. “教学快照”已从看板高频入口中移除，不再与周报/过程性评价同层暴露。
+6. 页面接入后端顶层 `archiveSuggestion`：仅当 `suggested=true` 时在概览上方显示温和的“建议归档”提示，正文优先使用后端 `message`，并展示最近提交/连续无近期活动天数；前端不根据 tasks/dueAt/submissions/includeClosedTasks 重算建议，也不自动归档。
+7. 每行任务已新增三类快捷入口：`提交记录`（submissions）、`课堂复盘`（review-pack）、`AI 指标`（ai-metrics），用于从看板直接下钻。
+8. “教学快照”已从看板高频入口中移除，不再与周报/过程性评价同层暴露。
 
 Student 学习链路（可用）：
 1. `/student/classrooms/join` -> `POST classrooms/join`
