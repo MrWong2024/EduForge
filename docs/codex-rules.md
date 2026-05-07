@@ -237,6 +237,33 @@ status!: XxxStatus;
 
 ---
 
+### 后端测试分层策略（强制）
+
+后端任务应按变更风险选择测试层级，不要求所有规则变化都新增 E2E，也不得把 `service.spec.ts` 视为真实 HTTP 链路的替代品。
+
+1. **service.spec.ts：覆盖业务规则与边界**
+   - 适用于业务规则、状态机、聚合统计口径、复杂优先级、错误分支、副作用是否发生等。
+   - 示例：`completionStatus` 只取 latest、教师反馈优先于 AI、`classroomTask.status` 使用 ACTIVE 白名单、`includeHistorical` 30/90 天窗口、`participationStatus` 原因优先级、拒绝时不创建 submission / AI job。
+   - 规则类变更优先补 service spec，不要为了纯 service 计算规则强行搭完整 E2E 数据链路。
+
+2. **controller.spec.ts / DTO validation：覆盖请求参数与校验层**
+   - 适用于 query 参数解析、DTO 字段声明、`ValidationPipe` whitelist / `forbidNonWhitelisted`、controller 到 service 的参数传递、默认值、boolean/string query transform。
+   - 新增 query 参数或 DTO 字段时，不能只写 service spec；至少应补 controller spec、DTO validation 测试，或确认已有等价覆盖。
+   - 目标是防止“service 业务测试通过，但真实请求在进入 service 前被 DTO 白名单拒绝”的问题。
+
+3. **backend/test/*.e2e-spec.ts：覆盖真实 HTTP 与关键闭环**
+   - 适用于新增接口、接口路径变化、权限/Guard、登录态/session/cookie、全局 Pipe、DTO 对真实请求的影响、数据库读写、Controller + Service + Module 装配，以及跨模块关键主流程。
+   - 关键业务闭环仍需保留少量 E2E 兜底，例如学生提交 -> AI job -> 反馈 -> 看板统计。
+   - E2E 用于验证真实链路，不应用来承载所有边界条件；大量规则边界应下沉到 service spec 或 controller/DTO 测试。
+
+4. **选择规则**
+   - 规则类任务：优先 `*.service.spec.ts`。
+   - 参数 / DTO / ValidationPipe 类任务：补 `*.controller.spec.ts`、DTO validation 测试或等价覆盖。
+   - 权限 / 路由 / Guard / 真实 HTTP 行为：考虑 `*.e2e-spec.ts`。
+   - 涉及 controller/query/DTO/ValidationPipe/Guard/权限/接口路径的任务，不能只补 service spec。
+
+---
+
 ### 违规处理原则（默认）
 
 如 Codex 行为违反以上规则中明确标注为“强制”的架构或安全约束：

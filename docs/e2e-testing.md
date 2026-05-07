@@ -18,6 +18,14 @@
 - 单元测试（unit test）
 - 模块级集成测试（integration test）
 
+### 1.1 与 service / controller 测试的关系
+
+E2E 测试主要覆盖真实 HTTP 链路、鉴权、Guard、全局 Pipe、DTO、数据库读写、模块装配与关键业务闭环。
+
+业务规则、状态机、聚合统计、复杂优先级和副作用边界，优先通过 `*.service.spec.ts` 覆盖；query 参数解析、DTO 字段声明、白名单校验、默认值和 controller 到 service 的参数传递，可通过 `*.controller.spec.ts` 或 DTO validation 测试覆盖。
+
+因此，不要求每个 service 规则变更都新增 E2E；但涉及接口路径、权限/Guard、全局 Pipe、DTO 对真实请求的影响或跨模块主流程时，应考虑补充少量 E2E 兜底。`service.spec.ts` 不能替代真实 HTTP 链路测试，E2E 也不应承载所有规则边界。
+
 ---
 
 ## 2. 运行环境约束（强制）
