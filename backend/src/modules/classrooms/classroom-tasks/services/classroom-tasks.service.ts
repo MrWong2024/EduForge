@@ -230,6 +230,18 @@ type LearningTrajectoryResponse = {
   total: number;
   items: LearningTrajectoryItem[];
 };
+type StudentTaskParticipationReason =
+  | 'ACTIVE'
+  | 'CLASSROOM_NOT_ACTIVE'
+  | 'CLASSROOM_TASK_NOT_ACTIVE'
+  | 'TASK_NOT_PUBLISHED';
+type StudentTaskParticipationStatus = {
+  readOnly: boolean;
+  canSubmit: boolean;
+  canRequestAiFeedback: boolean;
+  reason: StudentTaskParticipationReason;
+  message: string | null;
+};
 
 @Injectable()
 export class ClassroomTasksService {
@@ -1150,7 +1162,7 @@ export class ClassroomTasksService {
 
     const classroom = await this.classroomModel
       .findById(classroomObjectId)
-      .select('_id name courseId')
+      .select('_id name courseId status')
       .lean<ClassroomWithMeta>()
       .exec();
     if (!classroom) {
@@ -1236,18 +1248,27 @@ export class ClassroomTasksService {
     const completionStatus = latestSubmission
       ? buildCompletionStatus(latestSubmission.id, completionFeedbacks)
       : buildNotSubmittedCompletionStatus();
+    const classroomTaskStatus = this.toClassroomTaskStatusForRead(
+      classroomTask.status,
+    );
+    const participationStatus = this.buildStudentTaskParticipationStatus(
+      classroom.status,
+      classroomTaskStatus,
+      task.status,
+    );
 
     return {
       classroom: {
         id: classroom._id.toString(),
         name: classroom.name,
         courseId: classroom.courseId.toString(),
+        status: classroom.status,
       },
       classroomTask: {
         id: classroomTask._id.toString(),
         classroomId: classroomTask.classroomId.toString(),
         taskId: classroomTask.taskId.toString(),
-        status: this.toClassroomTaskStatusForRead(classroomTask.status),
+        status: classroomTaskStatus,
         publishedAt: classroomTask.publishedAt,
         dueAt: classroomTask.dueAt,
         settings: classroomTask.settings,
@@ -1265,6 +1286,7 @@ export class ClassroomTasksService {
       me: { studentId: studentObjectId.toString() },
       submissions: submissionItems,
       completionStatus,
+      participationStatus,
       latest: latestSubmission
         ? {
             submissionId: latestSubmission.id,
@@ -1327,6 +1349,47 @@ export class ClassroomTasksService {
       throw new ForbiddenException('Not allowed');
     }
     return user.roles ?? [];
+  }
+
+  private buildStudentTaskParticipationStatus(
+    classroomStatus: ClassroomStatus,
+    classroomTaskStatus: ClassroomTaskStatus,
+    taskStatus: TaskStatus,
+  ): StudentTaskParticipationStatus {
+    if (classroomStatus !== ClassroomStatus.Active) {
+      return {
+        readOnly: true,
+        canSubmit: false,
+        canRequestAiFeedback: false,
+        reason: 'CLASSROOM_NOT_ACTIVE',
+        message: '班级已归档或不可参与，仅可查看历史提交与反馈。',
+      };
+    }
+    if (classroomTaskStatus !== CLASSROOM_TASK_STATUS_ACTIVE) {
+      return {
+        readOnly: true,
+        canSubmit: false,
+        canRequestAiFeedback: false,
+        reason: 'CLASSROOM_TASK_NOT_ACTIVE',
+        message: '课堂任务已关闭或不可参与，仅可查看历史提交与反馈。',
+      };
+    }
+    if (taskStatus !== TaskStatus.Published) {
+      return {
+        readOnly: true,
+        canSubmit: false,
+        canRequestAiFeedback: false,
+        reason: 'TASK_NOT_PUBLISHED',
+        message: '任务未发布或不可参与，仅可查看历史提交与反馈。',
+      };
+    }
+    return {
+      readOnly: false,
+      canSubmit: true,
+      canRequestAiFeedback: true,
+      reason: 'ACTIVE',
+      message: null,
+    };
   }
 
   private parseObjectId(value: string, fieldName: string) {

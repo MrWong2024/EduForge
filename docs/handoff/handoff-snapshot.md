@@ -383,6 +383,7 @@ AI Provider 错误码（`ai-feedback-provider.error-codes.ts`）：
   - `GET /api/classrooms/:classroomId/tasks/:classroomTaskId/ai-metrics`
 - Z3 学生端聚合详情：
   - `GET /api/classrooms/:classroomId/tasks/:classroomTaskId/my-task-detail`
+  - 顶层新增 `participationStatus` 只读态信号；直链读取历史任务/提交/反馈保持可用，前端后续可用该字段展示只读提示并禁用提交/AI 请求入口。
 - AA 班级周报（teacher）：
   - `GET /api/classrooms/:classroomId/weekly-report`
 - AB 课程总览（teacher）：

@@ -16,6 +16,7 @@ import { LearningTasksService } from '../../../learning-tasks/services/learning-
 import {
   CLASSROOM_TASK_STATUS_ACTIVE,
   CLASSROOM_TASK_STATUS_CLOSED,
+  CLASSROOM_TASK_STATUS_RECALLED,
 } from '../classroom-task-status.constants';
 import { ClassroomTasksService } from './classroom-tasks.service';
 
@@ -187,6 +188,15 @@ const getMyTaskDetailCompletionStatus = async (
     query,
     ids.studentId.toString(),
   )) as {
+    classroom: {
+      status: ClassroomStatus;
+    };
+    classroomTask: {
+      status: string;
+    };
+    task: {
+      status: TaskStatus;
+    };
     completionStatus: {
       status: string;
       severity: FeedbackSeverity | null;
@@ -196,6 +206,17 @@ const getMyTaskDetailCompletionStatus = async (
       aiFeedbackCount: number;
       teacherWorstSeverity: FeedbackSeverity | null;
       aiWorstSeverity: FeedbackSeverity | null;
+    };
+    participationStatus: {
+      readOnly: boolean;
+      canSubmit: boolean;
+      canRequestAiFeedback: boolean;
+      reason:
+        | 'ACTIVE'
+        | 'CLASSROOM_NOT_ACTIVE'
+        | 'CLASSROOM_TASK_NOT_ACTIVE'
+        | 'TASK_NOT_PUBLISHED';
+      message: string | null;
     };
     latest: { submissionId: string } | null;
   };
@@ -297,6 +318,113 @@ describe('ClassroomTasksService createClassroomTaskSubmission participation stat
     expect(
       harness.learningTasksService.createSubmissionForClassroomTask,
     ).not.toHaveBeenCalled();
+  });
+});
+
+describe('ClassroomTasksService getMyTaskDetail participationStatus', () => {
+  it('returns ACTIVE participationStatus and stable status fields for active contexts', async () => {
+    const harness = createHarness();
+
+    const detail = await getMyTaskDetailCompletionStatus(
+      harness.service,
+      harness.ids,
+    );
+
+    expect(detail.classroom.status).toBe(ClassroomStatus.Active);
+    expect(detail.classroomTask.status).toBe(CLASSROOM_TASK_STATUS_ACTIVE);
+    expect(detail.task.status).toBe(TaskStatus.Published);
+    expect(detail.participationStatus).toEqual({
+      readOnly: false,
+      canSubmit: true,
+      canRequestAiFeedback: true,
+      reason: 'ACTIVE',
+      message: null,
+    });
+  });
+
+  it('returns CLASSROOM_NOT_ACTIVE when classroom is archived', async () => {
+    const harness = createHarness({
+      classroomStatus: ClassroomStatus.Archived,
+    });
+
+    const detail = await getMyTaskDetailCompletionStatus(
+      harness.service,
+      harness.ids,
+    );
+
+    expect(detail.participationStatus).toEqual({
+      readOnly: true,
+      canSubmit: false,
+      canRequestAiFeedback: false,
+      reason: 'CLASSROOM_NOT_ACTIVE',
+      message: '班级已归档或不可参与，仅可查看历史提交与反馈。',
+    });
+  });
+
+  it.each([CLASSROOM_TASK_STATUS_CLOSED, CLASSROOM_TASK_STATUS_RECALLED])(
+    'returns CLASSROOM_TASK_NOT_ACTIVE when classroomTask is %s',
+    async (classroomTaskStatus) => {
+      const harness = createHarness({ classroomTaskStatus });
+
+      const detail = await getMyTaskDetailCompletionStatus(
+        harness.service,
+        harness.ids,
+      );
+
+      expect(detail.participationStatus).toEqual({
+        readOnly: true,
+        canSubmit: false,
+        canRequestAiFeedback: false,
+        reason: 'CLASSROOM_TASK_NOT_ACTIVE',
+        message: '课堂任务已关闭或不可参与，仅可查看历史提交与反馈。',
+      });
+    },
+  );
+
+  it('returns TASK_NOT_PUBLISHED when task template is draft', async () => {
+    const harness = createHarness({ taskStatus: TaskStatus.Draft });
+
+    const detail = await getMyTaskDetailCompletionStatus(
+      harness.service,
+      harness.ids,
+    );
+
+    expect(detail.participationStatus).toEqual({
+      readOnly: true,
+      canSubmit: false,
+      canRequestAiFeedback: false,
+      reason: 'TASK_NOT_PUBLISHED',
+      message: '任务未发布或不可参与，仅可查看历史提交与反馈。',
+    });
+  });
+
+  it('prioritizes classroom status over classroomTask and task status', async () => {
+    const harness = createHarness({
+      classroomStatus: ClassroomStatus.Archived,
+      classroomTaskStatus: CLASSROOM_TASK_STATUS_CLOSED,
+      taskStatus: TaskStatus.Draft,
+    });
+
+    const detail = await getMyTaskDetailCompletionStatus(
+      harness.service,
+      harness.ids,
+    );
+
+    expect(detail.participationStatus.reason).toBe('CLASSROOM_NOT_ACTIVE');
+  });
+
+  it('prioritizes classroomTask status over task status', async () => {
+    const harness = createHarness({
+      classroomTaskStatus: CLASSROOM_TASK_STATUS_CLOSED,
+      taskStatus: TaskStatus.Draft,
+    });
+
+    const detail = await getMyTaskDetailCompletionStatus(
+      harness.service,
+      harness.ids,
+    );
+
+    expect(detail.participationStatus.reason).toBe('CLASSROOM_TASK_NOT_ACTIVE');
   });
 });
 
