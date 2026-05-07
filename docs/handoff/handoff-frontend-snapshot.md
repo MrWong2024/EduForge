@@ -152,6 +152,7 @@ Student 学习链路（可用）：
 5. `/student/submissions/[submissionId]` -> 稳定读源 + feedback 列表 + request AI
    - 反馈主列表已中文化：表头使用“来源/类型/严重程度/反馈内容/修改建议/标签/时间”。
    - `source/type/severity` 在列表单元格按后端原值直出（英文枚举不翻译）；`message` 与 `suggestion` 分列展示（`suggestion` 为空时显示“暂无”）。
+   - 迟交时长展示已从原始秒数改为人性化时长，最多展示两个主要单位（如 `37 天 22 小时`），避免大秒数直出。
    - 学生端“请求 AI 反馈”按钮仅在 `NOT_REQUESTED` 可点击；`FAILED` 状态已禁用，不再提供前端手工重试入口（失败后的后续处理由任务机制/worker 负责）。
    - 学生提交详情页已接入“状态驱动自动刷新”：`PENDING/RUNNING` 快速刷新、`FAILED` 慢速刷新；到 `SUCCEEDED/DEAD/NOT_REQUESTED` 自动停止；页面失焦或标签页不可见时暂停，回到前台后按当前状态恢复；同页实例内通过本地互斥避免刷新重叠。
    - `RequestAiFeedbackButton` 状态展示已与页面最新服务端状态同步：自动刷新后若状态变化（如 `RUNNING/FAILED -> DEAD`），按钮文案与提示会跟随更新，不再滞留旧状态文案。

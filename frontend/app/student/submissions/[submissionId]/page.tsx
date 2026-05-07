@@ -77,6 +77,40 @@ const asBooleanLike = (value: unknown): boolean | undefined => {
   return undefined;
 };
 
+const toDisplayLateDuration = (value: unknown): string | undefined => {
+  if (typeof value !== "number" || !Number.isFinite(value) || !Number.isInteger(value) || value < 0) {
+    return undefined;
+  }
+
+  if (value === 0) {
+    return "超时不足 1 秒";
+  }
+
+  const secondsPerMinute = 60;
+  const secondsPerHour = 60 * secondsPerMinute;
+  const secondsPerDay = 24 * secondsPerHour;
+
+  if (value < secondsPerMinute) {
+    return `超时 ${value} 秒`;
+  }
+
+  if (value < secondsPerHour) {
+    const minutes = Math.floor(value / secondsPerMinute);
+    const seconds = value % secondsPerMinute;
+    return seconds > 0 ? `超时 ${minutes} 分钟 ${seconds} 秒` : `超时 ${minutes} 分钟`;
+  }
+
+  if (value < secondsPerDay) {
+    const hours = Math.floor(value / secondsPerHour);
+    const minutes = Math.floor((value % secondsPerHour) / secondsPerMinute);
+    return minutes > 0 ? `超时 ${hours} 小时 ${minutes} 分钟` : `超时 ${hours} 小时`;
+  }
+
+  const days = Math.floor(value / secondsPerDay);
+  const hours = Math.floor((value % secondsPerDay) / secondsPerHour);
+  return hours > 0 ? `超时 ${days} 天 ${hours} 小时` : `超时 ${days} 天`;
+};
+
 const toLimitedCodeText = (value: string | undefined): string | undefined => {
   if (!value) {
     return undefined;
@@ -210,6 +244,11 @@ export default async function StudentSubmissionDetailPage({
     );
   }
 
+  const lateDurationText =
+    viewModel.isLate === true
+      ? toDisplayLateDuration(viewModel.lateBySeconds)
+      : undefined;
+
   return (
     <section className="space-y-4">
       <PageHeader
@@ -246,9 +285,7 @@ export default async function StudentSubmissionDetailPage({
           <p>尝试次数：{toDisplayText(viewModel.attemptNo)}</p>
           <p>
             是否迟交：{toDisplayText(viewModel.isLate)}
-            {viewModel.isLate && viewModel.lateBySeconds !== undefined
-              ? `（超时 ${viewModel.lateBySeconds} 秒）`
-              : ""}
+            {lateDurationText ? `（${lateDurationText}）` : ""}
           </p>
         </div>
       </section>
