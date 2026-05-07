@@ -108,6 +108,63 @@ const getDueTimeStatus = (
   };
 };
 
+const getSubmissionWindowStatus = (
+  status: string | undefined,
+  dueAt: string | null | undefined,
+  allowLate: boolean | undefined,
+): {
+  label: "可提交" | "允许迟交" | "不可提交" | "状态未知";
+  title: string;
+  badgeClassName: string;
+} => {
+  if (status !== "ACTIVE") {
+    return {
+      label: "不可提交",
+      title: "课堂任务未处于开放状态，学生不能继续提交。",
+      badgeClassName: "border-slate-200 bg-slate-50 text-slate-600",
+    };
+  }
+
+  if (!dueAt) {
+    return {
+      label: "可提交",
+      title: "课堂任务开放且未设置截止时间；最终提交权限仍以后端校验为准。",
+      badgeClassName: "border-emerald-200 bg-emerald-50 text-emerald-700",
+    };
+  }
+
+  const dueTime = new Date(dueAt).getTime();
+  if (!Number.isFinite(dueTime)) {
+    return {
+      label: "状态未知",
+      title: "截止时间格式异常，无法判断提交窗口状态。",
+      badgeClassName: "border-slate-200 bg-slate-50 text-slate-600",
+    };
+  }
+
+  if (dueTime >= Date.now()) {
+    return {
+      label: "可提交",
+      title: "课堂任务开放且尚未截止；最终提交权限仍以后端校验为准。",
+      badgeClassName: "border-emerald-200 bg-emerald-50 text-emerald-700",
+    };
+  }
+
+  if (allowLate === true) {
+    return {
+      label: "允许迟交",
+      title: "课堂任务已截止，但当前设置允许迟交；最终提交权限仍以后端校验为准。",
+      badgeClassName: "border-amber-200 bg-amber-50 text-amber-700",
+    };
+  }
+
+  return {
+    label: "不可提交",
+    title: "课堂任务已截止且未允许迟交。",
+    badgeClassName: "border-slate-200 bg-slate-50 text-slate-600",
+  };
+};
+
 export default async function ClassroomTasksPage({ params, searchParams }: ClassroomTasksPageProps) {
   const { classroomId } = await params;
   const query = await searchParams;
@@ -291,6 +348,11 @@ export default async function ClassroomTasksPage({ params, searchParams }: Class
               {viewModel.taskList.items.map((task, index) => {
                 const classroomTaskId = task.classroomTaskId;
                 const dueTimeStatus = getDueTimeStatus(task.dueAt);
+                const submissionWindowStatus = getSubmissionWindowStatus(
+                  task.status,
+                  task.dueAt,
+                  task.allowLate,
+                );
                 return (
                   <tr
                     key={classroomTaskId ?? `classroom-task-${index}`}
@@ -324,6 +386,14 @@ export default async function ClassroomTasksPage({ params, searchParams }: Class
                         classroomId={classroomId}
                         classroomTaskId={classroomTaskId}
                         status={task.status}
+                        submissionWindowBadge={
+                          <span
+                            title={submissionWindowStatus.title}
+                            className={`inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-medium whitespace-nowrap ${submissionWindowStatus.badgeClassName}`}
+                          >
+                            {submissionWindowStatus.label}
+                          </span>
+                        }
                       />
                     </td>
                     <td className="px-4 py-3">{getAiStatusLabel(task.aiStatus)}</td>

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { type ReactNode, useState } from "react";
 import { useRouter } from "next/navigation";
 import { ErrorState } from "@/components/blocks/ErrorState";
 import { BrowserFetchJsonError, fetchJson } from "@/lib/api/browser-client";
@@ -15,6 +15,7 @@ type ClassroomTaskLifecycleActionsProps = {
   classroomId: string;
   classroomTaskId?: string;
   status?: string;
+  submissionWindowBadge?: ReactNode;
 };
 
 type StatusActionErrorState = {
@@ -35,7 +36,7 @@ const STATUS_META: Record<
 > = {
   ACTIVE: {
     label: "开放中",
-    hint: "课堂任务处于开放状态；是否允许提交还取决于截止时间和迟交设置。",
+    hint: "课堂任务未关闭或撤回。",
     badgeClassName: "border-emerald-300 bg-emerald-50 text-emerald-700",
   },
   CLOSED: {
@@ -60,6 +61,7 @@ export function ClassroomTaskLifecycleActions({
   classroomId,
   classroomTaskId,
   status,
+  submissionWindowBadge,
 }: ClassroomTaskLifecycleActionsProps) {
   const router = useRouter();
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -148,6 +150,7 @@ export function ClassroomTaskLifecycleActions({
       <span className={`inline-flex rounded border px-2 py-0.5 text-xs font-semibold ${statusMeta.badgeClassName}`}>
         {statusMeta.label}
       </span>
+      {submissionWindowBadge ? <div>{submissionWindowBadge}</div> : null}
       <p className="text-xs text-zinc-500">{statusMeta.hint}</p>
 
       {!classroomTaskId ? (
