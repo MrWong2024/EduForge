@@ -121,6 +121,7 @@ backend/
 - 关键字段：`courseId`、`name`、`teacherId`、`joinCode`、`studentIds[]`、`status(ACTIVE|ARCHIVED)`。
 - 索引/唯一性：`unique(joinCode)`；`(teacherId,courseId,status,createdAt)`。
 - `studentIds[]` 口径：仅 legacy 输出/可选镜像；不参与授权、统计、mine 查询，不作为 fallback。
+- 响应契约：`ClassroomResponse` 保留兼容字段 `courseId`，并新增只读 `course` 摘要对象（`id/code/name/term/courseLabel/status`）供前端展示课程可读信息；课程记录异常缺失时 `course` 可为空，不影响班级读取。
 
 ### Enrollment（`src/modules/classrooms/enrollments/schemas/enrollment.schema.ts`）
 - 关键字段：`classroomId`、`userId`、`role(STUDENT)`、`status(ACTIVE|REMOVED)`、`joinedAt`、`removedAt?`、`timestamps`。

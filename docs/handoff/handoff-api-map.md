@@ -92,6 +92,7 @@ Notes:
 - `/api/classrooms/:id/dashboard`：teacher only + owner only；默认只返回 `classroomTask.status=ACTIVE` 的任务；`includeClosedTasks=true` 时返回 `ACTIVE+CLOSED`；`RECALLED/缺失/未知状态` 不返回；每个 task item 返回 `classroomTaskStatus`，统计口径与返回任务集合一致；顶层返回 `archiveSuggestion`，仅作为“建议归档”提示，不会自动归档或修改班级状态。
 - `/api/classrooms/mine/dashboard`：student only；默认只返回 `classroom.status=ACTIVE`、`classroomTask.status=ACTIVE`、模板 `task.status=PUBLISHED` 且仍值得关注的任务；有 `dueAt` 时截止后 30 天内仍显示并标记 `RECENTLY_EXPIRED`，超过 30 天为 `HISTORICAL` 且默认隐藏；无 `dueAt` 时 `publishedAt` 90 天内显示，超过 90 天为 `HISTORICAL` 且默认隐藏；`includeHistorical=true` 返回 `CURRENT+RECENTLY_EXPIRED+HISTORICAL`，但仍不返回归档班级或非 ACTIVE classroomTask；每个 task item 返回 `studentVisibilityStatus/isHistorical`，`total` 按最终返回班级分组统计。
 - 班级状态契约：`Classroom.status` 支持 `ACTIVE | ARCHIVED`；`PATCH /api/classrooms/:id` 可通过 body `status` 实现归档与恢复（`ARCHIVED <-> ACTIVE`）。
+- 班级响应契约：`ClassroomResponse` 继续保留 `courseId`，并新增只读 `course` 摘要对象（`id/code/name/term/courseLabel/status`）；课程记录缺失时允许 `course` 为空，但不得影响班级读取。
 - 班级删除契约：`DELETE /api/classrooms/:id` 仅在“空班级”允许删除；空班级判定主规则是 `ClassroomTask` 无记录且 `Enrollment` 无记录（包含 `REMOVED` 历史）；`studentIds` 仅作防御性辅助校验。
 - 非空班级删除错误：返回 `409 Conflict`，错误码 `CLASSROOM_NOT_EMPTY`，message=`该班级已有成员或任务记录，不能删除，只能归档`。
 

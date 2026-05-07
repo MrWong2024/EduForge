@@ -16,7 +16,10 @@ import { QueryClassroomWeeklyReportDto } from '../dto/query-classroom-weekly-rep
 import { QueryProcessAssessmentDto } from '../dto/query-process-assessment.dto';
 import { QueryClassroomExportSnapshotDto } from '../dto/query-classroom-export-snapshot.dto';
 import { QueryClassroomStudentsDto } from '../dto/query-classroom-students.dto';
-import { ClassroomResponseDto } from '../dto/classroom-response.dto';
+import {
+  ClassroomCourseSummaryDto,
+  ClassroomResponseDto,
+} from '../dto/classroom-response.dto';
 import { Course } from '../../courses/schemas/course.schema';
 import { User } from '../../users/schemas/user.schema';
 import { TeacherClassroomDashboardService } from './teacher-classroom-dashboard.service';
@@ -40,6 +43,11 @@ import { WithTimestamps } from '../../../common/types/with-timestamps.type';
 
 type ClassroomWithMeta = Classroom & WithId & WithTimestamps;
 type ClassroomOwnerLean = Pick<Classroom, 'teacherId'> & WithId;
+type CourseSummaryLean = Pick<
+  Course,
+  'code' | 'name' | 'term' | 'courseLabel' | 'status'
+> &
+  WithId;
 type StudentUserLean = Pick<
   User,
   'email' | 'roles' | 'status' | 'name' | 'studentNo' | 'employeeNo'
@@ -94,8 +102,8 @@ export class ClassroomsService {
     await this.ensureTeacher(userId);
     const course = await this.courseModel
       .findOne({ _id: dto.courseId, createdBy: new Types.ObjectId(userId) })
-      .select('_id')
-      .lean()
+      .select('_id code name term courseLabel status')
+      .lean<CourseSummaryLean>()
       .exec();
     if (!course) {
       throw new NotFoundException('Course not found');
@@ -115,7 +123,11 @@ export class ClassroomsService {
           joinCode,
           status: ClassroomStatus.Active,
         });
-        return this.toClassroomResponse(classroom as ClassroomWithMeta, true);
+        return this.toClassroomResponse(
+          classroom as ClassroomWithMeta,
+          true,
+          this.toCourseSummary(course),
+        );
       } catch (error) {
         const mongoError = error as { code?: number };
         if (
@@ -186,9 +198,19 @@ export class ClassroomsService {
       this.classroomModel.countDocuments(filter),
     ]);
 
+    const courseMap = await this.getCourseSummaryMap(
+      items.map((classroom) => classroom.courseId),
+    );
+
     return {
       items: await Promise.all(
-        items.map((classroom) => this.toClassroomResponse(classroom)),
+        items.map((classroom) =>
+          this.toClassroomResponse(
+            classroom,
+            false,
+            courseMap.get(classroom.courseId.toString()) ?? null,
+          ),
+        ),
       ),
       total,
       page,
@@ -470,6 +492,7 @@ export class ClassroomsService {
   private async toClassroomResponse(
     classroom: ClassroomWithMeta,
     includeStudents = false,
+    course: ClassroomCourseSummaryDto | null | undefined = undefined,
   ) {
     // Legacy output compatibility:
     // `studentIds` is a derived response field from Enrollment ACTIVE records.
@@ -477,9 +500,14 @@ export class ClassroomsService {
     const studentIds = includeStudents
       ? await this.enrollmentService.listActiveStudentIds(classroom._id)
       : undefined;
+    const courseSummary =
+      course === undefined
+        ? await this.findCourseSummaryById(classroom.courseId)
+        : (course ?? undefined);
     return {
       id: classroom._id.toString(),
       courseId: classroom.courseId.toString(),
+      course: courseSummary,
       name: classroom.name,
       teacherId: classroom.teacherId.toString(),
       joinCode: classroom.joinCode,
@@ -488,6 +516,60 @@ export class ClassroomsService {
       createdAt: classroom.createdAt ?? new Date(0),
       updatedAt: classroom.updatedAt ?? new Date(0),
     } as ClassroomResponseDto;
+  }
+
+  private async findCourseSummaryById(
+    courseId: Types.ObjectId,
+  ): Promise<ClassroomCourseSummaryDto | undefined> {
+    const course = await this.courseModel
+      .findById(courseId)
+      .select('_id code name term courseLabel status')
+      .lean<CourseSummaryLean>()
+      .exec();
+    return this.toCourseSummary(course);
+  }
+
+  private async getCourseSummaryMap(
+    courseIds: Types.ObjectId[],
+  ): Promise<Map<string, ClassroomCourseSummaryDto>> {
+    const uniqueCourseMap = new Map(
+      courseIds.map((courseId) => [courseId.toString(), courseId]),
+    );
+    const uniqueCourseIds = Array.from(uniqueCourseMap.values());
+    const result = new Map<string, ClassroomCourseSummaryDto>();
+    if (uniqueCourseIds.length === 0) {
+      return result;
+    }
+
+    const courses = await this.courseModel
+      .find({ _id: { $in: uniqueCourseIds } })
+      .select('_id code name term courseLabel status')
+      .lean<CourseSummaryLean[]>()
+      .exec();
+
+    for (const course of courses) {
+      const summary = this.toCourseSummary(course);
+      if (summary) {
+        result.set(summary.id, summary);
+      }
+    }
+    return result;
+  }
+
+  private toCourseSummary(
+    course: CourseSummaryLean | null | undefined,
+  ): ClassroomCourseSummaryDto | undefined {
+    if (!course) {
+      return undefined;
+    }
+    return {
+      id: course._id.toString(),
+      code: course.code,
+      name: course.name,
+      term: course.term,
+      courseLabel: course.courseLabel,
+      status: course.status,
+    };
   }
 
   private async assertStudentInClassroomActive(
