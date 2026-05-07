@@ -1,3 +1,6 @@
+import { plainToInstance } from 'class-transformer';
+import { validate } from 'class-validator';
+import { QueryStudentDashboardDto } from '../dto/query-student-dashboard.dto';
 import { ClassroomsService } from '../services/classrooms.service';
 import { ClassroomsController } from './classrooms.controller';
 
@@ -59,9 +62,12 @@ describe('ClassroomsController', () => {
   it('defaults includeHistorical to false for student dashboard', async () => {
     const { controller, classroomsService } = createController();
 
-    const result = await controller.getMyLearningDashboard({}, undefined, {
-      id: 'student-1',
-    });
+    const result = await controller.getMyLearningDashboard(
+      {},
+      {
+        id: 'student-1',
+      },
+    );
 
     expect(result).toEqual({ ok: true });
     expect(classroomsService.getMyLearningDashboard).toHaveBeenCalledWith(
@@ -78,16 +84,26 @@ describe('ClassroomsController', () => {
     ['true', true],
     [true, true],
   ] as const)(
-    'parses includeHistorical=%p as %p',
+    'accepts and parses includeHistorical=%p as %p',
     async (rawIncludeHistorical, expected) => {
       const { controller, classroomsService } = createController();
+      const query = plainToInstance(QueryStudentDashboardDto, {
+        includeHistorical: rawIncludeHistorical,
+      });
+      const errors = await validate(query, {
+        whitelist: true,
+        forbidNonWhitelisted: true,
+      });
 
-      await controller.getMyLearningDashboard({}, rawIncludeHistorical, {
+      expect(errors).toEqual([]);
+      expect(query.includeHistorical).toBe(expected);
+
+      await controller.getMyLearningDashboard(query, {
         id: 'student-1',
       });
 
       expect(classroomsService.getMyLearningDashboard).toHaveBeenCalledWith(
-        {},
+        query,
         'student-1',
         expected,
       );

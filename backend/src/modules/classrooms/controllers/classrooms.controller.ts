@@ -17,6 +17,7 @@ import { CurrentUser } from '../../../common/decorators/current-user.decorator';
 import { CreateClassroomDto } from '../dto/create-classroom.dto';
 import { UpdateClassroomDto } from '../dto/update-classroom.dto';
 import { QueryClassroomDto } from '../dto/query-classroom.dto';
+import { QueryStudentDashboardDto } from '../dto/query-student-dashboard.dto';
 import { JoinClassroomDto } from '../dto/join-classroom.dto';
 import { QueryClassroomWeeklyReportDto } from '../dto/query-classroom-weekly-report.dto';
 import { QueryProcessAssessmentDto } from '../dto/query-process-assessment.dto';
@@ -87,15 +88,13 @@ export class ClassroomsController {
   @Roles(...STUDENT_ROLES)
   @Get('mine/dashboard')
   getMyLearningDashboard(
-    @Query() query: QueryClassroomDto,
-    @Query('includeHistorical')
-    includeHistorical: string | boolean | undefined,
+    @Query() query: QueryStudentDashboardDto,
     @CurrentUser() user: { id: string },
   ) {
     return this.classroomsService.getMyLearningDashboard(
       query,
       user.id,
-      includeHistorical === true || includeHistorical === 'true',
+      query.includeHistorical === true,
     );
   }
 
