@@ -80,6 +80,11 @@ export type StudentTaskCompletionStatus = {
   aiWorstSeverity: StudentTaskCompletionSeverity | null;
 };
 
+export type StudentTaskVisibilityStatus =
+  | "CURRENT"
+  | "RECENTLY_EXPIRED"
+  | "HISTORICAL";
+
 export type StudentDashboardLatestSubmission = {
   submissionId?: string;
   attemptNo?: number;
@@ -98,6 +103,8 @@ export type StudentDashboardTaskItem = {
   mySubmissionsCount?: number;
   aiFeedbackStatus?: string;
   completionStatus?: StudentTaskCompletionStatus;
+  studentVisibilityStatus?: StudentTaskVisibilityStatus;
+  isHistorical?: boolean;
   raw: UnknownRecord;
 };
 
@@ -195,6 +202,7 @@ const toStudentDashboardTaskItem = (
   const latestSubmission = toStudentDashboardLatestSubmission(
     safeGet(record, "myLatestSubmission", undefined),
   );
+  const visibilityStatus = asString(record.studentVisibilityStatus);
 
   return {
     classroomTaskId: asString(record.classroomTaskId) ?? asString(record.id),
@@ -207,6 +215,10 @@ const toStudentDashboardTaskItem = (
     aiFeedbackStatus:
       latestSubmission?.aiFeedbackStatus ?? asString(record.aiFeedbackStatus),
     completionStatus: toStudentTaskCompletionStatus(record.completionStatus),
+    studentVisibilityStatus: isStudentTaskVisibilityStatus(visibilityStatus)
+      ? visibilityStatus
+      : undefined,
+    isHistorical: asNullableBoolean(record.isHistorical) ?? undefined,
     raw: record,
   };
 };
@@ -229,6 +241,13 @@ const isCompletionSource = (
   value: string | undefined,
 ): value is StudentTaskCompletionSource =>
   value === "TEACHER" || value === "AI";
+
+const isStudentTaskVisibilityStatus = (
+  value: string | undefined,
+): value is StudentTaskVisibilityStatus =>
+  value === "CURRENT" ||
+  value === "RECENTLY_EXPIRED" ||
+  value === "HISTORICAL";
 
 const toStudentDashboardLatestSubmission = (
   value: unknown,

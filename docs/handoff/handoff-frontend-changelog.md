@@ -618,6 +618,13 @@
 - 【展示口径】CLOSED 任务依据 `classroomTaskStatus` 显示“已关闭”标签并做轻量弱化；ACTIVE 保持原展示。
 - 【边界保持】任务集合与 summary 统计均以接口返回为准，前端不本地过滤 CLOSED、不二次扣减或重算统计。不改 backend，不新增依赖。
 
+## UAT-FE-74
+
+- 【本步解决】学生看板默认任务列表长期积累历史任务、但学生仍需要显式回看历史任务的问题。
+- 【新增事实 / 已收口口径】`/student/dashboard` 新增“显示历史任务”开关；默认不传 `includeHistorical`，打开后请求 `GET classrooms/mine/dashboard?includeHistorical=true`，关闭后恢复默认请求。
+- 【展示口径】`RECENTLY_EXPIRED` 任务显示“近期过期”标签；`HISTORICAL` 任务显示“历史任务”标签并做轻量弱化；旧响应缺少 `studentVisibilityStatus/isHistorical` 时按普通当前任务展示。
+- 【边界保持】任务可见性只消费后端 `studentVisibilityStatus/isHistorical`，前端不按 `dueAt/publishedAt` 或本地过滤重算历史任务；任务集合、`total/page/limit` 与完成情况均以接口返回为准。不改 backend，不新增依赖。
+
 ## 当前阶段一句话结论
 
 前端已达到“Teacher/Student 主链路可用 + 任务模板层与班级实例层边界收口 + 教师模板主链路可维护”的工程验收阶段，但尚未进入最终交付定版阶段。

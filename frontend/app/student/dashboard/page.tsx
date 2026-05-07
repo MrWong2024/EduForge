@@ -10,6 +10,7 @@ import {
   extractRawDetail,
 } from "@/lib/api/error-presenter";
 import {
+  StudentDashboardTaskItem,
   StudentTaskCompletionStatus,
   toStudentDashboardResponse,
 } from "@/lib/api/types-student";
@@ -19,6 +20,10 @@ import { toDisplayDate, toDisplayText } from "@/lib/ui/format";
 
 export const metadata: Metadata = {
   title: "学习看板",
+};
+
+type StudentDashboardPageProps = {
+  searchParams: Promise<{ includeHistorical?: string | string[] }>;
 };
 
 const getRequestOrigin = async (): Promise<string> => {
@@ -31,6 +36,21 @@ const getRequestOrigin = async (): Promise<string> => {
   const protocol = headerMap.get("x-forwarded-proto") ?? "http";
   return `${protocol}://${host}`;
 };
+
+const isQueryTrue = (value: string | string[] | undefined): boolean => {
+  const rawValue = Array.isArray(value) ? value[0] : value;
+  return rawValue === "true";
+};
+
+const getDashboardPath = (includeHistorical: boolean): string =>
+  includeHistorical
+    ? "classrooms/mine/dashboard?includeHistorical=true"
+    : "classrooms/mine/dashboard";
+
+const getHistoricalToggleHref = (includeHistorical: boolean): string =>
+  includeHistorical
+    ? paths.student.dashboard
+    : `${paths.student.dashboard}?includeHistorical=true`;
 
 type StudentDashboardViewModel =
   | {
@@ -174,7 +194,35 @@ const getCompletionStatusBadge = (
   };
 };
 
-export default async function StudentDashboardPage() {
+const getTaskVisibilityBadge = (
+  task: StudentDashboardTaskItem,
+): StatusBadgeView | null => {
+  if (task.studentVisibilityStatus === "RECENTLY_EXPIRED") {
+    return {
+      label: "近期过期",
+      title: "任务已过截止时间，但仍处于反馈查看期",
+      tone: "warning",
+    };
+  }
+
+  if (task.studentVisibilityStatus === "HISTORICAL" || task.isHistorical) {
+    return {
+      label: "历史任务",
+      title: "长期过期任务，仅在显示历史任务时展示",
+      tone: "neutral",
+    };
+  }
+
+  return null;
+};
+
+export default async function StudentDashboardPage({
+  searchParams,
+}: StudentDashboardPageProps) {
+  const resolvedSearchParams = await searchParams;
+  const includeHistorical = isQueryTrue(
+    resolvedSearchParams.includeHistorical,
+  );
   let viewModel: StudentDashboardViewModel = {
     mode: "error",
     status: 500,
@@ -183,10 +231,13 @@ export default async function StudentDashboardPage() {
 
   try {
     const origin = await getRequestOrigin();
-    const payload = await fetchJson<unknown>("classrooms/mine/dashboard", {
-      origin,
-      cache: "no-store",
-    });
+    const payload = await fetchJson<unknown>(
+      getDashboardPath(includeHistorical),
+      {
+        origin,
+        cache: "no-store",
+      },
+    );
 
     viewModel = {
       mode: "ready",
@@ -238,17 +289,66 @@ export default async function StudentDashboardPage() {
         }
       />
 
+      <section className="mb-4 rounded-lg border border-zinc-200 bg-white p-4">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+          <div>
+            <h2 className="text-sm font-semibold text-zinc-900">任务范围</h2>
+            <p className="mt-1 text-xs text-zinc-500">
+              {includeHistorical
+                ? "当前显示历史任务；已归档班级和已关闭任务仍不会显示。"
+                : "默认仅显示当前任务与近期过期任务，历史任务用于回看。"}
+            </p>
+          </div>
+          <Link
+            href={getHistoricalToggleHref(includeHistorical)}
+            role="switch"
+            aria-checked={includeHistorical}
+            className="inline-flex w-fit items-center gap-2 rounded-md border border-zinc-200 bg-white px-3 py-2 text-sm font-medium text-zinc-700 hover:bg-zinc-50"
+          >
+            <span
+              className={`relative h-5 w-9 rounded-full border transition ${
+                includeHistorical
+                  ? "border-blue-300 bg-blue-600"
+                  : "border-zinc-300 bg-zinc-100"
+              }`}
+              aria-hidden="true"
+            >
+              <span
+                className={`absolute top-0.5 h-3.5 w-3.5 rounded-full bg-white shadow transition ${
+                  includeHistorical ? "left-4" : "left-0.5"
+                }`}
+              />
+            </span>
+            显示历史任务
+          </Link>
+        </div>
+      </section>
+
       {classroomItems.length === 0 ? (
         <EmptyState
-          title="还没有加入任何班级"
-          description="先输入班级加入码加入班级，再开始做任务。"
+          title={includeHistorical ? "暂无任务" : "暂无当前任务"}
+          description={
+            includeHistorical
+              ? "当前没有可展示的学习任务。"
+              : "默认仅显示当前任务与近期过期任务；如需回看长期过期任务，可打开“显示历史任务”。"
+          }
           actions={
-            <Link
-              href={paths.student.joinClassroom}
-              className="rounded-md bg-zinc-900 px-3 py-1.5 text-sm font-medium text-white hover:bg-zinc-700"
-            >
-              去加入班级
-            </Link>
+            <div className="flex flex-wrap justify-center gap-3">
+              <Link
+                href={paths.student.joinClassroom}
+                className="rounded-md bg-zinc-900 px-3 py-1.5 text-sm font-medium text-white hover:bg-zinc-700"
+              >
+                去加入班级
+              </Link>
+              {!includeHistorical ? (
+                <Link
+                  href={getHistoricalToggleHref(false)}
+                  className="rounded-md border border-zinc-200 px-3 py-1.5 text-sm font-medium text-zinc-700 hover:bg-zinc-50"
+                >
+                  显示历史任务
+                </Link>
+              ) : null}
+            </div>
           }
         />
       ) : (
@@ -310,19 +410,39 @@ export default async function StudentDashboardPage() {
                               task.completionStatus,
                               hasLatestSubmission,
                             );
+                          const visibilityBadge =
+                            getTaskVisibilityBadge(task);
+                          const isHistoricalTask =
+                            task.studentVisibilityStatus === "HISTORICAL" ||
+                            task.isHistorical === true;
 
                           return (
                             <tr
                               key={task.classroomTaskId ?? `task-${taskIndex}`}
-                              className="border-t border-zinc-100"
+                              className={`border-t border-zinc-100 ${
+                                isHistoricalTask ? "bg-slate-50/70" : ""
+                              }`}
                             >
-                              <td className="px-4 py-2">
-                                {toDisplayText(task.title, "未命名任务")}
+                              <td
+                                className={`px-4 py-2 ${
+                                  isHistoricalTask
+                                    ? "font-medium text-slate-600"
+                                    : "text-zinc-900"
+                                }`}
+                              >
+                                <div className="flex flex-wrap items-center gap-2">
+                                  <span>
+                                    {toDisplayText(task.title, "未命名任务")}
+                                  </span>
+                                  {visibilityBadge ? (
+                                    <StatusBadge badge={visibilityBadge} />
+                                  ) : null}
+                                </div>
                               </td>
-                              <td className="px-4 py-2">
+                              <td className="px-4 py-2 text-zinc-700">
                                 {toDisplayDate(task.dueAt)}
                               </td>
-                              <td className="px-4 py-2">
+                              <td className="px-4 py-2 text-zinc-700">
                                 {toDisplayText(task.mySubmissionsCount, "0")}
                               </td>
                               <td className="px-4 py-2">
