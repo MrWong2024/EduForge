@@ -280,6 +280,12 @@ AI Provider 错误码（`ai-feedback-provider.error-codes.ts`）：
   - `includeClosedTasks=true` 时返回 `ACTIVE+CLOSED`；`RECALLED/缺失/未知状态` 仍不返回。
   - 每个 task item 返回 `classroomTaskStatus`，字段值来自 `ClassroomTask.status`，供前端后续标记已关闭任务。
   - summary 与任务级统计均基于本次返回任务集合：默认排除 `CLOSED`，显式包含关闭任务时统计随返回集合扩大。
+- 教师班级归档建议契约（后端已完成，前端待后续阶段接入）：
+  - `GET /api/classrooms/:id/dashboard` 顶层新增 `archiveSuggestion`，用于提示教师“建议归档”，第一版不做自动归档，不修改班级状态。
+  - 建议归档只面向 `Classroom.status=ACTIVE` 班级；非 ACTIVE 班级 `suggested=false`。
+  - 建议条件为：无当前活跃课堂任务、最近 30 天无学生提交、且不处于新班级 30 天保护期。
+  - 当前活跃课堂任务定义与学生看板时间窗口对齐：`ClassroomTask.status=ACTIVE` + 模板 `Task.status=PUBLISHED`，有 `dueAt` 时截止后 30 天内仍算活跃，无 `dueAt` 时 `publishedAt` 90 天内算活跃。
+  - `CLOSED/RECALLED` classroomTask 与非 `PUBLISHED` task 不算活跃任务；`archiveSuggestion` 独立于 `includeClosedTasks`，教师是否显示 CLOSED 任务不会改变建议结果。
 - 学生看板任务完成情况契约（后端已完成，前端待后续阶段接入）：
   - `GET /api/classrooms/mine/dashboard` 的每个 task item 顶层新增 `completionStatus`。
   - 学生看板定位为当前学习工作台，默认只返回 `classroom.status=ACTIVE`、`classroomTask.status=ACTIVE`、模板 `task.status=PUBLISHED` 且仍值得关注的任务；归档班级、已关闭或其它非 ACTIVE 课堂任务默认不显示。

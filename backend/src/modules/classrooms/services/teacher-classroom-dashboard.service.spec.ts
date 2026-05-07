@@ -14,6 +14,7 @@ import {
 import { Feedback } from '../../learning-tasks/schemas/feedback.schema';
 import { EnrollmentService } from '../enrollments/services/enrollment.service';
 import { TeacherClassroomDashboardService } from './teacher-classroom-dashboard.service';
+import { TaskStatus } from '../../learning-tasks/schemas/task.schema';
 
 type ClassroomTaskFixture = {
   _id: Types.ObjectId;
@@ -25,6 +26,7 @@ type ClassroomTaskFixture = {
   knowledgeModule: string;
   publishedAt: Date;
   dueAt?: Date;
+  taskStatus?: string;
 };
 
 type SubmissionFixture = {
@@ -32,6 +34,7 @@ type SubmissionFixture = {
   classroomTaskId: Types.ObjectId;
   studentId: Types.ObjectId;
   isLate?: boolean;
+  createdAt?: Date;
 };
 
 type AiJobFixture = {
@@ -45,6 +48,10 @@ type FeedbackFixture = {
 };
 
 type HarnessData = {
+  classroom?: Partial<{
+    status: string;
+    createdAt: Date;
+  }>;
   classroomTasks?: ClassroomTaskFixture[];
   submissions?: SubmissionFixture[];
   aiJobs?: AiJobFixture[];
@@ -66,6 +73,19 @@ const makeAggregate = <T>(result: T) => ({
   exec: jest.fn().mockResolvedValue(result),
 });
 
+const makeFindOne = <T>(result: T) => {
+  const chain = {
+    sort: jest.fn(),
+    select: jest.fn(),
+    lean: jest.fn(),
+    exec: jest.fn().mockResolvedValue(result),
+  };
+  chain.sort.mockReturnValue(chain);
+  chain.select.mockReturnValue(chain);
+  chain.lean.mockReturnValue(chain);
+  return chain;
+};
+
 const toIdSet = (values: Types.ObjectId[]) =>
   new Set(values.map((value) => value.toString()));
 
@@ -81,8 +101,9 @@ const createHarness = (data: HarnessData = {}) => {
     _id: classroomId,
     name: 'Class A',
     courseId: objectId(),
-    status: 'ACTIVE',
+    status: data.classroom?.status ?? 'ACTIVE',
     joinCode: 'JOIN01',
+    createdAt: data.classroom?.createdAt,
   };
   const classroomTasks = data.classroomTasks ?? [
     {
@@ -121,6 +142,24 @@ const createHarness = (data: HarnessData = {}) => {
         title: task.title,
         stage: task.stage,
         knowledgeModule: task.knowledgeModule,
+      }));
+  };
+
+  const filterArchiveCandidates = (pipeline: unknown[]) => {
+    const match = getPipelineMatch(pipeline);
+    const classroomIdValue = match.classroomId as Types.ObjectId | undefined;
+    return classroomTasks
+      .filter(
+        (task) =>
+          !classroomIdValue ||
+          task.classroomId.toString() === classroomIdValue.toString(),
+      )
+      .map((task) => ({
+        _id: task._id,
+        classroomTaskStatus: task.status,
+        taskStatus: task.taskStatus ?? TaskStatus.Published,
+        publishedAt: task.publishedAt,
+        dueAt: task.dueAt,
       }));
   };
 
@@ -242,14 +281,7 @@ const createHarness = (data: HarnessData = {}) => {
     findOne: jest.fn(() => makeQuery(classroom)),
   };
   const classroomTaskModel = {
-    aggregate: jest.fn((pipeline: unknown[]) =>
-      makeAggregate(filterClassroomTasks(pipeline)),
-    ),
-  };
-  const submissionModel = {
-    aggregate: jest.fn((pipeline: unknown[]) =>
-      makeAggregate(getSubmissionStats(pipeline)),
-    ),
+    aggregate: jest.fn(),
   };
   const aiFeedbackJobModel = {
     aggregate: jest.fn((pipeline: unknown[]) =>
@@ -261,8 +293,47 @@ const createHarness = (data: HarnessData = {}) => {
       makeAggregate(getTagStats(pipeline)),
     ),
   };
+  const getLastSubmission = (query: Record<string, unknown>) => {
+    const classroomTaskIds = toIdSet(
+      (query.classroomTaskId as { $in?: Types.ObjectId[] })?.$in ?? [],
+    );
+    const candidates = submissions.filter((submission) =>
+      classroomTaskIds.has(submission.classroomTaskId.toString()),
+    );
+    if (candidates.length === 0) {
+      return null;
+    }
+    const latest = candidates.reduce((currentLatest, submission) => {
+      const currentTime = submission.createdAt?.getTime() ?? 0;
+      const latestTime = currentLatest.createdAt?.getTime() ?? 0;
+      return currentTime > latestTime ? submission : currentLatest;
+    });
+    return {
+      createdAt: latest.createdAt,
+    };
+  };
+  const submissionFindOne = jest.fn((query: Record<string, unknown>) =>
+    makeFindOne(getLastSubmission(query)),
+  );
+  const submissionAggregate = jest.fn((pipeline: unknown[]) =>
+    makeAggregate(getSubmissionStats(pipeline)),
+  );
   const enrollmentService = {
     countStudents: jest.fn().mockResolvedValue(5),
+  };
+
+  classroomTaskModel.aggregate.mockImplementation((pipeline: unknown[]) => {
+    const match = getPipelineMatch(pipeline);
+    return makeAggregate(
+      match.status
+        ? filterClassroomTasks(pipeline)
+        : filterArchiveCandidates(pipeline),
+    );
+  });
+
+  const submissionModel = {
+    aggregate: submissionAggregate,
+    findOne: submissionFindOne,
   };
 
   const service = new TeacherClassroomDashboardService(
@@ -285,6 +356,15 @@ const createHarness = (data: HarnessData = {}) => {
 };
 
 describe('TeacherClassroomDashboardService', () => {
+  beforeEach(() => {
+    jest.useFakeTimers();
+    jest.setSystemTime(new Date('2026-05-07T00:00:00.000Z'));
+  });
+
+  afterEach(() => {
+    jest.useRealTimers();
+  });
+
   it('returns only ACTIVE classroomTasks by default', async () => {
     const activeTaskId = objectId();
     const closedTaskId = objectId();
@@ -565,6 +645,310 @@ describe('TeacherClassroomDashboardService', () => {
     expect(includeClosedDashboard.tasks[0]).toMatchObject({
       classroomTaskStatus: CLASSROOM_TASK_STATUS_CLOSED,
     });
+  });
+
+  it('does not suggest archiving when an ACTIVE classroom has a current active task', async () => {
+    const classroomId = objectId();
+    const activeTaskId = objectId();
+    const harness = createHarness({
+      classroom: { createdAt: new Date('2025-01-01T00:00:00.000Z') },
+      classroomTasks: [
+        {
+          _id: activeTaskId,
+          taskId: objectId(),
+          classroomId,
+          status: CLASSROOM_TASK_STATUS_ACTIVE,
+          title: 'Current Active Task',
+          stage: 1,
+          knowledgeModule: 'module',
+          publishedAt: new Date('2026-01-01T00:00:00.000Z'),
+          dueAt: new Date('2026-04-27T00:00:00.000Z'),
+        },
+      ],
+    });
+
+    const dashboard = await harness.service.getDashboard(
+      classroomId.toString(),
+      harness.ids.teacherId.toString(),
+    );
+
+    expect(dashboard.archiveSuggestion).toMatchObject({
+      suggested: false,
+      reason: null,
+      message: null,
+      latestActiveTaskDueAt: '2026-04-27T00:00:00.000Z',
+    });
+  });
+
+  it('suggests archiving when an old ACTIVE classroom has no active tasks and no recent submissions', async () => {
+    const classroomId = objectId();
+    const oldTaskId = objectId();
+    const harness = createHarness({
+      classroom: { createdAt: new Date('2025-01-01T00:00:00.000Z') },
+      classroomTasks: [
+        {
+          _id: oldTaskId,
+          taskId: objectId(),
+          classroomId,
+          status: CLASSROOM_TASK_STATUS_ACTIVE,
+          title: 'Old Active Instance',
+          stage: 1,
+          knowledgeModule: 'module',
+          publishedAt: new Date('2026-01-01T00:00:00.000Z'),
+          dueAt: new Date('2026-04-06T00:00:00.000Z'),
+        },
+      ],
+      submissions: [
+        {
+          _id: objectId(),
+          classroomTaskId: oldTaskId,
+          studentId: objectId(),
+          createdAt: new Date('2026-03-01T00:00:00.000Z'),
+        },
+      ],
+    });
+
+    const dashboard = await harness.service.getDashboard(
+      classroomId.toString(),
+      harness.ids.teacherId.toString(),
+    );
+
+    expect(dashboard.archiveSuggestion).toMatchObject({
+      suggested: true,
+      reason: 'NO_ACTIVE_TASKS_AND_NO_RECENT_SUBMISSIONS',
+      message: '该班级近期无活跃任务和学生提交，建议归档。',
+      lastSubmissionAt: '2026-03-01T00:00:00.000Z',
+      latestActiveTaskDueAt: null,
+    });
+  });
+
+  it('does not suggest archiving when a recent submission exists', async () => {
+    const classroomId = objectId();
+    const oldTaskId = objectId();
+    const harness = createHarness({
+      classroom: { createdAt: new Date('2025-01-01T00:00:00.000Z') },
+      classroomTasks: [
+        {
+          _id: oldTaskId,
+          taskId: objectId(),
+          classroomId,
+          status: CLASSROOM_TASK_STATUS_ACTIVE,
+          title: 'Old Active Instance',
+          stage: 1,
+          knowledgeModule: 'module',
+          publishedAt: new Date('2026-01-01T00:00:00.000Z'),
+          dueAt: new Date('2026-04-06T00:00:00.000Z'),
+        },
+      ],
+      submissions: [
+        {
+          _id: objectId(),
+          classroomTaskId: oldTaskId,
+          studentId: objectId(),
+          createdAt: new Date('2026-04-30T00:00:00.000Z'),
+        },
+      ],
+    });
+
+    const dashboard = await harness.service.getDashboard(
+      classroomId.toString(),
+      harness.ids.teacherId.toString(),
+    );
+
+    expect(dashboard.archiveSuggestion).toMatchObject({
+      suggested: false,
+      reason: null,
+      lastSubmissionAt: '2026-04-30T00:00:00.000Z',
+    });
+  });
+
+  it('protects new classrooms from archive suggestions', async () => {
+    const classroomId = objectId();
+    const harness = createHarness({
+      classroom: { createdAt: new Date('2026-04-30T00:00:00.000Z') },
+      classroomTasks: [],
+    });
+
+    const dashboard = await harness.service.getDashboard(
+      classroomId.toString(),
+      harness.ids.teacherId.toString(),
+    );
+
+    expect(dashboard.archiveSuggestion).toMatchObject({
+      suggested: false,
+      reason: null,
+      message: null,
+    });
+  });
+
+  it('uses the 90-day no-due publishedAt window for active tasks', async () => {
+    const classroomId = objectId();
+    const currentTaskId = objectId();
+    const historicalTaskId = objectId();
+    const currentHarness = createHarness({
+      classroom: { createdAt: new Date('2025-01-01T00:00:00.000Z') },
+      classroomTasks: [
+        {
+          _id: currentTaskId,
+          taskId: objectId(),
+          classroomId,
+          status: CLASSROOM_TASK_STATUS_ACTIVE,
+          title: 'No Due Current Task',
+          stage: 1,
+          knowledgeModule: 'module',
+          publishedAt: new Date('2026-03-08T00:00:00.000Z'),
+        },
+      ],
+    });
+    const historicalHarness = createHarness({
+      classroom: { createdAt: new Date('2025-01-01T00:00:00.000Z') },
+      classroomTasks: [
+        {
+          _id: historicalTaskId,
+          taskId: objectId(),
+          classroomId,
+          status: CLASSROOM_TASK_STATUS_ACTIVE,
+          title: 'No Due Historical Task',
+          stage: 1,
+          knowledgeModule: 'module',
+          publishedAt: new Date('2026-02-05T00:00:00.000Z'),
+        },
+      ],
+    });
+
+    const currentDashboard = await currentHarness.service.getDashboard(
+      classroomId.toString(),
+      currentHarness.ids.teacherId.toString(),
+    );
+    const historicalDashboard = await historicalHarness.service.getDashboard(
+      classroomId.toString(),
+      historicalHarness.ids.teacherId.toString(),
+    );
+
+    expect(currentDashboard.archiveSuggestion.suggested).toBe(false);
+    expect(historicalDashboard.archiveSuggestion.suggested).toBe(true);
+  });
+
+  it('ignores CLOSED, RECALLED, and non-PUBLISHED tasks when deciding active tasks', async () => {
+    const classroomId = objectId();
+    const harness = createHarness({
+      classroom: { createdAt: new Date('2025-01-01T00:00:00.000Z') },
+      classroomTasks: [
+        {
+          _id: objectId(),
+          taskId: objectId(),
+          classroomId,
+          status: CLASSROOM_TASK_STATUS_CLOSED,
+          title: 'Closed Task',
+          stage: 1,
+          knowledgeModule: 'module',
+          publishedAt: new Date('2026-05-01T00:00:00.000Z'),
+          dueAt: new Date('2026-06-01T00:00:00.000Z'),
+        },
+        {
+          _id: objectId(),
+          taskId: objectId(),
+          classroomId,
+          status: CLASSROOM_TASK_STATUS_RECALLED,
+          title: 'Recalled Task',
+          stage: 1,
+          knowledgeModule: 'module',
+          publishedAt: new Date('2026-05-01T00:00:00.000Z'),
+          dueAt: new Date('2026-06-01T00:00:00.000Z'),
+        },
+        {
+          _id: objectId(),
+          taskId: objectId(),
+          classroomId,
+          status: CLASSROOM_TASK_STATUS_ACTIVE,
+          taskStatus: TaskStatus.Draft,
+          title: 'Draft Template Task',
+          stage: 1,
+          knowledgeModule: 'module',
+          publishedAt: new Date('2026-05-01T00:00:00.000Z'),
+          dueAt: new Date('2026-06-01T00:00:00.000Z'),
+        },
+      ],
+    });
+
+    const dashboard = await harness.service.getDashboard(
+      classroomId.toString(),
+      harness.ids.teacherId.toString(),
+      true,
+    );
+
+    expect(dashboard.archiveSuggestion.suggested).toBe(true);
+  });
+
+  it('does not suggest archive for non-ACTIVE classrooms', async () => {
+    const classroomId = objectId();
+    const harness = createHarness({
+      classroom: {
+        status: 'ARCHIVED',
+        createdAt: new Date('2025-01-01T00:00:00.000Z'),
+      },
+      classroomTasks: [],
+    });
+
+    const dashboard = await harness.service.getDashboard(
+      classroomId.toString(),
+      harness.ids.teacherId.toString(),
+    );
+
+    expect(dashboard.archiveSuggestion).toMatchObject({
+      suggested: false,
+      reason: null,
+      inactiveDays: null,
+    });
+  });
+
+  it('keeps archive suggestions independent from includeClosedTasks', async () => {
+    const classroomId = objectId();
+    const activeTaskId = objectId();
+    const closedTaskId = objectId();
+    const harness = createHarness({
+      classroom: { createdAt: new Date('2025-01-01T00:00:00.000Z') },
+      classroomTasks: [
+        {
+          _id: activeTaskId,
+          taskId: objectId(),
+          classroomId,
+          status: CLASSROOM_TASK_STATUS_ACTIVE,
+          title: 'Old Active Task',
+          stage: 1,
+          knowledgeModule: 'module',
+          publishedAt: new Date('2026-01-01T00:00:00.000Z'),
+          dueAt: new Date('2026-04-06T00:00:00.000Z'),
+        },
+        {
+          _id: closedTaskId,
+          taskId: objectId(),
+          classroomId,
+          status: CLASSROOM_TASK_STATUS_CLOSED,
+          title: 'Closed Task',
+          stage: 1,
+          knowledgeModule: 'module',
+          publishedAt: new Date('2026-05-01T00:00:00.000Z'),
+          dueAt: new Date('2026-06-01T00:00:00.000Z'),
+        },
+      ],
+    });
+
+    const defaultDashboard = await harness.service.getDashboard(
+      classroomId.toString(),
+      harness.ids.teacherId.toString(),
+    );
+    const includeClosedDashboard = await harness.service.getDashboard(
+      classroomId.toString(),
+      harness.ids.teacherId.toString(),
+      true,
+    );
+
+    expect(defaultDashboard.archiveSuggestion).toEqual(
+      includeClosedDashboard.archiveSuggestion,
+    );
+    expect(defaultDashboard.archiveSuggestion.suggested).toBe(true);
+    expect(includeClosedDashboard.tasks).toHaveLength(2);
   });
 
   it('checks teacher ownership before returning dashboard data', async () => {
