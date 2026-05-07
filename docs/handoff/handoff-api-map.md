@@ -120,7 +120,7 @@ Notes:
 - `PATCH /api/classrooms/:classroomId/tasks/:classroomTaskId/status`：teacher only + owner only；`status` 入参允许 `ACTIVE/CLOSED/RECALLED`，但流转受后端状态机约束：允许 `ACTIVE -> CLOSED`、`ACTIVE -> RECALLED`、`CLOSED -> ACTIVE`，拒绝 `RECALLED` 相关恢复/再次流转与 `CLOSED -> RECALLED`；当目标为 `RECALLED` 且已有提交时返回 `400`（提示只能关闭）。
 - `CLOSED -> ACTIVE` 仅恢复提交状态，不会自动修改 `dueAt/settings.allowLate/settings.maxAttempts`；若需延长期限或修改规则，仍需调用实例配置更新接口。
 - 课堂任务返回口径（列表/详情/my-task-detail 的 `classroomTask` 区块）已补 `status` 字段；旧数据缺省状态按 `ACTIVE` 兼容输出。
-- `/api/classrooms/:classroomId/tasks/:classroomTaskId/submissions`：提交前先校验 `ClassroomTask.status=ACTIVE`；`CLOSED/RECALLED` 一律拒绝新提交；此外若 `dueAt` 存在且 `allowLate=false` 且 `now>dueAt`，拒绝（403），`error code = LATE_SUBMISSION_NOT_ALLOWED`；Submission 响应包含 `submittedAt/isLate/lateBySeconds` 语义字段。
+- `/api/classrooms/:classroomId/tasks/:classroomTaskId/submissions`：提交前先校验 `classroom.status=ACTIVE`、`ClassroomTask.status=ACTIVE`、模板 `task.status=PUBLISHED` 与 Enrollment ACTIVE；归档班级、关闭/撤回课堂任务、非发布模板均拒绝新提交且不创建 submission/AI job；此外若 `dueAt` 存在且 `allowLate=false` 且 `now>dueAt`，拒绝（403），`error code = LATE_SUBMISSION_NOT_ALLOWED`；Submission 响应包含 `submittedAt/isLate/lateBySeconds` 语义字段。
 - `GET /api/classrooms/:classroomId/tasks/:classroomTaskId/submissions`：teacher only + owner only（非 owner 返回 `404`）；只按 `classroomTaskId` 分页查询，禁止按 `taskId` 跨班聚合；默认排序 `submittedAt desc, _id desc`；`aiFeedbackStatus` 无 job 时为 `NOT_REQUESTED`；`items[*].feedbackCount` 为该 submission 在 Feedback 集合中的总条数（按当前页 submissionIds 批量聚合），无反馈时返回 `0`；不返回 `passwordHash`、`content.codeText`。
 - `/api/classrooms/:classroomId/tasks/:classroomTaskId/my-task-detail`：student only，且必须 Enrollment ACTIVE；Query: `includeFeedbackItems, feedbackLimit`；`attemptNo>1` 在未手工 request 时可能 `NOT_REQUESTED`（无 job，合法语义）。
 - `/api/classrooms/:classroomId/tasks/:classroomTaskId/learning-trajectory`：teacher only；Query: `window, page, limit, sort, order, includeAttempts, includeTagDetails`；默认 `window=all`；后端兼容集合 `all/7d/24h/30d`（`24h/30d` 为兼容窗口，下一阶段前端不再主展示）；`window=all` = 该课堂任务口径下无时间下界过滤；学生范围取 Enrollment ACTIVE；`items[*]` 返回结构化学生公开信息 `student:{id,name,studentNo,email}`（并兼容回填 `studentName`）；未提交学生也会以 `notSubmitted` 维度出现在 `items`；`includeAttempts=true` 时 `items[*].attempts[*].feedbackCount` 返回该 submission 在 Feedback 集合中的总条数（AI/TEACHER/SYSTEM 全来源，按当前页 submissionIds 批量聚合）；`feedbackSummary.totalItems` 仍保留 AI 摘要语义。
@@ -160,7 +160,7 @@ Notes:
   - `all`：当前教师可见全集（我的全部 + 共享池）。
 - `createdBy`：仅保留兼容字段；当前列表语义以 `scope` 为主，不再作为越权筛选入口。
 - `GET /api/learning-tasks/tasks/:id`：可见性规则为“作者本人可读；他人仅可读 `SHARED`（含旧数据缺省兼容视为 `SHARED`）；他人 `PRIVATE` 不可读（404）”。
-- `/api/learning-tasks/submissions/:submissionId/ai-feedback/request` 是产品能力，不受 `AI_FEEDBACK_DEBUG_ENABLED` 门禁影响，但受登录 + RBAC + 资源归属校验。
+- `/api/learning-tasks/submissions/:submissionId/ai-feedback/request` 是产品能力，不受 `AI_FEEDBACK_DEBUG_ENABLED` 门禁影响，但受登录 + RBAC + 资源归属校验；学生对本人课堂任务 submission 手工请求 AI 前还必须满足 `classroom.status=ACTIVE`、`ClassroomTask.status=ACTIVE`、模板 `task.status=PUBLISHED`，否则拒绝且不创建 job。
 - 幂等语义：job 已存在则返回既有 job（200）；不存在则创建 `PENDING` job。
 - `GET /api/learning-tasks/submissions/:id` 权限：学生本人可读；若 `classroomTaskId` 存在，仅该 `classroomTask` 所属班级 owner teacher 可读；若 `classroomTaskId` 为空，仅 `task.createdBy` 对应的 task owner teacher 可读；其他用户返回 `403`；submission 不存在返回 `404`。
 - `GET /api/learning-tasks/submissions/:id` 返回稳定读源字段：`id/taskId/classroomTaskId/studentId/studentName/taskTitle/content.language/content.codeText/submittedAt/attemptNo/isLate/lateBySeconds/aiFeedbackStatus`；不返回 `passwordHash`。

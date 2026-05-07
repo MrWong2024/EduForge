@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  ConflictException,
   ForbiddenException,
   Injectable,
   NotFoundException,
@@ -76,6 +77,7 @@ type ClassroomWithCourseLean = Pick<Classroom, 'courseId'> & WithId;
 type CourseWithLabelLean = Pick<Course, 'courseLabel'> & WithId;
 type ClassroomOwnerLean = Pick<Classroom, 'teacherId'> & WithId;
 type ClassroomTaskOwnerLean = Pick<ClassroomTask, 'classroomId'> & WithId;
+type ClassroomTaskSubmitTemplateLean = Pick<Task, 'status'> & WithId;
 type TaskWithMeta = Task & WithId & WithTimestamps;
 type PublishableTaskTemplateAgg = TaskWithMeta & {
   __courseLabelPriority?: number;
@@ -739,10 +741,13 @@ export class ClassroomTasksService {
     await this.ensureStudent(userId);
     const classroom = await this.classroomModel
       .findById(classroomId)
-      .lean()
+      .lean<ClassroomWithMeta>()
       .exec();
     if (!classroom) {
       throw new NotFoundException('Classroom not found');
+    }
+    if (classroom.status !== ClassroomStatus.Active) {
+      throw new ConflictException('班级已归档，不能继续提交该任务。');
     }
     const isMember = await this.enrollmentService.isStudentActiveInClassroom(
       classroom._id,
@@ -766,9 +771,19 @@ export class ClassroomTasksService {
       this.toClassroomTaskStatusForRead(classroomTask.status) !==
       CLASSROOM_TASK_STATUS_ACTIVE
     ) {
-      throw new BadRequestException(
-        'Classroom task is not active and cannot accept submissions',
-      );
+      throw new ConflictException('课堂任务已关闭，不能继续提交。');
+    }
+
+    const task = await this.taskModel
+      .findById(classroomTask.taskId)
+      .select('_id status')
+      .lean<ClassroomTaskSubmitTemplateLean>()
+      .exec();
+    if (!task) {
+      throw new NotFoundException('Task not found');
+    }
+    if (task.status !== TaskStatus.Published) {
+      throw new ConflictException('任务未发布，不能继续提交。');
     }
 
     return this.learningTasksService.createSubmissionForClassroomTask(

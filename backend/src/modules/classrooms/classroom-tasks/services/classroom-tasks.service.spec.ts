@@ -1,5 +1,5 @@
 import { Model, Types } from 'mongoose';
-import { Classroom } from '../../schemas/classroom.schema';
+import { Classroom, ClassroomStatus } from '../../schemas/classroom.schema';
 import { Course } from '../../../courses/schemas/course.schema';
 import { ClassroomTask } from '../schemas/classroom-task.schema';
 import { Task, TaskStatus } from '../../../learning-tasks/schemas/task.schema';
@@ -13,6 +13,10 @@ import { User } from '../../../users/schemas/user.schema';
 import { EnrollmentService } from '../../enrollments/services/enrollment.service';
 import { AiFeedbackJobService } from '../../../learning-tasks/ai-feedback/services/ai-feedback-job.service';
 import { LearningTasksService } from '../../../learning-tasks/services/learning-tasks.service';
+import {
+  CLASSROOM_TASK_STATUS_ACTIVE,
+  CLASSROOM_TASK_STATUS_CLOSED,
+} from '../classroom-task-status.constants';
 import { ClassroomTasksService } from './classroom-tasks.service';
 
 type SubmissionFixture = Pick<
@@ -32,6 +36,10 @@ type FeedbackFixture = {
 type HarnessOptions = {
   submissions?: SubmissionFixture[];
   feedbacks?: FeedbackFixture[];
+  classroomStatus?: ClassroomStatus;
+  classroomTaskStatus?: string;
+  taskStatus?: TaskStatus;
+  isMember?: boolean;
 };
 
 const objectId = () => new Types.ObjectId();
@@ -62,13 +70,14 @@ const createHarness = (options: HarnessOptions = {}) => {
     _id: classroomId,
     name: 'Class A',
     courseId: objectId(),
+    status: options.classroomStatus ?? ClassroomStatus.Active,
   };
   const classroomTask = {
     _id: classroomTaskId,
     classroomId,
     taskId,
     publishedAt: new Date('2026-01-01T00:00:00.000Z'),
-    status: 'ACTIVE',
+    status: options.classroomTaskStatus ?? CLASSROOM_TASK_STATUS_ACTIVE,
   };
   const task = {
     _id: taskId,
@@ -76,7 +85,7 @@ const createHarness = (options: HarnessOptions = {}) => {
     description: 'Task Description',
     knowledgeModule: 'module',
     stage: 1,
-    status: TaskStatus.Published,
+    status: options.taskStatus ?? TaskStatus.Published,
   };
 
   const classroomModel = {
@@ -111,10 +120,18 @@ const createHarness = (options: HarnessOptions = {}) => {
     findById: jest.fn(() => makeQuery({ roles: ['student'] })),
   };
   const enrollmentService = {
-    isStudentActiveInClassroom: jest.fn().mockResolvedValue(true),
+    isStudentActiveInClassroom: jest
+      .fn()
+      .mockResolvedValue(options.isMember ?? true),
   };
   const aiFeedbackJobService = {
     getStatusMapBySubmissionIds: jest.fn().mockResolvedValue(new Map()),
+  };
+
+  const learningTasksService = {
+    createSubmissionForClassroomTask: jest.fn().mockResolvedValue({
+      id: objectId().toString(),
+    }),
   };
 
   const service = new ClassroomTasksService(
@@ -127,12 +144,13 @@ const createHarness = (options: HarnessOptions = {}) => {
     userModel as unknown as Model<User>,
     enrollmentService as unknown as EnrollmentService,
     aiFeedbackJobService as unknown as AiFeedbackJobService,
-    {} as LearningTasksService,
+    learningTasksService as unknown as LearningTasksService,
   );
 
   return {
     service,
     feedbackModel,
+    learningTasksService,
     ids: { studentId, classroomId, classroomTaskId, taskId },
   };
 };
@@ -183,6 +201,104 @@ const getMyTaskDetailCompletionStatus = async (
   };
   return detail;
 };
+
+const submissionDto = {
+  content: {
+    codeText: 'console.log("ok");',
+    language: 'javascript',
+  },
+};
+
+describe('ClassroomTasksService createClassroomTaskSubmission participation status', () => {
+  it('allows ACTIVE classroom, ACTIVE classroomTask and PUBLISHED task submissions', async () => {
+    const harness = createHarness();
+
+    await expect(
+      harness.service.createClassroomTaskSubmission(
+        harness.ids.classroomId.toString(),
+        harness.ids.classroomTaskId.toString(),
+        submissionDto,
+        harness.ids.studentId.toString(),
+      ),
+    ).resolves.toBeDefined();
+    expect(
+      harness.learningTasksService.createSubmissionForClassroomTask,
+    ).toHaveBeenCalledWith(
+      harness.ids.taskId.toString(),
+      harness.ids.classroomTaskId.toString(),
+      submissionDto,
+      harness.ids.studentId.toString(),
+    );
+  });
+
+  it('rejects submissions when the classroom is archived before creating submission', async () => {
+    const harness = createHarness({
+      classroomStatus: ClassroomStatus.Archived,
+    });
+
+    await expect(
+      harness.service.createClassroomTaskSubmission(
+        harness.ids.classroomId.toString(),
+        harness.ids.classroomTaskId.toString(),
+        submissionDto,
+        harness.ids.studentId.toString(),
+      ),
+    ).rejects.toThrow('班级已归档，不能继续提交该任务。');
+    expect(
+      harness.learningTasksService.createSubmissionForClassroomTask,
+    ).not.toHaveBeenCalled();
+  });
+
+  it('rejects submissions when the classroomTask is closed even before dueAt', async () => {
+    const harness = createHarness({
+      classroomTaskStatus: CLASSROOM_TASK_STATUS_CLOSED,
+    });
+
+    await expect(
+      harness.service.createClassroomTaskSubmission(
+        harness.ids.classroomId.toString(),
+        harness.ids.classroomTaskId.toString(),
+        submissionDto,
+        harness.ids.studentId.toString(),
+      ),
+    ).rejects.toThrow('课堂任务已关闭，不能继续提交。');
+    expect(
+      harness.learningTasksService.createSubmissionForClassroomTask,
+    ).not.toHaveBeenCalled();
+  });
+
+  it('rejects submissions when the task template is not published', async () => {
+    const harness = createHarness({ taskStatus: TaskStatus.Draft });
+
+    await expect(
+      harness.service.createClassroomTaskSubmission(
+        harness.ids.classroomId.toString(),
+        harness.ids.classroomTaskId.toString(),
+        submissionDto,
+        harness.ids.studentId.toString(),
+      ),
+    ).rejects.toThrow('任务未发布，不能继续提交。');
+    expect(
+      harness.learningTasksService.createSubmissionForClassroomTask,
+    ).not.toHaveBeenCalled();
+  });
+
+  it('keeps non-member submissions on the existing forbidden path', async () => {
+    const harness = createHarness({ isMember: false });
+
+    await expect(
+      harness.service.createClassroomTaskSubmission(
+        harness.ids.classroomId.toString(),
+        harness.ids.classroomTaskId.toString(),
+        submissionDto,
+        harness.ids.studentId.toString(),
+      ),
+    ).rejects.toThrow('Not allowed to submit classroom tasks');
+    expect(
+      harness.learningTasksService.createSubmissionForClassroomTask,
+    ).not.toHaveBeenCalled();
+  });
+});
 
 describe('ClassroomTasksService getMyTaskDetail completionStatus', () => {
   it('returns NOT_SUBMITTED when there is no latest submission', async () => {

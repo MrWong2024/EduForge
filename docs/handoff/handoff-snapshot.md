@@ -421,6 +421,7 @@ AI Provider 错误码（`ai-feedback-provider.error-codes.ts`）：
   - 保护边界：`ai-metrics` 窗口集合保持 `1h/24h/7d`，本阶段未引入 `all`。
 - Z7 截止/迟交：
   - 提交门禁：`POST /api/classrooms/:classroomId/tasks/:classroomTaskId/submissions` 在到期且不允许迟交时返回 `LATE_SUBMISSION_NOT_ALLOWED`
+  - 参与状态门禁：学生新提交与学生手工请求 AI 均要求 `classroom.status=ACTIVE`、`classroomTask.status=ACTIVE`、模板 `task.status=PUBLISHED`；归档班级、关闭/撤回课堂任务、非发布模板只保留只读查看，不允许继续提交或请求 AI，拒绝时不创建 submission/AI job。
   - 提交冷却：默认 `LEARNING_TASK_SUBMISSION_COOLDOWN_MS=300000`；按同一 `studentId + classroomTaskId` 判定，命中时返回 `429` + `SUBMISSION_COOLDOWN_ACTIVE`（含 `retryAfterMs/retryAfterSeconds`），`0` 表示关闭冷却。
   - 迟交持久字段：`Submission.submittedAt / isLate / lateBySeconds`
   - late 维度已贯穿周报、课程总览、学习轨迹、复盘包、过程性评价、快照导出等聚合接口

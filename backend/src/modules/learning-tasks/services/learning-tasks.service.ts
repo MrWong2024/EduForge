@@ -1,5 +1,6 @@
 ﻿import {
   BadRequestException,
+  ConflictException,
   ForbiddenException,
   HttpException,
   HttpStatus,
@@ -14,7 +15,10 @@ import { Task, TaskStatus } from '../schemas/task.schema';
 import { Submission, SubmissionStatus } from '../schemas/submission.schema';
 import { Feedback, FeedbackSource } from '../schemas/feedback.schema';
 import { ClassroomTask } from '../../classrooms/classroom-tasks/schemas/classroom-task.schema';
-import { Classroom } from '../../classrooms/schemas/classroom.schema';
+import {
+  Classroom,
+  ClassroomStatus,
+} from '../../classrooms/schemas/classroom.schema';
 import { User } from '../../users/schemas/user.schema';
 import { CreateTaskDto } from '../dto/create-task.dto';
 import { UpdateTaskDto } from '../dto/update-task.dto';
@@ -54,6 +58,7 @@ import {
 } from '../../users/schemas/user-roles.constants';
 import { WithId } from '../../../common/types/with-id.type';
 import { WithTimestamps } from '../../../common/types/with-timestamps.type';
+import { CLASSROOM_TASK_STATUS_ACTIVE } from '../../classrooms/classroom-tasks/classroom-task-status.constants';
 
 type TagStat = {
   _id: string;
@@ -63,11 +68,16 @@ type TaskWithMeta = Task & WithId & WithTimestamps;
 type SubmissionWithMeta = Submission & WithId & WithTimestamps;
 type FeedbackWithMeta = Feedback & WithId & WithTimestamps;
 type ClassroomTaskWithClassroom = ClassroomTask & WithId;
-type ClassroomTaskDeadlineConfig = Pick<ClassroomTask, 'dueAt' | 'settings'> &
+type ClassroomTaskDeadlineConfig = Pick<
+  ClassroomTask,
+  'classroomId' | 'taskId' | 'status' | 'dueAt' | 'settings'
+> &
   WithId;
 type SubmissionDetailTaskLean = Pick<Task, 'title' | 'createdBy'> & WithId;
 type SubmissionDetailStudentLean = Pick<User, 'name'> & WithId;
 type SubmissionDetailClassroomLean = Pick<Classroom, 'teacherId'> & WithId;
+type ParticipationClassroomLean = Pick<Classroom, 'status'> & WithId;
+type ParticipationTaskLean = Pick<Task, 'status'> & WithId;
 type IdOnly = WithId;
 type SubmissionCooldownSource = Pick<Submission, 'submittedAt'> &
   WithId &
@@ -737,12 +747,12 @@ export class LearningTasksService {
     userId: string,
     classroomTaskId?: string,
   ) {
-    const task = await this.taskModel.findById(taskId).lean().exec();
+    const task = await this.taskModel
+      .findById(taskId)
+      .lean<TaskWithMeta>()
+      .exec();
     if (!task) {
       throw new NotFoundException('Task not found');
-    }
-    if (task.status !== TaskStatus.Published) {
-      throw new BadRequestException('Task is not published');
     }
 
     const taskObjectId = new Types.ObjectId(taskId);
@@ -753,12 +763,24 @@ export class LearningTasksService {
     const classroomTask = classroomTaskObjectId
       ? await this.classroomTaskModel
           .findById(classroomTaskObjectId)
-          .select('_id dueAt settings')
+          .select('_id classroomId taskId status dueAt settings')
           .lean<ClassroomTaskDeadlineConfig>()
           .exec()
       : null;
     if (classroomTaskObjectId && !classroomTask) {
       throw new NotFoundException('Classroom task not found');
+    }
+    if (classroomTask) {
+      if (classroomTask.taskId.toString() !== taskObjectId.toString()) {
+        throw new ConflictException('Classroom task does not match task');
+      }
+      await this.ensureStudentParticipationContextIsActive(
+        classroomTask,
+        task,
+        'submit',
+      );
+    } else if (task.status !== TaskStatus.Published) {
+      throw new BadRequestException('Task is not published');
     }
     const submittedAt = new Date();
     const dueAt = classroomTask?.dueAt ?? undefined;
@@ -966,10 +988,86 @@ export class LearningTasksService {
       hasAnyRole(roles, STUDENT_ROLES) &&
       submission.studentId.toString() === user.id
     ) {
+      await this.ensureStudentCanRequestAiFeedbackForSubmission(submission);
       return;
     }
 
     throw new ForbiddenException('Not allowed to request AI feedback');
+  }
+
+  private async ensureStudentCanRequestAiFeedbackForSubmission(
+    submission: SubmissionWithMeta,
+  ) {
+    const task = await this.taskModel
+      .findById(submission.taskId)
+      .select('_id status')
+      .lean<ParticipationTaskLean>()
+      .exec();
+    if (!task) {
+      throw new NotFoundException('Task not found');
+    }
+
+    if (!submission.classroomTaskId) {
+      if (task.status !== TaskStatus.Published) {
+        throw new ConflictException('任务未发布，不能请求 AI 反馈。');
+      }
+      return;
+    }
+
+    const classroomTask = await this.classroomTaskModel
+      .findById(submission.classroomTaskId)
+      .select('_id classroomId taskId status')
+      .lean<ClassroomTaskDeadlineConfig>()
+      .exec();
+    if (!classroomTask) {
+      throw new NotFoundException('Classroom task not found');
+    }
+    if (classroomTask.taskId.toString() !== submission.taskId.toString()) {
+      throw new ConflictException('Submission does not match classroom task');
+    }
+
+    await this.ensureStudentParticipationContextIsActive(
+      classroomTask,
+      task,
+      'requestAi',
+    );
+  }
+
+  private async ensureStudentParticipationContextIsActive(
+    classroomTask: ClassroomTaskDeadlineConfig,
+    task: ParticipationTaskLean,
+    operation: 'submit' | 'requestAi',
+  ) {
+    const classroom = await this.classroomModel
+      .findById(classroomTask.classroomId)
+      .select('_id status')
+      .lean<ParticipationClassroomLean>()
+      .exec();
+    if (!classroom) {
+      throw new NotFoundException('Classroom not found');
+    }
+
+    if (classroom.status !== ClassroomStatus.Active) {
+      throw new ConflictException(
+        operation === 'submit'
+          ? '班级已归档，不能继续提交该任务。'
+          : '班级已归档，不能请求 AI 反馈。',
+      );
+    }
+    if (classroomTask.status !== CLASSROOM_TASK_STATUS_ACTIVE) {
+      throw new ConflictException(
+        operation === 'submit'
+          ? '课堂任务已关闭，不能继续提交。'
+          : '课堂任务已关闭，不能请求 AI 反馈。',
+      );
+    }
+    if (task.status !== TaskStatus.Published) {
+      throw new ConflictException(
+        operation === 'submit'
+          ? '任务未发布，不能继续提交。'
+          : '任务未发布，不能请求 AI 反馈。',
+      );
+    }
   }
 
   private async ensureCanViewSubmissionDetail(
