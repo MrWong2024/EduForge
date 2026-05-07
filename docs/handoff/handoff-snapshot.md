@@ -282,7 +282,10 @@ AI Provider 错误码（`ai-feedback-provider.error-codes.ts`）：
   - summary 与任务级统计均基于本次返回任务集合：默认排除 `CLOSED`，显式包含关闭任务时统计随返回集合扩大。
 - 学生看板任务完成情况契约（后端已完成，前端待后续阶段接入）：
   - `GET /api/classrooms/mine/dashboard` 的每个 task item 顶层新增 `completionStatus`。
-  - 学生看板定位为当前可参与任务入口，只返回 `classroomTask.status=ACTIVE` 的任务；已关闭或其它非 ACTIVE 课堂任务默认不显示，只有 CLOSED/非 ACTIVE 任务的班级不返回空分组，`total` 按最终返回班级分组统计。
+  - 学生看板定位为当前学习工作台，默认只返回 `classroom.status=ACTIVE`、`classroomTask.status=ACTIVE`、模板 `task.status=PUBLISHED` 且仍值得关注的任务；归档班级、已关闭或其它非 ACTIVE 课堂任务默认不显示。
+  - 学生看板自动降噪口径：有 `dueAt` 时截止后 30 天内仍显示并标记 `RECENTLY_EXPIRED`，超过 30 天为 `HISTORICAL` 且默认隐藏；无 `dueAt` 时 `publishedAt` 90 天内显示，超过 90 天为 `HISTORICAL` 且默认隐藏；缺失/非法时间按 `HISTORICAL` 处理。
+  - `includeHistorical=true` 为后续前端“显示历史任务”开关预留：返回当前 ACTIVE 班级下的 `CURRENT + RECENTLY_EXPIRED + HISTORICAL` 任务，但仍不返回归档班级或非 ACTIVE classroomTask。
+  - 每个 task item 返回 `studentVisibilityStatus(CURRENT|RECENTLY_EXPIRED|HISTORICAL)` 与 `isHistorical`；过滤后无可见任务的班级不返回空分组，`total` 按最终返回班级分组统计。
   - `completionStatus` 只基于当前学生该课堂任务的 `myLatestSubmission.submissionId` 查询反馈；不会回退历史提交，也不会混入其它 `classroomTask` 或同 `taskId` 其它课堂任务的反馈。
   - 只纳入 `FeedbackSource.TEACHER` 与 `FeedbackSource.AI`；`SYSTEM` 不参与完成情况判断。
   - 来源优先级为 `TEACHER > AI`；同一来源多条反馈取最严重 `ERROR > WARN > INFO`。

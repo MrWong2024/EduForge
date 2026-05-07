@@ -88,9 +88,15 @@ export class ClassroomsController {
   @Get('mine/dashboard')
   getMyLearningDashboard(
     @Query() query: QueryClassroomDto,
+    @Query('includeHistorical')
+    includeHistorical: string | boolean | undefined,
     @CurrentUser() user: { id: string },
   ) {
-    return this.classroomsService.getMyLearningDashboard(query, user.id);
+    return this.classroomsService.getMyLearningDashboard(
+      query,
+      user.id,
+      includeHistorical === true || includeHistorical === 'true',
+    );
   }
 
   @UseGuards(RolesGuard)

@@ -65,7 +65,7 @@ Notes:
 | DELETE | `/api/classrooms/:id` | 教师删除空班级（仅无任务且无 enrollment 历史时允许）。 |
 | GET | `/api/classrooms` | 教师分页查询班级。 |
 | POST | `/api/classrooms/join` | 学生通过 `joinCode` 入班。 |
-| GET | `/api/classrooms/mine/dashboard` | 学生学习看板（按 `classroomTaskId` 聚合个人提交与 AI 状态）。 |
+| GET | `/api/classrooms/mine/dashboard` | 学生学习看板（按 `classroomTaskId` 聚合个人提交与 AI 状态；Query `includeHistorical` 可回看当前 ACTIVE 班级下历史任务）。 |
 | GET | `/api/classrooms/:id/dashboard` | 教师班级看板（按 `classroomTaskId` 聚合提交/AI 状态/tags；Query `includeClosedTasks` 可显式包含已关闭任务）。 |
 | GET | `/api/classrooms/:classroomId/weekly-report` | 班级周报（AA）。 |
 | GET | `/api/classrooms/:classroomId/process-assessment` | 过程性评价（Z6）。 |
@@ -90,6 +90,7 @@ Notes:
 - `/api/classrooms/:classroomId/export/snapshot` Query: `window, limitStudents, limitAssessment, includePerTask`；teacher only；体积保护采用 limit 截断并在 `meta.notes` 写明；不返回敏感字段。
 - `/api/classrooms/:id/students`：teacher only + owner only（非 owner 返回 `404`）；成员来源只认 Enrollment（`role=STUDENT`）；默认只返回 `status=ACTIVE`，`includeRemoved=1/true` 时返回 `ACTIVE+REMOVED`；不读取/不回退 `classroom.studentIds`；默认排序 `joinedAt desc, _id desc`；不返回 `passwordHash`。
 - `/api/classrooms/:id/dashboard`：teacher only + owner only；默认只返回 `classroomTask.status=ACTIVE` 的任务；`includeClosedTasks=true` 时返回 `ACTIVE+CLOSED`；`RECALLED/缺失/未知状态` 不返回；每个 task item 返回 `classroomTaskStatus`，统计口径与返回任务集合一致。
+- `/api/classrooms/mine/dashboard`：student only；默认只返回 `classroom.status=ACTIVE`、`classroomTask.status=ACTIVE`、模板 `task.status=PUBLISHED` 且仍值得关注的任务；有 `dueAt` 时截止后 30 天内仍显示并标记 `RECENTLY_EXPIRED`，超过 30 天为 `HISTORICAL` 且默认隐藏；无 `dueAt` 时 `publishedAt` 90 天内显示，超过 90 天为 `HISTORICAL` 且默认隐藏；`includeHistorical=true` 返回 `CURRENT+RECENTLY_EXPIRED+HISTORICAL`，但仍不返回归档班级或非 ACTIVE classroomTask；每个 task item 返回 `studentVisibilityStatus/isHistorical`，`total` 按最终返回班级分组统计。
 - 班级状态契约：`Classroom.status` 支持 `ACTIVE | ARCHIVED`；`PATCH /api/classrooms/:id` 可通过 body `status` 实现归档与恢复（`ARCHIVED <-> ACTIVE`）。
 - 班级删除契约：`DELETE /api/classrooms/:id` 仅在“空班级”允许删除；空班级判定主规则是 `ClassroomTask` 无记录且 `Enrollment` 无记录（包含 `REMOVED` 历史）；`studentIds` 仅作防御性辅助校验。
 - 非空班级删除错误：返回 `409 Conflict`，错误码 `CLASSROOM_NOT_EMPTY`，message=`该班级已有成员或任务记录，不能删除，只能归档`。
@@ -182,7 +183,7 @@ Notes:
 ## 聚合口径特别说明
 
 - 教师看板：`/api/classrooms/:id/dashboard` 的任务维度统计按 `classroomTaskId` 聚合；默认仅统计返回的 `ACTIVE` classroomTask，`includeClosedTasks=true` 时统计返回的 `ACTIVE+CLOSED` 集合。
-- 学生看板：`/api/classrooms/mine/dashboard` 的 `myLatestSubmission` 及 `aiFeedbackStatus` 按 `classroomTaskId` 隔离。
+- 学生看板：`/api/classrooms/mine/dashboard` 的 `myLatestSubmission`、`aiFeedbackStatus` 与 `completionStatus` 只围绕最终返回的 `classroomTaskId` 计算；默认隐藏归档班级、非 ACTIVE classroomTask 与长期历史任务，`includeHistorical=true` 仅放开时间窗口，不放开班级/课堂任务状态边界。
 - `/api/classrooms/:classroomId/tasks/:classroomTaskId/ai-metrics` 统计严格按 `classroomTaskId` 隔离（jobs 与 feedback 均不跨班汇总）。
 - 成员权威来源：Enrollment-only（`role=STUDENT,status=ACTIVE`）；`classroom.studentIds` 不作为授权/统计来源。
 - 隔离原则：课堂分析/报表/复盘/导出均按 `classroomTaskId` 隔离，禁止用 `taskId` 兜底做跨班聚合。

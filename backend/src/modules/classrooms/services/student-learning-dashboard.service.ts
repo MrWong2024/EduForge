@@ -1,11 +1,12 @@
 import { Injectable } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, PipelineStage, Types } from 'mongoose';
-import { Classroom } from '../schemas/classroom.schema';
+import { Classroom, ClassroomStatus } from '../schemas/classroom.schema';
 import { QueryClassroomDto } from '../dto/query-classroom.dto';
 import { ClassroomTask } from '../classroom-tasks/schemas/classroom-task.schema';
 import { CLASSROOM_TASK_STATUS_ACTIVE } from '../classroom-tasks/classroom-task-status.constants';
 import { Submission } from '../../learning-tasks/schemas/submission.schema';
+import { TaskStatus } from '../../learning-tasks/schemas/task.schema';
 import {
   Feedback,
   FeedbackSource,
@@ -25,19 +26,28 @@ import {
 
 type ClassroomLean = Classroom & WithId;
 type SubmissionWithMeta = Submission & WithId & WithTimestamps;
+type StudentTaskVisibilityStatus =
+  | 'CURRENT'
+  | 'RECENTLY_EXPIRED'
+  | 'HISTORICAL';
 
-type ClassroomTaskStudentItem = {
+type ClassroomTaskStudentAggregateItem = {
   _id: Types.ObjectId;
   classroomId: Types.ObjectId;
   taskId: Types.ObjectId;
   title: string;
-  publishedAt: Date;
-  dueAt?: Date;
+  publishedAt?: Date | string | null;
+  dueAt?: Date | string | null;
 };
 
-type ActiveClassroomTaskClassroomItem = {
-  _id: Types.ObjectId;
+type ClassroomTaskStudentItem = ClassroomTaskStudentAggregateItem & {
+  studentVisibilityStatus: StudentTaskVisibilityStatus;
+  isHistorical: boolean;
 };
+
+const DAY_MS = 24 * 60 * 60 * 1000;
+const RECENTLY_EXPIRED_GRACE_DAYS = 30;
+const NO_DUE_DATE_CURRENT_DAYS = 90;
 
 @Injectable()
 export class StudentLearningDashboardService {
@@ -54,65 +64,53 @@ export class StudentLearningDashboardService {
     private readonly aiFeedbackJobService: AiFeedbackJobService,
   ) {}
 
-  async getMyLearningDashboard(query: QueryClassroomDto, userId: string) {
+  async getMyLearningDashboard(
+    query: QueryClassroomDto,
+    userId: string,
+    includeHistorical = false,
+  ) {
     const page = query.page ?? 1;
     const limit = Math.min(query.limit ?? 20, 100);
     const enrollmentClassroomIds =
       await this.enrollmentService.listActiveClassroomIdsByUser(userId);
-    const enrollmentFilter: Record<string, unknown> = {};
-    if (query.status) {
-      enrollmentFilter.status = query.status;
-    }
 
-    let classrooms: ClassroomLean[] = [];
-    let total = 0;
-    if (enrollmentClassroomIds.length > 0) {
-      const activeClassroomTaskClassroomIds = await this.classroomTaskModel
-        .aggregate<ActiveClassroomTaskClassroomItem>([
-          {
-            $match: {
-              classroomId: { $in: enrollmentClassroomIds },
-              status: CLASSROOM_TASK_STATUS_ACTIVE,
-            },
-          },
-          { $group: { _id: '$classroomId' } },
-        ])
-        .exec();
-      const activeClassroomIds = activeClassroomTaskClassroomIds.map(
-        (item) => item._id,
-      );
-      const filter: Record<string, unknown> = {
-        ...enrollmentFilter,
-        _id: { $in: activeClassroomIds },
-      };
-      if (activeClassroomIds.length > 0) {
-        [classrooms, total] = await Promise.all([
-          this.classroomModel
-            .find(filter)
-            .sort({ createdAt: -1, _id: 1 })
-            .skip((page - 1) * limit)
-            .limit(limit)
-            .lean<ClassroomLean[]>()
-            .exec(),
-          this.classroomModel.countDocuments(filter),
-        ]);
-      }
-    }
-
-    if (classrooms.length === 0) {
+    if (
+      enrollmentClassroomIds.length === 0 ||
+      (query.status && query.status !== ClassroomStatus.Active)
+    ) {
       return {
         items: [],
-        total,
+        total: 0,
         page,
         limit,
       };
     }
 
-    const classroomIds = classrooms.map((classroom) => classroom._id);
+    const activeClassrooms = await this.classroomModel
+      .find({
+        _id: { $in: enrollmentClassroomIds },
+        status: ClassroomStatus.Active,
+      })
+      .sort({ createdAt: -1, _id: 1 })
+      .lean<ClassroomLean[]>()
+      .exec();
+
+    if (activeClassrooms.length === 0) {
+      return {
+        items: [],
+        total: 0,
+        page,
+        limit,
+      };
+    }
+
+    const activeClassroomIds = activeClassrooms.map(
+      (classroom) => classroom._id,
+    );
     const classroomTaskPipeline: PipelineStage[] = [
       {
         $match: {
-          classroomId: { $in: classroomIds },
+          classroomId: { $in: activeClassroomIds },
           status: CLASSROOM_TASK_STATUS_ACTIVE,
         },
       },
@@ -125,6 +123,7 @@ export class StudentLearningDashboardService {
         },
       },
       { $unwind: '$task' },
+      { $match: { 'task.status': TaskStatus.Published } },
       {
         $project: {
           _id: 1,
@@ -137,21 +136,63 @@ export class StudentLearningDashboardService {
       },
       { $sort: { publishedAt: -1 } },
     ];
-    const classroomTasks = await this.classroomTaskModel
-      .aggregate<ClassroomTaskStudentItem>(classroomTaskPipeline)
+    const rawClassroomTasks = await this.classroomTaskModel
+      .aggregate<ClassroomTaskStudentAggregateItem>(classroomTaskPipeline)
       .exec();
 
+    const now = new Date();
+    const visibleClassroomTasks = rawClassroomTasks
+      .map((task): ClassroomTaskStudentItem => {
+        const studentVisibilityStatus = this.getStudentTaskVisibilityStatus(
+          task,
+          now,
+        );
+        return {
+          ...task,
+          studentVisibilityStatus,
+          isHistorical: studentVisibilityStatus === 'HISTORICAL',
+        };
+      })
+      .filter((task) => includeHistorical || !task.isHistorical)
+      .sort((left, right) => this.compareStudentTasks(left, right));
+
     const tasksByClassroom = new Map<string, ClassroomTaskStudentItem[]>();
-    for (const classroom of classrooms) {
+    for (const classroom of activeClassrooms) {
       tasksByClassroom.set(classroom._id.toString(), []);
     }
-    for (const task of classroomTasks) {
+    for (const task of visibleClassroomTasks) {
       const key = task.classroomId.toString();
       const bucket = tasksByClassroom.get(key);
       if (bucket) {
         bucket.push(task);
       }
     }
+
+    const visibleClassrooms = activeClassrooms.filter((classroom) => {
+      const tasks = tasksByClassroom.get(classroom._id.toString()) ?? [];
+      return tasks.length > 0;
+    });
+    const total = visibleClassrooms.length;
+    const classrooms = visibleClassrooms.slice(
+      (page - 1) * limit,
+      page * limit,
+    );
+
+    if (classrooms.length === 0) {
+      return {
+        items: [],
+        total,
+        page,
+        limit,
+      };
+    }
+
+    const pageClassroomIds = new Set(
+      classrooms.map((classroom) => classroom._id.toString()),
+    );
+    const classroomTasks = visibleClassroomTasks.filter((task) =>
+      pageClassroomIds.has(task.classroomId.toString()),
+    );
 
     const classroomTaskIds = classroomTasks.map((task) => task._id);
     const taskIds = classroomTasks.map((task) => task.taskId);
@@ -272,8 +313,11 @@ export class StudentLearningDashboardService {
               classroomTaskId: task._id.toString(),
               taskId: taskKey,
               title: task.title,
-              publishedAt: task.publishedAt.toISOString(),
-              dueAt: task.dueAt ? task.dueAt.toISOString() : null,
+              publishedAt:
+                this.toValidDate(task.publishedAt)?.toISOString() ?? null,
+              dueAt: this.toValidDate(task.dueAt)?.toISOString() ?? null,
+              studentVisibilityStatus: task.studentVisibilityStatus,
+              isHistorical: task.isHistorical,
               myLatestSubmission: latest
                 ? {
                     submissionId: latest._id.toString(),
@@ -292,5 +336,71 @@ export class StudentLearningDashboardService {
       page,
       limit,
     };
+  }
+
+  private getStudentTaskVisibilityStatus(
+    task: Pick<ClassroomTaskStudentAggregateItem, 'dueAt' | 'publishedAt'>,
+    now: Date,
+  ): StudentTaskVisibilityStatus {
+    const dueAt = this.toValidDate(task.dueAt);
+    const nowTime = now.getTime();
+
+    if (dueAt) {
+      const dueTime = dueAt.getTime();
+      if (dueTime >= nowTime) {
+        return 'CURRENT';
+      }
+      const expiredCutoff = nowTime - RECENTLY_EXPIRED_GRACE_DAYS * DAY_MS;
+      return dueTime >= expiredCutoff ? 'RECENTLY_EXPIRED' : 'HISTORICAL';
+    }
+
+    const publishedAt = this.toValidDate(task.publishedAt);
+    if (!publishedAt) {
+      return 'HISTORICAL';
+    }
+
+    const noDueCurrentCutoff = nowTime - NO_DUE_DATE_CURRENT_DAYS * DAY_MS;
+    return publishedAt.getTime() >= noDueCurrentCutoff
+      ? 'CURRENT'
+      : 'HISTORICAL';
+  }
+
+  private compareStudentTasks(
+    left: ClassroomTaskStudentItem,
+    right: ClassroomTaskStudentItem,
+  ) {
+    const statusRank =
+      this.visibilitySortRank(left.studentVisibilityStatus) -
+      this.visibilitySortRank(right.studentVisibilityStatus);
+    if (statusRank !== 0) {
+      return statusRank;
+    }
+    return this.taskSortTime(right) - this.taskSortTime(left);
+  }
+
+  private visibilitySortRank(status: StudentTaskVisibilityStatus) {
+    if (status === 'CURRENT') {
+      return 0;
+    }
+    if (status === 'RECENTLY_EXPIRED') {
+      return 1;
+    }
+    return 2;
+  }
+
+  private taskSortTime(task: ClassroomTaskStudentAggregateItem) {
+    return (
+      this.toValidDate(task.dueAt)?.getTime() ??
+      this.toValidDate(task.publishedAt)?.getTime() ??
+      0
+    );
+  }
+
+  private toValidDate(value: Date | string | null | undefined) {
+    if (!value) {
+      return null;
+    }
+    const date = value instanceof Date ? value : new Date(value);
+    return Number.isNaN(date.getTime()) ? null : date;
   }
 }

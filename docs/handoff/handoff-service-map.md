@@ -117,7 +117,7 @@
   - `joinClassroom(dto: JoinClassroomDto, userId: string): Promise<ClassroomResponseDto> — called by POST /classrooms/join`
   - `removeStudent(id: string, studentId: string, userId: string): Promise<ClassroomResponseDto> — called by POST /classrooms/:id/students/:uid/remove`
   - `getDashboard(id: string, userId: string, includeClosedTasks?: boolean): Promise<Record<string, unknown>> — delegates to teacher dashboard service`
-  - `getMyLearningDashboard(query: QueryClassroomDto, userId: string): Promise<Record<string, unknown>> — delegates to student dashboard service`
+  - `getMyLearningDashboard(query: QueryClassroomDto, userId: string, includeHistorical?: boolean): Promise<Record<string, unknown>> — delegates to student dashboard service`
 - AuthZ Boundary: `teacher-only`（管理） / `student-only`（加入） / `member-or-owner`（查看）
 - Metrics/Isolation: 班级管理按 `teacherId`；成员判定与统计统一通过 `EnrollmentService`；下游统计统一是 `classroomTaskId` 口径
 - Consistency/Constraints: joinCode 生成重试上限 `8`；`PATCH /classrooms/:id` 支持 `status` 归档/恢复；归档状态下禁止改名但允许通过 `status=ACTIVE` 恢复；删除仅允许空班级（主判定：`ClassroomTask.exists({ classroomId })===false` 且 `Enrollment.exists({ classroomId })===false`，其中 Enrollment 判定包含 `REMOVED` 历史记录）；`studentIds` 仅作防御性辅助校验，不作为唯一主判定来源；非空删除返回 `409(code=CLASSROOM_NOT_EMPTY)`；`join/remove` 先写 Enrollment(`ACTIVE/REMOVED`)，`studentIds` 仅作为 legacy 镜像输出，不参与授权/统计；`GET /classrooms/:id/students` 只认 Enrollment（`role=STUDENT`），默认返回 ACTIVE，`includeRemoved=1/true` 时返回 ACTIVE+REMOVED，默认排序 `joinedAt desc, _id desc`
@@ -157,15 +157,15 @@
 - Domain: `ClassroomTask + Submission + Feedback + AiFeedbackStatus`
 - Actions: `list-my-classrooms`, `aggregate-classroom-tasks`, `pick-latest-submission`, `map-status`, `derive-completion-status`
 - I/O Shape:
-  - In: `QueryClassroomDto(page,limit,status)`, `userId`
+  - In: `QueryClassroomDto(page,limit,status)`, `userId`, `includeHistorical?`
   - Out: `student dashboard aggregate`
 - Key Methods:
-  - `getMyLearningDashboard(query: QueryClassroomDto, userId: string): Promise<Record<string, unknown>> — called by ClassroomsService and /classrooms/mine/dashboard`
+  - `getMyLearningDashboard(query: QueryClassroomDto, userId: string, includeHistorical?: boolean): Promise<Record<string, unknown>> — called by ClassroomsService and /classrooms/mine/dashboard`
 - AuthZ Boundary: `student-only`（由上层 `ClassroomsService.ensureStudent` 保障）
-- Metrics/Isolation: “我的班级”主路径来自 `EnrollmentService.listActiveClassroomIdsByUser`；学生看板是当前可参与任务入口，仅返回 `classroomTask.status=ACTIVE` 的任务，`CLOSED/RECALLED/未知或缺失状态` 不出现在 tasks 中；提交与状态按返回的 ACTIVE `classroomTaskId` 聚合；`completionStatus` 只基于当前 task 的 `myLatestSubmission.submissionId` 查询反馈，不按 `taskId/classroomTaskId/studentId` 粗暴聚合反馈
-- Consistency/Constraints: 无 job 记录时状态回退 `NOT_REQUESTED`；每个返回的 ACTIVE task item 顶层返回 `completionStatus`，值域为 `NOT_SUBMITTED|NO_FEEDBACK|QUALIFIED|QUALIFIED_WITH_WARNINGS|UNQUALIFIED`；反馈来源只纳入 `TEACHER/AI`，`SYSTEM` 不参与；最终来源优先级 `TEACHER > AI`；同一来源多条反馈取最严重 `ERROR > WARN > INFO`；`INFO->QUALIFIED`、`WARN->QUALIFIED_WITH_WARNINGS`、`ERROR->UNQUALIFIED`；无提交返回 `NOT_SUBMITTED`，有最新提交但无 TEACHER/AI 反馈返回 `NO_FEEDBACK`；只有 CLOSED/非 ACTIVE 任务的班级不返回空分组，`total` 按最终返回班级分组统计
+- Metrics/Isolation: “我的班级”主路径来自 `EnrollmentService.listActiveClassroomIdsByUser`；学生看板是当前学习工作台，仅返回 `classroom.status=ACTIVE` 且 `classroomTask.status=ACTIVE` 且模板 `task.status=PUBLISHED` 的任务；默认隐藏长期历史任务，`includeHistorical=true` 时才回看当前 ACTIVE 班级下的历史任务；提交与状态按最终返回的 `classroomTaskId` 聚合；`completionStatus` 只基于当前 task 的 `myLatestSubmission.submissionId` 查询反馈，不按 `taskId/classroomTaskId/studentId` 粗暴聚合反馈
+- Consistency/Constraints: 默认可见时间窗口：有 `dueAt` 时 `dueAt >= now` 返回 `CURRENT`，`now-30天 <= dueAt < now` 返回 `RECENTLY_EXPIRED` 且仍展示，`dueAt < now-30天` 为 `HISTORICAL` 且默认隐藏；无 `dueAt` 时 `publishedAt >= now-90天` 返回 `CURRENT`，更早或缺失时间为 `HISTORICAL`；`includeHistorical=true` 返回 `CURRENT|RECENTLY_EXPIRED|HISTORICAL`，但仍不返回归档班级或非 ACTIVE classroomTask；每个 task item 返回 `studentVisibilityStatus` 与 `isHistorical`；无 job 记录时状态回退 `NOT_REQUESTED`；每个返回 task item 顶层返回 `completionStatus`，值域为 `NOT_SUBMITTED|NO_FEEDBACK|QUALIFIED|QUALIFIED_WITH_WARNINGS|UNQUALIFIED`；反馈来源只纳入 `TEACHER/AI`，`SYSTEM` 不参与；最终来源优先级 `TEACHER > AI`；同一来源多条反馈取最严重 `ERROR > WARN > INFO`；`INFO->QUALIFIED`、`WARN->QUALIFIED_WITH_WARNINGS`、`ERROR->UNQUALIFIED`；无提交返回 `NOT_SUBMITTED`，有最新提交但无 TEACHER/AI 反馈返回 `NO_FEEDBACK`；过滤后无可见任务的班级不返回空分组，`total` 按最终返回班级分组统计
 - Deps/Side Effects: `ClassroomModel`, `ClassroomTaskModel`, `SubmissionModel`, `FeedbackModel`, `AiFeedbackJobService`, `EnrollmentService`；只读
-- Performance Notes: 先按 enrolled classroomIds 聚合出存在 ACTIVE classroomTask 的班级，再分页查询班级与 ACTIVE tasks；后续 submissions/statusMap/completionStatus 只围绕 ACTIVE classroomTaskIds 批量计算，避免 CLOSED 任务额外查询与历史提交混入
+- Performance Notes: 先按 enrolled classroomIds 读取 ACTIVE 班级与 ACTIVE/PUBLISHED classroomTask，再按 30/90 天窗口和 `includeHistorical` 得出最终可见任务集合后分页班级分组；后续 submissions/statusMap/completionStatus 只围绕最终返回的 classroomTaskIds 批量计算，避免 CLOSED/归档班级/默认隐藏历史任务额外查询与历史提交混入
 - SoT: `backend/src/modules/classrooms/services/student-learning-dashboard.service.ts`; `backend/src/modules/classrooms/enrollments/services/enrollment.service.ts`
 - Failure Modes:
   - 学生未加入任何班级 -> 返回空 `items`

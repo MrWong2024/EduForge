@@ -301,11 +301,16 @@ export class ClassroomsService {
     );
   }
 
-  async getMyLearningDashboard(query: QueryClassroomDto, userId: string) {
+  async getMyLearningDashboard(
+    query: QueryClassroomDto,
+    userId: string,
+    includeHistorical = false,
+  ) {
     await this.ensureStudent(userId);
     return this.studentLearningDashboardService.getMyLearningDashboard(
       query,
       userId,
+      includeHistorical,
     );
   }
 

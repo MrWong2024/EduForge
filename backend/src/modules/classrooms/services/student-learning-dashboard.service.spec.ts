@@ -1,5 +1,5 @@
 import { Model, Types } from 'mongoose';
-import { Classroom } from '../schemas/classroom.schema';
+import { Classroom, ClassroomStatus } from '../schemas/classroom.schema';
 import { ClassroomTask } from '../classroom-tasks/schemas/classroom-task.schema';
 import {
   CLASSROOM_TASK_STATUS_ACTIVE,
@@ -11,6 +11,7 @@ import {
   FeedbackSeverity,
   FeedbackSource,
 } from '../../learning-tasks/schemas/feedback.schema';
+import { TaskStatus } from '../../learning-tasks/schemas/task.schema';
 import { AiFeedbackJobService } from '../../learning-tasks/ai-feedback/services/ai-feedback-job.service';
 import { EnrollmentService } from '../enrollments/services/enrollment.service';
 import { StudentLearningDashboardService } from './student-learning-dashboard.service';
@@ -27,9 +28,10 @@ type ClassroomTaskFixture = {
   classroomId: Types.ObjectId;
   taskId: Types.ObjectId;
   status?: string;
+  taskStatus?: string;
   title: string;
-  publishedAt: Date;
-  dueAt?: Date;
+  publishedAt?: Date | null;
+  dueAt?: Date | null;
 };
 
 type SubmissionFixture = {
@@ -55,6 +57,8 @@ type HarnessData = {
 };
 
 const objectId = () => new Types.ObjectId();
+const DAY_MS = 24 * 60 * 60 * 1000;
+const addDays = (days: number) => new Date(Date.now() + days * DAY_MS);
 
 const makeQuery = <T>(result: T) => {
   const chain = {
@@ -93,7 +97,7 @@ const createHarness = (data: HarnessData = {}) => {
     _id: classroomId,
     name: 'Class A',
     courseId: objectId(),
-    status: 'ACTIVE',
+    status: ClassroomStatus.Active,
   };
   const classroomTask: ClassroomTaskFixture = {
     _id: classroomTaskId,
@@ -101,7 +105,7 @@ const createHarness = (data: HarnessData = {}) => {
     taskId,
     status: CLASSROOM_TASK_STATUS_ACTIVE,
     title: 'Task A',
-    publishedAt: new Date('2026-01-01T00:00:00.000Z'),
+    publishedAt: addDays(-1),
   };
   const classrooms = data.classrooms ?? [classroom];
   const classroomTasks = (data.classroomTasks ?? [classroomTask]).map(
@@ -134,10 +138,18 @@ const createHarness = (data: HarnessData = {}) => {
       | undefined;
     const match = firstStage?.$match ?? {};
     const ids = toIdSet(match.classroomId?.$in ?? []);
+    const taskStatusStage = pipeline.find((stage) => {
+      const matchRecord = (stage as { $match?: Record<string, unknown> })
+        .$match;
+      return Boolean(matchRecord?.['task.status']);
+    }) as { $match?: { 'task.status'?: string } } | undefined;
+    const taskStatus = taskStatusStage?.$match?.['task.status'];
     return classroomTasks.filter(
       (task) =>
         (ids.size === 0 || ids.has(task.classroomId.toString())) &&
-        (!match.status || task.status === match.status),
+        (!match.status || task.status === match.status) &&
+        (!taskStatus ||
+          (task.taskStatus ?? TaskStatus.Published) === taskStatus),
     );
   };
   const filterSubmissions = (filter: Record<string, unknown>) => {
@@ -321,7 +333,7 @@ describe('StudentLearningDashboardService', () => {
           classroomId: objectId(),
           taskId: submission.taskId,
           title: 'Task A',
-          publishedAt: new Date('2026-01-01T00:00:00.000Z'),
+          publishedAt: addDays(-1),
         },
       ],
       submissions: [submission],
@@ -361,7 +373,7 @@ describe('StudentLearningDashboardService', () => {
           classroomId: objectId(),
           taskId: submission.taskId,
           title: 'Task A',
-          publishedAt: new Date('2026-01-01T00:00:00.000Z'),
+          publishedAt: addDays(-1),
         },
       ],
       submissions: [submission],
@@ -408,7 +420,7 @@ describe('StudentLearningDashboardService', () => {
           classroomId: objectId(),
           taskId: submission.taskId,
           title: 'Task A',
-          publishedAt: new Date('2026-01-01T00:00:00.000Z'),
+          publishedAt: addDays(-1),
         },
       ],
       submissions: [submission],
@@ -458,7 +470,7 @@ describe('StudentLearningDashboardService', () => {
           classroomId: objectId(),
           taskId: submission.taskId,
           title: 'Task A',
-          publishedAt: new Date('2026-01-01T00:00:00.000Z'),
+          publishedAt: addDays(-1),
         },
       ],
       submissions: [submission],
@@ -514,7 +526,7 @@ describe('StudentLearningDashboardService', () => {
           classroomId: objectId(),
           taskId,
           title: 'Task A',
-          publishedAt: new Date('2026-01-01T00:00:00.000Z'),
+          publishedAt: addDays(-1),
         },
       ],
       submissions: [latestSubmission, oldSubmission],
@@ -583,7 +595,7 @@ describe('StudentLearningDashboardService', () => {
           _id: classroomId,
           name: 'Class A',
           courseId: objectId(),
-          status: 'ACTIVE',
+          status: ClassroomStatus.Active,
         },
       ],
       classroomTasks: [
@@ -593,7 +605,7 @@ describe('StudentLearningDashboardService', () => {
           taskId: activeTaskId,
           status: CLASSROOM_TASK_STATUS_ACTIVE,
           title: 'Active Task',
-          publishedAt: new Date('2026-01-01T00:00:00.000Z'),
+          publishedAt: addDays(-1),
         },
         {
           _id: closedClassroomTaskId,
@@ -601,7 +613,7 @@ describe('StudentLearningDashboardService', () => {
           taskId: closedTaskId,
           status: CLASSROOM_TASK_STATUS_CLOSED,
           title: 'Closed Task',
-          publishedAt: new Date('2026-01-01T00:00:00.000Z'),
+          publishedAt: addDays(-1),
         },
       ],
       submissions: [activeSubmission, closedSubmission],
@@ -653,7 +665,7 @@ describe('StudentLearningDashboardService', () => {
           _id: classroomId,
           name: 'Closed Only Class',
           courseId: objectId(),
-          status: 'ACTIVE',
+          status: ClassroomStatus.Active,
         },
       ],
       classroomTasks: [
@@ -663,7 +675,7 @@ describe('StudentLearningDashboardService', () => {
           taskId: closedTaskId,
           status: CLASSROOM_TASK_STATUS_CLOSED,
           title: 'Closed Task',
-          publishedAt: new Date('2026-01-01T00:00:00.000Z'),
+          publishedAt: addDays(-1),
         },
       ],
     });
@@ -690,7 +702,7 @@ describe('StudentLearningDashboardService', () => {
           _id: classroomId,
           name: 'Class A',
           courseId: objectId(),
-          status: 'ACTIVE',
+          status: ClassroomStatus.Active,
         },
       ],
       classroomTasks: [
@@ -700,7 +712,7 @@ describe('StudentLearningDashboardService', () => {
           taskId: closedTaskId,
           status: CLASSROOM_TASK_STATUS_CLOSED,
           title: 'Published Template But Closed Instance',
-          publishedAt: new Date('2026-01-01T00:00:00.000Z'),
+          publishedAt: addDays(-1),
         },
       ],
     });
@@ -734,7 +746,7 @@ describe('StudentLearningDashboardService', () => {
           _id: classroomId,
           name: 'Class A',
           courseId: objectId(),
-          status: 'ACTIVE',
+          status: ClassroomStatus.Active,
         },
       ],
       classroomTasks: [
@@ -744,7 +756,7 @@ describe('StudentLearningDashboardService', () => {
           taskId: unknownStatusTaskId,
           status: 'UNKNOWN',
           title: 'Unknown Status Task',
-          publishedAt: new Date('2026-01-01T00:00:00.000Z'),
+          publishedAt: addDays(-1),
         },
         {
           _id: objectId(),
@@ -752,7 +764,7 @@ describe('StudentLearningDashboardService', () => {
           taskId: missingStatusTaskId,
           status: undefined,
           title: 'Missing Status Task',
-          publishedAt: new Date('2026-01-01T00:00:00.000Z'),
+          publishedAt: addDays(-1),
         },
       ],
     });
@@ -760,6 +772,295 @@ describe('StudentLearningDashboardService', () => {
     const dashboard = await harness.service.getMyLearningDashboard(
       {},
       studentId.toString(),
+    );
+
+    expect(dashboard.items).toEqual([]);
+    expect(dashboard.total).toBe(0);
+  });
+
+  it('returns current and recently expired tasks by default with visibility fields', async () => {
+    const classroomId = objectId();
+    const studentId = objectId();
+    const currentTaskId = objectId();
+    const recentTaskId = objectId();
+    const harness = createHarness({
+      classrooms: [
+        {
+          _id: classroomId,
+          name: 'Class A',
+          courseId: objectId(),
+          status: ClassroomStatus.Active,
+        },
+      ],
+      classroomTasks: [
+        {
+          _id: objectId(),
+          classroomId,
+          taskId: currentTaskId,
+          status: CLASSROOM_TASK_STATUS_ACTIVE,
+          title: 'Future Due Task',
+          publishedAt: addDays(-1),
+          dueAt: addDays(3),
+        },
+        {
+          _id: objectId(),
+          classroomId,
+          taskId: recentTaskId,
+          status: CLASSROOM_TASK_STATUS_ACTIVE,
+          title: 'Recently Expired Task',
+          publishedAt: addDays(-20),
+          dueAt: addDays(-10),
+        },
+      ],
+    });
+
+    const dashboard = await harness.service.getMyLearningDashboard(
+      {},
+      studentId.toString(),
+    );
+
+    expect(dashboard.total).toBe(1);
+    expect(dashboard.items[0].tasks).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          title: 'Future Due Task',
+          studentVisibilityStatus: 'CURRENT',
+          isHistorical: false,
+        }),
+        expect.objectContaining({
+          title: 'Recently Expired Task',
+          studentVisibilityStatus: 'RECENTLY_EXPIRED',
+          isHistorical: false,
+        }),
+      ]),
+    );
+  });
+
+  it('hides long-expired and stale no-due tasks by default before querying submissions', async () => {
+    const classroomId = objectId();
+    const studentId = objectId();
+    const longExpiredClassroomTaskId = objectId();
+    const staleNoDueClassroomTaskId = objectId();
+    const harness = createHarness({
+      classrooms: [
+        {
+          _id: classroomId,
+          name: 'Historical Only Class',
+          courseId: objectId(),
+          status: ClassroomStatus.Active,
+        },
+      ],
+      classroomTasks: [
+        {
+          _id: longExpiredClassroomTaskId,
+          classroomId,
+          taskId: objectId(),
+          status: CLASSROOM_TASK_STATUS_ACTIVE,
+          title: 'Expired 31 Days Ago',
+          publishedAt: addDays(-45),
+          dueAt: addDays(-31),
+        },
+        {
+          _id: staleNoDueClassroomTaskId,
+          classroomId,
+          taskId: objectId(),
+          status: CLASSROOM_TASK_STATUS_ACTIVE,
+          title: 'No Due Old Published',
+          publishedAt: addDays(-91),
+        },
+      ],
+      submissions: [
+        {
+          _id: objectId(),
+          classroomTaskId: longExpiredClassroomTaskId,
+          taskId: objectId(),
+          studentId,
+          attemptNo: 1,
+          createdAt: addDays(-30),
+        },
+      ],
+    });
+
+    const dashboard = await harness.service.getMyLearningDashboard(
+      {},
+      studentId.toString(),
+    );
+
+    expect(dashboard.items).toEqual([]);
+    expect(dashboard.total).toBe(0);
+    expect(harness.submissionModel.find).not.toHaveBeenCalled();
+    expect(harness.feedbackModel.find).not.toHaveBeenCalled();
+  });
+
+  it('returns historical tasks when includeHistorical is true', async () => {
+    const classroomId = objectId();
+    const studentId = objectId();
+    const longExpiredClassroomTaskId = objectId();
+    const staleNoDueClassroomTaskId = objectId();
+    const harness = createHarness({
+      classrooms: [
+        {
+          _id: classroomId,
+          name: 'Class A',
+          courseId: objectId(),
+          status: ClassroomStatus.Active,
+        },
+      ],
+      classroomTasks: [
+        {
+          _id: longExpiredClassroomTaskId,
+          classroomId,
+          taskId: objectId(),
+          status: CLASSROOM_TASK_STATUS_ACTIVE,
+          title: 'Expired 31 Days Ago',
+          publishedAt: addDays(-45),
+          dueAt: addDays(-31),
+        },
+        {
+          _id: staleNoDueClassroomTaskId,
+          classroomId,
+          taskId: objectId(),
+          status: CLASSROOM_TASK_STATUS_ACTIVE,
+          title: 'No Due Old Published',
+          publishedAt: addDays(-91),
+        },
+      ],
+    });
+
+    const dashboard = await harness.service.getMyLearningDashboard(
+      {},
+      studentId.toString(),
+      true,
+    );
+
+    expect(dashboard.total).toBe(1);
+    expect(dashboard.items[0].tasks).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          title: 'Expired 31 Days Ago',
+          studentVisibilityStatus: 'HISTORICAL',
+          isHistorical: true,
+        }),
+        expect.objectContaining({
+          title: 'No Due Old Published',
+          studentVisibilityStatus: 'HISTORICAL',
+          isHistorical: true,
+        }),
+      ]),
+    );
+  });
+
+  it('returns recent no-due tasks and hides missing-date tasks by default', async () => {
+    const classroomId = objectId();
+    const studentId = objectId();
+    const harness = createHarness({
+      classrooms: [
+        {
+          _id: classroomId,
+          name: 'Class A',
+          courseId: objectId(),
+          status: ClassroomStatus.Active,
+        },
+      ],
+      classroomTasks: [
+        {
+          _id: objectId(),
+          classroomId,
+          taskId: objectId(),
+          status: CLASSROOM_TASK_STATUS_ACTIVE,
+          title: 'No Due Recent Published',
+          publishedAt: addDays(-60),
+        },
+        {
+          _id: objectId(),
+          classroomId,
+          taskId: objectId(),
+          status: CLASSROOM_TASK_STATUS_ACTIVE,
+          title: 'Missing Dates',
+          publishedAt: null,
+          dueAt: null,
+        },
+      ],
+    });
+
+    const dashboard = await harness.service.getMyLearningDashboard(
+      {},
+      studentId.toString(),
+    );
+
+    expect(dashboard.total).toBe(1);
+    expect(dashboard.items[0].tasks).toEqual([
+      expect.objectContaining({
+        title: 'No Due Recent Published',
+        studentVisibilityStatus: 'CURRENT',
+        isHistorical: false,
+      }),
+    ]);
+  });
+
+  it('does not return archived classrooms even when includeHistorical is true', async () => {
+    const classroomId = objectId();
+    const studentId = objectId();
+    const harness = createHarness({
+      classrooms: [
+        {
+          _id: classroomId,
+          name: 'Archived Class',
+          courseId: objectId(),
+          status: ClassroomStatus.Archived,
+        },
+      ],
+      classroomTasks: [
+        {
+          _id: objectId(),
+          classroomId,
+          taskId: objectId(),
+          status: CLASSROOM_TASK_STATUS_ACTIVE,
+          title: 'Active Task In Archived Class',
+          publishedAt: addDays(-1),
+        },
+      ],
+    });
+
+    const dashboard = await harness.service.getMyLearningDashboard(
+      {},
+      studentId.toString(),
+      true,
+    );
+
+    expect(dashboard.items).toEqual([]);
+    expect(dashboard.total).toBe(0);
+  });
+
+  it('does not return unpublished task templates', async () => {
+    const classroomId = objectId();
+    const studentId = objectId();
+    const harness = createHarness({
+      classrooms: [
+        {
+          _id: classroomId,
+          name: 'Class A',
+          courseId: objectId(),
+          status: ClassroomStatus.Active,
+        },
+      ],
+      classroomTasks: [
+        {
+          _id: objectId(),
+          classroomId,
+          taskId: objectId(),
+          status: CLASSROOM_TASK_STATUS_ACTIVE,
+          taskStatus: TaskStatus.Draft,
+          title: 'Draft Template Task',
+          publishedAt: addDays(-1),
+        },
+      ],
+    });
+
+    const dashboard = await harness.service.getMyLearningDashboard(
+      {},
+      studentId.toString(),
+      true,
     );
 
     expect(dashboard.items).toEqual([]);
