@@ -71,6 +71,16 @@ export type ClassroomSummary = {
   joinCode?: string;
   status?: ClassroomStatus;
   courseId?: string;
+  course?: ClassroomCourseSummary;
+};
+
+export type ClassroomCourseSummary = {
+  id?: string;
+  code?: string;
+  name?: string;
+  term?: string;
+  courseLabel?: string;
+  status?: string;
 };
 
 export type ClassroomListResponse = {
@@ -203,6 +213,7 @@ export type UpdateClassroomRequest = {
 export type ClassroomCreateResponse = {
   id?: string;
   courseId?: string;
+  course?: ClassroomCourseSummary;
   name?: string;
   joinCode?: string;
   status?: ClassroomStatus;
@@ -575,7 +586,30 @@ export const toClassroomSummary = (value: unknown): ClassroomSummary => {
     joinCode: asString(record.joinCode),
     status: normalizeClassroomStatus(record.status),
     courseId: asString(record.courseId),
+    course: toClassroomCourseSummary(record.course),
   };
+};
+
+const toClassroomCourseSummary = (
+  value: unknown,
+): ClassroomCourseSummary | undefined => {
+  const record = asRecord(value);
+  const course = {
+    id: asString(record.id) ?? asString(record.courseId),
+    code: asString(record.code),
+    name: asString(record.name),
+    term: asString(record.term),
+    courseLabel: asString(record.courseLabel),
+    status: asString(record.status),
+  };
+  const hasReadableCourse =
+    Boolean(course.id) ||
+    Boolean(course.code) ||
+    Boolean(course.name) ||
+    Boolean(course.term) ||
+    Boolean(course.courseLabel) ||
+    Boolean(course.status);
+  return hasReadableCourse ? course : undefined;
 };
 
 export const toClassroomCreateResponse = (
@@ -585,6 +619,7 @@ export const toClassroomCreateResponse = (
   return {
     id: asString(record.id) ?? asString(record.classroomId),
     courseId: asString(record.courseId),
+    course: toClassroomCourseSummary(record.course),
     name: asString(record.name),
     joinCode: asString(record.joinCode),
     status: normalizeClassroomStatus(record.status),

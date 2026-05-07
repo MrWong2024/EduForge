@@ -24,6 +24,12 @@ type EditClassroomFormErrorState = {
   description: string;
 };
 
+type ClassroomCourseDisplay = {
+  title: string;
+  details: string[];
+  showCourseIdFallback: boolean;
+};
+
 const getUpdateErrorSummary = (status: number, detail?: string): string => {
   if (status === 400) {
     if (detail?.includes("Archived classrooms cannot be updated")) {
@@ -46,12 +52,41 @@ const getUpdateErrorSummary = (status: number, detail?: string): string => {
   return "更新班级失败，请稍后重试。";
 };
 
+const getClassroomCourseDisplay = (
+  classroom: ClassroomDetailResponse,
+): ClassroomCourseDisplay => {
+  const course = classroom.course;
+  const title =
+    course?.name?.trim() ||
+    course?.code?.trim() ||
+    course?.courseLabel?.trim() ||
+    "课程信息暂不可用";
+  const details: string[] = [];
+
+  if (course?.code && course.code !== title) {
+    details.push(`课程编号：${course.code}`);
+  }
+  if (course?.term) {
+    details.push(`学期：${course.term}`);
+  }
+  if (course?.courseLabel && course.courseLabel !== title) {
+    details.push(`标签：${course.courseLabel}`);
+  }
+
+  return {
+    title,
+    details,
+    showCourseIdFallback: title === "课程信息暂不可用",
+  };
+};
+
 export function EditClassroomForm({ classroomId, initialClassroom }: EditClassroomFormProps) {
   const router = useRouter();
   const [name, setName] = useState(initialClassroom.name ?? "");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [errorState, setErrorState] = useState<EditClassroomFormErrorState | null>(null);
+  const courseDisplay = getClassroomCourseDisplay(initialClassroom);
 
   const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -112,7 +147,15 @@ export function EditClassroomForm({ classroomId, initialClassroom }: EditClassro
       </p>
 
       <div className="mt-4 grid gap-2 text-sm text-zinc-600 md:grid-cols-3">
-        <p>所属课程 ID：{toDisplayText(initialClassroom.courseId)}</p>
+        <div>
+          <p>所属课程：{courseDisplay.title}</p>
+          {courseDisplay.details.length > 0 ? (
+            <p className="mt-1 text-xs text-zinc-500">{courseDisplay.details.join(" · ")}</p>
+          ) : null}
+          {courseDisplay.showCourseIdFallback ? (
+            <p className="mt-1 text-xs text-zinc-400">课程 ID：{toDisplayText(initialClassroom.courseId)}</p>
+          ) : null}
+        </div>
         <p>当前状态：{toDisplayText(initialClassroom.status)}</p>
         <p>加入码：{toDisplayText(initialClassroom.joinCode)}</p>
       </div>
