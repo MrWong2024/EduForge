@@ -56,7 +56,7 @@ frontend/
   - `/teacher/tasks/[taskId]/edit`：模板编辑/查看与状态管理（含可选课程分类、模板可见性；非作者共享模板只读）；从模板页进入编辑时携带 `returnTo`（当前完整列表 URL），编辑页顶部/底部返回优先回到该地址，缺失或非法时回退 `/teacher/tasks`
 - 教师班级实例层（已收口）：
   - `/teacher/classrooms/[classroomId]/tasks`：选择“当前教师可见且已发布”的模板并发布到班级实例；候选池改为实时调用 `GET classrooms/:id/publishable-task-templates`，筛选条件 `courseLabel/onlyMine/knowledgeModule/stage` 透传后端，后端内置“仅 PUBLISHED + 排除本班已发布模板 + 课程优先排序”，不承担模板创建/编辑。
-  - 课堂任务实例列表已展示生命周期状态（`ACTIVE/CLOSED/RECALLED` -> `进行中/已关闭/已撤回`）；`ACTIVE` 任务可执行“关闭任务”（`PATCH classrooms/:classroomId/tasks/:classroomTaskId/status`，`status=CLOSED`），`CLOSED` 任务可执行“恢复提交”（同接口，`status=ACTIVE`），且 `ACTIVE/CLOSED` 任务可执行“编辑设置”（`PATCH classrooms/:classroomId/tasks/:classroomTaskId`，更新 `dueAt/allowLate/maxAttempts`）；`RECALLED` 仅展示状态，不提供恢复提交或编辑设置入口。恢复提交仅恢复状态，不自动修改 `dueAt/allowLate/maxAttempts`。
+  - 课堂任务实例列表已将生命周期状态与时间状态分开展示：`ACTIVE/CLOSED/RECALLED` -> `开放中/已关闭/已撤回`，其中 `ACTIVE` 仅表示未被教师关闭或撤回，不代表尚未截止；截止时间列单独展示 `未截止/已截止/无截止时间`（非法时间防御显示为“时间异常”）。`ACTIVE` 任务可执行“关闭任务”（`PATCH classrooms/:classroomId/tasks/:classroomTaskId/status`，`status=CLOSED`），`CLOSED` 任务可执行“恢复提交”（同接口，`status=ACTIVE`），且 `ACTIVE/CLOSED` 任务可执行“编辑设置”（`PATCH classrooms/:classroomId/tasks/:classroomTaskId`，更新 `dueAt/allowLate/maxAttempts`）；`RECALLED` 仅展示状态，不提供恢复提交或编辑设置入口。恢复提交仅恢复状态，不自动修改 `dueAt/allowLate/maxAttempts`。
   - 候选池首屏仍由 server 侧请求 `page=1&limit=50`；发布表单支持“加载更多”按当前筛选追加后续页（非完整分页器）；筛选条件变化时重置回第一页并清空历史追加结果。
   - 发布页“课程分类”下拉已改为复用统一标准课程分类列表（`lib/learning-tasks/course-labels.ts`），不再从当前已加载候选集合倒推选项。
 - `/student/**`：学习看板、加入班级、任务详情、提交、submission detail、请求 AI 已接入真接口。

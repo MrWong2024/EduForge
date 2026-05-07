@@ -637,6 +637,12 @@
 - 【新增事实 / 已收口口径】`/teacher/classrooms/[classroomId]/dashboard` 已接入 dashboard 顶层 `archiveSuggestion`；仅 `suggested=true` 时显示“建议归档”轻量提示，正文优先使用后端 `message`，并展示最近提交与连续无近期活动天数。
 - 【边界保持】归档建议完全由后端返回决定，前端不根据 `tasks/dueAt/submissions/includeClosedTasks` 重算，不自动归档，不新增直接归档 API 调用。不改 backend，不新增依赖。
 
+## UAT-FE-77
+
+- 【本步解决】教师班级任务列表将课堂任务 `ACTIVE` 显示为“进行中”，容易与截止时间是否已过混淆的问题。
+- 【新增事实 / 已收口口径】`/teacher/classrooms/[classroomId]/tasks` 已将 `ACTIVE` 生命周期文案改为“开放中”，并在截止时间列单独显示“未截止/已截止/无截止时间”（非法时间防御显示“时间异常”）。
+- 【边界保持】生命周期状态与时间状态分开展示；`ACTIVE + 已截止` 是合法组合，前端不自动关闭任务，不改变 `CLOSED/RECALLED` 展示，不改变迟交、提交权限或教师操作行为。不改 backend，不新增依赖。
+
 ## 当前阶段一句话结论
 
 前端已达到“Teacher/Student 主链路可用 + 任务模板层与班级实例层边界收口 + 教师模板主链路可维护”的工程验收阶段，但尚未进入最终交付定版阶段。

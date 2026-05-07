@@ -69,6 +69,45 @@ const parseStageFilter = (value: string | undefined): "1" | "2" | "3" | "4" | un
   return undefined;
 };
 
+const getDueTimeStatus = (
+  dueAt: string | null | undefined,
+): {
+  label: "未截止" | "已截止" | "无截止时间" | "时间异常";
+  title: string;
+  badgeClassName: string;
+} => {
+  if (!dueAt) {
+    return {
+      label: "无截止时间",
+      title: "该课堂任务未设置截止时间。",
+      badgeClassName: "border-slate-200 bg-slate-50 text-slate-600",
+    };
+  }
+
+  const dueTime = new Date(dueAt).getTime();
+  if (!Number.isFinite(dueTime)) {
+    return {
+      label: "时间异常",
+      title: "截止时间格式异常，请检查任务设置。",
+      badgeClassName: "border-slate-200 bg-slate-50 text-slate-600",
+    };
+  }
+
+  if (dueTime < Date.now()) {
+    return {
+      label: "已截止",
+      title: "截止时间已过；是否允许迟交取决于任务设置。",
+      badgeClassName: "border-amber-200 bg-amber-50 text-amber-700",
+    };
+  }
+
+  return {
+    label: "未截止",
+    title: "截止时间尚未到达。",
+    badgeClassName: "border-emerald-200 bg-emerald-50 text-emerald-700",
+  };
+};
+
 export default async function ClassroomTasksPage({ params, searchParams }: ClassroomTasksPageProps) {
   const { classroomId } = await params;
   const query = await searchParams;
@@ -251,6 +290,7 @@ export default async function ClassroomTasksPage({ params, searchParams }: Class
             <tbody>
               {viewModel.taskList.items.map((task, index) => {
                 const classroomTaskId = task.classroomTaskId;
+                const dueTimeStatus = getDueTimeStatus(task.dueAt);
                 return (
                   <tr
                     key={classroomTaskId ?? `classroom-task-${index}`}
@@ -262,7 +302,15 @@ export default async function ClassroomTasksPage({ params, searchParams }: Class
                         模板状态：{toDisplayText(task.taskStatus)}
                       </p>
                     </td>
-                    <td className="px-4 py-3">{toDisplayDate(task.dueAt)}</td>
+                    <td className="px-4 py-3">
+                      <p>{toDisplayDate(task.dueAt)}</p>
+                      <span
+                        title={dueTimeStatus.title}
+                        className={`mt-1 inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-medium whitespace-nowrap ${dueTimeStatus.badgeClassName}`}
+                      >
+                        {dueTimeStatus.label}
+                      </span>
+                    </td>
                     <td className="px-4 py-3">
                       {typeof task.allowLate === "boolean" ? (task.allowLate ? "是" : "否") : "—"}
                     </td>

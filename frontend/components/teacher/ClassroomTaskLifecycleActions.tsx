@@ -34,8 +34,8 @@ const STATUS_META: Record<
   }
 > = {
   ACTIVE: {
-    label: "进行中",
-    hint: "当前可继续提交。",
+    label: "开放中",
+    hint: "课堂任务处于开放状态；是否允许提交还取决于截止时间和迟交设置。",
     badgeClassName: "border-emerald-300 bg-emerald-50 text-emerald-700",
   },
   CLOSED: {
@@ -50,6 +50,12 @@ const STATUS_META: Record<
   },
 };
 
+const UNKNOWN_STATUS_META = {
+  label: "未知状态",
+  hint: "当前课堂任务状态无法识别，请刷新后重试。",
+  badgeClassName: "border-zinc-300 bg-zinc-50 text-zinc-600",
+};
+
 export function ClassroomTaskLifecycleActions({
   classroomId,
   classroomTaskId,
@@ -61,8 +67,8 @@ export function ClassroomTaskLifecycleActions({
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [errorState, setErrorState] = useState<StatusActionErrorState | null>(null);
 
-  const statusValue = normalizeClassroomTaskStatus(status) ?? "ACTIVE";
-  const statusMeta = STATUS_META[statusValue];
+  const statusValue = normalizeClassroomTaskStatus(status);
+  const statusMeta = statusValue ? STATUS_META[statusValue] : UNKNOWN_STATUS_META;
   const canClose = Boolean(classroomTaskId) && statusValue === "ACTIVE";
   const canReopen = Boolean(classroomTaskId) && statusValue === "CLOSED";
 
@@ -107,7 +113,7 @@ export function ClassroomTaskLifecycleActions({
       if (error instanceof BrowserFetchJsonError) {
         const detail = extractRawDetail(error.data);
         const summaryByStatus: Record<number, string> = targetStatus === "CLOSED" ? {
-          400: "当前任务状态不允许关闭，可能已不是进行中状态。",
+          400: "当前任务状态不允许关闭，可能已不是开放中状态。",
           401: "登录状态已失效，请重新登录。",
           403: "无权限管理该课堂任务。",
           404: "课堂任务不存在或已不可用。",
