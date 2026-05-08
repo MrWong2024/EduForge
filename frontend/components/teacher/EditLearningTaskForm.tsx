@@ -678,6 +678,7 @@ export function EditLearningTaskForm({
             />
           </label>
         </section>
+        </fieldset>
 
         <div className="flex flex-wrap items-center gap-3">
           {!effectiveReadOnly ? (
@@ -703,7 +704,6 @@ export function EditLearningTaskForm({
             返回任务模板列表
           </Link>
         </div>
-        </fieldset>
       </form>
 
       {successMessage ? <p className="mt-3 text-sm text-emerald-700">{successMessage}</p> : null}
