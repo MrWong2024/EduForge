@@ -4,7 +4,10 @@ import { ErrorState } from "@/components/blocks/ErrorState";
 import { PageHeader } from "@/components/blocks/PageHeader";
 import { EditLearningTaskForm } from "@/components/teacher/EditLearningTaskForm";
 import { fetchJson, FetchJsonError } from "@/lib/api/client";
-import { buildErrorDescription, extractRawDetail } from "@/lib/api/error-presenter";
+import {
+  buildErrorDescription,
+  extractRawDetail,
+} from "@/lib/api/error-presenter";
 import { getMe } from "@/lib/auth/session";
 import { toLearningTaskDetailResponse } from "@/lib/api/types-teacher";
 import { paths } from "@/lib/routes/paths";
@@ -32,6 +35,7 @@ type EditTaskViewModel =
       task: ReturnType<typeof toLearningTaskDetailResponse>;
       taskId: string;
       canEdit: boolean;
+      currentUserId?: string;
     }
   | { mode: "error"; status: number; description: string };
 
@@ -85,15 +89,14 @@ export default async function EditLearningTaskPage({
     const currentUserId =
       typeof me?.id === "string" && me.id.trim() ? me.id.trim() : undefined;
     const canEdit =
-      !currentUserId ||
-      !task.createdById ||
-      task.createdById === currentUserId;
+      !currentUserId || !task.createdById || task.createdById === currentUserId;
 
     viewModel = {
       mode: "ready",
       task,
       taskId,
       canEdit,
+      currentUserId,
     };
   } catch (error) {
     if (error instanceof FetchJsonError) {
@@ -101,14 +104,21 @@ export default async function EditLearningTaskPage({
       viewModel = {
         mode: "error",
         status: error.status,
-        description: buildErrorDescription(getTaskLoadSummary(error.status), detail),
+        description: buildErrorDescription(
+          getTaskLoadSummary(error.status),
+          detail,
+        ),
       };
     }
   }
 
   if (viewModel.mode === "error") {
     return (
-      <ErrorState status={viewModel.status} title="任务模板加载失败" description={viewModel.description} />
+      <ErrorState
+        status={viewModel.status}
+        title="任务模板加载失败"
+        description={viewModel.description}
+      />
     );
   }
 
@@ -120,14 +130,17 @@ export default async function EditLearningTaskPage({
       <PageHeader
         title={canEditCurrentTask ? "编辑任务模板" : "查看任务模板"}
         description={`模板：${toDisplayText(viewModel.task.title, "未命名模板")} | 状态：${toDisplayText(
-          viewModel.task.status
+          viewModel.task.status,
         )}`}
         actions={
           <div className="flex flex-wrap items-center gap-3 text-sm">
             <Link href={returnTo} className="text-blue-700 hover:underline">
               返回任务模板页
             </Link>
-            <Link href={paths.teacher.classrooms} className="text-blue-700 hover:underline">
+            <Link
+              href={paths.teacher.classrooms}
+              className="text-blue-700 hover:underline"
+            >
               返回班级列表
             </Link>
           </div>
@@ -140,7 +153,7 @@ export default async function EditLearningTaskPage({
             ? "此页用于维护 learning task 模板字段与基础评分配置。"
             : isArchivedTask && viewModel.canEdit
               ? "此页展示已归档模板详情；恢复为草稿后可继续编辑。"
-            : "此页展示共享模板详情；你当前仅有查看权限。"}
+              : "此页展示共享模板详情；你当前仅有查看权限。"}
         </p>
         <p className="mt-1">
           当前模板：{toDisplayText(viewModel.task.title, "未命名模板")}（状态：
@@ -152,6 +165,7 @@ export default async function EditLearningTaskPage({
         taskId={viewModel.taskId}
         initialTask={viewModel.task}
         readOnly={!viewModel.canEdit}
+        currentUserId={viewModel.currentUserId}
         returnTo={returnTo}
       />
     </section>

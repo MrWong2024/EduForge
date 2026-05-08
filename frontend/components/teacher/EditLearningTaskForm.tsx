@@ -5,7 +5,10 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { ErrorState } from "@/components/blocks/ErrorState";
 import { BrowserFetchJsonError, fetchJson } from "@/lib/api/browser-client";
-import { buildErrorDescription, extractRawDetail } from "@/lib/api/error-presenter";
+import {
+  buildErrorDescription,
+  extractRawDetail,
+} from "@/lib/api/error-presenter";
 import {
   LEARNING_TASK_STATUSES,
   toLearningTaskUpdateResponse,
@@ -26,12 +29,14 @@ import {
   type TaskTemplateVisibility,
 } from "@/lib/learning-tasks/template-visibility-scope";
 import { paths } from "@/lib/routes/paths";
+import { getPublisherLabel } from "@/lib/ui/format";
 import { getRubricDimensionLabel } from "@/lib/ui/rubric";
 
 type EditLearningTaskFormProps = {
   taskId: string;
   initialTask: LearningTaskDetailResponse;
   readOnly?: boolean;
+  currentUserId?: string;
   returnTo?: string;
 };
 
@@ -85,7 +90,9 @@ const parseStage = (value: string): number | null => {
   return parsed;
 };
 
-const parseOptionalNonNegativeInt = (value: string): number | undefined | null => {
+const parseOptionalNonNegativeInt = (
+  value: string,
+): number | undefined | null => {
   const trimmed = value.trim();
   if (!trimmed) {
     return undefined;
@@ -99,7 +106,11 @@ const parseOptionalNonNegativeInt = (value: string): number | undefined | null =
 
 const pickNonNegativeInt = (...candidates: unknown[]): number | undefined => {
   for (const candidate of candidates) {
-    if (typeof candidate === "number" && Number.isInteger(candidate) && candidate >= 0) {
+    if (
+      typeof candidate === "number" &&
+      Number.isInteger(candidate) &&
+      candidate >= 0
+    ) {
       return candidate;
     }
   }
@@ -111,7 +122,9 @@ const correctnessLabel = getRubricDimensionLabel("correctness");
 const codeStyleLabel = getRubricDimensionLabel("codeStyle");
 const designLabel = getRubricDimensionLabel("design");
 
-const extractRubricFormSeed = (rubric: Record<string, unknown> | undefined): RubricFormSeed => {
+const extractRubricFormSeed = (
+  rubric: Record<string, unknown> | undefined,
+): RubricFormSeed => {
   if (!rubric || Object.keys(rubric).length === 0) {
     return {
       functionalityWeight: "",
@@ -127,31 +140,34 @@ const extractRubricFormSeed = (rubric: Record<string, unknown> | undefined): Rub
   const functionality = pickNonNegativeInt(
     dimensions?.functionality,
     rubric.functionality,
-    rubric.functionalityWeight
+    rubric.functionalityWeight,
   );
   const correctness = pickNonNegativeInt(
     dimensions?.correctness,
     rubric.correctness,
-    rubric.correctnessWeight
+    rubric.correctnessWeight,
   );
   const codeStyle = pickNonNegativeInt(
     dimensions?.codeStyle,
     rubric.codeStyle,
-    rubric.codeStyleWeight
+    rubric.codeStyleWeight,
   );
   const design = pickNonNegativeInt(
     dimensions?.design,
     rubric.design,
-    rubric.designWeight
+    rubric.designWeight,
   );
   const notes = typeof rubric.notes === "string" ? rubric.notes.trim() : "";
   const recognizedCount =
-    [functionality, correctness, codeStyle, design].filter((value) => typeof value === "number")
-      .length + (notes ? 1 : 0);
+    [functionality, correctness, codeStyle, design].filter(
+      (value) => typeof value === "number",
+    ).length + (notes ? 1 : 0);
 
   return {
-    functionalityWeight: typeof functionality === "number" ? String(functionality) : "",
-    correctnessWeight: typeof correctness === "number" ? String(correctness) : "",
+    functionalityWeight:
+      typeof functionality === "number" ? String(functionality) : "",
+    correctnessWeight:
+      typeof correctness === "number" ? String(correctness) : "",
     codeStyleWeight: typeof codeStyle === "number" ? String(codeStyle) : "",
     designWeight: typeof design === "number" ? String(design) : "",
     notes,
@@ -216,6 +232,7 @@ export function EditLearningTaskForm({
   taskId,
   initialTask,
   readOnly = false,
+  currentUserId,
   returnTo,
 }: EditLearningTaskFormProps) {
   const router = useRouter();
@@ -230,37 +247,48 @@ export function EditLearningTaskForm({
   const initialVisibility =
     normalizeTaskTemplateVisibility(initialTask.visibility) ??
     TASK_TEMPLATE_VISIBILITY_SHARED;
+  const publisherLabel = getPublisherLabel(
+    initialTask.publisher,
+    currentUserId,
+  );
   const [title, setTitle] = useState(initialTask.title ?? "");
   const [description, setDescription] = useState(initialTask.description ?? "");
-  const [knowledgeModule, setKnowledgeModule] = useState(initialTask.knowledgeModule ?? "");
+  const [knowledgeModule, setKnowledgeModule] = useState(
+    initialTask.knowledgeModule ?? "",
+  );
   const [courseLabel, setCourseLabel] = useState(
     initialCourseLabel && initialCourseLabel !== TASK_COURSE_LABEL_UNCLASSIFIED
       ? initialCourseLabel
-      : ""
+      : "",
   );
   const [stage, setStage] = useState(
     typeof initialTask.stage === "number" && Number.isInteger(initialTask.stage)
       ? String(initialTask.stage)
-      : "1"
+      : "1",
   );
   const [status, setStatus] = useState<LearningTaskStatus>(
-    hasKnownInitialStatus ? rawInitialStatus : toStatusInitial(initialTask.status)
+    hasKnownInitialStatus
+      ? rawInitialStatus
+      : toStatusInitial(initialTask.status),
   );
   const [visibility, setVisibility] =
     useState<TaskTemplateVisibility>(initialVisibility);
   const [functionalityWeight, setFunctionalityWeight] = useState(
-    rubricSeed.functionalityWeight
+    rubricSeed.functionalityWeight,
   );
   const [correctnessWeight, setCorrectnessWeight] = useState(
-    rubricSeed.correctnessWeight
+    rubricSeed.correctnessWeight,
   );
-  const [codeStyleWeight, setCodeStyleWeight] = useState(rubricSeed.codeStyleWeight);
+  const [codeStyleWeight, setCodeStyleWeight] = useState(
+    rubricSeed.codeStyleWeight,
+  );
   const [designWeight, setDesignWeight] = useState(rubricSeed.designWeight);
   const [rubricNotes, setRubricNotes] = useState(rubricSeed.notes);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isRestoring, setIsRestoring] = useState(false);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
-  const [errorState, setErrorState] = useState<EditLearningTaskFormErrorState | null>(null);
+  const [errorState, setErrorState] =
+    useState<EditLearningTaskFormErrorState | null>(null);
 
   const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -274,8 +302,10 @@ export function EditLearningTaskForm({
     const normalizedCourseLabel = normalizeTaskCourseLabel(courseLabel);
     const trimmedRubricNotes = rubricNotes.trim();
     const parsedStage = parseStage(stage);
-    const parsedFunctionalityWeight = parseOptionalNonNegativeInt(functionalityWeight);
-    const parsedCorrectnessWeight = parseOptionalNonNegativeInt(correctnessWeight);
+    const parsedFunctionalityWeight =
+      parseOptionalNonNegativeInt(functionalityWeight);
+    const parsedCorrectnessWeight =
+      parseOptionalNonNegativeInt(correctnessWeight);
     const parsedCodeStyleWeight = parseOptionalNonNegativeInt(codeStyleWeight);
     const parsedDesignWeight = parseOptionalNonNegativeInt(designWeight);
 
@@ -354,7 +384,9 @@ export function EditLearningTaskForm({
     const hasRubricDimensions = Object.keys(rubricDimensions).length > 0;
     const hasRubricInput = hasRubricDimensions || Boolean(trimmedRubricNotes);
     const shouldPreserveLegacyRubric =
-      !hasRubricInput && rubricSeed.legacyUnstructured && Boolean(rubricSeed.sourceRubric);
+      !hasRubricInput &&
+      rubricSeed.legacyUnstructured &&
+      Boolean(rubricSeed.sourceRubric);
 
     const requestBody: UpdateLearningTaskRequest = {
       title: trimmedTitle,
@@ -388,14 +420,16 @@ export function EditLearningTaskForm({
             accept: "application/json",
           },
           body: JSON.stringify(requestBody),
-        }
+        },
       );
 
       const updated = toLearningTaskUpdateResponse(payload);
       const updatedTaskId = updated.id?.trim();
       const suffix = hasRubricInput ? "，评分配置已更新。" : "。";
       setSuccessMessage(
-        updatedTaskId ? `任务模板更新成功（ID: ${updatedTaskId}）${suffix}` : `任务模板更新成功${suffix}`
+        updatedTaskId
+          ? `任务模板更新成功（ID: ${updatedTaskId}）${suffix}`
+          : `任务模板更新成功${suffix}`,
       );
       router.refresh();
     } catch (error) {
@@ -421,7 +455,7 @@ export function EditLearningTaskForm({
       return;
     }
     const confirmed = window.confirm(
-      "确认将该归档模板恢复为草稿吗？恢复后可继续编辑，但不会自动重新发布到班级。"
+      "确认将该归档模板恢复为草稿吗？恢复后可继续编辑，但不会自动重新发布到班级。",
     );
     if (!confirmed) {
       return;
@@ -439,7 +473,7 @@ export function EditLearningTaskForm({
           headers: {
             accept: "application/json",
           },
-        }
+        },
       );
       setStatus("DRAFT");
       setSuccessMessage("任务模板已恢复为草稿。");
@@ -477,6 +511,11 @@ export function EditLearningTaskForm({
           当前模板由其他教师创建，你可以查看内容，但不能编辑或发布该模板。
         </p>
       ) : null}
+      {publisherLabel ? (
+        <p className="mt-2 inline-flex w-fit items-center rounded-full border border-sky-200 bg-sky-50 px-2 py-0.5 text-[11px] font-medium text-sky-700">
+          {publisherLabel}
+        </p>
+      ) : null}
       {canRestore ? (
         <p className="mt-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
           当前任务模板已归档，不能直接编辑。请先恢复为草稿后再修改。
@@ -489,195 +528,206 @@ export function EditLearningTaskForm({
       ) : null}
 
       <form onSubmit={handleSubmit} className="mt-4 space-y-4">
-        <fieldset disabled={isSubmitting || isRestoring || effectiveReadOnly} className="space-y-4">
-        <div className="grid gap-4 md:grid-cols-2">
-          <label className="block text-sm">
-            <span className="mb-1 block text-zinc-700">标题</span>
-            <input
-              value={title}
-              onChange={(event) => setTitle(event.target.value)}
-              placeholder="请输入任务模板标题"
-              className="w-full rounded-md border border-zinc-300 px-3 py-2"
-            />
-          </label>
-
-          <label className="block text-sm">
-            <span className="mb-1 block text-zinc-700">知识模块</span>
-            <input
-              value={knowledgeModule}
-              onChange={(event) => setKnowledgeModule(event.target.value)}
-              placeholder="例如：GENERAL"
-              className="w-full rounded-md border border-zinc-300 px-3 py-2"
-            />
-          </label>
-        </div>
-
-        <div className="grid gap-4 md:grid-cols-2">
-          <label className="block text-sm">
-            <span className="mb-1 block text-zinc-700">课程分类</span>
-            <select
-              value={courseLabel}
-              onChange={(event) => setCourseLabel(event.target.value)}
-              className="w-full rounded-md border border-zinc-300 px-3 py-2"
-            >
-              <option value="">未分类（通用模板）</option>
-              {TASK_COURSE_LABEL_FORM_OPTIONS.map((label) => (
-                <option key={label} value={label}>
-                  {label}
-                </option>
-              ))}
-            </select>
-            <p className="mt-1 text-xs text-zinc-500">
-              可选字段，仅用于模板治理（筛选/分组/检索辅助），不绑定课程。
-            </p>
-          </label>
-
-          <label className="block text-sm">
-            <span className="mb-1 block text-zinc-700">模板可见性</span>
-            <select
-              value={visibility}
-              onChange={(event) =>
-                setVisibility(event.target.value as TaskTemplateVisibility)
-              }
-              className="w-full rounded-md border border-zinc-300 px-3 py-2"
-            >
-              {TASK_TEMPLATE_VISIBILITIES.map((item) => (
-                <option key={item} value={item}>
-                  {TASK_TEMPLATE_VISIBILITY_LABELS[item]}
-                </option>
-              ))}
-            </select>
-            <p className="mt-1 text-xs text-zinc-500">
-              共享后其他教师可查看，但不能编辑或发布该模板。
-            </p>
-          </label>
-        </div>
-
-        <label className="block text-sm">
-          <span className="mb-1 block text-zinc-700">描述</span>
-          <textarea
-            value={description}
-            onChange={(event) => setDescription(event.target.value)}
-            rows={4}
-            placeholder="请输入任务模板描述"
-            className="w-full rounded-md border border-zinc-300 px-3 py-2"
-          />
-        </label>
-
-        <div className="grid gap-4 md:grid-cols-2">
-          <label className="block text-sm">
-            <span className="mb-1 block text-zinc-700">阶段</span>
-            <input
-              type="number"
-              min={1}
-              max={4}
-              step={1}
-              inputMode="numeric"
-              value={stage}
-              onChange={(event) => setStage(event.target.value)}
-              className="w-full rounded-md border border-zinc-300 px-3 py-2"
-            />
-          </label>
-
-          <label className="block text-sm">
-            <span className="mb-1 block text-zinc-700">状态</span>
-            <select
-              value={status}
-              onChange={(event) => setStatus(event.target.value as LearningTaskStatus)}
-              className="w-full rounded-md border border-zinc-300 px-3 py-2"
-            >
-              {LEARNING_TASK_STATUSES.map((item) => (
-                <option key={item} value={item}>
-                  {statusLabelMap[item]}
-                </option>
-              ))}
-            </select>
-            <p className="mt-1 text-xs text-zinc-500">
-              PUBLISHED 可用于班级发布；DRAFT / ARCHIVED 通常不会出现在班级发布可选列表。
-            </p>
-          </label>
-        </div>
-
-        <section className="rounded-md border border-zinc-200 bg-zinc-50 p-3">
-          <h3 className="text-sm font-medium text-zinc-900">基础评分配置（Rubric）</h3>
-          <p className="mt-1 text-xs text-zinc-600">
-            使用结构化字段维护评分参考；无需手写 JSON。
-          </p>
-          {rubricSeed.legacyUnstructured ? (
-            <p className="mt-1 text-xs text-amber-700">
-              检测到历史 rubric 结构，当前表单无法完整回填。若不填写新字段，保存时将保留历史结构。
-            </p>
-          ) : null}
-
-          <div className="mt-3 grid gap-4 md:grid-cols-2">
+        <fieldset
+          disabled={isSubmitting || isRestoring || effectiveReadOnly}
+          className="space-y-4"
+        >
+          <div className="grid gap-4 md:grid-cols-2">
             <label className="block text-sm">
-              <span className="mb-1 block text-zinc-700">{`${functionalityLabel}（可选）`}</span>
+              <span className="mb-1 block text-zinc-700">标题</span>
               <input
-                type="number"
-                min={0}
-                step={1}
-                inputMode="numeric"
-                value={functionalityWeight}
-                onChange={(event) => setFunctionalityWeight(event.target.value)}
-                placeholder="例如 40"
+                value={title}
+                onChange={(event) => setTitle(event.target.value)}
+                placeholder="请输入任务模板标题"
                 className="w-full rounded-md border border-zinc-300 px-3 py-2"
               />
             </label>
 
             <label className="block text-sm">
-              <span className="mb-1 block text-zinc-700">{`${correctnessLabel}（可选）`}</span>
+              <span className="mb-1 block text-zinc-700">知识模块</span>
               <input
-                type="number"
-                min={0}
-                step={1}
-                inputMode="numeric"
-                value={correctnessWeight}
-                onChange={(event) => setCorrectnessWeight(event.target.value)}
-                placeholder="例如 30"
-                className="w-full rounded-md border border-zinc-300 px-3 py-2"
-              />
-            </label>
-
-            <label className="block text-sm">
-              <span className="mb-1 block text-zinc-700">{`${codeStyleLabel}（可选）`}</span>
-              <input
-                type="number"
-                min={0}
-                step={1}
-                inputMode="numeric"
-                value={codeStyleWeight}
-                onChange={(event) => setCodeStyleWeight(event.target.value)}
-                placeholder="例如 20"
-                className="w-full rounded-md border border-zinc-300 px-3 py-2"
-              />
-            </label>
-
-            <label className="block text-sm">
-              <span className="mb-1 block text-zinc-700">{`${designLabel}（可选）`}</span>
-              <input
-                type="number"
-                min={0}
-                step={1}
-                inputMode="numeric"
-                value={designWeight}
-                onChange={(event) => setDesignWeight(event.target.value)}
-                placeholder="例如 10"
+                value={knowledgeModule}
+                onChange={(event) => setKnowledgeModule(event.target.value)}
+                placeholder="例如：GENERAL"
                 className="w-full rounded-md border border-zinc-300 px-3 py-2"
               />
             </label>
           </div>
 
-          <label className="mt-3 block text-sm">
-            <span className="mb-1 block text-zinc-700">评分说明（可选）</span>
+          <div className="grid gap-4 md:grid-cols-2">
+            <label className="block text-sm">
+              <span className="mb-1 block text-zinc-700">课程分类</span>
+              <select
+                value={courseLabel}
+                onChange={(event) => setCourseLabel(event.target.value)}
+                className="w-full rounded-md border border-zinc-300 px-3 py-2"
+              >
+                <option value="">未分类（通用模板）</option>
+                {TASK_COURSE_LABEL_FORM_OPTIONS.map((label) => (
+                  <option key={label} value={label}>
+                    {label}
+                  </option>
+                ))}
+              </select>
+              <p className="mt-1 text-xs text-zinc-500">
+                可选字段，仅用于模板治理（筛选/分组/检索辅助），不绑定课程。
+              </p>
+            </label>
+
+            <label className="block text-sm">
+              <span className="mb-1 block text-zinc-700">模板可见性</span>
+              <select
+                value={visibility}
+                onChange={(event) =>
+                  setVisibility(event.target.value as TaskTemplateVisibility)
+                }
+                className="w-full rounded-md border border-zinc-300 px-3 py-2"
+              >
+                {TASK_TEMPLATE_VISIBILITIES.map((item) => (
+                  <option key={item} value={item}>
+                    {TASK_TEMPLATE_VISIBILITY_LABELS[item]}
+                  </option>
+                ))}
+              </select>
+              <p className="mt-1 text-xs text-zinc-500">
+                共享后其他教师可查看，但不能编辑或发布该模板。
+              </p>
+            </label>
+          </div>
+
+          <label className="block text-sm">
+            <span className="mb-1 block text-zinc-700">描述</span>
             <textarea
-              value={rubricNotes}
-              onChange={(event) => setRubricNotes(event.target.value)}
-              rows={3}
-              placeholder="例如：优先关注可运行性与命名规范"
+              value={description}
+              onChange={(event) => setDescription(event.target.value)}
+              rows={4}
+              placeholder="请输入任务模板描述"
               className="w-full rounded-md border border-zinc-300 px-3 py-2"
             />
           </label>
-        </section>
+
+          <div className="grid gap-4 md:grid-cols-2">
+            <label className="block text-sm">
+              <span className="mb-1 block text-zinc-700">阶段</span>
+              <input
+                type="number"
+                min={1}
+                max={4}
+                step={1}
+                inputMode="numeric"
+                value={stage}
+                onChange={(event) => setStage(event.target.value)}
+                className="w-full rounded-md border border-zinc-300 px-3 py-2"
+              />
+            </label>
+
+            <label className="block text-sm">
+              <span className="mb-1 block text-zinc-700">状态</span>
+              <select
+                value={status}
+                onChange={(event) =>
+                  setStatus(event.target.value as LearningTaskStatus)
+                }
+                className="w-full rounded-md border border-zinc-300 px-3 py-2"
+              >
+                {LEARNING_TASK_STATUSES.map((item) => (
+                  <option key={item} value={item}>
+                    {statusLabelMap[item]}
+                  </option>
+                ))}
+              </select>
+              <p className="mt-1 text-xs text-zinc-500">
+                PUBLISHED 可用于班级发布；DRAFT / ARCHIVED
+                通常不会出现在班级发布可选列表。
+              </p>
+            </label>
+          </div>
+
+          <section className="rounded-md border border-zinc-200 bg-zinc-50 p-3">
+            <h3 className="text-sm font-medium text-zinc-900">
+              基础评分配置（Rubric）
+            </h3>
+            <p className="mt-1 text-xs text-zinc-600">
+              使用结构化字段维护评分参考；无需手写 JSON。
+            </p>
+            {rubricSeed.legacyUnstructured ? (
+              <p className="mt-1 text-xs text-amber-700">
+                检测到历史 rubric
+                结构，当前表单无法完整回填。若不填写新字段，保存时将保留历史结构。
+              </p>
+            ) : null}
+
+            <div className="mt-3 grid gap-4 md:grid-cols-2">
+              <label className="block text-sm">
+                <span className="mb-1 block text-zinc-700">{`${functionalityLabel}（可选）`}</span>
+                <input
+                  type="number"
+                  min={0}
+                  step={1}
+                  inputMode="numeric"
+                  value={functionalityWeight}
+                  onChange={(event) =>
+                    setFunctionalityWeight(event.target.value)
+                  }
+                  placeholder="例如 40"
+                  className="w-full rounded-md border border-zinc-300 px-3 py-2"
+                />
+              </label>
+
+              <label className="block text-sm">
+                <span className="mb-1 block text-zinc-700">{`${correctnessLabel}（可选）`}</span>
+                <input
+                  type="number"
+                  min={0}
+                  step={1}
+                  inputMode="numeric"
+                  value={correctnessWeight}
+                  onChange={(event) => setCorrectnessWeight(event.target.value)}
+                  placeholder="例如 30"
+                  className="w-full rounded-md border border-zinc-300 px-3 py-2"
+                />
+              </label>
+
+              <label className="block text-sm">
+                <span className="mb-1 block text-zinc-700">{`${codeStyleLabel}（可选）`}</span>
+                <input
+                  type="number"
+                  min={0}
+                  step={1}
+                  inputMode="numeric"
+                  value={codeStyleWeight}
+                  onChange={(event) => setCodeStyleWeight(event.target.value)}
+                  placeholder="例如 20"
+                  className="w-full rounded-md border border-zinc-300 px-3 py-2"
+                />
+              </label>
+
+              <label className="block text-sm">
+                <span className="mb-1 block text-zinc-700">{`${designLabel}（可选）`}</span>
+                <input
+                  type="number"
+                  min={0}
+                  step={1}
+                  inputMode="numeric"
+                  value={designWeight}
+                  onChange={(event) => setDesignWeight(event.target.value)}
+                  placeholder="例如 10"
+                  className="w-full rounded-md border border-zinc-300 px-3 py-2"
+                />
+              </label>
+            </div>
+
+            <label className="mt-3 block text-sm">
+              <span className="mb-1 block text-zinc-700">评分说明（可选）</span>
+              <textarea
+                value={rubricNotes}
+                onChange={(event) => setRubricNotes(event.target.value)}
+                rows={3}
+                placeholder="例如：优先关注可运行性与命名规范"
+                className="w-full rounded-md border border-zinc-300 px-3 py-2"
+              />
+            </label>
+          </section>
         </fieldset>
 
         <div className="flex flex-wrap items-center gap-3">
@@ -700,13 +750,18 @@ export function EditLearningTaskForm({
               {isRestoring ? "恢复中..." : "恢复为草稿"}
             </button>
           ) : null}
-          <Link href={taskListReturnTo} className="text-sm text-blue-700 hover:underline">
+          <Link
+            href={taskListReturnTo}
+            className="text-sm text-blue-700 hover:underline"
+          >
             返回任务模板列表
           </Link>
         </div>
       </form>
 
-      {successMessage ? <p className="mt-3 text-sm text-emerald-700">{successMessage}</p> : null}
+      {successMessage ? (
+        <p className="mt-3 text-sm text-emerald-700">{successMessage}</p>
+      ) : null}
 
       {errorState ? (
         <div className="mt-4">

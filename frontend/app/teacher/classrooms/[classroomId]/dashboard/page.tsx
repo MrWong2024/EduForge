@@ -13,9 +13,15 @@ import {
   toClassroomSummary,
   toDashboardResponse,
 } from "@/lib/api/types-teacher";
+import { getMe } from "@/lib/auth/session";
 import { paths } from "@/lib/routes/paths";
 import { getCommonErrorSummary } from "@/lib/ui/status";
-import { safeGet, toDisplayDate, toDisplayText } from "@/lib/ui/format";
+import {
+  getPublisherLabel,
+  safeGet,
+  toDisplayDate,
+  toDisplayText,
+} from "@/lib/ui/format";
 
 type DashboardPageProps = {
   params: Promise<{ classroomId: string }>;
@@ -219,6 +225,7 @@ type DashboardViewModel =
       publishedTasksCount: number;
       lateStudentsTotal: number;
       includeClosedTasks: boolean;
+      currentUserId?: string;
     }
   | { mode: "error"; status: number; description: string };
 
@@ -239,7 +246,7 @@ export default async function ClassroomDashboardPage({
 
   try {
     const origin = await getRequestOrigin();
-    const [classroomPayload, dashboardPayload] = await Promise.all([
+    const [classroomPayload, dashboardPayload, me] = await Promise.all([
       fetchJson<unknown>(`classrooms/${encodeURIComponent(classroomId)}`, {
         origin,
         cache: "no-store",
@@ -248,6 +255,7 @@ export default async function ClassroomDashboardPage({
         origin,
         cache: "no-store",
       }),
+      getMe().catch(() => null),
     ]);
 
     const classroom = toClassroomSummary(classroomPayload);
@@ -278,6 +286,8 @@ export default async function ClassroomDashboardPage({
       publishedTasksCount,
       lateStudentsTotal,
       includeClosedTasks,
+      currentUserId:
+        typeof me?.id === "string" && me.id.trim() ? me.id.trim() : undefined,
     };
   } catch (error) {
     if (error instanceof FetchJsonError) {
@@ -488,10 +498,13 @@ export default async function ClassroomDashboardPage({
                     item.classroomTaskStatus,
                   );
                   const isClosedTask = classroomTaskStatus === "CLOSED";
-                  const taskTemplateStatusBadge =
-                    getTaskTemplateStatusBadge(
-                      toOptionalText(item.taskTemplateStatus),
-                    );
+                  const taskTemplateStatusBadge = getTaskTemplateStatusBadge(
+                    toOptionalText(item.taskTemplateStatus),
+                  );
+                  const publisherLabel = getPublisherLabel(
+                    item.taskPublisher,
+                    viewModel.currentUserId,
+                  );
 
                   return (
                     <tr
@@ -522,6 +535,11 @@ export default async function ClassroomDashboardPage({
                               className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-medium ${taskTemplateStatusBadge.className}`}
                             >
                               {taskTemplateStatusBadge.label}
+                            </span>
+                          ) : null}
+                          {publisherLabel ? (
+                            <span className="inline-flex items-center rounded-full border border-sky-200 bg-sky-50 px-2 py-0.5 text-[11px] font-medium text-sky-700">
+                              {publisherLabel}
                             </span>
                           ) : null}
                         </div>

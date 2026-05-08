@@ -3,7 +3,11 @@ type PathInput = string | readonly string[];
 const toPathSegments = (path: PathInput): string[] =>
   typeof path === "string" ? path.split(".").filter(Boolean) : [...path];
 
-export const safeGet = <T>(source: unknown, path: PathInput, fallback: T): T => {
+export const safeGet = <T>(
+  source: unknown,
+  path: PathInput,
+  fallback: T,
+): T => {
   const segments = toPathSegments(path);
   let current: unknown = source;
 
@@ -37,7 +41,7 @@ export const safeGet = <T>(source: unknown, path: PathInput, fallback: T): T => 
 };
 
 export const getSingleSearchParam = (
-  value: string | string[] | undefined
+  value: string | string[] | undefined,
 ): string | undefined => (Array.isArray(value) ? value[0] : value);
 
 type ParsePositiveIntOptions = {
@@ -48,7 +52,7 @@ type ParsePositiveIntOptions = {
 export const parsePositiveInt = (
   value: string | undefined,
   fallback: number,
-  options: ParsePositiveIntOptions = {}
+  options: ParsePositiveIntOptions = {},
 ): number => {
   const parsed = Number.parseInt(String(value ?? ""), 10);
   if (!Number.isInteger(parsed)) {
@@ -67,7 +71,10 @@ export const parsePositiveInt = (
   return parsed;
 };
 
-export const parseBool01 = (value: string | undefined, fallback: boolean): boolean => {
+export const parseBool01 = (
+  value: string | undefined,
+  fallback: boolean,
+): boolean => {
   if (!value) {
     return fallback;
   }
@@ -86,11 +93,11 @@ export const parseBool01 = (value: string | undefined, fallback: boolean): boole
 export const parseEnum = <T extends string>(
   value: string | undefined,
   allowed: readonly T[],
-  fallback: T
+  fallback: T,
 ): T => (value && allowed.includes(value as T) ? (value as T) : fallback);
 
 export const buildQueryString = (
-  params: Record<string, string | number | boolean | undefined | null>
+  params: Record<string, string | number | boolean | undefined | null>,
 ): string => {
   const search = new URLSearchParams();
 
@@ -134,4 +141,19 @@ export const toDisplayText = (value: unknown, fallback = "—"): string => {
   }
 
   return fallback;
+};
+
+export const getPublisherLabel = (
+  publisher: { id?: string; name?: string } | null | undefined,
+  currentUserId: string | null | undefined,
+): string | null => {
+  if (!publisher?.id || !currentUserId) {
+    return null;
+  }
+
+  if (publisher.id === currentUserId) {
+    return null;
+  }
+
+  return publisher.name ? `模板发布者：${publisher.name}` : "其他教师模板";
 };

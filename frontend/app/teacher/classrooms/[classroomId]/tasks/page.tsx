@@ -7,16 +7,26 @@ import { EditClassroomTaskForm } from "@/components/teacher/EditClassroomTaskFor
 import { ClassroomTaskLifecycleActions } from "@/components/teacher/ClassroomTaskLifecycleActions";
 import { PublishClassroomTaskForm } from "@/components/teacher/PublishClassroomTaskForm";
 import { fetchJson, FetchJsonError } from "@/lib/api/client";
-import { buildErrorDescription, extractRawDetail } from "@/lib/api/error-presenter";
+import {
+  buildErrorDescription,
+  extractRawDetail,
+} from "@/lib/api/error-presenter";
 import {
   toClassroomSummary,
   toClassroomTasksResponse,
   toPublishableTaskTemplateListResponse,
 } from "@/lib/api/types-teacher";
+import { getMe } from "@/lib/auth/session";
 import { normalizeTaskCourseLabel } from "@/lib/learning-tasks/course-labels";
 import { paths } from "@/lib/routes/paths";
 import { getCommonErrorSummary } from "@/lib/ui/status";
-import { buildQueryString, getSingleSearchParam, toDisplayDate, toDisplayText } from "@/lib/ui/format";
+import {
+  buildQueryString,
+  getPublisherLabel,
+  getSingleSearchParam,
+  toDisplayDate,
+  toDisplayText,
+} from "@/lib/ui/format";
 
 type ClassroomTasksPageProps = {
   params: Promise<{ classroomId: string }>;
@@ -43,7 +53,9 @@ type TasksViewModel =
       mode: "ready";
       classroomName?: string;
       taskList: ReturnType<typeof toClassroomTasksResponse>;
-      availableTasks: ReturnType<typeof toPublishableTaskTemplateListResponse>["items"];
+      availableTasks: ReturnType<
+        typeof toPublishableTaskTemplateListResponse
+      >["items"];
       availableTasksTotal?: number;
       availableTasksPage?: number;
       availableTasksLimit?: number;
@@ -51,6 +63,7 @@ type TasksViewModel =
       initialOnlyMineFilter: boolean;
       initialKnowledgeModuleFilter?: string;
       initialStageFilter?: "1" | "2" | "3" | "4";
+      currentUserId?: string;
     }
   | { mode: "error"; status: number; description: string };
 
@@ -62,7 +75,9 @@ const parseOnlyMine = (value: string | undefined): boolean => {
   return normalized === "1" || normalized === "true";
 };
 
-const parseStageFilter = (value: string | undefined): "1" | "2" | "3" | "4" | undefined => {
+const parseStageFilter = (
+  value: string | undefined,
+): "1" | "2" | "3" | "4" | undefined => {
   if (value === "1" || value === "2" || value === "3" || value === "4") {
     return value;
   }
@@ -153,7 +168,8 @@ const getSubmissionWindowStatus = (
   if (allowLate === true) {
     return {
       label: "允许迟交",
-      title: "课堂任务已截止，但当前设置允许迟交；最终提交权限仍以后端校验为准。",
+      title:
+        "课堂任务已截止，但当前设置允许迟交；最终提交权限仍以后端校验为准。",
       badgeClassName: "border-amber-200 bg-amber-50 text-amber-700",
     };
   }
@@ -185,15 +201,23 @@ const getTemplateStatusBadge = (
   return null;
 };
 
-export default async function ClassroomTasksPage({ params, searchParams }: ClassroomTasksPageProps) {
+export default async function ClassroomTasksPage({
+  params,
+  searchParams,
+}: ClassroomTasksPageProps) {
   const { classroomId } = await params;
   const query = await searchParams;
   const initialCourseLabelFilter = normalizeTaskCourseLabel(
-    getSingleSearchParam(query.courseLabel)
+    getSingleSearchParam(query.courseLabel),
   );
-  const initialOnlyMineFilter = parseOnlyMine(getSingleSearchParam(query.onlyMine));
-  const initialKnowledgeModuleFilter = getSingleSearchParam(query.knowledgeModule)?.trim() || undefined;
-  const initialStageFilter = parseStageFilter(getSingleSearchParam(query.stage));
+  const initialOnlyMineFilter = parseOnlyMine(
+    getSingleSearchParam(query.onlyMine),
+  );
+  const initialKnowledgeModuleFilter =
+    getSingleSearchParam(query.knowledgeModule)?.trim() || undefined;
+  const initialStageFilter = parseStageFilter(
+    getSingleSearchParam(query.stage),
+  );
   let viewModel: TasksViewModel = {
     mode: "error",
     status: 500,
@@ -210,27 +234,33 @@ export default async function ClassroomTasksPage({ params, searchParams }: Class
       knowledgeModule: initialKnowledgeModuleFilter,
       stage: initialStageFilter ? Number(initialStageFilter) : undefined,
     });
-    const [classroomPayload, tasksPayload, learningTasksPayload] = await Promise.all([
-      fetchJson<unknown>(`classrooms/${encodeURIComponent(classroomId)}`, {
-        origin,
-        cache: "no-store",
-      }),
-      fetchJson<unknown>(`classrooms/${encodeURIComponent(classroomId)}/tasks`, {
-        origin,
-        cache: "no-store",
-      }),
-      fetchJson<unknown>(
-        `classrooms/${encodeURIComponent(classroomId)}/publishable-task-templates?${publishableQuery}`,
-        {
+    const [classroomPayload, tasksPayload, learningTasksPayload, me] =
+      await Promise.all([
+        fetchJson<unknown>(`classrooms/${encodeURIComponent(classroomId)}`, {
           origin,
           cache: "no-store",
-        }
-      ),
-    ]);
+        }),
+        fetchJson<unknown>(
+          `classrooms/${encodeURIComponent(classroomId)}/tasks`,
+          {
+            origin,
+            cache: "no-store",
+          },
+        ),
+        fetchJson<unknown>(
+          `classrooms/${encodeURIComponent(classroomId)}/publishable-task-templates?${publishableQuery}`,
+          {
+            origin,
+            cache: "no-store",
+          },
+        ),
+        getMe().catch(() => null),
+      ]);
 
     const classroom = toClassroomSummary(classroomPayload);
     const taskList = toClassroomTasksResponse(tasksPayload);
-    const learningTasks = toPublishableTaskTemplateListResponse(learningTasksPayload);
+    const learningTasks =
+      toPublishableTaskTemplateListResponse(learningTasksPayload);
 
     viewModel = {
       mode: "ready",
@@ -244,6 +274,8 @@ export default async function ClassroomTasksPage({ params, searchParams }: Class
       initialOnlyMineFilter,
       initialKnowledgeModuleFilter,
       initialStageFilter,
+      currentUserId:
+        typeof me?.id === "string" && me.id.trim() ? me.id.trim() : undefined,
     };
   } catch (error) {
     if (error instanceof FetchJsonError) {
@@ -262,7 +294,11 @@ export default async function ClassroomTasksPage({ params, searchParams }: Class
 
   if (viewModel.mode === "error") {
     return (
-      <ErrorState status={viewModel.status} title="课堂任务加载失败" description={viewModel.description} />
+      <ErrorState
+        status={viewModel.status}
+        title="课堂任务加载失败"
+        description={viewModel.description}
+      />
     );
   }
 
@@ -273,16 +309,28 @@ export default async function ClassroomTasksPage({ params, searchParams }: Class
         description={toDisplayText(viewModel.classroomName, "班级")}
         actions={
           <div className="flex flex-wrap items-center gap-3 text-sm">
-            <Link href={paths.teacher.classrooms} className="text-blue-700 hover:underline">
+            <Link
+              href={paths.teacher.classrooms}
+              className="text-blue-700 hover:underline"
+            >
               返回班级列表
             </Link>
-            <Link href={paths.teacher.classroomDashboard(classroomId)} className="text-blue-700 hover:underline">
+            <Link
+              href={paths.teacher.classroomDashboard(classroomId)}
+              className="text-blue-700 hover:underline"
+            >
               查看班级看板
             </Link>
-            <Link href={paths.teacher.classroomMembers(classroomId)} className="text-blue-700 hover:underline">
+            <Link
+              href={paths.teacher.classroomMembers(classroomId)}
+              className="text-blue-700 hover:underline"
+            >
               成员管理
             </Link>
-            <Link href={paths.teacher.tasksFromClassroom(classroomId)} className="text-blue-700 hover:underline">
+            <Link
+              href={paths.teacher.tasksFromClassroom(classroomId)}
+              className="text-blue-700 hover:underline"
+            >
               任务模板页
             </Link>
           </div>
@@ -294,8 +342,12 @@ export default async function ClassroomTasksPage({ params, searchParams }: Class
         <p className="mt-1">
           这里先选择已发布任务模板，再配置截止时间、迟交与尝试次数等班级实例设置后发布。
         </p>
-        <p className="mt-1">候选模板按当前班级与筛选条件实时检索，包含你自己的模板与可见共享模板。</p>
-        <p className="mt-1">后端已自动排除当前班级已发布过的模板，并处理课程分类优先匹配排序。</p>
+        <p className="mt-1">
+          候选模板按当前班级与筛选条件实时检索，包含你自己的模板与可见共享模板。
+        </p>
+        <p className="mt-1">
+          后端已自动排除当前班级已发布过的模板，并处理课程分类优先匹配排序。
+        </p>
         <p className="mt-2">
           若没有合适模板，请先前往
           <Link
@@ -375,6 +427,10 @@ export default async function ClassroomTasksPage({ params, searchParams }: Class
                 const templateStatusBadge = getTemplateStatusBadge(
                   task.taskStatus,
                 );
+                const publisherLabel = getPublisherLabel(
+                  task.taskPublisher,
+                  viewModel.currentUserId,
+                );
                 return (
                   <tr
                     key={classroomTaskId ?? `classroom-task-${index}`}
@@ -388,6 +444,11 @@ export default async function ClassroomTasksPage({ params, searchParams }: Class
                             className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-medium ${templateStatusBadge.className}`}
                           >
                             {templateStatusBadge.label}
+                          </span>
+                        ) : null}
+                        {publisherLabel ? (
+                          <span className="inline-flex items-center rounded-full border border-sky-200 bg-sky-50 px-2 py-0.5 text-[11px] font-medium text-sky-700">
+                            {publisherLabel}
                           </span>
                         ) : null}
                       </div>
@@ -404,10 +465,18 @@ export default async function ClassroomTasksPage({ params, searchParams }: Class
                       </p>
                     </td>
                     <td className="px-4 py-3">
-                      {typeof task.allowLate === "boolean" ? (task.allowLate ? "是" : "否") : "—"}
+                      {typeof task.allowLate === "boolean"
+                        ? task.allowLate
+                          ? "是"
+                          : "否"
+                        : "—"}
                     </td>
-                    <td className="px-4 py-3">{toDisplayText(task.maxAttempts)}</td>
-                    <td className="px-4 py-3">{toDisplayText(task.knowledgeModule)}</td>
+                    <td className="px-4 py-3">
+                      {toDisplayText(task.maxAttempts)}
+                    </td>
+                    <td className="px-4 py-3">
+                      {toDisplayText(task.knowledgeModule)}
+                    </td>
                     <td className="px-4 py-3">{toDisplayText(task.stage)}</td>
                     <td className="px-4 py-3">
                       <ClassroomTaskLifecycleActions
@@ -429,13 +498,19 @@ export default async function ClassroomTasksPage({ params, searchParams }: Class
                         <div className="space-y-2">
                           <div className="flex flex-wrap gap-3">
                             <Link
-                              href={paths.teacher.classroomTaskDetail(classroomId, classroomTaskId)}
+                              href={paths.teacher.classroomTaskDetail(
+                                classroomId,
+                                classroomTaskId,
+                              )}
                               className="text-blue-700 hover:underline"
                             >
                               任务详情
                             </Link>
                             <Link
-                              href={paths.teacher.classroomTaskSubmissions(classroomId, classroomTaskId)}
+                              href={paths.teacher.classroomTaskSubmissions(
+                                classroomId,
+                                classroomTaskId,
+                              )}
                               className="text-blue-700 hover:underline"
                             >
                               提交管理
@@ -458,19 +533,28 @@ export default async function ClassroomTasksPage({ params, searchParams }: Class
                       {classroomTaskId ? (
                         <div className="flex flex-wrap gap-3">
                           <Link
-                            href={paths.teacher.classroomTaskTrajectory(classroomId, classroomTaskId)}
+                            href={paths.teacher.classroomTaskTrajectory(
+                              classroomId,
+                              classroomTaskId,
+                            )}
                             className="text-blue-700 hover:underline"
                           >
                             学习轨迹
                           </Link>
                           <Link
-                            href={paths.teacher.classroomTaskReviewPack(classroomId, classroomTaskId)}
+                            href={paths.teacher.classroomTaskReviewPack(
+                              classroomId,
+                              classroomTaskId,
+                            )}
                             className="text-blue-700 hover:underline"
                           >
                             课堂复盘
                           </Link>
                           <Link
-                            href={paths.teacher.classroomTaskAiMetrics(classroomId, classroomTaskId)}
+                            href={paths.teacher.classroomTaskAiMetrics(
+                              classroomId,
+                              classroomTaskId,
+                            )}
                             className="text-blue-700 hover:underline"
                           >
                             AI 指标

@@ -65,6 +65,17 @@ const pickFirstNonEmptyRecord = (...candidates: unknown[]): UnknownRecord => {
   return {};
 };
 
+const toPublisherSummary = (value: unknown): PublisherSummary | null => {
+  const record = asRecord(value);
+  const id = asString(record.id);
+  if (!id) {
+    return null;
+  }
+
+  const name = asString(record.name);
+  return name ? { id, name } : { id };
+};
+
 export type ClassroomSummary = {
   id?: string;
   name?: string;
@@ -195,6 +206,7 @@ export type ClassroomTaskSummary = {
   allowLate?: boolean;
   maxAttempts?: number;
   aiStatus?: string;
+  taskPublisher?: PublisherSummary | null;
 };
 
 export type CreateClassroomRequest = {
@@ -235,6 +247,7 @@ export type TeacherDashboardTaskItem = UnknownRecord & {
   dueAt?: string | null;
   classroomTaskStatus?: string;
   taskTemplateStatus?: "DRAFT" | "PUBLISHED" | "ARCHIVED" | null;
+  taskPublisher?: PublisherSummary | null;
 };
 
 export const TEACHER_CLASSROOM_ARCHIVE_SUGGESTION_REASONS = [
@@ -273,6 +286,7 @@ export type ClassroomTask = {
   maxAttempts?: number;
   feedbackEnabled?: boolean;
   taskStatus?: string;
+  taskPublisher?: PublisherSummary | null;
   publishedAt?: string;
   raw: UnknownRecord;
 };
@@ -364,11 +378,17 @@ export type LearningTaskOption = {
   courseLabel?: string;
   visibility?: TaskTemplateVisibility;
   createdById?: string;
+  publisher?: PublisherSummary | null;
   createdAt?: string;
   updatedAt?: string;
   stage?: number;
   rubric?: Record<string, unknown>;
   raw: UnknownRecord;
+};
+
+export type PublisherSummary = {
+  id: string;
+  name?: string;
 };
 
 export type LearningTaskListResponse = {
@@ -870,6 +890,7 @@ export const toClassroomTask = (payload: unknown): ClassroomTask => {
     maxAttempts:
       asNumber(settingsRecord.maxAttempts) ?? asNumber(record.maxAttempts),
     feedbackEnabled: asBoolean(settingsRecord.feedbackEnabled),
+    taskPublisher: toPublisherSummary(record.taskPublisher),
     taskStatus:
       asString(taskRecord.status) ??
       asString(record.taskStatus) ??
@@ -899,6 +920,7 @@ export const toLearningTaskOption = (value: unknown): LearningTaskOption => {
       asString(createdByRecord.id) ??
       asString(createdByRecord._id) ??
       asString(createdByRecord.userId),
+    publisher: toPublisherSummary(record.publisher),
     createdAt: asString(record.createdAt),
     updatedAt: asString(record.updatedAt),
     stage: asNumber(record.stage),

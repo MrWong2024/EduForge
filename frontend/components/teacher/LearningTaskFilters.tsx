@@ -6,10 +6,20 @@ import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { EmptyState } from "@/components/blocks/EmptyState";
 import { ErrorState } from "@/components/blocks/ErrorState";
 import { BrowserFetchJsonError, fetchJson } from "@/lib/api/browser-client";
-import { buildErrorDescription, extractRawDetail } from "@/lib/api/error-presenter";
+import {
+  buildErrorDescription,
+  extractRawDetail,
+} from "@/lib/api/error-presenter";
 import { paths } from "@/lib/routes/paths";
-import { parsePositiveInt, toDisplayText } from "@/lib/ui/format";
-import { type LearningTaskOption, type LearningTaskStatus } from "@/lib/api/types-teacher";
+import {
+  getPublisherLabel,
+  parsePositiveInt,
+  toDisplayText,
+} from "@/lib/ui/format";
+import {
+  type LearningTaskOption,
+  type LearningTaskStatus,
+} from "@/lib/api/types-teacher";
 import {
   TASK_COURSE_LABELS,
   normalizeTaskCourseLabel,
@@ -53,12 +63,13 @@ type RestoreTaskErrorState = {
   description: string;
 };
 
-const STATUS_FILTER_OPTIONS: Array<{ value: TaskStatusFilter; label: string }> = [
-  { value: "ALL", label: "全部状态" },
-  { value: "DRAFT", label: "DRAFT（草稿）" },
-  { value: "PUBLISHED", label: "PUBLISHED（已发布）" },
-  { value: "ARCHIVED", label: "ARCHIVED（已归档）" },
-];
+const STATUS_FILTER_OPTIONS: Array<{ value: TaskStatusFilter; label: string }> =
+  [
+    { value: "ALL", label: "全部状态" },
+    { value: "DRAFT", label: "DRAFT（草稿）" },
+    { value: "PUBLISHED", label: "PUBLISHED（已发布）" },
+    { value: "ARCHIVED", label: "ARCHIVED（已归档）" },
+  ];
 
 const STAGE_FILTER_OPTIONS: Array<{ value: StageFilter; label: string }> = [
   { value: "ALL", label: "全部阶段" },
@@ -77,12 +88,18 @@ const SCOPE_SORT_HINTS: Record<TaskTemplateScope, string> = {
 const toStatusUpper = (value: unknown): string =>
   typeof value === "string" ? value.trim().toUpperCase() : "";
 
-const isKnownLearningTaskStatus = (value: string): value is LearningTaskStatus =>
+const isKnownLearningTaskStatus = (
+  value: string,
+): value is LearningTaskStatus =>
   value === "DRAFT" || value === "PUBLISHED" || value === "ARCHIVED";
 
 const toStatusFilter = (value: string | undefined): TaskStatusFilter => {
   const normalized = toStatusUpper(value);
-  if (normalized === "DRAFT" || normalized === "PUBLISHED" || normalized === "ARCHIVED") {
+  if (
+    normalized === "DRAFT" ||
+    normalized === "PUBLISHED" ||
+    normalized === "ARCHIVED"
+  ) {
     return normalized;
   }
   return "ALL";
@@ -90,7 +107,12 @@ const toStatusFilter = (value: string | undefined): TaskStatusFilter => {
 
 const toStageFilter = (value: string | undefined): StageFilter => {
   const normalized = typeof value === "string" ? value.trim() : "";
-  if (normalized === "1" || normalized === "2" || normalized === "3" || normalized === "4") {
+  if (
+    normalized === "1" ||
+    normalized === "2" ||
+    normalized === "3" ||
+    normalized === "4"
+  ) {
     return normalized;
   }
   return "ALL";
@@ -126,7 +148,9 @@ const getRestoreTaskErrorSummary = (status: number): string => {
   return "恢复任务模板失败，请稍后重试。";
 };
 
-const summarizeRubric = (rubric: Record<string, unknown> | undefined): RubricSummary => {
+const summarizeRubric = (
+  rubric: Record<string, unknown> | undefined,
+): RubricSummary => {
   if (!rubric || Object.keys(rubric).length === 0) {
     return {
       configured: false,
@@ -137,14 +161,18 @@ const summarizeRubric = (rubric: Record<string, unknown> | undefined): RubricSum
 
   const dimensionsRaw = rubric.dimensions;
   const dimensions =
-    dimensionsRaw && typeof dimensionsRaw === "object" && !Array.isArray(dimensionsRaw)
+    dimensionsRaw &&
+    typeof dimensionsRaw === "object" &&
+    !Array.isArray(dimensionsRaw)
       ? (dimensionsRaw as Record<string, unknown>)
       : undefined;
   const dimensionCount = dimensions
-    ? Object.values(dimensions).filter((value) => typeof value === "number" && Number.isFinite(value))
-        .length
+    ? Object.values(dimensions).filter(
+        (value) => typeof value === "number" && Number.isFinite(value),
+      ).length
     : 0;
-  const hasNotes = typeof rubric.notes === "string" && rubric.notes.trim().length > 0;
+  const hasNotes =
+    typeof rubric.notes === "string" && rubric.notes.trim().length > 0;
 
   return {
     configured: true,
@@ -169,30 +197,37 @@ export function LearningTaskFilters({
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const [restoringTaskId, setRestoringTaskId] = useState<string | null>(null);
-  const [restoreSuccessMessage, setRestoreSuccessMessage] = useState<string | null>(
-    null
-  );
+  const [restoreSuccessMessage, setRestoreSuccessMessage] = useState<
+    string | null
+  >(null);
   const [restoreErrorState, setRestoreErrorState] =
     useState<RestoreTaskErrorState | null>(null);
 
   const currentScope =
-    normalizeTaskTemplateScope(searchParams.get("scope") ?? initialScope) ?? initialScope;
-  const statusFilter = toStatusFilter(searchParams.get("status") ?? initialStatus);
+    normalizeTaskTemplateScope(searchParams.get("scope") ?? initialScope) ??
+    initialScope;
+  const statusFilter = toStatusFilter(
+    searchParams.get("status") ?? initialStatus,
+  );
   const stageFilter = toStageFilter(searchParams.get("stage") ?? initialStage);
   const courseLabelFilter =
-    normalizeTaskCourseLabel(searchParams.get("courseLabel") ?? initialCourseLabel) ?? "";
+    normalizeTaskCourseLabel(
+      searchParams.get("courseLabel") ?? initialCourseLabel,
+    ) ?? "";
   const knowledgeModuleFilter = useMemo(() => {
-    const value = searchParams.get("knowledgeModule") ?? initialKnowledgeModule ?? "";
+    const value =
+      searchParams.get("knowledgeModule") ?? initialKnowledgeModule ?? "";
     return value.trim();
   }, [searchParams, initialKnowledgeModule]);
   const currentPage = parsePositiveInt(
     searchParams.get("page") ?? String(initialPage),
     initialPage,
-    { min: 1 }
+    { min: 1 },
   );
 
   const limit = initialLimit > 0 ? initialLimit : 20;
-  const totalCount = typeof total === "number" && total >= 0 ? total : tasks.length;
+  const totalCount =
+    typeof total === "number" && total >= 0 ? total : tasks.length;
   const totalPages = Math.max(1, Math.ceil(totalCount / limit));
   const canGoPrevious = currentPage > 1;
   const canGoNext = currentPage < totalPages;
@@ -204,7 +239,9 @@ export function LearningTaskFilters({
     const moduleSet = new Set<string>();
     for (const task of tasks) {
       const moduleValue =
-        typeof task.knowledgeModule === "string" ? task.knowledgeModule.trim() : "";
+        typeof task.knowledgeModule === "string"
+          ? task.knowledgeModule.trim()
+          : "";
       if (moduleValue) {
         moduleSet.add(moduleValue);
       }
@@ -212,7 +249,9 @@ export function LearningTaskFilters({
     if (knowledgeModuleFilter) {
       moduleSet.add(knowledgeModuleFilter);
     }
-    return [...moduleSet].sort((left, right) => left.localeCompare(right, "zh-CN"));
+    return [...moduleSet].sort((left, right) =>
+      left.localeCompare(right, "zh-CN"),
+    );
   }, [tasks, knowledgeModuleFilter]);
 
   const currentTaskListUrl = useMemo(() => {
@@ -231,7 +270,7 @@ export function LearningTaskFilters({
       return;
     }
     const confirmed = window.confirm(
-      "确认将该归档模板恢复为草稿吗？恢复后可继续编辑，但不会自动重新发布到班级。"
+      "确认将该归档模板恢复为草稿吗？恢复后可继续编辑，但不会自动重新发布到班级。",
     );
     if (!confirmed) {
       return;
@@ -249,7 +288,7 @@ export function LearningTaskFilters({
           headers: {
             accept: "application/json",
           },
-        }
+        },
       );
       setRestoreSuccessMessage("任务模板已恢复为草稿。");
       router.refresh();
@@ -353,7 +392,7 @@ export function LearningTaskFilters({
         scope: currentScope,
         currentUserId,
       }),
-    [tasks, currentScope, currentUserId]
+    [tasks, currentScope, currentUserId],
   );
 
   const hasActiveFilters =
@@ -385,9 +424,12 @@ export function LearningTaskFilters({
           })}
         </div>
         <p className="mt-2 text-xs text-zinc-500">
-          当前视图：{TASK_TEMPLATE_SCOPE_LABELS[currentScope]}。共享只影响可见性，不改变作者编辑或发布权限。
+          当前视图：{TASK_TEMPLATE_SCOPE_LABELS[currentScope]}
+          。共享只影响可见性，不改变作者编辑或发布权限。
         </p>
-        <p className="mt-1 text-xs text-zinc-500">{SCOPE_SORT_HINTS[currentScope]}</p>
+        <p className="mt-1 text-xs text-zinc-500">
+          {SCOPE_SORT_HINTS[currentScope]}
+        </p>
       </section>
 
       <section className="rounded-lg border border-zinc-200 bg-white p-4">
@@ -400,7 +442,9 @@ export function LearningTaskFilters({
             <span className="mb-1 block text-zinc-700">状态</span>
             <select
               value={statusFilter}
-              onChange={(event) => setStatusFilterAndSync(event.target.value as TaskStatusFilter)}
+              onChange={(event) =>
+                setStatusFilterAndSync(event.target.value as TaskStatusFilter)
+              }
               className="w-full rounded-md border border-zinc-300 px-3 py-2"
             >
               {STATUS_FILTER_OPTIONS.map((option) => (
@@ -415,7 +459,9 @@ export function LearningTaskFilters({
             <span className="mb-1 block text-zinc-700">知识模块</span>
             <select
               value={knowledgeModuleFilter}
-              onChange={(event) => setKnowledgeModuleFilterAndSync(event.target.value)}
+              onChange={(event) =>
+                setKnowledgeModuleFilterAndSync(event.target.value)
+              }
               className="w-full rounded-md border border-zinc-300 px-3 py-2"
             >
               <option value="">全部模块</option>
@@ -431,7 +477,9 @@ export function LearningTaskFilters({
             <span className="mb-1 block text-zinc-700">阶段</span>
             <select
               value={stageFilter}
-              onChange={(event) => setStageFilterAndSync(event.target.value as StageFilter)}
+              onChange={(event) =>
+                setStageFilterAndSync(event.target.value as StageFilter)
+              }
               className="w-full rounded-md border border-zinc-300 px-3 py-2"
             >
               {STAGE_FILTER_OPTIONS.map((option) => (
@@ -446,7 +494,9 @@ export function LearningTaskFilters({
             <span className="mb-1 block text-zinc-700">课程分类</span>
             <select
               value={courseLabelFilter}
-              onChange={(event) => setCourseLabelFilterAndSync(event.target.value)}
+              onChange={(event) =>
+                setCourseLabelFilterAndSync(event.target.value)
+              }
               className="w-full rounded-md border border-zinc-300 px-3 py-2"
             >
               <option value="">全部分类</option>
@@ -499,7 +549,10 @@ export function LearningTaskFilters({
               >
                 创建任务模板
               </Link>
-              <Link href={paths.teacher.classrooms} className="text-sm text-blue-700 hover:underline">
+              <Link
+                href={paths.teacher.classrooms}
+                className="text-sm text-blue-700 hover:underline"
+              >
                 去班级列表
               </Link>
             </div>
@@ -518,7 +571,10 @@ export function LearningTaskFilters({
               >
                 清空筛选
               </button>
-              <Link href="#create-learning-task-form" className="text-sm text-blue-700 hover:underline">
+              <Link
+                href="#create-learning-task-form"
+                className="text-sm text-blue-700 hover:underline"
+              >
                 继续创建模板
               </Link>
             </div>
@@ -601,7 +657,9 @@ export function LearningTaskFilters({
                 const rubricBadgeClass = rubricSummary.configured
                   ? "border-sky-200 bg-sky-100 text-sky-700"
                   : "border-zinc-200 bg-zinc-100 text-zinc-700";
-                const visibility = normalizeTaskTemplateVisibility(task.visibility);
+                const visibility = normalizeTaskTemplateVisibility(
+                  task.visibility,
+                );
                 const visibilityBadgeClass =
                   visibility === "PRIVATE"
                     ? "border-zinc-300 bg-zinc-100 text-zinc-700"
@@ -609,8 +667,8 @@ export function LearningTaskFilters({
                 const isKnownStatus = isKnownLearningTaskStatus(statusUpper);
                 const isOwner = Boolean(
                   currentUserId &&
-                    task.createdById &&
-                    task.createdById === currentUserId
+                  task.createdById &&
+                  task.createdById === currentUserId,
                 );
                 const canEditTask =
                   isKnownStatus &&
@@ -618,6 +676,10 @@ export function LearningTaskFilters({
                   (!currentUserId || !task.createdById || isOwner);
                 const canRestoreTask = isOwner && statusUpper === "ARCHIVED";
                 const isRestoringThisTask = restoringTaskId === task.id;
+                const publisherLabel = getPublisherLabel(
+                  task.publisher,
+                  currentUserId,
+                );
 
                 return (
                   <tr
@@ -625,9 +687,16 @@ export function LearningTaskFilters({
                     className="border-t border-zinc-100 align-top"
                   >
                     <td className="px-4 py-3">
-                      <p className="max-h-[3rem] overflow-hidden break-words text-sm font-semibold leading-6 text-zinc-900">
-                        {titleText}
-                      </p>
+                      <div className="space-y-1">
+                        <p className="max-h-[3rem] overflow-hidden break-words text-sm font-semibold leading-6 text-zinc-900">
+                          {titleText}
+                        </p>
+                        {publisherLabel ? (
+                          <span className="inline-flex items-center rounded-full border border-sky-200 bg-sky-50 px-2 py-0.5 text-[11px] font-medium text-sky-700">
+                            {publisherLabel}
+                          </span>
+                        ) : null}
+                      </div>
                     </td>
                     <td className="px-4 py-3">
                       <p
@@ -637,8 +706,12 @@ export function LearningTaskFilters({
                         {descriptionText}
                       </p>
                     </td>
-                    <td className="px-4 py-3 break-words text-zinc-700">{toDisplayText(task.knowledgeModule)}</td>
-                    <td className="px-4 py-3 text-center font-medium text-zinc-900">{toDisplayText(task.stage)}</td>
+                    <td className="px-4 py-3 break-words text-zinc-700">
+                      {toDisplayText(task.knowledgeModule)}
+                    </td>
+                    <td className="px-4 py-3 text-center font-medium text-zinc-900">
+                      {toDisplayText(task.stage)}
+                    </td>
                     <td className="px-4 py-3">
                       <div className="space-y-1">
                         <span
@@ -646,7 +719,9 @@ export function LearningTaskFilters({
                         >
                           {toDisplayText(task.status)}
                         </span>
-                        <p className="text-xs leading-5 text-zinc-500">{getStatusHint(task.status)}</p>
+                        <p className="text-xs leading-5 text-zinc-500">
+                          {getStatusHint(task.status)}
+                        </p>
                       </div>
                     </td>
                     <td className="px-4 py-3">
@@ -674,7 +749,9 @@ export function LearningTaskFilters({
                         >
                           {rubricSummary.configured ? "已配置" : "未配置"}
                         </span>
-                        <p className="text-xs leading-5 text-zinc-500">{rubricHint}</p>
+                        <p className="text-xs leading-5 text-zinc-500">
+                          {rubricHint}
+                        </p>
                       </div>
                     </td>
                     <td className="whitespace-nowrap px-4 py-3">
@@ -695,9 +772,6 @@ export function LearningTaskFilters({
                             >
                               {isRestoringThisTask ? "恢复中..." : "恢复为草稿"}
                             </button>
-                          ) : null}
-                          {!isOwner && Boolean(currentUserId && task.createdById) ? (
-                            <p className="text-xs text-zinc-500">非作者模板</p>
                           ) : null}
                           {isOwner && statusUpper === "ARCHIVED" ? (
                             <p className="text-xs text-zinc-500">
