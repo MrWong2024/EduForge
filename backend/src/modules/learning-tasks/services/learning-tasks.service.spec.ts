@@ -96,6 +96,7 @@ const createHarness = (
   const feedbackModel = {};
   const classroomTaskModel = {
     findById: jest.fn(() => makeQuery(classroomTask)),
+    exists: jest.fn(() => ({ exec: jest.fn().mockResolvedValue(null) })),
   };
   const classroomModel = {
     findById: jest.fn(() => makeQuery(classroom)),
@@ -134,6 +135,7 @@ const createTaskManagementHarness = (
     taskStatus?: TaskStatus;
     createdBy?: Types.ObjectId;
     findByIdResult?: unknown;
+    hasClassroomTaskReference?: boolean;
   } = {},
 ) => {
   const teacherId = objectId();
@@ -158,18 +160,31 @@ const createTaskManagementHarness = (
     })),
     findOne: jest.fn().mockResolvedValue(task),
   };
+  const classroomTaskModel = {
+    exists: jest.fn(() => ({
+      exec: jest
+        .fn()
+        .mockResolvedValue(options.hasClassroomTaskReference ? {} : null),
+    })),
+  };
   const service = new LearningTasksService(
     { get: jest.fn() } as unknown as ConfigService,
     taskModel as unknown as Model<Task>,
     {} as unknown as Model<Submission>,
     {} as unknown as Model<Feedback>,
-    {} as unknown as Model<ClassroomTask>,
+    classroomTaskModel as unknown as Model<ClassroomTask>,
     {} as unknown as Model<Classroom>,
     {} as unknown as Model<User>,
     {} as unknown as AiFeedbackJobService,
   );
 
-  return { service, taskModel, task, ids: { teacherId, taskId } };
+  return {
+    service,
+    taskModel,
+    classroomTaskModel,
+    task,
+    ids: { teacherId, taskId },
+  };
 };
 
 describe('LearningTasksService task template restore', () => {
@@ -252,6 +267,71 @@ describe('LearningTasksService task template restore', () => {
       ),
     ).rejects.toThrow('Archived tasks cannot be updated');
     expect(harness.task.save).not.toHaveBeenCalled();
+  });
+
+  it('allows PUBLISHED templates without classroom references to move back to DRAFT', async () => {
+    const harness = createTaskManagementHarness({
+      taskStatus: TaskStatus.Published,
+    });
+
+    const result = await harness.service.updateTask(
+      harness.ids.taskId.toString(),
+      { status: TaskStatus.Draft },
+      harness.ids.teacherId.toString(),
+    );
+
+    expect(result).toMatchObject({
+      id: harness.ids.taskId.toString(),
+      status: TaskStatus.Draft,
+    });
+    expect(harness.classroomTaskModel.exists).toHaveBeenCalledWith({
+      taskId: harness.ids.taskId,
+    });
+    expect(harness.task.status).toBe(TaskStatus.Draft);
+    expect(harness.task.save).toHaveBeenCalledTimes(1);
+  });
+
+  it('rejects PUBLISHED templates with classroom references from moving back to DRAFT', async () => {
+    const harness = createTaskManagementHarness({
+      taskStatus: TaskStatus.Published,
+      hasClassroomTaskReference: true,
+    });
+
+    await expect(
+      harness.service.updateTask(
+        harness.ids.taskId.toString(),
+        { status: TaskStatus.Draft },
+        harness.ids.teacherId.toString(),
+      ),
+    ).rejects.toThrow(
+      'Published task templates used by classrooms cannot be changed back to draft',
+    );
+    expect(harness.classroomTaskModel.exists).toHaveBeenCalledWith({
+      taskId: harness.ids.taskId,
+    });
+    expect(harness.task.status).toBe(TaskStatus.Published);
+    expect(harness.task.save).not.toHaveBeenCalled();
+  });
+
+  it('allows PUBLISHED templates with classroom references to move to ARCHIVED', async () => {
+    const harness = createTaskManagementHarness({
+      taskStatus: TaskStatus.Published,
+      hasClassroomTaskReference: true,
+    });
+
+    const result = await harness.service.updateTask(
+      harness.ids.taskId.toString(),
+      { status: TaskStatus.Archived },
+      harness.ids.teacherId.toString(),
+    );
+
+    expect(result).toMatchObject({
+      id: harness.ids.taskId.toString(),
+      status: TaskStatus.Archived,
+    });
+    expect(harness.classroomTaskModel.exists).not.toHaveBeenCalled();
+    expect(harness.task.status).toBe(TaskStatus.Archived);
+    expect(harness.task.save).toHaveBeenCalledTimes(1);
   });
 });
 
@@ -428,19 +508,23 @@ describe('LearningTasksService student participation status gates', () => {
     ).not.toHaveBeenCalled();
   });
 
-  it('rejects student AI requests when the task template is not published without creating a job', async () => {
-    const harness = createHarness({ taskStatus: TaskStatus.Draft });
+  it('allows student AI requests for archived classroom-task templates', async () => {
+    const harness = createHarness({ taskStatus: TaskStatus.Archived });
 
-    await expect(
-      harness.service.requestAiFeedback(
-        harness.ids.submissionId.toString(),
-        { id: harness.ids.studentId.toString(), roles: [USER_ROLE_STUDENT] },
-        {},
-      ),
-    ).rejects.toThrow('任务未发布，不能请求 AI 反馈。');
+    const result = await harness.service.requestAiFeedback(
+      harness.ids.submissionId.toString(),
+      { id: harness.ids.studentId.toString(), roles: [USER_ROLE_STUDENT] },
+      {},
+    );
+
+    expect(result).toMatchObject({
+      submissionId: harness.ids.submissionId.toString(),
+      status: AiFeedbackJobStatus.Pending,
+      aiFeedbackStatus: AiFeedbackStatus.Pending,
+    });
     expect(
       harness.aiFeedbackJobService.ensureJobForSubmission,
-    ).not.toHaveBeenCalled();
+    ).toHaveBeenCalledTimes(1);
   });
 
   it('keeps non-owner AI requests on the existing forbidden path', async () => {
@@ -492,8 +576,23 @@ describe('LearningTasksService student participation status gates', () => {
     expect(harness.aiFeedbackJobService.enqueue).not.toHaveBeenCalled();
   });
 
-  it('rejects classroom submissions for unpublished task templates before creating submission or AI job', async () => {
-    const harness = createHarness({ taskStatus: TaskStatus.Draft });
+  it('allows classroom submissions for archived task templates when runtime state is active', async () => {
+    const harness = createHarness({ taskStatus: TaskStatus.Archived });
+
+    harness.submissionModel.create.mockResolvedValue({
+      _id: objectId(),
+      taskId: harness.ids.taskId,
+      classroomTaskId: harness.ids.classroomTaskId,
+      studentId: harness.ids.studentId,
+      attemptNo: 1,
+      submittedAt: new Date('2026-01-02T00:00:00.000Z'),
+      isLate: false,
+      lateBySeconds: 0,
+      content: submissionDto.content,
+      meta: undefined,
+      status: 'SUBMITTED',
+    });
+    harness.aiFeedbackJobService.enqueue.mockResolvedValue(undefined);
 
     await expect(
       harness.service.createSubmissionForClassroomTask(
@@ -502,8 +601,10 @@ describe('LearningTasksService student participation status gates', () => {
         submissionDto,
         harness.ids.studentId.toString(),
       ),
-    ).rejects.toThrow('任务未发布，不能继续提交。');
-    expect(harness.submissionModel.create).not.toHaveBeenCalled();
-    expect(harness.aiFeedbackJobService.enqueue).not.toHaveBeenCalled();
+    ).resolves.toMatchObject({
+      taskId: harness.ids.taskId.toString(),
+      classroomTaskId: harness.ids.classroomTaskId.toString(),
+    });
+    expect(harness.submissionModel.create).toHaveBeenCalledTimes(1);
   });
 });

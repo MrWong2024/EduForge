@@ -138,6 +138,18 @@ export class LearningTasksService {
     if (task.status === TaskStatus.Archived) {
       throw new BadRequestException('Archived tasks cannot be updated');
     }
+    const isPublishedToDraftTransition =
+      task.status === TaskStatus.Published && dto.status === TaskStatus.Draft;
+    if (isPublishedToDraftTransition) {
+      const existingClassroomTask = await this.classroomTaskModel
+        .exists({ taskId: task._id })
+        .exec();
+      if (existingClassroomTask) {
+        throw new BadRequestException(
+          'Published task templates used by classrooms cannot be changed back to draft',
+        );
+      }
+    }
     const hasCourseLabel = 'courseLabel' in dto;
     const nextVisibility = this.toSanitizedTaskVisibility(dto.visibility);
     const hasVisibility = nextVisibility !== undefined;
@@ -885,7 +897,6 @@ export class LearningTasksService {
       }
       await this.ensureStudentParticipationContextIsActive(
         classroomTask,
-        task,
         'submit',
       );
     } else if (task.status !== TaskStatus.Published) {
@@ -1137,14 +1148,12 @@ export class LearningTasksService {
 
     await this.ensureStudentParticipationContextIsActive(
       classroomTask,
-      task,
       'requestAi',
     );
   }
 
   private async ensureStudentParticipationContextIsActive(
     classroomTask: ClassroomTaskDeadlineConfig,
-    task: ParticipationTaskLean,
     operation: 'submit' | 'requestAi',
   ) {
     const classroom = await this.classroomModel
@@ -1168,13 +1177,6 @@ export class LearningTasksService {
         operation === 'submit'
           ? '课堂任务已关闭，不能继续提交。'
           : '课堂任务已关闭，不能请求 AI 反馈。',
-      );
-    }
-    if (task.status !== TaskStatus.Published) {
-      throw new ConflictException(
-        operation === 'submit'
-          ? '任务未发布，不能继续提交。'
-          : '任务未发布，不能请求 AI 反馈。',
       );
     }
   }

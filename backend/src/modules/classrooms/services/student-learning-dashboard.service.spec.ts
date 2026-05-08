@@ -1032,7 +1032,7 @@ describe('StudentLearningDashboardService', () => {
     expect(dashboard.total).toBe(0);
   });
 
-  it('does not return unpublished task templates', async () => {
+  it('returns classroomTasks whose linked templates are archived', async () => {
     const classroomId = objectId();
     const studentId = objectId();
     const harness = createHarness({
@@ -1050,8 +1050,8 @@ describe('StudentLearningDashboardService', () => {
           classroomId,
           taskId: objectId(),
           status: CLASSROOM_TASK_STATUS_ACTIVE,
-          taskStatus: TaskStatus.Draft,
-          title: 'Draft Template Task',
+          taskStatus: TaskStatus.Archived,
+          title: 'Archived Template Task',
           publishedAt: addDays(-1),
         },
       ],
@@ -1063,7 +1063,11 @@ describe('StudentLearningDashboardService', () => {
       true,
     );
 
-    expect(dashboard.items).toEqual([]);
-    expect(dashboard.total).toBe(0);
+    expect(dashboard.total).toBe(1);
+    expect(dashboard.items[0].tasks).toEqual([
+      expect.objectContaining({
+        title: 'Archived Template Task',
+      }),
+    ]);
   });
 });

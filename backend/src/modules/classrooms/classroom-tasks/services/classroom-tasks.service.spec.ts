@@ -219,11 +219,7 @@ const getMyTaskDetailCompletionStatus = async (
       readOnly: boolean;
       canSubmit: boolean;
       canRequestAiFeedback: boolean;
-      reason:
-        | 'ACTIVE'
-        | 'CLASSROOM_NOT_ACTIVE'
-        | 'CLASSROOM_TASK_NOT_ACTIVE'
-        | 'TASK_NOT_PUBLISHED';
+      reason: 'ACTIVE' | 'CLASSROOM_NOT_ACTIVE' | 'CLASSROOM_TASK_NOT_ACTIVE';
       message: string | null;
     };
     latest: { submissionId: string } | null;
@@ -296,8 +292,8 @@ describe('ClassroomTasksService createClassroomTaskSubmission participation stat
     ).not.toHaveBeenCalled();
   });
 
-  it('rejects submissions when the task template is not published', async () => {
-    const harness = createHarness({ taskStatus: TaskStatus.Draft });
+  it('allows submissions when the task template is archived', async () => {
+    const harness = createHarness({ taskStatus: TaskStatus.Archived });
 
     await expect(
       harness.service.createClassroomTaskSubmission(
@@ -306,10 +302,15 @@ describe('ClassroomTasksService createClassroomTaskSubmission participation stat
         submissionDto,
         harness.ids.studentId.toString(),
       ),
-    ).rejects.toThrow('任务未发布，不能继续提交。');
+    ).resolves.toBeDefined();
     expect(
       harness.learningTasksService.createSubmissionForClassroomTask,
-    ).not.toHaveBeenCalled();
+    ).toHaveBeenCalledWith(
+      harness.ids.taskId.toString(),
+      harness.ids.classroomTaskId.toString(),
+      submissionDto,
+      harness.ids.studentId.toString(),
+    );
   });
 
   it('keeps non-member submissions on the existing forbidden path', async () => {
@@ -711,8 +712,8 @@ describe('ClassroomTasksService getMyTaskDetail participationStatus', () => {
     },
   );
 
-  it('returns TASK_NOT_PUBLISHED when task template is draft', async () => {
-    const harness = createHarness({ taskStatus: TaskStatus.Draft });
+  it('returns ACTIVE when task template is archived but classroom runtime stays active', async () => {
+    const harness = createHarness({ taskStatus: TaskStatus.Archived });
 
     const detail = await getMyTaskDetailCompletionStatus(
       harness.service,
@@ -720,11 +721,11 @@ describe('ClassroomTasksService getMyTaskDetail participationStatus', () => {
     );
 
     expect(detail.participationStatus).toEqual({
-      readOnly: true,
-      canSubmit: false,
-      canRequestAiFeedback: false,
-      reason: 'TASK_NOT_PUBLISHED',
-      message: '任务未发布或不可参与，仅可查看历史提交与反馈。',
+      readOnly: false,
+      canSubmit: true,
+      canRequestAiFeedback: true,
+      reason: 'ACTIVE',
+      message: null,
     });
   });
 
@@ -743,10 +744,10 @@ describe('ClassroomTasksService getMyTaskDetail participationStatus', () => {
     expect(detail.participationStatus.reason).toBe('CLASSROOM_NOT_ACTIVE');
   });
 
-  it('prioritizes classroomTask status over task status', async () => {
+  it('prioritizes classroomTask status over template status', async () => {
     const harness = createHarness({
       classroomTaskStatus: CLASSROOM_TASK_STATUS_CLOSED,
-      taskStatus: TaskStatus.Draft,
+      taskStatus: TaskStatus.Archived,
     });
 
     const detail = await getMyTaskDetailCompletionStatus(

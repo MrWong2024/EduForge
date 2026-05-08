@@ -6,7 +6,6 @@ import { QueryClassroomDto } from '../dto/query-classroom.dto';
 import { ClassroomTask } from '../classroom-tasks/schemas/classroom-task.schema';
 import { CLASSROOM_TASK_STATUS_ACTIVE } from '../classroom-tasks/classroom-task-status.constants';
 import { Submission } from '../../learning-tasks/schemas/submission.schema';
-import { TaskStatus } from '../../learning-tasks/schemas/task.schema';
 import {
   Feedback,
   FeedbackSource,
@@ -123,7 +122,6 @@ export class StudentLearningDashboardService {
         },
       },
       { $unwind: '$task' },
-      { $match: { 'task.status': TaskStatus.Published } },
       {
         $project: {
           _id: 1,

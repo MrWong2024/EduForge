@@ -77,7 +77,6 @@ type ClassroomWithCourseLean = Pick<Classroom, 'courseId'> & WithId;
 type CourseWithLabelLean = Pick<Course, 'courseLabel'> & WithId;
 type ClassroomOwnerLean = Pick<Classroom, 'teacherId'> & WithId;
 type ClassroomTaskOwnerLean = Pick<ClassroomTask, 'classroomId'> & WithId;
-type ClassroomTaskSubmitTemplateLean = Pick<Task, 'status'> & WithId;
 type PublisherSummary = { id: string; name?: string };
 type PublisherUserLean = Pick<User, 'name'> & WithId;
 type TaskWithMeta = Task & WithId & WithTimestamps;
@@ -235,8 +234,7 @@ type LearningTrajectoryResponse = {
 type StudentTaskParticipationReason =
   | 'ACTIVE'
   | 'CLASSROOM_NOT_ACTIVE'
-  | 'CLASSROOM_TASK_NOT_ACTIVE'
-  | 'TASK_NOT_PUBLISHED';
+  | 'CLASSROOM_TASK_NOT_ACTIVE';
 type StudentTaskParticipationStatus = {
   readOnly: boolean;
   canSubmit: boolean;
@@ -808,14 +806,11 @@ export class ClassroomTasksService {
 
     const task = await this.taskModel
       .findById(classroomTask.taskId)
-      .select('_id status')
-      .lean<ClassroomTaskSubmitTemplateLean>()
+      .select('_id')
+      .lean<WithId>()
       .exec();
     if (!task) {
       throw new NotFoundException('Task not found');
-    }
-    if (task.status !== TaskStatus.Published) {
-      throw new ConflictException('任务未发布，不能继续提交。');
     }
 
     return this.learningTasksService.createSubmissionForClassroomTask(
@@ -1274,7 +1269,6 @@ export class ClassroomTasksService {
     const participationStatus = this.buildStudentTaskParticipationStatus(
       classroom.status,
       classroomTaskStatus,
-      task.status,
     );
 
     return {
@@ -1374,7 +1368,6 @@ export class ClassroomTasksService {
   private buildStudentTaskParticipationStatus(
     classroomStatus: ClassroomStatus,
     classroomTaskStatus: ClassroomTaskStatus,
-    taskStatus: TaskStatus,
   ): StudentTaskParticipationStatus {
     if (classroomStatus !== ClassroomStatus.Active) {
       return {
@@ -1392,15 +1385,6 @@ export class ClassroomTasksService {
         canRequestAiFeedback: false,
         reason: 'CLASSROOM_TASK_NOT_ACTIVE',
         message: '课堂任务已关闭或不可参与，仅可查看历史提交与反馈。',
-      };
-    }
-    if (taskStatus !== TaskStatus.Published) {
-      return {
-        readOnly: true,
-        canSubmit: false,
-        canRequestAiFeedback: false,
-        reason: 'TASK_NOT_PUBLISHED',
-        message: '任务未发布或不可参与，仅可查看历史提交与反馈。',
       };
     }
     return {

@@ -143,7 +143,7 @@ backend/
 - 关键字段：`title`、`description`、`knowledgeModule`、`courseLabel?`、`visibility(PRIVATE|SHARED)`、`stage(1..4)`、`difficulty?`、`rubric?`、`status(DRAFT|PUBLISHED|ARCHIVED)`、`createdBy`、`publishedAt?`。
 - `courseLabel` 语义：可选单值课程分类字段（白名单来源 `task-course-labels.constants.ts`）；非 `Course` 外键；仅用于模板治理（筛选/分组/展示辅助）；不参与权限与发布约束。
 - `visibility` 语义：模板可见性字段（白名单来源 `task-template-visibility.constants.ts`）；新建默认 `PRIVATE`；旧数据缺省值按 `SHARED` 兼容解释；共享仅影响读可见性，不改变作者写权限。
-- `ARCHIVED` 模板普通 `PATCH /api/learning-tasks/tasks/:id` 更新仍禁止；作者可通过 `POST /api/learning-tasks/tasks/:id/restore` 将归档模板恢复为 `DRAFT`，后续再编辑。
+- `ARCHIVED` 模板普通 `PATCH /api/learning-tasks/tasks/:id` 更新仍禁止；作者可通过 `POST /api/learning-tasks/tasks/:id/restore` 将归档模板恢复为 `DRAFT`，后续再编辑；`PUBLISHED -> DRAFT` 仅在模板未被任何 `ClassroomTask` 引用时允许，已被引用则返回 `400 Published task templates used by classrooms cannot be changed back to draft`；`PUBLISHED -> ARCHIVED` 允许且不影响已发布 classroomTask 运行。
 - 索引/唯一性：`(createdBy,createdAt)`；`(status,knowledgeModule,stage,createdAt)`；`(status,courseLabel,createdAt)`；`(visibility,createdAt)`；`(createdBy,status,courseLabel,knowledgeModule,stage,updatedAt,createdAt)`（发布候选 onlyMine 分支）；`(visibility,status,courseLabel,knowledgeModule,stage,updatedAt,createdAt)`（发布候选 shared 可见分支）。
 
 ### Submission（`src/modules/learning-tasks/schemas/submission.schema.ts`）
@@ -288,9 +288,9 @@ AI Provider 错误码（`ai-feedback-provider.error-codes.ts`）：
   - `GET /api/classrooms/:id/dashboard` 顶层新增 `archiveSuggestion`，用于提示教师“建议归档”，第一版不做自动归档，不修改班级状态。
   - 建议归档只面向 `Classroom.status=ACTIVE` 班级；非 ACTIVE 班级 `suggested=false`。
   - 建议条件为：无当前活跃课堂任务、最近 30 天无学生提交、且不处于新班级 30 天保护期。
-  - 当前活跃课堂任务定义与学生看板时间窗口对齐：`ClassroomTask.status=ACTIVE` + 模板 `Task.status=PUBLISHED`，有 `dueAt` 时截止后 30 天内仍算活跃，无 `dueAt` 时 `publishedAt` 90 天内算活跃。
+  - `archiveSuggestion` 当前活跃课堂任务定义仍保留 teacher heuristic：`ClassroomTask.status=ACTIVE` + 模板 `Task.status=PUBLISHED`，有 `dueAt` 时截止后 30 天内仍算活跃，无 `dueAt` 时 `publishedAt` 90 天内算活跃。
   - `CLOSED/RECALLED` classroomTask 与非 `PUBLISHED` task 不算活跃任务；`archiveSuggestion` 独立于 `includeClosedTasks`，教师是否显示 CLOSED 任务不会改变建议结果。
-  - 学生看板与学生提交仍要求模板 `Task.status=PUBLISHED`；本契约只补教师看板历史进展展示所需状态字段。
+  - 学生看板、学生详情、学生提交与学生课堂任务 AI 请求已不再要求模板当前 `Task.status=PUBLISHED`；该条只描述教师侧 `archiveSuggestion` 的现行 heuristic。
 - 教师侧模板发布者摘要契约（后端已完成，前端待后续阶段接入）：
   - `GET /api/classrooms/:id/tasks` 的课堂任务 item 返回 `taskPublisher:{id,name?}|null`，表示关联模板创建者/发布者。
   - `GET /api/classrooms/:id/dashboard` 的任务进展 item 返回同字段；不改变 `taskTemplateStatus`、过滤、排序、统计。
@@ -299,7 +299,7 @@ AI Provider 错误码（`ai-feedback-provider.error-codes.ts`）：
   - 发布者摘要只含 `id/name`；前端后续可用 `currentUser.id !== publisher.id` 决定是否显示“模板发布者”。
 - 学生看板任务完成情况契约（后端已完成，前端待后续阶段接入）：
   - `GET /api/classrooms/mine/dashboard` 的每个 task item 顶层新增 `completionStatus`。
-  - 学生看板定位为当前学习工作台，默认只返回 `classroom.status=ACTIVE`、`classroomTask.status=ACTIVE`、模板 `task.status=PUBLISHED` 且仍值得关注的任务；归档班级、已关闭或其它非 ACTIVE 课堂任务默认不显示。
+  - 学生看板定位为当前学习工作台，默认只返回 `classroom.status=ACTIVE`、`classroomTask.status=ACTIVE` 且仍值得关注的任务；模板当前 `task.status` 不再控制已发布 classroomTask 的学生可见性，归档班级、已关闭或其它非 ACTIVE 课堂任务默认不显示。
   - 学生看板自动降噪口径：有 `dueAt` 时截止后 30 天内仍显示并标记 `RECENTLY_EXPIRED`，超过 30 天为 `HISTORICAL` 且默认隐藏；无 `dueAt` 时 `publishedAt` 90 天内显示，超过 90 天为 `HISTORICAL` 且默认隐藏；缺失/非法时间按 `HISTORICAL` 处理。
   - `includeHistorical=true` 为后续前端“显示历史任务”开关预留：返回当前 ACTIVE 班级下的 `CURRENT + RECENTLY_EXPIRED + HISTORICAL` 任务，但仍不返回归档班级或非 ACTIVE classroomTask。
   - 每个 task item 返回 `studentVisibilityStatus(CURRENT|RECENTLY_EXPIRED|HISTORICAL)` 与 `isHistorical`；过滤后无可见任务的班级不返回空分组，`total` 按最终返回班级分组统计。
@@ -440,7 +440,7 @@ AI Provider 错误码（`ai-feedback-provider.error-codes.ts`）：
   - 保护边界：`ai-metrics` 窗口集合保持 `1h/24h/7d`，本阶段未引入 `all`。
 - Z7 截止/迟交：
   - 提交门禁：`POST /api/classrooms/:classroomId/tasks/:classroomTaskId/submissions` 在到期且不允许迟交时返回 `LATE_SUBMISSION_NOT_ALLOWED`
-  - 参与状态门禁：学生新提交与学生手工请求 AI 均要求 `classroom.status=ACTIVE`、`classroomTask.status=ACTIVE`、模板 `task.status=PUBLISHED`；归档班级、关闭/撤回课堂任务、非发布模板只保留只读查看，不允许继续提交或请求 AI，拒绝时不创建 submission/AI job。
+  - 参与状态门禁：学生新提交与学生手工请求 AI 均要求 `classroom.status=ACTIVE`、`classroomTask.status=ACTIVE`；模板当前 `task.status` 不再控制已发布 classroomTask 的学生运行态，模板归档不会阻断既有课堂任务的提交或 AI 请求；归档班级、关闭/撤回课堂任务仍只保留只读查看，不允许继续提交或请求 AI，拒绝时不创建 submission/AI job。
   - 提交冷却：默认 `LEARNING_TASK_SUBMISSION_COOLDOWN_MS=300000`；按同一 `studentId + classroomTaskId` 判定，命中时返回 `429` + `SUBMISSION_COOLDOWN_ACTIVE`（含 `retryAfterMs/retryAfterSeconds`），`0` 表示关闭冷却。
   - 迟交持久字段：`Submission.submittedAt / isLate / lateBySeconds`
   - late 维度已贯穿周报、课程总览、学习轨迹、复盘包、过程性评价、快照导出等聚合接口
