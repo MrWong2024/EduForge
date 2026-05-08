@@ -135,7 +135,7 @@ const createTaskManagementHarness = (
     taskStatus?: TaskStatus;
     createdBy?: Types.ObjectId;
     findByIdResult?: unknown;
-    hasClassroomTaskReference?: boolean;
+    findOneResult?: unknown;
   } = {},
 ) => {
   const teacherId = objectId();
@@ -154,19 +154,21 @@ const createTaskManagementHarness = (
   };
   const findByIdResult =
     'findByIdResult' in options ? options.findByIdResult : task;
+  const findOneResult =
+    'findOneResult' in options ? options.findOneResult : task;
   const taskModel = {
+    create: jest.fn((payload: Record<string, unknown>) => ({
+      _id: taskId,
+      createdAt: new Date('2026-01-01T00:00:00.000Z'),
+      updatedAt: new Date('2026-01-02T00:00:00.000Z'),
+      ...payload,
+    })),
     findById: jest.fn(() => ({
       exec: jest.fn().mockResolvedValue(findByIdResult),
     })),
-    findOne: jest.fn().mockResolvedValue(task),
+    findOne: jest.fn().mockResolvedValue(findOneResult),
   };
-  const classroomTaskModel = {
-    exists: jest.fn(() => ({
-      exec: jest
-        .fn()
-        .mockResolvedValue(options.hasClassroomTaskReference ? {} : null),
-    })),
-  };
+  const classroomTaskModel = {};
   const service = new LearningTasksService(
     { get: jest.fn() } as unknown as ConfigService,
     taskModel as unknown as Model<Task>,
@@ -181,18 +183,35 @@ const createTaskManagementHarness = (
   return {
     service,
     taskModel,
-    classroomTaskModel,
     task,
     ids: { teacherId, taskId },
   };
 };
 
-describe('LearningTasksService task template restore', () => {
-  it('restores an archived task owned by the teacher to DRAFT', async () => {
+describe('LearningTasksService task template lifecycle', () => {
+  it('keeps ordinary updateTask blocked for archived tasks', async () => {
     const harness = createTaskManagementHarness();
 
-    const result = await harness.service.restoreTask(
-      harness.ids.taskId.toString(),
+    await expect(
+      harness.service.updateTask(
+        harness.ids.taskId.toString(),
+        { title: 'Updated title' },
+        harness.ids.teacherId.toString(),
+      ),
+    ).rejects.toThrow('Archived tasks cannot be updated');
+    expect(harness.task.save).not.toHaveBeenCalled();
+  });
+
+  it('creates DRAFT task templates by default when status is omitted', async () => {
+    const harness = createTaskManagementHarness();
+
+    const result = await harness.service.createTask(
+      {
+        title: 'Task',
+        description: 'Description',
+        knowledgeModule: 'Module',
+        stage: 1,
+      },
       harness.ids.teacherId.toString(),
     );
 
@@ -200,9 +219,276 @@ describe('LearningTasksService task template restore', () => {
       id: harness.ids.taskId.toString(),
       status: TaskStatus.Draft,
       createdBy: harness.ids.teacherId.toString(),
+      publishedAt: undefined,
     });
-    expect(harness.task.status).toBe(TaskStatus.Draft);
+    expect(harness.taskModel.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        status: TaskStatus.Draft,
+      }),
+    );
+  });
+
+  it('creates PUBLISHED task templates with publishedAt set', async () => {
+    const harness = createTaskManagementHarness({
+      taskStatus: TaskStatus.Draft,
+    });
+
+    const result = await harness.service.createTask(
+      {
+        title: 'Task',
+        description: 'Description',
+        knowledgeModule: 'Module',
+        stage: 1,
+        status: TaskStatus.Published,
+      },
+      harness.ids.teacherId.toString(),
+    );
+
+    expect(result.id).toBe(harness.ids.taskId.toString());
+    expect(result.status).toBe(TaskStatus.Published);
+    expect(result.createdBy).toBe(harness.ids.teacherId.toString());
+    expect(result.publishedAt).toBeInstanceOf(Date);
+    const createPayload = harness.taskModel.create.mock.calls[0]?.[0] as
+      | { status: TaskStatus; publishedAt?: Date }
+      | undefined;
+    expect(createPayload?.status).toBe(TaskStatus.Published);
+    expect(createPayload?.publishedAt).toBeInstanceOf(Date);
+  });
+
+  it('rejects creating ARCHIVED task templates', async () => {
+    const harness = createTaskManagementHarness();
+
+    await expect(
+      harness.service.createTask(
+        {
+          title: 'Task',
+          description: 'Description',
+          knowledgeModule: 'Module',
+          stage: 1,
+          status: TaskStatus.Archived,
+        },
+        harness.ids.teacherId.toString(),
+      ),
+    ).rejects.toThrow('Task templates cannot be created as archived');
+    expect(harness.taskModel.create).not.toHaveBeenCalled();
+  });
+
+  it('rejects DRAFT to PUBLISHED status changes through PATCH', async () => {
+    const harness = createTaskManagementHarness({
+      taskStatus: TaskStatus.Draft,
+    });
+
+    await expect(
+      harness.service.updateTask(
+        harness.ids.taskId.toString(),
+        { status: TaskStatus.Published },
+        harness.ids.teacherId.toString(),
+      ),
+    ).rejects.toThrow(
+      'Task template status must be changed through lifecycle actions',
+    );
+    expect(harness.task.save).not.toHaveBeenCalled();
+  });
+
+  it('rejects PUBLISHED to DRAFT status changes through PATCH', async () => {
+    const harness = createTaskManagementHarness({
+      taskStatus: TaskStatus.Published,
+    });
+
+    await expect(
+      harness.service.updateTask(
+        harness.ids.taskId.toString(),
+        { status: TaskStatus.Draft },
+        harness.ids.teacherId.toString(),
+      ),
+    ).rejects.toThrow(
+      'Task template status must be changed through lifecycle actions',
+    );
+    expect(harness.task.status).toBe(TaskStatus.Published);
+    expect(harness.task.save).not.toHaveBeenCalled();
+  });
+
+  it('rejects PUBLISHED to ARCHIVED status changes through PATCH', async () => {
+    const harness = createTaskManagementHarness({
+      taskStatus: TaskStatus.Published,
+    });
+
+    await expect(
+      harness.service.updateTask(
+        harness.ids.taskId.toString(),
+        { status: TaskStatus.Archived },
+        harness.ids.teacherId.toString(),
+      ),
+    ).rejects.toThrow(
+      'Task template status must be changed through lifecycle actions',
+    );
+    expect(harness.task.status).toBe(TaskStatus.Published);
+    expect(harness.task.save).not.toHaveBeenCalled();
+  });
+
+  it('ignores same status in PATCH and still updates other mutable fields', async () => {
+    const harness = createTaskManagementHarness({
+      taskStatus: TaskStatus.Published,
+    });
+
+    const result = await harness.service.updateTask(
+      harness.ids.taskId.toString(),
+      {
+        status: TaskStatus.Published,
+        title: 'Updated title',
+        description: 'Updated description',
+      },
+      harness.ids.teacherId.toString(),
+    );
+
+    expect(result).toMatchObject({
+      id: harness.ids.taskId.toString(),
+      status: TaskStatus.Published,
+      title: 'Updated title',
+      description: 'Updated description',
+    });
+    expect(harness.task.status).toBe(TaskStatus.Published);
+    expect(harness.task.title).toBe('Updated title');
+    expect(harness.task.description).toBe('Updated description');
     expect(harness.task.save).toHaveBeenCalledTimes(1);
+  });
+
+  it('publishes DRAFT task templates', async () => {
+    const harness = createTaskManagementHarness({
+      taskStatus: TaskStatus.Draft,
+    });
+
+    const result = await harness.service.publishTask(
+      harness.ids.taskId.toString(),
+      harness.ids.teacherId.toString(),
+    );
+
+    expect(result).toMatchObject({
+      id: harness.ids.taskId.toString(),
+      status: TaskStatus.Published,
+    });
+    expect(result.publishedAt).toBeDefined();
+    expect(harness.task.status).toBe(TaskStatus.Published);
+    expect(harness.task.save).toHaveBeenCalledTimes(1);
+  });
+
+  it('rejects publishing ARCHIVED task templates', async () => {
+    const harness = createTaskManagementHarness({
+      taskStatus: TaskStatus.Archived,
+    });
+
+    await expect(
+      harness.service.publishTask(
+        harness.ids.taskId.toString(),
+        harness.ids.teacherId.toString(),
+      ),
+    ).rejects.toThrow('Archived task templates cannot be published');
+    expect(harness.task.save).not.toHaveBeenCalled();
+  });
+
+  it('archives PUBLISHED task templates for the author', async () => {
+    const harness = createTaskManagementHarness({
+      taskStatus: TaskStatus.Published,
+    });
+
+    const result = await harness.service.archiveTask(
+      harness.ids.taskId.toString(),
+      harness.ids.teacherId.toString(),
+    );
+
+    expect(result).toMatchObject({
+      id: harness.ids.taskId.toString(),
+      status: TaskStatus.Archived,
+    });
+    expect(harness.task.status).toBe(TaskStatus.Archived);
+    expect(harness.task.save).toHaveBeenCalledTimes(1);
+  });
+
+  it('rejects archiving DRAFT task templates', async () => {
+    const harness = createTaskManagementHarness({
+      taskStatus: TaskStatus.Draft,
+    });
+
+    await expect(
+      harness.service.archiveTask(
+        harness.ids.taskId.toString(),
+        harness.ids.teacherId.toString(),
+      ),
+    ).rejects.toThrow('Only published task templates can be archived');
+    expect(harness.task.save).not.toHaveBeenCalled();
+  });
+
+  it('rejects archiving already ARCHIVED task templates', async () => {
+    const harness = createTaskManagementHarness({
+      taskStatus: TaskStatus.Archived,
+    });
+
+    await expect(
+      harness.service.archiveTask(
+        harness.ids.taskId.toString(),
+        harness.ids.teacherId.toString(),
+      ),
+    ).rejects.toThrow('Only published task templates can be archived');
+    expect(harness.task.save).not.toHaveBeenCalled();
+  });
+
+  it('rejects archiving a PUBLISHED task template for non-authors', async () => {
+    const harness = createTaskManagementHarness({
+      taskStatus: TaskStatus.Published,
+      createdBy: objectId(),
+    });
+
+    await expect(
+      harness.service.archiveTask(
+        harness.ids.taskId.toString(),
+        harness.ids.teacherId.toString(),
+      ),
+    ).rejects.toThrow('Not allowed to archive task');
+    expect(harness.task.save).not.toHaveBeenCalled();
+  });
+
+  it('rejects archiving a missing task template', async () => {
+    const harness = createTaskManagementHarness({ findByIdResult: null });
+
+    await expect(
+      harness.service.archiveTask(
+        harness.ids.taskId.toString(),
+        harness.ids.teacherId.toString(),
+      ),
+    ).rejects.toThrow('Task not found');
+  });
+
+  it('allows archiving published task templates even if classrooms already use them', async () => {
+    const harness = createTaskManagementHarness({
+      taskStatus: TaskStatus.Published,
+    });
+
+    await expect(
+      harness.service.archiveTask(
+        harness.ids.taskId.toString(),
+        harness.ids.teacherId.toString(),
+      ),
+    ).resolves.toMatchObject({
+      id: harness.ids.taskId.toString(),
+      status: TaskStatus.Archived,
+    });
+    expect(harness.task.save).toHaveBeenCalledTimes(1);
+  });
+
+  it('rejects restoring an archived task template with the clone-as-draft message', async () => {
+    const harness = createTaskManagementHarness({
+      taskStatus: TaskStatus.Archived,
+    });
+
+    await expect(
+      harness.service.restoreTask(
+        harness.ids.taskId.toString(),
+        harness.ids.teacherId.toString(),
+      ),
+    ).rejects.toThrow(
+      'Archived task templates cannot be restored to draft; clone as draft instead',
+    );
+    expect(harness.task.save).not.toHaveBeenCalled();
   });
 
   it('rejects restoring a task owned by another teacher', async () => {
@@ -226,112 +512,6 @@ describe('LearningTasksService task template restore', () => {
         harness.ids.teacherId.toString(),
       ),
     ).rejects.toThrow('Task not found');
-  });
-
-  it('rejects restoring a DRAFT task without saving', async () => {
-    const harness = createTaskManagementHarness({
-      taskStatus: TaskStatus.Draft,
-    });
-
-    await expect(
-      harness.service.restoreTask(
-        harness.ids.taskId.toString(),
-        harness.ids.teacherId.toString(),
-      ),
-    ).rejects.toThrow('Only archived tasks can be restored');
-    expect(harness.task.save).not.toHaveBeenCalled();
-  });
-
-  it('rejects restoring a PUBLISHED task without saving', async () => {
-    const harness = createTaskManagementHarness({
-      taskStatus: TaskStatus.Published,
-    });
-
-    await expect(
-      harness.service.restoreTask(
-        harness.ids.taskId.toString(),
-        harness.ids.teacherId.toString(),
-      ),
-    ).rejects.toThrow('Only archived tasks can be restored');
-    expect(harness.task.save).not.toHaveBeenCalled();
-  });
-
-  it('keeps ordinary updateTask blocked for archived tasks', async () => {
-    const harness = createTaskManagementHarness();
-
-    await expect(
-      harness.service.updateTask(
-        harness.ids.taskId.toString(),
-        { title: 'Updated title' },
-        harness.ids.teacherId.toString(),
-      ),
-    ).rejects.toThrow('Archived tasks cannot be updated');
-    expect(harness.task.save).not.toHaveBeenCalled();
-  });
-
-  it('allows PUBLISHED templates without classroom references to move back to DRAFT', async () => {
-    const harness = createTaskManagementHarness({
-      taskStatus: TaskStatus.Published,
-    });
-
-    const result = await harness.service.updateTask(
-      harness.ids.taskId.toString(),
-      { status: TaskStatus.Draft },
-      harness.ids.teacherId.toString(),
-    );
-
-    expect(result).toMatchObject({
-      id: harness.ids.taskId.toString(),
-      status: TaskStatus.Draft,
-    });
-    expect(harness.classroomTaskModel.exists).toHaveBeenCalledWith({
-      taskId: harness.ids.taskId,
-    });
-    expect(harness.task.status).toBe(TaskStatus.Draft);
-    expect(harness.task.save).toHaveBeenCalledTimes(1);
-  });
-
-  it('rejects PUBLISHED templates with classroom references from moving back to DRAFT', async () => {
-    const harness = createTaskManagementHarness({
-      taskStatus: TaskStatus.Published,
-      hasClassroomTaskReference: true,
-    });
-
-    await expect(
-      harness.service.updateTask(
-        harness.ids.taskId.toString(),
-        { status: TaskStatus.Draft },
-        harness.ids.teacherId.toString(),
-      ),
-    ).rejects.toThrow(
-      'Published task templates used by classrooms cannot be changed back to draft',
-    );
-    expect(harness.classroomTaskModel.exists).toHaveBeenCalledWith({
-      taskId: harness.ids.taskId,
-    });
-    expect(harness.task.status).toBe(TaskStatus.Published);
-    expect(harness.task.save).not.toHaveBeenCalled();
-  });
-
-  it('allows PUBLISHED templates with classroom references to move to ARCHIVED', async () => {
-    const harness = createTaskManagementHarness({
-      taskStatus: TaskStatus.Published,
-      hasClassroomTaskReference: true,
-    });
-
-    const result = await harness.service.updateTask(
-      harness.ids.taskId.toString(),
-      { status: TaskStatus.Archived },
-      harness.ids.teacherId.toString(),
-    );
-
-    expect(result).toMatchObject({
-      id: harness.ids.taskId.toString(),
-      status: TaskStatus.Archived,
-    });
-    expect(harness.classroomTaskModel.exists).not.toHaveBeenCalled();
-    expect(harness.task.status).toBe(TaskStatus.Archived);
-    expect(harness.task.save).toHaveBeenCalledTimes(1);
   });
 });
 

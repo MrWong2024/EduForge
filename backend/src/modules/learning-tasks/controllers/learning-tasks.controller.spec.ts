@@ -11,6 +11,9 @@ import { LearningTasksController } from './learning-tasks.controller';
 describe('LearningTasksController', () => {
   const createController = () => {
     const learningTasksService = {
+      archiveTask: jest
+        .fn()
+        .mockResolvedValue({ id: 'task-1', status: 'ARCHIVED' }),
       restoreTask: jest
         .fn()
         .mockResolvedValue({ id: 'task-1', status: 'DRAFT' }),
@@ -24,6 +27,39 @@ describe('LearningTasksController', () => {
 
     return { controller, learningTasksService };
   };
+
+  it('delegates archiveTask to the service with the current teacher id', async () => {
+    const { controller, learningTasksService } = createController();
+
+    const result = await controller.archiveTask('task-1', { id: 'teacher-1' });
+
+    expect(result).toEqual({ id: 'task-1', status: 'ARCHIVED' });
+    expect(learningTasksService.archiveTask).toHaveBeenCalledWith(
+      'task-1',
+      'teacher-1',
+    );
+  });
+
+  it('keeps archiveTask behind teacher roles and RolesGuard', () => {
+    createController();
+    const archiveHandler = Object.getOwnPropertyDescriptor(
+      LearningTasksController.prototype,
+      'archiveTask',
+    )?.value as ((...args: unknown[]) => unknown) | undefined;
+    expect(archiveHandler).toBeDefined();
+
+    const roles = Reflect.getMetadata(
+      ROLES_KEY,
+      archiveHandler as (...args: unknown[]) => unknown,
+    ) as string[] | undefined;
+    const guards = Reflect.getMetadata(
+      GUARDS_METADATA,
+      archiveHandler as (...args: unknown[]) => unknown,
+    ) as unknown[] | undefined;
+
+    expect(roles).toEqual(TEACHER_ROLES);
+    expect(guards).toEqual([RolesGuard]);
+  });
 
   it('delegates restoreTask to the service with the current teacher id', async () => {
     const { controller, learningTasksService } = createController();

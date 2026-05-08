@@ -136,7 +136,8 @@ Notes:
 | POST | `/api/learning-tasks/tasks` | 创建任务。 |
 | PATCH | `/api/learning-tasks/tasks/:id` | 更新任务。 |
 | POST | `/api/learning-tasks/tasks/:id/publish` | 发布任务。 |
-| POST | `/api/learning-tasks/tasks/:id/restore` | 将作者自己的归档任务模板恢复为草稿。 |
+| POST | `/api/learning-tasks/tasks/:id/archive` | 将作者自己的已发布任务模板归档。 |
+| POST | `/api/learning-tasks/tasks/:id/restore` | 兼容保留入口；稳定返回 400，不再恢复归档模板。 |
 | GET | `/api/learning-tasks/tasks` | 分页查询任务。 |
 | GET | `/api/learning-tasks/tasks/:id` | 任务详情。 |
 | POST | `/api/learning-tasks/tasks/:id/submissions` | 通用任务提交入口（可无 `classroomTaskId`）。 |
@@ -155,8 +156,11 @@ Notes:
 - `Task.visibility`：模板可见性字段，值域 `PRIVATE | SHARED`（白名单来源 `backend/src/modules/learning-tasks/task-template-visibility.constants.ts`）；新建默认 `PRIVATE`；该字段只影响“读可见性”，不改变作者权限边界。
 - `POST/PATCH/GET /api/learning-tasks/tasks*`：入参与出参已支持 `courseLabel` 与 `visibility`；旧任务缺省 `visibility` 兼容按 `SHARED` 处理。
 - `GET /api/learning-tasks/tasks` 与 `GET /api/learning-tasks/tasks/:id` 返回任务模板发布者摘要 `publisher:{id,name?}|null`，来源为 `Task.createdBy` 用户，只含 `id/name`；前端可用 `currentUser.id !== publisher.id` 决定是否显示来源。
-- `POST /api/learning-tasks/tasks/:id/restore`：teacher only；仅任务作者可调用；仅允许 `ARCHIVED -> DRAFT`，成功返回标准 TaskResponse；`DRAFT/PUBLISHED/未知状态` 返回 `400 Only archived tasks can be restored`。普通 `PATCH /api/learning-tasks/tasks/:id` 对 `ARCHIVED` 的内容更新限制保持不变。
-- `PATCH /api/learning-tasks/tasks/:id`：当尝试 `PUBLISHED -> DRAFT` 时，如该模板已被任一 `ClassroomTask` 引用，返回 `400 Published task templates used by classrooms cannot be changed back to draft`；`PUBLISHED -> ARCHIVED` 允许，即使已有课堂任务引用；发布候选模板规则仍只认 `status=PUBLISHED`。
+- 任务模板生命周期已收口为单向流转：创建时仅允许初始 `status=DRAFT|PUBLISHED`（未传时默认 `DRAFT`），且禁止创建 `ARCHIVED`；创建成功后只允许 `DRAFT -> PUBLISHED -> ARCHIVED`。
+- `PATCH /api/learning-tasks/tasks/:id`：只负责内容编辑，不再承载状态生命周期变更；如果请求体包含 `status` 且值与当前状态不同，返回 `400 Task template status must be changed through lifecycle actions`；如果 `status` 与当前状态相同，后端忽略该字段并继续处理其它可编辑字段；`ARCHIVED` 模板普通内容更新仍返回 `400 Archived tasks cannot be updated`。
+- `POST /api/learning-tasks/tasks/:id/publish`：teacher only；仅任务作者可调用；只允许 `DRAFT -> PUBLISHED`；当前已是 `PUBLISHED` 时保持幂等返回当前任务；当前是 `ARCHIVED` 时返回 `400 Archived task templates cannot be published`。
+- `POST /api/learning-tasks/tasks/:id/archive`：teacher only；仅任务作者可调用；只允许 `PUBLISHED -> ARCHIVED`；`DRAFT/ARCHIVED` 均返回 `400 Only published task templates can be archived`；即使该模板已被 `ClassroomTask` 引用也允许归档，且不影响已发布 classroomTask 运行。
+- `POST /api/learning-tasks/tasks/:id/restore`：teacher only；仅任务作者可调用；兼容保留但不再作为正常业务能力，稳定返回 `400 Archived task templates cannot be restored to draft; clone as draft instead`；后续若需复用归档模板，应走“复制为新草稿”新能力。
 - `GET /api/learning-tasks/tasks` Query：`scope, status, knowledgeModule, courseLabel, stage, page, limit, createdBy`；默认 `scope=mine`（不再默认公共池）；`courseLabel=未分类` 时兼容匹配字段缺省任务。
 - `GET /api/learning-tasks/tasks` 中 `status/knowledgeModule/stage` 已在 `listTasks` 内进入数据库级过滤（与 `scope/courseLabel` 叠加生效）。
 - 前端任务模板页当前若仍使用本地 `status/knowledgeModule/stage` 过滤，仅代表前端接入阶段尚未切换；后端查询契约已完成升级。

@@ -71,6 +71,13 @@ export class LearningTasksController {
 
   @UseGuards(RolesGuard)
   @Roles(...TEACHER_ROLES)
+  @Post('tasks/:id/archive')
+  archiveTask(@Param('id') id: string, @CurrentUser() user: { id: string }) {
+    return this.learningTasksService.archiveTask(id, user.id);
+  }
+
+  @UseGuards(RolesGuard)
+  @Roles(...TEACHER_ROLES)
   @Post('tasks/:id/restore')
   restoreTask(@Param('id') id: string, @CurrentUser() user: { id: string }) {
     return this.learningTasksService.restoreTask(id, user.id);

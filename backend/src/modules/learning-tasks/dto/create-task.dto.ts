@@ -1,6 +1,5 @@
 import {
   IsIn,
-  IsEnum,
   IsInt,
   IsObject,
   IsOptional,
@@ -14,6 +13,11 @@ import { TASK_COURSE_LABELS } from '../task-course-labels.constants';
 import type { TaskCourseLabel } from '../task-course-labels.constants';
 import { TASK_VISIBILITIES } from '../task-template-visibility.constants';
 import type { TaskVisibility } from '../task-template-visibility.constants';
+
+const CREATE_TASK_ALLOWED_STATUSES = [
+  TaskStatus.Draft,
+  TaskStatus.Published,
+] as const;
 
 const trimCourseLabelInput = ({ value }: { value: unknown }): unknown => {
   if (typeof value !== 'string') {
@@ -64,6 +68,7 @@ export class CreateTaskDto {
   @IsObject()
   rubric?: Record<string, unknown>;
 
-  @IsEnum(TaskStatus)
-  status!: TaskStatus;
+  @IsOptional()
+  @IsIn(CREATE_TASK_ALLOWED_STATUSES)
+  status?: TaskStatus;
 }

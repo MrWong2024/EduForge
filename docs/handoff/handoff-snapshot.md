@@ -143,7 +143,10 @@ backend/
 - 关键字段：`title`、`description`、`knowledgeModule`、`courseLabel?`、`visibility(PRIVATE|SHARED)`、`stage(1..4)`、`difficulty?`、`rubric?`、`status(DRAFT|PUBLISHED|ARCHIVED)`、`createdBy`、`publishedAt?`。
 - `courseLabel` 语义：可选单值课程分类字段（白名单来源 `task-course-labels.constants.ts`）；非 `Course` 外键；仅用于模板治理（筛选/分组/展示辅助）；不参与权限与发布约束。
 - `visibility` 语义：模板可见性字段（白名单来源 `task-template-visibility.constants.ts`）；新建默认 `PRIVATE`；旧数据缺省值按 `SHARED` 兼容解释；共享仅影响读可见性，不改变作者写权限。
-- `ARCHIVED` 模板普通 `PATCH /api/learning-tasks/tasks/:id` 更新仍禁止；作者可通过 `POST /api/learning-tasks/tasks/:id/restore` 将归档模板恢复为 `DRAFT`，后续再编辑；`PUBLISHED -> DRAFT` 仅在模板未被任何 `ClassroomTask` 引用时允许，已被引用则返回 `400 Published task templates used by classrooms cannot be changed back to draft`；`PUBLISHED -> ARCHIVED` 允许且不影响已发布 classroomTask 运行。
+- 任务模板生命周期已收口为单向 `DRAFT -> PUBLISHED -> ARCHIVED`：创建仅允许初始 `DRAFT/PUBLISHED`（缺省 `DRAFT`，禁止创建 `ARCHIVED`）；已创建模板的状态变更只能走动作接口，不再通过普通 `PATCH` 直接改 `status`。
+- `ARCHIVED` 模板普通 `PATCH /api/learning-tasks/tasks/:id` 更新仍禁止；`PATCH` 若携带与当前状态不同的 `status`，固定返回 `400 Task template status must be changed through lifecycle actions`；若携带相同 `status`，后端忽略该字段并继续处理其它内容字段。
+- `POST /api/learning-tasks/tasks/:id/publish` 只允许 `DRAFT -> PUBLISHED`；`POST /api/learning-tasks/tasks/:id/archive` 只允许 `PUBLISHED -> ARCHIVED`；发布候选模板仍只认 `status=PUBLISHED`；归档不影响已发布 classroomTask 运行。
+- `POST /api/learning-tasks/tasks/:id/restore` 不再作为正常业务路径，兼容保留但稳定返回 `400 Archived task templates cannot be restored to draft; clone as draft instead`；后续如需复用归档模板，应通过“复制为新草稿”新能力实现（本阶段未实现）。
 - 索引/唯一性：`(createdBy,createdAt)`；`(status,knowledgeModule,stage,createdAt)`；`(status,courseLabel,createdAt)`；`(visibility,createdAt)`；`(createdBy,status,courseLabel,knowledgeModule,stage,updatedAt,createdAt)`（发布候选 onlyMine 分支）；`(visibility,status,courseLabel,knowledgeModule,stage,updatedAt,createdAt)`（发布候选 shared 可见分支）。
 
 ### Submission（`src/modules/learning-tasks/schemas/submission.schema.ts`）

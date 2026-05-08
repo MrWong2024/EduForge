@@ -88,6 +88,16 @@ type SubmissionCooldownSource = Pick<Submission, 'submittedAt'> &
 @Injectable()
 export class LearningTasksService {
   private static readonly TOP_TAGS_LIMIT = 5;
+  private static readonly CREATE_ARCHIVED_TASK_TEMPLATE_MESSAGE =
+    'Task templates cannot be created as archived';
+  private static readonly TASK_TEMPLATE_STATUS_ACTION_REQUIRED_MESSAGE =
+    'Task template status must be changed through lifecycle actions';
+  private static readonly ARCHIVED_TASK_TEMPLATE_PUBLISH_MESSAGE =
+    'Archived task templates cannot be published';
+  private static readonly ONLY_PUBLISHED_TASK_TEMPLATE_ARCHIVE_MESSAGE =
+    'Only published task templates can be archived';
+  private static readonly RESTORE_TASK_TEMPLATE_DISABLED_MESSAGE =
+    'Archived task templates cannot be restored to draft; clone as draft instead';
   private static readonly LATE_SUBMISSION_NOT_ALLOWED_CODE =
     'LATE_SUBMISSION_NOT_ALLOWED';
   private static readonly INVALID_FEEDBACK_TAGS_MESSAGE =
@@ -117,12 +127,19 @@ export class LearningTasksService {
     const courseLabel = this.toSanitizedCourseLabel(dto.courseLabel);
     const visibility =
       this.toSanitizedTaskVisibility(dto.visibility) ?? TASK_VISIBILITY_PRIVATE;
+    const initialStatus = dto.status ?? TaskStatus.Draft;
+    if (initialStatus === TaskStatus.Archived) {
+      throw new BadRequestException(
+        LearningTasksService.CREATE_ARCHIVED_TASK_TEMPLATE_MESSAGE,
+      );
+    }
     const task = await this.taskModel.create({
       ...dto,
       courseLabel,
       visibility,
+      status: initialStatus,
       createdBy: new Types.ObjectId(userId),
-      publishedAt: dto.status === TaskStatus.Published ? now : undefined,
+      publishedAt: initialStatus === TaskStatus.Published ? now : undefined,
     });
     return this.toTaskResponse(task as TaskWithMeta);
   }
@@ -138,17 +155,10 @@ export class LearningTasksService {
     if (task.status === TaskStatus.Archived) {
       throw new BadRequestException('Archived tasks cannot be updated');
     }
-    const isPublishedToDraftTransition =
-      task.status === TaskStatus.Published && dto.status === TaskStatus.Draft;
-    if (isPublishedToDraftTransition) {
-      const existingClassroomTask = await this.classroomTaskModel
-        .exists({ taskId: task._id })
-        .exec();
-      if (existingClassroomTask) {
-        throw new BadRequestException(
-          'Published task templates used by classrooms cannot be changed back to draft',
-        );
-      }
+    if (dto.status !== undefined && dto.status !== task.status) {
+      throw new BadRequestException(
+        LearningTasksService.TASK_TEMPLATE_STATUS_ACTION_REQUIRED_MESSAGE,
+      );
     }
     const hasCourseLabel = 'courseLabel' in dto;
     const nextVisibility = this.toSanitizedTaskVisibility(dto.visibility);
@@ -171,17 +181,11 @@ export class LearningTasksService {
     if (dto.rubric !== undefined) {
       task.rubric = dto.rubric;
     }
-    if (dto.status !== undefined) {
-      task.status = dto.status;
-    }
     if (hasCourseLabel) {
       task.courseLabel = this.toSanitizedCourseLabel(dto.courseLabel);
     }
     if (hasVisibility) {
       task.visibility = nextVisibility;
-    }
-    if (dto.status === TaskStatus.Published && !task.publishedAt) {
-      task.publishedAt = new Date();
     }
     await task.save();
     return this.toTaskResponse(task as TaskWithMeta);
@@ -196,13 +200,39 @@ export class LearningTasksService {
       throw new NotFoundException('Task not found');
     }
     if (task.status === TaskStatus.Archived) {
-      throw new BadRequestException('Archived tasks cannot be published');
+      throw new BadRequestException(
+        LearningTasksService.ARCHIVED_TASK_TEMPLATE_PUBLISH_MESSAGE,
+      );
+    }
+    if (task.status === TaskStatus.Published) {
+      return this.toTaskResponse(task as TaskWithMeta);
+    }
+    if (task.status !== TaskStatus.Draft) {
+      throw new BadRequestException(
+        'Only draft task templates can be published',
+      );
+    }
+    task.status = TaskStatus.Published;
+    task.publishedAt = new Date();
+    await task.save();
+    return this.toTaskResponse(task as TaskWithMeta);
+  }
+
+  async archiveTask(id: string, teacherId: string) {
+    const task = await this.taskModel.findById(id).exec();
+    if (!task) {
+      throw new NotFoundException('Task not found');
+    }
+    if (task.createdBy.toString() !== teacherId) {
+      throw new ForbiddenException('Not allowed to archive task');
     }
     if (task.status !== TaskStatus.Published) {
-      task.status = TaskStatus.Published;
-      task.publishedAt = new Date();
-      await task.save();
+      throw new BadRequestException(
+        LearningTasksService.ONLY_PUBLISHED_TASK_TEMPLATE_ARCHIVE_MESSAGE,
+      );
     }
+    task.status = TaskStatus.Archived;
+    await task.save();
     return this.toTaskResponse(task as TaskWithMeta);
   }
 
@@ -214,12 +244,9 @@ export class LearningTasksService {
     if (task.createdBy.toString() !== userId) {
       throw new ForbiddenException('Not allowed to restore task');
     }
-    if (task.status !== TaskStatus.Archived) {
-      throw new BadRequestException('Only archived tasks can be restored');
-    }
-    task.status = TaskStatus.Draft;
-    await task.save();
-    return this.toTaskResponse(task as TaskWithMeta);
+    throw new BadRequestException(
+      LearningTasksService.RESTORE_TASK_TEMPLATE_DISABLED_MESSAGE,
+    );
   }
 
   async listTasks(query: QueryTaskDto, userId: string) {
