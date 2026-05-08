@@ -135,6 +135,7 @@ Notes:
 | POST | `/api/learning-tasks/tasks` | 创建任务。 |
 | PATCH | `/api/learning-tasks/tasks/:id` | 更新任务。 |
 | POST | `/api/learning-tasks/tasks/:id/publish` | 发布任务。 |
+| POST | `/api/learning-tasks/tasks/:id/restore` | 将作者自己的归档任务模板恢复为草稿。 |
 | GET | `/api/learning-tasks/tasks` | 分页查询任务。 |
 | GET | `/api/learning-tasks/tasks/:id` | 任务详情。 |
 | POST | `/api/learning-tasks/tasks/:id/submissions` | 通用任务提交入口（可无 `classroomTaskId`）。 |
@@ -152,6 +153,7 @@ Notes:
 - `Task.courseLabel`：可选字符串字段（单选课程分类），白名单来源 `backend/src/modules/learning-tasks/task-course-labels.constants.ts`；非 `Course` 外键，不参与权限与发布约束，不限制跨课程复用。
 - `Task.visibility`：模板可见性字段，值域 `PRIVATE | SHARED`（白名单来源 `backend/src/modules/learning-tasks/task-template-visibility.constants.ts`）；新建默认 `PRIVATE`；该字段只影响“读可见性”，不改变作者权限边界。
 - `POST/PATCH/GET /api/learning-tasks/tasks*`：入参与出参已支持 `courseLabel` 与 `visibility`；旧任务缺省 `visibility` 兼容按 `SHARED` 处理。
+- `POST /api/learning-tasks/tasks/:id/restore`：teacher only；仅任务作者可调用；仅允许 `ARCHIVED -> DRAFT`，成功返回标准 TaskResponse；`DRAFT/PUBLISHED/未知状态` 返回 `400 Only archived tasks can be restored`。普通 `PATCH /api/learning-tasks/tasks/:id` 对 `ARCHIVED` 的内容更新限制保持不变。
 - `GET /api/learning-tasks/tasks` Query：`scope, status, knowledgeModule, courseLabel, stage, page, limit, createdBy`；默认 `scope=mine`（不再默认公共池）；`courseLabel=未分类` 时兼容匹配字段缺省任务。
 - `GET /api/learning-tasks/tasks` 中 `status/knowledgeModule/stage` 已在 `listTasks` 内进入数据库级过滤（与 `scope/courseLabel` 叠加生效）。
 - 前端任务模板页当前若仍使用本地 `status/knowledgeModule/stage` 过滤，仅代表前端接入阶段尚未切换；后端查询契约已完成升级。

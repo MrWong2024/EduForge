@@ -192,6 +192,22 @@ export class LearningTasksService {
     return this.toTaskResponse(task as TaskWithMeta);
   }
 
+  async restoreTask(id: string, userId: string) {
+    const task = await this.taskModel.findById(id).exec();
+    if (!task) {
+      throw new NotFoundException('Task not found');
+    }
+    if (task.createdBy.toString() !== userId) {
+      throw new ForbiddenException('Not allowed to restore task');
+    }
+    if (task.status !== TaskStatus.Archived) {
+      throw new BadRequestException('Only archived tasks can be restored');
+    }
+    task.status = TaskStatus.Draft;
+    await task.save();
+    return this.toTaskResponse(task as TaskWithMeta);
+  }
+
   async listTasks(query: QueryTaskDto, userId: string) {
     const page = query.page ?? 1;
     const limit = Math.min(query.limit ?? 20, 100);

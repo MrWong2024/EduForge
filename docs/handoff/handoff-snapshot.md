@@ -143,6 +143,7 @@ backend/
 - 关键字段：`title`、`description`、`knowledgeModule`、`courseLabel?`、`visibility(PRIVATE|SHARED)`、`stage(1..4)`、`difficulty?`、`rubric?`、`status(DRAFT|PUBLISHED|ARCHIVED)`、`createdBy`、`publishedAt?`。
 - `courseLabel` 语义：可选单值课程分类字段（白名单来源 `task-course-labels.constants.ts`）；非 `Course` 外键；仅用于模板治理（筛选/分组/展示辅助）；不参与权限与发布约束。
 - `visibility` 语义：模板可见性字段（白名单来源 `task-template-visibility.constants.ts`）；新建默认 `PRIVATE`；旧数据缺省值按 `SHARED` 兼容解释；共享仅影响读可见性，不改变作者写权限。
+- `ARCHIVED` 模板普通 `PATCH /api/learning-tasks/tasks/:id` 更新仍禁止；作者可通过 `POST /api/learning-tasks/tasks/:id/restore` 将归档模板恢复为 `DRAFT`，后续再编辑。
 - 索引/唯一性：`(createdBy,createdAt)`；`(status,knowledgeModule,stage,createdAt)`；`(status,courseLabel,createdAt)`；`(visibility,createdAt)`；`(createdBy,status,courseLabel,knowledgeModule,stage,updatedAt,createdAt)`（发布候选 onlyMine 分支）；`(visibility,status,courseLabel,knowledgeModule,stage,updatedAt,createdAt)`（发布候选 shared 可见分支）。
 
 ### Submission（`src/modules/learning-tasks/schemas/submission.schema.ts`）
