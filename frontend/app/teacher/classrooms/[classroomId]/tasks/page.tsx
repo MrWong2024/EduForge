@@ -165,6 +165,26 @@ const getSubmissionWindowStatus = (
   };
 };
 
+const getTemplateStatusBadge = (
+  status: string | null | undefined,
+): { label: string; className: string } | null => {
+  if (status === "DRAFT") {
+    return {
+      label: "模板已转为草稿",
+      className: "border-amber-200 bg-amber-50 text-amber-700",
+    };
+  }
+
+  if (status === "ARCHIVED") {
+    return {
+      label: "模板已归档",
+      className: "border-zinc-200 bg-zinc-50 text-zinc-600",
+    };
+  }
+
+  return null;
+};
+
 export default async function ClassroomTasksPage({ params, searchParams }: ClassroomTasksPageProps) {
   const { classroomId } = await params;
   const query = await searchParams;
@@ -352,13 +372,25 @@ export default async function ClassroomTasksPage({ params, searchParams }: Class
                   task.dueAt,
                   task.allowLate,
                 );
+                const templateStatusBadge = getTemplateStatusBadge(
+                  task.taskStatus,
+                );
                 return (
                   <tr
                     key={classroomTaskId ?? `classroom-task-${index}`}
                     className="border-t border-zinc-100 align-top"
                   >
                     <td className="px-4 py-3">
-                      <p>{toDisplayText(task.title, "未命名任务")}</p>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span>{toDisplayText(task.title, "未命名任务")}</span>
+                        {templateStatusBadge ? (
+                          <span
+                            className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-medium ${templateStatusBadge.className}`}
+                          >
+                            {templateStatusBadge.label}
+                          </span>
+                        ) : null}
+                      </div>
                     </td>
                     <td className="px-4 py-3">
                       <span
