@@ -234,6 +234,7 @@ export type TeacherDashboardTaskItem = UnknownRecord & {
   name?: string;
   dueAt?: string | null;
   classroomTaskStatus?: string;
+  taskTemplateStatus?: "DRAFT" | "PUBLISHED" | "ARCHIVED" | null;
 };
 
 export const TEACHER_CLASSROOM_ARCHIVE_SUGGESTION_REASONS = [

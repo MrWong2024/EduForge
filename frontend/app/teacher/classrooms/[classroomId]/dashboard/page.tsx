@@ -33,6 +33,11 @@ type TaskAiBreakdown = {
   notRequested: number;
 };
 
+type TaskTemplateStatusBadge = {
+  label: string;
+  className: string;
+};
+
 const getRequestOrigin = async (): Promise<string> => {
   const headerMap = await headers();
   const host = headerMap.get("x-forwarded-host") ?? headerMap.get("host") ?? "";
@@ -184,6 +189,24 @@ const toTopTags = (
   });
 
   return result;
+};
+
+const getTaskTemplateStatusBadge = (
+  status: string | null | undefined,
+): TaskTemplateStatusBadge | null => {
+  if (status === "DRAFT") {
+    return {
+      label: "模板已转为草稿",
+      className: "border-amber-200 bg-amber-50 text-amber-700",
+    };
+  }
+  if (status === "ARCHIVED") {
+    return {
+      label: "模板已归档",
+      className: "border-slate-200 bg-slate-50 text-slate-600",
+    };
+  }
+  return null;
 };
 
 type DashboardViewModel =
@@ -465,6 +488,10 @@ export default async function ClassroomDashboardPage({
                     item.classroomTaskStatus,
                   );
                   const isClosedTask = classroomTaskStatus === "CLOSED";
+                  const taskTemplateStatusBadge =
+                    getTaskTemplateStatusBadge(
+                      toOptionalText(item.taskTemplateStatus),
+                    );
 
                   return (
                     <tr
@@ -488,6 +515,13 @@ export default async function ClassroomDashboardPage({
                           {isClosedTask ? (
                             <span className="inline-flex items-center rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-xs font-medium text-slate-600">
                               已关闭
+                            </span>
+                          ) : null}
+                          {taskTemplateStatusBadge ? (
+                            <span
+                              className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-medium ${taskTemplateStatusBadge.className}`}
+                            >
+                              {taskTemplateStatusBadge.label}
                             </span>
                           ) : null}
                         </div>
