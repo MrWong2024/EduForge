@@ -624,13 +624,14 @@ describe('ClassroomTasksService listPublishableTaskTemplates publisher contract'
       teacherId.toString(),
     );
 
-    const firstAggregateCall = taskModel.aggregate.mock.calls[0];
+    const aggregateCalls = taskModel.aggregate.mock.calls as unknown as Array<
+      [Array<Record<string, unknown>>, ...unknown[]]
+    >;
+    const firstAggregateCall = aggregateCalls[0];
     if (!firstAggregateCall) {
       throw new Error('Expected taskModel.aggregate to be called');
     }
-    const itemsPipeline = firstAggregateCall[0] as unknown as Array<
-      Record<string, unknown>
-    >;
+    const itemsPipeline = firstAggregateCall[0];
     expect(itemsPipeline[0]).toEqual({
       $match: {
         status: TaskStatus.Published,
