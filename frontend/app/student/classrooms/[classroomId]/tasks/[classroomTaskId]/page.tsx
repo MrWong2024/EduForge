@@ -120,6 +120,9 @@ const buildHref = (
 const READ_ONLY_FALLBACK_MESSAGE =
   "该任务当前仅可查看历史提交与反馈，不能继续提交或请求 AI 反馈。";
 
+const PAST_DUE_WITHOUT_LATE_MESSAGE =
+  "该任务已截止，且教师未允许迟交，不能继续提交。";
+
 const toAiStatusDescription = (
   status: string | undefined,
   canRequestAiByStatus: boolean,
@@ -309,6 +312,19 @@ const resolveTaskDetailAutoRefreshStatus = (
 const toDisplayDateOrFallback = (value?: string | null): string => {
   const displayDate = toDisplayDate(value);
   return displayDate === "—" ? "未设置" : displayDate;
+};
+
+const isPastDue = (value: string | null | undefined, nowMs: number): boolean => {
+  if (!value) {
+    return false;
+  }
+
+  const dueAtMs = Date.parse(value);
+  return Number.isFinite(dueAtMs) && nowMs > dueAtMs;
+};
+
+const getServerRenderNowMs = (): number => {
+  return Date.now();
 };
 
 const toAllowLateText = (value: boolean | null): string => {
@@ -514,10 +530,19 @@ export default async function StudentTaskDetailPage({
   const readOnly = participationStatus?.readOnly === true;
   const canSubmitByStatus =
     !readOnly && participationStatus?.canSubmit !== false;
+  const nowMs = getServerRenderNowMs();
+  const isPastDueWithoutLate = isPastDue(dueAt, nowMs) && allowLate !== true;
+  const canSubmit = canSubmitByStatus && !isPastDueWithoutLate;
   const canRequestAiByStatus =
     !readOnly && participationStatus?.canRequestAiFeedback !== false;
   const readOnlyMessage =
     participationStatus?.message ?? READ_ONLY_FALLBACK_MESSAGE;
+  const submitDisabledMessage =
+    readOnly || participationStatus?.canSubmit === false
+      ? readOnlyMessage
+      : isPastDueWithoutLate
+        ? PAST_DUE_WITHOUT_LATE_MESSAGE
+        : READ_ONLY_FALLBACK_MESSAGE;
   const latestStatusDescription = toAiStatusDescription(
     latestRawStatus,
     canRequestAiByStatus,
@@ -718,7 +743,7 @@ export default async function StudentTaskDetailPage({
         </div>
       </section>
 
-      {canSubmitByStatus ? (
+      {canSubmit ? (
         <SubmissionForm
           classroomId={classroomId}
           classroomTaskId={classroomTaskId}
@@ -726,11 +751,11 @@ export default async function StudentTaskDetailPage({
       ) : (
         <section className="rounded-lg border border-zinc-200 bg-zinc-50 p-4 text-sm">
           <h2 className="text-sm font-semibold text-zinc-900">提交作业</h2>
-          <p className="mt-2 text-zinc-600">{readOnlyMessage}</p>
+          <p className="mt-2 text-zinc-600">{submitDisabledMessage}</p>
           <button
             type="button"
             disabled
-            title={readOnlyMessage}
+            title={submitDisabledMessage}
             className="mt-3 rounded-md bg-zinc-300 px-4 py-2 text-sm font-medium text-zinc-600 disabled:cursor-not-allowed"
           >
             提交作业

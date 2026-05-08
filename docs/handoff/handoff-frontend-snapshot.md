@@ -145,6 +145,7 @@ Student 学习链路（可用）：
    - 兼容旧响应：缺少 `completionStatus` 时，无 latest 显示“未提交”，有 latest 显示“暂无结论”。
    - 已接入后端顶层 `participationStatus`：`readOnly=true` 时显示“当前为只读模式”提示；`canSubmit=false` 时提交入口渲染为不可点击禁用态；旧响应缺字段时按可参与兜底。
    - 只读态只消费后端 `participationStatus`，前端不按 `classroom.status/classroomTask.status/task.status` 自行拼门禁规则，也不把 `dueAt/allowLate/cooldown/NOT_REQUESTED` 混入状态层只读判断。
+   - 提交区额外基于 `classroomTask.dueAt + settings.allowLate` 做前端体验拦截：页面渲染时已过截止时间且 `allowLate !== true` 时，不展示可填写提交表单，改为禁用提交入口并提示“该任务已截止，且教师未允许迟交，不能继续提交。”；`allowLate=true` 的已截止任务仍展示提交表单，最终权限仍以后端为准。
    - 已接入 AI 状态联动自动刷新：当提交列表中存在 `PENDING/RUNNING/FAILED` 时自动刷新；其中 `PENDING/RUNNING` 快速刷新、仅 `FAILED` 时慢速刷新；当提交列表全部进入非活跃状态（如 `SUCCEEDED/DEAD/NOT_REQUESTED`）时停止。
    - 自动刷新覆盖“最新 AI 状态”与提交记录表“AI 状态”列，使用整页刷新链路同步更新；页面不可见/失焦时暂停，回到前台后按当前状态恢复。
    - 终态收尾口径已修正：自动刷新驱动改为对齐“latest + submissions”真实状态来源，并在活跃态结束时保留一次最小收尾刷新，`DEAD` 可在自动刷新过程中自然显示，不再依赖手工刷新。
