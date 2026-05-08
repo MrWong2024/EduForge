@@ -28,6 +28,7 @@ type SubmissionLean = Submission & WithTimestamps;
 type ClassroomTaskDashboardItem = {
   _id: Types.ObjectId;
   taskId: Types.ObjectId;
+  taskTemplateStatus?: TaskStatus | null;
   title: string;
   stage: number;
   knowledgeModule: string;
@@ -141,6 +142,7 @@ export class TeacherClassroomDashboardService {
           classroomTaskStatus: '$status',
           publishedAt: 1,
           dueAt: 1,
+          taskTemplateStatus: '$task.status',
           title: '$task.title',
           stage: '$task.stage',
           knowledgeModule: '$task.knowledgeModule',
@@ -366,6 +368,7 @@ export class TeacherClassroomDashboardService {
           classroomTaskId: task._id.toString(),
           classroomTaskStatus: task.classroomTaskStatus,
           taskId: task.taskId.toString(),
+          taskTemplateStatus: task.taskTemplateStatus ?? null,
           title: task.title,
           stage: task.stage,
           knowledgeModule: task.knowledgeModule,

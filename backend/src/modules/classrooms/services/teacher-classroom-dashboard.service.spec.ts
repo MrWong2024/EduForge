@@ -137,6 +137,7 @@ const createHarness = (data: HarnessData = {}) => {
         _id: task._id,
         taskId: task.taskId,
         classroomTaskStatus: task.status ?? '',
+        taskTemplateStatus: task.taskStatus ?? TaskStatus.Published,
         publishedAt: task.publishedAt,
         dueAt: task.dueAt,
         title: task.title,
@@ -390,6 +391,7 @@ describe('TeacherClassroomDashboardService', () => {
           taskId: objectId(),
           classroomId,
           status: CLASSROOM_TASK_STATUS_CLOSED,
+          taskStatus: TaskStatus.Draft,
           title: 'Closed Task',
           stage: 1,
           knowledgeModule: 'module',
@@ -462,6 +464,7 @@ describe('TeacherClassroomDashboardService', () => {
     expect(dashboard.tasks[0]).toMatchObject({
       classroomTaskId: activeTaskId.toString(),
       classroomTaskStatus: CLASSROOM_TASK_STATUS_ACTIVE,
+      taskTemplateStatus: TaskStatus.Published,
       submissionsCount: 1,
       aiFeedback: { succeeded: 1, failed: 0, notRequested: 0 },
       topTags: [{ tag: 'correctness', count: 1 }],
@@ -494,6 +497,7 @@ describe('TeacherClassroomDashboardService', () => {
           taskId: objectId(),
           classroomId,
           status: CLASSROOM_TASK_STATUS_CLOSED,
+          taskStatus: TaskStatus.Draft,
           title: 'Closed Task',
           stage: 1,
           knowledgeModule: 'module',
@@ -539,6 +543,7 @@ describe('TeacherClassroomDashboardService', () => {
           taskId: objectId(),
           classroomId,
           status: CLASSROOM_TASK_STATUS_CLOSED,
+          taskStatus: TaskStatus.Draft,
           title: 'Closed Task',
           stage: 1,
           knowledgeModule: 'module',
@@ -606,9 +611,73 @@ describe('TeacherClassroomDashboardService', () => {
     expect(dashboard.tasks[1]).toMatchObject({
       classroomTaskId: closedTaskId.toString(),
       classroomTaskStatus: CLASSROOM_TASK_STATUS_CLOSED,
+      taskTemplateStatus: TaskStatus.Draft,
       submissionsCount: 1,
       aiFeedback: { failed: 1, notRequested: 0 },
     });
+  });
+
+  it('keeps ACTIVE dashboard items for DRAFT and ARCHIVED templates and exposes template status', async () => {
+    const classroomId = objectId();
+    const draftTemplateTaskId = objectId();
+    const archivedTemplateTaskId = objectId();
+    const harness = createHarness({
+      classroomTasks: [
+        {
+          _id: draftTemplateTaskId,
+          taskId: objectId(),
+          classroomId,
+          status: CLASSROOM_TASK_STATUS_ACTIVE,
+          taskStatus: TaskStatus.Draft,
+          title: 'Draft Template Task',
+          stage: 1,
+          knowledgeModule: 'module',
+          publishedAt: new Date('2026-01-01T00:00:00.000Z'),
+        },
+        {
+          _id: archivedTemplateTaskId,
+          taskId: objectId(),
+          classroomId,
+          status: CLASSROOM_TASK_STATUS_ACTIVE,
+          taskStatus: TaskStatus.Archived,
+          title: 'Archived Template Task',
+          stage: 1,
+          knowledgeModule: 'module',
+          publishedAt: new Date('2026-01-02T00:00:00.000Z'),
+        },
+      ],
+      submissions: [
+        {
+          _id: objectId(),
+          classroomTaskId: draftTemplateTaskId,
+          studentId: objectId(),
+        },
+      ],
+    });
+
+    const dashboard = await harness.service.getDashboard(
+      classroomId.toString(),
+      harness.ids.teacherId.toString(),
+    );
+
+    expect(dashboard.tasks).toHaveLength(2);
+    expect(dashboard.tasks).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          classroomTaskId: draftTemplateTaskId.toString(),
+          classroomTaskStatus: CLASSROOM_TASK_STATUS_ACTIVE,
+          taskTemplateStatus: TaskStatus.Draft,
+          submissionsCount: 1,
+        }),
+        expect.objectContaining({
+          classroomTaskId: archivedTemplateTaskId.toString(),
+          classroomTaskStatus: CLASSROOM_TASK_STATUS_ACTIVE,
+          taskTemplateStatus: TaskStatus.Archived,
+          submissionsCount: 0,
+        }),
+      ]),
+    );
+    expect(dashboard.summary.publishedTasksCount).toBe(2);
   });
 
   it('does not let task publication, classroom status, or dueAt override classroomTask.status', async () => {
