@@ -101,6 +101,7 @@ Teacher 起步与模板链路（可用）：
    - `courseLabel` 下拉使用标准分类全集，选择后通过 URL query 触发后端重查；加载更多不会改变下拉选项集合。
    - 班级实例列表中支持行内“编辑设置”，用于更新已发布课堂任务的实例级参数（`dueAt/allowLate/maxAttempts`）；该能力与模板编辑解耦，仅在 `ACTIVE/CLOSED` 状态开放。
 5. 进入 `/teacher/classrooms/[classroomId]/tasks/[classroomTaskId]/*` 和提交管理页
+   - 课堂任务详情页已移除历史遗留的模板发布状态管理区块，不再展示底层模板 `task.taskStatus` 的“发布状态”，也不再提供模板发布按钮；模板生命周期统一回到 `/teacher/tasks/[taskId]/edit` 处理，课堂任务实例状态流仍由班级任务列表页负责。
 
 Teacher 课程视角（可用）：
 - `/teacher/courses` 已支持课程列表与创建课程，`courseLabel`（课程分类）可选录入并在列表展示；默认按 `进行中/已归档/全部` 视图区分展示课程（`statusView` query）。

@@ -2,7 +2,6 @@ import Link from "next/link";
 import { headers } from "next/headers";
 import { ErrorState } from "@/components/blocks/ErrorState";
 import { PageHeader } from "@/components/blocks/PageHeader";
-import { PublishTaskStatusButton } from "@/components/teacher/PublishTaskStatusButton";
 import { fetchJson, FetchJsonError } from "@/lib/api/client";
 import { buildErrorDescription, extractRawDetail } from "@/lib/api/error-presenter";
 import { toClassroomSummary, toClassroomTask } from "@/lib/api/types-teacher";
@@ -131,20 +130,11 @@ export default async function ClassroomTaskDetailPage({ params }: ClassroomTaskD
       <section className="rounded-lg border border-zinc-200 bg-white p-4 text-sm">
         <div className="grid gap-2 md:grid-cols-2">
           <p>任务名称：{toDisplayText(task.title, "未命名任务")}</p>
-          <p>发布状态：{toDisplayText(task.taskStatus, "—")}</p>
           <p>截止时间：{toDisplayDate(task.dueAt)}</p>
           <p>允许迟交：{toDisplayText(task.allowLate)}</p>
           <p>发布时间：{toDisplayDate(task.publishedAt)}</p>
         </div>
         <p className="mt-3 whitespace-pre-wrap text-zinc-700">{toDisplayText(task.description, "暂无描述")}</p>
-      </section>
-
-      <section className="rounded-lg border border-zinc-200 bg-white p-4">
-        <h2 className="text-sm font-semibold text-zinc-900">任务状态管理</h2>
-        <p className="mt-1 text-sm text-zinc-600">如任务仍为草稿，可在此标记为已发布。</p>
-        <div className="mt-3">
-          <PublishTaskStatusButton taskId={task.taskId} taskStatus={task.taskStatus} />
-        </div>
       </section>
 
       <details className="rounded-lg border border-zinc-200 bg-zinc-50 p-4">
