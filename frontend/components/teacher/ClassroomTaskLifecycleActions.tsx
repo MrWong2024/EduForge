@@ -30,30 +30,25 @@ const STATUS_META: Record<
   ClassroomTaskStatus,
   {
     label: string;
-    hint: string;
     badgeClassName: string;
   }
 > = {
   ACTIVE: {
     label: "开放中",
-    hint: "课堂任务未关闭或撤回。",
     badgeClassName: "border-emerald-300 bg-emerald-50 text-emerald-700",
   },
   CLOSED: {
     label: "已关闭",
-    hint: "已停止继续提交。",
     badgeClassName: "border-zinc-300 bg-zinc-100 text-zinc-700",
   },
   RECALLED: {
     label: "已撤回",
-    hint: "已撤回，不再接收提交。",
     badgeClassName: "border-amber-300 bg-amber-50 text-amber-700",
   },
 };
 
 const UNKNOWN_STATUS_META = {
   label: "未知状态",
-  hint: "当前课堂任务状态无法识别，请刷新后重试。",
   badgeClassName: "border-zinc-300 bg-zinc-50 text-zinc-600",
 };
 
@@ -151,7 +146,6 @@ export function ClassroomTaskLifecycleActions({
         {statusMeta.label}
       </span>
       {submissionWindowBadge ? <div>{submissionWindowBadge}</div> : null}
-      <p className="text-xs text-zinc-500">{statusMeta.hint}</p>
 
       {!classroomTaskId ? (
         <p className="text-xs text-zinc-500">缺少课堂任务标识，无法更新状态。</p>
@@ -173,9 +167,7 @@ export function ClassroomTaskLifecycleActions({
         >
           {isSubmitting && pendingTargetStatus === "ACTIVE" ? "恢复中..." : "恢复提交"}
         </button>
-      ) : (
-        <p className="text-xs text-zinc-500">当前状态无需操作</p>
-      )}
+      ) : null}
 
       {successMessage ? <p className="text-xs text-emerald-700">{successMessage}</p> : null}
 
