@@ -112,10 +112,13 @@ export default async function EditLearningTaskPage({
     );
   }
 
+  const isArchivedTask = viewModel.task.status === "ARCHIVED";
+  const canEditCurrentTask = viewModel.canEdit && !isArchivedTask;
+
   return (
     <section className="space-y-4">
       <PageHeader
-        title={viewModel.canEdit ? "编辑任务模板" : "查看任务模板"}
+        title={canEditCurrentTask ? "编辑任务模板" : "查看任务模板"}
         description={`模板：${toDisplayText(viewModel.task.title, "未命名模板")} | 状态：${toDisplayText(
           viewModel.task.status
         )}`}
@@ -133,8 +136,10 @@ export default async function EditLearningTaskPage({
 
       <section className="rounded-lg border border-zinc-200 bg-white p-4 text-sm text-zinc-700">
         <p>
-          {viewModel.canEdit
+          {canEditCurrentTask
             ? "此页用于维护 learning task 模板字段与基础评分配置。"
+            : isArchivedTask && viewModel.canEdit
+              ? "此页展示已归档模板详情；恢复为草稿后可继续编辑。"
             : "此页展示共享模板详情；你当前仅有查看权限。"}
         </p>
         <p className="mt-1">

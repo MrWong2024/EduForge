@@ -1,9 +1,12 @@
 "use client";
 
 import Link from "next/link";
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { EmptyState } from "@/components/blocks/EmptyState";
+import { ErrorState } from "@/components/blocks/ErrorState";
+import { BrowserFetchJsonError, fetchJson } from "@/lib/api/browser-client";
+import { buildErrorDescription, extractRawDetail } from "@/lib/api/error-presenter";
 import { paths } from "@/lib/routes/paths";
 import { parsePositiveInt, toDisplayText } from "@/lib/ui/format";
 import { type LearningTaskOption, type LearningTaskStatus } from "@/lib/api/types-teacher";
@@ -45,6 +48,11 @@ type RubricSummary = {
   hasNotes: boolean;
 };
 
+type RestoreTaskErrorState = {
+  status?: number;
+  description: string;
+};
+
 const STATUS_FILTER_OPTIONS: Array<{ value: TaskStatusFilter; label: string }> = [
   { value: "ALL", label: "全部状态" },
   { value: "DRAFT", label: "DRAFT（草稿）" },
@@ -68,6 +76,9 @@ const SCOPE_SORT_HINTS: Record<TaskTemplateScope, string> = {
 
 const toStatusUpper = (value: unknown): string =>
   typeof value === "string" ? value.trim().toUpperCase() : "";
+
+const isKnownLearningTaskStatus = (value: string): value is LearningTaskStatus =>
+  value === "DRAFT" || value === "PUBLISHED" || value === "ARCHIVED";
 
 const toStatusFilter = (value: string | undefined): TaskStatusFilter => {
   const normalized = toStatusUpper(value);
@@ -94,6 +105,25 @@ const getStatusHint = (status: unknown): string => {
     return "通常不会出现在班级发布可选列表";
   }
   return "状态缺失或未知";
+};
+
+const getRestoreTaskErrorSummary = (status: number): string => {
+  if (status === 400) {
+    return "当前模板状态不允许恢复。";
+  }
+  if (status === 401) {
+    return "登录状态已失效，请重新登录。";
+  }
+  if (status === 403) {
+    return "无权限恢复该任务模板。";
+  }
+  if (status === 404) {
+    return "任务模板不存在或已不可用。";
+  }
+  if (status >= 500) {
+    return "恢复任务模板失败，请稍后重试。";
+  }
+  return "恢复任务模板失败，请稍后重试。";
 };
 
 const summarizeRubric = (rubric: Record<string, unknown> | undefined): RubricSummary => {
@@ -138,6 +168,12 @@ export function LearningTaskFilters({
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
+  const [restoringTaskId, setRestoringTaskId] = useState<string | null>(null);
+  const [restoreSuccessMessage, setRestoreSuccessMessage] = useState<string | null>(
+    null
+  );
+  const [restoreErrorState, setRestoreErrorState] =
+    useState<RestoreTaskErrorState | null>(null);
 
   const currentScope =
     normalizeTaskTemplateScope(searchParams.get("scope") ?? initialScope) ?? initialScope;
@@ -188,6 +224,51 @@ export function LearningTaskFilters({
     const params = new URLSearchParams();
     params.set("returnTo", currentTaskListUrl);
     return `${paths.teacher.taskEdit(taskId)}?${params.toString()}`;
+  };
+
+  const handleRestoreTask = async (taskId: string) => {
+    if (restoringTaskId) {
+      return;
+    }
+    const confirmed = window.confirm(
+      "确认将该归档模板恢复为草稿吗？恢复后可继续编辑，但不会自动重新发布到班级。"
+    );
+    if (!confirmed) {
+      return;
+    }
+
+    setRestoringTaskId(taskId);
+    setRestoreSuccessMessage(null);
+    setRestoreErrorState(null);
+
+    try {
+      await fetchJson<unknown>(
+        `learning-tasks/tasks/${encodeURIComponent(taskId)}/restore`,
+        {
+          method: "POST",
+          headers: {
+            accept: "application/json",
+          },
+        }
+      );
+      setRestoreSuccessMessage("任务模板已恢复为草稿。");
+      router.refresh();
+    } catch (error) {
+      if (error instanceof BrowserFetchJsonError) {
+        const summary = getRestoreTaskErrorSummary(error.status);
+        const detail = extractRawDetail(error);
+        setRestoreErrorState({
+          status: error.status,
+          description: buildErrorDescription(summary, detail),
+        });
+      } else {
+        setRestoreErrorState({
+          description: "恢复任务模板失败，请稍后重试。",
+        });
+      }
+    } finally {
+      setRestoringTaskId(null);
+    }
   };
 
   const replaceSearchQuery = (updater: (params: URLSearchParams) => void) => {
@@ -392,6 +473,20 @@ export function LearningTaskFilters({
         </p>
       </section>
 
+      {restoreSuccessMessage ? (
+        <p className="rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-800">
+          {restoreSuccessMessage}
+        </p>
+      ) : null}
+
+      {restoreErrorState ? (
+        <ErrorState
+          status={restoreErrorState.status}
+          title="恢复任务模板失败"
+          description={restoreErrorState.description}
+        />
+      ) : null}
+
       {sortedTasks.length === 0 && totalCount === 0 && !hasActiveFilters ? (
         <EmptyState
           title="还没有任务模板"
@@ -489,6 +584,7 @@ export function LearningTaskFilters({
                 const rubricSummary = summarizeRubric(task.rubric);
                 const titleText = toDisplayText(task.title, "未命名模板");
                 const descriptionText = toDisplayText(task.description);
+                const taskId = task.id;
                 const rubricHint = rubricSummary.configured
                   ? rubricSummary.dimensionCount > 0 || rubricSummary.hasNotes
                     ? `${rubricSummary.dimensionCount > 0 ? `${rubricSummary.dimensionCount} 个维度` : "未识别维度"}${rubricSummary.hasNotes ? "，含评分说明" : ""}`
@@ -510,10 +606,18 @@ export function LearningTaskFilters({
                   visibility === "PRIVATE"
                     ? "border-zinc-300 bg-zinc-100 text-zinc-700"
                     : "border-emerald-200 bg-emerald-100 text-emerald-700";
+                const isKnownStatus = isKnownLearningTaskStatus(statusUpper);
+                const isOwner = Boolean(
+                  currentUserId &&
+                    task.createdById &&
+                    task.createdById === currentUserId
+                );
                 const canEditTask =
-                  !currentUserId ||
-                  !task.createdById ||
-                  task.createdById === currentUserId;
+                  isKnownStatus &&
+                  statusUpper !== "ARCHIVED" &&
+                  (!currentUserId || !task.createdById || isOwner);
+                const canRestoreTask = isOwner && statusUpper === "ARCHIVED";
+                const isRestoringThisTask = restoringTaskId === task.id;
 
                 return (
                   <tr
@@ -574,16 +678,31 @@ export function LearningTaskFilters({
                       </div>
                     </td>
                     <td className="whitespace-nowrap px-4 py-3">
-                      {task.id ? (
-                        <div className="space-y-1">
+                      {taskId ? (
+                        <div className="flex flex-col items-start gap-1">
                           <Link
-                            href={buildTaskEditHref(task.id)}
+                            href={buildTaskEditHref(taskId)}
                             className="text-blue-700 hover:underline"
                           >
                             {canEditTask ? "编辑" : "查看"}
                           </Link>
-                          {!canEditTask ? (
+                          {canRestoreTask ? (
+                            <button
+                              type="button"
+                              onClick={() => handleRestoreTask(taskId)}
+                              disabled={Boolean(restoringTaskId)}
+                              className="rounded-md border border-amber-300 px-2 py-1 text-xs font-medium text-amber-700 enabled:hover:bg-amber-50 disabled:cursor-not-allowed disabled:opacity-60"
+                            >
+                              {isRestoringThisTask ? "恢复中..." : "恢复为草稿"}
+                            </button>
+                          ) : null}
+                          {!isOwner && Boolean(currentUserId && task.createdById) ? (
                             <p className="text-xs text-zinc-500">非作者模板</p>
+                          ) : null}
+                          {isOwner && statusUpper === "ARCHIVED" ? (
+                            <p className="text-xs text-zinc-500">
+                              已归档，需恢复后编辑
+                            </p>
                           ) : null}
                         </div>
                       ) : (

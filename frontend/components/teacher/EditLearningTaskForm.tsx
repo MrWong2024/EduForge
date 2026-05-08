@@ -37,6 +37,7 @@ type EditLearningTaskFormProps = {
 
 type EditLearningTaskFormErrorState = {
   status?: number;
+  title?: string;
   description: string;
 };
 
@@ -68,6 +69,9 @@ const toStatusInitial = (value: unknown): LearningTaskStatus => {
   const candidate = typeof value === "string" ? value.trim().toUpperCase() : "";
   return isLearningTaskStatus(candidate) ? candidate : "DRAFT";
 };
+
+const toRawStatusUpper = (value: unknown): string =>
+  typeof value === "string" ? value.trim().toUpperCase() : "";
 
 const parseStage = (value: string): number | null => {
   const trimmed = value.trim();
@@ -175,6 +179,25 @@ const getUpdateErrorSummary = (status: number): string => {
   return "更新任务模板失败，请稍后重试。";
 };
 
+const getRestoreTaskErrorSummary = (status: number): string => {
+  if (status === 400) {
+    return "当前模板状态不允许恢复。";
+  }
+  if (status === 401) {
+    return "登录状态已失效，请重新登录。";
+  }
+  if (status === 403) {
+    return "无权限恢复该任务模板。";
+  }
+  if (status === 404) {
+    return "任务模板不存在或已不可用。";
+  }
+  if (status >= 500) {
+    return "恢复任务模板失败，请稍后重试。";
+  }
+  return "恢复任务模板失败，请稍后重试。";
+};
+
 const toSafeTaskListReturnTo = (value: string | undefined): string => {
   const trimmed = value?.trim();
   if (!trimmed) {
@@ -199,6 +222,11 @@ export function EditLearningTaskForm({
   const taskListReturnTo = toSafeTaskListReturnTo(returnTo);
   const rubricSeed = extractRubricFormSeed(initialTask.rubric);
   const initialCourseLabel = normalizeTaskCourseLabel(initialTask.courseLabel);
+  const rawInitialStatus = toRawStatusUpper(initialTask.status);
+  const hasKnownInitialStatus = isLearningTaskStatus(rawInitialStatus);
+  const isArchived = rawInitialStatus === "ARCHIVED";
+  const canRestore = !readOnly && isArchived;
+  const effectiveReadOnly = readOnly || isArchived || !hasKnownInitialStatus;
   const initialVisibility =
     normalizeTaskTemplateVisibility(initialTask.visibility) ??
     TASK_TEMPLATE_VISIBILITY_SHARED;
@@ -216,7 +244,7 @@ export function EditLearningTaskForm({
       : "1"
   );
   const [status, setStatus] = useState<LearningTaskStatus>(
-    toStatusInitial(initialTask.status)
+    hasKnownInitialStatus ? rawInitialStatus : toStatusInitial(initialTask.status)
   );
   const [visibility, setVisibility] =
     useState<TaskTemplateVisibility>(initialVisibility);
@@ -230,12 +258,13 @@ export function EditLearningTaskForm({
   const [designWeight, setDesignWeight] = useState(rubricSeed.designWeight);
   const [rubricNotes, setRubricNotes] = useState(rubricSeed.notes);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isRestoring, setIsRestoring] = useState(false);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [errorState, setErrorState] = useState<EditLearningTaskFormErrorState | null>(null);
 
   const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    if (readOnly) {
+    if (effectiveReadOnly) {
       return;
     }
 
@@ -387,10 +416,58 @@ export function EditLearningTaskForm({
     }
   };
 
+  const handleRestoreTask = async () => {
+    if (!canRestore || isSubmitting || isRestoring) {
+      return;
+    }
+    const confirmed = window.confirm(
+      "确认将该归档模板恢复为草稿吗？恢复后可继续编辑，但不会自动重新发布到班级。"
+    );
+    if (!confirmed) {
+      return;
+    }
+
+    setIsRestoring(true);
+    setSuccessMessage(null);
+    setErrorState(null);
+
+    try {
+      await fetchJson<unknown>(
+        `learning-tasks/tasks/${encodeURIComponent(taskId)}/restore`,
+        {
+          method: "POST",
+          headers: {
+            accept: "application/json",
+          },
+        }
+      );
+      setStatus("DRAFT");
+      setSuccessMessage("任务模板已恢复为草稿。");
+      router.refresh();
+    } catch (error) {
+      if (error instanceof BrowserFetchJsonError) {
+        const summary = getRestoreTaskErrorSummary(error.status);
+        const detail = extractRawDetail(error);
+        setErrorState({
+          status: error.status,
+          title: "恢复任务模板失败",
+          description: buildErrorDescription(summary, detail),
+        });
+      } else {
+        setErrorState({
+          title: "恢复任务模板失败",
+          description: "恢复任务模板失败，请稍后重试。",
+        });
+      }
+    } finally {
+      setIsRestoring(false);
+    }
+  };
+
   return (
     <section className="rounded-lg border border-zinc-200 bg-white p-4">
       <h2 className="text-base font-semibold text-zinc-900">
-        {readOnly ? "查看任务模板" : "编辑任务模板"}
+        {effectiveReadOnly ? "查看任务模板" : "编辑任务模板"}
       </h2>
       <p className="mt-1 text-sm text-zinc-600">
         修改的是 learning task 模板本身，不是班级任务实例。
@@ -400,9 +477,19 @@ export function EditLearningTaskForm({
           当前模板由其他教师创建，你可以查看内容，但不能编辑或发布该模板。
         </p>
       ) : null}
+      {canRestore ? (
+        <p className="mt-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+          当前任务模板已归档，不能直接编辑。请先恢复为草稿后再修改。
+        </p>
+      ) : null}
+      {!readOnly && !hasKnownInitialStatus ? (
+        <p className="mt-2 rounded-md border border-zinc-200 bg-zinc-50 px-3 py-2 text-sm text-zinc-700">
+          当前任务模板状态暂不可用，暂不允许编辑。
+        </p>
+      ) : null}
 
       <form onSubmit={handleSubmit} className="mt-4 space-y-4">
-        <fieldset disabled={isSubmitting || readOnly} className="space-y-4">
+        <fieldset disabled={isSubmitting || isRestoring || effectiveReadOnly} className="space-y-4">
         <div className="grid gap-4 md:grid-cols-2">
           <label className="block text-sm">
             <span className="mb-1 block text-zinc-700">标题</span>
@@ -593,13 +680,23 @@ export function EditLearningTaskForm({
         </section>
 
         <div className="flex flex-wrap items-center gap-3">
-          {!readOnly ? (
+          {!effectiveReadOnly ? (
             <button
               type="submit"
-              disabled={isSubmitting}
+              disabled={isSubmitting || isRestoring}
               className="rounded-md bg-zinc-900 px-4 py-2 text-sm font-medium text-white disabled:cursor-not-allowed disabled:bg-zinc-400"
             >
               {isSubmitting ? "保存中..." : "保存修改"}
+            </button>
+          ) : null}
+          {canRestore ? (
+            <button
+              type="button"
+              onClick={handleRestoreTask}
+              disabled={isSubmitting || isRestoring}
+              className="rounded-md border border-amber-300 px-4 py-2 text-sm font-medium text-amber-700 enabled:hover:bg-amber-50 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {isRestoring ? "恢复中..." : "恢复为草稿"}
             </button>
           ) : null}
           <Link href={taskListReturnTo} className="text-sm text-blue-700 hover:underline">
@@ -613,7 +710,11 @@ export function EditLearningTaskForm({
 
       {errorState ? (
         <div className="mt-4">
-          <ErrorState status={errorState.status} title="更新任务模板失败" description={errorState.description} />
+          <ErrorState
+            status={errorState.status}
+            title={errorState.title ?? "更新任务模板失败"}
+            description={errorState.description}
+          />
         </div>
       ) : null}
     </section>
