@@ -362,6 +362,7 @@ export default async function ClassroomTasksPage({
 
       <PublishClassroomTaskForm
         classroomId={classroomId}
+        currentUserId={viewModel.currentUserId}
         availableTasks={viewModel.availableTasks}
         initialAvailableTasksTotal={viewModel.availableTasksTotal}
         initialAvailableTasksPage={viewModel.availableTasksPage}
@@ -437,19 +438,25 @@ export default async function ClassroomTasksPage({
                     className="border-t border-zinc-100 align-top"
                   >
                     <td className="px-4 py-3">
-                      <div className="flex flex-wrap items-center gap-2">
-                        <span>{toDisplayText(task.title, "未命名任务")}</span>
-                        {templateStatusBadge ? (
-                          <span
-                            className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-medium ${templateStatusBadge.className}`}
-                          >
-                            {templateStatusBadge.label}
-                          </span>
-                        ) : null}
+                      <div className="space-y-1">
+                        <p className="font-medium text-zinc-900">
+                          {toDisplayText(task.title, "未命名任务")}
+                        </p>
                         {publisherLabel ? (
-                          <span className="inline-flex items-center rounded-full border border-sky-200 bg-sky-50 px-2 py-0.5 text-[11px] font-medium text-sky-700">
-                            {publisherLabel}
-                          </span>
+                          <div>
+                            <span className="inline-flex w-fit items-center rounded-full border border-sky-200 bg-sky-50 px-2 py-0.5 text-[11px] font-medium text-sky-700">
+                              {publisherLabel}
+                            </span>
+                          </div>
+                        ) : null}
+                        {templateStatusBadge ? (
+                          <div>
+                            <span
+                              className={`inline-flex w-fit items-center rounded-full border px-2 py-0.5 text-[11px] font-medium ${templateStatusBadge.className}`}
+                            >
+                              {templateStatusBadge.label}
+                            </span>
+                          </div>
                         ) : null}
                       </div>
                     </td>

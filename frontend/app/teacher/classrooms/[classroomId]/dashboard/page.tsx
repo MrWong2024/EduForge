@@ -518,29 +518,35 @@ export default async function ClassroomDashboardPage({
                           isClosedTask ? "text-slate-600" : "text-zinc-900"
                         }`}
                       >
-                        <div className="flex flex-wrap items-center gap-2">
-                          <span>
+                        <div className="space-y-1">
+                          <p>
                             {toDisplayText(
                               item.title ?? item.name,
                               "未命名任务",
                             )}
-                          </span>
+                          </p>
                           {isClosedTask ? (
-                            <span className="inline-flex items-center rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-xs font-medium text-slate-600">
-                              已关闭
-                            </span>
-                          ) : null}
-                          {taskTemplateStatusBadge ? (
-                            <span
-                              className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-medium ${taskTemplateStatusBadge.className}`}
-                            >
-                              {taskTemplateStatusBadge.label}
-                            </span>
+                            <div>
+                              <span className="inline-flex w-fit items-center rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-xs font-medium text-slate-600">
+                                已关闭
+                              </span>
+                            </div>
                           ) : null}
                           {publisherLabel ? (
-                            <span className="inline-flex items-center rounded-full border border-sky-200 bg-sky-50 px-2 py-0.5 text-[11px] font-medium text-sky-700">
-                              {publisherLabel}
-                            </span>
+                            <div>
+                              <span className="inline-flex w-fit items-center rounded-full border border-sky-200 bg-sky-50 px-2 py-0.5 text-[11px] font-medium text-sky-700">
+                                {publisherLabel}
+                              </span>
+                            </div>
+                          ) : null}
+                          {taskTemplateStatusBadge ? (
+                            <div>
+                              <span
+                                className={`inline-flex w-fit items-center rounded-full border px-2 py-0.5 text-[11px] font-medium ${taskTemplateStatusBadge.className}`}
+                              >
+                                {taskTemplateStatusBadge.label}
+                              </span>
+                            </div>
                           ) : null}
                         </div>
                       </td>

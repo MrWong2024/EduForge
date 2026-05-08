@@ -17,10 +17,11 @@ import {
   toTaskCourseLabelDisplayText,
 } from "@/lib/learning-tasks/course-labels";
 import { paths } from "@/lib/routes/paths";
-import { buildQueryString } from "@/lib/ui/format";
+import { buildQueryString, getPublisherLabel } from "@/lib/ui/format";
 
 type PublishClassroomTaskFormProps = {
   classroomId: string;
+  currentUserId?: string;
   availableTasks: LearningTaskOption[];
   initialAvailableTasksTotal?: number;
   initialAvailableTasksPage?: number;
@@ -160,6 +161,7 @@ const toStageFilter = (value: string | undefined): StageFilter => {
 
 export function PublishClassroomTaskForm({
   classroomId,
+  currentUserId,
   availableTasks,
   initialAvailableTasksTotal,
   initialAvailableTasksPage,
@@ -248,6 +250,10 @@ export function PublishClassroomTaskForm({
   const selectedRubricSummary = useMemo(
     () => toRubricSummary(selectedTask?.rubric),
     [selectedTask]
+  );
+  const selectedPublisherLabel = useMemo(
+    () => getPublisherLabel(selectedTask?.publisher, currentUserId),
+    [currentUserId, selectedTask]
   );
 
   const courseLabelOptions = useMemo(() => {
@@ -682,6 +688,10 @@ export function PublishClassroomTaskForm({
               {loadedTasks.map((task, index) => {
                 const rubricSummary = toRubricSummary(task.rubric);
                 const isActive = task.id && task.id === taskId;
+                const publisherLabel = getPublisherLabel(
+                  task.publisher,
+                  currentUserId,
+                );
                 return (
                   <li
                     key={task.id ?? `candidate-${index}`}
@@ -689,10 +699,17 @@ export function PublishClassroomTaskForm({
                       isActive ? "border-zinc-900 bg-zinc-50" : "border-zinc-200"
                     }`}
                   >
-                    <div className="flex flex-wrap items-center justify-between gap-2">
-                      <p className="text-sm font-medium text-zinc-900">
-                        {toDisplayText(task.title, "未命名任务")}
-                      </p>
+                    <div className="flex flex-wrap items-start justify-between gap-2">
+                      <div className="min-w-0 flex-1">
+                        <p className="text-sm font-medium text-zinc-900">
+                          {toDisplayText(task.title, "未命名任务")}
+                        </p>
+                        {publisherLabel ? (
+                          <span className="mt-1 inline-flex w-fit items-center rounded-full border border-sky-200 bg-sky-50 px-2 py-0.5 text-[11px] font-medium text-sky-700">
+                            {publisherLabel}
+                          </span>
+                        ) : null}
+                      </div>
                       <button
                         type="button"
                         disabled={!task.id}
@@ -742,6 +759,12 @@ export function PublishClassroomTaskForm({
                 <span className="text-zinc-500">标题：</span>
                 {toDisplayText(selectedTask.title)}
               </p>
+              {selectedPublisherLabel ? (
+                <p>
+                  <span className="text-zinc-500">模板发布者：</span>
+                  {selectedPublisherLabel}
+                </p>
+              ) : null}
               <p>
                 <span className="text-zinc-500">状态：</span>
                 {toDisplayText(selectedTask.status)}
