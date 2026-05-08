@@ -58,6 +58,10 @@ const makeQuery = <T>(result: T) => {
   return chain;
 };
 
+const makeAggregate = <T>(result: T) => ({
+  exec: jest.fn().mockResolvedValue(result),
+});
+
 const createHarness = (options: HarnessOptions = {}) => {
   const studentId = options.submissions?.[0]?.studentId ?? objectId();
   const classroomId = objectId();
@@ -318,6 +322,120 @@ describe('ClassroomTasksService createClassroomTaskSubmission participation stat
     expect(
       harness.learningTasksService.createSubmissionForClassroomTask,
     ).not.toHaveBeenCalled();
+  });
+});
+
+describe('ClassroomTasksService listClassroomTasks publisher contract', () => {
+  it('returns taskPublisher summaries without changing classroomTask or template status fields', async () => {
+    const classroomId = objectId();
+    const teacherId = objectId();
+    const publisherId = objectId();
+    const missingPublisherId = objectId();
+    const classroom = {
+      _id: classroomId,
+      name: 'Class A',
+      teacherId,
+      courseId: objectId(),
+      status: ClassroomStatus.Active,
+    };
+    const items = [
+      {
+        _id: objectId(),
+        classroomId,
+        taskId: objectId(),
+        status: CLASSROOM_TASK_STATUS_ACTIVE,
+        publishedAt: new Date('2026-01-01T00:00:00.000Z'),
+        createdBy: teacherId,
+        createdAt: new Date('2026-01-01T00:00:00.000Z'),
+        updatedAt: new Date('2026-01-02T00:00:00.000Z'),
+        task: {
+          title: 'Published Template',
+          description: 'Description',
+          knowledgeModule: 'module',
+          stage: 1,
+          status: TaskStatus.Published,
+          createdBy: publisherId,
+        },
+      },
+      {
+        _id: objectId(),
+        classroomId,
+        taskId: objectId(),
+        status: CLASSROOM_TASK_STATUS_CLOSED,
+        publishedAt: new Date('2026-01-03T00:00:00.000Z'),
+        createdBy: teacherId,
+        createdAt: new Date('2026-01-03T00:00:00.000Z'),
+        updatedAt: new Date('2026-01-04T00:00:00.000Z'),
+        task: {
+          title: 'Draft Template',
+          description: 'Description',
+          knowledgeModule: 'module',
+          stage: 2,
+          status: TaskStatus.Draft,
+          createdBy: missingPublisherId,
+        },
+      },
+    ];
+    const classroomModel = {
+      findById: jest.fn(() => makeQuery(classroom)),
+    };
+    const classroomTaskModel = {
+      aggregate: jest.fn((pipeline: unknown[]) =>
+        makeAggregate(
+          pipeline.some(
+            (stage) => '$count' in (stage as Record<string, unknown>),
+          )
+            ? [{ total: items.length }]
+            : items,
+        ),
+      ),
+    };
+    const userModel = {
+      findById: jest.fn(() => makeQuery({ roles: ['teacher'] })),
+      find: jest.fn(() =>
+        makeQuery([{ _id: publisherId, name: 'Publisher One' }]),
+      ),
+    };
+    const service = new ClassroomTasksService(
+      classroomModel as unknown as Model<Classroom>,
+      {} as unknown as Model<Course>,
+      classroomTaskModel as unknown as Model<ClassroomTask>,
+      {} as unknown as Model<Task>,
+      {} as unknown as Model<Submission>,
+      {} as unknown as Model<Feedback>,
+      userModel as unknown as Model<User>,
+      {} as unknown as EnrollmentService,
+      {} as unknown as AiFeedbackJobService,
+      {} as unknown as LearningTasksService,
+    );
+
+    const result = await service.listClassroomTasks(
+      classroomId.toString(),
+      {},
+      teacherId.toString(),
+    );
+
+    expect(result.items).toHaveLength(2);
+    expect(result.items[0]).toMatchObject({
+      status: CLASSROOM_TASK_STATUS_ACTIVE,
+      taskPublisher: {
+        id: publisherId.toString(),
+        name: 'Publisher One',
+      },
+      task: {
+        status: TaskStatus.Published,
+      },
+    });
+    expect(result.items[1]).toMatchObject({
+      status: CLASSROOM_TASK_STATUS_CLOSED,
+      taskPublisher: {
+        id: missingPublisherId.toString(),
+      },
+      task: {
+        status: TaskStatus.Draft,
+      },
+    });
+    expect(userModel.find).toHaveBeenCalledTimes(1);
   });
 });
 

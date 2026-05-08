@@ -282,6 +282,7 @@ AI Provider 错误码（`ai-feedback-provider.error-codes.ts`）：
   - `includeClosedTasks=true` 时返回 `ACTIVE+CLOSED`；`RECALLED/缺失/未知状态` 仍不返回。
   - 每个 task item 返回 `classroomTaskStatus`，字段值来自 `ClassroomTask.status`，供前端后续标记已关闭任务。
   - 每个 task item 也返回 `taskTemplateStatus(DRAFT|PUBLISHED|ARCHIVED|null)`，字段值来自关联任务模板当前状态；教师看板不因模板转为 `DRAFT/ARCHIVED` 而隐藏既有课堂任务实例，前端后续可仅对非 `PUBLISHED` 显示轻量异常标签。
+  - 每个 task item 同步返回 `taskPublisher:{id,name?}|null`，来源为关联模板 `Task.createdBy` 用户摘要，仅暴露 `id/name`。
   - summary 与任务级统计均基于本次返回任务集合：默认排除 `CLOSED`，显式包含关闭任务时统计随返回集合扩大。
 - 教师班级归档建议契约（后端已完成，前端待后续阶段接入）：
   - `GET /api/classrooms/:id/dashboard` 顶层新增 `archiveSuggestion`，用于提示教师“建议归档”，第一版不做自动归档，不修改班级状态。
@@ -290,6 +291,11 @@ AI Provider 错误码（`ai-feedback-provider.error-codes.ts`）：
   - 当前活跃课堂任务定义与学生看板时间窗口对齐：`ClassroomTask.status=ACTIVE` + 模板 `Task.status=PUBLISHED`，有 `dueAt` 时截止后 30 天内仍算活跃，无 `dueAt` 时 `publishedAt` 90 天内算活跃。
   - `CLOSED/RECALLED` classroomTask 与非 `PUBLISHED` task 不算活跃任务；`archiveSuggestion` 独立于 `includeClosedTasks`，教师是否显示 CLOSED 任务不会改变建议结果。
   - 学生看板与学生提交仍要求模板 `Task.status=PUBLISHED`；本契约只补教师看板历史进展展示所需状态字段。
+- 教师侧模板发布者摘要契约（后端已完成，前端待后续阶段接入）：
+  - `GET /api/classrooms/:id/tasks` 的课堂任务 item 返回 `taskPublisher:{id,name?}|null`，表示关联模板创建者/发布者。
+  - `GET /api/classrooms/:id/dashboard` 的任务进展 item 返回同字段；不改变 `taskTemplateStatus`、过滤、排序、统计。
+  - `GET /api/learning-tasks/tasks` 与 `GET /api/learning-tasks/tasks/:id` 返回 `publisher:{id,name?}|null`。
+  - 发布者摘要只含 `id/name`；前端后续可用 `currentUser.id !== publisher.id` 决定是否显示“模板发布者”。
 - 学生看板任务完成情况契约（后端已完成，前端待后续阶段接入）：
   - `GET /api/classrooms/mine/dashboard` 的每个 task item 顶层新增 `completionStatus`。
   - 学生看板定位为当前学习工作台，默认只返回 `classroom.status=ACTIVE`、`classroomTask.status=ACTIVE`、模板 `task.status=PUBLISHED` 且仍值得关注的任务；归档班级、已关闭或其它非 ACTIVE 课堂任务默认不显示。

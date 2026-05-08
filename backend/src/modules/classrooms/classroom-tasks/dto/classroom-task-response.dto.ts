@@ -13,6 +13,10 @@ export class ClassroomTaskResponseDto {
   createdBy!: string;
   createdAt!: Date;
   updatedAt!: Date;
+  taskPublisher?: {
+    id: string;
+    name?: string;
+  } | null;
   task!: {
     title: string;
     description: string;

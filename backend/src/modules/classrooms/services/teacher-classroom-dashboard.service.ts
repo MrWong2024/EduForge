@@ -20,6 +20,7 @@ import { EnrollmentService } from '../enrollments/services/enrollment.service';
 import { WithId } from '../../../common/types/with-id.type';
 import { WithTimestamps } from '../../../common/types/with-timestamps.type';
 import { TaskStatus } from '../../learning-tasks/schemas/task.schema';
+import { User } from '../../users/schemas/user.schema';
 
 type ClassroomLean = Classroom & WithId & WithTimestamps;
 
@@ -28,6 +29,7 @@ type SubmissionLean = Submission & WithTimestamps;
 type ClassroomTaskDashboardItem = {
   _id: Types.ObjectId;
   taskId: Types.ObjectId;
+  taskPublisherId?: Types.ObjectId | null;
   taskTemplateStatus?: TaskStatus | null;
   title: string;
   stage: number;
@@ -77,6 +79,9 @@ type TagStats = {
   tags: { tag: string; count: number }[];
 };
 
+type PublisherSummary = { id: string; name?: string };
+type PublisherUserLean = Pick<User, 'name'> & WithId;
+
 @Injectable()
 export class TeacherClassroomDashboardService {
   private static readonly TOP_TAGS_LIMIT = 5;
@@ -96,6 +101,7 @@ export class TeacherClassroomDashboardService {
     @InjectModel(Feedback.name) private readonly feedbackModel: Model<Feedback>,
     @InjectModel(AiFeedbackJob.name)
     private readonly aiFeedbackJobModel: Model<AiFeedbackJob>,
+    @InjectModel(User.name) private readonly userModel: Model<User>,
     private readonly enrollmentService: EnrollmentService,
   ) {}
 
@@ -139,6 +145,7 @@ export class TeacherClassroomDashboardService {
         $project: {
           _id: 1,
           taskId: 1,
+          taskPublisherId: '$task.createdBy',
           classroomTaskStatus: '$status',
           publishedAt: 1,
           dueAt: 1,
@@ -159,9 +166,12 @@ export class TeacherClassroomDashboardService {
     );
 
     const classroomTaskIds = visibleClassroomTasks.map((task) => task._id);
-    const studentsCount = await this.enrollmentService.countStudents(
-      classroom._id.toString(),
-    );
+    const [studentsCount, publisherMap] = await Promise.all([
+      this.enrollmentService.countStudents(classroom._id.toString()),
+      this.getPublisherSummaryMap(
+        visibleClassroomTasks.map((task) => task.taskPublisherId),
+      ),
+    ]);
     if (classroomTaskIds.length === 0) {
       return {
         classroom: {
@@ -368,6 +378,10 @@ export class TeacherClassroomDashboardService {
           classroomTaskId: task._id.toString(),
           classroomTaskStatus: task.classroomTaskStatus,
           taskId: task.taskId.toString(),
+          taskPublisher: this.getPublisherSummaryFromMap(
+            task.taskPublisherId,
+            publisherMap,
+          ),
           taskTemplateStatus: task.taskTemplateStatus ?? null,
           title: task.title,
           stage: task.stage,
@@ -393,6 +407,76 @@ export class TeacherClassroomDashboardService {
     return includeClosedTasks
       ? [CLASSROOM_TASK_STATUS_ACTIVE, CLASSROOM_TASK_STATUS_CLOSED]
       : [CLASSROOM_TASK_STATUS_ACTIVE];
+  }
+
+  private async getPublisherSummaryMap(
+    userIds: Array<Types.ObjectId | string | null | undefined>,
+  ) {
+    const idStrings = Array.from(
+      new Set(
+        userIds
+          .map((userId) => this.normalizeObjectId(userId))
+          .filter((userId): userId is string => Boolean(userId)),
+      ),
+    );
+    if (idStrings.length === 0) {
+      return new Map<string, PublisherSummary>();
+    }
+
+    const users = await this.userModel
+      .find({ _id: { $in: idStrings.map((id) => new Types.ObjectId(id)) } })
+      .select('_id name')
+      .lean<PublisherUserLean[]>()
+      .exec();
+    const publisherMap = new Map<string, PublisherSummary>();
+    for (const user of users) {
+      const summary = this.toPublisherSummary(user._id, user);
+      if (summary) {
+        publisherMap.set(summary.id, summary);
+      }
+    }
+    return publisherMap;
+  }
+
+  private getPublisherSummaryFromMap(
+    userId: Types.ObjectId | string | null | undefined,
+    publisherMap: Map<string, PublisherSummary>,
+  ) {
+    const id = this.normalizeObjectId(userId);
+    if (!id) {
+      return null;
+    }
+    return publisherMap.get(id) ?? { id };
+  }
+
+  private toPublisherSummary(
+    userId: Types.ObjectId | string | null | undefined,
+    user: PublisherUserLean | null | undefined,
+  ): PublisherSummary | null {
+    const id = this.normalizeObjectId(user?._id ?? userId);
+    if (!id) {
+      return null;
+    }
+    const name = this.toOptionalName(user?.name);
+    return name ? { id, name } : { id };
+  }
+
+  private normalizeObjectId(value: unknown) {
+    if (value instanceof Types.ObjectId) {
+      return value.toString();
+    }
+    if (typeof value === 'string' && Types.ObjectId.isValid(value)) {
+      return new Types.ObjectId(value).toString();
+    }
+    return null;
+  }
+
+  private toOptionalName(value: unknown) {
+    if (typeof value !== 'string') {
+      return undefined;
+    }
+    const trimmed = value.trim();
+    return trimmed.length > 0 ? trimmed : undefined;
   }
 
   private async getArchiveSuggestionCandidates(classroomId: Types.ObjectId) {

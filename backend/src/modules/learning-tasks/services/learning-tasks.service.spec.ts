@@ -18,6 +18,10 @@ import { CreateSubmissionDto } from '../dto/create-submission.dto';
 import { Feedback } from '../schemas/feedback.schema';
 import { Submission } from '../schemas/submission.schema';
 import { Task, TaskStatus } from '../schemas/task.schema';
+import {
+  TASK_TEMPLATE_SCOPE_ALL,
+  TASK_VISIBILITY_SHARED,
+} from '../task-template-visibility.constants';
 import { LearningTasksService } from './learning-tasks.service';
 
 const objectId = () => new Types.ObjectId();
@@ -26,11 +30,15 @@ const makeQuery = <T>(result: T) => {
   const chain = {
     select: jest.fn(),
     sort: jest.fn(),
+    skip: jest.fn(),
+    limit: jest.fn(),
     lean: jest.fn(),
     exec: jest.fn().mockResolvedValue(result),
   };
   chain.select.mockReturnValue(chain);
   chain.sort.mockReturnValue(chain);
+  chain.skip.mockReturnValue(chain);
+  chain.limit.mockReturnValue(chain);
   chain.lean.mockReturnValue(chain);
   return chain;
 };
@@ -244,6 +252,125 @@ describe('LearningTasksService task template restore', () => {
       ),
     ).rejects.toThrow('Archived tasks cannot be updated');
     expect(harness.task.save).not.toHaveBeenCalled();
+  });
+});
+
+describe('LearningTasksService task template publisher contract', () => {
+  const createTask = (params: {
+    id?: Types.ObjectId;
+    createdBy: Types.ObjectId;
+    title: string;
+    status?: TaskStatus;
+  }) => ({
+    _id: params.id ?? objectId(),
+    title: params.title,
+    description: 'Description',
+    knowledgeModule: 'Module',
+    courseLabel: 'Course',
+    visibility: TASK_VISIBILITY_SHARED,
+    stage: 1,
+    status: params.status ?? TaskStatus.Published,
+    createdBy: params.createdBy,
+    createdAt: new Date('2026-01-01T00:00:00.000Z'),
+    updatedAt: new Date('2026-01-02T00:00:00.000Z'),
+  });
+
+  it('returns publisher summaries for task template list items including shared templates', async () => {
+    const currentTeacherId = objectId();
+    const otherTeacherId = objectId();
+    const tasks = [
+      createTask({ createdBy: currentTeacherId, title: 'Mine' }),
+      createTask({ createdBy: otherTeacherId, title: 'Shared' }),
+    ];
+    const taskModel = {
+      find: jest.fn(() => makeQuery(tasks)),
+      countDocuments: jest.fn().mockResolvedValue(tasks.length),
+    };
+    const userModel = {
+      find: jest.fn(() =>
+        makeQuery([
+          {
+            _id: currentTeacherId,
+            name: 'Current Teacher',
+            email: 'hidden@example.com',
+          },
+          { _id: otherTeacherId, name: 'Other Teacher', roles: ['teacher'] },
+        ]),
+      ),
+    };
+    const service = new LearningTasksService(
+      { get: jest.fn() } as unknown as ConfigService,
+      taskModel as unknown as Model<Task>,
+      {} as unknown as Model<Submission>,
+      {} as unknown as Model<Feedback>,
+      {} as unknown as Model<ClassroomTask>,
+      {} as unknown as Model<Classroom>,
+      userModel as unknown as Model<User>,
+      {} as unknown as AiFeedbackJobService,
+    );
+
+    const result = await service.listTasks(
+      { scope: TASK_TEMPLATE_SCOPE_ALL },
+      currentTeacherId.toString(),
+    );
+
+    expect(result.items).toHaveLength(2);
+    expect(result.items[0].publisher).toEqual({
+      id: currentTeacherId.toString(),
+      name: 'Current Teacher',
+    });
+    expect(result.items[1].publisher).toEqual({
+      id: otherTeacherId.toString(),
+      name: 'Other Teacher',
+    });
+    expect(result.items[0].publisher).not.toHaveProperty('email');
+    expect(result.items[1].publisher).not.toHaveProperty('roles');
+    expect(userModel.find).toHaveBeenCalledTimes(1);
+  });
+
+  it('returns publisher summary for shared task template detail visible to a non-author', async () => {
+    const currentTeacherId = objectId();
+    const otherTeacherId = objectId();
+    const task = createTask({
+      createdBy: otherTeacherId,
+      title: 'Shared Detail',
+    });
+    const taskModel = {
+      findById: jest.fn(() => makeQuery(task)),
+    };
+    const userModel = {
+      find: jest.fn(() =>
+        makeQuery([
+          {
+            _id: otherTeacherId,
+            name: 'Other Teacher',
+            status: 'ACTIVE',
+          },
+        ]),
+      ),
+    };
+    const service = new LearningTasksService(
+      { get: jest.fn() } as unknown as ConfigService,
+      taskModel as unknown as Model<Task>,
+      {} as unknown as Model<Submission>,
+      {} as unknown as Model<Feedback>,
+      {} as unknown as Model<ClassroomTask>,
+      {} as unknown as Model<Classroom>,
+      userModel as unknown as Model<User>,
+      {} as unknown as AiFeedbackJobService,
+    );
+
+    const result = await service.getTask(
+      task._id.toString(),
+      currentTeacherId.toString(),
+    );
+
+    expect(result.publisher).toEqual({
+      id: otherTeacherId.toString(),
+      name: 'Other Teacher',
+    });
+    expect(result.publisher).not.toHaveProperty('status');
+    expect(userModel.find).toHaveBeenCalledTimes(1);
   });
 });
 

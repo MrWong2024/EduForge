@@ -15,6 +15,7 @@ import { Feedback } from '../../learning-tasks/schemas/feedback.schema';
 import { EnrollmentService } from '../enrollments/services/enrollment.service';
 import { TeacherClassroomDashboardService } from './teacher-classroom-dashboard.service';
 import { TaskStatus } from '../../learning-tasks/schemas/task.schema';
+import { User } from '../../users/schemas/user.schema';
 
 type ClassroomTaskFixture = {
   _id: Types.ObjectId;
@@ -27,6 +28,12 @@ type ClassroomTaskFixture = {
   publishedAt: Date;
   dueAt?: Date;
   taskStatus?: string;
+  taskCreatedBy?: Types.ObjectId;
+};
+
+type UserFixture = {
+  _id: Types.ObjectId;
+  name?: string;
 };
 
 type SubmissionFixture = {
@@ -56,15 +63,18 @@ type HarnessData = {
   submissions?: SubmissionFixture[];
   aiJobs?: AiJobFixture[];
   feedbacks?: FeedbackFixture[];
+  users?: UserFixture[];
 };
 
 const objectId = () => new Types.ObjectId();
 
 const makeQuery = <T>(result: T) => {
   const chain = {
+    select: jest.fn(),
     lean: jest.fn(),
     exec: jest.fn().mockResolvedValue(result),
   };
+  chain.select.mockReturnValue(chain);
   chain.lean.mockReturnValue(chain);
   return chain;
 };
@@ -117,6 +127,10 @@ const createHarness = (data: HarnessData = {}) => {
       publishedAt: new Date('2026-01-01T00:00:00.000Z'),
     },
   ];
+  const defaultPublisherId = objectId();
+  const users = data.users ?? [
+    { _id: defaultPublisherId, name: 'Template Owner' },
+  ];
   const submissions = data.submissions ?? [];
   const aiJobs = data.aiJobs ?? [];
   const feedbacks = data.feedbacks ?? [];
@@ -136,6 +150,7 @@ const createHarness = (data: HarnessData = {}) => {
       .map((task) => ({
         _id: task._id,
         taskId: task.taskId,
+        taskPublisherId: task.taskCreatedBy ?? defaultPublisherId,
         classroomTaskStatus: task.status ?? '',
         taskTemplateStatus: task.taskStatus ?? TaskStatus.Published,
         publishedAt: task.publishedAt,
@@ -294,6 +309,14 @@ const createHarness = (data: HarnessData = {}) => {
       makeAggregate(getTagStats(pipeline)),
     ),
   };
+  const userModel = {
+    find: jest.fn((query: Record<string, { $in?: Types.ObjectId[] }>) => {
+      const userIds = toIdSet(query._id?.$in ?? []);
+      return makeQuery(
+        users.filter((user) => userIds.has(user._id.toString())),
+      );
+    }),
+  };
   const getLastSubmission = (query: Record<string, unknown>) => {
     const classroomTaskIds = toIdSet(
       (query.classroomTaskId as { $in?: Types.ObjectId[] })?.$in ?? [],
@@ -343,6 +366,7 @@ const createHarness = (data: HarnessData = {}) => {
     submissionModel as unknown as Model<Submission>,
     feedbackModel as unknown as Model<Feedback>,
     aiFeedbackJobModel as unknown as Model<AiFeedbackJob>,
+    userModel as unknown as Model<User>,
     enrollmentService as unknown as EnrollmentService,
   );
 
@@ -352,6 +376,7 @@ const createHarness = (data: HarnessData = {}) => {
     classroomTaskModel,
     submissionModel,
     feedbackModel,
+    userModel,
     ids: { classroomId, teacherId },
   };
 };
@@ -464,6 +489,7 @@ describe('TeacherClassroomDashboardService', () => {
     expect(dashboard.tasks[0]).toMatchObject({
       classroomTaskId: activeTaskId.toString(),
       classroomTaskStatus: CLASSROOM_TASK_STATUS_ACTIVE,
+      taskPublisher: { name: 'Template Owner' },
       taskTemplateStatus: TaskStatus.Published,
       submissionsCount: 1,
       aiFeedback: { succeeded: 1, failed: 0, notRequested: 0 },
@@ -611,6 +637,7 @@ describe('TeacherClassroomDashboardService', () => {
     expect(dashboard.tasks[1]).toMatchObject({
       classroomTaskId: closedTaskId.toString(),
       classroomTaskStatus: CLASSROOM_TASK_STATUS_CLOSED,
+      taskPublisher: { name: 'Template Owner' },
       taskTemplateStatus: TaskStatus.Draft,
       submissionsCount: 1,
       aiFeedback: { failed: 1, notRequested: 0 },
@@ -621,6 +648,8 @@ describe('TeacherClassroomDashboardService', () => {
     const classroomId = objectId();
     const draftTemplateTaskId = objectId();
     const archivedTemplateTaskId = objectId();
+    const draftPublisherId = objectId();
+    const archivedPublisherId = objectId();
     const harness = createHarness({
       classroomTasks: [
         {
@@ -629,6 +658,7 @@ describe('TeacherClassroomDashboardService', () => {
           classroomId,
           status: CLASSROOM_TASK_STATUS_ACTIVE,
           taskStatus: TaskStatus.Draft,
+          taskCreatedBy: draftPublisherId,
           title: 'Draft Template Task',
           stage: 1,
           knowledgeModule: 'module',
@@ -640,6 +670,7 @@ describe('TeacherClassroomDashboardService', () => {
           classroomId,
           status: CLASSROOM_TASK_STATUS_ACTIVE,
           taskStatus: TaskStatus.Archived,
+          taskCreatedBy: archivedPublisherId,
           title: 'Archived Template Task',
           stage: 1,
           knowledgeModule: 'module',
@@ -652,6 +683,10 @@ describe('TeacherClassroomDashboardService', () => {
           classroomTaskId: draftTemplateTaskId,
           studentId: objectId(),
         },
+      ],
+      users: [
+        { _id: draftPublisherId, name: 'Draft Owner' },
+        { _id: archivedPublisherId, name: 'Archived Owner' },
       ],
     });
 
@@ -667,12 +702,20 @@ describe('TeacherClassroomDashboardService', () => {
           classroomTaskId: draftTemplateTaskId.toString(),
           classroomTaskStatus: CLASSROOM_TASK_STATUS_ACTIVE,
           taskTemplateStatus: TaskStatus.Draft,
+          taskPublisher: {
+            id: draftPublisherId.toString(),
+            name: 'Draft Owner',
+          },
           submissionsCount: 1,
         }),
         expect.objectContaining({
           classroomTaskId: archivedTemplateTaskId.toString(),
           classroomTaskStatus: CLASSROOM_TASK_STATUS_ACTIVE,
           taskTemplateStatus: TaskStatus.Archived,
+          taskPublisher: {
+            id: archivedPublisherId.toString(),
+            name: 'Archived Owner',
+          },
           submissionsCount: 0,
         }),
       ]),

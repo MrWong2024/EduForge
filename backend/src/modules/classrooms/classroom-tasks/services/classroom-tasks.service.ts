@@ -78,6 +78,8 @@ type CourseWithLabelLean = Pick<Course, 'courseLabel'> & WithId;
 type ClassroomOwnerLean = Pick<Classroom, 'teacherId'> & WithId;
 type ClassroomTaskOwnerLean = Pick<ClassroomTask, 'classroomId'> & WithId;
 type ClassroomTaskSubmitTemplateLean = Pick<Task, 'status'> & WithId;
+type PublisherSummary = { id: string; name?: string };
+type PublisherUserLean = Pick<User, 'name'> & WithId;
 type TaskWithMeta = Task & WithId & WithTimestamps;
 type PublishableTaskTemplateAgg = TaskWithMeta & {
   __courseLabelPriority?: number;
@@ -692,16 +694,27 @@ export class ClassroomTasksService {
       { $count: 'total' },
     ];
 
-    const items = await this.classroomTaskModel
-      .aggregate<ClassroomTaskWithTask>(itemsPipeline)
-      .exec();
-    const totalResult = await this.classroomTaskModel
-      .aggregate<{ total: number }>(totalPipeline)
-      .exec();
+    const [items, totalResult] = await Promise.all([
+      this.classroomTaskModel
+        .aggregate<ClassroomTaskWithTask>(itemsPipeline)
+        .exec(),
+      this.classroomTaskModel
+        .aggregate<{ total: number }>(totalPipeline)
+        .exec(),
+    ]);
     const total = totalResult[0]?.total ?? 0;
+    const publisherMap = await this.getPublisherSummaryMap(
+      items.map((item) => item.task.createdBy),
+    );
 
     return {
-      items: items.map((item) => this.toClassroomTaskResponse(item, item.task)),
+      items: items.map((item) =>
+        this.toClassroomTaskResponse(
+          item,
+          item.task,
+          this.getPublisherSummaryFromMap(item.task.createdBy, publisherMap),
+        ),
+      ),
       total,
       page,
       limit,
@@ -741,7 +754,8 @@ export class ClassroomTasksService {
       throw new NotFoundException('Task not found');
     }
 
-    return this.toClassroomTaskResponse(classroomTask, task);
+    const taskPublisher = await this.getPublisherSummaryById(task.createdBy);
+    return this.toClassroomTaskResponse(classroomTask, task, taskPublisher);
   }
 
   async createClassroomTaskSubmission(
@@ -1835,6 +1849,7 @@ export class ClassroomTasksService {
   private toClassroomTaskResponse(
     classroomTask: ClassroomTaskWithMeta,
     task: Task,
+    taskPublisher?: PublisherSummary | null,
   ) {
     return {
       id: classroomTask._id.toString(),
@@ -1847,6 +1862,8 @@ export class ClassroomTasksService {
       createdBy: classroomTask.createdBy.toString(),
       createdAt: classroomTask.createdAt ?? new Date(0),
       updatedAt: classroomTask.updatedAt ?? new Date(0),
+      taskPublisher:
+        taskPublisher ?? this.toPublisherSummary(task.createdBy, null),
       task: {
         title: task.title,
         description: task.description,
@@ -1856,5 +1873,82 @@ export class ClassroomTasksService {
         status: task.status,
       },
     } as ClassroomTaskResponseDto;
+  }
+
+  private async getPublisherSummaryById(
+    userId: Types.ObjectId | string | null | undefined,
+  ) {
+    const publisherMap = await this.getPublisherSummaryMap([userId]);
+    return this.getPublisherSummaryFromMap(userId, publisherMap);
+  }
+
+  private async getPublisherSummaryMap(
+    userIds: Array<Types.ObjectId | string | null | undefined>,
+  ) {
+    const idStrings = Array.from(
+      new Set(
+        userIds
+          .map((userId) => this.normalizeObjectId(userId))
+          .filter((userId): userId is string => Boolean(userId)),
+      ),
+    );
+    if (idStrings.length === 0) {
+      return new Map<string, PublisherSummary>();
+    }
+
+    const users = await this.userModel
+      .find({ _id: { $in: idStrings.map((id) => new Types.ObjectId(id)) } })
+      .select('_id name')
+      .lean<PublisherUserLean[]>()
+      .exec();
+    const publisherMap = new Map<string, PublisherSummary>();
+    for (const user of users) {
+      const summary = this.toPublisherSummary(user._id, user);
+      if (summary) {
+        publisherMap.set(summary.id, summary);
+      }
+    }
+    return publisherMap;
+  }
+
+  private getPublisherSummaryFromMap(
+    userId: Types.ObjectId | string | null | undefined,
+    publisherMap: Map<string, PublisherSummary>,
+  ) {
+    const id = this.normalizeObjectId(userId);
+    if (!id) {
+      return null;
+    }
+    return publisherMap.get(id) ?? { id };
+  }
+
+  private toPublisherSummary(
+    userId: Types.ObjectId | string | null | undefined,
+    user: PublisherUserLean | null | undefined,
+  ): PublisherSummary | null {
+    const id = this.normalizeObjectId(user?._id ?? userId);
+    if (!id) {
+      return null;
+    }
+    const name = this.toOptionalName(user?.name);
+    return name ? { id, name } : { id };
+  }
+
+  private normalizeObjectId(value: unknown) {
+    if (value instanceof Types.ObjectId) {
+      return value.toString();
+    }
+    if (typeof value === 'string' && Types.ObjectId.isValid(value)) {
+      return new Types.ObjectId(value).toString();
+    }
+    return null;
+  }
+
+  private toOptionalName(value: unknown) {
+    if (typeof value !== 'string') {
+      return undefined;
+    }
+    const trimmed = value.trim();
+    return trimmed.length > 0 ? trimmed : undefined;
   }
 }

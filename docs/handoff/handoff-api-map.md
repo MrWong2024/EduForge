@@ -89,7 +89,7 @@ Notes:
 - 前后端分层说明：本节记录的是“后端兼容支持集合”；前端当前展示项与默认值仍可能滞后，下一阶段前端再切换主展示策略。
 - `/api/classrooms/:classroomId/export/snapshot` Query: `window, limitStudents, limitAssessment, includePerTask`；teacher only；体积保护采用 limit 截断并在 `meta.notes` 写明；不返回敏感字段。
 - `/api/classrooms/:id/students`：teacher only + owner only（非 owner 返回 `404`）；成员来源只认 Enrollment（`role=STUDENT`）；默认只返回 `status=ACTIVE`，`includeRemoved=1/true` 时返回 `ACTIVE+REMOVED`；不读取/不回退 `classroom.studentIds`；默认排序 `joinedAt desc, _id desc`；不返回 `passwordHash`。
-- `/api/classrooms/:id/dashboard`：teacher only + owner only；默认只返回 `classroomTask.status=ACTIVE` 的任务；`includeClosedTasks=true` 时返回 `ACTIVE+CLOSED`；`RECALLED/缺失/未知状态` 不返回；每个 task item 返回 `classroomTaskStatus` 与关联模板状态 `taskTemplateStatus(DRAFT|PUBLISHED|ARCHIVED|null)`，教师看板不因模板非 `PUBLISHED` 过滤既有课堂任务实例；统计口径与返回任务集合一致；顶层返回 `archiveSuggestion`，仅作为“建议归档”提示，不会自动归档或修改班级状态。
+- `/api/classrooms/:id/dashboard`：teacher only + owner only；默认只返回 `classroomTask.status=ACTIVE` 的任务；`includeClosedTasks=true` 时返回 `ACTIVE+CLOSED`；`RECALLED/缺失/未知状态` 不返回；每个 task item 返回 `classroomTaskStatus`、关联模板状态 `taskTemplateStatus(DRAFT|PUBLISHED|ARCHIVED|null)` 与关联模板发布者摘要 `taskPublisher:{id,name?}|null`；教师看板不因模板非 `PUBLISHED` 过滤既有课堂任务实例；统计口径与返回任务集合一致；顶层返回 `archiveSuggestion`，仅作为“建议归档”提示，不会自动归档或修改班级状态。
 - `/api/classrooms/mine/dashboard`：student only；默认只返回 `classroom.status=ACTIVE`、`classroomTask.status=ACTIVE`、模板 `task.status=PUBLISHED` 且仍值得关注的任务；有 `dueAt` 时截止后 30 天内仍显示并标记 `RECENTLY_EXPIRED`，超过 30 天为 `HISTORICAL` 且默认隐藏；无 `dueAt` 时 `publishedAt` 90 天内显示，超过 90 天为 `HISTORICAL` 且默认隐藏；`includeHistorical=true` 返回 `CURRENT+RECENTLY_EXPIRED+HISTORICAL`，但仍不返回归档班级或非 ACTIVE classroomTask；每个 task item 返回 `studentVisibilityStatus/isHistorical`，`total` 按最终返回班级分组统计。
 - 班级状态契约：`Classroom.status` 支持 `ACTIVE | ARCHIVED`；`PATCH /api/classrooms/:id` 可通过 body `status` 实现归档与恢复（`ARCHIVED <-> ACTIVE`）。
 - 班级响应契约：`ClassroomResponse` 继续保留 `courseId`，并新增只读 `course` 摘要对象（`id/code/name/term/courseLabel/status`）；课程记录缺失时允许 `course` 为空，但不得影响班级读取。
@@ -121,6 +121,7 @@ Notes:
 - `PATCH /api/classrooms/:classroomId/tasks/:classroomTaskId/status`：teacher only + owner only；`status` 入参允许 `ACTIVE/CLOSED/RECALLED`，但流转受后端状态机约束：允许 `ACTIVE -> CLOSED`、`ACTIVE -> RECALLED`、`CLOSED -> ACTIVE`，拒绝 `RECALLED` 相关恢复/再次流转与 `CLOSED -> RECALLED`；当目标为 `RECALLED` 且已有提交时返回 `400`（提示只能关闭）。
 - `CLOSED -> ACTIVE` 仅恢复提交状态，不会自动修改 `dueAt/settings.allowLate/settings.maxAttempts`；若需延长期限或修改规则，仍需调用实例配置更新接口。
 - 课堂任务返回口径（列表/详情/my-task-detail 的 `classroomTask` 区块）已补 `status` 字段；旧数据缺省状态按 `ACTIVE` 兼容输出。
+- `GET /api/classrooms/:id/tasks` 列表与详情 item 返回关联模板发布者摘要 `taskPublisher:{id,name?}|null`，来源为底层 `Task.createdBy` 用户，只含 `id/name`，不暴露完整 User。
 - `/api/classrooms/:classroomId/tasks/:classroomTaskId/submissions`：提交前先校验 `classroom.status=ACTIVE`、`ClassroomTask.status=ACTIVE`、模板 `task.status=PUBLISHED` 与 Enrollment ACTIVE；归档班级、关闭/撤回课堂任务、非发布模板均拒绝新提交且不创建 submission/AI job；此外若 `dueAt` 存在且 `allowLate=false` 且 `now>dueAt`，拒绝（403），`error code = LATE_SUBMISSION_NOT_ALLOWED`；Submission 响应包含 `submittedAt/isLate/lateBySeconds` 语义字段。
 - `GET /api/classrooms/:classroomId/tasks/:classroomTaskId/submissions`：teacher only + owner only（非 owner 返回 `404`）；只按 `classroomTaskId` 分页查询，禁止按 `taskId` 跨班聚合；默认排序 `submittedAt desc, _id desc`；`aiFeedbackStatus` 无 job 时为 `NOT_REQUESTED`；`items[*].feedbackCount` 为该 submission 在 Feedback 集合中的总条数（按当前页 submissionIds 批量聚合），无反馈时返回 `0`；不返回 `passwordHash`、`content.codeText`。
 - `/api/classrooms/:classroomId/tasks/:classroomTaskId/my-task-detail`：student only，且必须 Enrollment ACTIVE；Query: `includeFeedbackItems, feedbackLimit`；响应顶层返回 `participationStatus`（`readOnly/canSubmit/canRequestAiFeedback/reason/message`），作为状态层只读信号，原因优先级 `CLASSROOM_NOT_ACTIVE > CLASSROOM_TASK_NOT_ACTIVE > TASK_NOT_PUBLISHED > ACTIVE`；`classroom.status/classroomTask.status/task.status` 稳定返回；`participationStatus` 不混入 `dueAt/allowLate/cooldown/NOT_REQUESTED` 等动作级规则；`attemptNo>1` 在未手工 request 时可能 `NOT_REQUESTED`（无 job，合法语义）。
@@ -153,6 +154,7 @@ Notes:
 - `Task.courseLabel`：可选字符串字段（单选课程分类），白名单来源 `backend/src/modules/learning-tasks/task-course-labels.constants.ts`；非 `Course` 外键，不参与权限与发布约束，不限制跨课程复用。
 - `Task.visibility`：模板可见性字段，值域 `PRIVATE | SHARED`（白名单来源 `backend/src/modules/learning-tasks/task-template-visibility.constants.ts`）；新建默认 `PRIVATE`；该字段只影响“读可见性”，不改变作者权限边界。
 - `POST/PATCH/GET /api/learning-tasks/tasks*`：入参与出参已支持 `courseLabel` 与 `visibility`；旧任务缺省 `visibility` 兼容按 `SHARED` 处理。
+- `GET /api/learning-tasks/tasks` 与 `GET /api/learning-tasks/tasks/:id` 返回任务模板发布者摘要 `publisher:{id,name?}|null`，来源为 `Task.createdBy` 用户，只含 `id/name`；前端可用 `currentUser.id !== publisher.id` 决定是否显示来源。
 - `POST /api/learning-tasks/tasks/:id/restore`：teacher only；仅任务作者可调用；仅允许 `ARCHIVED -> DRAFT`，成功返回标准 TaskResponse；`DRAFT/PUBLISHED/未知状态` 返回 `400 Only archived tasks can be restored`。普通 `PATCH /api/learning-tasks/tasks/:id` 对 `ARCHIVED` 的内容更新限制保持不变。
 - `GET /api/learning-tasks/tasks` Query：`scope, status, knowledgeModule, courseLabel, stage, page, limit, createdBy`；默认 `scope=mine`（不再默认公共池）；`courseLabel=未分类` 时兼容匹配字段缺省任务。
 - `GET /api/learning-tasks/tasks` 中 `status/knowledgeModule/stage` 已在 `listTasks` 内进入数据库级过滤（与 `scope/courseLabel` 叠加生效）。
@@ -186,7 +188,7 @@ Notes:
 ## 聚合口径特别说明
 
 - 教师看板：`/api/classrooms/:id/dashboard` 的任务维度统计按 `classroomTaskId` 聚合；默认仅统计返回的 `ACTIVE` classroomTask，`includeClosedTasks=true` 时统计返回的 `ACTIVE+CLOSED` 集合。
-- 教师看板 task item 的 `taskTemplateStatus` 表示关联模板当前状态；前端可仅对 `DRAFT/ARCHIVED` 显示异常标签，`PUBLISHED` 不显示。学生看板与学生提交仍要求模板 `task.status=PUBLISHED`。
+- 教师看板 task item 的 `taskTemplateStatus` 表示关联模板当前状态；`taskPublisher` 表示关联模板创建者/发布者摘要。前端可仅对 `DRAFT/ARCHIVED` 显示异常标签，`PUBLISHED` 不显示；可仅对非本人模板显示发布者姓名。学生看板与学生提交仍要求模板 `task.status=PUBLISHED`。
 - 学生看板：`/api/classrooms/mine/dashboard` 的 `myLatestSubmission`、`aiFeedbackStatus` 与 `completionStatus` 只围绕最终返回的 `classroomTaskId` 计算；默认隐藏归档班级、非 ACTIVE classroomTask 与长期历史任务，`includeHistorical=true` 仅放开时间窗口，不放开班级/课堂任务状态边界。
 - `/api/classrooms/:classroomId/tasks/:classroomTaskId/ai-metrics` 统计严格按 `classroomTaskId` 隔离（jobs 与 feedback 均不跨班汇总）。
 - 成员权威来源：Enrollment-only（`role=STUDENT,status=ACTIVE`）；`classroom.studentIds` 不作为授权/统计来源。

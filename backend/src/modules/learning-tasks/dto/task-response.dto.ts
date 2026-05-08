@@ -13,6 +13,10 @@ export class TaskResponseDto {
   rubric?: Record<string, unknown>;
   status!: TaskStatus;
   createdBy!: string;
+  publisher?: {
+    id: string;
+    name?: string;
+  } | null;
   createdAt!: Date;
   updatedAt!: Date;
   publishedAt?: Date;

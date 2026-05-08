@@ -78,6 +78,8 @@ type SubmissionDetailStudentLean = Pick<User, 'name'> & WithId;
 type SubmissionDetailClassroomLean = Pick<Classroom, 'teacherId'> & WithId;
 type ParticipationClassroomLean = Pick<Classroom, 'status'> & WithId;
 type ParticipationTaskLean = Pick<Task, 'status'> & WithId;
+type PublisherSummary = { id: string; name?: string };
+type PublisherUserLean = Pick<User, 'name'> & WithId;
 type IdOnly = WithId;
 type SubmissionCooldownSource = Pick<Submission, 'submittedAt'> &
   WithId &
@@ -279,8 +281,17 @@ export class LearningTasksService {
       this.taskModel.countDocuments(filter),
     ]);
 
+    const publisherMap = await this.getPublisherSummaryMap(
+      items.map((task) => task.createdBy),
+    );
+
     return {
-      items: items.map((task) => this.toTaskResponse(task)),
+      items: items.map((task) =>
+        this.toTaskResponse(
+          task,
+          this.getPublisherSummaryFromMap(task.createdBy, publisherMap),
+        ),
+      ),
       total,
       page,
       limit,
@@ -296,7 +307,8 @@ export class LearningTasksService {
     if (!isOwner && !this.isTaskSharedVisibility(task.visibility)) {
       throw new NotFoundException('Task not found');
     }
-    return this.toTaskResponse(task);
+    const publisher = await this.getPublisherSummaryById(task.createdBy);
+    return this.toTaskResponse(task, publisher);
   }
 
   async createSubmission(
@@ -656,7 +668,10 @@ export class LearningTasksService {
     };
   }
 
-  private toTaskResponse(task: TaskWithMeta) {
+  private toTaskResponse(
+    task: TaskWithMeta,
+    publisher?: PublisherSummary | null,
+  ) {
     return {
       id: task._id.toString(),
       title: task.title,
@@ -669,10 +684,88 @@ export class LearningTasksService {
       rubric: task.rubric,
       status: task.status,
       createdBy: task.createdBy.toString(),
+      publisher: publisher ?? this.toPublisherSummary(task.createdBy, null),
       createdAt: task.createdAt ?? new Date(0),
       updatedAt: task.updatedAt ?? new Date(0),
       publishedAt: task.publishedAt,
     } as TaskResponseDto;
+  }
+
+  private async getPublisherSummaryById(
+    userId: Types.ObjectId | string | null | undefined,
+  ) {
+    const publisherMap = await this.getPublisherSummaryMap([userId]);
+    return this.getPublisherSummaryFromMap(userId, publisherMap);
+  }
+
+  private async getPublisherSummaryMap(
+    userIds: Array<Types.ObjectId | string | null | undefined>,
+  ) {
+    const idStrings = Array.from(
+      new Set(
+        userIds
+          .map((userId) => this.normalizeObjectId(userId))
+          .filter((userId): userId is string => Boolean(userId)),
+      ),
+    );
+    if (idStrings.length === 0) {
+      return new Map<string, PublisherSummary>();
+    }
+
+    const users = await this.userModel
+      .find({ _id: { $in: idStrings.map((id) => new Types.ObjectId(id)) } })
+      .select('_id name')
+      .lean<PublisherUserLean[]>()
+      .exec();
+    const publisherMap = new Map<string, PublisherSummary>();
+    for (const user of users) {
+      const summary = this.toPublisherSummary(user._id, user);
+      if (summary) {
+        publisherMap.set(summary.id, summary);
+      }
+    }
+    return publisherMap;
+  }
+
+  private getPublisherSummaryFromMap(
+    userId: Types.ObjectId | string | null | undefined,
+    publisherMap: Map<string, PublisherSummary>,
+  ) {
+    const id = this.normalizeObjectId(userId);
+    if (!id) {
+      return null;
+    }
+    return publisherMap.get(id) ?? { id };
+  }
+
+  private toPublisherSummary(
+    userId: Types.ObjectId | string | null | undefined,
+    user: PublisherUserLean | null | undefined,
+  ): PublisherSummary | null {
+    const id = this.normalizeObjectId(user?._id ?? userId);
+    if (!id) {
+      return null;
+    }
+    const name = this.toOptionalName(user?.name);
+    return name ? { id, name } : { id };
+  }
+
+  private normalizeObjectId(value: unknown) {
+    if (value instanceof Types.ObjectId) {
+      return value.toString();
+    }
+    if (typeof value === 'string' && Types.ObjectId.isValid(value)) {
+      return new Types.ObjectId(value).toString();
+    }
+    return null;
+  }
+
+  private toOptionalName(value: unknown) {
+    if (typeof value !== 'string') {
+      return undefined;
+    }
+    const trimmed = value.trim();
+    return trimmed.length > 0 ? trimmed : undefined;
   }
 
   private resolveTaskTemplateScope(scope: unknown): TaskTemplateScope {
