@@ -865,6 +865,7 @@ export const toClassroomTaskSummary = (
     maxAttempts:
       asNumber(settingsRecord.maxAttempts) ?? asNumber(record.maxAttempts),
     aiStatus: asString(record.aiStatus) ?? asString(record.aiFeedbackStatus),
+    taskPublisher: toPublisherSummary(record.taskPublisher),
   };
 };
 
