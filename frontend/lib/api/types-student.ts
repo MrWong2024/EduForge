@@ -89,6 +89,7 @@ export type StudentTaskParticipationReason =
   | "ACTIVE"
   | "CLASSROOM_NOT_ACTIVE"
   | "CLASSROOM_TASK_NOT_ACTIVE"
+  // Compatibility only: backend no longer emits this reason.
   | "TASK_NOT_PUBLISHED";
 
 export type StudentTaskParticipationStatus = {

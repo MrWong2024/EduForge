@@ -136,6 +136,7 @@ Student 学习链路（可用）：
 2. `/student/dashboard` -> `GET classrooms/mine/dashboard`
    - 页面新增“显示历史任务”链接式开关：默认不传 `includeHistorical`，打开后访问 `/student/dashboard?includeHistorical=true` 并请求 `classrooms/mine/dashboard?includeHistorical=true`，关闭后恢复默认请求。
    - 任务可见性完全消费后端 `studentVisibilityStatus/isHistorical`：`RECENTLY_EXPIRED` 显示“近期过期”标签，`HISTORICAL` 显示“历史任务”标签并轻量弱化；`CURRENT` 或旧响应缺字段不额外显示标签。
+   - 学生看板不再按任务模板当前 `PUBLISHED/ARCHIVED` 状态做前端二次过滤；已发布课堂任务是否展示，以后端返回的 classroom/classroomTask/enrollment 运行态结果为准。
    - 前端不按 `dueAt/publishedAt/classroom.status/classroomTask.status` 自行判断历史任务，不用本地 filter 模拟默认隐藏；任务集合、`total/page/limit` 与统计展示均以接口返回为准。
    - 任务列表的 AI 状态列已改为中文标签展示：未提交、未请求、排队中、生成中、已生成、生成失败、已终止；不再在该页显示 `SUCCEEDED（已生成）` 这类中英文混排。
    - 任务列表新增“完成情况”列，直接消费后端 `task.completionStatus.status`：未提交、暂无反馈、已合格、基本合格、不合格。
@@ -147,6 +148,8 @@ Student 学习链路（可用）：
    - 兼容旧响应：缺少 `completionStatus` 时，无 latest 显示“未提交”，有 latest 显示“暂无结论”。
    - 已接入后端顶层 `participationStatus`：`readOnly=true` 时显示“当前为只读模式”提示；`canSubmit=false` 时提交入口渲染为不可点击禁用态；旧响应缺字段时按可参与兜底。
    - 只读态只消费后端 `participationStatus`，前端不按 `classroom.status/classroomTask.status/task.status` 自行拼门禁规则，也不把 `dueAt/allowLate/cooldown/NOT_REQUESTED` 混入状态层只读判断。
+   - 学生任务详情页不再将“模板未发布/模板已归档”作为只读原因；模板当前状态不控制学生参与，运行态由 classroom/classroomTask/enrollment 与时间窗口决定。
+   - 学生端类型层仍兼容解析旧 `TASK_NOT_PUBLISHED` reason，但前端不再基于该 reason 输出只读文案或额外阻断。
    - 提交区额外基于 `classroomTask.dueAt + settings.allowLate` 做前端体验拦截：页面渲染时已过截止时间且 `allowLate !== true` 时，不展示可填写提交表单，改为禁用提交入口并提示“该任务已截止，且教师未允许迟交，不能继续提交。”；`allowLate=true` 的已截止任务仍展示提交表单，最终权限仍以后端为准。
    - 已接入 AI 状态联动自动刷新：当提交列表中存在 `PENDING/RUNNING/FAILED` 时自动刷新；其中 `PENDING/RUNNING` 快速刷新、仅 `FAILED` 时慢速刷新；当提交列表全部进入非活跃状态（如 `SUCCEEDED/DEAD/NOT_REQUESTED`）时停止。
    - 自动刷新覆盖“最新 AI 状态”与提交记录表“AI 状态”列，使用整页刷新链路同步更新；页面不可见/失焦时暂停，回到前台后按当前状态恢复。
@@ -280,6 +283,7 @@ Teacher 课堂复盘链路（可用）：
 - 模板列表视图已接入 `scope`（`mine/shared/all`），默认 `mine`；`shared` 视图可读共享模板，非作者模板不暴露误导性编辑入口。
 - 模板列表默认排序是前端内建行为，不新增 URL 排序参数，也不新增用户可配置排序器。
 - 班级任务页职责已收口：仅发布已有 `PUBLISHED` 模板，且模板选择体验已增强。
+- 教师模板编辑页已对“已被课堂任务引用的 `PUBLISHED` 模板不能改回 `DRAFT`”后端错误做中文收口提示；模板归档仍保持原交互，不暗示会影响已发布课堂任务运行。
 
 未达到：
 

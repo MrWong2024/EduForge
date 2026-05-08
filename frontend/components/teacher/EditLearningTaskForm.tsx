@@ -62,6 +62,12 @@ const statusLabelMap: Record<LearningTaskStatus, string> = {
   ARCHIVED: "ARCHIVED（已归档）",
 };
 
+const USED_PUBLISHED_TEMPLATE_REVERT_DETAIL =
+  "Published task templates used by classrooms cannot be changed back to draft";
+
+const USED_PUBLISHED_TEMPLATE_REVERT_MESSAGE =
+  "该模板已发布到班级，不能改回草稿。若需要停止学生提交，请到对应班级任务中关闭任务。";
+
 const isLearningTaskStatus = (value: string): value is LearningTaskStatus =>
   LEARNING_TASK_STATUSES.some((status) => status === value);
 
@@ -193,6 +199,16 @@ const getUpdateErrorSummary = (status: number): string => {
     return "更新任务模板失败，请稍后重试。";
   }
   return "更新任务模板失败，请稍后重试。";
+};
+
+const buildUpdateErrorDescription = (
+  status: number,
+  detail?: string,
+): string => {
+  if (detail?.includes(USED_PUBLISHED_TEMPLATE_REVERT_DETAIL)) {
+    return USED_PUBLISHED_TEMPLATE_REVERT_MESSAGE;
+  }
+  return buildErrorDescription(getUpdateErrorSummary(status), detail);
 };
 
 const getRestoreTaskErrorSummary = (status: number): string => {
@@ -434,11 +450,10 @@ export function EditLearningTaskForm({
       router.refresh();
     } catch (error) {
       if (error instanceof BrowserFetchJsonError) {
-        const summary = getUpdateErrorSummary(error.status);
         const detail = extractRawDetail(error);
         setErrorState({
           status: error.status,
-          description: buildErrorDescription(summary, detail),
+          description: buildUpdateErrorDescription(error.status, detail),
         });
       } else {
         setErrorState({
@@ -640,6 +655,11 @@ export function EditLearningTaskForm({
                 PUBLISHED 可用于班级发布；DRAFT / ARCHIVED
                 通常不会出现在班级发布可选列表。
               </p>
+              {rawInitialStatus === "PUBLISHED" ? (
+                <p className="mt-1 text-xs text-zinc-500">
+                  已发布到班级的模板不能改回草稿；如需停止学生提交，请在班级任务中关闭对应课堂任务。
+                </p>
+              ) : null}
             </label>
           </div>
 
