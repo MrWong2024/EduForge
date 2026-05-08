@@ -13,6 +13,10 @@ export class PublishableTaskTemplateItemResponseDto {
   status!: TaskStatus;
   createdBy!: string;
   createdById!: string;
+  publisher?: {
+    id: string;
+    name?: string;
+  } | null;
   createdAt!: Date;
   updatedAt!: Date;
   publishedAt?: Date;

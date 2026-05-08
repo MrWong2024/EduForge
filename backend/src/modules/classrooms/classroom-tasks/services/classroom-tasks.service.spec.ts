@@ -62,6 +62,10 @@ const makeAggregate = <T>(result: T) => ({
   exec: jest.fn().mockResolvedValue(result),
 });
 
+const makeExecOnly = <T>(result: T) => ({
+  exec: jest.fn().mockResolvedValue(result),
+});
+
 const createHarness = (options: HarnessOptions = {}) => {
   const studentId = options.submissions?.[0]?.studentId ?? objectId();
   const classroomId = objectId();
@@ -436,6 +440,209 @@ describe('ClassroomTasksService listClassroomTasks publisher contract', () => {
       },
     });
     expect(userModel.find).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('ClassroomTasksService listPublishableTaskTemplates publisher contract', () => {
+  it('returns publisher summaries for current page candidates with one batched user lookup', async () => {
+    const classroomId = objectId();
+    const courseId = objectId();
+    const teacherId = objectId();
+    const publisherIdA = objectId();
+    const publisherIdB = objectId();
+    const missingPublisherId = objectId();
+    const excludedTaskId = objectId();
+    const classroom = {
+      _id: classroomId,
+      courseId,
+    };
+    const items = [
+      {
+        _id: objectId(),
+        title: 'Shared Template A',
+        description: 'Description A',
+        knowledgeModule: 'module-a',
+        stage: 1,
+        status: TaskStatus.Published,
+        createdBy: publisherIdA,
+        createdAt: new Date('2026-01-01T00:00:00.000Z'),
+        updatedAt: new Date('2026-01-02T00:00:00.000Z'),
+        publishedAt: new Date('2026-01-03T00:00:00.000Z'),
+      },
+      {
+        _id: objectId(),
+        title: 'Shared Template B',
+        description: 'Description B',
+        knowledgeModule: 'module-b',
+        stage: 2,
+        status: TaskStatus.Published,
+        createdBy: publisherIdB,
+        createdAt: new Date('2026-01-04T00:00:00.000Z'),
+        updatedAt: new Date('2026-01-05T00:00:00.000Z'),
+        publishedAt: new Date('2026-01-06T00:00:00.000Z'),
+      },
+      {
+        _id: objectId(),
+        title: 'Shared Template Missing Publisher',
+        description: 'Description C',
+        knowledgeModule: 'module-c',
+        stage: 3,
+        status: TaskStatus.Published,
+        createdBy: missingPublisherId,
+        createdAt: new Date('2026-01-07T00:00:00.000Z'),
+        updatedAt: new Date('2026-01-08T00:00:00.000Z'),
+        publishedAt: new Date('2026-01-09T00:00:00.000Z'),
+      },
+    ];
+    const classroomModel = {
+      findOne: jest.fn(() => makeQuery(classroom)),
+    };
+    const courseModel = {
+      findById: jest.fn(() =>
+        makeQuery({ _id: courseId, courseLabel: 'CS101' }),
+      ),
+    };
+    const classroomTaskModel = {
+      distinct: jest.fn(() => makeExecOnly([excludedTaskId])),
+    };
+    const taskModel = {
+      aggregate: jest.fn(() => makeAggregate(items)),
+      countDocuments: jest.fn().mockResolvedValue(items.length),
+    };
+    const userModel = {
+      findById: jest.fn(() => makeQuery({ roles: ['teacher'] })),
+      find: jest.fn(() =>
+        makeQuery([
+          {
+            _id: publisherIdA,
+            name: 'Publisher A',
+            email: 'a@example.com',
+            roles: ['teacher'],
+            status: 'active',
+          },
+          {
+            _id: publisherIdB,
+            name: 'Publisher B',
+            email: 'b@example.com',
+            roles: ['teacher'],
+            status: 'active',
+          },
+        ]),
+      ),
+    };
+    const service = new ClassroomTasksService(
+      classroomModel as unknown as Model<Classroom>,
+      courseModel as unknown as Model<Course>,
+      classroomTaskModel as unknown as Model<ClassroomTask>,
+      taskModel as unknown as Model<Task>,
+      {} as unknown as Model<Submission>,
+      {} as unknown as Model<Feedback>,
+      userModel as unknown as Model<User>,
+      {} as unknown as EnrollmentService,
+      {} as unknown as AiFeedbackJobService,
+      {} as unknown as LearningTasksService,
+    );
+
+    const result = await service.listPublishableTaskTemplates(
+      classroomId.toString(),
+      { page: 1, limit: 20 },
+      teacherId.toString(),
+    );
+
+    expect(result.items).toHaveLength(3);
+    expect(result.items[0]).toMatchObject({
+      createdBy: publisherIdA.toString(),
+      createdById: publisherIdA.toString(),
+      publisher: { id: publisherIdA.toString(), name: 'Publisher A' },
+    });
+    expect(result.items[1]).toMatchObject({
+      createdBy: publisherIdB.toString(),
+      createdById: publisherIdB.toString(),
+      publisher: { id: publisherIdB.toString(), name: 'Publisher B' },
+    });
+    expect(result.items[2]).toMatchObject({
+      createdBy: missingPublisherId.toString(),
+      createdById: missingPublisherId.toString(),
+      publisher: { id: missingPublisherId.toString() },
+    });
+    expect(result.items[0].publisher).not.toHaveProperty('email');
+    expect(result.items[0].publisher).not.toHaveProperty('roles');
+    expect(result.items[0].publisher).not.toHaveProperty('status');
+    expect(userModel.find).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps existing publishable filters when onlyMine and query filters are provided', async () => {
+    const classroomId = objectId();
+    const courseId = objectId();
+    const teacherId = objectId();
+    const excludedTaskId = objectId();
+    const classroom = {
+      _id: classroomId,
+      courseId,
+    };
+    const classroomModel = {
+      findOne: jest.fn(() => makeQuery(classroom)),
+    };
+    const courseModel = {
+      findById: jest.fn(() =>
+        makeQuery({ _id: courseId, courseLabel: 'CS101' }),
+      ),
+    };
+    const classroomTaskModel = {
+      distinct: jest.fn(() => makeExecOnly([excludedTaskId])),
+    };
+    const taskModel = {
+      aggregate: jest.fn(() => makeAggregate([])),
+      countDocuments: jest.fn().mockResolvedValue(0),
+    };
+    const userModel = {
+      findById: jest.fn(() => makeQuery({ roles: ['teacher'] })),
+      find: jest.fn(() => makeQuery([])),
+    };
+    const service = new ClassroomTasksService(
+      classroomModel as unknown as Model<Classroom>,
+      courseModel as unknown as Model<Course>,
+      classroomTaskModel as unknown as Model<ClassroomTask>,
+      taskModel as unknown as Model<Task>,
+      {} as unknown as Model<Submission>,
+      {} as unknown as Model<Feedback>,
+      userModel as unknown as Model<User>,
+      {} as unknown as EnrollmentService,
+      {} as unknown as AiFeedbackJobService,
+      {} as unknown as LearningTasksService,
+    );
+
+    await service.listPublishableTaskTemplates(
+      classroomId.toString(),
+      {
+        page: 2,
+        limit: 10,
+        onlyMine: true,
+        knowledgeModule: 'module-a',
+        stage: 3,
+      },
+      teacherId.toString(),
+    );
+
+    const itemsPipeline = taskModel.aggregate.mock.calls[0][0] as Array<
+      Record<string, unknown>
+    >;
+    expect(itemsPipeline[0]).toEqual({
+      $match: {
+        status: TaskStatus.Published,
+        _id: { $nin: [excludedTaskId] },
+        knowledgeModule: 'module-a',
+        stage: 3,
+        createdBy: teacherId,
+      },
+    });
+    expect(taskModel.countDocuments).toHaveBeenCalledWith({
+      status: TaskStatus.Published,
+      _id: { $nin: [excludedTaskId] },
+      knowledgeModule: 'module-a',
+      stage: 3,
+      createdBy: teacherId,
+    });
   });
 });
 

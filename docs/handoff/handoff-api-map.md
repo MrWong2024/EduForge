@@ -114,7 +114,7 @@ Notes:
 | GET | `/api/classrooms/:classroomId/tasks/:classroomTaskId/ai-metrics` | AI 运行指标报表（AI）。 |
 
 Notes:
-- `GET /api/classrooms/:id/publishable-task-templates`：teacher only + owner only（非 owner 返回 `404`）；固定只返回 `status=PUBLISHED` 且当前教师可见模板（自己私有 + 自己共享 + 他人共享）；自动排除当前班级已发布过的 `taskId`；支持 query `courseLabel, onlyMine, knowledgeModule, stage, page, limit`；当请求未显式传 `courseLabel` 且当前班级课程存在 `courseLabel` 时，排序优先课程分类匹配模板，再按 `updatedAt desc, createdAt desc`。
+- `GET /api/classrooms/:id/publishable-task-templates`：teacher only + owner only（非 owner 返回 `404`）；固定只返回 `status=PUBLISHED` 且当前教师可见模板（自己私有 + 自己共享 + 他人共享）；自动排除当前班级已发布过的 `taskId`；支持 query `courseLabel, onlyMine, knowledgeModule, stage, page, limit`；当请求未显式传 `courseLabel` 且当前班级课程存在 `courseLabel` 时，排序优先课程分类匹配模板，再按 `updatedAt desc, createdAt desc`；每个 item 返回 `publisher:{id,name?}|null`，表示候选模板创建者/发布者摘要，只含 `id/name`，不暴露完整 User。
 - 索引口径：`Task` 已补发布候选查询复合索引（`onlyMine` 分支与共享可见分支各一组），用于支撑 `status/courseLabel/knowledgeModule/stage + updatedAt/createdAt` 的组合过滤与排序。
 - `ClassroomTask.status` 生命周期：`ACTIVE | CLOSED | RECALLED`；新发布默认 `ACTIVE`；允许 `ACTIVE -> CLOSED`、`ACTIVE -> RECALLED`、`CLOSED -> ACTIVE`；其中撤回要求“无提交”。
 - `PATCH /api/classrooms/:classroomId/tasks/:classroomTaskId`：teacher only + owner only；仅允许更新实例级字段 `dueAt/settings.allowLate/settings.maxAttempts`；`status` 仍走独立 `/status` 接口；状态边界为 `ACTIVE/CLOSED` 可编辑、`RECALLED` 不可编辑。

@@ -294,6 +294,7 @@ AI Provider 错误码（`ai-feedback-provider.error-codes.ts`）：
 - 教师侧模板发布者摘要契约（后端已完成，前端待后续阶段接入）：
   - `GET /api/classrooms/:id/tasks` 的课堂任务 item 返回 `taskPublisher:{id,name?}|null`，表示关联模板创建者/发布者。
   - `GET /api/classrooms/:id/dashboard` 的任务进展 item 返回同字段；不改变 `taskTemplateStatus`、过滤、排序、统计。
+  - `GET /api/classrooms/:id/publishable-task-templates` 的候选模板 item 返回 `publisher:{id,name?}|null`，表示候选模板创建者/发布者。
   - `GET /api/learning-tasks/tasks` 与 `GET /api/learning-tasks/tasks/:id` 返回 `publisher:{id,name?}|null`。
   - 发布者摘要只含 `id/name`；前端后续可用 `currentUser.id !== publisher.id` 决定是否显示“模板发布者”。
 - 学生看板任务完成情况契约（后端已完成，前端待后续阶段接入）：
@@ -343,6 +344,7 @@ AI Provider 错误码（`ai-feedback-provider.error-codes.ts`）：
   - 本次仅补强索引，不改接口契约、不改查询逻辑、不改前端接入口径。
 - P1 班级发布候选查询契约升级（后端已完成，前端待后续阶段接入）：
   - 新增 `GET /api/classrooms/:id/publishable-task-templates`，专用于班级发布页候选模板分页查询。
+  - 每个候选模板 item 返回 `publisher:{id,name?}|null`，只含 `id/name`；前端 `PublishClassroomTaskForm` 可基于 `publisher + currentUserId` 在候选列表与已选模板摘要显示非本人模板来源。
   - 固定内置规则：只返回当前教师可见模板（自己私有+自己共享+他人共享）、只返回 `status=PUBLISHED`、自动排除当前班级已发布过的 `taskId`。
   - 支持 query：`courseLabel`、`onlyMine`、`knowledgeModule`、`stage`、`page`、`limit`。
   - 当请求未显式传 `courseLabel` 且班级所属课程存在 `courseLabel` 时，默认排序优先课程分类匹配模板，再按 `updatedAt/createdAt` 倒序。

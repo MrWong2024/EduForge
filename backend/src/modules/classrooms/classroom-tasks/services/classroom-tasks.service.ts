@@ -638,10 +638,16 @@ export class ClassroomTasksService {
         .exec(),
       this.taskModel.countDocuments(filter),
     ]);
+    const publisherMap = await this.getPublisherSummaryMap(
+      items.map((task) => task.createdBy),
+    );
 
     return {
       items: items.map((task) =>
-        this.toPublishableTaskTemplateItemResponse(task),
+        this.toPublishableTaskTemplateItemResponse(
+          task,
+          this.getPublisherSummaryFromMap(task.createdBy, publisherMap),
+        ),
       ),
       total,
       page,
@@ -1814,7 +1820,10 @@ export class ClassroomTasksService {
     return itemsMap;
   }
 
-  private toPublishableTaskTemplateItemResponse(task: TaskWithMeta) {
+  private toPublishableTaskTemplateItemResponse(
+    task: TaskWithMeta,
+    publisher?: PublisherSummary | null,
+  ) {
     const createdById = task.createdBy.toString();
     return {
       id: task._id.toString(),
@@ -1828,6 +1837,7 @@ export class ClassroomTasksService {
       status: task.status,
       createdBy: createdById,
       createdById,
+      publisher: publisher ?? this.toPublisherSummary(task.createdBy, null),
       createdAt: task.createdAt ?? new Date(0),
       updatedAt: task.updatedAt ?? new Date(0),
       publishedAt: task.publishedAt,
