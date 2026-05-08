@@ -701,14 +701,16 @@ export function PublishClassroomTaskForm({
                   >
                     <div className="flex flex-wrap items-start justify-between gap-2">
                       <div className="min-w-0 flex-1">
-                        <p className="text-sm font-medium text-zinc-900">
-                          {toDisplayText(task.title, "未命名任务")}
-                        </p>
-                        {publisherLabel ? (
-                          <span className="mt-1 inline-flex w-fit items-center rounded-full border border-sky-200 bg-sky-50 px-2 py-0.5 text-[11px] font-medium text-sky-700">
-                            {publisherLabel}
-                          </span>
-                        ) : null}
+                        <div className="flex flex-wrap items-center gap-2">
+                          <p className="min-w-0 text-sm font-medium text-zinc-900">
+                            {toDisplayText(task.title, "未命名任务")}
+                          </p>
+                          {publisherLabel ? (
+                            <span className="inline-flex w-fit items-center rounded-full border border-sky-200 bg-sky-50 px-2 py-0.5 text-[11px] font-medium text-sky-700">
+                              {publisherLabel}
+                            </span>
+                          ) : null}
+                        </div>
                       </div>
                       <button
                         type="button"
