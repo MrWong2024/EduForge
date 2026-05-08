@@ -346,7 +346,6 @@ export type UpdateLearningTaskRequest = {
   courseLabel?: string;
   visibility?: TaskTemplateVisibility;
   stage: number;
-  status: LearningTaskStatus;
   rubric?: Record<string, unknown>;
 };
 

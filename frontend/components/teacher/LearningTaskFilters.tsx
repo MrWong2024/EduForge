@@ -1,15 +1,9 @@
 "use client";
 
 import Link from "next/link";
-import { useMemo, useState } from "react";
+import { useMemo } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { EmptyState } from "@/components/blocks/EmptyState";
-import { ErrorState } from "@/components/blocks/ErrorState";
-import { BrowserFetchJsonError, fetchJson } from "@/lib/api/browser-client";
-import {
-  buildErrorDescription,
-  extractRawDetail,
-} from "@/lib/api/error-presenter";
 import { paths } from "@/lib/routes/paths";
 import {
   getPublisherLabel,
@@ -56,11 +50,6 @@ type RubricSummary = {
   configured: boolean;
   dimensionCount: number;
   hasNotes: boolean;
-};
-
-type RestoreTaskErrorState = {
-  status?: number;
-  description: string;
 };
 
 const STATUS_FILTER_OPTIONS: Array<{ value: TaskStatusFilter; label: string }> =
@@ -129,25 +118,6 @@ const getStatusHint = (status: unknown): string => {
   return "状态缺失或未知";
 };
 
-const getRestoreTaskErrorSummary = (status: number): string => {
-  if (status === 400) {
-    return "当前模板状态不允许恢复。";
-  }
-  if (status === 401) {
-    return "登录状态已失效，请重新登录。";
-  }
-  if (status === 403) {
-    return "无权限恢复该任务模板。";
-  }
-  if (status === 404) {
-    return "任务模板不存在或已不可用。";
-  }
-  if (status >= 500) {
-    return "恢复任务模板失败，请稍后重试。";
-  }
-  return "恢复任务模板失败，请稍后重试。";
-};
-
 const summarizeRubric = (
   rubric: Record<string, unknown> | undefined,
 ): RubricSummary => {
@@ -196,12 +166,6 @@ export function LearningTaskFilters({
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
-  const [restoringTaskId, setRestoringTaskId] = useState<string | null>(null);
-  const [restoreSuccessMessage, setRestoreSuccessMessage] = useState<
-    string | null
-  >(null);
-  const [restoreErrorState, setRestoreErrorState] =
-    useState<RestoreTaskErrorState | null>(null);
 
   const currentScope =
     normalizeTaskTemplateScope(searchParams.get("scope") ?? initialScope) ??
@@ -263,51 +227,6 @@ export function LearningTaskFilters({
     const params = new URLSearchParams();
     params.set("returnTo", currentTaskListUrl);
     return `${paths.teacher.taskEdit(taskId)}?${params.toString()}`;
-  };
-
-  const handleRestoreTask = async (taskId: string) => {
-    if (restoringTaskId) {
-      return;
-    }
-    const confirmed = window.confirm(
-      "确认将该归档模板恢复为草稿吗？恢复后可继续编辑，但不会自动重新发布到班级。",
-    );
-    if (!confirmed) {
-      return;
-    }
-
-    setRestoringTaskId(taskId);
-    setRestoreSuccessMessage(null);
-    setRestoreErrorState(null);
-
-    try {
-      await fetchJson<unknown>(
-        `learning-tasks/tasks/${encodeURIComponent(taskId)}/restore`,
-        {
-          method: "POST",
-          headers: {
-            accept: "application/json",
-          },
-        },
-      );
-      setRestoreSuccessMessage("任务模板已恢复为草稿。");
-      router.refresh();
-    } catch (error) {
-      if (error instanceof BrowserFetchJsonError) {
-        const summary = getRestoreTaskErrorSummary(error.status);
-        const detail = extractRawDetail(error);
-        setRestoreErrorState({
-          status: error.status,
-          description: buildErrorDescription(summary, detail),
-        });
-      } else {
-        setRestoreErrorState({
-          description: "恢复任务模板失败，请稍后重试。",
-        });
-      }
-    } finally {
-      setRestoringTaskId(null);
-    }
   };
 
   const replaceSearchQuery = (updater: (params: URLSearchParams) => void) => {
@@ -523,20 +442,6 @@ export function LearningTaskFilters({
         </p>
       </section>
 
-      {restoreSuccessMessage ? (
-        <p className="rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-800">
-          {restoreSuccessMessage}
-        </p>
-      ) : null}
-
-      {restoreErrorState ? (
-        <ErrorState
-          status={restoreErrorState.status}
-          title="恢复任务模板失败"
-          description={restoreErrorState.description}
-        />
-      ) : null}
-
       {sortedTasks.length === 0 && totalCount === 0 && !hasActiveFilters ? (
         <EmptyState
           title="还没有任务模板"
@@ -671,11 +576,7 @@ export function LearningTaskFilters({
                   task.createdById === currentUserId,
                 );
                 const canEditTask =
-                  isKnownStatus &&
-                  statusUpper !== "ARCHIVED" &&
-                  (!currentUserId || !task.createdById || isOwner);
-                const canRestoreTask = isOwner && statusUpper === "ARCHIVED";
-                const isRestoringThisTask = restoringTaskId === task.id;
+                  isKnownStatus && isOwner && statusUpper !== "ARCHIVED";
                 const publisherLabel = getPublisherLabel(
                   task.publisher,
                   currentUserId,
@@ -763,19 +664,9 @@ export function LearningTaskFilters({
                           >
                             {canEditTask ? "编辑" : "查看"}
                           </Link>
-                          {canRestoreTask ? (
-                            <button
-                              type="button"
-                              onClick={() => handleRestoreTask(taskId)}
-                              disabled={Boolean(restoringTaskId)}
-                              className="rounded-md border border-amber-300 px-2 py-1 text-xs font-medium text-amber-700 enabled:hover:bg-amber-50 disabled:cursor-not-allowed disabled:opacity-60"
-                            >
-                              {isRestoringThisTask ? "恢复中..." : "恢复为草稿"}
-                            </button>
-                          ) : null}
                           {isOwner && statusUpper === "ARCHIVED" ? (
                             <p className="text-xs text-zinc-500">
-                              已归档，需恢复后编辑
+                              已归档，仅可查看
                             </p>
                           ) : null}
                         </div>

@@ -52,11 +52,11 @@ frontend/
     - 删除：`DELETE classrooms/:id`（前端统一提供入口，失败时按后端 `409 + CLASSROOM_NOT_EMPTY` 显示“该班级已有成员或任务记录，不能删除，只能归档”）
   - `/teacher/classrooms/[classroomId]/edit`：班级基础信息编辑页，当前前端按后端契约仅支持更新 `name`（调用 `PATCH classrooms/:id`）；所属课程只读展示优先使用 `ClassroomResponse.course` 摘要（name/code/term/courseLabel），仅在摘要缺失时弱化显示 `courseId` 作为排查信息；页面下方补齐 `ACTIVE` 班级的“危险操作 / 归档班级”（`POST classrooms/:id/archive`，二次确认后执行并回班级看板刷新），`ARCHIVED` 班级仅展示已归档提示，不新增恢复操作；`Archived` 状态更新失败会展示后端错误明细。
 - 教师模板层（已落地）：
-  - `/teacher/tasks`：模板列表 + 创建 + 视图切换（默认 `scope=mine`，支持 `mine/shared/all`）+ URL 驱动筛选（`scope/courseLabel/status/knowledgeModule/stage/page`）并展示模板可见性 `visibility(私有/共享)`；列表已切到后端真实查询与标准分页（固定 `limit=20`，`page` 入 URL，筛选变化自动回到第一页）；默认排序按 scope 收口（`mine=最近更新优先`、`shared=PUBLISHED 优先`、`all=我的模板优先`）；作者自己的 `ARCHIVED` 模板只显示“查看 + 恢复为草稿”，不直接显示“编辑”，非作者仍仅可查看并基于 `publisher` 展示模板发布者来源。
-  - `/teacher/tasks/[taskId]/edit`：模板编辑/查看与状态管理（含可选课程分类、模板可见性；非作者共享模板只读并显示模板发布者来源）；从模板页进入编辑时携带 `returnTo`（当前完整列表 URL），编辑页顶部/底部返回优先回到该地址，缺失或非法时回退 `/teacher/tasks`；作者打开 `ARCHIVED` 模板时页面只读并可调用 `POST learning-tasks/tasks/:id/restore` 恢复为 `DRAFT`，恢复后刷新进入可编辑态。
+  - `/teacher/tasks`：模板列表 + 创建 + 视图切换（默认 `scope=mine`，支持 `mine/shared/all`）+ URL 驱动筛选（`scope/courseLabel/status/knowledgeModule/stage/page`）并展示模板可见性 `visibility(私有/共享)`；列表已切到后端真实查询与标准分页（固定 `limit=20`，`page` 入 URL，筛选变化自动回到第一页）；创建区不再暴露状态枚举，而是通过“保存为草稿 / 发布模板”动作提交 `status=DRAFT/PUBLISHED`；默认排序按 scope 收口（`mine=最近更新优先`、`shared=PUBLISHED 优先`、`all=我的模板优先`）；作者自己的 `DRAFT/PUBLISHED` 模板显示“编辑”，作者自己的 `ARCHIVED` 模板仅显示“查看”，非作者仍仅可查看并基于 `publisher` 展示模板发布者来源。
+  - `/teacher/tasks/[taskId]/edit`：模板编辑/查看与生命周期动作（含可选课程分类、模板可见性；非作者共享模板只读并显示模板发布者来源）；从模板页进入编辑时携带 `returnTo`（当前完整列表 URL），编辑页顶部/底部返回优先回到该地址，缺失或非法时回退 `/teacher/tasks`；普通保存不再提交 `status`；作者打开 `DRAFT` 模板时可执行 `POST learning-tasks/tasks/:id/publish`，作者打开 `PUBLISHED` 模板时可执行 `POST learning-tasks/tasks/:id/archive`；作者打开 `ARCHIVED` 模板时页面只读，不显示保存/发布/归档/恢复按钮，并提示后续如需复用应复制为新草稿。
 - 教师班级实例层（已收口）：
   - `/teacher/classrooms/[classroomId]/tasks`：选择“当前教师可见且已发布”的模板并发布到班级实例；候选池改为实时调用 `GET classrooms/:id/publishable-task-templates`，筛选条件 `courseLabel/onlyMine/knowledgeModule/stage` 透传后端，后端内置“仅 PUBLISHED + 排除本班已发布模板 + 课程优先排序”，不承担模板创建/编辑；候选模板列表与已选模板摘要都会基于 `publisher` 对非本人模板显示发布者来源；已发布实例列表基于 `taskPublisher` 对非本人模板显示发布者来源，且任务标题下的多枚徽章按纵向堆叠展示。
-  - 课堂任务实例列表已将生命周期状态、截止时间状态、提交窗口状态分开展示：`ACTIVE/CLOSED/RECALLED` -> `开放中/已关闭/已撤回`，其中 `ACTIVE` 仅表示未被教师关闭或撤回，不代表尚未截止；任务标题列不再常驻展示模板状态枚举，但会基于 `task.taskStatus` 仅对 `DRAFT/ARCHIVED` 显示“模板已转为草稿/模板已归档”轻量标签，`PUBLISHED/null/未知值` 不显示；截止时间列单独展示 `未截止/已截止/无截止时间`（非法时间防御显示为“时间异常”）；任务状态列额外展示提交窗口辅助标签 `可提交/允许迟交/不可提交/状态未知`，并去除常驻解释文案，仅保留标签、必要操作与操作反馈；提交窗口标签仅由前端按 `classroomTask.status + dueAt + allowLate` 做列表提示，不改变真实提交权限。`ACTIVE` 任务可执行“关闭任务”（`PATCH classrooms/:classroomId/tasks/:classroomTaskId/status`，`status=CLOSED`），`CLOSED` 任务可执行“恢复提交”（同接口，`status=ACTIVE`），且 `ACTIVE/CLOSED` 任务可执行“编辑设置”（`PATCH classrooms/:classroomId/tasks/:classroomTaskId`，更新 `dueAt/allowLate/maxAttempts`）；`RECALLED` 仅展示状态，不提供恢复提交或编辑设置入口。恢复提交仅恢复状态，不自动修改 `dueAt/allowLate/maxAttempts`。
+  - 课堂任务实例列表已将生命周期状态、截止时间状态、提交窗口状态分开展示：`ACTIVE/CLOSED/RECALLED` -> `开放中/已关闭/已撤回`，其中 `ACTIVE` 仅表示未被教师关闭或撤回，不代表尚未截止；任务标题列不再常驻展示模板状态枚举，但会基于 `task.taskStatus` 仅对 `ARCHIVED` 显示“模板已归档”轻量标签，`DRAFT/PUBLISHED/null/未知值` 不显示；截止时间列单独展示 `未截止/已截止/无截止时间`（非法时间防御显示为“时间异常”）；任务状态列额外展示提交窗口辅助标签 `可提交/允许迟交/不可提交/状态未知`，并去除常驻解释文案，仅保留标签、必要操作与操作反馈；提交窗口标签仅由前端按 `classroomTask.status + dueAt + allowLate` 做列表提示，不改变真实提交权限。`ACTIVE` 任务可执行“关闭任务”（`PATCH classrooms/:classroomId/tasks/:classroomTaskId/status`，`status=CLOSED`），`CLOSED` 任务可执行“恢复提交”（同接口，`status=ACTIVE`），且 `ACTIVE/CLOSED` 任务可执行“编辑设置”（`PATCH classrooms/:classroomId/tasks/:classroomTaskId`，更新 `dueAt/allowLate/maxAttempts`）；`RECALLED` 仅展示状态，不提供恢复提交或编辑设置入口。恢复提交仅恢复状态，不自动修改 `dueAt/allowLate/maxAttempts`。
   - 课堂任务实例列表已移除低价值“AI 状态”列：classroomTask 本身没有单一 AI 状态，教师查看 AI 情况通过行内三件套入口的“AI 指标”（ai-metrics）下钻。
   - 候选池首屏仍由 server 侧请求 `page=1&limit=50`；发布表单支持“加载更多”按当前筛选追加后续页（非完整分页器）；筛选条件变化时重置回第一页并清空历史追加结果。
   - 发布页“课程分类”下拉已改为复用统一标准课程分类列表（`lib/learning-tasks/course-labels.ts`），不再从当前已加载候选集合倒推选项。
@@ -125,7 +125,7 @@ Teacher 班级看板链路（可用）：
 3. 任务明细表已补齐“提交进度（distinctStudentsSubmitted / studentsCount）”、“AI 处理概况（成功/失败/排队/处理中/终止/未请求）”与 `topTags` 前 2~3 项摘要。
 4. 页面新增“显示已关闭任务”开关：关闭时请求默认 dashboard；打开时请求 `includeClosedTasks=true`，由后端返回 ACTIVE+CLOSED 数据集。前端不通过本地过滤模拟默认隐藏，也不重算 summary。
 5. 任务行消费 `classroomTaskStatus`；当值为 `CLOSED` 时显示“已关闭”标签并做轻量弱化，未知状态不当作已关闭处理。
-6. 任务标题列消费 `taskTemplateStatus`：仅 `DRAFT/ARCHIVED` 显示“模板已转为草稿/模板已归档”轻量标签，`PUBLISHED/null/未知值` 不显示模板状态标签。
+6. 任务标题列消费 `taskTemplateStatus`：仅 `ARCHIVED` 显示“模板已归档”轻量标签，`DRAFT/PUBLISHED/null/未知值` 不显示模板状态标签。
 7. 任务标题列消费 `taskPublisher`：仅非本人模板显示“模板发布者：姓名”，姓名缺失显示“其他教师模板”，不显示 ID/email；任务标题、`已关闭`、发布者标签、模板异常标签按纵向堆叠展示，避免多枚徽章横向拥挤。
 7. 页面接入后端顶层 `archiveSuggestion`：仅当 `suggested=true` 时在概览上方显示温和的“建议归档”提示，正文优先使用后端 `message`，并展示最近提交/连续无近期活动天数；前端不根据 tasks/dueAt/submissions/includeClosedTasks 重算建议，也不自动归档。
 8. 每行任务已新增三类快捷入口：`提交记录`（submissions）、`课堂复盘`（review-pack）、`AI 指标`（ai-metrics），用于从看板直接下钻。
@@ -283,7 +283,7 @@ Teacher 课堂复盘链路（可用）：
 - 模板列表视图已接入 `scope`（`mine/shared/all`），默认 `mine`；`shared` 视图可读共享模板，非作者模板不暴露误导性编辑入口。
 - 模板列表默认排序是前端内建行为，不新增 URL 排序参数，也不新增用户可配置排序器。
 - 班级任务页职责已收口：仅发布已有 `PUBLISHED` 模板，且模板选择体验已增强。
-- 教师模板编辑页已对“已被课堂任务引用的 `PUBLISHED` 模板不能改回 `DRAFT`”后端错误做中文收口提示；模板归档仍保持原交互，不暗示会影响已发布课堂任务运行。
+- 教师模板编辑页已收口为生命周期动作模式：普通保存不再提交 `status`，`DRAFT` 走发布动作、`PUBLISHED` 走归档动作、`ARCHIVED` 保持只读且不再提供恢复入口；同时保留对旧后端错误 detail 的中文兜底收口。
 
 未达到：
 

@@ -10,7 +10,6 @@ import {
   extractRawDetail,
 } from "@/lib/api/error-presenter";
 import {
-  LEARNING_TASK_STATUSES,
   toLearningTaskUpdateResponse,
   type LearningTaskDetailResponse,
   type LearningTaskStatus,
@@ -56,10 +55,12 @@ type RubricFormSeed = {
   sourceRubric?: Record<string, unknown>;
 };
 
+type TaskLifecycleAction = "publish" | "archive";
+
 const statusLabelMap: Record<LearningTaskStatus, string> = {
-  DRAFT: "DRAFT（草稿）",
-  PUBLISHED: "PUBLISHED（已发布）",
-  ARCHIVED: "ARCHIVED（已归档）",
+  DRAFT: "草稿",
+  PUBLISHED: "已发布",
+  ARCHIVED: "已归档",
 };
 
 const USED_PUBLISHED_TEMPLATE_REVERT_DETAIL =
@@ -69,17 +70,12 @@ const USED_PUBLISHED_TEMPLATE_REVERT_MESSAGE =
   "该模板已发布到班级，不能改回草稿。若需要停止学生提交，请到对应班级任务中关闭任务。";
 
 const isLearningTaskStatus = (value: string): value is LearningTaskStatus =>
-  LEARNING_TASK_STATUSES.some((status) => status === value);
+  value === "DRAFT" || value === "PUBLISHED" || value === "ARCHIVED";
 
 const asRecord = (value: unknown): Record<string, unknown> | undefined =>
   value && typeof value === "object" && !Array.isArray(value)
     ? (value as Record<string, unknown>)
     : undefined;
-
-const toStatusInitial = (value: unknown): LearningTaskStatus => {
-  const candidate = typeof value === "string" ? value.trim().toUpperCase() : "";
-  return isLearningTaskStatus(candidate) ? candidate : "DRAFT";
-};
 
 const toRawStatusUpper = (value: unknown): string =>
   typeof value === "string" ? value.trim().toUpperCase() : "";
@@ -211,23 +207,45 @@ const buildUpdateErrorDescription = (
   return buildErrorDescription(getUpdateErrorSummary(status), detail);
 };
 
-const getRestoreTaskErrorSummary = (status: number): string => {
+const getLifecycleActionErrorSummary = (
+  action: TaskLifecycleAction,
+  status: number,
+): string => {
+  if (action === "publish") {
+    if (status === 400) {
+      return "当前模板状态不允许发布。";
+    }
+    if (status === 401) {
+      return "登录状态已失效，请重新登录。";
+    }
+    if (status === 403) {
+      return "无权限发布该任务模板。";
+    }
+    if (status === 404) {
+      return "任务模板不存在或已不可用。";
+    }
+    if (status >= 500) {
+      return "发布任务模板失败，请稍后重试。";
+    }
+    return "发布任务模板失败，请稍后重试。";
+  }
+
   if (status === 400) {
-    return "当前模板状态不允许恢复。";
+    return "当前模板状态不允许归档。";
   }
   if (status === 401) {
     return "登录状态已失效，请重新登录。";
   }
   if (status === 403) {
-    return "无权限恢复该任务模板。";
+    return "无权限归档该任务模板。";
   }
   if (status === 404) {
     return "任务模板不存在或已不可用。";
   }
   if (status >= 500) {
-    return "恢复任务模板失败，请稍后重试。";
+    return "归档任务模板失败，请稍后重试。";
   }
-  return "恢复任务模板失败，请稍后重试。";
+  return "归档任务模板失败，请稍后重试。";
 };
 
 const toSafeTaskListReturnTo = (value: string | undefined): string => {
@@ -257,9 +275,6 @@ export function EditLearningTaskForm({
   const initialCourseLabel = normalizeTaskCourseLabel(initialTask.courseLabel);
   const rawInitialStatus = toRawStatusUpper(initialTask.status);
   const hasKnownInitialStatus = isLearningTaskStatus(rawInitialStatus);
-  const isArchived = rawInitialStatus === "ARCHIVED";
-  const canRestore = !readOnly && isArchived;
-  const effectiveReadOnly = readOnly || isArchived || !hasKnownInitialStatus;
   const initialVisibility =
     normalizeTaskTemplateVisibility(initialTask.visibility) ??
     TASK_TEMPLATE_VISIBILITY_SHARED;
@@ -267,6 +282,7 @@ export function EditLearningTaskForm({
     initialTask.publisher,
     currentUserId,
   );
+
   const [title, setTitle] = useState(initialTask.title ?? "");
   const [description, setDescription] = useState(initialTask.description ?? "");
   const [knowledgeModule, setKnowledgeModule] = useState(
@@ -282,10 +298,8 @@ export function EditLearningTaskForm({
       ? String(initialTask.stage)
       : "1",
   );
-  const [status, setStatus] = useState<LearningTaskStatus>(
-    hasKnownInitialStatus
-      ? rawInitialStatus
-      : toStatusInitial(initialTask.status),
+  const [currentStatus, setCurrentStatus] = useState<LearningTaskStatus>(
+    hasKnownInitialStatus ? rawInitialStatus : "DRAFT",
   );
   const [visibility, setVisibility] =
     useState<TaskTemplateVisibility>(initialVisibility);
@@ -301,14 +315,21 @@ export function EditLearningTaskForm({
   const [designWeight, setDesignWeight] = useState(rubricSeed.designWeight);
   const [rubricNotes, setRubricNotes] = useState(rubricSeed.notes);
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [isRestoring, setIsRestoring] = useState(false);
+  const [isPublishing, setIsPublishing] = useState(false);
+  const [isArchiving, setIsArchiving] = useState(false);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [errorState, setErrorState] =
     useState<EditLearningTaskFormErrorState | null>(null);
 
+  const isArchived = currentStatus === "ARCHIVED";
+  const canPublish = !readOnly && currentStatus === "DRAFT";
+  const canArchive = !readOnly && currentStatus === "PUBLISHED";
+  const isActionPending = isPublishing || isArchiving;
+  const effectiveReadOnly = readOnly || isArchived || !hasKnownInitialStatus;
+
   const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    if (effectiveReadOnly) {
+    if (effectiveReadOnly || isActionPending) {
       return;
     }
 
@@ -346,12 +367,6 @@ export function EditLearningTaskForm({
     if (parsedStage === null) {
       setErrorState({
         description: "阶段必须是 1~4 的整数。",
-      });
-      return;
-    }
-    if (!isLearningTaskStatus(status)) {
-      setErrorState({
-        description: "任务模板状态不合法，请重新选择。",
       });
       return;
     }
@@ -411,7 +426,6 @@ export function EditLearningTaskForm({
       courseLabel: normalizedCourseLabel ?? "",
       visibility,
       stage: parsedStage,
-      status,
     };
     if (hasRubricInput) {
       const rubricPayload: Record<string, unknown> = {};
@@ -465,24 +479,38 @@ export function EditLearningTaskForm({
     }
   };
 
-  const handleRestoreTask = async () => {
-    if (!canRestore || isSubmitting || isRestoring) {
+  const handleLifecycleAction = async (action: TaskLifecycleAction) => {
+    if (readOnly || isSubmitting || isActionPending) {
       return;
     }
+
+    if (action === "publish" && !canPublish) {
+      return;
+    }
+    if (action === "archive" && !canArchive) {
+      return;
+    }
+
     const confirmed = window.confirm(
-      "确认将该归档模板恢复为草稿吗？恢复后可继续编辑，但不会自动重新发布到班级。",
+      action === "publish"
+        ? "确认发布该任务模板吗？发布后，该模板将进入班级发布候选列表，可被用于创建课堂任务。"
+        : "确认归档该任务模板吗？归档后，该模板将不再出现在班级发布候选列表中；已经发布到班级的课堂任务、学生提交和统计数据不受影响。",
     );
     if (!confirmed) {
       return;
     }
 
-    setIsRestoring(true);
+    if (action === "publish") {
+      setIsPublishing(true);
+    } else {
+      setIsArchiving(true);
+    }
     setSuccessMessage(null);
     setErrorState(null);
 
     try {
       await fetchJson<unknown>(
-        `learning-tasks/tasks/${encodeURIComponent(taskId)}/restore`,
+        `learning-tasks/tasks/${encodeURIComponent(taskId)}/${action}`,
         {
           method: "POST",
           headers: {
@@ -490,26 +518,38 @@ export function EditLearningTaskForm({
           },
         },
       );
-      setStatus("DRAFT");
-      setSuccessMessage("任务模板已恢复为草稿。");
+      const nextStatus = action === "publish" ? "PUBLISHED" : "ARCHIVED";
+      setCurrentStatus(nextStatus);
+      setSuccessMessage(
+        action === "publish" ? "任务模板已发布。" : "任务模板已归档。",
+      );
       router.refresh();
     } catch (error) {
       if (error instanceof BrowserFetchJsonError) {
-        const summary = getRestoreTaskErrorSummary(error.status);
+        const summary = getLifecycleActionErrorSummary(action, error.status);
         const detail = extractRawDetail(error);
         setErrorState({
           status: error.status,
-          title: "恢复任务模板失败",
+          title:
+            action === "publish" ? "发布任务模板失败" : "归档任务模板失败",
           description: buildErrorDescription(summary, detail),
         });
       } else {
         setErrorState({
-          title: "恢复任务模板失败",
-          description: "恢复任务模板失败，请稍后重试。",
+          title:
+            action === "publish" ? "发布任务模板失败" : "归档任务模板失败",
+          description:
+            action === "publish"
+              ? "发布任务模板失败，请稍后重试。"
+              : "归档任务模板失败，请稍后重试。",
         });
       }
     } finally {
-      setIsRestoring(false);
+      if (action === "publish") {
+        setIsPublishing(false);
+      } else {
+        setIsArchiving(false);
+      }
     }
   };
 
@@ -531,9 +571,9 @@ export function EditLearningTaskForm({
           {publisherLabel}
         </p>
       ) : null}
-      {canRestore ? (
+      {isArchived && !readOnly ? (
         <p className="mt-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
-          当前任务模板已归档，不能直接编辑。请先恢复为草稿后再修改。
+          当前任务模板已归档，不能直接编辑。后续如需复用，可复制为新草稿。
         </p>
       ) : null}
       {!readOnly && !hasKnownInitialStatus ? (
@@ -544,7 +584,7 @@ export function EditLearningTaskForm({
 
       <form onSubmit={handleSubmit} className="mt-4 space-y-4">
         <fieldset
-          disabled={isSubmitting || isRestoring || effectiveReadOnly}
+          disabled={isSubmitting || isActionPending || effectiveReadOnly}
           className="space-y-4"
         >
           <div className="grid gap-4 md:grid-cols-2">
@@ -636,31 +676,15 @@ export function EditLearningTaskForm({
               />
             </label>
 
-            <label className="block text-sm">
-              <span className="mb-1 block text-zinc-700">状态</span>
-              <select
-                value={status}
-                onChange={(event) =>
-                  setStatus(event.target.value as LearningTaskStatus)
-                }
-                className="w-full rounded-md border border-zinc-300 px-3 py-2"
-              >
-                {LEARNING_TASK_STATUSES.map((item) => (
-                  <option key={item} value={item}>
-                    {statusLabelMap[item]}
-                  </option>
-                ))}
-              </select>
+            <div className="block text-sm">
+              <span className="mb-1 block text-zinc-700">当前状态</span>
+              <div className="rounded-md border border-zinc-200 bg-zinc-50 px-3 py-2 text-zinc-700">
+                {statusLabelMap[currentStatus]}
+              </div>
               <p className="mt-1 text-xs text-zinc-500">
-                PUBLISHED 可用于班级发布；DRAFT / ARCHIVED
-                通常不会出现在班级发布可选列表。
+                普通保存只更新内容字段；状态流转需使用下方动作按钮。
               </p>
-              {rawInitialStatus === "PUBLISHED" ? (
-                <p className="mt-1 text-xs text-zinc-500">
-                  已发布到班级的模板不能改回草稿；如需停止学生提交，请在班级任务中关闭对应课堂任务。
-                </p>
-              ) : null}
-            </label>
+            </div>
           </div>
 
           <section className="rounded-md border border-zinc-200 bg-zinc-50 p-3">
@@ -754,20 +778,30 @@ export function EditLearningTaskForm({
           {!effectiveReadOnly ? (
             <button
               type="submit"
-              disabled={isSubmitting || isRestoring}
+              disabled={isSubmitting || isActionPending}
               className="rounded-md bg-zinc-900 px-4 py-2 text-sm font-medium text-white disabled:cursor-not-allowed disabled:bg-zinc-400"
             >
               {isSubmitting ? "保存中..." : "保存修改"}
             </button>
           ) : null}
-          {canRestore ? (
+          {canPublish ? (
             <button
               type="button"
-              onClick={handleRestoreTask}
-              disabled={isSubmitting || isRestoring}
+              onClick={() => void handleLifecycleAction("publish")}
+              disabled={isSubmitting || isActionPending}
+              className="rounded-md border border-emerald-300 px-4 py-2 text-sm font-medium text-emerald-700 enabled:hover:bg-emerald-50 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {isPublishing ? "发布中..." : "发布模板"}
+            </button>
+          ) : null}
+          {canArchive ? (
+            <button
+              type="button"
+              onClick={() => void handleLifecycleAction("archive")}
+              disabled={isSubmitting || isActionPending}
               className="rounded-md border border-amber-300 px-4 py-2 text-sm font-medium text-amber-700 enabled:hover:bg-amber-50 disabled:cursor-not-allowed disabled:opacity-60"
             >
-              {isRestoring ? "恢复中..." : "恢复为草稿"}
+              {isArchiving ? "归档中..." : "归档模板"}
             </button>
           ) : null}
           <Link

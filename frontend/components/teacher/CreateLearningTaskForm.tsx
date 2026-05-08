@@ -4,12 +4,13 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { ErrorState } from "@/components/blocks/ErrorState";
 import { BrowserFetchJsonError, fetchJson } from "@/lib/api/browser-client";
-import { buildErrorDescription, extractRawDetail } from "@/lib/api/error-presenter";
 import {
-  LEARNING_TASK_STATUSES,
+  buildErrorDescription,
+  extractRawDetail,
+} from "@/lib/api/error-presenter";
+import {
   toLearningTaskCreateResponse,
   type CreateLearningTaskRequest,
-  type LearningTaskStatus,
 } from "@/lib/api/types-teacher";
 import {
   TASK_COURSE_LABEL_FORM_OPTIONS,
@@ -17,8 +18,8 @@ import {
 } from "@/lib/learning-tasks/course-labels";
 import {
   TASK_TEMPLATE_VISIBILITIES,
-  TASK_TEMPLATE_VISIBILITY_PRIVATE,
   TASK_TEMPLATE_VISIBILITY_LABELS,
+  TASK_TEMPLATE_VISIBILITY_PRIVATE,
   type TaskTemplateVisibility,
 } from "@/lib/learning-tasks/template-visibility-scope";
 import { getRubricDimensionLabel } from "@/lib/ui/rubric";
@@ -28,14 +29,7 @@ type CreateLearningTaskFormErrorState = {
   description: string;
 };
 
-const statusLabelMap: Record<LearningTaskStatus, string> = {
-  DRAFT: "DRAFT（草稿）",
-  PUBLISHED: "PUBLISHED（已发布）",
-  ARCHIVED: "ARCHIVED（已归档）",
-};
-
-const isLearningTaskStatus = (value: string): value is LearningTaskStatus =>
-  LEARNING_TASK_STATUSES.some((status) => status === value);
+type CreateAction = "draft" | "publish";
 
 const getCreateErrorSummary = (status: number): string => {
   if (status === 400) {
@@ -68,7 +62,9 @@ const parseStage = (value: string): number | null => {
   return parsed;
 };
 
-const parseOptionalNonNegativeInt = (value: string): number | undefined | null => {
+const parseOptionalNonNegativeInt = (
+  value: string,
+): number | undefined | null => {
   const trimmed = value.trim();
   if (!trimmed) {
     return undefined;
@@ -92,21 +88,44 @@ export function CreateLearningTaskForm() {
   const [knowledgeModule, setKnowledgeModule] = useState("");
   const [courseLabel, setCourseLabel] = useState("");
   const [visibility, setVisibility] = useState<TaskTemplateVisibility>(
-    TASK_TEMPLATE_VISIBILITY_PRIVATE
+    TASK_TEMPLATE_VISIBILITY_PRIVATE,
   );
   const [stage, setStage] = useState("1");
-  const [status, setStatus] = useState<LearningTaskStatus>("DRAFT");
   const [functionalityWeight, setFunctionalityWeight] = useState("");
   const [correctnessWeight, setCorrectnessWeight] = useState("");
   const [codeStyleWeight, setCodeStyleWeight] = useState("");
   const [designWeight, setDesignWeight] = useState("");
   const [rubricNotes, setRubricNotes] = useState("");
-  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [pendingAction, setPendingAction] = useState<CreateAction | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
-  const [errorState, setErrorState] = useState<CreateLearningTaskFormErrorState | null>(null);
+  const [errorState, setErrorState] =
+    useState<CreateLearningTaskFormErrorState | null>(null);
 
-  const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
+  const isSubmitting = pendingAction !== null;
+
+  const resetForm = () => {
+    setTitle("");
+    setDescription("");
+    setKnowledgeModule("");
+    setCourseLabel("");
+    setVisibility(TASK_TEMPLATE_VISIBILITY_PRIVATE);
+    setStage("1");
+    setFunctionalityWeight("");
+    setCorrectnessWeight("");
+    setCodeStyleWeight("");
+    setDesignWeight("");
+    setRubricNotes("");
+  };
+
+  const submitCreate = async (
+    event: React.FormEvent<HTMLFormElement>,
+    action: CreateAction,
+  ) => {
     event.preventDefault();
+
+    if (isSubmitting) {
+      return;
+    }
 
     const trimmedTitle = title.trim();
     const trimmedDescription = description.trim();
@@ -114,8 +133,10 @@ export function CreateLearningTaskForm() {
     const normalizedCourseLabel = normalizeTaskCourseLabel(courseLabel);
     const trimmedRubricNotes = rubricNotes.trim();
     const parsedStage = parseStage(stage);
-    const parsedFunctionalityWeight = parseOptionalNonNegativeInt(functionalityWeight);
-    const parsedCorrectnessWeight = parseOptionalNonNegativeInt(correctnessWeight);
+    const parsedFunctionalityWeight =
+      parseOptionalNonNegativeInt(functionalityWeight);
+    const parsedCorrectnessWeight =
+      parseOptionalNonNegativeInt(correctnessWeight);
     const parsedCodeStyleWeight = parseOptionalNonNegativeInt(codeStyleWeight);
     const parsedDesignWeight = parseOptionalNonNegativeInt(designWeight);
 
@@ -140,12 +161,6 @@ export function CreateLearningTaskForm() {
     if (parsedStage === null) {
       setErrorState({
         description: "阶段必须是 1~4 的整数。",
-      });
-      return;
-    }
-    if (!isLearningTaskStatus(status)) {
-      setErrorState({
-        description: "任务模板状态不合法，请重新选择。",
       });
       return;
     }
@@ -174,7 +189,7 @@ export function CreateLearningTaskForm() {
       return;
     }
 
-    setIsSubmitting(true);
+    setPendingAction(action);
     setSuccessMessage(null);
     setErrorState(null);
 
@@ -201,7 +216,7 @@ export function CreateLearningTaskForm() {
       knowledgeModule: trimmedKnowledgeModule,
       visibility,
       stage: parsedStage,
-      status,
+      status: action === "publish" ? "PUBLISHED" : "DRAFT",
     };
     if (normalizedCourseLabel) {
       requestBody.courseLabel = normalizedCourseLabel;
@@ -229,25 +244,14 @@ export function CreateLearningTaskForm() {
 
       const created = toLearningTaskCreateResponse(payload);
       const createdTaskId = created.id?.trim();
+      const actionMessage =
+        action === "publish" ? "任务模板已发布" : "任务模板已保存为草稿";
+      const idMessage = createdTaskId ? `（ID: ${createdTaskId}）` : "";
+      const rubricMessage = hasRubric ? "评分配置已保存。" : "";
       setSuccessMessage(
-        createdTaskId
-          ? `任务模板创建成功（ID: ${createdTaskId}）${hasRubric ? "，评分配置已保存。" : "。"}`
-          : hasRubric
-            ? "任务模板创建成功，评分配置已保存。"
-            : "任务模板创建成功。"
+        `${actionMessage}${idMessage}。${rubricMessage ? ` ${rubricMessage}` : ""}`,
       );
-      setTitle("");
-      setDescription("");
-      setKnowledgeModule("");
-      setCourseLabel("");
-      setVisibility(TASK_TEMPLATE_VISIBILITY_PRIVATE);
-      setStage("1");
-      setStatus("DRAFT");
-      setFunctionalityWeight("");
-      setCorrectnessWeight("");
-      setCodeStyleWeight("");
-      setDesignWeight("");
-      setRubricNotes("");
+      resetForm();
       router.refresh();
     } catch (error) {
       if (error instanceof BrowserFetchJsonError) {
@@ -263,18 +267,31 @@ export function CreateLearningTaskForm() {
         });
       }
     } finally {
-      setIsSubmitting(false);
+      setPendingAction(null);
     }
   };
 
+  const handleSaveDraft = (event: React.FormEvent<HTMLFormElement>) =>
+    submitCreate(event, "draft");
+
+  const handlePublishTemplate = async () => {
+    const syntheticEvent = {
+      preventDefault() {},
+    } as React.FormEvent<HTMLFormElement>;
+    await submitCreate(syntheticEvent, "publish");
+  };
+
   return (
-    <section id="create-learning-task-form" className="rounded-lg border border-zinc-200 bg-white p-4">
+    <section
+      id="create-learning-task-form"
+      className="rounded-lg border border-zinc-200 bg-white p-4"
+    >
       <h2 className="text-base font-semibold text-zinc-900">创建任务模板</h2>
       <p className="mt-1 text-sm text-zinc-600">
         这里创建的是可复用模板；创建完成后，请到班级任务页将模板发布到具体班级。
       </p>
 
-      <form onSubmit={handleSubmit} className="mt-4 space-y-4">
+      <form onSubmit={handleSaveDraft} className="mt-4 space-y-4">
         <div className="grid gap-4 md:grid-cols-2">
           <label className="block text-sm">
             <span className="mb-1 block text-zinc-700">标题</span>
@@ -363,24 +380,21 @@ export function CreateLearningTaskForm() {
             />
           </label>
 
-          <label className="block text-sm">
-            <span className="mb-1 block text-zinc-700">状态</span>
-            <select
-              value={status}
-              onChange={(event) => setStatus(event.target.value as LearningTaskStatus)}
-              className="w-full rounded-md border border-zinc-300 px-3 py-2"
-            >
-              {LEARNING_TASK_STATUSES.map((item) => (
-                <option key={item} value={item}>
-                  {statusLabelMap[item]}
-                </option>
-              ))}
-            </select>
-          </label>
+          <div className="block text-sm">
+            <span className="mb-1 block text-zinc-700">创建动作</span>
+            <div className="rounded-md border border-zinc-200 bg-zinc-50 px-3 py-2 text-zinc-700">
+              使用下方按钮决定初始状态：可保存为草稿或直接发布模板。
+            </div>
+            <p className="mt-1 text-xs text-zinc-500">
+              不提供 `ARCHIVED` 创建入口。
+            </p>
+          </div>
         </div>
 
         <section className="rounded-md border border-zinc-200 bg-zinc-50 p-3">
-          <h3 className="text-sm font-medium text-zinc-900">基础评分配置（Rubric）</h3>
+          <h3 className="text-sm font-medium text-zinc-900">
+            基础评分配置（Rubric）
+          </h3>
           <p className="mt-1 text-xs text-zinc-600">
             可选填写。若全部留空，本次创建不会提交 rubric 字段。
           </p>
@@ -455,20 +469,36 @@ export function CreateLearningTaskForm() {
           </label>
         </section>
 
-        <button
-          type="submit"
-          disabled={isSubmitting}
-          className="rounded-md bg-zinc-900 px-4 py-2 text-sm font-medium text-white disabled:cursor-not-allowed disabled:bg-zinc-400"
-        >
-          {isSubmitting ? "创建中..." : "创建任务模板"}
-        </button>
+        <div className="flex flex-wrap items-center gap-3">
+          <button
+            type="submit"
+            disabled={isSubmitting}
+            className="rounded-md bg-zinc-900 px-4 py-2 text-sm font-medium text-white disabled:cursor-not-allowed disabled:bg-zinc-400"
+          >
+            {pendingAction === "draft" ? "保存中..." : "保存为草稿"}
+          </button>
+          <button
+            type="button"
+            onClick={handlePublishTemplate}
+            disabled={isSubmitting}
+            className="rounded-md border border-emerald-300 px-4 py-2 text-sm font-medium text-emerald-700 enabled:hover:bg-emerald-50 disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            {pendingAction === "publish" ? "发布中..." : "发布模板"}
+          </button>
+        </div>
       </form>
 
-      {successMessage ? <p className="mt-3 text-sm text-emerald-700">{successMessage}</p> : null}
+      {successMessage ? (
+        <p className="mt-3 text-sm text-emerald-700">{successMessage}</p>
+      ) : null}
 
       {errorState ? (
         <div className="mt-4">
-          <ErrorState status={errorState.status} title="创建任务模板失败" description={errorState.description} />
+          <ErrorState
+            status={errorState.status}
+            title="创建任务模板失败"
+            description={errorState.description}
+          />
         </div>
       ) : null}
     </section>

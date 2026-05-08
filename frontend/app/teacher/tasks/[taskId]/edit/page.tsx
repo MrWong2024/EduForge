@@ -152,7 +152,7 @@ export default async function EditLearningTaskPage({
           {canEditCurrentTask
             ? "此页用于维护 learning task 模板字段与基础评分配置。"
             : isArchivedTask && viewModel.canEdit
-              ? "此页展示已归档模板详情；恢复为草稿后可继续编辑。"
+              ? "此页展示已归档模板详情；归档模板当前只读，后续如需复用应复制为新草稿。"
               : "此页展示共享模板详情；你当前仅有查看权限。"}
         </p>
         <p className="mt-1">

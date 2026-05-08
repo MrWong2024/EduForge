@@ -181,7 +181,7 @@ export default async function TeacherLearningTasksPage({
           班级任务页发布的是 classroom task（班级实例），两者职责分离。
         </p>
         <p className="mt-1">
-          班级发布页当前只显示 `PUBLISHED` 模板；若创建为 `DRAFT`，需后续发布后才会出现在班级发布选择中。
+          班级发布页当前只显示 `PUBLISHED` 模板；创建区使用“保存为草稿 / 发布模板”动作决定初始状态。
         </p>
         <p className="mt-1">先筛选模板，再去班级任务页发布，效率更高。</p>
         <p className="mt-1">rubric 用于模板层的基础评分参考，班级发布页不配置 rubric。</p>

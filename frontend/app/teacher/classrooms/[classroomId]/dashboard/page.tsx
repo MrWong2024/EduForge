@@ -200,12 +200,6 @@ const toTopTags = (
 const getTaskTemplateStatusBadge = (
   status: string | null | undefined,
 ): TaskTemplateStatusBadge | null => {
-  if (status === "DRAFT") {
-    return {
-      label: "模板已转为草稿",
-      className: "border-amber-200 bg-amber-50 text-amber-700",
-    };
-  }
   if (status === "ARCHIVED") {
     return {
       label: "模板已归档",
