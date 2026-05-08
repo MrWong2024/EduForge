@@ -359,9 +359,6 @@ export default async function ClassroomTasksPage({ params, searchParams }: Class
                   >
                     <td className="px-4 py-3">
                       <p>{toDisplayText(task.title, "未命名任务")}</p>
-                      <p className="mt-1 text-xs text-zinc-500">
-                        模板状态：{toDisplayText(task.taskStatus)}
-                      </p>
                     </td>
                     <td className="px-4 py-3">
                       <span
