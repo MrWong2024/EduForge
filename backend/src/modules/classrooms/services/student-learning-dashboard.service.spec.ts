@@ -22,7 +22,7 @@ type ClassroomFixture = {
   _id: Types.ObjectId;
   name: string;
   courseId: Types.ObjectId;
-  teacherId: Types.ObjectId;
+  teacherId?: Types.ObjectId;
   status: string;
 };
 
