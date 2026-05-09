@@ -15,12 +15,20 @@ import { TaskStatus } from '../../learning-tasks/schemas/task.schema';
 import { AiFeedbackJobService } from '../../learning-tasks/ai-feedback/services/ai-feedback-job.service';
 import { EnrollmentService } from '../enrollments/services/enrollment.service';
 import { StudentLearningDashboardService } from './student-learning-dashboard.service';
+import { User } from '../../users/schemas/user.schema';
 
 type ClassroomFixture = {
   _id: Types.ObjectId;
   name: string;
   courseId: Types.ObjectId;
+  teacherId: Types.ObjectId;
   status: string;
+};
+
+type TeacherFixture = {
+  _id: Types.ObjectId;
+  name?: string;
+  employeeNo?: string;
 };
 
 type ClassroomTaskFixture = {
@@ -54,6 +62,7 @@ type HarnessData = {
   classroomTasks?: ClassroomTaskFixture[];
   submissions?: SubmissionFixture[];
   feedbacks?: FeedbackFixture[];
+  users?: TeacherFixture[];
 };
 
 const objectId = () => new Types.ObjectId();
@@ -65,12 +74,14 @@ const makeQuery = <T>(result: T) => {
     sort: jest.fn(),
     skip: jest.fn(),
     limit: jest.fn(),
+    select: jest.fn(),
     lean: jest.fn(),
     exec: jest.fn().mockResolvedValue(result),
   };
   chain.sort.mockReturnValue(chain);
   chain.skip.mockReturnValue(chain);
   chain.limit.mockReturnValue(chain);
+  chain.select.mockReturnValue(chain);
   chain.lean.mockReturnValue(chain);
   return chain;
 };
@@ -84,7 +95,10 @@ const toIdSet = (values: Types.ObjectId[]) =>
 
 const createHarness = (data: HarnessData = {}) => {
   const studentId = data.submissions?.[0]?.studentId ?? objectId();
-  const classroomId = data.classroomTasks?.[0]?.classroomId ?? objectId();
+  const classroomId =
+    data.classrooms?.[0]?._id ??
+    data.classroomTasks?.[0]?.classroomId ??
+    objectId();
   const taskId =
     data.classroomTasks?.[0]?.taskId ??
     data.submissions?.[0]?.taskId ??
@@ -97,6 +111,7 @@ const createHarness = (data: HarnessData = {}) => {
     _id: classroomId,
     name: 'Class A',
     courseId: objectId(),
+    teacherId: objectId(),
     status: ClassroomStatus.Active,
   };
   const classroomTask: ClassroomTaskFixture = {
@@ -107,7 +122,17 @@ const createHarness = (data: HarnessData = {}) => {
     title: 'Task A',
     publishedAt: addDays(-1),
   };
-  const classrooms = data.classrooms ?? [classroom];
+  const classrooms = (data.classrooms ?? [classroom]).map((item) => ({
+    ...item,
+    teacherId: item.teacherId ?? objectId(),
+  }));
+  const users =
+    data.users ??
+    classrooms.map((item) => ({
+      _id: item.teacherId,
+      name: 'Teacher A',
+      employeeNo: 'T-001',
+    }));
   const classroomTasks = (data.classroomTasks ?? [classroomTask]).map(
     (task) => ({
       ...task,
@@ -125,6 +150,13 @@ const createHarness = (data: HarnessData = {}) => {
       (item) =>
         (ids.size === 0 || ids.has(item._id.toString())) &&
         (!filter.status || item.status === filter.status),
+    );
+  };
+  const filterUsers = (filter: Record<string, unknown>) => {
+    const idFilter = filter._id as { $in?: Types.ObjectId[] } | undefined;
+    const ids = toIdSet(idFilter?.$in ?? []);
+    return users.filter(
+      (item) => ids.size === 0 || ids.has(item._id.toString()),
     );
   };
   const filterClassroomTasks = (pipeline: unknown[]) => {
@@ -215,6 +247,11 @@ const createHarness = (data: HarnessData = {}) => {
       makeQuery(filterSubmissions(filter)),
     ),
   };
+  const userModel = {
+    find: jest.fn((filter: Record<string, unknown>) =>
+      makeQuery(filterUsers(filter)),
+    ),
+  };
   const feedbackModel = {
     find: jest.fn((filter: Record<string, unknown>) => {
       const submissionFilter = filter.submissionId as {
@@ -248,6 +285,7 @@ const createHarness = (data: HarnessData = {}) => {
     classroomTaskModel as unknown as Model<ClassroomTask>,
     submissionModel as unknown as Model<Submission>,
     feedbackModel as unknown as Model<Feedback>,
+    userModel as unknown as Model<User>,
     enrollmentService as unknown as EnrollmentService,
     aiFeedbackJobService as unknown as AiFeedbackJobService,
   );
@@ -258,6 +296,7 @@ const createHarness = (data: HarnessData = {}) => {
     classroomTaskModel,
     submissionModel,
     feedbackModel,
+    userModel,
     ids: { studentId, classroomId, taskId, classroomTaskId },
   };
 };
@@ -273,6 +312,128 @@ describe('StudentLearningDashboardService', () => {
     );
     return dashboard.items[0].tasks[0];
   };
+
+  it('returns classroom teacher summary for each classroom item', async () => {
+    const teacherId = objectId();
+    const harness = createHarness({
+      classrooms: [
+        {
+          _id: objectId(),
+          name: 'Class A',
+          courseId: objectId(),
+          teacherId,
+          status: ClassroomStatus.Active,
+        },
+      ],
+      users: [
+        {
+          _id: teacherId,
+          name: '王老师',
+          employeeNo: 'EMP-001',
+        },
+      ],
+    });
+
+    const dashboard = await harness.service.getMyLearningDashboard(
+      {},
+      harness.ids.studentId.toString(),
+    );
+
+    expect(dashboard.items[0].classroom).toMatchObject({
+      id: harness.ids.classroomId.toString(),
+      teacher: {
+        id: teacherId.toString(),
+        name: '王老师',
+        employeeNo: 'EMP-001',
+      },
+    });
+    const teacherFilter = harness.userModel.find.mock.calls[0][0] as {
+      _id: { $in: Types.ObjectId[] };
+    };
+    expect(teacherFilter._id.$in.map((id) => id.toString())).toEqual([
+      teacherId.toString(),
+    ]);
+  });
+
+  it('keeps classroom items and returns null teacher fields when teacher user is missing or blank', async () => {
+    const teacherId = objectId();
+    const missingTeacherId = objectId();
+    const firstClassroomId = objectId();
+    const secondClassroomId = objectId();
+    const harness = createHarness({
+      classrooms: [
+        {
+          _id: firstClassroomId,
+          name: 'Named Teacher Class',
+          courseId: objectId(),
+          teacherId,
+          status: ClassroomStatus.Active,
+        },
+        {
+          _id: secondClassroomId,
+          name: 'Missing Teacher Class',
+          courseId: objectId(),
+          teacherId: missingTeacherId,
+          status: ClassroomStatus.Active,
+        },
+      ],
+      classroomTasks: [
+        {
+          _id: objectId(),
+          classroomId: firstClassroomId,
+          taskId: objectId(),
+          status: CLASSROOM_TASK_STATUS_ACTIVE,
+          title: 'Task A',
+          publishedAt: addDays(-1),
+        },
+        {
+          _id: objectId(),
+          classroomId: secondClassroomId,
+          taskId: objectId(),
+          status: CLASSROOM_TASK_STATUS_ACTIVE,
+          title: 'Task B',
+          publishedAt: addDays(-1),
+        },
+      ],
+      users: [
+        {
+          _id: teacherId,
+          name: '   ',
+          employeeNo: '',
+        },
+      ],
+    });
+
+    const dashboard = await harness.service.getMyLearningDashboard(
+      {},
+      harness.ids.studentId.toString(),
+    );
+    const firstClassroom = dashboard.items[0].classroom;
+    const secondClassroom = dashboard.items[1].classroom;
+
+    expect(firstClassroom).toMatchObject({
+      name: 'Named Teacher Class',
+      teacher: {
+        id: teacherId.toString(),
+        name: null,
+        employeeNo: null,
+      },
+    });
+    expect(secondClassroom).toMatchObject({
+      name: 'Missing Teacher Class',
+      teacher: {
+        id: missingTeacherId.toString(),
+        name: null,
+        employeeNo: null,
+      },
+    });
+    const teacherFilter = harness.userModel.find.mock.calls[0][0] as {
+      _id: { $in: Types.ObjectId[] };
+    };
+    expect(teacherFilter._id.$in.map((id) => id.toString()).sort()).toEqual(
+      [teacherId.toString(), missingTeacherId.toString()].sort(),
+    );
+  });
 
   it('returns NOT_SUBMITTED when the student has no submissions', async () => {
     const { service, feedbackModel, ids } = createHarness();

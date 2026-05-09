@@ -15,6 +15,7 @@ import { AiFeedbackStatus } from '../../learning-tasks/ai-feedback/interfaces/ai
 import { EnrollmentService } from '../enrollments/services/enrollment.service';
 import { WithId } from '../../../common/types/with-id.type';
 import { WithTimestamps } from '../../../common/types/with-timestamps.type';
+import { User } from '../../users/schemas/user.schema';
 import {
   CompletionFeedback,
   buildCompletionStatus,
@@ -25,6 +26,7 @@ import {
 
 type ClassroomLean = Classroom & WithId;
 type SubmissionWithMeta = Submission & WithId & WithTimestamps;
+type TeacherLean = Pick<User, 'name' | 'employeeNo'> & WithId;
 type StudentTaskVisibilityStatus =
   | 'CURRENT'
   | 'RECENTLY_EXPIRED'
@@ -59,6 +61,8 @@ export class StudentLearningDashboardService {
     private readonly submissionModel: Model<Submission>,
     @InjectModel(Feedback.name)
     private readonly feedbackModel: Model<Feedback>,
+    @InjectModel(User.name)
+    private readonly userModel: Model<User>,
     private readonly enrollmentService: EnrollmentService,
     private readonly aiFeedbackJobService: AiFeedbackJobService,
   ) {}
@@ -185,6 +189,20 @@ export class StudentLearningDashboardService {
       };
     }
 
+    const teacherObjectIds = Array.from(
+      new Set(classrooms.map((classroom) => classroom.teacherId.toString())),
+    ).map((teacherId) => new Types.ObjectId(teacherId));
+    const teachers =
+      teacherObjectIds.length === 0
+        ? []
+        : await this.userModel
+            .find({ _id: { $in: teacherObjectIds } })
+            .select('_id name employeeNo')
+            .lean<TeacherLean[]>()
+            .exec();
+    const teacherById = new Map(
+      teachers.map((teacher) => [teacher._id.toString(), teacher]),
+    );
     const pageClassroomIds = new Set(
       classrooms.map((classroom) => classroom._id.toString()),
     );
@@ -291,6 +309,7 @@ export class StudentLearningDashboardService {
             name: classroom.name,
             courseId: classroom.courseId.toString(),
             status: classroom.status,
+            teacher: this.buildTeacherSummary(classroom, teacherById),
           },
           tasks: tasks.map((task) => {
             const taskKey = task.taskId.toString();
@@ -333,6 +352,19 @@ export class StudentLearningDashboardService {
       total,
       page,
       limit,
+    };
+  }
+
+  private buildTeacherSummary(
+    classroom: ClassroomLean,
+    teacherById: Map<string, TeacherLean>,
+  ) {
+    const teacherId = classroom.teacherId.toString();
+    const teacher = teacherById.get(teacherId);
+    return {
+      id: teacherId,
+      name: this.toNullableText(teacher?.name),
+      employeeNo: this.toNullableText(teacher?.employeeNo),
     };
   }
 
@@ -400,5 +432,13 @@ export class StudentLearningDashboardService {
     }
     const date = value instanceof Date ? value : new Date(value);
     return Number.isNaN(date.getTime()) ? null : date;
+  }
+
+  private toNullableText(value: string | undefined) {
+    if (!value) {
+      return null;
+    }
+    const trimmed = value.trim();
+    return trimmed.length > 0 ? trimmed : null;
   }
 }
