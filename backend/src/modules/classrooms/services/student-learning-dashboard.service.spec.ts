@@ -16,6 +16,7 @@ import { AiFeedbackJobService } from '../../learning-tasks/ai-feedback/services/
 import { EnrollmentService } from '../enrollments/services/enrollment.service';
 import { StudentLearningDashboardService } from './student-learning-dashboard.service';
 import { User } from '../../users/schemas/user.schema';
+import { Course } from '../../courses/schemas/course.schema';
 
 type ClassroomFixture = {
   _id: Types.ObjectId;
@@ -29,6 +30,13 @@ type TeacherFixture = {
   _id: Types.ObjectId;
   name?: string;
   employeeNo?: string;
+};
+
+type CourseFixture = {
+  _id: Types.ObjectId;
+  name?: string;
+  term?: string;
+  code?: string;
 };
 
 type ClassroomTaskFixture = {
@@ -63,6 +71,7 @@ type HarnessData = {
   submissions?: SubmissionFixture[];
   feedbacks?: FeedbackFixture[];
   users?: TeacherFixture[];
+  courses?: CourseFixture[];
 };
 
 const objectId = () => new Types.ObjectId();
@@ -133,6 +142,14 @@ const createHarness = (data: HarnessData = {}) => {
       name: 'Teacher A',
       employeeNo: 'T-001',
     }));
+  const courses =
+    data.courses ??
+    classrooms.map((item) => ({
+      _id: item.courseId,
+      name: 'Course A',
+      term: '2026-Spring',
+      code: 'CS101',
+    }));
   const classroomTasks = (data.classroomTasks ?? [classroomTask]).map(
     (task) => ({
       ...task,
@@ -156,6 +173,13 @@ const createHarness = (data: HarnessData = {}) => {
     const idFilter = filter._id as { $in?: Types.ObjectId[] } | undefined;
     const ids = toIdSet(idFilter?.$in ?? []);
     return users.filter(
+      (item) => ids.size === 0 || ids.has(item._id.toString()),
+    );
+  };
+  const filterCourses = (filter: Record<string, unknown>) => {
+    const idFilter = filter._id as { $in?: Types.ObjectId[] } | undefined;
+    const ids = toIdSet(idFilter?.$in ?? []);
+    return courses.filter(
       (item) => ids.size === 0 || ids.has(item._id.toString()),
     );
   };
@@ -242,6 +266,11 @@ const createHarness = (data: HarnessData = {}) => {
       return makeAggregate(matchedTasks);
     }),
   };
+  const courseModel = {
+    find: jest.fn((filter: Record<string, unknown>) =>
+      makeQuery(filterCourses(filter)),
+    ),
+  };
   const submissionModel = {
     find: jest.fn((filter: Record<string, unknown>) =>
       makeQuery(filterSubmissions(filter)),
@@ -282,6 +311,7 @@ const createHarness = (data: HarnessData = {}) => {
 
   const service = new StudentLearningDashboardService(
     classroomModel as unknown as Model<Classroom>,
+    courseModel as unknown as Model<Course>,
     classroomTaskModel as unknown as Model<ClassroomTask>,
     submissionModel as unknown as Model<Submission>,
     feedbackModel as unknown as Model<Feedback>,
@@ -293,6 +323,7 @@ const createHarness = (data: HarnessData = {}) => {
   return {
     service,
     classroomModel,
+    courseModel,
     classroomTaskModel,
     submissionModel,
     feedbackModel,
@@ -312,6 +343,171 @@ describe('StudentLearningDashboardService', () => {
     );
     return dashboard.items[0].tasks[0];
   };
+
+  it('returns classroom course summary for each classroom item', async () => {
+    const courseId = objectId();
+    const harness = createHarness({
+      classrooms: [
+        {
+          _id: objectId(),
+          name: 'Class A',
+          courseId,
+          teacherId: objectId(),
+          status: ClassroomStatus.Active,
+        },
+      ],
+      courses: [
+        {
+          _id: courseId,
+          name: '程序设计基础',
+          term: '2026 春',
+          code: 'CS101',
+        },
+      ],
+    });
+
+    const dashboard = await harness.service.getMyLearningDashboard(
+      {},
+      harness.ids.studentId.toString(),
+    );
+
+    expect(dashboard.items[0].classroom).toMatchObject({
+      id: harness.ids.classroomId.toString(),
+      courseId: courseId.toString(),
+      course: {
+        id: courseId.toString(),
+        name: '程序设计基础',
+        term: '2026 春',
+        code: 'CS101',
+      },
+    });
+    const courseFilter = harness.courseModel.find.mock.calls[0][0] as {
+      _id: { $in: Types.ObjectId[] };
+    };
+    expect(courseFilter._id.$in.map((id) => id.toString())).toEqual([
+      courseId.toString(),
+    ]);
+  });
+
+  it('keeps classroom items and returns null course fields when course record is missing', async () => {
+    const existingCourseId = objectId();
+    const missingCourseId = objectId();
+    const firstClassroomId = objectId();
+    const secondClassroomId = objectId();
+    const harness = createHarness({
+      classrooms: [
+        {
+          _id: firstClassroomId,
+          name: 'Existing Course Class',
+          courseId: existingCourseId,
+          teacherId: objectId(),
+          status: ClassroomStatus.Active,
+        },
+        {
+          _id: secondClassroomId,
+          name: 'Missing Course Class',
+          courseId: missingCourseId,
+          teacherId: objectId(),
+          status: ClassroomStatus.Active,
+        },
+      ],
+      classroomTasks: [
+        {
+          _id: objectId(),
+          classroomId: firstClassroomId,
+          taskId: objectId(),
+          status: CLASSROOM_TASK_STATUS_ACTIVE,
+          title: 'Task A',
+          publishedAt: addDays(-1),
+        },
+        {
+          _id: objectId(),
+          classroomId: secondClassroomId,
+          taskId: objectId(),
+          status: CLASSROOM_TASK_STATUS_ACTIVE,
+          title: 'Task B',
+          publishedAt: addDays(-1),
+        },
+      ],
+      courses: [
+        {
+          _id: existingCourseId,
+          name: 'Data Structures',
+          term: '2026-Fall',
+          code: 'CS201',
+        },
+      ],
+    });
+
+    const dashboard = await harness.service.getMyLearningDashboard(
+      {},
+      harness.ids.studentId.toString(),
+    );
+    const firstClassroom = dashboard.items[0].classroom;
+    const secondClassroom = dashboard.items[1].classroom;
+
+    expect(firstClassroom).toMatchObject({
+      name: 'Existing Course Class',
+      course: {
+        id: existingCourseId.toString(),
+        name: 'Data Structures',
+        term: '2026-Fall',
+        code: 'CS201',
+      },
+    });
+    expect(secondClassroom).toMatchObject({
+      name: 'Missing Course Class',
+      course: {
+        id: missingCourseId.toString(),
+        name: null,
+        term: null,
+        code: null,
+      },
+    });
+    const courseFilter = harness.courseModel.find.mock.calls[0][0] as {
+      _id: { $in: Types.ObjectId[] };
+    };
+    expect(courseFilter._id.$in.map((id) => id.toString()).sort()).toEqual(
+      [existingCourseId.toString(), missingCourseId.toString()].sort(),
+    );
+  });
+
+  it('normalizes blank course fields to null', async () => {
+    const courseId = objectId();
+    const harness = createHarness({
+      classrooms: [
+        {
+          _id: objectId(),
+          name: 'Blank Course Fields Class',
+          courseId,
+          teacherId: objectId(),
+          status: ClassroomStatus.Active,
+        },
+      ],
+      courses: [
+        {
+          _id: courseId,
+          name: '   ',
+          term: '',
+          code: '  ',
+        },
+      ],
+    });
+
+    const dashboard = await harness.service.getMyLearningDashboard(
+      {},
+      harness.ids.studentId.toString(),
+    );
+
+    expect(dashboard.items[0].classroom).toMatchObject({
+      course: {
+        id: courseId.toString(),
+        name: null,
+        term: null,
+        code: null,
+      },
+    });
+  });
 
   it('returns classroom teacher summary for each classroom item', async () => {
     const teacherId = objectId();

@@ -16,6 +16,7 @@ import { EnrollmentService } from '../enrollments/services/enrollment.service';
 import { WithId } from '../../../common/types/with-id.type';
 import { WithTimestamps } from '../../../common/types/with-timestamps.type';
 import { User } from '../../users/schemas/user.schema';
+import { Course } from '../../courses/schemas/course.schema';
 import {
   CompletionFeedback,
   buildCompletionStatus,
@@ -27,6 +28,7 @@ import {
 type ClassroomLean = Classroom & WithId;
 type SubmissionWithMeta = Submission & WithId & WithTimestamps;
 type TeacherLean = Pick<User, 'name' | 'employeeNo'> & WithId;
+type CourseLean = Pick<Course, 'name' | 'term' | 'code'> & WithId;
 type StudentTaskVisibilityStatus =
   | 'CURRENT'
   | 'RECENTLY_EXPIRED'
@@ -55,6 +57,8 @@ export class StudentLearningDashboardService {
   constructor(
     @InjectModel(Classroom.name)
     private readonly classroomModel: Model<Classroom>,
+    @InjectModel(Course.name)
+    private readonly courseModel: Model<Course>,
     @InjectModel(ClassroomTask.name)
     private readonly classroomTaskModel: Model<ClassroomTask>,
     @InjectModel(Submission.name)
@@ -192,6 +196,17 @@ export class StudentLearningDashboardService {
     const teacherObjectIds = Array.from(
       new Set(classrooms.map((classroom) => classroom.teacherId.toString())),
     ).map((teacherId) => new Types.ObjectId(teacherId));
+    const courseObjectIds = Array.from(
+      new Set(classrooms.map((classroom) => classroom.courseId.toString())),
+    ).map((courseId) => new Types.ObjectId(courseId));
+    const courses =
+      courseObjectIds.length === 0
+        ? []
+        : await this.courseModel
+            .find({ _id: { $in: courseObjectIds } })
+            .select('_id name term code')
+            .lean<CourseLean[]>()
+            .exec();
     const teachers =
       teacherObjectIds.length === 0
         ? []
@@ -200,6 +215,9 @@ export class StudentLearningDashboardService {
             .select('_id name employeeNo')
             .lean<TeacherLean[]>()
             .exec();
+    const courseById = new Map(
+      courses.map((course) => [course._id.toString(), course]),
+    );
     const teacherById = new Map(
       teachers.map((teacher) => [teacher._id.toString(), teacher]),
     );
@@ -309,6 +327,7 @@ export class StudentLearningDashboardService {
             name: classroom.name,
             courseId: classroom.courseId.toString(),
             status: classroom.status,
+            course: this.buildCourseSummary(classroom, courseById),
             teacher: this.buildTeacherSummary(classroom, teacherById),
           },
           tasks: tasks.map((task) => {
@@ -365,6 +384,20 @@ export class StudentLearningDashboardService {
       id: teacherId,
       name: this.toNullableText(teacher?.name),
       employeeNo: this.toNullableText(teacher?.employeeNo),
+    };
+  }
+
+  private buildCourseSummary(
+    classroom: ClassroomLean,
+    courseById: Map<string, CourseLean>,
+  ) {
+    const courseId = classroom.courseId.toString();
+    const course = courseById.get(courseId);
+    return {
+      id: courseId,
+      name: this.toNullableText(course?.name),
+      term: this.toNullableText(course?.term),
+      code: this.toNullableText(course?.code),
     };
   }
 

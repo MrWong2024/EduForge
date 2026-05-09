@@ -304,6 +304,7 @@ AI Provider 错误码（`ai-feedback-provider.error-codes.ts`）：
   - `GET /api/classrooms/mine/dashboard` 的每个 task item 顶层新增 `completionStatus`。
   - 学生看板定位为当前学习工作台，默认只返回 `classroom.status=ACTIVE`、`classroomTask.status=ACTIVE` 且仍值得关注的任务；模板当前 `task.status` 不再控制已发布 classroomTask 的学生可见性，归档班级、已关闭或其它非 ACTIVE 课堂任务默认不显示。
   - 每个返回班级项的 `classroom` 现稳定补充 `teacher:{id,name,employeeNo}` 摘要，仅供学生端展示任课教师等信息；不返回教师 email 等敏感字段；教师记录缺失或空白字段时回落 `name=null, employeeNo=null`，但保留 `teacher.id`。
+  - 每个返回班级项的 `classroom` 现稳定补充 `course:{id,name,term,code}` 摘要，仅供学生端后续展示课程名、学期等班级级信息；不返回 `courseLabel/createdBy/status/createdAt/updatedAt`；课程记录缺失或空白字段时回落 `name=null, term=null, code=null`，但保留 `course.id`。
   - 学生看板自动降噪口径：有 `dueAt` 时截止后 30 天内仍显示并标记 `RECENTLY_EXPIRED`，超过 30 天为 `HISTORICAL` 且默认隐藏；无 `dueAt` 时 `publishedAt` 90 天内显示，超过 90 天为 `HISTORICAL` 且默认隐藏；缺失/非法时间按 `HISTORICAL` 处理。
   - `includeHistorical=true` 为后续前端“显示历史任务”开关预留：返回当前 ACTIVE 班级下的 `CURRENT + RECENTLY_EXPIRED + HISTORICAL` 任务，但仍不返回归档班级或非 ACTIVE classroomTask。
   - 每个 task item 返回 `studentVisibilityStatus(CURRENT|RECENTLY_EXPIRED|HISTORICAL)` 与 `isHistorical`；过滤后无可见任务的班级不返回空分组，`total` 按最终返回班级分组统计。
