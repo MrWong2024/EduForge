@@ -129,12 +129,20 @@ export type StudentDashboardClassroomTeacher = {
   employeeNo: string | null;
 };
 
+export type StudentDashboardClassroomCourse = {
+  id: string;
+  name: string | null;
+  term: string | null;
+  code: string | null;
+};
+
 export type StudentDashboardClassroomItem = {
   classroomId?: string;
   classroomName?: string;
   courseId?: string;
   status?: string;
   teacher: StudentDashboardClassroomTeacher;
+  course: StudentDashboardClassroomCourse;
   tasks: StudentDashboardTaskItem[];
   raw: UnknownRecord;
 };
@@ -354,6 +362,7 @@ const toStudentDashboardClassroomItem = (
   const record = asRecord(value);
   const classroomRecord = asRecord(safeGet(record, "classroom", undefined));
   const teacherRecord = asRecord(safeGet(classroomRecord, "teacher", undefined));
+  const courseRecord = asRecord(safeGet(classroomRecord, "course", undefined));
 
   return {
     classroomId:
@@ -368,6 +377,12 @@ const toStudentDashboardClassroomItem = (
       id: asString(teacherRecord.id) ?? "",
       name: asNullableString(teacherRecord.name) ?? null,
       employeeNo: asNullableString(teacherRecord.employeeNo) ?? null,
+    },
+    course: {
+      id: asString(courseRecord.id) ?? "",
+      name: asNullableString(courseRecord.name) ?? null,
+      term: asNullableString(courseRecord.term) ?? null,
+      code: asNullableString(courseRecord.code) ?? null,
     },
     tasks: asRecordArray(safeGet(record, "tasks", undefined)).map((item) =>
       toStudentDashboardTaskItem(item),

@@ -88,11 +88,15 @@ const StatusBadge = ({ badge }: { badge: StatusBadgeView }) => (
   </span>
 );
 
-const getTeacherBadgeLabel = (
-  teacherName: string | null | undefined,
+const classroomMetaBadgeClassName =
+  "inline-flex items-center rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-xs font-medium text-slate-600";
+
+const getClassroomMetaBadgeLabel = (
+  label: string,
+  value: string | null | undefined,
 ): string => {
-  const normalizedName = teacherName?.trim() || "未设置";
-  return `任课教师：${normalizedName}`;
+  const normalizedValue = value?.trim() || "未设置";
+  return `${label}：${normalizedValue}`;
 };
 
 const getAiFeedbackStatusBadge = (
@@ -373,8 +377,23 @@ export default async function StudentDashboardPage({
                       <h2 className="text-base font-semibold text-zinc-900">
                         {toDisplayText(classroom.classroomName, "未命名班级")}
                       </h2>
-                      <span className="inline-flex items-center rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-xs font-medium text-slate-600">
-                        {getTeacherBadgeLabel(classroom.teacher.name)}
+                      <span className={classroomMetaBadgeClassName}>
+                        {getClassroomMetaBadgeLabel(
+                          "任课教师",
+                          classroom.teacher.name,
+                        )}
+                      </span>
+                      <span className={classroomMetaBadgeClassName}>
+                        {getClassroomMetaBadgeLabel(
+                          "课程",
+                          classroom.course.name,
+                        )}
+                      </span>
+                      <span className={classroomMetaBadgeClassName}>
+                        {getClassroomMetaBadgeLabel(
+                          "学期",
+                          classroom.course.term,
+                        )}
                       </span>
                     </div>
                     <p className="text-sm text-zinc-600">

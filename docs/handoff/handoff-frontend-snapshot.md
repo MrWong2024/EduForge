@@ -136,8 +136,8 @@ Student 学习链路（可用）：
 1. `/student/classrooms/join` -> `POST classrooms/join`
 2. `/student/dashboard` -> `GET classrooms/mine/dashboard`
    - 页面新增“显示历史任务”链接式开关：默认不传 `includeHistorical`，打开后访问 `/student/dashboard?includeHistorical=true` 并请求 `classrooms/mine/dashboard?includeHistorical=true`，关闭后恢复默认请求。
-   - 班级标题区已接入后端 `classroom.teacher`：在班级名后显示轻量徽章“任课教师：{teacher.name}”，当 `teacher.name` 为 `null`、空字符串或缺失时回落为“任课教师：未设置”。
-   - 学生端只展示教师姓名文案，不展示 `teacher.id`、`teacher.employeeNo`、email 或其它教师身份字段。
+   - 班级标题区已接入后端 `classroom.teacher` 与 `classroom.course`：在班级名后显示轻量徽章“任课教师：{teacher.name}”“课程：{course.name}”“学期：{course.term}”；当对应字段为 `null`、空字符串或缺失时分别回落为“任课教师：未设置”“课程：未设置”“学期：未设置”。
+   - 学生端只展示教师姓名、课程名、学期文案，不展示 `teacher.id`、`teacher.employeeNo`、email、`course.id`、`courseId`、`course.code`、`courseLabel` 或其它课程管理字段。
    - 任务可见性完全消费后端 `studentVisibilityStatus/isHistorical`：`RECENTLY_EXPIRED` 显示“近期过期”标签，`HISTORICAL` 显示“历史任务”标签并轻量弱化；`CURRENT` 或旧响应缺字段不额外显示标签。
    - 学生看板不再按任务模板当前 `PUBLISHED/ARCHIVED` 状态做前端二次过滤；已发布课堂任务是否展示，以后端返回的 classroom/classroomTask/enrollment 运行态结果为准。
    - 前端不按 `dueAt/publishedAt/classroom.status/classroomTask.status` 自行判断历史任务，不用本地 filter 模拟默认隐藏；任务集合、`total/page/limit` 与统计展示均以接口返回为准。
