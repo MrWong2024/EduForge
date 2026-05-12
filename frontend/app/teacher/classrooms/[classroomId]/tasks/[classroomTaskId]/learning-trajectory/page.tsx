@@ -310,7 +310,13 @@ export default async function LearningTrajectoryPage({
         title="学习轨迹"
         description={`查看学生尝试趋势与当前窗口 AI 状态变化（${TRAJECTORY_WINDOW_LABELS[viewModel.query.window]}）。`}
         actions={
-          <div className="flex items-center gap-3 text-sm">
+          <div className="flex flex-wrap items-center gap-3 text-sm">
+            <Link
+              href={paths.teacher.classroomDashboard(classroomId)}
+              className="text-blue-700 hover:underline"
+            >
+              班级看板
+            </Link>
             <Link href={paths.teacher.classroomTasks(classroomId)} className="text-blue-700 hover:underline">
               返回任务列表
             </Link>

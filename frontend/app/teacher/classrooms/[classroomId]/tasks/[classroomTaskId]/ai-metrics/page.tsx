@@ -155,7 +155,13 @@ export default async function AiMetricsPage({ params, searchParams }: AiMetricsP
         title="AI 指标"
         description="查看当前课堂任务的 AI 处理质量与状态分布。"
         actions={
-          <div className="flex items-center gap-3 text-sm">
+          <div className="flex flex-wrap items-center gap-3 text-sm">
+            <Link
+              href={paths.teacher.classroomDashboard(classroomId)}
+              className="text-blue-700 hover:underline"
+            >
+              班级看板
+            </Link>
             <Link href={paths.teacher.classroomTasks(classroomId)} className="text-blue-700 hover:underline">
               返回任务列表
             </Link>

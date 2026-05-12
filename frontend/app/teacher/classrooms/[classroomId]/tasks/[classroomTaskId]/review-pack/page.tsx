@@ -560,7 +560,13 @@ export default async function ReviewPackPage({ params, searchParams }: ReviewPac
         title="课堂复盘包"
         description="先看课堂总览，再按高频问题、典型样例与学生分层完成课堂复盘判断。"
         actions={
-          <div className="flex items-center gap-3 text-sm">
+          <div className="flex flex-wrap items-center gap-3 text-sm">
+            <Link
+              href={paths.teacher.classroomDashboard(classroomId)}
+              className="text-blue-700 hover:underline"
+            >
+              班级看板
+            </Link>
             <Link href={paths.teacher.classroomTasks(classroomId)} className="text-blue-700 hover:underline">
               返回任务列表
             </Link>

@@ -109,6 +109,12 @@ export default async function ClassroomTaskSubmissionsPage({
         actions={
           <div className="flex flex-wrap items-center gap-3 text-sm">
             <Link
+              href={paths.teacher.classroomDashboard(classroomId)}
+              className="text-blue-700 hover:underline"
+            >
+              班级看板
+            </Link>
+            <Link
               href={paths.teacher.classroomTasks(classroomId)}
               className="text-blue-700 hover:underline"
             >
