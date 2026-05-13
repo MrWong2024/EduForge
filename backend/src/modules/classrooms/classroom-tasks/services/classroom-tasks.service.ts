@@ -249,6 +249,7 @@ export class ClassroomTasksService {
     'all';
   private static readonly DEFAULT_TRAJECTORY_PAGE = 1;
   private static readonly DEFAULT_TRAJECTORY_LIMIT = 20;
+  private static readonly MAX_TRAJECTORY_LIMIT = 100;
   private static readonly DEFAULT_TRAJECTORY_SORT: LearningTrajectorySortField =
     'latestAttemptAt';
   private static readonly DEFAULT_TRAJECTORY_ORDER: LearningTrajectorySortOrder =
@@ -927,7 +928,7 @@ export class ClassroomTasksService {
     const page = query.page ?? ClassroomTasksService.DEFAULT_TRAJECTORY_PAGE;
     const limit = Math.min(
       query.limit ?? ClassroomTasksService.DEFAULT_TRAJECTORY_LIMIT,
-      50,
+      ClassroomTasksService.MAX_TRAJECTORY_LIMIT,
     );
     const sort = LEARNING_TRAJECTORY_SORT_FIELDS.includes(
       query.sort as LearningTrajectorySortField,

@@ -40,7 +40,7 @@ export class QueryLearningTrajectoryDto {
   @Type(() => Number)
   @IsInt()
   @Min(1)
-  @Max(50)
+  @Max(100)
   limit?: number;
 
   @IsOptional()

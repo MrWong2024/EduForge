@@ -418,6 +418,7 @@ AI Provider 错误码（`ai-feedback-provider.error-codes.ts`）：
   - `items[*].ai.aiSuccessRate` 空值口径收口：`jobsTotal=0 -> null`，`jobsTotal>0 -> succeededJobs/jobsTotal`。
 - Z4 学习轨迹（teacher）：
   - `GET /api/classrooms/:classroomId/tasks/:classroomTaskId/learning-trajectory`
+  - 后端 `limit` 契约上限已从 `50` 调整为 `100`，默认 `limit=20` 保持不变；本阶段仅补稳定后端契约，不调整前端默认展示。
   - `items[*]` 已返回结构化学生公开信息 `student:{id,name,studentNo,email}`（兼容 `studentName`），且未提交学生同样返回该信息。
   - `includeAttempts=true` 时 `items[*].attempts[*]` 已返回 `feedbackCount`（Feedback 全来源总条数，AI/TEACHER/SYSTEM，不区分来源）；同一 attempt 下 `feedbackSummary.totalItems` 继续表示 AI 摘要条目数。
 - Z5 课堂复盘包（teacher）：

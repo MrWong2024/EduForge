@@ -48,6 +48,8 @@ type CreatedSubmissionResponse = {
 };
 type LearningTrajectoryResponse = {
   window: string;
+  page: number;
+  limit: number;
   total: number;
   items: Array<{
     studentId: string;
@@ -583,5 +585,32 @@ describe('Classroom Learning Trajectory (e2e)', () => {
       (item) => item.studentId === studentAId,
     );
     expect(studentAIn7d?.attemptsCount).toBe(2);
+
+    const trajectoryLimit100 = await teacherAgent
+      .get(
+        `/api/classrooms/${classroomId}/tasks/${classroomTaskId}/learning-trajectory`,
+      )
+      .query({
+        page: 1,
+        limit: 100,
+        includeAttempts: true,
+        includeTagDetails: true,
+      })
+      .expect(200);
+    expect((trajectoryLimit100.body as LearningTrajectoryResponse).limit).toBe(
+      100,
+    );
+
+    await teacherAgent
+      .get(
+        `/api/classrooms/${classroomId}/tasks/${classroomTaskId}/learning-trajectory`,
+      )
+      .query({
+        page: 1,
+        limit: 101,
+        includeAttempts: true,
+        includeTagDetails: true,
+      })
+      .expect(400);
   });
 });

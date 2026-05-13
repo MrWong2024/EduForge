@@ -719,7 +719,7 @@
 - Fields:
   - `window?: 'all' | '7d' | '24h' | '30d'`（`@IsIn(LEARNING_TRAJECTORY_WINDOWS)`；默认 `all`）
   - `page?: number`（`@Type(() => Number) @IsInt() @Min(1)`）
-  - `limit?: number`（`@Type(() => Number) @IsInt() @Min(1) @Max(50)`）
+  - `limit?: number`（`@Type(() => Number) @IsInt() @Min(1) @Max(100)`）
   - `sort?: 'latestAttemptAt' | 'attemptsCount' | 'errorRate' | 'notSubmitted'`
   - `order?: 'asc' | 'desc'`
   - `includeAttempts?: string`（`@IsBooleanString()`）

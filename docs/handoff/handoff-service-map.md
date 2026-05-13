@@ -343,7 +343,7 @@
   - `getLearningTrajectory(classroomId, classroomTaskId, query, teacherId)`
 - AuthZ Boundary: `teacher-only + owner-only`
 - Metrics/Isolation: 学生范围来自 Enrollment ACTIVE（分页在学生维度）；`items` 包含未提交学生（`notSubmitted` 维度可排序）；全链路按 `classroomTaskId` 聚合
-- Consistency/Constraints: 默认窗口为 `all`；后端兼容窗口 `all/7d/24h/30d`；`all` 语义为“无时间下界过滤（submissions 不拼 `createdAt >= lowerBound`）”；`includeTagDetails=false` 时跳过 tags 展开聚合；`aiFeedbackStatus` 缺 job 为 `NOT_REQUESTED`；`includeAttempts=true` 时 `attempts[*].feedbackCount` 为 Feedback 全来源总条数（按当前页 submissionIds 聚合，缺失回填 `0`）；`attempts[*].feedbackSummary.totalItems` 继续保留 AI 摘要语义；未提交学生同样携带 `student` 公开信息
+- Consistency/Constraints: 默认窗口为 `all`；后端兼容窗口 `all/7d/24h/30d`；`all` 语义为“无时间下界过滤（submissions 不拼 `createdAt >= lowerBound`）”；默认 `limit=20` 不变，`limit` 最大上限已从 `50` 提升到 `100`；排序仍保持“先分页 enrollment，再做 page-local sort”，本阶段不改为全局排序；`includeTagDetails=false` 时跳过 tags 展开聚合；`aiFeedbackStatus` 缺 job 为 `NOT_REQUESTED`；`includeAttempts=true` 时 `attempts[*].feedbackCount` 为 Feedback 全来源总条数（按当前页 submissionIds 聚合，缺失回填 `0`）；`attempts[*].feedbackSummary.totalItems` 继续保留 AI 摘要语义；未提交学生同样携带 `student` 公开信息
 - Deps/Side Effects: `ClassroomModel`, `ClassroomTaskModel`, `SubmissionModel`, `UserModel`, `EnrollmentService`, `AiFeedbackJobService`, `FeedbackModel`；只读
 - Performance Notes: 先分页 enrollment，再用 page-scope studentIds 批量查询 users 与 submissions；对当前页 submissionIds 批量拉取 `statusMap`、AI `feedbackSummary`、全来源 `feedbackCount`，避免 N+1
 - SoT: `backend/src/modules/classrooms/classroom-tasks/services/classroom-tasks.service.ts`; `backend/src/modules/classrooms/classroom-tasks/dto/query-learning-trajectory.dto.ts`
