@@ -12,6 +12,7 @@ import {
   buildQueryString,
   getSingleSearchParam,
   parseEnum,
+  parsePositiveInt,
   safeGet,
   toDisplayDate,
   toDisplayText,
@@ -19,13 +20,14 @@ import {
 
 type ProcessAssessmentPageProps = {
   params: Promise<{ classroomId: string }>;
-  searchParams: Promise<{ window?: string | string[] }>;
+  searchParams: Promise<{ window?: string | string[]; page?: string | string[] }>;
 };
 
 const SUPPORTED_REPORT_WINDOWS = ["24h", "7d", "30d", "all"] as const;
 type ReportWindow = (typeof SUPPORTED_REPORT_WINDOWS)[number];
 const DISPLAY_REPORT_WINDOWS = ["7d", "30d", "all"] as const;
 type DisplayReportWindow = (typeof DISPLAY_REPORT_WINDOWS)[number];
+const PROCESS_ASSESSMENT_PAGE_SIZE = 100;
 const REPORT_WINDOW_LABELS: Record<ReportWindow, string> = {
   "24h": "近24小时",
   "7d": "近7天",
@@ -283,8 +285,26 @@ const getRequestOrigin = async (): Promise<string> => {
   return `${protocol}://${host}`;
 };
 
+type ProcessAssessmentQueryState = {
+  window: ReportWindow;
+  page: number;
+};
+
+const resolveQueryState = (
+  query: Awaited<ProcessAssessmentPageProps["searchParams"]>,
+): ProcessAssessmentQueryState => ({
+  window: parseEnum(getSingleSearchParam(query.window), SUPPORTED_REPORT_WINDOWS, "all"),
+  page: parsePositiveInt(getSingleSearchParam(query.page), 1, { min: 1 }),
+});
+
 const buildWindowHref = (classroomId: string, windowValue: DisplayReportWindow): string => {
-  const query = buildQueryString({ window: windowValue });
+  const query = buildQueryString({ window: windowValue, page: 1 });
+  const basePath = paths.teacher.classroomProcessAssessment(classroomId);
+  return query ? `${basePath}?${query}` : basePath;
+};
+
+const buildPageHref = (classroomId: string, windowValue: ReportWindow, page: number): string => {
+  const query = buildQueryString({ window: windowValue, page });
   const basePath = paths.teacher.classroomProcessAssessment(classroomId);
   return query ? `${basePath}?${query}` : basePath;
 };
@@ -307,13 +327,18 @@ export default async function ProcessAssessmentPage({
   searchParams,
 }: ProcessAssessmentPageProps) {
   const { classroomId } = await params;
-  const query = await searchParams;
-  const window = parseEnum(getSingleSearchParam(query.window), SUPPORTED_REPORT_WINDOWS, "all");
-  const queryString = buildQueryString({ window });
+  const rawQuery = await searchParams;
+  const queryState = resolveQueryState(rawQuery);
+  const queryString = buildQueryString({
+    window: queryState.window,
+    page: String(queryState.page),
+    limit: String(PROCESS_ASSESSMENT_PAGE_SIZE),
+  });
   const csvBasePath = buildProxyPath(
     `classrooms/${encodeURIComponent(classroomId)}/process-assessment.csv`
   );
-  const csvHref = queryString ? `${csvBasePath}?${queryString}` : csvBasePath;
+  const csvQuery = buildQueryString({ window: queryState.window });
+  const csvHref = csvQuery ? `${csvBasePath}?${csvQuery}` : csvBasePath;
 
   let viewModel: ProcessAssessmentViewModel = {
     mode: "error",
@@ -334,7 +359,7 @@ export default async function ProcessAssessmentPage({
     viewModel = {
       mode: "ready",
       data: toProcessAssessmentResponse(payload),
-      window,
+      window: queryState.window,
       csvHref,
     };
   } catch (error) {
@@ -375,6 +400,18 @@ export default async function ProcessAssessmentPage({
       ? "（旧链接兼容）"
       : "";
   const rubricSummaryText = toRubricSummaryText(asRecord(viewModel.data.raw));
+  const displayedStudentsCount = rows.length;
+  const totalStudentsCount =
+    typeof viewModel.data.total === "number" ? viewModel.data.total : displayedStudentsCount;
+  const currentPageSource =
+    typeof viewModel.data.page === "number" && viewModel.data.page > 0
+      ? viewModel.data.page
+      : queryState.page;
+  const totalPages = Math.max(1, Math.ceil(totalStudentsCount / PROCESS_ASSESSMENT_PAGE_SIZE));
+  const currentPage = Math.min(currentPageSource, totalPages);
+  const showPagination = totalStudentsCount > PROCESS_ASSESSMENT_PAGE_SIZE;
+  const hasPrev = currentPage > 1;
+  const hasNext = currentPage < totalPages;
 
   return (
     <section className="space-y-4">
@@ -443,11 +480,14 @@ export default async function ProcessAssessmentPage({
       <section className="rounded-lg border border-zinc-200 bg-white p-4">
         <h2 className="text-sm font-semibold text-zinc-900">过程性评价明细</h2>
         <p className="mt-1 text-xs text-zinc-500">
-          表格展示当前窗口内过程性评价明细；如需完整结果，请使用上方 CSV 导出。
+          表格展示当前窗口内过程性评价明细；超过 100 人时可翻页查看，完整结果可通过 CSV 导出。
         </p>
         {rubricSummaryText ? (
           <p className="mt-2 text-xs text-zinc-500">{rubricSummaryText}</p>
         ) : null}
+        <div className="mt-2 text-sm text-zinc-600">
+          共 {totalStudentsCount} 名学生，当前显示 {displayedStudentsCount} 名
+        </div>
 
         {rows.length === 0 ? (
           <div className="mt-3">
@@ -502,6 +542,36 @@ export default async function ProcessAssessmentPage({
             </table>
           </div>
         )}
+
+        {showPagination ? (
+          <div className="mt-3 flex items-center gap-4 text-sm">
+            <span className="text-zinc-600">
+              第 {currentPage} / {totalPages} 页
+            </span>
+
+            {hasPrev ? (
+              <Link
+                href={buildPageHref(classroomId, viewModel.window, currentPage - 1)}
+                className="text-blue-700 hover:underline"
+              >
+                上一页
+              </Link>
+            ) : (
+              <span className="text-zinc-400">上一页</span>
+            )}
+
+            {hasNext ? (
+              <Link
+                href={buildPageHref(classroomId, viewModel.window, currentPage + 1)}
+                className="text-blue-700 hover:underline"
+              >
+                下一页
+              </Link>
+            ) : (
+              <span className="text-zinc-400">下一页</span>
+            )}
+          </div>
+        ) : null}
       </section>
 
       <details className="rounded-lg border border-zinc-200 bg-zinc-50 p-4">
