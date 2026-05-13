@@ -36,6 +36,7 @@ const TRAJECTORY_WINDOWS = ["24h", "7d", "30d", "all"] as const;
 const TRAJECTORY_DISPLAY_WINDOWS = ["all", "7d"] as const;
 const TRAJECTORY_SORT_FIELDS = ["latestAttemptAt", "attemptsCount", "errorRate", "notSubmitted"] as const;
 const TRAJECTORY_SORT_ORDERS = ["asc", "desc"] as const;
+const LEARNING_TRAJECTORY_PAGE_SIZE = 100;
 
 type TrajectoryWindow = (typeof TRAJECTORY_WINDOWS)[number];
 type TrajectoryDisplayWindow = (typeof TRAJECTORY_DISPLAY_WINDOWS)[number];
@@ -86,7 +87,10 @@ const resolveQueryState = (
 ): TrajectoryQueryState => ({
   window: parseEnum(getSingleSearchParam(query.window), TRAJECTORY_WINDOWS, "all"),
   page: parsePositiveInt(getSingleSearchParam(query.page), 1, { min: 1 }),
-  limit: parsePositiveInt(getSingleSearchParam(query.limit), 20, { min: 1, max: 50 }),
+  limit: parsePositiveInt(getSingleSearchParam(query.limit), LEARNING_TRAJECTORY_PAGE_SIZE, {
+    min: 1,
+    max: LEARNING_TRAJECTORY_PAGE_SIZE,
+  }),
   sort: parseEnum(getSingleSearchParam(query.sort), TRAJECTORY_SORT_FIELDS, "latestAttemptAt"),
   order: parseEnum(getSingleSearchParam(query.order), TRAJECTORY_SORT_ORDERS, "desc"),
   includeAttempts: parseBool01(getSingleSearchParam(query.includeAttempts), false),
@@ -125,8 +129,6 @@ type TrajectoryViewModel =
       mode: "ready";
       data: ReturnType<typeof toLearningTrajectoryResponse>;
       query: TrajectoryQueryState;
-      hasPrev: boolean;
-      hasNext: boolean;
     }
   | { mode: "error"; status: number; description: string };
 
@@ -266,18 +268,11 @@ export default async function LearningTrajectoryPage({
     );
 
     const data = toLearningTrajectoryResponse(payload);
-    const hasPrev = queryState.page > 1;
-    const hasNext =
-      typeof data.total === "number"
-        ? queryState.page * queryState.limit < data.total
-        : data.items.length === queryState.limit;
 
     viewModel = {
       mode: "ready",
       data,
       query: queryState,
-      hasPrev,
-      hasNext,
     };
   } catch (error) {
     if (error instanceof FetchJsonError) {
@@ -303,6 +298,22 @@ export default async function LearningTrajectoryPage({
 
   const routePath = paths.teacher.classroomTaskTrajectory(classroomId, classroomTaskId);
   const queryRecord = toQueryRecord(viewModel.query);
+  const displayedStudentsCount = viewModel.data.items.length;
+  const totalStudentsCount =
+    typeof viewModel.data.total === "number" ? viewModel.data.total : displayedStudentsCount;
+  const currentLimit =
+    typeof viewModel.data.limit === "number" && viewModel.data.limit > 0
+      ? viewModel.data.limit
+      : viewModel.query.limit;
+  const totalPages = Math.max(1, Math.ceil(totalStudentsCount / currentLimit));
+  const currentPageSource =
+    typeof viewModel.data.page === "number" && viewModel.data.page > 0
+      ? viewModel.data.page
+      : viewModel.query.page;
+  const currentPage = Math.min(currentPageSource, totalPages);
+  const showPagination = totalStudentsCount > currentLimit;
+  const hasPrev = currentPage > 1;
+  const hasNext = currentPage < totalPages;
 
   return (
     <section className="mt-4 space-y-4">
@@ -407,6 +418,10 @@ export default async function LearningTrajectoryPage({
         </div>
       </section>
 
+      <div className="text-sm text-zinc-600">
+        共 {totalStudentsCount} 名学生，当前显示 {displayedStudentsCount} 名
+      </div>
+
       {viewModel.data.items.length === 0 ? (
         <EmptyState title="暂无学习轨迹数据" description="当前查询条件下没有返回学生轨迹数据。" />
       ) : (
@@ -506,29 +521,35 @@ export default async function LearningTrajectoryPage({
         </div>
       )}
 
-      <div className="flex items-center gap-4 text-sm">
-        {viewModel.hasPrev ? (
-          <Link
-            href={buildHref(routePath, queryRecord, { page: String(viewModel.query.page - 1) })}
-            className="text-blue-700 hover:underline"
-          >
-            上一页
-          </Link>
-        ) : (
-          <span className="text-zinc-400">上一页</span>
-        )}
+      {showPagination ? (
+        <div className="flex items-center gap-4 text-sm">
+          <span className="text-zinc-600">
+            第 {currentPage} / {totalPages} 页
+          </span>
 
-        {viewModel.hasNext ? (
-          <Link
-            href={buildHref(routePath, queryRecord, { page: String(viewModel.query.page + 1) })}
-            className="text-blue-700 hover:underline"
-          >
-            下一页
-          </Link>
-        ) : (
-          <span className="text-zinc-400">下一页</span>
-        )}
-      </div>
+          {hasPrev ? (
+            <Link
+              href={buildHref(routePath, queryRecord, { page: String(currentPage - 1) })}
+              className="text-blue-700 hover:underline"
+            >
+              上一页
+            </Link>
+          ) : (
+            <span className="text-zinc-400">上一页</span>
+          )}
+
+          {hasNext ? (
+            <Link
+              href={buildHref(routePath, queryRecord, { page: String(currentPage + 1) })}
+              className="text-blue-700 hover:underline"
+            >
+              下一页
+            </Link>
+          ) : (
+            <span className="text-zinc-400">下一页</span>
+          )}
+        </div>
+      ) : null}
 
       <details className="rounded-lg border border-zinc-200 bg-zinc-50 p-4">
         <summary className="cursor-pointer text-sm font-medium text-zinc-800">查看原始学习轨迹 JSON</summary>

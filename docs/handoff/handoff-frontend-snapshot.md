@@ -201,6 +201,8 @@ Teacher 学习轨迹链路（可用）：
 4. `includeAttempts/includeTagDetails` 已在主视图提供可见扩展区（尝试详情、首次标签/最近标签），不再仅体现在请求参数与 raw JSON。
 5. attempts 扩展区“总反馈”已消费 `attempt.feedbackCount`（全来源总反馈数）；`feedbackSummary.totalItems` 仅作为 AI 摘要信息展示，不再充当总反馈数。
 6. 学习轨迹页顶部导航已补齐“班级看板”入口，当前顺序为：`班级看板 -> 返回任务列表 -> 提交管理`；跳转目标统一为 `/teacher/classrooms/[classroomId]/dashboard`，原有“返回任务列表”“提交管理”均保留。
+7. 学习轨迹页默认请求 `limit=100`，URL `limit` 最大允许 `100`；学生列表区域展示“共 X 名学生，当前显示 Y 名”。
+8. 当 `total <= limit` 时不显示分页按钮与 `第 1 / 1 页`；当 `total > limit` 时显示轻量分页“第 N / M 页 / 上一页 / 下一页”，翻页继续保留 `window/sort/order/includeAttempts/includeTagDetails/limit` 等当前 query 状态。
 
 Teacher AI 指标链路（可用）：
 1. `/teacher/classrooms/[classroomId]/tasks/[classroomTaskId]/ai-metrics` 保持真接口与 query 协议（`window/includeTags`）不变。
