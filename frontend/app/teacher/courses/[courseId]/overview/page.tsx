@@ -40,6 +40,7 @@ const SORT_FIELDS = [
   "failedJobs",
 ] as const;
 const SORT_ORDERS = ["asc", "desc"] as const;
+const COURSE_OVERVIEW_PAGE_SIZE = 100;
 
 type CourseOverviewWindow = (typeof OVERVIEW_WINDOWS)[number];
 type CourseOverviewDisplayWindow = (typeof DISPLAY_WINDOWS)[number];
@@ -87,7 +88,10 @@ const resolveQueryState = (
   sort: parseEnum(getSingleSearchParam(query.sort), SORT_FIELDS, "overallSubmissionCoverage"),
   order: parseEnum(getSingleSearchParam(query.order), SORT_ORDERS, "desc"),
   page: parsePositiveInt(getSingleSearchParam(query.page), 1, { min: 1, max: 100 }),
-  limit: parsePositiveInt(getSingleSearchParam(query.limit), 20, { min: 1, max: 50 }),
+  limit: parsePositiveInt(getSingleSearchParam(query.limit), COURSE_OVERVIEW_PAGE_SIZE, {
+    min: 1,
+    max: COURSE_OVERVIEW_PAGE_SIZE,
+  }),
 });
 
 const getRequestOrigin = async (): Promise<string> => {
@@ -157,6 +161,10 @@ type CourseOverviewViewModel =
       mode: "ready";
       data: ReturnType<typeof toCourseOverviewResponse>;
       query: CourseOverviewQueryState;
+      currentPage: number;
+      totalClassrooms: number;
+      totalPages: number;
+      showPagination: boolean;
       hasPrev: boolean;
       hasNext: boolean;
     }
@@ -189,16 +197,28 @@ export default async function CourseOverviewPage({ params, searchParams }: Cours
       }
     );
     const data = toCourseOverviewResponse(payload);
-    const total = data.total;
-    const hasPrev = query.page > 1;
-    const hasNext =
-      typeof total === "number"
-        ? query.page * query.limit < total
-        : data.items.length === query.limit;
+    const totalClassrooms = typeof data.total === "number" ? data.total : data.items.length;
+    const responseLimit =
+      typeof data.limit === "number" && Number.isFinite(data.limit) && data.limit > 0
+        ? Math.floor(data.limit)
+        : query.limit;
+    const responsePage =
+      typeof data.page === "number" && Number.isFinite(data.page) && data.page > 0
+        ? Math.floor(data.page)
+        : query.page;
+    const totalPages = Math.max(1, Math.ceil(totalClassrooms / responseLimit));
+    const currentPage = Math.min(responsePage, totalPages);
+    const showPagination = totalClassrooms > responseLimit;
+    const hasPrev = showPagination && currentPage > 1;
+    const hasNext = showPagination && currentPage < totalPages;
     viewModel = {
       mode: "ready",
       data,
       query,
+      currentPage,
+      totalClassrooms,
+      totalPages,
+      showPagination,
       hasPrev,
       hasNext,
     };
@@ -377,70 +397,81 @@ export default async function CourseOverviewPage({ params, searchParams }: Cours
         任务完成度表示当前窗口内该班全部已发布课堂任务的整体提交覆盖度；学生触达率表示至少提交过一次的学生占比；无 AI 活动时 AI 成功率显示为 —。
       </p>
 
+      <p className="text-sm text-zinc-600">
+        共 {viewModel.totalClassrooms} 个班级，当前显示 {viewModel.data.items.length} 个
+      </p>
+
       {viewModel.data.items.length === 0 ? (
         <EmptyState title="当前课程暂无班级统计" description="该课程在当前窗口没有可展示数据。" />
       ) : (
-        <div className="overflow-x-auto rounded-lg border border-zinc-200 bg-white">
-          <table className="min-w-full border-collapse text-sm">
-            <thead className="bg-zinc-50 text-left text-zinc-600">
-              <tr>
-                <th className="px-4 py-3">班级</th>
-                <th className="px-4 py-3">学生数</th>
-                <th className="px-4 py-3">任务完成度</th>
-                <th className="px-4 py-3">学生触达率</th>
-                <th className="px-4 py-3">AI 成功率</th>
-                <th className="px-4 py-3">AI 待处理</th>
-                <th className="px-4 py-3">AI 失败</th>
-                <th className="px-4 py-3">操作</th>
-              </tr>
-            </thead>
-            <tbody>
-              {viewModel.data.items.map((item, index) => (
-                <tr key={item.classroomId ?? `classroom-${index}`} className="border-t border-zinc-100">
-                  <td className="px-4 py-3">
-                    <p className="font-medium text-zinc-900">{toDisplayText(item.name, "未命名班级")}</p>
-                  </td>
-                  <td className="px-4 py-3">{toDisplayText(item.studentsCount)}</td>
-                  <td className="px-4 py-3">{toPercentText(item.overallSubmissionCoverage)}</td>
-                  <td className="px-4 py-3">{toPercentText(item.submissionRate)}</td>
-                  <td className="px-4 py-3">{toPercentText(item.aiSuccessRate)}</td>
-                  <td className="px-4 py-3">{toDisplayText(item.aiPendingJobs)}</td>
-                  <td className="px-4 py-3">{toDisplayText(item.aiFailedJobs)}</td>
-                  <td className="px-4 py-3">
-                    {item.classroomId ? (
-                      <Link
-                        href={paths.teacher.classroomDashboard(item.classroomId)}
-                        className="text-blue-700 hover:underline"
-                      >
-                        进入班级
-                      </Link>
-                    ) : (
-                      <span className="text-zinc-500">缺少班级标识</span>
-                    )}
-                  </td>
+        <>
+          <div className="overflow-x-auto rounded-lg border border-zinc-200 bg-white">
+            <table className="min-w-full border-collapse text-sm">
+              <thead className="bg-zinc-50 text-left text-zinc-600">
+                <tr>
+                  <th className="px-4 py-3">班级</th>
+                  <th className="px-4 py-3">学生数</th>
+                  <th className="px-4 py-3">任务完成度</th>
+                  <th className="px-4 py-3">学生触达率</th>
+                  <th className="px-4 py-3">AI 成功率</th>
+                  <th className="px-4 py-3">AI 待处理</th>
+                  <th className="px-4 py-3">AI 失败</th>
+                  <th className="px-4 py-3">操作</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+              </thead>
+              <tbody>
+                {viewModel.data.items.map((item, index) => (
+                  <tr key={item.classroomId ?? `classroom-${index}`} className="border-t border-zinc-100">
+                    <td className="px-4 py-3">
+                      <p className="font-medium text-zinc-900">{toDisplayText(item.name, "未命名班级")}</p>
+                    </td>
+                    <td className="px-4 py-3">{toDisplayText(item.studentsCount)}</td>
+                    <td className="px-4 py-3">{toPercentText(item.overallSubmissionCoverage)}</td>
+                    <td className="px-4 py-3">{toPercentText(item.submissionRate)}</td>
+                    <td className="px-4 py-3">{toPercentText(item.aiSuccessRate)}</td>
+                    <td className="px-4 py-3">{toDisplayText(item.aiPendingJobs)}</td>
+                    <td className="px-4 py-3">{toDisplayText(item.aiFailedJobs)}</td>
+                    <td className="px-4 py-3">
+                      {item.classroomId ? (
+                        <Link
+                          href={paths.teacher.classroomDashboard(item.classroomId)}
+                          className="text-blue-700 hover:underline"
+                        >
+                          进入班级
+                        </Link>
+                      ) : (
+                        <span className="text-zinc-500">缺少班级标识</span>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </>
       )}
 
-      <div className="flex items-center gap-4 text-sm">
-        {viewModel.hasPrev ? (
-          <Link href={buildHref({ page: viewModel.query.page - 1 })} className="text-blue-700 hover:underline">
-            上一页
-          </Link>
-        ) : (
-          <span className="text-zinc-400">上一页</span>
-        )}
-        {viewModel.hasNext ? (
-          <Link href={buildHref({ page: viewModel.query.page + 1 })} className="text-blue-700 hover:underline">
-            下一页
-          </Link>
-        ) : (
-          <span className="text-zinc-400">下一页</span>
-        )}
-      </div>
+      {viewModel.showPagination ? (
+        <div className="flex items-center gap-4 text-sm">
+          <span className="text-zinc-600">
+            第 {viewModel.currentPage} / {viewModel.totalPages} 页
+          </span>
+          {viewModel.hasPrev ? (
+            <Link href={buildHref({ page: viewModel.currentPage - 1 })} className="text-blue-700 hover:underline">
+              上一页
+            </Link>
+          ) : (
+            <span className="text-zinc-400">上一页</span>
+          )}
+          {viewModel.hasNext ? (
+            <Link href={buildHref({ page: viewModel.currentPage + 1 })} className="text-blue-700 hover:underline">
+              下一页
+            </Link>
+          ) : (
+            <span className="text-zinc-400">下一页</span>
+          )}
+        </div>
+      ) : null}
 
       <details className="rounded-lg border border-zinc-200 bg-zinc-50 p-4">
         <summary className="cursor-pointer text-sm font-medium text-zinc-800">

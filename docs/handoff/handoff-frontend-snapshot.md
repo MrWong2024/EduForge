@@ -112,6 +112,7 @@ Teacher 课程视角（可用）：
 - 课程空态动作已按 `statusView` 收口：页面主创建入口固定保留 `CreateCourseForm`；`archived` 空态仅提供“查看进行中课程”动作；`active/all` 空态不再追加“创建课程”按钮，避免与主创建入口重复。
 - `/teacher/courses/[courseId]/overview` 已收口为“筛选区 -> 课程摘要 -> 班级明细 -> 分页”的层次化结构；移除 `window/sort/order/page` 技术态参数裸露展示，筛选区风格向学习轨迹/课堂复盘页对齐。
 - 课程总览页前端主展示窗口已收口为 `all/7d`（默认 `all`）；旧值 URL（`1h/24h/7d`）仍兼容请求与展示，但主控件仅展示 `all/7d`。
+- 课程总览页班级明细默认请求 `limit=100`，URL `limit` 最大允许 `100`；切换 `window/sort/order` 时回到 `page=1`，翻页保留当前 `window/sort/order/limit`；明细区展示“共 X 个班级，当前显示 Y 个”，仅当 `total > limit` 时显示轻量分页“第 N / M 页 / 上一页 / 下一页”。
 - 课程总览页轻量摘要区已按“有意义优先”收口（复用既有 overview 数据契约，不新增接口）：班级总数（`total`）、当前页班级数、当前页平均任务完成度（`overallSubmissionCoverage`）、当前页平均 AI 成功率（跳过无 AI 活动班级）。
 - 课程总览页比率字段已统一为百分比展示，并做展示层精度收口（最多 1 位小数，不暴露长小数）；明细主指标已切换为 `overallSubmissionCoverage`（表头“任务完成度”），旧 `submissionRate` 降级为次级语义“学生触达率（至少提交一次占比）”。
 - 课程总览页筛选区已进一步向学习轨迹/课堂复盘页对齐，`顺序` 已改为与 learning-trajectory 同款单切换链接（点击在 `asc/desc` 间翻转并显示当前值）；筛选区固定展示“当前窗口”提示，命中旧窗口值时追加“旧链接兼容”标记；排序字段已接入 `overallSubmissionCoverage`，默认排序切到 `overallSubmissionCoverage desc`。
