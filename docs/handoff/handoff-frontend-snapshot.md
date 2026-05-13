@@ -176,6 +176,8 @@ Student 学习链路（可用）：
 
 Teacher 批阅链路（可用）：
 1. `/teacher/classrooms/[classroomId]/tasks/[classroomTaskId]/submissions`
+   - 页面现已显式读取 URL `page`，并固定请求 `page={当前页}&limit=100`。
+   - 提交列表区域展示“共 X 条提交，当前显示 Y 条”；当 `total <= 100` 时不显示分页按钮，当 `total > 100` 时显示轻量分页“第 N / M 页 / 上一页 / 下一页”。
 2. `/teacher/submissions/[submissionId]`（稳定读源）
    - 顶部导航已收口为：`班级看板 -> 返回任务提交列表 -> 返回任务详情`；其中“班级看板”仅在 query 中存在 `classroomId` 时显示，跳转 `/teacher/classrooms/[classroomId]/dashboard`。
    - 原 `返回班级列表` 入口已移除；本次不做 review-pack 来源追踪，不新增“返回课堂复盘 / 返回 AI 指标 / 返回学习轨迹”。

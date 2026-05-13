@@ -8,11 +8,22 @@ import { buildErrorDescription, extractRawDetail } from "@/lib/api/error-present
 import { toClassroomTaskSubmissionsResponse, toClassroomSummary } from "@/lib/api/types-teacher";
 import { paths } from "@/lib/routes/paths";
 import { getAiStatusLabel, getCommonErrorSummary } from "@/lib/ui/status";
-import { buildQueryString, toDisplayDate, toDisplayText } from "@/lib/ui/format";
+import {
+  buildQueryString,
+  getSingleSearchParam,
+  parsePositiveInt,
+  toDisplayDate,
+  toDisplayText,
+} from "@/lib/ui/format";
 
 type ClassroomTaskSubmissionsPageProps = {
   params: Promise<{ classroomId: string; classroomTaskId: string }>;
+  searchParams: Promise<{
+    page?: string | string[];
+  }>;
 };
+
+const SUBMISSIONS_PAGE_SIZE = 100;
 
 const getRequestOrigin = async (): Promise<string> => {
   const headerMap = await headers();
@@ -38,7 +49,7 @@ type TaskSubmissionsViewModel =
   | {
       mode: "ready";
       classroomName?: string;
-      submissions: ReturnType<typeof toClassroomTaskSubmissionsResponse>["items"];
+      submissionsResponse: ReturnType<typeof toClassroomTaskSubmissionsResponse>;
     }
   | {
       mode: "error";
@@ -46,11 +57,32 @@ type TaskSubmissionsViewModel =
       description: string;
     };
 
+type SubmissionsQueryState = {
+  page: number;
+};
+
+const resolveQueryState = (
+  query: Awaited<ClassroomTaskSubmissionsPageProps["searchParams"]>,
+): SubmissionsQueryState => ({
+  page: parsePositiveInt(getSingleSearchParam(query.page), 1, { min: 1 }),
+});
+
+const buildPageHref = (
+  routePath: string,
+  page: number,
+): string => `${routePath}?${buildQueryString({ page })}`;
+
 export default async function ClassroomTaskSubmissionsPage({
   params,
+  searchParams,
 }: ClassroomTaskSubmissionsPageProps) {
   const { classroomId, classroomTaskId } = await params;
-  const submissionsQuery = buildQueryString({ page: 1, limit: 50 });
+  const rawQuery = await searchParams;
+  const queryState = resolveQueryState(rawQuery);
+  const submissionsQuery = buildQueryString({
+    page: String(queryState.page),
+    limit: String(SUBMISSIONS_PAGE_SIZE),
+  });
   const submissionsPath = `classrooms/${encodeURIComponent(classroomId)}/tasks/${encodeURIComponent(
     classroomTaskId
   )}/submissions?${submissionsQuery}`;
@@ -78,7 +110,7 @@ export default async function ClassroomTaskSubmissionsPage({
     viewModel = {
       mode: "ready",
       classroomName: toClassroomSummary(classroomPayload).name,
-      submissions: submissionsResponse.items,
+      submissionsResponse,
     };
   } catch (error) {
     if (error instanceof FetchJsonError) {
@@ -100,6 +132,27 @@ export default async function ClassroomTaskSubmissionsPage({
       />
     );
   }
+
+  const routePath = paths.teacher.classroomTaskSubmissions(classroomId, classroomTaskId);
+  const submissions = viewModel.submissionsResponse.items;
+  const displayedSubmissionsCount = submissions.length;
+  const totalSubmissionsCount =
+    typeof viewModel.submissionsResponse.total === "number"
+      ? viewModel.submissionsResponse.total
+      : displayedSubmissionsCount;
+  const currentPageSource =
+    typeof viewModel.submissionsResponse.page === "number" &&
+    viewModel.submissionsResponse.page > 0
+      ? viewModel.submissionsResponse.page
+      : queryState.page;
+  const totalPages = Math.max(
+    1,
+    Math.ceil(totalSubmissionsCount / SUBMISSIONS_PAGE_SIZE),
+  );
+  const currentPage = Math.min(currentPageSource, totalPages);
+  const showPagination = totalSubmissionsCount > SUBMISSIONS_PAGE_SIZE;
+  const hasPrev = currentPage > 1;
+  const hasNext = currentPage < totalPages;
 
   return (
     <section className="mt-4 space-y-4">
@@ -155,7 +208,11 @@ export default async function ClassroomTaskSubmissionsPage({
         </p>
       </section>
 
-      {viewModel.submissions.length === 0 ? (
+      <div className="text-sm text-zinc-600">
+        共 {totalSubmissionsCount} 条提交，当前显示 {displayedSubmissionsCount} 条
+      </div>
+
+      {submissions.length === 0 ? (
         <EmptyState title="当前任务暂无提交" description="该课堂任务暂未收到学生提交。" />
       ) : (
         <div className="overflow-x-auto rounded-lg border border-zinc-200 bg-white">
@@ -176,7 +233,7 @@ export default async function ClassroomTaskSubmissionsPage({
               </tr>
             </thead>
             <tbody>
-              {viewModel.submissions.map((submission, index) => {
+              {submissions.map((submission, index) => {
                 const submissionId = submission.submissionId;
                 const baseDetailPath = submissionId
                   ? paths.teacher.submissionDetail(submissionId)
@@ -221,6 +278,36 @@ export default async function ClassroomTaskSubmissionsPage({
           </table>
         </div>
       )}
+
+      {showPagination ? (
+        <div className="flex items-center gap-4 text-sm">
+          <span className="text-zinc-600">
+            第 {currentPage} / {totalPages} 页
+          </span>
+
+          {hasPrev ? (
+            <Link
+              href={buildPageHref(routePath, currentPage - 1)}
+              className="text-blue-700 hover:underline"
+            >
+              上一页
+            </Link>
+          ) : (
+            <span className="text-zinc-400">上一页</span>
+          )}
+
+          {hasNext ? (
+            <Link
+              href={buildPageHref(routePath, currentPage + 1)}
+              className="text-blue-700 hover:underline"
+            >
+              下一页
+            </Link>
+          ) : (
+            <span className="text-zinc-400">下一页</span>
+          )}
+        </div>
+      ) : null}
 
     </section>
   );
