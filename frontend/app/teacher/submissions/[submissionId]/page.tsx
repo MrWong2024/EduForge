@@ -215,6 +215,9 @@ export default async function TeacherSubmissionDetailPage({
           viewModel.context.classroomTaskId,
         )
       : null;
+  const classroomDashboardHref = viewModel.context.classroomId
+    ? paths.teacher.classroomDashboard(viewModel.context.classroomId)
+    : null;
 
   return (
     <section className="space-y-4">
@@ -226,6 +229,14 @@ export default async function TeacherSubmissionDetailPage({
         )}`}
         actions={
           <div className="flex flex-wrap items-center gap-3 text-sm">
+            {classroomDashboardHref ? (
+              <Link
+                href={classroomDashboardHref}
+                className="text-blue-700 hover:underline"
+              >
+                班级看板
+              </Link>
+            ) : null}
             {backHref ? (
               <Link href={backHref} className="text-blue-700 hover:underline">
                 返回任务提交列表
@@ -236,12 +247,6 @@ export default async function TeacherSubmissionDetailPage({
                 返回任务详情
               </Link>
             ) : null}
-            <Link
-              href={paths.teacher.classrooms}
-              className="text-blue-700 hover:underline"
-            >
-              返回班级列表
-            </Link>
           </div>
         }
       />

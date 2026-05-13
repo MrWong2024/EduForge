@@ -177,6 +177,8 @@ Student 学习链路（可用）：
 Teacher 批阅链路（可用）：
 1. `/teacher/classrooms/[classroomId]/tasks/[classroomTaskId]/submissions`
 2. `/teacher/submissions/[submissionId]`（稳定读源）
+   - 顶部导航已收口为：`班级看板 -> 返回任务提交列表 -> 返回任务详情`；其中“班级看板”仅在 query 中存在 `classroomId` 时显示，跳转 `/teacher/classrooms/[classroomId]/dashboard`。
+   - 原 `返回班级列表` 入口已移除；本次不做 review-pack 来源追踪，不新增“返回课堂复盘 / 返回 AI 指标 / 返回学习轨迹”。
 3. `TeacherFeedbackForm` -> `POST learning-tasks/submissions/:id/feedback`
    - 新增教师反馈表单已补齐 `type` 选择；当前新增字段口径统一为 `type/severity/message/suggestion/tags`。
    - `tags` 可选，前端不做必填校验；不选择时继续不提交 `tags`，由后端归一化为 `other`，教师端仅提示该规则。
