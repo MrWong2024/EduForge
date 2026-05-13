@@ -50,7 +50,7 @@ frontend/
   - 班级生命周期操作已接入后端契约：
     - 归档/恢复：`PATCH classrooms/:id`（`status=ARCHIVED/ACTIVE`）
     - 删除：`DELETE classrooms/:id`（前端统一提供入口，失败时按后端 `409 + CLASSROOM_NOT_EMPTY` 显示“该班级已有成员或任务记录，不能删除，只能归档”）
-  - `/teacher/classrooms/[classroomId]/edit`：班级基础信息编辑页，当前前端按后端契约仅支持更新 `name`（调用 `PATCH classrooms/:id`）；所属课程只读展示优先使用 `ClassroomResponse.course` 摘要（name/code/term/courseLabel），仅在摘要缺失时弱化显示 `courseId` 作为排查信息；页面下方补齐 `ACTIVE` 班级的“危险操作 / 归档班级”（`POST classrooms/:id/archive`，二次确认后执行并回班级看板刷新），`ARCHIVED` 班级仅展示已归档提示，不新增恢复操作；`Archived` 状态更新失败会展示后端错误明细。
+  - `/teacher/classrooms/[classroomId]/edit`：班级基础信息编辑页，当前前端按后端契约仅支持更新 `name`（调用 `PATCH classrooms/:id`）；所属课程只读展示优先使用 `ClassroomResponse.course` 摘要（name/code/term/courseLabel），仅在摘要缺失时弱化显示 `courseId` 作为排查信息；页面说明文案已更新为中性口径，强调修改基础信息不会影响成员、课堂任务和历史提交；归档、删除等低频操作仍在班级列表 `/teacher/classrooms` 的“更多”菜单中处理，编辑页不再展示危险操作区块或归档入口；`Archived` 状态更新失败仍展示后端错误明细。
 - 教师模板层（已落地）：
   - `/teacher/tasks`：模板列表 + 创建 + 视图切换（默认 `scope=mine`，支持 `mine/shared/all`）+ URL 驱动筛选（`scope/courseLabel/status/knowledgeModule/stage/page`）并展示模板可见性 `visibility(私有/共享)`；列表已切到后端真实查询与标准分页（固定 `limit=20`，`page` 入 URL，筛选变化自动回到第一页）；创建区不再暴露状态枚举，而是通过“保存为草稿 / 发布模板”动作提交 `status=DRAFT/PUBLISHED`；默认排序按 scope 收口（`mine=最近更新优先`、`shared=PUBLISHED 优先`、`all=我的模板优先`）；作者自己的 `DRAFT/PUBLISHED` 模板显示“编辑”，作者自己的 `ARCHIVED` 模板仅显示“查看”，非作者仍仅可查看并基于 `publisher` 展示模板发布者来源。
   - `/teacher/tasks/[taskId]/edit`：模板编辑/查看与生命周期动作（含可选课程分类、模板可见性；非作者共享模板只读并显示模板发布者来源）；从模板页进入编辑时携带 `returnTo`（当前完整列表 URL），编辑页顶部/底部返回优先回到该地址，缺失或非法时回退 `/teacher/tasks`；普通保存不再提交 `status`；作者打开 `DRAFT` 模板时可执行 `POST learning-tasks/tasks/:id/publish`，作者打开 `PUBLISHED` 模板时可执行 `POST learning-tasks/tasks/:id/archive`；作者打开 `ARCHIVED` 模板时页面只读，不显示保存/发布/归档/恢复按钮，并提示后续如需复用应复制为新草稿。

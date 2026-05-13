@@ -103,7 +103,9 @@ export default async function EditClassroomPage({ params }: EditClassroomPagePro
 
       <section className="rounded-lg border border-zinc-200 bg-white p-4 text-sm text-zinc-700">
         <p>此页用于维护班级基础信息。</p>
-        <p className="mt-1">当前阶段仅接入后端已开放的更新能力，不包含班级删除与归档动作。</p>
+        <p className="mt-1">
+          修改班级信息不会影响班级成员、课堂任务和历史提交；归档、删除等低频操作请在班级列表的“更多”菜单中处理。
+        </p>
       </section>
 
       <EditClassroomForm classroomId={resolvedClassroomId} initialClassroom={viewModel.classroom} />
