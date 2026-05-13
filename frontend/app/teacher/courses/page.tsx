@@ -27,6 +27,7 @@ export const metadata: Metadata = {
 
 const COURSE_STATUS_VIEW_VALUES = ["active", "archived", "all"] as const;
 type CourseStatusView = (typeof COURSE_STATUS_VIEW_VALUES)[number];
+const COURSES_PAGE_SIZE = 100;
 
 const COURSE_STATUS_VIEW_LABEL: Record<CourseStatusView, string> = {
   active: "进行中",
@@ -95,11 +96,7 @@ const getRequestOrigin = async (): Promise<string> => {
 type CoursesViewModel =
   | {
       mode: "ready";
-      items: ReturnType<typeof toCourseListResponse>["items"];
-      page: number;
-      limit: number;
-      hasPrev: boolean;
-      hasNext: boolean;
+      response: ReturnType<typeof toCourseListResponse>;
       statusView: CourseStatusView;
     }
   | { mode: "error"; status: number; description: string };
@@ -107,7 +104,10 @@ type CoursesViewModel =
 export default async function TeacherCoursesPage({ searchParams }: TeacherCoursesPageProps) {
   const query = await searchParams;
   const page = parsePositiveInt(getSingleSearchParam(query.page), 1, { min: 1, max: 100 });
-  const limit = parsePositiveInt(getSingleSearchParam(query.limit), 20, { min: 1, max: 100 });
+  const limit = parsePositiveInt(getSingleSearchParam(query.limit), COURSES_PAGE_SIZE, {
+    min: 1,
+    max: COURSES_PAGE_SIZE,
+  });
   const statusView = parseStatusView(getSingleSearchParam(query.statusView));
   const statusFilter = toStatusFilter(statusView);
 
@@ -132,16 +132,9 @@ export default async function TeacherCoursesPage({ searchParams }: TeacherCourse
       cache: "no-store",
     });
     const response = toCourseListResponse(payload);
-    const total = response.total;
-    const hasPrev = page > 1;
-    const hasNext = typeof total === "number" ? page * limit < total : response.items.length === limit;
     viewModel = {
       mode: "ready",
-      items: response.items,
-      page,
-      limit,
-      hasPrev,
-      hasNext,
+      response,
       statusView,
     };
   } catch (error) {
@@ -165,22 +158,39 @@ export default async function TeacherCoursesPage({ searchParams }: TeacherCourse
     );
   }
 
+  const currentPageSource =
+    typeof viewModel.response.page === "number" && viewModel.response.page > 0
+      ? viewModel.response.page
+      : page;
+  const currentLimit =
+    typeof viewModel.response.limit === "number" && viewModel.response.limit > 0
+      ? viewModel.response.limit
+      : limit;
+  const displayedCoursesCount = viewModel.response.items.length;
+  const totalCoursesCount =
+    typeof viewModel.response.total === "number" ? viewModel.response.total : displayedCoursesCount;
+  const totalPages = Math.max(1, Math.ceil(totalCoursesCount / currentLimit));
+  const currentPage = Math.min(currentPageSource, totalPages);
+  const showPagination = totalCoursesCount > currentLimit;
+  const hasPrev = currentPage > 1;
+  const hasNext = currentPage < totalPages;
+
   const tabItems = [
     {
       label: "进行中",
-      href: buildCourseListHref(1, viewModel.limit, "active"),
+      href: buildCourseListHref(1, currentLimit, "active"),
     },
     {
       label: "已归档",
-      href: buildCourseListHref(1, viewModel.limit, "archived"),
+      href: buildCourseListHref(1, currentLimit, "archived"),
     },
     {
       label: "全部",
-      href: buildCourseListHref(1, viewModel.limit, "all"),
+      href: buildCourseListHref(1, currentLimit, "all"),
     },
   ];
 
-  const activeTabHref = buildCourseListHref(1, viewModel.limit, viewModel.statusView);
+  const activeTabHref = buildCourseListHref(1, currentLimit, viewModel.statusView);
   const emptyStateTitle =
     viewModel.statusView === "archived"
       ? "暂无已归档课程"
@@ -191,13 +201,13 @@ export default async function TeacherCoursesPage({ searchParams }: TeacherCourse
     viewModel.statusView === "archived"
       ? "归档后的课程会显示在这里。"
       : "可使用上方“创建课程”表单创建首门课程，再基于课程创建班级。";
-  const archivedEmptyActionHref = buildCourseListHref(1, viewModel.limit, "active");
+  const archivedEmptyActionHref = buildCourseListHref(1, currentLimit, "active");
 
   return (
     <section className="space-y-4">
       <PageHeader
         title="课程"
-        description={`当前视图：${COURSE_STATUS_VIEW_LABEL[viewModel.statusView]} · 第 ${viewModel.page} 页，每页 ${viewModel.limit} 条`}
+        description={`当前视图：${COURSE_STATUS_VIEW_LABEL[viewModel.statusView]} · 第 ${currentPage} 页，每页 ${currentLimit} 条`}
         actions={
           <Link href={paths.teacher.classrooms} className="text-sm text-blue-700 hover:underline">
             去班级列表
@@ -209,7 +219,11 @@ export default async function TeacherCoursesPage({ searchParams }: TeacherCourse
 
       <CreateCourseForm />
 
-      {viewModel.items.length === 0 ? (
+      <div className="text-sm text-zinc-600">
+        共 {totalCoursesCount} 门课程，当前显示 {displayedCoursesCount} 门
+      </div>
+
+      {viewModel.response.items.length === 0 ? (
         <EmptyState
           title={emptyStateTitle}
           description={emptyStateDescription}
@@ -240,7 +254,7 @@ export default async function TeacherCoursesPage({ searchParams }: TeacherCourse
               </tr>
             </thead>
             <tbody>
-              {viewModel.items.map((course, index) => {
+              {viewModel.response.items.map((course, index) => {
                 const courseId = course.id;
                 const statusMeta = course.status ? COURSE_STATUS_META[course.status] : undefined;
 
@@ -312,28 +326,33 @@ export default async function TeacherCoursesPage({ searchParams }: TeacherCourse
         </div>
       )}
 
-      <div className="flex items-center gap-4 text-sm">
-        {viewModel.hasPrev ? (
-          <Link
-            href={buildCourseListHref(viewModel.page - 1, viewModel.limit, viewModel.statusView)}
-            className="text-blue-700 hover:underline"
-          >
-            上一页
-          </Link>
-        ) : (
-          <span className="text-zinc-400">上一页</span>
-        )}
-        {viewModel.hasNext ? (
-          <Link
-            href={buildCourseListHref(viewModel.page + 1, viewModel.limit, viewModel.statusView)}
-            className="text-blue-700 hover:underline"
-          >
-            下一页
-          </Link>
-        ) : (
-          <span className="text-zinc-400">下一页</span>
-        )}
-      </div>
+      {showPagination ? (
+        <div className="flex items-center gap-4 text-sm">
+          <span className="text-zinc-600">
+            第 {currentPage} / {totalPages} 页
+          </span>
+          {hasPrev ? (
+            <Link
+              href={buildCourseListHref(currentPage - 1, currentLimit, viewModel.statusView)}
+              className="text-blue-700 hover:underline"
+            >
+              上一页
+            </Link>
+          ) : (
+            <span className="text-zinc-400">上一页</span>
+          )}
+          {hasNext ? (
+            <Link
+              href={buildCourseListHref(currentPage + 1, currentLimit, viewModel.statusView)}
+              className="text-blue-700 hover:underline"
+            >
+              下一页
+            </Link>
+          ) : (
+            <span className="text-zinc-400">下一页</span>
+          )}
+        </div>
+      ) : null}
     </section>
   );
 }

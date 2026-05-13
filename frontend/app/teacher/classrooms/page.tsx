@@ -24,6 +24,7 @@ export const metadata: Metadata = {
 
 const CLASSROOM_STATUS_VIEW_VALUES = ["active", "archived", "all"] as const;
 type ClassroomStatusView = (typeof CLASSROOM_STATUS_VIEW_VALUES)[number];
+const CLASSROOMS_PAGE_SIZE = 100;
 
 const CLASSROOM_STATUS_VIEW_LABEL: Record<ClassroomStatusView, string> = {
   active: "进行中",
@@ -101,11 +102,7 @@ const getRequestOrigin = async (): Promise<string> => {
 type ClassroomsViewModel =
   | {
       mode: "ready";
-      items: ReturnType<typeof toClassroomListResponse>["items"];
-      page: number;
-      limit: number;
-      hasPrev: boolean;
-      hasNext: boolean;
+      response: ReturnType<typeof toClassroomListResponse>;
       selectedCourseId?: string;
       courses: ReturnType<typeof toCourseListResponse>["items"];
       statusView: ClassroomStatusView;
@@ -115,7 +112,10 @@ type ClassroomsViewModel =
 export default async function TeacherClassroomsPage({ searchParams }: TeacherClassroomsPageProps) {
   const query = await searchParams;
   const page = parsePositiveInt(getSingleSearchParam(query.page), 1);
-  const limit = Math.min(parsePositiveInt(getSingleSearchParam(query.limit), 20), 100);
+  const limit = Math.min(
+    parsePositiveInt(getSingleSearchParam(query.limit), CLASSROOMS_PAGE_SIZE),
+    100
+  );
   const selectedCourseId = getSingleSearchParam(query.courseId)?.trim() || undefined;
   const statusView = parseStatusView(getSingleSearchParam(query.statusView));
   const statusFilter = toStatusFilter(statusView);
@@ -152,17 +152,9 @@ export default async function TeacherClassroomsPage({ searchParams }: TeacherCla
 
     const list = toClassroomListResponse(classroomsPayload);
     const courses = toCourseListResponse(coursesPayload).items;
-    const items = list.items;
-    const total = list.total;
-    const hasPrev = page > 1;
-    const hasNext = typeof total === "number" ? page * limit < total : items.length === limit;
     viewModel = {
       mode: "ready",
-      items,
-      page,
-      limit,
-      hasPrev,
-      hasNext,
+      response: list,
       selectedCourseId,
       courses,
       statusView,
@@ -188,6 +180,25 @@ export default async function TeacherClassroomsPage({ searchParams }: TeacherCla
     );
   }
 
+  const currentPageSource =
+    typeof viewModel.response.page === "number" && viewModel.response.page > 0
+      ? viewModel.response.page
+      : page;
+  const currentLimit =
+    typeof viewModel.response.limit === "number" && viewModel.response.limit > 0
+      ? viewModel.response.limit
+      : limit;
+  const displayedClassroomsCount = viewModel.response.items.length;
+  const totalClassroomsCount =
+    typeof viewModel.response.total === "number"
+      ? viewModel.response.total
+      : displayedClassroomsCount;
+  const totalPages = Math.max(1, Math.ceil(totalClassroomsCount / currentLimit));
+  const currentPage = Math.min(currentPageSource, totalPages);
+  const showPagination = totalClassroomsCount > currentLimit;
+  const hasPrev = currentPage > 1;
+  const hasNext = currentPage < totalPages;
+
   const courseNameMap = new Map(
     viewModel.courses
       .filter((course) => course.id)
@@ -197,21 +208,21 @@ export default async function TeacherClassroomsPage({ searchParams }: TeacherCla
   const tabItems = [
     {
       label: "进行中",
-      href: buildClassroomListHref(1, viewModel.limit, viewModel.selectedCourseId, "active"),
+      href: buildClassroomListHref(1, currentLimit, viewModel.selectedCourseId, "active"),
     },
     {
       label: "已归档",
-      href: buildClassroomListHref(1, viewModel.limit, viewModel.selectedCourseId, "archived"),
+      href: buildClassroomListHref(1, currentLimit, viewModel.selectedCourseId, "archived"),
     },
     {
       label: "全部",
-      href: buildClassroomListHref(1, viewModel.limit, viewModel.selectedCourseId, "all"),
+      href: buildClassroomListHref(1, currentLimit, viewModel.selectedCourseId, "all"),
     },
   ];
 
   const activeTabHref = buildClassroomListHref(
     1,
-    viewModel.limit,
+    currentLimit,
     viewModel.selectedCourseId,
     viewModel.statusView
   );
@@ -227,7 +238,7 @@ export default async function TeacherClassroomsPage({ searchParams }: TeacherCla
       : "可使用上方“创建班级”表单创建首个班级，再发布课堂任务。";
   const archivedEmptyActionHref = buildClassroomListHref(
     1,
-    viewModel.limit,
+    currentLimit,
     viewModel.selectedCourseId,
     "active"
   );
@@ -236,14 +247,18 @@ export default async function TeacherClassroomsPage({ searchParams }: TeacherCla
     <section className="space-y-4">
       <PageHeader
         title="班级"
-        description={`当前视图：${CLASSROOM_STATUS_VIEW_LABEL[viewModel.statusView]} · 第 ${viewModel.page} 页，每页 ${viewModel.limit} 条`}
+        description={`当前视图：${CLASSROOM_STATUS_VIEW_LABEL[viewModel.statusView]} · 第 ${currentPage} 页，每页 ${currentLimit} 条`}
       />
 
       <Tabs items={tabItems} activeHref={activeTabHref} />
 
       <CreateClassroomForm courses={viewModel.courses} initialCourseId={viewModel.selectedCourseId} />
 
-      {viewModel.items.length === 0 ? (
+      <div className="text-sm text-zinc-600">
+        共 {totalClassroomsCount} 个班级，当前显示 {displayedClassroomsCount} 个
+      </div>
+
+      {viewModel.response.items.length === 0 ? (
         <EmptyState
           title={emptyStateTitle}
           description={emptyStateDescription}
@@ -273,7 +288,7 @@ export default async function TeacherClassroomsPage({ searchParams }: TeacherCla
               </tr>
             </thead>
             <tbody>
-              {viewModel.items.map((item, index) => {
+              {viewModel.response.items.map((item, index) => {
                 const classroomId = item.id;
                 const courseName = item.courseId ? courseNameMap.get(item.courseId) : undefined;
                 const statusMeta =
@@ -332,39 +347,45 @@ export default async function TeacherClassroomsPage({ searchParams }: TeacherCla
         </div>
       )}
 
-      <div className="mt-4 flex items-center gap-4 text-sm">
-        {viewModel.hasPrev ? (
-          <Link
-            href={buildClassroomListHref(
-              viewModel.page - 1,
-              viewModel.limit,
-              viewModel.selectedCourseId,
-              viewModel.statusView
-            )}
-            className="text-blue-700 hover:underline"
-          >
-            上一页
-          </Link>
-        ) : (
-          <span className="text-zinc-400">上一页</span>
-        )}
+      {showPagination ? (
+        <div className="mt-4 flex items-center gap-4 text-sm">
+          <span className="text-zinc-600">
+            第 {currentPage} / {totalPages} 页
+          </span>
 
-        {viewModel.hasNext ? (
-          <Link
-            href={buildClassroomListHref(
-              viewModel.page + 1,
-              viewModel.limit,
-              viewModel.selectedCourseId,
-              viewModel.statusView
-            )}
-            className="text-blue-700 hover:underline"
-          >
-            下一页
-          </Link>
-        ) : (
-          <span className="text-zinc-400">下一页</span>
-        )}
-      </div>
+          {hasPrev ? (
+            <Link
+              href={buildClassroomListHref(
+                currentPage - 1,
+                currentLimit,
+                viewModel.selectedCourseId,
+                viewModel.statusView
+              )}
+              className="text-blue-700 hover:underline"
+            >
+              上一页
+            </Link>
+          ) : (
+            <span className="text-zinc-400">上一页</span>
+          )}
+
+          {hasNext ? (
+            <Link
+              href={buildClassroomListHref(
+                currentPage + 1,
+                currentLimit,
+                viewModel.selectedCourseId,
+                viewModel.statusView
+              )}
+              className="text-blue-700 hover:underline"
+            >
+              下一页
+            </Link>
+          ) : (
+            <span className="text-zinc-400">下一页</span>
+          )}
+        </div>
+      ) : null}
     </section>
   );
 }

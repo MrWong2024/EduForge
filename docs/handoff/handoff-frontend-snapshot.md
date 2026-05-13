@@ -44,7 +44,7 @@ frontend/
 - `/(auth)/login`：已完成登录与 role-home 跳转（`TEACHER -> /teacher/classrooms`, `STUDENT -> /student`）；页面已收口为极简专业型登录入口（主标题“重庆邮电大学智能化教学平台” + 聚焦登录表单），未改变登录链路与错误分流口径。
 - `/teacher/**`：教师起步链路、模板链路、班级发布链路、批阅链路、三件套、周报/过程性评价/快照已接入真接口。
 - 教师班级基础管理层（已落地）：
-  - `/teacher/classrooms`：班级列表 + 创建班级；默认按 `进行中/已归档/全部` 视图区分展示，操作列提供“进入班级/编辑班级”，班级生命周期动作统一收进“更多”次级菜单。
+- `/teacher/classrooms`：班级列表 + 创建班级；默认按 `进行中/已归档/全部` 视图区分展示，操作列提供“进入班级/编辑班级”，班级生命周期动作统一收进“更多”次级菜单；主列表已默认请求 `page=1&limit=100`，切换 `statusView/courseId` 时回到 `page=1`，并展示“共 X 个班级，当前显示 Y 个”；仅当 `total > 100` 时显示轻量分页。
   - 班级生命周期菜单已改为 `Portal + fixed` 浮层（渲染到 `document.body`），脱离表格滚动容器，菜单展开不再撑出列表滚动条。
   - 班级列表空态动作已按 `statusView` 收口：页面主创建入口固定保留 `CreateClassroomForm`；`archived` 空态仅提供“查看进行中班级”动作；`active/all` 空态不再追加“创建班级”按钮，避免与主创建入口重复。
   - 班级生命周期操作已接入后端契约：
@@ -104,7 +104,7 @@ Teacher 起步与模板链路（可用）：
    - 课堂任务详情页已移除历史遗留的模板发布状态管理区块，不再展示底层模板 `task.taskStatus` 的“发布状态”，也不再提供模板发布按钮；模板生命周期统一回到 `/teacher/tasks/[taskId]/edit` 处理，课堂任务实例状态流仍由班级任务列表页负责。
 
 Teacher 课程视角（可用）：
-- `/teacher/courses` 已支持课程列表与创建课程，`courseLabel`（课程分类）可选录入并在列表展示；默认按 `进行中/已归档/全部` 视图区分展示课程（`statusView` query）。
+- `/teacher/courses` 已支持课程列表与创建课程，`courseLabel`（课程分类）可选录入并在列表展示；默认按 `进行中/已归档/全部` 视图区分展示课程（`statusView` query）；主列表已默认请求 `page=1&limit=100`，切换状态视图时回到 `page=1`，并展示“共 X 门课程，当前显示 Y 门”；仅当 `total > 100` 时显示轻量分页。
 - 课程生命周期操作已接入后端契约，统一收进“更多”次级菜单：
   - 归档/恢复：`PATCH courses/:id`（`status=ARCHIVED/ACTIVE`）
   - 删除：`DELETE courses/:id`（前端统一提供入口，失败时按后端 `409 + COURSE_NOT_EMPTY` 显示“该课程下已有班级记录，不能删除，只能归档”）
