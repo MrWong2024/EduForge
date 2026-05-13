@@ -42,6 +42,7 @@ Notes:
 
 Notes:
 - `/api/courses/:courseId/overview` Query: `window, sort, order, page, limit`。
+- `/api/courses/:courseId/overview` `limit` DTO 最大上限已从 `50` 调整为 `100`，默认 `limit=20` 保持不变；用于匹配前端课程总览页显式请求 `limit=100` 的稳定契约。
 - `/api/courses/:courseId/overview` `sort` 兼容字段：`studentsCount/submissionRate/aiSuccessRate/pendingJobs/failedJobs`，并新增 `overallSubmissionCoverage`。
 - `/api/courses/:courseId/overview` 窗口契约：默认 `window=all`；后端兼容集合为 `all/7d/24h/1h`（旧值继续兼容）。
 - `/api/courses/:courseId/overview` 中 `window=all` 语义：课程总览口径下不拼时间下界（无 `createdAt >= lowerBound` 过滤）。

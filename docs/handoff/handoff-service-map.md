@@ -301,7 +301,7 @@
   - `getCourseOverview(courseId: string, query: QueryCourseOverviewDto, teacherId: string)`
 - AuthZ Boundary: `teacher-only + owner-only`（`course.createdBy === currentUserId`）
 - Metrics/Isolation: 仅统计该 teacher 名下 classrooms；`studentsCount` 批量来自 `EnrollmentService.countStudentsGroupedByClassroomIds`；提交/迟交/AI 全按 `classroomTaskId` 关联回 classroom
-- Consistency/Constraints: late 指标含 `lateSubmissionsCount/lateStudentsCount`；默认窗口为 `all`；后端兼容窗口 `all/7d/24h/1h`；`all` 语义为“无时间下界过滤（classroomTasks/submissions/jobs 不拼 `createdAt >= lowerBound`）”；禁止跨班 taskId 兜底聚合；`submissionRate` 兼容语义保持 `distinctStudentsSubmitted / studentsCount`；新增 `overallSubmissionCoverage = sum(distinctStudentsSubmitted per classroomTask) / (studentsCount * publishedClassroomTasks)`（分母为 0 返回 0）；`ai.aiSuccessRate` 在 `jobsTotal=0` 时返回 `null`
+- Consistency/Constraints: late 指标含 `lateSubmissionsCount/lateStudentsCount`；默认窗口为 `all`；默认 `limit=20` 不变，DTO `limit` 最大上限为 `100`；后端兼容窗口 `all/7d/24h/1h`；`all` 语义为“无时间下界过滤（classroomTasks/submissions/jobs 不拼 `createdAt >= lowerBound`）”；禁止跨班 taskId 兜底聚合；`submissionRate` 兼容语义保持 `distinctStudentsSubmitted / studentsCount`；新增 `overallSubmissionCoverage = sum(distinctStudentsSubmitted per classroomTask) / (studentsCount * publishedClassroomTasks)`（分母为 0 返回 0）；`ai.aiSuccessRate` 在 `jobsTotal=0` 时返回 `null`
 - Deps/Side Effects: `CourseModel`, `ClassroomModel`, `ClassroomTaskModel`, `SubmissionModel`, `EnrollmentService`, `AiFeedbackMetricsAggregator`；只读
 - Performance Notes: 先按分页取 classrooms，再做 page-scope 聚合并在页内排序（非全量排序）
 - SoT: `backend/src/modules/courses/services/course-overview.service.ts`; `backend/src/modules/classrooms/enrollments/services/enrollment.service.ts`

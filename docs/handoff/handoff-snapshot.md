@@ -412,6 +412,7 @@ AI Provider 错误码（`ai-feedback-provider.error-codes.ts`）：
 - AB 课程总览（teacher）：
   - `GET /api/courses/:courseId/overview`
   - 窗口契约：默认 `window=all`；后端兼容 `all/7d/24h/1h`；`all` 语义为无时间下界过滤。
+  - 后端 `limit` 契约上限已从 `50` 调整为 `100`，默认 `limit=20` 保持不变；用于匹配前端课程总览页显式请求 `limit=100`。
   - 排序契约：兼容 `studentsCount/submissionRate/aiSuccessRate/pendingJobs/failedJobs`，并新增 `overallSubmissionCoverage`。
   - `items[*].submissionRate` 保持兼容语义：`distinctStudentsSubmitted / studentsCount`（至少提交过一次的学生覆盖率）。
   - `items[*].overallSubmissionCoverage` 新增主比较指标：`sum(distinctStudentsSubmitted per classroomTask) / (studentsCount * publishedClassroomTasks)`；当分母为 0 返回 `0`。

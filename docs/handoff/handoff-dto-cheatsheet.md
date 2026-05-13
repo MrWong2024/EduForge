@@ -701,7 +701,7 @@
   - `sort?: 'studentsCount' | 'submissionRate' | 'overallSubmissionCoverage' | 'aiSuccessRate' | 'pendingJobs' | 'failedJobs'`
   - `order?: 'asc' | 'desc'`
   - `page?: number`（`@Type(() => Number) @IsInt() @Min(1)`）
-  - `limit?: number`（`@Type(() => Number) @IsInt() @Min(1) @Max(50)`）
+  - `limit?: number`（`@Type(() => Number) @IsInt() @Min(1) @Max(100)`；默认 `20`）
 - Example Query:
   - `/api/courses/{courseId}/overview?window=all&sort=aiSuccessRate&order=desc&page=1&limit=20`
 - Window 语义:

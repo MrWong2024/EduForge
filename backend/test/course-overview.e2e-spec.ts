@@ -36,9 +36,12 @@ type CreatedClassroomResponse = { id: string; joinCode: string };
 type CreatedTaskResponse = { id: string };
 type CreatedClassroomTaskResponse = { id: string };
 type CreatedSubmissionResponse = { id: string };
+type ValidationErrorResponse = { message?: unknown };
 
 type CourseOverviewResponse = {
   window: string;
+  page: number;
+  limit: number;
   total: number;
   items: Array<{
     classroomId: string;
@@ -566,6 +569,27 @@ describe('Course Overview (e2e)', () => {
     const pageLimitedBody = pageLimited.body as CourseOverviewResponse;
     expect(pageLimitedBody.total).toBe(3);
     expect(pageLimitedBody.items.length).toBe(1);
+
+    const limit100 = await teacherAgent
+      .get(`/api/courses/${courseId}/overview`)
+      .query({
+        window: '7d',
+        page: 1,
+        limit: 100,
+      })
+      .expect(200);
+    const limit100Body = limit100.body as CourseOverviewResponse;
+    expect(limit100Body.limit).toBe(100);
+    expect(limit100Body.items.length).toBe(3);
+
+    await teacherAgent
+      .get(`/api/courses/${courseId}/overview`)
+      .query({
+        window: '7d',
+        page: 1,
+        limit: 101,
+      })
+      .expect(400);
   });
 
   it('supports window=all and defaults to all while preserving legacy windows', async () => {
@@ -629,7 +653,9 @@ describe('Course Overview (e2e)', () => {
       .query({ window: 'not-supported' })
       .expect(400);
 
-    const message = invalidWindowResponse.body?.message;
+    const invalidWindowBody =
+      invalidWindowResponse.body as ValidationErrorResponse;
+    const message = invalidWindowBody.message;
     if (Array.isArray(message)) {
       const combinedMessage = message.map((item) => String(item)).join(' | ');
       expect(combinedMessage).toContain(
