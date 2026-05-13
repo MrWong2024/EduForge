@@ -17,18 +17,22 @@ import {
   buildQueryString,
   getSingleSearchParam,
   parseBool01,
+  parsePositiveInt,
   toDisplayDate,
   toDisplayText,
 } from "@/lib/ui/format";
 
 type MembersPageProps = {
   params: Promise<{ classroomId: string }>;
-  searchParams: Promise<{ includeRemoved?: string | string[] }>;
+  searchParams: Promise<{ includeRemoved?: string | string[]; page?: string | string[] }>;
 };
 
 type MembersQueryState = {
   includeRemoved: boolean;
+  page: number;
 };
+
+const MEMBERS_PAGE_SIZE = 100;
 
 const getRequestOrigin = async (): Promise<string> => {
   const headerMap = await headers();
@@ -45,21 +49,15 @@ const resolveQueryState = (
   query: Awaited<MembersPageProps["searchParams"]>
 ): MembersQueryState => ({
   includeRemoved: parseBool01(getSingleSearchParam(query.includeRemoved), false),
+  page: parsePositiveInt(getSingleSearchParam(query.page), 1, { min: 1 }),
 });
 
 const toStatusUpper = (status?: string): string => (status ?? "").trim().toUpperCase();
 
-const filterStudents = (students: ClassroomStudent[], includeRemoved: boolean): ClassroomStudent[] => {
-  if (includeRemoved) {
-    return students;
-  }
-
-  return students.filter((student) => toStatusUpper(student.status) !== "REMOVED");
-};
-
-const buildToggleHref = (classroomId: string, includeRemoved: boolean): string => {
+const buildMembersHref = (classroomId: string, queryState: MembersQueryState): string => {
   const query = buildQueryString({
-    includeRemoved: String(includeRemoved),
+    includeRemoved: queryState.includeRemoved ? "1" : "0",
+    page: String(queryState.page),
   });
   const basePath = paths.teacher.classroomMembers(classroomId);
   return query ? `${basePath}?${query}` : basePath;
@@ -70,6 +68,9 @@ type MembersViewModel =
       mode: "ready";
       classroomName?: string;
       students: ClassroomStudent[];
+      total: number;
+      currentPage: number;
+      totalPages: number;
       studentsRaw: unknown;
       query: MembersQueryState;
     }
@@ -95,6 +96,8 @@ export default async function ClassroomMembersPage({ params, searchParams }: Mem
   const queryState = resolveQueryState(rawQuery);
   const studentsPath = `classrooms/${encodeURIComponent(classroomId)}/students?${buildQueryString({
     includeRemoved: queryState.includeRemoved ? "1" : "0",
+    page: String(queryState.page),
+    limit: String(MEMBERS_PAGE_SIZE),
   })}`;
 
   let viewModel: MembersViewModel = {
@@ -118,12 +121,20 @@ export default async function ClassroomMembersPage({ params, searchParams }: Mem
 
     const classroom = toClassroomSummary(classroomPayload);
     const studentsResponse = toClassroomStudentsResponse(studentsPayload);
-    const students = filterStudents(studentsResponse.items, queryState.includeRemoved);
+    const total = studentsResponse.total ?? studentsResponse.items.length;
+    const totalPages = Math.max(1, Math.ceil(total / MEMBERS_PAGE_SIZE));
+    const currentPage = Math.min(
+      Math.max(studentsResponse.page ?? queryState.page, 1),
+      totalPages
+    );
 
     viewModel = {
       mode: "ready",
       classroomName: classroom.name,
-      students,
+      students: studentsResponse.items,
+      total,
+      currentPage,
+      totalPages,
       studentsRaw: studentsResponse.raw,
       query: queryState,
     };
@@ -167,12 +178,21 @@ export default async function ClassroomMembersPage({ params, searchParams }: Mem
         <p className="font-medium text-zinc-900">筛选</p>
         <div className="mt-2">
           <Link
-            href={buildToggleHref(classroomId, !viewModel.query.includeRemoved)}
+            href={buildMembersHref(classroomId, {
+              includeRemoved: !viewModel.query.includeRemoved,
+              page: 1,
+            })}
             className="text-blue-700 hover:underline"
           >
             显示已移除成员：{viewModel.query.includeRemoved ? "开" : "关"}
           </Link>
         </div>
+      </section>
+
+      <section className="text-sm text-zinc-600">
+        <p>
+          共 {viewModel.total} 名成员，当前显示 {viewModel.students.length} 名
+        </p>
       </section>
 
       {viewModel.students.length === 0 ? (
@@ -192,8 +212,7 @@ export default async function ClassroomMembersPage({ params, searchParams }: Mem
             <tbody>
               {viewModel.students.map((student, index) => {
                 const statusUpper = toStatusUpper(student.status);
-                const displayName =
-                  student.name ?? student.email ?? student.userId ?? `成员 ${index + 1}`;
+                const displayName = student.name ?? student.email ?? `成员 ${index + 1}`;
 
                 return (
                   <tr key={student.userId ?? `member-${index}`} className="border-t border-zinc-100 align-top">
@@ -220,6 +239,40 @@ export default async function ClassroomMembersPage({ params, searchParams }: Mem
           </table>
         </div>
       )}
+
+      {viewModel.total > MEMBERS_PAGE_SIZE ? (
+        <div className="flex flex-wrap items-center gap-4 text-sm">
+          <span className="text-zinc-600">
+            第 {viewModel.currentPage} / {viewModel.totalPages} 页
+          </span>
+          {viewModel.currentPage > 1 ? (
+            <Link
+              href={buildMembersHref(classroomId, {
+                includeRemoved: viewModel.query.includeRemoved,
+                page: viewModel.currentPage - 1,
+              })}
+              className="text-blue-700 hover:underline"
+            >
+              上一页
+            </Link>
+          ) : (
+            <span className="text-zinc-400">上一页</span>
+          )}
+          {viewModel.currentPage < viewModel.totalPages ? (
+            <Link
+              href={buildMembersHref(classroomId, {
+                includeRemoved: viewModel.query.includeRemoved,
+                page: viewModel.currentPage + 1,
+              })}
+              className="text-blue-700 hover:underline"
+            >
+              下一页
+            </Link>
+          ) : (
+            <span className="text-zinc-400">下一页</span>
+          )}
+        </div>
+      ) : null}
 
       <details className="rounded-lg border border-zinc-200 bg-zinc-50 p-4">
         <summary className="cursor-pointer text-sm font-medium text-zinc-800">查看原始成员 JSON</summary>

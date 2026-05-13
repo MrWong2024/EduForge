@@ -132,6 +132,14 @@ Teacher 班级看板链路（可用）：
 8. 每行任务已新增三类快捷入口：`提交记录`（submissions）、`课堂复盘`（review-pack）、`AI 指标`（ai-metrics），用于从看板直接下钻。
 9. “教学快照”已从看板高频入口中移除，不再与周报/过程性评价同层暴露。
 
+Teacher 班级成员链路（可用）：
+1. `/teacher/classrooms/[classroomId]/members` 继续使用 `GET /api/classrooms/:id/students` 作为主读源，但前端已显式传入 `page` 与固定 `limit=100`，不再只依赖后端默认分页大小。
+2. 页面 query 当前读取 `includeRemoved` 与 `page`；`limit` 固定为 `100`，不对外暴露每页数量切换。
+3. 页面会展示成员数量摘要：`共 X 名成员，当前显示 Y 名`；其中 `Y` 直接使用当前响应 `items.length`。
+4. 当 `total <= 100` 时，不显示分页按钮；当 `total > 100` 时，页面在表格下方显示轻量分页：`第 N / M 页`、`上一页`、`下一页`。
+5. `显示已移除成员` 开关语义不变，切换时会回到 `page=1`；成员移除/恢复等既有操作语义不变。
+6. 本次仅接入轻量真实分页，不新增搜索、不新增每页数量切换、不新增展开全部/收起，不改 backend 或接口契约。
+
 Student 学习链路（可用）：
 1. `/student/classrooms/join` -> `POST classrooms/join`
 2. `/student/dashboard` -> `GET classrooms/mine/dashboard`
