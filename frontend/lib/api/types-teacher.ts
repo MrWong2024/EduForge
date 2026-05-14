@@ -237,6 +237,9 @@ export type ClassroomUpdateResponse = ClassroomSummary;
 
 export type ClassroomTasksResponse = {
   items: ClassroomTaskSummary[];
+  page?: number;
+  limit?: number;
+  total?: number;
 };
 
 export type TeacherDashboardTaskItem = UnknownRecord & {
@@ -993,19 +996,26 @@ export const toClassroomTasksResponse = (
   if (Array.isArray(payload)) {
     return {
       items: payload.map((item) => toClassroomTaskSummary(item)),
+      page: 1,
+      limit: payload.length,
+      total: payload.length,
     };
   }
 
   const record = asRecord(payload);
+  const dataRecord = asRecord(safeGet(record, "data", undefined));
+  const source = Object.keys(dataRecord).length > 0 ? dataRecord : record;
   const candidateItems =
-    safeGet<unknown>(record, "items", undefined) ??
-    safeGet<unknown>(record, "data.items", undefined) ??
-    safeGet<unknown>(record, "data", undefined);
+    safeGet<unknown>(source, "items", undefined) ??
+    safeGet<unknown>(source, "data", undefined);
 
   return {
     items: asRecordArray(candidateItems).map((item) =>
       toClassroomTaskSummary(item),
     ),
+    page: asNumber(source.page),
+    limit: asNumber(source.limit),
+    total: asNumber(source.total),
   };
 };
 

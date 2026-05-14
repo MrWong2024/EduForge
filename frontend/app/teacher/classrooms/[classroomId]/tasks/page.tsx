@@ -24,6 +24,7 @@ import {
   buildQueryString,
   getPublisherLabel,
   getSingleSearchParam,
+  parsePositiveInt,
   toDisplayDate,
   toDisplayText,
 } from "@/lib/ui/format";
@@ -31,12 +32,15 @@ import {
 type ClassroomTasksPageProps = {
   params: Promise<{ classroomId: string }>;
   searchParams: Promise<{
+    page?: string | string[];
     courseLabel?: string | string[];
     onlyMine?: string | string[];
     knowledgeModule?: string | string[];
     stage?: string | string[];
   }>;
 };
+
+const CLASSROOM_TASKS_PAGE_SIZE = 100;
 
 const getRequestOrigin = async (): Promise<string> => {
   const headerMap = await headers();
@@ -200,6 +204,11 @@ export default async function ClassroomTasksPage({
 }: ClassroomTasksPageProps) {
   const { classroomId } = await params;
   const query = await searchParams;
+  const currentPublishedTasksPage = parsePositiveInt(
+    getSingleSearchParam(query.page),
+    1,
+    { min: 1 },
+  );
   const initialCourseLabelFilter = normalizeTaskCourseLabel(
     getSingleSearchParam(query.courseLabel),
   );
@@ -227,6 +236,10 @@ export default async function ClassroomTasksPage({
       knowledgeModule: initialKnowledgeModuleFilter,
       stage: initialStageFilter ? Number(initialStageFilter) : undefined,
     });
+    const publishedTasksQuery = buildQueryString({
+      page: currentPublishedTasksPage,
+      limit: CLASSROOM_TASKS_PAGE_SIZE,
+    });
     const [classroomPayload, tasksPayload, learningTasksPayload, me] =
       await Promise.all([
         fetchJson<unknown>(`classrooms/${encodeURIComponent(classroomId)}`, {
@@ -234,7 +247,7 @@ export default async function ClassroomTasksPage({
           cache: "no-store",
         }),
         fetchJson<unknown>(
-          `classrooms/${encodeURIComponent(classroomId)}/tasks`,
+          `classrooms/${encodeURIComponent(classroomId)}/tasks?${publishedTasksQuery}`,
           {
             origin,
             cache: "no-store",
@@ -294,6 +307,41 @@ export default async function ClassroomTasksPage({
       />
     );
   }
+
+  const totalPublishedTasks =
+    typeof viewModel.taskList.total === "number"
+      ? viewModel.taskList.total
+      : viewModel.taskList.items.length;
+  const publishedTasksLimit =
+    typeof viewModel.taskList.limit === "number" &&
+    Number.isFinite(viewModel.taskList.limit) &&
+    viewModel.taskList.limit > 0
+      ? Math.floor(viewModel.taskList.limit)
+      : CLASSROOM_TASKS_PAGE_SIZE;
+  const responsePublishedTasksPage =
+    typeof viewModel.taskList.page === "number" &&
+    Number.isFinite(viewModel.taskList.page) &&
+    viewModel.taskList.page > 0
+      ? Math.floor(viewModel.taskList.page)
+      : currentPublishedTasksPage;
+  const totalPublishedTaskPages = Math.max(
+    1,
+    Math.ceil(totalPublishedTasks / publishedTasksLimit),
+  );
+  const currentPublishedTaskPage = Math.min(
+    responsePublishedTasksPage,
+    totalPublishedTaskPages,
+  );
+  const showPublishedTasksPagination =
+    totalPublishedTasks > CLASSROOM_TASKS_PAGE_SIZE;
+  const buildPublishedTasksHref = (page: number) =>
+    `${paths.teacher.classroomTasks(classroomId)}?${buildQueryString({
+      page,
+      courseLabel: initialCourseLabelFilter,
+      onlyMine: initialOnlyMineFilter ? "true" : undefined,
+      knowledgeModule: initialKnowledgeModuleFilter,
+      stage: initialStageFilter,
+    })}`;
 
   return (
     <section className="space-y-4">
@@ -365,6 +413,11 @@ export default async function ClassroomTasksPage({
         initialKnowledgeModuleFilter={viewModel.initialKnowledgeModuleFilter}
         initialStageFilter={viewModel.initialStageFilter}
       />
+
+      <p className="text-sm text-zinc-600">
+        共 {totalPublishedTasks} 个课堂任务，当前显示{" "}
+        {viewModel.taskList.items.length} 个
+      </p>
 
       {viewModel.taskList.items.length === 0 ? (
         <EmptyState
@@ -571,6 +624,34 @@ export default async function ClassroomTasksPage({
           </table>
         </div>
       )}
+
+      {showPublishedTasksPagination ? (
+        <div className="flex items-center gap-4 text-sm">
+          <span className="text-zinc-600">
+            第 {currentPublishedTaskPage} / {totalPublishedTaskPages} 页
+          </span>
+          {currentPublishedTaskPage > 1 ? (
+            <Link
+              href={buildPublishedTasksHref(currentPublishedTaskPage - 1)}
+              className="text-blue-700 hover:underline"
+            >
+              上一页
+            </Link>
+          ) : (
+            <span className="text-zinc-400">上一页</span>
+          )}
+          {currentPublishedTaskPage < totalPublishedTaskPages ? (
+            <Link
+              href={buildPublishedTasksHref(currentPublishedTaskPage + 1)}
+              className="text-blue-700 hover:underline"
+            >
+              下一页
+            </Link>
+          ) : (
+            <span className="text-zinc-400">下一页</span>
+          )}
+        </div>
+      ) : null}
     </section>
   );
 }

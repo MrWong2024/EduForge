@@ -738,3 +738,10 @@
 - AI 默认联调继续使用 `Stub + worker`，不把 `process-once` 当主模式。
 - 课程视角与 Teacher 起步入口已是主链路组成部分，不回退为“仅班级入口”。
 - 任务模板层（`/teacher/tasks`）与班级实例层（`/teacher/classrooms/[classroomId]/tasks`）继续分层，禁止回退为混合流。
+
+## UAT-FE-89
+
+- 【本步解决】`/teacher/classrooms/[classroomId]/tasks` 下方已发布任务列表此前未显式传 `page/limit`，仍吃后端默认 `page=1&limit=20`，当课堂任务超过 20 条时存在静默截断风险。
+- 【新增事实 / 已收口口径】已发布任务列表现已显式读取 URL `page`，并固定请求 `GET classrooms/:classroomId/tasks?page={当前页}&limit=100`；列表区展示“共 X 个课堂任务，当前显示 Y 个”。
+- 【分页收口】当 `total <= 100` 时不显示分页按钮与 `第 1 / 1 页`；当 `total > 100` 时显示轻量分页“第 N / M 页 / 上一页 / 下一页”。
+- 【边界保持】上方候选模板区保持 `publishable-task-templates` 的 `page=1&limit=50 + 加载更多` 现状，不改模板筛选/发布逻辑；任务列表页也不改用班级看板 `dashboard` 聚合接口。
