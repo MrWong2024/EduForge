@@ -753,3 +753,11 @@
 - 【分页收口】当 `total <= 100` 时不显示分页按钮与 `第 1 / 1 页`；当 `total > 100` 时显示轻量分页“第 N / M 页 / 上一页 / 下一页”。
 - 【筛选联动】切换 `status/scope/courseLabel/knowledgeModule/stage` 时回到 `page=1`；翻页继续保留 `fromClassroomId/status/scope/courseLabel/knowledgeModule/stage`。
 - 【边界保持】仅优化 `/teacher/tasks` 主列表分页体验，不改 backend，不改班级任务页上方候选模板列表，也不改变 `publishable-task-templates` 的 `page=1&limit=50` 现状。
+
+## UAT-FE-91
+
+- 【本步解决】`/student/dashboard` 先前未显式传 `page/limit`，默认只吃后端 `page=1&limit=20`，且页面只展示“第 X 页，每页 Y 条”技术态文案，没有完整轻量分页入口。
+- 【新增事实 / 已收口口径】学生学习看板班级卡片列表现已显式读取 URL `page`，并固定请求 `GET classrooms/mine/dashboard?page={当前页}&limit=100`；页面显示“共 X 个班级，当前显示 Y 个”。
+- 【分页收口】当 `total <= 100` 时不显示分页按钮与 `第 1 / 1 页`；当 `total > 100` 时显示轻量分页“第 N / M 页 / 上一页 / 下一页”；翻页继续保留当前 `includeHistorical` 状态。
+- 【筛选联动】切换“显示历史任务”时回到 `page=1`，避免从旧页码切换后出现空页错觉。
+- 【边界保持】本次分页仅作用于班级卡片列表 `items` 层级；每个班级卡片内部 `tasks` 继续完整展示后端返回的可见任务，不分页、不截断，也不新增搜索、每页数量切换或“展开全部 / 收起”。

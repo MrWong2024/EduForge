@@ -146,11 +146,13 @@ Teacher 班级成员链路（可用）：
 Student 学习链路（可用）：
 1. `/student/classrooms/join` -> `POST classrooms/join`
 2. `/student/dashboard` -> `GET classrooms/mine/dashboard`
-   - 页面新增“显示历史任务”链接式开关：默认不传 `includeHistorical`，打开后访问 `/student/dashboard?includeHistorical=true` 并请求 `classrooms/mine/dashboard?includeHistorical=true`，关闭后恢复默认请求。
+   - 页面新增“显示历史任务”链接式开关：默认不传 `includeHistorical`，打开后访问 `/student/dashboard?page=1&includeHistorical=true` 并请求 `classrooms/mine/dashboard?page=1&limit=100&includeHistorical=true`，关闭后恢复默认请求；切换 `includeHistorical` 时回到 `page=1`。
+   - 班级卡片列表现已显式读取 URL `page`，并固定请求 `page={当前页}&limit=100`；页面显示“共 X 个班级，当前显示 Y 个”，当 `total <= 100` 时不显示分页按钮，当 `total > 100` 时显示轻量分页“第 N / M 页 / 上一页 / 下一页”。
    - 班级标题区已接入后端 `classroom.teacher` 与 `classroom.course`：在班级名后显示轻量徽章“任课教师：{teacher.name}”“课程：{course.name}”“学期：{course.term}”；当对应字段为 `null`、空字符串或缺失时分别回落为“任课教师：未设置”“课程：未设置”“学期：未设置”。
    - 学生端只展示教师姓名、课程名、学期文案，不展示 `teacher.id`、`teacher.employeeNo`、email、`course.id`、`courseId`、`course.code`、`courseLabel` 或其它课程管理字段。
    - 任务可见性完全消费后端 `studentVisibilityStatus/isHistorical`：`RECENTLY_EXPIRED` 显示“近期过期”标签，`HISTORICAL` 显示“历史任务”标签并轻量弱化；`CURRENT` 或旧响应缺字段不额外显示标签。
    - 学生看板不再按任务模板当前 `PUBLISHED/ARCHIVED` 状态做前端二次过滤；已发布课堂任务是否展示，以后端返回的 classroom/classroomTask/enrollment 运行态结果为准。
+   - 本次分页仅作用于班级卡片列表 `items` 层级；每个班级卡片内部 `tasks` 继续完整展示后端返回的可见任务，不分页、不截断，也不新增“展开全部 / 收起”。
    - 前端不按 `dueAt/publishedAt/classroom.status/classroomTask.status` 自行判断历史任务，不用本地 filter 模拟默认隐藏；任务集合、`total/page/limit` 与统计展示均以接口返回为准。
    - 任务列表的 AI 状态列已改为中文标签展示：未提交、未请求、排队中、生成中、已生成、生成失败、已终止；不再在该页显示 `SUCCEEDED（已生成）` 这类中英文混排。
    - 任务列表新增“完成情况”列，直接消费后端 `task.completionStatus.status`：未提交、暂无反馈、已合格、基本合格、不合格。

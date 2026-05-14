@@ -16,15 +16,26 @@ import {
 } from "@/lib/api/types-student";
 import { paths } from "@/lib/routes/paths";
 import { getCommonErrorSummary } from "@/lib/ui/status";
-import { toDisplayDate, toDisplayText } from "@/lib/ui/format";
+import {
+  buildQueryString,
+  getSingleSearchParam,
+  parsePositiveInt,
+  toDisplayDate,
+  toDisplayText,
+} from "@/lib/ui/format";
 
 export const metadata: Metadata = {
   title: "学习看板",
 };
 
 type StudentDashboardPageProps = {
-  searchParams: Promise<{ includeHistorical?: string | string[] }>;
+  searchParams: Promise<{
+    includeHistorical?: string | string[];
+    page?: string | string[];
+  }>;
 };
+
+const STUDENT_DASHBOARD_PAGE_SIZE = 100;
 
 const getRequestOrigin = async (): Promise<string> => {
   const headerMap = await headers();
@@ -42,15 +53,23 @@ const isQueryTrue = (value: string | string[] | undefined): boolean => {
   return rawValue === "true";
 };
 
-const getDashboardPath = (includeHistorical: boolean): string =>
-  includeHistorical
-    ? "classrooms/mine/dashboard?includeHistorical=true"
-    : "classrooms/mine/dashboard";
+const getDashboardHref = (page: number, includeHistorical: boolean): string => {
+  const query = buildQueryString({
+    page,
+    includeHistorical: includeHistorical ? "true" : undefined,
+  });
+  return query ? `${paths.student.dashboard}?${query}` : paths.student.dashboard;
+};
+
+const getDashboardPath = (page: number, includeHistorical: boolean): string =>
+  `classrooms/mine/dashboard?${buildQueryString({
+    page,
+    limit: STUDENT_DASHBOARD_PAGE_SIZE,
+    includeHistorical: includeHistorical ? "true" : undefined,
+  })}`;
 
 const getHistoricalToggleHref = (includeHistorical: boolean): string =>
-  includeHistorical
-    ? paths.student.dashboard
-    : `${paths.student.dashboard}?includeHistorical=true`;
+  getDashboardHref(1, !includeHistorical);
 
 type StudentDashboardViewModel =
   | {
@@ -231,6 +250,11 @@ export default async function StudentDashboardPage({
   searchParams,
 }: StudentDashboardPageProps) {
   const resolvedSearchParams = await searchParams;
+  const currentPage = parsePositiveInt(
+    getSingleSearchParam(resolvedSearchParams.page),
+    1,
+    { min: 1 },
+  );
   const includeHistorical = isQueryTrue(
     resolvedSearchParams.includeHistorical,
   );
@@ -243,7 +267,7 @@ export default async function StudentDashboardPage({
   try {
     const origin = await getRequestOrigin();
     const payload = await fetchJson<unknown>(
-      getDashboardPath(includeHistorical),
+      getDashboardPath(currentPage, includeHistorical),
       {
         origin,
         cache: "no-store",
@@ -281,15 +305,26 @@ export default async function StudentDashboardPage({
   }
 
   const classroomItems = viewModel.data.items;
+  const totalClassrooms =
+    typeof viewModel.data.total === "number" && viewModel.data.total >= 0
+      ? viewModel.data.total
+      : classroomItems.length;
+  const dashboardLimit =
+    typeof viewModel.data.limit === "number" && viewModel.data.limit > 0
+      ? Math.floor(viewModel.data.limit)
+      : STUDENT_DASHBOARD_PAGE_SIZE;
+  const currentDashboardPage =
+    typeof viewModel.data.page === "number" && viewModel.data.page > 0
+      ? Math.floor(viewModel.data.page)
+      : currentPage;
+  const totalPages = Math.max(1, Math.ceil(totalClassrooms / dashboardLimit));
+  const showPagination = totalClassrooms > STUDENT_DASHBOARD_PAGE_SIZE;
 
   return (
     <section>
       <PageHeader
         title="我的学习看板"
-        description={`第 ${toDisplayText(viewModel.data.page, "1")} 页，每页 ${toDisplayText(
-          viewModel.data.limit,
-          "20",
-        )} 条`}
+        description="查看当前班级与可见学习任务。"
         actions={
           <Link
             href={paths.student.joinClassroom}
@@ -299,6 +334,13 @@ export default async function StudentDashboardPage({
           </Link>
         }
       />
+
+      <section className="mb-4 rounded-lg border border-zinc-200 bg-white px-4 py-3">
+        <p className="text-sm text-zinc-600">
+          共 {toDisplayText(totalClassrooms, "0")} 个班级，当前显示{" "}
+          {toDisplayText(classroomItems.length, "0")} 个
+        </p>
+      </section>
 
       <section className="mb-4 rounded-lg border border-zinc-200 bg-white p-4">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
@@ -506,6 +548,39 @@ export default async function StudentDashboardPage({
               </section>
             );
           })}
+
+          {showPagination ? (
+            <section className="flex flex-col gap-3 rounded-lg border border-zinc-200 bg-white px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+              <p className="text-sm text-zinc-600">
+                第 {toDisplayText(currentDashboardPage, "1")} /{" "}
+                {toDisplayText(totalPages, "1")} 页
+              </p>
+              <div className="flex items-center gap-3 text-sm">
+                {currentDashboardPage > 1 ? (
+                  <Link
+                    href={getDashboardHref(
+                      currentDashboardPage - 1,
+                      includeHistorical,
+                    )}
+                    className="text-blue-700 hover:underline"
+                  >
+                    上一页
+                  </Link>
+                ) : null}
+                {currentDashboardPage < totalPages ? (
+                  <Link
+                    href={getDashboardHref(
+                      currentDashboardPage + 1,
+                      includeHistorical,
+                    )}
+                    className="text-blue-700 hover:underline"
+                  >
+                    下一页
+                  </Link>
+                ) : null}
+              </div>
+            </section>
+          ) : null}
         </div>
       )}
 
