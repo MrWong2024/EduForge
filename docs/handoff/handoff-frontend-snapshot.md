@@ -52,7 +52,7 @@ frontend/
     - 删除：`DELETE classrooms/:id`（前端统一提供入口，失败时按后端 `409 + CLASSROOM_NOT_EMPTY` 显示“该班级已有成员或任务记录，不能删除，只能归档”）
   - `/teacher/classrooms/[classroomId]/edit`：班级基础信息编辑页，当前前端按后端契约仅支持更新 `name`（调用 `PATCH classrooms/:id`）；所属课程只读展示优先使用 `ClassroomResponse.course` 摘要（name/code/term/courseLabel），仅在摘要缺失时弱化显示 `courseId` 作为排查信息；页面说明文案已更新为中性口径，强调修改基础信息不会影响成员、课堂任务和历史提交；归档、删除等低频操作仍在班级列表 `/teacher/classrooms` 的“更多”菜单中处理，编辑页不再展示危险操作区块或归档入口；`Archived` 状态更新失败仍展示后端错误明细。
 - 教师模板层（已落地）：
-  - `/teacher/tasks`：模板列表 + 创建 + 视图切换（默认 `scope=mine`，支持 `mine/shared/all`）+ URL 驱动筛选（`scope/courseLabel/status/knowledgeModule/stage/page`）并展示模板可见性 `visibility(私有/共享)`；列表已切到后端真实查询与标准分页（固定 `limit=20`，`page` 入 URL，筛选变化自动回到第一页）；创建区不再暴露状态枚举，而是通过“保存为草稿 / 发布模板”动作提交 `status=DRAFT/PUBLISHED`；默认排序按 scope 收口（`mine=最近更新优先`、`shared=PUBLISHED 优先`、`all=我的模板优先`）；作者自己的 `DRAFT/PUBLISHED` 模板显示“编辑”，作者自己的 `ARCHIVED` 模板仅显示“查看”，非作者仍仅可查看并基于 `publisher` 展示模板发布者来源。
+  - `/teacher/tasks`：模板列表 + 创建 + 视图切换（默认 `scope=mine`，支持 `mine/shared/all`）+ URL 驱动筛选（`scope/courseLabel/status/knowledgeModule/stage/page`）并展示模板可见性 `visibility(私有/共享)`；列表已切到后端真实查询与标准分页，现已默认请求 `page=1&limit=100`，筛选变化自动回到第一页，翻页继续保留 `fromClassroomId/status/scope/courseLabel/knowledgeModule/stage`；列表区展示“共 X 个任务模板，当前显示 Y 个”，仅当 `total > 100` 时显示轻量分页；创建区不再暴露状态枚举，而是通过“保存为草稿 / 发布模板”动作提交 `status=DRAFT/PUBLISHED`；默认排序按 scope 收口（`mine=最近更新优先`、`shared=PUBLISHED 优先`、`all=我的模板优先`）；作者自己的 `DRAFT/PUBLISHED` 模板显示“编辑”，作者自己的 `ARCHIVED` 模板仅显示“查看”，非作者仍仅可查看并基于 `publisher` 展示模板发布者来源。
   - `/teacher/tasks/[taskId]/edit`：模板编辑/查看与生命周期动作（含可选课程分类、模板可见性；非作者共享模板只读并显示模板发布者来源）；从模板页进入编辑时携带 `returnTo`（当前完整列表 URL），编辑页顶部/底部返回优先回到该地址，缺失或非法时回退 `/teacher/tasks`；普通保存不再提交 `status`；作者打开 `DRAFT` 模板时可执行 `POST learning-tasks/tasks/:id/publish`，作者打开 `PUBLISHED` 模板时可执行 `POST learning-tasks/tasks/:id/archive`；作者打开 `ARCHIVED` 模板时页面只读，不显示保存/发布/归档/恢复按钮，并提示后续如需复用应复制为新草稿。
 - 教师班级实例层（已收口）：
   - `/teacher/classrooms/[classroomId]/tasks`：选择“当前教师可见且已发布”的模板并发布到班级实例；候选池改为实时调用 `GET classrooms/:id/publishable-task-templates`，筛选条件 `courseLabel/onlyMine/knowledgeModule/stage` 透传后端，后端内置“仅 PUBLISHED + 排除本班已发布模板 + 课程优先排序”，不承担模板创建/编辑；候选模板列表与已选模板摘要都会基于 `publisher` 对非本人模板显示发布者来源；已发布实例列表基于 `taskPublisher` 对非本人模板显示发布者来源，且任务标题下的多枚徽章按纵向堆叠展示。
@@ -96,7 +96,7 @@ Teacher 起步与模板链路（可用）：
 3. `/teacher/tasks` 进行模板创建/筛选，必要时进入 `/teacher/tasks/[taskId]/edit` 维护模板状态与 rubric
    - 模板层已接入 `courseLabel`（课程分类）与 `visibility`（私有/共享）字段：创建/编辑可维护，列表可筛选并展示；`courseLabel` 与 `visibility` 都是模板治理字段，不绑定课程。
    - 模板列表默认 `scope=mine`，并支持显式切换 `mine/shared/all`；共享只影响读可见性，不改变作者权限边界。
-   - 模板筛选已统一走后端真实查询：`scope/courseLabel/status/knowledgeModule/stage` 透传 `GET learning-tasks/tasks`；页面标准分页使用 `page` query（固定 `limit=20`），筛选变化自动重置到第一页。
+   - 模板筛选已统一走后端真实查询：`scope/courseLabel/status/knowledgeModule/stage` 透传 `GET learning-tasks/tasks`；页面标准分页使用 `page` query（固定 `limit=100`），筛选变化自动重置到第一页。
    - 模板列表默认排序已前端收口：`mine` 按最近更新时间降序（同时间按创建时间）；`shared` 先 `PUBLISHED` 再按最近更新时间；`all` 先“我的模板”再“他人共享模板”。
 4. `/teacher/classrooms/[classroomId]/tasks` 选择当前可见且已发布模板（我的 + 可见共享）并设置 `dueAt/allowLate/maxAttempts` 后发布（`POST classrooms/:id/tasks`）；候选池由 `GET classrooms/:id/publishable-task-templates` 按 query 实时检索，`courseLabel/onlyMine/knowledgeModule/stage` 均为后端真实查询条件，且后端已内置排除本班已发布模板
    - 首次仅加载第一页（`page=1&limit=50`），当 `total` 大于当前已加载数量时可在表单内“加载更多”并追加候选；筛选条件变化后回到第一页结果。

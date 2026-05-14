@@ -745,3 +745,11 @@
 - 【新增事实 / 已收口口径】已发布任务列表现已显式读取 URL `page`，并固定请求 `GET classrooms/:classroomId/tasks?page={当前页}&limit=100`；列表区展示“共 X 个课堂任务，当前显示 Y 个”。
 - 【分页收口】当 `total <= 100` 时不显示分页按钮与 `第 1 / 1 页`；当 `total > 100` 时显示轻量分页“第 N / M 页 / 上一页 / 下一页”。
 - 【边界保持】上方候选模板区保持 `publishable-task-templates` 的 `page=1&limit=50 + 加载更多` 现状，不改模板筛选/发布逻辑；任务列表页也不改用班级看板 `dashboard` 聚合接口。
+
+## UAT-FE-90
+
+- 【本步解决】`/teacher/tasks` 主列表此前固定 `limit=20`，总数不大时仍保留标准分页尾巴，和近期教师端列表页的轻量分页口径不一致。
+- 【新增事实 / 已收口口径】任务模板主列表现已默认请求 `page=1&limit=100`；列表区展示“共 X 个任务模板，当前显示 Y 个”。
+- 【分页收口】当 `total <= 100` 时不显示分页按钮与 `第 1 / 1 页`；当 `total > 100` 时显示轻量分页“第 N / M 页 / 上一页 / 下一页”。
+- 【筛选联动】切换 `status/scope/courseLabel/knowledgeModule/stage` 时回到 `page=1`；翻页继续保留 `fromClassroomId/status/scope/courseLabel/knowledgeModule/stage`。
+- 【边界保持】仅优化 `/teacher/tasks` 主列表分页体验，不改 backend，不改班级任务页上方候选模板列表，也不改变 `publishable-task-templates` 的 `page=1&limit=50` 现状。

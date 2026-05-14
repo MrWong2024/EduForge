@@ -60,7 +60,7 @@ type TeacherLearningTasksPageProps = {
   }>;
 };
 
-const TASK_TEMPLATE_PAGE_LIMIT = 20;
+const TASK_TEMPLATE_PAGE_LIMIT = 100;
 const STAGE_FILTER_VALUES = new Set(["1", "2", "3", "4"]);
 
 const normalizeTaskStatusFilter = (value: string | undefined): LearningTaskStatus | undefined => {
@@ -153,6 +153,43 @@ export default async function TeacherLearningTasksPage({
     );
   }
 
+  const totalTaskTemplates =
+    typeof viewModel.taskList.total === "number"
+      ? viewModel.taskList.total
+      : viewModel.taskList.items.length;
+  const taskTemplateLimit =
+    typeof viewModel.taskList.limit === "number" &&
+    Number.isFinite(viewModel.taskList.limit) &&
+    viewModel.taskList.limit > 0
+      ? Math.floor(viewModel.taskList.limit)
+      : TASK_TEMPLATE_PAGE_LIMIT;
+  const responseTaskTemplatePage =
+    typeof viewModel.taskList.page === "number" &&
+    Number.isFinite(viewModel.taskList.page) &&
+    viewModel.taskList.page > 0
+      ? Math.floor(viewModel.taskList.page)
+      : initialPage;
+  const totalTaskTemplatePages = Math.max(
+    1,
+    Math.ceil(totalTaskTemplates / taskTemplateLimit),
+  );
+  const currentTaskTemplatePage = Math.min(
+    responseTaskTemplatePage,
+    totalTaskTemplatePages,
+  );
+  const showTaskTemplatePagination =
+    totalTaskTemplates > TASK_TEMPLATE_PAGE_LIMIT;
+  const buildTaskTemplatePageHref = (page: number) =>
+    `${paths.teacher.tasks}?${buildQueryString({
+      fromClassroomId,
+      page,
+      status: initialStatusFilter,
+      knowledgeModule: initialKnowledgeModuleFilter,
+      stage: initialStageFilter,
+      courseLabel: initialCourseLabelFilter,
+      scope: initialScope,
+    })}`;
+
   return (
     <section className="space-y-4">
       <PageHeader
@@ -196,18 +233,53 @@ export default async function TeacherLearningTasksPage({
 
       <CreateLearningTaskForm />
 
-      <LearningTaskFilters
-        tasks={viewModel.taskList.items}
-        currentUserId={viewModel.currentUserId}
-        initialScope={initialScope}
-        initialStatus={initialStatusFilter}
-        initialKnowledgeModule={initialKnowledgeModuleFilter}
-        initialStage={initialStageFilter}
-        initialCourseLabel={initialCourseLabelFilter}
-        initialPage={viewModel.taskList.page ?? initialPage}
-        initialLimit={viewModel.taskList.limit ?? TASK_TEMPLATE_PAGE_LIMIT}
-        total={viewModel.taskList.total}
-      />
+      <p className="text-sm text-zinc-600">
+        共 {totalTaskTemplates} 个任务模板，当前显示{" "}
+        {viewModel.taskList.items.length} 个
+      </p>
+
+      <div className="[&>section:nth-of-type(2)>p:last-child]:hidden [&>section:nth-of-type(3)]:hidden">
+        <LearningTaskFilters
+          tasks={viewModel.taskList.items}
+          currentUserId={viewModel.currentUserId}
+          initialScope={initialScope}
+          initialStatus={initialStatusFilter}
+          initialKnowledgeModule={initialKnowledgeModuleFilter}
+          initialStage={initialStageFilter}
+          initialCourseLabel={initialCourseLabelFilter}
+          initialPage={viewModel.taskList.page ?? initialPage}
+          initialLimit={viewModel.taskList.limit ?? TASK_TEMPLATE_PAGE_LIMIT}
+          total={viewModel.taskList.total}
+        />
+      </div>
+
+      {showTaskTemplatePagination ? (
+        <div className="flex items-center gap-4 text-sm">
+          <span className="text-zinc-600">
+            第 {currentTaskTemplatePage} / {totalTaskTemplatePages} 页
+          </span>
+          {currentTaskTemplatePage > 1 ? (
+            <Link
+              href={buildTaskTemplatePageHref(currentTaskTemplatePage - 1)}
+              className="text-blue-700 hover:underline"
+            >
+              上一页
+            </Link>
+          ) : (
+            <span className="text-zinc-400">上一页</span>
+          )}
+          {currentTaskTemplatePage < totalTaskTemplatePages ? (
+            <Link
+              href={buildTaskTemplatePageHref(currentTaskTemplatePage + 1)}
+              className="text-blue-700 hover:underline"
+            >
+              下一页
+            </Link>
+          ) : (
+            <span className="text-zinc-400">下一页</span>
+          )}
+        </div>
+      ) : null}
     </section>
   );
 }
