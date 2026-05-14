@@ -761,3 +761,9 @@
 - 【分页收口】当 `total <= 100` 时不显示分页按钮与 `第 1 / 1 页`；当 `total > 100` 时显示轻量分页“第 N / M 页 / 上一页 / 下一页”；翻页继续保留当前 `includeHistorical` 状态。
 - 【筛选联动】切换“显示历史任务”时回到 `page=1`，避免从旧页码切换后出现空页错觉。
 - 【边界保持】本次分页仅作用于班级卡片列表 `items` 层级；每个班级卡片内部 `tasks` 继续完整展示后端返回的可见任务，不分页、不截断，也不新增搜索、每页数量切换或“展开全部 / 收起”。
+
+## UAT-FE-92
+
+- 【本步解决】`/teacher/classrooms/[classroomId]/tasks` 的“已选任务模板摘要”里，描述此前与标签同一行展示，HTML 折叠掉原始换行和空白，教师在发布前不易确认模板正文排版。
+- 【新增事实 / 已收口口径】`PublishClassroomTaskForm` 已将“已选任务模板摘要”的描述改为独立块级说明框，使用 `whitespace-pre-wrap + break-words + max-h-48 + overflow-auto` 保留原始换行/空白并限制最大高度，长描述在框内滚动。
+- 【边界保持】空描述仍沿用 `toDisplayText(selectedTask.description)` 兜底；候选模板列表中的描述摘要、`/teacher/tasks` 主列表描述 tooltip、模板筛选/选择/发布逻辑与后端接口均不变。

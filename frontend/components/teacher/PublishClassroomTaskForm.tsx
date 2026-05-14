@@ -783,10 +783,12 @@ export function PublishClassroomTaskForm({
                 <span className="text-zinc-500">阶段：</span>
                 {toDisplayText(selectedTask.stage)}
               </p>
-              <p className="md:col-span-2">
-                <span className="text-zinc-500">描述：</span>
-                {toDisplayText(selectedTask.description)}
-              </p>
+              <div className="md:col-span-2">
+                <p className="mb-1 text-zinc-500">描述：</p>
+                <div className="max-h-48 overflow-auto rounded-md border border-zinc-200 bg-white px-3 py-2 text-sm leading-6 text-zinc-700 whitespace-pre-wrap break-words">
+                  {toDisplayText(selectedTask.description)}
+                </div>
+              </div>
               <p className="md:col-span-2 text-xs text-zinc-500">
                 模板 ID：{toDisplayText(selectedTask.id)}
               </p>
