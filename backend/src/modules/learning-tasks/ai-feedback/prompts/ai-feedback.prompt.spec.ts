@@ -64,6 +64,43 @@ describe('openrouter-feedback prompt constraints', () => {
     );
   });
 
+  it('includes multi-file boundary recognition safeguards in system prompt', () => {
+    const systemPrompt = buildSystemPrompt();
+
+    expect(systemPrompt).toContain(
+      'codeText may contain a normal single-file submission',
+    );
+    expect(systemPrompt).toContain(
+      'For normal single-file submissions without boundary markers',
+    );
+    expect(systemPrompt).toContain('analyze the code as a single file');
+    expect(systemPrompt).toContain('do not require file markers');
+    expect(systemPrompt).toContain('recommended multi-file marker');
+    expect(systemPrompt).toContain(
+      'File boundary markers have three confidence levels',
+    );
+    expect(systemPrompt).toContain('Standard markers');
+    expect(systemPrompt).toContain('Keyword-based near-miss markers');
+    expect(systemPrompt).toContain('Keyword-less boundary markers');
+    expect(systemPrompt).toContain('case-insensitive');
+    expect(systemPrompt).toContain('plausible relative file path or filename');
+    expect(systemPrompt).toContain(
+      'Do not merge different file blocks into one source file',
+    );
+    expect(systemPrompt).toContain(
+      'Only mention unclear file boundaries when there is strong evidence',
+    );
+    expect(systemPrompt).toContain('If CodeTruncated is true');
+    expect(systemPrompt).toContain('===== FILE: src/main.py =====');
+    expect(systemPrompt).toContain('== file: main.py =====');
+    expect(systemPrompt).toContain('=====FILE:src/main.py=====');
+    expect(systemPrompt).toContain('File: package.json');
+    expect(systemPrompt).toContain('文件：main.cpp');
+    expect(systemPrompt).toContain('===== src/main.py =====');
+    expect(systemPrompt).toContain('--- package.json ---');
+    expect(systemPrompt).toContain('### App.vue');
+  });
+
   it('includes primary-problem user instructions', () => {
     const userPrompt = buildUserPrompt({
       maxCodeChars: 5000,
@@ -102,6 +139,39 @@ describe('openrouter-feedback prompt constraints', () => {
     expect(userPrompt).toContain('Language hint: typescript');
     expect(userPrompt).toContain(
       'Language hint may be missing or incorrect; prioritize code evidence for language-specific judgement.',
+    );
+  });
+
+  it('includes multi-file convention guidance in user prompt', () => {
+    const userPrompt = buildUserPrompt({
+      maxCodeChars: 5000,
+      context: {
+        submissionId: 'sub-1',
+        classroomTaskId: 'ct-1',
+        attemptNo: 2,
+        language: 'typescript',
+        codeText: 'function main(){return 1;}',
+        aiUsageDeclaration: 'none',
+        taskId: 'task-1',
+        taskTitle: 'Task title',
+        taskDescription: 'Task desc',
+        taskRubric: { k: 'v' },
+      },
+    });
+
+    expect(userPrompt).toContain('Multi-file convention');
+    expect(userPrompt).toContain(
+      'For normal single-file submissions without boundary markers',
+    );
+    expect(userPrompt).toContain('standard multi-file marker');
+    expect(userPrompt).toContain('programming language is not limited');
+    expect(userPrompt).toContain('relative path or only a plausible filename');
+    expect(userPrompt).toContain('malformed but understandable variants');
+    expect(userPrompt).toContain(
+      'Analyze each inferred file block separately first',
+    );
+    expect(userPrompt).toContain(
+      'Do not treat content from different inferred file blocks as if it belonged to one source file',
     );
   });
 });
