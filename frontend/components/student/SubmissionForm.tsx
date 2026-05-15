@@ -158,7 +158,7 @@ export function SubmissionForm({ classroomId, classroomTaskId }: SubmissionFormP
 
         <div className="space-y-1">
           <label className="block text-sm font-medium text-zinc-800" htmlFor="submission-code-text">
-            codeText
+            代码内容
           </label>
           <textarea
             id="submission-code-text"
@@ -169,6 +169,21 @@ export function SubmissionForm({ classroomId, classroomTaskId }: SubmissionFormP
             className="w-full rounded-md border border-zinc-300 px-3 py-2 text-sm outline-none focus:border-zinc-500"
             placeholder="请输入要提交的代码内容"
           />
+          <div className="rounded-md border border-zinc-200 bg-zinc-50 p-3 text-xs text-zinc-600">
+            <p>普通单文件代码可直接粘贴提交，无需添加标记。</p>
+            <p className="mt-1">
+              如果代码分散在多个文件中，可使用 FILE 标记分隔不同文件。示例中的文件名可替换为自己的文件名或相对路径，例如
+              main.py、Main.java、index.html。
+            </p>
+            <details className="mt-2">
+              <summary className="cursor-pointer text-xs font-medium text-zinc-700">
+                多文件代码粘贴格式示例
+              </summary>
+              <pre className="mt-2 overflow-auto whitespace-pre-wrap rounded-md border border-zinc-200 bg-white p-3 text-xs text-zinc-800">
+                {"===== FILE: src/file-a.ext =====\n第一个文件的代码内容\n\n===== FILE: src/file-b.ext =====\n第二个文件的代码内容"}
+              </pre>
+            </details>
+          </div>
         </div>
 
         <button

@@ -172,6 +172,9 @@ Student 学习链路（可用）：
    - 自动刷新覆盖“最新 AI 状态”与提交记录表“AI 状态”列，使用整页刷新链路同步更新；页面不可见/失焦时暂停，回到前台后按当前状态恢复。
    - 终态收尾口径已修正：自动刷新驱动改为对齐“latest + submissions”真实状态来源，并在活跃态结束时保留一次最小收尾刷新，`DEAD` 可在自动刷新过程中自然显示，不再依赖手工刷新。
 4. `SubmissionForm` -> `POST .../submissions`（language 默认“自动识别”，未手动指定时提交 `auto`，不再默认 `javascript`）
+   - `codeText` 输入区新增轻量提示：普通单文件代码可直接粘贴提交，无需 `FILE` 标记。
+   - 当代码分散在多个文件中，前端仅提示推荐标准文本分隔格式 `===== FILE: relative/path/FileName.ext =====`，并用语言无关示例展示两个文件块；示例中的文件名可替换为学生自己的文件名或相对路径。
+   - 该提示仅为 UI 文案，不新增上传能力、多文件编辑器、结构化文件提交或前端 `codeText` 解析。
 5. `/student/submissions/[submissionId]` -> 稳定读源 + feedback 列表 + request AI
    - 反馈主列表已中文化：表头使用“来源/类型/严重程度/反馈内容/修改建议/标签/时间”。
    - `source/type/severity` 在列表单元格按后端原值直出（英文枚举不翻译）；`message` 与 `suggestion` 分列展示（`suggestion` 为空时显示“暂无”）。

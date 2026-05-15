@@ -48,7 +48,7 @@
 | 组件 | 文件 | 真实 API | 作用边界 |
 |---|---|---|---|
 | JoinClassroomForm | `components/student/JoinClassroomForm.tsx` | `POST classrooms/join` | 仅处理 joinCode 入班 |
-| SubmissionForm | `components/student/SubmissionForm.tsx` | `POST classrooms/:classroomId/tasks/:classroomTaskId/submissions` | 仅处理提交动作与迟交错误分流；不额外根据任务模板当前 `PUBLISHED/ARCHIVED` 状态做前端阻断 |
+| SubmissionForm | `components/student/SubmissionForm.tsx` | `POST classrooms/:classroomId/tasks/:classroomTaskId/submissions` | 仅处理提交动作与迟交错误分流；`codeText` 输入区提供语言无关的多文件粘贴格式提示，明确单文件无需 `FILE` 标记，并展示推荐标准格式示例；不额外根据任务模板当前 `PUBLISHED/ARCHIVED` 状态做前端阻断，也不做上传/结构化文件提交 |
 | RequestAiFeedbackButton | `components/student/RequestAiFeedbackButton.tsx` | `POST learning-tasks/submissions/:submissionId/ai-feedback/request` | 仅处理 request AI 行为 |
 | AiProcessingHint | `components/student/AiProcessingHint.tsx` | - | 统一 `PENDING/RUNNING` 提示文案 |
 | SubmissionAutoRefresh | `components/student/SubmissionAutoRefresh.tsx` | `router.refresh()`（复用页面现有读源链路） | 用于学生提交详情页与学生任务详情页的状态驱动自动刷新；支持单状态或状态集合输入；`PENDING/RUNNING` 快速、`FAILED` 慢速；活跃态结束后有一次最小收尾刷新；页面失焦/不可见暂停；同页实例内防重叠 |
