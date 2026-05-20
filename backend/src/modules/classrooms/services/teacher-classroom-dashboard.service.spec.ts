@@ -46,11 +46,12 @@ type SubmissionFixture = {
 
 type AiJobFixture = {
   classroomTaskId: Types.ObjectId;
+  submissionId?: Types.ObjectId;
   status: AiFeedbackJobStatus;
 };
 
 type FeedbackFixture = {
-  classroomTaskId: Types.ObjectId;
+  submissionId?: Types.ObjectId;
   tags: string[];
 };
 
@@ -64,6 +65,7 @@ type HarnessData = {
   aiJobs?: AiJobFixture[];
   feedbacks?: FeedbackFixture[];
   users?: UserFixture[];
+  activeStudentIds?: Types.ObjectId[];
 };
 
 const objectId = () => new Types.ObjectId();
@@ -134,6 +136,16 @@ const createHarness = (data: HarnessData = {}) => {
   const submissions = data.submissions ?? [];
   const aiJobs = data.aiJobs ?? [];
   const feedbacks = data.feedbacks ?? [];
+  const activeStudentIds =
+    data.activeStudentIds ??
+    Array.from(
+      new Map(
+        submissions.map((submission) => [
+          submission.studentId.toString(),
+          submission.studentId,
+        ]),
+      ).values(),
+    );
 
   const filterClassroomTasks = (pipeline: unknown[]) => {
     const match = getPipelineMatch(pipeline);
@@ -181,8 +193,14 @@ const createHarness = (data: HarnessData = {}) => {
 
   const getSubmissionStats = (pipeline: unknown[]) => {
     const match = getPipelineMatch(pipeline);
+    if (match._id === null) {
+      return [];
+    }
     const classroomTaskIds = toIdSet(
       (match.classroomTaskId as { $in?: Types.ObjectId[] })?.$in ?? [],
+    );
+    const studentIds = toIdSet(
+      (match.studentId as { $in?: Types.ObjectId[] })?.$in ?? [],
     );
     const statsByTask = new Map<
       string,
@@ -197,6 +215,12 @@ const createHarness = (data: HarnessData = {}) => {
     for (const submission of submissions) {
       const taskKey = submission.classroomTaskId.toString();
       if (!classroomTaskIds.has(taskKey)) {
+        continue;
+      }
+      if (
+        studentIds.size > 0 &&
+        !studentIds.has(submission.studentId.toString())
+      ) {
         continue;
       }
       const current = statsByTask.get(taskKey) ?? {
@@ -228,8 +252,14 @@ const createHarness = (data: HarnessData = {}) => {
 
   const getAiFeedbackStats = (pipeline: unknown[]) => {
     const match = getPipelineMatch(pipeline);
+    if (match._id === null) {
+      return [];
+    }
     const classroomTaskIds = toIdSet(
       (match.classroomTaskId as { $in?: Types.ObjectId[] })?.$in ?? [],
+    );
+    const submissionIds = toIdSet(
+      (match.submissionId as { $in?: Types.ObjectId[] })?.$in ?? [],
     );
     const stats = new Map<
       string,
@@ -242,6 +272,12 @@ const createHarness = (data: HarnessData = {}) => {
     for (const job of aiJobs) {
       const taskKey = job.classroomTaskId.toString();
       if (!classroomTaskIds.has(taskKey)) {
+        continue;
+      }
+      if (
+        submissionIds.size > 0 &&
+        (!job.submissionId || !submissionIds.has(job.submissionId.toString()))
+      ) {
         continue;
       }
       const key = `${taskKey}:${job.status}`;
@@ -260,24 +296,36 @@ const createHarness = (data: HarnessData = {}) => {
   };
 
   const getTagStats = (pipeline: unknown[]) => {
-    const submissionMatchStage = pipeline.find((stage) => {
-      const match = (stage as { $match?: Record<string, unknown> }).$match;
-      return Boolean(match?.['submission.classroomTaskId']);
-    }) as { $match?: Record<string, { $in?: Types.ObjectId[] }> } | undefined;
-    const classroomTaskIds = toIdSet(
-      submissionMatchStage?.$match?.['submission.classroomTaskId']?.$in ?? [],
+    const match = getPipelineMatch(pipeline);
+    if (match._id === null) {
+      return [];
+    }
+    const submissionIds = toIdSet(
+      (match.submissionId as { $in?: Types.ObjectId[] })?.$in ?? [],
     );
     const grouped = new Map<
       string,
       { _id: Types.ObjectId; tags: { tag: string; count: number }[] }
     >();
     for (const feedback of feedbacks) {
-      const taskKey = feedback.classroomTaskId.toString();
-      if (!classroomTaskIds.has(taskKey)) {
+      if (!feedback.submissionId) {
         continue;
       }
+      if (
+        submissionIds.size > 0 &&
+        !submissionIds.has(feedback.submissionId.toString())
+      ) {
+        continue;
+      }
+      const submission = submissions.find(
+        (item) => item._id.toString() === feedback.submissionId?.toString(),
+      );
+      if (!submission) {
+        continue;
+      }
+      const taskKey = submission.classroomTaskId.toString();
       const current = grouped.get(taskKey) ?? {
-        _id: feedback.classroomTaskId,
+        _id: submission.classroomTaskId,
         tags: [],
       };
       for (const tag of feedback.tags) {
@@ -344,6 +392,11 @@ const createHarness = (data: HarnessData = {}) => {
   );
   const enrollmentService = {
     countStudents: jest.fn().mockResolvedValue(5),
+    listActiveStudentIds: jest
+      .fn()
+      .mockResolvedValue(
+        activeStudentIds.map((studentId) => studentId.toString()),
+      ),
   };
 
   classroomTaskModel.aggregate.mockImplementation((pipeline: unknown[]) => {
@@ -355,9 +408,32 @@ const createHarness = (data: HarnessData = {}) => {
     );
   });
 
+  const findActiveSubmissions = (filter: Record<string, unknown>) => {
+    const classroomTaskIds = toIdSet(
+      (filter.classroomTaskId as { $in?: Types.ObjectId[] })?.$in ?? [],
+    );
+    const studentIds = toIdSet(
+      (filter.studentId as { $in?: Types.ObjectId[] })?.$in ?? [],
+    );
+    return submissions.filter((submission) => {
+      if (!classroomTaskIds.has(submission.classroomTaskId.toString())) {
+        return false;
+      }
+      if (
+        studentIds.size > 0 &&
+        !studentIds.has(submission.studentId.toString())
+      ) {
+        return false;
+      }
+      return true;
+    });
+  };
   const submissionModel = {
     aggregate: submissionAggregate,
     findOne: submissionFindOne,
+    find: jest.fn((filter: Record<string, unknown>) =>
+      makeQuery(findActiveSubmissions(filter)),
+    ),
   };
 
   const service = new TeacherClassroomDashboardService(
@@ -399,6 +475,8 @@ describe('TeacherClassroomDashboardService', () => {
     const unknownTaskId = objectId();
     const classroomId = objectId();
     const studentId = objectId();
+    const activeSubmissionId = objectId();
+    const closedSubmissionId = objectId();
     const harness = createHarness({
       classroomTasks: [
         {
@@ -455,13 +533,13 @@ describe('TeacherClassroomDashboardService', () => {
       ],
       submissions: [
         {
-          _id: objectId(),
+          _id: activeSubmissionId,
           classroomTaskId: activeTaskId,
           studentId,
           isLate: true,
         },
         {
-          _id: objectId(),
+          _id: closedSubmissionId,
           classroomTaskId: closedTaskId,
           studentId,
           isLate: true,
@@ -470,13 +548,18 @@ describe('TeacherClassroomDashboardService', () => {
       aiJobs: [
         {
           classroomTaskId: activeTaskId,
+          submissionId: activeSubmissionId,
           status: AiFeedbackJobStatus.Succeeded,
         },
-        { classroomTaskId: closedTaskId, status: AiFeedbackJobStatus.Failed },
+        {
+          classroomTaskId: closedTaskId,
+          submissionId: closedSubmissionId,
+          status: AiFeedbackJobStatus.Failed,
+        },
       ],
       feedbacks: [
-        { classroomTaskId: activeTaskId, tags: ['correctness'] },
-        { classroomTaskId: closedTaskId, tags: ['bug-risk'] },
+        { submissionId: activeSubmissionId, tags: ['correctness'] },
+        { submissionId: closedSubmissionId, tags: ['bug-risk'] },
       ],
     });
 
@@ -552,6 +635,9 @@ describe('TeacherClassroomDashboardService', () => {
     const recalledTaskId = objectId();
     const unknownTaskId = objectId();
     const studentId = objectId();
+    const activeSubmissionId = objectId();
+    const closedSubmissionId = objectId();
+    const closeSubmissionId = objectId();
     const harness = createHarness({
       classroomTasks: [
         {
@@ -607,17 +693,38 @@ describe('TeacherClassroomDashboardService', () => {
         },
       ],
       submissions: [
-        { _id: objectId(), classroomTaskId: activeTaskId, studentId },
-        { _id: objectId(), classroomTaskId: closedTaskId, studentId },
-        { _id: objectId(), classroomTaskId: closeTaskId, studentId },
+        {
+          _id: activeSubmissionId,
+          classroomTaskId: activeTaskId,
+          studentId,
+        },
+        {
+          _id: closedSubmissionId,
+          classroomTaskId: closedTaskId,
+          studentId,
+        },
+        {
+          _id: closeSubmissionId,
+          classroomTaskId: closeTaskId,
+          studentId,
+        },
       ],
       aiJobs: [
         {
           classroomTaskId: activeTaskId,
+          submissionId: activeSubmissionId,
           status: AiFeedbackJobStatus.Succeeded,
         },
-        { classroomTaskId: closedTaskId, status: AiFeedbackJobStatus.Failed },
-        { classroomTaskId: closeTaskId, status: AiFeedbackJobStatus.Dead },
+        {
+          classroomTaskId: closedTaskId,
+          submissionId: closedSubmissionId,
+          status: AiFeedbackJobStatus.Failed,
+        },
+        {
+          classroomTaskId: closeTaskId,
+          submissionId: closeSubmissionId,
+          status: AiFeedbackJobStatus.Dead,
+        },
       ],
     });
 
@@ -641,6 +748,154 @@ describe('TeacherClassroomDashboardService', () => {
       taskTemplateStatus: TaskStatus.Draft,
       submissionsCount: 1,
       aiFeedback: { failed: 1, notRequested: 0 },
+    });
+  });
+
+  it('excludes REMOVED student submissions from dashboard stats, ai feedback stats, and top tags', async () => {
+    const classroomId = objectId();
+    const classroomTaskId = objectId();
+    const activeStudentId = objectId();
+    const removedStudentId = objectId();
+    const activeSubmissionId = objectId();
+    const removedSubmissionId = objectId();
+    const harness = createHarness({
+      activeStudentIds: [activeStudentId],
+      classroomTasks: [
+        {
+          _id: classroomTaskId,
+          taskId: objectId(),
+          classroomId,
+          status: CLASSROOM_TASK_STATUS_ACTIVE,
+          title: 'Task With Mixed Enrollments',
+          stage: 1,
+          knowledgeModule: 'module',
+          publishedAt: new Date('2026-01-01T00:00:00.000Z'),
+        },
+      ],
+      submissions: [
+        {
+          _id: activeSubmissionId,
+          classroomTaskId,
+          studentId: activeStudentId,
+          isLate: true,
+        },
+        {
+          _id: removedSubmissionId,
+          classroomTaskId,
+          studentId: removedStudentId,
+          isLate: true,
+        },
+      ],
+      aiJobs: [
+        {
+          classroomTaskId,
+          submissionId: activeSubmissionId,
+          status: AiFeedbackJobStatus.Succeeded,
+        },
+        {
+          classroomTaskId,
+          submissionId: removedSubmissionId,
+          status: AiFeedbackJobStatus.Failed,
+        },
+      ],
+      feedbacks: [
+        { submissionId: activeSubmissionId, tags: ['correctness'] },
+        { submissionId: removedSubmissionId, tags: ['bug-risk'] },
+      ],
+    });
+
+    const dashboard = await harness.service.getDashboard(
+      classroomId.toString(),
+      harness.ids.teacherId.toString(),
+    );
+
+    expect(dashboard.summary).toMatchObject({
+      studentsCount: 1,
+      lateSubmissionsTotal: 1,
+      lateStudentsTotal: 1,
+    });
+    expect(dashboard.tasks).toHaveLength(1);
+    expect(dashboard.tasks[0]).toMatchObject({
+      classroomTaskId: classroomTaskId.toString(),
+      submissionsCount: 1,
+      distinctStudentsSubmitted: 1,
+      lateSubmissionsCount: 1,
+      lateDistinctStudentsCount: 1,
+      aiFeedback: {
+        pending: 0,
+        running: 0,
+        succeeded: 1,
+        failed: 0,
+        dead: 0,
+        notRequested: 0,
+      },
+      topTags: [{ tag: 'correctness', count: 1 }],
+    });
+  });
+
+  it('returns zero submission stats when no ACTIVE students remain but keeps visible tasks', async () => {
+    const classroomId = objectId();
+    const classroomTaskId = objectId();
+    const removedStudentId = objectId();
+    const removedSubmissionId = objectId();
+    const harness = createHarness({
+      activeStudentIds: [],
+      classroomTasks: [
+        {
+          _id: classroomTaskId,
+          taskId: objectId(),
+          classroomId,
+          status: CLASSROOM_TASK_STATUS_ACTIVE,
+          title: 'Task Without Active Students',
+          stage: 1,
+          knowledgeModule: 'module',
+          publishedAt: new Date('2026-01-01T00:00:00.000Z'),
+        },
+      ],
+      submissions: [
+        {
+          _id: removedSubmissionId,
+          classroomTaskId,
+          studentId: removedStudentId,
+          isLate: true,
+        },
+      ],
+      aiJobs: [
+        {
+          classroomTaskId,
+          submissionId: removedSubmissionId,
+          status: AiFeedbackJobStatus.Failed,
+        },
+      ],
+      feedbacks: [{ submissionId: removedSubmissionId, tags: ['bug-risk'] }],
+    });
+
+    const dashboard = await harness.service.getDashboard(
+      classroomId.toString(),
+      harness.ids.teacherId.toString(),
+    );
+
+    expect(dashboard.summary).toMatchObject({
+      studentsCount: 0,
+      lateSubmissionsTotal: 0,
+      lateStudentsTotal: 0,
+    });
+    expect(dashboard.tasks).toHaveLength(1);
+    expect(dashboard.tasks[0]).toMatchObject({
+      classroomTaskId: classroomTaskId.toString(),
+      submissionsCount: 0,
+      distinctStudentsSubmitted: 0,
+      lateSubmissionsCount: 0,
+      lateDistinctStudentsCount: 0,
+      aiFeedback: {
+        pending: 0,
+        running: 0,
+        succeeded: 0,
+        failed: 0,
+        dead: 0,
+        notRequested: 0,
+      },
+      topTags: [],
     });
   });
 

@@ -147,7 +147,7 @@ npm run test:e2e -- backend/test/classroom-learning-loop.e2e-spec.ts
   - 关键断言：默认冷却命中返回 `429/SUBMISSION_COOLDOWN_ACTIVE`；超窗后允许再次提交；`LEARNING_TASK_SUBMISSION_COOLDOWN_MS=0` 时可连续提交。
 - `backend/test/classroom-task-submissions.e2e-spec.ts`
   - 覆盖：P0 `GET /api/learning-tasks/submissions/:id` 稳定读源（含 classroomTask 隔离场景） + `GET /api/classrooms/:classroomId/tasks/:classroomTaskId/submissions` 列表契约。
-  - 关键断言：学生本人可读；classroom owner teacher 可读；非授权 teacher/student 返回 `403`；返回 `content.codeText`；无 job 时 `aiFeedbackStatus=NOT_REQUESTED`；提交列表 `feedbackCount` 覆盖有反馈 `>0` 与无反馈 `=0` 两种场景。
+  - 关键断言：学生本人可读；classroom owner teacher 可读；非授权 teacher/student 返回 `403`；返回 `content.codeText`；无 job 时 `aiFeedbackStatus=NOT_REQUESTED`；提交列表 `feedbackCount` 覆盖有反馈 `>0` 与无反馈 `=0` 两种场景；默认只返回当前 Enrollment `ACTIVE` 学生的 submissions，REMOVED 学生历史提交不进入 `items/total`。
 - `backend/test/classroom-export-snapshot.e2e-spec.ts`
   - 覆盖：Z9 `GET /api/classrooms/:classroomId/export/snapshot`。
   - 关键断言：`includePerTask=false` 时 perTask 省略且 `meta.notes` 提示；对 stringify 结果断言不包含 `"codeText"`。
@@ -157,6 +157,7 @@ npm run test:e2e -- backend/test/classroom-learning-loop.e2e-spec.ts
 - submission detail 主视图回归建议成对验证：`GET /api/learning-tasks/submissions/:id` 与 `GET /api/learning-tasks/submissions/:id/feedback`，避免只验 feedback 而漏掉 detail 读源。
 - `backend/test/classroom-dashboard-isolation.e2e-spec.ts`：跨班同 task 的 `classroomTaskId` 隔离口径。
 - `backend/test/classroom-dashboard.e2e-spec.ts`：教师/学生看板与 `aiFeedbackStatus` 变化。
+- 教师看板回归补充：默认教学统计应只面向 Enrollment `ACTIVE` 学生；当 ACTIVE 与 REMOVED 学生都存在历史提交时，`distinctStudentsSubmitted/submissionsCount/late*`、AI feedback 统计与 `topTags` 默认只计 ACTIVE submissions。
 - `backend/test/learning-tasks.e2e-spec.ts`：learning-tasks 基础闭环（含 `GET /api/learning-tasks/submissions/:id` 在 `classroomTaskId=null` 场景下 task owner teacher 可读，以及教师反馈标签词表校验：未知标签返回 `400` 固定文案、未传 tags 自动落 `other`）。
 
 ### 新增能力覆盖矩阵（Z3~Z9）

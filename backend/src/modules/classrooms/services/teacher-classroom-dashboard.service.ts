@@ -25,6 +25,7 @@ import { User } from '../../users/schemas/user.schema';
 type ClassroomLean = Classroom & WithId & WithTimestamps;
 
 type SubmissionLean = Submission & WithTimestamps;
+type ActiveSubmissionRef = Pick<Submission, 'classroomTaskId'> & WithId;
 
 type ClassroomTaskDashboardItem = {
   _id: Types.ObjectId;
@@ -166,12 +167,13 @@ export class TeacherClassroomDashboardService {
     );
 
     const classroomTaskIds = visibleClassroomTasks.map((task) => task._id);
-    const [studentsCount, publisherMap] = await Promise.all([
-      this.enrollmentService.countStudents(classroom._id.toString()),
+    const [activeStudentIds, publisherMap] = await Promise.all([
+      this.enrollmentService.listActiveStudentIds(classroom._id.toString()),
       this.getPublisherSummaryMap(
         visibleClassroomTasks.map((task) => task.taskPublisherId),
       ),
     ]);
+    const studentsCount = activeStudentIds.length;
     if (classroomTaskIds.length === 0) {
       return {
         classroom: {
@@ -190,8 +192,18 @@ export class TeacherClassroomDashboardService {
       };
     }
 
+    const activeStudentObjectIds = activeStudentIds.map(
+      (studentId) => new Types.ObjectId(studentId),
+    );
+    const activeSubmissionFilter =
+      activeStudentObjectIds.length === 0
+        ? null
+        : {
+            classroomTaskId: { $in: classroomTaskIds },
+            studentId: { $in: activeStudentObjectIds },
+          };
     const submissionStatsPipeline: PipelineStage[] = [
-      { $match: { classroomTaskId: { $in: classroomTaskIds } } },
+      { $match: activeSubmissionFilter ?? { _id: null } },
       {
         $group: {
           _id: '$classroomTaskId',
@@ -224,8 +236,26 @@ export class TeacherClassroomDashboardService {
         },
       },
     ];
+    const activeSubmissions = activeSubmissionFilter
+      ? await this.submissionModel
+          .find(activeSubmissionFilter)
+          .select('_id classroomTaskId')
+          .lean<ActiveSubmissionRef[]>()
+          .exec()
+      : [];
+    const activeSubmissionIds = activeSubmissions.map(
+      (submission) => submission._id,
+    );
     const aiFeedbackStatsPipeline: PipelineStage[] = [
-      { $match: { classroomTaskId: { $in: classroomTaskIds } } },
+      {
+        $match:
+          activeSubmissionIds.length === 0
+            ? { _id: null }
+            : {
+                classroomTaskId: { $in: classroomTaskIds },
+                submissionId: { $in: activeSubmissionIds },
+              },
+      },
       {
         $group: {
           _id: { classroomTaskId: '$classroomTaskId', status: '$status' },
@@ -236,6 +266,9 @@ export class TeacherClassroomDashboardService {
     const tagStatsPipeline: PipelineStage[] = [
       {
         $match: {
+          ...(activeSubmissionIds.length === 0
+            ? { _id: null }
+            : { submissionId: { $in: activeSubmissionIds } }),
           source: FeedbackSource.AI,
           tags: { $exists: true, $ne: [] },
         },
@@ -249,7 +282,6 @@ export class TeacherClassroomDashboardService {
         },
       },
       { $unwind: '$submission' },
-      { $match: { 'submission.classroomTaskId': { $in: classroomTaskIds } } },
       { $unwind: '$tags' },
       {
         $group: {

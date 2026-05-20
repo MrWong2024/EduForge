@@ -13,6 +13,7 @@ import { User } from '../../../users/schemas/user.schema';
 import { EnrollmentService } from '../../enrollments/services/enrollment.service';
 import { AiFeedbackJobService } from '../../../learning-tasks/ai-feedback/services/ai-feedback-job.service';
 import { LearningTasksService } from '../../../learning-tasks/services/learning-tasks.service';
+import { WithId } from '../../../../common/types/with-id.type';
 import {
   CLASSROOM_TASK_STATUS_ACTIVE,
   CLASSROOM_TASK_STATUS_CLOSED,
@@ -41,6 +42,15 @@ type HarnessOptions = {
   classroomTaskStatus?: string;
   taskStatus?: TaskStatus;
   isMember?: boolean;
+  userRoles?: string[];
+  activeStudentIds?: Types.ObjectId[];
+  users?: Array<
+    Pick<
+      User,
+      'email' | 'roles' | 'status' | 'name' | 'studentNo' | 'employeeNo'
+    > &
+      WithId
+  >;
 };
 
 const objectId = () => new Types.ObjectId();
@@ -49,11 +59,15 @@ const makeQuery = <T>(result: T) => {
   const chain = {
     select: jest.fn(),
     sort: jest.fn(),
+    skip: jest.fn(),
+    limit: jest.fn(),
     lean: jest.fn(),
     exec: jest.fn().mockResolvedValue(result),
   };
   chain.select.mockReturnValue(chain);
   chain.sort.mockReturnValue(chain);
+  chain.skip.mockReturnValue(chain);
+  chain.limit.mockReturnValue(chain);
   chain.lean.mockReturnValue(chain);
   return chain;
 };
@@ -74,6 +88,34 @@ const createHarness = (options: HarnessOptions = {}) => {
   const taskId = options.submissions?.[0]?.taskId ?? objectId();
   const submissions = options.submissions ?? [];
   const feedbacks = options.feedbacks ?? [];
+  const activeStudentIds =
+    options.activeStudentIds ??
+    Array.from(
+      new Map(
+        submissions.map((submission) => [
+          submission.studentId.toString(),
+          submission.studentId,
+        ]),
+      ).values(),
+    );
+  const users =
+    options.users ??
+    Array.from(
+      new Map(
+        submissions.map((submission) => [
+          submission.studentId.toString(),
+          {
+            _id: submission.studentId,
+            email: `${submission.studentId.toString()}@example.com`,
+            roles: ['student'],
+            status: 'active',
+            name: `Student-${submission.attemptNo}`,
+            studentNo: `S${submission.attemptNo}`,
+            employeeNo: null,
+          },
+        ]),
+      ).values(),
+    );
 
   const classroom = {
     _id: classroomId,
@@ -99,6 +141,7 @@ const createHarness = (options: HarnessOptions = {}) => {
 
   const classroomModel = {
     findById: jest.fn(() => makeQuery(classroom)),
+    findOne: jest.fn(() => makeQuery({ ...classroom, teacherId: studentId })),
   };
   const courseModel = {};
   const classroomTaskModel = {
@@ -107,8 +150,48 @@ const createHarness = (options: HarnessOptions = {}) => {
   const taskModel = {
     findById: jest.fn(() => makeQuery(task)),
   };
+  const filterSubmissions = (filter: Record<string, unknown>) => {
+    const classroomTaskIdFilter = filter.classroomTaskId as
+      | Types.ObjectId
+      | undefined;
+    const studentIdFilter = filter.studentId as
+      | Types.ObjectId
+      | { $in?: Types.ObjectId[] }
+      | undefined;
+    const studentIdFilterValues =
+      studentIdFilter && !(studentIdFilter instanceof Types.ObjectId)
+        ? (studentIdFilter.$in ?? [])
+        : [];
+    const activeStudentIdSet = new Set(
+      studentIdFilterValues.map((studentId) => studentId.toString()),
+    );
+    return submissions.filter((submission) => {
+      if (
+        classroomTaskIdFilter &&
+        submission.classroomTaskId.toString() !==
+          classroomTaskIdFilter.toString()
+      ) {
+        return false;
+      }
+      if (studentIdFilter instanceof Types.ObjectId) {
+        return submission.studentId.toString() === studentIdFilter.toString();
+      }
+      if (
+        activeStudentIdSet.size > 0 &&
+        !activeStudentIdSet.has(submission.studentId.toString())
+      ) {
+        return false;
+      }
+      return true;
+    });
+  };
   const submissionModel = {
-    find: jest.fn(() => makeQuery(submissions)),
+    find: jest.fn((filter: Record<string, unknown>) =>
+      makeQuery(filterSubmissions(filter)),
+    ),
+    countDocuments: jest.fn((filter: Record<string, unknown>) =>
+      Promise.resolve(filterSubmissions(filter).length),
+    ),
   };
   const feedbackModel = {
     find: jest.fn((filter: Record<string, unknown>) => {
@@ -126,12 +209,24 @@ const createHarness = (options: HarnessOptions = {}) => {
     aggregate: jest.fn(() => ({ exec: jest.fn().mockResolvedValue([]) })),
   };
   const userModel = {
-    findById: jest.fn(() => makeQuery({ roles: ['student'] })),
+    findById: jest.fn(() =>
+      makeQuery({ roles: options.userRoles ?? ['student'] }),
+    ),
+    find: jest.fn((filter: { _id?: { $in?: Types.ObjectId[] } }) => {
+      const userIds = filter._id?.$in ?? [];
+      const ids = new Set(userIds.map((id) => id.toString()));
+      return makeQuery(users.filter((user) => ids.has(user._id.toString())));
+    }),
   };
   const enrollmentService = {
     isStudentActiveInClassroom: jest
       .fn()
       .mockResolvedValue(options.isMember ?? true),
+    listActiveStudentIds: jest
+      .fn()
+      .mockResolvedValue(
+        activeStudentIds.map((studentId) => studentId.toString()),
+      ),
   };
   const aiFeedbackJobService = {
     getStatusMapBySubmissionIds: jest.fn().mockResolvedValue(new Map()),
@@ -327,6 +422,107 @@ describe('ClassroomTasksService createClassroomTaskSubmission participation stat
     expect(
       harness.learningTasksService.createSubmissionForClassroomTask,
     ).not.toHaveBeenCalled();
+  });
+});
+
+describe('ClassroomTasksService listClassroomTaskSubmissions ACTIVE enrollment filter', () => {
+  it('returns only ACTIVE student submissions and keeps total aligned with items filter', async () => {
+    const classroomTaskId = objectId();
+    const taskId = objectId();
+    const activeStudentId = objectId();
+    const removedStudentId = objectId();
+    const activeSubmission = submissionFixture({
+      classroomTaskId,
+      taskId,
+      studentId: activeStudentId,
+      attemptNo: 2,
+      createdAt: new Date('2026-01-02T00:00:00.000Z'),
+    });
+    const removedSubmission = submissionFixture({
+      classroomTaskId,
+      taskId,
+      studentId: removedStudentId,
+      attemptNo: 1,
+      createdAt: new Date('2026-01-03T00:00:00.000Z'),
+    });
+    const harness = createHarness({
+      userRoles: ['teacher'],
+      activeStudentIds: [activeStudentId],
+      submissions: [activeSubmission, removedSubmission],
+      users: [
+        {
+          _id: activeStudentId,
+          email: 'active@example.com',
+          roles: ['student'],
+          status: 'active',
+          name: 'Active Student',
+          studentNo: 'S001',
+          employeeNo: null,
+        },
+        {
+          _id: removedStudentId,
+          email: 'removed@example.com',
+          roles: ['student'],
+          status: 'active',
+          name: 'Removed Student',
+          studentNo: 'S999',
+          employeeNo: null,
+        },
+      ],
+    });
+
+    const result = await harness.service.listClassroomTaskSubmissions(
+      harness.ids.classroomId.toString(),
+      classroomTaskId.toString(),
+      { page: 1, limit: 20 },
+      harness.ids.studentId.toString(),
+    );
+
+    expect(result.total).toBe(1);
+    expect(result.items).toHaveLength(1);
+    expect(result.items[0]).toMatchObject({
+      id: activeSubmission._id.toString(),
+      classroomTaskId: classroomTaskId.toString(),
+      student: {
+        id: activeStudentId.toString(),
+        name: 'Active Student',
+        studentNo: 'S001',
+      },
+    });
+    expect(result.items.map((item) => item.id)).not.toContain(
+      removedSubmission._id.toString(),
+    );
+  });
+
+  it('returns empty items and zero total when there are no ACTIVE students', async () => {
+    const classroomTaskId = objectId();
+    const taskId = objectId();
+    const removedStudentId = objectId();
+    const removedSubmission = submissionFixture({
+      classroomTaskId,
+      taskId,
+      studentId: removedStudentId,
+      attemptNo: 1,
+    });
+    const harness = createHarness({
+      userRoles: ['teacher'],
+      activeStudentIds: [],
+      submissions: [removedSubmission],
+    });
+
+    const result = await harness.service.listClassroomTaskSubmissions(
+      harness.ids.classroomId.toString(),
+      classroomTaskId.toString(),
+      { page: 1, limit: 20 },
+      harness.ids.studentId.toString(),
+    );
+
+    expect(result).toEqual({
+      items: [],
+      total: 0,
+      page: 1,
+      limit: 20,
+    });
   });
 });
 

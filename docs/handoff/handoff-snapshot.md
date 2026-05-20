@@ -281,7 +281,8 @@ AI Provider 错误码（`ai-feedback-provider.error-codes.ts`）：
 
 新增/变更产品能力（Z3、AA~AI、Z4~Z9 收口口径）：
 - 教师班级看板已关闭任务可见性契约（后端已完成，前端待后续阶段接入）：
-  - `GET /api/classrooms/:id/dashboard` 默认只返回 `classroomTask.status=ACTIVE` 的任务，用作当前教学看板。
+- `GET /api/classrooms/:id/dashboard` 默认只返回 `classroomTask.status=ACTIVE` 的任务，用作当前教学看板。
+- 教师班级看板默认教学统计只面向当前 Enrollment `ACTIVE` 学生：`studentsCount` 分母保持 ACTIVE 学生数，`distinctStudentsSubmitted/submissionsCount/lateSubmissionsCount/lateDistinctStudentsCount/lateStudentsTotal`、AI feedback 统计与 `topTags` 均只计入当前 ACTIVE 学生对应 submissions；已移除学生历史 submissions 保留在库中，但默认不进入看板统计。
   - `includeClosedTasks=true` 时返回 `ACTIVE+CLOSED`；`RECALLED/缺失/未知状态` 仍不返回。
   - 每个 task item 返回 `classroomTaskStatus`，字段值来自 `ClassroomTask.status`，供前端后续标记已关闭任务。
   - 每个 task item 也返回 `taskTemplateStatus(DRAFT|PUBLISHED|ARCHIVED|null)`，字段值来自关联任务模板当前状态；教师看板不因模板转为 `DRAFT/ARCHIVED` 而隐藏既有课堂任务实例，前端后续可仅对非 `PUBLISHED` 显示轻量异常标签。
@@ -378,7 +379,8 @@ AI Provider 错误码（`ai-feedback-provider.error-codes.ts`）：
   - `GET /api/classrooms/:id/students`
   - teacher owner 可访问；成员来源只认 Enrollment（`role=STUDENT`）；默认返回 ACTIVE，`includeRemoved=1/true` 时返回 ACTIVE+REMOVED；默认排序 `joinedAt desc, _id desc`；不读取 `classroom.studentIds`。
 - P0 课堂任务提交列表（已完成）：
-  - `GET /api/classrooms/:classroomId/tasks/:classroomTaskId/submissions`
+- `GET /api/classrooms/:classroomId/tasks/:classroomTaskId/submissions`
+- 教师课堂任务提交列表默认只返回当前 Enrollment `ACTIVE` 学生的 submissions；已移除学生历史 submissions 保留但默认不出现在列表与 total 统计中。
   - teacher owner 可访问；只按 `classroomTaskId` 读取；默认排序 `submittedAt desc, _id desc`；无 job 时 `aiFeedbackStatus=NOT_REQUESTED`；`items[*].feedbackCount` 为该 submission 在 Feedback 集合中的总条数（按当前页 submissionIds 批量聚合），无反馈返回 `0`；不返回 `passwordHash/content.codeText`。
 - P0 提交详情稳定读源（已完成）：
   - `GET /api/learning-tasks/submissions/:id`

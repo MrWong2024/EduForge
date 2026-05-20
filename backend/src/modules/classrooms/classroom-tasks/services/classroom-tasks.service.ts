@@ -859,7 +859,18 @@ export class ClassroomTasksService {
 
     const page = query.page ?? 1;
     const limit = Math.min(query.limit ?? 20, 100);
-    const filter = { classroomTaskId: classroomTask._id };
+    const activeStudentIds =
+      await this.enrollmentService.listActiveStudentIds(classroomObjectId);
+    if (activeStudentIds.length === 0) {
+      return { items: [], total: 0, page, limit };
+    }
+    const activeStudentObjectIds = activeStudentIds.map(
+      (studentId) => new Types.ObjectId(studentId),
+    );
+    const filter = {
+      classroomTaskId: classroomTask._id,
+      studentId: { $in: activeStudentObjectIds },
+    };
     const [submissions, total] = await Promise.all([
       this.submissionModel
         .find(filter)
