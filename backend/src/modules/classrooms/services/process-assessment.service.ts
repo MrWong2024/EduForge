@@ -226,7 +226,8 @@ export class ProcessAssessmentService {
         .map((cell) => this.escapeCsvCell(cell))
         .join(',');
     });
-    return [headers.join(','), ...rows].join('\n');
+    const csvBody = [headers.join(','), ...rows].join('\n');
+    return `\uFEFF${csvBody}`;
   }
 
   private async buildPayload(
