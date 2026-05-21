@@ -364,7 +364,7 @@
   - `aggregateCommonIssuesBySubmissionIds(...)` / `aggregateCommonIssuesByClassroomTaskIds(...)`（供 snapshot 复用）
 - AuthZ Boundary: `teacher-only + owner-only`
 - Metrics/Isolation: 任务相关统计严格按 `classroomTaskId`；成员范围来自 Enrollment ACTIVE
-- Consistency/Constraints: 默认窗口为 `all`；后端兼容窗口 `all/7d/24h/30d`；`all` 语义为“无时间下界过滤（submissions/jobs/tags 不拼 lowerBound 条件）”；`topTags` 维持标签展开计数；`examples` 按 `feedbackId` 去重并保留标签归属信息（`primaryTag/matchedTags/tags`）；不返回 `codeText/prompt/apiKey`
+- Consistency/Constraints: 默认窗口为 `all`；后端兼容窗口 `all/7d/24h/30d`；`all` 语义为“无时间下界过滤（submissions/jobs/tags 不拼 lowerBound 条件）”；`topTags` 维持标签展开计数；`examples` 按 `feedbackId` 去重并保留标签归属信息（`primaryTag/matchedTags/tags`）；`studentTiers.good/watch/notSubmitted` 返回完整 ACTIVE 学生分层数组，不再由后端做预览截断，前端负责折叠/展开展示；不返回 `codeText/prompt/apiKey`
 - Deps/Side Effects: `ClassroomModel`, `ClassroomTaskModel`, `SubmissionModel`, `FeedbackModel`, `UserModel`, `EnrollmentService`, `AiFeedbackJobService`, `AiFeedbackMetricsAggregator`；只读
 - Performance Notes: examples 候选集仍按 `severityRank DESC + createdAt DESC` 且按 `examplesPerTag` 截断，再做 `feedbackId` 去重输出样例池
 - SoT: `backend/src/modules/classrooms/classroom-tasks/services/class-review-pack.service.ts`; `backend/src/modules/classrooms/classroom-tasks/dto/query-class-review-pack.dto.ts`

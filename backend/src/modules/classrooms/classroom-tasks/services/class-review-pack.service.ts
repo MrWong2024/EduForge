@@ -120,9 +120,6 @@ export class ClassReviewPackService {
   private static readonly DEFAULT_WINDOW: ClassReviewPackWindow = 'all';
   private static readonly DEFAULT_TOP_K = 10;
   private static readonly DEFAULT_EXAMPLES_PER_TAG = 2;
-  private static readonly GOOD_TIER_LIMIT = 20;
-  private static readonly WATCH_TIER_LIMIT = 20;
-  private static readonly NOT_SUBMITTED_TIER_LIMIT = 50;
   private static readonly WINDOW_MS_MAP: Record<
     Exclude<ClassReviewPackWindow, 'all'>,
     number
@@ -852,12 +849,9 @@ export class ClassReviewPackService {
     );
 
     return {
-      good: good.slice(0, ClassReviewPackService.GOOD_TIER_LIMIT),
-      watch: watch.slice(0, ClassReviewPackService.WATCH_TIER_LIMIT),
-      notSubmitted: notSubmitted.slice(
-        0,
-        ClassReviewPackService.NOT_SUBMITTED_TIER_LIMIT,
-      ),
+      good,
+      watch,
+      notSubmitted,
     };
   }
 
