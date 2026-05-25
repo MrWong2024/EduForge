@@ -92,6 +92,7 @@ frontend/
 
 Teacher 起步与模板链路（可用）：
 1. `CreateCourseForm` -> `POST courses`
+   - 学期输入框 placeholder 已改为前端按当前月份动态示例：1 月显示上一年秋季，2-7 月显示当年春季，8-12 月显示当年秋季；仅用于灰色示例提示，不会自动填充 term，也不影响提交 payload。
 2. `CreateClassroomForm` -> `POST classrooms`；在 `/teacher/classrooms` 可执行班级生命周期操作（归档/恢复/删除），必要时进入 `/teacher/classrooms/[classroomId]/edit` 维护班级名称；空态不再重复平铺“创建班级”入口
 3. `/teacher/tasks` 进行模板创建/筛选，必要时进入 `/teacher/tasks/[taskId]/edit` 维护模板状态与 rubric
    - 模板层已接入 `courseLabel`（课程分类）与 `visibility`（私有/共享）字段：创建/编辑可维护，列表可筛选并展示；`courseLabel` 与 `visibility` 都是模板治理字段，不绑定课程。
