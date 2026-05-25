@@ -22,6 +22,21 @@ type CreateClassroomFormErrorState = {
   description: string;
 };
 
+const getClassroomNamePlaceholder = (date = new Date()): string => {
+  const year = date.getFullYear();
+  const month = date.getMonth() + 1;
+
+  if (month === 1) {
+    return `例如 ${year - 1} 秋-1 班`;
+  }
+
+  if (month >= 2 && month <= 7) {
+    return `例如 ${year} 春-1 班`;
+  }
+
+  return `例如 ${year} 秋-1 班`;
+};
+
 const getCreateErrorSummary = (status: number): string => {
   if (status === 401) {
     return "登录状态已失效，请重新登录。";
@@ -53,6 +68,7 @@ export function CreateClassroomForm({ courses, initialCourseId }: CreateClassroo
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [errorState, setErrorState] = useState<CreateClassroomFormErrorState | null>(null);
+  const classroomNamePlaceholder = getClassroomNamePlaceholder();
 
   const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -149,7 +165,7 @@ export function CreateClassroomForm({ courses, initialCourseId }: CreateClassroo
             <input
               value={name}
               onChange={(event) => setName(event.target.value)}
-              placeholder="例如 2026 春-1 班"
+              placeholder={classroomNamePlaceholder}
               className="w-full rounded-md border border-zinc-300 px-3 py-2"
             />
           </label>
