@@ -26,6 +26,7 @@ type PasswordResetTokenWithMeta = PasswordResetToken & WithId & WithTimestamps;
 
 @Injectable()
 export class PasswordResetService implements OnModuleInit {
+  private static readonly REQUEST_COOLDOWN_MS = 60 * 1000;
   private readonly logger = new Logger(PasswordResetService.name);
   private readonly resetTokenTtlMinutes = 30;
   private readonly genericForgotPasswordResponse = {
@@ -57,6 +58,21 @@ export class PasswordResetService implements OnModuleInit {
     }
 
     const now = new Date();
+    const cooldownSince = new Date(
+      now.getTime() - PasswordResetService.REQUEST_COOLDOWN_MS,
+    );
+    const recentResetToken = await this.passwordResetTokenModel
+      .findOne({
+        userId: user._id,
+        createdAt: { $gte: cooldownSince },
+      })
+      .select({ _id: 1 })
+      .lean<Pick<PasswordResetTokenWithMeta, '_id'>>()
+      .exec();
+    if (recentResetToken) {
+      return this.genericForgotPasswordResponse;
+    }
+
     const plainToken = randomBytes(32).toString('hex');
     const tokenHash = this.hashToken(plainToken);
     const expiresAt = new Date(

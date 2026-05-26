@@ -35,6 +35,11 @@ type ResetTokenRecord = {
   usedAt: Date | null;
 };
 
+type RecentResetTokenRecord = {
+  _id: Types.ObjectId;
+  createdAt: Date;
+};
+
 type MongoWriteResult = {
   acknowledged: true;
   modifiedCount: number;
@@ -47,12 +52,14 @@ type UpdateUserPayload = {
 };
 
 type ServiceOptions = {
+  recentResetToken?: RecentResetTokenRecord | null;
   resetToken?: ResetTokenRecord | null;
   updateClaimModifiedCount?: number;
   user?: ResetUser | null;
   userById?: ResetUser | null;
 };
 
+const FIXED_NOW = new Date('2099-01-01T00:00:00.000Z');
 const createExec = <T>(value: T): jest.Mock<Promise<T>, []> =>
   jest.fn<Promise<T>, []>().mockResolvedValue(value);
 
@@ -73,6 +80,8 @@ describe('PasswordResetService', () => {
         : options.user;
     const userById: ResetUser | null =
       options.userById === undefined ? user : options.userById;
+    const recentResetToken: RecentResetTokenRecord | null =
+      options.recentResetToken === undefined ? null : options.recentResetToken;
     const resetToken: ResetTokenRecord | null =
       options.resetToken === undefined
         ? {
@@ -114,7 +123,32 @@ describe('PasswordResetService', () => {
         [Record<string, unknown>]
       >()
       .mockResolvedValue({ _id: resetTokenId, createdAt: resetTokenCreatedAt });
-    const findResetTokenExec = createExec(resetToken);
+    const findPasswordResetToken = jest.fn((query: Record<string, unknown>) => {
+      const execMock =
+        'tokenHash' in query
+          ? createExec(resetToken)
+          : createExec(
+              recentResetToken &&
+                query.userId instanceof Types.ObjectId &&
+                query.userId.equals(userId) &&
+                query.createdAt &&
+                typeof query.createdAt === 'object' &&
+                '$gte' in query.createdAt &&
+                query.createdAt.$gte instanceof Date &&
+                recentResetToken.createdAt >= query.createdAt.$gte
+                ? recentResetToken
+                : null,
+            );
+      const leanChain = {
+        exec: execMock,
+      };
+      return {
+        select: jest.fn(() => ({
+          lean: jest.fn(() => leanChain),
+        })),
+        lean: jest.fn(() => leanChain),
+      };
+    });
     const claimTokenExec = createExec<MongoWriteResult>({
       acknowledged: true,
       modifiedCount: options.updateClaimModifiedCount ?? 1,
@@ -159,11 +193,7 @@ describe('PasswordResetService', () => {
     const passwordResetTokenModel = {
       ensureIndexes: jest.fn().mockResolvedValue(undefined),
       create: createResetToken,
-      findOne: jest.fn(() => ({
-        lean: jest.fn(() => ({
-          exec: findResetTokenExec,
-        })),
-      })),
+      findOne: findPasswordResetToken,
       updateOne: markTokenUsed,
       updateMany: invalidateTokens,
     };
@@ -187,6 +217,7 @@ describe('PasswordResetService', () => {
       mocks: {
         clearUserSessions,
         createResetToken,
+        findPasswordResetToken,
         invalidateTokens,
         markTokenUsed,
         sendPasswordResetEmail,
@@ -198,10 +229,12 @@ describe('PasswordResetService', () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
+    jest.useFakeTimers().setSystemTime(FIXED_NOW);
     jest.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
   });
 
   afterEach(() => {
+    jest.useRealTimers();
     jest.restoreAllMocks();
   });
 
@@ -269,6 +302,49 @@ describe('PasswordResetService', () => {
       resetUrl: `https://frontend.example.com/reset-password?token=${FIXED_TOKEN}`,
       expiresInMinutes: 30,
     });
+  });
+
+  it('returns generic success during cooldown without creating token, invalidating token, or sending mail', async () => {
+    const harness = createService({
+      recentResetToken: {
+        _id: new Types.ObjectId(),
+        createdAt: new Date(FIXED_NOW.getTime() - 30 * 1000),
+      },
+    });
+
+    await expect(
+      harness.service.requestPasswordReset('teacher@example.com'),
+    ).resolves.toEqual({
+      message: '如果邮箱存在，我们将发送密码重置邮件。',
+    });
+
+    expect(harness.mocks.findPasswordResetToken).toHaveBeenCalledWith({
+      userId: harness.userId,
+      createdAt: { $gte: new Date(FIXED_NOW.getTime() - 60 * 1000) },
+    });
+    expect(harness.mocks.createResetToken).not.toHaveBeenCalled();
+    expect(harness.mocks.invalidateTokens).not.toHaveBeenCalled();
+    expect(harness.mocks.markTokenUsed).not.toHaveBeenCalled();
+    expect(harness.mocks.sendPasswordResetEmail).not.toHaveBeenCalled();
+  });
+
+  it('allows another forgot-password request after cooldown window passes', async () => {
+    const harness = createService({
+      recentResetToken: {
+        _id: new Types.ObjectId(),
+        createdAt: new Date(FIXED_NOW.getTime() - 61 * 1000),
+      },
+    });
+
+    await expect(
+      harness.service.requestPasswordReset('teacher@example.com'),
+    ).resolves.toEqual({
+      message: '如果邮箱存在，我们将发送密码重置邮件。',
+    });
+
+    expect(harness.mocks.createResetToken).toHaveBeenCalledTimes(1);
+    expect(harness.mocks.invalidateTokens).toHaveBeenCalledTimes(1);
+    expect(harness.mocks.sendPasswordResetEmail).toHaveBeenCalledTimes(1);
   });
 
   it('invalidates the fresh token when email sending fails but still returns generic success', async () => {

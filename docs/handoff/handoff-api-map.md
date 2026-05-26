@@ -19,7 +19,7 @@
 
 Notes:
 
-- `POST /api/auth/forgot-password`：公开接口；请求体 `email` 会 trim + email 校验；无论邮箱是否存在、用户是否允许登录，统一返回 `{"message":"如果邮箱存在，我们将发送密码重置邮件。"}`；只有 `status=active` 用户会真实创建 reset token 并发邮件。
+- `POST /api/auth/forgot-password`：公开接口；请求体 `email` 会 trim + email 校验；无论邮箱是否存在、用户是否允许登录，统一返回 `{"message":"如果邮箱存在，我们将发送密码重置邮件。"}`；只有 `status=active` 用户会真实创建 reset token 并发邮件；同一真实用户邮箱 60 秒内重复请求命中冷却时，不会创建新 token、不会失效旧 token、不会重复发邮件，但响应保持不变。
 - `POST /api/auth/reset-password`：公开接口；请求体 `token/newPassword`，其中 `newPassword` trim 后需满足至少 8 位；成功返回 `{"message":"密码已重置，请使用新密码登录。"}`；不会自动登录，也不会写 cookie。
 
 ## Users

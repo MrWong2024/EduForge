@@ -268,7 +268,7 @@ AI Provider 错误码（`ai-feedback-provider.error-codes.ts`）：
 - 认证与授权：
   - `SessionAuthGuard` 全局启用（除 `@Public()`）。
   - `AUTHZ_ENFORCE_ROLES`（默认 `true`）。
-  - 邮箱重置密码接口 `POST /api/auth/forgot-password` 与 `POST /api/auth/reset-password` 为公开路由；其中 `forgot-password` 固定返回通用成功提示，避免邮箱枚举。
+  - 邮箱重置密码接口 `POST /api/auth/forgot-password` 与 `POST /api/auth/reset-password` 为公开路由；其中 `forgot-password` 固定返回通用成功提示，避免邮箱枚举；同一真实用户邮箱 60 秒内重复请求不会重复发邮件。
 - AI 相关：
   - `AI_FEEDBACK_DEBUG_ENABLED`
   - `AI_FEEDBACK_REAL_ENABLED`
@@ -400,7 +400,7 @@ AI Provider 错误码（`ai-feedback-provider.error-codes.ts`）：
   - `PATCH /api/users/me`：已落地可用；仅允许更新 `name/studentNo/employeeNo`。
   - `GET /api/users/me` 与 `PATCH /api/users/me` 返回口径一致，均不返回 `passwordHash`。
   - `POST /api/users/me/change-password`：已落地可用；需校验 `currentPassword`，`newPassword` 执行 trim 非空与长度校验，且不得与当前密码相同；成功后保留当前会话并失效其它历史会话。
-  - `POST /api/auth/forgot-password`：已落地可用；无论邮箱是否存在、用户是否允许登录，都返回通用成功提示；正常用户会收到 30 分钟有效的一次性重置链接。
+  - `POST /api/auth/forgot-password`：已落地可用；无论邮箱是否存在、用户是否允许登录，都返回通用成功提示；正常用户会收到 30 分钟有效的一次性重置链接；同一真实用户邮箱 60 秒内重复请求不会新建 token、不会失效旧 token、也不会重复发邮件。
   - `POST /api/auth/reset-password`：已落地可用；验证 `tokenHash`、`expiresAt`、`usedAt` 和用户状态后更新 `passwordHash`，并清理该用户全部 sessions；不会自动登录。
 - P0 班级成员列表（已完成）：
   - `GET /api/classrooms/:id/students`
@@ -493,7 +493,7 @@ AI Provider 错误码（`ai-feedback-provider.error-codes.ts`）：
 - 用户资料字段补齐：`name/studentNo/employeeNo`。
 - `/api/users/me` 更新能力：`PATCH` 真实可用，且与 `GET` 返回口径一致。
 - 当前用户自助改密能力：`POST /api/users/me/change-password` 真实可用（旧密码校验 + 新密码校验 + 会话失效策略）。
-- 邮箱忘记密码/重置密码能力：`POST /api/auth/forgot-password` + `POST /api/auth/reset-password` 已可供后续前端忘记密码页接入。
+- 邮箱忘记密码/重置密码能力：`POST /api/auth/forgot-password` + `POST /api/auth/reset-password` 已可供后续前端忘记密码页接入；后端已增加同一真实邮箱 60 秒发送冷却。
 - 班级正式成员列表：`GET /api/classrooms/:id/students`（Enrollment ACTIVE SoT）。
 - 课堂任务实例提交列表：`GET /api/classrooms/:classroomId/tasks/:classroomTaskId/submissions`（`classroomTaskId` 隔离）。
 - 提交详情稳定读源：`GET /api/learning-tasks/submissions/:id`（用于 Teacher/Student submission detail 主视图读取，不再主要依赖 query 透传）。

@@ -99,7 +99,7 @@ npm run test:e2e -- backend/test/classroom-learning-loop.e2e-spec.ts
 必须关注：
 
 - `backend/src/modules/auth/services/password-reset.service.spec.ts`
-  - 覆盖：`forgot-password` 防邮箱枚举、只对可登录用户建 token、旧 token 失效、mail 失败补偿、`reset-password` 的无效/过期/已使用 token 拒绝，以及成功改密后清理 sessions。
+  - 覆盖：`forgot-password` 防邮箱枚举、只对可登录用户建 token、同一真实邮箱 60 秒冷却下不重复建 token/不重复发邮件/不失效旧 token、超窗后恢复发送、mail 失败补偿、`reset-password` 的无效/过期/已使用 token 拒绝，以及成功改密后清理 sessions。
 - `backend/src/modules/mail/mail.service.spec.ts`
   - 覆盖：`MAIL_PROVIDER=log` 不真实发信、`MAIL_PROVIDER=smtp` 的 transporter 组装、`from` 格式和缺失 SMTP 配置 fail-fast。
 - `backend/src/modules/auth/controllers/auth.controller.spec.ts`

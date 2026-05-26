@@ -108,7 +108,7 @@
   - `resetPassword(token: string, newPassword: string): Promise<{ message: string }> — called by POST /auth/reset-password`
 - AuthZ Boundary: `public`
 - Metrics/Isolation: reset token 按 `userId` 管理；与 `classroomTaskId` 无关
-- Consistency/Constraints: `forgot-password` 固定返回通用成功提示，避免邮箱枚举；仅对 `status=active` 用户创建 token；明文 token 只出现在邮件链接中，数据库只保存 `tokenHash`；新请求会失效同用户旧的未用 token；重置成功后更新 `passwordHash`、标记 `usedAt`、并清理该用户全部 sessions
+- Consistency/Constraints: `forgot-password` 固定返回通用成功提示，避免邮箱枚举；仅对 `status=active` 用户创建 token；同一真实用户邮箱按 `userId + createdAt` 做 60 秒冷却，命中冷却时不创建新 token、不失效旧 token、不发新邮件；未命中冷却时才失效同用户旧的未用 token；明文 token 只出现在邮件链接中，数据库只保存 `tokenHash`；重置成功后更新 `passwordHash`、标记 `usedAt`、并清理该用户全部 sessions
 - Deps/Side Effects: `UserModel`, `PasswordResetTokenModel`, `MailService`, `SessionService`, 共享密码 helper；写 token、发邮件、更新密码、删除 sessions
 - Performance Notes: 通过 `tokenHash` 精确查找；TTL 索引负责后台清理，业务层仍显式检查 `expiresAt/usedAt`
 - SoT: `backend/src/modules/auth/services/password-reset.service.ts`; `backend/src/modules/auth/schemas/password-reset-token.schema.ts`
