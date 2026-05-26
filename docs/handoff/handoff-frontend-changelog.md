@@ -793,3 +793,9 @@
 - 【新增事实 / 已收口口径】`/login` 已增加“忘记密码？”入口；新增 `/forgot-password` 与 `/reset-password` 页面，分别接入 `POST /api/auth/forgot-password` 与 `POST /api/auth/reset-password`，请求继续通过 `/api/proxy/**` 转发。
 - 【安全边界】忘记密码成功态固定展示防邮箱枚举文案，不根据后端 message 推断账号存在性；重置密码页仅从 URL query 读取 `token`，不写入 localStorage/sessionStorage/cookie，也不展示完整 token。
 - 【交互口径】重置密码前端校验 trim 后不少于 8 位且确认密码一致；成功后仅提示返回登录页使用新密码登录，不自动登录、不修改现有 session/cookie 登录逻辑。
+
+## UAT-FE-95
+
+- 【本步解决】`/forgot-password` 成功提交后缺少防连点反馈，用户容易连续点击“发送重置邮件”。
+- 【新增事实 / 已收口口径】`ForgotPasswordForm` 在成功提交 `POST /api/auth/forgot-password` 后，发送按钮会进入前端 60 秒倒计时禁用态，按钮文案显示剩余秒数；请求失败时不启动倒计时。
+- 【边界保持】邮箱输入框在倒计时期间仍可编辑；刷新页面后倒计时可丢失；前端倒计时仅是体验层优化，不改变 API 契约，也不替代后端 60 秒冷却安全边界。

@@ -42,7 +42,7 @@ frontend/
 ## 2) 路由分区与完成度（摘要）
 
 - `/(auth)/login`：已完成登录与 role-home 跳转（`TEACHER -> /teacher/classrooms`, `STUDENT -> /student`）；登录表单已补充“忘记密码？”入口，未改变登录链路、错误分流口径与登录成功跳转行为。
-- `/(auth)/forgot-password`：已接入 `POST /api/auth/forgot-password`；前端提交邮箱后固定展示防枚举成功提示“如果邮箱存在，我们已发送密码重置邮件，请检查收件箱。”，不根据后端返回内容推断邮箱是否存在。
+- `/(auth)/forgot-password`：已接入 `POST /api/auth/forgot-password`；前端提交邮箱后固定展示防枚举成功提示“如果邮箱存在，我们已发送密码重置邮件，请检查收件箱。”，不根据后端返回内容推断邮箱是否存在；成功提交后发送按钮进入前端 60 秒倒计时禁用，作为体验层防连点，不承担真实安全边界。
 - `/(auth)/reset-password`：已接入 `POST /api/auth/reset-password`；页面从 URL query 读取 `token`，前端校验新密码 trim 后不少于 8 位且两次输入一致；成功后提示返回登录页使用新密码登录，不自动登录，也不持久化保存 token。
 - `/teacher/**`：教师起步链路、模板链路、班级发布链路、批阅链路、三件套、周报/过程性评价/快照已接入真接口。
 - 教师班级基础管理层（已落地）：

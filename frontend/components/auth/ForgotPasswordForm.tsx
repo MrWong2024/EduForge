@@ -1,19 +1,33 @@
 "use client";
 
 import Link from "next/link";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type { FormEvent } from "react";
 import { fetchJson, BrowserFetchJsonError } from "@/lib/api/browser-client";
 import { ErrorState } from "@/components/blocks/ErrorState";
 import { getCommonErrorSummary } from "@/lib/ui/status";
 
+const RESEND_COOLDOWN_SECONDS = 60;
 const SUCCESS_MESSAGE = "如果邮箱存在，我们已发送密码重置邮件，请检查收件箱。";
 
 export function ForgotPasswordForm() {
   const [email, setEmail] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [cooldownSeconds, setCooldownSeconds] = useState(0);
   const [resultMessage, setResultMessage] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (cooldownSeconds <= 0) {
+      return undefined;
+    }
+
+    const timer = window.setTimeout(() => {
+      setCooldownSeconds((seconds) => Math.max(0, seconds - 1));
+    }, 1000);
+
+    return () => window.clearTimeout(timer);
+  }, [cooldownSeconds]);
 
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -40,6 +54,7 @@ export function ForgotPasswordForm() {
       });
 
       setResultMessage(SUCCESS_MESSAGE);
+      setCooldownSeconds(RESEND_COOLDOWN_SECONDS);
     } catch (error) {
       if (error instanceof BrowserFetchJsonError) {
         setErrorMessage(getCommonErrorSummary(error.status, "找回密码"));
@@ -75,10 +90,14 @@ export function ForgotPasswordForm() {
 
         <button
           type="submit"
-          disabled={isSubmitting}
+          disabled={isSubmitting || cooldownSeconds > 0}
           className="rounded-md bg-zinc-900 px-4 py-2 text-sm font-medium text-white disabled:cursor-not-allowed disabled:bg-zinc-500"
         >
-          {isSubmitting ? "发送中..." : "发送重置邮件"}
+          {isSubmitting
+            ? "发送中..."
+            : cooldownSeconds > 0
+              ? `${cooldownSeconds} 秒后可再次发送`
+              : "发送重置邮件"}
         </button>
       </form>
 

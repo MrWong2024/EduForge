@@ -26,7 +26,7 @@
 | 组件 | 文件 | 真实 API | 作用边界 |
 |---|---|---|---|
 | LoginForm | `components/auth/LoginForm.tsx` | `POST auth/login`、`GET users/me` | 负责登录提交、401/通用错误展示、`next` 回跳与 role-home 跳转；已补“忘记密码？”入口；不要在此改动 forgot/reset-password 接口契约 |
-| ForgotPasswordForm | `components/auth/ForgotPasswordForm.tsx` | `POST auth/forgot-password` | 负责邮箱输入、前端空值校验、固定防枚举成功提示与返回登录入口；不要根据返回内容推断邮箱是否存在 |
+| ForgotPasswordForm | `components/auth/ForgotPasswordForm.tsx` | `POST auth/forgot-password` | 负责邮箱输入、前端空值校验、固定防枚举成功提示、成功后 60 秒倒计时禁用发送按钮与返回登录入口；不要根据返回内容推断邮箱是否存在，也不要把倒计时当作安全边界 |
 | ResetPasswordForm | `components/auth/ResetPasswordForm.tsx` | `POST auth/reset-password` | 负责消费 URL token、校验新密码 trim 后至少 8 位且两次输入一致、提交重置与成功后返回登录；不要把 token 持久化到 localStorage/sessionStorage/cookie |
 
 ## 3) Teacher 交互组件
