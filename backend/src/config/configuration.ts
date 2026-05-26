@@ -7,6 +7,18 @@ export default () => ({
     ),
     frontendUrl: process.env.FRONTEND_URL ?? 'http://localhost:3000',
   },
+  mail: {
+    provider: process.env.MAIL_PROVIDER ?? 'log',
+    from: process.env.MAIL_FROM ?? '',
+    fromName: process.env.MAIL_FROM_NAME ?? 'EduForge',
+    smtp: {
+      host: process.env.SMTP_HOST ?? '',
+      port: Number.parseInt(process.env.SMTP_PORT ?? '465', 10),
+      secure: (process.env.SMTP_SECURE ?? 'true') === 'true',
+      user: process.env.SMTP_USER ?? '',
+      pass: process.env.SMTP_PASS ?? '',
+    },
+  },
   mongo: {
     uri: process.env.MONGO_URI,
     serverSelectionTimeoutMS: Number.parseInt(

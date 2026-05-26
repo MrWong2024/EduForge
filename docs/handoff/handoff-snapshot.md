@@ -27,6 +27,7 @@ backend/
 │  ├─ config/{configuration.ts,env.validation.ts}
 │  └─ modules/
 │     ├─ auth/{controllers,dto,schemas,services}
+│     ├─ mail/
 │     ├─ users/{controllers,dto,schemas,services}
 │     ├─ courses/
 │     │  ├─ controllers/
@@ -105,6 +106,7 @@ backend/
 ```
 
 版本策略引用：
+
 - `docs/backend-architecture.md`
 - 数据库治理补充：`docs/database-conventions.md`
 - E2E 运行基线：`docs/e2e-testing.md`
@@ -113,17 +115,20 @@ backend/
 ## 2) 领域模型摘要卡（按模块）
 
 ### Course（`src/modules/courses/schemas/course.schema.ts`）
+
 - 关键字段：`code`、`name`、`term`、`courseLabel?`、`status(ACTIVE|ARCHIVED)`、`createdBy`。
 - `courseLabel` 语义：可选课程分类字段（与 `Task.courseLabel` 共用 `task-course-labels.constants.ts` 值域）；非外键、可为空；用于课程与模板的分类坐标对齐。
 - 索引/唯一性：`unique(createdBy, code)`。
 
 ### Classroom（`src/modules/classrooms/schemas/classroom.schema.ts`）
+
 - 关键字段：`courseId`、`name`、`teacherId`、`joinCode`、`studentIds[]`、`status(ACTIVE|ARCHIVED)`。
 - 索引/唯一性：`unique(joinCode)`；`(teacherId,courseId,status,createdAt)`。
 - `studentIds[]` 口径：仅 legacy 输出/可选镜像；不参与授权、统计、mine 查询，不作为 fallback。
 - 响应契约：`ClassroomResponse` 保留兼容字段 `courseId`，并新增只读 `course` 摘要对象（`id/code/name/term/courseLabel/status`）供前端展示课程可读信息；课程记录异常缺失时 `course` 可为空，不影响班级读取。
 
 ### Enrollment（`src/modules/classrooms/enrollments/schemas/enrollment.schema.ts`）
+
 - 关键字段：`classroomId`、`userId`、`role(STUDENT)`、`status(ACTIVE|REMOVED)`、`joinedAt`、`removedAt?`、`timestamps`。
 - 索引/唯一性：
   - `unique(classroomId, userId)`
@@ -133,6 +138,7 @@ backend/
 - 权威性声明：Enrollment 是成员关系唯一权威来源；授权/统计只读 Enrollment。
 
 ### ClassroomTask（`src/modules/classrooms/classroom-tasks/schemas/classroom-task.schema.ts`）
+
 - 关键字段：`classroomId`、`taskId`、`status(ACTIVE|CLOSED|RECALLED)`、`publishedAt`、`dueAt?`、`settings.allowLate?`、`settings.maxAttempts?`、`createdBy`。
 - 索引/唯一性：`unique(classroomId, taskId)`；`(classroomId, createdAt)`。
 - 生命周期口径：新发布默认 `ACTIVE`；允许 `ACTIVE -> CLOSED`、`ACTIVE -> RECALLED`、`CLOSED -> ACTIVE`；撤回（`RECALLED`）要求当前“无提交”，有提交时只能关闭（`CLOSED`）；`RECALLED` 保持封闭不可恢复，且 `CLOSED -> RECALLED` 不允许；旧数据缺省状态按 `ACTIVE` 兼容读取。
@@ -140,6 +146,7 @@ backend/
 - 提交门禁：`ClassroomTask.status` 非 `ACTIVE` 时拒绝新提交；`settings.allowLate` 默认按实现为 `true`，迟交标记仍按 `dueAt/allowLate` 计算。
 
 ### Task（`src/modules/learning-tasks/schemas/task.schema.ts`）
+
 - 关键字段：`title`、`description`、`knowledgeModule`、`courseLabel?`、`visibility(PRIVATE|SHARED)`、`stage(1..4)`、`difficulty?`、`rubric?`、`status(DRAFT|PUBLISHED|ARCHIVED)`、`createdBy`、`publishedAt?`。
 - `courseLabel` 语义：可选单值课程分类字段（白名单来源 `task-course-labels.constants.ts`）；非 `Course` 外键；仅用于模板治理（筛选/分组/展示辅助）；不参与权限与发布约束。
 - `visibility` 语义：模板可见性字段（白名单来源 `task-template-visibility.constants.ts`）；新建默认 `PRIVATE`；旧数据缺省值按 `SHARED` 兼容解释；共享仅影响读可见性，不改变作者写权限。
@@ -150,6 +157,7 @@ backend/
 - 索引/唯一性：`(createdBy,createdAt)`；`(status,knowledgeModule,stage,createdAt)`；`(status,courseLabel,createdAt)`；`(visibility,createdAt)`；`(createdBy,status,courseLabel,knowledgeModule,stage,updatedAt,createdAt)`（发布候选 onlyMine 分支）；`(visibility,status,courseLabel,knowledgeModule,stage,updatedAt,createdAt)`（发布候选 shared 可见分支）。
 
 ### Submission（`src/modules/learning-tasks/schemas/submission.schema.ts`）
+
 - 关键字段：`taskId`、`classroomTaskId?`、`studentId`、`attemptNo`、`submittedAt`、`isLate`、`lateBySeconds`、`content.codeText`、`content.language`、`meta.aiUsageDeclaration?`、`status(SUBMITTED|EVALUATED)`。
 - 字段语义：
   - `submittedAt`：创建时写入 `now`（与 `createdAt` 语义一致，但用于显式提交时间表达）。
@@ -164,6 +172,7 @@ backend/
   - `(classroomTaskId, isLate, submittedAt)`
 
 ### AiFeedbackJob（`src/modules/learning-tasks/ai-feedback/schemas/ai-feedback-job.schema.ts`）
+
 - 关键字段：`submissionId`、`taskId`、`classroomTaskId?`、`studentId`、`status(PENDING|RUNNING|SUCCEEDED|FAILED|DEAD)`、`attempts`、`maxAttempts`、`notBefore?`、`lockedAt?`、`lockOwner?`、`lastError?`。
 - 索引/唯一性：`unique(submissionId)`；`(status,notBefore,lockedAt,createdAt)`；`(classroomTaskId,status,notBefore)`；`(classroomTaskId,createdAt)`；`(classroomTaskId,updatedAt)`。
 - attempt-based 触发策略：
@@ -173,25 +182,35 @@ backend/
   - “无 job => NOT_REQUESTED” 为正常产品语义。
 
 ### Feedback（`src/modules/learning-tasks/schemas/feedback.schema.ts`）
+
 - 关键字段：`submissionId`、`createdBy?`、`source(AI|TEACHER|SYSTEM)`、`type(...)`、`severity(INFO|WARN|ERROR)`、`message`、`suggestion?`、`tags?`、`scoreHint?`。
 - 索引/唯一性：`unique(submissionId,source,type,severity,message)`；`(submissionId,createdAt)`；`(submissionId,source,createdAt)`。
 - 隔离字段来源：当前 schema 无 `classroomTaskId` 直连字段；统计隔离通过 `submissionId -> Submission.classroomTaskId` 关联完成。
 
 ### User（`src/modules/users/schemas/user.schema.ts`）
+
 - 关键字段：`email`、`passwordHash(select:false)`、`roles[]`、`status(active|suspended)`、`name?`、`studentNo?`、`employeeNo?`。
 - 索引/唯一性：`unique(email)`。
 - 用户资料口径：`GET/PATCH /api/users/me` 返回一致的公开字段口径，不返回 `passwordHash`。
 - 账户安全动作：`POST /api/users/me/change-password` 仅允许当前会话用户改密；成功后保留当前会话并失效其它历史会话。
 
 ### Session（`src/modules/auth/schemas/session.schema.ts`）
+
 - 关键字段：`userId`、`token`、`expiresAt`。
 - 索引/唯一性：`unique(token)`；TTL(`expiresAt`)；`(userId)`。
+
+### PasswordResetToken（`src/modules/auth/schemas/password-reset-token.schema.ts`）
+
+- 关键字段：`userId`、`email`、`tokenHash`、`expiresAt`、`usedAt?`。
+- 索引/唯一性：`unique(tokenHash)`；TTL(`expiresAt`)；`(userId)`。
+- 安全口径：数据库只保存 `tokenHash`，明文 token 只出现在发给用户的 reset link 中；TTL 仅负责后台清理，业务上仍显式检查 `expiresAt` 与 `usedAt`。
 
 ## 3) 权威来源提炼（interfaces/protocol/prompts/guards/types）
 
 ### 3.1 错误码 / 枚举 / 类型域
 
 AI Provider 错误码（`ai-feedback-provider.error-codes.ts`）：
+
 - `UNAUTHORIZED`
 - `RATE_LIMIT_UPSTREAM`
 - `RATE_LIMIT_LOCAL`
@@ -203,10 +222,12 @@ AI Provider 错误码（`ai-feedback-provider.error-codes.ts`）：
 - `MISSING_API_KEY`
 
 业务门禁错误码：
+
 - `LATE_SUBMISSION_NOT_ALLOWED`
   - 出现位置：`POST /api/classrooms/:classroomId/tasks/:classroomTaskId/submissions` 在 `dueAt` 已到且 `allowLate=false` 时拒绝提交。
 
 关键枚举：
+
 - `AiFeedbackStatus`: `NOT_REQUESTED|PENDING|RUNNING|SUCCEEDED|FAILED|DEAD`
 - `AiFeedbackJobStatus`: `PENDING|RUNNING|SUCCEEDED|FAILED|DEAD`
 - `TaskStatus`: `DRAFT|PUBLISHED|ARCHIVED`
@@ -222,11 +243,13 @@ AI Provider 错误码（`ai-feedback-provider.error-codes.ts`）：
 ### 3.2 JSON 协议 / 校验规则（AI）
 
 来源：
+
 - `ai-feedback-json.protocol.ts`
 - `ai-feedback.prompt.ts`
 - `openrouter-feedback.provider.ts`
 
 规则摘要：
+
 - 顶层只允许 `items`（必需）与 `meta`（可选）。
 - 每个 item 只允许 `type,severity,message,suggestion,tags,scoreHint`。
 - `type/severity` 必须来自枚举值域；`message` 必须非空。
@@ -245,6 +268,7 @@ AI Provider 错误码（`ai-feedback-provider.error-codes.ts`）：
 - 认证与授权：
   - `SessionAuthGuard` 全局启用（除 `@Public()`）。
   - `AUTHZ_ENFORCE_ROLES`（默认 `true`）。
+  - 邮箱重置密码接口 `POST /api/auth/forgot-password` 与 `POST /api/auth/reset-password` 为公开路由；其中 `forgot-password` 固定返回通用成功提示，避免邮箱枚举。
 - AI 相关：
   - `AI_FEEDBACK_DEBUG_ENABLED`
   - `AI_FEEDBACK_REAL_ENABLED`
@@ -263,12 +287,12 @@ AI Provider 错误码（`ai-feedback-provider.error-codes.ts`）：
 
 ### 3.5 providers 子目录提炼
 
-| Provider | 文件 | 说明 |
-|---|---|---|
-| Stub Provider | `default-stub-ai-feedback.provider.ts` | 已适配统一契约 `analyzeSubmission(context: AiSubmissionAnalysisContext)`；仍仅基于 `context.codeText` 走本地规则，英文输出与规则行为不变 |
-| OpenRouter Provider | `providers/real/openrouter-feedback.provider.ts` | 已接收 `AiSubmissionAnalysisContext`；prompt 纳入 `taskTitle/taskDescription/taskRubric/codeText` 等上下文；默认要求反馈文本（`message/suggestion`）使用简体中文，并以“主问题导向综合反馈”为主控（默认 1 条、仅独立问题允许第 2 条、同类问题禁止按位置拆条）；空数组仅在“确实无任何可反馈/可建议内容”时允许，基本正确但可改进仍返回 1 条综合反馈；`language` 仅视为 hint，若 hint 缺失/auto/unknown 或与代码冲突，优先依据代码特征判断语言；prompt 现支持对 `codeText` 的多文件文本边界做语言无关识别，但默认仍按普通单文件提交分析，不要求无边界标记的单文件补 `FILE` 标记；推荐边界为 `===== FILE: relative/path/FileName.ext =====`，并容错识别大小写不敏感关键词、仅文件名、关键词不规范及明显边界样式的弱边界；该能力仅由 prompt 引导模型完成，不做后端正则解析、不新增 `codeFiles` 字段；只有强证据表明疑似多文件但边界不清时才保守提示，且 `CodeTruncated=true` 时不假定最后一个文件块完整；provider 协议层对 `items` 执行 `<=2` 闸门；外部 AI 调用 + 严格 JSON 解析 |
-| Bailian Provider | `providers/real/bailian-feedback.provider.ts` | 新增阿里云百炼 provider，通过 `AI_FEEDBACK_PROVIDER=bailian` 启用；默认 `BAILIAN_BASE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1`、`BAILIAN_MODEL=qwen-plus`（生产可显式指定 `qwen3.6-plus`）；走 OpenAI Chat Completions 兼容接口 `/chat/completions`；复用 OpenAI-compatible 基类中的 prompt、严格 JSON 协议、字段白名单、`<=2` 闸门、重试、超时和错误映射；日志 provider 字段为 `bailian` |
-| OpenAI Provider（占位） | `providers/real/openai-feedback.provider.ts` | 已同步统一 context 契约签名，但仍为占位实现（调用直接抛未实现错误） |
+| Provider                | 文件                                             | 说明                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| ----------------------- | ------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Stub Provider           | `default-stub-ai-feedback.provider.ts`           | 已适配统一契约 `analyzeSubmission(context: AiSubmissionAnalysisContext)`；仍仅基于 `context.codeText` 走本地规则，英文输出与规则行为不变                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| OpenRouter Provider     | `providers/real/openrouter-feedback.provider.ts` | 已接收 `AiSubmissionAnalysisContext`；prompt 纳入 `taskTitle/taskDescription/taskRubric/codeText` 等上下文；默认要求反馈文本（`message/suggestion`）使用简体中文，并以“主问题导向综合反馈”为主控（默认 1 条、仅独立问题允许第 2 条、同类问题禁止按位置拆条）；空数组仅在“确实无任何可反馈/可建议内容”时允许，基本正确但可改进仍返回 1 条综合反馈；`language` 仅视为 hint，若 hint 缺失/auto/unknown 或与代码冲突，优先依据代码特征判断语言；prompt 现支持对 `codeText` 的多文件文本边界做语言无关识别，但默认仍按普通单文件提交分析，不要求无边界标记的单文件补 `FILE` 标记；推荐边界为 `===== FILE: relative/path/FileName.ext =====`，并容错识别大小写不敏感关键词、仅文件名、关键词不规范及明显边界样式的弱边界；该能力仅由 prompt 引导模型完成，不做后端正则解析、不新增 `codeFiles` 字段；只有强证据表明疑似多文件但边界不清时才保守提示，且 `CodeTruncated=true` 时不假定最后一个文件块完整；provider 协议层对 `items` 执行 `<=2` 闸门；外部 AI 调用 + 严格 JSON 解析 |
+| Bailian Provider        | `providers/real/bailian-feedback.provider.ts`    | 新增阿里云百炼 provider，通过 `AI_FEEDBACK_PROVIDER=bailian` 启用；默认 `BAILIAN_BASE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1`、`BAILIAN_MODEL=qwen-plus`（生产可显式指定 `qwen3.6-plus`）；走 OpenAI Chat Completions 兼容接口 `/chat/completions`；复用 OpenAI-compatible 基类中的 prompt、严格 JSON 协议、字段白名单、`<=2` 闸门、重试、超时和错误映射；日志 provider 字段为 `bailian`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| OpenAI Provider（占位） | `providers/real/openai-feedback.provider.ts`     | 已同步统一 context 契约签名，但仍为占位实现（调用直接抛未实现错误）                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
 
 ## 4) 关键链路概览（隔离口径）
 
@@ -280,6 +304,7 @@ AI Provider 错误码（`ai-feedback-provider.error-codes.ts`）：
 - AI feedback provider 契约已统一为 `analyzeSubmission(context: AiSubmissionAnalysisContext)`；`AiFeedbackProcessor` 在消费 job 时会先读取 submission，再按 `submission.taskId` 查询 task 并组装上下文后调用 provider（task 缺失进入失败链路）；主控约束已前移到 prompt/协议层（默认 1 条、必要时最多 2 条），processor compactor 继续作为轻量兜底。
 
 新增/变更产品能力（Z3、AA~AI、Z4~Z9 收口口径）：
+
 - 教师班级看板已关闭任务可见性契约（后端已完成，前端待后续阶段接入）：
 - `GET /api/classrooms/:id/dashboard` 默认只返回 `classroomTask.status=ACTIVE` 的任务，用作当前教学看板。
 - 教师班级看板默认教学统计只面向当前 Enrollment `ACTIVE` 学生：`studentsCount` 分母保持 ACTIVE 学生数，`distinctStudentsSubmitted/submissionsCount/lateSubmissionsCount/lateDistinctStudentsCount/lateStudentsTotal`、AI feedback 统计与 `topTags` 均只计入当前 ACTIVE 学生对应 submissions；已移除学生历史 submissions 保留在库中，但默认不进入看板统计。
@@ -375,6 +400,8 @@ AI Provider 错误码（`ai-feedback-provider.error-codes.ts`）：
   - `PATCH /api/users/me`：已落地可用；仅允许更新 `name/studentNo/employeeNo`。
   - `GET /api/users/me` 与 `PATCH /api/users/me` 返回口径一致，均不返回 `passwordHash`。
   - `POST /api/users/me/change-password`：已落地可用；需校验 `currentPassword`，`newPassword` 执行 trim 非空与长度校验，且不得与当前密码相同；成功后保留当前会话并失效其它历史会话。
+  - `POST /api/auth/forgot-password`：已落地可用；无论邮箱是否存在、用户是否允许登录，都返回通用成功提示；正常用户会收到 30 分钟有效的一次性重置链接。
+  - `POST /api/auth/reset-password`：已落地可用；验证 `tokenHash`、`expiresAt`、`usedAt` 和用户状态后更新 `passwordHash`，并清理该用户全部 sessions；不会自动登录。
 - P0 班级成员列表（已完成）：
   - `GET /api/classrooms/:id/students`
   - teacher owner 可访问；成员来源只认 Enrollment（`role=STUDENT`）；默认返回 ACTIVE，`includeRemoved=1/true` 时返回 ACTIVE+REMOVED；默认排序 `joinedAt desc, _id desc`；不读取 `classroom.studentIds`。
@@ -462,20 +489,24 @@ AI Provider 错误码（`ai-feedback-provider.error-codes.ts`）：
 ## 5) P0 后端补齐状态（交接边界）
 
 已完成（可供前端/BFF 正式接入）：
+
 - 用户资料字段补齐：`name/studentNo/employeeNo`。
 - `/api/users/me` 更新能力：`PATCH` 真实可用，且与 `GET` 返回口径一致。
 - 当前用户自助改密能力：`POST /api/users/me/change-password` 真实可用（旧密码校验 + 新密码校验 + 会话失效策略）。
+- 邮箱忘记密码/重置密码能力：`POST /api/auth/forgot-password` + `POST /api/auth/reset-password` 已可供后续前端忘记密码页接入。
 - 班级正式成员列表：`GET /api/classrooms/:id/students`（Enrollment ACTIVE SoT）。
 - 课堂任务实例提交列表：`GET /api/classrooms/:classroomId/tasks/:classroomTaskId/submissions`（`classroomTaskId` 隔离）。
 - 提交详情稳定读源：`GET /api/learning-tasks/submissions/:id`（用于 Teacher/Student submission detail 主视图读取，不再主要依赖 query 透传）。
 
 明确未完成（本阶段不包含）：
+
 - 产品化管理员批量导入用户能力（后台页面/管理接口/Excel 上传）。
 - 教师手工添加学生到班级。
 - 提交/成员列表高级筛选与全文搜索。
 - 额外导出能力（如提交列表 CSV）。
 
 运维脚本补充说明（非产品化后台能力）：
+
 - 脚本入口：`backend/scripts/import-users.ts`。
 - npm 用法：`npm run import-users -- --file="..." [--dry-run] [--reset-password]`。
 - 输入格式：仅支持 CSV（不支持 xlsx）。

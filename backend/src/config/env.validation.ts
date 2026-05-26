@@ -3,6 +3,14 @@ import Joi from 'joi';
 type EnvValidationInput = {
   AI_FEEDBACK_PROVIDER?: string;
   AI_FEEDBACK_REAL_ENABLED?: string;
+  MAIL_PROVIDER?: string;
+  MAIL_FROM?: string;
+  MAIL_FROM_NAME?: string;
+  SMTP_HOST?: string;
+  SMTP_PORT?: number;
+  SMTP_SECURE?: string;
+  SMTP_USER?: string;
+  SMTP_PASS?: string;
   OPENROUTER_API_KEY?: string;
   BAILIAN_API_KEY?: string;
 } & Record<string, unknown>;
@@ -16,6 +24,16 @@ export const envValidationSchema = Joi.object({
   FRONTEND_URL: Joi.string()
     .uri({ scheme: [/https?/] })
     .default('http://localhost:3000'),
+  MAIL_PROVIDER: Joi.string().valid('log', 'smtp').default('log'),
+  MAIL_FROM: Joi.string()
+    .email({ tlds: { allow: false } })
+    .required(),
+  MAIL_FROM_NAME: Joi.string().trim().min(1).default('EduForge'),
+  SMTP_HOST: Joi.string().allow(''),
+  SMTP_PORT: Joi.number().integer().min(1).max(65535).default(465),
+  SMTP_SECURE: Joi.string().valid('true', 'false').default('true'),
+  SMTP_USER: Joi.string().allow(''),
+  SMTP_PASS: Joi.string().allow(''),
   MONGO_URI: Joi.string()
     .pattern(/^mongodb(\+srv)?:\/\/\S+$/)
     .required()
@@ -98,6 +116,30 @@ export const envValidationSchema = Joi.object({
     }
     if (provider === 'bailian' && realEnabled && !hasBailianApiKey) {
       return helpers.error('any.required', { missingKey: 'BAILIAN_API_KEY' });
+    }
+    const mailProvider =
+      typeof value.MAIL_PROVIDER === 'string'
+        ? value.MAIL_PROVIDER.toLowerCase()
+        : 'log';
+    const hasSmtpHost =
+      typeof value.SMTP_HOST === 'string' && value.SMTP_HOST.trim().length > 0;
+    const hasSmtpUser =
+      typeof value.SMTP_USER === 'string' && value.SMTP_USER.trim().length > 0;
+    const hasSmtpPass =
+      typeof value.SMTP_PASS === 'string' && value.SMTP_PASS.trim().length > 0;
+    const hasMailFrom =
+      typeof value.MAIL_FROM === 'string' && value.MAIL_FROM.trim().length > 0;
+    if (mailProvider === 'smtp' && !hasSmtpHost) {
+      return helpers.error('any.required', { missingKey: 'SMTP_HOST' });
+    }
+    if (mailProvider === 'smtp' && !hasSmtpUser) {
+      return helpers.error('any.required', { missingKey: 'SMTP_USER' });
+    }
+    if (mailProvider === 'smtp' && !hasSmtpPass) {
+      return helpers.error('any.required', { missingKey: 'SMTP_PASS' });
+    }
+    if (mailProvider === 'smtp' && !hasMailFrom) {
+      return helpers.error('any.required', { missingKey: 'MAIL_FROM' });
     }
     return value;
   })

@@ -4,43 +4,53 @@
 
 ## App
 
-| Method | Path | 用途 |
-|---|---|---|
-| GET | `/api` | 基础连通性返回（Hello World）。 |
+| Method | Path   | 用途                            |
+| ------ | ------ | ------------------------------- |
+| GET    | `/api` | 基础连通性返回（Hello World）。 |
 
 ## Auth
 
-| Method | Path | 用途 |
-|---|---|---|
-| POST | `/api/auth/login` | 登录并写入 `ef_session` Cookie（HttpOnly）。 |
-| POST | `/api/auth/logout` | 注销并清除 `ef_session` Cookie。 |
+| Method | Path                        | 用途                                                       |
+| ------ | --------------------------- | ---------------------------------------------------------- |
+| POST   | `/api/auth/login`           | 登录并写入 `ef_session` Cookie（HttpOnly）。               |
+| POST   | `/api/auth/logout`          | 注销并清除 `ef_session` Cookie。                           |
+| POST   | `/api/auth/forgot-password` | 提交邮箱并触发一次性密码重置邮件（固定返回通用成功提示）。 |
+| POST   | `/api/auth/reset-password`  | 使用一次性 token 设置新密码，并清理该用户全部 sessions。   |
+
+Notes:
+
+- `POST /api/auth/forgot-password`：公开接口；请求体 `email` 会 trim + email 校验；无论邮箱是否存在、用户是否允许登录，统一返回 `{"message":"如果邮箱存在，我们将发送密码重置邮件。"}`；只有 `status=active` 用户会真实创建 reset token 并发邮件。
+- `POST /api/auth/reset-password`：公开接口；请求体 `token/newPassword`，其中 `newPassword` trim 后需满足至少 8 位；成功返回 `{"message":"密码已重置，请使用新密码登录。"}`；不会自动登录，也不会写 cookie。
 
 ## Users
 
-| Method | Path | 用途 |
-|---|---|---|
-| GET | `/api/users/me` | 读取当前会话用户公开信息。 |
-| PATCH | `/api/users/me` | 更新当前会话用户公开资料（仅 `name/studentNo/employeeNo`）。 |
-| POST | `/api/users/me/change-password` | 当前登录用户自助修改密码（需校验 `currentPassword`）。 |
+| Method | Path                            | 用途                                                         |
+| ------ | ------------------------------- | ------------------------------------------------------------ |
+| GET    | `/api/users/me`                 | 读取当前会话用户公开信息。                                   |
+| PATCH  | `/api/users/me`                 | 更新当前会话用户公开资料（仅 `name/studentNo/employeeNo`）。 |
+| POST   | `/api/users/me/change-password` | 当前登录用户自助修改密码（需校验 `currentPassword`）。       |
 
 Notes:
+
 - `GET /api/users/me` 与 `PATCH /api/users/me` 返回口径一致（公开字段），不返回 `passwordHash`。
 - `PATCH /api/users/me` 仅允许更新 `name/studentNo/employeeNo`，基于当前登录会话识别用户。
 - `POST /api/users/me/change-password` 请求体：`currentPassword/newPassword`；`newPassword` 会执行 trim 非空、长度与“不得与当前密码相同”校验；改密成功后保留当前会话并失效该用户其它历史会话。
+- 前端待接入说明：后续忘记密码页应调用 `POST /api/auth/forgot-password`，重置密码页应调用 `POST /api/auth/reset-password`。
 
 ## Courses
 
-| Method | Path | 用途 |
-|---|---|---|
-| POST | `/api/courses` | 教师创建课程。 |
-| PATCH | `/api/courses/:id` | 教师更新课程（含 `status` 归档/恢复）。 |
-| DELETE | `/api/courses/:id` | 教师删除空课程（仅无班级引用时允许）。 |
-| GET | `/api/courses` | 教师分页查询课程。 |
-| GET | `/api/courses/:id` | 教师获取单课程详情。 |
-| GET | `/api/courses/:courseId/overview` | 课程总览（AB）。 |
-| POST | `/api/courses/:id/archive` | 归档课程。 |
+| Method | Path                              | 用途                                    |
+| ------ | --------------------------------- | --------------------------------------- |
+| POST   | `/api/courses`                    | 教师创建课程。                          |
+| PATCH  | `/api/courses/:id`                | 教师更新课程（含 `status` 归档/恢复）。 |
+| DELETE | `/api/courses/:id`                | 教师删除空课程（仅无班级引用时允许）。  |
+| GET    | `/api/courses`                    | 教师分页查询课程。                      |
+| GET    | `/api/courses/:id`                | 教师获取单课程详情。                    |
+| GET    | `/api/courses/:courseId/overview` | 课程总览（AB）。                        |
+| POST   | `/api/courses/:id/archive`        | 归档课程。                              |
 
 Notes:
+
 - `/api/courses/:courseId/overview` Query: `window, sort, order, page, limit`。
 - `/api/courses/:courseId/overview` `limit` DTO 最大上限已从 `50` 调整为 `100`，默认 `limit=20` 保持不变；用于匹配前端课程总览页显式请求 `limit=100` 的稳定契约。
 - `/api/courses/:courseId/overview` `sort` 兼容字段：`studentsCount/submissionRate/aiSuccessRate/pendingJobs/failedJobs`，并新增 `overallSubmissionCoverage`。
@@ -59,25 +69,26 @@ Notes:
 
 ## Classrooms
 
-| Method | Path | 用途 |
-|---|---|---|
-| POST | `/api/classrooms` | 教师创建班级并分配 `joinCode`。 |
-| PATCH | `/api/classrooms/:id` | 教师更新班级（含 `status` 归档/恢复）。 |
-| DELETE | `/api/classrooms/:id` | 教师删除空班级（仅无任务且无 enrollment 历史时允许）。 |
-| GET | `/api/classrooms` | 教师分页查询班级。 |
-| POST | `/api/classrooms/join` | 学生通过 `joinCode` 入班。 |
-| GET | `/api/classrooms/mine/dashboard` | 学生学习看板（按 `classroomTaskId` 聚合个人提交与 AI 状态；Query `includeHistorical` 可回看当前 ACTIVE 班级下历史任务）。 |
-| GET | `/api/classrooms/:id/dashboard` | 教师班级看板（按 `classroomTaskId` 聚合提交/AI 状态/tags；Query `includeClosedTasks` 可显式包含已关闭任务）。 |
-| GET | `/api/classrooms/:classroomId/weekly-report` | 班级周报（AA）。 |
-| GET | `/api/classrooms/:classroomId/process-assessment` | 过程性评价（Z6）。 |
-| GET | `/api/classrooms/:classroomId/process-assessment.csv` | 过程性评价 CSV（Z6）。 |
-| GET | `/api/classrooms/:classroomId/export/snapshot` | 教学数据快照导出（Z9）。 |
-| GET | `/api/classrooms/:id` | 获取班级详情（teacher owner 或 student member）。 |
-| GET | `/api/classrooms/:id/students` | 教师分页查看班级正式成员列表（默认 Enrollment ACTIVE；`includeRemoved=1/true` 可包含 REMOVED）。 |
-| POST | `/api/classrooms/:id/archive` | 教师归档班级。 |
-| POST | `/api/classrooms/:id/students/:uid/remove` | 教师移除学生。 |
+| Method | Path                                                  | 用途                                                                                                                      |
+| ------ | ----------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------- |
+| POST   | `/api/classrooms`                                     | 教师创建班级并分配 `joinCode`。                                                                                           |
+| PATCH  | `/api/classrooms/:id`                                 | 教师更新班级（含 `status` 归档/恢复）。                                                                                   |
+| DELETE | `/api/classrooms/:id`                                 | 教师删除空班级（仅无任务且无 enrollment 历史时允许）。                                                                    |
+| GET    | `/api/classrooms`                                     | 教师分页查询班级。                                                                                                        |
+| POST   | `/api/classrooms/join`                                | 学生通过 `joinCode` 入班。                                                                                                |
+| GET    | `/api/classrooms/mine/dashboard`                      | 学生学习看板（按 `classroomTaskId` 聚合个人提交与 AI 状态；Query `includeHistorical` 可回看当前 ACTIVE 班级下历史任务）。 |
+| GET    | `/api/classrooms/:id/dashboard`                       | 教师班级看板（按 `classroomTaskId` 聚合提交/AI 状态/tags；Query `includeClosedTasks` 可显式包含已关闭任务）。             |
+| GET    | `/api/classrooms/:classroomId/weekly-report`          | 班级周报（AA）。                                                                                                          |
+| GET    | `/api/classrooms/:classroomId/process-assessment`     | 过程性评价（Z6）。                                                                                                        |
+| GET    | `/api/classrooms/:classroomId/process-assessment.csv` | 过程性评价 CSV（Z6）。                                                                                                    |
+| GET    | `/api/classrooms/:classroomId/export/snapshot`        | 教学数据快照导出（Z9）。                                                                                                  |
+| GET    | `/api/classrooms/:id`                                 | 获取班级详情（teacher owner 或 student member）。                                                                         |
+| GET    | `/api/classrooms/:id/students`                        | 教师分页查看班级正式成员列表（默认 Enrollment ACTIVE；`includeRemoved=1/true` 可包含 REMOVED）。                          |
+| POST   | `/api/classrooms/:id/archive`                         | 教师归档班级。                                                                                                            |
+| POST   | `/api/classrooms/:id/students/:uid/remove`            | 教师移除学生。                                                                                                            |
 
 Notes:
+
 - `/api/classrooms/:classroomId/weekly-report` Query: `window, includeRiskStudentIds`。
 - `/api/classrooms/:classroomId/weekly-report` 权限：teacher only，`classroom.teacherId === currentUserId`；统计隔离按 `classroomId + classroomTaskId`，`studentsCount/risk` 仅基于 Enrollment ACTIVE。
 - `/api/classrooms/:classroomId/process-assessment` Query: `window, page, limit, sort, order`；teacher only；Enrollment-only；返回聚合结果，不返回敏感字段。
@@ -99,22 +110,23 @@ Notes:
 
 ## Classroom Tasks（Classrooms 子资源）
 
-| Method | Path | 用途 |
-|---|---|---|
-| POST | `/api/classrooms/:id/tasks` | 教师将已发布 Task 发布到班级（生成 ClassroomTask 实例）。 |
-| GET | `/api/classrooms/:id/publishable-task-templates` | 班级发布候选模板分页查询（内置可见性/PUBLISHED/已发布去重规则）。 |
-| GET | `/api/classrooms/:id/tasks` | 教师/学生查看班级任务列表。 |
-| GET | `/api/classrooms/:id/tasks/:classroomTaskId` | 教师/学生查看班级任务详情。 |
-| PATCH | `/api/classrooms/:classroomId/tasks/:classroomTaskId` | 教师更新课堂任务实例级发布参数（截止时间/迟交/尝试次数）。 |
-| PATCH | `/api/classrooms/:classroomId/tasks/:classroomTaskId/status` | 教师更新课堂任务实例生命周期状态（关闭/撤回/恢复提交）。 |
-| POST | `/api/classrooms/:classroomId/tasks/:classroomTaskId/submissions` | 班级发布实例提交入口（绑定 `classroomTaskId`）。 |
-| GET | `/api/classrooms/:classroomId/tasks/:classroomTaskId/submissions` | 教师分页查看课堂任务实例提交列表（仅 `classroomTaskId`）。 |
-| GET | `/api/classrooms/:classroomId/tasks/:classroomTaskId/my-task-detail` | 学生端任务聚合详情（Z3）。 |
-| GET | `/api/classrooms/:classroomId/tasks/:classroomTaskId/learning-trajectory` | 学习轨迹（Z4）。 |
-| GET | `/api/classrooms/:classroomId/tasks/:classroomTaskId/review-pack` | 课堂复盘包（Z5）。 |
-| GET | `/api/classrooms/:classroomId/tasks/:classroomTaskId/ai-metrics` | AI 运行指标报表（AI）。 |
+| Method | Path                                                                      | 用途                                                              |
+| ------ | ------------------------------------------------------------------------- | ----------------------------------------------------------------- |
+| POST   | `/api/classrooms/:id/tasks`                                               | 教师将已发布 Task 发布到班级（生成 ClassroomTask 实例）。         |
+| GET    | `/api/classrooms/:id/publishable-task-templates`                          | 班级发布候选模板分页查询（内置可见性/PUBLISHED/已发布去重规则）。 |
+| GET    | `/api/classrooms/:id/tasks`                                               | 教师/学生查看班级任务列表。                                       |
+| GET    | `/api/classrooms/:id/tasks/:classroomTaskId`                              | 教师/学生查看班级任务详情。                                       |
+| PATCH  | `/api/classrooms/:classroomId/tasks/:classroomTaskId`                     | 教师更新课堂任务实例级发布参数（截止时间/迟交/尝试次数）。        |
+| PATCH  | `/api/classrooms/:classroomId/tasks/:classroomTaskId/status`              | 教师更新课堂任务实例生命周期状态（关闭/撤回/恢复提交）。          |
+| POST   | `/api/classrooms/:classroomId/tasks/:classroomTaskId/submissions`         | 班级发布实例提交入口（绑定 `classroomTaskId`）。                  |
+| GET    | `/api/classrooms/:classroomId/tasks/:classroomTaskId/submissions`         | 教师分页查看课堂任务实例提交列表（仅 `classroomTaskId`）。        |
+| GET    | `/api/classrooms/:classroomId/tasks/:classroomTaskId/my-task-detail`      | 学生端任务聚合详情（Z3）。                                        |
+| GET    | `/api/classrooms/:classroomId/tasks/:classroomTaskId/learning-trajectory` | 学习轨迹（Z4）。                                                  |
+| GET    | `/api/classrooms/:classroomId/tasks/:classroomTaskId/review-pack`         | 课堂复盘包（Z5）。                                                |
+| GET    | `/api/classrooms/:classroomId/tasks/:classroomTaskId/ai-metrics`          | AI 运行指标报表（AI）。                                           |
 
 Notes:
+
 - `GET /api/classrooms/:id/publishable-task-templates`：teacher only + owner only（非 owner 返回 `404`）；固定只返回 `status=PUBLISHED` 且当前教师可见模板（自己私有 + 自己共享 + 他人共享）；自动排除当前班级已发布过的 `taskId`；支持 query `courseLabel, onlyMine, knowledgeModule, stage, page, limit`；当请求未显式传 `courseLabel` 且当前班级课程存在 `courseLabel` 时，排序优先课程分类匹配模板，再按 `updatedAt desc, createdAt desc`；每个 item 返回 `publisher:{id,name?}|null`，表示候选模板创建者/发布者摘要，只含 `id/name`，不暴露完整 User。
 - 索引口径：`Task` 已补发布候选查询复合索引（`onlyMine` 分支与共享可见分支各一组），用于支撑 `status/courseLabel/knowledgeModule/stage + updatedAt/createdAt` 的组合过滤与排序。
 - `ClassroomTask.status` 生命周期：`ACTIVE | CLOSED | RECALLED`；新发布默认 `ACTIVE`；允许 `ACTIVE -> CLOSED`、`ACTIVE -> RECALLED`、`CLOSED -> ACTIVE`；其中撤回要求“无提交”。
@@ -132,27 +144,28 @@ Notes:
 
 ## Learning Tasks
 
-| Method | Path | 用途 |
-|---|---|---|
-| POST | `/api/learning-tasks/tasks` | 创建任务。 |
-| PATCH | `/api/learning-tasks/tasks/:id` | 更新任务。 |
-| POST | `/api/learning-tasks/tasks/:id/publish` | 发布任务。 |
-| POST | `/api/learning-tasks/tasks/:id/archive` | 将作者自己的已发布任务模板归档。 |
-| POST | `/api/learning-tasks/tasks/:id/restore` | 兼容保留入口；稳定返回 400，不再恢复归档模板。 |
-| GET | `/api/learning-tasks/tasks` | 分页查询任务。 |
-| GET | `/api/learning-tasks/tasks/:id` | 任务详情。 |
-| POST | `/api/learning-tasks/tasks/:id/submissions` | 通用任务提交入口（可无 `classroomTaskId`）。 |
-| GET | `/api/learning-tasks/tasks/:id/submissions/mine` | 学生查看自己的提交与 `aiFeedbackStatus`。 |
-| GET | `/api/learning-tasks/tasks/:id/submissions` | 教师分页查看某任务提交。 |
-| GET | `/api/learning-tasks/submissions/:id` | 提交详情稳定读源（学生本人或有权教师可见）。 |
-| POST | `/api/learning-tasks/submissions/:id/feedback` | 教师新增反馈（AI/TEACHER/SYSTEM 结构统一）。 |
-| PATCH | `/api/learning-tasks/submissions/:submissionId/feedback/:feedbackId` | 教师修改自己有权管理的 TEACHER 来源反馈。 |
-| GET | `/api/learning-tasks/submissions/:id/feedback` | 提交反馈列表（学生本人或任务教师可见）。 |
-| POST | `/api/learning-tasks/submissions/:submissionId/ai-feedback/request` | 手工触发 AI 入队请求（幂等）。 |
-| GET | `/api/learning-tasks/tasks/:id/stats` | 任务统计（提交数、去重学生数、top tags）。 |
-| GET | `/api/learning-tasks/tasks/:id/reports/common-issues` | common-issues 报表（topTags/topTypes/examples）。 |
+| Method | Path                                                                 | 用途                                              |
+| ------ | -------------------------------------------------------------------- | ------------------------------------------------- |
+| POST   | `/api/learning-tasks/tasks`                                          | 创建任务。                                        |
+| PATCH  | `/api/learning-tasks/tasks/:id`                                      | 更新任务。                                        |
+| POST   | `/api/learning-tasks/tasks/:id/publish`                              | 发布任务。                                        |
+| POST   | `/api/learning-tasks/tasks/:id/archive`                              | 将作者自己的已发布任务模板归档。                  |
+| POST   | `/api/learning-tasks/tasks/:id/restore`                              | 兼容保留入口；稳定返回 400，不再恢复归档模板。    |
+| GET    | `/api/learning-tasks/tasks`                                          | 分页查询任务。                                    |
+| GET    | `/api/learning-tasks/tasks/:id`                                      | 任务详情。                                        |
+| POST   | `/api/learning-tasks/tasks/:id/submissions`                          | 通用任务提交入口（可无 `classroomTaskId`）。      |
+| GET    | `/api/learning-tasks/tasks/:id/submissions/mine`                     | 学生查看自己的提交与 `aiFeedbackStatus`。         |
+| GET    | `/api/learning-tasks/tasks/:id/submissions`                          | 教师分页查看某任务提交。                          |
+| GET    | `/api/learning-tasks/submissions/:id`                                | 提交详情稳定读源（学生本人或有权教师可见）。      |
+| POST   | `/api/learning-tasks/submissions/:id/feedback`                       | 教师新增反馈（AI/TEACHER/SYSTEM 结构统一）。      |
+| PATCH  | `/api/learning-tasks/submissions/:submissionId/feedback/:feedbackId` | 教师修改自己有权管理的 TEACHER 来源反馈。         |
+| GET    | `/api/learning-tasks/submissions/:id/feedback`                       | 提交反馈列表（学生本人或任务教师可见）。          |
+| POST   | `/api/learning-tasks/submissions/:submissionId/ai-feedback/request`  | 手工触发 AI 入队请求（幂等）。                    |
+| GET    | `/api/learning-tasks/tasks/:id/stats`                                | 任务统计（提交数、去重学生数、top tags）。        |
+| GET    | `/api/learning-tasks/tasks/:id/reports/common-issues`                | common-issues 报表（topTags/topTypes/examples）。 |
 
 Notes:
+
 - `Task.courseLabel`：可选字符串字段（单选课程分类），白名单来源 `backend/src/modules/learning-tasks/task-course-labels.constants.ts`；非 `Course` 外键，不参与权限与发布约束，不限制跨课程复用。
 - `Task.visibility`：模板可见性字段，值域 `PRIVATE | SHARED`（白名单来源 `backend/src/modules/learning-tasks/task-template-visibility.constants.ts`）；新建默认 `PRIVATE`；该字段只影响“读可见性”，不改变作者权限边界。
 - `POST/PATCH/GET /api/learning-tasks/tasks*`：入参与出参已支持 `courseLabel` 与 `visibility`；旧任务缺省 `visibility` 兼容按 `SHARED` 处理。
@@ -182,14 +195,15 @@ Notes:
 ## AI Feedback Debug / Ops（门禁接口）
 
 门禁条件：
+
 - 全局 `SessionAuthGuard`（非 `@Public` 路由必须登录）。
 - 路由显式 `AiFeedbackDebugEnabledGuard + RolesGuard`。
 - `AI_FEEDBACK_DEBUG_ENABLED !== 'true'` 时返回 404（优先于 403）。
 
-| Method | Path | 用途 |
-|---|---|---|
-| GET | `/api/learning-tasks/ai-feedback/jobs` | 查询 job 队列状态（含失败与重试视角）。 |
-| POST | `/api/learning-tasks/ai-feedback/jobs/process-once` | 手动执行一次处理批次（用于调试/运维）。 |
+| Method | Path                                                | 用途                                    |
+| ------ | --------------------------------------------------- | --------------------------------------- |
+| GET    | `/api/learning-tasks/ai-feedback/jobs`              | 查询 job 队列状态（含失败与重试视角）。 |
+| POST   | `/api/learning-tasks/ai-feedback/jobs/process-once` | 手动执行一次处理批次（用于调试/运维）。 |
 
 ## 聚合口径特别说明
 

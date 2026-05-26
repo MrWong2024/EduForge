@@ -13,6 +13,7 @@
 说明：本节命令仅作为人类手工运行示例，不作为 Codex 执行步骤要求。
 
 全量 e2e：
+
 ```powershell
 cd backend
 $env:NODE_ENV="test"
@@ -21,12 +22,14 @@ npm run test:e2e
 ```
 
 单个 spec（示例）：
+
 ```powershell
 cd backend
 $env:NODE_ENV="test"
 Remove-Item Env:KEEP_E2E_DB -ErrorAction SilentlyContinue
 npm run test:e2e -- backend/test/learning-tasks.ai-feedback.ops.e2e-spec.ts
 ```
+
 ```powershell
 cd backend
 $env:NODE_ENV="test"
@@ -36,24 +39,28 @@ npm run test:e2e -- backend/test/learning-tasks.ai-feedback.openrouter-context.e
 ```
 
 常用单个 spec 入口（新增能力）：
+
 ```powershell
 cd backend
 $env:NODE_ENV="test"
 Remove-Item Env:KEEP_E2E_DB -ErrorAction SilentlyContinue
 npm run test:e2e -- backend/test/classroom-learning-trajectory.e2e-spec.ts
 ```
+
 ```powershell
 cd backend
 $env:NODE_ENV="test"
 Remove-Item Env:KEEP_E2E_DB -ErrorAction SilentlyContinue
 npm run test:e2e -- backend/test/classroom-review-pack.e2e-spec.ts
 ```
+
 ```powershell
 cd backend
 $env:NODE_ENV="test"
 Remove-Item Env:KEEP_E2E_DB -ErrorAction SilentlyContinue
 npm run test:e2e -- backend/test/classroom-process-assessment.e2e-spec.ts
 ```
+
 ```powershell
 cd backend
 $env:NODE_ENV="test"
@@ -62,13 +69,16 @@ npm run test:e2e -- backend/test/classroom-export-snapshot.e2e-spec.ts
 ```
 
 推荐默认联调模式（结论）：
+
 - `Stub + worker`（用于本地开发 / 前后端联调 / AI 闭环验证）。
 - 最小关键 env：`AI_FEEDBACK_PROVIDER=stub`、`AI_FEEDBACK_REAL_ENABLED=false`、`AI_FEEDBACK_WORKER_ENABLED=true`。
 - worker 默认轮询间隔 `10000ms`（可由 `AI_FEEDBACK_WORKER_INTERVAL_MS` 覆盖）；空跑 tick（processed/succeeded/failed/dead 全 0）默认不输出结果 DEBUG 日志。
 - 产品级 request 只负责创建/确保 `PENDING` job，worker 负责消费到 `SUCCEEDED`。
 - `process-once` 仅用于 debug/ops 辅助，不作为默认交付运行模式。
+- 邮箱重置密码默认联调模式：`MAIL_PROVIDER=log`，通过日志观察 reset link；测试禁止真实连接 SMTP。
 
 ai-feedback e2e 入口：
+
 - `learning-tasks.ai-feedback.ops.e2e-spec.ts`
 - `learning-tasks.ai-feedback.ops.debug-off.e2e-spec.ts`
 - `learning-tasks.ai-feedback.guards.e2e-spec.ts`
@@ -76,6 +86,7 @@ ai-feedback e2e 入口：
 - `learning-tasks.ai-feedback.openrouter-context.e2e-spec.ts`
 
 本地调试保留数据：
+
 ```powershell
 cd backend
 $env:NODE_ENV="test"
@@ -86,6 +97,13 @@ npm run test:e2e -- backend/test/classroom-learning-loop.e2e-spec.ts
 ## 3) 关键 e2e 文件与覆盖点
 
 必须关注：
+
+- `backend/src/modules/auth/services/password-reset.service.spec.ts`
+  - 覆盖：`forgot-password` 防邮箱枚举、只对可登录用户建 token、旧 token 失效、mail 失败补偿、`reset-password` 的无效/过期/已使用 token 拒绝，以及成功改密后清理 sessions。
+- `backend/src/modules/mail/mail.service.spec.ts`
+  - 覆盖：`MAIL_PROVIDER=log` 不真实发信、`MAIL_PROVIDER=smtp` 的 transporter 组装、`from` 格式和缺失 SMTP 配置 fail-fast。
+- `backend/src/modules/auth/controllers/auth.controller.spec.ts`
+  - 覆盖：`ForgotPasswordDto` / `ResetPasswordDto` 的 trim + 校验，controller 到 password reset service 的参数传递。
 - `backend/test/classroom-learning-loop.e2e-spec.ts`
   - 覆盖：课程/班级/任务发布链路、学生入班与提交、`process-once`、教师反馈、`common-issues` 报表回归。
 - `backend/test/classrooms.ai-metrics.e2e-spec.ts`
@@ -154,6 +172,7 @@ npm run test:e2e -- backend/test/classroom-learning-loop.e2e-spec.ts
   - 重要性：保证导出体积保护与敏感字段禁出策略。
 
 建议同时关注：
+
 - submission detail 主视图回归建议成对验证：`GET /api/learning-tasks/submissions/:id` 与 `GET /api/learning-tasks/submissions/:id/feedback`，避免只验 feedback 而漏掉 detail 读源。
 - `backend/test/classroom-dashboard-isolation.e2e-spec.ts`：跨班同 task 的 `classroomTaskId` 隔离口径。
 - `backend/test/classroom-dashboard.e2e-spec.ts`：教师/学生看板与 `aiFeedbackStatus` 变化。
@@ -162,40 +181,45 @@ npm run test:e2e -- backend/test/classroom-learning-loop.e2e-spec.ts
 
 ### 新增能力覆盖矩阵（Z3~Z9）
 
-| 能力 | 接口 | 对应 e2e 文件 |
-|---|---|---|
-| Z3 my-task-detail | `GET /api/classrooms/:classroomId/tasks/:classroomTaskId/my-task-detail` | `backend/test/classroom-student-task-detail.e2e-spec.ts` |
-| AA weekly-report | `GET /api/classrooms/:classroomId/weekly-report` | `backend/test/classroom-weekly-report.e2e-spec.ts` |
-| AB course overview | `GET /api/courses/:courseId/overview` | `backend/test/course-overview.e2e-spec.ts` |
-| Z4 learning-trajectory | `GET /api/classrooms/:classroomId/tasks/:classroomTaskId/learning-trajectory` | `backend/test/classroom-learning-trajectory.e2e-spec.ts` |
-| Z5 review-pack | `GET /api/classrooms/:classroomId/tasks/:classroomTaskId/review-pack` | `backend/test/classroom-review-pack.e2e-spec.ts` |
-| Z6 process-assessment + CSV | `GET /api/classrooms/:classroomId/process-assessment` + `GET /api/classrooms/:classroomId/process-assessment.csv` | `backend/test/classroom-process-assessment.e2e-spec.ts` |
-| Z7 deadline/late | `POST /api/classrooms/:classroomId/tasks/:classroomTaskId/submissions`（同时回归 late 字段在 weekly/trajectory/review-pack/process-assessment/snapshot 等聚合接口中的传播） | `backend/test/classroom-task-deadline.e2e-spec.ts` |
-| Z9 export snapshot | `GET /api/classrooms/:classroomId/export/snapshot` | `backend/test/classroom-export-snapshot.e2e-spec.ts` |
-| Enrollment-only regression | 成员授权/统计相关接口（Enrollment-only 回归） | `backend/test/enrollments.authority-and-legacy.e2e-spec.ts`、`backend/test/enrollment-only.regression.e2e-spec.ts` |
+| 能力                        | 接口                                                                                                                                                                        | 对应 e2e 文件                                                                                                      |
+| --------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------ |
+| Z3 my-task-detail           | `GET /api/classrooms/:classroomId/tasks/:classroomTaskId/my-task-detail`                                                                                                    | `backend/test/classroom-student-task-detail.e2e-spec.ts`                                                           |
+| AA weekly-report            | `GET /api/classrooms/:classroomId/weekly-report`                                                                                                                            | `backend/test/classroom-weekly-report.e2e-spec.ts`                                                                 |
+| AB course overview          | `GET /api/courses/:courseId/overview`                                                                                                                                       | `backend/test/course-overview.e2e-spec.ts`                                                                         |
+| Z4 learning-trajectory      | `GET /api/classrooms/:classroomId/tasks/:classroomTaskId/learning-trajectory`                                                                                               | `backend/test/classroom-learning-trajectory.e2e-spec.ts`                                                           |
+| Z5 review-pack              | `GET /api/classrooms/:classroomId/tasks/:classroomTaskId/review-pack`                                                                                                       | `backend/test/classroom-review-pack.e2e-spec.ts`                                                                   |
+| Z6 process-assessment + CSV | `GET /api/classrooms/:classroomId/process-assessment` + `GET /api/classrooms/:classroomId/process-assessment.csv`                                                           | `backend/test/classroom-process-assessment.e2e-spec.ts`                                                            |
+| Z7 deadline/late            | `POST /api/classrooms/:classroomId/tasks/:classroomTaskId/submissions`（同时回归 late 字段在 weekly/trajectory/review-pack/process-assessment/snapshot 等聚合接口中的传播） | `backend/test/classroom-task-deadline.e2e-spec.ts`                                                                 |
+| Z9 export snapshot          | `GET /api/classrooms/:classroomId/export/snapshot`                                                                                                                          | `backend/test/classroom-export-snapshot.e2e-spec.ts`                                                               |
+| Enrollment-only regression  | 成员授权/统计相关接口（Enrollment-only 回归）                                                                                                                               | `backend/test/enrollments.authority-and-legacy.e2e-spec.ts`、`backend/test/enrollment-only.regression.e2e-spec.ts` |
 
 ## 4) token/session 获取方式
 
 事实口径：
+
 - 登录接口：`POST /api/auth/login`。
 - 登录成功后由服务端写 `ef_session` Cookie（HttpOnly）。
 - Guard：全局 `SessionAuthGuard` 从 cookie 读 token，校验后写入 `req.user={id,roles}`。
 
 测试实践：
+
 - e2e 使用 `supertest` 的 `request.agent()` 持久化 cookie session。
 - 常见流程：先 `agent.post('/api/auth/login')`，后续复用同一 `agent` 访问受保护接口。
 
 ## 5) Mock server（存在且已用于 e2e）
 
 来源：
+
 - `backend/test/learning-tasks.ai-feedback.guards.e2e-spec.ts` 的 `startMockOpenRouter`
 - `backend/test/learning-tasks.ai-feedback.openrouter-context.e2e-spec.ts` 的 `startMockOpenRouter`
-补充：`openrouter-context` spec 的 mock server 会捕获请求体（`messages`），用于断言 task 上下文片段与“默认简体中文输出”prompt 约束。多数聚合回归可在 stub/mock 下完成；provider 实链路再启用 REAL_AI_E2E。
+  补充：`openrouter-context` spec 的 mock server 会捕获请求体（`messages`），用于断言 task 上下文片段与“默认简体中文输出”prompt 约束。多数聚合回归可在 stub/mock 下完成；provider 实链路再启用 REAL_AI_E2E。
 
 路由：
+
 - `POST /chat/completions`
 
 返回 JSON 摘要示例（短）：
+
 ```json
 {
   "choices": [
@@ -213,6 +237,7 @@ npm run test:e2e -- backend/test/classroom-learning-loop.e2e-spec.ts
 补充：Z3~Z9 新聚合 e2e（含 attempt-based 与 ai-metrics）默认不要求真实外部调用，可在 stub/mock 语境下回归；仅在需要覆盖 provider 实链路时再启用本节配置。
 
 Mock OpenRouter（E2E 常规）：
+
 ```powershell
 cd backend
 $env:NODE_ENV="test"
@@ -222,6 +247,7 @@ $env:OPENROUTER_API_KEY="test-key"
 $env:OPENROUTER_BASE_URL="http://127.0.0.1:<mock-port>"
 npm run test:e2e -- backend/test/learning-tasks.ai-feedback.guards.e2e-spec.ts
 ```
+
 ```powershell
 cd backend
 $env:NODE_ENV="test"
@@ -234,6 +260,7 @@ npm run test:e2e -- backend/test/learning-tasks.ai-feedback.openrouter-context.e
 ```
 
 Real OpenRouter（仅本地人工联调）：
+
 ```powershell
 cd backend
 $env:NODE_ENV="test"
@@ -245,9 +272,11 @@ npm run test:e2e -- backend/test/learning-tasks.ai-feedback.guards.e2e-spec.ts
 ```
 
 Debug 接口门禁（如需调用 jobs/process-once）：
+
 ```powershell
 $env:AI_FEEDBACK_DEBUG_ENABLED="true"
 ```
+
 补充：当 `AI_FEEDBACK_DEBUG_ENABLED=false` 时，`POST /api/learning-tasks/ai-feedback/jobs/process-once` 返回 `404` 属正常门禁行为。
 补充：`learning-tasks.ai-feedback.openrouter-context.e2e-spec.ts` 当前实践会设置 `AI_FEEDBACK_DEBUG_ENABLED=true` 作为测试辅助环境；该 spec 推进 job 通过 service 层 `aiFeedbackProcessor.processOnce(1)` 完成，并非依赖 debug 路由，也不改变“默认联调模式为 Stub + worker”的结论。
 

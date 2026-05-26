@@ -6,13 +6,17 @@ import {
 } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
-import * as bcrypt from 'bcryptjs';
 import { UpdateProfileDto } from '../dto/update-profile.dto';
 import { ChangePasswordDto } from '../dto/change-password.dto';
 import { User } from '../schemas/user.schema';
-import { Session } from '../../auth/schemas/session.schema';
 import { WithId } from '../../../common/types/with-id.type';
 import { WithTimestamps } from '../../../common/types/with-timestamps.type';
+import {
+  comparePassword,
+  hashPassword,
+  validateNewPassword,
+} from '../password.utils';
+import { SessionService } from '../../auth/services/session.service';
 
 type UserLean = User & WithId & WithTimestamps;
 type UserWithPassword = User &
@@ -34,13 +38,12 @@ type ProfileUpdatePayload = Partial<
 
 @Injectable()
 export class UsersService {
-  private readonly minPasswordLength = 8;
   private readonly publicUserProjection =
     'email roles status name studentNo employeeNo createdAt';
 
   constructor(
+    private readonly sessionService: SessionService,
     @InjectModel(User.name) private readonly userModel: Model<User>,
-    @InjectModel(Session.name) private readonly sessionModel: Model<Session>,
   ) {}
 
   async getMe(userId: string): Promise<PublicUserProfile> {
@@ -93,7 +96,7 @@ export class UsersService {
       throw new NotFoundException('User not found');
     }
 
-    const isCurrentPasswordValid = await bcrypt.compare(
+    const isCurrentPasswordValid = await comparePassword(
       dto.currentPassword,
       user.passwordHash,
     );
@@ -101,17 +104,9 @@ export class UsersService {
       throw new UnauthorizedException('Current password is incorrect');
     }
 
-    const nextPassword = dto.newPassword.trim();
-    if (!nextPassword) {
-      throw new BadRequestException('New password must not be blank');
-    }
-    if (nextPassword.length < this.minPasswordLength) {
-      throw new BadRequestException(
-        `New password must be at least ${this.minPasswordLength} characters`,
-      );
-    }
+    const nextPassword = validateNewPassword(dto.newPassword);
 
-    const isSameAsCurrent = await bcrypt.compare(
+    const isSameAsCurrent = await comparePassword(
       nextPassword,
       user.passwordHash,
     );
@@ -121,7 +116,7 @@ export class UsersService {
       );
     }
 
-    const nextPasswordHash = await bcrypt.hash(nextPassword, 10);
+    const nextPasswordHash = await hashPassword(nextPassword);
     await this.userModel
       .updateOne(
         { _id: user._id },
@@ -129,13 +124,7 @@ export class UsersService {
       )
       .exec();
 
-    if (currentSessionToken) {
-      await this.sessionModel
-        .deleteMany({ userId: user._id, token: { $ne: currentSessionToken } })
-        .exec();
-    } else {
-      await this.sessionModel.deleteMany({ userId: user._id }).exec();
-    }
+    await this.sessionService.clearUserSessions(user._id, currentSessionToken);
 
     return { ok: true };
   }

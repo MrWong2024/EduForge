@@ -5,6 +5,7 @@
 重点包含：`classrooms/enrollments/services/*` 与 `classrooms/classroom-tasks/services/*` 新增服务域。
 
 全局口径（SoT）：
+
 - 成员关系：`Enrollment(role=STUDENT,status=ACTIVE)` 是唯一权威来源（Enrollment-only）。
 - 隔离键：课堂分析/报表/复盘/导出统一按 `classroomTaskId` 隔离，禁止用 `taskId` 做跨班兜底聚合。
 - `Classroom.studentIds`：仅 legacy 输出/镜像字段；授权与统计读路径不依赖该字段。
@@ -30,25 +31,91 @@
 
 - Service: `backend/src/modules/auth/services/auth.service.ts`
 - Domain: `Cross-domain(Auth + Session)`
-- Actions: `login`, `logout`, `validate-session`, `trim-sessions`
+- Actions: `login`, `logout`, `validate-session`
 - I/O Shape:
   - In: `LoginDto(email,password)`, `token`
-  - Out: `sessionToken + user profile` | `void` | `userId|null`
+  - Out: `sessionToken + user profile` | `void` | `{ id, roles } | null`
 - Key Methods:
-  - `onModuleInit(): Promise<void> — called by Nest lifecycle to ensure session indexes exist`
   - `login(dto: LoginDto): Promise<{ sessionToken: string; user: Record<string, unknown> }> — called by auth login controller`
   - `logout(token?: string): Promise<void> — called by auth logout controller`
-  - `validateSession(token?: string): Promise<string | null> — called by SessionAuthGuard for request authentication`
+  - `validateSession(token?: string): Promise<{ id: string; roles: string[] } | null> — called by SessionAuthGuard for request authentication`
 - AuthZ Boundary: `login-only`（由 controller/guard 接入；不做角色鉴权）
 - Metrics/Isolation: 会话治理按 `userId`，与 `classroomTaskId` 无关
-- Consistency/Constraints: 会话上限 `N=5`；`expiresAt` + TTL 索引；模块启动执行 `ensureIndexes()`
-- Deps/Side Effects: `UserModel`, `SessionModel`, `bcrypt.compare`, `randomBytes`；写入/删除 sessions
-- Performance Notes: 旧会话清理用 `sort(createdAt:-1)+skip(N)` 批量删除
+- Consistency/Constraints: 登录凭据校验后通过 `SessionService` 创建 session；保持会话上限 `N=5`
+- Deps/Side Effects: `UserModel`, `SessionModel`, `SessionService`, 共享密码 helper；写入/删除 sessions
+- Performance Notes: session 创建/淘汰逻辑下沉到 `SessionService`
 - SoT: `docs/auth-baseline.md`; `backend/src/modules/auth/schemas/session.schema.ts`; `backend/src/modules/auth/auth.constants.ts`
 - Failure Modes:
   - 凭据错误 -> `401 Unauthorized`
   - token 缺失/失效 -> `validateSession` 返回 `null`
   - session 过期 -> 删除会话并返回 `null`
+
+## Service Card 01A
+
+- Service: `backend/src/modules/auth/services/session.service.ts`
+- Domain: `Session`
+- Actions: `create-session`, `delete-session`, `clear-user-sessions`
+- I/O Shape:
+  - In: `userId`, `token?`, `currentSessionToken?`
+  - Out: `sessionToken | void`
+- Key Methods:
+  - `onModuleInit(): Promise<void> — called by Nest lifecycle to ensure session indexes exist`
+  - `createUserSession(userId: ObjectId): Promise<string> — called by AuthService.login`
+  - `deleteSession(token?: string): Promise<void> — called by AuthService.logout`
+  - `clearUserSessions(userId: ObjectId|string, currentSessionToken?: string): Promise<void> — called by UsersService.changePassword and PasswordResetService.resetPassword`
+- AuthZ Boundary: `internal-only`
+- Metrics/Isolation: 会话治理按 `userId`
+- Consistency/Constraints: `expiresAt` + TTL 索引；单用户最多保留 5 个会话；支持“保留当前会话”与“清空全部会话”两种失效策略
+- Deps/Side Effects: `SessionModel`, `randomBytes`；写 session、删 session、ensureIndexes
+- Performance Notes: 旧会话清理用 `sort(createdAt:-1)+skip(5)` 一次性淘汰
+- SoT: `backend/src/modules/auth/services/session.service.ts`; `backend/src/modules/auth/schemas/session.schema.ts`
+- Failure Modes:
+  - token 缺失 -> 删除动作直接 no-op
+  - session 过期/淘汰 -> 下次校验返回 `null`
+
+## Service Card 01B
+
+- Service: `backend/src/modules/mail/mail.service.ts`
+- Domain: `Cross-domain(Mail)`
+- Actions: `send-mail`, `send-password-reset-email`
+- I/O Shape:
+  - In: `to/subject/text/html` 或 `to/resetUrl/expiresInMinutes`
+  - Out: `void`
+- Key Methods:
+  - `sendMail(options): Promise<void> — called by PasswordResetService`
+  - `sendPasswordResetEmail(options): Promise<void> — called by PasswordResetService.requestPasswordReset`
+- AuthZ Boundary: `internal-only`
+- Metrics/Isolation: 与 `classroomTaskId` 无关
+- Consistency/Constraints: 支持 `MAIL_PROVIDER=log|smtp`；`log` 仅打日志不真实发送；`smtp` 必须通过配置构造 `"Display Name" <from@example.com>` 发件人；不得记录 `SMTP_PASS`
+- Deps/Side Effects: `ConfigService`, `Logger`, `nodemailer`（仅 smtp provider）
+- Performance Notes: smtp transporter 在 service 初始化时创建；缺失关键 SMTP 配置时 fail-fast
+- SoT: `backend/src/modules/mail/mail.service.ts`; `backend/src/config/env.validation.ts`; `backend/src/config/configuration.ts`
+- Failure Modes:
+  - `MAIL_PROVIDER=smtp` 且缺失 SMTP 关键配置 -> 抛配置错误
+  - SMTP 发送失败 -> 抛异常，由上层决定补偿/日志口径
+
+## Service Card 01C
+
+- Service: `backend/src/modules/auth/services/password-reset.service.ts`
+- Domain: `Cross-domain(Auth + User + Mail + Session)`
+- Actions: `request-password-reset`, `reset-password`, `invalidate-tokens`
+- I/O Shape:
+  - In: `email` 或 `token + newPassword`
+  - Out: `{ message: string }`
+- Key Methods:
+  - `onModuleInit(): Promise<void> — called by Nest lifecycle to ensure password-reset-token indexes exist`
+  - `requestPasswordReset(email: string): Promise<{ message: string }> — called by POST /auth/forgot-password`
+  - `resetPassword(token: string, newPassword: string): Promise<{ message: string }> — called by POST /auth/reset-password`
+- AuthZ Boundary: `public`
+- Metrics/Isolation: reset token 按 `userId` 管理；与 `classroomTaskId` 无关
+- Consistency/Constraints: `forgot-password` 固定返回通用成功提示，避免邮箱枚举；仅对 `status=active` 用户创建 token；明文 token 只出现在邮件链接中，数据库只保存 `tokenHash`；新请求会失效同用户旧的未用 token；重置成功后更新 `passwordHash`、标记 `usedAt`、并清理该用户全部 sessions
+- Deps/Side Effects: `UserModel`, `PasswordResetTokenModel`, `MailService`, `SessionService`, 共享密码 helper；写 token、发邮件、更新密码、删除 sessions
+- Performance Notes: 通过 `tokenHash` 精确查找；TTL 索引负责后台清理，业务层仍显式检查 `expiresAt/usedAt`
+- SoT: `backend/src/modules/auth/services/password-reset.service.ts`; `backend/src/modules/auth/schemas/password-reset-token.schema.ts`
+- Failure Modes:
+  - 邮箱不存在或用户不可登录 -> 返回通用成功提示，不发邮件、不建 token
+  - token 无效/过期/已使用 -> `400 Reset token is invalid`
+  - 邮件发送失败 -> 记录错误并使本次新 token 失效，接口仍返回通用成功提示
 
 ## Service Card 02
 
@@ -65,8 +132,8 @@
 - AuthZ Boundary: `login-only`
 - Metrics/Isolation: 无 `classroomTaskId` 口径
 - Consistency/Constraints: `PATCH /users/me` 仅允许更新 `name/studentNo/employeeNo`；`POST /users/me/change-password` 必须校验当前密码、新密码 trim 后非空、长度下限、且不得与当前密码相同；改密成功后保留当前会话并失效其它历史会话；`GET/PATCH` 返回口径一致且不含 `passwordHash`
-- Deps/Side Effects: `UserModel`, `SessionModel`, `bcrypt`；读写公开资料字段、更新密码哈希、删除历史 sessions
-- Performance Notes: `lean + select` 最小字段读取；`undefined` 字段忽略更新（不写入）；session 清理使用单次 `deleteMany`（按 `token != current`）
+- Deps/Side Effects: `UserModel`, `SessionService`, 共享密码 helper；读写公开资料字段、更新密码哈希、删除历史 sessions
+- Performance Notes: `lean + select` 最小字段读取；`undefined` 字段忽略更新（不写入）；session 清理复用 `SessionService.clearUserSessions`
 - SoT: `backend/src/modules/users/services/users.service.ts`; `backend/src/modules/users/schemas/user.schema.ts`; `backend/src/modules/auth/schemas/session.schema.ts`
 - Failure Modes:
   - 用户不存在 -> `404 User not found`
