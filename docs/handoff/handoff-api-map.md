@@ -35,7 +35,7 @@ Notes:
 - `GET /api/users/me` 与 `PATCH /api/users/me` 返回口径一致（公开字段），不返回 `passwordHash`。
 - `PATCH /api/users/me` 仅允许更新 `name/studentNo/employeeNo`，基于当前登录会话识别用户。
 - `POST /api/users/me/change-password` 请求体：`currentPassword/newPassword`；`newPassword` 会执行 trim 非空、长度与“不得与当前密码相同”校验；改密成功后保留当前会话并失效该用户其它历史会话。
-- 前端待接入说明：后续忘记密码页应调用 `POST /api/auth/forgot-password`，重置密码页应调用 `POST /api/auth/reset-password`。
+- 前端已接入说明：`/forgot-password` 页面通过 `/api/proxy/auth/forgot-password` 调用 `POST /api/auth/forgot-password`；`/reset-password?token=...` 页面通过 `/api/proxy/auth/reset-password` 调用 `POST /api/auth/reset-password`；前端统一展示防枚举成功提示，重置 token 只从 URL query 读取，不做持久化保存。
 
 ## Courses
 

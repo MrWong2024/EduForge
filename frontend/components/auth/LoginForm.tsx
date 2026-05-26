@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useState } from "react";
 import type { SubmitEventHandler } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
@@ -132,6 +133,15 @@ export function LoginForm() {
             className="w-full rounded-md border border-zinc-300 px-3 py-2 text-sm outline-none focus:border-zinc-500"
             placeholder="••••••••"
           />
+        </div>
+
+        <div className="flex justify-end">
+          <Link
+            href="/forgot-password"
+            className="text-sm text-zinc-600 transition-colors hover:text-zinc-900"
+          >
+            忘记密码？
+          </Link>
         </div>
 
         <button

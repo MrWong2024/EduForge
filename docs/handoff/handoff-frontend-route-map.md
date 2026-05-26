@@ -14,6 +14,8 @@
 |---|---|---|---|---|---|
 | `/` | 根入口 | - | 直接重定向到 `/login` | Done | - |
 | `/login` | 登录页 + 角色分流 | `POST auth/login`、`GET users/me` | 登录、`next` 回跳、无角色提示 | Done | 真接口 |
+| `/forgot-password` | 忘记密码页 | `POST auth/forgot-password` | 输入邮箱、提交重置邮件请求、固定展示防枚举成功提示、返回登录页 | Done | 真接口 |
+| `/reset-password` | 重置密码页 | `POST auth/reset-password` | 从 URL query 读取 `token`、校验新密码长度与确认密码一致、重置成功后返回登录页 | Done | 真接口 |
 
 ## 2) Teacher 路由
 

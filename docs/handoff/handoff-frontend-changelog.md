@@ -786,3 +786,10 @@
 - 【本步解决】`/teacher/classrooms/[classroomId]/tasks` 的“已选任务模板摘要”里，描述此前与标签同一行展示，HTML 折叠掉原始换行和空白，教师在发布前不易确认模板正文排版。
 - 【新增事实 / 已收口口径】`PublishClassroomTaskForm` 已将“已选任务模板摘要”的描述改为独立块级说明框，使用 `whitespace-pre-wrap + break-words + max-h-48 + overflow-auto` 保留原始换行/空白并限制最大高度，长描述在框内滚动。
 - 【边界保持】空描述仍沿用 `toDisplayText(selectedTask.description)` 兜底；候选模板列表中的描述摘要、`/teacher/tasks` 主列表描述 tooltip、模板筛选/选择/发布逻辑与后端接口均不变。
+
+## UAT-FE-94
+
+- 【本步解决】前端缺少密码找回与重置链路，登录页也没有“忘记密码”入口。
+- 【新增事实 / 已收口口径】`/login` 已增加“忘记密码？”入口；新增 `/forgot-password` 与 `/reset-password` 页面，分别接入 `POST /api/auth/forgot-password` 与 `POST /api/auth/reset-password`，请求继续通过 `/api/proxy/**` 转发。
+- 【安全边界】忘记密码成功态固定展示防邮箱枚举文案，不根据后端 message 推断账号存在性；重置密码页仅从 URL query 读取 `token`，不写入 localStorage/sessionStorage/cookie，也不展示完整 token。
+- 【交互口径】重置密码前端校验 trim 后不少于 8 位且确认密码一致；成功后仅提示返回登录页使用新密码登录，不自动登录、不修改现有 session/cookie 登录逻辑。

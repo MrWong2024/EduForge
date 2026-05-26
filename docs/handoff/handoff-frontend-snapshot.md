@@ -19,7 +19,7 @@
 ```text
 frontend/
 ├─ app/
-│  ├─ (auth)/login
+│  ├─ (auth)/{login,forgot-password,reset-password}
 │  ├─ teacher/**
 │  ├─ student/**
 │  ├─ api/proxy/[...path]          # 正式 BFF 代理
@@ -41,7 +41,9 @@ frontend/
 
 ## 2) 路由分区与完成度（摘要）
 
-- `/(auth)/login`：已完成登录与 role-home 跳转（`TEACHER -> /teacher/classrooms`, `STUDENT -> /student`）；页面已收口为极简专业型登录入口（主标题“重庆邮电大学智能化教学平台” + 聚焦登录表单），未改变登录链路与错误分流口径。
+- `/(auth)/login`：已完成登录与 role-home 跳转（`TEACHER -> /teacher/classrooms`, `STUDENT -> /student`）；登录表单已补充“忘记密码？”入口，未改变登录链路、错误分流口径与登录成功跳转行为。
+- `/(auth)/forgot-password`：已接入 `POST /api/auth/forgot-password`；前端提交邮箱后固定展示防枚举成功提示“如果邮箱存在，我们已发送密码重置邮件，请检查收件箱。”，不根据后端返回内容推断邮箱是否存在。
+- `/(auth)/reset-password`：已接入 `POST /api/auth/reset-password`；页面从 URL query 读取 `token`，前端校验新密码 trim 后不少于 8 位且两次输入一致；成功后提示返回登录页使用新密码登录，不自动登录，也不持久化保存 token。
 - `/teacher/**`：教师起步链路、模板链路、班级发布链路、批阅链路、三件套、周报/过程性评价/快照已接入真接口。
 - 教师班级基础管理层（已落地）：
 - `/teacher/classrooms`：班级列表 + 创建班级；默认按 `进行中/已归档/全部` 视图区分展示，操作列提供“进入班级/编辑班级”，班级生命周期动作统一收进“更多”次级菜单；主列表已默认请求 `page=1&limit=100`，切换 `statusView/courseId` 时回到 `page=1`，并展示“共 X 个班级，当前显示 Y 个”；仅当 `total > 100` 时显示轻量分页。
