@@ -8,11 +8,11 @@
 - 代理目标由 `FRONTEND_BACKEND_ORIGIN` 决定，代理实现位于 `app/api/proxy/[...path]/route.ts`。
 - 与后端对齐口径来自：
   - `docs/frontend-architecture.md`
-  - `docs/handoff/handoff-api-map.md`
-  - `docs/handoff/handoff-dto-cheatsheet.md`
-  - `docs/handoff/handoff-decisions.md`
-  - `docs/handoff/handoff-snapshot.md`
-  - `docs/handoff/handoff-config-matrix.md`
+  - `docs/handoff/handoff-backend-api-map.md`
+  - `docs/handoff/handoff-backend-dto-cheatsheet.md`
+  - `docs/handoff/handoff-backend-decisions.md`
+  - `docs/handoff/handoff-backend-snapshot.md`
+  - `docs/handoff/handoff-backend-config-matrix.md`
 
 ## 1) 项目骨架（当前前端真实结构）
 

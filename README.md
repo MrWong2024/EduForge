@@ -35,9 +35,9 @@ EduForge/
 - 前端架构规范：`docs/frontend-architecture.md`
 - AI/Agent 执行规则：`docs/codex-rules.md`
 - 指令编写规范：`docs/codex-instruction-spec.md`
-- 后端 handoff 入口：`docs/handoff/handoff-INDEX.md`
+- 后端 handoff 入口：`docs/handoff/handoff-backend-INDEX.md`
 - 前端 handoff 入口：`docs/handoff/handoff-frontend-INDEX.md`
-- 运行模式与环境变量矩阵：`docs/handoff/handoff-config-matrix.md`
+- 运行模式与环境变量矩阵：`docs/handoff/handoff-backend-config-matrix.md`
 
 详细的环境变量、联调与运行口径统一以上述文档为准，README 不重复维护细粒度配置字典。
 
@@ -45,4 +45,4 @@ EduForge/
 
 - 在本地准备 Node.js LTS 与 MongoDB 环境。
 - 按需进入 `backend/` 与 `frontend/` 目录安装依赖并启动开发服务。
-- 涉及 AI feedback provider / worker / 调试开关等配置时，请直接查阅 `docs/handoff/handoff-config-matrix.md`。
+- 涉及 AI feedback provider / worker / 调试开关等配置时，请直接查阅 `docs/handoff/handoff-backend-config-matrix.md`。

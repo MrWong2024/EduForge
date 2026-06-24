@@ -19,8 +19,8 @@
 
 - DTO 以代码为准：`backend/src/modules/**/dto/*.dto.ts`。
 - 若 DTO 字段、校验装饰器、枚举、嵌套结构有变更，必须同步更新本文件对应接口段落。
-- 若 `handoff-api-map` 与 Controller 路径不一致，以 Controller 真实路径为准，并在本文件标注差异。
-- 本次扫描未发现路径冲突（与 `docs/handoff/handoff-api-map.md` 一致）。
+- 若 `handoff-backend-api-map` 与 Controller 路径不一致，以 Controller 真实路径为准，并在本文件标注差异。
+- 本次扫描未发现路径冲突（与 `docs/handoff/handoff-backend-api-map.md` 一致）。
 
 ---
 

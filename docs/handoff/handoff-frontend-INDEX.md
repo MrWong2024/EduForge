@@ -4,7 +4,7 @@
 
 - `frontend/**` 当前工作区源码（最高优先级）
 - `docs/frontend-architecture.md`
-- `docs/handoff/handoff-*.md`（后端交接口径）
+- `docs/handoff/handoff-backend-*.md`（后端交接口径）
 
 若文档与代码冲突，一律以当前 `frontend/**` 代码为准。
 
@@ -26,7 +26,7 @@
 
 ## 推荐阅读顺序（新会话）
 
-启动新会话时，建议先快速阅读 `docs/handoff/handoff-INDEX.md`（后端入口），再按下列前端顺序继续。
+启动新会话时，建议先快速阅读 `docs/handoff/handoff-backend-INDEX.md`（后端入口），再按下列前端顺序继续。
 
 1. `handoff-frontend-snapshot.md`
 2. `handoff-frontend-changelog.md`
@@ -36,15 +36,15 @@
 
 ## 需要与后端交叉阅读的文档
 
-后端交接口径、运行模式、DTO、服务职责边界等基线请以 `docs/handoff/handoff-INDEX.md` 为入口再向下展开。
+后端交接口径、运行模式、DTO、服务职责边界等基线请以 `docs/handoff/handoff-backend-INDEX.md` 为入口再向下展开。
 
-- `docs/handoff/handoff-INDEX.md`
-- `docs/handoff/handoff-api-map.md`
-- `docs/handoff/handoff-dto-cheatsheet.md`
-- `docs/handoff/handoff-decisions.md`
-- `docs/handoff/handoff-snapshot.md`
-- `docs/handoff/handoff-config-matrix.md`
-- `docs/handoff/handoff-service-map.md`
+- `docs/handoff/handoff-backend-INDEX.md`
+- `docs/handoff/handoff-backend-api-map.md`
+- `docs/handoff/handoff-backend-dto-cheatsheet.md`
+- `docs/handoff/handoff-backend-decisions.md`
+- `docs/handoff/handoff-backend-snapshot.md`
+- `docs/handoff/handoff-backend-config-matrix.md`
+- `docs/handoff/handoff-backend-service-map.md`
 
 ## 前端续接硬约束（当前实现口径）
 

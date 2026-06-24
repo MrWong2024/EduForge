@@ -2,6 +2,8 @@
 
 本交接包基于 `backend/` 源码与现有 `docs/` 生成，用于在**不依赖 git/commit** 的前提下，直接续接开发。
 
+后端 handoff 当前入口：`docs/handoff/handoff-backend-INDEX.md`。前端 handoff 当前入口：`docs/handoff/handoff-frontend-INDEX.md`。
+
 ## 旧宪法事实迁移说明
 
 - 2026-06-24 已把 7 个旧宪法文档中夹带的 EduForge 项目专属事实补充到 `docs/handoff/**`。
@@ -12,13 +14,13 @@
 
 | 文档 | 用途 | 何时查它 |
 |---|---|---|
-| `docs/handoff/handoff-snapshot.md` | 全局事实快照：目录骨架、领域模型、协议口径、关键链路 | 新会话刚开始，先建立系统全貌 |
-| `docs/handoff/handoff-api-map.md` | 控制器接口地图（method/path/用途/门禁） | 要找接口入口、排查某条 API 归属 |
-| `docs/handoff/handoff-config-matrix.md` | 运行模式与环境变量矩阵（stub/mock/real） | 要切换 AI 模式、调 worker/debug 或排查配置 |
-| `docs/handoff/handoff-testing-playbook.md` | E2E 测试作战手册与 mock server 注入方式 | 跑回归、复现实验、定位测试失败 |
-| `docs/handoff/handoff-service-map.md` | 服务职责地图（Service Cards） | 需要改某个 service 前先看边界/依赖/失败路径 |
-| `docs/handoff/handoff-decisions.md` | 关键决策记录（Decision/Rationale/Consequences） | 评估改动是否违背既有架构决策 |
-| `docs/handoff/handoff-dto-cheatsheet.md` | 写接口 DTO 最小请求体速查（required/枚举/嵌套/最小 JSON 示例） | 前端/脚本联调遇到 400 校验、需要快速拼请求 body 时 |
+| `docs/handoff/handoff-backend-snapshot.md` | 全局事实快照：目录骨架、领域模型、协议口径、关键链路 | 新会话刚开始，先建立系统全貌 |
+| `docs/handoff/handoff-backend-api-map.md` | 控制器接口地图（method/path/用途/门禁） | 要找接口入口、排查某条 API 归属 |
+| `docs/handoff/handoff-backend-config-matrix.md` | 运行模式与环境变量矩阵（stub/mock/real） | 要切换 AI 模式、调 worker/debug 或排查配置 |
+| `docs/handoff/handoff-backend-testing-playbook.md` | E2E 测试作战手册与 mock server 注入方式 | 跑回归、复现实验、定位测试失败 |
+| `docs/handoff/handoff-backend-service-map.md` | 服务职责地图（Service Cards） | 需要改某个 service 前先看边界/依赖/失败路径 |
+| `docs/handoff/handoff-backend-decisions.md` | 关键决策记录（Decision/Rationale/Consequences） | 评估改动是否违背既有架构决策 |
+| `docs/handoff/handoff-backend-dto-cheatsheet.md` | 写接口 DTO 最小请求体速查（required/枚举/嵌套/最小 JSON 示例） | 前端/脚本联调遇到 400 校验、需要快速拼请求 body 时 |
 
 ## 前端入口补充
 
@@ -33,5 +35,5 @@
 - 平台仍不开放公开注册（无前端注册页、无开放注册接口）；仍无产品化管理员批量导入功能（后台页面/管理接口/Excel 上传）。
 - 已有运维脚本级 CSV 导入能力：`backend/scripts/import-users.ts`，执行入口 `npm run import-users -- --file="..." [--dry-run] [--reset-password]`。
 - 连接串口径：应用运行读取 `MONGO_URI`；运维导入脚本读取 `MONGO_ADMIN_URI`。
-- `handoff-dto-cheatsheet.md` 仅覆盖 Controller 写接口（POST/PATCH/PUT/DELETE） 的 `@Body()` 最小样例；`@Query`/`@Param` 默认不展开。
-- DTO 以 backend 源码为准；若 `handoff-dto-cheatsheet.md` 与代码不一致，以代码为准并需同步修订 `handoff-dto-cheatsheet.md`。
+- `handoff-backend-dto-cheatsheet.md` 仅覆盖 Controller 写接口（POST/PATCH/PUT/DELETE） 的 `@Body()` 最小样例；`@Query`/`@Param` 默认不展开。
+- DTO 以 backend 源码为准；若 `handoff-backend-dto-cheatsheet.md` 与代码不一致，以代码为准并需同步修订 `handoff-backend-dto-cheatsheet.md`。
