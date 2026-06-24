@@ -669,6 +669,10 @@ export class ProcessAssessmentService {
     aiRequestedCount: number;
     avgErrorItems: number;
   }) {
+    if (params.submissionsCount <= 0) {
+      return 0;
+    }
+
     const submittedTasksScore =
       params.submittedTasksRate *
       ProcessAssessmentService.RUBRIC.submittedTasksRate *

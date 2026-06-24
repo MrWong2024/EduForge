@@ -453,7 +453,7 @@
   - `getProcessAssessmentForSnapshot(...)`（供 snapshot 复用）
 - AuthZ Boundary: `teacher-only + owner-only`
 - Metrics/Isolation: 成员全集与分页来自 Enrollment ACTIVE；任务/提交/AI/反馈聚合均按 `classroomId + classroomTaskId`；迟交指标输出 `lateSubmissionsCount/lateTasksCount`
-- Consistency/Constraints: 默认窗口为 `all`；后端兼容窗口 `all/7d/30d/term`；`all` 语义为“无时间下界过滤（tasks/submissions/feedback 不拼 lowerBound）”；rubric/score/riskLevel 为过程性指标；CSV 导出与 JSON 复用同一 payload（窗口口径一致）并使用手写转义（`"` -> `""`），最终返回字符串前追加 UTF-8 BOM（`\uFEFF`）以兼容 Windows Excel 中文打开；不输出敏感字段
+- Consistency/Constraints: 默认窗口为 `all`；后端兼容窗口 `all/7d/30d/term`；`all` 语义为“无时间下界过滤（tasks/submissions/feedback 不拼 lowerBound）”；rubric/score/riskLevel 为过程性指标；计分时 `submissionsCount <= 0` 直接返回 `0`，ACTIVE 学生仍保留在列表/CSV 中；CSV 导出与 JSON 复用同一 payload（窗口口径一致）并使用手写转义（`"` -> `""`），最终返回字符串前追加 UTF-8 BOM（`\uFEFF`）以兼容 Windows Excel 中文打开；不输出敏感字段
 - Deps/Side Effects: `ClassroomModel`, `ClassroomTaskModel`, `SubmissionModel`, `AiFeedbackJobModel`, `FeedbackModel`, `EnrollmentService`；只读
 - Performance Notes: Enrollment 稳定分页后页内排序（page-local sort）
 - SoT: `backend/src/modules/classrooms/services/process-assessment.service.ts`; `backend/src/modules/classrooms/dto/query-process-assessment.dto.ts`

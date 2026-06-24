@@ -463,6 +463,7 @@ AI Provider 错误码（`ai-feedback-provider.error-codes.ts`）：
   - `GET /api/classrooms/:classroomId/process-assessment`
   - `GET /api/classrooms/:classroomId/process-assessment.csv`
   - `items[*]` 已返回可展示学生信息：`studentId/studentName/studentNo`（`studentName` 缺失回落 `未知学生`，`studentNo` 缺失返回 `null`）。
+  - 0 次提交学生仍保留在过程性评价列表中，但 `score` 固定为 `0`，不会因 `avgErrorItems=0` 获得 codeQualityProxy 分。
   - CSV 口径已对齐 JSON：列前置为 `studentName,studentNo,studentId,...`（保留 `studentId` 便于核对链路）。
   - CSV 导出内容现以 UTF-8 BOM（`\uFEFF`）开头，并保持 `Content-Type: text/csv; charset=utf-8`，用于改善 Windows Excel 直接打开时的中文乱码兼容性。
 - 统计窗口收口·阶段一（后端契约已落地，前端待跟进）：
