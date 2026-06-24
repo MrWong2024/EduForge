@@ -1,11 +1,11 @@
-# EduForge 前端阶段变更薄记录（Step 8~12 + UAT-FE-01~06）
+# EduForge 前端历史变更记录
 
-用途：快速说明关键阶段形成了哪些结论、哪些口径已收口、哪些旧做法禁止回退。
+本文是前端历史变更记录，用于追溯阶段演进；不是当前事实 SoT。当前前端事实以 `docs/handoff/handoff-frontend-snapshot.md`、`docs/handoff/handoff-frontend-route-map.md`、`docs/handoff/handoff-frontend-component-map.md` 以及当前 `frontend/**` 代码为准。
 
 ## 阅读建议
 
 - 本文是“阶段变化索引”，不是权威现状快照。
-- 当前权威现状仍以 `docs/handoff/handoff-frontend-snapshot.md` + `frontend/**` 代码为准。
+- 当前事实仍以 snapshot / route-map / component-map 与 `frontend/**` 代码为准。
 - 使用方式：先看本文定位“变更点”，再到 snapshot/route-map/component-map 查现状细节。
 
 ## Step 8

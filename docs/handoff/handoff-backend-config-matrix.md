@@ -7,7 +7,7 @@
 - env 默认值以 `backend/src/config/env.validation.ts` 为准。
 - `AI_FEEDBACK_WORKER_*` 不在 Joi schema 内；其默认行为来自 worker/processor 源码常量（`backend/src/modules/learning-tasks/ai-feedback/services/ai-feedback-worker.service.ts`、`backend/src/modules/learning-tasks/ai-feedback/services/ai-feedback-processor.service.ts`）。
 
-## 0.5) 数据库、连接串与索引治理
+## 1) 数据库、连接串与索引治理
 
 数据库命名按 `NODE_ENV` 物理隔离：
 
@@ -34,14 +34,14 @@
 - production 的 Schema 索引同步唯一入口是 `npm run sync-indexes`；不得依赖 production 启动时 `autoIndex` 建索引。
 - `sessions` 集合必须具备 `userId_1`、`token_1 unique`、`expiresAt_1 expireAfterSeconds:0`；SessionService 会在模块初始化时确保 session 索引存在。
 
-## 0.6) Cookie、CORS 与前端代理
+## 2) Cookie、CORS 与前端代理
 
 - 会话 Cookie：`ef_session`，`HttpOnly=true`、`sameSite=lax`、`secure=(NODE_ENV=production)`、`path=/`、`maxAge=SESSION_TTL_MS`（当前 `7d`）。
 - 后端 CORS origin 由 `FRONTEND_URL` 控制，默认 `http://localhost:3000`。
 - 当前前端 BFF 代理目标变量是 `FRONTEND_BACKEND_ORIGIN`，代理路由为 `frontend/app/api/proxy/[...path]/route.ts`，上游路径拼为 `${FRONTEND_BACKEND_ORIGIN}/api/**`。
 - 代理允许并转发必要请求头（含 `cookie/content-type/accept/user-agent`），响应透传 `content-type/content-disposition/cache-control/location/set-cookie`；业务页面不要绕过 `/api/proxy/**` 直连后端。
 
-## 1) 运行模式矩阵（最小可运维闭环）
+## 3) 运行模式矩阵（最小可运维闭环）
 
 | 模式                       | 执行方式       | 目标                          | 必要 env                                                                                                                                                                                         | 可选 env（默认）                                                                                                                                                                                                 | 备注                                                                                                |
 | -------------------------- | -------------- | ----------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------- |
@@ -59,7 +59,7 @@
 - `process-once` 属于 debug/ops 门禁路由：需登录 + RBAC（teacher）+ `AI_FEEDBACK_DEBUG_ENABLED=true`；否则按现实现返回 `404`。
 - `POST /api/learning-tasks/submissions/:submissionId/ai-feedback/request` 是产品能力，不依赖 debug 门禁；但依赖登录 + RBAC + 资源归属校验。
 
-## 2) 核心 env 列表与默认值
+## 4) 核心 env 列表与默认值
 
 | 变量                                           | 默认值                                              | 来源                                                 | 说明                                                                            |
 | ---------------------------------------------- | --------------------------------------------------- | ---------------------------------------------------- | ------------------------------------------------------------------------------- | -------------------------------------------------------------------- | ------------- |
@@ -124,7 +124,7 @@ $env:BAILIAN_BASE_URL="https://dashscope.aliyuncs.com/compatible-mode/v1"
 $env:BAILIAN_MODEL="qwen3.6-plus"
 ```
 
-### 2.1 AI 入队触发策略（attempt-based）组合语义
+## 5) AI 入队触发策略（attempt-based）组合语义
 
 说明：
 
@@ -142,7 +142,7 @@ $env:BAILIAN_MODEL="qwen3.6-plus"
 - 当后续提交未自动入队时，“无 Job”是策略结果，应体现为 `NOT_REQUESTED`，不代表系统异常。
 - “无 job => NOT_REQUESTED” 是正常产品语义，适用于 dashboards / `my-task-detail` / `learning-trajectory` 等聚合视图。
 
-### 2.2 关键业务门禁错误码与排障指引
+## 6) 关键业务门禁错误码与排障指引
 
 - `LATE_SUBMISSION_NOT_ALLOWED`
   - 触发条件：`classroomTask.dueAt` 存在，且 `settings.allowLate=false`，且 `now > dueAt`。
@@ -153,7 +153,7 @@ $env:BAILIAN_MODEL="qwen3.6-plus"
   - HTTP：`429`（当前实现），并返回 `retryAfterMs/retryAfterSeconds`。
   - 排障要点：默认冷却 `300000ms`，可通过 `LEARNING_TASK_SUBMISSION_COOLDOWN_MS=0` 关闭。
 
-## 3) Worker / Debug 默认关闭与开启方式
+## 7) Worker / Debug 默认关闭与开启方式
 
 默认关闭：
 
@@ -187,9 +187,9 @@ debug/ops 门禁口径（与当前实现一致）：
 - debug/ops 路由显式 `@UseGuards(AiFeedbackDebugEnabledGuard, RolesGuard)`，即先 debug 门禁，再 RBAC。
 - 当 `AI_FEEDBACK_DEBUG_ENABLED=false` 时，teacher/admin 访问 debug/ops 优先返回 `404`。
 
-## 4) 护栏 env（默认值 + 建议范围）
+## 8) 护栏 env（默认值 + 建议范围）
 
-提示：本节为“执行层护栏”（processor/provider）；触发层入队策略见第 2.1 节。
+提示：本节为“执行层护栏”（processor/provider）；触发层入队策略见第 5 节。
 
 | 护栏项                     | 变量                                           | 默认值  | 约束范围（源码） | 建议范围（交付运维） |
 | -------------------------- | ---------------------------------------------- | ------- | ---------------- | -------------------- |

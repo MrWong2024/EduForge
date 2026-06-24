@@ -1,5 +1,7 @@
 ﻿# 服务职责地图（Service Cards）
 
+本文是后端 Service 职责与边界地图，用于改动前定位影响范围；具体实现以 `backend/` 源码为准。
+
 扫描范围：`backend/src/modules/**` 下全部 `*service.ts`。  
 补充：为满足 Provider 交接完整性，附带 `*.provider.ts` 卡片。
 重点包含：`classrooms/enrollments/services/*` 与 `classrooms/classroom-tasks/services/*` 新增服务域。

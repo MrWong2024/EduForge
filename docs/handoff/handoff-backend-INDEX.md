@@ -1,6 +1,6 @@
 # EduForge 后端新会话交接包（入口）
 
-本交接包基于 `backend/` 源码与现有 `docs/` 生成，用于在**不依赖 git/commit** 的前提下，直接续接开发。
+本交接包基于 `backend/` 源码与现有 `docs/` 生成，用于在**不依赖当前聊天上下文**的前提下，直接续接开发。
 
 后端 handoff 当前入口：`docs/handoff/handoff-backend-INDEX.md`。前端 handoff 当前入口：`docs/handoff/handoff-frontend-INDEX.md`。
 
@@ -28,7 +28,7 @@
 
 ## 统一前提
 
-- 本项目当前不使用 git（本交接包按“工作区事实状态”交接）。
+- 本项目使用 git/GitHub 进行版本管理；AI 协作开发时，代码事实以当前工作区或用户指定 commit 为准，handoff 用于交接业务事实，不替代代码核对。
 - Node.js/NestJS/MongoDB 版本策略只引用 `docs/backend-architecture.md`，不重复展开。
 - 系统为新系统，无 legacy 数据；本交接包不包含任何 legacy 迁移策略。
 - P0 / 主链路已同步的后端事实（以代码为准）：`PATCH /api/users/me` 已可用；`POST /api/users/me/change-password` 已可用（校验旧密码，成功后保留当前会话并失效其它会话）；`GET /api/classrooms/:id/students` 默认只返 Enrollment ACTIVE，`includeRemoved=1/true` 可包含 REMOVED；`GET /api/classrooms/:classroomId/tasks/:classroomTaskId/submissions` 只认 `classroomTaskId`；`GET /api/learning-tasks/submissions/:id` 已作为 submission detail 稳定读源。

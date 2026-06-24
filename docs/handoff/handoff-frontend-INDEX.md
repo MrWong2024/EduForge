@@ -19,7 +19,7 @@
 | 文档 | 用途 | 新会话何时看 |
 |---|---|---|
 | `docs/handoff/handoff-frontend-snapshot.md` | 前端全局事实快照（架构、主链路、真接口收口、AI 联调模式） | 新会话第一步先看 |
-| `docs/handoff/handoff-frontend-changelog.md` | 阶段演进结论（Step 8~12） | 需要快速理解“本会话最后一段做了什么”时 |
+| `docs/handoff/handoff-frontend-changelog.md` | 前端历史变更记录（不是当前事实 SoT） | 需要追溯阶段演进或旧口径收口原因时 |
 | `docs/handoff/handoff-frontend-route-map.md` | 路由地图（页面用途/主接口/完成度/稳定读源） | 要改页面或补链路前 |
 | `docs/handoff/handoff-frontend-component-map.md` | 组件与模块职责边界（在哪改、不要在哪改） | 要改组件或公共机制前 |
 

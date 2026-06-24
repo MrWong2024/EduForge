@@ -1,6 +1,6 @@
 # DTO Cheatsheet（Write APIs）
 
-更新时间：2026-04-04  
+更新时间口径：以当前 commit / 工作区最近同步为准；DTO 事实以 backend 源码为最高优先级，本文件用于快速交接。  
 来源：`backend/src/modules/**/controllers/*.controller.ts` + 对应 `dto/*.dto.ts`
 
 ## 用途说明
