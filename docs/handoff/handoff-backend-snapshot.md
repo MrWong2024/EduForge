@@ -1,26 +1,20 @@
-# 全局事实快照（Path Base: `backend/`）
+# 后端当前事实快照（Path Base: `backend/`）
 
-## 0) 事实前提（强制口径）
+## 0) 本文定位（强制口径）
 
-- 本项目使用 git/GitHub 进行版本管理。
-- 但在 AI 协作开发中，唯一权威来源是当前工作区目录中的本地代码状态（working tree）。
-- 任何 handoff 文档、分析结论或续接开发，均必须以当前工作区代码为准，而不是 GitHub 仓库状态、commit 历史、分支信息或 PR 记录。
-- 本交接包不依赖 git 工作流。
-- 当文档与代码发生冲突时，以代码为准。
-- 2026-06-24 已将 7 个旧宪法文档中的 EduForge 项目专属事实迁移到 `docs/handoff/**`；后续覆盖通用宪法文档后，本快照与其它 handoff 仍承担 EduForge 项目事实锚点。
+本文是后端当前事实快照，用于新会话快速建立系统全貌；它保留强制口径、系统骨架、领域模型摘要、主链路状态、高风险边界和细节文档索引，不承载完整 API/config/testing/provider/Service 说明。
+
+- 本项目使用 git/GitHub 进行版本管理；AI 协作开发时，代码事实以当前工作区或用户指定 commit 为准。
+- 与代码冲突时，具体实现以 `backend/` 源码为最高优先级，handoff 只用于交接业务事实，不替代代码核对。
+- 详细接口路径、门禁、响应/Query 口径看 `docs/handoff/handoff-backend-api-map.md`。
+- 详细配置、数据库命名、env、AI provider/worker/debug 运行模式看 `docs/handoff/handoff-backend-config-matrix.md`。
+- 详细 DTO 请求体看 `docs/handoff/handoff-backend-dto-cheatsheet.md`。
+- 详细 Service 职责与边界看 `docs/handoff/handoff-backend-service-map.md`。
+- 详细 E2E、mock server、spec 覆盖和测试命令看 `docs/handoff/handoff-backend-testing-playbook.md`。
 - 后端技术栈事实：Node.js LTS 24.x、NestJS 11.x、MongoDB 8.x（Mongoose）、TypeScript、REST API。
-- 前端技术栈事实：Next.js App Router + TypeScript；正式后端访问路径为同域 `/api/proxy/**`。
-- 该系统为新系统，无历史数据包袱。
-- 因此不需要回填脚本；Enrollment 为权威来源，legacy `studentIds` 不作为任何授权/统计的 fallback。
-- 本次扫描基准目录是 `backend/`，即 `backend/src`、`backend/test`、`backend/scripts`。
-- 平台基线仍为不开放公开注册：无前端注册页、无开放注册 API。
-- 当前仍未提供产品化“管理员批量导入用户”能力（后台页面/管理接口/Excel 上传）。
-- 当前已提供运维脚本级 CSV 批量导入能力：`backend/scripts/import-users.ts`，用于离线导入账号。
-- 连接串口径区分：应用运行读取 `MONGO_URI`；运维导入脚本读取 `MONGO_ADMIN_URI`。
-- `docs/operations/**` 在本次快照中作为运维文档产物被引用（不在 `backend/` 目录树内，但属于工程交付物）。
-- `backend/dist/**` 与 `backend/node_modules/**` 不在扫描范围。
+- 前端正式后端访问路径为同域 `/api/proxy/**`，代理目标由 `FRONTEND_BACKEND_ORIGIN` 控制。
 
-## 1) 项目骨架（关键目录树）
+## 1) 系统骨架摘要
 
 ```text
 backend/
@@ -28,494 +22,114 @@ backend/
 │  ├─ common/{decorators,filters,guards,interfaces,types}
 │  ├─ config/{configuration.ts,env.validation.ts}
 │  └─ modules/
-│     ├─ auth/{controllers,dto,schemas,services}
-│     ├─ mail/
-│     ├─ users/{controllers,dto,schemas,services}
-│     ├─ courses/
-│     │  ├─ controllers/
-│     │  ├─ dto/
-│     │  │  └─ query-course-overview.dto.ts
-│     │  ├─ schemas/
-│     │  └─ services/
-│     │     ├─ courses.service.ts
-│     │     └─ course-overview.service.ts
-│     ├─ classrooms/
-│     │  ├─ classroom-tasks/
-│     │  │  ├─ controllers/
-│     │  │  ├─ dto/
-│     │  │  ├─ schemas/
-│     │  │  └─ services/
-│     │  │     ├─ classroom-tasks.service.ts
-│     │  │     ├─ ai-metrics.service.ts
-│     │  │     ├─ class-review-pack.service.ts
-│     │  │     └─ ai-feedback-metrics-aggregator.service.ts
-│     │  ├─ controllers/
-│     │  ├─ dto/
-│     │  ├─ schemas/
-│     │  ├─ services/
-│     │  │  ├─ classrooms.service.ts
-│     │  │  ├─ teacher-classroom-dashboard.service.ts
-│     │  │  ├─ teacher-classroom-weekly-report.service.ts
-│     │  │  ├─ student-learning-dashboard.service.ts
-│     │  │  ├─ process-assessment.service.ts
-│     │  │  └─ classroom-export-snapshot.service.ts
-│     │  └─ enrollments/
-│     │     ├─ schemas/
-│     │     ├─ services/
-│     │     └─ README.md
-│     ├─ learning-tasks/
-│     │  ├─ ai-feedback/
-│     │  │  ├─ guards/interfaces/lib/prompts/protocol/providers/real/schemas/services
-│     │  ├─ controllers/
-│     │  ├─ dto/
-│     │  │  ├─ request-ai-feedback.dto.ts
-│     │  │  └─ submission-detail-response.dto.ts
-│     │  ├─ task-course-labels.constants.ts
-│     │  ├─ schemas/
-│     │  └─ services/
-│     │  (已上线手工触发接口：`POST /api/learning-tasks/submissions/:submissionId/ai-feedback/request`)
-│     └─ database/
-├─ test/
-│  ├─ app.e2e-spec.ts
-│  ├─ classroom-dashboard.e2e-spec.ts
-│  ├─ classroom-dashboard-isolation.e2e-spec.ts
-│  ├─ classrooms.ai-metrics.e2e-spec.ts
-│  ├─ classroom-learning-loop.e2e-spec.ts
-│  ├─ learning-tasks.e2e-spec.ts
-│  ├─ learning-tasks.ai-feedback.guards.e2e-spec.ts
-│  ├─ learning-tasks.ai-feedback.ops.e2e-spec.ts
-│  ├─ learning-tasks.ai-feedback.ops.debug-off.e2e-spec.ts
-│  ├─ learning-tasks.ai-feedback.openrouter-context.e2e-spec.ts
-│  ├─ learning-tasks.ai-feedback.trigger-policy.e2e-spec.ts
-│  ├─ classroom-student-task-detail.e2e-spec.ts
-│  ├─ classroom-weekly-report.e2e-spec.ts
-│  ├─ course-overview.e2e-spec.ts
-│  ├─ course-lifecycle.e2e-spec.ts
-│  ├─ enrollments.authority-and-legacy.e2e-spec.ts
-│  ├─ enrollment-only.regression.e2e-spec.ts
-│  ├─ classroom-learning-trajectory.e2e-spec.ts
-│  ├─ classroom-review-pack.e2e-spec.ts
-│  ├─ classroom-process-assessment.e2e-spec.ts
-│  ├─ classroom-task-deadline.e2e-spec.ts
-│  ├─ classroom-export-snapshot.e2e-spec.ts
-│  ├─ users-me.e2e-spec.ts
-│  ├─ users-change-password.e2e-spec.ts
-│  ├─ classroom-students.e2e-spec.ts
-│  └─ classroom-task-submissions.e2e-spec.ts
-└─ scripts/
-   ├─ sync-indexes.ts
-   └─ import-users.ts
+│     ├─ auth/                 # 登录、session、忘记/重置密码
+│     ├─ mail/                 # 邮件发送抽象
+│     ├─ users/                # 当前用户资料与改密
+│     ├─ courses/              # 课程、课程总览
+│     ├─ classrooms/           # 班级、看板、周报、过程性评价、导出
+│     │  ├─ classroom-tasks/   # 课堂任务实例、三件套、AI 指标
+│     │  └─ enrollments/       # Enrollment-only 成员关系
+│     ├─ learning-tasks/       # 任务模板、提交、反馈、AI Feedback
+│     │  └─ ai-feedback/       # provider、worker、processor、protocol、debug guard
+│     └─ database/             # Mongo 连接与 databaseName 校验
+├─ test/                       # E2E specs；清单与命令见 testing-playbook
+└─ scripts/                    # sync-indexes.ts、import-users.ts
 ```
 
-版本策略引用：
+运行与运维入口摘要：
 
-- `docs/backend-architecture.md`
-- 数据库治理补充：`docs/database-conventions.md`
-- E2E 运行基线：`docs/e2e-testing.md`
-- 联调与运行口径：`docs/handoff/handoff-backend-config-matrix.md`
+- 应用连接串读取 `MONGO_URI`；索引同步、用户导入等运维脚本读取 `MONGO_ADMIN_URI`。
+- `NODE_ENV` 与数据库物理库名绑定：`development -> eduforge_dev`，`test -> eduforge_test`，`production -> eduforge`。
+- production 索引同步入口是 `npm run sync-indexes`；离线用户导入入口是 `npm run import-users -- --file="..." [--dry-run] [--reset-password]`。
 
-## 2) 领域模型摘要卡（按模块）
+## 2) 领域模型摘要
 
-### Course（`src/modules/courses/schemas/course.schema.ts`）
+- `User`：账号与角色承载实体，含 `email/passwordHash/roles/status/name/studentNo/employeeNo`；`passwordHash` 不对 API 返回。
+- `Session`：登录态实体；服务端通过 `ef_session` HttpOnly Cookie 识别会话。
+- `PasswordResetToken`：忘记/重置密码一次性 token；数据库保存 `tokenHash`，业务显式校验过期与使用状态。
+- `Course`：课程实体，支持 `ACTIVE/ARCHIVED`，`courseLabel` 是可选课程分类坐标，不是外键。
+- `Classroom`：班级实体，绑定 `courseId/teacherId/joinCode/status`；`studentIds` 仅 legacy 输出/镜像，不参与授权、统计或 fallback。
+- `Enrollment`：成员关系唯一权威来源，当前只承载 `role=STUDENT`，状态为 `ACTIVE/REMOVED`。
+- `Task`：任务模板资产，支持 `courseLabel`、`visibility(PRIVATE|SHARED)` 与生命周期 `DRAFT -> PUBLISHED -> ARCHIVED`；共享只影响读可见性，不改变作者写权限。
+- `ClassroomTask`：课堂任务实例，按 `classroomId + taskId` 发布；实例状态为 `ACTIVE/CLOSED/RECALLED`，实例配置包含 `dueAt/settings.allowLate/settings.maxAttempts`。
+- `Submission`：学生提交，隔离键优先看 `classroomTaskId`；持久化 `submittedAt/isLate/lateBySeconds/content.codeText/content.language`。
+- `Feedback`：教师、AI、系统反馈；`tags` 与 AI feedback 共用统一词表并归一化。
+- `AiFeedbackJob`：AI Feedback job 生命周期为 `PENDING/RUNNING/SUCCEEDED/FAILED/DEAD`；无 job 时前后端应展示 `NOT_REQUESTED`，这是正常产品语义。
 
-- 关键字段：`code`、`name`、`term`、`courseLabel?`、`status(ACTIVE|ARCHIVED)`、`createdBy`。
-- `courseLabel` 语义：可选课程分类字段（与 `Task.courseLabel` 共用 `task-course-labels.constants.ts` 值域）；非外键、可为空；用于课程与模板的分类坐标对齐。
-- 索引/唯一性：`unique(createdBy, code)`。
+## 3) 强制边界与高风险口径
 
-### Classroom（`src/modules/classrooms/schemas/classroom.schema.ts`）
+认证与授权：
 
-- 关键字段：`courseId`、`name`、`teacherId`、`joinCode`、`studentIds[]`、`status(ACTIVE|ARCHIVED)`。
-- 索引/唯一性：`unique(joinCode)`；`(teacherId,courseId,status,createdAt)`。
-- `studentIds[]` 口径：仅 legacy 输出/可选镜像；不参与授权、统计、mine 查询，不作为 fallback。
-- 响应契约：`ClassroomResponse` 保留兼容字段 `courseId`，并新增只读 `course` 摘要对象（`id/code/name/term/courseLabel/status`）供前端展示课程可读信息；课程记录异常缺失时 `course` 可为空，不影响班级读取。
+- 全局 `SessionAuthGuard` 通过 `APP_GUARD` 保护非 `@Public()` 路由；角色边界由 `RolesGuard` 与 `TEACHER/STUDENT` 承载。
+- `GET /api/users/me` 是登录态与前端 role gate 锚点；`PATCH /api/users/me` 与 `GET` 返回公开字段口径一致。
+- 平台不开放公开注册；当前也没有产品化管理员批量导入页面/管理接口/Excel 上传。
 
-### Enrollment（`src/modules/classrooms/enrollments/schemas/enrollment.schema.ts`）
+成员、班级与课程：
 
-- 关键字段：`classroomId`、`userId`、`role(STUDENT)`、`status(ACTIVE|REMOVED)`、`joinedAt`、`removedAt?`、`timestamps`。
-- 索引/唯一性：
-  - `unique(classroomId, userId)`
-  - `(classroomId, status)`
-  - `(userId, status)`
-  - `(classroomId, status, role, userId)`
-- 权威性声明：Enrollment 是成员关系唯一权威来源；授权/统计只读 Enrollment。
+- Enrollment-only 已收口：成员授权、统计、mine 查询都只读 `Enrollment(role=STUDENT,status=ACTIVE)`；`classroom.studentIds` 不作为 fallback。
+- 课程/班级支持归档、恢复和空对象删除；非空删除分别返回 `COURSE_NOT_EMPTY` / `CLASSROOM_NOT_EMPTY`，应只归档。
+- 班级、课堂任务、统计聚合严禁用 `taskId` 做跨班兜底；课堂任务级统计和提交流水以 `classroomTaskId` 隔离。
 
-### ClassroomTask（`src/modules/classrooms/classroom-tasks/schemas/classroom-task.schema.ts`）
+任务、提交与反馈：
 
-- 关键字段：`classroomId`、`taskId`、`status(ACTIVE|CLOSED|RECALLED)`、`publishedAt`、`dueAt?`、`settings.allowLate?`、`settings.maxAttempts?`、`createdBy`。
-- 索引/唯一性：`unique(classroomId, taskId)`；`(classroomId, createdAt)`。
-- 生命周期口径：新发布默认 `ACTIVE`；允许 `ACTIVE -> CLOSED`、`ACTIVE -> RECALLED`、`CLOSED -> ACTIVE`；撤回（`RECALLED`）要求当前“无提交”，有提交时只能关闭（`CLOSED`）；`RECALLED` 保持封闭不可恢复，且 `CLOSED -> RECALLED` 不允许；旧数据缺省状态按 `ACTIVE` 兼容读取。
-- 实例级配置口径：新增 `PATCH /api/classrooms/:classroomId/tasks/:classroomTaskId`，仅允许更新 `dueAt/settings.allowLate/settings.maxAttempts`；`ACTIVE/CLOSED` 可编辑，`RECALLED` 不可编辑；状态流仍走独立 `/status` 接口。
-- 提交门禁：`ClassroomTask.status` 非 `ACTIVE` 时拒绝新提交；`settings.allowLate` 默认按实现为 `true`，迟交标记仍按 `dueAt/allowLate` 计算。
+- 任务模板生命周期必须走动作接口；普通 `PATCH` 不再承担状态流转。
+- 班级发布候选只返回当前教师可见且 `PUBLISHED` 的模板，并排除本班已发布过的模板。
+- 学生新提交与学生手工请求 AI 均要求 `classroom.status=ACTIVE` 与 `classroomTask.status=ACTIVE`；模板当前状态不再阻断既有课堂任务运行。
+- 到期且不允许迟交时，提交返回 `LATE_SUBMISSION_NOT_ALLOWED`；重复提交冷却由 `LEARNING_TASK_SUBMISSION_COOLDOWN_MS` 控制，命中返回 `SUBMISSION_COOLDOWN_ACTIVE`。
+- 教师反馈仅允许修改 `source=TEACHER` 的条目；`AI/SYSTEM` 反馈只读。
 
-### Task（`src/modules/learning-tasks/schemas/task.schema.ts`）
+AI Feedback：
 
-- 关键字段：`title`、`description`、`knowledgeModule`、`courseLabel?`、`visibility(PRIVATE|SHARED)`、`stage(1..4)`、`difficulty?`、`rubric?`、`status(DRAFT|PUBLISHED|ARCHIVED)`、`createdBy`、`publishedAt?`。
-- `courseLabel` 语义：可选单值课程分类字段（白名单来源 `task-course-labels.constants.ts`）；非 `Course` 外键；仅用于模板治理（筛选/分组/展示辅助）；不参与权限与发布约束。
-- `visibility` 语义：模板可见性字段（白名单来源 `task-template-visibility.constants.ts`）；新建默认 `PRIVATE`；旧数据缺省值按 `SHARED` 兼容解释；共享仅影响读可见性，不改变作者写权限。
-- 任务模板生命周期已收口为单向 `DRAFT -> PUBLISHED -> ARCHIVED`：创建仅允许初始 `DRAFT/PUBLISHED`（缺省 `DRAFT`，禁止创建 `ARCHIVED`）；已创建模板的状态变更只能走动作接口，不再通过普通 `PATCH` 直接改 `status`。
-- `ARCHIVED` 模板普通 `PATCH /api/learning-tasks/tasks/:id` 更新仍禁止；`PATCH` 若携带与当前状态不同的 `status`，固定返回 `400 Task template status must be changed through lifecycle actions`；若携带相同 `status`，后端忽略该字段并继续处理其它内容字段。
-- `POST /api/learning-tasks/tasks/:id/publish` 只允许 `DRAFT -> PUBLISHED`；`POST /api/learning-tasks/tasks/:id/archive` 只允许 `PUBLISHED -> ARCHIVED`；发布候选模板仍只认 `status=PUBLISHED`；归档不影响已发布 classroomTask 运行。
-- `POST /api/learning-tasks/tasks/:id/restore` 不再作为正常业务路径，兼容保留但稳定返回 `400 Archived task templates cannot be restored to draft; clone as draft instead`；后续如需复用归档模板，应通过“复制为新草稿”新能力实现（本阶段未实现）。
-- 索引/唯一性：`(createdBy,createdAt)`；`(status,knowledgeModule,stage,createdAt)`；`(status,courseLabel,createdAt)`；`(visibility,createdAt)`；`(createdBy,status,courseLabel,knowledgeModule,stage,updatedAt,createdAt)`（发布候选 onlyMine 分支）；`(visibility,status,courseLabel,knowledgeModule,stage,updatedAt,createdAt)`（发布候选 shared 可见分支）。
+- 默认联调模式为 `Stub + worker`，即 `AI_FEEDBACK_PROVIDER=stub` 且 `AI_FEEDBACK_WORKER_ENABLED=true`。
+- `process-once` 只用于 debug/ops，受 `AI_FEEDBACK_DEBUG_ENABLED` 与 RBAC 保护；debug gate 关闭时按 `404` 处理。
+- 自动入队采用 attempt-based 策略：默认首提自动入队，后续提交未手工 request 时可保持 `NOT_REQUESTED`。
+- Provider、OpenRouter/Bailian 真实调用、并发/限流/超时/重试等细节统一看 config-matrix 与 testing-playbook。
 
-### Submission（`src/modules/learning-tasks/schemas/submission.schema.ts`）
+## 4) 主链路当前状态摘要
 
-- 关键字段：`taskId`、`classroomTaskId?`、`studentId`、`attemptNo`、`submittedAt`、`isLate`、`lateBySeconds`、`content.codeText`、`content.language`、`meta.aiUsageDeclaration?`、`status(SUBMITTED|EVALUATED)`。
-- 字段语义：
-  - `submittedAt`：创建时写入 `now`（与 `createdAt` 语义一致，但用于显式提交时间表达）。
-  - `isLate/lateBySeconds`：仅在 `classroomTask.dueAt` 存在时计算；否则 `false/0`。
-- 索引/唯一性：
-  - `unique(taskId, studentId, attemptNo)`
-  - `(taskId, studentId)`、`(taskId, createdAt)`
-  - `(classroomTaskId, studentId, createdAt)`
-  - `(classroomTaskId, studentId, attemptNo)`
-  - `(classroomTaskId, createdAt)`、`(classroomTaskId, _id)`
-  - `(classroomTaskId, studentId, submittedAt)`
-  - `(classroomTaskId, isLate, submittedAt)`
+用户与账户：
 
-### AiFeedbackJob（`src/modules/learning-tasks/ai-feedback/schemas/ai-feedback-job.schema.ts`）
+- 登录、登出、session 校验、当前用户资料、当前用户改密已可用。
+- `POST /api/auth/forgot-password` 固定返回防枚举成功提示；真实可登录用户才会创建 reset token 并发邮件，且同一真实邮箱有 60 秒冷却。
+- `POST /api/auth/reset-password` 验证 token 后更新密码并清理该用户 sessions；不会自动登录。
 
-- 关键字段：`submissionId`、`taskId`、`classroomTaskId?`、`studentId`、`status(PENDING|RUNNING|SUCCEEDED|FAILED|DEAD)`、`attempts`、`maxAttempts`、`notBefore?`、`lockedAt?`、`lockOwner?`、`lastError?`。
-- 索引/唯一性：`unique(submissionId)`；`(status,notBefore,lockedAt,createdAt)`；`(classroomTaskId,status,notBefore)`；`(classroomTaskId,createdAt)`；`(classroomTaskId,updatedAt)`。
-- attempt-based 触发策略：
-  - 默认仅 `attemptNo==1` 自动入队；
-  - `attemptNo>1` 在 `AI_FEEDBACK_AUTO_ON_FIRST_ATTEMPT_ONLY=true` 时不自动创建 job；
-  - 手工触发：可通过 `POST /api/learning-tasks/submissions/:submissionId/ai-feedback/request` 幂等创建 `PENDING` job；
-  - “无 job => NOT_REQUESTED” 为正常产品语义。
+教学主链路：
 
-### Feedback（`src/modules/learning-tasks/schemas/feedback.schema.ts`）
+- Teacher 可维护课程、班级、任务模板，并将已发布模板发布为课堂任务实例。
+- Student 通过 joinCode 加入班级，读取学习看板、任务详情，提交作业并查看反馈。
+- 教师成员列表、课堂任务提交列表、Teacher/Student submission detail 均已切到稳定真接口；submission detail 读源为 `GET /api/learning-tasks/submissions/:id`。
+- 课堂任务实例支持关闭/恢复提交/撤回状态流，以及 `dueAt/allowLate/maxAttempts` 实例级配置更新。
 
-- 关键字段：`submissionId`、`createdBy?`、`source(AI|TEACHER|SYSTEM)`、`type(...)`、`severity(INFO|WARN|ERROR)`、`message`、`suggestion?`、`tags?`、`scoreHint?`。
-- 索引/唯一性：`unique(submissionId,source,type,severity,message)`；`(submissionId,createdAt)`；`(submissionId,source,createdAt)`。
-- 隔离字段来源：当前 schema 无 `classroomTaskId` 直连字段；统计隔离通过 `submissionId -> Submission.classroomTaskId` 关联完成。
+聚合与分析：
 
-### User（`src/modules/users/schemas/user.schema.ts`）
+- 班级看板、学生学习看板、课程总览、周报、学习轨迹、课堂复盘、AI 指标、教学快照预检均已有后端接口。
+- 过程性评价（JSON + CSV）已接入 `excludedTaskIds`，支持任务排除后重新计算；排除任务不参与提交、迟交、AI job、AI feedback、`topTags`、score/risk 计算，排除全部任务时 ACTIVE 学生仍保留且 score 为 0。
+- 周报、课程总览、学习轨迹、复盘包、过程性评价等聚合接口均要求遵守 Enrollment-only 与 classroomTask 隔离。
 
-- 关键字段：`email`、`passwordHash(select:false)`、`roles[]`、`status(active|suspended)`、`name?`、`studentNo?`、`employeeNo?`。
-- 索引/唯一性：`unique(email)`。
-- 用户资料口径：`GET/PATCH /api/users/me` 返回一致的公开字段口径，不返回 `passwordHash`。
-- 账户安全动作：`POST /api/users/me/change-password` 仅允许当前会话用户改密；成功后保留当前会话并失效其它历史会话。
+## 5) 当前不可误判事项
 
-### Session（`src/modules/auth/schemas/session.schema.ts`）
+已完成且不应回退：
 
-- 关键字段：`userId`、`token`、`expiresAt`。
-- 索引/唯一性：`unique(token)`；TTL(`expiresAt`)；`(userId)`。
+- `GET /api/classrooms/:id/students` 只认 Enrollment 成员关系。
+- `GET /api/classrooms/:classroomId/tasks/:classroomTaskId/submissions` 只认 `classroomTaskId` 隔离。
+- `GET /api/learning-tasks/submissions/:id` 是提交详情稳定读源，不应把列表接口扩展成详情读源。
+- `AI Feedback` 的产品 request 只负责确保 job，实际执行由 worker/processor 消费。
+- 过程性评价任务排除是临时查询条件，不修改任务、成绩或教师偏好。
 
-### PasswordResetToken（`src/modules/auth/schemas/password-reset-token.schema.ts`）
+仍未完成或不属于当前产品能力：
 
-- 关键字段：`userId`、`email`、`tokenHash`、`expiresAt`、`usedAt?`。
-- 索引/唯一性：`unique(tokenHash)`；TTL(`expiresAt`)；`(userId)`。
-- 安全口径：数据库只保存 `tokenHash`，明文 token 只出现在发给用户的 reset link 中；TTL 仅负责后台清理，业务上仍显式检查 `expiresAt` 与 `usedAt`。
-
-## 3) 权威来源提炼（interfaces/protocol/prompts/guards/types）
-
-### 3.1 错误码 / 枚举 / 类型域
-
-AI Provider 错误码（`ai-feedback-provider.error-codes.ts`）：
-
-- `UNAUTHORIZED`
-- `RATE_LIMIT_UPSTREAM`
-- `RATE_LIMIT_LOCAL`
-- `UPSTREAM_4XX`
-- `UPSTREAM_5XX`
-- `TIMEOUT`
-- `BAD_RESPONSE`
-- `REAL_DISABLED`
-- `MISSING_API_KEY`
-
-业务门禁错误码：
-
-- `LATE_SUBMISSION_NOT_ALLOWED`
-  - 出现位置：`POST /api/classrooms/:classroomId/tasks/:classroomTaskId/submissions` 在 `dueAt` 已到且 `allowLate=false` 时拒绝提交。
-
-关键枚举：
-
-- `AiFeedbackStatus`: `NOT_REQUESTED|PENDING|RUNNING|SUCCEEDED|FAILED|DEAD`
-- `AiFeedbackJobStatus`: `PENDING|RUNNING|SUCCEEDED|FAILED|DEAD`
-- `TaskStatus`: `DRAFT|PUBLISHED|ARCHIVED`
-- `SubmissionStatus`: `SUBMITTED|EVALUATED`
-- `FeedbackSource`: `AI|TEACHER|SYSTEM`
-- `FeedbackType`: `SYNTAX|STYLE|DESIGN|BUG|PERFORMANCE|SECURITY|OTHER`
-- `FeedbackSeverity`: `INFO|WARN|ERROR`
-- `CourseStatus`: `ACTIVE|ARCHIVED`
-- `ClassroomStatus`: `ACTIVE|ARCHIVED`
-- `EnrollmentRole`: `STUDENT`
-- `EnrollmentStatus`: `ACTIVE|REMOVED`
-
-### 3.2 JSON 协议 / 校验规则（AI）
-
-来源：
-
-- `ai-feedback-json.protocol.ts`
-- `ai-feedback.prompt.ts`
-- `openrouter-feedback.provider.ts`
-
-规则摘要：
-
-- 顶层只允许 `items`（必需）与 `meta`（可选）。
-- 每个 item 只允许 `type,severity,message,suggestion,tags,scoreHint`。
-- `type/severity` 必须来自枚举值域；`message` 必须非空。
-- `tags` 必须来自统一词表；未知值归一化为 `other`。
-- 返回必须是单个 JSON 对象（禁止 markdown/code fence/额外字段）。
-- JSON 协议本身未变；本轮变化在 provider 输入契约（`AiSubmissionAnalysisContext`）与 prompt 约束层（task 上下文 + 默认简体中文输出）。
-
-### 3.3 tags 唯一来源与归一化策略
-
-- 唯一词表来源：`feedback-normalizer.ts` 的 `FEEDBACK_TAGS_LIST`。
-- 协议层通过 `getFeedbackTags()` 注入 `AI_FEEDBACK_JSON_PROTOCOL.allowedTags`。
-- 归一化：小写、trim、空格/下划线转 `-`、重复连字符折叠、未知值映射 `other`、输出去重。
-
-### 3.4 环境门禁与关键开关
-
-- 认证与授权：
-  - `SessionAuthGuard` 全局启用（除 `@Public()`）。
-  - `AUTHZ_ENFORCE_ROLES`（默认 `true`）。
-  - 邮箱重置密码接口 `POST /api/auth/forgot-password` 与 `POST /api/auth/reset-password` 为公开路由；其中 `forgot-password` 固定返回通用成功提示，避免邮箱枚举；同一真实用户邮箱 60 秒内重复请求不会重复发邮件。
-- AI 相关：
-  - `AI_FEEDBACK_DEBUG_ENABLED`
-  - `AI_FEEDBACK_REAL_ENABLED`
-  - `AI_FEEDBACK_PROVIDER`
-  - `AI_FEEDBACK_WORKER_ENABLED`
-  - `AI_FEEDBACK_AUTO_ON_SUBMIT`
-  - `AI_FEEDBACK_AUTO_ON_FIRST_ATTEMPT_ONLY`
-  - `AI_FEEDBACK_MAX_CONCURRENCY`
-  - `AI_FEEDBACK_MAX_PER_CLASSROOMTASK_PER_MINUTE`
-  - `LEARNING_TASK_SUBMISSION_COOLDOWN_MS`
-  - `AI_FEEDBACK_WORKER_INTERVAL_MS`
-  - `AI_FEEDBACK_WORKER_BATCH_SIZE`
-  - `OPENROUTER_API_KEY`（仅 `openrouter + real enabled` 必填）
-  - `BAILIAN_API_KEY`（仅 `bailian + real enabled` 必填）
-- 业务口径补充：Enrollment-only 已收口，legacy `studentIds` 不存在 fallback（该条为业务规则，不是 env 开关）。
-
-### 3.5 providers 子目录提炼
-
-| Provider                | 文件                                             | 说明                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
-| ----------------------- | ------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Stub Provider           | `default-stub-ai-feedback.provider.ts`           | 已适配统一契约 `analyzeSubmission(context: AiSubmissionAnalysisContext)`；仍仅基于 `context.codeText` 走本地规则，英文输出与规则行为不变                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
-| OpenRouter Provider     | `providers/real/openrouter-feedback.provider.ts` | 已接收 `AiSubmissionAnalysisContext`；prompt 纳入 `taskTitle/taskDescription/taskRubric/codeText` 等上下文；默认要求反馈文本（`message/suggestion`）使用简体中文，并以“主问题导向综合反馈”为主控（默认 1 条、仅独立问题允许第 2 条、同类问题禁止按位置拆条）；空数组仅在“确实无任何可反馈/可建议内容”时允许，基本正确但可改进仍返回 1 条综合反馈；`language` 仅视为 hint，若 hint 缺失/auto/unknown 或与代码冲突，优先依据代码特征判断语言；prompt 现支持对 `codeText` 的多文件文本边界做语言无关识别，但默认仍按普通单文件提交分析，不要求无边界标记的单文件补 `FILE` 标记；推荐边界为 `===== FILE: relative/path/FileName.ext =====`，并容错识别大小写不敏感关键词、仅文件名、关键词不规范及明显边界样式的弱边界；该能力仅由 prompt 引导模型完成，不做后端正则解析、不新增 `codeFiles` 字段；只有强证据表明疑似多文件但边界不清时才保守提示，且 `CodeTruncated=true` 时不假定最后一个文件块完整；provider 协议层对 `items` 执行 `<=2` 闸门；外部 AI 调用 + 严格 JSON 解析 |
-| Bailian Provider        | `providers/real/bailian-feedback.provider.ts`    | 新增阿里云百炼 provider，通过 `AI_FEEDBACK_PROVIDER=bailian` 启用；默认 `BAILIAN_BASE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1`、`BAILIAN_MODEL=qwen-plus`（生产可显式指定 `qwen3.6-plus`）；走 OpenAI Chat Completions 兼容接口 `/chat/completions`；复用 OpenAI-compatible 基类中的 prompt、严格 JSON 协议、字段白名单、`<=2` 闸门、重试、超时和错误映射；日志 provider 字段为 `bailian`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
-| OpenAI Provider（占位） | `providers/real/openai-feedback.provider.ts`     | 已同步统一 context 契约签名，但仍为占位实现（调用直接抛未实现错误）                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
-
-## 4) 关键链路概览（隔离口径）
-
-- 主链路：`Course -> Classroom -> Enrollment -> ClassroomTask -> Submission -> AiFeedbackJob -> Feedback -> Dashboard/Report/Export`。
-- 成员关系：Enrollment（`ACTIVE/REMOVED`）为唯一权威来源；所有授权/统计只读 Enrollment。
-- 关键隔离键：`classroomTaskId`（提交、队列、报表、复盘、导出均按该维度隔离/聚合）。
-- `Classroom.studentIds` 仅为 legacy 输出/镜像；系统授权、统计与 mine 查询均不读该字段（Enrollment only）。
-- `AiFeedbackStatus=NOT_REQUESTED` 的两类来源（从未创建 job / 策略跳过入队）均为正常产品语义。
-- AI feedback provider 契约已统一为 `analyzeSubmission(context: AiSubmissionAnalysisContext)`；`AiFeedbackProcessor` 在消费 job 时会先读取 submission，再按 `submission.taskId` 查询 task 并组装上下文后调用 provider（task 缺失进入失败链路）；主控约束已前移到 prompt/协议层（默认 1 条、必要时最多 2 条），processor compactor 继续作为轻量兜底。
-
-新增/变更产品能力（Z3、AA~AI、Z4~Z9 收口口径）：
-
-- 教师班级看板已关闭任务可见性契约（后端已完成，前端待后续阶段接入）：
-- `GET /api/classrooms/:id/dashboard` 默认只返回 `classroomTask.status=ACTIVE` 的任务，用作当前教学看板。
-- 教师班级看板默认教学统计只面向当前 Enrollment `ACTIVE` 学生：`studentsCount` 分母保持 ACTIVE 学生数，`distinctStudentsSubmitted/submissionsCount/lateSubmissionsCount/lateDistinctStudentsCount/lateStudentsTotal`、AI feedback 统计与 `topTags` 均只计入当前 ACTIVE 学生对应 submissions；已移除学生历史 submissions 保留在库中，但默认不进入看板统计。
-  - `includeClosedTasks=true` 时返回 `ACTIVE+CLOSED`；`RECALLED/缺失/未知状态` 仍不返回。
-  - 每个 task item 返回 `classroomTaskStatus`，字段值来自 `ClassroomTask.status`，供前端后续标记已关闭任务。
-  - 每个 task item 也返回 `taskTemplateStatus(DRAFT|PUBLISHED|ARCHIVED|null)`，字段值来自关联任务模板当前状态；教师看板不因模板转为 `DRAFT/ARCHIVED` 而隐藏既有课堂任务实例，前端后续可仅对非 `PUBLISHED` 显示轻量异常标签。
-  - 每个 task item 同步返回 `taskPublisher:{id,name?}|null`，来源为关联模板 `Task.createdBy` 用户摘要，仅暴露 `id/name`。
-  - summary 与任务级统计均基于本次返回任务集合：默认排除 `CLOSED`，显式包含关闭任务时统计随返回集合扩大。
-- 教师班级归档建议契约（后端已完成，前端待后续阶段接入）：
-  - `GET /api/classrooms/:id/dashboard` 顶层新增 `archiveSuggestion`，用于提示教师“建议归档”，第一版不做自动归档，不修改班级状态。
-  - 建议归档只面向 `Classroom.status=ACTIVE` 班级；非 ACTIVE 班级 `suggested=false`。
-  - 建议条件为：无当前活跃课堂任务、最近 30 天无学生提交、且不处于新班级 30 天保护期。
-  - `archiveSuggestion` 当前活跃课堂任务定义仍保留 teacher heuristic：`ClassroomTask.status=ACTIVE` + 模板 `Task.status=PUBLISHED`，有 `dueAt` 时截止后 30 天内仍算活跃，无 `dueAt` 时 `publishedAt` 90 天内算活跃。
-  - `CLOSED/RECALLED` classroomTask 与非 `PUBLISHED` task 不算活跃任务；`archiveSuggestion` 独立于 `includeClosedTasks`，教师是否显示 CLOSED 任务不会改变建议结果。
-  - 学生看板、学生详情、学生提交与学生课堂任务 AI 请求已不再要求模板当前 `Task.status=PUBLISHED`；该条只描述教师侧 `archiveSuggestion` 的现行 heuristic。
-- 教师侧模板发布者摘要契约（后端已完成，前端待后续阶段接入）：
-  - `GET /api/classrooms/:id/tasks` 的课堂任务 item 返回 `taskPublisher:{id,name?}|null`，表示关联模板创建者/发布者。
-  - `GET /api/classrooms/:id/dashboard` 的任务进展 item 返回同字段；不改变 `taskTemplateStatus`、过滤、排序、统计。
-  - `GET /api/classrooms/:id/publishable-task-templates` 的候选模板 item 返回 `publisher:{id,name?}|null`，表示候选模板创建者/发布者。
-  - `GET /api/learning-tasks/tasks` 与 `GET /api/learning-tasks/tasks/:id` 返回 `publisher:{id,name?}|null`。
-  - 发布者摘要只含 `id/name`；前端后续可用 `currentUser.id !== publisher.id` 决定是否显示“模板发布者”。
-- 学生看板任务完成情况契约（后端已完成，前端待后续阶段接入）：
-  - `GET /api/classrooms/mine/dashboard` 的每个 task item 顶层新增 `completionStatus`。
-  - 学生看板定位为当前学习工作台，默认只返回 `classroom.status=ACTIVE`、`classroomTask.status=ACTIVE` 且仍值得关注的任务；模板当前 `task.status` 不再控制已发布 classroomTask 的学生可见性，归档班级、已关闭或其它非 ACTIVE 课堂任务默认不显示。
-  - 每个返回班级项的 `classroom` 现稳定补充 `teacher:{id,name,employeeNo}` 摘要，仅供学生端展示任课教师等信息；不返回教师 email 等敏感字段；教师记录缺失或空白字段时回落 `name=null, employeeNo=null`，但保留 `teacher.id`。
-  - 每个返回班级项的 `classroom` 现稳定补充 `course:{id,name,term,code}` 摘要，仅供学生端后续展示课程名、学期等班级级信息；不返回 `courseLabel/createdBy/status/createdAt/updatedAt`；课程记录缺失或空白字段时回落 `name=null, term=null, code=null`，但保留 `course.id`。
-  - 学生看板自动降噪口径：有 `dueAt` 时截止后 30 天内仍显示并标记 `RECENTLY_EXPIRED`，超过 30 天为 `HISTORICAL` 且默认隐藏；无 `dueAt` 时 `publishedAt` 90 天内显示，超过 90 天为 `HISTORICAL` 且默认隐藏；缺失/非法时间按 `HISTORICAL` 处理。
-  - `includeHistorical=true` 为后续前端“显示历史任务”开关预留：返回当前 ACTIVE 班级下的 `CURRENT + RECENTLY_EXPIRED + HISTORICAL` 任务，但仍不返回归档班级或非 ACTIVE classroomTask。
-  - 每个 task item 返回 `studentVisibilityStatus(CURRENT|RECENTLY_EXPIRED|HISTORICAL)` 与 `isHistorical`；过滤后无可见任务的班级不返回空分组，`total` 按最终返回班级分组统计。
-  - `completionStatus` 只基于当前学生该课堂任务的 `myLatestSubmission.submissionId` 查询反馈；不会回退历史提交，也不会混入其它 `classroomTask` 或同 `taskId` 其它课堂任务的反馈。
-  - 只纳入 `FeedbackSource.TEACHER` 与 `FeedbackSource.AI`；`SYSTEM` 不参与完成情况判断。
-  - 来源优先级为 `TEACHER > AI`；同一来源多条反馈取最严重 `ERROR > WARN > INFO`。
-  - 最终映射：`INFO -> QUALIFIED`，`WARN -> QUALIFIED_WITH_WARNINGS`，`ERROR -> UNQUALIFIED`；无提交返回 `NOT_SUBMITTED`；有最新提交但无 TEACHER/AI 反馈返回 `NO_FEEDBACK`。
-- 学生任务详情完成情况契约（后端已完成，前端待后续阶段接入）：
-  - `GET /api/classrooms/:classroomId/tasks/:classroomTaskId/my-task-detail` 顶层新增 `completionStatus`。
-  - `completionStatus` 只基于顶层 `latest.submissionId` 查询完整 TEACHER/AI 反馈；不受历史 `submissions[]`、其它 `classroomTask`、`includeFeedbackItems=false` 或 `feedbackLimit` 截断影响。
-  - 规则与学生看板一致：`TEACHER > AI`，同源多条取最严重 `ERROR > WARN > INFO`；`INFO -> QUALIFIED`，`WARN -> QUALIFIED_WITH_WARNINGS`，`ERROR -> UNQUALIFIED`；无 latest 返回 `NOT_SUBMITTED`，latest 无 TEACHER/AI 反馈返回 `NO_FEEDBACK`。
-- P1 班级归档/删除契约（后端阶段一已完成，前端待后续阶段接入）：
-  - 状态口径：`Classroom.status` 仅 `ACTIVE | ARCHIVED`，支持通过 `PATCH /api/classrooms/:id` 的 `status` 字段执行归档/恢复。
-  - 兼容接口：保留 `POST /api/classrooms/:id/archive`，内部已收口到统一状态更新链路。
-  - 新增删除接口：`DELETE /api/classrooms/:id`（teacher only + owner only）。
-  - 删除允许条件（主规则）：`ClassroomTask.exists({ classroomId }) === false` 且 `Enrollment.exists({ classroomId }) === false`。
-  - 删除禁止条件：存在任一 `ClassroomTask` 或任一 `Enrollment`（包括 `REMOVED` 历史）即不可删，只能归档。
-  - 辅助一致性校验：`studentIds` 仅作防御性检查，不作为唯一主判定来源。
-  - 非空删除错误口径：`409 Conflict`，`code=CLASSROOM_NOT_EMPTY`，message=`该班级已有成员或任务记录，不能删除，只能归档`。
-- P1 课程归档/删除契约（后端阶段一已完成，前端待后续阶段接入）：
-  - 状态口径：`Course.status` 仅 `ACTIVE | ARCHIVED`，支持通过 `PATCH /api/courses/:id` 的 `status` 字段执行归档/恢复。
-  - 兼容接口：保留 `POST /api/courses/:id/archive`，内部已收口到统一状态更新链路。
-  - 新增删除接口：`DELETE /api/courses/:id`（teacher only + owner only）。
-  - 删除允许条件：`Classroom.exists({ courseId }) === false`。
-  - 删除禁止条件：存在任一 `Classroom` 引用课程即不可删，只能归档。
-  - 非空删除错误口径：`409 Conflict`，`code=COURSE_NOT_EMPTY`，message=`该课程下已有班级记录，不能删除，只能归档`。
-- P1 课堂任务生命周期状态流契约（后端已完成，前端待后续阶段接入）：
-  - `ClassroomTask` 新增状态字段：`ACTIVE | CLOSED | RECALLED`，默认 `ACTIVE`。
-  - 新增状态流转接口：`PATCH /api/classrooms/:classroomId/tasks/:classroomTaskId/status`（教师端）。
-  - 流转规则：允许 `ACTIVE -> CLOSED`、`ACTIVE -> RECALLED`、`CLOSED -> ACTIVE`；`RECALLED` 前必须无提交；`RECALLED` 保持封闭不可恢复，且 `CLOSED -> RECALLED` 不允许。
-  - 恢复提交语义：`CLOSED -> ACTIVE` 仅恢复状态，不自动修改 `dueAt/settings.allowLate/settings.maxAttempts`。
-  - 前端现状说明：课堂任务页已接入“关闭任务”，`CLOSED -> ACTIVE` 的“恢复提交”按钮尚未接入（后端契约已可用）。
-  - 提交门禁同步：`CLOSED/RECALLED` 状态下学生提交入口拒绝新提交。
-  - 保持边界：不做物理删除、不放宽 `unique(classroomId,taskId)`，本阶段不支持同模板同班级重复发布。
-- P1 课堂任务实例级参数编辑契约（后端已完成，前端待后续阶段接入）：
-  - 新增实例配置更新接口：`PATCH /api/classrooms/:classroomId/tasks/:classroomTaskId`（教师端）。
-  - 仅允许修改：`dueAt`、`settings.allowLate`、`settings.maxAttempts`；不允许修改 `taskId/classroomId/publishedAt/createdBy/status`。
-  - 状态边界：`ACTIVE/CLOSED` 允许编辑，`RECALLED` 拒绝编辑；状态流仍由 `PATCH .../status` 独立承载。
-  - 字段清空语义：`dueAt` 与 `maxAttempts` 支持 `null/空字符串` 清空（后端收敛为 unset），不落脏值。
-- P1 发布候选模板查询索引补强（后端已完成）：
-  - `Task` 新增两组复合索引，分别覆盖发布候选查询的 `onlyMine` 分支与共享可见分支。
-  - 本次仅补强索引，不改接口契约、不改查询逻辑、不改前端接入口径。
-- P1 班级发布候选查询契约升级（后端已完成，前端待后续阶段接入）：
-  - 新增 `GET /api/classrooms/:id/publishable-task-templates`，专用于班级发布页候选模板分页查询。
-  - 每个候选模板 item 返回 `publisher:{id,name?}|null`，只含 `id/name`；前端 `PublishClassroomTaskForm` 可基于 `publisher + currentUserId` 在候选列表与已选模板摘要显示非本人模板来源。
-  - 固定内置规则：只返回当前教师可见模板（自己私有+自己共享+他人共享）、只返回 `status=PUBLISHED`、自动排除当前班级已发布过的 `taskId`。
-  - 支持 query：`courseLabel`、`onlyMine`、`knowledgeModule`、`stage`、`page`、`limit`。
-  - 当请求未显式传 `courseLabel` 且班级所属课程存在 `courseLabel` 时，默认排序优先课程分类匹配模板，再按 `updatedAt/createdAt` 倒序。
-- P1 Course 课程分类字段契约（后端已完成，前端待后续阶段接入）：
-  - `Course.courseLabel` 已接入 schema/DTO/service/response，字段可选，空白输入会 trim 并按未设置处理。
-  - `Course.courseLabel` 与 `Task.courseLabel` 共用同一套标准值域，保持“课程分类坐标”一致，未引入 `Task -> Course` 外键绑定。
-- P1 Task 课程分类契约（后端已完成，前端待后续阶段接入）：
-  - `Task.courseLabel` 已接入 schema/DTO/service/query/response；支持创建、更新、详情返回、列表返回与按标签筛选。
-  - 字段保持可选，空值语义为“未分类/通用模板”；旧数据不做迁移脚本，保持兼容。
-  - `courseLabel` 仅用于任务模板治理，不参与权限、不参与发布到班级一致性校验，不限制跨课程复用。
-- P1 Task 模板可见性与视图范围契约（后端已完成，前端待后续阶段接入）：
-  - `Task.visibility` 已接入 schema/DTO/service/query/response；值域 `PRIVATE|SHARED`，新建默认 `PRIVATE`。
-  - 旧任务缺省 `visibility` 按 `SHARED` 兼容，避免历史模板在升级后大面积隐身。
-  - 列表 query 新增 `scope(mine|shared|all)`，默认 `mine`（默认行为已从“公共池倾向”切换为“只看我的模板”）。
-  - `scope` 语义：`mine=我的全部模板`；`shared=共享池(包含我自己设为 SHARED 的模板)`；`all=我的全部+共享池`。
-  - 模板详情读取同步可见性：作者可读、他人仅可读 `SHARED`（含旧数据兼容）、他人 `PRIVATE` 不可读。
-  - 共享仅影响读可见性，不改变“编辑/发布仍为作者权限”的所有权边界。
-- P1 任务模板列表检索契约升级（后端已完成，前端待后续阶段接入）：
-  - `GET /api/learning-tasks/tasks` 已将 `status/knowledgeModule/stage` 正式纳入数据库级过滤，并可与 `scope/courseLabel/page/limit` 叠加。
-  - 保持原有分页结构与默认排序不变；本次仅升级后端查询契约，前端后续再把这三项从本地过滤切换到 query 透传。
-- P0 用户资料闭环（已完成）：
-  - `PATCH /api/users/me`：已落地可用；仅允许更新 `name/studentNo/employeeNo`。
-  - `GET /api/users/me` 与 `PATCH /api/users/me` 返回口径一致，均不返回 `passwordHash`。
-  - `POST /api/users/me/change-password`：已落地可用；需校验 `currentPassword`，`newPassword` 执行 trim 非空与长度校验，且不得与当前密码相同；成功后保留当前会话并失效其它历史会话。
-  - `POST /api/auth/forgot-password`：已落地可用；无论邮箱是否存在、用户是否允许登录，都返回通用成功提示；正常用户会收到 30 分钟有效的一次性重置链接；同一真实用户邮箱 60 秒内重复请求不会新建 token、不会失效旧 token、也不会重复发邮件。
-  - `POST /api/auth/reset-password`：已落地可用；验证 `tokenHash`、`expiresAt`、`usedAt` 和用户状态后更新 `passwordHash`，并清理该用户全部 sessions；不会自动登录。
-- P0 班级成员列表（已完成）：
-  - `GET /api/classrooms/:id/students`
-  - teacher owner 可访问；成员来源只认 Enrollment（`role=STUDENT`）；默认返回 ACTIVE，`includeRemoved=1/true` 时返回 ACTIVE+REMOVED；默认排序 `joinedAt desc, _id desc`；不读取 `classroom.studentIds`。
-- P0 课堂任务提交列表（已完成）：
-- `GET /api/classrooms/:classroomId/tasks/:classroomTaskId/submissions`
-- 教师课堂任务提交列表默认只返回当前 Enrollment `ACTIVE` 学生的 submissions；已移除学生历史 submissions 保留但默认不出现在列表与 total 统计中。
-  - teacher owner 可访问；只按 `classroomTaskId` 读取；默认排序 `submittedAt desc, _id desc`；无 job 时 `aiFeedbackStatus=NOT_REQUESTED`；`items[*].feedbackCount` 为该 submission 在 Feedback 集合中的总条数（按当前页 submissionIds 批量聚合），无反馈返回 `0`；不返回 `passwordHash/content.codeText`。
-- P0 提交详情稳定读源（已完成）：
-  - `GET /api/learning-tasks/submissions/:id`
-  - 学生本人可访问；若 `classroomTaskId` 存在，仅所属班级 owner teacher 可访问；若 `classroomTaskId` 为空，仅 task owner teacher 可访问。
-  - 返回 submission detail 稳定读源字段（`taskTitle/studentName/content.language/content.codeText/submittedAt/attemptNo/isLate/lateBySeconds/aiFeedbackStatus`）。
-  - 无 job 时 `aiFeedbackStatus=NOT_REQUESTED`。
-- 教师反馈标签词表收口（已完成）：
-  - `POST /api/learning-tasks/submissions/:id/feedback`
-  - `tags` 与 AI feedback 共用统一词表（同 `feedback-normalizer` 词表来源）；包含未定义标签时返回 `400` + `Invalid tag(s), please select from predefined tags`。
-  - `tags` 未传或清洗后为空时，后端按 `other` 持久化。
-- 教师反馈修改契约（已完成）：
-  - `PATCH /api/learning-tasks/submissions/:submissionId/feedback/:feedbackId`
-  - 仅 teacher 可调用；教师管理权限与 submission detail 口径一致：有 `classroomTaskId` 时按课堂任务所属班级 owner teacher，缺省时按 task owner teacher。
-  - 仅允许修改 `TEACHER` 来源反馈；`AI/SYSTEM` 反馈保持只读。
-  - `Feedback.createdBy` 为 optional 兼容字段；新建 `TEACHER` 反馈写入当前教师，旧 `TEACHER` 反馈缺失时允许有管理权限的教师更新并补写。
-- AI 默认联调模式（已固化）：
-  - 推荐 `Stub + worker`：`AI_FEEDBACK_PROVIDER=stub` 且 `AI_FEEDBACK_WORKER_ENABLED=true`。
-  - worker 轮询默认间隔为 `10000ms`（`AI_FEEDBACK_WORKER_INTERVAL_MS` 可覆盖）；空跑 tick（processed/succeeded/failed/dead 全 0）默认不输出结果 DEBUG 日志。
-  - 产品级 request 仅负责创建/确保 job（新建时为 `PENDING`），worker 负责消费到 `SUCCEEDED`。
-  - `process-once` 仅用于 debug/ops，不作为默认交付运行模式。
-  - Real OpenRouter 路径已支持基于 task 上下文（`title/description/rubric`）分析 submission，且 prompt/协议已明确“默认 1 条、必要时最多 2 条、同类问题合并、错误优先、禁止表扬噪音”。
-  - Real Bailian 路径已接入阿里云百炼 OpenAI-compatible 接口；OpenRouter 保留，provider 通过 `AI_FEEDBACK_PROVIDER=stub|openrouter|bailian` 切换。
-  - Stub provider 已完成统一 context 契约签名适配，但规则逻辑与英文输出保持原样；OpenAI provider 当前仍为占位实现。
-- AI 指标看板（已存在）：
-  - `GET /api/classrooms/:classroomId/tasks/:classroomTaskId/ai-metrics`
-- Z3 学生端聚合详情：
-  - `GET /api/classrooms/:classroomId/tasks/:classroomTaskId/my-task-detail`
-  - 顶层新增 `participationStatus` 只读态信号；直链读取历史任务/提交/反馈保持可用，前端后续可用该字段展示只读提示并禁用提交/AI 请求入口。
-- AA 班级周报（teacher）：
-  - `GET /api/classrooms/:classroomId/weekly-report`
-- AB 课程总览（teacher）：
-  - `GET /api/courses/:courseId/overview`
-  - 窗口契约：默认 `window=all`；后端兼容 `all/7d/24h/1h`；`all` 语义为无时间下界过滤。
-  - 后端 `limit` 契约上限已从 `50` 调整为 `100`，默认 `limit=20` 保持不变；用于匹配前端课程总览页显式请求 `limit=100`。
-  - 排序契约：兼容 `studentsCount/submissionRate/aiSuccessRate/pendingJobs/failedJobs`，并新增 `overallSubmissionCoverage`。
-  - `items[*].submissionRate` 保持兼容语义：`distinctStudentsSubmitted / studentsCount`（至少提交过一次的学生覆盖率）。
-  - `items[*].overallSubmissionCoverage` 新增主比较指标：`sum(distinctStudentsSubmitted per classroomTask) / (studentsCount * publishedClassroomTasks)`；当分母为 0 返回 `0`。
-  - `items[*].ai.aiSuccessRate` 空值口径收口：`jobsTotal=0 -> null`，`jobsTotal>0 -> succeededJobs/jobsTotal`。
-- Z4 学习轨迹（teacher）：
-  - `GET /api/classrooms/:classroomId/tasks/:classroomTaskId/learning-trajectory`
-  - 后端 `limit` 契约上限已从 `50` 调整为 `100`，默认 `limit=20` 保持不变；本阶段仅补稳定后端契约，不调整前端默认展示。
-  - `items[*]` 已返回结构化学生公开信息 `student:{id,name,studentNo,email}`（兼容 `studentName`），且未提交学生同样返回该信息。
-  - `includeAttempts=true` 时 `items[*].attempts[*]` 已返回 `feedbackCount`（Feedback 全来源总条数，AI/TEACHER/SYSTEM，不区分来源）；同一 attempt 下 `feedbackSummary.totalItems` 继续表示 AI 摘要条目数。
-- Z5 课堂复盘包（teacher）：
-  - `GET /api/classrooms/:classroomId/tasks/:classroomTaskId/review-pack`
-  - Query：`window, topK, examplesPerTag`（已移除 `includeStudentTiers`、`includeTeacherScript`）
-  - 响应核心域：`overview/commonIssues/examples/studentTiers`（已移除 `actionItems/teacherScript`）
-  - `examples` 已收口为去重典型样例池：同一 feedback 命中多标签时仅出现一次（按 `feedbackId` 去重），并保留 `primaryTag/matchedTags/tags` 解释标签归属。
-  - `topTags` 统计口径不变：多标签 feedback 仍按标签展开分别计数。
-  - `studentTiers` 判定：成员集只取 Enrollment ACTIVE；窗口过滤以 `submission.createdAt` 为准；每个学生只看该 `classroomTaskId` 下窗口内最新提交；`good=AiFeedbackStatus.Succeeded 且 latestErrorCount=0`，`watch=其余已提交`，`notSubmitted=窗口内无提交`；`latestErrorCount` 仅统计该最新提交的 `AI+ERROR`。
-  - `studentTiers.good/watch/notSubmitted[*]` 均返回可展示学生信息：`studentId/studentName/studentNo`（`studentName` 缺失回落 `未知学生`）；三组默认返回当前 ACTIVE 学生全集分层，不再由后端做预览截断，前端继续负责折叠/展开展示。
-- Z6 过程性评价（teacher）：
-  - `GET /api/classrooms/:classroomId/process-assessment`
-  - `GET /api/classrooms/:classroomId/process-assessment.csv`
-  - `items[*]` 已返回可展示学生信息：`studentId/studentName/studentNo`（`studentName` 缺失回落 `未知学生`，`studentNo` 缺失返回 `null`）。
-  - JSON 与 CSV 均支持 optional query `excludedTaskIds`（逗号分隔或 repeated query），用于临时排除指定课堂任务后重新计算；返回结构与 CSV 列不变，前端任务选择 UI 尚未实现。
-  - `excludedTaskIds` 在 window 任务范围确定后应用；被排除任务不参与 `publishedTasksCount`、提交/迟交、AI job、AI feedback、`topTags` 与 score/risk 计算。
-  - 0 次提交学生仍保留在过程性评价列表中，但 `score` 固定为 `0`，不会因 `avgErrorItems=0` 获得 codeQualityProxy 分。
-  - CSV 口径已对齐 JSON：列前置为 `studentName,studentNo,studentId,...`（保留 `studentId` 便于核对链路）。
-  - CSV 导出内容现以 UTF-8 BOM（`\uFEFF`）开头，并保持 `Content-Type: text/csv; charset=utf-8`，用于改善 Windows Excel 直接打开时的中文乱码兼容性。
-- 统计窗口收口·阶段一（后端契约已落地，前端待跟进）：
-  - 范围：`weekly-report`、`process-assessment`（含 CSV）、`learning-trajectory`、`review-pack`、`course-overview`。
-  - 默认窗口：以上接口默认值统一为 `all`。
-  - `all` 语义：当前资源边界内的全部可统计历史记录；实现为“无时间下界过滤”，非固定天数伪全量。
-  - 后端兼容窗口：
-    - 班级级：`weekly-report` 支持 `all/7d/30d/24h/1h`，`process-assessment` 支持 `all/7d/30d/term`。
-    - 单任务级：`learning-trajectory` 与 `review-pack` 支持 `all/7d/24h/30d`。
-    - 课程级：`course-overview` 支持 `all/7d/24h/1h`。
-  - 前端状态：当前前端主展示与默认值尚未全部切换到上述新策略，下一阶段前端再收口。
-  - 保护边界：`ai-metrics` 窗口集合保持 `1h/24h/7d`，本阶段未引入 `all`。
-- Z7 截止/迟交：
-  - 提交门禁：`POST /api/classrooms/:classroomId/tasks/:classroomTaskId/submissions` 在到期且不允许迟交时返回 `LATE_SUBMISSION_NOT_ALLOWED`
-  - 参与状态门禁：学生新提交与学生手工请求 AI 均要求 `classroom.status=ACTIVE`、`classroomTask.status=ACTIVE`；模板当前 `task.status` 不再控制已发布 classroomTask 的学生运行态，模板归档不会阻断既有课堂任务的提交或 AI 请求；归档班级、关闭/撤回课堂任务仍只保留只读查看，不允许继续提交或请求 AI，拒绝时不创建 submission/AI job。
-  - 提交冷却：默认 `LEARNING_TASK_SUBMISSION_COOLDOWN_MS=300000`；按同一 `studentId + classroomTaskId` 判定，命中时返回 `429` + `SUBMISSION_COOLDOWN_ACTIVE`（含 `retryAfterMs/retryAfterSeconds`），`0` 表示关闭冷却。
-  - 迟交持久字段：`Submission.submittedAt / isLate / lateBySeconds`
-  - late 维度已贯穿周报、课程总览、学习轨迹、复盘包、过程性评价、快照导出等聚合接口
-- Z9 教学数据快照导出（teacher）：
-  - `GET /api/classrooms/:classroomId/export/snapshot`
-- 运维收口产物：
-  - `docs/handoff/handoff-backend-testing-playbook.md`
-
-## 5) P0 后端补齐状态（交接边界）
-
-已完成（可供前端/BFF 正式接入）：
-
-- 用户资料字段补齐：`name/studentNo/employeeNo`。
-- `/api/users/me` 更新能力：`PATCH` 真实可用，且与 `GET` 返回口径一致。
-- 当前用户自助改密能力：`POST /api/users/me/change-password` 真实可用（旧密码校验 + 新密码校验 + 会话失效策略）。
-- 邮箱忘记密码/重置密码能力：`POST /api/auth/forgot-password` + `POST /api/auth/reset-password` 已可供后续前端忘记密码页接入；后端已增加同一真实邮箱 60 秒发送冷却。
-- 班级正式成员列表：`GET /api/classrooms/:id/students`（Enrollment ACTIVE SoT）。
-- 课堂任务实例提交列表：`GET /api/classrooms/:classroomId/tasks/:classroomTaskId/submissions`（`classroomTaskId` 隔离）。
-- 提交详情稳定读源：`GET /api/learning-tasks/submissions/:id`（用于 Teacher/Student submission detail 主视图读取，不再主要依赖 query 透传）。
-
-明确未完成（本阶段不包含）：
-
-- 产品化管理员批量导入用户能力（后台页面/管理接口/Excel 上传）。
+- 公开注册。
+- 产品化管理员批量导入用户能力。
 - 教师手工添加学生到班级。
 - 提交/成员列表高级筛选与全文搜索。
 - 额外导出能力（如提交列表 CSV）。
 
-运维脚本补充说明（非产品化后台能力）：
+## 6) 细节文档索引
 
-- 脚本入口：`backend/scripts/import-users.ts`。
-- npm 用法：`npm run import-users -- --file="..." [--dry-run] [--reset-password]`。
-- 输入格式：仅支持 CSV（不支持 xlsx）。
-- 典型用途：在“不开放注册”基线下，供运维/管理员离线批量导入用户账号。
-- 初始化密码：`cqupt@ai`。
-- 默认行为：已存在用户不重置密码；仅显式传入 `--reset-password` 时才重置。
-- 支持 `--dry-run` 只校验与统计，不写库。
+- 接口地图：`docs/handoff/handoff-backend-api-map.md`
+- DTO 写接口速查：`docs/handoff/handoff-backend-dto-cheatsheet.md`
+- 配置矩阵与运行模式：`docs/handoff/handoff-backend-config-matrix.md`
+- Service 职责地图：`docs/handoff/handoff-backend-service-map.md`
+- 测试作战手册：`docs/handoff/handoff-backend-testing-playbook.md`
+- 关键决策记录：`docs/handoff/handoff-backend-decisions.md`
+- 前端入口：`docs/handoff/handoff-frontend-INDEX.md`
