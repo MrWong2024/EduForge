@@ -56,8 +56,12 @@ type ProcessAssessmentResponse = {
     studentNo: string | null;
     submittedTasksCount: number;
     submissionsCount: number;
+    iteratedTasksCount: number;
     aiRequestedCount: number;
     aiSucceededCount: number;
+    aiRequestedTasksCount: number;
+    aiSucceededTasksCount: number;
+    avgWarnItems: number;
     riskLevel: 'LOW' | 'MEDIUM' | 'HIGH';
     score: number;
     topTags: Array<{ tag: string; count: number }>;
@@ -455,8 +459,8 @@ describe('Classroom Process Assessment (e2e)', () => {
     expect(body.window).toBe('all');
     expect(body.total).toBeGreaterThanOrEqual(2);
     expect(body.rubric).toEqual({
-      submittedTasksRate: 0.4,
-      submissionsCount: 0.2,
+      submittedTasksRate: 0.45,
+      submissionsCount: 0.15,
       aiRequestQualityProxy: 0.2,
       codeQualityProxy: 0.2,
     });
@@ -502,7 +506,7 @@ describe('Classroom Process Assessment (e2e)', () => {
     expect(contentType).toContain('text/csv');
     const csvText = csvResponse.text ?? '';
     expect(csvText).toContain(
-      'studentName,studentNo,studentId,score,riskLevel,submittedTasksRate,submissionsCount,lateSubmissionsCount,lateTasksCount,aiRequestedCount,aiSucceededCount,avgErrorItems,topTags',
+      'studentName,studentNo,studentId,score,riskLevel,submittedTasksRate,submissionsCount,iteratedTasksCount,lateSubmissionsCount,lateTasksCount,aiRequestedCount,aiSucceededCount,aiRequestedTasksCount,aiSucceededTasksCount,avgWarnItems,avgErrorItems,topTags',
     );
     expect(csvText).toContain('学生甲');
     expect(csvText).toContain('S-A-001');

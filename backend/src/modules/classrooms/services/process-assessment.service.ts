@@ -34,6 +34,7 @@ type SubmissionByStudentAgg = {
   _id: Types.ObjectId;
   submissionsCount: number;
   submittedTasksCount: number;
+  iteratedTasksCount: number;
   lateSubmissionsCount: number;
   lateTasksCount: number;
   submissionIds: Types.ObjectId[];
@@ -42,10 +43,14 @@ type JobsByStudentAgg = {
   _id: Types.ObjectId;
   aiRequestedCount: number;
   aiSucceededCount: number;
+  aiRequestedTasksCount: number;
+  aiSucceededTasksCount: number;
 };
 type FeedbackTotalsByStudentAgg = {
   _id: Types.ObjectId;
+  reviewedTasksCount: number;
   totalFeedbackItems: number;
+  totalWarnItems: number;
   totalErrorItems: number;
 };
 type FeedbackTagsByStudentAgg = {
@@ -70,11 +75,15 @@ type ProcessAssessmentItem = {
   publishedTasksCount: number;
   submittedTasksRate: number;
   submissionsCount: number;
+  iteratedTasksCount: number;
   lateSubmissionsCount: number;
   lateTasksCount: number;
   aiRequestedCount: number;
   aiSucceededCount: number;
+  aiRequestedTasksCount: number;
+  aiSucceededTasksCount: number;
   avgFeedbackItems: number;
+  avgWarnItems: number;
   avgErrorItems: number;
   topTags: Array<{ tag: string; count: number }>;
   riskLevel: ProcessAssessmentRiskLevel;
@@ -105,15 +114,11 @@ export class ProcessAssessmentService {
   // v1 rubric constants:
   // score is process-assessment reference only and must not be used as final grade arbitration.
   private static readonly RUBRIC = {
-    submittedTasksRate: 0.4,
-    submissionsCount: 0.2,
+    submittedTasksRate: 0.45,
+    submissionsCount: 0.15,
     aiRequestQualityProxy: 0.2,
     codeQualityProxy: 0.2,
   } as const;
-  // v1 risk thresholds:
-  // HIGH: submittedTasksRate < 0.4 OR avgErrorItems >= 3
-  // MEDIUM: submittedTasksRate < 0.7 OR avgErrorItems >= 1
-  // LOW: otherwise
   private static readonly RISK_ORDER_MAP: Record<
     ProcessAssessmentRiskLevel,
     number
@@ -197,10 +202,14 @@ export class ProcessAssessmentService {
       'riskLevel',
       'submittedTasksRate',
       'submissionsCount',
+      'iteratedTasksCount',
       'lateSubmissionsCount',
       'lateTasksCount',
       'aiRequestedCount',
       'aiSucceededCount',
+      'aiRequestedTasksCount',
+      'aiSucceededTasksCount',
+      'avgWarnItems',
       'avgErrorItems',
       'topTags',
     ];
@@ -216,10 +225,14 @@ export class ProcessAssessmentService {
         item.riskLevel,
         item.submittedTasksRate,
         item.submissionsCount,
+        item.iteratedTasksCount,
         item.lateSubmissionsCount,
         item.lateTasksCount,
         item.aiRequestedCount,
         item.aiSucceededCount,
+        item.aiRequestedTasksCount,
+        item.aiSucceededTasksCount,
+        item.avgWarnItems,
         item.avgErrorItems,
         topTags,
       ]
@@ -347,42 +360,56 @@ export class ProcessAssessmentService {
               },
               {
                 $group: {
-                  _id: '$studentId',
+                  _id: {
+                    studentId: '$studentId',
+                    classroomTaskId: '$classroomTaskId',
+                  },
                   submissionsCount: { $sum: 1 },
-                  submittedTaskIds: { $addToSet: '$classroomTaskId' },
                   lateSubmissionsCount: {
                     $sum: {
                       $cond: [{ $ifNull: ['$isLate', false] }, 1, 0],
                     },
                   },
-                  lateTaskIdsRaw: {
-                    $addToSet: {
-                      $cond: [
-                        { $ifNull: ['$isLate', false] },
-                        '$classroomTaskId',
-                        null,
-                      ],
+                  hasLateTask: {
+                    $max: {
+                      $cond: [{ $ifNull: ['$isLate', false] }, 1, 0],
                     },
                   },
                   submissionIds: { $addToSet: '$_id' },
                 },
               },
               {
+                $group: {
+                  _id: '$_id.studentId',
+                  submissionsCount: { $sum: '$submissionsCount' },
+                  submittedTasksCount: { $sum: 1 },
+                  iteratedTasksCount: {
+                    $sum: {
+                      $cond: [{ $gte: ['$submissionsCount', 2] }, 1, 0],
+                    },
+                  },
+                  lateSubmissionsCount: { $sum: '$lateSubmissionsCount' },
+                  lateTasksCount: { $sum: '$hasLateTask' },
+                  submissionIdBuckets: { $push: '$submissionIds' },
+                },
+              },
+              {
                 $project: {
                   _id: 1,
                   submissionsCount: 1,
-                  submittedTasksCount: { $size: '$submittedTaskIds' },
+                  submittedTasksCount: 1,
+                  iteratedTasksCount: 1,
                   lateSubmissionsCount: 1,
-                  lateTasksCount: {
-                    $size: {
-                      $filter: {
-                        input: '$lateTaskIdsRaw',
-                        as: 'taskId',
-                        cond: { $ne: ['$$taskId', null] },
+                  lateTasksCount: 1,
+                  submissionIds: {
+                    $reduce: {
+                      input: '$submissionIdBuckets',
+                      initialValue: [],
+                      in: {
+                        $setUnion: ['$$value', '$$this'],
                       },
                     },
                   },
-                  submissionIds: 1,
                 },
               },
             ] as PipelineStage[])
@@ -415,8 +442,29 @@ export class ProcessAssessmentService {
                 },
               },
               {
+                $lookup: {
+                  from: 'submissions',
+                  localField: 'submissionId',
+                  foreignField: '_id',
+                  pipeline: [
+                    { $project: { _id: 1, classroomTaskId: 1, studentId: 1 } },
+                  ],
+                  as: 'submission',
+                },
+              },
+              { $unwind: '$submission' },
+              {
+                $match: {
+                  'submission.classroomTaskId': { $in: effectiveTaskIds },
+                  'submission.studentId': { $in: pageStudentObjectIds },
+                },
+              },
+              {
                 $group: {
-                  _id: '$studentId',
+                  _id: {
+                    studentId: '$studentId',
+                    classroomTaskId: '$submission.classroomTaskId',
+                  },
                   aiRequestedCount: { $sum: 1 },
                   aiSucceededCount: {
                     $sum: {
@@ -425,6 +473,19 @@ export class ProcessAssessmentService {
                         1,
                         0,
                       ],
+                    },
+                  },
+                },
+              },
+              {
+                $group: {
+                  _id: '$_id.studentId',
+                  aiRequestedCount: { $sum: '$aiRequestedCount' },
+                  aiSucceededCount: { $sum: '$aiSucceededCount' },
+                  aiRequestedTasksCount: { $sum: 1 },
+                  aiSucceededTasksCount: {
+                    $sum: {
+                      $cond: [{ $gt: ['$aiSucceededCount', 0] }, 1, 0],
                     },
                   },
                 },
@@ -443,7 +504,16 @@ export class ProcessAssessmentService {
                   from: 'submissions',
                   localField: 'submissionId',
                   foreignField: '_id',
-                  pipeline: [{ $project: { _id: 1, studentId: 1 } }],
+                  pipeline: [
+                    {
+                      $project: {
+                        _id: 1,
+                        studentId: 1,
+                        classroomTaskId: 1,
+                        createdAt: 1,
+                      },
+                    },
+                  ],
                   as: 'submission',
                 },
               },
@@ -451,6 +521,59 @@ export class ProcessAssessmentService {
               {
                 $match: {
                   'submission.studentId': { $in: pageStudentObjectIds },
+                  'submission.classroomTaskId': { $in: effectiveTaskIds },
+                },
+              },
+              {
+                $group: {
+                  _id: {
+                    studentId: '$submission.studentId',
+                    classroomTaskId: '$submission.classroomTaskId',
+                    submissionId: '$submissionId',
+                  },
+                  submissionCreatedAt: { $max: '$submission.createdAt' },
+                  feedbackCreatedAt: { $max: '$createdAt' },
+                  feedbackItems: { $sum: 1 },
+                  warnItems: {
+                    $sum: {
+                      $cond: [
+                        { $eq: ['$severity', FeedbackSeverity.Warn] },
+                        1,
+                        0,
+                      ],
+                    },
+                  },
+                  errorItems: {
+                    $sum: {
+                      $cond: [
+                        { $eq: ['$severity', FeedbackSeverity.Error] },
+                        1,
+                        0,
+                      ],
+                    },
+                  },
+                  tagBuckets: { $push: { $ifNull: ['$tags', []] } },
+                },
+              },
+              {
+                $sort: {
+                  '_id.studentId': 1,
+                  '_id.classroomTaskId': 1,
+                  submissionCreatedAt: -1,
+                  feedbackCreatedAt: -1,
+                  '_id.submissionId': -1,
+                },
+              },
+              {
+                $group: {
+                  _id: {
+                    studentId: '$_id.studentId',
+                    classroomTaskId: '$_id.classroomTaskId',
+                  },
+                  feedbackItems: { $first: '$feedbackItems' },
+                  warnItems: { $first: '$warnItems' },
+                  errorItems: { $first: '$errorItems' },
+                  tagBuckets: { $first: '$tagBuckets' },
                 },
               },
               {
@@ -458,27 +581,33 @@ export class ProcessAssessmentService {
                   totals: [
                     {
                       $group: {
-                        _id: '$submission.studentId',
-                        totalFeedbackItems: { $sum: 1 },
-                        totalErrorItems: {
-                          $sum: {
-                            $cond: [
-                              { $eq: ['$severity', FeedbackSeverity.Error] },
-                              1,
-                              0,
-                            ],
-                          },
-                        },
+                        _id: '$_id.studentId',
+                        reviewedTasksCount: { $sum: 1 },
+                        totalFeedbackItems: { $sum: '$feedbackItems' },
+                        totalWarnItems: { $sum: '$warnItems' },
+                        totalErrorItems: { $sum: '$errorItems' },
                       },
                     },
                   ],
                   tags: [
+                    {
+                      $project: {
+                        _id: 1,
+                        tags: {
+                          $reduce: {
+                            input: '$tagBuckets',
+                            initialValue: [],
+                            in: { $concatArrays: ['$$value', '$$this'] },
+                          },
+                        },
+                      },
+                    },
                     { $match: { tags: { $exists: true, $ne: [] } } },
                     { $unwind: '$tags' },
                     {
                       $group: {
                         _id: {
-                          studentId: '$submission.studentId',
+                          studentId: '$_id.studentId',
                           tag: '$tags',
                         },
                         count: { $sum: 1 },
@@ -509,6 +638,7 @@ export class ProcessAssessmentService {
       {
         submissionsCount: number;
         submittedTasksCount: number;
+        iteratedTasksCount: number;
         lateSubmissionsCount: number;
         lateTasksCount: number;
       }
@@ -517,6 +647,7 @@ export class ProcessAssessmentService {
       submissionMap.set(row._id.toString(), {
         submissionsCount: row.submissionsCount,
         submittedTasksCount: row.submittedTasksCount,
+        iteratedTasksCount: row.iteratedTasksCount,
         lateSubmissionsCount: row.lateSubmissionsCount,
         lateTasksCount: row.lateTasksCount,
       });
@@ -527,12 +658,16 @@ export class ProcessAssessmentService {
       {
         aiRequestedCount: number;
         aiSucceededCount: number;
+        aiRequestedTasksCount: number;
+        aiSucceededTasksCount: number;
       }
     >();
     for (const row of jobsAgg) {
       jobMap.set(row._id.toString(), {
         aiRequestedCount: row.aiRequestedCount,
         aiSucceededCount: row.aiSucceededCount,
+        aiRequestedTasksCount: row.aiRequestedTasksCount,
+        aiSucceededTasksCount: row.aiSucceededTasksCount,
       });
     }
 
@@ -540,13 +675,17 @@ export class ProcessAssessmentService {
     const feedbackTotalsMap = new Map<
       string,
       {
+        reviewedTasksCount: number;
         totalFeedbackItems: number;
+        totalWarnItems: number;
         totalErrorItems: number;
       }
     >();
     for (const row of feedbackFacet.totals) {
       feedbackTotalsMap.set(row._id.toString(), {
+        reviewedTasksCount: row.reviewedTasksCount,
         totalFeedbackItems: row.totalFeedbackItems,
+        totalWarnItems: row.totalWarnItems,
         totalErrorItems: row.totalErrorItems,
       });
     }
@@ -563,35 +702,63 @@ export class ProcessAssessmentService {
       const submissionStats = submissionMap.get(studentId) ?? {
         submissionsCount: 0,
         submittedTasksCount: 0,
+        iteratedTasksCount: 0,
         lateSubmissionsCount: 0,
         lateTasksCount: 0,
       };
       const jobStats = jobMap.get(studentId) ?? {
         aiRequestedCount: 0,
         aiSucceededCount: 0,
+        aiRequestedTasksCount: 0,
+        aiSucceededTasksCount: 0,
       };
       const feedbackStats = feedbackTotalsMap.get(studentId) ?? {
+        reviewedTasksCount: 0,
         totalFeedbackItems: 0,
+        totalWarnItems: 0,
         totalErrorItems: 0,
       };
       const submittedTasksRate =
-        submissionStats.submittedTasksCount / Math.max(publishedTasksCount, 1);
+        publishedTasksCount > 0
+          ? this.clamp(
+              submissionStats.submittedTasksCount / publishedTasksCount,
+              0,
+              1,
+            )
+          : 0;
       const avgFeedbackItems =
-        submissionStats.submissionsCount > 0
-          ? feedbackStats.totalFeedbackItems / submissionStats.submissionsCount
+        feedbackStats.reviewedTasksCount > 0
+          ? feedbackStats.totalFeedbackItems / feedbackStats.reviewedTasksCount
+          : 0;
+      const avgWarnItems =
+        feedbackStats.reviewedTasksCount > 0
+          ? feedbackStats.totalWarnItems / feedbackStats.reviewedTasksCount
           : 0;
       const avgErrorItems =
-        submissionStats.submissionsCount > 0
-          ? feedbackStats.totalErrorItems / submissionStats.submissionsCount
+        feedbackStats.reviewedTasksCount > 0
+          ? feedbackStats.totalErrorItems / feedbackStats.reviewedTasksCount
           : 0;
-      const riskLevel = this.toRiskLevel(submittedTasksRate, avgErrorItems);
+      const normalizedAvgFeedbackItems = Number(avgFeedbackItems.toFixed(4));
+      const normalizedAvgWarnItems = Number(avgWarnItems.toFixed(4));
+      const normalizedAvgErrorItems = Number(avgErrorItems.toFixed(4));
+      const riskLevel = this.toRiskLevel({
+        effectiveTaskCount: publishedTasksCount,
+        submissionsCount: submissionStats.submissionsCount,
+        taskCoverageRatio: submittedTasksRate,
+        avgWarnItems: normalizedAvgWarnItems,
+        avgErrorItems: normalizedAvgErrorItems,
+      });
       // Z7 v1: late metrics are display-only and do not directly change risk/score
       // until policy thresholds are explicitly approved.
       const score = this.toScore({
-        submittedTasksRate,
+        effectiveTaskCount: publishedTasksCount,
+        submittedTasksCount: submissionStats.submittedTasksCount,
         submissionsCount: submissionStats.submissionsCount,
-        aiRequestedCount: jobStats.aiRequestedCount,
-        avgErrorItems,
+        iteratedTasksCount: submissionStats.iteratedTasksCount,
+        aiRequestedTasksCount: jobStats.aiRequestedTasksCount,
+        aiSucceededTasksCount: jobStats.aiSucceededTasksCount,
+        avgWarnItems: normalizedAvgWarnItems,
+        avgErrorItems: normalizedAvgErrorItems,
       });
       return {
         studentId,
@@ -601,12 +768,16 @@ export class ProcessAssessmentService {
         publishedTasksCount,
         submittedTasksRate: Number(submittedTasksRate.toFixed(4)),
         submissionsCount: submissionStats.submissionsCount,
+        iteratedTasksCount: submissionStats.iteratedTasksCount,
         lateSubmissionsCount: submissionStats.lateSubmissionsCount,
         lateTasksCount: submissionStats.lateTasksCount,
         aiRequestedCount: jobStats.aiRequestedCount,
         aiSucceededCount: jobStats.aiSucceededCount,
-        avgFeedbackItems: Number(avgFeedbackItems.toFixed(4)),
-        avgErrorItems: Number(avgErrorItems.toFixed(4)),
+        aiRequestedTasksCount: jobStats.aiRequestedTasksCount,
+        aiSucceededTasksCount: jobStats.aiSucceededTasksCount,
+        avgFeedbackItems: normalizedAvgFeedbackItems,
+        avgWarnItems: normalizedAvgWarnItems,
+        avgErrorItems: normalizedAvgErrorItems,
         topTags: topTagsMap.get(studentId) ?? [],
         riskLevel,
         score,
@@ -663,52 +834,107 @@ export class ProcessAssessmentService {
     return left.studentId.localeCompare(right.studentId);
   }
 
-  private toRiskLevel(
-    submittedTasksRate: number,
-    avgErrorItems: number,
-  ): ProcessAssessmentRiskLevel {
-    if (submittedTasksRate < 0.4 || avgErrorItems >= 3) {
+  private toRiskLevel(params: {
+    effectiveTaskCount: number;
+    submissionsCount: number;
+    taskCoverageRatio: number;
+    avgWarnItems: number;
+    avgErrorItems: number;
+  }): ProcessAssessmentRiskLevel {
+    if (params.effectiveTaskCount <= 0) {
+      return 'LOW';
+    }
+    if (params.submissionsCount <= 0) {
       return 'HIGH';
     }
-    if (submittedTasksRate < 0.7 || avgErrorItems >= 1) {
+    if (params.taskCoverageRatio < 0.4) {
+      return 'HIGH';
+    }
+    if (params.avgErrorItems >= 2) {
+      return 'HIGH';
+    }
+    if (params.taskCoverageRatio < 0.8) {
+      return 'MEDIUM';
+    }
+    if (params.avgErrorItems >= 1) {
+      return 'MEDIUM';
+    }
+    if (params.avgWarnItems >= 2) {
       return 'MEDIUM';
     }
     return 'LOW';
   }
 
   private toScore(params: {
-    submittedTasksRate: number;
+    effectiveTaskCount: number;
+    submittedTasksCount: number;
     submissionsCount: number;
-    aiRequestedCount: number;
+    iteratedTasksCount: number;
+    aiRequestedTasksCount: number;
+    aiSucceededTasksCount: number;
+    avgWarnItems: number;
     avgErrorItems: number;
   }) {
-    if (params.submissionsCount <= 0) {
+    if (params.effectiveTaskCount <= 0 || params.submissionsCount <= 0) {
       return 0;
     }
 
-    const submittedTasksScore =
-      params.submittedTasksRate *
+    const taskCoverageRatio = this.clamp(
+      params.submittedTasksCount / params.effectiveTaskCount,
+      0,
+      1,
+    );
+    const iterationTaskRatio = this.clamp(
+      params.iteratedTasksCount / params.effectiveTaskCount,
+      0,
+      1,
+    );
+    const submissionEngagementRatio = this.clamp(
+      taskCoverageRatio * 0.85 + iterationTaskRatio * 0.15,
+      0,
+      1,
+    );
+    const aiTaskCoverageRatio = this.clamp(
+      params.aiRequestedTasksCount / params.effectiveTaskCount,
+      0,
+      1,
+    );
+    const aiTaskSuccessRate =
+      params.aiRequestedTasksCount > 0
+        ? this.clamp(
+            params.aiSucceededTasksCount / params.aiRequestedTasksCount,
+            0,
+            1,
+          )
+        : 0;
+    const aiQualityRatio = this.clamp(
+      aiTaskCoverageRatio * (0.8 + aiTaskSuccessRate * 0.2),
+      0,
+      1,
+    );
+    const qualityPenalty = params.avgWarnItems * 0.5 + params.avgErrorItems;
+    const codeQualityRatio = this.clamp(1 - qualityPenalty / 2, 0, 1);
+
+    const submittedTasksRateScore =
+      taskCoverageRatio *
       ProcessAssessmentService.RUBRIC.submittedTasksRate *
       100;
     const submissionsCountScore =
-      (Math.min(params.submissionsCount, 10) / 10) *
+      submissionEngagementRatio *
       ProcessAssessmentService.RUBRIC.submissionsCount *
       100;
-    // aiRequestedCount is only an engagement proxy and not a final-grade signal.
     const aiRequestQualityProxyScore =
-      (Math.min(params.aiRequestedCount, 10) / 10) *
+      aiQualityRatio *
       ProcessAssessmentService.RUBRIC.aiRequestQualityProxy *
       100;
     const codeQualityProxyScore =
-      (1 - this.clamp(params.avgErrorItems / 5, 0, 1)) *
-      ProcessAssessmentService.RUBRIC.codeQualityProxy *
-      100;
+      codeQualityRatio * ProcessAssessmentService.RUBRIC.codeQualityProxy * 100;
     const score =
-      submittedTasksScore +
+      submittedTasksRateScore +
       submissionsCountScore +
       aiRequestQualityProxyScore +
       codeQualityProxyScore;
-    return Number(this.clamp(score, 0, 100).toFixed(2));
+    return Math.round(this.clamp(score, 0, 100));
   }
 
   private clamp(value: number, min: number, max: number) {

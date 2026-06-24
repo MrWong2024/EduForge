@@ -6,6 +6,10 @@ import { PageHeader } from "@/components/blocks/PageHeader";
 import { buildProxyPath, fetchJson, FetchJsonError } from "@/lib/api/client";
 import { buildErrorDescription, extractRawDetail } from "@/lib/api/error-presenter";
 import {
+  ExcludeTasksPanel,
+  type ExcludeTasksPanelTask,
+} from "./ExcludeTasksPanel";
+import {
   toClassroomTasksResponse,
   toProcessAssessmentResponse,
 } from "@/lib/api/types-teacher";
@@ -23,12 +27,14 @@ import {
 
 type ProcessAssessmentPageProps = {
   params: Promise<{ classroomId: string }>;
-  searchParams: Promise<{
-    window?: string | string[];
-    page?: string | string[];
-    excludedTaskIds?: string | string[];
-  }>;
+  searchParams: Promise<ProcessAssessmentSearchParams>;
 };
+
+type ProcessAssessmentSearchParams = {
+  window?: string | string[];
+  page?: string | string[];
+  excludedTaskIds?: string | string[];
+} & Record<string, string | string[] | undefined>;
 
 const SUPPORTED_REPORT_WINDOWS = ["24h", "7d", "30d", "all"] as const;
 type ReportWindow = (typeof SUPPORTED_REPORT_WINDOWS)[number];
@@ -59,6 +65,11 @@ type ProcessAssessmentTableRow = {
   riskRaw: string;
   issueSummaryDisplay: string;
   issueSummaryTitle?: string;
+  iteratedTasksCount: number;
+  aiTaskCoverageDisplay: string;
+  aiTaskCoverageSecondaryText: string;
+  avgWarnItemsDisplay: string;
+  avgErrorItemsDisplay: string;
   aiRequestedCount: number;
   aiSucceededCount: number;
 };
@@ -118,6 +129,14 @@ const toScoreText = (value: number | null): string => {
   }
   const rounded = Math.round(value * 10) / 10;
   return Number.isInteger(rounded) ? `${rounded}` : rounded.toFixed(1);
+};
+
+const toMetricText = (value: number | null): string => {
+  if (value === null) {
+    return "—";
+  }
+  const rounded = Math.round(value * 100) / 100;
+  return Number.isInteger(rounded) ? `${rounded}` : rounded.toFixed(2);
 };
 
 const toRiskLabel = (
@@ -213,6 +232,18 @@ const toProcessAssessmentTableRows = (items: UnknownRecord[]): ProcessAssessment
 
     const aiRequestedCount = toFiniteNumber(safeGet(item, "aiRequestedCount", undefined)) ?? 0;
     const aiSucceededCount = toFiniteNumber(safeGet(item, "aiSucceededCount", undefined)) ?? 0;
+    const iteratedTasksCount = toFiniteNumber(safeGet(item, "iteratedTasksCount", undefined)) ?? 0;
+    const aiRequestedTasksCount =
+      toFiniteNumber(safeGet(item, "aiRequestedTasksCount", undefined)) ?? 0;
+    const aiSucceededTasksCount =
+      toFiniteNumber(safeGet(item, "aiSucceededTasksCount", undefined)) ?? 0;
+    const avgWarnItems = toFiniteNumber(safeGet(item, "avgWarnItems", undefined));
+    const avgErrorItems = toFiniteNumber(safeGet(item, "avgErrorItems", undefined));
+    const aiTaskCoverageDisplay =
+      publishedTasksCount !== null
+        ? `${aiRequestedTasksCount}/${publishedTasksCount}`
+        : `${aiRequestedTasksCount}`;
+    const aiTaskCoverageSecondaryText = `成功任务 ${aiSucceededTasksCount}；总请求 ${aiRequestedCount} / 成功 ${aiSucceededCount}`;
 
     return {
       key: String(studentId || safeGet(item, "id", undefined) || index),
@@ -228,6 +259,11 @@ const toProcessAssessmentTableRows = (items: UnknownRecord[]): ProcessAssessment
       riskRaw: risk.raw,
       issueSummaryDisplay: issueSummary.text,
       issueSummaryTitle: issueSummary.title,
+      iteratedTasksCount,
+      aiTaskCoverageDisplay,
+      aiTaskCoverageSecondaryText,
+      avgWarnItemsDisplay: toMetricText(avgWarnItems),
+      avgErrorItemsDisplay: toMetricText(avgErrorItems),
       aiRequestedCount,
       aiSucceededCount,
     };
@@ -261,7 +297,7 @@ const toSummaryCards = (rows: ProcessAssessmentTableRow[]): SummaryMetricCard[] 
     { key: "highRiskCount", label: "高风险学生数", value: `${highRiskCount}` },
     {
       key: "averageProgressRate",
-      label: "平均任务提交率",
+      label: "平均任务覆盖率",
       value: toPercentText(averageProgressRate),
     },
     { key: "averageScore", label: "平均得分", value: toScoreText(averageScore) },
@@ -285,12 +321,12 @@ const toRubricSummaryText = (raw: UnknownRecord): string | null => {
     return null;
   }
 
-  const toWeightPercent = (value: number) => toPercentText(value <= 1 ? value : value / 100);
-  return `当前评价口径：任务提交率 ${toWeightPercent(submittedTasksRate)}，提交次数 ${toWeightPercent(
+  const toPointText = (value: number) => toScoreText((value <= 1 ? value : value / 100) * 100);
+  return `当前评价口径：任务覆盖率 ${toPointText(submittedTasksRate)} 分，提交迭代质量 ${toPointText(
     submissionsCount
-  )}，AI 请求质量代理 ${toWeightPercent(aiRequestQualityProxy)}，代码质量代理 ${toWeightPercent(
+  )} 分，AI 使用质量 ${toPointText(aiRequestQualityProxy)} 分，代码质量代理 ${toPointText(
     codeQualityProxy
-  )}。`;
+  )} 分。`;
 };
 
 const riskToneClassNameMap: Record<ProcessAssessmentTableRow["riskTone"], string> = {
@@ -344,6 +380,22 @@ const toExcludedTaskIdsQueryValue = (
 ): string | undefined =>
   excludedTaskIds.length > 0 ? excludedTaskIds.join(",") : undefined;
 
+const toSearchParamEntries = (
+  query: ProcessAssessmentSearchParams,
+): Array<[string, string]> => {
+  const entries: Array<[string, string]> = [];
+  for (const [key, rawValue] of Object.entries(query)) {
+    if (rawValue === undefined) {
+      continue;
+    }
+    const values = Array.isArray(rawValue) ? rawValue : [rawValue];
+    for (const value of values) {
+      entries.push([key, value]);
+    }
+  }
+  return entries;
+};
+
 const resolveQueryState = (
   query: Awaited<ProcessAssessmentPageProps["searchParams"]>,
 ): ProcessAssessmentQueryState => ({
@@ -377,15 +429,6 @@ const buildPageHref = (
     page,
     excludedTaskIds: toExcludedTaskIdsQueryValue(excludedTaskIds),
   });
-  const basePath = paths.teacher.classroomProcessAssessment(classroomId);
-  return query ? `${basePath}?${query}` : basePath;
-};
-
-const buildClearExcludedHref = (
-  classroomId: string,
-  windowValue: ReportWindow,
-): string => {
-  const query = buildQueryString({ window: windowValue, page: 1 });
   const basePath = paths.teacher.classroomProcessAssessment(classroomId);
   return query ? `${basePath}?${query}` : basePath;
 };
@@ -518,6 +561,7 @@ export default async function ProcessAssessmentPage({
   const { classroomId } = await params;
   const rawQuery = await searchParams;
   const queryState = resolveQueryState(rawQuery);
+  const currentQueryEntries = toSearchParamEntries(rawQuery);
   const queryString = buildQueryString({
     window: queryState.window,
     page: String(queryState.page),
@@ -619,14 +663,13 @@ export default async function ProcessAssessmentPage({
   const showPagination = totalStudentsCount > PROCESS_ASSESSMENT_PAGE_SIZE;
   const hasPrev = currentPage > 1;
   const hasNext = currentPage < totalPages;
-  const selectedExcludedTaskIdSet = new Set(viewModel.excludedTaskIds);
-  const taskOptionIdSet = new Set(
-    viewModel.taskOptions.map((taskOption) => taskOption.id),
-  );
-  const hiddenExcludedTaskIds = viewModel.excludedTaskIds.filter(
-    (taskId) => !taskOptionIdSet.has(taskId),
-  );
-  const selectedExcludedTaskCount = viewModel.excludedTaskIds.length;
+  const excludedTaskPanelTasks: ExcludeTasksPanelTask[] =
+    viewModel.taskOptions.map((taskOption) => ({
+      id: taskOption.id,
+      title: taskOption.title,
+      publishedAt: taskOption.publishedAt ?? null,
+      metaText: toTaskOptionMeta(taskOption),
+    }));
 
   return (
     <section className="space-y-4">
@@ -684,94 +727,21 @@ export default async function ProcessAssessmentPage({
       </section>
 
       <details
-        open={selectedExcludedTaskCount > 0}
+        open={viewModel.excludedTaskIds.length > 0}
         className="rounded-lg border border-zinc-200 bg-white p-4 text-sm"
       >
         <summary className="cursor-pointer font-medium text-zinc-900">
           排除任务（临时计算）
         </summary>
-        <div className="mt-3 space-y-3">
-          <p className="text-zinc-600">
-            勾选后点击应用，当前页面与 CSV 将按排除后的任务范围重新计算；这只是临时查询条件，不会保存偏好，不会修改课堂任务或成绩数据。
-          </p>
-          <p className="text-xs text-zinc-500">
-            {selectedExcludedTaskCount > 0
-              ? `已排除 ${selectedExcludedTaskCount} 个任务，当前成绩与 CSV 均按排除后任务范围计算。`
-              : "未排除任务，当前成绩按统计窗口内全部任务计算。"}
-          </p>
-          {viewModel.taskOptionsLoadError ? (
-            <p className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-700">
-              {viewModel.taskOptionsLoadError}
-            </p>
-          ) : null}
-          {hiddenExcludedTaskIds.length > 0 ? (
-            <p className="rounded-md border border-sky-200 bg-sky-50 px-3 py-2 text-xs text-sky-700">
-              有 {hiddenExcludedTaskIds.length} 个已选任务未在当前任务列表中显示；它们仍会保留在本次页面与 CSV 查询参数中。
-            </p>
-          ) : null}
-          <form method="get" className="space-y-3">
-            <input type="hidden" name="window" value={viewModel.window} />
-            <input type="hidden" name="page" value="1" />
-            {hiddenExcludedTaskIds.map((taskId) => (
-              <input
-                key={taskId}
-                type="hidden"
-                name="excludedTaskIds"
-                value={taskId}
-              />
-            ))}
-
-            {viewModel.taskOptions.length === 0 ? (
-              <p className="rounded-md border border-zinc-200 bg-zinc-50 px-3 py-2 text-zinc-500">
-                {viewModel.taskOptionsLoadError
-                  ? "当前无法展示可选任务；页面仍会按 URL 中的排除参数计算。"
-                  : "暂无可排除任务。"}
-              </p>
-            ) : (
-              <div className="max-h-72 overflow-y-auto rounded-md border border-zinc-200">
-                {viewModel.taskOptions.map((taskOption) => (
-                  <label
-                    key={taskOption.id}
-                    className="flex gap-3 border-b border-zinc-100 px-3 py-2.5 last:border-b-0"
-                  >
-                    <input
-                      type="checkbox"
-                      name="excludedTaskIds"
-                      value={taskOption.id}
-                      defaultChecked={selectedExcludedTaskIdSet.has(
-                        taskOption.id,
-                      )}
-                      className="mt-1 h-4 w-4 rounded border-zinc-300"
-                    />
-                    <span className="min-w-0">
-                      <span className="block break-words font-medium text-zinc-900">
-                        {taskOption.title}
-                      </span>
-                      <span className="mt-0.5 block text-xs text-zinc-500">
-                        {toTaskOptionMeta(taskOption)}
-                      </span>
-                    </span>
-                  </label>
-                ))}
-              </div>
-            )}
-
-            <div className="flex flex-wrap items-center gap-3">
-              <button
-                type="submit"
-                className="rounded-md bg-zinc-900 px-3 py-1.5 text-sm font-medium text-white hover:bg-zinc-700"
-              >
-                应用排除任务
-              </button>
-              <Link
-                href={buildClearExcludedHref(classroomId, viewModel.window)}
-                className="text-sm text-blue-700 hover:underline"
-              >
-                清空排除
-              </Link>
-            </div>
-          </form>
-        </div>
+        <ExcludeTasksPanel
+          classroomId={classroomId}
+          window={viewModel.window}
+          initialExcludedTaskIds={viewModel.excludedTaskIds}
+          tasks={excludedTaskPanelTasks}
+          initialQueryEntries={currentQueryEntries}
+          taskOptionsLoadError={viewModel.taskOptionsLoadError}
+          currentPathname={paths.teacher.classroomProcessAssessment(classroomId)}
+        />
       </details>
 
       <section className="rounded-lg border border-zinc-200 bg-white p-4">
@@ -811,6 +781,10 @@ export default async function ProcessAssessmentPage({
                   <th className="w-14 px-3 py-2.5 text-center">序号</th>
                   <th className="w-56 px-3 py-2.5">学生</th>
                   <th className="w-44 px-3 py-2.5">进度</th>
+                  <th className="w-28 px-3 py-2.5 text-right">迭代任务数</th>
+                  <th className="w-44 px-3 py-2.5">AI 覆盖任务数</th>
+                  <th className="w-28 px-3 py-2.5 text-right">平均警告项</th>
+                  <th className="w-28 px-3 py-2.5 text-right">平均错误项</th>
                   <th className="w-24 px-3 py-2.5 text-right">得分</th>
                   <th className="w-28 px-3 py-2.5">风险</th>
                   <th className="px-3 py-2.5">问题摘要</th>
@@ -829,6 +803,21 @@ export default async function ProcessAssessmentPage({
                     <td className="px-3 py-2.5">
                       <p className="text-base font-semibold text-zinc-900">{row.progressDisplay}</p>
                       <p className="mt-0.5 text-[11px] text-zinc-500">{row.progressSecondaryText}</p>
+                    </td>
+                    <td className="px-3 py-2.5 text-right text-zinc-800">
+                      {row.iteratedTasksCount}
+                    </td>
+                    <td className="px-3 py-2.5">
+                      <p className="font-medium text-zinc-900">{row.aiTaskCoverageDisplay}</p>
+                      <p className="mt-0.5 text-[11px] text-zinc-500">
+                        {row.aiTaskCoverageSecondaryText}
+                      </p>
+                    </td>
+                    <td className="px-3 py-2.5 text-right text-zinc-800">
+                      {row.avgWarnItemsDisplay}
+                    </td>
+                    <td className="px-3 py-2.5 text-right text-zinc-800">
+                      {row.avgErrorItemsDisplay}
                     </td>
                     <td className="px-3 py-2.5 text-right text-base font-semibold text-zinc-900">
                       {row.scoreDisplay}

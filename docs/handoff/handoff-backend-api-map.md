@@ -105,11 +105,12 @@ Notes:
 - `/api/classrooms/:classroomId/weekly-report` 权限：teacher only，`classroom.teacherId === currentUserId`；统计隔离按 `classroomId + classroomTaskId`，`studentsCount/risk` 仅基于 Enrollment ACTIVE。
 - `/api/classrooms/:classroomId/process-assessment` Query: `window, page, limit, sort, order, excludedTaskIds`；`excludedTaskIds` 为 optional，支持逗号分隔或 repeated query，用于临时排除指定课堂任务后重新计算；teacher only；Enrollment-only；返回聚合结果，不返回敏感字段。
 - `/api/classrooms/:classroomId/process-assessment.csv` Query: `window, excludedTaskIds`；`excludedTaskIds` 与 JSON 接口同口径；teacher only；CSV 为手写转义（双引号转义），响应保持 `text/csv; charset=utf-8`，且内容以 UTF-8 BOM（`\uFEFF`）开头以兼容 Windows Excel 中文显示；不返回敏感字段。
-- 前端接入口径：教师端 `/teacher/classrooms/:classroomId/process-assessment` 已支持临时排除任务 UI；页面 URL 解析兼容逗号分隔与 repeated query，JSON/CSV 请求统一用逗号分隔 `excludedTaskIds` 透传；切换窗口、翻页和 CSV 下载均保持同一排除口径，返回结构与 CSV 列不变。
-- `/api/classrooms/:classroomId/process-assessment` 响应项增强：`items[*]` 返回 `studentId/studentName/studentNo`；`studentName` 缺失回落 `未知学生`，`studentNo` 缺失返回 `null`。
-- `/api/classrooms/:classroomId/process-assessment` 评分口径：`submissionsCount <= 0` 的学生仍返回在 `items` 中，但 `score` 固定为 `0`；有提交学生继续按既有四项 rubric 计算。
-- `/api/classrooms/:classroomId/process-assessment` 排除任务口径：先按 `classroomId + window` 取课堂任务，再应用 `excludedTaskIds` 得到有效任务范围；被排除任务不参与 `publishedTasksCount`、`submittedTasksRate` 分母、提交/迟交、AI job、AI feedback、`topTags` 与 score/risk 计算；排除全部任务时仍返回当前 ACTIVE 学生，任务相关统计与 `score` 均为 0。
-- `/api/classrooms/:classroomId/process-assessment.csv` 与 JSON 口径对齐：新增 `studentName,studentNo` 列并保留 `studentId`，列顺序前置为 `studentName,studentNo,studentId,...`。
+- 前端接入口径：教师端 `/teacher/classrooms/:classroomId/process-assessment` 已支持临时排除任务 UI；页面 URL 解析兼容逗号分隔与 repeated query，JSON/CSV 请求统一用逗号分隔 `excludedTaskIds` 透传；切换窗口、翻页和 CSV 下载均保持同一排除口径；“清空排除”为独立 GET form，只提交 `window + page=1`，不提交 `excludedTaskIds`。
+- `/api/classrooms/:classroomId/process-assessment` 响应项增强：`items[*]` 返回 `studentId/studentName/studentNo`；`studentName` 缺失回落 `未知学生`，`studentNo` 缺失返回 `null`；任务维度评分解释字段包含 `iteratedTasksCount/aiRequestedTasksCount/aiSucceededTasksCount/avgWarnItems`。
+- `/api/classrooms/:classroomId/process-assessment` 评分口径：rubric 为任务覆盖率 0.45、提交迭代质量 0.15、AI 使用质量 0.2、代码质量代理 0.2；`submissionsCount <= 0` 的学生仍返回在 `items` 中但 `score=0`；AI 与提交迭代按任务维度去重，WARN 按 0.5、ERROR 按 1 扣代码质量代理，INFO 不扣分。
+- `/api/classrooms/:classroomId/process-assessment` risk 口径：无有效任务为 `LOW`；有任务但 0 提交为 `HIGH`；任务覆盖率 `<0.4` 或平均 ERROR `>=2` 为 `HIGH`；任务覆盖率 `<0.8`、平均 ERROR `>=1`、平均 WARN `>=2` 为 `MEDIUM`；其余为 `LOW`。
+- `/api/classrooms/:classroomId/process-assessment` 排除任务口径：先按 `classroomId + window` 取课堂任务，再应用 `excludedTaskIds` 得到有效任务范围；被排除任务不参与 `publishedTasksCount`、`submittedTasksRate` 分母、提交/迭代、迟交、AI job 总次数、AI 任务覆盖、AI 任务成功、最新任务反馈均值、`topTags` 与 score/risk 计算；排除全部任务时仍返回当前 ACTIVE 学生，任务相关统计与 `score` 均为 0。
+- `/api/classrooms/:classroomId/process-assessment.csv` 与 JSON 口径对齐：新增 `studentName,studentNo` 列并保留 `studentId`，列顺序前置为 `studentName,studentNo,studentId,...`；CSV 另包含 `iteratedTasksCount/aiRequestedTasksCount/aiSucceededTasksCount/avgWarnItems`，并保留 `aiRequestedCount/aiSucceededCount`。
 - `weekly-report` 窗口契约（后端阶段一）：默认 `window=all`；后端兼容集合为 `all/7d/30d/24h/1h`（`24h/1h` 为兼容窗口，不作为推荐默认窗口）。
 - `process-assessment`（JSON + CSV）窗口契约（后端阶段一）：默认 `window=all`；后端兼容集合为 `all/7d/30d/term`（`term` 为兼容窗口）；`window=all` 语义与 JSON/CSV 完全一致。
 - `window=all` 统一语义：在当前资源边界内做全量统计（班级级接口 = 当前班级可纳入口径的全部历史记录），实现为“无时间下界过滤”，不是固定 90/180 天。

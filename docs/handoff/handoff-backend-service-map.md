@@ -454,8 +454,8 @@
   - `exportProcessAssessmentCsv(...)`
   - `getProcessAssessmentForSnapshot(...)`（供 snapshot 复用）
 - AuthZ Boundary: `teacher-only + owner-only`
-- Metrics/Isolation: 成员全集与分页来自 Enrollment ACTIVE；任务范围先按 `classroomId + window` 取 window tasks，再应用 `excludedTaskIds` 得到 `effectiveTaskIds`；提交/迟交/AI/反馈/`topTags` 聚合均基于 `effectiveTaskIds`；迟交指标输出 `lateSubmissionsCount/lateTasksCount`
-- Consistency/Constraints: 默认窗口为 `all`；后端兼容窗口 `all/7d/30d/term`；`all` 语义为“无时间下界过滤（tasks/submissions/feedback 不拼 lowerBound）”；`excludedTaskIds` 为 optional query，支持逗号分隔与 repeated query，非法 MongoId 返回 400，合法但不属于当前课堂/窗口的 id 自然无效果；排除全部任务时仍返回当前 ACTIVE 学生且任务相关统计与 score 均为 0；rubric/score/riskLevel 为过程性指标；计分时 `submissionsCount <= 0` 直接返回 `0`，ACTIVE 学生仍保留在列表/CSV 中；CSV 导出与 JSON 复用同一 payload（窗口 + 排除口径一致）并使用手写转义（`"` -> `""`），最终返回字符串前追加 UTF-8 BOM（`\uFEFF`）以兼容 Windows Excel 中文打开；不输出敏感字段
+- Metrics/Isolation: 成员全集与分页来自 Enrollment ACTIVE；任务范围先按 `classroomId + window` 取 window tasks，再应用 `excludedTaskIds` 得到 `effectiveTaskIds`；提交/迟交/AI/反馈/`topTags` 聚合均基于 `effectiveTaskIds`；提交迭代、AI 覆盖、AI 成功按 `studentId + classroomTaskId` 去重；迟交指标输出 `lateSubmissionsCount/lateTasksCount`
+- Consistency/Constraints: 默认窗口为 `all`；后端兼容窗口 `all/7d/30d/term`；`all` 语义为“无时间下界过滤（tasks/submissions/feedback 不拼 lowerBound）”；`excludedTaskIds` 为 optional query，支持逗号分隔与 repeated query，非法 MongoId 返回 400，合法但不属于当前课堂/窗口的 id 自然无效果；排除全部任务时仍返回当前 ACTIVE 学生且任务相关统计与 score 均为 0；rubric/score/riskLevel 为过程性指标；rubric 固定为任务覆盖率 0.45、提交迭代质量 0.15、AI 使用质量 0.2、代码质量代理 0.2；计分时 `effectiveTaskCount <= 0` 或 `submissionsCount <= 0` 直接返回 `0`；反馈均值按每个学生每个有效任务“最新一次有 AI 反馈项的提交”统计，INFO 只进 `avgFeedbackItems`，WARN 进 `avgWarnItems` 并按 0.5 扣分，ERROR 进 `avgErrorItems` 并按 1 扣分；CSV 导出与 JSON 复用同一 payload（窗口 + 排除口径一致）并使用手写转义（`"` -> `""`），最终返回字符串前追加 UTF-8 BOM（`\uFEFF`）以兼容 Windows Excel 中文打开；不输出敏感字段
 - Deps/Side Effects: `ClassroomModel`, `ClassroomTaskModel`, `SubmissionModel`, `AiFeedbackJobModel`, `FeedbackModel`, `EnrollmentService`；只读
 - Performance Notes: Enrollment 稳定分页后页内排序（page-local sort）
 - SoT: `backend/src/modules/classrooms/services/process-assessment.service.ts`; `backend/src/modules/classrooms/dto/query-process-assessment.dto.ts`

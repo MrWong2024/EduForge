@@ -103,7 +103,7 @@ AI Feedback：
 聚合与分析：
 
 - 班级看板、学生学习看板、课程总览、周报、学习轨迹、课堂复盘、AI 指标、教学快照预检均已有后端接口。
-- 过程性评价（JSON + CSV）已接入 `excludedTaskIds`，支持任务排除后重新计算；排除任务不参与提交、迟交、AI job、AI feedback、`topTags`、score/risk 计算，排除全部任务时 ACTIVE 学生仍保留且 score 为 0。
+- 过程性评价（JSON + CSV）已接入 `excludedTaskIds`，支持任务排除后重新计算；排除任务不参与提交、迭代、迟交、AI job 总次数、AI 任务覆盖/成功、最新任务反馈均值、`topTags`、score/risk 计算，排除全部任务时 ACTIVE 学生仍保留且 score 为 0；评分已升级为任务覆盖率 45、提交迭代质量 15、AI 使用质量 20、代码质量代理 20。
 - 周报、课程总览、学习轨迹、复盘包、过程性评价等聚合接口均要求遵守 Enrollment-only 与 classroomTask 隔离。
 
 ## 5) 当前不可误判事项

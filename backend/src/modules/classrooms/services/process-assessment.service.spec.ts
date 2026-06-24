@@ -6,10 +6,10 @@ import { QueryProcessAssessmentDto } from '../dto/query-process-assessment.dto';
 import { ProcessAssessmentService } from './process-assessment.service';
 
 const CSV_HEADER =
-  'studentName,studentNo,studentId,score,riskLevel,submittedTasksRate,submissionsCount,lateSubmissionsCount,lateTasksCount,aiRequestedCount,aiSucceededCount,avgErrorItems,topTags';
+  'studentName,studentNo,studentId,score,riskLevel,submittedTasksRate,submissionsCount,iteratedTasksCount,lateSubmissionsCount,lateTasksCount,aiRequestedCount,aiSucceededCount,aiRequestedTasksCount,aiSucceededTasksCount,avgWarnItems,avgErrorItems,topTags';
 const RUBRIC = {
-  submittedTasksRate: 0.4,
-  submissionsCount: 0.2,
+  submittedTasksRate: 0.45,
+  submissionsCount: 0.15,
   aiRequestQualityProxy: 0.2,
   codeQualityProxy: 0.2,
 };
@@ -107,6 +107,7 @@ const createAssessmentHarness = () => {
           _id: submittedStudentId,
           submissionsCount: submissionIds.length,
           submittedTasksCount: submissionIds.length,
+          iteratedTasksCount: 0,
           lateSubmissionsCount: hasExcludedTask ? 1 : 0,
           lateTasksCount: hasExcludedTask ? 1 : 0,
           submissionIds,
@@ -136,6 +137,8 @@ const createAssessmentHarness = () => {
           _id: submittedStudentId,
           aiRequestedCount,
           aiSucceededCount: hasIncludedSubmission ? 1 : 0,
+          aiRequestedTasksCount: aiRequestedCount,
+          aiSucceededTasksCount: hasIncludedSubmission ? 1 : 0,
         },
       ]);
     }),
@@ -177,7 +180,9 @@ const createAssessmentHarness = () => {
           totals: [
             {
               _id: submittedStudentId,
+              reviewedTasksCount: submissionIds.length,
               totalFeedbackItems,
+              totalWarnItems: 0,
               totalErrorItems,
             },
           ],
@@ -242,6 +247,131 @@ const createAssessmentHarness = () => {
   };
 };
 
+type TaskDimensionScenario = {
+  taskCount: number;
+  submittedTasksCount: number;
+  submissionsCount: number;
+  iteratedTasksCount: number;
+  aiRequestedCount: number;
+  aiSucceededCount: number;
+  aiRequestedTasksCount: number;
+  aiSucceededTasksCount: number;
+  reviewedTasksCount?: number;
+  totalFeedbackItems?: number;
+  totalWarnItems?: number;
+  totalErrorItems?: number;
+};
+
+const createTaskDimensionHarness = (scenario: TaskDimensionScenario) => {
+  const classroomId = objectId();
+  const teacherId = objectId();
+  const studentId = objectId();
+  const classroomTaskIds = Array.from({ length: scenario.taskCount }, () =>
+    objectId(),
+  );
+  const submissionIds = Array.from({ length: scenario.submissionsCount }, () =>
+    objectId(),
+  );
+
+  const classroomModel = {
+    findOne: jest.fn().mockReturnValue(makeQuery({ _id: classroomId })),
+  };
+  const classroomTaskModel = {
+    find: jest
+      .fn()
+      .mockReturnValue(
+        makeQuery(classroomTaskIds.map((taskId) => ({ _id: taskId }))),
+      ),
+  };
+  const submissionModel = {
+    aggregate: jest.fn().mockReturnValue(
+      makeAggregate(
+        scenario.submissionsCount > 0
+          ? [
+              {
+                _id: studentId,
+                submissionsCount: scenario.submissionsCount,
+                submittedTasksCount: scenario.submittedTasksCount,
+                iteratedTasksCount: scenario.iteratedTasksCount,
+                lateSubmissionsCount: 0,
+                lateTasksCount: 0,
+                submissionIds,
+              },
+            ]
+          : [],
+      ),
+    ),
+  };
+  const aiFeedbackJobModel = {
+    aggregate: jest.fn().mockReturnValue(
+      makeAggregate(
+        scenario.aiRequestedCount > 0
+          ? [
+              {
+                _id: studentId,
+                aiRequestedCount: scenario.aiRequestedCount,
+                aiSucceededCount: scenario.aiSucceededCount,
+                aiRequestedTasksCount: scenario.aiRequestedTasksCount,
+                aiSucceededTasksCount: scenario.aiSucceededTasksCount,
+              },
+            ]
+          : [],
+      ),
+    ),
+  };
+  const reviewedTasksCount = scenario.reviewedTasksCount ?? 0;
+  const feedbackModel = {
+    aggregate: jest.fn().mockReturnValue(
+      makeAggregate([
+        {
+          totals:
+            reviewedTasksCount > 0
+              ? [
+                  {
+                    _id: studentId,
+                    reviewedTasksCount,
+                    totalFeedbackItems: scenario.totalFeedbackItems ?? 0,
+                    totalWarnItems: scenario.totalWarnItems ?? 0,
+                    totalErrorItems: scenario.totalErrorItems ?? 0,
+                  },
+                ]
+              : [],
+          tags: [],
+        },
+      ]),
+    ),
+  };
+  const userModel = {
+    find: jest.fn().mockReturnValue(
+      makeQuery([
+        {
+          _id: studentId,
+          name: 'Scenario Student',
+          studentNo: 'S-001',
+        },
+      ]),
+    ),
+  };
+  const enrollmentService = {
+    countStudents: jest.fn().mockResolvedValue(1),
+    listActiveStudentIds: jest.fn().mockResolvedValue([studentId.toString()]),
+    listActiveStudentIdsByClassroomPage: jest
+      .fn()
+      .mockResolvedValue([studentId.toString()]),
+  };
+  const service = new ProcessAssessmentService(
+    classroomModel as never,
+    classroomTaskModel as never,
+    submissionModel as never,
+    aiFeedbackJobModel as never,
+    feedbackModel as never,
+    userModel as never,
+    enrollmentService as never,
+  );
+
+  return { classroomId, teacherId, studentId, service };
+};
+
 describe('QueryProcessAssessmentDto', () => {
   it('normalizes comma-separated excludedTaskIds', async () => {
     const firstTaskId = objectId().toString();
@@ -286,6 +416,228 @@ describe('QueryProcessAssessmentDto', () => {
   });
 });
 
+describe('ProcessAssessmentService task-dimension scoring', () => {
+  it.each<[string, TaskDimensionScenario, Record<string, unknown>]>([
+    [
+      'scores 98 for one covered task with one submission and successful AI',
+      {
+        taskCount: 1,
+        submittedTasksCount: 1,
+        submissionsCount: 1,
+        iteratedTasksCount: 0,
+        aiRequestedCount: 1,
+        aiSucceededCount: 1,
+        aiRequestedTasksCount: 1,
+        aiSucceededTasksCount: 1,
+      },
+      {
+        score: 98,
+        riskLevel: 'LOW',
+        avgWarnItems: 0,
+        avgErrorItems: 0,
+      },
+    ],
+    [
+      'scores 100 when the single covered task is iterated',
+      {
+        taskCount: 1,
+        submittedTasksCount: 1,
+        submissionsCount: 2,
+        iteratedTasksCount: 1,
+        aiRequestedCount: 1,
+        aiSucceededCount: 1,
+        aiRequestedTasksCount: 1,
+        aiSucceededTasksCount: 1,
+      },
+      {
+        score: 100,
+        riskLevel: 'LOW',
+      },
+    ],
+    [
+      'scores 78 for one covered task without AI usage',
+      {
+        taskCount: 1,
+        submittedTasksCount: 1,
+        submissionsCount: 1,
+        iteratedTasksCount: 0,
+        aiRequestedCount: 0,
+        aiSucceededCount: 0,
+        aiRequestedTasksCount: 0,
+        aiSucceededTasksCount: 0,
+      },
+      {
+        score: 78,
+        riskLevel: 'LOW',
+        aiRequestedTasksCount: 0,
+        aiSucceededTasksCount: 0,
+      },
+    ],
+    [
+      'scores 93 when the latest task feedback has one WARN',
+      {
+        taskCount: 1,
+        submittedTasksCount: 1,
+        submissionsCount: 1,
+        iteratedTasksCount: 0,
+        aiRequestedCount: 1,
+        aiSucceededCount: 1,
+        aiRequestedTasksCount: 1,
+        aiSucceededTasksCount: 1,
+        reviewedTasksCount: 1,
+        totalFeedbackItems: 1,
+        totalWarnItems: 1,
+        totalErrorItems: 0,
+      },
+      {
+        score: 93,
+        riskLevel: 'LOW',
+        avgFeedbackItems: 1,
+        avgWarnItems: 1,
+        avgErrorItems: 0,
+      },
+    ],
+    [
+      'scores 88 when the latest task feedback has one ERROR',
+      {
+        taskCount: 1,
+        submittedTasksCount: 1,
+        submissionsCount: 1,
+        iteratedTasksCount: 0,
+        aiRequestedCount: 1,
+        aiSucceededCount: 1,
+        aiRequestedTasksCount: 1,
+        aiSucceededTasksCount: 1,
+        reviewedTasksCount: 1,
+        totalFeedbackItems: 1,
+        totalWarnItems: 0,
+        totalErrorItems: 1,
+      },
+      {
+        score: 88,
+        riskLevel: 'MEDIUM',
+        avgFeedbackItems: 1,
+        avgWarnItems: 0,
+        avgErrorItems: 1,
+      },
+    ],
+    [
+      'scores 36 when one of five tasks is repeatedly submitted and AI requested',
+      {
+        taskCount: 5,
+        submittedTasksCount: 1,
+        submissionsCount: 6,
+        iteratedTasksCount: 1,
+        aiRequestedCount: 5,
+        aiSucceededCount: 1,
+        aiRequestedTasksCount: 1,
+        aiSucceededTasksCount: 1,
+      },
+      {
+        score: 36,
+        riskLevel: 'HIGH',
+        submittedTasksRate: 0.2,
+        iteratedTasksCount: 1,
+        aiRequestedTasksCount: 1,
+        aiSucceededTasksCount: 1,
+      },
+    ],
+    [
+      'scores 98 when all five tasks are covered once with successful AI',
+      {
+        taskCount: 5,
+        submittedTasksCount: 5,
+        submissionsCount: 5,
+        iteratedTasksCount: 0,
+        aiRequestedCount: 5,
+        aiSucceededCount: 5,
+        aiRequestedTasksCount: 5,
+        aiSucceededTasksCount: 5,
+      },
+      {
+        score: 98,
+        riskLevel: 'LOW',
+        submittedTasksRate: 1,
+      },
+    ],
+    [
+      'scores 99 when all five tasks are covered and three tasks are iterated',
+      {
+        taskCount: 5,
+        submittedTasksCount: 5,
+        submissionsCount: 8,
+        iteratedTasksCount: 3,
+        aiRequestedCount: 5,
+        aiSucceededCount: 5,
+        aiRequestedTasksCount: 5,
+        aiSucceededTasksCount: 5,
+      },
+      {
+        score: 99,
+        riskLevel: 'LOW',
+        iteratedTasksCount: 3,
+      },
+    ],
+    [
+      'scores 78 when all five tasks are covered without AI',
+      {
+        taskCount: 5,
+        submittedTasksCount: 5,
+        submissionsCount: 5,
+        iteratedTasksCount: 0,
+        aiRequestedCount: 0,
+        aiSucceededCount: 0,
+        aiRequestedTasksCount: 0,
+        aiSucceededTasksCount: 0,
+      },
+      {
+        score: 78,
+        riskLevel: 'LOW',
+        aiRequestedTasksCount: 0,
+        aiSucceededTasksCount: 0,
+      },
+    ],
+    [
+      'scores 0 and marks HIGH risk when there are no submissions',
+      {
+        taskCount: 1,
+        submittedTasksCount: 0,
+        submissionsCount: 0,
+        iteratedTasksCount: 0,
+        aiRequestedCount: 0,
+        aiSucceededCount: 0,
+        aiRequestedTasksCount: 0,
+        aiSucceededTasksCount: 0,
+      },
+      {
+        score: 0,
+        riskLevel: 'HIGH',
+        submittedTasksCount: 0,
+        submittedTasksRate: 0,
+        iteratedTasksCount: 0,
+        aiRequestedTasksCount: 0,
+        aiSucceededTasksCount: 0,
+        avgFeedbackItems: 0,
+        avgWarnItems: 0,
+        avgErrorItems: 0,
+      },
+    ],
+  ])('%s', async (_name, scenario, expected) => {
+    const { classroomId, teacherId, service } =
+      createTaskDimensionHarness(scenario);
+
+    const result = await service.getProcessAssessment(
+      classroomId.toString(),
+      {},
+      teacherId.toString(),
+    );
+
+    expect(result.rubric).toEqual(RUBRIC);
+    expect(result.items).toHaveLength(1);
+    expect(result.items[0]).toMatchObject(expected);
+  });
+});
+
 describe('ProcessAssessmentService getProcessAssessment', () => {
   it('keeps active students with zero submissions in the list and fixes their score at 0', async () => {
     const {
@@ -321,13 +673,17 @@ describe('ProcessAssessmentService getProcessAssessment', () => {
     expect(submittedItem).toMatchObject({
       submissionsCount: 2,
       submittedTasksCount: 2,
+      iteratedTasksCount: 0,
       lateSubmissionsCount: 1,
       lateTasksCount: 1,
       aiRequestedCount: 2,
       aiSucceededCount: 1,
+      aiRequestedTasksCount: 2,
+      aiSucceededTasksCount: 1,
       avgFeedbackItems: 3.5,
+      avgWarnItems: 0,
       avgErrorItems: 2.5,
-      score: 58,
+      score: 76,
     });
     expect(submittedItem?.score).toBeGreaterThan(0);
   });
@@ -348,10 +704,13 @@ describe('ProcessAssessmentService getProcessAssessment', () => {
     expect(submittedItem).toMatchObject({
       publishedTasksCount: 2,
       submissionsCount: 2,
+      iteratedTasksCount: 0,
       lateSubmissionsCount: 1,
       aiRequestedCount: 2,
+      aiRequestedTasksCount: 2,
+      avgWarnItems: 0,
       avgErrorItems: 2.5,
-      score: 58,
+      score: 76,
     });
   });
 
@@ -380,14 +739,18 @@ describe('ProcessAssessmentService getProcessAssessment', () => {
       submittedTasksCount: 1,
       submittedTasksRate: 1,
       submissionsCount: 1,
+      iteratedTasksCount: 0,
       lateSubmissionsCount: 0,
       lateTasksCount: 0,
       aiRequestedCount: 1,
       aiSucceededCount: 1,
+      aiRequestedTasksCount: 1,
+      aiSucceededTasksCount: 1,
       avgFeedbackItems: 2,
+      avgWarnItems: 0,
       avgErrorItems: 0,
       riskLevel: 'LOW',
-      score: 64,
+      score: 98,
     });
     expect(submittedItem?.topTags).toEqual([
       { tag: 'readability', count: 1 },
@@ -422,10 +785,13 @@ describe('ProcessAssessmentService getProcessAssessment', () => {
     expect(submittedItem).toMatchObject({
       publishedTasksCount: 2,
       submissionsCount: 2,
+      iteratedTasksCount: 0,
       lateSubmissionsCount: 1,
       aiRequestedCount: 2,
+      aiRequestedTasksCount: 2,
+      avgWarnItems: 0,
       avgErrorItems: 2.5,
-      score: 58,
+      score: 76,
     });
   });
 
@@ -459,13 +825,18 @@ describe('ProcessAssessmentService getProcessAssessment', () => {
         submittedTasksCount: 0,
         submittedTasksRate: 0,
         submissionsCount: 0,
+        iteratedTasksCount: 0,
         lateSubmissionsCount: 0,
         lateTasksCount: 0,
         aiRequestedCount: 0,
         aiSucceededCount: 0,
+        aiRequestedTasksCount: 0,
+        aiSucceededTasksCount: 0,
         avgFeedbackItems: 0,
+        avgWarnItems: 0,
         avgErrorItems: 0,
         topTags: [],
+        riskLevel: 'LOW',
         score: 0,
       });
     }
@@ -507,15 +878,19 @@ describe('ProcessAssessmentService exportProcessAssessmentCsv', () => {
           publishedTasksCount: 2,
           submittedTasksRate: 0.5,
           submissionsCount: 2,
+          iteratedTasksCount: 1,
           lateSubmissionsCount: 1,
           lateTasksCount: 1,
           aiRequestedCount: 2,
           aiSucceededCount: 1,
+          aiRequestedTasksCount: 1,
+          aiSucceededTasksCount: 1,
           avgFeedbackItems: 1.5,
+          avgWarnItems: 0.25,
           avgErrorItems: 0.5,
           topTags: [{ tag: '中文标签', count: 2 }],
           riskLevel: 'MEDIUM',
-          score: 82.5,
+          score: 83,
         },
       ],
     });
@@ -607,6 +982,6 @@ describe('ProcessAssessmentService exportProcessAssessmentCsv', () => {
     );
     expect(submittedLine).toBeDefined();
     expect(submittedLine?.split(',')[3]).toBe(String(jsonItem?.score));
-    expect(submittedLine?.split(',')[3]).toBe('64');
+    expect(submittedLine?.split(',')[3]).toBe('98');
   });
 });

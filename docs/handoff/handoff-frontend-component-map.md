@@ -57,7 +57,7 @@
 
 | 页面模块 | 文件 | 真实 API | 作用边界 |
 |---|---|---|---|
-| ProcessAssessmentPage | `app/teacher/classrooms/[classroomId]/process-assessment/page.tsx` | `GET classrooms/:classroomId/process-assessment`、`GET classrooms/:classroomId/process-assessment.csv`、`GET classrooms/:classroomId/tasks` | 负责过程性评价页面 URL query 解析与服务端数据加载；`excludedTaskIds` 解析兼容逗号分隔和 repeated query，并在 JSON/CSV 请求中归一化为逗号分隔；“排除任务”是临时查询条件，使用原生 GET 表单，不持久化、不写浏览器存储、不修改任务或成绩；课堂任务选项加载失败只显示提示，不阻断过程性评价主体展示；不要在本页重算后端评分、改 CSV 字段、改 API 契约或引入复杂客户端状态。 |
+| ProcessAssessmentPage | `app/teacher/classrooms/[classroomId]/process-assessment/page.tsx` | `GET classrooms/:classroomId/process-assessment`、`GET classrooms/:classroomId/process-assessment.csv`、`GET classrooms/:classroomId/tasks` | 负责过程性评价页面 URL query 解析与服务端数据加载；`excludedTaskIds` 解析兼容逗号分隔和 repeated query，并在 JSON/CSV 请求中归一化为逗号分隔；“排除任务”是临时查询条件，应用排除使用原生 GET 表单，清空排除使用独立 GET form 且不提交 `excludedTaskIds`，不持久化、不写浏览器存储、不修改任务或成绩；页面展示后端返回的任务维度指标（迭代任务数、AI 覆盖任务数、平均警告/错误项）；课堂任务选项加载失败只显示提示，不阻断过程性评价主体展示；不要在本页重算后端评分、改 API 契约或引入复杂客户端状态。 |
 
 ## 4) Student 交互组件
 

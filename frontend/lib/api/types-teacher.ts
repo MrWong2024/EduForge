@@ -564,13 +564,36 @@ export type WeeklyReportResponse = {
   raw: UnknownRecord;
 };
 
+export type ProcessAssessmentItem = UnknownRecord & {
+  studentId?: string;
+  studentName?: string;
+  studentNo?: string | null;
+  submittedTasksCount?: number;
+  publishedTasksCount?: number;
+  submittedTasksRate?: number;
+  submissionsCount?: number;
+  iteratedTasksCount?: number;
+  lateSubmissionsCount?: number;
+  lateTasksCount?: number;
+  aiRequestedCount?: number;
+  aiSucceededCount?: number;
+  aiRequestedTasksCount?: number;
+  aiSucceededTasksCount?: number;
+  avgFeedbackItems?: number;
+  avgWarnItems?: number;
+  avgErrorItems?: number;
+  riskLevel?: string;
+  score?: number;
+  topTags?: UnknownRecord[];
+};
+
 export type ProcessAssessmentResponse = {
   classroomId?: string;
   window?: string;
   page?: number;
   limit?: number;
   total?: number;
-  items: UnknownRecord[];
+  items: ProcessAssessmentItem[];
   raw: UnknownRecord;
 };
 

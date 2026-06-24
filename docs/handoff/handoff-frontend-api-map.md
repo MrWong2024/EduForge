@@ -137,10 +137,10 @@
   - 注意：三件套共享任务上下文导航，不各自维护 API 边界。
 - 过程性评价 JSON：`process-assessment/page.tsx` -> `/api/proxy/classrooms/:id/process-assessment`。
   - 对应后端：`GET /api/classrooms/:classroomId/process-assessment`。
-  - 注意：`excludedTaskIds` 解析为 URL 查询条件；前端不重算评分。
+  - 注意：`excludedTaskIds` 解析为 URL 查询条件；前端展示后端返回的任务维度指标（`iteratedTasksCount/aiRequestedTasksCount/aiSucceededTasksCount/avgWarnItems`），不重算评分。
 - 过程性评价 CSV：`process-assessment/page.tsx` -> `buildProxyPath("classrooms/:id/process-assessment.csv")`。
   - 对应后端：`GET /api/classrooms/:classroomId/process-assessment.csv`。
-  - 注意：下载链接继续走 `/api/proxy/**`，与页面 JSON 使用同一排除口径。
+  - 注意：下载链接继续走 `/api/proxy/**`，与页面 JSON 使用同一排除口径；CSV 字段由后端导出实现决定。
 - 教学快照预检：`export/snapshot/page.tsx` -> `/api/proxy/classrooms/:id/export/snapshot`。
   - 对应后端：`GET /api/classrooms/:classroomId/export/snapshot`。
   - 注意：内部预检/诊断页，不作为教师高频主入口。

@@ -692,8 +692,11 @@
   - `items[*]` 稳定返回 `studentId/studentName/studentNo`（不再仅有 `studentId`）
   - `studentName`：优先用户姓名，缺失/空白时回落 `未知学生`
   - `studentNo`：优先用户学号，缺失/空白时返回 `null`
-  - CSV 同步包含 `studentName,studentNo,studentId` 列（列顺序在前部）
-  - 任务排除会重新计算 `publishedTasksCount/submittedTasksRate/submissions/late/AI job/AI feedback/topTags/score/risk`；排除全部任务时仍返回 ACTIVE 学生且任务相关统计与 `score` 为 0
+  - `items[*]` 评分解释字段包含 `iteratedTasksCount/aiRequestedTasksCount/aiSucceededTasksCount/avgWarnItems`；原 `aiRequestedCount/aiSucceededCount` 继续表示总 AI 请求/成功次数
+  - `avgFeedbackItems/avgWarnItems/avgErrorItems` 按任务维度统计：每个学生每个有效任务取最新一次有 AI 反馈项的提交，INFO 只进 `avgFeedbackItems`，WARN 进 `avgWarnItems`，ERROR 进 `avgErrorItems`
+  - rubric 固定为任务覆盖率 0.45、提交迭代质量 0.15、AI 使用质量 0.2、代码质量代理 0.2；`submissionsCount <= 0` 或排除全部任务时 `score=0`
+  - CSV 同步包含 `studentName,studentNo,studentId` 列（列顺序在前部），并新增 `iteratedTasksCount/aiRequestedTasksCount/aiSucceededTasksCount/avgWarnItems`
+  - 任务排除会重新计算 `publishedTasksCount/submittedTasksRate/submissions/iteration/late/AI job/AI task coverage/AI task success/AI feedback/topTags/score/risk`；排除全部任务时仍返回 ACTIVE 学生且任务相关统计与 `score` 为 0
 
 ### GET /api/courses/:courseId/overview
 
