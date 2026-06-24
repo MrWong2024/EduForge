@@ -218,7 +218,7 @@ Codex 在生成或修改后端查询逻辑时，如使用 Mongoose `.lean()` 查
 - 局部只用一次的类型，优先在当前 service 文件就近定义。
 - 多处复用且语义稳定的类型，才考虑提取到模块级 `interfaces`、`types` 或等价位置。
 - 可以使用仓库已有的类型；但如果仓库尚未形成某个全局工具类型范式，Codex 不得为解决局部问题擅自创建全局类型。
-- ReviewX 不引入 `WithTimestamps<T>` 作为项目级通用类型，也不把 `WithId<T>` 作为项目级推荐范式；需要 `_id` 或 timestamps 字段时，按实际查询结果在局部类型中显式声明字段。
+- 为解决局部 lean 类型问题时，Codex 不得擅自新增、泛化或改造 `WithId<T>`、`WithTimestamps<T>` 等项目级通用类型。若仓库已存在这类工具类型，可在语义稳定、字段与实际查询结果一致时使用；对 select、projection、aggregate、populate、lean 后的结果，必须按实际返回字段建模，避免把局部查询结果误声明为完整实体。需要 `_id`、`createdAt`、`updatedAt` 等字段时，应优先复用仓库已有类型或在局部类型中显式声明字段。
 
 示例：
 
