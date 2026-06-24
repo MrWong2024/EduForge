@@ -8,6 +8,7 @@
 - 所有正式业务请求统一走同域 `/api/proxy/**`，不要在业务页绕过 proxy 直连后端。
 - 代理目标由 `FRONTEND_BACKEND_ORIGIN` 决定，代理实现位于 `app/api/proxy/[...path]/route.ts`。
 - 详细页面、路由、主接口与完成度看 `docs/handoff/handoff-frontend-route-map.md`。
+- 前端 API helper、BFF proxy 与后端接口对接关系看 `docs/handoff/handoff-frontend-api-map.md`。
 - 详细组件职责与“改哪里/不要改哪里”看 `docs/handoff/handoff-frontend-component-map.md`。
 - 历史演进与旧口径收口原因看 `docs/handoff/handoff-frontend-changelog.md`，不要把 changelog 当当前事实 SoT。
 - 后端接口、DTO、配置与运行模式分别看对应 `handoff-backend-*` 文件。
@@ -127,6 +128,7 @@ Student 学习链路：
 
 - 前端入口：`docs/handoff/handoff-frontend-INDEX.md`
 - 路由地图：`docs/handoff/handoff-frontend-route-map.md`
+- 前端 API 对接地图：`docs/handoff/handoff-frontend-api-map.md`
 - 组件职责地图：`docs/handoff/handoff-frontend-component-map.md`
 - 历史变更记录：`docs/handoff/handoff-frontend-changelog.md`
 - 后端接口地图：`docs/handoff/handoff-backend-api-map.md`

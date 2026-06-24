@@ -5,6 +5,7 @@
 - 本文仅记录当前 `frontend/app/**` 实际存在路由。
 - `/teacher/**` 与 `/student/**` 已由对应 layout 执行 server-side role gate：未登录重定向到 `/login`，角色不匹配展示 403 UI。
 - 页面请求均经 `lib/api/client.ts` 或 `lib/api/browser-client.ts` 走 `/api/proxy/**`。
+- 前端 API helper / BFF proxy / 后端接口对接关系详见 `docs/handoff/handoff-frontend-api-map.md`。
 - `完成度` 口径：`Done`（主视图 + 主交互 + 真接口接入）、`Partial`（可访问但能力不完整）。
 - `Done` 仅表示当前页面链路可用，不等于最终交付定版。
 

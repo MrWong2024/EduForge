@@ -2,6 +2,8 @@
 
 目标：让新会话快速知道“改哪里、不要改哪里”。
 
+前端 API helper / BFF proxy / 后端接口对接关系详见 `docs/handoff/handoff-frontend-api-map.md`；本文只记录组件和模块职责边界。
+
 ## 1) Shell 层（页面外壳与导航）
 
 | 模块 | 文件 | 职责 | 不要在哪改 |
