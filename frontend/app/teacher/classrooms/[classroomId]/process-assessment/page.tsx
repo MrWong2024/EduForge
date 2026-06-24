@@ -5,7 +5,10 @@ import { ErrorState } from "@/components/blocks/ErrorState";
 import { PageHeader } from "@/components/blocks/PageHeader";
 import { buildProxyPath, fetchJson, FetchJsonError } from "@/lib/api/client";
 import { buildErrorDescription, extractRawDetail } from "@/lib/api/error-presenter";
-import { toProcessAssessmentResponse } from "@/lib/api/types-teacher";
+import {
+  toClassroomTasksResponse,
+  toProcessAssessmentResponse,
+} from "@/lib/api/types-teacher";
 import { paths } from "@/lib/routes/paths";
 import { getCommonErrorSummary } from "@/lib/ui/status";
 import {
@@ -20,7 +23,11 @@ import {
 
 type ProcessAssessmentPageProps = {
   params: Promise<{ classroomId: string }>;
-  searchParams: Promise<{ window?: string | string[]; page?: string | string[] }>;
+  searchParams: Promise<{
+    window?: string | string[];
+    page?: string | string[];
+    excludedTaskIds?: string | string[];
+  }>;
 };
 
 const SUPPORTED_REPORT_WINDOWS = ["24h", "7d", "30d", "all"] as const;
@@ -28,6 +35,8 @@ type ReportWindow = (typeof SUPPORTED_REPORT_WINDOWS)[number];
 const DISPLAY_REPORT_WINDOWS = ["7d", "30d", "all"] as const;
 type DisplayReportWindow = (typeof DISPLAY_REPORT_WINDOWS)[number];
 const PROCESS_ASSESSMENT_PAGE_SIZE = 100;
+const TASK_OPTION_PAGE_SIZE = 100;
+const MAX_TASK_OPTION_PAGES = 20;
 const REPORT_WINDOW_LABELS: Record<ReportWindow, string> = {
   "24h": "近24小时",
   "7d": "近7天",
@@ -58,11 +67,28 @@ type SummaryMetricCard = {
   label: string;
   value: string;
 };
+type ProcessAssessmentTaskOption = {
+  id: string;
+  title: string;
+  publishedAt?: string;
+  status?: string;
+  dueAt?: string;
+};
+type TaskOptionsLoadResult = {
+  taskOptions: ProcessAssessmentTaskOption[];
+  taskOptionsLoadError?: string;
+};
 
 const asRecord = (value: unknown): UnknownRecord =>
   value && typeof value === "object" && !Array.isArray(value)
     ? (value as UnknownRecord)
     : {};
+
+const asRecordArray = (value: unknown): UnknownRecord[] =>
+  Array.isArray(value) ? value.map((item) => asRecord(item)) : [];
+
+const toOptionalString = (value: unknown): string | undefined =>
+  typeof value === "string" && value.trim() ? value.trim() : undefined;
 
 const toFiniteNumber = (value: unknown): number | null => {
   if (typeof value === "number" && Number.isFinite(value)) {
@@ -288,25 +314,185 @@ const getRequestOrigin = async (): Promise<string> => {
 type ProcessAssessmentQueryState = {
   window: ReportWindow;
   page: number;
+  excludedTaskIds: string[];
 };
+
+const parseExcludedTaskIds = (
+  value: string | string[] | null | undefined,
+): string[] => {
+  if (value === undefined || value === null) {
+    return [];
+  }
+
+  const rawValues = Array.isArray(value) ? value : [value];
+  const seen = new Set<string>();
+  const parsed: string[] = [];
+  for (const taskId of rawValues
+    .flatMap((rawValue) => rawValue.split(","))
+    .map((rawValue) => rawValue.trim())
+    .filter((rawValue) => rawValue.length > 0)) {
+    if (!seen.has(taskId)) {
+      seen.add(taskId);
+      parsed.push(taskId);
+    }
+  }
+  return parsed;
+};
+
+const toExcludedTaskIdsQueryValue = (
+  excludedTaskIds: string[],
+): string | undefined =>
+  excludedTaskIds.length > 0 ? excludedTaskIds.join(",") : undefined;
 
 const resolveQueryState = (
   query: Awaited<ProcessAssessmentPageProps["searchParams"]>,
 ): ProcessAssessmentQueryState => ({
   window: parseEnum(getSingleSearchParam(query.window), SUPPORTED_REPORT_WINDOWS, "all"),
   page: parsePositiveInt(getSingleSearchParam(query.page), 1, { min: 1 }),
+  excludedTaskIds: parseExcludedTaskIds(query.excludedTaskIds),
 });
 
-const buildWindowHref = (classroomId: string, windowValue: DisplayReportWindow): string => {
+const buildWindowHref = (
+  classroomId: string,
+  windowValue: DisplayReportWindow,
+  excludedTaskIds: string[],
+): string => {
+  const query = buildQueryString({
+    window: windowValue,
+    page: 1,
+    excludedTaskIds: toExcludedTaskIdsQueryValue(excludedTaskIds),
+  });
+  const basePath = paths.teacher.classroomProcessAssessment(classroomId);
+  return query ? `${basePath}?${query}` : basePath;
+};
+
+const buildPageHref = (
+  classroomId: string,
+  windowValue: ReportWindow,
+  page: number,
+  excludedTaskIds: string[],
+): string => {
+  const query = buildQueryString({
+    window: windowValue,
+    page,
+    excludedTaskIds: toExcludedTaskIdsQueryValue(excludedTaskIds),
+  });
+  const basePath = paths.teacher.classroomProcessAssessment(classroomId);
+  return query ? `${basePath}?${query}` : basePath;
+};
+
+const buildClearExcludedHref = (
+  classroomId: string,
+  windowValue: ReportWindow,
+): string => {
   const query = buildQueryString({ window: windowValue, page: 1 });
   const basePath = paths.teacher.classroomProcessAssessment(classroomId);
   return query ? `${basePath}?${query}` : basePath;
 };
 
-const buildPageHref = (classroomId: string, windowValue: ReportWindow, page: number): string => {
-  const query = buildQueryString({ window: windowValue, page });
-  const basePath = paths.teacher.classroomProcessAssessment(classroomId);
-  return query ? `${basePath}?${query}` : basePath;
+const extractClassroomTaskRecords = (payload: unknown): UnknownRecord[] => {
+  if (Array.isArray(payload)) {
+    return asRecordArray(payload);
+  }
+
+  const record = asRecord(payload);
+  const dataRecord = asRecord(safeGet(record, "data", undefined));
+  const source = Object.keys(dataRecord).length > 0 ? dataRecord : record;
+  const candidateItems =
+    safeGet<unknown>(source, "items", undefined) ??
+    safeGet<unknown>(source, "data", undefined);
+  return asRecordArray(candidateItems);
+};
+
+const toTaskOptionsFromPayload = (
+  payload: unknown,
+): ProcessAssessmentTaskOption[] => {
+  const taskList = toClassroomTasksResponse(payload);
+  const rawItems = extractClassroomTaskRecords(payload);
+  const taskOptions: ProcessAssessmentTaskOption[] = [];
+  taskList.items.forEach((task, index) => {
+    const rawItem = rawItems[index] ?? {};
+    const taskRecord = asRecord(safeGet(rawItem, "task", undefined));
+    const id =
+      task.classroomTaskId ??
+      toOptionalString(rawItem.classroomTaskId) ??
+      toOptionalString(rawItem.id);
+    if (!id) {
+      return;
+    }
+
+    const publishedAt =
+      toOptionalString(rawItem.publishedAt) ??
+      toOptionalString(taskRecord.publishedAt);
+    const status = task.status ?? toOptionalString(rawItem.status);
+    const dueAt = task.dueAt ?? toOptionalString(rawItem.dueAt);
+    taskOptions.push({
+      id,
+      title:
+        task.title ??
+        toOptionalString(taskRecord.title) ??
+        toOptionalString(rawItem.title) ??
+        "未命名任务",
+      ...(publishedAt ? { publishedAt } : {}),
+      ...(status ? { status } : {}),
+      ...(dueAt ? { dueAt } : {}),
+    });
+  });
+  return taskOptions;
+};
+
+const fetchAllClassroomTaskOptions = async (
+  classroomId: string,
+  origin: string,
+): Promise<ProcessAssessmentTaskOption[]> => {
+  const taskOptions: ProcessAssessmentTaskOption[] = [];
+  const seenTaskIds = new Set<string>();
+  let page = 1;
+  let total: number | undefined;
+
+  while (page <= MAX_TASK_OPTION_PAGES) {
+    const query = buildQueryString({
+      page,
+      limit: TASK_OPTION_PAGE_SIZE,
+    });
+    const payload = await fetchJson<unknown>(
+      `classrooms/${encodeURIComponent(classroomId)}/tasks?${query}`,
+      {
+        origin,
+        cache: "no-store",
+      },
+    );
+    const taskList = toClassroomTasksResponse(payload);
+    const pageTaskOptions = toTaskOptionsFromPayload(payload);
+    let addedCount = 0;
+    for (const taskOption of pageTaskOptions) {
+      if (!seenTaskIds.has(taskOption.id)) {
+        seenTaskIds.add(taskOption.id);
+        taskOptions.push(taskOption);
+        addedCount += 1;
+      }
+    }
+
+    total = typeof taskList.total === "number" ? taskList.total : total;
+    if (typeof total === "number" && taskOptions.length >= total) {
+      break;
+    }
+    if (pageTaskOptions.length < TASK_OPTION_PAGE_SIZE || addedCount === 0) {
+      break;
+    }
+    page += 1;
+  }
+
+  return taskOptions;
+};
+
+const toTaskOptionMeta = (taskOption: ProcessAssessmentTaskOption): string => {
+  const items = [
+    `发布时间：${toDisplayDate(taskOption.publishedAt)}`,
+    `截止：${toDisplayDate(taskOption.dueAt)}`,
+    `状态：${toDisplayText(taskOption.status)}`,
+  ];
+  return items.join(" · ");
 };
 
 type ProcessAssessmentViewModel =
@@ -314,6 +500,9 @@ type ProcessAssessmentViewModel =
       mode: "ready";
       data: ReturnType<typeof toProcessAssessmentResponse>;
       window: ReportWindow;
+      excludedTaskIds: string[];
+      taskOptions: ProcessAssessmentTaskOption[];
+      taskOptionsLoadError?: string;
       csvHref: string;
     }
   | {
@@ -333,11 +522,15 @@ export default async function ProcessAssessmentPage({
     window: queryState.window,
     page: String(queryState.page),
     limit: String(PROCESS_ASSESSMENT_PAGE_SIZE),
+    excludedTaskIds: toExcludedTaskIdsQueryValue(queryState.excludedTaskIds),
   });
   const csvBasePath = buildProxyPath(
     `classrooms/${encodeURIComponent(classroomId)}/process-assessment.csv`
   );
-  const csvQuery = buildQueryString({ window: queryState.window });
+  const csvQuery = buildQueryString({
+    window: queryState.window,
+    excludedTaskIds: toExcludedTaskIdsQueryValue(queryState.excludedTaskIds),
+  });
   const csvHref = csvQuery ? `${csvBasePath}?${csvQuery}` : csvBasePath;
 
   let viewModel: ProcessAssessmentViewModel = {
@@ -348,18 +541,32 @@ export default async function ProcessAssessmentPage({
 
   try {
     const origin = await getRequestOrigin();
-    const payload = await fetchJson<unknown>(
-      `classrooms/${encodeURIComponent(classroomId)}/process-assessment?${queryString}`,
-      {
-        origin,
-        cache: "no-store",
-      }
-    );
+    const taskOptionsPromise: Promise<TaskOptionsLoadResult> =
+      fetchAllClassroomTaskOptions(classroomId, origin)
+        .then((taskOptions) => ({ taskOptions }))
+        .catch(() => ({
+          taskOptions: [],
+          taskOptionsLoadError:
+            "排除任务列表加载失败，当前成绩仍按 URL 中的排除参数计算。",
+        }));
+    const [payload, taskOptionsResult] = await Promise.all([
+      fetchJson<unknown>(
+        `classrooms/${encodeURIComponent(classroomId)}/process-assessment?${queryString}`,
+        {
+          origin,
+          cache: "no-store",
+        },
+      ),
+      taskOptionsPromise,
+    ]);
 
     viewModel = {
       mode: "ready",
       data: toProcessAssessmentResponse(payload),
       window: queryState.window,
+      excludedTaskIds: queryState.excludedTaskIds,
+      taskOptions: taskOptionsResult.taskOptions,
+      taskOptionsLoadError: taskOptionsResult.taskOptionsLoadError,
       csvHref,
     };
   } catch (error) {
@@ -412,6 +619,14 @@ export default async function ProcessAssessmentPage({
   const showPagination = totalStudentsCount > PROCESS_ASSESSMENT_PAGE_SIZE;
   const hasPrev = currentPage > 1;
   const hasNext = currentPage < totalPages;
+  const selectedExcludedTaskIdSet = new Set(viewModel.excludedTaskIds);
+  const taskOptionIdSet = new Set(
+    viewModel.taskOptions.map((taskOption) => taskOption.id),
+  );
+  const hiddenExcludedTaskIds = viewModel.excludedTaskIds.filter(
+    (taskId) => !taskOptionIdSet.has(taskId),
+  );
+  const selectedExcludedTaskCount = viewModel.excludedTaskIds.length;
 
   return (
     <section className="space-y-4">
@@ -448,7 +663,11 @@ export default async function ProcessAssessmentPage({
               return (
                 <Link
                   key={windowValue}
-                  href={buildWindowHref(classroomId, windowValue)}
+                  href={buildWindowHref(
+                    classroomId,
+                    windowValue,
+                    viewModel.excludedTaskIds,
+                  )}
                   className={isActive ? "font-semibold text-blue-700" : "text-blue-700 hover:underline"}
                 >
                   {REPORT_WINDOW_LABELS[windowValue]}
@@ -463,6 +682,97 @@ export default async function ProcessAssessmentPage({
         </div>
         <p className="mt-1.5 text-[11px] text-zinc-400">统计生成于：{generatedAt}</p>
       </section>
+
+      <details
+        open={selectedExcludedTaskCount > 0}
+        className="rounded-lg border border-zinc-200 bg-white p-4 text-sm"
+      >
+        <summary className="cursor-pointer font-medium text-zinc-900">
+          排除任务（临时计算）
+        </summary>
+        <div className="mt-3 space-y-3">
+          <p className="text-zinc-600">
+            勾选后点击应用，当前页面与 CSV 将按排除后的任务范围重新计算；这只是临时查询条件，不会保存偏好，不会修改课堂任务或成绩数据。
+          </p>
+          <p className="text-xs text-zinc-500">
+            {selectedExcludedTaskCount > 0
+              ? `已排除 ${selectedExcludedTaskCount} 个任务，当前成绩与 CSV 均按排除后任务范围计算。`
+              : "未排除任务，当前成绩按统计窗口内全部任务计算。"}
+          </p>
+          {viewModel.taskOptionsLoadError ? (
+            <p className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-700">
+              {viewModel.taskOptionsLoadError}
+            </p>
+          ) : null}
+          {hiddenExcludedTaskIds.length > 0 ? (
+            <p className="rounded-md border border-sky-200 bg-sky-50 px-3 py-2 text-xs text-sky-700">
+              有 {hiddenExcludedTaskIds.length} 个已选任务未在当前任务列表中显示；它们仍会保留在本次页面与 CSV 查询参数中。
+            </p>
+          ) : null}
+          <form method="get" className="space-y-3">
+            <input type="hidden" name="window" value={viewModel.window} />
+            <input type="hidden" name="page" value="1" />
+            {hiddenExcludedTaskIds.map((taskId) => (
+              <input
+                key={taskId}
+                type="hidden"
+                name="excludedTaskIds"
+                value={taskId}
+              />
+            ))}
+
+            {viewModel.taskOptions.length === 0 ? (
+              <p className="rounded-md border border-zinc-200 bg-zinc-50 px-3 py-2 text-zinc-500">
+                {viewModel.taskOptionsLoadError
+                  ? "当前无法展示可选任务；页面仍会按 URL 中的排除参数计算。"
+                  : "暂无可排除任务。"}
+              </p>
+            ) : (
+              <div className="max-h-72 overflow-y-auto rounded-md border border-zinc-200">
+                {viewModel.taskOptions.map((taskOption) => (
+                  <label
+                    key={taskOption.id}
+                    className="flex gap-3 border-b border-zinc-100 px-3 py-2.5 last:border-b-0"
+                  >
+                    <input
+                      type="checkbox"
+                      name="excludedTaskIds"
+                      value={taskOption.id}
+                      defaultChecked={selectedExcludedTaskIdSet.has(
+                        taskOption.id,
+                      )}
+                      className="mt-1 h-4 w-4 rounded border-zinc-300"
+                    />
+                    <span className="min-w-0">
+                      <span className="block break-words font-medium text-zinc-900">
+                        {taskOption.title}
+                      </span>
+                      <span className="mt-0.5 block text-xs text-zinc-500">
+                        {toTaskOptionMeta(taskOption)}
+                      </span>
+                    </span>
+                  </label>
+                ))}
+              </div>
+            )}
+
+            <div className="flex flex-wrap items-center gap-3">
+              <button
+                type="submit"
+                className="rounded-md bg-zinc-900 px-3 py-1.5 text-sm font-medium text-white hover:bg-zinc-700"
+              >
+                应用排除任务
+              </button>
+              <Link
+                href={buildClearExcludedHref(classroomId, viewModel.window)}
+                className="text-sm text-blue-700 hover:underline"
+              >
+                清空排除
+              </Link>
+            </div>
+          </form>
+        </div>
+      </details>
 
       <section className="rounded-lg border border-zinc-200 bg-white p-4">
         <h2 className="text-sm font-semibold text-zinc-900">过程性评价摘要</h2>
@@ -551,7 +861,12 @@ export default async function ProcessAssessmentPage({
 
             {hasPrev ? (
               <Link
-                href={buildPageHref(classroomId, viewModel.window, currentPage - 1)}
+                href={buildPageHref(
+                  classroomId,
+                  viewModel.window,
+                  currentPage - 1,
+                  viewModel.excludedTaskIds,
+                )}
                 className="text-blue-700 hover:underline"
               >
                 上一页
@@ -562,7 +877,12 @@ export default async function ProcessAssessmentPage({
 
             {hasNext ? (
               <Link
-                href={buildPageHref(classroomId, viewModel.window, currentPage + 1)}
+                href={buildPageHref(
+                  classroomId,
+                  viewModel.window,
+                  currentPage + 1,
+                  viewModel.excludedTaskIds,
+                )}
                 className="text-blue-700 hover:underline"
               >
                 下一页

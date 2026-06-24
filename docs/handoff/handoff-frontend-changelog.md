@@ -799,3 +799,10 @@
 - 【本步解决】`/forgot-password` 成功提交后缺少防连点反馈，用户容易连续点击“发送重置邮件”。
 - 【新增事实 / 已收口口径】`ForgotPasswordForm` 在成功提交 `POST /api/auth/forgot-password` 后，发送按钮会进入前端 60 秒倒计时禁用态，按钮文案显示剩余秒数；请求失败时不启动倒计时。
 - 【边界保持】邮箱输入框在倒计时期间仍可编辑；刷新页面后倒计时可丢失；前端倒计时仅是体验层优化，不改变 API 契约，也不替代后端 60 秒冷却安全边界。
+
+## UAT-FE-96
+
+- 【本步解决】教师过程性评价页无法临时排除异常课堂任务后重新计算，虽然后端已支持 `excludedTaskIds` query。
+- 【新增事实 / 已收口口径】`/teacher/classrooms/[classroomId]/process-assessment` 已新增“排除任务（临时计算）”区域，使用课堂任务列表接口加载选项，勾选后通过 URL `excludedTaskIds` 触发重新计算；页面解析兼容逗号分隔与 repeated query，向过程性评价 JSON 与 CSV 下载请求时统一透传逗号分隔值。
+- 【联动收口】切换统计窗口时保留 `excludedTaskIds` 并回到 `page=1`；翻页保留 `window + excludedTaskIds`；清空排除会移除 `excludedTaskIds` 并回到 `page=1`；已选但不在当前任务选项中显示的 id 继续保留在查询参数中。
+- 【边界保持】排除任务只是临时查询条件，不保存教师偏好，不写 localStorage/sessionStorage/cookie，不修改任务、成绩、CSV 字段、后端接口或评分规则；任务选项加载失败只提示，不阻断过程性评价主体展示。

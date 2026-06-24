@@ -162,6 +162,7 @@ npm run test:e2e -- backend/test/classroom-learning-loop.e2e-spec.ts
 - `backend/test/classroom-process-assessment.e2e-spec.ts`
   - 覆盖：Z6 `GET /api/classrooms/:classroomId/process-assessment` 与 `GET /api/classrooms/:classroomId/process-assessment.csv`。
   - 关键断言：CSV header/转义正确，不含敏感字段；CSV 下载内容以 UTF-8 BOM（`\uFEFF`）开头以兼容 Excel 中文；`lateSubmissionsCount/lateTasksCount` 存在（Z7）；0 次提交 ACTIVE 学生仍保留在过程性评价结果中，且 `score=0`，不得获得 codeQualityProxy 保底分；`excludedTaskIds` 排除任务后，`publishedTasksCount`、`submittedTasksRate` 分母、提交/迟交、AI job、AI feedback、`topTags` 与 CSV score 均按剩余任务重新计算；排除全部任务时 ACTIVE 学生仍保留且 score 为 0。
+  - 前端人工回归：`/teacher/classrooms/:classroomId/process-assessment` 的排除任务 UI 应通过 URL `excludedTaskIds` 触发重新计算；逗号分隔与 repeated query 均可被页面解析；切换统计窗口和翻页保留排除项；CSV 下载链接带同样的 `excludedTaskIds`；清空排除移除该参数并回到 `page=1`；任务选项加载失败时过程性评价主体仍可展示。
   - 重要性：保证过程性评价 JSON/CSV 同口径可导出。
 - `backend/test/classroom-task-deadline.e2e-spec.ts`
   - 覆盖：Z7 `POST /api/classrooms/:classroomId/tasks/:classroomTaskId/submissions` 的截止门禁。

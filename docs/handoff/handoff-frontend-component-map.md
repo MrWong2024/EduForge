@@ -51,6 +51,12 @@
 | TeacherFeedbackHistory | `components/teacher/TeacherFeedbackHistory.tsx` | - | 仅负责教师提交详情页反馈历史展示与编辑态切换；只对 `source=TEACHER` 且有 `id` 的反馈显示“修改”，AI/SYSTEM 反馈保持只读；同一时间只展开一个编辑表单 |
 | TeacherFeedbackEditForm | `components/teacher/TeacherFeedbackEditForm.tsx` | `PATCH learning-tasks/submissions/:submissionId/feedback/:feedbackId` | 仅负责单条教师反馈原地编辑（`type/severity/message/suggestion/tags`）；`tags` 可选，不选时由后端归一化为 `other`，前端只做规则提示，不改变原始枚举展示；请求通过 `browser-client.fetchJson` 走 `/api/proxy/**`；保存成功后 `router.refresh()` 并退出编辑态；400/403/404/5xx 分别显示明确中文摘要与后端 detail；`scoreHint` 后端响应兼容但前端不展示、不提交、不编辑 |
 
+## 3.5) Teacher 报表页面级模块
+
+| 页面模块 | 文件 | 真实 API | 作用边界 |
+|---|---|---|---|
+| ProcessAssessmentPage | `app/teacher/classrooms/[classroomId]/process-assessment/page.tsx` | `GET classrooms/:classroomId/process-assessment`、`GET classrooms/:classroomId/process-assessment.csv`、`GET classrooms/:classroomId/tasks` | 负责过程性评价页面 URL query 解析与服务端数据加载；`excludedTaskIds` 解析兼容逗号分隔和 repeated query，并在 JSON/CSV 请求中归一化为逗号分隔；“排除任务”是临时查询条件，使用原生 GET 表单，不持久化、不写浏览器存储、不修改任务或成绩；课堂任务选项加载失败只显示提示，不阻断过程性评价主体展示；不要在本页重算后端评分、改 CSV 字段、改 API 契约或引入复杂客户端状态。 |
+
 ## 4) Student 交互组件
 
 | 组件 | 文件 | 真实 API | 作用边界 |

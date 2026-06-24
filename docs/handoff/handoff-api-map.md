@@ -93,6 +93,7 @@ Notes:
 - `/api/classrooms/:classroomId/weekly-report` 权限：teacher only，`classroom.teacherId === currentUserId`；统计隔离按 `classroomId + classroomTaskId`，`studentsCount/risk` 仅基于 Enrollment ACTIVE。
 - `/api/classrooms/:classroomId/process-assessment` Query: `window, page, limit, sort, order, excludedTaskIds`；`excludedTaskIds` 为 optional，支持逗号分隔或 repeated query，用于临时排除指定课堂任务后重新计算；teacher only；Enrollment-only；返回聚合结果，不返回敏感字段。
 - `/api/classrooms/:classroomId/process-assessment.csv` Query: `window, excludedTaskIds`；`excludedTaskIds` 与 JSON 接口同口径；teacher only；CSV 为手写转义（双引号转义），响应保持 `text/csv; charset=utf-8`，且内容以 UTF-8 BOM（`\uFEFF`）开头以兼容 Windows Excel 中文显示；不返回敏感字段。
+- 前端接入口径：教师端 `/teacher/classrooms/:classroomId/process-assessment` 已支持临时排除任务 UI；页面 URL 解析兼容逗号分隔与 repeated query，JSON/CSV 请求统一用逗号分隔 `excludedTaskIds` 透传；切换窗口、翻页和 CSV 下载均保持同一排除口径，返回结构与 CSV 列不变。
 - `/api/classrooms/:classroomId/process-assessment` 响应项增强：`items[*]` 返回 `studentId/studentName/studentNo`；`studentName` 缺失回落 `未知学生`，`studentNo` 缺失返回 `null`。
 - `/api/classrooms/:classroomId/process-assessment` 评分口径：`submissionsCount <= 0` 的学生仍返回在 `items` 中，但 `score` 固定为 `0`；有提交学生继续按既有四项 rubric 计算。
 - `/api/classrooms/:classroomId/process-assessment` 排除任务口径：先按 `classroomId + window` 取课堂任务，再应用 `excludedTaskIds` 得到有效任务范围；被排除任务不参与 `publishedTasksCount`、`submittedTasksRate` 分母、提交/迟交、AI job、AI feedback、`topTags` 与 score/risk 计算；排除全部任务时仍返回当前 ACTIVE 学生，任务相关统计与 `score` 均为 0。
