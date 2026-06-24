@@ -8,6 +8,12 @@
 
 若文档与代码冲突，一律以当前 `frontend/**` 代码为准。
 
+## 旧宪法事实迁移说明
+
+- 2026-06-24 已将旧 `docs/frontend-architecture.md` 中的 EduForge 前端事实迁移/对齐到本入口、route-map、component-map、frontend-snapshot 与相关后端 handoff。
+- 后续如 7 个通用宪法文档被覆盖，前端路由、BFF、role gate、页面接口、AI Feedback 与过程性评价 UI 事实以 `docs/handoff/**` 为项目锚点。
+- 当前代码口径：正式 BFF 代理变量是 `FRONTEND_BACKEND_ORIGIN`；旧示例中的 `BACKEND_URL` 不作为当前前端事实。
+
 ## 文档导航（前端）
 
 | 文档 | 用途 | 新会话何时看 |

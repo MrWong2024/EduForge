@@ -7,7 +7,9 @@
 - 任何 handoff 文档、分析结论或续接开发，均必须以当前工作区代码为准，而不是 GitHub 仓库状态、commit 历史、分支信息或 PR 记录。
 - 本交接包不依赖 git 工作流。
 - 当文档与代码发生冲突时，以代码为准。
-- 版本策略（Node.js/NestJS/MongoDB）以 `docs/backend-architecture.md` 为准，本文不重复。
+- 2026-06-24 已将 7 个旧宪法文档中的 EduForge 项目专属事实迁移到 `docs/handoff/**`；后续覆盖通用宪法文档后，本快照与其它 handoff 仍承担 EduForge 项目事实锚点。
+- 后端技术栈事实：Node.js LTS 24.x、NestJS 11.x、MongoDB 8.x（Mongoose）、TypeScript、REST API。
+- 前端技术栈事实：Next.js App Router + TypeScript；正式后端访问路径为同域 `/api/proxy/**`。
 - 该系统为新系统，无历史数据包袱。
 - 因此不需要回填脚本；Enrollment 为权威来源，legacy `studentIds` 不作为任何授权/统计的 fallback。
 - 本次扫描基准目录是 `backend/`，即 `backend/src`、`backend/test`、`backend/scripts`。

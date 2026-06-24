@@ -680,17 +680,20 @@
   - `limit?: number`（`@Type(() => Number) @IsInt() @Min(1) @Max(100)`）
   - `sort?: 'score' | 'submissionsCount' | 'submittedTasksCount' | 'aiRequestedCount' | 'riskLevel'`
   - `order?: 'asc' | 'desc'`
+  - `excludedTaskIds?: string | string[]`（optional；支持逗号分隔或 repeated query；每个 id 应为 MongoId）
 - Example Query:
   - `/api/classrooms/{classroomId}/process-assessment?window=all&page=1&limit=50&sort=score&order=desc`
+  - `/api/classrooms/{classroomId}/process-assessment?window=all&excludedTaskIds=64f10c5a9c8f4a1b2c3d4e5f,64f10c5a9c8f4a1b2c3d4e60`
 - Window 语义:
   - `all` = 当前班级过程性评价口径下全部历史记录（无时间下界过滤）
   - `term` 为后端兼容窗口
-  - CSV 接口 `GET /api/classrooms/:classroomId/process-assessment.csv` 复用同 DTO/同窗口语义
+  - CSV 接口 `GET /api/classrooms/:classroomId/process-assessment.csv` 复用同窗口与 `excludedTaskIds` 语义
 - Response 关键口径（items）:
   - `items[*]` 稳定返回 `studentId/studentName/studentNo`（不再仅有 `studentId`）
   - `studentName`：优先用户姓名，缺失/空白时回落 `未知学生`
   - `studentNo`：优先用户学号，缺失/空白时返回 `null`
   - CSV 同步包含 `studentName,studentNo,studentId` 列（列顺序在前部）
+  - 任务排除会重新计算 `publishedTasksCount/submittedTasksRate/submissions/late/AI job/AI feedback/topTags/score/risk`；排除全部任务时仍返回 ACTIVE 学生且任务相关统计与 `score` 为 0
 
 ### GET /api/courses/:courseId/overview
 

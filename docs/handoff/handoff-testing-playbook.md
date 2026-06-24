@@ -4,9 +4,14 @@
 
 - 强制遵循：`docs/e2e-testing.md`。
 - 必须使用测试环境：`NODE_ENV=test`。
-- 必须提供测试库连接：`MONGO_URI`（且应指向 test DB）。
+- 必须提供测试库连接：`MONGO_URI`（且应指向 `eduforge_test`）。
+- E2E 使用真实 MongoDB 测试库，不使用内存库；连接到非 test 命名库应 fail-fast。
 - 默认应自动清理；仅本地调试时才设置 `KEEP_E2E_DB=1`。
 - 影响模块装配、provider 绑定、guard 行为的 env（如 `AI_FEEDBACK_DEBUG_ENABLED`、`AI_FEEDBACK_PROVIDER`、`AI_FEEDBACK_REAL_ENABLED`、`AI_FEEDBACK_WORKER_ENABLED`）必须在应用初始化 / `AppModule` 导入前设置；否则可能出现与业务无关的 `404` 或 provider/guard 装配偏差。
+- 每个 `*.e2e-spec.ts` 必须显式设置 `jest.setTimeout(30000)`，避免 Nest 启动、真实 MongoDB、Session/Cookie 与 AI worker 链路被 Jest 默认 5 秒超时误判。
+- AI Feedback 主链路测试默认不依赖 `POST /api/learning-tasks/ai-feedback/jobs/process-once` debug 路由；可直接调用 `AiFeedbackProcessor.processOnce(...)` 或内部 service 推进批次，确保与 worker 路径一致。
+- debug gate 专项测试才调用 jobs/process-once，并应独立描述 `AI_FEEDBACK_DEBUG_ENABLED` 的 404/403/200 组合行为。
+- `LEARNING_TASK_SUBMISSION_COOLDOWN_MS` 属运行时业务阈值；连续提交类 E2E 需在 spec 内备份、设置为 `0`、在 `app.init()` 后同步 `ConfigService.set('LEARNING_TASK_SUBMISSION_COOLDOWN_MS', 0)`，并在 `afterAll` 恢复。
 
 ## 2) 运行命令（PowerShell）
 

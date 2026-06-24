@@ -203,3 +203,16 @@ provider 在协议层增加 `items<=2` 的硬闸门；`AiFeedbackProcessor` comp
 `Feedback` schema 与 API 路径保持不变，兼容现有前端读取。  
 主策略由“模型自由输出 + compactor善后”调整为“prompt/协议先约束 + compactor轻量兜底”。  
 `AI_FEEDBACK_MAX_ITEMS` 仍保留兼容语义，但真实 OpenRouter 输出链路默认目标为 1 条、必要时最多 2 条。  
+
+## 16) EduForge 项目专属事实从旧宪法文档迁移到 handoff
+
+**Decision**  
+2026-06-24 起，旧 7 个宪法文档中的 EduForge 项目专属事实迁移/补充到 `docs/handoff/**`；后续可用 ReviewX 的 7 个通用宪法文档覆盖 `docs/` 下同名宪法文档。
+
+**Rationale**  
+认证、角色、路由、接口、DTO、配置、数据库、测试、AI Feedback 与过程性评价属于 EduForge 项目事实，不应依赖通用宪法文档长期承载。
+
+**Consequences**  
+替换 7 个通用宪法文档后，Codex/GPT 续接 EduForge 应优先阅读 `docs/handoff/**`。  
+若 handoff 与当前代码冲突，以当前工作区代码为准，并同步修订对应 handoff。  
+本决策不改变任何业务接口、DTO、权限逻辑、返回结构或测试代码。

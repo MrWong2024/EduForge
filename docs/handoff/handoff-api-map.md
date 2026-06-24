@@ -2,6 +2,18 @@
 
 全局前缀：运行态由 `src/main.ts` 统一加 `api` 前缀。下文路径按运行态写为 `/api/...`。
 
+## 全局认证与授权口径
+
+- 认证模型：服务端 Session + HttpOnly Cookie；Cookie 名称固定为 `ef_session`。
+- `POST /api/auth/login` 成功后创建 `sessions` 记录并写入 `ef_session`；`POST /api/auth/logout` 清除 Cookie 并使服务端 session 失效。
+- 当前用户探针固定为 `GET /api/users/me`，用于确认 Cookie session 与 `req.user={id,roles}` 已建立；返回公开字段，不返回 `passwordHash`。
+- 全局 `SessionAuthGuard` 通过 `APP_GUARD` 保护非 `@Public()` 路由；公开例外包括登录、忘记密码、重置密码等显式 `@Public()` 路由。
+- `RolesGuard` 由 controller 显式 `@UseGuards(RolesGuard) + @Roles(...)` 启用；后端 service 继续执行资源归属校验，前端 role gate 只承担体验层入口约束。
+- 角色语义：`TEACHER` 管理自己创建/拥有的课程、班级、课堂任务、提交与报表；`STUDENT` 仅访问自己 Enrollment ACTIVE 的班级任务、自己的提交与反馈。
+- 成员与统计权威来源是 Enrollment-only（`role=STUDENT,status=ACTIVE`）；`classroom.studentIds` 仅 legacy 镜像/输出，不作为授权、统计或 fallback。
+- 资源隔离默认按 `classroomId + classroomTaskId + studentId` 执行；教师只能访问自己班级/任务数据，学生只能访问自己任务或提交记录。后端是权限最终裁判。
+- 认证失败对外按 `401 Unauthorized` 处理；debug/ops 门禁关闭时优先返回 `404`，不暴露接口存在性。
+
 ## App
 
 | Method | Path   | 用途                            |

@@ -7,6 +7,40 @@
 - env 默认值以 `backend/src/config/env.validation.ts` 为准。
 - `AI_FEEDBACK_WORKER_*` 不在 Joi schema 内；其默认行为来自 worker/processor 源码常量（`backend/src/modules/learning-tasks/ai-feedback/services/ai-feedback-worker.service.ts`、`backend/src/modules/learning-tasks/ai-feedback/services/ai-feedback-processor.service.ts`）。
 
+## 0.5) 数据库、连接串与索引治理
+
+数据库命名按 `NODE_ENV` 物理隔离：
+
+| `NODE_ENV` | Database |
+|---|---|
+| `development` | `eduforge_dev` |
+| `test` | `eduforge_test` |
+| `production` | `eduforge` |
+
+连接串口径：
+
+- 应用运行只读取 `MONGO_URI`，并由 `DatabaseModule` 校验连接到的 databaseName 是否与 `NODE_ENV` 匹配；不匹配时 fail-fast。
+- 运维脚本读取 `MONGO_ADMIN_URI`，包括 `npm run sync-indexes` 与 `npm run import-users -- ...`；脚本同样校验 databaseName。
+- 账号模型沿用两类账号：`*_app` 用于应用运行，权限限于对应库 `readWrite`；`*_db_admin` 用于索引同步、导入、迁移等人工/脚本操作。
+
+索引与 `autoIndex`：
+
+| `NODE_ENV` | Mongoose `autoIndex` |
+|---|---|
+| `development` | `true` |
+| `test` | `true` |
+| `production` | `false` |
+
+- production 的 Schema 索引同步唯一入口是 `npm run sync-indexes`；不得依赖 production 启动时 `autoIndex` 建索引。
+- `sessions` 集合必须具备 `userId_1`、`token_1 unique`、`expiresAt_1 expireAfterSeconds:0`；SessionService 会在模块初始化时确保 session 索引存在。
+
+## 0.6) Cookie、CORS 与前端代理
+
+- 会话 Cookie：`ef_session`，`HttpOnly=true`、`sameSite=lax`、`secure=(NODE_ENV=production)`、`path=/`、`maxAge=SESSION_TTL_MS`（当前 `7d`）。
+- 后端 CORS origin 由 `FRONTEND_URL` 控制，默认 `http://localhost:3000`。
+- 当前前端 BFF 代理目标变量是 `FRONTEND_BACKEND_ORIGIN`，代理路由为 `frontend/app/api/proxy/[...path]/route.ts`，上游路径拼为 `${FRONTEND_BACKEND_ORIGIN}/api/**`。
+- 代理允许并转发必要请求头（含 `cookie/content-type/accept/user-agent`），响应透传 `content-type/content-disposition/cache-control/location/set-cookie`；业务页面不要绕过 `/api/proxy/**` 直连后端。
+
 ## 1) 运行模式矩阵（最小可运维闭环）
 
 | 模式                       | 执行方式       | 目标                          | 必要 env                                                                                                                                                                                         | 可选 env（默认）                                                                                                                                                                                                 | 备注                                                                                                |

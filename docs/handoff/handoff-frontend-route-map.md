@@ -62,6 +62,8 @@
 | `/api/_demo/**` | demo 本地路由 | 不经过后端 | 非生产链路 |
 | `/api/proxy/[...path]` | 正式代理层 | 转发到 `${FRONTEND_BACKEND_ORIGIN}/api/**` | 主链路必经 |
 
+补充：当前 `frontend/app/**` 未建设正式 `/ops/**` 页面；后端 AI Feedback debug/ops 接口已存在，debug gate 关闭时返回 `404` 应按“功能未启用”理解。
+
 ## 5) submission detail 口径说明（关键）
 
 - Teacher/Student submission detail 主体数据均来自 `GET learning-tasks/submissions/:id`。
