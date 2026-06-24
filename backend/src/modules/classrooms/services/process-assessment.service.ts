@@ -253,6 +253,9 @@ export class ProcessAssessmentService {
       ? (query.order as ProcessAssessmentSortOrder)
       : ProcessAssessmentService.DEFAULT_ORDER;
     const { window, lowerBound } = this.resolveWindow(query.window);
+    const excludedTaskIdSet = this.buildExcludedTaskIdSet(
+      query.excludedTaskIds,
+    );
 
     const classroom = await this.classroomModel
       .findOne({
@@ -279,8 +282,18 @@ export class ProcessAssessmentService {
       .select('_id')
       .lean<WithId[]>()
       .exec();
-    const windowTaskIds = windowClassroomTasks.map((task) => task._id);
-    const publishedTasksCount = windowTaskIds.length;
+    let effectiveClassroomTasks = windowClassroomTasks;
+    if (excludedTaskIdSet.size > 0) {
+      const filteredClassroomTasks: WithId[] = [];
+      for (const task of windowClassroomTasks) {
+        if (!excludedTaskIdSet.has(task._id.toString())) {
+          filteredClassroomTasks.push(task);
+        }
+      }
+      effectiveClassroomTasks = filteredClassroomTasks;
+    }
+    const effectiveTaskIds = effectiveClassroomTasks.map((task) => task._id);
+    const publishedTasksCount = effectiveTaskIds.length;
 
     const [total, pageStudentIds] = options?.forceAllActiveStudents
       ? await (async () => {
@@ -318,14 +331,14 @@ export class ProcessAssessmentService {
     const studentPublicMap =
       await this.buildStudentPublicInfoMap(pageStudentObjectIds);
     const submissionMatch: Record<string, unknown> = {
-      classroomTaskId: { $in: windowTaskIds },
+      classroomTaskId: { $in: effectiveTaskIds },
       studentId: { $in: pageStudentObjectIds },
     };
     if (lowerBound) {
       submissionMatch.createdAt = { $gte: lowerBound };
     }
     const submissionAgg =
-      windowTaskIds.length === 0
+      effectiveTaskIds.length === 0
         ? []
         : await this.submissionModel
             .aggregate<SubmissionByStudentAgg>([
@@ -721,6 +734,26 @@ export class ProcessAssessmentService {
       throw new BadRequestException(`${fieldName} must be a valid ObjectId`);
     }
     return new Types.ObjectId(value);
+  }
+
+  private buildExcludedTaskIdSet(excludedTaskIds: string[] | undefined) {
+    const excludedTaskIdSet = new Set<string>();
+    for (const taskId of excludedTaskIds ?? []) {
+      const trimmedTaskId = taskId.trim();
+      if (trimmedTaskId.length === 0) {
+        continue;
+      }
+      if (
+        !/^[0-9a-fA-F]{24}$/.test(trimmedTaskId) ||
+        !Types.ObjectId.isValid(trimmedTaskId)
+      ) {
+        throw new BadRequestException(
+          'excludedTaskIds must contain valid ObjectIds',
+        );
+      }
+      excludedTaskIdSet.add(new Types.ObjectId(trimmedTaskId).toString());
+    }
+    return excludedTaskIdSet;
   }
 
   private async buildStudentPublicInfoMap(studentIds: Types.ObjectId[]) {

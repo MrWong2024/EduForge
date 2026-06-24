@@ -1,4 +1,8 @@
+import 'reflect-metadata';
+import { plainToInstance } from 'class-transformer';
+import { validate } from 'class-validator';
 import { Types } from 'mongoose';
+import { QueryProcessAssessmentDto } from '../dto/query-process-assessment.dto';
 import { ProcessAssessmentService } from './process-assessment.service';
 
 const CSV_HEADER =
@@ -11,6 +15,10 @@ const RUBRIC = {
 };
 
 const objectId = () => new Types.ObjectId();
+
+type AggregatePipelineStage = {
+  $match?: Record<string, unknown>;
+} & Record<string, unknown>;
 
 const makeQuery = <T>(result: T) => {
   const chain = {
@@ -26,6 +34,19 @@ const makeQuery = <T>(result: T) => {
 const makeAggregate = <T>(result: T) => ({
   exec: jest.fn().mockResolvedValue(result),
 });
+
+const firstMatch = (pipeline: unknown) => {
+  const stages = pipeline as AggregatePipelineStage[];
+  return stages[0]?.$match ?? {};
+};
+
+const objectIdStringsFromMatch = (
+  match: Record<string, unknown>,
+  field: string,
+) => {
+  const condition = match[field] as { $in?: Types.ObjectId[] } | undefined;
+  return (condition?.$in ?? []).map((id) => id.toString());
+};
 
 const createService = () =>
   new ProcessAssessmentService(
@@ -43,10 +64,11 @@ const createAssessmentHarness = () => {
   const teacherId = objectId();
   const submittedStudentId = objectId();
   const zeroSubmissionStudentId = objectId();
-  const classroomTaskId = objectId();
-  const anotherClassroomTaskId = objectId();
-  const submissionId = objectId();
-  const anotherSubmissionId = objectId();
+  const includedClassroomTaskId = objectId();
+  const excludedClassroomTaskId = objectId();
+  const outsideClassroomTaskId = objectId();
+  const includedSubmissionId = objectId();
+  const excludedSubmissionId = objectId();
 
   const classroomModel = {
     findOne: jest.fn().mockReturnValue(makeQuery({ _id: classroomId })),
@@ -55,49 +77,114 @@ const createAssessmentHarness = () => {
     find: jest
       .fn()
       .mockReturnValue(
-        makeQuery([{ _id: classroomTaskId }, { _id: anotherClassroomTaskId }]),
+        makeQuery([
+          { _id: includedClassroomTaskId },
+          { _id: excludedClassroomTaskId },
+        ]),
       ),
   };
   const submissionModel = {
-    aggregate: jest.fn().mockReturnValue(
-      makeAggregate([
+    aggregate: jest.fn((pipeline: unknown) => {
+      const taskIds = objectIdStringsFromMatch(
+        firstMatch(pipeline),
+        'classroomTaskId',
+      );
+      const hasIncludedTask = taskIds.includes(
+        includedClassroomTaskId.toString(),
+      );
+      const hasExcludedTask = taskIds.includes(
+        excludedClassroomTaskId.toString(),
+      );
+      const submissionIds = [
+        ...(hasIncludedTask ? [includedSubmissionId] : []),
+        ...(hasExcludedTask ? [excludedSubmissionId] : []),
+      ];
+      if (submissionIds.length === 0) {
+        return makeAggregate([]);
+      }
+      return makeAggregate([
         {
           _id: submittedStudentId,
-          submissionsCount: 2,
-          submittedTasksCount: 1,
-          lateSubmissionsCount: 0,
-          lateTasksCount: 0,
-          submissionIds: [submissionId, anotherSubmissionId],
+          submissionsCount: submissionIds.length,
+          submittedTasksCount: submissionIds.length,
+          lateSubmissionsCount: hasExcludedTask ? 1 : 0,
+          lateTasksCount: hasExcludedTask ? 1 : 0,
+          submissionIds,
         },
-      ]),
-    ),
+      ]);
+    }),
   };
   const aiFeedbackJobModel = {
-    aggregate: jest.fn().mockReturnValue(
-      makeAggregate([
+    aggregate: jest.fn((pipeline: unknown) => {
+      const submissionIds = objectIdStringsFromMatch(
+        firstMatch(pipeline),
+        'submissionId',
+      );
+      const hasIncludedSubmission = submissionIds.includes(
+        includedSubmissionId.toString(),
+      );
+      const hasExcludedSubmission = submissionIds.includes(
+        excludedSubmissionId.toString(),
+      );
+      const aiRequestedCount =
+        (hasIncludedSubmission ? 1 : 0) + (hasExcludedSubmission ? 1 : 0);
+      if (aiRequestedCount === 0) {
+        return makeAggregate([]);
+      }
+      return makeAggregate([
         {
           _id: submittedStudentId,
-          aiRequestedCount: 2,
-          aiSucceededCount: 1,
+          aiRequestedCount,
+          aiSucceededCount: hasIncludedSubmission ? 1 : 0,
         },
-      ]),
-    ),
+      ]);
+    }),
   };
   const feedbackModel = {
-    aggregate: jest.fn().mockReturnValue(
-      makeAggregate([
+    aggregate: jest.fn((pipeline: unknown) => {
+      const submissionIds = objectIdStringsFromMatch(
+        firstMatch(pipeline),
+        'submissionId',
+      );
+      const hasIncludedSubmission = submissionIds.includes(
+        includedSubmissionId.toString(),
+      );
+      const hasExcludedSubmission = submissionIds.includes(
+        excludedSubmissionId.toString(),
+      );
+      const totalFeedbackItems =
+        (hasIncludedSubmission ? 2 : 0) + (hasExcludedSubmission ? 5 : 0);
+      const totalErrorItems = hasExcludedSubmission ? 5 : 0;
+      const topTags = [
+        ...(hasExcludedSubmission
+          ? [
+              { tag: 'security', count: 3 },
+              { tag: 'bug', count: 2 },
+            ]
+          : []),
+        ...(hasIncludedSubmission
+          ? [
+              { tag: 'readability', count: 1 },
+              { tag: 'logic', count: 1 },
+            ]
+          : []),
+      ];
+      if (totalFeedbackItems === 0) {
+        return makeAggregate([{ totals: [], tags: [] }]);
+      }
+      return makeAggregate([
         {
           totals: [
             {
               _id: submittedStudentId,
-              totalFeedbackItems: 3,
-              totalErrorItems: 1,
+              totalFeedbackItems,
+              totalErrorItems,
             },
           ],
-          tags: [{ _id: submittedStudentId, topTags: [] }],
+          tags: [{ _id: submittedStudentId, topTags }],
         },
-      ]),
-    ),
+      ]);
+    }),
   };
   const userModel = {
     find: jest.fn().mockReturnValue(
@@ -117,6 +204,12 @@ const createAssessmentHarness = () => {
   };
   const enrollmentService = {
     countStudents: jest.fn().mockResolvedValue(2),
+    listActiveStudentIds: jest
+      .fn()
+      .mockResolvedValue([
+        submittedStudentId.toString(),
+        zeroSubmissionStudentId.toString(),
+      ]),
     listActiveStudentIdsByClassroomPage: jest
       .fn()
       .mockResolvedValue([
@@ -139,9 +232,59 @@ const createAssessmentHarness = () => {
     teacherId,
     submittedStudentId,
     zeroSubmissionStudentId,
+    includedClassroomTaskId,
+    excludedClassroomTaskId,
+    outsideClassroomTaskId,
     service,
+    submissionModel,
+    aiFeedbackJobModel,
+    feedbackModel,
   };
 };
+
+describe('QueryProcessAssessmentDto', () => {
+  it('normalizes comma-separated excludedTaskIds', async () => {
+    const firstTaskId = objectId().toString();
+    const secondTaskId = objectId().toString();
+    const dto = plainToInstance(QueryProcessAssessmentDto, {
+      excludedTaskIds: `${firstTaskId}, ${secondTaskId}`,
+    });
+
+    expect(dto.excludedTaskIds).toEqual([firstTaskId, secondTaskId]);
+    await expect(validate(dto)).resolves.toHaveLength(0);
+  });
+
+  it('normalizes repeated excludedTaskIds and filters empty values', async () => {
+    const firstTaskId = objectId().toString();
+    const secondTaskId = objectId().toString();
+    const dto = plainToInstance(QueryProcessAssessmentDto, {
+      excludedTaskIds: [firstTaskId, `${secondTaskId},`, ''],
+    });
+
+    expect(dto.excludedTaskIds).toEqual([firstTaskId, secondTaskId]);
+    await expect(validate(dto)).resolves.toHaveLength(0);
+  });
+
+  it('treats empty excludedTaskIds as an empty array', async () => {
+    const dto = plainToInstance(QueryProcessAssessmentDto, {
+      excludedTaskIds: '',
+    });
+
+    expect(dto.excludedTaskIds).toEqual([]);
+    await expect(validate(dto)).resolves.toHaveLength(0);
+  });
+
+  it('rejects invalid excludedTaskIds', async () => {
+    const dto = plainToInstance(QueryProcessAssessmentDto, {
+      excludedTaskIds: 'not-a-mongo-id',
+    });
+
+    const errors = await validate(dto);
+
+    expect(errors).toHaveLength(1);
+    expect(errors[0].property).toBe('excludedTaskIds');
+  });
+});
 
 describe('ProcessAssessmentService getProcessAssessment', () => {
   it('keeps active students with zero submissions in the list and fixes their score at 0', async () => {
@@ -177,10 +320,170 @@ describe('ProcessAssessmentService getProcessAssessment', () => {
     expect(submittedItem).toBeDefined();
     expect(submittedItem).toMatchObject({
       submissionsCount: 2,
-      submittedTasksCount: 1,
-      score: 46,
+      submittedTasksCount: 2,
+      lateSubmissionsCount: 1,
+      lateTasksCount: 1,
+      aiRequestedCount: 2,
+      aiSucceededCount: 1,
+      avgFeedbackItems: 3.5,
+      avgErrorItems: 2.5,
+      score: 58,
     });
     expect(submittedItem?.score).toBeGreaterThan(0);
+  });
+
+  it('keeps existing results when excludedTaskIds is empty', async () => {
+    const { classroomId, teacherId, submittedStudentId, service } =
+      createAssessmentHarness();
+
+    const result = await service.getProcessAssessment(
+      classroomId.toString(),
+      { excludedTaskIds: [] },
+      teacherId.toString(),
+    );
+
+    const submittedItem = result.items.find(
+      (item) => item.studentId === submittedStudentId.toString(),
+    );
+    expect(submittedItem).toMatchObject({
+      publishedTasksCount: 2,
+      submissionsCount: 2,
+      lateSubmissionsCount: 1,
+      aiRequestedCount: 2,
+      avgErrorItems: 2.5,
+      score: 58,
+    });
+  });
+
+  it('recalculates all metrics from effectiveTaskIds when one task is excluded', async () => {
+    const {
+      classroomId,
+      teacherId,
+      submittedStudentId,
+      includedClassroomTaskId,
+      excludedClassroomTaskId,
+      service,
+      submissionModel,
+    } = createAssessmentHarness();
+
+    const result = await service.getProcessAssessment(
+      classroomId.toString(),
+      { excludedTaskIds: [excludedClassroomTaskId.toString()] },
+      teacherId.toString(),
+    );
+
+    const submittedItem = result.items.find(
+      (item) => item.studentId === submittedStudentId.toString(),
+    );
+    expect(submittedItem).toMatchObject({
+      publishedTasksCount: 1,
+      submittedTasksCount: 1,
+      submittedTasksRate: 1,
+      submissionsCount: 1,
+      lateSubmissionsCount: 0,
+      lateTasksCount: 0,
+      aiRequestedCount: 1,
+      aiSucceededCount: 1,
+      avgFeedbackItems: 2,
+      avgErrorItems: 0,
+      riskLevel: 'LOW',
+      score: 64,
+    });
+    expect(submittedItem?.topTags).toEqual([
+      { tag: 'readability', count: 1 },
+      { tag: 'logic', count: 1 },
+    ]);
+    const submissionPipeline = submissionModel.aggregate.mock.calls[0][0];
+    const taskIds = objectIdStringsFromMatch(
+      firstMatch(submissionPipeline),
+      'classroomTaskId',
+    );
+    expect(taskIds).toEqual([includedClassroomTaskId.toString()]);
+  });
+
+  it('ignores valid excludedTaskIds outside the current classroom task window', async () => {
+    const {
+      classroomId,
+      teacherId,
+      submittedStudentId,
+      outsideClassroomTaskId,
+      service,
+    } = createAssessmentHarness();
+
+    const result = await service.getProcessAssessment(
+      classroomId.toString(),
+      { excludedTaskIds: [outsideClassroomTaskId.toString()] },
+      teacherId.toString(),
+    );
+
+    const submittedItem = result.items.find(
+      (item) => item.studentId === submittedStudentId.toString(),
+    );
+    expect(submittedItem).toMatchObject({
+      publishedTasksCount: 2,
+      submissionsCount: 2,
+      lateSubmissionsCount: 1,
+      aiRequestedCount: 2,
+      avgErrorItems: 2.5,
+      score: 58,
+    });
+  });
+
+  it('keeps active students with zero task metrics when all tasks are excluded', async () => {
+    const {
+      classroomId,
+      teacherId,
+      includedClassroomTaskId,
+      excludedClassroomTaskId,
+      service,
+      submissionModel,
+      aiFeedbackJobModel,
+      feedbackModel,
+    } = createAssessmentHarness();
+
+    const result = await service.getProcessAssessment(
+      classroomId.toString(),
+      {
+        excludedTaskIds: [
+          includedClassroomTaskId.toString(),
+          excludedClassroomTaskId.toString(),
+        ],
+      },
+      teacherId.toString(),
+    );
+
+    expect(result.items).toHaveLength(2);
+    for (const item of result.items) {
+      expect(item).toMatchObject({
+        publishedTasksCount: 0,
+        submittedTasksCount: 0,
+        submittedTasksRate: 0,
+        submissionsCount: 0,
+        lateSubmissionsCount: 0,
+        lateTasksCount: 0,
+        aiRequestedCount: 0,
+        aiSucceededCount: 0,
+        avgFeedbackItems: 0,
+        avgErrorItems: 0,
+        topTags: [],
+        score: 0,
+      });
+    }
+    expect(submissionModel.aggregate).not.toHaveBeenCalled();
+    expect(aiFeedbackJobModel.aggregate).not.toHaveBeenCalled();
+    expect(feedbackModel.aggregate).not.toHaveBeenCalled();
+  });
+
+  it('rejects invalid excludedTaskIds at service level', async () => {
+    const { classroomId, teacherId, service } = createAssessmentHarness();
+
+    await expect(
+      service.getProcessAssessment(
+        classroomId.toString(),
+        { excludedTaskIds: ['not-a-mongo-id'] },
+        teacherId.toString(),
+      ),
+    ).rejects.toThrow('excludedTaskIds must contain valid ObjectIds');
   });
 });
 
@@ -270,5 +573,40 @@ describe('ProcessAssessmentService exportProcessAssessmentCsv', () => {
     );
     expect(zeroSubmissionLine).toBeDefined();
     expect(zeroSubmissionLine?.split(',')[3]).toBe('0');
+  });
+
+  it('exports CSV using the same excludedTaskIds scoring scope as JSON', async () => {
+    const {
+      classroomId,
+      teacherId,
+      submittedStudentId,
+      excludedClassroomTaskId,
+      service,
+    } = createAssessmentHarness();
+    const query = { excludedTaskIds: [excludedClassroomTaskId.toString()] };
+    const jsonResult = await service.getProcessAssessment(
+      classroomId.toString(),
+      query,
+      teacherId.toString(),
+    );
+    const jsonItem = jsonResult.items.find(
+      (item) => item.studentId === submittedStudentId.toString(),
+    );
+
+    const csvResult = await service.exportProcessAssessmentCsv(
+      classroomId.toString(),
+      query,
+      teacherId.toString(),
+    );
+
+    expect(csvResult.startsWith('\uFEFF')).toBe(true);
+    const [headerLine, ...dataLines] = csvResult.slice(1).split('\n');
+    expect(headerLine).toBe(CSV_HEADER);
+    const submittedLine = dataLines.find((line) =>
+      line.includes(submittedStudentId.toString()),
+    );
+    expect(submittedLine).toBeDefined();
+    expect(submittedLine?.split(',')[3]).toBe(String(jsonItem?.score));
+    expect(submittedLine?.split(',')[3]).toBe('64');
   });
 });

@@ -91,10 +91,11 @@ Notes:
 
 - `/api/classrooms/:classroomId/weekly-report` Query: `window, includeRiskStudentIds`。
 - `/api/classrooms/:classroomId/weekly-report` 权限：teacher only，`classroom.teacherId === currentUserId`；统计隔离按 `classroomId + classroomTaskId`，`studentsCount/risk` 仅基于 Enrollment ACTIVE。
-- `/api/classrooms/:classroomId/process-assessment` Query: `window, page, limit, sort, order`；teacher only；Enrollment-only；返回聚合结果，不返回敏感字段。
-- `/api/classrooms/:classroomId/process-assessment.csv` Query: `window`；teacher only；CSV 为手写转义（双引号转义），响应保持 `text/csv; charset=utf-8`，且内容以 UTF-8 BOM（`\uFEFF`）开头以兼容 Windows Excel 中文显示；不返回敏感字段。
+- `/api/classrooms/:classroomId/process-assessment` Query: `window, page, limit, sort, order, excludedTaskIds`；`excludedTaskIds` 为 optional，支持逗号分隔或 repeated query，用于临时排除指定课堂任务后重新计算；teacher only；Enrollment-only；返回聚合结果，不返回敏感字段。
+- `/api/classrooms/:classroomId/process-assessment.csv` Query: `window, excludedTaskIds`；`excludedTaskIds` 与 JSON 接口同口径；teacher only；CSV 为手写转义（双引号转义），响应保持 `text/csv; charset=utf-8`，且内容以 UTF-8 BOM（`\uFEFF`）开头以兼容 Windows Excel 中文显示；不返回敏感字段。
 - `/api/classrooms/:classroomId/process-assessment` 响应项增强：`items[*]` 返回 `studentId/studentName/studentNo`；`studentName` 缺失回落 `未知学生`，`studentNo` 缺失返回 `null`。
 - `/api/classrooms/:classroomId/process-assessment` 评分口径：`submissionsCount <= 0` 的学生仍返回在 `items` 中，但 `score` 固定为 `0`；有提交学生继续按既有四项 rubric 计算。
+- `/api/classrooms/:classroomId/process-assessment` 排除任务口径：先按 `classroomId + window` 取课堂任务，再应用 `excludedTaskIds` 得到有效任务范围；被排除任务不参与 `publishedTasksCount`、`submittedTasksRate` 分母、提交/迟交、AI job、AI feedback、`topTags` 与 score/risk 计算；排除全部任务时仍返回当前 ACTIVE 学生，任务相关统计与 `score` 均为 0。
 - `/api/classrooms/:classroomId/process-assessment.csv` 与 JSON 口径对齐：新增 `studentName,studentNo` 列并保留 `studentId`，列顺序前置为 `studentName,studentNo,studentId,...`。
 - `weekly-report` 窗口契约（后端阶段一）：默认 `window=all`；后端兼容集合为 `all/7d/30d/24h/1h`（`24h/1h` 为兼容窗口，不作为推荐默认窗口）。
 - `process-assessment`（JSON + CSV）窗口契约（后端阶段一）：默认 `window=all`；后端兼容集合为 `all/7d/30d/term`（`term` 为兼容窗口）；`window=all` 语义与 JSON/CSV 完全一致。

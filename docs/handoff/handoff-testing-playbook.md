@@ -161,7 +161,7 @@ npm run test:e2e -- backend/test/classroom-learning-loop.e2e-spec.ts
   - 重要性：保证复盘包可教学使用且无敏感字段泄漏。
 - `backend/test/classroom-process-assessment.e2e-spec.ts`
   - 覆盖：Z6 `GET /api/classrooms/:classroomId/process-assessment` 与 `GET /api/classrooms/:classroomId/process-assessment.csv`。
-  - 关键断言：CSV header/转义正确，不含敏感字段；CSV 下载内容以 UTF-8 BOM（`\uFEFF`）开头以兼容 Excel 中文；`lateSubmissionsCount/lateTasksCount` 存在（Z7）；0 次提交 ACTIVE 学生仍保留在过程性评价结果中，且 `score=0`，不得获得 codeQualityProxy 保底分。
+  - 关键断言：CSV header/转义正确，不含敏感字段；CSV 下载内容以 UTF-8 BOM（`\uFEFF`）开头以兼容 Excel 中文；`lateSubmissionsCount/lateTasksCount` 存在（Z7）；0 次提交 ACTIVE 学生仍保留在过程性评价结果中，且 `score=0`，不得获得 codeQualityProxy 保底分；`excludedTaskIds` 排除任务后，`publishedTasksCount`、`submittedTasksRate` 分母、提交/迟交、AI job、AI feedback、`topTags` 与 CSV score 均按剩余任务重新计算；排除全部任务时 ACTIVE 学生仍保留且 score 为 0。
   - 重要性：保证过程性评价 JSON/CSV 同口径可导出。
 - `backend/test/classroom-task-deadline.e2e-spec.ts`
   - 覆盖：Z7 `POST /api/classrooms/:classroomId/tasks/:classroomTaskId/submissions` 的截止门禁。
