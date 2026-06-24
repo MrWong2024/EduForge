@@ -1,380 +1,366 @@
 # E2E 测试规范（End-to-End Testing）
 
-本文档定义 EduForge 后端项目中 **端到端测试（E2E Testing）** 的运行环境、数据隔离规则与执行边界。  
-所有 E2E 测试相关行为，必须以本文档为唯一权威依据。
+本文档定义后端端到端测试的运行环境、数据库隔离、测试数据生命周期、Jest 运行时、启动期配置注入、执行方式与测试边界。  
+适用于采用 NestJS + Jest + Supertest + MongoDB/Mongoose 的后端工程。  
+本文档不定义具体业务流程、具体业务接口或具体业务测试用例；具体业务链路测试由对应模块的 E2E 用例定义。  
+Codex 执行边界和验证策略以 `docs/codex-rules.md` 为准；数据库隔离与数据库治理以 `docs/database-conventions.md` 为准；认证与会话测试原则以 `docs/auth-baseline.md` 为准。
 
 ---
 
-## 1. 适用范围（强制）
+## 1. 适用范围
 
-本规范适用于以下所有场景：
+本规范适用于：
 
 - 本地开发环境中的 E2E 测试
 - CI / 自动化流水线中的 E2E 测试
-- 任何以 `test:e2e`、`jest-e2e` 等方式运行的端到端测试
+- 通过 `test:e2e`、`jest-e2e` 或项目等价命令运行的端到端测试
 
-**本规范不适用于：**
+本规范不适用于：
 
-- 单元测试（unit test）
-- 模块级集成测试（integration test）
+- 单元测试
+- 模块级集成测试
 
 ### 1.1 与 service / controller 测试的关系
 
-E2E 测试主要覆盖真实 HTTP 链路、鉴权、Guard、全局 Pipe、DTO、数据库读写、模块装配与关键业务闭环。
-
-业务规则、状态机、聚合统计、复杂优先级和副作用边界，优先通过 `*.service.spec.ts` 覆盖；query 参数解析、DTO 字段声明、白名单校验、默认值和 controller 到 service 的参数传递，可通过 `*.controller.spec.ts` 或 DTO validation 测试覆盖。
-
-因此，不要求每个 service 规则变更都新增 E2E；但涉及接口路径、权限/Guard、全局 Pipe、DTO 对真实请求的影响或跨模块主流程时，应考虑补充少量 E2E 兜底。`service.spec.ts` 不能替代真实 HTTP 链路测试，E2E 也不应承载所有规则边界。
+- `service.spec.ts` 优先覆盖业务规则、状态机、边界条件、聚合统计、复杂优先级和副作用
+- `controller.spec.ts` / DTO validation 优先覆盖 query 参数、DTO 字段、`ValidationPipe`、默认值和参数传递
+- E2E 覆盖真实 HTTP、认证、Guard、全局 Pipe、DTO、数据库读写、模块装配和跨模块关键闭环
+- `service spec` 不能替代真实 HTTP 链路测试
+- E2E 也不应承载所有规则边界
 
 ---
 
-## 2. 运行环境约束（强制）
+## 2. 运行环境约束
 
 ### 2.1 NODE_ENV 约束
 
-- 所有 E2E 测试 **必须** 在以下环境变量下运行：
-`NODE_ENV=test`
+- 所有 E2E 测试必须在 `NODE_ENV=test` 下运行
+- 禁止在 development 或 production 环境中运行 E2E
 
-禁止在 development 或 production 环境中运行任何 E2E 测试。
+### 2.2 测试配置加载
 
-### 2.2 测试配置加载规则
+- E2E 应加载测试环境配置，例如 `.env.test` 或项目等价测试配置
+- 配置加载、环境变量解析与优先级规则，应遵循后端配置体系和数据库治理规范
+- 如果当前环境、数据库名或连接串无法确认属于 test 环境，应 fail fast
 
-E2E 测试运行时，必须加载 测试环境配置（例如 .env.test）。
-配置加载、环境变量解析与优先级规则，必须遵循后端统一配置体系及数据库治理规范。
+相关引用：
 
-相关强制引用文档：
-docs/database-conventions.md
+- `docs/database-conventions.md`
 
-## 3. 测试数据库隔离（强制）
+---
 
-### 3.1 数据库隔离原则
+## 3. 测试数据库隔离
 
-E2E 测试 必须 使用与开发 / 生产环境完全隔离的 测试数据库（test database）。
+### 3.1 隔离原则
 
-测试数据库不得与 dev / prod 共享：
+- E2E 必须使用与 development / production 完全隔离的 test database
+- 测试数据库不得与 dev / prod 共享：
+  - 数据库名称
+  - 用户账号
+  - 连接串
+  - 数据文件或物理实例
 
-- 数据库名称
-- 用户账号
-- 连接串
-- 数据文件或物理实例
+### 3.2 启动期校验
 
-### 3.2 可验证性要求（Fail Fast）
+应用在 E2E 启动时，应具备可验证的隔离机制，至少确认：
 
-应用在 E2E 启动时，必须具备 可验证的隔离机制，用于确认当前连接的数据库属于 test 环境。
-若检测到以下任一情况，测试应立即失败（fail fast）：
+- `databaseName` 符合 test 命名约定
+- 当前环境为 test
+- 当前连接不是 dev / prod
 
-- 连接到非 test 命名约定的数据库
-- 连接到 dev / prod 环境数据库
-- 无法确认数据库环境归属
+若无法确认隔离条件成立，应 fail fast。
+
+具体数据库命名、账号权限和 production 红线，以 `docs/database-conventions.md` 为准。
+
+---
 
 ## 4. 测试数据生命周期管理
 
-### 4.1 默认模式（自动清理｜推荐）
+### 4.1 默认模式
 
-默认情况下，E2E 测试应在 测试结束后自动清理测试数据。
+- 默认行为必须是自动清理测试数据
+- 该模式适用于 CI / 自动化环境和常规回归
 
-推荐使用场景：
-- CI / 自动化流水线
-- 日常回归测试
-- 多人协作环境
+### 4.2 本地调试保留模式
 
-### 4.2 调试模式（保留数据｜仅限本地）
+- 本地调试允许临时保留测试数据
+- 可采用环境变量示例：`KEEP_E2E_DB=1`
+- 该变量仅作为项目可选约定，实际开关以项目配置为准
+- 如果项目尚未实现该开关，不得假设可用
+- CI / 自动化环境禁止保留测试数据
 
-在本地调试场景中，允许临时保留测试数据，以便排查问题。
-可通过以下环境变量开启：
+---
 
-`KEEP_E2E_DB=1`
+## 5. E2E 执行方式
 
-严格限制：
-KEEP_E2E_DB 仅允许 在本地调试场景使用
-CI / 自动化环境中 禁止 设置该变量
-默认行为必须为“自动清理”
+Windows PowerShell 示例：
 
-## 5. E2E 测试执行方式
-
-### 5.1 默认执行方式（推荐）
 ```powershell
 cd backend
 $env:NODE_ENV="test"
 Remove-Item Env:KEEP_E2E_DB -ErrorAction SilentlyContinue
-npm run test:e2e -- <spec-file>
+npm run test:e2e -- <spec-file>.e2e-spec.ts
 ```
 
 说明：
-<spec-file> 为具体的 e2e 测试文件（例如 learning-tasks.e2e-spec.ts）
-未设置 KEEP_E2E_DB 时，测试结束后应自动清理测试数据
 
-### 5.2 本地调试执行方式（保留数据）
-```powershell
-cd backend
-$env:NODE_ENV="test"
-$env:KEEP_E2E_DB="1"
-npm run test:e2e -- <spec-file>
+- 上述命令仅为示例
+- 实际命令以 `backend/package.json` 为准
+- `KEEP_E2E_DB` 仅在项目实现了该开关时才可使用
+- 是否执行 E2E，以 `docs/codex-rules.md` 和具体任务验收要求为准
+
+---
+
+## 6. Jest 运行时约束
+
+### 6.1 背景
+
+Jest 默认测试超时时间通常为 5 秒。  
+E2E 往往包含以下较慢操作：
+
+- NestJS 应用完整启动
+- MongoDB 真实连接
+- 账号校验与 test 环境确认
+- Session / Cookie 登录闭环
+- 后台任务、消息队列、外部服务 stub / mock 或异步处理
+
+因此，默认 5 秒可能导致误报失败。
+
+### 6.2 统一超时约定
+
+- E2E 测试应显式设置统一超时时间
+- 建议默认值为 `30000ms`
+- 推荐写法是在顶层 `import` 之后、`describe` 之前调用：
+
+```ts
+jest.setTimeout(30000);
 ```
 
-## 6. Jest 运行时约束（强制）
-本节用于统一约束 EduForge 后端 **E2E 测试在 Jest 运行时层面的行为**，以避免因默认配置不合理导致的误报失败、调试成本上升或 CI 不稳定问题。
+允许写法：
 
-### 6.1 背景说明
+- 在最外层 `describe()` 内无条件调用
 
-Jest 的默认测试超时时间为 **5 秒**。  
-在 EduForge 后端工程中，E2E 测试通常涉及以下高耗时操作：
+不推荐写法：
 
-- NestJS 应用完整启动（含模块装配与依赖注入）
-- MongoDB 真实连接、账号校验与数据库环境确认
-- Session / Cookie 登录闭环
-- 异步任务、后台 Worker 或 Job Queue（如 AI Feedback 流程）
+- 在 `beforeAll`、`beforeEach`、`test` 内调用
+- 在条件分支内调用
+- 仅对单个测试用例设置超时
+- 完全依赖 Jest 默认 5 秒
 
-在上述场景下，默认 5 秒超时 **无法满足工程实际需求**，  
-容易导致以下问题：
+---
 
-- 测试用例逻辑正确，但因超时被误判为失败
-- 本地与 CI 表现不一致，降低测试可信度
-- 开发者被迫在用例中引入不必要的 hack（如拆测试、绕流程）
+## 7. 测试结构约定
 
-因此，有必要对 E2E 测试的 Jest 运行时超时进行统一治理。
+- 单个 `*.e2e-spec.ts` 文件可以存在多个 `describe()`
+- 每个 `describe()` 应对应明确且独立的测试关注点
+- 若多个 `describe()` 之间存在状态共享、隐式依赖或执行顺序假设，应拆分
+- 禁止通过 `beforeAll` / `beforeEach` 在多个 `describe()` 之间引入或依赖隐式共享状态
 
-### 6.2 强制超时约定
+通用关注点示例：
 
-**所有 E2E 测试文件必须显式覆盖 Jest 默认超时时间。**
+- main flow
+- guard
+- validation
+- pagination
+- conflict
+- permission
+- file export
+- background processing
 
-强制约定如下：
-- 每一个 `*.e2e-spec.ts` 文件 **必须** 设置 Jest 超时时间为 **30 秒（30000ms）**
+---
 
-- **推荐写法**：
-  - 在文件顶层（`import` 语句之后、任何 `describe()` 之前）调用：
+## 8. 后台任务、Worker 与 Debug/Ops 路由测试边界
 
-  ```ts
-  jest.setTimeout(30000);
-  ```
+- 当测试目标是验证主业务链路或后台处理链路时，不应默认依赖 debug / ops 路由触发
+- 应优先通过内部 service、processor、queue adapter、worker entry 等可测试入口触发一次处理
+- 测试应尽量贴近生产路径
+- debug / ops 路由只应用于验证调试门禁、运维开关、权限叠加和路由隐藏行为
+- debug / ops 测试必须单独成组，不得与主链路测试混合
+- 不得将运维门禁开启作为主链路 E2E 的默认前提
 
-- **允许写法**：
-  - 在最外层 `describe()` 内、且不依赖任何条件判断的情况下调用
+通用示例名可使用：
 
-  ```ts
-  jest.setTimeout(30000);
-  ```
+- `BackgroundProcessor`
+- `processOnce()`
+- `enqueue`
+- `worker`
+- `ops route`
+- `FEATURE_DEBUG_ENABLED`
+- `WORKER_ENABLED`
+- `PENDING / COMPLETED / FAILED / SKIPPED`
 
-- **禁止以下写法**：
-  - 在 `beforeAll` / `beforeEach` / `test` 内调用
-  - 在条件分支中调用（如依赖环境变量）
-  - 仅对单个测试用例设置超时（如 `test(name, fn, timeout)`）
-  - 依赖 Jest 默认 5 秒超时
+---
 
-### 6.3 测试结构约定（推荐）
+## 9. 启动期环境变量注入时机
 
-- 单个 `*.e2e-spec.ts` 文件中 **允许存在多个 `describe()`**，用于划分**同一业务域下的不同测试子场景**（例如：主流程 / Guard / 并发 / 限流）。
-- 每个 `describe()` 必须对应**明确且独立的测试关注点**，禁止因“测试用例过多”而随意拆分。
-- 若多个 `describe()` 之间存在**状态共享、隐式依赖或执行顺序假设**，应考虑拆分为多个 e2e 文件。
-- 禁止通过 beforeAll / beforeEach 在多个 `describe()` 之间引入或依赖隐式共享状态
+如果某个环境变量会影响 NestJS 模块装配阶段的行为，必须在 `import AppModule` 之前设置。
 
-### 6.4 AI Feedback Pipeline 测试触发规范（强制）
+典型场景包括：
 
-在涉及 AI Feedback 主链路的 E2E 测试中，必须区分以下两类测试目标：
-
-#### 6.4.1 主链路测试（默认场景）
-
-当测试目标为验证 AI 处理主链路行为（例如）：
-- Submission 创建
-- Job enqueue
-- Processor 执行
-- 状态流转（PENDING / SUCCEEDED / FAILED / NOT_REQUESTED）
-- Feedback 持久化
-- Dashboard / 报表聚合结果
-
-此类测试不得依赖 debug 路由触发处理。
-
-禁止默认调用：
-`POST /api/learning-tasks/ai-feedback/jobs/process-once`
+- 路由是否挂载
+- Guard 或 ops 路由开关
+- Provider 选择或注册
+- Worker 初始化
+- 启动时读取并缓存的配置值
 
 原因：
-- 该接口受 AI_FEEDBACK_DEBUG_ENABLED 门禁控制
-- 默认环境中该门禁应为关闭
-- 测试不应因运维门禁策略变动而失效
 
-推荐做法：
-- 在测试内部直接调用 AiFeedbackProcessor.processOnce()
-- 或通过内部 Service/Processor 触发一次处理批次
-- 保证与 Worker 执行路径一致
+- `ConfigModule.forRoot()` 会在模块装配阶段读取配置
+- 模块树装配完成后，再改 `process.env` 往往已经太晚
 
-此规则的目的：
-- 避免测试与 debug 门禁耦合
-- 保证测试聚焦业务链路
-- 保持与生产 Worker 行为一致
+通用示例：
 
-#### 6.4.2 Debug / 运维门禁测试（专用场景）
-
-若测试目标为验证：
-- AI_FEEDBACK_DEBUG_ENABLED 开关行为
-- debug/ops 路由的 404 / 403 逻辑
-- 角色权限与门禁叠加行为
-
-此类测试可以调用 debug 路由。
-
-但必须：
-- 在测试描述中明确标注为“debug gate 测试”
-- 单独成组（describe 分组）
-- 不与主链路测试混合
-
-### 6.5 环境变量注入时机规则（强制）
-
-在 E2E 测试中，若某个环境变量会影响 NestJS 模块装配阶段的行为（即在 `ConfigModule.forRoot()` 或模块初始化期间被读取的配置），例如：
-- 是否注册某些路由
-- 是否启用/禁用某些 Guard
-- 是否挂载 debug/ops 接口
-- 是否实例化某些 Provider
-- 是否根据配置决定模块结构
-
-则该环境变量 **必须** 在 `import AppModule` 之前设置。
-
-原因：
-- `ConfigModule.forRoot()` 在模块装配阶段读取并缓存配置
-- 模块树一旦装配完成，再修改 `process.env` 不会影响已注册的路由或 Guard
-- 在 `beforeAll()` 中修改环境变量通常为时已晚
-
-#### 正确写法示例：
 ```ts
-import { App } from 'supertest/types';
-
-const previousDebug = process.env.AI_FEEDBACK_DEBUG_ENABLED;
-process.env.AI_FEEDBACK_DEBUG_ENABLED = 'true';
+const previousFeatureFlag = process.env.FEATURE_DEBUG_ENABLED;
+process.env.FEATURE_DEBUG_ENABLED = 'true';
 
 import { AppModule } from '../src/app.module';
 ```
 
-并在 `afterAll()` 中恢复旧值：
+恢复示例：
+
 ```ts
-if (previousDebug === undefined) {
-  delete process.env.AI_FEEDBACK_DEBUG_ENABLED;
+if (previousFeatureFlag === undefined) {
+  delete process.env.FEATURE_DEBUG_ENABLED;
 } else {
-  process.env.AI_FEEDBACK_DEBUG_ENABLED = previousDebug;
+  process.env.FEATURE_DEBUG_ENABLED = previousFeatureFlag;
 }
 ```
 
-禁止写法：
-- 在 beforeAll() 中设置会影响模块装配的环境变量
-- 依赖 PowerShell / Shell 预置环境变量作为测试稳定性的前提
-- 在多个测试文件之间共享未恢复的 process.env 修改
+禁止做法：
 
-本规则适用于以下典型开关（示例）：
-- AI_FEEDBACK_DEBUG_ENABLED
-- AI_FEEDBACK_WORKER_ENABLED
-- 任何影响路由是否存在或模块是否注册的配置项
+- 在 `beforeAll()` 中设置会影响模块装配的环境变量
+- 在多个测试文件之间共享未恢复的 `process.env` 修改
 
-违反本规则可能导致：
-- 测试返回 404 而非预期 403/200
-- Debug 路由无法访问
-- 测试结果在不同运行方式下不一致
+---
 
-### 6.6 运行时配置覆写边界（补充）
+## 10. 运行时配置覆写边界
 
-本节用于补充 6.5 的边界：`ConfigService.set(...)` 不是通用替代方案，只适用于“运行时现读配置”。
+### 10.1 必须在启动前设 env 的场景
 
-#### 6.6.1 必须使用“启动前设 env”的场景
-
-若配置会影响以下任一启动期行为，必须在 `import AppModule` 之前设置 `process.env`：
+若配置会影响以下启动期行为，必须在 `import AppModule` 之前设置 `process.env`：
 
 - 模块装配或模块结构
-- Provider 选择/注册
-- Route/Controller 是否挂载
-- Guard 或 debug gate / ops 路由开关
+- Provider 选择 / 注册
+- Route / Controller 是否挂载
+- Guard 或 debug / ops 路由开关
 - `onModuleInit()` 启动逻辑
 - 定时器 / worker 初始化
 - 启动时读取并缓存的配置值
 
-此类配置不得依赖 `await app.init()` 之后再 `app.get(ConfigService).set(...)`。
+### 10.2 允许启动后 set ConfigService 的场景
 
-#### 6.6.2 允许“启动后 set ConfigService”的场景
+`ConfigService.set(...)` 只适用于运行时重新读取配置的业务逻辑。
 
-仅当同时满足以下条件时，才允许在 `await app.init()` 之后使用：
+允许启动后调用的前提：
 
-```ts
-app.get(ConfigService).set('KEY', value);
-```
+- 不影响模块装配、路由挂载、Provider 注册或启动期定时器
+- 被测逻辑会在请求处理时或方法执行时重新读取 `ConfigService`
+- 配置属于运行时阈值或运行时开关，而不是启动期结构性配置
 
-- 该配置不会影响模块装配、路由挂载、Provider 注册或启动期定时器行为；
-- 被测业务会在“请求处理时/方法执行时”重新读取 `ConfigService`；
-- 该配置属于运行时业务阈值/开关，而非启动期结构性配置。
+### 10.3 默认策略
 
-#### 6.6.3 拿不准时的默认策略
+若无法确认配置是启动期读取还是运行时现读，默认按更稳妥方式处理：
 
-若无法确认配置是“启动期读取并缓存”还是“运行时现读”，默认按更稳妥方式处理：
+- 在 `import AppModule` 之前设置 `process.env`
 
-- 在 `import AppModule` 之前设置 `process.env`。
+通用配置示例：
 
-#### 6.6.4 抽象示例分类（不绑定具体实现）
+- `FEATURE_DEBUG_ENABLED`
+- `WORKER_ENABLED`
+- `ENABLE_OPS_ROUTES`
+- `FEATURE_X_ENABLED`
 
-适合“启动前设 env”的配置类别（示例）：
+---
 
-- debug gate 开关
-- worker enable 开关
-- provider 选择
-- 定时轮询间隔
+## 11. 认证与权限 E2E 原则
 
-适合“启动后 set ConfigService(...)”的配置类别（示例）：
+- 未认证访问受保护接口应返回 `401`
+- 已认证但无权限应返回 `403`
+- 公共接口应可在未登录状态访问
+- 登录成功后应能通过认证探针或受保护接口确认登录态
+- logout 后原 Cookie / session 不应继续访问受保护接口
+- 敏感字段不应出现在 E2E 响应断言允许的输出中
+- 具体认证、Cookie、Guard 和角色规则以 `docs/auth-baseline.md` 为准
 
-- 纯运行时业务阈值
-- 请求处理时即时读取的冷却时间/限制阈值
-- 不改变模块结构的动态测试参数
+---
 
-### 6.7 Submission Cooldown 门禁变量约定（强制）
+## 12. 测试数据与断言原则
 
-本节用于明确 `LEARNING_TASK_SUBMISSION_COOLDOWN_MS` 在 E2E 中的处理方式。该变量属于“运行时业务阈值/门禁值”，会影响同一学生在同一 `classroomTaskId` 下的连续提交行为。
+- 测试数据应由测试用例显式创建，不依赖本地手工数据
+- 测试用例应避免依赖执行顺序
+- 测试断言应验证：
+  - HTTP status
+  - 响应结构
+  - 关键字段
+  - 数据库副作用
+  - 权限与数据隔离
+  - 错误语义
+- 避免过度断言完整响应，降低无关字段变化导致的脆弱性
+- 时间字段断言应使用范围、存在性或格式断言，不要依赖固定时间值
+- ID 字段断言应验证存在性、格式或关联关系，不要依赖硬编码 ID
 
-#### 6.7.1 适用场景
+---
 
-当测试目标包含以下链路时，必须显式处理该变量：
+## 13. 外部服务边界
 
-- 同一学生对同一 `classroomTaskId` 的连续提交（例如首提后立即二提/三提）
-- 依赖连续 `POST /api/classrooms/:classroomId/tasks/:classroomTaskId/submissions` 成功路径（`201`）的业务断言
+- E2E 不应默认真实调用第三方服务、短信、邮件、支付、模型服务、对象存储、会议平台或其他外部系统
+- 外部服务应通过 mock、stub、fake adapter、测试 Provider 或测试配置隔离
+- 如必须进行真实外部集成测试，应单独标记、单独运行，并默认不进入普通 E2E
+- 外部服务凭证不得写入仓库
+- 不得因为外部服务不可用导致普通 E2E 不稳定
 
-若不显式处理，在默认 cooldown 下可能命中 `429`（`SUBMISSION_COOLDOWN_ACTIVE`），造成非目标性误失败。
+---
 
-#### 6.7.2 推荐写法（标准模式）
+## 14. CI 与本地调试边界
 
-在 spec 内按以下顺序处理：
+CI 中默认应满足：
 
-1. 备份原值：`const previousSubmissionCooldownMs = process.env.LEARNING_TASK_SUBMISSION_COOLDOWN_MS;`
-2. 初始化前设置：`process.env.LEARNING_TASK_SUBMISSION_COOLDOWN_MS = '0';`
-3. 若测试内已拿到运行态 `ConfigService`，则在 `await app.init()` 后同步：
-   `configService.set('LEARNING_TASK_SUBMISSION_COOLDOWN_MS', 0);`
-4. 在 `afterAll()` 恢复原值：
-   - 原值不存在：`delete process.env.LEARNING_TASK_SUBMISSION_COOLDOWN_MS`
-   - 原值存在：恢复为备份值
+- `NODE_ENV=test`
+- 使用 test database
+- 自动清理数据
+- 不保留 `KEEP_E2E_DB`
+- 不依赖本地手工环境
+- 不调用真实外部服务
 
-恢复原值是强制要求，用于避免污染后续 spec。
+本地调试允许：
 
-#### 6.7.3 禁止做法
+- 定向执行单个 E2E 文件
+- 临时保留测试数据
+- 打印必要调试日志
+- 使用本地测试数据库
 
-- 通过修改生产默认值来迁就测试
-- 通过放宽断言（例如接受 `429`）掩盖门禁问题
-- 依赖外部 shell 预置该变量而不在 spec 内显式设置与恢复
+补充原则：
 
-## 7. 禁止事项（红线）
+- 本地调试配置不得作为 CI 默认行为
+- CI 稳定性优先于调试便利
 
-以下行为 **严格禁止**：
+---
 
-- 在 dev / prod 数据库上运行 E2E 测试
-- 在 NODE_ENV=development 或 NODE_ENV=production 下运行 E2E
-- 在 CI 环境中开启 KEEP_E2E_DB
-- 通过修改测试脚本绕过数据库隔离或清理机制
-- 任何违反上述红线的行为，均视为 架构违规。
+## 15. 文档同步口径
 
-## 8. 文档治理与一致性约定
-
-本文档属于 测试治理级强制规范
-后端架构文档（backend-architecture.md）仅作强制引用，不重复定义细节
-如与其它文档存在约定冲突：
-
-- 数据库相关规则以 docs/database-conventions.md 为准
-- 测试执行与数据生命周期规则以本文档为准
-
-## 9. 变更流程（强制）
-
-任何涉及以下内容的变更，必须同步更新本文档：
+以下变化通常应同步更新本文档，或在任务的“〖文档同步要求〗”中明确说明：
 
 - E2E 执行方式
+- 测试数据库隔离方式
 - 测试数据清理 / 保留策略
-- CI 中的 E2E 测试行为
+- Jest 超时基线
+- 启动期配置注入约定
+- 外部服务隔离方式
+- CI 中的 E2E 行为
 
-未同步更新文档的实现变更，视为无效变更
+普通测试文件新增或局部断言调整，通常不要求机械更新本文档。
+
+---
+
+## 16. 与相关文档的职责关系
+
+- `docs/codex-instruction-spec.md`：Codex 指令结构
+- `docs/codex-rules.md`：Codex 执行规则、验证边界、不得修复范围外错误
+- `docs/backend-architecture.md`：后端架构、模块分层、Service / Controller / DTO / Schema 职责
+- `docs/auth-baseline.md`：认证、sessions、Cookie、Guard、安全错误语义
+- `docs/database-conventions.md`：数据库命名、环境隔离、索引治理
+- `docs/frontend-architecture.md`：前端 BFF、会话协作和 UI 错误处理
+
+如出现内容重叠，应按各文档职责边界理解；本文档只定义 E2E 测试规范本身。
+

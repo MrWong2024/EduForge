@@ -1,167 +1,198 @@
+# 身份与会话基线规范
 
-# Auth Baseline（身份与会话基线规范）
-
-> 适用于 EduForge 后端（NestJS + MongoDB）
-> 本文档用于**固定认证与会话的工程约束**，防止后续模块或重构破坏登录闭环。
-
----
-
-## 1. 认证模型选择（结论先行）
-
-**采用：服务端会话（Session-based Auth） + HttpOnly Cookie**
-
-明确不采用：
-
-* 纯无状态 JWT（无法强制失效、不可控）
-* 将会话信息塞入 users 表（反模式）
+本文档定义认证、会话、Cookie、Guard、用户上下文、角色权限基线、认证探针和安全错误语义。  
+适用于采用 NestJS + MongoDB/Mongoose + Next.js 前端协作的全栈项目。  
+本文档不定义具体业务角色集合，不定义具体业务权限矩阵；具体角色、权限与页面入口可由业务文档或 handoff 文档定义。  
+Codex 执行边界以 `docs/codex-rules.md` 为准；前端协作口径以 `docs/frontend-architecture.md` 为准；后端架构口径以 `docs/backend-architecture.md` 为准。
 
 ---
 
-## 2. 会话存储设计（sessions 集合）
+## 1. 认证模型选择
 
-### 2.1 Collection：`sessions`
+主登录态采用：服务端会话（Session-based Auth） + HttpOnly Cookie。
 
-**用途**：持久化登录会话，实现服务端可控登录态。
+基线结论：
 
-最小字段：
+- 主登录态不采用纯无状态 JWT。
+- 不把会话信息写入用户主集合。
+- JWT 可作为特定场景的临时凭证或外部集成令牌，但不作为主登录态，除非后续架构决策明确调整。
 
-| 字段          | 含义               |
-| ----------- | ---------------- |
-| `userId`    | 所属用户             |
-| `token`     | 会话标识（唯一）         |
-| `expiresAt` | 会话过期时间（TTL）      |
-| `createdAt` | 创建时间（timestamps） |
+采用服务端会话的原因：
 
----
-
-### 2.2 索引规范（强制）
-
-`sessions` 集合必须存在以下索引：
-
-* `userId_1`：查询索引
-* `token_1 (unique)`：防止 token 冲突
-* `expiresAt_1 (expireAfterSeconds: 0)`：**TTL 自动清理**
-
-> 验收命令：
-
-```js
-db.sessions.getIndexes()
-```
+- 服务端可控失效
+- 可限量
+- 可审计
+- 可主动清理
+- 更适合后台管理、协同系统和权限敏感系统
 
 ---
 
-## 3. 会话生命周期策略（关键治理点）
+## 2. sessions 集合设计
 
-### 3.1 会话创建
+### 2.1 最小字段
 
-* 每次 `POST /api/auth/login` 成功：
+建议 `sessions` 集合至少包含以下字段：
 
-  * 创建新 session
-  * 写入 `sessions` 集合
-  * 下发 HttpOnly Cookie（`ef_session`）
+| 字段 | 说明 |
+| --- | --- |
+| `userId` | 所属用户 |
+| `token` | 服务端会话标识，必须唯一 |
+| `expiresAt` | 会话过期时间，配合 TTL 索引 |
+| `createdAt` | 由 `timestamps` 管理 |
+| `updatedAt` | 由 `timestamps` 管理 |
 
----
+可选字段，可按业务需要引入：
 
-### 3.2 会话上限策略（必须）
+- `userAgent`
+- `ip`
+- `lastSeenAt`
+- `revokedAt`
 
-**策略：允许多端，但限制上限**
+### 2.2 索引原则
 
-* 同一 `userId` **最多保留 N 个有效会话**（当前 N=5）
-* 超出上限：
+`sessions` 集合应至少具备以下索引：
 
-  * 自动删除**最旧会话**
-* 防止：
+- `userId` 查询索引
+- `token` unique 索引
+- `expiresAt` TTL 索引
 
-  * 会话无限增长
-  * 灌水攻击
-  * 长期存储膨胀
-
-> 验收命令：
-
-```js
-db.sessions.countDocuments({ userId })
-```
-
----
-
-### 3.3 会话失效
-
-* **TTL 自动回收**：MongoDB 后台清理过期会话
-* **被动校验失效**：Guard 校验时发现过期 → 立即拒绝
-* **logout**：
-
-  * 清 cookie
-  * 同时使服务端 session 失效（删除或过期）
+具体索引创建、同步与运维边界以 `docs/database-conventions.md` 为准。  
+如需人工核查，可使用数据库客户端或运维脚本查看现有索引，这类命令仅作为可选示例，不构成本文档的固定执行步骤。
 
 ---
 
-## 4. Cookie 策略（协议层）
+## 3. Cookie 策略
 
-Cookie 名称：`ef_session`
+Cookie 名称应使用通用配置项或统一约定，例如：
 
-属性规范：
+- `SESSION_COOKIE_NAME`
+- `<app>_session`
 
-| 属性         | 说明                   |
-| ---------- | -------------------- |
-| `HttpOnly` | 必须                   |
-| `SameSite` | `Lax`（本地/同站）         |
-| `Secure`   | `true`（仅 production） |
-| `Path`     | `/`                  |
-| `Max-Age`  | 与 session TTL 对齐     |
+Cookie 属性原则：
+
+- `HttpOnly` 必须启用
+- `SameSite` 默认 `Lax`
+- `Secure` 在 production 环境必须启用
+- `Path` 默认为 `/`
+- `Max-Age` 与 session TTL 对齐
+
+补充说明：
+
+- `Domain` 是否设置由部署拓扑决定
+- 跨站点部署、第三方嵌入或多域名场景，需要重新评估 `SameSite`、`Secure` 与 CORS 策略
+- 前端不得直接读取 HttpOnly Cookie；前端仅通过认证探针或受保护接口判断登录态
+
+---
+
+## 4. 会话生命周期策略
+
+### 4.1 登录成功
+
+登录成功后应完成以下动作：
+
+- 创建新 session
+- 写入 `sessions` 集合
+- 下发 HttpOnly Cookie
+- 返回用户公开信息，或由前端随后调用认证探针获取
+
+### 4.2 会话上限
+
+- 同一用户的最大有效会话数应由配置项控制，例如 `MAX_ACTIVE_SESSIONS_PER_USER`
+- 如未显式配置，可采用保守默认值；例如建议默认 5，但不应把该值写成当前项目事实
+- 超出上限时，应按明确策略处理，通常优先回收最旧会话
+
+### 4.3 会话失效
+
+会话失效至少应覆盖以下路径：
+
+- TTL 自动回收
+- Guard 被动校验
+- logout 主动失效
+
+可选扩展：
+
+- 管理侧强制失效
+- 安全事件触发的批量撤销
 
 ---
 
 ## 5. Guard 与用户上下文
 
-### 5.1 SessionAuthGuard 职责（基于 HttpOnly Cookie 的 Session Guard）
+### 5.1 SessionAuthGuard
 
-* 从 request cookie 读取 `ef_session`
-* 校验 session 是否存在且有效
-* 支持 `@Public()` 路由直通（全局 guard 白名单）
-* 校验通过：
+`SessionAuthGuard` 的基线职责：
 
-  * 基于 `validateSession` 挂载 `req.user = { id, roles }`
-* 校验失败：
+- 从 Cookie 读取 session token
+- 校验 session 是否存在、未过期、未撤销
+- 支持 `@Public()` 路由直通
+- 校验通过后挂载 `req.user`
+- 校验失败抛 `UnauthorizedException` 或统一认证异常
 
-  * 抛 `UnauthorizedException`
+### 5.2 用户上下文
 
-### 5.2 Guard 提供方式（架构约束）
+`req.user` 建议至少包含：
 
-* `SessionAuthGuard`：
+- `id`
+- `roles`
 
-  * **由 AuthModule 提供并导出**
-  * **由 AppModule 通过 `APP_GUARD` 全局挂载**
-  * 其它模块只使用，不自行 provide
-* 避免模块“装配耦合”
-* `RolesGuard` 不全局化，仍由路由显式 `@UseGuards(RolesGuard) + @Roles(...)` 控制授权
+按业务需要可选补充：
 
----
+- `permissions`
+- `sessionId`
+- `tenantId`
+- `organizationId`
 
-## 6. /users/me 行为规范（闭环锚点）
+### 5.3 RolesGuard 与权限基线
 
-* 路由：`GET /api/users/me`
-* 角色：登录态探针接口（用于确认 cookie session 与用户上下文已建立）
-* 访问条件：
-
-  * 必须通过 `SessionAuthGuard`
-* 返回：
-
-  * 当前用户**公开字段**
-  * 严禁返回 `passwordHash`
+- `RolesGuard` 不默认全局化
+- `@Roles(...)` 由具体路由显式使用
+- 权限校验可基于 RBAC、权限码或组合策略实现
+- 具体角色名、权限码和数据范围规则不在本文档定义
+- 如需举例，可使用 `roleA`、`roleB` 或 `<role>`
 
 ---
 
-## 7. 错误语义统一（安全红线）
+## 6. 认证探针接口
 
-### 7.1 对外 message 统一
+项目应提供一个认证探针接口，路径由具体项目约定，推荐：
 
-所有认证失败场景：
+- `GET /api/auth/me`
+- `GET /api/users/me`
 
-* 未登录
-* 会话无效
-* 登录失败（密码错误）
+该接口的职责：
 
-**统一返回：**
+- 校验 HttpOnly Cookie 对应的服务端 session
+- 返回当前用户公开字段、角色和必要权限摘要
+- 不返回 `passwordHash`、`token`、`secret`、`credential` 等敏感字段
+
+前端使用原则：
+
+- 前端通过认证探针或受保护接口确认登录态
+- `401` 跳转登录
+- `403` 展示无权限
+- 具体 UI 处理以 `docs/frontend-architecture.md` 为准
+
+---
+
+## 7. 错误语义统一
+
+认证失败场景对外不应泄露具体失败原因，包括但不限于：
+
+- 未登录
+- 会话不存在
+- 会话过期
+- 会话撤销
+- token 错误
+- 用户不存在
+- 密码错误
+
+对外语义约束：
+
+- 上述场景可统一返回 `401 Unauthorized`
+- 已认证但无权限时返回 `403 Forbidden`
+- 不得泄露账号是否存在、密码是否错误、session 是否存在等敏感细节
+
+通用响应示例：
 
 ```json
 {
@@ -170,40 +201,92 @@ Cookie 名称：`ef_session`
 }
 ```
 
-目的：
-
-* 不泄露失败原因
-* 防止账号枚举
-* 前端统一处理
+前端可根据 `status` 或 `code` 映射友好文案，但后端不应泄露安全敏感原因。
 
 ---
 
-## 8. 验收清单（任何改动 auth 必跑）
+## 8. 敏感字段与输出安全
 
-### 必跑 1：TTL 索引
+普通响应不得返回以下敏感字段或安全凭证：
 
-```js
-db.sessions.getIndexes()
-```
+- `password`
+- `passwordHash`
+- session token
+- reset token
+- `secret`
+- `credential`
+- refresh token
+- 其他安全凭证
 
-### 必跑 2：会话上限
+输出安全原则：
 
-```js
-db.sessions.countDocuments({ userId })
-```
+- 用户公开信息应经过 DTO、mapper 或 serializer 控制
+- 不得直接返回完整用户文档
+- `select: false`、DTO 剔除、序列化剔除等实现方式由后端架构和实际代码决定
 
-### 必跑 3：未登录访问
+---
 
-```http
-GET /api/users/me → 401 Unauthorized
-```
+## 9. 前后端协作口径
+
+登录协作：
+
+- 后端设置 HttpOnly Cookie
+- 前端不读取 Cookie 内容
+- 前端根据响应或认证探针更新 UI 状态
+
+登出协作：
+
+- 后端清除 Cookie
+- 后端使 session 失效
+- 前端清除本地非敏感 UI 状态并跳转登录页或公共页
+
+BFF 协作：
+
+- 当前端请求通过同域 BFF 代理转发时，由 BFF 透传 Cookie
+- `set-cookie` 必须透传
+- 具体 BFF 规则以 `docs/frontend-architecture.md` 为准
+
+跨域协作：
+
+- 需要明确 CORS、credentials、`SameSite`、`Secure`、`Domain` 策略
+- 本文档不写死部署形态
 
 ---
 
-## 9. 结论性约束（一句话版）
+## 10. 验收建议
 
-> **EduForge 的登录态是“服务端资产”，不是客户端凭证。**
-> 任何改动 Auth 的代码，必须保证：
-> **可控失效、可回收、可限量、可审计。**
+涉及认证、会话、Guard、Cookie、权限的代码变更时，应按影响范围选择执行以下核查：
+
+- `sessions` 索引存在
+- 登录成功后 session 创建、Cookie 下发
+- 未登录访问受保护接口返回 `401`
+- 登录后访问认证探针返回当前用户公开信息
+- logout 后原 Cookie 不再可访问受保护接口
+- 会话过期后访问受保护接口返回 `401`
+- 无权限访问返回 `403`
+- 敏感字段不出现在响应中
+
+说明：
+
+- 不要求所有任务机械执行全部核查
+- 具体测试命令和执行边界以 `docs/codex-rules.md` 与 `docs/e2e-testing.md` 为准
 
 ---
+
+## 11. 结论性约束
+
+> 主登录态是服务端资产，不是客户端自管凭证。任何认证与会话相关改动，都必须保证：可控失效、可回收、可限量、可审计、敏感信息不外泄。
+
+---
+
+## 12. 与相关文档的职责关系
+
+- `docs/codex-instruction-spec.md`：Codex 指令结构
+- `docs/codex-rules.md`：Codex 执行规则、依赖治理、Git 安全、验证规则
+- `docs/backend-architecture.md`：后端架构、模块分层和 API 风格
+- `docs/frontend-architecture.md`：前端 BFF、路由、会话协作和 UI 处理
+- `docs/database-conventions.md`：数据库治理、索引与集合命名
+- `docs/e2e-testing.md`：E2E 测试组织和环境
+
+如出现认证与会话基线和其他文档的说明重叠，应按各文档职责边界理解；本文档仅定义身份与会话基线本身。
+

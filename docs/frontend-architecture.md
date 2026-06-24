@@ -1,422 +1,286 @@
-# EduForge Frontend Architecture Baseline (V1.1.3)
+# 前端架构规范（Next.js）
 
-版本：`V1.1.3`  
-更新时间：`2026-03-17`  
-权威后端基线：`docs/handoff/handoff-*.md`、`docs/auth-baseline.md`
+本文档定义 `frontend\` 前端工程的目录结构、路由组织、数据获取、BFF 代理、组件分层、错误处理、缓存刷新和架构演进口径。  
+适用于采用 Next.js App Router + TypeScript 的前端工程。  
+本文档不承担 Codex 指令模板和 Codex 执行边界职责；Codex 指令结构以 `docs/codex-instruction-spec.md` 为准，Codex 执行规则以 `docs/codex-rules.md` 为准；认证、会话、角色和权限口径以 `docs/auth-baseline.md` 为准。
 
-## 0. 文档定位与范围
-- 目标：提供可直接落地的 Next.js App Router 前端架构规范，支持页面批量开发与一致性验收。
-- 适用范围：`frontend/app/**`、`frontend/lib/**`、前端路由权限、数据获取、错误处理、下载交互。
-- 非目标：不定义视觉稿，不替代后端 API 文档，不扩展新状态管理架构。
-- 当前阶段：前端已进入“主链路整体可用、教师可自助起步”阶段；本文记录的是已落地架构基线，不是纯规划草案。
+---
 
-## 1. 不可违背约束（从 handoff 抽取）
-- 认证必须是服务端 Session + HttpOnly Cookie `ef_session`。
-- 前端禁止 Bearer Token；请求默认携带 cookie。
-- 所有后端接口路径以 `/api` 开头。
-- debug/ops gate：`AI_FEEDBACK_DEBUG_ENABLED=false` 时返回 `404` 是正常门禁；前端文案必须是“功能未启用”。
-- 课堂统计/报表/复盘/导出统一按 `classroomTaskId` 隔离；禁止按 `taskId` 跨班兜底聚合。
-- 成员授权与统计是 Enrollment-only；禁止读取 `classroom.studentIds` 做 fallback。
-- AI 语义：无 job 等于 `NOT_REQUESTED`，是正常产品状态。
-- `backend/**` 不参与中文化；后端代码与错误 `message` / `code` 保持英文（中文提示仅在前端 UI 层提供）。
+## 1. 通用架构基线
 
-## 2. RSC/Server Actions 调后端（默认路径 + 备选路径）
-### 2.1 默认方案（必须优先）：BFF 代理（Next Route Handler）
-- 页面（RSC/Server Actions/Client）统一请求同域 `/api/proxy/**`。
-- `app/api/proxy/[...path]/route.ts` 转发到后端 `/api/**`，透传 `Cookie`，回传 `Set-Cookie`/`Content-Type`/`Content-Disposition`。
-- 目标：规避跨域 cookie/CORS/CSRF 配置坑，且避免 RSC 相对路径误打到 Next 本地 API。
-- 实现约束（MUST）：
-  - 代理必须支持任意 HTTP method：`GET/POST/PATCH/PUT/DELETE`。
-  - 必须转发请求 body（`stream` 或 `arrayBuffer` 均可）。
-  - 必须转发必要请求头：至少 `cookie`、`content-type`、`accept`；其余头建议白名单透传。
-  - 必须透传响应头：`content-type`、`content-disposition`、`set-cookie`。
-  - `set-cookie` 可能多条，必须确保全部透传，不能只保留首条。
-  - 下载代理（CSV/snapshot）要求与第 8 节一致。
+- Next.js App Router + TypeScript
+- Server Components 优先
+- Server-first 数据获取
+- 写操作可使用 Server Actions 或 Route Handler，但应结合当前项目实际约定
+- 写后应根据影响范围使用 `revalidatePath`、`revalidateTag` 或显式重新获取数据
+- 不引入未明确要求的全局状态管理库
+- 依赖治理以 `docs/codex-rules.md` 为准
 
-最小片段（示意，真实实现必须满足上述约束）：
-```ts
-// app/api/proxy/[...path]/route.ts
-import { NextRequest, NextResponse } from 'next/server';
+---
 
-export async function GET(req: NextRequest, { params }: { params: { path: string[] } }) {
-  const upstream = await fetch(`${process.env.BACKEND_URL}/api/${params.path.join('/')}${req.nextUrl.search}`, {
-    method: 'GET',
-    headers: { cookie: req.headers.get('cookie') ?? '' },
-    cache: 'no-store',
-  });
-  const res = new NextResponse(upstream.body, { status: upstream.status });
-  const ct = upstream.headers.get('content-type');
-  const cd = upstream.headers.get('content-disposition');
-  const sc = upstream.headers.get('set-cookie');
-  if (ct) res.headers.set('content-type', ct);
-  if (cd) res.headers.set('content-disposition', cd);
-  if (sc) res.headers.set('set-cookie', sc);
-  return res;
-}
-```
+## 2. 不可违背约束
 
-### 2.2 备选方案：前端直连后端
-- 仅在部署层已做同域反代或跨域配置明确时启用。
-- 必须使用绝对地址 `BACKEND_URL`（server-only）；不要在 RSC 使用 `fetch('/api/...')` 期待命中后端。
-- 原因：RSC 在 server 端执行，`/api/...` 默认命中的是 Next 自己。
+- 前端请求后端时应优先通过 BFF 代理。
+- 前端不得在 client bundle 暴露服务端敏感环境变量。
+- Server Components、Server Actions、Route Handler 与 Client Components 的职责必须清晰。
+- 认证和权限口径以 `docs/auth-baseline.md` 为准。
+- 后端错误 `code`、`message` 原则上不直接作为最终中文 UI 文案；前端 UI 层可做友好提示映射。
+- 当后端以 `404` 隐藏未启用功能或受限能力时，前端应根据业务错误码或接口契约展示“功能未启用”或“资源不存在”等友好提示。
 
-## 3. 技术栈与架构原则
-- `Next.js App Router + TypeScript`。
-- `Server Components` 优先，`Client Components` 仅承载交互与局部轮询。
-- server-first 数据获取，避免不必要全局状态。
-- 写操作优先 `Server Actions`，其次 route handler；成功后 `revalidatePath` 或 `revalidateTag`。
+---
 
-## 4. IA 与路由分区（Role-first）
-顶层分区：
+## 3. BFF 代理与服务端请求规则
+
+### 3.1 默认方案
+
+- 页面、RSC、Server Actions、Client Components 统一请求同域 `/api/proxy/**`。
+- `app/api/proxy/[...path]/route.ts` 转发到后端 `/api/**`。
+- 代理层负责透传 Cookie、请求体、必要请求头和必要响应头。
+
+代理约束：
+
+- 支持常见 HTTP method：`GET`、`POST`、`PUT`、`PATCH`、`DELETE`。
+- 转发请求 body。
+- 透传必要请求头，至少包括 `cookie`、`content-type`、`accept`。
+- 透传必要响应头，至少包括 `content-type`、`content-disposition`、`set-cookie`。
+- 多条 `set-cookie` 不得丢失。
+
+### 3.2 RSC 调后端规则
+
+- Next.js Server Components 运行在服务端环境中，不应使用相对 `/api/...` 期待直接命中后端服务。
+- 如需通过同域访问后端，优先调用 BFF 代理。
+- 仅在部署、反向代理和环境变量约定都明确时，才考虑服务端直连后端。
+
+### 3.3 文件下载与导入导出
+
+- 文件下载、导入导出、二进制响应、带 `Content-Disposition` 的响应，优先经 BFF 代理统一处理。
+- BFF 代理必须透传 `Content-Type` 与 `Content-Disposition`。
+- 不应把二进制响应强行按 JSON 解析。
+- 前端应根据文件名、 MIME type 和响应头处理下载行为。
+
+---
+
+## 4. 路由组织与信息架构
+
+顶层路由分区可按角色、工作区或系统能力组织，以下仅为通用示例，不代表当前项目已实现：
+
 - `/login`
-- `/teacher/**`
-- `/student/**`
-- `/ops/**`（默认隐藏入口）
+- `/dashboard`
+- `/workspace/**`
+- `/resources/**`
+- `/settings/**`
+- `/admin/**`
+- `/system/**` 或 `/ops/**`
 
-推荐路由骨架（开发级）：
+通用路由骨架示例：
+
 ```text
 app/
   (auth)/login/page.tsx
-  (teacher)/teacher/page.tsx
-  (teacher)/teacher/courses/page.tsx
-  (teacher)/teacher/courses/[courseId]/overview/page.tsx
-  (teacher)/teacher/classrooms/page.tsx
-  (teacher)/teacher/classrooms/[classroomId]/page.tsx
-  (teacher)/teacher/classrooms/[classroomId]/dashboard/page.tsx
-  (teacher)/teacher/classrooms/[classroomId]/tasks/page.tsx
-  (teacher)/teacher/classrooms/[classroomId]/tasks/[classroomTaskId]/page.tsx
-  (teacher)/teacher/classrooms/[classroomId]/tasks/[classroomTaskId]/submissions/page.tsx
-  (teacher)/teacher/classrooms/[classroomId]/tasks/[classroomTaskId]/learning-trajectory/page.tsx
-  (teacher)/teacher/classrooms/[classroomId]/tasks/[classroomTaskId]/review-pack/page.tsx
-  (teacher)/teacher/classrooms/[classroomId]/tasks/[classroomTaskId]/ai-metrics/page.tsx
-  (teacher)/teacher/classrooms/[classroomId]/members/page.tsx
-  (teacher)/teacher/classrooms/[classroomId]/weekly-report/page.tsx
-  (teacher)/teacher/classrooms/[classroomId]/process-assessment/page.tsx
-  (teacher)/teacher/classrooms/[classroomId]/export/snapshot/page.tsx
-  (teacher)/teacher/submissions/[submissionId]/page.tsx
-  (student)/student/page.tsx
-  (student)/student/dashboard/page.tsx
-  (student)/student/classrooms/join/page.tsx
-  (student)/student/classrooms/[classroomId]/tasks/[classroomTaskId]/page.tsx
-  (student)/student/submissions/[submissionId]/page.tsx
-  (student)/student/help/ai/page.tsx
-  (ops)/** （规划/隐藏分区，当前未建设前端正式 ops 页）
+  (main)/dashboard/page.tsx
+  (main)/workspace/page.tsx
+  (main)/workspace/resources/page.tsx
+  (main)/workspace/resources/[resourceId]/page.tsx
+  (main)/workspace/resources/[resourceId]/items/page.tsx
+  (main)/workspace/resources/[resourceId]/items/[itemId]/page.tsx
+  (main)/settings/page.tsx
+  (admin)/admin/users/page.tsx
+  (admin)/admin/users/[userId]/page.tsx
+  (system)/system/files/[fileId]/page.tsx
 ```
 
-动态段命名统一：
-- `[courseId]`、`[classroomId]`、`[classroomTaskId]`、`[submissionId]`
+动态段命名建议：
 
-后端 `:id` 映射规则（统一写法）：
-- 前端路由层统一使用语义化 `classroomId/courseId`。
-- 调后端时按接口契约映射：  
-  - `/api/classrooms/:id/*` 的 `:id` 由前端 `classroomId` 填充。  
-  - `/api/courses/:id/*` 的 `:id` 由前端 `courseId` 填充。  
-  - `/api/classrooms/:classroomId/tasks/:classroomTaskId/*` 直接同名映射。
+- `[resourceId]`
+- `[itemId]`
+- `[userId]`
+- `[fileId]`
+- `[recordId]`
 
-导航信息架构图（文字版）：
+组织原则：
+
+- 路由段应表达清晰语义。
+- 前端动态段命名应与后端接口契约建立明确映射。
+- 嵌套路由不要过深。
+- 列表页、详情页、编辑页、设置页的组织方式应保持一致。
+
+导航结构示例：
+
 ```text
-Login -> Role Home
-Teacher: /teacher/courses -> /teacher/courses/[courseId]/overview -> /teacher/classrooms
-        -> /teacher/classrooms/[classroomId]/dashboard -> /teacher/classrooms/[classroomId]/tasks
-        -> /teacher/classrooms/[classroomId]/tasks/[classroomTaskId]
-        -> /teacher/classrooms/[classroomId]/tasks/[classroomTaskId]/submissions
-        -> /teacher/submissions/[submissionId]
-Student: /student -> /student/dashboard -> /student/classrooms/join
-        -> /student/classrooms/[classroomId]/tasks/[classroomTaskId]
-        -> /student/submissions/[submissionId] -> /student/help/ai
+Login -> Workspace Home
+Dashboard -> Resources -> Resource Detail -> Related Items
+Admin/System -> User / Role / Config Management
 ```
 
-## 5. 认证、会话与权限策略
-- 登录态探针固定为 `GET /api/users/me`。
-- 推荐在 `teacher` 与 `student` 根 layout 完成会话探针与角色重定向。
-- `401`：跳转 `/login`（携带 `next`）。
-- `403`：显示“无权限访问该资源”。
-- `404`：显示“资源不存在，或功能未启用”。
-- debug/ops 特例：`AI_FEEDBACK_DEBUG_ENABLED=false` 导致的 `404` 必须展示“功能未启用”，不是“权限不足”。
+---
 
-### 5.1 角色首页跳转（Role Home Routing Policy）
-- MUST：`roles` 包含 `TEACHER` 时，默认跳转 `/teacher/classrooms`（可带 `?page=1`）。
-- MUST：否则若 `roles` 包含 `STUDENT`，默认跳转 `/student`（该路由会立即重定向到 `/student/dashboard`）。
-- MUST：否则显示 `403`（无可用角色），并提示“请联系管理员开通角色权限”。
-- 说明：本规范仅定义默认跳转策略；不实现 `手动切换角色` 能力（后续如需支持，需另行设计并更新本规范）。
+## 5. 认证、会话与权限协作
 
-## 6. 缓存与一致性策略（避免 no-store 一刀切）
-### 6.1 默认策略
-- 关键业务读模型（教师/学生当前操作页）默认 `no-store`（强一致）。
-- 报表窗口数据允许可控缓存：`next: { revalidate, tags }`。
+- 认证探针接口由 `docs/auth-baseline.md` 定义，本文档不固定具体路径。
+- `401` 应跳转登录页，并可携带 `next` 参数。
+- `403` 应展示无权限提示。
+- `404` 应根据接口语义展示资源不存在或功能未启用。
+- 应存在登录后的默认入口。
+- 多角色用户的默认入口、手动切换角色和无可用角色处理方式，由 `docs/auth-baseline.md` 或具体业务文档定义。
+- `frontend-architecture.md` 不定义具体角色集合。
 
-### 6.2 适合 tag 缓存的页面
-- `GET /api/classrooms/:classroomId/weekly-report`
-- `GET /api/classrooms/:classroomId/process-assessment`
-- `GET /api/classrooms/:classroomId/tasks/:classroomTaskId/learning-trajectory`
-- `GET /api/classrooms/:classroomId/tasks/:classroomTaskId/review-pack`
-- `GET /api/classrooms/:classroomId/tasks/:classroomTaskId/ai-metrics`
-- `GET /api/courses/:courseId/overview`
+---
 
-建议 tag：
-- `classroom:{classroomId}:weekly-report:{window}`
-- `classroom:{classroomId}:process-assessment:{window}`
-- `classroom-task:{classroomTaskId}:trajectory:{window}`
-- `classroom-task:{classroomTaskId}:review-pack:{window}`
-- `classroom-task:{classroomTaskId}:ai-metrics:{window}`
-- `course:{courseId}:overview:{window}`
+## 6. 数据获取与缓存一致性
 
-### 6.3 不适合缓存（应 no-store）
-- `GET /api/users/me`
-- `GET /api/classrooms/mine/dashboard`
-- `GET /api/classrooms/:classroomId/tasks/:classroomTaskId/my-task-detail`
-- `GET /api/learning-tasks/submissions/:id`（submission detail 主读源）
-- `GET /api/learning-tasks/submissions/:id/feedback`（提交后即时查看）
-- 所有与权限判定强相关的入口页数据
+默认原则：
 
-### 6.4 写后刷新
-- 提交作业、请求 AI、加入班级后，按影响范围执行 `revalidateTag/revalidatePath`。
-- 严禁只刷新局部组件但保留过期主数据。
+- 权限强相关、登录态强相关、当前操作强相关的数据默认 `no-store`。
+- 低频变化的统计、概览、报表、配置、字典类数据可以使用 `revalidate` 或 tag 缓存。
+- 写操作后根据影响范围执行 `revalidatePath` 或 `revalidateTag`。
+- 禁止只刷新局部 UI 但保留过期主数据。
 
-## 7. API Client 规范（可执行）
+通用接口示例：
+
+- `GET /api/resources`
+- `GET /api/resources/:resourceId`
+- `GET /api/resources/:resourceId/items`
+- `GET /api/reports/summary`
+- `GET /api/config/options`
+
+tag 示例：
+
+- `resource:{resourceId}:detail`
+- `resource:{resourceId}:items`
+- `report:summary:{window}`
+- `config:options`
+
+---
+
+## 7. API Client 规范
+
 推荐文件：
+
 - `frontend/lib/api/errors.ts`
 - `frontend/lib/api/client.ts`
 
-规范：
-- 默认走 BFF：`baseUrl = ''`，调用 `/api/proxy/**`。
-- 直连后端时：`baseUrl = process.env.BACKEND_URL`（server-only），禁止暴露到 client bundle。
-- 统一 body 解析兼容：`json`、`text`、`204/empty`。
-- 统一错误分流：`401/403/404/500` + 业务错误码（如 `LATE_SUBMISSION_NOT_ALLOWED`）。
+设计原则：
 
-最小片段：
-```ts
-// frontend/lib/api/errors.ts
-export class ApiError extends Error {
-  constructor(
-    public status: number,
-    public code: string,
-    message: string,
-    public details?: unknown,
-  ) {
-    super(message);
-  }
-}
-```
+- 默认走 BFF。
+- 直连后端仅在部署和环境变量明确时使用。
+- 统一处理 `json`、`text`、`204`、空响应。
+- 统一错误分流。
+- 不把服务端环境变量暴露到 client bundle。
 
-```ts
-// frontend/lib/api/client.ts
-import { ApiError } from './errors';
+`ApiError` 建议包含：
 
-type FetchOpts = RequestInit & {
-  baseUrl?: string; // BFF 为空字符串；直连后端传 BACKEND_URL
-  nextOptions?: { revalidate?: number; tags?: string[] };
-};
+- `status`
+- `code`
+- `message`
+- `details`
 
-async function parseBody(res: Response): Promise<unknown> {
-  if (res.status === 204) return null;
-  const raw = await res.text();
-  if (!raw) return null;
-  const ct = res.headers.get('content-type') ?? '';
-  if (ct.includes('application/json')) {
-    try { return JSON.parse(raw); } catch { return raw; }
-  }
-  return raw;
-}
+通用错误码示例：
 
-export async function apiFetchJson<T>(path: string, opts: FetchOpts = {}): Promise<T> {
-  const { baseUrl = '', nextOptions, ...init } = opts;
-  const res = await fetch(`${baseUrl}${path}`, {
-    ...init,
-    credentials: 'include',
-    next: nextOptions,
-  });
-  const body = await parseBody(res);
-  if (!res.ok) {
-    const code = typeof body === 'object' && body && 'code' in body ? String((body as any).code) : 'HTTP_ERROR';
-    const msg = typeof body === 'object' && body && 'message' in body ? String((body as any).message) : `HTTP ${res.status}`;
-    throw new ApiError(res.status, code, msg, body);
-  }
-  return body as T;
-}
+- `VALIDATION_FAILED`
+- `FORBIDDEN`
+- `NOT_FOUND`
+- `FEATURE_DISABLED`
+- `INTERNAL_ERROR`
 
-export async function apiFetchText(path: string, opts: FetchOpts = {}): Promise<string> {
-  const { baseUrl = '', nextOptions, ...init } = opts;
-  const res = await fetch(`${baseUrl}${path}`, {
-    ...init,
-    credentials: 'include',
-    next: nextOptions,
-  });
-  const body = await parseBody(res);
-  if (!res.ok) throw new ApiError(res.status, 'HTTP_ERROR', `HTTP ${res.status}`, body);
-  return typeof body === 'string' ? body : '';
-}
-```
+---
 
-## 8. 下载接口规范（CSV / Snapshot）
-下载接口：
-- `GET /api/classrooms/:classroomId/process-assessment.csv`
-- `GET /api/classrooms/:classroomId/export/snapshot`
+## 8. 组件分层与文件组织
 
-实现约束：
-- 浏览器下载优先经 route handler 代理（同域 `/api/proxy/**`）。
-- 必须透传：
-  - `content-type`
-  - `content-disposition`
-  - `set-cookie`（若存在）
-- 失败状态统一处理：
-  - `401` -> 跳登录
-  - `403` -> 无权限提示
-  - `404` -> 资源不存在或功能未启用
-  - `500` -> 重试提示
+推荐组织：
 
-Snapshot 体积保护 UX：
-- UI 必须暴露导出参数：`limitStudents`、`limitAssessment`、`includePerTask`、`window`。
-- 响应中若含 `meta.notes`，页面必须提示“导出结果已按限制截断”。
+- `app/`：负责路由、`layout`、`page`、Route Handler
+- `components/`：负责可复用 UI 组件
+- `features/` 或 `modules/`：负责业务域组件与 hooks，是否采用由项目实际决定
+- `lib/`：负责 API Client、工具、服务端辅助函数
+- `types/`：负责共享前端类型
+- `styles/`：负责全局样式
 
-## 9. Page Contract Map
-权限失败规则（默认）：`401 -> /login`，`403 -> 无权限`，`404 -> 资源不存在或功能未启用`。  
-其中 ops/debug 关闭场景的 `404` 固定显示“功能未启用”。
+分层原则：
 
-### 9.1 Public / Teacher / Ops
-| 页面（route） | 主接口（method + path） | 关键 query | 关键交互 | 权限失败展示 |
-|---|---|---|---|---|
-| `/login` | `POST /api/auth/login`；`GET /api/users/me` | `next` | 登录成功后按角色跳转 | `401` 显示登录失败，不暴露细节 |
-| `/teacher` | - | - | 重定向到 `/teacher/classrooms` | 按默认规则 |
-| `/teacher/courses` | `GET /api/courses`；`POST /api/courses` | `page,limit` | 课程分页、创建课程、跳课程总览/班级 | 按默认规则 |
-| `/teacher/courses/[courseId]/overview` | `GET /api/courses/:courseId/overview` | `window,page,limit,sort,order` | 窗口/排序切换，跳班级 | 按默认规则 |
-| `/teacher/classrooms` | `GET /api/classrooms`；`GET /api/courses`；`POST /api/classrooms` | `page,limit,courseId` | 班级分页、按课程过滤、创建班级 | 按默认规则 |
-| `/teacher/classrooms/[classroomId]` | - | - | 重定向到 dashboard | 按默认规则 |
-| `/teacher/classrooms/[classroomId]/dashboard` | `GET /api/classrooms/:id`；`GET /api/classrooms/:id/dashboard` | 无（handoff 未声明） | 进入任务/成员/报表/导出 | 按默认规则 |
-| `/teacher/classrooms/[classroomId]/tasks` | `GET /api/classrooms/:id`；`GET /api/classrooms/:id/tasks`；`GET /api/learning-tasks/tasks`；`POST /api/classrooms/:id/tasks`；`POST /api/learning-tasks/tasks`（可选） | 无（handoff 未声明） | 发布课堂任务、进入任务详情/提交管理/三件套 | 按默认规则 |
-| `/teacher/classrooms/[classroomId]/tasks/[classroomTaskId]` | `GET /api/classrooms/:id`；`GET /api/classrooms/:id/tasks/:classroomTaskId`；`POST /api/learning-tasks/tasks/:id/publish` | 无（handoff 未声明） | 查看课堂任务与底层 learning task 状态，必要时触发底层 task publish | 按默认规则 |
-| `/teacher/classrooms/[classroomId]/tasks/[classroomTaskId]/submissions` | `GET /api/classrooms/:id`；`GET /api/classrooms/:classroomId/tasks/:classroomTaskId/submissions` | `page,limit` | 查看提交列表并跳转批阅详情 | 按默认规则 |
-| `/teacher/submissions/[submissionId]` | `GET /api/learning-tasks/submissions/:id`；`GET /api/learning-tasks/submissions/:id/feedback`；`POST /api/learning-tasks/submissions/:id/feedback` | `classroomId,classroomTaskId`（用于回跳） | 查看提交内容/反馈历史，新增教师反馈 | 按默认规则 |
-| `/teacher/classrooms/[classroomId]/tasks/[classroomTaskId]/learning-trajectory` | `GET /api/classrooms/:classroomId/tasks/:classroomTaskId/learning-trajectory` | `window,page,limit,sort,order,includeAttempts,includeTagDetails` | 排序筛选、查看学生轨迹 | 按默认规则 |
-| `/teacher/classrooms/[classroomId]/tasks/[classroomTaskId]/review-pack` | `GET /api/classrooms/:classroomId/tasks/:classroomTaskId/review-pack` | `window,topK,examplesPerTag` | 证据型课堂复盘（总览/问题聚合/样例/分层） | 按默认规则 |
-| `/teacher/classrooms/[classroomId]/tasks/[classroomTaskId]/ai-metrics` | `GET /api/classrooms/:classroomId/tasks/:classroomTaskId/ai-metrics` | `window,includeTags` | 查看 AI 状态与分布 | 按默认规则 |
-| `/teacher/classrooms/[classroomId]/members` | `GET /api/classrooms/:id`；`GET /api/classrooms/:id/students`；`POST /api/classrooms/:id/students/:uid/remove` | `includeRemoved` | 成员查看、移除成员 | 按默认规则 |
-| `/teacher/classrooms/[classroomId]/weekly-report` | `GET /api/classrooms/:classroomId/weekly-report` | `window,includeRiskStudentIds` | 周报筛选 | 按默认规则 |
-| `/teacher/classrooms/[classroomId]/process-assessment` | `GET /api/classrooms/:classroomId/process-assessment`；`GET /api/classrooms/:classroomId/process-assessment.csv` | JSON:`window,page,limit,sort,order`；CSV:`window` | 表格浏览、CSV 下载 | 按默认规则 |
-| `/teacher/classrooms/[classroomId]/export/snapshot` | `GET /api/classrooms/:classroomId/export/snapshot` | `window,limitStudents,limitAssessment,includePerTask` | 导出快照、显示截断提示 | 按默认规则 |
-| `/ops/**`（预留） | `GET /api/learning-tasks/ai-feedback/jobs`；`POST /api/learning-tasks/ai-feedback/jobs/process-once`（后端可用） | 以后端 DTO 为准 | 当前前端未建设正式 ops 页面；仅保留规划/隐藏分区口径 | debug gate 关闭时 `404` 固定显示“功能未启用” |
+- `page.tsx` 应尽量薄。
+- 复杂交互下沉到组件。
+- 可复用逻辑下沉到 hooks 或 `lib/`。
+- server-only 逻辑不得放入 Client Component。
+- Client Component 不得直接读取服务端私有环境变量。
+- Server Components 优先承载读取型页面和首屏数据获取。
+- Client Components 仅承载交互、浏览器 API、局部状态、局部轮询、富文本、编辑器、图表等前端专属能力。
 
-### 9.2 Student
-| 页面（route） | 主接口（method + path） | 关键 query | 关键交互 | 权限失败展示 |
-|---|---|---|---|---|
-| `/student` | - | - | 重定向到 `/student/dashboard` | 按默认规则 |
-| `/student/dashboard` | `GET /api/classrooms/mine/dashboard` | 无（handoff 未声明） | 查看班级任务并跳转任务详情 | 按默认规则 |
-| `/student/classrooms/join` | `POST /api/classrooms/join` | 无 | 输入 joinCode 加入班级 | 按 status 分流：`400`=joinCode 无效/格式错误；`404`=班级不存在或不可加入；`403`=无权限加入（如非学生角色） |
-| `/student/classrooms/[classroomId]/tasks/[classroomTaskId]` | `GET /api/classrooms/:classroomId/tasks/:classroomTaskId/my-task-detail`；`POST /api/classrooms/:classroomId/tasks/:classroomTaskId/submissions` | `includeFeedbackItems,feedbackLimit` | 查看详情、提交作业 | `403` 无权限；`LATE_SUBMISSION_NOT_ALLOWED` 显示截止提示 |
-| `/student/submissions/[submissionId]` | `GET /api/learning-tasks/submissions/:id`；`GET /api/learning-tasks/submissions/:id/feedback`；`POST /api/learning-tasks/submissions/:submissionId/ai-feedback/request` | `classroomId,classroomTaskId`（用于回跳） | 查看提交内容与反馈、手工请求 AI | 按默认规则 |
-| `/student/help/ai` | - | - | AI 状态语义与排障说明页 | 按默认规则 |
+---
 
-### 9.3 submission detail 稳定读源（已落地约束）
-- Teacher / Student submission detail 主体数据必须优先来自 `GET /api/learning-tasks/submissions/:id`。
-- 反馈历史读取接口为 `GET /api/learning-tasks/submissions/:id/feedback`。
-- query 透传只承担两类职责：
-  - 返回链路上下文（如 `classroomId/classroomTaskId`）
-  - 极少量字段 fallback 展示（仅在 detail 字段缺失时）
-- 禁止将 query 透传作为 submission detail 主数据源。
-- `GET /api/learning-tasks/submissions/:id` detail 接口允许返回 `content.codeText`。
-- `GET /api/classrooms/:classroomId/tasks/:classroomTaskId/submissions` 列表接口继续不返回 `content.codeText`。
+## 9. 错误处理与 UI 文案
 
-## 9.4 UI Copy Strategy（Chinese UI, English Code）
-### A) 总原则
-- 用户可见 UI 文案允许中文（frontend 侧）。
-- 工程结构与标识符必须英文（路径/路由段、paths key、变量/函数/类型/文件名、接口字段名、错误码等）。
-- 后端（backend）不参与中文化。
+处理原则：
 
-### B) Scope（允许中文化 vs 必须英文）
-- 允许中文化（User-visible UI copy，`frontend/**`）：
-  - 导航、页面标题、按钮、空态、ErrorState 的中文摘要/解释文字。
-- 必须英文（Engineering / Protocol invariants）：
-  - 路由路径与路由段（`/teacher/**`、`/student/**`）、`paths.ts` key。
-  - 变量/函数/类型/文件名（标识符与工程结构）。
-  - 后端返回的 message / 错误码 / 诊断字段（原样保留英文）。
-  - proxy 502 JSON 字段（`method/path/type`）与日志字段。
+- HTTP 状态与业务错误码应分层处理。
+- 前端 UI 文案应面向用户友好表达。
+- 后端 `code` 可用于分流，但不直接等同于最终 UI 文案。
+- 不在本文档中定义具体业务错误文案全集。
+- 具体业务文案可在业务文档、组件或 i18n 资源中定义。
 
-### C) Backend Hard Rule
-- **`backend/**` 下所有代码与文案保持英文，且本项目“前端中文化”不得推动任何 backend 改动。**
-- 若需要中文提示，只能在前端提供中文摘要；后端英文 detail 原样展示。
+基础分流建议：
 
-### D) Error Presentation Policy
-- ErrorState：中文摘要 + 英文 detail（原样，不翻译、不改写）。
-- debug/ops gate 的 `404` 必须展示“功能未启用”（与既有规则一致）。
+- `401`：登录态失效，跳登录
+- `403`：无权限
+- `404`：资源不存在或功能未启用
+- `409`：状态冲突，提示刷新或重试
+- `422`：输入不合法，提示修正输入
+- `500`：系统繁忙或服务异常
 
-### E) Copy-related Hard Rules
-- 禁止为了中文化修改路由/paths key/后端 message。
-- V1.x 阶段不引入第三方 i18n 依赖。
-- 中文化优先落在壳层组件（Shell / PageHeader / Tabs / EmptyState / ErrorState / TaskContextHeader）。
+---
 
-## 10. AI 状态与错误码 UX 规范
-`AiFeedbackStatus`：
-- `NOT_REQUESTED`：正常状态，展示“请求 AI 反馈”。
-- `PENDING`：排队中。
-- `RUNNING`：处理中。
-- `SUCCEEDED`：可查看反馈。
-- `FAILED`：允许重试请求。
-- `DEAD`：不可无限重试，提示联系教师/管理员。
+## 10. 环境变量与配置
 
-错误映射：
-- `LATE_SUBMISSION_NOT_ALLOWED`（403）：提示“提交已截止，当前任务不允许迟交”，提供“查看截止时间/联系教师/返回任务列表”。
-- Join 场景（`POST /api/classrooms/join`）按 status 分流：
-  - `400`：joinCode 无效或格式不正确，提示“请检查并重新输入 joinCode”。
-  - `404`：班级不存在或当前不可加入，提示“请确认 joinCode 或联系教师”。
-  - `403`：无权限加入（如角色不满足），提示权限原因并引导联系管理员/教师。
-- `401`：登录已过期。
-- `403`：权限不足。
-- `404`：资源不存在或功能未启用（debug gate 场景固定“功能未启用”）。
-- `500`：系统繁忙稍后重试。
+原则：
 
-### 10.1 默认联调/验收模式（已固化）
-- 默认联调/验收模式为 `Stub + worker`：`AI_FEEDBACK_PROVIDER=stub` + `AI_FEEDBACK_WORKER_ENABLED=true`。
-- `POST /api/learning-tasks/submissions/:submissionId/ai-feedback/request` 负责创建或确保 job（产品入口）。
-- worker 负责消费 job 到 `SUCCEEDED`（或进入失败重试/终态）。
-- `POST /api/learning-tasks/ai-feedback/jobs/process-once` 仅用于 debug/ops，不是默认交付运行模式。
+- 仅 `NEXT_PUBLIC_` 前缀变量可进入 client bundle。
+- 服务端私有变量只能在 server-only 代码中读取。
+- BFF 代理后端地址应使用服务端环境变量。
+- 不得在 Client Component 中读取服务端私有变量。
 
-## 11. Recommended Patterns 与 Hard Rules
-### Recommended Patterns
-- BFF 代理作为默认后端访问路径。
-- 报表接口按 `window` 维度使用 tag 缓存，写操作后精准 revalidate。
-- 页面级统一五态：`loading/empty/error/forbidden/not-found`。
-- 下载统一走代理并标准化错误提示。
+通用示例：
 
-### Hard Rules
-- 禁止按 `taskId` 做跨班统计或钻取。
-- 禁止用 `classroom.studentIds` 参与授权或统计。
-- 禁止把“无 job”误判为失败；`NOT_REQUESTED` 是合法语义。
-- 禁止将 debug gate 404 显示成 403。
-- 禁止前端自行推导后端口径指标（如风险学生），以接口返回为准。
+- `BACKEND_URL`
+- `NEXT_PUBLIC_APP_NAME`
+- `NEXT_PUBLIC_ENABLE_xxx`
 
-### 11.1 P0 真接口收口（前端当前基线）
-前端已正式接入并在主链路页面使用：
-- `GET /api/users/me`
-- `GET /api/classrooms/:id/students`
-- `GET /api/classrooms/:classroomId/tasks/:classroomTaskId/submissions`
-- `GET /api/learning-tasks/submissions/:id`
+说明：
 
-禁止回退：
-- 禁止回退到 `process-assessment` 代替成员读源。
-- 禁止回退到按 `taskId` 的跨班 submissions 过滤兜底。
-- 禁止回退到 query 主读源的 submission detail 实现。
+- 上述变量名仅作为示例，不代表当前项目已经存在对应配置。
 
-### 11.2 Teacher 起步链路（已可用）
-- `/teacher/courses` 已支持创建课程。
-- `/teacher/classrooms` 已支持创建班级。
-- `/teacher/courses/[courseId]/overview` 已作为课程视角正式入口。
-- 当前新教师起步链路：`创建课程 -> 创建班级 -> 发布任务 -> 学生加入与提交`。
+---
 
-### 11.3 Step 12 交付强化策略（已落地）
-- 空态必须带“下一步动作”，并优先通过 `EmptyState` 的 `actions` 承载跳转/主按钮。
-- raw JSON fallback 可以保留，但默认应折叠为“查看原始数据（调试用）”。
-- 手工验收入口文档固定为 `docs/handoff/handoff-frontend-manual-checklist.md`。
+## 11. 前端架构演进与文档同步口径
 
-## 12. 验收清单（文档执行检查）
-- 接口路径是否全部为 `/api/...`。
-- 是否明确默认路径为 BFF 代理，并给出 RSC/Server Actions 带 cookie 落地方式。
-- 是否明确 debug gate 404 = 功能未启用。
-- 是否明确 `classroomTaskId` 隔离与 Enrollment-only。
-- 是否明确 submission detail 稳定读源：`GET /api/learning-tasks/submissions/:id`，且 query 仅承担上下文/少量 fallback。
-- 是否明确 P0 真接口收口：`/users/me`、`/classrooms/:id/students`、`/classrooms/:classroomId/tasks/:classroomTaskId/submissions`、`/learning-tasks/submissions/:id`。
-- 是否明确 AI 默认联调模式为 `Stub + worker`，`process-once` 仅用于 debug/ops。
-- 是否明确 Teacher 起步链路已可用（创建课程、创建班级、课程总览入口）。
-- 是否明确 Step 12 强化策略（空态 actions、raw JSON 默认折叠、manual checklist 入口）。
-- CSV/快照下载是否具备可直接照抄的代理与错误处理约束。
-- 是否遵循“UI 中文、工程结构与标识符英文；`backend/**` 不参与中文化且不改动”。
-- ErrorState 是否支持“中文摘要 + 英文 detail 原样展示”。
+涉及以下变化时，应同步更新本文档，或在任务的“〖文档同步要求〗”中明确说明：
+
+- 前端目录结构
+- 路由分区原则
+- BFF 代理约定
+- 认证协作方式
+- API Client 约定
+- 缓存刷新策略
+- 全局状态管理方案
+- 下载、导入导出处理方式
+- 组件分层方式
+
+以下情况通常不要求机械更新本文档：
+
+- 普通页面新增
+- 普通组件新增
+- 局部 UI 调整
+
+Codex 执行边界和文档同步执行规则以 `docs/codex-rules.md` 为准。
+
+---
+
+## 12. 与相关文档的职责关系
+
+- `docs/codex-instruction-spec.md`：Codex 指令结构
+- `docs/codex-rules.md`：Codex 执行规则、依赖治理、Git 安全、验证规则
+- `docs/auth-baseline.md`：认证、会话、角色、权限
+- `docs/backend-architecture.md`：后端架构、API 风格和后端分层
+- `docs/e2e-testing.md`：E2E 测试组织和环境
+- `docs/database-conventions.md`：数据库治理
+
+如出现执行规则与前端架构说明的重叠或冲突，应以 `docs/codex-rules.md` 的执行规则为准；本文档聚焦前端工程架构本身。
+

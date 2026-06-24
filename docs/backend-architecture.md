@@ -1,45 +1,50 @@
+# 后端架构规范（NestJS）
 
-# EduForge 后端架构规范（NestJS）
+本文档定义 `backend\` 后端工程的目录结构、分层职责、命名规范、模块边界与架构演进口径。  
+适用于采用 NestJS + Mongoose + MongoDB + TypeScript 的后端工程。  
+本文档不承担 Codex 指令模板和 Codex 执行边界职责；Codex 指令结构以 `docs/codex-instruction-spec.md` 为准，Codex 执行规则以 `docs/codex-rules.md` 为准。
 
-  本文档定义 EduForge 后端（NestJS）的目录结构、分层职责、命名规范与开发流程。  
-  本仓库以本文档为准绳：任何新增模块、重构、目录调整，必须先更新本文档，再改代码。  
+涉及后端目录结构、分层边界、公共能力放置位置、跨模块依赖方式、API 风格或数据库治理等架构规则变化时，应同步更新本文档，或在任务的“〖文档同步要求〗”中明确说明。  
+普通模块新增、普通接口新增或局部实现修改，不要求机械修改本文档；是否同步文档由具体任务的“〖文档同步要求〗”确定。
 
 ---
 
 ## 1. 技术栈与版本策略
 
-  - 运行时：Node.js LTS（24.x）
-  - 框架：NestJS 11.x
-  - 数据库：MongoDB 8.x（Mongoose）
-  - 语言：TypeScript
-  - API 风格：REST（优先），后续如需 GraphQL 另立规范
+- 运行时方向：Node.js
+- 框架方向：NestJS
+- 数据库方向：MongoDB + Mongoose
+- 语言：TypeScript
+- API 风格：REST 优先；如需引入其他接口风格，应另行补充规范
 
-### 1.x. 数据库治理与索引规范（强制引用）
+版本口径：
 
-EduForge 后端所有与数据库相关的行为，包括但不限于：
-
-- 数据库命名与环境隔离
-- MongoDB 账号与权限模型
-- autoIndex 策略
-- 索引创建、变更与同步流程
-- 运维脚本与人工操作边界
-
-**必须严格遵循以下文档：**
-
-- `docs/database-conventions.md`
-
-约定说明：
-
-- `database-conventions.md` 属于 **架构级强制规范**
-- 本文档不重复定义数据库细则，避免规则分散与冲突
-- 如两份文档存在约定冲突，**以 `database-conventions.md` 为准**
-- 任何违反该文档的实现（包括应用配置、启动参数、脚本行为），均视为架构违规
+- 已初始化项目以 `backend/package.json`、锁文件、配置文件、部署环境和仓库实际代码为准。
+- 未初始化项目的 Node.js、NestJS、Mongoose、MongoDB 版本由人类开发者明确决定。
+- Codex 不得仅依据本文档自行安装、升级、降级或替换依赖版本。
+- 依赖治理和版本变更边界以 `docs/codex-rules.md` 为准。
 
 ---
 
-## 2. 顶层目录约定（backend/）
+## 2. 数据库治理与索引规范引用
 
-  后端工程目录固定如下，不允许随意增加同级目录（除非在本文档中新增条款并说明原因）：
+后端所有数据库相关行为，包括但不限于以下内容，统一遵循 `docs/database-conventions.md`：
+
+- 数据库命名与环境隔离
+- MongoDB 账号与权限模型
+- `autoIndex` 策略
+- 索引创建、变更与同步流程
+- 运维脚本与人工操作边界
+- 数据模型与集合命名约定
+
+本文档只定义后端架构层面对数据库访问的职责边界，不重复展开数据库治理细则。  
+如与 `docs/database-conventions.md` 存在冲突，以 `docs/database-conventions.md` 为准。
+
+---
+
+## 3. 顶层目录约定（backend/）
+
+推荐的后端顶层目录如下：
 
 ```text
 backend/
@@ -56,17 +61,17 @@ backend/
 
 说明：
 
-* `src/modules/`：所有业务模块统一放置位置（auth、users、semesters、courses、classrooms…）
-* `src/common/`：跨模块复用的通用能力（装饰器、守卫、过滤器、拦截器、管道、接口等）
-* `src/config/`：配置加载与校验（环境变量、配置对象）
-* `src/lib/`：纯工具代码（不依赖 Nest DI 或少依赖），例如字符串处理、通用校验、时间工具等
-* 禁止新增 `utils/`、`helpers/` 这类泛化目录，避免“垃圾桶化”
+- `src/modules/`：所有业务模块统一放置位置，可使用 `auth`、`users`、`files`、`notifications`、`<module>` 等通用命名。
+- `src/common/`：跨模块复用的通用能力，例如装饰器、守卫、过滤器、拦截器、管道、共享类型。
+- `src/config/`：配置加载、配置映射、环境变量校验。
+- `src/lib/`：不依赖或少依赖 Nest DI 的纯工具代码。
+- 禁止引入 `utils/`、`helpers/` 这类泛化垃圾桶目录。
 
 ---
 
-## 3. 业务模块标准结构（强制）
+## 4. 业务模块标准结构
 
-每个业务模块必须遵循统一结构；任何模块都像一个“小型独立 npm 包”，有清晰边界。
+每个业务模块应保持清晰边界，建议结构如下：
 
 ```text
 src/modules/<module>/
@@ -88,497 +93,192 @@ src/modules/<module>/
    └─ <module>.interface.ts
 ```
 
-生成方式（强制建议）：
-
-* controller：`nest g controller modules/<module>/controllers/<module> --flat`
-* service：`nest g service modules/<module>/services/<module> --flat`
-* module：`nest g module modules/<module>`
-
-说明：
-
-* 允许存在 `interfaces/`，用于模块内专属类型（不对外暴露的内部契约）
-* 不建议引入 repository 层，除非明确需要解耦多数据源或复杂查询组合（届时新增条款）
+建议优先使用 Nest CLI 生成 `controller`、`service`、`module` 骨架，再按需要补充 `dto`、`schemas`、`interfaces`。  
+是否引入额外层次应以实际复杂度为依据，避免为了形式增加无必要的抽象层。
 
 ---
 
-## 4. 分层职责边界（必须遵守）
+## 5. 分层职责边界
 
-### 4.1 Controller（控制器层）
+### 5.1 Controller
 
 职责：
 
-* 定义路由与 HTTP 协议细节（path、method、status code、headers）
-* 解析请求参数（@Body/@Param/@Query）
-* 绑定权限与认证（Guards / Roles）
-* 调用 service 执行业务
-* 不承载业务规则与数据库访问
+- 定义路由与 HTTP 协议细节
+- 解析请求参数
+- 绑定认证、权限与 Guard
+- 调用 Service
+- 统一接入异常、Pipe、拦截器等请求链能力
 
-禁止：
+约束：
 
-* 禁止直接操作 Mongoose Model
-* 禁止写超过 80 行的业务逻辑（超过说明该下沉到 service）
-* 禁止处理复杂异常拼装（交给全局异常体系）
+- 不承载业务规则
+- 不直接操作 Mongoose Model
+- 不拼装复杂业务流程
 
-### 4.2 Service（业务层）
-
-职责：
-
-* 实现业务规则与流程编排
-* 调用数据访问（Mongoose Model）
-* 处理事务性一致性（必要时）
-* 形成清晰可测试的业务函数
-
-允许：
-
-* 在 service 内进行数据校验（但输入校验优先 DTO）
-* 在 service 内进行跨表/跨集合查询与聚合
-
-禁止：
-
-* 禁止返回“含敏感字段”的实体（例如 password），除非明确设计为内部接口
-* 禁止在 service 里写 HTTP 相关逻辑（res、cookie、header）
-
-#### 4.2.x 工具链兼容性写法（强制）
-
-为规避 TypeScript + ESLint 在部分表达式上的解析与类型边缘问题，Service 层在以下场景中 **必须遵循工具链兼容性写法**：
-
-* **`await` + 链式调用场景（如 Mongoose 查询）**
-  - 优先采用单行链式调用
-  - 避免将链式调用拆分为多行
-
-  推荐：
-  ```ts
-  const task = await this.taskModel.findById(id).lean().exec();
-  ```
-  
-  不推荐：
-  ```ts
-  const task = await this.taskModel
-    .findById(id)
-    .lean()
-    .exec();
-  ```
-
-* **`map / filter / reduce` 等高阶函数回调为单表达式的场景**
-  - 使用单行箭头函数
-  - 避免在函数调用参数中换行并使用尾逗号（`trailing comma`）
-
-  推荐：
-  ```ts
-  items: items.map((x) => this.toDto(x)),
-  ```
-
-  不推荐：
-  ```ts
-  items: items.map((x) =>
-    this.toDto(x),
-  ),
-  ```
-
-#### 4.2.y 异步接口设计约定（设计级约定）
-
-在本项目中，凡是**未来明确会演进为 IO 调用**的接口（例如：AI 模型调用、外部服务请求、异步分析/评分管线、消息投递等），
-即使在当前阶段采用 stub / mock / 本地同步实现，也应遵循以下设计约定：
-
-- 接口方法应保持 `async` 签名；
-- 方法体内应包含最小的 `await`（例如 `await Promise.resolve()`），以确保异步语义成立；
-- 不因当前实现为同步逻辑而去除 `async` / `await`。
-
-该约定的目的在于：
-
-- 保持系统时间模型（Time Model）的一致性；
-- 避免后续引入真实 IO 实现时发生接口签名变更；
-- 降低异步管线、后台 worker 与调用方的演进与重构成本。
-
-说明：
-
-- 本约定属于**设计层约定**，不作为 lint 级或编译期强制规则；
-- 在代码评审、架构评估及自动化生成（如 GPT-5.2-Codex）过程中应予以遵循；
-- 若确有同步实现且未来不涉及 IO 的接口，不受此约定约束。
-
-#### 4.2.z Mongoose Lean 查询的类型约束规范（强制）
-
-在 EduForge 后端工程中，Service 层广泛使用 Mongoose 的 `.lean()` 查询以提升性能。
-由于 `.lean()` 返回的是 **Plain Object（非 Mongoose Document）**，TypeScript 在以下场景中无法自动推断字段存在性与类型稳定性：
-
-- `_id`
-- `createdAt / updatedAt`
-- 基于上述字段的派生计算（如时间比较、序列化等）
-
-为避免在 Service 层出现隐式 `any`、类型断言泛滥或运行期风险，特制定以下**强制类型约束规范**。
-
----
-
-##### 一、公共类型定义（强制使用）
-
-后端统一提供以下公共类型定义：
-
-- `WithId`  
-  ```ts
-  export type WithId = { _id: Types.ObjectId };
-  ```
-- `WithTimestamps`  
-  ```ts
-  export type WithTimestamps = { createdAt?: Date; updatedAt?: Date };
-  ```
-
-上述类型统一存放于：
-- src/common/types/with-id.type.ts
-- src/common/types/with-timestamps.type.ts
-
-##### 二、Mapper / Helper 层的强制约定（A 类场景）
-
-凡是 DTO / Response Mapper / Helper 中访问以下字段之一的：
-* `_id`
-* `createdAt`
-* `updatedAt`
-
-必须在入参类型上显式声明：
-```ts
-X & WithId & WithTimestamps
-```
-
-示例（推荐）：
-```ts
-toTaskResponse(task: Task & WithId & WithTimestamps) {
-  return {
-    id: task._id.toString(),
-    createdAt: task.createdAt?.toISOString(),
-  };
-}
-```
-
-禁止在 Mapper 层通过 as any、隐式断言或假设字段存在。
-
-##### 三、Service 内局部逻辑的约定（B 类场景）
-
-在 Service 内部的局部计算逻辑（非 Mapper），如：
-* latest.createdAt?.getTime()
-* (x.createdAt ?? new Date(0)).toISOString()
-* _id.toString() 作为 Map key / response 字段
-
-必须采用以下两种方式之一（择一即可）：
-
-* 方式 1：为 .lean() 查询显式指定泛型（推荐）
-```ts
-const submissions = await this.submissionModel
-  .find(...)
-  .lean<Submission & WithId & WithTimestamps[]>()
-  .exec();
-```
-
-方式 2：在局部变量或容器类型上补充类型约束
-```ts
-const statsMap = new Map<
-  string,
-  { latest?: Submission & WithId & WithTimestamps; count: number }
->();
-```
-
-##### 四、扫描与核查要求（强制）
-
-在新增或重构 Service 代码时，必须进行以下静态核查：
-- 扫描所有 .lean() 查询链；
-- 扫描所有 _id / createdAt / updatedAt 的访问点；
-- 核对是否符合以下规则：
-  * A 类（Mapper / Helper）：是否统一使用 X & WithId & WithTimestamps
-  * B 类（Service 内局部逻辑）：是否通过泛型或局部类型补齐
-
-未满足上述约定的代码，视为 **类型治理不合规**。
-
-##### 五、设计说明（必须保留）
-
-本规范的目的在于：
-* 明确 .lean() 场景下的类型边界；
-* 避免类型断言向运行期风险转移；
-* 保证 Service 层在复杂聚合、统计与派生计算中的可维护性；
-* 为 Codex / GPT 自动化代码生成提供确定性规则。
-
-本规范属于 工程级强制约定，对新增代码与重构代码必须遵守；
-历史代码不强制追溯，但在涉及文件调整时应同步修正。
-
-### 4.3 DTO（输入契约层）
+### 5.2 Service
 
 职责：
 
-* 定义接口输入结构与校验规则（class-validator）
-* 与 ValidationPipe 配合实现白名单过滤与校验错误格式统一
+- 实现业务规则与流程编排
+- 调用 Mongoose Model 或其他数据访问能力
+- 处理跨集合查询、聚合与必要的一致性
+- 组织输出层需要的派生数据
 
-规范：
+约束：
 
-* Create DTO：字段尽量完整且严格
-* Update DTO：使用 PartialType(CreateDto) 或专用 Update DTO（视安全边界决定）
-* Profile DTO：用于“用户更新自己资料”等场景，应更严格限制字段范围
+- 不写 HTTP response、cookie、header 等协议细节
+- 不应返回包含敏感字段的实体，除非明确为内部流程
 
-#### 4.3.x Query DTO 的数值类型转换约定（强制）
+设计建议：
 
-在本项目中，所有通过 URL Query（@Query()）传入的参数，在 HTTP 协议层面均为字符串类型。
-为确保 class-validator 在数值校验（如 @IsInt / @Min / @Max）场景下行为一致、可预期，特制定以下强制约定：
+- 对未来明确会演进为外部服务调用、消息投递、文件处理、后台任务或异步分析的接口，即使当前仅为 stub、mock 或本地实现，也建议保持 `async` 签名，以减少后续演进时的接口变更成本。
+- 已确认纯同步且无 IO 演进预期的工具函数，不受此建议约束。
 
-##### 强制规则
-- 所有 Query DTO 中声明为 `number` 的字段，**必须**显式使用：
-  ```ts
-  @Type(() => Number)
-  ```
-
-该约定适用于但不限于以下常见字段：
-
-- 分页参数：`page`、`limit`、`offset`
-- 筛选参数：`stage`、`level`、`score`
-- 数值型区间参数：`from` / `to`（如时间戳）
-
-##### 推荐写法示例
-```ts
-import { Type } from 'class-transformer';
-import { IsInt, IsOptional, Max, Min } from 'class-validator';
-
-export class QueryExampleDto {
-  @IsOptional()
-  @Type(() => Number)
-  @IsInt()
-  @Min(1)
-  page?: number;
-
-  @IsOptional()
-  @Type(() => Number)
-  @IsInt()
-  @Min(1)
-  @Max(100)
-  limit?: number;
-}
-```
-
-##### 说明与边界
-- 本约定 **仅适用于 `@Query()` DTO**
-- `@Body()` DTO：
-  - 默认要求客户端遵循 JSON 数值语义
-  - **不强制**使用 `@Type(() => Number)`，以避免弱化输入契约
-- `@Param()` DTO：
-  - 若参数语义为数值类型（而非字符串 ID）
-  - 应遵循与 Query DTO 相同的类型转换规则，应遵循与 Query DTO 相同的转换规则
-
-本规则的目的在于：
-- 消除 query string 带来的隐式类型差异；
-- 避免校验行为随 ValidationPipe 或工具链配置变化；
-- 提升接口行为的长期稳定性与可维护性。
-
-### 4.4 Schema（持久化层）
+### 5.3 DTO
 
 职责：
 
-* 定义 MongoDB collection 的结构（@Schema/@Prop）
-* 定义索引（index、unique、compound index）
-* 定义必要的 pre-save 钩子（例如密码加密）
+- 定义接口输入结构
+- 配合 `class-validator` 与 `ValidationPipe`
+- 明确 Create DTO / Update DTO 的边界
 
-规范：
+约束：
 
-* Schema 文件只放持久化相关逻辑，不放业务规则
-* 密码 hash、identifier 自动生成这类“存储前转换”允许存在于 schema pre-save
+- DTO 用于输入契约和校验，不承担业务规则
+- 分页、过滤、排序等请求参数应在 DTO 中显式声明
 
-#### 4.4.x timestamps 字段约定（强制）
+### 5.4 Schema
 
-当 Schema 启用 Mongoose 的 timestamps 机制时：
+职责：
 
-```ts
-@Schema({ timestamps: true })
-```
-必须遵循以下约定：
+- 定义集合字段、索引和基础约束
+- 承载必要的持久化层配置
 
-* createdAt 与 updatedAt 由 Mongoose 自动生成并维护；
-* 禁止在 Schema class 中显式声明以下字段：
-  * createdAt
-  * updatedAt
-  * 以及 timestamps 自定义映射后的等价字段名；
+约束：
 
-说明：
-* timestamps 生成的字段在 MongoDB collection 中真实存在；
-* Schema 中重复声明上述字段会造成语义重复与维护混乱；
-* MongoDB 索引可直接使用 createdAt / updatedAt，不依赖 Schema class 中的 @Prop() 声明；
+- 不承载复杂业务逻辑
+- 敏感字段默认使用 `select: false` 或通过输出层剔除
+- `timestamps`、联合类型、枚举字段、`.lean()` 查询类型安全等技术红线只作原则性提示；具体规则以 `docs/codex-rules.md` 与 `docs/database-conventions.md` 为准
 
-如需表达业务语义时间点，必须使用明确区分的字段名，例如：
-* publishedAt
-* archivedAt
-* deletedAt
+Schema 与查询类型安全原则：
 
-### 4.5 代码风格补充规范（Import / Decorator）
+- Schema 字段定义应保持明确，避免依赖模糊推断
+- 查询返回对象不得通过 `as any` 绕过类型约束
+- Mapper 或 DTO 输出层应显式处理 `_id`、`createdAt`、`updatedAt` 等字段
+- 涉及 `.lean()` 查询的类型安全红线，以 `docs/codex-rules.md` 为准
 
-#### 4.5.1 装饰器密集型库的 import 约定（强制）
+### 5.5 common / config / lib
 
-在后端工程中，以下类型的库属于**装饰器密集型库（decorator-heavy libraries）**，包括但不限于：
+职责边界：
 
-- `class-validator`
-- `class-transformer`
-- `@nestjs/swagger`
-- NestJS 框架中大量依赖装饰器的相关模块
+- `common/` 放跨模块共享的框架能力与共享类型
+- `config/` 放配置加载、映射与校验
+- `lib/` 放纯工具代码或低耦合基础能力
 
-**工程级强制约定（基于已验证的工具链行为）：**
+约束：
 
-- 对上述库的 import，**统一采用单行写法**
-- 禁止使用多行解构 import（即 `{` 后换行的形式）
-- 该约定优先级 **高于 Prettier 的默认格式化行为**
-
-原因说明（必须保留）：
-
-> 在当前 EduForge 工程的 TypeScript / ESLint / IDE 组合环境中，  
-> 已验证多行解构 import 在部分场景下会触发解析或编译异常。  
-> 为保证代码生成、编译与 CI 行为的确定性，统一收敛为单行 import。
-
-**唯一推荐写法：**
-
-```ts
-import { IsInt, IsOptional, Max, Min } from 'class-validator';
-```
-明确禁止写法：
-```ts
-import {
-  IsInt,
-  IsOptional,
-  Max,
-  Min,
-} from 'class-validator';
-```
-说明：
-
-- 本约定属于**工程稳定性约定**，不是风格偏好；
-- Codex / GPT 等自动化代码生成 **必须遵循**；
-- 如未来工具链升级并验证问题消失，需通过**文档变更流程**解除该约定。
-
-#### 4.5.2 Prettier 特赦机制（推荐）
-
-在以下场景中，**允许并推荐**使用 `// prettier-ignore` 固定 import 或装饰器相关代码格式：
-
-- 教学示例代码，需要保持结构稳定
-- 装饰器参数较多，需要强调可读性与对齐
-- 明确已遇到或验证过工具链（TypeScript / ESLint / IDE）解析异常的场景
-- `// prettier-ignore` 不得用于绕过 4.5.1 中关于 import 行结构的强制约定；
-- 仅允许在 **单行 import 前提下** 固定装饰器或参数排版。
-
-示例：
-
-```ts
-// prettier-ignore
-import {
-  Prop,
-  Schema,
-  SchemaFactory,
-} from '@nestjs/mongoose';
-```
-
-#### 4.5.3 适用范围
-
-* 本规范适用于所有后端业务模块与通用模块
-* 对新增代码与重构代码必须遵守
-* 对历史代码不强制追溯修改，但在涉及文件调整时建议同步修正
+- 不得把无法归类的代码随意堆入通用目录
+- 模块内专属逻辑优先放回模块内部，而不是提前抽到 `common/`
 
 ---
 
-## 5. 通用能力规范（common/）
+## 6. API 设计规范
 
-`src/common/` 允许包含以下子目录：
+总体原则：
 
-```text
-src/common/
-├─ decorators/
-├─ guards/
-├─ filters/
-├─ interceptors/
-├─ pipes/
-└─ interfaces/
-```
+- REST API 优先
+- 路由使用复数资源名
+- 嵌套资源不要过深
+- Controller 不拼装复杂业务
+- 异常与响应口径应统一
 
-推荐做法：
+通用示例：
 
-* 认证鉴权：guards + decorators（例如 Roles、CurrentUser）
-* 错误处理：filters（全局异常过滤器统一输出格式）
-* 响应封装：interceptors（如需要统一 envelope 再启用）
+- `GET /resources`
+- `POST /resources`
+- `GET /resources/:id`
+- `PATCH /resources/:id`
+- `DELETE /resources/:id`
+- `GET /resources/:id/items`
 
-> 说明：认证相关 Guard（如 JwtAuthGuard）的职责边界与提供方式，
-> 需与 `docs/auth-baseline.md` 保持一致，
-> 不得在业务模块中自行装配或变更其提供方式。
+补充约定：
 
----
+- 分页、过滤、排序参数应在 DTO 中声明
+- 动作型接口应谨慎使用；如必须存在，应采用清晰且稳定的资源语义
+- 对外接口返回结构应便于前后端协作和测试验证
 
-## 6. API 约定（REST）
+代码格式说明：
 
-### 6.1 路由命名
-
-* 集合：`/users`、`/courses`、`/semesters`
-* 子资源：`/courses/:id/classrooms`
-* 自身资源：`/users/me`
-* 动作型：尽量避免；如确需动作，使用语义清晰的子路径（例如 `/auth/login`）
-
-### 6.2 返回数据
-
-* 默认返回业务数据对象或数组
-* 错误统一由全局异常过滤器输出结构（statusCode/timestamp/path/message）
-* 不强制 envelope（如 `{ data, message }`），如后续统一再新增条款
+- 代码格式默认以当前项目的 Prettier、ESLint、TypeScript 配置为准
+- 如已确认特定写法存在工具链兼容问题，按 `docs/codex-rules.md` 中的工具链兼容性规则处理
+- 本文档不重复规定具体格式化禁令
 
 ---
 
-## 7. 安全与敏感字段红线
+## 7. 认证、安全与敏感字段
 
-* 任何对外接口不得返回 password 等敏感字段
-* findByEmail / findOne 等方法如需要 password，必须显式传参 `includePassword=true`
-* 登录与刷新 token 的逻辑集中在 auth 模块，禁止散落到其它模块
+认证与授权相关口径统一以 `docs/auth-baseline.md` 为准，包括：
 
-### 7.x 认证与会话实现说明
+- 登录态
+- Token / Cookie
+- 角色模型
+- Guard
+- 前后端认证协作方式
 
-关于登录态、会话存储、Cookie 策略、会话失效与清理等**具体实现约束**，
-统一以以下文档为准：
+安全红线：
 
-- `docs/auth-baseline.md`
-
-任何涉及认证、鉴权、会话生命周期的实现或重构，
-**不得与该基线文档冲突**。
-
----
-
-## 8. 测试规范（最小可行）
-
-* service 必须可单测（至少关键业务流程）
-* controller 至少保证路由可用与 guard 绑定正确
-* 新增模块时，优先补齐 service.spec.ts 骨架，后续再逐步完善
-
-### 8.x E2E 测试与环境隔离（强制引用）
-
-所有端到端测试（E2E Testing）相关的行为，包括但不限于：
-
-- E2E 测试的运行环境约束（NODE_ENV）
-- 测试数据库的隔离策略
-- 测试数据的清理与保留规则
-- 本地调试与 CI 场景下的差异化执行方式
-
-**必须严格遵循以下文档：**
-
-- `docs/e2e-testing.md`
-
-约定说明：
-
-- `e2e-testing.md` 属于 **测试治理级强制规范**
-- 本文档不重复定义 E2E 测试的具体执行细节
-- 如两份文档存在约定冲突，**以 `e2e-testing.md` 为准**
-- 任何违反该文档的 E2E 测试实现或执行方式，均视为架构违规
+- `password`、`token`、`secret`、`credential` 等敏感字段不得出现在普通响应中
+- 管理类能力必须有明确 Guard 或权限控制
+- 不得绕过统一认证与授权机制
 
 ---
 
-## 9. 变更流程（强制）
+## 8. 测试分层与验证引用
 
-* 新增模块：先按“模块标准结构”生成骨架，再补业务逻辑
-* 重构结构：先改本文档，再改代码
-* 大变更：必须输出“变更清单 + 影响范围 + 回滚策略”
+后端测试应按分层职责组织：
+
+- `service.spec.ts`：覆盖规则与边界条件
+- `controller.spec.ts`：覆盖路由参数、DTO、`ValidationPipe` 和 Service 调用
+- `backend/test/*.e2e-spec.ts`：覆盖真实 HTTP、认证、Guard、数据库读写和关键闭环
+
+相关引用：
+
+- E2E 组织、环境隔离与执行口径以 `docs/e2e-testing.md` 为准
+- 具体测试执行策略、任务范围内验证和范围外错误处理，以 `docs/codex-rules.md` 为准
+
+本文档只保留架构层面的测试分层说明，不重复展开 Codex 执行规则。
 
 ---
 
-## 10. 给 GPT-5.2-Codex 的执行规则（简版）
+## 9. 架构演进与文档同步口径
 
-* 以仓库现有结构为唯一事实，不得发明新目录
-* 新模块必须落在 `src/modules/<module>/` 并符合标准结构
-* controller 不写业务逻辑，业务逻辑下沉到 service
-* schema 仅做持久化定义与必要的 pre-save 转换
-* 不确定时先提出问题与风险，再给可执行方案
-* 生成或修改涉及装饰器库（class-validator、class-transformer、@nestjs/swagger）的代码时：
-  - 以 Prettier 格式化结果为准
-  - 在需要固定格式的场景下，允许使用 `// prettier-ignore`，并遵循第 4.5 节说明
+以下变化通常应同步更新本文档，或在任务的“〖文档同步要求〗”中明确说明：
 
-````
+- 顶层目录结构调整
+- 模块标准结构调整
+- 分层职责边界变化
+- 公共能力放置位置变化
+- 跨模块依赖方式变化
+- API 风格变化
+- 数据库访问职责边界变化
+
+以下情况通常不要求机械更新本文档：
+
+- 普通模块新增
+- 普通接口新增
+- 局部实现修改
+- 不改变既有架构边界的常规开发
+
+---
+
+## 10. 与相关文档的职责关系
+
+- `docs/codex-instruction-spec.md`：定义 Codex 指令的生成结构
+- `docs/codex-rules.md`：定义 Codex 执行边界、依赖治理、验证规则、Mongoose 技术红线和文档同步执行规则
+- `docs/database-conventions.md`：定义数据库治理、索引策略与运维边界
+- `docs/auth-baseline.md`：定义认证、授权、会话与安全协作口径
+- `docs/e2e-testing.md`：定义 E2E 组织方式、环境隔离与执行基线
+
+如出现执行规则与架构说明的重叠或冲突，应以 `docs/codex-rules.md` 的执行规则为准；本文档聚焦后端工程架构本身。
 
