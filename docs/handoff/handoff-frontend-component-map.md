@@ -107,4 +107,4 @@
 - 需要改 submission detail 相关逻辑时：优先以稳定读源 `GET learning-tasks/submissions/:id` 为主，先看 `lib/api/types-student.ts`、`lib/api/types-teacher.ts` 与 Teacher/Student submission detail 页，不要把 query 透传当主数据源。
 - 模板创建/编辑/rubric 配置属于模板层（`/teacher/tasks*`），不要回退到班级任务页。
 - 班级任务页只负责班级实例发布与任务工作区管理，不要把模板维护能力混回 `PublishClassroomTaskForm`。
-- 若任务仅是 handoff/manual checklist/docs 调整：不要顺手改业务组件或路由实现，先核对 `docs/handoff/*` 与当前代码是否一致再决定是否改代码。
+- 若任务仅是 handoff 文档调整：不要顺手改业务组件或路由实现，先核对 `docs/handoff/*` 与当前代码是否一致再决定是否改代码。

@@ -22,7 +22,6 @@
 | `docs/handoff/handoff-frontend-changelog.md` | 阶段演进结论（Step 8~12） | 需要快速理解“本会话最后一段做了什么”时 |
 | `docs/handoff/handoff-frontend-route-map.md` | 路由地图（页面用途/主接口/完成度/稳定读源） | 要改页面或补链路前 |
 | `docs/handoff/handoff-frontend-component-map.md` | 组件与模块职责边界（在哪改、不要在哪改） | 要改组件或公共机制前 |
-| `docs/handoff/handoff-frontend-manual-checklist.md` | Step 12 人工验收清单 | 联调冒烟或交接验收时 |
 
 ## 推荐阅读顺序（新会话）
 
@@ -32,7 +31,8 @@
 2. `handoff-frontend-changelog.md`
 3. `handoff-frontend-route-map.md`
 4. `handoff-frontend-component-map.md`
-5. `handoff-frontend-manual-checklist.md`
+
+人工验收不再单独维护 handoff 文件；当前前端事实以 snapshot / route-map / component-map 为准，阶段结论看 changelog。
 
 ## 需要与后端交叉阅读的文档
 
