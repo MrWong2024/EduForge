@@ -7,7 +7,7 @@
 ## 旧宪法事实迁移说明
 
 - 2026-06-24 已把 7 个旧宪法文档中夹带的 EduForge 项目专属事实补充到 `docs/handoff/**`。
-- 后续如用 ReviewX 的 7 个通用宪法文档覆盖 `docs/` 下同名宪法文档，EduForge 的认证、接口、DTO、配置、数据库、测试、AI Feedback 与过程性评价事实以 `docs/handoff/**` 为项目锚点。
+- `docs/` 下 7 个通用宪法文档只承载通用工程规则；EduForge 的认证、接口、DTO、配置、数据库、测试、AI Feedback 与过程性评价事实以 `docs/handoff/**` 为项目锚点。
 - 若 handoff 与当前代码冲突，仍以当前工作区代码为准，并同步修订对应 handoff。
 
 ## 文档导航

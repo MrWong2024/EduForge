@@ -207,7 +207,7 @@ provider 在协议层增加 `items<=2` 的硬闸门；`AiFeedbackProcessor` comp
 ## 16) EduForge 项目专属事实从旧宪法文档迁移到 handoff
 
 **Decision**  
-2026-06-24 起，旧 7 个宪法文档中的 EduForge 项目专属事实迁移/补充到 `docs/handoff/**`；后续可用 ReviewX 的 7 个通用宪法文档覆盖 `docs/` 下同名宪法文档。
+2026-06-24 起，旧 7 个宪法文档中的 EduForge 项目专属事实已迁移/补充到 `docs/handoff/**`；`docs/` 下 7 个通用宪法文档只承载通用工程规则。
 
 **Rationale**  
 认证、角色、路由、接口、DTO、配置、数据库、测试、AI Feedback 与过程性评价属于 EduForge 项目事实，不应依赖通用宪法文档长期承载。
