@@ -53,7 +53,7 @@ Teacher：
 - 课程和班级列表已支持创建、基础编辑、归档/恢复/空对象删除；低频生命周期动作在列表“更多”菜单处理。
 - 模板层（`/teacher/tasks*`）负责模板创建、筛选、编辑、可见性与生命周期；班级任务页只负责选择已发布模板并发布课堂任务实例。
 - 课堂任务工作区以班级看板和任务列表为中枢，提交管理、学习轨迹、课堂复盘、AI 指标共用任务上下文导航。
-- 过程性评价页面已接真实 JSON/CSV 接口，支持通过 `ExcludeTasksPanel` Client Component + `router.replace` 客户端软导航更新 `excludedTaskIds` 临时查询后重新计算、任务维度评分指标明细展示与导出；页面级细节看 route-map/component-map。
+- 过程性评价页面已接真实 JSON/CSV 接口，支持通过 `ExcludeTasksPanel` Client Component + `router.replace` 客户端软导航更新 `excludedTaskIds` 临时查询后重新计算、任务维度评分指标明细展示与导出；明细区提供用户可读的可展开评分规则说明，用于解释综合过程分、四个权重维度、任务维度统计和典型样例，不改变算法或接口；页面级细节看 route-map/component-map。
 
 Student：
 

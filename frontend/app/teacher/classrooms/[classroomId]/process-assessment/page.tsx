@@ -336,6 +336,89 @@ const riskToneClassNameMap: Record<ProcessAssessmentTableRow["riskTone"], string
   unknown: "bg-zinc-100 text-zinc-700 ring-zinc-200",
 };
 
+function ProcessAssessmentScoringGuide() {
+  return (
+    <details className="mt-3 rounded-lg border border-zinc-200 bg-zinc-50 p-4 text-sm">
+      <summary className="cursor-pointer font-medium text-zinc-900">
+        评分规则说明
+      </summary>
+      <div className="mt-3 space-y-3 text-zinc-700">
+        <p>
+          过程性评价分数用于反映学生在当前统计范围内的学习过程表现，满分
+          100 分。它不是每布置一次任务就单独生成一个固定分数，也不是把多次任务的分数简单求平均。系统会把当前统计范围内的有效任务放在一起，综合分析学生的任务完成、提交迭代、AI
+          使用和代码质量反馈情况。
+        </p>
+        <p>
+          每次有效任务都会参与综合计算，但最终展示的是当前统计范围内的综合过程分。把
+          4 次任务拉通一起计算，与每次单独打分再求平均，不一定相同；这是正常的，因为二者评价目标不同。传统作业成绩可以单独评分，过程性评价更关注一段时间内的整体学习过程和能力表现。
+        </p>
+
+        <div>
+          <p className="font-medium text-zinc-900">四个评分维度</p>
+          <ul className="mt-2 list-disc space-y-1 pl-5">
+            <li>
+              任务完成覆盖率，占 45
+              分：看学生完成了多少有效任务。布置了 4 次任务，完成 4
+              次和只完成 1 次，过程表现不同。
+            </li>
+            <li>
+              提交迭代质量，占 15
+              分：看学生是否在任务中有适度修改和再次提交。同一个任务提交很多次，不会一直加分；系统只判断这个任务是否发生过有效迭代。
+            </li>
+            <li>
+              AI 使用质量，占 20
+              分：看学生在多少个任务中使用过 AI，以及 AI
+              请求是否成功。同一个任务反复请求 AI，不会重复刷高分。
+            </li>
+            <li>
+              代码质量代理，占 20
+              分：根据 AI 反馈的问题严重程度进行评估。INFO
+              只是提示，不扣分；WARN 表示轻度问题，会少量扣分；ERROR
+              表示较明显的问题，扣分更重。
+            </li>
+          </ul>
+        </div>
+
+        <p>
+          系统按任务维度统计，而不是按点击次数统计。也就是说，同一个任务提交
+          5 次、10 次，或在同一个任务中多次请求 AI，都不会无限提高分数。系统更关注学生是否覆盖了更多任务、是否在不同任务中合理使用
+          AI、是否有适度迭代，以及反馈中是否存在明显问题。
+        </p>
+
+        <div>
+          <p className="font-medium text-zinc-900">典型例子</p>
+          <ul className="mt-2 list-disc space-y-1 pl-5">
+            <li>
+              如果只统计 1 个有效任务，学生提交 1 次、AI
+              请求成功，并且没有 WARN 或 ERROR，分数约为 98
+              分。
+            </li>
+            <li>
+              如果在此基础上又进行了一次有效修改并再次提交，分数可达到
+              100 分。
+            </li>
+            <li>
+              如果当前有 5 个有效任务，学生只完成了其中 1
+              个任务，即使这个任务提交很多次、AI
+              请求很多次，系统也只算完成了 1 个任务、1
+              个任务有迭代、1 个任务使用过 AI，不会靠刷次数拿高分。
+            </li>
+            <li>
+              如果 5 个任务都完成、都成功使用 AI，并且反馈中没有明显问题，过程分会比较高，接近满分。
+            </li>
+            <li>如果完全没有提交，过程性评价分数为 0。</li>
+          </ul>
+        </div>
+
+        <p>
+          该分数主要用于观察学生学习过程，辅助教师了解学生的任务完成、迭代修改、AI
+          使用和代码质量情况，不等同于最终作业成绩。教师仍可结合课程要求、课堂表现和正式评分标准进行综合评价。
+        </p>
+      </div>
+    </details>
+  );
+}
+
 const getRequestOrigin = async (): Promise<string> => {
   const headerMap = await headers();
   const host = headerMap.get("x-forwarded-host") ?? headerMap.get("host") ?? "";
@@ -765,6 +848,7 @@ export default async function ProcessAssessmentPage({
         {rubricSummaryText ? (
           <p className="mt-2 text-xs text-zinc-500">{rubricSummaryText}</p>
         ) : null}
+        <ProcessAssessmentScoringGuide />
         <div className="mt-2 text-sm text-zinc-600">
           共 {totalStudentsCount} 名学生，当前显示 {displayedStudentsCount} 名
         </div>

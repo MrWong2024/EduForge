@@ -57,7 +57,7 @@
 
 | 页面模块 | 文件 | 真实 API | 作用边界 |
 |---|---|---|---|
-| ProcessAssessmentPage | `app/teacher/classrooms/[classroomId]/process-assessment/page.tsx` | `GET classrooms/:classroomId/process-assessment`、`GET classrooms/:classroomId/process-assessment.csv`、`GET classrooms/:classroomId/tasks` | 负责过程性评价页面 URL query 解析与服务端数据加载；`excludedTaskIds` 解析兼容逗号分隔和 repeated query，并在 JSON/CSV 请求中归一化为逗号分隔；“排除任务”是临时查询条件，排除任务区由 `ExcludeTasksPanel` Client Component 承载；页面展示后端返回的任务维度指标（迭代任务数、AI 覆盖任务数、平均警告/错误项）；课堂任务选项加载失败只显示提示，不阻断过程性评价主体展示；不要在本页重算后端评分、改 API 契约或持久化 `excludedTaskIds`。 |
+| ProcessAssessmentPage | `app/teacher/classrooms/[classroomId]/process-assessment/page.tsx` | `GET classrooms/:classroomId/process-assessment`、`GET classrooms/:classroomId/process-assessment.csv`、`GET classrooms/:classroomId/tasks` | 负责过程性评价页面 URL query 解析与服务端数据加载；`excludedTaskIds` 解析兼容逗号分隔和 repeated query，并在 JSON/CSV 请求中归一化为逗号分隔；“排除任务”是临时查询条件，排除任务区由 `ExcludeTasksPanel` Client Component 承载；页面展示后端返回的任务维度指标（迭代任务数、AI 覆盖任务数、平均警告/错误项），并在明细区提供可展开的评分规则说明卡片，解释当前综合过程分、四个权重维度、任务维度统计与典型样例；课堂任务选项加载失败只显示提示，不阻断过程性评价主体展示；不要在本页重算后端评分、改 API 契约或持久化 `excludedTaskIds`。 |
 | ExcludeTasksPanel | `app/teacher/classrooms/[classroomId]/process-assessment/ExcludeTasksPanel.tsx` | - | Client Component，负责过程性评价排除任务勾选交互；应用排除通过 `router.replace` 客户端软导航写入当前选中的 `excludedTaskIds` 并回到 `page=1`；清空排除通过 `router.replace` 删除 `excludedTaskIds`，仅保留 `window` 与 `page=1`；不落库、不写浏览器存储、不修改任务或成绩，仅影响当前 URL query 对应的临时计算；该实现替代旧的原生 GET form / 独立 GET form 口径，用于避免 hydration mismatch 并保持交互稳定。 |
 
 ## 4) Student 交互组件

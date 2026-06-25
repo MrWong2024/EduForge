@@ -813,3 +813,9 @@
 - 【新增事实 / 已收口口径】排除任务区已由 `ExcludeTasksPanel` Client Component 承载；应用排除与清空排除均通过 `router.replace` 客户端软导航更新 URL。应用排除写入当前选中的 `excludedTaskIds` 并回到 `page=1`；清空排除删除 `excludedTaskIds`，仅保留 `window` 与 `page=1`；点击后 URL 不应再包含 `excludedTaskIds`。
 - 【展示同步】过程性评价明细表新增/显式展示 `iteratedTasksCount`、AI 覆盖任务数（`aiRequestedTasksCount / publishedTasksCount`）以及 `avgWarnItems/avgErrorItems`，rubric 文案同步为任务覆盖率 45、提交迭代质量 15、AI 使用质量 20、代码质量代理 20。
 - 【边界保持】前端仍不重算后端评分，不持久化 `excludedTaskIds`，不写浏览器存储，不修改任务、成绩或接口路径；CSV 字段变化由后端 `process-assessment.csv` 契约承载。
+
+## UAT-FE-98
+
+- 【本步解决】教师端过程性评价分数缺少面向教师的可读解释，用户不易区分综合过程分与单次任务成绩。
+- 【新增事实 / 已收口口径】过程性评价明细区域新增默认收起的“评分规则说明”，使用原生 `details/summary` 展开；说明覆盖任务完成覆盖率 45、提交迭代质量 15、AI 使用质量 20、代码质量代理 20，解释任务维度统计、防刷提交/AI、INFO/WARN/ERROR 差异、典型样例，以及过程分不等于最终作业成绩。
+- 【边界保持】仅前端展示与 handoff 文档同步，不改 backend，不改评分算法、API、DTO、CSV、权限或依赖。
