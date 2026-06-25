@@ -775,25 +775,41 @@ export default async function ProcessAssessmentPage({
           </div>
         ) : (
           <div className="mt-3 overflow-x-auto rounded-lg border border-zinc-200 bg-white">
-            <table className="min-w-full border-collapse text-sm">
+            <table className="w-full min-w-[1180px] border-collapse text-sm">
               <thead className="bg-zinc-50 text-left text-zinc-600">
                 <tr>
-                  <th className="w-14 px-3 py-2.5 text-center">序号</th>
-                  <th className="w-56 px-3 py-2.5">学生</th>
-                  <th className="w-44 px-3 py-2.5">进度</th>
-                  <th className="w-28 px-3 py-2.5 text-right">迭代任务数</th>
-                  <th className="w-44 px-3 py-2.5">AI 覆盖任务数</th>
-                  <th className="w-28 px-3 py-2.5 text-right">平均警告项</th>
-                  <th className="w-28 px-3 py-2.5 text-right">平均错误项</th>
-                  <th className="w-24 px-3 py-2.5 text-right">得分</th>
-                  <th className="w-28 px-3 py-2.5">风险</th>
-                  <th className="px-3 py-2.5">问题摘要</th>
+                  <th className="w-14 whitespace-nowrap px-3 py-2.5 text-center">序号</th>
+                  <th className="w-56 whitespace-nowrap px-3 py-2.5 text-left">学生</th>
+                  <th className="w-44 whitespace-nowrap px-3 py-2.5 text-left">进度</th>
+                  <th className="min-w-[88px] whitespace-nowrap px-3 py-2.5 text-center">
+                    迭代任务数
+                  </th>
+                  <th className="min-w-[112px] whitespace-nowrap px-3 py-2.5 text-center">
+                    AI 覆盖任务数
+                  </th>
+                  <th className="min-w-[96px] whitespace-nowrap px-3 py-2.5 text-center">
+                    平均警告项
+                  </th>
+                  <th className="min-w-[96px] whitespace-nowrap px-3 py-2.5 text-center">
+                    平均错误项
+                  </th>
+                  <th className="min-w-[72px] whitespace-nowrap px-3 py-2.5 text-center">
+                    得分
+                  </th>
+                  <th className="min-w-[72px] whitespace-nowrap px-3 py-2.5 text-center">
+                    风险
+                  </th>
+                  <th className="min-w-[240px] whitespace-nowrap px-3 py-2.5 text-left">
+                    问题摘要
+                  </th>
                 </tr>
               </thead>
               <tbody>
                 {rows.map((row, index) => (
                   <tr key={row.key} className="border-t border-zinc-100 align-top">
-                    <td className="px-3 py-2.5 text-center text-zinc-700">{index + 1}</td>
+                    <td className="px-3 py-2.5 text-center tabular-nums text-zinc-700">
+                      {index + 1}
+                    </td>
                     <td className="px-3 py-2.5">
                       <p className="font-medium text-zinc-900">{row.studentDisplayName}</p>
                       {row.studentSecondaryText ? (
@@ -804,25 +820,27 @@ export default async function ProcessAssessmentPage({
                       <p className="text-base font-semibold text-zinc-900">{row.progressDisplay}</p>
                       <p className="mt-0.5 text-[11px] text-zinc-500">{row.progressSecondaryText}</p>
                     </td>
-                    <td className="px-3 py-2.5 text-right text-zinc-800">
+                    <td className="px-3 py-2.5 text-center tabular-nums text-zinc-800">
                       {row.iteratedTasksCount}
                     </td>
-                    <td className="px-3 py-2.5">
-                      <p className="font-medium text-zinc-900">{row.aiTaskCoverageDisplay}</p>
+                    <td className="px-3 py-2.5 text-center">
+                      <p className="font-medium tabular-nums text-zinc-900">
+                        {row.aiTaskCoverageDisplay}
+                      </p>
                       <p className="mt-0.5 text-[11px] text-zinc-500">
                         {row.aiTaskCoverageSecondaryText}
                       </p>
                     </td>
-                    <td className="px-3 py-2.5 text-right text-zinc-800">
+                    <td className="px-3 py-2.5 text-center tabular-nums text-zinc-800">
                       {row.avgWarnItemsDisplay}
                     </td>
-                    <td className="px-3 py-2.5 text-right text-zinc-800">
+                    <td className="px-3 py-2.5 text-center tabular-nums text-zinc-800">
                       {row.avgErrorItemsDisplay}
                     </td>
-                    <td className="px-3 py-2.5 text-right text-base font-semibold text-zinc-900">
+                    <td className="px-3 py-2.5 text-center text-base font-semibold tabular-nums text-zinc-900">
                       {row.scoreDisplay}
                     </td>
-                    <td className="px-3 py-2.5">
+                    <td className="px-3 py-2.5 text-center">
                       <span
                         className={`inline-flex rounded-full px-2 py-0.5 text-xs font-medium ring-1 ${riskToneClassNameMap[row.riskTone]}`}
                       >

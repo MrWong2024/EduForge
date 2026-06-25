@@ -174,7 +174,7 @@ export function ExcludeTasksPanel({
         </p>
       ) : null}
       {hiddenSelectedTaskIds.length > 0 ? (
-        <p className="rounded-md border border-sky-200 bg-sky-50 px-3 py-2 text-xs text-sky-700">
+        <p className="rounded-md border border-zinc-200 bg-zinc-50 px-3 py-2 text-xs text-zinc-700">
           有 {hiddenSelectedTaskIds.length}{" "}
           个已选任务未在当前任务列表中显示；它们仍会保留在本次页面与 CSV 查询参数中。
         </p>
@@ -187,37 +187,43 @@ export function ExcludeTasksPanel({
             : "暂无可排除任务。"}
         </p>
       ) : (
-        <div className="max-h-72 overflow-y-auto rounded-md border border-zinc-200">
-          {tasks.map((task) => (
-            <label
-              key={task.id}
-              className="flex gap-3 border-b border-zinc-100 px-3 py-2.5 last:border-b-0"
-            >
-              <input
-                type="checkbox"
-                checked={selectedIdSet.has(task.id)}
-                onChange={() => toggleTask(task.id)}
-                className="mt-1 h-4 w-4 rounded border-zinc-300"
-              />
-              <span className="min-w-0">
-                <span className="block break-words font-medium text-zinc-900">
-                  {task.title}
+        <div className="max-h-72 overflow-y-auto rounded-lg border border-zinc-200 bg-white">
+          {tasks.map((task) => {
+            const isSelected = selectedIdSet.has(task.id);
+
+            return (
+              <label
+                key={task.id}
+                className={`flex items-start gap-3 border-b border-zinc-100 px-3 py-2.5 last:border-b-0 hover:bg-zinc-50 ${
+                  isSelected ? "bg-zinc-50 ring-1 ring-inset ring-zinc-200" : ""
+                }`}
+              >
+                <input
+                  type="checkbox"
+                  checked={isSelected}
+                  onChange={() => toggleTask(task.id)}
+                  className="mt-1 h-4 w-4 rounded border-zinc-300 accent-zinc-900 focus:ring-2 focus:ring-zinc-900/20"
+                />
+                <span className="min-w-0">
+                  <span className="block break-words text-sm font-medium text-zinc-900">
+                    {task.title}
+                  </span>
+                  <span className="mt-0.5 block text-xs text-zinc-500">
+                    {task.metaText}
+                  </span>
                 </span>
-                <span className="mt-0.5 block text-xs text-zinc-500">
-                  {task.metaText}
-                </span>
-              </span>
-            </label>
-          ))}
+              </label>
+            );
+          })}
         </div>
       )}
 
-      <div className="flex flex-wrap items-center gap-3">
+      <div className="flex flex-wrap items-center gap-2">
         <button
           type="button"
           onClick={applySelectedTasks}
           disabled={isApplyDisabled}
-          className="rounded-md bg-zinc-900 px-3 py-1.5 text-sm font-medium text-white hover:bg-zinc-700 disabled:cursor-not-allowed disabled:bg-zinc-400 disabled:hover:bg-zinc-400"
+          className="inline-flex h-8 items-center justify-center rounded-md bg-zinc-900 px-3 text-sm font-medium text-white hover:bg-zinc-800 disabled:cursor-not-allowed disabled:bg-zinc-300 disabled:text-zinc-500 disabled:hover:bg-zinc-300"
         >
           {isPending && pendingAction === "apply" ? "应用中..." : "应用排除任务"}
         </button>
@@ -225,7 +231,7 @@ export function ExcludeTasksPanel({
           type="button"
           onClick={clearSelectedTasks}
           disabled={isClearDisabled}
-          className="text-sm text-blue-700 hover:underline disabled:cursor-not-allowed disabled:text-zinc-400 disabled:no-underline"
+          className="inline-flex h-8 items-center justify-center rounded-md border border-zinc-300 bg-white px-3 text-sm font-medium text-zinc-700 hover:bg-zinc-50 disabled:cursor-not-allowed disabled:border-zinc-200 disabled:text-zinc-400 disabled:hover:bg-white"
         >
           {isPending && pendingAction === "clear" ? "清空中..." : "清空排除"}
         </button>
