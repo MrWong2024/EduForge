@@ -53,7 +53,7 @@ Teacher：
 - 课程和班级列表已支持创建、基础编辑、归档/恢复/空对象删除；低频生命周期动作在列表“更多”菜单处理。
 - 模板层（`/teacher/tasks*`）负责模板创建、筛选、编辑、可见性与生命周期；班级任务页只负责选择已发布模板并发布课堂任务实例。
 - 课堂任务工作区以班级看板和任务列表为中枢，提交管理、学习轨迹、课堂复盘、AI 指标共用任务上下文导航。
-- 过程性评价页面已接真实 JSON/CSV 接口，支持 `excludedTaskIds` 任务排除后重新计算、任务维度评分指标明细展示与导出；页面级细节看 route-map/component-map。
+- 过程性评价页面已接真实 JSON/CSV 接口，支持通过 `ExcludeTasksPanel` Client Component + `router.replace` 客户端软导航更新 `excludedTaskIds` 临时查询后重新计算、任务维度评分指标明细展示与导出；页面级细节看 route-map/component-map。
 
 Student：
 
@@ -74,7 +74,7 @@ Student：
 - 类型适配：教师/学生 payload 解析优先落在 `lib/api/types-teacher.ts` 与 `lib/api/types-student.ts`，不要在页面深层散写原始字段访问。
 - 状态文案与 UI 工具：AI 状态、rubric 四维中文、日期/展示兜底分别在 `lib/ui/status.ts`、`lib/ui/rubric.ts`、`lib/ui/format.ts` 收口。
 - 模板治理：`courseLabel`、`visibility/scope` 与默认排序分别由 `lib/learning-tasks/*` 单一来源维护。
-- 表单/页面组件边界：模板维护属于 `/teacher/tasks*`，班级任务页只做实例发布；过程性评价任务排除是 URL 查询条件，不持久化、不写浏览器存储、不重算后端评分；清空排除只提交 `window + page=1`，不得提交 `excludedTaskIds`。
+- 页面组件边界：模板维护属于 `/teacher/tasks*`，班级任务页只做实例发布；过程性评价任务排除由 `ExcludeTasksPanel` Client Component 承载，通过 `router.replace` 客户端软导航更新临时 URL query；应用排除写入当前选中的 `excludedTaskIds`，清空排除删除 `excludedTaskIds` 且仅保留 `window + page=1`；不持久化、不写浏览器存储、不修改任务或成绩、不重算后端评分。
 
 ## 4) 主链路可用性摘要
 

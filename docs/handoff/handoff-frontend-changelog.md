@@ -803,13 +803,13 @@
 ## UAT-FE-96
 
 - 【本步解决】教师过程性评价页无法临时排除异常课堂任务后重新计算，虽然后端已支持 `excludedTaskIds` query。
-- 【新增事实 / 已收口口径】`/teacher/classrooms/[classroomId]/process-assessment` 已新增“排除任务（临时计算）”区域，使用课堂任务列表接口加载选项，勾选后通过 URL `excludedTaskIds` 触发重新计算；页面解析兼容逗号分隔与 repeated query，向过程性评价 JSON 与 CSV 下载请求时统一透传逗号分隔值。
+- 【新增事实 / 已收口口径】`/teacher/classrooms/[classroomId]/process-assessment` 已新增“排除任务（临时计算）”区域，由 `ExcludeTasksPanel` Client Component 使用课堂任务列表接口加载选项；应用排除通过 `router.replace` 客户端软导航将当前选中的 `excludedTaskIds` 写入 URL 后触发重新计算；页面解析兼容逗号分隔与 repeated query，向过程性评价 JSON 与 CSV 下载请求时统一透传逗号分隔值。
 - 【联动收口】切换统计窗口时保留 `excludedTaskIds` 并回到 `page=1`；翻页保留 `window + excludedTaskIds`；清空排除会移除 `excludedTaskIds` 并回到 `page=1`；已选但不在当前任务选项中显示的 id 继续保留在查询参数中。
 - 【边界保持】排除任务只是临时查询条件，不保存教师偏好，不写 localStorage/sessionStorage/cookie，不修改任务、成绩、CSV 字段、后端接口或评分规则；任务选项加载失败只提示，不阻断过程性评价主体展示。
 
 ## UAT-FE-97
 
-- 【本步解决】过程性评价页“清空排除”在排除选择 form 上下文中存在交互不稳风险，且后端评分已升级为任务维度指标。
-- 【新增事实 / 已收口口径】清空排除已改为独立 GET form，只提交 `window` 与 `page=1`，不包含任何 `excludedTaskIds` 字段；点击后 URL 不应再包含 `excludedTaskIds`。
+- 【本步解决】过程性评价页“排除任务 / 清空排除”旧 GET form 交互在 hydration 场景下存在不稳定风险，且后端评分已升级为任务维度指标。
+- 【新增事实 / 已收口口径】排除任务区已由 `ExcludeTasksPanel` Client Component 承载；应用排除与清空排除均通过 `router.replace` 客户端软导航更新 URL。应用排除写入当前选中的 `excludedTaskIds` 并回到 `page=1`；清空排除删除 `excludedTaskIds`，仅保留 `window` 与 `page=1`；点击后 URL 不应再包含 `excludedTaskIds`。
 - 【展示同步】过程性评价明细表新增/显式展示 `iteratedTasksCount`、AI 覆盖任务数（`aiRequestedTasksCount / publishedTasksCount`）以及 `avgWarnItems/avgErrorItems`，rubric 文案同步为任务覆盖率 45、提交迭代质量 15、AI 使用质量 20、代码质量代理 20。
-- 【边界保持】前端仍不重算后端评分，不持久化 `excludedTaskIds`，不修改接口路径；CSV 字段变化由后端 `process-assessment.csv` 契约承载。
+- 【边界保持】前端仍不重算后端评分，不持久化 `excludedTaskIds`，不写浏览器存储，不修改任务、成绩或接口路径；CSV 字段变化由后端 `process-assessment.csv` 契约承载。
