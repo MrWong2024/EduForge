@@ -10,7 +10,7 @@
 - 详细页面、路由、主接口与完成度看 `docs/handoff/handoff-frontend-route-map.md`。
 - 前端 API helper、BFF proxy 与后端接口对接关系看 `docs/handoff/handoff-frontend-api-map.md`。
 - 详细组件职责与“改哪里/不要改哪里”看 `docs/handoff/handoff-frontend-component-map.md`。
-- 历史演进与旧口径收口原因看 `docs/handoff/handoff-frontend-changelog.md`，不要把 changelog 当当前事实 SoT。
+- 当前前端事实以本文、route-map、api-map、component-map 与 `frontend/**` 源码为准；历史阶段流水账不再维护 handoff 文件。
 - 后端接口、DTO、配置与运行模式分别看对应 `handoff-backend-*` 文件。
 
 ## 1) 前端骨架摘要
@@ -130,7 +130,6 @@ Student 学习链路：
 - 路由地图：`docs/handoff/handoff-frontend-route-map.md`
 - 前端 API 对接地图：`docs/handoff/handoff-frontend-api-map.md`
 - 组件职责地图：`docs/handoff/handoff-frontend-component-map.md`
-- 历史变更记录：`docs/handoff/handoff-frontend-changelog.md`
 - 后端接口地图：`docs/handoff/handoff-backend-api-map.md`
 - 后端配置矩阵：`docs/handoff/handoff-backend-config-matrix.md`
 - 后端 DTO 速查：`docs/handoff/handoff-backend-dto-cheatsheet.md`

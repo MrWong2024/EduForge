@@ -22,7 +22,6 @@
 | `docs/handoff/handoff-frontend-route-map.md` | 路由地图（页面用途/主接口/完成度/稳定读源） | 要改页面或补链路前 |
 | `docs/handoff/handoff-frontend-api-map.md` | 前端 API helper / BFF proxy / 后端接口对接地图 | 要核对前端调用链或新增 API 接入前 |
 | `docs/handoff/handoff-frontend-component-map.md` | 组件与模块职责边界（在哪改、不要在哪改） | 要改组件或公共机制前 |
-| `docs/handoff/handoff-frontend-changelog.md` | 前端历史变更记录（不是当前事实 SoT） | 需要追溯阶段演进或旧口径收口原因时 |
 
 ## 推荐阅读顺序（新会话）
 
@@ -32,9 +31,8 @@
 2. `handoff-frontend-route-map.md`
 3. `handoff-frontend-api-map.md`
 4. `handoff-frontend-component-map.md`
-5. `handoff-frontend-changelog.md`（仅查历史）
 
-人工验收不再单独维护 handoff 文件；当前前端事实以 snapshot / route-map / api-map / component-map 为准，阶段结论看 changelog。
+人工验收与历史阶段流水账不再单独维护 handoff 文件；当前前端事实以 snapshot / route-map / api-map / component-map 与 `frontend/**` 源码为准。
 
 ## 需要与后端交叉阅读的文档
 
