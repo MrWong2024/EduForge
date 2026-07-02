@@ -51,6 +51,42 @@
 
 ---
 
+## 命令范围与搜索噪声控制（强制）
+
+- Codex 执行只读搜索、复查和验收命令时，也必须控制范围和输出噪声。只读命令虽然不会修改文件，但过宽搜索会浪费上下文、拖慢执行并干扰判断。
+- 优先使用任务明确指定的文件列表、目录或 `git diff --name-only` 结果作为命令范围。
+- 检查修改范围时，优先使用：
+  - `git diff --name-only`
+  - `git diff --check -- <明确文件或目录>`
+  - `git status --short`
+- 不得为了证明“没有误改”而对仓库根目录执行宽关键词搜索。
+- 除非任务明确要求全局影响面分析，否则不得从仓库根目录搜索过宽关键词，例如 `package.json`、`.env`、`backend`、`frontend`、`node_modules`、`.next`。
+- 默认不得搜索生成目录、依赖目录、缓存目录和构建产物目录，包括但不限于：
+  - `node_modules/`
+  - `.next/`
+  - `dist/`
+  - `build/`
+  - `coverage/`
+  - `.turbo/`
+  - `.cache/`
+  - `out/`
+  - `backend/dist/`
+  - `frontend/.next/`
+- 除非任务明确要求且已说明理由，不得使用会放开忽略规则或显著扩大搜索范围的参数，例如：
+  - `rg --no-ignore`
+  - `rg --hidden`
+  - `rg -uuu`
+  - `rg -g "*"`
+- 如确需全局搜索，必须尽量使用明确目录、文件类型或排除规则：
+  - 推荐写法：`rg -n "pattern" backend/src frontend/src docs`
+  - 推荐写法：`rg -n "pattern" -g "*.ts" -g "*.tsx" backend/src frontend/src`
+  - 需要排除目录时的写法：`rg -n "pattern" --glob "!**/node_modules/**" --glob "!frontend/.next/**"`
+- 搜索关键词应尽量使用业务字段、函数名、接口路径、DTO 名、环境变量名等精准词，不得用过宽泛词替代精准定位。
+- 如搜索结果明显异常膨胀，应停止输出，收窄路径或关键词后重试。
+- Codex 输出执行结果时，不得粘贴大段无关搜索结果；应摘要说明命中的文件、行号和结论。
+
+---
+
 ## 依赖与版本控制规则（极其重要｜强制）
 
 1. **依赖安装权归属**
