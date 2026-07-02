@@ -140,31 +140,31 @@ npm run test:e2e -- backend/test/classroom-learning-loop.e2e-spec.ts
   - 关键断言：污染后仍不能越权，且不影响统计、mine、overview 等结果。
   - 重要性：锁定“studentIds 不能回滚为业务真相”的回归边界。
 - `backend/test/classroom-weekly-report.e2e-spec.ts`
-  - 覆盖：AA `GET /api/classrooms/:classroomId/weekly-report`。
+  - 覆盖：`GET /api/classrooms/:classroomId/weekly-report`。
   - 关键断言：`risk=activeStudents-submittedDistinctStudents`，`lateStudentsCount/lateSubmissionsCount` 存在且为 number。
   - 重要性：保证周报口径与 Enrollment-only、迟交维度一致。
 - `backend/test/course-overview.e2e-spec.ts`
-  - 覆盖：AB `GET /api/courses/:courseId/overview`。
+  - 覆盖：`GET /api/courses/:courseId/overview`。
   - 关键断言：`studentsCount` 来源 Enrollment grouped-count，包含 late 维度字段，排序/分页语义为页内排序。
   - 重要性：保证课程总览聚合口径不跨班泄漏。
 - `backend/test/classroom-student-task-detail.e2e-spec.ts`
-  - 覆盖：Z3 `GET /api/classrooms/:classroomId/tasks/:classroomTaskId/my-task-detail`。
+  - 覆盖：`GET /api/classrooms/:classroomId/tasks/:classroomTaskId/my-task-detail`。
   - 关键断言：`includeFeedbackItems/feedbackLimit` 生效，`attempt>1` 可能 `NOT_REQUESTED`（无 job 合法语义）。
   - 重要性：保证学生端聚合详情与 attempt-based 语义一致。
 - `backend/test/classroom-learning-trajectory.e2e-spec.ts`
-  - 覆盖：Z4 `GET /api/classrooms/:classroomId/tasks/:classroomTaskId/learning-trajectory`（teacher）。
-  - 关键断言：`items[*].student` 含 `id/name/studentNo/email`（并兼容 `studentName`）；未提交学生也在 `items` 且带 student 公开信息；响应不包含 `passwordHash`；`includeTagDetails=false` 跳过 tags unwind；`attempts[].isLate/lateBySeconds` 存在（Z7）；`includeAttempts=true` 时 `attempts[*].feedbackCount` 存在且覆盖有反馈 `>0` / 无反馈 `=0`，同时 `feedbackSummary.totalItems` 保留 AI 摘要语义。
+  - 覆盖：`GET /api/classrooms/:classroomId/tasks/:classroomTaskId/learning-trajectory`（teacher）。
+  - 关键断言：`items[*].student` 含 `id/name/studentNo/email`（并兼容 `studentName`）；未提交学生也在 `items` 且带 student 公开信息；响应不包含 `passwordHash`；`includeTagDetails=false` 跳过 tags unwind；`attempts[].isLate/lateBySeconds` 存在（迟交字段回归）；`includeAttempts=true` 时 `attempts[*].feedbackCount` 存在且覆盖有反馈 `>0` / 无反馈 `=0`，同时 `feedbackSummary.totalItems` 保留 AI 摘要语义。
   - 重要性：锁定轨迹分页口径与迟交字段传播。
 - `backend/test/classroom-review-pack.e2e-spec.ts`
-  - 覆盖：Z5 `GET /api/classrooms/:classroomId/tasks/:classroomTaskId/review-pack`。
+  - 覆盖：`GET /api/classrooms/:classroomId/tasks/:classroomTaskId/review-pack`。
   - 关键断言：examples 不含 `codeText/prompt/apiKey`；多标签 feedback 仍可同时贡献 `topTags` 计数；`examples` 以 `feedbackId` 去重（同一 feedback 不因多标签重复出现），并保留 `primaryTag/matchedTags/tags`；overview 含 late 维度；响应不再包含 `actionItems/teacherScript`；`studentTiers` 在默认请求下固定返回并基于最新提交稳定分层（`good/watch/notSubmitted` 不得在 `studentsCount>0 && submittedStudentsCount>0` 时全空），并验证 `latestErrorCount` 仅按最新提交的 `AI+ERROR` 统计；`studentTiers.*[*]` 含 `studentName/studentNo`（缺失姓名回落 `未知学生`）；三类分层人数合计应等于当前 ACTIVE 学生总数，且不应因后端预览截断而丢人。
   - 重要性：保证复盘包可教学使用且无敏感字段泄漏。
 - `backend/test/classroom-process-assessment.e2e-spec.ts`
-  - 覆盖：Z6 `GET /api/classrooms/:classroomId/process-assessment` 与 `GET /api/classrooms/:classroomId/process-assessment.csv`。
-  - 关键断言：CSV header/转义正确，不含敏感字段；CSV 下载内容以 UTF-8 BOM（`\uFEFF`）开头以兼容 Excel 中文；`lateSubmissionsCount/lateTasksCount` 存在（Z7）；0 次提交 ACTIVE 学生仍保留在过程性评价结果中，且 `score=0`，不得获得 codeQualityProxy 保底分；评分样例覆盖任务覆盖率、`iteratedTasksCount`、AI 任务覆盖/成功、WARN/ERROR 不同扣分；`excludedTaskIds` 排除任务后，`publishedTasksCount`、`submittedTasksRate` 分母、提交/迭代/迟交、AI job 总次数、AI 任务覆盖/成功、AI feedback、`topTags` 与 CSV score 均按剩余任务重新计算；CSV header 包含 `iteratedTasksCount/aiRequestedTasksCount/aiSucceededTasksCount/avgWarnItems`；排除全部任务时 ACTIVE 学生仍保留且 score 为 0。
+  - 覆盖：`GET /api/classrooms/:classroomId/process-assessment` 与 `GET /api/classrooms/:classroomId/process-assessment.csv`。
+  - 关键断言：CSV header/转义正确，不含敏感字段；CSV 下载内容以 UTF-8 BOM（`\uFEFF`）开头以兼容 Excel 中文；`lateSubmissionsCount/lateTasksCount` 存在（迟交字段回归）；0 次提交 ACTIVE 学生仍保留在过程性评价结果中，且 `score=0`，不得获得 codeQualityProxy 保底分；评分样例覆盖任务覆盖率、`iteratedTasksCount`、AI 任务覆盖/成功、WARN/ERROR 不同扣分；`excludedTaskIds` 排除任务后，`publishedTasksCount`、`submittedTasksRate` 分母、提交/迭代/迟交、AI job 总次数、AI 任务覆盖/成功、AI feedback、`topTags` 与 CSV score 均按剩余任务重新计算；CSV header 包含 `iteratedTasksCount/aiRequestedTasksCount/aiSucceededTasksCount/avgWarnItems`；排除全部任务时 ACTIVE 学生仍保留且 score 为 0。
   - 重要性：保证过程性评价 JSON/CSV 同口径可导出。
 - `backend/test/classroom-task-deadline.e2e-spec.ts`
-  - 覆盖：Z7 `POST /api/classrooms/:classroomId/tasks/:classroomTaskId/submissions` 的截止门禁。
+  - 覆盖：`POST /api/classrooms/:classroomId/tasks/:classroomTaskId/submissions` 的截止门禁。
   - 关键断言：`dueAt` 到期且 `allowLate=false` 返回 `LATE_SUBMISSION_NOT_ALLOWED`；`submittedAt/isLate/lateBySeconds` 持久化语义正确。
   - 重要性：保证截止规则与迟交数据链路一致。
 - `backend/test/classroom-task-submission-cooldown.e2e-spec.ts`
@@ -174,7 +174,7 @@ npm run test:e2e -- backend/test/classroom-learning-loop.e2e-spec.ts
   - 覆盖：P0 `GET /api/learning-tasks/submissions/:id` 稳定读源（含 classroomTask 隔离场景） + `GET /api/classrooms/:classroomId/tasks/:classroomTaskId/submissions` 列表契约。
   - 关键断言：学生本人可读；classroom owner teacher 可读；非授权 teacher/student 返回 `403`；返回 `content.codeText`；无 job 时 `aiFeedbackStatus=NOT_REQUESTED`；提交列表 `feedbackCount` 覆盖有反馈 `>0` 与无反馈 `=0` 两种场景；默认只返回当前 Enrollment `ACTIVE` 学生的 submissions，REMOVED 学生既有提交不进入 `items/total`。
 - `backend/test/classroom-export-snapshot.e2e-spec.ts`
-  - 覆盖：Z9 `GET /api/classrooms/:classroomId/export/snapshot`。
+  - 覆盖：`GET /api/classrooms/:classroomId/export/snapshot`。
   - 关键断言：`includePerTask=false` 时 perTask 省略且 `meta.notes` 提示；对 stringify 结果断言不包含 `"codeText"`。
   - 重要性：保证导出体积保护与敏感字段禁出策略。
 
@@ -187,18 +187,18 @@ npm run test:e2e -- backend/test/classroom-learning-loop.e2e-spec.ts
 - `backend/test/learning-tasks.e2e-spec.ts`：learning-tasks 基础闭环（含 `GET /api/learning-tasks/submissions/:id` 在 `classroomTaskId=null` 场景下 task owner teacher 可读，以及教师反馈标签词表校验：未知标签返回 `400` 固定文案、未传 tags 自动落 `other`）。
 - `backend/src/modules/learning-tasks/ai-feedback/lib/feedback-item-compactor.spec.ts`：AI feedback item 收敛兜底回归，覆盖同类错误合并、低价值 INFO 过滤、ERROR 优先与“最多 2 条”约束；主控制策略仍在 prompt/协议层，compactor 保持轻量兜底定位。
 
-### 能力覆盖矩阵（Z3~Z9）
+### 关键能力覆盖矩阵
 
 | 能力                        | 接口                                                                                                                                                                        | 对应 e2e 文件                                                                                                      |
 | --------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------ |
-| Z3 my-task-detail           | `GET /api/classrooms/:classroomId/tasks/:classroomTaskId/my-task-detail`                                                                                                    | `backend/test/classroom-student-task-detail.e2e-spec.ts`                                                           |
-| AA weekly-report            | `GET /api/classrooms/:classroomId/weekly-report`                                                                                                                            | `backend/test/classroom-weekly-report.e2e-spec.ts`                                                                 |
-| AB course overview          | `GET /api/courses/:courseId/overview`                                                                                                                                       | `backend/test/course-overview.e2e-spec.ts`                                                                         |
-| Z4 learning-trajectory      | `GET /api/classrooms/:classroomId/tasks/:classroomTaskId/learning-trajectory`                                                                                               | `backend/test/classroom-learning-trajectory.e2e-spec.ts`                                                           |
-| Z5 review-pack              | `GET /api/classrooms/:classroomId/tasks/:classroomTaskId/review-pack`                                                                                                       | `backend/test/classroom-review-pack.e2e-spec.ts`                                                                   |
-| Z6 process-assessment + CSV | `GET /api/classrooms/:classroomId/process-assessment` + `GET /api/classrooms/:classroomId/process-assessment.csv`                                                           | `backend/test/classroom-process-assessment.e2e-spec.ts`                                                            |
-| Z7 deadline/late            | `POST /api/classrooms/:classroomId/tasks/:classroomTaskId/submissions`（同时回归 late 字段在 weekly/trajectory/review-pack/process-assessment/snapshot 等聚合接口中的传播） | `backend/test/classroom-task-deadline.e2e-spec.ts`                                                                 |
-| Z9 export snapshot          | `GET /api/classrooms/:classroomId/export/snapshot`                                                                                                                          | `backend/test/classroom-export-snapshot.e2e-spec.ts`                                                               |
+| my-task-detail              | `GET /api/classrooms/:classroomId/tasks/:classroomTaskId/my-task-detail`                                                                                                    | `backend/test/classroom-student-task-detail.e2e-spec.ts`                                                           |
+| weekly-report               | `GET /api/classrooms/:classroomId/weekly-report`                                                                                                                            | `backend/test/classroom-weekly-report.e2e-spec.ts`                                                                 |
+| course overview             | `GET /api/courses/:courseId/overview`                                                                                                                                       | `backend/test/course-overview.e2e-spec.ts`                                                                         |
+| learning-trajectory         | `GET /api/classrooms/:classroomId/tasks/:classroomTaskId/learning-trajectory`                                                                                               | `backend/test/classroom-learning-trajectory.e2e-spec.ts`                                                           |
+| review-pack                 | `GET /api/classrooms/:classroomId/tasks/:classroomTaskId/review-pack`                                                                                                       | `backend/test/classroom-review-pack.e2e-spec.ts`                                                                   |
+| process-assessment + CSV    | `GET /api/classrooms/:classroomId/process-assessment` + `GET /api/classrooms/:classroomId/process-assessment.csv`                                                           | `backend/test/classroom-process-assessment.e2e-spec.ts`                                                            |
+| deadline/late               | `POST /api/classrooms/:classroomId/tasks/:classroomTaskId/submissions`（同时回归 late 字段在 weekly/trajectory/review-pack/process-assessment/snapshot 等聚合接口中的传播） | `backend/test/classroom-task-deadline.e2e-spec.ts`                                                                 |
+| export snapshot             | `GET /api/classrooms/:classroomId/export/snapshot`                                                                                                                          | `backend/test/classroom-export-snapshot.e2e-spec.ts`                                                               |
 | Enrollment-only regression  | 成员授权/统计相关接口（Enrollment-only 回归）                                                                                                                               | `backend/test/enrollments.authority-and-legacy.e2e-spec.ts`、`backend/test/enrollment-only.regression.e2e-spec.ts` |
 
 ## 4) token/session 获取方式
@@ -243,7 +243,7 @@ npm run test:e2e -- backend/test/classroom-learning-loop.e2e-spec.ts
 
 ## 6) 在测试中注入 OPENROUTER 与 Provider 配置
 
-Z3~Z9 聚合 e2e（含 attempt-based 与 ai-metrics）默认不要求真实外部调用，可在 stub/mock 语境下回归；仅在需要覆盖 provider 实链路时再启用本节配置。
+聚合 / 报表 / 导出类 e2e（含 attempt-based 与 ai-metrics）默认不要求真实外部调用，可在 stub/mock 语境下回归；仅在需要覆盖 provider 实链路时再启用本节配置。
 
 Mock OpenRouter（E2E 常规）：
 
