@@ -1,5 +1,7 @@
 # 测试作战手册（Testing Playbook）
 
+定位：本文是后端 E2E / 服务端测试手册，用于跑回归、复现实验和定位测试失败；具体实现以 `backend/` 源码和 `backend/test/**` 为最高优先级，配置细节参考 `docs/handoff/handoff-backend-config-matrix.md`，接口契约参考 `docs/handoff/handoff-backend-api-map.md`。
+
 ## 1) 执行前提（E2E 基线）
 
 - 强制遵循：`docs/e2e-testing.md`。
@@ -43,7 +45,7 @@ Remove-Item Env:KEEP_E2E_DB -ErrorAction SilentlyContinue
 npm run test:e2e -- backend/test/learning-tasks.ai-feedback.openrouter-context.e2e-spec.ts
 ```
 
-常用单个 spec 入口（新增能力）：
+常用单个 spec 入口：
 
 ```powershell
 cd backend
@@ -120,7 +122,7 @@ npm run test:e2e -- backend/test/classroom-learning-loop.e2e-spec.ts
 - `backend/test/learning-tasks.ai-feedback.openrouter-context.e2e-spec.ts`
   - 覆盖：mock OpenRouter 请求体捕获与 prompt 上下文断言（`TaskTitle/TaskDescription/TaskRubric/Code/AIUsageDeclaration`）。
   - 关键断言：system prompt 明确要求简体中文输出（教学反馈文本字段默认中文）并包含“主问题导向收敛”硬约束（默认 1 条、最多 2 条、同类问题合并、阻断问题优先、禁止表扬噪音）以及合法/非法输出形状示例；空数组边界已收紧为“仅 truly no-feedback 内容时允许”，正确但可改进场景必须返回 1 条综合反馈；`language` 仅作 hint（缺失/冲突时优先按代码判断语言）；反馈主链路可持久化并可查询。
-  - 补充：测试通过直接调用 `aiFeedbackProcessor.processOnce(1)` 推进 job，属于测试辅助推进方式，不是默认产品运行模式。
+  - 测试可通过直接调用 `aiFeedbackProcessor.processOnce(1)` 推进 job，属于测试辅助推进方式，不是默认产品运行模式。
 - `backend/test/learning-tasks.ai-feedback.ops.debug-off.e2e-spec.ts`
   - 覆盖：debug gate OFF（`AI_FEEDBACK_DEBUG_ENABLED=false`）时 teacher/admin 访问 debug/ops 返回 404。
 - `backend/test/learning-tasks.ai-feedback.ops.e2e-spec.ts`
@@ -170,7 +172,7 @@ npm run test:e2e -- backend/test/classroom-learning-loop.e2e-spec.ts
   - 关键断言：默认冷却命中返回 `429/SUBMISSION_COOLDOWN_ACTIVE`；超窗后允许再次提交；`LEARNING_TASK_SUBMISSION_COOLDOWN_MS=0` 时可连续提交。
 - `backend/test/classroom-task-submissions.e2e-spec.ts`
   - 覆盖：P0 `GET /api/learning-tasks/submissions/:id` 稳定读源（含 classroomTask 隔离场景） + `GET /api/classrooms/:classroomId/tasks/:classroomTaskId/submissions` 列表契约。
-  - 关键断言：学生本人可读；classroom owner teacher 可读；非授权 teacher/student 返回 `403`；返回 `content.codeText`；无 job 时 `aiFeedbackStatus=NOT_REQUESTED`；提交列表 `feedbackCount` 覆盖有反馈 `>0` 与无反馈 `=0` 两种场景；默认只返回当前 Enrollment `ACTIVE` 学生的 submissions，REMOVED 学生历史提交不进入 `items/total`。
+  - 关键断言：学生本人可读；classroom owner teacher 可读；非授权 teacher/student 返回 `403`；返回 `content.codeText`；无 job 时 `aiFeedbackStatus=NOT_REQUESTED`；提交列表 `feedbackCount` 覆盖有反馈 `>0` 与无反馈 `=0` 两种场景；默认只返回当前 Enrollment `ACTIVE` 学生的 submissions，REMOVED 学生既有提交不进入 `items/total`。
 - `backend/test/classroom-export-snapshot.e2e-spec.ts`
   - 覆盖：Z9 `GET /api/classrooms/:classroomId/export/snapshot`。
   - 关键断言：`includePerTask=false` 时 perTask 省略且 `meta.notes` 提示；对 stringify 结果断言不包含 `"codeText"`。
@@ -181,10 +183,11 @@ npm run test:e2e -- backend/test/classroom-learning-loop.e2e-spec.ts
 - submission detail 主视图回归建议成对验证：`GET /api/learning-tasks/submissions/:id` 与 `GET /api/learning-tasks/submissions/:id/feedback`，避免只验 feedback 而漏掉 detail 读源。
 - `backend/test/classroom-dashboard-isolation.e2e-spec.ts`：跨班同 task 的 `classroomTaskId` 隔离口径。
 - `backend/test/classroom-dashboard.e2e-spec.ts`：教师/学生看板与 `aiFeedbackStatus` 变化。
-- 教师看板回归补充：默认教学统计应只面向 Enrollment `ACTIVE` 学生；当 ACTIVE 与 REMOVED 学生都存在历史提交时，`distinctStudentsSubmitted/submissionsCount/late*`、AI feedback 统计与 `topTags` 默认只计 ACTIVE submissions。
+- 教师看板回归要点：默认教学统计应只面向 Enrollment `ACTIVE` 学生；当 ACTIVE 与 REMOVED 学生都存在既有提交时，`distinctStudentsSubmitted/submissionsCount/late*`、AI feedback 统计与 `topTags` 默认只计 ACTIVE submissions。
 - `backend/test/learning-tasks.e2e-spec.ts`：learning-tasks 基础闭环（含 `GET /api/learning-tasks/submissions/:id` 在 `classroomTaskId=null` 场景下 task owner teacher 可读，以及教师反馈标签词表校验：未知标签返回 `400` 固定文案、未传 tags 自动落 `other`）。
+- `backend/src/modules/learning-tasks/ai-feedback/lib/feedback-item-compactor.spec.ts`：AI feedback item 收敛兜底回归，覆盖同类错误合并、低价值 INFO 过滤、ERROR 优先与“最多 2 条”约束；主控制策略仍在 prompt/协议层，compactor 保持轻量兜底定位。
 
-### 新增能力覆盖矩阵（Z3~Z9）
+### 能力覆盖矩阵（Z3~Z9）
 
 | 能力                        | 接口                                                                                                                                                                        | 对应 e2e 文件                                                                                                      |
 | --------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------ |
@@ -217,7 +220,8 @@ npm run test:e2e -- backend/test/classroom-learning-loop.e2e-spec.ts
 
 - `backend/test/learning-tasks.ai-feedback.guards.e2e-spec.ts` 的 `startMockOpenRouter`
 - `backend/test/learning-tasks.ai-feedback.openrouter-context.e2e-spec.ts` 的 `startMockOpenRouter`
-  补充：`openrouter-context` spec 的 mock server 会捕获请求体（`messages`），用于断言 task 上下文片段与“默认简体中文输出”prompt 约束。多数聚合回归可在 stub/mock 下完成；provider 实链路再启用 REAL_AI_E2E。
+
+`openrouter-context` spec 的 mock server 会捕获请求体（`messages`），用于断言 task 上下文片段与“默认简体中文输出”prompt 约束。多数聚合回归可在 stub/mock 下完成；provider 实链路再启用 REAL_AI_E2E。
 
 路由：
 
@@ -239,7 +243,7 @@ npm run test:e2e -- backend/test/classroom-learning-loop.e2e-spec.ts
 
 ## 6) 在测试中注入 OPENROUTER 与 Provider 配置
 
-补充：Z3~Z9 新聚合 e2e（含 attempt-based 与 ai-metrics）默认不要求真实外部调用，可在 stub/mock 语境下回归；仅在需要覆盖 provider 实链路时再启用本节配置。
+Z3~Z9 聚合 e2e（含 attempt-based 与 ai-metrics）默认不要求真实外部调用，可在 stub/mock 语境下回归；仅在需要覆盖 provider 实链路时再启用本节配置。
 
 Mock OpenRouter（E2E 常规）：
 
@@ -282,31 +286,11 @@ Debug 接口门禁（如需调用 jobs/process-once）：
 $env:AI_FEEDBACK_DEBUG_ENABLED="true"
 ```
 
-补充：当 `AI_FEEDBACK_DEBUG_ENABLED=false` 时，`POST /api/learning-tasks/ai-feedback/jobs/process-once` 返回 `404` 属正常门禁行为。
-补充：`learning-tasks.ai-feedback.openrouter-context.e2e-spec.ts` 当前实践会设置 `AI_FEEDBACK_DEBUG_ENABLED=true` 作为测试辅助环境；该 spec 推进 job 通过 service 层 `aiFeedbackProcessor.processOnce(1)` 完成，并非依赖 debug 路由，也不改变“默认联调模式为 Stub + worker”的结论。
+当 `AI_FEEDBACK_DEBUG_ENABLED=false` 时，`POST /api/learning-tasks/ai-feedback/jobs/process-once` 返回 `404` 属正常门禁行为。
+`learning-tasks.ai-feedback.openrouter-context.e2e-spec.ts` 当前实践会设置 `AI_FEEDBACK_DEBUG_ENABLED=true` 作为测试辅助环境；该 spec 推进 job 通过 service 层 `aiFeedbackProcessor.processOnce(1)` 完成，并非依赖 debug 路由，也不改变“默认联调模式为 Stub + worker”的结论。
 
 ## 7) 与 AI 入队触发策略相关的测试要点（attempt-based）
 
 - 无 job => `NOT_REQUESTED` 是策略结果，不是异常。
 - 手工 request 仅创建/确保 `PENDING` job；执行仍由 worker/process-once 消费链路负责。
 - 聚合回归优先 stub/mock；provider 实链路验证时再启用 `REAL_AI_E2E=1`（详见第 6 节）。
-
-## Changelog（本次更新）
-
-- `enrollments.authority-and-legacy.e2e-spec.ts`
-- `enrollment-only.regression.e2e-spec.ts`
-- `classroom-weekly-report.e2e-spec.ts`
-- `course-overview.e2e-spec.ts`
-- `classroom-student-task-detail.e2e-spec.ts`
-- `classroom-learning-trajectory.e2e-spec.ts`
-- `classroom-review-pack.e2e-spec.ts`
-- `classroom-process-assessment.e2e-spec.ts`
-- `classroom-task-deadline.e2e-spec.ts`
-- `classroom-task-submission-cooldown.e2e-spec.ts`
-- `classroom-export-snapshot.e2e-spec.ts`
-- `learning-tasks.ai-feedback.openrouter-context.e2e-spec.ts`
-- 补充：submission detail 稳定读源测试关注点（`GET /api/learning-tasks/submissions/:id`）。
-- 固化：默认联调模式为 `Stub + worker`，并补充影响模块装配/guard 的 env 设置时机提醒。
-- 补充：AI feedback context spec 已纳入入口；覆盖 mock OpenRouter prompt 请求体中的 task 上下文片段与简体中文输出约束断言。
-- 补充：AI feedback 收敛单测 `src/modules/learning-tasks/ai-feedback/lib/feedback-item-compactor.spec.ts` 已覆盖同类错误合并、低价值 INFO 过滤、ERROR 优先与“最多 2 条”约束。
-- 补充：主控制策略已前移到 prompt/协议层；compactor 定位保持轻量兜底，不作为主要控制手段扩张。
