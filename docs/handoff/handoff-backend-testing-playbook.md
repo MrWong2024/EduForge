@@ -72,6 +72,20 @@ npm run test:e2e -- backend/test/classroom-process-assessment.e2e-spec.ts
 cd backend
 $env:NODE_ENV="test"
 Remove-Item Env:KEEP_E2E_DB -ErrorAction SilentlyContinue
+npm run test:e2e -- backend/test/classroom-ai-learning-analytics.e2e-spec.ts
+```
+
+定向服务单测：
+
+```powershell
+cd backend
+npm run test -- ai-learning-analytics.service.spec.ts --runInBand
+```
+
+```powershell
+cd backend
+$env:NODE_ENV="test"
+Remove-Item Env:KEEP_E2E_DB -ErrorAction SilentlyContinue
 npm run test:e2e -- backend/test/classroom-export-snapshot.e2e-spec.ts
 ```
 
@@ -163,6 +177,12 @@ npm run test:e2e -- backend/test/classroom-learning-loop.e2e-spec.ts
   - 覆盖：`GET /api/classrooms/:classroomId/process-assessment` 与 `GET /api/classrooms/:classroomId/process-assessment.csv`。
   - 关键断言：CSV header/转义正确，不含敏感字段；CSV 下载内容以 UTF-8 BOM（`\uFEFF`）开头以兼容 Excel 中文；`lateSubmissionsCount/lateTasksCount` 存在（迟交字段回归）；0 次提交 ACTIVE 学生仍保留在过程性评价结果中，且 `score=0`，不得获得 codeQualityProxy 保底分；评分样例覆盖任务覆盖率、`iteratedTasksCount`、AI 任务覆盖/成功、WARN/ERROR 不同扣分；`excludedTaskIds` 排除任务后，`publishedTasksCount`、`submittedTasksRate` 分母、提交/迭代/迟交、AI job 总次数、AI 任务覆盖/成功、AI feedback、`topTags` 与 CSV score 均按剩余任务重新计算；CSV header 包含 `iteratedTasksCount/aiRequestedTasksCount/aiSucceededTasksCount/avgWarnItems`；排除全部任务时 ACTIVE 学生仍保留且 score 为 0。
   - 重要性：保证过程性评价 JSON/CSV 同口径可导出。
+- `backend/src/modules/classrooms/services/ai-learning-analytics.service.spec.ts`
+  - 覆盖：`AI_FEEDBACK_INTERVENTION_V1` 标准样本的稳定 submission 排序与 anchor 选择、job 完成前/后提交、CRLF/LF 与整体空白标准化、`ERROR=1/WARN=0.5/INFO=0`、非 AI feedback 排除、SUCCEEDED 无反馈负荷 0、`IMPROVED/STABLE/REGRESSED/NOT_COMPARABLE`、四种 growthTrend、零分母、零提交任务/学生、`excludedTaskIds` 以及 window 不截断入选任务 submission 链。
+- `backend/test/classroom-ai-learning-analytics.e2e-spec.ts`
+  - 覆盖：三个 `GET /api/classrooms/:classroomId/ai-learning-analytics...` 真实 HTTP 接口；未登录 401、非教师 403、非 owner 404；ACTIVE/REMOVED Enrollment；零提交学生与任务；aiRequested/aiDelivered 区分；job 完成前后提交；代码变化；可比样本三类结果；`window=all|7d|30d`、`excludedTaskIds` 与 DTO 400；学生分页和详情安全 404。
+  - 隔离断言：同一 `taskId` 同时发布到两个课堂时，只按当前 `classroomTaskId` 统计；REMOVED 学生即使保留 submission/job 也不进入结果。测试直接构造可控 job/feedback，不调用 processor、worker 或真实外部 AI。
+  - 重要性：锁定“EduForge AI 反馈介入后的行为与代码问题代理”口径；结果不代表学生全部 AI 使用、正式成绩或因果贡献。
 - `backend/test/classroom-task-deadline.e2e-spec.ts`
   - 覆盖：`POST /api/classrooms/:classroomId/tasks/:classroomTaskId/submissions` 的截止门禁。
   - 关键断言：`dueAt` 到期且 `allowLate=false` 返回 `LATE_SUBMISSION_NOT_ALLOWED`；`submittedAt/isLate/lateBySeconds` 持久化语义正确。
@@ -197,6 +217,7 @@ npm run test:e2e -- backend/test/classroom-learning-loop.e2e-spec.ts
 | learning-trajectory         | `GET /api/classrooms/:classroomId/tasks/:classroomTaskId/learning-trajectory`                                                                                               | `backend/test/classroom-learning-trajectory.e2e-spec.ts`                                                           |
 | review-pack                 | `GET /api/classrooms/:classroomId/tasks/:classroomTaskId/review-pack`                                                                                                       | `backend/test/classroom-review-pack.e2e-spec.ts`                                                                   |
 | process-assessment + CSV    | `GET /api/classrooms/:classroomId/process-assessment` + `GET /api/classrooms/:classroomId/process-assessment.csv`                                                           | `backend/test/classroom-process-assessment.e2e-spec.ts`                                                            |
+| AI feedback intervention analytics | `GET /api/classrooms/:classroomId/ai-learning-analytics` + `/students` + `/students/:studentId`                                                                         | `backend/src/modules/classrooms/services/ai-learning-analytics.service.spec.ts`、`backend/test/classroom-ai-learning-analytics.e2e-spec.ts` |
 | deadline/late               | `POST /api/classrooms/:classroomId/tasks/:classroomTaskId/submissions`（同时回归 late 字段在 weekly/trajectory/review-pack/process-assessment/snapshot 等聚合接口中的传播） | `backend/test/classroom-task-deadline.e2e-spec.ts`                                                                 |
 | export snapshot             | `GET /api/classrooms/:classroomId/export/snapshot`                                                                                                                          | `backend/test/classroom-export-snapshot.e2e-spec.ts`                                                               |
 | Enrollment-only regression  | 成员授权/统计相关接口（Enrollment-only 回归）                                                                                                                               | `backend/test/enrollments.authority-and-legacy.e2e-spec.ts`、`backend/test/enrollment-only.regression.e2e-spec.ts` |

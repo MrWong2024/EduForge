@@ -24,6 +24,10 @@ import { QueryProcessAssessmentDto } from '../dto/query-process-assessment.dto';
 import { QueryClassroomExportSnapshotDto } from '../dto/query-classroom-export-snapshot.dto';
 import { QueryClassroomStudentsDto } from '../dto/query-classroom-students.dto';
 import {
+  QueryAiLearningAnalyticsDto,
+  QueryAiLearningAnalyticsStudentsDto,
+} from '../dto/query-ai-learning-analytics.dto';
+import {
   MEMBER_OR_OWNER_ROLES,
   STUDENT_ROLES,
   TEACHER_ROLES,
@@ -111,6 +115,53 @@ export class ClassroomsController {
       id,
       user.id,
       includeClosedTasks === true || includeClosedTasks === 'true',
+    );
+  }
+
+  @UseGuards(RolesGuard)
+  @Roles(...TEACHER_ROLES)
+  @Get(':classroomId/ai-learning-analytics')
+  getAiLearningAnalytics(
+    @Param('classroomId') classroomId: string,
+    @Query() query: QueryAiLearningAnalyticsDto,
+    @CurrentUser() user: { id: string },
+  ) {
+    return this.classroomsService.getAiLearningAnalytics(
+      classroomId,
+      query,
+      user.id,
+    );
+  }
+
+  @UseGuards(RolesGuard)
+  @Roles(...TEACHER_ROLES)
+  @Get(':classroomId/ai-learning-analytics/students')
+  getAiLearningAnalyticsStudents(
+    @Param('classroomId') classroomId: string,
+    @Query() query: QueryAiLearningAnalyticsStudentsDto,
+    @CurrentUser() user: { id: string },
+  ) {
+    return this.classroomsService.getAiLearningAnalyticsStudents(
+      classroomId,
+      query,
+      user.id,
+    );
+  }
+
+  @UseGuards(RolesGuard)
+  @Roles(...TEACHER_ROLES)
+  @Get(':classroomId/ai-learning-analytics/students/:studentId')
+  getAiLearningAnalyticsStudentDetail(
+    @Param('classroomId') classroomId: string,
+    @Param('studentId') studentId: string,
+    @Query() query: QueryAiLearningAnalyticsDto,
+    @CurrentUser() user: { id: string },
+  ) {
+    return this.classroomsService.getAiLearningAnalyticsStudentDetail(
+      classroomId,
+      studentId,
+      query,
+      user.id,
     );
   }
 

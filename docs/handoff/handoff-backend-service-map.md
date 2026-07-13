@@ -173,7 +173,7 @@
 
 - Service: `backend/src/modules/classrooms/services/classrooms.service.ts`
 - Domain: `Classroom`
-- Actions: `create/update/list/get`, `join/remove`, `list-students`, `archive/restore`, `delete-empty-classroom`, `dashboard-delegate`
+- Actions: `create/update/list/get`, `join/remove`, `list-students`, `archive/restore`, `delete-empty-classroom`, `dashboard/report/analytics-delegate`
 - I/O Shape:
   - In: `classroomId`, `JoinClassroomDto(joinCode)`, `QueryClassroomDto`, `QueryClassroomStudentsDto`, `userId`
   - Out: `ClassroomResponseDto` | `{ items, total, page, limit }` | `dashboard aggregate` | `classroom students paged list`
@@ -187,10 +187,11 @@
   - `removeStudent(id: string, studentId: string, userId: string): Promise<ClassroomResponseDto> — called by POST /classrooms/:id/students/:uid/remove`
   - `getDashboard(id: string, userId: string, includeClosedTasks?: boolean): Promise<Record<string, unknown>> — delegates to teacher dashboard service`
   - `getMyLearningDashboard(query: QueryClassroomDto, userId: string, includeHistorical?: boolean): Promise<Record<string, unknown>> — delegates to student dashboard service`
+  - `getAiLearningAnalytics(...) / getAiLearningAnalyticsStudents(...) / getAiLearningAnalyticsStudentDetail(...) — delegate AI feedback intervention analytics after teacher role check`
 - AuthZ Boundary: `teacher-only`（管理） / `student-only`（加入） / `member-or-owner`（查看）
 - Metrics/Isolation: 班级管理按 `teacherId`；成员判定与统计统一通过 `EnrollmentService`；下游统计统一是 `classroomTaskId` 口径
 - Consistency/Constraints: joinCode 生成重试上限 `8`；`ClassroomResponse` 保留 `courseId` 并补充只读 `course` 摘要（`id/code/name/term/courseLabel/status`），列表批量查询课程避免 N+1，课程记录缺失时 `course` 可为空且不影响班级读取；`PATCH /classrooms/:id` 支持 `status` 归档/恢复；归档状态下禁止改名但允许通过 `status=ACTIVE` 恢复；删除仅允许空班级（主判定：`ClassroomTask.exists({ classroomId })===false` 且 `Enrollment.exists({ classroomId })===false`，其中 Enrollment 判定包含 `REMOVED` 历史记录）；`studentIds` 仅作防御性辅助校验，不作为唯一主判定来源；非空删除返回 `409(code=CLASSROOM_NOT_EMPTY)`；`join/remove` 先写 Enrollment(`ACTIVE/REMOVED`)，`studentIds` 仅作为 legacy 镜像输出，不参与授权/统计；`GET /classrooms/:id/students` 只认 Enrollment（`role=STUDENT`），默认返回 ACTIVE，`includeRemoved=1/true` 时返回 ACTIVE+REMOVED，默认排序 `joinedAt desc, _id desc`
-- Deps/Side Effects: `ClassroomModel`, `ClassroomTaskModel`, `EnrollmentModel`, `CourseModel`, `UserModel`, `EnrollmentService`, `TeacherClassroomDashboardService`, `TeacherClassroomWeeklyReportService`, `StudentLearningDashboardService`, `ProcessAssessmentService`, `ClassroomExportSnapshotService`
+- Deps/Side Effects: `ClassroomModel`, `ClassroomTaskModel`, `EnrollmentModel`, `CourseModel`, `UserModel`, `EnrollmentService`, `TeacherClassroomDashboardService`, `TeacherClassroomWeeklyReportService`, `StudentLearningDashboardService`, `ProcessAssessmentService`, `ClassroomExportSnapshotService`, `AiLearningAnalyticsService`
 - Performance Notes: 列表查询分页 + 索引过滤；join/remove 采用 Enrollment upsert/update，并可选镜像更新 `studentIds`；`listStudents` 按页批量拉取用户公开字段避免 N+1
 - SoT: `backend/src/modules/classrooms/services/classrooms.service.ts`; `backend/src/modules/classrooms/enrollments/services/enrollment.service.ts`; `backend/src/modules/classrooms/enrollments/schemas/enrollment.schema.ts`
 - Failure Modes:
@@ -483,6 +484,34 @@
   - 班级/课程不存在或非 owner -> `404`
   - 参数非法 -> `400`
 
+## Service Card 08I
+
+- Service: `backend/src/modules/classrooms/services/ai-learning-analytics.service.ts`
+- Domain: `Classroom + ClassroomTask + Enrollment + Submission + AiFeedbackJob + Feedback`
+- Actions: `resolve-effective-tasks`, `build-standard-samples`, `aggregate-overview/task/student`, `page-active-students`
+- I/O Shape:
+  - In: `classroomId`, `teacherId`, `window(all|7d|30d)`, `excludedTaskIds`, optional `page/limit` or `studentId`
+  - Out: `overview + taskTrends` | `ACTIVE student paged list` | `student detail + taskPoints`
+- Key Methods:
+  - `getOverview(classroomId, query, teacherId)`
+  - `getStudents(classroomId, query, teacherId)`
+  - `getStudentDetail(classroomId, studentId, query, teacherId)`
+  - `buildAiLearningAnalyticsStandardSamples(submissions, jobs, feedbackItems)`（同文件纯计算入口，供规则单测）
+- AuthZ Boundary: `teacher-only + owner-only`；上层 `ClassroomsService` 延续既有角色校验与委托模式，专用 service 用 `_id + teacherId` 查询课堂；不存在与非 owner 统一 `404 Classroom not found`；学生详情只允许当前课堂 ACTIVE Enrollment，其他学生安全返回 404。
+- Metrics/Isolation: 数据隔离键固定为 `classroomTaskId`；学生全集只来自 `Enrollment(role=STUDENT,status=ACTIVE)`；Feedback 查询与计算双重限定 `source=AI`；同一个 `taskId` 发布到其他课堂不会进入当前课堂任务、提交、job 或 feedback 范围。
+- Consistency/Constraints: 有效任务先按 `classroomId + ClassroomTask.publishedAt window` 选择，再应用 `excludedTaskIds`，稳定排序为 `publishedAt ASC, classroomTaskId ASC`；窗口不再裁剪入选任务的 submission 链。标准样本单位固定为 `studentId + classroomTaskId`，每个组合最多一个样本；submission 顺序为 `attemptNo ASC, submittedAt ASC, submissionId ASC`。`aiRequested` 表示组合内存在任意 job；`aiDelivered` 表示存在 SUCCEEDED job；anchor 为排序最早的 SUCCEEDED-job submission，`feedbackCompletedAt` 使用该 job 的 `updatedAt`。
+- Pairing/Proxy: `postSubmission` 为 anchor 后第一条同时满足 `attemptNo` 更大且 `submittedAt > feedbackCompletedAt` 的提交；`comparableAfterSubmission` 还必须拥有 SUCCEEDED job。代码变化只做 `CRLF -> LF + 整体 trim`。仅在可比时计算 `issueLoad=ERROR*1+WARN*0.5`，内部使用半分整数；`before-after >0/0/<0` 对应 `IMPROVED/STABLE/REGRESSED`，不可比为 `NOT_COMPARABLE` 且任务点三个 issueLoad 字段为 `null`。比率与平均值统一保留 4 位小数，分母为 0 返回 0。
+- Rate Denominators: `aiStudentCoverageRate=requested distinct students/ACTIVE students`；`aiTaskCoverageRate=requested student-task/submitted student-task`；`aiDeliveryRate=delivered/requested`；`postFeedbackResubmissionRate=resubmitted/delivered`；`postFeedbackCodeChangeRate=codeChanged/resubmitted`；`qualityComparableRate=comparable/delivered`；`improvedRate=improved/comparable`。任务趋势沿用对应 student-task 分母（不返回班级级 distinct-student coverage）；三个平均值仅基于 comparable 样本。
+- Deps/Side Effects: `ClassroomModel`, `CourseModel`, `ClassroomTaskModel`, `TaskModel`, `SubmissionModel`, `AiFeedbackJobModel`, `FeedbackModel`, `UserModel`, `EnrollmentService`；全部只读，无数据库写入、无 provider/worker 调用。
+- Performance Notes: 每次请求先完成 owner 课堂、有效任务、ACTIVE 成员与公开上下文批量查询；submission 按有效 `classroomTaskIds + scoped studentIds` 一次查询，再按 submissionIds 并行批量查 jobs 与 AI feedback；projection + lean + Map 配对，无按学生/任务 N+1。学生列表只为当前页学生加载 submission/job/feedback。
+- SoT: `backend/src/modules/classrooms/services/ai-learning-analytics.service.ts`; `backend/src/modules/classrooms/dto/query-ai-learning-analytics.dto.ts`; `backend/test/classroom-ai-learning-analytics.e2e-spec.ts`
+- Failure Modes:
+  - classroomId 非法 -> `400 classroomId must be a valid ObjectId`
+  - 课堂不存在或非 owner -> `404 Classroom not found`
+  - studentId 非 ACTIVE/外班/REMOVED/非法 -> `404 Student not found`
+  - window/excludedTaskIds/page/limit 非法 -> DTO `400`
+  - 空任务、空成员、空 submission/job/feedback -> 返回稳定零值/空数组，而非异常
+
 ## Service Card 09
 
 - Service: `backend/src/modules/learning-tasks/services/learning-tasks-reports.service.ts`
@@ -712,6 +741,7 @@
   - `Service Card 08F` `ClassReviewPackService`
   - `Service Card 08G` `ProcessAssessmentService`
   - `Service Card 08H` `ClassroomExportSnapshotService`
+  - `Service Card 08I` `AiLearningAnalyticsService`（AI 反馈介入成效分析）
 - 修订 Service Cards：
   - `Service Card 04` `ClassroomsService`
   - `Service Card 05` `TeacherClassroomDashboardService`

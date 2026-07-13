@@ -17,6 +17,10 @@ import { QueryProcessAssessmentDto } from '../dto/query-process-assessment.dto';
 import { QueryClassroomExportSnapshotDto } from '../dto/query-classroom-export-snapshot.dto';
 import { QueryClassroomStudentsDto } from '../dto/query-classroom-students.dto';
 import {
+  QueryAiLearningAnalyticsDto,
+  QueryAiLearningAnalyticsStudentsDto,
+} from '../dto/query-ai-learning-analytics.dto';
+import {
   ClassroomCourseSummaryDto,
   ClassroomResponseDto,
 } from '../dto/classroom-response.dto';
@@ -40,6 +44,7 @@ import {
 } from '../../users/schemas/user-roles.constants';
 import { WithId } from '../../../common/types/with-id.type';
 import { WithTimestamps } from '../../../common/types/with-timestamps.type';
+import { AiLearningAnalyticsService } from './ai-learning-analytics.service';
 
 type ClassroomWithMeta = Classroom & WithId & WithTimestamps;
 type ClassroomOwnerLean = Pick<Classroom, 'teacherId'> & WithId;
@@ -96,6 +101,7 @@ export class ClassroomsService {
     private readonly studentLearningDashboardService: StudentLearningDashboardService,
     private readonly processAssessmentService: ProcessAssessmentService,
     private readonly classroomExportSnapshotService: ClassroomExportSnapshotService,
+    private readonly aiLearningAnalyticsService: AiLearningAnalyticsService,
   ) {}
 
   async createClassroom(dto: CreateClassroomDto, userId: string) {
@@ -344,6 +350,47 @@ export class ClassroomsService {
     await this.ensureTeacher(userId);
     return this.processAssessmentService.getProcessAssessment(
       classroomId,
+      query,
+      userId,
+    );
+  }
+
+  async getAiLearningAnalytics(
+    classroomId: string,
+    query: QueryAiLearningAnalyticsDto,
+    userId: string,
+  ) {
+    await this.ensureTeacher(userId);
+    return this.aiLearningAnalyticsService.getOverview(
+      classroomId,
+      query,
+      userId,
+    );
+  }
+
+  async getAiLearningAnalyticsStudents(
+    classroomId: string,
+    query: QueryAiLearningAnalyticsStudentsDto,
+    userId: string,
+  ) {
+    await this.ensureTeacher(userId);
+    return this.aiLearningAnalyticsService.getStudents(
+      classroomId,
+      query,
+      userId,
+    );
+  }
+
+  async getAiLearningAnalyticsStudentDetail(
+    classroomId: string,
+    studentId: string,
+    query: QueryAiLearningAnalyticsDto,
+    userId: string,
+  ) {
+    await this.ensureTeacher(userId);
+    return this.aiLearningAnalyticsService.getStudentDetail(
+      classroomId,
+      studentId,
       query,
       userId,
     );

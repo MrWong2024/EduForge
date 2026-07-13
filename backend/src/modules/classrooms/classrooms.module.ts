@@ -40,6 +40,7 @@ import {
 import { EnrollmentService } from './enrollments/services/enrollment.service';
 import { AuthModule } from '../auth/auth.module';
 import { LearningTasksModule } from '../learning-tasks/learning-tasks.module';
+import { AiLearningAnalyticsService } from './services/ai-learning-analytics.service';
 
 @Module({
   imports: [
@@ -71,6 +72,7 @@ import { LearningTasksModule } from '../learning-tasks/learning-tasks.module';
     StudentLearningDashboardService,
     ProcessAssessmentService,
     ClassroomExportSnapshotService,
+    AiLearningAnalyticsService,
   ],
   exports: [EnrollmentService],
 })

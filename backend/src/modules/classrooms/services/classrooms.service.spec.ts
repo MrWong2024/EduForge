@@ -64,6 +64,7 @@ const createService = ({
     {} as never,
     {} as never,
     {} as never,
+    {} as never,
   );
 
   return {

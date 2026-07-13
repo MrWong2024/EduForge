@@ -93,6 +93,9 @@ Notes:
 | GET    | `/api/classrooms/:classroomId/weekly-report`          | 班级周报（AA）。                                                                                                          |
 | GET    | `/api/classrooms/:classroomId/process-assessment`     | 过程性评价（Z6）。                                                                                                        |
 | GET    | `/api/classrooms/:classroomId/process-assessment.csv` | 过程性评价 CSV（Z6）。                                                                                                    |
+| GET    | `/api/classrooms/:classroomId/ai-learning-analytics`  | AI 反馈介入成效分析：班级总览与课堂任务趋势。                                                                             |
+| GET    | `/api/classrooms/:classroomId/ai-learning-analytics/students` | AI 反馈介入成效分析：ACTIVE 学生分页列表。                                                                         |
+| GET    | `/api/classrooms/:classroomId/ai-learning-analytics/students/:studentId` | AI 反馈介入成效分析：单个 ACTIVE 学生详情与全任务点。                                                       |
 | GET    | `/api/classrooms/:classroomId/export/snapshot`        | 教学数据快照导出（Z9）。                                                                                                  |
 | GET    | `/api/classrooms/:id`                                 | 获取班级详情（teacher owner 或 student member）。                                                                         |
 | GET    | `/api/classrooms/:id/students`                        | 教师分页查看班级正式成员列表（默认 Enrollment ACTIVE；`includeRemoved=1/true` 可包含 REMOVED）。                          |
@@ -111,6 +114,10 @@ Notes:
 - `/api/classrooms/:classroomId/process-assessment` risk 口径：无有效任务为 `LOW`；有任务但 0 提交为 `HIGH`；任务覆盖率 `<0.4` 或平均 ERROR `>=2` 为 `HIGH`；任务覆盖率 `<0.8`、平均 ERROR `>=1`、平均 WARN `>=2` 为 `MEDIUM`；其余为 `LOW`。
 - `/api/classrooms/:classroomId/process-assessment` 排除任务口径：先按 `classroomId + window` 取课堂任务，再应用 `excludedTaskIds` 得到有效任务范围；被排除任务不参与 `publishedTasksCount`、`submittedTasksRate` 分母、提交/迭代、迟交、AI job 总次数、AI 任务覆盖、AI 任务成功、最新任务反馈均值、`topTags` 与 score/risk 计算；排除全部任务时仍返回当前 ACTIVE 学生，任务相关统计与 `score` 均为 0。
 - `/api/classrooms/:classroomId/process-assessment.csv` 与 JSON 口径对齐：新增 `studentName,studentNo` 列并保留 `studentId`，列顺序前置为 `studentName,studentNo,studentId,...`；CSV 另包含 `iteratedTasksCount/aiRequestedTasksCount/aiSucceededTasksCount/avgWarnItems`，并保留 `aiRequestedCount/aiSucceededCount`。
+- `GET /api/classrooms/:classroomId/ai-learning-analytics`、`/students`、`/students/:studentId`：统一为 teacher only + classroom owner only，课堂不存在或非 owner 返回 `404 Classroom not found`；学生详情仅允许当前课堂 `Enrollment(role=STUDENT,status=ACTIVE)` 成员，REMOVED/外班/非法学生 id 均安全返回 404。三个接口共同支持 `window=all|7d|30d`（默认 `all`）与 `excludedTaskIds`（逗号分隔或 repeated query，指 `classroomTaskId`）；学生列表另支持 `page`（默认 1）与 `limit`（默认 20，上限 100），不提供 `term` 或任意字段排序。
+- AI 反馈介入成效分析的 `window` 只按 `ClassroomTask.publishedAt` 选择有效课堂任务；任务入选后读取该任务下全部相关提交以保持介入前后配对。总览返回 `context/methodology/summary/taskTrends`，任务趋势包含零提交任务；学生列表的 `total/items` 覆盖全部 ACTIVE Enrollment（含零提交学生）；学生详情返回 `context/methodology/student/summary/taskPoints`，并为每个有效课堂任务返回任务点，不可比较点的 `issueLoadBefore/After/Delta=null`、`outcome=NOT_COMPARABLE`。
+- 总览 `summary` 固定包含 ACTIVE 学生、提交/AI 请求/AI 交付/反馈后重提/代码变化/质量可比/改善/持平/恶化的 student-task 计数，`aiStudentCoverageRate/aiTaskCoverageRate/aiDeliveryRate/postFeedbackResubmissionRate/postFeedbackCodeChangeRate/qualityComparableRate/improvedRate`，以及仅基于质量可比样本的三个 issueLoad 平均值；所有零分母比率与零可比平均值返回 0。学生列表 item 返回同语义的任务计数、三个平均值和 `growthTrend`；详情 task point 返回 attempts 与各阶段布尔值、可空 issueLoad 和 outcome。
+- 方法学固定为 `scope=AI_FEEDBACK_INTERVENTION_V1`、`sampleUnit=STUDENT_CLASSROOM_TASK`、`qualityProxy=ERROR_PLUS_HALF_WARN`。该能力只分析 EduForge AI 反馈介入后的提交行为与代码问题代理变化，不覆盖学生全部 AI 使用，不代表正式成绩，也不代表 AI 对成绩或能力提升的因果贡献；不得据此声称学生已阅读或采纳反馈。
 - `weekly-report` 窗口契约（后端阶段一）：默认 `window=all`；后端兼容集合为 `all/7d/30d/24h/1h`（`24h/1h` 为兼容窗口，不作为推荐默认窗口）。
 - `process-assessment`（JSON + CSV）窗口契约（后端阶段一）：默认 `window=all`；后端兼容集合为 `all/7d/30d/term`（`term` 为兼容窗口）；`window=all` 语义与 JSON/CSV 完全一致。
 - `window=all` 统一语义：在当前资源边界内做全量统计（班级级接口 = 当前班级可纳入口径的全部历史记录），实现为“无时间下界过滤”，不是固定 90/180 天。
