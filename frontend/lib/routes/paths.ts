@@ -27,6 +27,13 @@ export const paths = {
       `/teacher/classrooms/${encodeSegment(classroomId)}/weekly-report`,
     classroomProcessAssessment: (classroomId: string) =>
       `/teacher/classrooms/${encodeSegment(classroomId)}/process-assessment`,
+    classroomAiLearningAnalytics: (classroomId: string) =>
+      `/teacher/classrooms/${encodeSegment(classroomId)}/ai-learning-analytics`,
+    classroomAiLearningAnalyticsStudent: (
+      classroomId: string,
+      studentId: string,
+    ) =>
+      `/teacher/classrooms/${encodeSegment(classroomId)}/ai-learning-analytics/students/${encodeSegment(studentId)}`,
     classroomExportSnapshot: (classroomId: string) =>
       `/teacher/classrooms/${encodeSegment(classroomId)}/export/snapshot`,
     classroomTaskBase: (classroomId: string, classroomTaskId: string) =>

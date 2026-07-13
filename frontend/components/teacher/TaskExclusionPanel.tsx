@@ -4,7 +4,11 @@ import { useEffect, useMemo, useState, useTransition } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { paths } from "@/lib/routes/paths";
 
-export type ExcludeTasksPanelTask = {
+export type TaskExclusionPanelMode =
+  | "process-assessment"
+  | "ai-learning-analytics";
+
+export type TaskExclusionPanelTask = {
   id: string;
   title: string;
   publishedAt?: string | null;
@@ -13,11 +17,12 @@ export type ExcludeTasksPanelTask = {
 
 type SearchParamEntry = readonly [string, string];
 
-type ExcludeTasksPanelProps = {
+type TaskExclusionPanelProps = {
+  mode: TaskExclusionPanelMode;
   classroomId: string;
   window: string;
   initialExcludedTaskIds: string[];
-  tasks: ExcludeTasksPanelTask[];
+  tasks: TaskExclusionPanelTask[];
   initialQueryEntries: SearchParamEntry[];
   taskOptionsLoadError?: string;
   currentPathname?: string;
@@ -50,7 +55,16 @@ const haveSameTaskIds = (left: string[], right: string[]): boolean => {
   return normalizedLeft.every((taskId) => rightSet.has(taskId));
 };
 
-export function ExcludeTasksPanel({
+const getFallbackPathname = (
+  mode: TaskExclusionPanelMode,
+  classroomId: string,
+) =>
+  mode === "process-assessment"
+    ? paths.teacher.classroomProcessAssessment(classroomId)
+    : paths.teacher.classroomAiLearningAnalytics(classroomId);
+
+export function TaskExclusionPanel({
+  mode,
   classroomId,
   window: reportWindow,
   initialExcludedTaskIds,
@@ -58,13 +72,13 @@ export function ExcludeTasksPanel({
   initialQueryEntries,
   taskOptionsLoadError,
   currentPathname,
-}: ExcludeTasksPanelProps) {
+}: TaskExclusionPanelProps) {
   const router = useRouter();
   const routerPathname = usePathname();
   const pathname =
     currentPathname ??
     routerPathname ??
-    paths.teacher.classroomProcessAssessment(classroomId);
+    getFallbackPathname(mode, classroomId);
   const [isPending, startTransition] = useTransition();
   const [pendingAction, setPendingAction] = useState<"apply" | "clear" | null>(
     null,
@@ -155,15 +169,24 @@ export function ExcludeTasksPanel({
     });
   };
 
+  const isProcessAssessment = mode === "process-assessment";
+  const scopeDescription = isProcessAssessment
+    ? "勾选后点击应用，当前页面与 CSV 将按排除后的任务范围重新计算；这只是临时查询条件，不会保存偏好，不会修改课堂任务或成绩数据。"
+    : "勾选后点击应用，当前分析页面将按排除后的任务范围重新计算；这只是临时查询条件，不会保存偏好，不会修改课堂任务、提交、反馈或其他教学数据。";
+  const appliedDescription =
+    normalizedInitialExcludedTaskIds.length > 0
+      ? isProcessAssessment
+        ? `已排除 ${normalizedInitialExcludedTaskIds.length} 个任务，当前成绩与 CSV 均按排除后任务范围计算。`
+        : `已排除 ${normalizedInitialExcludedTaskIds.length} 个任务，当前分析按排除后的任务范围计算。`
+      : isProcessAssessment
+        ? "未排除任务，当前成绩按统计窗口内全部任务计算。"
+        : "未排除任务，当前分析按统计窗口内全部任务计算。";
+
   return (
     <div className="mt-3 space-y-3">
-      <p className="text-zinc-600">
-        勾选后点击应用，当前页面与 CSV 将按排除后的任务范围重新计算；这只是临时查询条件，不会保存偏好，不会修改课堂任务或成绩数据。
-      </p>
+      <p className="text-zinc-600">{scopeDescription}</p>
       <p className="text-xs text-zinc-500">
-        {normalizedInitialExcludedTaskIds.length > 0
-          ? `已排除 ${normalizedInitialExcludedTaskIds.length} 个任务，当前成绩与 CSV 均按排除后任务范围计算。`
-          : "未排除任务，当前成绩按统计窗口内全部任务计算。"}
+        {appliedDescription}
         {hasSelectionChanged
           ? ` 当前已选 ${selectedIds.length} 个任务，点击应用后生效。`
           : ""}
@@ -175,8 +198,8 @@ export function ExcludeTasksPanel({
       ) : null}
       {hiddenSelectedTaskIds.length > 0 ? (
         <p className="rounded-md border border-zinc-200 bg-zinc-50 px-3 py-2 text-xs text-zinc-700">
-          有 {hiddenSelectedTaskIds.length}{" "}
-          个已选任务未在当前任务列表中显示；它们仍会保留在本次页面与 CSV 查询参数中。
+          有 {hiddenSelectedTaskIds.length} 个已选任务未在当前任务列表中显示；它们仍会保留在本次
+          {isProcessAssessment ? "页面与 CSV" : "分析"}查询参数中。
         </p>
       ) : null}
 

@@ -207,6 +207,7 @@ export type ClassroomTaskSummary = {
   maxAttempts?: number;
   aiStatus?: string;
   taskPublisher?: PublisherSummary | null;
+  publishedAt?: string;
 };
 
 export type CreateClassroomRequest = {
@@ -597,6 +598,164 @@ export type ProcessAssessmentResponse = {
   raw: UnknownRecord;
 };
 
+export const AI_LEARNING_ANALYTICS_WINDOWS = ["all", "7d", "30d"] as const;
+export type AiLearningAnalyticsWindow =
+  (typeof AI_LEARNING_ANALYTICS_WINDOWS)[number];
+
+export const AI_LEARNING_ANALYTICS_GROWTH_TRENDS = [
+  "IMPROVING",
+  "STABLE",
+  "DECLINING",
+  "INSUFFICIENT_DATA",
+] as const;
+export type AiLearningAnalyticsGrowthTrend =
+  (typeof AI_LEARNING_ANALYTICS_GROWTH_TRENDS)[number];
+
+export const AI_LEARNING_ANALYTICS_OUTCOMES = [
+  "IMPROVED",
+  "STABLE",
+  "REGRESSED",
+  "NOT_COMPARABLE",
+] as const;
+export type AiLearningAnalyticsOutcome =
+  (typeof AI_LEARNING_ANALYTICS_OUTCOMES)[number];
+
+export type AiLearningAnalyticsContext = {
+  classroomId: string;
+  classroomName: string;
+  courseId: string;
+  courseName: string | null;
+  courseCode: string | null;
+  courseTerm: string | null;
+  generatedAt: string;
+  window: AiLearningAnalyticsWindow;
+  effectiveTaskCount: number;
+  excludedTaskIds: string[];
+};
+
+export type AiLearningAnalyticsMethodology = {
+  scope: string;
+  sampleUnit: string;
+  qualityProxy: string;
+  disclaimer: string;
+};
+
+export type AiLearningAnalyticsSummary = {
+  activeStudentsCount: number;
+  submittedStudentTaskCount: number;
+  aiRequestedStudentTaskCount: number;
+  aiDeliveredStudentTaskCount: number;
+  postFeedbackResubmittedStudentTaskCount: number;
+  postFeedbackCodeChangedStudentTaskCount: number;
+  qualityComparableStudentTaskCount: number;
+  improvedStudentTaskCount: number;
+  stableStudentTaskCount: number;
+  regressedStudentTaskCount: number;
+  aiStudentCoverageRate: number;
+  aiTaskCoverageRate: number;
+  aiDeliveryRate: number;
+  postFeedbackResubmissionRate: number;
+  postFeedbackCodeChangeRate: number;
+  qualityComparableRate: number;
+  improvedRate: number;
+  averageIssueLoadBefore: number;
+  averageIssueLoadAfter: number;
+  averageIssueLoadDelta: number;
+};
+
+export type AiLearningAnalyticsTaskTrend = {
+  classroomTaskId: string;
+  taskId: string;
+  taskTitle: string;
+  publishedAt: string | null;
+  submittedStudentCount: number;
+  aiRequestedStudentCount: number;
+  aiDeliveredStudentCount: number;
+  postFeedbackResubmittedStudentCount: number;
+  postFeedbackCodeChangedStudentCount: number;
+  qualityComparableStudentCount: number;
+  improvedStudentCount: number;
+  stableStudentCount: number;
+  regressedStudentCount: number;
+  aiTaskCoverageRate: number;
+  postFeedbackResubmissionRate: number;
+  postFeedbackCodeChangeRate: number;
+  qualityComparableRate: number;
+  improvedRate: number;
+  averageIssueLoadBefore: number;
+  averageIssueLoadAfter: number;
+  averageIssueLoadDelta: number;
+};
+
+export type AiLearningAnalyticsOverviewResponse = {
+  context: AiLearningAnalyticsContext;
+  methodology: AiLearningAnalyticsMethodology;
+  summary: AiLearningAnalyticsSummary;
+  taskTrends: AiLearningAnalyticsTaskTrend[];
+  raw: UnknownRecord;
+};
+
+export type AiLearningAnalyticsStudentMetrics = {
+  submittedTasksCount: number;
+  aiRequestedTasksCount: number;
+  aiDeliveredTasksCount: number;
+  postFeedbackResubmittedTasksCount: number;
+  postFeedbackCodeChangedTasksCount: number;
+  qualityComparableTasksCount: number;
+  improvedTasksCount: number;
+  stableTasksCount: number;
+  regressedTasksCount: number;
+  averageIssueLoadBefore: number;
+  averageIssueLoadAfter: number;
+  averageIssueLoadDelta: number;
+  growthTrend: AiLearningAnalyticsGrowthTrend;
+};
+
+export type AiLearningAnalyticsStudentItem =
+  AiLearningAnalyticsStudentMetrics & {
+    studentId: string;
+    studentName: string;
+    studentNo: string | null;
+  };
+
+export type AiLearningAnalyticsStudentsResponse = {
+  page: number;
+  limit: number;
+  total: number;
+  items: AiLearningAnalyticsStudentItem[];
+  raw: UnknownRecord;
+};
+
+export type AiLearningAnalyticsTaskPoint = {
+  classroomTaskId: string;
+  taskId: string;
+  taskTitle: string;
+  publishedAt: string | null;
+  attemptsCount: number;
+  aiRequested: boolean;
+  aiDelivered: boolean;
+  postFeedbackResubmitted: boolean;
+  postFeedbackCodeChanged: boolean;
+  qualityComparable: boolean;
+  issueLoadBefore: number | null;
+  issueLoadAfter: number | null;
+  issueLoadDelta: number | null;
+  outcome: AiLearningAnalyticsOutcome;
+};
+
+export type AiLearningAnalyticsStudentDetailResponse = {
+  context: AiLearningAnalyticsContext;
+  methodology: AiLearningAnalyticsMethodology;
+  student: {
+    studentId: string;
+    studentName: string;
+    studentNo: string | null;
+  };
+  summary: AiLearningAnalyticsStudentMetrics;
+  taskPoints: AiLearningAnalyticsTaskPoint[];
+  raw: UnknownRecord;
+};
+
 export type ExportSnapshotResponse = {
   classroomId?: string;
   window?: string;
@@ -891,6 +1050,8 @@ export const toClassroomTaskSummary = (
       asNumber(settingsRecord.maxAttempts) ?? asNumber(record.maxAttempts),
     aiStatus: asString(record.aiStatus) ?? asString(record.aiFeedbackStatus),
     taskPublisher: toPublisherSummary(record.taskPublisher),
+    publishedAt:
+      asString(record.publishedAt) ?? asString(taskRecord.publishedAt),
   };
 };
 
@@ -1320,6 +1481,298 @@ export const toProcessAssessmentResponse = (
       asNumber(safeGet(record, "pagination.total", undefined)),
     items,
     raw: record,
+  };
+};
+
+const unwrapAiLearningAnalyticsRecord = (payload: unknown): UnknownRecord => {
+  const record = asRecord(payload);
+  const dataRecord = asRecord(safeGet(record, "data", undefined));
+  return Object.keys(dataRecord).length > 0 ? dataRecord : record;
+};
+
+const toRequiredString = (value: unknown, fallback = ""): string =>
+  asString(value) ?? fallback;
+
+const toRequiredNumber = (value: unknown): number => asNumber(value) ?? 0;
+
+const normalizeAiLearningAnalyticsWindow = (
+  value: unknown,
+): AiLearningAnalyticsWindow => {
+  const window = asString(value);
+  return window === "7d" || window === "30d" || window === "all"
+    ? window
+    : "all";
+};
+
+const normalizeAiLearningAnalyticsGrowthTrend = (
+  value: unknown,
+): AiLearningAnalyticsGrowthTrend => {
+  const trend = asString(value);
+  if (
+    trend === "IMPROVING" ||
+    trend === "STABLE" ||
+    trend === "DECLINING" ||
+    trend === "INSUFFICIENT_DATA"
+  ) {
+    return trend;
+  }
+  return "INSUFFICIENT_DATA";
+};
+
+const normalizeAiLearningAnalyticsOutcome = (
+  value: unknown,
+): AiLearningAnalyticsOutcome => {
+  const outcome = asString(value);
+  if (
+    outcome === "IMPROVED" ||
+    outcome === "STABLE" ||
+    outcome === "REGRESSED" ||
+    outcome === "NOT_COMPARABLE"
+  ) {
+    return outcome;
+  }
+  return "NOT_COMPARABLE";
+};
+
+const toAiLearningAnalyticsContext = (
+  value: unknown,
+): AiLearningAnalyticsContext => {
+  const record = asRecord(value);
+  return {
+    classroomId: toRequiredString(record.classroomId),
+    classroomName: toRequiredString(record.classroomName, "未命名班级"),
+    courseId: toRequiredString(record.courseId),
+    courseName: asNullableString(record.courseName) ?? null,
+    courseCode: asNullableString(record.courseCode) ?? null,
+    courseTerm: asNullableString(record.courseTerm) ?? null,
+    generatedAt: toRequiredString(record.generatedAt),
+    window: normalizeAiLearningAnalyticsWindow(record.window),
+    effectiveTaskCount: toRequiredNumber(record.effectiveTaskCount),
+    excludedTaskIds: asStringArray(record.excludedTaskIds)
+      .map((taskId) => taskId.trim())
+      .filter((taskId) => taskId.length > 0),
+  };
+};
+
+const toAiLearningAnalyticsMethodology = (
+  value: unknown,
+): AiLearningAnalyticsMethodology => {
+  const record = asRecord(value);
+  return {
+    scope: toRequiredString(record.scope, "AI_FEEDBACK_INTERVENTION_V1"),
+    sampleUnit: toRequiredString(
+      record.sampleUnit,
+      "STUDENT_CLASSROOM_TASK",
+    ),
+    qualityProxy: toRequiredString(
+      record.qualityProxy,
+      "ERROR_PLUS_HALF_WARN",
+    ),
+    disclaimer: toRequiredString(
+      record.disclaimer,
+      "本分析仅反映 EduForge AI 反馈介入后的提交行为与代码问题代理变化，不代表 AI 对学习成绩或能力提升的因果贡献。",
+    ),
+  };
+};
+
+const toAiLearningAnalyticsSummary = (
+  value: unknown,
+): AiLearningAnalyticsSummary => {
+  const record = asRecord(value);
+  return {
+    activeStudentsCount: toRequiredNumber(record.activeStudentsCount),
+    submittedStudentTaskCount: toRequiredNumber(
+      record.submittedStudentTaskCount,
+    ),
+    aiRequestedStudentTaskCount: toRequiredNumber(
+      record.aiRequestedStudentTaskCount,
+    ),
+    aiDeliveredStudentTaskCount: toRequiredNumber(
+      record.aiDeliveredStudentTaskCount,
+    ),
+    postFeedbackResubmittedStudentTaskCount: toRequiredNumber(
+      record.postFeedbackResubmittedStudentTaskCount,
+    ),
+    postFeedbackCodeChangedStudentTaskCount: toRequiredNumber(
+      record.postFeedbackCodeChangedStudentTaskCount,
+    ),
+    qualityComparableStudentTaskCount: toRequiredNumber(
+      record.qualityComparableStudentTaskCount,
+    ),
+    improvedStudentTaskCount: toRequiredNumber(
+      record.improvedStudentTaskCount,
+    ),
+    stableStudentTaskCount: toRequiredNumber(record.stableStudentTaskCount),
+    regressedStudentTaskCount: toRequiredNumber(
+      record.regressedStudentTaskCount,
+    ),
+    aiStudentCoverageRate: toRequiredNumber(record.aiStudentCoverageRate),
+    aiTaskCoverageRate: toRequiredNumber(record.aiTaskCoverageRate),
+    aiDeliveryRate: toRequiredNumber(record.aiDeliveryRate),
+    postFeedbackResubmissionRate: toRequiredNumber(
+      record.postFeedbackResubmissionRate,
+    ),
+    postFeedbackCodeChangeRate: toRequiredNumber(
+      record.postFeedbackCodeChangeRate,
+    ),
+    qualityComparableRate: toRequiredNumber(record.qualityComparableRate),
+    improvedRate: toRequiredNumber(record.improvedRate),
+    averageIssueLoadBefore: toRequiredNumber(record.averageIssueLoadBefore),
+    averageIssueLoadAfter: toRequiredNumber(record.averageIssueLoadAfter),
+    averageIssueLoadDelta: toRequiredNumber(record.averageIssueLoadDelta),
+  };
+};
+
+const toAiLearningAnalyticsTaskTrend = (
+  value: unknown,
+): AiLearningAnalyticsTaskTrend => {
+  const record = asRecord(value);
+  return {
+    classroomTaskId: toRequiredString(record.classroomTaskId),
+    taskId: toRequiredString(record.taskId),
+    taskTitle: toRequiredString(record.taskTitle, "未知任务"),
+    publishedAt: asNullableString(record.publishedAt) ?? null,
+    submittedStudentCount: toRequiredNumber(record.submittedStudentCount),
+    aiRequestedStudentCount: toRequiredNumber(record.aiRequestedStudentCount),
+    aiDeliveredStudentCount: toRequiredNumber(record.aiDeliveredStudentCount),
+    postFeedbackResubmittedStudentCount: toRequiredNumber(
+      record.postFeedbackResubmittedStudentCount,
+    ),
+    postFeedbackCodeChangedStudentCount: toRequiredNumber(
+      record.postFeedbackCodeChangedStudentCount,
+    ),
+    qualityComparableStudentCount: toRequiredNumber(
+      record.qualityComparableStudentCount,
+    ),
+    improvedStudentCount: toRequiredNumber(record.improvedStudentCount),
+    stableStudentCount: toRequiredNumber(record.stableStudentCount),
+    regressedStudentCount: toRequiredNumber(record.regressedStudentCount),
+    aiTaskCoverageRate: toRequiredNumber(record.aiTaskCoverageRate),
+    postFeedbackResubmissionRate: toRequiredNumber(
+      record.postFeedbackResubmissionRate,
+    ),
+    postFeedbackCodeChangeRate: toRequiredNumber(
+      record.postFeedbackCodeChangeRate,
+    ),
+    qualityComparableRate: toRequiredNumber(record.qualityComparableRate),
+    improvedRate: toRequiredNumber(record.improvedRate),
+    averageIssueLoadBefore: toRequiredNumber(record.averageIssueLoadBefore),
+    averageIssueLoadAfter: toRequiredNumber(record.averageIssueLoadAfter),
+    averageIssueLoadDelta: toRequiredNumber(record.averageIssueLoadDelta),
+  };
+};
+
+const toAiLearningAnalyticsStudentMetrics = (
+  value: unknown,
+): AiLearningAnalyticsStudentMetrics => {
+  const record = asRecord(value);
+  return {
+    submittedTasksCount: toRequiredNumber(record.submittedTasksCount),
+    aiRequestedTasksCount: toRequiredNumber(record.aiRequestedTasksCount),
+    aiDeliveredTasksCount: toRequiredNumber(record.aiDeliveredTasksCount),
+    postFeedbackResubmittedTasksCount: toRequiredNumber(
+      record.postFeedbackResubmittedTasksCount,
+    ),
+    postFeedbackCodeChangedTasksCount: toRequiredNumber(
+      record.postFeedbackCodeChangedTasksCount,
+    ),
+    qualityComparableTasksCount: toRequiredNumber(
+      record.qualityComparableTasksCount,
+    ),
+    improvedTasksCount: toRequiredNumber(record.improvedTasksCount),
+    stableTasksCount: toRequiredNumber(record.stableTasksCount),
+    regressedTasksCount: toRequiredNumber(record.regressedTasksCount),
+    averageIssueLoadBefore: toRequiredNumber(record.averageIssueLoadBefore),
+    averageIssueLoadAfter: toRequiredNumber(record.averageIssueLoadAfter),
+    averageIssueLoadDelta: toRequiredNumber(record.averageIssueLoadDelta),
+    growthTrend: normalizeAiLearningAnalyticsGrowthTrend(record.growthTrend),
+  };
+};
+
+const toAiLearningAnalyticsStudentItem = (
+  value: unknown,
+): AiLearningAnalyticsStudentItem => {
+  const record = asRecord(value);
+  return {
+    studentId: toRequiredString(record.studentId),
+    studentName: toRequiredString(record.studentName, "未知学生"),
+    studentNo: asNullableString(record.studentNo) ?? null,
+    ...toAiLearningAnalyticsStudentMetrics(record),
+  };
+};
+
+const toAiLearningAnalyticsTaskPoint = (
+  value: unknown,
+): AiLearningAnalyticsTaskPoint => {
+  const record = asRecord(value);
+  return {
+    classroomTaskId: toRequiredString(record.classroomTaskId),
+    taskId: toRequiredString(record.taskId),
+    taskTitle: toRequiredString(record.taskTitle, "未知任务"),
+    publishedAt: asNullableString(record.publishedAt) ?? null,
+    attemptsCount: toRequiredNumber(record.attemptsCount),
+    aiRequested: asBoolean(record.aiRequested) ?? false,
+    aiDelivered: asBoolean(record.aiDelivered) ?? false,
+    postFeedbackResubmitted:
+      asBoolean(record.postFeedbackResubmitted) ?? false,
+    postFeedbackCodeChanged:
+      asBoolean(record.postFeedbackCodeChanged) ?? false,
+    qualityComparable: asBoolean(record.qualityComparable) ?? false,
+    issueLoadBefore: asNullableNumber(record.issueLoadBefore) ?? null,
+    issueLoadAfter: asNullableNumber(record.issueLoadAfter) ?? null,
+    issueLoadDelta: asNullableNumber(record.issueLoadDelta) ?? null,
+    outcome: normalizeAiLearningAnalyticsOutcome(record.outcome),
+  };
+};
+
+export const toAiLearningAnalyticsOverviewResponse = (
+  payload: unknown,
+): AiLearningAnalyticsOverviewResponse => {
+  const source = unwrapAiLearningAnalyticsRecord(payload);
+  return {
+    context: toAiLearningAnalyticsContext(source.context),
+    methodology: toAiLearningAnalyticsMethodology(source.methodology),
+    summary: toAiLearningAnalyticsSummary(source.summary),
+    taskTrends: asRecordArray(source.taskTrends).map((item) =>
+      toAiLearningAnalyticsTaskTrend(item),
+    ),
+    raw: source,
+  };
+};
+
+export const toAiLearningAnalyticsStudentsResponse = (
+  payload: unknown,
+): AiLearningAnalyticsStudentsResponse => {
+  const source = unwrapAiLearningAnalyticsRecord(payload);
+  return {
+    page: Math.max(1, toRequiredNumber(source.page) || 1),
+    limit: Math.max(1, toRequiredNumber(source.limit) || 20),
+    total: Math.max(0, toRequiredNumber(source.total)),
+    items: asRecordArray(source.items).map((item) =>
+      toAiLearningAnalyticsStudentItem(item),
+    ),
+    raw: source,
+  };
+};
+
+export const toAiLearningAnalyticsStudentDetailResponse = (
+  payload: unknown,
+): AiLearningAnalyticsStudentDetailResponse => {
+  const source = unwrapAiLearningAnalyticsRecord(payload);
+  const studentRecord = asRecord(source.student);
+  return {
+    context: toAiLearningAnalyticsContext(source.context),
+    methodology: toAiLearningAnalyticsMethodology(source.methodology),
+    student: {
+      studentId: toRequiredString(studentRecord.studentId),
+      studentName: toRequiredString(studentRecord.studentName, "未知学生"),
+      studentNo: asNullableString(studentRecord.studentNo) ?? null,
+    },
+    summary: toAiLearningAnalyticsStudentMetrics(source.summary),
+    taskPoints: asRecordArray(source.taskPoints).map((item) =>
+      toAiLearningAnalyticsTaskPoint(item),
+    ),
+    raw: source,
   };
 };
 

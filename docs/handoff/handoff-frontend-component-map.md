@@ -57,8 +57,12 @@
 
 | 页面模块 | 文件 | 真实 API | 作用边界 |
 |---|---|---|---|
-| ProcessAssessmentPage | `app/teacher/classrooms/[classroomId]/process-assessment/page.tsx` | `GET classrooms/:classroomId/process-assessment`、`GET classrooms/:classroomId/process-assessment.csv`、`GET classrooms/:classroomId/tasks` | 负责过程性评价页面 URL query 解析与服务端数据加载；`excludedTaskIds` 解析兼容逗号分隔和 repeated query，并在 JSON/CSV 请求中归一化为逗号分隔；“排除任务”是临时查询条件，排除任务区由 `ExcludeTasksPanel` Client Component 承载；页面展示后端返回的任务维度指标（迭代任务数、AI 覆盖任务数、平均警告/错误项），并在明细区提供可展开的评分规则说明卡片，解释当前综合过程分、四个权重维度、任务维度统计与典型样例；课堂任务选项加载失败只显示提示，不阻断过程性评价主体展示；不要在本页重算后端评分、改 API 契约或持久化 `excludedTaskIds`。 |
-| ExcludeTasksPanel | `app/teacher/classrooms/[classroomId]/process-assessment/ExcludeTasksPanel.tsx` | - | Client Component，负责过程性评价排除任务勾选交互；应用排除通过 `router.replace` 客户端软导航写入当前选中的 `excludedTaskIds` 并回到 `page=1`；清空排除通过 `router.replace` 删除 `excludedTaskIds`，仅保留 `window` 与 `page=1`；不落库、不写浏览器存储、不修改任务或成绩，仅影响当前 URL query 对应的临时计算；该实现替代旧的原生 GET form / 独立 GET form 口径，用于避免 hydration mismatch 并保持交互稳定。 |
+| ProcessAssessmentPage | `app/teacher/classrooms/[classroomId]/process-assessment/page.tsx` | `GET classrooms/:classroomId/process-assessment`、`GET classrooms/:classroomId/process-assessment.csv`、`GET classrooms/:classroomId/tasks` | 负责过程性评价页面 URL query 解析与服务端数据加载；`excludedTaskIds` 解析兼容逗号分隔和 repeated query，并在 JSON/CSV 请求中归一化为逗号分隔；“排除任务”由共享 `TaskExclusionPanel` 的 `process-assessment` 模式承载，课堂任务选项由共享 Server helper 全量加载；现有评分、CSV、分页、软导航和错误降级行为保持。 |
+| AiLearningAnalyticsPage | `app/teacher/classrooms/[classroomId]/ai-learning-analytics/page.tsx` | `GET classrooms/:classroomId/ai-learning-analytics`、`GET .../students`、`GET classrooms/:classroomId/tasks` | Server Component，负责共享筛选参数、总览与学生列表并行读取、学生列表局部错误边界、任务选项降级、摘要/趋势/任务表/学生表/分页与原始 JSON；不从学生分页重算摘要。 |
+| AiLearningAnalyticsStudentPage | `app/teacher/classrooms/[classroomId]/ai-learning-analytics/students/[studentId]/page.tsx` | `GET classrooms/:classroomId/ai-learning-analytics/students/:studentId` | Server Component，负责学生摘要、个人反馈介入变化轨迹、全任务明细与返回导航；URL `page` 只用于返回列表，不传给详情后端。 |
+| TaskExclusionPanel | `components/teacher/TaskExclusionPanel.tsx` | - | 唯一的 URL 驱动临时任务排除 Client Component；支持 `process-assessment` 与 `ai-learning-analytics` 两种可序列化展示模式、repeated `excludedTaskIds`、隐藏已选 ID 保留、清空排除与 `router.replace` 后回到 `page=1`；不持久化、不修改教学数据。 |
+| AiLearningAnalyticsCharts | `components/teacher/AiLearningAnalyticsCharts.tsx` | - | 纯展示原生 SVG：班级问题负荷平均变化、反馈后行为/可比性趋势、个人反馈介入变化轨迹；无 API、无业务聚合、无动画依赖，支持 0/1/N 点、零基线、null/零分母缺口、文字+线型/点型图例和可访问文本。 |
+| AiLearningAnalyticsMethodologyPanel | `components/teacher/AiLearningAnalyticsMethodology.tsx` | - | 在班级与学生页稳定展示分析范围、样本单位、质量代理、后端 disclaimer、任务难度未校正及非成绩/非因果边界。 |
 
 ## 4) Student 交互组件
 
@@ -88,6 +92,7 @@
 | Browser API Client | `lib/api/browser-client.ts` | Client 组件请求，统一 `/api/proxy/**` 与错误类型 | 不要在业务组件直接写 `fetch('/api/proxy/...')` 重复逻辑 |
 | Error Presenter | `lib/api/error-presenter.ts` | detail 提取与错误描述拼接 | 不要各表单重复手写 message/code 拼接 |
 | Teacher Types Adapter | `lib/api/types-teacher.ts` | 教师域 payload 解析与容错映射 | 不要在页面直接散写深层字段访问 |
+| Classroom Task Options | `lib/api/classroom-task-options.ts` | Server-side 分页加载完整课堂任务排除选项，固定 limit=100、最多 20 页、按 `classroomTaskId` 去重 | 不要在各报表页面复制分页/payload 兼容逻辑，也不要在此加入写操作 |
 | Student Types Adapter | `lib/api/types-student.ts` | 学生域 payload 解析与容错映射 | 同上 |
 | Session/Auth | `lib/auth/session.ts` + `lib/auth/role-home.ts` | `users/me` 探针、role 判断、role-home | 不要在页面自定义角色跳转规则 |
 | Paths | `lib/routes/paths.ts` | 路由常量与参数化路径（含模板页、模板编辑页、班级页到模板页上下文链路） | 不要在页面硬编码路径字符串 |

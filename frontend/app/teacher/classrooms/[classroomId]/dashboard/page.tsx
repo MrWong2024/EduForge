@@ -351,6 +351,12 @@ export default async function ClassroomDashboardPage({
             >
               过程性评价
             </Link>
+            <Link
+              href={paths.teacher.classroomAiLearningAnalytics(classroomId)}
+              className="text-blue-700 hover:underline"
+            >
+              AI 成效分析
+            </Link>
           </div>
         }
       />

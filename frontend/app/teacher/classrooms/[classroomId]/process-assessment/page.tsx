@@ -3,16 +3,17 @@ import { headers } from "next/headers";
 import { EmptyState } from "@/components/blocks/EmptyState";
 import { ErrorState } from "@/components/blocks/ErrorState";
 import { PageHeader } from "@/components/blocks/PageHeader";
+import {
+  TaskExclusionPanel,
+  type TaskExclusionPanelTask,
+} from "@/components/teacher/TaskExclusionPanel";
+import {
+  loadAllClassroomTaskOptions,
+  type ClassroomTaskOption,
+} from "@/lib/api/classroom-task-options";
 import { buildProxyPath, fetchJson, FetchJsonError } from "@/lib/api/client";
 import { buildErrorDescription, extractRawDetail } from "@/lib/api/error-presenter";
-import {
-  ExcludeTasksPanel,
-  type ExcludeTasksPanelTask,
-} from "./ExcludeTasksPanel";
-import {
-  toClassroomTasksResponse,
-  toProcessAssessmentResponse,
-} from "@/lib/api/types-teacher";
+import { toProcessAssessmentResponse } from "@/lib/api/types-teacher";
 import { paths } from "@/lib/routes/paths";
 import { getCommonErrorSummary } from "@/lib/ui/status";
 import {
@@ -41,8 +42,6 @@ type ReportWindow = (typeof SUPPORTED_REPORT_WINDOWS)[number];
 const DISPLAY_REPORT_WINDOWS = ["7d", "30d", "all"] as const;
 type DisplayReportWindow = (typeof DISPLAY_REPORT_WINDOWS)[number];
 const PROCESS_ASSESSMENT_PAGE_SIZE = 100;
-const TASK_OPTION_PAGE_SIZE = 100;
-const MAX_TASK_OPTION_PAGES = 20;
 const REPORT_WINDOW_LABELS: Record<ReportWindow, string> = {
   "24h": "近24小时",
   "7d": "近7天",
@@ -78,15 +77,8 @@ type SummaryMetricCard = {
   label: string;
   value: string;
 };
-type ProcessAssessmentTaskOption = {
-  id: string;
-  title: string;
-  publishedAt?: string;
-  status?: string;
-  dueAt?: string;
-};
 type TaskOptionsLoadResult = {
-  taskOptions: ProcessAssessmentTaskOption[];
+  taskOptions: ClassroomTaskOption[];
   taskOptionsLoadError?: string;
 };
 
@@ -94,12 +86,6 @@ const asRecord = (value: unknown): UnknownRecord =>
   value && typeof value === "object" && !Array.isArray(value)
     ? (value as UnknownRecord)
     : {};
-
-const asRecordArray = (value: unknown): UnknownRecord[] =>
-  Array.isArray(value) ? value.map((item) => asRecord(item)) : [];
-
-const toOptionalString = (value: unknown): string | undefined =>
-  typeof value === "string" && value.trim() ? value.trim() : undefined;
 
 const toFiniteNumber = (value: unknown): number | null => {
   if (typeof value === "number" && Number.isFinite(value)) {
@@ -516,103 +502,7 @@ const buildPageHref = (
   return query ? `${basePath}?${query}` : basePath;
 };
 
-const extractClassroomTaskRecords = (payload: unknown): UnknownRecord[] => {
-  if (Array.isArray(payload)) {
-    return asRecordArray(payload);
-  }
-
-  const record = asRecord(payload);
-  const dataRecord = asRecord(safeGet(record, "data", undefined));
-  const source = Object.keys(dataRecord).length > 0 ? dataRecord : record;
-  const candidateItems =
-    safeGet<unknown>(source, "items", undefined) ??
-    safeGet<unknown>(source, "data", undefined);
-  return asRecordArray(candidateItems);
-};
-
-const toTaskOptionsFromPayload = (
-  payload: unknown,
-): ProcessAssessmentTaskOption[] => {
-  const taskList = toClassroomTasksResponse(payload);
-  const rawItems = extractClassroomTaskRecords(payload);
-  const taskOptions: ProcessAssessmentTaskOption[] = [];
-  taskList.items.forEach((task, index) => {
-    const rawItem = rawItems[index] ?? {};
-    const taskRecord = asRecord(safeGet(rawItem, "task", undefined));
-    const id =
-      task.classroomTaskId ??
-      toOptionalString(rawItem.classroomTaskId) ??
-      toOptionalString(rawItem.id);
-    if (!id) {
-      return;
-    }
-
-    const publishedAt =
-      toOptionalString(rawItem.publishedAt) ??
-      toOptionalString(taskRecord.publishedAt);
-    const status = task.status ?? toOptionalString(rawItem.status);
-    const dueAt = task.dueAt ?? toOptionalString(rawItem.dueAt);
-    taskOptions.push({
-      id,
-      title:
-        task.title ??
-        toOptionalString(taskRecord.title) ??
-        toOptionalString(rawItem.title) ??
-        "未命名任务",
-      ...(publishedAt ? { publishedAt } : {}),
-      ...(status ? { status } : {}),
-      ...(dueAt ? { dueAt } : {}),
-    });
-  });
-  return taskOptions;
-};
-
-const fetchAllClassroomTaskOptions = async (
-  classroomId: string,
-  origin: string,
-): Promise<ProcessAssessmentTaskOption[]> => {
-  const taskOptions: ProcessAssessmentTaskOption[] = [];
-  const seenTaskIds = new Set<string>();
-  let page = 1;
-  let total: number | undefined;
-
-  while (page <= MAX_TASK_OPTION_PAGES) {
-    const query = buildQueryString({
-      page,
-      limit: TASK_OPTION_PAGE_SIZE,
-    });
-    const payload = await fetchJson<unknown>(
-      `classrooms/${encodeURIComponent(classroomId)}/tasks?${query}`,
-      {
-        origin,
-        cache: "no-store",
-      },
-    );
-    const taskList = toClassroomTasksResponse(payload);
-    const pageTaskOptions = toTaskOptionsFromPayload(payload);
-    let addedCount = 0;
-    for (const taskOption of pageTaskOptions) {
-      if (!seenTaskIds.has(taskOption.id)) {
-        seenTaskIds.add(taskOption.id);
-        taskOptions.push(taskOption);
-        addedCount += 1;
-      }
-    }
-
-    total = typeof taskList.total === "number" ? taskList.total : total;
-    if (typeof total === "number" && taskOptions.length >= total) {
-      break;
-    }
-    if (pageTaskOptions.length < TASK_OPTION_PAGE_SIZE || addedCount === 0) {
-      break;
-    }
-    page += 1;
-  }
-
-  return taskOptions;
-};
-
-const toTaskOptionMeta = (taskOption: ProcessAssessmentTaskOption): string => {
+const toTaskOptionMeta = (taskOption: ClassroomTaskOption): string => {
   const items = [
     `发布时间：${toDisplayDate(taskOption.publishedAt)}`,
     `截止：${toDisplayDate(taskOption.dueAt)}`,
@@ -627,7 +517,7 @@ type ProcessAssessmentViewModel =
       data: ReturnType<typeof toProcessAssessmentResponse>;
       window: ReportWindow;
       excludedTaskIds: string[];
-      taskOptions: ProcessAssessmentTaskOption[];
+      taskOptions: ClassroomTaskOption[];
       taskOptionsLoadError?: string;
       csvHref: string;
     }
@@ -669,7 +559,7 @@ export default async function ProcessAssessmentPage({
   try {
     const origin = await getRequestOrigin();
     const taskOptionsPromise: Promise<TaskOptionsLoadResult> =
-      fetchAllClassroomTaskOptions(classroomId, origin)
+      loadAllClassroomTaskOptions({ classroomId, origin })
         .then((taskOptions) => ({ taskOptions }))
         .catch(() => ({
           taskOptions: [],
@@ -746,7 +636,7 @@ export default async function ProcessAssessmentPage({
   const showPagination = totalStudentsCount > PROCESS_ASSESSMENT_PAGE_SIZE;
   const hasPrev = currentPage > 1;
   const hasNext = currentPage < totalPages;
-  const excludedTaskPanelTasks: ExcludeTasksPanelTask[] =
+  const excludedTaskPanelTasks: TaskExclusionPanelTask[] =
     viewModel.taskOptions.map((taskOption) => ({
       id: taskOption.id,
       title: taskOption.title,
@@ -816,7 +706,8 @@ export default async function ProcessAssessmentPage({
         <summary className="cursor-pointer font-medium text-zinc-900">
           排除任务（临时计算）
         </summary>
-        <ExcludeTasksPanel
+        <TaskExclusionPanel
+          mode="process-assessment"
           classroomId={classroomId}
           window={viewModel.window}
           initialExcludedTaskIds={viewModel.excludedTaskIds}

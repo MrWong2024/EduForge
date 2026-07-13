@@ -30,6 +30,7 @@
 | `frontend/app/api/proxy/[...path]/route.ts` | BFF proxy；转发 method/body/header 到后端 `/api/**` | 所有正式业务请求 | 唯一正式后端代理入口；由 `FRONTEND_BACKEND_ORIGIN` 控制上游 |
 | `frontend/lib/api/error-presenter.ts` | 从错误 payload 提取 `message/code` 并拼展示文案 | 表单、页面错误态 | 不改变后端错误语义，只做展示整理 |
 | `frontend/lib/api/types-teacher.ts` | Teacher 域响应解析、容错 mapper、view-model 辅助类型 | 教师课程/班级/任务/报表页面 | API 字段变化先在这里或对应页面 mapper 收口 |
+| `frontend/lib/api/classroom-task-options.ts` | Server-side 分页读取完整课堂任务选项；固定每页 100、按 total/短页停止、最多 20 页并按 `classroomTaskId` 去重 | 过程性评价、AI 反馈介入成效分析 | 只读 `GET classrooms/:classroomId/tasks`；返回排除面板所需 `id/title/publishedAt/dueAt/status`，不承担写操作 |
 | `frontend/lib/api/types-student.ts` | Student 域响应解析、容错 mapper、状态解析 | 学生看板、任务详情、提交详情 | 不在 JSX 深层散写 payload 访问 |
 | `frontend/lib/auth/session.ts` | `GET users/me` 探针、role gate、登录态读取 | `app/teacher/layout.tsx`、`app/student/layout.tsx` | 401 时重定向 `/login`；角色不匹配由 layout 展示 403 |
 | `frontend/lib/http/server-cookie.ts` | Server-only 读取 inbound `cookie` header | `lib/api/client.ts` | 仅用于 Server/RSC 请求透传 session |
@@ -141,6 +142,13 @@
 - 过程性评价 CSV：`process-assessment/page.tsx` -> `buildProxyPath("classrooms/:id/process-assessment.csv")`。
   - 对应后端：`GET /api/classrooms/:classroomId/process-assessment.csv`。
   - 注意：下载链接继续走 `/api/proxy/**`，与页面 JSON 使用同一排除口径；CSV 字段由后端导出实现决定。
+- AI 反馈介入成效分析总览：`ai-learning-analytics/page.tsx` -> `client.fetchJson("classrooms/:id/ai-learning-analytics?..." )` -> `/api/proxy/classrooms/:id/ai-learning-analytics` -> `GET /api/classrooms/:classroomId/ai-learning-analytics`。
+  - 使用 `toAiLearningAnalyticsOverviewResponse`；query 仅为 `window=all|7d|30d` 与逗号分隔的 `excludedTaskIds`。
+- AI 反馈介入成效分析学生列表：同一 `page.tsx` -> `/api/proxy/classrooms/:id/ai-learning-analytics/students` -> `GET /api/classrooms/:classroomId/ai-learning-analytics/students`。
+  - 使用 `toAiLearningAnalyticsStudentsResponse`；与总览传递相同 `window/excludedTaskIds`，另固定 `limit=20` 并从 URL 传 `page`；学生列表失败只形成局部错误态。
+- AI 反馈介入成效分析学生详情：`ai-learning-analytics/students/[studentId]/page.tsx` -> `/api/proxy/classrooms/:id/ai-learning-analytics/students/:studentId` -> `GET /api/classrooms/:classroomId/ai-learning-analytics/students/:studentId`。
+  - 使用 `toAiLearningAnalyticsStudentDetailResponse`；后端请求只传 `window/excludedTaskIds`，URL 中的 `page` 仅用于返回班级分析时恢复列表分页，绝不传给详情接口。
+- 上述三条正式请求全部由 `fetchJson` 经 `/api/proxy/**` 发出；前端只格式化后端返回值、映射枚举并结合可比计数控制“—”/缺口展示，不重算 anchor、配对、issueLoad、outcome、growthTrend、rate 分母或任何聚合指标。
 - 教学快照预检：`export/snapshot/page.tsx` -> `/api/proxy/classrooms/:id/export/snapshot`。
   - 对应后端：`GET /api/classrooms/:classroomId/export/snapshot`。
   - 注意：内部预检/诊断页，不作为教师高频主入口。
@@ -155,6 +163,7 @@
 - 不把 URL query 透传数据当 submission detail 主体数据源；主体以 `GET /api/learning-tasks/submissions/:id` 为准。
 - 不在前端重算过程性评价评分、CSV 字段、Enrollment 权限或班级归属；这些由后端接口判定。
 - 不在前端持久化 `excludedTaskIds`；过程性评价排除任务仅作为 URL 查询条件。
+- AI 反馈介入成效分析同样不持久化 `excludedTaskIds`，且不得用当前学生分页结果重算班级摘要；个人可空问题负荷必须保持 `number | null`。
 - 不用模板当前 `PUBLISHED/ARCHIVED` 状态阻断既有 classroomTask 的学生运行态；消费后端 `participationStatus`。
 - 不把 debug/ops 接口接成正式前端 `/ops/**` 页面；当前正式前端未建设 `/ops/**`。
 - 不把 `/_demo/**` 或 `/api/_demo/**` 的内存接口当正式 API 接入口。

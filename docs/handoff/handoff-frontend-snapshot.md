@@ -49,11 +49,12 @@ Auth：
 
 Teacher：
 
-- `/teacher/**` 由 `app/teacher/layout.tsx` 做 server-side role gate；教师主链路覆盖课程、班级、任务模板、课堂任务实例、成员、提交批阅、三件套、周报、过程性评价、教学快照预检。
+- `/teacher/**` 由 `app/teacher/layout.tsx` 做 server-side role gate；教师主链路覆盖课程、班级、任务模板、课堂任务实例、成员、提交批阅、三件套、周报、过程性评价、AI 反馈介入成效分析、教学快照预检。
 - 课程和班级列表已支持创建、基础编辑、归档/恢复/空对象删除；低频生命周期动作在列表“更多”菜单处理。
 - 模板层（`/teacher/tasks*`）负责模板创建、筛选、编辑、可见性与生命周期；班级任务页只负责选择已发布模板并发布课堂任务实例。
 - 课堂任务工作区以班级看板和任务列表为中枢，提交管理、学习轨迹、课堂复盘、AI 指标共用任务上下文导航。
-- 过程性评价页面已接真实 JSON/CSV 接口，支持通过 `ExcludeTasksPanel` Client Component + `router.replace` 客户端软导航更新 `excludedTaskIds` 临时查询后重新计算、任务维度评分指标明细展示与导出；明细区提供用户可读的可展开评分规则说明，用于解释综合过程分、四个权重维度、任务维度统计和典型样例，不改变算法或接口；页面级细节看 route-map/component-map。
+- 过程性评价页面已接真实 JSON/CSV 接口，支持通过共享 `TaskExclusionPanel` Client Component + `router.replace` 客户端软导航更新 `excludedTaskIds` 临时查询后重新计算、任务维度评分指标明细展示与导出；明细区提供用户可读的可展开评分规则说明，用于解释综合过程分、四个权重维度、任务维度统计和典型样例，不改变算法或接口；页面级细节看 route-map/component-map。
+- 教师班级看板已有“AI 成效分析”入口；班级级页面提供总览、原生 SVG 任务趋势、任务明细与 ACTIVE 学生分页列表，学生详情页提供全任务明细和个人反馈介入变化轨迹。该能力只反映 EduForge AI 反馈介入，不代表全部 AI 使用、正式课程成绩或 AI 的因果贡献，也不推断学生已阅读或采纳反馈。
 
 Student：
 
@@ -74,7 +75,7 @@ Student：
 - 类型适配：教师/学生 payload 解析优先落在 `lib/api/types-teacher.ts` 与 `lib/api/types-student.ts`，不要在页面深层散写原始字段访问。
 - 状态文案与 UI 工具：AI 状态、rubric 四维中文、日期/展示兜底分别在 `lib/ui/status.ts`、`lib/ui/rubric.ts`、`lib/ui/format.ts` 收口。
 - 模板治理：`courseLabel`、`visibility/scope` 与默认排序分别由 `lib/learning-tasks/*` 单一来源维护。
-- 页面组件边界：模板维护属于 `/teacher/tasks*`，班级任务页只做实例发布；过程性评价任务排除由 `ExcludeTasksPanel` Client Component 承载，通过 `router.replace` 客户端软导航更新临时 URL query；应用排除写入当前选中的 `excludedTaskIds`，清空排除删除 `excludedTaskIds` 且仅保留 `window + page=1`；不持久化、不写浏览器存储、不修改任务或成绩、不重算后端评分。
+- 页面组件边界：模板维护属于 `/teacher/tasks*`，班级任务页只做实例发布；过程性评价与 AI 反馈介入成效分析共同使用 `TaskExclusionPanel`，通过 `router.replace` 客户端软导航更新临时 URL query；应用排除写入当前选中的 `excludedTaskIds`，清空排除删除 `excludedTaskIds` 并回到 `page=1`；不持久化、不写浏览器存储、不修改教学数据、不重算后端指标。
 
 ## 4) 主链路可用性摘要
 
@@ -84,7 +85,7 @@ Teacher 起步与教学链路：
 2. 在模板页创建/维护任务模板，按 `scope/courseLabel/status/knowledgeModule/stage` 走后端真实查询。
 3. 在班级任务页从发布候选接口选择当前教师可见且 `PUBLISHED` 的模板，配置实例参数后发布。
 4. 通过任务详情、提交管理、学习轨迹、课堂复盘、AI 指标完成教学观察与批阅。
-5. 周报、课程总览、过程性评价、教学快照预检均已接入后端聚合接口；复杂页面结构与按钮行为以 route-map 为准。
+5. 周报、课程总览、过程性评价、AI 反馈介入成效分析、教学快照预检均已接入后端聚合接口；复杂页面结构与按钮行为以 route-map 为准。
 
 Student 学习链路：
 
@@ -104,6 +105,7 @@ Student 学习链路：
 - `GET/POST/PATCH /api/learning-tasks/tasks*` 与模板生命周期动作：任务模板创建、编辑、发布、归档和列表筛选。
 - `GET /api/classrooms/:id/publishable-task-templates` + `POST /api/classrooms/:id/tasks`：班级实例发布主链路。
 - `GET /api/classrooms/:classroomId/process-assessment` 与 `.csv`：过程性评价与任务排除后重新计算。
+- `GET /api/classrooms/:classroomId/ai-learning-analytics`、`/students`、`/students/:studentId`：教师端班级 AI 反馈介入总览、ACTIVE 学生分页分析与单学生全任务详情。
 - `POST /api/learning-tasks/submissions/:submissionId/ai-feedback/request`：学生产品级 AI Feedback 请求入口。
 
 补充：`PATCH /api/users/me` 后端已可用，但当前前端仍未提供资料编辑 UI。
@@ -117,11 +119,12 @@ Student 学习链路：
 - 不要在班级任务页恢复模板创建/编辑职责。
 - 不要用模板当前 `PUBLISHED/ARCHIVED` 状态阻断既有 classroomTask 的学生运行态；前端应消费后端状态信号。
 - 不要在过程性评价页重算后端评分、持久化 `excludedTaskIds`，或把清空排除实现成会带上当前 checkbox 状态的提交。
+- 不要在 AI 反馈介入成效分析页重算后端统计、把零可比平均值当真实持平点，或使用成绩/能力增长/因果贡献措辞。
 - 不要把 raw JSON 调试块当主视图，也不要让主链路依赖 raw JSON 才能操作。
 
 当前阶段：
 
-- 已达到 Teacher/Student 主链路可用、P0 真接口前端收口、任务模板层与班级实例层职责清晰、过程性评价与 AI Feedback 产品入口可用。
+- 已达到 Teacher/Student 主链路可用、P0 真接口前端收口、任务模板层与班级实例层职责清晰、过程性评价、AI Feedback 产品入口与教师端 AI 反馈介入成效分析可用。
 - 仍未进入最终交付定版：部分页面保留低权重 raw JSON 调试块；正式 `/ops/**` 前端页面未建设；模板治理仍为 MVP（删除/复制/批量等能力未提供）；浏览器级自动化 smoke 尚未建立。
 
 ## 7) 细节文档索引
