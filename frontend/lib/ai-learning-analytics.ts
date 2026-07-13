@@ -15,9 +15,9 @@ export const AI_LEARNING_ANALYTICS_WINDOW_LABELS: Record<
   AiLearningAnalyticsWindow,
   string
 > = {
-  "7d": "近 7 天",
-  "30d": "近 30 天",
-  all: "全部",
+  "7d": "近 7 天发布的任务",
+  "30d": "近 30 天发布的任务",
+  all: "全部任务",
 };
 
 export const AI_LEARNING_ANALYTICS_GROWTH_TREND_LABELS: Record<

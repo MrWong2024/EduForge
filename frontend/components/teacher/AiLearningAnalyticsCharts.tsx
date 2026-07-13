@@ -283,8 +283,8 @@ export function AiLearningAnalyticsClassDeltaChart({
 
   return (
     <DeltaChart
-      title="问题负荷平均变化曲线"
-      description="正值表示反馈后问题负荷降低，负值表示升高；无质量可比样本的任务以缺口显示。"
+      title="AI 反馈前后问题变化"
+      description="每个点表示该任务中质量可比样本的平均问题负荷差值；正值表示问题减少，负值表示问题增加。"
       points={points}
     />
   );
@@ -320,8 +320,8 @@ export function AiLearningAnalyticsStudentDeltaChart({
 
   return (
     <DeltaChart
-      title="个人反馈介入变化轨迹"
-      description="该轨迹反映代码问题代理变化，不等同于成绩曲线或能力成长曲线；不同任务难度未校正。"
+      title="个人 AI 反馈前后问题变化"
+      description="每个点表示该学生在一个课堂任务中的 AI 反馈前后问题负荷差值；不可比较的任务不绘制为 0。"
       points={points}
     />
   );
@@ -458,8 +458,12 @@ export function AiLearningAnalyticsRatesChart({
     <figure className="rounded-lg border border-zinc-200 bg-white p-4">
       <figcaption>
         <h3 className="text-sm font-semibold text-zinc-900">
-          反馈后行为与可比性趋势
+          反馈后的提交与改善情况
         </h3>
+        <p className="mt-1 text-xs text-zinc-500">
+          展示成功交付 AI
+          反馈后，学生是否再次提交、是否形成可比样本，以及可比样本中问题是否减少。
+        </p>
         <p className="mt-1 text-xs text-zinc-500">
           纵轴固定为 0%–100%；分母为 0 的指标以缺口表示，并非 0% 表现。
         </p>
@@ -491,13 +495,13 @@ export function AiLearningAnalyticsRatesChart({
       <div className="mt-2 overflow-x-auto" tabIndex={0}>
         <svg
           role="img"
-          aria-label="反馈后行为与可比性趋势。反馈后重提率、质量可比率和可比样本改善率按课堂任务顺序展示。"
+          aria-label="反馈后的提交与改善情况。展示成功交付 AI 反馈后，学生是否再次提交、是否形成可比样本，以及可比样本中问题是否减少。分母为 0 的指标以缺口表示，并非 0% 表现。"
           viewBox={`0 0 ${width} ${CHART_HEIGHT}`}
           width={width}
           height={CHART_HEIGHT}
           className="block max-w-none"
         >
-          <title>反馈后行为与可比性趋势</title>
+          <title>反馈后的提交与改善情况</title>
           {[0, 0.25, 0.5, 0.75, 1].map((rate) => {
             const y = toY(rate);
             return (

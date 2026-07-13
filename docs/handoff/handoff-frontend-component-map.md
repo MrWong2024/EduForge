@@ -59,10 +59,10 @@
 |---|---|---|---|
 | ProcessAssessmentPage | `app/teacher/classrooms/[classroomId]/process-assessment/page.tsx` | `GET classrooms/:classroomId/process-assessment`、`GET classrooms/:classroomId/process-assessment.csv`、`GET classrooms/:classroomId/tasks` | 负责过程性评价页面 URL query 解析与服务端数据加载；`excludedTaskIds` 解析兼容逗号分隔和 repeated query，并在 JSON/CSV 请求中归一化为逗号分隔；“排除任务”由共享 `TaskExclusionPanel` 的 `process-assessment` 模式承载，课堂任务选项由共享 Server helper 全量加载；现有评分、CSV、分页、软导航和错误降级行为保持。 |
 | AiLearningAnalyticsPage | `app/teacher/classrooms/[classroomId]/ai-learning-analytics/page.tsx` | `GET classrooms/:classroomId/ai-learning-analytics`、`GET .../students`、`GET classrooms/:classroomId/tasks` | Server Component，负责共享筛选参数、总览与学生列表并行读取、学生列表局部错误边界、任务选项降级、摘要/趋势/任务表/学生表/分页与原始 JSON；不从学生分页重算摘要。 |
-| AiLearningAnalyticsStudentPage | `app/teacher/classrooms/[classroomId]/ai-learning-analytics/students/[studentId]/page.tsx` | `GET classrooms/:classroomId/ai-learning-analytics/students/:studentId` | Server Component，负责学生摘要、个人反馈介入变化轨迹、全任务明细与返回导航；URL `page` 只用于返回列表，不传给详情后端。 |
+| AiLearningAnalyticsStudentPage | `app/teacher/classrooms/[classroomId]/ai-learning-analytics/students/[studentId]/page.tsx` | `GET classrooms/:classroomId/ai-learning-analytics/students/:studentId` | Server Component，负责学生摘要、“个人 AI 反馈前后问题变化”图、全任务明细与返回导航，并在图表前复用共享指标说明；URL `page` 只用于返回列表，不传给详情后端。 |
 | TaskExclusionPanel | `components/teacher/TaskExclusionPanel.tsx` | - | 唯一的 URL 驱动临时任务排除 Client Component；支持 `process-assessment` 与 `ai-learning-analytics` 两种可序列化展示模式、repeated `excludedTaskIds`、隐藏已选 ID 保留、清空排除与 `router.replace` 后回到 `page=1`；不持久化、不修改教学数据。 |
-| AiLearningAnalyticsCharts | `components/teacher/AiLearningAnalyticsCharts.tsx` | - | 纯展示原生 SVG：班级问题负荷平均变化、反馈后行为/可比性趋势、个人反馈介入变化轨迹；无 API、无业务聚合、无动画依赖，支持 0/1/N 点、零基线、null/零分母缺口、文字+线型/点型图例和可访问文本。 |
-| AiLearningAnalyticsMethodologyPanel | `components/teacher/AiLearningAnalyticsMethodology.tsx` | - | 在班级与学生页稳定展示分析范围、样本单位、质量代理、后端 disclaimer、任务难度未校正及非成绩/非因果边界。 |
+| AiLearningAnalyticsCharts | `components/teacher/AiLearningAnalyticsCharts.tsx` | - | 纯展示原生 SVG，用户可见标题为“AI 反馈前后问题变化”“反馈后的提交与改善情况”“个人 AI 反馈前后问题变化”，并在标题附近常显各图含义、正负值或缺口说明；无 API、无业务聚合、无业务计算、无动画依赖，支持 0/1/N 点、零基线、null/零分母缺口、文字+线型/点型图例和可访问文本。 |
+| AiLearningAnalyticsMethodologyPanel / AiLearningAnalyticsMetricGuide | `components/teacher/AiLearningAnalyticsMethodology.tsx` | - | 常显方法学面板继续在班级与学生页稳定展示分析范围、样本单位、质量代理、后端 disclaimer、任务难度未校正及非成绩/非因果边界；同文件的共享 `AiLearningAnalyticsMetricGuide` 使用默认收起的原生 details，统一说明样本形成、版本配对、问题负荷、质量可比样本、比例分母、趋势与统计窗口边界，不承担业务计算。 |
 
 ## 4) Student 交互组件
 

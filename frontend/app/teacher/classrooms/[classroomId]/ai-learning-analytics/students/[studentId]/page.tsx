@@ -4,7 +4,10 @@ import { EmptyState } from "@/components/blocks/EmptyState";
 import { ErrorState } from "@/components/blocks/ErrorState";
 import { PageHeader } from "@/components/blocks/PageHeader";
 import { AiLearningAnalyticsStudentDeltaChart } from "@/components/teacher/AiLearningAnalyticsCharts";
-import { AiLearningAnalyticsMethodologyPanel } from "@/components/teacher/AiLearningAnalyticsMethodology";
+import {
+  AiLearningAnalyticsMethodologyPanel,
+  AiLearningAnalyticsMetricGuide,
+} from "@/components/teacher/AiLearningAnalyticsMethodology";
 import { fetchJson, FetchJsonError } from "@/lib/api/client";
 import {
   buildErrorDescription,
@@ -269,6 +272,8 @@ export default async function AiLearningAnalyticsStudentPage({
 
       <AiLearningAnalyticsMethodologyPanel methodology={detail.methodology} />
 
+      <AiLearningAnalyticsMetricGuide variant="student" />
+
       <section className="rounded-lg border border-zinc-200 bg-white p-4">
         <h2 className="text-sm font-semibold text-zinc-900">学生分析摘要</h2>
         <p className="mt-1 text-xs text-zinc-500">
@@ -323,10 +328,11 @@ export default async function AiLearningAnalyticsStudentPage({
 
       <section className="rounded-lg border border-zinc-200 bg-zinc-50 p-4">
         <h2 className="text-sm font-semibold text-zinc-900">
-          个人反馈介入变化轨迹
+          个人 AI 反馈前后问题变化
         </h2>
         <p className="mt-1 text-xs text-zinc-500">
-          该轨迹反映代码问题代理变化，不等同于成绩曲线或能力成长曲线；不同任务难度未校正。
+          每个点表示该学生在一个课堂任务中的 AI
+          反馈前后问题负荷差值；不可比较的任务不绘制为 0。
         </p>
         <div className="mt-3">
           {hasComparablePoints ? (

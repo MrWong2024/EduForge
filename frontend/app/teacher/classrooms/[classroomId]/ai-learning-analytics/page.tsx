@@ -7,7 +7,10 @@ import {
   AiLearningAnalyticsClassDeltaChart,
   AiLearningAnalyticsRatesChart,
 } from "@/components/teacher/AiLearningAnalyticsCharts";
-import { AiLearningAnalyticsMethodologyPanel } from "@/components/teacher/AiLearningAnalyticsMethodology";
+import {
+  AiLearningAnalyticsMethodologyPanel,
+  AiLearningAnalyticsMetricGuide,
+} from "@/components/teacher/AiLearningAnalyticsMethodology";
 import {
   TaskExclusionPanel,
   type TaskExclusionPanelTask,
@@ -45,7 +48,7 @@ import { paths } from "@/lib/routes/paths";
 import { getCommonErrorSummary } from "@/lib/ui/status";
 import { buildQueryString, toDisplayDate, toDisplayText } from "@/lib/ui/format";
 
-const STUDENT_PAGE_SIZE = 20;
+const STUDENT_PAGE_SIZE = 100;
 
 type AiLearningAnalyticsPageProps = {
   params: Promise<{ classroomId: string }>;
@@ -299,12 +302,18 @@ function SummarySection({
           </dd>
         </div>
         <div>
-          <dt className="text-xs text-zinc-500">反馈后代码变化率</dt>
+          <dt className="text-xs text-zinc-500">
+            首次反馈后重提代码变化率
+          </dt>
           <dd className="mt-0.5 font-medium tabular-nums text-zinc-900">
             {formatAiLearningAnalyticsPercent(
               summary.postFeedbackCodeChangeRate,
             )}
           </dd>
+          <p className="mt-1 text-[11px] leading-5 text-zinc-500">
+            比较首次成功获得 AI
+            反馈的提交与反馈完成后的第一次后续提交。
+          </p>
         </div>
         <div>
           <dt className="text-xs text-zinc-500">平均问题负荷 before</dt>
@@ -555,6 +564,8 @@ export default async function AiLearningAnalyticsPage({
 
       <AiLearningAnalyticsMethodologyPanel methodology={overview.methodology} />
 
+      <AiLearningAnalyticsMetricGuide variant="class" />
+
       <section className="rounded-lg border border-zinc-200 bg-white p-4 text-sm">
         <h2 className="font-medium text-zinc-900">统计窗口筛选</h2>
         <div className="mt-2 flex flex-wrap items-center gap-3">
@@ -580,6 +591,9 @@ export default async function AiLearningAnalyticsPage({
           </span>
         </div>
         <p className="mt-2 text-xs text-zinc-500">
+          统计窗口按课堂任务发布时间筛选；任务纳入后，该任务下的完整提交链参与分析。
+        </p>
+        <p className="mt-1 text-xs text-zinc-500">
           统计生成于：{toDisplayDate(context.generatedAt)}
         </p>
       </section>
@@ -653,7 +667,8 @@ export default async function AiLearningAnalyticsPage({
       <section className="rounded-lg border border-zinc-200 bg-white p-4">
         <h2 className="text-sm font-semibold text-zinc-900">学生分析列表</h2>
         <p className="mt-1 text-xs text-zinc-500">
-          仅展示当前班级 ACTIVE 学生；不进行前端排序、搜索或排名。
+          仅展示当前班级 ACTIVE 学生；每页最多 {STUDENT_PAGE_SIZE}
+          名，不进行前端排序、搜索或排名。
         </p>
         {studentListState.mode === "error" ? (
           <div className="mt-3">
@@ -668,9 +683,9 @@ export default async function AiLearningAnalyticsPage({
             const students = studentListState.data;
             const totalPages = Math.max(
               1,
-              Math.ceil(students.total / students.limit),
+              Math.ceil(students.total / STUDENT_PAGE_SIZE),
             );
-            const showPagination = students.total > students.limit;
+            const showPagination = students.total > STUDENT_PAGE_SIZE;
             const isCurrentPageEmpty =
               students.total > 0 && students.items.length === 0;
             return (

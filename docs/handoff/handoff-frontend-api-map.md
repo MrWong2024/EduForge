@@ -145,7 +145,7 @@
 - AI 反馈介入成效分析总览：`ai-learning-analytics/page.tsx` -> `client.fetchJson("classrooms/:id/ai-learning-analytics?..." )` -> `/api/proxy/classrooms/:id/ai-learning-analytics` -> `GET /api/classrooms/:classroomId/ai-learning-analytics`。
   - 使用 `toAiLearningAnalyticsOverviewResponse`；query 仅为 `window=all|7d|30d` 与逗号分隔的 `excludedTaskIds`。
 - AI 反馈介入成效分析学生列表：同一 `page.tsx` -> `/api/proxy/classrooms/:id/ai-learning-analytics/students` -> `GET /api/classrooms/:classroomId/ai-learning-analytics/students`。
-  - 使用 `toAiLearningAnalyticsStudentsResponse`；与总览传递相同 `window/excludedTaskIds`，另固定 `limit=20` 并从 URL 传 `page`；学生列表失败只形成局部错误态。
+  - 使用 `toAiLearningAnalyticsStudentsResponse`；与总览传递相同 `window/excludedTaskIds`，另固定 `limit=100` 并从 URL 传 `page`；学生列表失败只形成局部错误态。
 - AI 反馈介入成效分析学生详情：`ai-learning-analytics/students/[studentId]/page.tsx` -> `/api/proxy/classrooms/:id/ai-learning-analytics/students/:studentId` -> `GET /api/classrooms/:classroomId/ai-learning-analytics/students/:studentId`。
   - 使用 `toAiLearningAnalyticsStudentDetailResponse`；后端请求只传 `window/excludedTaskIds`，URL 中的 `page` 仅用于返回班级分析时恢复列表分页，绝不传给详情接口。
 - 上述三条正式请求全部由 `fetchJson` 经 `/api/proxy/**` 发出；前端只格式化后端返回值、映射枚举并结合可比计数控制“—”/缺口展示，不重算 anchor、配对、issueLoad、outcome、growthTrend、rate 分母或任何聚合指标。
