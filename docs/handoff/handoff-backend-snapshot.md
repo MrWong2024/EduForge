@@ -103,7 +103,7 @@ AI Feedback：
 聚合与分析：
 
 - 班级看板、学生学习看板、课程总览、周报、学习轨迹、课堂复盘、AI 指标、教学快照预检均已有后端接口。
-- 班级级“AI 反馈介入成效分析”已提供总览/任务趋势、ACTIVE 学生分页列表和单学生全任务详情；方法学版本固定为 `AI_FEEDBACK_INTERVENTION_V1`，只反映 EduForge AI 反馈介入后的提交行为与代码问题代理变化，不代表学生全部 AI 使用、正式成绩或因果贡献。
+- 班级级“AI 反馈介入成效分析”已升级为向后兼容 V1.1：`scope` 继续为 `AI_FEEDBACK_INTERVENTION_V1`，新增 `version=AI_FEEDBACK_INTERVENTION_V1_1`；在保留 legacy `STABLE/stable*Count/growthTrend/outcome` 的同时，将可比持平拆为“前后均无 ERROR/WARN”与“前后问题负荷相同但仍有问题”，并增加学生净总体结果与互斥反馈参与阶段。ACTIVE 学生列表支持服务端姓名/学号搜索、总体结果和反馈参与阶段 AND 筛选，筛选后分页且区分过滤后 `total` 与全部 ACTIVE `activeStudentsTotal`。该能力仍只反映 EduForge AI 反馈介入后的提交行为与代码问题代理变化，不代表学生全部 AI 使用、正式成绩、时间趋势、学习态度、能力或因果贡献。
 - 过程性评价（JSON + CSV）已接入 `excludedTaskIds`，支持任务排除后重新计算；排除任务不参与提交、迭代、迟交、AI job 总次数、AI 任务覆盖/成功、最新任务反馈均值、`topTags`、score/risk 计算，排除全部任务时 ACTIVE 学生仍保留且 score 为 0；评分已升级为任务覆盖率 45、提交迭代质量 15、AI 使用质量 20、代码质量代理 20。
 - 周报、课程总览、学习轨迹、复盘包、过程性评价等聚合接口均要求遵守 Enrollment-only 与 classroomTask 隔离。
 

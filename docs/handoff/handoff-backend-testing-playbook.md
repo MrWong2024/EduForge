@@ -82,6 +82,8 @@ cd backend
 npm run test -- ai-learning-analytics.service.spec.ts --runInBand
 ```
 
+该定向单测同时覆盖 V1.1 公共值域、精细 outcome、overallOutcome/growthTrend 单向映射、六种 engagementStatus、DTO 搜索筛选校验与学生列表两条查询路径。
+
 ```powershell
 cd backend
 $env:NODE_ENV="test"
@@ -178,9 +180,11 @@ npm run test:e2e -- backend/test/classroom-learning-loop.e2e-spec.ts
   - 关键断言：CSV header/转义正确，不含敏感字段；CSV 下载内容以 UTF-8 BOM（`\uFEFF`）开头以兼容 Excel 中文；`lateSubmissionsCount/lateTasksCount` 存在（迟交字段回归）；0 次提交 ACTIVE 学生仍保留在过程性评价结果中，且 `score=0`，不得获得 codeQualityProxy 保底分；评分样例覆盖任务覆盖率、`iteratedTasksCount`、AI 任务覆盖/成功、WARN/ERROR 不同扣分；`excludedTaskIds` 排除任务后，`publishedTasksCount`、`submittedTasksRate` 分母、提交/迭代/迟交、AI job 总次数、AI 任务覆盖/成功、AI feedback、`topTags` 与 CSV score 均按剩余任务重新计算；CSV header 包含 `iteratedTasksCount/aiRequestedTasksCount/aiSucceededTasksCount/avgWarnItems`；排除全部任务时 ACTIVE 学生仍保留且 score 为 0。
   - 重要性：保证过程性评价 JSON/CSV 同口径可导出。
 - `backend/src/modules/classrooms/services/ai-learning-analytics.service.spec.ts`
-  - 覆盖：`AI_FEEDBACK_INTERVENTION_V1` 标准样本的稳定 submission 排序与 anchor 选择、job 完成前/后提交、CRLF/LF 与整体空白标准化、`ERROR=1/WARN=0.5/INFO=0`、非 AI feedback 排除、SUCCEEDED 无反馈负荷 0、`IMPROVED/STABLE/REGRESSED/NOT_COMPARABLE`、四种 growthTrend、零分母、零提交任务/学生、`excludedTaskIds` 以及 window 不截断入选任务 submission 链。
+  - 覆盖：V1.1 保持 legacy outcome/growthTrend 值域；标准样本稳定 submission 排序与 anchor 选择、job 完成前/后提交、CRLF/LF 与整体空白标准化、`ERROR=1/WARN=0.5/INFO=0`、非 AI feedback 排除、SUCCEEDED 无反馈负荷 0；精确区分 `0→0 = REMAINED_CLEAN + legacy STABLE` 与 `0.5→0.5 = UNCHANGED_WITH_ISSUES + legacy STABLE`，并覆盖改善、恶化、不可比较、stable 恒等关系和四个精细 rate 分母。
+  - 学生语义覆盖：四种 `overallOutcome`、只从 overallOutcome 映射四种 legacy `growthTrend`、六种 `engagementStatus` 与优先级；`q` trim/空白归一/最大长度/中文姓名/英文大小写/学号/不匹配 studentId；overallOutcome 与 engagementStatus 筛选、三过滤 AND、筛选后分页、`total/activeStudentsTotal/filters`；q-only 只加载当前页样本、指标筛选只执行一次候选批量样本查询且不重复加载当前页、零候选跳过样本查询；`excludedTaskIds` 以及 window 不截断入选任务 submission 链。
 - `backend/test/classroom-ai-learning-analytics.e2e-spec.ts`
-  - 覆盖：三个 `GET /api/classrooms/:classroomId/ai-learning-analytics...` 真实 HTTP 接口；未登录 401、非教师 403、非 owner 404；ACTIVE/REMOVED Enrollment；零提交学生与任务；aiRequested/aiDelivered 区分；job 完成前后提交；代码变化；可比样本三类结果；`window=all|7d|30d`、`excludedTaskIds` 与 DTO 400；学生分页和详情安全 404。
+  - 覆盖：三个 `GET /api/classrooms/:classroomId/ai-learning-analytics...` 真实 HTTP 接口；`methodology.scope` 保持 V1 且 `version=AI_FEEDBACK_INTERVENTION_V1_1`；未登录 401、非教师 403、非 owner 404；ACTIVE/REMOVED Enrollment；零提交学生与任务；aiRequested/aiDelivered 区分；job 完成前后提交；代码变化；`REMAINED_CLEAN/UNCHANGED_WITH_ISSUES` 与 legacy STABLE 并存；overview/task/student 精细计数、rate 与恒等关系；overallOutcome/legacy growthTrend；detail task point 的 detailed/legacy outcome。
+  - 搜索筛选矩阵：姓名与学号子串、英文大小写、无结果、REMOVED/外班隔离；六种 engagementStatus、overallOutcome、`q + overallOutcome + engagementStatus` AND、筛选后分页、过滤后 `total` 与固定 `activeStudentsTotal`、filters 回显；非法枚举和超长 q 返回 400；`window/excludedTaskIds` 先改变有效任务及学生指标再筛选。
   - 隔离断言：同一 `taskId` 同时发布到两个课堂时，只按当前 `classroomTaskId` 统计；REMOVED 学生即使保留 submission/job 也不进入结果。测试直接构造可控 job/feedback，不调用 processor、worker 或真实外部 AI。
   - 重要性：锁定“EduForge AI 反馈介入后的行为与代码问题代理”口径；结果不代表学生全部 AI 使用、正式成绩或因果贡献。
 - `backend/test/classroom-task-deadline.e2e-spec.ts`

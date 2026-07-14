@@ -1,0 +1,58 @@
+export const AI_LEARNING_ANALYTICS_SCOPE =
+  'AI_FEEDBACK_INTERVENTION_V1' as const;
+export const AI_LEARNING_ANALYTICS_VERSION =
+  'AI_FEEDBACK_INTERVENTION_V1_1' as const;
+export const AI_LEARNING_ANALYTICS_SAMPLE_UNIT =
+  'STUDENT_CLASSROOM_TASK' as const;
+export const AI_LEARNING_ANALYTICS_QUALITY_PROXY =
+  'ERROR_PLUS_HALF_WARN' as const;
+export const AI_LEARNING_ANALYTICS_DISCLAIMER =
+  '本分析仅反映 EduForge AI 反馈介入后的提交行为与代码问题代理变化，不代表 AI 对学习成绩或能力提升的因果贡献。';
+
+export const AI_LEARNING_ANALYTICS_OUTCOMES = [
+  'IMPROVED',
+  'STABLE',
+  'REGRESSED',
+  'NOT_COMPARABLE',
+] as const;
+export type AiLearningAnalyticsOutcome =
+  (typeof AI_LEARNING_ANALYTICS_OUTCOMES)[number];
+
+export const AI_LEARNING_ANALYTICS_DETAILED_OUTCOMES = [
+  'IMPROVED',
+  'REMAINED_CLEAN',
+  'UNCHANGED_WITH_ISSUES',
+  'REGRESSED',
+  'NOT_COMPARABLE',
+] as const;
+export type AiLearningAnalyticsDetailedOutcome =
+  (typeof AI_LEARNING_ANALYTICS_DETAILED_OUTCOMES)[number];
+
+export const AI_LEARNING_ANALYTICS_GROWTH_TRENDS = [
+  'INSUFFICIENT_DATA',
+  'IMPROVING',
+  'STABLE',
+  'DECLINING',
+] as const;
+export type AiLearningAnalyticsGrowthTrend =
+  (typeof AI_LEARNING_ANALYTICS_GROWTH_TRENDS)[number];
+
+export const AI_LEARNING_ANALYTICS_OVERALL_OUTCOMES = [
+  'INSUFFICIENT_DATA',
+  'IMPROVED_OVERALL',
+  'NO_NET_CHANGE',
+  'REGRESSED_OVERALL',
+] as const;
+export type AiLearningAnalyticsOverallOutcome =
+  (typeof AI_LEARNING_ANALYTICS_OVERALL_OUTCOMES)[number];
+
+export const AI_LEARNING_ANALYTICS_ENGAGEMENT_STATUSES = [
+  'NO_SUBMISSION',
+  'SUBMITTED_WITHOUT_AI_REQUEST',
+  'AI_REQUESTED_WITHOUT_DELIVERY',
+  'AI_DELIVERED_WITHOUT_RESUBMISSION',
+  'RESUBMITTED_WITHOUT_COMPARABLE',
+  'QUALITY_COMPARABLE',
+] as const;
+export type AiLearningAnalyticsEngagementStatus =
+  (typeof AI_LEARNING_ANALYTICS_ENGAGEMENT_STATUSES)[number];

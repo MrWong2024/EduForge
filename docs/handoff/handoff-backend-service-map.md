@@ -488,10 +488,10 @@
 
 - Service: `backend/src/modules/classrooms/services/ai-learning-analytics.service.ts`
 - Domain: `Classroom + ClassroomTask + Enrollment + Submission + AiFeedbackJob + Feedback`
-- Actions: `resolve-effective-tasks`, `build-standard-samples`, `aggregate-overview/task/student`, `page-active-students`
+- Actions: `resolve-effective-tasks`, `build-standard-samples`, `aggregate-overview/task/student`, `search/filter/page-active-students`
 - I/O Shape:
-  - In: `classroomId`, `teacherId`, `window(all|7d|30d)`, `excludedTaskIds`, optional `page/limit` or `studentId`
-  - Out: `overview + taskTrends` | `ACTIVE student paged list` | `student detail + taskPoints`
+  - In: `classroomId`, `teacherId`, `window(all|7d|30d)`, `excludedTaskIds`, optional `page/limit/q/overallOutcome/engagementStatus` or `studentId`
+  - Out: `overview + taskTrends` | `ACTIVE student searched/filtered paged list + context/filters/totals` | `student detail + taskPoints`
 - Key Methods:
   - `getOverview(classroomId, query, teacherId)`
   - `getStudents(classroomId, query, teacherId)`
@@ -499,17 +499,18 @@
   - `buildAiLearningAnalyticsStandardSamples(submissions, jobs, feedbackItems)`（同文件纯计算入口，供规则单测）
 - AuthZ Boundary: `teacher-only + owner-only`；上层 `ClassroomsService` 延续既有角色校验与委托模式，专用 service 用 `_id + teacherId` 查询课堂；不存在与非 owner 统一 `404 Classroom not found`；学生详情只允许当前课堂 ACTIVE Enrollment，其他学生安全返回 404。
 - Metrics/Isolation: 数据隔离键固定为 `classroomTaskId`；学生全集只来自 `Enrollment(role=STUDENT,status=ACTIVE)`；Feedback 查询与计算双重限定 `source=AI`；同一个 `taskId` 发布到其他课堂不会进入当前课堂任务、提交、job 或 feedback 范围。
-- Consistency/Constraints: 有效任务先按 `classroomId + ClassroomTask.publishedAt window` 选择，再应用 `excludedTaskIds`，稳定排序为 `publishedAt ASC, classroomTaskId ASC`；窗口不再裁剪入选任务的 submission 链。标准样本单位固定为 `studentId + classroomTaskId`，每个组合最多一个样本；submission 顺序为 `attemptNo ASC, submittedAt ASC, submissionId ASC`。`aiRequested` 表示组合内存在任意 job；`aiDelivered` 表示存在 SUCCEEDED job；anchor 为排序最早的 SUCCEEDED-job submission，`feedbackCompletedAt` 使用该 job 的 `updatedAt`。
-- Pairing/Proxy: `postSubmission` 为 anchor 后第一条同时满足 `attemptNo` 更大且 `submittedAt > feedbackCompletedAt` 的提交；`comparableAfterSubmission` 还必须拥有 SUCCEEDED job。代码变化只做 `CRLF -> LF + 整体 trim`。仅在可比时计算 `issueLoad=ERROR*1+WARN*0.5`，内部使用半分整数；`before-after >0/0/<0` 对应 `IMPROVED/STABLE/REGRESSED`，不可比为 `NOT_COMPARABLE` 且任务点三个 issueLoad 字段为 `null`。比率与平均值统一保留 4 位小数，分母为 0 返回 0。
-- Rate Denominators: `aiStudentCoverageRate=requested distinct students/ACTIVE students`；`aiTaskCoverageRate=requested student-task/submitted student-task`；`aiDeliveryRate=delivered/requested`；`postFeedbackResubmissionRate=resubmitted/delivered`；`postFeedbackCodeChangeRate=codeChanged/resubmitted`；`qualityComparableRate=comparable/delivered`；`improvedRate=improved/comparable`。任务趋势沿用对应 student-task 分母（不返回班级级 distinct-student coverage）；三个平均值仅基于 comparable 样本。
+- Consistency/Constraints: 方法学返回 `scope=AI_FEEDBACK_INTERVENTION_V1` 与增量 `version=AI_FEEDBACK_INTERVENTION_V1_1`，既有 disclaimer 不变。有效任务先按 `classroomId + ClassroomTask.publishedAt window` 选择，再应用 `excludedTaskIds`，稳定排序为 `publishedAt ASC, classroomTaskId ASC`；窗口不再裁剪入选任务的 submission 链。标准样本单位固定为 `studentId + classroomTaskId`，每个组合最多一个样本；submission 顺序为 `attemptNo ASC, submittedAt ASC, submissionId ASC`。`aiRequested` 表示组合内存在任意 job；`aiDelivered` 表示存在 SUCCEEDED job；anchor 为排序最早的 SUCCEEDED-job submission，`feedbackCompletedAt` 使用该 job 的 `updatedAt`。
+- Pairing/Proxy: `postSubmission` 为 anchor 后第一条同时满足 `attemptNo` 更大且 `submittedAt > feedbackCompletedAt` 的提交；`comparableAfterSubmission` 还必须拥有 SUCCEEDED job。代码变化只做 `CRLF -> LF + 整体 trim`。仅在可比时计算 `issueLoad=ERROR*1+WARN*0.5`，内部使用半分整数；V1.1 `detailedOutcome` 按半分整数判定：`before>after -> IMPROVED`、`before=after=0 -> REMAINED_CLEAN`、`before=after>0 -> UNCHANGED_WITH_ISSUES`、`before<after -> REGRESSED`，不可比为 `NOT_COMPARABLE`。legacy `outcome` 保持 `IMPROVED|STABLE|REGRESSED|NOT_COMPARABLE`，两类精细持平都投影为 `STABLE`；`stableCount = remainedCleanCount + unchangedWithIssuesCount` 在班级、任务和学生聚合层均成立。不可比任务点三个 issueLoad 字段仍为 `null`。比率与平均值统一保留 4 位小数，分母为 0 返回 0。
+- Student Semantics: `overallOutcome` 只按当前有效任务范围内所有质量可比样本的 `issueLoadDeltaHalfUnitsTotal` 判断：无可比任务为 `INSUFFICIENT_DATA`，总和正/零/负分别为 `IMPROVED_OVERALL/NO_NET_CHANGE/REGRESSED_OVERALL`；`NO_NET_CHANGE` 可能由改善与恶化抵消，不表示每个任务持平，也不是时间序列趋势或能力结论。legacy `growthTrend` 只由 `overallOutcome` 单向映射为 `INSUFFICIENT_DATA/IMPROVING/STABLE/DECLINING`，不独立重算。`engagementStatus` 按互斥优先级形成：`submitted=0 -> NO_SUBMISSION`；否则 `requested=0 -> SUBMITTED_WITHOUT_AI_REQUEST`；否则 `delivered=0 -> AI_REQUESTED_WITHOUT_DELIVERY`；否则 `resubmitted=0 -> AI_DELIVERED_WITHOUT_RESUBMISSION`；否则 `comparable=0 -> RESUBMITTED_WITHOUT_COMPARABLE`；否则 `QUALITY_COMPARABLE`。它只表示当前范围到达的最深反馈参与阶段。
+- Rate Denominators: `aiStudentCoverageRate=requested distinct students/ACTIVE students`；`aiTaskCoverageRate=requested student-task/submitted student-task`；`aiDeliveryRate=delivered/requested`；`postFeedbackResubmissionRate=resubmitted/delivered`；`postFeedbackCodeChangeRate=codeChanged/resubmitted`；`qualityComparableRate=comparable/delivered`；`improvedRate/remainedCleanRate/unchangedWithIssuesRate/regressedRate` 均为对应精细结果数除以 comparable。任务趋势沿用对应 student-task 分母（不返回班级级 distinct-student coverage）；三个平均值仅基于 comparable 样本。
 - Deps/Side Effects: `ClassroomModel`, `CourseModel`, `ClassroomTaskModel`, `TaskModel`, `SubmissionModel`, `AiFeedbackJobModel`, `FeedbackModel`, `UserModel`, `EnrollmentService`；全部只读，无数据库写入、无 provider/worker 调用。
-- Performance Notes: 每次请求先完成 owner 课堂、有效任务、ACTIVE 成员与公开上下文批量查询；submission 按有效 `classroomTaskIds + scoped studentIds` 一次查询，再按 submissionIds 并行批量查 jobs 与 AI feedback；projection + lean + Map 配对，无按学生/任务 N+1。学生列表只为当前页学生加载 submission/job/feedback。
+- Performance Notes: 每次请求先完成 owner 课堂、有效任务、ACTIVE 成员与公开上下文批量查询；学生列表一次批量读取全部 ACTIVE 学生的 `_id/name/studentNo` 并按 `studentNo/studentName/studentId` 稳定排序，`q` 只在这些公开字段上做 trim 后、不区分大小写的内存字符串子串匹配，不构造 Mongo regex、不搜索 studentId。无指标筛选（含 q-only）时先对 q 结果分页，只为当前页学生批量加载 submission/job/AI feedback；存在 `overallOutcome` 或 `engagementStatus` 时，对 q 候选学生执行一次有边界的 submission 批量查询，再按 submissionIds 并行批量查 jobs/AI feedback、构建每名候选 metrics、AND 筛选、计算 total、分页并复用已算 metrics，不重复加载当前页。q 后零候选时跳过样本查询。所有路径均为 projection + lean + Map 配对，无按学生/任务 N+1；`window/excludedTaskIds` 始终先确定 effective tasks，再计算筛选指标。
 - SoT: `backend/src/modules/classrooms/services/ai-learning-analytics.service.ts`; `backend/src/modules/classrooms/dto/query-ai-learning-analytics.dto.ts`; `backend/test/classroom-ai-learning-analytics.e2e-spec.ts`
 - Failure Modes:
   - classroomId 非法 -> `400 classroomId must be a valid ObjectId`
   - 课堂不存在或非 owner -> `404 Classroom not found`
   - studentId 非 ACTIVE/外班/REMOVED/非法 -> `404 Student not found`
-  - window/excludedTaskIds/page/limit 非法 -> DTO `400`
+  - window/excludedTaskIds/page/limit/q/overallOutcome/engagementStatus 非法 -> DTO `400`
   - 空任务、空成员、空 submission/job/feedback -> 返回稳定零值/空数组，而非异常
 
 ## Service Card 09

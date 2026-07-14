@@ -29,33 +29,40 @@ import {
 } from '../dto/query-ai-learning-analytics.dto';
 import { EnrollmentService } from '../enrollments/services/enrollment.service';
 import { Classroom } from '../schemas/classroom.schema';
+import {
+  AI_LEARNING_ANALYTICS_DISCLAIMER,
+  AI_LEARNING_ANALYTICS_QUALITY_PROXY,
+  AI_LEARNING_ANALYTICS_SAMPLE_UNIT,
+  AI_LEARNING_ANALYTICS_SCOPE,
+  AI_LEARNING_ANALYTICS_VERSION,
+} from '../types/ai-learning-analytics.types';
+import type {
+  AiLearningAnalyticsDetailedOutcome,
+  AiLearningAnalyticsEngagementStatus,
+  AiLearningAnalyticsGrowthTrend,
+  AiLearningAnalyticsOutcome,
+  AiLearningAnalyticsOverallOutcome,
+} from '../types/ai-learning-analytics.types';
 
-export const AI_LEARNING_ANALYTICS_SCOPE =
-  'AI_FEEDBACK_INTERVENTION_V1' as const;
-export const AI_LEARNING_ANALYTICS_SAMPLE_UNIT =
-  'STUDENT_CLASSROOM_TASK' as const;
-export const AI_LEARNING_ANALYTICS_QUALITY_PROXY =
-  'ERROR_PLUS_HALF_WARN' as const;
-export const AI_LEARNING_ANALYTICS_DISCLAIMER =
-  '本分析仅反映 EduForge AI 反馈介入后的提交行为与代码问题代理变化，不代表 AI 对学习成绩或能力提升的因果贡献。';
-
-export const AI_LEARNING_ANALYTICS_OUTCOMES = [
-  'IMPROVED',
-  'STABLE',
-  'REGRESSED',
-  'NOT_COMPARABLE',
-] as const;
-export type AiLearningAnalyticsOutcome =
-  (typeof AI_LEARNING_ANALYTICS_OUTCOMES)[number];
-
-export const AI_LEARNING_ANALYTICS_GROWTH_TRENDS = [
-  'INSUFFICIENT_DATA',
-  'IMPROVING',
-  'STABLE',
-  'DECLINING',
-] as const;
-export type AiLearningAnalyticsGrowthTrend =
-  (typeof AI_LEARNING_ANALYTICS_GROWTH_TRENDS)[number];
+export {
+  AI_LEARNING_ANALYTICS_DETAILED_OUTCOMES,
+  AI_LEARNING_ANALYTICS_DISCLAIMER,
+  AI_LEARNING_ANALYTICS_ENGAGEMENT_STATUSES,
+  AI_LEARNING_ANALYTICS_GROWTH_TRENDS,
+  AI_LEARNING_ANALYTICS_OUTCOMES,
+  AI_LEARNING_ANALYTICS_OVERALL_OUTCOMES,
+  AI_LEARNING_ANALYTICS_QUALITY_PROXY,
+  AI_LEARNING_ANALYTICS_SAMPLE_UNIT,
+  AI_LEARNING_ANALYTICS_SCOPE,
+  AI_LEARNING_ANALYTICS_VERSION,
+} from '../types/ai-learning-analytics.types';
+export type {
+  AiLearningAnalyticsDetailedOutcome,
+  AiLearningAnalyticsEngagementStatus,
+  AiLearningAnalyticsGrowthTrend,
+  AiLearningAnalyticsOutcome,
+  AiLearningAnalyticsOverallOutcome,
+} from '../types/ai-learning-analytics.types';
 
 type ClassroomContextLean = Pick<Classroom, 'courseId' | 'name'> & WithId;
 type CourseContextLean = Pick<Course, 'code' | 'name' | 'term'> & WithId;
@@ -92,6 +99,7 @@ type AnalyticsStudent = {
 };
 type AnalyticsMethodology = {
   scope: typeof AI_LEARNING_ANALYTICS_SCOPE;
+  version: typeof AI_LEARNING_ANALYTICS_VERSION;
   sampleUnit: typeof AI_LEARNING_ANALYTICS_SAMPLE_UNIT;
   qualityProxy: typeof AI_LEARNING_ANALYTICS_QUALITY_PROXY;
   disclaimer: string;
@@ -121,6 +129,7 @@ export type AiLearningAnalyticsStandardSample = {
   issueLoadBeforeHalfUnits: number | null;
   issueLoadAfterHalfUnits: number | null;
   issueLoadDeltaHalfUnits: number | null;
+  detailedOutcome: AiLearningAnalyticsDetailedOutcome;
   outcome: AiLearningAnalyticsOutcome;
 };
 
@@ -132,6 +141,8 @@ type SampleAggregate = {
   postFeedbackCodeChangedCount: number;
   qualityComparableCount: number;
   improvedCount: number;
+  remainedCleanCount: number;
+  unchangedWithIssuesCount: number;
   stableCount: number;
   regressedCount: number;
   averageIssueLoadBefore: number;
@@ -186,6 +197,80 @@ const toIssueLoadHalfUnits = (feedbackItems: AnalyticsFeedbackLean[]) => {
     }
   }
   return halfUnits;
+};
+
+const classifyAiLearningAnalyticsOutcome = (
+  issueLoadBeforeHalfUnits: number,
+  issueLoadAfterHalfUnits: number,
+): {
+  detailedOutcome: AiLearningAnalyticsDetailedOutcome;
+  outcome: AiLearningAnalyticsOutcome;
+} => {
+  const issueLoadDeltaHalfUnits =
+    issueLoadBeforeHalfUnits - issueLoadAfterHalfUnits;
+  if (issueLoadDeltaHalfUnits > 0) {
+    return { detailedOutcome: 'IMPROVED', outcome: 'IMPROVED' };
+  }
+  if (issueLoadDeltaHalfUnits < 0) {
+    return { detailedOutcome: 'REGRESSED', outcome: 'REGRESSED' };
+  }
+  return issueLoadBeforeHalfUnits === 0
+    ? { detailedOutcome: 'REMAINED_CLEAN', outcome: 'STABLE' }
+    : { detailedOutcome: 'UNCHANGED_WITH_ISSUES', outcome: 'STABLE' };
+};
+
+export const deriveAiLearningAnalyticsOverallOutcome = (
+  qualityComparableTasksCount: number,
+  issueLoadDeltaHalfUnitsTotal: number,
+): AiLearningAnalyticsOverallOutcome => {
+  if (qualityComparableTasksCount === 0) {
+    return 'INSUFFICIENT_DATA';
+  }
+  if (issueLoadDeltaHalfUnitsTotal > 0) {
+    return 'IMPROVED_OVERALL';
+  }
+  return issueLoadDeltaHalfUnitsTotal < 0
+    ? 'REGRESSED_OVERALL'
+    : 'NO_NET_CHANGE';
+};
+
+export const mapAiLearningAnalyticsOverallOutcomeToGrowthTrend = (
+  overallOutcome: AiLearningAnalyticsOverallOutcome,
+): AiLearningAnalyticsGrowthTrend => {
+  const mapping: Record<
+    AiLearningAnalyticsOverallOutcome,
+    AiLearningAnalyticsGrowthTrend
+  > = {
+    INSUFFICIENT_DATA: 'INSUFFICIENT_DATA',
+    IMPROVED_OVERALL: 'IMPROVING',
+    NO_NET_CHANGE: 'STABLE',
+    REGRESSED_OVERALL: 'DECLINING',
+  };
+  return mapping[overallOutcome];
+};
+
+export const deriveAiLearningAnalyticsEngagementStatus = (metrics: {
+  submittedTasksCount: number;
+  aiRequestedTasksCount: number;
+  aiDeliveredTasksCount: number;
+  postFeedbackResubmittedTasksCount: number;
+  qualityComparableTasksCount: number;
+}): AiLearningAnalyticsEngagementStatus => {
+  if (metrics.submittedTasksCount === 0) {
+    return 'NO_SUBMISSION';
+  }
+  if (metrics.aiRequestedTasksCount === 0) {
+    return 'SUBMITTED_WITHOUT_AI_REQUEST';
+  }
+  if (metrics.aiDeliveredTasksCount === 0) {
+    return 'AI_REQUESTED_WITHOUT_DELIVERY';
+  }
+  if (metrics.postFeedbackResubmittedTasksCount === 0) {
+    return 'AI_DELIVERED_WITHOUT_RESUBMISSION';
+  }
+  return metrics.qualityComparableTasksCount === 0
+    ? 'RESUBMITTED_WITHOUT_COMPARABLE'
+    : 'QUALITY_COMPARABLE';
 };
 
 export const buildAiLearningAnalyticsStandardSamples = (
@@ -261,6 +346,7 @@ export const buildAiLearningAnalyticsStandardSamples = (
         issueLoadBeforeHalfUnits: null,
         issueLoadAfterHalfUnits: null,
         issueLoadDeltaHalfUnits: null,
+        detailedOutcome: 'NOT_COMPARABLE',
         outcome: 'NOT_COMPARABLE',
       });
       continue;
@@ -283,6 +369,7 @@ export const buildAiLearningAnalyticsStandardSamples = (
         issueLoadBeforeHalfUnits: null,
         issueLoadAfterHalfUnits: null,
         issueLoadDeltaHalfUnits: null,
+        detailedOutcome: 'NOT_COMPARABLE',
         outcome: 'NOT_COMPARABLE',
       });
       continue;
@@ -322,6 +409,7 @@ export const buildAiLearningAnalyticsStandardSamples = (
         issueLoadBeforeHalfUnits: null,
         issueLoadAfterHalfUnits: null,
         issueLoadDeltaHalfUnits: null,
+        detailedOutcome: 'NOT_COMPARABLE',
         outcome: 'NOT_COMPARABLE',
       });
       continue;
@@ -336,12 +424,10 @@ export const buildAiLearningAnalyticsStandardSamples = (
     );
     const issueLoadDeltaHalfUnits =
       issueLoadBeforeHalfUnits - issueLoadAfterHalfUnits;
-    const outcome: AiLearningAnalyticsOutcome =
-      issueLoadDeltaHalfUnits > 0
-        ? 'IMPROVED'
-        : issueLoadDeltaHalfUnits < 0
-          ? 'REGRESSED'
-          : 'STABLE';
+    const { detailedOutcome, outcome } = classifyAiLearningAnalyticsOutcome(
+      issueLoadBeforeHalfUnits,
+      issueLoadAfterHalfUnits,
+    );
 
     samples.push({
       studentId,
@@ -355,6 +441,7 @@ export const buildAiLearningAnalyticsStandardSamples = (
       issueLoadBeforeHalfUnits,
       issueLoadAfterHalfUnits,
       issueLoadDeltaHalfUnits,
+      detailedOutcome,
       outcome,
     });
   }
@@ -441,6 +528,8 @@ export class AiLearningAnalyticsService {
           aggregate.postFeedbackCodeChangedCount,
         qualityComparableStudentTaskCount: aggregate.qualityComparableCount,
         improvedStudentTaskCount: aggregate.improvedCount,
+        remainedCleanStudentTaskCount: aggregate.remainedCleanCount,
+        unchangedWithIssuesStudentTaskCount: aggregate.unchangedWithIssuesCount,
         stableStudentTaskCount: aggregate.stableCount,
         regressedStudentTaskCount: aggregate.regressedCount,
         aiStudentCoverageRate: this.toRate(
@@ -469,6 +558,18 @@ export class AiLearningAnalyticsService {
         ),
         improvedRate: this.toRate(
           aggregate.improvedCount,
+          aggregate.qualityComparableCount,
+        ),
+        remainedCleanRate: this.toRate(
+          aggregate.remainedCleanCount,
+          aggregate.qualityComparableCount,
+        ),
+        unchangedWithIssuesRate: this.toRate(
+          aggregate.unchangedWithIssuesCount,
+          aggregate.qualityComparableCount,
+        ),
+        regressedRate: this.toRate(
+          aggregate.regressedCount,
           aggregate.qualityComparableCount,
         ),
         averageIssueLoadBefore: aggregate.averageIssueLoadBefore,
@@ -501,25 +602,90 @@ export class AiLearningAnalyticsService {
     );
     const students = await this.loadStudents(base.activeStudentIds);
     students.sort((left, right) => this.compareStudents(left, right));
-    const pageStudents = students.slice((page - 1) * limit, page * limit);
-    const samples = await this.loadStandardSamples(
-      base.tasks.map((task) => task.classroomTaskId),
-      pageStudents.map((student) => student.studentId),
+    const trimmedQuery = query.q?.trim();
+    const normalizedQuery = trimmedQuery ? trimmedQuery : undefined;
+    const searchedStudents = normalizedQuery
+      ? students.filter((student) =>
+          this.matchesStudentSearch(student, normalizedQuery),
+        )
+      : students;
+    const hasMetricsFilter = Boolean(
+      query.overallOutcome || query.engagementStatus,
     );
-    const samplesByStudentId = this.groupSamplesBy(
-      samples,
-      (sample) => sample.studentId,
+    const taskIds = base.tasks.map((task) => task.classroomTaskId);
+
+    let filteredStudents = searchedStudents;
+    let metricsByStudentId = new Map<
+      string,
+      ReturnType<AiLearningAnalyticsService['buildStudentMetrics']>
+    >();
+    if (hasMetricsFilter && searchedStudents.length > 0) {
+      const candidateSamples = await this.loadStandardSamples(
+        taskIds,
+        searchedStudents.map((student) => student.studentId),
+      );
+      const samplesByStudentId = this.groupSamplesBy(
+        candidateSamples,
+        (sample) => sample.studentId,
+      );
+      metricsByStudentId = new Map(
+        searchedStudents.map((student) => [
+          student.studentId,
+          this.buildStudentMetrics(
+            samplesByStudentId.get(student.studentId) ?? [],
+          ),
+        ]),
+      );
+      filteredStudents = searchedStudents.filter((student) => {
+        const metrics = metricsByStudentId.get(student.studentId);
+        return (
+          metrics !== undefined &&
+          (!query.overallOutcome ||
+            metrics.overallOutcome === query.overallOutcome) &&
+          (!query.engagementStatus ||
+            metrics.engagementStatus === query.engagementStatus)
+        );
+      });
+    }
+
+    const pageStudents = filteredStudents.slice(
+      (page - 1) * limit,
+      page * limit,
     );
+    if (!hasMetricsFilter && pageStudents.length > 0) {
+      const pageSamples = await this.loadStandardSamples(
+        taskIds,
+        pageStudents.map((student) => student.studentId),
+      );
+      const samplesByStudentId = this.groupSamplesBy(
+        pageSamples,
+        (sample) => sample.studentId,
+      );
+      metricsByStudentId = new Map(
+        pageStudents.map((student) => [
+          student.studentId,
+          this.buildStudentMetrics(
+            samplesByStudentId.get(student.studentId) ?? [],
+          ),
+        ]),
+      );
+    }
 
     return {
+      context: base.context,
       page,
       limit,
-      total: students.length,
+      total: filteredStudents.length,
+      activeStudentsTotal: students.length,
+      filters: {
+        q: normalizedQuery ?? null,
+        overallOutcome: query.overallOutcome ?? null,
+        engagementStatus: query.engagementStatus ?? null,
+      },
       items: pageStudents.map((student) => ({
         ...student,
-        ...this.buildStudentMetrics(
-          samplesByStudentId.get(student.studentId) ?? [],
-        ),
+        ...(metricsByStudentId.get(student.studentId) ??
+          this.buildStudentMetrics([])),
       })),
     };
   }
@@ -766,6 +932,8 @@ export class AiLearningAnalyticsService {
     let postFeedbackCodeChangedCount = 0;
     let qualityComparableCount = 0;
     let improvedCount = 0;
+    let remainedCleanCount = 0;
+    let unchangedWithIssuesCount = 0;
     let stableCount = 0;
     let regressedCount = 0;
     let issueLoadBeforeHalfUnitsTotal = 0;
@@ -778,9 +946,16 @@ export class AiLearningAnalyticsService {
       postFeedbackResubmittedCount += sample.postFeedbackResubmitted ? 1 : 0;
       postFeedbackCodeChangedCount += sample.postFeedbackCodeChanged ? 1 : 0;
       qualityComparableCount += sample.qualityComparable ? 1 : 0;
-      improvedCount += sample.outcome === 'IMPROVED' ? 1 : 0;
-      stableCount += sample.outcome === 'STABLE' ? 1 : 0;
-      regressedCount += sample.outcome === 'REGRESSED' ? 1 : 0;
+      improvedCount += sample.detailedOutcome === 'IMPROVED' ? 1 : 0;
+      remainedCleanCount += sample.detailedOutcome === 'REMAINED_CLEAN' ? 1 : 0;
+      unchangedWithIssuesCount +=
+        sample.detailedOutcome === 'UNCHANGED_WITH_ISSUES' ? 1 : 0;
+      stableCount +=
+        sample.detailedOutcome === 'REMAINED_CLEAN' ||
+        sample.detailedOutcome === 'UNCHANGED_WITH_ISSUES'
+          ? 1
+          : 0;
+      regressedCount += sample.detailedOutcome === 'REGRESSED' ? 1 : 0;
       if (sample.qualityComparable) {
         issueLoadBeforeHalfUnitsTotal += sample.issueLoadBeforeHalfUnits ?? 0;
         issueLoadAfterHalfUnitsTotal += sample.issueLoadAfterHalfUnits ?? 0;
@@ -796,6 +971,8 @@ export class AiLearningAnalyticsService {
       postFeedbackCodeChangedCount,
       qualityComparableCount,
       improvedCount,
+      remainedCleanCount,
+      unchangedWithIssuesCount,
       stableCount,
       regressedCount,
       averageIssueLoadBefore: this.toIssueLoadAverage(
@@ -833,6 +1010,8 @@ export class AiLearningAnalyticsService {
         aggregate.postFeedbackCodeChangedCount,
       qualityComparableStudentCount: aggregate.qualityComparableCount,
       improvedStudentCount: aggregate.improvedCount,
+      remainedCleanStudentCount: aggregate.remainedCleanCount,
+      unchangedWithIssuesStudentCount: aggregate.unchangedWithIssuesCount,
       stableStudentCount: aggregate.stableCount,
       regressedStudentCount: aggregate.regressedCount,
       aiTaskCoverageRate: this.toRate(
@@ -855,6 +1034,18 @@ export class AiLearningAnalyticsService {
         aggregate.improvedCount,
         aggregate.qualityComparableCount,
       ),
+      remainedCleanRate: this.toRate(
+        aggregate.remainedCleanCount,
+        aggregate.qualityComparableCount,
+      ),
+      unchangedWithIssuesRate: this.toRate(
+        aggregate.unchangedWithIssuesCount,
+        aggregate.qualityComparableCount,
+      ),
+      regressedRate: this.toRate(
+        aggregate.regressedCount,
+        aggregate.qualityComparableCount,
+      ),
       averageIssueLoadBefore: aggregate.averageIssueLoadBefore,
       averageIssueLoadAfter: aggregate.averageIssueLoadAfter,
       averageIssueLoadDelta: aggregate.averageIssueLoadDelta,
@@ -863,16 +1054,11 @@ export class AiLearningAnalyticsService {
 
   private buildStudentMetrics(samples: AiLearningAnalyticsStandardSample[]) {
     const aggregate = this.aggregateSamples(samples);
-    let growthTrend: AiLearningAnalyticsGrowthTrend = 'INSUFFICIENT_DATA';
-    if (aggregate.qualityComparableCount > 0) {
-      growthTrend =
-        aggregate.issueLoadDeltaHalfUnitsTotal > 0
-          ? 'IMPROVING'
-          : aggregate.issueLoadDeltaHalfUnitsTotal < 0
-            ? 'DECLINING'
-            : 'STABLE';
-    }
-    return {
+    const overallOutcome = deriveAiLearningAnalyticsOverallOutcome(
+      aggregate.qualityComparableCount,
+      aggregate.issueLoadDeltaHalfUnitsTotal,
+    );
+    const baseMetrics = {
       submittedTasksCount: aggregate.submittedCount,
       aiRequestedTasksCount: aggregate.aiRequestedCount,
       aiDeliveredTasksCount: aggregate.aiDeliveredCount,
@@ -880,12 +1066,20 @@ export class AiLearningAnalyticsService {
       postFeedbackCodeChangedTasksCount: aggregate.postFeedbackCodeChangedCount,
       qualityComparableTasksCount: aggregate.qualityComparableCount,
       improvedTasksCount: aggregate.improvedCount,
+      remainedCleanTasksCount: aggregate.remainedCleanCount,
+      unchangedWithIssuesTasksCount: aggregate.unchangedWithIssuesCount,
       stableTasksCount: aggregate.stableCount,
       regressedTasksCount: aggregate.regressedCount,
       averageIssueLoadBefore: aggregate.averageIssueLoadBefore,
       averageIssueLoadAfter: aggregate.averageIssueLoadAfter,
       averageIssueLoadDelta: aggregate.averageIssueLoadDelta,
-      growthTrend,
+      overallOutcome,
+      growthTrend:
+        mapAiLearningAnalyticsOverallOutcomeToGrowthTrend(overallOutcome),
+    };
+    return {
+      ...baseMetrics,
+      engagementStatus: deriveAiLearningAnalyticsEngagementStatus(baseMetrics),
     };
   }
 
@@ -909,6 +1103,7 @@ export class AiLearningAnalyticsService {
       ),
       issueLoadAfter: this.toNullableIssueLoad(sample?.issueLoadAfterHalfUnits),
       issueLoadDelta: this.toNullableIssueLoad(sample?.issueLoadDeltaHalfUnits),
+      detailedOutcome: sample?.detailedOutcome ?? 'NOT_COMPARABLE',
       outcome: sample?.outcome ?? 'NOT_COMPARABLE',
     };
   }
@@ -916,6 +1111,7 @@ export class AiLearningAnalyticsService {
   private buildMethodology(): AnalyticsMethodology {
     return {
       scope: AI_LEARNING_ANALYTICS_SCOPE,
+      version: AI_LEARNING_ANALYTICS_VERSION,
       sampleUnit: AI_LEARNING_ANALYTICS_SAMPLE_UNIT,
       qualityProxy: AI_LEARNING_ANALYTICS_QUALITY_PROXY,
       disclaimer: AI_LEARNING_ANALYTICS_DISCLAIMER,
@@ -990,6 +1186,16 @@ export class AiLearningAnalyticsService {
     return studentNameComparison !== 0
       ? studentNameComparison
       : left.studentId.localeCompare(right.studentId);
+  }
+
+  private matchesStudentSearch(student: AnalyticsStudent, query: string) {
+    const normalizedQuery = query.toLowerCase();
+    const nameMatches =
+      student.studentName !== '未知学生' &&
+      student.studentName.toLowerCase().includes(normalizedQuery);
+    const studentNoMatches =
+      student.studentNo?.toLowerCase().includes(normalizedQuery) ?? false;
+    return nameMatches || studentNoMatches;
   }
 
   private toStudentPublic(student: StudentPublicLean): AnalyticsStudent {

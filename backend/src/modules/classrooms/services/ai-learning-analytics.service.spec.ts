@@ -7,10 +7,16 @@ import {
   QueryAiLearningAnalyticsStudentsDto,
 } from '../dto/query-ai-learning-analytics.dto';
 import {
+  AI_LEARNING_ANALYTICS_DETAILED_OUTCOMES,
+  AI_LEARNING_ANALYTICS_ENGAGEMENT_STATUSES,
   AI_LEARNING_ANALYTICS_GROWTH_TRENDS,
   AI_LEARNING_ANALYTICS_OUTCOMES,
+  AI_LEARNING_ANALYTICS_OVERALL_OUTCOMES,
   AiLearningAnalyticsService,
   buildAiLearningAnalyticsStandardSamples,
+  deriveAiLearningAnalyticsEngagementStatus,
+  deriveAiLearningAnalyticsOverallOutcome,
+  mapAiLearningAnalyticsOverallOutcomeToGrowthTrend,
   normalizeAiLearningAnalyticsCode,
 } from './ai-learning-analytics.service';
 import { AiFeedbackJobStatus } from '../../learning-tasks/ai-feedback/schemas/ai-feedback-job.schema';
@@ -171,6 +177,9 @@ const createServiceHarness = (options: ServiceHarnessOptions = {}) => {
     service,
     classroomId,
     teacherId,
+    submissionModel,
+    aiFeedbackJobModel,
+    feedbackModel,
     getCapturedClassroomTaskFilter: () => capturedClassroomTaskFilter,
     getCapturedSubmissionFilter: () => capturedSubmissionFilter,
   };
@@ -189,6 +198,27 @@ describe('AI learning analytics DTO and public semantics', () => {
       'IMPROVING',
       'STABLE',
       'DECLINING',
+    ]);
+    expect(AI_LEARNING_ANALYTICS_DETAILED_OUTCOMES).toEqual([
+      'IMPROVED',
+      'REMAINED_CLEAN',
+      'UNCHANGED_WITH_ISSUES',
+      'REGRESSED',
+      'NOT_COMPARABLE',
+    ]);
+    expect(AI_LEARNING_ANALYTICS_OVERALL_OUTCOMES).toEqual([
+      'INSUFFICIENT_DATA',
+      'IMPROVED_OVERALL',
+      'NO_NET_CHANGE',
+      'REGRESSED_OVERALL',
+    ]);
+    expect(AI_LEARNING_ANALYTICS_ENGAGEMENT_STATUSES).toEqual([
+      'NO_SUBMISSION',
+      'SUBMITTED_WITHOUT_AI_REQUEST',
+      'AI_REQUESTED_WITHOUT_DELIVERY',
+      'AI_DELIVERED_WITHOUT_RESUBMISSION',
+      'RESUBMITTED_WITHOUT_COMPARABLE',
+      'QUALITY_COMPARABLE',
     ]);
   });
 
@@ -219,6 +249,76 @@ describe('AI learning analytics DTO and public semantics', () => {
     await expect(validate(invalidTask)).resolves.toHaveLength(1);
     await expect(validate(invalidPage)).resolves.toHaveLength(2);
   });
+
+  it('normalizes q and validates search length plus V1.1 filters', async () => {
+    const normalized = plainToInstance(QueryAiLearningAnalyticsStudentsDto, {
+      q: '  张三  ',
+      overallOutcome: 'IMPROVED_OVERALL',
+      engagementStatus: 'QUALITY_COMPARABLE',
+    });
+    const blank = plainToInstance(QueryAiLearningAnalyticsStudentsDto, {
+      q: '   ',
+    });
+    const invalid = plainToInstance(QueryAiLearningAnalyticsStudentsDto, {
+      q: 'x'.repeat(101),
+      overallOutcome: 'IMPROVING',
+      engagementStatus: 'ENGAGED',
+    });
+
+    expect(normalized.q).toBe('张三');
+    expect(blank.q).toBeUndefined();
+    await expect(validate(normalized)).resolves.toHaveLength(0);
+    await expect(validate(blank)).resolves.toHaveLength(0);
+    await expect(validate(invalid)).resolves.toHaveLength(3);
+  });
+
+  it('derives overall outcomes once and maps them to legacy growth trends', () => {
+    expect(deriveAiLearningAnalyticsOverallOutcome(0, 10)).toBe(
+      'INSUFFICIENT_DATA',
+    );
+    expect(deriveAiLearningAnalyticsOverallOutcome(2, 1)).toBe(
+      'IMPROVED_OVERALL',
+    );
+    expect(deriveAiLearningAnalyticsOverallOutcome(2, 0)).toBe('NO_NET_CHANGE');
+    expect(deriveAiLearningAnalyticsOverallOutcome(2, -1)).toBe(
+      'REGRESSED_OVERALL',
+    );
+    expect(
+      AI_LEARNING_ANALYTICS_OVERALL_OUTCOMES.map(
+        mapAiLearningAnalyticsOverallOutcomeToGrowthTrend,
+      ),
+    ).toEqual(['INSUFFICIENT_DATA', 'IMPROVING', 'STABLE', 'DECLINING']);
+  });
+
+  it.each([
+    [0, 0, 0, 0, 0, 'NO_SUBMISSION'],
+    [1, 0, 0, 0, 0, 'SUBMITTED_WITHOUT_AI_REQUEST'],
+    [1, 1, 0, 0, 0, 'AI_REQUESTED_WITHOUT_DELIVERY'],
+    [1, 1, 1, 0, 0, 'AI_DELIVERED_WITHOUT_RESUBMISSION'],
+    [1, 1, 1, 1, 0, 'RESUBMITTED_WITHOUT_COMPARABLE'],
+    [1, 1, 1, 1, 1, 'QUALITY_COMPARABLE'],
+    [0, 1, 1, 1, 1, 'NO_SUBMISSION'],
+  ] as const)(
+    'derives the mutually exclusive engagement stage in priority order',
+    (
+      submittedTasksCount,
+      aiRequestedTasksCount,
+      aiDeliveredTasksCount,
+      postFeedbackResubmittedTasksCount,
+      qualityComparableTasksCount,
+      expected,
+    ) => {
+      expect(
+        deriveAiLearningAnalyticsEngagementStatus({
+          submittedTasksCount,
+          aiRequestedTasksCount,
+          aiDeliveredTasksCount,
+          postFeedbackResubmittedTasksCount,
+          qualityComparableTasksCount,
+        }),
+      ).toBe(expected);
+    },
+  );
 });
 
 describe('AI learning analytics standard sample rules', () => {
@@ -298,6 +398,7 @@ describe('AI learning analytics standard sample rules', () => {
       issueLoadBeforeHalfUnits: 2,
       issueLoadAfterHalfUnits: 0,
       issueLoadDeltaHalfUnits: 2,
+      detailedOutcome: 'IMPROVED',
       outcome: 'IMPROVED',
     });
   });
@@ -347,6 +448,7 @@ describe('AI learning analytics standard sample rules', () => {
       postFeedbackResubmitted: true,
       postFeedbackCodeChanged: true,
       qualityComparable: true,
+      detailedOutcome: 'REMAINED_CLEAN',
       outcome: 'STABLE',
     });
   });
@@ -385,6 +487,7 @@ describe('AI learning analytics standard sample rules', () => {
       postFeedbackResubmitted: false,
       postFeedbackCodeChanged: false,
       qualityComparable: false,
+      detailedOutcome: 'NOT_COMPARABLE',
       outcome: 'NOT_COMPARABLE',
     });
   });
@@ -458,17 +561,19 @@ describe('AI learning analytics standard sample rules', () => {
       issueLoadBeforeHalfUnits: 3,
       issueLoadAfterHalfUnits: 0,
       issueLoadDeltaHalfUnits: 3,
+      detailedOutcome: 'IMPROVED',
       outcome: 'IMPROVED',
     });
   });
 
   it.each([
-    [2, 0, 'IMPROVED'],
-    [1, 1, 'STABLE'],
-    [0, 2, 'REGRESSED'],
+    [2, 0, 'IMPROVED', 'IMPROVED'],
+    [0, 0, 'REMAINED_CLEAN', 'STABLE'],
+    [1, 1, 'UNCHANGED_WITH_ISSUES', 'STABLE'],
+    [0, 2, 'REGRESSED', 'REGRESSED'],
   ] as const)(
-    'classifies beforeHalfUnits=%s afterHalfUnits=%s as %s',
-    (beforeHalfUnits, afterHalfUnits, outcome) => {
+    'classifies beforeHalfUnits=%s afterHalfUnits=%s as %s with legacy %s',
+    (beforeHalfUnits, afterHalfUnits, detailedOutcome, outcome) => {
       const studentId = objectId();
       const classroomTaskId = objectId();
       const before = submission({
@@ -513,7 +618,7 @@ describe('AI learning analytics standard sample rules', () => {
         ],
       );
 
-      expect(sample.outcome).toBe(outcome);
+      expect(sample).toMatchObject({ detailedOutcome, outcome });
     },
   );
 
@@ -556,6 +661,7 @@ describe('AI learning analytics standard sample rules', () => {
       issueLoadBeforeHalfUnits: null,
       issueLoadAfterHalfUnits: null,
       issueLoadDeltaHalfUnits: null,
+      detailedOutcome: 'NOT_COMPARABLE',
       outcome: 'NOT_COMPARABLE',
     });
   });
@@ -575,6 +681,10 @@ describe('AiLearningAnalyticsService aggregation boundaries', () => {
       effectiveTaskCount: 0,
       window: 'all',
     });
+    expect(result.methodology).toMatchObject({
+      scope: 'AI_FEEDBACK_INTERVENTION_V1',
+      version: 'AI_FEEDBACK_INTERVENTION_V1_1',
+    });
     expect(result.summary).toMatchObject({
       activeStudentsCount: 0,
       submittedStudentTaskCount: 0,
@@ -582,6 +692,11 @@ describe('AiLearningAnalyticsService aggregation boundaries', () => {
       aiDeliveredStudentTaskCount: 0,
       aiStudentCoverageRate: 0,
       aiTaskCoverageRate: 0,
+      remainedCleanStudentTaskCount: 0,
+      unchangedWithIssuesStudentTaskCount: 0,
+      remainedCleanRate: 0,
+      unchangedWithIssuesRate: 0,
+      regressedRate: 0,
       averageIssueLoadDelta: 0,
     });
     expect(result.taskTrends).toEqual([]);
@@ -618,6 +733,9 @@ describe('AiLearningAnalyticsService aggregation boundaries', () => {
       postFeedbackCodeChangeRate: 0,
       qualityComparableRate: 0,
       improvedRate: 0,
+      remainedCleanRate: 0,
+      unchangedWithIssuesRate: 0,
+      regressedRate: 0,
       averageIssueLoadBefore: 0,
       averageIssueLoadAfter: 0,
       averageIssueLoadDelta: 0,
@@ -628,8 +746,13 @@ describe('AiLearningAnalyticsService aggregation boundaries', () => {
       submittedStudentCount: 0,
       aiRequestedStudentCount: 0,
       qualityComparableStudentCount: 0,
+      remainedCleanStudentCount: 0,
+      unchangedWithIssuesStudentCount: 0,
       aiTaskCoverageRate: 0,
       improvedRate: 0,
+      remainedCleanRate: 0,
+      unchangedWithIssuesRate: 0,
+      regressedRate: 0,
     });
   });
 
@@ -667,11 +790,25 @@ describe('AiLearningAnalyticsService aggregation boundaries', () => {
       teacherId.toString(),
     );
 
-    expect(list).toMatchObject({ page: 1, limit: 20, total: 1 });
+    expect(list).toMatchObject({
+      page: 1,
+      limit: 20,
+      total: 1,
+      activeStudentsTotal: 1,
+      filters: {
+        q: null,
+        overallOutcome: null,
+        engagementStatus: null,
+      },
+    });
     expect(list.items[0]).toMatchObject({
       studentId: activeStudentId.toString(),
       submittedTasksCount: 0,
       qualityComparableTasksCount: 0,
+      remainedCleanTasksCount: 0,
+      unchangedWithIssuesTasksCount: 0,
+      overallOutcome: 'INSUFFICIENT_DATA',
+      engagementStatus: 'NO_SUBMISSION',
       growthTrend: 'INSUFFICIENT_DATA',
     });
     expect(detail.taskPoints).toHaveLength(1);
@@ -683,6 +820,7 @@ describe('AiLearningAnalyticsService aggregation boundaries', () => {
       issueLoadBefore: null,
       issueLoadAfter: null,
       issueLoadDelta: null,
+      detailedOutcome: 'NOT_COMPARABLE',
       outcome: 'NOT_COMPARABLE',
     });
   });
@@ -690,15 +828,16 @@ describe('AiLearningAnalyticsService aggregation boundaries', () => {
   it('returns all four growth trends and does not repeat-weight multiple AI jobs within one student-task sample', async () => {
     const classroomTaskId = objectId();
     const taskId = objectId();
-    const studentIds = Array.from({ length: 4 }, () => objectId());
+    const studentIds = Array.from({ length: 5 }, () => objectId());
     const submissions: ReturnType<typeof submission>[] = [];
     const jobs: ReturnType<typeof job>[] = [];
     const feedbackItems: ReturnType<typeof feedback>[] = [];
-    const expectedTrends = [
-      'IMPROVING',
-      'STABLE',
-      'DECLINING',
-      'INSUFFICIENT_DATA',
+    const expectedOutcomes = [
+      ['IMPROVED_OVERALL', 'IMPROVING'],
+      ['NO_NET_CHANGE', 'STABLE'],
+      ['NO_NET_CHANGE', 'STABLE'],
+      ['REGRESSED_OVERALL', 'DECLINING'],
+      ['INSUFFICIENT_DATA', 'INSUFFICIENT_DATA'],
     ];
 
     for (let index = 0; index < studentIds.length; index += 1) {
@@ -717,7 +856,7 @@ describe('AiLearningAnalyticsService aggregation boundaries', () => {
         codeText: 'after',
       });
       submissions.push(before, after);
-      if (index < 3) {
+      if (index < 4) {
         jobs.push(
           job({
             submissionId: before._id,
@@ -740,6 +879,18 @@ describe('AiLearningAnalyticsService aggregation boundaries', () => {
         );
       }
       if (index === 2) {
+        feedbackItems.push(
+          feedback({
+            submissionId: before._id,
+            severity: FeedbackSeverity.Warn,
+          }),
+          feedback({
+            submissionId: after._id,
+            severity: FeedbackSeverity.Warn,
+          }),
+        );
+      }
+      if (index === 3) {
         feedbackItems.push(
           feedback({
             submissionId: after._id,
@@ -773,14 +924,270 @@ describe('AiLearningAnalyticsService aggregation boundaries', () => {
       teacherId.toString(),
     );
 
-    expect(result.items.map((item) => item.growthTrend)).toEqual(
-      expectedTrends,
-    );
+    expect(
+      result.items.map((item) => [item.overallOutcome, item.growthTrend]),
+    ).toEqual(expectedOutcomes);
     for (const item of result.items) {
       expect(item.submittedTasksCount).toBe(1);
       expect(item.aiRequestedTasksCount).toBeLessThanOrEqual(1);
       expect(item.aiDeliveredTasksCount).toBeLessThanOrEqual(1);
+      expect(item.stableTasksCount).toBe(
+        item.remainedCleanTasksCount + item.unchangedWithIssuesTasksCount,
+      );
     }
+    expect(result.items[1]).toMatchObject({
+      remainedCleanTasksCount: 1,
+      unchangedWithIssuesTasksCount: 0,
+    });
+    expect(result.items[2]).toMatchObject({
+      remainedCleanTasksCount: 0,
+      unchangedWithIssuesTasksCount: 1,
+    });
+
+    const overview = await service.getOverview(
+      classroomId.toString(),
+      {},
+      teacherId.toString(),
+    );
+    expect(overview.summary.stableStudentTaskCount).toBe(
+      overview.summary.remainedCleanStudentTaskCount +
+        overview.summary.unchangedWithIssuesStudentTaskCount,
+    );
+    expect(overview.summary).toMatchObject({
+      qualityComparableStudentTaskCount: 4,
+      improvedStudentTaskCount: 1,
+      remainedCleanStudentTaskCount: 1,
+      unchangedWithIssuesStudentTaskCount: 1,
+      stableStudentTaskCount: 2,
+      regressedStudentTaskCount: 1,
+      improvedRate: 0.25,
+      remainedCleanRate: 0.25,
+      unchangedWithIssuesRate: 0.25,
+      regressedRate: 0.25,
+    });
+    expect(overview.taskTrends[0].stableStudentCount).toBe(
+      overview.taskTrends[0].remainedCleanStudentCount +
+        overview.taskTrends[0].unchangedWithIssuesStudentCount,
+    );
+  });
+
+  it('searches only name and studentNo with trimmed case-insensitive substrings', async () => {
+    const studentIds = Array.from({ length: 3 }, () => objectId());
+    const { service, classroomId, teacherId, submissionModel } =
+      createServiceHarness({
+        activeStudentIds: studentIds,
+        students: [
+          { _id: studentIds[0], name: '张三', studentNo: 'CN-001' },
+          { _id: studentIds[1], name: 'Alice Chen', studentNo: 'AbC-002' },
+          { _id: studentIds[2], name: 'Bob', studentNo: 'EN-003' },
+        ],
+      });
+
+    const byName = await service.getStudents(
+      classroomId.toString(),
+      { q: '张' },
+      teacherId.toString(),
+    );
+    const byEnglishName = await service.getStudents(
+      classroomId.toString(),
+      { q: 'ALICE' },
+      teacherId.toString(),
+    );
+    const byStudentNo = await service.getStudents(
+      classroomId.toString(),
+      { q: 'bc-00' },
+      teacherId.toString(),
+    );
+    const byStudentId = await service.getStudents(
+      classroomId.toString(),
+      { q: studentIds[0].toString() },
+      teacherId.toString(),
+    );
+
+    expect(byName.items.map((item) => item.studentName)).toEqual(['张三']);
+    expect(byEnglishName.items.map((item) => item.studentName)).toEqual([
+      'Alice Chen',
+    ]);
+    expect(byStudentNo.items.map((item) => item.studentNo)).toEqual([
+      'AbC-002',
+    ]);
+    expect(byStudentId).toMatchObject({
+      total: 0,
+      activeStudentsTotal: 3,
+      filters: { q: studentIds[0].toString() },
+      items: [],
+    });
+    expect(submissionModel.find).not.toHaveBeenCalled();
+  });
+
+  it('paginates q-only candidates before loading only the current-page samples', async () => {
+    const studentIds = Array.from({ length: 3 }, () => objectId());
+    const classroomTaskId = objectId();
+    const { service, classroomId, teacherId, submissionModel } =
+      createServiceHarness({
+        activeStudentIds: studentIds,
+        students: studentIds.map((studentId, index) => ({
+          _id: studentId,
+          name: `Candidate ${index + 1}`,
+          studentNo: `C-00${index + 1}`,
+        })),
+        classroomTasks: [
+          {
+            _id: classroomTaskId,
+            taskId: objectId(),
+            publishedAt: new Date(),
+          },
+        ],
+      });
+
+    const result = await service.getStudents(
+      classroomId.toString(),
+      { q: 'candidate', page: 2, limit: 1 },
+      teacherId.toString(),
+    );
+
+    expect(result).toMatchObject({
+      page: 2,
+      limit: 1,
+      total: 3,
+      activeStudentsTotal: 3,
+    });
+    expect(submissionModel.find).toHaveBeenCalledTimes(1);
+    const filter = submissionModel.find.mock.calls[0][0] as {
+      studentId: { $in: Types.ObjectId[] };
+    };
+    expect(filter.studentId.$in.map((id) => id.toString())).toEqual([
+      studentIds[1].toString(),
+    ]);
+  });
+
+  it('applies q and metric filters with AND semantics before pagination and reuses one candidate metrics batch', async () => {
+    const studentIds = Array.from({ length: 3 }, () => objectId());
+    const classroomTaskId = objectId();
+    const taskId = objectId();
+    const before = submission({
+      studentId: studentIds[0],
+      classroomTaskId,
+      attemptNo: 1,
+      submittedAt: '2026-07-01T00:00:00.000Z',
+      codeText: 'before',
+    });
+    const after = submission({
+      studentId: studentIds[0],
+      classroomTaskId,
+      attemptNo: 2,
+      submittedAt: '2026-07-02T00:00:00.000Z',
+      codeText: 'after',
+    });
+    const {
+      service,
+      classroomId,
+      teacherId,
+      submissionModel,
+      aiFeedbackJobModel,
+      feedbackModel,
+    } = createServiceHarness({
+      activeStudentIds: studentIds,
+      students: studentIds.map((studentId, index) => ({
+        _id: studentId,
+        name: `Candidate ${index + 1}`,
+        studentNo: `C-00${index + 1}`,
+      })),
+      classroomTasks: [
+        { _id: classroomTaskId, taskId, publishedAt: new Date() },
+      ],
+      submissions: [before, after],
+      jobs: [
+        job({
+          submissionId: before._id,
+          status: AiFeedbackJobStatus.Succeeded,
+          updatedAt: '2026-07-01T01:00:00.000Z',
+        }),
+        job({
+          submissionId: after._id,
+          status: AiFeedbackJobStatus.Succeeded,
+          updatedAt: '2026-07-02T01:00:00.000Z',
+        }),
+      ],
+      feedbackItems: [
+        feedback({
+          submissionId: before._id,
+          severity: FeedbackSeverity.Error,
+        }),
+      ],
+    });
+
+    const improved = await service.getStudents(
+      classroomId.toString(),
+      { overallOutcome: 'IMPROVED_OVERALL' },
+      teacherId.toString(),
+    );
+    expect(improved.items.map((item) => item.studentId)).toEqual([
+      studentIds[0].toString(),
+    ]);
+    expect(improved.items[0]).toMatchObject({
+      overallOutcome: 'IMPROVED_OVERALL',
+      engagementStatus: 'QUALITY_COMPARABLE',
+      growthTrend: 'IMPROVING',
+    });
+
+    submissionModel.find.mockClear();
+    aiFeedbackJobModel.find.mockClear();
+    feedbackModel.find.mockClear();
+    const filteredPage = await service.getStudents(
+      classroomId.toString(),
+      {
+        q: 'candidate',
+        overallOutcome: 'INSUFFICIENT_DATA',
+        engagementStatus: 'NO_SUBMISSION',
+        page: 2,
+        limit: 1,
+      },
+      teacherId.toString(),
+    );
+
+    expect(filteredPage).toMatchObject({
+      page: 2,
+      limit: 1,
+      total: 2,
+      activeStudentsTotal: 3,
+      filters: {
+        q: 'candidate',
+        overallOutcome: 'INSUFFICIENT_DATA',
+        engagementStatus: 'NO_SUBMISSION',
+      },
+    });
+    expect(filteredPage.items[0].studentId).toBe(studentIds[2].toString());
+    expect(submissionModel.find).toHaveBeenCalledTimes(1);
+    expect(aiFeedbackJobModel.find).toHaveBeenCalledTimes(1);
+    expect(feedbackModel.find).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not load samples when q leaves no ACTIVE candidate', async () => {
+    const activeStudentId = objectId();
+    const { service, classroomId, teacherId, submissionModel } =
+      createServiceHarness({
+        activeStudentIds: [activeStudentId],
+        students: [
+          { _id: activeStudentId, name: 'Only Student', studentNo: 'ONLY-1' },
+        ],
+        classroomTasks: [
+          { _id: objectId(), taskId: objectId(), publishedAt: new Date() },
+        ],
+      });
+
+    const result = await service.getStudents(
+      classroomId.toString(),
+      { q: 'missing', overallOutcome: 'INSUFFICIENT_DATA' },
+      teacherId.toString(),
+    );
+
+    expect(result).toMatchObject({
+      total: 0,
+      activeStudentsTotal: 1,
+      items: [],
+    });
+    expect(submissionModel.find).not.toHaveBeenCalled();
   });
 
   it('applies excludedTaskIds and window only to ClassroomTask selection, not the included task submission chain', async () => {
