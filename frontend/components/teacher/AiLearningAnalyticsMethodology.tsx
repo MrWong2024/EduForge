@@ -66,9 +66,18 @@ export function AiLearningAnalyticsMetricGuide({
           <h3 className="font-medium text-zinc-900">分析样本与起点</h3>
           <ul className="mt-2 list-disc space-y-1 pl-5">
             <li>
-              系统按“学生 ×
-              课堂任务”形成分析样本；同一名学生在同一个课堂任务中最多计为一个成效样本，多次请求 AI
-              不会重复增加班级样本权重。
+              系统按“学生 × 课堂任务”形成分析样本；
+              {variant === "class" ? (
+                <>
+                  同一名学生在同一个课堂任务中最多计为一个成效样本，多次请求 AI
+                  不会重复增加班级样本权重。
+                </>
+              ) : (
+                <>
+                  同一学生在同一个课堂任务中最多形成一个分析样本，多次请求 AI
+                  不会把同一课堂任务重复计入个人汇总。
+                </>
+              )}
             </li>
             <li>
               系统以该学生在该课堂任务中首次成功获得 EduForge AI
@@ -109,8 +118,17 @@ export function AiLearningAnalyticsMetricGuide({
               分析，才能比较前后问题负荷。
             </li>
             <li>
-              学生收到反馈后进行了重提，但没有再次成功完成 AI
-              分析时，会计入反馈后重提，但不会进入质量可比样本，也不进入改善率分母。
+              {variant === "class" ? (
+                <>
+                  学生收到反馈后进行了重提，但没有再次成功完成 AI
+                  分析时，会计入反馈后重提，但不会进入质量可比样本，也不进入改善率分母。
+                </>
+              ) : (
+                <>
+                  学生收到反馈后进行了重提，但没有再次成功完成 AI
+                  分析时，会计入反馈后重提，但不会进入质量可比样本，也不会归入四类个人结果。
+                </>
+              )}
             </li>
             <li>
               用于代码变化判断的是反馈完成后的第一次后续提交；用于质量比较的是反馈后第一次成功完成 AI
@@ -154,89 +172,197 @@ export function AiLearningAnalyticsMetricGuide({
         <section>
           <h3 className="font-medium text-zinc-900">图表阅读方式</h3>
           <div className="mt-2 space-y-3">
-            <div>
-              <h4 className="font-medium text-zinc-900">
-                各任务 AI 反馈前后问题对比
-              </h4>
-              <ul className="mt-1 list-disc space-y-1 pl-5">
-                <li>
-                  每一行代表一个课堂任务；空心圆表示 AI
-                  反馈前的平均问题负荷，实心菱形表示 AI
-                  反馈后的平均问题负荷。
-                </li>
-                <li>
-                  横轴数值越低，表示 AI 分析检测到的 ERROR/WARN
-                  问题负荷越低。同一任务内，反馈后标记位于反馈前标记左侧表示问题负荷下降，位于右侧表示问题负荷上升。
-                </li>
-                <li>
-                  不同任务的难度和内容不同，不能根据任务之间的横向位置推断连续成长趋势。
-                </li>
-              </ul>
-            </div>
-            <div>
-              <h4 className="font-medium text-zinc-900">
-                各任务可比样本结果分布
-              </h4>
-              <ul className="mt-1 list-disc space-y-1 pl-5">
-                <li>
-                  每一条横向分布条对应一个课堂任务，分母是该任务的质量可比样本数。
-                </li>
-                <li>
-                  分布条依次区分“改善”“前后均无 ERROR/WARN”“问题负荷未减少”和“恶化”，四类人数之和应等于该任务质量可比样本数。
-                </li>
-                <li>
-                  显示“暂无可比样本”表示没有可进行前后质量比较的数据，不代表结果为
-                  0；百分比可能因显示时四舍五入产生轻微尾差。
-                </li>
-              </ul>
-            </div>
-            <div>
-              <h4 className="font-medium text-zinc-900">学生个人图表</h4>
-              <p className="mt-1">
-                学生详情页的图表同样按课堂任务逐行比较反馈前后问题负荷，不同任务之间不连接；它不是成绩曲线或能力成长曲线。
-              </p>
-            </div>
+            {variant === "class" ? (
+              <>
+                <div>
+                  <h4 className="font-medium text-zinc-900">
+                    各任务 AI 反馈前后问题对比
+                  </h4>
+                  <ul className="mt-1 list-disc space-y-1 pl-5">
+                    <li>
+                      每一行代表一个课堂任务；空心圆表示 AI
+                      反馈前的平均问题负荷，实心菱形表示 AI
+                      反馈后的平均问题负荷。
+                    </li>
+                    <li>
+                      横轴数值越低，表示 AI 分析检测到的 ERROR/WARN
+                      问题负荷越低。同一任务内，反馈后标记位于反馈前标记左侧表示问题负荷下降，位于右侧表示问题负荷上升。
+                    </li>
+                    <li>
+                      不同任务的难度和内容不同，不能根据任务之间的横向位置推断连续成长趋势。
+                    </li>
+                  </ul>
+                </div>
+                <div>
+                  <h4 className="font-medium text-zinc-900">
+                    各任务可比样本结果分布
+                  </h4>
+                  <ul className="mt-1 list-disc space-y-1 pl-5">
+                    <li>
+                      每一条横向分布条对应一个课堂任务，分母是该任务的质量可比样本数。
+                    </li>
+                    <li>
+                      分布条依次区分“改善”“前后均无 ERROR/WARN”“问题负荷未减少”和“恶化”，四类人数之和应等于该任务质量可比样本数。
+                    </li>
+                    <li>
+                      显示“暂无可比样本”表示没有可进行前后质量比较的数据，不代表结果为
+                      0；百分比可能因显示时四舍五入产生轻微尾差。
+                    </li>
+                  </ul>
+                </div>
+                <div>
+                  <h4 className="font-medium text-zinc-900">学生个人图表</h4>
+                  <p className="mt-1">
+                    学生详情页的图表同样按课堂任务逐行比较反馈前后问题负荷，不同任务之间不连接；它不是成绩曲线或能力成长曲线。
+                  </p>
+                </div>
+              </>
+            ) : (
+              <div>
+                <h4 className="font-medium text-zinc-900">
+                  个人各任务 AI 反馈前后问题对比
+                </h4>
+                <ul className="mt-1 list-disc space-y-1 pl-5">
+                  <li>
+                    每一行代表该学生的一个课堂任务；只有质量可比任务才绘制反馈前后问题负荷。空心圆表示
+                    AI 反馈前的问题负荷，实心菱形表示 AI
+                    反馈后的问题负荷。
+                  </li>
+                  <li>
+                    横轴数值越低，表示 AI 分析检测到的 ERROR/WARN
+                    问题负荷越低。同一任务中，反馈后标记位于反馈前标记左侧，表示问题负荷下降；位于右侧，表示问题负荷上升；位于同一横轴位置，表示问题负荷未发生净变化。
+                  </li>
+                  <li>
+                    不可比较任务不绘制为 0；不同课堂任务之间不连接。
+                  </li>
+                  <li>
+                    该图不是成绩曲线、能力成长曲线或连续时间趋势。
+                  </li>
+                </ul>
+              </div>
+            )}
           </div>
         </section>
 
-        <section>
-          <h3 className="font-medium text-zinc-900">
-            反馈过程指标与结果占比的分母
-          </h3>
-          <h4 className="mt-2 font-medium text-zinc-900">反馈过程指标</h4>
-          <ol className="mt-2 list-decimal space-y-2 pl-5">
-            <li>
-              <span className="font-medium text-zinc-900">反馈后重提率：</span>
-              成功交付 AI
-              反馈的样本中，反馈完成后再次提交的比例；分母为成功交付 AI
-              反馈的样本数。
-            </li>
-            <li>
-              <span className="font-medium text-zinc-900">
-                首次反馈后重提代码变化率：
-              </span>
-              已经发生反馈后重提的样本中，第一次后续提交与分析起点提交的代码文本发生变化的比例；分母为反馈后重提样本数。这里只比较第一次后续提交，代码文本变化不等于学生已理解或采纳
-              AI 建议。
-            </li>
-            <li>
-              <span className="font-medium text-zinc-900">质量可比率：</span>
-              成功交付 AI
-              反馈的样本中，后续又成功完成 AI
-              分析、能够比较前后问题负荷的比例；分母为成功交付 AI
-              反馈的样本数。
-            </li>
-          </ol>
-          <h4 className="mt-3 font-medium text-zinc-900">
-            质量可比结果占比
-          </h4>
-          <p className="mt-2">
-            “可比样本改善率”“前后均无 ERROR/WARN 比率”“问题负荷未减少比率”和“恶化率”的分母均为质量可比样本数。四类结果互斥，四类人数之和等于质量可比样本数。
-          </p>
-          <p className="mt-2">
-            这些比率的分母不是全部学生、全部课堂任务、全部提交或全部成功交付
-            AI 反馈的样本；百分比展示可能因四舍五入存在轻微尾差。
-          </p>
-        </section>
+        {variant === "class" ? (
+          <section>
+            <h3 className="font-medium text-zinc-900">
+              反馈过程指标与结果占比的分母
+            </h3>
+            <h4 className="mt-2 font-medium text-zinc-900">反馈过程指标</h4>
+            <ol className="mt-2 list-decimal space-y-2 pl-5">
+              <li>
+                <span className="font-medium text-zinc-900">
+                  反馈后重提率：
+                </span>
+                成功交付 AI
+                反馈的样本中，反馈完成后再次提交的比例；分母为成功交付 AI
+                反馈的样本数。
+              </li>
+              <li>
+                <span className="font-medium text-zinc-900">
+                  首次反馈后重提代码变化率：
+                </span>
+                已经发生反馈后重提的样本中，第一次后续提交与分析起点提交的代码文本发生变化的比例；分母为反馈后重提样本数。这里只比较第一次后续提交，代码文本变化不等于学生已理解或采纳
+                AI 建议。
+              </li>
+              <li>
+                <span className="font-medium text-zinc-900">
+                  质量可比率：
+                </span>
+                成功交付 AI
+                反馈的样本中，后续又成功完成 AI
+                分析、能够比较前后问题负荷的比例；分母为成功交付 AI
+                反馈的样本数。
+              </li>
+            </ol>
+            <h4 className="mt-3 font-medium text-zinc-900">
+              质量可比结果占比
+            </h4>
+            <p className="mt-2">
+              “可比样本改善率”“前后均无 ERROR/WARN 比率”“问题负荷未减少比率”和“恶化率”的分母均为质量可比样本数。四类结果互斥，四类人数之和等于质量可比样本数。
+            </p>
+            <p className="mt-2">
+              这些比率的分母不是全部学生、全部课堂任务、全部提交或全部成功交付
+              AI 反馈的样本；百分比展示可能因四舍五入存在轻微尾差。
+            </p>
+          </section>
+        ) : (
+          <section>
+            <h3 className="font-medium text-zinc-900">学生任务计数说明</h3>
+            <ol className="mt-2 list-decimal space-y-2 pl-5">
+              <li>
+                <span className="font-medium text-zinc-900">
+                  已提交任务数：
+                </span>
+                当前统计范围内，该学生至少提交过一次的课堂任务数量。
+              </li>
+              <li>
+                <span className="font-medium text-zinc-900">
+                  AI 反馈请求任务数：
+                </span>
+                当前统计范围内，该学生至少发起过一次 EduForge AI
+                反馈请求的课堂任务数量；这不是学生使用全部 AI
+                工具的任务数量。
+              </li>
+              <li>
+                <span className="font-medium text-zinc-900">
+                  AI 反馈成功交付任务数：
+                </span>
+                当前统计范围内，至少有一次 AI
+                反馈成功生成的课堂任务数量。
+              </li>
+              <li>
+                <span className="font-medium text-zinc-900">
+                  反馈后重提任务数：
+                </span>
+                AI
+                反馈成功生成后，该学生又提交新版本的课堂任务数量。AI
+                反馈生成之前已经发生的提交，不计入反馈后重提。
+              </li>
+              <li>
+                <span className="font-medium text-zinc-900">
+                  首次反馈后代码变化任务数：
+                </span>
+                已经发生反馈后重提的课堂任务中，反馈完成后的第一次后续提交的代码文本与分析起点提交不同的任务数量。只比较反馈完成后的第一次后续提交；代码文本发生变化，不代表学生已经理解或采纳
+                AI 建议。
+              </li>
+              <li>
+                <span className="font-medium text-zinc-900">
+                  质量可比任务数：
+                </span>
+                分析起点和后续版本均成功完成 AI
+                分析，能够比较反馈前后问题负荷的课堂任务数量。
+                <ul className="mt-1 list-disc space-y-1 pl-5">
+                  <li>
+                    学生反馈后已经重提，但后续版本未成功完成 AI
+                    分析时，会计入反馈后重提任务数，不计入质量可比任务数。
+                  </li>
+                  <li>质量可比任务数是四类个人结果计数的统计范围。</li>
+                </ul>
+              </li>
+              <li>
+                <span className="font-medium text-zinc-900">
+                  四类个人结果任务数：
+                </span>
+                四类结果为“改善”“前后均无
+                ERROR/WARN”“问题负荷未减少”和“恶化”。
+                <ul className="mt-1 list-disc space-y-1 pl-5">
+                  <li>四类结果只统计质量可比任务，且四类结果互斥。</li>
+                  <li>四类任务数之和等于质量可比任务数。</li>
+                  <li>不可比较任务不会归入四类结果。</li>
+                  <li>
+                    “前后均无 ERROR/WARN”只表示两次 AI
+                    分析的问题负荷均为 0，不代表代码绝对正确。
+                  </li>
+                  <li>
+                    “问题负荷未减少”表示前后问题负荷相同且大于 0。
+                  </li>
+                </ul>
+              </li>
+            </ol>
+          </section>
+        )}
 
         <section>
           <h3 className="font-medium text-zinc-900">总体结果</h3>
