@@ -18,8 +18,9 @@ import {
   type AiLearningAnalyticsTaskPoint,
 } from "@/lib/api/types-teacher";
 import {
-  AI_LEARNING_ANALYTICS_GROWTH_TREND_LABELS,
-  AI_LEARNING_ANALYTICS_OUTCOME_LABELS,
+  AI_LEARNING_ANALYTICS_DETAILED_OUTCOME_LABELS,
+  AI_LEARNING_ANALYTICS_ENGAGEMENT_STATUS_LABELS,
+  AI_LEARNING_ANALYTICS_OVERALL_OUTCOME_LABELS,
   AI_LEARNING_ANALYTICS_WINDOW_LABELS,
   formatAiLearningAnalyticsDelta,
   formatAiLearningAnalyticsIssueLoad,
@@ -57,6 +58,9 @@ const buildBackToAnalyticsHref = (
       queryState.excludedTaskIds,
     ),
     page: queryState.page,
+    q: queryState.q,
+    overallOutcome: queryState.overallOutcome,
+    engagementStatus: queryState.engagementStatus,
   });
   const pathname = paths.teacher.classroomAiLearningAnalytics(classroomId);
   return query ? `${pathname}?${query}` : pathname;
@@ -151,7 +155,11 @@ function StudentTaskPointsTable({
                   : formatAiLearningAnalyticsDelta(task.issueLoadDelta)}
               </td>
               <td className="px-3 py-2.5 text-zinc-800">
-                {AI_LEARNING_ANALYTICS_OUTCOME_LABELS[task.outcome]}
+                {
+                  AI_LEARNING_ANALYTICS_DETAILED_OUTCOME_LABELS[
+                    task.detailedOutcome
+                  ]
+                }
               </td>
             </tr>
           ))}
@@ -294,9 +302,36 @@ export default async function AiLearningAnalyticsStudentPage({
         </div>
         <dl className="mt-3 grid gap-x-6 gap-y-2 rounded-md border border-zinc-200 px-3 py-2.5 text-sm sm:grid-cols-2 xl:grid-cols-4">
           <div>
-            <dt className="text-xs text-zinc-500">改善 / 持平 / 恶化任务数</dt>
+            <dt className="text-xs text-zinc-500">反馈参与阶段</dt>
+            <dd className="mt-0.5 font-medium text-zinc-900">
+              {
+                AI_LEARNING_ANALYTICS_ENGAGEMENT_STATUS_LABELS[
+                  summary.engagementStatus
+                ]
+              }
+            </dd>
+          </div>
+          <div>
+            <dt className="text-xs text-zinc-500">总体结果</dt>
+            <dd className="mt-0.5 font-medium text-zinc-900">
+              {
+                AI_LEARNING_ANALYTICS_OVERALL_OUTCOME_LABELS[
+                  summary.overallOutcome
+                ]
+              }
+            </dd>
+            <p className="mt-1 text-[11px] leading-5 text-zinc-500">
+              {hasComparableTasks
+                ? `基于 ${summary.qualityComparableTasksCount} 个可比任务`
+                : "暂无质量可比任务"}
+            </p>
+          </div>
+          <div>
+            <dt className="text-xs text-zinc-500">四类精细结果任务数</dt>
             <dd className="mt-0.5 font-medium tabular-nums text-zinc-900">
-              {summary.improvedTasksCount} / {summary.stableTasksCount} /{" "}
+              改善 {summary.improvedTasksCount} · 前后均无 ERROR/WARN{" "}
+              {summary.remainedCleanTasksCount} · 问题负荷未减少{" "}
+              {summary.unchangedWithIssuesTasksCount} · 恶化{" "}
               {summary.regressedTasksCount}
             </dd>
           </div>
@@ -317,22 +352,12 @@ export default async function AiLearningAnalyticsStudentPage({
               )}
             </dd>
           </div>
-          <div>
-            <dt className="text-xs text-zinc-500">总体变化</dt>
-            <dd className="mt-0.5 font-medium text-zinc-900">
-              {AI_LEARNING_ANALYTICS_GROWTH_TREND_LABELS[summary.growthTrend]}
-            </dd>
-            <p className="mt-1 text-[11px] leading-5 text-zinc-500">
-              {hasComparableTasks
-                ? "基于 " +
-                  summary.qualityComparableTasksCount +
-                  " 个可比任务"
-                : "暂无质量可比任务"}
-            </p>
-          </div>
         </dl>
         <p className="mt-3 text-xs leading-5 text-zinc-500">
-          “总体变化”只表示当前范围内可比任务平均问题负荷差值的方向，不是时间序列回归，也不是能力成长或退步结论。
+          总体结果按当前范围内全部可比任务的问题负荷净变化计算，不按任务发布时间做趋势回归，也不是能力成长或退步结论。
+          {summary.overallOutcome === "NO_NET_CHANGE"
+            ? "“净变化为零”可能由改善和恶化相互抵消。"
+            : ""}
         </p>
       </section>
 

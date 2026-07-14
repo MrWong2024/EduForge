@@ -143,12 +143,15 @@
   - 对应后端：`GET /api/classrooms/:classroomId/process-assessment.csv`。
   - 注意：下载链接继续走 `/api/proxy/**`，与页面 JSON 使用同一排除口径；CSV 字段由后端导出实现决定。
 - AI 反馈介入成效分析总览：`ai-learning-analytics/page.tsx` -> `client.fetchJson("classrooms/:id/ai-learning-analytics?..." )` -> `/api/proxy/classrooms/:id/ai-learning-analytics` -> `GET /api/classrooms/:classroomId/ai-learning-analytics`。
-  - 使用 `toAiLearningAnalyticsOverviewResponse`；query 仅为 `window=all|7d|30d` 与逗号分隔的 `excludedTaskIds`。
+  - 使用 `toAiLearningAnalyticsOverviewResponse`；query 仅为 `window=all|7d|30d` 与逗号分隔的 `excludedTaskIds`，不携带学生搜索、筛选或分页参数。
+  - 方法学 `scope` 仍为 `AI_FEEDBACK_INTERVENTION_V1`，新增 `version=AI_FEEDBACK_INTERVENTION_V1_1`；mapper 直接映射班级与任务级精细计数和后端 rate。
 - AI 反馈介入成效分析学生列表：同一 `page.tsx` -> `/api/proxy/classrooms/:id/ai-learning-analytics/students` -> `GET /api/classrooms/:classroomId/ai-learning-analytics/students`。
-  - 使用 `toAiLearningAnalyticsStudentsResponse`；与总览传递相同 `window/excludedTaskIds`，另固定 `limit=100` 并从 URL 传 `page`；学生列表失败只形成局部错误态。
+  - 使用 `toAiLearningAnalyticsStudentsResponse`；与总览传递相同 `window/excludedTaskIds`，另固定 `limit=100` 并从 URL 传 `page/q/overallOutcome/engagementStatus`；后三项为 AND 语义，后端先搜索筛选再分页。
+  - 响应映射 `context/total/activeStudentsTotal/filters/items`：`total` 是筛选后总数，`activeStudentsTotal` 是全部 ACTIVE 学生数，`filters` 是后端规范化回显；学生列表失败只形成局部错误态。
 - AI 反馈介入成效分析学生详情：`ai-learning-analytics/students/[studentId]/page.tsx` -> `/api/proxy/classrooms/:id/ai-learning-analytics/students/:studentId` -> `GET /api/classrooms/:classroomId/ai-learning-analytics/students/:studentId`。
-  - 使用 `toAiLearningAnalyticsStudentDetailResponse`；后端请求只传 `window/excludedTaskIds`，URL 中的 `page` 仅用于返回班级分析时恢复列表分页，绝不传给详情接口。
-- 上述三条正式请求全部由 `fetchJson` 经 `/api/proxy/**` 发出；前端只格式化后端返回值、映射枚举并结合可比计数控制“—”/缺口展示，不重算 anchor、配对、issueLoad、outcome、growthTrend、rate 分母或任何聚合指标。
+  - 使用 `toAiLearningAnalyticsStudentDetailResponse`；后端请求只传 `window/excludedTaskIds`，URL 中的 `page/q/overallOutcome/engagementStatus` 仅用于返回班级分析时恢复列表状态，绝不传给详情接口。
+- 三个 mapper 直接消费 `detailedOutcome/overallOutcome/engagementStatus`；legacy `outcome/growthTrend/stable*Count` 继续映射并保留在 raw/兼容类型中，但不作为 V1.1 主 UI。
+- 上述三条正式请求全部由 `fetchJson` 经 `/api/proxy/**` 发出；前端只格式化后端返回值、映射枚举并结合可比计数控制“—”/缺口展示，不重算 anchor、配对、issueLoad、`detailedOutcome`、`overallOutcome`、`engagementStatus`、rate 分母或任何聚合指标。
 - 教学快照预检：`export/snapshot/page.tsx` -> `/api/proxy/classrooms/:id/export/snapshot`。
   - 对应后端：`GET /api/classrooms/:classroomId/export/snapshot`。
   - 注意：内部预检/诊断页，不作为教师高频主入口。

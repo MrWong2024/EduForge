@@ -1,12 +1,15 @@
 import Link from "next/link";
 import { EmptyState } from "@/components/blocks/EmptyState";
 import type {
+  AiLearningAnalyticsEngagementStatus,
+  AiLearningAnalyticsOverallOutcome,
   AiLearningAnalyticsStudentItem,
   AiLearningAnalyticsTaskTrend,
   AiLearningAnalyticsWindow,
 } from "@/lib/api/types-teacher";
 import {
-  AI_LEARNING_ANALYTICS_GROWTH_TREND_LABELS,
+  AI_LEARNING_ANALYTICS_ENGAGEMENT_STATUS_LABELS,
+  AI_LEARNING_ANALYTICS_OVERALL_OUTCOME_LABELS,
   formatAiLearningAnalyticsDelta,
   formatAiLearningAnalyticsIssueLoad,
   formatAiLearningAnalyticsPercent,
@@ -124,13 +127,31 @@ export function AiLearningAnalyticsTaskTable({
                   </p>
                 </td>
                 <td className="px-3 py-3 tabular-nums text-zinc-800">
-                  <p>改善：{task.improvedStudentCount}</p>
-                  <p className="mt-1">持平：{task.stableStudentCount}</p>
-                  <p className="mt-1">恶化：{task.regressedStudentCount}</p>
-                  <p className="mt-1 text-xs text-zinc-500">
-                    改善率：
+                  <p>
+                    改善：{task.improvedStudentCount} ·{" "}
                     {formatRateWithDenominator(
                       task.improvedRate,
+                      task.qualityComparableStudentCount,
+                    )}
+                  </p>
+                  <p className="mt-1">
+                    均无 ERROR/WARN：{task.remainedCleanStudentCount} ·{" "}
+                    {formatRateWithDenominator(
+                      task.remainedCleanRate,
+                      task.qualityComparableStudentCount,
+                    )}
+                  </p>
+                  <p className="mt-1">
+                    问题负荷未减少：{task.unchangedWithIssuesStudentCount} ·{" "}
+                    {formatRateWithDenominator(
+                      task.unchangedWithIssuesRate,
+                      task.qualityComparableStudentCount,
+                    )}
+                  </p>
+                  <p className="mt-1">
+                    恶化：{task.regressedStudentCount} ·{" "}
+                    {formatRateWithDenominator(
+                      task.regressedRate,
                       task.qualityComparableStudentCount,
                     )}
                   </p>
@@ -174,18 +195,27 @@ const buildStudentDetailHref = ({
   window,
   excludedTaskIds,
   page,
+  q,
+  overallOutcome,
+  engagementStatus,
 }: {
   classroomId: string;
   studentId: string;
   window: AiLearningAnalyticsWindow;
   excludedTaskIds: string[];
   page: number;
+  q?: string;
+  overallOutcome?: AiLearningAnalyticsOverallOutcome;
+  engagementStatus?: AiLearningAnalyticsEngagementStatus;
 }): string => {
   const query = buildQueryString({
     window,
     excludedTaskIds:
       toAiLearningAnalyticsExcludedTaskIdsQueryValue(excludedTaskIds),
     page,
+    q,
+    overallOutcome,
+    engagementStatus,
   });
   const pathname = paths.teacher.classroomAiLearningAnalyticsStudent(
     classroomId,
@@ -200,12 +230,18 @@ export function AiLearningAnalyticsStudentsTable({
   window,
   excludedTaskIds,
   page,
+  q,
+  overallOutcome,
+  engagementStatus,
 }: {
   students: AiLearningAnalyticsStudentItem[];
   classroomId: string;
   window: AiLearningAnalyticsWindow;
   excludedTaskIds: string[];
   page: number;
+  q?: string;
+  overallOutcome?: AiLearningAnalyticsOverallOutcome;
+  engagementStatus?: AiLearningAnalyticsEngagementStatus;
 }) {
   return (
     <div className="overflow-x-auto rounded-lg border border-zinc-200 bg-white">
@@ -268,6 +304,14 @@ export function AiLearningAnalyticsStudentsTable({
                     重提 {student.postFeedbackResubmittedTasksCount} ·
                     代码变化 {student.postFeedbackCodeChangedTasksCount}
                   </p>
+                  <p className="mt-1 text-xs leading-5 text-zinc-500">
+                    反馈阶段：
+                    {
+                      AI_LEARNING_ANALYTICS_ENGAGEMENT_STATUS_LABELS[
+                        student.engagementStatus
+                      ]
+                    }
+                  </p>
                 </td>
                 <td className="px-3 py-3 tabular-nums text-zinc-800">
                   <p className="font-medium">
@@ -283,7 +327,12 @@ export function AiLearningAnalyticsStudentsTable({
                 </td>
                 <td className="px-3 py-3 tabular-nums text-zinc-800">
                   <p>改善 {student.improvedTasksCount}</p>
-                  <p className="mt-1">持平 {student.stableTasksCount}</p>
+                  <p className="mt-1">
+                    均无 ERROR/WARN {student.remainedCleanTasksCount}
+                  </p>
+                  <p className="mt-1">
+                    问题负荷未减少 {student.unchangedWithIssuesTasksCount}
+                  </p>
                   <p className="mt-1">恶化 {student.regressedTasksCount}</p>
                 </td>
                 <td className="px-3 py-3 tabular-nums text-zinc-800">
@@ -295,8 +344,8 @@ export function AiLearningAnalyticsStudentsTable({
                 <td className="px-3 py-3 text-zinc-800">
                   <p className="font-medium">
                     {
-                      AI_LEARNING_ANALYTICS_GROWTH_TREND_LABELS[
-                        student.growthTrend
+                      AI_LEARNING_ANALYTICS_OVERALL_OUTCOME_LABELS[
+                        student.overallOutcome
                       ]
                     }
                   </p>
@@ -307,6 +356,11 @@ export function AiLearningAnalyticsStudentsTable({
                         " 个可比任务"
                       : "暂无质量可比任务"}
                   </p>
+                  {student.overallOutcome === "NO_NET_CHANGE" ? (
+                    <p className="mt-1 text-[11px] leading-5 text-zinc-500">
+                      可能包含改善与恶化相互抵消。
+                    </p>
+                  ) : null}
                 </td>
                 <td className="px-3 py-3">
                   {student.studentId ? (
@@ -317,6 +371,9 @@ export function AiLearningAnalyticsStudentsTable({
                         window,
                         excludedTaskIds,
                         page,
+                        q,
+                        overallOutcome,
+                        engagementStatus,
                       })}
                       className="text-blue-700 hover:underline"
                     >

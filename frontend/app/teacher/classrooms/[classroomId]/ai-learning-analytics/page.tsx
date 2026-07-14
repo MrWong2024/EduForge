@@ -19,6 +19,7 @@ import {
   AiLearningAnalyticsStudentsTable,
   AiLearningAnalyticsTaskTable,
 } from "@/components/teacher/AiLearningAnalyticsTables";
+import { AiLearningAnalyticsStudentFilters } from "@/components/teacher/AiLearningAnalyticsStudentFilters";
 import {
   TaskExclusionPanel,
   type TaskExclusionPanelTask,
@@ -36,6 +37,8 @@ import {
   toAiLearningAnalyticsOverviewResponse,
   toAiLearningAnalyticsStudentsResponse,
   type AiLearningAnalyticsOverviewResponse,
+  type AiLearningAnalyticsEngagementStatus,
+  type AiLearningAnalyticsOverallOutcome,
   type AiLearningAnalyticsStudentsResponse,
 } from "@/lib/api/types-teacher";
 import {
@@ -107,6 +110,9 @@ const buildClassAnalyticsHref = (
     window: AiLearningAnalyticsOverviewResponse["context"]["window"];
     excludedTaskIds: string[];
     page: number;
+    q?: string;
+    overallOutcome?: AiLearningAnalyticsOverallOutcome;
+    engagementStatus?: AiLearningAnalyticsEngagementStatus;
   },
 ): string => {
   const query = buildQueryString({
@@ -115,6 +121,9 @@ const buildClassAnalyticsHref = (
       params.excludedTaskIds,
     ),
     page: params.page,
+    q: params.q,
+    overallOutcome: params.overallOutcome,
+    engagementStatus: params.engagementStatus,
   });
   const pathname = paths.teacher.classroomAiLearningAnalytics(classroomId);
   return query ? `${pathname}?${query}` : pathname;
@@ -202,18 +211,30 @@ export default async function AiLearningAnalyticsPage({
   const { classroomId } = await params;
   const rawQuery = await searchParams;
   const queryState = resolveAiLearningAnalyticsQueryState(rawQuery);
-  const currentQueryEntries = toAiLearningAnalyticsSearchParamEntries(rawQuery);
+  const excludedTaskIdsQueryValue =
+    toAiLearningAnalyticsExcludedTaskIdsQueryValue(
+      queryState.excludedTaskIds,
+    );
+  const currentQueryEntries = toAiLearningAnalyticsSearchParamEntries({
+    window: queryState.window,
+    page: String(queryState.page),
+    excludedTaskIds: excludedTaskIdsQueryValue,
+    q: queryState.q,
+    overallOutcome: queryState.overallOutcome,
+    engagementStatus: queryState.engagementStatus,
+  });
   const sharedQuery = {
     window: queryState.window,
-    excludedTaskIds: toAiLearningAnalyticsExcludedTaskIdsQueryValue(
-      queryState.excludedTaskIds,
-    ),
+    excludedTaskIds: excludedTaskIdsQueryValue,
   };
   const overviewQuery = buildQueryString(sharedQuery);
   const studentsQuery = buildQueryString({
     ...sharedQuery,
     page: queryState.page,
     limit: STUDENT_PAGE_SIZE,
+    q: queryState.q,
+    overallOutcome: queryState.overallOutcome,
+    engagementStatus: queryState.engagementStatus,
   });
   const origin = await getRequestOrigin();
   const [overviewResult, studentsResult, taskOptionsResult] =
@@ -313,6 +334,9 @@ export default async function AiLearningAnalyticsPage({
                 window: windowValue,
                 excludedTaskIds: queryState.excludedTaskIds,
                 page: 1,
+                q: queryState.q,
+                overallOutcome: queryState.overallOutcome,
+                engagementStatus: queryState.engagementStatus,
               })}
               className={
                 windowValue === context.window
@@ -411,11 +435,19 @@ export default async function AiLearningAnalyticsPage({
         <h2 className="text-sm font-semibold text-zinc-900">学生分析列表</h2>
         <p className="mt-1 text-xs text-zinc-500">
           仅展示当前班级 ACTIVE 学生；每页最多 {STUDENT_PAGE_SIZE}
-          名，不进行前端排序、搜索或排名。
+          名，不进行前端排序或排名。
         </p>
         <p className="mt-1 text-xs leading-5 text-zinc-500">
-          “总体变化”只表示当前范围内可比任务平均问题负荷差值的方向，不是时间序列回归，也不是能力成长或退步结论。
+          “总体变化”由后端按当前范围内全部可比任务的问题负荷净变化给出，不是时间序列回归，也不是能力成长或退步结论。
         </p>
+        <AiLearningAnalyticsStudentFilters
+          classroomId={classroomId}
+          window={context.window}
+          excludedTaskIds={queryState.excludedTaskIds}
+          q={queryState.q}
+          overallOutcome={queryState.overallOutcome}
+          engagementStatus={queryState.engagementStatus}
+        />
         {studentListState.mode === "error" ? (
           <div className="mt-3">
             <ErrorState
@@ -427,30 +459,81 @@ export default async function AiLearningAnalyticsPage({
         ) : (
           (() => {
             const students = studentListState.data;
+            const hasAppliedFilters =
+              students.filters.q !== null ||
+              students.filters.overallOutcome !== null ||
+              students.filters.engagementStatus !== null;
             const totalPages = Math.max(
               1,
-              Math.ceil(students.total / STUDENT_PAGE_SIZE),
+              Math.ceil(students.total / students.limit),
             );
-            const showPagination = students.total > STUDENT_PAGE_SIZE;
+            const showPagination = students.total > students.limit;
             const isCurrentPageEmpty =
-              students.total > 0 && students.items.length === 0;
+              students.total > 0 &&
+              students.items.length === 0 &&
+              students.page > 1;
+            const clearFiltersHref = buildClassAnalyticsHref(classroomId, {
+              window: context.window,
+              excludedTaskIds: queryState.excludedTaskIds,
+              page: 1,
+            });
+            const firstPageHref = buildClassAnalyticsHref(classroomId, {
+              window: context.window,
+              excludedTaskIds: queryState.excludedTaskIds,
+              page: 1,
+              q: students.filters.q ?? undefined,
+              overallOutcome: students.filters.overallOutcome ?? undefined,
+              engagementStatus: students.filters.engagementStatus ?? undefined,
+            });
             return (
               <>
                 <p className="mt-3 text-sm text-zinc-600">
-                  共 {students.total} 名学生，当前显示 {students.items.length} 名
+                  {hasAppliedFilters ? (
+                    <>
+                      共 {students.activeStudentsTotal} 名 ACTIVE 学生，筛选命中{" "}
+                      {students.total} 名，当前显示 {students.items.length} 名。
+                    </>
+                  ) : (
+                    <>
+                      共 {students.activeStudentsTotal} 名 ACTIVE 学生，当前显示{" "}
+                      {students.items.length} 名。
+                    </>
+                  )}
                 </p>
                 {students.items.length === 0 ? (
                   <div className="mt-3">
                     <EmptyState
                       title={
-                        isCurrentPageEmpty
-                          ? "当前页暂无学生分析数据"
-                          : "当前班级暂无有效学生"
+                        students.activeStudentsTotal === 0
+                          ? "当前班级暂无 ACTIVE 学生"
+                          : students.total === 0
+                            ? "没有学生符合当前搜索和筛选条件"
+                            : "当前分页无数据"
                       }
                       description={
-                        isCurrentPageEmpty
-                          ? "可返回上一页继续查看。"
-                          : "学生分析列表仅覆盖 ACTIVE 学生。"
+                        students.activeStudentsTotal === 0
+                          ? "学生分析列表仅覆盖当前 ACTIVE 学生。"
+                          : students.total === 0
+                            ? "可清空或调整学生搜索与筛选条件后重试。"
+                            : "可返回第 1 页继续查看。"
+                      }
+                      actions={
+                        students.activeStudentsTotal > 0 &&
+                        students.total === 0 ? (
+                          <Link
+                            href={clearFiltersHref}
+                            className="text-blue-700 hover:underline"
+                          >
+                            清空筛选
+                          </Link>
+                        ) : isCurrentPageEmpty ? (
+                          <Link
+                            href={firstPageHref}
+                            className="text-blue-700 hover:underline"
+                          >
+                            返回第 1 页
+                          </Link>
+                        ) : null
                       }
                     />
                   </div>
@@ -462,6 +545,13 @@ export default async function AiLearningAnalyticsPage({
                       window={context.window}
                       excludedTaskIds={queryState.excludedTaskIds}
                       page={students.page}
+                      q={students.filters.q ?? undefined}
+                      overallOutcome={
+                        students.filters.overallOutcome ?? undefined
+                      }
+                      engagementStatus={
+                        students.filters.engagementStatus ?? undefined
+                      }
                     />
                   </div>
                 )}
@@ -477,6 +567,11 @@ export default async function AiLearningAnalyticsPage({
                           window: context.window,
                           excludedTaskIds: queryState.excludedTaskIds,
                           page: students.page - 1,
+                          q: students.filters.q ?? undefined,
+                          overallOutcome:
+                            students.filters.overallOutcome ?? undefined,
+                          engagementStatus:
+                            students.filters.engagementStatus ?? undefined,
                         })}
                         className="text-blue-700 hover:underline"
                       >
@@ -491,6 +586,11 @@ export default async function AiLearningAnalyticsPage({
                           window: context.window,
                           excludedTaskIds: queryState.excludedTaskIds,
                           page: students.page + 1,
+                          q: students.filters.q ?? undefined,
+                          overallOutcome:
+                            students.filters.overallOutcome ?? undefined,
+                          engagementStatus:
+                            students.filters.engagementStatus ?? undefined,
                         })}
                         className="text-blue-700 hover:underline"
                       >

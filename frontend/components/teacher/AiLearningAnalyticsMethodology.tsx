@@ -1,4 +1,5 @@
 import type { AiLearningAnalyticsMethodology } from "@/lib/api/types-teacher";
+import { getAiLearningAnalyticsMethodologyVersionLabel } from "@/lib/ai-learning-analytics";
 
 type AiLearningAnalyticsMethodologyPanelProps = {
   methodology: AiLearningAnalyticsMethodology;
@@ -14,7 +15,7 @@ export function AiLearningAnalyticsMethodologyPanel({
   return (
     <section className="rounded-lg border border-sky-200 bg-sky-50 p-4 text-sm text-sky-950">
       <h2 className="font-semibold">方法学说明与适用边界</h2>
-      <dl className="mt-3 grid gap-2 sm:grid-cols-3">
+      <dl className="mt-3 grid gap-2 sm:grid-cols-4">
         <div>
           <dt className="text-xs text-sky-700">分析范围</dt>
           <dd className="mt-0.5 font-medium">EduForge AI 反馈</dd>
@@ -26,6 +27,14 @@ export function AiLearningAnalyticsMethodologyPanel({
         <div>
           <dt className="text-xs text-sky-700">质量代理</dt>
           <dd className="mt-0.5 font-medium">ERROR + 0.5 × WARN</dd>
+        </div>
+        <div>
+          <dt className="text-xs text-sky-700">方法学版本</dt>
+          <dd className="mt-0.5 font-medium">
+            {getAiLearningAnalyticsMethodologyVersionLabel(
+              methodology.version,
+            )}
+          </dd>
         </div>
       </dl>
       <div className="mt-3 space-y-1.5 text-sky-900">
@@ -124,16 +133,21 @@ export function AiLearningAnalyticsMetricGuide({
           </p>
           <ul className="mt-2 list-disc space-y-1 pl-5">
             <li>正数表示问题减少，即改善。</li>
-            <li>0 表示问题数量持平。</li>
+            <li>
+              前后均为 0 时，精细结果为“前后均无 ERROR/WARN”；这只表示两次成功
+              AI 分析均未检测到 ERROR/WARN，INFO 不计入问题负荷，不代表代码绝对正确。
+            </li>
+            <li>
+              前后相同且大于 0 时，精细结果为“问题负荷未减少”，表示代理问题数量没有下降。
+            </li>
             <li>负数表示问题增加，即恶化。</li>
             <li>
               显示“—”或图中“暂无可比样本”表示没有可比较样本，不等于真实的 0。
             </li>
           </ul>
           <p className="mt-2">
-            当前 V1
-            中，前后问题负荷均为 0，以及前后问题负荷相同但仍大于
-            0，都会归入 STABLE（持平），目前尚未进一步拆分。
+            V1.1 已正式将旧版 STABLE
+            拆分为“前后均无 ERROR/WARN”和“问题负荷未减少”，页面主结果不再把两者合并展示。
           </p>
         </section>
 
@@ -163,13 +177,23 @@ export function AiLearningAnalyticsMetricGuide({
         </section>
 
         <section>
-          <h3 className="font-medium text-zinc-900">总体变化</h3>
+          <h3 className="font-medium text-zinc-900">总体结果</h3>
           <p className="mt-2">
             {trendLocation}
-            “问题负荷改善、变化持平、问题负荷恶化”，根据当前统计范围内所有质量可比任务的平均问题负荷差值判断。它不是严格的时间序列回归，也不是学生能力成长或退步结论；没有质量可比任务时显示“可比数据不足”。
+            总体结果依据当前统计范围内全部质量可比任务的“反馈前问题负荷 −
+            反馈后问题负荷”差值净和判断：净和大于 0 为“总体改善”，等于 0
+            为“净变化为零”，小于 0 为“总体恶化”；没有质量可比任务时显示“可比数据不足”。
           </p>
           <p className="mt-2">
-            “总体变化”只反映当前范围内可比任务平均问题负荷差值的方向；即使只有一个可比任务，也只是该次任务的前后结果，不代表成长趋势。
+            “净变化为零”既可能表示所有可比任务均无净变化，也可能由若干改善与若干恶化相互抵消；它不表示每个任务都持平。总体结果不是时间序列趋势，也不是能力判断。
+          </p>
+        </section>
+
+        <section>
+          <h3 className="font-medium text-zinc-900">反馈参与阶段</h3>
+          <p className="mt-2">
+            反馈参与阶段表示学生在当前统计范围内到达的最深反馈参与阶段，各状态互斥。它只描述提交、请求、交付、再次提交和形成质量可比结果的流程位置，不表示学习态度、AI
+            依赖程度、能力或风险等级。
           </p>
         </section>
 

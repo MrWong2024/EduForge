@@ -1,8 +1,16 @@
 import type {
+  AiLearningAnalyticsDetailedOutcome,
+  AiLearningAnalyticsEngagementStatus,
   AiLearningAnalyticsGrowthTrend,
+  AiLearningAnalyticsMethodologyVersion,
   AiLearningAnalyticsOutcome,
+  AiLearningAnalyticsOverallOutcome,
   AiLearningAnalyticsTaskTrend,
   AiLearningAnalyticsWindow,
+} from "@/lib/api/types-teacher";
+import {
+  AI_LEARNING_ANALYTICS_ENGAGEMENT_STATUSES,
+  AI_LEARNING_ANALYTICS_OVERALL_OUTCOMES,
 } from "@/lib/api/types-teacher";
 import { getSingleSearchParam, parsePositiveInt } from "@/lib/ui/format";
 
@@ -41,16 +49,80 @@ export const AI_LEARNING_ANALYTICS_OUTCOME_LABELS: Record<
   NOT_COMPARABLE: "不可比较",
 };
 
+export const AI_LEARNING_ANALYTICS_DETAILED_OUTCOME_LABELS: Record<
+  AiLearningAnalyticsDetailedOutcome,
+  string
+> = {
+  IMPROVED: "改善",
+  REMAINED_CLEAN: "前后均无 ERROR/WARN",
+  UNCHANGED_WITH_ISSUES: "问题负荷未减少",
+  REGRESSED: "恶化",
+  NOT_COMPARABLE: "不可比较",
+};
+
+export const AI_LEARNING_ANALYTICS_DETAILED_OUTCOME_COMPACT_LABELS: Record<
+  AiLearningAnalyticsDetailedOutcome,
+  string
+> = {
+  ...AI_LEARNING_ANALYTICS_DETAILED_OUTCOME_LABELS,
+  REMAINED_CLEAN: "均无 ERROR/WARN",
+};
+
+export const AI_LEARNING_ANALYTICS_OVERALL_OUTCOME_LABELS: Record<
+  AiLearningAnalyticsOverallOutcome,
+  string
+> = {
+  INSUFFICIENT_DATA: "可比数据不足",
+  IMPROVED_OVERALL: "总体改善",
+  NO_NET_CHANGE: "净变化为零",
+  REGRESSED_OVERALL: "总体恶化",
+};
+
+export const AI_LEARNING_ANALYTICS_ENGAGEMENT_STATUS_LABELS: Record<
+  AiLearningAnalyticsEngagementStatus,
+  string
+> = {
+  NO_SUBMISSION: "未提交任务",
+  SUBMITTED_WITHOUT_AI_REQUEST: "已提交，未请求 AI 反馈",
+  AI_REQUESTED_WITHOUT_DELIVERY: "已请求 AI 反馈，暂无成功交付",
+  AI_DELIVERED_WITHOUT_RESUBMISSION: "已获 AI 反馈，未再次提交",
+  RESUBMITTED_WITHOUT_COMPARABLE: "已再次提交，暂无质量可比结果",
+  QUALITY_COMPARABLE: "已形成质量可比结果",
+};
+
+export const AI_LEARNING_ANALYTICS_OVERALL_OUTCOME_OPTIONS =
+  AI_LEARNING_ANALYTICS_OVERALL_OUTCOMES.map((value) => ({
+    value,
+    label: AI_LEARNING_ANALYTICS_OVERALL_OUTCOME_LABELS[value],
+  }));
+
+export const AI_LEARNING_ANALYTICS_ENGAGEMENT_STATUS_OPTIONS =
+  AI_LEARNING_ANALYTICS_ENGAGEMENT_STATUSES.map((value) => ({
+    value,
+    label: AI_LEARNING_ANALYTICS_ENGAGEMENT_STATUS_LABELS[value],
+  }));
+
+export const getAiLearningAnalyticsMethodologyVersionLabel = (
+  version: AiLearningAnalyticsMethodologyVersion,
+): string =>
+  version === "AI_FEEDBACK_INTERVENTION_V1_1" ? "V1.1" : "版本未知";
+
 export type AiLearningAnalyticsSearchParams = {
   window?: string | string[];
   page?: string | string[];
   excludedTaskIds?: string | string[];
+  q?: string | string[];
+  overallOutcome?: string | string[];
+  engagementStatus?: string | string[];
 } & Record<string, string | string[] | undefined>;
 
 export type AiLearningAnalyticsQueryState = {
   window: AiLearningAnalyticsWindow;
   page: number;
   excludedTaskIds: string[];
+  q: string | undefined;
+  overallOutcome: AiLearningAnalyticsOverallOutcome | undefined;
+  engagementStatus: AiLearningAnalyticsEngagementStatus | undefined;
 };
 
 export const parseAiLearningAnalyticsWindow = (
@@ -82,6 +154,31 @@ export const parseAiLearningAnalyticsExcludedTaskIds = (
   return taskIds;
 };
 
+export const parseAiLearningAnalyticsSearchQuery = (
+  value: string | string[] | undefined,
+): string | undefined => {
+  const normalized = getSingleSearchParam(value)?.trim();
+  return normalized ? normalized : undefined;
+};
+
+export const parseAiLearningAnalyticsOverallOutcome = (
+  value: string | string[] | undefined,
+): AiLearningAnalyticsOverallOutcome | undefined => {
+  const normalized = getSingleSearchParam(value);
+  return AI_LEARNING_ANALYTICS_OVERALL_OUTCOMES.find(
+    (candidate) => candidate === normalized,
+  );
+};
+
+export const parseAiLearningAnalyticsEngagementStatus = (
+  value: string | string[] | undefined,
+): AiLearningAnalyticsEngagementStatus | undefined => {
+  const normalized = getSingleSearchParam(value);
+  return AI_LEARNING_ANALYTICS_ENGAGEMENT_STATUSES.find(
+    (candidate) => candidate === normalized,
+  );
+};
+
 export const resolveAiLearningAnalyticsQueryState = (
   query: AiLearningAnalyticsSearchParams,
 ): AiLearningAnalyticsQueryState => ({
@@ -89,6 +186,13 @@ export const resolveAiLearningAnalyticsQueryState = (
   page: parsePositiveInt(getSingleSearchParam(query.page), 1, { min: 1 }),
   excludedTaskIds: parseAiLearningAnalyticsExcludedTaskIds(
     query.excludedTaskIds,
+  ),
+  q: parseAiLearningAnalyticsSearchQuery(query.q),
+  overallOutcome: parseAiLearningAnalyticsOverallOutcome(
+    query.overallOutcome,
+  ),
+  engagementStatus: parseAiLearningAnalyticsEngagementStatus(
+    query.engagementStatus,
   ),
 });
 
@@ -132,8 +236,8 @@ export const formatAiLearningAnalyticsDelta = (value: number): string => {
 
 export const getAiLearningAnalyticsDeltaMeaning = (
   value: number,
-): "改善" | "持平" | "恶化" =>
-  value > 0 ? "改善" : value < 0 ? "恶化" : "持平";
+): "改善" | "差值为零" | "恶化" =>
+  value > 0 ? "改善" : value < 0 ? "恶化" : "差值为零";
 
 export type AiLearningAnalyticsTeachingAttention = {
   lowestResubmissionTask: AiLearningAnalyticsTaskTrend | null;

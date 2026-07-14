@@ -3,7 +3,7 @@ import type {
   AiLearningAnalyticsTaskTrend,
 } from "@/lib/api/types-teacher";
 import {
-  AI_LEARNING_ANALYTICS_OUTCOME_LABELS,
+  AI_LEARNING_ANALYTICS_DETAILED_OUTCOME_LABELS,
   formatAiLearningAnalyticsDelta,
   formatAiLearningAnalyticsIssueLoad,
   formatAiLearningAnalyticsPercent,
@@ -433,7 +433,8 @@ export function AiLearningAnalyticsStudentIssueLoadComparisonChart({
     const before = hasComparable ? task.issueLoadBefore : null;
     const after = hasComparable ? task.issueLoadAfter : null;
     const delta = hasComparable ? task.issueLoadDelta : null;
-    const outcomeLabel = AI_LEARNING_ANALYTICS_OUTCOME_LABELS[task.outcome];
+    const outcomeLabel =
+      AI_LEARNING_ANALYTICS_DETAILED_OUTCOME_LABELS[task.detailedOutcome];
     const accessibleText = [
       "任务：" + task.taskTitle,
       "发布时间：" + toDisplayDate(task.publishedAt),
@@ -470,16 +471,26 @@ export function AiLearningAnalyticsStudentIssueLoadComparisonChart({
 
 type OutcomeDistributionRow = TaskNamedRow & {
   improved: number;
-  stable: number;
+  remainedClean: number;
+  unchangedWithIssues: number;
   regressed: number;
+  improvedRate: number;
+  remainedCleanRate: number;
+  unchangedWithIssuesRate: number;
+  regressedRate: number;
   total: number;
   accessibleText: string;
 };
 
 type OutcomeSegment = {
-  key: "improved" | "stable" | "regressed";
-  label: "改善" | "持平" | "恶化";
+  key:
+    | "improved"
+    | "remainedClean"
+    | "unchangedWithIssues"
+    | "regressed";
+  label: string;
   count: number;
+  rate: number;
   fill: string;
   stroke: string;
 };
@@ -494,10 +505,16 @@ function OutcomeLegend() {
         改善
       </span>
       <span className="inline-flex items-center gap-2">
-        <span className="inline-flex h-4 w-5 items-center justify-center border border-zinc-600 bg-zinc-100 text-[9px] text-zinc-800">
+        <span className="inline-flex h-4 w-5 items-center justify-center border border-sky-700 bg-sky-50 text-[9px] text-sky-900">
+          ○
+        </span>
+        前后均无 ERROR/WARN
+      </span>
+      <span className="inline-flex items-center gap-2">
+        <span className="inline-flex h-4 w-5 items-center justify-center border border-amber-700 bg-amber-100 text-[9px] text-amber-900">
           ＝
         </span>
-        持平
+        问题负荷未减少
       </span>
       <span className="inline-flex items-center gap-2">
         <span className="inline-flex h-4 w-5 items-center justify-center border border-red-700 bg-red-100 text-[9px] text-red-900">
@@ -516,29 +533,41 @@ export function AiLearningAnalyticsComparableOutcomeChart({
 }) {
   const rows: OutcomeDistributionRow[] = taskTrends.map((task, index) => {
     const total = task.qualityComparableStudentCount;
-    const toSegmentText = (label: string, count: number) =>
+    const toSegmentText = (label: string, count: number, rate: number) =>
       label +
       "：" +
       count +
       "，占该任务质量可比样本 " +
-      (total > 0
-        ? formatAiLearningAnalyticsPercent(count / total)
-        : "无对应分母");
+      (total > 0 ? formatAiLearningAnalyticsPercent(rate) : "无对应分母");
     return {
       key: task.classroomTaskId || "outcome-task-" + index,
       taskTitle: task.taskTitle,
       publishedAt: task.publishedAt,
       improved: task.improvedStudentCount,
-      stable: task.stableStudentCount,
+      remainedClean: task.remainedCleanStudentCount,
+      unchangedWithIssues: task.unchangedWithIssuesStudentCount,
       regressed: task.regressedStudentCount,
+      improvedRate: task.improvedRate,
+      remainedCleanRate: task.remainedCleanRate,
+      unchangedWithIssuesRate: task.unchangedWithIssuesRate,
+      regressedRate: task.regressedRate,
       total,
       accessibleText: [
         "任务：" + task.taskTitle,
         "发布时间：" + toDisplayDate(task.publishedAt),
         "质量可比样本总数：" + total,
-        toSegmentText("改善", task.improvedStudentCount),
-        toSegmentText("持平", task.stableStudentCount),
-        toSegmentText("恶化", task.regressedStudentCount),
+        toSegmentText("改善", task.improvedStudentCount, task.improvedRate),
+        toSegmentText(
+          "前后均无 ERROR/WARN",
+          task.remainedCleanStudentCount,
+          task.remainedCleanRate,
+        ),
+        toSegmentText(
+          "问题负荷未减少",
+          task.unchangedWithIssuesStudentCount,
+          task.unchangedWithIssuesRate,
+        ),
+        toSegmentText("恶化", task.regressedStudentCount, task.regressedRate),
       ].join("；"),
     };
   });
@@ -551,7 +580,7 @@ export function AiLearningAnalyticsComparableOutcomeChart({
             各任务可比样本结果分布
           </h3>
           <p className="mt-1 text-xs leading-5 text-zinc-500">
-            每条横向堆叠条以该任务的质量可比样本数为分母，展示改善、持平和恶化样本。
+            每条横向堆叠条以该任务的质量可比样本数为分母，展示四类 V1.1 精细结果。
           </p>
         </figcaption>
         <p className="mt-3 rounded-md border border-dashed border-zinc-300 bg-zinc-50 p-5 text-sm text-zinc-600">
@@ -573,14 +602,14 @@ export function AiLearningAnalyticsComparableOutcomeChart({
           各任务可比样本结果分布
         </h3>
         <p className="mt-1 text-xs leading-5 text-zinc-500">
-          每条横向堆叠条以该任务的质量可比样本数为分母，展示改善、持平和恶化样本。
+          每条横向堆叠条以该任务的质量可比样本数为分母，展示四类 V1.1 精细结果。
         </p>
       </figcaption>
       <OutcomeLegend />
       <div className="mt-2 overflow-x-auto" tabIndex={0}>
         <svg
           role="img"
-          aria-label="各任务可比样本结果分布。每条横向堆叠条以该任务的质量可比样本数为分母。"
+          aria-label="各任务可比样本结果分布。每条横向堆叠条以该任务的质量可比样本数为分母，区分改善、前后均无 ERROR/WARN、问题负荷未减少和恶化。"
           viewBox={"0 0 " + CHART_WIDTH + " " + height}
           width={CHART_WIDTH}
           height={height}
@@ -589,13 +618,22 @@ export function AiLearningAnalyticsComparableOutcomeChart({
           <title>各任务可比样本结果分布</title>
           <defs>
             <pattern
-              id="ai-analytics-stable-pattern"
+              id="ai-analytics-remained-clean-pattern"
               width="7"
               height="7"
               patternUnits="userSpaceOnUse"
             >
-              <rect width="7" height="7" fill="#f4f4f5" />
-              <path d="M-1,7 L7,-1 M3,9 L9,3" stroke="#71717a" strokeWidth="1" />
+              <rect width="7" height="7" fill="#f0f9ff" />
+              <circle cx="3.5" cy="3.5" r="1.2" fill="#0369a1" />
+            </pattern>
+            <pattern
+              id="ai-analytics-unchanged-with-issues-pattern"
+              width="7"
+              height="7"
+              patternUnits="userSpaceOnUse"
+            >
+              <rect width="7" height="7" fill="#fef3c7" />
+              <path d="M-1,7 L7,-1 M3,9 L9,3" stroke="#b45309" strokeWidth="1" />
             </pattern>
             <pattern
               id="ai-analytics-regressed-pattern"
@@ -614,20 +652,31 @@ export function AiLearningAnalyticsComparableOutcomeChart({
                 key: "improved",
                 label: "改善",
                 count: row.improved,
+                rate: row.improvedRate,
                 fill: "#dcfce7",
                 stroke: "#15803d",
               },
               {
-                key: "stable",
-                label: "持平",
-                count: row.stable,
-                fill: "url(#ai-analytics-stable-pattern)",
-                stroke: "#52525b",
+                key: "remainedClean",
+                label: "前后均无 ERROR/WARN",
+                count: row.remainedClean,
+                rate: row.remainedCleanRate,
+                fill: "url(#ai-analytics-remained-clean-pattern)",
+                stroke: "#0369a1",
+              },
+              {
+                key: "unchangedWithIssues",
+                label: "问题负荷未减少",
+                count: row.unchangedWithIssues,
+                rate: row.unchangedWithIssuesRate,
+                fill: "url(#ai-analytics-unchanged-with-issues-pattern)",
+                stroke: "#b45309",
               },
               {
                 key: "regressed",
                 label: "恶化",
                 count: row.regressed,
+                rate: row.regressedRate,
                 fill: "url(#ai-analytics-regressed-pattern)",
                 stroke: "#b91c1c",
               },
@@ -676,7 +725,7 @@ export function AiLearningAnalyticsComparableOutcomeChart({
                         "：" +
                         segment.count +
                         "；占质量可比样本：" +
-                        formatAiLearningAnalyticsPercent(ratio);
+                        formatAiLearningAnalyticsPercent(segment.rate);
                       return (
                         <g key={segment.key}>
                           <title>{tooltip}</title>
@@ -710,10 +759,13 @@ export function AiLearningAnalyticsComparableOutcomeChart({
                     <text x={DETAIL_X} y={centerY + 1} fontSize="10" fill="#166534">
                       改善 {row.improved}
                     </text>
-                    <text x={DETAIL_X + 70} y={centerY + 1} fontSize="10" fill="#52525b">
-                      持平 {row.stable}
+                    <text x={DETAIL_X + 70} y={centerY + 1} fontSize="10" fill="#075985">
+                      均无 ERROR/WARN {row.remainedClean}
                     </text>
-                    <text x={DETAIL_X} y={centerY + 17} fontSize="10" fill="#991b1b">
+                    <text x={DETAIL_X} y={centerY + 17} fontSize="10" fill="#92400e">
+                      问题负荷未减少 {row.unchangedWithIssues}
+                    </text>
+                    <text x={DETAIL_X + 125} y={centerY + 17} fontSize="10" fill="#991b1b">
                       恶化 {row.regressed}
                     </text>
                   </>
@@ -749,7 +801,7 @@ export function AiLearningAnalyticsComparableOutcomeChart({
         </svg>
       </div>
       <p className="mt-3 text-xs leading-5 text-zinc-600">
-        当前 V1 的“持平”同时包含前后均无 ERROR/WARN，以及问题负荷未发生变化的情况，暂未进一步拆分。
+        V1.1 已将旧版“持平”拆分为“前后均无 ERROR/WARN”和“问题负荷未减少”。前者只表示两次 AI 分析均未检测到 ERROR/WARN，不代表代码不存在其他问题。
       </p>
       <ul className="sr-only">
         {rows.map((row) => (

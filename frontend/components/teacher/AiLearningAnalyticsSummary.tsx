@@ -3,6 +3,7 @@ import type {
   AiLearningAnalyticsTaskTrend,
 } from "@/lib/api/types-teacher";
 import {
+  AI_LEARNING_ANALYTICS_DETAILED_OUTCOME_LABELS,
   formatAiLearningAnalyticsDelta,
   formatAiLearningAnalyticsIssueLoad,
   formatAiLearningAnalyticsPercent,
@@ -61,15 +62,25 @@ function DeterministicClassSummary({
           <span className="font-semibold tabular-nums">
             {summary.improvedStudentTaskCount}
           </span>{" "}
-          个改善、{" "}
+          个{AI_LEARNING_ANALYTICS_DETAILED_OUTCOME_LABELS.IMPROVED}、{" "}
           <span className="font-semibold tabular-nums">
-            {summary.stableStudentTaskCount}
+            {summary.remainedCleanStudentTaskCount}
           </span>{" "}
-          个持平、{" "}
+          个
+          {AI_LEARNING_ANALYTICS_DETAILED_OUTCOME_LABELS.REMAINED_CLEAN}、{" "}
+          <span className="font-semibold tabular-nums">
+            {summary.unchangedWithIssuesStudentTaskCount}
+          </span>{" "}
+          个
+          {
+            AI_LEARNING_ANALYTICS_DETAILED_OUTCOME_LABELS.UNCHANGED_WITH_ISSUES
+          }
+          、{" "}
           <span className="font-semibold tabular-nums">
             {summary.regressedStudentTaskCount}
           </span>{" "}
-          个恶化，平均问题负荷由{" "}
+          个{AI_LEARNING_ANALYTICS_DETAILED_OUTCOME_LABELS.REGRESSED}
+          ，平均问题负荷由{" "}
           <span className="font-semibold tabular-nums">
             {formatAiLearningAnalyticsIssueLoad(
               summary.averageIssueLoadBefore,
@@ -199,8 +210,9 @@ export function AiLearningAnalyticsSummary({
             {summary.qualityComparableStudentTaskCount}
           </p>
           <p className="mt-1 text-xs leading-5 text-emerald-800">
-            改善 {summary.improvedStudentTaskCount} · 持平{" "}
-            {summary.stableStudentTaskCount} · 恶化{" "}
+            改善 {summary.improvedStudentTaskCount} · 前后均无 ERROR/WARN{" "}
+            {summary.remainedCleanStudentTaskCount} · 问题负荷未减少{" "}
+            {summary.unchangedWithIssuesStudentTaskCount} · 恶化{" "}
             {summary.regressedStudentTaskCount}
           </p>
           <dl className="mt-4 space-y-2 border-t border-emerald-200 pt-3 text-sm">
@@ -213,6 +225,47 @@ export function AiLearningAnalyticsSummary({
                 )}
                 <span className="ml-1 block text-[11px] font-normal text-emerald-800">
                   改善 {summary.improvedStudentTaskCount} / 可比{" "}
+                  {summary.qualityComparableStudentTaskCount}
+                </span>
+              </dd>
+            </div>
+            <div className="flex items-start justify-between gap-3">
+              <dt className="text-emerald-800">
+                前后均无 ERROR/WARN 比率
+              </dt>
+              <dd className="text-right font-medium tabular-nums text-emerald-950">
+                {formatRateWithDenominator(
+                  summary.remainedCleanRate,
+                  summary.qualityComparableStudentTaskCount,
+                )}
+                <span className="ml-1 block text-[11px] font-normal text-emerald-800">
+                  均无 ERROR/WARN {summary.remainedCleanStudentTaskCount} / 可比{" "}
+                  {summary.qualityComparableStudentTaskCount}
+                </span>
+              </dd>
+            </div>
+            <div className="flex items-start justify-between gap-3">
+              <dt className="text-emerald-800">问题负荷未减少比率</dt>
+              <dd className="text-right font-medium tabular-nums text-emerald-950">
+                {formatRateWithDenominator(
+                  summary.unchangedWithIssuesRate,
+                  summary.qualityComparableStudentTaskCount,
+                )}
+                <span className="ml-1 block text-[11px] font-normal text-emerald-800">
+                  未减少 {summary.unchangedWithIssuesStudentTaskCount} / 可比{" "}
+                  {summary.qualityComparableStudentTaskCount}
+                </span>
+              </dd>
+            </div>
+            <div className="flex items-start justify-between gap-3">
+              <dt className="text-emerald-800">恶化率</dt>
+              <dd className="text-right font-medium tabular-nums text-emerald-950">
+                {formatRateWithDenominator(
+                  summary.regressedRate,
+                  summary.qualityComparableStudentTaskCount,
+                )}
+                <span className="ml-1 block text-[11px] font-normal text-emerald-800">
+                  恶化 {summary.regressedStudentTaskCount} / 可比{" "}
                   {summary.qualityComparableStudentTaskCount}
                 </span>
               </dd>
@@ -256,7 +309,7 @@ export function AiLearningAnalyticsSummary({
             </div>
           </dl>
           <p className="mt-3 text-xs leading-5 text-emerald-800">
-            当前 V1 的“持平”尚未区分前后均无 ERROR/WARN，或前后仍有相同问题负荷。
+            V1.1 已将旧版“持平”拆分为“前后均无 ERROR/WARN”和“问题负荷未减少”。前者只说明两次 AI 分析均未检测到 ERROR/WARN。
           </p>
         </article>
       </div>
