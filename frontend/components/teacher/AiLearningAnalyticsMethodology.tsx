@@ -146,33 +146,95 @@ export function AiLearningAnalyticsMetricGuide({
             </li>
           </ul>
           <p className="mt-2">
-            V1.1 已正式将旧版 STABLE
-            拆分为“前后均无 ERROR/WARN”和“问题负荷未减少”，页面主结果不再把两者合并展示。
+            V1.1
+            将原先统一显示的“持平”进一步拆分为“前后均无 ERROR/WARN”和“问题负荷未减少”，避免把教学含义不同的两种情况合并展示。
           </p>
         </section>
 
         <section>
-          <h3 className="font-medium text-zinc-900">三个比例指标的分母</h3>
+          <h3 className="font-medium text-zinc-900">图表阅读方式</h3>
+          <div className="mt-2 space-y-3">
+            <div>
+              <h4 className="font-medium text-zinc-900">
+                各任务 AI 反馈前后问题对比
+              </h4>
+              <ul className="mt-1 list-disc space-y-1 pl-5">
+                <li>
+                  每一行代表一个课堂任务；空心圆表示 AI
+                  反馈前的平均问题负荷，实心菱形表示 AI
+                  反馈后的平均问题负荷。
+                </li>
+                <li>
+                  横轴数值越低，表示 AI 分析检测到的 ERROR/WARN
+                  问题负荷越低。同一任务内，反馈后标记位于反馈前标记左侧表示问题负荷下降，位于右侧表示问题负荷上升。
+                </li>
+                <li>
+                  不同任务的难度和内容不同，不能根据任务之间的横向位置推断连续成长趋势。
+                </li>
+              </ul>
+            </div>
+            <div>
+              <h4 className="font-medium text-zinc-900">
+                各任务可比样本结果分布
+              </h4>
+              <ul className="mt-1 list-disc space-y-1 pl-5">
+                <li>
+                  每一条横向分布条对应一个课堂任务，分母是该任务的质量可比样本数。
+                </li>
+                <li>
+                  分布条依次区分“改善”“前后均无 ERROR/WARN”“问题负荷未减少”和“恶化”，四类人数之和应等于该任务质量可比样本数。
+                </li>
+                <li>
+                  显示“暂无可比样本”表示没有可进行前后质量比较的数据，不代表结果为
+                  0；百分比可能因显示时四舍五入产生轻微尾差。
+                </li>
+              </ul>
+            </div>
+            <div>
+              <h4 className="font-medium text-zinc-900">学生个人图表</h4>
+              <p className="mt-1">
+                学生详情页的图表同样按课堂任务逐行比较反馈前后问题负荷，不同任务之间不连接；它不是成绩曲线或能力成长曲线。
+              </p>
+            </div>
+          </div>
+        </section>
+
+        <section>
+          <h3 className="font-medium text-zinc-900">
+            反馈过程指标与结果占比的分母
+          </h3>
+          <h4 className="mt-2 font-medium text-zinc-900">反馈过程指标</h4>
           <ol className="mt-2 list-decimal space-y-2 pl-5">
             <li>
               <span className="font-medium text-zinc-900">反馈后重提率：</span>
-              成功交付 AI 反馈的样本中，反馈完成后再次提交的比例。
+              成功交付 AI
+              反馈的样本中，反馈完成后再次提交的比例；分母为成功交付 AI
+              反馈的样本数。
+            </li>
+            <li>
+              <span className="font-medium text-zinc-900">
+                首次反馈后重提代码变化率：
+              </span>
+              已经发生反馈后重提的样本中，第一次后续提交与分析起点提交的代码文本发生变化的比例；分母为反馈后重提样本数。这里只比较第一次后续提交，代码文本变化不等于学生已理解或采纳
+              AI 建议。
             </li>
             <li>
               <span className="font-medium text-zinc-900">质量可比率：</span>
               成功交付 AI
-              反馈的样本中，后续又成功完成 AI 分析、可以进行前后比较的比例。
-            </li>
-            <li>
-              <span className="font-medium text-zinc-900">
-                可比样本改善率：
-              </span>
-              质量可比样本中，问题负荷下降的比例。
+              反馈的样本中，后续又成功完成 AI
+              分析、能够比较前后问题负荷的比例；分母为成功交付 AI
+              反馈的样本数。
             </li>
           </ol>
+          <h4 className="mt-3 font-medium text-zinc-900">
+            质量可比结果占比
+          </h4>
           <p className="mt-2">
-            三个比例需按各自分母理解：前两项以成功交付 AI
-            反馈的样本为分母，可比样本改善率以质量可比样本为分母；它的分母不是全部学生，也不是全部提交。
+            “可比样本改善率”“前后均无 ERROR/WARN 比率”“问题负荷未减少比率”和“恶化率”的分母均为质量可比样本数。四类结果互斥，四类人数之和等于质量可比样本数。
+          </p>
+          <p className="mt-2">
+            这些比率的分母不是全部学生、全部课堂任务、全部提交或全部成功交付
+            AI 反馈的样本；百分比展示可能因四舍五入存在轻微尾差。
           </p>
         </section>
 
@@ -185,15 +247,35 @@ export function AiLearningAnalyticsMetricGuide({
             为“净变化为零”，小于 0 为“总体恶化”；没有质量可比任务时显示“可比数据不足”。
           </p>
           <p className="mt-2">
-            “净变化为零”既可能表示所有可比任务均无净变化，也可能由若干改善与若干恶化相互抵消；它不表示每个任务都持平。总体结果不是时间序列趋势，也不是能力判断。
+            总体结果不是根据“改善任务是否占多数”进行投票。少数任务中的较大恶化可能抵消多个任务中的较小改善，少数任务中的较大改善也可能抵消多个任务中的较小恶化。
+          </p>
+          <p className="mt-2">
+            “净变化为零”既可能表示每个可比任务都没有净变化，也可能由改善与恶化相互抵消；它不表示每个任务都处于同一种结果。
+          </p>
+          <p className="mt-2">
+            只有一个质量可比任务时，总体结果实际上只反映该单次任务，不能据此判断学生形成了成长趋势。总体结果不是时间序列回归、成绩变化，也不是能力成长或退步判断。
           </p>
         </section>
 
         <section>
           <h3 className="font-medium text-zinc-900">反馈参与阶段</h3>
           <p className="mt-2">
-            反馈参与阶段表示学生在当前统计范围内到达的最深反馈参与阶段，各状态互斥。它只描述提交、请求、交付、再次提交和形成质量可比结果的流程位置，不表示学习态度、AI
-            依赖程度、能力或风险等级。
+            六种反馈参与阶段互斥，系统按学生在当前统计范围内到达的最深阶段返回一个状态：
+          </p>
+          <ol className="mt-2 list-decimal space-y-1 pl-5">
+            <li>未提交任务</li>
+            <li>已提交，未请求 AI 反馈</li>
+            <li>已请求 AI 反馈，暂无成功交付</li>
+            <li>已获 AI 反馈，未再次提交</li>
+            <li>已再次提交，暂无质量可比结果</li>
+            <li>已形成质量可比结果</li>
+          </ol>
+          <p className="mt-2">
+            “已形成质量可比结果”表示学生至少有一个任务形成质量可比样本，不表示该学生的所有任务都形成了质量可比结果。同理，其他阶段也是学生在当前统计范围内的总体参与阶段，不是逐任务状态列表。
+          </p>
+          <p className="mt-2">
+            该字段只描述提交、请求、交付、再次提交和形成质量可比结果的流程位置，不表示学习态度、AI
+            依赖程度、学习能力、风险等级或是否采纳 AI 建议。
           </p>
         </section>
 
