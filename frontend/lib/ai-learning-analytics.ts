@@ -1,6 +1,7 @@
 import type {
   AiLearningAnalyticsGrowthTrend,
   AiLearningAnalyticsOutcome,
+  AiLearningAnalyticsTaskTrend,
   AiLearningAnalyticsWindow,
 } from "@/lib/api/types-teacher";
 import { getSingleSearchParam, parsePositiveInt } from "@/lib/ui/format";
@@ -133,3 +134,50 @@ export const getAiLearningAnalyticsDeltaMeaning = (
   value: number,
 ): "改善" | "持平" | "恶化" =>
   value > 0 ? "改善" : value < 0 ? "恶化" : "持平";
+
+export type AiLearningAnalyticsTeachingAttention = {
+  lowestResubmissionTask: AiLearningAnalyticsTaskTrend | null;
+  mostRegressedTask: AiLearningAnalyticsTaskTrend | null;
+  highestImprovedRateTask: AiLearningAnalyticsTaskTrend | null;
+};
+
+export const selectAiLearningAnalyticsTeachingAttention = (
+  taskTrends: AiLearningAnalyticsTaskTrend[],
+): AiLearningAnalyticsTeachingAttention => {
+  let lowestResubmissionTask: AiLearningAnalyticsTaskTrend | null = null;
+  let mostRegressedTask: AiLearningAnalyticsTaskTrend | null = null;
+  let highestImprovedRateTask: AiLearningAnalyticsTaskTrend | null = null;
+
+  for (const task of taskTrends) {
+    if (
+      task.aiDeliveredStudentCount > 0 &&
+      (lowestResubmissionTask === null ||
+        task.postFeedbackResubmissionRate <
+          lowestResubmissionTask.postFeedbackResubmissionRate)
+    ) {
+      lowestResubmissionTask = task;
+    }
+
+    if (
+      task.qualityComparableStudentCount > 0 &&
+      (mostRegressedTask === null ||
+        task.regressedStudentCount > mostRegressedTask.regressedStudentCount)
+    ) {
+      mostRegressedTask = task;
+    }
+
+    if (
+      task.qualityComparableStudentCount > 0 &&
+      (highestImprovedRateTask === null ||
+        task.improvedRate > highestImprovedRateTask.improvedRate)
+    ) {
+      highestImprovedRateTask = task;
+    }
+  }
+
+  return {
+    lowestResubmissionTask,
+    mostRegressedTask,
+    highestImprovedRateTask,
+  };
+};

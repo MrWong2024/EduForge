@@ -34,7 +34,7 @@ export function AiLearningAnalyticsMethodologyPanel({
           本页面不覆盖学生使用的其他 AI 工具，不代表正式课程成绩，也不据此判断学生已阅读、理解或采纳反馈。
         </p>
         <p>
-          不同课堂任务的难度可能不同；本页面按课堂任务顺序观察变化，不做任务难度校正。
+          不同课堂任务的难度可能不同；本页面只在同一任务内比较反馈前后问题负荷，不做任务难度校正，也不连接不同任务推断连续成长。
         </p>
       </div>
     </section>
@@ -127,9 +127,14 @@ export function AiLearningAnalyticsMetricGuide({
             <li>0 表示问题数量持平。</li>
             <li>负数表示问题增加，即恶化。</li>
             <li>
-              显示“—”或曲线缺口表示没有可比较样本，不等于真实的 0。
+              显示“—”或图中“暂无可比样本”表示没有可比较样本，不等于真实的 0。
             </li>
           </ul>
+          <p className="mt-2">
+            当前 V1
+            中，前后问题负荷均为 0，以及前后问题负荷相同但仍大于
+            0，都会归入 STABLE（持平），目前尚未进一步拆分。
+          </p>
         </section>
 
         <section>
@@ -158,10 +163,13 @@ export function AiLearningAnalyticsMetricGuide({
         </section>
 
         <section>
-          <h3 className="font-medium text-zinc-900">介入变化趋势</h3>
+          <h3 className="font-medium text-zinc-900">总体变化</h3>
           <p className="mt-2">
             {trendLocation}
             “问题负荷改善、变化持平、问题负荷恶化”，根据当前统计范围内所有质量可比任务的平均问题负荷差值判断。它不是严格的时间序列回归，也不是学生能力成长或退步结论；没有质量可比任务时显示“可比数据不足”。
+          </p>
+          <p className="mt-2">
+            “总体变化”只反映当前范围内可比任务平均问题负荷差值的方向；即使只有一个可比任务，也只是该次任务的前后结果，不代表成长趋势。
           </p>
         </section>
 

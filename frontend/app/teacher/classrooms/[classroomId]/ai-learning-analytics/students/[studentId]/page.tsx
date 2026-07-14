@@ -3,7 +3,7 @@ import { headers } from "next/headers";
 import { EmptyState } from "@/components/blocks/EmptyState";
 import { ErrorState } from "@/components/blocks/ErrorState";
 import { PageHeader } from "@/components/blocks/PageHeader";
-import { AiLearningAnalyticsStudentDeltaChart } from "@/components/teacher/AiLearningAnalyticsCharts";
+import { AiLearningAnalyticsStudentIssueLoadComparisonChart } from "@/components/teacher/AiLearningAnalyticsCharts";
 import {
   AiLearningAnalyticsMethodologyPanel,
   AiLearningAnalyticsMetricGuide,
@@ -318,33 +318,45 @@ export default async function AiLearningAnalyticsStudentPage({
             </dd>
           </div>
           <div>
-            <dt className="text-xs text-zinc-500">介入变化趋势</dt>
+            <dt className="text-xs text-zinc-500">总体变化</dt>
             <dd className="mt-0.5 font-medium text-zinc-900">
               {AI_LEARNING_ANALYTICS_GROWTH_TREND_LABELS[summary.growthTrend]}
             </dd>
+            <p className="mt-1 text-[11px] leading-5 text-zinc-500">
+              {hasComparableTasks
+                ? "基于 " +
+                  summary.qualityComparableTasksCount +
+                  " 个可比任务"
+                : "暂无质量可比任务"}
+            </p>
           </div>
         </dl>
+        <p className="mt-3 text-xs leading-5 text-zinc-500">
+          “总体变化”只表示当前范围内可比任务平均问题负荷差值的方向，不是时间序列回归，也不是能力成长或退步结论。
+        </p>
       </section>
 
-      <section className="rounded-lg border border-zinc-200 bg-zinc-50 p-4">
-        <h2 className="text-sm font-semibold text-zinc-900">
-          个人 AI 反馈前后问题变化
-        </h2>
-        <p className="mt-1 text-xs text-zinc-500">
-          每个点表示该学生在一个课堂任务中的 AI
-          反馈前后问题负荷差值；不可比较的任务不绘制为 0。
-        </p>
-        <div className="mt-3">
-          {hasComparablePoints ? (
-            <AiLearningAnalyticsStudentDeltaChart taskPoints={taskPoints} />
-          ) : (
+      {hasComparablePoints ? (
+        <AiLearningAnalyticsStudentIssueLoadComparisonChart
+          taskPoints={taskPoints}
+        />
+      ) : (
+        <section className="rounded-lg border border-zinc-200 bg-zinc-50 p-4">
+          <h2 className="text-sm font-semibold text-zinc-900">
+            个人各任务 AI 反馈前后问题对比
+          </h2>
+          <p className="mt-1 text-xs leading-5 text-zinc-500">
+            该图比较同一课堂任务内 AI
+            反馈前后的问题负荷，不代表不同任务之间的成绩或能力成长曲线。
+          </p>
+          <div className="mt-3">
             <EmptyState
               title="当前学生暂无可比较的介入前后任务"
               description="摘要和全任务明细仍保留；不可比较任务不会被绘制为 0。"
             />
-          )}
-        </div>
-      </section>
+          </div>
+        </section>
+      )}
 
       <section className="rounded-lg border border-zinc-200 bg-white p-4">
         <h2 className="text-sm font-semibold text-zinc-900">全任务明细</h2>
@@ -356,14 +368,16 @@ export default async function AiLearningAnalyticsStudentPage({
         </div>
       </section>
 
-      <details className="rounded-lg border border-zinc-200 bg-zinc-50 p-4">
-        <summary className="cursor-pointer text-sm font-medium text-zinc-800">
-          查看原始学生分析 JSON
-        </summary>
-        <pre className="mt-3 overflow-auto text-xs text-zinc-700">
-          {JSON.stringify(detail.raw, null, 2)}
-        </pre>
-      </details>
+      {process.env.NODE_ENV !== "production" ? (
+        <details className="rounded-lg border border-zinc-200 bg-zinc-50 p-4">
+          <summary className="cursor-pointer text-sm font-medium text-zinc-800">
+            查看原始学生分析 JSON
+          </summary>
+          <pre className="mt-3 overflow-auto text-xs text-zinc-700">
+            {JSON.stringify(detail.raw, null, 2)}
+          </pre>
+        </details>
+      ) : null}
     </section>
   );
 }

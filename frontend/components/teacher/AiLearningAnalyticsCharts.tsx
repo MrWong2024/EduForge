@@ -10,626 +10,751 @@ import {
 } from "@/lib/ai-learning-analytics";
 import { toDisplayDate } from "@/lib/ui/format";
 
-const CHART_HEIGHT = 320;
-const PLOT_TOP = 38;
-const PLOT_BOTTOM = 235;
-const PLOT_LEFT = 64;
-const PLOT_RIGHT = 34;
-const TASK_STEP = 128;
+const CHART_WIDTH = 1040;
+const TASK_LABEL_X = 8;
+const TASK_LABEL_MAX_CHARACTERS = 22;
+const PLOT_LEFT = 285;
+const PLOT_RIGHT = 750;
+const DETAIL_X = 780;
+const ROW_START = 42;
+const MIN_ROW_HEIGHT = 68;
+const AXIS_FOOTER_HEIGHT = 48;
 
-type DeltaChartPoint = {
+type TaskNamedRow = {
   key: string;
   taskTitle: string;
   publishedAt: string | null;
-  value: number | null;
-  tooltip: string;
+};
+
+type RowLayout<T extends TaskNamedRow> = {
+  row: T;
+  top: number;
+  height: number;
+  centerY: number;
+  titleLines: string[];
+};
+
+const wrapTaskTitle = (title: string): string[] => {
+  const characters = Array.from(title.trim() || "未知任务");
+  const lines: string[] = [];
+  for (
+    let index = 0;
+    index < characters.length;
+    index += TASK_LABEL_MAX_CHARACTERS
+  ) {
+    lines.push(
+      characters.slice(index, index + TASK_LABEL_MAX_CHARACTERS).join(""),
+    );
+  }
+  return lines.length > 0 ? lines : ["未知任务"];
+};
+
+function buildRowLayouts<T extends TaskNamedRow>(
+  rows: T[],
+): {
+  layouts: RowLayout<T>[];
+  height: number;
+} {
+  let currentTop = ROW_START;
+  const layouts = rows.map((row) => {
+    const titleLines = wrapTaskTitle(row.taskTitle);
+    const height = Math.max(
+      MIN_ROW_HEIGHT,
+      28 + titleLines.length * 16,
+    );
+    const layout = {
+      row,
+      top: currentTop,
+      height,
+      centerY: currentTop + height / 2,
+      titleLines,
+    };
+    currentTop += height;
+    return layout;
+  });
+  return {
+    layouts,
+    height: currentTop + AXIS_FOOTER_HEIGHT,
+  };
+}
+
+function SvgTaskTitle({
+  lines,
+  centerY,
+}: {
+  lines: string[];
+  centerY: number;
+}) {
+  const firstLineY = centerY - ((lines.length - 1) * 16) / 2 + 4;
+  return (
+    <text x={TASK_LABEL_X} y={firstLineY} fontSize="11" fill="#27272a">
+      {lines.map((line, index) => (
+        <tspan
+          key={line + "-" + index}
+          x={TASK_LABEL_X}
+          dy={index === 0 ? 0 : 16}
+        >
+          {line}
+        </tspan>
+      ))}
+    </text>
+  );
+}
+
+type BeforeAfterRow = TaskNamedRow & {
+  before: number | null;
+  after: number | null;
+  delta: number | null;
+  detailLabel: string;
   accessibleText: string;
 };
 
-type PositionedPoint = {
-  x: number;
-  y: number;
-};
+function BeforeAfterLegend() {
+  return (
+    <div className="mt-3 flex flex-wrap gap-x-5 gap-y-2 text-xs text-zinc-700">
+      <span className="inline-flex items-center gap-2">
+        <svg width="20" height="16" aria-hidden="true">
+          <circle
+            cx="10"
+            cy="8"
+            r="5"
+            fill="#ffffff"
+            stroke="#2563eb"
+            strokeWidth="2.5"
+          />
+        </svg>
+        AI 反馈前（空心圆）
+      </span>
+      <span className="inline-flex items-center gap-2">
+        <svg width="20" height="16" aria-hidden="true">
+          <polygon
+            points="10,2 16,8 10,14 4,8"
+            fill="#f97316"
+            stroke="#9a3412"
+            strokeWidth="1.5"
+          />
+        </svg>
+        AI 反馈后（实心菱形）
+      </span>
+    </div>
+  );
+}
 
-const getChartWidth = (pointCount: number): number =>
-  Math.max(720, PLOT_LEFT + PLOT_RIGHT + Math.max(1, pointCount - 1) * TASK_STEP);
-
-const getPointX = (index: number, pointCount: number, width: number): number => {
-  if (pointCount <= 1) {
-    return (PLOT_LEFT + width - PLOT_RIGHT) / 2;
-  }
-  return PLOT_LEFT + index * TASK_STEP;
-};
-
-const truncateTaskTitle = (title: string): string =>
-  title.length > 12 ? `${title.slice(0, 12)}…` : title;
-
-const toPath = (points: PositionedPoint[]): string =>
-  points
-    .map((point, index) =>
-      `${index === 0 ? "M" : "L"} ${point.x.toFixed(2)} ${point.y.toFixed(2)}`,
-    )
-    .join(" ");
-
-const splitIntoSegments = <T,>(
-  values: T[],
-  toPosition: (value: T, index: number) => PositionedPoint | null,
-): PositionedPoint[][] => {
-  const segments: PositionedPoint[][] = [];
-  let current: PositionedPoint[] = [];
-
-  values.forEach((value, index) => {
-    const position = toPosition(value, index);
-    if (!position) {
-      if (current.length > 0) {
-        segments.push(current);
-        current = [];
-      }
-      return;
-    }
-    current.push(position);
-  });
-
-  if (current.length > 0) {
-    segments.push(current);
-  }
-  return segments;
-};
-
-function DeltaChart({
+function BeforeAfterComparisonChart({
   title,
   description,
-  points,
+  rows,
 }: {
   title: string;
   description: string;
-  points: DeltaChartPoint[];
+  rows: BeforeAfterRow[];
 }) {
-  if (points.length === 0) {
+  if (rows.length === 0) {
     return (
-      <div className="rounded-md border border-dashed border-zinc-300 bg-zinc-50 p-5 text-sm text-zinc-600">
-        暂无课堂任务点可展示。
-      </div>
+      <figure className="rounded-lg border border-zinc-200 bg-white p-4">
+        <figcaption>
+          <h3 className="text-sm font-semibold text-zinc-900">{title}</h3>
+          <p className="mt-1 text-xs leading-5 text-zinc-500">{description}</p>
+        </figcaption>
+        <p className="mt-3 rounded-md border border-dashed border-zinc-300 bg-zinc-50 p-5 text-sm text-zinc-600">
+          暂无课堂任务可展示。
+        </p>
+      </figure>
     );
   }
 
-  const width = getChartWidth(points.length);
-  const validValues = points.flatMap((point) =>
-    point.value === null ? [] : [Math.abs(point.value)],
+  const { layouts, height } = buildRowLayouts(rows);
+  const comparableValues = rows.flatMap((row) =>
+    row.before === null || row.after === null ? [] : [row.before, row.after],
   );
-  const maxMagnitude = Math.max(1, ...validValues);
-  const plotHeight = PLOT_BOTTOM - PLOT_TOP;
-  const zeroY = PLOT_TOP + plotHeight / 2;
-  const toY = (value: number) =>
-    zeroY - (value / maxMagnitude) * (plotHeight / 2);
-  const segments = splitIntoSegments(points, (point, index) =>
-    point.value === null
-      ? null
-      : {
-          x: getPointX(index, points.length, width),
-          y: toY(point.value),
-        },
-  );
+  const maximum = Math.max(1, ...comparableValues);
+  const plotWidth = PLOT_RIGHT - PLOT_LEFT;
+  const toX = (value: number) => PLOT_LEFT + (value / maximum) * plotWidth;
+  const ticks = [0, 0.25, 0.5, 0.75, 1];
+  const plotBottom =
+    layouts[layouts.length - 1].top + layouts[layouts.length - 1].height;
 
   return (
     <figure className="rounded-lg border border-zinc-200 bg-white p-4">
       <figcaption>
         <h3 className="text-sm font-semibold text-zinc-900">{title}</h3>
-        <p className="mt-1 text-xs text-zinc-500">{description}</p>
+        <p className="mt-1 text-xs leading-5 text-zinc-500">{description}</p>
       </figcaption>
-      <div className="mt-3 overflow-x-auto" tabIndex={0}>
+      <BeforeAfterLegend />
+      <div className="mt-2 overflow-x-auto" tabIndex={0}>
         <svg
           role="img"
-          aria-label={`${title}。${description}`}
-          viewBox={`0 0 ${width} ${CHART_HEIGHT}`}
-          width={width}
-          height={CHART_HEIGHT}
+          aria-label={title + "。" + description}
+          viewBox={"0 0 " + CHART_WIDTH + " " + height}
+          width={CHART_WIDTH}
+          height={height}
           className="block max-w-none"
         >
           <title>{title}</title>
-          <line
-            x1={PLOT_LEFT}
-            x2={width - PLOT_RIGHT}
-            y1={PLOT_TOP}
-            y2={PLOT_TOP}
-            stroke="#e4e4e7"
-          />
-          <line
-            x1={PLOT_LEFT}
-            x2={width - PLOT_RIGHT}
-            y1={zeroY}
-            y2={zeroY}
-            stroke="#71717a"
-            strokeWidth="1.5"
-          />
-          <line
-            x1={PLOT_LEFT}
-            x2={width - PLOT_RIGHT}
-            y1={PLOT_BOTTOM}
-            y2={PLOT_BOTTOM}
-            stroke="#e4e4e7"
-          />
-          <text x={8} y={PLOT_TOP + 4} fontSize="11" fill="#3f6212">
-            +{formatAiLearningAnalyticsIssueLoad(maxMagnitude)} 改善
-          </text>
-          <text x={28} y={zeroY + 4} fontSize="11" fill="#52525b">
-            0
-          </text>
-          <text x={8} y={PLOT_BOTTOM + 4} fontSize="11" fill="#991b1b">
-            -{formatAiLearningAnalyticsIssueLoad(maxMagnitude)} 恶化
-          </text>
 
-          {segments.map((segment, index) =>
-            segment.length > 1 ? (
-              <path
-                key={`segment-${index}`}
-                d={toPath(segment)}
-                fill="none"
-                stroke="#2563eb"
-                strokeWidth="2.5"
-              />
-            ) : null,
-          )}
-
-          {points.map((point, index) => {
-            const x = getPointX(index, points.length, width);
+          {ticks.map((tick) => {
+            const x = PLOT_LEFT + tick * plotWidth;
             return (
-              <g key={point.key}>
-                <line
-                  x1={x}
-                  x2={x}
-                  y1={PLOT_BOTTOM}
-                  y2={PLOT_BOTTOM + 6}
-                  stroke="#a1a1aa"
-                />
-                {point.value === null ? (
-                  <g>
-                    <title>{point.tooltip}</title>
-                    <text
-                      x={x}
-                      y={PLOT_BOTTOM - 8}
-                      textAnchor="middle"
-                      fontSize="10"
-                      fill="#71717a"
-                    >
-                      缺口（无可比样本）
-                    </text>
-                  </g>
-                ) : (
-                  <g>
-                    <title>{point.tooltip}</title>
-                    <circle
-                      cx={x}
-                      cy={toY(point.value)}
-                      r="5"
-                      fill="#ffffff"
-                      stroke="#2563eb"
-                      strokeWidth="3"
-                    />
-                    <text
-                      x={x}
-                      y={toY(point.value) - 10}
-                      textAnchor="middle"
-                      fontSize="10"
-                      fill="#1d4ed8"
-                    >
-                      {formatAiLearningAnalyticsDelta(point.value)}
-                    </text>
-                  </g>
-                )}
+              <g key={tick}>
                 <text
                   x={x}
-                  y={PLOT_BOTTOM + 22}
+                  y={plotBottom + 18}
                   textAnchor="middle"
                   fontSize="10"
                   fill="#52525b"
                 >
-                  任务 {index + 1}
-                </text>
-                <text
-                  x={x}
-                  y={PLOT_BOTTOM + 38}
-                  textAnchor="middle"
-                  fontSize="10"
-                  fill="#71717a"
-                >
-                  {truncateTaskTitle(point.taskTitle)}
+                  {formatAiLearningAnalyticsIssueLoad(maximum * tick)}
                 </text>
               </g>
             );
           })}
+
+          {layouts.map(({ row, top, height: rowHeight, centerY, titleLines }, index) => {
+            const hasComparable =
+              row.before !== null && row.after !== null && row.delta !== null;
+            const beforeX = hasComparable ? toX(row.before as number) : 0;
+            const afterX = hasComparable ? toX(row.after as number) : 0;
+            const pointsOverlap =
+              hasComparable && Math.abs(beforeX - afterX) < 0.5;
+            const beforeY = centerY + (pointsOverlap ? 7 : 0);
+            const afterY = centerY - (pointsOverlap ? 7 : 0);
+            return (
+              <g key={row.key}>
+                <title>{row.accessibleText}</title>
+                <rect
+                  x="0"
+                  y={top}
+                  width={CHART_WIDTH}
+                  height={rowHeight}
+                  fill={index % 2 === 0 ? "#fafafa" : "#ffffff"}
+                />
+                {ticks.map((tick) => {
+                  const x = PLOT_LEFT + tick * plotWidth;
+                  return (
+                    <line
+                      key={tick}
+                      x1={x}
+                      x2={x}
+                      y1={top}
+                      y2={top + rowHeight}
+                      stroke={tick === 0 ? "#a1a1aa" : "#e4e4e7"}
+                      strokeWidth={tick === 0 ? "1.5" : "1"}
+                    />
+                  );
+                })}
+                <line
+                  x1="0"
+                  x2={CHART_WIDTH}
+                  y1={top}
+                  y2={top}
+                  stroke="#e4e4e7"
+                />
+                <SvgTaskTitle lines={titleLines} centerY={centerY} />
+                <line
+                  x1={PLOT_LEFT}
+                  x2={PLOT_RIGHT}
+                  y1={centerY}
+                  y2={centerY}
+                  stroke="#d4d4d8"
+                />
+                {hasComparable ? (
+                  <>
+                    <line
+                      x1={beforeX}
+                      x2={afterX}
+                      y1={beforeY}
+                      y2={afterY}
+                      stroke="#71717a"
+                      strokeWidth="3"
+                    />
+                    <circle
+                      cx={beforeX}
+                      cy={beforeY}
+                      r="6"
+                      fill="#ffffff"
+                      stroke="#2563eb"
+                      strokeWidth="3"
+                    />
+                    <polygon
+                      points={
+                        afterX +
+                        "," +
+                        (afterY - 7) +
+                        " " +
+                        (afterX + 7) +
+                        "," +
+                        afterY +
+                        " " +
+                        afterX +
+                        "," +
+                        (afterY + 7) +
+                        " " +
+                        (afterX - 7) +
+                        "," +
+                        afterY
+                      }
+                      fill="#f97316"
+                      stroke="#9a3412"
+                      strokeWidth="1.5"
+                    />
+                    <text
+                      x={DETAIL_X}
+                      y={centerY - 7}
+                      fontSize="11"
+                      fill="#27272a"
+                    >
+                      前{" "}
+                      {formatAiLearningAnalyticsIssueLoad(row.before as number)}
+                      {" "}→ 后{" "}
+                      {formatAiLearningAnalyticsIssueLoad(row.after as number)}
+                    </text>
+                    <text
+                      x={DETAIL_X}
+                      y={centerY + 12}
+                      fontSize="10"
+                      fill="#52525b"
+                    >
+                      差值{" "}
+                      {formatAiLearningAnalyticsDelta(row.delta as number)}
+                      {" · "}
+                      {row.detailLabel}
+                    </text>
+                  </>
+                ) : (
+                  <>
+                    <text
+                      x={PLOT_LEFT + 10}
+                      y={centerY + 4}
+                      fontSize="11"
+                      fill="#71717a"
+                    >
+                      暂无可比样本
+                    </text>
+                    <text
+                      x={DETAIL_X}
+                      y={centerY + 4}
+                      fontSize="10"
+                      fill="#71717a"
+                    >
+                      {row.detailLabel}
+                    </text>
+                  </>
+                )}
+              </g>
+            );
+          })}
+
+          <line
+            x1={PLOT_LEFT}
+            x2={PLOT_RIGHT}
+            y1={plotBottom}
+            y2={plotBottom}
+            stroke="#71717a"
+            strokeWidth="1.5"
+          />
           <text
-            x={(PLOT_LEFT + width - PLOT_RIGHT) / 2}
-            y={CHART_HEIGHT - 10}
+            x={(PLOT_LEFT + PLOT_RIGHT) / 2}
+            y={height - 8}
             textAnchor="middle"
             fontSize="11"
             fill="#52525b"
           >
-            课堂任务顺序
+            平均问题负荷（横轴从 0 开始，数值越低越好）
           </text>
         </svg>
       </div>
       <ul className="sr-only">
-        {points.map((point) => (
-          <li key={`accessible-${point.key}`}>{point.accessibleText}</li>
+        {rows.map((row) => (
+          <li key={"accessible-" + row.key}>{row.accessibleText}</li>
         ))}
       </ul>
     </figure>
   );
 }
 
-export function AiLearningAnalyticsClassDeltaChart({
+export function AiLearningAnalyticsTaskIssueLoadComparisonChart({
   taskTrends,
 }: {
   taskTrends: AiLearningAnalyticsTaskTrend[];
 }) {
-  const points: DeltaChartPoint[] = taskTrends.map((task, index) => {
-    const value =
-      task.qualityComparableStudentCount > 0
-        ? task.averageIssueLoadDelta
-        : null;
-    const valueText =
-      value === null ? "暂无可比样本" : formatAiLearningAnalyticsDelta(value);
-    const text = `任务：${task.taskTitle}；发布时间：${toDisplayDate(task.publishedAt)}；平均差值：${valueText}；可比样本数：${task.qualityComparableStudentCount}`;
+  const rows: BeforeAfterRow[] = taskTrends.map((task, index) => {
+    const hasComparable = task.qualityComparableStudentCount > 0;
+    const before = hasComparable ? task.averageIssueLoadBefore : null;
+    const after = hasComparable ? task.averageIssueLoadAfter : null;
+    const delta = hasComparable ? task.averageIssueLoadDelta : null;
+    const accessibleText = [
+      "任务：" + task.taskTitle,
+      "发布时间：" + toDisplayDate(task.publishedAt),
+      "AI 反馈前平均问题负荷：" +
+        (before === null
+          ? "—"
+          : formatAiLearningAnalyticsIssueLoad(before)),
+      "AI 反馈后平均问题负荷：" +
+        (after === null ? "—" : formatAiLearningAnalyticsIssueLoad(after)),
+      "平均差值：" +
+        (delta === null ? "—" : formatAiLearningAnalyticsDelta(delta)),
+      "质量可比样本数：" + task.qualityComparableStudentCount,
+    ].join("；");
     return {
-      key: task.classroomTaskId || `class-task-${index}`,
+      key: task.classroomTaskId || "class-task-" + index,
       taskTitle: task.taskTitle,
       publishedAt: task.publishedAt,
-      value,
-      tooltip: text,
-      accessibleText: text,
+      before,
+      after,
+      delta,
+      detailLabel:
+        task.qualityComparableStudentCount > 0
+          ? "可比样本 " + task.qualityComparableStudentCount
+          : "暂无可比样本",
+      accessibleText,
     };
   });
 
   return (
-    <DeltaChart
-      title="AI 反馈前后问题变化"
-      description="每个点表示该任务中质量可比样本的平均问题负荷差值；正值表示问题减少，负值表示问题增加。"
-      points={points}
+    <BeforeAfterComparisonChart
+      title="各任务 AI 反馈前后问题对比"
+      description="每行对比一个课堂任务中质量可比样本的平均问题负荷。数值越低，表示该版本检测到的 ERROR/WARN 问题负荷越低；不同任务难度未校正，不应把任务间差异直接理解为连续成长趋势。"
+      rows={rows}
     />
   );
 }
 
-export function AiLearningAnalyticsStudentDeltaChart({
+export function AiLearningAnalyticsStudentIssueLoadComparisonChart({
   taskPoints,
 }: {
   taskPoints: AiLearningAnalyticsTaskPoint[];
 }) {
-  const points: DeltaChartPoint[] = taskPoints.map((task, index) => {
-    const value =
-      task.qualityComparable && task.issueLoadDelta !== null
-        ? task.issueLoadDelta
-        : null;
-    const text = [
-      `任务：${task.taskTitle}`,
-      `发布时间：${toDisplayDate(task.publishedAt)}`,
-      `问题负荷 before：${task.issueLoadBefore === null ? "—" : formatAiLearningAnalyticsIssueLoad(task.issueLoadBefore)}`,
-      `问题负荷 after：${task.issueLoadAfter === null ? "—" : formatAiLearningAnalyticsIssueLoad(task.issueLoadAfter)}`,
-      `差值：${value === null ? "—" : formatAiLearningAnalyticsDelta(value)}`,
-      `结果：${AI_LEARNING_ANALYTICS_OUTCOME_LABELS[task.outcome]}`,
+  const rows: BeforeAfterRow[] = taskPoints.map((task, index) => {
+    const hasComparable =
+      task.qualityComparable &&
+      task.issueLoadBefore !== null &&
+      task.issueLoadAfter !== null &&
+      task.issueLoadDelta !== null;
+    const before = hasComparable ? task.issueLoadBefore : null;
+    const after = hasComparable ? task.issueLoadAfter : null;
+    const delta = hasComparable ? task.issueLoadDelta : null;
+    const outcomeLabel = AI_LEARNING_ANALYTICS_OUTCOME_LABELS[task.outcome];
+    const accessibleText = [
+      "任务：" + task.taskTitle,
+      "发布时间：" + toDisplayDate(task.publishedAt),
+      "AI 反馈前问题负荷：" +
+        (before === null
+          ? "—"
+          : formatAiLearningAnalyticsIssueLoad(before)),
+      "AI 反馈后问题负荷：" +
+        (after === null ? "—" : formatAiLearningAnalyticsIssueLoad(after)),
+      "差值：" +
+        (delta === null ? "—" : formatAiLearningAnalyticsDelta(delta)),
+      "结果：" + outcomeLabel,
     ].join("；");
     return {
-      key: task.classroomTaskId || `student-task-${index}`,
+      key: task.classroomTaskId || "student-task-" + index,
       taskTitle: task.taskTitle,
       publishedAt: task.publishedAt,
-      value,
-      tooltip: text,
-      accessibleText: text,
+      before,
+      after,
+      delta,
+      detailLabel: "结果 " + outcomeLabel,
+      accessibleText,
     };
   });
 
   return (
-    <DeltaChart
-      title="个人 AI 反馈前后问题变化"
-      description="每个点表示该学生在一个课堂任务中的 AI 反馈前后问题负荷差值；不可比较的任务不绘制为 0。"
-      points={points}
+    <BeforeAfterComparisonChart
+      title="个人各任务 AI 反馈前后问题对比"
+      description="该图比较同一课堂任务内 AI 反馈前后的问题负荷，不代表不同任务之间的成绩或能力成长曲线。"
+      rows={rows}
     />
   );
 }
 
-type RateSeriesKey = "resubmission" | "comparable" | "improved";
-type RateSeriesDefinition = {
-  key: RateSeriesKey;
-  label: string;
-  color: string;
-  dashArray?: string;
-  marker: "circle" | "square" | "diamond";
+type OutcomeDistributionRow = TaskNamedRow & {
+  improved: number;
+  stable: number;
+  regressed: number;
+  total: number;
+  accessibleText: string;
 };
 
-const RATE_SERIES: RateSeriesDefinition[] = [
-  {
-    key: "resubmission",
-    label: "反馈后重提率",
-    color: "#2563eb",
-    marker: "circle",
-  },
-  {
-    key: "comparable",
-    label: "质量可比率",
-    color: "#7c3aed",
-    dashArray: "8 5",
-    marker: "square",
-  },
-  {
-    key: "improved",
-    label: "可比样本改善率",
-    color: "#15803d",
-    dashArray: "2 5",
-    marker: "diamond",
-  },
-];
-
-type RateDatum = {
-  rate: number;
-  numerator: number;
-  denominator: number;
+type OutcomeSegment = {
+  key: "improved" | "stable" | "regressed";
+  label: "改善" | "持平" | "恶化";
+  count: number;
+  fill: string;
+  stroke: string;
 };
 
-const getRateDatum = (
-  task: AiLearningAnalyticsTaskTrend,
-  seriesKey: RateSeriesKey,
-): RateDatum => {
-  if (seriesKey === "resubmission") {
-    return {
-      rate: task.postFeedbackResubmissionRate,
-      numerator: task.postFeedbackResubmittedStudentCount,
-      denominator: task.aiDeliveredStudentCount,
-    };
-  }
-  if (seriesKey === "comparable") {
-    return {
-      rate: task.qualityComparableRate,
-      numerator: task.qualityComparableStudentCount,
-      denominator: task.aiDeliveredStudentCount,
-    };
-  }
-  return {
-    rate: task.improvedRate,
-    numerator: task.improvedStudentCount,
-    denominator: task.qualityComparableStudentCount,
-  };
-};
-
-function RateMarker({
-  marker,
-  x,
-  y,
-  color,
-}: {
-  marker: RateSeriesDefinition["marker"];
-  x: number;
-  y: number;
-  color: string;
-}) {
-  if (marker === "square") {
-    return (
-      <rect
-        x={x - 5}
-        y={y - 5}
-        width="10"
-        height="10"
-        fill="#ffffff"
-        stroke={color}
-        strokeWidth="2.5"
-      />
-    );
-  }
-  if (marker === "diamond") {
-    return (
-      <polygon
-        points={`${x},${y - 6} ${x + 6},${y} ${x},${y + 6} ${x - 6},${y}`}
-        fill="#ffffff"
-        stroke={color}
-        strokeWidth="2.5"
-      />
-    );
-  }
+function OutcomeLegend() {
   return (
-    <circle
-      cx={x}
-      cy={y}
-      r="5"
-      fill="#ffffff"
-      stroke={color}
-      strokeWidth="2.5"
-    />
+    <div className="mt-3 flex flex-wrap gap-x-5 gap-y-2 text-xs text-zinc-700">
+      <span className="inline-flex items-center gap-2">
+        <span className="inline-flex h-4 w-5 items-center justify-center border border-emerald-700 bg-emerald-100 text-[9px] text-emerald-900">
+          ↓
+        </span>
+        改善
+      </span>
+      <span className="inline-flex items-center gap-2">
+        <span className="inline-flex h-4 w-5 items-center justify-center border border-zinc-600 bg-zinc-100 text-[9px] text-zinc-800">
+          ＝
+        </span>
+        持平
+      </span>
+      <span className="inline-flex items-center gap-2">
+        <span className="inline-flex h-4 w-5 items-center justify-center border border-red-700 bg-red-100 text-[9px] text-red-900">
+          ↑
+        </span>
+        恶化
+      </span>
+    </div>
   );
 }
 
-export function AiLearningAnalyticsRatesChart({
+export function AiLearningAnalyticsComparableOutcomeChart({
   taskTrends,
 }: {
   taskTrends: AiLearningAnalyticsTaskTrend[];
 }) {
-  if (taskTrends.length === 0) {
+  const rows: OutcomeDistributionRow[] = taskTrends.map((task, index) => {
+    const total = task.qualityComparableStudentCount;
+    const toSegmentText = (label: string, count: number) =>
+      label +
+      "：" +
+      count +
+      "，占该任务质量可比样本 " +
+      (total > 0
+        ? formatAiLearningAnalyticsPercent(count / total)
+        : "无对应分母");
+    return {
+      key: task.classroomTaskId || "outcome-task-" + index,
+      taskTitle: task.taskTitle,
+      publishedAt: task.publishedAt,
+      improved: task.improvedStudentCount,
+      stable: task.stableStudentCount,
+      regressed: task.regressedStudentCount,
+      total,
+      accessibleText: [
+        "任务：" + task.taskTitle,
+        "发布时间：" + toDisplayDate(task.publishedAt),
+        "质量可比样本总数：" + total,
+        toSegmentText("改善", task.improvedStudentCount),
+        toSegmentText("持平", task.stableStudentCount),
+        toSegmentText("恶化", task.regressedStudentCount),
+      ].join("；"),
+    };
+  });
+
+  if (rows.length === 0) {
     return (
-      <div className="rounded-md border border-dashed border-zinc-300 bg-zinc-50 p-5 text-sm text-zinc-600">
-        暂无课堂任务点可展示。
-      </div>
+      <figure className="rounded-lg border border-zinc-200 bg-white p-4">
+        <figcaption>
+          <h3 className="text-sm font-semibold text-zinc-900">
+            各任务可比样本结果分布
+          </h3>
+          <p className="mt-1 text-xs leading-5 text-zinc-500">
+            每条横向堆叠条以该任务的质量可比样本数为分母，展示改善、持平和恶化样本。
+          </p>
+        </figcaption>
+        <p className="mt-3 rounded-md border border-dashed border-zinc-300 bg-zinc-50 p-5 text-sm text-zinc-600">
+          暂无课堂任务可展示。
+        </p>
+      </figure>
     );
   }
 
-  const width = getChartWidth(taskTrends.length);
-  const plotHeight = PLOT_BOTTOM - PLOT_TOP;
-  const toY = (rate: number) =>
-    PLOT_BOTTOM - Math.min(1, Math.max(0, rate)) * plotHeight;
+  const { layouts, height } = buildRowLayouts(rows);
+  const barWidth = PLOT_RIGHT - PLOT_LEFT;
+  const plotBottom =
+    layouts[layouts.length - 1].top + layouts[layouts.length - 1].height;
 
   return (
     <figure className="rounded-lg border border-zinc-200 bg-white p-4">
       <figcaption>
         <h3 className="text-sm font-semibold text-zinc-900">
-          反馈后的提交与改善情况
+          各任务可比样本结果分布
         </h3>
-        <p className="mt-1 text-xs text-zinc-500">
-          展示成功交付 AI
-          反馈后，学生是否再次提交、是否形成可比样本，以及可比样本中问题是否减少。
-        </p>
-        <p className="mt-1 text-xs text-zinc-500">
-          纵轴固定为 0%–100%；分母为 0 的指标以缺口表示，并非 0% 表现。
+        <p className="mt-1 text-xs leading-5 text-zinc-500">
+          每条横向堆叠条以该任务的质量可比样本数为分母，展示改善、持平和恶化样本。
         </p>
       </figcaption>
-      <div className="mt-3 flex flex-wrap gap-x-5 gap-y-2 text-xs text-zinc-700">
-        {RATE_SERIES.map((series) => (
-          <span key={series.key} className="inline-flex items-center gap-1.5">
-            <svg width="34" height="14" aria-hidden="true">
-              <line
-                x1="1"
-                x2="33"
-                y1="7"
-                y2="7"
-                stroke={series.color}
-                strokeWidth="2"
-                strokeDasharray={series.dashArray}
-              />
-              <RateMarker
-                marker={series.marker}
-                x={17}
-                y={7}
-                color={series.color}
-              />
-            </svg>
-            {series.label}
-          </span>
-        ))}
-      </div>
+      <OutcomeLegend />
       <div className="mt-2 overflow-x-auto" tabIndex={0}>
         <svg
           role="img"
-          aria-label="反馈后的提交与改善情况。展示成功交付 AI 反馈后，学生是否再次提交、是否形成可比样本，以及可比样本中问题是否减少。分母为 0 的指标以缺口表示，并非 0% 表现。"
-          viewBox={`0 0 ${width} ${CHART_HEIGHT}`}
-          width={width}
-          height={CHART_HEIGHT}
+          aria-label="各任务可比样本结果分布。每条横向堆叠条以该任务的质量可比样本数为分母。"
+          viewBox={"0 0 " + CHART_WIDTH + " " + height}
+          width={CHART_WIDTH}
+          height={height}
           className="block max-w-none"
         >
-          <title>反馈后的提交与改善情况</title>
-          {[0, 0.25, 0.5, 0.75, 1].map((rate) => {
-            const y = toY(rate);
-            return (
-              <g key={rate}>
-                <line
-                  x1={PLOT_LEFT}
-                  x2={width - PLOT_RIGHT}
-                  y1={y}
-                  y2={y}
-                  stroke={rate === 0 ? "#71717a" : "#e4e4e7"}
-                  strokeWidth={rate === 0 ? "1.5" : "1"}
-                />
-                <text
-                  x={22}
-                  y={y + 4}
-                  textAnchor="middle"
-                  fontSize="10"
-                  fill="#52525b"
-                >
-                  {Math.round(rate * 100)}%
-                </text>
-              </g>
-            );
-          })}
+          <title>各任务可比样本结果分布</title>
+          <defs>
+            <pattern
+              id="ai-analytics-stable-pattern"
+              width="7"
+              height="7"
+              patternUnits="userSpaceOnUse"
+            >
+              <rect width="7" height="7" fill="#f4f4f5" />
+              <path d="M-1,7 L7,-1 M3,9 L9,3" stroke="#71717a" strokeWidth="1" />
+            </pattern>
+            <pattern
+              id="ai-analytics-regressed-pattern"
+              width="8"
+              height="8"
+              patternUnits="userSpaceOnUse"
+            >
+              <rect width="8" height="8" fill="#fee2e2" />
+              <path d="M0,0 L8,8 M8,0 L0,8" stroke="#b91c1c" strokeWidth="0.8" />
+            </pattern>
+          </defs>
 
-          {RATE_SERIES.map((series) => {
-            const segments = splitIntoSegments(taskTrends, (task, index) => {
-              const datum = getRateDatum(task, series.key);
-              return datum.denominator === 0
-                ? null
-                : {
-                    x: getPointX(index, taskTrends.length, width),
-                    y: toY(datum.rate),
-                  };
-            });
+          {layouts.map(({ row, top, height: rowHeight, centerY, titleLines }, index) => {
+            const segments: OutcomeSegment[] = [
+              {
+                key: "improved",
+                label: "改善",
+                count: row.improved,
+                fill: "#dcfce7",
+                stroke: "#15803d",
+              },
+              {
+                key: "stable",
+                label: "持平",
+                count: row.stable,
+                fill: "url(#ai-analytics-stable-pattern)",
+                stroke: "#52525b",
+              },
+              {
+                key: "regressed",
+                label: "恶化",
+                count: row.regressed,
+                fill: "url(#ai-analytics-regressed-pattern)",
+                stroke: "#b91c1c",
+              },
+            ];
+            let currentX = PLOT_LEFT;
             return (
-              <g key={`line-${series.key}`}>
-                {segments.map((segment, index) =>
-                  segment.length > 1 ? (
-                    <path
-                      key={`${series.key}-segment-${index}`}
-                      d={toPath(segment)}
-                      fill="none"
-                      stroke={series.color}
-                      strokeWidth="2.5"
-                      strokeDasharray={series.dashArray}
+              <g key={row.key}>
+                <title>{row.accessibleText}</title>
+                <rect
+                  x="0"
+                  y={top}
+                  width={CHART_WIDTH}
+                  height={rowHeight}
+                  fill={index % 2 === 0 ? "#fafafa" : "#ffffff"}
+                />
+                <line
+                  x1="0"
+                  x2={CHART_WIDTH}
+                  y1={top}
+                  y2={top}
+                  stroke="#e4e4e7"
+                />
+                <SvgTaskTitle lines={titleLines} centerY={centerY} />
+                {row.total > 0 ? (
+                  <>
+                    <rect
+                      x={PLOT_LEFT}
+                      y={centerY - 13}
+                      width={barWidth}
+                      height="26"
+                      fill="#ffffff"
+                      stroke="#a1a1aa"
                     />
-                  ) : null,
+                    {segments.map((segment) => {
+                      const ratio = segment.count / row.total;
+                      const width = ratio * barWidth;
+                      const x = currentX;
+                      currentX += width;
+                      if (segment.count === 0) {
+                        return null;
+                      }
+                      const tooltip =
+                        row.taskTitle +
+                        "；" +
+                        segment.label +
+                        "：" +
+                        segment.count +
+                        "；占质量可比样本：" +
+                        formatAiLearningAnalyticsPercent(ratio);
+                      return (
+                        <g key={segment.key}>
+                          <title>{tooltip}</title>
+                          <rect
+                            x={x}
+                            y={centerY - 13}
+                            width={width}
+                            height="26"
+                            fill={segment.fill}
+                            stroke={segment.stroke}
+                            strokeWidth="1.5"
+                          />
+                          {width >= 34 ? (
+                            <text
+                              x={x + width / 2}
+                              y={centerY + 4}
+                              textAnchor="middle"
+                              fontSize="10"
+                              fontWeight="600"
+                              fill="#27272a"
+                            >
+                              {segment.count}
+                            </text>
+                          ) : null}
+                        </g>
+                      );
+                    })}
+                    <text x={DETAIL_X} y={centerY - 15} fontSize="10" fill="#52525b">
+                      可比总数 {row.total}
+                    </text>
+                    <text x={DETAIL_X} y={centerY + 1} fontSize="10" fill="#166534">
+                      改善 {row.improved}
+                    </text>
+                    <text x={DETAIL_X + 70} y={centerY + 1} fontSize="10" fill="#52525b">
+                      持平 {row.stable}
+                    </text>
+                    <text x={DETAIL_X} y={centerY + 17} fontSize="10" fill="#991b1b">
+                      恶化 {row.regressed}
+                    </text>
+                  </>
+                ) : (
+                  <text
+                    x={PLOT_LEFT + 10}
+                    y={centerY + 4}
+                    fontSize="11"
+                    fill="#71717a"
+                  >
+                    暂无可比样本
+                  </text>
                 )}
               </g>
             );
           })}
-
-          {taskTrends.map((task, taskIndex) => {
-            const x = getPointX(taskIndex, taskTrends.length, width);
-            return (
-              <g key={task.classroomTaskId || `rates-task-${taskIndex}`}>
-                <line
-                  x1={x}
-                  x2={x}
-                  y1={PLOT_BOTTOM}
-                  y2={PLOT_BOTTOM + 6}
-                  stroke="#a1a1aa"
-                />
-                {RATE_SERIES.map((series) => {
-                  const datum = getRateDatum(task, series.key);
-                  if (datum.denominator === 0) {
-                    return null;
-                  }
-                  const tooltip = `${task.taskTitle}；${series.label}：${formatAiLearningAnalyticsPercent(datum.rate)}（${datum.numerator}/${datum.denominator}）`;
-                  return (
-                    <g key={`${task.classroomTaskId}-${series.key}`}>
-                      <title>{tooltip}</title>
-                      <RateMarker
-                        marker={series.marker}
-                        x={x}
-                        y={toY(datum.rate)}
-                        color={series.color}
-                      />
-                    </g>
-                  );
-                })}
-                <text
-                  x={x}
-                  y={PLOT_BOTTOM + 22}
-                  textAnchor="middle"
-                  fontSize="10"
-                  fill="#52525b"
-                >
-                  任务 {taskIndex + 1}
-                </text>
-                <text
-                  x={x}
-                  y={PLOT_BOTTOM + 38}
-                  textAnchor="middle"
-                  fontSize="10"
-                  fill="#71717a"
-                >
-                  {truncateTaskTitle(task.taskTitle)}
-                </text>
-              </g>
-            );
-          })}
+          <line
+            x1={PLOT_LEFT}
+            x2={PLOT_RIGHT}
+            y1={plotBottom}
+            y2={plotBottom}
+            stroke="#71717a"
+          />
           <text
-            x={(PLOT_LEFT + width - PLOT_RIGHT) / 2}
-            y={CHART_HEIGHT - 10}
+            x={(PLOT_LEFT + PLOT_RIGHT) / 2}
+            y={height - 8}
             textAnchor="middle"
             fontSize="11"
             fill="#52525b"
           >
-            课堂任务顺序
+            该任务质量可比样本占比（0%–100%）
           </text>
         </svg>
       </div>
+      <p className="mt-3 text-xs leading-5 text-zinc-600">
+        当前 V1 的“持平”同时包含前后均无 ERROR/WARN，以及问题负荷未发生变化的情况，暂未进一步拆分。
+      </p>
       <ul className="sr-only">
-        {taskTrends.flatMap((task) =>
-          RATE_SERIES.map((series) => {
-            const datum = getRateDatum(task, series.key);
-            return (
-              <li key={`accessible-${task.classroomTaskId}-${series.key}`}>
-                {task.taskTitle}，{series.label}：
-                {datum.denominator === 0
-                  ? "无对应分母样本"
-                  : `${formatAiLearningAnalyticsPercent(datum.rate)}，${datum.numerator}/${datum.denominator}`}
-              </li>
-            );
-          }),
-        )}
+        {rows.map((row) => (
+          <li key={"accessible-" + row.key}>{row.accessibleText}</li>
+        ))}
       </ul>
     </figure>
   );

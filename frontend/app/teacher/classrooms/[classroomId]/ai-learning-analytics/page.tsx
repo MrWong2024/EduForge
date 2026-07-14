@@ -4,13 +4,21 @@ import { EmptyState } from "@/components/blocks/EmptyState";
 import { ErrorState } from "@/components/blocks/ErrorState";
 import { PageHeader } from "@/components/blocks/PageHeader";
 import {
-  AiLearningAnalyticsClassDeltaChart,
-  AiLearningAnalyticsRatesChart,
+  AiLearningAnalyticsComparableOutcomeChart,
+  AiLearningAnalyticsTaskIssueLoadComparisonChart,
 } from "@/components/teacher/AiLearningAnalyticsCharts";
 import {
   AiLearningAnalyticsMethodologyPanel,
   AiLearningAnalyticsMetricGuide,
 } from "@/components/teacher/AiLearningAnalyticsMethodology";
+import {
+  AiLearningAnalyticsSummary,
+  AiLearningAnalyticsTeachingAttention,
+} from "@/components/teacher/AiLearningAnalyticsSummary";
+import {
+  AiLearningAnalyticsStudentsTable,
+  AiLearningAnalyticsTaskTable,
+} from "@/components/teacher/AiLearningAnalyticsTables";
 import {
   TaskExclusionPanel,
   type TaskExclusionPanelTask,
@@ -29,16 +37,10 @@ import {
   toAiLearningAnalyticsStudentsResponse,
   type AiLearningAnalyticsOverviewResponse,
   type AiLearningAnalyticsStudentsResponse,
-  type AiLearningAnalyticsTaskTrend,
 } from "@/lib/api/types-teacher";
 import {
   AI_LEARNING_ANALYTICS_DISPLAY_WINDOWS,
-  AI_LEARNING_ANALYTICS_GROWTH_TREND_LABELS,
   AI_LEARNING_ANALYTICS_WINDOW_LABELS,
-  formatAiLearningAnalyticsDelta,
-  formatAiLearningAnalyticsIssueLoad,
-  formatAiLearningAnalyticsPercent,
-  getAiLearningAnalyticsDeltaMeaning,
   resolveAiLearningAnalyticsQueryState,
   toAiLearningAnalyticsExcludedTaskIdsQueryValue,
   toAiLearningAnalyticsSearchParamEntries,
@@ -118,43 +120,12 @@ const buildClassAnalyticsHref = (
   return query ? `${pathname}?${query}` : pathname;
 };
 
-const buildStudentDetailHref = (
-  classroomId: string,
-  studentId: string,
-  params: {
-    window: AiLearningAnalyticsOverviewResponse["context"]["window"];
-    excludedTaskIds: string[];
-    page: number;
-  },
-): string => {
-  const query = buildQueryString({
-    window: params.window,
-    excludedTaskIds: toAiLearningAnalyticsExcludedTaskIdsQueryValue(
-      params.excludedTaskIds,
-    ),
-    page: params.page,
-  });
-  const pathname = paths.teacher.classroomAiLearningAnalyticsStudent(
-    classroomId,
-    studentId,
-  );
-  return query ? `${pathname}?${query}` : pathname;
-};
-
 const toTaskOptionMeta = (taskOption: ClassroomTaskOption): string =>
   [
     `发布时间：${toDisplayDate(taskOption.publishedAt)}`,
     `截止：${toDisplayDate(taskOption.dueAt)}`,
     `状态：${toDisplayText(taskOption.status)}`,
   ].join(" · ");
-
-const formatComparableDelta = (
-  value: number,
-  comparableCount: number,
-): string =>
-  comparableCount > 0
-    ? `${formatAiLearningAnalyticsDelta(value)}（${getAiLearningAnalyticsDeltaMeaning(value)}）`
-    : "—";
 
 const getScopeNotice = (
   overview: AiLearningAnalyticsOverviewResponse,
@@ -193,7 +164,7 @@ const getScopeNotice = (
   if (summary.qualityComparableStudentTaskCount === 0) {
     return {
       title: "当前范围暂无可比较的介入前后样本",
-      description: "摘要和任务明细仍保留；问题负荷变化曲线不会伪造为持平。",
+      description: "摘要和任务明细仍保留；问题负荷对比图不会伪造为持平。",
     };
   }
   return null;
@@ -220,238 +191,6 @@ function HeaderActions({ classroomId }: { classroomId: string }) {
       >
         过程性评价
       </Link>
-    </div>
-  );
-}
-
-function SummarySection({
-  overview,
-}: {
-  overview: AiLearningAnalyticsOverviewResponse;
-}) {
-  const { summary } = overview;
-  const hasComparableSamples = summary.qualityComparableStudentTaskCount > 0;
-  const primaryMetrics = [
-    {
-      key: "activeStudents",
-      label: "ACTIVE 学生数",
-      value: `${summary.activeStudentsCount}`,
-      secondary: "仅统计当前有效成员",
-    },
-    {
-      key: "studentCoverage",
-      label: "AI 反馈学生覆盖率",
-      value: formatAiLearningAnalyticsPercent(summary.aiStudentCoverageRate),
-      secondary: "至少一个任务存在 EduForge AI 反馈请求的学生",
-    },
-    {
-      key: "taskCoverage",
-      label: "AI 反馈任务覆盖率",
-      value: formatAiLearningAnalyticsPercent(summary.aiTaskCoverageRate),
-      secondary: `${summary.aiRequestedStudentTaskCount} / ${summary.submittedStudentTaskCount} 个已提交 student-task`,
-    },
-    {
-      key: "resubmission",
-      label: "反馈后重提率",
-      value: formatAiLearningAnalyticsPercent(
-        summary.postFeedbackResubmissionRate,
-      ),
-      secondary: `${summary.postFeedbackResubmittedStudentTaskCount} / ${summary.aiDeliveredStudentTaskCount} 个已交付 student-task`,
-    },
-    {
-      key: "comparable",
-      label: "质量可比样本数",
-      value: `${summary.qualityComparableStudentTaskCount}`,
-      secondary: "仅介入前后两次提交均有成功 AI 分析的 student-task",
-    },
-    {
-      key: "improved",
-      label: "可比样本改善率",
-      value: formatAiLearningAnalyticsPercent(summary.improvedRate),
-      secondary: `${summary.improvedStudentTaskCount} / ${summary.qualityComparableStudentTaskCount} 个质量可比样本`,
-    },
-  ];
-
-  return (
-    <section className="rounded-lg border border-zinc-200 bg-white p-4">
-      <h2 className="text-sm font-semibold text-zinc-900">班级分析摘要</h2>
-      <p className="mt-1 text-xs text-zinc-500">
-        以下汇总直接来自总览接口，不由当前学生分页结果重新计算。
-      </p>
-      <div className="mt-3 grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-        {primaryMetrics.map((metric) => (
-          <article
-            key={metric.key}
-            className="rounded-md border border-zinc-200 bg-zinc-50 p-3"
-          >
-            <p className="text-xs text-zinc-500">{metric.label}</p>
-            <p className="mt-1 text-xl font-semibold tabular-nums text-zinc-900">
-              {metric.value}
-            </p>
-            <p className="mt-1 text-[11px] leading-5 text-zinc-500">
-              {metric.secondary}
-            </p>
-          </article>
-        ))}
-      </div>
-      <dl className="mt-3 grid gap-x-6 gap-y-2 rounded-md border border-zinc-200 px-3 py-2.5 text-sm sm:grid-cols-2 xl:grid-cols-5">
-        <div>
-          <dt className="text-xs text-zinc-500">AI 反馈交付率</dt>
-          <dd className="mt-0.5 font-medium tabular-nums text-zinc-900">
-            {formatAiLearningAnalyticsPercent(summary.aiDeliveryRate)}
-          </dd>
-        </div>
-        <div>
-          <dt className="text-xs text-zinc-500">
-            首次反馈后重提代码变化率
-          </dt>
-          <dd className="mt-0.5 font-medium tabular-nums text-zinc-900">
-            {formatAiLearningAnalyticsPercent(
-              summary.postFeedbackCodeChangeRate,
-            )}
-          </dd>
-          <p className="mt-1 text-[11px] leading-5 text-zinc-500">
-            比较首次成功获得 AI
-            反馈的提交与反馈完成后的第一次后续提交。
-          </p>
-        </div>
-        <div>
-          <dt className="text-xs text-zinc-500">平均问题负荷 before</dt>
-          <dd className="mt-0.5 font-medium tabular-nums text-zinc-900">
-            {hasComparableSamples
-              ? formatAiLearningAnalyticsIssueLoad(
-                  summary.averageIssueLoadBefore,
-                )
-              : "—"}
-          </dd>
-        </div>
-        <div>
-          <dt className="text-xs text-zinc-500">平均问题负荷 after</dt>
-          <dd className="mt-0.5 font-medium tabular-nums text-zinc-900">
-            {hasComparableSamples
-              ? formatAiLearningAnalyticsIssueLoad(
-                  summary.averageIssueLoadAfter,
-                )
-              : "—"}
-          </dd>
-        </div>
-        <div>
-          <dt className="text-xs text-zinc-500">平均差值</dt>
-          <dd className="mt-0.5 font-medium tabular-nums text-zinc-900">
-            {formatComparableDelta(
-              summary.averageIssueLoadDelta,
-              summary.qualityComparableStudentTaskCount,
-            )}
-          </dd>
-        </div>
-      </dl>
-    </section>
-  );
-}
-
-function TaskTrendsTable({ taskTrends }: { taskTrends: AiLearningAnalyticsTaskTrend[] }) {
-  if (taskTrends.length === 0) {
-    return (
-      <EmptyState
-        title="当前统计范围内暂无有效课堂任务"
-        description="任务排除和统计窗口共同决定当前有效任务范围。"
-      />
-    );
-  }
-
-  return (
-    <div className="overflow-x-auto rounded-lg border border-zinc-200 bg-white">
-      <table className="w-full min-w-[1680px] border-collapse text-sm">
-        <thead className="bg-zinc-50 text-left text-zinc-600">
-          <tr>
-            <th className="px-3 py-2.5">任务</th>
-            <th className="px-3 py-2.5 text-center">提交学生</th>
-            <th className="px-3 py-2.5 text-center">AI 反馈请求</th>
-            <th className="px-3 py-2.5 text-center">AI 反馈交付</th>
-            <th className="px-3 py-2.5 text-center">反馈后重提</th>
-            <th className="px-3 py-2.5 text-center">代码变化</th>
-            <th className="px-3 py-2.5 text-center">质量可比</th>
-            <th className="px-3 py-2.5 text-center">改善 / 持平 / 恶化</th>
-            <th className="px-3 py-2.5 text-center">反馈后重提率</th>
-            <th className="px-3 py-2.5 text-center">质量可比率</th>
-            <th className="px-3 py-2.5 text-center">可比样本改善率</th>
-            <th className="px-3 py-2.5 text-center">平均问题负荷</th>
-            <th className="px-3 py-2.5 text-center">平均差值</th>
-          </tr>
-        </thead>
-        <tbody>
-          {taskTrends.map((task, index) => {
-            const hasComparable = task.qualityComparableStudentCount > 0;
-            return (
-              <tr
-                key={task.classroomTaskId || `task-trend-${index}`}
-                className="border-t border-zinc-100 align-top"
-              >
-                <td className="max-w-72 px-3 py-2.5">
-                  <p
-                    className="truncate font-medium text-zinc-900"
-                    title={task.taskTitle}
-                  >
-                    {task.taskTitle}
-                  </p>
-                  <p className="mt-0.5 text-[11px] text-zinc-500">
-                    发布时间：{toDisplayDate(task.publishedAt)}
-                  </p>
-                </td>
-                {[
-                  task.submittedStudentCount,
-                  task.aiRequestedStudentCount,
-                  task.aiDeliveredStudentCount,
-                  task.postFeedbackResubmittedStudentCount,
-                  task.postFeedbackCodeChangedStudentCount,
-                  task.qualityComparableStudentCount,
-                ].map((value, valueIndex) => (
-                  <td
-                    key={`${task.classroomTaskId}-count-${valueIndex}`}
-                    className="px-3 py-2.5 text-center tabular-nums text-zinc-800"
-                  >
-                    {value}
-                  </td>
-                ))}
-                <td className="px-3 py-2.5 text-center tabular-nums text-zinc-800">
-                  {task.improvedStudentCount} / {task.stableStudentCount} /{" "}
-                  {task.regressedStudentCount}
-                </td>
-                <td className="px-3 py-2.5 text-center tabular-nums text-zinc-800">
-                  {task.aiDeliveredStudentCount > 0
-                    ? formatAiLearningAnalyticsPercent(
-                        task.postFeedbackResubmissionRate,
-                      )
-                    : "—"}
-                </td>
-                <td className="px-3 py-2.5 text-center tabular-nums text-zinc-800">
-                  {task.aiDeliveredStudentCount > 0
-                    ? formatAiLearningAnalyticsPercent(
-                        task.qualityComparableRate,
-                      )
-                    : "—"}
-                </td>
-                <td className="px-3 py-2.5 text-center tabular-nums text-zinc-800">
-                  {hasComparable
-                    ? formatAiLearningAnalyticsPercent(task.improvedRate)
-                    : "—"}
-                </td>
-                <td className="px-3 py-2.5 text-center tabular-nums text-zinc-800">
-                  {hasComparable
-                    ? `${formatAiLearningAnalyticsIssueLoad(task.averageIssueLoadBefore)} → ${formatAiLearningAnalyticsIssueLoad(task.averageIssueLoadAfter)}`
-                    : "—"}
-                </td>
-                <td className="px-3 py-2.5 text-center tabular-nums text-zinc-800">
-                  {formatComparableDelta(
-                    task.averageIssueLoadDelta,
-                    task.qualityComparableStudentCount,
-                  )}
-                </td>
-              </tr>
-            );
-          })}
-        </tbody>
-      </table>
     </div>
   );
 }
@@ -543,7 +282,6 @@ export default async function AiLearningAnalyticsPage({
     }),
   );
   const context = overview.context;
-  const summary = overview.summary;
   const courseDescription = [
     context.courseName,
     context.courseCode ? `课程代码：${context.courseCode}` : null,
@@ -552,7 +290,6 @@ export default async function AiLearningAnalyticsPage({
     .filter((value): value is string => Boolean(value))
     .join(" · ");
   const scopeNotice = getScopeNotice(overview);
-  const hasComparableSamples = summary.qualityComparableStudentTaskCount > 0;
 
   return (
     <section className="space-y-4">
@@ -619,7 +356,7 @@ export default async function AiLearningAnalyticsPage({
         />
       </details>
 
-      <SummarySection overview={overview} />
+      <AiLearningAnalyticsSummary overview={overview} />
 
       {scopeNotice ? (
         <EmptyState
@@ -628,27 +365,33 @@ export default async function AiLearningAnalyticsPage({
         />
       ) : null}
 
+      <AiLearningAnalyticsTeachingAttention
+        taskTrends={overview.taskTrends}
+      />
+
       <section className="rounded-lg border border-zinc-200 bg-zinc-50 p-4">
         <h2 className="text-sm font-semibold text-zinc-900">
-          班级反馈介入变化趋势
+          课堂任务对比分析
         </h2>
-        <p className="mt-1 text-xs text-zinc-500">
-          横轴严格使用后端返回的课堂任务顺序；数值明细可在下方任务表中核对。
+        <p className="mt-1 text-xs leading-5 text-zinc-500">
+          按后端返回的任务顺序逐行对比，不把不同课堂任务连接成连续时间序列。
         </p>
         <div className="mt-3 space-y-3">
-          {hasComparableSamples ? (
-            <AiLearningAnalyticsClassDeltaChart
-              taskTrends={overview.taskTrends}
-            />
+          {overview.taskTrends.length > 0 ? (
+            <>
+              <AiLearningAnalyticsTaskIssueLoadComparisonChart
+                taskTrends={overview.taskTrends}
+              />
+              <AiLearningAnalyticsComparableOutcomeChart
+                taskTrends={overview.taskTrends}
+              />
+            </>
           ) : (
             <EmptyState
-              title="暂无可比较的问题负荷变化曲线"
-              description="质量可比样本数为 0，未将后端零值绘制为真实持平点。"
+              title="当前统计范围内暂无有效课堂任务"
+              description="任务排除和统计窗口共同决定当前有效任务范围。"
             />
           )}
-          {overview.taskTrends.length > 0 ? (
-            <AiLearningAnalyticsRatesChart taskTrends={overview.taskTrends} />
-          ) : null}
         </div>
       </section>
 
@@ -660,7 +403,7 @@ export default async function AiLearningAnalyticsPage({
           覆盖当前有效任务，包括零提交任务；“—”表示没有对应分母或质量可比样本。
         </p>
         <div className="mt-3">
-          <TaskTrendsTable taskTrends={overview.taskTrends} />
+          <AiLearningAnalyticsTaskTable taskTrends={overview.taskTrends} />
         </div>
       </section>
 
@@ -669,6 +412,9 @@ export default async function AiLearningAnalyticsPage({
         <p className="mt-1 text-xs text-zinc-500">
           仅展示当前班级 ACTIVE 学生；每页最多 {STUDENT_PAGE_SIZE}
           名，不进行前端排序、搜索或排名。
+        </p>
+        <p className="mt-1 text-xs leading-5 text-zinc-500">
+          “总体变化”只表示当前范围内可比任务平均问题负荷差值的方向，不是时间序列回归，也不是能力成长或退步结论。
         </p>
         {studentListState.mode === "error" ? (
           <div className="mt-3">
@@ -709,93 +455,14 @@ export default async function AiLearningAnalyticsPage({
                     />
                   </div>
                 ) : (
-                  <div className="mt-3 overflow-x-auto rounded-lg border border-zinc-200">
-                    <table className="w-full min-w-[1500px] border-collapse text-sm">
-                      <thead className="bg-zinc-50 text-left text-zinc-600">
-                        <tr>
-                          <th className="px-3 py-2.5">学生</th>
-                          <th className="px-3 py-2.5 text-center">已提交任务</th>
-                          <th className="px-3 py-2.5 text-center">
-                            AI 反馈请求 / 交付
-                          </th>
-                          <th className="px-3 py-2.5 text-center">反馈后重提</th>
-                          <th className="px-3 py-2.5 text-center">代码变化</th>
-                          <th className="px-3 py-2.5 text-center">质量可比</th>
-                          <th className="px-3 py-2.5 text-center">改善 / 持平 / 恶化</th>
-                          <th className="px-3 py-2.5 text-center">平均问题负荷差值</th>
-                          <th className="px-3 py-2.5">介入变化趋势</th>
-                          <th className="px-3 py-2.5">操作</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {students.items.map((student, index) => (
-                          <tr
-                            key={student.studentId || `student-${index}`}
-                            className="border-t border-zinc-100 align-top"
-                          >
-                            <td className="px-3 py-2.5">
-                              <p className="font-medium text-zinc-900">
-                                {student.studentName}
-                              </p>
-                              <p className="mt-0.5 text-[11px] text-zinc-500">
-                                {student.studentNo
-                                  ? `学号：${student.studentNo}`
-                                  : "学号未设置"}
-                              </p>
-                            </td>
-                            {[
-                              student.submittedTasksCount,
-                              `${student.aiRequestedTasksCount} / ${student.aiDeliveredTasksCount}`,
-                              student.postFeedbackResubmittedTasksCount,
-                              student.postFeedbackCodeChangedTasksCount,
-                              student.qualityComparableTasksCount,
-                              `${student.improvedTasksCount} / ${student.stableTasksCount} / ${student.regressedTasksCount}`,
-                            ].map((value, valueIndex) => (
-                              <td
-                                key={`${student.studentId}-metric-${valueIndex}`}
-                                className="px-3 py-2.5 text-center tabular-nums text-zinc-800"
-                              >
-                                {value}
-                              </td>
-                            ))}
-                            <td className="px-3 py-2.5 text-center tabular-nums text-zinc-800">
-                              {formatComparableDelta(
-                                student.averageIssueLoadDelta,
-                                student.qualityComparableTasksCount,
-                              )}
-                            </td>
-                            <td className="px-3 py-2.5 text-zinc-800">
-                              {
-                                AI_LEARNING_ANALYTICS_GROWTH_TREND_LABELS[
-                                  student.growthTrend
-                                ]
-                              }
-                            </td>
-                            <td className="px-3 py-2.5">
-                              {student.studentId ? (
-                                <Link
-                                  href={buildStudentDetailHref(
-                                    classroomId,
-                                    student.studentId,
-                                    {
-                                      window: context.window,
-                                      excludedTaskIds:
-                                        queryState.excludedTaskIds,
-                                      page: students.page,
-                                    },
-                                  )}
-                                  className="text-blue-700 hover:underline"
-                                >
-                                  查看详情
-                                </Link>
-                              ) : (
-                                <span className="text-zinc-400">暂不可用</span>
-                              )}
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
+                  <div className="mt-3">
+                    <AiLearningAnalyticsStudentsTable
+                      students={students.items}
+                      classroomId={classroomId}
+                      window={context.window}
+                      excludedTaskIds={queryState.excludedTaskIds}
+                      page={students.page}
+                    />
                   </div>
                 )}
 
@@ -840,24 +507,26 @@ export default async function AiLearningAnalyticsPage({
         )}
       </section>
 
-      <details className="rounded-lg border border-zinc-200 bg-zinc-50 p-4">
-        <summary className="cursor-pointer text-sm font-medium text-zinc-800">
-          查看原始 AI 反馈介入成效分析 JSON
-        </summary>
-        <pre className="mt-3 overflow-auto text-xs text-zinc-700">
-          {JSON.stringify(
-            {
-              overview: overview.raw,
-              students:
-                studentListState.mode === "ready"
-                  ? studentListState.data.raw
-                  : { error: studentListState.error.description },
-            },
-            null,
-            2,
-          )}
-        </pre>
-      </details>
+      {process.env.NODE_ENV !== "production" ? (
+        <details className="rounded-lg border border-zinc-200 bg-zinc-50 p-4">
+          <summary className="cursor-pointer text-sm font-medium text-zinc-800">
+            查看原始 AI 反馈介入成效分析 JSON
+          </summary>
+          <pre className="mt-3 overflow-auto text-xs text-zinc-700">
+            {JSON.stringify(
+              {
+                overview: overview.raw,
+                students:
+                  studentListState.mode === "ready"
+                    ? studentListState.data.raw
+                    : { error: studentListState.error.description },
+              },
+              null,
+              2,
+            )}
+          </pre>
+        </details>
+      ) : null}
     </section>
   );
 }
