@@ -3,10 +3,13 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "next dev",
+    "dev": "next dev -p 3000",
     "build": "next build",
-    "start": "next start",
-    "lint": "eslint"
+    "start": "next start -p 3000",
+    "lint": "eslint .",
+    "lint:file": "eslint",
+    "lint:file:fix": "eslint --fix",
+    "typecheck": "next typegen && tsc --noEmit"
   },
   "dependencies": {
     "next": "16.1.5",

@@ -394,15 +394,15 @@ describe('Classroom Students List (e2e)', () => {
     const includeRemovedTrueIds = includeRemovedTrueList.items.map(
       (item) => item.id,
     );
-    const includeRemovedLiteralFalseIds = includeRemovedLiteralFalseList.items.map(
-      (item) => item.id,
-    );
-    const includeRemovedLiteralTrueIds = includeRemovedLiteralTrueList.items.map(
-      (item) => item.id,
-    );
+    const includeRemovedLiteralFalseIds =
+      includeRemovedLiteralFalseList.items.map((item) => item.id);
+    const includeRemovedLiteralTrueIds =
+      includeRemovedLiteralTrueList.items.map((item) => item.id);
 
     expect(defaultList.total).toBe(2);
-    expect(defaultIds).toEqual(expect.arrayContaining([studentAId, studentBId]));
+    expect(defaultIds).toEqual(
+      expect.arrayContaining([studentAId, studentBId]),
+    );
     expect(defaultIds).not.toContain(removedStudentId);
     expect(defaultIds).not.toContain(legacyPollutedStudentId);
 

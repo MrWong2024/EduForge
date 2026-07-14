@@ -147,8 +147,12 @@ describe('Course Lifecycle (e2e)', () => {
         );
       }
       if (createdUserIds.length > 0) {
-        const userObjectIds = createdUserIds.map((id) => new Types.ObjectId(id));
-        cleanup.push(sessionModel.deleteMany({ userId: { $in: userObjectIds } }));
+        const userObjectIds = createdUserIds.map(
+          (id) => new Types.ObjectId(id),
+        );
+        cleanup.push(
+          sessionModel.deleteMany({ userId: { $in: userObjectIds } }),
+        );
         cleanup.push(userModel.deleteMany({ _id: { $in: userObjectIds } }));
       }
       await Promise.all(cleanup);
@@ -160,7 +164,9 @@ describe('Course Lifecycle (e2e)', () => {
   it('allows deleting an empty course', async () => {
     const courseId = await createCourse('DEL-EMPTY');
 
-    const deleted = await teacherAgent.delete(`/api/courses/${courseId}`).expect(200);
+    const deleted = await teacherAgent
+      .delete(`/api/courses/${courseId}`)
+      .expect(200);
     expect((deleted.body as { ok?: boolean }).ok).toBe(true);
 
     await teacherAgent.get(`/api/courses/${courseId}`).expect(404);
@@ -176,7 +182,9 @@ describe('Course Lifecycle (e2e)', () => {
     const classroomId = (classroomRes.body as CreatedClassroomResponse).id;
     createdClassroomIds.push(classroomId);
 
-    const deleted = await teacherAgent.delete(`/api/courses/${courseId}`).expect(409);
+    const deleted = await teacherAgent
+      .delete(`/api/courses/${courseId}`)
+      .expect(409);
     const body = deleted.body as { code?: string; message?: string };
     expect(body.code).toBe('COURSE_NOT_EMPTY');
     expect(body.message).toBe('该课程下已有班级记录，不能删除，只能归档');

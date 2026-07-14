@@ -487,13 +487,14 @@ describe('Classroom Review Pack (e2e)', () => {
     );
     expect(backdateResult.matchedCount).toBe(1);
     expect(backdateResult.modifiedCount).toBe(1);
-    const backdatedStudentESubmission = await submissionModel.collection.findOne<{
-      createdAt?: Date;
-      submittedAt?: Date;
-    }>(
-      { _id: studentELatest._id },
-      { projection: { createdAt: 1, submittedAt: 1 } },
-    );
+    const backdatedStudentESubmission =
+      await submissionModel.collection.findOne<{
+        createdAt?: Date;
+        submittedAt?: Date;
+      }>(
+        { _id: studentELatest._id },
+        { projection: { createdAt: 1, submittedAt: 1 } },
+      );
     expect(backdatedStudentESubmission).toBeDefined();
     expect(backdatedStudentESubmission?.createdAt?.getTime()).toBe(
       oldSubmissionDate.getTime(),
