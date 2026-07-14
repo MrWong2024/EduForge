@@ -43,10 +43,12 @@ import {
 } from "@/lib/api/types-teacher";
 import {
   AI_LEARNING_ANALYTICS_DISPLAY_WINDOWS,
+  AI_LEARNING_ANALYTICS_STUDENT_SECTION_ID,
   AI_LEARNING_ANALYTICS_WINDOW_LABELS,
   resolveAiLearningAnalyticsQueryState,
   toAiLearningAnalyticsExcludedTaskIdsQueryValue,
   toAiLearningAnalyticsSearchParamEntries,
+  withAiLearningAnalyticsStudentSectionHash,
   type AiLearningAnalyticsSearchParams,
 } from "@/lib/ai-learning-analytics";
 import { paths } from "@/lib/routes/paths";
@@ -431,7 +433,10 @@ export default async function AiLearningAnalyticsPage({
         </div>
       </section>
 
-      <section className="rounded-lg border border-zinc-200 bg-white p-4">
+      <section
+        id={AI_LEARNING_ANALYTICS_STUDENT_SECTION_ID}
+        className="scroll-mt-20 rounded-lg border border-zinc-200 bg-white p-4"
+      >
         <h2 className="text-sm font-semibold text-zinc-900">学生分析列表</h2>
         <p className="mt-1 text-xs text-zinc-500">
           仅展示当前班级 ACTIVE 学生；每页最多 {STUDENT_PAGE_SIZE}
@@ -472,19 +477,27 @@ export default async function AiLearningAnalyticsPage({
               students.total > 0 &&
               students.items.length === 0 &&
               students.page > 1;
-            const clearFiltersHref = buildClassAnalyticsHref(classroomId, {
-              window: context.window,
-              excludedTaskIds: queryState.excludedTaskIds,
-              page: 1,
-            });
-            const firstPageHref = buildClassAnalyticsHref(classroomId, {
-              window: context.window,
-              excludedTaskIds: queryState.excludedTaskIds,
-              page: 1,
-              q: students.filters.q ?? undefined,
-              overallOutcome: students.filters.overallOutcome ?? undefined,
-              engagementStatus: students.filters.engagementStatus ?? undefined,
-            });
+            const clearFiltersHref =
+              withAiLearningAnalyticsStudentSectionHash(
+                buildClassAnalyticsHref(classroomId, {
+                  window: context.window,
+                  excludedTaskIds: queryState.excludedTaskIds,
+                  page: 1,
+                }),
+              );
+            const firstPageHref =
+              withAiLearningAnalyticsStudentSectionHash(
+                buildClassAnalyticsHref(classroomId, {
+                  window: context.window,
+                  excludedTaskIds: queryState.excludedTaskIds,
+                  page: 1,
+                  q: students.filters.q ?? undefined,
+                  overallOutcome:
+                    students.filters.overallOutcome ?? undefined,
+                  engagementStatus:
+                    students.filters.engagementStatus ?? undefined,
+                }),
+              );
             return (
               <>
                 <p className="mt-3 text-sm text-zinc-600">
@@ -563,16 +576,18 @@ export default async function AiLearningAnalyticsPage({
                     </span>
                     {students.page > 1 ? (
                       <Link
-                        href={buildClassAnalyticsHref(classroomId, {
-                          window: context.window,
-                          excludedTaskIds: queryState.excludedTaskIds,
-                          page: students.page - 1,
-                          q: students.filters.q ?? undefined,
-                          overallOutcome:
-                            students.filters.overallOutcome ?? undefined,
-                          engagementStatus:
-                            students.filters.engagementStatus ?? undefined,
-                        })}
+                        href={withAiLearningAnalyticsStudentSectionHash(
+                          buildClassAnalyticsHref(classroomId, {
+                            window: context.window,
+                            excludedTaskIds: queryState.excludedTaskIds,
+                            page: students.page - 1,
+                            q: students.filters.q ?? undefined,
+                            overallOutcome:
+                              students.filters.overallOutcome ?? undefined,
+                            engagementStatus:
+                              students.filters.engagementStatus ?? undefined,
+                          }),
+                        )}
                         className="text-blue-700 hover:underline"
                       >
                         上一页
@@ -582,16 +597,18 @@ export default async function AiLearningAnalyticsPage({
                     )}
                     {students.page < totalPages ? (
                       <Link
-                        href={buildClassAnalyticsHref(classroomId, {
-                          window: context.window,
-                          excludedTaskIds: queryState.excludedTaskIds,
-                          page: students.page + 1,
-                          q: students.filters.q ?? undefined,
-                          overallOutcome:
-                            students.filters.overallOutcome ?? undefined,
-                          engagementStatus:
-                            students.filters.engagementStatus ?? undefined,
-                        })}
+                        href={withAiLearningAnalyticsStudentSectionHash(
+                          buildClassAnalyticsHref(classroomId, {
+                            window: context.window,
+                            excludedTaskIds: queryState.excludedTaskIds,
+                            page: students.page + 1,
+                            q: students.filters.q ?? undefined,
+                            overallOutcome:
+                              students.filters.overallOutcome ?? undefined,
+                            engagementStatus:
+                              students.filters.engagementStatus ?? undefined,
+                          }),
+                        )}
                         className="text-blue-700 hover:underline"
                       >
                         下一页

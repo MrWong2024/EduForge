@@ -8,6 +8,7 @@ import {
   AI_LEARNING_ANALYTICS_ENGAGEMENT_STATUS_OPTIONS,
   AI_LEARNING_ANALYTICS_OVERALL_OUTCOME_OPTIONS,
   toAiLearningAnalyticsExcludedTaskIdsQueryValue,
+  withAiLearningAnalyticsStudentSectionHash,
 } from "@/lib/ai-learning-analytics";
 import { paths } from "@/lib/routes/paths";
 import { buildQueryString } from "@/lib/ui/format";
@@ -37,7 +38,10 @@ export function AiLearningAnalyticsStudentFilters({
     excludedTaskIds: excludedTaskIdsValue,
     page: 1,
   });
-  const clearHref = clearQuery ? `${pathname}?${clearQuery}` : pathname;
+  const formAction = withAiLearningAnalyticsStudentSectionHash(pathname);
+  const clearHref = withAiLearningAnalyticsStudentSectionHash(
+    clearQuery ? `${pathname}?${clearQuery}` : pathname,
+  );
 
   return (
     <div className="mt-3 space-y-3">
@@ -45,7 +49,7 @@ export function AiLearningAnalyticsStudentFilters({
         以下搜索与筛选只影响学生列表，不改变上方班级摘要、教学关注、图表和课堂任务分析。
       </p>
       <form
-        action={pathname}
+        action={formAction}
         method="get"
         className="grid gap-3 lg:grid-cols-[minmax(180px,1fr)_minmax(180px,0.8fr)_minmax(240px,1fr)_auto]"
       >

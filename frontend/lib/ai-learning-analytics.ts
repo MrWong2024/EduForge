@@ -14,6 +14,12 @@ import {
 } from "@/lib/api/types-teacher";
 import { getSingleSearchParam, parsePositiveInt } from "@/lib/ui/format";
 
+export const AI_LEARNING_ANALYTICS_STUDENT_SECTION_ID = "student-analysis";
+
+export const withAiLearningAnalyticsStudentSectionHash = (
+  href: string,
+): string => `${href}#${AI_LEARNING_ANALYTICS_STUDENT_SECTION_ID}`;
+
 export const AI_LEARNING_ANALYTICS_DISPLAY_WINDOWS = [
   "7d",
   "30d",

@@ -27,6 +27,7 @@ import {
   getAiLearningAnalyticsDeltaMeaning,
   resolveAiLearningAnalyticsQueryState,
   toAiLearningAnalyticsExcludedTaskIdsQueryValue,
+  withAiLearningAnalyticsStudentSectionHash,
   type AiLearningAnalyticsSearchParams,
 } from "@/lib/ai-learning-analytics";
 import { paths } from "@/lib/routes/paths";
@@ -63,7 +64,9 @@ const buildBackToAnalyticsHref = (
     engagementStatus: queryState.engagementStatus,
   });
   const pathname = paths.teacher.classroomAiLearningAnalytics(classroomId);
-  return query ? `${pathname}?${query}` : pathname;
+  return withAiLearningAnalyticsStudentSectionHash(
+    query ? `${pathname}?${query}` : pathname,
+  );
 };
 
 const toBooleanText = (value: boolean): string => (value ? "是" : "否");
