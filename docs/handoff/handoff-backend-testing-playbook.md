@@ -1,321 +1,89 @@
-# 测试作战手册（Testing Playbook）
+# EduForge 后端测试治理手册
 
-定位：本文是后端 E2E / 服务端测试手册，用于跑回归、复现实验和定位测试失败；具体实现以 `backend/` 源码和 `backend/test/**` 为最高优先级，配置细节参考 `docs/handoff/handoff-backend-config-matrix.md`，接口契约参考 `docs/handoff/handoff-backend-api-map.md`。
+## 1. Scope / Owner
 
-## 1) 执行前提（E2E 基线）
+本文是 EduForge 后端测试证据、测试数据库用途、E2E fixture 生命周期与 cleanup 规则的唯一 Owner。通用 E2E 原则见 [E2E Testing](../e2e-testing.md)；数据库名、连接变量和运行模式的完整映射由 [Backend config matrix](./handoff-backend-config-matrix.md) 维护；前端测试、Browser evidence 与 smoke 由 [Frontend testing playbook](./handoff-frontend-testing-playbook.md) 维护。
 
-- 强制遵循：`docs/e2e-testing.md`。
-- 必须使用测试环境：`NODE_ENV=test`。
-- 必须提供测试库连接：`MONGO_URI`（且应指向 `eduforge_test`）。
-- E2E 使用真实 MongoDB 测试库，不使用内存库；连接到非 test 命名库应 fail-fast。
-- 默认应自动清理；仅本地调试时才设置 `KEEP_E2E_DB=1`。
-- 影响模块装配、provider 绑定、guard 行为的 env（如 `AI_FEEDBACK_DEBUG_ENABLED`、`AI_FEEDBACK_PROVIDER`、`AI_FEEDBACK_REAL_ENABLED`、`AI_FEEDBACK_WORKER_ENABLED`）必须在应用初始化 / `AppModule` 导入前设置；否则可能出现与业务无关的 `404` 或 provider/guard 装配偏差。
-- 每个 `*.e2e-spec.ts` 必须显式设置 `jest.setTimeout(30000)`，避免 Nest 启动、真实 MongoDB、Session/Cookie 与 AI worker 链路被 Jest 默认 5 秒超时误判。
-- AI Feedback 主链路测试默认不依赖 `POST /api/learning-tasks/ai-feedback/jobs/process-once` debug 路由；可直接调用 `AiFeedbackProcessor.processOnce(...)` 或内部 service 推进批次，确保与 worker 路径一致。
-- debug gate 专项测试才调用 jobs/process-once，并应独立描述 `AI_FEEDBACK_DEBUG_ENABLED` 的 404/403/200 组合行为。
-- `LEARNING_TASK_SUBMISSION_COOLDOWN_MS` 属运行时业务阈值；连续提交类 E2E 需在 spec 内备份、设置为 `0`、在 `app.init()` 后同步 `ConfigService.set('LEARNING_TASK_SUBMISSION_COOLDOWN_MS', 0)`，并在 `afterAll` 恢复。
+本文不复制 API、DTO、Service 或配置明细，也不保存逐轮执行日志、覆盖率流水或完整 spec inventory。
 
-## 2) 运行命令（PowerShell）
+## 2. Current Test Baseline
 
-说明：本节命令仅作为人类手工运行示例，不作为 Codex 执行步骤要求。
+基于当前仓库资产，后端证据分层如下：
 
-全量 e2e：
+| 层级 | 当前资产与工具 | 主要证明语义 |
+|---|---|---|
+| Pure / Static | `npm run lint`、`npm run build` | lint、TypeScript/Nest 编译、import 与静态结构 |
+| Unit / Service / Controller | `backend/src/**/*.spec.ts`，当前 16 个 Jest + ts-jest spec | Service 分支、Controller 参数传递、局部规则、mapper 与错误边界 |
+| HTTP E2E / Integration | `backend/test/*.e2e-spec.ts`，当前 28 个 Jest + Supertest spec | 真实 Nest HTTP、Guard/Pipe/DTO、Session、角色/ownership、MongoDB 终态与跨模块链路 |
+| Scripted Browser | 后端无此类 runner；当前项目可执行资产为 0 | 仅在未来出现不可由低层证明的 Browser-native 合同时由前端 Owner 治理 |
+| Agent-assisted / Human smoke | 不属于后端自动测试 Owner | 真实产品 UI 可操作性与主观教学/UX 判断，见 Frontend testing playbook |
+
+Unit 与 HTTP E2E 可以覆盖同一业务区域，但不得重复承担同一主断言：局部规则留在 unit，真实 HTTP/认证/数据库终态留在 E2E。
+
+## 3. 最低充分证据选择
+
+1. 纯函数、Service 分支、Controller 参数传递和廉价防御优先用 unit。
+2. 需要证明真实路由、Guard、Pipe、DTO whitelist、Cookie Session、角色/ownership、公开错误合同或 MongoDB 终态时使用 HTTP E2E。
+3. 页面是否可操作不由后端 E2E 冒充；服务端合同已被精确 E2E 证明时，不在 Browser 重复非法调用矩阵。
+4. 不因业务重要就机械运行完整套件。先选择受影响 spec；只有认证、公共 Guard/Pipe、Schema、共享测试基础设施或跨模块合同发生变化时才扩大范围。
+5. 测试文件存在、测试名称或代码阅读不等于动态通过；报告必须区分“资产存在”和“本次已执行”。
+
+## 4. 真实命令
+
+以下命令均从 `backend` 目录执行：
 
 ```powershell
-cd backend
-$env:NODE_ENV="test"
+npm run lint
+npm run build
+npm run test -- --runInBand
+```
+
+HTTP E2E 必须在 Jest 启动前显式选择测试环境，并保持默认 cleanup：
+
+```powershell
+$env:NODE_ENV = "test"
 Remove-Item Env:KEEP_E2E_DB -ErrorAction SilentlyContinue
-npm run test:e2e
+npm run test:e2e -- --runInBand
 ```
 
-单个 spec（示例）：
+定向 E2E 示例：
 
 ```powershell
-cd backend
-$env:NODE_ENV="test"
+$env:NODE_ENV = "test"
 Remove-Item Env:KEEP_E2E_DB -ErrorAction SilentlyContinue
-npm run test:e2e -- backend/test/learning-tasks.ai-feedback.ops.e2e-spec.ts
+npm run test:e2e -- --runInBand --runTestsByPath ./test/users-me.e2e-spec.ts
 ```
 
-```powershell
-cd backend
-$env:NODE_ENV="test"
-$env:AI_FEEDBACK_DEBUG_ENABLED="true"
-Remove-Item Env:KEEP_E2E_DB -ErrorAction SilentlyContinue
-npm run test:e2e -- backend/test/learning-tasks.ai-feedback.openrouter-context.e2e-spec.ts
-```
+`test:watch` 不用于正式验收。是否执行全量 unit/E2E 由实际影响决定，不把“最终验证”解释为无差别全量运行。
 
-常用单个 spec 入口：
+## 5. Database Purpose
 
-```powershell
-cd backend
-$env:NODE_ENV="test"
-Remove-Item Env:KEEP_E2E_DB -ErrorAction SilentlyContinue
-npm run test:e2e -- backend/test/classroom-learning-trajectory.e2e-spec.ts
-```
+- 当前自动化数据库用途只有普通测试：`NODE_ENV=test`，应用通过 `MONGO_URI` 连接 `eduforge_test`。
+- `backend/.env.test` 与 `backend/.env.test.example` 提供测试环境来源；`DatabaseModule` 在连接后核对实际 database name，不匹配即 fail-fast。
+- `MONGO_ADMIN_URI` 只属于明确的管理脚本职责，不是应用 E2E 的连接来源。连接串和凭据不得出现在日志、文档或报告。
+- unit/HTTP E2E 不得连接 `eduforge_dev` 或 production 数据库，也不得依赖 shell 中残留的开发/生产变量选择数据库。
+- 当前没有独立 Browser acceptance database、Browser fixture 或 Browser backend 配置；不得从其他项目机械复制一套。
 
-```powershell
-cd backend
-$env:NODE_ENV="test"
-Remove-Item Env:KEEP_E2E_DB -ErrorAction SilentlyContinue
-npm run test:e2e -- backend/test/classroom-review-pack.e2e-spec.ts
-```
+## 6. Fixture、Verifier 与 Cleanup
 
-```powershell
-cd backend
-$env:NODE_ENV="test"
-Remove-Item Env:KEEP_E2E_DB -ErrorAction SilentlyContinue
-npm run test:e2e -- backend/test/classroom-process-assessment.e2e-spec.ts
-```
+当前 E2E 采用 spec-local 生命周期：
 
-```powershell
-cd backend
-$env:NODE_ENV="test"
-Remove-Item Env:KEEP_E2E_DB -ErrorAction SilentlyContinue
-npm run test:e2e -- backend/test/classroom-ai-learning-analytics.e2e-spec.ts
-```
+- 27/28 个 E2E spec 使用独立 app lifecycle、时间戳或唯一值创建任务专属合成数据，并通过 `request.agent` 保持 Session Cookie。
+- 这些 spec 在 `afterAll` 中按已记录 ID/唯一字段执行 scoped cleanup，并关闭 Nest app；不使用 `dropDatabase`。
+- 涉及 AI provider 的 E2E 使用 stub 或任务自有 mock HTTP server；默认不调用真实外部 AI，mock server 也必须由创建它的 spec 关闭。
+- 当前没有共享 fixture CLI、独立 database verifier 或集中式 cleanup runner。数据库终态主要由 spec 内断言与必要的 model 查询证明。
+- `KEEP_E2E_DB=1` 只用于明确的本地诊断；正式验收和 CI 默认不得设置。保留数据时必须报告并由原 spec 的 ownership 信息指导精确清理。
+- 写入超时或连接结果未知时不得直接重跑；先只读核对 app、数据库和任务 namespace 的实际状态。
 
-定向服务单测：
+## 7. Current Known Gaps
 
-```powershell
-cd backend
-npm run test -- ai-learning-analytics.service.spec.ts --runInBand
-```
+- `backend/test/app.e2e-spec.ts` 在 `beforeEach` 创建 app，但当前没有对应 `afterEach/afterAll` 关闭 app；这是测试 lifecycle/open-handle 风险，不是产品缺陷。本任务不修改测试资产。
+- E2E bootstrap、合成账号/数据准备与 cleanup 仍以 spec-local 方式重复；只有重复开始造成真实维护风险时，才考虑最低充分的共享 helper。
+- 当前没有独立 verifier/fixture registry。只有未来 Browser 写入或复杂跨进程终态无法由 HTTP E2E 充分证明时，才评估新增。
+- 后端 Session E2E 使用 Supertest agent 证明 HTTP Cookie 链路，但不证明真实 BrowserContext、reload、CORS/credentials 或 BFF 的 Browser-native 语义；是否需要该证据由 Frontend testing playbook 的准入规则判断。
 
-该定向单测同时覆盖 V1.1 公共值域、精细 outcome、overallOutcome/growthTrend 单向映射、六种 engagementStatus、DTO 搜索筛选校验与学生列表两条查询路径。
+## 8. Maintenance / Non-goals
 
-```powershell
-cd backend
-$env:NODE_ENV="test"
-Remove-Item Env:KEEP_E2E_DB -ErrorAction SilentlyContinue
-npm run test:e2e -- backend/test/classroom-export-snapshot.e2e-spec.ts
-```
-
-推荐默认联调模式（结论）：
-
-- `Stub + worker`（用于本地开发 / 前后端联调 / AI 闭环验证）。
-- 最小关键 env：`AI_FEEDBACK_PROVIDER=stub`、`AI_FEEDBACK_REAL_ENABLED=false`、`AI_FEEDBACK_WORKER_ENABLED=true`。
-- worker 默认轮询间隔 `10000ms`（可由 `AI_FEEDBACK_WORKER_INTERVAL_MS` 覆盖）；空跑 tick（processed/succeeded/failed/dead 全 0）默认不输出结果 DEBUG 日志。
-- 产品级 request 只负责创建/确保 `PENDING` job，worker 负责消费到 `SUCCEEDED`。
-- `process-once` 仅用于 debug/ops 辅助，不作为默认交付运行模式。
-- 邮箱重置密码默认联调模式：`MAIL_PROVIDER=log`，通过日志观察 reset link；测试禁止真实连接 SMTP。
-
-ai-feedback e2e 入口：
-
-- `learning-tasks.ai-feedback.ops.e2e-spec.ts`
-- `learning-tasks.ai-feedback.ops.debug-off.e2e-spec.ts`
-- `learning-tasks.ai-feedback.guards.e2e-spec.ts`
-- `learning-tasks.ai-feedback.trigger-policy.e2e-spec.ts`
-- `learning-tasks.ai-feedback.openrouter-context.e2e-spec.ts`
-
-本地调试保留数据：
-
-```powershell
-cd backend
-$env:NODE_ENV="test"
-$env:KEEP_E2E_DB="1"
-npm run test:e2e -- backend/test/classroom-learning-loop.e2e-spec.ts
-```
-
-## 3) 关键 e2e 文件与覆盖点
-
-必须关注：
-
-- `backend/src/modules/auth/services/password-reset.service.spec.ts`
-  - 覆盖：`forgot-password` 防邮箱枚举、只对可登录用户建 token、同一真实邮箱 60 秒冷却下不重复建 token/不重复发邮件/不失效旧 token、超窗后恢复发送、mail 失败补偿、`reset-password` 的无效/过期/已使用 token 拒绝，以及成功改密后清理 sessions。
-- `backend/src/modules/mail/mail.service.spec.ts`
-  - 覆盖：`MAIL_PROVIDER=log` 不真实发信、`MAIL_PROVIDER=smtp` 的 transporter 组装、`from` 格式和缺失 SMTP 配置 fail-fast。
-- `backend/src/modules/auth/controllers/auth.controller.spec.ts`
-  - 覆盖：`ForgotPasswordDto` / `ResetPasswordDto` 的 trim + 校验，controller 到 password reset service 的参数传递。
-- `backend/test/classroom-learning-loop.e2e-spec.ts`
-  - 覆盖：课程/班级/任务发布链路、学生入班与提交、`process-once`、教师反馈、`common-issues` 报表回归。
-- `backend/test/classrooms.ai-metrics.e2e-spec.ts`
-  - 覆盖：`GET /api/classrooms/:classroomId/tasks/:classroomTaskId/ai-metrics`。
-  - 断言维度：jobs 统计、成功率、错误码聚合（含 `RATE_LIMIT_LOCAL` 场景）、feedback 产出、`includeTags` 开关下的 tags 聚合行为。
-- `backend/test/learning-tasks.ai-feedback.guards.e2e-spec.ts`
-  - 覆盖：并发护栏、限流与重试窗口、Mock/Real AI provider 路径、落库前收敛上限回归。
-  - 关键断言：mock provider 即使返回 25 条 `items`，单 submission 最终 AI feedback 持久化条数仍收敛为 `<=2`。
-- `backend/test/learning-tasks.ai-feedback.openrouter-context.e2e-spec.ts`
-  - 覆盖：mock OpenRouter 请求体捕获与 prompt 上下文断言（`TaskTitle/TaskDescription/TaskRubric/Code/AIUsageDeclaration`）。
-  - 关键断言：system prompt 明确要求简体中文输出（教学反馈文本字段默认中文）并包含“主问题导向收敛”硬约束（默认 1 条、最多 2 条、同类问题合并、阻断问题优先、禁止表扬噪音）以及合法/非法输出形状示例；空数组边界已收紧为“仅 truly no-feedback 内容时允许”，正确但可改进场景必须返回 1 条综合反馈；`language` 仅作 hint（缺失/冲突时优先按代码判断语言）；反馈主链路可持久化并可查询。
-  - 测试可通过直接调用 `aiFeedbackProcessor.processOnce(1)` 推进 job，属于测试辅助推进方式，不是默认产品运行模式。
-- `backend/test/learning-tasks.ai-feedback.ops.debug-off.e2e-spec.ts`
-  - 覆盖：debug gate OFF（`AI_FEEDBACK_DEBUG_ENABLED=false`）时 teacher/admin 访问 debug/ops 返回 404。
-- `backend/test/learning-tasks.ai-feedback.ops.e2e-spec.ts`
-  - 覆盖：pipeline 主链路 + debug gate ON 下的角色授权（student 403、teacher/admin 200/201）。
-- `backend/test/learning-tasks.ai-feedback.trigger-policy.e2e-spec.ts`
-  - 覆盖：attempt-based 触发策略回归。
-  - 关键断言：`attemptNo=1` 自动入队（`PENDING`）；`attemptNo>1` 默认 `NOT_REQUESTED`（无 job）；`POST /api/learning-tasks/submissions/:submissionId/ai-feedback/request` 手工入队幂等并进入 `PENDING`；可选验证 `process-once` 后 `SUCCEEDED` 且可查询 feedback（mock/stub 语境）。
-  - 说明：该 spec 显式将 `LEARNING_TASK_SUBMISSION_COOLDOWN_MS` 设为 `0`，避免提交冷却影响“连续尝试触发策略”断言。
-- `backend/test/enrollments.authority-and-legacy.e2e-spec.ts`
-  - 覆盖：Enrollment-only 权威来源收口，成员关系以 Enrollment 为准。
-  - 关键断言：`classroom.studentIds` 仅镜像输出，不作为授权/统计读源。
-  - 重要性：防止文档与实现被误读为可回退 legacy 口径。
-- `backend/test/enrollment-only.regression.e2e-spec.ts`
-  - 覆盖：Enrollment-only 反作弊回归，测试内直写污染 `classroom.studentIds` 场景。
-  - 关键断言：污染后仍不能越权，且不影响统计、mine、overview 等结果。
-  - 重要性：锁定“studentIds 不能回滚为业务真相”的回归边界。
-- `backend/test/classroom-weekly-report.e2e-spec.ts`
-  - 覆盖：`GET /api/classrooms/:classroomId/weekly-report`。
-  - 关键断言：`risk=activeStudents-submittedDistinctStudents`，`lateStudentsCount/lateSubmissionsCount` 存在且为 number。
-  - 重要性：保证周报口径与 Enrollment-only、迟交维度一致。
-- `backend/test/course-overview.e2e-spec.ts`
-  - 覆盖：`GET /api/courses/:courseId/overview`。
-  - 关键断言：`studentsCount` 来源 Enrollment grouped-count，包含 late 维度字段，排序/分页语义为页内排序。
-  - 重要性：保证课程总览聚合口径不跨班泄漏。
-- `backend/test/classroom-student-task-detail.e2e-spec.ts`
-  - 覆盖：`GET /api/classrooms/:classroomId/tasks/:classroomTaskId/my-task-detail`。
-  - 关键断言：`includeFeedbackItems/feedbackLimit` 生效，`attempt>1` 可能 `NOT_REQUESTED`（无 job 合法语义）。
-  - 重要性：保证学生端聚合详情与 attempt-based 语义一致。
-- `backend/test/classroom-learning-trajectory.e2e-spec.ts`
-  - 覆盖：`GET /api/classrooms/:classroomId/tasks/:classroomTaskId/learning-trajectory`（teacher）。
-  - 关键断言：`items[*].student` 含 `id/name/studentNo/email`（并兼容 `studentName`）；未提交学生也在 `items` 且带 student 公开信息；响应不包含 `passwordHash`；`includeTagDetails=false` 跳过 tags unwind；`attempts[].isLate/lateBySeconds` 存在（迟交字段回归）；`includeAttempts=true` 时 `attempts[*].feedbackCount` 存在且覆盖有反馈 `>0` / 无反馈 `=0`，同时 `feedbackSummary.totalItems` 保留 AI 摘要语义。
-  - 重要性：锁定轨迹分页口径与迟交字段传播。
-- `backend/test/classroom-review-pack.e2e-spec.ts`
-  - 覆盖：`GET /api/classrooms/:classroomId/tasks/:classroomTaskId/review-pack`。
-  - 关键断言：examples 不含 `codeText/prompt/apiKey`；多标签 feedback 仍可同时贡献 `topTags` 计数；`examples` 以 `feedbackId` 去重（同一 feedback 不因多标签重复出现），并保留 `primaryTag/matchedTags/tags`；overview 含 late 维度；响应不再包含 `actionItems/teacherScript`；`studentTiers` 在默认请求下固定返回并基于最新提交稳定分层（`good/watch/notSubmitted` 不得在 `studentsCount>0 && submittedStudentsCount>0` 时全空），并验证 `latestErrorCount` 仅按最新提交的 `AI+ERROR` 统计；`studentTiers.*[*]` 含 `studentName/studentNo`（缺失姓名回落 `未知学生`）；三类分层人数合计应等于当前 ACTIVE 学生总数，且不应因后端预览截断而丢人。
-  - 重要性：保证复盘包可教学使用且无敏感字段泄漏。
-- `backend/test/classroom-process-assessment.e2e-spec.ts`
-  - 覆盖：`GET /api/classrooms/:classroomId/process-assessment` 与 `GET /api/classrooms/:classroomId/process-assessment.csv`。
-  - 关键断言：CSV header/转义正确，不含敏感字段；CSV 下载内容以 UTF-8 BOM（`\uFEFF`）开头以兼容 Excel 中文；`lateSubmissionsCount/lateTasksCount` 存在（迟交字段回归）；0 次提交 ACTIVE 学生仍保留在过程性评价结果中，且 `score=0`，不得获得 codeQualityProxy 保底分；评分样例覆盖任务覆盖率、`iteratedTasksCount`、AI 任务覆盖/成功、WARN/ERROR 不同扣分；`excludedTaskIds` 排除任务后，`publishedTasksCount`、`submittedTasksRate` 分母、提交/迭代/迟交、AI job 总次数、AI 任务覆盖/成功、AI feedback、`topTags` 与 CSV score 均按剩余任务重新计算；CSV header 包含 `iteratedTasksCount/aiRequestedTasksCount/aiSucceededTasksCount/avgWarnItems`；排除全部任务时 ACTIVE 学生仍保留且 score 为 0。
-  - 重要性：保证过程性评价 JSON/CSV 同口径可导出。
-- `backend/src/modules/classrooms/services/ai-learning-analytics.service.spec.ts`
-  - 覆盖：V1.1 保持 legacy outcome/growthTrend 值域；标准样本稳定 submission 排序与 anchor 选择、job 完成前/后提交、CRLF/LF 与整体空白标准化、`ERROR=1/WARN=0.5/INFO=0`、非 AI feedback 排除、SUCCEEDED 无反馈负荷 0；精确区分 `0→0 = REMAINED_CLEAN + legacy STABLE` 与 `0.5→0.5 = UNCHANGED_WITH_ISSUES + legacy STABLE`，并覆盖改善、恶化、不可比较、stable 恒等关系和四个精细 rate 分母。
-  - 学生语义覆盖：四种 `overallOutcome`、只从 overallOutcome 映射四种 legacy `growthTrend`、六种 `engagementStatus` 与优先级；`q` trim/空白归一/最大长度/中文姓名/英文大小写/学号/不匹配 studentId；overallOutcome 与 engagementStatus 筛选、三过滤 AND、筛选后分页、`total/activeStudentsTotal/filters`；q-only 只加载当前页样本、指标筛选只执行一次候选批量样本查询且不重复加载当前页、零候选跳过样本查询；`excludedTaskIds` 以及 window 不截断入选任务 submission 链。
-- `backend/test/classroom-ai-learning-analytics.e2e-spec.ts`
-  - 覆盖：三个 `GET /api/classrooms/:classroomId/ai-learning-analytics...` 真实 HTTP 接口；`methodology.scope` 保持 V1 且 `version=AI_FEEDBACK_INTERVENTION_V1_1`；未登录 401、非教师 403、非 owner 404；ACTIVE/REMOVED Enrollment；零提交学生与任务；aiRequested/aiDelivered 区分；job 完成前后提交；代码变化；`REMAINED_CLEAN/UNCHANGED_WITH_ISSUES` 与 legacy STABLE 并存；overview/task/student 精细计数、rate 与恒等关系；overallOutcome/legacy growthTrend；detail task point 的 detailed/legacy outcome。
-  - 搜索筛选矩阵：姓名与学号子串、英文大小写、无结果、REMOVED/外班隔离；六种 engagementStatus、overallOutcome、`q + overallOutcome + engagementStatus` AND、筛选后分页、过滤后 `total` 与固定 `activeStudentsTotal`、filters 回显；非法枚举和超长 q 返回 400；`window/excludedTaskIds` 先改变有效任务及学生指标再筛选。
-  - 隔离断言：同一 `taskId` 同时发布到两个课堂时，只按当前 `classroomTaskId` 统计；REMOVED 学生即使保留 submission/job 也不进入结果。测试直接构造可控 job/feedback，不调用 processor、worker 或真实外部 AI。
-  - 重要性：锁定“EduForge AI 反馈介入后的行为与代码问题代理”口径；结果不代表学生全部 AI 使用、正式成绩或因果贡献。
-- `backend/test/classroom-task-deadline.e2e-spec.ts`
-  - 覆盖：`POST /api/classrooms/:classroomId/tasks/:classroomTaskId/submissions` 的截止门禁。
-  - 关键断言：`dueAt` 到期且 `allowLate=false` 返回 `LATE_SUBMISSION_NOT_ALLOWED`；`submittedAt/isLate/lateBySeconds` 持久化语义正确。
-  - 重要性：保证截止规则与迟交数据链路一致。
-- `backend/test/classroom-task-submission-cooldown.e2e-spec.ts`
-  - 覆盖：课堂任务提交冷却（同一 `studentId + classroomTaskId`）。
-  - 关键断言：默认冷却命中返回 `429/SUBMISSION_COOLDOWN_ACTIVE`；超窗后允许再次提交；`LEARNING_TASK_SUBMISSION_COOLDOWN_MS=0` 时可连续提交。
-- `backend/test/classroom-task-submissions.e2e-spec.ts`
-  - 覆盖：P0 `GET /api/learning-tasks/submissions/:id` 稳定读源（含 classroomTask 隔离场景） + `GET /api/classrooms/:classroomId/tasks/:classroomTaskId/submissions` 列表契约。
-  - 关键断言：学生本人可读；classroom owner teacher 可读；非授权 teacher/student 返回 `403`；返回 `content.codeText`；无 job 时 `aiFeedbackStatus=NOT_REQUESTED`；提交列表 `feedbackCount` 覆盖有反馈 `>0` 与无反馈 `=0` 两种场景；默认只返回当前 Enrollment `ACTIVE` 学生的 submissions，REMOVED 学生既有提交不进入 `items/total`。
-- `backend/test/classroom-export-snapshot.e2e-spec.ts`
-  - 覆盖：`GET /api/classrooms/:classroomId/export/snapshot`。
-  - 关键断言：`includePerTask=false` 时 perTask 省略且 `meta.notes` 提示；对 stringify 结果断言不包含 `"codeText"`。
-  - 重要性：保证导出体积保护与敏感字段禁出策略。
-
-建议同时关注：
-
-- submission detail 主视图回归建议成对验证：`GET /api/learning-tasks/submissions/:id` 与 `GET /api/learning-tasks/submissions/:id/feedback`，避免只验 feedback 而漏掉 detail 读源。
-- `backend/test/classroom-dashboard-isolation.e2e-spec.ts`：跨班同 task 的 `classroomTaskId` 隔离口径。
-- `backend/test/classroom-dashboard.e2e-spec.ts`：教师/学生看板与 `aiFeedbackStatus` 变化。
-- 教师看板回归要点：默认教学统计应只面向 Enrollment `ACTIVE` 学生；当 ACTIVE 与 REMOVED 学生都存在既有提交时，`distinctStudentsSubmitted/submissionsCount/late*`、AI feedback 统计与 `topTags` 默认只计 ACTIVE submissions。
-- `backend/test/learning-tasks.e2e-spec.ts`：learning-tasks 基础闭环（含 `GET /api/learning-tasks/submissions/:id` 在 `classroomTaskId=null` 场景下 task owner teacher 可读，以及教师反馈标签词表校验：未知标签返回 `400` 固定文案、未传 tags 自动落 `other`）。
-- `backend/src/modules/learning-tasks/ai-feedback/lib/feedback-item-compactor.spec.ts`：AI feedback item 收敛兜底回归，覆盖同类错误合并、低价值 INFO 过滤、ERROR 优先与“最多 2 条”约束；主控制策略仍在 prompt/协议层，compactor 保持轻量兜底定位。
-
-### 关键能力覆盖矩阵
-
-| 能力                        | 接口                                                                                                                                                                        | 对应 e2e 文件                                                                                                      |
-| --------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------ |
-| my-task-detail              | `GET /api/classrooms/:classroomId/tasks/:classroomTaskId/my-task-detail`                                                                                                    | `backend/test/classroom-student-task-detail.e2e-spec.ts`                                                           |
-| weekly-report               | `GET /api/classrooms/:classroomId/weekly-report`                                                                                                                            | `backend/test/classroom-weekly-report.e2e-spec.ts`                                                                 |
-| course overview             | `GET /api/courses/:courseId/overview`                                                                                                                                       | `backend/test/course-overview.e2e-spec.ts`                                                                         |
-| learning-trajectory         | `GET /api/classrooms/:classroomId/tasks/:classroomTaskId/learning-trajectory`                                                                                               | `backend/test/classroom-learning-trajectory.e2e-spec.ts`                                                           |
-| review-pack                 | `GET /api/classrooms/:classroomId/tasks/:classroomTaskId/review-pack`                                                                                                       | `backend/test/classroom-review-pack.e2e-spec.ts`                                                                   |
-| process-assessment + CSV    | `GET /api/classrooms/:classroomId/process-assessment` + `GET /api/classrooms/:classroomId/process-assessment.csv`                                                           | `backend/test/classroom-process-assessment.e2e-spec.ts`                                                            |
-| AI feedback intervention analytics | `GET /api/classrooms/:classroomId/ai-learning-analytics` + `/students` + `/students/:studentId`                                                                         | `backend/src/modules/classrooms/services/ai-learning-analytics.service.spec.ts`、`backend/test/classroom-ai-learning-analytics.e2e-spec.ts` |
-| deadline/late               | `POST /api/classrooms/:classroomId/tasks/:classroomTaskId/submissions`（同时回归 late 字段在 weekly/trajectory/review-pack/process-assessment/snapshot 等聚合接口中的传播） | `backend/test/classroom-task-deadline.e2e-spec.ts`                                                                 |
-| export snapshot             | `GET /api/classrooms/:classroomId/export/snapshot`                                                                                                                          | `backend/test/classroom-export-snapshot.e2e-spec.ts`                                                               |
-| Enrollment-only regression  | 成员授权/统计相关接口（Enrollment-only 回归）                                                                                                                               | `backend/test/enrollments.authority-and-legacy.e2e-spec.ts`、`backend/test/enrollment-only.regression.e2e-spec.ts` |
-
-## 4) token/session 获取方式
-
-事实口径：
-
-- 登录接口：`POST /api/auth/login`。
-- 登录成功后由服务端写 `ef_session` Cookie（HttpOnly）。
-- Guard：全局 `SessionAuthGuard` 从 cookie 读 token，校验后写入 `req.user={id,roles}`。
-
-测试实践：
-
-- e2e 使用 `supertest` 的 `request.agent()` 持久化 cookie session。
-- 常见流程：先 `agent.post('/api/auth/login')`，后续复用同一 `agent` 访问受保护接口。
-
-## 5) Mock server（存在且已用于 e2e）
-
-来源：
-
-- `backend/test/learning-tasks.ai-feedback.guards.e2e-spec.ts` 的 `startMockOpenRouter`
-- `backend/test/learning-tasks.ai-feedback.openrouter-context.e2e-spec.ts` 的 `startMockOpenRouter`
-
-`openrouter-context` spec 的 mock server 会捕获请求体（`messages`），用于断言 task 上下文片段与“默认简体中文输出”prompt 约束。多数聚合回归可在 stub/mock 下完成；provider 实链路再启用 REAL_AI_E2E。
-
-路由：
-
-- `POST /chat/completions`
-
-返回 JSON 摘要示例（短）：
-
-```json
-{
-  "choices": [
-    {
-      "message": {
-        "content": "{\"items\":[{\"type\":\"STYLE\",\"severity\":\"WARN\",\"message\":\"Mock item 1\",\"tags\":[\"readability\"]}],\"meta\":{\"model\":\"mock\"}}"
-      }
-    }
-  ]
-}
-```
-
-## 6) 在测试中注入 OPENROUTER 与 Provider 配置
-
-聚合 / 报表 / 导出类 e2e（含 attempt-based 与 ai-metrics）默认不要求真实外部调用，可在 stub/mock 语境下回归；仅在需要覆盖 provider 实链路时再启用本节配置。
-
-Mock OpenRouter（E2E 常规）：
-
-```powershell
-cd backend
-$env:NODE_ENV="test"
-$env:AI_FEEDBACK_PROVIDER="openrouter"
-$env:AI_FEEDBACK_REAL_ENABLED="true"
-$env:OPENROUTER_API_KEY="test-key"
-$env:OPENROUTER_BASE_URL="http://127.0.0.1:<mock-port>"
-npm run test:e2e -- backend/test/learning-tasks.ai-feedback.guards.e2e-spec.ts
-```
-
-```powershell
-cd backend
-$env:NODE_ENV="test"
-$env:AI_FEEDBACK_PROVIDER="openrouter"
-$env:AI_FEEDBACK_REAL_ENABLED="true"
-$env:AI_FEEDBACK_DEBUG_ENABLED="true"
-$env:OPENROUTER_API_KEY="test-key"
-$env:OPENROUTER_BASE_URL="http://127.0.0.1:<mock-port>"
-npm run test:e2e -- backend/test/learning-tasks.ai-feedback.openrouter-context.e2e-spec.ts
-```
-
-Real OpenRouter（仅本地人工联调）：
-
-```powershell
-cd backend
-$env:NODE_ENV="test"
-$env:AI_FEEDBACK_PROVIDER="openrouter"
-$env:AI_FEEDBACK_REAL_ENABLED="true"
-$env:OPENROUTER_API_KEY="<real-key>"
-$env:REAL_AI_E2E="1"
-npm run test:e2e -- backend/test/learning-tasks.ai-feedback.guards.e2e-spec.ts
-```
-
-Debug 接口门禁（如需调用 jobs/process-once）：
-
-```powershell
-$env:AI_FEEDBACK_DEBUG_ENABLED="true"
-```
-
-当 `AI_FEEDBACK_DEBUG_ENABLED=false` 时，`POST /api/learning-tasks/ai-feedback/jobs/process-once` 返回 `404` 属正常门禁行为。
-`learning-tasks.ai-feedback.openrouter-context.e2e-spec.ts` 当前实践会设置 `AI_FEEDBACK_DEBUG_ENABLED=true` 作为测试辅助环境；该 spec 推进 job 通过 service 层 `aiFeedbackProcessor.processOnce(1)` 完成，并非依赖 debug 路由，也不改变“默认联调模式为 Stub + worker”的结论。
-
-## 7) 与 AI 入队触发策略相关的测试要点（attempt-based）
-
-- 无 job => `NOT_REQUESTED` 是策略结果，不是异常。
-- 手工 request 仅创建/确保 `PENDING` job；执行仍由 worker/process-once 消费链路负责。
-- 聚合回归优先 stub/mock；provider 实链路验证时再启用 `REAL_AI_E2E=1`（详见第 6 节）。
+- 新增或修改测试时同步本手册的资产类型、命令、数据库用途或 lifecycle 事实；API/配置事实回到各自 Owner。
+- 不按测试文件逐条扩张 inventory，不追求某层数量非零，不把开发日志或历史通过次数长期堆入本文。
+- 不因当前缺少 Browser 资产而安装 runner、创建专用数据库或扩大 fixture 基础设施。

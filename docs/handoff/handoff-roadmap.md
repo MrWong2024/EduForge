@@ -36,9 +36,9 @@ EduForge 当前是面向教师与学生的教学任务平台，已形成以下�
 
 - `DG-01A`：通用宪法文档同步，已完成。
 - `DG-01B`：Handoff 信息架构与文档 Owner 治理，已完成；Roadmap、Frontend Design Baseline 和导航型 INDEX 已建立。
-- `DG-01C`：测试 / Browser evidence 治理，`PLANNED`；不属于 DG-01B 范围。
+- `DG-01C`：Testing / Browser evidence 治理，已完成；Backend / Frontend Testing Playbook 与 smoke Owner 已建立。
 
-DG-01 在 DG-01C 完成前保持 `ACTIVE`。
+DG-01 仍为 `ACTIVE`：A/B/C 已实现，等待独立的 `DG-01V Governance Verification` 后再最终收口。
 
 ## 5. 下一产品主线（PLANNED）
 

@@ -25,9 +25,9 @@
 | [Backend Service map](./handoff-backend-service-map.md) | Service / Provider 职责、关键调用关系、约束与失败边界 |
 | [Backend config matrix](./handoff-backend-config-matrix.md) | 环境变量、配置来源、默认/校验、数据库用途映射与运行模式 |
 | [Backend decisions](./handoff-backend-decisions.md) | 已形成且仍有效的稳定项目决策、理由与影响 |
-| [Backend testing playbook](./handoff-backend-testing-playbook.md) | 后端测试执行、隔离、fixture、验证与测试证据 |
+| [Backend testing playbook](./handoff-backend-testing-playbook.md) | 后端 Pure/Unit/HTTP E2E、测试数据库、fixture、verifier、cleanup 与测试证据 |
 
-前端路由、API 调用、组件和设计原则从 [Frontend Handoff 入口](./handoff-frontend-INDEX.md) 进入对应 Owner。
+前端路由、API 调用、组件、设计原则以及 Browser evidence / smoke 治理从 [Frontend Handoff 入口](./handoff-frontend-INDEX.md) 进入对应 Owner。
 
 ## 4. 同步规则
 
