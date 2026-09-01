@@ -36,10 +36,12 @@ Codex 执行边界以 `docs/codex-rules.md` 为准；前端协作口径以 `docs
 | 字段 | 说明 |
 | --- | --- |
 | `userId` | 所属用户 |
-| `token` | 服务端会话标识，必须唯一 |
+| `tokenHash`（通用示例名） | 服务端持久化的 session token 不可逆哈希，必须唯一；具体字段名由项目 Schema 决定 |
 | `expiresAt` | 会话过期时间，配合 TTL 索引 |
 | `createdAt` | 由 `timestamps` 管理 |
 | `updatedAt` | 由 `timestamps` 管理 |
+
+原始 session token 不得进入数据库，只允许存在于客户端 HttpOnly Cookie 和必要的请求生命周期内；服务端持久化层只保存其不可逆哈希。具体不可逆映射由项目安全与实现合同决定，本文档不规定哈希算法。
 
 可选字段，可按业务需要引入：
 
@@ -53,7 +55,7 @@ Codex 执行边界以 `docs/codex-rules.md` 为准；前端协作口径以 `docs
 `sessions` 集合应至少具备以下索引：
 
 - `userId` 查询索引
-- `token` unique 索引
+- `tokenHash` unique 索引；该名称为通用示例，实际索引字段名与项目 Schema 保持一致
 - `expiresAt` TTL 索引
 
 具体索引创建、同步与运维边界以 `docs/database-conventions.md` 为准。  
@@ -72,7 +74,9 @@ Cookie 属性原则：
 
 - `HttpOnly` 必须启用
 - `SameSite` 默认 `Lax`
-- `Secure` 在 production 环境必须启用
+- 面向 HTTPS 的生产部署应启用 `Secure`，production 默认配置原则上应为 secure；实际 Cookie Secure 值必须由项目权威配置层决定
+- Controller / 业务代码不得绕过配置层自行根据 `NODE_ENV`、环境变量或 fallback 重新推导 `Secure`
+- `SameSite=None` 时必须配合 `Secure`
 - `Path` 默认为 `/`
 - `Max-Age` 与 session TTL 对齐
 
@@ -122,7 +126,7 @@ Cookie 属性原则：
 
 `SessionAuthGuard` 的基线职责：
 
-- 从 Cookie 读取 session token
+- 从 HttpOnly Cookie 读取原始 session token，按项目既定不可逆映射生成查询值，并只使用持久化 token hash 查找服务端 session；数据库不得保存原始 token
 - 校验 session 是否存在、未过期、未撤销
 - 支持 `@Public()` 路由直通
 - 校验通过后挂载 `req.user`
@@ -212,6 +216,7 @@ Cookie 属性原则：
 - `password`
 - `passwordHash`
 - session token
+- session token hash
 - reset token
 - `secret`
 - `credential`
@@ -220,6 +225,7 @@ Cookie 属性原则：
 
 输出安全原则：
 
+- session token 及其 hash 均为服务端安全字段，不进入普通响应、日志或前端公开模型
 - 用户公开信息应经过 DTO、mapper 或 serializer 控制
 - 不得直接返回完整用户文档
 - `select: false`、DTO 剔除、序列化剔除等实现方式由后端架构和实际代码决定
@@ -284,7 +290,7 @@ BFF 协作：
 - `docs/codex-instruction-spec.md`：Codex 指令结构
 - `docs/codex-rules.md`：Codex 执行规则、依赖治理、Git 安全、验证规则
 - `docs/backend-architecture.md`：后端架构、模块分层和 API 风格
-- `docs/frontend-architecture.md`：前端 BFF、路由、会话协作和 UI 处理
+- `docs/frontend-architecture.md`：前端后端访问拓扑、路由、会话协作和 UI 处理
 - `docs/database-conventions.md`：数据库治理、索引与集合命名
 - `docs/e2e-testing.md`：E2E 测试组织和环境
 

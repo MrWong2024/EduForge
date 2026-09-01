@@ -360,7 +360,7 @@ CI 中默认应满足：
 - `docs/backend-architecture.md`：后端架构、模块分层、Service / Controller / DTO / Schema 职责
 - `docs/auth-baseline.md`：认证、sessions、Cookie、Guard、安全错误语义
 - `docs/database-conventions.md`：数据库命名、环境隔离、索引治理
-- `docs/frontend-architecture.md`：前端 BFF、会话协作和 UI 错误处理
+- `docs/frontend-architecture.md`：前端后端访问拓扑、会话协作和 UI 错误处理
 
 如出现内容重叠，应按各文档职责边界理解；本文档只定义 E2E 测试规范本身。
 

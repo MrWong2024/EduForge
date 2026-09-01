@@ -323,7 +323,7 @@ production 关闭 `autoIndex` 的原因：
 - `docs/codex-rules.md`：Codex 执行规则、依赖治理、Git 安全、验证规则、Mongoose 技术红线
 - `docs/backend-architecture.md`：后端架构、模块分层和 Schema 职责
 - `docs/auth-baseline.md`：认证、sessions 集合、Cookie 和会话安全
-- `docs/frontend-architecture.md`：前端 BFF、路由、会话协作和 UI 处理
+- `docs/frontend-architecture.md`：前端后端访问拓扑、路由、会话协作和 UI 处理
 - `docs/e2e-testing.md`：E2E 测试组织和环境
 
 如出现数据库治理说明与其他文档的内容重叠，应按各文档职责边界理解；本文档只定义数据库治理本身。
