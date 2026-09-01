@@ -28,17 +28,16 @@ EduForge 当前是面向教师与学生的教学任务平台，已形成以下�
 
 详细当前事实和真实未实现边界只在 backend/frontend snapshot 与专项 maps 中维护，Roadmap 不复制其接口或字段细节。
 
-## 4. 当前工程治理工作（ACTIVE）
+## 4. 文档与测试治理基线（CURRENT）
 
 ### DG-01 — Documentation & Testing Governance Alignment
 
-目标是让通用工程宪法、项目 handoff Owner 和后续测试证据治理形成清晰、可持续的单一事实结构，不改变 EduForge 产品行为。
+DG-01 已完成独立治理验收并收口为当前治理基线，不改变 EduForge 产品行为。最终结果为：
 
-- `DG-01A`：通用宪法文档同步，已完成。
-- `DG-01B`：Handoff 信息架构与文档 Owner 治理，已完成；Roadmap、Frontend Design Baseline 和导航型 INDEX 已建立。
-- `DG-01C`：Testing / Browser evidence 治理，已完成；Backend / Frontend Testing Playbook 与 smoke Owner 已建立。
-
-DG-01 仍为 `ACTIVE`：A/B/C 已实现，等待独立的 `DG-01V Governance Verification` 后再最终收口。
+- 7 份通用工程治理文档已与成熟上游基线保持同源。
+- 项目 handoff 已建立 Roadmap、Frontend Design Baseline、导航型 INDEX 与“一事实一 Owner”结构。
+- Backend / Frontend Testing Playbook、测试数据库职责和最低充分 Browser evidence 治理已建立。
+- 独立 DG-01V 已验证同源性、项目污染、Owner 边界、Roadmap/Design/Testing 事实、Browser 治理、链接与 Git 范围，阻断门禁全部通过。
 
 ## 5. 下一产品主线（PLANNED）
 
