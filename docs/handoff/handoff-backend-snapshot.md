@@ -89,31 +89,30 @@ AI Feedback：
 
 用户与账户：
 
-- 登录、登出、session 校验、当前用户资料、当前用户改密已可用。
-- `POST /api/auth/forgot-password` 固定返回防枚举成功提示；真实可登录用户才会创建 reset token 并发邮件，且同一真实邮箱有 60 秒冷却。
-- `POST /api/auth/reset-password` 验证 token 后更新密码并清理该用户 sessions；不会自动登录。
+- 登录、登出、session 校验、当前用户资料、当前用户改密与忘记/重置密码链路已可用。
+- 防枚举、冷却、reset token 与会话失效的具体 HTTP 合同由 `handoff-backend-api-map.md` 和 `handoff-backend-dto-cheatsheet.md` 维护。
 
 教学主链路：
 
 - Teacher 可维护课程、班级、任务模板，并将已发布模板发布为课堂任务实例。
 - Student 通过 joinCode 加入班级，读取学习看板、任务详情，提交作业并查看反馈。
-- 教师成员列表、课堂任务提交列表、Teacher/Student submission detail 均已切到稳定真接口；submission detail 读源为 `GET /api/learning-tasks/submissions/:id`。
+- 教师成员列表、课堂任务提交列表与 Teacher/Student submission detail 均已切到稳定真接口；具体读源和权限边界由 API map 维护。
 - 课堂任务实例支持关闭/恢复提交/撤回状态流，以及 `dueAt/allowLate/maxAttempts` 实例级配置更新。
 
 聚合与分析：
 
-- 班级看板、学生学习看板、课程总览、周报、学习轨迹、课堂复盘、AI 指标、教学快照预检均已有后端接口。
-- 班级级“AI 反馈介入成效分析”已升级为向后兼容 V1.1：`scope` 继续为 `AI_FEEDBACK_INTERVENTION_V1`，新增 `version=AI_FEEDBACK_INTERVENTION_V1_1`；在保留 legacy `STABLE/stable*Count/growthTrend/outcome` 的同时，将可比持平拆为“前后均无 ERROR/WARN”与“前后问题负荷相同但仍有问题”，并增加学生净总体结果与互斥反馈参与阶段。ACTIVE 学生列表支持服务端姓名/学号搜索、总体结果和反馈参与阶段 AND 筛选，筛选后分页且区分过滤后 `total` 与全部 ACTIVE `activeStudentsTotal`。该能力仍只反映 EduForge AI 反馈介入后的提交行为与代码问题代理变化，不代表学生全部 AI 使用、正式成绩、时间趋势、学习态度、能力或因果贡献。
-- 过程性评价（JSON + CSV）已接入 `excludedTaskIds`，支持任务排除后重新计算；排除任务不参与提交、迭代、迟交、AI job 总次数、AI 任务覆盖/成功、最新任务反馈均值、`topTags`、score/risk 计算，排除全部任务时 ACTIVE 学生仍保留且 score 为 0；评分已升级为任务覆盖率 45、提交迭代质量 15、AI 使用质量 20、代码质量代理 20。
+- 班级看板、学生学习看板、课程总览、周报、学习轨迹、课堂复盘、AI 指标、过程性评价、AI 反馈介入成效分析与教学快照预检均已有后端能力。
+- AI 反馈介入成效分析覆盖总览、任务和 ACTIVE 学生分析，并支持必要筛选；结果只反映当前合同下的提交行为与代码问题代理变化，不代表正式成绩、能力、时间趋势或因果贡献。
+- 过程性评价支持临时排除任务后重新计算并提供 JSON/CSV；评分、字段、筛选与兼容口径由 API map、DTO cheatsheet 和 Service map 维护。
 - 周报、课程总览、学习轨迹、复盘包、过程性评价等聚合接口均要求遵守 Enrollment-only 与 classroomTask 隔离。
 
 ## 5) 当前不可误判事项
 
 已完成且不应回退：
 
-- `GET /api/classrooms/:id/students` 只认 Enrollment 成员关系。
-- `GET /api/classrooms/:classroomId/tasks/:classroomTaskId/submissions` 只认 `classroomTaskId` 隔离。
-- `GET /api/learning-tasks/submissions/:id` 是提交详情稳定读源，不应把列表接口扩展成详情读源。
+- 成员授权、统计和正式成员读取只认 Enrollment，不回退到 `classroom.studentIds`。
+- 课堂任务提交和聚合严格按 `classroomTaskId` 隔离，不用 `taskId` 跨班兜底。
+- submission detail 使用稳定详情读源，并与轻量列表的数据暴露边界分离。
 - `AI Feedback` 的产品 request 只负责确保 job，实际执行由 worker/processor 消费。
 - 过程性评价任务排除是临时查询条件，不修改任务、成绩或教师偏好。
 

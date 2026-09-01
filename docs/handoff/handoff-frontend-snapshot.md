@@ -53,8 +53,8 @@ Teacher：
 - 课程和班级列表已支持创建、基础编辑、归档/恢复/空对象删除；低频生命周期动作在列表“更多”菜单处理。
 - 模板层（`/teacher/tasks*`）负责模板创建、筛选、编辑、可见性与生命周期；班级任务页只负责选择已发布模板并发布课堂任务实例。
 - 课堂任务工作区以班级看板和任务列表为中枢，提交管理、学习轨迹、课堂复盘、AI 指标共用任务上下文导航。
-- 过程性评价页面已接真实 JSON/CSV 接口，支持通过共享 `TaskExclusionPanel` Client Component + `router.replace` 客户端软导航更新 `excludedTaskIds` 临时查询后重新计算、任务维度评分指标明细展示与导出；明细区提供用户可读的可展开评分规则说明，用于解释综合过程分、四个权重维度、任务维度统计和典型样例，不改变算法或接口；页面级细节看 route-map/component-map。
-- 教师班级看板已有“AI 成效分析”入口；班级级页面已消费后端 `AI_FEEDBACK_INTERVENTION_V1_1` 方法学版本，将旧版“持平”拆为“前后均无 ERROR/WARN”和“问题负荷未减少”，并提供总览、原生 SVG 任务趋势、任务明细与 ACTIVE 学生分页列表。学生列表支持服务端姓名/学号搜索、总体结果筛选和反馈参与阶段筛选，学生详情页提供全任务明细和个人反馈介入变化轨迹；学生总体结果是当前范围可比任务的净变化，不是时间趋势。该能力只反映 EduForge AI 反馈介入，不代表全部 AI 使用、正式课程成绩或 AI 的因果贡献，也不推断学生已阅读或采纳反馈。
+- 过程性评价页面已接真实 JSON/CSV 能力，支持临时任务排除、评分说明和导出；Query、组件与交互细节由 route/API/component maps 维护。
+- 教师班级看板已有 AI 成效分析入口，页面覆盖总览、任务和 ACTIVE 学生分析；结果只反映当前合同下的提交行为与代码问题代理变化，不代表全部 AI 使用、正式成绩、能力或因果贡献。
 
 Student：
 
@@ -75,7 +75,7 @@ Student：
 - 类型适配：教师/学生 payload 解析优先落在 `lib/api/types-teacher.ts` 与 `lib/api/types-student.ts`，不要在页面深层散写原始字段访问。
 - 状态文案与 UI 工具：AI 状态、rubric 四维中文、日期/展示兜底分别在 `lib/ui/status.ts`、`lib/ui/rubric.ts`、`lib/ui/format.ts` 收口。
 - 模板治理：`courseLabel`、`visibility/scope` 与默认排序分别由 `lib/learning-tasks/*` 单一来源维护。
-- 页面组件边界：模板维护属于 `/teacher/tasks*`，班级任务页只做实例发布；过程性评价与 AI 反馈介入成效分析共同使用 `TaskExclusionPanel`，通过 `router.replace` 客户端软导航更新临时 URL query；应用排除写入当前选中的 `excludedTaskIds`，清空排除删除 `excludedTaskIds` 并回到 `page=1`；不持久化、不写浏览器存储、不修改教学数据、不重算后端指标。
+- 页面组件边界：模板维护属于模板层，班级任务页只做实例发布；报表筛选、临时任务排除与客户端导航的具体组件和状态职责由 component map 维护，前端不重算后端指标。
 
 ## 4) 主链路可用性摘要
 
@@ -96,19 +96,14 @@ Student 学习链路：
 
 ## 5) 真接口收口状态
 
-已接入并作为当前主读源/主写入口：
+当前 Teacher/Student 主链路已使用真实后端能力：
 
-- `GET /api/users/me`：登录态探针 + Teacher/Student role gate。
-- `GET /api/classrooms/:id/students`：教师成员页主读源，遵守 Enrollment-only。
-- `GET /api/classrooms/:classroomId/tasks/:classroomTaskId/submissions`：教师提交管理页主读源。
-- `GET /api/learning-tasks/submissions/:id`：Teacher/Student submission detail 稳定读源。
-- `GET/POST/PATCH /api/learning-tasks/tasks*` 与模板生命周期动作：任务模板创建、编辑、发布、归档和列表筛选。
-- `GET /api/classrooms/:id/publishable-task-templates` + `POST /api/classrooms/:id/tasks`：班级实例发布主链路。
-- `GET /api/classrooms/:classroomId/process-assessment` 与 `.csv`：过程性评价与任务排除后重新计算。
-- `GET /api/classrooms/:classroomId/ai-learning-analytics`、`/students`、`/students/:studentId`：教师端班级 AI 反馈介入总览、ACTIVE 学生分页分析与单学生全任务详情。
-- `POST /api/learning-tasks/submissions/:submissionId/ai-feedback/request`：学生产品级 AI Feedback 请求入口。
+- 登录态、角色边界、当前用户和改密链路已接入；资料编辑后端能力尚无前端 UI。
+- 教师课程、班级、成员、模板、课堂任务、提交与反馈链路已接入。
+- 学生看板、加入班级、任务详情、提交、submission detail 与 AI Feedback 请求链路已接入。
+- 课程/班级聚合、周报、学习轨迹、课堂复盘、过程性评价、AI 指标、AI 反馈介入成效分析和教学快照预检已接入。
 
-补充：`PATCH /api/users/me` 后端已可用，但当前前端仍未提供资料编辑 UI。
+具体 helper、proxy、endpoint、请求/响应与 UI 映射统一由 `handoff-frontend-api-map.md` 维护；后端 HTTP 与 DTO 合同分别回到 backend API map 与 DTO cheatsheet。
 
 ## 6) 高风险边界与当前阶段判断
 

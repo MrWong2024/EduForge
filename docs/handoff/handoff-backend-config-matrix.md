@@ -2,9 +2,7 @@
 
 ## 0) 口径说明
 
-- 本系统为新系统，无历史数据包袱。
-- Enrollment-only 已收口：成员权威来源仅为 `Enrollment(role=STUDENT,status=ACTIVE)`；`classroom.studentIds` 仅为 legacy 输出/镜像，不参与任何授权/统计（这是业务口径，不是 env 开关）。
-- env 默认值以 `backend/src/config/env.validation.ts` 为准。
+ - env 默认值以 `backend/src/config/env.validation.ts` 为准。
 - `AI_FEEDBACK_WORKER_*` 不在 Joi schema 内；其默认行为来自 worker/processor 源码常量（`backend/src/modules/learning-tasks/ai-feedback/services/ai-feedback-worker.service.ts`、`backend/src/modules/learning-tasks/ai-feedback/services/ai-feedback-processor.service.ts`）。
 
 ## 1) 数据库、连接串与索引治理
@@ -142,18 +140,7 @@ $env:BAILIAN_MODEL="qwen3.6-plus"
 - 当后续提交未自动入队时，“无 Job”是策略结果，应体现为 `NOT_REQUESTED`，不代表系统异常。
 - “无 job => NOT_REQUESTED” 是正常产品语义，适用于 dashboards / `my-task-detail` / `learning-trajectory` 等聚合视图。
 
-## 6) 关键业务门禁错误码与排障指引
-
-- `LATE_SUBMISSION_NOT_ALLOWED`
-  - 触发条件：`classroomTask.dueAt` 存在，且 `settings.allowLate=false`，且 `now > dueAt`。
-  - HTTP：`403`（当前实现）。
-  - 排障要点：若 `dueAt` 为空，则不限制提交，且 `isLate=false`。
-- `SUBMISSION_COOLDOWN_ACTIVE`
-  - 触发条件：同一 `studentId + classroomTaskId` 在冷却窗口内重复提交。
-  - HTTP：`429`（当前实现），并返回 `retryAfterMs/retryAfterSeconds`。
-  - 排障要点：默认冷却 `300000ms`，可通过 `LEARNING_TASK_SUBMISSION_COOLDOWN_MS=0` 关闭。
-
-## 7) Worker / Debug 默认关闭与开启方式
+## 6) Worker / Debug 默认关闭与开启方式
 
 默认关闭：
 
@@ -187,7 +174,7 @@ debug/ops 门禁口径（与当前实现一致）：
 - debug/ops 路由显式 `@UseGuards(AiFeedbackDebugEnabledGuard, RolesGuard)`，即先 debug 门禁，再 RBAC。
 - 当 `AI_FEEDBACK_DEBUG_ENABLED=false` 时，teacher/admin 访问 debug/ops 优先返回 `404`。
 
-## 8) 护栏 env（默认值 + 建议范围）
+## 7) 护栏 env（默认值 + 建议范围）
 
 提示：本节为“执行层护栏”（processor/provider）；触发层入队策略见第 5 节。
 
