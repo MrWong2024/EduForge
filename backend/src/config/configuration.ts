@@ -1,3 +1,5 @@
+import { resolveTestDatabasePurpose } from './database-purpose';
+
 export default () => ({
   app: {
     env: process.env.NODE_ENV ?? 'development',
@@ -20,6 +22,10 @@ export default () => ({
     },
   },
   mongo: {
+    purpose: resolveTestDatabasePurpose(
+      process.env.NODE_ENV ?? 'development',
+      process.env.EDUFORGE_DATABASE_PURPOSE,
+    ),
     uri: process.env.MONGO_URI,
     serverSelectionTimeoutMS: Number.parseInt(
       process.env.MONGO_SERVER_SELECTION_TIMEOUT_MS ?? '5000',

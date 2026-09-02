@@ -19,6 +19,13 @@ export const envValidationSchema = Joi.object({
   NODE_ENV: Joi.string()
     .valid('development', 'test', 'production')
     .default('development'),
+  EDUFORGE_DATABASE_PURPOSE: Joi.when('NODE_ENV', {
+    is: 'test',
+    then: Joi.string()
+      .valid('standard_test', 'browser_acceptance')
+      .default('standard_test'),
+    otherwise: Joi.forbidden(),
+  }),
   BACKEND_PORT: Joi.number().port(),
   PORT: Joi.number().port(),
   FRONTEND_URL: Joi.string()

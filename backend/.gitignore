@@ -44,6 +44,7 @@ lerna-debug.log*
 .env.development
 .env.test
 .env.production
+.env.browser-acceptance
 
 # temp directory
 .temp

@@ -7,19 +7,31 @@
 
 ## 1) 数据库、连接串与索引治理
 
-数据库命名按 `NODE_ENV` 物理隔离：
+数据库按环境与测试用途物理隔离；`browser_acceptance` 不是新的 `NODE_ENV`：
 
-| `NODE_ENV` | Database |
-|---|---|
-| `development` | `eduforge_dev` |
-| `test` | `eduforge_test` |
-| `production` | `eduforge` |
+| `NODE_ENV` | `EDUFORGE_DATABASE_PURPOSE` | Database |
+|---|---|---|
+| `development` | 不设置 | `eduforge_dev` |
+| `test` | `standard_test`（未设置时默认） | `eduforge_test` |
+| `test` | `browser_acceptance` | `eduforge_browser_test` |
+| `production` | 不设置 | `eduforge` |
+
+purpose 仅在 test 环境允许上述两个值；空值、未知值或非 test 环境声明 purpose 都被拒绝。
 
 连接串口径：
 
-- 应用运行只读取 `MONGO_URI`，并由 `DatabaseModule` 校验连接到的 databaseName 是否与 `NODE_ENV` 匹配；不匹配时 fail-fast。
+- 应用运行只读取 `MONGO_URI`；`DatabaseModule` 先核对 URI 声明的数据库，再核对连接后的实际 databaseName。两者必须符合上述映射；缺失或不匹配均 fail-closed，不回退到其他数据库。
 - 运维脚本读取 `MONGO_ADMIN_URI`，包括 `npm run sync-indexes` 与 `npm run import-users -- ...`；脚本同样校验 databaseName。
 - 账号模型沿用两类账号：`*_app` 用于应用运行，权限限于对应库 `readWrite`；`*_db_admin` 用于索引同步、导入、迁移等人工/脚本操作。
+
+Browser backend 配置与唯一启动入口：
+
+- `backend/.env.browser-acceptance` 是本机 ignored 文件，模板为同构的 `.env.browser-acceptance.example`；仅含 `EDUFORGE_DATABASE_PURPOSE`、`BROWSER_ACCEPTANCE_APP_MONGO_URI` 和 `BROWSER_ACCEPTANCE_ADMIN_MONGO_URI`。
+- `npm run start:browser-test` 执行 `backend/scripts/start-browser-test-backend.ts`。launcher 只解析该固定文件，先验证 purpose 与 APP/ADMIN 的数据库声明，再导入 AppModule；AppModule 在 Browser purpose 下 `ignoreEnvFile=true`，不加载 `.env.test` 或 `.env`。
+- APP URI 映射为应用的 `MONGO_URI`。ADMIN URI 仅做不连接数据库的声明校验，不注入应用环境、不用作 Nest 连接；APP/ADMIN URI 必须不同。后续 fixture/admin 操作不属于此入口。
+- launcher 清除继承的数据库、邮件、AI 等应用配置；固定 `NODE_ENV=test`、邮件 log provider、合成 MAIL_FROM、AI stub 且 real/worker 关闭。仅允许 shell `BACKEND_PORT` 覆写监听端口（默认 5000），绑定 `127.0.0.1`，CORS origin 为 `http://localhost:3000`。
+- Browser 连接只尝试一次，连接后再次核对实际数据库，再 listen；启动输出只包含安全状态，不输出原始数据库/配置错误。普通 development/test/production 仍保留原有 `.env.<NODE_ENV>`、`.env` 加载顺序及连接重试策略。
+- 普通入口和 Browser 入口共用 `configureApp()`：global prefix、CORS、cookie parser、ValidationPipe 与 AllExceptionsFilter 保持一致。Browser DB foundation 的验收与 fixture 边界见 [Backend testing playbook](./handoff-backend-testing-playbook.md)。
 
 索引与 `autoIndex`：
 

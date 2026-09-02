@@ -14,10 +14,23 @@ import configuration from './config/configuration';
 import { envValidationSchema } from './config/env.validation';
 import { SessionAuthGuard } from './common/guards/session-auth.guard';
 
+import { assertBrowserAcceptancePreImportEnvironment } from './config/database-purpose';
+
+const browserAcceptance =
+  process.env.EDUFORGE_DATABASE_PURPOSE === 'browser_acceptance';
+if (browserAcceptance) {
+  assertBrowserAcceptancePreImportEnvironment({
+    nodeEnv: process.env.NODE_ENV,
+    purpose: process.env.EDUFORGE_DATABASE_PURPOSE,
+    mongoUri: process.env.MONGO_URI,
+  });
+}
+
 @Module({
   imports: [
     ConfigModule.forRoot({
       isGlobal: true,
+      ignoreEnvFile: browserAcceptance,
       envFilePath: [`.env.${process.env.NODE_ENV ?? 'development'}`, '.env'],
       load: [configuration],
       validationSchema: envValidationSchema,

@@ -13,7 +13,7 @@
 | 层级 | 当前资产与工具 | 主要证明语义 |
 |---|---|---|
 | Pure / Static | `npm run lint`、`npm run build` | lint、TypeScript/Nest 编译、import 与静态结构 |
-| Unit / Service / Controller | `backend/src/**/*.spec.ts`，当前 16 个 Jest + ts-jest spec | Service 分支、Controller 参数传递、局部规则、mapper 与错误边界 |
+| Unit / Service / Controller | `backend/src/**/*.spec.ts`，Jest + ts-jest | Service 分支、Controller 参数传递、局部规则、mapper 与错误边界 |
 | HTTP E2E / Integration | `backend/test/*.e2e-spec.ts`，当前 28 个 Jest + Supertest spec | 真实 Nest HTTP、Guard/Pipe/DTO、Session、角色/ownership、MongoDB 终态与跨模块链路 |
 | Scripted Browser | 后端无此类 runner；项目当前资产见 [Frontend testing playbook](./handoff-frontend-testing-playbook.md) | 不可由低层证明的 Browser-native 合同由前端 Owner 治理 |
 | Agent-assisted / Human smoke | 不属于后端自动测试 Owner | 真实产品 UI 可操作性与主观教学/UX 判断，见 Frontend testing playbook |
@@ -42,6 +42,8 @@ HTTP E2E 必须在 Jest 启动前显式选择测试环境，并保持默认 clea
 
 ```powershell
 $env:NODE_ENV = "test"
+$env:EDUFORGE_DATABASE_PURPOSE = "standard_test"
+Remove-Item Env:MONGO_URI, Env:MONGO_ADMIN_URI, Env:BROWSER_ACCEPTANCE_APP_MONGO_URI, Env:BROWSER_ACCEPTANCE_ADMIN_MONGO_URI -ErrorAction SilentlyContinue
 Remove-Item Env:KEEP_E2E_DB -ErrorAction SilentlyContinue
 npm run test:e2e -- --runInBand
 ```
@@ -50,6 +52,8 @@ npm run test:e2e -- --runInBand
 
 ```powershell
 $env:NODE_ENV = "test"
+$env:EDUFORGE_DATABASE_PURPOSE = "standard_test"
+Remove-Item Env:MONGO_URI, Env:MONGO_ADMIN_URI, Env:BROWSER_ACCEPTANCE_APP_MONGO_URI, Env:BROWSER_ACCEPTANCE_ADMIN_MONGO_URI -ErrorAction SilentlyContinue
 Remove-Item Env:KEEP_E2E_DB -ErrorAction SilentlyContinue
 npm run test:e2e -- --runInBand --runTestsByPath ./test/users-me.e2e-spec.ts
 ```
@@ -58,11 +62,18 @@ npm run test:e2e -- --runInBand --runTestsByPath ./test/users-me.e2e-spec.ts
 
 ## 5. Database Purpose
 
-- 当前自动化数据库用途只有普通测试：`NODE_ENV=test`，应用通过 `MONGO_URI` 连接 `eduforge_test`。
-- `backend/.env.test` 与 `backend/.env.test.example` 提供测试环境来源；`DatabaseModule` 在连接后核对实际 database name，不匹配即 fail-fast。
-- `MONGO_ADMIN_URI` 只属于明确的管理脚本职责，不是应用 E2E 的连接来源。连接串和凭据不得出现在日志、文档或报告。
-- unit/HTTP E2E 不得连接 `eduforge_dev` 或 production 数据库，也不得依赖 shell 中残留的开发/生产变量选择数据库。
-- 当前没有独立 Browser acceptance database、Browser fixture 或 Browser backend 配置；不得从其他项目机械复制一套。
+- `standard_test → eduforge_test` 与 `browser_acceptance → eduforge_browser_test` 已物理隔离；完整配置合同见 [Backend config matrix](./handoff-backend-config-matrix.md#1-数据库连接串与索引治理)。
+- 普通 HTTP E2E 使用独立 `NODE_ENV=test` 子进程，purpose 显式指定或默认解析为 `standard_test`；仅提供 `backend/.env.test`，启动前清除 shell 残留的主连接、管理连接和 Browser 变量，不与 Browser env 叠加。
+- Browser backend 使用独立 `start:browser-test` launcher，仅读取 ignored `.env.browser-acceptance`。应用连接与普通 E2E 数据库隔离，admin URI 仅校验声明，不建立 admin 连接。
+- URI 声明门禁在连接前执行，Mongoose 实际 databaseName 在连接后验证；Browser launcher 在 AppModule 导入前和 listen 前分别执行门禁，错误立即拒绝。
+- pure/unit/lint/build 的用途为 `none`，不连接数据库。HTTP E2E 不得连接 Browser、development 或 production 数据库；Browser backend 不得连接 standard_test、development 或 production 数据库。
+- 当前 foundation 支持受控启动、正常初始化所需索引元数据和公开 `GET /api` 健康请求；不创建业务数据、Browser fixture、verifier 或 UI/DB Profile，不代表真实 Teacher/Student Browser 登录已验收。
+
+最低充分证据入口（执行状态以当次报告为准）：
+
+- `src/config/database-purpose.spec.ts`：purpose/URI/connected-name、APP/ADMIN 声明、环境隔离与 launcher 静态合同；先 `npm run test -- --listTests --runInBand --runTestsByPath ./src/config/database-purpose.spec.ts`，确认唯一目标后去掉 `--listTests` 执行。
+- 代表性真实 HTTP 回归：`test/users-me.e2e-spec.ts`；先用相同定向参数加 `--listTests` 做 discovery，再运行本手册第 4 节命令。保持 spec-owned cleanup 与 app close。
+- Browser 正向验收：独立前台运行 `npm run start:browser-test`（必要时通过 `BACKEND_PORT` 选择已核对空闲端口），确认实际数据库与安全启动摘要，再请求 `http://127.0.0.1:<port>/api` 得到 200。仅停止该运行单元并确认端口释放，不执行数据库 cleanup。
 
 ## 6. Fixture、Verifier 与 Cleanup
 
