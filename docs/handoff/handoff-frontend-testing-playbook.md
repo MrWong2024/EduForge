@@ -8,9 +8,9 @@
 
 ## 2. Current Test Baseline
 
-当前 `frontend/package.json` 只有 `lint`、`typecheck` 与 `build` 等静态门禁，没有 test script。仓库中没有前端 Jest/Vitest/Cypress/Playwright config、spec 目录或顶层 Browser runner 依赖；因此：
+当前 frontend 已使用现有 `@playwright/test` 作为标准 pure/static contracts runner，并保留 `lint`、`typecheck` 与 `build` 静态门禁。contracts 配置、目录、命令与首个 route-path contract 见第 4 节；该 runner 不启动 Browser。Playwright dependency 的存在不代表已经存在 Browser regression：
 
-> 当前 deterministic scripted Browser asset = 0。
+> 当前 deterministic scripted Browser executable = 0。
 
 这表示当前没有可执行的 scripted Browser regression，不表示产品 UI 已通过或失败。此前也没有 Agent-assisted / Human smoke 的独立 Owner；本文建立治理边界，但不把未执行的流程写成 passed evidence。
 
@@ -18,10 +18,10 @@
 
 | 证据类别 | 当前资产 / 工具 | 当前证明语义 | 重复与缺口 | 是否扩张 |
 |---|---|---|---|---|
-| A. Pure / Static Contract | `npm run lint`、`npm run typecheck`、`npm run build`；ESLint、Next typegen、TypeScript、Next build | 静态类型、import、路由/build 可生成性与 lint | 没有独立 `contracts` test 目录；不证明运行时 Session、HTTP 或 UI | 按变更执行；不为数量新增 contract runner |
-| B. Unit / Logic | 当前前端 spec = 0，未安装前端 test runner | 当前无动态局部逻辑证据 | 若未来抽出稳定的 formatter/state helper，可出现低成本缺口；当前空白本身不阻断 | 仅为独立、稳定、低成本逻辑增加，不机械补齐组件快照 |
+| A. Pure / Static Contract | Playwright Test contracts runner 与 route-path spec（见第 4 节）；ESLint、Next typegen、TypeScript、Next build | 路径稳定性、动态段/查询编码，以及静态类型、import、路由/build 可生成性与 lint | 已有独立 contracts 目录；不证明运行时 Session、HTTP 或 UI | 按变更复用现有 runner，不为数量扩张 |
+| B. Unit / Logic | 独立 unit/component spec = 0；pure/static contract 归 A 类 | 当前无独立组件或其他局部逻辑证据 | 若未来抽出稳定的 formatter/state helper，可出现低成本缺口；当前空白本身不阻断 | 仅为独立、稳定、低成本逻辑增加，优先复用现有 runner，不机械补齐组件快照 |
 | C. HTTP E2E / Integration | 前端无独立 HTTP suite；后端 Jest + Supertest E2E 是公开 API 主 Owner | 认证、DTO、角色/ownership、Submission/AI Feedback 与数据库终态 | 不重复搬到 Browser；BFF/真实 origin 的 Browser-native 子事实当前无专门证据 | API 风险优先补后端 HTTP E2E；仅 Browser-only 部分再升级 |
-| D. Scripted Browser | 当前资产 0；无 Playwright/Cypress script、config、spec 或顶层依赖 | 当前没有 deterministic Browser 证明 | 没有已确认必须长期回归的 Browser-native 缺口 | 保持 0 合理；具体候选通过准入后才建立薄 micro-profile |
+| D. Scripted Browser | 当前 executable 0；无 Browser script、config 或 spec；现有 Playwright 仅用于 contracts | 当前没有 deterministic Browser 证明 | 没有已确认必须长期回归的 Browser-native 缺口 | 保持 0 合理；具体候选通过准入后才建立薄 micro-profile |
 | E. Agent-assisted Browser smoke | 本文定义治理；执行时使用 Agent 可控制的真实 Browser | 当前 production UI 的客观可操作性、页面 wiring 与真实用户主流程 | 不是仓库内 CI asset，也没有历史 passed 结果可继承 | 按产品主链和实际变更选择少量场景，不固定全量矩阵 |
 | F. Human smoke | 本文 + Frontend design baseline | 清晰度、认知负担、教学表达、视觉/UX 与真实教学判断 | 自动化不能替代；当前无统一签收记录 | 保留人工 Owner，不伪装成自动化 |
 
@@ -30,18 +30,23 @@
 从 `frontend` 目录执行的当前真实命令：
 
 ```powershell
+npm run test:contracts:list
+npm run test:contracts
 npm run lint
 npm run typecheck
 npm run build
 ```
 
+- 标准 runner 为 Playwright Test，配置：`frontend/playwright.contracts.config.ts`；pure/static contracts 目录：`frontend/test/contracts`。先用 `test:contracts:list` 确认发现范围，再用 `test:contracts` 执行。
+- 首个资产 `frontend/test/contracts/routes-paths.contract.spec.ts` 验证 `frontend/lib/routes/paths.ts` 的关键静态路径、动态段 URL-safe encoding、`tasksFromClassroom()` 的 classroomId 编码与 `status=PUBLISHED`，以及课堂任务 submissions 的双动态段编码。
+- contracts 仅使用 `test` / `expect` 与被测纯模块，不使用 Browser fixture，不启动 Browser 或服务，不连接网络/数据库，也不依赖环境变量；Browser evidence 仍须按本文既有最低充分规则另行资格审查。
 - lint/typecheck/build 是代码变化后的静态门禁，不证明登录、Cookie、BFF、请求副作用或真实页面流程。
-- 纯展示映射、序列化、资格判断等逻辑如果可以脱离 React/Browser 独立证明，应优先形成 pure test；当前没有相应 runner，不因假设未来需求提前安装。
+- 纯展示映射、序列化、资格判断等逻辑如果可以脱离 React/Browser 独立证明，应优先复用现有 contracts runner，不因假设未来需求新增依赖或并行 runner。
 - 文档-only 变化只做文档、链接、diff 与范围门禁，不机械运行 frontend build。
 
 ## 5. Unit / Logic
 
-当前前端没有 unit/component test 资产。未来只有在逻辑已经稳定抽离、错误风险真实且静态类型不能充分证明时，才选择标准轻量 runner；组件结构、文案或 selector 不应默认用脆弱快照重复维护。
+当前前端除第 4 节的 pure/static contract 外，没有独立 unit/component test 资产。未来只有在逻辑已经稳定抽离、错误风险真实且静态类型不能充分证明时，才增加最低充分测试，并优先复用现有标准 runner；组件结构、文案或 selector 不应默认用脆弱快照重复维护。
 
 ## 6. HTTP E2E 与前端相关边界
 
@@ -71,9 +76,9 @@ scripted deterministic Browser 只用于不可由 Pure/Unit/HTTP E2E 可靠证�
 2. 使用最小合法前置，不把教师/学生完整业务主链塞入 scripted body。
 3. 只断言 Browser 不可替代事实；服务端终态复用既有 HTTP E2E，必要时才增加最小 verifier。
 4. 资产、runtime、namespace 和 cleanup 各自可归属、可独立收口。
-5. 当前没有合格候选，因此不创建 placeholder、Browser DB、runner、support 或 test-only UI hook。
+5. 当前没有合格候选，因此不创建 placeholder、Browser DB、Browser runner、support 或 test-only UI hook。
 
-若未来确有合格缺口而当前仍无工具，应先报告证据缺口与准入理由，再单独评估标准 Playwright；不得私建 Browser runner，也不得在本任务中安装依赖。
+若未来确有合格缺口，应先报告证据缺口与准入理由，再单独评估现有标准 Playwright 的 Browser 配置与执行边界；contracts runner 和依赖的存在不赋予 Browser regression 资格，不得私建 Browser runner 或无故安装依赖。
 
 ## 8. Agent-assisted Browser Smoke
 
@@ -133,7 +138,7 @@ Human smoke 保留以下唯一职责：
 
 ## 13. Current Known Gaps
 
-- 前端没有 unit/logic runner；仅在出现稳定、独立且静态门禁无法证明的逻辑风险时再评估。
+- 前端已有 pure/static contracts runner 与首个 route-path contract；其他 unit/logic 证据仅在出现稳定、独立且现有证据无法证明的逻辑风险时增加。
 - 当前没有 scripted Browser 对真实 BrowserContext、reload、Cookie/credentials/CORS 或 BFF topology 提供确定性证据；Discovery 尚未发现必须立即建设的独立 Browser-native 合同。
 - Agent-assisted 与 Human smoke 目前只有治理和候选范围，没有可继承的 passed evidence、专用 fixture 或结果登记；实际任务必须按真实执行模式报告。
 - 写入型 Browser smoke 尚无独立数据库用途。出现重复验收需求前保持现状，比预建空基础设施更符合最低充分原则。
