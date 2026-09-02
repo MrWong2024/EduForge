@@ -9,7 +9,7 @@ import {
   FeedbackSeverity,
   FeedbackSource,
 } from '../../../learning-tasks/schemas/feedback.schema';
-import { User } from '../../../users/schemas/user.schema';
+import { User, UserStatus } from '../../../users/schemas/user.schema';
 import { EnrollmentService } from '../../enrollments/services/enrollment.service';
 import { AiFeedbackJobService } from '../../../learning-tasks/ai-feedback/services/ai-feedback-job.service';
 import { LearningTasksService } from '../../../learning-tasks/services/learning-tasks.service';
@@ -168,7 +168,7 @@ const createHarness = (options: HarnessOptions = {}) => {
     return submissions.filter((submission) => {
       if (
         classroomTaskIdFilter &&
-        submission.classroomTaskId.toString() !==
+        submission.classroomTaskId?.toString() !==
           classroomTaskIdFilter.toString()
       ) {
         return false;
@@ -454,19 +454,19 @@ describe('ClassroomTasksService listClassroomTaskSubmissions ACTIVE enrollment f
           _id: activeStudentId,
           email: 'active@example.com',
           roles: ['student'],
-          status: 'active',
+          status: UserStatus.Active,
           name: 'Active Student',
           studentNo: 'S001',
-          employeeNo: null,
+          employeeNo: undefined,
         },
         {
           _id: removedStudentId,
           email: 'removed@example.com',
           roles: ['student'],
-          status: 'active',
+          status: UserStatus.Active,
           name: 'Removed Student',
           studentNo: 'S999',
-          employeeNo: null,
+          employeeNo: undefined,
         },
       ],
     });

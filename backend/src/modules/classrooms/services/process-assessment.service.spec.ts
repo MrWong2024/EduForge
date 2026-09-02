@@ -48,8 +48,10 @@ const objectIdStringsFromMatch = (
   return (condition?.$in ?? []).map((id) => id.toString());
 };
 
-const createService = () =>
-  new ProcessAssessmentService(
+type BuildPayload = ProcessAssessmentService['buildPayload'];
+
+const createService = (payload: Awaited<ReturnType<BuildPayload>>) => {
+  const service = new ProcessAssessmentService(
     {} as never,
     {} as never,
     {} as never,
@@ -58,6 +60,14 @@ const createService = () =>
     {} as never,
     {} as never,
   );
+  // Isolate CSV serialization while checking the private builder's real signature.
+  Object.defineProperty(service, 'buildPayload', {
+    value: jest
+      .fn<ReturnType<BuildPayload>, Parameters<BuildPayload>>()
+      .mockResolvedValue(payload),
+  });
+  return service;
+};
 
 const createAssessmentHarness = () => {
   const classroomId = objectId();
@@ -860,8 +870,7 @@ describe('ProcessAssessmentService getProcessAssessment', () => {
 
 describe('ProcessAssessmentService exportProcessAssessmentCsv', () => {
   it('prefixes CSV with UTF-8 BOM and preserves header order with Chinese text', async () => {
-    const service = createService();
-    jest.spyOn(service as never, 'buildPayload').mockResolvedValue({
+    const service = createService({
       classroomId: 'classroom-1',
       window: 'all',
       generatedAt: '2026-05-20T00:00:00.000Z',
@@ -909,8 +918,7 @@ describe('ProcessAssessmentService exportProcessAssessmentCsv', () => {
   });
 
   it('returns BOM plus header row when there are no items', async () => {
-    const service = createService();
-    jest.spyOn(service as never, 'buildPayload').mockResolvedValue({
+    const service = createService({
       classroomId: 'classroom-1',
       window: 'all',
       generatedAt: '2026-05-20T00:00:00.000Z',
