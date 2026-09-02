@@ -15,7 +15,7 @@
 | Pure / Static | `npm run lint`、`npm run build` | lint、TypeScript/Nest 编译、import 与静态结构 |
 | Unit / Service / Controller | `backend/src/**/*.spec.ts`，当前 16 个 Jest + ts-jest spec | Service 分支、Controller 参数传递、局部规则、mapper 与错误边界 |
 | HTTP E2E / Integration | `backend/test/*.e2e-spec.ts`，当前 28 个 Jest + Supertest spec | 真实 Nest HTTP、Guard/Pipe/DTO、Session、角色/ownership、MongoDB 终态与跨模块链路 |
-| Scripted Browser | 后端无此类 runner；当前项目可执行资产为 0 | 仅在未来出现不可由低层证明的 Browser-native 合同时由前端 Owner 治理 |
+| Scripted Browser | 后端无此类 runner；项目当前资产见 [Frontend testing playbook](./handoff-frontend-testing-playbook.md) | 不可由低层证明的 Browser-native 合同由前端 Owner 治理 |
 | Agent-assisted / Human smoke | 不属于后端自动测试 Owner | 真实产品 UI 可操作性与主观教学/UX 判断，见 Frontend testing playbook |
 
 Unit 与 HTTP E2E 可以覆盖同一业务区域，但不得重复承担同一主断言：局部规则留在 unit，真实 HTTP/认证/数据库终态留在 E2E。

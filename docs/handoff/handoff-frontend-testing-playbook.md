@@ -8,11 +8,11 @@
 
 ## 2. Current Test Baseline
 
-当前 frontend 已使用现有 `@playwright/test` 作为标准 pure/static contracts runner，并保留 `lint`、`typecheck` 与 `build` 静态门禁。contracts 配置、目录、命令与首个 route-path contract 见第 4 节；该 runner 不启动 Browser。Playwright dependency 的存在不代表已经存在 Browser regression：
+当前 frontend 已使用现有 `@playwright/test` 作为标准 pure/static contracts runner，并保留 `lint`、`typecheck` 与 `build` 静态门禁。contracts 配置、目录、命令与首个 route-path contract 见第 4 节；该 runner 不启动 Browser。独立 Browser runner 与当前唯一 micro-profile 见第 7.3 节；Playwright dependency 本身不代表 Browser regression，当前可执行资产为：
 
-> 当前 deterministic scripted Browser executable = 0。
+> 当前 deterministic scripted Browser executable = 1 个 micro-profile：BFF Cookie Roundtrip & BrowserContext Isolation。
 
-这表示当前没有可执行的 scripted Browser regression，不表示产品 UI 已通过或失败。此前也没有 Agent-assisted / Human smoke 的独立 Owner；本文建立治理边界，但不把未执行的流程写成 passed evidence。
+该 profile 仅证明 Cookie/Storage 的 Browser-native 合同，不表示产品 UI 已通过或失败，也不构成 UI golden path evidence。Agent-assisted / Human smoke 继续按本文治理，未执行的流程不得写成 passed evidence。
 
 ## 3. Test Evidence Classes
 
@@ -20,8 +20,8 @@
 |---|---|---|---|---|
 | A. Pure / Static Contract | Playwright Test contracts runner 与 route-path spec（见第 4 节）；ESLint、Next typegen、TypeScript、Next build | 路径稳定性、动态段/查询编码，以及静态类型、import、路由/build 可生成性与 lint | 已有独立 contracts 目录；不证明运行时 Session、HTTP 或 UI | 按变更复用现有 runner，不为数量扩张 |
 | B. Unit / Logic | 独立 unit/component spec = 0；pure/static contract 归 A 类 | 当前无独立组件或其他局部逻辑证据 | 若未来抽出稳定的 formatter/state helper，可出现低成本缺口；当前空白本身不阻断 | 仅为独立、稳定、低成本逻辑增加，优先复用现有 runner，不机械补齐组件快照 |
-| C. HTTP E2E / Integration | 前端无独立 HTTP suite；后端 Jest + Supertest E2E 是公开 API 主 Owner | 认证、DTO、角色/ownership、Submission/AI Feedback 与数据库终态 | 不重复搬到 Browser；BFF/真实 origin 的 Browser-native 子事实当前无专门证据 | API 风险优先补后端 HTTP E2E；仅 Browser-only 部分再升级 |
-| D. Scripted Browser | 当前 executable 0；无 Browser script、config 或 spec；现有 Playwright 仅用于 contracts | 当前没有 deterministic Browser 证明 | 没有已确认必须长期回归的 Browser-native 缺口 | 保持 0 合理；具体候选通过准入后才建立薄 micro-profile |
+| C. HTTP E2E / Integration | 前端无独立 HTTP suite；后端 Jest + Supertest E2E 是公开 API 主 Owner | 认证、DTO、角色/ownership、Submission/AI Feedback 与数据库终态 | 不重复搬到 Browser；BFF Cookie/Context 子事实由第 7.3 节提供专门证据 | API 风险优先补后端 HTTP E2E；仅 Browser-only 部分再升级 |
+| D. Scripted Browser | 独立 Playwright Browser runner；1 个 BFF Cookie/Context micro-profile（见第 7.3 节） | Chromium 接受 Cookie、HttpOnly、自动发送及 Context Cookie/Storage 隔离 | 不验证 UI，不替代 HTTP E2E，不证明其他 Browser 合同 | 仅通过准入的独立 Browser-native 候选才扩张 |
 | E. Agent-assisted Browser smoke | 本文定义治理；执行时使用 Agent 可控制的真实 Browser | 当前 production UI 的客观可操作性、页面 wiring 与真实用户主流程 | 不是仓库内 CI asset，也没有历史 passed 结果可继承 | 按产品主链和实际变更选择少量场景，不固定全量矩阵 |
 | F. Human smoke | 本文 + Frontend design baseline | 清晰度、认知负担、教学表达、视觉/UX 与真实教学判断 | 自动化不能替代；当前无统一签收记录 | 保留人工 Owner，不伪装成自动化 |
 
@@ -70,15 +70,33 @@ scripted deterministic Browser 只用于不可由 Pure/Unit/HTTP E2E 可靠证�
 
 ### 7.2 Micro-profile
 
-未来合格资产必须保持薄：
+合格资产必须保持薄：
 
 1. 一个 profile 聚焦一个 Browser-native 合同，只含 1–4 个紧密相关场景。
 2. 使用最小合法前置，不把教师/学生完整业务主链塞入 scripted body。
 3. 只断言 Browser 不可替代事实；服务端终态复用既有 HTTP E2E，必要时才增加最小 verifier。
 4. 资产、runtime、namespace 和 cleanup 各自可归属、可独立收口。
-5. 当前没有合格候选，因此不创建 placeholder、Browser DB、Browser runner、support 或 test-only UI hook。
+5. 仅为合格合同增加必要资产；当前 micro-profile 使用 synthetic upstream，不需要 Browser DB、业务 fixture 或 test-only UI hook。
 
-若未来确有合格缺口，应先报告证据缺口与准入理由，再单独评估现有标准 Playwright 的 Browser 配置与执行边界；contracts runner 和依赖的存在不赋予 Browser regression 资格，不得私建 Browser runner 或无故安装依赖。
+新增候选仍须先报告证据缺口与准入理由，再评估现有标准 Playwright 的配置与执行边界；runner 和依赖的存在不自动赋予资格，不得私建 Browser runner 或无故安装依赖。
+
+### 7.3 Current Micro-profile
+
+- 配置：`frontend/playwright.browser.config.ts`；spec：`frontend/test/browser/bff-cookie-isolation.browser.spec.ts`；合成上游：`frontend/test/browser/support/browser-probe-upstream.mjs`。与 `test/contracts` 物理分离，仅使用已安装的 Chromium。
+- 准入理由是普通 HTTP E2E 无法完整证明真实 Browser 是否接受 `Set-Cookie`、Cookie 是否进入 Context store、HttpOnly 是否阻止 `document.cookie` 访问、后续 Browser 请求是否自动发送 Cookie，以及两个 Context 的 Cookie/Storage 是否隔离；不是因为 BFF 业务重要而升级 Browser。Header forwarding 逻辑、API 状态及普通业务分支仍由 HTTP E2E 负责。
+- 两个场景分别验证同一 Context 的 Cookie roundtrip，以及独立 Context A/B 的 Cookie、localStorage 与 sessionStorage 隔离。只导航到非 UI BFF route 并使用 Browser primitive，无 UI locator、表单、点击、视觉或业务页面断言。
+- Topology：Chromium → real Next.js frontend origin → `/api/proxy/*` BFF → Node 标准库 synthetic upstream `/api/*`。Playwright `webServer` 托管两个服务，使用 health/BFF echo 就绪检查，`reuseExistingServer: false`，退出时回收其创建的进程；不复用来源不明的已有服务。
+- 默认 frontend `127.0.0.1:3100`、upstream `127.0.0.1:5100`；分别用 `EDUFORGE_BROWSER_FRONTEND_PORT`、`EDUFORGE_BROWSER_UPSTREAM_PORT` 覆盖。端口必须不同且专用，不允许 3000/5000；冲突时选择其他空闲端口，不终止已有进程。frontend 的 `FRONTEND_BACKEND_ORIGIN` 由 runner 显式设为该 synthetic upstream，运行真实 Next dev/BFF，涉及同一 `.next` 的命令必须串行。
+- 本 profile 不启动真实 backend、不连接任何数据库、不写磁盘业务数据。探针使用专用合成 Cookie `eduforge_browser_probe`，不使用真实 session Cookie；不需要 Browser acceptance DB、业务 fixture 或数据库 cleanup。
+
+从 `frontend` 目录独立执行：
+
+```powershell
+npm run test:browser:list
+npm run test:browser
+```
+
+先核对 discovery 仅包含该 micro-profile，再正式运行；contracts 继续使用第 4 节的独立命令。
 
 ## 8. Agent-assisted Browser Smoke
 
@@ -110,7 +128,7 @@ Human smoke 保留以下唯一职责：
 ## 10. Database / Fixture Coordination
 
 - 当前需要数据库的后端 HTTP E2E 使用 `eduforge_test`；unit / static 证据通常不连接数据库。项目没有独立 Browser acceptance database 或 Browser fixture。
-- 因当前 scripted Browser 资产为 0，也没有需要长期重复准备的 Browser namespace，本任务不新增数据库、env、fixture、verifier 或 cleanup 配置。
+- 当前 BFF Cookie/Context profile 的数据库用途为 `none`，只使用内存中的 synthetic upstream 和独立 BrowserContext；Browser acceptance DB 仍不存在，也不需要数据库 namespace、业务 fixture、verifier 或数据库 cleanup。
 - 任何写入型 Agent-assisted/Human smoke 在执行前必须明确环境、实际 database、合成账号/数据 ownership 与 cleanup；不得复用来源不明的服务或账号，也不得与可能清理 `eduforge_test` 的 E2E 并行。
 - 如果未来形成可重复、写入型 Browser acceptance 资产，再单独设计与普通 E2E 物理隔离且 fail-closed 的用途；namespace 不能替代数据库用途隔离。
 
@@ -139,6 +157,6 @@ Human smoke 保留以下唯一职责：
 ## 13. Current Known Gaps
 
 - 前端已有 pure/static contracts runner 与首个 route-path contract；其他 unit/logic 证据仅在出现稳定、独立且现有证据无法证明的逻辑风险时增加。
-- 当前没有 scripted Browser 对真实 BrowserContext、reload、Cookie/credentials/CORS 或 BFF topology 提供确定性证据；Discovery 尚未发现必须立即建设的独立 Browser-native 合同。
+- 当前 scripted 证据限于第 7.3 节的 BFF Cookie roundtrip、HttpOnly 与 Context Cookie/Storage 隔离；其他 reload、credentials/CORS 或 Browser topology 合同仍须按实际风险独立资格审查，不能从该 profile 泛化为已覆盖。
 - Agent-assisted 与 Human smoke 目前只有治理和候选范围，没有可继承的 passed evidence、专用 fixture 或结果登记；实际任务必须按真实执行模式报告。
 - 写入型 Browser smoke 尚无独立数据库用途。出现重复验收需求前保持现状，比预建空基础设施更符合最低充分原则。

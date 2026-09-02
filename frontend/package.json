@@ -11,7 +11,9 @@
     "lint:file:fix": "eslint --fix",
     "typecheck": "next typegen && tsc --noEmit",
     "test:contracts": "playwright test --config=playwright.contracts.config.ts",
-    "test:contracts:list": "playwright test --config=playwright.contracts.config.ts --list"
+    "test:contracts:list": "playwright test --config=playwright.contracts.config.ts --list",
+    "test:browser": "playwright test --config=playwright.browser.config.ts",
+    "test:browser:list": "playwright test --config=playwright.browser.config.ts --list"
   },
   "dependencies": {
     "next": "16.1.5",
