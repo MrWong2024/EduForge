@@ -21,19 +21,18 @@ type PasswordResetEmailOptions = {
 export class MailService {
   private readonly logger = new Logger(MailService.name);
   private readonly provider: MailProvider;
-  private readonly fromAddress: string;
+  private readonly fromAddress?: string;
   private readonly smtpTransport?: nodemailer.Transporter;
 
   constructor(private readonly configService: ConfigService) {
     this.provider =
       (this.configService.get<string>('mail.provider') as MailProvider) ??
       'log';
-    const from = this.configService.get<string>('mail.from') ?? '';
-    const fromName =
-      this.configService.get<string>('mail.fromName') ?? 'EduForge';
-    this.fromAddress = `"${fromName.replace(/"/g, '\\"')}" <${from}>`;
-
     if (this.provider === 'smtp') {
+      const from = this.requireConfig('mail.from', 'MAIL_FROM');
+      const fromName =
+        this.configService.get<string>('mail.fromName') ?? 'EduForge';
+      this.fromAddress = `"${fromName.replace(/"/g, '\\"')}" <${from}>`;
       this.smtpTransport = nodemailer.createTransport({
         host: this.requireConfig('mail.smtp.host', 'SMTP_HOST'),
         port: this.requireNumberConfig('mail.smtp.port', 'SMTP_PORT'),
@@ -74,7 +73,7 @@ export class MailService {
   async sendMail(options: SendMailOptions): Promise<void> {
     if (this.provider === 'log') {
       this.logger.log(
-        `mail provider=log to=${options.to} subject="${options.subject}" body=${options.text.replace(/\n/g, ' | ')}`,
+        `mail provider=log to=${options.to} subject="${options.subject}"`,
       );
       return;
     }

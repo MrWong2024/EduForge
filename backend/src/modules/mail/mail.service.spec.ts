@@ -3,102 +3,192 @@ import { ConfigService } from '@nestjs/config';
 import * as nodemailer from 'nodemailer';
 import { MailService } from './mail.service';
 
+type SentMail = Parameters<MailService['sendMail']>[0] & { from: string };
+
+const mockSendMail = jest
+  .fn<Promise<{ messageId: string }>, [SentMail]>()
+  .mockResolvedValue({ messageId: 'message-1' });
+
 jest.mock('nodemailer', () => ({
-  createTransport: jest.fn(),
+  createTransport: jest.fn(() => ({ sendMail: mockSendMail })),
 }));
 
 describe('MailService', () => {
-  const createConfigService = (
-    values: Record<string, string | number | boolean>,
-  ) =>
-    ({
-      get: jest.fn((key: string) => values[key]),
-    }) as unknown as ConfigService;
+  const smtpConfig = {
+    provider: 'smtp',
+    from: 'sender@example.invalid',
+    smtp: {
+      host: 'smtp.example.invalid',
+      port: 465,
+      user: 'synthetic-user',
+      pass: 'synthetic-smtp-password',
+    },
+  };
 
   beforeEach(() => {
     jest.clearAllMocks();
   });
 
-  it('logs password reset emails when provider=log', async () => {
+  afterEach(() => {
+    jest.restoreAllMocks();
+  });
+
+  it.each([undefined, 'log'])(
+    'logs only metadata with provider=%p and no sender or SMTP configuration',
+    async (provider) => {
+      const loggerSpy = jest
+        .spyOn(Logger.prototype, 'log')
+        .mockImplementation(() => undefined);
+      const config = new ConfigService(
+        provider === undefined ? {} : { mail: { provider } },
+      );
+      const getConfigSpy = jest.spyOn(config, 'get');
+      const service = new MailService(config);
+      const options = {
+        to: 'recipient@example.invalid',
+        subject: 'Synthetic mail subject',
+        text: 'SYNTHETIC_TEXT_BODY\nSecond line',
+        html: '<p>SYNTHETIC_HTML_BODY</p>',
+      };
+
+      expect(nodemailer.createTransport).not.toHaveBeenCalled();
+      await service.sendMail(options);
+
+      expect(getConfigSpy.mock.calls).toEqual([['mail.provider']]);
+      expect(nodemailer.createTransport).not.toHaveBeenCalled();
+      expect(mockSendMail).not.toHaveBeenCalled();
+      expect(loggerSpy.mock.calls).toEqual([
+        [
+          'mail provider=log to=recipient@example.invalid subject="Synthetic mail subject"',
+        ],
+      ]);
+      const logs = JSON.stringify(loggerSpy.mock.calls);
+      expect(logs).not.toContain('SYNTHETIC_TEXT_BODY');
+      expect(logs).not.toContain(options.html);
+      expect(logs).not.toContain('body=');
+    },
+  );
+
+  it('keeps password reset URLs, tokens and both bodies out of log output', async () => {
     const loggerSpy = jest
       .spyOn(Logger.prototype, 'log')
       .mockImplementation(() => undefined);
     const service = new MailService(
-      createConfigService({
-        'mail.provider': 'log',
-        'mail.from': 'noreply@mail.cqupt.fun',
-        'mail.fromName': 'EduForge',
-      }),
+      new ConfigService({ mail: { provider: 'log' } }),
     );
+    const sendMailSpy = jest.spyOn(service, 'sendMail');
+    const resetUrl =
+      'https://example.test/reset-password?token=SUPER_SECRET_RESET_TOKEN';
 
     await service.sendPasswordResetEmail({
-      to: 'user@example.com',
-      resetUrl: 'http://localhost:3000/reset-password?token=plain-token',
+      to: 'recipient@example.invalid',
+      resetUrl,
       expiresInMinutes: 30,
     });
 
     expect(nodemailer.createTransport).not.toHaveBeenCalled();
-    expect(loggerSpy).toHaveBeenCalledWith(
-      expect.stringContaining('reset-password?token=plain-token'),
-    );
-    loggerSpy.mockRestore();
+    expect(mockSendMail).not.toHaveBeenCalled();
+    expect(loggerSpy.mock.calls).toEqual([
+      [
+        'mail provider=log to=recipient@example.invalid subject="EduForge 密码重置"',
+      ],
+    ]);
+    const logs = loggerSpy.mock.calls.flat().join('\n');
+    const [{ text, html }] = sendMailSpy.mock.calls[0];
+    for (const sensitive of [
+      resetUrl,
+      'SUPER_SECRET_RESET_TOKEN',
+      'token=',
+      text,
+      html,
+      '您收到这封邮件',
+    ]) {
+      expect(logs).not.toContain(sensitive);
+    }
   });
 
-  it('sends smtp mail with formatted from address when provider=smtp', async () => {
-    const sendMail = jest.fn().mockResolvedValue({ messageId: 'message-1' });
-    (nodemailer.createTransport as jest.Mock).mockReturnValue({ sendMail });
-    const service = new MailService(
-      createConfigService({
-        'mail.provider': 'smtp',
-        'mail.from': 'noreply@mail.cqupt.fun',
-        'mail.fromName': 'EduForge',
-        'mail.smtp.host': 'smtpdm.aliyun.com',
-        'mail.smtp.port': 465,
-        'mail.smtp.secure': true,
-        'mail.smtp.user': 'noreply@mail.cqupt.fun',
-        'mail.smtp.pass': 'smtp-password',
-      }),
-    );
+  it('sends password reset mail using SMTP with the existing sender and secure defaults', async () => {
+    const service = new MailService(new ConfigService({ mail: smtpConfig }));
+    const resetUrl =
+      'https://example.test/reset-password?token=SYNTHETIC_SMTP_RESET_TOKEN';
 
     await service.sendPasswordResetEmail({
-      to: 'user@example.com',
-      resetUrl: 'https://frontend.example.com/reset-password?token=plain-token',
+      to: 'recipient@example.invalid',
+      resetUrl,
       expiresInMinutes: 30,
     });
 
+    expect(nodemailer.createTransport).toHaveBeenCalledTimes(1);
     expect(nodemailer.createTransport).toHaveBeenCalledWith({
-      host: 'smtpdm.aliyun.com',
+      host: 'smtp.example.invalid',
       port: 465,
       secure: true,
       auth: {
-        user: 'noreply@mail.cqupt.fun',
-        pass: 'smtp-password',
+        user: 'synthetic-user',
+        pass: 'synthetic-smtp-password',
       },
     });
-    expect(sendMail).toHaveBeenCalledWith(
-      expect.objectContaining({
-        from: '"EduForge" <noreply@mail.cqupt.fun>',
-        to: 'user@example.com',
-        subject: 'EduForge 密码重置',
-      }),
-    );
+    expect(mockSendMail).toHaveBeenCalledTimes(1);
+    const [sent] = mockSendMail.mock.calls[0];
+    expect(sent).toMatchObject({
+      from: '"EduForge" <sender@example.invalid>',
+      to: 'recipient@example.invalid',
+      subject: 'EduForge 密码重置',
+    });
+    expect(sent.text).toContain(resetUrl);
+    expect(sent.html).toContain('<a href="' + resetUrl + '">');
   });
 
-  it('fails fast when smtp provider misses required config', () => {
-    expect(
-      () =>
-        new MailService(
-          createConfigService({
-            'mail.provider': 'smtp',
-            'mail.from': '',
-            'mail.fromName': 'EduForge',
-            'mail.smtp.host': '',
-            'mail.smtp.port': 465,
-            'mail.smtp.secure': true,
-            'mail.smtp.user': '',
-            'mail.smtp.pass': '',
-          }),
-        ),
-    ).toThrow('SMTP_HOST is required when MAIL_PROVIDER=smtp');
+  it('preserves explicit SMTP transport settings and forwards all mail fields', async () => {
+    const service = new MailService(
+      new ConfigService({
+        mail: {
+          ...smtpConfig,
+          fromName: 'Custom "Sender"',
+          smtp: { ...smtpConfig.smtp, port: 587, secure: false },
+        },
+      }),
+    );
+    const options = {
+      to: 'recipient@example.invalid',
+      subject: 'Synthetic SMTP subject',
+      text: 'Synthetic plain body\nSecond line',
+      html: '<p>Synthetic HTML body</p>',
+    };
+
+    await service.sendMail(options);
+
+    expect(nodemailer.createTransport).toHaveBeenCalledWith({
+      host: 'smtp.example.invalid',
+      port: 587,
+      secure: false,
+      auth: {
+        user: 'synthetic-user',
+        pass: 'synthetic-smtp-password',
+      },
+    });
+    expect(mockSendMail).toHaveBeenCalledTimes(1);
+    expect(mockSendMail).toHaveBeenCalledWith({
+      from: '"Custom \\"Sender\\"" <sender@example.invalid>',
+      ...options,
+    });
+  });
+
+  it.each([
+    ['from', 'MAIL_FROM'],
+    ['host', 'SMTP_HOST'],
+    ['port', 'SMTP_PORT'],
+    ['user', 'SMTP_USER'],
+    ['pass', 'SMTP_PASS'],
+  ])('fails fast when SMTP configuration %s is missing', (key, envKey) => {
+    const mail =
+      key === 'from'
+        ? { ...smtpConfig, from: undefined }
+        : { ...smtpConfig, smtp: { ...smtpConfig.smtp, [key]: undefined } };
+
+    expect(() => new MailService(new ConfigService({ mail }))).toThrow(
+      envKey + ' is required when MAIL_PROVIDER=smtp',
+    );
+    expect(nodemailer.createTransport).not.toHaveBeenCalled();
   });
 });

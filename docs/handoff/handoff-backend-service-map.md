@@ -88,12 +88,12 @@
   - `sendPasswordResetEmail(options): Promise<void> — called by PasswordResetService.requestPasswordReset`
 - AuthZ Boundary: `internal-only`
 - Metrics/Isolation: 与 `classroomTaskId` 无关
-- Consistency/Constraints: 支持 `MAIL_PROVIDER=log|smtp`；`log` 仅打日志不真实发送；`smtp` 必须通过配置构造 `"Display Name" <from@example.com>` 发件人；不得记录 `SMTP_PASS`
+- Consistency/Constraints: `log` 不发送邮件，仅记录 provider、收件人与主题；不得记录正文、重置链接、token 或 SMTP 凭据。`smtp` 使用配置发件人发送；配置条件与默认值见 [Config Matrix](./handoff-backend-config-matrix.md#4-核心-env-列表与默认值)
 - Deps/Side Effects: `ConfigService`, `Logger`, `nodemailer`（仅 smtp provider）
-- Performance Notes: smtp transporter 在 service 初始化时创建；缺失关键 SMTP 配置时 fail-fast
+- Performance Notes: smtp transporter 仅在 smtp provider 初始化时创建；缺失发件人或关键 SMTP 配置时 fail-fast
 - SoT: `backend/src/modules/mail/mail.service.ts`; `backend/src/config/env.validation.ts`; `backend/src/config/configuration.ts`
 - Failure Modes:
-  - `MAIL_PROVIDER=smtp` 且缺失 SMTP 关键配置 -> 抛配置错误
+  - `MAIL_PROVIDER=smtp` 且缺失发件人或 SMTP 关键配置 -> 抛配置错误
   - SMTP 发送失败 -> 抛异常，由上层决定补偿/日志口径
 
 ## Service Card 01C

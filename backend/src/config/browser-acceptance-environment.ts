@@ -44,7 +44,6 @@ export function createBrowserAcceptanceEnvironment(
     BACKEND_PORT: inherited.BACKEND_PORT ?? '5000',
     FRONTEND_URL: 'http://localhost:3000',
     MAIL_PROVIDER: 'log',
-    MAIL_FROM: 'browser-acceptance@example.invalid',
     AI_FEEDBACK_PROVIDER: 'stub',
     AI_FEEDBACK_WORKER_ENABLED: 'false',
   };

@@ -30,9 +30,7 @@ export const envValidationSchema = Joi.object({
     .uri({ scheme: [/https?/] })
     .default('http://localhost:3000'),
   MAIL_PROVIDER: Joi.string().valid('log', 'smtp').default('log'),
-  MAIL_FROM: Joi.string()
-    .email({ tlds: { allow: false } })
-    .required(),
+  MAIL_FROM: Joi.string().email({ tlds: { allow: false } }),
   MAIL_FROM_NAME: Joi.string().trim().min(1).default('EduForge'),
   SMTP_HOST: Joi.string().allow(''),
   SMTP_PORT: Joi.number().integer().min(1).max(65535).default(465),

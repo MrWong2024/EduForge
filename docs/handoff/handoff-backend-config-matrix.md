@@ -29,7 +29,7 @@ Browser backend 配置与唯一启动入口：
 - `backend/.env.browser-acceptance` 是本机 ignored 文件，模板为同构的 `.env.browser-acceptance.example`；仅含 `EDUFORGE_DATABASE_PURPOSE`、`BROWSER_ACCEPTANCE_APP_MONGO_URI` 和 `BROWSER_ACCEPTANCE_ADMIN_MONGO_URI`。
 - `npm run start:browser-test` 执行 `backend/scripts/start-browser-test-backend.ts`。launcher 只解析该固定文件，先验证 purpose 与 APP/ADMIN 的数据库声明，再导入 AppModule；AppModule 在 Browser purpose 下 `ignoreEnvFile=true`，不加载 `.env.test` 或 `.env`。
 - APP URI 映射为应用的 `MONGO_URI`。ADMIN URI 仅做不连接数据库的声明校验，不注入应用环境、不用作 Nest 连接；APP/ADMIN URI 必须不同。后续 fixture/admin 操作不属于此入口。
-- launcher 清除继承的数据库、邮件、AI 等应用配置；固定 `NODE_ENV=test`、邮件 log provider、合成 MAIL_FROM、AI stub 且 real/worker 关闭。仅允许 shell `BACKEND_PORT` 覆写监听端口（默认 5000），绑定 `127.0.0.1`，CORS origin 为 `http://localhost:3000`。
+- launcher 清除继承的数据库、邮件、AI 等应用配置；固定 `NODE_ENV=test`、`MAIL_PROVIDER=log`（不注入 synthetic MAIL_FROM、不依赖 sender/SMTP 配置）、AI stub 且 real/worker 关闭。仅允许 shell `BACKEND_PORT` 覆写监听端口（默认 5000），绑定 `127.0.0.1`，CORS origin 为 `http://localhost:3000`。
 - Browser 连接只尝试一次，连接后再次核对实际数据库，再 listen；启动输出只包含安全状态，不输出原始数据库/配置错误。普通 development/test/production 仍保留原有 `.env.<NODE_ENV>`、`.env` 加载顺序及连接重试策略。
 - 普通入口和 Browser 入口共用 `configureApp()`：global prefix、CORS、cookie parser、ValidationPipe 与 AllExceptionsFilter 保持一致。Browser DB foundation 的验收与 fixture 边界见 [Backend testing playbook](./handoff-backend-testing-playbook.md)。
 
@@ -82,9 +82,9 @@ Browser backend 配置与唯一启动入口：
 | ---------------------------------------------- | --------------------------------------------------- | ---------------------------------------------------- | ------------------------------------------------------------------------------- | -------------------------------------------------------------------- | ------------- |
 | `NODE_ENV`                                     | `development`                                       | Joi                                                  | `development                                                                    | test                                                                 | production`。 |
 | `FRONTEND_URL`                                 | `http://localhost:3000`                             | Joi                                                  | CORS origin。                                                                   |
-| `MAIL_PROVIDER`                                | `log`                                               | Joi                                                  | 邮件 provider：`log                                                             | smtp`。development/test 默认建议 `log`，production 示例使用 `smtp`。 |
-| `MAIL_FROM`                                    | 无                                                  | Joi                                                  | 发件人邮箱地址；`MAIL_PROVIDER=smtp` 时必须存在。                               |
-| `MAIL_FROM_NAME`                               | `EduForge`                                          | Joi                                                  | 发件人显示名称；邮件 `from` 组装为 `"MAIL_FROM_NAME" <MAIL_FROM>`。             |
+| `MAIL_PROVIDER` | `log` | Joi | 仅支持 `log`、`smtp`；development/test 示例使用 `log`，production 示例使用 `smtp`。 |
+| `MAIL_FROM` | 无 | Joi | 仅 `smtp` 必填；`log` 可省略；提供时必须为有效 email。 |
+| `MAIL_FROM_NAME` | `EduForge` | Joi | 可省略；仅 `smtp` 使用，组装为 `"MAIL_FROM_NAME" <MAIL_FROM>`。 |
 | `SMTP_HOST`                                    | 无                                                  | Joi                                                  | SMTP 主机；`MAIL_PROVIDER=smtp` 时必须存在。                                    |
 | `SMTP_PORT`                                    | `465`                                               | Joi                                                  | SMTP 端口。                                                                     |
 | `SMTP_SECURE`                                  | `true`                                              | Joi                                                  | SMTP 是否启用 TLS/SMTPS。                                                       |
@@ -112,13 +112,14 @@ Browser backend 配置与唯一启动入口：
 
 条件必填：
 
-- 当 `MAIL_PROVIDER=smtp` 时，`MAIL_FROM`、`SMTP_HOST`、`SMTP_PORT`、`SMTP_USER`、`SMTP_PASS` 必须存在；缺失会在 env 校验或 mail service 初始化阶段 fail-fast。
+- `MAIL_PROVIDER=log` 不要求提供 `MAIL_FROM`、`MAIL_FROM_NAME` 或任何 `SMTP_*`；MailService 不读取或构造 sender，不创建 Nodemailer transport，不发送真实邮件。
+- `MAIL_PROVIDER=smtp` 必须提供 `MAIL_FROM`、`SMTP_HOST`、`SMTP_USER`、`SMTP_PASS`；缺失会在 env 校验或 MailService 初始化阶段 fail-fast。`MAIL_FROM_NAME`、`SMTP_PORT`、`SMTP_SECURE` 可省略，默认值见上表。
 - 当 `AI_FEEDBACK_PROVIDER=bailian` 时，`BAILIAN_API_KEY` 必须存在且非空、非纯空白；否则 env validation fail-fast。
 - `stub` 不要求真实 API Key；Worker 开关不影响上述校验。Provider Base 保留 `MISSING_API_KEY` 运行时防御。
 
 补充：
 
-- 本地开发/测试密码重置推荐 `MAIL_PROVIDER=log`，由 `MailService` 仅打印收件人、标题与 reset link，避免误发真实邮件。
+- log provider 只记录 `provider=log`、收件人 `to` 和主题 `subject`；不记录 text/HTML 正文、password reset URL、query token 或 reset token。development/test 示例的 Mail 配置仅保留 `MAIL_PROVIDER=log`。
 - 生产真实发信使用 `MAIL_PROVIDER=smtp`，SMTP 配置全部来自 env；仓库示例文件只保留占位符，不提交真实密码。
 
 PowerShell 本地百炼联调口径：

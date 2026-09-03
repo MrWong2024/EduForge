@@ -2,7 +2,6 @@ import { envValidationSchema } from './env.validation';
 
 const baseEnv = {
   NODE_ENV: 'test',
-  MAIL_FROM: 'unit@example.invalid',
   MONGO_URI: 'mongodb://127.0.0.1:1/ai_feedback_unit',
 };
 
@@ -13,6 +12,90 @@ function validate(overrides: Record<string, unknown> = {}) {
     value: result.value as Record<string, unknown>,
   };
 }
+
+describe('Mail env validation (no external I/O)', () => {
+  const smtpEnv = {
+    MAIL_PROVIDER: 'smtp',
+    MAIL_FROM: 'sender@example.invalid',
+    SMTP_HOST: 'smtp.example.invalid',
+    SMTP_USER: 'synthetic-user',
+    SMTP_PASS: 'synthetic-smtp-password',
+  };
+
+  it.each([undefined, 'log'])(
+    'accepts provider=%p without sender or SMTP configuration',
+    (provider) => {
+      const result = validate(
+        provider === undefined ? {} : { MAIL_PROVIDER: provider },
+      );
+
+      expect(result.error).toBeUndefined();
+      expect(result.value.MAIL_PROVIDER).toBe('log');
+      for (const key of ['MAIL_FROM', 'SMTP_HOST', 'SMTP_USER', 'SMTP_PASS']) {
+        expect(result.value).not.toHaveProperty(key);
+      }
+    },
+  );
+
+  it('accepts SMTP with the required fields and supplies existing defaults', () => {
+    const result = validate(smtpEnv);
+
+    expect(result.error).toBeUndefined();
+    expect(result.value).toMatchObject({
+      ...smtpEnv,
+      MAIL_FROM_NAME: 'EduForge',
+      SMTP_PORT: 465,
+      SMTP_SECURE: 'true',
+    });
+  });
+
+  it('preserves explicit SMTP sender, port and secure settings', () => {
+    const result = validate({
+      ...smtpEnv,
+      MAIL_FROM_NAME: 'Custom sender',
+      SMTP_PORT: '587',
+      SMTP_SECURE: 'false',
+    });
+
+    expect(result.error).toBeUndefined();
+    expect(result.value).toMatchObject({
+      MAIL_FROM_NAME: 'Custom sender',
+      SMTP_PORT: 587,
+      SMTP_SECURE: 'false',
+    });
+  });
+
+  it.each(['MAIL_FROM', 'SMTP_HOST', 'SMTP_USER', 'SMTP_PASS'])(
+    'requires %s for SMTP',
+    (key) => {
+      const result = validate({ ...smtpEnv, [key]: undefined });
+
+      expect(result.error).toBeDefined();
+      expect(result.error?.message).toContain(key);
+    },
+  );
+
+  it.each(['log', 'smtp'])('rejects an invalid sender for %s', (provider) => {
+    const result = validate({
+      ...smtpEnv,
+      MAIL_PROVIDER: provider,
+      MAIL_FROM: 'not-an-email',
+    });
+
+    expect(result.error?.details).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ path: ['MAIL_FROM'], type: 'string.email' }),
+      ]),
+    );
+  });
+
+  it.each(['none', 'disabled', 'unsupported-provider', ''])(
+    'rejects unsupported mail provider %p',
+    (provider) => {
+      expect(validate({ MAIL_PROVIDER: provider }).error).toBeDefined();
+    },
+  );
+});
 
 describe('AI Feedback env validation (no external I/O)', () => {
   it('defaults to stub without real API keys and supplies all worker defaults', () => {
