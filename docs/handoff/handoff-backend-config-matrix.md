@@ -59,6 +59,7 @@ Browser backend 配置与唯一启动入口：
 
 - `AI_FEEDBACK_PROVIDER` 决定 Provider：`stub` 不触网、无需真实 API Key；`bailian` 对应真实百炼 Provider。
 - 真实 AI 最小配置：`AI_FEEDBACK_PROVIDER=bailian` + 非空 `BAILIAN_API_KEY`。
+- development example 定位为本地真实集成开发环境：`AI_FEEDBACK_PROVIDER=bailian`、`AI_FEEDBACK_WORKER_ENABLED=true`、显式 `BAILIAN_MODEL=qwen3.6-plus`，Mail 使用 `smtp`。
 - `AI_FEEDBACK_WORKER_ENABLED` 只控制后台常驻 Worker 自动消费 AiFeedbackJob，不是“是否开启 AI”的总开关；`false` 不禁止 Provider 或显式 `process-once`。后台自动消费需另外设为 `true`。
 - test example 显式保持 `provider=stub` / worker disabled；Browser acceptance example 说明 launcher 固定使用同样配置，仅读取用途与 APP/ADMIN 连接声明。
 
@@ -82,7 +83,7 @@ Browser backend 配置与唯一启动入口：
 | ---------------------------------------------- | --------------------------------------------------- | ---------------------------------------------------- | ------------------------------------------------------------------------------- | -------------------------------------------------------------------- | ------------- |
 | `NODE_ENV`                                     | `development`                                       | Joi                                                  | `development                                                                    | test                                                                 | production`。 |
 | `FRONTEND_URL`                                 | `http://localhost:3000`                             | Joi                                                  | CORS origin。                                                                   |
-| `MAIL_PROVIDER` | `log` | Joi | 仅支持 `log`、`smtp`；development/test 示例使用 `log`，production 示例使用 `smtp`。 |
+| `MAIL_PROVIDER` | `log` | Joi | 仅支持 `log`、`smtp`；test 示例使用 `log`，development/production 示例使用 `smtp`。 |
 | `MAIL_FROM` | 无 | Joi | 仅 `smtp` 必填；`log` 可省略；提供时必须为有效 email。 |
 | `MAIL_FROM_NAME` | `EduForge` | Joi | 可省略；仅 `smtp` 使用，组装为 `"MAIL_FROM_NAME" <MAIL_FROM>`。 |
 | `SMTP_HOST`                                    | 无                                                  | Joi                                                  | SMTP 主机；`MAIL_PROVIDER=smtp` 时必须存在。                                    |
@@ -119,7 +120,7 @@ Browser backend 配置与唯一启动入口：
 
 补充：
 
-- log provider 只记录 `provider=log`、收件人 `to` 和主题 `subject`；不记录 text/HTML 正文、password reset URL、query token 或 reset token。development/test 示例的 Mail 配置仅保留 `MAIL_PROVIDER=log`。
+- log provider 只记录 `provider=log`、收件人 `to` 和主题 `subject`；不记录 text/HTML 正文、password reset URL、query token 或 reset token。test 示例的 Mail 配置仅保留 `MAIL_PROVIDER=log`。
 - 生产真实发信使用 `MAIL_PROVIDER=smtp`，SMTP 配置全部来自 env；仓库示例文件只保留占位符，不提交真实密码。
 
 PowerShell 本地百炼联调口径：
