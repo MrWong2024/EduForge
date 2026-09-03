@@ -614,7 +614,7 @@
   - `processOnce(batchSize?: number): Promise<{ processed: number; succeeded: number; failed: number; dead: number }> — called by worker tick and debug process-once endpoint`
 - AuthZ Boundary: `internal-only`（worker 与 debug process-once 共享）
 - Metrics/Isolation: job 按 `classroomTaskId` 进入限流桶；重试/backoff/attempts 状态机收敛
-- Consistency/Constraints: 锁 TTL=5min；仅 claim `PENDING|FAILED`；指数退避（30s 起，最大 10min）；`UNAUTHORIZED/MISSING_API_KEY/REAL_DISABLED` 直接 `DEAD`；处理链路为“读取 submission -> 按 `submission.taskId` 查询 task -> 组装 `AiSubmissionAnalysisContext` -> 调 provider -> 落库前收敛”；收敛口径为默认 1 条主反馈、必要时最多 2 条；同类问题聚合、低价值 INFO（存在 ERROR/WARN 时）不独立落库
+- Consistency/Constraints: 锁 TTL=5min；仅 claim `PENDING|FAILED`；指数退避（30s 起，最大 10min）；`UNAUTHORIZED/MISSING_API_KEY` 直接 `DEAD`；处理链路为“读取 submission -> 按 `submission.taskId` 查询 task -> 组装 `AiSubmissionAnalysisContext` -> 调 provider -> 落库前收敛”；收敛口径为默认 1 条主反馈、必要时最多 2 条；同类问题聚合、低价值 INFO（存在 ERROR/WARN 时）不独立落库
 - Deps/Side Effects: `AiFeedbackJobModel`, `SubmissionModel`, `TaskModel`, `FeedbackModel`, `AI_FEEDBACK_PROVIDER_TOKEN`, `AiFeedbackGuardsService`, `ConfigService`, `feedback-item-compactor`；外部 provider 调用 + 反馈写库 + job 状态更新
 - Performance Notes: `findOneAndUpdate` 原子 claim（按 createdAt 先来先服务）；`insertMany(ordered:false)` 批量落库并容忍重复键；收敛逻辑基于当前 job 的 `items[]` 内存处理，避免额外数据库 I/O
 - SoT: `backend/src/modules/learning-tasks/ai-feedback/services/ai-feedback-processor.service.ts`; `backend/src/modules/learning-tasks/ai-feedback/lib/feedback-item-compactor.ts`; `backend/src/modules/learning-tasks/ai-feedback/interfaces/ai-feedback-provider.error-codes.ts`
@@ -640,13 +640,13 @@
 - AuthZ Boundary: `internal-only`
 - Metrics/Isolation: 复用 processor 统计结果；隔离口径由 processor 负责
 - Consistency/Constraints: 默认禁用；`isRunning` 防重入；destroy 时清理 interval
-- Deps/Side Effects: `AiFeedbackProcessor`；周期调度、日志输出
+- Deps/Side Effects: `AiFeedbackProcessor`、`ConfigService`（读取已校验配置）；周期调度、日志输出
 - Performance Notes: 定时批处理，batch 可配置；禁用时无轮询开销
 - SoT: `backend/src/modules/learning-tasks/ai-feedback/services/ai-feedback-worker.service.ts`; `backend/src/modules/learning-tasks/ai-feedback/services/ai-feedback-processor.service.ts`
 - Failure Modes:
   - 未开启 `AI_FEEDBACK_WORKER_ENABLED` -> 不启动 worker
   - processor 异常 -> 捕获并记录，worker 不崩溃
-  - 非法 interval/batch env -> 回退默认值
+  - 非法 Worker 配置 -> env validation 拒绝启动；配置职责、默认值和边界见 [Config Matrix](./handoff-backend-config-matrix.md#4-核心-env-列表与默认值)
 
 ## Provider Card A
 
@@ -685,7 +685,6 @@
 - Performance Notes: 单请求超时控制 + 有界重试；解析失败直接终止
 - SoT: `backend/src/modules/learning-tasks/ai-feedback/providers/real/openrouter-feedback.provider.ts`; `backend/src/modules/learning-tasks/ai-feedback/protocol/ai-feedback-json.protocol.ts`; `backend/src/modules/learning-tasks/ai-feedback/prompts/ai-feedback.prompt.ts`
 - Failure Modes:
-  - `AI_FEEDBACK_REAL_ENABLED=false` -> `REAL_DISABLED`（不可重试）
   - 无 API key -> `MISSING_API_KEY`（不可重试）
   - HTTP 429/5xx/超时 -> 可重试错误
   - 非法 JSON/越界字段 -> `BAD_RESPONSE`
@@ -726,7 +725,6 @@
 - Performance Notes: 单请求超时控制 + 有界重试；解析失败直接终止
 - SoT: `backend/src/modules/learning-tasks/ai-feedback/providers/real/bailian-feedback.provider.ts`; `backend/src/modules/learning-tasks/ai-feedback/providers/real/openai-compatible-feedback-provider.base.ts`; `backend/src/modules/learning-tasks/ai-feedback/protocol/ai-feedback-json.protocol.ts`; `backend/src/modules/learning-tasks/ai-feedback/prompts/ai-feedback.prompt.ts`
 - Failure Modes:
-  - `AI_FEEDBACK_REAL_ENABLED=false` -> `REAL_DISABLED`（不可重试）
   - 无 `BAILIAN_API_KEY` -> `MISSING_API_KEY`（不可重试）
   - HTTP 429/5xx/超时 -> 可重试错误
   - 非法 JSON/越界字段 -> `BAD_RESPONSE`

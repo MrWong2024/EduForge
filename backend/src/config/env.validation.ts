@@ -2,7 +2,6 @@ import Joi from 'joi';
 
 type EnvValidationInput = {
   AI_FEEDBACK_PROVIDER?: string;
-  AI_FEEDBACK_REAL_ENABLED?: string;
   MAIL_PROVIDER?: string;
   MAIL_FROM?: string;
   MAIL_FROM_NAME?: string;
@@ -55,9 +54,9 @@ export const envValidationSchema = Joi.object({
   AI_FEEDBACK_PROVIDER: Joi.string()
     .valid('stub', 'openrouter', 'bailian')
     .default('stub'),
-  AI_FEEDBACK_REAL_ENABLED: Joi.string()
-    .valid('true', 'false')
-    .default('false'),
+  AI_FEEDBACK_WORKER_ENABLED: Joi.boolean().default(false),
+  AI_FEEDBACK_WORKER_INTERVAL_MS: Joi.number().integer().min(1).default(10000),
+  AI_FEEDBACK_WORKER_BATCH_SIZE: Joi.number().integer().min(1).default(5),
   AI_FEEDBACK_MAX_CODE_CHARS: Joi.number()
     .integer()
     .min(500)
@@ -84,7 +83,7 @@ export const envValidationSchema = Joi.object({
     .valid('true', 'false')
     .default('false'),
   AUTHZ_ENFORCE_ROLES: Joi.string().valid('true', 'false').default('true'),
-  OPENROUTER_API_KEY: Joi.string(),
+  OPENROUTER_API_KEY: Joi.string().trim().allow(''),
   OPENROUTER_BASE_URL: Joi.string()
     .uri({ scheme: [/https?/] })
     .default('https://openrouter.ai/api/v1'),
@@ -95,7 +94,7 @@ export const envValidationSchema = Joi.object({
   OPENROUTER_MODEL: Joi.string().default('openrouter/free'),
   OPENROUTER_TIMEOUT_MS: Joi.number().integer().min(1000).default(90000),
   OPENROUTER_MAX_RETRIES: Joi.number().integer().min(0).default(1),
-  BAILIAN_API_KEY: Joi.string().allow(''),
+  BAILIAN_API_KEY: Joi.string().trim().allow(''),
   BAILIAN_BASE_URL: Joi.string()
     .uri({ scheme: [/https?/] })
     .default('https://dashscope.aliyuncs.com/compatible-mode/v1'),
@@ -109,19 +108,18 @@ export const envValidationSchema = Joi.object({
       typeof value.AI_FEEDBACK_PROVIDER === 'string'
         ? value.AI_FEEDBACK_PROVIDER.toLowerCase()
         : 'stub';
-    const realEnabled = value.AI_FEEDBACK_REAL_ENABLED === 'true';
     const hasOpenRouterApiKey =
       typeof value.OPENROUTER_API_KEY === 'string' &&
-      value.OPENROUTER_API_KEY.length > 0;
+      value.OPENROUTER_API_KEY.trim().length > 0;
     const hasBailianApiKey =
       typeof value.BAILIAN_API_KEY === 'string' &&
-      value.BAILIAN_API_KEY.length > 0;
-    if (provider === 'openrouter' && realEnabled && !hasOpenRouterApiKey) {
+      value.BAILIAN_API_KEY.trim().length > 0;
+    if (provider === 'openrouter' && !hasOpenRouterApiKey) {
       return helpers.error('any.required', {
         missingKey: 'OPENROUTER_API_KEY',
       });
     }
-    if (provider === 'bailian' && realEnabled && !hasBailianApiKey) {
+    if (provider === 'bailian' && !hasBailianApiKey) {
       return helpers.error('any.required', { missingKey: 'BAILIAN_API_KEY' });
     }
     const mailProvider =

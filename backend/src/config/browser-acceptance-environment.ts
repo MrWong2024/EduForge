@@ -46,7 +46,6 @@ export function createBrowserAcceptanceEnvironment(
     MAIL_PROVIDER: 'log',
     MAIL_FROM: 'browser-acceptance@example.invalid',
     AI_FEEDBACK_PROVIDER: 'stub',
-    AI_FEEDBACK_REAL_ENABLED: 'false',
     AI_FEEDBACK_WORKER_ENABLED: 'false',
   };
 }

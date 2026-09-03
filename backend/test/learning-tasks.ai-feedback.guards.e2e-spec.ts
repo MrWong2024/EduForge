@@ -171,7 +171,6 @@ describe('LearningTasks AI Feedback Guards (e2e)', () => {
   let previousWorkerEnabled: string | undefined;
   let previousDebugEnabled: string | undefined;
   let previousProvider: string | undefined;
-  let previousRealEnabled: string | undefined;
   let previousApiKey: string | undefined;
   let previousBaseUrl: string | undefined;
   let previousMaxItems: string | undefined;
@@ -248,8 +247,6 @@ describe('LearningTasks AI Feedback Guards (e2e)', () => {
     process.env.AI_FEEDBACK_DEBUG_ENABLED = 'true';
     previousProvider = process.env.AI_FEEDBACK_PROVIDER;
     process.env.AI_FEEDBACK_PROVIDER = 'openrouter';
-    previousRealEnabled = process.env.AI_FEEDBACK_REAL_ENABLED;
-    process.env.AI_FEEDBACK_REAL_ENABLED = 'true';
     previousApiKey = process.env.OPENROUTER_API_KEY;
     previousBaseUrl = process.env.OPENROUTER_BASE_URL;
     previousMaxItems = process.env.AI_FEEDBACK_MAX_ITEMS;
@@ -407,11 +404,6 @@ describe('LearningTasks AI Feedback Guards (e2e)', () => {
       delete process.env.AI_FEEDBACK_PROVIDER;
     } else {
       process.env.AI_FEEDBACK_PROVIDER = previousProvider;
-    }
-    if (previousRealEnabled === undefined) {
-      delete process.env.AI_FEEDBACK_REAL_ENABLED;
-    } else {
-      process.env.AI_FEEDBACK_REAL_ENABLED = previousRealEnabled;
     }
     if (previousApiKey === undefined) {
       delete process.env.OPENROUTER_API_KEY;

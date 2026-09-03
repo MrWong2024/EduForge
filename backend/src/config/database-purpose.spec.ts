@@ -181,7 +181,7 @@ describe('Browser environment and launcher isolation', () => {
       SMTP_PASS: 'synthetic-smtp',
       BAILIAN_API_KEY: 'synthetic-key',
       AI_FEEDBACK_WORKER_ENABLED: 'true',
-      AI_FEEDBACK_REAL_ENABLED: 'true',
+      AI_FEEDBACK_PROVIDER: 'bailian',
       BACKEND_PORT: '5003',
       PATH: 'synthetic-path',
     };
@@ -203,7 +203,7 @@ describe('Browser environment and launcher isolation', () => {
     }
     expect(result.MAIL_PROVIDER).toBe('log');
     expect(result.AI_FEEDBACK_WORKER_ENABLED).toBe('false');
-    expect(result.AI_FEEDBACK_REAL_ENABLED).toBe('false');
+    expect(result.AI_FEEDBACK_PROVIDER).toBe('stub');
     expect(result.BACKEND_PORT).toBe('5003');
     expect(result.PATH).toBe('synthetic-path');
     expect(inherited.NODE_ENV).toBe('production');

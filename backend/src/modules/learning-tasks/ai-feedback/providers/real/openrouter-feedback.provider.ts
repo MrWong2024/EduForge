@@ -39,8 +39,6 @@ export class OpenRouterFeedbackProvider extends OpenAiCompatibleFeedbackProvider
         this.configService.get<string>('OPENROUTER_MODEL') ?? DEFAULT_MODEL,
       timeoutMs: this.readInt('OPENROUTER_TIMEOUT_MS', DEFAULT_TIMEOUT_MS),
       maxRetries: this.readInt('OPENROUTER_MAX_RETRIES', DEFAULT_MAX_RETRIES),
-      realEnabled:
-        this.configService.get<string>('AI_FEEDBACK_REAL_ENABLED') === 'true',
       maxCodeChars: this.readInt(
         'AI_FEEDBACK_MAX_CODE_CHARS',
         DEFAULT_MAX_CODE_CHARS,

@@ -4,31 +4,36 @@ import {
   OnModuleDestroy,
   OnModuleInit,
 } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { AiFeedbackProcessor } from './ai-feedback-processor.service';
 
 type WorkerTickResult = Awaited<ReturnType<AiFeedbackProcessor['processOnce']>>;
 
 @Injectable()
 export class AiFeedbackWorker implements OnModuleInit, OnModuleDestroy {
-  private static readonly DEFAULT_INTERVAL_MS = 10000;
   private readonly logger = new Logger(AiFeedbackWorker.name);
   private intervalId?: NodeJS.Timeout;
   private isRunning = false;
 
-  constructor(private readonly processor: AiFeedbackProcessor) {}
+  constructor(
+    private readonly processor: AiFeedbackProcessor,
+    private readonly configService: ConfigService,
+  ) {}
 
   onModuleInit() {
-    if (process.env.AI_FEEDBACK_WORKER_ENABLED !== 'true') {
+    if (!this.configService.getOrThrow<boolean>('AI_FEEDBACK_WORKER_ENABLED')) {
       return;
     }
 
-    const intervalMs = this.getIntervalMs();
-    const batchSize = this.getBatchSize();
-    const batchSizeLabel =
-      batchSize === undefined ? 'default' : String(batchSize);
+    const intervalMs = this.configService.getOrThrow<number>(
+      'AI_FEEDBACK_WORKER_INTERVAL_MS',
+    );
+    const batchSize = this.configService.getOrThrow<number>(
+      'AI_FEEDBACK_WORKER_BATCH_SIZE',
+    );
 
     this.logger.log(
-      `AI Feedback Worker enabled (intervalMs=${intervalMs}, batchSize=${batchSizeLabel})`,
+      `AI Feedback Worker enabled (intervalMs=${intervalMs}, batchSize=${batchSize})`,
     );
 
     this.intervalId = setInterval(() => {
@@ -43,41 +48,14 @@ export class AiFeedbackWorker implements OnModuleInit, OnModuleDestroy {
     }
   }
 
-  private getIntervalMs() {
-    const raw = process.env.AI_FEEDBACK_WORKER_INTERVAL_MS;
-    if (!raw) {
-      return AiFeedbackWorker.DEFAULT_INTERVAL_MS;
-    }
-    const parsed = Number(raw);
-    if (!Number.isFinite(parsed) || parsed <= 0) {
-      return AiFeedbackWorker.DEFAULT_INTERVAL_MS;
-    }
-    return Math.floor(parsed);
-  }
-
-  private getBatchSize() {
-    const raw = process.env.AI_FEEDBACK_WORKER_BATCH_SIZE;
-    if (!raw) {
-      return undefined;
-    }
-    const parsed = Number(raw);
-    if (!Number.isFinite(parsed) || parsed <= 0) {
-      return undefined;
-    }
-    return Math.floor(parsed);
-  }
-
-  private async tick(batchSize?: number) {
+  private async tick(batchSize: number) {
     if (this.isRunning) {
       return;
     }
     this.isRunning = true;
 
     try {
-      const result =
-        batchSize === undefined
-          ? await this.processor.processOnce()
-          : await this.processor.processOnce(batchSize);
+      const result = await this.processor.processOnce(batchSize);
       if (!this.isEmptyTickResult(result)) {
         this.logger.debug(
           `AI Feedback Worker tick result: processed=${result.processed}, succeeded=${result.succeeded}, failed=${result.failed}, dead=${result.dead}`,

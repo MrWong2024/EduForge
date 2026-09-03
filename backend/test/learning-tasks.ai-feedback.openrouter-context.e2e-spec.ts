@@ -149,7 +149,6 @@ describe('LearningTasks AI Feedback OpenRouter Context (e2e)', () => {
   let submissionId = '';
   let previousWorkerEnabled: string | undefined;
   let previousProvider: string | undefined;
-  let previousRealEnabled: string | undefined;
   let previousApiKey: string | undefined;
   let previousBaseUrl: string | undefined;
   let previousDebugEnabled: string | undefined;
@@ -199,8 +198,6 @@ describe('LearningTasks AI Feedback OpenRouter Context (e2e)', () => {
       process.env.AI_FEEDBACK_WORKER_ENABLED = 'false';
       previousProvider = process.env.AI_FEEDBACK_PROVIDER;
       process.env.AI_FEEDBACK_PROVIDER = 'openrouter';
-      previousRealEnabled = process.env.AI_FEEDBACK_REAL_ENABLED;
-      process.env.AI_FEEDBACK_REAL_ENABLED = 'true';
       previousApiKey = process.env.OPENROUTER_API_KEY;
       process.env.OPENROUTER_API_KEY = 'test-key';
       previousBaseUrl = process.env.OPENROUTER_BASE_URL;
@@ -237,9 +234,6 @@ describe('LearningTasks AI Feedback OpenRouter Context (e2e)', () => {
       const configService = app.get(ConfigService);
       expect(configService.get<string>('AI_FEEDBACK_PROVIDER')).toBe(
         'openrouter',
-      );
-      expect(configService.get<string>('AI_FEEDBACK_REAL_ENABLED')).toBe(
-        'true',
       );
       expect(configService.get<string>('OPENROUTER_BASE_URL')).toBe(mock.url);
 
@@ -313,11 +307,6 @@ describe('LearningTasks AI Feedback OpenRouter Context (e2e)', () => {
       delete process.env.AI_FEEDBACK_PROVIDER;
     } else {
       process.env.AI_FEEDBACK_PROVIDER = previousProvider;
-    }
-    if (previousRealEnabled === undefined) {
-      delete process.env.AI_FEEDBACK_REAL_ENABLED;
-    } else {
-      process.env.AI_FEEDBACK_REAL_ENABLED = previousRealEnabled;
     }
     if (previousApiKey === undefined) {
       delete process.env.OPENROUTER_API_KEY;

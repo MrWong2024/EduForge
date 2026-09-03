@@ -256,8 +256,7 @@ export class AiFeedbackProcessor {
       : 'AI_FEEDBACK_PROVIDER: UNKNOWN';
     const shouldDeadImmediately =
       providerCode === AI_FEEDBACK_ERROR_CODES.UNAUTHORIZED ||
-      providerCode === AI_FEEDBACK_ERROR_CODES.MISSING_API_KEY ||
-      providerCode === AI_FEEDBACK_ERROR_CODES.REAL_DISABLED;
+      providerCode === AI_FEEDBACK_ERROR_CODES.MISSING_API_KEY;
     const isRateLimit =
       providerCode === AI_FEEDBACK_ERROR_CODES.RATE_LIMIT_UPSTREAM ||
       providerCode === AI_FEEDBACK_ERROR_CODES.RATE_LIMIT_LOCAL;

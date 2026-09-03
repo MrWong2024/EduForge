@@ -476,7 +476,6 @@ describe('LearningTasks AI Feedback Ops (e2e) - stub worker default loop', () =>
   let previousWorkerEnabled: string | undefined;
   let previousDebugEnabled: string | undefined;
   let previousProvider: string | undefined;
-  let previousRealEnabled: string | undefined;
   let previousIntervalMs: string | undefined;
   let previousBatchSize: string | undefined;
   let previousAutoOnSubmit: string | undefined;
@@ -532,8 +531,6 @@ describe('LearningTasks AI Feedback Ops (e2e) - stub worker default loop', () =>
     process.env.AI_FEEDBACK_DEBUG_ENABLED = 'false';
     previousProvider = process.env.AI_FEEDBACK_PROVIDER;
     process.env.AI_FEEDBACK_PROVIDER = 'stub';
-    previousRealEnabled = process.env.AI_FEEDBACK_REAL_ENABLED;
-    process.env.AI_FEEDBACK_REAL_ENABLED = 'false';
     previousIntervalMs = process.env.AI_FEEDBACK_WORKER_INTERVAL_MS;
     process.env.AI_FEEDBACK_WORKER_INTERVAL_MS = '120';
     previousBatchSize = process.env.AI_FEEDBACK_WORKER_BATCH_SIZE;
@@ -558,6 +555,11 @@ describe('LearningTasks AI Feedback Ops (e2e) - stub worker default loop', () =>
       }),
     );
     app.use(cookieParser());
+    // AppModule validates env at import time; set typed worker overrides before init.
+    const configService = app.get(ConfigService);
+    configService.set('AI_FEEDBACK_WORKER_ENABLED', true);
+    configService.set('AI_FEEDBACK_WORKER_INTERVAL_MS', 120);
+    configService.set('AI_FEEDBACK_WORKER_BATCH_SIZE', 2);
     await app.init();
     app.get(ConfigService).set('LEARNING_TASK_SUBMISSION_COOLDOWN_MS', 0);
 
@@ -628,11 +630,6 @@ describe('LearningTasks AI Feedback Ops (e2e) - stub worker default loop', () =>
       delete process.env.AI_FEEDBACK_PROVIDER;
     } else {
       process.env.AI_FEEDBACK_PROVIDER = previousProvider;
-    }
-    if (previousRealEnabled === undefined) {
-      delete process.env.AI_FEEDBACK_REAL_ENABLED;
-    } else {
-      process.env.AI_FEEDBACK_REAL_ENABLED = previousRealEnabled;
     }
     if (previousIntervalMs === undefined) {
       delete process.env.AI_FEEDBACK_WORKER_INTERVAL_MS;

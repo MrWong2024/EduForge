@@ -34,7 +34,6 @@ export type OpenAiCompatibleProviderConfig = {
   model: string;
   timeoutMs: number;
   maxRetries: number;
-  realEnabled: boolean;
   maxCodeChars: number;
   maxItems: number;
 };
@@ -85,13 +84,7 @@ export abstract class OpenAiCompatibleFeedbackProviderBase implements AiFeedback
   ): Promise<AiFeedbackItem[]> {
     const config = this.getConfig();
 
-    if (!config.realEnabled) {
-      throw this.createProviderError(
-        AI_FEEDBACK_ERROR_CODES.REAL_DISABLED,
-        false,
-      );
-    }
-    if (!config.apiKey) {
+    if (!config.apiKey?.trim()) {
       throw this.createProviderError(
         AI_FEEDBACK_ERROR_CODES.MISSING_API_KEY,
         false,
