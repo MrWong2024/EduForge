@@ -26,7 +26,7 @@ export function createBrowserAcceptanceEnvironment(
   const environment = { ...inherited };
   for (const key of Object.keys(environment)) {
     if (
-      /^(MONGO_|BROWSER_ACCEPTANCE_|EDUFORGE_|MAIL_|SMTP_|AI_FEEDBACK_|OPENROUTER_|BAILIAN_|AUTHZ_|LEARNING_TASK_)/i.test(
+      /^(MONGO_|BROWSER_ACCEPTANCE_|EDUFORGE_|MAIL_|SMTP_|AI_FEEDBACK_|BAILIAN_|AUTHZ_|LEARNING_TASK_)/i.test(
         key,
       ) ||
       /^(NODE_ENV|PORT|BACKEND_PORT|FRONTEND_URL)$/i.test(key)

@@ -10,7 +10,6 @@ type EnvValidationInput = {
   SMTP_SECURE?: string;
   SMTP_USER?: string;
   SMTP_PASS?: string;
-  OPENROUTER_API_KEY?: string;
   BAILIAN_API_KEY?: string;
 } & Record<string, unknown>;
 
@@ -51,9 +50,7 @@ export const envValidationSchema = Joi.object({
     .integer()
     .min(1000)
     .default(5000),
-  AI_FEEDBACK_PROVIDER: Joi.string()
-    .valid('stub', 'openrouter', 'bailian')
-    .default('stub'),
+  AI_FEEDBACK_PROVIDER: Joi.string().valid('stub', 'bailian').default('stub'),
   AI_FEEDBACK_WORKER_ENABLED: Joi.boolean().default(false),
   AI_FEEDBACK_WORKER_INTERVAL_MS: Joi.number().integer().min(1).default(10000),
   AI_FEEDBACK_WORKER_BATCH_SIZE: Joi.number().integer().min(1).default(5),
@@ -83,17 +80,6 @@ export const envValidationSchema = Joi.object({
     .valid('true', 'false')
     .default('false'),
   AUTHZ_ENFORCE_ROLES: Joi.string().valid('true', 'false').default('true'),
-  OPENROUTER_API_KEY: Joi.string().trim().allow(''),
-  OPENROUTER_BASE_URL: Joi.string()
-    .uri({ scheme: [/https?/] })
-    .default('https://openrouter.ai/api/v1'),
-  OPENROUTER_HTTP_REFERER: Joi.string()
-    .uri({ scheme: [/https?/] })
-    .default('https://eduforge.local'),
-  OPENROUTER_X_TITLE: Joi.string().default('EduForge'),
-  OPENROUTER_MODEL: Joi.string().default('openrouter/free'),
-  OPENROUTER_TIMEOUT_MS: Joi.number().integer().min(1000).default(90000),
-  OPENROUTER_MAX_RETRIES: Joi.number().integer().min(0).default(1),
   BAILIAN_API_KEY: Joi.string().trim().allow(''),
   BAILIAN_BASE_URL: Joi.string()
     .uri({ scheme: [/https?/] })
@@ -108,17 +94,9 @@ export const envValidationSchema = Joi.object({
       typeof value.AI_FEEDBACK_PROVIDER === 'string'
         ? value.AI_FEEDBACK_PROVIDER.toLowerCase()
         : 'stub';
-    const hasOpenRouterApiKey =
-      typeof value.OPENROUTER_API_KEY === 'string' &&
-      value.OPENROUTER_API_KEY.trim().length > 0;
     const hasBailianApiKey =
       typeof value.BAILIAN_API_KEY === 'string' &&
       value.BAILIAN_API_KEY.trim().length > 0;
-    if (provider === 'openrouter' && !hasOpenRouterApiKey) {
-      return helpers.error('any.required', {
-        missingKey: 'OPENROUTER_API_KEY',
-      });
-    }
     if (provider === 'bailian' && !hasBailianApiKey) {
       return helpers.error('any.required', { missingKey: 'BAILIAN_API_KEY' });
     }

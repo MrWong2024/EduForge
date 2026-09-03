@@ -42,7 +42,7 @@ tags 词表只在 `feedback-normalizer.ts` 维护，协议层通过 `getFeedback
 ## 4) 严格 JSON 协议 + prompt 资产化 + 解析收敛（可回归）
 
 **Decision**  
-OpenRouter provider 只接受严格 JSON 对象，字段白名单、值域白名单与解析流程固定在 protocol/prompt/provider 三件套。  
+Bailian provider 只接受严格 JSON 对象，字段白名单、值域白名单与解析流程固定在 protocol/prompt/provider 三件套。
 
 **Rationale**  
 外部模型输出天然不稳定，必须通过协议收敛为可验证结构。  
@@ -187,12 +187,12 @@ detail 主视图需要稳定读取 `taskTitle/studentName/language/submittedAt/a
 **Consequences**  
 AI 闭环验收默认应在 `Stub + worker` 下进行。  
 产品级 request 接口与 debug/process-once 的职责边界保持清晰。  
-`Mock OpenRouter + worker` 可作为更贴近 provider 行为的备选模式，但不是默认前提。  
+`Mock Bailian + worker` 可作为更贴近 provider 行为的备选模式，但不是默认前提。
 
 ## 15) 真实 AI feedback 主控前移到 Prompt / 协议层，compactor 保持轻量兜底
 
 **Decision**  
-OpenRouter prompt / 输出协议明确要求：默认 1 条主反馈，仅在问题类别明显独立且不可合并时允许第 2 条；同类问题禁止按行号/位置拆条。  
+Bailian prompt / 输出协议明确要求：默认 1 条主反馈，仅在问题类别明显独立且不可合并时允许第 2 条；同类问题禁止按行号/位置拆条。
 provider 在协议层增加 `items<=2` 的硬闸门；`AiFeedbackProcessor` compactor 继续保留但定位为轻量兜底。  
 
 **Rationale**  
@@ -202,7 +202,7 @@ provider 在协议层增加 `items<=2` 的硬闸门；`AiFeedbackProcessor` comp
 **Consequences**  
 `Feedback` schema 与 API 路径保持不变，兼容现有前端读取。  
 主策略由“模型自由输出 + compactor善后”调整为“prompt/协议先约束 + compactor轻量兜底”。  
-`AI_FEEDBACK_MAX_ITEMS` 仍保留兼容语义，但真实 OpenRouter 输出链路默认目标为 1 条、必要时最多 2 条。  
+`AI_FEEDBACK_MAX_ITEMS` 仍保留兼容语义，但真实 Bailian 输出链路默认目标为 1 条、必要时最多 2 条。
 
 ## 16) EduForge 项目专属事实从旧宪法文档迁移到 handoff
 

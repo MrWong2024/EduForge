@@ -138,20 +138,6 @@ export abstract class OpenAiCompatibleFeedbackProviderBase implements AiFeedback
 
   protected abstract getConfig(): OpenAiCompatibleProviderConfig;
 
-  protected buildExtraHeaders(
-    config: OpenAiCompatibleProviderConfig,
-  ): Record<string, string> {
-    void config;
-    return {};
-  }
-
-  protected buildPayloadExtras(
-    config: OpenAiCompatibleProviderConfig,
-  ): Record<string, unknown> {
-    void config;
-    return {};
-  }
-
   protected readInt(key: string, fallback: number) {
     const raw = this.configService.get<string>(key);
     if (!raw) {
@@ -179,12 +165,10 @@ export abstract class OpenAiCompatibleFeedbackProviderBase implements AiFeedback
         { role: 'user', content: userPrompt },
       ],
       temperature: 0.2,
-      ...this.buildPayloadExtras(config),
     };
     const headers = {
       Authorization: `Bearer ${config.apiKey}`,
       'Content-Type': 'application/json',
-      ...this.buildExtraHeaders(config),
     };
 
     return { endpoint, payload, headers, model: config.model };

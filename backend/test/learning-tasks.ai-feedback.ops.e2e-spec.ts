@@ -22,20 +22,6 @@ const waitMs = (ms: number) =>
   new Promise((resolve) => setTimeout(resolve, ms));
 
 const KEEP_DB = process.env.KEEP_E2E_DB === '1';
-const USE_REAL_AI = process.env.REAL_AI_E2E === '1';
-
-if (USE_REAL_AI) {
-  if (!process.env.OPENROUTER_API_KEY && process.env.OPENROUTER_API_KEY_REAL) {
-    process.env.OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY_REAL;
-  }
-  if (!process.env.OPENROUTER_MODEL) {
-    process.env.OPENROUTER_MODEL = 'openai/gpt-4o-mini';
-  }
-  if (!process.env.OPENROUTER_TIMEOUT_MS) {
-    process.env.OPENROUTER_TIMEOUT_MS = '20000';
-  }
-}
-
 const ensureMongoUri = () => {
   if (!process.env.MONGO_URI) {
     throw new Error(

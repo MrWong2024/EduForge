@@ -83,7 +83,7 @@ AI Feedback：
 - 默认联调模式为 `Stub + worker`，即 `AI_FEEDBACK_PROVIDER=stub` 且 `AI_FEEDBACK_WORKER_ENABLED=true`。
 - `process-once` 只用于 debug/ops，受 `AI_FEEDBACK_DEBUG_ENABLED` 与 RBAC 保护；debug gate 关闭时按 `404` 处理。
 - 自动入队采用 attempt-based 策略：默认首提自动入队，后续提交未手工 request 时可保持 `NOT_REQUESTED`。
-- Provider、OpenRouter/Bailian 真实调用、并发/限流/超时/重试等细节统一看 config-matrix 与 testing-playbook。
+- Provider、Bailian 真实调用、并发/限流/超时/重试等细节统一看 config-matrix 与 testing-playbook。
 
 ## 4) 主链路当前状态摘要
 

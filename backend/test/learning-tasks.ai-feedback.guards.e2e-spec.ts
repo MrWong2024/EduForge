@@ -7,7 +7,7 @@ import cookieParser from 'cookie-parser';
 import http from 'http';
 import request from 'supertest';
 import { App } from 'supertest/types';
-import { AppModule } from '../src/app.module';
+import type * as AppModuleExports from '../src/app.module';
 import { User } from '../src/modules/users/schemas/user.schema';
 import { Session } from '../src/modules/auth/schemas/session.schema';
 import { Course } from '../src/modules/courses/schemas/course.schema';
@@ -26,20 +26,6 @@ import {
 jest.setTimeout(30000);
 
 const KEEP_DB = process.env.KEEP_E2E_DB === '1';
-const USE_REAL_AI = process.env.REAL_AI_E2E === '1';
-
-if (USE_REAL_AI) {
-  if (!process.env.OPENROUTER_API_KEY && process.env.OPENROUTER_API_KEY_REAL) {
-    process.env.OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY_REAL;
-  }
-  if (!process.env.OPENROUTER_MODEL) {
-    process.env.OPENROUTER_MODEL = 'openai/gpt-4o-mini';
-  }
-  if (!process.env.OPENROUTER_TIMEOUT_MS) {
-    process.env.OPENROUTER_TIMEOUT_MS = '20000';
-  }
-}
-
 const ensureMongoUri = () => {
   if (!process.env.MONGO_URI) {
     throw new Error(
@@ -89,12 +75,12 @@ const buildMockItems = (count: number) =>
     tags: ['readability'],
   }));
 
-const startMockOpenRouter = (itemsCount = 25, delayMs = 50) =>
+const startMockBailian = (itemsCount = 25, delayMs = 50) =>
   new Promise<{
     server: http.Server;
     url: string;
     getMaxInflightObserved: () => number;
-  }>((resolve) => {
+  }>((resolve, reject) => {
     let inflight = 0;
     let maxInflightObserved = 0;
     const server = http.createServer((req, res) => {
@@ -128,14 +114,22 @@ const startMockOpenRouter = (itemsCount = 25, delayMs = 50) =>
         }, delayMs);
       });
     });
-    server.listen(0, () => {
+    server.requestTimeout = 5000;
+    server.headersTimeout = 5000;
+    const startupTimeout = setTimeout(() => {
+      server.close();
+      reject(new Error('Mock Bailian startup timed out'));
+    }, 5000);
+    server.once('error', (error) => {
+      clearTimeout(startupTimeout);
+      reject(error);
+    });
+    server.listen(0, '127.0.0.1', () => {
+      clearTimeout(startupTimeout);
       const address = server.address();
       if (!address || typeof address === 'string') {
-        resolve({
-          server,
-          url: 'http://127.0.0.1:0',
-          getMaxInflightObserved: () => maxInflightObserved,
-        });
+        server.close();
+        reject(new Error('Mock Bailian address unavailable'));
         return;
       }
       resolve({
@@ -162,7 +156,7 @@ describe('LearningTasks AI Feedback Guards (e2e)', () => {
   let studentAgent: ReturnType<typeof request.agent>;
   let mockServer: http.Server;
   let mockBaseUrl = '';
-  let getMaxInflightObserved: (() => number) | undefined;
+  let getMaxInflightObserved: () => number;
 
   let courseId = '';
   let classroomId = '';
@@ -178,14 +172,14 @@ describe('LearningTasks AI Feedback Guards (e2e)', () => {
   let previousMaxPerMinute: string | undefined;
   let previousAutoOnSubmit: string | undefined;
   let previousFirstAttemptOnly: string | undefined;
-  let previousOpenrouterModel: string | undefined;
-  let previousOpenrouterTimeout: string | undefined;
+  let previousCooldown: string | undefined;
 
-  const teacherEmail = `teacher.guard.${Date.now()}@example.com`;
-  const studentEmail = `student.guard.${Date.now()}@example.com`;
+  const fixtureNamespace = 'ai-bailian-guards-' + Date.now();
+  const teacherEmail = 'teacher.' + fixtureNamespace + '@example.invalid';
+  const studentEmail = 'student.' + fixtureNamespace + '@example.invalid';
   const teacherPassword = 'TeacherPass123!';
   const studentPassword = 'StudentPass123!';
-  const describeDefaultMaxPerMinute = USE_REAL_AI ? '10' : '1000';
+  const describeDefaultMaxPerMinute = '600';
   const submissionIds: string[] = [];
   const waitMsLocal = (ms: number) =>
     new Promise((resolve) => setTimeout(resolve, ms));
@@ -232,25 +226,21 @@ describe('LearningTasks AI Feedback Guards (e2e)', () => {
   };
 
   beforeAll(async () => {
-    ensureMongoUri();
-
-    if (!USE_REAL_AI) {
-      const mock = await startMockOpenRouter(25, 80);
-      mockServer = mock.server;
-      mockBaseUrl = mock.url;
-      getMaxInflightObserved = mock.getMaxInflightObserved;
-    }
+    const mock = await startMockBailian(25, 80);
+    mockServer = mock.server;
+    mockBaseUrl = mock.url;
+    getMaxInflightObserved = mock.getMaxInflightObserved;
 
     previousWorkerEnabled = process.env.AI_FEEDBACK_WORKER_ENABLED;
     process.env.AI_FEEDBACK_WORKER_ENABLED = 'false';
     previousDebugEnabled = process.env.AI_FEEDBACK_DEBUG_ENABLED;
     process.env.AI_FEEDBACK_DEBUG_ENABLED = 'true';
     previousProvider = process.env.AI_FEEDBACK_PROVIDER;
-    process.env.AI_FEEDBACK_PROVIDER = 'openrouter';
-    previousApiKey = process.env.OPENROUTER_API_KEY;
-    previousBaseUrl = process.env.OPENROUTER_BASE_URL;
+    process.env.AI_FEEDBACK_PROVIDER = 'bailian';
+    previousApiKey = process.env.BAILIAN_API_KEY;
+    previousBaseUrl = process.env.BAILIAN_BASE_URL;
     previousMaxItems = process.env.AI_FEEDBACK_MAX_ITEMS;
-    process.env.AI_FEEDBACK_MAX_ITEMS = '20';
+    process.env.AI_FEEDBACK_MAX_ITEMS = '10';
     previousMaxConcurrency = process.env.AI_FEEDBACK_MAX_CONCURRENCY;
     process.env.AI_FEEDBACK_MAX_CONCURRENCY = '2';
     previousMaxPerMinute =
@@ -262,24 +252,17 @@ describe('LearningTasks AI Feedback Guards (e2e)', () => {
     previousFirstAttemptOnly =
       process.env.AI_FEEDBACK_AUTO_ON_FIRST_ATTEMPT_ONLY;
     process.env.AI_FEEDBACK_AUTO_ON_FIRST_ATTEMPT_ONLY = 'false';
-    previousOpenrouterModel = process.env.OPENROUTER_MODEL;
-    previousOpenrouterTimeout = process.env.OPENROUTER_TIMEOUT_MS;
+    process.env.BAILIAN_API_KEY = 'test-key';
+    process.env.BAILIAN_BASE_URL = mockBaseUrl;
+    previousCooldown = process.env.LEARNING_TASK_SUBMISSION_COOLDOWN_MS;
+    process.env.LEARNING_TASK_SUBMISSION_COOLDOWN_MS = '0';
 
-    if (USE_REAL_AI) {
-      const realKey = process.env.OPENROUTER_API_KEY_REAL;
-      if (!process.env.OPENROUTER_API_KEY && !realKey) {
-        throw new Error(
-          'OPENROUTER_API_KEY or OPENROUTER_API_KEY_REAL is required when REAL_AI_E2E=1.',
-        );
-      }
-      if (!process.env.OPENROUTER_API_KEY && realKey) {
-        process.env.OPENROUTER_API_KEY = realKey;
-      }
-      process.env.OPENROUTER_BASE_URL = 'https://openrouter.ai/api/v1';
-    } else {
-      process.env.OPENROUTER_API_KEY = 'test-key';
-      process.env.OPENROUTER_BASE_URL = mockBaseUrl;
-    }
+    // Validate this suite's mock configuration before creating the application.
+    const appModuleExports =
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      require('../src/app.module') as typeof AppModuleExports;
+    const { AppModule } = appModuleExports;
+    ensureMongoUri();
 
     const moduleFixture: TestingModule = await Test.createTestingModule({
       imports: [AppModule],
@@ -297,8 +280,12 @@ describe('LearningTasks AI Feedback Guards (e2e)', () => {
     app.use(cookieParser());
     await app.init();
 
-    teacherAgent = request.agent(app.getHttpServer());
-    studentAgent = request.agent(app.getHttpServer());
+    teacherAgent = request
+      .agent(app.getHttpServer())
+      .timeout({ response: 5000, deadline: 10000 });
+    studentAgent = request
+      .agent(app.getHttpServer())
+      .timeout({ response: 5000, deadline: 10000 });
 
     userModel = app.get(getModelToken(User.name));
     sessionModel = app.get(getModelToken(Session.name));
@@ -310,6 +297,24 @@ describe('LearningTasks AI Feedback Guards (e2e)', () => {
     feedbackModel = app.get(getModelToken(Feedback.name));
     aiFeedbackJobModel = app.get(getModelToken(AiFeedbackJob.name));
     aiFeedbackProcessor = app.get(AiFeedbackProcessor);
+    expect(process.env.EDUFORGE_DATABASE_PURPOSE).toBe('standard_test');
+    expect(userModel.db.name).toBe('eduforge_test');
+    userModel.db.set('maxTimeMS', 10000);
+    expect(
+      await aiFeedbackJobModel.countDocuments({
+        status: {
+          $in: [AiFeedbackJobStatus.Pending, AiFeedbackJobStatus.Failed],
+        },
+      }),
+    ).toBe(0);
+    console.info(
+      'Bailian guards E2E: standard_test / ' +
+        userModel.db.name +
+        '; namespace=' +
+        fixtureNamespace +
+        '; mock=' +
+        mockBaseUrl,
+    );
 
     const [teacherHash, studentHash] = await Promise.all([
       bcrypt.hash(teacherPassword, 10),
@@ -386,7 +391,7 @@ describe('LearningTasks AI Feedback Guards (e2e)', () => {
   afterEach(() => {
     process.env.AI_FEEDBACK_MAX_PER_CLASSROOMTASK_PER_MINUTE =
       describeDefaultMaxPerMinute;
-    applyMaxPerMinuteFromEnv();
+    if (app) applyMaxPerMinuteFromEnv();
   });
 
   afterAll(async () => {
@@ -406,14 +411,14 @@ describe('LearningTasks AI Feedback Guards (e2e)', () => {
       process.env.AI_FEEDBACK_PROVIDER = previousProvider;
     }
     if (previousApiKey === undefined) {
-      delete process.env.OPENROUTER_API_KEY;
+      delete process.env.BAILIAN_API_KEY;
     } else {
-      process.env.OPENROUTER_API_KEY = previousApiKey;
+      process.env.BAILIAN_API_KEY = previousApiKey;
     }
     if (previousBaseUrl === undefined) {
-      delete process.env.OPENROUTER_BASE_URL;
+      delete process.env.BAILIAN_BASE_URL;
     } else {
-      process.env.OPENROUTER_BASE_URL = previousBaseUrl;
+      process.env.BAILIAN_BASE_URL = previousBaseUrl;
     }
     if (previousMaxItems === undefined) {
       delete process.env.AI_FEEDBACK_MAX_ITEMS;
@@ -442,60 +447,102 @@ describe('LearningTasks AI Feedback Guards (e2e)', () => {
       process.env.AI_FEEDBACK_AUTO_ON_FIRST_ATTEMPT_ONLY =
         previousFirstAttemptOnly;
     }
-    if (previousOpenrouterModel === undefined) {
-      delete process.env.OPENROUTER_MODEL;
+    if (previousCooldown === undefined) {
+      delete process.env.LEARNING_TASK_SUBMISSION_COOLDOWN_MS;
     } else {
-      process.env.OPENROUTER_MODEL = previousOpenrouterModel;
-    }
-    if (previousOpenrouterTimeout === undefined) {
-      delete process.env.OPENROUTER_TIMEOUT_MS;
-    } else {
-      process.env.OPENROUTER_TIMEOUT_MS = previousOpenrouterTimeout;
+      process.env.LEARNING_TASK_SUBMISSION_COOLDOWN_MS = previousCooldown;
     }
 
-    if (!KEEP_DB) {
-      const submissionObjectIds = submissionIds.map(
-        (id) => new Types.ObjectId(id),
-      );
-      if (submissionObjectIds.length > 0) {
-        await feedbackModel.deleteMany({
-          submissionId: { $in: submissionObjectIds },
-        });
-        await aiFeedbackJobModel.deleteMany({
-          submissionId: { $in: submissionObjectIds },
-        });
-        await submissionModel.deleteMany({ _id: { $in: submissionObjectIds } });
+    try {
+      if (!KEEP_DB && userModel) {
+        const submissionObjectIds = submissionIds.map(
+          (id) => new Types.ObjectId(id),
+        );
+        if (submissionObjectIds.length > 0) {
+          await feedbackModel.deleteMany({
+            submissionId: { $in: submissionObjectIds },
+          });
+          await aiFeedbackJobModel.deleteMany({
+            submissionId: { $in: submissionObjectIds },
+          });
+          await submissionModel.deleteMany({
+            _id: { $in: submissionObjectIds },
+          });
+        }
+        if (classroomTaskId) {
+          await classroomTaskModel.deleteOne({
+            _id: new Types.ObjectId(classroomTaskId),
+          });
+        }
+        if (taskId) {
+          await taskModel.deleteOne({ _id: taskId });
+        }
+        if (classroomId) {
+          await classroomModel.deleteOne({
+            _id: new Types.ObjectId(classroomId),
+          });
+        }
+        if (courseId) {
+          await courseModel.deleteOne({ _id: new Types.ObjectId(courseId) });
+        }
+        const users = await userModel
+          .find({ email: { $in: [teacherEmail, studentEmail] } })
+          .select('_id')
+          .lean<Array<{ _id: Types.ObjectId }>>()
+          .exec();
+        const userIds = users.map((user) => user._id);
+        if (userIds.length > 0) {
+          await sessionModel.deleteMany({ userId: { $in: userIds } });
+          await userModel.deleteMany({ _id: { $in: userIds } });
+        }
+        expect(
+          await feedbackModel.countDocuments({
+            submissionId: { $in: submissionObjectIds },
+          }),
+        ).toBe(0);
+        expect(
+          await aiFeedbackJobModel.countDocuments({
+            submissionId: { $in: submissionObjectIds },
+          }),
+        ).toBe(0);
+        expect(
+          await submissionModel.countDocuments({
+            _id: { $in: submissionObjectIds },
+          }),
+        ).toBe(0);
+        expect(
+          await userModel.countDocuments({
+            email: { $in: [teacherEmail, studentEmail] },
+          }),
+        ).toBe(0);
+        expect(
+          await sessionModel.countDocuments({ userId: { $in: userIds } }),
+        ).toBe(0);
+        if (taskId)
+          expect(await taskModel.countDocuments({ _id: taskId })).toBe(0);
+        if (courseId)
+          expect(await courseModel.countDocuments({ _id: courseId })).toBe(0);
+        if (classroomId)
+          expect(
+            await classroomModel.countDocuments({ _id: classroomId }),
+          ).toBe(0);
+        if (classroomTaskId)
+          expect(
+            await classroomTaskModel.countDocuments({ _id: classroomTaskId }),
+          ).toBe(0);
+        console.info('Fixture cleanup verified: ' + fixtureNamespace);
       }
-      if (classroomTaskId) {
-        await classroomTaskModel.deleteOne({
-          _id: new Types.ObjectId(classroomTaskId),
-        });
+    } finally {
+      try {
+        if (app) await app.close();
+      } finally {
+        if (mockServer?.listening) {
+          mockServer.closeAllConnections();
+          await new Promise<void>((resolve) =>
+            mockServer.close(() => resolve()),
+          );
+        }
       }
-      if (taskId) {
-        await taskModel.deleteOne({ _id: taskId });
-      }
-      if (classroomId) {
-        await classroomModel.deleteOne({
-          _id: new Types.ObjectId(classroomId),
-        });
-      }
-      if (courseId) {
-        await courseModel.deleteOne({ _id: new Types.ObjectId(courseId) });
-      }
-      const users = await userModel
-        .find({ email: { $in: [teacherEmail, studentEmail] } })
-        .select('_id')
-        .lean()
-        .exec();
-      const userIds = users.map((user) => user._id);
-      if (userIds.length > 0) {
-        await sessionModel.deleteMany({ userId: { $in: userIds } });
-        await userModel.deleteMany({ _id: { $in: userIds } });
-      }
-    }
-    await app.close();
-    if (!USE_REAL_AI && mockServer) {
-      await new Promise<void>((resolve) => mockServer.close(() => resolve()));
     }
   });
 
@@ -564,119 +611,110 @@ describe('LearningTasks AI Feedback Guards (e2e)', () => {
     });
     expect(feedbackCountB).toBeLessThanOrEqual(2);
 
-    if (!USE_REAL_AI && getMaxInflightObserved) {
-      const maxConcurrency = Number(
-        process.env.AI_FEEDBACK_MAX_CONCURRENCY ?? 2,
-      );
-      expect(getMaxInflightObserved()).toBeLessThanOrEqual(maxConcurrency);
-    }
+    expect(getMaxInflightObserved()).toBeGreaterThan(0);
+    expect(getMaxInflightObserved()).toBeLessThanOrEqual(2);
   });
 
-  const itRateLimit = USE_REAL_AI ? it.skip : it;
-  itRateLimit(
-    'local rate limit marks second job as failed with notBefore',
-    async () => {
-      process.env.AI_FEEDBACK_MAX_PER_CLASSROOMTASK_PER_MINUTE = '1';
-      applyMaxPerMinuteFromEnv();
-      resetGuardsState();
-      try {
-        const createSubmission = async (label: string) => {
-          const created = await studentAgent
-            .post(
-              `/api/classrooms/${classroomId}/tasks/${classroomTaskId}/submissions`,
-            )
-            .send({
-              content: {
-                codeText: `console.log("${label}")`,
-                language: 'typescript',
-              },
-            })
-            .expect(201);
-          const createdId = (created.body as CreatedSubmissionResponse).id;
-          submissionIds.push(createdId);
-          return createdId;
-        };
-
-        const [submissionAId, submissionBId] = await Promise.all([
-          createSubmission('A'),
-          createSubmission('B'),
-        ]);
-        await studentAgent
+  it('local rate limit marks second job as failed with notBefore', async () => {
+    process.env.AI_FEEDBACK_MAX_PER_CLASSROOMTASK_PER_MINUTE = '1';
+    applyMaxPerMinuteFromEnv();
+    resetGuardsState();
+    try {
+      const createSubmission = async (label: string) => {
+        const created = await studentAgent
           .post(
-            `/api/learning-tasks/submissions/${submissionAId}/ai-feedback/request`,
+            `/api/classrooms/${classroomId}/tasks/${classroomTaskId}/submissions`,
           )
-          .send({})
-          .expect(200);
-        await studentAgent
-          .post(
-            `/api/learning-tasks/submissions/${submissionBId}/ai-feedback/request`,
-          )
-          .send({})
-          .expect(200);
+          .send({
+            content: {
+              codeText: `console.log("${label}")`,
+              language: 'typescript',
+            },
+          })
+          .expect(201);
+        const createdId = (created.body as CreatedSubmissionResponse).id;
+        submissionIds.push(createdId);
+        return createdId;
+      };
 
-        const processOnceFirst = await aiFeedbackProcessor.processOnce(1);
+      const [submissionAId, submissionBId] = await Promise.all([
+        createSubmission('A'),
+        createSubmission('B'),
+      ]);
+      await studentAgent
+        .post(
+          `/api/learning-tasks/submissions/${submissionAId}/ai-feedback/request`,
+        )
+        .send({})
+        .expect(200);
+      await studentAgent
+        .post(
+          `/api/learning-tasks/submissions/${submissionBId}/ai-feedback/request`,
+        )
+        .send({})
+        .expect(200);
 
-        const firstBody = processOnceFirst as ProcessOnceResponse;
-        expect(firstBody.processed).toBe(1);
+      const processOnceFirst = await aiFeedbackProcessor.processOnce(1);
 
-        const findJobWithRetry = async (
-          id: string,
-          retries = 3,
-        ): Promise<AiFeedbackJob | null> => {
-          const submissionObjectId = new Types.ObjectId(id);
-          let job = await aiFeedbackJobModel.findOne({
+      const firstBody = processOnceFirst as ProcessOnceResponse;
+      expect(firstBody.processed).toBe(1);
+
+      const findJobWithRetry = async (
+        id: string,
+        retries = 3,
+      ): Promise<AiFeedbackJob | null> => {
+        const submissionObjectId = new Types.ObjectId(id);
+        let job = await aiFeedbackJobModel.findOne({
+          submissionId: submissionObjectId,
+        });
+        let remaining = retries;
+        while (!job && remaining > 0) {
+          await waitMsLocal(50);
+          job = await aiFeedbackJobModel.findOne({
             submissionId: submissionObjectId,
           });
-          let remaining = retries;
-          while (!job && remaining > 0) {
-            await waitMsLocal(50);
-            job = await aiFeedbackJobModel.findOne({
-              submissionId: submissionObjectId,
-            });
-            remaining -= 1;
-          }
-          return job ?? null;
-        };
-
-        const [jobAAfterFirst, jobBAfterFirst] = await Promise.all([
-          findJobWithRetry(submissionAId),
-          findJobWithRetry(submissionBId),
-        ]);
-        const succeededAfterFirst = [jobAAfterFirst, jobBAfterFirst].filter(
-          (job) => job?.status === AiFeedbackJobStatus.Succeeded,
-        );
-        const pendingAfterFirst = [jobAAfterFirst, jobBAfterFirst].filter(
-          (job) => job?.status === AiFeedbackJobStatus.Pending,
-        );
-        expect(succeededAfterFirst.length).toBe(1);
-        expect(pendingAfterFirst.length).toBe(1);
-
-        await aiFeedbackProcessor.processOnce(1);
-
-        const nowAfterSecond = Date.now();
-        const pendingSubmissionId =
-          jobAAfterFirst?.status === AiFeedbackJobStatus.Pending
-            ? submissionAId
-            : submissionBId;
-        let failedJob = await findJobWithRetry(pendingSubmissionId);
-        if (failedJob?.status !== AiFeedbackJobStatus.Failed) {
-          await waitMsLocal(50);
-          failedJob = await findJobWithRetry(pendingSubmissionId, 1);
+          remaining -= 1;
         }
+        return job ?? null;
+      };
 
-        expect(failedJob?.status).toBe('FAILED');
-        expect(failedJob?.lastError ?? '').toContain('RATE_LIMIT_LOCAL');
-        expect(failedJob?.notBefore).toBeTruthy();
-        expect(
-          failedJob?.notBefore &&
-            failedJob.notBefore.getTime() > nowAfterSecond,
-        ).toBe(true);
-        expect(failedJob?.status).not.toBe('RUNNING');
-      } finally {
-        process.env.AI_FEEDBACK_MAX_PER_CLASSROOMTASK_PER_MINUTE =
-          describeDefaultMaxPerMinute;
-        applyMaxPerMinuteFromEnv();
+      const [jobAAfterFirst, jobBAfterFirst] = await Promise.all([
+        findJobWithRetry(submissionAId),
+        findJobWithRetry(submissionBId),
+      ]);
+      const succeededAfterFirst = [jobAAfterFirst, jobBAfterFirst].filter(
+        (job) => job?.status === AiFeedbackJobStatus.Succeeded,
+      );
+      const pendingAfterFirst = [jobAAfterFirst, jobBAfterFirst].filter(
+        (job) => job?.status === AiFeedbackJobStatus.Pending,
+      );
+      expect(succeededAfterFirst.length).toBe(1);
+      expect(pendingAfterFirst.length).toBe(1);
+
+      await aiFeedbackProcessor.processOnce(1);
+
+      const nowAfterSecond = Date.now();
+      const pendingSubmissionId =
+        jobAAfterFirst?.status === AiFeedbackJobStatus.Pending
+          ? submissionAId
+          : submissionBId;
+      let failedJob = await findJobWithRetry(pendingSubmissionId);
+      if (failedJob?.status !== AiFeedbackJobStatus.Failed) {
+        await waitMsLocal(50);
+        failedJob = await findJobWithRetry(pendingSubmissionId, 1);
       }
-    },
-  );
+
+      expect(failedJob?.status).toBe('FAILED');
+      expect(failedJob?.lastError ?? '').toContain('RATE_LIMIT_LOCAL');
+      expect(failedJob?.notBefore).toBeTruthy();
+      expect(
+        failedJob?.notBefore && failedJob.notBefore.getTime() > nowAfterSecond,
+      ).toBe(true);
+      expect(failedJob?.status).not.toBe('RUNNING');
+    } finally {
+      process.env.AI_FEEDBACK_MAX_PER_CLASSROOMTASK_PER_MINUTE =
+        describeDefaultMaxPerMinute;
+      applyMaxPerMinuteFromEnv();
+    }
+  });
 });

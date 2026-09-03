@@ -670,20 +670,20 @@
 
 ## Provider Card B
 
-- Service: `backend/src/modules/learning-tasks/ai-feedback/providers/real/openrouter-feedback.provider.ts`
-- Domain: `AiFeedback Provider`
-- Actions: `build-request`, `call-openrouter`, `parse-validate-json`, `map-provider-error`
+- Service: `backend/src/modules/learning-tasks/ai-feedback/providers/real/openai-compatible-feedback-provider.base.ts`
+- Domain: `AiFeedback Provider Base`
+- Actions: `build-request`, `call-compatible-api`, `parse-validate-json`, `map-provider-error`
 - I/O Shape:
-  - In: `AiSubmissionAnalysisContext`, `OPENROUTER_*`, `AI_FEEDBACK_*`
+  - In: `AiSubmissionAnalysisContext`, `OpenAiCompatibleProviderConfig`（由 Bailian 提供）
   - Out: `AiFeedbackItem[]`
 - Key Methods:
-  - `analyzeSubmission(context: AiSubmissionAnalysisContext): Promise<AiFeedbackItem[]> — called by processor when provider=openrouter`
+  - `analyzeSubmission(context: AiSubmissionAnalysisContext): Promise<AiFeedbackItem[]> — inherited by BailianFeedbackProvider`
 - AuthZ Boundary: `internal-only`
 - Metrics/Isolation: 日志带 `submissionId/classroomTaskId/provider/model/duration/retried`
 - Consistency/Constraints: 严格 JSON 协议；字段白名单；最多 `maxItems`；指数退避重试；system prompt 默认要求 `message/suggestion` 使用简体中文并保持代码元素原文；prompt 已加入“主问题导向综合反馈”约束（默认 1 条，必要时第 2 条；同类问题不按位置拆条；阻断运行问题优先；存在 ERROR/WARN 时不输出表扬型 INFO 噪音）；AI feedback prompt 现支持对 `codeText` 做语言无关的多文件文本边界识别，但默认仍按普通单文件分析，不要求无边界标记的提交补 `FILE` 标记；推荐标准边界为 `===== FILE: relative/path/FileName.ext =====`，并容错识别大小写不敏感关键词、仅文件名、关键词不规范及明显边界样式的弱边界；该能力仅由 prompt 引导模型完成，不做后端正则拆分、不新增 `codeFiles` 字段；只有强证据表明疑似多文件且边界不清时才保守提示，且 `CodeTruncated=true` 时不假定最后一个文件块完整；user prompt 纳入 `taskTitle/taskDescription/taskRubric/codeText/language/attemptNo/aiUsageDeclaration` 并要求结合题目要求分析
 - Deps/Side Effects: `ConfigService`, `fetch` 外部网络调用、prompt/protocol/normalizer
 - Performance Notes: 单请求超时控制 + 有界重试；解析失败直接终止
-- SoT: `backend/src/modules/learning-tasks/ai-feedback/providers/real/openrouter-feedback.provider.ts`; `backend/src/modules/learning-tasks/ai-feedback/protocol/ai-feedback-json.protocol.ts`; `backend/src/modules/learning-tasks/ai-feedback/prompts/ai-feedback.prompt.ts`
+- SoT: `backend/src/modules/learning-tasks/ai-feedback/providers/real/openai-compatible-feedback-provider.base.ts`; `backend/src/modules/learning-tasks/ai-feedback/protocol/ai-feedback-json.protocol.ts`; `backend/src/modules/learning-tasks/ai-feedback/prompts/ai-feedback.prompt.ts`
 - Failure Modes:
   - 无 API key -> `MISSING_API_KEY`（不可重试）
   - HTTP 429/5xx/超时 -> 可重试错误
@@ -720,7 +720,7 @@
   - `analyzeSubmission(context: AiSubmissionAnalysisContext): Promise<AiFeedbackItem[]> — called by processor when provider=bailian`
 - AuthZ Boundary: `internal-only`
 - Metrics/Isolation: 日志带 `submissionId/classroomTaskId/provider=bailian/model/duration/retried`
-- Consistency/Constraints: 走阿里云百炼 OpenAI Chat Completions 兼容接口；默认 `BAILIAN_BASE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1`、`BAILIAN_MODEL=qwen-plus`（生产可显式指定 `qwen3.6-plus`）；复用 OpenAI-compatible 基类中的 prompt、严格 JSON 协议、字段白名单、`<=2` 协议闸门、指数退避、超时与错误映射；不发送 OpenRouter 专属 `HTTP-Referer/X-Title` 请求头
+- Consistency/Constraints: 走阿里云百炼 OpenAI Chat Completions 兼容接口；默认 `BAILIAN_BASE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1`、`BAILIAN_MODEL=qwen-plus`（生产可显式指定 `qwen3.6-plus`）；复用 OpenAI-compatible 基类中的 prompt、严格 JSON 协议、字段白名单、`<=2` 协议闸门、指数退避、超时与错误映射
 - Deps/Side Effects: `ConfigService`, `fetch` 外部网络调用、prompt/protocol/normalizer
 - Performance Notes: 单请求超时控制 + 有界重试；解析失败直接终止
 - SoT: `backend/src/modules/learning-tasks/ai-feedback/providers/real/bailian-feedback.provider.ts`; `backend/src/modules/learning-tasks/ai-feedback/providers/real/openai-compatible-feedback-provider.base.ts`; `backend/src/modules/learning-tasks/ai-feedback/protocol/ai-feedback-json.protocol.ts`; `backend/src/modules/learning-tasks/ai-feedback/prompts/ai-feedback.prompt.ts`

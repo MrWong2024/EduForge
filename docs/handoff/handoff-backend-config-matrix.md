@@ -57,8 +57,8 @@ Browser backend 配置与唯一启动入口：
 
 ## 3) 运行模式矩阵（最小可运维闭环）
 
-- `AI_FEEDBACK_PROVIDER` 决定 Provider：`stub` 不触网、无需真实 API Key；`bailian` / `openrouter` 对应真实 Provider。
-- 真实 AI 最小配置：`AI_FEEDBACK_PROVIDER=bailian` + 非空 `BAILIAN_API_KEY`；或 `AI_FEEDBACK_PROVIDER=openrouter` + 非空 `OPENROUTER_API_KEY`。
+- `AI_FEEDBACK_PROVIDER` 决定 Provider：`stub` 不触网、无需真实 API Key；`bailian` 对应真实百炼 Provider。
+- 真实 AI 最小配置：`AI_FEEDBACK_PROVIDER=bailian` + 非空 `BAILIAN_API_KEY`。
 - `AI_FEEDBACK_WORKER_ENABLED` 只控制后台常驻 Worker 自动消费 AiFeedbackJob，不是“是否开启 AI”的总开关；`false` 不禁止 Provider 或显式 `process-once`。后台自动消费需另外设为 `true`。
 - test example 显式保持 `provider=stub` / worker disabled；Browser acceptance example 说明 launcher 固定使用同样配置，仅读取用途与 APP/ADMIN 连接声明。
 
@@ -66,10 +66,8 @@ Browser backend 配置与唯一启动入口：
 | -------------------------- | -------------- | ----------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------- |
 | Stub                       | `worker`       | 本地开发/不触网，后台持续消费 | `MONGO_URI`、`AI_FEEDBACK_PROVIDER=stub`、`AI_FEEDBACK_WORKER_ENABLED=true`                                                                                    | `AI_FEEDBACK_WORKER_INTERVAL_MS=10000`、`AI_FEEDBACK_WORKER_BATCH_SIZE=5`（Joi 正式默认）                                                                                                             | 默认不触发外部 AI。                                                                                 |
 | Stub                       | `process-once` | 本地排障，一次性处理一批      | `MONGO_URI`、`AI_FEEDBACK_PROVIDER=stub`、`AI_FEEDBACK_DEBUG_ENABLED=true`                                                                                     | `AI_FEEDBACK_WORKER_ENABLED=false`                                                                                                                                                                               | 调 `POST /api/learning-tasks/ai-feedback/jobs/process-once`；debug 关闭时返回 `404`（不是 `403`）。 |
-| Mock OpenRouter（E2E）     | `worker`       | CI/联调仿真 real provider     | `MONGO_URI`、`AI_FEEDBACK_PROVIDER=openrouter`、`OPENROUTER_API_KEY=test-key`、`OPENROUTER_BASE_URL=http://127.0.0.1:<port>`、`AI_FEEDBACK_WORKER_ENABLED=true` | `OPENROUTER_MODEL=openrouter/free`、`OPENROUTER_TIMEOUT_MS=90000`、`OPENROUTER_MAX_RETRIES=1`、worker 两项同上                                                                                                   | 可配本地 mock server。                                                                              |
-| Mock OpenRouter（E2E）     | `process-once` | CI/联调排障，一次性处理       | `MONGO_URI`、`AI_FEEDBACK_PROVIDER=openrouter`、`OPENROUTER_API_KEY=test-key`、`OPENROUTER_BASE_URL=http://127.0.0.1:<port>`、`AI_FEEDBACK_DEBUG_ENABLED=true`  | 同 mock openrouter 默认项                                                                                                                                                                                        | 调 `POST /api/learning-tasks/ai-feedback/jobs/process-once`；debug 关闭时返回 `404`。               |
-| Real OpenRouter            | `worker`       | 真实上游持续消费              | `MONGO_URI`、`AI_FEEDBACK_PROVIDER=openrouter`、`OPENROUTER_API_KEY=<real>`、`AI_FEEDBACK_WORKER_ENABLED=true`                                                  | `OPENROUTER_BASE_URL=https://openrouter.ai/api/v1`、worker 两项同上                                                                                                                                              | 缺 key 会在 env 校验阶段 fail-fast。                                                                |
-| Real OpenRouter            | `process-once` | 真实上游手工批处理排障        | `MONGO_URI`、`AI_FEEDBACK_PROVIDER=openrouter`、`OPENROUTER_API_KEY=<real>`、`AI_FEEDBACK_DEBUG_ENABLED=true`                                                   | `OPENROUTER_BASE_URL=https://openrouter.ai/api/v1`                                                                                                                                                               | 调 `POST /api/learning-tasks/ai-feedback/jobs/process-once`；debug 关闭时返回 `404`。               |
+| Mock Bailian（E2E）     | `worker`       | CI/联调仿真 real provider     | `MONGO_URI`、`AI_FEEDBACK_PROVIDER=bailian`、`BAILIAN_API_KEY=test-key`、`BAILIAN_BASE_URL=http://127.0.0.1:<port>`、`AI_FEEDBACK_WORKER_ENABLED=true` | `BAILIAN_MODEL=qwen-plus`、`BAILIAN_TIMEOUT_MS=90000`、`BAILIAN_MAX_RETRIES=1`、worker 两项同上                                                                                                   | 可配本地 mock server。                                                                              |
+| Mock Bailian（E2E）     | `process-once` | CI/联调排障，一次性处理       | `MONGO_URI`、`AI_FEEDBACK_PROVIDER=bailian`、`BAILIAN_API_KEY=test-key`、`BAILIAN_BASE_URL=http://127.0.0.1:<port>`、`AI_FEEDBACK_DEBUG_ENABLED=true`  | 同 mock Bailian 默认项                                                                                                                                                                                        | 调 `POST /api/learning-tasks/ai-feedback/jobs/process-once`；debug 关闭时返回 `404`。               |
 | Real Bailian（阿里云百炼） | `worker`       | 真实上游持续消费              | `MONGO_URI`、`AI_FEEDBACK_PROVIDER=bailian`、`BAILIAN_API_KEY=<real>`、`AI_FEEDBACK_WORKER_ENABLED=true`                                                        | `BAILIAN_BASE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1`、`BAILIAN_MODEL=qwen-plus`（代码默认；生产可显式指定 `qwen3.6-plus`）、`BAILIAN_TIMEOUT_MS=90000`、`BAILIAN_MAX_RETRIES=1`、worker 两项同上 | 走 OpenAI Chat Completions 兼容接口；缺 key 会在 env 校验阶段 fail-fast。                           |
 | Real Bailian（阿里云百炼） | `process-once` | 真实上游手工批处理排障        | `MONGO_URI`、`AI_FEEDBACK_PROVIDER=bailian`、`BAILIAN_API_KEY=<real>`、`AI_FEEDBACK_DEBUG_ENABLED=true`                                                         | `BAILIAN_BASE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1`、`BAILIAN_MODEL=qwen-plus`（代码默认；生产可显式指定 `qwen3.6-plus`）                                                                       | 调 `POST /api/learning-tasks/ai-feedback/jobs/process-once`；debug 关闭时返回 `404`。               |
 
@@ -93,7 +91,7 @@ Browser backend 配置与唯一启动入口：
 | `SMTP_USER`                                    | 无                                                  | Joi                                                  | SMTP 用户名；`MAIL_PROVIDER=smtp` 时必须存在。                                  |
 | `SMTP_PASS`                                    | 无                                                  | Joi                                                  | SMTP 密码；`MAIL_PROVIDER=smtp` 时必须存在，且不得写入日志。                    |
 | `MONGO_SERVER_SELECTION_TIMEOUT_MS`            | `5000`                                              | Joi                                                  | Mongo 连接超时。                                                                |
-| `AI_FEEDBACK_PROVIDER` | `stub` | Joi | Provider 选择：`stub`、`openrouter`、`bailian`；真实 Provider 必须提供对应 Key。 |
+| `AI_FEEDBACK_PROVIDER` | `stub` | Joi | Provider 选择：`stub`、`bailian`；真实 Provider 必须提供对应 Key。 |
 | `AI_FEEDBACK_MAX_CODE_CHARS`                   | `12000`                                             | Joi                                                  | 发送给模型的代码截断上限。                                                      |
 | `AI_FEEDBACK_MAX_CONCURRENCY`                  | `2`                                                 | Joi                                                  | 进程级并发信号量。                                                              |
 | `AI_FEEDBACK_MAX_PER_CLASSROOMTASK_PER_MINUTE` | `30`                                                | Joi                                                  | 每 `classroomTaskId` 的本地软限流。                                             |
@@ -103,13 +101,6 @@ Browser backend 配置与唯一启动入口：
 | `LEARNING_TASK_SUBMISSION_COOLDOWN_MS`         | `300000`                                            | Joi                                                  | 学生提交冷却窗口（ms）；按同一 student + classroomTask 判定，`0` 表示关闭冷却。 |
 | `AI_FEEDBACK_DEBUG_ENABLED`                    | `false`                                             | Joi                                                  | debug/ops 路由门禁。                                                            |
 | `AUTHZ_ENFORCE_ROLES`                          | `true`                                              | Joi                                                  | 是否强制 `RolesGuard` 执行。                                                    |
-| `OPENROUTER_API_KEY` | 无 | Joi | 选择 `openrouter` 时必填，不能是空值或纯空白。 |
-| `OPENROUTER_BASE_URL`                          | `https://openrouter.ai/api/v1`                      | Joi                                                  | OpenRouter 基础地址。                                                           |
-| `OPENROUTER_HTTP_REFERER`                      | `https://eduforge.local`                            | Joi                                                  | 上游请求头。                                                                    |
-| `OPENROUTER_X_TITLE`                           | `EduForge`                                          | Joi                                                  | 上游请求头。                                                                    |
-| `OPENROUTER_MODEL`                             | `openrouter/free`                                   | Joi                                                  | 模型名。                                                                        |
-| `OPENROUTER_TIMEOUT_MS`                        | `90000`                                             | Joi                                                  | 上游超时（ms）。                                                                |
-| `OPENROUTER_MAX_RETRIES`                       | `1`                                                 | Joi                                                  | provider 重试次数。                                                             |
 | `BAILIAN_API_KEY` | 无 | Joi | 选择 `bailian` 时必填，不能是空值或纯空白。 |
 | `BAILIAN_BASE_URL`                             | `https://dashscope.aliyuncs.com/compatible-mode/v1` | Joi                                                  | 阿里云百炼大陆站 OpenAI-compatible 基础地址。                                   |
 | `BAILIAN_MODEL`                                | `qwen-plus`                                         | Joi                                                  | 百炼模型名；生产可显式指定 `qwen3.6-plus` 或后续新版本。                        |
@@ -122,7 +113,6 @@ Browser backend 配置与唯一启动入口：
 条件必填：
 
 - 当 `MAIL_PROVIDER=smtp` 时，`MAIL_FROM`、`SMTP_HOST`、`SMTP_PORT`、`SMTP_USER`、`SMTP_PASS` 必须存在；缺失会在 env 校验或 mail service 初始化阶段 fail-fast。
-- 当 `AI_FEEDBACK_PROVIDER=openrouter` 时，`OPENROUTER_API_KEY` 必须存在且非空、非纯空白；否则 env validation fail-fast。
 - 当 `AI_FEEDBACK_PROVIDER=bailian` 时，`BAILIAN_API_KEY` 必须存在且非空、非纯空白；否则 env validation fail-fast。
 - `stub` 不要求真实 API Key；Worker 开关不影响上述校验。Provider Base 保留 `MISSING_API_KEY` 运行时防御。
 
@@ -203,8 +193,6 @@ debug/ops 门禁口径（与当前实现一致）：
 | 并发信号量                 | `AI_FEEDBACK_MAX_CONCURRENCY`                  | `2`     | `1..20`          | `2..6`               |
 | 软限流（按 classroomTask） | `AI_FEEDBACK_MAX_PER_CLASSROOMTASK_PER_MINUTE` | `30`    | `1..600`         | `20..120`            |
 | 单次落库上限               | `AI_FEEDBACK_MAX_ITEMS`                        | `2`     | `1..10`          | `1..2`               |
-| 上游超时                   | `OPENROUTER_TIMEOUT_MS`                        | `90000` | `>=1000`         | `60000..120000`      |
-| provider 重试              | `OPENROUTER_MAX_RETRIES`                       | `1`     | `>=0`            | `0..1`               |
 | 百炼上游超时               | `BAILIAN_TIMEOUT_MS`                           | `90000` | `>=1000`         | `60000..120000`      |
 | 百炼 provider 重试         | `BAILIAN_MAX_RETRIES`                          | `1`     | `>=0`            | `0..1`               |
 | 代码截断上限               | `AI_FEEDBACK_MAX_CODE_CHARS`                   | `12000` | `500..200000`    | `8000..30000`        |
@@ -219,4 +207,4 @@ debug/ops 门禁口径（与当前实现一致）：
 
 成本提醒：
 
-- 选择 Bailian / OpenRouter 真实 Provider 后，并发/限流/maxItems 会直接影响调用成本与上游压力。
+- 选择 Bailian 真实 Provider 后，并发/限流/maxItems 会直接影响调用成本与上游压力。

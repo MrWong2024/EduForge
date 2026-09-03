@@ -31,42 +31,46 @@ describe('AI Feedback env validation (no external I/O)', () => {
     expect(
       validate({
         AI_FEEDBACK_PROVIDER: 'stub',
-        OPENROUTER_API_KEY: '',
         BAILIAN_API_KEY: '',
         AI_FEEDBACK_WORKER_ENABLED: 'true',
       }).error,
     ).toBeUndefined();
   });
 
-  describe.each([
-    ['bailian', 'BAILIAN_API_KEY', 'OPENROUTER_API_KEY'],
-    ['openrouter', 'OPENROUTER_API_KEY', 'BAILIAN_API_KEY'],
-  ])('%s provider', (provider, apiKey, otherApiKey) => {
-    it('accepts its own key without enabling the worker', () => {
-      const result = validate({
-        AI_FEEDBACK_PROVIDER: provider,
-        [apiKey]: 'synthetic-unit-key',
-      });
-
-      expect(result.error).toBeUndefined();
-      expect(result.value.AI_FEEDBACK_WORKER_ENABLED).toBe(false);
+  it('accepts Bailian with its own key without enabling the worker', () => {
+    const result = validate({
+      AI_FEEDBACK_PROVIDER: 'bailian',
+      BAILIAN_API_KEY: 'synthetic-unit-key',
     });
-
-    it.each([undefined, '', ' \t '])(
-      'rejects a missing or blank key (%p), even with another provider key',
-      (key) => {
-        const result = validate({
-          AI_FEEDBACK_PROVIDER: provider,
-          [apiKey]: key,
-          [otherApiKey]: 'synthetic-other-key',
-          AI_FEEDBACK_WORKER_ENABLED: 'false',
-        });
-
-        expect(result.error).toBeDefined();
-        expect(result.error?.message).toContain(apiKey);
-      },
-    );
+    expect(result.error).toBeUndefined();
+    expect(result.value.AI_FEEDBACK_WORKER_ENABLED).toBe(false);
   });
+
+  it.each([undefined, '', ' \t '])(
+    'rejects a missing or blank Bailian key (%p)',
+    (key) => {
+      const result = validate({
+        AI_FEEDBACK_PROVIDER: 'bailian',
+        BAILIAN_API_KEY: key,
+        AI_FEEDBACK_WORKER_ENABLED: 'false',
+      });
+      expect(result.error).toBeDefined();
+      expect(result.error?.message).toContain('BAILIAN_API_KEY');
+    },
+  );
+
+  it.each(['unsupported-provider', ''])(
+    'rejects an invalid provider (%p)',
+    (provider) => {
+      const result = validate({ AI_FEEDBACK_PROVIDER: provider });
+      expect(result.error).toBeDefined();
+      expect(
+        result.error?.details.some(
+          (detail) => detail.path[0] === 'AI_FEEDBACK_PROVIDER',
+        ),
+      ).toBe(true);
+    },
+  );
 
   it.each(['true', 'false'])(
     'converts worker enabled=%s and numeric values',

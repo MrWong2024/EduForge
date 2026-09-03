@@ -39,24 +39,24 @@ type ProcessOnceResponse = {
   dead: number;
 };
 
-type OpenRouterMessage = {
+type BailianMessage = {
   role?: string;
   content?: string;
 };
 
-type OpenRouterRequestPayload = {
+type BailianRequestPayload = {
   model?: string;
-  messages?: OpenRouterMessage[];
+  messages?: BailianMessage[];
 };
 
-const startMockOpenRouter = () =>
+const startMockBailian = () =>
   new Promise<{
     server: http.Server;
     url: string;
-    getCapturedPayloads: () => OpenRouterRequestPayload[];
+    getCapturedPayloads: () => BailianRequestPayload[];
     clearCapturedPayloads: () => void;
-  }>((resolve) => {
-    const capturedPayloads: OpenRouterRequestPayload[] = [];
+  }>((resolve, reject) => {
+    const capturedPayloads: BailianRequestPayload[] = [];
     const server = http.createServer((req, res) => {
       if (req.method !== 'POST') {
         res.statusCode = 404;
@@ -71,9 +71,7 @@ const startMockOpenRouter = () =>
         const rawBody = Buffer.concat(bodyChunks).toString('utf8');
         if (rawBody.trim().length > 0) {
           try {
-            capturedPayloads.push(
-              JSON.parse(rawBody) as OpenRouterRequestPayload,
-            );
+            capturedPayloads.push(JSON.parse(rawBody) as BailianRequestPayload);
           } catch {
             capturedPayloads.push({});
           }
@@ -94,7 +92,7 @@ const startMockOpenRouter = () =>
                       tags: ['correctness'],
                     },
                   ],
-                  meta: { model: 'mock-openrouter' },
+                  meta: { model: 'mock-bailian' },
                 }),
               },
             },
@@ -104,17 +102,22 @@ const startMockOpenRouter = () =>
         res.end(JSON.stringify(payload));
       });
     });
-    server.listen(0, () => {
+    server.requestTimeout = 5000;
+    server.headersTimeout = 5000;
+    const startupTimeout = setTimeout(() => {
+      server.close();
+      reject(new Error('Mock Bailian startup timed out'));
+    }, 5000);
+    server.once('error', (error) => {
+      clearTimeout(startupTimeout);
+      reject(error);
+    });
+    server.listen(0, '127.0.0.1', () => {
+      clearTimeout(startupTimeout);
       const address = server.address();
       if (!address || typeof address === 'string') {
-        resolve({
-          server,
-          url: 'http://127.0.0.1:0',
-          getCapturedPayloads: () => [...capturedPayloads],
-          clearCapturedPayloads: () => {
-            capturedPayloads.length = 0;
-          },
-        });
+        server.close();
+        reject(new Error('Mock Bailian address unavailable'));
         return;
       }
       resolve({
@@ -128,7 +131,7 @@ const startMockOpenRouter = () =>
     });
   });
 
-describe('LearningTasks AI Feedback OpenRouter Context (e2e)', () => {
+describe('LearningTasks AI Feedback Bailian Context (e2e)', () => {
   let app: INestApplication<App>;
   let userModel: Model<User>;
   let sessionModel: Model<Session>;
@@ -140,11 +143,9 @@ describe('LearningTasks AI Feedback OpenRouter Context (e2e)', () => {
   let teacherAgent: ReturnType<typeof request.agent>;
   let studentAgent: ReturnType<typeof request.agent>;
   let mockServer: http.Server;
-  let getCapturedPayloads: () => OpenRouterRequestPayload[];
+  let getCapturedPayloads: () => BailianRequestPayload[];
   let clearCapturedPayloads: () => void;
 
-  let teacherId = '';
-  let studentId = '';
   let taskId = '';
   let submissionId = '';
   let previousWorkerEnabled: string | undefined;
@@ -153,8 +154,9 @@ describe('LearningTasks AI Feedback OpenRouter Context (e2e)', () => {
   let previousBaseUrl: string | undefined;
   let previousDebugEnabled: string | undefined;
 
-  const teacherEmail = `teacher.openrouter.ctx.${Date.now()}@example.com`;
-  const studentEmail = `student.openrouter.ctx.${Date.now()}@example.com`;
+  const fixtureNamespace = 'ai-bailian-bailian-context-' + Date.now();
+  const teacherEmail = 'teacher.' + fixtureNamespace + '@example.invalid';
+  const studentEmail = 'student.' + fixtureNamespace + '@example.invalid';
   const teacherPassword = 'TeacherPass123!';
   const studentPassword = 'StudentPass123!';
 
@@ -188,7 +190,7 @@ describe('LearningTasks AI Feedback OpenRouter Context (e2e)', () => {
   };
 
   beforeAll(async () => {
-    const mock = await startMockOpenRouter();
+    const mock = await startMockBailian();
     mockServer = mock.server;
     getCapturedPayloads = mock.getCapturedPayloads;
     clearCapturedPayloads = mock.clearCapturedPayloads;
@@ -197,11 +199,11 @@ describe('LearningTasks AI Feedback OpenRouter Context (e2e)', () => {
       previousWorkerEnabled = process.env.AI_FEEDBACK_WORKER_ENABLED;
       process.env.AI_FEEDBACK_WORKER_ENABLED = 'false';
       previousProvider = process.env.AI_FEEDBACK_PROVIDER;
-      process.env.AI_FEEDBACK_PROVIDER = 'openrouter';
-      previousApiKey = process.env.OPENROUTER_API_KEY;
-      process.env.OPENROUTER_API_KEY = 'test-key';
-      previousBaseUrl = process.env.OPENROUTER_BASE_URL;
-      process.env.OPENROUTER_BASE_URL = mock.url;
+      process.env.AI_FEEDBACK_PROVIDER = 'bailian';
+      previousApiKey = process.env.BAILIAN_API_KEY;
+      process.env.BAILIAN_API_KEY = 'test-key';
+      previousBaseUrl = process.env.BAILIAN_BASE_URL;
+      process.env.BAILIAN_BASE_URL = mock.url;
       previousDebugEnabled = process.env.AI_FEEDBACK_DEBUG_ENABLED;
       process.env.AI_FEEDBACK_DEBUG_ENABLED = 'true';
 
@@ -212,7 +214,7 @@ describe('LearningTasks AI Feedback OpenRouter Context (e2e)', () => {
       const { AppModule } = appModuleExports;
       if (!process.env.MONGO_URI) {
         throw new Error(
-          'MONGO_URI is required for learning-tasks ai-feedback openrouter context e2e.',
+          'MONGO_URI is required for learning-tasks ai-feedback bailian context e2e.',
         );
       }
 
@@ -232,13 +234,15 @@ describe('LearningTasks AI Feedback OpenRouter Context (e2e)', () => {
       app.use(cookieParser());
       await app.init();
       const configService = app.get(ConfigService);
-      expect(configService.get<string>('AI_FEEDBACK_PROVIDER')).toBe(
-        'openrouter',
-      );
-      expect(configService.get<string>('OPENROUTER_BASE_URL')).toBe(mock.url);
+      expect(configService.get<string>('AI_FEEDBACK_PROVIDER')).toBe('bailian');
+      expect(configService.get<string>('BAILIAN_BASE_URL')).toBe(mock.url);
 
-      teacherAgent = request.agent(app.getHttpServer());
-      studentAgent = request.agent(app.getHttpServer());
+      teacherAgent = request
+        .agent(app.getHttpServer())
+        .timeout({ response: 5000, deadline: 10000 });
+      studentAgent = request
+        .agent(app.getHttpServer())
+        .timeout({ response: 5000, deadline: 10000 });
 
       userModel = app.get(getModelToken(User.name));
       sessionModel = app.get(getModelToken(Session.name));
@@ -247,13 +251,31 @@ describe('LearningTasks AI Feedback OpenRouter Context (e2e)', () => {
       feedbackModel = app.get(getModelToken(Feedback.name));
       aiFeedbackJobModel = app.get(getModelToken(AiFeedbackJob.name));
       aiFeedbackProcessor = app.get(AiFeedbackProcessor);
+      expect(process.env.EDUFORGE_DATABASE_PURPOSE).toBe('standard_test');
+      expect(userModel.db.name).toBe('eduforge_test');
+      userModel.db.set('maxTimeMS', 10000);
+      expect(
+        await aiFeedbackJobModel.countDocuments({
+          status: {
+            $in: [AiFeedbackJobStatus.Pending, AiFeedbackJobStatus.Failed],
+          },
+        }),
+      ).toBe(0);
+      console.info(
+        'Bailian context E2E: standard_test / ' +
+          userModel.db.name +
+          '; namespace=' +
+          fixtureNamespace +
+          '; mock=' +
+          mock.url,
+      );
 
       const [teacherHash, studentHash] = await Promise.all([
         bcrypt.hash(teacherPassword, 10),
         bcrypt.hash(studentPassword, 10),
       ]);
 
-      const [teacher, student] = await Promise.all([
+      await Promise.all([
         userModel.create({
           email: teacherEmail,
           passwordHash: teacherHash,
@@ -265,8 +287,6 @@ describe('LearningTasks AI Feedback OpenRouter Context (e2e)', () => {
           roles: ['student'],
         }),
       ]);
-      teacherId = teacher._id.toString();
-      studentId = student._id.toString();
 
       await login(teacherAgent, teacherEmail, teacherPassword);
       await login(studentAgent, studentEmail, studentPassword);
@@ -274,13 +294,13 @@ describe('LearningTasks AI Feedback OpenRouter Context (e2e)', () => {
       const createdTask = await teacherAgent
         .post('/api/learning-tasks/tasks')
         .send({
-          title: 'OpenRouter Context Task',
+          title: 'Bailian Context Task',
           description: '实现一个函数并满足题目要求与评分标准。',
           rubric: {
             keyRequirements: ['必须处理边界条件', '必须给出可读实现'],
             scoring: { correctness: 70, readability: 30 },
           },
-          knowledgeModule: 'ai-openrouter',
+          knowledgeModule: 'ai-bailian',
           stage: 1,
           status: 'DRAFT',
         })
@@ -309,14 +329,14 @@ describe('LearningTasks AI Feedback OpenRouter Context (e2e)', () => {
       process.env.AI_FEEDBACK_PROVIDER = previousProvider;
     }
     if (previousApiKey === undefined) {
-      delete process.env.OPENROUTER_API_KEY;
+      delete process.env.BAILIAN_API_KEY;
     } else {
-      process.env.OPENROUTER_API_KEY = previousApiKey;
+      process.env.BAILIAN_API_KEY = previousApiKey;
     }
     if (previousBaseUrl === undefined) {
-      delete process.env.OPENROUTER_BASE_URL;
+      delete process.env.BAILIAN_BASE_URL;
     } else {
-      process.env.OPENROUTER_BASE_URL = previousBaseUrl;
+      process.env.BAILIAN_BASE_URL = previousBaseUrl;
     }
     if (previousDebugEnabled === undefined) {
       delete process.env.AI_FEEDBACK_DEBUG_ENABLED;
@@ -324,38 +344,69 @@ describe('LearningTasks AI Feedback OpenRouter Context (e2e)', () => {
       process.env.AI_FEEDBACK_DEBUG_ENABLED = previousDebugEnabled;
     }
 
-    if (!KEEP_DB) {
-      const cleanup: Promise<unknown>[] = [];
-      if (submissionId) {
-        const submissionObjectId = new Types.ObjectId(submissionId);
-        cleanup.push(
-          feedbackModel.deleteMany({ submissionId: submissionObjectId }),
-        );
-        cleanup.push(
-          aiFeedbackJobModel.deleteMany({ submissionId: submissionObjectId }),
-        );
-        cleanup.push(submissionModel.deleteOne({ _id: submissionObjectId }));
+    try {
+      if (!KEEP_DB && userModel) {
+        const cleanup: Promise<unknown>[] = [];
+        if (submissionId) {
+          const submissionObjectId = new Types.ObjectId(submissionId);
+          cleanup.push(
+            feedbackModel.deleteMany({ submissionId: submissionObjectId }),
+          );
+          cleanup.push(
+            aiFeedbackJobModel.deleteMany({ submissionId: submissionObjectId }),
+          );
+          cleanup.push(submissionModel.deleteOne({ _id: submissionObjectId }));
+        }
+        if (taskId) {
+          cleanup.push(taskModel.deleteOne({ _id: taskId }));
+        }
+        const users = await userModel
+          .find({ email: { $in: [teacherEmail, studentEmail] } })
+          .select('_id')
+          .lean<Array<{ _id: Types.ObjectId }>>()
+          .exec();
+        const userIds = users.map((user) => user._id);
+        if (userIds.length > 0) {
+          cleanup.push(sessionModel.deleteMany({ userId: { $in: userIds } }));
+          cleanup.push(userModel.deleteMany({ _id: { $in: userIds } }));
+        }
+        for (const operation of cleanup) await operation;
+        if (submissionId) {
+          expect(await feedbackModel.countDocuments({ submissionId })).toBe(0);
+          expect(
+            await aiFeedbackJobModel.countDocuments({ submissionId }),
+          ).toBe(0);
+          expect(
+            await submissionModel.countDocuments({ _id: submissionId }),
+          ).toBe(0);
+        }
+        if (taskId)
+          expect(await taskModel.countDocuments({ _id: taskId })).toBe(0);
+        expect(
+          await userModel.countDocuments({
+            email: { $in: [teacherEmail, studentEmail] },
+          }),
+        ).toBe(0);
+        expect(
+          await sessionModel.countDocuments({ userId: { $in: userIds } }),
+        ).toBe(0);
+        console.info('Fixture cleanup verified: ' + fixtureNamespace);
       }
-      if (taskId) {
-        cleanup.push(taskModel.deleteOne({ _id: taskId }));
+    } finally {
+      try {
+        if (app) await app.close();
+      } finally {
+        if (mockServer?.listening) {
+          mockServer.closeAllConnections();
+          await new Promise<void>((resolve) =>
+            mockServer.close(() => resolve()),
+          );
+        }
       }
-      const userIds = [teacherId, studentId].filter(Boolean);
-      if (userIds.length > 0) {
-        cleanup.push(sessionModel.deleteMany({ userId: { $in: userIds } }));
-        cleanup.push(userModel.deleteMany({ _id: { $in: userIds } }));
-      }
-      await Promise.all(cleanup);
-    }
-
-    if (app) {
-      await app.close();
-    }
-    if (mockServer && mockServer.listening) {
-      await new Promise<void>((resolve) => mockServer.close(() => resolve()));
     }
   });
 
-  it('passes task context and zh-cn instruction to mock OpenRouter and keeps feedback pipeline persisted', async () => {
+  it('passes task context and zh-cn instruction to mock Bailian and keeps feedback pipeline persisted', async () => {
     clearCapturedPayloads();
 
     const createdSubmission = await studentAgent
@@ -438,7 +489,7 @@ describe('LearningTasks AI Feedback OpenRouter Context (e2e)', () => {
     expect(systemPrompt).toContain(
       'Use {"items":[]} only when there is truly nothing worth flagging, no actionable suggestion, and no learning-value improvement point.',
     );
-    expect(userPrompt).toContain('TaskTitle: OpenRouter Context Task');
+    expect(userPrompt).toContain('TaskTitle: Bailian Context Task');
     expect(userPrompt).toContain(
       'TaskDescription: 实现一个函数并满足题目要求与评分标准。',
     );
