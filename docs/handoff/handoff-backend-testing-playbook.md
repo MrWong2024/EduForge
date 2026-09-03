@@ -13,7 +13,7 @@
 | 层级 | 当前资产与工具 | 主要证明语义 |
 |---|---|---|
 | Pure / Static | `npm run lint`、`npm run typecheck`、`npm run build` | lint、全量 TypeScript 类型检查、Nest 编译、import 与静态结构 |
-| Unit / Service / Controller | `backend/src/**/*.spec.ts`，Jest + ts-jest | Service 分支、Controller 参数传递、局部规则、mapper 与错误边界 |
+| Unit / Service / Controller | `backend/src/**/*.spec.ts` + `backend/scripts/**/*.spec.ts`，Jest + ts-jest；当前 scripts spec 为 0 | Service 分支、Controller 参数传递、局部规则、mapper 与错误边界 |
 | HTTP E2E / Integration | `backend/test/*.e2e-spec.ts`，当前 28 个 Jest + Supertest spec | 真实 Nest HTTP、Guard/Pipe/DTO、Session、角色/ownership、MongoDB 终态与跨模块链路 |
 | Scripted Browser | 后端无此类 runner；项目当前资产见 [Frontend testing playbook](./handoff-frontend-testing-playbook.md) | 不可由低层证明的 Browser-native 合同由前端 Owner 治理 |
 | Agent-assisted / Human smoke | 不属于后端自动测试 Owner | 真实产品 UI 可操作性与主观教学/UX 判断，见 Frontend testing playbook |
@@ -39,9 +39,13 @@ npm run build
 npm run test -- --runInBand
 ```
 
+`npm run lint` 与 `lint:fix` 覆盖 `src/**/*.ts`、`test/**/*.ts`、`scripts/**/*.ts`。
+
 `npm run typecheck` 使用 `tsconfig.typecheck.json`，覆盖 `src/**/*.ts`、`test/**/*.ts`、`scripts/**/*.ts`；仅检查类型，不生成编译产物或增量缓存，不排除特定测试文件。该全量静态门禁不可由 build 或 Jest 运行结果替代。
 
-HTTP E2E 必须在 Jest 启动前显式选择测试环境，并保持默认 cleanup：
+普通 unit runner 的 Jest `rootDir` 为 `backend`；coverage 只统计 `src/**/*.(t|j)s`，输出到 `backend/coverage`。
+
+`backend/test/*.e2e-spec.ts` 由 `test:e2e`（`test/jest-e2e.json`）独立管理，不进入普通 unit runner。HTTP E2E 必须在 Jest 启动前显式选择测试环境，并保持默认 cleanup：
 
 ```powershell
 $env:NODE_ENV = "test"
