@@ -22,7 +22,7 @@ purpose 仅在 test 环境允许上述两个值；空值、未知值或非 test 
 
 - 应用运行只读取 `MONGO_URI`；`DatabaseModule` 先核对 URI 声明的数据库，再核对连接后的实际 databaseName。两者必须符合上述映射；缺失或不匹配均 fail-closed，不回退到其他数据库。
 - 运维脚本读取 `MONGO_ADMIN_URI`，包括 `npm run sync-indexes` 与 `npm run import-users -- ...`；脚本同样校验 databaseName。
-- 账号模型沿用两类账号：`*_app` 用于应用运行，权限限于对应库 `readWrite`；`*_db_admin` 用于索引同步、导入、迁移等人工/脚本操作。
+- development/test 使用两类账号：`*_app` 用于应用运行，权限限于对应库 `readWrite`；`*_db_admin` 用于索引同步、导入、迁移等人工/脚本操作。当前 production 的 `MONGO_URI` 与 `MONGO_ADMIN_URI` 使用相同连接串和 `root` 账号。
 
 Browser backend 配置与唯一启动入口：
 
