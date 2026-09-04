@@ -15,7 +15,7 @@
 | Pure / Static | `npm run lint`、`npm run typecheck`、`npm run build` | lint、全量 TypeScript 类型检查、Nest 编译、import 与静态结构 |
 | Unit / Service / Controller | `backend/src/**/*.spec.ts` + `backend/scripts/**/*.spec.ts`，Jest + ts-jest；当前 scripts spec 为 0 | Service 分支、Controller 参数传递、局部规则、mapper 与错误边界 |
 | HTTP E2E / Integration | `backend/test/*.e2e-spec.ts`，当前 28 个 Jest + Supertest spec | 真实 Nest HTTP、Guard/Pipe/DTO、Session、角色/ownership、MongoDB 终态与跨模块链路 |
-| Scripted Browser | 后端无此类 runner；项目当前资产见 [Frontend testing playbook](./handoff-frontend-testing-playbook.md) | 不可由低层证明的 Browser-native 合同由前端 Owner 治理 |
+| Scripted Browser | runner 由 frontend 维护；当前有 1 个 BFF Cookie / BrowserContext micro-profile；后端已具备 Browser backend launcher 与 `browser_acceptance` database foundation | 不可由低层证明的 Browser-native 合同由前端 Owner 治理 |
 | Agent-assisted / Human smoke | 不属于后端自动测试 Owner | 真实产品 UI 可操作性与主观教学/UX 判断，见 Frontend testing playbook |
 
 Unit 与 HTTP E2E 可以覆盖同一业务区域，但不得重复承担同一主断言：局部规则留在 unit，真实 HTTP/认证/数据库终态留在 E2E。
@@ -67,14 +67,31 @@ npm run test:e2e -- --runInBand --runTestsByPath ./test/users-me.e2e-spec.ts
 
 `test:watch` 不用于正式验收。是否执行全量 unit/E2E 由实际影响决定，不把“最终验证”解释为无差别全量运行。
 
-## 5. Database Purpose
+## 5. Database Purpose 与 Browser Process Roles
 
-- `standard_test → eduforge_test` 与 `browser_acceptance → eduforge_browser_test` 已物理隔离；完整配置合同见 [Backend config matrix](./handoff-backend-config-matrix.md#1-数据库连接串与索引治理)。
-- 普通 HTTP E2E 使用独立 `NODE_ENV=test` 子进程，purpose 显式指定或默认解析为 `standard_test`；仅提供 `backend/.env.test`，启动前清除 shell 残留的主连接、管理连接和 Browser 变量，不与 Browser env 叠加。
-- Browser backend 使用独立 `start:browser-test` launcher，仅读取 ignored `.env.browser-acceptance`。应用连接与普通 E2E 数据库隔离，admin URI 仅校验声明，不建立 admin 连接。
-- URI 声明门禁在连接前执行，Mongoose 实际 databaseName 在连接后验证；Browser launcher 在 AppModule 导入前和 listen 前分别执行门禁，错误立即拒绝。
-- pure/unit/lint/build 的用途为 `none`，不连接数据库。HTTP E2E 不得连接 Browser、development 或 production 数据库；Browser backend 不得连接 standard_test、development 或 production 数据库。
-- 当前 foundation 支持受控启动、正常初始化所需索引元数据和公开 `GET /api` 健康请求；不创建业务数据、Browser fixture、verifier 或 UI/DB Profile，不代表真实 Teacher/Student Browser 登录已验收。
+每个进程在一次运行中只能属于一个 database purpose：
+
+| Purpose | 治理语义 |
+|---|---|
+| `none` | 当前进程不得连接业务数据库；适用于纯文档、不连接数据库的 pure/unit、lint、typecheck、build、Playwright / Browser runner 等进程 |
+| `standard_test` | 普通 Jest、HTTP E2E 等标准测试用途，按测试资产合同使用和精确清理测试数据 |
+| `browser_acceptance` | scripted / Agent-assisted Browser 在确需真实 backend/database 时使用的独立 Browser Acceptance 用途 |
+| `development` | 本地真实开发与集成环境，不作为自动测试或生产运维用途 |
+| `production_or_operations` | 生产或用户明确授权的生产运维动作，仅限该次授权范围 |
+
+数据库具体名称、URI、账号与环境文件映射仍由 [Backend config matrix](./handoff-backend-config-matrix.md#1-数据库连接串与索引治理) 唯一维护，本手册不复制完整 Config Matrix。`standard_test` 与 `browser_acceptance` 已物理数据库隔离；namespace、collection prefix 等逻辑隔离不能替代 database-level isolation。不同 purpose 不得在同一进程混用配置，也不得依赖继承变量、dotenv 顺序或后加载覆盖选择数据库。
+
+Browser 相关进程角色边界：
+
+| 进程 | Database purpose | 数据库角色 |
+|---|---|---|
+| Playwright / Browser runner | `none` | 不得直接获得或连接 Mongo APP / ADMIN URI |
+| Browser backend | `browser_acceptance` | 通过独立 `start:browser-test` launcher 使用 Browser Acceptance APP connection；ADMIN 声明只校验、不注入 Nest 应用 |
+| 未来按真实 profile 风险准入的 fixture / verifier / cleanup | `browser_acceptance` | 作为独立管理进程使用 Browser Acceptance ADMIN connection；不得与 Browser backend 或 runner 合并 |
+
+写下上述角色边界不构成现在新增 fixture、verifier 或 cleanup 的理由。当前 foundation 只支持受控启动、正常初始化所需索引元数据和公开 `GET /api` 健康请求；不创建业务数据或 UI/DB Profile，也不代表真实 Teacher/Student Browser 登录已验收。
+
+普通 HTTP E2E 使用独立 `NODE_ENV=test` 子进程，purpose 显式指定或默认解析为 `standard_test`；仅提供 `backend/.env.test`，启动前清除 shell 残留的主连接、管理连接和 Browser 变量，不与 Browser env 叠加。URI 声明门禁在连接前执行，Mongoose 实际 databaseName 在连接后验证；Browser launcher 在 AppModule 导入前和 listen 前分别执行门禁，错误立即拒绝。HTTP E2E 不得连接 Browser、development 或 production 数据库；Browser backend / 管理进程不得连接 standard_test、development 或 production 数据库。
 
 最低充分证据入口（执行状态以当次报告为准）：
 
@@ -93,6 +110,10 @@ npm run test:e2e -- --runInBand --runTestsByPath ./test/users-me.e2e-spec.ts
 - `KEEP_E2E_DB=1` 只用于明确的本地诊断；正式验收和 CI 默认不得设置。保留数据时必须报告并由原 spec 的 ownership 信息指导精确清理。
 - 写入超时或连接结果未知时不得直接重跑；先只读核对 app、数据库和任务 namespace 的实际状态。
 
+完全隔离于 production 和真实用户的 synthetic application test account（例如测试专用 teacher/student 用户名与密码），只有同时满足以下条件时，才可作为 tracked deterministic test constant：仅存在于测试数据库；不复用生产账号或真实个人密码；不提供基础设施权限；不能取得 Mongo、API、SMTP 或其他外部 Secret 能力。此类凭据是被测应用的普通测试常量，不是 infrastructure Secret。
+
+Mongo password、production credential、Bailian API Key、SMTP password、第三方 service credential 与真实用户 credential 始终属于 Secret，不得 tracked、写入日志或报告。synthetic application credential 的有限规则不得用于放宽这些 Secret 边界。
+
 ## 7. Current Known Gaps
 
 - `backend/test/app.e2e-spec.ts` 在 `beforeEach` 创建 app，但当前没有对应 `afterEach/afterAll` 关闭 app；这是测试 lifecycle/open-handle 风险，不是产品缺陷。本任务不修改测试资产。
@@ -104,4 +125,4 @@ npm run test:e2e -- --runInBand --runTestsByPath ./test/users-me.e2e-spec.ts
 
 - 新增或修改测试时同步本手册的资产类型、命令、数据库用途或 lifecycle 事实；API/配置事实回到各自 Owner。
 - 不按测试文件逐条扩张 inventory，不追求某层数量非零，不把开发日志或历史通过次数长期堆入本文。
-- 不因当前缺少 Browser 资产而安装 runner、创建专用数据库或扩大 fixture 基础设施。
+- 当前 Playwright runner、FT-02 scripted non-UI micro-profile、Browser backend launcher 与 `browser_acceptance` database foundation 按真实风险复用；不因追求测试层数量、覆盖率或假设性风险继续扩张 Browser 资产，fixture / verifier 等新资产仍须通过最低充分准入后按需建设。

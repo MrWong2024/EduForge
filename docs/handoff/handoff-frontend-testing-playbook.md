@@ -14,7 +14,20 @@
 
 该 profile 仅证明 Cookie/Storage 的 Browser-native 合同，不表示产品 UI 已通过或失败，也不构成 UI golden path evidence。Agent-assisted / Human smoke 继续按本文治理，未执行的流程不得写成 passed evidence。
 
-## 3. Test Evidence Classes
+## 3. Risk Classification 与 Test Evidence Classes
+
+先判断风险从哪里可达，再选择最低充分证据层：
+
+| 风险分类 | 判定边界 |
+|---|---|
+| `ui_reachable` | 正常用户可通过当前正式 UI 产生的状态或风险；UI 可达不自动赋予 scripted Browser 资格 |
+| `public_api_reachable` | UI 不一定提供入口，但正式公开 API 可以合法触达 |
+| `legitimate_concurrency` | 正常并发、重复请求、竞态或客户端合法重试可能产生 |
+| `internal_corruption_only` | 只有手工改 DB、破坏内部数据或绕过正式合同才能制造；不得据此自动扩张 Browser / E2E |
+| `manual_or_real_device` | 需要真实设备、人类主观判断或无法稳定自动化的现实交互 |
+| `general_gate` | lint、typecheck、build、static contract 等项目级质量门禁 |
+
+风险分类只决定候选的真实来源，不取代下表的证据职责，也不要求每个风险逐层重复证明。
 
 | 证据类别 | 当前资产 / 工具 | 当前证明语义 | 重复与缺口 | 是否扩张 |
 |---|---|---|---|---|
@@ -75,10 +88,19 @@ scripted deterministic Browser 只用于不可由 Pure/Unit/HTTP E2E 可靠证�
 1. 一个 profile 聚焦一个 Browser-native 合同，只含 1–4 个紧密相关场景。
 2. 使用最小合法前置，不把教师/学生完整业务主链塞入 scripted body。
 3. 只断言 Browser 不可替代事实；服务端终态复用既有 HTTP E2E，必要时才增加最小 verifier。
-4. 资产、runtime、namespace 和 cleanup 各自可归属、可独立收口。
-5. 仅为合格合同增加必要资产；当前 micro-profile 使用 synthetic upstream，不需要 Browser DB、业务 fixture 或 test-only UI hook。
+4. 一个 profile 的完整证据闭环原则上保持同一 Git code state、同一最小前置、一次 Browser execution、确有必要时一次对应 verifier，以及一次精确 cleanup。
+5. 不同 profile 的前置、执行、证据与 cleanup 相互独立；后续其他 profile 失败，不自动推翻已经完整闭环并通过的 profile。
+6. 仅为合格合同增加必要资产；当前 micro-profile 使用 synthetic upstream，不需要 Browser DB、业务 fixture 或 test-only UI hook。
 
 新增候选仍须先报告证据缺口与准入理由，再评估现有标准 Playwright 的配置与执行边界；runner 和依赖的存在不自动赋予资格，不得私建 Browser runner 或无故安装依赖。
+
+scripted Browser 采用以下止损：
+
+- 静态审计已经确认某 profile 的主要断言是 UI semantic 时，不必先让它失败若干轮；直接放弃 scripted 方案，转为 Agent-assisted、Human 或更合适的低层证据。
+- 对真正合格的 non-UI scripted profile，测试资产自身只允许一次最低充分修复。
+- 同一种 execution mode / asset 方案连续两轮主要因 `spec/test`、`fixture`、`support/runner`、`environment` 或 `tool_limitation` 失败时，禁止第三轮机械 patch / rerun；必须重新选择 evidence layer、execution mode 或 profile 设计。
+
+该止损防止 scripted Browser 退化为 locator 维护、sleep / timeout 堆叠、testid 扩张或 UI 自动化泥潭；明确的 product contract violation 仍按产品问题处理，不能用模式切换掩盖。
 
 ### 7.3 Current Micro-profile
 
@@ -138,13 +160,27 @@ Human smoke 保留以下唯一职责：
 
 > Pure / Static → Unit / Logic → HTTP E2E → Scripted Browser micro-profile → Agent-assisted Browser smoke → Human smoke
 
-这不是逐层全部执行，而是选择能够可靠证明目标语义的最低成本证据：
+这不是逐层全部执行。先使用第 3 节分类确认风险来源，再用紧凑的 Q1/Q2/Q3 选择主证据：
 
-1. HTTP 可以证明的合同，不因业务重要升级成 Browser。
-2. Browser 只证明 Browser 本身不可替代的语义。
-3. UI 主流程重要，不等于必须 scripted automation；客观 production UI 默认 Agent-assisted。
-4. 主观体验、教学表达和真实教学判断由 Human smoke 负责。
-5. 同一风险只设一个主证据 Owner；其他层只补不可替代的边界。
+1. **Q1：不用真实 Browser 能可靠证明吗？**能则使用 Pure/Static、Unit/Logic 或 HTTP E2E 等更低层证据；HTTP 可以证明的合同，不因业务重要升级成 Browser。不能才进入 Browser evidence 判断。
+2. **Q2：Browser 要证明 Browser-native semantic 还是 UI semantic？**BrowserContext、Cookie、HttpOnly、Storage、origin、CORS / credentials、browser lifecycle 与浏览器原生网络行为，可以评估 scripted deterministic micro-profile；页面流程、可见内容、按钮交互、locator 与用户任务完成路径属于 UI semantic，默认 Agent-assisted。
+3. **Q3：是否需要主观判断、教学合理性、UX 质量、真实设备体验或专业人员判断？**需要则由 Human smoke / Human verification 承担。
+
+同一风险只设一个主证据 Owner，其他层只补不可替代边界；scripted Browser 只证明 Browser-native semantic，客观 production UI 默认 Agent-assisted，Human 保留主观、教学与真实设备职责。
+
+**Happy Path First：**证据实施顺序为：先证明正常主链可用；再补高价值 defensive / non-UI Browser 风险；再补少量代表性 recovery；最后处理工作包收口型证据。Happy Path 尚未稳定时，不持续扩大低频异常状态矩阵。该顺序是通用治理，不在本文提前定义未来业务流程。
+
+**Failure Attribution：**测试失败不自动等于产品失败；先归因，再决定修改 production code、test/spec、fixture、runner/support、environment 或 execution mode。
+
+| 归因 | 语义 |
+|---|---|
+| `product` | 稳定复现且违反已冻结的正式产品合同 |
+| `spec/test` | 测试合同、断言、选择器或测试实现错误、过时或不充分 |
+| `fixture` | 测试前置数据、账号、namespace 或生命周期不满足既定测试合同 |
+| `support/runner` | 测试支撑、进程编排、等待方式、runner 配置或资源回收问题 |
+| `environment` | 端口、构建产物、配置、依赖服务、权限或执行环境不正确 / 不可用 |
+| `tool_limitation` | 当前工具或 execution mode 无法可靠产生、观察或证明目标事实 |
+| `not_executed` | 目标测试没有形成一次有效执行，不能记为 passed 或 failed product evidence |
 
 ## 12. Explicit Non-goals
 
