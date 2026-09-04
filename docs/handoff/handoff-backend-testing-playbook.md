@@ -2,7 +2,9 @@
 
 ## 1. Scope / Owner
 
-本文是 EduForge 后端测试证据、测试数据库用途、E2E fixture 生命周期与 cleanup 规则的唯一 Owner。通用 E2E 原则见 [E2E Testing](../e2e-testing.md)；数据库名、连接变量和运行模式的完整映射由 [Backend config matrix](./handoff-backend-config-matrix.md) 维护；前端测试、Browser evidence 与 smoke 由 [Frontend testing playbook](./handoff-frontend-testing-playbook.md) 维护。
+本文是 EduForge backend test layers、真实 runner / command、Database Purpose、DB / process isolation、Browser backend APP / ADMIN role 与当前 backend test asset 事实的 Owner。通用验证候选生成、初始 / 增量 A/B/C、候选归属、完成治理与覆盖对账由 [Codex instruction spec](../codex-instruction-spec.md) §3.9 维护；本文不复制通用候选来源或完成合同。
+
+通用 E2E 原则见 [E2E Testing](../e2e-testing.md)；数据库名、连接变量和运行模式的完整映射由 [Backend config matrix](./handoff-backend-config-matrix.md) 维护；前端测试、Browser evidence 与 smoke 由 [Frontend testing playbook](./handoff-frontend-testing-playbook.md) 维护。
 
 本文不复制 API、DTO、Service 或配置明细，也不保存逐轮执行日志、覆盖率流水或完整 spec inventory。
 
@@ -28,7 +30,11 @@ Unit 与 HTTP E2E 可以覆盖同一业务区域，但不得重复承担同一�
 4. 不因业务重要就机械运行完整套件。先选择受影响 spec；只有认证、公共 Guard/Pipe、Schema、共享测试基础设施或跨模块合同发生变化时才扩大范围。
 5. 测试文件存在、测试名称或代码阅读不等于动态通过；报告必须区分“资产存在”和“本次已执行”。
 
+跨层 Failure Attribution 与 Browser stop-loss 由 [Frontend testing playbook](./handoff-frontend-testing-playbook.md) 统一维护，Backend Playbook 不建立第二份分类。后端只记录项目级事实；例如 testing lifecycle / open-handle risk 是测试资产问题，不因其存在自动成为 production product defect。
+
 ## 4. 真实命令
+
+命令生成期核验、discovery、定向执行、目标集合精确匹配、`not_executed` 判定与是否扩大测试范围统一遵循 [Codex instruction spec](../codex-instruction-spec.md) §3.8 / §3.9；本节只保留 EduForge 当前真实 Jest / HTTP E2E runner 与命令入口。
 
 以下命令均从 `backend` 目录执行：
 
@@ -109,6 +115,8 @@ Browser 相关进程角色边界：
 - 当前没有共享 fixture CLI、独立 database verifier 或集中式 cleanup runner。数据库终态主要由 spec 内断言与必要的 model 查询证明。
 - `KEEP_E2E_DB=1` 只用于明确的本地诊断；正式验收和 CI 默认不得设置。保留数据时必须报告并由原 spec 的 ownership 信息指导精确清理。
 - 写入超时或连接结果未知时不得直接重跑；先只读核对 app、数据库和任务 namespace 的实际状态。
+
+fixture、verifier、support 与 Browser infrastructure 的通用复杂度止损遵循 [Codex instruction spec](../codex-instruction-spec.md) §3.10；本节只维护当前 EduForge 测试资产与 lifecycle 事实，不建立额外治理体系。
 
 完全隔离于 production 和真实用户的 synthetic application test account（例如测试专用 teacher/student 用户名与密码），只有同时满足以下条件时，才可作为 tracked deterministic test constant：仅存在于测试数据库；不复用生产账号或真实个人密码；不提供基础设施权限；不能取得 Mongo、API、SMTP 或其他外部 Secret 能力。此类凭据是被测应用的普通测试常量，不是 infrastructure Secret。
 

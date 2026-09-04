@@ -2,7 +2,9 @@
 
 ## 1. Scope / Owner
 
-本文是 EduForge 前端测试、Browser evidence、Agent-assisted Browser smoke 与 Human smoke 的唯一 Owner。后端 Jest/HTTP E2E、测试数据库、fixture 与 cleanup 由 [Backend testing playbook](./handoff-backend-testing-playbook.md) 维护；当前页面与路由事实见 [Frontend route map](./handoff-frontend-route-map.md)，稳定 UI/UX 判断基线见 [Frontend design baseline](./handoff-frontend-design-baseline.md)。
+本文是 EduForge 前端项目级 Risk Classification、evidence hierarchy、Browser evidence、scripted / Agent-assisted / Human execution mode、Browser profile admission、Failure Attribution 与 Browser stop-loss 的 Owner。通用验证候选生成、初始 / 增量 A/B/C、候选归属、即时验收、覆盖对账及实现单元 / 工作包完成治理由 [Codex instruction spec](../codex-instruction-spec.md) §3.9 维护；本文不复制其完整规则。
+
+后端 Jest/HTTP E2E、测试数据库、fixture 与 cleanup 由 [Backend testing playbook](./handoff-backend-testing-playbook.md) 维护；当前页面与路由事实见 [Frontend route map](./handoff-frontend-route-map.md)，稳定 UI/UX 判断基线见 [Frontend design baseline](./handoff-frontend-design-baseline.md)。
 
 本文维护证据职责和选择规则，不维护产品 Roadmap、逐轮执行日志、几百行测试文件清单或 deterministic CI 通过记录。
 
@@ -57,6 +59,8 @@ npm run build
 - 纯展示映射、序列化、资格判断等逻辑如果可以脱离 React/Browser 独立证明，应优先复用现有 contracts runner，不因假设未来需求新增依赖或并行 runner。
 - 文档-only 变化只做文档、链接、diff 与范围门禁，不机械运行 frontend build。
 
+命令生成期核验、discovery、定向执行、目标集合精确匹配、`not_executed` 判定与是否扩大回归统一遵循 [Codex instruction spec](../codex-instruction-spec.md) §3.8 / §3.9；本文只保留 EduForge 当前真实 runner 与命令入口。不得仅因“最终代码态”“为了保险”或追求形式完整而机械扩大完整测试套件。
+
 ## 5. Unit / Logic
 
 当前前端除第 4 节的 pure/static contract 外，没有独立 unit/component test 资产。未来只有在逻辑已经稳定抽离、错误风险真实且静态类型不能充分证明时，才增加最低充分测试，并优先复用现有标准 runner；组件结构、文案或 selector 不应默认用脆弱快照重复维护。
@@ -81,6 +85,8 @@ scripted deterministic Browser 只用于不可由 Pure/Unit/HTTP E2E 可靠证�
 
 页面重要、流程短、selector 稳定、希望 CI 回归或属于黄金路径，都不单独赋予 scripted 资格。普通 API/DTO/业务分支、页面文案、组件层级、点击顺序和整条用户 workflow 不应 Browser 化。
 
+Browser spec 的 expected contract 独立冻结与自证闭环防线遵循 [Codex instruction spec](../codex-instruction-spec.md) §3.9。current production code 可以用于 wiring、selector 与 integration discovery，但不得成为 expected behavior 的唯一事实来源。
+
 ### 7.2 Micro-profile
 
 合格资产必须保持薄：
@@ -91,6 +97,17 @@ scripted deterministic Browser 只用于不可由 Pure/Unit/HTTP E2E 可靠证�
 4. 一个 profile 的完整证据闭环原则上保持同一 Git code state、同一最小前置、一次 Browser execution、确有必要时一次对应 verifier，以及一次精确 cleanup。
 5. 不同 profile 的前置、执行、证据与 cleanup 相互独立；后续其他 profile 失败，不自动推翻已经完整闭环并通过的 profile。
 6. 仅为合格合同增加必要资产；当前 micro-profile 使用 synthetic upstream，不需要 Browser DB、业务 fixture 或 test-only UI hook。
+
+profile 不以 assertion 数量衡量完整性或覆盖率，只断言其明确负责的 Browser-native contract。若断言开始大量涉及 API 组合、数据库内部状态、普通 UI copy、内部 count 或其他非 Browser-native 事实，必须重新选择证据层并下沉到 Pure / Static、Unit / Logic、HTTP E2E、仅在未来真实需要时采用的 verifier，或 static gate；不得为增加 assertion 数量扩大 Browser profile。
+
+Profile 内信息按用途区分：
+
+- **Contract assertion**：该 profile 正式负责的合同；不满足时可以使 profile fail。
+- **Diagnostic information**：仅用于排障、观察或定位；除非已经明确锁定为正式合同，不得因其与某次历史偶然值不同而使 profile fail。
+
+readiness 轮询次数、request 事件数量、内部日志数量和 synthetic upstream 内部计数默认属于 diagnostic information，不自动升级为合同。
+
+synthetic upstream、synthetic HTML 或 probe topology 可以证明明确声明的 Browser primitive / Browser runtime semantic，证据等级严格限于该合同；不得据此声称当前真实产品 UI、真实用户业务流程、真实 backend integration 或 production environment 已通过。
 
 新增候选仍须先报告证据缺口与准入理由，再评估现有标准 Playwright 的配置与执行边界；runner 和依赖的存在不自动赋予资格，不得私建 Browser runner 或无故安装依赖。
 
@@ -184,7 +201,7 @@ Human smoke 有独立证据职责，不是 scripted Browser 或 Agent-assisted B
 | `tool_limitation` | 当前工具或 execution mode 无法可靠产生、观察或证明目标事实 |
 | `not_executed` | 目标测试没有形成一次有效执行，不能记为 passed 或 failed product evidence |
 
-`spec/test`、`fixture`、`support/runner`、`environment` 或 `tool_limitation` 失败，不自动等于 production code / product failure，也不等于 Browser evidence passed。若目标合同只有真实 Browser 才能证明而本轮没有形成可信 Browser evidence，即使未发现产品 bug，也只能按事实记录为 `blocked`、`not_executed` 或本文既有的其他精确未闭环状态，不能报告 Browser passed。
+`spec/test`、`fixture`、`support/runner`、`environment` 或 `tool_limitation` 失败，不自动等于 production code / product failure，也不等于 Browser evidence passed。目标测试未实际执行时按正式治理记录 `not_executed`；因环境、权限、工具或其他明确条件无法继续时，在执行报告中说明具体阻断原因。若 Browser-only 合同没有形成可信 Browser evidence，即使未发现产品 bug，也必须准确报告“Browser 验证未闭环”或等价事实，不能报告 Browser passed。
 
 测试基础设施故障不得自动推翻在当前仍适用代码态上已经形成、完整精确且仍有效的既有证据；但其他已有证据也不得替代当前目标明确要求的 Browser-only evidence。
 
