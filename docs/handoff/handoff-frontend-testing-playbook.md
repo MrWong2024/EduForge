@@ -20,7 +20,7 @@
 
 | 风险分类 | 判定边界 |
 |---|---|
-| `ui_reachable` | 正常用户可通过当前正式 UI 产生的状态或风险；UI 可达不自动赋予 scripted Browser 资格 |
+| `ui_reachable` | 正常用户可通过当前真实产品 UI 产生的状态或风险；UI 可达不自动赋予 scripted Browser 资格 |
 | `public_api_reachable` | UI 不一定提供入口，但正式公开 API 可以合法触达 |
 | `legitimate_concurrency` | 正常并发、重复请求、竞态或客户端合法重试可能产生 |
 | `internal_corruption_only` | 只有手工改 DB、破坏内部数据或绕过正式合同才能制造；不得据此自动扩张 Browser / E2E |
@@ -35,7 +35,7 @@
 | B. Unit / Logic | 独立 unit/component spec = 0；pure/static contract 归 A 类 | 当前无独立组件或其他局部逻辑证据 | 若未来抽出稳定的 formatter/state helper，可出现低成本缺口；当前空白本身不阻断 | 仅为独立、稳定、低成本逻辑增加，优先复用现有 runner，不机械补齐组件快照 |
 | C. HTTP E2E / Integration | 前端无独立 HTTP suite；后端 Jest + Supertest E2E 是公开 API 主 Owner | 认证、DTO、角色/ownership、Submission/AI Feedback 与数据库终态 | 不重复搬到 Browser；BFF Cookie/Context 子事实由第 7.3 节提供专门证据 | API 风险优先补后端 HTTP E2E；仅 Browser-only 部分再升级 |
 | D. Scripted Browser | 独立 Playwright Browser runner；1 个 BFF Cookie/Context micro-profile（见第 7.3 节） | Chromium 接受 Cookie、HttpOnly、自动发送及 Context Cookie/Storage 隔离 | 不验证 UI，不替代 HTTP E2E，不证明其他 Browser 合同 | 仅通过准入的独立 Browser-native 候选才扩张 |
-| E. Agent-assisted Browser smoke | 本文定义治理；执行时使用 Agent 可控制的真实 Browser | 当前 production UI 的客观可操作性、页面 wiring 与真实用户主流程 | 不是仓库内 CI asset，也没有历史 passed 结果可继承 | 按产品主链和实际变更选择少量场景，不固定全量矩阵 |
+| E. Agent-assisted Browser smoke | 本文定义治理；执行时使用 Agent 可控制的真实 Browser | 当前真实产品 UI 的客观可操作性、页面 wiring 与真实用户主流程 | 不是仓库内 CI asset，也没有历史 passed 结果可继承 | 按产品主链和实际变更选择少量场景，不固定全量矩阵 |
 | F. Human smoke | 本文 + Frontend design baseline | 清晰度、认知负担、教学表达、视觉/UX 与真实教学判断 | 自动化不能替代；当前无统一签收记录 | 保留人工 Owner，不伪装成自动化 |
 
 ## 4. Pure / Static Contract
@@ -147,6 +147,8 @@ Human smoke 保留以下唯一职责：
 
 自动化或 Agent 可以收集客观现象，不能把主观体验、教学专业判断或真实使用合理性伪装成自动化通过。
 
+Human smoke 有独立证据职责，不是 scripted Browser 或 Agent-assisted Browser 执行失败后的默认降级或兜底。若 Agent-assisted 因工具或执行环境不可用，而客观 UI flow 确由人实际完成，可以记录为 `human manual evidence`，但必须准确标记实际执行方式；除非对应自动化层确实执行并完成，不得报告为 `Agent-assisted passed` 或 `scripted Browser passed`。
+
 ## 10. Database / Fixture Coordination
 
 - 后端已建立独立 Browser acceptance DB foundation 与受控 backend launcher，和普通 HTTP E2E 物理隔离；用途与配置见 [Backend testing playbook](./handoff-backend-testing-playbook.md#5-database-purpose)。当前仍无 Browser fixture/verifier 或 Browser UI/DB Profile。
@@ -166,7 +168,7 @@ Human smoke 保留以下唯一职责：
 2. **Q2：Browser 要证明 Browser-native semantic 还是 UI semantic？**BrowserContext、Cookie、HttpOnly、Storage、origin、CORS / credentials、browser lifecycle 与浏览器原生网络行为，可以评估 scripted deterministic micro-profile；页面流程、可见内容、按钮交互、locator 与用户任务完成路径属于 UI semantic，默认 Agent-assisted。
 3. **Q3：是否需要主观判断、教学合理性、UX 质量、真实设备体验或专业人员判断？**需要则由 Human smoke / Human verification 承担。
 
-同一风险只设一个主证据 Owner，其他层只补不可替代边界；scripted Browser 只证明 Browser-native semantic，客观 production UI 默认 Agent-assisted，Human 保留主观、教学与真实设备职责。
+同一风险只设一个主证据 Owner，其他层只补不可替代边界；scripted Browser 只证明 Browser-native semantic，当前真实产品 UI 的客观语义默认 Agent-assisted，Human 保留主观、教学与真实设备职责。
 
 **Happy Path First：**证据实施顺序为：先证明正常主链可用；再补高价值 defensive / non-UI Browser 风险；再补少量代表性 recovery；最后处理工作包收口型证据。Happy Path 尚未稳定时，不持续扩大低频异常状态矩阵。该顺序是通用治理，不在本文提前定义未来业务流程。
 
@@ -181,6 +183,10 @@ Human smoke 保留以下唯一职责：
 | `environment` | 端口、构建产物、配置、依赖服务、权限或执行环境不正确 / 不可用 |
 | `tool_limitation` | 当前工具或 execution mode 无法可靠产生、观察或证明目标事实 |
 | `not_executed` | 目标测试没有形成一次有效执行，不能记为 passed 或 failed product evidence |
+
+`spec/test`、`fixture`、`support/runner`、`environment` 或 `tool_limitation` 失败，不自动等于 production code / product failure，也不等于 Browser evidence passed。若目标合同只有真实 Browser 才能证明而本轮没有形成可信 Browser evidence，即使未发现产品 bug，也只能按事实记录为 `blocked`、`not_executed` 或本文既有的其他精确未闭环状态，不能报告 Browser passed。
+
+测试基础设施故障不得自动推翻在当前仍适用代码态上已经形成、完整精确且仍有效的既有证据；但其他已有证据也不得替代当前目标明确要求的 Browser-only evidence。
 
 ## 12. Explicit Non-goals
 
