@@ -4,6 +4,8 @@
 
 本文是 EduForge 前端项目级 Risk Classification、evidence hierarchy、Browser evidence、scripted / Agent-assisted / Human execution mode、Browser profile admission、Failure Attribution 与 Browser stop-loss 的 Owner。通用验证候选生成、初始 / 增量 A/B/C、候选归属、即时验收、覆盖对账及实现单元 / 工作包完成治理由 [Codex instruction spec](../codex-instruction-spec.md) §3.9 维护；本文不复制其完整规则。
 
+Browser/test infrastructure 的通用复杂度治理由 [Codex instruction spec](../codex-instruction-spec.md) §3.10 统一维护；本文只维护前端 / Browser 项目级准入、薄 micro-profile 与 stop-loss 规则，不复制其通用正文。
+
 后端 Jest/HTTP E2E、测试数据库、fixture 与 cleanup 由 [Backend testing playbook](./handoff-backend-testing-playbook.md) 维护；当前页面与路由事实见 [Frontend route map](./handoff-frontend-route-map.md)，稳定 UI/UX 判断基线见 [Frontend design baseline](./handoff-frontend-design-baseline.md)。
 
 本文维护证据职责和选择规则，不维护产品 Roadmap、逐轮执行日志、几百行测试文件清单或 deterministic CI 通过记录。
