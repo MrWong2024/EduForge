@@ -108,20 +108,37 @@ Browser 相关进程角色边界：
 
 ## 6. Fixture、Verifier 与 Cleanup
 
+### 6.1 Current State
+
 当前 E2E 采用 spec-local 生命周期：
 
 - 27/28 个 E2E spec 使用独立 app lifecycle、时间戳或唯一值创建任务专属合成数据，并通过 `request.agent` 保持 Session Cookie。
 - 这些 spec 在 `afterAll` 中按已记录 ID/唯一字段执行 scoped cleanup，并关闭 Nest app；不使用 `dropDatabase`。
 - 涉及 AI provider 的 E2E 使用 stub 或任务自有 mock HTTP server；默认不调用真实外部 AI，mock server 也必须由创建它的 spec 关闭。
-- 当前没有共享 fixture CLI、独立 database verifier 或集中式 cleanup runner。数据库终态主要由 spec 内断言与必要的 model 查询证明。
+- 当前共享 Browser fixture CLI = 0、独立 database verifier = 0、集中式 Browser cleanup runner = 0。数据库终态主要由 spec 内断言与必要的 model 查询证明。
 - `KEEP_E2E_DB=1` 只用于明确的本地诊断；正式验收和 CI 默认不得设置。保留数据时必须报告并由原 spec 的 ownership 信息指导精确清理。
 - 写入超时或连接结果未知时不得直接重跑；先只读核对 app、数据库和任务 namespace 的实际状态。
+- 第 5 节的 Browser Acceptance foundation 不自动要求 fixture、verifier 或 cleanup 资产；只有 Browser 持久写入或复杂跨进程终态无法由已有低层证据充分证明时，才允许评估新资产。
 
 fixture、verifier、support 与 Browser infrastructure 的通用复杂度止损遵循 [Codex instruction spec](../codex-instruction-spec.md) §3.10；本节只维护当前 EduForge 测试资产与 lifecycle 事实，不建立额外治理体系。
 
 完全隔离于 production 和真实用户的 synthetic application test account（例如测试专用 teacher/student 用户名与密码），只有同时满足以下条件时，才可作为 tracked deterministic test constant：仅存在于测试数据库；不复用生产账号或真实个人密码；不提供基础设施权限；不能取得 Mongo、API、SMTP 或其他外部 Secret 能力。此类凭据是被测应用的普通测试常量，不是 infrastructure Secret。
 
 Mongo password、production credential、Bailian API Key、SMTP password、第三方 service credential 与真实用户 credential 始终属于 Secret，不得 tracked、写入日志或报告。synthetic application credential 的有限规则不得用于放宽这些 Secret 边界。
+
+### 6.2 Future Admitted Lifecycle
+
+以下合同仅在未来真实 Browser Profile 已通过准入且确实需要对应资产后生效，不表示 EduForge 当前已经拥有 fixture、verifier 或 Browser cleanup runner：
+
+1. **Fixture 准入与边界：**先评估正式 API、已有 test factory / builder 或合法 synthetic seed 能否最低成本形成起点；只有它们不足时才新增专用 fixture。fixture 只构造 legal、minimal、deterministic、synthetic 前置，不得成为第二套产品、业务状态机、catalog / seed 治理或 UI 测试后门，也不得直接改库制造正式产品不可达状态、绕过业务不变量或引入 test-only lifecycle state；只能直接改库形成的状态须回到 [Frontend testing playbook](./handoff-frontend-testing-playbook.md) 的 `internal_corruption_only` 分类与 [Codex instruction spec](../codex-instruction-spec.md) §3.9 重新判断证据必要性。
+2. **变更触发：**UI copy、layout、selector、styling 或 visual arrangement 变化本身不触发 fixture / verifier 数据合同变更；只有 DTO、Schema、ownership、role、lifecycle / state precondition、正式 API contract 或 Profile 所需持久业务事实真实变化时，才评估最低充分同步。
+3. **Ownership、namespace 与进程角色：**每个 Profile 创建的持久 synthetic resource 必须具有唯一、可识别、可回收的 ownership / namespace，只能修改或清理自身资源；shared、canonical 与其他 Profile 数据默认只读，namespace 不替代 database-level isolation。进程角色继续遵循第 5 节：runner 为 `none` 且不持有 Mongo URI，Browser backend 使用 `browser_acceptance` APP connection，fixture / verifier / cleanup 管理进程使用 `browser_acceptance` ADMIN connection，APP 与 ADMIN 不得为方便而混入同一 runner / backend 进程。
+4. **Verifier 职责：**只有正式不变量存在真实证据缺口时才建立 verifier。prepared verifier 原则上只读确认前置，不创建、修复、迁移、删除或补齐数据；不满足时报告 fixture / precondition 问题。post verifier 仅补 Browser 持久副作用中尚未由 HTTP E2E 或其他低层证据充分证明的部分，不为 Profile 完整感重复 role / ownership、state gate、rejection、idempotency、无非法副作用或数据库终态等既有证据；assertion 只锁定正式合同，不把历史偶然 count、调试字段、runner 信息、日志数量或非正式 cardinality 升级为门禁。
+5. **最低充分闭环：**按实际准入步骤形成 `prepare → optional prepared verify → Browser backend / evidence → optional post verify → cleanup → optional residual verify`，并保持同一 Git code state、同一已验证前置与同一 ownership / namespace。该序列不是每个 Profile 的固定模板；不需要 fixture、数据库写入、verifier 或 residual 核对时必须省略对应步骤。
+6. **Cleanup：**cleanup 必须 precise、ownership-scoped，并在可行时保持幂等与安全可重复；不得使用 `dropDatabase`、广域删除，也不得触碰未知、非当前 Profile 或其他执行中任务的资源。写入或 cleanup 结果不确定时，先只读核对服务端权威状态、ownership、已产生副作用与 residual，再决定下一步，不盲目重跑副作用或破坏性操作。
+7. **Evidence Atomicity：**与 [Frontend testing playbook](./handoff-frontend-testing-playbook.md) 的完整证据闭环一致；不得把 Profile A 的 prepare、Profile B 的数据修改和 Profile A 的 verifier / cleanup 拼成一次通过。后续其他 Profile 失败，不自动推翻当前 Profile 已完整闭环且仍适用于当前代码态的证据。
+8. **Stage / test-only coordination 防扩张：**不得为测试便利默认建立 Stage、test-only business state、direct-DB transition、hidden lifecycle 或 test-only synchronization state。只有正式产品可达的真实并发窗口确实存在且 HTTP E2E 等低层证据无法以更低复杂度充分证明时，才按 Spec §3.9 重新治理候选并设计最低充分协调；必须说明低层证据为何不足，并确认协调机制不复制产品状态机或形成第二套实现。
+9. **复杂度 stop-loss：**继续遵循 [Codex instruction spec](../codex-instruction-spec.md) §3.10。fixture / verifier / support 一旦开始复制业务状态机、服务端判断、catalog、大量真实产品数据、独立于产品的 lifecycle，或为每个 Profile 扩张大量 support code，必须停止扩张，并重新评估是否下沉 HTTP E2E、改用 Agent-assisted / Human、缩小 Profile，或取消不需要的 Browser evidence。
 
 ## 7. Current Known Gaps
 
