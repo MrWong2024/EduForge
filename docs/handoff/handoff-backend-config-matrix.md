@@ -7,7 +7,7 @@
 
 ## 1) 数据库、连接串与索引治理
 
-数据库按环境与测试用途物理隔离；`browser_acceptance` 不是新的 `NODE_ENV`：
+数据库按环境与测试用途使用独立 database 实现 database-level isolation；`browser_acceptance` 是独立数据库用途，不是新的 `NODE_ENV`：
 
 | `NODE_ENV` | `EDUFORGE_DATABASE_PURPOSE` | Database |
 |---|---|---|
