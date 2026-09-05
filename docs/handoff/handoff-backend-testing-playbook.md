@@ -25,10 +25,11 @@ Unit 与 HTTP E2E 可以覆盖同一业务区域，但不得重复承担同一�
 ## 3. 最低充分证据选择
 
 1. 纯函数、Service 分支、Controller 参数传递和廉价防御优先用 unit。
-2. 需要证明真实 Nest HTTP route、authentication / Session、authorization / role、Guard / Pipe、DTO whitelist、ownership、lifecycle / state gate、rejection semantics、非法调用无业务副作用或必要的 MongoDB 权威终态时使用 HTTP E2E。`public_api_reachable` 风险即使当前 UI 无对应入口，只要正式公开 API 可由合法 HTTP 客户端直接调用，也以该层为主要证据。
-3. 页面是否可操作不由后端 E2E 冒充；服务端合同已被精确 HTTP E2E 证明时，Browser 不通过 `page.evaluate(fetch(...))`、Browser-side direct HTTP 或人工构造请求重复模拟同一服务端 API bypass / 攻击矩阵。只有页面是否正确发起请求、Cookie / credentials / origin 等 Browser-native semantic、真实 UI wiring 或用户可操作流程等 Browser / UI 不可替代语义，才由对应 Browser evidence 承担。
-4. 不因业务重要就机械运行完整套件。先选择受影响 spec；只有认证、公共 Guard/Pipe、Schema、共享测试基础设施或跨模块合同发生变化时才扩大范围。
-5. 测试文件存在、测试名称或代码阅读不等于动态通过；报告必须区分“资产存在”和“本次已执行”。
+2. HTTP E2E 的项目级证明能力包括真实 Nest HTTP route、authentication / Session、authorization / role、Guard / Pipe、DTO whitelist、ownership、lifecycle / state gate、rejection semantics、非法调用无业务副作用，以及必要的 MongoDB 权威终态。
+3. Risk Classification 定义采用 [Frontend testing playbook](./handoff-frontend-testing-playbook.md)，验证候选生成、风险必要性判断及风险到最低充分证据层的分配遵循 [Codex instruction spec](../codex-instruction-spec.md) §3.9；本节只维护后端证据能力与跨层不重复证明边界，不另建 risk → evidence mapping。
+4. 页面是否可操作不由后端 E2E 冒充；服务端合同已被精确 HTTP E2E 证明时，Browser 不通过 `page.evaluate(fetch(...))`、Browser-side direct HTTP 或人工构造请求重复模拟同一服务端 API bypass / 攻击矩阵。只有页面是否正确发起请求、Cookie / credentials / origin 等 Browser-native semantic、真实 UI wiring 或用户可操作流程等 Browser / UI 不可替代语义，才由对应 Browser evidence 承担。
+5. 不因业务重要就机械运行完整套件。先选择受影响 spec；只有认证、公共 Guard/Pipe、Schema、共享测试基础设施或跨模块合同发生变化时才扩大范围。
+6. 测试文件存在、测试名称或代码阅读不等于动态通过；报告必须区分“资产存在”和“本次已执行”。
 
 跨层 Failure Attribution 与 Browser stop-loss 由 [Frontend testing playbook](./handoff-frontend-testing-playbook.md) 统一维护，Backend Playbook 不建立第二份分类。后端只记录项目级事实；例如 testing lifecycle / open-handle risk 是测试资产问题，不因其存在自动成为 production product defect。
 
