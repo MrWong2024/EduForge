@@ -15,9 +15,9 @@
 | 层级 | 当前资产与工具 | 主要证明语义 |
 |---|---|---|
 | Pure / Static | `npm run lint`、`npm run typecheck`、`npm run build` | lint、全量 TypeScript 类型检查、Nest 编译、import 与静态结构 |
-| Unit / Service / Controller | `backend/src/**/*.spec.ts` + `backend/scripts/**/*.spec.ts`，Jest + ts-jest；当前 scripts spec 为 0 | Service 分支、Controller 参数传递、局部规则、mapper 与错误边界 |
-| HTTP E2E / Integration | `backend/test/*.e2e-spec.ts`，当前 28 个 Jest + Supertest spec | 真实 Nest HTTP、Guard/Pipe/DTO、Session、角色/ownership、MongoDB 终态与跨模块链路 |
-| Scripted Browser | runner 由 frontend 维护；当前有 1 个 BFF Cookie / BrowserContext micro-profile；后端已具备 Browser backend launcher 与 `browser_acceptance` database foundation | 不可由低层证明的 Browser-native 合同由前端 Owner 治理 |
+| Unit / Service / Controller | `backend/src/**/*.spec.ts` + `backend/scripts/**/*.spec.ts`，Jest + ts-jest | Service 分支、Controller 参数传递、局部规则、mapper 与错误边界 |
+| HTTP E2E / Integration | `backend/test/*.e2e-spec.ts`，Jest + Supertest | 真实 Nest HTTP、Guard/Pipe/DTO、Session、角色/ownership、MongoDB 终态与跨模块链路 |
+| Scripted Browser | runner 由 frontend 维护；已存在 FT-02 BFF Cookie / BrowserContext non-UI micro-profile；后端已具备 Browser backend launcher 与 `browser_acceptance` database foundation | 不可由低层证明的 Browser-native 合同由前端 Owner 治理；该 profile 不证明产品 UI |
 | Agent-assisted / Human smoke | 不属于后端自动测试 Owner | 真实产品 UI 可操作性与主观教学/UX 判断，见 Frontend testing playbook |
 
 Unit 与 HTTP E2E 可以覆盖同一业务区域，但不得重复承担同一主断言：局部规则留在 unit，真实 HTTP/认证/数据库终态留在 E2E。
@@ -28,7 +28,7 @@ Unit 与 HTTP E2E 可以覆盖同一业务区域，但不得重复承担同一�
 2. HTTP E2E 的项目级证明能力包括真实 Nest HTTP route、authentication / Session、authorization / role、Guard / Pipe、DTO whitelist、ownership、lifecycle / state gate、rejection semantics、非法调用无业务副作用，以及必要的 MongoDB 权威终态。
 3. Risk Classification 定义采用 [Frontend testing playbook](./handoff-frontend-testing-playbook.md)，验证候选生成、风险必要性判断及风险到最低充分证据层的分配遵循 [Codex instruction spec](../codex-instruction-spec.md) §3.9；本节只维护后端证据能力与跨层不重复证明边界，不另建 risk → evidence mapping。
 4. 页面是否可操作不由后端 E2E 冒充；服务端合同已被精确 HTTP E2E 证明时，Browser 不通过 `page.evaluate(fetch(...))`、Browser-side direct HTTP 或人工构造请求重复模拟同一服务端 API bypass / 攻击矩阵。只有页面是否正确发起请求、Cookie / credentials / origin 等 Browser-native semantic、真实 UI wiring 或用户可操作流程等 Browser / UI 不可替代语义，才由对应 Browser evidence 承担。
-5. 不因业务重要就机械运行完整套件。先选择受影响 spec；只有认证、公共 Guard/Pipe、Schema、共享测试基础设施或跨模块合同发生变化时才扩大范围。
+5. 不因业务重要、“为了保险”、“最终代码态”或形式完整而机械运行完整套件；先选择受影响 spec，是否扩大验证范围遵循 [Codex instruction spec](../codex-instruction-spec.md) §3.9。认证、公共 Guard/Pipe、Schema、共享测试基础设施、跨模块合同等横切变化通常构成扩大范围的依据，但该列表不是封闭枚举；其他经实际影响分析证明具有横切作用的变化同样可以构成依据。
 6. 测试文件存在、测试名称或代码阅读不等于动态通过；报告必须区分“资产存在”和“本次已执行”。
 
 跨层 Failure Attribution 与 Browser stop-loss 由 [Frontend testing playbook](./handoff-frontend-testing-playbook.md) 统一维护，Backend Playbook 不建立第二份分类。后端只记录项目级事实；例如 testing lifecycle / open-handle risk 是测试资产问题，不因其存在自动成为 production product defect。
@@ -86,7 +86,7 @@ npm run test:e2e -- --runInBand --runTestsByPath ./test/users-me.e2e-spec.ts
 | `development` | 本地真实开发与集成环境，不作为自动测试或生产运维用途 |
 | `production_or_operations` | 生产或用户明确授权的生产运维动作，仅限该次授权范围 |
 
-数据库具体名称、URI、账号与环境文件映射仍由 [Backend config matrix](./handoff-backend-config-matrix.md#1-数据库连接串与索引治理) 唯一维护，本手册不复制完整 Config Matrix。`standard_test` 与 `browser_acceptance` 已物理数据库隔离；namespace、collection prefix 等逻辑隔离不能替代 database-level isolation。不同 purpose 不得在同一进程混用配置，也不得依赖继承变量、dotenv 顺序或后加载覆盖选择数据库。
+数据库具体名称、URI、账号与环境文件映射仍由 [Backend config matrix](./handoff-backend-config-matrix.md#1-数据库连接串与索引治理) 唯一维护，本手册不复制完整 Config Matrix。`standard_test` 与 `browser_acceptance` 使用独立 database 实现 database-level isolation；namespace、collection prefix 等逻辑隔离不能替代 database-level isolation。不同 purpose 不得在同一进程混用配置，也不得依赖继承变量、dotenv 顺序或后加载覆盖选择数据库。
 
 Browser 相关进程角色边界：
 
@@ -110,12 +110,13 @@ Browser 相关进程角色边界：
 
 ### 6.1 Current State
 
-当前 E2E 采用 spec-local 生命周期：
+当前 HTTP E2E 原则上采用 spec-local 生命周期：
 
-- 27/28 个 E2E spec 使用独立 app lifecycle、时间戳或唯一值创建任务专属合成数据，并通过 `request.agent` 保持 Session Cookie。
-- 这些 spec 在 `afterAll` 中按已记录 ID/唯一字段执行 scoped cleanup，并关闭 Nest app；不使用 `dropDatabase`。
+- spec 使用独立 app lifecycle、时间戳或唯一值创建任务专属合成数据，并通过 `request.agent` 保持 Session Cookie；当前已知 lifecycle 例外由第 7 节维护。
+- 符合该 lifecycle 的 spec 在 `afterAll` 中按已记录 ID/唯一字段执行 scoped cleanup，并关闭自己创建的 Nest app；不使用 `dropDatabase`。
 - 涉及 AI provider 的 E2E 使用 stub 或任务自有 mock HTTP server；默认不调用真实外部 AI，mock server 也必须由创建它的 spec 关闭。
-- 当前共享 Browser fixture CLI = 0、独立 database verifier = 0、集中式 Browser cleanup runner = 0。数据库终态主要由 spec 内断言与必要的 model 查询证明。
+- 当前不存在共享 Browser fixture CLI、独立 database verifier 或集中式 Browser cleanup runner。数据库终态主要由 spec 内断言与必要的 model 查询证明。
+- spec-local repetition 本身不构成 gap；只有重复代码开始造成具体维护风险时，才按 [Codex instruction spec](../codex-instruction-spec.md) §3.10 评估最低充分 shared helper。
 - `KEEP_E2E_DB=1` 只用于明确的本地诊断；正式验收和 CI 默认不得设置。保留数据时必须报告并由原 spec 的 ownership 信息指导精确清理。
 - 写入超时或连接结果未知时不得直接重跑；先只读核对 app、数据库和任务 namespace 的实际状态。
 - 第 5 节的 Browser Acceptance foundation 不自动要求 fixture、verifier 或 cleanup 资产；只有 Browser 持久写入或复杂跨进程终态无法由已有低层证据充分证明时，才允许评估新资产。
@@ -142,10 +143,7 @@ Mongo password、production credential、Bailian API Key、SMTP password、第�
 
 ## 7. Current Known Gaps
 
-- `backend/test/app.e2e-spec.ts` 在 `beforeEach` 创建 app，但当前没有对应 `afterEach/afterAll` 关闭 app；这是测试 lifecycle/open-handle 风险，不是产品缺陷。本任务不修改测试资产。
-- E2E bootstrap、合成账号/数据准备与 cleanup 仍以 spec-local 方式重复；只有重复开始造成真实维护风险时，才考虑最低充分的共享 helper。
-- 当前没有独立 verifier/fixture registry。只有未来 Browser 写入或复杂跨进程终态无法由 HTTP E2E 充分证明时，才评估新增。
-- 后端 Session E2E 使用 Supertest agent 证明 HTTP Cookie 链路，但不证明真实 BrowserContext、reload、CORS/credentials 或 BFF 的 Browser-native 语义；是否需要该证据由 Frontend testing playbook 的准入规则判断。
+- `backend/test/app.e2e-spec.ts` 当前在 `beforeEach` 创建 app，但缺少对应 `afterEach` / `afterAll` 生命周期关闭；这是 testing lifecycle/open-handle risk，不是 production product defect。
 
 ## 8. Maintenance / Non-goals
 

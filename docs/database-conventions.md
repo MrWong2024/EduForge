@@ -9,7 +9,7 @@ Mongoose Schema 技术红线与 Codex 执行规则以 `docs/codex-rules.md` 为�
 
 ## 1. 数据库命名与环境隔离
 
-数据库必须按运行环境物理隔离，禁止 development、test、staging、production 共库使用。
+数据库必须按运行环境进行 database-level isolation，禁止 development、test、staging、production 共库使用。最低要求是使用独立 `databaseName`，并按环境账号/权限与连接配置进行隔离；除非项目另有部署或安全要求，本规范不默认要求不同环境运行在独立 MongoDB server、cluster 或 physical instance。
 
 推荐命名模板：
 

@@ -170,7 +170,7 @@ Human smoke 有独立证据职责，不是 scripted Browser 或 Agent-assisted B
 
 ## 10. Database / Fixture Coordination
 
-- 后端已建立独立 Browser acceptance DB foundation 与受控 backend launcher，和普通 HTTP E2E 物理隔离；用途与配置见 [Backend testing playbook](./handoff-backend-testing-playbook.md#5-database-purpose)。当前仍无 Browser fixture/verifier 或 Browser UI/DB Profile。
+- 后端已建立独立 Browser acceptance database foundation 与受控 backend launcher，和普通 HTTP E2E database 实现 database-level isolation；用途与配置见 [Backend testing playbook](./handoff-backend-testing-playbook.md#5-database-purpose)。当前仍无 Browser fixture/verifier 或 Browser UI/DB Profile。
 - FT-02 BFF Cookie/Context micro-profile 的数据库用途仍为 `none`，只使用内存 synthetic upstream 和独立 BrowserContext，不启动 backend、不连接 DB，也不需要业务 fixture、verifier 或数据库 cleanup。
 - 任何写入型 Agent-assisted/Human smoke 在执行前必须明确环境、实际 database、合成账号/数据 ownership 与 cleanup；不得复用来源不明的服务或账号，也不得与可能清理 `eduforge_test` 的 E2E 并行。
 - 后续写入型 Browser acceptance 资产须在现有 DB foundation 上单独建立明确的 fixture、ownership 与 cleanup 合同；namespace 不能替代数据库用途隔离。
