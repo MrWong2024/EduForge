@@ -2,34 +2,23 @@
 
 ## Scope / Owner
 
-本文是公开 HTTP endpoint inventory 与 endpoint-level contract 的 Owner，回答“接口在哪里、对外做什么、怎么鉴权”。具体事实以当前 backend 源码或用户指定 commit 为准。
+本文是公开 HTTP endpoint inventory 与 endpoint-level contract 的 Owner，回答“接口在哪里、谁能调用、对外做什么”。源码是最高事实源；下文 runtime Path 保留统一 `/api` 前缀。
 
-- 维护 Method、runtime Path、Controller / endpoint identity、请求 DTO 类型名、public response 类型与 HTTP status 的高层口径；按下文模块分区定位 Controller，必要时补充简洁源码引用。
-- 维护 endpoint-level authentication / authorization、状态转换、主要安全/错误边界、必要的高层副作用，以及不能仅靠字段描述表达的公开语义。
-- 不维护 DTO 逐字段 decorator/validation 矩阵、完整 nested response shape、Service 算法或完整方法签名、前端实现、测试矩阵或执行证据。
-
-跨层采用 `reference, don't restate`：
-
-- “公开数据长什么样”由 [DTO / Public Data Contract Cheatsheet](./handoff-backend-dto-cheatsheet.md) 维护。
-- “内部如何承担职责与不变量”由 [Service Map](./handoff-backend-service-map.md) 维护。
-- frontend consumption、BFF 与前端 mapper 由 [Frontend API Map](./handoff-frontend-api-map.md) 维护，页面与组件细节从其对应前端 Owner 获取。
-- testing/evidence 由 [Backend Testing Playbook](./handoff-backend-testing-playbook.md) 与 [Frontend Testing Playbook](./handoff-frontend-testing-playbook.md) 维护。
-
-维护时只更新本层变化；删除既有详细段落前先确认承接 Owner 或源码可无歧义定位，不为精简而丢失唯一公开合同。
-
-全局前缀：运行态由 `src/main.ts` 统一加 `api` 前缀。下文路径按运行态写为 `/api/...`。
+- 本文拥有 Method/Path、endpoint purpose、Controller-level authentication / authorization、ownership、资源边界、生命周期、业务/HTTP 错误、可见副作用与必要的高层兼容语义。
+- Query 字段、validation/transform/default、完整 response/nested shape、enum/nullability 和 safe exposure 由 [DTO / Public Data Contract Cheatsheet](./handoff-backend-dto-cheatsheet.md) 唯一维护。
+- 内部配对、查询、排序、聚合公式、比率分母与计算、索引及性能策略见 [Service Map](./handoff-backend-service-map.md)；配置参数见 [Config Matrix](./handoff-backend-config-matrix.md)。
+- frontend consumption 与 BFF 见 [Frontend API Map](./handoff-frontend-api-map.md)；testing/evidence 见 [Backend Testing Playbook](./handoff-backend-testing-playbook.md) 和 [Frontend Testing Playbook](./handoff-frontend-testing-playbook.md)。
 
 ## 全局认证与授权口径
 
-- 认证模型：服务端 Session + HttpOnly Cookie；Cookie 名称固定为 `ef_session`。
-- `POST /api/auth/login` 成功后创建 `sessions` 记录并写入 `ef_session`；`POST /api/auth/logout` 清除 Cookie 并使服务端 session 失效。
-- 当前用户探针固定为 `GET /api/users/me`，用于确认 Cookie session 与 `req.user={id,roles}` 已建立；返回公开字段，不返回 `passwordHash`。
-- 全局 `SessionAuthGuard` 通过 `APP_GUARD` 保护非 `@Public()` 路由；公开例外包括登录、忘记密码、重置密码等显式 `@Public()` 路由。
-- `RolesGuard` 由 controller 显式 `@UseGuards(RolesGuard) + @Roles(...)` 启用；后端 service 继续执行资源归属校验，前端 role gate 只承担体验层入口约束。
-- 角色语义：`TEACHER` 管理自己创建/拥有的课程、班级、课堂任务、提交与报表；`STUDENT` 仅访问自己 Enrollment ACTIVE 的班级任务、自己的提交与反馈。
-- 成员与统计权威来源是 Enrollment-only（`role=STUDENT,status=ACTIVE`）；`classroom.studentIds` 仅 legacy 镜像/输出，不作为授权、统计或 fallback。
-- 资源隔离默认按 `classroomId + classroomTaskId + studentId` 执行；教师只能访问自己班级/任务数据，学生只能访问自己任务或提交记录。后端是权限最终裁判。
-- 认证失败对外按 `401 Unauthorized` 处理；debug/ops 门禁关闭时优先返回 `404`，不暴露接口存在性。
+- 认证使用服务端 Session + HttpOnly Cookie，Cookie 名称 `ef_session`。登录创建服务端 session 并写 Cookie；注销清除 Cookie 并使该 session 失效。
+- 当前用户探针固定为 `GET /api/users/me`，用于确认 Cookie session 与当前用户身份已建立；公开数据见 [DTO Users](./handoff-backend-dto-cheatsheet.md#users)。
+- 全局 `SessionAuthGuard` 通过 `APP_GUARD` 保护非 `@Public()` 路由；公开例外包括登录、忘记密码、重置密码等显式 Public 路由。
+- `RolesGuard` 由 Controller 显式启用；Service 继续执行资源归属校验，前端 role gate 仅承担体验层入口约束，不能替代后端授权。
+- `TEACHER` 管理自己创建/拥有的课程、班级、课堂任务、提交与报表；`STUDENT` 仅访问自己 Enrollment ACTIVE 的班级任务、自己的提交与反馈。
+- 成员与默认教学统计的权威来源为 Enrollment-only（`role=STUDENT,status=ACTIVE`）；`classroom.studentIds` 仅 legacy 镜像，不作为授权、统计或 fallback。
+- 课堂分析、报表、复盘、导出以及课堂提交读取均按 `classroomId + classroomTaskId + studentId` 的资源边界隔离；禁止使用模板 `taskId` 兜底跨班聚合。通用模板入口的独立语义见 Learning Tasks。
+- 认证失败返回 `401 Unauthorized`；debug/ops 门禁关闭时优先返回 `404`，不暴露入口存在性。
 
 ## App
 
@@ -48,8 +37,10 @@
 
 Notes:
 
-- `POST /api/auth/forgot-password`：`AuthController.forgotPassword`，请求 DTO 为 `ForgotPasswordDto`；公开接口；请求体 `email` 会 trim + email 校验；无论邮箱是否存在、用户是否允许登录，统一返回 `{"message":"如果邮箱存在，我们将发送密码重置邮件。"}`；只有 `status=active` 用户会真实创建 reset token 并发邮件；同一真实用户邮箱 60 秒内重复请求命中冷却时，不会创建新 token、不会失效旧 token、不会重复发邮件，但响应保持不变。
-- `POST /api/auth/reset-password`：`AuthController.resetPassword`，请求 DTO 为 `ResetPasswordDto`；公开接口；请求体 `token/newPassword`，其中 `newPassword` trim 后需满足至少 8 位；成功返回 `{"message":"密码已重置，请使用新密码登录。"}`；不会自动登录，也不会写 cookie。
+- 忘记密码与重置密码是公开入口。忘记密码对邮箱不存在、不可登录用户及正常请求统一返回通用成功提示，避免枚举；只有允许登录的用户才创建 token 并触发邮件。
+- 同一真实用户邮箱 60 秒内再次请求命中冷却时，不创建新 token、不失效旧 token、不重复发邮件，对外响应不变；邮件发送失败也维持通用提示。
+- 重置使用一次性 token；无效、已使用、过期或对应用户不可登录时返回 `400 Reset token is invalid`。成功后该用户的重置凭据失效并清理全部 sessions；不会自动登录或写入登录 Cookie。
+- 请求校验、公开 message 及凭据省略见 [DTO Auth](./handoff-backend-dto-cheatsheet.md#auth)；token 领取、失效与恢复策略见 [Service Card 01C](./handoff-backend-service-map.md#service-card-01c)。
 
 ## Users
 
@@ -61,9 +52,8 @@ Notes:
 
 Notes:
 
-- `GET /api/users/me` 与 `PATCH /api/users/me` 返回口径一致（公开字段），不返回 `passwordHash`。
-- `PATCH /api/users/me` 仅允许更新 `name/studentNo/employeeNo`，基于当前登录会话识别用户。
-- `POST /api/users/me/change-password` 请求 DTO 为 `ChangePasswordDto`；基于当前登录会话校验当前密码，改密成功后保留当前会话并失效该用户其它历史会话；字段校验见 [DTO Cheatsheet](./handoff-backend-dto-cheatsheet.md)。
+- 读取与修改资料都基于当前登录会话，不接受替其他用户修改资料；公开资料白名单与相同返回投影见 [DTO Users](./handoff-backend-dto-cheatsheet.md#users)。
+- 自助改密先校验当前密码；成功后保留当前会话，失效该用户其它历史会话。内部协作见 [Service Card 02](./handoff-backend-service-map.md#service-card-02)。
 
 ## Courses
 
@@ -79,16 +69,11 @@ Notes:
 
 Notes:
 
-- `/api/courses/:courseId/overview` 由 `CoursesController.getCourseOverview` 接收 `QueryCourseOverviewDto`；Query 字段、默认/兼容值与 validation 见 [DTO Cheatsheet](./handoff-backend-dto-cheatsheet.md)。
-- `/api/courses/:courseId/overview` 中 `window=all` 语义：课程总览口径下不拼时间下界（无 `createdAt >= lowerBound` 过滤）。
-- 权限：teacher only，且 `course.createdBy === currentUserId`；仅统计该 teacher 名下 classrooms。
-- 聚合口径：按 `classroomId + classroomTaskId` 隔离；`studentsCount` 来自 Enrollment（`role=STUDENT,status=ACTIVE`）。
-- 课程总览保留 `submissionRate` 的“至少提交过一次的学生覆盖率”兼容语义，`overallSubmissionCoverage` 表示全部已发布课堂任务的整体提交覆盖度，二者不可混用；字段公式与零值/null 合同见 [DTO Cheatsheet](./handoff-backend-dto-cheatsheet.md)，内部聚合见 [Service Card 08C](./handoff-backend-service-map.md#service-card-08c)。
-- `Course.courseLabel`：可选课程分类字段（与 `Task.courseLabel` 共用 `TASK_COURSE_LABELS`），用于“班级课程分类坐标”与模板课程分类对齐；非外键、可为空。
-- 课程状态契约：`Course.status` 支持 `ACTIVE | ARCHIVED`；`PATCH /api/courses/:id` 可通过 body `status` 实现归档与恢复（`ARCHIVED <-> ACTIVE`）。
-- 课程删除契约：`DELETE /api/courses/:id` 仅在“空课程”允许删除；空课程判定主规则是不存在任何班级引用；内部检查由 [Service Map](./handoff-backend-service-map.md#service-card-03) 维护。
-- 非空课程删除错误：返回 `409 Conflict`，错误码 `COURSE_NOT_EMPTY`，message=`该课程下已有班级记录，不能删除，只能归档`。
-- 兼容接口：保留 `POST /api/courses/:id/archive`，内部收口到统一状态更新链路。
+- teacher only；资源必须由当前教师创建，课程总览仅涵盖该教师名下班级，并遵守全局 Enrollment-only 与课堂任务隔离边界。
+- 总览是当前课程口径下的提交覆盖与 AI 运行概览，支持无时间下界的历史读取；各窗口、兼容提交率与整体覆盖率的区别见 [DTO 课程总览](./handoff-backend-dto-cheatsheet.md#课程总览)，聚合见 [Service Card 08C](./handoff-backend-service-map.md#service-card-08c)。
+- 课程状态为 `ACTIVE | ARCHIVED`；PATCH 支持归档与恢复。已归档课程可通过状态更新恢复，但不允许普通内容编辑。
+- 仅无任何班级引用的空课程可删除；非空时返回 `409 Conflict`，`code=COURSE_NOT_EMPTY`，message=`该课程下已有班级记录，不能删除，只能归档`。
+- 兼容保留 POST archive，收口到相同归档行为；引用检查与内部一致性见 [Service Card 03](./handoff-backend-service-map.md#service-card-03)。课程分类是对齐坐标，不构成外键或额外权限边界；字段与返回数据见 [DTO Courses](./handoff-backend-dto-cheatsheet.md#courses)。
 
 ## Classrooms
 
@@ -115,27 +100,19 @@ Notes:
 
 Notes:
 
-- `/api/classrooms/:classroomId/weekly-report` Query: `window, includeRiskStudentIds`。
-- `/api/classrooms/:classroomId/weekly-report` 权限：teacher only，`classroom.teacherId === currentUserId`；统计隔离按 `classroomId + classroomTaskId`，`studentsCount/risk` 仅基于 Enrollment ACTIVE。
-- `/api/classrooms/:classroomId/process-assessment` 由 `ClassroomsController.getProcessAssessment` 接收 `QueryProcessAssessmentDto`；teacher only；Enrollment-only；返回聚合结果，不返回敏感字段。Query 与字段级输出见 [DTO Cheatsheet](./handoff-backend-dto-cheatsheet.md)。
-- `/api/classrooms/:classroomId/process-assessment.csv` 由 `ClassroomsController.exportProcessAssessmentCsv` 接收 `QueryProcessAssessmentDto`，使用与 JSON 相同的窗口及任务排除口径；teacher only；响应为 `text/csv; charset=utf-8`，内容以 UTF-8 BOM（`\uFEFF`）开头以兼容 Windows Excel 中文显示；不返回敏感字段。
-- `/api/classrooms/:classroomId/process-assessment` 的 score/risk 是过程性指标；零提交学生仍返回且 `score=0`。计分、风险阈值与聚合职责由 [Service Card 08G](./handoff-backend-service-map.md#service-card-08g) 维护，评分解释字段与公开 rubric 见 DTO Cheatsheet。
-- `/api/classrooms/:classroomId/process-assessment` 的任务排除是临时查询条件，按有效任务范围重新计算聚合，不修改教学数据；排除全部任务时仍返回当前 ACTIVE 学生，任务相关统计与 `score` 均为 0。内部任务筛选及聚合顺序见 Service Card 08G。
-- `GET /api/classrooms/:classroomId/ai-learning-analytics`、`/students`、`/students/:studentId`：统一为 teacher only + classroom owner only，课堂不存在或非 owner 返回 `404 Classroom not found`；学生详情仅允许当前课堂 `Enrollment(role=STUDENT,status=ACTIVE)` 成员，REMOVED/外班/非法学生 id 均安全返回 404。三个接口共同支持 `window=all|7d|30d`（默认 `all`）与 `excludedTaskIds`（逗号分隔或 repeated query，指 `classroomTaskId`）；学生列表另支持 `page`（默认 1）、`limit`（默认 20，上限 100）、`q`（trim 后最长 100，只对姓名/学号做不区分大小写的字符串子串匹配）、`overallOutcome` 与 `engagementStatus`，不提供 `term` 或任意字段排序。`q + overallOutcome + engagementStatus` 为 AND 语义，所有搜索筛选后再分页；非法枚举或超长 `q` 由全局 DTO 校验返回 400。
-- AI 反馈介入成效分析的 `window` 只按 `ClassroomTask.publishedAt` 选择有效课堂任务；任务入选后读取该任务下全部相关提交以保持介入前后配对。总览返回 `context/methodology/summary/taskTrends`，任务趋势包含零提交任务；学生列表返回 `context/page/limit/total/activeStudentsTotal/filters/items`：`activeStudentsTotal` 是当前课堂全部 ACTIVE 学生数且不受筛选影响，`total` 是全部搜索筛选后的学生数，`filters` 回显规范化 `q` 和两个可空枚举；无过滤时两者相等。学生详情返回 `context/methodology/student/summary/taskPoints`，并为每个有效课堂任务返回任务点，不可比较点的 `issueLoadBefore/After/Delta=null`、`detailedOutcome=NOT_COMPARABLE`、`outcome=NOT_COMPARABLE`。
-- 总览 `summary` 在既有计数与 rate 上新增 `remainedCleanStudentTaskCount/unchangedWithIssuesStudentTaskCount/remainedCleanRate/unchangedWithIssuesRate/regressedRate`；任务趋势对应新增 `remainedCleanStudentCount/unchangedWithIssuesStudentCount/remainedCleanRate/unchangedWithIssuesRate/regressedRate`。三个新增结果 rate 均以质量可比 student-task 数为分母，零分母返回 0；`stableStudentTaskCount = remainedCleanStudentTaskCount + unchangedWithIssuesStudentTaskCount`，任务趋势同理。学生 item/detail summary 新增 `remainedCleanTasksCount/unchangedWithIssuesTasksCount/overallOutcome/engagementStatus`，task point 新增 `detailedOutcome`。legacy `stable*Count/growthTrend/outcome` 与其他既有字段全部保留。
-- 方法学 V1.1 返回 `scope=AI_FEEDBACK_INTERVENTION_V1`、`version=AI_FEEDBACK_INTERVENTION_V1_1`、`sampleUnit=STUDENT_CLASSROOM_TASK`、`qualityProxy=ERROR_PLUS_HALF_WARN`，既有 disclaimer 不变。`detailedOutcome` 值域为 `IMPROVED|REMAINED_CLEAN|UNCHANGED_WITH_ISSUES|REGRESSED|NOT_COMPARABLE`；其中 `REMAINED_CLEAN` 是可比且前后半分单位均为 0，`UNCHANGED_WITH_ISSUES` 是可比且前后半分单位相同且大于 0，两者均兼容投影为 legacy `outcome=STABLE`。`overallOutcome` 按当前有效任务内全部可比样本的 `issueLoadDeltaHalfUnits` 总和判断 `INSUFFICIENT_DATA|IMPROVED_OVERALL|NO_NET_CHANGE|REGRESSED_OVERALL`，再单向映射 legacy `growthTrend`；`NO_NET_CHANGE` 只表示净变化为零，可能由改善与恶化抵消，不是时间序列趋势或能力结论。`engagementStatus` 是当前范围达到的最深互斥反馈阶段，不表示学习态度、AI 依赖、能力或风险。该能力仍只分析 EduForge AI 反馈介入后的提交行为与代码问题代理变化，不覆盖学生全部 AI 使用，不代表正式成绩，也不代表 AI 对成绩或能力提升的因果贡献；不得据此声称学生已阅读或采纳反馈。
-- `weekly-report` 窗口契约（后端阶段一）：默认 `window=all`；后端兼容集合为 `all/7d/30d/24h/1h`（`24h/1h` 为兼容窗口，不作为推荐默认窗口）。
-- `process-assessment`（JSON + CSV）窗口契约（后端阶段一）：默认 `window=all`；后端兼容集合为 `all/7d/30d/term`（`term` 为兼容窗口）；`window=all` 语义与 JSON/CSV 完全一致。
-- `window=all` 统一语义：在当前资源边界内做全量统计（班级级接口 = 当前班级可纳入口径的全部历史记录），实现为“无时间下界过滤”，不是固定 90/180 天。
-- `/api/classrooms/:classroomId/export/snapshot` Query: `window, limitStudents, limitAssessment, includePerTask`；teacher only；体积保护采用 limit 截断并在 `meta.notes` 写明；不返回敏感字段。
-- `/api/classrooms/:id/students`：teacher only + owner only（非 owner 返回 `404`）；成员来源只认 Enrollment（`role=STUDENT`）；默认只返回 `status=ACTIVE`，`includeRemoved=1/true` 时返回 `ACTIVE+REMOVED`；不读取/不回退 `classroom.studentIds`；默认排序 `joinedAt desc, _id desc`；不返回 `passwordHash`。
-- `/api/classrooms/:id/dashboard`：teacher only + owner only；默认只返回 `classroomTask.status=ACTIVE` 的任务；`includeClosedTasks=true` 时返回 `ACTIVE+CLOSED`；`RECALLED/缺失/未知状态` 不返回；每个 task item 返回 `classroomTaskStatus`、关联模板状态 `taskTemplateStatus(DRAFT|PUBLISHED|ARCHIVED|null)` 与关联模板发布者摘要 `taskPublisher:{id,name?}|null`；教师看板不因模板非 `PUBLISHED` 过滤既有课堂任务实例；统计口径与返回任务集合一致，且默认教学统计只计入当前 Enrollment `ACTIVE` 学生对应 submissions（`distinctStudentsSubmitted/submissionsCount/late*`、AI feedback 统计、`topTags` 默认排除 REMOVED 学生历史提交贡献）；顶层返回 `archiveSuggestion`，仅作为“建议归档”提示，不会自动归档或修改班级状态。
-- `/api/classrooms/mine/dashboard`：student only；默认只返回 `classroom.status=ACTIVE`、`classroomTask.status=ACTIVE` 且仍值得关注的任务；学生看板不再要求关联模板当前 `task.status=PUBLISHED`，模板变为 `ARCHIVED/DRAFT` 不影响既有 classroomTask 的可见性；有 `dueAt` 时截止后 30 天内仍显示并标记 `RECENTLY_EXPIRED`，超过 30 天为 `HISTORICAL` 且默认隐藏；无 `dueAt` 时 `publishedAt` 90 天内显示，超过 90 天为 `HISTORICAL` 且默认隐藏；`includeHistorical=true` 返回 `CURRENT+RECENTLY_EXPIRED+HISTORICAL`，但仍不返回归档班级或非 ACTIVE classroomTask；每个 item 的 `classroom` 现稳定返回 `teacher:{id,name,employeeNo}` 与 `course:{id,name,term,code}` 摘要：教师摘要仅含 id/姓名/工号，不返回 email；课程摘要仅含 id/课程名/学期/课程编号，不返回 `courseLabel/createdBy/status/createdAt/updatedAt`；关联记录缺失或文本字段空白时对应文本字段回落为 `null`；每个 task item 返回 `studentVisibilityStatus/isHistorical`，`total` 按最终返回班级分组统计。
-- 班级状态契约：`Classroom.status` 支持 `ACTIVE | ARCHIVED`；`PATCH /api/classrooms/:id` 可通过 body `status` 实现归档与恢复（`ARCHIVED <-> ACTIVE`）。
-- 班级响应契约：`ClassroomResponse` 继续保留 `courseId`，并新增只读 `course` 摘要对象（`id/code/name/term/courseLabel/status`）；课程记录缺失时允许 `course` 为空，但不得影响班级读取。
-- 班级删除契约：`DELETE /api/classrooms/:id` 仅在“空班级”允许删除；空班级判定主规则是 `ClassroomTask` 无记录且 `Enrollment` 无记录（包含 `REMOVED` 历史）；`studentIds` 仅作防御性辅助校验。
-- 非空班级删除错误：返回 `409 Conflict`，错误码 `CLASSROOM_NOT_EMPTY`，message=`该班级已有成员或任务记录，不能删除，只能归档`。
+- 教师管理与报表入口要求 teacher owner；班级详情允许 owner teacher 或当前正式学生成员。成员权威来源为 Enrollment，不回退 legacy studentIds。
+- 正式成员列表仅 owner teacher 可读，非 owner 返回 `404`；默认 ACTIVE，显式包含移除成员时返回 ACTIVE + REMOVED 历史。数据及选项解析见 [DTO Classroom family](./handoff-backend-dto-cheatsheet.md#classrooms)，默认成员排序和读取策略见 [Service Card 04](./handoff-backend-service-map.md#service-card-04)。
+- 教师看板默认仅返回 ACTIVE 课堂任务；显式包含关闭任务时返回 ACTIVE + CLOSED；RECALLED、缺失或未知实例状态不返回。既有实例不因关联模板非 PUBLISHED 而消失。统计范围与返回任务集合一致，默认排除 REMOVED 学生历史提交贡献；归档建议只作提示，不自动改变班级状态。
+- 学生看板要求当前 Enrollment ACTIVE，默认只展示 ACTIVE 班级内 ACTIVE 课堂任务。模板变为 ARCHIVED/DRAFT 不影响既有实例可见性。有截止时间的任务在截止后 30 天内仍显示为近期过期，更早的归为历史；无截止时间的任务在发布后 90 天内显示，更早的归为历史。includeHistorical 仅放开时间窗口，不放开班级或课堂任务状态边界。
+- 看板的状态字段、公开摘要及缺失关联兼容见 [DTO Dashboard / Student state](./handoff-backend-dto-cheatsheet.md#teacher--student-dashboard-response-family)；归档建议与任务筛选计算分别见 [Service Card 05](./handoff-backend-service-map.md#service-card-05) / [06](./handoff-backend-service-map.md#service-card-06)。
+- Weekly report 是 teacher owner 的班级进度/风险/AI 概览，学生范围为当前 Enrollment ACTIVE；窗口与公开数据见 [DTO Weekly report](./handoff-backend-dto-cheatsheet.md#weekly-report)，内部计算见 [Service Card 08B](./handoff-backend-service-map.md#service-card-08b)。
+- Process Assessment JSON / CSV 均为 teacher owner 的过程性指标，不能作为正式成绩仲裁；二者使用相同窗口、排除项与查询口径，CSV 媒体类型为 `text/csv; charset=utf-8`。临时任务排除只改变本次分析，不修改教学数据；零提交及排除全部任务时仍返回当前 ACTIVE 学生。
+- PA 的合法窗口、term 旧链接兼容、零值、rubric 及 CSV 数据合同见 [DTO Process Assessment](./handoff-backend-dto-cheatsheet.md#process-assessment)；评分、risk 与排除重算见 [Service Card 08G](./handoff-backend-service-map.md#service-card-08g)。
+- AI Learning Analytics 三个入口统一 teacher only + classroom owner only；课堂不存在或非 owner 返回 `404 Classroom not found`。学生详情仅允许当前课堂 ACTIVE Enrollment 学生，REMOVED、外班及非法学生 id 均安全返回 `404`。
+- Analytics 以课堂任务发布时间界定分析任务范围，呈现 AI 反馈介入后的班级、任务与学生结果。学生列表的 q 只匹配姓名/学号，不区分大小写，按字符串子串匹配；q、overallOutcome 与 engagementStatus 采用 AND 组合。非法 Query 按 DTO 校验拒绝（`400`）。公开参数/分页结果、方法学 V1.1、枚举与零值见 [DTO Analytics](./handoff-backend-dto-cheatsheet.md#ai-learning-analytics)，配对与搜索筛选分页算法见 [Service Card 08I](./handoff-backend-service-map.md#service-card-08i)。
+- Analytics 仅反映 EduForge AI 反馈介入后的提交行为及代码问题代理变化，不覆盖全部 AI 使用，不是正式成绩、学习能力或因果贡献结论，也不能证明学生已阅读/采纳反馈。净结果不代表时间序列趋势；反馈阶段不表示态度、AI 依赖、能力或风险。
+- Snapshot 是 teacher owner 的体积受控教学数据快照导出，超量数据附带截断提示；Query、meta/notes、公开投影与敏感省略见 [DTO Snapshot](./handoff-backend-dto-cheatsheet.md#classroom-export-snapshot)，组合与截断策略见 [Service Card 08H](./handoff-backend-service-map.md#service-card-08h)。
+- 班级状态为 `ACTIVE | ARCHIVED`，PATCH 支持归档/恢复，保留 POST archive。仅无 ClassroomTask 且无 Enrollment 记录（包含 REMOVED 历史）的空班级可删除；legacy studentIds 仅作删除防御校验。非空时返回 `409 Conflict`，`code=CLASSROOM_NOT_EMPTY`，message=`该班级已有成员或任务记录，不能删除，只能归档`。
 
 ## Classroom Tasks（Classrooms 子资源）
 
@@ -156,21 +133,16 @@ Notes:
 
 Notes:
 
-- `GET /api/classrooms/:id/publishable-task-templates`：teacher only + owner only（非 owner 返回 `404`）；固定只返回 `status=PUBLISHED` 且当前教师可见模板（自己私有 + 自己共享 + 他人共享）；自动排除当前班级已发布过的 `taskId`；支持 query `courseLabel, onlyMine, knowledgeModule, stage, page, limit`；当请求未显式传 `courseLabel` 且当前班级课程存在 `courseLabel` 时，排序优先课程分类匹配模板，再按 `updatedAt desc, createdAt desc`；每个 item 返回 `publisher:{id,name?}|null`，表示候选模板创建者/发布者摘要，只含 `id/name`，不暴露完整 User。
-- 发布候选查询的复合索引与性能职责见 [Service Card 08](./handoff-backend-service-map.md#service-card-08)，不在 endpoint inventory 复制索引实现。
-- `ClassroomTask.status` 生命周期：`ACTIVE | CLOSED | RECALLED`；新发布默认 `ACTIVE`；允许 `ACTIVE -> CLOSED`、`ACTIVE -> RECALLED`、`CLOSED -> ACTIVE`；其中撤回要求“无提交”。
-- `PATCH /api/classrooms/:classroomId/tasks/:classroomTaskId`：teacher only + owner only；仅允许更新实例级字段 `dueAt/settings.allowLate/settings.maxAttempts`；`status` 仍走独立 `/status` 接口；状态边界为 `ACTIVE/CLOSED` 可编辑、`RECALLED` 不可编辑。
-- `PATCH /api/classrooms/:classroomId/tasks/:classroomTaskId/status`：teacher only + owner only；`status` 入参允许 `ACTIVE/CLOSED/RECALLED`，但流转受后端状态机约束：允许 `ACTIVE -> CLOSED`、`ACTIVE -> RECALLED`、`CLOSED -> ACTIVE`，拒绝 `RECALLED` 相关恢复/再次流转与 `CLOSED -> RECALLED`；当目标为 `RECALLED` 且已有提交时返回 `400`（提示只能关闭）。
-- `CLOSED -> ACTIVE` 仅恢复提交状态，不会自动修改 `dueAt/settings.allowLate/settings.maxAttempts`；若需延长期限或修改规则，仍需调用实例配置更新接口。
-- 课堂任务返回口径（列表/详情/my-task-detail 的 `classroomTask` 区块）已补 `status` 字段；旧数据缺省状态按 `ACTIVE` 兼容输出。
-- `GET /api/classrooms/:id/tasks` 列表与详情 item 返回关联模板发布者摘要 `taskPublisher:{id,name?}|null`，来源为底层 `Task.createdBy` 用户，只含 `id/name`，不暴露完整 User。
-- `/api/classrooms/:classroomId/tasks/:classroomTaskId/submissions`：提交前先校验 `classroom.status=ACTIVE`、`ClassroomTask.status=ACTIVE` 与 `Enrollment ACTIVE`；学生提交不再要求关联模板当前 `task.status=PUBLISHED`，模板变为 `ARCHIVED` 不拒绝既有 classroomTask 提交；此外若 `dueAt` 存在且 `allowLate=false` 且 `now>dueAt`，拒绝（403），`error code = LATE_SUBMISSION_NOT_ALLOWED`；Submission 响应包含 `submittedAt/isLate/lateBySeconds` 语义字段。
-- 同一 `studentId + classroomTaskId` 在提交冷却窗口内重复提交时返回 `429 + code=SUBMISSION_COOLDOWN_ACTIVE`，并返回 `retryAfterMs/retryAfterSeconds`；冷却窗口的配置与默认值由 config matrix 维护。
-- `GET /api/classrooms/:classroomId/tasks/:classroomTaskId/submissions`：teacher only + owner only（非 owner 返回 `404`）；只按 `classroomTaskId` 分页查询，禁止按 `taskId` 跨班聚合；默认只返回当前 Enrollment `ACTIVE` 学生的 submissions，`total` 与 `items` 使用同一 ACTIVE 过滤口径；默认排序 `submittedAt desc, _id desc`；`aiFeedbackStatus` 无 job 时为 `NOT_REQUESTED`；`items[*].feedbackCount` 为该 submission 在 Feedback 集合中的总条数（按当前页 submissionIds 批量聚合），无反馈时返回 `0`；不返回 `passwordHash`、`content.codeText`。
-- `/api/classrooms/:classroomId/tasks/:classroomTaskId/my-task-detail`：student only，且必须 Enrollment ACTIVE；Query: `includeFeedbackItems, feedbackLimit`；响应顶层返回 `participationStatus`（`readOnly/canSubmit/canRequestAiFeedback/reason/message`），作为状态层只读信号；学生端运行态不再由模板当前状态决定，原因优先级现为 `CLASSROOM_NOT_ACTIVE > CLASSROOM_TASK_NOT_ACTIVE > ACTIVE`；`classroom.status/classroomTask.status/task.status` 仍稳定返回，但 `task.status` 仅作模板信息展示；`participationStatus` 不混入 `dueAt/allowLate/cooldown/NOT_REQUESTED` 等动作级规则；`attemptNo>1` 在未手工 request 时可能 `NOT_REQUESTED`（无 job，合法语义）。
-- `/api/classrooms/:classroomId/tasks/:classroomTaskId/learning-trajectory`：teacher only；Query: `window, page, limit, sort, order, includeAttempts, includeTagDetails`；默认 `window=all`，默认 `limit=20` 不变；后端兼容集合 `all/7d/24h/30d`（`24h/30d` 为兼容窗口）；分页参数与上限见 [DTO Cheatsheet](./handoff-backend-dto-cheatsheet.md)；`window=all` = 该课堂任务口径下无时间下界过滤；学生范围取 Enrollment ACTIVE；`items[*]` 返回结构化学生公开信息 `student:{id,name,studentNo,email}`（并兼容回填 `studentName`）；未提交学生也会以 `notSubmitted` 维度出现在 `items`；`includeAttempts=true` 时 `items[*].attempts[*].feedbackCount` 返回该 submission 在 Feedback 集合中的总条数（AI/TEACHER/SYSTEM 全来源，按当前页 submissionIds 批量聚合）；`feedbackSummary.totalItems` 仍保留 AI 摘要语义。
-- `/api/classrooms/:classroomId/tasks/:classroomTaskId/review-pack`：teacher only；Query: `window, topK, examplesPerTag`；默认 `window=all`；后端兼容集合 `all/7d/24h/30d`（`24h/30d` 为兼容窗口）；`window=all` = 该课堂任务口径下无时间下界过滤；禁止敏感字段，examples 不包含 `codeText/prompt/apiKey`；`examples` 现为去重后的典型样例池（以 `feedbackId` 去重），每项含 `feedbackId/submissionId/attemptNo/severity/type/message/suggestion/source/primaryTag/matchedTags/tags`；`topTags` 继续按标签展开计数（多标签 feedback 会同时贡献多个 tag 计数）；`studentTiers` 固定返回，且基于 Enrollment ACTIVE + 窗口内 `submission.createdAt`，按每个学生最新提交分层（`good=Succeeded 且 latestErrorCount=0`，`watch=其余已提交`，`notSubmitted=窗口内无提交`，其中 `latestErrorCount` 仅统计该最新提交下 `source=AI && severity=ERROR`）；`studentTiers.*[*]` 统一包含 `studentId/studentName/studentNo`（`studentName` 缺失时回落为 `未知学生`），且三组为完整 ACTIVE 分层，不再是后端预览列表。
-- `/api/classrooms/:classroomId/tasks/:classroomTaskId/ai-metrics`：Query `window, includeTags`；保留既有口径（仅 `1h/24h/7d`），统计严格按 `classroomTaskId` 隔离；本轮未引入 `all`。
+- 管理、提交列表、轨迹、复盘和 AI metrics 入口要求 teacher owner；普通任务列表/详情允许 owner teacher 或当前 Enrollment ACTIVE 学生。实例必须属于路径所指班级。
+- 发布候选查询仅 owner teacher 可读，非 owner 返回 `404`；仅返回当前教师可见的已发布模板（自己私有、自己共享、他人共享），排除当前班级已发布过的模板。字段见 [DTO 发布候选](./handoff-backend-dto-cheatsheet.md#发布候选模板)；课程分类优先与排序见 [Service Card 07](./handoff-backend-service-map.md#service-card-07)，索引见 [08](./handoff-backend-service-map.md#service-card-08)。
+- 新实例默认 ACTIVE；生命周期允许 `ACTIVE -> CLOSED`、`ACTIVE -> RECALLED`、`CLOSED -> ACTIVE`；撤回要求无提交。拒绝 RECALLED 恢复/再次流转以及 CLOSED -> RECALLED；已有提交而试图撤回返回 `400`，提示只能关闭。
+- 实例配置 PATCH 与状态 PATCH 分离：仅 ACTIVE/CLOSED 可编辑发布参数，RECALLED 不可编辑；恢复 ACTIVE 只恢复提交状态，不自动延长截止时间或更改迟交/尝试次数规则。输入/返回字段及旧实例默认状态见 [DTO ClassroomTask](./handoff-backend-dto-cheatsheet.md#classroomtask-dto--response-family)。
+- 课堂提交要求班级 ACTIVE、实例 ACTIVE、学生 Enrollment ACTIVE；无需关联模板仍为 PUBLISHED，模板归档不拒绝既有实例提交。有截止时间、禁止迟交且已超过截止时间时，返回 `403`，`code=LATE_SUBMISSION_NOT_ALLOWED`。
+- 同一 studentId + classroomTaskId 在冷却窗口内重复提交返回 `429`，`code=SUBMISSION_COOLDOWN_ACTIVE`，并提供重试时间提示；配置与默认窗口见 [Config Matrix](./handoff-backend-config-matrix.md)，提示数据见 [DTO Submission](./handoff-backend-dto-cheatsheet.md#submission-request--response-family)。
+- 实例提交列表非 owner 返回 `404`；严格按 classroomTaskId 读取，默认只包含当前 ACTIVE 学生的 submissions，total 与 items 的成员范围一致。默认提交时间倒序及实现见 [Service Card 07](./handoff-backend-service-map.md#service-card-07)；公开列表、全来源 feedbackCount 与详情内容暴露区别见 DTO Submission。
+- my-task-detail 为 student only，仍要求 Enrollment ACTIVE。participationStatus 只提供状态层只读信号，原因优先级为 `CLASSROOM_NOT_ACTIVE > CLASSROOM_TASK_NOT_ACTIVE > ACTIVE`；模板状态只供展示，不决定学生运行态。该信号不包含截止、迟交、冷却或 AI 请求资格，不能替代动作入口的最终校验；字段及反馈预览合同见 [DTO My-task-detail](./handoff-backend-dto-cheatsheet.md#my-task-detail--ai-feedback-summary-family)。
+- Learning trajectory 覆盖当前 ACTIVE 学生，包括未提交学生；Review pack 提供该实例的典型问题样例与完整学生分层。两者均支持资源范围内无时间下界的读取，兼容窗口、返回形状和安全暴露分别见 [DTO Trajectory](./handoff-backend-dto-cheatsheet.md#learning-trajectory) / [Review pack](./handoff-backend-dto-cheatsheet.md#review-pack)；内部聚合/样例选择见 [Service Card 08E](./handoff-backend-service-map.md#service-card-08efeature-learning-trajectory-z4) / [08F](./handoff-backend-service-map.md#service-card-08f)。
+- AI metrics 的 jobs 与 feedback 均严格按 classroomTaskId 隔离，不跨班；独立窗口集合与 nullable 延迟等公开数据见 [DTO AI Metrics](./handoff-backend-dto-cheatsheet.md#ai-metrics)，内部指标实现见 [Service Card 11](./handoff-backend-service-map.md#service-card-11)。
 
 ## Learning Tasks
 
@@ -196,48 +168,34 @@ Notes:
 
 Notes:
 
-- `Task.courseLabel`：可选字符串字段（单选课程分类），白名单来源 `backend/src/modules/learning-tasks/task-course-labels.constants.ts`；非 `Course` 外键，不参与权限与发布约束，不限制跨课程复用。
-- `Task.visibility`：模板可见性字段，值域 `PRIVATE | SHARED`（白名单来源 `backend/src/modules/learning-tasks/task-template-visibility.constants.ts`）；新建默认 `PRIVATE`；该字段只影响“读可见性”，不改变作者权限边界。
-- `POST/PATCH/GET /api/learning-tasks/tasks*`：入参与出参已支持 `courseLabel` 与 `visibility`；旧任务缺省 `visibility` 兼容按 `SHARED` 处理。
-- `GET /api/learning-tasks/tasks` 与 `GET /api/learning-tasks/tasks/:id` 返回任务模板发布者摘要 `publisher:{id,name?}|null`，来源为 `Task.createdBy` 用户，只含 `id/name`。
-- 任务模板生命周期已收口为单向流转：创建时仅允许初始 `status=DRAFT|PUBLISHED`（未传时默认 `DRAFT`），且禁止创建 `ARCHIVED`；创建成功后只允许 `DRAFT -> PUBLISHED -> ARCHIVED`。
-- `PATCH /api/learning-tasks/tasks/:id`：只负责内容编辑，不再承载状态生命周期变更；如果请求体包含 `status` 且值与当前状态不同，返回 `400 Task template status must be changed through lifecycle actions`；如果 `status` 与当前状态相同，后端忽略该字段并继续处理其它可编辑字段；`ARCHIVED` 模板普通内容更新仍返回 `400 Archived tasks cannot be updated`。
-- `POST /api/learning-tasks/tasks/:id/publish`：teacher only；仅任务作者可调用；只允许 `DRAFT -> PUBLISHED`；当前已是 `PUBLISHED` 时保持幂等返回当前任务；当前是 `ARCHIVED` 时返回 `400 Archived task templates cannot be published`。
-- `POST /api/learning-tasks/tasks/:id/archive`：teacher only；仅任务作者可调用；只允许 `PUBLISHED -> ARCHIVED`；`DRAFT/ARCHIVED` 均返回 `400 Only published task templates can be archived`；即使该模板已被 `ClassroomTask` 引用也允许归档，且不影响已发布 classroomTask 运行。
-- `POST /api/learning-tasks/tasks/:id/restore`：teacher only；仅任务作者可调用；兼容保留但不再作为正常业务能力，稳定返回 `400 Archived task templates cannot be restored to draft; clone as draft instead`；后续若需复用归档模板，应走“复制为新草稿”新能力。
-- `GET /api/learning-tasks/tasks` 请求 DTO 为 `QueryTaskDto`；默认 `scope=mine`；Query 字段与兼容值见 [DTO Cheatsheet](./handoff-backend-dto-cheatsheet.md)。
-- `scope` 语义：
-  - `mine`：仅当前教师自己的模板（`PRIVATE + SHARED`）。
-  - `shared`：共享池（`visibility=SHARED` + 旧数据缺省 `visibility`），包含“我自己设为 SHARED 的模板”。
-  - `all`：当前教师可见全集（我的全部 + 共享池）。
-- `createdBy`：仅保留兼容字段；当前列表语义以 `scope` 为主，不再作为越权筛选入口。
-- `GET /api/learning-tasks/tasks/:id`：可见性规则为“作者本人可读；他人仅可读 `SHARED`（含旧数据缺省兼容视为 `SHARED`）；他人 `PRIVATE` 不可读（404）”。
-- `/api/learning-tasks/submissions/:submissionId/ai-feedback/request` 是产品能力，不受 `AI_FEEDBACK_DEBUG_ENABLED` 门禁影响，但受登录 + RBAC + 资源归属校验；学生对本人课堂任务 submission 手工请求 AI 前仍需满足 `classroom.status=ACTIVE`、`ClassroomTask.status=ACTIVE`，但不再要求模板当前 `task.status=PUBLISHED`，模板变为 `ARCHIVED` 不影响既有课堂任务的 AI 请求。
-- 幂等语义：job 已存在则返回既有 job（200）；不存在则创建 `PENDING` job。
-- `GET /api/learning-tasks/submissions/:id` 权限：学生本人可读；若 `classroomTaskId` 存在，仅该 `classroomTask` 所属班级 owner teacher 可读；若 `classroomTaskId` 为空，仅 `task.createdBy` 对应的 task owner teacher 可读；其他用户返回 `403`；submission 不存在返回 `404`。
-- `GET /api/learning-tasks/submissions/:id` 返回稳定读源字段：`id/taskId/classroomTaskId/studentId/studentName/taskTitle/content.language/content.codeText/submittedAt/attemptNo/isLate/lateBySeconds/aiFeedbackStatus`；不返回 `passwordHash`。
-- `aiFeedbackStatus` 口径：无 job 时显式返回 `NOT_REQUESTED`；`GET /api/learning-tasks/submissions/:id` 允许返回 `content.codeText`，但 `GET /api/classrooms/:classroomId/tasks/:classroomTaskId/submissions` 列表接口仍不返回 `content.codeText`。
-- `PATCH /api/learning-tasks/submissions/:submissionId/feedback/:feedbackId`：teacher only；若 submission 绑定 `classroomTaskId`，仅课堂任务所属班级 owner teacher 可改；未绑定课堂任务时仅 task owner teacher 可改；feedback 不存在或不属于该 submission 返回 `404`；仅允许修改 `source=TEACHER` 的反馈，`AI/SYSTEM` 返回 `403 Only teacher feedback can be updated`；返回单条 feedback response，含 `createdBy/createdAt/updatedAt`。
-- Feedback response 的字段与 `createdBy` 兼容暴露口径见 [DTO Cheatsheet](./handoff-backend-dto-cheatsheet.md)；接口权限与可修改来源仍按上述 endpoint 合同执行。
+- 模板可见性只影响读取，不改变作者的管理权限。课程分类不参与权限、发布约束或跨课程复用限制；字段/默认/白名单见 [DTO Task template](./handoff-backend-dto-cheatsheet.md#task-template-dto--response-family)。
+- 模板创建仅允许初始 DRAFT/PUBLISHED，不能直接创建 ARCHIVED；后续单向 `DRAFT -> PUBLISHED -> ARCHIVED`。
+- 普通 PATCH 不承担生命周期变更：status 与当前状态不同时返回 `400 Task template status must be changed through lifecycle actions`；相同时忽略该字段并继续编辑其它内容。ARCHIVED 模板普通更新返回 `400 Archived tasks cannot be updated`。
+- publish 为 teacher only、作者 only；DRAFT 可发布，PUBLISHED 幂等返回当前模板，ARCHIVED 返回 `400 Archived task templates cannot be published`。
+- archive 为 teacher only、作者 only；仅 PUBLISHED 可归档，其余返回 `400 Only published task templates can be archived`。被 ClassroomTask 引用仍可归档，不影响已发布实例运行。
+- restore 仅作为 teacher/作者的兼容入口，稳定返回 `400 Archived task templates cannot be restored to draft; clone as draft instead`，不再恢复归档模板。
+- 列表 scope 语义：mine 是本人全部模板；shared 是共享池（包含本人共享模板和旧数据缺省 visibility）；all 是本人全部与共享池的可见全集。createdBy 仅保留字段兼容，不能成为越权筛选入口。详情允许作者读取，其他人仅可读共享模板（旧数据缺省也视为共享），他人的 PRIVATE 模板返回 `404`。
+- 通用 task submission 可无 classroomTaskId；其模板级统计与 common-issues 入口不能替代课堂实例报表。提交详情 `GET /api/learning-tasks/submissions/:id` 是稳定读源：学生本人可读；有实例关联时仅该班级 owner teacher 可读，无实例关联时仅 task owner teacher 可读；其他用户 `403`，不存在 `404`。字段及 detail/list 的代码暴露区别见 [DTO Submission](./handoff-backend-dto-cheatsheet.md#submission-request--response-family)。
+- 手工 AI request 是登录、RBAC 与资源归属保护的产品能力，不受 AI_FEEDBACK_DEBUG_ENABLED 门禁影响。学生对本人课堂提交请求时要求班级/实例 ACTIVE，不要求模板仍为 PUBLISHED；已有 job 幂等返回（200），无 job 时创建 PENDING job。
+- 教师反馈更新要求对 submission 的管理权：有实例关联时是班级 owner，无实例关联时是 task owner；feedback 不存在或不属于该 submission 返回 `404`。仅 TEACHER 来源可改，AI/SYSTEM 返回 `403 Only teacher feedback can be updated`；已有 createdBy 时还必须是该作者，否则 `403 Not allowed to update feedback`。
+- 新建 TEACHER feedback 记录当前教师作者；旧 TEACHER feedback 缺失 createdBy 时，有管理权教师可更新并补写作者，保留原 createdAt。字段白名单与兼容投影仅见 [DTO Feedback](./handoff-backend-dto-cheatsheet.md#feedback-dto--response-family)，内部协作见 [Service Card 08](./handoff-backend-service-map.md#service-card-08)。
 
 ## AI Feedback Debug / Ops（门禁接口）
 
 门禁条件：
 
-- 全局 `SessionAuthGuard`（非 `@Public` 路由必须登录）。
-- 路由显式 `AiFeedbackDebugEnabledGuard + RolesGuard`。
-- `AI_FEEDBACK_DEBUG_ENABLED !== 'true'` 时返回 404（优先于 403）。
+- 全局 SessionAuthGuard 要求登录；路由显式使用 AiFeedbackDebugEnabledGuard + RolesGuard，teacher only。
+- `AI_FEEDBACK_DEBUG_ENABLED !== 'true'` 时返回 `404`，优先于角色拒绝的 `403`；它不关闭上文产品手工 AI request。
 
 | Method | Path                                                | 用途                                    |
 | ------ | --------------------------------------------------- | --------------------------------------- |
 | GET    | `/api/learning-tasks/ai-feedback/jobs`              | 查询 job 队列状态（含失败与重试视角）。 |
 | POST   | `/api/learning-tasks/ai-feedback/jobs/process-once` | 手动执行一次处理批次（用于调试/运维）。 |
 
-## 聚合口径特别说明
+输入与诊断投影见 [DTO diagnostics](./handoff-backend-dto-cheatsheet.md#ai-feedback-diagnostics--request-family)，Job/批次处理内部职责见 [Service Card 10](./handoff-backend-service-map.md#service-card-10) 及后续处理卡片。
 
-- 教师看板：`/api/classrooms/:id/dashboard` 的任务维度统计按 `classroomTaskId` 聚合；默认仅统计返回的 `ACTIVE` classroomTask，`includeClosedTasks=true` 时统计返回的 `ACTIVE+CLOSED` 集合；默认教学统计统一只面向当前 Enrollment `ACTIVE` 学生，REMOVED 学生历史 submissions 保留但不进入默认分子/迟交/AI/tags 统计。
-- 教师看板 task item 的 `taskTemplateStatus` 表示关联模板当前状态；`taskPublisher` 表示关联模板创建者/发布者摘要。学生看板、学生详情、学生提交与学生课堂任务 AI 请求均不再要求模板当前 `task.status=PUBLISHED`。
-- 学生看板：`/api/classrooms/mine/dashboard` 的 `classroom.teacher` 为班级级教师摘要（`id/name/employeeNo`，无 email；教师记录缺失时保留 `teacher.id` 并把文本字段回落为 `null`）；`classroom.course` 为班级级课程摘要（`id/name/term/code`；课程记录缺失时保留 `course.id` 并把文本字段回落为 `null`，不返回 `courseLabel/createdBy/status/createdAt/updatedAt`）；`myLatestSubmission`、`aiFeedbackStatus` 与 `completionStatus` 只围绕最终返回的 `classroomTaskId` 计算；默认隐藏归档班级、非 ACTIVE classroomTask 与长期历史任务，`includeHistorical=true` 仅放开时间窗口，不放开班级/课堂任务状态边界。
-- `/api/classrooms/:classroomId/tasks/:classroomTaskId/ai-metrics` 统计严格按 `classroomTaskId` 隔离（jobs 与 feedback 均不跨班汇总）。
-- 成员权威来源：Enrollment-only（`role=STUDENT,status=ACTIVE`）；`classroom.studentIds` 不作为授权/统计来源。
-- 隔离原则：课堂分析/报表/复盘/导出均按 `classroomTaskId` 隔离，禁止用 `taskId` 兜底做跨班聚合。
+## Maintenance
+
+- 以 endpoint 为单位维护 inventory、角色/归属、生命周期、错误、副作用和高层兼容行为；路径变化在此更新，不要求 DTO 重建一份 endpoint 清单。
+- Notes 新增字段矩阵、Query 默认值、nested response 或安全字段列表时，归入 DTO 对应 family，并从本节链接；新增配对、比率分母、查询/排序或聚合步骤时，定位 Service Owner。
+- 删除 Notes 前逐条确认公开事实已由正确 Owner 承接；既有跨文档入口锚点保持可达，不用压缩行数代替事实保全。
