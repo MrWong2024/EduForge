@@ -1,5 +1,13 @@
 # 关键决策记录（Decisions）
 
+## Owner / Maintenance
+
+本文维护长期工程决策、理由、影响及历史生命周期；当前具体配置事实由 [Config Matrix](./handoff-backend-config-matrix.md) 维护，实现事实以当前代码为准。
+
+- Decision 默认记录创建时的历史决策；当前仍有效且未被替代的决策可视为 `CURRENT`，既有决策无需逐条补 `Status: CURRENT`。
+- 后续替代决策时保留原背景、理由与历史语义，显式标记 `Status: SUPERSEDED`，并用 `Superseded by: Decision N / 当前 Owner 文档` 指向承接来源；历史内容不再作为 current contract。
+- 新增长期决策使用当前最大编号的连续下一编号，不重排历史编号，也不复制 Config Matrix 的配置表或环境组合。
+
 ## 1) 引入 `classroomTaskId` 做数据隔离（Submission/Job/聚合口径）
 
 **Decision**  
@@ -93,6 +101,10 @@ controller 的 `@UseGuards(RolesGuard) + @Roles(...)` 成为授权主门禁，se
 
 ## 8) 数据库环境必须 fail-fast（运行期与运维脚本双重校验）
 
+Status: SUPERSEDED
+
+Superseded by: [Decision 17](#17-数据库连接的环境与用途约束)
+
 **Decision**  
 `DatabaseModule` 与 `scripts/sync-indexes.ts` 都要求 DB 名与 `NODE_ENV` 命名约定匹配，不匹配立即报错退出。  
 
@@ -174,6 +186,10 @@ detail 主视图需要稳定读取 `taskTitle/studentName/language/submittedAt/a
 
 ## 14) AI 默认联调/验收模式采用 `Stub + worker`，`process-once` 仅作 debug/ops
 
+Status: SUPERSEDED
+
+Superseded by: [Decision 18](#18-ai-执行职责分离)
+
 **Decision**  
 默认联调/验收模式采用 `Stub + worker`。  
 推荐配置为 `AI_FEEDBACK_PROVIDER=stub` 且 `AI_FEEDBACK_WORKER_ENABLED=true`。  
@@ -216,3 +232,40 @@ provider 在协议层增加 `items<=2` 的硬闸门；`AiFeedbackProcessor` comp
 替换 7 个通用宪法文档后，Codex/GPT 续接 EduForge 应优先阅读 `docs/handoff/**`。  
 若 handoff 与当前代码冲突，以当前工作区代码为准，并同步修订对应 handoff。  
 本决策不改变任何业务接口、DTO、权限逻辑、返回结构或测试代码。
+
+## 17) 数据库连接的环境与用途约束
+
+Status: CURRENT
+
+**Decision**
+
+database connection fail-fast 由运行环境（environment）、database purpose 与 Config Matrix 的正式映射共同约束，不能简化为单一 `NODE_ENV -> databaseName`。
+连接前声明的目标必须符合允许映射；连接后仍须验证 actual databaseName，不匹配立即拒绝，不回退到其他数据库。
+
+**Rationale**
+
+同一运行环境可以承载不同数据库用途；仅校验环境命名无法保证用途隔离，目标声明与实际连接必须分别验证。
+
+**Consequences**
+
+具体 databaseName、URI 变量、账号与默认 purpose 统一由 [Config Matrix](./handoff-backend-config-matrix.md) 维护，不在 Decision Log 复制；后续连接入口须遵守环境与用途共同约束的 fail-fast 边界。
+
+## 18) AI 执行职责分离
+
+Status: CURRENT
+
+**Decision**
+
+AI Provider selection、后台 Worker 自动消费与 debug/manual 执行入口属于不同职责，不互相充当 AI 总开关：
+
+- Provider 决定实际 AI 实现，当前支持 `stub` / `bailian`。
+- Worker 只控制后台自动消费；关闭 Worker 不禁用 Provider，也不禁止已通过诊断门禁的显式处理。
+- `process-once` 是受 debug 门禁与权限控制的手工诊断执行入口，与 Worker 共用 processor；产品 request 只负责确保 job，与诊断执行保持分离。
+
+**Rationale**
+
+将实现选择、自动调度与诊断执行分开，可避免把某次联调组合误当作长期架构合同，同时保持自动与手工处理的执行约束一致。
+
+**Consequences**
+
+各环境 provider / worker / model / mail 组合统一由 [Config Matrix](./handoff-backend-config-matrix.md) 维护，Decision Log 不固定 development/test/browser/production 组合。

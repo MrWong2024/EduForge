@@ -59,8 +59,8 @@ EduForge 当前前端已形成教师端与学生端两个角色入口，共用�
 ## 8. 当前与未来边界
 
 - 本基线只描述当前 EduForge 教师/学生产品形态能够支持的稳定原则。
-- Learning Evidence Foundation Phase 1 仅在 [项目 Roadmap](./handoff-roadmap.md) 中处于 `PLANNED`；尚未成为当前 UI 能力。
-- Task Workspace、Evidence Timeline 或其他未来界面不得因名称已出现而被视为已实现页面、既定布局或当前组件合同；只有产品范围和实现事实稳定后，才更新对应 Owner 文档与本设计投影。
+- Learning Evidence Foundation、Task Workspace、Evidence Timeline 或其他未来设计概念，在尚未进入当前实现前，不得被视为现有 UI 能力、既定布局或当前组件合同。
+- 具体实现状态以 [项目 Roadmap](./handoff-roadmap.md) 与当前代码为准；只有产品范围和实现事实稳定后，才更新对应 Owner 文档与本设计投影。
 
 ## 9. 维护规则
 

@@ -10,7 +10,7 @@
 - 详细配置、数据库命名、env、AI provider/worker/debug 运行模式看 `docs/handoff/handoff-backend-config-matrix.md`。
 - 详细 DTO 请求体看 `docs/handoff/handoff-backend-dto-cheatsheet.md`。
 - 详细 Service 职责与边界看 `docs/handoff/handoff-backend-service-map.md`。
-- 详细 E2E、mock server、spec 覆盖和测试命令看 `docs/handoff/handoff-backend-testing-playbook.md`。
+- 后端测试层、真实 runner/命令、Database Purpose、Browser Acceptance foundation、fixture/verifier/cleanup 与 evidence governance 见 [Backend Testing Playbook](./handoff-backend-testing-playbook.md)。
 - 后端技术栈事实：Node.js LTS 24.x、NestJS 11.x、MongoDB 8.x（Mongoose）、TypeScript、REST API。
 - 前端正式后端访问路径为同域 `/api/proxy/**`，代理目标由 `FRONTEND_BACKEND_ORIGIN` 控制。
 
@@ -38,8 +38,8 @@ backend/
 
 运行与运维入口摘要：
 
-- 应用连接串读取 `MONGO_URI`；索引同步、用户导入等运维脚本读取 `MONGO_ADMIN_URI`。
-- `NODE_ENV` 与数据库物理库名绑定：`development -> eduforge_dev`，`test -> eduforge_test`，`production -> eduforge`。
+- 数据库选择由运行环境与 database purpose 共同约束；连接前的目标声明与连接后的实际 databaseName 均须通过校验。
+- 具体 databaseName、URI 变量、APP/Admin 账号和默认 purpose 由 [Config Matrix](./handoff-backend-config-matrix.md) 维护。
 - production 索引同步入口是 `npm run sync-indexes`；离线用户导入入口是 `npm run import-users -- --file="..." [--dry-run] [--reset-password]`。
 
 ## 2) 领域模型摘要
@@ -80,10 +80,10 @@ backend/
 
 AI Feedback：
 
-- 默认联调模式为 `Stub + worker`，即 `AI_FEEDBACK_PROVIDER=stub` 且 `AI_FEEDBACK_WORKER_ENABLED=true`。
+- AI Feedback Provider 当前支持 `stub` / `bailian`；Provider 决定实际 AI 实现，Worker 独立控制后台自动消费。
 - `process-once` 只用于 debug/ops，受 `AI_FEEDBACK_DEBUG_ENABLED` 与 RBAC 保护；debug gate 关闭时按 `404` 处理。
 - 自动入队采用 attempt-based 策略：默认首提自动入队，后续提交未手工 request 时可保持 `NOT_REQUESTED`。
-- Provider、Bailian 真实调用、并发/限流/超时/重试等细节统一看 config-matrix 与 testing-playbook。
+- Provider 选择、Worker 状态、模型、Mail 等各环境当前配置与具体运行参数以 [Config Matrix](./handoff-backend-config-matrix.md) 为准。
 
 ## 4) 主链路当前状态摘要
 

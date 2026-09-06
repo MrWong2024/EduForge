@@ -7,10 +7,13 @@
 - 具体实现以当前 `frontend/**` 源码或用户指定 commit 为最高优先级；与 handoff 冲突时先核对代码。
 - 所有正式业务请求统一走同域 `/api/proxy/**`，不要在业务页绕过 proxy 直连后端。
 - 代理目标由 `FRONTEND_BACKEND_ORIGIN` 决定，代理实现位于 `app/api/proxy/[...path]/route.ts`。
-- 详细页面、路由、主接口与完成度看 `docs/handoff/handoff-frontend-route-map.md`。
-- 前端 API helper、BFF proxy 与后端接口对接关系看 `docs/handoff/handoff-frontend-api-map.md`。
-- 详细组件职责与“改哪里/不要改哪里”看 `docs/handoff/handoff-frontend-component-map.md`。
-- 当前前端事实以本文、route-map、api-map、component-map 与 `frontend/**` 源码为准；历史阶段流水账不再维护 handoff 文件。
+- 产品阶段、Work Package 状态与下一主线由 [Roadmap](./handoff-roadmap.md) 唯一维护。
+- 页面、路由、访问边界与数据来源由 [Route Map](./handoff-frontend-route-map.md) 维护。
+- 前端 API helper、BFF proxy 与 frontend/backend integration 由 [Frontend API Map](./handoff-frontend-api-map.md) 维护。
+- 组件职责与“改哪里/不要改哪里”由 [Component Map](./handoff-frontend-component-map.md) 维护。
+- 稳定 UX、视觉与交互原则由 [Design Baseline](./handoff-frontend-design-baseline.md) 维护。
+- Browser evidence、scripted / Agent-assisted / Human smoke 治理由 [Frontend Testing Playbook](./handoff-frontend-testing-playbook.md) 维护。
+- 本文只维护当前前端实现全貌与实现边界；专项事实回到上述 Owner，历史阶段流水账不再维护 handoff 文件。
 - 后端接口、DTO、配置与运行模式分别看对应 `handoff-backend-*` 文件。
 
 ## 1) 前端骨架摘要
@@ -105,7 +108,7 @@ Student 学习链路：
 
 具体 helper、proxy、endpoint、请求/响应与 UI 映射统一由 `handoff-frontend-api-map.md` 维护；后端 HTTP 与 DTO 合同分别回到 backend API map 与 DTO cheatsheet。
 
-## 6) 高风险边界与当前阶段判断
+## 6) 高风险边界与当前实现边界
 
 不得回退：
 
@@ -117,10 +120,11 @@ Student 学习链路：
 - 不要在 AI 反馈介入成效分析页重算后端的精细结果、总体结果、反馈参与阶段或 rate 分母，不要把零可比平均值当真实持平点，也不要使用成绩/能力增长/因果贡献措辞。
 - 不要把 raw JSON 调试块当主视图，也不要让主链路依赖 raw JSON 才能操作。
 
-当前阶段：
+当前实现边界：
 
-- 已达到 Teacher/Student 主链路可用、P0 真接口前端收口、任务模板层与班级实例层职责清晰、过程性评价、AI Feedback 产品入口与教师端 AI 反馈介入成效分析可用。
-- 仍未进入最终交付定版：部分页面保留低权重 raw JSON 调试块；正式 `/ops/**` 前端页面未建设；模板治理仍为 MVP（删除/复制/批量等能力未提供）；浏览器级自动化 smoke 尚未建立。
+- Teacher/Student 主链路已接真接口，任务模板层与班级实例层职责清晰；过程性评价、AI Feedback 产品入口与教师端 AI 反馈介入成效分析已可用。
+- 部分页面保留低权重 raw JSON 调试块；正式 `/ops/**` 前端页面未建设；模板删除/复制/批量等能力未提供。
+- 当前已有合法 non-UI scripted Browser evidence / micro-profile，不等于产品 UI scripted smoke，也不表示产品 UI 主流程已验收通过；产品 UI 主流程的证据模式由 [Frontend Testing Playbook](./handoff-frontend-testing-playbook.md) 决定。
 
 ## 7) 细节文档索引
 

@@ -34,7 +34,7 @@ EduForge 当前是面向教师与学生的教学任务平台，已形成以下�
 
 DG-01 已完成独立治理验收并收口为当前治理基线，不改变 EduForge 产品行为。最终结果为：
 
-- 7 份通用工程治理文档已与成熟上游基线保持同源。
+- DG-01 完成时，7 份通用工程治理文档已完成成熟上游基线同源对齐；此后按 EduForge 自身治理需求独立演进，以当前仓库版本为准。
 - 项目 handoff 已建立 Roadmap、Frontend Design Baseline、导航型 INDEX 与“一事实一 Owner”结构。
 - Backend / Frontend Testing Playbook、测试数据库职责和最低充分 Browser evidence 治理已建立。
 - 独立 DG-01V 已验证同源性、项目污染、Owner 边界、Roadmap/Design/Testing 事实、Browser 治理、链接与 Git 范围，阻断门禁全部通过。
