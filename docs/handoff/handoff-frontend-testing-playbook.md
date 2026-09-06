@@ -217,7 +217,4 @@ Human smoke 有独立证据职责，不是 scripted Browser 或 Agent-assisted B
 
 ## 13. Current Known Gaps
 
-- 前端已有 pure/static contracts runner 与首个 route-path contract；其他 unit/logic 证据仅在出现稳定、独立且现有证据无法证明的逻辑风险时增加。
-- 当前 scripted 证据限于第 7.3 节的 BFF Cookie roundtrip、HttpOnly 与 Context Cookie/Storage 隔离；其他 reload、credentials/CORS 或 Browser topology 合同仍须按实际风险独立资格审查，不能从该 profile 泛化为已覆盖。
-- Agent-assisted 与 Human smoke 目前只有治理和候选范围，没有可继承的 passed evidence、专用 fixture 或结果登记；实际任务必须按真实执行模式报告。
-- Browser DB foundation 已存在，但写入型 Browser smoke 的 fixture、verifier 与 UI/DB Profile 尚未建立；不得将数据库连通视为 UI 验收通过。
+None currently recorded.

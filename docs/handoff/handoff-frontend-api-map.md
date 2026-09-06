@@ -104,7 +104,7 @@
   - 注意：只按 `classroomTaskId` 读取，不用 `taskId` 兜底过滤。
 - 提交详情和反馈：Teacher/Student submission pages + feedback forms -> `/api/proxy/learning-tasks/submissions/:id*`。
   - 对应后端：submission detail、feedback list、teacher feedback create/update。
-  - 注意：detail 主体读源是 `GET /api/learning-tasks/submissions/:id`；query 只做导航上下文。
+  - 注意：正式 detail API `GET /api/learning-tasks/submissions/:id` 是主体 SoT；URL query 仅用于导航上下文及正式 detail 缺字段时的少量展示兼容 fallback（包括 Student 页的 AI 状态展示），不得覆盖已有权威字段，也不作为权威业务数据源。
 
 ### 3.4 Student 学习链路
 

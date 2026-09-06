@@ -380,7 +380,7 @@
 - Controller & Method: `backend/src/modules/classrooms/classroom-tasks/controllers/classroom-tasks.controller.ts` -> `ClassroomTasksController.updateClassroomTaskStatus`
 - DTO: `UpdateClassroomTaskStatusDto` (`backend/src/modules/classrooms/classroom-tasks/dto/update-classroom-task-status.dto.ts`)
 - Required fields:
-  - `status`
+  - `status`（`@IsIn(CLASSROOM_TASK_MUTABLE_STATUSES)`）
 - Enums:
   - `status`: `ACTIVE | CLOSED | RECALLED`
 - Nested structure: None
@@ -392,12 +392,7 @@
 }
 ```
 - Notes:
-  - 仅允许教师操作。
-  - 当前允许 `ACTIVE -> CLOSED`、`ACTIVE -> RECALLED`、`CLOSED -> ACTIVE`。
-  - 撤回（`RECALLED`）前会检查是否已有提交；若已有提交会返回 `400`，提示只能关闭（`CLOSED`）。
-  - `RECALLED` 状态保持封闭：不允许恢复为 `ACTIVE`，也不允许再变更为 `CLOSED`。
-  - `CLOSED -> RECALLED` 不允许；同状态重复变更（如 `ACTIVE -> ACTIVE`）不允许。
-  - 恢复提交（`CLOSED -> ACTIVE`）仅恢复状态，不会自动修改 `dueAt/settings.allowLate/settings.maxAttempts`。
+  - ClassroomTask 生命周期与 endpoint-level 状态转换、拒绝规则由 [Backend API Map](./handoff-backend-api-map.md) 维护；本节只记录 request/response 字段与 validation。
 
 ---
 
