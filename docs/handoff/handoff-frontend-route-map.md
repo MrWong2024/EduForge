@@ -1,76 +1,76 @@
 # 前端路由地图（Route Map）
 
-说明：
+## Scope / Owner
 
-- 本文仅记录当前 `frontend/app/**` 实际存在路由。
-- `/teacher/**` 与 `/student/**` 已由对应 layout 执行 server-side role gate：未登录重定向到 `/login`，角色不匹配展示 403 UI。
-- 页面请求均经 `lib/api/client.ts` 或 `lib/api/browser-client.ts` 走 `/api/proxy/**`。
-- 前端 API helper / BFF proxy / 后端接口对接关系详见 `docs/handoff/handoff-frontend-api-map.md`。
-- `完成度` 口径：`Done`（主视图 + 主交互 + 真接口接入）、`Partial`（可访问但能力不完整）。
-- `Done` 仅表示当前页面链路可用，不等于最终交付定版。
+- 本文维护当前 `frontend/app/**` 实际存在的 route inventory：角色与访问投影、页面用途、主要数据/领域依赖、核心用户交互、route-specific 高层边界及 implementation state。当前源码是最高事实源。
+- `/teacher/**` 与 `/student/**` 由对应 layout 执行 server-side role gate：未登录重定向到 `/login`，角色不匹配展示 403 UI；前端入口约束不替代后端权限。
+- 正式业务请求统一走 `/api/proxy/**`。API helper、BFF、backend endpoint、request/response adaptation 与 integration boundary 由 [Frontend API Map](./handoff-frontend-api-map.md) 维护；下表只列高层数据依赖，不维护第二套接口清单。
+- 组件职责、local state 与 composition 见 [Component Map](./handoff-frontend-component-map.md)，稳定 UX/视觉/交互原则见 [Design Baseline](./handoff-frontend-design-baseline.md)，Browser/smoke/evidence 见 [Frontend Testing Playbook](./handoff-frontend-testing-playbook.md)。本文不复制 DTO 字段、HTTP error matrix、普通分页参数、mapper、selector/Portal 或完整布局。
+- 完成度是 route implementation state：`Done` = 当前主视图、主要交互和真链路已存在；`Partial` = 页面存在但能力不完整。Done 不等于最终交付定版，也不替代 [Roadmap](./handoff-roadmap.md) 的 CURRENT/ACTIVE/PLANNED/DEFERRED。
 
 ## 1) Auth 与入口
 
-| Route | 页面用途 | 主接口（经 `/api/proxy/**`） | 关键交互 | 完成度 | 稳定读源/真接口 |
-|---|---|---|---|---|---|
-| `/` | 根入口 | - | 直接重定向到 `/login` | Done | - |
-| `/login` | 登录页 + 角色分流 | `POST auth/login`、`GET users/me` | 登录、`next` 回跳、无角色提示 | Done | 真接口 |
-| `/forgot-password` | 忘记密码页 | `POST auth/forgot-password` | 输入邮箱、提交重置邮件请求、固定展示防枚举成功提示、返回登录页 | Done | 真接口 |
-| `/reset-password` | 重置密码页 | `POST auth/reset-password` | 从 URL query 读取 `token`、校验新密码长度与确认密码一致、重置成功后返回登录页 | Done | 真接口 |
+| Route | 页面用途 | 主要数据 / 依赖 | 核心交互 / 边界 | 完成度 |
+|---|---|---|---|---|
+| `/` | 根入口 | 无数据依赖 | 重定向到登录页 | Done |
+| `/login` | 登录与角色分流 | Auth / 当前用户 | 登录、保留合法来源回跳、按角色进入工作区；无角色时提示 | Done |
+| `/forgot-password` | 忘记密码 | Auth 密码重置请求 | 输入邮箱请求重置邮件；固定防枚举成功提示；可返回登录 | Done |
+| `/reset-password` | 重置密码 | Auth 密码重置 | 使用重置链接设置并确认新密码，成功后返回登录；token 处理归 API/Component Owner | Done |
 
 ## 2) Teacher 路由
 
-| Route | 页面用途 | 主接口（经 `/api/proxy/**`） | 关键交互 | 完成度 | 稳定读源/真接口 |
-|---|---|---|---|---|---|
-| `/teacher` | 教师入口 | - | 重定向到 `/teacher/classrooms` | Done | - |
-| `/teacher/courses` | 课程列表 + 创建课程 | `GET courses`、`POST courses`、`PATCH courses/:id`、`DELETE courses/:id` | 默认按 `进行中/已归档/全部` 视图区分展示（`statusView` query 驱动；列表请求在 `active/archived` 视图透传 `status=ACTIVE/ARCHIVED`）；默认请求 `page=1&limit=100`，状态切换回到 `page=1`；页面显示“共 X 门课程，当前显示 Y 门”，仅当 `total > 100` 时显示轻量分页“第 N / M 页 / 上一页 / 下一页”；创建支持可选 `courseLabel`（课程分类）；列表展示课程分类与状态标签；课程生命周期动作收进“更多”次级菜单（`ACTIVE: 归档/删除`，`ARCHIVED: 恢复/删除`）；删除作为危险次级操作，命中 `409 + COURSE_NOT_EMPTY` 时给出明确提示“该课程下已有班级记录，不能删除，只能归档”；操作后通过 `router.refresh()` 刷新并保持当前视图 query；空态动作按视图收口：`archived` 空态仅“查看进行中课程”，`active/all` 空态不再额外展示“创建课程” | Done | 真接口 |
-| `/teacher/courses/[courseId]/overview` | 课程总览 | `GET courses/:courseId/overview` | 页面结构收口为“筛选区 -> 课程摘要 -> 班级明细 -> 分页 -> 调试区”；去除 `window/sort/order/page` 技术态裸文本回显；筛选区风格向学习轨迹/课堂复盘页对齐；前端主展示窗口收口为 `all/7d`（默认 `all`，旧值 `1h/24h/7d` URL 仍兼容）；班级明细默认请求 `page=1&limit=100`，URL `limit` 最大允许 `100`，切换 `window/sort/order` 回到 `page=1`，页面显示“共 X 个班级，当前显示 Y 个”，仅当 `total > limit` 时显示轻量分页“第 N / M 页 / 上一页 / 下一页”；摘要区按“有意义优先”瘦身为班级总数、当前页班级数、当前页有提交班级数、当前页平均提交率、当前页平均 AI 成功率，聚合口径仍基于当前页班级明细；比率字段（摘要+表格）统一百分比展示；`顺序` 改为与 learning-trajectory 一致的单切换表达（点击翻转 `asc/desc`），并固定展示“当前窗口”提示（旧值带“旧链接兼容”标记）；表格区补充“班级指标按当前窗口内该班全部课堂任务汇总”的低干扰说明；新增低权重“查看原始 JSON”折叠调试入口（直接复用当前 overview 响应） | Done | 真接口 |
-| `/teacher/courses/[courseId]/edit` | 课程编辑页 | `GET courses/:id`、`PATCH courses/:id` | 从课程列表/课程总览进入编辑；支持修改 `code/name/term/courseLabel`，保存后回课程总览；overview 保持展示页职责 | Done | 真接口 |
-| `/teacher/tasks` | 任务模板页 | `GET learning-tasks/tasks`、`POST learning-tasks/tasks` | 默认 `scope=mine`；支持视图切换 `mine/shared/all` 并同步 URL；`scope/courseLabel/status/knowledgeModule/stage/page` 全部由 URL 驱动并透传后端真实查询；主列表现已默认请求 `page=1&limit=100`，筛选切换回到 `page=1`，翻页继续保留 `fromClassroomId/status/scope/courseLabel/knowledgeModule/stage`，页面显示“共 X 个任务模板，当前显示 Y 个”，仅当 `total > 100` 时显示轻量分页“第 N / M 页 / 上一页 / 下一页”；列表显示 `visibility(私有/共享)`；创建区不再暴露状态枚举，而是通过“保存为草稿 / 发布模板”两个动作提交 `status=DRAFT/PUBLISHED`；非作者模板仅显示“查看”入口，并基于 `publisher` 显示“模板发布者：姓名”（姓名缺失显示“其他教师模板”）；作者自己的 `DRAFT/PUBLISHED` 模板显示“编辑”，作者自己的 `ARCHIVED` 模板仅显示“查看”；默认排序按视图收口：`mine=最近更新优先`、`shared=PUBLISHED 优先`、`all=我的模板优先` | Done | 真接口 |
-| `/teacher/tasks/[taskId]/edit` | 任务模板编辑/查看页 | `GET learning-tasks/tasks/:id`、`PATCH learning-tasks/tasks/:id`、`POST learning-tasks/tasks/:id/publish`、`POST learning-tasks/tasks/:id/archive` | 作者可编辑 DRAFT/PUBLISHED 模板核心字段（含可选 `courseLabel`、`visibility`）、维护 rubric 基础配置；普通保存不再提交 `status`；DRAFT 页显示“发布模板”，PUBLISHED 页显示“归档模板”，均二次确认后调用动作接口；作者打开 `ARCHIVED` 模板时页面只读，不显示保存/发布/归档/恢复按钮，并提示后续如需复用应复制为新草稿；非作者共享模板进入只读查看模式，并基于 `publisher` 显示模板发布者；保存失败时，若后端返回“已被课堂任务引用的 `PUBLISHED` 模板不能改回 `DRAFT`”错误，前端保留中文友好兜底；支持 `returnTo` 回跳上下文（优先返回原模板列表 URL，缺失/非法时回退 `/teacher/tasks`） | Done | 真接口 |
-| `/teacher/classrooms` | 班级列表 + 创建班级 | `GET classrooms`、`GET courses`、`POST classrooms`、`PATCH classrooms/:id`、`DELETE classrooms/:id` | 默认按 `进行中/已归档/全部` 视图区分展示（`statusView` query 驱动；列表请求透传 `status`）；默认请求 `page=1&limit=100`，状态切换与 `courseId` 切换均回到 `page=1`；页面显示“共 X 个班级，当前显示 Y 个”，仅当 `total > 100` 时显示轻量分页“第 N / M 页 / 上一页 / 下一页”；用于课程筛选/名称映射的辅助请求 `courses?page=1&limit=100` 保持原样；支持创建班级；班级生命周期动作收进“更多”次级菜单（`ACTIVE: 归档/删除`，`ARCHIVED: 恢复/删除`）；空态动作按视图收口：`archived` 空态仅“查看进行中班级”，`active/all` 空态不再额外展示“创建班级”；删除作为危险次级操作，命中 `409 + CLASSROOM_NOT_EMPTY` 时给出明确提示“该班级已有成员或任务记录，不能删除，只能归档”；操作后通过 `router.refresh()` 刷新并保持当前视图 query | Done | 真接口 |
-| `/teacher/classrooms/[classroomId]/edit` | 班级编辑页 | `GET classrooms/:id`、`PATCH classrooms/:id` | 编辑班级基础信息（当前仅班级名称）；所属课程用 `ClassroomResponse.course` 摘要只读展示；页面说明已更新为中性口径，强调修改基础信息不影响成员、课堂任务和历史提交；归档、删除等低频操作继续在班级列表“更多”菜单中处理，编辑页不再展示危险操作区块，也不提供归档/删除入口 | Done | 真接口 |
-| `/teacher/classrooms/[classroomId]` | 班级入口 | - | 重定向到 dashboard | Done | - |
-| `/teacher/classrooms/[classroomId]/dashboard` | 班级看板 | `GET classrooms/:id`、`GET classrooms/:id/dashboard` | 默认不传 `includeClosedTasks`，仅展示后端返回的 ACTIVE 任务；提供“显示已关闭任务”开关，打开后请求 `includeClosedTasks=true` 并展示 ACTIVE+CLOSED，CLOSED 行显示“已关闭”标签并弱化；任务标题列基于 `taskTemplateStatus` 仅对 `ARCHIVED` 显示“模板已归档”轻量标签，`DRAFT/PUBLISHED/null/未知值` 不显示；非本人模板基于 `taskPublisher` 显示“模板发布者：姓名”（姓名缺失显示“其他教师模板”）；任务标题第一行仅显示标题，`已关闭`、发布者标签、模板异常标签按纵向堆叠；统计完全以接口返回 summary 为准，不在前端二次过滤或重算；消费后端 `archiveSuggestion`，仅 `suggested=true` 时显示“建议归档”提示，前端不重算建议、不自动归档 | Done | 真接口 |
-| `/teacher/classrooms/[classroomId]/tasks` | 班级任务列表/发布页（班级实例层） | `GET classrooms/:id`、`GET classrooms/:id/tasks`、`GET classrooms/:id/publishable-task-templates`、`POST classrooms/:id/tasks`、`PATCH classrooms/:classroomId/tasks/:classroomTaskId/status`、`PATCH classrooms/:classroomId/tasks/:classroomTaskId` | 候选池由发布候选接口实时检索；`courseLabel/onlyMine/knowledgeModule/stage` 写入 URL 并透传后端查询；`courseLabel` 下拉选项来自统一标准课程分类列表（非候选结果倒推）；后端内置“仅 `PUBLISHED` + 排除本班已发布模板 + 课程优先排序”；候选模板首屏仍加载 `page=1&limit=50`，当 `total` 更大时支持“加载更多”追加后续页（非完整分页器）；筛选变化回到第一页并重置已追加候选；下方已发布任务列表继续使用 `GET classrooms/:classroomId/tasks` 资源接口，现已显式读取 URL `page` 并固定请求 `page={当前页}&limit=100`，页面显示“共 X 个课堂任务，当前显示 Y 个”，仅当 `total > 100` 时显示轻量分页“第 N / M 页 / 上一页 / 下一页”；选择“当前教师可见的已发布模板（我的+可见共享）”并配置 `dueAt/allowLate/maxAttempts` 发布实例；模板候选列表与已选模板摘要都会基于 `publisher` 对非本人模板显示“模板发布者：姓名”（姓名缺失显示“其他教师模板”）；任务标题列不常驻展示模板状态枚举，仅基于 `task.taskStatus` 对 `ARCHIVED` 显示“模板已归档”轻量标签，`DRAFT/PUBLISHED/null/未知值` 不显示；非本人模板基于 `task.taskPublisher` 显示“模板发布者：姓名”（姓名缺失显示“其他教师模板”），且任务标题第一行仅显示标题，后续徽章按纵向堆叠；课堂任务生命周期、截止时间、提交窗口三类状态分开展示：`ACTIVE` 显示“开放中”，`CLOSED` 显示“已关闭”，`RECALLED` 显示“已撤回”；截止时间列单独显示“未截止/已截止/无截止时间/时间异常”；任务状态列内补充提交窗口辅助标签“可提交/允许迟交/不可提交/状态未知”（按 `status + dueAt + allowLate` 前端提示，不替代后端权限），不常驻展示状态解释长句；不展示课堂任务级“AI 状态”列，AI 情况通过三件套入口中的“AI 指标”查看；`ACTIVE` 可执行“关闭任务”，`CLOSED` 可执行“恢复提交”（`status=ACTIVE`），`ACTIVE/CLOSED` 可执行“编辑设置”（更新 `dueAt/allowLate/maxAttempts`），`RECALLED` 仅展示状态；进入详情/提交/三件套、跳模板页 | Done | 真接口 |
-| `/teacher/classrooms/[classroomId]/tasks/[classroomTaskId]` | 课堂任务详情 | `GET classrooms/:id`、`GET classrooms/:id/tasks/:classroomTaskId` | 只读展示课堂任务基础信息（任务名称、截止时间、允许迟交、发布时间、描述）与三件套/提交管理入口；不再展示底层模板 `task.taskStatus` 的“发布状态”，也不再提供“任务状态管理”区块或模板发布按钮；课堂任务实例状态管理仍留在班级任务列表页处理 | Done | 真接口 |
-| `/teacher/classrooms/[classroomId]/tasks/[classroomTaskId]/submissions` | 课堂任务提交管理 | `GET classrooms/:id`、`GET classrooms/:classroomId/tasks/:classroomTaskId/submissions` | 查看提交、跳转批阅页；显式读取 URL `page` 并固定请求 `page={当前页}&limit=100`；表格区域显示“共 X 条提交，当前显示 Y 条”；仅当 `total > 100` 时显示轻量分页“第 N / M 页 / 上一页 / 下一页”；顶部导航顺序为“班级看板 -> 返回任务列表 -> 返回任务详情 -> 学习轨迹 -> 课堂复盘 -> AI 指标”，其中“班级看板”跳 `/teacher/classrooms/[classroomId]/dashboard` | Done | P0 真接口 |
-| `/teacher/submissions/[submissionId]` | 教师提交详情/批阅 | `GET learning-tasks/submissions/:id`、`GET learning-tasks/submissions/:id/feedback`、`POST learning-tasks/submissions/:id/feedback`、`PATCH learning-tasks/submissions/:submissionId/feedback/:feedbackId` | 查看代码与反馈、新增教师反馈；顶部导航收口为“班级看板 -> 返回任务提交列表 -> 返回任务详情”，其中“班级看板”仅在 query 存在 `classroomId` 时显示并跳 `/teacher/classrooms/[classroomId]/dashboard`，原“返回班级列表”已移除；新增与编辑字段口径统一为 `type/severity/message/suggestion/tags`，其中 `tags` 可选，不选由后端归一化为 `other`；反馈历史中仅 `source=TEACHER` 且有 `id` 的条目显示“修改”，支持原地编辑并保存后 `router.refresh()`；AI/SYSTEM 反馈只读；`scoreHint` 仅做响应兼容，不在教师前端展示或提交 | Done | 稳定读源 + 真接口 |
-| `/teacher/classrooms/[classroomId]/tasks/[classroomTaskId]/learning-trajectory` | 学习轨迹 | `GET .../learning-trajectory` | 主展示窗口 `all/7d`（默认 `all`）；兼容 URL 旧值 `24h/30d`（继续请求但不在主 tabs 展示）；window/sort/order/include* 切换；默认请求 `limit=100`，URL `limit` 最大允许 `100`；主表“错误数变化（最近 vs 首次）”显示增加/减少/无变化语义；`includeAttempts/includeTagDetails` 在主视图显示可见扩展区；attempts 中“总反馈”使用 `feedbackCount`（非 `feedbackSummary.totalItems`）；学生列表区域显示“共 X 名学生，当前显示 Y 名”；仅当 `total > limit` 时显示轻量分页“第 N / M 页 / 上一页 / 下一页”；顶部导航顺序为“班级看板 -> 返回任务列表 -> 提交管理”，其中“班级看板”跳 `/teacher/classrooms/[classroomId]/dashboard` | Done | 真接口 |
-| `/teacher/classrooms/[classroomId]/tasks/[classroomTaskId]/review-pack` | 课堂复盘（证据型） | `GET .../review-pack` | 主展示窗口 `all/7d`（默认 `all`）；兼容 URL 旧值 `24h/30d`（继续请求但不在主 tabs 展示）；`window/topK/examplesPerTag` 切换；主视图聚焦总览/问题聚合/典型样例/学生分层；样例卡片可跳转对应提交详情；顶部导航顺序为“班级看板 -> 返回任务列表 -> 提交管理”，其中“班级看板”跳 `/teacher/classrooms/[classroomId]/dashboard` | Done | 真接口 |
-| `/teacher/classrooms/[classroomId]/tasks/[classroomTaskId]/ai-metrics` | AI 指标 | `GET .../ai-metrics` | 窗口集合与默认值保持原策略（`1h/24h/7d`），仅做 window/includeTags 切换；顶部导航顺序为“班级看板 -> 返回任务列表 -> 提交管理”，其中“班级看板”跳 `/teacher/classrooms/[classroomId]/dashboard` | Done | 真接口 |
-| `/teacher/classrooms/[classroomId]/members` | 班级成员管理 | `GET classrooms/:id`、`GET classrooms/:id/students`、`POST classrooms/:id/students/:uid/remove` | 成员列表、移除成员；成员请求显式传 `page` 与固定 `limit=100`，页面展示“共 X 名成员，当前显示 Y 名”；`total > 100` 时显示轻量分页（第 N / M 页、上一页、下一页），`includeRemoved` 切换时回到 `page=1` | Done | P0 真接口 |
-| `/teacher/classrooms/[classroomId]/weekly-report` | 班级周报 | `GET classrooms/:classroomId/weekly-report` | 页面已收口为汇总型分析页（筛选区 -> 周报摘要 -> 周报概览 -> 调试区）；主展示窗口 `7d/30d/all`（默认 `all`），兼容 URL 旧值 `24h`（继续请求但不在主 tabs 展示）；已移除空“周报明细”区块；`topTags` 仅在“风险与问题概览”展示一次；原始 JSON 入口保留且默认折叠 | Done | 真接口 |
-| `/teacher/classrooms/[classroomId]/process-assessment` | 过程性评价 | `GET classrooms/:classroomId/process-assessment`、`GET classrooms/:classroomId/process-assessment.csv`、`GET classrooms/:classroomId/tasks`（排除任务选项） | 页面保持正式评价页结构、`7d/30d/all` 主窗口、兼容 `24h`、`page/limit=100`、JSON/CSV 同口径排除、分页、摘要、评分说明和 raw JSON 行为；临时排除改由共享 `TaskExclusionPanel` 的 `process-assessment` 模式承载，应用/清空仍以 `router.replace` 软导航回到 `page=1`，CSV 与成绩文案语义保持；课堂任务选项改由共享 Server helper 分页全量加载，失败仍只提示且不阻断评价主体，未显示的已选 ID 继续保留。 | Done | 真接口 |
-| `/teacher/classrooms/[classroomId]/ai-learning-analytics` | AI 反馈介入成效分析 | `GET classrooms/:classroomId/ai-learning-analytics`、`GET classrooms/:classroomId/ai-learning-analytics/students`、`GET classrooms/:classroomId/tasks`（排除选项） | Server Component；页面消费方法学 V1.1，把旧版“持平”拆为“前后均无 ERROR/WARN”和“问题负荷未减少”，班级摘要、四类堆叠图、任务表和学生表均直接使用后端精细计数/rate。学生列表通过 Server Component 原生 GET form 支持服务端姓名/学号 `q` 搜索、`overallOutcome` 与 `engagementStatus` 单选筛选，三者只影响学生列表且以后端 `filters` 判断是否生效；URL 状态为 `window/excludedTaskIds/page/q/overallOutcome/engagementStatus`，窗口切换、任务排除、分页、详情进入和返回均保留相应状态。学生分析区固定使用 `#student-analysis`；应用/清空学生筛选、学生分页和返回第 1 页后定位该区，统计窗口和任务排除仍保持原导航位置行为。总体结果直接展示后端 `overallOutcome`，不是时间趋势。学生区区分“无 ACTIVE 学生 / 筛选无结果 / 当前分页无数据”三类空态，并用 `activeStudentsTotal/total/items.length` 展示人数；任务选项失败只警告，学生列表失败只影响局部且筛选表单仍可用，总览失败为页面错误。 | Done | 真接口 |
-| `/teacher/classrooms/[classroomId]/ai-learning-analytics/students/[studentId]` | 单学生 AI 反馈介入分析 | `GET classrooms/:classroomId/ai-learning-analytics/students/:studentId` | Server Component；学生摘要直接展示 `overallOutcome/engagementStatus` 与四类精细结果计数；个人图表和全任务明细使用 `detailedOutcome`，逐任务展示 before/after 与差值，不连接不同课堂任务，不可比较任务不绘制为 0。详情后端请求只传 `window/excludedTaskIds`；URL 保留 `page/q/overallOutcome/engagementStatus` 仅用于返回班级分析时恢复列表状态，“返回班级分析”再通过 `#student-analysis` 定位学生分析区。 | Done | 真接口 |
-| `/teacher/classrooms/[classroomId]/export/snapshot` | 教学快照预检（内部） | `GET classrooms/:classroomId/export/snapshot` | 内部预检/诊断页：window/includePerTask/limit* 切换、查看 `meta.notes` 截断提示与预检摘要；保留直达路由，不作为教师高频主入口 | Done | 真接口 |
+| Route | 页面用途 | 主要数据 / 依赖 | 核心交互 / 边界 | 完成度 |
+|---|---|---|---|---|
+| `/teacher` | 教师入口 | 无数据依赖 | 重定向到班级列表 | Done |
+| `/teacher/account` | 账户设置 | 当前用户 / 改密能力 | 查看本人资料、修改密码；无资料编辑 UI；可返回班级列表 | Done |
+| `/teacher/courses` | 课程列表与创建 | Course 列表 / 生命周期 | 按进行中、已归档、全部查看并分页；创建含课程分类，进入编辑/总览；列表“更多”提供 ACTIVE 归档/删除、ARCHIVED 恢复/删除，删除需确认且仅空课程允许；操作保留当前视图 | Done |
+| `/teacher/courses/[courseId]/overview` | 课程总览 | Course overview API | 切换统计窗口、班级排序与分页并进入班级；主窗口 all/7d、默认 all，旧链接窗口继续兼容。班级总数取总量，班级数、平均任务完成度与平均 AI 成功率摘要基于当前页；任务完成度与学生触达率分别展示，无 AI 活动时成功率显示缺省；页面只读 | Done |
+| `/teacher/courses/[courseId]/edit` | 课程基础信息编辑 | Course 详情 / 更新 | 从列表或总览进入，编辑编号、名称、学期、课程分类，保存后回总览；总览保持展示职责 | Done |
+| `/teacher/tasks` | 任务模板列表与创建 | Task template 查询 / 创建 | 默认我的模板，可切换我的/共享/全部并按课程分类、状态、知识模块、阶段筛选及分页；创建为草稿或发布模板；展示可见性和发布者。作者的 DRAFT/PUBLISHED 可编辑，ARCHIVED 及非作者模板仅查看；保留班级来源和列表回跳上下文 | Done |
+| `/teacher/tasks/[taskId]/edit` | 模板编辑或只读查看 | Task template 详情 / 生命周期 | 作者编辑 DRAFT/PUBLISHED 的内容、可见性与 rubric；保存内容与生命周期动作分离；DRAFT 可发布、PUBLISHED 可归档，均需确认。ARCHIVED、非作者共享模板及未知状态只读；无恢复入口，归档复用提示不代表已有复制功能；返回原模板列表上下文，非法或缺失时回模板列表 | Done |
+| `/teacher/classrooms` | 班级列表与创建 | Classroom 列表 / Course 关联 | 按课程及进行中、已归档、全部筛选并分页；创建、进入编辑/看板。列表“更多”提供 ACTIVE 归档/删除、ARCHIVED 恢复/删除，删除需确认且仅空班级允许；非空限制由后端判定，操作保留当前视图 | Done |
+| `/teacher/classrooms/[classroomId]/edit` | 班级基础信息编辑 | Classroom 详情 / 更新 | 当前只编辑班级名称，所属课程、状态及加入码只读；保存后回看板，不影响成员、课堂任务和历史提交；不提供归档/恢复/删除，生命周期动作在列表“更多”菜单 | Done |
+| `/teacher/classrooms/[classroomId]` | 班级入口 | 无数据依赖 | 重定向到本班 dashboard | Done |
+| `/teacher/classrooms/[classroomId]/dashboard` | 班级看板 | Classroom dashboard API | 默认展示 ACTIVE 任务，可显式包含 CLOSED；展示模板归档提示和非本人模板发布者，进入任务与分析页。统计及归档建议直接消费后端结果，不二次过滤重算或自动归档 | Done |
+| `/teacher/classrooms/[classroomId]/tasks` | 课堂任务列表与发布 | ClassroomTask / 发布候选池 | 按课程分类、仅我的、知识模块及阶段检索可见已发布模板，候选支持加载更多，已发布任务支持分页；候选排除本班已发布模板，课程优先排序，展示发布者与模板归档提示。配置截止、迟交和次数限制后发布实例；ACTIVE 可关闭、CLOSED 可恢复提交，两者可编辑实例设置，RECALLED 仅展示。生命周期、截止与提交窗口分别表达，前端提示不替代后端权限；可进入详情/提交/三件套及模板页，不在此维护模板 | Done |
+| `/teacher/classrooms/[classroomId]/tasks/[classroomTaskId]` | 课堂任务详情 | ClassroomTask 详情 | 只读展示实例信息和任务说明，进入三件套或提交管理；实例状态动作在任务列表，模板生命周期在模板层 | Done |
+| `/teacher/classrooms/[classroomId]/tasks/[classroomTaskId]/submissions` | 课堂任务提交管理 | ClassroomTask submissions | 按课堂任务实例查看与分页，进入提交批阅；保留班级看板、任务列表/详情及三件套导航上下文 | Done |
+| `/teacher/submissions/[submissionId]` | 教师提交详情与批阅 | 正式 submission detail / feedback（[调用链](./handoff-frontend-api-map.md)） | 查看代码和反馈、新增教师反馈；有标识的教师反馈可原地编辑，AI/SYSTEM 反馈只读，不展示或编辑 scoreHint。按可用上下文返回班级看板、任务提交列表或详情；导航上下文不作为主体数据 SoT | Done |
+| `/teacher/classrooms/[classroomId]/tasks/[classroomTaskId]/learning-trajectory` | 学习轨迹 | Learning trajectory API | 切换窗口、排序及分页，查看最近与首次错误数变化、展开提交尝试和标签明细；主窗口 all/7d、默认 all，旧链接窗口继续兼容；保留班级看板、任务列表及提交管理导航 | Done |
+| `/teacher/classrooms/[classroomId]/tasks/[classroomTaskId]/review-pack` | 课堂复盘 | Review pack API | 查看问题聚合、典型样例与学生分层，调整窗口及样例范围，样例可进入对应提交；主窗口 all/7d、默认 all，旧链接窗口继续兼容；保留课堂任务上下文导航 | Done |
+| `/teacher/classrooms/[classroomId]/tasks/[classroomTaskId]/ai-metrics` | AI 指标 | AI metrics API | 切换 1h/24h/7d 窗口及标签扩展，查看任务 AI 情况；保留班级看板、任务列表及提交管理导航 | Done |
+| `/teacher/classrooms/[classroomId]/members` | 班级成员管理 | Classroom 成员读源 | 查看、分页和移除成员，可包含已移除成员；成员关系以正式读源为准，不回退 legacy studentIds | Done |
+| `/teacher/classrooms/[classroomId]/weekly-report` | 班级周报 | Weekly report API | 汇总型分析页，查看摘要、风险与问题概览；主窗口 7d/30d/all、默认 all，旧链接窗口继续兼容；不宣称已有独立周报明细能力 | Done |
+| `/teacher/classrooms/[classroomId]/process-assessment` | 过程性评价 | Process assessment JSON/CSV / 课堂任务选项 | 主窗口 7d/30d/all，兼容旧链接；查看分页评价、摘要与评分说明，临时排除/清空任务并导出同口径 CSV。排除不持久化，不重算后端评分；任务选项失败只警告，不阻断评价主体，未显示的已选任务继续保留 | Done |
+| `/teacher/classrooms/[classroomId]/ai-learning-analytics` | AI 反馈介入成效分析 | Analytics 总览 / ACTIVE 学生列表 / 任务选项 | 切换窗口、临时排除任务，查看班级/任务/学生 V1.1 分析；姓名/学号搜索、总体结果和参与阶段筛选仅作用于学生列表。分页、详情进入和返回保留筛选上下文，学生筛选/分页后定位学生分析区；区分无 ACTIVE 学生、筛选无结果和空分页。任务选项或学生列表失败局部降级，总览失败为页面错误；直接展示后端结果，不从学生分页重算摘要，不将总体结果当时间趋势或能力/因果结论 | Done |
+| `/teacher/classrooms/[classroomId]/ai-learning-analytics/students/[studentId]` | 单学生 AI 反馈介入分析 | Analytics student detail API | 展示后端总体结果、参与阶段、逐任务 before/after 与全任务明细；不连接不同任务，不把不可比较值画为 0。列表筛选与页码仅用于返回并恢复学生分析区上下文，不改变详情数据范围 | Done |
+| `/teacher/classrooms/[classroomId]/export/snapshot` | 教学快照预检（内部） | Snapshot export API | 调整统计窗口、逐任务范围与截断范围，查看预检摘要和截断提示；保留直达路由，不作为教师高频入口 | Done |
 
 ## 3) Student 路由
 
-| Route | 页面用途 | 主接口（经 `/api/proxy/**`） | 关键交互 | 完成度 | 稳定读源/真接口 |
-|---|---|---|---|---|---|
-| `/student` | 学生入口 | - | 重定向到 `/student/dashboard` | Done | - |
-| `/student/dashboard` | 学习看板 | `GET classrooms/mine/dashboard` | 查看班级与任务、跳任务详情；默认不传 `includeHistorical`，仅展示后端返回的当前任务与近期过期任务；提供“显示历史任务”开关，打开后请求 `includeHistorical=true` 且回到 `page=1`；班级卡片列表现已显式读取 URL `page` 并固定请求 `page={当前页}&limit=100`，页面显示“共 X 个班级，当前显示 Y 个”，仅当 `total > 100` 时显示轻量分页“第 N / M 页 / 上一页 / 下一页”；翻页保留当前 `includeHistorical` 状态；班级标题区已接入后端 `classroom.teacher` 与 `classroom.course` 摘要，并在班级名后以轻量徽章展示“任课教师：{name}”“课程：{name}”“学期：{term}”；教师姓名、课程名或学期为空时分别显示“任课教师：未设置”“课程：未设置”“学期：未设置”；不展示 `teacher.id/employeeNo/email`，也不展示 `course.id/courseId/course.code/courseLabel`；`RECENTLY_EXPIRED` 显示“近期过期”标签，`HISTORICAL` 显示“历史任务”标签并弱化；任务列表 AI 状态列以中文标签展示；“完成情况”列直接展示后端 `completionStatus.status`（未提交/暂无反馈/已合格/基本合格/不合格）；前端不再按任务模板当前 `PUBLISHED/ARCHIVED` 状态做二次过滤或参与提示；每个班级卡片内部 `tasks` 继续完整展示后端返回的可见任务，不分页、不截断 | Done | 真接口 |
-| `/student/classrooms/join` | 加入班级 | `POST classrooms/join` | 输入 joinCode 入班 | Done | 真接口 |
-| `/student/classrooms/[classroomId]/tasks/[classroomTaskId]` | 学生任务详情与提交页 | `GET .../my-task-detail`、`POST .../submissions` | 基于 `my-task-detail` 聚合结果展示任务基础信息、任务说明、评分标准与历史提交；顶部“最新 AI 状态”和历史提交 AI 状态均使用中文标签；顶部“完成情况”直接展示后端顶层 `completionStatus.status`（未提交/暂无反馈/已合格/基本合格/不合格），不从历史提交、反馈摘要、反馈明细或 AI 状态二次推断；接入顶层 `participationStatus`，`readOnly=true/canSubmit=false` 时显示只读提示并禁用提交入口，旧响应缺字段按可参与兜底；前端不再使用 `TASK_NOT_PUBLISHED` 或模板当前 `PUBLISHED/ARCHIVED` 状态控制只读/可提交；页面渲染时若已过 `dueAt` 且 `allowLate !== true`，提交区不展示可填写表单，改为禁用按钮与截止提示；`allowLate=true` 的已截止任务仍可展示提交表单；支持提交作业并进入 submission detail 查看反馈 | Done | 真接口 |
-| `/student/submissions/[submissionId]` | 学生提交详情/反馈 | `GET learning-tasks/submissions/:id`、`GET learning-tasks/submissions/:id/feedback`、`POST learning-tasks/submissions/:submissionId/ai-feedback/request` | 查看代码与反馈、请求 AI；迟交时长按人性化单位展示，不直出大秒数 | Done | 稳定读源 + 真接口 |
-| `/student/help/ai` | AI 状态帮助页 | - | 状态说明与排障建议 | Done | - |
+| Route | 页面用途 | 主要数据 / 依赖 | 核心交互 / 边界 | 完成度 |
+|---|---|---|---|---|
+| `/student` | 学生入口 | 无数据依赖 | 重定向到学习看板 | Done |
+| `/student/account` | 账户设置 | 当前用户 / 改密能力 | 查看本人资料、修改密码；无资料编辑 UI；可返回学习看板 | Done |
+| `/student/dashboard` | 学习看板 | Student classroom dashboard API | 查看班级与任务、进入任务详情；默认当前和近期过期任务，可显式查看历史并保留分页视图。班级分页，卡片内完整展示后端可见任务；展示教师、课程、学期摘要，不暴露无关标识或联系方式。完成情况直接消费 completionStatus，模板当前状态不作为二次过滤或参与阻断依据 | Done |
+| `/student/classrooms/join` | 加入班级 | Classroom join 能力 | 输入加入码入班，资格由后端判定 | Done |
+| `/student/classrooms/[classroomId]/tasks/[classroomTaskId]` | 学生任务详情与提交 | my-task-detail 聚合 / submission | 查看任务说明、评分标准、完成情况、历史提交与 AI 状态；completionStatus 由后端提供，不从反馈或 AI 状态推断。消费 participationStatus 的只读/可提交边界，旧响应缺字段保留可参与兜底；不以模板当前状态阻断。已截止且不允许迟交时禁用提交，允许迟交且有参与资格时可提交；成功后进入 submission detail | Done |
+| `/student/submissions/[submissionId]` | 学生提交详情与反馈 | 正式 submission detail / feedback（[调用链](./handoff-frontend-api-map.md)） | 查看代码、反馈及迟交信息，在允许状态下请求 AI；可返回来源任务，导航上下文不作为主体数据 SoT；状态刷新职责见 Component Map | Done |
+| `/student/help/ai` | AI 状态帮助 | 静态帮助内容 | 查看状态说明与排障建议 | Done |
 
 ## 4) 辅助路由（非主交付链）
 
-| Route | 页面用途 | 接口 | 现状 |
-|---|---|---|---|
-| `/_demo/**` | demo 沙箱页 | `app/api/_demo/**` 内存接口 | 与主链路解耦，仅用于演示 |
-| `/api/_demo/**` | demo 本地路由 | 不经过后端 | 非生产链路 |
-| `/api/proxy/[...path]` | 正式代理层 | 转发到 `${FRONTEND_BACKEND_ORIGIN}/api/**` | 主链路必经 |
+| Route | 页面用途 | 主要数据 / 依赖 | 核心交互 / 边界 | 当前实现 |
+|---|---|---|---|---|
+| `/_demo/**` | demo 沙箱页 | 前端内存 demo 数据 | 与正式主链路解耦，仅用于演示 | demo-only |
+| `/api/_demo/**` | demo 本地路由 | 前端内存数据，无后端 API | 不作为生产业务调用链 | demo-only |
+| `/api/proxy/[...path]` | 正式 BFF 代理入口 | Backend API；实现见 [Frontend API Map](./handoff-frontend-api-map.md) | 正式业务主链路必经，业务页面不绕过代理 | 已接入 |
 
-补充：当前 `frontend/app/**` 未建设正式 `/ops/**` 页面；后端 AI Feedback debug/ops 接口已存在，debug gate 关闭时返回 `404` 应按“功能未启用”理解。
+当前没有正式 `/ops/**` 前端页面；debug/ops 的后端接口与启用边界由 API Owner 维护。
 
-## 5) submission detail 口径说明（关键）
+## 5) Maintenance
 
-- Teacher/Student submission detail 主体数据均来自 `GET learning-tasks/submissions/:id`。
-- URL query 透传目前仅承担：
-  - 导航上下文（`classroomId/classroomTaskId`）用于回跳
-  - 少量字段兜底展示（当 detail 字段缺失时）
-- query 透传不再作为 submission 主体数据真相源。
+- route 新增/删除、角色、页面用途、主要用户交互或 implementation state 变化时更新本文；以源码确认 Done/Partial，不复制 Roadmap 阶段状态。
+- API helper、BFF、backend endpoint 或数据适配变化更新 Frontend API Map；本文仅同步受影响的高层依赖与页面语义。
+- component responsibility、composition/state owner 变化更新 Component Map；稳定 UX/视觉原则更新 Design Baseline；testing evidence 更新 Testing Playbook。
+- 跨层事实采用最低充分引用；submission detail 的主体读源、query 兼容与调用链统一回到 Frontend API Map，不在本文恢复独立数据源合同。
