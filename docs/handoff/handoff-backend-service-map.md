@@ -363,12 +363,12 @@ Global SoT 只保留理解跨 Service workflow 必需的稳定不变量，不追
 - Service: `backend/src/modules/classrooms/classroom-tasks/services/ai-metrics.service.ts`
 - Domain / Responsibility: 聚合实例 AI Job、错误及 AI 反馈运行指标。
 - Upstream: 课堂任务 AI metrics 入口。
-- Downstream / Dependencies: `ClassroomModel`、`ClassroomTaskModel`、`AiFeedbackJobModel`、`FeedbackModel`。
+- Downstream / Dependencies: 直接依赖 `ClassroomModel`、`ClassroomTaskModel`、`FeedbackModel`、`AiFeedbackMetricsAggregator`；Job 数量、状态、attempts 与 error 聚合通过 `AiFeedbackMetricsAggregator` 完成，后者直接持有 `AiFeedbackJobModel`。
 - Consistency / State / Idempotency: Job 窗口按 updatedAt 过滤；反馈只取 AI 来源。当前 schema 缺少延迟计算所需数据，不以伪造值填充延迟指标。
 - Isolation: 校验 classroom.teacherId 与实例归属；所有统计按 classroomTaskId，反馈必要时通过 submissions 关联隔离。
 - Side Effects: 只读 aggregate。
 - Important Performance / Recovery: 前置 `$match`；Job 与 Feedback 分别聚合，关闭 includeTags 时跳过 tags 分支，避免 N+1。
-- SoT: `backend/src/modules/classrooms/classroom-tasks/services/ai-metrics.service.ts`。
+- SoT: `backend/src/modules/classrooms/classroom-tasks/services/ai-metrics.service.ts`；`backend/src/modules/classrooms/classroom-tasks/services/ai-feedback-metrics-aggregator.service.ts`。
 - Boundary / Non-responsibility: 不返回 Provider 原始响应或重建推理链；公开窗口与接口见 [API Map](./handoff-backend-api-map.md#classroom-tasksclassrooms-子资源)，字段映射从上述源码定位。
 
 ## Service Card 12
