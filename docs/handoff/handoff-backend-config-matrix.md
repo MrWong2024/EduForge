@@ -2,6 +2,7 @@
 
 ## 0) 口径说明
 
+- 本矩阵只维护配置入口、默认值与静态校验、环境映射及运行模式等当前配置事实；配置项、开关或运行模式存在，不等于对应 Service、route 或产品能力已经实现，也不代表测试资产已存在或证据已通过。当前实现能力与真实未实现边界见 [Backend Snapshot](./handoff-backend-snapshot.md)、[Frontend Snapshot](./handoff-frontend-snapshot.md) 及当前代码；测试资产、执行能力与证据状态见 [Backend Testing Playbook](./handoff-backend-testing-playbook.md) 和 [Frontend Testing Playbook](./handoff-frontend-testing-playbook.md)。
  - env 默认值以 `backend/src/config/env.validation.ts` 为准。
 - Worker 的 enabled、interval、batch 均纳入 Joi 校验；ConfigService 提供校验后的值，默认值与边界见第 4 节。
 
