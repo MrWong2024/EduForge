@@ -20,12 +20,12 @@
 |---|---|
 | [项目 Roadmap](./handoff-roadmap.md) | 当前产品主线、工作包状态、近期计划与明确延期项 |
 | [Backend snapshot](./handoff-backend-snapshot.md) | 当前后端工程结构、能力范围、高层实现事实与真实未实现边界 |
-| [Backend API map](./handoff-backend-api-map.md) | 后端 HTTP endpoint、用途、权限、请求/响应与错误口径 |
-| [Backend DTO cheatsheet](./handoff-backend-dto-cheatsheet.md) | DTO、Query、字段形状、校验规则与最小请求示例 |
-| [Backend Service map](./handoff-backend-service-map.md) | Service / Provider 职责、关键调用关系、约束与失败边界 |
+| [Backend API map](./handoff-backend-api-map.md) | 公开 HTTP endpoint 清单与用途、认证授权和资源归属、生命周期/状态流转、接口错误、可见副作用及必要高层语义 |
+| [Backend DTO cheatsheet](./handoff-backend-dto-cheatsheet.md) | 公开请求/响应数据（Body/Query/Param）、校验与转换、枚举/默认/可空/可选、嵌套形状及安全暴露/敏感省略 |
+| [Backend Service map](./handoff-backend-service-map.md) | 内部 Service / Provider / workflow 职责与依赖、状态/一致性/幂等、隔离与副作用、补偿/恢复及职责边界 |
 | [Backend config matrix](./handoff-backend-config-matrix.md) | 环境变量、配置来源、默认/校验、数据库用途映射与运行模式 |
-| [Backend decisions](./handoff-backend-decisions.md) | 已形成且仍有效的稳定项目决策、理由与影响 |
-| [Backend testing playbook](./handoff-backend-testing-playbook.md) | 后端 Pure/Unit/HTTP E2E、测试数据库、fixture、verifier、cleanup 与测试证据 |
+| [Backend decisions](./handoff-backend-decisions.md) | 稳定工程决策的 CURRENT/SUPERSEDED 生命周期、理由、影响与替代历史 |
+| [Backend testing playbook](./handoff-backend-testing-playbook.md) | 后端测试分层、runner/runtime、数据库用途与进程隔离、Browser backend foundation、fixture/verifier/cleanup 准入及证据治理 |
 
 前端路由、API 调用、组件、设计原则以及 Browser evidence / smoke 治理从 [Frontend Handoff 入口](./handoff-frontend-INDEX.md) 进入对应 Owner。
 
@@ -34,4 +34,4 @@
 - 产品范围、工作包状态或当前主线变化时更新 Roadmap。
 - 后端高层结构、能力范围或真实未实现边界变化时更新 snapshot。
 - endpoint、DTO、Service、配置、稳定决策或测试事实变化时，只更新对应专项 Owner；其他文档按需更新引用或高层投影。
-- 仅当导航入口、推荐阅读顺序或文档职责变化时更新本 INDEX；遵循 `reference, don't restate`，不在此积累实现、配置、API、测试或工作包事实。
+- 仅当导航入口、推荐阅读顺序或文档职责变化时更新本 INDEX；专项 Owner Scope 变化只同步一句职责摘要，不复制全文；遵循 `reference, don't restate`，不在此积累实现、配置、API、测试或工作包事实。

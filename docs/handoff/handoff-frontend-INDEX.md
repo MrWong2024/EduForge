@@ -21,9 +21,9 @@
 |---|---|
 | [项目 Roadmap](./handoff-roadmap.md) | 当前产品主线、工作包状态、近期计划与明确延期项 |
 | [Frontend snapshot](./handoff-frontend-snapshot.md) | 当前前端工程结构、能力范围、高层实现事实与真实未实现边界 |
-| [Frontend route map](./handoff-frontend-route-map.md) | 路由、页面职责、访问边界、主要交互与数据来源 |
-| [Frontend API map](./handoff-frontend-api-map.md) | API helper、BFF proxy、请求/响应、错误处理与 UI 对接 |
-| [Frontend component map](./handoff-frontend-component-map.md) | 组件、模块、Hook、API client 的职责和修改边界 |
+| [Frontend route map](./handoff-frontend-route-map.md) | 路由清单、页面用途、主要依赖、核心交互与实现状态，含访问/角色投影 |
+| [Frontend API map](./handoff-frontend-api-map.md) | API helper / client、BFF proxy 与后端集成、请求/响应适配、Server/Browser 调用边界及跨层集成不变量 |
+| [Frontend component map](./handoff-frontend-component-map.md) | 组件/模块位置与职责、必要局部状态与组合、可复用行为及修改/非职责边界 |
 | [Frontend design baseline](./handoff-frontend-design-baseline.md) | EduForge 稳定的前端产品、视觉、交互与 UX 原则 |
 | [Frontend testing playbook](./handoff-frontend-testing-playbook.md) | 前端测试、Browser evidence、Agent-assisted Browser smoke 与 Human smoke 治理 |
 
@@ -34,4 +34,4 @@
 - 产品范围、工作包状态或当前主线变化时更新 Roadmap。
 - 前端高层结构、能力范围或真实未实现边界变化时更新 snapshot。
 - 路由、API 对接、组件职责、稳定设计原则或测试证据治理变化时，只更新对应专项 Owner；其他文档按需更新引用或高层投影。
-- 仅当导航入口、推荐阅读顺序或文档职责变化时更新本 INDEX；遵循 `reference, don't restate`，不在此维护技术栈、API 明细、运行模式、测试事实或工作包状态。
+- 仅当导航入口、推荐阅读顺序或文档职责变化时更新本 INDEX；专项 Owner Scope 变化只同步一句职责摘要，不复制全文；遵循 `reference, don't restate`，不在此维护技术栈、API 明细、运行模式、测试事实或工作包状态。

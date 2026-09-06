@@ -48,12 +48,12 @@ Browser backend 配置与唯一启动入口：
 
 - 会话 Cookie：`ef_session`，`HttpOnly=true`、`sameSite=lax`、`secure=(NODE_ENV=production)`、`path=/`、`maxAge=SESSION_TTL_MS`（当前 `7d`）。
 - 后端 CORS origin 由 `FRONTEND_URL` 控制，默认 `http://localhost:3000`。
-- `FRONTEND_BACKEND_ORIGIN` 是 frontend BFF 的 server-side upstream origin，代理路由为 `frontend/app/api/proxy/[...path]/route.ts`，上游路径拼为 `${FRONTEND_BACKEND_ORIGIN}/api/**`。
+- `FRONTEND_BACKEND_ORIGIN` 是 frontend BFF 的 server-side upstream origin。
 - 本地开发模板：`frontend/.env.local.example` → 实际 `frontend/.env.local`，值为 `http://localhost:5000`。
 - 生产模板：`frontend/.env.production.example` → 实际 `frontend/.env.production`，值为 `http://127.0.0.1:5000`。
 - 本地 `localhost` 强调开发可读性；生产 `127.0.0.1` 明确 Next.js server → 同机 NestJS backend 的 IPv4 loopback，避免 localhost 的 IPv4/IPv6 解析歧义，不代表 Browser 访问用户本机。两者地址字符串不同是有意设计。
 - 实际 `.env.local`、`.env.production` 及其他真实 `.env*` 是机器配置，继续 Git ignored、不得提交；Git 仅跟踪上述两份 frontend example 模板。
-- 代理允许并转发必要请求头（含 `cookie/content-type/accept/user-agent`），响应透传 `content-type/content-disposition/cache-control/location/set-cookie`；Browser 通过 `/api/proxy/**` 访问 BFF，不直接访问 backend 5000。
+- 正式业务访问使用同域 BFF；具体 proxy path、header forwarding、response passthrough、client 调用链及异常行为见 [Frontend API Map](./handoff-frontend-api-map.md)。
 
 ## 3) 运行模式矩阵（最小可运维闭环）
 
