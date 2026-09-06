@@ -138,6 +138,7 @@
   - 注意：三件套共享任务上下文导航，不各自维护 API 边界。
 - 过程性评价 JSON：`process-assessment/page.tsx` -> `/api/proxy/classrooms/:id/process-assessment`。
   - 对应后端：`GET /api/classrooms/:classroomId/process-assessment`。
+  - window 适配：正常 UI 选项为 `7d/30d/all`；旧链接额外接受 `term`，显示“学期（旧链接兼容）”，不提供 `term` 筛选按钮。`24h` 不是 process-assessment 合法窗口，与其他未知或非法值统一通过现有 query parser 规范化为默认 `all`；JSON 与 CSV 共用同一解析后的 window。
   - 注意：`excludedTaskIds` 解析为 URL 查询条件；前端展示后端返回的任务维度指标（`iteratedTasksCount/aiRequestedTasksCount/aiSucceededTasksCount/avgWarnItems`），不重算评分。
 - 过程性评价 CSV：`process-assessment/page.tsx` -> `buildProxyPath("classrooms/:id/process-assessment.csv")`。
   - 对应后端：`GET /api/classrooms/:classroomId/process-assessment.csv`。

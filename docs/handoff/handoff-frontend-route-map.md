@@ -41,7 +41,7 @@
 | `/teacher/classrooms/[classroomId]/tasks/[classroomTaskId]/ai-metrics` | AI 指标 | AI metrics API | 切换 1h/24h/7d 窗口及标签扩展，查看任务 AI 情况；保留班级看板、任务列表及提交管理导航 | Done |
 | `/teacher/classrooms/[classroomId]/members` | 班级成员管理 | Classroom 成员读源 | 查看、分页和移除成员，可包含已移除成员；成员关系以正式读源为准，不回退 legacy studentIds | Done |
 | `/teacher/classrooms/[classroomId]/weekly-report` | 班级周报 | Weekly report API | 汇总型分析页，查看摘要、风险与问题概览；主窗口 7d/30d/all、默认 all，旧链接窗口继续兼容；不宣称已有独立周报明细能力 | Done |
-| `/teacher/classrooms/[classroomId]/process-assessment` | 过程性评价 | Process assessment JSON/CSV / 课堂任务选项 | 主窗口 7d/30d/all，兼容旧链接；查看分页评价、摘要与评分说明，临时排除/清空任务并导出同口径 CSV。排除不持久化，不重算后端评分；任务选项失败只警告，不阻断评价主体，未显示的已选任务继续保留 | Done |
+| `/teacher/classrooms/[classroomId]/process-assessment` | 过程性评价 | Process assessment JSON/CSV / 课堂任务选项 | 主窗口 7d/30d/all，旧链接仅兼容 term；查看分页评价、摘要与评分说明，临时排除/清空任务并导出同口径 CSV。排除不持久化，不重算后端评分；任务选项失败只警告，不阻断评价主体，未显示的已选任务继续保留 | Done |
 | `/teacher/classrooms/[classroomId]/ai-learning-analytics` | AI 反馈介入成效分析 | Analytics 总览 / ACTIVE 学生列表 / 任务选项 | 切换窗口、临时排除任务，查看班级/任务/学生 V1.1 分析；姓名/学号搜索、总体结果和参与阶段筛选仅作用于学生列表。分页、详情进入和返回保留筛选上下文，学生筛选/分页后定位学生分析区；区分无 ACTIVE 学生、筛选无结果和空分页。任务选项或学生列表失败局部降级，总览失败为页面错误；直接展示后端结果，不从学生分页重算摘要，不将总体结果当时间趋势或能力/因果结论 | Done |
 | `/teacher/classrooms/[classroomId]/ai-learning-analytics/students/[studentId]` | 单学生 AI 反馈介入分析 | Analytics student detail API | 展示后端总体结果、参与阶段、逐任务 before/after 与全任务明细；不连接不同任务，不把不可比较值画为 0。列表筛选与页码仅用于返回并恢复学生分析区上下文，不改变详情数据范围 | Done |
 | `/teacher/classrooms/[classroomId]/export/snapshot` | 教学快照预检（内部） | Snapshot export API | 调整统计窗口、逐任务范围与截断范围，查看预检摘要和截断提示；保留直达路由，不作为教师高频入口 | Done |

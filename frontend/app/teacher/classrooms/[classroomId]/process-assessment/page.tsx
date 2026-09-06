@@ -37,13 +37,13 @@ type ProcessAssessmentSearchParams = {
   excludedTaskIds?: string | string[];
 } & Record<string, string | string[] | undefined>;
 
-const SUPPORTED_REPORT_WINDOWS = ["24h", "7d", "30d", "all"] as const;
+const SUPPORTED_REPORT_WINDOWS = ["term", "7d", "30d", "all"] as const;
 type ReportWindow = (typeof SUPPORTED_REPORT_WINDOWS)[number];
 const DISPLAY_REPORT_WINDOWS = ["7d", "30d", "all"] as const;
 type DisplayReportWindow = (typeof DISPLAY_REPORT_WINDOWS)[number];
 const PROCESS_ASSESSMENT_PAGE_SIZE = 100;
 const REPORT_WINDOW_LABELS: Record<ReportWindow, string> = {
-  "24h": "近24小时",
+  term: "学期",
   "7d": "近7天",
   "30d": "近30天",
   all: "全部",
