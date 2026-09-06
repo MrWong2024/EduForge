@@ -1,26 +1,25 @@
-# DTO Cheatsheet（Write APIs）
+# DTO / Public Data Contract Cheatsheet
 
-更新时间口径：以当前 commit / 工作区最近同步为准；DTO 事实以 backend 源码为最高优先级，本文件用于快速交接。  
-来源：`backend/src/modules/**/controllers/*.controller.ts` + 对应 `dto/*.dto.ts`
+## Scope / Owner
 
-## 用途说明
+本文是 public request / response data contract 的 handoff quick-reference，回答“字段是什么、怎么校验、公开返回什么”。backend 源码仍是最高事实源，本文不替代源码，也不承诺穷举全部 response type。
 
-本文件用于交接时快速给出写接口（`POST`/`PATCH`/`PUT`/`DELETE`）的最小请求体参考，帮助前端与联调脚本避免因 DTO 必填校验导致 `400`。
+- 覆盖 `@Body()`、`@Query()`、`@Param()` 的字段、validation / transform / whitelist、enum、nested structure、public response shape、敏感/私有字段省略与向后兼容的公开字段语义。
+- DTO 声明、Controller 入参绑定、response DTO / mapper 与必要的字段处理源码共同用于核对数据合同；字段由 Service 校验时仍保留其公开输入约束。
+- endpoint/path 与 `Controller & Method` 仅作定位上下文，不构成第二份 endpoint inventory；无 body 继续标注 `No body`，Minimal JSON example 继续服务于数据对接。
 
-## 范围定义
+跨层采用 `reference, don't restate`：
 
-- 仅覆盖 Controller 中声明的写接口。
-- 仅抽取 request body DTO（`@Body()`）。
-- `@Query()` / `@Param()` DTO 默认不展开；若某写接口无 body，本文件会标注 `No body`。
-- 例外：为承接 P0 后端补齐，本文件末尾补充了 2 个正式读取接口的 Query DTO（分页参数）。
-- 运行态路径按全局前缀 `api` 书写为 `/api/...`。
+- “endpoint 对外做什么”、Method/runtime Path、Controller-level Auth、状态转换与 HTTP 错误由 [Backend API Map](./handoff-backend-api-map.md) 维护。
+- “内部如何承担职责与不变量”、workflow、聚合算法、查询策略、幂等与补偿由 [Backend Service Map](./handoff-backend-service-map.md) 维护。
+- testing/evidence 由 [Backend Testing Playbook](./handoff-backend-testing-playbook.md) 与 [Frontend Testing Playbook](./handoff-frontend-testing-playbook.md) 维护。
+- frontend consumption / mapper 与展示策略从 [Frontend API Map](./handoff-frontend-api-map.md) 及对应 Route / Component Owner 获取。
 
 ## 更新规则（必须遵守）
 
-- DTO 以代码为准：`backend/src/modules/**/dto/*.dto.ts`。
-- 若 DTO 字段、校验装饰器、枚举、嵌套结构有变更，必须同步更新本文件对应接口段落。
-- 若 `handoff-backend-api-map` 与 Controller 路径不一致，以 Controller 真实路径为准，并在本文件标注差异。
-- 本次扫描未发现路径冲突（与 `docs/handoff/handoff-backend-api-map.md` 一致）。
+- 公开字段、校验、转换、枚举、嵌套结构、安全暴露或兼容语义变化时，按源码更新对应数据段落；不复制完整 endpoint inventory 或内部流程。
+- Controller 路径发生变化时更新 API Map；本文只按需更新定位上下文，不积累扫描结论或阶段日志。
+- 当前未展开的 request/response 按后续实际变更渐进补充；本轮不为新 Owner 定位一次性补齐全部类型。
 
 ---
 
@@ -102,7 +101,7 @@
   - 该接口只允许当前登录用户修改自己的密码，不接受 `userId`。
   - 服务层会对 `newPassword` 做 `trim` 后非空校验，拒绝纯空白密码。
   - 服务层会拒绝“新密码与当前密码相同”。
-  - 改密成功后保留当前会话，并失效该用户其它历史会话。
+  - 改密后的会话失效策略见 [Backend API Map](./handoff-backend-api-map.md#users)，内部协作见 [Service Map](./handoff-backend-service-map.md#service-card-02)。
 
 ---
 
@@ -186,8 +185,7 @@
 - Nested structure: None
 - Minimal request: No body (`Content-Length: 0`). Do not send JSON `null`.
 - Notes:
-  - 仅允许删除空课程：必须满足 `Classroom.exists({ courseId }) === false`。
-  - 非空删除返回 `409`，`code=COURSE_NOT_EMPTY`，message=`该课程下已有班级记录，不能删除，只能归档`。
+  - 删除门禁与 HTTP 错误见 [Backend API Map](./handoff-backend-api-map.md#courses)；内部引用检查见 [Service Map](./handoff-backend-service-map.md#service-card-03)。
 
 ---
 
@@ -277,9 +275,7 @@
 - Nested structure: None
 - Minimal request: No body (`Content-Length: 0`). Do not send JSON `null`.
 - Notes:
-  - 仅允许删除空班级：必须同时满足“无 `ClassroomTask` 记录 + 无 `Enrollment` 记录（含 REMOVED 历史）”。
-  - `studentIds` 仅作防御性辅助校验，不是主判定来源。
-  - 非空删除返回 `409`，`code=CLASSROOM_NOT_EMPTY`，message=`该班级已有成员或任务记录，不能删除，只能归档`。
+  - 删除门禁与 HTTP 错误见 [Backend API Map](./handoff-backend-api-map.md#classrooms)；Enrollment 历史与 legacy 防御检查见 [Service Map](./handoff-backend-service-map.md#service-card-04)。
 
 ### POST /api/classrooms/:id/students/:uid/remove
 
@@ -416,12 +412,12 @@
   - `description`
   - `knowledgeModule`
   - `stage` (1~4)
-  - `status`
 - Optional fields:
+  - `status?: TaskStatus`（`@IsOptional() @IsIn(CREATE_TASK_ALLOWED_STATUSES)`；缺省按 `DRAFT` 创建）
   - `courseLabel?: string`（单选课程分类；来源白名单：`backend/src/modules/learning-tasks/task-course-labels.constants.ts`）
   - `visibility?: string`（模板可见性；来源白名单：`backend/src/modules/learning-tasks/task-template-visibility.constants.ts`）
 - Enums:
-  - `status`: `DRAFT | PUBLISHED | ARCHIVED`（from `TaskStatus`）
+  - `status`（创建允许值）: `DRAFT | PUBLISHED`；不允许初始 `ARCHIVED`
   - `courseLabel`（可选）: `TASK_COURSE_LABELS`（例如：`未分类`、`通用编程`、`Java 程序设计`、`数据结构`、`人工智能`）
   - `visibility`（可选）: `PRIVATE | SHARED`（缺省默认 `PRIVATE`）
 - knowledgeModule constraint:
@@ -528,7 +524,7 @@
 ```
 - Response notes:
   - 返回单条 feedback response，含 `id/submissionId/source/type/severity/message/suggestion/tags/scoreHint/createdAt/updatedAt`。
-  - 当 `source=TEACHER` 时，新建反馈会写入并返回 `createdBy`。
+  - 当 `source=TEACHER` 时，新建反馈会写入并返回 `createdBy`；旧数据缺失 `createdBy` 时，公开响应允许该字段缺省。
 
 ### PATCH /api/learning-tasks/submissions/:submissionId/feedback/:feedbackId
 
@@ -603,7 +599,7 @@
 
 ---
 
-## Query DTO 补充（读取接口）
+## Query DTO / Public Response（读取接口）
 
 ### GET /api/classrooms/:id/students
 
@@ -695,7 +691,7 @@
   - `items[*]` 评分解释字段包含 `iteratedTasksCount/aiRequestedTasksCount/aiSucceededTasksCount/avgWarnItems`；原 `aiRequestedCount/aiSucceededCount` 继续表示总 AI 请求/成功次数
   - `avgFeedbackItems/avgWarnItems/avgErrorItems` 按任务维度统计：每个学生每个有效任务取最新一次有 AI 反馈项的提交，INFO 只进 `avgFeedbackItems`，WARN 进 `avgWarnItems`，ERROR 进 `avgErrorItems`
   - rubric 固定为任务覆盖率 0.45、提交迭代质量 0.15、AI 使用质量 0.2、代码质量代理 0.2；`submissionsCount <= 0` 或排除全部任务时 `score=0`
-  - CSV 同步包含 `studentName,studentNo,studentId` 列（列顺序在前部），并新增 `iteratedTasksCount/aiRequestedTasksCount/aiSucceededTasksCount/avgWarnItems`
+  - CSV 同步包含 `studentName,studentNo,studentId` 列（列顺序在前部），以及 `iteratedTasksCount/aiRequestedTasksCount/aiSucceededTasksCount/avgWarnItems`；继续保留 `aiRequestedCount/aiSucceededCount` 次数字段
   - 任务排除会重新计算 `publishedTasksCount/submittedTasksRate/submissions/iteration/late/AI job/AI task coverage/AI task success/AI feedback/topTags/score/risk`；排除全部任务时仍返回 ACTIVE 学生且任务相关统计与 `score` 为 0
 
 ### GET /api/courses/:courseId/overview
@@ -734,12 +730,12 @@
   - `/api/classrooms/{classroomId}/tasks/{classroomTaskId}/learning-trajectory?window=all&page=1&limit=20`
 - Window 语义:
   - `all` = 当前课堂任务学习轨迹口径下全部历史记录（无时间下界过滤）
-  - `24h/30d` 为后端兼容窗口，下一阶段前端不再主展示
+  - `24h/30d` 为后端兼容窗口
 
-### 统计窗口契约分层说明（阶段一）
+### 统计窗口契约分层说明
 
 - 后端兼容支持集合：以上 Query DTO 的 `@IsIn(...)` 允许值（含兼容窗口）。
-- 前端主展示集合：由下一阶段前端策略决定，不等同于后端兼容集合。
+- 前端窗口展示策略见 [Frontend Route Map](./handoff-frontend-route-map.md)，不在本文复制当前展示集合。
 - 课程总览窗口契约：`GET /api/courses/:courseId/overview` 默认 `all`，兼容 `all/1h/24h/7d`，其中 `all` 表示无时间下界过滤。
 - `ai-metrics` DTO 保持不变：`window` 仍仅支持 `1h | 24h | 7d`，不引入 `all`。
 
@@ -765,9 +761,8 @@
   - `scope=mine`：仅当前教师本人模板（包含本人 `PRIVATE + SHARED`）
   - `scope=shared`：共享池（`visibility=SHARED`，且包含旧数据缺省 `visibility`；包含“我自己设为 SHARED 的模板”）
   - `scope=all`：当前教师可见全集（我的全部 + 共享池）
-  - `status/knowledgeModule/stage` 已在后端进入数据库级过滤（与 `scope/courseLabel` 可叠加）。
+  - `status/knowledgeModule/stage` 可与 `scope/courseLabel` 组合筛选；内部查询实现见 [Service Map](./handoff-backend-service-map.md#service-card-08)。
   - 当 `courseLabel=未分类` 时，服务端会同时匹配“字段缺省/空值”任务，保持旧数据兼容。
-  - 当前前端任务模板页若仍在本地处理 `status/knowledgeModule/stage`，属前端接入阶段问题；后端查询契约已就绪。
 
 ### GET /api/classrooms/:id/publishable-task-templates
 

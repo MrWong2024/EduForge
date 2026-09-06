@@ -1,10 +1,15 @@
 ﻿# 服务职责地图（Service Cards）
 
-本文是后端 Service 职责与边界地图，用于改动前定位影响范围；具体实现以 `backend/` 源码为准。
+## Scope / Owner
 
-扫描范围：`backend/src/modules/**` 下全部 `*service.ts`。  
-补充：为满足 Provider 交接完整性，附带 `*.provider.ts` 卡片。
-重点包含：`classrooms/enrollments/services/*` 与 `classrooms/classroom-tasks/services/*` 新增服务域。
+本文是后端内部 Service / Provider / Workflow 职责与边界的 Owner，回答“内部谁负责、状态与一致性如何保证”。用于改动前定位影响范围，具体实现以当前 `backend/` 源码或用户指定 commit 为准。
+
+- 维护 Service / Provider / workflow location、domain responsibility、上下游依赖、Service 真正承担的授权/资源边界、state / consistency / idempotency、data isolation、transaction / compensation / recovery、重要 side effects、具有实际意义的性能架构、SoT 与非职责边界。
+- 不作为 endpoint inventory、HTTP Method/Path、Controller-level Auth 矩阵、完整 DTO 字段、完整 public response shape、普通 HTTP error inventory、frontend behavior 或 testing evidence 的 Owner。
+- “endpoint 对外做什么”由 [Backend API Map](./handoff-backend-api-map.md) 维护；“公开数据长什么样”由 [DTO / Public Data Contract Cheatsheet](./handoff-backend-dto-cheatsheet.md) 维护；本文只描述内部如何承担职责与不变量，跨层采用 `reference, don't restate`。
+- 前端消费与展示从 [Frontend API Map](./handoff-frontend-api-map.md) 及对应前端 Owner 获取；测试证据见 [Backend Testing Playbook](./handoff-backend-testing-playbook.md) 与 [Frontend Testing Playbook](./handoff-frontend-testing-playbook.md)；配置事实见 [Config Matrix](./handoff-backend-config-matrix.md)。
+
+定位范围：`backend/src/modules/**` 的 Service 与 Provider；本文件不是完整方法签名目录。
 
 全局口径（SoT）：
 
@@ -12,22 +17,28 @@
 - 隔离键：课堂分析/报表/复盘/导出统一按 `classroomTaskId` 隔离，禁止用 `taskId` 做跨班兜底聚合。
 - `Classroom.studentIds`：仅 legacy 输出/镜像字段；授权与统计读路径不依赖该字段。
 
-## Service Card 模板（含新增字段）
+Global SoT 只保留理解跨 Service workflow 必需的稳定不变量，不追加 endpoint、DTO、前端或测试明细；已有专项 Owner 时优先引用。
 
-- Service: `<file path>`
-- Domain: `Course|Classroom|ClassroomTask|Task|Submission|AiFeedbackJob|Feedback|Cross-domain`
-- Actions: `2~4 个动词`
-- I/O Shape:
-  - In: `关键参数`
-  - Out: `entity | paged list | aggregate | void`
-- Key Methods（关键方法签名摘要）
-- AuthZ Boundary
-- Metrics/Isolation
-- Consistency/Constraints
-- Deps/Side Effects
-- Performance Notes
-- SoT
-- Failure Modes
+## Service Card 模板
+
+- Service / Provider: `源码位置`
+- Domain / Responsibility: `领域与承担的职责`
+- Upstream: `调用方与入口职责`
+- Downstream / Dependencies: `下游协作与依赖`
+- Consistency / State / Idempotency: `状态、不变量与重复调用约束`
+- Isolation: `数据隔离与 Service 实际负责的资源边界`
+- Side Effects: `重要读写或外部副作用`
+- Important Performance / Recovery: `仅在适用时记录性能架构、事务、补偿与恢复`
+- SoT: `源码或权威合同引用`
+- Boundary / Non-responsibility: `不承担什么、交给哪个 Owner`
+
+确有助于理解 workflow 时可补少量关键方法名；不要求完整 TypeScript 签名、逐字段 I/O Shape、HTTP error matrix 或 endpoint inventory。
+
+## Maintenance
+
+- 保留当前仍正确、有交接价值的既有详细卡片，允许渐进压缩；后续相关 Service 被业务变更触及时，按当前模板更新并删除已由 API/DTO Owner 维护的重复事实。
+- 既有卡片中的方法签名、I/O 或 Failure Modes 是历史交接细节，不构成新的 API/DTO Owner；本轮只修明确错误和安全可去重内容，不全面重写卡片。
+- 新增或更新卡片只完整维护本层职责；移除历史细节前确认唯一事实仍可在承接 Owner 或源码中定位，不以行数为治理目标。
 
 ## Service Card 01
 
@@ -371,7 +382,7 @@
   - `getCourseOverview(courseId: string, query: QueryCourseOverviewDto, teacherId: string)`
 - AuthZ Boundary: `teacher-only + owner-only`（`course.createdBy === currentUserId`）
 - Metrics/Isolation: 仅统计该 teacher 名下 classrooms；`studentsCount` 批量来自 `EnrollmentService.countStudentsGroupedByClassroomIds`；提交/迟交/AI 全按 `classroomTaskId` 关联回 classroom
-- Consistency/Constraints: late 指标含 `lateSubmissionsCount/lateStudentsCount`；默认窗口为 `all`；默认 `limit=20` 不变，DTO `limit` 最大上限为 `100`；后端兼容窗口 `all/7d/24h/1h`；`all` 语义为“无时间下界过滤（classroomTasks/submissions/jobs 不拼 `createdAt >= lowerBound`）”；禁止跨班 taskId 兜底聚合；`submissionRate` 兼容语义保持 `distinctStudentsSubmitted / studentsCount`；新增 `overallSubmissionCoverage = sum(distinctStudentsSubmitted per classroomTask) / (studentsCount * publishedClassroomTasks)`（分母为 0 返回 0）；`ai.aiSuccessRate` 在 `jobsTotal=0` 时返回 `null`
+- Consistency/Constraints: 统计严格按 `classroomTaskId` 关联后归并到班级，禁止跨班 taskId 兜底；`all` 时 classrooms 对应的 classroomTasks/submissions/jobs 不拼时间下界；保留 late 指标 `lateSubmissionsCount/lateStudentsCount`。Query 默认/兼容值、分页上限以及 `submissionRate/overallSubmissionCoverage/ai.aiSuccessRate` 的公开字段语义见 [DTO Cheatsheet](./handoff-backend-dto-cheatsheet.md)。
 - Deps/Side Effects: `CourseModel`, `ClassroomModel`, `ClassroomTaskModel`, `SubmissionModel`, `EnrollmentService`, `AiFeedbackMetricsAggregator`；只读
 - Performance Notes: 先按分页取 classrooms，再做 page-scope 聚合并在页内排序（非全量排序）
 - SoT: `backend/src/modules/courses/services/course-overview.service.ts`; `backend/src/modules/classrooms/enrollments/services/enrollment.service.ts`
@@ -456,7 +467,8 @@
   - `getProcessAssessmentForSnapshot(...)`（供 snapshot 复用）
 - AuthZ Boundary: `teacher-only + owner-only`
 - Metrics/Isolation: 成员全集与分页来自 Enrollment ACTIVE；任务范围先按 `classroomId + window` 取 window tasks，再应用 `excludedTaskIds` 得到 `effectiveTaskIds`；提交/迟交/AI/反馈/`topTags` 聚合均基于 `effectiveTaskIds`；提交迭代、AI 覆盖、AI 成功按 `studentId + classroomTaskId` 去重；迟交指标输出 `lateSubmissionsCount/lateTasksCount`
-- Consistency/Constraints: 默认窗口为 `all`；后端兼容窗口 `all/7d/30d/term`；`all` 语义为“无时间下界过滤（tasks/submissions/feedback 不拼 lowerBound）”；`excludedTaskIds` 为 optional query，支持逗号分隔与 repeated query，非法 MongoId 返回 400，合法但不属于当前课堂/窗口的 id 自然无效果；排除全部任务时仍返回当前 ACTIVE 学生且任务相关统计与 score 均为 0；rubric/score/riskLevel 为过程性指标；rubric 固定为任务覆盖率 0.45、提交迭代质量 0.15、AI 使用质量 0.2、代码质量代理 0.2；计分时 `effectiveTaskCount <= 0` 或 `submissionsCount <= 0` 直接返回 `0`；反馈均值按每个学生每个有效任务“最新一次有 AI 反馈项的提交”统计，INFO 只进 `avgFeedbackItems`，WARN 进 `avgWarnItems` 并按 0.5 扣分，ERROR 进 `avgErrorItems` 并按 1 扣分；CSV 导出与 JSON 复用同一 payload（窗口 + 排除口径一致）并使用手写转义（`"` -> `""`），最终返回字符串前追加 UTF-8 BOM（`\uFEFF`）以兼容 Windows Excel 中文打开；不输出敏感字段
+- Consistency/Constraints: `all` 时 tasks/submissions/feedback 不拼 lowerBound；合法但不属于当前课堂/窗口的排除 id 自然无效果；排除全部任务时仍返回当前 ACTIVE 学生且任务相关统计与 score 均为 0。rubric/score/riskLevel 为过程性指标；计分与公开响应使用同一 rubric 常量（权重值见 [DTO Cheatsheet](./handoff-backend-dto-cheatsheet.md)）；`effectiveTaskCount <= 0` 或 `submissionsCount <= 0` 时直接返回 `0`。反馈均值按每个学生每个有效任务“最新一次有 AI 反馈项的提交”统计，INFO 只进 `avgFeedbackItems`，WARN 进 `avgWarnItems` 并按 0.5 扣分，ERROR 进 `avgErrorItems` 并按 1 扣分；CSV 与 JSON 复用同一 payload（窗口 + 排除口径一致），使用手写转义（`"` -> `""`）并在字符串前追加 UTF-8 BOM（`\uFEFF`）；不输出敏感字段。
+- Risk Calculation: 无有效任务为 `LOW`；有任务但 0 提交为 `HIGH`；任务覆盖率 `<0.4` 或平均 ERROR `>=2` 为 `HIGH`；任务覆盖率 `<0.8`、平均 ERROR `>=1`、平均 WARN `>=2` 为 `MEDIUM`；其余为 `LOW`。
 - Deps/Side Effects: `ClassroomModel`, `ClassroomTaskModel`, `SubmissionModel`, `AiFeedbackJobModel`, `FeedbackModel`, `EnrollmentService`；只读
 - Performance Notes: Enrollment 稳定分页后页内排序（page-local sort）
 - SoT: `backend/src/modules/classrooms/services/process-assessment.service.ts`; `backend/src/modules/classrooms/dto/query-process-assessment.dto.ts`
@@ -622,7 +634,7 @@
   - submission 不存在 -> 进入失败处理并重试/死亡
   - task 不存在 -> 进入失败处理并重试/死亡
   - 本地/上游限流 -> `FAILED` + 设置 `notBefore`
-  - 凭据错误或 real 未启用 -> `DEAD`
+  - Provider 凭据错误（`UNAUTHORIZED` / `MISSING_API_KEY`）-> `DEAD`
   - provider 返回坏 JSON -> `BAD_RESPONSE`
   - feedback 重复键 -> 忽略重复，不中断 job
 
