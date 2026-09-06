@@ -2,136 +2,108 @@
 
 ## 0) 本文定位（强制口径）
 
-本文是前端当前事实快照，用于新会话快速建立前端全貌；它保留强制口径、前端骨架、路由分区摘要、主链路可用性、真接口收口状态、高风险边界和细节文档索引，不是页面说明书。
+本文用于新会话快速建立前端全貌，维护当前工程形态、角色与页面族、主链路能力、高风险边界和真实未实现能力，不维护页面说明书或 helper 清单。
 
-- 具体实现以当前 `frontend/**` 源码或用户指定 commit 为最高优先级；与 handoff 冲突时先核对代码。
-- 所有正式业务请求统一走同域 `/api/proxy/**`，不要在业务页绕过 proxy 直连后端。
-- 代理目标由 `FRONTEND_BACKEND_ORIGIN` 决定，代理实现位于 `app/api/proxy/[...path]/route.ts`。
-- 产品阶段、Work Package 状态与下一主线由 [Roadmap](./handoff-roadmap.md) 唯一维护。
-- 页面、路由、访问边界与数据来源由 [Route Map](./handoff-frontend-route-map.md) 维护。
-- 前端 API helper、BFF proxy 与 frontend/backend integration 由 [Frontend API Map](./handoff-frontend-api-map.md) 维护。
-- 组件职责与“改哪里/不要改哪里”由 [Component Map](./handoff-frontend-component-map.md) 维护。
-- 稳定 UX、视觉与交互原则由 [Design Baseline](./handoff-frontend-design-baseline.md) 维护。
-- Browser evidence、scripted / Agent-assisted / Human smoke 治理由 [Frontend Testing Playbook](./handoff-frontend-testing-playbook.md) 维护。
-- 本文只维护当前前端实现全貌与实现边界；专项事实回到上述 Owner，历史阶段流水账不再维护 handoff 文件。
-- 后端接口、DTO、配置与运行模式分别看对应 `handoff-backend-*` 文件。
+- 当前 `frontend/` 源码或用户指定 commit 是实现事实的最高来源；与 handoff 冲突时先核对代码。
+- 前端采用 Next.js App Router，按 Server Component / Client Component 分工；所有正式业务请求统一走同域 `/api/proxy/**`，业务页不得绕过 BFF 直连后端。
+- 产品阶段与下一主线由 [Roadmap](./handoff-roadmap.md) 维护；路由、调用、组件、设计与证据分别由专项 Owner 维护，入口见本文末尾索引。
 
 ## 1) 前端骨架摘要
 
 ```text
 frontend/
 ├─ app/
-│  ├─ (auth)/{login,forgot-password,reset-password}
-│  ├─ teacher/**
-│  ├─ student/**
-│  ├─ api/proxy/[...path]          # 正式 BFF 代理
-│  ├─ _demo/** + api/_demo/**      # 本地 demo 沙箱，非主交付链
-│  └─ {layout,error,not-found,page}
-├─ components/
-│  ├─ layout/{TeacherShell,StudentShell}
-│  ├─ blocks/{PageHeader,EmptyState,ErrorState,Tabs,FloatingMoreMenu}
-│  ├─ auth/**
-│  ├─ teacher/**
-│  ├─ student/**
-│  └─ classroomTask/TaskContextHeader
-└─ lib/
-   ├─ api/{client,browser-client,error-presenter,types-*}
-   ├─ auth/{session,role-home}
-   ├─ routes/paths.ts
-   ├─ learning-tasks/{course-labels,template-visibility-scope,template-list-sorting}.ts
-   ├─ ui/{status,format,rubric}.ts
-   └─ http/server-cookie.ts
+│  ├─ (auth)/                  # 登录与密码恢复页面族
+│  ├─ teacher/                 # 教师角色入口与教学页面
+│  ├─ student/                 # 学生角色入口与学习页面
+│  ├─ api/                     # 同域 BFF 与隔离的 demo 接口
+│  └─ _demo/                   # 本地 demo 沙箱，非主交付链
+├─ components/                 # 角色 Shell、共享区块及领域交互组件
+└─ lib/                        # API client/type adaptation、认证会话、
+                               # 路由常量与共享展示语义
 ```
+
+Server 侧负责会话读取、页面数据加载与组合，Client 侧承载表单和交互请求；二者共用 BFF 架构，服务端转发入站会话 Cookie，浏览器携带同域 Cookie。具体代理实现、配置与 helper 定位见 [Frontend API Map](./handoff-frontend-api-map.md)。
 
 ## 2) 路由分区摘要
 
 Auth：
 
-- `/login` 已完成登录、`GET users/me` 探针与 role-home 跳转：`TEACHER -> /teacher/classrooms`，`STUDENT -> /student`。
-- `/forgot-password` 与 `/reset-password` 已接真实接口；前端固定防枚举成功提示，重置 token 只从 URL query 读取，不持久化保存。
+- 登录、当前用户探针与按角色进入主界面的链路已完成。
+- 忘记/重置密码已接真实接口，保持防枚举提示和重置凭据不持久化的边界。
 
 Teacher：
 
-- `/teacher/**` 由 `app/teacher/layout.tsx` 做 server-side role gate；教师主链路覆盖课程、班级、任务模板、课堂任务实例、成员、提交批阅、三件套、周报、过程性评价、AI 反馈介入成效分析、教学快照预检。
-- 课程和班级列表已支持创建、基础编辑、归档/恢复/空对象删除；低频生命周期动作在列表“更多”菜单处理。
-- 模板层（`/teacher/tasks*`）负责模板创建、筛选、编辑、可见性与生命周期；班级任务页只负责选择已发布模板并发布课堂任务实例。
-- 课堂任务工作区以班级看板和任务列表为中枢，提交管理、学习轨迹、课堂复盘、AI 指标共用任务上下文导航。
-- 过程性评价页面已接真实 JSON/CSV 能力，支持临时任务排除、评分说明和导出；Query、组件与交互细节由 route/API/component maps 维护。
-- 教师班级看板已有 AI 成效分析入口，页面覆盖总览、任务和 ACTIVE 学生分析；结果只反映当前合同下的提交行为与代码问题代理变化，不代表全部 AI 使用、正式成绩、能力或因果贡献。
+- 教师页面族有独立 server-side role gate；覆盖课程、班级、模板、课堂任务、成员、提交批阅及教学分析。
+- 课程和班级已支持创建、基础编辑、归档、恢复与受后端约束的空对象删除。
+- 模板层承担资产维护，课堂实例层承担已发布模板的选择、发布与实例管理；两层职责不混用。
+- 提交管理、学习轨迹、课堂复盘与 AI 指标共享课堂任务上下文。
+- 过程性评价、AI 反馈介入成效分析及其他报表已接后端权威聚合；页面用途与具体交互见 [Route Map](./handoff-frontend-route-map.md)。
 
 Student：
 
-- `/student/**` 由 `app/student/layout.tsx` 做 server-side role gate。
-- 学生看板、加入班级、任务详情与提交、submission detail、请求 AI 均已接真接口。
-- 学生任务详情以 `my-task-detail` 为主读源，消费后端 `participationStatus` 与 `completionStatus`；模板当前状态不再作为前端二次阻断依据。
+- 学生页面族有独立 server-side role gate；看板、加入班级、任务详情、提交、提交详情与 AI 请求均已接真接口。
+- 任务详情读取后端聚合数据，消费完成与参与状态，模板当前状态不作为前端二次阻断依据。
 
 辅助：
 
-- `/_demo/**` 与 `/api/_demo/**` 是独立 demo 沙箱，不参与主链路交付。
-- 当前没有正式 `/ops/**` 前端页面；后端 debug/ops 接口关闭时返回 `404` 应按“功能未启用”理解。
+- demo 沙箱及其内存接口与正式主链路隔离。
+- 当前没有正式运维前端页面；受控后端诊断入口不代表已具备产品化运维 UI。
 
 ## 3) 公共机制与职责边界
 
-- API client：Server/RSC 使用 `lib/api/client.ts`，Client Component 使用 `lib/api/browser-client.ts`；两者统一拼 `/api/proxy/**` 并处理错误。
-- Role gate：`lib/auth/session.ts` 通过 `GET users/me` 获取登录态，`app/teacher/layout.tsx` 与 `app/student/layout.tsx` 做角色边界。
-- 路由常量：`lib/routes/paths.ts` 是教师/学生主链路路径单一来源，三件套导航优先改 `TaskContextHeader` 与 paths。
-- 类型适配：教师/学生 payload 解析优先落在 `lib/api/types-teacher.ts` 与 `lib/api/types-student.ts`，不要在页面深层散写原始字段访问。
-- 状态文案与 UI 工具：AI 状态、rubric 四维中文、日期/展示兜底分别在 `lib/ui/status.ts`、`lib/ui/rubric.ts`、`lib/ui/format.ts` 收口。
-- 模板治理：`courseLabel`、`visibility/scope` 与默认排序分别由 `lib/learning-tasks/*` 单一来源维护。
-- 页面组件边界：模板维护属于模板层，班级任务页只做实例发布；报表筛选、临时任务排除与客户端导航的具体组件和状态职责由 component map 维护，前端不重算后端指标。
+- Server / Client 调用分别处理入站会话转发与浏览器同域请求，统一经 BFF 读取后端；错误解析和响应适配集中维护。
+- Teacher / Student 入口以服务端当前用户探针建立角色边界，前端 gate 不能替代后端资源授权。
+- 主链路路径与任务上下文集中复用，避免页面各自维护导航规则；具体模块职责见 [Component Map](./handoff-frontend-component-map.md)。
+- payload adaptation 与共享展示语义集中处理，不在页面深层散写原始后端字段访问，也不据此重新推导权威业务数据。
+- 模板治理、实例管理和报表筛选各守职责；具体组件与交互状态由 Component Map 维护，真实 Query 与 mapper 由 Frontend API Map 维护。
 
 ## 4) 主链路可用性摘要
 
 Teacher 起步与教学链路：
 
 1. 创建课程与班级，进入班级看板。
-2. 在模板页创建/维护任务模板，按 `scope/courseLabel/status/knowledgeModule/stage` 走后端真实查询。
-3. 在班级任务页从发布候选接口选择当前教师可见且 `PUBLISHED` 的模板，配置实例参数后发布。
-4. 通过任务详情、提交管理、学习轨迹、课堂复盘、AI 指标完成教学观察与批阅。
-5. 周报、课程总览、过程性评价、AI 反馈介入成效分析、教学快照预检均已接入后端聚合接口；复杂页面结构与按钮行为以 route-map 为准。
+2. 创建和维护模板，使用正式后端筛选与分页能力查找模板。
+3. 从后端发布候选池选择已发布模板，配置课堂实例后发布。
+4. 通过任务详情、提交管理、学习轨迹、复盘和 AI 指标完成教学观察与批阅。
+5. 使用课程总览、周报、过程性评价、AI 反馈介入成效分析及教学快照预检；临时分析条件不改变教学记录。
 
 Student 学习链路：
 
-1. 加入班级后在 `/student/dashboard` 查看当前、近期过期或显式历史任务。
-2. 在任务详情页读取任务说明、评分标准、完成情况和历史提交。
-3. 提交代码后进入 submission detail 查看反馈，并可在允许状态下请求 AI Feedback。
-4. `NOT_REQUESTED/PENDING/RUNNING/SUCCEEDED/FAILED/DEAD` 均有展示口径；自动刷新逻辑由专用组件承载。
+1. 入班后从学习看板查看当前、近期过期或显式历史任务。
+2. 在任务详情读取任务说明、评分标准、完成情况和历史提交。
+3. 提交代码后进入稳定 submission detail 查看反馈，在允许状态下请求 AI Feedback。
+4. AI Feedback 生命周期已有统一展示与状态驱动自动刷新；具体数据合同见 [Backend DTO](./handoff-backend-dto-cheatsheet.md#submission-request--response-family)，刷新组件职责见 [Component Map](./handoff-frontend-component-map.md)。
 
 ## 5) 真接口收口状态
 
-当前 Teacher/Student 主链路已使用真实后端能力：
+Teacher / Student 主链路已接真实后端：账户、教学容器、模板与实例、成员、提交与反馈，以及教学报表和分析均有正式调用链。当前用户资料可读取，后端资料编辑能力尚无前端 UI。
 
-- 登录态、角色边界、当前用户和改密链路已接入；资料编辑后端能力尚无前端 UI。
-- 教师课程、班级、成员、模板、课堂任务、提交与反馈链路已接入。
-- 学生看板、加入班级、任务详情、提交、submission detail 与 AI Feedback 请求链路已接入。
-- 课程/班级聚合、周报、学习轨迹、课堂复盘、过程性评价、AI 指标、AI 反馈介入成效分析和教学快照预检已接入。
-
-具体 helper、proxy、endpoint、请求/响应与 UI 映射统一由 `handoff-frontend-api-map.md` 维护；后端 HTTP 与 DTO 合同分别回到 backend API map 与 DTO cheatsheet。
+调用点、helper、BFF、请求/响应适配及兼容行为由 [Frontend API Map](./handoff-frontend-api-map.md) 维护；公开 HTTP 行为与数据形状分别由 [Backend API](./handoff-backend-api-map.md) / [Backend DTO](./handoff-backend-dto-cheatsheet.md) 维护。
 
 ## 6) 高风险边界与当前实现边界
 
 不得回退：
 
-- 不要绕过 `/api/proxy/**` 直连后端。
-- 不要把 query 透传当 submission detail 主体数据源。
-- 不要在班级任务页恢复模板创建/编辑职责。
-- 不要用模板当前 `PUBLISHED/ARCHIVED` 状态阻断既有 classroomTask 的学生运行态；前端应消费后端状态信号。
-- 不要在过程性评价页重算后端评分、持久化 `excludedTaskIds`，或把清空排除实现成会带上当前 checkbox 状态的提交。
-- 不要在 AI 反馈介入成效分析页重算后端的精细结果、总体结果、反馈参与阶段或 rate 分母，不要把零可比平均值当真实持平点，也不要使用成绩/能力增长/因果贡献措辞。
-- 不要把 raw JSON 调试块当主视图，也不要让主链路依赖 raw JSON 才能操作。
+- 正式业务请求必须经过同域 `/api/proxy/**`。
+- submission detail 主体来自稳定详情接口；URL query 只承担上下文与受限展示兼容，不覆盖后端权威字段。
+- 模板资产与课堂实例职责分离，不以模板当前状态重新阻断既有实例的学生运行态；参与和完成状态消费后端结果。
+- 过程性评价只消费后端评分；任务排除仅为临时查询条件，不持久化为教学事实或教师偏好。
+- AI 反馈介入成效分析不重算后端结果或指标分母，不从学生分页重算班级摘要；不可比数据不能误表示为真实持平，也不能据此宣称成绩、能力或因果贡献。
+- raw JSON 不能成为主产品视图或主链路操作前提。
 
 当前实现边界：
 
-- Teacher/Student 主链路已接真接口，任务模板层与班级实例层职责清晰；过程性评价、AI Feedback 产品入口与教师端 AI 反馈介入成效分析已可用。
-- 部分页面保留低权重 raw JSON 调试块；正式 `/ops/**` 前端页面未建设；模板删除/复制/批量等能力未提供。
-- 当前已有合法 non-UI scripted Browser evidence / micro-profile，不等于产品 UI scripted smoke，也不表示产品 UI 主流程已验收通过；产品 UI 主流程的证据模式由 [Frontend Testing Playbook](./handoff-frontend-testing-playbook.md) 决定。
+- 部分页面仍有低权重 raw JSON 调试块；正式运维页面、模板删除/复制/批量操作及资料编辑 UI 尚未提供。
+- 已有 non-UI scripted Browser evidence / micro-profile，不等于产品 UI 已验收；实际证据边界由 [Frontend Testing Playbook](./handoff-frontend-testing-playbook.md) 维护。
+- 当前页面族与真实主链路不代表未来学习证据产品形态已经实现；阶段见 [Roadmap](./handoff-roadmap.md)，稳定产品与交互原则见 [Design Baseline](./handoff-frontend-design-baseline.md)。
 
 ## 7) 细节文档索引
 
-- 前端入口：`docs/handoff/handoff-frontend-INDEX.md`
-- 路由地图：`docs/handoff/handoff-frontend-route-map.md`
-- 前端 API 对接地图：`docs/handoff/handoff-frontend-api-map.md`
-- 组件职责地图：`docs/handoff/handoff-frontend-component-map.md`
-- 后端接口地图：`docs/handoff/handoff-backend-api-map.md`
-- 后端配置矩阵：`docs/handoff/handoff-backend-config-matrix.md`
-- 后端 DTO 速查：`docs/handoff/handoff-backend-dto-cheatsheet.md`
+- [Frontend INDEX](./handoff-frontend-INDEX.md)：前端专项 Owner 导航。
+- [Route Map](./handoff-frontend-route-map.md)：页面用途、访问边界与实现状态。
+- [Frontend API Map](./handoff-frontend-api-map.md)：helper、BFF、调用链与数据适配。
+- [Component Map](./handoff-frontend-component-map.md)：模块位置、组合及修改边界。
+- [Design Baseline](./handoff-frontend-design-baseline.md)：稳定 UX、视觉与交互原则。
+- [Frontend Testing Playbook](./handoff-frontend-testing-playbook.md)：Browser 与 smoke 证据职责。
+- [Backend API](./handoff-backend-api-map.md)、[Backend DTO](./handoff-backend-dto-cheatsheet.md)、[Config Matrix](./handoff-backend-config-matrix.md)：后端公开合同与运行配置。
