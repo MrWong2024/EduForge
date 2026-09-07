@@ -4,6 +4,7 @@
 
 本文维护长期工程决策、理由、影响及历史生命周期；当前具体配置事实由 [Config Matrix](./handoff-backend-config-matrix.md) 维护，实现事实以当前代码为准。
 
+- Decision 中出现的测试文件、用例或验证方式仅作为形成该决策时的历史 evidence；当前测试资产、runner、执行方式与证据状态由 [Backend Testing Playbook](./handoff-backend-testing-playbook.md) 维护。
 - Decision 默认记录创建时的历史决策；当前仍有效且未被替代的决策可视为 `CURRENT`，既有决策无需逐条补 `Status: CURRENT`。
 - 后续替代决策时保留原背景、理由与历史语义，显式标记 `Status: SUPERSEDED`，并用 `Superseded by: Decision N / 当前 Owner 文档` 指向承接来源；历史内容不再作为 current contract。
 - 新增长期决策使用当前最大编号的连续下一编号，不重排历史编号，也不复制 Config Matrix 的配置表或环境组合。
@@ -15,7 +16,7 @@
 
 **Rationale**  
 同一 `taskId` 可被多个班级复用；若仅按 `taskId` 统计会跨班串数。  
-`classroom-dashboard-isolation.e2e-spec.ts` 明确验证了跨班隔离。  
+该决策形成时，`classroom-dashboard-isolation.e2e-spec.ts` 用于回归验证跨班隔离。
 
 **Consequences**  
 提交、队列、看板三层口径一致，可稳定支持“同任务跨班复用”。  
@@ -28,7 +29,7 @@
 
 **Rationale**  
 worker 与 debug 的 `process-once` 都走同一 processor，护栏只放一处即可避免策略分叉。  
-`learning-tasks.ai-feedback.ops.e2e-spec.ts`、`learning-tasks.ai-feedback.ops.debug-off.e2e-spec.ts` 与 `learning-tasks.ai-feedback.guards.e2e-spec.ts` 共同覆盖了该链路回归。  
+该决策形成时，`learning-tasks.ai-feedback.ops.e2e-spec.ts`、`learning-tasks.ai-feedback.ops.debug-off.e2e-spec.ts` 与 `learning-tasks.ai-feedback.guards.e2e-spec.ts` 用于回归验证 worker 与 process-once 共用的 processor/guard 链路。
 
 **Consequences**  
 无论后台定时消费还是手工触发，都会遵守同一并发与速率上限。  
@@ -71,7 +72,7 @@ Bailian provider 只接受严格 JSON 对象，字段白名单、值域白名单
 
 **Consequences**  
 线上默认不可见，需显式开启才可调试。  
-E2E 中相关用例都会先设置 `AI_FEEDBACK_DEBUG_ENABLED=true`。  
+该决策形成时，相关 E2E 通过显式启用 `AI_FEEDBACK_DEBUG_ENABLED=true` 验证受门禁接口。
 
 ## 6) 会话模型采用服务端 Session + HttpOnly Cookie，并限制会话上限
 
