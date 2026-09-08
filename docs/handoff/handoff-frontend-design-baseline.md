@@ -46,8 +46,33 @@ EduForge 当前前端已形成教师端与学生端两个角色入口，共用�
 - 保持稳定内容宽度、合理留白和可扫描的信息分组；标题、说明、操作区和主体内容避免挤在同一视觉层级。
 - 卡片、表格和列表按信息结构使用，不为了制造“仪表盘感”堆叠容器。
 - 错误、警告和成功状态不能只依赖颜色表达；关键状态同时提供文字或明确语义。
-- 页面与组件应延续现有响应式收缩和换行方式；密集内容需要局部滚动时，不得造成页面级无意横向溢出。
+- 页面与组件应延续现有响应式收缩和换行方式；响应式范围、局部滚动与横向溢出约束见 [§6.1](#61-响应式与设备兼容基线)。
 - 动效保持少量、短暂且有功能目的，不用复杂转场掩盖状态变化或增加等待感。
+
+## 6.1 响应式与设备兼容基线
+
+教师端和学生端均必须响应式支持下列手机、平板和桌面范围，包括平板横竖屏及 viewport 动态变化。所有尺寸均指实际 CSS content viewport：`window.innerWidth × window.innerHeight`；这些是代表性设计/验收 viewport，不是 CSS breakpoint 清单，也不要求穷举所有设备型号。
+
+| 设备范围 | 代表性 viewport |
+|---|---|
+| 手机竖屏 | `390×844` |
+| 大屏 Android 平板竖屏 | `800×1280` |
+| 大屏 Android 平板横屏 | `1280×800` |
+| 大屏 iPad 竖屏 | `1024×1366` |
+| 大屏 iPad 横屏 | `1366×1024` |
+| 紧凑桌面 | `1280×720` |
+| 桌面大屏 | `1536×864` |
+
+- 页面不得产生 document / main 级无意横向溢出；Grid、Flex、Card 等子项应允许合理收缩，多栏布局在窄屏下应自然收缩、重排或切换为单列，不得通过固定宽度把主要页面撑出 viewport。
+- 表格及确需保留最小内容宽度的密集区域可以在明确的局部容器中横向滚动，局部滚动不得撑宽整个页面；不要求把复杂数据强行压缩到手机宽度而失去可读性。
+- Dialog、Form、主要操作（primary action）及错误/警告反馈在代表 viewport 下必须保持可见、可聚焦、可操作；不得因 viewport 缩小把主操作永久推出屏幕、遮挡关键错误或形成无法完成的表单。
+- 横竖屏或 viewport 尺寸变化不得静默丢失仍处于当前客户端状态中的合法未提交草稿。该原则适用于教师编辑类表单、学生提交类输入及后续具备合法未提交状态的页面；草稿字段、autosave 协议、持久化和客户端状态实现由对应 [Route Map](./handoff-frontend-route-map.md)、[Component Map](./handoff-frontend-component-map.md) 与当前代码承担，本节不维护实现明细。
+- 不得根据手机、平板、电脑、viewport width 或 orientation 推断 teacher/student role、authorization 或 route permission；角色与权限由正式 Auth / Route / Session 合同决定。
+- 不要求不同设备像素级一致；允许布局根据空间合理重排，但必须保持信息层级、主要任务、核心操作、状态语义、可读性与可操作性。
+- 当前正式基线使用上述 7 个代表 viewport，不穷举所有设备 × 角色组合。仅当真实产品或设备需求证明该集合不足时才调整，不因新增设备型号机械增加 viewport。
+- 特定硬件能力如成为未来业务的真实依赖，由对应业务合同另行定义；本节只维护响应式设计责任。
+
+本节建立稳定的响应式设计责任（stable responsive design responsibility），不代表当前全部 route 已完成响应式改造、全部页面已通过 7 个 viewport 验收，或已有 scripted Browser responsive regression、真实设备 evidence、Agent/Human smoke passed。当前实现能力以 [Frontend Snapshot](./handoff-frontend-snapshot.md) 与当前代码为准；测试资产、执行方式与证据状态由 [Frontend Testing Playbook](./handoff-frontend-testing-playbook.md) 维护。
 
 ## 7. 文案与信息边界
 
@@ -66,5 +91,6 @@ EduForge 当前前端已形成教师端与学生端两个角色入口，共用�
 
 - 新增或调整页面、组件、布局、样式和用户交互前，先检查本文是否已有适用原则。
 - 设计原则变化时更新本文；route、API、component 或当前实现事实变化时更新其各自 Owner，不在本文复制明细。
+- 正式代表 viewport 集合或响应式/设备兼容设计原则变化时更新本文；测试资产、执行方式与 evidence 状态由 [Frontend Testing Playbook](./handoff-frontend-testing-playbook.md) 维护，本文不记录通过状态。
 - 优先扩展已有可复用模式；只有重复需求和职责边界稳定时才新增公共组件。
 - 遵循 `reference, don't restate`：没有设计职责变化时，本文件保持 zero diff。
