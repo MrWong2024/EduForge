@@ -66,7 +66,7 @@ EduForge 当前前端已形成教师端与学生端两个角色入口，共用�
 - 页面不得产生 document / main 级无意横向溢出；Grid、Flex、Card 等子项应允许合理收缩，多栏布局在窄屏下应自然收缩、重排或切换为单列，不得通过固定宽度把主要页面撑出 viewport。
 - 表格及确需保留最小内容宽度的密集区域可以在明确的局部容器中横向滚动，局部滚动不得撑宽整个页面；不要求把复杂数据强行压缩到手机宽度而失去可读性。
 - Dialog、Form、主要操作（primary action）及错误/警告反馈在代表 viewport 下必须保持可见、可聚焦、可操作；不得因 viewport 缩小把主操作永久推出屏幕、遮挡关键错误或形成无法完成的表单。
-- 横竖屏或 viewport 尺寸变化不得静默丢失仍处于当前客户端状态中的合法未提交草稿。该原则适用于教师编辑类表单、学生提交类输入及后续具备合法未提交状态的页面；草稿字段、autosave 协议、持久化和客户端状态实现由对应 [Route Map](./handoff-frontend-route-map.md)、[Component Map](./handoff-frontend-component-map.md) 与当前代码承担，本节不维护实现明细。
+- 横竖屏或 viewport 尺寸变化不得静默丢失仍处于当前客户端状态中的合法未提交草稿。该原则适用于教师编辑类表单、学生提交类输入及后续具备合法未提交状态的页面；具体草稿字段、autosave / 持久化协议和客户端状态实现由届时对应 authoritative owner 与当前代码维护，本节不维护实现明细。
 - 不得根据手机、平板、电脑、viewport width 或 orientation 推断 teacher/student role、authorization 或 route permission；角色与权限由正式 Auth / Route / Session 合同决定。
 - 不要求不同设备像素级一致；允许布局根据空间合理重排，但必须保持信息层级、主要任务、核心操作、状态语义、可读性与可操作性。
 - 当前正式基线使用上述 7 个代表 viewport，不穷举所有设备 × 角色组合。仅当真实产品或设备需求证明该集合不足时才调整，不因新增设备型号机械增加 viewport。
