@@ -41,18 +41,18 @@ DG-01 已完成独立治理验收并收口为当前治理基线，不改变 EduF
 
 ## 5. 下一产品主线（PLANNED）
 
-### Learning Evidence Foundation Phase 1
+### Curriculum & Teaching Foundation Phase 0
 
-这是 DG-01 之后已明确的下一条产品主线，目标是建立可追溯、可复用的学习证据基础，为后续验证与能力建模提供可靠输入。
+面向大一软件类课程，先建立课程—教材—平台联合教学模型，明确教材适用对象与先修边界、学生必须真正掌握的核心编程基础、AI 随学习阶段逐步开放的使用与责任边界，以及标准教学任务的高层学习流程。选取一个代表性 vertical slice，检查现有 EduForge Task / Submission / Feedback 等主链是否足以承载该教学模型，识别真实能力与缺口。
 
-当前仅确认方向和顺序；详细合同、数据模型、API、UI、验收范围与实施拆分尚未在本 Roadmap 中锁定，也尚未开始实现。
+本阶段是产品/教学设计阶段，尚未开始实施；仅锁定高层方向，不预设具体技术实现，不锁定 Schema、API、DTO、UI、持久化结构或具体平台实现工作包。完成后，再依据联合教学模型、代表性 vertical slice 和现有 EduForge 的真实能力差距，决定下一产品开发主线与实现工作包。
 
 ## 6. 后续候选方向（DEFERRED）
 
 | 候选方向 | 当前处置 |
 |---|---|
-| Verification Foundation | 延后评估；不是当前工作包，也不作为 Learning Evidence Phase 1 的隐含完成条件 |
-| Competency Foundation | 延后评估；需在学习证据基础与真实产品需求稳定后另行定界 |
+| Verification Foundation | 延后评估；不是当前工作包，也不是 Curriculum & Teaching Foundation Phase 0 的隐含完成条件 |
+| Competency Foundation | 延后评估；待课程—教材—平台联合教学模型与真实产品需求稳定后另行定界 |
 
 候选方向只有在范围、Owner、依赖和验收合同被单独确认后，才可转为 `PLANNED` 或 `ACTIVE`。
 
