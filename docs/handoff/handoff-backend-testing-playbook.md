@@ -143,7 +143,7 @@ Mongo password、production credential、Bailian API Key、SMTP password、第�
 
 ## 7. Current Known Gaps
 
-- `backend/test/app.e2e-spec.ts` 当前在 `beforeEach` 创建 app，但缺少对应 `afterEach` / `afterAll` 生命周期关闭；这是 testing lifecycle/open-handle risk，不是 production product defect。
+当前无已确认的 Backend Testing Known Gap。
 
 ## 8. Maintenance / Non-goals
 
