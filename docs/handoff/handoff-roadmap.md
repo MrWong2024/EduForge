@@ -2,7 +2,7 @@
 
 ## 1. 文档定位
 
-本文是 EduForge 产品主线、工作包状态、近期计划和明确延期方向的唯一 Owner。Roadmap 只保留高层范围和状态，不维护 Schema、API、字段清单、完整验收测试、开发日志或 release notes。
+本文是 EduForge 产品主线、工作包状态和近期计划的唯一 Owner。Roadmap 只保留高层范围和状态，不维护 Schema、API、字段清单、完整验收测试、开发日志或 release notes。
 
 - 当前实现全貌分别见 [Backend snapshot](./handoff-backend-snapshot.md) 与 [Frontend snapshot](./handoff-frontend-snapshot.md)。
 - API、DTO、Service、配置、路由、组件和稳定设计原则由对应 map、matrix、snapshot 与 design baseline 维护。
@@ -15,7 +15,6 @@
 | `CURRENT` | 已成为当前产品基线的能力与边界 |
 | `ACTIVE` | 已启动、正在推进的工作包 |
 | `PLANNED` | 已明确为下一主线，但尚未开始实施 |
-| `DEFERRED` | 仅作为后续候选保留，不是当前承诺或隐含前置 |
 
 ## 3. 当前产品基线（CURRENT）
 
@@ -30,14 +29,9 @@ EduForge 当前是面向教师与学生的教学任务平台，已形成以下�
 
 ## 4. 文档与测试治理基线（CURRENT）
 
-### DG-01 — Documentation & Testing Governance Alignment
-
-DG-01 已完成独立治理验收并收口为当前治理基线，不改变 EduForge 产品行为。最终结果为：
-
-- DG-01 完成时，7 份通用工程治理文档已完成成熟上游基线同源对齐；此后按 EduForge 自身治理需求独立演进，以当前仓库版本为准。
+- 7 份通用工程治理文档已完成当前基线对齐，此后按 EduForge 自身治理需求独立演进，以当前仓库版本为准。
 - 项目 handoff 已建立 Roadmap、Frontend Design Baseline、导航型 INDEX 与“一事实一 Owner”结构。
 - Backend / Frontend Testing Playbook、测试数据库职责和最低充分 Browser evidence 治理已建立。
-- 独立 DG-01V 已验证同源性、项目污染、Owner 边界、Roadmap/Design/Testing 事实、Browser 治理、链接与 Git 范围，阻断门禁全部通过。
 
 ## 5. 下一产品主线（PLANNED）
 
@@ -47,18 +41,9 @@ DG-01 已完成独立治理验收并收口为当前治理基线，不改变 EduF
 
 本阶段是产品/教学设计阶段，尚未开始实施；仅锁定高层方向，不预设具体技术实现，不锁定 Schema、API、DTO、UI、持久化结构或具体平台实现工作包。完成后，再依据联合教学模型、代表性 vertical slice 和现有 EduForge 的真实能力差距，决定下一产品开发主线与实现工作包。
 
-## 6. 后续候选方向（DEFERRED）
+## 6. 维护规则
 
-| 候选方向 | 当前处置 |
-|---|---|
-| Verification Foundation | 延后评估；不是当前工作包，也不是 Curriculum & Teaching Foundation Phase 0 的隐含完成条件 |
-| Competency Foundation | 延后评估；待课程—教材—平台联合教学模型与真实产品需求稳定后另行定界 |
-
-候选方向只有在范围、Owner、依赖和验收合同被单独确认后，才可转为 `PLANNED` 或 `ACTIVE`。
-
-## 7. 维护规则
-
-1. 产品主线、工作包状态、近期计划或延期处置变化时更新本文。
+1. 产品主线、工作包状态或近期计划变化时更新本文。
 2. Roadmap 不复制 API、DTO、Schema、字段矩阵、测试轮次、测试数量或实现流水；这些事实回到各自 Owner。
 3. 工作包完成后压缩为高层目标、最终状态和权威引用，不长期保留逐步开发过程。
-4. `CURRENT`、`ACTIVE`、`PLANNED` 与 `DEFERRED` 必须按真实状态使用；候选方向不得写成当前已实现事实或承诺。
+4. `CURRENT`、`ACTIVE` 与 `PLANNED` 必须按真实状态使用。
