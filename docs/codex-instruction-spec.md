@@ -1,4 +1,4 @@
-# Codex 指令生成规则 v1.21（精简稳定版）
+# Codex 指令生成规则 v1.23
 
 > 适用于采用 `frontend\`、`backend\`、`docs\` 目录结构，并通过架构文档与规则文档约束开发的项目。
 > 目标：保证指令结构稳定、输出可审核、执行边界清晰、文档同步可判断。
@@ -317,7 +317,7 @@ GPT 对以下任务必须在生成 Codex 实现指令前执行候选生成：
 7. **已有证据和变化影响**：unit、HTTP E2E、Browser、verifier、已知缺陷和回归，以及证据形成后相关代码、接口和配置是否变化。
 8. **自动化边界**：真实设备、触控笔和手写、相机、打印、外部登录或硬件，以及无法可靠自动化的主观或专业判断。
 
-候选集合原则上是 GPT 生成 Codex 指令时的临时设计工作集，不要求完整输出给 Codex，不要求写入 Testing Playbook，不要求长期分配 ID，也不要求随提交持久保存。持久文档只保留通用生成和治理规则、当前明确未关闭的真实 `gap`、当前人工或真实设备项目、当前批次状态、精确证据资产和 evidence commit，以及具有长期意义的合同结论；详细执行与治理过程由 Git 历史追溯。
+候选集合原则上是 GPT 生成 Codex 指令时的临时设计工作集，不要求完整输出给 Codex，不要求写入 Testing Playbook，不要求长期分配 ID，也不要求随提交持久保存。候选治理产生的持久事实统一按 3.11 的单一 authoritative owner 规则收口，本节不另行规定固定持久化类别或证据台账。
 
 **阶段 B：候选治理和最低充分证据选择**
 
@@ -333,14 +333,22 @@ GPT 对以下任务必须在生成 Codex 实现指令前执行候选生成：
 6. 没有穷举所有角色、错误码、字段组合和数据库快照，不等于存在测试缺口；只有风险真实可达、风险独立且当前最低充分证据缺失时，才能标记为 `gap`。
 7. 要求完整 unit、E2E 或 Browser 套件时，必须说明认证、公共 Guard、Schema、通用 mapper、公共测试基础设施、跨模块合同或其他具体影响依据；不得只写“为了保险”。
 
-**Browser 证据执行方式与合同自证防线**
+**证据判定依据与合同自证防线**
+
+1. 对某项 assertion target 的 expected / oracle，必须具有相对于该被断言事实足够独立且可说明的判定依据；不得仅从被测实现自身、其实际输出，或与该被断言事实共享同一判断路径的逻辑反向生成 expected，再以二者一致证明该实现符合业务或合同。
+2. expected / oracle 的依据应来自与 assertion target 对应的 authoritative contract 或其他可独立成立的判定依据，包括已经锁定的业务/接口/状态/数据合同、对应事实的 authoritative owner、用户明确决策、正式标准或协议、可独立成立的领域/数学不变量，以及合同明确要求由人工或专业判断形成的结论。若这些来源不存在、互相冲突或不足以唯一确定预期，应先锁定合同或拆出前置设计任务，不得让测试或 current implementation 替项目决定正确答案。
+3. 允许读取、调用或复用 current production implementation 获取测试所需的 implementation / wiring facts，或承担与当前 assertion target 不同的职责；是否构成自证，应判断这些事实或逻辑是否同时承担当前被断言事实的正确性判定，而不是机械禁止读取或复用 production code，也不得为了形式上的“独立”复制第二套 enum、DTO、算法或业务实现。
+4. characterization / regression evidence 可以有意冻结经确认的 current behavior，用于判断后续是否发生非预期变化；但如果其基线主要来自 current implementation，本身只能证明行为是否相对该基线变化，不能在缺少独立判定依据时单独证明冻结时的行为符合业务或合同。若该基线已由独立 authoritative basis 确认，则可以与该依据共同形成合同证据。
+5. 本规则适用于所有证据方式。具体任务应依据 assertion target、authoritative basis 和实际 evidence mechanism 判断是否存在自证；不得建立固定 evidence-layer 白名单、黑名单、逐层穷举禁止清单或为了执行本规则新增永久 audit、manifest、JSON、hash、状态体系或独立测试流程。项目级 Testing Playbook 可以增加本项目特有的 evidence qualification，但不得重新定义本通用原则。
+
+**Browser 证据执行方式与专项自证防线**
 
 1. Browser evidence requirement 与 Browser execution mode 必须分开判断，且先问“assertion target 是 Browser semantic 还是 UI semantic”，不能先问 Playwright 是否能写。scripted deterministic Browser regression 默认只准入 non-UI Browser runtime / network / origin / isolation semantic；主要测试逻辑和主要断言不得依赖 production UI 的 DOM 结构、文案、selector、visible controls、组件层级、interaction topology 或用户操作路径。
 2. non-UI Browser semantic 包括 BrowserContext isolation、Cookie isolation / persistence、localStorage / sessionStorage / IndexedDB 等 Storage isolation、origin isolation、CORS / credentials、浏览器层 Session / Cookie 生命周期、navigation / reload / history / origin 的 Browser lifecycle 本身、Browser-native file / blob / object URL semantics、独立 Browser-native API semantics，以及 production build / 真实 origin / 真实 HTTP topology 的最低充分 wiring。production 页面可以作为 Browser runtime 宿主，但 scripted 主断言不得因此扩张成登录、多页导航、多次点击、modal / details、录音、手写、上传或业务完成等 UI golden path。
 3. Browser-native API 名称本身不构成 scripted 资格。MediaRecorder、Canvas、Pointer、file input、focus、keyboard、clipboard、permissions 等都必须继续判断是在证明独立 Browser primitive，还是产品 UI 使用该 primitive 的行为；前者只有在可脱离 production UI topology 的薄 profile 中才可 scripted，后者属于 UI。navigation / reload 只有在证明 Cookie / Storage / Context 等 Browser lifecycle 事实时可 scripted；业务页面刷新后的题目、面板、按钮、提示和继续操作体验属于 UI。泛化的 file input 以及 keyboard / focus 不再是默认 scripted 白名单。
 4. UI semantic 包括页面结构、可见组件或控件、文案、提示语、modal / drawer / details / tab、组件展开关系、selector / locator / DOM ancestor、元素位置、enable / disable、用户点击顺序、输入 / 保存 / 继续流程、页面级错误恢复、UI reload / resume、frontend workflow，以及视觉、布局和 accessibility 体验。客观 production UI Browser behavior 默认使用 Agent-assisted interactive Browser smoke；Agent 可以适应当前布局、DOM ancestor、展开结构、动态控件和不改变合同的普通 copy 变化，但不得改变预先冻结的 expected contract。通过只能记录为 `Agent-assisted Browser smoke passed`，不能记录为 scripted / Playwright regression green、CI coverage 或 reusable scripted evidence。
 5. human manual / real-device smoke 独立负责可理解性、自然性、视觉层级、主观体验、专业判断、真实设备和真实麦克风、触控笔、相机及浏览器 / OS 权限体验。Agent Browser 不可用或人工实际操作本身是验收要求时，客观 UI flow 也可以形成准确标记的 human manual evidence；不得与 Agent-assisted 或 scripted 结果混称。human 不替代 BrowserContext、Cookie / Storage isolation、CORS / credentials 等独立 non-UI Browser security semantic 的 scripted evidence。
-6. substantive contract change、旧 scripted Profile 与 current 行为广泛漂移，或准备重写 / 替换 Browser spec 主体时，GPT 必须先从已锁定产品合同、current roadmap contract、正式 API / DTO、领域原始需求或用户明确决策等独立来源冻结 expected business behavior，之后才读取 current production code 获取 selector、testid、route、控件结构和 wiring。Agent 的适应性不得形成“production 怎么实现 → test 就期待什么 → test 再证明 production 正确”的自证闭环。该冻结默认只是 GPT 生成期的临时设计工作，不机械新增审计任务、JSON、hash 或长期文档；只有合同来源矛盾、旧测试与 current 合同严重冲突或重写依据无法明确时，才建立具名 read-only independent contract audit。
+6. 在遵循前述通用合同自证防线的基础上，substantive contract change、旧 scripted Profile 与 current 行为广泛漂移，或准备重写 / 替换 Browser spec 主体时，GPT 必须先从已锁定产品合同、current roadmap contract、正式 API / DTO、领域原始需求或用户明确决策等独立来源冻结 expected business behavior，之后才读取 current production code 获取 selector、testid、route、控件结构和 wiring。Agent 的适应性不得形成“production 怎么实现 → test 就期待什么 → test 再证明 production 正确”的自证闭环。该冻结默认只是 GPT 生成期的临时设计工作，不机械新增审计任务、JSON、hash 或长期文档；只有合同来源矛盾、旧测试与 current 合同严重冲突或重写依据无法明确时，才建立具名 read-only independent contract audit。
 7. 对现有 scripted Profile，`patch / rewrite body / retire` 前先判断其是否仍有本版本 scripted 资格。主要验证 UI 时直接选择 `retire scripted profile / switch current UI evidence to Agent-assisted or human`，不得 patch selector 或 rewrite scripted UI body 作为长期方案；历史通过继续按形成时有效的 historical evidence 保存，但不自动构成 current / future scripted regression 资格。只有 `ELIGIBLE_NON_UI_SCRIPTED` Profile 才继续依据职责、漂移范围与维护成本选择 patch 或 rewrite；真正 Browser-only semantic 被长 UI flow 包裹时，先尝试下沉低层或形成最低充分的薄 non-UI profile，无法合理薄化时由 Agent-assisted 验证整个 UI flow。
 
 **验收优先级与冻结止损**
@@ -385,7 +393,7 @@ GPT 对以下任务必须在生成 Codex 实现指令前执行候选生成：
    4. 对新增或变化候选执行阶段 B、C。
    5. 执行最终验收。
    6. 完成候选覆盖完整性对账。
-   7. 同步状态和证据。
+   7. 按 3.11 的 Owner 规则收口相关状态与证据记录。
 3. 默认一体化不表示所有工作必须塞入一个巨大 Codex 指令，不禁止拆分 Browser、并发、迁移或独立验收阶段，也不表示代码已实现后必须在原任务中无限扩大测试范围。新实现单元默认仍不得采用“先开发、在 Playbook 积累、以后集中测试”的流程。
 4. 实现期间随时发现的新风险必须立即加入临时候选集合，并继续按阶段 B、C 分类、归属和判定关闭。实现完成后、最终验收范围冻结前、宣布当前阶段或实现单元完成前，Codex 必须主动执行增量阶段 A，至少核对基线至当前工作区的实际代码 diff、新增和删除文件、公开合同变化、调用链和依赖关系变化、公共 Guard / mapper / coordinator / fixture 或其他共享资产变化、数据库 / Storage / 审计及其他外部副作用，以及实现和测试执行结果暴露的新状态、恢复路径、并发窗口或回归风险。新增或发生实质变化的候选必须重新执行阶段 B、C；最终验收暴露的新独立风险也必须先治理，只有命中“验收优先级与冻结止损”的重新打开条件才扩展当前实现，其他候选具名归入后续阶段或工作包最终收口。当 happy path 已通过、阻断项已关闭且剩余候选均有明确归属时执行最终覆盖完整性对账并冻结范围；不得规定无意义的固定循环次数，也不得对未变化候选机械重复相同测试。
 5. 范围复杂或验收链路较重时，可以采用 `A# 实现阶段 → A# 独立验收阶段`、`B# 实现阶段 → B# 独立验收阶段`，或同一实现单元下其他具名且边界稳定的等价阶段。适合考虑拆分的原因包括实现范围或跨层调用链较大；新状态机、合法并发、部分完成或恢复复杂；数据迁移、兼容或不可逆副作用；Browser fixture、多个 Profile、跨进程编排或真实 wall-clock 验收本身构成独立工程；外部权限、设备或环境暂不可用；实际 diff 和新增候选显著超出初始预计，导致单任务边界不再稳定。这些阶段不产生新的候选仓库，也不改变 A# / B# 的最终完成门禁。
@@ -395,8 +403,8 @@ GPT 对以下任务必须在生成 Codex 实现指令前执行候选生成：
 
 **分级完成门禁**
 
-1. **当前任务或阶段完成**只有在当前阶段拥有的实现已完成、当前阶段拥有的验收已实际通过、本阶段发现的候选均有明确主要归属、未在本阶段执行的候选已指向明确后续阶段/其他实现单元/人工边界或具名工作包最终收口、没有未披露的当前阻断 `gap`，且当前阶段状态和证据已同步时才能宣布。明确后续自动化阶段或工作包最终收口候选仍 `pending` 可以允许当前子阶段完成，但不能据此宣布对应工作包完成。
-2. **A# / B# 或其他实现单元完成**只有在该实现单元锁定范围内的当前阻断候选和即时自动化验收均已关闭、所有属于本单元完成门禁的后续自动化阶段均已完成、不存在未披露的阻断性 `gap`、引用证据仍适用于当前代码态、当前范围 mandatory 的人工或真实设备项目已经完成、最终候选覆盖完整性对账已完成，且状态和证据索引已同步时才能宣布。尚未关闭的候选只有经阶段 B 治理为具名工作包最终收口候选、具有明确归属和复核时点时才可保留；它们不阻断当前实现单元，但在实际关闭前继续阻断对应工作包完成。
+1. **当前任务或阶段完成**只有在当前阶段拥有的实现已完成、当前阶段拥有的验收已实际通过、本阶段发现的候选均有明确主要归属、未在本阶段执行的候选已指向明确后续阶段/其他实现单元/人工边界或具名工作包最终收口、没有未披露的当前阻断 `gap`，且相关状态与证据记录已按 3.11 的 Owner 规则收口时才能宣布。明确后续自动化阶段或工作包最终收口候选仍 `pending` 可以允许当前子阶段完成，但不能据此宣布对应工作包完成。
+2. **A# / B# 或其他实现单元完成**只有在该实现单元锁定范围内的当前阻断候选和即时自动化验收均已关闭、所有属于本单元完成门禁的后续自动化阶段均已完成、不存在未披露的阻断性 `gap`、引用证据仍适用于当前代码态、当前范围 mandatory 的人工或真实设备项目已经完成、最终候选覆盖完整性对账已完成，且相关状态与证据记录已按 3.11 的 Owner 规则收口时才能宣布。尚未关闭的候选只有经阶段 B 治理为具名工作包最终收口候选、具有明确归属和复核时点时才可保留；它们不阻断当前实现单元，但在实际关闭前继续阻断对应工作包完成。
 3. **工作包或产品能力完成**只有在工作包锁定范围要求的相关 A#、B# 和跨层任务均已完成，跨层合同、联调和用户流程验收均已关闭，范围内不存在 `pending` 自动化验收或阻断性 `gap`，mandatory 人工或真实设备项目满足工作包合同，且 roadmap 已按真实证据同步时才能宣布。Testing Playbook 不得自行启动或关闭 roadmap 工作包。
 
 **A#、B# 与范围限定边界**
@@ -461,27 +469,37 @@ Codex 指令不要求包含或输出完整候选全集，也不得新增第 13 �
 
 ## 6. 版本说明
 
-当前版本：v1.21（精简稳定版）
-适用场景：适用于需要通过稳定指令结构控制修改范围、验证过程与文档同步的持续开发项目
-v1.21 核心变化：修正文档事实所有权中的历史测试证据归档口径，明确当前测试治理与证据职责归 testing playbook、本次任务实际验证结果归 task final report、历史测试执行与 historical evidence 归 Git；不改变既有测试候选、执行、完成治理或项目级 Testing Playbook 职责
-v1.20 核心变化：将 scripted deterministic Browser regression 收窄为 non-UI Browser runtime / network / origin / isolation semantics；产品客观 UI verification 默认由 Agent-assisted 执行，主观、专业与真实设备事实由 human manual / real-device 执行；删除稳定 interaction topology、keyboard / focus 和泛化 file input 作为默认 scripted 准入，明确 CI 要求不覆盖该边界，并要求现有 scripted 资产按新规则重新 qualification
-v1.19 核心变化：新增文档事实单一 authoritative owner 与同步写入门禁，确立 `reference, don't restate`、同步文档不等于复制事实、completed work package 压缩、current stage 非 release notes、去重不等于信息丢失及轻量 owner check；不新增 ownership registry、独立审计流程或持久状态体系
-v1.18 核心变化：将 Browser evidence requirement 与 execution mode 分离，明确 scripted deterministic regression、Agent-assisted interactive smoke 与 human manual / real-device smoke 的适用边界和完成语义；新增 substantive contract change 后的 independent-contract 自证防线、patch / rewrite body / retire 决策、连续两轮测试基础设施失败后的工具级策略重评估，以及 fixture / support / verifier 形成第二套实现时的复杂度止损；不改变既有验证候选、活动状态或产品完成门禁
-v1.17 核心变化：明确页面或用户流程可见、UI 可达不自动要求 Browser；只有不可替代 Browser 语义或 production 页面到真实 HTTP wiring 才以 Browser 为主证据，主观与专业判断归人工验收；不改变 v1.16 的主体分工和最低充分治理
-v1.16 核心变化：新增 GPT-only / Codex-only / Shared 适用主体与执行边界；明确 Codex 阅读完整规范不等于重复 GPT 生成期工作；拆清 3.8 的生成期命令设计与执行期 discovery，明确 3.9 初始 A/B/C 由 GPT 负责、增量 A/B/C 与最终验收由 Codex 负责，并明确 3.10 在双方各自阶段适用；不改变既有验证治理和最低充分复杂度原则
-v1.15 核心变化：明确通用宪法与项目事实的职责边界；移除最低充分复杂度、并行治理和验证候选规则中的特定项目业务实体与场景，将其抽象为跨项目适用的业务聚合、写入主体和专业判断原则；不改变 v1.14 已确立的最低充分复杂度、正常主流程优先、安全拒绝、显式重试和验收止损原则
-v1.14 核心变化：将“最低充分复杂度优先”确立为项目全生命周期长期原则，锁定安全与正确性优先的六级权衡顺序；明确系统级正常并行、独立业务聚合可以正常并行、同一业务聚合内写操作串行优先及其不等于技术全局锁；固化真实竞争下“一个成功 + 一个 CAS 安全拒绝 + 读取权威状态 + 用户显式重试”的正确结果；在保留初始 / 增量 A、B、C 的前提下加入 happy path 优先、失败先分类、重新打开条件与验收范围冻结止损，防止风险扫描、自动化时序和低频理论问题无限扩大实现与测试范围
-v1.13 核心变化：在 3.7 与 3.9 的既有最低充分治理内，将降低实现复杂度、正常主流程优先和“安全拒绝 + 服务端状态刷新 + 用户显式重试”固化为设计原则；明确不默认建设自动重试、无缝协调、锁、队列或多套 revision，不自动重放有副作用操作，也不让测试工具内部时序反向塑造产品架构；验证候选继续先生成、再治理、选择最低充分证据，并在治理时区分当前实现单元阻断与有明确工作包归属和复核时点的最终收口候选，不新增状态体系或第二套验证流程，且不得削弱数据完整性、权限、隐私、正常主流程、防重复与关键失败恢复
-v1.12 核心变化：新增“严禁过度设计与最低充分性自检”强制规则，要求 GPT 在需求分析、任务或工作包拆分、架构与数据设计、测试设计以及生成 Codex 指令前，按当前任务规模和风险进行最低充分性判断，优先复用现有能力，删除或延后仅服务于未来假设且缺少当前需求、真实调用方、明确验收路径或现行约束依据的设计；同时明确最低充分不得削弱已锁定的业务或领域正确性、安全、隐私、数据完整性、权限、不变量、并发与幂等、失败恢复、兼容性、可审计性和可验证验收要求，且不得演变为独立审计阶段、额外文档、固定长清单、持久候选仓库、额外状态机或 Codex 执行流程，并保持 3.9 为验证候选治理的权威规则
-v1.11 核心变化：明确验证治理采用实现前初始 A/B/C 与实现后增量 A/B/C 的双时点闭环；实现前按目标合同生成候选，实现后基于实际 diff 主动扫描变化影响；明确初始最低充分验收集合不是封闭清单，并补充默认实现/验收一体化、复杂任务分阶段和独立验收的完成边界
-v1.10 核心变化：将候选生成和即时验收治理显式扩展到 A#、B# 及其他实现单元，并区分当前阶段、实现单元和工作包完成；明确后续阶段归属不等于候选关闭
-v1.9 核心变化：新增验证候选的系统生成、任务归属和开发后即时验收闭环；Playbook 不再作为候选项积压仓库，同时保留既有可达性分类、证据复用和最低充分证据治理
-v1.8 核心变化：禁止把实现代码或测试资产行数作为硬性或接近硬性的复杂度门禁，改用职责、重复、耦合、生命周期和维护成本评估，并禁止为过线而压缩、删注释或转移代码
-v1.7 核心变化：新增测试必要性与可达性前置核验，要求复用已有证据并按风险选择最低充分测试层
-v1.6 核心变化：澄清 `unknown` 仅为临时测试结论，并要求环境修正后仍复现的合同违例按证据重新分类
-v1.5 核心变化：新增命令与运行环境前置核验规则，要求先证明定向测试范围和跨进程环境一致性，再执行正式验收与缺陷归类
-v1.4 核心变化：增加任务规模适配、单一事实、既有规则引用、栏目职责去重和软性篇幅参考
-v1.3 治理记录：新增工具适配与安装前置判断，要求优先评估成熟标准工具、由用户安装或明确授权，并禁止因工具缺失而默认重复自研基础设施
-升级条件：当仓库结构、治理方式或审核要求发生明显变化时再讨论规则升级
+### 6.1 当前版本
+
+- **版本**：v1.23
+- **适用场景**：适用于需要通过稳定指令结构控制修改范围、验证过程与文档同步的持续开发项目。
+
+### 6.2 版本历史
+
+- **v1.23**：收口 §3.9 与 §3.11 的事实归档职责，移除阶段 A 对固定持久化测试事实类别以及分级完成门禁对独立 evidence index 的隐含要求，统一改为按 §3.11 的 authoritative owner 规则收口相关状态与证据记录；同时将版本升级条件独立为 §6.3。既有候选生成、证据选择、分级完成门禁强度及 Testing Playbook 职责不变。
+- **v1.22**：将合同自证防线从 Browser 专项规则提升为所有证据方式通用的证据判定依据约束，以 assertion target 为判断核心，明确 expected / oracle 必须具有相对于被断言事实足够独立且可说明的判定依据；允许读取或复用 current implementation 获取不承担当前正确性判定的 implementation / wiring facts，并区分 contract-correctness evidence 与 characterization / regression evidence；Browser 继续保留专项强化，不建立 evidence-layer 白名单、逐层穷举规则或额外持久审计流程。同时移除当前标题中的“精简稳定版”，并整理版本说明的 Markdown 排版。
+- **v1.21**：修正文档事实所有权中的历史测试证据归档口径，明确当前测试治理与证据职责归 testing playbook、本次任务实际验证结果归 task final report、历史测试执行与 historical evidence 归 Git；不改变既有测试候选、执行、完成治理或项目级 Testing Playbook 职责
+- **v1.20**：将 scripted deterministic Browser regression 收窄为 non-UI Browser runtime / network / origin / isolation semantics；产品客观 UI verification 默认由 Agent-assisted 执行，主观、专业与真实设备事实由 human manual / real-device 执行；删除稳定 interaction topology、keyboard / focus 和泛化 file input 作为默认 scripted 准入，明确 CI 要求不覆盖该边界，并要求现有 scripted 资产按新规则重新 qualification
+- **v1.19**：新增文档事实单一 authoritative owner 与同步写入门禁，确立 `reference, don't restate`、同步文档不等于复制事实、completed work package 压缩、current stage 非 release notes、去重不等于信息丢失及轻量 owner check；不新增 ownership registry、独立审计流程或持久状态体系
+- **v1.18**：将 Browser evidence requirement 与 execution mode 分离，明确 scripted deterministic regression、Agent-assisted interactive smoke 与 human manual / real-device smoke 的适用边界和完成语义；新增 substantive contract change 后的 independent-contract 自证防线、patch / rewrite body / retire 决策、连续两轮测试基础设施失败后的工具级策略重评估，以及 fixture / support / verifier 形成第二套实现时的复杂度止损；不改变既有验证候选、活动状态或产品完成门禁
+- **v1.17**：明确页面或用户流程可见、UI 可达不自动要求 Browser；只有不可替代 Browser 语义或 production 页面到真实 HTTP wiring 才以 Browser 为主证据，主观与专业判断归人工验收；不改变 v1.16 的主体分工和最低充分治理
+- **v1.16**：新增 GPT-only / Codex-only / Shared 适用主体与执行边界；明确 Codex 阅读完整规范不等于重复 GPT 生成期工作；拆清 3.8 的生成期命令设计与执行期 discovery，明确 3.9 初始 A/B/C 由 GPT 负责、增量 A/B/C 与最终验收由 Codex 负责，并明确 3.10 在双方各自阶段适用；不改变既有验证治理和最低充分复杂度原则
+- **v1.15**：明确通用宪法与项目事实的职责边界；移除最低充分复杂度、并行治理和验证候选规则中的特定项目业务实体与场景，将其抽象为跨项目适用的业务聚合、写入主体和专业判断原则；不改变 v1.14 已确立的最低充分复杂度、正常主流程优先、安全拒绝、显式重试和验收止损原则
+- **v1.14**：将“最低充分复杂度优先”确立为项目全生命周期长期原则，锁定安全与正确性优先的六级权衡顺序；明确系统级正常并行、独立业务聚合可以正常并行、同一业务聚合内写操作串行优先及其不等于技术全局锁；固化真实竞争下“一个成功 + 一个 CAS 安全拒绝 + 读取权威状态 + 用户显式重试”的正确结果；在保留初始 / 增量 A、B、C 的前提下加入 happy path 优先、失败先分类、重新打开条件与验收范围冻结止损，防止风险扫描、自动化时序和低频理论问题无限扩大实现与测试范围
+- **v1.13**：在 3.7 与 3.9 的既有最低充分治理内，将降低实现复杂度、正常主流程优先和“安全拒绝 + 服务端状态刷新 + 用户显式重试”固化为设计原则；明确不默认建设自动重试、无缝协调、锁、队列或多套 revision，不自动重放有副作用操作，也不让测试工具内部时序反向塑造产品架构；验证候选继续先生成、再治理、选择最低充分证据，并在治理时区分当前实现单元阻断与有明确工作包归属和复核时点的最终收口候选，不新增状态体系或第二套验证流程，且不得削弱数据完整性、权限、隐私、正常主流程、防重复与关键失败恢复
+- **v1.12**：新增“严禁过度设计与最低充分性自检”强制规则，要求 GPT 在需求分析、任务或工作包拆分、架构与数据设计、测试设计以及生成 Codex 指令前，按当前任务规模和风险进行最低充分性判断，优先复用现有能力，删除或延后仅服务于未来假设且缺少当前需求、真实调用方、明确验收路径或现行约束依据的设计；同时明确最低充分不得削弱已锁定的业务或领域正确性、安全、隐私、数据完整性、权限、不变量、并发与幂等、失败恢复、兼容性、可审计性和可验证验收要求，且不得演变为独立审计阶段、额外文档、固定长清单、持久候选仓库、额外状态机或 Codex 执行流程，并保持 3.9 为验证候选治理的权威规则
+- **v1.11**：明确验证治理采用实现前初始 A/B/C 与实现后增量 A/B/C 的双时点闭环；实现前按目标合同生成候选，实现后基于实际 diff 主动扫描变化影响；明确初始最低充分验收集合不是封闭清单，并补充默认实现/验收一体化、复杂任务分阶段和独立验收的完成边界
+- **v1.10**：将候选生成和即时验收治理显式扩展到 A#、B# 及其他实现单元，并区分当前阶段、实现单元和工作包完成；明确后续阶段归属不等于候选关闭
+- **v1.9**：新增验证候选的系统生成、任务归属和开发后即时验收闭环；Playbook 不再作为候选项积压仓库，同时保留既有可达性分类、证据复用和最低充分证据治理
+- **v1.8**：禁止把实现代码或测试资产行数作为硬性或接近硬性的复杂度门禁，改用职责、重复、耦合、生命周期和维护成本评估，并禁止为过线而压缩、删注释或转移代码
+- **v1.7**：新增测试必要性与可达性前置核验，要求复用已有证据并按风险选择最低充分测试层
+- **v1.6**：澄清 `unknown` 仅为临时测试结论，并要求环境修正后仍复现的合同违例按证据重新分类
+- **v1.5**：新增命令与运行环境前置核验规则，要求先证明定向测试范围和跨进程环境一致性，再执行正式验收与缺陷归类
+- **v1.4**：增加任务规模适配、单一事实、既有规则引用、栏目职责去重和软性篇幅参考
+- **v1.3**：新增工具适配与安装前置判断，要求优先评估成熟标准工具、由用户安装或明确授权，并禁止因工具缺失而默认重复自研基础设施
+
+### 6.3 升级条件
+
+当仓库结构、治理方式或审核要求发生明显变化时再讨论规则升级。
 
 ---
