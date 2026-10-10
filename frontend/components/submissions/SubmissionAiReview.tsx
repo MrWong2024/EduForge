@@ -1,16 +1,25 @@
 "use client";
-import { useState } from "react";
-import { RefreshButton } from "@/components/blocks/RefreshButton";
+import { useCallback, useEffect, useRef, useState, useTransition } from "react";
+import { useRouter } from "next/navigation";
+import { ErrorState } from "@/components/blocks/ErrorState";
+import { fetchJson, BrowserFetchJsonError } from "@/lib/api/browser-client";
+import {
+  toRequestAiFeedbackResponse,
+  toSubmissionDetailResponse,
+} from "@/lib/api/types-student";
+import { SubmissionAiOperations } from "@/lib/learning-tasks/submission-ai-operations";
 import { RequestAiFeedbackButton } from "@/components/student/RequestAiFeedbackButton";
 import { SubmissionAutoRefresh } from "@/components/student/SubmissionAutoRefresh";
 import {
   displayAiUsage,
   getAutoRefreshPhase,
-  normalizeAiStatus,
   type AiReview,
-  type AiStatus,
 } from "@/lib/learning-tasks/ai-review";
-import { getAiStatusHint, getAiStatusLabel } from "@/lib/ui/status";
+import {
+  getAiStatusHint,
+  getAiStatusLabel,
+  getCommonErrorSummary,
+} from "@/lib/ui/status";
 import { toDisplayDate } from "@/lib/ui/format";
 
 type Props = {
@@ -19,29 +28,151 @@ type Props = {
   review?: AiReview;
   autoRefresh: boolean;
 };
-export function SubmissionAiReview({
+export function SubmissionAiReview(props: Props) {
+  return <SubmissionAiReviewPanel key={props.submissionId} {...props} />;
+}
+function SubmissionAiReviewPanel({
   submissionId,
   status,
-  review,
+  review: initialReview,
   autoRefresh,
 }: Props) {
-  const [requestOutcome, setRequestOutcome] = useState<{
-    status: AiStatus | undefined;
-    reviewAtRequest: AiReview | undefined;
+  const router = useRouter();
+  const [operations] = useState(
+    () => new SubmissionAiOperations(submissionId, status, initialReview),
+  );
+  const [view, setView] = useState(() => operations.view);
+  const [error, setError] = useState<{
+    status?: number;
+    message: string;
   } | null>(null);
-  // A successful POST closes this action for the mounted submission, even if
-  // the old server props still say canRequest=true. Fresh detail owns the status.
-  const currentStatus =
-    requestOutcome && requestOutcome.reviewAtRequest === review
-      ? requestOutcome.status
-      : normalizeAiStatus(status);
+  const [isPageRefreshing, startTransition] = useTransition();
+  const activeAbort = useRef<AbortController | null>(null);
+  useEffect(
+    () => () => {
+      operations.cancelPending();
+      activeAbort.current?.abort();
+    },
+    [operations],
+  );
+
+  const readDetail = useCallback(
+    async (explicit: boolean) => {
+      if (isPageRefreshing) return;
+      const operation = operations.beginRead(explicit);
+      if (!operation) return;
+      const abort = new AbortController();
+      activeAbort.current = abort;
+      setView(operations.view);
+      setError(null);
+      try {
+        const payload = await fetchJson<unknown>(
+          "learning-tasks/submissions/" + encodeURIComponent(submissionId),
+          {
+            cache: "no-store",
+            signal: AbortSignal.any([
+              abort.signal,
+              AbortSignal.timeout(30_000),
+            ]),
+          },
+        );
+        const accepted = operations.finishRead(
+          operation,
+          toSubmissionDetailResponse(payload),
+        );
+        if (accepted === null) return;
+        setView(operations.view);
+        if (!accepted) {
+          setError({
+            message:
+              "详情返回信息不完整或与已确认申请不一致，申请入口保持关闭。请再次显式刷新核对。",
+          });
+          return;
+        }
+        // Only this after-operation read updates the AI block. RSC props arriving
+        // from an earlier refresh cannot replace its accepted status/eligibility.
+        if (explicit || autoRefresh) startTransition(() => router.refresh());
+      } catch (error) {
+        if (operations.finishRead(operation) === null) return;
+        setView(operations.view);
+        setError({
+          status:
+            error instanceof BrowserFetchJsonError ? error.status : undefined,
+          message: "权威详情读取未完成，申请入口保持关闭。请再次显式刷新核对。",
+        });
+      } finally {
+        if (activeAbort.current === abort) activeAbort.current = null;
+      }
+    },
+    [autoRefresh, isPageRefreshing, operations, router, submissionId],
+  );
+  const autoRead = useCallback(() => readDetail(false), [readDetail]);
+  const handleRequest = async () => {
+    if (isPageRefreshing) return;
+    const operation = operations.beginRequest();
+    if (!operation) return;
+    const abort = new AbortController();
+    activeAbort.current = abort;
+    setView(operations.view);
+    setError(null);
+    try {
+      const payload = await fetchJson<unknown>(
+        "learning-tasks/submissions/" +
+          encodeURIComponent(submissionId) +
+          "/ai-feedback/request",
+        {
+          method: "POST",
+          signal: AbortSignal.any([abort.signal, AbortSignal.timeout(30_000)]),
+          headers: {
+            "content-type": "application/json",
+            accept: "application/json",
+          },
+          body: JSON.stringify({}),
+        },
+      );
+      const confirmed = operations.finishRequest(
+        operation,
+        toRequestAiFeedbackResponse(payload),
+      );
+      if (confirmed === null) return;
+      setView(operations.view);
+      if (!confirmed) {
+        setError({
+          message:
+            "申请响应信息不完整，结果尚未确认。请显式刷新详情核对，避免重复申请。",
+        });
+        return;
+      }
+      if (autoRefresh) await readDetail(false);
+    } catch (error) {
+      if (operations.finishRequest(operation) === null) return;
+      setView(operations.view);
+      setError({
+        status:
+          error instanceof BrowserFetchJsonError ? error.status : undefined,
+        message:
+          error instanceof BrowserFetchJsonError && error.status < 500
+            ? getCommonErrorSummary(error.status, "申请 AI 辅助反馈") +
+              "请显式刷新详情核对当前资格。"
+            : "申请结果尚未确认，请显式刷新详情核对，避免重复申请。",
+      });
+    } finally {
+      if (activeAbort.current === abort) activeAbort.current = null;
+    }
+  };
+  const currentStatus = view.status,
+    review = view.review;
+  const refreshEnabled =
+    view.busy === null && !view.needsConfirmation && !isPageRefreshing;
   const polling =
-    autoRefresh && getAutoRefreshPhase(currentStatus, review) !== null;
-  const requestHint = requestOutcome
-    ? "申请接口返回状态：" +
-      getAiStatusLabel(requestOutcome.status) +
-      "。已有任务会返回原状态，不会重新排队。点击刷新查看最新结果。"
-    : null;
+    autoRefresh &&
+    refreshEnabled &&
+    getAutoRefreshPhase(currentStatus, review) !== null;
+  const requestHint = view.confirmedJob
+    ? "申请已确认已有处理任务，不会重新排队。点击刷新查看最新结果。"
+    : view.needsConfirmation
+      ? "结果需核对：只有此后手动发起并成功完成的详情读取，才能重新判断申请资格。"
+      : null;
   const statusHint =
     currentStatus === "FAILED"
       ? review?.retryScheduled === true
@@ -55,7 +186,14 @@ export function SubmissionAiReview({
     <section className="min-w-0 space-y-3 rounded-lg border border-zinc-200 bg-white p-4 text-sm text-zinc-700">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <h2 className="text-base font-semibold text-zinc-900">AI 辅助反馈</h2>
-        <RefreshButton label="刷新详情" />
+        <button
+          type="button"
+          disabled={view.busy !== null || isPageRefreshing}
+          onClick={() => void readDetail(true)}
+          className="text-sm text-blue-700 underline disabled:cursor-not-allowed disabled:text-zinc-500"
+        >
+          {view.busy === "read" || isPageRefreshing ? "刷新中…" : "刷新详情"}
+        </button>
       </div>
       <p>处理状态：{getAiStatusLabel(currentStatus)}</p>
       <p>{statusHint}</p>
@@ -75,20 +213,23 @@ export function SubmissionAiReview({
       ) : null}
       {!review ? (
         <p>AI 摘要信息暂不可用，申请入口已关闭，请刷新详情核对。</p>
-      ) : review.canRequest !== true && !requestOutcome ? (
+      ) : review.canRequest !== true && !view.confirmedJob ? (
         <p>
           {review.requestBlockReason ?? "当前申请资格暂不可用，请刷新核对。"}
         </p>
       ) : null}
       {currentStatus !== "DEAD" ? (
         <RequestAiFeedbackButton
-          submissionId={submissionId}
-          review={review}
-          requested={requestOutcome !== null}
-          refreshAfterRequest={autoRefresh}
-          onRequested={(nextStatus) =>
-            setRequestOutcome({ status: nextStatus, reviewAtRequest: review })
-          }
+          disabled={!view.canRequest || isPageRefreshing}
+          isSubmitting={view.busy === "request"}
+          onRequest={handleRequest}
+        />
+      ) : null}
+      {error ? (
+        <ErrorState
+          status={error.status}
+          title="AI 操作结果"
+          description={error.message}
         />
       ) : null}
       {requestHint ? (
@@ -102,7 +243,12 @@ export function SubmissionAiReview({
           : "点击刷新查看最新结果。"}
       </p>
       {autoRefresh ? (
-        <SubmissionAutoRefresh status={currentStatus} review={review} />
+        <SubmissionAutoRefresh
+          status={currentStatus}
+          review={review}
+          enabled={refreshEnabled}
+          onRefresh={autoRead}
+        />
       ) : null}
       <p className="text-xs text-zinc-600">
         {review?.provider === "stub"

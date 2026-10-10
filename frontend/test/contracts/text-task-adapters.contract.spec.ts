@@ -15,6 +15,9 @@ import {
 } from "../../lib/learning-tasks/ai-review";
 import {
   buildTextSubmissionRequest,
+  canCreateTextSubmission,
+  getSavedSubmissionHref,
+  getTextSubmissionError,
   countCodePoints,
   getSubmissionTextError,
 } from "../../lib/learning-tasks/text-submission";
@@ -151,4 +154,63 @@ test("keeps missing and false snapshot distinct and closes incomplete participat
   expect(detail.participationStatus?.canSubmit).toBe(false);
   expect(detail.participationStatus?.canRequestAiFeedback).toBe(false);
   expect(detail.participationStatus?.readOnly).toBe(true);
+});
+
+test("a saved submission stays locked after busy ends and recovery opens that same detail", () => {
+  expect(canCreateTextSubmission(false, false, null)).toBe(true);
+  expect(canCreateTextSubmission(true, false, null)).toBe(false);
+  expect(canCreateTextSubmission(false, true, null)).toBe(false);
+  expect(canCreateTextSubmission(false, false, "saved/作品")).toBe(false);
+  expect(canCreateTextSubmission(true, false, "saved/作品")).toBe(false);
+  expect(getSavedSubmissionHref("saved/作品", "class one", "task/two")).toBe(
+    "/student/submissions/saved%2F%E4%BD%9C%E5%93%81?classroomId=class+one&classroomTaskId=task%2Ftwo",
+  );
+});
+test("maps only actual public messages for cooldown, conflicts and late submission", () => {
+  const body = (statusCode: number, message: string) => ({
+    statusCode,
+    timestamp: "2026-10-11T00:00:00Z",
+    path: "/api/classrooms/c/tasks/t/submissions",
+    message,
+  });
+  const cooldown =
+    "提交过于频繁。当前设置的提交冷却时间为 17 秒，请约 3 秒后再试。";
+  expect(getTextSubmissionError(429, body(429, cooldown))).toBe(cooldown);
+  for (const message of [
+    "班级已归档，不能继续提交该任务。",
+    "课堂任务已关闭，不能继续提交。",
+    "该课堂任务未保存发布内容，请教师重新布置后继续。",
+  ])
+    expect(getTextSubmissionError(409, body(409, message))).toBe(message);
+  expect(
+    getTextSubmissionError(
+      403,
+      body(403, "Late submission is not allowed for this classroom task"),
+    ),
+  ).toBe("已截止，禁止迟交，请联系老师。");
+});
+test("unknown or mismatched error messages never become user-facing raw exceptions", () => {
+  const unknown = "Internal exception: synthetic stack at private-service.ts";
+  expect(getTextSubmissionError(403, { message: unknown })).toBe(
+    "无权限提交该课堂任务。",
+  );
+  for (const [status, message] of [
+    [429, unknown],
+    [409, unknown],
+    [429, "提交过于频繁。当前设置的提交冷却时间为 17 秒，请约 3 秒后再试。\n"],
+    [
+      429,
+      "提交过于频繁。当前设置的提交冷却时间为 17 秒，请约 3 秒后再试。 " +
+        unknown,
+    ],
+    [429, "提交过于频繁。当前设置的提交冷却时间为 0 秒，请约 3 秒后再试。"],
+    [500, "课堂任务已关闭，不能继续提交。"],
+  ] as const) {
+    const result = getTextSubmissionError(status, { message });
+    expect(result).not.toContain(unknown);
+    expect(result).not.toBe(message);
+  }
+  expect(
+    getTextSubmissionError(403, { code: "LATE_SUBMISSION_NOT_ALLOWED" }),
+  ).toBe("无权限提交该课堂任务。");
 });

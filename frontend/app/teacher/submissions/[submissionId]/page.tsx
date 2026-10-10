@@ -17,7 +17,7 @@ import {
   type TeacherSubmissionContext,
 } from "@/lib/api/types-teacher";
 import { paths } from "@/lib/routes/paths";
-import { getAiStatusLabel, getCommonErrorSummary } from "@/lib/ui/status";
+import { getCommonErrorSummary } from "@/lib/ui/status";
 import {
   getSingleSearchParam,
   toDisplayDate,
@@ -102,22 +102,14 @@ export default async function TeacherSubmissionDetailPage({
 
   try {
     const origin = await getRequestOrigin();
-    const [detailPayload, feedbackPayload] = await Promise.all([
-      fetchJson<unknown>(
-        `learning-tasks/submissions/${encodeURIComponent(submissionId)}`,
-        {
-          origin,
-          cache: "no-store",
-        },
-      ),
-      fetchJson<unknown>(
-        `learning-tasks/submissions/${encodeURIComponent(submissionId)}/feedback`,
-        {
-          origin,
-          cache: "no-store",
-        },
-      ),
-    ]);
+    const detailPayload = await fetchJson<unknown>(
+      `learning-tasks/submissions/${encodeURIComponent(submissionId)}`,
+      { origin, cache: "no-store" },
+    );
+    const feedbackPayload = await fetchJson<unknown>(
+      `learning-tasks/submissions/${encodeURIComponent(submissionId)}/feedback`,
+      { origin, cache: "no-store" },
+    );
 
     const detail = toSubmissionDetailResponse(detailPayload);
     const feedback = toTeacherFeedbackListResponse(feedbackPayload);
@@ -232,12 +224,6 @@ export default async function TeacherSubmissionDetailPage({
             <p className="text-zinc-500">尝试次数</p>
             <p className="font-medium text-zinc-900">
               {toDisplayText(viewModel.context.attemptNo)}
-            </p>
-          </div>
-          <div>
-            <p className="text-zinc-500">AI 状态</p>
-            <p className="font-medium text-zinc-900">
-              {getAiStatusLabel(viewModel.detail.aiFeedbackStatus)}
             </p>
           </div>
           <div>

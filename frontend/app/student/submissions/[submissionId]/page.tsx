@@ -129,22 +129,14 @@ export default async function StudentSubmissionDetailPage({
 
   try {
     const origin = await getRequestOrigin();
-    const [detailPayload, feedbackPayload] = await Promise.all([
-      fetchJson<unknown>(
-        `learning-tasks/submissions/${encodeURIComponent(submissionId)}`,
-        {
-          origin,
-          cache: "no-store",
-        },
-      ),
-      fetchJson<unknown>(
-        `learning-tasks/submissions/${encodeURIComponent(submissionId)}/feedback`,
-        {
-          origin,
-          cache: "no-store",
-        },
-      ),
-    ]);
+    const detailPayload = await fetchJson<unknown>(
+      `learning-tasks/submissions/${encodeURIComponent(submissionId)}`,
+      { origin, cache: "no-store" },
+    );
+    const feedbackPayload = await fetchJson<unknown>(
+      `learning-tasks/submissions/${encodeURIComponent(submissionId)}/feedback`,
+      { origin, cache: "no-store" },
+    );
 
     const detail = toSubmissionDetailResponse(detailPayload);
     const feedback = toListFeedbackResponse(feedbackPayload);

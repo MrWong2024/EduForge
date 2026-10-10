@@ -54,7 +54,7 @@
 | `/student/account` | 账户设置 | 当前用户 / 改密能力 | 查看本人资料、修改密码；无资料编辑 UI；可返回学习看板 | Done |
 | `/student/dashboard` | 学习看板 | Student classroom dashboard API | 查看班级与任务、进入任务详情；默认当前和近期过期任务，可显式查看历史并保留分页视图。班级分页，卡片内完整展示后端可见任务；展示教师、课程、学期摘要，不暴露无关标识或联系方式。完成情况直接消费 completionStatus，模板当前状态不作为二次过滤或参与阻断依据 | Done |
 | `/student/classrooms/join` | 加入班级 | Classroom join 能力 | 输入加入码入班，资格由后端判定 | Done |
-| `/student/classrooms/[classroomId]/tasks/[classroomTaskId]` | 学生任务详情与提交 | my-task-detail 聚合 / submission | 查看任务说明、评分标准、完成情况、历史提交与 AI 状态；completionStatus 由后端提供，不从反馈或 AI 状态推断。提交要求明确快照可用且 participationStatus.canSubmit=true，缺字段关闭写入口，保留只读原因；独立说明按码点校验并原样保存；草稿页仅显式刷新；不以模板当前状态阻断。已截止且不允许迟交时禁用提交，允许迟交且有参与资格时可提交；成功后进入 submission detail | Done |
+| `/student/classrooms/[classroomId]/tasks/[classroomTaskId]` | 学生任务详情与提交 | my-task-detail 聚合 / submission | 查看任务说明、评分标准、完成情况、历史提交与 AI 状态；completionStatus 由后端提供，不从反馈或 AI 状态推断。提交要求明确快照可用且 participationStatus.canSubmit=true，缺字段关闭写入口，保留只读原因；独立说明按码点校验并原样保存；草稿页仅显式刷新；不以模板当前状态阻断。已截止且不允许迟交时禁用提交，允许迟交且有参与资格时可提交；成功保存后锁住表单并进入 submission detail，导航未完成时可再次打开同一已保存详情 | Done |
 | `/student/submissions/[submissionId]` | 学生提交详情与反馈 | 正式 submission detail / feedback（[调用链](./handoff-frontend-api-map.md)） | 查看完整源码、独立说明、已有声明、迟交与 AI 摘要，仅按后端资格请求 AI；可返回来源任务，导航上下文不作为主体数据 SoT；状态刷新职责见 Component Map | Done |
 | `/student/help/ai` | AI 状态帮助 | 静态帮助内容 | 解释平台策略、有限重试、作品保存与 AI 失败的区别、模拟/覆盖/未知用量及教师判断边界 | Done |
 

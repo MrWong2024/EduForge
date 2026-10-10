@@ -1,20 +1,17 @@
 "use client";
 
-import {
-  useCallback,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-  useTransition,
-} from "react";
-import { useRouter } from "next/navigation";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import {
   getAutoRefreshPhase,
   type AiReview,
 } from "@/lib/learning-tasks/ai-review";
-type SubmissionAutoRefreshProps = { status?: string | null; review?: AiReview };
+type SubmissionAutoRefreshProps = {
+  status?: string | null;
+  review?: AiReview;
+  enabled: boolean;
+  onRefresh: () => Promise<void>;
+};
 type PollableStatus = "PENDING" | "RUNNING" | "FAILED";
 
 const getBaseDelayMs = (status: PollableStatus): number => {
@@ -44,10 +41,10 @@ const getDelayWithBackoff = (
 export function SubmissionAutoRefresh({
   status,
   review,
+  enabled,
+  onRefresh,
 }: SubmissionAutoRefreshProps) {
-  const router = useRouter();
   const [isPageActive, setIsPageActive] = useState(true);
-  const [isPending, startTransition] = useTransition();
   const pollableStatus = useMemo(
     () => getAutoRefreshPhase(status, review),
     [status, review],
@@ -57,7 +54,6 @@ export function SubmissionAutoRefresh({
 
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const inFlightRef = useRef(false);
-  const pendingRef = useRef(false);
   const unchangedRoundsRef = useRef(0);
   const lastStatusSignatureRef = useRef(statusSignature);
 
@@ -68,13 +64,6 @@ export function SubmissionAutoRefresh({
     clearTimeout(timerRef.current);
     timerRef.current = null;
   }, []);
-
-  useEffect(() => {
-    pendingRef.current = isPending;
-    if (!isPending) {
-      inFlightRef.current = false;
-    }
-  }, [isPending]);
 
   useEffect(() => {
     if (lastStatusSignatureRef.current !== statusSignature) {
@@ -106,7 +95,7 @@ export function SubmissionAutoRefresh({
   useEffect(() => {
     clearTimer();
 
-    if (!isPageActive || !pollableStatus) {
+    if (!enabled || !isPageActive || !pollableStatus) {
       return () => clearTimer();
     }
 
@@ -117,12 +106,12 @@ export function SubmissionAutoRefresh({
         return;
       }
 
-      timerRef.current = setTimeout(() => {
+      timerRef.current = setTimeout(async () => {
         if (cancelled) {
           return;
         }
 
-        if (inFlightRef.current || pendingRef.current) {
+        if (inFlightRef.current) {
           const nextDelay = pollableStatus
             ? getDelayWithBackoff(pollableStatus, unchangedRoundsRef.current)
             : 1_500;
@@ -132,11 +121,10 @@ export function SubmissionAutoRefresh({
 
         inFlightRef.current = true;
         unchangedRoundsRef.current += 1;
-        startTransition(() => {
-          router.refresh();
-        });
-
-        if (pollableStatus) {
+        try {
+          await onRefresh();
+        } finally {
+          inFlightRef.current = false;
           scheduleNext(
             getDelayWithBackoff(pollableStatus, unchangedRoundsRef.current),
           );
@@ -154,7 +142,7 @@ export function SubmissionAutoRefresh({
       cancelled = true;
       clearTimer();
     };
-  }, [clearTimer, isPageActive, pollableStatus, router, startTransition]);
+  }, [clearTimer, enabled, isPageActive, onRefresh, pollableStatus]);
 
   return null;
 }

@@ -84,10 +84,10 @@
 | Component / Module | File | Responsibility / Boundary |
 |---|---|---|
 | JoinClassroomForm | `components/student/JoinClassroomForm.tsx` | 加入码输入与入班动作，不判断后端入班权限 |
-| SubmissionForm | `components/student/SubmissionForm.tsx` | 原文源码与独立可选说明输入、码点校验、请求防重复及迟交错误呈现；成功进入本次详情，结果未确认先核对历史；多文件粘贴格式提示与示例由此维护，单文件无需 FILE 标记；不提供上传/结构化文件提交，不以模板当前状态自行阻断 |
-| RequestAiFeedbackButton | `components/student/RequestAiFeedbackButton.tsx` | 师生复用的空体申请动作、请求中防重复和失败后先刷新门禁；资格由 aiReview 提供，成功状态交给共享摘要组件；不展示原始响应 |
+| SubmissionForm | `components/student/SubmissionForm.tsx` | 原文源码与独立可选说明输入、码点校验、请求防重复及公开业务错误安全适配；成功保存后锁住当前表单，导航恢复只打开同一提交详情，结果未确认先核对历史；多文件粘贴格式提示与示例由此维护，单文件无需 FILE 标记；不提供上传/结构化文件提交，不以模板当前状态自行阻断 |
+| RequestAiFeedbackButton | `components/student/RequestAiFeedbackButton.tsx` | 师生复用的申请按钮展示；disabled/pending 与动作回调由 SubmissionAiReview 提供，不独立持有资格或请求时序 |
 | AiProcessingHint | `components/student/AiProcessingHint.tsx` | 统一 AI 处理中提示；通用状态文案复用 UI Status |
-| SubmissionAutoRefresh | `components/student/SubmissionAutoRefresh.tsx` | 仅学生提交详情：PENDING/RUNNING 或 FAILED 且明确计划重试时刷新；终态、未计划重试及信息不足停止，无终态收尾刷新；失焦/不可见暂停并清理定时器，不用于草稿页 |
+| SubmissionAutoRefresh | `components/student/SubmissionAutoRefresh.tsx` | 仅学生提交详情：以共享区块已接纳状态在 PENDING/RUNNING 或 FAILED 且计划重试时调用局部读取；操作中和待显式确认时暂停；终态及信息不足停止；沿用退避、失焦暂停和定时器清理，不用于草稿页 |
 | StudentTaskDetailPage | `app/student/classrooms/[classroomId]/tasks/[classroomTaskId]/page.tsx` | 实例教学内容与历史提交加载，明确快照/参与资格控制提交，消费 completionStatus；组合共享 rubric 和提交表单，仅显式刷新，模式不代替提交资格 |
 | StudentSubmissionDetailPage | `app/student/submissions/[submissionId]/page.tsx` | 权威详情/反馈加载、返回导航及共享作品/AI 展示，限定状态自动刷新；query 不补业务事实 |
 
@@ -97,7 +97,7 @@
 |---|---|---|
 | TaskRubric | `components/learning-tasks/TaskRubric.tsx` | 师生只读 rubric 展示，复用 UI Rubric 中文维度，不推断成绩 |
 | SubmissionContent | `components/submissions/SubmissionContent.tsx` | 师生作品原文展示；源码局部滚动、说明/声明纯文本换行，展示快照状态 |
-| SubmissionAiReview | `components/submissions/SubmissionAiReview.tsx` | 师生共享安全 AI 状态/失败/覆盖与可展开实报用量；拥有本次申请成功的局部关闭状态，由提交 ID key 限定；学生组合受限轮询，教师仅显式刷新，不管理人工反馈草稿 |
+| SubmissionAiReview | `components/submissions/SubmissionAiReview.tsx` | 师生共享安全 AI 摘要；拥有当前提交的串行 POST/GET、操作标识及统一接纳结果，页面 props 仅作初始读取；成功 Job 持续关闭申请，不确定结果仅由事后显式完整读取重新核对；按提交 ID 隔离并卸载取消。学生组合受限轮询，教师仅显式整页刷新，不管理人工反馈草稿 |
 
 ## 8) Context / State
 
@@ -119,7 +119,8 @@
 | Student Types Adapter | `lib/api/types-student.ts` | 学生 payload 解析与容错映射的修改落点；不在 JSX 深层散写字段访问 |
 | Session/Auth | `lib/auth/session.ts` + `lib/auth/role-home.ts` | 登录态、角色判断与 role-home 的共同入口；不在业务页创建另一套角色跳转规则 |
 | Paths | `lib/routes/paths.ts` | 路径构造及模板/班级/任务上下文导航的单一来源；不在业务页硬编码重复路径 |
-| Text Submission | `lib/learning-tasks/text-submission.ts` | Unicode 码点校验及原文请求构造，无模型消息预算或保存框架 |
+| Text submission helpers | `lib/learning-tasks/text-submission.ts` | 原文请求构造、码点校验、保存后 POST 门禁与同一详情恢复路径、已知公开提交错误安全适配；产品实际调用 |
+| Submission AI operations | `lib/learning-tasks/submission-ai-operations.ts` | 单个挂载提交内的操作标识、串行读写、确认资格与已接纳摘要；无网络、无全局锁，不定义后端 Job 状态转换 |
 | AI Review | `lib/learning-tasks/ai-review.ts` | 模式/快照展示、严格摘要适配及学生轮询资格的纯逻辑，不推断后端授权 |
 | UI Status | `lib/ui/status.ts` | AI 状态文案与通用错误摘要的统一入口 |
 | Task Course Labels | `lib/learning-tasks/course-labels.ts` | 课程分类候选、未分类口径、显示/归一化工具的前端单一来源；不从局部查询结果倒推候选 |
