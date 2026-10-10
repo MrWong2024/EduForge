@@ -1,3 +1,4 @@
+import { Enrollment } from '../src/modules/classrooms/enrollments/schemas/enrollment.schema';
 import { INestApplication, ValidationPipe } from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
 import { getModelToken } from '@nestjs/mongoose';
@@ -252,12 +253,19 @@ describe('Classroom Dashboard Isolation (e2e)', () => {
       .select('_id')
       .lean()
       .exec();
-    const userIds = users.map((user) => user._id.toString());
+    const userIds = users.map((user) => user._id);
     if (userIds.length > 0) {
       cleanup.push(sessionModel.deleteMany({ userId: { $in: userIds } }));
       cleanup.push(userModel.deleteMany({ _id: { $in: userIds } }));
     }
 
+    await app
+      .get<Model<Enrollment>>(getModelToken(Enrollment.name))
+      .deleteMany({
+        classroomId: {
+          $in: createdClassroomIds.map((id) => new Types.ObjectId(id)),
+        },
+      });
     await Promise.all(cleanup);
     await app.close();
   });

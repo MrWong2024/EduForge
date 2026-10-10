@@ -170,29 +170,30 @@ Global SoT 只保留理解跨 Service workflow 必需的稳定不变量，不追
 - Upstream: 课堂任务管理、实例提交及实例聚合入口。
 - Downstream / Dependencies: `ClassroomModel`、`ClassroomTaskModel`、`TaskModel`、`SubmissionModel`、`FeedbackModel`、`UserModel`、`EnrollmentService`、`AiFeedbackJobService`、`LearningTasksService`。
 - Consistency / State / Idempotency:
-  - 发布前检查班级运行状态及模板已发布；`unique(classroomId,taskId)` 防重复发布，重复键转为受控拒绝。旧实例缺省状态按 ACTIVE 兼容。
+  - 发布前检查班级 owner/运行态与模板发布态/可见性，从同一次 Task 读取形成 taskSnapshot 与实例同次写入；`unique(classroomId,taskId)` 防重复发布，重复键转为受控拒绝。旧实例缺省状态按 ACTIVE 兼容。
   - 实例配置更新与生命周期分开处理；撤回前检查无提交，RECALLED 保持封闭。恢复提交仅改状态，不隐式改截止与提交设置；不支持撤回后重发同模板。
+  - 发布返回、列表/详情、my-task-detail、教师/学生看板、提交详情标题及 AI 分析标题统一优先读实例快照；旧实例仅当前模板只读 fallback，不回填。模板库/候选仍读当前 Task，资产状态保持当前值。
   - 发布候选查询同时应用当前教师可见性、模板发布状态及已发布 taskId 排除；未显式指定课程分类时按班级课程分类优先排序。
   - 提交入口检查学生身份、Enrollment ACTIVE、课堂归属及班级/实例 ACTIVE，再通过 `createSubmissionForClassroomTask` 绑定实例主键；真正写 Submission/自动 Job 前，由 [Card 08](#service-card-08) 再次 enforce 运行态及截止/迟交边界。
 - Isolation: 查询与统计按 `classroomTaskId`，成员全集来自 Enrollment ACTIVE；不得按底层 taskId 跨班兜底。模板状态不决定既有实例学生运行态。
 - Side Effects: 写 ClassroomTask；学生提交委托 LearningTasksService 写 Submission 并按策略入队。
 - Important Performance / Recovery: 列表用 aggregate 构造页数据与计数；模板发布者批量查 User。提交列表按页批量关联公开用户信息、job 状态及全来源 feedbackCount，缺失计数补零，避免 N+1。
 - SoT: `backend/src/modules/classrooms/classroom-tasks/services/classroom-tasks.service.ts`；`backend/src/modules/classrooms/classroom-tasks/schemas/classroom-task.schema.ts`；`backend/src/modules/classrooms/enrollments/services/enrollment.service.ts`。
-- Boundary / Non-responsibility: 完整状态转换/拒绝与 participationStatus 的公开合同见 [API Map](./handoff-backend-api-map.md#classroom-tasksclassrooms-子资源)，输入与返回数据见 [DTO Cheatsheet](./handoff-backend-dto-cheatsheet.md#classroom-tasksclassrooms-子资源)。状态层 participation 判断不计算截止、迟交、冷却或 AI 动作资格；动作写入口仍是最终校验。
+- Boundary / Non-responsibility: 完整状态转换/拒绝与 participationStatus 的公开合同见 [API Map](./handoff-backend-api-map.md#classroom-tasksclassrooms-子资源)，输入与返回数据见 [DTO Cheatsheet](./handoff-backend-dto-cheatsheet.md#classroom-tasksclassrooms-子资源)。participation 投影结合快照可用性及学生模式，不计算截止、迟交或冷却；动作写入口仍是最终校验。
 
 ## Service Card 08
 
 - Service: `backend/src/modules/learning-tasks/services/learning-tasks.service.ts`
 - Domain / Responsibility: 管理任务模板，创建 Submission，读取提交详情，写教师反馈，协调自动/手工 AI Job 与任务统计。
 - Upstream: 任务/提交/反馈入口；`ClassroomTasksService` 的实例提交流程。
-- Downstream / Dependencies: `ConfigService`、`TaskModel`、`SubmissionModel`、`FeedbackModel`、`ClassroomTaskModel`、`ClassroomModel`、`UserModel`、`AiFeedbackJobService`。
+- Downstream / Dependencies: `ConfigService`、`TaskModel`、`SubmissionModel`、`FeedbackModel`、`ClassroomTaskModel`、`ClassroomModel`、`UserModel`、`EnrollmentModel`、`AiFeedbackJobService`。
 - Consistency / State / Idempotency:
   - 模板承担资产管理，ClassroomTask 承担教学运行态；内容编辑不得隐式改变状态，同状态输入忽略后继续编辑，归档内容不可改。重复发布保持幂等；归档不检查/级联 ClassroomTask 引用，兼容 restore 入口不恢复归档模板。
   - 模板读范围由当前教师与共享可见性构造；legacy 缺省 visibility 兼容 SHARED，兼容 createdBy query 不突破当前教师范围；共享不转移作者写权限。分类为治理坐标，不作为 Course 外键或发布一致性约束；“未分类”查询兼容字段缺省任务。
-  - Submission 的 attemptNo 采用“查询最新编号 + 有界重试”，最多 3 次分配尝试，冲突不绕过唯一约束。通用任务提交要求模板已发布；实例提交在写 Submission/自动 Job 前重验班级/实例 ACTIVE，并校验截止与迟交规则，持久化提交时间及迟交结果，不以模板当前状态阻断既有实例。
-  - 自动入队由提交是否触发及首提策略共同决定；手工请求复用 `ensureJobForSubmission`，不重复创建已有 Job。学生对本人实例提交手工请求前同样重验班级/实例运行态；教师手工请求保留资源管理边界。
+  - Submission 的 attemptNo 采用“查询最新编号 + 有界重试”，最多 3 次分配尝试，冲突不绕过唯一约束。旧通用写入口拒绝；新实例提交要求实际快照并逐次保存源码与说明，实例提交在写 Submission/自动 Job 前重验班级/实例 ACTIVE，并校验截止与迟交规则，持久化提交时间及迟交结果，不以模板当前状态阻断既有实例。
+  - 自动入队同时检查实例模式、首提和全局自动开关；手工请求复用 `ensureJobForSubmission`，不重复创建已有 Job。手动 ensure 前统一校验提交/实例关联与实例策略；学生还重验 Enrollment ACTIVE 和班级/实例运行态，教师保留班级 ownership 评阅边界。
   - 教师反馈修改复用 submission 管理上下文，校验反馈属于该提交、来源为 TEACHER 且已有作者与当前教师一致。旧教师反馈无 createdBy 时在授权更新中补写，不批量迁移历史数据。
-- Isolation: 学生只访问本人 Submission；教师管理上下文在有 classroomTaskId 时沿实例定位班级 owner，否则沿 Task 定位作者。教师默认提交列表与计数共同过滤当前 Enrollment ACTIVE，移除学生历史记录保留；课堂链路保留 classroomTaskId，通用提交允许该键缺省。
+- Isolation: 学生只访问本人 Submission；教师管理上下文在有 classroomTaskId 时沿实例定位班级 owner，否则沿 Task 定位作者。教师默认提交列表与计数共同过滤当前 Enrollment ACTIVE，移除学生历史记录保留；课堂链路保留 classroomTaskId，历史无关联提交只读。模板级 list/stats 与 ReportsService 共用 teacherSubmissionScope，在分页/计数/去重/反馈聚合前限定自有班级实例和旧无关联提交。
 - Side Effects: 写模板、Submission、Feedback；自动入队与手工确保 Job 分别委托 JobService。课堂提交冷却与自动入队的运行参数见 [Config Matrix](./handoff-backend-config-matrix.md)。
 - Important Performance / Recovery: 列表筛选在数据库中组合执行；批量关联发布者与 Job 状态。发布候选复合索引分别以 `createdBy` 或 `visibility` 为前缀，后接 `status,courseLabel,knowledgeModule,stage,updatedAt,createdAt`，支持本人及共享分支；编号重试耗尽安全拒绝。
 - SoT: `backend/src/modules/learning-tasks/services/learning-tasks.service.ts`；`backend/src/modules/learning-tasks/schemas/task.schema.ts`；`backend/src/modules/learning-tasks/schemas/submission.schema.ts`；`backend/src/modules/learning-tasks/ai-feedback/services/ai-feedback-job.service.ts`。
@@ -337,9 +338,9 @@ Global SoT 只保留理解跨 Service workflow 必需的稳定不变量，不追
 - Service: `backend/src/modules/learning-tasks/services/learning-tasks-reports.service.ts`
 - Domain / Responsibility: 聚合通用 Task 的共性问题、类型与典型样例。
 - Upstream: 任务共性问题报表入口。
-- Downstream / Dependencies: `TaskModel`、`SubmissionModel`、`FeedbackModel`。
+- Downstream / Dependencies: `TaskModel`、`SubmissionModel`、`FeedbackModel`、`ClassroomModel`、`ClassroomTaskModel`、teacherSubmissionScope。
 - Consistency / State / Idempotency: 统计仅纳入 AI/TEACHER 反馈；聚合 limit 收敛到 1..10，每个 tag 的样例最多 3 条；无反馈返回空聚合。
-- Isolation: 校验任务作者；此通用模板报表按 taskId 选择 submissions，不属于课堂实例隔离报表。
+- Isolation: 校验任务作者；沿 teacherSubmissionScope 先限制该教师自有班级实例及旧无课堂关联提交，再统计/去重/聚合反馈，不能跨教师班级。
 - Side Effects: 只读。
 - Important Performance / Recovery: 单次 aggregate + facet 同时形成 tags、types 与样例，避免重复扫描。
 - SoT: `backend/src/modules/learning-tasks/services/learning-tasks-reports.service.ts`。
@@ -389,14 +390,14 @@ Global SoT 只保留理解跨 Service workflow 必需的稳定不变量，不追
 - Service: `backend/src/modules/learning-tasks/ai-feedback/services/ai-feedback-processor.service.ts`
 - Domain / Responsibility: 原子认领 Job、构造分析上下文、经护栏调用 Provider、收敛并持久化反馈、更新执行终态与重试时间。
 - Upstream: `AiFeedbackWorker` 与受诊断门禁保护的手工 process-once，共用处理链。
-- Downstream / Dependencies: `AiFeedbackJobModel`、`SubmissionModel`、`TaskModel`、`FeedbackModel`、`AI_FEEDBACK_PROVIDER_TOKEN`、`AiFeedbackGuardsService`、`ConfigService`、`feedback-item-compactor`。
+- Downstream / Dependencies: `AiFeedbackJobModel`、`SubmissionModel`、`ClassroomTaskModel`、`FeedbackModel`、`AI_FEEDBACK_PROVIDER_TOKEN`、`AiFeedbackGuardsService`、`ConfigService`、`feedback-item-compactor`。
 - Consistency / State / Idempotency:
   - 通过 findOneAndUpdate 按 createdAt 顺序原子 claim，仅认领 PENDING/FAILED，锁 TTL 为 5 分钟；成功写回用 job id + lockOwner 条件并清理锁/失败信息。
-  - 读取 Submission 后按 submission.taskId 读取 Task，形成 AiSubmissionAnalysisContext；调用 Provider 后在写库前以内存 compactor 收敛，同类问题合并，存在 ERROR/WARN 时去掉独立低价值 INFO。
-  - 凭据错误 UNAUTHORIZED/MISSING_API_KEY 直接 DEAD；其他失败增加 attempts，耗尽 maxAttempts 后 DEAD，否则 FAILED 并设置 notBefore。退避从 30 秒指数增长，最大 10 分钟；本地/上游限流同样进入有界失败恢复，不绕过护栏。
+  - 读取 Submission 后核对 Job/Submission/实例归属，读取所属实例的固定 title/description/rubric 形成 AiSubmissionAnalysisContext，源码与既有 AI 使用声明来自保存的 Submission；submissionNote 不进入 A1 模型上下文；调用 Provider 后在写库前以内存 compactor 收敛，同类问题合并，存在 ERROR/WARN 时去掉独立低价值 INFO。
+  - 关联不一致、缺快照和 DISABLED 等确定性资格失败直接 DEAD，清空锁与 notBefore，保存固定脱敏原因；凭据错误 UNAUTHORIZED/MISSING_API_KEY 直接 DEAD；其他失败增加 attempts，耗尽 maxAttempts 后 DEAD，否则 FAILED 并设置 notBefore。退避从 30 秒指数增长，最大 10 分钟；本地/上游限流同样进入有界失败恢复，不绕过护栏。
 - Isolation: 沿 Job 的 classroomTaskId 进入限流桶；成功条件写回校验认领者，不把 Worker 防重入当成 Job 跨入口互斥。
 - Side Effects: 外部 Provider 调用、反馈写库、Job 状态/锁/错误/重试时间更新；Provider 调用及反馈持久化使用的信号量在 finally 释放。
-- Important Performance / Recovery: `insertMany(ordered:false)` 批量写反馈并容忍重复键；Job 关联的 Submission/Task 缺失也走失败/重试/死亡链。Provider BAD_RESPONSE 进入失败处理，重复反馈不单独中断 Job；收敛过程不追加数据库 I/O。
+- Important Performance / Recovery: `insertMany(ordered:false)` 批量写反馈并容忍重复键；Submission 缺失仍走既有失败处理，实例关联/资格失败不调用 Provider 或反复重试。Provider BAD_RESPONSE 进入失败处理，重复反馈不单独中断 Job；收敛过程不追加数据库 I/O。
 - SoT: `backend/src/modules/learning-tasks/ai-feedback/services/ai-feedback-processor.service.ts`；`backend/src/modules/learning-tasks/ai-feedback/lib/feedback-item-compactor.ts`；`backend/src/modules/learning-tasks/ai-feedback/interfaces/ai-feedback-provider.error-codes.ts`。
 - Boundary / Non-responsibility: 不承担产品请求的资源授权或 Worker 调度；反馈主策略来自 prompt/protocol，compactor 是落库前轻量兜底。运行参数见 [Config Matrix](./handoff-backend-config-matrix.md)，Provider 规则见 [Card B](#provider-card-b)。
 

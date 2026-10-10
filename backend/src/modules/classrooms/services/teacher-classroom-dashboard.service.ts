@@ -151,9 +151,27 @@ export class TeacherClassroomDashboardService {
           publishedAt: 1,
           dueAt: 1,
           taskTemplateStatus: '$task.status',
-          title: '$task.title',
-          stage: '$task.stage',
-          knowledgeModule: '$task.knowledgeModule',
+          title: {
+            $cond: [
+              { $ifNull: ['$taskSnapshot', false] },
+              '$taskSnapshot.title',
+              '$task.title',
+            ],
+          },
+          stage: {
+            $cond: [
+              { $ifNull: ['$taskSnapshot', false] },
+              '$taskSnapshot.stage',
+              '$task.stage',
+            ],
+          },
+          knowledgeModule: {
+            $cond: [
+              { $ifNull: ['$taskSnapshot', false] },
+              '$taskSnapshot.knowledgeModule',
+              '$task.knowledgeModule',
+            ],
+          },
         },
       },
       { $sort: { publishedAt: -1 } },

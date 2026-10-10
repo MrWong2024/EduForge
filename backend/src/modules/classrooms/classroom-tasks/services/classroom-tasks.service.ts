@@ -9,6 +9,12 @@ import { InjectModel } from '@nestjs/mongoose';
 import { Model, PipelineStage, Types } from 'mongoose';
 import { Classroom } from '../../schemas/classroom.schema';
 import { Course } from '../../../courses/schemas/course.schema';
+import {
+  AiFeedbackMode,
+  MISSING_TASK_SNAPSHOT_MESSAGE,
+  snapshotTask,
+  studentCanRequestAi,
+} from '../classroom-task-content';
 import { ClassroomTask } from '../schemas/classroom-task.schema';
 import { CreateClassroomTaskDto } from '../dto/create-classroom-task.dto';
 import { QueryClassroomTaskDto } from '../dto/query-classroom-task.dto';
@@ -297,7 +303,12 @@ export class ClassroomTasksService {
     }
 
     const task = await this.taskModel.findById(dto.taskId).lean().exec();
-    if (!task) {
+    if (
+      !task ||
+      (task.createdBy.toString() !== userId &&
+        this.toTaskVisibilityForRead(task.visibility) !==
+          TASK_VISIBILITY_SHARED)
+    ) {
       throw new NotFoundException('Task not found');
     }
     if (task.status !== TaskStatus.Published) {
@@ -308,6 +319,8 @@ export class ClassroomTasksService {
     const dueAt = dto.dueAt ? new Date(dto.dueAt) : undefined;
     const settings = {
       allowLate: dto.settings?.allowLate ?? true,
+      aiFeedbackMode:
+        dto.settings?.aiFeedbackMode ?? AiFeedbackMode.TeacherOnly,
       ...(dto.settings?.maxAttempts !== undefined
         ? { maxAttempts: dto.settings.maxAttempts }
         : {}),
@@ -317,6 +330,7 @@ export class ClassroomTasksService {
       const classroomTask = await this.classroomTaskModel.create({
         classroomId: new Types.ObjectId(classroomId),
         taskId: new Types.ObjectId(dto.taskId),
+        taskSnapshot: snapshotTask(task),
         publishedAt,
         dueAt,
         settings,
@@ -805,6 +819,9 @@ export class ClassroomTasksService {
       throw new ConflictException('课堂任务已关闭，不能继续提交。');
     }
 
+    if (!classroomTask.taskSnapshot) {
+      throw new ConflictException(MISSING_TASK_SNAPSHOT_MESSAGE);
+    }
     const task = await this.taskModel
       .findById(classroomTask.taskId)
       .select('_id')
@@ -1214,7 +1231,7 @@ export class ClassroomTasksService {
     const task = await this.taskModel
       .findById(classroomTask.taskId)
       .select(
-        'title description knowledgeModule stage difficulty rubric status createdAt updatedAt',
+        'title description knowledgeModule courseLabel stage difficulty rubric status createdAt updatedAt',
       )
       .lean<TaskWithMeta>()
       .exec();
@@ -1281,7 +1298,9 @@ export class ClassroomTasksService {
     const participationStatus = this.buildStudentTaskParticipationStatus(
       classroom.status,
       classroomTaskStatus,
+      classroomTask,
     );
+    const teachingContent = classroomTask.taskSnapshot ?? snapshotTask(task);
 
     return {
       classroom: {
@@ -1297,16 +1316,17 @@ export class ClassroomTasksService {
         status: classroomTaskStatus,
         publishedAt: classroomTask.publishedAt,
         dueAt: classroomTask.dueAt,
-        settings: classroomTask.settings,
+        settings: {
+          ...classroomTask.settings,
+          aiFeedbackMode:
+            classroomTask.settings?.aiFeedbackMode ??
+            AiFeedbackMode.TeacherOnly,
+        },
+        taskSnapshotAvailable: Boolean(classroomTask.taskSnapshot),
       },
       task: {
         id: task._id.toString(),
-        title: task.title,
-        description: task.description,
-        knowledgeModule: task.knowledgeModule,
-        stage: task.stage,
-        difficulty: task.difficulty,
-        rubric: task.rubric,
+        ...teachingContent,
         status: task.status,
       },
       me: { studentId: studentObjectId.toString() },
@@ -1380,6 +1400,7 @@ export class ClassroomTasksService {
   private buildStudentTaskParticipationStatus(
     classroomStatus: ClassroomStatus,
     classroomTaskStatus: ClassroomTaskStatus,
+    classroomTask: ClassroomTask,
   ): StudentTaskParticipationStatus {
     if (classroomStatus !== ClassroomStatus.Active) {
       return {
@@ -1400,9 +1421,11 @@ export class ClassroomTasksService {
       };
     }
     return {
-      readOnly: false,
-      canSubmit: true,
-      canRequestAiFeedback: true,
+      readOnly: !classroomTask.taskSnapshot,
+      canSubmit: Boolean(classroomTask.taskSnapshot),
+      canRequestAiFeedback:
+        Boolean(classroomTask.taskSnapshot) &&
+        studentCanRequestAi(classroomTask.settings?.aiFeedbackMode),
       reason: 'ACTIVE',
       message: null,
     };
@@ -1857,6 +1880,7 @@ export class ClassroomTasksService {
     task: Task,
     taskPublisher?: PublisherSummary | null,
   ) {
+    const teachingContent = classroomTask.taskSnapshot ?? snapshotTask(task);
     return {
       id: classroomTask._id.toString(),
       classroomId: classroomTask.classroomId.toString(),
@@ -1864,18 +1888,19 @@ export class ClassroomTasksService {
       status: this.toClassroomTaskStatusForRead(classroomTask.status),
       publishedAt: classroomTask.publishedAt,
       dueAt: classroomTask.dueAt,
-      settings: classroomTask.settings,
+      settings: {
+        ...classroomTask.settings,
+        aiFeedbackMode:
+          classroomTask.settings?.aiFeedbackMode ?? AiFeedbackMode.TeacherOnly,
+      },
+      taskSnapshotAvailable: Boolean(classroomTask.taskSnapshot),
       createdBy: classroomTask.createdBy.toString(),
       createdAt: classroomTask.createdAt ?? new Date(0),
       updatedAt: classroomTask.updatedAt ?? new Date(0),
       taskPublisher:
         taskPublisher ?? this.toPublisherSummary(task.createdBy, null),
       task: {
-        title: task.title,
-        description: task.description,
-        knowledgeModule: task.knowledgeModule,
-        stage: task.stage,
-        difficulty: task.difficulty,
+        ...teachingContent,
         status: task.status,
       },
     } as ClassroomTaskResponseDto;

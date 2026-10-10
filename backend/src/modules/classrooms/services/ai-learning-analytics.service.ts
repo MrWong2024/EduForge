@@ -68,7 +68,7 @@ type ClassroomContextLean = Pick<Classroom, 'courseId' | 'name'> & WithId;
 type CourseContextLean = Pick<Course, 'code' | 'name' | 'term'> & WithId;
 type ClassroomTaskAnalyticsLean = Pick<
   ClassroomTask,
-  'taskId' | 'publishedAt'
+  'taskId' | 'publishedAt' | 'taskSnapshot'
 > &
   WithId;
 type TaskTitleLean = Pick<Task, 'title'> & WithId;
@@ -772,7 +772,7 @@ export class AiLearningAnalyticsService {
     const [classroomTasks, activeStudentIds, course] = await Promise.all([
       this.classroomTaskModel
         .find(taskFilter)
-        .select('_id taskId publishedAt')
+        .select('_id taskId publishedAt taskSnapshot')
         .sort({ publishedAt: 1, _id: 1 })
         .lean<ClassroomTaskAnalyticsLean[]>()
         .exec(),
@@ -807,7 +807,9 @@ export class AiLearningAnalyticsService {
       classroomTaskId: classroomTask._id.toString(),
       taskId: classroomTask.taskId.toString(),
       taskTitle:
-        taskTitleMap.get(classroomTask.taskId.toString()) ?? '未知任务',
+        classroomTask.taskSnapshot?.title ??
+        taskTitleMap.get(classroomTask.taskId.toString()) ??
+        '未知任务',
       publishedAt: classroomTask.publishedAt,
     }));
     const canonicalActiveStudentIds = Array.from(

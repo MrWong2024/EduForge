@@ -18,6 +18,9 @@ export class SubmissionContent {
 
   @Prop({ required: true })
   language!: string;
+
+  @Prop({ type: String, default: '' })
+  submissionNote?: string;
 }
 
 export const SubmissionContentSchema =

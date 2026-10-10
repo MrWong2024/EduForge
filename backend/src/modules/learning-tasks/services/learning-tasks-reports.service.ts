@@ -5,6 +5,9 @@
 } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
+import { Classroom } from '../../classrooms/schemas/classroom.schema';
+import { ClassroomTask } from '../../classrooms/classroom-tasks/schemas/classroom-task.schema';
+import { teacherSubmissionScope } from './teacher-submission-scope';
 import { Task } from '../schemas/task.schema';
 import { Submission } from '../schemas/submission.schema';
 import { Feedback } from '../schemas/feedback.schema';
@@ -38,6 +41,10 @@ export class LearningTasksReportsService {
     @InjectModel(Submission.name)
     private readonly submissionModel: Model<Submission>,
     @InjectModel(Feedback.name) private readonly feedbackModel: Model<Feedback>,
+    @InjectModel(Classroom.name)
+    private readonly classroomModel: Model<Classroom>,
+    @InjectModel(ClassroomTask.name)
+    private readonly classroomTaskModel: Model<ClassroomTask>,
   ) {}
 
   async getCommonIssuesReport(taskId: string, userId: string, limit = 10) {
@@ -54,10 +61,16 @@ export class LearningTasksReportsService {
       LearningTasksReportsService.COMMON_ISSUES_LIMIT,
     );
     const taskObjectId = new Types.ObjectId(taskId);
+    const filter = await teacherSubmissionScope(
+      taskId,
+      userId,
+      this.classroomModel,
+      this.classroomTaskModel,
+    );
 
     const [submissionsCount, distinctStudentIds, report] = await Promise.all([
-      this.submissionModel.countDocuments({ taskId: taskObjectId }),
-      this.submissionModel.distinct('studentId', { taskId: taskObjectId }),
+      this.submissionModel.countDocuments(filter),
+      this.submissionModel.distinct('studentId', filter),
       this.feedbackModel
         .aggregate<CommonIssuesReportAggregation>([
           {
@@ -72,6 +85,7 @@ export class LearningTasksReportsService {
               from: this.submissionModel.collection.name,
               let: { submissionId: '$submissionId' },
               pipeline: [
+                { $match: filter },
                 {
                   $match: {
                     $expr: {

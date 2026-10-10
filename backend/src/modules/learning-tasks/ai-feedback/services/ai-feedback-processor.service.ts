@@ -4,7 +4,11 @@ import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import { Feedback, FeedbackSource } from '../../schemas/feedback.schema';
 import { Submission } from '../../schemas/submission.schema';
-import { Task } from '../../schemas/task.schema';
+import { ClassroomTask } from '../../../classrooms/classroom-tasks/schemas/classroom-task.schema';
+import {
+  AiFeedbackMode,
+  TaskSnapshot,
+} from '../../../classrooms/classroom-tasks/classroom-task-content';
 import {
   AiFeedbackJob,
   AiFeedbackJobStatus,
@@ -28,8 +32,11 @@ type SubmissionAnalysisSource = Pick<
   'taskId' | 'classroomTaskId' | 'attemptNo' | 'content' | 'meta'
 > &
   WithId;
-type TaskAnalysisSource = Pick<Task, 'title' | 'description' | 'rubric'> &
-  WithId;
+class AiFeedbackEligibilityError extends Error {}
+type TaskAnalysisSource = Pick<
+  TaskSnapshot,
+  'title' | 'description' | 'rubric'
+>;
 
 @Injectable()
 export class AiFeedbackProcessor {
@@ -46,8 +53,8 @@ export class AiFeedbackProcessor {
     private readonly aiFeedbackJobModel: Model<AiFeedbackJob>,
     @InjectModel(Submission.name)
     private readonly submissionModel: Model<Submission>,
-    @InjectModel(Task.name)
-    private readonly taskModel: Model<Task>,
+    @InjectModel(ClassroomTask.name)
+    private readonly classroomTaskModel: Model<ClassroomTask>,
     @InjectModel(Feedback.name)
     private readonly feedbackModel: Model<Feedback>,
     @Inject(AI_FEEDBACK_PROVIDER_TOKEN)
@@ -79,14 +86,42 @@ export class AiFeedbackProcessor {
         if (!submission) {
           throw new Error('Submission not found');
         }
-        const task = await this.taskModel
-          .findById(submission.taskId)
-          .lean<TaskAnalysisSource>()
-          .exec();
-        if (!task) {
-          throw new Error('Task not found');
+        if (
+          !submission.classroomTaskId ||
+          !job.classroomTaskId ||
+          submission.classroomTaskId.toString() !==
+            job.classroomTaskId.toString()
+        ) {
+          throw new AiFeedbackEligibilityError(
+            'AI_ELIGIBILITY: CLASSROOM_TASK_ASSOCIATION_INVALID',
+          );
         }
-        const analysisContext = this.buildAnalysisContext(submission, task);
+        const classroomTask = await this.classroomTaskModel
+          .findById(submission.classroomTaskId)
+          .lean()
+          .exec();
+        if (
+          !classroomTask ||
+          classroomTask.taskId.toString() !== submission.taskId.toString()
+        ) {
+          throw new AiFeedbackEligibilityError(
+            'AI_ELIGIBILITY: CLASSROOM_TASK_ASSOCIATION_INVALID',
+          );
+        }
+        if (!classroomTask.taskSnapshot) {
+          throw new AiFeedbackEligibilityError(
+            'AI_ELIGIBILITY: TASK_SNAPSHOT_MISSING',
+          );
+        }
+        if (
+          classroomTask.settings?.aiFeedbackMode === AiFeedbackMode.Disabled
+        ) {
+          throw new AiFeedbackEligibilityError('AI_ELIGIBILITY: DISABLED');
+        }
+        const analysisContext = this.buildAnalysisContext(
+          submission,
+          classroomTask.taskSnapshot,
+        );
         const bucketKey = job.classroomTaskId?.toString();
         if (!this.aiFeedbackGuards.tryConsume(bucketKey)) {
           this.logger.debug(
@@ -164,7 +199,7 @@ export class AiFeedbackProcessor {
       language: submission.content?.language ?? 'unknown',
       codeText: submission.content?.codeText ?? '',
       aiUsageDeclaration: submission.meta?.aiUsageDeclaration,
-      taskId: task._id.toString(),
+      taskId: submission.taskId.toString(),
       taskTitle: task.title,
       taskDescription: task.description,
       taskRubric: task.rubric,
@@ -253,8 +288,11 @@ export class AiFeedbackProcessor {
     const providerCode = isProviderError ? error.code : null;
     const lastError = isProviderError
       ? error.message
-      : 'AI_FEEDBACK_PROVIDER: UNKNOWN';
+      : error instanceof AiFeedbackEligibilityError
+        ? error.message
+        : 'AI_FEEDBACK_PROVIDER: UNKNOWN';
     const shouldDeadImmediately =
+      error instanceof AiFeedbackEligibilityError ||
       providerCode === AI_FEEDBACK_ERROR_CODES.UNAUTHORIZED ||
       providerCode === AI_FEEDBACK_ERROR_CODES.MISSING_API_KEY;
     const isRateLimit =

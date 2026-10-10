@@ -1,3 +1,4 @@
+import { Enrollment } from '../src/modules/classrooms/enrollments/schemas/enrollment.schema';
 import { INestApplication, ValidationPipe } from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
 import { getModelToken } from '@nestjs/mongoose';
@@ -182,7 +183,9 @@ describe('Classroom Learning Loop (e2e)', () => {
     }
 
     const cleanup: Promise<unknown>[] = [];
-    const userIds = [teacherId, studentId].filter(Boolean);
+    const userIds = [teacherId, studentId]
+      .filter(Boolean)
+      .map((id) => new Types.ObjectId(id));
 
     if (submissionId) {
       const submissionObjectId = new Types.ObjectId(submissionId);
@@ -219,6 +222,10 @@ describe('Classroom Learning Loop (e2e)', () => {
       cleanup.push(userModel.deleteMany({ _id: { $in: userIds } }));
     }
 
+    if (classroomId)
+      await app
+        .get<Model<Enrollment>>(getModelToken(Enrollment.name))
+        .deleteMany({ classroomId: new Types.ObjectId(classroomId) });
     await Promise.all(cleanup);
     await app.close();
   });
@@ -274,7 +281,11 @@ describe('Classroom Learning Loop (e2e)', () => {
       .send({
         taskId,
         dueAt: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
-        settings: { allowLate: false, maxAttempts: 2 },
+        settings: {
+          allowLate: false,
+          maxAttempts: 2,
+          aiFeedbackMode: 'FIRST_SUBMISSION_AUTO',
+        },
       })
       .expect(201);
     const classroomTaskBody =
@@ -289,7 +300,9 @@ describe('Classroom Learning Loop (e2e)', () => {
       .expect(201);
 
     const createdSubmission = await studentAgent
-      .post(`/api/learning-tasks/tasks/${taskId}/submissions`)
+      .post(
+        `/api/classrooms/${classroomId}/tasks/${classroomTaskId}/submissions`,
+      )
       .send({
         content: {
           codeText: 'function quicksort(arr) { return arr; }',

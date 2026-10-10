@@ -40,7 +40,7 @@ backend/
 - `Course` / `Classroom`：课程与班级具有独立生命周期；课程分类是治理坐标，不形成额外外键或权限边界。
 - `Enrollment`：成员关系唯一权威来源；`classroom.studentIds` 仅 legacy 镜像，不参与授权或统计 fallback。
 - `Task` / `ClassroomTask`：任务模板资产与课堂运行实例拥有独立生命周期；模板共享不转移作者写权限，模板当前状态不重新阻断既有实例运行。
-- `Submission`：学生提交；课堂链路固定以 `classroomTaskId` 为隔离主键，通用模板提交不能充当课堂实例读取或统计的兜底。
+- `Submission`：学生提交；课堂链路固定以 `classroomTaskId` 为隔离主键，旧通用模板写入口已拒绝；模板级只读查询按教师自有课堂范围收紧，不能充当跨班读取或统计兜底。
 - `Feedback`：统一承载教师、AI 与系统反馈，来源和作者决定各自修改边界。
 - `AiFeedbackJob`：持久化 AI Feedback 处理生命周期；没有 Job 是正常产品状态，不等于正在处理。
 
@@ -69,7 +69,7 @@ backend/
 AI Feedback：
 
 - 产品 request 只负责确保持久化 Job，Worker 调度与 Processor 执行独立；Provider 选择不等于后台自动消费开关。
-- 自动入队具有提交次数策略，后续提交未请求 AI 时没有 Job 属于正常状态，不应隐式补成处理中。
+- 平台 AI 请求及首提自动入队由实例策略与既有开关共同控制，后续提交未请求 AI 时没有 Job 属于正常状态，不应隐式补成处理中。
 - 受控 debug / process-once 是非产品执行入口，与 Worker 共用处理链，不能代替产品请求或后台消费模型。
 - 本地桩与外部 Provider 对接已具备；具体 Provider、Worker、模型及邮件运行组合见 [Config Matrix](./handoff-backend-config-matrix.md)，内部处理与恢复见 [Service Map](./handoff-backend-service-map.md)。
 
@@ -82,7 +82,7 @@ AI Feedback：
 
 教学主链路：
 
-- 教师维护课程、班级与任务模板，将已发布模板形成课堂任务实例。
+- 新发布课堂实例保存固定教学文字/量规与平台 AI 策略；源码和提交说明逐次保存，读取与 Worker 使用所属实例内容。旧记录保持只读且不回填，缺快照实例禁止新提交/新 AI 请求；公开边界见 API/DTO Owner。
 - 学生通过加入码入班，查看学习任务、提交作业并读取反馈；教师可读取正式成员和实例提交，进入稳定提交详情并批阅。
 - 课堂任务实例支持独立的运行状态管理、截止与提交规则配置；不把实例管理重新混回模板生命周期。具体动作和字段见 [API](./handoff-backend-api-map.md#classroom-tasksclassrooms-子资源) / [DTO](./handoff-backend-dto-cheatsheet.md#classroomtask-dto--response-family)。
 
@@ -96,6 +96,8 @@ AI Feedback：
 ## 5) 当前不可误判事项
 
 上述授权、成员来源、课堂隔离、模板/实例分层、详情读源、AI 请求/执行分离和临时分析条件均是不可回退边界。新增能力应沿既有模块及权威数据链扩展。
+
+A1 的说明未进入模型，预算/实际用量/成本控制归 A2，前端录入与展示接入归 B1；本批能力不代表整项教学流程或真实课堂效果已验证。
 
 当前仍未提供：
 

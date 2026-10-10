@@ -1,4 +1,8 @@
-import { INestApplication } from '@nestjs/common';
+import { Course } from '../src/modules/courses/schemas/course.schema';
+import { Classroom } from '../src/modules/classrooms/schemas/classroom.schema';
+import { ClassroomTask } from '../src/modules/classrooms/classroom-tasks/schemas/classroom-task.schema';
+import { Enrollment } from '../src/modules/classrooms/enrollments/schemas/enrollment.schema';
+import { INestApplication, ValidationPipe } from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
 import { getModelToken } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
@@ -95,6 +99,9 @@ describe('LearningTasks (e2e)', () => {
   let teacherId = '';
   let otherTeacherId = '';
   let studentId = '';
+  let courseId = '',
+    classroomId = '',
+    classroomTaskId = '';
   let taskId = '';
   let submissionId = '';
   let feedbackId = '';
@@ -135,6 +142,13 @@ describe('LearningTasks (e2e)', () => {
     app = moduleFixture.createNestApplication();
     app.setGlobalPrefix('api');
     app.use(cookieParser());
+    app.useGlobalPipes(
+      new ValidationPipe({
+        whitelist: true,
+        transform: true,
+        forbidNonWhitelisted: true,
+      }),
+    );
     await app.init();
 
     teacherAgent = request.agent(app.getHttpServer());
@@ -246,7 +260,9 @@ describe('LearningTasks (e2e)', () => {
     }
 
     const cleanup: Promise<unknown>[] = [];
-    const userIds = [teacherId, otherTeacherId, studentId].filter(Boolean);
+    const userIds = [teacherId, otherTeacherId, studentId]
+      .filter(Boolean)
+      .map((id) => new Types.ObjectId(id));
 
     const feedbackIds = [
       feedbackId,
@@ -275,7 +291,23 @@ describe('LearningTasks (e2e)', () => {
       cleanup.push(userModel.deleteMany({ _id: { $in: userIds } }));
     }
 
-    await Promise.all(cleanup);
+    for (const operation of cleanup) await operation;
+    if (classroomTaskId)
+      await app
+        .get<Model<ClassroomTask>>(getModelToken(ClassroomTask.name))
+        .deleteOne({ _id: classroomTaskId });
+    if (classroomId) {
+      await app
+        .get<Model<Enrollment>>(getModelToken(Enrollment.name))
+        .deleteMany({ classroomId: new Types.ObjectId(classroomId) });
+      await app
+        .get<Model<Classroom>>(getModelToken(Classroom.name))
+        .deleteOne({ _id: classroomId });
+    }
+    if (courseId)
+      await app
+        .get<Model<Course>>(getModelToken(Course.name))
+        .deleteOne({ _id: courseId });
 
     await app.close();
   });
@@ -315,6 +347,30 @@ describe('LearningTasks (e2e)', () => {
 
     const publishedBody = publishedTask.body as PublishedTaskResponse;
     expect(publishedBody.status).toBe('PUBLISHED');
+    const course = await teacherAgent
+      .post('/api/courses')
+      .send({
+        code: 'fixture-' + taskId,
+        name: 'Synthetic task course',
+        term: '2026',
+      })
+      .expect(201);
+    courseId = (course.body as { id: string }).id;
+    const classroom = await teacherAgent
+      .post('/api/classrooms')
+      .send({ courseId, name: 'Synthetic task classroom' })
+      .expect(201);
+    const room = classroom.body as { id: string; joinCode: string };
+    classroomId = room.id;
+    const instance = await teacherAgent
+      .post('/api/classrooms/' + classroomId + '/tasks')
+      .send({ taskId, settings: { aiFeedbackMode: 'FIRST_SUBMISSION_AUTO' } })
+      .expect(201);
+    classroomTaskId = (instance.body as { id: string }).id;
+    await studentAgent
+      .post('/api/classrooms/join')
+      .send({ joinCode: room.joinCode })
+      .expect(201);
 
     const submissionPayload = {
       content: {
@@ -324,7 +380,9 @@ describe('LearningTasks (e2e)', () => {
     };
 
     const createdSubmission = await studentAgent
-      .post(`/api/learning-tasks/tasks/${taskId}/submissions`)
+      .post(
+        `/api/classrooms/${classroomId}/tasks/${classroomTaskId}/submissions`,
+      )
       .send(submissionPayload)
       .expect(201);
 
@@ -340,7 +398,7 @@ describe('LearningTasks (e2e)', () => {
     const teacherDetailBody = teacherDetail.body as SubmissionDetailResponse;
     expect(teacherDetailBody.id).toBe(submissionId);
     expect(teacherDetailBody.taskId).toBe(taskId);
-    expect(teacherDetailBody.classroomTaskId).toBeNull();
+    expect(teacherDetailBody.classroomTaskId).toBe(classroomTaskId);
     expect(teacherDetailBody.studentId).toBe(studentId);
     expect(teacherDetailBody.taskTitle).toBe('Sorting Lab');
     expect(teacherDetailBody.language).toBe('typescript');
@@ -357,7 +415,7 @@ describe('LearningTasks (e2e)', () => {
     const studentDetailBody = studentDetail.body as SubmissionDetailResponse;
     expect(studentDetailBody.id).toBe(submissionId);
     expect(studentDetailBody.studentId).toBe(studentId);
-    expect(studentDetailBody.classroomTaskId).toBeNull();
+    expect(studentDetailBody.classroomTaskId).toBe(classroomTaskId);
 
     const invalidFeedbackPayload = {
       source: 'TEACHER',

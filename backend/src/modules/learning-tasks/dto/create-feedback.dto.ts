@@ -1,6 +1,7 @@
 import {
   IsArray,
   IsEnum,
+  Equals,
   IsNumber,
   IsOptional,
   IsString,
@@ -15,7 +16,7 @@ import {
 import { FeedbackTag } from '../ai-feedback/lib/feedback-normalizer';
 
 export class CreateFeedbackDto {
-  @IsEnum(FeedbackSource)
+  @Equals(FeedbackSource.Teacher)
   source!: FeedbackSource;
 
   @IsEnum(FeedbackType)

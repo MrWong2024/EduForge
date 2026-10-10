@@ -7,11 +7,14 @@ export class SubmissionDetailResponseDto {
   studentId!: string;
   studentName!: string | null;
   taskTitle!: string | null;
+  taskSnapshotAvailable!: boolean;
   language!: string | null;
   content!: {
     language: string | null;
     codeText: string | null;
+    submissionNote: string;
   };
+  meta?: { aiUsageDeclaration?: string };
   submittedAt!: Date | null;
   attemptNo!: number | null;
   isLate!: boolean;

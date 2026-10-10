@@ -10,6 +10,7 @@ export class SubmissionResponseDto {
   content!: {
     codeText: string;
     language: string;
+    submissionNote: string;
   };
   meta?: {
     aiUsageDeclaration?: string;

@@ -93,8 +93,8 @@ Mock Bailian 等测试组合的执行方案见 [Backend Testing Playbook](./hand
 | `AI_FEEDBACK_MAX_CODE_CHARS`                   | `12000`                                             | Joi                                                  | 发送给模型的代码截断上限；整数，范围 `500..200000`。                                                      |
 | `AI_FEEDBACK_MAX_CONCURRENCY`                  | `2`                                                 | Joi                                                  | 进程级并发上限；整数，范围 `1..20`。                                                              |
 | `AI_FEEDBACK_MAX_PER_CLASSROOMTASK_PER_MINUTE` | `30`                                                | Joi                                                  | 每 `classroomTaskId` 的本地软限流；整数，范围 `1..600`。                                             |
-| `AI_FEEDBACK_AUTO_ON_SUBMIT`                   | `true`                                              | Joi                                                  | 提交后是否自动尝试创建 AI Job。                                                 |
-| `AI_FEEDBACK_AUTO_ON_FIRST_ATTEMPT_ONLY`       | `true`                                              | Joi                                                  | 自动入队是否仅限首提（attemptNo=1）。                                           |
+| `AI_FEEDBACK_AUTO_ON_SUBMIT`                   | `true`                                              | Joi                                                  | 仅允许具备 FIRST_SUBMISSION_AUTO 策略的实例首提尝试创建 AI Job。                                                 |
+| `AI_FEEDBACK_AUTO_ON_FIRST_ATTEMPT_ONLY`       | `true`                                              | Joi                                                  | 兼容旧首提配置；false 不能将实例首提自动模式扩大到每次提交。                                           |
 | `AI_FEEDBACK_MAX_ITEMS`                        | `2`                                                 | Joi                                                  | 每次保存反馈条目上限；允许范围 `1..10`。                                        |
 | `LEARNING_TASK_SUBMISSION_COOLDOWN_MS`         | `300000`                                            | Joi                                                  | 学生提交冷却窗口（ms）；按同一 student + classroomTask 判定，`0` 表示关闭冷却。 |
 | `AI_FEEDBACK_DEBUG_ENABLED`                    | `false`                                             | Joi                                                  | debug/ops 配置开关；职责见第 3 节。                                                            |
@@ -118,12 +118,12 @@ Mock Bailian 等测试组合的执行方案见 [Backend Testing Playbook](./hand
 
 ## 5) AI 入队触发策略（attempt-based）组合语义
 
-以下组合只控制提交后是否自动 enqueue，不改变已存在 Job 的执行配置。默认值见第 4 节。
+以下组合控制新提交自动 enqueue；实例模式由发布确定，默认值/值域见 [DTO ClassroomTask](./handoff-backend-dto-cheatsheet.md#classroomtask-dto--response-family)，手动授权见 API Owner。只有 FIRST_SUBMISSION_AUTO 且 attemptNo=1 才可能自动入队，其它实例模式不被全局开关覆盖。默认值见第 4 节。
 
 | `AI_FEEDBACK_AUTO_ON_SUBMIT` | `AI_FEEDBACK_AUTO_ON_FIRST_ATTEMPT_ONLY` | 自动入队配置效果 |
 |---|---|---|
-| `true` | `true` | 仅首提（attemptNo=1）自动入队；后续提交不自动入队。 |
-| `true` | `false` | 每次提交都自动入队。 |
+| `true` | `true` | FIRST_SUBMISSION_AUTO 实例仅首提自动入队。 |
+| `true` | `false` | 仍只允许 FIRST_SUBMISSION_AUTO 实例首提，不能扩大为每次入队。 |
 | `false` | 任意 | 不自动入队；不影响独立的手工入队方式。 |
 
 未触发自动入队不表示配置异常；具体公开状态投影见 [DTO / Public Data Contract Cheatsheet](./handoff-backend-dto-cheatsheet.md)。

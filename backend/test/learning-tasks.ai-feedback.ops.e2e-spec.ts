@@ -1,3 +1,7 @@
+import { Course } from '../src/modules/courses/schemas/course.schema';
+import { Classroom } from '../src/modules/classrooms/schemas/classroom.schema';
+import { ClassroomTask } from '../src/modules/classrooms/classroom-tasks/schemas/classroom-task.schema';
+import { Enrollment } from '../src/modules/classrooms/enrollments/schemas/enrollment.schema';
 import { INestApplication, ValidationPipe } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Test, TestingModule } from '@nestjs/testing';
@@ -94,6 +98,9 @@ describe('LearningTasks AI Feedback Ops (e2e) - pipeline & debug gate ON', () =>
 
   let teacherId = '';
   let studentId = '';
+  let courseId = '',
+    classroomId = '',
+    classroomTaskId = '';
   let taskId = '';
   let submissionId = '';
   let previousWorkerEnabled: string | undefined;
@@ -160,6 +167,11 @@ describe('LearningTasks AI Feedback Ops (e2e) - pipeline & debug gate ON', () =>
     submissionModel = app.get(getModelToken(Submission.name));
     feedbackModel = app.get(getModelToken(Feedback.name));
     aiFeedbackJobModel = app.get(getModelToken(AiFeedbackJob.name));
+    expect(
+      await aiFeedbackJobModel
+        .countDocuments({ status: { $in: ['PENDING', 'FAILED', 'RUNNING'] } })
+        .maxTimeMS(10000),
+    ).toBe(0);
 
     const [teacherHash, studentHash] = await Promise.all([
       bcrypt.hash(teacherPassword, 10),
@@ -201,7 +213,9 @@ describe('LearningTasks AI Feedback Ops (e2e) - pipeline & debug gate ON', () =>
     }
 
     const cleanup: Promise<unknown>[] = [];
-    const userIds = [teacherId, studentId].filter(Boolean);
+    const userIds = [teacherId, studentId]
+      .filter(Boolean)
+      .map((id) => new Types.ObjectId(id));
     const submissionObjectId = submissionId
       ? new Types.ObjectId(submissionId)
       : null;
@@ -223,7 +237,24 @@ describe('LearningTasks AI Feedback Ops (e2e) - pipeline & debug gate ON', () =>
       cleanup.push(userModel.deleteMany({ _id: { $in: userIds } }));
     }
 
-    await Promise.all(cleanup);
+    for (const operation of cleanup) await operation;
+    if (classroomTaskId)
+      await app
+        .get<Model<ClassroomTask>>(getModelToken(ClassroomTask.name))
+        .deleteOne({ _id: classroomTaskId });
+    if (classroomId) {
+      await app
+        .get<Model<Enrollment>>(getModelToken(Enrollment.name))
+        .deleteMany({ classroomId: new Types.ObjectId(classroomId) });
+      await app
+        .get<Model<Classroom>>(getModelToken(Classroom.name))
+        .deleteOne({ _id: classroomId });
+    }
+    if (courseId)
+      await app
+        .get<Model<Course>>(getModelToken(Course.name))
+        .deleteOne({ _id: courseId });
+
     await app.close();
   });
 
@@ -251,6 +282,30 @@ describe('LearningTasks AI Feedback Ops (e2e) - pipeline & debug gate ON', () =>
       .post(`/api/learning-tasks/tasks/${taskId}/publish`)
       .send({})
       .expect(201);
+    const course = await teacherAgent
+      .post('/api/courses')
+      .send({
+        code: 'fixture-' + taskId,
+        name: 'Synthetic task course',
+        term: '2026',
+      })
+      .expect(201);
+    courseId = (course.body as { id: string }).id;
+    const classroom = await teacherAgent
+      .post('/api/classrooms')
+      .send({ courseId, name: 'Synthetic task classroom' })
+      .expect(201);
+    const room = classroom.body as { id: string; joinCode: string };
+    classroomId = room.id;
+    const instance = await teacherAgent
+      .post('/api/classrooms/' + classroomId + '/tasks')
+      .send({ taskId, settings: { aiFeedbackMode: 'FIRST_SUBMISSION_AUTO' } })
+      .expect(201);
+    classroomTaskId = (instance.body as { id: string }).id;
+    await studentAgent
+      .post('/api/classrooms/join')
+      .send({ joinCode: room.joinCode })
+      .expect(201);
 
     const submissionPayload = {
       content: {
@@ -260,7 +315,9 @@ describe('LearningTasks AI Feedback Ops (e2e) - pipeline & debug gate ON', () =>
     };
 
     const createdSubmission = await studentAgent
-      .post(`/api/learning-tasks/tasks/${taskId}/submissions`)
+      .post(
+        `/api/classrooms/${classroomId}/tasks/${classroomTaskId}/submissions`,
+      )
       .send(submissionPayload)
       .expect(201);
 
@@ -456,6 +513,9 @@ describe('LearningTasks AI Feedback Ops (e2e) - stub worker default loop', () =>
 
   let teacherId = '';
   let studentId = '';
+  let courseId = '',
+    classroomId = '',
+    classroomTaskId = '';
   let taskId = '';
   const submissionIds: string[] = [];
 
@@ -599,6 +659,30 @@ describe('LearningTasks AI Feedback Ops (e2e) - stub worker default loop', () =>
       .post(`/api/learning-tasks/tasks/${taskId}/publish`)
       .send({})
       .expect(201);
+    const course = await teacherAgent
+      .post('/api/courses')
+      .send({
+        code: 'fixture-' + taskId,
+        name: 'Synthetic task course',
+        term: '2026',
+      })
+      .expect(201);
+    courseId = (course.body as { id: string }).id;
+    const classroom = await teacherAgent
+      .post('/api/classrooms')
+      .send({ courseId, name: 'Synthetic task classroom' })
+      .expect(201);
+    const room = classroom.body as { id: string; joinCode: string };
+    classroomId = room.id;
+    const instance = await teacherAgent
+      .post('/api/classrooms/' + classroomId + '/tasks')
+      .send({ taskId, settings: { aiFeedbackMode: 'FIRST_SUBMISSION_AUTO' } })
+      .expect(201);
+    classroomTaskId = (instance.body as { id: string }).id;
+    await studentAgent
+      .post('/api/classrooms/join')
+      .send({ joinCode: room.joinCode })
+      .expect(201);
   });
 
   afterAll(async () => {
@@ -662,12 +746,30 @@ describe('LearningTasks AI Feedback Ops (e2e) - stub worker default loop', () =>
       if (taskId) {
         cleanup.push(taskModel.deleteOne({ _id: taskId }));
       }
-      const userIds = [teacherId, studentId].filter(Boolean);
+      const userIds = [teacherId, studentId]
+        .filter(Boolean)
+        .map((id) => new Types.ObjectId(id));
       if (userIds.length > 0) {
         cleanup.push(sessionModel.deleteMany({ userId: { $in: userIds } }));
         cleanup.push(userModel.deleteMany({ _id: { $in: userIds } }));
       }
-      await Promise.all(cleanup);
+      for (const operation of cleanup) await operation;
+      if (classroomTaskId)
+        await app
+          .get<Model<ClassroomTask>>(getModelToken(ClassroomTask.name))
+          .deleteOne({ _id: classroomTaskId });
+      if (classroomId) {
+        await app
+          .get<Model<Enrollment>>(getModelToken(Enrollment.name))
+          .deleteMany({ classroomId: new Types.ObjectId(classroomId) });
+        await app
+          .get<Model<Classroom>>(getModelToken(Classroom.name))
+          .deleteOne({ _id: classroomId });
+      }
+      if (courseId)
+        await app
+          .get<Model<Course>>(getModelToken(Course.name))
+          .deleteOne({ _id: courseId });
     }
 
     await app.close();
@@ -675,7 +777,9 @@ describe('LearningTasks AI Feedback Ops (e2e) - stub worker default loop', () =>
 
   it('runs request -> PENDING -> worker SUCCEEDED and exposes detail/feedback', async () => {
     const createdSubmission = await studentAgent
-      .post(`/api/learning-tasks/tasks/${taskId}/submissions`)
+      .post(
+        `/api/classrooms/${classroomId}/tasks/${classroomTaskId}/submissions`,
+      )
       .send({
         content: {
           codeText: 'TODO: refine this worker-path sample',
@@ -728,7 +832,9 @@ describe('LearningTasks AI Feedback Ops (e2e) - stub worker default loop', () =>
 
   it('keeps NOT_REQUESTED when no job exists', async () => {
     const createdSubmission = await studentAgent
-      .post(`/api/learning-tasks/tasks/${taskId}/submissions`)
+      .post(
+        `/api/classrooms/${classroomId}/tasks/${classroomTaskId}/submissions`,
+      )
       .send({
         content: {
           codeText: 'function untouchedSubmission() { return true; }',

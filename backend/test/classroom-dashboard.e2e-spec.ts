@@ -1,3 +1,4 @@
+import { Enrollment } from '../src/modules/classrooms/enrollments/schemas/enrollment.schema';
 import { INestApplication, ValidationPipe } from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
 import { getModelToken } from '@nestjs/mongoose';
@@ -102,6 +103,10 @@ describe('Classroom Dashboards (e2e)', () => {
   let classroomTaskId = '';
   let taskId = '';
   let submissionId = '';
+  const ownedCourseIds: Types.ObjectId[] = [],
+    ownedClassroomIds: Types.ObjectId[] = [],
+    ownedTaskIds: Types.ObjectId[] = [],
+    ownedInstanceIds: Types.ObjectId[] = [];
   let previousWorkerEnabled: string | undefined;
   let previousDebugEnabled: string | undefined;
 
@@ -199,53 +204,47 @@ describe('Classroom Dashboards (e2e)', () => {
       process.env.AI_FEEDBACK_DEBUG_ENABLED = previousDebugEnabled;
     }
 
-    if (KEEP_DB) {
-      await app.close();
-      return;
-    }
-
-    const cleanup: Promise<unknown>[] = [];
-    const userIds = [teacherId, studentId].filter(Boolean);
-
-    if (submissionId) {
-      const submissionObjectId = new Types.ObjectId(submissionId);
-      cleanup.push(
-        feedbackModel.deleteMany({ submissionId: submissionObjectId }),
+    try {
+      if (KEEP_DB) return;
+      const userIds = [teacherId, studentId]
+        .filter(Boolean)
+        .map((id) => new Types.ObjectId(id));
+      if (submissionId) {
+        const id = new Types.ObjectId(submissionId);
+        await feedbackModel.deleteMany({ submissionId: id });
+        await aiFeedbackJobModel.deleteMany({ submissionId: id });
+        await submissionModel.deleteOne({ _id: id });
+      }
+      await classroomTaskModel.deleteMany({ _id: { $in: ownedInstanceIds } });
+      await taskModel.deleteMany({ _id: { $in: ownedTaskIds } });
+      const enrollmentModel = app.get<Model<Enrollment>>(
+        getModelToken(Enrollment.name),
       );
-      cleanup.push(
-        aiFeedbackJobModel.deleteMany({ submissionId: submissionObjectId }),
-      );
-      cleanup.push(submissionModel.deleteOne({ _id: submissionObjectId }));
-    }
-    if (classroomTaskId) {
-      cleanup.push(
-        classroomTaskModel.deleteOne({
-          _id: new Types.ObjectId(classroomTaskId),
+      await enrollmentModel.deleteMany({
+        classroomId: { $in: ownedClassroomIds },
+      });
+      await classroomModel.deleteMany({ _id: { $in: ownedClassroomIds } });
+      await courseModel.deleteMany({ _id: { $in: ownedCourseIds } });
+      await sessionModel.deleteMany({ userId: { $in: userIds } });
+      await userModel.deleteMany({ _id: { $in: userIds } });
+      expect(
+        await enrollmentModel.countDocuments({
+          classroomId: { $in: ownedClassroomIds },
         }),
-      );
+      ).toBe(0);
+      expect(
+        await sessionModel.countDocuments({ userId: { $in: userIds } }),
+      ).toBe(0);
+      expect(
+        await classroomModel.countDocuments({
+          _id: { $in: ownedClassroomIds },
+        }),
+      ).toBe(0);
+      console.info('Dashboard fixture cleanup verified');
+    } finally {
+      await app.close();
     }
-    if (taskId) {
-      cleanup.push(taskModel.deleteOne({ _id: new Types.ObjectId(taskId) }));
-    }
-    if (classroomId) {
-      cleanup.push(
-        classroomModel.deleteOne({ _id: new Types.ObjectId(classroomId) }),
-      );
-    }
-    if (courseId) {
-      cleanup.push(
-        courseModel.deleteOne({ _id: new Types.ObjectId(courseId) }),
-      );
-    }
-    if (userIds.length > 0) {
-      cleanup.push(sessionModel.deleteMany({ userId: { $in: userIds } }));
-      cleanup.push(userModel.deleteMany({ _id: { $in: userIds } }));
-    }
-
-    await Promise.all(cleanup);
-    await app.close();
   });
-
   it('teacher and student dashboards reflect classroom task and AI status change', async () => {
     await login(teacherAgent, teacherEmail, teacherPassword);
     await login(studentAgent, studentEmail, studentPassword);
@@ -260,6 +259,7 @@ describe('Classroom Dashboards (e2e)', () => {
       .expect(201);
     const courseBody = createdCourse.body as CreatedCourseResponse;
     courseId = courseBody.id;
+    ownedCourseIds.push(new Types.ObjectId(courseId));
 
     const createdClassroom = await teacherAgent
       .post('/api/classrooms')
@@ -270,6 +270,7 @@ describe('Classroom Dashboards (e2e)', () => {
       .expect(201);
     const classroomBody = createdClassroom.body as CreatedClassroomResponse;
     classroomId = classroomBody.id;
+    ownedClassroomIds.push(new Types.ObjectId(classroomId));
 
     const createdTask = await teacherAgent
       .post('/api/learning-tasks/tasks')
@@ -283,6 +284,7 @@ describe('Classroom Dashboards (e2e)', () => {
       .expect(201);
     const taskBody = createdTask.body as CreatedTaskResponse;
     taskId = taskBody.id;
+    ownedTaskIds.push(new Types.ObjectId(taskId));
 
     await teacherAgent
       .post(`/api/learning-tasks/tasks/${taskId}/publish`)
@@ -294,12 +296,17 @@ describe('Classroom Dashboards (e2e)', () => {
       .send({
         taskId,
         dueAt: new Date(Date.now() + 12 * 60 * 60 * 1000).toISOString(),
-        settings: { allowLate: true, maxAttempts: 3 },
+        settings: {
+          allowLate: true,
+          maxAttempts: 3,
+          aiFeedbackMode: 'FIRST_SUBMISSION_AUTO',
+        },
       })
       .expect(201);
     const classroomTaskBody =
       createdClassroomTask.body as CreatedClassroomTaskResponse;
     classroomTaskId = classroomTaskBody.id;
+    ownedInstanceIds.push(new Types.ObjectId(classroomTaskId));
 
     await studentAgent
       .post('/api/classrooms/join')
@@ -317,7 +324,9 @@ describe('Classroom Dashboards (e2e)', () => {
     expect(teacherTaskIds).toContain(classroomTaskId);
 
     const createdSubmission = await studentAgent
-      .post(`/api/learning-tasks/tasks/${taskId}/submissions`)
+      .post(
+        `/api/classrooms/${classroomId}/tasks/${classroomTaskId}/submissions`,
+      )
       .send({
         content: {
           codeText: 'function dashboardLab() { return true; }',
@@ -405,6 +414,7 @@ describe('Classroom Dashboards (e2e)', () => {
         .expect(201);
       const createdCourseBody = createdCourse.body as CreatedCourseResponse;
       courseId = createdCourseBody.id;
+      ownedCourseIds.push(new Types.ObjectId(courseId));
 
       const createdClassroom = await teacherAgent
         .post('/api/classrooms')
@@ -416,6 +426,7 @@ describe('Classroom Dashboards (e2e)', () => {
       const createdClassroomBody =
         createdClassroom.body as CreatedClassroomResponse;
       classroomId = createdClassroomBody.id;
+      ownedClassroomIds.push(new Types.ObjectId(classroomId));
 
       const createdTask = await teacherAgent
         .post('/api/learning-tasks/tasks')
@@ -429,6 +440,7 @@ describe('Classroom Dashboards (e2e)', () => {
         .expect(201);
       const createdTaskBody = createdTask.body as CreatedTaskResponse;
       taskId = createdTaskBody.id;
+      ownedTaskIds.push(new Types.ObjectId(taskId));
 
       await teacherAgent
         .post(`/api/learning-tasks/tasks/${taskId}/publish`)
@@ -442,6 +454,7 @@ describe('Classroom Dashboards (e2e)', () => {
       const createdClassroomTaskBody =
         createdClassroomTask.body as CreatedClassroomTaskResponse;
       classroomTaskId = createdClassroomTaskBody.id;
+      ownedInstanceIds.push(new Types.ObjectId(classroomTaskId));
 
       await studentAgent
         .post('/api/classrooms/join')

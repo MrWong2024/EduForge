@@ -28,6 +28,10 @@ import {
   Classroom,
   ClassroomSchema,
 } from '../classrooms/schemas/classroom.schema';
+import {
+  Enrollment,
+  EnrollmentSchema,
+} from '../classrooms/enrollments/schemas/enrollment.schema';
 import { User, UserSchema } from '../users/schemas/user.schema';
 
 @Module({
@@ -41,6 +45,7 @@ import { User, UserSchema } from '../users/schemas/user.schema';
       { name: ClassroomTask.name, schema: ClassroomTaskSchema },
       { name: Classroom.name, schema: ClassroomSchema },
       { name: User.name, schema: UserSchema },
+      { name: Enrollment.name, schema: EnrollmentSchema },
     ]),
   ],
   controllers: [LearningTasksController],

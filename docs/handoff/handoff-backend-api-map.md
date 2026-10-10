@@ -135,12 +135,13 @@ Notes:
 
 - 管理、提交列表、轨迹、复盘和 AI metrics 入口要求 teacher owner；普通任务列表/详情允许 owner teacher 或当前 Enrollment ACTIVE 学生。实例必须属于路径所指班级。
 - 发布候选查询仅 owner teacher 可读，非 owner 返回 `404`；仅返回当前教师可见的已发布模板（自己私有、自己共享、他人共享），排除当前班级已发布过的模板。字段见 [DTO 发布候选](./handoff-backend-dto-cheatsheet.md#发布候选模板)；课程分类优先与排序见 [Service Card 07](./handoff-backend-service-map.md#service-card-07)，索引见 [08](./handoff-backend-service-map.md#service-card-08)。
+- 发布需校验教师拥有班级且班级可发布，模板为 PUBLISHED 且属于该教师或共享可见；已知 ID 不能绕过可见性，他人不可见模板返回 404。服务端发布时保存教学内容，模板之后编辑/归档不改写实例；普通 PATCH 不接受快照和 AI 模式。外链文字被保存，不保证外部文件内容固定。
 - 新实例默认 ACTIVE；生命周期允许 `ACTIVE -> CLOSED`、`ACTIVE -> RECALLED`、`CLOSED -> ACTIVE`；撤回要求无提交。拒绝 RECALLED 恢复/再次流转以及 CLOSED -> RECALLED；已有提交而试图撤回返回 `400`，提示只能关闭。
 - 实例配置 PATCH 与状态 PATCH 分离：仅 ACTIVE/CLOSED 可编辑发布参数，RECALLED 不可编辑；恢复 ACTIVE 只恢复提交状态，不自动延长截止时间或更改迟交/尝试次数规则。输入/返回字段及旧实例默认状态见 [DTO ClassroomTask](./handoff-backend-dto-cheatsheet.md#classroomtask-dto--response-family)。
-- 课堂提交要求班级 ACTIVE、实例 ACTIVE、学生 Enrollment ACTIVE；无需关联模板仍为 PUBLISHED，模板归档不拒绝既有实例提交。有截止时间、禁止迟交且已超过截止时间时，返回 `403`，`code=LATE_SUBMISSION_NOT_ALLOWED`。
+- 课堂提交要求班级 ACTIVE、实例 ACTIVE、学生 Enrollment ACTIVE，且实例已保存发布快照；无需关联模板仍为 PUBLISHED，模板归档不拒绝既有实例提交。有截止时间、禁止迟交且已超过截止时间时，返回 `403`，`code=LATE_SUBMISSION_NOT_ALLOWED`。
 - 同一 studentId + classroomTaskId 在冷却窗口内重复提交返回 `429`，`code=SUBMISSION_COOLDOWN_ACTIVE`，并提供重试时间提示；配置与默认窗口见 [Config Matrix](./handoff-backend-config-matrix.md)，提示数据见 [DTO Submission](./handoff-backend-dto-cheatsheet.md#submission-request--response-family)。
 - 实例提交列表非 owner 返回 `404`；严格按 classroomTaskId 读取，默认只包含当前 ACTIVE 学生的 submissions，total 与 items 的成员范围一致。默认提交时间倒序及实现见 [Service Card 07](./handoff-backend-service-map.md#service-card-07)；公开列表、全来源 feedbackCount 与详情内容暴露区别见 DTO Submission。
-- my-task-detail 为 student only，仍要求 Enrollment ACTIVE。participationStatus 只提供状态层只读信号，原因优先级为 `CLASSROOM_NOT_ACTIVE > CLASSROOM_TASK_NOT_ACTIVE > ACTIVE`；模板状态只供展示，不决定学生运行态。该信号不包含截止、迟交、冷却或 AI 请求资格，不能替代动作入口的最终校验；字段及反馈预览合同见 [DTO My-task-detail](./handoff-backend-dto-cheatsheet.md#my-task-detail--ai-feedback-summary-family)。
+- my-task-detail 为 student only，仍要求 Enrollment ACTIVE。participationStatus 只提供状态层只读信号，原因优先级为 `CLASSROOM_NOT_ACTIVE > CLASSROOM_TASK_NOT_ACTIVE > ACTIVE`；模板状态只供展示，不决定学生运行态。该信号结合快照可用性及学生可用的实例 AI 策略，不计算截止、迟交或冷却；不能替代动作入口的最终校验；字段及反馈预览合同见 [DTO My-task-detail](./handoff-backend-dto-cheatsheet.md#my-task-detail--ai-feedback-summary-family)。
 - Learning trajectory 覆盖当前 ACTIVE 学生，包括未提交学生；Review pack 提供该实例的典型问题样例与完整学生分层。两者均支持资源范围内无时间下界的读取，兼容窗口、返回形状和安全暴露分别见 [DTO Trajectory](./handoff-backend-dto-cheatsheet.md#learning-trajectory) / [Review pack](./handoff-backend-dto-cheatsheet.md#review-pack)；内部聚合/样例选择见 [Service Card 08E](./handoff-backend-service-map.md#service-card-08efeature-learning-trajectory-z4) / [08F](./handoff-backend-service-map.md#service-card-08f)。
 - AI metrics 的 jobs 与 feedback 均严格按 classroomTaskId 隔离，不跨班；独立窗口集合与 nullable 延迟等公开数据见 [DTO AI Metrics](./handoff-backend-dto-cheatsheet.md#ai-metrics)，内部指标实现见 [Service Card 11](./handoff-backend-service-map.md#service-card-11)。
 
@@ -155,11 +156,11 @@ Notes:
 | POST   | `/api/learning-tasks/tasks/:id/restore`                              | 兼容保留入口；稳定返回 400，不再恢复归档模板。    |
 | GET    | `/api/learning-tasks/tasks`                                          | 分页查询任务。                                    |
 | GET    | `/api/learning-tasks/tasks/:id`                                      | 任务详情。                                        |
-| POST   | `/api/learning-tasks/tasks/:id/submissions`                          | 通用任务提交入口（可无 `classroomTaskId`）。      |
+| POST   | `/api/learning-tasks/tasks/:id/submissions`                          | 旧入口：409，提示从班级任务入口提交。      |
 | GET    | `/api/learning-tasks/tasks/:id/submissions/mine`                     | 学生查看自己的提交与 `aiFeedbackStatus`。         |
 | GET    | `/api/learning-tasks/tasks/:id/submissions`                          | 教师分页查看某任务提交。                          |
 | GET    | `/api/learning-tasks/submissions/:id`                                | 提交详情稳定读源（学生本人或有权教师可见）。      |
-| POST   | `/api/learning-tasks/submissions/:id/feedback`                       | 教师新增反馈（AI/TEACHER/SYSTEM 结构统一）。      |
+| POST   | `/api/learning-tasks/submissions/:id/feedback`                       | 教师新增 TEACHER 来源文字反馈。      |
 | PATCH  | `/api/learning-tasks/submissions/:submissionId/feedback/:feedbackId` | 教师修改自己有权管理的 TEACHER 来源反馈。         |
 | GET    | `/api/learning-tasks/submissions/:id/feedback`                       | 提交反馈列表（学生本人或任务教师可见）。          |
 | POST   | `/api/learning-tasks/submissions/:submissionId/ai-feedback/request`  | 手工触发 AI 入队请求（幂等）。                    |
@@ -175,8 +176,10 @@ Notes:
 - archive 为 teacher only、作者 only；仅 PUBLISHED 可归档，其余返回 `400 Only published task templates can be archived`。被 ClassroomTask 引用仍可归档，不影响已发布实例运行。
 - restore 仅作为 teacher/作者的兼容入口，稳定返回 `400 Archived task templates cannot be restored to draft; clone as draft instead`，不再恢复归档模板。
 - 列表 scope 语义：mine 是本人全部模板；shared 是共享池（包含本人共享模板和旧数据缺省 visibility）；all 是本人全部与共享池的可见全集。createdBy 仅保留字段兼容，不能成为越权筛选入口。详情允许作者读取，其他人仅可读共享模板（旧数据缺省也视为共享），他人的 PRIVATE 模板返回 `404`。
-- 通用 task submission 可无 classroomTaskId；其模板级统计与 common-issues 入口不能替代课堂实例报表。提交详情 `GET /api/learning-tasks/submissions/:id` 是稳定读源：学生本人可读；有实例关联时仅该班级 owner teacher 可读，无实例关联时仅 task owner teacher 可读；其他用户 `403`，不存在 `404`。字段及 detail/list 的代码暴露区别见 [DTO Submission](./handoff-backend-dto-cheatsheet.md#submission-request--response-family)。
-- 手工 AI request 是登录、RBAC 与资源归属保护的产品能力，不受 AI_FEEDBACK_DEBUG_ENABLED 门禁影响。学生对本人课堂提交请求时要求班级/实例 ACTIVE，不要求模板仍为 PUBLISHED；已有 job 幂等返回（200），无 job 时创建 PENDING job。
+- 新作品只经课堂实例入口创建；旧通用提交 POST 返回 409，message=“请从班级任务入口提交。”。模板级 submissions/stats/common-issues 继续要求模板作者权限，仅纳入该教师自有班级实例及既有无课堂关联提交；权限范围先于分页、total、学生去重和反馈聚合。共享模板不授予作者访问他人班级作品的权限；学生 mine 仍仅本人。提交详情 `GET /api/learning-tasks/submissions/:id` 是稳定读源：学生本人可读；有实例关联时仅该班级 owner teacher 可读，无实例关联时仅 task owner teacher 可读；其他用户 `403`，不存在 `404`。字段及 detail/list 的代码暴露区别见 [DTO Submission](./handoff-backend-dto-cheatsheet.md#submission-request--response-family)。
+- 手工 AI request 是登录、RBAC 与资源归属保护的产品能力，不受 AI_FEEDBACK_DEBUG_ENABLED 门禁影响。按保存的 classroomTaskId 校验提交/实例/班级关联：DISABLED 禁止师生；TEACHER_ONLY 仅班级 owner 教师；MANUAL 与 FIRST_SUBMISSION_AUTO 允许有权师生。学生还须本人、Enrollment ACTIVE、班级/实例 ACTIVE；教师可评阅已移出学生的既有作品。策略禁止返回 403，在 ensureJobForSubmission 前拒绝，无 Job/反馈写入。合法请求复用既有 Job 幂等返回 200。自动入队组合见 [Config Matrix](./handoff-backend-config-matrix.md#5-ai-入队触发策略attempt-based组合语义)。
+- 缺快照旧实例保持已有作品/反馈只读投影，不迁移或读时回填；新提交和新 AI 请求返回 409，message=“该课堂任务未保存发布内容，请教师重新布置后继续。”。无课堂关联旧提交也禁止新 AI 请求。旧模板投影不代表发布时原文；可用性字段见 DTO Owner。
+- 公开教师创建反馈只接受 source=TEACHER；伪造 AI/SYSTEM/其他值返回 400，不写反馈或 AI Job。内部 Processor 仍保存 AI 来源。
 - 教师反馈更新要求对 submission 的管理权：有实例关联时是班级 owner，无实例关联时是 task owner；feedback 不存在或不属于该 submission 返回 `404`。仅 TEACHER 来源可改，AI/SYSTEM 返回 `403 Only teacher feedback can be updated`；已有 createdBy 时还必须是该作者，否则 `403 Not allowed to update feedback`。
 - 新建 TEACHER feedback 记录当前教师作者；旧 TEACHER feedback 缺失 createdBy 时，有管理权教师可更新并补写作者，保留原 createdAt。字段白名单与兼容投影仅见 [DTO Feedback](./handoff-backend-dto-cheatsheet.md#feedback-dto--response-family)，内部协作见 [Service Card 08](./handoff-backend-service-map.md#service-card-08)。
 

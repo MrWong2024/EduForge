@@ -1,3 +1,4 @@
+import { Enrollment } from '../src/modules/classrooms/enrollments/schemas/enrollment.schema';
 import { INestApplication, ValidationPipe } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Test, TestingModule } from '@nestjs/testing';
@@ -304,11 +305,11 @@ describe('Classrooms AI Metrics (e2e)', () => {
     const [createdClassroomTaskA, createdClassroomTaskB] = await Promise.all([
       teacherAgent
         .post(`/api/classrooms/${classroomAId}/tasks`)
-        .send({ taskId })
+        .send({ taskId, settings: { aiFeedbackMode: 'MANUAL' } })
         .expect(201),
       teacherAgent
         .post(`/api/classrooms/${classroomBId}/tasks`)
-        .send({ taskId })
+        .send({ taskId, settings: { aiFeedbackMode: 'MANUAL' } })
         .expect(201),
     ]);
     const classroomTaskABody =
@@ -401,6 +402,9 @@ describe('Classrooms AI Metrics (e2e)', () => {
           .filter(Boolean)
           .map((id) => new Types.ObjectId(id));
         if (classroomIds.length > 0) {
+          await app
+            .get<Model<Enrollment>>(getModelToken(Enrollment.name))
+            .deleteMany({ classroomId: { $in: classroomIds } });
           await classroomModel.deleteMany({ _id: { $in: classroomIds } });
         }
       }

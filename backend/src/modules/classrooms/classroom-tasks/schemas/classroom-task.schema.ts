@@ -2,6 +2,8 @@ import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
 import { HydratedDocument, Types } from 'mongoose';
 import { Classroom } from '../../schemas/classroom.schema';
 import { Task } from '../../../learning-tasks/schemas/task.schema';
+import { AiFeedbackMode } from '../classroom-task-content';
+import type { TaskSnapshot } from '../classroom-task-content';
 import { User } from '../../../users/schemas/user.schema';
 import {
   CLASSROOM_TASK_STATUSES,
@@ -18,6 +20,9 @@ export class ClassroomTask {
 
   @Prop({ type: Types.ObjectId, ref: Task.name, required: true })
   taskId!: Types.ObjectId;
+
+  @Prop({ type: Object, immutable: true })
+  taskSnapshot?: TaskSnapshot;
 
   @Prop({
     type: String,
@@ -37,6 +42,7 @@ export class ClassroomTask {
   settings?: {
     allowLate?: boolean;
     maxAttempts?: number;
+    aiFeedbackMode?: AiFeedbackMode;
   };
 
   @Prop({ type: Types.ObjectId, ref: User.name, required: true })

@@ -33,13 +33,15 @@ EduForge 当前是面向教师与学生的教学任务平台，已形成以下�
 - 项目 handoff 已建立 Roadmap、Frontend Design Baseline、导航型 INDEX 与“一事实一 Owner”结构。
 - Backend / Frontend Testing Playbook、测试数据库职责和最低充分 Browser evidence 治理已建立。
 
-## 5. 下一产品主线（PLANNED）
+## 5. 文本教学任务承载（ACTIVE）
 
-### Curriculum & Teaching Foundation Phase 0
+面向源码文本与提交说明的教学活动，沿既有 Task → ClassroomTask → Submission → Feedback 链建立首批教学承载合同。
 
-面向大一软件类课程，先建立课程—教材—平台联合教学模型，明确教材适用对象与先修边界、学生必须真正掌握的核心编程基础、AI 随学习阶段逐步开放的使用与责任边界，以及标准教学任务的高层学习流程。选取一个代表性 vertical slice，检查现有 EduForge Task / Submission / Feedback 等主链是否足以承载该教学模型，识别真实能力与缺口。
+- A1：发布内容固定、提交说明、班级隔离与实例平台 AI 策略；后端范围完成，定向 unit/HTTP E2E 及 lint、完整 typecheck、build 门禁已通过。
+- A2（PLANNED）：有预算的 AI 辅助评阅，负责说明入模、完整输入预算、输出限制、实际用量及重试控制。
+- B1（PLANNED）：基于稳定后端合同接入教师发布、学生提交/详情、教师查看与反馈，负责页面与交互验收。
 
-本阶段是产品/教学设计阶段，尚未开始实施；仅锁定高层方向，不预设具体技术实现，不锁定 Schema、API、DTO、UI、持久化结构或具体平台实现工作包。完成后，再依据联合教学模型、代表性 vertical slice 和现有 EduForge 的真实能力差距，决定下一产品开发主线与实现工作包。
+A1、A2、B1 均完成并通过对应验收后才能关闭首批教学承载工作包；真实课堂效果另行验证。详细合同由 [API Map](./handoff-backend-api-map.md)、[DTO Cheatsheet](./handoff-backend-dto-cheatsheet.md)、[Service Map](./handoff-backend-service-map.md) 和 [Config Matrix](./handoff-backend-config-matrix.md) 维护。
 
 ## 6. 维护规则
 

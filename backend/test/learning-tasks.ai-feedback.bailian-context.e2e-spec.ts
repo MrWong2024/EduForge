@@ -8,6 +8,10 @@ import cookieParser from 'cookie-parser';
 import http from 'http';
 import request from 'supertest';
 import { App } from 'supertest/types';
+import { Course } from '../src/modules/courses/schemas/course.schema';
+import { Classroom } from '../src/modules/classrooms/schemas/classroom.schema';
+import { ClassroomTask } from '../src/modules/classrooms/classroom-tasks/schemas/classroom-task.schema';
+import { Enrollment } from '../src/modules/classrooms/enrollments/schemas/enrollment.schema';
 import { User } from '../src/modules/users/schemas/user.schema';
 import { Session } from '../src/modules/auth/schemas/session.schema';
 import { Task } from '../src/modules/learning-tasks/schemas/task.schema';
@@ -146,6 +150,12 @@ describe('LearningTasks AI Feedback Bailian Context (e2e)', () => {
   let getCapturedPayloads: () => BailianRequestPayload[];
   let clearCapturedPayloads: () => void;
 
+  let courseId = '';
+  const classroomIds: string[] = [],
+    instanceIds: string[] = [],
+    submissionIds: string[] = [];
+  let classroomTaskAId = '',
+    classroomTaskBId = '';
   let taskId = '';
   let submissionId = '';
   let previousWorkerEnabled: string | undefined;
@@ -311,6 +321,45 @@ describe('LearningTasks AI Feedback Bailian Context (e2e)', () => {
         .post(`/api/learning-tasks/tasks/${taskId}/publish`)
         .send({})
         .expect(201);
+      configService.set('AI_FEEDBACK_AUTO_ON_SUBMIT', false);
+      configService.set('LEARNING_TASK_SUBMISSION_COOLDOWN_MS', 0);
+      const course = await teacherAgent
+        .post('/api/courses')
+        .send({ code: fixtureNamespace, name: 'Context course', term: '2026' })
+        .expect(201);
+      courseId = (course.body as CreatedTaskResponse).id;
+      for (let index = 0; index < 2; index += 1) {
+        const classroom = await teacherAgent
+          .post('/api/classrooms')
+          .send({ courseId, name: 'Context classroom ' + index })
+          .expect(201);
+        const body = classroom.body as { id: string; joinCode: string };
+        classroomIds.push(body.id);
+        await studentAgent
+          .post('/api/classrooms/join')
+          .send({ joinCode: body.joinCode })
+          .expect(201);
+        if (index === 1) {
+          await teacherAgent
+            .patch('/api/learning-tasks/tasks/' + taskId)
+            .send({
+              title: 'B revised context',
+              description: 'B revised description',
+              rubric: { criterion: 'B revised rubric' },
+            })
+            .expect(200);
+        }
+        const instance = await teacherAgent
+          .post('/api/classrooms/' + body.id + '/tasks')
+          .send({ taskId, settings: { aiFeedbackMode: 'MANUAL' } })
+          .expect(201);
+        instanceIds.push((instance.body as CreatedTaskResponse).id);
+      }
+      [classroomTaskAId, classroomTaskBId] = instanceIds;
+      await teacherAgent
+        .post('/api/learning-tasks/tasks/' + taskId + '/archive')
+        .send({})
+        .expect(201);
     } catch (error) {
       await new Promise<void>((resolve) => mockServer.close(() => resolve()));
       throw error;
@@ -347,8 +396,8 @@ describe('LearningTasks AI Feedback Bailian Context (e2e)', () => {
     try {
       if (!KEEP_DB && userModel) {
         const cleanup: Promise<unknown>[] = [];
-        if (submissionId) {
-          const submissionObjectId = new Types.ObjectId(submissionId);
+        for (const ownedId of submissionIds) {
+          const submissionObjectId = new Types.ObjectId(ownedId);
           cleanup.push(
             feedbackModel.deleteMany({ submissionId: submissionObjectId }),
           );
@@ -371,6 +420,23 @@ describe('LearningTasks AI Feedback Bailian Context (e2e)', () => {
           cleanup.push(userModel.deleteMany({ _id: { $in: userIds } }));
         }
         for (const operation of cleanup) await operation;
+        await app
+          .get<Model<ClassroomTask>>(getModelToken(ClassroomTask.name))
+          .deleteMany({ _id: { $in: instanceIds } });
+        await app
+          .get<Model<Enrollment>>(getModelToken(Enrollment.name))
+          .deleteMany({
+            classroomId: {
+              $in: classroomIds.map((id) => new Types.ObjectId(id)),
+            },
+          });
+        await app
+          .get<Model<Classroom>>(getModelToken(Classroom.name))
+          .deleteMany({ _id: { $in: classroomIds } });
+        if (courseId)
+          await app
+            .get<Model<Course>>(getModelToken(Course.name))
+            .deleteOne({ _id: courseId });
         if (submissionId) {
           expect(await feedbackModel.countDocuments({ submissionId })).toBe(0);
           expect(
@@ -410,12 +476,19 @@ describe('LearningTasks AI Feedback Bailian Context (e2e)', () => {
     clearCapturedPayloads();
 
     const createdSubmission = await studentAgent
-      .post(`/api/learning-tasks/tasks/${taskId}/submissions`)
+      .post(
+        '/api/classrooms/' +
+          classroomIds[0] +
+          '/tasks/' +
+          classroomTaskAId +
+          '/submissions',
+      )
       .send({
         content: {
           codeText:
             'function solveQuadratic(a: number, b: number, c: number) { return [a, b, c]; }',
           language: 'typescript',
+          submissionNote: 'NOTE_EXCLUDED_FROM_A1_MODEL_INPUT',
         },
         meta: {
           aiUsageDeclaration: 'I used AI for brainstorming only.',
@@ -423,6 +496,7 @@ describe('LearningTasks AI Feedback Bailian Context (e2e)', () => {
       })
       .expect(201);
     submissionId = (createdSubmission.body as CreatedSubmissionResponse).id;
+    submissionIds.push(submissionId);
 
     await studentAgent
       .post(
@@ -489,6 +563,8 @@ describe('LearningTasks AI Feedback Bailian Context (e2e)', () => {
     expect(systemPrompt).toContain(
       'Use {"items":[]} only when there is truly nothing worth flagging, no actionable suggestion, and no learning-value improvement point.',
     );
+    expect(userPrompt).not.toContain('NOTE_EXCLUDED_FROM_A1_MODEL_INPUT');
+    expect(userPrompt).not.toContain('B revised');
     expect(userPrompt).toContain('TaskTitle: Bailian Context Task');
     expect(userPrompt).toContain(
       'TaskDescription: 实现一个函数并满足题目要求与评分标准。',
@@ -528,5 +604,52 @@ describe('LearningTasks AI Feedback Bailian Context (e2e)', () => {
     const feedbackItems = feedbackList.body as unknown[];
     expect(Array.isArray(feedbackItems)).toBe(true);
     expect(feedbackItems.length).toBeGreaterThan(0);
+  });
+  it('uses B snapshot and saved source in the actual mock request after the template is archived', async () => {
+    clearCapturedPayloads();
+    const created = await studentAgent
+      .post(
+        '/api/classrooms/' +
+          classroomIds[1] +
+          '/tasks/' +
+          classroomTaskBId +
+          '/submissions',
+      )
+      .send({
+        content: {
+          codeText: 'B_SAVED_SOURCE_ONLY',
+          language: 'typescript',
+          submissionNote: 'B_NOTE_EXCLUDED_A1',
+        },
+      })
+      .expect(201);
+    const id = (created.body as CreatedSubmissionResponse).id;
+    submissionIds.push(id);
+    await studentAgent
+      .post('/api/learning-tasks/submissions/' + id + '/ai-feedback/request')
+      .send({})
+      .expect(200);
+    expect(await aiFeedbackProcessor.processOnce(1)).toEqual({
+      processed: 1,
+      succeeded: 1,
+      failed: 0,
+      dead: 0,
+    });
+    const payloads = getCapturedPayloads();
+    expect(payloads).toHaveLength(1);
+    const prompt =
+      payloads[0].messages?.find((message) => message.role === 'user')
+        ?.content ?? '';
+    expect(prompt).toContain('TaskTitle: B revised context');
+    expect(prompt).toContain('TaskDescription: B revised description');
+    expect(prompt).toContain('B revised rubric');
+    expect(prompt).toContain('B_SAVED_SOURCE_ONLY');
+    expect(prompt).not.toContain('B_NOTE_EXCLUDED_A1');
+    expect(prompt).not.toContain('必须处理边界条件');
+    const savedFeedback = await feedbackModel
+      .findOne({ submissionId: new Types.ObjectId(id) })
+      .lean()
+      .exec();
+    expect(savedFeedback?.source).toBe('AI');
   });
 });

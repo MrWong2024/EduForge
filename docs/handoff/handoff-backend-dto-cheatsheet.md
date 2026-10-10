@@ -123,11 +123,11 @@ my-task-detail 另稳定返回 `participationStatus={readOnly,canSubmit,canReque
 
 | `reason` | `readOnly` | `canSubmit / canRequestAiFeedback` | `message` |
 | --- | --- | --- | --- |
-| `ACTIVE` | false | true / true | null |
+| `ACTIVE` | 有快照时 false，否则 true | 有快照可提交；AI 还需学生可用模式 | null |
 | `CLASSROOM_NOT_ACTIVE` | true | false / false | 班级已归档或不可参与，仅可查看历史提交与反馈。 |
 | `CLASSROOM_TASK_NOT_ACTIVE` | true | false / false | 课堂任务已关闭或不可参与，仅可查看历史提交与反馈。 |
 
-这些值是状态层展示信号；动作授权边界、原因优先级和模板兼容行为见 [API Classroom Tasks](./handoff-backend-api-map.md#classroom-tasksclassrooms-子资源)。
+班级/实例 ACTIVE 时，有快照且模式为 MANUAL / FIRST_SUBMISSION_AUTO 才 canRequestAiFeedback=true；缺快照 canSubmit/canRequestAiFeedback 均 false。reason/message 的班级/实例含义与优先级不变，模式本身说明 AI 策略限制。这些值是展示信号；动作授权边界、原因优先级和模板兼容行为见 [API Classroom Tasks](./handoff-backend-api-map.md#classroom-tasksclassrooms-子资源)。
 
 ## Classroom Tasks（Classrooms 子资源）
 
@@ -137,8 +137,8 @@ my-task-detail 另稳定返回 `participationStatus={readOnly,canSubmit,canReque
 
 | DTO | 字段合同 |
 | --- | --- |
-| `CreateClassroomTaskDto` | 必填 `taskId`（MongoId）；可选 `dueAt`（DateString）；可选 nested `settings` 用 `ValidateNested + Type`，其中 `allowLate?` 为 Boolean，`maxAttempts?` 为整数且 >=1。 |
-| `UpdateClassroomTaskDto` | 至少一个扁平字段：`dueAt?`（DateString，null/空字符串清空）、`allowLate?`（Boolean，null 不合法）、`maxAttempts?`（整数 >=1，null/空字符串清空）。不接受 `taskId/classroomId/publishedAt/createdBy/status` 或 nested `settings`。 |
+| `CreateClassroomTaskDto` | 必填 `taskId`（MongoId）；可选 `dueAt`（DateString）；可选 nested `settings` 用 `ValidateNested + Type`，其中 `allowLate?` 为 Boolean，`maxAttempts?` 为整数且 >=1；`aiFeedbackMode?` 为 DISABLED / TEACHER_ONLY / MANUAL / FIRST_SUBMISSION_AUTO，省略默认 TEACHER_ONLY，显式 null 或非法值为 400。发布请求不能指定 taskSnapshot。 |
+| `UpdateClassroomTaskDto` | 至少一个扁平字段：`dueAt?`（DateString，null/空字符串清空）、`allowLate?`（Boolean，null 不合法）、`maxAttempts?`（整数 >=1，null/空字符串清空）。不接受 `taskId/classroomId/publishedAt/createdBy/status/taskSnapshot/aiFeedbackMode` 或 nested `settings`。 |
 | `UpdateClassroomTaskStatusDto` | 必填 `status`，`IsIn` 值域 `ACTIVE \| CLOSED \| RECALLED`。允许值不等同于允许状态转换，见 API Owner。 |
 | [QueryClassroomTaskDto](../../backend/src/modules/classrooms/classroom-tasks/dto/query-classroom-task.dto.ts) | 分页校验；可选 `status` 使用 `TaskStatus`（`DRAFT \| PUBLISHED \| ARCHIVED`），不要误当为实例状态筛选枚举。 |
 
@@ -148,20 +148,20 @@ my-task-detail 另稳定返回 `participationStatus={readOnly,canSubmit,canReque
 {"dueAt": null, "maxAttempts": null}
 ```
 
-`ClassroomTaskResponseDto`：`{id,classroomId,taskId,status,publishedAt,dueAt?,settings?,createdBy,createdAt,updatedAt,taskPublisher,task}`。
+`ClassroomTaskResponseDto`：`{id,classroomId,taskId,taskSnapshotAvailable,status,publishedAt,dueAt?,settings?,createdBy,createdAt,updatedAt,taskPublisher,task}`。
 
 - `status: ACTIVE | CLOSED | RECALLED`；普通列表/详情与 my-task-detail 对旧数据缺省按 ACTIVE 兼容输出。
 - `taskPublisher: {id,name?} | null` 来自模板发布者，安全字段仅 id/name。
-- `task={title,description,knowledgeModule,stage,difficulty?,status}`；它的 `status` 是模板状态。
+- `task={title,description,knowledgeModule,courseLabel?,stage,difficulty?,rubric?,status}`；教学字段取实际快照，缺快照旧实例只作当前模板投影，不能称为发布原文。`status` 仍为当前模板资产状态。`taskSnapshotAvailable:boolean` 仅有实际快照时为 true；`settings.aiFeedbackMode` 返回实例模式，旧记录缺省只读投影为 TEACHER_ONLY。
 - 发布候选的 Query / response 与 Task 模板 family 共用，见[发布候选模板](#发布候选模板)。
 
 ### Submission request / response family
 
 来源：[CreateSubmissionDto](../../backend/src/modules/learning-tasks/dto/create-submission.dto.ts)、[SubmissionResponseDto](../../backend/src/modules/learning-tasks/dto/submission-response.dto.ts)、[SubmissionDetailResponseDto](../../backend/src/modules/learning-tasks/dto/submission-detail-response.dto.ts)、[ClassroomTasksService](../../backend/src/modules/classrooms/classroom-tasks/services/classroom-tasks.service.ts)。
 
-- 通用提交与课堂任务提交复用 `CreateSubmissionDto`：`content={codeText:string,language:string}`，nested validation；可选 `meta={aiUsageDeclaration?:string}`。两项 content 字段用 `IsString`，language 无枚举白名单。请求不接受客户端指定 submission 归属或 attemptNo。
-- `SubmissionResponseDto`：`{id,taskId,classroomTaskId?,studentId,attemptNo,content,meta?,status,aiFeedbackStatus,submittedAt,isLate,lateBySeconds,createdAt,updatedAt}`；`content` 同请求结构。`submittedAt` 表示提交时刻，`isLate` 是迟交标志，`lateBySeconds` 是迟交秒数。
-- `SubmissionDetailResponseDto`：`{id,taskId,classroomTaskId,studentId,studentName,taskTitle,language,content,submittedAt,attemptNo,isLate,lateBySeconds,aiFeedbackStatus}`；`classroomTaskId/studentName/taskTitle/language/submittedAt/attemptNo` 可为 null，`content={language:string|null,codeText:string|null}`。
+- 课堂任务提交使用 `CreateSubmissionDto`（旧通用入口仍复用输入 DTO，但拒绝写入）：`content={codeText:string,language:string,submissionNote?:string}`，nested validation；可选 `meta={aiUsageDeclaration?:string}`。codeText/language 保持 `IsString` 与既有持久化要求，language 无枚举白名单。submissionNote 可省略/空字符串，null、非字符串或超过 20,000 Unicode 码点返回 400；通过 ValidateIf 跳过 undefined、IsString 与 Unicode Matches 校验，保留原文/换行/缩进，省略时完整 content 响应统一为 ""。限制是产品字段长度，不是模型 Token 预算。多源码保持 `===== FILE: 相对路径 =====` 文本约定，仍要求源码，不提供纯文字提交类型。请求不接受客户端指定 submission 归属或 attemptNo。
+- `SubmissionResponseDto`：`{id,taskId,classroomTaskId?,studentId,attemptNo,content,meta?,status,aiFeedbackStatus,submittedAt,isLate,lateBySeconds,createdAt,updatedAt}`；`content={codeText,language,submissionNote}`，submissionNote 始终为字符串；meta 只白名单投影 aiUsageDeclaration。`submittedAt` 表示提交时刻，`isLate` 是迟交标志，`lateBySeconds` 是迟交秒数。
+- `SubmissionDetailResponseDto`：`{id,taskId,classroomTaskId,taskSnapshotAvailable,studentId,studentName,taskTitle,language,content,meta?,submittedAt,attemptNo,isLate,lateBySeconds,aiFeedbackStatus}`；`classroomTaskId/studentName/taskTitle/language/submittedAt/attemptNo` 可为 null，`content={language:string|null,codeText:string|null,submissionNote:string}`；taskTitle 有快照时取实例标题。meta 仅返回已有 aiUsageDeclaration，不暴露任意内部字段、不从说明派生声明。taskSnapshotAvailable 为实际实例快照可用性，旧记录/无课堂关联为 false。
 - `aiFeedbackStatus` 值域 `NOT_REQUESTED | PENDING | RUNNING | SUCCEEDED | FAILED | DEAD`，无 job 显式返回 `NOT_REQUESTED`。后续 attempt 尚未手工 request 时也可能合法地为 NOT_REQUESTED。
 - `QueryClassroomTaskSubmissionsDto` 只有分页校验，默认 `page=1,limit=20`；返回 `{items,total,page,limit}`。item 为 `{id,taskId,classroomTaskId,student,attemptNo,submittedAt,isLate,lateBySeconds,status,aiFeedbackStatus,feedbackCount}`。
 - 列表 `student={id,email,roles,status,name,studentNo,employeeNo}`，后三项文本可为 null。`attemptNo` 是该学生在当前 classroomTaskId 下的独立序号，从 1 递增。
@@ -174,7 +174,7 @@ my-task-detail 另稳定返回 `participationStatus={readOnly,canSubmit,canReque
 
 顶层返回 `{classroom,classroomTask,task,me,submissions,latest,completionStatus,participationStatus}`：
 
-- `classroom={id,name,courseId,status}`；`classroomTask={id,classroomId,taskId,status,publishedAt,dueAt?,settings?}`；`task={id,title,description,knowledgeModule,stage,difficulty?,rubric?,status}`；`me={studentId}`。
+- `classroom={id,name,courseId,status}`；`classroomTask={id,classroomId,taskId,taskSnapshotAvailable,status,publishedAt,dueAt?,settings?}`（settings 含 aiFeedbackMode）；`task={id,title,description,knowledgeModule,courseLabel?,stage,difficulty?,rubric?,status}`；`me={studentId}`。
 - `submissions[]`：`{id,attemptNo,createdAt,aiFeedbackStatus,feedbackSummary,feedbackItems?}`。
 - `latest`：`{submissionId,attemptNo,aiFeedbackStatus,feedbackSummary,feedbackItems?} | null`；未提交时为 null。
 - `feedbackSummary={totalItems,topTags,severityBreakdown}`，只统计 AI 反馈；`topTags` 为 `{tag,count}[]`；`severityBreakdown={INFO,WARN,ERROR}`。空摘要为总量 0、tags 空数组、三类严重程度计数 0。
@@ -388,7 +388,7 @@ disclaimer：本分析仅反映 EduForge AI 反馈介入后的提交行为与代
 
 | 字段 | 公开合同 |
 | --- | --- |
-| `source` | 创建必填枚举 `AI \| TEACHER \| SYSTEM`；更新不可写。 |
+| `source` | 公开创建只允许 TEACHER（Equals），AI/SYSTEM/其他值/null 为 400；内部反馈与响应仍使用 AI / TEACHER / SYSTEM，更新不可写。 |
 | `type` | 创建必填，更新可选；`SYNTAX \| STYLE \| DESIGN \| BUG \| PERFORMANCE \| SECURITY \| OTHER`。 |
 | `severity` | 创建必填，更新可选；`INFO \| WARN \| ERROR`。 |
 | `message` | 创建必填字符串；更新可选字符串且 MinLength(1)，空字符串不合法。 |

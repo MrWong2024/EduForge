@@ -386,6 +386,7 @@ describe('Classroom Learning Trajectory (e2e)', () => {
       .post(`/api/classrooms/${classroomId}/tasks`)
       .send({
         taskId,
+        settings: { aiFeedbackMode: 'FIRST_SUBMISSION_AUTO' },
         dueAt: new Date(Date.now() + 60 * 60 * 1000).toISOString(),
       })
       .expect(201);

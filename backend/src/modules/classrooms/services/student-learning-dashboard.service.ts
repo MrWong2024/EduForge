@@ -137,7 +137,13 @@ export class StudentLearningDashboardService {
           taskId: 1,
           publishedAt: 1,
           dueAt: 1,
-          title: '$task.title',
+          title: {
+            $cond: [
+              { $ifNull: ['$taskSnapshot', false] },
+              '$taskSnapshot.title',
+              '$task.title',
+            ],
+          },
         },
       },
       { $sort: { publishedAt: -1 } },

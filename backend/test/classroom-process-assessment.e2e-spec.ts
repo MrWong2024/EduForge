@@ -365,11 +365,17 @@ describe('Classroom Process Assessment (e2e)', () => {
     const [createdClassroomTaskA, createdClassroomTaskB] = await Promise.all([
       teacherAgent
         .post(`/api/classrooms/${classroomId}/tasks`)
-        .send({ taskId: taskAId })
+        .send({
+          taskId: taskAId,
+          settings: { aiFeedbackMode: 'FIRST_SUBMISSION_AUTO' },
+        })
         .expect(201),
       teacherAgent
         .post(`/api/classrooms/${classroomId}/tasks`)
-        .send({ taskId: taskBId })
+        .send({
+          taskId: taskBId,
+          settings: { aiFeedbackMode: 'FIRST_SUBMISSION_AUTO' },
+        })
         .expect(201),
     ]);
     classroomTaskAId = (

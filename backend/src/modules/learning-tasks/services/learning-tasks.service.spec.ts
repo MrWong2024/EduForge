@@ -1,5 +1,7 @@
+import { Enrollment } from '../../classrooms/enrollments/schemas/enrollment.schema';
+import { AiFeedbackMode } from '../../classrooms/classroom-tasks/classroom-task-content';
 import { ConfigService } from '@nestjs/config';
-import { Model, Types } from 'mongoose';
+import { Model, Mongoose, Schema, Types } from 'mongoose';
 import { ClassroomTask } from '../../classrooms/classroom-tasks/schemas/classroom-task.schema';
 import {
   CLASSROOM_TASK_STATUS_ACTIVE,
@@ -80,12 +82,24 @@ const createHarness = (
     classroomId,
     taskId,
     status: options.classroomTaskStatus ?? CLASSROOM_TASK_STATUS_ACTIVE,
+    taskSnapshot: {
+      title: 'Published task',
+      description: 'Published description',
+      knowledgeModule: 'Module',
+      stage: 1,
+    },
+    settings: { aiFeedbackMode: AiFeedbackMode.Manual },
   };
   const classroom = {
     _id: classroomId,
     status: options.classroomStatus ?? ClassroomStatus.Active,
   };
 
+  const enrollmentModel = new Mongoose().model<Enrollment>(
+    'Enrollment',
+    new Schema<Enrollment>(),
+  );
+  jest.spyOn(enrollmentModel, 'exists').mockResolvedValue({ _id: objectId() });
   const configService = { get: jest.fn() };
   const taskModel = { findById: jest.fn(() => makeQuery(task)) };
   const submissionModel = {
@@ -119,6 +133,7 @@ const createHarness = (
     classroomModel as unknown as Model<Classroom>,
     userModel as unknown as Model<User>,
     aiFeedbackJobService as unknown as AiFeedbackJobService,
+    enrollmentModel,
   );
 
   return {
@@ -178,6 +193,7 @@ const createTaskManagementHarness = (
     {} as unknown as Model<Classroom>,
     {} as unknown as Model<User>,
     {} as unknown as AiFeedbackJobService,
+    {} as Model<Enrollment>,
   );
 
   return {
@@ -567,6 +583,7 @@ describe('LearningTasksService task template publisher contract', () => {
       {} as unknown as Model<Classroom>,
       userModel as unknown as Model<User>,
       {} as unknown as AiFeedbackJobService,
+      {} as Model<Enrollment>,
     );
 
     const result = await service.listTasks(
@@ -618,6 +635,7 @@ describe('LearningTasksService task template publisher contract', () => {
       {} as unknown as Model<Classroom>,
       userModel as unknown as Model<User>,
       {} as unknown as AiFeedbackJobService,
+      {} as Model<Enrollment>,
     );
 
     const result = await service.getTask(

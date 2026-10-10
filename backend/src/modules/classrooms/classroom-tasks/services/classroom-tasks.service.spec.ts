@@ -1,3 +1,4 @@
+import { AiFeedbackMode } from '../classroom-task-content';
 import { Model, Types } from 'mongoose';
 import { Classroom, ClassroomStatus } from '../../schemas/classroom.schema';
 import { Course } from '../../../courses/schemas/course.schema';
@@ -129,6 +130,13 @@ const createHarness = (options: HarnessOptions = {}) => {
     taskId,
     publishedAt: new Date('2026-01-01T00:00:00.000Z'),
     status: options.classroomTaskStatus ?? CLASSROOM_TASK_STATUS_ACTIVE,
+    taskSnapshot: {
+      title: 'Published task',
+      description: 'Published description',
+      knowledgeModule: 'Module',
+      stage: 1,
+    },
+    settings: { aiFeedbackMode: AiFeedbackMode.Manual },
   };
   const task = {
     _id: taskId,

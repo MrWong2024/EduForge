@@ -1,3 +1,4 @@
+import { Enrollment } from '../src/modules/classrooms/enrollments/schemas/enrollment.schema';
 import { INestApplication, ValidationPipe } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Test, TestingModule } from '@nestjs/testing';
@@ -230,7 +231,7 @@ describe('LearningTasks AI Feedback Trigger Policy (e2e)', () => {
 
     const createdClassroomTask = await teacherAgent
       .post(`/api/classrooms/${classroomId}/tasks`)
-      .send({ taskId })
+      .send({ taskId, settings: { aiFeedbackMode: 'FIRST_SUBMISSION_AUTO' } })
       .expect(201);
     const classroomTaskBody =
       createdClassroomTask.body as CreatedClassroomTaskResponse;
@@ -293,6 +294,10 @@ describe('LearningTasks AI Feedback Trigger Policy (e2e)', () => {
       if (courseId) {
         await courseModel.deleteOne({ _id: new Types.ObjectId(courseId) });
       }
+      if (classroomId)
+        await app
+          .get<Model<Enrollment>>(getModelToken(Enrollment.name))
+          .deleteMany({ classroomId: new Types.ObjectId(classroomId) });
       const users = await userModel
         .find({ email: { $in: [teacherEmail, studentEmail] } })
         .select('_id')
