@@ -1,6 +1,8 @@
 import Link from "next/link";
 import { headers } from "next/headers";
 import { ErrorState } from "@/components/blocks/ErrorState";
+import { SubmissionAiReview } from "@/components/submissions/SubmissionAiReview";
+import { SubmissionContent } from "@/components/submissions/SubmissionContent";
 import { PageHeader } from "@/components/blocks/PageHeader";
 import { TeacherFeedbackForm } from "@/components/teacher/TeacherFeedbackForm";
 import { TeacherFeedbackHistory } from "@/components/teacher/TeacherFeedbackHistory";
@@ -27,14 +29,6 @@ type TeacherSubmissionDetailPageProps = {
   searchParams: Promise<{
     classroomId?: string | string[];
     classroomTaskId?: string | string[];
-    taskTitle?: string | string[];
-    studentName?: string | string[];
-    language?: string | string[];
-    submittedAt?: string | string[];
-    attemptNo?: string | string[];
-    isLate?: string | string[];
-    lateBySeconds?: string | string[];
-    codeText?: string | string[];
   }>;
 };
 
@@ -46,42 +40,6 @@ const getRequestOrigin = async (): Promise<string> => {
   }
   const protocol = headerMap.get("x-forwarded-proto") ?? "http";
   return `${protocol}://${host}`;
-};
-
-const asNumberLike = (value: unknown): number | undefined => {
-  if (typeof value === "number" && Number.isFinite(value)) {
-    return value;
-  }
-  if (typeof value === "string") {
-    const parsed = Number.parseInt(value, 10);
-    if (Number.isFinite(parsed)) {
-      return parsed;
-    }
-  }
-  return undefined;
-};
-
-const asBooleanLike = (value: unknown): boolean | undefined => {
-  if (typeof value === "boolean") {
-    return value;
-  }
-  if (typeof value === "string") {
-    const normalized = value.trim().toLowerCase();
-    if (normalized === "1" || normalized === "true") {
-      return true;
-    }
-    if (normalized === "0" || normalized === "false") {
-      return false;
-    }
-  }
-  return undefined;
-};
-
-const toLimitedCodeText = (value: string | undefined): string | undefined => {
-  if (!value) {
-    return undefined;
-  }
-  return value.length <= 2000 ? value : undefined;
 };
 
 const getTeacherSubmissionErrorSummary = (status: number): string => {
@@ -106,22 +64,14 @@ const buildContext = (
   classroomId: getSingleSearchParam(query.classroomId),
   classroomTaskId:
     detail.classroomTaskId ?? getSingleSearchParam(query.classroomTaskId),
-  taskTitle: detail.taskTitle ?? getSingleSearchParam(query.taskTitle),
-  studentName: detail.studentName ?? getSingleSearchParam(query.studentName),
-  language:
-    detail.language ??
-    detail.content.language ??
-    getSingleSearchParam(query.language),
-  submittedAt: detail.submittedAt ?? getSingleSearchParam(query.submittedAt),
-  attemptNo:
-    detail.attemptNo ?? asNumberLike(getSingleSearchParam(query.attemptNo)),
-  isLate: detail.isLate ?? asBooleanLike(getSingleSearchParam(query.isLate)),
-  lateBySeconds:
-    detail.lateBySeconds ??
-    asNumberLike(getSingleSearchParam(query.lateBySeconds)),
-  codeText:
-    detail.content.codeText ??
-    toLimitedCodeText(getSingleSearchParam(query.codeText)),
+  taskTitle: detail.taskTitle ?? undefined,
+  studentName: detail.studentName ?? undefined,
+  language: detail.language ?? detail.content.language ?? undefined,
+  submittedAt: detail.submittedAt ?? undefined,
+  attemptNo: detail.attemptNo ?? undefined,
+  isLate: detail.isLate,
+  lateBySeconds: detail.lateBySeconds,
+  codeText: detail.content.codeText ?? undefined,
 });
 
 type SubmissionFeedbackViewModel =
@@ -220,7 +170,7 @@ export default async function TeacherSubmissionDetailPage({
     : null;
 
   return (
-    <section className="space-y-4">
+    <section className="min-w-0 space-y-4">
       <PageHeader
         title="提交详情 / 教师批阅"
         description={`任务：${toDisplayText(viewModel.context.taskTitle, "未命名任务")} | 学生：${toDisplayText(
@@ -303,27 +253,20 @@ export default async function TeacherSubmissionDetailPage({
         </div>
       </section>
 
-      <section className="rounded-lg border border-zinc-200 bg-white p-4">
-        <h2 className="text-base font-semibold text-zinc-900">提交内容</h2>
-        {viewModel.context.codeText ? (
-          <details
-            className="mt-3 rounded-md border border-zinc-200 bg-zinc-50 p-3"
-            open
-          >
-            <summary className="cursor-pointer text-sm font-medium text-zinc-800">
-              查看代码内容
-            </summary>
-            <pre className="mt-3 max-h-[28rem] overflow-auto whitespace-pre-wrap rounded-md bg-zinc-900 p-3 text-xs text-zinc-100">
-              {viewModel.context.codeText}
-            </pre>
-          </details>
-        ) : (
-          <p className="mt-2 text-sm text-zinc-600">当前接口未返回代码内容。</p>
-        )}
-      </section>
+      <SubmissionContent detail={viewModel.detail} />
+      <SubmissionAiReview
+        key={submissionId}
+        submissionId={submissionId}
+        status={viewModel.detail.aiFeedbackStatus}
+        review={viewModel.detail.aiReview}
+        autoRefresh={false}
+      />
 
       <section className="rounded-lg border border-zinc-200 bg-white p-4 text-sm text-zinc-700">
-        <p>此页用于查看提交内容、反馈历史，并新增或修改教师反馈。</p>
+        <p>
+          此页用于查看作品与反馈，并新增或修改教师反馈。为保护未提交的批阅草稿，仅显式刷新；AI
+          申请后点击刷新查看最新结果。
+        </p>
       </section>
 
       <TeacherFeedbackForm submissionId={submissionId} />
@@ -335,15 +278,6 @@ export default async function TeacherSubmissionDetailPage({
           submissionId={submissionId}
         />
       </section>
-
-      <details className="rounded-lg border border-zinc-200 bg-zinc-50 p-4">
-        <summary className="cursor-pointer text-sm font-medium text-zinc-800">
-          查看原始数据（调试用）
-        </summary>
-        <pre className="mt-3 overflow-auto text-xs text-zinc-700">
-          {JSON.stringify(viewModel.feedback.raw, null, 2)}
-        </pre>
-      </details>
     </section>
   );
 }

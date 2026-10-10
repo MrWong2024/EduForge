@@ -32,10 +32,10 @@
 | `/teacher/classrooms/[classroomId]/edit` | 班级基础信息编辑 | Classroom 详情 / 更新 | 当前只编辑班级名称，所属课程、状态及加入码只读；保存后回看板，不影响成员、课堂任务和历史提交；不提供归档/恢复/删除，生命周期动作在列表“更多”菜单 | Done |
 | `/teacher/classrooms/[classroomId]` | 班级入口 | 无数据依赖 | 重定向到本班 dashboard | Done |
 | `/teacher/classrooms/[classroomId]/dashboard` | 班级看板 | Classroom dashboard API | 默认展示 ACTIVE 任务，可显式包含 CLOSED；展示模板归档提示和非本人模板发布者，进入任务与分析页。统计及归档建议直接消费后端结果，不二次过滤重算或自动归档 | Done |
-| `/teacher/classrooms/[classroomId]/tasks` | 课堂任务列表与发布 | ClassroomTask / 发布候选池 | 按课程分类、仅我的、知识模块及阶段检索可见已发布模板，候选支持加载更多，已发布任务支持分页；候选排除本班已发布模板，课程优先排序，展示发布者与模板归档提示。配置截止、迟交和次数限制后发布实例；ACTIVE 可关闭、CLOSED 可恢复提交，两者可编辑实例设置，RECALLED 仅展示。生命周期、截止与提交窗口分别表达，前端提示不替代后端权限；可进入详情/提交/三件套及模板页，不在此维护模板 | Done |
-| `/teacher/classrooms/[classroomId]/tasks/[classroomTaskId]` | 课堂任务详情 | ClassroomTask 详情 | 只读展示实例信息和任务说明，进入三件套或提交管理；实例状态动作在任务列表，模板生命周期在模板层 | Done |
+| `/teacher/classrooms/[classroomId]/tasks` | 课堂任务列表与发布 | ClassroomTask / 发布候选池 | 按课程分类、仅我的、知识模块及阶段检索可见已发布模板，候选支持加载更多，已发布任务支持分页；候选排除本班已发布模板，课程优先排序，展示发布者与模板归档提示。配置截止、迟交、次数及四种平台 AI 模式后发布实例；列表展示实例模式与快照状态；ACTIVE 可关闭、CLOSED 可恢复提交，两者可编辑实例设置，RECALLED 仅展示。生命周期、截止与提交窗口分别表达，前端提示不替代后端权限；可进入详情/提交/三件套及模板页，不在此维护模板 | Done |
+| `/teacher/classrooms/[classroomId]/tasks/[classroomTaskId]` | 课堂任务详情 | ClassroomTask 详情 | 只读展示实例模式、发布快照状态、教学说明及 rubric，进入三件套或提交管理；实例状态动作在任务列表，模板生命周期在模板层 | Done |
 | `/teacher/classrooms/[classroomId]/tasks/[classroomTaskId]/submissions` | 课堂任务提交管理 | ClassroomTask submissions | 按课堂任务实例查看与分页，进入提交批阅；保留班级看板、任务列表/详情及三件套导航上下文 | Done |
-| `/teacher/submissions/[submissionId]` | 教师提交详情与批阅 | 正式 submission detail / feedback（[调用链](./handoff-frontend-api-map.md)） | 查看代码和反馈、新增教师反馈；有标识的教师反馈可原地编辑，AI/SYSTEM 反馈只读，不展示或编辑 scoreHint。按可用上下文返回班级看板、任务提交列表或详情；导航上下文不作为主体数据 SoT | Done |
+| `/teacher/submissions/[submissionId]` | 教师提交详情与批阅 | 正式 submission detail / feedback（[调用链](./handoff-frontend-api-map.md)） | 查看完整源码、独立说明、已有声明及安全 AI 摘要，按后端资格申请辅助反馈；AI 申请局部显示结果，仅显式刷新，保护人工反馈草稿；新增教师反馈；有标识的教师反馈可原地编辑，AI/SYSTEM 反馈只读，不展示或编辑 scoreHint。按可用上下文返回班级看板、任务提交列表或详情；导航上下文不作为主体数据 SoT | Done |
 | `/teacher/classrooms/[classroomId]/tasks/[classroomTaskId]/learning-trajectory` | 学习轨迹 | Learning trajectory API | 切换窗口、排序及分页，查看最近与首次错误数变化、展开提交尝试和标签明细；主窗口 all/7d、默认 all，旧链接窗口继续兼容；保留班级看板、任务列表及提交管理导航 | Done |
 | `/teacher/classrooms/[classroomId]/tasks/[classroomTaskId]/review-pack` | 课堂复盘 | Review pack API | 查看问题聚合、典型样例与学生分层，调整窗口及样例范围，样例可进入对应提交；主窗口 all/7d、默认 all，旧链接窗口继续兼容；保留课堂任务上下文导航 | Done |
 | `/teacher/classrooms/[classroomId]/tasks/[classroomTaskId]/ai-metrics` | AI 指标 | AI metrics API | 切换 1h/24h/7d 窗口及标签扩展，查看任务 AI 情况；保留班级看板、任务列表及提交管理导航 | Done |
@@ -54,9 +54,9 @@
 | `/student/account` | 账户设置 | 当前用户 / 改密能力 | 查看本人资料、修改密码；无资料编辑 UI；可返回学习看板 | Done |
 | `/student/dashboard` | 学习看板 | Student classroom dashboard API | 查看班级与任务、进入任务详情；默认当前和近期过期任务，可显式查看历史并保留分页视图。班级分页，卡片内完整展示后端可见任务；展示教师、课程、学期摘要，不暴露无关标识或联系方式。完成情况直接消费 completionStatus，模板当前状态不作为二次过滤或参与阻断依据 | Done |
 | `/student/classrooms/join` | 加入班级 | Classroom join 能力 | 输入加入码入班，资格由后端判定 | Done |
-| `/student/classrooms/[classroomId]/tasks/[classroomTaskId]` | 学生任务详情与提交 | my-task-detail 聚合 / submission | 查看任务说明、评分标准、完成情况、历史提交与 AI 状态；completionStatus 由后端提供，不从反馈或 AI 状态推断。消费 participationStatus 的只读/可提交边界，旧响应缺字段保留可参与兜底；不以模板当前状态阻断。已截止且不允许迟交时禁用提交，允许迟交且有参与资格时可提交；成功后进入 submission detail | Done |
-| `/student/submissions/[submissionId]` | 学生提交详情与反馈 | 正式 submission detail / feedback（[调用链](./handoff-frontend-api-map.md)） | 查看代码、反馈及迟交信息，在允许状态下请求 AI；可返回来源任务，导航上下文不作为主体数据 SoT；状态刷新职责见 Component Map | Done |
-| `/student/help/ai` | AI 状态帮助 | 静态帮助内容 | 查看状态说明与排障建议 | Done |
+| `/student/classrooms/[classroomId]/tasks/[classroomTaskId]` | 学生任务详情与提交 | my-task-detail 聚合 / submission | 查看任务说明、评分标准、完成情况、历史提交与 AI 状态；completionStatus 由后端提供，不从反馈或 AI 状态推断。提交要求明确快照可用且 participationStatus.canSubmit=true，缺字段关闭写入口，保留只读原因；独立说明按码点校验并原样保存；草稿页仅显式刷新；不以模板当前状态阻断。已截止且不允许迟交时禁用提交，允许迟交且有参与资格时可提交；成功后进入 submission detail | Done |
+| `/student/submissions/[submissionId]` | 学生提交详情与反馈 | 正式 submission detail / feedback（[调用链](./handoff-frontend-api-map.md)） | 查看完整源码、独立说明、已有声明、迟交与 AI 摘要，仅按后端资格请求 AI；可返回来源任务，导航上下文不作为主体数据 SoT；状态刷新职责见 Component Map | Done |
+| `/student/help/ai` | AI 状态帮助 | 静态帮助内容 | 解释平台策略、有限重试、作品保存与 AI 失败的区别、模拟/覆盖/未知用量及教师判断边界 | Done |
 
 ## 4) 辅助路由（非主交付链）
 
@@ -73,4 +73,4 @@
 - route 新增/删除、角色、页面用途、主要用户交互或 implementation state 变化时更新本文；以源码确认 Done/Partial，不复制 Roadmap 阶段状态。
 - API helper、BFF、backend endpoint 或数据适配变化更新 Frontend API Map；本文仅同步受影响的高层依赖与页面语义。
 - component responsibility、composition/state owner 变化更新 Component Map；稳定 UX/视觉原则更新 Design Baseline；testing evidence 更新 Testing Playbook。
-- 跨层事实采用最低充分引用；submission detail 的主体读源、query 兼容与调用链统一回到 Frontend API Map，不在本文恢复独立数据源合同。
+- 跨层事实采用最低充分引用；submission detail 的主体读源、纯导航 query 与调用链统一回到 Frontend API Map，不在本文恢复独立数据源合同。

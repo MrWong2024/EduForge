@@ -3,82 +3,40 @@ import { headers } from "next/headers";
 import { EmptyState } from "@/components/blocks/EmptyState";
 import { ErrorState } from "@/components/blocks/ErrorState";
 import { PageHeader } from "@/components/blocks/PageHeader";
-import { AiProcessingHint } from "@/components/student/AiProcessingHint";
-import { RequestAiFeedbackButton } from "@/components/student/RequestAiFeedbackButton";
-import { SubmissionAutoRefresh } from "@/components/student/SubmissionAutoRefresh";
+import { SubmissionAiReview } from "@/components/submissions/SubmissionAiReview";
+import { SubmissionContent } from "@/components/submissions/SubmissionContent";
 import { fetchJson, FetchJsonError } from "@/lib/api/client";
-import { buildErrorDescription, extractRawDetail } from "@/lib/api/error-presenter";
-import { toListFeedbackResponse, toSubmissionDetailResponse } from "@/lib/api/types-student";
+import {
+  buildErrorDescription,
+  extractRawDetail,
+} from "@/lib/api/error-presenter";
+import {
+  toListFeedbackResponse,
+  toSubmissionDetailResponse,
+} from "@/lib/api/types-student";
 import { paths } from "@/lib/routes/paths";
 import { getCommonErrorSummary } from "@/lib/ui/status";
-import { getSingleSearchParam, toDisplayDate, toDisplayText } from "@/lib/ui/format";
+import {
+  getSingleSearchParam,
+  toDisplayDate,
+  toDisplayText,
+} from "@/lib/ui/format";
 
 type SubmissionDetailPageProps = {
   params: Promise<{ submissionId: string }>;
   searchParams: Promise<{
-    status?: string | string[];
     classroomId?: string | string[];
     classroomTaskId?: string | string[];
-    taskTitle?: string | string[];
-    language?: string | string[];
-    submittedAt?: string | string[];
-    attemptNo?: string | string[];
-    isLate?: string | string[];
-    lateBySeconds?: string | string[];
-    codeText?: string | string[];
   }>;
 };
 
-const AI_STATUSES = [
-  "NOT_REQUESTED",
-  "PENDING",
-  "RUNNING",
-  "SUCCEEDED",
-  "FAILED",
-  "DEAD",
-] as const;
-
-type AiStatus = (typeof AI_STATUSES)[number];
-
-const parseAiStatus = (value: unknown): AiStatus | null => {
-  if (typeof value !== "string") {
-    return null;
-  }
-  const normalized = value.trim().toUpperCase() as AiStatus;
-  return AI_STATUSES.includes(normalized) ? normalized : null;
-};
-
-const asNumberLike = (value: unknown): number | undefined => {
-  if (typeof value === "number" && Number.isFinite(value)) {
-    return value;
-  }
-  if (typeof value === "string") {
-    const parsed = Number.parseInt(value, 10);
-    if (Number.isFinite(parsed)) {
-      return parsed;
-    }
-  }
-  return undefined;
-};
-
-const asBooleanLike = (value: unknown): boolean | undefined => {
-  if (typeof value === "boolean") {
-    return value;
-  }
-  if (typeof value === "string") {
-    const normalized = value.trim().toLowerCase();
-    if (normalized === "1" || normalized === "true") {
-      return true;
-    }
-    if (normalized === "0" || normalized === "false") {
-      return false;
-    }
-  }
-  return undefined;
-};
-
 const toDisplayLateDuration = (value: unknown): string | undefined => {
-  if (typeof value !== "number" || !Number.isFinite(value) || !Number.isInteger(value) || value < 0) {
+  if (
+    typeof value !== "number" ||
+    !Number.isFinite(value) ||
+    !Number.isInteger(value) ||
+    value < 0
+  ) {
     return undefined;
   }
 
@@ -97,25 +55,22 @@ const toDisplayLateDuration = (value: unknown): string | undefined => {
   if (value < secondsPerHour) {
     const minutes = Math.floor(value / secondsPerMinute);
     const seconds = value % secondsPerMinute;
-    return seconds > 0 ? `超时 ${minutes} 分钟 ${seconds} 秒` : `超时 ${minutes} 分钟`;
+    return seconds > 0
+      ? `超时 ${minutes} 分钟 ${seconds} 秒`
+      : `超时 ${minutes} 分钟`;
   }
 
   if (value < secondsPerDay) {
     const hours = Math.floor(value / secondsPerHour);
     const minutes = Math.floor((value % secondsPerHour) / secondsPerMinute);
-    return minutes > 0 ? `超时 ${hours} 小时 ${minutes} 分钟` : `超时 ${hours} 小时`;
+    return minutes > 0
+      ? `超时 ${hours} 小时 ${minutes} 分钟`
+      : `超时 ${hours} 小时`;
   }
 
   const days = Math.floor(value / secondsPerDay);
   const hours = Math.floor((value % secondsPerDay) / secondsPerHour);
   return hours > 0 ? `超时 ${days} 天 ${hours} 小时` : `超时 ${days} 天`;
-};
-
-const toLimitedCodeText = (value: string | undefined): string | undefined => {
-  if (!value) {
-    return undefined;
-  }
-  return value.length <= 2000 ? value : undefined;
 };
 
 const getStudentSubmissionErrorSummary = (status: number): string => {
@@ -146,14 +101,6 @@ type SubmissionFeedbackViewModel =
       mode: "ready";
       detail: ReturnType<typeof toSubmissionDetailResponse>;
       feedback: ReturnType<typeof toListFeedbackResponse>;
-      aiFeedbackStatus: AiStatus | null;
-      taskTitle?: string;
-      language?: string;
-      submittedAt?: string;
-      attemptNo?: number;
-      isLate?: boolean;
-      lateBySeconds?: number;
-      codeText?: string;
     }
   | {
       mode: "error";
@@ -167,7 +114,6 @@ export default async function StudentSubmissionDetailPage({
 }: SubmissionDetailPageProps) {
   const { submissionId } = await params;
   const query = await searchParams;
-  const queryStatus = parseAiStatus(getSingleSearchParam(query.status));
   const classroomId = getSingleSearchParam(query.classroomId);
   const classroomTaskId = getSingleSearchParam(query.classroomTaskId);
   const taskDetailHref =
@@ -184,16 +130,19 @@ export default async function StudentSubmissionDetailPage({
   try {
     const origin = await getRequestOrigin();
     const [detailPayload, feedbackPayload] = await Promise.all([
-      fetchJson<unknown>(`learning-tasks/submissions/${encodeURIComponent(submissionId)}`, {
-        origin,
-        cache: "no-store",
-      }),
+      fetchJson<unknown>(
+        `learning-tasks/submissions/${encodeURIComponent(submissionId)}`,
+        {
+          origin,
+          cache: "no-store",
+        },
+      ),
       fetchJson<unknown>(
         `learning-tasks/submissions/${encodeURIComponent(submissionId)}/feedback`,
         {
           origin,
           cache: "no-store",
-        }
+        },
       ),
     ]);
 
@@ -203,22 +152,6 @@ export default async function StudentSubmissionDetailPage({
       mode: "ready",
       detail,
       feedback,
-      aiFeedbackStatus: parseAiStatus(detail.aiFeedbackStatus) ?? queryStatus,
-      taskTitle: detail.taskTitle ?? getSingleSearchParam(query.taskTitle),
-      language:
-        detail.language ??
-        detail.content.language ??
-        getSingleSearchParam(query.language),
-      submittedAt: detail.submittedAt ?? getSingleSearchParam(query.submittedAt),
-      attemptNo:
-        detail.attemptNo ?? asNumberLike(getSingleSearchParam(query.attemptNo)),
-      isLate: detail.isLate ?? asBooleanLike(getSingleSearchParam(query.isLate)),
-      lateBySeconds:
-        detail.lateBySeconds ??
-        asNumberLike(getSingleSearchParam(query.lateBySeconds)),
-      codeText:
-        detail.content.codeText ??
-        toLimitedCodeText(getSingleSearchParam(query.codeText)),
     };
   } catch (error) {
     if (error instanceof FetchJsonError) {
@@ -228,7 +161,7 @@ export default async function StudentSubmissionDetailPage({
         status: error.status,
         description: buildErrorDescription(
           getStudentSubmissionErrorSummary(error.status),
-          detail
+          detail,
         ),
       };
     }
@@ -245,77 +178,74 @@ export default async function StudentSubmissionDetailPage({
   }
 
   const lateDurationText =
-    viewModel.isLate === true
-      ? toDisplayLateDuration(viewModel.lateBySeconds)
+    viewModel.detail.isLate === true
+      ? toDisplayLateDuration(viewModel.detail.lateBySeconds)
       : undefined;
 
   return (
-    <section className="space-y-4">
+    <section className="min-w-0 space-y-4">
       <PageHeader
         title="提交详情 / 反馈"
-        description={`任务：${toDisplayText(viewModel.taskTitle, "未命名任务")} | 提交时间：${toDisplayDate(viewModel.submittedAt)}`}
+        description={`任务：${toDisplayText(viewModel.detail.taskTitle, "未命名任务")} | 提交时间：${toDisplayDate(viewModel.detail.submittedAt)}`}
         actions={
-          <div className="flex items-center gap-3 text-sm">
+          <div className="flex flex-wrap items-center gap-3 text-sm">
             {taskDetailHref ? (
-              <Link href={taskDetailHref} className="text-blue-700 hover:underline">
+              <Link
+                href={taskDetailHref}
+                className="text-blue-700 hover:underline"
+              >
                 返回任务详情
               </Link>
             ) : null}
-            <Link href={paths.student.dashboard} className="text-blue-700 hover:underline">
+            <Link
+              href={paths.student.dashboard}
+              className="text-blue-700 hover:underline"
+            >
               返回学习看板
             </Link>
-            <Link href={paths.student.aiHelp} className="text-blue-700 hover:underline">
+            <Link
+              href={paths.student.aiHelp}
+              className="text-blue-700 hover:underline"
+            >
               AI 帮助
             </Link>
           </div>
         }
       />
 
-      <section className="rounded-lg border border-zinc-200 bg-white p-4 text-sm text-zinc-700">
+      <section className="break-words rounded-lg border border-zinc-200 bg-white p-4 text-sm text-zinc-700">
         <p>
-          此页展示本次提交的反馈结果；处于未请求状态时可在此发起 AI 反馈请求。排队中、处理中与失败等待处理期间，页面会自动刷新。
+          此页展示该次保存的作品和反馈。AI
+          申请资格与重试安排以当前详情为准；排队、处理或已安排重试时才自动刷新。
         </p>
       </section>
 
-      <section className="rounded-lg border border-zinc-200 bg-white p-4 text-sm text-zinc-700">
+      <section className="break-words rounded-lg border border-zinc-200 bg-white p-4 text-sm text-zinc-700">
         <div className="grid gap-2 md:grid-cols-2">
-          <p>任务标题：{toDisplayText(viewModel.taskTitle)}</p>
-          <p>语言：{toDisplayText(viewModel.language)}</p>
-          <p>提交时间：{toDisplayDate(viewModel.submittedAt)}</p>
-          <p>尝试次数：{toDisplayText(viewModel.attemptNo)}</p>
+          <p>任务标题：{toDisplayText(viewModel.detail.taskTitle)}</p>
+          <p>语言：{toDisplayText(viewModel.detail.language)}</p>
+          <p>提交时间：{toDisplayDate(viewModel.detail.submittedAt)}</p>
+          <p>尝试次数：{toDisplayText(viewModel.detail.attemptNo)}</p>
           <p>
-            是否迟交：{toDisplayText(viewModel.isLate)}
+            是否迟交：{toDisplayText(viewModel.detail.isLate)}
             {lateDurationText ? `（${lateDurationText}）` : ""}
           </p>
         </div>
       </section>
 
-      <AiProcessingHint
-        status={viewModel.aiFeedbackStatus}
-        variant="submission"
-        helpHref={paths.student.aiHelp}
-      />
-      <SubmissionAutoRefresh status={viewModel.aiFeedbackStatus} />
-      <RequestAiFeedbackButton
+      <SubmissionContent detail={viewModel.detail} />
+      <SubmissionAiReview
+        key={submissionId}
         submissionId={submissionId}
-        initialStatus={viewModel.aiFeedbackStatus ?? undefined}
+        status={viewModel.detail.aiFeedbackStatus}
+        review={viewModel.detail.aiReview}
+        autoRefresh={true}
       />
-
-      <section className="rounded-lg border border-zinc-200 bg-white p-4">
-        <h2 className="text-base font-semibold text-zinc-900">提交内容</h2>
-        {viewModel.codeText ? (
-          <pre className="mt-3 max-h-[28rem] overflow-auto whitespace-pre-wrap rounded-md bg-zinc-900 p-3 text-xs text-zinc-100">
-            {viewModel.codeText}
-          </pre>
-        ) : (
-          <p className="mt-2 text-sm text-zinc-600">当前接口未返回代码内容。</p>
-        )}
-      </section>
 
       {viewModel.feedback.items.length === 0 ? (
         <EmptyState
           title="暂无反馈"
-          description="当前提交还没有反馈内容；未请求状态可点击上方按钮请求 AI 反馈，处理中或失败等待处理期间页面会自动刷新。"
+          description="当前尚无可展示的反馈。处理完成也不表示作品已通过；请按任务要求和教师反馈继续核对。"
         />
       ) : (
         <div className="overflow-x-auto rounded-lg border border-zinc-200 bg-white">
@@ -333,13 +263,30 @@ export default async function StudentSubmissionDetailPage({
             </thead>
             <tbody>
               {viewModel.feedback.items.map((item, index) => (
-                <tr key={item.id ?? `feedback-${index}`} className="border-t border-zinc-100 align-top">
-                  <td className="px-4 py-3">{toDisplayText(item.source, "—")}</td>
+                <tr
+                  key={item.id ?? `feedback-${index}`}
+                  className="border-t border-zinc-100 align-top"
+                >
+                  <td className="px-4 py-3">
+                    {item.source === "TEACHER"
+                      ? "教师反馈"
+                      : item.source === "AI"
+                        ? "AI 辅助反馈"
+                        : "其他反馈"}
+                  </td>
                   <td className="px-4 py-3">{toDisplayText(item.type, "—")}</td>
-                  <td className="px-4 py-3">{toDisplayText(item.severity, "—")}</td>
-                  <td className="px-4 py-3 whitespace-pre-wrap">{toDisplayText(item.message)}</td>
-                  <td className="px-4 py-3 whitespace-pre-wrap">{toDisplayText(item.suggestion, "暂无")}</td>
-                  <td className="px-4 py-3">{item.tags.length > 0 ? item.tags.join(", ") : "—"}</td>
+                  <td className="px-4 py-3">
+                    {toDisplayText(item.severity, "—")}
+                  </td>
+                  <td className="max-w-lg break-words px-4 py-3 whitespace-pre-wrap">
+                    {toDisplayText(item.message)}
+                  </td>
+                  <td className="max-w-lg break-words px-4 py-3 whitespace-pre-wrap">
+                    {toDisplayText(item.suggestion, "暂无")}
+                  </td>
+                  <td className="px-4 py-3">
+                    {item.tags.length > 0 ? item.tags.join(", ") : "—"}
+                  </td>
                   <td className="px-4 py-3">{toDisplayDate(item.createdAt)}</td>
                 </tr>
               ))}
@@ -347,15 +294,6 @@ export default async function StudentSubmissionDetailPage({
           </table>
         </div>
       )}
-
-      <details className="rounded-lg border border-zinc-200 bg-zinc-50 p-4">
-        <summary className="cursor-pointer text-sm font-medium text-zinc-800">
-          查看原始数据（调试用）
-        </summary>
-        <pre className="mt-3 overflow-auto text-xs text-zinc-700">
-          {JSON.stringify({ detail: viewModel.detail.raw, feedback: viewModel.feedback.raw }, null, 2)}
-        </pre>
-      </details>
     </section>
   );
 }

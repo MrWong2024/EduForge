@@ -1,170 +1,110 @@
 "use client";
-
-import { useEffect, useMemo, useState } from "react";
+import { useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { ErrorState } from "@/components/blocks/ErrorState";
 import { fetchJson, BrowserFetchJsonError } from "@/lib/api/browser-client";
-import { buildErrorDescription, extractRawDetail } from "@/lib/api/error-presenter";
 import { toRequestAiFeedbackResponse } from "@/lib/api/types-student";
-import { getAiStatusHint, getCommonErrorSummary } from "@/lib/ui/status";
+import {
+  normalizeAiStatus,
+  type AiReview,
+  type AiStatus,
+} from "@/lib/learning-tasks/ai-review";
+import { getCommonErrorSummary } from "@/lib/ui/status";
 
-type RequestAiFeedbackButtonProps = {
+type Props = {
   submissionId: string;
-  initialStatus?: string;
+  review?: AiReview;
+  requested: boolean;
+  refreshAfterRequest: boolean;
+  onRequested: (status: AiStatus | undefined) => void;
 };
-
-type RequestErrorState = {
-  status?: number;
-  summary: string;
-  detail?: string;
-};
-
-const toNormalizedStatus = (value?: string): string | undefined =>
-  value && value.trim() ? value.trim().toUpperCase() : undefined;
-
-const getButtonLabel = (status?: string): string => {
-  if (status === "PENDING") {
-    return "排队中";
-  }
-  if (status === "RUNNING") {
-    return "处理中";
-  }
-  if (status === "SUCCEEDED") {
-    return "已生成";
-  }
-  if (status === "FAILED") {
-    return "AI 反馈失败";
-  }
-  if (status === "DEAD") {
-    return "不可重试";
-  }
-
-  return "请求 AI 反馈";
-};
-
 export function RequestAiFeedbackButton({
   submissionId,
-  initialStatus,
-}: RequestAiFeedbackButtonProps) {
+  review,
+  requested,
+  refreshAfterRequest,
+  onRequested,
+}: Props) {
   const router = useRouter();
-  const normalizedInitialStatus = useMemo(
-    () => toNormalizedStatus(initialStatus),
-    [initialStatus]
-  );
+  const inFlight = useRef(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [errorState, setErrorState] = useState<RequestErrorState | null>(null);
-  const [requestResult, setRequestResult] = useState<unknown>(null);
-  const [latestStatus, setLatestStatus] = useState<string | undefined>(normalizedInitialStatus);
-
-  useEffect(() => {
-    setLatestStatus(normalizedInitialStatus);
-  }, [normalizedInitialStatus]);
-
-  const status = latestStatus;
-  const canRequest = status === "NOT_REQUESTED";
-  const isDisabled = isSubmitting || !canRequest;
-
-  const statusHint = useMemo(() => {
-    if (status === "PENDING") {
-      return "AI 反馈排队中，页面会自动刷新。";
-    }
-    if (status === "RUNNING") {
-      return "AI 反馈处理中，页面会自动刷新。";
-    }
-    if (status === "FAILED") {
-      return "AI 反馈暂时失败，当前不可手动重新请求；系统会继续按机制处理，页面会慢速自动刷新查看结果。";
-    }
-    if (!status) {
-      return "当前 AI 状态未就绪，暂不可手工请求。";
-    }
-    return getAiStatusHint(status);
-  }, [status]);
-
+  const [reviewNeedsRefresh, setReviewNeedsRefresh] = useState<AiReview | null>(
+    null,
+  );
+  const [error, setError] = useState<{
+    status?: number;
+    message: string;
+  } | null>(null);
+  const disabled =
+    isSubmitting ||
+    requested ||
+    review?.canRequest !== true ||
+    reviewNeedsRefresh === review;
   const handleRequest = async () => {
-    if (isDisabled) {
-      return;
-    }
-
+    if (disabled || inFlight.current) return;
+    inFlight.current = true;
     setIsSubmitting(true);
-    setErrorState(null);
-
+    setError(null);
     try {
       const payload = await fetchJson<unknown>(
-        `learning-tasks/submissions/${encodeURIComponent(submissionId)}/ai-feedback/request`,
+        "learning-tasks/submissions/" +
+          encodeURIComponent(submissionId) +
+          "/ai-feedback/request",
         {
           method: "POST",
+          signal: AbortSignal.timeout(30_000),
           headers: {
             "content-type": "application/json",
             accept: "application/json",
           },
           body: JSON.stringify({}),
-        }
+        },
       );
-
-      const parsed = toRequestAiFeedbackResponse(payload);
-      const nextStatus =
-        toNormalizedStatus(parsed.aiFeedbackStatus) ?? toNormalizedStatus(parsed.status);
-
-      setLatestStatus(nextStatus);
-      setRequestResult(parsed.raw);
-      router.refresh();
+      const result = toRequestAiFeedbackResponse(payload);
+      onRequested(
+        normalizeAiStatus(result.aiFeedbackStatus) ??
+          normalizeAiStatus(result.status),
+      );
+      if (refreshAfterRequest) router.refresh();
     } catch (error) {
-      if (error instanceof BrowserFetchJsonError) {
-        const detail = extractRawDetail(error.data);
-        const summary =
-          error.status === 403
-            ? "无权限触发该提交的 AI 反馈请求。"
-            : getCommonErrorSummary(error.status, "请求 AI 反馈");
-
-        setErrorState({
-          status: error.status,
-          summary,
-          detail,
-        });
-      } else {
-        setErrorState({
-          summary: "请求 AI 反馈失败，请稍后重试。",
-        });
-      }
+      setReviewNeedsRefresh(review ?? null);
+      setError(
+        error instanceof BrowserFetchJsonError
+          ? {
+              status: error.status,
+              message:
+                error.status >= 500
+                  ? "申请结果尚未确认，请先刷新详情核对，避免重复申请。"
+                  : getCommonErrorSummary(error.status, "申请 AI 辅助反馈") +
+                    "请刷新详情核对当前资格。",
+            }
+          : {
+              message:
+                "网络中断或请求超时，申请结果未确认。请先刷新详情核对，避免重复申请。",
+            },
+      );
     } finally {
+      inFlight.current = false;
       setIsSubmitting(false);
     }
   };
-
   return (
-    <section className="rounded-lg border border-zinc-200 bg-white p-4">
-      <div className="flex flex-wrap items-center gap-3">
-        <button
-          type="button"
-          disabled={isDisabled}
-          onClick={handleRequest}
-          className="rounded-md bg-zinc-900 px-4 py-2 text-sm font-medium text-white disabled:cursor-not-allowed disabled:bg-zinc-500"
-        >
-          {isSubmitting ? "请求中..." : getButtonLabel(status)}
-        </button>
-        <p className="text-sm text-zinc-700">{statusHint}</p>
-      </div>
-
-      {errorState ? (
-        <div className="mt-4">
-          <ErrorState
-            status={errorState.status}
-            title="请求 AI 反馈失败"
-            description={buildErrorDescription(errorState.summary, errorState.detail)}
-          />
-        </div>
+    <div className="space-y-3">
+      <button
+        type="button"
+        disabled={disabled}
+        onClick={handleRequest}
+        className="rounded-md bg-zinc-900 px-4 py-2 text-sm font-medium text-white disabled:cursor-not-allowed disabled:bg-zinc-500"
+      >
+        {isSubmitting ? "申请中…" : "申请 AI 辅助反馈"}
+      </button>
+      {error ? (
+        <ErrorState
+          status={error.status}
+          title="AI 申请结果"
+          description={error.message}
+        />
       ) : null}
-
-      {requestResult ? (
-        <details className="mt-4 rounded-md border border-emerald-200 bg-emerald-50 p-3">
-          <summary className="cursor-pointer text-sm font-medium text-emerald-900">
-            请求已提交，查看返回结果
-          </summary>
-          <pre className="mt-2 overflow-auto text-xs text-emerald-900">
-            {JSON.stringify(requestResult, null, 2)}
-          </pre>
-        </details>
-      ) : null}
-    </section>
+    </div>
   );
 }

@@ -1,12 +1,19 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import type { FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import { ErrorState } from "@/components/blocks/ErrorState";
 import { fetchJson, BrowserFetchJsonError } from "@/lib/api/browser-client";
-import { buildErrorDescription, extractRawDetail } from "@/lib/api/error-presenter";
-import type { CreateSubmissionRequest } from "@/lib/api/types-student";
+import { extractRawDetail } from "@/lib/api/error-presenter";
+import { toSubmissionDetailResponse } from "@/lib/api/types-student";
+import {
+  buildTextSubmissionRequest,
+  countCodePoints,
+  getSubmissionTextError,
+  SUBMISSION_NOTE_MAX_CODE_POINTS,
+} from "@/lib/learning-tasks/text-submission";
+import { paths } from "@/lib/routes/paths";
 import { getCommonErrorSummary } from "@/lib/ui/status";
 
 type SubmissionFormProps = {
@@ -43,7 +50,10 @@ const extractErrorCode = (data: unknown): string | undefined => {
   return undefined;
 };
 
-const containsLateSubmissionCode = (data: unknown, detail?: string): boolean => {
+const containsLateSubmissionCode = (
+  data: unknown,
+  detail?: string,
+): boolean => {
   const code = extractErrorCode(data);
   if (code === "LATE_SUBMISSION_NOT_ALLOWED") {
     return true;
@@ -52,62 +62,78 @@ const containsLateSubmissionCode = (data: unknown, detail?: string): boolean => 
   return Boolean(detail && detail.includes("LATE_SUBMISSION_NOT_ALLOWED"));
 };
 
-export function SubmissionForm({ classroomId, classroomTaskId }: SubmissionFormProps) {
+export function SubmissionForm({
+  classroomId,
+  classroomTaskId,
+}: SubmissionFormProps) {
   const router = useRouter();
   const [language, setLanguage] = useState("auto");
   const [codeText, setCodeText] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [errorState, setErrorState] = useState<SubmissionErrorState | null>(null);
-  const [result, setResult] = useState<unknown>(null);
+  const [errorState, setErrorState] = useState<SubmissionErrorState | null>(
+    null,
+  );
+  const [submissionNote, setSubmissionNote] = useState("");
+  const [resultUncertain, setResultUncertain] = useState(false);
+  const inFlight = useRef(false);
+  const noteLength = countCodePoints(submissionNote);
 
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
 
-    const normalizedLanguage = language.trim().toLowerCase() || "auto";
-    const normalizedCodeText = codeText.trim();
-    if (!normalizedCodeText) {
-      setErrorState({
-        summary: "请填写代码内容后再提交。",
-      });
+    if (inFlight.current || resultUncertain) return;
+    const textError = getSubmissionTextError(codeText, submissionNote);
+    if (textError) {
+      setErrorState({ summary: textError });
       return;
     }
-
+    const normalizedLanguage = language.trim().toLowerCase() || "auto";
+    const requestBody = buildTextSubmissionRequest(
+      codeText,
+      normalizedLanguage,
+      submissionNote,
+    );
+    inFlight.current = true;
     setIsSubmitting(true);
     setErrorState(null);
-
-    const requestBody: CreateSubmissionRequest = {
-      content: {
-        language: normalizedLanguage,
-        codeText: normalizedCodeText,
-      },
-    };
 
     try {
       const payload = await fetchJson<unknown>(
         `classrooms/${encodeURIComponent(classroomId)}/tasks/${encodeURIComponent(classroomTaskId)}/submissions`,
         {
           method: "POST",
+          signal: AbortSignal.timeout(30_000),
           headers: {
             "content-type": "application/json",
             accept: "application/json",
           },
           body: JSON.stringify(requestBody),
-        }
+        },
       );
 
-      setResult(payload);
-      router.refresh();
+      const submissionId = toSubmissionDetailResponse(payload).id;
+      if (!submissionId) {
+        setResultUncertain(true);
+        setErrorState({
+          summary: "提交请求已成功，但返回信息不完整，请到任务提交历史核对",
+        });
+        return;
+      }
+      const query = new URLSearchParams({ classroomId, classroomTaskId });
+      router.push(
+        paths.student.submissionDetail(submissionId) + "?" + query.toString(),
+      );
     } catch (error) {
       if (error instanceof BrowserFetchJsonError) {
         const detail = extractRawDetail(error.data);
         const isLateSubmission =
-          error.status === 403 && containsLateSubmissionCode(error.data, detail);
+          error.status === 403 &&
+          containsLateSubmissionCode(error.data, detail);
 
         if (isLateSubmission) {
           setErrorState({
             status: 403,
             summary: "已截止，禁止迟交，请联系老师。",
-            detail,
           });
           return;
         }
@@ -117,17 +143,23 @@ export function SubmissionForm({ classroomId, classroomTaskId }: SubmissionFormP
             ? "无权限提交该课堂任务。"
             : getCommonErrorSummary(error.status, "提交作业");
 
-        setErrorState({
-          status: error.status,
-          summary,
-          detail,
-        });
+        if (error.status >= 500) {
+          setResultUncertain(true);
+          setErrorState({
+            status: error.status,
+            summary:
+              "服务暂不可用，提交结果可能尚未确认，请先到提交历史核对，避免重复提交。",
+          });
+        } else setErrorState({ status: error.status, summary });
       } else {
+        setResultUncertain(true);
         setErrorState({
-          summary: "提交请求失败，请稍后重试。",
+          summary:
+            "网络中断或请求超时，提交结果未确认，请先到任务提交历史核对，避免重复提交。",
         });
       }
     } finally {
+      inFlight.current = false;
       setIsSubmitting(false);
     }
   };
@@ -137,8 +169,11 @@ export function SubmissionForm({ classroomId, classroomTaskId }: SubmissionFormP
       <h2 className="text-sm font-semibold text-zinc-900">提交作业</h2>
       <form onSubmit={handleSubmit} className="mt-3 space-y-3">
         <div className="space-y-1">
-          <label className="block text-sm font-medium text-zinc-800" htmlFor="submission-language">
-            language
+          <label
+            className="block text-sm font-medium text-zinc-800"
+            htmlFor="submission-language"
+          >
+            编程语言
           </label>
           <select
             id="submission-language"
@@ -153,11 +188,16 @@ export function SubmissionForm({ classroomId, classroomTaskId }: SubmissionFormP
               </option>
             ))}
           </select>
-          <p className="text-xs text-zinc-500">未指定具体语言时，将优先按代码内容自动识别。</p>
+          <p className="text-xs text-zinc-500">
+            未指定具体语言时，将优先按代码内容自动识别。
+          </p>
         </div>
 
         <div className="space-y-1">
-          <label className="block text-sm font-medium text-zinc-800" htmlFor="submission-code-text">
+          <label
+            className="block text-sm font-medium text-zinc-800"
+            htmlFor="submission-code-text"
+          >
             代码内容
           </label>
           <textarea
@@ -172,7 +212,8 @@ export function SubmissionForm({ classroomId, classroomTaskId }: SubmissionFormP
           <div className="rounded-md border border-zinc-200 bg-zinc-50 p-3 text-xs text-zinc-600">
             <p>普通单文件代码可直接粘贴提交，无需添加标记。</p>
             <p className="mt-1">
-              如果代码分散在多个文件中，可使用 FILE 标记分隔不同文件。示例中的文件名可替换为自己的文件名或相对路径，例如
+              如果代码分散在多个文件中，可使用 FILE
+              标记分隔不同文件。示例中的文件名可替换为自己的文件名或相对路径，例如
               main.py、Main.java、index.html。
             </p>
             <details className="mt-2">
@@ -180,15 +221,47 @@ export function SubmissionForm({ classroomId, classroomTaskId }: SubmissionFormP
                 多文件代码粘贴格式示例
               </summary>
               <pre className="mt-2 overflow-auto whitespace-pre-wrap rounded-md border border-zinc-200 bg-white p-3 text-xs text-zinc-800">
-                {"===== FILE: src/file-a.ext =====\n第一个文件的代码内容\n\n===== FILE: src/file-b.ext =====\n第二个文件的代码内容"}
+                {
+                  "===== FILE: src/file-a.ext =====\n第一个文件的代码内容\n\n===== FILE: src/file-b.ext =====\n第二个文件的代码内容"
+                }
               </pre>
             </details>
           </div>
         </div>
 
+        <div className="space-y-1">
+          <label
+            className="block text-sm font-medium text-zinc-800"
+            htmlFor="submission-note"
+          >
+            提交说明（可选）
+          </label>
+          <textarea
+            id="submission-note"
+            value={submissionNote}
+            onChange={(event) => setSubmissionNote(event.target.value)}
+            rows={6}
+            aria-describedby="submission-note-hint"
+            aria-invalid={noteLength > SUBMISSION_NOTE_MAX_CODE_POINTS}
+            className="w-full rounded-md border border-zinc-300 px-3 py-2 text-sm outline-none focus:border-zinc-500"
+            placeholder="例如设计思路、实际运行核对、修订过程或 AI 协作说明；按任务要求填写即可。"
+          />
+          <p
+            id="submission-note-hint"
+            className={
+              noteLength > SUBMISSION_NOTE_MAX_CODE_POINTS
+                ? "text-xs text-red-700"
+                : "text-xs text-zinc-500"
+            }
+          >
+            {noteLength.toLocaleString()} / 20,000 个 Unicode
+            码点。说明独立保存，保留原文格式。
+          </p>
+        </div>
+
         <button
           type="submit"
-          disabled={isSubmitting}
+          disabled={isSubmitting || resultUncertain}
           className="rounded-md bg-zinc-900 px-4 py-2 text-sm font-medium text-white disabled:cursor-not-allowed disabled:bg-zinc-500"
         >
           {isSubmitting ? "提交中..." : "提交作业"}
@@ -199,17 +272,32 @@ export function SubmissionForm({ classroomId, classroomTaskId }: SubmissionFormP
         <div className="mt-4">
           <ErrorState
             status={errorState.status}
-            title="提交失败"
-            description={buildErrorDescription(errorState.summary, errorState.detail)}
+            title={resultUncertain ? "提交结果待核对" : "暂未完成提交"}
+            description={errorState.summary}
           />
         </div>
       ) : null}
 
-      {result ? (
-        <details className="mt-4 rounded-md border border-emerald-200 bg-emerald-50 p-3">
-          <summary className="cursor-pointer text-sm font-medium text-emerald-900">提交成功，查看返回结果</summary>
-          <pre className="mt-2 overflow-auto text-xs text-emerald-900">{JSON.stringify(result, null, 2)}</pre>
-        </details>
+      {resultUncertain ? (
+        <div className="mt-3 flex flex-wrap gap-3 text-sm">
+          <button
+            type="button"
+            onClick={() => router.refresh()}
+            className="text-blue-700 underline"
+          >
+            刷新任务提交历史
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              setResultUncertain(false);
+              setErrorState(null);
+            }}
+            className="text-zinc-700 underline"
+          >
+            已核对历史，继续编辑
+          </button>
+        </div>
       ) : null}
     </section>
   );

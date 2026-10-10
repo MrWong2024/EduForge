@@ -39,7 +39,7 @@ EduForge 当前是面向教师与学生的教学任务平台，已形成以下�
 
 - A1：发布内容固定、提交说明、班级隔离与实例平台 AI 策略；后端范围完成，定向 unit/HTTP E2E 及 lint、完整 typecheck、build 门禁已通过。
 - A2：完整文本 AI 辅助评阅、调用限额与实报用量读取；后端范围完成，定向 unit/HTTP E2E（含受控 stub Worker 循环）及 lint、完整 typecheck、build 门禁已通过。
-- B1（PLANNED）：基于稳定后端合同接入教师发布、学生提交/详情、教师查看与反馈，负责页面与交互验收。
+- B1（ACTIVE）：基于稳定后端合同接入教师发布、学生提交/详情、教师查看与反馈。B1-1 页面实现与即时 pure/static 门禁已完成；B1-2 收到 B1-1 新 commit 后制定并执行真实师生 Browser 流程验收，含代表性恢复、草稿保护和响应式操作。B1 整体尚未完成。
 
 A1、A2、B1 均完成并通过对应验收后才能关闭首批教学承载工作包；真实课堂效果另行验证。详细合同由 [API Map](./handoff-backend-api-map.md)、[DTO Cheatsheet](./handoff-backend-dto-cheatsheet.md)、[Service Map](./handoff-backend-service-map.md) 和 [Config Matrix](./handoff-backend-config-matrix.md) 维护。
 

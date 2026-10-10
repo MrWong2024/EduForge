@@ -1,3 +1,7 @@
+import {
+  normalizeAiFeedbackMode,
+  type AiFeedbackMode,
+} from "@/lib/learning-tasks/ai-review";
 import { safeGet } from "@/lib/ui/format";
 import {
   normalizeTaskCourseLabel,
@@ -194,6 +198,9 @@ export const CLASSROOM_TASK_STATUSES = [
 export type ClassroomTaskStatus = (typeof CLASSROOM_TASK_STATUSES)[number];
 
 export type ClassroomTaskSummary = {
+  aiFeedbackMode?: AiFeedbackMode;
+  taskSnapshotAvailable?: boolean;
+  rubric?: Record<string, unknown>;
   classroomTaskId?: string;
   taskId?: string;
   title?: string;
@@ -279,6 +286,9 @@ export type DashboardResponse = UnknownRecord & {
 };
 
 export type ClassroomTask = {
+  aiFeedbackMode?: AiFeedbackMode;
+  taskSnapshotAvailable?: boolean;
+  rubric?: Record<string, unknown>;
   id?: string;
   classroomId?: string;
   taskId?: string;
@@ -310,6 +320,7 @@ export type PublishClassroomTaskRequest = {
   taskId: string;
   dueAt?: string;
   settings?: {
+    aiFeedbackMode?: AiFeedbackMode;
     allowLate?: boolean;
     maxAttempts?: number;
   };
@@ -1084,6 +1095,14 @@ export const toClassroomTaskSummary = (
   const settingsRecord = asRecord(safeGet(record, "settings", undefined));
 
   return {
+    aiFeedbackMode: normalizeAiFeedbackMode(settingsRecord.aiFeedbackMode),
+    taskSnapshotAvailable: asBoolean(record.taskSnapshotAvailable),
+    rubric:
+      taskRecord.rubric &&
+      typeof taskRecord.rubric === "object" &&
+      !Array.isArray(taskRecord.rubric)
+        ? asRecord(taskRecord.rubric)
+        : undefined,
     classroomTaskId: asString(record.classroomTaskId) ?? asString(record.id),
     taskId:
       asString(record.taskId) ??
@@ -1121,6 +1140,14 @@ export const toClassroomTask = (payload: unknown): ClassroomTask => {
   const settingsRecord = asRecord(safeGet(record, "settings", undefined));
 
   return {
+    aiFeedbackMode: normalizeAiFeedbackMode(settingsRecord.aiFeedbackMode),
+    taskSnapshotAvailable: asBoolean(record.taskSnapshotAvailable),
+    rubric:
+      taskRecord.rubric &&
+      typeof taskRecord.rubric === "object" &&
+      !Array.isArray(taskRecord.rubric)
+        ? asRecord(taskRecord.rubric)
+        : undefined,
     id: asString(record.id) ?? asString(record.classroomTaskId),
     classroomId: asString(record.classroomId),
     taskId: asString(record.taskId),
@@ -1676,14 +1703,8 @@ const toAiLearningAnalyticsMethodology = (
   return {
     scope: toRequiredString(record.scope, "AI_FEEDBACK_INTERVENTION_V1"),
     version: normalizeAiLearningAnalyticsMethodologyVersion(record.version),
-    sampleUnit: toRequiredString(
-      record.sampleUnit,
-      "STUDENT_CLASSROOM_TASK",
-    ),
-    qualityProxy: toRequiredString(
-      record.qualityProxy,
-      "ERROR_PLUS_HALF_WARN",
-    ),
+    sampleUnit: toRequiredString(record.sampleUnit, "STUDENT_CLASSROOM_TASK"),
+    qualityProxy: toRequiredString(record.qualityProxy, "ERROR_PLUS_HALF_WARN"),
     disclaimer: toRequiredString(
       record.disclaimer,
       "本分析仅反映 EduForge AI 反馈介入后的提交行为与代码问题代理变化，不代表 AI 对学习成绩或能力提升的因果贡献。",
@@ -1715,9 +1736,7 @@ const toAiLearningAnalyticsSummary = (
     qualityComparableStudentTaskCount: toRequiredNumber(
       record.qualityComparableStudentTaskCount,
     ),
-    improvedStudentTaskCount: toRequiredNumber(
-      record.improvedStudentTaskCount,
-    ),
+    improvedStudentTaskCount: toRequiredNumber(record.improvedStudentTaskCount),
     remainedCleanStudentTaskCount: toRequiredNumber(
       record.remainedCleanStudentTaskCount,
     ),
@@ -1740,9 +1759,7 @@ const toAiLearningAnalyticsSummary = (
     qualityComparableRate: toRequiredNumber(record.qualityComparableRate),
     improvedRate: toRequiredNumber(record.improvedRate),
     remainedCleanRate: toRequiredNumber(record.remainedCleanRate),
-    unchangedWithIssuesRate: toRequiredNumber(
-      record.unchangedWithIssuesRate,
-    ),
+    unchangedWithIssuesRate: toRequiredNumber(record.unchangedWithIssuesRate),
     regressedRate: toRequiredNumber(record.regressedRate),
     averageIssueLoadBefore: toRequiredNumber(record.averageIssueLoadBefore),
     averageIssueLoadAfter: toRequiredNumber(record.averageIssueLoadAfter),
@@ -1859,10 +1876,8 @@ const toAiLearningAnalyticsTaskPoint = (
     attemptsCount: toRequiredNumber(record.attemptsCount),
     aiRequested: asBoolean(record.aiRequested) ?? false,
     aiDelivered: asBoolean(record.aiDelivered) ?? false,
-    postFeedbackResubmitted:
-      asBoolean(record.postFeedbackResubmitted) ?? false,
-    postFeedbackCodeChanged:
-      asBoolean(record.postFeedbackCodeChanged) ?? false,
+    postFeedbackResubmitted: asBoolean(record.postFeedbackResubmitted) ?? false,
+    postFeedbackCodeChanged: asBoolean(record.postFeedbackCodeChanged) ?? false,
     qualityComparable: asBoolean(record.qualityComparable) ?? false,
     issueLoadBefore: asNullableNumber(record.issueLoadBefore) ?? null,
     issueLoadAfter: asNullableNumber(record.issueLoadAfter) ?? null,

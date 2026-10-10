@@ -4,7 +4,13 @@ import { EmptyState } from "@/components/blocks/EmptyState";
 import { ErrorState } from "@/components/blocks/ErrorState";
 import { PageHeader } from "@/components/blocks/PageHeader";
 import { AiProcessingHint } from "@/components/student/AiProcessingHint";
-import { SubmissionAutoRefresh } from "@/components/student/SubmissionAutoRefresh";
+import { RefreshButton } from "@/components/blocks/RefreshButton";
+import { TaskRubric } from "@/components/learning-tasks/TaskRubric";
+import {
+  canSubmitTextTask,
+  getAiModeLabel,
+  getTaskSnapshotMessage,
+} from "@/lib/learning-tasks/ai-review";
 import { SubmissionForm } from "@/components/student/SubmissionForm";
 import { fetchJson, FetchJsonError } from "@/lib/api/client";
 import {
@@ -14,7 +20,6 @@ import {
 import type { StudentTaskCompletionStatus } from "@/lib/api/types-student";
 import { toMyTaskDetailResponse } from "@/lib/api/types-student";
 import { paths } from "@/lib/routes/paths";
-import { getRubricDimensionLabel } from "@/lib/ui/rubric";
 import { getAiStatusHint, getCommonErrorSummary } from "@/lib/ui/status";
 import {
   buildQueryString,
@@ -262,59 +267,15 @@ const getCompletionStatusBadge = (
   };
 };
 
-const toTaskDetailAutoRefreshStatuses = (
-  latestStatus: string | undefined,
-  submissions: unknown[],
-): Array<string | undefined> => {
-  const statuses: Array<string | undefined> = [latestStatus];
-  for (const submission of submissions) {
-    statuses.push(
-      safeGet<string | undefined>(submission, "aiFeedbackStatus", undefined),
-    );
-  }
-  return statuses;
-};
-
-const resolveTaskDetailAutoRefreshStatus = (
-  statuses: Array<string | undefined>,
-): "PENDING" | "RUNNING" | "FAILED" | undefined => {
-  let hasPending = false;
-  let hasRunning = false;
-  let hasFailed = false;
-
-  for (const status of statuses) {
-    const normalized = normalizeAiStatus(status);
-    if (normalized === "PENDING") {
-      hasPending = true;
-      continue;
-    }
-    if (normalized === "RUNNING") {
-      hasRunning = true;
-      continue;
-    }
-    if (normalized === "FAILED") {
-      hasFailed = true;
-    }
-  }
-
-  if (hasRunning) {
-    return "RUNNING";
-  }
-  if (hasPending) {
-    return "PENDING";
-  }
-  if (hasFailed) {
-    return "FAILED";
-  }
-  return undefined;
-};
-
 const toDisplayDateOrFallback = (value?: string | null): string => {
   const displayDate = toDisplayDate(value);
   return displayDate === "—" ? "未设置" : displayDate;
 };
 
-const isPastDue = (value: string | null | undefined, nowMs: number): boolean => {
+const isPastDue = (
+  value: string | null | undefined,
+  nowMs: number,
+): boolean => {
   if (!value) {
     return false;
   }
@@ -347,42 +308,6 @@ const toStageText = (value: unknown): string => {
   }
   return "当前未设置阶段";
 };
-
-const toRubricDimensions = (
-  rubric: unknown,
-): Array<{ key: string; value: string }> => {
-  if (!rubric || typeof rubric !== "object" || Array.isArray(rubric)) {
-    return [];
-  }
-
-  const dimensionsRaw = safeGet<unknown>(rubric, "dimensions", undefined);
-  if (
-    !dimensionsRaw ||
-    typeof dimensionsRaw !== "object" ||
-    Array.isArray(dimensionsRaw)
-  ) {
-    return [];
-  }
-
-  return Object.entries(dimensionsRaw as Record<string, unknown>)
-    .map(([rawKey, rawValue]) => {
-      const key = rawKey.trim();
-      const value = toDisplayText(rawValue, "");
-      if (!key || !value) {
-        return null;
-      }
-      return {
-        key: getRubricDimensionLabel(key),
-        value,
-      };
-    })
-    .filter((item): item is { key: string; value: string } => Boolean(item));
-};
-
-const asRecord = (value: unknown): Record<string, unknown> =>
-  value && typeof value === "object" && !Array.isArray(value)
-    ? (value as Record<string, unknown>)
-    : {};
 
 const buildSubmissionFeedbackHref = (
   submissionId: string,
@@ -503,15 +428,6 @@ export default async function StudentTaskDetailPage({
     safeGet(viewModel.data.task, "description", undefined),
     "当前未提供任务说明",
   );
-  const rubric = asRecord(
-    safeGet<unknown>(viewModel.data.task, "rubric", undefined),
-  );
-  const rubricDimensions = toRubricDimensions(rubric);
-  const rubricNotes = toDisplayText(
-    safeGet<unknown>(rubric, "notes", undefined),
-    "",
-  );
-  const hasRubricContent = rubricDimensions.length > 0 || Boolean(rubricNotes);
   const latestRawStatus = safeGet<string | undefined>(
     viewModel.data.latest,
     "aiFeedbackStatus",
@@ -529,24 +445,36 @@ export default async function StudentTaskDetailPage({
   const participationStatus = viewModel.data.participationStatus;
   const readOnly = participationStatus?.readOnly === true;
   const canSubmitByStatus =
-    !readOnly && participationStatus?.canSubmit !== false;
+    !readOnly &&
+    canSubmitTextTask(
+      viewModel.data.classroomTask.taskSnapshotAvailable,
+      participationStatus?.canSubmit,
+    );
   const nowMs = getServerRenderNowMs();
   const isPastDueWithoutLate = isPastDue(dueAt, nowMs) && allowLate !== true;
   const canSubmit = canSubmitByStatus && !isPastDueWithoutLate;
   const canRequestAiByStatus =
-    !readOnly && participationStatus?.canRequestAiFeedback !== false;
+    !readOnly &&
+    viewModel.data.classroomTask.taskSnapshotAvailable === true &&
+    participationStatus?.canRequestAiFeedback === true;
   const readOnlyMessage =
     participationStatus?.message ?? READ_ONLY_FALLBACK_MESSAGE;
   const submitDisabledMessage =
     readOnly || participationStatus?.canSubmit === false
       ? readOnlyMessage
-      : isPastDueWithoutLate
-        ? PAST_DUE_WITHOUT_LATE_MESSAGE
-        : READ_ONLY_FALLBACK_MESSAGE;
+      : viewModel.data.classroomTask.taskSnapshotAvailable !== true
+        ? getTaskSnapshotMessage(
+            viewModel.data.classroomTask.taskSnapshotAvailable,
+          )
+        : isPastDueWithoutLate
+          ? PAST_DUE_WITHOUT_LATE_MESSAGE
+          : "参与资格信息暂不可用，请刷新核对。";
   const latestStatusDescription = toAiStatusDescription(
     latestRawStatus,
     canRequestAiByStatus,
-    readOnlyMessage,
+    readOnly
+      ? readOnlyMessage
+      : "AI 申请资格请到提交详情核对；仅教师可申请 AI 不影响符合条件的作业提交。",
   );
   const latestSubmissionId = safeGet<string | undefined>(
     viewModel.data.latest,
@@ -560,21 +488,15 @@ export default async function StudentTaskDetailPage({
         classroomTaskId,
       )
     : null;
-  const autoRefreshStatuses = toTaskDetailAutoRefreshStatuses(
-    latestRawStatus,
-    viewModel.data.submissions,
-  );
-  const autoRefreshStatus =
-    resolveTaskDetailAutoRefreshStatus(autoRefreshStatuses);
-  const isAutoRefreshing = Boolean(autoRefreshStatus);
 
   return (
-    <section className="space-y-4">
+    <section className="min-w-0 space-y-4">
       <PageHeader
         title={taskTitle}
         description={classroomName}
         actions={
-          <div className="flex items-center gap-3 text-sm">
+          <div className="flex flex-wrap items-center gap-3 text-sm">
+            <RefreshButton label="刷新任务与历史" />
             {latestSubmissionHref ? (
               <Link
                 href={latestSubmissionHref}
@@ -609,6 +531,17 @@ export default async function StudentTaskDetailPage({
       <section className="rounded-lg border border-zinc-200 bg-white p-4 text-sm">
         <h2 className="text-base font-semibold text-zinc-900">任务基础信息</h2>
         <div className="mt-3 grid gap-2 md:grid-cols-2">
+          <p>
+            平台 AI：
+            {getAiModeLabel(
+              viewModel.data.classroomTask.settings.aiFeedbackMode,
+            )}
+          </p>
+          <p className="break-words">
+            {getTaskSnapshotMessage(
+              viewModel.data.classroomTask.taskSnapshotAvailable,
+            )}
+          </p>
           <p>发布时间：{toDisplayDateOrFallback(publishedAt)}</p>
           <p>截止时间：{toDisplayDateOrFallback(dueAt)}</p>
           <p>是否允许迟交：{toAllowLateText(allowLate)}</p>
@@ -639,11 +572,6 @@ export default async function StudentTaskDetailPage({
             {latestStatusDescription}
           </p>
         ) : null}
-        {isAutoRefreshing ? (
-          <p className="mt-2 text-sm text-zinc-700">
-            AI 状态更新中，页面会自动刷新。
-          </p>
-        ) : null}
         {isProcessingAiStatus(latestRawStatus) ? (
           <p className="mt-2 text-sm text-zinc-700">
             若等待时间较长，可先查看
@@ -665,42 +593,13 @@ export default async function StudentTaskDetailPage({
         </p>
       </section>
 
-      <section className="rounded-lg border border-zinc-200 bg-white p-4 text-sm">
-        <h2 className="text-base font-semibold text-zinc-900">评分标准</h2>
-        {hasRubricContent ? (
-          <div className="mt-3 space-y-3 text-zinc-700">
-            {rubricDimensions.length > 0 ? (
-              <div>
-                <p className="font-medium text-zinc-900">评分维度</p>
-                <ul className="mt-2 space-y-1">
-                  {rubricDimensions.map((dimension, index) => (
-                    <li key={`${dimension.key}-${index}`}>
-                      {dimension.key}：{dimension.value}
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            ) : null}
-            {rubricNotes ? (
-              <div>
-                <p className="font-medium text-zinc-900">评分说明</p>
-                <p className="mt-1 whitespace-pre-wrap break-words">
-                  {rubricNotes}
-                </p>
-              </div>
-            ) : null}
-          </div>
-        ) : (
-          <p className="mt-3 text-zinc-700">当前未提供评分标准说明</p>
-        )}
-      </section>
+      <TaskRubric rubric={viewModel.data.task.rubric} />
 
       <AiProcessingHint
         status={latestRawStatus}
         variant="taskDetail"
         helpHref={paths.student.aiHelp}
       />
-      <SubmissionAutoRefresh statuses={autoRefreshStatuses} />
 
       <section className="rounded-lg border border-zinc-200 bg-white p-4 text-sm">
         <p className="font-medium text-zinc-900">参数</p>
@@ -763,6 +662,12 @@ export default async function StudentTaskDetailPage({
         </section>
       )}
 
+      <h2
+        id="submission-history"
+        className="text-base font-semibold text-zinc-900"
+      >
+        提交历史
+      </h2>
       {viewModel.data.submissions.length === 0 ? (
         <EmptyState
           title="暂无提交记录"
@@ -840,15 +745,6 @@ export default async function StudentTaskDetailPage({
           </table>
         </div>
       )}
-
-      <details className="rounded-lg border border-zinc-200 bg-zinc-50 p-4">
-        <summary className="cursor-pointer text-sm font-medium text-zinc-800">
-          查看原始数据（调试用）
-        </summary>
-        <pre className="mt-3 overflow-auto text-xs text-zinc-700">
-          {JSON.stringify(viewModel.data.raw, null, 2)}
-        </pre>
-      </details>
     </section>
   );
 }

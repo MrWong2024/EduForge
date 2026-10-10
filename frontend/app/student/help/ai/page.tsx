@@ -1,60 +1,70 @@
 import Link from "next/link";
 import { PageHeader } from "@/components/blocks/PageHeader";
 import { paths } from "@/lib/routes/paths";
-
 export default function StudentAiHelpPage() {
   return (
-    <section className="space-y-4">
+    <section className="min-w-0 space-y-4">
       <PageHeader
-        title="AI 反馈为什么还没出来？"
-        description="本页用于解释常见状态与处理建议，不会调用任何调试接口。"
+        title="理解 AI 辅助反馈"
+        description="作品保存、AI 辅助反馈与教师评价分别查看。"
       />
-
-      <section className="rounded-lg border border-zinc-200 bg-white p-4 text-sm text-zinc-800">
-        <h2 className="text-base font-semibold text-zinc-900">你会看到哪些状态</h2>
-        <ul className="mt-2 list-disc space-y-1 pl-5">
-          <li>NOT_REQUESTED：未请求或策略未触发，属于正常状态。</li>
-          <li>PENDING：已进入队列，正在等待处理。</li>
-          <li>RUNNING：系统正在处理你的请求。</li>
-          <li>SUCCEEDED：反馈已生成，可查看结果。</li>
-          <li>FAILED：本次处理失败，可稍后重试请求。</li>
-          <li>DEAD：当前不可自动重试，请联系老师。</li>
+      <section className="rounded-lg border border-zinc-200 bg-white p-4 text-sm text-zinc-700">
+        <h2 className="text-base font-semibold text-zinc-900">
+          先确认作品是否保存
+        </h2>
+        <p className="mt-2">
+          到任务提交历史进入对应提交详情，核对完整源码与独立说明。AI
+          输入超限表示作品已保存、本次没有生成 AI
+          反馈，不是提交失败，也不应删除必要源码来换取反馈。
+        </p>
+        <p className="mt-2">
+          提交或 AI 申请遇到网络中断时，先刷新历史或详情核对结果，避免重复操作。
+        </p>
+      </section>
+      <section className="rounded-lg border border-zinc-200 bg-white p-4 text-sm text-zinc-700">
+        <h2 className="text-base font-semibold text-zinc-900">
+          申请与处理状态
+        </h2>
+        <ul className="mt-2 list-disc space-y-2 pl-5">
+          <li>
+            未申请是正常状态。平台可以关闭
+            AI、仅允许教师发起、允许师生手动发起，或首次提交自动申请。外部 AI
+            是否允许使用仍由任务要求规定。
+          </li>
+          <li>
+            首次自动申请依赖系统开启自动处理，不保证自动生成成功；后续按详情中的实际资格手动申请。
+          </li>
+          <li>
+            排队中或处理中可能需要等待；学生提交详情在这些状态下自动刷新，任务提交草稿页保留手动刷新。
+          </li>
+          <li>
+            本次处理失败时，查看是否已安排重试；未安排重试时不会自动刷新。已有任务不会因重复申请重新排队或重置次数。
+          </li>
+          <li>
+            已终止的任务不能重新申请；按详情中的公开原因联系教师或管理员。
+          </li>
+          <li>处理完成但没有条目时，表示暂无可展示的反馈，不表示作品通过。</li>
         </ul>
       </section>
-
-      <section className="rounded-lg border border-zinc-200 bg-white p-4 text-sm text-zinc-800">
-        <h2 className="text-base font-semibold text-zinc-900">为什么会一直排队或处理中</h2>
-        <ul className="mt-2 list-disc space-y-1 pl-5">
-          <li>学校或老师侧尚未开启 AI 处理后台。</li>
-          <li>当前排队任务较多，处理时间延长。</li>
-          <li>AI 服务配额或网络出现临时波动。</li>
-        </ul>
+      <section className="rounded-lg border border-zinc-200 bg-white p-4 text-sm text-zinc-700">
+        <h2 className="text-base font-semibold text-zinc-900">
+          理解反馈和用量
+        </h2>
+        <p className="mt-2">
+          模拟反馈会明确标识。完整输入覆盖只表示材料进入本次请求；平台未运行程序，不认证学生自述，也不据此认定作品正确或学生已经掌握。教师反馈与
+          AI 辅助反馈按来源分别展示。
+        </p>
+        <p className="mt-2">
+          用量可在详情中展开查看：预留请求数不等于准确送达次数，未知 Token
+          显示“未知”，不补成零、不估算金额。
+        </p>
       </section>
-
-      <section className="rounded-lg border border-zinc-200 bg-white p-4 text-sm text-zinc-800">
-        <h2 className="text-base font-semibold text-zinc-900">学生可以先做什么</h2>
-        <ul className="mt-2 list-disc space-y-1 pl-5">
-          <li>等待一段时间后手动刷新页面。</li>
-          <li>确认自己已成功提交作业。</li>
-          <li>若长时间无结果，联系老师或管理员协助排查。</li>
-        </ul>
-      </section>
-
-      <section className="rounded-lg border border-zinc-200 bg-white p-4 text-sm text-zinc-800">
-        <h2 className="text-base font-semibold text-zinc-900">老师或管理员通常需要确认</h2>
-        <ul className="mt-2 list-disc space-y-1 pl-5">
-          <li>AI Worker 是否已开启并处于运行状态。</li>
-          <li>AI 服务供应商配置与配额是否可用。</li>
-          <li>学校网络或服务连通性是否正常。</li>
-        </ul>
-      </section>
-
-      <div className="flex flex-wrap items-center gap-4 text-sm">
-        <Link href={paths.student.dashboard} className="text-blue-700 hover:underline">
-          返回学习看板
-        </Link>
-        <p className="text-zinc-600">如需返回刚才的提交详情，请使用浏览器返回上一页。</p>
-      </div>
+      <Link
+        href={paths.student.dashboard}
+        className="text-sm text-blue-700 underline"
+      >
+        返回学习看板
+      </Link>
     </section>
   );
 }

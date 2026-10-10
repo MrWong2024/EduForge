@@ -93,13 +93,13 @@
   - 注意：模板可见性、发布资格及本班已发布排除由后端候选接口决定，前端不自行伪造候选全集。
 - 班级任务实例：`/teacher/classrooms/:id/tasks/page.tsx` + 发布/生命周期/编辑组件 -> `/api/proxy/classrooms/:id/tasks*`。
   - 对应后端：`GET/POST/PATCH /api/classrooms/:id/tasks*` 与 `/status`。
-  - 注意：实例配置与状态动作分开发送；前端只请求后端支持的状态动作，不构造额外 transition。
+  - 注意：发布表单在既有 settings 内发送所选平台 AI 模式，默认仅教师发起，保留截止/迟交/次数；发布后模式只读。列表/详情消费实例模式、快照可用性及投影教学内容，不另取当前模板覆盖。实例配置与状态动作分开发送。
 - 课堂任务提交列表：`submissions/page.tsx` -> `/api/proxy/classrooms/:cid/tasks/:ctid/submissions`。
   - 对应后端：`GET /api/classrooms/:classroomId/tasks/:classroomTaskId/submissions`。
   - 注意：只按 `classroomTaskId` 读取，不用 `taskId` 兜底过滤。
 - 提交详情和反馈：Teacher/Student submission pages + feedback forms -> `/api/proxy/learning-tasks/submissions/:id*`。
   - 对应后端：submission detail、feedback list、teacher feedback create/update。
-  - 注意：正式 detail API `GET /api/learning-tasks/submissions/:id` 是主体 SoT；URL query 仅用于导航上下文及正式 detail 缺字段时的少量展示兼容 fallback（包括 Student 页的 AI 状态展示），不得覆盖已有权威字段，也不作为权威业务数据源。
+  - 注意：正式 detail API `GET /api/learning-tasks/submissions/:id` 是主体 SoT；师生共用学生侧详情 mapper，保留完整源码、独立说明与已有声明原文，适配 aiReview；URL query 仅保留班级/课堂任务返回导航，不补标题、正文、提交时间、次数、迟交或 AI 状态。公开字段与 null/0 语义由 [Backend DTO](./handoff-backend-dto-cheatsheet.md#submission-request--response-family) 维护。
 
 ### 3.4 Student 学习链路
 
@@ -112,16 +112,16 @@
   - 注意：消费 `participationStatus`；模板当前状态不作为前端阻断依据。
 - 学生提交：`SubmissionForm` -> `/api/proxy/classrooms/:cid/tasks/:ctid/submissions`。
   - 对应后端：`POST /api/classrooms/:classroomId/tasks/:classroomTaskId/submissions`。
-  - 注意：迟交、冷却、Enrollment、课堂任务状态由后端最终校验。
+  - 注意：提交入口要求明确快照可用且后端 canSubmit=true，不以模板状态或 AI 发起权限代替提交资格。content 中的源码和可选说明原样发送；说明按 Unicode 码点校验。取得有效提交 ID 后走既有路径进入本次详情，query 只用于返回导航；成功缺 ID 或网络结果未确认时先核对历史，不自动重放。迟交、冷却和授权仍由后端最终校验。
 - 学生 submission detail：`student/submissions/:id/page.tsx` -> `/api/proxy/learning-tasks/submissions/:id*`。
   - 对应后端：submission detail、feedback list。
-  - 注意：状态驱动刷新只复用现有读源，不新增旁路接口。
+  - 注意：学生任务草稿页仅显式刷新；学生提交详情仅在处理中或已安排重试时状态驱动刷新，复用现有读源，无历史详情 N+1。
 
 ### 3.5 AI Feedback / 报表 / 导出
 
 - AI Feedback 产品请求：`RequestAiFeedbackButton` -> `/api/proxy/learning-tasks/submissions/:id/ai-feedback/request`。
   - 对应后端：`POST /api/learning-tasks/submissions/:submissionId/ai-feedback/request`。
-  - 注意：request 只确保 job；执行由 worker/processor 消费。
+  - 注意：空请求体复用既有 BFF；只以 aiReview.canRequest=true 开启动作，缺摘要关闭并提供刷新。成功采用接口真实返回状态，已有 Job 不重新排队；局部成功状态防止旧详情 props 重新开启动作，网络结果未确认先刷新详情。学生详情可按状态刷新，教师详情仅局部显示申请结果并提示显式刷新，保护人工反馈草稿。request 不返回完整 aiReview；执行仍归后端。
 - 班级周报：`weekly-report/page.tsx` -> `/api/proxy/classrooms/:id/weekly-report`。
   - 对应后端：`GET /api/classrooms/:classroomId/weekly-report`。
   - 注意：窗口与公开数据见 [Backend DTO](./handoff-backend-dto-cheatsheet.md#weekly-report)，前端消费后端聚合结果。

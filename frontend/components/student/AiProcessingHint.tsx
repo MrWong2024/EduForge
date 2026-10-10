@@ -20,7 +20,7 @@ const toPhaseText = (status: string): string =>
 
 const toVariantTip = (variant: AiProcessingHintProps["variant"]): string =>
   variant === "submission"
-    ? "当前页面会自动刷新以获取最新反馈结果；若等待较久可查看 AI 帮助。"
+    ? "请在提交详情按当前状态查看或刷新反馈；若等待较久可查看 AI 帮助。"
     : "你可以先查看当前任务状态，稍后再进入提交详情页查看反馈。";
 
 export function AiProcessingHint({

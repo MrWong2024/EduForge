@@ -3,8 +3,16 @@ import { headers } from "next/headers";
 import { ErrorState } from "@/components/blocks/ErrorState";
 import { PageHeader } from "@/components/blocks/PageHeader";
 import { fetchJson, FetchJsonError } from "@/lib/api/client";
-import { buildErrorDescription, extractRawDetail } from "@/lib/api/error-presenter";
+import {
+  buildErrorDescription,
+  extractRawDetail,
+} from "@/lib/api/error-presenter";
 import { toClassroomSummary, toClassroomTask } from "@/lib/api/types-teacher";
+import { TaskRubric } from "@/components/learning-tasks/TaskRubric";
+import {
+  getAiModeLabel,
+  getTaskSnapshotMessage,
+} from "@/lib/learning-tasks/ai-review";
 import { paths } from "@/lib/routes/paths";
 import { getCommonErrorSummary } from "@/lib/ui/status";
 import { toDisplayDate, toDisplayText } from "@/lib/ui/format";
@@ -35,7 +43,9 @@ type TaskDetailViewModel =
       description: string;
     };
 
-export default async function ClassroomTaskDetailPage({ params }: ClassroomTaskDetailPageProps) {
+export default async function ClassroomTaskDetailPage({
+  params,
+}: ClassroomTaskDetailPageProps) {
   const { classroomId, classroomTaskId } = await params;
 
   let viewModel: TaskDetailViewModel = {
@@ -56,7 +66,7 @@ export default async function ClassroomTaskDetailPage({ params }: ClassroomTaskD
         {
           origin,
           cache: "no-store",
-        }
+        },
       ),
     ]);
 
@@ -83,42 +93,61 @@ export default async function ClassroomTaskDetailPage({ params }: ClassroomTaskD
 
   if (viewModel.mode === "error") {
     return (
-      <ErrorState status={viewModel.status} title="任务详情加载失败" description={viewModel.description} />
+      <ErrorState
+        status={viewModel.status}
+        title="任务详情加载失败"
+        description={viewModel.description}
+      />
     );
   }
 
   const task = viewModel.task;
 
   return (
-    <section className="mt-4 space-y-4">
+    <section className="mt-4 min-w-0 space-y-4">
       <PageHeader
         title={toDisplayText(task.title, "任务详情")}
         description={`${toDisplayText(viewModel.classroomName, "班级")} | 课堂任务详情`}
         actions={
           <div className="flex flex-wrap items-center gap-3 text-sm">
-            <Link href={paths.teacher.classroomTasks(classroomId)} className="text-blue-700 hover:underline">
+            <Link
+              href={paths.teacher.classroomTasks(classroomId)}
+              className="text-blue-700 hover:underline"
+            >
               返回任务列表
             </Link>
             <Link
-              href={paths.teacher.classroomTaskTrajectory(classroomId, classroomTaskId)}
+              href={paths.teacher.classroomTaskTrajectory(
+                classroomId,
+                classroomTaskId,
+              )}
               className="text-blue-700 hover:underline"
             >
               学习轨迹
             </Link>
             <Link
-              href={paths.teacher.classroomTaskReviewPack(classroomId, classroomTaskId)}
+              href={paths.teacher.classroomTaskReviewPack(
+                classroomId,
+                classroomTaskId,
+              )}
               className="text-blue-700 hover:underline"
             >
               课堂复盘
             </Link>
             <Link
-              href={paths.teacher.classroomTaskAiMetrics(classroomId, classroomTaskId)}
+              href={paths.teacher.classroomTaskAiMetrics(
+                classroomId,
+                classroomTaskId,
+              )}
               className="text-blue-700 hover:underline"
             >
               AI 指标
             </Link>
             <Link
-              href={paths.teacher.classroomTaskSubmissions(classroomId, classroomTaskId)}
+              href={paths.teacher.classroomTaskSubmissions(
+                classroomId,
+                classroomTaskId,
+              )}
               className="text-blue-700 hover:underline"
             >
               查看提交管理
@@ -129,16 +158,24 @@ export default async function ClassroomTaskDetailPage({ params }: ClassroomTaskD
 
       <section className="rounded-lg border border-zinc-200 bg-white p-4 text-sm">
         <div className="grid gap-2 md:grid-cols-2">
+          <p>平台 AI：{getAiModeLabel(task.aiFeedbackMode)}</p>
+          <p>发布内容：{getTaskSnapshotMessage(task.taskSnapshotAvailable)}</p>
           <p>任务名称：{toDisplayText(task.title, "未命名任务")}</p>
           <p>截止时间：{toDisplayDate(task.dueAt)}</p>
           <p>允许迟交：{toDisplayText(task.allowLate)}</p>
           <p>发布时间：{toDisplayDate(task.publishedAt)}</p>
         </div>
-        <p className="mt-3 whitespace-pre-wrap text-zinc-700">{toDisplayText(task.description, "暂无描述")}</p>
+        <p className="mt-3 whitespace-pre-wrap break-words text-zinc-700">
+          {toDisplayText(task.description, "暂无描述")}
+        </p>
       </section>
 
+      <TaskRubric rubric={task.rubric} />
+
       <details className="rounded-lg border border-zinc-200 bg-zinc-50 p-4">
-        <summary className="cursor-pointer text-sm font-medium text-zinc-800">查看原始任务详情 JSON</summary>
+        <summary className="cursor-pointer text-sm font-medium text-zinc-800">
+          查看原始任务详情 JSON
+        </summary>
         <pre className="mt-3 overflow-auto text-xs text-zinc-700">
           {JSON.stringify(task.raw, null, 2)}
         </pre>

@@ -26,13 +26,13 @@ const hasUpdatedAtChanged = (item: TeacherFeedbackItem): boolean => {
 
 const FeedbackReadonlyBody = ({ item }: { item: TeacherFeedbackItem }) => (
   <>
-    <p className="mt-3 whitespace-pre-wrap text-sm text-zinc-900">
+    <p className="mt-3 whitespace-pre-wrap break-words text-sm text-zinc-900">
       {toDisplayText(item.message)}
     </p>
-    <p className="mt-2 text-sm text-zinc-700">
+    <p className="mt-2 whitespace-pre-wrap break-words text-sm text-zinc-700">
       建议：{toDisplayText(item.suggestion)}
     </p>
-    <p className="mt-1 text-sm text-zinc-700">
+    <p className="mt-1 break-words text-sm text-zinc-700">
       标签：{item.tags.length > 0 ? item.tags.join(", ") : "—"}
     </p>
     <div className="mt-1 space-y-1 text-xs text-zinc-500">
@@ -54,7 +54,7 @@ export function TeacherFeedbackHistory({
   const groupedFeedback = groupTeacherFeedbackItems(items);
   const groupedSections = [
     { key: "teacher", title: "教师反馈", items: groupedFeedback.teacher },
-    { key: "ai", title: "AI 反馈", items: groupedFeedback.ai },
+    { key: "ai", title: "AI 辅助反馈", items: groupedFeedback.ai },
     { key: "system", title: "系统反馈", items: groupedFeedback.system },
   ] as const;
 
@@ -69,7 +69,7 @@ export function TeacherFeedbackHistory({
       {groupedSections.map((section) => (
         <section
           key={section.key}
-          className="rounded-lg border border-zinc-200 bg-white p-4"
+          className="min-w-0 rounded-lg border border-zinc-200 bg-white p-4"
         >
           <h3 className="text-sm font-semibold text-zinc-900">
             {section.title}
@@ -91,7 +91,11 @@ export function TeacherFeedbackHistory({
                     <div className="flex flex-wrap items-start justify-between gap-3">
                       <div className="flex flex-wrap gap-2 text-xs">
                         <span className="rounded-full bg-zinc-900 px-2 py-1 font-medium text-white">
-                          {toDisplayText(item.source)}
+                          {item.source === "TEACHER"
+                            ? "教师反馈"
+                            : item.source === "AI"
+                              ? "AI 辅助反馈"
+                              : "其他反馈"}
                         </span>
                         <span className="rounded-full bg-zinc-200 px-2 py-1 text-zinc-700">
                           {toDisplayText(item.severity)}

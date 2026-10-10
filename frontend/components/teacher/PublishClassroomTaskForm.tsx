@@ -16,6 +16,12 @@ import {
   TASK_COURSE_LABEL_UNCLASSIFIED,
   toTaskCourseLabelDisplayText,
 } from "@/lib/learning-tasks/course-labels";
+import {
+  AI_FEEDBACK_MODES,
+  AI_MODE_LABELS,
+  normalizeAiFeedbackMode,
+  type AiFeedbackMode,
+} from "@/lib/learning-tasks/ai-review";
 import { paths } from "@/lib/routes/paths";
 import { buildQueryString, getPublisherLabel } from "@/lib/ui/format";
 
@@ -55,7 +61,8 @@ const extractRawDetail = (data: unknown): string | undefined => {
   }
 
   const message =
-    "message" in data && typeof (data as { message?: unknown }).message === "string"
+    "message" in data &&
+    typeof (data as { message?: unknown }).message === "string"
       ? String((data as { message: string }).message)
       : "";
   const code =
@@ -97,7 +104,9 @@ const toDescriptionSnippet = (value: unknown, maxLength = 90): string => {
   return `${trimmed.slice(0, maxLength)}...`;
 };
 
-const toRubricSummary = (rubric: Record<string, unknown> | undefined): RubricSummary => {
+const toRubricSummary = (
+  rubric: Record<string, unknown> | undefined,
+): RubricSummary => {
   if (!rubric || Object.keys(rubric).length === 0) {
     return {
       configured: false,
@@ -107,13 +116,18 @@ const toRubricSummary = (rubric: Record<string, unknown> | undefined): RubricSum
 
   const dimensionsRaw = rubric.dimensions;
   const dimensions =
-    dimensionsRaw && typeof dimensionsRaw === "object" && !Array.isArray(dimensionsRaw)
+    dimensionsRaw &&
+    typeof dimensionsRaw === "object" &&
+    !Array.isArray(dimensionsRaw)
       ? (dimensionsRaw as Record<string, unknown>)
       : undefined;
   const dimensionCount = dimensions
-    ? Object.values(dimensions).filter((value) => typeof value === "number" && Number.isFinite(value)).length
+    ? Object.values(dimensions).filter(
+        (value) => typeof value === "number" && Number.isFinite(value),
+      ).length
     : 0;
-  const hasNotes = typeof rubric.notes === "string" && rubric.notes.trim().length > 0;
+  const hasNotes =
+    typeof rubric.notes === "string" && rubric.notes.trim().length > 0;
 
   if (dimensionCount > 0 || hasNotes) {
     return {
@@ -176,32 +190,43 @@ export function PublishClassroomTaskForm({
   const searchParams = useSearchParams();
 
   const [taskId, setTaskId] = useState<string>("");
-  const [courseLabelFilter, setCourseLabelFilter] = useState<string>(initialCourseLabelFilter ?? "");
+  const [courseLabelFilter, setCourseLabelFilter] = useState<string>(
+    initialCourseLabelFilter ?? "",
+  );
   const [onlyMine, setOnlyMine] = useState<boolean>(initialOnlyMineFilter);
   const [knowledgeModuleFilter, setKnowledgeModuleFilter] = useState<string>(
-    initialKnowledgeModuleFilter ?? ""
+    initialKnowledgeModuleFilter ?? "",
   );
-  const [stageFilter, setStageFilter] = useState<StageFilter>(toStageFilter(initialStageFilter));
+  const [stageFilter, setStageFilter] = useState<StageFilter>(
+    toStageFilter(initialStageFilter),
+  );
   const [dueAt, setDueAt] = useState<string>("");
   const [isDueAtPickerActive, setIsDueAtPickerActive] = useState(false);
+  const [aiFeedbackMode, setAiFeedbackMode] =
+    useState<AiFeedbackMode>("TEACHER_ONLY");
   const [allowLate, setAllowLate] = useState<boolean>(true);
   const [maxAttempts, setMaxAttempts] = useState<string>("");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errorState, setErrorState] = useState<PublishErrorState | null>(null);
   const [createdTaskId, setCreatedTaskId] = useState<string | null>(null);
-  const [loadedTasks, setLoadedTasks] = useState<LearningTaskOption[]>(availableTasks);
+  const [loadedTasks, setLoadedTasks] =
+    useState<LearningTaskOption[]>(availableTasks);
   const [loadedTotal, setLoadedTotal] = useState<number>(
-    typeof initialAvailableTasksTotal === "number" ? initialAvailableTasksTotal : availableTasks.length
+    typeof initialAvailableTasksTotal === "number"
+      ? initialAvailableTasksTotal
+      : availableTasks.length,
   );
   const [loadedPage, setLoadedPage] = useState<number>(
-    typeof initialAvailableTasksPage === "number" && initialAvailableTasksPage > 0
+    typeof initialAvailableTasksPage === "number" &&
+      initialAvailableTasksPage > 0
       ? initialAvailableTasksPage
-      : 1
+      : 1,
   );
   const [loadedLimit, setLoadedLimit] = useState<number>(
-    typeof initialAvailableTasksLimit === "number" && initialAvailableTasksLimit > 0
+    typeof initialAvailableTasksLimit === "number" &&
+      initialAvailableTasksLimit > 0
       ? initialAvailableTasksLimit
-      : 50
+      : 50,
   );
   const [isLoadingMore, setIsLoadingMore] = useState(false);
   const [loadMoreError, setLoadMoreError] = useState<string | null>(null);
@@ -227,43 +252,58 @@ export function PublishClassroomTaskForm({
     loadMoreEpochRef.current += 1;
     setLoadedTasks(availableTasks);
     setLoadedTotal(
-      typeof initialAvailableTasksTotal === "number" ? initialAvailableTasksTotal : availableTasks.length
+      typeof initialAvailableTasksTotal === "number"
+        ? initialAvailableTasksTotal
+        : availableTasks.length,
     );
     setLoadedPage(
-      typeof initialAvailableTasksPage === "number" && initialAvailableTasksPage > 0
+      typeof initialAvailableTasksPage === "number" &&
+        initialAvailableTasksPage > 0
         ? initialAvailableTasksPage
-        : 1
+        : 1,
     );
     setLoadedLimit(
-      typeof initialAvailableTasksLimit === "number" && initialAvailableTasksLimit > 0
+      typeof initialAvailableTasksLimit === "number" &&
+        initialAvailableTasksLimit > 0
         ? initialAvailableTasksLimit
-        : 50
+        : 50,
     );
     setLoadMoreError(null);
     setIsLoadingMore(false);
-  }, [availableTasks, initialAvailableTasksTotal, initialAvailableTasksPage, initialAvailableTasksLimit]);
+  }, [
+    availableTasks,
+    initialAvailableTasksTotal,
+    initialAvailableTasksPage,
+    initialAvailableTasksLimit,
+  ]);
 
   const selectedTask = useMemo(
     () => loadedTasks.find((task) => task.id === taskId),
-    [loadedTasks, taskId]
+    [loadedTasks, taskId],
   );
   const selectedRubricSummary = useMemo(
     () => toRubricSummary(selectedTask?.rubric),
-    [selectedTask]
+    [selectedTask],
   );
   const selectedPublisherLabel = useMemo(
     () => getPublisherLabel(selectedTask?.publisher, currentUserId),
-    [currentUserId, selectedTask]
+    [currentUserId, selectedTask],
   );
 
   const courseLabelOptions = useMemo(() => {
     if (
       courseLabelFilter &&
-      !TASK_COURSE_LABELS.includes(courseLabelFilter as (typeof TASK_COURSE_LABELS)[number])
+      !TASK_COURSE_LABELS.includes(
+        courseLabelFilter as (typeof TASK_COURSE_LABELS)[number],
+      )
     ) {
-      return [TASK_COURSE_LABEL_UNCLASSIFIED, courseLabelFilter, ...TASK_COURSE_LABELS.filter(
-        (label) => label !== TASK_COURSE_LABEL_UNCLASSIFIED
-      )];
+      return [
+        TASK_COURSE_LABEL_UNCLASSIFIED,
+        courseLabelFilter,
+        ...TASK_COURSE_LABELS.filter(
+          (label) => label !== TASK_COURSE_LABEL_UNCLASSIFIED,
+        ),
+      ];
     }
     return [...TASK_COURSE_LABELS];
   }, [courseLabelFilter]);
@@ -272,7 +312,9 @@ export function PublishClassroomTaskForm({
     const moduleSet = new Set<string>();
     for (const task of loadedTasks) {
       const moduleValue =
-        typeof task.knowledgeModule === "string" ? task.knowledgeModule.trim() : "";
+        typeof task.knowledgeModule === "string"
+          ? task.knowledgeModule.trim()
+          : "";
       if (moduleValue) {
         moduleSet.add(moduleValue);
       }
@@ -281,7 +323,9 @@ export function PublishClassroomTaskForm({
       moduleSet.add(knowledgeModuleFilter);
     }
 
-    return [...moduleSet].sort((left, right) => left.localeCompare(right, "zh-CN"));
+    return [...moduleSet].sort((left, right) =>
+      left.localeCompare(right, "zh-CN"),
+    );
   }, [loadedTasks, knowledgeModuleFilter]);
 
   useEffect(() => {
@@ -362,9 +406,13 @@ export function PublishClassroomTaskForm({
   };
 
   const hasActiveQueryFilters =
-    Boolean(courseLabelFilter) || onlyMine || Boolean(knowledgeModuleFilter) || stageFilter !== "ALL";
+    Boolean(courseLabelFilter) ||
+    onlyMine ||
+    Boolean(knowledgeModuleFilter) ||
+    stageFilter !== "ALL";
   const hasMoreTasks = loadedTasks.length < loadedTotal;
-  const dueAtInputType = dueAt || isDueAtPickerActive ? "datetime-local" : "text";
+  const dueAtInputType =
+    dueAt || isDueAtPickerActive ? "datetime-local" : "text";
 
   const handleLoadMore = async () => {
     if (isLoadingMore || !hasMoreTasks) {
@@ -387,7 +435,7 @@ export function PublishClassroomTaskForm({
 
     try {
       const payload = await fetchJson<unknown>(
-        `classrooms/${encodeURIComponent(classroomId)}/publishable-task-templates?${query}`
+        `classrooms/${encodeURIComponent(classroomId)}/publishable-task-templates?${query}`,
       );
       const response = toPublishableTaskTemplateListResponse(payload);
       const nextItems = response.items;
@@ -399,7 +447,7 @@ export function PublishClassroomTaskForm({
         const seenIds = new Set(
           previous
             .map((task) => (typeof task.id === "string" ? task.id.trim() : ""))
-            .filter((id) => id.length > 0)
+            .filter((id) => id.length > 0),
         );
         const merged = [...previous];
 
@@ -417,7 +465,11 @@ export function PublishClassroomTaskForm({
         return merged;
       });
 
-      setLoadedPage(typeof response.page === "number" && response.page > 0 ? response.page : nextPage);
+      setLoadedPage(
+        typeof response.page === "number" && response.page > 0
+          ? response.page
+          : nextPage,
+      );
       if (typeof response.limit === "number" && response.limit > 0) {
         setLoadedLimit(response.limit);
       }
@@ -435,7 +487,8 @@ export function PublishClassroomTaskForm({
           403: "无权限加载更多候选模板。",
           404: "候选模板检索接口未启用、不可用或资源不存在。",
         };
-        const summary = summaryByStatus[error.status] ?? "加载更多候选模板失败，请稍后重试。";
+        const summary =
+          summaryByStatus[error.status] ?? "加载更多候选模板失败，请稍后重试。";
         setLoadMoreError(buildErrorDescription(summary, detail));
       } else {
         setLoadMoreError("加载更多候选模板失败，请稍后重试。");
@@ -474,6 +527,7 @@ export function PublishClassroomTaskForm({
 
       const settings: NonNullable<PublishClassroomTaskRequest["settings"]> = {
         allowLate,
+        aiFeedbackMode,
       };
       if (typeof parsedMaxAttempts === "number") {
         settings.maxAttempts = parsedMaxAttempts;
@@ -496,7 +550,7 @@ export function PublishClassroomTaskForm({
             accept: "application/json",
           },
           body: JSON.stringify(body),
-        }
+        },
       );
 
       const response = toSubmitTaskResponse(payload);
@@ -510,7 +564,8 @@ export function PublishClassroomTaskForm({
           403: "无权限管理任务。",
           404: "任务发布功能未启用、不可用或资源不存在。",
         };
-        const summary = summaryByStatus[error.status] ?? "发布任务失败，请稍后重试。";
+        const summary =
+          summaryByStatus[error.status] ?? "发布任务失败，请稍后重试。";
 
         setErrorState({
           status: error.status,
@@ -528,7 +583,10 @@ export function PublishClassroomTaskForm({
   };
 
   return (
-    <section id="publish-task-form" className="rounded-lg border border-zinc-200 bg-white p-4">
+    <section
+      id="publish-task-form"
+      className="rounded-lg border border-zinc-200 bg-white p-4"
+    >
       <h2 className="text-base font-semibold text-zinc-900">发布任务到班级</h2>
       <p className="mt-1 text-sm text-zinc-600">
         当前仅支持选择已有任务模板并发布到本班；此处不创建或编辑任务模板。
@@ -561,7 +619,10 @@ export function PublishClassroomTaskForm({
                 重置筛选
               </button>
               ，或前往
-              <Link href={paths.teacher.tasksFromClassroom(classroomId)} className="mx-1 underline">
+              <Link
+                href={paths.teacher.tasksFromClassroom(classroomId)}
+                className="mx-1 underline"
+              >
                 任务模板页
               </Link>
               调整模板信息后再发布。
@@ -569,7 +630,10 @@ export function PublishClassroomTaskForm({
           ) : (
             <>
               当前班级暂无新的可发布模板。可前往
-              <Link href={paths.teacher.tasksFromClassroom(classroomId)} className="mx-1 underline">
+              <Link
+                href={paths.teacher.tasksFromClassroom(classroomId)}
+                className="mx-1 underline"
+              >
                 任务模板页
               </Link>
               创建并发布模板后，再回到本页发布到班级。
@@ -580,16 +644,21 @@ export function PublishClassroomTaskForm({
 
       <form onSubmit={handleSubmit} className="mt-4 space-y-4">
         <section className="rounded-md border border-zinc-200 bg-zinc-50 p-3">
-          <p className="text-sm font-medium text-zinc-900">模板筛选（实时查询）</p>
+          <p className="text-sm font-medium text-zinc-900">
+            模板筛选（实时查询）
+          </p>
           <p className="mt-1 text-xs text-zinc-600">
-            课程分类、仅看我的模板、知识模块、阶段会写入 URL 并触发后端重新检索。
+            课程分类、仅看我的模板、知识模块、阶段会写入 URL
+            并触发后端重新检索。
           </p>
           <div className="mt-3 grid gap-3 md:grid-cols-5">
             <label className="block text-sm">
               <span className="mb-1 block text-zinc-700">课程分类</span>
               <select
                 value={courseLabelFilter}
-                onChange={(event) => setCourseLabelFilterAndSync(event.target.value)}
+                onChange={(event) =>
+                  setCourseLabelFilterAndSync(event.target.value)
+                }
                 className="w-full rounded-md border border-zinc-300 px-3 py-2"
               >
                 <option value="">全部课程分类</option>
@@ -605,7 +674,9 @@ export function PublishClassroomTaskForm({
               <span className="mb-1 block text-zinc-700">知识模块</span>
               <select
                 value={knowledgeModuleFilter}
-                onChange={(event) => setKnowledgeModuleFilterAndSync(event.target.value)}
+                onChange={(event) =>
+                  setKnowledgeModuleFilterAndSync(event.target.value)
+                }
                 className="w-full rounded-md border border-zinc-300 px-3 py-2"
               >
                 <option value="">全部模块</option>
@@ -621,7 +692,9 @@ export function PublishClassroomTaskForm({
               <span className="mb-1 block text-zinc-700">阶段</span>
               <select
                 value={stageFilter}
-                onChange={(event) => setStageFilterAndSync(event.target.value as StageFilter)}
+                onChange={(event) =>
+                  setStageFilterAndSync(event.target.value as StageFilter)
+                }
                 className="w-full rounded-md border border-zinc-300 px-3 py-2"
               >
                 <option value="ALL">全部阶段</option>
@@ -673,7 +746,8 @@ export function PublishClassroomTaskForm({
             </option>
             {loadedTasks.map((task) => (
               <option key={task.id ?? task.title} value={task.id}>
-                {task.title ?? "未命名任务"} | {toDisplayText(task.knowledgeModule)} / 阶段{" "}
+                {task.title ?? "未命名任务"} |{" "}
+                {toDisplayText(task.knowledgeModule)} / 阶段{" "}
                 {toDisplayText(task.stage)}
               </option>
             ))}
@@ -683,7 +757,9 @@ export function PublishClassroomTaskForm({
         {loadedTasks.length > 0 ? (
           <section className="rounded-md border border-zinc-200 bg-white p-3">
             <p className="text-sm font-medium text-zinc-900">模板候选列表</p>
-            <p className="mt-1 text-xs text-zinc-600">点击“选择此模板”可快速回填到发布表单。</p>
+            <p className="mt-1 text-xs text-zinc-600">
+              点击“选择此模板”可快速回填到发布表单。
+            </p>
             <ul className="mt-3 space-y-2">
               {loadedTasks.map((task, index) => {
                 const rubricSummary = toRubricSummary(task.rubric);
@@ -696,7 +772,9 @@ export function PublishClassroomTaskForm({
                   <li
                     key={task.id ?? `candidate-${index}`}
                     className={`rounded-md border p-3 ${
-                      isActive ? "border-zinc-900 bg-zinc-50" : "border-zinc-200"
+                      isActive
+                        ? "border-zinc-900 bg-zinc-50"
+                        : "border-zinc-200"
                     }`}
                   >
                     <div className="flex flex-wrap items-start justify-between gap-2">
@@ -722,8 +800,11 @@ export function PublishClassroomTaskForm({
                       </button>
                     </div>
                     <p className="mt-1 text-xs text-zinc-500">
-                      模块：{toDisplayText(task.knowledgeModule)} | 阶段：{toDisplayText(task.stage)} | 评分参考：
-                      {rubricSummary.configured ? `已配置（${rubricSummary.hint}）` : "未配置"}
+                      模块：{toDisplayText(task.knowledgeModule)} | 阶段：
+                      {toDisplayText(task.stage)} | 评分参考：
+                      {rubricSummary.configured
+                        ? `已配置（${rubricSummary.hint}）`
+                        : "未配置"}
                     </p>
                     <p className="mt-2 text-xs text-zinc-600">
                       描述摘要：{toDescriptionSnippet(task.description)}
@@ -773,7 +854,9 @@ export function PublishClassroomTaskForm({
               </p>
               <p>
                 <span className="text-zinc-500">评分参考：</span>
-                {selectedRubricSummary.configured ? `已配置（${selectedRubricSummary.hint}）` : "未配置"}
+                {selectedRubricSummary.configured
+                  ? `已配置（${selectedRubricSummary.hint}）`
+                  : "未配置"}
               </p>
               <p>
                 <span className="text-zinc-500">模块：</span>
@@ -795,7 +878,9 @@ export function PublishClassroomTaskForm({
             </div>
           </div>
         ) : (
-          <p className="text-xs text-zinc-500">请选择一个已发布任务模板后再提交发布。</p>
+          <p className="text-xs text-zinc-500">
+            请选择一个已发布任务模板后再提交发布。
+          </p>
         )}
 
         <div className="grid gap-4 md:grid-cols-2">
@@ -813,7 +898,9 @@ export function PublishClassroomTaskForm({
           </label>
 
           <label className="block text-sm">
-            <span className="mb-1 block text-zinc-700">最大尝试次数（可选）</span>
+            <span className="mb-1 block text-zinc-700">
+              最大尝试次数（可选）
+            </span>
             <input
               type="number"
               min={1}
@@ -825,6 +912,37 @@ export function PublishClassroomTaskForm({
               className="w-full rounded-md border border-zinc-300 px-3 py-2"
             />
           </label>
+        </div>
+
+        <div className="space-y-2 text-sm">
+          <label className="block" htmlFor="publish-ai-mode">
+            平台 AI 反馈策略
+          </label>
+          <select
+            id="publish-ai-mode"
+            value={aiFeedbackMode}
+            onChange={(event) =>
+              setAiFeedbackMode(
+                normalizeAiFeedbackMode(event.target.value) ?? "TEACHER_ONLY",
+              )
+            }
+            className="w-full rounded-md border border-zinc-300 px-3 py-2"
+          >
+            {AI_FEEDBACK_MODES.map((mode) => (
+              <option key={mode} value={mode}>
+                {AI_MODE_LABELS[mode]}
+              </option>
+            ))}
+          </select>
+          <p className="text-xs text-zinc-600">
+            发布后的策略只读。这里只控制 EduForge 平台 AI 反馈，外部 AI
+            是否允许使用仍由具体学习任务规定。
+          </p>
+          {aiFeedbackMode === "FIRST_SUBMISSION_AUTO" ? (
+            <p className="text-xs text-zinc-600">
+              首次提交自动申请依赖系统开启自动处理；后续可按权限手动申请，不保证自动生成成功。
+            </p>
+          ) : null}
         </div>
 
         <label className="flex items-center gap-2 text-sm text-zinc-700">
@@ -850,13 +968,19 @@ export function PublishClassroomTaskForm({
           <p>任务发布成功，课堂任务 ID：{createdTaskId}</p>
           <div className="mt-1 flex flex-wrap gap-3">
             <Link
-              href={paths.teacher.classroomTaskDetail(classroomId, createdTaskId)}
+              href={paths.teacher.classroomTaskDetail(
+                classroomId,
+                createdTaskId,
+              )}
               className="text-emerald-800 underline"
             >
               查看任务详情
             </Link>
             <Link
-              href={paths.teacher.classroomTaskSubmissions(classroomId, createdTaskId)}
+              href={paths.teacher.classroomTaskSubmissions(
+                classroomId,
+                createdTaskId,
+              )}
               className="text-emerald-800 underline"
             >
               查看提交管理
@@ -870,7 +994,10 @@ export function PublishClassroomTaskForm({
           <ErrorState
             status={errorState.status}
             title="发布任务失败"
-            description={buildErrorDescription(errorState.summary, errorState.detail)}
+            description={buildErrorDescription(
+              errorState.summary,
+              errorState.detail,
+            )}
           />
         </div>
       ) : null}

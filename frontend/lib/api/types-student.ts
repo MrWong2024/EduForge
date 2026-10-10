@@ -1,5 +1,12 @@
 import { safeGet } from "@/lib/ui/format";
 
+import {
+  normalizeAiFeedbackMode,
+  toAiReview,
+  type AiFeedbackMode,
+  type AiReview,
+} from "@/lib/learning-tasks/ai-review";
+
 type UnknownRecord = Record<string, unknown>;
 
 const asRecord = (value: unknown): UnknownRecord =>
@@ -157,7 +164,14 @@ export type StudentDashboardResponse = {
 
 export type MyTaskDetailResponse = {
   classroom: UnknownRecord;
-  classroomTask: UnknownRecord;
+  classroomTask: UnknownRecord & {
+    taskSnapshotAvailable?: boolean;
+    settings: {
+      aiFeedbackMode?: AiFeedbackMode;
+      allowLate?: boolean;
+      maxAttempts?: number;
+    };
+  };
   task: UnknownRecord;
   me: UnknownRecord;
   submissions: UnknownRecord[];
@@ -168,6 +182,9 @@ export type MyTaskDetailResponse = {
 };
 
 export type SubmissionDetailResponse = {
+  taskSnapshotAvailable?: boolean;
+  aiReview?: AiReview;
+  meta?: { aiUsageDeclaration?: string };
   id?: string;
   taskId?: string;
   classroomTaskId?: string | null;
@@ -178,6 +195,7 @@ export type SubmissionDetailResponse = {
   content: {
     language?: string | null;
     codeText?: string | null;
+    submissionNote?: string | null;
   };
   submittedAt?: string | null;
   attemptNo?: number | null;
@@ -220,6 +238,7 @@ export type CreateSubmissionRequest = {
   content: {
     codeText: string;
     language: string;
+    submissionNote?: string;
   };
   meta?: {
     aiUsageDeclaration?: string;
@@ -276,9 +295,7 @@ const isCompletionSource = (
 const isStudentTaskVisibilityStatus = (
   value: string | undefined,
 ): value is StudentTaskVisibilityStatus =>
-  value === "CURRENT" ||
-  value === "RECENTLY_EXPIRED" ||
-  value === "HISTORICAL";
+  value === "CURRENT" || value === "RECENTLY_EXPIRED" || value === "HISTORICAL";
 
 const isStudentTaskParticipationReason = (
   value: string | undefined,
@@ -347,10 +364,9 @@ const toStudentTaskParticipationStatus = (
   }
 
   return {
-    readOnly: asNullableBoolean(record.readOnly) ?? false,
-    canSubmit: asNullableBoolean(record.canSubmit) ?? true,
-    canRequestAiFeedback:
-      asNullableBoolean(record.canRequestAiFeedback) ?? true,
+    readOnly: asNullableBoolean(record.readOnly) ?? true,
+    canSubmit: record.canSubmit === true,
+    canRequestAiFeedback: record.canRequestAiFeedback === true,
     reason,
     message: asNullableString(record.message) ?? null,
   };
@@ -361,7 +377,9 @@ const toStudentDashboardClassroomItem = (
 ): StudentDashboardClassroomItem => {
   const record = asRecord(value);
   const classroomRecord = asRecord(safeGet(record, "classroom", undefined));
-  const teacherRecord = asRecord(safeGet(classroomRecord, "teacher", undefined));
+  const teacherRecord = asRecord(
+    safeGet(classroomRecord, "teacher", undefined),
+  );
   const courseRecord = asRecord(safeGet(classroomRecord, "course", undefined));
 
   return {
@@ -462,10 +480,21 @@ export const toMyTaskDetailResponse = (
 ): MyTaskDetailResponse => {
   const record = asRecord(payload);
   const latest = safeGet<unknown>(record, "latest", null);
+  const classroomTask = asRecord(record.classroomTask);
+  const settings = asRecord(classroomTask.settings);
 
   return {
     classroom: asRecord(safeGet(record, "classroom", undefined)),
-    classroomTask: asRecord(safeGet(record, "classroomTask", undefined)),
+    classroomTask: {
+      ...classroomTask,
+      taskSnapshotAvailable:
+        asNullableBoolean(classroomTask.taskSnapshotAvailable) ?? undefined,
+      settings: {
+        aiFeedbackMode: normalizeAiFeedbackMode(settings.aiFeedbackMode),
+        allowLate: asNullableBoolean(settings.allowLate) ?? undefined,
+        maxAttempts: asNumber(settings.maxAttempts),
+      },
+    },
     task: asRecord(safeGet(record, "task", undefined)),
     me: asRecord(safeGet(record, "me", undefined)),
     submissions: asRecordArray(safeGet(record, "submissions", undefined)),
@@ -488,11 +517,21 @@ export const toSubmissionDetailResponse = (
   );
   const source = Object.keys(dataRecord).length > 0 ? dataRecord : record;
   const contentRecord = asRecord(safeGet(source, "content", undefined));
+  const meta = asRecord(source.meta);
+  const originalText = (value: unknown): string | null | undefined =>
+    value === null ? null : typeof value === "string" ? value : undefined;
   const language =
     asNullableString(source.language) ??
     asNullableString(contentRecord.language);
 
   return {
+    taskSnapshotAvailable:
+      asNullableBoolean(source.taskSnapshotAvailable) ?? undefined,
+    aiReview: toAiReview(source.aiReview),
+    meta:
+      typeof meta.aiUsageDeclaration === "string"
+        ? { aiUsageDeclaration: meta.aiUsageDeclaration }
+        : undefined,
     id: asString(source.id),
     taskId: asString(source.taskId),
     classroomTaskId: asNullableString(source.classroomTaskId),
@@ -502,7 +541,8 @@ export const toSubmissionDetailResponse = (
     language,
     content: {
       language,
-      codeText: asNullableString(contentRecord.codeText),
+      codeText: originalText(contentRecord.codeText),
+      submissionNote: originalText(contentRecord.submissionNote),
     },
     submittedAt:
       asNullableString(source.submittedAt) ??
