@@ -8,8 +8,6 @@ import {
 const DEFAULT_BASE_URL = 'https://dashscope.aliyuncs.com/compatible-mode/v1';
 const DEFAULT_MODEL = 'qwen-plus';
 const DEFAULT_TIMEOUT_MS = 90000;
-const DEFAULT_MAX_RETRIES = 1;
-const DEFAULT_MAX_CODE_CHARS = 12000;
 const DEFAULT_MAX_ITEMS = 2;
 
 @Injectable()
@@ -29,10 +27,17 @@ export class BailianFeedbackProvider extends OpenAiCompatibleFeedbackProviderBas
         this.configService.get<string>('BAILIAN_BASE_URL') ?? DEFAULT_BASE_URL,
       model: this.configService.get<string>('BAILIAN_MODEL') ?? DEFAULT_MODEL,
       timeoutMs: this.readInt('BAILIAN_TIMEOUT_MS', DEFAULT_TIMEOUT_MS),
-      maxRetries: this.readInt('BAILIAN_MAX_RETRIES', DEFAULT_MAX_RETRIES),
-      maxCodeChars: this.readInt(
-        'AI_FEEDBACK_MAX_CODE_CHARS',
-        DEFAULT_MAX_CODE_CHARS,
+      maxInputBytes: this.readInt(
+        'AI_FEEDBACK_MAX_INPUT_BYTES',
+        65536,
+        16384,
+        262144,
+      ),
+      maxOutputTokens: this.readInt(
+        'AI_FEEDBACK_MAX_OUTPUT_TOKENS',
+        2048,
+        256,
+        4096,
       ),
       maxItems: this.readInt('AI_FEEDBACK_MAX_ITEMS', DEFAULT_MAX_ITEMS),
     };

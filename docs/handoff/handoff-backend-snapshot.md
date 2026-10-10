@@ -71,6 +71,7 @@ AI Feedback：
 - 产品 request 只负责确保持久化 Job，Worker 调度与 Processor 执行独立；Provider 选择不等于后台自动消费开关。
 - 平台 AI 请求及首提自动入队由实例策略与既有开关共同控制，后续提交未请求 AI 时没有 Job 属于正常状态，不应隐式补成处理中。
 - 受控 debug / process-once 是非产品执行入口，与 Worker 共用处理链，不能代替产品请求或后台消费模型。
+- 完整源码、说明、声明及发布快照已纳入有界 AI 辅助评阅，持久化请求预留与实报用量并提供安全详情摘要；字段见 [DTO Owner](./handoff-backend-dto-cheatsheet.md#submission-request--response-family)。
 - 本地桩与外部 Provider 对接已具备；具体 Provider、Worker、模型及邮件运行组合见 [Config Matrix](./handoff-backend-config-matrix.md)，内部处理与恢复见 [Service Map](./handoff-backend-service-map.md)。
 
 ## 4) 主链路当前状态摘要
@@ -97,7 +98,7 @@ AI Feedback：
 
 上述授权、成员来源、课堂隔离、模板/实例分层、详情读源、AI 请求/执行分离和临时分析条件均是不可回退边界。新增能力应沿既有模块及权威数据链扩展。
 
-A1 的说明未进入模型，预算/实际用量/成本控制归 A2，前端录入与展示接入归 B1；本批能力不代表整项教学流程或真实课堂效果已验证。
+A2 提供完整输入字节限额、输出上限、Job 单层重试及实际用量读取；这些限制约束一次反馈的调用规模，不是课程费用硬上限或金额预算。平台不执行代码、不认证学生自述、不代替教师评价或掌握判断。前端录入与展示接入归 B1；本批 mock 验收不证明真实模型反馈质量或课堂效果。
 
 当前仍未提供：
 

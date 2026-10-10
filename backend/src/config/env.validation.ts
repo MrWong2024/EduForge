@@ -52,11 +52,16 @@ export const envValidationSchema = Joi.object({
   AI_FEEDBACK_WORKER_ENABLED: Joi.boolean().default(false),
   AI_FEEDBACK_WORKER_INTERVAL_MS: Joi.number().integer().min(1).default(10000),
   AI_FEEDBACK_WORKER_BATCH_SIZE: Joi.number().integer().min(1).default(5),
-  AI_FEEDBACK_MAX_CODE_CHARS: Joi.number()
+  AI_FEEDBACK_MAX_INPUT_BYTES: Joi.number()
     .integer()
-    .min(500)
-    .max(200000)
-    .default(12000),
+    .min(16384)
+    .max(262144)
+    .default(65536),
+  AI_FEEDBACK_MAX_OUTPUT_TOKENS: Joi.number()
+    .integer()
+    .min(256)
+    .max(4096)
+    .default(2048),
   AI_FEEDBACK_MAX_CONCURRENCY: Joi.number().integer().min(1).max(20).default(2),
   AI_FEEDBACK_MAX_PER_CLASSROOMTASK_PER_MINUTE: Joi.number()
     .integer()
@@ -84,7 +89,6 @@ export const envValidationSchema = Joi.object({
     .default('https://dashscope.aliyuncs.com/compatible-mode/v1'),
   BAILIAN_MODEL: Joi.string().default('qwen-plus'),
   BAILIAN_TIMEOUT_MS: Joi.number().integer().min(1000).default(90000),
-  BAILIAN_MAX_RETRIES: Joi.number().integer().min(0).default(1),
 })
   .unknown(true)
   .custom((value: EnvValidationInput, helpers) => {

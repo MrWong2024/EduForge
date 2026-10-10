@@ -5,6 +5,7 @@ import {
   FeedbackType,
 } from '../../../schemas/feedback.schema';
 import {
+  AiFeedbackExecution,
   AiFeedbackItem,
   AiFeedbackProvider,
 } from '../../interfaces/ai-feedback-provider.interface';
@@ -24,8 +25,13 @@ import {
 } from '../../prompts/ai-feedback.prompt';
 import { AI_FEEDBACK_JSON_PROTOCOL } from '../../protocol/ai-feedback-json.protocol';
 
+import {
+  checkInputBudget,
+  readReportedUsage,
+  AiChatMessage,
+} from '../../lib/ai-request-budget';
 type OpenAiCompatibleChatResponse = {
-  choices?: Array<{ message?: { content?: string } }>;
+  choices?: Array<{ finish_reason?: string; message?: { content?: string } }>;
 };
 
 export type OpenAiCompatibleProviderConfig = {
@@ -33,8 +39,8 @@ export type OpenAiCompatibleProviderConfig = {
   baseUrl: string;
   model: string;
   timeoutMs: number;
-  maxRetries: number;
-  maxCodeChars: number;
+  maxInputBytes: number;
+  maxOutputTokens: number;
   maxItems: number;
 };
 
@@ -46,7 +52,6 @@ type OpenAiCompatibleProviderOptions = {
 
 type ProviderErrorCode = AiFeedbackProviderErrorCode;
 
-const DEFAULT_SEVERITY = FeedbackSeverity.Warn;
 const PROMPT_PROTOCOL_MAX_ITEMS = 2;
 const ALLOWED_ROOT_KEYS = new Set<string>(
   AI_FEEDBACK_JSON_PROTOCOL.allowedRootKeys as readonly string[],
@@ -57,6 +62,7 @@ const ALLOWED_ITEM_KEYS = new Set<string>(
 const ALLOWED_TYPES = new Set<string>(
   AI_FEEDBACK_JSON_PROTOCOL.allowedTypes as readonly string[],
 );
+const ALLOWED_TAGS = new Set<string>(AI_FEEDBACK_JSON_PROTOCOL.allowedTags);
 const ALLOWED_SEVERITIES = new Set<string>(
   AI_FEEDBACK_JSON_PROTOCOL.allowedSeverities as readonly string[],
 );
@@ -79,72 +85,100 @@ export abstract class OpenAiCompatibleFeedbackProviderBase implements AiFeedback
     private readonly options: OpenAiCompatibleProviderOptions,
   ) {}
 
+  assertInputEligible(context: AiSubmissionAnalysisContext): void {
+    const config = this.getConfig();
+    checkInputBudget(
+      this.buildRequest(context, config).payload.messages,
+      config.maxInputBytes,
+    );
+  }
+
   async analyzeSubmission(
     context: AiSubmissionAnalysisContext,
+    execution: AiFeedbackExecution,
   ): Promise<AiFeedbackItem[]> {
     const config = this.getConfig();
-
     if (!config.apiKey?.trim()) {
       throw this.createProviderError(
         AI_FEEDBACK_ERROR_CODES.MISSING_API_KEY,
         false,
       );
     }
-
-    const submissionId = context.submissionId;
-    const classroomTaskId = context.classroomTaskId;
     const request = this.buildRequest(context, config);
-    const startMs = Date.now();
-    let retryCount = 0;
-
-    for (let attempt = 0; attempt <= config.maxRetries; attempt += 1) {
-      if (attempt > 0) {
-        retryCount = attempt;
-        await this.sleep(this.getBackoffMs(attempt));
-      }
-      try {
-        const response = await this.callProvider(request, config.timeoutMs);
-        const parsedItems = this.parseResponse(response);
-        const protocolMaxItems = Math.min(
-          config.maxItems,
-          PROMPT_PROTOCOL_MAX_ITEMS,
-        );
-        const items = parsedItems.slice(0, protocolMaxItems);
-        if (parsedItems.length > protocolMaxItems) {
-          this.logger.warn(
-            `${this.options.logName} feedback items exceeded protocol cap: submissionId=${submissionId}, classroomTaskId=${classroomTaskId ?? 'n/a'}, provider=${this.options.providerName}, model=${config.model}, receivedItems=${parsedItems.length}, cappedTo=${protocolMaxItems}`,
-          );
-        }
-        const durationMs = Date.now() - startMs;
-        this.logger.debug(
-          `${this.options.logName} feedback success: submissionId=${submissionId}, classroomTaskId=${classroomTaskId ?? 'n/a'}, provider=${this.options.providerName}, model=${config.model}, durationMs=${durationMs}, retried=${retryCount > 0}`,
-        );
-        return items;
-      } catch (error) {
-        const providerError = this.toProviderError(error);
-        if (providerError.retryable && attempt < config.maxRetries) {
-          continue;
-        }
-        const durationMs = Date.now() - startMs;
-        this.logger.warn(
-          `${this.options.logName} feedback failed: submissionId=${submissionId}, classroomTaskId=${classroomTaskId ?? 'n/a'}, provider=${this.options.providerName}, model=${config.model}, durationMs=${durationMs}, retried=${retryCount > 0}, error=${providerError.code}`,
-        );
-        throw providerError;
-      }
+    const inputBytes = checkInputBudget(
+      request.payload.messages,
+      config.maxInputBytes,
+    );
+    await execution.reserveRequest({
+      provider: 'bailian',
+      model: config.model,
+      inputBytes,
+      maxOutputTokens: config.maxOutputTokens,
+      reservedAt: new Date(),
+    });
+    let response: { status: number; data: unknown };
+    try {
+      response = await this.callProvider(request, config.timeoutMs);
+    } catch (error) {
+      await execution.reportUsage(null);
+      throw error;
     }
-
-    throw this.createProviderError(AI_FEEDBACK_ERROR_CODES.UPSTREAM_5XX, true);
+    // Persist actual usage even for non-2xx, truncated and malformed feedback.
+    // Keep this outside the fetch catch: a DB failure must stay non-retryable.
+    await execution.reportUsage(readReportedUsage(response.data));
+    if (response.status < 200 || response.status >= 300) {
+      throw this.mapHttpError(response.status);
+    }
+    if (!response.data || typeof response.data !== 'object') {
+      throw this.createProviderError(
+        AI_FEEDBACK_ERROR_CODES.BAD_RESPONSE,
+        false,
+      );
+    }
+    const data = response.data as OpenAiCompatibleChatResponse;
+    const finishReason = data.choices?.[0]?.finish_reason;
+    if (finishReason === 'length') {
+      throw this.createProviderError(
+        AI_FEEDBACK_ERROR_CODES.OUTPUT_LIMIT_REACHED,
+        false,
+      );
+    }
+    if (finishReason !== 'stop') {
+      throw this.createProviderError(
+        AI_FEEDBACK_ERROR_CODES.BAD_RESPONSE,
+        false,
+      );
+    }
+    const parsedItems = this.parseResponse(data);
+    const cap = Math.min(config.maxItems, PROMPT_PROTOCOL_MAX_ITEMS);
+    this.logger.debug(
+      this.options.logName +
+        ' feedback success: submissionId=' +
+        context.submissionId +
+        ', provider=' +
+        this.options.providerName +
+        ', model=' +
+        config.model,
+    );
+    return parsedItems.slice(0, cap);
   }
 
   protected abstract getConfig(): OpenAiCompatibleProviderConfig;
 
-  protected readInt(key: string, fallback: number) {
+  protected readInt(
+    key: string,
+    fallback: number,
+    min = 1,
+    max = Number.MAX_SAFE_INTEGER,
+  ) {
     const raw = this.configService.get<string>(key);
     if (!raw) {
       return fallback;
     }
-    const parsed = Number.parseInt(raw, 10);
-    return Number.isFinite(parsed) ? parsed : fallback;
+    const parsed = Number(raw);
+    return Number.isSafeInteger(parsed) && parsed >= min && parsed <= max
+      ? parsed
+      : fallback;
   }
 
   private buildRequest(
@@ -154,16 +188,16 @@ export abstract class OpenAiCompatibleFeedbackProviderBase implements AiFeedback
     const baseUrl = config.baseUrl.replace(/\/+$/g, '');
     const endpoint = `${baseUrl}/chat/completions`;
     const systemPrompt = buildSystemPrompt();
-    const userPrompt = buildUserPrompt({
-      context,
-      maxCodeChars: config.maxCodeChars,
-    });
+    const userPrompt = buildUserPrompt({ context });
+    const messages: AiChatMessage[] = [
+      { role: 'system', content: systemPrompt },
+      { role: 'user', content: userPrompt },
+    ];
     const payload = {
       model: config.model,
-      messages: [
-        { role: 'system', content: systemPrompt },
-        { role: 'user', content: userPrompt },
-      ],
+      messages,
+      enable_thinking: false,
+      max_tokens: config.maxOutputTokens,
       temperature: 0.2,
     };
     const headers = {
@@ -192,17 +226,13 @@ export abstract class OpenAiCompatibleFeedbackProviderBase implements AiFeedback
         body: JSON.stringify(request.payload),
         signal: controller.signal,
       });
-      if (response.ok) {
-        try {
-          return (await response.json()) as OpenAiCompatibleChatResponse;
-        } catch {
-          throw this.createProviderError(
-            AI_FEEDBACK_ERROR_CODES.BAD_RESPONSE,
-            false,
-          );
-        }
+      let data: unknown = null;
+      try {
+        data = await response.json();
+      } catch (error) {
+        if (controller.signal.aborted) throw error;
       }
-      throw this.mapHttpError(response.status);
+      return { status: response.status, data };
     } catch (error) {
       throw this.toProviderError(error);
     } finally {
@@ -336,27 +366,44 @@ export abstract class OpenAiCompatibleFeedbackProviderBase implements AiFeedback
       );
     }
 
-    const normalizedType =
-      typeof type === 'string' && ALLOWED_TYPES.has(type)
-        ? (type as FeedbackType)
-        : FeedbackType.Other;
-    const normalizedSeverity =
-      typeof severity === 'string' && ALLOWED_SEVERITIES.has(severity)
-        ? (severity as FeedbackSeverity)
-        : DEFAULT_SEVERITY;
+    if (
+      typeof type !== 'string' ||
+      !ALLOWED_TYPES.has(type) ||
+      typeof severity !== 'string' ||
+      !ALLOWED_SEVERITIES.has(severity)
+    ) {
+      throw this.createProviderError(
+        AI_FEEDBACK_ERROR_CODES.BAD_RESPONSE,
+        false,
+      );
+    }
+    if (
+      (record.suggestion !== undefined &&
+        typeof record.suggestion !== 'string') ||
+      (record.tags !== undefined &&
+        (!Array.isArray(record.tags) ||
+          record.tags.some(
+            (tag: unknown) => typeof tag !== 'string' || !ALLOWED_TAGS.has(tag),
+          ))) ||
+      (record.scoreHint !== undefined &&
+        (typeof record.scoreHint !== 'number' ||
+          !Number.isFinite(record.scoreHint) ||
+          record.scoreHint < 0 ||
+          record.scoreHint > 100))
+    )
+      throw this.createProviderError(
+        AI_FEEDBACK_ERROR_CODES.BAD_RESPONSE,
+        false,
+      );
+    const normalizedType = type as FeedbackType;
+    const normalizedSeverity = severity as FeedbackSeverity;
     const suggestion =
       typeof record.suggestion === 'string' ? record.suggestion : undefined;
     const tags = Array.isArray(record.tags)
       ? record.tags.filter((tag) => typeof tag === 'string')
       : undefined;
     const scoreHint =
-      typeof record.scoreHint === 'number'
-        ? record.scoreHint
-        : typeof record.scoreHint === 'string' &&
-            record.scoreHint.trim().length > 0 &&
-            Number.isFinite(Number(record.scoreHint))
-          ? Number(record.scoreHint)
-          : undefined;
+      typeof record.scoreHint === 'number' ? record.scoreHint : undefined;
 
     return {
       type: normalizedType,
@@ -368,24 +415,13 @@ export abstract class OpenAiCompatibleFeedbackProviderBase implements AiFeedback
     };
   }
 
-  private getBackoffMs(attempt: number) {
-    const base = 200;
-    const factor = 2.5;
-    return Math.round(base * Math.pow(factor, Math.max(0, attempt - 1)));
-  }
-
-  private async sleep(ms: number) {
-    if (ms <= 0) {
-      return;
-    }
-    await new Promise((resolve) => setTimeout(resolve, ms));
-  }
-
   private isAbortError(error: unknown) {
+    // Native fetch errors can originate in another realm (e.g. Jest/undici).
     return (
-      error instanceof Error &&
-      (error.name === 'AbortError' ||
-        error.message.toLowerCase().includes('aborted'))
+      typeof error === 'object' &&
+      error !== null &&
+      'name' in error &&
+      (error.name === 'AbortError' || error.name === 'TimeoutError')
     );
   }
 
@@ -396,14 +432,14 @@ export abstract class OpenAiCompatibleFeedbackProviderBase implements AiFeedback
     if (error instanceof AiFeedbackProviderError) {
       return this.createProviderError(error.code, error.retryable, error);
     }
+    if (this.isAbortError(error)) {
+      return this.createProviderError(
+        AI_FEEDBACK_ERROR_CODES.TIMEOUT,
+        true,
+        error,
+      );
+    }
     if (error instanceof Error) {
-      if (this.isAbortError(error)) {
-        return this.createProviderError(
-          AI_FEEDBACK_ERROR_CODES.TIMEOUT,
-          true,
-          error,
-        );
-      }
       return this.createProviderError(
         AI_FEEDBACK_ERROR_CODES.BAD_RESPONSE,
         false,

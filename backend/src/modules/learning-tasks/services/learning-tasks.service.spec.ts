@@ -115,8 +115,9 @@ const createHarness = (
   const classroomModel = {
     findById: jest.fn(() => makeQuery(classroom)),
   };
-  const userModel = {};
+  const userModel = { findById: jest.fn(() => makeQuery(null)) };
   const aiFeedbackJobService = {
+    getReviewJob: jest.fn().mockResolvedValue(null),
     enqueue: jest.fn(),
     ensureJobForSubmission: jest.fn().mockResolvedValue({
       jobId: objectId().toString(),
@@ -141,6 +142,7 @@ const createHarness = (
     taskModel,
     submissionModel,
     aiFeedbackJobService,
+    enrollmentModel,
     ids: { studentId, classroomId, classroomTaskId, taskId, submissionId },
   };
 };
@@ -804,5 +806,44 @@ describe('LearningTasksService student participation status gates', () => {
       classroomTaskId: harness.ids.classroomTaskId.toString(),
     });
     expect(harness.submissionModel.create).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('AI review detail eligibility (no database)', () => {
+  afterEach(() => jest.restoreAllMocks());
+  it('reuses request eligibility for an authorized detail with no Job', async () => {
+    const h = createHarness();
+    const detail = await h.service.getSubmissionDetail(
+      h.ids.submissionId.toString(),
+      { id: h.ids.studentId.toString(), roles: ['student'] },
+    );
+    expect(detail.aiReview).toMatchObject({
+      canRequest: true,
+      requestBlockReason: null,
+      provider: null,
+      inputCoverage: 'NOT_SENT',
+      usage: { reservedRequests: 0, totalTokens: 0 },
+    });
+  });
+  it('propagates internal eligibility errors instead of presenting an ordinary block', async () => {
+    const h = createHarness();
+    const error = new Error('synthetic query failure');
+    jest.spyOn(h.enrollmentModel, 'exists').mockRejectedValue(error);
+    await expect(
+      h.service.getSubmissionDetail(h.ids.submissionId.toString(), {
+        id: h.ids.studentId.toString(),
+        roles: ['student'],
+      }),
+    ).rejects.toBe(error);
+  });
+  it('does not read any AI facts before the existing ownership gate', async () => {
+    const h = createHarness();
+    await expect(
+      h.service.getSubmissionDetail(h.ids.submissionId.toString(), {
+        id: new Types.ObjectId().toString(),
+        roles: ['student'],
+      }),
+    ).rejects.toThrow('Not allowed to view submission detail');
+    expect(h.aiFeedbackJobService.getReviewJob).not.toHaveBeenCalled();
   });
 });

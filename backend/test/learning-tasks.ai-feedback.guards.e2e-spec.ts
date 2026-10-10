@@ -99,6 +99,7 @@ const startMockBailian = (itemsCount = 25, delayMs = 50) =>
         const payload = {
           choices: [
             {
+              finish_reason: 'stop',
               message: {
                 content: JSON.stringify({
                   items: buildMockItems(itemsCount),

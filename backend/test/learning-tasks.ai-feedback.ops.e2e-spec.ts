@@ -4,6 +4,9 @@ import { ClassroomTask } from '../src/modules/classrooms/classroom-tasks/schemas
 import { Enrollment } from '../src/modules/classrooms/enrollments/schemas/enrollment.schema';
 import { INestApplication, ValidationPipe } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { Server } from 'node:http';
+import { AiFeedbackProcessor } from '../src/modules/learning-tasks/ai-feedback/services/ai-feedback-processor.service';
+import { AiFeedbackWorker } from '../src/modules/learning-tasks/ai-feedback/services/ai-feedback-worker.service';
 import { Test, TestingModule } from '@nestjs/testing';
 import { getModelToken } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
@@ -502,6 +505,7 @@ describe('LearningTasks AI Feedback Ops (e2e) - pipeline & debug gate ON', () =>
 
 describe('LearningTasks AI Feedback Ops (e2e) - stub worker default loop', () => {
   let app: INestApplication<App>;
+  let processOnceSpy: jest.SpiedFunction<AiFeedbackProcessor['processOnce']>;
   let userModel: Model<User>;
   let sessionModel: Model<Session>;
   let taskModel: Model<Task>;
@@ -606,6 +610,8 @@ describe('LearningTasks AI Feedback Ops (e2e) - stub worker default loop', () =>
     configService.set('AI_FEEDBACK_WORKER_ENABLED', true);
     configService.set('AI_FEEDBACK_WORKER_INTERVAL_MS', 120);
     configService.set('AI_FEEDBACK_WORKER_BATCH_SIZE', 2);
+    // Observe real processing without replacing the stub worker lifecycle.
+    processOnceSpy = jest.spyOn(app.get(AiFeedbackProcessor), 'processOnce');
     await app.init();
     app.get(ConfigService).set('LEARNING_TASK_SUBMISSION_COOLDOWN_MS', 0);
 
@@ -686,6 +692,14 @@ describe('LearningTasks AI Feedback Ops (e2e) - stub worker default loop', () =>
   });
 
   afterAll(async () => {
+    // Stop new ticks and drain already started work before fixture/DB cleanup.
+    app.get(AiFeedbackWorker).onModuleDestroy();
+    await Promise.all(
+      processOnceSpy.mock.results
+        .filter((result) => result.type === 'return')
+        .map((result) => result.value),
+    );
+    processOnceSpy.mockRestore();
     if (previousWorkerEnabled === undefined) {
       delete process.env.AI_FEEDBACK_WORKER_ENABLED;
     } else {
@@ -773,6 +787,11 @@ describe('LearningTasks AI Feedback Ops (e2e) - stub worker default loop', () =>
     }
 
     await app.close();
+    expect(aiFeedbackJobModel.db.readyState).toBe(0);
+    const httpServer: unknown = app.getHttpServer();
+    expect(httpServer).toBeInstanceOf(Server);
+    if (httpServer instanceof Server) expect(httpServer.listening).toBe(false);
+    console.info('A2 stub Worker stopped and drained; app/DB closed.');
   });
 
   it('runs request -> PENDING -> worker SUCCEEDED and exposes detail/feedback', async () => {

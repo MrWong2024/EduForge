@@ -1,4 +1,4 @@
-﻿# 配置矩阵（Config Matrix）
+# 配置矩阵（Config Matrix）
 
 ## 0) 口径说明
 
@@ -90,7 +90,8 @@ Mock Bailian 等测试组合的执行方案见 [Backend Testing Playbook](./hand
 | `SMTP_PASS`                                    | 无                                                  | Joi                                                  | SMTP 密码；必填条件见下文，不得写入日志。                    |
 | `MONGO_SERVER_SELECTION_TIMEOUT_MS`            | `5000`                                              | Joi                                                  | Mongo 连接超时。                                                                |
 | `AI_FEEDBACK_PROVIDER` | `stub` | Joi | Provider 选择：`stub`、`bailian`；Key 条件见下文。 |
-| `AI_FEEDBACK_MAX_CODE_CHARS`                   | `12000`                                             | Joi                                                  | 发送给模型的代码截断上限；整数，范围 `500..200000`。                                                      |
+| `AI_FEEDBACK_MAX_INPUT_BYTES` | `65536` | Joi / Provider fallback | 完整 system/user messages 序列化 UTF-8 字节限额；整数 `16384..262144`，不是准确 Token 或金额预算。 |
+| `AI_FEEDBACK_MAX_OUTPUT_TOKENS` | `2048` | Joi / Provider fallback | 上游 max_tokens；整数 `256..4096`。 |
 | `AI_FEEDBACK_MAX_CONCURRENCY`                  | `2`                                                 | Joi                                                  | 进程级并发上限；整数，范围 `1..20`。                                                              |
 | `AI_FEEDBACK_MAX_PER_CLASSROOMTASK_PER_MINUTE` | `30`                                                | Joi                                                  | 每 `classroomTaskId` 的本地软限流；整数，范围 `1..600`。                                             |
 | `AI_FEEDBACK_AUTO_ON_SUBMIT`                   | `true`                                              | Joi                                                  | 仅允许具备 FIRST_SUBMISSION_AUTO 策略的实例首提尝试创建 AI Job。                                                 |
@@ -103,10 +104,11 @@ Mock Bailian 等测试组合的执行方案见 [Backend Testing Playbook](./hand
 | `BAILIAN_BASE_URL`                             | `https://dashscope.aliyuncs.com/compatible-mode/v1` | Joi                                                  | 阿里云百炼大陆站 OpenAI-compatible 基础地址。                                   |
 | `BAILIAN_MODEL`                                | `qwen-plus`                                         | Joi                                                  | 百炼模型名；环境显式配置见第 3 节。                        |
 | `BAILIAN_TIMEOUT_MS`                           | `90000`                                             | Joi                                                  | 百炼上游超时（ms）；整数，`>=1000`。                                                            |
-| `BAILIAN_MAX_RETRIES`                          | `1`                                                 | Joi                                                  | 百炼 provider 重试次数；整数，`>=0`。                                                        |
 | `AI_FEEDBACK_WORKER_ENABLED` | `false` | Joi → ConfigService | 布尔值；后台自动消费开关，职责见第 3 节。 |
 | `AI_FEEDBACK_WORKER_INTERVAL_MS` | `10000` | Joi → ConfigService | 后台自动消费间隔（ms），正整数。 |
 | `AI_FEEDBACK_WORKER_BATCH_SIZE` | `5` | Joi → ConfigService | 后台自动消费批次大小，正整数。 |
+
+Bailian 固定使用非流式、顶层 `enable_thinking:false` 与 `max_tokens`，无思考开关、extra_body 或第二套输出上限。`AI_FEEDBACK_MAX_CODE_CHARS` 与 `BAILIAN_MAX_RETRIES` 已废止：移除校验、读取及 example，ignored env 残留不恢复截断或 Provider 重试。每 Job 最多三次处理机会，无新增次数配置，内部执行见 Service Owner。模型路由及默认值保持不变。
 
 条件必填与安全配置：
 
@@ -138,7 +140,7 @@ Mock Bailian 等测试组合的执行方案见 [Backend Testing Playbook](./hand
 | 软限流（按 classroomTask） | `AI_FEEDBACK_MAX_PER_CLASSROOMTASK_PER_MINUTE` | `20..120` |
 | 单次落库上限 | `AI_FEEDBACK_MAX_ITEMS` | `1..2` |
 | 百炼上游超时 | `BAILIAN_TIMEOUT_MS` | `60000..120000` |
-| 百炼 provider 重试 | `BAILIAN_MAX_RETRIES` | `0..1` |
-| 代码截断上限 | `AI_FEEDBACK_MAX_CODE_CHARS` | `8000..30000` |
+| 完整输入字节限额 | `AI_FEEDBACK_MAX_INPUT_BYTES` | 根据课堂材料体积在静态边界内配置 |
+| 上游输出上限 | `AI_FEEDBACK_MAX_OUTPUT_TOKENS` | 根据反馈长度在静态边界内配置 |
 
 选择 Bailian 真实 Provider 后，并发/限流/maxItems 会直接影响调用成本与上游压力。

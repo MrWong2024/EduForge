@@ -1,4 +1,4 @@
-﻿import {
+import {
   BadRequestException,
   ConflictException,
   ForbiddenException,
@@ -54,6 +54,10 @@ import type {
   TaskTemplateScope,
   TaskVisibility,
 } from '../task-template-visibility.constants';
+import {
+  buildAiReviewSummary,
+  AiReviewSummary,
+} from '../ai-feedback/lib/ai-review-summary';
 import { AiFeedbackJobService } from '../ai-feedback/services/ai-feedback-job.service';
 import { AiFeedbackJobStatus } from '../ai-feedback/schemas/ai-feedback-job.schema';
 import { AiFeedbackStatus } from '../ai-feedback/interfaces/ai-feedback-status.enum';
@@ -666,16 +670,23 @@ export class LearningTasksService {
       user,
     );
 
-    const statusMap =
-      await this.aiFeedbackJobService.getStatusMapBySubmissionIds([
-        submission._id,
-      ]);
+    const job = await this.aiFeedbackJobService.getReviewJob(submission._id);
+    const reason = await this.aiRequestBlockReason(submission, user);
+    const worker = this.configService.get<boolean | string>(
+      'AI_FEEDBACK_WORKER_ENABLED',
+    );
+    const review = buildAiReviewSummary(
+      job,
+      reason,
+      worker === true || worker === 'true',
+    );
     return this.toSubmissionDetailResponse(
       submission,
       task,
       classroomTask,
       student ?? null,
-      statusMap.get(submission._id.toString()) ?? AiFeedbackStatus.NotRequested,
+      job ? this.toAiFeedbackStatus(job.status) : AiFeedbackStatus.NotRequested,
+      review,
     );
   }
 
@@ -893,6 +904,7 @@ export class LearningTasksService {
     classroomTask: ClassroomTaskWithClassroom | null,
     student: SubmissionDetailStudentLean | null,
     aiFeedbackStatus: AiFeedbackStatus,
+    aiReview: AiReviewSummary,
   ): SubmissionDetailResponseDto {
     const language = submission.content?.language ?? null;
     return {
@@ -919,7 +931,8 @@ export class LearningTasksService {
       isLate: submission.isLate ?? false,
       lateBySeconds: submission.lateBySeconds ?? 0,
       aiFeedbackStatus,
-    } as SubmissionDetailResponseDto;
+      aiReview,
+    };
   }
 
   private async createSubmissionInternal(
@@ -1157,6 +1170,34 @@ export class LearningTasksService {
       },
       HttpStatus.TOO_MANY_REQUESTS,
     );
+  }
+
+  private async aiRequestBlockReason(
+    submission: SubmissionWithMeta,
+    user: { id: string; roles?: string[] },
+  ): Promise<string | null> {
+    try {
+      await this.ensureCanRequestAiFeedback(submission, user);
+      return null;
+    } catch (error) {
+      // Only the existing eligibility exceptions are public blocking reasons.
+      // Unknown DB/config/programming failures still propagate as server errors.
+      if (error instanceof ForbiddenException)
+        return '当前用户或课堂 AI 策略不允许申请 AI 反馈。';
+      if (error instanceof ConflictException) {
+        if (error.message === MISSING_TASK_SNAPSHOT_MESSAGE)
+          return MISSING_TASK_SNAPSHOT_MESSAGE;
+        if (
+          error.message === '班级已归档，不能请求 AI 反馈。' ||
+          error.message === '课堂任务已关闭，不能请求 AI 反馈。'
+        )
+          return error.message;
+        return '提交与课堂任务不匹配，不能申请 AI 反馈。';
+      }
+      if (error instanceof NotFoundException)
+        return '关联课堂任务或班级不存在，不能申请 AI 反馈。';
+      throw error;
+    }
   }
 
   private async ensureCanRequestAiFeedback(

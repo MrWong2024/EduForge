@@ -22,6 +22,7 @@ import {
   AiFeedbackJob,
   AiFeedbackJobStatus,
 } from '../src/modules/learning-tasks/ai-feedback/schemas/ai-feedback-job.schema';
+import { AiReviewSummary } from '../src/modules/learning-tasks/ai-feedback/lib/ai-review-summary';
 import type * as AppModuleExports from '../src/app.module';
 
 jest.setTimeout(30000);
@@ -50,17 +51,44 @@ type BailianMessage = {
 
 type BailianRequestPayload = {
   model?: string;
+  max_tokens?: number;
+  enable_thinking?: boolean;
   messages?: BailianMessage[];
 };
 
+type MockResponse = {
+  status?: number;
+  finish?: string;
+  content?: string;
+  usage?: unknown;
+  hold?: boolean;
+  raw?: string;
+};
+const validUsage = {
+  prompt_tokens: 100,
+  completion_tokens: 20,
+  total_tokens: 120,
+};
+const validContent = JSON.stringify({
+  items: [
+    {
+      type: 'BUG',
+      severity: 'WARN',
+      message: 'Mock feedback',
+      tags: ['correctness'],
+    },
+  ],
+});
 const startMockBailian = () =>
   new Promise<{
     server: http.Server;
     url: string;
     getCapturedPayloads: () => BailianRequestPayload[];
     clearCapturedPayloads: () => void;
+    setResponses: (responses: MockResponse[]) => void;
   }>((resolve, reject) => {
     const capturedPayloads: BailianRequestPayload[] = [];
+    let responses: MockResponse[] = [];
     const server = http.createServer((req, res) => {
       if (req.method !== 'POST') {
         res.statusCode = 404;
@@ -82,28 +110,20 @@ const startMockBailian = () =>
         } else {
           capturedPayloads.push({});
         }
+        const response = responses.shift() ?? {};
+        if (response.hold) return;
+        res.statusCode = response.status ?? 200;
         const payload = {
           choices: [
             {
-              message: {
-                content: JSON.stringify({
-                  items: [
-                    {
-                      type: 'LOGIC',
-                      severity: 'WARN',
-                      message: 'Mock item 1',
-                      suggestion: 'Mock suggestion 1',
-                      tags: ['correctness'],
-                    },
-                  ],
-                  meta: { model: 'mock-bailian' },
-                }),
-              },
+              finish_reason: response.finish ?? 'stop',
+              message: { content: response.content ?? validContent },
             },
           ],
+          usage: Object.hasOwn(response, 'usage') ? response.usage : validUsage,
         };
         res.setHeader('content-type', 'application/json');
-        res.end(JSON.stringify(payload));
+        res.end(response.raw ?? JSON.stringify(payload));
       });
     });
     server.requestTimeout = 5000;
@@ -128,6 +148,9 @@ const startMockBailian = () =>
         server,
         url: `http://127.0.0.1:${address.port}`,
         getCapturedPayloads: () => [...capturedPayloads],
+        setResponses: (next) => {
+          responses = [...next];
+        },
         clearCapturedPayloads: () => {
           capturedPayloads.length = 0;
         },
@@ -149,6 +172,7 @@ describe('LearningTasks AI Feedback Bailian Context (e2e)', () => {
   let mockServer: http.Server;
   let getCapturedPayloads: () => BailianRequestPayload[];
   let clearCapturedPayloads: () => void;
+  let setResponses: (responses: MockResponse[]) => void;
 
   let courseId = '';
   const classroomIds: string[] = [],
@@ -199,11 +223,52 @@ describe('LearningTasks AI Feedback Bailian Context (e2e)', () => {
     return aiFeedbackJobModel.findOne({ submissionId: objectId });
   };
 
+  const readReview = async (id: string, agent = studentAgent) => {
+    const res = await agent
+      .get('/api/learning-tasks/submissions/' + id)
+      .expect(200);
+    return res.body as {
+      aiFeedbackStatus: string;
+      aiReview: AiReviewSummary;
+      content: { codeText: string; submissionNote: string };
+    };
+  };
+  const submitAndRequest = async (
+    codeText = 'console.log("saved");',
+    submissionNote = '完整说明',
+  ) => {
+    const res = await studentAgent
+      .post(
+        '/api/classrooms/' +
+          classroomIds[0] +
+          '/tasks/' +
+          classroomTaskAId +
+          '/submissions',
+      )
+      .send({ content: { codeText, language: 'javascript', submissionNote } })
+      .expect(201);
+    const id = (res.body as CreatedSubmissionResponse).id;
+    submissionIds.push(id);
+    await studentAgent
+      .post('/api/learning-tasks/submissions/' + id + '/ai-feedback/request')
+      .send({})
+      .expect(200);
+    return id;
+  };
+  const makeDue = async (id: string) => {
+    // Approved controlled scheduling advancement; no status/attempt/usage rewrite.
+    await aiFeedbackJobModel.updateOne(
+      { submissionId: new Types.ObjectId(id), status: 'FAILED' },
+      { $set: { notBefore: new Date(0) } },
+    );
+  };
+
   beforeAll(async () => {
     const mock = await startMockBailian();
     mockServer = mock.server;
     getCapturedPayloads = mock.getCapturedPayloads;
     clearCapturedPayloads = mock.clearCapturedPayloads;
+    setResponses = mock.setResponses;
 
     try {
       previousWorkerEnabled = process.env.AI_FEEDBACK_WORKER_ENABLED;
@@ -456,17 +521,40 @@ describe('LearningTasks AI Feedback Bailian Context (e2e)', () => {
         expect(
           await sessionModel.countDocuments({ userId: { $in: userIds } }),
         ).toBe(0);
+        const ownedIds = submissionIds.map((id) => new Types.ObjectId(id));
+        expect(
+          await aiFeedbackJobModel.countDocuments({
+            submissionId: { $in: ownedIds },
+          }),
+        ).toBe(0);
+        expect(
+          await feedbackModel.countDocuments({
+            submissionId: { $in: ownedIds },
+          }),
+        ).toBe(0);
+        expect(
+          await submissionModel.countDocuments({ _id: { $in: ownedIds } }),
+        ).toBe(0);
         console.info('Fixture cleanup verified: ' + fixtureNamespace);
       }
     } finally {
       try {
-        if (app) await app.close();
+        if (app) {
+          await app.close();
+          if (userModel) expect(userModel.db.readyState).toBe(0);
+          const server = app.getHttpServer();
+          expect(server).toBeInstanceOf(http.Server);
+          if (server instanceof http.Server)
+            expect(server.listening).toBe(false);
+        }
       } finally {
         if (mockServer?.listening) {
           mockServer.closeAllConnections();
           await new Promise<void>((resolve) =>
             mockServer.close(() => resolve()),
           );
+          expect(mockServer.listening).toBe(false);
+          console.info('A2 app/DB/mock closed; scoped residuals zero');
         }
       }
     }
@@ -486,9 +574,11 @@ describe('LearningTasks AI Feedback Bailian Context (e2e)', () => {
       .send({
         content: {
           codeText:
-            'function solveQuadratic(a: number, b: number, c: number) { return [a, b, c]; }',
+            'function solveQuadratic(a: number, b: number, c: number) { return [a, b, c]; }' +
+            '// source padding'.repeat(900) +
+            'SOURCE_TAIL_A2',
           language: 'typescript',
-          submissionNote: 'NOTE_EXCLUDED_FROM_A1_MODEL_INPUT',
+          submissionNote: 'NOTE_FULL_A2_MODEL_INPUT',
         },
         meta: {
           aiUsageDeclaration: 'I used AI for brainstorming only.',
@@ -525,6 +615,13 @@ describe('LearningTasks AI Feedback Bailian Context (e2e)', () => {
       ),
     );
     expect(matchedPayload).toBeTruthy();
+    expect(capturedPayloads).toHaveLength(1);
+    expect(matchedPayload).toMatchObject({
+      max_tokens: 2048,
+      enable_thinking: false,
+    });
+    expect(matchedPayload).not.toHaveProperty('extra_body');
+    expect(matchedPayload).not.toHaveProperty('max_completion_tokens');
 
     const systemPrompt =
       matchedPayload?.messages?.find((message) => message.role === 'system')
@@ -592,6 +689,34 @@ describe('LearningTasks AI Feedback Bailian Context (e2e)', () => {
     );
     expect(userPrompt).toContain('Code:');
     expect(userPrompt).toContain('solveQuadratic');
+    expect(userPrompt).toContain('SOURCE_TAIL_A2');
+    const detail = await readReview(submissionId);
+    expect(detail.aiReview).toMatchObject({
+      provider: 'bailian',
+      canRequest: false,
+      inputCoverage: 'FULL',
+      failure: null,
+      usage: {
+        reservedRequests: 1,
+        reportedRequests: 1,
+        promptTokens: 100,
+        completionTokens: 20,
+        totalTokens: 120,
+      },
+    });
+    console.info(
+      'A2 success public aiReview=' + JSON.stringify(detail.aiReview),
+    );
+    const savedRecord = await aiFeedbackJobModel
+      .findOne({ submissionId: new Types.ObjectId(submissionId) })
+      .lean()
+      .exec();
+    expect(savedRecord?.requests?.[0].inputBytes).toBe(
+      Buffer.byteLength(JSON.stringify(matchedPayload?.messages), 'utf8'),
+    );
+    expect(JSON.stringify(savedRecord?.requests)).not.toContain(
+      'SOURCE_TAIL_A2',
+    );
 
     const feedbackCount = await feedbackModel.countDocuments({
       submissionId: new Types.ObjectId(submissionId),
@@ -619,7 +744,7 @@ describe('LearningTasks AI Feedback Bailian Context (e2e)', () => {
         content: {
           codeText: 'B_SAVED_SOURCE_ONLY',
           language: 'typescript',
-          submissionNote: 'B_NOTE_EXCLUDED_A1',
+          submissionNote: 'B_NOTE_FULL_A2',
         },
       })
       .expect(201);
@@ -651,5 +776,363 @@ describe('LearningTasks AI Feedback Bailian Context (e2e)', () => {
       .lean()
       .exec();
     expect(savedFeedback?.source).toBe('AI');
+    const first = await studentAgent
+      .get('/api/learning-tasks/submissions/' + submissionId)
+      .expect(200);
+    const second = await studentAgent
+      .get('/api/learning-tasks/submissions/' + id)
+      .expect(200);
+    expect(
+      (first.body as { content: { submissionNote: string } }).content
+        .submissionNote,
+    ).toBe('NOTE_FULL_A2_MODEL_INPUT');
+    expect(
+      (second.body as { content: { submissionNote: string } }).content
+        .submissionNote,
+    ).toBe('B_NOTE_FULL_A2');
+  });
+  it.each(['source', 'note'])(
+    'rejects complete input oversized by %s without losing saved work or calling HTTP',
+    async (material) => {
+      clearCapturedPayloads();
+      setResponses([]);
+      const long = '中'.repeat(19990) + '完整尾部';
+      const code =
+        material === 'source' ? long : 'console.log("small source");';
+      const note = material === 'note' ? long : 'small note';
+      const id = await submitAndRequest(code, note);
+      expect(await aiFeedbackProcessor.processOnce(1)).toEqual({
+        processed: 1,
+        succeeded: 0,
+        failed: 0,
+        dead: 1,
+      });
+      const detail = await readReview(id);
+      expect(detail.aiFeedbackStatus).toBe('DEAD');
+      expect(detail.content).toMatchObject({
+        codeText: code,
+        submissionNote: note,
+      });
+      expect(detail.aiReview).toMatchObject({
+        provider: 'bailian',
+        inputCoverage: 'NOT_SENT',
+        failure: {
+          code: 'INPUT_BUDGET_EXCEEDED',
+          message: '作业已保存，完整内容超过 AI 输入限额，本次未生成 AI 反馈。',
+        },
+        usage: {
+          reservedRequests: 0,
+          reportedRequests: 0,
+          promptTokens: 0,
+          completionTokens: 0,
+          totalTokens: 0,
+        },
+      });
+      expect(getCapturedPayloads()).toHaveLength(0);
+      expect(
+        await feedbackModel.countDocuments({
+          submissionId: new Types.ObjectId(id),
+          source: 'AI',
+        }),
+      ).toBe(0);
+      const repeated = await studentAgent
+        .post('/api/learning-tasks/submissions/' + id + '/ai-feedback/request')
+        .send({})
+        .expect(200);
+      expect(repeated.body).toMatchObject({ status: 'DEAD' });
+      expect(await aiFeedbackProcessor.processOnce(1)).toMatchObject({
+        processed: 0,
+      });
+      expect(getCapturedPayloads()).toHaveLength(0);
+      const saved = await aiFeedbackJobModel
+        .findOne({ submissionId: new Types.ObjectId(id) })
+        .lean()
+        .exec();
+      expect(saved?.attempts).toBe(1);
+      if (material === 'source')
+        console.info(
+          'A2 budget rejection public aiReview=' +
+            JSON.stringify(detail.aiReview),
+        );
+    },
+  );
+
+  it.each([
+    ['length', { finish: 'length' }, 'OUTPUT_LIMIT_REACHED', 1],
+    ['bad JSON', { content: 'not-json' }, 'INVALID_RESPONSE', 1],
+    ['malformed envelope', { raw: '{broken' }, 'INVALID_RESPONSE', 0],
+    ['auth', { status: 401 }, 'PROVIDER_CONFIGURATION', 1],
+  ] as const)(
+    'preserves usage for %s without partial feedback',
+    async (_name, response, code, reported) => {
+      clearCapturedPayloads();
+      setResponses([response]);
+      const id = await submitAndRequest();
+      expect(await aiFeedbackProcessor.processOnce(1)).toMatchObject({
+        dead: 1,
+        succeeded: 0,
+      });
+      const detail = await readReview(id);
+      expect(detail.aiReview).toMatchObject({
+        failure: { code },
+        inputCoverage: 'UNKNOWN',
+        usage: {
+          reservedRequests: 1,
+          reportedRequests: reported,
+          promptTokens: reported ? 100 : null,
+          completionTokens: reported ? 20 : null,
+          totalTokens: reported ? 120 : null,
+        },
+      });
+      expect(getCapturedPayloads()).toHaveLength(1);
+      expect(
+        await feedbackModel.countDocuments({
+          submissionId: new Types.ObjectId(id),
+          source: 'AI',
+        }),
+      ).toBe(0);
+    },
+  );
+
+  it('keeps successful missing usage unknown, including across student/teacher detail reads', async () => {
+    clearCapturedPayloads();
+    setResponses([{ usage: undefined }]);
+    const id = await submitAndRequest();
+    expect(await aiFeedbackProcessor.processOnce(1)).toMatchObject({
+      succeeded: 1,
+    });
+    const student = await readReview(id),
+      teacher = await readReview(id, teacherAgent);
+    expect(student.aiReview).toEqual(teacher.aiReview);
+    expect(student.aiReview).toMatchObject({
+      inputCoverage: 'FULL',
+      usage: {
+        reservedRequests: 1,
+        reportedRequests: 0,
+        promptTokens: null,
+        completionTokens: null,
+        totalTokens: null,
+      },
+    });
+    expect(JSON.stringify(student.aiReview)).not.toMatch(
+      /lastError|lockOwner|requests|inputBytes|test-key|reasoning_content/,
+    );
+  });
+
+  it.each([false, true])(
+    'counts retryable failure usage across three claims; unknownFirst=%p',
+    async (unknownFirst) => {
+      clearCapturedPayloads();
+      setResponses([
+        { status: 429, usage: unknownFirst ? undefined : validUsage },
+        { status: 503 },
+        {},
+      ]);
+      const id = await submitAndRequest();
+      expect(await aiFeedbackProcessor.processOnce(1)).toMatchObject({
+        failed: 1,
+      });
+      const config = app.get(ConfigService);
+      expect((await readReview(id)).aiReview.retryScheduled).toBe(false);
+      config.set('AI_FEEDBACK_WORKER_ENABLED', true);
+      expect((await readReview(id)).aiReview).toMatchObject({
+        retryScheduled: true,
+        failure: { code: 'RATE_LIMITED' },
+      });
+      config.set('AI_FEEDBACK_WORKER_ENABLED', false);
+      await makeDue(id);
+      expect(await aiFeedbackProcessor.processOnce(1)).toMatchObject({
+        failed: 1,
+      });
+      await makeDue(id);
+      expect(await aiFeedbackProcessor.processOnce(1)).toMatchObject({
+        succeeded: 1,
+      });
+      expect(await aiFeedbackProcessor.processOnce(1)).toMatchObject({
+        processed: 0,
+      });
+      const job = await aiFeedbackJobModel
+        .findOne({ submissionId: new Types.ObjectId(id) })
+        .lean()
+        .exec();
+      expect(job).toMatchObject({
+        budgetVersion: 1,
+        attempts: 3,
+        maxAttempts: 3,
+      });
+      expect(job?.requests?.map((r) => r.claimNo)).toEqual([1, 2, 3]);
+      expect(getCapturedPayloads()).toHaveLength(3);
+      expect((await readReview(id)).aiReview.usage).toEqual({
+        reservedRequests: 3,
+        reportedRequests: unknownFirst ? 2 : 3,
+        promptTokens: unknownFirst ? null : 300,
+        completionTokens: unknownFirst ? null : 60,
+        totalTokens: unknownFirst ? null : 360,
+      });
+      console.info(
+        'A2 retry evidence: requests=3; totalTokens=' +
+          (unknownFirst ? 'null' : '360'),
+      );
+    },
+  );
+
+  it('stops after three retryable failures, retaining the final reason and valid failure usage', async () => {
+    clearCapturedPayloads();
+    setResponses([{ status: 503 }, { status: 503 }, { status: 503 }]);
+    const id = await submitAndRequest();
+    for (let i = 0; i < 3; i += 1) {
+      if (i > 0) await makeDue(id);
+      expect(await aiFeedbackProcessor.processOnce(1)).toMatchObject(
+        i === 2 ? { dead: 1 } : { failed: 1 },
+      );
+    }
+    const detail = await readReview(id);
+    expect(detail.aiReview).toMatchObject({
+      failure: { code: 'UPSTREAM_UNAVAILABLE' },
+      retryScheduled: false,
+      nextRetryAt: null,
+      usage: { reservedRequests: 3, reportedRequests: 3, totalTokens: 360 },
+    });
+    expect(await aiFeedbackProcessor.processOnce(1)).toMatchObject({
+      processed: 0,
+    });
+    expect(getCapturedPayloads()).toHaveLength(3);
+    const job = await aiFeedbackJobModel
+      .findOne({ submissionId: new Types.ObjectId(id) })
+      .lean()
+      .exec();
+    expect(job).toMatchObject({
+      status: 'DEAD',
+      attempts: 3,
+      notBefore: null,
+      lockedAt: null,
+      lockOwner: null,
+    });
+  });
+
+  it('records timeout reservation as unknown and retries at most once per claim', async () => {
+    clearCapturedPayloads();
+    setResponses([{ hold: true }, {}]);
+    const config = app.get(ConfigService),
+      previous = config.get<number>('BAILIAN_TIMEOUT_MS');
+    config.set('BAILIAN_TIMEOUT_MS', 1000);
+    try {
+      const id = await submitAndRequest();
+      expect(await aiFeedbackProcessor.processOnce(1)).toMatchObject({
+        failed: 1,
+      });
+      expect((await readReview(id)).aiReview).toMatchObject({
+        failure: { code: 'UPSTREAM_UNAVAILABLE' },
+        usage: { reservedRequests: 1, reportedRequests: 0, totalTokens: null },
+      });
+      await makeDue(id);
+      expect(await aiFeedbackProcessor.processOnce(1)).toMatchObject({
+        succeeded: 1,
+      });
+      expect((await readReview(id)).aiReview.usage).toMatchObject({
+        reservedRequests: 2,
+        reportedRequests: 1,
+        totalTokens: null,
+      });
+      expect(getCapturedPayloads()).toHaveLength(2);
+    } finally {
+      config.set('BAILIAN_TIMEOUT_MS', previous);
+    }
+  });
+
+  it('keeps concurrent process-once and repeated public requests idempotent', async () => {
+    clearCapturedPayloads();
+    setResponses([]);
+    const id = await submitAndRequest();
+    const requests = await Promise.all(
+      Array.from({ length: 3 }, () =>
+        studentAgent
+          .post(
+            '/api/learning-tasks/submissions/' + id + '/ai-feedback/request',
+          )
+          .send({})
+          .expect(200),
+      ),
+    );
+    expect(
+      new Set(requests.map((r) => (r.body as { jobId: string }).jobId)).size,
+    ).toBe(1);
+    const processed = await Promise.all([
+      aiFeedbackProcessor.processOnce(1),
+      aiFeedbackProcessor.processOnce(1),
+    ]);
+    expect(processed.reduce((n, r) => n + r.processed, 0)).toBe(1);
+    expect(getCapturedPayloads()).toHaveLength(1);
+    expect(
+      await aiFeedbackJobModel.countDocuments({
+        submissionId: new Types.ObjectId(id),
+      }),
+    ).toBe(1);
+    expect(
+      (
+        await aiFeedbackJobModel
+          .findOne({ submissionId: new Types.ObjectId(id) })
+          .lean()
+          .exec()
+      )?.attempts,
+    ).toBe(1);
+    const repeated = await studentAgent
+      .post('/api/learning-tasks/submissions/' + id + '/ai-feedback/request')
+      .send({})
+      .expect(200);
+    expect(repeated.body).toMatchObject({ status: 'SUCCEEDED' });
+    expect(await aiFeedbackProcessor.processOnce(1)).toMatchObject({
+      processed: 0,
+    });
+    expect(getCapturedPayloads()).toHaveLength(1);
+    console.info(
+      'A2 concurrency: one claim, one Job, one mock request; terminal repeated request unchanged',
+    );
+  });
+
+  it('terminates legacy nonterminal jobs without calls and leaves terminal history untouched', async () => {
+    clearCapturedPayloads();
+    setResponses([]);
+    const id = await submitAndRequest();
+    await aiFeedbackJobModel.updateOne(
+      { submissionId: new Types.ObjectId(id) },
+      { $unset: { budgetVersion: 1, requests: 1 } },
+    );
+    expect(await aiFeedbackProcessor.processOnce(1)).toMatchObject({ dead: 1 });
+    expect((await readReview(id)).aiReview).toMatchObject({
+      inputCoverage: 'UNKNOWN',
+      failure: { code: 'LEGACY_JOB_UNSUPPORTED' },
+      usage: {
+        reservedRequests: null,
+        reportedRequests: null,
+        totalTokens: null,
+      },
+    });
+    const historyId = await submitAndRequest();
+    await aiFeedbackJobModel.updateOne(
+      { submissionId: new Types.ObjectId(historyId) },
+      {
+        $set: { status: 'SUCCEEDED' },
+        $unset: { budgetVersion: 1, requests: 1 },
+      },
+    );
+    const before = await aiFeedbackJobModel
+      .findOne({ submissionId: new Types.ObjectId(historyId) })
+      .lean()
+      .exec();
+    expect(await aiFeedbackProcessor.processOnce(1)).toMatchObject({
+      processed: 0,
+    });
+    const after = await aiFeedbackJobModel
+      .findOne({ submissionId: new Types.ObjectId(historyId) })
+      .lean()
+      .exec();
+    expect(after).toEqual(before);
+    expect(after).not.toHaveProperty('budgetVersion');
+    expect((await readReview(historyId)).aiReview.usage.totalTokens).toBeNull();
+    expect(getCapturedPayloads()).toHaveLength(0);
+    console.info(
+      'A2 legacy: zero mock requests; terminal document unchanged; usage null',
+    );
   });
 });

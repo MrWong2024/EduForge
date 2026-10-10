@@ -4,6 +4,7 @@ export type AiSubmissionAnalysisContext = {
   attemptNo: number;
   language: string;
   codeText: string;
+  submissionNote?: string;
   aiUsageDeclaration?: string;
   taskId: string;
   taskTitle: string;

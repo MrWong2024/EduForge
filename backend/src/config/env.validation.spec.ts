@@ -199,3 +199,27 @@ describe('AI Feedback env validation (no external I/O)', () => {
     );
   });
 });
+
+describe('A2 input/output limits (no I/O)', () => {
+  it('supplies byte/output defaults and ignores obsolete settings', () => {
+    const result = validate({
+      AI_FEEDBACK_MAX_CODE_CHARS: 'obsolete',
+      BAILIAN_MAX_RETRIES: 'obsolete',
+    });
+    expect(result.error).toBeUndefined();
+    expect(result.value).toMatchObject({
+      AI_FEEDBACK_MAX_INPUT_BYTES: 65536,
+      AI_FEEDBACK_MAX_OUTPUT_TOKENS: 2048,
+    });
+  });
+  it.each([
+    ['AI_FEEDBACK_MAX_INPUT_BYTES', 16383],
+    ['AI_FEEDBACK_MAX_INPUT_BYTES', 262145],
+    ['AI_FEEDBACK_MAX_OUTPUT_TOKENS', 255],
+    ['AI_FEEDBACK_MAX_OUTPUT_TOKENS', 4097],
+    ['AI_FEEDBACK_MAX_INPUT_BYTES', 20000.5],
+    ['AI_FEEDBACK_MAX_OUTPUT_TOKENS', 'invalid'],
+  ])('rejects %s=%p', (key, value) => {
+    expect(validate({ [key]: value }).error).toBeDefined();
+  });
+});

@@ -115,6 +115,7 @@ Browser 相关进程角色边界：
 - spec 使用独立 app lifecycle、时间戳或唯一值创建任务专属合成数据，并通过 `request.agent` 保持 Session Cookie；当前已知 lifecycle 例外由第 7 节维护。
 - 符合该 lifecycle 的 spec 在 `afterAll` 中按已记录 ID/唯一字段执行 scoped cleanup，并关闭自己创建的 Nest app；不使用 `dropDatabase`。
 - 涉及 AI provider 的 E2E 使用 stub 或任务自有 mock HTTP server；默认不调用真实外部 AI，mock server 也必须由创建它的 spec 关闭。
+- 启用受控 Worker 循环的专项须在自有 fixture cleanup 前停止定时调度并等待已发起的处理结束，再关闭 app / DB，避免处理与清理或断开连接竞争。
 - 当前不存在共享 Browser fixture CLI、独立 database verifier 或集中式 Browser cleanup runner。数据库终态主要由 spec 内断言与必要的 model 查询证明。
 - spec-local repetition 本身不构成 gap；只有重复代码开始造成具体维护风险时，才按 [Codex instruction spec](../codex-instruction-spec.md) §3.10 评估最低充分 shared helper。
 - `KEEP_E2E_DB=1` 只用于明确的本地诊断；正式验收和 CI 默认不得设置。保留数据时必须报告并由原 spec 的 ownership 信息指导精确清理。

@@ -352,7 +352,7 @@ Global SoT 只保留理解跨 Service workflow 必需的稳定不变量，不追
 - Domain / Responsibility: 自动入队、手工确保 Job、诊断查询与批量状态映射。
 - Upstream: `LearningTasksService` 提交/手工请求，诊断读取入口及看板/提交查询。
 - Downstream / Dependencies: `AiFeedbackJobModel`。
-- Consistency / State / Idempotency: `unique(submissionId)` 防重复；创建 PENDING Job 并初始化最大尝试次数为 3。`ensureJobForSubmission` 先查既有 Job，创建遇并发重复键时回查返回；无 Job 由调用方回落 NOT_REQUESTED，未知 Job 状态映射 FAILED 并记录诊断日志。
+- Consistency / State / Idempotency: `unique(submissionId)` 防重复；新建 PENDING Job 显式保存 budgetVersion=1、空请求记录、attempts=0 和 maxAttempts=3；预算版本无 Schema 默认值，历史文档不水合为新版。`ensureJobForSubmission` 先查既有 Job，创建遇并发重复键时回查返回；无 Job 由调用方回落 NOT_REQUESTED，未知 Job 状态映射 FAILED 并记录诊断日志。
 - Isolation: Job 绑定 submissionId 并保留课堂任务关联；资源归属由 LearningTasksService 请求入口先行校验。
 - Side Effects: 写 Job，记录重复或异常日志。
 - Important Performance / Recovery: 自动 enqueue 遇重复键忽略并记 debug，其他写库异常记 error，不抛入 Submission 主链；显式 ensure 不吞掉非重复键错误。状态映射按 submissionIds 的 `$in` 批量读取，避免逐提交查询。
@@ -392,12 +392,14 @@ Global SoT 只保留理解跨 Service workflow 必需的稳定不变量，不追
 - Upstream: `AiFeedbackWorker` 与受诊断门禁保护的手工 process-once，共用处理链。
 - Downstream / Dependencies: `AiFeedbackJobModel`、`SubmissionModel`、`ClassroomTaskModel`、`FeedbackModel`、`AI_FEEDBACK_PROVIDER_TOKEN`、`AiFeedbackGuardsService`、`ConfigService`、`feedback-item-compactor`。
 - Consistency / State / Idempotency:
-  - 通过 findOneAndUpdate 按 createdAt 顺序原子 claim，仅认领 PENDING/FAILED，锁 TTL 为 5 分钟；成功写回用 job id + lockOwner 条件并清理锁/失败信息。
-  - 读取 Submission 后核对 Job/Submission/实例归属，读取所属实例的固定 title/description/rubric 形成 AiSubmissionAnalysisContext，源码与既有 AI 使用声明来自保存的 Submission；submissionNote 不进入 A1 模型上下文；调用 Provider 后在写库前以内存 compactor 收敛，同类问题合并，存在 ERROR/WARN 时去掉独立低价值 INFO。
-  - 关联不一致、缺快照和 DISABLED 等确定性资格失败直接 DEAD，清空锁与 notBefore，保存固定脱敏原因；凭据错误 UNAUTHORIZED/MISSING_API_KEY 直接 DEAD；其他失败增加 attempts，耗尽 maxAttempts 后 DEAD，否则 FAILED 并设置 notBefore。退避从 30 秒指数增长，最大 10 分钟；本地/上游限流同样进入有界失败恢复，不绕过护栏。
+  - findOneAndUpdate 按 createdAt 原子 claim，同时检查 PENDING/FAILED、调度到期、budgetVersion=1、attempts < maxAttempts 和既有锁条件，在同一次写入增加 attempts 并设 RUNNING。attempts 表示认领次数，本地限流也消耗机会；失败更新不再递增。所有认领后 Job 记录和终态写入匹配 ID、RUNNING、本次 attempts 及 lockOwner。
+  - 读取 Submission 后核对 Job/Submission/实例归属，读取所属实例的固定 title/description/rubric 形成 AiSubmissionAnalysisContext，codeText/language/submissionNote/meta.aiUsageDeclaration 完整来自当前 Submission，说明与源码分别标记且不能覆盖教师要求；调用 Provider 后在写库前以内存 compactor 收敛，同类问题合并，存在 ERROR/WARN 时去掉独立低价值 INFO。
+  - Job/Processor 是唯一重试负责人：仅本地/上游限流、上游 5xx 和超时可在剩余机会内 FAILED，并按既有 30 秒起指数退避（最大 10 分钟）；其他不可重试失败和耗尽次数直接 DEAD，清理锁与调度时间，保留安全失败代码。数据库记录/反馈/终态写入异常不能成为再次调用模型的理由。
+  - 每次真实 HTTP 前通过回调在当前 claim 持久化预留，以 claimNo 标识，最多三条；包含 provider、model、完整输入 bytes、输出 token 上限、reservedAt、usage=null。预留失败或未匹配禁止 fetch；供应商可能已收到的未知预留不归零、不删除。usage 落库先于反馈处理；不保存 prompt/源码副本/原始响应/密钥/请求头。
+  - 缺当前版本的 PENDING/FAILED/RUNNING Job 原子终止为 LEGACY_JOB_UNSUPPORTED，不调用 Provider、不补造预算版本或用量；旧 SUCCEEDED/DEAD 只读保持。无迁移、回填、RUNNING 崩溃恢复、租约接管或自动重放。
 - Isolation: 沿 Job 的 classroomTaskId 进入限流桶；成功条件写回校验认领者，不把 Worker 防重入当成 Job 跨入口互斥。
 - Side Effects: 外部 Provider 调用、反馈写库、Job 状态/锁/错误/重试时间更新；Provider 调用及反馈持久化使用的信号量在 finally 释放。
-- Important Performance / Recovery: `insertMany(ordered:false)` 批量写反馈并容忍重复键；Submission 缺失仍走既有失败处理，实例关联/资格失败不调用 Provider 或反复重试。Provider BAD_RESPONSE 进入失败处理，重复反馈不单独中断 Job；收敛过程不追加数据库 I/O。
+- Important Performance / Recovery: `insertMany(ordered:false)` 批量写反馈并容忍重复键；Submission 缺失作为 INTERNAL_ERROR 终止，实例关联/资格失败不调用 Provider 或反复重试。Provider BAD_RESPONSE 进入失败处理，重复反馈不单独中断 Job；compactor 不追加模型调用。
 - SoT: `backend/src/modules/learning-tasks/ai-feedback/services/ai-feedback-processor.service.ts`；`backend/src/modules/learning-tasks/ai-feedback/lib/feedback-item-compactor.ts`；`backend/src/modules/learning-tasks/ai-feedback/interfaces/ai-feedback-provider.error-codes.ts`。
 - Boundary / Non-responsibility: 不承担产品请求的资源授权或 Worker 调度；反馈主策略来自 prompt/protocol，compactor 是落库前轻量兜底。运行参数见 [Config Matrix](./handoff-backend-config-matrix.md)，Provider 规则见 [Card B](#provider-card-b)。
 
@@ -422,7 +424,7 @@ Global SoT 只保留理解跨 Service workflow 必需的稳定不变量，不追
 - Downstream / Dependencies: `feedback-normalizer`。
 - Consistency / State / Idempotency: 仅读 context.codeText，复用空代码/短代码/TODO 规则与英文 message；空代码形成 validation 错误项，未命中规则形成 other INFO 项，输出统一经过 normalizeFeedbackItems。
 - Isolation: 只处理当前提交内容，不自行查询课堂或数据库。
-- Side Effects: 无外部 I/O。
+- Side Effects: 无外部 I/O，不写请求预留或伪造供应商 Token 用量。
 - SoT: `backend/src/modules/learning-tasks/ai-feedback/services/default-stub-ai-feedback.provider.ts`；`backend/src/modules/learning-tasks/ai-feedback/lib/feedback-normalizer.ts`。
 - Boundary / Non-responsibility: 不执行真实推理，不承担 Job 状态或落库；Provider 选择见 [Config Matrix](./handoff-backend-config-matrix.md)。
 
@@ -434,11 +436,12 @@ Global SoT 只保留理解跨 Service workflow 必需的稳定不变量，不追
 - Downstream / Dependencies: Provider 配置、`fetch`、prompt、JSON protocol 与 normalizer。
 - Consistency / State / Idempotency:
   - 严格 JSON 与字段白名单，协议最多 2 条反馈并结合 maxItems 收敛；prompt 要求主问题导向，默认 1 条、必要时第 2 条，同类问题不按位置拆分，阻断运行问题优先，ERROR/WARN 存在时不输出表扬型 INFO。
-  - system prompt 要求 message/suggestion 使用简体中文、保留代码元素原文；user prompt 纳入题目标题/描述/rubric、代码/语言、尝试次数和 AI 使用声明，要求结合题目分析。
-  - 多文件文本识别仅由 prompt 引导，默认按普通单文件处理；标准边界为 `===== FILE: relative/path/FileName.ext =====`，容错识别关键词大小写、仅文件名和明显弱边界。只有强证据表明多文件且边界不清时才保守提示；CodeTruncated=true 时不假定末文件块完整。
-- Isolation: 单提交分析，日志关联 submissionId/classroomTaskId/provider/model/duration/retried。
-- Side Effects: 外部网络调用及诊断日志；不写业务数据库。
-- Important Performance / Recovery: 单请求超时与有界指数退避；HTTP 429/5xx/超时按可重试错误处理，缺 Key 为不可重试 MISSING_API_KEY；非法 JSON/越界字段为 BAD_RESPONSE，解析失败终止本次 Provider 解析链。
+  - system prompt 要求 message/suggestion 使用简体中文、保留代码元素原文；user prompt 纳入题目标题/描述/rubric、代码/语言、尝试次数、完整提交说明和 AI 使用声明，要求结合题目分析；学生材料不是系统指令，明确平台未运行程序，自述运行通过不等于验证或掌握。
+  - 多文件文本识别仅由 prompt 引导，默认按普通单文件处理；标准边界为 `===== FILE: relative/path/FileName.ext =====`，容错识别关键词大小写、仅文件名和明显弱边界。只有强证据表明多文件且边界不清时才保守提示；所有输入完整保留，不截断、摘要、分块或隐式降级。
+  - 唯一计量为实际即将发送的完整 messages 的 `Buffer.byteLength(JSON.stringify(messages), 'utf8')`，等于限额允许，超限在预留/fetch 前拒绝。固定请求参数见 Config Owner；只接受 finish_reason=stop，length 归 OUTPUT_LIMIT_REACHED，其他/缺失结束原因及非法协议归 BAD_RESPONSE。
+- Isolation: 单提交分析，执行记录不含完整学生材料或供应商响应。
+- Side Effects: 每次 analyze 最多一次 fetch，通过 Processor 回调先预留、再保存 usage；不直接写业务数据库。
+- Important Performance / Recovery: 单请求有限超时，Provider 不重试；先从可解析响应读取合法 usage，再判断 HTTP/结束原因/业务 JSON。仅实报非负有限整数且 prompt+completion=total 有效；reasoning_tokens 是 completion 明细，不重复相加、不保存 reasoning_content。缺失/无效/超时/无法解析 usage 为 null。HTTP 429/5xx/超时按可重试错误处理，缺 Key 为不可重试 MISSING_API_KEY；非法 JSON/越界字段为 BAD_RESPONSE，解析失败终止本次 Provider 解析链。
 - SoT: `backend/src/modules/learning-tasks/ai-feedback/providers/real/openai-compatible-feedback-provider.base.ts`；`backend/src/modules/learning-tasks/ai-feedback/protocol/ai-feedback-json.protocol.ts`；`backend/src/modules/learning-tasks/ai-feedback/prompts/ai-feedback.prompt.ts`。
 - Boundary / Non-responsibility: 不用后端正则拆分多文件，不新增 codeFiles 数据模型，不要求普通提交补 FILE 标记；不接管 Processor 的 Job 重试终态。具体配置值见 [Config Matrix](./handoff-backend-config-matrix.md)。
 
@@ -458,7 +461,7 @@ Global SoT 只保留理解跨 Service workflow 必需的稳定不变量，不追
 - Domain / Responsibility: 将 Bailian 配置适配到 OpenAI-compatible 基类，执行百炼分析。
 - Upstream: Processor 经 Provider 注入调用。
 - Downstream / Dependencies: `ConfigService`、OpenAI-compatible 基类及其 prompt/protocol/normalizer。
-- Consistency / State / Idempotency: 复用 [Card B](#provider-card-b) 的严格 JSON、字段白名单、反馈条数闸门、超时、退避及错误映射，不维护另一套解析与重试逻辑。
+- Consistency / State / Idempotency: 复用 [Card B](#provider-card-b) 的严格 JSON、字段白名单、反馈条数闸门、单次调用、超时及错误映射，不维护另一套解析与重试逻辑。
 - Isolation: 日志沿用提交/课堂任务上下文并标明 provider=bailian。
 - Side Effects: 经基类发起外部调用，无独立业务数据库写入。
 - SoT: `backend/src/modules/learning-tasks/ai-feedback/providers/real/bailian-feedback.provider.ts`；`backend/src/modules/learning-tasks/ai-feedback/providers/real/openai-compatible-feedback-provider.base.ts`；`backend/src/modules/learning-tasks/ai-feedback/protocol/ai-feedback-json.protocol.ts`；`backend/src/modules/learning-tasks/ai-feedback/prompts/ai-feedback.prompt.ts`。

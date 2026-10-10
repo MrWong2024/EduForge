@@ -1,3 +1,4 @@
+import { AiReviewSummary } from '../ai-feedback/lib/ai-review-summary';
 import { AiFeedbackStatus } from '../ai-feedback/interfaces/ai-feedback-status.enum';
 
 export class SubmissionDetailResponseDto {
@@ -20,4 +21,5 @@ export class SubmissionDetailResponseDto {
   isLate!: boolean;
   lateBySeconds!: number;
   aiFeedbackStatus!: AiFeedbackStatus;
+  aiReview!: AiReviewSummary;
 }

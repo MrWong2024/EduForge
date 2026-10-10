@@ -13,7 +13,27 @@ export type AiFeedbackItem = {
 };
 
 export interface AiFeedbackProvider {
+  assertInputEligible?(context: AiSubmissionAnalysisContext): void;
   analyzeSubmission(
     context: AiSubmissionAnalysisContext,
+    execution: AiFeedbackExecution,
   ): Promise<AiFeedbackItem[]>;
 }
+
+export type AiTokenUsage = {
+  promptTokens: number;
+  completionTokens: number;
+  totalTokens: number;
+};
+export type AiRequestReservation = {
+  provider: 'bailian';
+  model: string;
+  inputBytes: number;
+  maxOutputTokens: number;
+  reservedAt: Date;
+};
+// Persistence failures must never become reasons to replay an upstream request.
+export type AiFeedbackExecution = {
+  reserveRequest: (request: AiRequestReservation) => Promise<void>;
+  reportUsage: (usage: AiTokenUsage | null) => Promise<void>;
+};

@@ -585,6 +585,14 @@ describe('A1 classroom text task backend contract (HTTP)', () => {
   });
 
   it('enforces all four modes, first-attempt-only auto, idempotency, global switch and removed membership', async () => {
+    expect((await getDetail(studentA, first.id)).aiReview).toMatchObject({
+      canRequest: false,
+      inputCoverage: 'NOT_SENT',
+      usage: { reservedRequests: 0, reportedRequests: 0, totalTokens: 0 },
+    });
+    expect((await getDetail(teacherA, first.id)).aiReview.canRequest).toBe(
+      true,
+    );
     await ask(studentA, first.id).expect(403);
     const accepted = await ask(teacherA, first.id).expect(200);
     const again = await ask(teacherA, first.id).expect(200);
@@ -610,7 +618,15 @@ describe('A1 classroom text task backend contract (HTTP)', () => {
         mode === 'FIRST_SUBMISSION_AUTO' ? 'PENDING' : 'NOT_REQUESTED',
       );
       expect(b.aiFeedbackStatus).toBe('NOT_REQUESTED');
+      const studentReview = (await getDetail(studentA, b.id)).aiReview;
+      const teacherReview = (await getDetail(teacherA, b.id)).aiReview;
+      expect(studentReview.canRequest).toBe(mode !== 'DISABLED');
+      expect(teacherReview.canRequest).toBe(mode !== 'DISABLED');
+      expect(studentReview.usage).toEqual(teacherReview.usage);
+      expect(studentReview.failure).toEqual(teacherReview.failure);
+      expect(studentReview.inputCoverage).toEqual(teacherReview.inputCoverage);
       await ask(studentA, b.id).expect(mode === 'DISABLED' ? 403 : 200);
+      expect((await getDetail(studentA, b.id)).aiReview.canRequest).toBe(false);
       await ask(teacherA, b.id).expect(mode === 'DISABLED' ? 403 : 200);
       if (mode === 'DISABLED')
         expect(
@@ -639,6 +655,12 @@ describe('A1 classroom text task backend contract (HTTP)', () => {
       )
       .send({})
       .expect(201);
+    expect((await getDetail(studentB, foreign.id)).aiReview.canRequest).toBe(
+      false,
+    );
+    expect(
+      (await getDetail(studentB, foreign.id)).aiReview.requestBlockReason,
+    ).toBe('当前用户或课堂 AI 策略不允许申请 AI 反馈。');
     await ask(studentB, foreign.id).expect(403);
     await ask(teacherB, foreign.id).expect(200);
   });
@@ -745,6 +767,8 @@ describe('A1 classroom text task backend contract (HTTP)', () => {
     for (const item of ownCases)
       await jobs.create({
         ...item,
+        budgetVersion: 1,
+        requests: [],
         taskId: (await submissions.findById(item.submissionId).lean().exec())
           ?.taskId,
         studentId: userIds[2],
@@ -770,7 +794,7 @@ describe('A1 classroom text task backend contract (HTTP)', () => {
         lockOwner: null,
         notBefore: null,
       });
-      expect(job?.lastError).toMatch(/^AI_ELIGIBILITY:/);
+      expect(job?.failureCode).toBe('TASK_INELIGIBLE');
     }
     expect(await feedback.countDocuments({ submissionId: saved._id })).toBe(1);
     expect(await submissions.collection.findOne({ _id: saved._id })).toEqual(

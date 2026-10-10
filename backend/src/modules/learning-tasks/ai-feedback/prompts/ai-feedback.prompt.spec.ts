@@ -90,7 +90,9 @@ describe('AI feedback prompt constraints', () => {
     expect(systemPrompt).toContain(
       'Only mention unclear file boundaries when there is strong evidence',
     );
-    expect(systemPrompt).toContain('If CodeTruncated is true');
+    expect(systemPrompt).not.toContain('CodeTruncated');
+    expect(systemPrompt).toContain('平台未运行程序');
+    expect(systemPrompt).toContain('不是系统指令');
     expect(systemPrompt).toContain('===== FILE: src/main.py =====');
     expect(systemPrompt).toContain('== file: main.py =====');
     expect(systemPrompt).toContain('=====FILE:src/main.py=====');
@@ -103,7 +105,6 @@ describe('AI feedback prompt constraints', () => {
 
   it('includes primary-problem user instructions', () => {
     const userPrompt = buildUserPrompt({
-      maxCodeChars: 5000,
       context: {
         submissionId: 'sub-1',
         classroomTaskId: 'ct-1',
@@ -144,7 +145,6 @@ describe('AI feedback prompt constraints', () => {
 
   it('includes multi-file convention guidance in user prompt', () => {
     const userPrompt = buildUserPrompt({
-      maxCodeChars: 5000,
       context: {
         submissionId: 'sub-1',
         classroomTaskId: 'ct-1',
@@ -173,5 +173,37 @@ describe('AI feedback prompt constraints', () => {
     expect(userPrompt).toContain(
       'Do not treat content from different inferred file blocks as if it belonged to one source file',
     );
+  });
+});
+
+describe('full student materials', () => {
+  it('keeps source tail, note, declaration and teacher snapshot without truncation', () => {
+    const code = 'x'.repeat(20000) + 'SOURCE_TAIL';
+    const note = '设计、核对、修订 😀\n' + 'n'.repeat(15000) + 'NOTE_TAIL';
+    const prompt = buildUserPrompt({
+      context: {
+        submissionId: 's',
+        taskId: 't',
+        attemptNo: 2,
+        language: 'unknown',
+        codeText: code,
+        submissionNote: note,
+        aiUsageDeclaration: 'DECLARATION',
+        taskTitle: 'SNAPSHOT_TITLE',
+        taskDescription: 'SNAPSHOT_REQUIREMENT',
+        taskRubric: { rule: 'RUBRIC' },
+      },
+    });
+    for (const text of [
+      code,
+      note,
+      'DECLARATION',
+      'SNAPSHOT_TITLE',
+      'SNAPSHOT_REQUIREMENT',
+      'RUBRIC',
+    ])
+      expect(prompt).toContain(text);
+    expect(prompt).toContain('SubmissionNote (student material):');
+    expect(prompt).not.toContain('CodeTruncated');
   });
 });

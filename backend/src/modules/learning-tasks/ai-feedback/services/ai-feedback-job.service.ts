@@ -1,4 +1,4 @@
-﻿import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import {
@@ -7,6 +7,7 @@ import {
 } from '../schemas/ai-feedback-job.schema';
 import { Submission } from '../../schemas/submission.schema';
 import { AiFeedbackStatus } from '../interfaces/ai-feedback-status.enum';
+import { AiReviewJob } from '../lib/ai-review-summary';
 import { WithId } from '../../../../common/types/with-id.type';
 import { WithTimestamps } from '../../../../common/types/with-timestamps.type';
 
@@ -88,6 +89,16 @@ export class AiFeedbackJobService {
       }
       throw error;
     }
+  }
+
+  async getReviewJob(submissionId: Types.ObjectId) {
+    return this.aiFeedbackJobModel
+      .findOne({ submissionId })
+      .select(
+        'status budgetVersion provider failureCode requests attempts maxAttempts notBefore',
+      )
+      .lean<AiReviewJob>()
+      .exec();
   }
 
   async listJobs(params: { status?: AiFeedbackJobStatus; limit?: number }) {
@@ -180,6 +191,8 @@ export class AiFeedbackJobService {
 
   private toNewJobDocument(submission: Submission & { _id: Types.ObjectId }) {
     return {
+      budgetVersion: 1,
+      requests: [],
       submissionId: submission._id,
       taskId: submission.taskId,
       classroomTaskId: submission.classroomTaskId,

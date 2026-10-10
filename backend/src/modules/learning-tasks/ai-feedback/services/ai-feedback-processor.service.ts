@@ -15,6 +15,7 @@ import {
 } from '../schemas/ai-feedback-job.schema';
 import { AI_FEEDBACK_PROVIDER_TOKEN } from '../interfaces/ai-feedback-provider.interface';
 import type {
+  AiFeedbackExecution,
   AiFeedbackItem,
   AiFeedbackProvider,
 } from '../interfaces/ai-feedback-provider.interface';
@@ -24,6 +25,7 @@ import { AiFeedbackGuardsService } from './ai-feedback-guards.service';
 import { WithId } from '../../../../common/types/with-id.type';
 import { WithTimestamps } from '../../../../common/types/with-timestamps.type';
 import { AiSubmissionAnalysisContext } from '../interfaces/ai-submission-analysis-context.interface';
+import { AiReviewFailureCode } from '../lib/ai-review-summary';
 import { compactAiFeedbackItems } from '../lib/feedback-item-compactor';
 
 type AiFeedbackJobWithMeta = AiFeedbackJob & WithId & WithTimestamps;
@@ -72,6 +74,12 @@ export class AiFeedbackProcessor {
     };
 
     for (let index = 0; index < batchSize; index += 1) {
+      const retired = await this.terminateUnsupportedJob();
+      if (retired) {
+        results.processed += 1;
+        results.dead += 1;
+        continue;
+      }
       const job = await this.claimNextJob();
       if (!job) {
         break;
@@ -122,6 +130,17 @@ export class AiFeedbackProcessor {
           submission,
           classroomTask.taskSnapshot,
         );
+        const provider =
+          this.configService.get<string>('AI_FEEDBACK_PROVIDER') === 'bailian'
+            ? 'bailian'
+            : 'stub';
+        const assigned = await this.aiFeedbackJobModel
+          .updateOne(this.claimFilter(job), { $set: { provider } })
+          .exec();
+        if (assigned.matchedCount !== 1)
+          throw new Error('Claim no longer current');
+        // Oversized complete input is terminal, including when locally throttled.
+        this.aiFeedbackProvider.assertInputEligible?.(analysisContext);
         const bucketKey = job.classroomTaskId?.toString();
         if (!this.aiFeedbackGuards.tryConsume(bucketKey)) {
           this.logger.debug(
@@ -136,8 +155,11 @@ export class AiFeedbackProcessor {
         const release = await this.aiFeedbackGuards.acquire();
         let items: AiFeedbackItem[] = [];
         try {
-          items =
-            await this.aiFeedbackProvider.analyzeSubmission(analysisContext);
+          items = await this.aiFeedbackProvider.analyzeSubmission(
+            analysisContext,
+            this.executionFor(job),
+          );
+          await this.requireCurrentClaim(job);
           const compactedItems = compactAiFeedbackItems(items, {
             maxItems: this.getMaxItems(),
           });
@@ -151,16 +173,14 @@ export class AiFeedbackProcessor {
           release();
         }
         await this.aiFeedbackJobModel
-          .findOneAndUpdate(
-            { _id: job._id, lockOwner: job.lockOwner },
-            {
-              status: AiFeedbackJobStatus.Succeeded,
-              lockedAt: null,
-              lockOwner: null,
-              notBefore: null,
-              lastError: null,
-            },
-          )
+          .findOneAndUpdate(this.claimFilter(job), {
+            status: AiFeedbackJobStatus.Succeeded,
+            lockedAt: null,
+            lockOwner: null,
+            notBefore: null,
+            lastError: null,
+            failureCode: null,
+          })
           .exec();
         results.succeeded += 1;
       } catch (error) {
@@ -198,6 +218,7 @@ export class AiFeedbackProcessor {
       attemptNo: submission.attemptNo,
       language: submission.content?.language ?? 'unknown',
       codeText: submission.content?.codeText ?? '',
+      submissionNote: submission.content?.submissionNote ?? '',
       aiUsageDeclaration: submission.meta?.aiUsageDeclaration,
       taskId: submission.taskId.toString(),
       taskTitle: task.title,
@@ -216,6 +237,8 @@ export class AiFeedbackProcessor {
     return this.aiFeedbackJobModel
       .findOneAndUpdate(
         {
+          budgetVersion: 1,
+          $expr: { $lt: ['$attempts', '$maxAttempts'] },
           status: {
             $in: [AiFeedbackJobStatus.Pending, AiFeedbackJobStatus.Failed],
           },
@@ -237,6 +260,7 @@ export class AiFeedbackProcessor {
           ],
         },
         {
+          $inc: { attempts: 1 },
           $set: {
             status: AiFeedbackJobStatus.Running,
             lockedAt: now,
@@ -283,50 +307,137 @@ export class AiFeedbackProcessor {
     }
   }
 
-  private async handleJobFailure(job: AiFeedbackJobWithMeta, error: unknown) {
-    const isProviderError = error instanceof AiFeedbackProviderError;
-    const providerCode = isProviderError ? error.code : null;
-    const lastError = isProviderError
-      ? error.message
-      : error instanceof AiFeedbackEligibilityError
-        ? error.message
-        : 'AI_FEEDBACK_PROVIDER: UNKNOWN';
-    const shouldDeadImmediately =
-      error instanceof AiFeedbackEligibilityError ||
-      providerCode === AI_FEEDBACK_ERROR_CODES.UNAUTHORIZED ||
-      providerCode === AI_FEEDBACK_ERROR_CODES.MISSING_API_KEY;
-    const isRateLimit =
-      providerCode === AI_FEEDBACK_ERROR_CODES.RATE_LIMIT_UPSTREAM ||
-      providerCode === AI_FEEDBACK_ERROR_CODES.RATE_LIMIT_LOCAL;
-    const attempts = job.attempts ?? 0;
-    const maxAttempts = job.maxAttempts ?? 3;
-    const nextAttempts = attempts + 1;
-    const shouldDead = shouldDeadImmediately || nextAttempts >= maxAttempts;
-    const status = shouldDead
-      ? AiFeedbackJobStatus.Dead
-      : AiFeedbackJobStatus.Failed;
-    const baseBackoffMs = shouldDead
-      ? 0
-      : Math.min(
-          AiFeedbackProcessor.MAX_BACKOFF_MS,
-          AiFeedbackProcessor.BASE_BACKOFF_MS * Math.pow(2, nextAttempts - 1),
-        );
-    const backoffMs = isRateLimit
-      ? Math.max(baseBackoffMs, 30000)
-      : baseBackoffMs;
-    const notBefore = shouldDead ? null : new Date(Date.now() + backoffMs);
+  private claimFilter(job: AiFeedbackJobWithMeta) {
+    return {
+      _id: job._id,
+      status: AiFeedbackJobStatus.Running,
+      attempts: job.attempts,
+      lockOwner: job.lockOwner,
+    };
+  }
 
+  private async requireCurrentClaim(job: AiFeedbackJobWithMeta) {
+    if (!(await this.aiFeedbackJobModel.exists(this.claimFilter(job))))
+      throw new Error('Claim no longer current');
+  }
+
+  private executionFor(job: AiFeedbackJobWithMeta): AiFeedbackExecution {
+    return {
+      reserveRequest: async (request) => {
+        const result = await this.aiFeedbackJobModel
+          .updateOne(
+            {
+              ...this.claimFilter(job),
+              budgetVersion: 1,
+              'requests.claimNo': { $ne: job.attempts },
+              $expr: { $lt: [{ $size: { $ifNull: ['$requests', []] } }, 3] },
+            },
+            {
+              $push: {
+                requests: { ...request, claimNo: job.attempts, usage: null },
+              },
+            },
+          )
+          .exec();
+        if (result.matchedCount !== 1)
+          throw new Error('Request reservation not persisted');
+      },
+      reportUsage: async (usage) => {
+        const result = await this.aiFeedbackJobModel
+          .updateOne(
+            {
+              ...this.claimFilter(job),
+              'requests.claimNo': job.attempts,
+            },
+            { $set: { 'requests.$.usage': usage } },
+          )
+          .exec();
+        if (result.matchedCount !== 1)
+          throw new Error('Request usage not persisted');
+      },
+    };
+  }
+
+  private async terminateUnsupportedJob() {
+    // Legacy RUNNING is terminated, never taken over or replayed. Terminal jobs
+    // remain untouched, including documents without budgetVersion.
+    return this.aiFeedbackJobModel
+      .findOneAndUpdate(
+        {
+          budgetVersion: { $ne: 1 },
+          status: {
+            $in: [
+              AiFeedbackJobStatus.Pending,
+              AiFeedbackJobStatus.Failed,
+              AiFeedbackJobStatus.Running,
+            ],
+          },
+        },
+        {
+          $set: {
+            status: AiFeedbackJobStatus.Dead,
+            failureCode: 'LEGACY_JOB_UNSUPPORTED',
+            lastError: 'AI_FEEDBACK: LEGACY_JOB_UNSUPPORTED',
+            notBefore: null,
+            lockedAt: null,
+            lockOwner: null,
+          },
+        },
+        { new: true },
+      )
+      .exec();
+  }
+
+  private async handleJobFailure(job: AiFeedbackJobWithMeta, error: unknown) {
+    const providerCode =
+      error instanceof AiFeedbackProviderError ? error.code : null;
+    const failureCode: AiReviewFailureCode =
+      error instanceof AiFeedbackEligibilityError
+        ? 'TASK_INELIGIBLE'
+        : providerCode === 'INPUT_BUDGET_EXCEEDED'
+          ? 'INPUT_BUDGET_EXCEEDED'
+          : providerCode === 'OUTPUT_LIMIT_REACHED'
+            ? 'OUTPUT_LIMIT_REACHED'
+            : ['UNAUTHORIZED', 'MISSING_API_KEY', 'UPSTREAM_4XX'].includes(
+                  providerCode ?? '',
+                )
+              ? 'PROVIDER_CONFIGURATION'
+              : ['RATE_LIMIT_UPSTREAM', 'RATE_LIMIT_LOCAL'].includes(
+                    providerCode ?? '',
+                  )
+                ? 'RATE_LIMITED'
+                : ['TIMEOUT', 'UPSTREAM_5XX'].includes(providerCode ?? '')
+                  ? 'UPSTREAM_UNAVAILABLE'
+                  : providerCode === 'BAD_RESPONSE'
+                    ? 'INVALID_RESPONSE'
+                    : 'INTERNAL_ERROR';
+    const retryable =
+      error instanceof AiFeedbackProviderError &&
+      error.retryable &&
+      [
+        'RATE_LIMIT_UPSTREAM',
+        'RATE_LIMIT_LOCAL',
+        'UPSTREAM_5XX',
+        'TIMEOUT',
+      ].includes(error.code);
+    const dead = !retryable || job.attempts >= job.maxAttempts;
+    const status = dead ? AiFeedbackJobStatus.Dead : AiFeedbackJobStatus.Failed;
+    const backoff = Math.min(
+      AiFeedbackProcessor.MAX_BACKOFF_MS,
+      AiFeedbackProcessor.BASE_BACKOFF_MS * Math.pow(2, job.attempts - 1),
+    );
     await this.aiFeedbackJobModel
-      .findByIdAndUpdate(job._id, {
-        status,
-        attempts: nextAttempts,
-        notBefore,
-        lockedAt: null,
-        lockOwner: null,
-        lastError,
+      .findOneAndUpdate(this.claimFilter(job), {
+        $set: {
+          status,
+          notBefore: dead ? null : new Date(Date.now() + backoff),
+          lockedAt: null,
+          lockOwner: null,
+          lastError: 'AI_FEEDBACK: ' + (providerCode ?? failureCode),
+          failureCode,
+        },
       })
       .exec();
-
     return status;
   }
 }

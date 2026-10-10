@@ -1,5 +1,7 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
 import { HydratedDocument, Types } from 'mongoose';
+import type { AiTokenUsage } from '../interfaces/ai-feedback-provider.interface';
+import type { AiReviewFailureCode } from '../lib/ai-review-summary';
 import { Submission } from '../../schemas/submission.schema';
 import { Task } from '../../schemas/task.schema';
 import { User } from '../../../users/schemas/user.schema';
@@ -15,8 +17,40 @@ export enum AiFeedbackJobStatus {
   Dead = 'DEAD',
 }
 
+@Schema({ _id: false })
+export class AiRequestRecord {
+  @Prop({ type: Number, required: true, min: 1, max: 3 })
+  claimNo!: number;
+  @Prop({ type: String, enum: ['bailian'], required: true })
+  provider!: 'bailian';
+  @Prop({ type: String, required: true })
+  model!: string;
+  @Prop({ type: Number, required: true })
+  inputBytes!: number;
+  @Prop({ type: Number, required: true })
+  maxOutputTokens!: number;
+  @Prop({ type: Date, required: true })
+  reservedAt!: Date;
+  @Prop({ type: Object, default: null })
+  usage!: AiTokenUsage | null;
+}
+const AiRequestRecordSchema = SchemaFactory.createForClass(AiRequestRecord);
+
 @Schema({ timestamps: true })
 export class AiFeedbackJob {
+  // No default: old jobs must not hydrate as current budget records.
+  @Prop({ type: Number })
+  budgetVersion?: number;
+  @Prop({ type: String, enum: ['bailian', 'stub'] })
+  provider?: 'bailian' | 'stub';
+  @Prop({ type: String })
+  failureCode?: AiReviewFailureCode;
+  @Prop({
+    type: [AiRequestRecordSchema],
+    default: undefined,
+    validate: (records: AiRequestRecord[]) => records.length <= 3,
+  })
+  requests?: AiRequestRecord[];
   @Prop({ type: Types.ObjectId, ref: Submission.name, required: true })
   submissionId!: Types.ObjectId;
 
