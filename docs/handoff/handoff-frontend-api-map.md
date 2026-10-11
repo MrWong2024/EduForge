@@ -90,7 +90,7 @@
   - 注意：内容更新与生命周期采用各自后端接口，普通保存不构造状态流转；权限与生命周期由后端最终校验。
 - 班级发布候选：`PublishClassroomTaskForm` -> `/api/proxy/classrooms/:id/publishable-task-templates`。
   - 对应后端：`GET /api/classrooms/:id/publishable-task-templates`。
-  - 注意：模板可见性、发布资格及本班已发布排除由后端候选接口决定，前端不自行伪造候选全集。
+  - 注意：模板可见性、发布资格及本班已发布排除由后端候选接口决定，前端不自行伪造候选全集。当前候选 DTO 不提供 rubric，缺少该字段只能提示到模板详情核对，不能判断模板未配置评分参考。
 - 班级任务实例：`/teacher/classrooms/:id/tasks/page.tsx` + 发布/生命周期/编辑组件 -> `/api/proxy/classrooms/:id/tasks*`。
   - 对应后端：`GET/POST/PATCH /api/classrooms/:id/tasks*` 与 `/status`。
   - 注意：发布表单在既有 settings 内发送所选平台 AI 模式，默认仅教师发起，保留截止/迟交/次数；发布后模式只读。列表/详情消费实例模式、快照可用性及投影教学内容，不另取当前模板覆盖。实例配置与状态动作分开发送。
@@ -99,7 +99,9 @@
   - 注意：只按 `classroomTaskId` 读取，不用 `taskId` 兜底过滤。
 - 提交详情和反馈：Teacher/Student submission pages + feedback forms -> `/api/proxy/learning-tasks/submissions/:id*`。
   - 对应后端：submission detail、feedback list、teacher feedback create/update。
-  - 注意：正式 detail API `GET /api/learning-tasks/submissions/:id` 是主体 SoT；每次先 await detail 成功，再请求同一提交的 feedback；师生共用学生侧详情 mapper，保留完整源码、独立说明与已有声明原文，适配 aiReview；URL query 仅保留班级/课堂任务返回导航，不补标题、正文、提交时间、次数、迟交或 AI 状态。公开字段与 null/0 语义由 [Backend DTO](./handoff-backend-dto-cheatsheet.md#submission-request--response-family) 维护。
+  - 注意：正式 detail API `GET /api/learning-tasks/submissions/:id` 是主体 SoT；每次先 await detail 成功，再请求同一提交的 feedback；师生共用学生侧详情 mapper，保留完整源码、独立说明与已有声明原文，适配 aiReview；URL query 不提供标题、正文、提交时间、次数、迟交或 AI 状态；班级/课堂任务上下文用于返回导航。公开字段与 null/0 语义由 [Backend DTO](./handoff-backend-dto-cheatsheet.md#submission-request--response-family) 维护。
+
+- 教师提交页的可选评分参考：在权威 detail/feedback 成功后，使用上下文 classroomId 与 detail 的权威 classroomTaskId 经 BFF 读取 `GET /api/classrooms/:classroomId/tasks/:classroomTaskId`，复用 `toClassroomTask`；仅当响应 taskId 与提交 detail 一致时展示实例投影 rubric。上下文只定位请求，评分事实来自正式响应；无上下文、读失败或不匹配时提示从任务详情核对，不替换已保存作品或反馈表单。
 
 ### 3.4 Student 学习链路
 

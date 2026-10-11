@@ -110,7 +110,7 @@ const toRubricSummary = (
   if (!rubric || Object.keys(rubric).length === 0) {
     return {
       configured: false,
-      hint: "未配置评分参考",
+      hint: "候选列表未提供评分参考，请到模板详情核对",
     };
   }
 
@@ -585,7 +585,7 @@ export function PublishClassroomTaskForm({
   return (
     <section
       id="publish-task-form"
-      className="rounded-lg border border-zinc-200 bg-white p-4"
+      className="rounded-lg border border-zinc-200 bg-white p-4 text-zinc-900"
     >
       <h2 className="text-base font-semibold text-zinc-900">发布任务到班级</h2>
       <p className="mt-1 text-sm text-zinc-600">
@@ -804,7 +804,7 @@ export function PublishClassroomTaskForm({
                       {toDisplayText(task.stage)} | 评分参考：
                       {rubricSummary.configured
                         ? `已配置（${rubricSummary.hint}）`
-                        : "未配置"}
+                        : "请到模板详情核对"}
                     </p>
                     <p className="mt-2 text-xs text-zinc-600">
                       描述摘要：{toDescriptionSnippet(task.description)}
@@ -856,7 +856,7 @@ export function PublishClassroomTaskForm({
                 <span className="text-zinc-500">评分参考：</span>
                 {selectedRubricSummary.configured
                   ? `已配置（${selectedRubricSummary.hint}）`
-                  : "未配置"}
+                  : selectedRubricSummary.hint}
               </p>
               <p>
                 <span className="text-zinc-500">模块：</span>

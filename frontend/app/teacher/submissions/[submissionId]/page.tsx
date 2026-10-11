@@ -2,6 +2,7 @@ import Link from "next/link";
 import { headers } from "next/headers";
 import { ErrorState } from "@/components/blocks/ErrorState";
 import { SubmissionAiReview } from "@/components/submissions/SubmissionAiReview";
+import { TaskRubric } from "@/components/learning-tasks/TaskRubric";
 import { SubmissionContent } from "@/components/submissions/SubmissionContent";
 import { PageHeader } from "@/components/blocks/PageHeader";
 import { TeacherFeedbackForm } from "@/components/teacher/TeacherFeedbackForm";
@@ -12,6 +13,7 @@ import {
   extractRawDetail,
 } from "@/lib/api/error-presenter";
 import {
+  toClassroomTask,
   toSubmissionDetailResponse,
   toTeacherFeedbackListResponse,
   type TeacherSubmissionContext,
@@ -143,6 +145,25 @@ export default async function TeacherSubmissionDetailPage({
     );
   }
 
+  let rubric: Record<string, unknown> | undefined;
+  let rubricAvailable = false;
+  if (viewModel.context.classroomId && viewModel.detail.classroomTaskId) {
+    try {
+      const taskPayload = await fetchJson<unknown>(
+        `classrooms/${encodeURIComponent(viewModel.context.classroomId)}/tasks/${encodeURIComponent(viewModel.detail.classroomTaskId)}`,
+        { origin: await getRequestOrigin(), cache: "no-store" },
+      );
+      const task = toClassroomTask(taskPayload);
+      if (task.taskId === viewModel.detail.taskId) {
+        rubric = task.rubric;
+        rubricAvailable = true;
+      }
+    } catch {
+      // Optional reference failure must not replace the saved work or draft form.
+      rubricAvailable = false;
+    }
+  }
+
   const backHref =
     viewModel.context.classroomId && viewModel.context.classroomTaskId
       ? paths.teacher.classroomTaskSubmissions(
@@ -240,6 +261,13 @@ export default async function TeacherSubmissionDetailPage({
       </section>
 
       <SubmissionContent detail={viewModel.detail} />
+      {rubricAvailable ? (
+        <TaskRubric rubric={rubric} />
+      ) : (
+        <p className="text-sm text-zinc-600">
+          评分参考暂不可用，请从任务详情核对。
+        </p>
+      )}
       <SubmissionAiReview
         key={submissionId}
         submissionId={submissionId}

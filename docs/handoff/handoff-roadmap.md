@@ -33,15 +33,13 @@ EduForge 当前是面向教师与学生的教学任务平台，已形成以下�
 - 项目 handoff 已建立 Roadmap、Frontend Design Baseline、导航型 INDEX 与“一事实一 Owner”结构。
 - Backend / Frontend Testing Playbook、测试数据库职责和最低充分 Browser evidence 治理已建立。
 
-## 5. 文本教学任务承载（ACTIVE）
+## 5. 文本教学任务承载（CURRENT）
 
-面向源码文本与提交说明的教学活动，沿既有 Task → ClassroomTask → Submission → Feedback 链建立首批教学承载合同。
+首批文本教学任务承载工程范围已闭合：沿 Task → ClassroomTask → Submission → Feedback，支持固定发布内容、源码与独立说明、实例平台 AI 策略、完整文本辅助评阅及用量读取，并形成教师发布、学生提交、人工反馈和修订的真实前后端页面链。
 
-- A1：发布内容固定、提交说明、班级隔离与实例平台 AI 策略；后端范围完成，定向 unit/HTTP E2E 及 lint、完整 typecheck、build 门禁已通过。
-- A2：完整文本 AI 辅助评阅、调用限额与实报用量读取；后端范围完成，定向 unit/HTTP E2E（含受控 stub Worker 循环）及 lint、完整 typecheck、build 门禁已通过。
-- B1（ACTIVE）：基于稳定后端合同接入教师发布、学生提交/详情、教师查看与反馈。B1-1 页面实现与即时 pure/static 门禁已完成；B1-2 收到 B1-1 新 commit 后制定并执行真实师生 Browser 流程验收，含代表性恢复、草稿保护和响应式操作。B1 整体尚未完成。
-
-A1、A2、B1 均完成并通过对应验收后才能关闭首批教学承载工作包；真实课堂效果另行验证。详细合同由 [API Map](./handoff-backend-api-map.md)、[DTO Cheatsheet](./handoff-backend-dto-cheatsheet.md)、[Service Map](./handoff-backend-service-map.md) 和 [Config Matrix](./handoff-backend-config-matrix.md) 维护。
+- 后端合同、前端页面及对应工程验收完成；隔离数据库与合成账号的 Agent-assisted Browser smoke 使用现有 stub，代表性只读/失败恢复、草稿保护与响应式操作已闭合。
+- 详细合同由 [Backend API](./handoff-backend-api-map.md)、[Backend DTO](./handoff-backend-dto-cheatsheet.md) 与 [Frontend API](./handoff-frontend-api-map.md) / [Component Map](./handoff-frontend-component-map.md) Owner 维护；证据职责及验收支持见 [Backend testing playbook](./handoff-backend-testing-playbook.md) 和 [Frontend testing playbook](./handoff-frontend-testing-playbook.md)。
+- 真实模型质量、教学可理解性及真实课堂效果尚未验证；工程完成不等于真实课堂试教通过。
 
 ## 6. 维护规则
 

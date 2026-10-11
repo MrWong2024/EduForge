@@ -9,7 +9,7 @@ export function SubmissionContent({
     note = detail.content.submissionNote,
     declaration = detail.meta?.aiUsageDeclaration;
   return (
-    <section className="min-w-0 space-y-4 rounded-lg border border-zinc-200 bg-white p-4">
+    <section className="min-w-0 space-y-4 rounded-lg border border-zinc-200 bg-white p-4 text-zinc-900">
       <h2 className="text-base font-semibold text-zinc-900">本次提交内容</h2>
       <p className="break-words text-xs text-zinc-600">
         {getTaskSnapshotMessage(detail.taskSnapshotAvailable)}

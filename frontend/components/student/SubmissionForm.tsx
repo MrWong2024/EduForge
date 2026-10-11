@@ -143,7 +143,7 @@ export function SubmissionForm({
   };
 
   return (
-    <section className="rounded-lg border border-zinc-200 bg-white p-4">
+    <section className="rounded-lg border border-zinc-200 bg-white p-4 text-zinc-900">
       <h2 className="text-sm font-semibold text-zinc-900">提交作业</h2>
       <form onSubmit={handleSubmit} className="mt-3">
         <fieldset

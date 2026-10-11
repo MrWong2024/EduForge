@@ -39,7 +39,7 @@ Browser/test infrastructure 的通用复杂度治理由 [Codex instruction spec]
 | B. Unit / Logic | 独立 unit/component spec = 0；pure/static contract 归 A 类 | 当前无独立组件或其他局部逻辑证据 | 若未来抽出稳定的 formatter/state helper，可出现低成本缺口；当前空白本身不阻断 | 仅为独立、稳定、低成本逻辑增加，优先复用现有 runner，不机械补齐组件快照 |
 | C. HTTP E2E / Integration | 前端无独立 HTTP suite；后端 Jest + Supertest E2E 是公开 API 主 Owner | 认证、DTO、角色/ownership、Submission/AI Feedback 与数据库终态 | 不重复搬到 Browser；BFF Cookie/Context 子事实由第 7.3 节提供专门证据 | API 风险优先补后端 HTTP E2E；仅 Browser-only 部分再升级 |
 | D. Scripted Browser | 独立 Playwright Browser runner；1 个 BFF Cookie/Context micro-profile（见第 7.3 节） | Chromium 接受 Cookie、HttpOnly、自动发送及 Context Cookie/Storage 隔离 | 不验证 UI，不替代 HTTP E2E，不证明其他 Browser 合同 | 仅通过准入的独立 Browser-native 候选才扩张 |
-| E. Agent-assisted Browser smoke | 本文定义治理；执行时使用 Agent 可控制的真实 Browser | 当前真实产品 UI 的客观可操作性、页面 wiring 与真实用户主流程 | 不是仓库内 CI asset，也没有历史 passed 结果可继承 | 按产品主链和实际变更选择少量场景，不固定全量矩阵 |
+| E. Agent-assisted Browser smoke | 本文定义治理；执行时使用 Agent 可控制的真实 Browser | 当前真实产品 UI 的客观可操作性、页面 wiring 与真实用户主流程 | 不是仓库内 CI asset；执行状态以当次报告为准，不能直接继承历史通过结论 | 按产品主链和实际变更选择少量场景，不固定全量矩阵 |
 | F. Human smoke | 本文 + Frontend design baseline | 清晰度、认知负担、教学表达、视觉/UX 与真实教学判断 | 自动化不能替代；当前无统一签收记录 | 保留人工 Owner，不伪装成自动化 |
 
 ## 4. Pure / Static Contract
@@ -154,6 +154,10 @@ npm run test:browser
 
 这些是候选 smoke，不是每个任务都要全部执行，也不表示尚未执行的流程已通过。未来产品方向不得提前写成当前 smoke。
 
+文本教学任务的真实前后端 smoke 由 Agent 操作实际师生页面：课堂发布、源码与独立说明保存/历史回读、权限内 AI 申请与实际 stub 反馈、教师人工反馈、学生修订，以及任务关闭后的只读访问。它补充真实页面 wiring、防重复入口、正常冷却、失败后的显式核对与恢复、批阅草稿保护和代表性 CSS viewport 的客观可操作性；不重复完整服务端攻击矩阵或 pure 精确乱序。合成账号、前置、受控 APP Processor 与 ADMIN 精确清理引用 [Backend testing playbook §6.2](./handoff-backend-testing-playbook.md#62-文本教学任务专用-smoke-支持)，不在此复制 fixture 字段。
+
+该执行方式是 Agent-assisted interactive Browser smoke，不是 scripted UI golden path 或 CI 资产。实际命令、请求、截图、结果与资源收尾归当次报告；stub 不证明真实模型质量，教学可理解性与真实课堂效果仍由 Human/真实教学验证承担。
+
 ## 9. Human Smoke
 
 Human smoke 保留以下唯一职责：
@@ -170,7 +174,7 @@ Human smoke 有独立证据职责，不是 scripted Browser 或 Agent-assisted B
 
 ## 10. Database / Fixture Coordination
 
-- 后端已建立独立 Browser acceptance database foundation 与受控 backend launcher，和普通 HTTP E2E database 实现 database-level isolation；用途与配置见 [Backend testing playbook](./handoff-backend-testing-playbook.md)。当前仍无 Browser fixture/verifier 或 Browser UI/DB Profile。
+- 后端已建立独立 Browser acceptance database foundation 与受控 backend launcher，和普通 HTTP E2E database 实现 database-level isolation；用途与配置见 [Backend testing playbook](./handoff-backend-testing-playbook.md)。文本教学任务已有薄专用准备、只读核验、受控消费与 cleanup 入口，见后端手册 §6.2；与 Browser 工具、HTTP APP backend 分进程执行。
 - FT-02 BFF Cookie/Context micro-profile 的数据库用途仍为 `none`，只使用内存 synthetic upstream 和独立 BrowserContext，不启动 backend、不连接 DB，也不需要业务 fixture、verifier 或数据库 cleanup。
 - 任何写入型 Agent-assisted/Human smoke 在执行前必须明确环境、实际 database、合成账号/数据 ownership 与 cleanup；不得复用来源不明的服务或账号，也不得与可能清理 `eduforge_test` 的 E2E 并行。
 - 后续写入型 Browser acceptance 资产须在现有 DB foundation 上单独建立明确的 fixture、ownership 与 cleanup 合同；namespace 不能替代数据库用途隔离。

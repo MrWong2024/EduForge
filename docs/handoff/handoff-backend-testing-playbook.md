@@ -94,9 +94,10 @@ Browser 相关进程角色边界：
 |---|---|---|
 | Playwright / Browser runner | `none` | 不得直接获得或连接 Mongo APP / ADMIN URI |
 | Browser backend | `browser_acceptance` | 通过独立 `start:browser-test` launcher 使用 Browser Acceptance APP connection；ADMIN 声明只校验、不注入 Nest 应用 |
-| 未来按真实 profile 风险准入的 fixture / verifier / cleanup | `browser_acceptance` | 作为独立管理进程使用 Browser Acceptance ADMIN connection；不得与 Browser backend 或 runner 合并 |
+| 文本教学任务 `process-ai` | `browser_acceptance` | 独立 APP 应用上下文；不 listen、不启动 Worker，只在独占验收时段消费唯一合格目标，见 §6.2 |
+| 文本教学任务 `prepare/inspect/cleanup/replace` | `browser_acceptance` | 独立 ADMIN 管理进程；不导入 AppModule，不与 HTTP backend 或 Browser 合并，见 §6.2 |
 
-写下上述角色边界不构成现在新增 fixture、verifier 或 cleanup 的理由。当前 foundation 只支持受控启动、正常初始化所需索引元数据和公开 `GET /api` 健康请求；不创建业务数据或 UI/DB Profile，也不代表真实 Teacher/Student Browser 登录已验收。
+Browser launcher foundation 负责受控启动、正常初始化所需索引元数据和公开 `GET /api` 健康请求，本身不创建业务数据或证明师生 UI。文本教学任务另有 §6.2 的专用支持，供真实前后端 Agent-assisted smoke 使用；这不构成扩张通用 fixture 框架的理由。
 
 普通 HTTP E2E 使用独立 `NODE_ENV=test` 子进程，purpose 显式指定或默认解析为 `standard_test`；仅提供 `backend/.env.test`，启动前清除 shell 残留的主连接、管理连接和 Browser 变量，不与 Browser env 叠加。URI 声明门禁在连接前执行，Mongoose 实际 databaseName 在连接后验证；Browser launcher 在 AppModule 导入前和 listen 前分别执行门禁，错误立即拒绝。HTTP E2E 不得连接 Browser、development 或 production 数据库；Browser backend / 管理进程不得连接 standard_test、development 或 production 数据库。
 
@@ -104,7 +105,7 @@ Browser 相关进程角色边界：
 
 - `src/config/database-purpose.spec.ts`：purpose/URI/connected-name、APP/ADMIN 声明、环境隔离与 launcher 静态合同；先 `npm run test -- --listTests --runInBand --runTestsByPath ./src/config/database-purpose.spec.ts`，确认唯一目标后去掉 `--listTests` 执行。
 - 代表性真实 HTTP 回归：`test/users-me.e2e-spec.ts`；先用相同定向参数加 `--listTests` 做 discovery，再运行本手册第 4 节命令。保持 spec-owned cleanup 与 app close。
-- Browser 正向验收：独立前台运行 `npm run start:browser-test`（必要时通过 `BACKEND_PORT` 选择已核对空闲端口），确认实际数据库与安全启动摘要，再请求 `http://127.0.0.1:<port>/api` 得到 200。仅停止该运行单元并确认端口释放，不执行数据库 cleanup。
+- Browser 正向验收：独立前台运行 `npm run start:browser-test`（必要时通过 `BACKEND_PORT` 选择已核对空闲端口），确认实际数据库与安全启动摘要，再请求 `http://127.0.0.1:<port>/api` 得到 200。仅执行启动/健康检查时，停止该运行单元并确认端口释放即可；写入型文本教学 smoke 另须按 §6.2 精确 cleanup。
 
 ## 6. Fixture、Verifier 与 Cleanup
 
@@ -116,7 +117,7 @@ Browser 相关进程角色边界：
 - 符合该 lifecycle 的 spec 在 `afterAll` 中按已记录 ID/唯一字段执行 scoped cleanup，并关闭自己创建的 Nest app；不使用 `dropDatabase`。
 - 涉及 AI provider 的 E2E 使用 stub 或任务自有 mock HTTP server；默认不调用真实外部 AI，mock server 也必须由创建它的 spec 关闭。
 - 启用受控 Worker 循环的专项须在自有 fixture cleanup 前停止定时调度并等待已发起的处理结束，再关闭 app / DB，避免处理与清理或断开连接竞争。
-- 当前不存在共享 Browser fixture CLI、独立 database verifier 或集中式 Browser cleanup runner。数据库终态主要由 spec 内断言与必要的 model 查询证明。
+- 当前没有通用共享 Browser fixture 或集中式 cleanup 框架；文本教学任务使用 §6.2 的薄专用 CLI。HTTP E2E 的数据库终态仍由 spec 内断言与必要的 model 查询证明。
 - spec-local repetition 本身不构成 gap；只有重复代码开始造成具体维护风险时，才按 [Codex instruction spec](../codex-instruction-spec.md) §3.10 评估最低充分 shared helper。
 - `KEEP_E2E_DB=1` 只用于明确的本地诊断；正式验收和 CI 默认不得设置。保留数据时必须报告并由原 spec 的 ownership 信息指导精确清理。
 - 写入超时或连接结果未知时不得直接重跑；先只读核对 app、数据库和任务 namespace 的实际状态。
@@ -128,9 +129,33 @@ fixture、verifier、support 与 Browser infrastructure 的通用复杂度止损
 
 Mongo password、production credential、Bailian API Key、SMTP password、第三方 service credential 与真实用户 credential 始终属于 Secret，不得 tracked、写入日志或报告。synthetic application credential 的有限规则不得用于放宽这些 Secret 边界。
 
-### 6.2 Future Admitted Lifecycle
+### 6.2 文本教学任务专用 Smoke 支持
 
-以下合同仅在未来真实 Browser Profile 已通过准入且确实需要对应资产后生效，不表示 EduForge 当前已经拥有 fixture、verifier 或 Browser cleanup runner：
+入口为 `backend/scripts/browser-text-task-smoke.ts`，从 `backend` 目录运行以下命令；`b1-2-<unique>` 和 `<job-id>` 须替换为当前任务的准确值：
+
+```powershell
+npm run browser:text-smoke -- --help
+npm run browser:text-smoke -- prepare --namespace b1-2-<unique> --frontend-port 3100 --backend-port 5100
+npm run browser:text-smoke -- inspect --namespace b1-2-<unique> --prepared
+npm run browser:text-smoke -- process-ai --namespace b1-2-<unique> --job-id <job-id> --confirm-exclusive b1-2-<unique>
+npm run browser:text-smoke -- inspect --namespace b1-2-<unique>
+npm run browser:text-smoke -- cleanup --namespace b1-2-<unique> --confirm-namespace b1-2-<unique>
+```
+
+- 每次调用为独立进程，仅读取 `backend/.env.browser-acceptance`，复用既有环境构造、用途/URI 声明门禁和连接后实际库名门禁；再核对实际 APP/ADMIN 数据库角色。完整数据库映射仍归 Config Matrix。
+- `prepare` 只通过当前 UserSchema 和密码 helper seed namespace 专属 teacher/student；固定合成应用密码由脚本测试常量统一维护。课程、班级、四个不同已发布私有模板及入班走前端同源 BFF 的正式 HTTP API。课堂发布、作品提交、产品 AI 申请和教师反馈留给真实 Browser。
+- `inspect --prepared` 只读核验账号固定值及最小前置；普通 `inspect` 读取 ownership 限定的资源、保存原文版本及 Job/反馈终态。异常前置不自动修复。确需替换时显式运行 `npm run browser:text-smoke -- replace --namespace b1-2-<unique> --confirm-namespace b1-2-<unique>`：先清理并核对旧残留，再重新准备；不得手工改密码或业务状态绕过核验。
+- `process-ai` 在 APP/ADMIN 声明门禁通过后才动态导入 AppModule，以 `createApplicationContext` 启动且不 listen；实际 ConfigService 必须为 Browser 用途、stub、worker=false、debug=false，实际数据库名和 APP 角色也须匹配。正常索引初始化仍可能写入数据库。
+- 处理前核对 Job→Submission→ClassroomTask→合成师生/班级的完整 ownership；全库 PENDING/FAILED/RUNNING 必须恰好只有目标，且为 budgetVersion=1、PENDING、attempts=0。外来、多目标或 legacy 非终态立即拒绝，不修改它们。随后只调用真实 `AiFeedbackProcessor.processOnce(1)` 一次，读取该目标及实际 stub 反馈核对结果，finally 等待上下文关闭。
+- `processOnce` 是全库扫描入口，上述查询不是并发锁。操作者必须独占验收时段，排除其他 Worker/Profile/生产者并串行形成、消费目标；`--confirm-exclusive` 记录的是该运行前提，不能代替隔离审计。不启用长期 Worker、debug HTTP 或真实模型。
+- 最小恢复记录仅保存 namespace、端口、准确资源 ID，位于 ignored `backend/coverage/browser-text-task-smoke/<namespace>.json`；Cookie 仅在准备过程内存中使用，不持久化 Cookie、Session、Mongo URI 或基础设施凭据。
+- CLI 总截止为 120 秒，HTTP 请求 15 秒；ADMIN 连接建立/选择和查询采用有限超时，连接在 finally 中关闭。写入或 cleanup 结果不明时保留恢复记录，先用 `inspect` 和进程/端口审计确认实际状态，不直接重放。
+- 清理前停止本轮写入与处理并等待在途动作结束。cleanup 使用准确 ID 和关联 ownership，顺序为 Feedback/Job → Submission → ClassroomTask/Task → Enrollment/Classroom/Course → 合成用户 Session/必要 PasswordResetToken → User；拒绝仍在 RUNNING 的自有 Job，不 dropDatabase、不清空集合。完成后核对业务与认证关联残留为零；同一 namespace 的 cleanup 可安全重复，恢复记录在确认资源收尾后再删除。
+- 支持纯测试为 `scripts/browser-text-task-smoke.spec.ts`；沿第 4 节 Jest runner 用相同目标参数先 discovery，再执行。它只证明新增门禁、ownership、固定密码和 cleanup 选择，不证明真实 Browser 流程。
+
+### 6.3 Future Admitted Lifecycle
+
+以下合同用于未来按真实风险准入的其他 Browser Profile；当前文本教学专用资产见 §6.2，不表示已建立通用 fixture/verifier/cleanup 框架：
 
 1. **Fixture 准入与边界：**先评估正式 API、已有 test factory / builder 或合法 synthetic seed 能否最低成本形成起点；只有它们不足时才新增专用 fixture。fixture 只构造 legal、minimal、deterministic、synthetic 前置，不得成为第二套产品、业务状态机、catalog / seed 治理或 UI 测试后门，也不得直接改库制造正式产品不可达状态、绕过业务不变量或引入 test-only lifecycle state；只能直接改库形成的状态须回到 [Frontend testing playbook](./handoff-frontend-testing-playbook.md) 的 `internal_corruption_only` 分类与 [Codex instruction spec](../codex-instruction-spec.md) §3.9 重新判断证据必要性。
 2. **变更触发：**UI copy、layout、selector、styling 或 visual arrangement 变化本身不触发 fixture / verifier 数据合同变更；只有 DTO、Schema、ownership、role、lifecycle / state precondition、正式 API contract 或 Profile 所需持久业务事实真实变化时，才评估最低充分同步。
