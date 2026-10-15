@@ -7,6 +7,18 @@ import {
   TASK_VISIBILITY_PRIVATE,
 } from '../task-template-visibility.constants';
 
+import type { AiContextRef } from '../ai-context/ai-context.types';
+
+@Schema({ _id: false })
+class TaskAiContextRef {
+  @Prop({ required: true })
+  archivePath!: string;
+
+  @Prop({ type: [String], required: true })
+  entryPaths!: string[];
+}
+const TaskAiContextRefSchema = SchemaFactory.createForClass(TaskAiContextRef);
+
 export type TaskDocument = HydratedDocument<Task>;
 
 export enum TaskStatus {
@@ -41,6 +53,9 @@ export class Task {
 
   @Prop()
   difficulty?: string;
+
+  @Prop({ type: [TaskAiContextRefSchema], default: undefined })
+  aiContextRefs?: AiContextRef[];
 
   @Prop({ type: Object })
   rubric?: Record<string, unknown>;

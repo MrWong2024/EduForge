@@ -139,6 +139,20 @@ describe('A1 classroom text task backend contract (HTTP)', () => {
     (await agent.get('/api/learning-tasks/submissions/' + id).expect(200))
       .body as SubmissionDetailResponseDto;
 
+  const processOwned = async (batch: number) => {
+    const owned = await submissions
+      .find({ studentId: { $in: userIds } })
+      .select('_id')
+      .lean()
+      .exec();
+    expect(
+      await jobs.countDocuments({
+        status: { $in: ['PENDING', 'FAILED', 'RUNNING'] },
+        submissionId: { $nin: owned.map((s) => s._id) },
+      }),
+    ).toBe(0);
+    return app.get(AiFeedbackProcessor).processOnce(batch);
+  };
   beforeAll(async () => {
     const module = await Test.createTestingModule({
       imports: [AppModule],
@@ -168,8 +182,29 @@ describe('A1 classroom text task backend contract (HTTP)', () => {
     expect(process.env.EDUFORGE_DATABASE_PURPOSE).toBe('standard_test');
     expect(users.db.name).toBe('eduforge_test');
     users.db.set('maxTimeMS', 10000);
+    const auth = await users.db.db?.command(
+      { connectionStatus: 1, showPrivileges: false },
+      { timeoutMS: 5000 },
+    );
+    const roles = (
+      auth as {
+        authInfo: {
+          authenticatedUserRoles: Array<{ role: string; db: string }>;
+        };
+      }
+    ).authInfo.authenticatedUserRoles;
     expect(
-      await jobs.countDocuments({ status: { $in: ['PENDING', 'FAILED'] } }),
+      roles.some((r) => r.role === 'readWrite' && r.db === 'eduforge_test'),
+    ).toBe(true);
+    expect(
+      roles.some((r) =>
+        ['root', 'dbOwner', 'dbAdminAnyDatabase'].includes(r.role),
+      ),
+    ).toBe(false);
+    expect(
+      await jobs.countDocuments({
+        status: { $in: ['PENDING', 'FAILED', 'RUNNING'] },
+      }),
     ).toBe(0);
     console.info(
       'A1 database gate: standard_test / eduforge_test; namespace=' + namespace,
@@ -281,6 +316,21 @@ describe('A1 classroom text task backend contract (HTTP)', () => {
         expect(await users.countDocuments({ _id: { $in: userIds } })).toBe(0);
         expect(
           await sessions.countDocuments({ userId: { $in: userIds } }),
+        ).toBe(0);
+        expect(
+          await tasks.countDocuments({
+            _id: { $in: taskIds.map((id) => new Types.ObjectId(id)) },
+          }),
+        ).toBe(0);
+        expect(
+          await classrooms.countDocuments({
+            _id: { $in: classIds.map((id) => new Types.ObjectId(id)) },
+          }),
+        ).toBe(0);
+        expect(
+          await courses.countDocuments({
+            _id: { $in: courseIds.map((id) => new Types.ObjectId(id)) },
+          }),
         ).toBe(0);
         console.info('A1 scoped cleanup verified: ' + namespace);
       }
@@ -754,7 +804,7 @@ describe('A1 classroom text task backend contract (HTTP)', () => {
       'analyzeSubmission',
     );
     // Finish this spec's legitimate pending jobs before constructing old-job qualification cases.
-    await app.get(AiFeedbackProcessor).processOnce(20);
+    await processOwned(20);
     provider.mockClear();
     const ownCases = [
       { submissionId: saved._id, classroomTaskId: old._id },
@@ -776,7 +826,7 @@ describe('A1 classroom text task backend contract (HTTP)', () => {
         attempts: 0,
         maxAttempts: 3,
       });
-    expect(await app.get(AiFeedbackProcessor).processOnce(3)).toEqual({
+    expect(await processOwned(3)).toEqual({
       processed: 3,
       succeeded: 0,
       failed: 0,

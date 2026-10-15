@@ -1,3 +1,4 @@
+import { AiContextReaderService } from '../ai-context/ai-context-reader.service';
 import { Enrollment } from '../../classrooms/enrollments/schemas/enrollment.schema';
 import { AiFeedbackMode } from '../../classrooms/classroom-tasks/classroom-task-content';
 import { ConfigService } from '@nestjs/config';
@@ -135,6 +136,7 @@ const createHarness = (
     userModel as unknown as Model<User>,
     aiFeedbackJobService as unknown as AiFeedbackJobService,
     enrollmentModel,
+    new AiContextReaderService(),
   );
 
   return {
@@ -196,6 +198,7 @@ const createTaskManagementHarness = (
     {} as unknown as Model<User>,
     {} as unknown as AiFeedbackJobService,
     {} as Model<Enrollment>,
+    new AiContextReaderService(),
   );
 
   return {
@@ -586,6 +589,7 @@ describe('LearningTasksService task template publisher contract', () => {
       userModel as unknown as Model<User>,
       {} as unknown as AiFeedbackJobService,
       {} as Model<Enrollment>,
+      new AiContextReaderService(),
     );
 
     const result = await service.listTasks(
@@ -638,6 +642,7 @@ describe('LearningTasksService task template publisher contract', () => {
       userModel as unknown as Model<User>,
       {} as unknown as AiFeedbackJobService,
       {} as Model<Enrollment>,
+      new AiContextReaderService(),
     );
 
     const result = await service.getTask(

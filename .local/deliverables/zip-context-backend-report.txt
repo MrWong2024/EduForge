@@ -1,0 +1,146 @@
+ZIP 依赖资料接入：后端工程验收记录（2026-10-16，Asia/Shanghai）
+
+结果：ZIP依赖资料配置、课堂快照与AI评阅后端工程范围完成。
+当前范围无阻断 gap。本文是本轮执行记录，不是长期合同 Owner。
+
+1. 基线与变更
+Git 根：D:\Node.js\NodeProjects\EduForge
+指定基线、初始完整 HEAD、最终完整 HEAD 均为：74865354a342436e403b1fc428dd29d704b17d72
+初始 status --short 为空，未覆盖用户修改。未 commit/push/部署。
+本轮工程变更：25 个 TS、11 个小型固定 ZIP 夹具、7 个指定 handoff 文档。
+本报告另为 .local/deliverables 下的本地未跟踪生成物，当前未被 gitignore 忽略；不加入工程提交，也未修改 .gitignore。
+完整文件清单：
+D:\Node.js\NodeProjects\EduForge\backend\src\modules\classrooms\classroom-tasks\classroom-task-content.ts
+D:\Node.js\NodeProjects\EduForge\backend\src\modules\classrooms\classroom-tasks\dto\classroom-task-response.dto.ts
+D:\Node.js\NodeProjects\EduForge\backend\src\modules\classrooms\classroom-tasks\services\classroom-tasks.service.spec.ts
+D:\Node.js\NodeProjects\EduForge\backend\src\modules\classrooms\classroom-tasks\services\classroom-tasks.service.ts
+D:\Node.js\NodeProjects\EduForge\backend\src\modules\learning-tasks\ai-feedback\interfaces\ai-submission-analysis-context.interface.ts
+D:\Node.js\NodeProjects\EduForge\backend\src\modules\learning-tasks\ai-feedback\lib\ai-review-summary.ts
+D:\Node.js\NodeProjects\EduForge\backend\src\modules\learning-tasks\ai-feedback\prompts\ai-feedback.prompt.spec.ts
+D:\Node.js\NodeProjects\EduForge\backend\src\modules\learning-tasks\ai-feedback\prompts\ai-feedback.prompt.ts
+D:\Node.js\NodeProjects\EduForge\backend\src\modules\learning-tasks\ai-feedback\services\ai-feedback-processor.service.spec.ts
+D:\Node.js\NodeProjects\EduForge\backend\src\modules\learning-tasks\ai-feedback\services\ai-feedback-processor.service.ts
+D:\Node.js\NodeProjects\EduForge\backend\src\modules\learning-tasks\dto\create-task.dto.ts
+D:\Node.js\NodeProjects\EduForge\backend\src\modules\learning-tasks\dto\task-response.dto.ts
+D:\Node.js\NodeProjects\EduForge\backend\src\modules\learning-tasks\dto\update-task.dto.ts
+D:\Node.js\NodeProjects\EduForge\backend\src\modules\learning-tasks\learning-tasks.module.ts
+D:\Node.js\NodeProjects\EduForge\backend\src\modules\learning-tasks\schemas\task.schema.ts
+D:\Node.js\NodeProjects\EduForge\backend\src\modules\learning-tasks\services\learning-tasks.service.spec.ts
+D:\Node.js\NodeProjects\EduForge\backend\src\modules\learning-tasks\services\learning-tasks.service.ts
+D:\Node.js\NodeProjects\EduForge\backend\test\classroom-text-task-contract.e2e-spec.ts
+D:\Node.js\NodeProjects\EduForge\backend\test\learning-tasks.ai-feedback.bailian-context.e2e-spec.ts
+D:\Node.js\NodeProjects\EduForge\docs\handoff\handoff-backend-api-map.md
+D:\Node.js\NodeProjects\EduForge\docs\handoff\handoff-backend-config-matrix.md
+D:\Node.js\NodeProjects\EduForge\docs\handoff\handoff-backend-dto-cheatsheet.md
+D:\Node.js\NodeProjects\EduForge\docs\handoff\handoff-backend-service-map.md
+D:\Node.js\NodeProjects\EduForge\docs\handoff\handoff-backend-snapshot.md
+D:\Node.js\NodeProjects\EduForge\docs\handoff\handoff-backend-testing-playbook.md
+D:\Node.js\NodeProjects\EduForge\docs\handoff\handoff-roadmap.md
+D:\Node.js\NodeProjects\EduForge\backend\src\modules\classrooms\classroom-tasks\classroom-task-content.spec.ts
+D:\Node.js\NodeProjects\EduForge\backend\src\modules\learning-tasks\ai-context\ai-context-reader.service.spec.ts
+D:\Node.js\NodeProjects\EduForge\backend\src\modules\learning-tasks\ai-context\ai-context-reader.service.ts
+D:\Node.js\NodeProjects\EduForge\backend\src\modules\learning-tasks\ai-context\ai-context.types.ts
+D:\Node.js\NodeProjects\EduForge\backend\src\modules\learning-tasks\dto\ai-context-ref.dto.spec.ts
+D:\Node.js\NodeProjects\EduForge\backend\src\modules\learning-tasks\dto\ai-context-ref.dto.ts
+D:\Node.js\NodeProjects\EduForge\backend\test\fixtures\ai-context\corrupt.zip
+D:\Node.js\NodeProjects\EduForge\backend\test\fixtures\ai-context\duplicate.zip
+D:\Node.js\NodeProjects\EduForge\backend\test\fixtures\ai-context\encrypted.zip
+D:\Node.js\NodeProjects\EduForge\backend\test\fixtures\ai-context\invalid-text.zip
+D:\Node.js\NodeProjects\EduForge\backend\test\fixtures\ai-context\many.zip
+D:\Node.js\NodeProjects\EduForge\backend\test\fixtures\ai-context\oversized.zip
+D:\Node.js\NodeProjects\EduForge\backend\test\fixtures\ai-context\student.zip
+D:\Node.js\NodeProjects\EduForge\backend\test\fixtures\ai-context\symlink.zip
+D:\Node.js\NodeProjects\EduForge\backend\test\fixtures\ai-context\teacher.zip
+D:\Node.js\NodeProjects\EduForge\backend\test\fixtures\ai-context\total.zip
+D:\Node.js\NodeProjects\EduForge\backend\test\fixtures\ai-context\unsupported.zip
+
+2. 真实接线
+TaskAiContextDto 被创建/更新 DTO 继承；Task 使用 nested Schema 持久化，教师管理列表/详情可回读。
+创建省略无依赖；PATCH undefined 保留、[] 清空、null 拒绝。保存验证最终引用且先于全部字段修改。
+DRAFT 实际发布、创建 PUBLISHED、课堂发布均验证；模板重复 publish 保持原幂等语义。
+课堂发布从同次 Task 读取构造候选快照，验证后保存同一份内容；引用和 entryPaths 深复制。
+AiContextReaderService 由 LearningTasksModule 注册/导出。根目录基于模块位置定位项目 .local，支持 source/正常 dist/src，不依赖 cwd，无新 env。
+只用 yauzl 扫描并读取选中文件，不落盘解压。路径、realpath、普通文件、重复目标、编码/格式/CRC、声明和实际字节保护及资源关闭均有测试。
+Processor 只读所属 ClassroomTask.taskSnapshot 引用，每次重读；不从当前模板补资料，不将正文存进 Task/实例/Submission/Job。
+参考资料进入 AiSubmissionAnalysisContext.referenceFiles，prompt 分区标识来源，与发布任务/rubric、学生源码/说明/声明共同组装。
+实际 mock HTTP 请求含多 ZIP/多条目正文，Job 预留 inputBytes 与该实际 messages 的 UTF-8 JSON 字节数相符。
+既有 Buffer.byteLength(JSON.stringify(messages), 'utf8') 预算链保持；等于允许、超出在预留/fetch 前拒绝；不增大默认预算，不截断、替换或丢弃资料。
+
+3. 错误、投影与作品保护
+保存/发布的非法 DTO、缺失/损坏/不支持/不可读/超限资料均为安全 400，不保存部分内容、不生成无效实例。
+新增安全失败码 AI_CONTEXT_UNAVAILABLE / AI_CONTEXT_LIMIT_EXCEEDED，Processor 在 Provider/stub 前进入 DEAD，零请求、零伪反馈，不自动重试配置错误。
+安全摘要明确作业已保存、本次未生成 AI 反馈、请联系教师；完整 messages 超限仍为 INPUT_BUDGET_EXCEEDED。
+课堂列表、详情、my-task-detail 显式公开投影，不含 aiContextRefs、教师包路径或参考正文；保留教学字段、rubric、快照可用性、AI 模式和参与资格。
+FIRST_SUBMISSION_AUTO 资料缺失之后，正式提交详情仍可回读原源码/说明；重复 request 返回原 DEAD，不 reset。
+无依赖仍走既有链路；整个快照缺失的只读/409 保持，不迁移历史。
+
+4. 实际教材配置示例
+下例为只读读取/配置示例，不是已经完整审查的正式代码评阅依赖集合。
+两个实际成员分别为 1343 与 6123 UTF-8 字节，source unit 和编译后 dist 读取均成功。
+{
+  "aiContextRefs": [
+    {
+      "archivePath": "human-ai-programming/student/第14章_学生配套_C++_V0.5.1.zip",
+      "entryPaths": [
+        "chapter14_cpp/notes/AI任务委托卡.md"
+      ]
+    },
+    {
+      "archivePath": "human-ai-programming/teacher/第14章_教师与编辑配套_三语言_V0.7.zip",
+      "entryPaths": [
+        "chapter14_teacher/teacher/教学与练习说明.md"
+      ]
+    }
+  ]
+}
+
+5. 实际命令与结果
+以下 npm 命令均在 D:\Node.js\NodeProjects\EduForge\backend 执行；执行器 Node spawnSync 包装保留退出码，正式命令总超时 600000ms，首次 yield <=10秒，通过工具 session 有界收尾。
+unit discovery（退出码 0，精确 10 个目标）：
+npm run test -- --runInBand --runTestsByPath ./src/modules/learning-tasks/ai-context/ai-context-reader.service.spec.ts ./src/modules/learning-tasks/dto/ai-context-ref.dto.spec.ts ./src/modules/classrooms/classroom-tasks/classroom-task-content.spec.ts ./src/modules/learning-tasks/services/learning-tasks.service.spec.ts ./src/modules/classrooms/classroom-tasks/services/classroom-tasks.service.spec.ts ./src/modules/learning-tasks/ai-feedback/services/ai-feedback-processor.service.spec.ts ./src/modules/learning-tasks/ai-feedback/prompts/ai-feedback.prompt.spec.ts ./src/modules/learning-tasks/ai-feedback/lib/ai-request-budget.spec.ts ./src/modules/learning-tasks/ai-feedback/lib/ai-review-summary.spec.ts ./src/modules/learning-tasks/ai-feedback/providers/real/openai-compatible-feedback-provider.base.spec.ts --listTests
+unit 正式最终执行（passed，10 suites / 179 tests，退出码 0）：
+npm run test -- --runInBand --runTestsByPath ./src/modules/learning-tasks/ai-context/ai-context-reader.service.spec.ts ./src/modules/learning-tasks/dto/ai-context-ref.dto.spec.ts ./src/modules/classrooms/classroom-tasks/classroom-task-content.spec.ts ./src/modules/learning-tasks/services/learning-tasks.service.spec.ts ./src/modules/classrooms/classroom-tasks/services/classroom-tasks.service.spec.ts ./src/modules/learning-tasks/ai-feedback/services/ai-feedback-processor.service.spec.ts ./src/modules/learning-tasks/ai-feedback/prompts/ai-feedback.prompt.spec.ts ./src/modules/learning-tasks/ai-feedback/lib/ai-request-budget.spec.ts ./src/modules/learning-tasks/ai-feedback/lib/ai-review-summary.spec.ts ./src/modules/learning-tasks/ai-feedback/providers/real/openai-compatible-feedback-provider.base.spec.ts
+HTTP E2E discovery（退出码 0，精确 2 个目标）：
+npm run test:e2e -- --runInBand --runTestsByPath ./test/classroom-text-task-contract.e2e-spec.ts ./test/learning-tasks.ai-feedback.bailian-context.e2e-spec.ts --listTests
+HTTP E2E 正式最终执行（passed，2 suites / 26 tests，退出码 0）：
+npm run test:e2e -- --runInBand --runTestsByPath ./test/classroom-text-task-contract.e2e-spec.ts ./test/learning-tasks.ai-feedback.bailian-context.e2e-spec.ts
+全部新增/修改 TS lint（passed，0 error/warning，退出码 0）：
+npm run lint:file -- src/modules/classrooms/classroom-tasks/classroom-task-content.ts src/modules/classrooms/classroom-tasks/dto/classroom-task-response.dto.ts src/modules/classrooms/classroom-tasks/services/classroom-tasks.service.spec.ts src/modules/classrooms/classroom-tasks/services/classroom-tasks.service.ts src/modules/learning-tasks/ai-feedback/interfaces/ai-submission-analysis-context.interface.ts src/modules/learning-tasks/ai-feedback/lib/ai-review-summary.ts src/modules/learning-tasks/ai-feedback/prompts/ai-feedback.prompt.spec.ts src/modules/learning-tasks/ai-feedback/prompts/ai-feedback.prompt.ts src/modules/learning-tasks/ai-feedback/services/ai-feedback-processor.service.spec.ts src/modules/learning-tasks/ai-feedback/services/ai-feedback-processor.service.ts src/modules/learning-tasks/dto/create-task.dto.ts src/modules/learning-tasks/dto/task-response.dto.ts src/modules/learning-tasks/dto/update-task.dto.ts src/modules/learning-tasks/learning-tasks.module.ts src/modules/learning-tasks/schemas/task.schema.ts src/modules/learning-tasks/services/learning-tasks.service.spec.ts src/modules/learning-tasks/services/learning-tasks.service.ts test/classroom-text-task-contract.e2e-spec.ts test/learning-tasks.ai-feedback.bailian-context.e2e-spec.ts src/modules/classrooms/classroom-tasks/classroom-task-content.spec.ts src/modules/learning-tasks/ai-context/ai-context-reader.service.spec.ts src/modules/learning-tasks/ai-context/ai-context-reader.service.ts src/modules/learning-tasks/ai-context/ai-context.types.ts src/modules/learning-tasks/dto/ai-context-ref.dto.spec.ts src/modules/learning-tasks/dto/ai-context-ref.dto.ts
+正式全量类型检查（passed，0 TypeScript error，退出码 0）：
+npm run typecheck
+正式 Nest 编译（passed，退出码 0）：
+npm run build
+编译后服务真实教材读取（passed，退出码 0；15秒截止，无数据库）：
+node 从 backend/dist/src/modules/learning-tasks/ai-context/ai-context-reader.service.js 加载 AiContextReaderService，读取第4项两个真实成员。
+最终 diff/范围/UTF-8 LF/无 BOM/受保护范围检查均 passed，退出码 0。
+未运行前端 build、Browser、真实模型与课堂质量验收：not_executed（明确非目标，不构成本轮后端 gap）。
+
+中间失败与修复：
+- 沙箱源码目录/文件写入被 Windows 拒绝；backend 工作目录检查出现 setup refresh 执行器初始化失败（not_started），未当作产品/测试失败。
+- 按平台审批做范围明确的沙箱外编辑/检查，均获批准；没有自动审批拒绝。最终 unit、E2E、lint/typecheck/build 使用沙箱外身份；未运行任何 .next 写入命令。
+- 首轮 unit 13项失败：不可替换 namespace import 的 spy 与 undefined/属性存在断言问题，属于测试资产；改用可替换导入和正确省略语义后全部通过。
+- 新增 E2E 类型检查出现两处 TS2353（本轮测试的 Mongo command maxTimeMS 选项），修正为已安装 driver 支持的 timeoutMS，最终 typecheck 0错误。
+- 首轮 HTTP 5项失败：新增 prompt 标记改变了既有 Code: 断言，以及新增 verifier 未沿用原 spec 的显式 ObjectId 查询，造成后续受控消费串扰。保留原标记并修正查询，复验全部通过；每轮 afterAll 均清理并关闭上下文。
+- 首轮 lint 唯一错误为测试 async generator 无 await，修正为普通 generator；最终全部 lint 通过。
+
+6. 数据库、进程和 cleanup
+源码/unit/lint/typecheck/build/dist读取：purpose=none，无数据库连接，无真实 Mongo 配置注入。
+只读 preflight/postflight 与 HTTP 上下文：purpose=standard_test，仅 backend/.env.test，实际库名精确 eduforge_test，APP readWrite角色已核验且无 root/dbOwner/dbAdminAnyDatabase。
+独立 HTTP 进程启动前：NODE_ENV=test、EDUFORGE_DATABASE_PURPOSE=standard_test、Worker=false、初始Provider=stub、mail=log；清除 MONGO_URI/MONGO_ADMIN_URI/Browser连接变量及 KEEP_E2E_DB；mock组合在 AppModule 导入前设为本轮127.0.0.1服务。
+未读取/使用 development、browser_acceptance 或生产库，未连接 ADMIN。真实模型 Key/URI/认证信息未输出。
+进程审计无外来本项目 Node/Nest Worker/生产者，初始 PENDING/FAILED/RUNNING 为0；每次消费前查询并拒绝 foreign Job，未改造生产 Processor 为定向测试入口。
+最终 namespaces：ai-bailian-bailian-context-1792081476653、a1-text-1792081484170；前两轮同样已 scoped cleanup。
+最新 afterAll 对自有 Feedback/Job/Submission/Task/ClassroomTask/Enrollment/Classroom/Course/User/Session 均完成精确清理和残留断言；临时 ZIP 根已删除并 stat=ENOENT；Nest/DB/mock 已关闭。
+最后只读 postflight：eduforge_test 的非终态 Job=0，三轮自有账号=0，自有课程=0，连接关闭。
+本轮 mock 端口 12471、13021、13732 的最终 OS Listen/Bound 残留为0；本项目测试/服务进程残留为0。
+没有 dropDatabase、集合清空、真实业务数据修改或未知副作用。固定测试夹具保留为验收资产。
+
+7. 证据与 Owner
+新增证据：嵌套 DTO；真实 ZIP/顺序/路径/格式/编码/CRC/流式限额/句柄释放；快照深复制与公开投影；参考 prompt 分区；Processor/stub 前 DEAD；HTTP 持久化/原子拒绝/发布固定引用/隐私/实际 mock输入/首提作品保留/完整预算拒绝。
+复用并本轮定向回归：A1 实例快照、缺快照409、模式权限与提交合同；A2 Provider预算、请求预留、usage/retry/并发/历史Job规则。没有使用历史 B1 Browser 证据证明本功能。
+DTO Owner=字段/默认更新语义/内部与公开投影/实际成员示例；API Owner=保存发布失败和异步行为；Service Owner=ZIP读取/快照/Processor；Config Owner=固定根/部署保留/集中限额且无新env；Testing Owner=证据职责/夹具生命周期；Snapshot=高层能力/边界；Roadmap=本轮后端范围 CURRENT，不重开 B1。
+前端当前失败摘要 adapter 接受安全 string code/message，无需更改前端合同。前端代码/文档、架构规范和 codex规则均 zero diff。
+剩余阻断 gap：无。资料下载、管理配置页、DOCX/PDF/图片解析、真实模型质量及课堂效果均为明确非目标。
+
+8. 最终边界声明
+未部署、未迁移历史、未修改真实业务数据、未新增或升级依赖、未改依赖清单/锁文件、未改既有教材包、未调用真实模型、未 commit/push。

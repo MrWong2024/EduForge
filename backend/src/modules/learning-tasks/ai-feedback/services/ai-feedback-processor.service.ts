@@ -1,3 +1,5 @@
+import { AiContextReaderService } from '../../ai-context/ai-context-reader.service';
+import { AiContextError } from '../../ai-context/ai-context.types';
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectModel } from '@nestjs/mongoose';
@@ -63,6 +65,7 @@ export class AiFeedbackProcessor {
     private readonly aiFeedbackProvider: AiFeedbackProvider,
     private readonly aiFeedbackGuards: AiFeedbackGuardsService,
     private readonly configService: ConfigService,
+    private readonly aiContextReader: AiContextReaderService,
   ) {}
 
   async processOnce(batchSize = AiFeedbackProcessor.DEFAULT_BATCH_SIZE) {
@@ -129,6 +132,9 @@ export class AiFeedbackProcessor {
         const analysisContext = this.buildAnalysisContext(
           submission,
           classroomTask.taskSnapshot,
+        );
+        analysisContext.referenceFiles = await this.aiContextReader.read(
+          classroomTask.taskSnapshot.aiContextRefs,
         );
         const provider =
           this.configService.get<string>('AI_FEEDBACK_PROVIDER') === 'bailian'
@@ -392,25 +398,32 @@ export class AiFeedbackProcessor {
     const providerCode =
       error instanceof AiFeedbackProviderError ? error.code : null;
     const failureCode: AiReviewFailureCode =
-      error instanceof AiFeedbackEligibilityError
-        ? 'TASK_INELIGIBLE'
-        : providerCode === 'INPUT_BUDGET_EXCEEDED'
-          ? 'INPUT_BUDGET_EXCEEDED'
-          : providerCode === 'OUTPUT_LIMIT_REACHED'
-            ? 'OUTPUT_LIMIT_REACHED'
-            : ['UNAUTHORIZED', 'MISSING_API_KEY', 'UPSTREAM_4XX'].includes(
-                  providerCode ?? '',
-                )
-              ? 'PROVIDER_CONFIGURATION'
-              : ['RATE_LIMIT_UPSTREAM', 'RATE_LIMIT_LOCAL'].includes(
+      error instanceof AiContextError
+        ? error.code
+        : error instanceof AiFeedbackEligibilityError
+          ? 'TASK_INELIGIBLE'
+          : providerCode === 'INPUT_BUDGET_EXCEEDED'
+            ? 'INPUT_BUDGET_EXCEEDED'
+            : providerCode === 'OUTPUT_LIMIT_REACHED'
+              ? 'OUTPUT_LIMIT_REACHED'
+              : ['UNAUTHORIZED', 'MISSING_API_KEY', 'UPSTREAM_4XX'].includes(
                     providerCode ?? '',
                   )
-                ? 'RATE_LIMITED'
-                : ['TIMEOUT', 'UPSTREAM_5XX'].includes(providerCode ?? '')
-                  ? 'UPSTREAM_UNAVAILABLE'
-                  : providerCode === 'BAD_RESPONSE'
-                    ? 'INVALID_RESPONSE'
-                    : 'INTERNAL_ERROR';
+                ? 'PROVIDER_CONFIGURATION'
+                : ['RATE_LIMIT_UPSTREAM', 'RATE_LIMIT_LOCAL'].includes(
+                      providerCode ?? '',
+                    )
+                  ? 'RATE_LIMITED'
+                  : ['TIMEOUT', 'UPSTREAM_5XX'].includes(providerCode ?? '')
+                    ? 'UPSTREAM_UNAVAILABLE'
+                    : providerCode === 'BAD_RESPONSE'
+                      ? 'INVALID_RESPONSE'
+                      : 'INTERNAL_ERROR';
+    if (error instanceof AiContextError) {
+      this.logger.warn(
+        `AI context rejected: jobId=${job._id.toString()}, submissionId=${job.submissionId.toString()}, code=${error.code}, reason=${error.message}`,
+      );
+    }
     const retryable =
       error instanceof AiFeedbackProviderError &&
       error.retryable &&

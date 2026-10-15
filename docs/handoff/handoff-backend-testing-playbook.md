@@ -129,6 +129,13 @@ fixture、verifier、support 与 Browser infrastructure 的通用复杂度止损
 
 Mongo password、production credential、Bailian API Key、SMTP password、第三方 service credential 与真实用户 credential 始终属于 Secret，不得 tracked、写入日志或报告。synthetic application credential 的有限规则不得用于放宽这些 Secret 边界。
 
+### ZIP 资料证据与夹具
+
+- `learning-tasks/ai-context` unit 负责真实 yauzl 精确读取与顺序、路径/realpath、格式/编码/CRC、声明/实际字节保护及关闭；用固定 stdlib ZIP 夹具与已知正文作独立 expected，两个维护中的第14章教材包仅只读核验，不以 reader 输出生成 expected。
+- DTO / classroom-task-content / prompt / Processor unit 分别负责嵌套白名单及 null、快照深复制与公开投影、参考/作品分区和不可执行指令、资料错误在 stub/Provider 前终止。既有 budget/provider unit 继续证明实际 messages 计量、等于上限允许及请求预留前拒绝。
+- 扩展既有 classroom text contract 与 Bailian context HTTP E2E，证明正式 API 白名单/持久化、最终生效引用验证与无部分写入、候选快照固定、成员投影、实际 mock HTTP 请求包含多包材料、异步资料失效/输入超限及首提作品保留。它们不证明 Browser、真实模型质量或课堂效果。
+- 固定 ZIP 位于 `backend/test/fixtures/ai-context`；异常只作用于 spec-owned 临时目录副本，使用实例级窄范围读取根注入，不引入产品配置。HTTP 上下文继续 standard_test / APP、Worker=false、mail=log；每次消费前拒绝外来 PENDING/FAILED/RUNNING。finally 精确清理自有数据、Session、临时 ZIP、mock/Nest/DB，并验证残留；不修改真实教材或全库清空。
+
 ### 6.2 文本教学任务专用 Smoke 支持
 
 入口为 `backend/scripts/browser-text-task-smoke.ts`，从 `backend` 目录运行以下命令；`b1-2-<unique>` 和 `<job-id>` 须替换为当前任务的准确值：

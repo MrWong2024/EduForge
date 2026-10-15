@@ -1,3 +1,8 @@
+import { copyFile, mkdir, mkdtemp, rm, stat } from 'node:fs/promises';
+import { resolve } from 'node:path';
+import { tmpdir } from 'node:os';
+import { AiContextReaderService } from '../src/modules/learning-tasks/ai-context/ai-context-reader.service';
+import type { AiContextRef } from '../src/modules/learning-tasks/ai-context/ai-context.types';
 import { INestApplication, ValidationPipe } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Test, TestingModule } from '@nestjs/testing';
@@ -174,6 +179,8 @@ describe('LearningTasks AI Feedback Bailian Context (e2e)', () => {
   let clearCapturedPayloads: () => void;
   let setResponses: (responses: MockResponse[]) => void;
 
+  let contextRoot = '';
+  const contextTaskIds: string[] = [];
   let courseId = '';
   const classroomIds: string[] = [],
     instanceIds: string[] = [],
@@ -255,6 +262,74 @@ describe('LearningTasks AI Feedback Bailian Context (e2e)', () => {
       .expect(200);
     return id;
   };
+  const processOwned = async (batchSize: number) => {
+    const foreign = await aiFeedbackJobModel.countDocuments({
+      status: { $in: ['PENDING', 'FAILED', 'RUNNING'] },
+      submissionId: { $nin: submissionIds.map((id) => new Types.ObjectId(id)) },
+    });
+    expect(foreign).toBe(0);
+    return aiFeedbackProcessor.processOnce(batchSize);
+  };
+  const refs: AiContextRef[] = [
+    {
+      archivePath: 'book/student.zip',
+      entryPaths: ['资料/AI任务委托卡.md', 'src/C++.cpp'],
+    },
+    { archivePath: 'book/teacher.zip', entryPaths: ['teacher/guide.md'] },
+  ];
+  const contextTask = async (aiContextRefs = refs, status = 'PUBLISHED') => {
+    const response = await teacherAgent
+      .post('/api/learning-tasks/tasks')
+      .send({
+        title: 'ZIP task',
+        description: 'ZIP_REQUIREMENTS',
+        rubric: { criterion: 'ZIP_RUBRIC' },
+        knowledgeModule: 'zip-context',
+        stage: 1,
+        status,
+        aiContextRefs,
+      })
+      .expect(201);
+    const id = (response.body as CreatedTaskResponse).id;
+    contextTaskIds.push(id);
+    return id;
+  };
+  const publishContext = async (id: string, mode = 'MANUAL') => {
+    const response = await teacherAgent
+      .post('/api/classrooms/' + classroomIds[0] + '/tasks')
+      .send({ taskId: id, settings: { aiFeedbackMode: mode } })
+      .expect(201);
+    const instance = (response.body as CreatedTaskResponse).id;
+    instanceIds.push(instance);
+    return instance;
+  };
+  const submitContext = async (instance: string) => {
+    const response = await studentAgent
+      .post(
+        '/api/classrooms/' +
+          classroomIds[0] +
+          '/tasks/' +
+          instance +
+          '/submissions',
+      )
+      .send({
+        content: {
+          codeText: 'STUDENT_ZIP_CODE',
+          language: 'cpp',
+          submissionNote: 'STUDENT_ZIP_NOTE',
+        },
+        meta: { aiUsageDeclaration: 'STUDENT_ZIP_AI' },
+      })
+      .expect(201);
+    const id = (response.body as CreatedSubmissionResponse).id;
+    submissionIds.push(id);
+    return id;
+  };
+  const requestContext = (id: string) =>
+    studentAgent
+      .post('/api/learning-tasks/submissions/' + id + '/ai-feedback/request')
+      .send({})
+      .expect(200);
   const makeDue = async (id: string) => {
     // Approved controlled scheduling advancement; no status/attempt/usage rewrite.
     await aiFeedbackJobModel.updateOne(
@@ -264,6 +339,14 @@ describe('LearningTasks AI Feedback Bailian Context (e2e)', () => {
   };
 
   beforeAll(async () => {
+    contextRoot = await mkdtemp(resolve(tmpdir(), 'eduforge-context-http-'));
+    await mkdir(resolve(contextRoot, 'book'));
+    for (const file of ['student.zip', 'teacher.zip']) {
+      await copyFile(
+        resolve(__dirname, 'fixtures/ai-context', file),
+        resolve(contextRoot, 'book', file),
+      );
+    }
     const mock = await startMockBailian();
     mockServer = mock.server;
     getCapturedPayloads = mock.getCapturedPayloads;
@@ -293,9 +376,16 @@ describe('LearningTasks AI Feedback Bailian Context (e2e)', () => {
         );
       }
 
+      const contextReader = new AiContextReaderService();
+      Object.defineProperty(contextReader, 'resourceRoot', {
+        value: contextRoot,
+      });
       const moduleFixture: TestingModule = await Test.createTestingModule({
         imports: [AppModule],
-      }).compile();
+      })
+        .overrideProvider(AiContextReaderService)
+        .useValue(contextReader)
+        .compile();
 
       app = moduleFixture.createNestApplication();
       app.setGlobalPrefix('api');
@@ -311,6 +401,8 @@ describe('LearningTasks AI Feedback Bailian Context (e2e)', () => {
       const configService = app.get(ConfigService);
       expect(configService.get<string>('AI_FEEDBACK_PROVIDER')).toBe('bailian');
       expect(configService.get<string>('BAILIAN_BASE_URL')).toBe(mock.url);
+      expect(configService.get('AI_FEEDBACK_WORKER_ENABLED')).toBe(false);
+      expect(configService.get('MAIL_PROVIDER')).toBe('log');
 
       teacherAgent = request
         .agent(app.getHttpServer())
@@ -329,10 +421,33 @@ describe('LearningTasks AI Feedback Bailian Context (e2e)', () => {
       expect(process.env.EDUFORGE_DATABASE_PURPOSE).toBe('standard_test');
       expect(userModel.db.name).toBe('eduforge_test');
       userModel.db.set('maxTimeMS', 10000);
+      const auth = await userModel.db.db?.command(
+        { connectionStatus: 1, showPrivileges: false },
+        { timeoutMS: 5000 },
+      );
+      const roles = (
+        auth as {
+          authInfo: {
+            authenticatedUserRoles: Array<{ role: string; db: string }>;
+          };
+        }
+      ).authInfo.authenticatedUserRoles;
+      expect(
+        roles.some((r) => r.role === 'readWrite' && r.db === 'eduforge_test'),
+      ).toBe(true);
+      expect(
+        roles.some((r) =>
+          ['root', 'dbOwner', 'dbAdminAnyDatabase'].includes(r.role),
+        ),
+      ).toBe(false);
       expect(
         await aiFeedbackJobModel.countDocuments({
           status: {
-            $in: [AiFeedbackJobStatus.Pending, AiFeedbackJobStatus.Failed],
+            $in: [
+              AiFeedbackJobStatus.Pending,
+              AiFeedbackJobStatus.Failed,
+              AiFeedbackJobStatus.Running,
+            ],
           },
         }),
       ).toBe(0);
@@ -471,6 +586,12 @@ describe('LearningTasks AI Feedback Bailian Context (e2e)', () => {
           );
           cleanup.push(submissionModel.deleteOne({ _id: submissionObjectId }));
         }
+        if (contextTaskIds.length) {
+          await taskModel.deleteMany({ _id: { $in: contextTaskIds } });
+          expect(
+            await taskModel.countDocuments({ _id: { $in: contextTaskIds } }),
+          ).toBe(0);
+        }
         if (taskId) {
           cleanup.push(taskModel.deleteOne({ _id: taskId }));
         }
@@ -535,9 +656,40 @@ describe('LearningTasks AI Feedback Bailian Context (e2e)', () => {
         expect(
           await submissionModel.countDocuments({ _id: { $in: ownedIds } }),
         ).toBe(0);
+        for (const [name, filter] of [
+          [
+            ClassroomTask.name,
+            { _id: { $in: instanceIds.map((id) => new Types.ObjectId(id)) } },
+          ],
+          [
+            Enrollment.name,
+            {
+              classroomId: {
+                $in: classroomIds.map((id) => new Types.ObjectId(id)),
+              },
+            },
+          ],
+          [
+            Classroom.name,
+            { _id: { $in: classroomIds.map((id) => new Types.ObjectId(id)) } },
+          ],
+          [Course.name, { _id: new Types.ObjectId(courseId) }],
+        ] as Array<[string, Record<string, unknown>]>) {
+          expect(
+            await app
+              .get<Model<unknown>>(getModelToken(name))
+              .countDocuments(filter),
+          ).toBe(0);
+        }
         console.info('Fixture cleanup verified: ' + fixtureNamespace);
       }
     } finally {
+      if (contextRoot) {
+        await rm(contextRoot, { recursive: true, force: true });
+        await expect(stat(contextRoot)).rejects.toMatchObject({
+          code: 'ENOENT',
+        });
+      }
       try {
         if (app) {
           await app.close();
@@ -595,9 +747,7 @@ describe('LearningTasks AI Feedback Bailian Context (e2e)', () => {
       .send({})
       .expect(200);
 
-    const processResult = (await aiFeedbackProcessor.processOnce(
-      1,
-    )) as ProcessOnceResponse;
+    const processResult = (await processOwned(1)) as ProcessOnceResponse;
     expect(processResult.processed).toBe(1);
     expect(processResult.succeeded).toBe(1);
 
@@ -754,7 +904,7 @@ describe('LearningTasks AI Feedback Bailian Context (e2e)', () => {
       .post('/api/learning-tasks/submissions/' + id + '/ai-feedback/request')
       .send({})
       .expect(200);
-    expect(await aiFeedbackProcessor.processOnce(1)).toEqual({
+    expect(await processOwned(1)).toEqual({
       processed: 1,
       succeeded: 1,
       failed: 0,
@@ -801,7 +951,7 @@ describe('LearningTasks AI Feedback Bailian Context (e2e)', () => {
         material === 'source' ? long : 'console.log("small source");';
       const note = material === 'note' ? long : 'small note';
       const id = await submitAndRequest(code, note);
-      expect(await aiFeedbackProcessor.processOnce(1)).toEqual({
+      expect(await processOwned(1)).toEqual({
         processed: 1,
         succeeded: 0,
         failed: 0,
@@ -840,7 +990,7 @@ describe('LearningTasks AI Feedback Bailian Context (e2e)', () => {
         .send({})
         .expect(200);
       expect(repeated.body).toMatchObject({ status: 'DEAD' });
-      expect(await aiFeedbackProcessor.processOnce(1)).toMatchObject({
+      expect(await processOwned(1)).toMatchObject({
         processed: 0,
       });
       expect(getCapturedPayloads()).toHaveLength(0);
@@ -868,7 +1018,7 @@ describe('LearningTasks AI Feedback Bailian Context (e2e)', () => {
       clearCapturedPayloads();
       setResponses([response]);
       const id = await submitAndRequest();
-      expect(await aiFeedbackProcessor.processOnce(1)).toMatchObject({
+      expect(await processOwned(1)).toMatchObject({
         dead: 1,
         succeeded: 0,
       });
@@ -898,7 +1048,7 @@ describe('LearningTasks AI Feedback Bailian Context (e2e)', () => {
     clearCapturedPayloads();
     setResponses([{ usage: undefined }]);
     const id = await submitAndRequest();
-    expect(await aiFeedbackProcessor.processOnce(1)).toMatchObject({
+    expect(await processOwned(1)).toMatchObject({
       succeeded: 1,
     });
     const student = await readReview(id),
@@ -929,7 +1079,7 @@ describe('LearningTasks AI Feedback Bailian Context (e2e)', () => {
         {},
       ]);
       const id = await submitAndRequest();
-      expect(await aiFeedbackProcessor.processOnce(1)).toMatchObject({
+      expect(await processOwned(1)).toMatchObject({
         failed: 1,
       });
       const config = app.get(ConfigService);
@@ -941,14 +1091,14 @@ describe('LearningTasks AI Feedback Bailian Context (e2e)', () => {
       });
       config.set('AI_FEEDBACK_WORKER_ENABLED', false);
       await makeDue(id);
-      expect(await aiFeedbackProcessor.processOnce(1)).toMatchObject({
+      expect(await processOwned(1)).toMatchObject({
         failed: 1,
       });
       await makeDue(id);
-      expect(await aiFeedbackProcessor.processOnce(1)).toMatchObject({
+      expect(await processOwned(1)).toMatchObject({
         succeeded: 1,
       });
-      expect(await aiFeedbackProcessor.processOnce(1)).toMatchObject({
+      expect(await processOwned(1)).toMatchObject({
         processed: 0,
       });
       const job = await aiFeedbackJobModel
@@ -982,7 +1132,7 @@ describe('LearningTasks AI Feedback Bailian Context (e2e)', () => {
     const id = await submitAndRequest();
     for (let i = 0; i < 3; i += 1) {
       if (i > 0) await makeDue(id);
-      expect(await aiFeedbackProcessor.processOnce(1)).toMatchObject(
+      expect(await processOwned(1)).toMatchObject(
         i === 2 ? { dead: 1 } : { failed: 1 },
       );
     }
@@ -993,7 +1143,7 @@ describe('LearningTasks AI Feedback Bailian Context (e2e)', () => {
       nextRetryAt: null,
       usage: { reservedRequests: 3, reportedRequests: 3, totalTokens: 360 },
     });
-    expect(await aiFeedbackProcessor.processOnce(1)).toMatchObject({
+    expect(await processOwned(1)).toMatchObject({
       processed: 0,
     });
     expect(getCapturedPayloads()).toHaveLength(3);
@@ -1018,7 +1168,7 @@ describe('LearningTasks AI Feedback Bailian Context (e2e)', () => {
     config.set('BAILIAN_TIMEOUT_MS', 1000);
     try {
       const id = await submitAndRequest();
-      expect(await aiFeedbackProcessor.processOnce(1)).toMatchObject({
+      expect(await processOwned(1)).toMatchObject({
         failed: 1,
       });
       expect((await readReview(id)).aiReview).toMatchObject({
@@ -1026,7 +1176,7 @@ describe('LearningTasks AI Feedback Bailian Context (e2e)', () => {
         usage: { reservedRequests: 1, reportedRequests: 0, totalTokens: null },
       });
       await makeDue(id);
-      expect(await aiFeedbackProcessor.processOnce(1)).toMatchObject({
+      expect(await processOwned(1)).toMatchObject({
         succeeded: 1,
       });
       expect((await readReview(id)).aiReview.usage).toMatchObject({
@@ -1057,10 +1207,7 @@ describe('LearningTasks AI Feedback Bailian Context (e2e)', () => {
     expect(
       new Set(requests.map((r) => (r.body as { jobId: string }).jobId)).size,
     ).toBe(1);
-    const processed = await Promise.all([
-      aiFeedbackProcessor.processOnce(1),
-      aiFeedbackProcessor.processOnce(1),
-    ]);
+    const processed = await Promise.all([processOwned(1), processOwned(1)]);
     expect(processed.reduce((n, r) => n + r.processed, 0)).toBe(1);
     expect(getCapturedPayloads()).toHaveLength(1);
     expect(
@@ -1081,7 +1228,7 @@ describe('LearningTasks AI Feedback Bailian Context (e2e)', () => {
       .send({})
       .expect(200);
     expect(repeated.body).toMatchObject({ status: 'SUCCEEDED' });
-    expect(await aiFeedbackProcessor.processOnce(1)).toMatchObject({
+    expect(await processOwned(1)).toMatchObject({
       processed: 0,
     });
     expect(getCapturedPayloads()).toHaveLength(1);
@@ -1098,7 +1245,7 @@ describe('LearningTasks AI Feedback Bailian Context (e2e)', () => {
       { submissionId: new Types.ObjectId(id) },
       { $unset: { budgetVersion: 1, requests: 1 } },
     );
-    expect(await aiFeedbackProcessor.processOnce(1)).toMatchObject({ dead: 1 });
+    expect(await processOwned(1)).toMatchObject({ dead: 1 });
     expect((await readReview(id)).aiReview).toMatchObject({
       inputCoverage: 'UNKNOWN',
       failure: { code: 'LEGACY_JOB_UNSUPPORTED' },
@@ -1120,7 +1267,7 @@ describe('LearningTasks AI Feedback Bailian Context (e2e)', () => {
       .findOne({ submissionId: new Types.ObjectId(historyId) })
       .lean()
       .exec();
-    expect(await aiFeedbackProcessor.processOnce(1)).toMatchObject({
+    expect(await processOwned(1)).toMatchObject({
       processed: 0,
     });
     const after = await aiFeedbackJobModel
@@ -1133,6 +1280,311 @@ describe('LearningTasks AI Feedback Bailian Context (e2e)', () => {
     expect(getCapturedPayloads()).toHaveLength(0);
     console.info(
       'A2 legacy: zero mock requests; terminal document unchanged; usage null',
+    );
+  });
+  it('persists nested references through HTTP, preserves omission, clears [], and rejects invalid saves atomically', async () => {
+    const id = await contextTask(refs, 'DRAFT');
+    const detail = () =>
+      teacherAgent.get('/api/learning-tasks/tasks/' + id).expect(200);
+    expect((await detail()).body).toMatchObject({ aiContextRefs: refs });
+    expect(await taskModel.findById(id).lean()).toMatchObject({
+      aiContextRefs: refs,
+    });
+    await teacherAgent
+      .patch('/api/learning-tasks/tasks/' + id)
+      .send({ title: 'Kept refs' })
+      .expect(200);
+    expect((await detail()).body).toMatchObject({
+      title: 'Kept refs',
+      aiContextRefs: refs,
+    });
+    for (const invalid of [
+      null,
+      [{ archivePath: 'book/missing.zip', entryPaths: ['a.txt'] }],
+      [{ archivePath: '../escape.zip', entryPaths: ['a.txt'] }],
+      [...refs, refs[0]],
+    ]) {
+      const rejected = await teacherAgent
+        .patch('/api/learning-tasks/tasks/' + id)
+        .send({ title: 'MUST_NOT_SAVE', aiContextRefs: invalid })
+        .expect(400);
+      expect(JSON.stringify(rejected.body)).not.toContain(contextRoot);
+      expect((await detail()).body).toMatchObject({
+        title: 'Kept refs',
+        aiContextRefs: refs,
+      });
+    }
+    await teacherAgent
+      .patch('/api/learning-tasks/tasks/' + id)
+      .send({ aiContextRefs: [] })
+      .expect(200);
+    expect((await detail()).body).toMatchObject({ aiContextRefs: [] });
+    await teacherAgent
+      .patch('/api/learning-tasks/tasks/' + id)
+      .send({ aiContextRefs: refs })
+      .expect(200);
+    const invalidTitle = fixtureNamespace + '-invalid-published';
+    await teacherAgent
+      .post('/api/learning-tasks/tasks')
+      .send({
+        title: invalidTitle,
+        description: 'invalid',
+        knowledgeModule: 'zip',
+        stage: 1,
+        status: 'PUBLISHED',
+        aiContextRefs: [
+          { archivePath: 'book/missing.zip', entryPaths: ['a.txt'] },
+        ],
+      })
+      .expect(400);
+    expect(await taskModel.countDocuments({ title: invalidTitle })).toBe(0);
+  });
+
+  it('revalidates effective saves and real template/classroom publish before any write', async () => {
+    const draft = await contextTask(refs, 'DRAFT');
+    const published = await contextTask();
+    await rm(resolve(contextRoot, 'book/teacher.zip'));
+    try {
+      await teacherAgent
+        .patch('/api/learning-tasks/tasks/' + draft)
+        .send({ title: 'MUST_NOT_SAVE' })
+        .expect(400);
+      expect(await taskModel.findById(draft).lean()).toMatchObject({
+        title: 'ZIP task',
+        status: 'DRAFT',
+        aiContextRefs: refs,
+      });
+      await teacherAgent
+        .post('/api/learning-tasks/tasks/' + draft + '/publish')
+        .send({})
+        .expect(400);
+      expect(await taskModel.findById(draft).lean()).toMatchObject({
+        status: 'DRAFT',
+      });
+      await teacherAgent
+        .post('/api/classrooms/' + classroomIds[0] + '/tasks')
+        .send({ taskId: published })
+        .expect(400);
+      expect(
+        await app
+          .get<Model<ClassroomTask>>(getModelToken(ClassroomTask.name))
+          .countDocuments({ taskId: published }),
+      ).toBe(0);
+    } finally {
+      await copyFile(
+        resolve(__dirname, 'fixtures/ai-context/teacher.zip'),
+        resolve(contextRoot, 'book/teacher.zip'),
+      );
+    }
+    await teacherAgent
+      .post('/api/learning-tasks/tasks/' + draft + '/publish')
+      .send({})
+      .expect(201);
+    const before = await taskModel.findById(draft).lean();
+    await teacherAgent
+      .post('/api/learning-tasks/tasks/' + draft + '/publish')
+      .send({})
+      .expect(201);
+    expect((await taskModel.findById(draft).lean())?.publishedAt).toEqual(
+      before?.publishedAt,
+    );
+  });
+
+  it('sends multiple exact files in the actual HTTP model request from the frozen instance and hides references in member responses', async () => {
+    clearCapturedPayloads();
+    const id = await contextTask();
+    const instance = await publishContext(id);
+    const instances = app.get<Model<ClassroomTask>>(
+      getModelToken(ClassroomTask.name),
+    );
+    expect(
+      (await instances.findById(instance).lean())?.taskSnapshot?.aiContextRefs,
+    ).toEqual(refs);
+    await teacherAgent
+      .patch('/api/learning-tasks/tasks/' + id)
+      .send({
+        aiContextRefs: [
+          {
+            archivePath: 'book/teacher.zip',
+            entryPaths: ['teacher/alternate.md'],
+          },
+        ],
+      })
+      .expect(200);
+    const frozen = await instances.findById(instance).lean();
+    await teacherAgent
+      .post('/api/classrooms/' + classroomIds[0] + '/tasks')
+      .send({ taskId: id })
+      .expect(400);
+    expect((await instances.findById(instance).lean())?.taskSnapshot).toEqual(
+      frozen?.taskSnapshot,
+    );
+    const base = '/api/classrooms/' + classroomIds[0] + '/tasks';
+    for (const path of [
+      base,
+      base + '/' + instance,
+      base + '/' + instance + '/my-task-detail',
+    ]) {
+      const response = await studentAgent.get(path).expect(200);
+      const json = JSON.stringify(response.body);
+      for (const hidden of [
+        'aiContextRefs',
+        'book/teacher.zip',
+        'teacher/guide.md',
+        '# REF_B',
+        contextRoot,
+      ])
+        expect(json).not.toContain(hidden);
+      expect(json).toContain('ZIP_REQUIREMENTS');
+      expect(json).toContain('ZIP_RUBRIC');
+      expect(json).toContain('taskSnapshotAvailable');
+      expect(json).toContain('MANUAL');
+    }
+    const my = await studentAgent
+      .get(base + '/' + instance + '/my-task-detail')
+      .expect(200);
+    expect(my.body).toMatchObject({
+      participationStatus: {
+        canSubmit: true,
+        canRequestAiFeedback: true,
+        readOnly: false,
+      },
+    });
+    const submission = await submitContext(instance);
+    await requestContext(submission);
+    expect(await processOwned(1)).toMatchObject({ succeeded: 1 });
+    expect(getCapturedPayloads()).toHaveLength(1);
+    const payload = getCapturedPayloads()[0];
+    const input =
+      payload.messages?.map((m) => m.content ?? '').join('\n') ?? '';
+    for (const text of [
+      '# REF_A\nfirst reference\n',
+      'int reference() { return 14; }\n',
+      '# REF_B\nsecond reference\n',
+      'ZIP_REQUIREMENTS',
+      'ZIP_RUBRIC',
+      'STUDENT_ZIP_CODE',
+      'STUDENT_ZIP_NOTE',
+      'STUDENT_ZIP_AI',
+    ])
+      expect(input).toContain(text);
+    expect(input.indexOf('# REF_A')).toBeLessThan(
+      input.indexOf('int reference()'),
+    );
+    expect(input.indexOf('int reference()')).toBeLessThan(
+      input.indexOf('# REF_B'),
+    );
+    expect(input).not.toContain('ALTERNATE_REFERENCE');
+    expect(input).not.toContain('book/teacher.zip');
+    const job = await aiFeedbackJobModel
+      .findOne({ submissionId: new Types.ObjectId(submission) })
+      .lean();
+    expect(job?.requests?.[0].inputBytes).toBe(
+      Buffer.byteLength(JSON.stringify(payload.messages), 'utf8'),
+    );
+    expect((await readReview(submission)).aiReview.inputCoverage).toBe('FULL');
+  });
+
+  it.each([false, true])(
+    'keeps saved work when queued materials disappear (FIRST_SUBMISSION_AUTO=%s)',
+    async (automatic) => {
+      clearCapturedPayloads();
+      const config = app.get(ConfigService);
+      config.set('AI_FEEDBACK_AUTO_ON_SUBMIT', automatic);
+      const id = await contextTask();
+      const instance = await publishContext(
+        id,
+        automatic ? 'FIRST_SUBMISSION_AUTO' : 'MANUAL',
+      );
+      const submission = await submitContext(instance);
+      if (!automatic) await requestContext(submission);
+      const pending = await aiFeedbackJobModel
+        .findOne({ submissionId: new Types.ObjectId(submission) })
+        .lean();
+      expect(pending?.status).toBe('PENDING');
+      await rm(resolve(contextRoot, 'book/teacher.zip'));
+      try {
+        expect(await processOwned(1)).toMatchObject({ processed: 1, dead: 1 });
+        const detail = await readReview(submission);
+        expect(detail.content).toMatchObject({
+          codeText: 'STUDENT_ZIP_CODE',
+          submissionNote: 'STUDENT_ZIP_NOTE',
+        });
+        expect(detail.aiReview).toMatchObject({
+          failure: {
+            code: 'AI_CONTEXT_UNAVAILABLE',
+            message:
+              '作业已保存，任务参考资料暂不可用，本次未生成 AI 反馈，请联系教师。',
+          },
+          usage: { reservedRequests: 0 },
+          retryScheduled: false,
+          inputCoverage: 'NOT_SENT',
+        });
+        expect(getCapturedPayloads()).toHaveLength(0);
+        expect(
+          await feedbackModel.countDocuments({
+            submissionId: new Types.ObjectId(submission),
+          }),
+        ).toBe(0);
+        expect(await submissionModel.countDocuments({ _id: submission })).toBe(
+          1,
+        );
+        const job = await aiFeedbackJobModel
+          .findOne({ submissionId: new Types.ObjectId(submission) })
+          .lean();
+        expect(job).toMatchObject({
+          status: 'DEAD',
+          attempts: 1,
+          failureCode: 'AI_CONTEXT_UNAVAILABLE',
+          notBefore: null,
+          lockedAt: null,
+        });
+        const retry = await requestContext(submission);
+        expect(retry.body).toMatchObject({ status: 'DEAD' });
+        const safe = JSON.stringify(detail.aiReview);
+        for (const hidden of [
+          'aiContextRefs',
+          'teacher.zip',
+          'ENOENT',
+          contextRoot,
+          '# REF_B',
+        ])
+          expect(safe).not.toContain(hidden);
+      } finally {
+        await copyFile(
+          resolve(__dirname, 'fixtures/ai-context/teacher.zip'),
+          resolve(contextRoot, 'book/teacher.zip'),
+        );
+        config.set('AI_FEEDBACK_AUTO_ON_SUBMIT', false);
+      }
+    },
+  );
+
+  it('uses the existing complete messages budget when references push an otherwise small submission over it', async () => {
+    clearCapturedPayloads();
+    const id = await contextTask([
+      { archivePath: 'book/student.zip', entryPaths: ['limit.txt'] },
+    ]);
+    const instance = await publishContext(id);
+    const submission = await submitContext(instance);
+    await requestContext(submission);
+    expect(await processOwned(1)).toMatchObject({ dead: 1 });
+    expect(getCapturedPayloads()).toHaveLength(0);
+    const job = await aiFeedbackJobModel
+      .findOne({ submissionId: new Types.ObjectId(submission) })
+      .lean();
+    expect(job).toMatchObject({
+      status: 'DEAD',
+      failureCode: 'INPUT_BUDGET_EXCEEDED',
+      requests: [],
+    });
+    expect(
+      await feedbackModel.countDocuments({
+        submissionId: new Types.ObjectId(submission),
+      }),
+    ).toBe(0);
+    expect((await readReview(submission)).content.codeText).toBe(
+      'STUDENT_ZIP_CODE',
     );
   });
 });

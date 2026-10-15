@@ -72,6 +72,7 @@ AI Feedback：
 - 平台 AI 请求及首提自动入队由实例策略与既有开关共同控制，后续提交未请求 AI 时没有 Job 属于正常状态，不应隐式补成处理中。
 - 受控 debug / process-once 是非产品执行入口，与 Worker 共用处理链，不能代替产品请求或后台消费模型。
 - 完整源码、说明、声明及发布快照已纳入有界 AI 辅助评阅，持久化请求预留与实报用量并提供安全详情摘要；字段见 [DTO Owner](./handoff-backend-dto-cheatsheet.md#submission-request--response-family)。
+- 已支持任务配置 ZIP 文本资料、发布实例固定引用与 Processor 运行时重读；参考材料参与既有完整输入预算，失败提供安全摘要且不影响已保存作品。路径/字段、调用、运行资源和证据分别见 DTO、Service、Config 与 Testing Owner；不提供下载界面、Word/PDF/图片解析或资料管理平台。
 - 本地桩与外部 Provider 对接已具备；具体 Provider、Worker、模型及邮件运行组合见 [Config Matrix](./handoff-backend-config-matrix.md)，内部处理与恢复见 [Service Map](./handoff-backend-service-map.md)。
 
 ## 4) 主链路当前状态摘要

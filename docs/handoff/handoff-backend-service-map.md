@@ -168,11 +168,11 @@ Global SoT 只保留理解跨 Service workflow 必需的稳定不变量，不追
 - Service: `backend/src/modules/classrooms/classroom-tasks/services/classroom-tasks.service.ts`
 - Domain / Responsibility: 发布与管理课堂任务实例，查询可发布模板，组织实例提交与 Z3/Z4 聚合。
 - Upstream: 课堂任务管理、实例提交及实例聚合入口。
-- Downstream / Dependencies: `ClassroomModel`、`ClassroomTaskModel`、`TaskModel`、`SubmissionModel`、`FeedbackModel`、`UserModel`、`EnrollmentService`、`AiFeedbackJobService`、`LearningTasksService`。
+- Downstream / Dependencies: `ClassroomModel`、`ClassroomTaskModel`、`TaskModel`、`SubmissionModel`、`FeedbackModel`、`UserModel`、`EnrollmentService`、`AiFeedbackJobService`、`LearningTasksService`、`AiContextReaderService`。
 - Consistency / State / Idempotency:
-  - 发布前检查班级 owner/运行态与模板发布态/可见性，从同一次 Task 读取形成 taskSnapshot 与实例同次写入；`unique(classroomId,taskId)` 防重复发布，重复键转为受控拒绝。旧实例缺省状态按 ACTIVE 兼容。
+  - 发布前检查班级 owner/运行态与模板发布态/可见性，从同一次 Task 读取形成候选 taskSnapshot（深复制引用），通过 AiContextReaderService 验证候选引用后保存同一份快照；`unique(classroomId,taskId)` 防重复发布，重复键转为受控拒绝。旧实例缺省状态按 ACTIVE 兼容。
   - 实例配置更新与生命周期分开处理；撤回前检查无提交，RECALLED 保持封闭。恢复提交仅改状态，不隐式改截止与提交设置；不支持撤回后重发同模板。
-  - 发布返回、列表/详情、my-task-detail、教师/学生看板、提交详情标题及 AI 分析标题统一优先读实例快照；旧实例仅当前模板只读 fallback，不回填。模板库/候选仍读当前 Task，资产状态保持当前值。
+  - 发布返回、列表/详情、my-task-detail、教师/学生看板、提交详情标题及 AI 分析标题统一优先读实例快照；旧实例仅当前模板只读 fallback，不回填；课堂成员响应由 publicTaskContent 明确投影，避免展开内部引用。模板库/候选仍读当前 Task，资产状态保持当前值。
   - 发布候选查询同时应用当前教师可见性、模板发布状态及已发布 taskId 排除；未显式指定课程分类时按班级课程分类优先排序。
   - 提交入口检查学生身份、Enrollment ACTIVE、课堂归属及班级/实例 ACTIVE，再通过 `createSubmissionForClassroomTask` 绑定实例主键；真正写 Submission/自动 Job 前，由 [Card 08](#service-card-08) 再次 enforce 运行态及截止/迟交边界。
 - Isolation: 查询与统计按 `classroomTaskId`，成员全集来自 Enrollment ACTIVE；不得按底层 taskId 跨班兜底。模板状态不决定既有实例学生运行态。
@@ -186,8 +186,9 @@ Global SoT 只保留理解跨 Service workflow 必需的稳定不变量，不追
 - Service: `backend/src/modules/learning-tasks/services/learning-tasks.service.ts`
 - Domain / Responsibility: 管理任务模板，创建 Submission，读取提交详情，写教师反馈，协调自动/手工 AI Job 与任务统计。
 - Upstream: 任务/提交/反馈入口；`ClassroomTasksService` 的实例提交流程。
-- Downstream / Dependencies: `ConfigService`、`TaskModel`、`SubmissionModel`、`FeedbackModel`、`ClassroomTaskModel`、`ClassroomModel`、`UserModel`、`EnrollmentModel`、`AiFeedbackJobService`。
+- Downstream / Dependencies: `ConfigService`、`TaskModel`、`SubmissionModel`、`FeedbackModel`、`ClassroomTaskModel`、`ClassroomModel`、`UserModel`、`EnrollmentModel`、`AiFeedbackJobService`、`AiContextReaderService`。
 - Consistency / State / Idempotency:
+  - 保存模板前由 AiContextReaderService 验证最终生效引用，再应用全部编辑；创建 PUBLISHED 和实际 publish 同样验证，幂等 publish 不重建内容。
   - 模板承担资产管理，ClassroomTask 承担教学运行态；内容编辑不得隐式改变状态，同状态输入忽略后继续编辑，归档内容不可改。重复发布保持幂等；归档不检查/级联 ClassroomTask 引用，兼容 restore 入口不恢复归档模板。
   - 模板读范围由当前教师与共享可见性构造；legacy 缺省 visibility 兼容 SHARED，兼容 createdBy query 不突破当前教师范围；共享不转移作者写权限。分类为治理坐标，不作为 Course 外键或发布一致性约束；“未分类”查询兼容字段缺省任务。
   - Submission 的 attemptNo 采用“查询最新编号 + 有界重试”，最多 3 次分配尝试，冲突不绕过唯一约束。旧通用写入口拒绝；新实例提交要求实际快照并逐次保存源码与说明，实例提交在写 Submission/自动 Job 前重验班级/实例 ACTIVE，并校验截止与迟交规则，持久化提交时间及迟交结果，不以模板当前状态阻断既有实例。
@@ -390,9 +391,10 @@ Global SoT 只保留理解跨 Service workflow 必需的稳定不变量，不追
 - Service: `backend/src/modules/learning-tasks/ai-feedback/services/ai-feedback-processor.service.ts`
 - Domain / Responsibility: 原子认领 Job、构造分析上下文、经护栏调用 Provider、收敛并持久化反馈、更新执行终态与重试时间。
 - Upstream: `AiFeedbackWorker` 与受诊断门禁保护的手工 process-once，共用处理链。
-- Downstream / Dependencies: `AiFeedbackJobModel`、`SubmissionModel`、`ClassroomTaskModel`、`FeedbackModel`、`AI_FEEDBACK_PROVIDER_TOKEN`、`AiFeedbackGuardsService`、`ConfigService`、`feedback-item-compactor`。
+- Downstream / Dependencies: `AiFeedbackJobModel`、`SubmissionModel`、`ClassroomTaskModel`、`FeedbackModel`、`AI_FEEDBACK_PROVIDER_TOKEN`、`AiFeedbackGuardsService`、`ConfigService`、`feedback-item-compactor`、`AiContextReaderService`。
 - Consistency / State / Idempotency:
   - findOneAndUpdate 按 createdAt 原子 claim，同时检查 PENDING/FAILED、调度到期、budgetVersion=1、attempts < maxAttempts 和既有锁条件，在同一次写入增加 attempts 并设 RUNNING。attempts 表示认领次数，本地限流也消耗机会；失败更新不再递增。所有认领后 Job 记录和终态写入匹配 ID、RUNNING、本次 attempts 及 lockOwner。
+  - 每次处理由 AiContextReaderService 只读取所属实例快照指定 ZIP；不回查当前模板、不保存正文副本。资料读取在 Provider 及 stub 之前，失败安全终止、不调用模型。参考文件以引用序号/条目来源标记为分析数据，与发布要求、评分参考、学生源码和说明/声明分区；参考实现不是唯一合法答案或运行证据，不要求复述全文/内部路径。完整 messages 仍进入 Provider 的现有字节预算。
   - 读取 Submission 后核对 Job/Submission/实例归属，读取所属实例的固定 title/description/rubric 形成 AiSubmissionAnalysisContext，codeText/language/submissionNote/meta.aiUsageDeclaration 完整来自当前 Submission，说明与源码分别标记且不能覆盖教师要求；调用 Provider 后在写库前以内存 compactor 收敛，同类问题合并，存在 ERROR/WARN 时去掉独立低价值 INFO。
   - Job/Processor 是唯一重试负责人：仅本地/上游限流、上游 5xx 和超时可在剩余机会内 FAILED，并按既有 30 秒起指数退避（最大 10 分钟）；其他不可重试失败和耗尽次数直接 DEAD，清理锁与调度时间，保留安全失败代码。数据库记录/反馈/终态写入异常不能成为再次调用模型的理由。
   - 每次真实 HTTP 前通过回调在当前 claim 持久化预留，以 claimNo 标识，最多三条；包含 provider、model、完整输入 bytes、输出 token 上限、reservedAt、usage=null。预留失败或未匹配禁止 fetch；供应商可能已收到的未知预留不归零、不删除。usage 落库先于反馈处理；不保存 prompt/源码副本/原始响应/密钥/请求头。
@@ -402,6 +404,13 @@ Global SoT 只保留理解跨 Service workflow 必需的稳定不变量，不追
 - Important Performance / Recovery: `insertMany(ordered:false)` 批量写反馈并容忍重复键；Submission 缺失作为 INTERNAL_ERROR 终止，实例关联/资格失败不调用 Provider 或反复重试。Provider BAD_RESPONSE 进入失败处理，重复反馈不单独中断 Job；compactor 不追加模型调用。
 - SoT: `backend/src/modules/learning-tasks/ai-feedback/services/ai-feedback-processor.service.ts`；`backend/src/modules/learning-tasks/ai-feedback/lib/feedback-item-compactor.ts`；`backend/src/modules/learning-tasks/ai-feedback/interfaces/ai-feedback-provider.error-codes.ts`。
 - Boundary / Non-responsibility: 不承担产品请求的资源授权或 Worker 调度；反馈主策略来自 prompt/protocol，compactor 是落库前轻量兜底。运行参数见 [Config Matrix](./handoff-backend-config-matrix.md)，Provider 规则见 [Card B](#provider-card-b)。
+
+## ZIP Context Reader
+
+- Service: `backend/src/modules/learning-tasks/ai-context/ai-context-reader.service.ts`，由 LearningTasksModule 注册并导出；模板保存/发布、课堂发布与 Processor 共用。
+- Responsibility: 按配置顺序用 yauzl 懒扫描、精确选择条目、流式读取，不整包解压到磁盘。无依赖直接返回且不访问文件系统；资源定位及固定限制见 [Config Matrix §7](./handoff-backend-config-matrix.md#7-zip-资料资源)，文本/路径合同见 [DTO Owner](./handoff-backend-dto-cheatsheet.md#zip-资料引用配置)。
+- Safety: realpath containment 与普通文件检查；拒绝重复目标名称、目录/符号链接、加密或不支持压缩；检查声明及实际字节数、CRC32 与严格 UTF-8。选中流在 finally destroy，ZIP 在 finally close 并等待关闭；原始系统错误归为安全引用/条目序号与原因。
+- Failure boundary: 保存/发布转安全 400；Processor 将 AiContextError 映射为不可重试 DEAD，清理 claim 锁/调度，保留既有作品。内部诊断只记 Job/提交标识、序号与安全原因。没有下载授权、正文快照、自动版本选择、缓存或文件解析平台。
 
 ## Service Card 14
 

@@ -1,3 +1,4 @@
+import { AiContextReaderService } from '../../../learning-tasks/ai-context/ai-context-reader.service';
 import { AiFeedbackMode } from '../classroom-task-content';
 import { Model, Types } from 'mongoose';
 import { Classroom, ClassroomStatus } from '../../schemas/classroom.schema';
@@ -257,6 +258,7 @@ const createHarness = (options: HarnessOptions = {}) => {
     enrollmentService as unknown as EnrollmentService,
     aiFeedbackJobService as unknown as AiFeedbackJobService,
     learningTasksService as unknown as LearningTasksService,
+    new AiContextReaderService(),
   );
 
   return {
@@ -616,6 +618,7 @@ describe('ClassroomTasksService listClassroomTasks publisher contract', () => {
       {} as unknown as EnrollmentService,
       {} as unknown as AiFeedbackJobService,
       {} as unknown as LearningTasksService,
+      new AiContextReaderService(),
     );
 
     const result = await service.listClassroomTasks(
@@ -746,6 +749,7 @@ describe('ClassroomTasksService listPublishableTaskTemplates publisher contract'
       {} as unknown as EnrollmentService,
       {} as unknown as AiFeedbackJobService,
       {} as unknown as LearningTasksService,
+      new AiContextReaderService(),
     );
 
     const result = await service.listPublishableTaskTemplates(
@@ -815,6 +819,7 @@ describe('ClassroomTasksService listPublishableTaskTemplates publisher contract'
       {} as unknown as EnrollmentService,
       {} as unknown as AiFeedbackJobService,
       {} as unknown as LearningTasksService,
+      new AiContextReaderService(),
     );
 
     await service.listPublishableTaskTemplates(

@@ -5,6 +5,7 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
+import { AiContextReaderService } from '../../../learning-tasks/ai-context/ai-context-reader.service';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, PipelineStage, Types } from 'mongoose';
 import { Classroom } from '../../schemas/classroom.schema';
@@ -13,6 +14,7 @@ import {
   AiFeedbackMode,
   MISSING_TASK_SNAPSHOT_MESSAGE,
   snapshotTask,
+  publicTaskContent,
   studentCanRequestAi,
 } from '../classroom-task-content';
 import { ClassroomTask } from '../schemas/classroom-task.schema';
@@ -283,6 +285,7 @@ export class ClassroomTasksService {
     private readonly enrollmentService: EnrollmentService,
     private readonly aiFeedbackJobService: AiFeedbackJobService,
     private readonly learningTasksService: LearningTasksService,
+    private readonly aiContextReader: AiContextReaderService,
   ) {}
 
   async createClassroomTask(
@@ -315,6 +318,8 @@ export class ClassroomTasksService {
       throw new BadRequestException('Task must be published');
     }
 
+    const candidateSnapshot = snapshotTask(task);
+    await this.aiContextReader.validateForSave(candidateSnapshot.aiContextRefs);
     const publishedAt = new Date();
     const dueAt = dto.dueAt ? new Date(dto.dueAt) : undefined;
     const settings = {
@@ -330,7 +335,7 @@ export class ClassroomTasksService {
       const classroomTask = await this.classroomTaskModel.create({
         classroomId: new Types.ObjectId(classroomId),
         taskId: new Types.ObjectId(dto.taskId),
-        taskSnapshot: snapshotTask(task),
+        taskSnapshot: candidateSnapshot,
         publishedAt,
         dueAt,
         settings,
@@ -1326,7 +1331,7 @@ export class ClassroomTasksService {
       },
       task: {
         id: task._id.toString(),
-        ...teachingContent,
+        ...publicTaskContent(teachingContent),
         status: task.status,
       },
       me: { studentId: studentObjectId.toString() },
@@ -1900,7 +1905,7 @@ export class ClassroomTasksService {
       taskPublisher:
         taskPublisher ?? this.toPublisherSummary(task.createdBy, null),
       task: {
-        ...teachingContent,
+        ...publicTaskContent(teachingContent),
         status: task.status,
       },
     } as ClassroomTaskResponseDto;

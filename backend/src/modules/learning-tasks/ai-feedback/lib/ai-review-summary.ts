@@ -1,6 +1,10 @@
 import type { AiRequestRecord } from '../schemas/ai-feedback-job.schema';
 import { AiFeedbackJobStatus } from '../schemas/ai-feedback-job.schema';
 export const AI_REVIEW_FAILURE_MESSAGES = {
+  AI_CONTEXT_UNAVAILABLE:
+    '作业已保存，任务参考资料暂不可用，本次未生成 AI 反馈，请联系教师。',
+  AI_CONTEXT_LIMIT_EXCEEDED:
+    '作业已保存，任务参考资料超过读取限额，本次未生成 AI 反馈，请联系教师。',
   INPUT_BUDGET_EXCEEDED:
     '作业已保存，完整内容超过 AI 输入限额，本次未生成 AI 反馈。',
   OUTPUT_LIMIT_REACHED: 'AI 输出达到上限，反馈不完整，本次未保存 AI 反馈。',

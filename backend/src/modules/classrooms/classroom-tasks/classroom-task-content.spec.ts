@@ -1,0 +1,35 @@
+import { snapshotTask, publicTaskContent } from './classroom-task-content';
+import { Task, TaskStatus } from '../../learning-tasks/schemas/task.schema';
+import { Types } from 'mongoose';
+it('deep copies internal references and explicitly projects public teaching fields', () => {
+  const task: Task = {
+    title: 'title',
+    description: 'description',
+    knowledgeModule: 'module',
+    courseLabel: '通用编程',
+    stage: 1,
+    difficulty: 'easy',
+    rubric: { nested: { points: 1 } },
+    status: TaskStatus.Published,
+    createdBy: new Types.ObjectId(),
+    aiContextRefs: [
+      { archivePath: 'teacher/book.zip', entryPaths: ['teacher/guide.md'] },
+    ],
+  };
+  const snapshot = snapshotTask(task);
+  task.aiContextRefs![0].entryPaths.push('new.md');
+  task.aiContextRefs![0].archivePath = 'new/book.zip';
+  expect(snapshot.aiContextRefs).toEqual([
+    { archivePath: 'teacher/book.zip', entryPaths: ['teacher/guide.md'] },
+  ]);
+  expect(publicTaskContent(snapshot)).toEqual({
+    title: 'title',
+    description: 'description',
+    knowledgeModule: 'module',
+    courseLabel: '通用编程',
+    stage: 1,
+    difficulty: 'easy',
+    rubric: { nested: { points: 1 } },
+  });
+  expect(publicTaskContent(snapshot)).not.toHaveProperty('aiContextRefs');
+});

@@ -1,3 +1,6 @@
+import { AiContextError } from '../../ai-context/ai-context.types';
+import { DefaultStubAiFeedbackProvider } from './default-stub-ai-feedback.provider';
+import { AiContextReaderService } from '../../ai-context/ai-context-reader.service';
 import { Test } from '@nestjs/testing';
 import { ConfigService } from '@nestjs/config';
 import { getModelToken } from '@nestjs/mongoose';
@@ -60,6 +63,7 @@ async function harness() {
   const module = await Test.createTestingModule({
     providers: [
       AiFeedbackProcessor,
+      AiContextReaderService,
       { provide: ConfigService, useValue: config },
       { provide: AiFeedbackGuardsService, useValue: guards },
       {
@@ -269,4 +273,50 @@ describe('claim and paid request persistence gates (no database)', () => {
       await h.module.close();
     }
   });
+});
+
+describe('reference failures are terminal before every provider, including stub', () => {
+  afterEach(() => jest.restoreAllMocks());
+  it.each(['AI_CONTEXT_UNAVAILABLE', 'AI_CONTEXT_LIMIT_EXCEEDED'] as const)(
+    'terminates %s without request reservation or feedback',
+    async (code) => {
+      const h = await harness();
+      const stub = new DefaultStubAiFeedbackProvider();
+      const provider = h.module.get<BailianFeedbackProvider>(
+        AI_FEEDBACK_PROVIDER_TOKEN,
+      );
+      const analyze = jest
+        .spyOn(provider, 'analyzeSubmission')
+        .mockImplementation((context) => stub.analyzeSubmission(context));
+      h.config.set('AI_FEEDBACK_PROVIDER', 'stub');
+      jest
+        .spyOn(h.module.get(AiContextReaderService), 'read')
+        .mockRejectedValue(new AiContextError(code, '安全原因', 1, 2));
+      const fetch = jest.spyOn(globalThis, 'fetch');
+      try {
+        expect(await h.processor.processOnce(1)).toEqual({
+          processed: 1,
+          succeeded: 0,
+          failed: 0,
+          dead: 1,
+        });
+        expect(analyze).not.toHaveBeenCalled();
+        expect(fetch).not.toHaveBeenCalled();
+        expect(h.jobModel.updateOne).not.toHaveBeenCalled();
+        expect(h.feedback.insertMany).not.toHaveBeenCalled();
+        expect(h.jobModel.findOneAndUpdate.mock.calls[2][1]).toMatchObject({
+          $set: {
+            status: 'DEAD',
+            failureCode: code,
+            lastError: 'AI_FEEDBACK: ' + code,
+            notBefore: null,
+            lockedAt: null,
+            lockOwner: null,
+          },
+        });
+      } finally {
+        await h.module.close();
+      }
+    },
+  );
 });

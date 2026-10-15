@@ -1,3 +1,4 @@
+import { AiContextReaderService } from './ai-context/ai-context-reader.service';
 import { Module } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { MongooseModule } from '@nestjs/mongoose';
@@ -50,6 +51,7 @@ import { User, UserSchema } from '../users/schemas/user.schema';
   ],
   controllers: [LearningTasksController],
   providers: [
+    AiContextReaderService,
     LearningTasksService,
     LearningTasksReportsService,
     AiFeedbackJobService,
@@ -85,6 +87,6 @@ import { User, UserSchema } from '../users/schemas/user.schema';
       },
     },
   ],
-  exports: [LearningTasksService],
+  exports: [LearningTasksService, AiContextReaderService],
 })
 export class LearningTasksModule {}

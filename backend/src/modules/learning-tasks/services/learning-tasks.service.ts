@@ -8,6 +8,7 @@ import {
   Logger,
   NotFoundException,
 } from '@nestjs/common';
+import { AiContextReaderService } from '../ai-context/ai-context-reader.service';
 import { ConfigService } from '@nestjs/config';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
@@ -135,6 +136,7 @@ export class LearningTasksService {
     private readonly aiFeedbackJobService: AiFeedbackJobService,
     @InjectModel(Enrollment.name)
     private readonly enrollmentModel: Model<Enrollment>,
+    private readonly aiContextReader: AiContextReaderService,
   ) {}
 
   async createTask(dto: CreateTaskDto, userId: string) {
@@ -148,6 +150,7 @@ export class LearningTasksService {
         LearningTasksService.CREATE_ARCHIVED_TASK_TEMPLATE_MESSAGE,
       );
     }
+    await this.aiContextReader.validateForSave(dto.aiContextRefs);
     const task = await this.taskModel.create({
       ...dto,
       courseLabel,
@@ -174,6 +177,12 @@ export class LearningTasksService {
       throw new BadRequestException(
         LearningTasksService.TASK_TEMPLATE_STATUS_ACTION_REQUIRED_MESSAGE,
       );
+    }
+    await this.aiContextReader.validateForSave(
+      dto.aiContextRefs === undefined ? task.aiContextRefs : dto.aiContextRefs,
+    );
+    if (dto.aiContextRefs !== undefined) {
+      task.aiContextRefs = dto.aiContextRefs;
     }
     const hasCourseLabel = 'courseLabel' in dto;
     const nextVisibility = this.toSanitizedTaskVisibility(dto.visibility);
@@ -227,6 +236,7 @@ export class LearningTasksService {
         'Only draft task templates can be published',
       );
     }
+    await this.aiContextReader.validateForSave(task.aiContextRefs);
     task.status = TaskStatus.Published;
     task.publishedAt = new Date();
     await task.save();
@@ -753,6 +763,10 @@ export class LearningTasksService {
       stage: task.stage,
       difficulty: task.difficulty,
       rubric: task.rubric,
+      aiContextRefs: task.aiContextRefs?.map((ref) => ({
+        archivePath: ref.archivePath,
+        entryPaths: [...ref.entryPaths],
+      })),
       status: task.status,
       createdBy: task.createdBy.toString(),
       publisher: publisher ?? this.toPublisherSummary(task.createdBy, null),

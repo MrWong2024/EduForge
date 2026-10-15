@@ -165,7 +165,7 @@ my-task-detail 另稳定返回 `participationStatus={readOnly,canSubmit,canReque
 - `aiFeedbackStatus` 值域 `NOT_REQUESTED | PENDING | RUNNING | SUCCEEDED | FAILED | DEAD`，无 job 显式返回 `NOT_REQUESTED`。后续 attempt 尚未手工 request 时也可能合法地为 NOT_REQUESTED。
 - 详情新增 `aiReview={provider,canRequest,requestBlockReason,failure,retryScheduled,nextRetryAt,inputCoverage,usage}`：
   - provider 为 `bailian | stub | null`；canRequest 仅表示当前用户符合 A1 申请资格且尚无 Job，允许时 requestBlockReason=null，否则为安全中文原因。授权及 POST 幂等合同见 API Owner。
-  - failure 为 null 或 `{code,message}`；code 白名单为 `INPUT_BUDGET_EXCEEDED | OUTPUT_LIMIT_REACHED | PROVIDER_CONFIGURATION | RATE_LIMITED | UPSTREAM_UNAVAILABLE | INVALID_RESPONSE | TASK_INELIGIBLE | LEGACY_JOB_UNSUPPORTED | INTERNAL_ERROR`。message 为服务端安全中文，不返回 lastError、堆栈、上游原文或连接信息。输入超限文案为“作业已保存，完整内容超过 AI 输入限额，本次未生成 AI 反馈。”；次数耗尽保留最后原因。
+  - failure 为 null 或 `{code,message}`；code 白名单为 `AI_CONTEXT_UNAVAILABLE | AI_CONTEXT_LIMIT_EXCEEDED | INPUT_BUDGET_EXCEEDED | OUTPUT_LIMIT_REACHED | PROVIDER_CONFIGURATION | RATE_LIMITED | UPSTREAM_UNAVAILABLE | INVALID_RESPONSE | TASK_INELIGIBLE | LEGACY_JOB_UNSUPPORTED | INTERNAL_ERROR`。message 为服务端安全中文，不返回 lastError、堆栈、上游原文或连接信息。输入超限文案为“作业已保存，完整内容超过 AI 输入限额，本次未生成 AI 反馈。”；次数耗尽保留最后原因。
   - retryScheduled 仅新版 FAILED、尚有次数、有 notBefore 且当前 Worker 启用时为 true，nextRetryAt 此时为 ISO 时间，其余 false/null；计划不保证已开始或成功。
   - inputCoverage 为 `FULL | NOT_SENT | UNKNOWN`。FULL 仅本版 Bailian 成功，表示完整材料进入请求，不认证运行或掌握；确定无真实请求及 stub 为 NOT_SENT；旧结果及已预留但覆盖无法确认的未成功结果为 UNKNOWN。
   - usage 为 `{reservedRequests,reportedRequests,promptTokens,completionTokens,totalTokens}`，字段均为 number|null。reservedRequests 是持久化预留数，不是准确送达数；reportedRequests 是获得完整合法 usage 的记录数。全部预留已报告才返回跨全部请求 Token 合计（含失败请求）；任一次未知则三个合计均 null，保留请求计数。无 Job、新版无请求及 stub 均为 0；历史缺版本的所有用量字段均 null。
@@ -378,7 +378,32 @@ disclaimer：本分析仅反映 EduForge AI 反馈介入后的提交行为与代
 - knowledgeModule 无枚举白名单。`courseLabel` 使用 `TASK_COURSE_LABELS` 单选白名单（如未分类、通用编程、Java 程序设计、数据结构、人工智能）；trim 后空白转 undefined。更新中显式传入空白 courseLabel 表示清空；不是 Course 外键。
 - `visibility: PRIVATE | SHARED`，trim + uppercase，空白视为未传；创建默认 PRIVATE；公开读取旧数据缺省时按 SHARED 兼容。
 - `courseLabel=未分类` 查询兼容匹配字段缺省/空值。`createdBy` 保留输入兼容但不提供越权筛选；scope 的可见性含义见 [API Learning Tasks](./handoff-backend-api-map.md#learning-tasks)。
-- `TaskResponseDto`：`{id,title,description,knowledgeModule,courseLabel?,visibility,stage,difficulty?,rubric?,status,createdBy,publisher,createdAt,updatedAt,publishedAt?}`。`publisher={id,name?}|null`，不返回完整 User。
+- `TaskResponseDto`：`{id,title,description,knowledgeModule,courseLabel?,visibility,stage,difficulty?,rubric?,aiContextRefs?,status,createdBy,publisher,createdAt,updatedAt,publishedAt?}`。`publisher={id,name?}|null`，不返回完整 User。
+
+### ZIP 资料引用配置
+
+CreateTaskDto / UpdateTaskDto 通过继承 `TaskAiContextDto` 接受嵌套 `aiContextRefs?: Array<{archivePath:string;entryPaths:string[]}>`；Task Schema 持久化引用，教师模板列表/详情按既有可见性返回。创建省略为无依赖；PATCH 省略保留最终引用，`[]` 清空，`null` 不合法。非空引用必须选择条目；拒绝重复 archivePath、同包重复 entryPath、非法嵌套字段；保留配置顺序。大小上限由 [Config Matrix §7](./handoff-backend-config-matrix.md#7-zip-资料资源) 维护。
+
+路径以 `/` 分隔且精确匹配，不 trim、改大小写或补前缀；archivePath 相对于 `.local` 且包含教材目录，entryPaths 为 ZIP 内完整文件路径。拒绝绝对路径、盘符/UNC、反斜杠、NUL、`.`/`..` 与空路径段。读取的文本扩展名为 `.md/.markdown/.txt/.json/.diff/.patch/.c/.h/.cc/.hh/.cpp/.hpp/.cxx/.hxx/.java/.py/.js/.jsx/.mjs/.cjs/.ts/.tsx/.mts/.cts`，必须为严格 UTF-8，可带 BOM；不接受 NUL、无效 UTF-8 或二进制。未选中的 DOCX 不影响其它合法文本读取。
+
+内部 TaskSnapshot 深复制引用和 entryPaths；课堂列表、详情及 my-task-detail 的 task 使用明确公开教学字段投影，不返回 aiContextRefs、资料正文或教师包路径。已有完整快照缺少此可选字段按无依赖；整个快照缺失时的只读/409 合同不变。Submission/Job 不保存参考资料正文。
+
+以下成员已通过真实第14章 ZIP 只读核实。这是读取与配置示例，不表示已完整审查正式代码评阅所需依赖：
+
+```json
+{
+  "aiContextRefs": [
+    {
+      "archivePath": "human-ai-programming/student/第14章_学生配套_C++_V0.5.1.zip",
+      "entryPaths": ["chapter14_cpp/notes/AI任务委托卡.md"]
+    },
+    {
+      "archivePath": "human-ai-programming/teacher/第14章_教师与编辑配套_三语言_V0.7.zip",
+      "entryPaths": ["chapter14_teacher/teacher/教学与练习说明.md"]
+    }
+  ]
+}
+```
 
 ### 发布候选模板
 

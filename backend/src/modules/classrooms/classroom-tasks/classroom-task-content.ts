@@ -9,7 +9,22 @@ export type TaskSnapshot = Pick<
   | 'stage'
   | 'difficulty'
   | 'rubric'
+  | 'aiContextRefs'
 >;
+
+export type PublicTaskContent = Omit<TaskSnapshot, 'aiContextRefs'>;
+
+export function publicTaskContent(task: TaskSnapshot): PublicTaskContent {
+  return {
+    title: task.title,
+    description: task.description,
+    knowledgeModule: task.knowledgeModule,
+    courseLabel: task.courseLabel,
+    stage: task.stage,
+    difficulty: task.difficulty,
+    rubric: task.rubric,
+  };
+}
 
 export enum AiFeedbackMode {
   Disabled = 'DISABLED',
@@ -23,6 +38,10 @@ export const MISSING_TASK_SNAPSHOT_MESSAGE =
 
 export function snapshotTask(task: Task): TaskSnapshot {
   return {
+    aiContextRefs: task.aiContextRefs?.map((ref) => ({
+      archivePath: ref.archivePath,
+      entryPaths: [...ref.entryPaths],
+    })),
     title: task.title,
     description: task.description,
     knowledgeModule: task.knowledgeModule,

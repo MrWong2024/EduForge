@@ -172,12 +172,14 @@ Notes:
 - 模板可见性只影响读取，不改变作者的管理权限。课程分类不参与权限、发布约束或跨课程复用限制；字段/默认/白名单见 [DTO Task template](./handoff-backend-dto-cheatsheet.md#task-template-dto--response-family)。
 - 模板创建仅允许初始 DRAFT/PUBLISHED，不能直接创建 ARCHIVED；后续单向 `DRAFT -> PUBLISHED -> ARCHIVED`。
 - 普通 PATCH 不承担生命周期变更：status 与当前状态不同时返回 `400 Task template status must be changed through lifecycle actions`；相同时忽略该字段并继续编辑其它内容。ARCHIVED 模板普通更新返回 `400 Archived tasks cannot be updated`。
+- 创建/保存模板先验证最终生效的 ZIP 引用；创建 PUBLISHED、DRAFT 实际 publish 及课堂发布均须读取验证。DTO 非法和缺失/损坏/不可读/不支持/超限资料返回 400，使用引用/条目序号及安全原因，不暴露系统路径；不保存部分编辑、不创建无效实例。模板已 PUBLISHED 的重复 publish 保持既有幂等语义。配置及公开投影见 [DTO ZIP 资料引用](./handoff-backend-dto-cheatsheet.md#zip-资料引用配置)。
 - publish 为 teacher only、作者 only；DRAFT 可发布，PUBLISHED 幂等返回当前模板，ARCHIVED 返回 `400 Archived task templates cannot be published`。
 - archive 为 teacher only、作者 only；仅 PUBLISHED 可归档，其余返回 `400 Only published task templates can be archived`。被 ClassroomTask 引用仍可归档，不影响已发布实例运行。
 - restore 仅作为 teacher/作者的兼容入口，稳定返回 `400 Archived task templates cannot be restored to draft; clone as draft instead`，不再恢复归档模板。
 - 列表 scope 语义：mine 是本人全部模板；shared 是共享池（包含本人共享模板和旧数据缺省 visibility）；all 是本人全部与共享池的可见全集。createdBy 仅保留字段兼容，不能成为越权筛选入口。详情允许作者读取，其他人仅可读共享模板（旧数据缺省也视为共享），他人的 PRIVATE 模板返回 `404`。
 - 新作品只经课堂实例入口创建；旧通用提交 POST 返回 409，message=“请从班级任务入口提交。”。模板级 submissions/stats/common-issues 继续要求模板作者权限，仅纳入该教师自有班级实例及既有无课堂关联提交；权限范围先于分页、total、学生去重和反馈聚合。共享模板不授予作者访问他人班级作品的权限；学生 mine 仍仅本人。提交详情 `GET /api/learning-tasks/submissions/:id` 是稳定读源：学生本人可读；有实例关联时仅该班级 owner teacher 可读，无实例关联时仅 task owner teacher 可读；其他用户 `403`，不存在 `404`。字段及 detail/list 的代码暴露区别见 [DTO Submission](./handoff-backend-dto-cheatsheet.md#submission-request--response-family)。
 - 手工 AI request 是登录、RBAC 与资源归属保护的产品能力，不受 AI_FEEDBACK_DEBUG_ENABLED 门禁影响。按保存的 classroomTaskId 校验提交/实例/班级关联：DISABLED 禁止师生；TEACHER_ONLY 仅班级 owner 教师；MANUAL 与 FIRST_SUBMISSION_AUTO 允许有权师生。学生还须本人、Enrollment ACTIVE、班级/实例 ACTIVE；教师可评阅已移出学生的既有作品。策略禁止返回 403，在 ensureJobForSubmission 前拒绝，无 Job/反馈写入。合法请求复用既有 Job 的真实状态幂等返回 200，包括 FAILED/DEAD/SUCCEEDED；不重置次数或重新排队，无 retry/reset 入口。合法申请仍先返回 Job，完整输入限额拒绝在异步处理后从详情读取，不改变作品提交成功；无新增预检接口。自动入队组合见 [Config Matrix](./handoff-backend-config-matrix.md#5-ai-入队触发策略attempt-based组合语义)。
+- ZIP 读取不进入同步 request：申请仍先检查权限并幂等返回真实 Job 状态。Processor 每次执行重读实例指定资料；不可用或资源超限在 Provider 前直接 DEAD，零模型请求、零伪反馈，分别返回 AI_CONTEXT_UNAVAILABLE / AI_CONTEXT_LIMIT_EXCEEDED 的安全中文摘要，明确作业已保存、未生成反馈并联系教师。完整 messages 超限仍为 INPUT_BUDGET_EXCEEDED。首提自动入队后的资料/预算失败不回滚作品，无自动换版本、重放或 retry/reset 产品入口。
 - 提交详情在原有读取授权之后增加安全 aiReview，师生获得相同的失败、用量和覆盖事实，当前用户动作资格可不同；轻量列表不扩展摘要。字段与 null/0 语义见 [DTO Submission](./handoff-backend-dto-cheatsheet.md#submission-request--response-family)，页面不依赖 debug/ops。
 - 缺快照旧实例保持已有作品/反馈只读投影，不迁移或读时回填；新提交和新 AI 请求返回 409，message=“该课堂任务未保存发布内容，请教师重新布置后继续。”。无课堂关联旧提交也禁止新 AI 请求。旧模板投影不代表发布时原文；可用性字段见 DTO Owner。
 - 公开教师创建反馈只接受 source=TEACHER；伪造 AI/SYSTEM/其他值返回 400，不写反馈或 AI Job。内部 Processor 仍保存 AI 来源。

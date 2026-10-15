@@ -1,7 +1,10 @@
 import { TaskStatus } from '../schemas/task.schema';
 import type { TaskVisibility } from '../task-template-visibility.constants';
 
+import type { AiContextRef } from '../ai-context/ai-context.types';
+
 export class TaskResponseDto {
+  aiContextRefs?: AiContextRef[];
   id!: string;
   title!: string;
   description!: string;

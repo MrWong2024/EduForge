@@ -144,3 +144,22 @@ Bailian 固定使用非流式、顶层 `enable_thinking:false` 与 `max_tokens`�
 | 上游输出上限 | `AI_FEEDBACK_MAX_OUTPUT_TOKENS` | 根据反馈长度在静态边界内配置 |
 
 选择 Bailian 真实 Provider 后，并发/限流/maxItems 会直接影响调用成本与上游压力。
+
+
+## 7) ZIP 资料资源
+
+资源根固定为项目根 `.local`，与 backend/frontend 同级；读取服务按自身模块位置定位 source 与正常 `backend/dist/src` 产物，不依赖启动 cwd。不新增环境变量；集中代码常量为 `AI_CONTEXT_LIMITS`（`backend/src/modules/learning-tasks/ai-context/ai-context.types.ts`）。
+
+| 资源读取保护 | 固定上限 |
+|---|---|
+| 每任务 ZIP 引用 | 8 |
+| 全部 ZIP 选中文件 | 32 |
+| 单 ZIP 物理大小 | 32 MiB |
+| 单 ZIP 扫描条目 | 4096 |
+| 单个选中文件声明/实际解压大小 | 64 KiB |
+| 全部选中文件声明/实际解压总量 | 256 KiB |
+| archivePath / 单 entryPath | 各 1024 字符 |
+
+KiB/MiB 按 1024 进制。读取保护不替代 §4 完整 AI 输入预算，不提高默认预算、不截断或丢弃参考资料。
+
+教材目录继续纳入 Git，每本教材独立目录；部署和运行须保留配置的精确包路径。新版本使用新文件名，已被实例引用的旧包继续保留；不自动搜索最新版、替换或补齐。快照固定引用路径，不防止维护者手工覆盖同名包；不新增文件版本数据库或正文快照。`.local` 不挂静态目录，引用配置不是下载授权。实际教材配置示例由 [DTO Owner](./handoff-backend-dto-cheatsheet.md#zip-资料引用配置) 维护。

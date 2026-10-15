@@ -1,3 +1,4 @@
+import { TaskAiContextDto } from './ai-context-ref.dto';
 import {
   IsIn,
   IsEnum,
@@ -31,7 +32,7 @@ const trimVisibilityInput = ({ value }: { value: unknown }): unknown => {
   return trimmed ? trimmed : undefined;
 };
 
-export class UpdateTaskDto {
+export class UpdateTaskDto extends TaskAiContextDto {
   @IsOptional()
   @IsString()
   title?: string;
