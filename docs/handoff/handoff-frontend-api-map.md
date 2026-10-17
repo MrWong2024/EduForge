@@ -88,6 +88,7 @@
 - 任务模板编辑/生命周期：`EditLearningTaskForm` -> `/api/proxy/learning-tasks/tasks/:id*`。
   - 对应后端：`GET/PATCH /api/learning-tasks/tasks/:id`、`POST /publish`、`POST /archive`。
   - 注意：内容更新与生命周期采用各自后端接口，普通保存不构造状态流转；权限与生命周期由后端最终校验。
+  - 教师模板类型及 create/detail/update/list 适配保留 `aiContextRefs`；字段缺省表示无引用，非法引用响应使加载/保存确认失败，不回退为空配置。创建与编辑沿上述 BFF 保存；编辑仅在引用语义改变时发送完整数组，未变更省略，显式 `[]` 清空；成功响应更新比较基准。完整字段、验证与快照合同见 [Backend DTO ZIP 资料引用配置](./handoff-backend-dto-cheatsheet.md#zip-资料引用配置)。课堂公开接口及学生消费不补取教师模板资料。
 - 班级发布候选：`PublishClassroomTaskForm` -> `/api/proxy/classrooms/:id/publishable-task-templates`。
   - 对应后端：`GET /api/classrooms/:id/publishable-task-templates`。
   - 注意：模板可见性、发布资格及本班已发布排除由后端候选接口决定，前端不自行伪造候选全集。当前候选 DTO 不提供 rubric，缺少该字段只能提示到模板详情核对，不能判断模板未配置评分参考。

@@ -45,7 +45,7 @@ EduForge 当前是面向教师与学生的教学任务平台，已形成以下�
 
 ZIP 依赖资料配置、课堂发布固定引用与 AI 评阅后端工程范围已闭合：教师通过既有任务 API 配置文本资料，实例沿发布引用读取并参与完整输入预算，失败保护已保存作品并提供安全摘要。
 
-- 当前范围为后端配置、发布快照、异步评阅与工程验收；没有新增前端配置页、资料下载/管理平台或 Word/PDF/图片解析，不以历史 B1 Browser 证据证明本功能。
+- 后端范围保持闭合；教师模板资料引用的前端简易编辑与只读展示/复制、对应工程验收及隔离合成数据清理已闭合，不重新打开 B1。资料下载/管理平台及 Word/PDF/图片解析不在本范围。前端对接与职责见 [Frontend API](./handoff-frontend-api-map.md) / [Component Map](./handoff-frontend-component-map.md)，页面证据边界见 [Frontend Testing Playbook](./handoff-frontend-testing-playbook.md#8-agent-assisted-browser-smoke)。
 - 配置与投影见 [DTO Owner](./handoff-backend-dto-cheatsheet.md#zip-资料引用配置)，执行与资源边界见 [Service Map](./handoff-backend-service-map.md#zip-context-reader) / [Config Matrix](./handoff-backend-config-matrix.md#7-zip-资料资源)，证据职责见 [Backend Testing Playbook](./handoff-backend-testing-playbook.md#zip-资料证据与夹具)。真实模型质量与真实课堂效果不在本范围。
 
 ## 7. 维护规则

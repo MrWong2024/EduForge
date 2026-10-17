@@ -13,6 +13,10 @@ import { toLearningTaskDetailResponse } from "@/lib/api/types-teacher";
 import { paths } from "@/lib/routes/paths";
 import { getCommonErrorSummary } from "@/lib/ui/status";
 import { getSingleSearchParam, toDisplayText } from "@/lib/ui/format";
+import {
+  canEditTaskTemplate,
+  isTaskTemplateAuthor,
+} from "@/lib/learning-tasks/ai-context-refs";
 
 type EditLearningTaskPageProps = {
   params: Promise<{ taskId: string }>;
@@ -88,8 +92,7 @@ export default async function EditLearningTaskPage({
     const task = toLearningTaskDetailResponse(payload);
     const currentUserId =
       typeof me?.id === "string" && me.id.trim() ? me.id.trim() : undefined;
-    const canEdit =
-      !currentUserId || !task.createdById || task.createdById === currentUserId;
+    const canEdit = isTaskTemplateAuthor(currentUserId, task.createdById);
 
     viewModel = {
       mode: "ready",
@@ -123,7 +126,11 @@ export default async function EditLearningTaskPage({
   }
 
   const isArchivedTask = viewModel.task.status === "ARCHIVED";
-  const canEditCurrentTask = viewModel.canEdit && !isArchivedTask;
+  const canEditCurrentTask = canEditTaskTemplate(
+    viewModel.currentUserId,
+    viewModel.task.createdById,
+    viewModel.task.status,
+  );
 
   return (
     <section className="space-y-4">
@@ -153,7 +160,7 @@ export default async function EditLearningTaskPage({
             ? "此页用于维护 learning task 模板字段与基础评分配置。"
             : isArchivedTask && viewModel.canEdit
               ? "此页展示已归档模板详情；归档模板当前只读，后续如需复用应复制为新草稿。"
-              : "此页展示共享模板详情；你当前仅有查看权限。"}
+              : "此页只读展示模板详情；当前身份或状态不允许编辑。"}
         </p>
         <p className="mt-1">
           当前模板：{toDisplayText(viewModel.task.title, "未命名模板")}（状态：
@@ -162,6 +169,7 @@ export default async function EditLearningTaskPage({
       </section>
 
       <EditLearningTaskForm
+        key={viewModel.taskId}
         taskId={viewModel.taskId}
         initialTask={viewModel.task}
         readOnly={!viewModel.canEdit}

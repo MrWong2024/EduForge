@@ -30,6 +30,15 @@ import {
 import { paths } from "@/lib/routes/paths";
 import { getPublisherLabel } from "@/lib/ui/format";
 import { getRubricDimensionLabel } from "@/lib/ui/rubric";
+import {
+  TaskAiContextRefsEditor,
+  TaskAiContextRefsReadOnly,
+} from "@/components/teacher/TaskAiContextRefs";
+import {
+  buildAiContextRefsPatch,
+  canEditTaskTemplate,
+  formatAiContextRefs,
+} from "@/lib/learning-tasks/ai-context-refs";
 
 type EditLearningTaskFormProps = {
   taskId: string;
@@ -314,6 +323,13 @@ export function EditLearningTaskForm({
   );
   const [designWeight, setDesignWeight] = useState(rubricSeed.designWeight);
   const [rubricNotes, setRubricNotes] = useState(rubricSeed.notes);
+  const [aiContextBaseline, setAiContextBaseline] = useState(
+    initialTask.aiContextRefs ?? [],
+  );
+  const [aiContextText, setAiContextText] = useState(() =>
+    formatAiContextRefs(initialTask.aiContextRefs ?? []),
+  );
+  const [aiContextError, setAiContextError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isPublishing, setIsPublishing] = useState(false);
   const [isArchiving, setIsArchiving] = useState(false);
@@ -322,14 +338,19 @@ export function EditLearningTaskForm({
     useState<EditLearningTaskFormErrorState | null>(null);
 
   const isArchived = currentStatus === "ARCHIVED";
-  const canPublish = !readOnly && currentStatus === "DRAFT";
-  const canArchive = !readOnly && currentStatus === "PUBLISHED";
+  const ownerCanEdit = canEditTaskTemplate(
+    currentUserId,
+    initialTask.createdById,
+    hasKnownInitialStatus ? currentStatus : undefined,
+  );
+  const canPublish = !readOnly && ownerCanEdit && currentStatus === "DRAFT";
+  const canArchive = !readOnly && ownerCanEdit && currentStatus === "PUBLISHED";
   const isActionPending = isPublishing || isArchiving;
-  const effectiveReadOnly = readOnly || isArchived || !hasKnownInitialStatus;
+  const effectiveReadOnly = readOnly || !ownerCanEdit;
 
   const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    if (effectiveReadOnly || isActionPending) {
+    if (effectiveReadOnly || isSubmitting || isActionPending) {
       return;
     }
 
@@ -395,6 +416,19 @@ export function EditLearningTaskForm({
       return;
     }
 
+    let aiContextPatch: Pick<UpdateLearningTaskRequest, "aiContextRefs">;
+    try {
+      aiContextPatch = buildAiContextRefsPatch(
+        aiContextText,
+        aiContextBaseline,
+      );
+    } catch (error) {
+      setAiContextError(
+        error instanceof Error ? error.message : "引用 JSON 不合法。",
+      );
+      return;
+    }
+    setAiContextError(null);
     setIsSubmitting(true);
     setSuccessMessage(null);
     setErrorState(null);
@@ -426,6 +460,7 @@ export function EditLearningTaskForm({
       courseLabel: normalizedCourseLabel ?? "",
       visibility,
       stage: parsedStage,
+      ...aiContextPatch,
     };
     if (hasRubricInput) {
       const rubricPayload: Record<string, unknown> = {};
@@ -454,6 +489,14 @@ export function EditLearningTaskForm({
       );
 
       const updated = toLearningTaskUpdateResponse(payload);
+      if (
+        updated.id !== taskId ||
+        "aiContextRefs" in
+          buildAiContextRefsPatch(aiContextText, updated.aiContextRefs ?? [])
+      ) {
+        throw new Error("保存结果无法确认");
+      }
+      setAiContextBaseline(updated.aiContextRefs ?? []);
       const updatedTaskId = updated.id?.trim();
       const suffix = hasRubricInput ? "，评分配置已更新。" : "。";
       setSuccessMessage(
@@ -480,7 +523,7 @@ export function EditLearningTaskForm({
   };
 
   const handleLifecycleAction = async (action: TaskLifecycleAction) => {
-    if (readOnly || isSubmitting || isActionPending) {
+    if (effectiveReadOnly || isSubmitting || isActionPending) {
       return;
     }
 
@@ -530,14 +573,12 @@ export function EditLearningTaskForm({
         const detail = extractRawDetail(error);
         setErrorState({
           status: error.status,
-          title:
-            action === "publish" ? "发布任务模板失败" : "归档任务模板失败",
+          title: action === "publish" ? "发布任务模板失败" : "归档任务模板失败",
           description: buildErrorDescription(summary, detail),
         });
       } else {
         setErrorState({
-          title:
-            action === "publish" ? "发布任务模板失败" : "归档任务模板失败",
+          title: action === "publish" ? "发布任务模板失败" : "归档任务模板失败",
           description:
             action === "publish"
               ? "发布任务模板失败，请稍后重试。"
@@ -563,7 +604,7 @@ export function EditLearningTaskForm({
       </p>
       {readOnly ? (
         <p className="mt-2 text-xs text-zinc-600">
-          当前模板由其他教师创建，你可以查看内容，但不能编辑或发布该模板。
+          当前仅有查看权限，不能编辑或发布该模板。
         </p>
       ) : null}
       {publisherLabel ? (
@@ -585,7 +626,7 @@ export function EditLearningTaskForm({
       <form onSubmit={handleSubmit} className="mt-4 space-y-4">
         <fieldset
           disabled={isSubmitting || isActionPending || effectiveReadOnly}
-          className="space-y-4"
+          className="min-w-0 space-y-4"
         >
           <div className="grid gap-4 md:grid-cols-2">
             <label className="block text-sm">
@@ -773,6 +814,18 @@ export function EditLearningTaskForm({
             </label>
           </section>
         </fieldset>
+
+        {effectiveReadOnly ? (
+          <TaskAiContextRefsReadOnly refs={aiContextBaseline} />
+        ) : (
+          <TaskAiContextRefsEditor
+            value={aiContextText}
+            onChange={setAiContextText}
+            error={aiContextError}
+            onError={setAiContextError}
+            disabled={isSubmitting || isActionPending}
+          />
+        )}
 
         <div className="flex flex-wrap items-center gap-3">
           {!effectiveReadOnly ? (

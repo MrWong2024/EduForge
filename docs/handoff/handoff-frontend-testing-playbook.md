@@ -59,6 +59,7 @@ npm run build
 - contracts 仅使用 `test` / `expect` 与被测纯模块，不使用 Browser fixture，不启动 Browser 或服务，不连接网络/数据库，也不依赖环境变量；Browser evidence 仍须按本文既有最低充分规则另行资格审查。
 - lint/typecheck/build 是代码变化后的静态门禁，不证明登录、Cookie、BFF、请求副作用或真实页面流程。
 - 纯展示映射、序列化、资格判断等逻辑如果可以脱离 React/Browser 独立证明，应优先复用现有 contracts runner，不因假设未来需求新增依赖或并行 runner。
+- `task-ai-context-refs.contract.spec.ts` 负责教师模板引用适配、结构拒绝、路径/顺序保持、仅格式化不改变语义、PATCH 省略/清空与响应基准、明确作者及状态门禁；expected 来自任务约束与 Backend DTO，不读取 ZIP 或启动服务。
 - 文档-only 变化只做文档、链接、diff 与范围门禁，不机械运行 frontend build。
 
 命令生成期核验、discovery、定向执行、目标集合精确匹配、`not_executed` 判定与是否扩大回归统一遵循 [Codex instruction spec](../codex-instruction-spec.md) §3.8 / §3.9；本文只保留 EduForge 当前真实 runner 与命令入口。不得仅因“最终代码态”“为了保险”或追求形式完整而机械扩大完整测试套件。
@@ -157,6 +158,8 @@ npm run test:browser
 文本教学任务的真实前后端 smoke 由 Agent 操作实际师生页面：课堂发布、源码与独立说明保存/历史回读、权限内 AI 申请与实际 stub 反馈、教师人工反馈、学生修订，以及任务关闭后的只读访问。它补充真实页面 wiring、防重复入口、正常冷却、失败后的显式核对与恢复、批阅草稿保护和代表性 CSS viewport 的客观可操作性；不重复完整服务端攻击矩阵或 pure 精确乱序。合成账号、前置、受控 APP Processor 与 ADMIN 精确清理引用 [Backend testing playbook §6.2](./handoff-backend-testing-playbook.md#62-文本教学任务专用-smoke-支持)，不在此复制 fixture 字段。
 
 该执行方式是 Agent-assisted interactive Browser smoke，不是 scripted UI golden path 或 CI 资产。实际命令、请求、截图、结果与资源收尾归当次报告；stub 不证明真实模型质量，教学可理解性与真实课堂效果仍由 Human/真实教学验证承担。
+
+教师模板资料引用 UI 变更的必要 smoke 聚焦：创建/编辑/刷新回填、未变更省略及清空、前端 JSON 阻断与真实后端资源拒绝后的草稿恢复、共享和归档只读及复制、学生课堂公开页隐藏资料，以及桌面/窄视口的操作与草稿保护。复用同一隔离基础及后端 §6.2 支持；不增加 scripted UI spec，不调用模型，不以历史后端通过代替当前页面证据。
 
 ## 9. Human Smoke
 

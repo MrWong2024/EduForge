@@ -52,8 +52,10 @@
 | CreateClassroomForm | `components/teacher/CreateClassroomForm.tsx` | 建班表单及局部输入/提交状态，不负责班级列表加载；名称示例不自动成为输入值 |
 | EditClassroomForm | `components/teacher/EditClassroomForm.tsx` | 只编辑班级基础信息，当前可编辑字段为 `name`；所属课程、状态与加入码只读。通过班级更新能力保存并返回看板；不提供归档、恢复、删除或其他生命周期操作，生命周期动作归 ClassroomLifecycleActions |
 | ClassroomLifecycleActions | `components/teacher/ClassroomLifecycleActions.tsx` | 班级列表生命周期“更多”菜单：ACTIVE 归档/删除，ARCHIVED 恢复/删除；拥有菜单、pending、确认与结果状态，组合 FloatingMoreMenu 并保留当前列表视图；删除限制由后端判定，不混入基础编辑表单 |
-| CreateLearningTaskForm | `components/teacher/CreateLearningTaskForm.tsx` | 模板内容、课程分类、可见性及基础 rubric 配置；草稿/发布两种创建动作，无归档创建入口；复用 course-labels 与 UI Rubric，不负责课堂实例发布 |
-| EditLearningTaskForm | `components/teacher/EditLearningTaskForm.tsx` | 模板内容编辑、rubric 与只读呈现；保存内容与发布/归档动作分离，管理动作确认和 pending。非作者、归档或未知状态只读，无恢复动作；保留合法列表返回上下文；不承担课堂实例设置 |
+| CreateLearningTaskForm | `components/teacher/CreateLearningTaskForm.tsx` | 模板内容、课程分类、可见性及基础 rubric 配置；评分参考后组合资料引用编辑区；草稿/发布两种创建动作，无归档创建入口；保存失败保留全部输入，不负责课堂实例发布 |
+| EditLearningTaskForm | `components/teacher/EditLearningTaskForm.tsx` | 模板内容、rubric 与资料引用编辑/只读组合；成功保存更新引用比较基准，刷新 props 不覆盖草稿，页面按 taskId 重建表单。仅明确身份与作者匹配且状态可编辑时允许写入；保存与发布/归档共用 pending 边界，保留列表返回上下文，不承担课堂实例设置 |
+| TaskAiContextRefs | `components/teacher/TaskAiContextRefs.tsx` | 普通多行引用 JSON 编辑、就近结构错误与格式化；只读时按包展示全部路径并复制数组 JSON，失败提供可选中文本；不渲染路径链接/HTML，不读 ZIP，不进入学生或课堂实例页 |
+| ai-context-refs | `lib/learning-tasks/ai-context-refs.ts` | 引用基本结构解析、稳定格式化、语义差异与局部作者编辑判断；保持路径及数组顺序，不复制后端 ZIP 安全校验 |
 | LearningTaskFilters | `components/teacher/LearningTaskFilters.tsx` | 模板视图/筛选的 URL 状态、分页、列表展示与编辑/查看入口；保留列表返回上下文，筛选后回首屏；复用共享可见性和排序模块，不在当前页伪造完整候选或发起发布/归档 |
 | PublishClassroomTaskForm | `components/teacher/PublishClassroomTaskForm.tsx` | 可见已发布模板的筛选、候选追加加载、选择状态与实例发布；筛选变化重置候选，课程分类复用共享候选；发布者来源与已选模板摘要由本组件展示；候选未提供 rubric 时提示到模板详情核对，不宣称未配置。实例截止/迟交/次数和发布时平台 AI 模式选择属于此表单；不创建/编辑模板，不自行判定后端候选全集 |
 | ClassroomTaskLifecycleActions | `components/teacher/ClassroomTaskLifecycleActions.tsx` | 实例状态展示、关闭/恢复提交及确认/请求状态；恢复只改变运行状态，不自动改截止、迟交或次数设置；RECALLED 无动作，不做物理删除或发布表单 |

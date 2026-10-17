@@ -4,6 +4,10 @@ import {
 } from "@/lib/learning-tasks/ai-review";
 import { safeGet } from "@/lib/ui/format";
 import {
+  readAiContextRefs,
+  type TaskAiContextRef,
+} from "@/lib/learning-tasks/ai-context-refs";
+import {
   normalizeTaskCourseLabel,
   type TaskCourseLabel,
 } from "@/lib/learning-tasks/course-labels";
@@ -352,6 +356,7 @@ export type CreateLearningTaskRequest = {
   stage: number;
   status: LearningTaskStatus;
   rubric?: Record<string, unknown>;
+  aiContextRefs?: TaskAiContextRef[];
 };
 
 export type UpdateLearningTaskRequest = {
@@ -362,6 +367,7 @@ export type UpdateLearningTaskRequest = {
   visibility?: TaskTemplateVisibility;
   stage: number;
   rubric?: Record<string, unknown>;
+  aiContextRefs?: TaskAiContextRef[];
 };
 
 export type ListLearningTasksRequest = {
@@ -397,6 +403,7 @@ export type LearningTaskOption = {
   updatedAt?: string;
   stage?: number;
   rubric?: Record<string, unknown>;
+  aiContextRefs?: TaskAiContextRef[];
   raw: UnknownRecord;
 };
 
@@ -1199,6 +1206,10 @@ export const toLearningTaskOption = (value: unknown): LearningTaskOption => {
     updatedAt: asString(record.updatedAt),
     stage: asNumber(record.stage),
     rubric: Object.keys(rubricRecord).length > 0 ? rubricRecord : undefined,
+    aiContextRefs:
+      record.aiContextRefs === undefined
+        ? undefined
+        : readAiContextRefs(record.aiContextRefs),
     raw: record,
   };
 };

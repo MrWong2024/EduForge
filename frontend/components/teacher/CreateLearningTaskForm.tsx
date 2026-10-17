@@ -23,6 +23,12 @@ import {
   type TaskTemplateVisibility,
 } from "@/lib/learning-tasks/template-visibility-scope";
 import { getRubricDimensionLabel } from "@/lib/ui/rubric";
+import { TaskAiContextRefsEditor } from "@/components/teacher/TaskAiContextRefs";
+import {
+  buildAiContextRefsPatch,
+  parseAiContextRefsJson,
+  type TaskAiContextRef,
+} from "@/lib/learning-tasks/ai-context-refs";
 
 type CreateLearningTaskFormErrorState = {
   status?: number;
@@ -96,6 +102,8 @@ export function CreateLearningTaskForm() {
   const [codeStyleWeight, setCodeStyleWeight] = useState("");
   const [designWeight, setDesignWeight] = useState("");
   const [rubricNotes, setRubricNotes] = useState("");
+  const [aiContextText, setAiContextText] = useState("[]");
+  const [aiContextError, setAiContextError] = useState<string | null>(null);
   const [pendingAction, setPendingAction] = useState<CreateAction | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [errorState, setErrorState] =
@@ -115,6 +123,8 @@ export function CreateLearningTaskForm() {
     setCodeStyleWeight("");
     setDesignWeight("");
     setRubricNotes("");
+    setAiContextText("[]");
+    setAiContextError(null);
   };
 
   const submitCreate = async (
@@ -189,6 +199,16 @@ export function CreateLearningTaskForm() {
       return;
     }
 
+    let aiContextRefs: TaskAiContextRef[];
+    try {
+      aiContextRefs = parseAiContextRefsJson(aiContextText);
+    } catch (error) {
+      setAiContextError(
+        error instanceof Error ? error.message : "引用 JSON 不合法。",
+      );
+      return;
+    }
+    setAiContextError(null);
     setPendingAction(action);
     setSuccessMessage(null);
     setErrorState(null);
@@ -217,6 +237,7 @@ export function CreateLearningTaskForm() {
       visibility,
       stage: parsedStage,
       status: action === "publish" ? "PUBLISHED" : "DRAFT",
+      aiContextRefs,
     };
     if (normalizedCourseLabel) {
       requestBody.courseLabel = normalizedCourseLabel;
@@ -243,6 +264,13 @@ export function CreateLearningTaskForm() {
       });
 
       const created = toLearningTaskCreateResponse(payload);
+      if (
+        !created.id ||
+        "aiContextRefs" in
+          buildAiContextRefsPatch(aiContextText, created.aiContextRefs ?? [])
+      ) {
+        throw new Error("创建结果无法确认");
+      }
       const createdTaskId = created.id?.trim();
       const actionMessage =
         action === "publish" ? "任务模板已发布" : "任务模板已保存为草稿";
@@ -292,183 +320,194 @@ export function CreateLearningTaskForm() {
       </p>
 
       <form onSubmit={handleSaveDraft} className="mt-4 space-y-4">
-        <div className="grid gap-4 md:grid-cols-2">
-          <label className="block text-sm">
-            <span className="mb-1 block text-zinc-700">标题</span>
-            <input
-              value={title}
-              onChange={(event) => setTitle(event.target.value)}
-              placeholder="请输入任务模板标题"
-              className="w-full rounded-md border border-zinc-300 px-3 py-2"
-            />
-          </label>
-
-          <label className="block text-sm">
-            <span className="mb-1 block text-zinc-700">知识模块</span>
-            <input
-              value={knowledgeModule}
-              onChange={(event) => setKnowledgeModule(event.target.value)}
-              placeholder="例如：GENERAL"
-              className="w-full rounded-md border border-zinc-300 px-3 py-2"
-            />
-          </label>
-        </div>
-
-        <div className="grid gap-4 md:grid-cols-2">
-          <label className="block text-sm">
-            <span className="mb-1 block text-zinc-700">课程分类</span>
-            <select
-              value={courseLabel}
-              onChange={(event) => setCourseLabel(event.target.value)}
-              className="w-full rounded-md border border-zinc-300 px-3 py-2"
-            >
-              <option value="">未分类（通用模板）</option>
-              {TASK_COURSE_LABEL_FORM_OPTIONS.map((label) => (
-                <option key={label} value={label}>
-                  {label}
-                </option>
-              ))}
-            </select>
-            <p className="mt-1 text-xs text-zinc-500">
-              可选字段，仅用于模板治理（筛选/分组/检索辅助），不绑定课程。
-            </p>
-          </label>
-
-          <label className="block text-sm">
-            <span className="mb-1 block text-zinc-700">模板可见性</span>
-            <select
-              value={visibility}
-              onChange={(event) =>
-                setVisibility(event.target.value as TaskTemplateVisibility)
-              }
-              className="w-full rounded-md border border-zinc-300 px-3 py-2"
-            >
-              {TASK_TEMPLATE_VISIBILITIES.map((item) => (
-                <option key={item} value={item}>
-                  {TASK_TEMPLATE_VISIBILITY_LABELS[item]}
-                </option>
-              ))}
-            </select>
-            <p className="mt-1 text-xs text-zinc-500">
-              共享后其他教师可查看，但不能编辑或发布该模板。
-            </p>
-          </label>
-        </div>
-
-        <label className="block text-sm">
-          <span className="mb-1 block text-zinc-700">描述</span>
-          <textarea
-            value={description}
-            onChange={(event) => setDescription(event.target.value)}
-            rows={4}
-            placeholder="请输入任务模板描述"
-            className="w-full rounded-md border border-zinc-300 px-3 py-2"
-          />
-        </label>
-
-        <div className="grid gap-4 md:grid-cols-2">
-          <label className="block text-sm">
-            <span className="mb-1 block text-zinc-700">阶段</span>
-            <input
-              type="number"
-              min={1}
-              step={1}
-              inputMode="numeric"
-              value={stage}
-              onChange={(event) => setStage(event.target.value)}
-              className="w-full rounded-md border border-zinc-300 px-3 py-2"
-            />
-          </label>
-
-          <div className="block text-sm">
-            <span className="mb-1 block text-zinc-700">创建动作</span>
-            <div className="rounded-md border border-zinc-200 bg-zinc-50 px-3 py-2 text-zinc-700">
-              使用下方按钮决定初始状态：可保存为草稿或直接发布模板。
-            </div>
-            <p className="mt-1 text-xs text-zinc-500">
-              不提供 `ARCHIVED` 创建入口。
-            </p>
-          </div>
-        </div>
-
-        <section className="rounded-md border border-zinc-200 bg-zinc-50 p-3">
-          <h3 className="text-sm font-medium text-zinc-900">
-            基础评分配置（Rubric）
-          </h3>
-          <p className="mt-1 text-xs text-zinc-600">
-            可选填写。若全部留空，本次创建不会提交 rubric 字段。
-          </p>
-
-          <div className="mt-3 grid gap-4 md:grid-cols-2">
+        <fieldset disabled={isSubmitting} className="min-w-0 space-y-4">
+          <div className="grid gap-4 md:grid-cols-2">
             <label className="block text-sm">
-              <span className="mb-1 block text-zinc-700">{`${functionalityLabel}（可选）`}</span>
+              <span className="mb-1 block text-zinc-700">标题</span>
               <input
-                type="number"
-                min={0}
-                step={1}
-                inputMode="numeric"
-                value={functionalityWeight}
-                onChange={(event) => setFunctionalityWeight(event.target.value)}
-                placeholder="例如 40"
+                value={title}
+                onChange={(event) => setTitle(event.target.value)}
+                placeholder="请输入任务模板标题"
                 className="w-full rounded-md border border-zinc-300 px-3 py-2"
               />
             </label>
 
             <label className="block text-sm">
-              <span className="mb-1 block text-zinc-700">{`${correctnessLabel}（可选）`}</span>
+              <span className="mb-1 block text-zinc-700">知识模块</span>
               <input
-                type="number"
-                min={0}
-                step={1}
-                inputMode="numeric"
-                value={correctnessWeight}
-                onChange={(event) => setCorrectnessWeight(event.target.value)}
-                placeholder="例如 30"
-                className="w-full rounded-md border border-zinc-300 px-3 py-2"
-              />
-            </label>
-
-            <label className="block text-sm">
-              <span className="mb-1 block text-zinc-700">{`${codeStyleLabel}（可选）`}</span>
-              <input
-                type="number"
-                min={0}
-                step={1}
-                inputMode="numeric"
-                value={codeStyleWeight}
-                onChange={(event) => setCodeStyleWeight(event.target.value)}
-                placeholder="例如 20"
-                className="w-full rounded-md border border-zinc-300 px-3 py-2"
-              />
-            </label>
-
-            <label className="block text-sm">
-              <span className="mb-1 block text-zinc-700">{`${designLabel}（可选）`}</span>
-              <input
-                type="number"
-                min={0}
-                step={1}
-                inputMode="numeric"
-                value={designWeight}
-                onChange={(event) => setDesignWeight(event.target.value)}
-                placeholder="例如 10"
+                value={knowledgeModule}
+                onChange={(event) => setKnowledgeModule(event.target.value)}
+                placeholder="例如：GENERAL"
                 className="w-full rounded-md border border-zinc-300 px-3 py-2"
               />
             </label>
           </div>
 
-          <label className="mt-3 block text-sm">
-            <span className="mb-1 block text-zinc-700">评分说明（可选）</span>
+          <div className="grid gap-4 md:grid-cols-2">
+            <label className="block text-sm">
+              <span className="mb-1 block text-zinc-700">课程分类</span>
+              <select
+                value={courseLabel}
+                onChange={(event) => setCourseLabel(event.target.value)}
+                className="w-full rounded-md border border-zinc-300 px-3 py-2"
+              >
+                <option value="">未分类（通用模板）</option>
+                {TASK_COURSE_LABEL_FORM_OPTIONS.map((label) => (
+                  <option key={label} value={label}>
+                    {label}
+                  </option>
+                ))}
+              </select>
+              <p className="mt-1 text-xs text-zinc-500">
+                可选字段，仅用于模板治理（筛选/分组/检索辅助），不绑定课程。
+              </p>
+            </label>
+
+            <label className="block text-sm">
+              <span className="mb-1 block text-zinc-700">模板可见性</span>
+              <select
+                value={visibility}
+                onChange={(event) =>
+                  setVisibility(event.target.value as TaskTemplateVisibility)
+                }
+                className="w-full rounded-md border border-zinc-300 px-3 py-2"
+              >
+                {TASK_TEMPLATE_VISIBILITIES.map((item) => (
+                  <option key={item} value={item}>
+                    {TASK_TEMPLATE_VISIBILITY_LABELS[item]}
+                  </option>
+                ))}
+              </select>
+              <p className="mt-1 text-xs text-zinc-500">
+                共享后其他教师可查看，但不能编辑或发布该模板。
+              </p>
+            </label>
+          </div>
+
+          <label className="block text-sm">
+            <span className="mb-1 block text-zinc-700">描述</span>
             <textarea
-              value={rubricNotes}
-              onChange={(event) => setRubricNotes(event.target.value)}
-              rows={3}
-              placeholder="例如：优先关注可运行性与命名规范"
+              value={description}
+              onChange={(event) => setDescription(event.target.value)}
+              rows={4}
+              placeholder="请输入任务模板描述"
               className="w-full rounded-md border border-zinc-300 px-3 py-2"
             />
           </label>
-        </section>
 
+          <div className="grid gap-4 md:grid-cols-2">
+            <label className="block text-sm">
+              <span className="mb-1 block text-zinc-700">阶段</span>
+              <input
+                type="number"
+                min={1}
+                step={1}
+                inputMode="numeric"
+                value={stage}
+                onChange={(event) => setStage(event.target.value)}
+                className="w-full rounded-md border border-zinc-300 px-3 py-2"
+              />
+            </label>
+
+            <div className="block text-sm">
+              <span className="mb-1 block text-zinc-700">创建动作</span>
+              <div className="rounded-md border border-zinc-200 bg-zinc-50 px-3 py-2 text-zinc-700">
+                使用下方按钮决定初始状态：可保存为草稿或直接发布模板。
+              </div>
+              <p className="mt-1 text-xs text-zinc-500">
+                不提供 `ARCHIVED` 创建入口。
+              </p>
+            </div>
+          </div>
+
+          <section className="rounded-md border border-zinc-200 bg-zinc-50 p-3">
+            <h3 className="text-sm font-medium text-zinc-900">
+              基础评分配置（Rubric）
+            </h3>
+            <p className="mt-1 text-xs text-zinc-600">
+              可选填写。若全部留空，本次创建不会提交 rubric 字段。
+            </p>
+
+            <div className="mt-3 grid gap-4 md:grid-cols-2">
+              <label className="block text-sm">
+                <span className="mb-1 block text-zinc-700">{`${functionalityLabel}（可选）`}</span>
+                <input
+                  type="number"
+                  min={0}
+                  step={1}
+                  inputMode="numeric"
+                  value={functionalityWeight}
+                  onChange={(event) =>
+                    setFunctionalityWeight(event.target.value)
+                  }
+                  placeholder="例如 40"
+                  className="w-full rounded-md border border-zinc-300 px-3 py-2"
+                />
+              </label>
+
+              <label className="block text-sm">
+                <span className="mb-1 block text-zinc-700">{`${correctnessLabel}（可选）`}</span>
+                <input
+                  type="number"
+                  min={0}
+                  step={1}
+                  inputMode="numeric"
+                  value={correctnessWeight}
+                  onChange={(event) => setCorrectnessWeight(event.target.value)}
+                  placeholder="例如 30"
+                  className="w-full rounded-md border border-zinc-300 px-3 py-2"
+                />
+              </label>
+
+              <label className="block text-sm">
+                <span className="mb-1 block text-zinc-700">{`${codeStyleLabel}（可选）`}</span>
+                <input
+                  type="number"
+                  min={0}
+                  step={1}
+                  inputMode="numeric"
+                  value={codeStyleWeight}
+                  onChange={(event) => setCodeStyleWeight(event.target.value)}
+                  placeholder="例如 20"
+                  className="w-full rounded-md border border-zinc-300 px-3 py-2"
+                />
+              </label>
+
+              <label className="block text-sm">
+                <span className="mb-1 block text-zinc-700">{`${designLabel}（可选）`}</span>
+                <input
+                  type="number"
+                  min={0}
+                  step={1}
+                  inputMode="numeric"
+                  value={designWeight}
+                  onChange={(event) => setDesignWeight(event.target.value)}
+                  placeholder="例如 10"
+                  className="w-full rounded-md border border-zinc-300 px-3 py-2"
+                />
+              </label>
+            </div>
+
+            <label className="mt-3 block text-sm">
+              <span className="mb-1 block text-zinc-700">评分说明（可选）</span>
+              <textarea
+                value={rubricNotes}
+                onChange={(event) => setRubricNotes(event.target.value)}
+                rows={3}
+                placeholder="例如：优先关注可运行性与命名规范"
+                className="w-full rounded-md border border-zinc-300 px-3 py-2"
+              />
+            </label>
+          </section>
+
+          <TaskAiContextRefsEditor
+            value={aiContextText}
+            onChange={setAiContextText}
+            error={aiContextError}
+            onError={setAiContextError}
+            disabled={isSubmitting}
+          />
+        </fieldset>
         <div className="flex flex-wrap items-center gap-3">
           <button
             type="submit"
