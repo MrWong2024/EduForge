@@ -23,12 +23,6 @@ import {
   type TaskTemplateVisibility,
 } from "@/lib/learning-tasks/template-visibility-scope";
 import { getRubricDimensionLabel } from "@/lib/ui/rubric";
-import { TaskAiContextRefsEditor } from "@/components/teacher/TaskAiContextRefs";
-import {
-  buildAiContextRefsPatch,
-  parseAiContextRefsJson,
-  type TaskAiContextRef,
-} from "@/lib/learning-tasks/ai-context-refs";
 
 type CreateLearningTaskFormErrorState = {
   status?: number;
@@ -102,8 +96,6 @@ export function CreateLearningTaskForm() {
   const [codeStyleWeight, setCodeStyleWeight] = useState("");
   const [designWeight, setDesignWeight] = useState("");
   const [rubricNotes, setRubricNotes] = useState("");
-  const [aiContextText, setAiContextText] = useState("[]");
-  const [aiContextError, setAiContextError] = useState<string | null>(null);
   const [pendingAction, setPendingAction] = useState<CreateAction | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [errorState, setErrorState] =
@@ -123,8 +115,6 @@ export function CreateLearningTaskForm() {
     setCodeStyleWeight("");
     setDesignWeight("");
     setRubricNotes("");
-    setAiContextText("[]");
-    setAiContextError(null);
   };
 
   const submitCreate = async (
@@ -199,16 +189,6 @@ export function CreateLearningTaskForm() {
       return;
     }
 
-    let aiContextRefs: TaskAiContextRef[];
-    try {
-      aiContextRefs = parseAiContextRefsJson(aiContextText);
-    } catch (error) {
-      setAiContextError(
-        error instanceof Error ? error.message : "引用 JSON 不合法。",
-      );
-      return;
-    }
-    setAiContextError(null);
     setPendingAction(action);
     setSuccessMessage(null);
     setErrorState(null);
@@ -237,7 +217,6 @@ export function CreateLearningTaskForm() {
       visibility,
       stage: parsedStage,
       status: action === "publish" ? "PUBLISHED" : "DRAFT",
-      aiContextRefs,
     };
     if (normalizedCourseLabel) {
       requestBody.courseLabel = normalizedCourseLabel;
@@ -264,11 +243,7 @@ export function CreateLearningTaskForm() {
       });
 
       const created = toLearningTaskCreateResponse(payload);
-      if (
-        !created.id ||
-        "aiContextRefs" in
-          buildAiContextRefsPatch(aiContextText, created.aiContextRefs ?? [])
-      ) {
+      if (!created.id) {
         throw new Error("创建结果无法确认");
       }
       const createdTaskId = created.id?.trim();
@@ -499,14 +474,6 @@ export function CreateLearningTaskForm() {
               />
             </label>
           </section>
-
-          <TaskAiContextRefsEditor
-            value={aiContextText}
-            onChange={setAiContextText}
-            error={aiContextError}
-            onError={setAiContextError}
-            disabled={isSubmitting}
-          />
         </fieldset>
         <div className="flex flex-wrap items-center gap-3">
           <button

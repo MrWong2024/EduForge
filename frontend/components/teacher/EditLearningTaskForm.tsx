@@ -323,6 +323,9 @@ export function EditLearningTaskForm({
   );
   const [designWeight, setDesignWeight] = useState(rubricSeed.designWeight);
   const [rubricNotes, setRubricNotes] = useState(rubricSeed.notes);
+  const [showAiContextEditor] = useState(
+    () => (initialTask.aiContextRefs?.length ?? 0) > 0,
+  );
   const [aiContextBaseline, setAiContextBaseline] = useState(
     initialTask.aiContextRefs ?? [],
   );
@@ -625,13 +628,14 @@ export function EditLearningTaskForm({
 
       <form onSubmit={handleSubmit} className="mt-4 space-y-4">
         <fieldset
-          disabled={isSubmitting || isActionPending || effectiveReadOnly}
+          disabled={isSubmitting || isActionPending}
           className="min-w-0 space-y-4"
         >
           <div className="grid gap-4 md:grid-cols-2">
             <label className="block text-sm">
               <span className="mb-1 block text-zinc-700">标题</span>
               <input
+                disabled={effectiveReadOnly}
                 value={title}
                 onChange={(event) => setTitle(event.target.value)}
                 placeholder="请输入任务模板标题"
@@ -642,6 +646,7 @@ export function EditLearningTaskForm({
             <label className="block text-sm">
               <span className="mb-1 block text-zinc-700">知识模块</span>
               <input
+                disabled={effectiveReadOnly}
                 value={knowledgeModule}
                 onChange={(event) => setKnowledgeModule(event.target.value)}
                 placeholder="例如：GENERAL"
@@ -654,6 +659,7 @@ export function EditLearningTaskForm({
             <label className="block text-sm">
               <span className="mb-1 block text-zinc-700">课程分类</span>
               <select
+                disabled={effectiveReadOnly}
                 value={courseLabel}
                 onChange={(event) => setCourseLabel(event.target.value)}
                 className="w-full rounded-md border border-zinc-300 px-3 py-2"
@@ -673,6 +679,7 @@ export function EditLearningTaskForm({
             <label className="block text-sm">
               <span className="mb-1 block text-zinc-700">模板可见性</span>
               <select
+                disabled={effectiveReadOnly}
                 value={visibility}
                 onChange={(event) =>
                   setVisibility(event.target.value as TaskTemplateVisibility)
@@ -694,11 +701,12 @@ export function EditLearningTaskForm({
           <label className="block text-sm">
             <span className="mb-1 block text-zinc-700">描述</span>
             <textarea
+              readOnly={effectiveReadOnly}
               value={description}
               onChange={(event) => setDescription(event.target.value)}
-              rows={4}
+              rows={10}
               placeholder="请输入任务模板描述"
-              className="w-full rounded-md border border-zinc-300 px-3 py-2"
+              className="w-full resize-y overflow-auto rounded-md border border-zinc-300 px-3 py-2"
             />
           </label>
 
@@ -706,6 +714,7 @@ export function EditLearningTaskForm({
             <label className="block text-sm">
               <span className="mb-1 block text-zinc-700">阶段</span>
               <input
+                disabled={effectiveReadOnly}
                 type="number"
                 min={1}
                 max={4}
@@ -746,6 +755,7 @@ export function EditLearningTaskForm({
               <label className="block text-sm">
                 <span className="mb-1 block text-zinc-700">{`${functionalityLabel}（可选）`}</span>
                 <input
+                  disabled={effectiveReadOnly}
                   type="number"
                   min={0}
                   step={1}
@@ -762,6 +772,7 @@ export function EditLearningTaskForm({
               <label className="block text-sm">
                 <span className="mb-1 block text-zinc-700">{`${correctnessLabel}（可选）`}</span>
                 <input
+                  disabled={effectiveReadOnly}
                   type="number"
                   min={0}
                   step={1}
@@ -776,6 +787,7 @@ export function EditLearningTaskForm({
               <label className="block text-sm">
                 <span className="mb-1 block text-zinc-700">{`${codeStyleLabel}（可选）`}</span>
                 <input
+                  disabled={effectiveReadOnly}
                   type="number"
                   min={0}
                   step={1}
@@ -790,6 +802,7 @@ export function EditLearningTaskForm({
               <label className="block text-sm">
                 <span className="mb-1 block text-zinc-700">{`${designLabel}（可选）`}</span>
                 <input
+                  disabled={effectiveReadOnly}
                   type="number"
                   min={0}
                   step={1}
@@ -805,11 +818,12 @@ export function EditLearningTaskForm({
             <label className="mt-3 block text-sm">
               <span className="mb-1 block text-zinc-700">评分说明（可选）</span>
               <textarea
+                readOnly={effectiveReadOnly}
                 value={rubricNotes}
                 onChange={(event) => setRubricNotes(event.target.value)}
-                rows={3}
+                rows={rubricNotes.trim() ? 8 : 3}
                 placeholder="例如：优先关注可运行性与命名规范"
-                className="w-full rounded-md border border-zinc-300 px-3 py-2"
+                className="w-full resize-y overflow-auto rounded-md border border-zinc-300 px-3 py-2"
               />
             </label>
           </section>
@@ -817,7 +831,7 @@ export function EditLearningTaskForm({
 
         {effectiveReadOnly ? (
           <TaskAiContextRefsReadOnly refs={aiContextBaseline} />
-        ) : (
+        ) : showAiContextEditor ? (
           <TaskAiContextRefsEditor
             value={aiContextText}
             onChange={setAiContextText}
@@ -825,7 +839,7 @@ export function EditLearningTaskForm({
             onError={setAiContextError}
             disabled={isSubmitting || isActionPending}
           />
-        )}
+        ) : null}
 
         <div className="flex flex-wrap items-center gap-3">
           {!effectiveReadOnly ? (

@@ -1,6 +1,6 @@
 "use client";
 
-import { useId, useState } from "react";
+import { useId } from "react";
 import {
   formatAiContextRefs,
   parseAiContextRefsJson,
@@ -81,60 +81,28 @@ export function TaskAiContextRefsReadOnly({
 }: {
   refs: TaskAiContextRef[];
 }) {
-  const [copyMessage, setCopyMessage] = useState<string | null>(null);
-  const json = formatAiContextRefs(refs);
+  if (!refs.length) {
+    return null;
+  }
   return (
     <section className="min-w-0 rounded-md border border-zinc-200 bg-zinc-50 p-3">
       <h3 className="text-sm font-medium text-zinc-900">AI 评阅参考资料</h3>
-      {refs.length ? (
-        <div className="mt-2 space-y-3 text-sm">
-          {refs.map((ref, index) => (
-            <div key={index}>
-              <p className="break-all font-medium text-zinc-800">
-                {ref.archivePath}
-              </p>
-              <ul className="mt-1 list-inside list-disc text-zinc-700">
-                {ref.entryPaths.map((path, entryIndex) => (
-                  <li key={entryIndex} className="break-all">
-                    {path}
-                  </li>
-                ))}
-              </ul>
-            </div>
-          ))}
-        </div>
-      ) : (
-        <p className="mt-2 text-sm text-zinc-600">未配置 AI 评阅参考资料</p>
-      )}
-      <label className="mt-3 block text-sm text-zinc-700">
-        参考资料引用 JSON
-        <textarea
-          readOnly
-          value={json}
-          rows={6}
-          spellCheck={false}
-          className="mt-1 w-full rounded-md border border-zinc-300 bg-white px-3 py-2 font-mono text-sm"
-        />
-      </label>
-      <button
-        type="button"
-        onClick={async () => {
-          try {
-            await navigator.clipboard.writeText(json);
-            setCopyMessage("JSON 已复制。");
-          } catch {
-            setCopyMessage("复制失败，请选中上方 JSON 文本手动复制。");
-          }
-        }}
-        className="mt-2 rounded-md border border-zinc-300 px-3 py-1.5 text-sm"
-      >
-        复制 JSON
-      </button>
-      {copyMessage ? (
-        <p role="status" className="mt-2 text-sm text-zinc-700">
-          {copyMessage}
-        </p>
-      ) : null}
+      <div className="mt-2 space-y-3 text-sm">
+        {refs.map((ref, index) => (
+          <div key={index}>
+            <p className="break-all font-medium text-zinc-800">
+              {ref.archivePath}
+            </p>
+            <ul className="mt-1 list-inside list-disc text-zinc-700">
+              {ref.entryPaths.map((path, entryIndex) => (
+                <li key={entryIndex} className="break-all">
+                  {path}
+                </li>
+              ))}
+            </ul>
+          </div>
+        ))}
+      </div>
     </section>
   );
 }
