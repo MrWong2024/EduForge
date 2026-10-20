@@ -27,7 +27,7 @@ import {
   normalizeTaskTemplateVisibility,
   type TaskTemplateVisibility,
 } from "@/lib/learning-tasks/template-visibility-scope";
-import { paths } from "@/lib/routes/paths";
+import { toSafeTaskListReturnTo } from "@/lib/routes/task-list-return-to";
 import { getPublisherLabel } from "@/lib/ui/format";
 import { getRubricDimensionLabel } from "@/lib/ui/rubric";
 import {
@@ -243,20 +243,6 @@ const getLifecycleActionErrorSummary = (
     return "归档任务模板失败，请稍后重试。";
   }
   return "归档任务模板失败，请稍后重试。";
-};
-
-const toSafeTaskListReturnTo = (value: string | undefined): string => {
-  const trimmed = value?.trim();
-  if (!trimmed) {
-    return paths.teacher.tasks;
-  }
-  if (trimmed.startsWith("//")) {
-    return paths.teacher.tasks;
-  }
-  if (!/^\/teacher\/tasks(?:[/?#]|$)/.test(trimmed)) {
-    return paths.teacher.tasks;
-  }
-  return trimmed;
 };
 
 export function EditLearningTaskForm({

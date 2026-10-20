@@ -11,6 +11,7 @@ import {
 import { getMe } from "@/lib/auth/session";
 import { toLearningTaskDetailResponse } from "@/lib/api/types-teacher";
 import { paths } from "@/lib/routes/paths";
+import { toSafeTaskListReturnTo } from "@/lib/routes/task-list-return-to";
 import { getCommonErrorSummary } from "@/lib/ui/status";
 import { getSingleSearchParam, toDisplayText } from "@/lib/ui/format";
 import {
@@ -51,22 +52,6 @@ const getTaskLoadSummary = (status: number): string => {
     return "任务模板不存在或功能未启用/不可用。";
   }
   return getCommonErrorSummary(status, "加载任务模板");
-};
-
-const toSafeTaskListReturnTo = (value: string | undefined): string => {
-  const trimmed = value?.trim();
-  if (!trimmed) {
-    return paths.teacher.tasks;
-  }
-  if (trimmed.startsWith("//")) {
-    return paths.teacher.tasks;
-  }
-  if (!/^\/teacher\/tasks(?:[/?#]|$)/.test(trimmed)) {
-    return paths.teacher.tasks;
-  }
-  const url = new URL(trimmed, "http://task-list.local");
-  url.searchParams.delete("stage");
-  return `${url.pathname}${url.search}${url.hash}`;
 };
 
 export default async function EditLearningTaskPage({

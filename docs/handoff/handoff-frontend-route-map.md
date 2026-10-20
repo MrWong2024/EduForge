@@ -27,7 +27,7 @@
 | `/teacher/courses/[courseId]/overview` | 课程总览 | Course overview API | 切换统计窗口、班级排序与分页并进入班级；主窗口 all/7d、默认 all，旧链接窗口继续兼容。班级总数取总量，班级数、平均任务完成度与平均 AI 成功率摘要基于当前页；任务完成度与学生触达率分别展示，无 AI 活动时成功率显示缺省；页面只读 | Done |
 | `/teacher/courses/[courseId]/edit` | 课程基础信息编辑 | Course 详情 / 更新 | 从列表或总览进入，编辑编号、名称、学期、课程分类，保存后回总览；总览保持展示职责 | Done |
 | `/teacher/tasks` | 任务模板列表与创建 | Task template 查询 / 创建 | 默认我的模板，可切换我的/共享/全部并按课程分类、状态、知识模块筛选及分页；创建为草稿或发布模板；展示可见性和发布者。作者的 DRAFT/PUBLISHED 可编辑，ARCHIVED 及非作者模板仅查看；保留班级来源和列表回跳上下文 | Done |
-| `/teacher/tasks/[taskId]/edit` | 模板编辑或只读查看 | Task template 详情 / 生命周期 | 作者编辑 DRAFT/PUBLISHED 的内容、可见性与 rubric；保存内容与生命周期动作分离；DRAFT 可发布、PUBLISHED 可归档，均需确认。ARCHIVED、非作者共享模板及未知状态只读；无恢复入口，归档复用提示不代表已有复制功能；返回原模板列表上下文，非法或缺失时回模板列表 | Done |
+| `/teacher/tasks/[taskId]/edit` | 模板编辑或只读查看 | Task template 详情 / 生命周期 | 作者编辑 DRAFT/PUBLISHED 的内容、可见性与 rubric；保存内容与生命周期动作分离；DRAFT 可发布、PUBLISHED 可归档，均需确认。ARCHIVED、非作者共享模板及未知状态只读；无恢复入口，归档复用提示不代表已有复制功能；returnTo 仅接受规范化后路径严格为 `/teacher/tasks` 的站内地址，保留有效列表上下文；非法或缺失时回退模板列表 | Done |
 | `/teacher/classrooms` | 班级列表与创建 | Classroom 列表 / Course 关联 | 按课程及进行中、已归档、全部筛选并分页；创建、进入编辑/看板。列表“更多”提供 ACTIVE 归档/删除、ARCHIVED 恢复/删除，删除需确认且仅空班级允许；非空限制由后端判定，操作保留当前视图 | Done |
 | `/teacher/classrooms/[classroomId]/edit` | 班级基础信息编辑 | Classroom 详情 / 更新 | 当前只编辑班级名称，所属课程、状态及加入码只读；保存后回看板，不影响成员、课堂任务和历史提交；不提供归档/恢复/删除，生命周期动作在列表“更多”菜单 | Done |
 | `/teacher/classrooms/[classroomId]` | 班级入口 | 无数据依赖 | 重定向到本班 dashboard | Done |
