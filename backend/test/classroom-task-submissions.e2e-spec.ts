@@ -268,7 +268,6 @@ describe('Classroom Task Submissions List (e2e)', () => {
         title: 'Shared Submission Task',
         description: 'A shared task for classroomTaskId isolation.',
         knowledgeModule: 'isolation',
-        stage: 2,
         status: 'DRAFT',
       })
       .expect(201);

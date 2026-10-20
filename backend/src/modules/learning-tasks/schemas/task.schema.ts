@@ -48,9 +48,6 @@ export class Task {
   })
   visibility?: string;
 
-  @Prop({ required: true, min: 1, max: 4 })
-  stage!: number;
-
   @Prop()
   difficulty?: string;
 
@@ -73,8 +70,8 @@ export class Task {
 export const TaskSchema = SchemaFactory.createForClass(Task);
 // Indexes below optimize list filters/sorts; add write overhead on task writes.
 TaskSchema.index({ createdBy: 1, createdAt: -1 });
-// Supports listTasks composite filters (status/knowledgeModule/stage) with createdAt sort.
-TaskSchema.index({ status: 1, knowledgeModule: 1, stage: 1, createdAt: -1 });
+// Supports listTasks composite filters (status/knowledgeModule) with createdAt sort.
+TaskSchema.index({ status: 1, knowledgeModule: 1, createdAt: -1 });
 // Supports listTasks filtering by status + courseLabel with createdAt sort.
 TaskSchema.index({ status: 1, courseLabel: 1, createdAt: -1 });
 // Supports scope=shared queries sorted by createdAt.
@@ -85,7 +82,6 @@ TaskSchema.index({
   status: 1,
   courseLabel: 1,
   knowledgeModule: 1,
-  stage: 1,
   updatedAt: -1,
   createdAt: -1,
 });
@@ -95,7 +91,6 @@ TaskSchema.index({
   status: 1,
   courseLabel: 1,
   knowledgeModule: 1,
-  stage: 1,
   updatedAt: -1,
   createdAt: -1,
 });

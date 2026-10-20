@@ -540,7 +540,6 @@ describe('Classroom AI learning analytics (e2e)', () => {
         title,
         description: `${title} for controlled analytics`,
         knowledgeModule: 'ai-learning-analytics',
-        stage: 2,
         status: TaskStatus.Published,
         createdBy: teacherId,
         publishedAt: new Date(),

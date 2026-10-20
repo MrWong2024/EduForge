@@ -345,7 +345,6 @@ describe('LearningTasks AI Feedback Guards (e2e)', () => {
         title: 'AI Feedback Guarded',
         description: 'Guarded AI feedback pipeline.',
         knowledgeModule: 'ai-guards',
-        stage: 1,
         status: 'DRAFT',
       })
       .expect(201);

@@ -36,7 +36,6 @@ type LearningTaskFiltersProps = {
   initialScope: TaskTemplateScope;
   initialStatus?: string;
   initialKnowledgeModule?: string;
-  initialStage?: string;
   initialCourseLabel?: string;
   initialPage: number;
   initialLimit: number;
@@ -44,8 +43,6 @@ type LearningTaskFiltersProps = {
 };
 
 type TaskStatusFilter = "ALL" | LearningTaskStatus;
-type StageFilter = "ALL" | "1" | "2" | "3" | "4";
-
 type RubricSummary = {
   configured: boolean;
   dimensionCount: number;
@@ -59,14 +56,6 @@ const STATUS_FILTER_OPTIONS: Array<{ value: TaskStatusFilter; label: string }> =
     { value: "PUBLISHED", label: "PUBLISHED（已发布）" },
     { value: "ARCHIVED", label: "ARCHIVED（已归档）" },
   ];
-
-const STAGE_FILTER_OPTIONS: Array<{ value: StageFilter; label: string }> = [
-  { value: "ALL", label: "全部阶段" },
-  { value: "1", label: "阶段 1" },
-  { value: "2", label: "阶段 2" },
-  { value: "3", label: "阶段 3" },
-  { value: "4", label: "阶段 4" },
-];
 
 const SCOPE_SORT_HINTS: Record<TaskTemplateScope, string> = {
   mine: "默认按最近更新时间排序（同时间按创建时间）。",
@@ -88,19 +77,6 @@ const toStatusFilter = (value: string | undefined): TaskStatusFilter => {
     normalized === "DRAFT" ||
     normalized === "PUBLISHED" ||
     normalized === "ARCHIVED"
-  ) {
-    return normalized;
-  }
-  return "ALL";
-};
-
-const toStageFilter = (value: string | undefined): StageFilter => {
-  const normalized = typeof value === "string" ? value.trim() : "";
-  if (
-    normalized === "1" ||
-    normalized === "2" ||
-    normalized === "3" ||
-    normalized === "4"
   ) {
     return normalized;
   }
@@ -157,7 +133,6 @@ export function LearningTaskFilters({
   initialScope,
   initialStatus,
   initialKnowledgeModule,
-  initialStage,
   initialCourseLabel,
   initialPage,
   initialLimit,
@@ -173,7 +148,6 @@ export function LearningTaskFilters({
   const statusFilter = toStatusFilter(
     searchParams.get("status") ?? initialStatus,
   );
-  const stageFilter = toStageFilter(searchParams.get("stage") ?? initialStage);
   const courseLabelFilter =
     normalizeTaskCourseLabel(
       searchParams.get("courseLabel") ?? initialCourseLabel,
@@ -219,7 +193,9 @@ export function LearningTaskFilters({
   }, [tasks, knowledgeModuleFilter]);
 
   const currentTaskListUrl = useMemo(() => {
-    const currentQuery = searchParams.toString();
+    const params = new URLSearchParams(searchParams.toString());
+    params.delete("stage");
+    const currentQuery = params.toString();
     return currentQuery ? `${pathname}?${currentQuery}` : pathname;
   }, [pathname, searchParams]);
 
@@ -231,6 +207,7 @@ export function LearningTaskFilters({
 
   const replaceSearchQuery = (updater: (params: URLSearchParams) => void) => {
     const params = new URLSearchParams(searchParams.toString());
+    params.delete("stage");
     updater(params);
     const nextQuery = params.toString();
     router.replace(nextQuery ? `${pathname}?${nextQuery}` : pathname, {
@@ -278,17 +255,6 @@ export function LearningTaskFilters({
     });
   };
 
-  const setStageFilterAndSync = (nextValue: StageFilter) => {
-    replaceSearchQuery((params) => {
-      if (nextValue === "ALL") {
-        params.delete("stage");
-      } else {
-        params.set("stage", nextValue);
-      }
-      params.set("page", "1");
-    });
-  };
-
   const goToPage = (page: number) => {
     replaceSearchQuery((params) => {
       params.set("page", String(Math.max(1, page)));
@@ -299,7 +265,6 @@ export function LearningTaskFilters({
     replaceSearchQuery((params) => {
       params.delete("status");
       params.delete("knowledgeModule");
-      params.delete("stage");
       params.delete("courseLabel");
       params.set("page", "1");
     });
@@ -317,7 +282,6 @@ export function LearningTaskFilters({
   const hasActiveFilters =
     statusFilter !== "ALL" ||
     Boolean(knowledgeModuleFilter) ||
-    stageFilter !== "ALL" ||
     Boolean(courseLabelFilter);
 
   return (
@@ -356,7 +320,7 @@ export function LearningTaskFilters({
         <p className="mt-1 text-sm text-zinc-600">
           筛选条件会写入 URL 并触发后端实时查询；筛选变化后自动回到第一页。
         </p>
-        <div className="mt-4 grid gap-4 md:grid-cols-5">
+        <div className="mt-4 grid gap-4 md:grid-cols-4">
           <label className="block text-sm">
             <span className="mb-1 block text-zinc-700">状态</span>
             <select
@@ -387,23 +351,6 @@ export function LearningTaskFilters({
               {knowledgeModuleOptions.map((moduleValue) => (
                 <option key={moduleValue} value={moduleValue}>
                   {moduleValue}
-                </option>
-              ))}
-            </select>
-          </label>
-
-          <label className="block text-sm">
-            <span className="mb-1 block text-zinc-700">阶段</span>
-            <select
-              value={stageFilter}
-              onChange={(event) =>
-                setStageFilterAndSync(event.target.value as StageFilter)
-              }
-              className="w-full rounded-md border border-zinc-300 px-3 py-2"
-            >
-              {STAGE_FILTER_OPTIONS.map((option) => (
-                <option key={option.value} value={option.value}>
-                  {option.label}
                 </option>
               ))}
             </select>
@@ -449,7 +396,7 @@ export function LearningTaskFilters({
           actions={
             <div className="flex flex-wrap items-center gap-3">
               <Link
-                href="#create-learning-task-form"
+                href={`${currentTaskListUrl}#create-learning-task-form`}
                 className="rounded-md bg-zinc-900 px-3 py-1.5 text-sm font-medium text-white hover:bg-zinc-700"
               >
                 创建任务模板
@@ -477,7 +424,7 @@ export function LearningTaskFilters({
                 清空筛选
               </button>
               <Link
-                href="#create-learning-task-form"
+                href={`${currentTaskListUrl}#create-learning-task-form`}
                 className="text-sm text-blue-700 hover:underline"
               >
                 继续创建模板
@@ -531,7 +478,6 @@ export function LearningTaskFilters({
                 <th className="px-4 py-3">标题</th>
                 <th className="px-4 py-3">描述</th>
                 <th className="px-4 py-3">知识模块</th>
-                <th className="px-4 py-3">阶段</th>
                 <th className="px-4 py-3">状态</th>
                 <th className="px-4 py-3">可见性</th>
                 <th className="px-4 py-3">课程分类</th>
@@ -609,9 +555,6 @@ export function LearningTaskFilters({
                     </td>
                     <td className="px-4 py-3 break-words text-zinc-700">
                       {toDisplayText(task.knowledgeModule)}
-                    </td>
-                    <td className="px-4 py-3 text-center font-medium text-zinc-900">
-                      {toDisplayText(task.stage)}
                     </td>
                     <td className="px-4 py-3">
                       <div className="space-y-1">

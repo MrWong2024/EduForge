@@ -249,7 +249,6 @@ describe('Classroom Weekly Report (e2e)', () => {
         title: 'Weekly Report Task',
         description: 'Task for classroom weekly report e2e.',
         knowledgeModule: 'weekly-report',
-        stage: 2,
         status: 'DRAFT',
       })
       .expect(201);

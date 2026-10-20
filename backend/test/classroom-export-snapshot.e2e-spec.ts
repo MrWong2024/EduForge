@@ -248,7 +248,6 @@ describe('Classroom Export Snapshot (e2e)', () => {
         title: 'Snapshot Task',
         description: 'Snapshot aggregation task.',
         knowledgeModule: 'snapshot',
-        stage: 1,
         status: 'DRAFT',
       })
       .expect(201);

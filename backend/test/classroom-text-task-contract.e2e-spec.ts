@@ -35,7 +35,6 @@ const oldContent = {
     'A description\nKeep original external link https://example.invalid/a',
   knowledgeModule: 'old-module',
   courseLabel: 'Java 程序设计',
-  stage: 1,
   difficulty: 'old difficulty',
   rubric: { criterion: 'old rubric' },
 };
@@ -44,7 +43,6 @@ const newContent = {
   description: 'B changed description',
   knowledgeModule: 'new-module',
   courseLabel: 'Java 程序设计',
-  stage: 2,
   difficulty: 'new difficulty',
   rubric: { criterion: 'new rubric' },
 };
@@ -337,6 +335,145 @@ describe('A1 classroom text task backend contract (HTTP)', () => {
     } finally {
       if (app) await app.close();
     }
+  });
+
+  it('removes task stage across task and classroom contracts', async () => {
+    const templatesUrl = '/api/learning-tasks/tasks';
+    const candidatesUrl =
+      '/api/classrooms/' + classB.id + '/publishable-task-templates';
+    const title = namespace + '-stage-retirement';
+    const rejectedTitle = title + '-rejected-create';
+    await teacherA
+      .post(templatesUrl)
+      .send({ ...oldContent, title: rejectedTitle, stage: 1 })
+      .expect(400);
+    expect(
+      await tasks.countDocuments({
+        createdBy: userIds[0],
+        title: rejectedTitle,
+      }),
+    ).toBe(0);
+
+    const id = await makeTask(teacherA, { ...oldContent, title });
+    const objectId = new Types.ObjectId(id);
+    const taskUrl = templatesUrl + '/' + id;
+    const updatedDescription = 'Stage-free teaching content';
+    const updated = await teacherA
+      .patch(taskUrl)
+      .send({ description: updatedDescription })
+      .expect(200);
+    expect(updated.body as object).not.toHaveProperty('stage');
+    const stored = await tasks.collection.findOne({ _id: objectId });
+    expect(stored).not.toBeNull();
+    expect(stored).not.toHaveProperty('stage');
+    expect(stored?.description).toBe(updatedDescription);
+
+    await teacherA
+      .patch(taskUrl)
+      .send({ title: title + '-rejected-update', stage: 4 })
+      .expect(400);
+    expect(await tasks.collection.findOne({ _id: objectId })).toEqual(stored);
+    await teacherA.get(templatesUrl).query({ stage: 1 }).expect(400);
+    await teacherB.get(candidatesUrl).query({ stage: 1 }).expect(400);
+
+    const verifyTemplates = async () => {
+      const detail = await teacherA.get(taskUrl).expect(200);
+      expect(detail.body as object).toMatchObject({
+        id,
+        title,
+        description: updatedDescription,
+        status: 'PUBLISHED',
+      });
+      expect(detail.body as object).not.toHaveProperty('stage');
+      for (const [agent, url, query] of [
+        [teacherA, templatesUrl, { scope: 'mine', limit: 100 }],
+        [teacherB, candidatesUrl, { limit: 100 }],
+      ] as const) {
+        const response = await agent.get(url).query(query).expect(200);
+        const item = (response.body as List).items.find(
+          (item) => item.id === id,
+        );
+        expect(item).toBeDefined();
+        expect(item).not.toHaveProperty('stage');
+      }
+    };
+    await verifyTemplates();
+
+    const instance = await publish(teacherA, classA, id, 'TEACHER_ONLY');
+    expect(instance.task).not.toHaveProperty('stage');
+    const instanceId = new Types.ObjectId(instance.id);
+    const rawInstance = await instances.collection.findOne({ _id: instanceId });
+    expect(rawInstance?.taskSnapshot).toMatchObject({
+      title,
+      description: updatedDescription,
+    });
+    expect(rawInstance?.taskSnapshot).not.toHaveProperty('stage');
+    const classroomUrl = '/api/classrooms/' + classA.id;
+    const instanceUrl = classroomUrl + '/tasks/' + instance.id;
+    const verifyClassroom = async () => {
+      const detail = await teacherA.get(instanceUrl).expect(200);
+      const detailBody = detail.body as ClassroomTaskResponseDto;
+      expect(detailBody.task).toMatchObject({
+        title,
+        description: updatedDescription,
+      });
+      expect(detailBody.task).not.toHaveProperty('stage');
+      expect(detailBody.taskSnapshotAvailable).toBe(true);
+      const list = await teacherA.get(classroomUrl + '/tasks').expect(200);
+      const item = (
+        list.body as { items: ClassroomTaskResponseDto[] }
+      ).items.find((item) => item.id === instance.id);
+      expect(item).toBeDefined();
+      expect(item?.task).not.toHaveProperty('stage');
+      const mine = await studentA
+        .get(instanceUrl + '/my-task-detail')
+        .expect(200);
+      const mineBody = mine.body as {
+        task: object;
+        participationStatus: {
+          canSubmit: boolean;
+          canRequestAiFeedback: boolean;
+        };
+      };
+      expect(mineBody.task).toMatchObject({
+        title,
+        description: updatedDescription,
+      });
+      expect(mineBody.task).not.toHaveProperty('stage');
+      expect(mineBody.participationStatus).toMatchObject({
+        canSubmit: true,
+        canRequestAiFeedback: false,
+      });
+      const dashboard = await teacherA
+        .get(classroomUrl + '/dashboard')
+        .expect(200);
+      const dashboardTask = (
+        dashboard.body as {
+          tasks: Array<{ classroomTaskId: string; title: string }>;
+        }
+      ).tasks.find((task) => task.classroomTaskId === instance.id);
+      expect(dashboardTask?.title).toBe(title);
+      expect(dashboardTask).not.toHaveProperty('stage');
+    };
+    await verifyClassroom();
+
+    // Native collection writes model legacy fields only on this spec's owned IDs.
+    await tasks.collection.updateOne(
+      { _id: objectId, createdBy: userIds[0] },
+      { $set: { stage: 4 } },
+    );
+    await instances.collection.updateOne(
+      { _id: instanceId, taskId: objectId },
+      { $set: { 'taskSnapshot.stage': 2 } },
+    );
+    await verifyTemplates();
+    await verifyClassroom();
+    expect((await tasks.collection.findOne({ _id: objectId }))?.stage).toBe(4);
+    expect(
+      (await instances.collection.findOne({ _id: instanceId }))?.taskSnapshot,
+    ).toHaveProperty('stage', 2);
+    expect(await submissions.countDocuments({ taskId: objectId })).toBe(0);
+    expect(await jobs.countDocuments({ taskId: objectId })).toBe(0);
   });
 
   it('publishes, preserves each source/note, freezes A and B independently across read chains', async () => {

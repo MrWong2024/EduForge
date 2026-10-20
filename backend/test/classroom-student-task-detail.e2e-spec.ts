@@ -235,7 +235,6 @@ describe('Classroom Student Task Detail (e2e)', () => {
         title: 'Student Task Detail Task',
         description: 'Verify classroom task detail aggregate.',
         knowledgeModule: 'student-detail',
-        stage: 2,
         status: 'DRAFT',
       })
       .expect(201);

@@ -338,7 +338,6 @@ describe('Course Overview (e2e)', () => {
         title: 'Course Overview Task',
         description: 'Task for cross-classroom overview aggregation.',
         knowledgeModule: 'course-overview',
-        stage: 2,
         status: 'DRAFT',
       })
       .expect(201);
@@ -355,7 +354,6 @@ describe('Course Overview (e2e)', () => {
         title: 'Course Overview Task Secondary',
         description: 'Secondary task for classroom-level submission coverage.',
         knowledgeModule: 'course-overview-secondary',
-        stage: 2,
         status: 'DRAFT',
       })
       .expect(201);

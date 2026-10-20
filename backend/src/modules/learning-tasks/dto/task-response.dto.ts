@@ -11,7 +11,6 @@ export class TaskResponseDto {
   knowledgeModule!: string;
   courseLabel?: string;
   visibility!: TaskVisibility;
-  stage!: number;
   difficulty?: string;
   rubric?: Record<string, unknown>;
   status!: TaskStatus;

@@ -269,7 +269,6 @@ describe('LearningTasks AI Feedback Ops (e2e) - pipeline & debug gate ON', () =>
       title: 'AI Feedback Lab',
       description: 'Intro to AI feedback pipeline.',
       knowledgeModule: 'ai-basics',
-      stage: 1,
       status: 'DRAFT',
     };
 
@@ -655,7 +654,6 @@ describe('LearningTasks AI Feedback Ops (e2e) - stub worker default loop', () =>
         title: 'AI Worker Loop Task',
         description: 'Validate stub worker loop.',
         knowledgeModule: 'ai-worker',
-        stage: 1,
         status: 'DRAFT',
       })
       .expect(201);

@@ -306,7 +306,6 @@ describe('Classroom Dashboard Isolation (e2e)', () => {
         title: 'Shared Task',
         description: 'Shared across classrooms.',
         knowledgeModule: 'isolation',
-        stage: 1,
         status: 'DRAFT',
       })
       .expect(201);

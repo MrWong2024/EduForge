@@ -40,7 +40,6 @@ type ClassroomTasksPageProps = {
     courseLabel?: string | string[];
     onlyMine?: string | string[];
     knowledgeModule?: string | string[];
-    stage?: string | string[];
   }>;
 };
 
@@ -70,7 +69,6 @@ type TasksViewModel =
       initialCourseLabelFilter?: string;
       initialOnlyMineFilter: boolean;
       initialKnowledgeModuleFilter?: string;
-      initialStageFilter?: "1" | "2" | "3" | "4";
       currentUserId?: string;
     }
   | { mode: "error"; status: number; description: string };
@@ -81,15 +79,6 @@ const parseOnlyMine = (value: string | undefined): boolean => {
   }
   const normalized = value.trim().toLowerCase();
   return normalized === "1" || normalized === "true";
-};
-
-const parseStageFilter = (
-  value: string | undefined,
-): "1" | "2" | "3" | "4" | undefined => {
-  if (value === "1" || value === "2" || value === "3" || value === "4") {
-    return value;
-  }
-  return undefined;
 };
 
 const getDueTimeStatus = (
@@ -221,9 +210,6 @@ export default async function ClassroomTasksPage({
   );
   const initialKnowledgeModuleFilter =
     getSingleSearchParam(query.knowledgeModule)?.trim() || undefined;
-  const initialStageFilter = parseStageFilter(
-    getSingleSearchParam(query.stage),
-  );
   let viewModel: TasksViewModel = {
     mode: "error",
     status: 500,
@@ -238,7 +224,6 @@ export default async function ClassroomTasksPage({
       courseLabel: initialCourseLabelFilter,
       onlyMine: initialOnlyMineFilter ? "true" : undefined,
       knowledgeModule: initialKnowledgeModuleFilter,
-      stage: initialStageFilter ? Number(initialStageFilter) : undefined,
     });
     const publishedTasksQuery = buildQueryString({
       page: currentPublishedTasksPage,
@@ -283,7 +268,6 @@ export default async function ClassroomTasksPage({
       initialCourseLabelFilter,
       initialOnlyMineFilter,
       initialKnowledgeModuleFilter,
-      initialStageFilter,
       currentUserId:
         typeof me?.id === "string" && me.id.trim() ? me.id.trim() : undefined,
     };
@@ -344,7 +328,6 @@ export default async function ClassroomTasksPage({
       courseLabel: initialCourseLabelFilter,
       onlyMine: initialOnlyMineFilter ? "true" : undefined,
       knowledgeModule: initialKnowledgeModuleFilter,
-      stage: initialStageFilter,
     })}`;
 
   return (
@@ -415,7 +398,6 @@ export default async function ClassroomTasksPage({
         initialCourseLabelFilter={viewModel.initialCourseLabelFilter}
         initialOnlyMineFilter={viewModel.initialOnlyMineFilter}
         initialKnowledgeModuleFilter={viewModel.initialKnowledgeModuleFilter}
-        initialStageFilter={viewModel.initialStageFilter}
       />
 
       <p className="text-sm text-zinc-600">
@@ -430,7 +412,7 @@ export default async function ClassroomTasksPage({
           actions={
             <div className="flex flex-wrap items-center gap-3">
               <Link
-                href="#publish-task-form"
+                href={`${buildPublishedTasksHref(currentPublishedTaskPage)}#publish-task-form`}
                 className="rounded-md bg-zinc-900 px-3 py-1.5 text-sm font-medium text-white hover:bg-zinc-700"
               >
                 发布任务
@@ -461,7 +443,6 @@ export default async function ClassroomTasksPage({
                 <th className="px-4 py-3">允许迟交</th>
                 <th className="px-4 py-3">最大尝试次数</th>
                 <th className="px-4 py-3">模板模块</th>
-                <th className="px-4 py-3">模板阶段</th>
                 <th className="px-4 py-3">任务状态</th>
                 <th className="px-4 py-3">管理</th>
                 <th className="px-4 py-3">三件套入口</th>
@@ -541,7 +522,6 @@ export default async function ClassroomTasksPage({
                     <td className="px-4 py-3">
                       {toDisplayText(task.knowledgeModule)}
                     </td>
-                    <td className="px-4 py-3">{toDisplayText(task.stage)}</td>
                     <td className="px-4 py-3">
                       <ClassroomTaskLifecycleActions
                         classroomId={classroomId}

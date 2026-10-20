@@ -6,7 +6,6 @@ export type TaskSnapshot = Pick<
   | 'description'
   | 'knowledgeModule'
   | 'courseLabel'
-  | 'stage'
   | 'difficulty'
   | 'rubric'
   | 'aiContextRefs'
@@ -20,7 +19,6 @@ export function publicTaskContent(task: TaskSnapshot): PublicTaskContent {
     description: task.description,
     knowledgeModule: task.knowledgeModule,
     courseLabel: task.courseLabel,
-    stage: task.stage,
     difficulty: task.difficulty,
     rubric: task.rubric,
   };
@@ -46,7 +44,6 @@ export function snapshotTask(task: Task): TaskSnapshot {
     description: task.description,
     knowledgeModule: task.knowledgeModule,
     courseLabel: task.courseLabel,
-    stage: task.stage,
     difficulty: task.difficulty,
     rubric:
       task.rubric === undefined ? undefined : structuredClone(task.rubric),

@@ -614,7 +614,6 @@ async function prepare(
         description:
           '合成编程任务：将数组求和逻辑拆为 sum.js 与 main.js 两个 FILE 片段；提交独立说明并按教师意见修订。此材料仅用于工程验收。',
         knowledgeModule: '合成数组与函数',
-        stage: 1,
         status: 'PUBLISHED',
         visibility: 'PRIVATE',
         rubric: {

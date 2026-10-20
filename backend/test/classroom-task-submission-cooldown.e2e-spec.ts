@@ -94,7 +94,6 @@ describe('Classroom Task Submission Cooldown (e2e)', () => {
         title: `Submission Cooldown Task ${Date.now()}-${Math.random()}`,
         description: 'Verify classroom submission cooldown behavior.',
         knowledgeModule: 'submission-cooldown',
-        stage: 1,
         status: 'DRAFT',
       })
       .expect(201);

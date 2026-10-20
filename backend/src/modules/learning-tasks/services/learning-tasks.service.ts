@@ -196,9 +196,6 @@ export class LearningTasksService {
     if (dto.knowledgeModule !== undefined) {
       task.knowledgeModule = dto.knowledgeModule;
     }
-    if (dto.stage !== undefined) {
-      task.stage = dto.stage;
-    }
     if (dto.difficulty !== undefined) {
       task.difficulty = dto.difficulty;
     }
@@ -301,9 +298,6 @@ export class LearningTasksService {
       } else {
         baseFilter.courseLabel = query.courseLabel;
       }
-    }
-    if (query.stage) {
-      baseFilter.stage = query.stage;
     }
     if (scope === TASK_TEMPLATE_SCOPE_MINE) {
       if (legacyCreatedBy && legacyCreatedBy !== userId) {
@@ -760,7 +754,6 @@ export class LearningTasksService {
       knowledgeModule: task.knowledgeModule,
       courseLabel: this.toSanitizedCourseLabel(task.courseLabel),
       visibility: this.toTaskVisibilityForRead(task.visibility),
-      stage: task.stage,
       difficulty: task.difficulty,
       rubric: task.rubric,
       aiContextRefs: task.aiContextRefs?.map((ref) => ({

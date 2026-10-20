@@ -100,7 +100,6 @@ describe('Classroom Task Deadline Rules (e2e)', () => {
         title: `Deadline Task ${Date.now()}-${Math.random()}`,
         description: 'Deadline rule test task.',
         knowledgeModule: 'deadline',
-        stage: 1,
         status: 'DRAFT',
       })
       .expect(201);

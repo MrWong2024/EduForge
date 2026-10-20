@@ -217,7 +217,6 @@ describe('LearningTasks AI Feedback Trigger Policy (e2e)', () => {
         title: 'Trigger Policy Task',
         description: 'Validate attempt-based auto enqueue policy.',
         knowledgeModule: 'ai-policy',
-        stage: 1,
         status: 'DRAFT',
       })
       .expect(201);

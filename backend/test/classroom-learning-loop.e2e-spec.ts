@@ -264,7 +264,6 @@ describe('Classroom Learning Loop (e2e)', () => {
         title: 'Sorting Lab',
         description: 'Implement quicksort.',
         knowledgeModule: 'algorithms',
-        stage: 2,
         status: 'DRAFT',
       })
       .expect(201);

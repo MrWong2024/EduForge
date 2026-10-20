@@ -298,17 +298,6 @@ const toAllowLateText = (value: boolean | null): string => {
   return "未设置";
 };
 
-const toStageText = (value: unknown): string => {
-  if (typeof value === "number" && Number.isFinite(value)) {
-    return `阶段 ${value}`;
-  }
-  if (typeof value === "string" && value.trim()) {
-    const trimmed = value.trim();
-    return /^\d+$/.test(trimmed) ? `阶段 ${trimmed}` : trimmed;
-  }
-  return "当前未设置阶段";
-};
-
 const buildSubmissionFeedbackHref = (
   submissionId: string,
   classroomId: string,
@@ -420,9 +409,6 @@ export default async function StudentTaskDetailPage({
   const knowledgeModule = toDisplayText(
     safeGet(viewModel.data.task, "knowledgeModule", undefined),
     "当前未设置知识模块",
-  );
-  const stageText = toStageText(
-    safeGet(viewModel.data.task, "stage", undefined),
   );
   const description = toDisplayText(
     safeGet(viewModel.data.task, "description", undefined),
@@ -546,7 +532,6 @@ export default async function StudentTaskDetailPage({
           <p>截止时间：{toDisplayDateOrFallback(dueAt)}</p>
           <p>是否允许迟交：{toAllowLateText(allowLate)}</p>
           <p>知识模块：{knowledgeModule}</p>
-          <p>阶段：{stageText}</p>
           <p className="flex items-center gap-2">
             <span>最新 AI 状态：</span>
             <StatusBadge badge={latestStatusBadge} />

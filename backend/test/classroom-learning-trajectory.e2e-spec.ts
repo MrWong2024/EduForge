@@ -371,7 +371,6 @@ describe('Classroom Learning Trajectory (e2e)', () => {
         title: 'Trajectory Task',
         description: 'Track attempt evolution.',
         knowledgeModule: 'trajectory',
-        stage: 2,
         status: 'DRAFT',
       })
       .expect(201);

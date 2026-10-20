@@ -64,7 +64,9 @@ const toSafeTaskListReturnTo = (value: string | undefined): string => {
   if (!/^\/teacher\/tasks(?:[/?#]|$)/.test(trimmed)) {
     return paths.teacher.tasks;
   }
-  return trimmed;
+  const url = new URL(trimmed, "http://task-list.local");
+  url.searchParams.delete("stage");
+  return `${url.pathname}${url.search}${url.hash}`;
 };
 
 export default async function EditLearningTaskPage({

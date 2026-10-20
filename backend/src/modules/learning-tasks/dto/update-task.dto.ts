@@ -1,14 +1,5 @@
 import { TaskAiContextDto } from './ai-context-ref.dto';
-import {
-  IsIn,
-  IsEnum,
-  IsInt,
-  IsObject,
-  IsOptional,
-  IsString,
-  Max,
-  Min,
-} from 'class-validator';
+import { IsIn, IsEnum, IsObject, IsOptional, IsString } from 'class-validator';
 import { Transform } from 'class-transformer';
 import { TaskStatus } from '../schemas/task.schema';
 import { TASK_COURSE_LABELS } from '../task-course-labels.constants';
@@ -54,12 +45,6 @@ export class UpdateTaskDto extends TaskAiContextDto {
   @Transform(trimVisibilityInput)
   @IsIn(TASK_VISIBILITIES)
   visibility?: TaskVisibility;
-
-  @IsOptional()
-  @IsInt()
-  @Min(1)
-  @Max(4)
-  stage?: number;
 
   @IsOptional()
   @IsString()

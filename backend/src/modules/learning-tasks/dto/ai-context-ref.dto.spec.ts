@@ -16,7 +16,6 @@ const create = {
   title: 'task',
   description: 'desc',
   knowledgeModule: 'unit',
-  stage: 1,
 };
 const transform = (
   value: unknown,

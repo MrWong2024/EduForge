@@ -89,18 +89,6 @@ const asRecord = (value: unknown): Record<string, unknown> | undefined =>
 const toRawStatusUpper = (value: unknown): string =>
   typeof value === "string" ? value.trim().toUpperCase() : "";
 
-const parseStage = (value: string): number | null => {
-  const trimmed = value.trim();
-  if (!trimmed) {
-    return null;
-  }
-  const parsed = Number(trimmed);
-  if (!Number.isInteger(parsed) || parsed < 1 || parsed > 4) {
-    return null;
-  }
-  return parsed;
-};
-
 const parseOptionalNonNegativeInt = (
   value: string,
 ): number | undefined | null => {
@@ -302,11 +290,6 @@ export function EditLearningTaskForm({
       ? initialCourseLabel
       : "",
   );
-  const [stage, setStage] = useState(
-    typeof initialTask.stage === "number" && Number.isInteger(initialTask.stage)
-      ? String(initialTask.stage)
-      : "1",
-  );
   const [currentStatus, setCurrentStatus] = useState<LearningTaskStatus>(
     hasKnownInitialStatus ? rawInitialStatus : "DRAFT",
   );
@@ -362,7 +345,6 @@ export function EditLearningTaskForm({
     const trimmedKnowledgeModule = knowledgeModule.trim();
     const normalizedCourseLabel = normalizeTaskCourseLabel(courseLabel);
     const trimmedRubricNotes = rubricNotes.trim();
-    const parsedStage = parseStage(stage);
     const parsedFunctionalityWeight =
       parseOptionalNonNegativeInt(functionalityWeight);
     const parsedCorrectnessWeight =
@@ -385,12 +367,6 @@ export function EditLearningTaskForm({
     if (!trimmedKnowledgeModule) {
       setErrorState({
         description: "请填写知识模块。",
-      });
-      return;
-    }
-    if (parsedStage === null) {
-      setErrorState({
-        description: "阶段必须是 1~4 的整数。",
       });
       return;
     }
@@ -462,7 +438,6 @@ export function EditLearningTaskForm({
       knowledgeModule: trimmedKnowledgeModule,
       courseLabel: normalizedCourseLabel ?? "",
       visibility,
-      stage: parsedStage,
       ...aiContextPatch,
     };
     if (hasRubricInput) {
@@ -710,22 +685,7 @@ export function EditLearningTaskForm({
             />
           </label>
 
-          <div className="grid gap-4 md:grid-cols-2">
-            <label className="block text-sm">
-              <span className="mb-1 block text-zinc-700">阶段</span>
-              <input
-                disabled={effectiveReadOnly}
-                type="number"
-                min={1}
-                max={4}
-                step={1}
-                inputMode="numeric"
-                value={stage}
-                onChange={(event) => setStage(event.target.value)}
-                className="w-full rounded-md border border-zinc-300 px-3 py-2"
-              />
-            </label>
-
+          <div>
             <div className="block text-sm">
               <span className="mb-1 block text-zinc-700">当前状态</span>
               <div className="rounded-md border border-zinc-200 bg-zinc-50 px-3 py-2 text-zinc-700">

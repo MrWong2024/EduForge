@@ -87,7 +87,6 @@ const createHarness = (
       title: 'Published task',
       description: 'Published description',
       knowledgeModule: 'Module',
-      stage: 1,
     },
     settings: { aiFeedbackMode: AiFeedbackMode.Manual },
   };
@@ -164,7 +163,6 @@ const createTaskManagementHarness = (
     title: 'Task',
     description: 'Description',
     knowledgeModule: 'Module',
-    stage: 1,
     status: options.taskStatus ?? TaskStatus.Archived,
     createdBy: options.createdBy ?? teacherId,
     createdAt: new Date('2026-01-01T00:00:00.000Z'),
@@ -231,7 +229,6 @@ describe('LearningTasksService task template lifecycle', () => {
         title: 'Task',
         description: 'Description',
         knowledgeModule: 'Module',
-        stage: 1,
       },
       harness.ids.teacherId.toString(),
     );
@@ -242,6 +239,10 @@ describe('LearningTasksService task template lifecycle', () => {
       createdBy: harness.ids.teacherId.toString(),
       publishedAt: undefined,
     });
+    expect(result).not.toHaveProperty('stage');
+    expect(harness.taskModel.create.mock.calls[0]?.[0]).not.toHaveProperty(
+      'stage',
+    );
     expect(harness.taskModel.create).toHaveBeenCalledWith(
       expect.objectContaining({
         status: TaskStatus.Draft,
@@ -259,7 +260,6 @@ describe('LearningTasksService task template lifecycle', () => {
         title: 'Task',
         description: 'Description',
         knowledgeModule: 'Module',
-        stage: 1,
         status: TaskStatus.Published,
       },
       harness.ids.teacherId.toString(),
@@ -285,7 +285,6 @@ describe('LearningTasksService task template lifecycle', () => {
           title: 'Task',
           description: 'Description',
           knowledgeModule: 'Module',
-          stage: 1,
           status: TaskStatus.Archived,
         },
         harness.ids.teacherId.toString(),
@@ -549,7 +548,6 @@ describe('LearningTasksService task template publisher contract', () => {
     knowledgeModule: 'Module',
     courseLabel: 'Course',
     visibility: TASK_VISIBILITY_SHARED,
-    stage: 1,
     status: params.status ?? TaskStatus.Published,
     createdBy: params.createdBy,
     createdAt: new Date('2026-01-01T00:00:00.000Z'),
@@ -618,8 +616,9 @@ describe('LearningTasksService task template publisher contract', () => {
       createdBy: otherTeacherId,
       title: 'Shared Detail',
     });
+    const legacyTask = { ...task, stage: 4 };
     const taskModel = {
-      findById: jest.fn(() => makeQuery(task)),
+      findById: jest.fn(() => makeQuery(legacyTask)),
     };
     const userModel = {
       find: jest.fn(() =>
@@ -655,6 +654,7 @@ describe('LearningTasksService task template publisher contract', () => {
       name: 'Other Teacher',
     });
     expect(result.publisher).not.toHaveProperty('status');
+    expect(result).not.toHaveProperty('stage');
     expect(userModel.find).toHaveBeenCalledTimes(1);
   });
 });

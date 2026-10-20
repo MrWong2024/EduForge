@@ -35,7 +35,6 @@ type PublishClassroomTaskFormProps = {
   initialCourseLabelFilter?: string;
   initialOnlyMineFilter: boolean;
   initialKnowledgeModuleFilter?: string;
-  initialStageFilter?: "1" | "2" | "3" | "4";
 };
 
 type PublishErrorState = {
@@ -43,8 +42,6 @@ type PublishErrorState = {
   summary: string;
   detail?: string;
 };
-
-type StageFilter = "ALL" | "1" | "2" | "3" | "4";
 
 type RubricSummary = {
   configured: boolean;
@@ -166,13 +163,6 @@ const parseOptionalPositiveInt = (value: string): number | undefined | null => {
   return parsed;
 };
 
-const toStageFilter = (value: string | undefined): StageFilter => {
-  if (value === "1" || value === "2" || value === "3" || value === "4") {
-    return value;
-  }
-  return "ALL";
-};
-
 export function PublishClassroomTaskForm({
   classroomId,
   currentUserId,
@@ -183,7 +173,6 @@ export function PublishClassroomTaskForm({
   initialCourseLabelFilter,
   initialOnlyMineFilter,
   initialKnowledgeModuleFilter,
-  initialStageFilter,
 }: PublishClassroomTaskFormProps) {
   const router = useRouter();
   const pathname = usePathname();
@@ -196,9 +185,6 @@ export function PublishClassroomTaskForm({
   const [onlyMine, setOnlyMine] = useState<boolean>(initialOnlyMineFilter);
   const [knowledgeModuleFilter, setKnowledgeModuleFilter] = useState<string>(
     initialKnowledgeModuleFilter ?? "",
-  );
-  const [stageFilter, setStageFilter] = useState<StageFilter>(
-    toStageFilter(initialStageFilter),
   );
   const [dueAt, setDueAt] = useState<string>("");
   const [isDueAtPickerActive, setIsDueAtPickerActive] = useState(false);
@@ -243,10 +229,6 @@ export function PublishClassroomTaskForm({
   useEffect(() => {
     setKnowledgeModuleFilter(initialKnowledgeModuleFilter ?? "");
   }, [initialKnowledgeModuleFilter]);
-
-  useEffect(() => {
-    setStageFilter(toStageFilter(initialStageFilter));
-  }, [initialStageFilter]);
 
   useEffect(() => {
     loadMoreEpochRef.current += 1;
@@ -340,6 +322,7 @@ export function PublishClassroomTaskForm({
 
   const replaceSearchQuery = (updater: (params: URLSearchParams) => void) => {
     const params = new URLSearchParams(searchParams.toString());
+    params.delete("stage");
     updater(params);
     params.delete("page");
     const nextQuery = params.toString();
@@ -381,35 +364,21 @@ export function PublishClassroomTaskForm({
     });
   };
 
-  const setStageFilterAndSync = (nextValue: StageFilter) => {
-    setStageFilter(nextValue);
-    replaceSearchQuery((params) => {
-      if (nextValue !== "ALL") {
-        params.set("stage", nextValue);
-      } else {
-        params.delete("stage");
-      }
-    });
-  };
-
   const resetFilters = () => {
     setCourseLabelFilter("");
     setOnlyMine(false);
     setKnowledgeModuleFilter("");
-    setStageFilter("ALL");
     replaceSearchQuery((params) => {
       params.delete("courseLabel");
       params.delete("onlyMine");
       params.delete("knowledgeModule");
-      params.delete("stage");
     });
   };
 
   const hasActiveQueryFilters =
     Boolean(courseLabelFilter) ||
     onlyMine ||
-    Boolean(knowledgeModuleFilter) ||
-    stageFilter !== "ALL";
+    Boolean(knowledgeModuleFilter);
   const hasMoreTasks = loadedTasks.length < loadedTotal;
   const dueAtInputType =
     dueAt || isDueAtPickerActive ? "datetime-local" : "text";
@@ -426,7 +395,6 @@ export function PublishClassroomTaskForm({
       courseLabel: courseLabelFilter || undefined,
       onlyMine: onlyMine ? "true" : undefined,
       knowledgeModule: knowledgeModuleFilter || undefined,
-      stage: stageFilter !== "ALL" ? Number(stageFilter) : undefined,
     });
 
     setIsLoadingMore(true);
@@ -648,10 +616,9 @@ export function PublishClassroomTaskForm({
             模板筛选（实时查询）
           </p>
           <p className="mt-1 text-xs text-zinc-600">
-            课程分类、仅看我的模板、知识模块、阶段会写入 URL
-            并触发后端重新检索。
+            课程分类、仅看我的模板、知识模块会写入 URL 并触发后端重新检索。
           </p>
-          <div className="mt-3 grid gap-3 md:grid-cols-5">
+          <div className="mt-3 grid gap-3 md:grid-cols-4">
             <label className="block text-sm">
               <span className="mb-1 block text-zinc-700">课程分类</span>
               <select
@@ -685,23 +652,6 @@ export function PublishClassroomTaskForm({
                     {option}
                   </option>
                 ))}
-              </select>
-            </label>
-
-            <label className="block text-sm">
-              <span className="mb-1 block text-zinc-700">阶段</span>
-              <select
-                value={stageFilter}
-                onChange={(event) =>
-                  setStageFilterAndSync(event.target.value as StageFilter)
-                }
-                className="w-full rounded-md border border-zinc-300 px-3 py-2"
-              >
-                <option value="ALL">全部阶段</option>
-                <option value="1">阶段 1</option>
-                <option value="2">阶段 2</option>
-                <option value="3">阶段 3</option>
-                <option value="4">阶段 4</option>
               </select>
             </label>
 
@@ -747,8 +697,7 @@ export function PublishClassroomTaskForm({
             {loadedTasks.map((task) => (
               <option key={task.id ?? task.title} value={task.id}>
                 {task.title ?? "未命名任务"} |{" "}
-                {toDisplayText(task.knowledgeModule)} / 阶段{" "}
-                {toDisplayText(task.stage)}
+                {toDisplayText(task.knowledgeModule)}
               </option>
             ))}
           </select>
@@ -800,8 +749,7 @@ export function PublishClassroomTaskForm({
                       </button>
                     </div>
                     <p className="mt-1 text-xs text-zinc-500">
-                      模块：{toDisplayText(task.knowledgeModule)} | 阶段：
-                      {toDisplayText(task.stage)} | 评分参考：
+                      模块：{toDisplayText(task.knowledgeModule)} | 评分参考：
                       {rubricSummary.configured
                         ? `已配置（${rubricSummary.hint}）`
                         : "请到模板详情核对"}
@@ -861,10 +809,6 @@ export function PublishClassroomTaskForm({
               <p>
                 <span className="text-zinc-500">模块：</span>
                 {toDisplayText(selectedTask.knowledgeModule)}
-              </p>
-              <p>
-                <span className="text-zinc-500">阶段：</span>
-                {toDisplayText(selectedTask.stage)}
               </p>
               <div className="md:col-span-2">
                 <p className="mb-1 text-zinc-500">描述：</p>

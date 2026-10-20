@@ -135,7 +135,6 @@ const createHarness = (options: HarnessOptions = {}) => {
       title: 'Published task',
       description: 'Published description',
       knowledgeModule: 'Module',
-      stage: 1,
     },
     settings: { aiFeedbackMode: AiFeedbackMode.Manual },
   };
@@ -144,7 +143,6 @@ const createHarness = (options: HarnessOptions = {}) => {
     title: 'Task A',
     description: 'Task Description',
     knowledgeModule: 'module',
-    stage: 1,
     status: options.taskStatus ?? TaskStatus.Published,
   };
 
@@ -563,7 +561,6 @@ describe('ClassroomTasksService listClassroomTasks publisher contract', () => {
           title: 'Published Template',
           description: 'Description',
           knowledgeModule: 'module',
-          stage: 1,
           status: TaskStatus.Published,
           createdBy: publisherId,
         },
@@ -581,7 +578,6 @@ describe('ClassroomTasksService listClassroomTasks publisher contract', () => {
           title: 'Draft Template',
           description: 'Description',
           knowledgeModule: 'module',
-          stage: 2,
           status: TaskStatus.Draft,
           createdBy: missingPublisherId,
         },
@@ -670,7 +666,6 @@ describe('ClassroomTasksService listPublishableTaskTemplates publisher contract'
         title: 'Shared Template A',
         description: 'Description A',
         knowledgeModule: 'module-a',
-        stage: 1,
         status: TaskStatus.Published,
         createdBy: publisherIdA,
         createdAt: new Date('2026-01-01T00:00:00.000Z'),
@@ -682,7 +677,6 @@ describe('ClassroomTasksService listPublishableTaskTemplates publisher contract'
         title: 'Shared Template B',
         description: 'Description B',
         knowledgeModule: 'module-b',
-        stage: 2,
         status: TaskStatus.Published,
         createdBy: publisherIdB,
         createdAt: new Date('2026-01-04T00:00:00.000Z'),
@@ -694,7 +688,6 @@ describe('ClassroomTasksService listPublishableTaskTemplates publisher contract'
         title: 'Shared Template Missing Publisher',
         description: 'Description C',
         knowledgeModule: 'module-c',
-        stage: 3,
         status: TaskStatus.Published,
         createdBy: missingPublisherId,
         createdAt: new Date('2026-01-07T00:00:00.000Z'),
@@ -829,7 +822,6 @@ describe('ClassroomTasksService listPublishableTaskTemplates publisher contract'
         limit: 10,
         onlyMine: true,
         knowledgeModule: 'module-a',
-        stage: 3,
       },
       teacherId.toString(),
     );
@@ -847,7 +839,6 @@ describe('ClassroomTasksService listPublishableTaskTemplates publisher contract'
         status: TaskStatus.Published,
         _id: { $nin: [excludedTaskId] },
         knowledgeModule: 'module-a',
-        stage: 3,
         createdBy: teacherId,
       },
     });
@@ -855,9 +846,10 @@ describe('ClassroomTasksService listPublishableTaskTemplates publisher contract'
       status: TaskStatus.Published,
       _id: { $nin: [excludedTaskId] },
       knowledgeModule: 'module-a',
-      stage: 3,
       createdBy: teacherId,
     });
+    expect(itemsPipeline).toContainEqual({ $skip: 10 });
+    expect(itemsPipeline).toContainEqual({ $limit: 10 });
   });
 });
 

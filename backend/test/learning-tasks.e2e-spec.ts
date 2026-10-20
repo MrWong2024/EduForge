@@ -324,7 +324,6 @@ describe('LearningTasks (e2e)', () => {
       title: 'Sorting Lab',
       description: 'Implement quicksort.',
       knowledgeModule: 'algorithms',
-      stage: 2,
       status: 'DRAFT',
     };
 

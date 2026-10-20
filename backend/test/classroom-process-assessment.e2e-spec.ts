@@ -333,7 +333,6 @@ describe('Classroom Process Assessment (e2e)', () => {
           title: 'Process Task A',
           description: 'Task A for process assessment.',
           knowledgeModule: 'process-assessment',
-          stage: 2,
           status: 'DRAFT',
         })
         .expect(201),
@@ -343,7 +342,6 @@ describe('Classroom Process Assessment (e2e)', () => {
           title: 'Process Task B',
           description: 'Task B for process assessment.',
           knowledgeModule: 'process-assessment',
-          stage: 2,
           status: 'DRAFT',
         })
         .expect(201),

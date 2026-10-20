@@ -82,7 +82,7 @@
 ### 3.3 Teacher 任务 / 提交 / 反馈
 
 - 任务模板列表：`/teacher/tasks/page.tsx` -> `/api/proxy/learning-tasks/tasks?...` -> `GET /api/learning-tasks/tasks`。
-  - 注意：`scope/courseLabel/status/knowledgeModule/stage/page` 由 URL 驱动并透传后端。
+  - 注意：`scope/courseLabel/status/knowledgeModule/page` 由 URL 驱动并透传后端。模板列表与课堂候选页忽略旧 URL 的 `stage`，筛选、分页和回跳链接不再携带它；后端参数合同见 [DTO Cheatsheet](./handoff-backend-dto-cheatsheet.md#learning-tasks)。
 - 任务模板创建：`CreateLearningTaskForm` -> `/api/proxy/learning-tasks/tasks` -> `POST /api/learning-tasks/tasks`。
   - 注意：初始 `status` 遵循后端创建 DTO；创建与后续生命周期请求不混用。
 - 任务模板编辑/生命周期：`EditLearningTaskForm` -> `/api/proxy/learning-tasks/tasks/:id*`。

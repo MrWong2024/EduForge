@@ -285,7 +285,6 @@ describe('LearningTasks AI Feedback Bailian Context (e2e)', () => {
         description: 'ZIP_REQUIREMENTS',
         rubric: { criterion: 'ZIP_RUBRIC' },
         knowledgeModule: 'zip-context',
-        stage: 1,
         status,
         aiContextRefs,
       })
@@ -491,7 +490,6 @@ describe('LearningTasks AI Feedback Bailian Context (e2e)', () => {
             scoring: { correctness: 70, readability: 30 },
           },
           knowledgeModule: 'ai-bailian',
-          stage: 1,
           status: 'DRAFT',
         })
         .expect(201);
@@ -1330,7 +1328,6 @@ describe('LearningTasks AI Feedback Bailian Context (e2e)', () => {
         title: invalidTitle,
         description: 'invalid',
         knowledgeModule: 'zip',
-        stage: 1,
         status: 'PUBLISHED',
         aiContextRefs: [
           { archivePath: 'book/missing.zip', entryPaths: ['a.txt'] },

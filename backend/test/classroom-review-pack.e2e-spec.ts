@@ -350,7 +350,6 @@ describe('Classroom Review Pack (e2e)', () => {
         title: 'Review Pack Task',
         description: 'Generate classroom review pack.',
         knowledgeModule: 'review-pack',
-        stage: 2,
         status: 'DRAFT',
       })
       .expect(201);

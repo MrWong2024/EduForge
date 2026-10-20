@@ -598,9 +598,6 @@ export class ClassroomTasksService {
     if (query.knowledgeModule) {
       baseFilter.knowledgeModule = query.knowledgeModule;
     }
-    if (query.stage) {
-      baseFilter.stage = query.stage;
-    }
     if (query.onlyMine === true) {
       baseFilter.createdBy = teacherObjectId;
     } else {
@@ -1236,7 +1233,7 @@ export class ClassroomTasksService {
     const task = await this.taskModel
       .findById(classroomTask.taskId)
       .select(
-        'title description knowledgeModule courseLabel stage difficulty rubric status createdAt updatedAt',
+        'title description knowledgeModule courseLabel difficulty rubric status createdAt updatedAt',
       )
       .lean<TaskWithMeta>()
       .exec();
@@ -1856,7 +1853,6 @@ export class ClassroomTasksService {
       knowledgeModule: task.knowledgeModule,
       courseLabel: this.toSanitizedCourseLabel(task.courseLabel),
       visibility: this.toTaskVisibilityForRead(task.visibility),
-      stage: task.stage,
       difficulty: task.difficulty,
       status: task.status,
       createdBy: createdById,

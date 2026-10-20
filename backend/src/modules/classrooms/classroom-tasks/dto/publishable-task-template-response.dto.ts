@@ -8,7 +8,6 @@ export class PublishableTaskTemplateItemResponseDto {
   knowledgeModule!: string;
   courseLabel?: string;
   visibility!: TaskVisibility;
-  stage!: number;
   difficulty?: string;
   status!: TaskStatus;
   createdBy!: string;

@@ -33,7 +33,6 @@ type ClassroomTaskDashboardItem = {
   taskPublisherId?: Types.ObjectId | null;
   taskTemplateStatus?: TaskStatus | null;
   title: string;
-  stage: number;
   knowledgeModule: string;
   publishedAt: Date;
   dueAt?: Date;
@@ -156,13 +155,6 @@ export class TeacherClassroomDashboardService {
               { $ifNull: ['$taskSnapshot', false] },
               '$taskSnapshot.title',
               '$task.title',
-            ],
-          },
-          stage: {
-            $cond: [
-              { $ifNull: ['$taskSnapshot', false] },
-              '$taskSnapshot.stage',
-              '$task.stage',
             ],
           },
           knowledgeModule: {
@@ -434,7 +426,6 @@ export class TeacherClassroomDashboardService {
           ),
           taskTemplateStatus: task.taskTemplateStatus ?? null,
           title: task.title,
-          stage: task.stage,
           knowledgeModule: task.knowledgeModule,
           publishedAt: task.publishedAt.toISOString(),
           dueAt: task.dueAt ? task.dueAt.toISOString() : null,

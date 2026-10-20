@@ -290,7 +290,6 @@ describe('Classrooms AI Metrics (e2e)', () => {
         title: 'AI Metrics Task',
         description: 'Collect ai metrics in classroom scope.',
         knowledgeModule: 'ai-metrics',
-        stage: 1,
         status: 'DRAFT',
       })
       .expect(201);

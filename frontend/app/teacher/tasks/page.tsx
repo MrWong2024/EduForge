@@ -6,7 +6,10 @@ import { PageHeader } from "@/components/blocks/PageHeader";
 import { CreateLearningTaskForm } from "@/components/teacher/CreateLearningTaskForm";
 import { LearningTaskFilters } from "@/components/teacher/LearningTaskFilters";
 import { fetchJson, FetchJsonError } from "@/lib/api/client";
-import { buildErrorDescription, extractRawDetail } from "@/lib/api/error-presenter";
+import {
+  buildErrorDescription,
+  extractRawDetail,
+} from "@/lib/api/error-presenter";
 import { getMe } from "@/lib/auth/session";
 import {
   LEARNING_TASK_STATUSES,
@@ -54,16 +57,16 @@ type TeacherLearningTasksPageProps = {
     page?: string | string[];
     status?: string | string[];
     knowledgeModule?: string | string[];
-    stage?: string | string[];
     courseLabel?: string | string[];
     scope?: string | string[];
   }>;
 };
 
 const TASK_TEMPLATE_PAGE_LIMIT = 100;
-const STAGE_FILTER_VALUES = new Set(["1", "2", "3", "4"]);
 
-const normalizeTaskStatusFilter = (value: string | undefined): LearningTaskStatus | undefined => {
+const normalizeTaskStatusFilter = (
+  value: string | undefined,
+): LearningTaskStatus | undefined => {
   const normalized = value?.trim().toUpperCase();
   if (!normalized) {
     return undefined;
@@ -71,32 +74,30 @@ const normalizeTaskStatusFilter = (value: string | undefined): LearningTaskStatu
   return LEARNING_TASK_STATUSES.find((status) => status === normalized);
 };
 
-const normalizeKnowledgeModuleFilter = (value: string | undefined): string | undefined => {
+const normalizeKnowledgeModuleFilter = (
+  value: string | undefined,
+): string | undefined => {
   const normalized = value?.trim();
   return normalized ? normalized : undefined;
-};
-
-const normalizeStageFilter = (value: string | undefined): string | undefined => {
-  const normalized = value?.trim();
-  if (!normalized || !STAGE_FILTER_VALUES.has(normalized)) {
-    return undefined;
-  }
-  return normalized;
 };
 
 export default async function TeacherLearningTasksPage({
   searchParams,
 }: TeacherLearningTasksPageProps) {
   const query = await searchParams;
-  const fromClassroomId = getSingleSearchParam(query.fromClassroomId)?.trim() || undefined;
-  const initialPage = parsePositiveInt(getSingleSearchParam(query.page), 1, { min: 1 });
-  const initialStatusFilter = normalizeTaskStatusFilter(getSingleSearchParam(query.status));
-  const initialKnowledgeModuleFilter = normalizeKnowledgeModuleFilter(
-    getSingleSearchParam(query.knowledgeModule)
+  const fromClassroomId =
+    getSingleSearchParam(query.fromClassroomId)?.trim() || undefined;
+  const initialPage = parsePositiveInt(getSingleSearchParam(query.page), 1, {
+    min: 1,
+  });
+  const initialStatusFilter = normalizeTaskStatusFilter(
+    getSingleSearchParam(query.status),
   );
-  const initialStageFilter = normalizeStageFilter(getSingleSearchParam(query.stage));
+  const initialKnowledgeModuleFilter = normalizeKnowledgeModuleFilter(
+    getSingleSearchParam(query.knowledgeModule),
+  );
   const initialCourseLabelFilter = normalizeTaskCourseLabel(
-    getSingleSearchParam(query.courseLabel)
+    getSingleSearchParam(query.courseLabel),
   );
   const initialScope =
     normalizeTaskTemplateScope(getSingleSearchParam(query.scope)) ??
@@ -117,7 +118,6 @@ export default async function TeacherLearningTasksPage({
       courseLabel: initialCourseLabelFilter,
       status: initialStatusFilter,
       knowledgeModule: initialKnowledgeModuleFilter,
-      stage: initialStageFilter,
     });
     const [payload, me] = await Promise.all([
       fetchJson<unknown>(`learning-tasks/tasks?${listQuery}`, {
@@ -141,7 +141,7 @@ export default async function TeacherLearningTasksPage({
         status: error.status,
         description: buildErrorDescription(
           getCommonErrorSummary(error.status, "加载任务模板"),
-          detail
+          detail,
         ),
       };
     }
@@ -149,7 +149,11 @@ export default async function TeacherLearningTasksPage({
 
   if (viewModel.mode === "error") {
     return (
-      <ErrorState status={viewModel.status} title="任务模板加载失败" description={viewModel.description} />
+      <ErrorState
+        status={viewModel.status}
+        title="任务模板加载失败"
+        description={viewModel.description}
+      />
     );
   }
 
@@ -185,7 +189,6 @@ export default async function TeacherLearningTasksPage({
       page,
       status: initialStatusFilter,
       knowledgeModule: initialKnowledgeModuleFilter,
-      stage: initialStageFilter,
       courseLabel: initialCourseLabelFilter,
       scope: initialScope,
     })}`;
@@ -205,7 +208,10 @@ export default async function TeacherLearningTasksPage({
                 返回当前班级任务页
               </Link>
             ) : null}
-            <Link href={paths.teacher.classrooms} className="text-blue-700 hover:underline">
+            <Link
+              href={paths.teacher.classrooms}
+              className="text-blue-700 hover:underline"
+            >
               返回班级列表
             </Link>
           </div>
@@ -218,15 +224,23 @@ export default async function TeacherLearningTasksPage({
           班级任务页发布的是 classroom task（班级实例），两者职责分离。
         </p>
         <p className="mt-1">
-          班级发布页当前只显示 `PUBLISHED` 模板；创建区使用“保存为草稿 / 发布模板”动作决定初始状态。
+          班级发布页当前只显示 `PUBLISHED` 模板；创建区使用“保存为草稿 /
+          发布模板”动作决定初始状态。
         </p>
         <p className="mt-1">先筛选模板，再去班级任务页发布，效率更高。</p>
-        <p className="mt-1">rubric 用于模板层的基础评分参考，班级发布页不配置 rubric。</p>
-        <p className="mt-1">课程分类仅用于模板治理，不代表班级绑定课程，也不限制跨课程复用。</p>
-        <p className="mt-1">默认视图为“我的模板”；切换到共享/全部视图只影响可见性，不改变作者权限边界。</p>
+        <p className="mt-1">
+          rubric 用于模板层的基础评分参考，班级发布页不配置 rubric。
+        </p>
+        <p className="mt-1">
+          课程分类仅用于模板治理，不代表班级绑定课程，也不限制跨课程复用。
+        </p>
+        <p className="mt-1">
+          默认视图为“我的模板”；切换到共享/全部视图只影响可见性，不改变作者权限边界。
+        </p>
         {fromClassroomId ? (
           <p className="mt-2 text-sm text-blue-700">
-            你正从班级任务页进入。建议先筛选 `PUBLISHED` 模板，选定后返回班级发布。
+            你正从班级任务页进入。建议先筛选 `PUBLISHED`
+            模板，选定后返回班级发布。
           </p>
         ) : null}
       </section>
@@ -245,7 +259,6 @@ export default async function TeacherLearningTasksPage({
           initialScope={initialScope}
           initialStatus={initialStatusFilter}
           initialKnowledgeModule={initialKnowledgeModuleFilter}
-          initialStage={initialStageFilter}
           initialCourseLabel={initialCourseLabelFilter}
           initialPage={viewModel.taskList.page ?? initialPage}
           initialLimit={viewModel.taskList.limit ?? TASK_TEMPLATE_PAGE_LIMIT}

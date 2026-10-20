@@ -54,13 +54,6 @@ export class QueryTaskDto {
   @Type(() => Number)
   @IsInt()
   @Min(1)
-  @Max(4)
-  stage?: number;
-
-  @IsOptional()
-  @Type(() => Number)
-  @IsInt()
-  @Min(1)
   page?: number;
 
   @IsOptional()

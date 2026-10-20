@@ -278,7 +278,6 @@ describe('Classroom Dashboards (e2e)', () => {
         title: 'Dashboard Lab',
         description: 'Check dashboard aggregation.',
         knowledgeModule: 'basics',
-        stage: 1,
         status: 'DRAFT',
       })
       .expect(201);
@@ -434,7 +433,6 @@ describe('Classroom Dashboards (e2e)', () => {
           title: 'RBAC Task',
           description: 'Check member-or-owner guard',
           knowledgeModule: 'basics',
-          stage: 1,
           status: 'DRAFT',
         })
         .expect(201);

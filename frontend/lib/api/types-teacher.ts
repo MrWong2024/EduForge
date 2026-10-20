@@ -212,7 +212,6 @@ export type ClassroomTaskSummary = {
   status?: ClassroomTaskStatus;
   taskStatus?: string;
   knowledgeModule?: string;
-  stage?: number;
   dueAt?: string;
   allowLate?: boolean;
   maxAttempts?: number;
@@ -353,7 +352,6 @@ export type CreateLearningTaskRequest = {
   knowledgeModule: string;
   courseLabel?: string;
   visibility?: TaskTemplateVisibility;
-  stage: number;
   status: LearningTaskStatus;
   rubric?: Record<string, unknown>;
   aiContextRefs?: TaskAiContextRef[];
@@ -365,7 +363,6 @@ export type UpdateLearningTaskRequest = {
   knowledgeModule: string;
   courseLabel?: string;
   visibility?: TaskTemplateVisibility;
-  stage: number;
   rubric?: Record<string, unknown>;
   aiContextRefs?: TaskAiContextRef[];
 };
@@ -377,7 +374,6 @@ export type ListLearningTasksRequest = {
   status?: LearningTaskStatus;
   knowledgeModule?: string;
   courseLabel?: TaskCourseLabel;
-  stage?: number;
 };
 
 export type ListPublishableTaskTemplatesRequest = {
@@ -386,7 +382,6 @@ export type ListPublishableTaskTemplatesRequest = {
   courseLabel?: TaskCourseLabel;
   onlyMine?: boolean;
   knowledgeModule?: string;
-  stage?: number;
 };
 
 export type LearningTaskOption = {
@@ -401,7 +396,6 @@ export type LearningTaskOption = {
   publisher?: PublisherSummary | null;
   createdAt?: string;
   updatedAt?: string;
-  stage?: number;
   rubric?: Record<string, unknown>;
   aiContextRefs?: TaskAiContextRef[];
   raw: UnknownRecord;
@@ -1128,7 +1122,6 @@ export const toClassroomTaskSummary = (
       asString(record.learningTaskStatus),
     knowledgeModule:
       asString(taskRecord.knowledgeModule) ?? asString(record.knowledgeModule),
-    stage: asNumber(taskRecord.stage) ?? asNumber(record.stage),
     dueAt: asString(record.dueAt),
     allowLate:
       asBoolean(settingsRecord.allowLate) ?? asBoolean(record.allowLate),
@@ -1204,7 +1197,6 @@ export const toLearningTaskOption = (value: unknown): LearningTaskOption => {
     publisher: toPublisherSummary(record.publisher),
     createdAt: asString(record.createdAt),
     updatedAt: asString(record.updatedAt),
-    stage: asNumber(record.stage),
     rubric: Object.keys(rubricRecord).length > 0 ? rubricRecord : undefined,
     aiContextRefs:
       record.aiContextRefs === undefined

@@ -94,7 +94,7 @@
 
 - `classroom`：`{id,name,courseId,status,joinCode}`。
 - `summary`：`{studentsCount,publishedTasksCount,lateSubmissionsTotal,lateStudentsTotal}`。
-- `tasks[]`：`{classroomTaskId,classroomTaskStatus,taskId,taskPublisher,taskTemplateStatus,title,stage,knowledgeModule,publishedAt,dueAt,submissionsCount,distinctStudentsSubmitted,lateSubmissionsCount,lateDistinctStudentsCount,aiFeedback,topTags}`。
+- `tasks[]`：`{classroomTaskId,classroomTaskStatus,taskId,taskPublisher,taskTemplateStatus,title,knowledgeModule,publishedAt,dueAt,submissionsCount,distinctStudentsSubmitted,lateSubmissionsCount,lateDistinctStudentsCount,aiFeedback,topTags}`。
 - `taskTemplateStatus` 为 `DRAFT | PUBLISHED | ARCHIVED | null`；`taskPublisher` 为 `{id,name?} | null`，不含完整 User；`dueAt` 可为 null。`aiFeedback` 包含 `pending/running/succeeded/failed/dead/notRequested` 数量；`topTags` 是 `{tag,count}[]`。
 - `archiveSuggestion`：`{suggested:boolean,reason,message,lastSubmissionAt,latestActiveTaskDueAt,inactiveDays}`；后五项均可为 null。`reason` 非空值为 `NO_ACTIVE_TASKS | NO_RECENT_SUBMISSIONS | NO_ACTIVE_TASKS_AND_NO_RECENT_SUBMISSIONS`；时间为字符串，`inactiveDays` 为 number。判定过程见 [Service Card 05](./handoff-backend-service-map.md#service-card-05)。
 
@@ -152,7 +152,7 @@ my-task-detail 另稳定返回 `participationStatus={readOnly,canSubmit,canReque
 
 - `status: ACTIVE | CLOSED | RECALLED`；普通列表/详情与 my-task-detail 对旧数据缺省按 ACTIVE 兼容输出。
 - `taskPublisher: {id,name?} | null` 来自模板发布者，安全字段仅 id/name。
-- `task={title,description,knowledgeModule,courseLabel?,stage,difficulty?,rubric?,status}`；教学字段取实际快照，缺快照旧实例只作当前模板投影，不能称为发布原文。`status` 仍为当前模板资产状态。`taskSnapshotAvailable:boolean` 仅有实际快照时为 true；`settings.aiFeedbackMode` 返回实例模式，旧记录缺省只读投影为 TEACHER_ONLY。
+- `task={title,description,knowledgeModule,courseLabel?,difficulty?,rubric?,status}`；教学字段取实际快照，缺快照旧实例只作当前模板投影，不能称为发布原文。`status` 仍为当前模板资产状态。`taskSnapshotAvailable:boolean` 仅有实际快照时为 true；`settings.aiFeedbackMode` 返回实例模式，旧记录缺省只读投影为 TEACHER_ONLY。
 - 发布候选的 Query / response 与 Task 模板 family 共用，见[发布候选模板](#发布候选模板)。
 
 ### Submission request / response family
@@ -181,7 +181,7 @@ my-task-detail 另稳定返回 `participationStatus={readOnly,canSubmit,canReque
 
 顶层返回 `{classroom,classroomTask,task,me,submissions,latest,completionStatus,participationStatus}`：
 
-- `classroom={id,name,courseId,status}`；`classroomTask={id,classroomId,taskId,taskSnapshotAvailable,status,publishedAt,dueAt?,settings?}`（settings 含 aiFeedbackMode）；`task={id,title,description,knowledgeModule,courseLabel?,stage,difficulty?,rubric?,status}`；`me={studentId}`。
+- `classroom={id,name,courseId,status}`；`classroomTask={id,classroomId,taskId,taskSnapshotAvailable,status,publishedAt,dueAt?,settings?}`（settings 含 aiFeedbackMode）；`task={id,title,description,knowledgeModule,courseLabel?,difficulty?,rubric?,status}`；`me={studentId}`。
 - `submissions[]`：`{id,attemptNo,createdAt,aiFeedbackStatus,feedbackSummary,feedbackItems?}`。
 - `latest`：`{submissionId,attemptNo,aiFeedbackStatus,feedbackSummary,feedbackItems?} | null`；未提交时为 null。
 - `feedbackSummary={totalItems,topTags,severityBreakdown}`，只统计 AI 反馈；`topTags` 为 `{tag,count}[]`；`severityBreakdown={INFO,WARN,ERROR}`。空摘要为总量 0、tags 空数组、三类严重程度计数 0。
@@ -371,14 +371,15 @@ disclaimer：本分析仅反映 EduForge AI 反馈介入后的提交行为与代
 
 | DTO | 字段与校验 |
 | --- | --- |
-| `CreateTaskDto` | 必填字符串 `title/description/knowledgeModule`，`stage` 为整数 1..4（body 不声明 Type(Number)）；可选字符串 `difficulty`、对象 `rubric:Record<string,unknown>`、`courseLabel`、`visibility` 与 `status:DRAFT \| PUBLISHED`；status 默认 DRAFT。 |
+| `CreateTaskDto` | 必填字符串 `title/description/knowledgeModule`；可选字符串 `difficulty`、对象 `rubric:Record<string,unknown>`、`courseLabel`、`visibility` 与 `status:DRAFT \| PUBLISHED`；status 默认 DRAFT。 |
 | `UpdateTaskDto` | 上述字段可选；status 的校验集合为 `DRAFT \| PUBLISHED \| ARCHIVED`，其编辑行为见 API；rubric 不静态约束内部 key。 |
-| `QueryTaskDto` | 可选 `scope:mine \| shared \| all`，默认 mine，trim + lowercase，空白视为未传；可选 status、字符串 knowledgeModule、courseLabel；stage 经 Type(Number)，整数 1..4；分页校验；兼容 `createdBy` 用 IsMongoId。 |
+| `QueryTaskDto` | 可选 `scope:mine \| shared \| all`，默认 mine，trim + lowercase，空白视为未传；可选 status、字符串 knowledgeModule、courseLabel；分页校验；兼容 `createdBy` 用 IsMongoId。 |
 
+- Task 的创建、更新、模板列表及发布候选查询不接受 `stage`，严格白名单对旧参数返回 400；公开模板、课堂内容、学生详情及教师看板均不投影旧记录中的该字段。新 Task 和新快照不写入该字段，存量字段和旧数据库索引不作物理清理。
 - knowledgeModule 无枚举白名单。`courseLabel` 使用 `TASK_COURSE_LABELS` 单选白名单（如未分类、通用编程、Java 程序设计、数据结构、人工智能）；trim 后空白转 undefined。更新中显式传入空白 courseLabel 表示清空；不是 Course 外键。
 - `visibility: PRIVATE | SHARED`，trim + uppercase，空白视为未传；创建默认 PRIVATE；公开读取旧数据缺省时按 SHARED 兼容。
 - `courseLabel=未分类` 查询兼容匹配字段缺省/空值。`createdBy` 保留输入兼容但不提供越权筛选；scope 的可见性含义见 [API Learning Tasks](./handoff-backend-api-map.md#learning-tasks)。
-- `TaskResponseDto`：`{id,title,description,knowledgeModule,courseLabel?,visibility,stage,difficulty?,rubric?,aiContextRefs?,status,createdBy,publisher,createdAt,updatedAt,publishedAt?}`。`publisher={id,name?}|null`，不返回完整 User。
+- `TaskResponseDto`：`{id,title,description,knowledgeModule,courseLabel?,visibility,difficulty?,rubric?,aiContextRefs?,status,createdBy,publisher,createdAt,updatedAt,publishedAt?}`。`publisher={id,name?}|null`，不返回完整 User。
 
 ### ZIP 资料引用配置
 
@@ -411,8 +412,8 @@ CreateTaskDto / UpdateTaskDto 通过继承 `TaskAiContextDto` 接受嵌套 `aiCo
 
 - 可选 `courseLabel` 使用同一白名单；可选字符串 `knowledgeModule`；两者 trim 后空白转 undefined。
 - `onlyMine?` 经 Transform，支持布尔/数字 true/false/1/0，以及 trim + lowercase 后对应字符串；空白视为未传，再 IsBoolean。
-- `stage?` 经 Type(Number)，整数 1..4；分页校验。
-- 返回 `{items,total,page,limit}`；item 为 `{id,title,description,knowledgeModule,courseLabel?,visibility,stage,difficulty?,status,createdBy,createdById,publisher,createdAt,updatedAt,publishedAt?}`；publisher 同上。候选资格与已发布排除见 [API Classroom Tasks](./handoff-backend-api-map.md#classroom-tasksclassrooms-子资源)，课程分类排序见 [Service Card 07](./handoff-backend-service-map.md#service-card-07)。
+- 分页校验同通用分页约定。
+- 返回 `{items,total,page,limit}`；item 为 `{id,title,description,knowledgeModule,courseLabel?,visibility,difficulty?,status,createdBy,createdById,publisher,createdAt,updatedAt,publishedAt?}`；publisher 同上。候选资格与已发布排除见 [API Classroom Tasks](./handoff-backend-api-map.md#classroom-tasksclassrooms-子资源)，课程分类排序见 [Service Card 07](./handoff-backend-service-map.md#service-card-07)。
 
 ### Feedback DTO / response family
 
