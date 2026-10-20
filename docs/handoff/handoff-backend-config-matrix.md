@@ -43,6 +43,22 @@ Browser acceptance 配置：
 - production 的 Schema 索引同步唯一入口是 `npm run sync-indexes`；不得依赖 production 启动时 `autoIndex` 建索引。
 - `sessions` 集合必须具备 `userId_1`、`token_1 unique`、`expiresAt_1 expireAfterSeconds:0`。
 
+### Task.stage 定向退役运维
+
+在实际项目的 `backend` 目录，通过同一正式入口选择定向模式：
+
+```text
+npm run sync-indexes -- --retire-task-stage --help
+npm run sync-indexes -- --retire-task-stage --database <精确库名> --dry-run
+npm run sync-indexes -- --retire-task-stage --database <精确库名> --apply --confirm-db <同一库名>
+```
+
+- 只允许四个精确目标。`eduforge_browser_test` 仅读取 `.env.browser-acceptance` 的 `BROWSER_ACCEPTANCE_ADMIN_MONGO_URI`；`eduforge_test`、`eduforge_dev`、服务器 `eduforge` 分别仅读取 `.env.test`、`.env.development`、`.env.production` 的 `MONGO_ADMIN_URI`。不叠加 `.env` 或继承的连接串，不替换 URI 中的库名；连接前后均校验库名，另核对本地地址与运维角色。
+- 默认只读；apply 需要同库确认，不能与 dry-run 混用，未知参数拒绝。该分支在加载 AppModule 前分流，不创建 Nest 上下文，不启动业务服务或 Worker；直接使用现有 MongoDB 原生 collection API，无自动建库/建集合。无参数入口仍执行原有普通全模型同步，定向退役不得调用该路径。
+- 操作固定为移除 `tasks.stage`、`classroomtasks.taskSnapshot.stage`，以及替换三个已知含 stage 的 Task 复合索引；实现与精确键定义见 [定向实现](../../backend/scripts/retire-task-stage.ts)。先备份，再建立并回读全部新索引，随后仅 `$unset` 两个字段，核对残留和其他内容后按实际名称删除旧索引。异常索引选项、键定义、快照或同名冲突均拒绝写入，不调整其他索引。
+- 首次写入前，将带 BSON 类型的字段级 EJSON 和相关实际索引写入项目根目录 `.local/deliverables/task-stage-retirement-backups/<本轮标识>/<库名>/`，持久化并回读核验后才修改数据库；不覆盖旧材料。标识默认自动生成，也可用 `--backup-run <唯一标识>` 为同轮不同库归档。恢复材料不含完整文档或凭据，执行后保留；不自动恢复。
+- 运维用途为 `production_or_operations`，不将它赋给产品 `EDUFORGE_DATABASE_PURPOSE`。四库分进程串行处理；apply 前须核对实际运行进程及其构建已退役 stage。运行版本未知或仍为旧版时，只做只读盘点。失败/超时后先盘点实际状态，不直接重放写入；再次 dry-run 用于确认无待执行变化，缺失库/集合不创建。
+
 ## 2) Cookie、CORS 与前端代理
 
 - 会话 Cookie：`ef_session`，`HttpOnly=true`、`sameSite=lax`、`secure=(NODE_ENV=production)`、`path=/`、`maxAge=SESSION_TTL_MS`（当前 `7d`）。

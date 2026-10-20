@@ -375,7 +375,7 @@ disclaimer：本分析仅反映 EduForge AI 反馈介入后的提交行为与代
 | `UpdateTaskDto` | 上述字段可选；status 的校验集合为 `DRAFT \| PUBLISHED \| ARCHIVED`，其编辑行为见 API；rubric 不静态约束内部 key。 |
 | `QueryTaskDto` | 可选 `scope:mine \| shared \| all`，默认 mine，trim + lowercase，空白视为未传；可选 status、字符串 knowledgeModule、courseLabel；分页校验；兼容 `createdBy` 用 IsMongoId。 |
 
-- Task 的创建、更新、模板列表及发布候选查询不接受 `stage`，严格白名单对旧参数返回 400；公开模板、课堂内容、学生详情及教师看板均不投影旧记录中的该字段。新 Task 和新快照不写入该字段，存量字段和旧数据库索引不作物理清理。
+- Task 的创建、更新、模板列表及发布候选查询不接受 `stage`，严格白名单对旧参数返回 400；公开模板、课堂内容、学生详情及教师看板均不投影旧记录中的该字段。新 Task 和新快照不写入该字段；存量字段和旧索引通过[受控定向运维](./handoff-backend-config-matrix.md#taskstage-定向退役运维)处理。
 - knowledgeModule 无枚举白名单。`courseLabel` 使用 `TASK_COURSE_LABELS` 单选白名单（如未分类、通用编程、Java 程序设计、数据结构、人工智能）；trim 后空白转 undefined。更新中显式传入空白 courseLabel 表示清空；不是 Course 外键。
 - `visibility: PRIVATE | SHARED`，trim + uppercase，空白视为未传；创建默认 PRIVATE；公开读取旧数据缺省时按 SHARED 兼容。
 - `courseLabel=未分类` 查询兼容匹配字段缺省/空值。`createdBy` 保留输入兼容但不提供越权筛选；scope 的可见性含义见 [API Learning Tasks](./handoff-backend-api-map.md#learning-tasks)。
