@@ -620,6 +620,7 @@ describe('LearningTasks AI Feedback Ops (e2e) - stub worker default loop', () =>
     configService.set('AI_FEEDBACK_WORKER_ENABLED', true);
     configService.set('AI_FEEDBACK_WORKER_INTERVAL_MS', 120);
     configService.set('AI_FEEDBACK_WORKER_BATCH_SIZE', 2);
+    configService.set('AI_FEEDBACK_AUTO_ON_SUBMIT', false);
     // Observe real processing without replacing the stub worker lifecycle.
     processOnceSpy = jest.spyOn(app.get(AiFeedbackProcessor), 'processOnce');
     await app.init();

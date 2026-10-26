@@ -54,6 +54,8 @@ npm run test -- --runInBand
 
 `backend/test/*.e2e-spec.ts` 由 `test:e2e`（`test/jest-e2e.json`）独立管理，不进入普通 unit runner。HTTP E2E 必须在 Jest 启动前显式选择测试环境，并保持默认 cleanup：
 
+`test:e2e` 通过 `node --experimental-vm-modules` 显式启动本地 Jest：当前 MongoDB Driver 的运行时适配器使用动态 `import('os')`，需要 Jest VM 的模块支持。参数由 package script 声明，下列命令无需依赖额外的 `NODE_OPTIONS` 注入。
+
 ```powershell
 $env:NODE_ENV = "test"
 $env:EDUFORGE_DATABASE_PURPOSE = "standard_test"

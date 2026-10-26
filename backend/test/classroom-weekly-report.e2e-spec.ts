@@ -11,11 +11,15 @@ import { User } from '../src/modules/users/schemas/user.schema';
 import { Session } from '../src/modules/auth/schemas/session.schema';
 import { Course } from '../src/modules/courses/schemas/course.schema';
 import { Classroom } from '../src/modules/classrooms/schemas/classroom.schema';
+import { Enrollment } from '../src/modules/classrooms/enrollments/schemas/enrollment.schema';
 import { ClassroomTask } from '../src/modules/classrooms/classroom-tasks/schemas/classroom-task.schema';
 import { Task } from '../src/modules/learning-tasks/schemas/task.schema';
 import { Submission } from '../src/modules/learning-tasks/schemas/submission.schema';
 import { Feedback } from '../src/modules/learning-tasks/schemas/feedback.schema';
-import { AiFeedbackJob } from '../src/modules/learning-tasks/ai-feedback/schemas/ai-feedback-job.schema';
+import {
+  AiFeedbackJob,
+  AiFeedbackJobStatus,
+} from '../src/modules/learning-tasks/ai-feedback/schemas/ai-feedback-job.schema';
 import { AiFeedbackProcessor } from '../src/modules/learning-tasks/ai-feedback/services/ai-feedback-processor.service';
 
 jest.setTimeout(30000);
@@ -33,6 +37,11 @@ type CreatedClassroomResponse = { id: string; joinCode: string };
 type CreatedTaskResponse = { id: string };
 type CreatedClassroomTaskResponse = { id: string };
 type CreatedSubmissionResponse = { id: string };
+
+type WeeklyReportJob = Pick<
+  AiFeedbackJob,
+  'submissionId' | 'taskId' | 'classroomTaskId' | 'studentId' | 'status'
+> & { _id: Types.ObjectId };
 
 type WeeklyReportResponse = {
   window: string;
@@ -64,6 +73,7 @@ describe('Classroom Weekly Report (e2e)', () => {
   let sessionModel: Model<Session>;
   let courseModel: Model<Course>;
   let classroomModel: Model<Classroom>;
+  let enrollmentModel: Model<Enrollment>;
   let classroomTaskModel: Model<ClassroomTask>;
   let taskModel: Model<Task>;
   let submissionModel: Model<Submission>;
@@ -136,6 +146,7 @@ describe('Classroom Weekly Report (e2e)', () => {
     sessionModel = app.get(getModelToken(Session.name));
     courseModel = app.get(getModelToken(Course.name));
     classroomModel = app.get(getModelToken(Classroom.name));
+    enrollmentModel = app.get(getModelToken(Enrollment.name));
     classroomTaskModel = app.get(getModelToken(ClassroomTask.name));
     taskModel = app.get(getModelToken(Task.name));
     submissionModel = app.get(getModelToken(Submission.name));
@@ -176,47 +187,83 @@ describe('Classroom Weekly Report (e2e)', () => {
       process.env.AI_FEEDBACK_DEBUG_ENABLED = previousDebugEnabled;
     }
 
-    if (!KEEP_DB) {
-      const cleanup: Promise<unknown>[] = [];
-      const userIds = [teacherId, studentId].filter(Boolean);
-      if (submissionId) {
-        const submissionObjectId = new Types.ObjectId(submissionId);
-        cleanup.push(
-          feedbackModel.deleteMany({ submissionId: submissionObjectId }),
-        );
-        cleanup.push(
-          aiFeedbackJobModel.deleteMany({ submissionId: submissionObjectId }),
-        );
-        cleanup.push(submissionModel.deleteOne({ _id: submissionObjectId }));
+    const cleanupErrors: unknown[] = [];
+    try {
+      if (!KEEP_DB) {
+        const cleanup: Promise<unknown>[] = [];
+        const userIds = [teacherId, studentId]
+          .filter(Boolean)
+          .map((id) => new Types.ObjectId(id));
+        if (submissionId) {
+          const submissionObjectId = new Types.ObjectId(submissionId);
+          cleanup.push(
+            feedbackModel.deleteMany({ submissionId: submissionObjectId }),
+          );
+          cleanup.push(
+            aiFeedbackJobModel.deleteMany({ submissionId: submissionObjectId }),
+          );
+          cleanup.push(submissionModel.deleteOne({ _id: submissionObjectId }));
+        }
+        if (classroomTaskId) {
+          cleanup.push(
+            classroomTaskModel.deleteOne({
+              _id: new Types.ObjectId(classroomTaskId),
+            }),
+          );
+        }
+        if (taskId) {
+          cleanup.push(
+            taskModel.deleteOne({ _id: new Types.ObjectId(taskId) }),
+          );
+        }
+        if (classroomId) {
+          cleanup.push(
+            enrollmentModel.deleteMany({
+              classroomId: new Types.ObjectId(classroomId),
+            }),
+          );
+          cleanup.push(
+            classroomModel.deleteOne({ _id: new Types.ObjectId(classroomId) }),
+          );
+        }
+        if (courseId) {
+          cleanup.push(
+            courseModel.deleteOne({ _id: new Types.ObjectId(courseId) }),
+          );
+        }
+        if (userIds.length > 0) {
+          cleanup.push(sessionModel.deleteMany({ userId: { $in: userIds } }));
+          cleanup.push(userModel.deleteMany({ _id: { $in: userIds } }));
+        }
+        const results = await Promise.allSettled(cleanup);
+        for (const result of results) {
+          if (result.status === 'rejected') cleanupErrors.push(result.reason);
+        }
+        if (classroomId) {
+          expect(
+            await enrollmentModel.countDocuments({
+              classroomId: new Types.ObjectId(classroomId),
+            }),
+          ).toBe(0);
+        }
+        if (userIds.length > 0) {
+          expect(
+            await sessionModel.countDocuments({ userId: { $in: userIds } }),
+          ).toBe(0);
+        }
       }
-      if (classroomTaskId) {
-        cleanup.push(
-          classroomTaskModel.deleteOne({
-            _id: new Types.ObjectId(classroomTaskId),
-          }),
-        );
+    } catch (error) {
+      cleanupErrors.push(error);
+    } finally {
+      try {
+        await app?.close();
+      } catch (error) {
+        cleanupErrors.push(error);
       }
-      if (taskId) {
-        cleanup.push(taskModel.deleteOne({ _id: new Types.ObjectId(taskId) }));
-      }
-      if (classroomId) {
-        cleanup.push(
-          classroomModel.deleteOne({ _id: new Types.ObjectId(classroomId) }),
-        );
-      }
-      if (courseId) {
-        cleanup.push(
-          courseModel.deleteOne({ _id: new Types.ObjectId(courseId) }),
-        );
-      }
-      if (userIds.length > 0) {
-        cleanup.push(sessionModel.deleteMany({ userId: { $in: userIds } }));
-        cleanup.push(userModel.deleteMany({ _id: { $in: userIds } }));
-      }
-      await Promise.all(cleanup);
     }
-
-    await app.close();
+    if (cleanupErrors.length > 0) {
+      throw new AggregateError(cleanupErrors, 'Weekly report cleanup failed.');
+    }
   });
 
   it('returns teacher classroom weekly report with progress, ai health and tags', async () => {
@@ -288,7 +335,33 @@ describe('Classroom Weekly Report (e2e)', () => {
       .expect(201);
     submissionId = (createdSubmission.body as CreatedSubmissionResponse).id;
 
-    await aiFeedbackProcessor.processOnce(5);
+    await teacherAgent
+      .post(
+        `/api/learning-tasks/submissions/${submissionId}/ai-feedback/request`,
+      )
+      .send({})
+      .expect(200);
+
+    const jobs = await aiFeedbackJobModel
+      .find({ submissionId: new Types.ObjectId(submissionId) })
+      .select('_id submissionId taskId classroomTaskId studentId status')
+      .lean<WeeklyReportJob[]>()
+      .exec();
+    expect(jobs).toHaveLength(1);
+    expect(jobs[0].submissionId.toString()).toBe(submissionId);
+    expect(jobs[0].taskId.toString()).toBe(taskId);
+    expect(jobs[0].classroomTaskId?.toString()).toBe(classroomTaskId);
+    expect(jobs[0].studentId.toString()).toBe(studentId);
+    expect(jobs[0].status).toBe(AiFeedbackJobStatus.Pending);
+
+    const processed = await aiFeedbackProcessor.processOnce(5);
+    expect(processed.succeeded).toBe(1);
+    const completedJob = await aiFeedbackJobModel
+      .findById(jobs[0]._id)
+      .select('status -_id')
+      .lean<Pick<AiFeedbackJob, 'status'>>()
+      .exec();
+    expect(completedJob?.status).toBe(AiFeedbackJobStatus.Succeeded);
 
     const report = await teacherAgent
       .get(`/api/classrooms/${classroomId}/weekly-report`)
@@ -299,8 +372,9 @@ describe('Classroom Weekly Report (e2e)', () => {
     expect(body.window).toBe('7d');
     expect(body.progress.studentsCount).toBeGreaterThanOrEqual(1);
     expect(body.progress.publishedClassroomTasks).toBeGreaterThanOrEqual(1);
-    expect(body.aiHealth.jobs.total).toBeGreaterThanOrEqual(1);
-    expect(body.aiHealth.successRate).toBeGreaterThanOrEqual(0);
+    expect(body.aiHealth.jobs.total).toBe(1);
+    expect(body.aiHealth.jobs.succeeded).toBe(1);
+    expect(body.aiHealth.successRate).toBe(1);
     expect(Array.isArray(body.topTags)).toBe(true);
 
     const defaultWindowReport = await teacherAgent

@@ -1,7 +1,7 @@
 import { INestApplication, ValidationPipe } from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
 import { getModelToken } from '@nestjs/mongoose';
-import { Model } from 'mongoose';
+import { Model, Types } from 'mongoose';
 import * as bcrypt from 'bcryptjs';
 import cookieParser from 'cookie-parser';
 import request from 'supertest';
@@ -128,13 +128,36 @@ describe('LearningTasks AI Feedback Ops (e2e) - debug gate OFF', () => {
       return;
     }
 
-    const userIds = [teacherId, adminId].filter(Boolean);
-    if (userIds.length > 0) {
-      await sessionModel.deleteMany({ userId: { $in: userIds } });
-      await userModel.deleteMany({ _id: { $in: userIds } });
+    const cleanupErrors: unknown[] = [];
+    try {
+      const userIds = [teacherId, adminId]
+        .filter(Boolean)
+        .map((id) => new Types.ObjectId(id));
+      if (userIds.length > 0) {
+        await sessionModel.deleteMany({ userId: { $in: userIds } });
+        await userModel.deleteMany({ _id: { $in: userIds } });
+        expect(
+          await sessionModel.countDocuments({ userId: { $in: userIds } }),
+        ).toBe(0);
+        expect(await userModel.countDocuments({ _id: { $in: userIds } })).toBe(
+          0,
+        );
+      }
+    } catch (error: unknown) {
+      cleanupErrors.push(error);
+    } finally {
+      try {
+        await app.close();
+      } catch (error: unknown) {
+        cleanupErrors.push(error);
+      }
     }
-
-    await app.close();
+    if (cleanupErrors.length === 1) throw cleanupErrors[0];
+    if (cleanupErrors.length > 1)
+      throw new AggregateError(
+        cleanupErrors,
+        'Debug-off fixture cleanup and app close failed',
+      );
   });
 
   it('returns 404 for teacher and admin on debug ops routes', async () => {
