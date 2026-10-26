@@ -21,7 +21,10 @@ import { User } from '../src/modules/users/schemas/user.schema';
 import { Session } from '../src/modules/auth/schemas/session.schema';
 import { Task } from '../src/modules/learning-tasks/schemas/task.schema';
 import { Submission } from '../src/modules/learning-tasks/schemas/submission.schema';
-import { Feedback } from '../src/modules/learning-tasks/schemas/feedback.schema';
+import {
+  Feedback,
+  FeedbackSource,
+} from '../src/modules/learning-tasks/schemas/feedback.schema';
 import { AiFeedbackProcessor } from '../src/modules/learning-tasks/ai-feedback/services/ai-feedback-processor.service';
 import {
   AiFeedbackJob,
@@ -264,7 +267,13 @@ describe('LearningTasks AI Feedback Bailian Context (e2e)', () => {
   };
   const processOwned = async (batchSize: number) => {
     const foreign = await aiFeedbackJobModel.countDocuments({
-      status: { $in: ['PENDING', 'FAILED', 'RUNNING'] },
+      status: {
+        $in: [
+          AiFeedbackJobStatus.Pending,
+          AiFeedbackJobStatus.Failed,
+          AiFeedbackJobStatus.Running,
+        ],
+      },
       submissionId: { $nin: submissionIds.map((id) => new Types.ObjectId(id)) },
     });
     expect(foreign).toBe(0);
@@ -332,7 +341,10 @@ describe('LearningTasks AI Feedback Bailian Context (e2e)', () => {
   const makeDue = async (id: string) => {
     // Approved controlled scheduling advancement; no status/attempt/usage rewrite.
     await aiFeedbackJobModel.updateOne(
-      { submissionId: new Types.ObjectId(id), status: 'FAILED' },
+      {
+        submissionId: new Types.ObjectId(id),
+        status: AiFeedbackJobStatus.Failed,
+      },
       { $set: { notBefore: new Date(0) } },
     );
   };
@@ -745,7 +757,7 @@ describe('LearningTasks AI Feedback Bailian Context (e2e)', () => {
       .send({})
       .expect(200);
 
-    const processResult = (await processOwned(1)) as ProcessOnceResponse;
+    const processResult: ProcessOnceResponse = await processOwned(1);
     expect(processResult.processed).toBe(1);
     expect(processResult.succeeded).toBe(1);
 
@@ -980,7 +992,7 @@ describe('LearningTasks AI Feedback Bailian Context (e2e)', () => {
       expect(
         await feedbackModel.countDocuments({
           submissionId: new Types.ObjectId(id),
-          source: 'AI',
+          source: FeedbackSource.AI,
         }),
       ).toBe(0);
       const repeated = await studentAgent
@@ -1036,7 +1048,7 @@ describe('LearningTasks AI Feedback Bailian Context (e2e)', () => {
       expect(
         await feedbackModel.countDocuments({
           submissionId: new Types.ObjectId(id),
-          source: 'AI',
+          source: FeedbackSource.AI,
         }),
       ).toBe(0);
     },

@@ -781,7 +781,7 @@ export class ProcessAssessmentService {
         topTags: topTagsMap.get(studentId) ?? [],
         riskLevel,
         score,
-      } as ProcessAssessmentItem;
+      };
     });
 
     items.sort((left, right) => this.compareItems(left, right, sort, order));

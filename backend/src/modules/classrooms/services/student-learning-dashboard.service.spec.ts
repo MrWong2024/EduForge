@@ -212,11 +212,9 @@ const createHarness = (data: HarnessData = {}) => {
     const studentId = filter.studentId as Types.ObjectId | undefined;
     const orClauses = (filter.$or as Array<Record<string, unknown>>) ?? [];
     const classroomTaskClause = orClauses[0] as
-      | { classroomTaskId?: { $in?: Types.ObjectId[] } }
-      | undefined;
+      { classroomTaskId?: { $in?: Types.ObjectId[] } } | undefined;
     const fallbackClause = orClauses[1] as
-      | { taskId?: { $in?: Types.ObjectId[] } }
-      | undefined;
+      { taskId?: { $in?: Types.ObjectId[] } } | undefined;
     const classroomTaskIds = toIdSet(
       classroomTaskClause?.classroomTaskId?.$in ?? [],
     );
@@ -1085,8 +1083,7 @@ describe('StudentLearningDashboardService', () => {
     const activeStatusMatched = (aggregateCalls[0]?.[0] ?? []).some((stage) => {
       const stageRecord = stage as Record<string, unknown>;
       const matchRecord = stageRecord.$match as
-        | Record<string, unknown>
-        | undefined;
+        Record<string, unknown> | undefined;
       return matchRecord?.status === CLASSROOM_TASK_STATUS_ACTIVE;
     });
     expect(activeStatusMatched).toBe(true);

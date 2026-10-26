@@ -353,7 +353,7 @@ export class CourseOverviewService {
           aiSuccessRate,
           topErrors: this.toTopErrors(ai.errorCountMap),
         },
-      } as CourseOverviewItem;
+      };
     });
 
     items.sort((left, right) =>

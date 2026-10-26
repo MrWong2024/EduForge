@@ -39,6 +39,7 @@ export default defineConfig({
   preserveOutput: "never",
   use: {
     browserName: "chromium",
+    channel: "chrome",
     headless: true,
     baseURL: frontendOrigin,
     actionTimeout: 5_000,

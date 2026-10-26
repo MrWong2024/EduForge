@@ -38,7 +38,7 @@ Browser/test infrastructure 的通用复杂度治理由 [Codex instruction spec]
 | A. Pure / Static Contract | Playwright Test contracts runner 与 route-path spec（见第 4 节）；ESLint、Next typegen、TypeScript、Next build | 路径稳定性、动态段/查询编码，以及静态类型、import、路由/build 可生成性与 lint | 已有独立 contracts 目录；不证明运行时 Session、HTTP 或 UI | 按变更复用现有 runner，不为数量扩张 |
 | B. Unit / Logic | 独立 unit/component spec = 0；pure/static contract 归 A 类 | 当前无独立组件或其他局部逻辑证据 | 若未来抽出稳定的 formatter/state helper，可出现低成本缺口；当前空白本身不阻断 | 仅为独立、稳定、低成本逻辑增加，优先复用现有 runner，不机械补齐组件快照 |
 | C. HTTP E2E / Integration | 前端无独立 HTTP suite；后端 Jest + Supertest E2E 是公开 API 主 Owner | 认证、DTO、角色/ownership、Submission/AI Feedback 与数据库终态 | 不重复搬到 Browser；BFF Cookie/Context 子事实由第 7.3 节提供专门证据 | API 风险优先补后端 HTTP E2E；仅 Browser-only 部分再升级 |
-| D. Scripted Browser | 独立 Playwright Browser runner；1 个 BFF Cookie/Context micro-profile（见第 7.3 节） | Chromium 接受 Cookie、HttpOnly、自动发送及 Context Cookie/Storage 隔离 | 不验证 UI，不替代 HTTP E2E，不证明其他 Browser 合同 | 仅通过准入的独立 Browser-native 候选才扩张 |
+| D. Scripted Browser | 独立 Playwright Browser runner；1 个 BFF Cookie/Context micro-profile（见第 7.3 节） | 系统 Chrome 接受 Cookie、HttpOnly、自动发送及 Context Cookie/Storage 隔离 | 不验证 UI，不替代 HTTP E2E，不证明其他 Browser 合同 | 仅通过准入的独立 Browser-native 候选才扩张 |
 | E. Agent-assisted Browser smoke | 本文定义治理；执行时使用 Agent 可控制的真实 Browser | 当前真实产品 UI 的客观可操作性、页面 wiring 与真实用户主流程 | 不是仓库内 CI asset；执行状态以当次报告为准，不能直接继承历史通过结论 | 按产品主链和实际变更选择少量场景，不固定全量矩阵 |
 | F. Human smoke | 本文 + Frontend design baseline | 清晰度、认知负担、教学表达、视觉/UX 与真实教学判断 | 自动化不能替代；当前无统一签收记录 | 保留人工 Owner，不伪装成自动化 |
 
@@ -124,10 +124,12 @@ scripted Browser 采用以下止损：
 
 ### 7.3 Current Micro-profile
 
-- 配置：`frontend/playwright.browser.config.ts`；spec：`frontend/test/browser/bff-cookie-isolation.browser.spec.ts`；合成上游：`frontend/test/browser/support/browser-probe-upstream.mjs`。与 `test/contracts` 物理分离，仅使用已安装的 Chromium。
+- 配置：`frontend/playwright.browser.config.ts`；spec：`frontend/test/browser/bff-cookie-isolation.browser.spec.ts`；合成上游：`frontend/test/browser/support/browser-probe-upstream.mjs`。与 `test/contracts` 物理分离，使用系统已安装的 Google Chrome Stable：`browserName: "chromium"` 表示浏览器引擎，`channel: "chrome"` 选择系统 Chrome；不硬编码安装路径，不回退到 Playwright Chromium。
+- 安装项目依赖使用锁文件对应的 `npm ci`（Windows PowerShell 可用 `npm.cmd ci`）；当前 `@playwright/test` 不在 npm 安装时自动下载浏览器。此 profile 不执行 `playwright install`、`playwright install chromium` 或重新初始化 Playwright 脚手架，也不需要预先提供业务数据。Chrome 缺失时报告环境前置未满足，不自动安装或切换浏览器；不删除其他项目可能共用的 `ms-playwright` 缓存。仅运行 contracts 不需要 Chrome。
+- Chrome 可独立自动更新，执行 Browser 验证时记录实际 Chrome 与 Playwright 版本；锁文件固定 npm 依赖，不固定系统 Chrome 版本。
 - 准入理由是普通 HTTP E2E 无法完整证明真实 Browser 是否接受 `Set-Cookie`、Cookie 是否进入 Context store、HttpOnly 是否阻止 `document.cookie` 访问、后续 Browser 请求是否自动发送 Cookie，以及两个 Context 的 Cookie/Storage 是否隔离；不是因为 BFF 业务重要而升级 Browser。Header forwarding 逻辑、API 状态及普通业务分支仍由 HTTP E2E 负责。
 - 两个场景分别验证同一 Context 的 Cookie roundtrip，以及独立 Context A/B 的 Cookie、localStorage 与 sessionStorage 隔离。只导航到非 UI BFF route 并使用 Browser primitive，无 UI locator、表单、点击、视觉或业务页面断言。
-- Topology：Chromium → real Next.js frontend origin → `/api/proxy/*` BFF → Node 标准库 synthetic upstream `/api/*`。Playwright `webServer` 托管两个服务，使用 health/BFF echo 就绪检查，`reuseExistingServer: false`，退出时回收其创建的进程；不复用来源不明的已有服务。
+- Topology：系统 Chrome → real Next.js frontend origin → `/api/proxy/*` BFF → Node 标准库 synthetic upstream `/api/*`。Playwright `webServer` 托管两个服务，使用 health/BFF echo 就绪检查，`reuseExistingServer: false`，退出时回收其创建的进程；不复用来源不明的已有服务。
 - 默认 frontend `127.0.0.1:3100`、upstream `127.0.0.1:5100`；分别用 `EDUFORGE_BROWSER_FRONTEND_PORT`、`EDUFORGE_BROWSER_UPSTREAM_PORT` 覆盖。端口必须不同且专用，不允许 3000/5000；冲突时选择其他空闲端口，不终止已有进程。frontend 的 `FRONTEND_BACKEND_ORIGIN` 由 runner 显式设为该 synthetic upstream，运行真实 Next dev/BFF，涉及同一 `.next` 的命令必须串行。
 - 本 profile 不启动真实 backend、不连接任何数据库、不写磁盘业务数据。探针使用专用合成 Cookie `eduforge_browser_probe`，不使用真实 session Cookie；不需要 Browser acceptance DB、业务 fixture 或数据库 cleanup。
 

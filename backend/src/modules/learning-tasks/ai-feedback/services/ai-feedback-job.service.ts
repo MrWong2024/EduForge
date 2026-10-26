@@ -186,7 +186,7 @@ export class AiFeedbackJobService {
     return {
       jobId: existing._id.toString(),
       status: existing.status,
-    } as AiFeedbackJobEnsureResult;
+    };
   }
 
   private toNewJobDocument(submission: Submission & { _id: Types.ObjectId }) {

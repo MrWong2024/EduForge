@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { ErrorState } from "@/components/blocks/ErrorState";
 import { BrowserFetchJsonError, fetchJson } from "@/lib/api/browser-client";
@@ -85,14 +85,6 @@ export function EditClassroomTaskForm({
   const statusValue = normalizeClassroomTaskStatus(status) ?? "ACTIVE";
   const canEdit = Boolean(classroomTaskId) && (statusValue === "ACTIVE" || statusValue === "CLOSED");
 
-  useEffect(() => {
-    if (!isExpanded) {
-      setNextDueAt(toDateTimeLocalValue(dueAt));
-      setNextAllowLate(typeof allowLate === "boolean" ? allowLate : true);
-      setNextMaxAttempts(typeof maxAttempts === "number" ? String(maxAttempts) : "");
-    }
-  }, [dueAt, allowLate, maxAttempts, isExpanded]);
-
   const hasChanges = useMemo(() => {
     const originalDueAt = toDateTimeLocalValue(dueAt);
     const originalAllowLate = typeof allowLate === "boolean" ? allowLate : true;
@@ -107,6 +99,13 @@ export function EditClassroomTaskForm({
   if (!canEdit) {
     return null;
   }
+
+  const handleExpand = () => {
+    setNextDueAt(toDateTimeLocalValue(dueAt));
+    setNextAllowLate(typeof allowLate === "boolean" ? allowLate : true);
+    setNextMaxAttempts(typeof maxAttempts === "number" ? String(maxAttempts) : "");
+    setIsExpanded(true);
+  };
 
   const handleCancel = () => {
     setIsExpanded(false);
@@ -192,7 +191,7 @@ export function EditClassroomTaskForm({
       {!isExpanded ? (
         <button
           type="button"
-          onClick={() => setIsExpanded(true)}
+          onClick={handleExpand}
           className="rounded-md border border-zinc-300 px-2.5 py-1 text-xs font-medium text-zinc-700 hover:bg-zinc-100"
         >
           编辑设置

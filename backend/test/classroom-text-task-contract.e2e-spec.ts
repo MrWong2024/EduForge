@@ -15,9 +15,15 @@ import { Classroom } from '../src/modules/classrooms/schemas/classroom.schema';
 import { Enrollment } from '../src/modules/classrooms/enrollments/schemas/enrollment.schema';
 import { ClassroomTask } from '../src/modules/classrooms/classroom-tasks/schemas/classroom-task.schema';
 import { Task } from '../src/modules/learning-tasks/schemas/task.schema';
-import { Submission } from '../src/modules/learning-tasks/schemas/submission.schema';
+import {
+  Submission,
+  SubmissionStatus,
+} from '../src/modules/learning-tasks/schemas/submission.schema';
 import { Feedback } from '../src/modules/learning-tasks/schemas/feedback.schema';
-import { AiFeedbackJob } from '../src/modules/learning-tasks/ai-feedback/schemas/ai-feedback-job.schema';
+import {
+  AiFeedbackJob,
+  AiFeedbackJobStatus,
+} from '../src/modules/learning-tasks/ai-feedback/schemas/ai-feedback-job.schema';
 import { AiFeedbackProcessor } from '../src/modules/learning-tasks/ai-feedback/services/ai-feedback-processor.service';
 import { DefaultStubAiFeedbackProvider } from '../src/modules/learning-tasks/ai-feedback/services/default-stub-ai-feedback.provider';
 import { ClassroomTaskResponseDto } from '../src/modules/classrooms/classroom-tasks/dto/classroom-task-response.dto';
@@ -145,7 +151,13 @@ describe('A1 classroom text task backend contract (HTTP)', () => {
       .exec();
     expect(
       await jobs.countDocuments({
-        status: { $in: ['PENDING', 'FAILED', 'RUNNING'] },
+        status: {
+          $in: [
+            AiFeedbackJobStatus.Pending,
+            AiFeedbackJobStatus.Failed,
+            AiFeedbackJobStatus.Running,
+          ],
+        },
         submissionId: { $nin: owned.map((s) => s._id) },
       }),
     ).toBe(0);
@@ -201,7 +213,13 @@ describe('A1 classroom text task backend contract (HTTP)', () => {
     ).toBe(false);
     expect(
       await jobs.countDocuments({
-        status: { $in: ['PENDING', 'FAILED', 'RUNNING'] },
+        status: {
+          $in: [
+            AiFeedbackJobStatus.Pending,
+            AiFeedbackJobStatus.Failed,
+            AiFeedbackJobStatus.Running,
+          ],
+        },
       }),
     ).toBe(0);
     console.info(
@@ -869,14 +887,14 @@ describe('A1 classroom text task backend contract (HTTP)', () => {
       studentId: userIds[2],
       attemptNo: 1,
       content: { codeText: 'old source', language: 'typescript' },
-      status: 'SUBMITTED',
+      status: SubmissionStatus.Submitted,
     });
     const unbound = await submissions.create({
       taskId: new Types.ObjectId(legacyTask),
       studentId: userIds[2],
       attemptNo: 1,
       content: { codeText: 'unbound source', language: 'typescript' },
-      status: 'SUBMITTED',
+      status: SubmissionStatus.Submitted,
     });
     await teacherA
       .post(
@@ -959,7 +977,7 @@ describe('A1 classroom text task backend contract (HTTP)', () => {
         taskId: (await submissions.findById(item.submissionId).lean().exec())
           ?.taskId,
         studentId: userIds[2],
-        status: 'PENDING',
+        status: AiFeedbackJobStatus.Pending,
         attempts: 0,
         maxAttempts: 3,
       });

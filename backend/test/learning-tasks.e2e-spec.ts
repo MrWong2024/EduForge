@@ -15,7 +15,12 @@ import { User } from '../src/modules/users/schemas/user.schema';
 import { Session } from '../src/modules/auth/schemas/session.schema';
 import { Task } from '../src/modules/learning-tasks/schemas/task.schema';
 import { Submission } from '../src/modules/learning-tasks/schemas/submission.schema';
-import { Feedback } from '../src/modules/learning-tasks/schemas/feedback.schema';
+import {
+  Feedback,
+  FeedbackSeverity,
+  FeedbackSource,
+  FeedbackType,
+} from '../src/modules/learning-tasks/schemas/feedback.schema';
 import { AiFeedbackJob } from '../src/modules/learning-tasks/ai-feedback/schemas/ai-feedback-job.schema';
 
 jest.setTimeout(30000);
@@ -510,9 +515,9 @@ describe('LearningTasks (e2e)', () => {
 
     const mismatchedFeedback = await feedbackModel.create({
       submissionId: new Types.ObjectId(),
-      source: 'TEACHER',
-      type: 'STYLE',
-      severity: 'WARN',
+      source: FeedbackSource.Teacher,
+      type: FeedbackType.Style,
+      severity: FeedbackSeverity.Warn,
       message: `Mismatched feedback ${Date.now()}`,
       tags: ['other'],
     });
@@ -527,17 +532,17 @@ describe('LearningTasks (e2e)', () => {
     const [aiFeedback, systemFeedback] = await Promise.all([
       feedbackModel.create({
         submissionId: new Types.ObjectId(submissionId),
-        source: 'AI',
-        type: 'BUG',
-        severity: 'ERROR',
+        source: FeedbackSource.AI,
+        type: FeedbackType.Bug,
+        severity: FeedbackSeverity.Error,
         message: `AI readonly feedback ${Date.now()}`,
         tags: ['logic'],
       }),
       feedbackModel.create({
         submissionId: new Types.ObjectId(submissionId),
-        source: 'SYSTEM',
-        type: 'OTHER',
-        severity: 'INFO',
+        source: FeedbackSource.System,
+        type: FeedbackType.Other,
+        severity: FeedbackSeverity.Info,
         message: `System readonly feedback ${Date.now()}`,
         tags: ['other'],
       }),

@@ -661,7 +661,7 @@ describe('LearningTasks AI Feedback Guards (e2e)', () => {
 
       const processOnceFirst = await aiFeedbackProcessor.processOnce(1);
 
-      const firstBody = processOnceFirst as ProcessOnceResponse;
+      const firstBody: ProcessOnceResponse = processOnceFirst;
       expect(firstBody.processed).toBe(1);
 
       const findJobWithRetry = async (

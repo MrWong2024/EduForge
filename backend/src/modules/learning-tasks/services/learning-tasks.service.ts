@@ -159,7 +159,7 @@ export class LearningTasksService {
       createdBy: new Types.ObjectId(userId),
       publishedAt: initialStatus === TaskStatus.Published ? now : undefined,
     });
-    return this.toTaskResponse(task as TaskWithMeta);
+    return this.toTaskResponse(task);
   }
 
   async updateTask(id: string, dto: UpdateTaskDto, userId: string) {
@@ -209,7 +209,7 @@ export class LearningTasksService {
       task.visibility = nextVisibility;
     }
     await task.save();
-    return this.toTaskResponse(task as TaskWithMeta);
+    return this.toTaskResponse(task);
   }
 
   async publishTask(id: string, userId: string) {
@@ -226,7 +226,7 @@ export class LearningTasksService {
       );
     }
     if (task.status === TaskStatus.Published) {
-      return this.toTaskResponse(task as TaskWithMeta);
+      return this.toTaskResponse(task);
     }
     if (task.status !== TaskStatus.Draft) {
       throw new BadRequestException(
@@ -237,7 +237,7 @@ export class LearningTasksService {
     task.status = TaskStatus.Published;
     task.publishedAt = new Date();
     await task.save();
-    return this.toTaskResponse(task as TaskWithMeta);
+    return this.toTaskResponse(task);
   }
 
   async archiveTask(id: string, teacherId: string) {
@@ -255,7 +255,7 @@ export class LearningTasksService {
     }
     task.status = TaskStatus.Archived;
     await task.save();
-    return this.toTaskResponse(task as TaskWithMeta);
+    return this.toTaskResponse(task);
   }
 
   async restoreTask(id: string, userId: string) {
@@ -527,7 +527,7 @@ export class LearningTasksService {
       createdBy: new Types.ObjectId(userId),
       tags: normalizedTags,
     });
-    return this.toFeedbackResponse(feedback as FeedbackWithMeta);
+    return this.toFeedbackResponse(feedback);
   }
 
   async updateFeedback(
@@ -599,7 +599,7 @@ export class LearningTasksService {
     }
 
     await feedback.save();
-    return this.toFeedbackResponse(feedback as FeedbackWithMeta);
+    return this.toFeedbackResponse(feedback);
   }
 
   async listFeedback(submissionId: string, userId: string) {
@@ -1047,13 +1047,13 @@ export class LearningTasksService {
         if (shouldEnqueue) {
           await this.aiFeedbackJobService.enqueue(submission);
           return this.toSubmissionResponse(
-            submission as SubmissionWithMeta,
+            submission,
             AiFeedbackStatus.Pending,
           );
         }
 
         return this.toSubmissionResponse(
-          submission as SubmissionWithMeta,
+          submission,
           AiFeedbackStatus.NotRequested,
         );
       } catch (error) {

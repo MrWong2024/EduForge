@@ -130,7 +130,7 @@ export class ClassroomsService {
           status: ClassroomStatus.Active,
         });
         return this.toClassroomResponse(
-          classroom as ClassroomWithMeta,
+          classroom,
           true,
           this.toCourseSummary(course),
         );
@@ -168,7 +168,7 @@ export class ClassroomsService {
     if (dto.name !== undefined || dto.status !== undefined) {
       await classroom.save();
     }
-    return this.toClassroomResponse(classroom as ClassroomWithMeta, true);
+    return this.toClassroomResponse(classroom, true);
   }
 
   async deleteClassroom(id: string, userId: string) {
@@ -486,10 +486,7 @@ export class ClassroomsService {
       .findById(classroom._id)
       .lean<ClassroomWithMeta>()
       .exec();
-    return this.toClassroomResponse(
-      (updated ?? classroom) as ClassroomWithMeta,
-      true,
-    );
+    return this.toClassroomResponse(updated ?? classroom, true);
   }
 
   private async ensureTeacher(userId: string) {

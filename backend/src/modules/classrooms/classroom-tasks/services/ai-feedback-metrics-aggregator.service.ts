@@ -42,11 +42,7 @@ type TopTagAgg = {
 };
 
 type NormalizedJobStatus =
-  | 'pending'
-  | 'running'
-  | 'succeeded'
-  | 'failed'
-  | 'dead';
+  'pending' | 'running' | 'succeeded' | 'failed' | 'dead';
 
 export type AiFeedbackAggregatedJobMetrics = {
   jobs: {

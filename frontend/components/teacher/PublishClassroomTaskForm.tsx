@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useLayoutEffect, useMemo, useRef, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { ErrorState } from "@/components/blocks/ErrorState";
 import { BrowserFetchJsonError, fetchJson } from "@/lib/api/browser-client";
@@ -217,21 +217,51 @@ export function PublishClassroomTaskForm({
   const [isLoadingMore, setIsLoadingMore] = useState(false);
   const [loadMoreError, setLoadMoreError] = useState<string | null>(null);
   const loadMoreEpochRef = useRef(0);
+  const [previousFilterProps, setPreviousFilterProps] = useState({
+    initialCourseLabelFilter,
+    initialOnlyMineFilter,
+    initialKnowledgeModuleFilter,
+  });
+  const [previousTaskProps, setPreviousTaskProps] = useState({
+    availableTasks,
+    initialAvailableTasksTotal,
+    initialAvailableTasksPage,
+    initialAvailableTasksLimit,
+  });
 
-  useEffect(() => {
-    setCourseLabelFilter(initialCourseLabelFilter ?? "");
-  }, [initialCourseLabelFilter]);
+  if (
+    previousFilterProps.initialCourseLabelFilter !== initialCourseLabelFilter ||
+    previousFilterProps.initialOnlyMineFilter !== initialOnlyMineFilter ||
+    previousFilterProps.initialKnowledgeModuleFilter !== initialKnowledgeModuleFilter
+  ) {
+    setPreviousFilterProps({
+      initialCourseLabelFilter,
+      initialOnlyMineFilter,
+      initialKnowledgeModuleFilter,
+    });
+    if (previousFilterProps.initialCourseLabelFilter !== initialCourseLabelFilter) {
+      setCourseLabelFilter(initialCourseLabelFilter ?? "");
+    }
+    if (previousFilterProps.initialOnlyMineFilter !== initialOnlyMineFilter) {
+      setOnlyMine(initialOnlyMineFilter);
+    }
+    if (previousFilterProps.initialKnowledgeModuleFilter !== initialKnowledgeModuleFilter) {
+      setKnowledgeModuleFilter(initialKnowledgeModuleFilter ?? "");
+    }
+  }
 
-  useEffect(() => {
-    setOnlyMine(initialOnlyMineFilter);
-  }, [initialOnlyMineFilter]);
-
-  useEffect(() => {
-    setKnowledgeModuleFilter(initialKnowledgeModuleFilter ?? "");
-  }, [initialKnowledgeModuleFilter]);
-
-  useEffect(() => {
-    loadMoreEpochRef.current += 1;
+  if (
+    previousTaskProps.availableTasks !== availableTasks ||
+    !Object.is(previousTaskProps.initialAvailableTasksTotal, initialAvailableTasksTotal) ||
+    !Object.is(previousTaskProps.initialAvailableTasksPage, initialAvailableTasksPage) ||
+    !Object.is(previousTaskProps.initialAvailableTasksLimit, initialAvailableTasksLimit)
+  ) {
+    setPreviousTaskProps({
+      availableTasks,
+      initialAvailableTasksTotal,
+      initialAvailableTasksPage,
+      initialAvailableTasksLimit,
+    });
     setLoadedTasks(availableTasks);
     setLoadedTotal(
       typeof initialAvailableTasksTotal === "number"
@@ -252,6 +282,10 @@ export function PublishClassroomTaskForm({
     );
     setLoadMoreError(null);
     setIsLoadingMore(false);
+  }
+
+  useLayoutEffect(() => {
+    loadMoreEpochRef.current += 1;
   }, [
     availableTasks,
     initialAvailableTasksTotal,
@@ -310,15 +344,9 @@ export function PublishClassroomTaskForm({
     );
   }, [loadedTasks, knowledgeModuleFilter]);
 
-  useEffect(() => {
-    if (!taskId) {
-      return;
-    }
-    const stillVisible = loadedTasks.some((task) => task.id === taskId);
-    if (!stillVisible) {
-      setTaskId("");
-    }
-  }, [loadedTasks, taskId]);
+  if (taskId && !loadedTasks.some((task) => task.id === taskId)) {
+    setTaskId("");
+  }
 
   const replaceSearchQuery = (updater: (params: URLSearchParams) => void) => {
     const params = new URLSearchParams(searchParams.toString());

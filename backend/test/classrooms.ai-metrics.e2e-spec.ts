@@ -449,9 +449,8 @@ describe('Classrooms AI Metrics (e2e)', () => {
       .send({})
       .expect(200);
 
-    const processBody = (await aiFeedbackProcessor.processOnce(
-      10,
-    )) as ProcessOnceResponse;
+    const processBody: ProcessOnceResponse =
+      await aiFeedbackProcessor.processOnce(10);
     expect(processBody.processed).toBeGreaterThanOrEqual(2);
 
     const responseA = await teacherAgent
@@ -518,12 +517,10 @@ describe('Classrooms AI Metrics (e2e)', () => {
       .send({})
       .expect(200);
 
-    const firstProcess = (await aiFeedbackProcessor.processOnce(
-      1,
-    )) as ProcessOnceResponse;
-    const secondProcess = (await aiFeedbackProcessor.processOnce(
-      1,
-    )) as ProcessOnceResponse;
+    const firstProcess: ProcessOnceResponse =
+      await aiFeedbackProcessor.processOnce(1);
+    const secondProcess: ProcessOnceResponse =
+      await aiFeedbackProcessor.processOnce(1);
     expect(firstProcess.processed).toBeGreaterThanOrEqual(1);
     expect(secondProcess.processed).toBeGreaterThanOrEqual(1);
 

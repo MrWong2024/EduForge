@@ -26,12 +26,7 @@ const PASSWORD_SALT_ROUNDS = 10;
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 type CsvHeader =
-  | 'email'
-  | 'name'
-  | 'roles'
-  | 'status'
-  | 'studentNo'
-  | 'employeeNo';
+  'email' | 'name' | 'roles' | 'status' | 'studentNo' | 'employeeNo';
 type RawCsvRow = Partial<Record<CsvHeader, string>>;
 type NormalizedCsvRow = {
   email: string;

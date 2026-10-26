@@ -10,12 +10,12 @@ EduForge 是一个面向软件工程实践教学的智能化教学平台，目�
 
 本项目采用前后端分离架构，强调模块化设计、清晰的职责边界以及长期可维护性。
 
-## 技术栈（版本策略：使用最新稳定主版本，运行时采用最新 LTS）
+## 技术栈（实际依赖版本以 package.json 与锁文件为准）
 
 - Node.js：最新 LTS（24.x）
 - 前端：Next.js 16.x（App Router）
 - 后端：NestJS 11.x（默认 Express v5）
-- 数据库：MongoDB 8.x
+- 数据库：MongoDB（环境版本目标见 [Config Matrix](docs/handoff/handoff-backend-config-matrix.md#1-数据库连接串与索引治理)）
 - 语言：TypeScript
 
 ## 仓库结构概览
@@ -44,5 +44,11 @@ EduForge/
 ## 简要启动说明
 
 - 在本地准备 Node.js LTS 与 MongoDB 环境。
-- 按需进入 `backend/` 与 `frontend/` 目录安装依赖并启动开发服务。
+- 分别进入 `backend/` 与 `frontend/` 目录用 `npm ci` 安装锁定依赖，再按需启动开发服务；Windows PowerShell 可用 `npm.cmd ci`。
 - 涉及 AI feedback provider / worker / 调试开关等配置时，请直接查阅 `docs/handoff/handoff-backend-config-matrix.md`。
+
+## 依赖维护
+
+后端对 `@nestjs/platform-express` 的 `multer` 子依赖设置了限定范围的 `2.5.0` override，用于修复 [GHSA-q7qp-rjg7-q26m](https://github.com/advisories/GHSA-q7qp-rjg7-q26m)；NestJS 11 的当前适配器仍固定旧版本。上游采用修复版本后，应重新核对并移除该 override，不将它扩展为全局替换或通过 `--force` 忽略依赖冲突。
+
+前端暂保留 ESLint 9：当前 Next.js lint 配置所用的 `eslint-plugin-import`、`eslint-plugin-jsx-a11y`、`eslint-plugin-react` 的 peer 范围尚不接受 ESLint 10。ESLint 9 已停止维护，待这些插件支持后再升级；后端已采用 ESLint 10，不通过 `--legacy-peer-deps` 强行统一两端版本。

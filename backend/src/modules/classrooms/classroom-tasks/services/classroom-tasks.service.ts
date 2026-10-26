@@ -240,9 +240,7 @@ type LearningTrajectoryResponse = {
   items: LearningTrajectoryItem[];
 };
 type StudentTaskParticipationReason =
-  | 'ACTIVE'
-  | 'CLASSROOM_NOT_ACTIVE'
-  | 'CLASSROOM_TASK_NOT_ACTIVE';
+  'ACTIVE' | 'CLASSROOM_NOT_ACTIVE' | 'CLASSROOM_TASK_NOT_ACTIVE';
 type StudentTaskParticipationStatus = {
   readOnly: boolean;
   canSubmit: boolean;
@@ -341,10 +339,7 @@ export class ClassroomTasksService {
         settings,
         createdBy: new Types.ObjectId(userId),
       });
-      return this.toClassroomTaskResponse(
-        classroomTask as ClassroomTaskWithMeta,
-        task,
-      );
+      return this.toClassroomTaskResponse(classroomTask, task);
     } catch (error) {
       const mongoError = error as { code?: number };
       if (mongoError.code === 11000) {
@@ -1111,7 +1106,7 @@ export class ClassroomTasksService {
             topTagsLatest: [],
           },
           attempts: [],
-        } as LearningTrajectoryItem;
+        };
       }
 
       const firstSubmission =
@@ -1146,7 +1141,7 @@ export class ClassroomTasksService {
               feedbackCount:
                 feedbackCountMap.get(submission._id.toString()) ?? 0,
               feedbackSummary,
-            } as LearningTrajectoryAttempt;
+            };
           })
         : [];
 
@@ -1169,7 +1164,7 @@ export class ClassroomTasksService {
           topTagsLatest: latestSummary.topTags,
         },
         attempts,
-      } as LearningTrajectoryItem;
+      };
     });
 
     items.sort((left, right) =>

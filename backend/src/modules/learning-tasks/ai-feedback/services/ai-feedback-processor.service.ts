@@ -278,7 +278,7 @@ export class AiFeedbackProcessor {
           sort: { createdAt: 1 },
         },
       )
-      .exec() as Promise<AiFeedbackJobWithMeta | null>;
+      .exec();
   }
 
   private async persistFeedback(

@@ -270,8 +270,7 @@ describe('LearningTasksService task template lifecycle', () => {
     expect(result.createdBy).toBe(harness.ids.teacherId.toString());
     expect(result.publishedAt).toBeInstanceOf(Date);
     const createPayload = harness.taskModel.create.mock.calls[0]?.[0] as
-      | { status: TaskStatus; publishedAt?: Date }
-      | undefined;
+      { status: TaskStatus; publishedAt?: Date } | undefined;
     expect(createPayload?.status).toBe(TaskStatus.Published);
     expect(createPayload?.publishedAt).toBeInstanceOf(Date);
   });

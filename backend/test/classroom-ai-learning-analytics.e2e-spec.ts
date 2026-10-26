@@ -7,7 +7,10 @@ import cookieParser from 'cookie-parser';
 import request from 'supertest';
 import { App } from 'supertest/types';
 import { Session } from '../src/modules/auth/schemas/session.schema';
-import { Course } from '../src/modules/courses/schemas/course.schema';
+import {
+  Course,
+  CourseStatus,
+} from '../src/modules/courses/schemas/course.schema';
 import {
   Classroom,
   ClassroomStatus,
@@ -448,7 +451,7 @@ describe('Classroom AI learning analytics (e2e)', () => {
       code: `AIA-${Date.now()}`,
       name: 'AI Analytics Course',
       term: '2026-Spring',
-      status: 'ACTIVE',
+      status: CourseStatus.Active,
       createdBy: teacherId,
     });
     courseId = course._id;

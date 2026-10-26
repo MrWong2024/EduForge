@@ -304,7 +304,7 @@ export abstract class OpenAiCompatibleFeedbackProviderBase implements AiFeedback
       );
     }
 
-    const rootKeys = Object.keys(parsed as Record<string, unknown>);
+    const rootKeys = Object.keys(parsed);
     if (
       rootKeys.length === 0 ||
       rootKeys.some((key) => !ALLOWED_ROOT_KEYS.has(key))

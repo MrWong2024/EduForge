@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState, useTransition } from "react";
+import { useMemo, useState, useTransition } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { paths } from "@/lib/routes/paths";
 
@@ -90,16 +90,13 @@ export function TaskExclusionPanel({
   const [selectedIds, setSelectedIds] = useState<string[]>(
     normalizedInitialExcludedTaskIds,
   );
+  const [previousInitialExcludedTaskIds, setPreviousInitialExcludedTaskIds] =
+    useState(normalizedInitialExcludedTaskIds);
 
-  useEffect(() => {
+  if (previousInitialExcludedTaskIds !== normalizedInitialExcludedTaskIds) {
+    setPreviousInitialExcludedTaskIds(normalizedInitialExcludedTaskIds);
     setSelectedIds(normalizedInitialExcludedTaskIds);
-  }, [normalizedInitialExcludedTaskIds]);
-
-  useEffect(() => {
-    if (!isPending) {
-      setPendingAction(null);
-    }
-  }, [isPending]);
+  }
 
   const selectedIdSet = useMemo(() => new Set(selectedIds), [selectedIds]);
   const taskIdSet = useMemo(

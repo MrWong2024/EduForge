@@ -8,6 +8,8 @@
 
 ## 1) 数据库、连接串与索引治理
 
+数据库兼容目标为 MongoDB 9.0.4（本地）与 8.3（服务器），使用同一套后端依赖；Mongoose 及其实际 MongoDB Node.js Driver 版本以 `backend/package-lock.json` 为准。选择驱动时核对 [MongoDB 官方兼容矩阵](https://www.mongodb.com/docs/drivers/compatibility/?driver-language=javascript&javascript-driver-framework=nodejs) 对两个 Server 主版本及 Node.js 24 的支持，不通过 `overrides` 强行替换 Mongoose 的驱动。官方支持范围、纯测试与构建结果不等于两个实际环境的业务回归已通过；真实数据库回归须遵守 Testing Playbook 的隔离边界，不以生产库作为升级测试靶场。
+
 数据库按环境与测试用途使用独立 database 实现 database-level isolation；`browser_acceptance` 是独立数据库用途，不是新的 `NODE_ENV`：
 
 | `NODE_ENV` | `EDUFORGE_DATABASE_PURPOSE` | Database |
@@ -56,6 +58,7 @@ npm run sync-indexes -- --retire-task-stage --database <精确库名> --apply --
 - 只允许四个精确目标。`eduforge_browser_test` 仅读取 `.env.browser-acceptance` 的 `BROWSER_ACCEPTANCE_ADMIN_MONGO_URI`；`eduforge_test`、`eduforge_dev`、服务器 `eduforge` 分别仅读取 `.env.test`、`.env.development`、`.env.production` 的 `MONGO_ADMIN_URI`。不叠加 `.env` 或继承的连接串，不替换 URI 中的库名；连接前后均校验库名，另核对本地地址与运维角色。
 - 默认只读；apply 需要同库确认，不能与 dry-run 混用，未知参数拒绝。该分支在加载 AppModule 前分流，不创建 Nest 上下文，不启动业务服务或 Worker；直接使用现有 MongoDB 原生 collection API，无自动建库/建集合。无参数入口仍执行原有普通全模型同步，定向退役不得调用该路径。
 - 操作固定为移除 `tasks.stage`、`classroomtasks.taskSnapshot.stage`，以及替换三个已知含 stage 的 Task 复合索引；实现与精确键定义见 [定向实现](../../backend/scripts/retire-task-stage.ts)。先备份，再建立并回读全部新索引，随后仅 `$unset` 两个字段，核对残留和其他内容后按实际名称删除旧索引。异常索引选项、键定义、快照或同名冲突均拒绝写入，不调整其他索引。
+- 当前定向脚本不接受显式 `collation` 选项；MongoDB 9 返回 `collation: { locale: "simple" }` 时也会按 `UNEXPECTED_INDEX_OPTIONS` 拒绝处理。这是该旧运维入口的兼容限制，不代表 Mongoose 应用连接不兼容；不得绕过门禁或以重新执行退役清理代替依赖升级验证。
 - 首次写入前，将带 BSON 类型的字段级 EJSON 和相关实际索引写入项目根目录 `.local/deliverables/task-stage-retirement-backups/<本轮标识>/<库名>/`，持久化并回读核验后才修改数据库；不覆盖旧材料。标识默认自动生成，也可用 `--backup-run <唯一标识>` 为同轮不同库归档。恢复材料不含完整文档或凭据，执行后保留；不自动恢复。
 - 运维用途为 `production_or_operations`，不将它赋给产品 `EDUFORGE_DATABASE_PURPOSE`。四库分进程串行处理；apply 前须核对实际运行进程及其构建已退役 stage。运行版本未知或仍为旧版时，只做只读盘点。失败/超时后先盘点实际状态，不直接重放写入；再次 dry-run 用于确认无待执行变化，缺失库/集合不创建。
 

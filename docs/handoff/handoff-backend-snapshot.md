@@ -5,7 +5,7 @@
 本文用于新会话快速建立后端全貌，维护当前工程结构、模块能力、主教学链、高风险架构边界与真实未实现能力。接口、公开数据、内部实现、配置和测试细节由各专项 Owner 维护。
 
 - 当前 `backend/` 源码或用户指定 commit 是实现事实的最高来源；handoff 不替代代码核对。
-- 后端技术栈为 Node.js LTS 24.x、NestJS 11.x、MongoDB 8.x（Mongoose）、TypeScript 与 REST API。
+- 后端技术栈为 Node.js LTS 24.x、NestJS 11.x、MongoDB（Mongoose）、TypeScript 与 REST API；数据库环境版本目标见 [Config Matrix](./handoff-backend-config-matrix.md#1-数据库连接串与索引治理)。
 - 前端正式业务访问经过同域 BFF proxy；具体调用与代理实现见 [Frontend API Map](./handoff-frontend-api-map.md)。
 - 产品主线与阶段状态由 [Roadmap](./handoff-roadmap.md) 维护；专项事实入口见本文末尾索引。
 

@@ -21,7 +21,10 @@ import { Session } from '../src/modules/auth/schemas/session.schema';
 import { Task } from '../src/modules/learning-tasks/schemas/task.schema';
 import { Submission } from '../src/modules/learning-tasks/schemas/submission.schema';
 import { Feedback } from '../src/modules/learning-tasks/schemas/feedback.schema';
-import { AiFeedbackJob } from '../src/modules/learning-tasks/ai-feedback/schemas/ai-feedback-job.schema';
+import {
+  AiFeedbackJob,
+  AiFeedbackJobStatus,
+} from '../src/modules/learning-tasks/ai-feedback/schemas/ai-feedback-job.schema';
 
 jest.setTimeout(30000);
 
@@ -172,7 +175,15 @@ describe('LearningTasks AI Feedback Ops (e2e) - pipeline & debug gate ON', () =>
     aiFeedbackJobModel = app.get(getModelToken(AiFeedbackJob.name));
     expect(
       await aiFeedbackJobModel
-        .countDocuments({ status: { $in: ['PENDING', 'FAILED', 'RUNNING'] } })
+        .countDocuments({
+          status: {
+            $in: [
+              AiFeedbackJobStatus.Pending,
+              AiFeedbackJobStatus.Failed,
+              AiFeedbackJobStatus.Running,
+            ],
+          },
+        })
         .maxTimeMS(10000),
     ).toBe(0);
 

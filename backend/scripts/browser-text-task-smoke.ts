@@ -46,6 +46,7 @@ import {
 import {
   Feedback,
   FeedbackSchema,
+  FeedbackSource,
 } from '../src/modules/learning-tasks/schemas/feedback.schema';
 import {
   ClassroomTask,
@@ -858,7 +859,10 @@ async function processAi(record: SmokeRecord, jobId: string): Promise<void> {
       .maxTimeMS(5000)
       .exec();
     const feedback = await owned.m.feedback
-      .countDocuments({ submissionId: job.submissionId, source: 'AI' })
+      .countDocuments({
+        submissionId: job.submissionId,
+        source: FeedbackSource.AI,
+      })
       .maxTimeMS(5000)
       .exec();
     if (

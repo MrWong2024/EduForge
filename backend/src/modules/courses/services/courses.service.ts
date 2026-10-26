@@ -46,7 +46,7 @@ export class CoursesService {
         status: CourseStatus.Active,
         createdBy: new Types.ObjectId(userId),
       });
-      return this.toCourseResponse(course as CourseWithMeta);
+      return this.toCourseResponse(course);
     } catch (error) {
       const mongoError = error as { code?: number };
       if (mongoError.code === 11000) {
@@ -87,7 +87,7 @@ export class CoursesService {
       if (hasBaseFieldUpdate || dto.status !== undefined) {
         await course.save();
       }
-      return this.toCourseResponse(course as CourseWithMeta);
+      return this.toCourseResponse(course);
     } catch (error) {
       const mongoError = error as { code?: number };
       if (mongoError.code === 11000) {

@@ -30,9 +30,7 @@ type SubmissionWithMeta = Submission & WithId & WithTimestamps;
 type TeacherLean = Pick<User, 'name' | 'employeeNo'> & WithId;
 type CourseLean = Pick<Course, 'name' | 'term' | 'code'> & WithId;
 type StudentTaskVisibilityStatus =
-  | 'CURRENT'
-  | 'RECENTLY_EXPIRED'
-  | 'HISTORICAL';
+  'CURRENT' | 'RECENTLY_EXPIRED' | 'HISTORICAL';
 
 type ClassroomTaskStudentAggregateItem = {
   _id: Types.ObjectId;

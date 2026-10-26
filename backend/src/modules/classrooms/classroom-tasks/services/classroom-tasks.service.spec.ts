@@ -159,12 +159,9 @@ const createHarness = (options: HarnessOptions = {}) => {
   };
   const filterSubmissions = (filter: Record<string, unknown>) => {
     const classroomTaskIdFilter = filter.classroomTaskId as
-      | Types.ObjectId
-      | undefined;
+      Types.ObjectId | undefined;
     const studentIdFilter = filter.studentId as
-      | Types.ObjectId
-      | { $in?: Types.ObjectId[] }
-      | undefined;
+      Types.ObjectId | { $in?: Types.ObjectId[] } | undefined;
     const studentIdFilterValues =
       studentIdFilter && !(studentIdFilter instanceof Types.ObjectId)
         ? (studentIdFilter.$in ?? [])
