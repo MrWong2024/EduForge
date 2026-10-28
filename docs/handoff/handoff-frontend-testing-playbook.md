@@ -56,11 +56,15 @@ npm run build
 
 - 标准 runner 为 Playwright Test，配置：`frontend/playwright.contracts.config.ts`；pure/static contracts 目录：`frontend/test/contracts`。先用 `test:contracts:list` 确认发现范围，再用 `test:contracts` 执行。
 - 首个资产 `frontend/test/contracts/routes-paths.contract.spec.ts` 验证 `frontend/lib/routes/paths.ts` 的关键静态路径、动态段 URL-safe encoding、`tasksFromClassroom()` 的 classroomId 编码与 `status=PUBLISHED`，以及课堂任务 submissions 的双动态段编码。
-- contracts 仅使用 `test` / `expect` 与被测纯模块，不使用 Browser fixture，不启动 Browser 或服务，不连接网络/数据库，也不依赖环境变量；Browser evidence 仍须按本文既有最低充分规则另行资格审查。
+- contracts 使用 `test` / `expect` 与被测纯模块或静态工具公共 API，不使用 Browser fixture，不启动 Browser 或服务，不连接网络/数据库，也不依赖环境变量；Browser evidence 仍须按本文既有最低充分规则另行资格审查。
 - lint/typecheck/build 是代码变化后的静态门禁，不证明登录、Cookie、BFF、请求副作用或真实页面流程。
+- lint 配置由 [`frontend/eslint.config.mjs`](../../frontend/eslint.config.mjs) 维护：JavaScript recommended 为基础，TypeScript recommended 在 TS/TSX 范围覆盖相应核心规则；完整 Next Core Web Vitals 与官方 Hooks flat recommended 保留框架及 Hooks/Compiler 检查，现代 React 插件只显式启用迁移所需规则，`import-x` 与 `jsx-a11y-x` 承接现有职责。配置同时维护 TS、TSX、MJS 等文件的解析、globals 和生成产物忽略；具体版本以 package.json/锁文件为准，不引入 type-aware lint 或额外 resolver。
+- TypeScript 承接仅限 TS/TSX：正式 typecheck 负责重复 JSX 属性、未定义 JSX 组件、字符串 ref、`this.isMounted()` 与 class render 无返回；MJS 仍由 ESLint 负责。自动 JSX runtime 下退役 `jsx-uses-react`，JSX 变量使用由 TypeScript ESLint scope/unused-vars 处理；现代组件命名检查不与旧 display-name 全域等价，也不新增 Context 命名要求。旧 no-deprecated 由现代拆分规则与 React 类型共同承担；no-unescaped-entities 作为旧 JSX 文本风格检查明确退役，不宣称 TypeScript 已覆盖。
+- `eslint-config.contract.spec.ts` 通过 ESLint 公共 API 加载真实最终配置，以固定正反例断言代表性规则的 ruleId/severity，并检查 TS/TSX/MJS 覆盖与生成目录忽略；测试支持 MJS 只读取源码做静态 lint，不导入执行。
 - 纯展示映射、序列化、资格判断等逻辑如果可以脱离 React/Browser 独立证明，应优先复用现有 contracts runner，不因假设未来需求新增依赖或并行 runner。
 - `task-ai-context-refs.contract.spec.ts` 负责教师模板引用适配、结构拒绝、路径/顺序保持、仅格式化不改变语义、PATCH 省略/清空与响应基准、明确作者及状态门禁；expected 来自任务约束与 Backend DTO，不读取 ZIP 或启动服务。
 - 文档-only 变化只做文档、链接、diff 与范围门禁，不机械运行 frontend build。
+- 仅 lint 配置、开发依赖与静态 contract 变化时不为形式强制 build；应用源码变化后按影响执行，build 不替代 lint 验收。
 
 命令生成期核验、discovery、定向执行、目标集合精确匹配、`not_executed` 判定与是否扩大回归统一遵循 [Codex instruction spec](../codex-instruction-spec.md) §3.8 / §3.9；本文只保留 EduForge 当前真实 runner 与命令入口。不得仅因“最终代码态”“为了保险”或追求形式完整而机械扩大完整测试套件。
 

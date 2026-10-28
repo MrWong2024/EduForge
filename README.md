@@ -51,4 +51,4 @@ EduForge/
 
 后端对 `@nestjs/platform-express` 的 `multer` 子依赖设置了限定范围的 `2.5.0` override，用于修复 [GHSA-q7qp-rjg7-q26m](https://github.com/advisories/GHSA-q7qp-rjg7-q26m)；NestJS 11 的当前适配器仍固定旧版本。上游采用修复版本后，应重新核对并移除该 override，不将它扩展为全局替换或通过 `--force` 忽略依赖冲突。
 
-前端暂保留 ESLint 9：当前 Next.js lint 配置所用的 `eslint-plugin-import`、`eslint-plugin-jsx-a11y`、`eslint-plugin-react` 的 peer 范围尚不接受 ESLint 10。ESLint 9 已停止维护，待这些插件支持后再升级；后端已采用 ESLint 10，不通过 `--legacy-peer-deps` 强行统一两端版本。
+前端采用 ESLint 10，显式组合 JavaScript、TypeScript、Next.js、官方 React Hooks 和现代 React 检查，并以 `import-x`、`jsx-a11y-x` 承接现有 import 与无障碍职责。配置边界、TypeScript 承接与退役规则、静态 contract 见 [前端 testing playbook §4](docs/handoff/handoff-frontend-testing-playbook.md#4-pure--static-contract)；具体版本以 `frontend/package.json` 和锁文件为准。
