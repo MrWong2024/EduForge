@@ -71,7 +71,7 @@ export class UsersService {
       .findByIdAndUpdate(
         userId,
         { $set: updatePayload },
-        { new: true, runValidators: true },
+        { returnDocument: 'after', runValidators: true },
       )
       .select(this.publicUserProjection)
       .lean<UserLean>()

@@ -433,7 +433,7 @@ export class ClassroomTasksService {
       .findOneAndUpdate(
         { _id: classroomTaskObjectId, classroomId: classroomObjectId },
         updatePatch,
-        { new: true },
+        { returnDocument: 'after' },
       )
       .lean<ClassroomTaskWithMeta>()
       .exec();
@@ -533,7 +533,7 @@ export class ClassroomTasksService {
       .findOneAndUpdate(
         { _id: classroomTaskObjectId, classroomId: classroomObjectId },
         { $set: { status: targetStatus } },
-        { new: true },
+        { returnDocument: 'after' },
       )
       .lean<ClassroomTaskWithMeta>()
       .exec();

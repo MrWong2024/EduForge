@@ -274,7 +274,7 @@ export class AiFeedbackProcessor {
           },
         },
         {
-          new: true,
+          returnDocument: 'after',
           sort: { createdAt: 1 },
         },
       )
@@ -389,7 +389,7 @@ export class AiFeedbackProcessor {
             lockOwner: null,
           },
         },
-        { new: true },
+        { returnDocument: 'after' },
       )
       .exec();
   }
