@@ -1,5 +1,6 @@
 import { AiReviewSummary } from '../ai-feedback/lib/ai-review-summary';
 import { AiFeedbackStatus } from '../ai-feedback/interfaces/ai-feedback-status.enum';
+import { SubmissionEditing } from './submission-response.dto';
 
 export class SubmissionDetailResponseDto {
   id!: string;
@@ -18,6 +19,11 @@ export class SubmissionDetailResponseDto {
   meta?: { aiUsageDeclaration?: string };
   submittedAt!: Date | null;
   attemptNo!: number | null;
+  contentRevision!: number | null;
+  lastEditedAt!: Date | null;
+  lastEditIsLate!: boolean | null;
+  reviewStartedAt!: Date | null;
+  editing!: SubmissionEditing;
   isLate!: boolean;
   lateBySeconds!: number;
   aiFeedbackStatus!: AiFeedbackStatus;

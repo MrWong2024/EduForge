@@ -138,7 +138,7 @@ describe('A1 classroom text task backend contract (HTTP)', () => {
   const ask = (agent: Agent, id: string) =>
     agent
       .post('/api/learning-tasks/submissions/' + id + '/ai-feedback/request')
-      .send({});
+      .send({ expectedRevision: 0 });
   const getDetail = async (agent: Agent, id: string) =>
     (await agent.get('/api/learning-tasks/submissions/' + id).expect(200))
       .body as SubmissionDetailResponseDto;
@@ -626,6 +626,7 @@ describe('A1 classroom text task backend contract (HTTP)', () => {
     await teacherA
       .post('/api/learning-tasks/submissions/' + foreign.id + '/feedback')
       .send({
+        expectedRevision: 0,
         source: 'TEACHER',
         type: 'OTHER',
         severity: 'ERROR',
@@ -635,6 +636,7 @@ describe('A1 classroom text task backend contract (HTTP)', () => {
     await teacherB
       .post('/api/learning-tasks/submissions/' + foreign.id + '/feedback')
       .send({
+        expectedRevision: 0,
         source: 'TEACHER',
         type: 'OTHER',
         severity: 'ERROR',
@@ -770,7 +772,13 @@ describe('A1 classroom text task backend contract (HTTP)', () => {
     for (const source of ['AI', 'SYSTEM', 'INVALID'])
       await teacherA
         .post('/api/learning-tasks/submissions/' + empty.id + '/feedback')
-        .send({ source, type: 'OTHER', severity: 'WARN', message: 'forged' })
+        .send({
+          expectedRevision: 0,
+          source,
+          type: 'OTHER',
+          severity: 'WARN',
+          message: 'forged',
+        })
         .expect(400);
     expect(
       await feedback.countDocuments({
@@ -901,6 +909,7 @@ describe('A1 classroom text task backend contract (HTTP)', () => {
         '/api/learning-tasks/submissions/' + saved._id.toString() + '/feedback',
       )
       .send({
+        expectedRevision: 0,
         source: 'TEACHER',
         type: 'OTHER',
         severity: 'INFO',

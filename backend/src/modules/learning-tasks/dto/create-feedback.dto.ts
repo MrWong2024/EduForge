@@ -1,5 +1,7 @@
 import {
   IsArray,
+  IsDefined,
+  IsInt,
   IsEnum,
   Equals,
   IsNumber,
@@ -7,6 +9,7 @@ import {
   IsString,
   Max,
   Min,
+  MinLength,
 } from 'class-validator';
 import {
   FeedbackSeverity,
@@ -16,6 +19,12 @@ import {
 import { FeedbackTag } from '../ai-feedback/lib/feedback-normalizer';
 
 export class CreateFeedbackDto {
+  @IsDefined()
+  @IsInt()
+  @Min(0)
+  @Max(Number.MAX_SAFE_INTEGER)
+  expectedRevision!: number;
+
   @Equals(FeedbackSource.Teacher)
   source!: FeedbackSource;
 
@@ -26,6 +35,7 @@ export class CreateFeedbackDto {
   severity!: FeedbackSeverity;
 
   @IsString()
+  @MinLength(1)
   message!: string;
 
   @IsOptional()

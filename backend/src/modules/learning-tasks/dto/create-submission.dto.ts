@@ -1,5 +1,7 @@
 import {
   IsOptional,
+  IsDefined,
+  IsObject,
   IsString,
   Matches,
   ValidateIf,
@@ -7,7 +9,7 @@ import {
 } from 'class-validator';
 import { Type } from 'class-transformer';
 
-class SubmissionContentDto {
+export class SubmissionContentDto {
   @IsString()
   codeText!: string;
 
@@ -32,6 +34,8 @@ class SubmissionMetaDto {
 }
 
 export class CreateSubmissionDto {
+  @IsDefined()
+  @IsObject()
   @ValidateNested()
   @Type(() => SubmissionContentDto)
   content!: SubmissionContentDto;

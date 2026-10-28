@@ -418,7 +418,10 @@ describe('Classroom Student Task Detail (e2e)', () => {
       .post(
         `/api/learning-tasks/submissions/${secondSubmissionBody.id}/ai-feedback/request`,
       )
-      .send({ reason: 'Need ai detail for second attempt' })
+      .send({
+        expectedRevision: 0,
+        reason: 'Need ai detail for second attempt',
+      })
       .expect(200);
     const requestBody = requestResponse.body as RequestAiFeedbackResponse;
     expect(requestBody.submissionId).toBe(secondSubmissionBody.id);

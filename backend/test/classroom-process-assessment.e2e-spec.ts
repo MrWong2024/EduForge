@@ -442,7 +442,10 @@ describe('Classroom Process Assessment (e2e)', () => {
       .post(
         `/api/learning-tasks/submissions/${submissionA3Body.id}/ai-feedback/request`,
       )
-      .send({ reason: 'Need process assessment proxy data on attempt 2' })
+      .send({
+        expectedRevision: 0,
+        reason: 'Need process assessment proxy data on attempt 2',
+      })
       .expect(200);
 
     for (let index = 0; index < 8; index += 1) {

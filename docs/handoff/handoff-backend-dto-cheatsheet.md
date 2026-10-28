@@ -157,11 +157,16 @@ my-task-detail 另稳定返回 `participationStatus={readOnly,canSubmit,canReque
 
 ### Submission request / response family
 
-来源：[CreateSubmissionDto](../../backend/src/modules/learning-tasks/dto/create-submission.dto.ts)、[SubmissionResponseDto](../../backend/src/modules/learning-tasks/dto/submission-response.dto.ts)、[SubmissionDetailResponseDto](../../backend/src/modules/learning-tasks/dto/submission-detail-response.dto.ts)、[ClassroomTasksService](../../backend/src/modules/classrooms/classroom-tasks/services/classroom-tasks.service.ts)。
+来源：[CreateSubmissionDto](../../backend/src/modules/learning-tasks/dto/create-submission.dto.ts)、[UpdateSubmissionDto](../../backend/src/modules/learning-tasks/dto/update-submission.dto.ts)、[SubmissionResponseDto](../../backend/src/modules/learning-tasks/dto/submission-response.dto.ts)、[SubmissionDetailResponseDto](../../backend/src/modules/learning-tasks/dto/submission-detail-response.dto.ts)、[ClassroomTasksService](../../backend/src/modules/classrooms/classroom-tasks/services/classroom-tasks.service.ts)。
 
 - 课堂任务提交使用 `CreateSubmissionDto`（旧通用入口仍复用输入 DTO，但拒绝写入）：`content={codeText:string,language:string,submissionNote?:string}`，nested validation；可选 `meta={aiUsageDeclaration?:string}`。codeText/language 保持 `IsString` 与既有持久化要求，language 无枚举白名单。submissionNote 可省略/空字符串，null、非字符串或超过 20,000 Unicode 码点返回 400；通过 ValidateIf 跳过 undefined、IsString 与 Unicode Matches 校验，保留原文/换行/缩进，省略时完整 content 响应统一为 ""。限制是产品字段长度，不是模型 Token 预算。多源码保持 `===== FILE: 相对路径 =====` 文本约定，仍要求源码，不提供纯文字提交类型。请求不接受客户端指定 submission 归属或 attemptNo。
 - `SubmissionResponseDto`：`{id,taskId,classroomTaskId?,studentId,attemptNo,content,meta?,status,aiFeedbackStatus,submittedAt,isLate,lateBySeconds,createdAt,updatedAt}`；`content={codeText,language,submissionNote}`，submissionNote 始终为字符串；meta 只白名单投影 aiUsageDeclaration。`submittedAt` 表示提交时刻，`isLate` 是迟交标志，`lateBySeconds` 是迟交秒数。
 - `SubmissionDetailResponseDto`：`{id,taskId,classroomTaskId,taskSnapshotAvailable,studentId,studentName,taskTitle,language,content,meta?,submittedAt,attemptNo,isLate,lateBySeconds,aiFeedbackStatus,aiReview}`；`classroomTaskId/studentName/taskTitle/language/submittedAt/attemptNo` 可为 null，`content={language:string|null,codeText:string|null,submissionNote:string}`；taskTitle 有快照时取实例标题。meta 仅返回已有 aiUsageDeclaration，不暴露任意内部字段、不从说明派生声明。taskSnapshotAvailable 为实际实例快照可用性，旧记录/无课堂关联为 false。
+- `UpdateSubmissionDto`：必填 `expectedRevision` 为非负安全整数（无字符串转换；缺失/null/负数/小数拒绝）；必填非 null object `content`，完整替换 `language/codeText/submissionNote` 并复用创建文本规则，说明省略为 ""，原文不 trim。拒绝所有归属、时间、attempt、revision、评阅状态和 meta 系统字段。PATCH 成功返回权威 `SubmissionDetailResponseDto`。
+- 上述创建/提交响应与详情共同提供 `contentRevision:number|null`、`lastEditedAt:Date|null`、`lastEditIsLate:boolean|null`、`reviewStartedAt:Date|null` 和 `editing={canEdit:boolean,reason:string|null,message:string|null}`。新建 revision=0、修改时间对为 null；历史 revision 真正缺失只读投影为 0，字段已存在但非法投影 null 并关闭写入，GET 不回填。非法时间/状态同样 fail-closed；投影 null 不代表可修改。
+- `editing.reason`：可编辑时 null；稳定阻断值为 `INVALID_STATE | REVIEW_STARTED | NOT_OWNER | CLASSROOM_TASK_REQUIRED | CLASSROOM_TASK_UNAVAILABLE | TASK_MISMATCH | SNAPSHOT_MISSING | ENROLLMENT_INACTIVE | CLASSROOM_UNAVAILABLE | CLASSROOM_ARCHIVED | CLASSROOM_TASK_CLOSED | DEADLINE_PASSED | UNAVAILABLE`。客户端仅在有效 revision 且明确 canEdit=true 时开入口，资格不等同于 AI 申请资格。
+- `submittedAt/createdAt/isLate/lateBySeconds` 始终保留首次提交事实；`lastEditedAt/lastEditIsLate` 仅由实际内容保存成对更新，按保存时当前 dueAt/allowLate 判定。`updatedAt` 不是内容修改时间；`reviewStartedAt` 表示正式受理评阅，之后不自动清除，不表示 Feedback/Job 已创建。
+- 版本/评阅状态冲突及反馈幂等 payload 不一致返回 409。正式 HTTP 沿用全局错误响应 `{statusCode,timestamp,path,message}`，不透传 Service 异常中的内部 code/reason；客户端按已知 message 并读取权威详情核对原因。拒绝和恢复流程见 Service Owner。
 - `aiFeedbackStatus` 值域 `NOT_REQUESTED | PENDING | RUNNING | SUCCEEDED | FAILED | DEAD`，无 job 显式返回 `NOT_REQUESTED`。后续 attempt 尚未手工 request 时也可能合法地为 NOT_REQUESTED。
 - 详情新增 `aiReview={provider,canRequest,requestBlockReason,failure,retryScheduled,nextRetryAt,inputCoverage,usage}`：
   - provider 为 `bailian | stub | null`；canRequest 仅表示当前用户符合 A1 申请资格且尚无 Job，允许时 requestBlockReason=null，否则为安全中文原因。授权及 POST 幂等合同见 API Owner。
@@ -421,6 +426,7 @@ CreateTaskDto / UpdateTaskDto 通过继承 `TaskAiContextDto` 接受嵌套 `aiCo
 
 | 字段 | 公开合同 |
 | --- | --- |
+| `expectedRevision` | 仅创建必填非负安全整数，拒绝缺失/null/字符串/负数/小数；版本前置不进入 Feedback 业务内容，更新沿用原合同。 |
 | `source` | 公开创建只允许 TEACHER（Equals），AI/SYSTEM/其他值/null 为 400；内部反馈与响应仍使用 AI / TEACHER / SYSTEM，更新不可写。 |
 | `type` | 创建必填，更新可选；`SYNTAX \| STYLE \| DESIGN \| BUG \| PERFORMANCE \| SECURITY \| OTHER`。 |
 | `severity` | 创建必填，更新可选；`INFO \| WARN \| ERROR`。 |
@@ -437,7 +443,7 @@ CreateTaskDto / UpdateTaskDto 通过继承 `TaskAiContextDto` 接受嵌套 `aiCo
 
 来源：[RequestAiFeedbackDto](../../backend/src/modules/learning-tasks/dto/request-ai-feedback.dto.ts)、[QueryAiFeedbackJobsDto](../../backend/src/modules/learning-tasks/dto/query-ai-feedback-jobs.dto.ts)、[ProcessAiFeedbackJobsDto](../../backend/src/modules/learning-tasks/dto/process-ai-feedback-jobs.dto.ts)。
 
-- `RequestAiFeedbackDto`：可选 `reason:string`，最长 200；不要求填充无意义 body 字段。
+- `RequestAiFeedbackDto`：必填 `expectedRevision`，规则同 Submission PATCH；可选 `reason:string`，最长 200。已有 Job 也必须校验本次 expectedRevision，不自动补最新版。
 - `QueryAiFeedbackJobsDto`：可选 `status:PENDING | RUNNING | SUCCEEDED | FAILED | DEAD`；`limit` 转整数，1..100，默认 20。
 - `ProcessAiFeedbackJobsDto`：可选 `batchSize`，整数 1..50，body 不声明数值字符串转换；省略时使用 Processor 的默认批次设置，配置入口见 [Config Matrix](./handoff-backend-config-matrix.md)。
 - 诊断 Job item：`{id,submissionId,status,attempts,maxAttempts,notBefore,lockedAt,lockOwner,lastError?,createdAt,updatedAt}`；新版 attempts 为已持久化认领次数，maxAttempts 固定 3；历史诊断缺省 attempts=0、maxAttempts=3，notBefore/lockedAt/lockOwner/createdAt/updatedAt 可为 null。来源：[AiFeedbackJobService.listJobs](../../backend/src/modules/learning-tasks/ai-feedback/services/ai-feedback-job.service.ts)。

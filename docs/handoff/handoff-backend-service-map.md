@@ -194,6 +194,11 @@ Global SoT 只保留理解跨 Service workflow 必需的稳定不变量，不追
   - Submission 的 attemptNo 采用“查询最新编号 + 有界重试”，最多 3 次分配尝试，冲突不绕过唯一约束。旧通用写入口拒绝；新实例提交要求实际快照并逐次保存源码与说明，实例提交在写 Submission/自动 Job 前重验班级/实例 ACTIVE，并校验截止与迟交规则，持久化提交时间及迟交结果，不以模板当前状态阻断既有实例。
   - 自动入队同时检查实例模式、首提和全局自动开关；手工请求复用 `ensureJobForSubmission`，不重复创建已有 Job。手动 ensure 前统一校验提交/实例关联与实例策略；学生还重验 Enrollment ACTIVE 和班级/实例运行态，教师保留班级 ownership 评阅边界。
   - 教师反馈修改复用 submission 管理上下文，校验反馈属于该提交、来源为 TEACHER 且已有作者与当前教师一致。旧教师反馈无 createdBy 时在授权更新中补写，不批量迁移历史数据。
+  - 同次作品修改：身份、课堂关联/快照、成员、运行态、输入、截止及历史 Feedback/Job 检查完成后，按 `_id + expectedRevision + 未进入评阅` 单文档条件更新，原子替换允许内容、成对写修改时间/迟交事实并递增 revision。revision=0 的条件显式兼容字段缺失；已有非法版本/评阅状态 fail-closed。任何历史 Feedback/任意状态 Job 都禁止编辑，不要求最新 attempt；不建新 Submission、不增加 attempt、不触发 AI，也不套用创建冷却。首次提交/报表事实保持不变。
+  - 评阅固定：新增教师反馈与师生手动 AI request 先完成全部权限、关联、模式及业务输入校验，再以同一 revision 条件原子写入 reviewStartedAt，成功即正式受理；已有有效固定时间且 revision 相同允许继续合法评阅。学生先保存则旧评阅 409；评阅先受理则旧编辑 409，绝不读取新版替换 expectedRevision 重放。GET/轮询/资格读取无固定写入。
+  - 自动首提仅复用实际 shouldAutoEnqueue 结果，在创建 Submission 的同次 insert 写入固定时间后才创建 Job；全局关闭/非首提等不触发时不误锁。关联 Job 创建失败仍保留作品和固定时间，响应无 Job 时真实为 NOT_REQUESTED；原有权限允许的用户核对后可从正式手动入口补申请同 revision。
+  - Submission 与 Feedback/Job 不组成跨集合事务。固定后关联写失败、超时或返回不确定均不解锁；详情仍显示不能修改，客户端保留草稿，先读权威详情/反馈列表再由用户明确续行。Job 始终沿 submissionId 唯一键幂等，不重置 FAILED/DEAD/SUCCEEDED、不重新排队。
+  - 教师反馈创建显式挑选规范业务 payload，版本前置不 spread 进文档；仅捕获预期复合唯一键重复，查回后核对 submission、作者及完整规范 source/type/severity/message/suggestion/tags/scoreHint。完全一致返回既有反馈，不同明确冲突；其它 E11000 继续失败。教师反馈 PATCH 不增加第二套版本机制。历史缺字段只读兼容、不迁移、不修复。
 - Isolation: 学生只访问本人 Submission；教师管理上下文在有 classroomTaskId 时沿实例定位班级 owner，否则沿 Task 定位作者。教师默认提交列表与计数共同过滤当前 Enrollment ACTIVE，移除学生历史记录保留；课堂链路保留 classroomTaskId，历史无关联提交只读。模板级 list/stats 与 ReportsService 共用 teacherSubmissionScope，在分页/计数/去重/反馈聚合前限定自有班级实例和旧无关联提交。
 - Side Effects: 写模板、Submission、Feedback；自动入队与手工确保 Job 分别委托 JobService。课堂提交冷却与自动入队的运行参数见 [Config Matrix](./handoff-backend-config-matrix.md)。
 - Important Performance / Recovery: 列表筛选在数据库中组合执行；批量关联发布者与 Job 状态。发布候选复合索引分别以 `createdBy` 或 `visibility` 为前缀，后接 `status,courseLabel,knowledgeModule,updatedAt,createdAt`，支持本人及共享分支；模板列表另有 `{status:1,knowledgeModule:1,createdAt:-1}`。这里描述 Schema 定义，不代表存量数据库旧索引已清理；编号重试耗尽安全拒绝。

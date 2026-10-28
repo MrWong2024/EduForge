@@ -319,6 +319,7 @@ describe('Classroom Learning Loop (e2e)', () => {
     await teacherAgent
       .post(`/api/learning-tasks/submissions/${submissionId}/feedback`)
       .send({
+        expectedRevision: 0,
         source: 'TEACHER',
         type: 'STYLE',
         severity: 'WARN',

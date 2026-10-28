@@ -23,6 +23,22 @@ export default function StudentAiHelpPage() {
       </section>
       <section className="rounded-lg border border-zinc-200 bg-white p-4 text-sm text-zinc-700">
         <h2 className="text-base font-semibold text-zinc-900">
+          进入评阅前修改本次提交
+        </h2>
+        <p className="mt-2">
+          在提交详情中，若仍有参与资格且截止规则允许，可修改本次提交的代码、语言和说明。取消不保存；保存仍是同一份提交，不增加尝试次数。首次提交时间与迟交记录保留，最近修改时间和本次修改是否迟交另行显示。
+        </p>
+        <p className="mt-2">
+          教师仅打开查看不会锁定作品。教师正式提交反馈，或平台受理有权用户的 AI
+          评阅申请后，作品即进入评阅并不能再修改；即使后续处理失败，也不会重新开放修改。是否可以申请
+          AI 与是否可以修改作品分别判断。
+        </p>
+        <p className="mt-2">
+          保存时若作品已有变化或已经进入评阅，草稿会保留。请读取并核对最新作品与反馈，再明确决定是否继续；平台不会自动合并或替你提交到新版。网络中断或结果待核对时也请先查看权威详情，避免重复操作。
+        </p>
+      </section>
+      <section className="rounded-lg border border-zinc-200 bg-white p-4 text-sm text-zinc-700">
+        <h2 className="text-base font-semibold text-zinc-900">
           申请与处理状态
         </h2>
         <ul className="mt-2 list-disc space-y-2 pl-5">

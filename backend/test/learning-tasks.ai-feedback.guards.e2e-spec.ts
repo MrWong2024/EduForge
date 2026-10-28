@@ -575,7 +575,7 @@ describe('LearningTasks AI Feedback Guards (e2e)', () => {
           .post(
             `/api/learning-tasks/submissions/${submissionId}/ai-feedback/request`,
           )
-          .send({})
+          .send({ expectedRevision: 0 })
           .expect(200),
       ),
     );
@@ -650,13 +650,13 @@ describe('LearningTasks AI Feedback Guards (e2e)', () => {
         .post(
           `/api/learning-tasks/submissions/${submissionAId}/ai-feedback/request`,
         )
-        .send({})
+        .send({ expectedRevision: 0 })
         .expect(200);
       await studentAgent
         .post(
           `/api/learning-tasks/submissions/${submissionBId}/ai-feedback/request`,
         )
-        .send({})
+        .send({ expectedRevision: 0 })
         .expect(200);
 
       const processOnceFirst = await aiFeedbackProcessor.processOnce(1);

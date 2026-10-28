@@ -20,6 +20,7 @@ import { CreateTaskDto } from '../dto/create-task.dto';
 import { UpdateTaskDto } from '../dto/update-task.dto';
 import { QueryTaskDto } from '../dto/query-task.dto';
 import { CreateSubmissionDto } from '../dto/create-submission.dto';
+import { UpdateSubmissionDto } from '../dto/update-submission.dto';
 import { CreateFeedbackDto } from '../dto/create-feedback.dto';
 import { UpdateFeedbackDto } from '../dto/update-feedback.dto';
 import { RequestAiFeedbackDto } from '../dto/request-ai-feedback.dto';
@@ -143,6 +144,17 @@ export class LearningTasksController {
     @CurrentUser() user: { id: string; roles?: string[] },
   ) {
     return this.learningTasksService.getSubmissionDetail(submissionId, user);
+  }
+
+  @UseGuards(RolesGuard)
+  @Roles(...STUDENT_ROLES)
+  @Patch('submissions/:id')
+  updateSubmission(
+    @Param('id') submissionId: string,
+    @Body() dto: UpdateSubmissionDto,
+    @CurrentUser() user: { id: string; roles?: string[] },
+  ) {
+    return this.learningTasksService.updateSubmission(submissionId, dto, user);
   }
 
   @UseGuards(RolesGuard)

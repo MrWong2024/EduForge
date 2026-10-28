@@ -19,7 +19,7 @@ import { AiFeedbackJobStatus } from '../ai-feedback/schemas/ai-feedback-job.sche
 import { AiFeedbackJobService } from '../ai-feedback/services/ai-feedback-job.service';
 import { CreateSubmissionDto } from '../dto/create-submission.dto';
 import { Feedback } from '../schemas/feedback.schema';
-import { Submission } from '../schemas/submission.schema';
+import { Submission, SubmissionStatus } from '../schemas/submission.schema';
 import { Task, TaskStatus } from '../schemas/task.schema';
 import {
   TASK_TEMPLATE_SCOPE_ALL,
@@ -73,6 +73,8 @@ const createHarness = (
     studentId: options.submissionStudentId ?? studentId,
     attemptNo: 1,
     submittedAt: new Date('2026-01-01T00:00:00.000Z'),
+    contentRevision: 0,
+    status: SubmissionStatus.Submitted,
   };
   const task = {
     _id: taskId,
@@ -106,8 +108,11 @@ const createHarness = (
     findById: jest.fn(() => makeQuery(submission)),
     findOne: jest.fn(() => makeQuery(null)),
     create: jest.fn(),
+    findOneAndUpdate: jest.fn(() =>
+      makeQuery({ ...submission, reviewStartedAt: new Date() }),
+    ),
   };
-  const feedbackModel = {};
+  const feedbackModel = { exists: jest.fn().mockResolvedValue(null) };
   const classroomTaskModel = {
     findById: jest.fn(() => makeQuery(classroomTask)),
     exists: jest.fn(() => ({ exec: jest.fn().mockResolvedValue(null) })),
@@ -665,7 +670,7 @@ describe('LearningTasksService student participation status gates', () => {
     const result = await harness.service.requestAiFeedback(
       harness.ids.submissionId.toString(),
       { id: harness.ids.studentId.toString(), roles: [USER_ROLE_STUDENT] },
-      {},
+      { expectedRevision: 0 },
     );
 
     expect(result).toMatchObject({
@@ -687,7 +692,7 @@ describe('LearningTasksService student participation status gates', () => {
       harness.service.requestAiFeedback(
         harness.ids.submissionId.toString(),
         { id: harness.ids.studentId.toString(), roles: [USER_ROLE_STUDENT] },
-        {},
+        { expectedRevision: 0 },
       ),
     ).rejects.toThrow('班级已归档，不能请求 AI 反馈。');
     expect(
@@ -704,7 +709,7 @@ describe('LearningTasksService student participation status gates', () => {
       harness.service.requestAiFeedback(
         harness.ids.submissionId.toString(),
         { id: harness.ids.studentId.toString(), roles: [USER_ROLE_STUDENT] },
-        {},
+        { expectedRevision: 0 },
       ),
     ).rejects.toThrow('课堂任务已关闭，不能请求 AI 反馈。');
     expect(
@@ -718,7 +723,7 @@ describe('LearningTasksService student participation status gates', () => {
     const result = await harness.service.requestAiFeedback(
       harness.ids.submissionId.toString(),
       { id: harness.ids.studentId.toString(), roles: [USER_ROLE_STUDENT] },
-      {},
+      { expectedRevision: 0 },
     );
 
     expect(result).toMatchObject({
@@ -738,7 +743,7 @@ describe('LearningTasksService student participation status gates', () => {
       harness.service.requestAiFeedback(
         harness.ids.submissionId.toString(),
         { id: harness.ids.studentId.toString(), roles: [USER_ROLE_STUDENT] },
-        {},
+        { expectedRevision: 0 },
       ),
     ).rejects.toThrow('Not allowed to request AI feedback');
     expect(

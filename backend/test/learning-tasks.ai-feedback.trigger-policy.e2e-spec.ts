@@ -367,7 +367,10 @@ describe('LearningTasks AI Feedback Trigger Policy (e2e)', () => {
       .post(
         `/api/learning-tasks/submissions/${secondBody.id}/ai-feedback/request`,
       )
-      .send({ reason: 'Need AI feedback for second attempt' })
+      .send({
+        expectedRevision: 0,
+        reason: 'Need AI feedback for second attempt',
+      })
       .expect(200);
     const requestBody = requestResult.body as RequestAiFeedbackResponse;
     expect(requestBody.submissionId).toBe(secondBody.id);
@@ -379,7 +382,7 @@ describe('LearningTasks AI Feedback Trigger Policy (e2e)', () => {
       .post(
         `/api/learning-tasks/submissions/${secondBody.id}/ai-feedback/request`,
       )
-      .send({ reason: 'Idempotency check' })
+      .send({ expectedRevision: 0, reason: 'Idempotency check' })
       .expect(200);
     const requestAgainBody = requestAgain.body as RequestAiFeedbackResponse;
     expect(requestAgainBody.jobId).toBe(requestBody.jobId);

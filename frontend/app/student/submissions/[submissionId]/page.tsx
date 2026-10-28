@@ -3,8 +3,7 @@ import { headers } from "next/headers";
 import { EmptyState } from "@/components/blocks/EmptyState";
 import { ErrorState } from "@/components/blocks/ErrorState";
 import { PageHeader } from "@/components/blocks/PageHeader";
-import { SubmissionAiReview } from "@/components/submissions/SubmissionAiReview";
-import { SubmissionContent } from "@/components/submissions/SubmissionContent";
+import { EditSubmissionForm } from "@/components/student/EditSubmissionForm";
 import { fetchJson, FetchJsonError } from "@/lib/api/client";
 import {
   buildErrorDescription,
@@ -178,7 +177,7 @@ export default async function StudentSubmissionDetailPage({
     <section className="min-w-0 space-y-4">
       <PageHeader
         title="提交详情 / 反馈"
-        description={`任务：${toDisplayText(viewModel.detail.taskTitle, "未命名任务")} | 提交时间：${toDisplayDate(viewModel.detail.submittedAt)}`}
+        description={`任务：${toDisplayText(viewModel.detail.taskTitle, "未命名任务")} | 首次提交时间：${toDisplayDate(viewModel.detail.submittedAt)}`}
         actions={
           <div className="flex flex-wrap items-center gap-3 text-sm">
             {taskDetailHref ? (
@@ -216,22 +215,46 @@ export default async function StudentSubmissionDetailPage({
         <div className="grid gap-2 md:grid-cols-2">
           <p>任务标题：{toDisplayText(viewModel.detail.taskTitle)}</p>
           <p>语言：{toDisplayText(viewModel.detail.language)}</p>
-          <p>提交时间：{toDisplayDate(viewModel.detail.submittedAt)}</p>
+          <p>首次提交时间：{toDisplayDate(viewModel.detail.submittedAt)}</p>
+          <p>
+            最近修改时间：
+            {viewModel.detail.lastEditedAt
+              ? toDisplayDate(viewModel.detail.lastEditedAt)
+              : viewModel.detail.lastEditedAt === null
+                ? "尚未修改"
+                : "未知"}
+          </p>
           <p>尝试次数：{toDisplayText(viewModel.detail.attemptNo)}</p>
           <p>
-            是否迟交：{toDisplayText(viewModel.detail.isLate)}
+            首次提交是否迟交：{toDisplayText(viewModel.detail.isLate)}
             {lateDurationText ? `（${lateDurationText}）` : ""}
+          </p>
+          {viewModel.detail.lastEditedAt ? (
+            <p>
+              本次修改是否迟交：
+              {viewModel.detail.lastEditIsLate === true
+                ? "是"
+                : viewModel.detail.lastEditIsLate === false
+                  ? "否"
+                  : "未知"}
+            </p>
+          ) : null}
+          <p>
+            {viewModel.detail.reviewStartedAt ||
+            viewModel.detail.editing.reason === "REVIEW_STARTED"
+              ? "已进入评阅，不能修改作品。"
+              : (viewModel.detail.editing.message ??
+                (viewModel.detail.editing.canEdit
+                  ? "尚未进入评阅；修改资格以保存时校验为准。"
+                  : "当前修改资格暂不可用，请刷新核对。"))}
           </p>
         </div>
       </section>
 
-      <SubmissionContent detail={viewModel.detail} />
-      <SubmissionAiReview
+      <EditSubmissionForm
         key={submissionId}
         submissionId={submissionId}
-        status={viewModel.detail.aiFeedbackStatus}
-        review={viewModel.detail.aiReview}
-        autoRefresh={true}
+        detail={viewModel.detail}
       />
 
       {viewModel.feedback.items.length === 0 ? (

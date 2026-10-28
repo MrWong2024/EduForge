@@ -1,6 +1,10 @@
 import { paths } from "../routes/paths";
 import { getCommonErrorSummary } from "../ui/status";
-import type { CreateSubmissionRequest } from "../api/types-student";
+import type {
+  CreateSubmissionRequest,
+  SubmissionDetailResponse,
+  UpdateSubmissionRequest,
+} from "../api/types-student";
 export const SUBMISSION_NOTE_MAX_CODE_POINTS = 20_000;
 export const countCodePoints = (value: string): number =>
   Array.from(value).length;
@@ -20,6 +24,85 @@ export const buildTextSubmissionRequest = (
 ): CreateSubmissionRequest => ({
   content: { codeText, language, submissionNote },
 });
+
+export const isValidContentRevision = (value: unknown): value is number =>
+  typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
+
+export const canEditSubmission = (detail: SubmissionDetailResponse): boolean =>
+  isValidContentRevision(detail.contentRevision) &&
+  detail.editing.canEdit === true;
+
+export function selectSubmissionDisplayDetail(
+  pageDetail: SubmissionDetailResponse,
+  savedDetail: SubmissionDetailResponse | null,
+): SubmissionDetailResponse {
+  // A malformed current response must close actions rather than reviving an
+  // older permission. A confirmed save can bridge an older page refresh.
+  if (!isValidContentRevision(pageDetail.contentRevision)) return pageDetail;
+  if (
+    savedDetail &&
+    isValidContentRevision(savedDetail.contentRevision) &&
+    (savedDetail.contentRevision > pageDetail.contentRevision ||
+      (savedDetail.contentRevision === pageDetail.contentRevision &&
+        !savedDetail.editing.canEdit &&
+        pageDetail.editing.canEdit))
+  )
+    return savedDetail;
+  return pageDetail;
+}
+
+export function buildUpdateSubmissionRequest(
+  expectedRevision: number,
+  codeText: string,
+  language: string,
+  submissionNote: string,
+): UpdateSubmissionRequest {
+  if (!isValidContentRevision(expectedRevision))
+    throw new Error("A valid displayed content revision is required");
+  return { expectedRevision, content: { codeText, language, submissionNote } };
+}
+
+export const isDraftRevisionCurrent = (
+  baseRevision: unknown,
+  currentRevision: unknown,
+): boolean =>
+  isValidContentRevision(baseRevision) && baseRevision === currentRevision;
+
+export const isSavedSubmissionRevision = (
+  baseRevision: unknown,
+  returnedRevision: unknown,
+): boolean =>
+  isValidContentRevision(baseRevision) &&
+  isValidContentRevision(returnedRevision) &&
+  returnedRevision > baseRevision;
+
+export function getSubmissionRevisionError(data: unknown): string {
+  const code =
+    data && typeof data === "object" && "code" in data ? data.code : undefined;
+  const message =
+    data && typeof data === "object" && "message" in data
+      ? data.message
+      : undefined;
+  // The public exception filter preserves the message but may omit code.
+  // Match only the complete known public strings; never display raw errors.
+  if (
+    code === "SUBMISSION_REVIEW_STARTED" ||
+    message ===
+      "本次提交已进入评阅，不能再修改作品；草稿仍保留，请核对提交详情。"
+  )
+    return "本次提交已进入评阅，不能再修改作品。草稿已保留，请核对当前作品与反馈。";
+  if (
+    code === "SUBMISSION_REVISION_CONFLICT" ||
+    message === "作品内容已变化，请查看最新提交并核对草稿后明确继续。"
+  )
+    return "作品内容已变化，当前操作依据的是旧版作品。草稿已保留，请刷新查看并明确确认后继续。";
+  if (
+    code === "SUBMISSION_INVALID_STATE" ||
+    message === "提交的版本或评阅状态无效，当前操作已停止，请联系教师核对。"
+  )
+    return "提交状态暂不可用。草稿已保留，请核对详情或联系教师。";
+  return "提交状态已变化。草稿已保留，请先核对最新详情。";
+}
 
 // Network completion does not clear a confirmed save.
 export const canCreateTextSubmission = (

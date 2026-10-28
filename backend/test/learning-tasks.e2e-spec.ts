@@ -431,7 +431,7 @@ describe('LearningTasks (e2e)', () => {
 
     const invalidFeedback = await teacherAgent
       .post(`/api/learning-tasks/submissions/${submissionId}/feedback`)
-      .send(invalidFeedbackPayload)
+      .send({ expectedRevision: 0, ...invalidFeedbackPayload })
       .expect(400);
     const invalidFeedbackBody =
       invalidFeedback.body as InvalidFeedbackTagsResponse;
@@ -448,7 +448,7 @@ describe('LearningTasks (e2e)', () => {
 
     const createdFeedback = await teacherAgent
       .post(`/api/learning-tasks/submissions/${submissionId}/feedback`)
-      .send(feedbackPayload)
+      .send({ expectedRevision: 0, ...feedbackPayload })
       .expect(201);
 
     const feedbackBody = createdFeedback.body as CreatedFeedbackResponse;

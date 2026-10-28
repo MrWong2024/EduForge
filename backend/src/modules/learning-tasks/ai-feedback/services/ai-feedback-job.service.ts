@@ -46,19 +46,13 @@ export class AiFeedbackJobService {
 
   async enqueue(submission: Submission & { _id: Types.ObjectId }) {
     try {
-      await this.aiFeedbackJobModel.create(this.toNewJobDocument(submission));
+      return await this.ensureJobForSubmission(submission);
     } catch (error) {
-      const mongoError = error as { code?: number };
-      if (mongoError.code === 11000) {
-        this.logger.debug(
-          `AiFeedbackJob already exists for submissionId=${submission._id.toString()}`,
-        );
-        return;
-      }
       this.logger.error(
         `Failed to enqueue AiFeedbackJob for submissionId=${submission._id.toString()}`,
         error as Error,
       );
+      return null;
     }
   }
 

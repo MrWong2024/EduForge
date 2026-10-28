@@ -21,12 +21,17 @@ import {
   getCommonErrorSummary,
 } from "@/lib/ui/status";
 import { toDisplayDate } from "@/lib/ui/format";
+import {
+  getSubmissionRevisionError,
+  isValidContentRevision,
+} from "@/lib/learning-tasks/text-submission";
 
 type Props = {
   submissionId: string;
   status?: string;
   review?: AiReview;
   autoRefresh: boolean;
+  contentRevision?: number | null;
 };
 export function SubmissionAiReview(props: Props) {
   return <SubmissionAiReviewPanel key={props.submissionId} {...props} />;
@@ -36,10 +41,17 @@ function SubmissionAiReviewPanel({
   status,
   review: initialReview,
   autoRefresh,
+  contentRevision,
 }: Props) {
   const router = useRouter();
   const [operations] = useState(
-    () => new SubmissionAiOperations(submissionId, status, initialReview),
+    () =>
+      new SubmissionAiOperations(
+        submissionId,
+        status,
+        initialReview,
+        contentRevision,
+      ),
   );
   const [view, setView] = useState(() => operations.view);
   const [error, setError] = useState<{
@@ -108,7 +120,7 @@ function SubmissionAiReviewPanel({
   );
   const autoRead = useCallback(() => readDetail(false), [readDetail]);
   const handleRequest = async () => {
-    if (isPageRefreshing) return;
+    if (isPageRefreshing || view.displayedRevision !== contentRevision) return;
     const operation = operations.beginRequest();
     if (!operation) return;
     const abort = new AbortController();
@@ -127,7 +139,9 @@ function SubmissionAiReviewPanel({
             "content-type": "application/json",
             accept: "application/json",
           },
-          body: JSON.stringify({}),
+          body: JSON.stringify({
+            expectedRevision: operation.expectedRevision,
+          }),
         },
       );
       const confirmed = operations.finishRequest(
@@ -151,10 +165,12 @@ function SubmissionAiReviewPanel({
         status:
           error instanceof BrowserFetchJsonError ? error.status : undefined,
         message:
-          error instanceof BrowserFetchJsonError && error.status < 500
-            ? getCommonErrorSummary(error.status, "申请 AI 辅助反馈") +
-              "请显式刷新详情核对当前资格。"
-            : "申请结果尚未确认，请显式刷新详情核对，避免重复申请。",
+          error instanceof BrowserFetchJsonError && error.status === 409
+            ? getSubmissionRevisionError(error.data)
+            : error instanceof BrowserFetchJsonError && error.status < 500
+              ? getCommonErrorSummary(error.status, "申请 AI 辅助反馈") +
+                "请显式刷新详情核对当前资格。"
+              : "申请结果尚未确认，请显式刷新详情核对，避免重复申请。",
       });
     } finally {
       if (activeAbort.current === abort) activeAbort.current = null;
@@ -197,6 +213,34 @@ function SubmissionAiReviewPanel({
       </div>
       <p>处理状态：{getAiStatusLabel(currentStatus)}</p>
       <p>{statusHint}</p>
+      {!isValidContentRevision(contentRevision) ? (
+        <p>作品版本信息暂不可用，请刷新详情核对后再申请。</p>
+      ) : view.displayedRevision !== contentRevision ||
+        view.contentRevision !== contentRevision ? (
+        <div
+          className="space-y-2 rounded-md bg-amber-50 p-3 text-amber-900"
+          role="status"
+        >
+          <p>
+            作品已有新版。请先刷新查看页面中的当前作品，再明确确认；后台状态刷新不会替你确认已查看新版。
+          </p>
+          <button
+            type="button"
+            disabled={
+              view.busy !== null ||
+              isPageRefreshing ||
+              view.contentRevision !== contentRevision
+            }
+            onClick={() => {
+              if (operations.confirmDisplayedRevision(contentRevision))
+                setView(operations.view);
+            }}
+            className="text-blue-700 underline disabled:text-zinc-500"
+          >
+            已查看页面当前作品，按此作品申请
+          </button>
+        </div>
+      ) : null}
       {review?.failure ? (
         <p
           role="status"
@@ -220,7 +264,11 @@ function SubmissionAiReviewPanel({
       ) : null}
       {currentStatus !== "DEAD" ? (
         <RequestAiFeedbackButton
-          disabled={!view.canRequest || isPageRefreshing}
+          disabled={
+            !view.canRequest ||
+            isPageRefreshing ||
+            view.displayedRevision !== contentRevision
+          }
           isSubmitting={view.busy === "request"}
           onRequest={handleRequest}
         />

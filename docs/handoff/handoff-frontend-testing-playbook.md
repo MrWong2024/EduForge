@@ -62,6 +62,7 @@ npm run build
 - TypeScript 承接仅限 TS/TSX：正式 typecheck 负责重复 JSX 属性、未定义 JSX 组件、字符串 ref、`this.isMounted()` 与 class render 无返回；MJS 仍由 ESLint 负责。自动 JSX runtime 下退役 `jsx-uses-react`，JSX 变量使用由 TypeScript ESLint scope/unused-vars 处理；现代组件命名检查不与旧 display-name 全域等价，也不新增 Context 命名要求。旧 no-deprecated 由现代拆分规则与 React 类型共同承担；no-unescaped-entities 作为旧 JSX 文本风格检查明确退役，不宣称 TypeScript 已覆盖。
 - `eslint-config.contract.spec.ts` 通过 ESLint 公共 API 加载真实最终配置，以固定正反例断言代表性规则的 ruleId/severity，并检查 TS/TSX/MJS 覆盖与生成目录忽略；测试支持 MJS 只读取源码做静态 lint，不导入执行。
 - 纯展示映射、序列化、资格判断等逻辑如果可以脱离 React/Browser 独立证明，应优先复用现有 contracts runner，不因假设未来需求新增依赖或并行 runner。
+- 同次提交修改的严格详情/资格解析、原文请求白名单和草稿版本判断由 `text-task-adapters.contract.spec.ts` 负责；AI 展示版本与未知结果资格由 `submission-ai-review.contract.spec.ts` 负责。师生草稿在真实刷新/冲突中的保留与显式核对操作由第 8 节 Agent-assisted smoke 负责，权限、真实竞争与持久终态引用后端 `submission-edit.e2e-spec.ts`，不新增 scripted UI 回归或组件快照。
 - `task-ai-context-refs.contract.spec.ts` 负责教师模板引用适配、结构拒绝、路径/顺序保持、仅格式化不改变语义、PATCH 省略/清空与响应基准、明确作者及状态门禁；expected 来自任务约束与 Backend DTO，不读取 ZIP 或启动服务。
 - 文档-only 变化只做文档、链接、diff 与范围门禁，不机械运行 frontend build。
 - 仅 lint 配置、开发依赖与静态 contract 变化时不为形式强制 build；应用源码变化后按影响执行，build 不替代 lint 验收。

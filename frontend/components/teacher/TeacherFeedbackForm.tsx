@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { ErrorState } from "@/components/blocks/ErrorState";
 import { BrowserFetchJsonError, fetchJson } from "@/lib/api/browser-client";
@@ -9,6 +9,17 @@ import {
   extractRawDetail,
 } from "@/lib/api/error-presenter";
 import type { CreateTeacherFeedbackRequest } from "@/lib/api/types-teacher";
+import {
+  toListFeedbackResponse,
+  toSubmissionDetailResponse,
+  type SubmissionDetailResponse,
+} from "@/lib/api/types-student";
+import { SubmissionContent } from "@/components/submissions/SubmissionContent";
+import {
+  getSubmissionRevisionError,
+  isDraftRevisionCurrent,
+  isValidContentRevision,
+} from "@/lib/learning-tasks/text-submission";
 import {
   FEEDBACK_SEVERITIES,
   FEEDBACK_TYPES,
@@ -23,6 +34,7 @@ import {
 
 type TeacherFeedbackFormProps = {
   submissionId: string;
+  contentRevision?: number | null;
 };
 
 type FeedbackErrorState = {
@@ -31,10 +43,22 @@ type FeedbackErrorState = {
   detail?: string;
 };
 
-const INVALID_TAGS_MESSAGE = "Invalid tag(s), please select from predefined tags";
+const INVALID_TAGS_MESSAGE =
+  "Invalid tag(s), please select from predefined tags";
 
-export function TeacherFeedbackForm({ submissionId }: TeacherFeedbackFormProps) {
+export function TeacherFeedbackForm({
+  submissionId,
+  contentRevision,
+}: TeacherFeedbackFormProps) {
   const router = useRouter();
+  // New props never rebind an existing feedback draft to unseen work.
+  const [baseRevision, setBaseRevision] = useState(contentRevision);
+  const [needsReview, setNeedsReview] = useState(false);
+  const [checked, setChecked] = useState<SubmissionDetailResponse | null>(null);
+  const [checking, setChecking] = useState(false);
+  const [feedbackCheck, setFeedbackCheck] = useState<string | null>(null);
+  const [isRefreshing, startTransition] = useTransition();
+  const inFlight = useRef(false);
   const [type, setType] = useState<FeedbackTypeValue>("OTHER");
   const [message, setMessage] = useState("");
   const [suggestion, setSuggestion] = useState("");
@@ -49,12 +73,19 @@ export function TeacherFeedbackForm({ submissionId }: TeacherFeedbackFormProps) 
     setSelectedTags((prev) =>
       prev.includes(tagValue)
         ? prev.filter((item) => item !== tagValue)
-        : [...prev, tagValue]
+        : [...prev, tagValue],
     );
   };
 
   const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+    if (
+      inFlight.current ||
+      needsReview ||
+      !isDraftRevisionCurrent(baseRevision, contentRevision) ||
+      !isValidContentRevision(baseRevision)
+    )
+      return;
 
     const normalizedMessage = message.trim();
     if (!normalizedMessage) {
@@ -66,9 +97,11 @@ export function TeacherFeedbackForm({ submissionId }: TeacherFeedbackFormProps) 
     setErrorState(null);
     setSuccessText(null);
     setIsSubmitting(true);
+    inFlight.current = true;
 
     try {
       const payload: CreateTeacherFeedbackRequest = {
+        expectedRevision: baseRevision,
         source: "TEACHER",
         type,
         severity,
@@ -85,6 +118,7 @@ export function TeacherFeedbackForm({ submissionId }: TeacherFeedbackFormProps) 
         `learning-tasks/submissions/${encodeURIComponent(submissionId)}/feedback`,
         {
           method: "POST",
+          signal: AbortSignal.timeout(30_000),
           headers: {
             "content-type": "application/json",
             accept: "application/json",
@@ -104,6 +138,10 @@ export function TeacherFeedbackForm({ submissionId }: TeacherFeedbackFormProps) 
       if (error instanceof BrowserFetchJsonError) {
         const detail = extractRawDetail(error.data);
         const summary = (() => {
+          if (error.status === 409)
+            return getSubmissionRevisionError(error.data);
+          if (error.status >= 500)
+            return "反馈提交结果待核对。评语草稿已保留，请读取当前作品和反馈历史，避免重复提交。";
           if (error.status === 403) {
             return "无权限查看或批阅该提交。";
           }
@@ -117,20 +155,119 @@ export function TeacherFeedbackForm({ submissionId }: TeacherFeedbackFormProps) 
           summary,
           detail,
         });
+        if (error.status === 409 || error.status >= 500) {
+          setNeedsReview(true);
+          setChecked(null);
+        }
       } else {
+        setNeedsReview(true);
+        setChecked(null);
         setErrorState({
-          summary: "提交教师反馈失败，请稍后重试。",
+          summary:
+            "网络中断或超时，反馈结果待核对。评语草稿已保留，请先核对作品与反馈历史。",
         });
       }
     } finally {
       setIsSubmitting(false);
+      inFlight.current = false;
+    }
+  };
+
+  const checkCurrent = async () => {
+    if (inFlight.current) return;
+    inFlight.current = true;
+    setChecking(true);
+    setNeedsReview(true);
+    setChecked(null);
+    setFeedbackCheck(null);
+    try {
+      const path = `learning-tasks/submissions/${encodeURIComponent(submissionId)}`;
+      const latest = toSubmissionDetailResponse(
+        await fetchJson<unknown>(path, {
+          cache: "no-store",
+          signal: AbortSignal.timeout(30_000),
+        }),
+      );
+      const history = toListFeedbackResponse(
+        await fetchJson<unknown>(path + "/feedback", {
+          cache: "no-store",
+          signal: AbortSignal.timeout(30_000),
+        }),
+      );
+      if (
+        latest.id !== submissionId ||
+        !isValidContentRevision(latest.contentRevision)
+      )
+        throw new Error("Incomplete detail");
+      setChecked(latest);
+      setFeedbackCheck(
+        history.items.length === 0
+          ? "当前尚无反馈。"
+          : "当前反馈：\n" +
+              history.items
+                .map(
+                  (item) =>
+                    `${item.source ?? "反馈"}：${item.message ?? "（无内容）"}`,
+                )
+                .join("\n"),
+      );
+      startTransition(() => router.refresh());
+    } catch {
+      setErrorState({
+        summary:
+          "权威作品或反馈历史读取未完成，评语草稿已保留，请再次显式核对。",
+      });
+    } finally {
+      inFlight.current = false;
+      setChecking(false);
     }
   };
 
   return (
     <section className="rounded-lg border border-zinc-200 bg-white p-4 text-zinc-900">
       <h2 className="text-base font-semibold text-zinc-900">新增教师反馈</h2>
-      <p className="mt-1 text-sm text-zinc-600">至少填写反馈内容，其他字段可选。</p>
+      <p className="mt-1 text-sm text-zinc-600">
+        至少填写反馈内容，其他字段可选。
+      </p>
+      {needsReview || !isDraftRevisionCurrent(baseRevision, contentRevision) ? (
+        <div className="mt-3 space-y-3 text-sm text-amber-900" role="status">
+          <p>
+            评语草稿已保留。请重新查看当前作品和反馈历史，确认评语仍适用于当前作品后继续；不会自动提交。
+          </p>
+          <button
+            type="button"
+            disabled={isSubmitting || checking || isRefreshing}
+            onClick={() => void checkCurrent()}
+            className="text-blue-700 underline"
+          >
+            {checking ? "核对中…" : "刷新查看当前作品与反馈"}
+          </button>
+          {checked ? (
+            <>
+              <SubmissionContent detail={checked} />
+              <p className="whitespace-pre-wrap break-words">{feedbackCheck}</p>
+              <button
+                type="button"
+                disabled={checking || isRefreshing}
+                onClick={() => {
+                  if (
+                    !isValidContentRevision(checked.contentRevision) ||
+                    checked.contentRevision !== contentRevision
+                  )
+                    return;
+                  setBaseRevision(checked.contentRevision);
+                  setNeedsReview(false);
+                  setChecked(null);
+                  setErrorState(null);
+                }}
+                className="text-blue-700 underline"
+              >
+                已查看当前作品并核对反馈，保留评语继续
+              </button>
+            </>
+          ) : null}
+        </div>
+      ) : null}
 
       <form onSubmit={handleSubmit} className="mt-4 space-y-4">
         <label className="block text-sm">
@@ -220,15 +357,25 @@ export function TeacherFeedbackForm({ submissionId }: TeacherFeedbackFormProps) 
 
         <button
           type="submit"
-          disabled={isSubmitting}
+          disabled={
+            isSubmitting ||
+            checking ||
+            isRefreshing ||
+            needsReview ||
+            !isDraftRevisionCurrent(baseRevision, contentRevision)
+          }
           className="rounded-md bg-zinc-900 px-4 py-2 text-sm font-medium text-white disabled:cursor-not-allowed disabled:bg-zinc-400"
         >
           {isSubmitting ? "提交中..." : "提交教师反馈"}
         </button>
       </form>
 
-      {validationError ? <p className="mt-3 text-sm text-red-700">{validationError}</p> : null}
-      {successText ? <p className="mt-3 text-sm text-emerald-700">{successText}</p> : null}
+      {validationError ? (
+        <p className="mt-3 text-sm text-red-700">{validationError}</p>
+      ) : null}
+      {successText ? (
+        <p className="mt-3 text-sm text-emerald-700">{successText}</p>
+      ) : null}
 
       {errorState ? (
         <div className="mt-4">

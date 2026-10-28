@@ -295,7 +295,7 @@ describe('Classroom Export Snapshot (e2e)', () => {
       .post(
         `/api/learning-tasks/submissions/${submissionId}/ai-feedback/request`,
       )
-      .send({ reason: 'snapshot-export-test' })
+      .send({ expectedRevision: 0, reason: 'snapshot-export-test' })
       .expect(200);
 
     const snapshot = await teacherAgent

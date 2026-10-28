@@ -160,6 +160,7 @@ Notes:
 | GET    | `/api/learning-tasks/tasks/:id/submissions/mine`                     | 学生查看自己的提交与 `aiFeedbackStatus`。         |
 | GET    | `/api/learning-tasks/tasks/:id/submissions`                          | 教师分页查看某任务提交。                          |
 | GET    | `/api/learning-tasks/submissions/:id`                                | 提交详情及安全 AI 评阅摘要（学生本人或有权教师可见）。      |
+| PATCH  | `/api/learning-tasks/submissions/:id`                                | 学生本人在进入评阅前修改同一次提交。                    |
 | POST   | `/api/learning-tasks/submissions/:id/feedback`                       | 教师新增 TEACHER 来源文字反馈。      |
 | PATCH  | `/api/learning-tasks/submissions/:submissionId/feedback/:feedbackId` | 教师修改自己有权管理的 TEACHER 来源反馈。         |
 | GET    | `/api/learning-tasks/submissions/:id/feedback`                       | 提交反馈列表（学生本人或任务教师可见）。          |
@@ -183,6 +184,8 @@ Notes:
 - 提交详情在原有读取授权之后增加安全 aiReview，师生获得相同的失败、用量和覆盖事实，当前用户动作资格可不同；轻量列表不扩展摘要。字段与 null/0 语义见 [DTO Submission](./handoff-backend-dto-cheatsheet.md#submission-request--response-family)，页面不依赖 debug/ops。
 - 缺快照旧实例保持已有作品/反馈只读投影，不迁移或读时回填；新提交和新 AI 请求返回 409，message=“该课堂任务未保存发布内容，请教师重新布置后继续。”。无课堂关联旧提交也禁止新 AI 请求。旧模板投影不代表发布时原文；可用性字段见 DTO Owner。
 - 公开教师创建反馈只接受 source=TEACHER；伪造 AI/SYSTEM/其他值返回 400，不写反馈或 AI Job。内部 Processor 仍保存 AI 来源。
+- Submission PATCH 只允许具备学生角色的提交本人；校验有效课堂关联、发布快照、ACTIVE Enrollment 与班级/课堂任务运行态及保存时截止规则，不以 AI 模式或是否最新 attempt 代替资格。已进入评阅或已有任何 Feedback/Job 均禁止修改；请求及详情字段见 [DTO Submission](./handoff-backend-dto-cheatsheet.md#submission-request--response-family)。
+- 新增教师反馈与产品 AI request 均要求必填 `expectedRevision`，先完成权限、关联、策略和输入校验，再正式受理评阅；已有 Job 也不能跳过本次版本和权限校验。竞争失败明确返回 409；查看详情、反馈列表及轮询不固定作品。版本竞争、固定成功后关联写失败的续行与幂等由 [Service Card 08](./handoff-backend-service-map.md#service-card-08) 维护；教师反馈 PATCH 保留原合同。
 - 教师反馈更新要求对 submission 的管理权：有实例关联时是班级 owner，无实例关联时是 task owner；feedback 不存在或不属于该 submission 返回 `404`。仅 TEACHER 来源可改，AI/SYSTEM 返回 `403 Only teacher feedback can be updated`；已有 createdBy 时还必须是该作者，否则 `403 Not allowed to update feedback`。
 - 新建 TEACHER feedback 记录当前教师作者；旧 TEACHER feedback 缺失 createdBy 时，有管理权教师可更新并补写作者，保留原 createdAt。字段白名单与兼容投影仅见 [DTO Feedback](./handoff-backend-dto-cheatsheet.md#feedback-dto--response-family)，内部协作见 [Service Card 08](./handoff-backend-service-map.md#service-card-08)。
 

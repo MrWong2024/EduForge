@@ -20,7 +20,190 @@ import {
   getTextSubmissionError,
   countCodePoints,
   getSubmissionTextError,
+  buildUpdateSubmissionRequest,
+  canEditSubmission,
+  isDraftRevisionCurrent,
+  isSavedSubmissionRevision,
+  selectSubmissionDisplayDetail,
+  getSubmissionRevisionError,
 } from "../../lib/learning-tasks/text-submission";
+
+test("only an explicit valid revision and complete server editing permission allow editing", () => {
+  const valid = {
+    contentRevision: 0,
+    editing: { canEdit: true, reason: null, message: null },
+  };
+  expect(canEditSubmission(toSubmissionDetailResponse(valid))).toBe(true);
+  for (const contentRevision of [
+    undefined,
+    null,
+    "0",
+    -1,
+    1.5,
+    Number.NaN,
+    Infinity,
+  ]) {
+    const detail = toSubmissionDetailResponse({ ...valid, contentRevision });
+    expect(canEditSubmission(detail)).toBe(false);
+    expect(detail.contentRevision).toBe(
+      contentRevision === null ? null : undefined,
+    );
+  }
+  for (const editing of [
+    undefined,
+    null,
+    {},
+    { canEdit: true },
+    { canEdit: "true", reason: null, message: null },
+    { canEdit: true, reason: "UNKNOWN", message: null },
+    { canEdit: false, reason: "REVIEW_STARTED", message: "已进入评阅" },
+  ]) {
+    expect(
+      canEditSubmission(toSubmissionDetailResponse({ ...valid, editing })),
+    ).toBe(false);
+  }
+  const times = {
+    lastEditedAt: "2026-10-28T01:00:00.000Z",
+    lastEditIsLate: true,
+    reviewStartedAt: null,
+  };
+  expect(toSubmissionDetailResponse({ ...valid, ...times })).toMatchObject(
+    times,
+  );
+  expect(toTeacherDetail({ ...valid, ...times })).toEqual(
+    toSubmissionDetailResponse({ ...valid, ...times }),
+  );
+  const malformed = toSubmissionDetailResponse({
+    lastEditedAt: "bad",
+    lastEditIsLate: "true",
+    reviewStartedAt: 123,
+  });
+  expect(malformed.lastEditedAt).toBeUndefined();
+  expect(malformed.lastEditIsLate).toBeUndefined();
+  expect(malformed.reviewStartedAt).toBeUndefined();
+});
+
+test("edit requests preserve text, require captured revision and contain only the content whitelist", () => {
+  const code = "  print('😀')\r\n\t ",
+    note = " 说明\n ";
+  expect(buildUpdateSubmissionRequest(2, code, "python", note)).toEqual({
+    expectedRevision: 2,
+    content: { language: "python", codeText: code, submissionNote: note },
+  });
+  expect(
+    buildUpdateSubmissionRequest(0, code, "auto", "").content.submissionNote,
+  ).toBe("");
+  for (const revision of [-1, 1.5, Number.NaN, Infinity])
+    expect(() =>
+      buildUpdateSubmissionRequest(revision, code, "auto", note),
+    ).toThrow();
+});
+
+test("a refreshed work version invalidates the captured student or teacher draft until explicit confirmation", () => {
+  for (const text of ["学生保留的代码草稿", "教师保留的评语草稿"]) {
+    const draft = { baseRevision: 2, text };
+    const refreshed = toSubmissionDetailResponse({ contentRevision: 3 });
+    expect(
+      isDraftRevisionCurrent(draft.baseRevision, refreshed.contentRevision),
+    ).toBe(false);
+    expect(draft).toEqual({ baseRevision: 2, text });
+    expect(isDraftRevisionCurrent(draft.baseRevision, undefined)).toBe(false);
+    expect(isDraftRevisionCurrent(draft.baseRevision, 2)).toBe(true);
+    // The explicit confirmation keeps user input while changing only its reviewed basis.
+    const confirmed = { ...draft, baseRevision: refreshed.contentRevision };
+    expect(confirmed.text).toBe(text);
+    expect(
+      isDraftRevisionCurrent(confirmed.baseRevision, refreshed.contentRevision),
+    ).toBe(true);
+  }
+  expect(
+    getSubmissionRevisionError({ code: "SUBMISSION_REVISION_CONFLICT" }),
+  ).toContain("旧版作品");
+  expect(
+    getSubmissionRevisionError({ code: "SUBMISSION_REVIEW_STARTED" }),
+  ).toContain("已进入评阅");
+  expect(
+    getSubmissionRevisionError({ message: "private stack" }),
+  ).not.toContain("private stack");
+});
+
+test("a confirmed edit accepts an authoritative later version without accepting stale or invalid revisions", () => {
+  expect(isSavedSubmissionRevision(2, 3)).toBe(true);
+  expect(isSavedSubmissionRevision(2, 4)).toBe(true);
+  for (const revision of [2, 1, null, undefined, "3", -1, 3.5, Number.NaN])
+    expect(isSavedSubmissionRevision(2, revision)).toBe(false);
+  expect(isSavedSubmissionRevision(undefined, 3)).toBe(false);
+});
+
+test("distinguishes real public 409 responses after the exception filter omits code", () => {
+  const body = (message: unknown) => ({
+    statusCode: 409,
+    timestamp: "2026-10-28T01:00:00.000Z",
+    path: "/api/learning-tasks/submissions/submission-1",
+    message,
+  });
+  const contentChanged = "作品内容已变化，请查看最新提交并核对草稿后明确继续。";
+  const reviewStarted =
+    "本次提交已进入评阅，不能再修改作品；草稿仍保留，请核对提交详情。";
+  const invalidState =
+    "提交的版本或评阅状态无效，当前操作已停止，请联系教师核对。";
+  expect(getSubmissionRevisionError(body(contentChanged))).toBe(
+    "作品内容已变化，当前操作依据的是旧版作品。草稿已保留，请刷新查看并明确确认后继续。",
+  );
+  expect(getSubmissionRevisionError(body(reviewStarted))).toBe(
+    "本次提交已进入评阅，不能再修改作品。草稿已保留，请核对当前作品与反馈。",
+  );
+  expect(getSubmissionRevisionError(body(invalidState))).toBe(
+    "提交状态暂不可用。草稿已保留，请核对详情或联系教师。",
+  );
+  for (const message of [
+    "private stack",
+    contentChanged + " ",
+    reviewStarted + "\nprivate stack",
+    invalidState + "private stack",
+    [reviewStarted],
+    null,
+  ]) {
+    expect(getSubmissionRevisionError(body(message))).toBe(
+      "提交状态已变化。草稿已保留，请先核对最新详情。",
+    );
+  }
+});
+
+test("saved work bridges an old page response but cannot revive permission from an invalid latest detail", () => {
+  const permission = { canEdit: true, reason: null, message: null };
+  const old = toSubmissionDetailResponse({
+    contentRevision: 0,
+    content: { codeText: "A" },
+    editing: permission,
+  });
+  const saved = toSubmissionDetailResponse({
+    contentRevision: 1,
+    content: { codeText: "B" },
+    editing: permission,
+  });
+  expect(selectSubmissionDisplayDetail(old, saved)).toBe(saved);
+  for (const contentRevision of [undefined, null, -1, "1"]) {
+    const invalid = toSubmissionDetailResponse({
+      contentRevision,
+      editing: permission,
+    });
+    const display = selectSubmissionDisplayDetail(invalid, saved);
+    expect(display).toBe(invalid);
+    expect(canEditSubmission(display)).toBe(false);
+  }
+  const locked = toSubmissionDetailResponse({
+    ...saved.raw,
+    reviewStartedAt: "2026-10-28T01:00:00Z",
+    editing: {
+      canEdit: false,
+      reason: "REVIEW_STARTED",
+      message: "已进入评阅",
+    },
+  });
+  expect(selectSubmissionDisplayDetail(locked, saved)).toBe(locked);
+  expect(selectSubmissionDisplayDetail(saved, locked)).toBe(locked);
+});
 
 test("preserves source, independent note and declaration without trimming", () => {
   const codeText =

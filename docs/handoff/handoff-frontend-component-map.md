@@ -62,7 +62,7 @@
 | EditClassroomTaskForm | `components/teacher/EditClassroomTaskForm.tsx` | 列表行内展开、草稿输入与实例截止/迟交/次数设置保存；ACTIVE/CLOSED 可编辑，RECALLED 无入口；不修改模板或状态流 |
 | PublishTaskStatusButton | `components/teacher/PublishTaskStatusButton.tsx` | 单一模板发布操作；当前 classroomTask 详情页不使用，模板生命周期入口留在模板层 |
 | RemoveStudentButton | `components/teacher/RemoveStudentButton.tsx` | 单个成员移除及动作结果，不负责成员列表或成员关系判定 |
-| TeacherFeedbackForm | `components/teacher/TeacherFeedbackForm.tsx` | 教师反馈创建输入与提交，复用统一反馈选项；标签可选，不提供 scoreHint 入口；字段合同与服务端归一化归 API Owner |
+| TeacherFeedbackForm | `components/teacher/TeacherFeedbackForm.tsx` | 教师反馈创建输入与提交，复用统一反馈选项；评语草稿绑定实际查看版本，刷新不重绑，冲突/未知结果保留草稿并显式核对当前作品与反馈后确认继续；标签可选，不提供 scoreHint 入口，合同与归一化归 API Owner |
 | TeacherFeedbackHistory | `components/teacher/TeacherFeedbackHistory.tsx` | 反馈历史组合与编辑态切换，同一时间只展开一个编辑表单；仅有 id 的教师反馈可修改，AI/SYSTEM 只读 |
 | TeacherFeedbackEditForm | `components/teacher/TeacherFeedbackEditForm.tsx` | 单条教师反馈原地编辑、请求/错误状态、保存后退出编辑；与创建表单保持输入能力一致，不展示或编辑 scoreHint，不承担历史列表状态 |
 | TeacherSubmissionDetailPage | `app/teacher/submissions/[submissionId]/page.tsx` | 权威详情/反馈加载、返回导航及共享作品/AI 展示；可选评分参考复用 TaskRubric，正式实例读源与失败边界见 API Map；AI 申请仅更新局部结果，不自动整页刷新，不以 AI 状态改变人工反馈表单 key；新增表单和历史编辑态归 feedback 组件 |
@@ -87,6 +87,7 @@
 |---|---|---|
 | JoinClassroomForm | `components/student/JoinClassroomForm.tsx` | 加入码输入与入班动作，不判断后端入班权限 |
 | SubmissionForm | `components/student/SubmissionForm.tsx` | 原文源码与独立可选说明输入、码点校验、请求防重复及公开业务错误安全适配；成功保存后锁住当前表单，导航恢复只打开同一提交详情，结果未确认先核对历史；多文件粘贴格式提示与示例由此维护，单文件无需 FILE 标记；不提供上传/结构化文件提交，不以模板当前状态自行阻断 |
+| EditSubmissionForm | `components/student/EditSubmissionForm.tsx` | 同次提交的受控代码/语言/说明草稿及 baseRevision；取消无写，保存采用权威详情，刷新不覆盖草稿/静默换版；冲突或未知结果锁住保存，显式读取作品并确认后继续，取消不绕过核对门禁，评阅已受理时保留可复制草稿；学生作品展示与共享 AI 区块使用同一当前详情 |
 | RequestAiFeedbackButton | `components/student/RequestAiFeedbackButton.tsx` | 师生复用的申请按钮展示；disabled/pending 与动作回调由 SubmissionAiReview 提供，不独立持有资格或请求时序 |
 | AiProcessingHint | `components/student/AiProcessingHint.tsx` | 统一 AI 处理中提示；通用状态文案复用 UI Status |
 | SubmissionAutoRefresh | `components/student/SubmissionAutoRefresh.tsx` | 仅学生提交详情：以共享区块已接纳状态在 PENDING/RUNNING 或 FAILED 且计划重试时调用局部读取；操作中和待显式确认时暂停；终态及信息不足停止；沿用退避、失焦暂停和定时器清理，不用于草稿页 |
@@ -99,7 +100,7 @@
 |---|---|---|
 | TaskRubric | `components/learning-tasks/TaskRubric.tsx` | 师生只读 rubric 展示，复用 UI Rubric 中文维度，不推断成绩 |
 | SubmissionContent | `components/submissions/SubmissionContent.tsx` | 师生作品原文展示；源码局部滚动、说明/声明纯文本换行，展示快照状态；白色作品面板保持明确前景色 |
-| SubmissionAiReview | `components/submissions/SubmissionAiReview.tsx` | 师生共享安全 AI 摘要；拥有当前提交的串行 POST/GET、操作标识及统一接纳结果，页面 props 仅作初始读取；成功 Job 持续关闭申请，不确定结果仅由事后显式完整读取重新核对；按提交 ID 隔离并卸载取消。学生组合受限轮询，教师仅显式整页刷新，不管理人工反馈草稿 |
+| SubmissionAiReview | `components/submissions/SubmissionAiReview.tsx` | 师生共享安全 AI 摘要；拥有当前提交的串行 POST/GET、操作标识及统一接纳结果；申请绑定页面实际展示作品版本，轮询不自动升级；成功 Job 持续关闭申请，不确定结果仅由事后显式完整读取重新核对；按提交 ID 隔离并卸载取消。学生组合受限轮询，教师仅显式整页刷新，不管理人工反馈草稿 |
 
 ## 8) Context / State
 

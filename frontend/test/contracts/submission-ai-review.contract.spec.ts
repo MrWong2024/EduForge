@@ -185,11 +185,12 @@ const requestable = {
 const makeDetail = (status = "NOT_REQUESTED", canRequest: unknown = true) =>
   toSubmissionDetailResponse({
     id: "s",
+    contentRevision: 0,
     aiFeedbackStatus: status,
     aiReview: { ...requestable, canRequest },
   });
 const makeOperations = () =>
-  new SubmissionAiOperations("s", "NOT_REQUESTED", makeDetail().aiReview);
+  new SubmissionAiOperations("s", "NOT_REQUESTED", makeDetail().aiReview, 0);
 const postResult = (status: string) =>
   toRequestAiFeedbackResponse({
     submissionId: "s",
@@ -266,17 +267,20 @@ test("failed, incomplete or non-true confirmation cannot unlock an uncertain req
     toSubmissionDetailResponse({ id: "s" }),
     toSubmissionDetailResponse({
       id: "s",
+      contentRevision: 0,
       aiFeedbackStatus: "NOT_REQUESTED",
       aiReview: { canRequest: true },
     }),
     toSubmissionDetailResponse({
       id: "other",
+      contentRevision: 0,
       aiFeedbackStatus: "NOT_REQUESTED",
       aiReview: requestable,
     }),
     ...[false, "true", 1, null, undefined].map((value) =>
       toSubmissionDetailResponse({
         id: "s",
+        contentRevision: 0,
         aiFeedbackStatus: "NOT_REQUESTED",
         aiReview: { ...requestable, canRequest: value },
       }),
@@ -295,6 +299,7 @@ test("accepted status, eligibility and polling use the same confirmed detail", (
   operations.finishRequest(operations.beginRequest()!, postResult("PENDING"));
   const detail = toSubmissionDetailResponse({
     id: "s",
+    contentRevision: 0,
     aiFeedbackStatus: "FAILED",
     aiReview: {
       ...known,
@@ -331,6 +336,7 @@ test("invalidated or other-submission operations cannot update a new submission"
     "other",
     "NOT_REQUESTED",
     makeDetail().aiReview,
+    0,
   );
   const newRequest = current.beginRequest()!;
   expect(current.finishRequest(request, postResult("DEAD"))).toBeNull();
@@ -364,4 +370,51 @@ test("incomplete successful POST response stays locked pending explicit confirma
   expect(operations.view.status).toBe("NOT_REQUESTED");
   expect(operations.view.needsConfirmation).toBe(true);
   expect(operations.beginRequest()).toBeNull();
+});
+
+test("AI requests require the displayed work revision and polling cannot silently upgrade it", () => {
+  for (const revision of [undefined, null, -1, 1.5]) {
+    const operations = new SubmissionAiOperations(
+      "s",
+      "NOT_REQUESTED",
+      makeDetail().aiReview,
+      revision,
+    );
+    expect(operations.beginRequest()).toBeNull();
+  }
+  const operations = makeOperations();
+  const newer = toSubmissionDetailResponse({
+    id: "s",
+    contentRevision: 1,
+    aiFeedbackStatus: "NOT_REQUESTED",
+    aiReview: requestable,
+  });
+  expect(operations.finishRead(operations.beginRead(false)!, newer)).toBe(true);
+  expect(operations.view.contentRevision).toBe(1);
+  expect(operations.view.displayedRevision).toBe(0);
+  expect(operations.beginRequest()).toBeNull();
+  expect(operations.confirmDisplayedRevision(0)).toBe(false);
+  expect(operations.confirmDisplayedRevision(1)).toBe(true);
+  const request = operations.beginRequest()!;
+  expect(request.expectedRevision).toBe(1);
+  expect(operations.confirmDisplayedRevision(2)).toBe(false);
+});
+
+test("uncertain AI writes require an explicit read and still require viewing a changed revision", () => {
+  const operations = makeOperations();
+  const request = operations.beginRequest()!;
+  expect(request.expectedRevision).toBe(0);
+  operations.finishRequest(request);
+  expect(operations.beginRequest()).toBeNull();
+  const newer = toSubmissionDetailResponse({
+    id: "s",
+    contentRevision: 2,
+    aiFeedbackStatus: "NOT_REQUESTED",
+    aiReview: requestable,
+  });
+  expect(operations.finishRead(operations.beginRead(true)!, newer)).toBe(true);
+  expect(operations.beginRequest()).toBeNull();
+  expect(operations.view.busy).toBeNull();
+  expect(operations.confirmDisplayedRevision(2)).toBe(true);
+  expect(operations.beginRequest()?.expectedRevision).toBe(2);
 });

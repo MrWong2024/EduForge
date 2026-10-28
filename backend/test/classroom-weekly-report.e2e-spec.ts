@@ -339,7 +339,7 @@ describe('Classroom Weekly Report (e2e)', () => {
       .post(
         `/api/learning-tasks/submissions/${submissionId}/ai-feedback/request`,
       )
-      .send({})
+      .send({ expectedRevision: 0 })
       .expect(200);
 
     const jobs = await aiFeedbackJobModel

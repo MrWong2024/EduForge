@@ -22,6 +22,8 @@
 
 Unit 与 HTTP E2E 可以覆盖同一业务区域，但不得重复承担同一主断言：局部规则留在 unit，真实 HTTP/认证/数据库终态留在 E2E。
 
+`test/submission-edit.e2e-spec.ts` 负责同次作品修改与正式评阅受理的真实 HTTP、版本竞争、首次提交事实、历史兼容及部分失败续行；复用正式鉴权/发布/提交与 spec-owned cleanup，不添加生产测试开关。expectedRevision 变更涉及的既有反馈/AI 请求继续保留各自原业务断言。合同明细引用 [Service Card 08](./handoff-backend-service-map.md#service-card-08)，实际 discovery/执行及退出码归当次报告。
+
 ## 3. 最低充分证据选择
 
 1. 纯函数、Service 分支、Controller 参数传递和廉价防御优先用 unit。

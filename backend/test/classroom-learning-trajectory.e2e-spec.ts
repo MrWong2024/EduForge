@@ -485,7 +485,10 @@ describe('Classroom Learning Trajectory (e2e)', () => {
       .post(
         `/api/learning-tasks/submissions/${secondSubmissionBody.id}/ai-feedback/request`,
       )
-      .send({ reason: 'Need second attempt feedback for trajectory' })
+      .send({
+        expectedRevision: 0,
+        reason: 'Need second attempt feedback for trajectory',
+      })
       .expect(200);
 
     let hasSucceeded = false;

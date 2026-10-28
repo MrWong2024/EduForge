@@ -35,11 +35,15 @@ import { CreateTaskDto } from '../dto/create-task.dto';
 import { UpdateTaskDto } from '../dto/update-task.dto';
 import { QueryTaskDto } from '../dto/query-task.dto';
 import { CreateSubmissionDto } from '../dto/create-submission.dto';
+import { UpdateSubmissionDto } from '../dto/update-submission.dto';
 import { CreateFeedbackDto } from '../dto/create-feedback.dto';
 import { UpdateFeedbackDto } from '../dto/update-feedback.dto';
 import { RequestAiFeedbackDto } from '../dto/request-ai-feedback.dto';
 import { TaskResponseDto } from '../dto/task-response.dto';
-import { SubmissionResponseDto } from '../dto/submission-response.dto';
+import {
+  SubmissionEditing,
+  SubmissionResponseDto,
+} from '../dto/submission-response.dto';
 import { FeedbackResponseDto } from '../dto/feedback-response.dto';
 import { SubmissionDetailResponseDto } from '../dto/submission-detail-response.dto';
 import { TASK_COURSE_LABEL_UNCLASSIFIED } from '../task-course-labels.constants';
@@ -399,8 +403,12 @@ export class LearningTasksService {
     }
 
     await this.ensureCanRequestAiFeedback(submission, user);
+    const pinned = await this.acceptSubmissionReview(
+      submission,
+      dto.expectedRevision,
+    );
     const ensured =
-      await this.aiFeedbackJobService.ensureJobForSubmission(submission);
+      await this.aiFeedbackJobService.ensureJobForSubmission(pinned);
 
     if (dto.reason) {
       this.logger.debug(
@@ -414,6 +422,95 @@ export class LearningTasksService {
       status: ensured.status,
       aiFeedbackStatus: this.toAiFeedbackStatus(ensured.status),
     };
+  }
+
+  async updateSubmission(
+    submissionId: string,
+    dto: UpdateSubmissionDto,
+    user: { id: string; roles?: string[] },
+  ): Promise<SubmissionDetailResponseDto> {
+    const submission = await this.submissionModel
+      .findById(submissionId)
+      .lean<SubmissionWithMeta>()
+      .exec();
+    if (!submission) throw new NotFoundException('Submission not found');
+    if (
+      !hasAnyRole(user.roles ?? [], STUDENT_ROLES) ||
+      submission.studentId.toString() !== user.id
+    ) {
+      throw new ForbiddenException(
+        'Only the student who submitted may edit this submission',
+      );
+    }
+    this.assertExpectedRevision(dto.expectedRevision);
+    const { classroomTask: initialClassroomTask } =
+      await this.loadSubmissionAuthContext(submission);
+    const editing = await this.getSubmissionEditing(
+      submission,
+      user,
+      initialClassroomTask,
+    );
+    if (!editing.canEdit) {
+      if (editing.reason === 'REVIEW_STARTED')
+        this.throwSubmissionConflict('SUBMISSION_REVIEW_STARTED');
+      if (editing.reason === 'INVALID_STATE')
+        this.throwSubmissionConflict('SUBMISSION_INVALID_STATE');
+      throw new ForbiddenException({
+        statusCode: 403,
+        code: 'SUBMISSION_EDIT_NOT_ALLOWED',
+        reason: editing.reason,
+        message: editing.message,
+      });
+    }
+
+    // Capture the server save time after eligibility IO. The current deadline is
+    // checked again against this time, without changing the first-submit facts.
+    const classroomTask = await this.classroomTaskModel
+      .findById(submission.classroomTaskId)
+      .lean<ClassroomTaskDeadlineConfig>()
+      .exec();
+    if (!classroomTask) throw new NotFoundException('Classroom task not found');
+    const lastEditedAt = new Date();
+    const lastEditIsLate = Boolean(
+      classroomTask.dueAt &&
+      lastEditedAt.getTime() > classroomTask.dueAt.getTime(),
+    );
+    if (lastEditIsLate && classroomTask.settings?.allowLate === false) {
+      throw new ForbiddenException({
+        statusCode: 403,
+        code: 'SUBMISSION_EDIT_NOT_ALLOWED',
+        reason: 'DEADLINE_PASSED',
+        message: '已超过截止时间，当前课堂任务不允许迟交或修改。',
+      });
+    }
+    const updated = await this.submissionModel
+      .findOneAndUpdate(
+        {
+          _id: submission._id,
+          $and: [
+            this.submissionRevisionFilter(dto.expectedRevision),
+            { reviewStartedAt: { $exists: false } },
+          ],
+          status: SubmissionStatus.Submitted,
+        },
+        {
+          $set: {
+            content: {
+              language: dto.content.language,
+              codeText: dto.content.codeText,
+              submissionNote: dto.content.submissionNote ?? '',
+            },
+            lastEditedAt,
+            lastEditIsLate,
+          },
+          $inc: { contentRevision: 1 },
+        },
+        { returnDocument: 'after' },
+      )
+      .lean<SubmissionWithMeta>()
+      .exec();
+    if (!updated) await this.throwCurrentSubmissionConflict(submission._id);
+    return this.getSubmissionDetail(submissionId, user);
   }
 
   async listMySubmissions(taskId: string, userId: string) {
@@ -520,14 +617,77 @@ export class LearningTasksService {
     if (dto.source !== FeedbackSource.Teacher) {
       throw new BadRequestException('Only TEACHER feedback can be created');
     }
+    if (typeof dto.message !== 'string' || dto.message.length === 0) {
+      throw new BadRequestException('message should not be empty');
+    }
+    if (
+      classroomTask &&
+      classroomTask.taskId.toString() !== submission.taskId.toString()
+    ) {
+      throw new ConflictException('Submission does not match classroom task');
+    }
     const normalizedTags = this.normalizeTeacherFeedbackTags(dto.tags);
-    const feedback = await this.feedbackModel.create({
+    const payload = {
       submissionId: new Types.ObjectId(submissionId),
-      ...dto,
+      source: FeedbackSource.Teacher,
+      type: dto.type,
+      severity: dto.severity,
+      message: dto.message,
+      suggestion: dto.suggestion ?? undefined,
+      scoreHint: dto.scoreHint ?? undefined,
       createdBy: new Types.ObjectId(userId),
       tags: normalizedTags,
-    });
-    return this.toFeedbackResponse(feedback);
+    };
+    await this.acceptSubmissionReview(submission, dto.expectedRevision);
+    try {
+      const feedback = await this.feedbackModel.create(payload);
+      return this.toFeedbackResponse(feedback);
+    } catch (error) {
+      const mongoError = error as {
+        code?: number;
+        keyPattern?: Record<string, number>;
+      };
+      const uniqueFields = [
+        'submissionId',
+        'source',
+        'type',
+        'severity',
+        'message',
+      ];
+      if (
+        mongoError.code !== 11000 ||
+        !mongoError.keyPattern ||
+        Object.keys(mongoError.keyPattern).length !== uniqueFields.length ||
+        !uniqueFields.every((field) => mongoError.keyPattern?.[field] === 1)
+      ) {
+        throw error;
+      }
+      const existing = await this.feedbackModel
+        .findOne({
+          submissionId: payload.submissionId,
+          source: payload.source,
+          type: payload.type,
+          severity: payload.severity,
+          message: payload.message,
+        })
+        .lean<FeedbackWithMeta>()
+        .exec();
+      if (!existing) throw error;
+      if (
+        existing.createdBy?.toString() !== userId ||
+        (existing.suggestion ?? null) !== (payload.suggestion ?? null) ||
+        (existing.scoreHint ?? null) !== (payload.scoreHint ?? null) ||
+        JSON.stringify([...(existing.tags ?? [])].sort()) !==
+          JSON.stringify([...payload.tags].sort())
+      ) {
+        throw new ConflictException({
+          statusCode: 409,
+          code: 'FEEDBACK_PAYLOAD_CONFLICT',
+          message: '已有反馈与本次内容不同，请核对反馈列表后再继续。',
+        });
+      }
+      return this.toFeedbackResponse(existing);
+    }
   }
 
   async updateFeedback(
@@ -658,7 +818,7 @@ export class LearningTasksService {
       submission.classroomTaskId
         ? this.classroomTaskModel
             .findById(submission.classroomTaskId)
-            .select('_id classroomId taskId taskSnapshot settings status')
+            .select('_id classroomId taskId taskSnapshot settings status dueAt')
             .lean<ClassroomTaskWithClassroom>()
             .exec()
         : Promise.resolve(null),
@@ -684,6 +844,12 @@ export class LearningTasksService {
       reason,
       worker === true || worker === 'true',
     );
+    const editing = await this.getSubmissionEditing(
+      submission,
+      user,
+      classroomTask,
+      Boolean(job),
+    );
     return this.toSubmissionDetailResponse(
       submission,
       task,
@@ -691,6 +857,7 @@ export class LearningTasksService {
       student ?? null,
       job ? this.toAiFeedbackStatus(job.status) : AiFeedbackStatus.NotRequested,
       review,
+      editing,
     );
   }
 
@@ -877,6 +1044,11 @@ export class LearningTasksService {
   private toSubmissionResponse(
     submission: SubmissionWithMeta,
     aiFeedbackStatus: AiFeedbackStatus = AiFeedbackStatus.NotRequested,
+    editing: SubmissionEditing = {
+      canEdit: false,
+      reason: 'UNAVAILABLE',
+      message: '请打开提交详情核对当前修改资格。',
+    },
   ) {
     return {
       id: submission._id.toString(),
@@ -886,6 +1058,8 @@ export class LearningTasksService {
         : undefined,
       studentId: submission.studentId.toString(),
       attemptNo: submission.attemptNo,
+      ...this.submissionVersionFields(submission),
+      editing,
       content: {
         codeText: submission.content.codeText,
         language: submission.content.language,
@@ -912,6 +1086,7 @@ export class LearningTasksService {
     student: SubmissionDetailStudentLean | null,
     aiFeedbackStatus: AiFeedbackStatus,
     aiReview: AiReviewSummary,
+    editing: SubmissionEditing,
   ): SubmissionDetailResponseDto {
     const language = submission.content?.language ?? null;
     return {
@@ -935,6 +1110,8 @@ export class LearningTasksService {
       },
       submittedAt: submission.submittedAt ?? submission.createdAt ?? null,
       attemptNo: submission.attemptNo ?? null,
+      ...this.submissionVersionFields(submission),
+      editing,
       isLate: submission.isLate ?? false,
       lateBySeconds: submission.lateBySeconds ?? 0,
       aiFeedbackStatus,
@@ -1025,6 +1202,10 @@ export class LearningTasksService {
         .exec();
 
       const attemptNo = (lastSubmission?.attemptNo ?? 0) + 1;
+      const shouldEnqueue = this.shouldAutoEnqueue(
+        attemptNo,
+        classroomTask?.settings?.aiFeedbackMode,
+      );
 
       try {
         const submission = await this.submissionModel.create({
@@ -1032,6 +1213,8 @@ export class LearningTasksService {
           classroomTaskId: classroomTaskObjectId,
           studentId: studentObjectId,
           attemptNo,
+          contentRevision: 0,
+          ...(shouldEnqueue ? { reviewStartedAt: submittedAt } : {}),
           submittedAt,
           isLate,
           lateBySeconds,
@@ -1040,22 +1223,18 @@ export class LearningTasksService {
           status: SubmissionStatus.Submitted,
         });
 
-        const shouldEnqueue = this.shouldAutoEnqueue(
-          submission.attemptNo,
-          classroomTask?.settings?.aiFeedbackMode,
-        );
+        let aiFeedbackStatus = AiFeedbackStatus.NotRequested;
         if (shouldEnqueue) {
-          await this.aiFeedbackJobService.enqueue(submission);
-          return this.toSubmissionResponse(
-            submission,
-            AiFeedbackStatus.Pending,
-          );
+          const enqueued = await this.aiFeedbackJobService.enqueue(submission);
+          if (enqueued)
+            aiFeedbackStatus = this.toAiFeedbackStatus(enqueued.status);
         }
-
-        return this.toSubmissionResponse(
+        const editing = await this.getSubmissionEditing(
           submission,
-          AiFeedbackStatus.NotRequested,
+          { id: userId, roles: [...STUDENT_ROLES] },
+          classroomTask,
         );
+        return this.toSubmissionResponse(submission, aiFeedbackStatus, editing);
       } catch (error) {
         const mongoError = error as { code?: number };
         if (mongoError.code !== 11000 || attempt === 2) {
@@ -1065,6 +1244,268 @@ export class LearningTasksService {
     }
 
     throw new BadRequestException('Unable to allocate attempt number');
+  }
+
+  private isValidDate(value: unknown): value is Date {
+    return value instanceof Date && Number.isFinite(value.getTime());
+  }
+
+  private readSubmissionRevision(
+    submission: SubmissionWithMeta,
+  ): number | null {
+    const revision: unknown = submission.contentRevision;
+    if (revision === undefined) return 0;
+    return typeof revision === 'number' &&
+      Number.isSafeInteger(revision) &&
+      revision >= 0
+      ? revision
+      : null;
+  }
+
+  private hasValidSubmissionState(submission: SubmissionWithMeta): boolean {
+    if (this.readSubmissionRevision(submission) === null) return false;
+    if (
+      submission.reviewStartedAt !== undefined &&
+      !this.isValidDate(submission.reviewStartedAt)
+    )
+      return false;
+    if (submission.lastEditedAt === undefined) {
+      if (submission.lastEditIsLate !== undefined) return false;
+    } else if (
+      !this.isValidDate(submission.lastEditedAt) ||
+      typeof submission.lastEditIsLate !== 'boolean'
+    )
+      return false;
+    return (
+      submission.status === SubmissionStatus.Submitted ||
+      submission.status === SubmissionStatus.Evaluated
+    );
+  }
+
+  private submissionVersionFields(submission: SubmissionWithMeta) {
+    return {
+      contentRevision: this.readSubmissionRevision(submission),
+      lastEditedAt: this.isValidDate(submission.lastEditedAt)
+        ? submission.lastEditedAt
+        : null,
+      lastEditIsLate:
+        typeof submission.lastEditIsLate === 'boolean'
+          ? submission.lastEditIsLate
+          : null,
+      reviewStartedAt: this.isValidDate(submission.reviewStartedAt)
+        ? submission.reviewStartedAt
+        : null,
+    };
+  }
+
+  private assertExpectedRevision(expectedRevision: number) {
+    if (!Number.isSafeInteger(expectedRevision) || expectedRevision < 0) {
+      throw new BadRequestException(
+        'expectedRevision must be a non-negative integer',
+      );
+    }
+  }
+
+  private submissionRevisionFilter(expectedRevision: number) {
+    return expectedRevision === 0
+      ? {
+          $or: [
+            { contentRevision: 0 },
+            { contentRevision: { $exists: false } },
+          ],
+        }
+      : { contentRevision: expectedRevision };
+  }
+
+  private throwSubmissionConflict(
+    code:
+      | 'SUBMISSION_REVISION_CONFLICT'
+      | 'SUBMISSION_REVIEW_STARTED'
+      | 'SUBMISSION_INVALID_STATE',
+  ): never {
+    const messages = {
+      SUBMISSION_REVISION_CONFLICT:
+        '作品内容已变化，请查看最新提交并核对草稿后明确继续。',
+      SUBMISSION_REVIEW_STARTED:
+        '本次提交已进入评阅，不能再修改作品；草稿仍保留，请核对提交详情。',
+      SUBMISSION_INVALID_STATE:
+        '提交的版本或评阅状态无效，当前操作已停止，请联系教师核对。',
+    };
+    throw new ConflictException({
+      statusCode: 409,
+      code,
+      message: messages[code],
+    });
+  }
+
+  private async throwCurrentSubmissionConflict(
+    submissionId: Types.ObjectId,
+  ): Promise<never> {
+    const current = await this.submissionModel
+      .findById(submissionId)
+      .lean<SubmissionWithMeta>()
+      .exec();
+    if (current && !this.hasValidSubmissionState(current))
+      this.throwSubmissionConflict('SUBMISSION_INVALID_STATE');
+    if (
+      current &&
+      (current.reviewStartedAt !== undefined ||
+        current.status === SubmissionStatus.Evaluated)
+    )
+      this.throwSubmissionConflict('SUBMISSION_REVIEW_STARTED');
+    this.throwSubmissionConflict('SUBMISSION_REVISION_CONFLICT');
+  }
+
+  private async acceptSubmissionReview(
+    submission: SubmissionWithMeta,
+    expectedRevision: number,
+  ): Promise<SubmissionWithMeta> {
+    this.assertExpectedRevision(expectedRevision);
+    if (!this.hasValidSubmissionState(submission))
+      this.throwSubmissionConflict('SUBMISSION_INVALID_STATE');
+    // This single-document update competes with content PATCH. Existing valid
+    // review dates are preserved so retrying the same revision cannot unlock or
+    // replace the original acceptance time. It is not a cross-collection txn.
+    const pinned = await this.submissionModel
+      .findOneAndUpdate(
+        {
+          _id: submission._id,
+          $and: [
+            this.submissionRevisionFilter(expectedRevision),
+            {
+              $or: [
+                { reviewStartedAt: { $exists: false } },
+                { reviewStartedAt: { $type: 'date' } },
+              ],
+            },
+          ],
+          status: {
+            $in: [SubmissionStatus.Submitted, SubmissionStatus.Evaluated],
+          },
+        },
+        [
+          {
+            $set: {
+              reviewStartedAt: {
+                $cond: [
+                  { $eq: [{ $type: '$reviewStartedAt' }, 'missing'] },
+                  new Date(),
+                  '$reviewStartedAt',
+                ],
+              },
+            },
+          },
+        ],
+        { returnDocument: 'after', updatePipeline: true },
+      )
+      .lean<SubmissionWithMeta>()
+      .exec();
+    if (!pinned) {
+      // Do not replace the caller's revision with the newly read revision.
+      const current = await this.submissionModel
+        .findById(submission._id)
+        .lean<SubmissionWithMeta>()
+        .exec();
+      if (current && !this.hasValidSubmissionState(current))
+        this.throwSubmissionConflict('SUBMISSION_INVALID_STATE');
+      this.throwSubmissionConflict('SUBMISSION_REVISION_CONFLICT');
+    }
+    return pinned;
+  }
+
+  private async getSubmissionEditing(
+    submission: SubmissionWithMeta,
+    user: { id: string; roles?: string[] },
+    knownClassroomTask?: ClassroomTaskDeadlineConfig | null,
+    knownHasJob?: boolean,
+  ): Promise<SubmissionEditing> {
+    const blocked = (reason: string, message: string): SubmissionEditing => ({
+      canEdit: false,
+      reason,
+      message,
+    });
+    if (
+      !this.hasValidSubmissionState(submission) ||
+      this.readSubmissionRevision(submission) === Number.MAX_SAFE_INTEGER
+    )
+      return blocked(
+        'INVALID_STATE',
+        '提交的版本或评阅状态无效，暂时不能修改。',
+      );
+    if (
+      submission.reviewStartedAt !== undefined ||
+      submission.status === SubmissionStatus.Evaluated
+    )
+      return blocked('REVIEW_STARTED', '本次提交已进入评阅，不能修改作品。');
+    const [feedback, hasJob] = await Promise.all([
+      this.feedbackModel.exists({ submissionId: submission._id }),
+      knownHasJob === undefined
+        ? this.aiFeedbackJobService.getReviewJob(submission._id).then(Boolean)
+        : Promise.resolve(knownHasJob),
+    ]);
+    if (feedback || hasJob)
+      return blocked('REVIEW_STARTED', '本次提交已有评阅记录，不能修改作品。');
+    if (
+      !hasAnyRole(user.roles ?? [], STUDENT_ROLES) ||
+      submission.studentId.toString() !== user.id
+    )
+      return blocked('NOT_OWNER', '仅提交的学生本人可以修改作品。');
+    if (!(submission.classroomTaskId instanceof Types.ObjectId))
+      return blocked(
+        'CLASSROOM_TASK_REQUIRED',
+        '本次提交没有有效的课堂任务，不能修改。',
+      );
+    const classroomTask =
+      knownClassroomTask === undefined
+        ? await this.classroomTaskModel
+            .findById(submission.classroomTaskId)
+            .lean<ClassroomTaskDeadlineConfig>()
+            .exec()
+        : knownClassroomTask;
+    if (!classroomTask)
+      return blocked(
+        'CLASSROOM_TASK_UNAVAILABLE',
+        '关联课堂任务不存在，不能修改。',
+      );
+    if (classroomTask.taskId.toString() !== submission.taskId.toString())
+      return blocked('TASK_MISMATCH', '提交与课堂任务不匹配，不能修改。');
+    if (!classroomTask.taskSnapshot)
+      return blocked('SNAPSHOT_MISSING', MISSING_TASK_SNAPSHOT_MESSAGE);
+    const member = await this.enrollmentModel.exists({
+      classroomId: classroomTask.classroomId,
+      userId: submission.studentId,
+      role: EnrollmentRole.Student,
+      status: EnrollmentStatus.Active,
+    });
+    if (!member)
+      return blocked(
+        'ENROLLMENT_INACTIVE',
+        '当前已不具备该班级的参与资格，不能修改。',
+      );
+    const classroom = await this.classroomModel
+      .findById(classroomTask.classroomId)
+      .select('_id status')
+      .lean<ParticipationClassroomLean>()
+      .exec();
+    if (!classroom)
+      return blocked('CLASSROOM_UNAVAILABLE', '关联班级不存在，不能修改。');
+    if (classroom.status !== ClassroomStatus.Active)
+      return blocked('CLASSROOM_ARCHIVED', '班级已归档，不能修改本次提交。');
+    if (classroomTask.status !== CLASSROOM_TASK_STATUS_ACTIVE)
+      return blocked(
+        'CLASSROOM_TASK_CLOSED',
+        '课堂任务已关闭，不能修改本次提交。',
+      );
+    if (
+      classroomTask.dueAt &&
+      new Date().getTime() > classroomTask.dueAt.getTime() &&
+      classroomTask.settings?.allowLate === false
+    )
+      return blocked(
+        'DEADLINE_PASSED',
+        '已超过截止时间，当前课堂任务不允许迟交或修改。',
+      );
+    return { canEdit: true, reason: null, message: null };
   }
 
   private normalizeTeacherFeedbackTags(tags?: string[]) {
@@ -1373,7 +1814,7 @@ export class LearningTasksService {
       submission.classroomTaskId
         ? this.classroomTaskModel
             .findById(submission.classroomTaskId)
-            .select('_id classroomId taskId taskSnapshot settings status')
+            .select('_id classroomId taskId taskSnapshot settings status dueAt')
             .lean<ClassroomTaskWithClassroom>()
             .exec()
         : Promise.resolve(null),

@@ -88,9 +88,7 @@ export type StudentTaskCompletionStatus = {
 };
 
 export type StudentTaskVisibilityStatus =
-  | "CURRENT"
-  | "RECENTLY_EXPIRED"
-  | "HISTORICAL";
+  "CURRENT" | "RECENTLY_EXPIRED" | "HISTORICAL";
 
 export type StudentTaskParticipationReason =
   | "ACTIVE"
@@ -182,6 +180,11 @@ export type MyTaskDetailResponse = {
 };
 
 export type SubmissionDetailResponse = {
+  contentRevision?: number | null;
+  lastEditedAt?: string | null;
+  lastEditIsLate?: boolean | null;
+  reviewStartedAt?: string | null;
+  editing: { canEdit: boolean; reason: string | null; message: string | null };
   taskSnapshotAvailable?: boolean;
   aiReview?: AiReview;
   meta?: { aiUsageDeclaration?: string };
@@ -242,6 +245,15 @@ export type CreateSubmissionRequest = {
   };
   meta?: {
     aiUsageDeclaration?: string;
+  };
+};
+
+export type UpdateSubmissionRequest = {
+  expectedRevision: number;
+  content: {
+    language: string;
+    codeText: string;
+    submissionNote: string;
   };
 };
 
@@ -518,6 +530,18 @@ export const toSubmissionDetailResponse = (
   const source = Object.keys(dataRecord).length > 0 ? dataRecord : record;
   const contentRecord = asRecord(safeGet(source, "content", undefined));
   const meta = asRecord(source.meta);
+  const editing = asRecord(source.editing);
+  const revision = source.contentRevision;
+  const validRevision =
+    typeof revision === "number" &&
+    Number.isSafeInteger(revision) &&
+    revision >= 0;
+  const nullableDate = (value: unknown): string | null | undefined =>
+    value === null
+      ? null
+      : typeof value === "string" && Number.isFinite(Date.parse(value))
+        ? value
+        : undefined;
   const originalText = (value: unknown): string | null | undefined =>
     value === null ? null : typeof value === "string" ? value : undefined;
   const language =
@@ -525,6 +549,20 @@ export const toSubmissionDetailResponse = (
     asNullableString(contentRecord.language);
 
   return {
+    contentRevision:
+      revision === null ? null : validRevision ? revision : undefined,
+    lastEditedAt: nullableDate(source.lastEditedAt),
+    lastEditIsLate: asNullableBoolean(source.lastEditIsLate),
+    reviewStartedAt: nullableDate(source.reviewStartedAt),
+    editing: {
+      canEdit:
+        validRevision &&
+        editing.canEdit === true &&
+        editing.reason === null &&
+        editing.message === null,
+      reason: asString(editing.reason) ?? null,
+      message: asString(editing.message) ?? null,
+    },
     taskSnapshotAvailable:
       asNullableBoolean(source.taskSnapshotAvailable) ?? undefined,
     aiReview: toAiReview(source.aiReview),

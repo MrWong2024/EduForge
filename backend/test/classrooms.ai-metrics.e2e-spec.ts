@@ -440,13 +440,13 @@ describe('Classrooms AI Metrics (e2e)', () => {
       .post(
         `/api/learning-tasks/submissions/${submissionAId}/ai-feedback/request`,
       )
-      .send({})
+      .send({ expectedRevision: 0 })
       .expect(200);
     await studentAgent
       .post(
         `/api/learning-tasks/submissions/${submissionBId}/ai-feedback/request`,
       )
-      .send({})
+      .send({ expectedRevision: 0 })
       .expect(200);
 
     const processBody: ProcessOnceResponse =
@@ -508,13 +508,13 @@ describe('Classrooms AI Metrics (e2e)', () => {
       .post(
         `/api/learning-tasks/submissions/${firstSubmissionId}/ai-feedback/request`,
       )
-      .send({})
+      .send({ expectedRevision: 0 })
       .expect(200);
     await studentAgent
       .post(
         `/api/learning-tasks/submissions/${secondSubmissionId}/ai-feedback/request`,
       )
-      .send({})
+      .send({ expectedRevision: 0 })
       .expect(200);
 
     const firstProcess: ProcessOnceResponse =

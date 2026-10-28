@@ -261,7 +261,7 @@ describe('LearningTasks AI Feedback Bailian Context (e2e)', () => {
     submissionIds.push(id);
     await studentAgent
       .post('/api/learning-tasks/submissions/' + id + '/ai-feedback/request')
-      .send({})
+      .send({ expectedRevision: 0 })
       .expect(200);
     return id;
   };
@@ -336,7 +336,7 @@ describe('LearningTasks AI Feedback Bailian Context (e2e)', () => {
   const requestContext = (id: string) =>
     studentAgent
       .post('/api/learning-tasks/submissions/' + id + '/ai-feedback/request')
-      .send({})
+      .send({ expectedRevision: 0 })
       .expect(200);
   const makeDue = async (id: string) => {
     // Approved controlled scheduling advancement; no status/attempt/usage rewrite.
@@ -754,7 +754,7 @@ describe('LearningTasks AI Feedback Bailian Context (e2e)', () => {
       .post(
         `/api/learning-tasks/submissions/${submissionId}/ai-feedback/request`,
       )
-      .send({})
+      .send({ expectedRevision: 0 })
       .expect(200);
 
     const processResult: ProcessOnceResponse = await processOwned(1);
@@ -912,7 +912,7 @@ describe('LearningTasks AI Feedback Bailian Context (e2e)', () => {
     submissionIds.push(id);
     await studentAgent
       .post('/api/learning-tasks/submissions/' + id + '/ai-feedback/request')
-      .send({})
+      .send({ expectedRevision: 0 })
       .expect(200);
     expect(await processOwned(1)).toEqual({
       processed: 1,
@@ -997,7 +997,7 @@ describe('LearningTasks AI Feedback Bailian Context (e2e)', () => {
       ).toBe(0);
       const repeated = await studentAgent
         .post('/api/learning-tasks/submissions/' + id + '/ai-feedback/request')
-        .send({})
+        .send({ expectedRevision: 0 })
         .expect(200);
       expect(repeated.body).toMatchObject({ status: 'DEAD' });
       expect(await processOwned(1)).toMatchObject({
@@ -1210,7 +1210,7 @@ describe('LearningTasks AI Feedback Bailian Context (e2e)', () => {
           .post(
             '/api/learning-tasks/submissions/' + id + '/ai-feedback/request',
           )
-          .send({})
+          .send({ expectedRevision: 0 })
           .expect(200),
       ),
     );
@@ -1235,7 +1235,7 @@ describe('LearningTasks AI Feedback Bailian Context (e2e)', () => {
     ).toBe(1);
     const repeated = await studentAgent
       .post('/api/learning-tasks/submissions/' + id + '/ai-feedback/request')
-      .send({})
+      .send({ expectedRevision: 0 })
       .expect(200);
     expect(repeated.body).toMatchObject({ status: 'SUCCEEDED' });
     expect(await processOwned(1)).toMatchObject({

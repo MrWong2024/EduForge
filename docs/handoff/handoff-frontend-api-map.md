@@ -101,6 +101,7 @@
 - 提交详情和反馈：Teacher/Student submission pages + feedback forms -> `/api/proxy/learning-tasks/submissions/:id*`。
   - 对应后端：submission detail、feedback list、teacher feedback create/update。
   - 注意：正式 detail API `GET /api/learning-tasks/submissions/:id` 是主体 SoT；每次先 await detail 成功，再请求同一提交的 feedback；师生共用学生侧详情 mapper，保留完整源码、独立说明与已有声明原文，适配 aiReview；URL query 不提供标题、正文、提交时间、次数、迟交或 AI 状态；班级/课堂任务上下文用于返回导航。公开字段与 null/0 语义由 [Backend DTO](./handoff-backend-dto-cheatsheet.md#submission-request--response-family) 维护。
+  - 新增教师反馈发送撰写时绑定的 `expectedRevision`；刷新 props 不重绑旧评语。409/结果不确定保留评语，显式读取权威作品及反馈列表，用户确认适用后再允许继续。教师反馈原地 PATCH 沿用原合同；固定、版本与幂等合同见 [Backend Service Card 08](./handoff-backend-service-map.md#service-card-08)。
 
 - 教师提交页的可选评分参考：在权威 detail/feedback 成功后，使用上下文 classroomId 与 detail 的权威 classroomTaskId 经 BFF 读取 `GET /api/classrooms/:classroomId/tasks/:classroomTaskId`，复用 `toClassroomTask`；仅当响应 taskId 与提交 detail 一致时展示实例投影 rubric。上下文只定位请求，评分事实来自正式响应；无上下文、读失败或不匹配时提示从任务详情核对，不替换已保存作品或反馈表单。
 
@@ -119,12 +120,13 @@
 - 学生 submission detail：`student/submissions/:id/page.tsx` -> `/api/proxy/learning-tasks/submissions/:id*`。
   - 对应后端：submission detail、feedback list。
   - 注意：学生任务草稿页仅显式刷新；学生提交详情仅在处理中或已安排重试时状态驱动刷新，复用现有读源，无历史详情 N+1。
+  - `EditSubmissionForm` 经同源 BFF PATCH 同一 submission，使用编辑开始时的 `expectedRevision` 和允许 content 字段，正常保存显式发送说明；取消不写，成功采用权威详情。mapper 严格消费 revision/editing，缺失或未知关闭入口；冲突/未知结果保留草稿，读取作品并由用户明确核对，不自动换新 attempt、合并或重放。
 
 ### 3.5 AI Feedback / 报表 / 导出
 
 - AI Feedback 产品请求：`SubmissionAiReview`（组合 RequestAiFeedbackButton） -> `/api/proxy/learning-tasks/submissions/:id/ai-feedback/request`。
   - 对应后端：`POST /api/learning-tasks/submissions/:submissionId/ai-feedback/request`。
-  - 注意：空请求体复用既有 BFF；只以 aiReview.canRequest=true 开启动作，缺摘要关闭并提供刷新。成功采用接口真实返回状态，已有 Job 不重新排队；当前提交内串行申请与读取，操作标识拒绝旧结果，页面 props 不作为 POST 后确认。成功 Job 持续锁定申请；结果不确定后，只接受事后用户显式发起、完整成功的详情读取重新判断资格，不自动重放 POST。按钮、正文与轮询共用同一已接纳结果。学生详情可按状态刷新，教师详情仅局部显示申请结果并提示显式刷新，保护人工反馈草稿。request 不返回完整 aiReview；执行仍归后端。
+  - 注意：请求携带页面实际展示作品的 `expectedRevision`，轮询发现新版不能视为用户已查看；需要明确刷新作品后申请。仅有效 revision 且 aiReview.canRequest=true 开启动作，缺摘要关闭并提供刷新。成功采用接口真实返回状态，已有 Job 不重新排队；当前提交内串行申请与读取，操作标识拒绝旧结果，页面 props 不作为 POST 后确认。成功 Job 持续锁定申请；结果不确定后，只接受事后用户显式发起、完整成功的详情读取重新判断资格，不自动重放 POST。按钮、正文与轮询共用同一已接纳结果。学生详情可按状态刷新，教师详情仅局部显示申请结果并提示显式刷新，保护人工反馈草稿。request 不返回完整 aiReview；执行仍归后端。BFF 保持既有 PATCH/JSON body 透传。
 - 班级周报：`weekly-report/page.tsx` -> `/api/proxy/classrooms/:id/weekly-report`。
   - 对应后端：`GET /api/classrooms/:classroomId/weekly-report`。
   - 注意：窗口与公开数据见 [Backend DTO](./handoff-backend-dto-cheatsheet.md#weekly-report)，前端消费后端聚合结果。

@@ -445,6 +445,7 @@ export type TeacherFeedbackItem = FeedbackItem;
 export type TeacherFeedbackListResponse = ListFeedbackResponse;
 
 export type CreateTeacherFeedbackRequest = {
+  expectedRevision: number;
   source: "TEACHER";
   type: string;
   severity: string;

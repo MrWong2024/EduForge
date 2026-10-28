@@ -236,7 +236,7 @@ export default async function TeacherSubmissionDetailPage({
             </p>
           </div>
           <div>
-            <p className="text-zinc-500">提交时间</p>
+            <p className="text-zinc-500">首次提交时间</p>
             <p className="font-medium text-zinc-900">
               {toDisplayDate(viewModel.context.submittedAt)}
             </p>
@@ -248,7 +248,7 @@ export default async function TeacherSubmissionDetailPage({
             </p>
           </div>
           <div>
-            <p className="text-zinc-500">是否迟交</p>
+            <p className="text-zinc-500">首次提交是否迟交</p>
             <p className="font-medium text-zinc-900">
               {toDisplayText(viewModel.context.isLate)}
               {viewModel.context.isLate &&
@@ -257,6 +257,32 @@ export default async function TeacherSubmissionDetailPage({
                 : ""}
             </p>
           </div>
+          <div>
+            <p className="text-zinc-500">最近修改时间</p>
+            <p>
+              {viewModel.detail.lastEditedAt
+                ? toDisplayDate(viewModel.detail.lastEditedAt)
+                : viewModel.detail.lastEditedAt === null
+                  ? "尚未修改"
+                  : "未知"}
+            </p>
+            {viewModel.detail.lastEditedAt ? (
+              <p>
+                本次修改是否迟交：
+                {viewModel.detail.lastEditIsLate === true
+                  ? "是"
+                  : viewModel.detail.lastEditIsLate === false
+                    ? "否"
+                    : "未知"}
+              </p>
+            ) : null}
+          </div>
+          <p>
+            {viewModel.detail.reviewStartedAt ||
+            viewModel.detail.editing.reason === "REVIEW_STARTED"
+              ? "已进入评阅，作品已固定，学生不能修改。"
+              : "教师仅查看不会锁定作品；正式提交反馈或受理 AI 申请后固定作品。"}
+          </p>
         </div>
       </section>
 
@@ -271,6 +297,7 @@ export default async function TeacherSubmissionDetailPage({
       <SubmissionAiReview
         key={submissionId}
         submissionId={submissionId}
+        contentRevision={viewModel.detail.contentRevision}
         status={viewModel.detail.aiFeedbackStatus}
         review={viewModel.detail.aiReview}
         autoRefresh={false}
@@ -283,7 +310,10 @@ export default async function TeacherSubmissionDetailPage({
         </p>
       </section>
 
-      <TeacherFeedbackForm submissionId={submissionId} />
+      <TeacherFeedbackForm
+        submissionId={submissionId}
+        contentRevision={viewModel.detail.contentRevision}
+      />
 
       <section className="space-y-3">
         <h2 className="text-base font-semibold text-zinc-900">反馈历史</h2>

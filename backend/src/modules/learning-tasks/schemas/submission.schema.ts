@@ -61,6 +61,20 @@ export class Submission {
   @Prop({ required: true, type: SubmissionContentSchema })
   content!: SubmissionContent;
 
+  // No schema default: historical documents remain distinguishable from invalid
+  // persisted values. New submissions explicitly write revision zero.
+  @Prop({ type: Number, min: 0 })
+  contentRevision?: number;
+
+  @Prop({ type: Date })
+  lastEditedAt?: Date;
+
+  @Prop({ type: Boolean })
+  lastEditIsLate?: boolean;
+
+  @Prop({ type: Date })
+  reviewStartedAt?: Date;
+
   @Prop({ type: SubmissionMetaSchema })
   meta?: SubmissionMeta;
 

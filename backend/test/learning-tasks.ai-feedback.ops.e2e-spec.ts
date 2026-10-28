@@ -402,7 +402,7 @@ describe('LearningTasks AI Feedback Ops (e2e) - pipeline & debug gate ON', () =>
 
     await teacherAgent
       .post(`/api/learning-tasks/submissions/${submissionId}/feedback`)
-      .send(teacherFeedbackPayload)
+      .send({ expectedRevision: 0, ...teacherFeedbackPayload })
       .expect(201);
 
     const succeededJobs = await teacherAgent
@@ -831,7 +831,7 @@ describe('LearningTasks AI Feedback Ops (e2e) - stub worker default loop', () =>
       .post(
         `/api/learning-tasks/submissions/${submissionId}/ai-feedback/request`,
       )
-      .send({ reason: 'worker-loop-check' })
+      .send({ expectedRevision: 0, reason: 'worker-loop-check' })
       .expect(200);
     expect(
       ['PENDING', 'RUNNING', 'SUCCEEDED'].includes(
