@@ -419,6 +419,8 @@ describe('B1-2 submission content edits and review admission (HTTP)', () => {
       },
       { expectedRevision: 0, content: { ...changed, language: 1 } },
       { expectedRevision: 0, content: { ...changed, codeText: null } },
+      { expectedRevision: 0, content: { ...changed, codeText: '' } },
+      { expectedRevision: 0, content: { ...changed, language: '' } },
       ...[
         'studentId',
         'taskId',
@@ -445,14 +447,51 @@ describe('B1-2 submission content edits and review admission (HTTP)', () => {
         content: { ...changed, studentId: userIds[1].toString() },
       },
     ];
-    for (const payload of invalid)
+    for (const payload of invalid) {
       await student.patch(submissionUrl(created.id)).send(payload).expect(400);
-    expect(await raw(created.id)).toEqual(before);
-    await noReviewRecords(created.id);
+      expect(await raw(created.id)).toEqual(before);
+      await noReviewRecords(created.id);
+    }
     const unicode = { ...changed, submissionNote: '😀'.repeat(20000) };
     expect(
       ((await edit(created.id, 0, unicode).expect(200)).body as Detail).content,
     ).toEqual(unicode);
+  });
+
+  it('rejects empty code or language before creating a first attempt', async () => {
+    const published = await publish();
+    const readOwnedCounts = async () => {
+      const owned = await submissions
+        .find({ studentId: { $in: userIds } })
+        .select('_id')
+        .lean()
+        .exec();
+      return {
+        submissions: owned.length,
+        jobs: await jobs.countDocuments({ studentId: { $in: userIds } }),
+        feedback: await feedback.countDocuments({
+          submissionId: { $in: owned.map((item) => item._id) },
+        }),
+      };
+    };
+    const before = await readOwnedCounts();
+    for (const content of [
+      { ...original, codeText: '' },
+      { ...original, language: '' },
+    ]) {
+      await student
+        .post(instanceUrl(published.id) + '/submissions')
+        .send({ content })
+        .expect(400);
+      expect(await readOwnedCounts()).toEqual(before);
+    }
+    const content = { ...original, submissionNote: '' };
+    const created = await submit(published, content);
+    expect(created.attemptNo).toBe(1);
+    expect(created.contentRevision).toBe(0);
+    expect(created.content).toEqual(content);
+    expect((await raw(created.id))?.content).toEqual(content);
+    await noReviewRecords(created.id);
   });
 
   it('validates review DTOs and business tags before fixing the content', async () => {

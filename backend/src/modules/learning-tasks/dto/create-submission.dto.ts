@@ -2,6 +2,7 @@ import {
   IsOptional,
   IsDefined,
   IsObject,
+  IsNotEmpty,
   IsString,
   Matches,
   ValidateIf,
@@ -11,9 +12,11 @@ import { Type } from 'class-transformer';
 
 export class SubmissionContentDto {
   @IsString()
+  @IsNotEmpty()
   codeText!: string;
 
   @IsString()
+  @IsNotEmpty()
   language!: string;
 
   @ValidateIf((_, value: unknown) => value !== undefined)
