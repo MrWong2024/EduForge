@@ -399,10 +399,10 @@ Global SoT 只保留理解跨 Service workflow 必需的稳定不变量，不追
 - Downstream / Dependencies: `AiFeedbackJobModel`、`SubmissionModel`、`ClassroomTaskModel`、`FeedbackModel`、`AI_FEEDBACK_PROVIDER_TOKEN`、`AiFeedbackGuardsService`、`ConfigService`、`feedback-item-compactor`、`AiContextReaderService`。
 - Consistency / State / Idempotency:
   - findOneAndUpdate 按 createdAt 原子 claim，同时检查 PENDING/FAILED、调度到期、budgetVersion=1、attempts < maxAttempts 和既有锁条件，在同一次写入增加 attempts 并设 RUNNING。attempts 表示认领次数，本地限流也消耗机会；失败更新不再递增。所有认领后 Job 记录和终态写入匹配 ID、RUNNING、本次 attempts 及 lockOwner。
-  - 每次处理由 AiContextReaderService 只读取所属实例快照指定 ZIP；不回查当前模板、不保存正文副本。资料读取在 Provider 及 stub 之前，失败安全终止、不调用模型。参考文件以引用序号/条目来源标记为分析数据，与发布要求、评分参考、学生源码和说明/声明分区；参考实现不是唯一合法答案或运行证据，不要求复述全文/内部路径。完整 messages 仍进入 Provider 的现有字节预算。
-  - 读取 Submission 后核对 Job/Submission/实例归属，读取所属实例的固定 title/description/rubric 形成 AiSubmissionAnalysisContext，codeText/language/submissionNote/meta.aiUsageDeclaration 完整来自当前 Submission，说明与源码分别标记且不能覆盖教师要求；调用 Provider 后在写库前以内存 compactor 收敛，同类问题合并，存在 ERROR/WARN 时去掉独立低价值 INFO。
+  - 每次处理由 AiContextReaderService 只读取所属实例快照指定 ZIP；不回查当前模板、不向数据库保存正文副本。资料读取在 Provider 及 stub 之前，失败安全终止、不调用模型。参考文件以引用序号/条目来源标记为分析数据，与发布要求、评分参考、学生源码和说明/声明分区；参考实现不是唯一合法答案或运行证据，不要求复述全文/内部路径。完整 messages 仍进入 Provider 的现有字节预算。
+  - 读取 Submission 后核对 Job/Submission/实例归属，读取所属实例的固定 title/description/rubric 形成 AiSubmissionAnalysisContext，codeText/language/submissionNote/meta.aiUsageDeclaration 完整来自当前 Submission，说明与源码分别标记且不能覆盖教师要求；调用 Provider 后在写库前以内存 compactor 收敛，同类问题合并，存在 ERROR/WARN 时去掉独立低价值 INFO。compactor 保留展示文本的分段和有效缩进，另用规范化文本比较去重；不凭空改写肯定正文或补写通用建议。
   - Job/Processor 是唯一重试负责人：仅本地/上游限流、上游 5xx 和超时可在剩余机会内 FAILED，并按既有 30 秒起指数退避（最大 10 分钟）；其他不可重试失败和耗尽次数直接 DEAD，清理锁与调度时间，保留安全失败代码。数据库记录/反馈/终态写入异常不能成为再次调用模型的理由。
-  - 每次真实 HTTP 前通过回调在当前 claim 持久化预留，以 claimNo 标识，最多三条；包含 provider、model、完整输入 bytes、输出 token 上限、reservedAt、usage=null。预留失败或未匹配禁止 fetch；供应商可能已收到的未知预留不归零、不删除。usage 落库先于反馈处理；不保存 prompt/源码副本/原始响应/密钥/请求头。
+  - 每次真实 HTTP 前通过回调在当前 claim 持久化预留，以 claimNo 标识，最多三条；包含 provider、model、完整输入 bytes、输出 token 上限、reservedAt、usage=null。预留失败或未匹配禁止 fetch；供应商可能已收到的未知预留不归零、不删除。usage 落库先于反馈处理；数据库不保存 prompt/源码副本/完整请求正文/原始响应/密钥/请求头。可选本地请求体副作用见 [Provider Card B](#provider-card-b)。
   - 缺当前版本的 PENDING/FAILED/RUNNING Job 原子终止为 LEGACY_JOB_UNSUPPORTED，不调用 Provider、不补造预算版本或用量；旧 SUCCEEDED/DEAD 只读保持。无迁移、回填、RUNNING 崩溃恢复、租约接管或自动重放。
 - Isolation: 沿 Job 的 classroomTaskId 进入限流桶；成功条件写回校验认领者，不把 Worker 防重入当成 Job 跨入口互斥。
 - Side Effects: 外部 Provider 调用、反馈写库、Job 状态/锁/错误/重试时间更新；Provider 调用及反馈持久化使用的信号量在 finally 释放。
@@ -447,16 +447,17 @@ Global SoT 只保留理解跨 Service workflow 必需的稳定不变量，不追
 - Provider: `backend/src/modules/learning-tasks/ai-feedback/providers/real/openai-compatible-feedback-provider.base.ts`
 - Domain / Responsibility: 为兼容协议 Provider 构建请求，组织 prompt，执行有界网络调用，并解析/校验反馈及映射 Provider 错误。
 - Upstream: `BailianFeedbackProvider` 继承复用，Processor 提供分析上下文。
-- Downstream / Dependencies: Provider 配置、`fetch`、prompt、JSON protocol 与 normalizer。
+- Downstream / Dependencies: Provider 配置、`fetch`、prompt、JSON protocol、normalizer 与 `AiFeedbackRequestBodyDumper`。
 - Consistency / State / Idempotency:
   - 严格 JSON 与字段白名单，协议最多 2 条反馈并结合 maxItems 收敛；prompt 要求主问题导向，默认 1 条、必要时第 2 条，同类问题不按位置拆分，阻断运行问题优先，ERROR/WARN 存在时不输出表扬型 INFO。
-  - system prompt 要求 message/suggestion 使用简体中文、保留代码元素原文；user prompt 纳入题目标题/描述/rubric、代码/语言、尝试次数、完整提交说明和 AI 使用声明，要求结合题目分析；学生材料不是系统指令，明确平台未运行程序，自述运行通过不等于验证或掌握。
+  - system prompt 要求 message/suggestion 使用简体中文、保留代码元素原文；user prompt 纳入题目标题/描述/rubric、代码/语言、尝试次数、完整提交说明和 AI 使用声明，要求依据当前任务实质评价维度交代结论、依据及材料不足的判断边界。有依据的肯定可以不带 suggestion；保留 `items:[]` 解析兼容，不用空数组隐藏明确缺陷或必需缺项。
+  - 学生材料不是系统指令；区分静态判断、提交者报告、AI 工具代跑、教学模拟与待确认事实，明确平台未运行程序。仅任务要求本人解释、实践或独立完成时才评价对应证据；rubric 中隐私、输出格式、参考资料使用等反馈约束只约束输出，不转作学生评分项。
   - 多文件文本识别仅由 prompt 引导，默认按普通单文件处理；标准边界为 `===== FILE: relative/path/FileName.ext =====`，容错识别关键词大小写、仅文件名和明显弱边界。只有强证据表明多文件且边界不清时才保守提示；所有输入完整保留，不截断、摘要、分块或隐式降级。
   - 唯一计量为实际即将发送的完整 messages 的 `Buffer.byteLength(JSON.stringify(messages), 'utf8')`，等于限额允许，超限在预留/fetch 前拒绝。固定请求参数见 Config Owner；只接受 finish_reason=stop，length 归 OUTPUT_LIMIT_REACHED，其他/缺失结束原因及非法协议归 BAD_RESPONSE。
-- Isolation: 单提交分析，执行记录不含完整学生材料或供应商响应。
-- Side Effects: 每次 analyze 最多一次 fetch，通过 Processor 回调先预留、再保存 usage；不直接写业务数据库。
-- Important Performance / Recovery: 单请求有限超时，Provider 不重试；先从可解析响应读取合法 usage，再判断 HTTP/结束原因/业务 JSON。仅实报非负有限整数且 prompt+completion=total 有效；reasoning_tokens 是 completion 明细，不重复相加、不保存 reasoning_content。缺失/无效/超时/无法解析 usage 为 null。HTTP 429/5xx/超时按可重试错误处理，缺 Key 为不可重试 MISSING_API_KEY；非法 JSON/越界字段为 BAD_RESPONSE，解析失败终止本次 Provider 解析链。
-- SoT: `backend/src/modules/learning-tasks/ai-feedback/providers/real/openai-compatible-feedback-provider.base.ts`；`backend/src/modules/learning-tasks/ai-feedback/protocol/ai-feedback-json.protocol.ts`；`backend/src/modules/learning-tasks/ai-feedback/prompts/ai-feedback.prompt.ts`。
+- Isolation: 单提交分析，数据库执行记录不含完整学生材料或供应商响应。
+- Side Effects: 每次 analyze 最多一次 fetch，通过 Processor 回调先预留、再保存 usage；不直接写业务数据库。预算检查及预留成功后，在实际 fetch 路径将 payload 序列化一次，可选留存与 `fetch.body` 使用同一字符串；文件仅含完整 UTF-8 payload，不含请求头或凭据，不向消息或上游协议加入诊断字段。开关、环境门禁及固定目录见 [Config Matrix](./handoff-backend-config-matrix.md#实际发送边界请求体留存)。文件存在仅证明到达留存边界，不代表网络发送成功。
+- Important Performance / Recovery: 单请求有限超时，Provider 不重试；留存尝试结束后才开始原有上游 HTTP 超时计时。留存失败只安全告警，继续原有单次请求，不改变反馈状态或增加重试；成功日志仅含提交标识与保存位置，失败日志不打印正文、headers、完整 config 或原始错误对象。先从可解析响应读取合法 usage，再判断 HTTP/结束原因/业务 JSON。仅实报非负有限整数且 prompt+completion=total 有效；reasoning_tokens 是 completion 明细，不重复相加、不保存 reasoning_content。缺失/无效/超时/无法解析 usage 为 null。HTTP 429/5xx/超时按可重试错误处理，缺 Key 为不可重试 MISSING_API_KEY；非法 JSON/越界字段为 BAD_RESPONSE，解析失败终止本次 Provider 解析链。
+- SoT: `backend/src/modules/learning-tasks/ai-feedback/providers/real/openai-compatible-feedback-provider.base.ts`；`backend/src/modules/learning-tasks/ai-feedback/lib/ai-feedback-request-body-dumper.ts`；`backend/src/modules/learning-tasks/ai-feedback/protocol/ai-feedback-json.protocol.ts`；`backend/src/modules/learning-tasks/ai-feedback/prompts/ai-feedback.prompt.ts`。
 - Boundary / Non-responsibility: 不用后端正则拆分多文件，不新增 codeFiles 数据模型，不要求普通提交补 FILE 标记；不接管 Processor 的 Job 重试终态。具体配置值见 [Config Matrix](./handoff-backend-config-matrix.md)。
 
 ## Provider Card C

@@ -24,6 +24,7 @@ import {
   buildUserPrompt,
 } from '../../prompts/ai-feedback.prompt';
 import { AI_FEEDBACK_JSON_PROTOCOL } from '../../protocol/ai-feedback-json.protocol';
+import { AiFeedbackRequestBodyDumper } from '../../lib/ai-feedback-request-body-dumper';
 
 import {
   checkInputBudget,
@@ -79,11 +80,15 @@ class OpenAiCompatibleProviderError extends AiFeedbackProviderError {
 }
 
 export abstract class OpenAiCompatibleFeedbackProviderBase implements AiFeedbackProvider {
+  private readonly requestBodyDumper: AiFeedbackRequestBodyDumper;
+
   protected constructor(
     protected readonly configService: ConfigService,
     private readonly logger: Logger,
     private readonly options: OpenAiCompatibleProviderOptions,
-  ) {}
+  ) {
+    this.requestBodyDumper = new AiFeedbackRequestBodyDumper(logger);
+  }
 
   assertInputEligible(context: AiSubmissionAnalysisContext): void {
     const config = this.getConfig();
@@ -118,7 +123,11 @@ export abstract class OpenAiCompatibleFeedbackProviderBase implements AiFeedback
     });
     let response: { status: number; data: unknown };
     try {
-      response = await this.callProvider(request, config.timeoutMs);
+      response = await this.callProvider(
+        request,
+        config.timeoutMs,
+        context.submissionId,
+      );
     } catch (error) {
       await execution.reportUsage(null);
       throw error;
@@ -216,14 +225,24 @@ export abstract class OpenAiCompatibleFeedbackProviderBase implements AiFeedback
       model: string;
     },
     timeoutMs: number,
+    submissionId: string,
   ) {
+    // This exact string is both retained and supplied to fetch. Preparation and
+    // reservation have already succeeded; filesystem time is not HTTP time.
+    const body = JSON.stringify(request.payload);
+    if (
+      this.configService.get<string>('NODE_ENV') === 'development' &&
+      this.configService.get<boolean>('AI_FEEDBACK_DUMP_REQUEST_BODY') === true
+    ) {
+      await this.requestBodyDumper.save(submissionId, body);
+    }
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), timeoutMs);
     try {
       const response = await fetch(request.endpoint, {
         method: 'POST',
         headers: request.headers,
-        body: JSON.stringify(request.payload),
+        body,
         signal: controller.signal,
       });
       let data: unknown = null;

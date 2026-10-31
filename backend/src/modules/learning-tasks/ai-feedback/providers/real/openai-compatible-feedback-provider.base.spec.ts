@@ -1,9 +1,12 @@
 import { Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import fs from 'node:fs/promises';
+import { basename, dirname, resolve } from 'node:path';
 import { envValidationSchema } from '../../../../../config/env.validation';
 import { AiFeedbackExecution } from '../../interfaces/ai-feedback-provider.interface';
 import { AiSubmissionAnalysisContext } from '../../interfaces/ai-submission-analysis-context.interface';
 import { DefaultStubAiFeedbackProvider } from '../../services/default-stub-ai-feedback.provider';
+import { AiFeedbackRequestBodyDumper } from '../../lib/ai-feedback-request-body-dumper';
 import { BailianFeedbackProvider } from './bailian-feedback.provider';
 
 const context: AiSubmissionAnalysisContext = {
@@ -58,6 +61,25 @@ function execution(): AiFeedbackExecution {
 
 describe('AI Feedback providers (fake fetch only)', () => {
   let fetchMock: jest.SpiedFunction<typeof fetch>;
+  let logMock: jest.SpiedFunction<Logger['log']>;
+  let warnMock: jest.SpiedFunction<Logger['warn']>;
+  let temporaryDirectory: string | undefined;
+  const temporaryParent = resolve(
+    __dirname,
+    '../../../../../../../.local/deliverables',
+  );
+
+  async function useTestDumpDirectory(provider: BailianFeedbackProvider) {
+    await fs.mkdir(temporaryParent, { recursive: true });
+    temporaryDirectory = await fs.mkdtemp(
+      resolve(temporaryParent, '.tmp-ai-request-tests-'),
+    );
+    const directory = resolve(temporaryDirectory, 'requests');
+    Object.defineProperty(provider, 'requestBodyDumper', {
+      value: new AiFeedbackRequestBodyDumper(new Logger('unit'), directory),
+    });
+    return directory;
+  }
 
   beforeEach(() => {
     jest.useFakeTimers();
@@ -65,14 +87,253 @@ describe('AI Feedback providers (fake fetch only)', () => {
       .spyOn(globalThis, 'fetch')
       .mockRejectedValue(new Error('Unexpected fetch in unit test'));
     jest.spyOn(Logger.prototype, 'debug').mockImplementation(() => undefined);
-    jest.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
+    warnMock = jest
+      .spyOn(Logger.prototype, 'warn')
+      .mockImplementation(() => undefined);
+    logMock = jest
+      .spyOn(Logger.prototype, 'log')
+      .mockImplementation(() => undefined);
   });
 
-  afterEach(() => {
+  afterEach(async () => {
     const remainingTimers = jest.getTimerCount();
     jest.useRealTimers();
     jest.restoreAllMocks();
+    if (temporaryDirectory) {
+      if (
+        dirname(temporaryDirectory) !== temporaryParent ||
+        !basename(temporaryDirectory).startsWith('.tmp-ai-request-tests-')
+      ) {
+        throw new Error(
+          'Refusing cleanup outside the owned temporary directory',
+        );
+      }
+      await fs.rm(temporaryDirectory, { recursive: true, force: true });
+      temporaryDirectory = undefined;
+    }
     expect(remainingTimers).toBe(0);
+  });
+
+  it('retains exactly the complete string handed to fake fetch after reservation', async () => {
+    const provider = new BailianFeedbackProvider(
+      configService({
+        NODE_ENV: 'development',
+        AI_FEEDBACK_DUMP_REQUEST_BODY: true,
+      }),
+    );
+    const directory = await useTestDumpDirectory(provider);
+    const completeContext: AiSubmissionAnalysisContext = {
+      ...context,
+      taskTitle: '合成统计任务',
+      taskDescription: '保持空集合行为，并解释过滤条件。完整任务尾部。',
+      taskRubric: {
+        criteria: ['结果正确', '说明依据'],
+        note: '完整 rubric 尾部',
+      },
+      codeText: 'def total(values):\n    return sum(values)\n# 学生源码尾部',
+      submissionNote: '学生报告：使用示例数据检查了空集合。说明尾部。',
+      aiUsageDeclaration: 'AI 工具仅提供检查建议，未代跑。声明尾部。',
+      referenceFiles: [
+        {
+          referenceNo: 1,
+          entryPath: 'guide/a.md',
+          text: '参考 A\n完整 A 尾部',
+        },
+        {
+          referenceNo: 2,
+          entryPath: 'checks/b.py',
+          text: '# 参考 B\nassert True\n完整 B 尾部',
+        },
+      ],
+    };
+    const hooks = execution();
+    const successfulResponse = chatResponse(JSON.stringify({ items: [item] }));
+    const stringify = jest.spyOn(JSON, 'stringify');
+    fetchMock.mockImplementation(async (_url, init) => {
+      expect(hooks.reserveRequest).toHaveBeenCalledTimes(1);
+      if (typeof init?.body !== 'string')
+        throw new Error('Expected string body');
+      const files = await fs.readdir(directory);
+      expect(files).toHaveLength(1);
+      const saved = await fs.readFile(resolve(directory, files[0]));
+      expect(saved).toEqual(Buffer.from(init.body, 'utf8'));
+      expect(saved.subarray(0, 3)).not.toEqual(Buffer.from([0xef, 0xbb, 0xbf]));
+      expect(init.body.endsWith('}')).toBe(true);
+      expect(init.body).not.toContain('synthetic-unit-key');
+      expect(init.body).not.toContain('Authorization');
+      const payload = JSON.parse(init.body) as {
+        model: string;
+        messages: Array<{ role: string; content: string }>;
+        temperature: number;
+        max_tokens: number;
+        enable_thinking: boolean;
+      };
+      expect(Object.keys(payload).sort()).toEqual([
+        'enable_thinking',
+        'max_tokens',
+        'messages',
+        'model',
+        'temperature',
+      ]);
+      expect(payload).toMatchObject({
+        model: 'qwen-plus',
+        temperature: 0.2,
+        max_tokens: 2048,
+        enable_thinking: false,
+      });
+      const userMessage = payload.messages[1].content;
+      for (const material of [
+        completeContext.taskTitle,
+        completeContext.taskDescription,
+        JSON.stringify(completeContext.taskRubric),
+        completeContext.codeText,
+        completeContext.submissionNote,
+        completeContext.aiUsageDeclaration,
+        ...(completeContext.referenceFiles ?? []).map((file) => file.text),
+      ]) {
+        expect(userMessage).toContain(material);
+      }
+      return successfulResponse;
+    });
+
+    await expect(
+      provider.analyzeSubmission(completeContext, hooks),
+    ).resolves.toMatchObject([item]);
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(
+      stringify.mock.calls.filter(
+        ([value]) =>
+          typeof value === 'object' && value !== null && 'messages' in value,
+      ),
+    ).toHaveLength(1);
+    expect(logMock).toHaveBeenCalledWith(
+      expect.stringContaining(context.submissionId),
+    );
+    expect(logMock).toHaveBeenCalledWith(expect.stringContaining(directory));
+    expect(logMock).not.toHaveBeenCalledWith(
+      expect.stringContaining(completeContext.codeText),
+    );
+  });
+
+  it.each([
+    ['development', undefined],
+    ['development', false],
+    ['development', 'false'],
+    ['development', 'true'],
+    ['test', true],
+    ['browser_acceptance', true],
+    ['production', true],
+  ])(
+    'does not touch files for environment %s and flag %p',
+    async (nodeEnv, flag) => {
+      const save = jest
+        .spyOn(AiFeedbackRequestBodyDumper.prototype, 'save')
+        .mockResolvedValue(undefined);
+      const mkdir = jest.spyOn(fs, 'mkdir');
+      const writeFile = jest.spyOn(fs, 'writeFile');
+      fetchMock.mockResolvedValue(chatResponse(JSON.stringify({ items: [] })));
+      const provider = new BailianFeedbackProvider(
+        configService({
+          NODE_ENV: nodeEnv,
+          AI_FEEDBACK_DUMP_REQUEST_BODY: flag,
+          EDUFORGE_DATABASE_PURPOSE: 'browser_acceptance',
+        }),
+      );
+
+      await expect(
+        provider.analyzeSubmission(context, execution()),
+      ).resolves.toEqual([]);
+
+      expect(save).not.toHaveBeenCalled();
+      expect(mkdir).not.toHaveBeenCalled();
+      expect(writeFile).not.toHaveBeenCalled();
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+    },
+  );
+
+  it('does not retain a preflight, budget rejection, or failed reservation', async () => {
+    const save = jest
+      .spyOn(AiFeedbackRequestBodyDumper.prototype, 'save')
+      .mockResolvedValue(undefined);
+    const provider = new BailianFeedbackProvider(
+      configService({
+        NODE_ENV: 'development',
+        AI_FEEDBACK_DUMP_REQUEST_BODY: true,
+        AI_FEEDBACK_MAX_INPUT_BYTES: 16384,
+      }),
+    );
+    provider.assertInputEligible(context);
+    await expect(
+      provider.analyzeSubmission(
+        { ...context, codeText: '中'.repeat(10000) },
+        execution(),
+      ),
+    ).rejects.toMatchObject({ code: 'INPUT_BUDGET_EXCEEDED' });
+    const hooks = execution();
+    const failure = new Error('synthetic reservation failure');
+    hooks.reserveRequest = jest.fn().mockRejectedValue(failure);
+    await expect(provider.analyzeSubmission(context, hooks)).rejects.toBe(
+      failure,
+    );
+
+    expect(save).not.toHaveBeenCalled();
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('continues one fetch when the owned retention path cannot be written', async () => {
+    const provider = new BailianFeedbackProvider(
+      configService({
+        NODE_ENV: 'development',
+        AI_FEEDBACK_DUMP_REQUEST_BODY: true,
+      }),
+    );
+    const directory = await useTestDumpDirectory(provider);
+    await fs.writeFile(directory, 'owned blocking file');
+    fetchMock.mockResolvedValue(
+      chatResponse(JSON.stringify({ items: [item] })),
+    );
+
+    await expect(
+      provider.analyzeSubmission(context, execution()),
+    ).resolves.toMatchObject([item]);
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(warnMock).toHaveBeenCalledWith(
+      'AI feedback request body retention failed: submissionId=unit-submission',
+    );
+  });
+
+  it('starts HTTP timing only after the retention attempt settles', async () => {
+    const provider = new BailianFeedbackProvider(
+      configService({
+        NODE_ENV: 'development',
+        AI_FEEDBACK_DUMP_REQUEST_BODY: true,
+      }),
+    );
+    let finishRetention: (() => void) | undefined;
+    const save = jest
+      .spyOn(AiFeedbackRequestBodyDumper.prototype, 'save')
+      .mockImplementation(
+        () =>
+          new Promise<void>((resolve) => {
+            finishRetention = resolve;
+          }),
+      );
+    fetchMock.mockImplementation(() => {
+      expect(jest.getTimerCount()).toBe(1);
+      return Promise.resolve(chatResponse(JSON.stringify({ items: [item] })));
+    });
+    const pending = provider.analyzeSubmission(context, execution());
+    await Promise.resolve();
+    expect(save).toHaveBeenCalledTimes(1);
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(jest.getTimerCount()).toBe(0);
+    if (!finishRetention) throw new Error('Retention did not begin');
+    finishRetention();
+
+    await expect(pending).resolves.toMatchObject([item]);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
   it('runs stub without API keys or network access', async () => {

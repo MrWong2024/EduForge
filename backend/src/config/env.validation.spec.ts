@@ -223,3 +223,36 @@ describe('A2 input/output limits (no I/O)', () => {
     expect(validate({ [key]: value }).error).toBeDefined();
   });
 });
+
+describe('AI request body dump env validation (no I/O)', () => {
+  it('defaults to disabled independently of the debug flag', () => {
+    for (const debugEnabled of ['true', 'false']) {
+      const result = validate({ AI_FEEDBACK_DEBUG_ENABLED: debugEnabled });
+      expect(result.error).toBeUndefined();
+      expect(result.value.AI_FEEDBACK_DUMP_REQUEST_BODY).toBe(false);
+    }
+  });
+
+  it.each([
+    ['true', true],
+    ['false', false],
+    [true, true],
+    [false, false],
+  ])('normalizes %p to boolean %p', (input, expected) => {
+    const result = validate({ AI_FEEDBACK_DUMP_REQUEST_BODY: input });
+    expect(result.error).toBeUndefined();
+    expect(result.value.AI_FEEDBACK_DUMP_REQUEST_BODY).toBe(expected);
+  });
+
+  it.each(['yes', 'no', '1', '0', '', 1, 0, null])(
+    'rejects invalid dump boolean %p',
+    (input) => {
+      const result = validate({ AI_FEEDBACK_DUMP_REQUEST_BODY: input });
+      expect(result.error?.details).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ path: ['AI_FEEDBACK_DUMP_REQUEST_BODY'] }),
+        ]),
+      );
+    },
+  );
+});

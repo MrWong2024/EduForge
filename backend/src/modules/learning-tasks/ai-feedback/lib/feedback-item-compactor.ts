@@ -49,7 +49,8 @@ const SEMICOLON_PATTERNS = [
   /分号|缺少;|缺少；|漏写分号/u,
 ];
 
-const cleanText = (value: string) => value.trim().replace(/\s+/g, ' ');
+const cleanDisplayText = (value: string) =>
+  value.replace(/\r\n?/g, '\n').trim();
 
 const normalizeForCompare = (value: string) =>
   value
@@ -142,12 +143,14 @@ const normalizeScoreHint = (value?: number) =>
   typeof value === 'number' && Number.isFinite(value) ? value : undefined;
 
 const normalizeItem = (item: AiFeedbackItem): AiFeedbackItem | null => {
-  const message = cleanText(item.message ?? '');
+  const message = cleanDisplayText(item.message ?? '');
   if (!message) {
     return null;
   }
   const suggestionRaw =
-    typeof item.suggestion === 'string' ? cleanText(item.suggestion) : '';
+    typeof item.suggestion === 'string'
+      ? cleanDisplayText(item.suggestion)
+      : '';
   return {
     type: item.type,
     severity: item.severity,
@@ -207,14 +210,17 @@ const pickPrimaryItem = (items: AiFeedbackItem[]) => {
 };
 
 const collectMergedSuggestion = (items: AiFeedbackItem[]) => {
-  const suggestions = Array.from(
-    new Set(
-      items
-        .map((item) => item.suggestion ?? '')
-        .map((value) => value.trim())
-        .filter((value) => value.length > 0),
-    ),
-  );
+  const suggestions: string[] = [];
+  const seen = new Set<string>();
+  for (const item of items) {
+    const display = item.suggestion ?? '';
+    const key = normalizeForCompare(display);
+    if (!key || seen.has(key)) {
+      continue;
+    }
+    seen.add(key);
+    suggestions.push(display);
+  }
   if (suggestions.length === 0) {
     return undefined;
   }
@@ -341,23 +347,6 @@ const isIndependentIssue = (
   return true;
 };
 
-const ensureImprovementForPraiseOnly = (item: AiFeedbackItem) => {
-  if (!isLowValueInfo(item)) {
-    return item;
-  }
-  const hasSuggestion =
-    typeof item.suggestion === 'string' && item.suggestion.trim().length > 0;
-  if (hasSuggestion) {
-    return item;
-  }
-  return {
-    ...item,
-    message:
-      '整体实现方向基本正确。建议继续完善边界条件、异常输入处理与代码可读性。',
-    suggestion: '可补充 1-2 个边界测试用例，并检查命名与注释是否足够清晰。',
-  };
-};
-
 const resolveMaxItems = (maxItems?: number) => {
   if (!Number.isFinite(maxItems)) {
     return DEFAULT_MAX_OUTPUT_ITEMS;
@@ -415,10 +404,6 @@ export const compactAiFeedbackItems = (
       selected.push(candidate);
       break;
     }
-  }
-
-  if (!actionable && selected.length > 0) {
-    selected[0] = ensureImprovementForPraiseOnly(selected[0]);
   }
 
   return selected.slice(0, maxItems);

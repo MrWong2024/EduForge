@@ -92,25 +92,88 @@ describe('compactAiFeedbackItems', () => {
     expect(compacted[1].type).toBe(FeedbackType.Performance);
   });
 
-  it('converts praise-only output into one improvement-oriented feedback', () => {
-    const items: AiFeedbackItem[] = [
-      buildItem({
-        type: FeedbackType.Other,
-        severity: FeedbackSeverity.Info,
-        message: '做得很好，逻辑清晰',
-      }),
-      buildItem({
-        type: FeedbackType.Other,
-        severity: FeedbackSeverity.Info,
-        message: 'Great job overall',
-      }),
-    ];
-
-    const compacted = compactAiFeedbackItems(items);
+  it('preserves a supported affirmation without inventing a suggestion', () => {
+    const message =
+      '做得很好。空输入返回空结果；相同键按任务要求保留首次出现顺序。';
+    const compacted = compactAiFeedbackItems([buildItem({ message })]);
 
     expect(compacted).toHaveLength(1);
     expect(compacted[0].severity).toBe(FeedbackSeverity.Info);
-    expect(compacted[0].suggestion).toContain('测试');
+    expect(compacted[0].message).toBe(message);
+    expect(compacted[0].suggestion).toBeUndefined();
+  });
+
+  it('preserves paragraphs and internal indentation while normalizing line endings', () => {
+    const compacted = compactAiFeedbackItems([
+      buildItem({
+        message:
+          '\r\n结论：输入判断符合要求。\r\n\r\n  依据：空集合有独立分支。\r\n',
+        suggestion:
+          '\r\n核对重复键：\r\n  - 输入两个相同键。\r\n  - 比较输出顺序。\r\n',
+      }),
+    ]);
+
+    expect(compacted[0].message).toBe(
+      '结论：输入判断符合要求。\n\n  依据：空集合有独立分支。',
+    );
+    expect(compacted[0].suggestion).toBe(
+      '核对重复键：\n  - 输入两个相同键。\n  - 比较输出顺序。',
+    );
+  });
+
+  it('deduplicates whitespace variants without flattening the retained display text', () => {
+    const first = buildItem({
+      type: FeedbackType.Bug,
+      severity: FeedbackSeverity.Warn,
+      message: 'Check empty input.\n\n  Preserve record order.',
+      suggestion: 'Add an empty input case.\n  Compare record order.',
+    });
+    const compacted = compactAiFeedbackItems([
+      first,
+      {
+        ...first,
+        message: 'Check empty input. Preserve record order.',
+        suggestion: 'Add an empty input case. Compare record order.',
+      },
+    ]);
+
+    expect(compacted).toHaveLength(1);
+    expect(compacted[0].message).toBe(first.message);
+    expect(compacted[0].suggestion).toBe(first.suggestion);
+  });
+
+  it('deduplicates merged suggestions by comparison key and preserves their display form', () => {
+    const firstSuggestion = '补齐分号。\n  保留其他语句。';
+    const nextSuggestion = '修复后编译。\n\n  核对原有输出。';
+    const compacted = compactAiFeedbackItems([
+      buildItem({
+        type: FeedbackType.Syntax,
+        severity: FeedbackSeverity.Error,
+        message: '第 12 行缺少分号',
+        suggestion: firstSuggestion,
+      }),
+      buildItem({
+        type: FeedbackType.Syntax,
+        severity: FeedbackSeverity.Error,
+        message: '第 26 行缺少分号',
+        suggestion: '补齐分号。 保留其他语句。',
+      }),
+      buildItem({
+        type: FeedbackType.Syntax,
+        severity: FeedbackSeverity.Error,
+        message: '第 40 行缺少分号',
+        suggestion: nextSuggestion,
+      }),
+    ]);
+
+    expect(compacted).toHaveLength(1);
+    expect(compacted[0].suggestion).toBe(
+      `${firstSuggestion}；${nextSuggestion}`,
+    );
+  });
+
+  it('keeps empty-array compatibility', () => {
+    expect(compactAiFeedbackItems([])).toEqual([]);
   });
 
   it('respects maxItems=1 while preserving primary severity', () => {

@@ -140,6 +140,12 @@ Mongo password、production credential、Bailian API Key、SMTP password、第�
 - 扩展既有 classroom text contract 与 Bailian context HTTP E2E，证明正式 API 白名单/持久化、最终生效引用验证与无部分写入、候选快照固定、成员投影、实际 mock HTTP 请求包含多包材料、异步资料失效/输入超限及首提作品保留。它们不证明 Browser、真实模型质量或课堂效果。
 - 固定 ZIP 位于 `backend/test/fixtures/ai-context`；异常只作用于 spec-owned 临时目录副本，使用实例级窄范围读取根注入，不引入产品配置。HTTP 上下文继续 standard_test / APP、Worker=false、mail=log；每次消费前拒绝外来 PENDING/FAILED/RUNNING。finally 精确清理自有数据、Session、临时 ZIP、mock/Nest/DB，并验证残留；不修改真实教材或全库清空。
 
+### AI 反馈指令、文本收敛与请求体留存
+
+- prompt unit 使用合成任务核对 rubric 原文、评价覆盖与证据归属要求、缺 rubric 时的任务依据及无强制凑建议矛盾；只能证明指令传递，不能证明真实模型遵循。compactor unit 负责无 suggestion 的肯定、展示文本分段/缩进与空白比较键，以及既有严重度、同类合并和条数回归。
+- Provider / request-body-dumper unit 以 fake fetch 触发实际发送边界，至少实际读回一次文件逐字节比较 `fetch.body`，检查合成任务、rubric、学生材料和多份参考正文完整且不含请求头凭据；同时覆盖关闭/环境门禁、预检和预算/预留拒绝不落盘、写入失败不阻断或增加请求、并发不覆盖、cwd 与源码/dist 根定位，以及留存先于网络计时。
+- 文件系统测试只写各自创建的仓库内 `.local/deliverables/.tmp-ai-request-tests-<唯一后缀>/`，在 teardown/finally 中精确清理自有目录，不读取或删除已有真实留存；不加载真实凭据、不创建 AppModule 或数据库连接、不调用真实模型。合成参考通过不代表真实课堂资料已抓取核验；运行配置合同见 [Config Matrix](./handoff-backend-config-matrix.md#实际发送边界请求体留存)。
+
 ### 6.2 文本教学任务专用 Smoke 支持
 
 入口为 `backend/scripts/browser-text-task-smoke.ts`，从 `backend` 目录运行以下命令；`b1-2-<unique>` 和 `<job-id>` 须替换为当前任务的准确值：
