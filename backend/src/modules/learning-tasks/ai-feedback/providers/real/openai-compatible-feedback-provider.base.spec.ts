@@ -7,6 +7,8 @@ import { AiFeedbackExecution } from '../../interfaces/ai-feedback-provider.inter
 import { AiSubmissionAnalysisContext } from '../../interfaces/ai-submission-analysis-context.interface';
 import { DefaultStubAiFeedbackProvider } from '../../services/default-stub-ai-feedback.provider';
 import { AiFeedbackRequestBodyDumper } from '../../lib/ai-feedback-request-body-dumper';
+import { compactAiFeedbackItems } from '../../lib/feedback-item-compactor';
+import { buildSystemPrompt } from '../../prompts/ai-feedback.prompt';
 import { BailianFeedbackProvider } from './bailian-feedback.provider';
 
 const context: AiSubmissionAnalysisContext = {
@@ -391,6 +393,85 @@ describe('AI Feedback providers (fake fetch only)', () => {
     ]);
     expect(typeof payload.messages[0].content).toBe('string');
     expect(payload.messages[1].content).toContain(context.codeText);
+  });
+
+  it.each([
+    { prefix: 'Valid shape example A', count: 1 },
+    { prefix: 'Valid shape example B', count: 2 },
+    { prefix: 'Valid boundary example C', count: 1 },
+    { prefix: 'Schema example:', count: 1 },
+  ])(
+    'parses the actual $prefix JSON example through fake-fetch Provider',
+    async ({ prefix, count }) => {
+      const exampleLine = buildSystemPrompt()
+        .split('\n')
+        .find((line) => line.startsWith(prefix));
+      if (!exampleLine) throw new Error('Expected a prompt JSON example');
+      const separator = exampleLine.indexOf(': ');
+      expect(separator).toBeGreaterThanOrEqual(0);
+      fetchMock.mockResolvedValue(
+        chatResponse(exampleLine.slice(separator + 2)),
+      );
+
+      const parsed = await new BailianFeedbackProvider(
+        configService(),
+      ).analyzeSubmission(context, execution());
+
+      expect(parsed).toHaveLength(count);
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+    },
+  );
+
+  it('preserves synthetic dimension paragraphs and evidence boundaries through parsing and compaction', async () => {
+    const provider = new BailianFeedbackProvider(configService());
+    const syntheticContext: AiSubmissionAnalysisContext = {
+      ...context,
+      language: 'python',
+      taskTitle: '标签去重与协作实践',
+      taskDescription:
+        '保持首次出现次序并去重；记录真实协作，给出本人独立解释及亲手变式。',
+      taskRubric: {
+        notes:
+          '评价作品行为、运行依据、真实协作和本人实践；不复述内部参考资料。',
+      },
+      codeText:
+        'def unique_labels(labels):\n    return list(dict.fromkeys(labels))',
+      submissionNote:
+        '助手报告空列表及重复标签检查通过，属于工具代跑。任务卡和采纳记录为教学模拟；尚未提供本人独立解释和亲手变式。',
+      aiUsageDeclaration: '助手代跑检查；协作材料为教学模拟。',
+    };
+    // This response is synthetic text, not evidence of real-model quality.
+    const syntheticMessage = [
+      '作品行为：源码用 dict.fromkeys 去重并保留首次出现次序，空列表返回空列表。',
+      '运行依据：助手报告空列表及重复标签检查通过，属于工具代跑；平台未执行，不能据此确认本人运行。',
+      '真实协作：任务卡和采纳记录明确标为教学模拟，内容可供核对，但不足以确认任务要求的真实协作。',
+      '本人实践：提交说明明确尚未提供独立解释和亲手变式，任务所需本人实践证据不足；代码正确不能单独证明本人掌握，也不据此推断作弊。',
+    ].join('\n\n');
+    const syntheticItem = {
+      type: 'OTHER',
+      severity: 'WARN',
+      message: syntheticMessage,
+      suggestion:
+        '按任务要求补充真实协作材料及本人解释、亲手变式的实际记录；未完成的如实说明。',
+      tags: ['correctness', 'documentation'],
+    };
+    fetchMock.mockResolvedValue(
+      chatResponse(JSON.stringify({ items: [syntheticItem] })),
+    );
+
+    const parsed = await provider.analyzeSubmission(
+      syntheticContext,
+      execution(),
+    );
+    const compacted = compactAiFeedbackItems(parsed);
+
+    expect(parsed).toHaveLength(1);
+    expect(parsed[0]).toMatchObject(syntheticItem);
+    expect(parsed[0].message).toBe(syntheticMessage);
+    expect(compacted).toHaveLength(1);
+    expect(compacted[0]).toMatchObject(syntheticItem);
+    expect(compacted[0].message).toBe(syntheticMessage);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
   it.each([undefined, '', ' \t '])(

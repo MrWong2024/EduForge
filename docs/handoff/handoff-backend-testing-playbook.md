@@ -142,9 +142,11 @@ Mongo password、production credential、Bailian API Key、SMTP password、第�
 
 ### AI 反馈指令、文本收敛与请求体留存
 
-- prompt unit 使用合成任务核对 rubric 原文、评价覆盖与证据归属要求、缺 rubric 时的任务依据及无强制凑建议矛盾；只能证明指令传递，不能证明真实模型遵循。compactor unit 负责无 suggestion 的肯定、展示文本分段/缩进与空白比较键，以及既有严重度、同类合并和条数回归。
+- prompt unit 使用合成任务核对 rubric 原文及语义维度、维度分段与缺证边界、证据来源和执行者归属，以及肯定与必需缺项并存的要求；包含自然语言 rubric.notes 与缺 rubric 的任务依据。行为职责见 [Provider Card B](./handoff-backend-service-map.md#provider-card-b)，unit 只能证明指令传递，不能证明模型实际遵循。
+- Provider unit 以 fake fetch 返回固定多段反馈，经真实 Provider、normalizer 与 compactor 链路核对维度段落、依据和边界原文保留；compactor unit 继续负责无 suggestion 的肯定、展示分段/缩进、空白比较键及既有严重度、同类合并和条数回归。这些证据证明协议和文本传递，不证明真实模型反馈质量。
 - Provider / request-body-dumper unit 以 fake fetch 触发实际发送边界，至少实际读回一次文件逐字节比较 `fetch.body`，检查合成任务、rubric、学生材料和多份参考正文完整且不含请求头凭据；同时覆盖关闭/环境门禁、预检和预算/预留拒绝不落盘、写入失败不阻断或增加请求、并发不覆盖、cwd 与源码/dist 根定位，以及留存先于网络计时。
 - 文件系统测试只写各自创建的仓库内 `.local/deliverables/.tmp-ai-request-tests-<唯一后缀>/`，在 teardown/finally 中精确清理自有目录，不读取或删除已有真实留存；不加载真实凭据、不创建 AppModule 或数据库连接、不调用真实模型。合成参考通过不代表真实课堂资料已抓取核验；运行配置合同见 [Config Matrix](./handoff-backend-config-matrix.md#实际发送边界请求体留存)。
+- 具名后续阶段“第14章 12 项资料真实模型质量复核”尚未执行，负责验证真实模型对评价维度、证据归属及肯定/缺证口径的实际遵循；unit 或 fake fetch 通过不能关闭该阶段。
 
 ### 6.2 文本教学任务专用 Smoke 支持
 

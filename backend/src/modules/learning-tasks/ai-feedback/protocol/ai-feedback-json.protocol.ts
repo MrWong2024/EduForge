@@ -17,10 +17,11 @@ export const AI_FEEDBACK_JSON_PROTOCOL = {
   schemaExample: {
     items: [
       {
-        type: FeedbackType.Style,
-        severity: FeedbackSeverity.Warn,
-        message: 'Use clearer variable names.',
-        tags: ['readability'],
+        type: FeedbackType.Other,
+        severity: FeedbackSeverity.Info,
+        message:
+          '源码为空列表设置了独立返回分支，符合空列表返回空列表的任务要求。',
+        tags: ['correctness'],
       },
     ],
     meta: { language: 'typescript' },
