@@ -140,12 +140,14 @@ Mongo password、production credential、Bailian API Key、SMTP password、第�
 - 扩展既有 classroom text contract 与 Bailian context HTTP E2E，证明正式 API 白名单/持久化、最终生效引用验证与无部分写入、候选快照固定、成员投影、实际 mock HTTP 请求包含多包材料、异步资料失效/输入超限及首提作品保留。它们不证明 Browser、真实模型质量或课堂效果。
 - 固定 ZIP 位于 `backend/test/fixtures/ai-context`；异常只作用于 spec-owned 临时目录副本，使用实例级窄范围读取根注入，不引入产品配置。HTTP 上下文继续 standard_test / APP、Worker=false、mail=log；每次消费前拒绝外来 PENDING/FAILED/RUNNING。finally 精确清理自有数据、Session、临时 ZIP、mock/Nest/DB，并验证残留；不修改真实教材或全库清空。
 
-### AI 反馈指令、文本收敛与请求体留存
+### AI 反馈指令、文本收敛与本地诊断
 
 - prompt unit 使用合成任务核对 rubric 原文及语义维度、维度分段与缺证边界、证据来源和执行者归属，以及肯定与必需缺项并存的要求；包含自然语言 rubric.notes 与缺 rubric 的任务依据。行为职责见 [Provider Card B](./handoff-backend-service-map.md#provider-card-b)，unit 只能证明指令传递，不能证明模型实际遵循。
 - Provider unit 以 fake fetch 返回固定多段反馈，经真实 Provider、normalizer 与 compactor 链路核对维度段落、依据和边界原文保留；compactor unit 继续负责无 suggestion 的肯定、展示分段/缩进、空白比较键及既有严重度、同类合并和条数回归。这些证据证明协议和文本传递，不证明真实模型反馈质量。
-- Provider / request-body-dumper unit 以 fake fetch 触发实际发送边界，至少实际读回一次文件逐字节比较 `fetch.body`，检查合成任务、rubric、学生材料和多份参考正文完整且不含请求头凭据；同时覆盖关闭/环境门禁、预检和预算/预留拒绝不落盘、写入失败不阻断或增加请求、并发不覆盖、cwd 与源码/dist 根定位，以及留存先于网络计时。
-- 文件系统测试只写各自创建的仓库内 `.local/deliverables/.tmp-ai-request-tests-<唯一后缀>/`，在 teardown/finally 中精确清理自有目录，不读取或删除已有真实留存；不加载真实凭据、不创建 AppModule 或数据库连接、不调用真实模型。合成参考通过不代表真实课堂资料已抓取核验；运行配置合同见 [Config Matrix](./handoff-backend-config-matrix.md#实际发送边界请求体留存)。
+- Provider / request-body-dumper unit 以 fake fetch 触发实际发送边界，读回请求文件逐字节比较 `fetch.body`，核对合成材料完整且不含请求头凭据；响应诊断与同次 `response.text()` 的固定原字符串比较，分别核对协议校验、normalize 和 Provider 条数收敛阶段，不把诊断当作网络原始 bytes。
+- Processor unit 以 mock claim、Provider 和持久化核对同次调用关联、claim 核验及 compactor input/output；合并文件只证明持久化前候选，不证明数据库落库。覆盖成功、合法空结果、失败或未到达阶段的 null/到达标记，以及独立 Provider 不伪造合并阶段；fake fetch/mock 只证明诊断链，不证明模型质量或真实数据库终态。
+- 文件诊断回归覆盖关闭/环境门禁、预检及预算/预留拒绝不落盘、三类文件同 stem、请求保存失败后的关联、独占创建不覆盖、并发隔离与源码/dist 的 cwd 独立定位；验证请求 I/O 在 HTTP timer 前、响应/合并 I/O 在清理后，且写入失败不改变业务结果、usage、重试或请求次数。
+- 文件系统测试只写各自创建的仓库内 `.local/deliverables/` 唯一临时目录（请求/Provider 使用 `.tmp-ai-request-tests-`，Processor 使用 `.tmp-ai-processor-diagnostics-` 前缀），在 teardown/finally 中精确清理自有目录，不读取或删除已有真实留存；不加载真实凭据、不创建 AppModule 或数据库连接、不调用真实模型。合成参考通过不代表真实课堂资料已抓取核验；运行配置合同见 [Config Matrix](./handoff-backend-config-matrix.md#实际发送边界请求体留存)。
 - 具名后续阶段“第14章 12 项资料真实模型质量复核”尚未执行，负责验证真实模型对评价维度、证据归属及肯定/缺证口径的实际遵循；unit 或 fake fetch 通过不能关闭该阶段。
 
 ### 6.2 文本教学任务专用 Smoke 支持

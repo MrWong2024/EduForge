@@ -8,6 +8,8 @@ import {
   AiFeedbackExecution,
   AiFeedbackItem,
   AiFeedbackProvider,
+  type AiFeedbackDiagnosticHandle,
+  type AiFeedbackResponseDiagnostic,
 } from '../../interfaces/ai-feedback-provider.interface';
 import { AiSubmissionAnalysisContext } from '../../interfaces/ai-submission-analysis-context.interface';
 import { AiFeedbackProviderError } from '../../interfaces/ai-feedback-provider.error';
@@ -121,55 +123,137 @@ export abstract class OpenAiCompatibleFeedbackProviderBase implements AiFeedback
       maxOutputTokens: config.maxOutputTokens,
       reservedAt: new Date(),
     });
-    let response: { status: number; data: unknown };
+    let handle: AiFeedbackDiagnosticHandle | undefined;
+    let diagnostic: AiFeedbackResponseDiagnostic | undefined;
     try {
-      response = await this.callProvider(
-        request,
-        config.timeoutMs,
-        context.submissionId,
+      if (
+        this.configService.get<string>('NODE_ENV') === 'development' &&
+        this.configService.get<boolean>('AI_FEEDBACK_DUMP_REQUEST_BODY') ===
+          true
+      ) {
+        handle = this.requestBodyDumper.createHandle(context.submissionId);
+        diagnostic = {
+          httpStatus: null,
+          rawResponseBody: null,
+          validatedItemsBeforeNormalize: null,
+          normalizedItemsBeforeCap: null,
+          providerItemsAfterCap: null,
+          reachedStage: 'request_ready',
+          failureCode: null,
+          captureFailed: false,
+        };
+      }
+    } catch {
+      this.warnDiagnostic('INITIALIZATION_FAILED');
+    }
+    if (handle) {
+      try {
+        await execution.onDiagnosticHandle?.(handle);
+      } catch {
+        this.warnDiagnostic('CALLBACK_FAILED');
+      }
+    }
+    try {
+      let response: { status: number; data: unknown };
+      try {
+        response = await this.callProvider(
+          request,
+          config.timeoutMs,
+          handle,
+          diagnostic,
+        );
+      } catch (error) {
+        await execution.reportUsage(null);
+        throw error;
+      }
+      // Keep usage persistence outside the fetch catch, including diagnostics.
+      await execution.reportUsage(readReportedUsage(response.data));
+      if (response.status < 200 || response.status >= 300) {
+        throw this.mapHttpError(response.status);
+      }
+      if (!response.data || typeof response.data !== 'object') {
+        throw this.createProviderError(
+          AI_FEEDBACK_ERROR_CODES.BAD_RESPONSE,
+          false,
+        );
+      }
+      const data = response.data as OpenAiCompatibleChatResponse;
+      const finishReason = data.choices?.[0]?.finish_reason;
+      if (finishReason === 'length') {
+        throw this.createProviderError(
+          AI_FEEDBACK_ERROR_CODES.OUTPUT_LIMIT_REACHED,
+          false,
+        );
+      }
+      if (finishReason !== 'stop') {
+        throw this.createProviderError(
+          AI_FEEDBACK_ERROR_CODES.BAD_RESPONSE,
+          false,
+        );
+      }
+      const parsedItems = this.parseResponse(data, diagnostic);
+      const cap = Math.min(config.maxItems, PROMPT_PROTOCOL_MAX_ITEMS);
+      this.logger.debug(
+        this.options.logName +
+          ' feedback success: submissionId=' +
+          context.submissionId +
+          ', provider=' +
+          this.options.providerName +
+          ', model=' +
+          config.model,
       );
+      const capped = parsedItems.slice(0, cap);
+      this.captureItems(
+        diagnostic,
+        'providerItemsAfterCap',
+        'provider_capped',
+        capped,
+      );
+      return capped;
     } catch (error) {
-      await execution.reportUsage(null);
+      if (diagnostic) {
+        diagnostic.failureCode =
+          error instanceof AiFeedbackProviderError
+            ? error.code
+            : 'EXECUTION_FAILED';
+      }
       throw error;
+    } finally {
+      if (handle && diagnostic) {
+        try {
+          await this.requestBodyDumper.saveResponse(handle, diagnostic);
+        } catch {
+          this.warnDiagnostic('RESPONSE_WRITE_FAILED');
+        }
+      }
     }
-    // Persist actual usage even for non-2xx, truncated and malformed feedback.
-    // Keep this outside the fetch catch: a DB failure must stay non-retryable.
-    await execution.reportUsage(readReportedUsage(response.data));
-    if (response.status < 200 || response.status >= 300) {
-      throw this.mapHttpError(response.status);
+  }
+
+  private captureItems(
+    diagnostic: AiFeedbackResponseDiagnostic | undefined,
+    field:
+      | 'validatedItemsBeforeNormalize'
+      | 'normalizedItemsBeforeCap'
+      | 'providerItemsAfterCap',
+    reachedStage: AiFeedbackResponseDiagnostic['reachedStage'],
+    items: AiFeedbackItem[],
+  ): void {
+    if (!diagnostic) return;
+    diagnostic.reachedStage = reachedStage;
+    try {
+      diagnostic[field] = structuredClone(items);
+    } catch {
+      diagnostic.captureFailed = true;
+      this.warnDiagnostic('SNAPSHOT_FAILED');
     }
-    if (!response.data || typeof response.data !== 'object') {
-      throw this.createProviderError(
-        AI_FEEDBACK_ERROR_CODES.BAD_RESPONSE,
-        false,
-      );
+  }
+
+  private warnDiagnostic(reason: string): void {
+    try {
+      this.logger.warn(`AI feedback diagnostics failed: reason=${reason}`);
+    } catch {
+      // Diagnostics, including their warnings, cannot replace business errors.
     }
-    const data = response.data as OpenAiCompatibleChatResponse;
-    const finishReason = data.choices?.[0]?.finish_reason;
-    if (finishReason === 'length') {
-      throw this.createProviderError(
-        AI_FEEDBACK_ERROR_CODES.OUTPUT_LIMIT_REACHED,
-        false,
-      );
-    }
-    if (finishReason !== 'stop') {
-      throw this.createProviderError(
-        AI_FEEDBACK_ERROR_CODES.BAD_RESPONSE,
-        false,
-      );
-    }
-    const parsedItems = this.parseResponse(data);
-    const cap = Math.min(config.maxItems, PROMPT_PROTOCOL_MAX_ITEMS);
-    this.logger.debug(
-      this.options.logName +
-        ' feedback success: submissionId=' +
-        context.submissionId +
-        ', provider=' +
-        this.options.providerName +
-        ', model=' +
-        config.model,
-    );
-    return parsedItems.slice(0, cap);
   }
 
   protected abstract getConfig(): OpenAiCompatibleProviderConfig;
@@ -225,16 +309,18 @@ export abstract class OpenAiCompatibleFeedbackProviderBase implements AiFeedback
       model: string;
     },
     timeoutMs: number,
-    submissionId: string,
+    handle?: AiFeedbackDiagnosticHandle,
+    diagnostic?: AiFeedbackResponseDiagnostic,
   ) {
     // This exact string is both retained and supplied to fetch. Preparation and
     // reservation have already succeeded; filesystem time is not HTTP time.
     const body = JSON.stringify(request.payload);
-    if (
-      this.configService.get<string>('NODE_ENV') === 'development' &&
-      this.configService.get<boolean>('AI_FEEDBACK_DUMP_REQUEST_BODY') === true
-    ) {
-      await this.requestBodyDumper.save(submissionId, body);
+    if (handle) {
+      try {
+        await this.requestBodyDumper.save(handle, body);
+      } catch {
+        this.warnDiagnostic('REQUEST_WRITE_FAILED');
+      }
     }
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), timeoutMs);
@@ -245,9 +331,19 @@ export abstract class OpenAiCompatibleFeedbackProviderBase implements AiFeedback
         body,
         signal: controller.signal,
       });
+      if (diagnostic) {
+        diagnostic.httpStatus = response.status;
+        diagnostic.reachedStage = 'http_response';
+      }
       let data: unknown = null;
       try {
-        data = await response.json();
+        const rawResponseBody = await response.text();
+        if (diagnostic) {
+          diagnostic.rawResponseBody = rawResponseBody;
+          diagnostic.reachedStage = 'response_body_read';
+        }
+        data = JSON.parse(rawResponseBody) as unknown;
+        if (diagnostic) diagnostic.reachedStage = 'response_parsed';
       } catch (error) {
         if (controller.signal.aborted) throw error;
       }
@@ -290,7 +386,10 @@ export abstract class OpenAiCompatibleFeedbackProviderBase implements AiFeedback
     );
   }
 
-  private parseResponse(data: OpenAiCompatibleChatResponse): AiFeedbackItem[] {
+  private parseResponse(
+    data: OpenAiCompatibleChatResponse,
+    diagnostic?: AiFeedbackResponseDiagnostic,
+  ): AiFeedbackItem[] {
     const content = data?.choices?.[0]?.message?.content;
     if (typeof content !== 'string') {
       throw this.createProviderError(
@@ -301,21 +400,24 @@ export abstract class OpenAiCompatibleFeedbackProviderBase implements AiFeedback
     const raw = content.trim();
     const directResult = this.tryParseJson(raw);
     if (directResult.ok) {
-      return this.validateParsedResponse(directResult.value);
+      return this.validateParsedResponse(directResult.value, diagnostic);
     }
 
     const fenced = this.extractJsonFencedBlock(raw);
     if (fenced) {
       const fencedResult = this.tryParseJson(fenced);
       if (fencedResult.ok) {
-        return this.validateParsedResponse(fencedResult.value);
+        return this.validateParsedResponse(fencedResult.value, diagnostic);
       }
     }
 
     throw this.createProviderError(AI_FEEDBACK_ERROR_CODES.BAD_RESPONSE, false);
   }
 
-  private validateParsedResponse(parsed: unknown): AiFeedbackItem[] {
+  private validateParsedResponse(
+    parsed: unknown,
+    diagnostic?: AiFeedbackResponseDiagnostic,
+  ): AiFeedbackItem[] {
     if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
       throw this.createProviderError(
         AI_FEEDBACK_ERROR_CODES.BAD_RESPONSE,
@@ -355,7 +457,20 @@ export abstract class OpenAiCompatibleFeedbackProviderBase implements AiFeedback
     const normalized: RawFeedbackItem[] = items.map((item) =>
       this.validateItem(item),
     );
-    return normalizeFeedbackItems(normalized);
+    this.captureItems(
+      diagnostic,
+      'validatedItemsBeforeNormalize',
+      'items_validated',
+      normalized,
+    );
+    const normalizedItems = normalizeFeedbackItems(normalized);
+    this.captureItems(
+      diagnostic,
+      'normalizedItemsBeforeCap',
+      'items_normalized',
+      normalizedItems,
+    );
+    return normalizedItems;
   }
 
   private validateItem(item: unknown): RawFeedbackItem {

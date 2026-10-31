@@ -78,7 +78,7 @@ npm run sync-indexes -- --retire-task-stage --database <精确库名> --apply --
 - `AI_FEEDBACK_PROVIDER` 选择 AI Provider；`stub` 不触网，Key 条件见第 4 节。
 - `AI_FEEDBACK_WORKER_ENABLED` 只控制后台自动消费，不是 AI 总开关；关闭 Worker 不禁用 Provider，也不禁止通过独立门禁的显式处理。
 - `AI_FEEDBACK_DEBUG_ENABLED` 独立控制 debug/ops 能力是否启用。开关默认值与校验见第 4 节；具体 API 权限、门禁与错误行为由 [Backend API Map](./handoff-backend-api-map.md) 维护。
-- `AI_FEEDBACK_DUMP_REQUEST_BODY` 独立控制实际发送边界请求体的本地留存，不依赖 debug/ops 开关；使用方式见下文。
+- `AI_FEEDBACK_DUMP_REQUEST_BODY` 独立控制请求体、响应与合并过程的本地诊断留存，不依赖 debug/ops 开关；沿用现有开关，使用方式见下文。
 - Worker 与 Provider 的内部执行和日志行为见 [Backend Service Map](./handoff-backend-service-map.md)。
 
 下表记录当前 tracked example / Browser 配置组合中的显式值；未显式配置的核心变量使用第 4 节默认值。真实文件继续 ignored，不在本文记录密钥。
@@ -96,7 +96,9 @@ Mock Bailian 等测试组合的执行方案见 [Backend Testing Playbook](./hand
 
 `AI_FEEDBACK_DUMP_REQUEST_BODY` 经 Joi 校验后以布尔值读取，默认值见第 4 节。只有 `NODE_ENV === "development"` 且该值严格为 `true` 时启用；`test`（含 `browser_acceptance`）和 `production` 即使配置为 true 也不留存。关闭或运行环境不允许时，不访问文件系统、不创建目录。
 
-固定输出目录为 `<仓库根目录>/.local/deliverables/ai-feedback-requests/`，根定位兼容源码和正常 `backend/dist/src` 布局，不依赖启动 cwd，也不增加路径配置项。文件名使用安全化提交标识、Windows 合法时间戳及唯一后缀，不覆盖已有文件；目录沿用根 `.gitignore` 的 `/.local/deliverables/` 忽略规则。
+固定输出目录为 `<仓库根目录>/.local/deliverables/ai-feedback-requests/`；原请求仍写 `<stem>.json`，同次调用的响应与合并诊断分别写 `diagnostics/<stem>.response.json`、`diagnostics/<stem>.compaction.json`。三者共享由安全化 submissionId、Windows 合法时间戳及 UUID 组成的 stem，以独占创建（`wx`）防止覆盖；各文件独立保存，不能因缺少某一文件推定其余阶段未执行。
+
+根定位兼容源码和正常 `backend/dist/src` 布局，不依赖启动 cwd，也不增加路径配置项。目录沿用根 `.gitignore` 的 `/.local/deliverables/` 忽略规则；诊断可含完整学生材料和供应商响应，不作为 Git 跟踪资产。
 
 在本地开发配置中显式设置 `AI_FEEDBACK_DUMP_REQUEST_BODY=true`，重启后端后生效；设回 false 或移除后也须重启，不提供动态切换。发送、文件内容及失败边界由 [Provider Card B](./handoff-backend-service-map.md#provider-card-b) 维护。
 
@@ -127,7 +129,7 @@ Mock Bailian 等测试组合的执行方案见 [Backend Testing Playbook](./hand
 | `AI_FEEDBACK_MAX_ITEMS`                        | `2`                                                 | Joi                                                  | 每次保存反馈条目上限；允许范围 `1..10`。                                        |
 | `LEARNING_TASK_SUBMISSION_COOLDOWN_MS`         | `300000`                                            | Joi                                                  | 学生提交冷却窗口（ms）；按同一 student + classroomTask 判定，`0` 表示关闭冷却。 |
 | `AI_FEEDBACK_DEBUG_ENABLED`                    | `false`                                             | Joi                                                  | debug/ops 配置开关；职责见第 3 节。                                                            |
-| `AI_FEEDBACK_DUMP_REQUEST_BODY` | `false` | Joi → ConfigService | 布尔值；仅显式 true 且 development 启用实际发送边界请求体留存，环境、目录和启停方式见第 3 节。 |
+| `AI_FEEDBACK_DUMP_REQUEST_BODY` | `false` | Joi → ConfigService | 布尔值；仅显式 true 且 development 启用本地请求/响应/合并诊断，环境、目录和启停方式见第 3 节。 |
 | `AUTHZ_ENFORCE_ROLES`                          | `true`                                              | Joi                                                  | 角色校验配置开关。                                                    |
 | `BAILIAN_API_KEY` | 无 | Joi | 真实 Provider Key；必填条件见下文。 |
 | `BAILIAN_BASE_URL`                             | `https://dashscope.aliyuncs.com/compatible-mode/v1` | Joi                                                  | 阿里云百炼大陆站 OpenAI-compatible 基础地址。                                   |

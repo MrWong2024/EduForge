@@ -17,6 +17,8 @@ import {
 } from '../schemas/ai-feedback-job.schema';
 import { AI_FEEDBACK_PROVIDER_TOKEN } from '../interfaces/ai-feedback-provider.interface';
 import type {
+  AiFeedbackCompactionDiagnostic,
+  AiFeedbackDiagnosticHandle,
   AiFeedbackExecution,
   AiFeedbackItem,
   AiFeedbackProvider,
@@ -160,15 +162,55 @@ export class AiFeedbackProcessor {
         }
         const release = await this.aiFeedbackGuards.acquire();
         let items: AiFeedbackItem[] = [];
+        let diagnosticHandle: AiFeedbackDiagnosticHandle | undefined;
+        let compactionDiagnostic: AiFeedbackCompactionDiagnostic | undefined;
         try {
           items = await this.aiFeedbackProvider.analyzeSubmission(
             analysisContext,
-            this.executionFor(job),
+            this.executionFor(job, (handle) => {
+              try {
+                const record: AiFeedbackCompactionDiagnostic = {
+                  jobId: job._id.toString(),
+                  claimNo: job.attempts,
+                  compactionReached: false,
+                  compactorInput: null,
+                  compactorOutput: null,
+                  reason: 'PROVIDER_NOT_COMPLETED',
+                  captureFailed: false,
+                };
+                diagnosticHandle = handle;
+                compactionDiagnostic = record;
+              } catch {
+                this.warnCompactionDiagnostic(job, 'INITIALIZATION_FAILED');
+              }
+            }),
           );
+          if (compactionDiagnostic)
+            compactionDiagnostic.reason = 'CLAIM_NOT_VALIDATED';
           await this.requireCurrentClaim(job);
+          if (compactionDiagnostic) {
+            compactionDiagnostic.reason = 'COMPACTION_NOT_COMPLETED';
+            compactionDiagnostic.compactorInput = this.snapshotCompactionItems(
+              items,
+              compactionDiagnostic,
+              job,
+              'INPUT_CLONE_FAILED',
+            );
+          }
+          if (compactionDiagnostic)
+            compactionDiagnostic.compactionReached = true;
           const compactedItems = compactAiFeedbackItems(items, {
             maxItems: this.getMaxItems(),
           });
+          if (compactionDiagnostic) {
+            compactionDiagnostic.reason = null;
+            compactionDiagnostic.compactorOutput = this.snapshotCompactionItems(
+              compactedItems,
+              compactionDiagnostic,
+              job,
+              'OUTPUT_CLONE_FAILED',
+            );
+          }
           if (compactedItems.length !== items.length) {
             this.logger.debug(
               `AI feedback compacted before persistence: jobId=${job._id.toString()}, submissionId=${job.submissionId.toString()}, originalItems=${items.length}, compactedItems=${compactedItems.length}`,
@@ -176,7 +218,17 @@ export class AiFeedbackProcessor {
           }
           await this.persistFeedback(job, compactedItems);
         } finally {
-          release();
+          try {
+            if (diagnosticHandle && compactionDiagnostic) {
+              try {
+                await diagnosticHandle.saveCompaction(compactionDiagnostic);
+              } catch {
+                this.warnCompactionDiagnostic(job, 'SAVE_FAILED');
+              }
+            }
+          } finally {
+            release();
+          }
         }
         await this.aiFeedbackJobModel
           .findOneAndUpdate(this.claimFilter(job), {
@@ -327,8 +379,44 @@ export class AiFeedbackProcessor {
       throw new Error('Claim no longer current');
   }
 
-  private executionFor(job: AiFeedbackJobWithMeta): AiFeedbackExecution {
+  private snapshotCompactionItems(
+    items: AiFeedbackItem[],
+    diagnostic: AiFeedbackCompactionDiagnostic,
+    job: AiFeedbackJobWithMeta,
+    reason: 'INPUT_CLONE_FAILED' | 'OUTPUT_CLONE_FAILED',
+  ): AiFeedbackItem[] | null {
+    try {
+      return structuredClone(items);
+    } catch {
+      diagnostic.captureFailed = true;
+      this.warnCompactionDiagnostic(job, reason);
+      return null;
+    }
+  }
+
+  private warnCompactionDiagnostic(
+    job: AiFeedbackJobWithMeta,
+    reason:
+      | 'INITIALIZATION_FAILED'
+      | 'INPUT_CLONE_FAILED'
+      | 'OUTPUT_CLONE_FAILED'
+      | 'SAVE_FAILED',
+  ): void {
+    try {
+      this.logger.warn(
+        `AI feedback compaction diagnostic failed: jobId=${job._id.toString()}, submissionId=${job.submissionId.toString()}, reason=${reason}`,
+      );
+    } catch {
+      // Diagnostic logging must not replace the business result or exception.
+    }
+  }
+
+  private executionFor(
+    job: AiFeedbackJobWithMeta,
+    onDiagnosticHandle?: AiFeedbackExecution['onDiagnosticHandle'],
+  ): AiFeedbackExecution {
     return {
+      onDiagnosticHandle,
       reserveRequest: async (request) => {
         const result = await this.aiFeedbackJobModel
           .updateOne(

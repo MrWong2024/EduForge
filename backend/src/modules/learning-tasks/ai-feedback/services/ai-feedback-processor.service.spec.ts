@@ -2,9 +2,12 @@ import { AiContextError } from '../../ai-context/ai-context.types';
 import { DefaultStubAiFeedbackProvider } from './default-stub-ai-feedback.provider';
 import { AiContextReaderService } from '../../ai-context/ai-context-reader.service';
 import { Test } from '@nestjs/testing';
+import { Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { getModelToken } from '@nestjs/mongoose';
 import { Types, Mongoose } from 'mongoose';
+import fs from 'node:fs/promises';
+import { basename, dirname, resolve } from 'node:path';
 import { AiFeedbackProcessor } from './ai-feedback-processor.service';
 import { AiFeedbackGuardsService } from './ai-feedback-guards.service';
 import {
@@ -12,10 +15,22 @@ import {
   AiFeedbackJobSchema,
 } from '../schemas/ai-feedback-job.schema';
 import { Submission } from '../../schemas/submission.schema';
-import { Feedback } from '../../schemas/feedback.schema';
+import {
+  Feedback,
+  FeedbackSeverity,
+  FeedbackType,
+} from '../../schemas/feedback.schema';
 import { ClassroomTask } from '../../../classrooms/classroom-tasks/schemas/classroom-task.schema';
 import { AI_FEEDBACK_PROVIDER_TOKEN } from '../interfaces/ai-feedback-provider.interface';
+import type {
+  AiFeedbackCompactionDiagnostic,
+  AiFeedbackDiagnosticHandle,
+  AiFeedbackItem,
+} from '../interfaces/ai-feedback-provider.interface';
 import { BailianFeedbackProvider } from '../providers/real/bailian-feedback.provider';
+import { AiFeedbackRequestBodyDumper } from '../lib/ai-feedback-request-body-dumper';
+import { AiFeedbackProviderError } from '../interfaces/ai-feedback-provider.error';
+import * as compactor from '../lib/feedback-item-compactor';
 const query = <T>(value: T) => {
   const q = { exec: jest.fn().mockResolvedValue(value), lean: jest.fn() };
   q.lean.mockReturnValue(q);
@@ -51,15 +66,30 @@ async function harness() {
     .mockReturnValueOnce(query(null))
     .mockReturnValueOnce(query(job));
   const feedback = { insertMany: jest.fn().mockResolvedValue([]) };
+  const release = jest.fn();
   const guards = {
     tryConsume: jest.fn().mockReturnValue(true),
-    acquire: jest.fn().mockResolvedValue(jest.fn()),
+    acquire: jest.fn().mockResolvedValue(release),
   };
-  const config = new ConfigService({
+  const values: Record<string, unknown> = {
+    NODE_ENV: 'test',
+    AI_FEEDBACK_DUMP_REQUEST_BODY: false,
+    AI_FEEDBACK_MAX_INPUT_BYTES: 65536,
     AI_FEEDBACK_PROVIDER: 'bailian',
     BAILIAN_API_KEY: 'synthetic-unit-key',
     BAILIAN_BASE_URL: 'http://127.0.0.1:1',
-  });
+  };
+  const config = new ConfigService(values);
+  // ConfigService.set also writes process.env; keep this harness entirely local.
+  jest
+    .spyOn(config, 'get')
+    .mockImplementation((property: string) => values[property]);
+  jest
+    .spyOn(config, 'set')
+    .mockImplementation((property: string, value: unknown) => {
+      values[property] = value;
+    });
+  const provider = new BailianFeedbackProvider(config);
   const module = await Test.createTestingModule({
     providers: [
       AiFeedbackProcessor,
@@ -68,7 +98,7 @@ async function harness() {
       { provide: AiFeedbackGuardsService, useValue: guards },
       {
         provide: AI_FEEDBACK_PROVIDER_TOKEN,
-        useValue: new BailianFeedbackProvider(config),
+        useValue: provider,
       },
       { provide: getModelToken(AiFeedbackJob.name), useValue: jobModel },
       { provide: getModelToken(Feedback.name), useValue: feedback },
@@ -114,7 +144,38 @@ async function harness() {
     jobModel,
     feedback,
     guards,
+    release,
+    provider,
   };
+}
+
+function diagnosticFor(submissionId: string) {
+  const saveCompaction = jest
+    .fn<Promise<void>, [AiFeedbackCompactionDiagnostic]>()
+    .mockResolvedValue(undefined);
+  const handle: AiFeedbackDiagnosticHandle = {
+    traceId: 'synthetic-processor-trace',
+    submissionId,
+    requestFileName: 'synthetic-processor-request.json',
+    createdAt: '2026-11-01T00:00:00.000Z',
+    requestSaved: true,
+    saveCompaction,
+  };
+  return { handle, saveCompaction };
+}
+
+async function removeOwnedDiagnosticDirectory(
+  directory: string | undefined,
+  parent: string,
+): Promise<void> {
+  if (!directory) return;
+  if (
+    dirname(directory) !== parent ||
+    !basename(directory).startsWith('.tmp-ai-processor-diagnostics-')
+  ) {
+    throw new Error('Refusing cleanup outside the owned temporary directory');
+  }
+  await fs.rm(directory, { recursive: true, force: true });
 }
 describe('claim and paid request persistence gates (no database)', () => {
   afterEach(() => jest.restoreAllMocks());
@@ -273,6 +334,381 @@ describe('claim and paid request persistence gates (no database)', () => {
       await h.module.close();
     }
   });
+});
+
+describe('claim-local pre-persistence compaction diagnostics (no database)', () => {
+  afterEach(() => jest.restoreAllMocks());
+
+  it('correlates real request, response and compaction files for a merged fake-fetch result', async () => {
+    const h = await harness();
+    const temporaryParent = resolve(
+      __dirname,
+      '../../../../../..',
+      '.local/deliverables',
+    );
+    let ownedDirectory: string | undefined;
+    try {
+      await fs.mkdir(temporaryParent, { recursive: true });
+      const directory = await fs.mkdtemp(
+        resolve(temporaryParent, '.tmp-ai-processor-diagnostics-'),
+      );
+      ownedDirectory = directory;
+      const dumper = new AiFeedbackRequestBodyDumper(
+        { log: jest.fn(), warn: jest.fn() },
+        directory,
+      );
+      Object.defineProperty(h.provider, 'requestBodyDumper', { value: dumper });
+      const createHandle = jest.spyOn(dumper, 'createHandle');
+      h.config.set('NODE_ENV', 'development');
+      h.config.set('AI_FEEDBACK_DUMP_REQUEST_BODY', true);
+      const rawResponse = JSON.stringify({
+        choices: [
+          {
+            finish_reason: 'stop',
+            message: {
+              content: JSON.stringify({
+                items: [
+                  {
+                    type: 'SYNTAX',
+                    severity: 'ERROR',
+                    message: '第 12 行缺少分号',
+                    suggestion: '在 `foo()` 后补齐分号。',
+                  },
+                  {
+                    type: 'SYNTAX',
+                    severity: 'ERROR',
+                    message: '第 26 行缺少分号',
+                    suggestion: '在 `Foo()` 后补齐分号。',
+                  },
+                ],
+              }),
+            },
+          },
+        ],
+        usage: { prompt_tokens: 10, completion_tokens: 2, total_tokens: 12 },
+      });
+      const fetchMock = jest
+        .spyOn(globalThis, 'fetch')
+        .mockResolvedValue(new Response(rawResponse));
+      expect(await h.processor.processOnce(1)).toMatchObject({ succeeded: 1 });
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      expect(createHandle).toHaveBeenCalledTimes(1);
+      const createdHandle = createHandle.mock.results[0];
+      if (!createdHandle || createdHandle.type !== 'return') {
+        throw new Error('Expected one returned diagnostic handle');
+      }
+      const handle = createdHandle.value;
+      expect(
+        await fs.readFile(resolve(directory, handle.requestFileName), 'utf8'),
+      ).toBe(fetchMock.mock.calls[0][1]?.body);
+      const response: unknown = JSON.parse(
+        await fs.readFile(
+          resolve(directory, 'diagnostics', `${handle.traceId}.response.json`),
+          'utf8',
+        ),
+      );
+      const compaction: unknown = JSON.parse(
+        await fs.readFile(
+          resolve(
+            directory,
+            'diagnostics',
+            `${handle.traceId}.compaction.json`,
+          ),
+          'utf8',
+        ),
+      );
+      for (const record of [response, compaction]) {
+        expect(record).toMatchObject({
+          traceId: handle.traceId,
+          submissionId: h.job.submissionId.toString(),
+          requestFileName: handle.requestFileName,
+          requestSaved: true,
+        });
+      }
+      expect(response).toMatchObject({
+        rawResponseBody: rawResponse,
+        reachedStage: 'provider_capped',
+      });
+      expect(compaction).toMatchObject({
+        jobId: h.job._id.toString(),
+        claimNo: 1,
+        resultMeaning: 'pre_persistence_candidates',
+        compactionReached: true,
+        compactorInput: [
+          { message: '第 12 行缺少分号' },
+          { message: '第 26 行缺少分号' },
+        ],
+        compactorOutput: [
+          {
+            message:
+              '存在多处语句末尾缺少分号的问题，导致代码无法稳定编译或运行。',
+            suggestion: '在 `foo()` 后补齐分号。；在 `Foo()` 后补齐分号。',
+          },
+        ],
+        reason: null,
+      });
+      expect(h.feedback.insertMany).toHaveBeenCalledTimes(1);
+      expect(h.release).toHaveBeenCalledTimes(1);
+    } finally {
+      try {
+        await h.module.close();
+      } finally {
+        await removeOwnedDiagnosticDirectory(ownedDirectory, temporaryParent);
+      }
+    }
+  });
+
+  it('captures independent snapshots before persistence can mutate the candidates', async () => {
+    const h = await harness();
+    const diagnostic = diagnosticFor(h.job.submissionId.toString());
+    const items: AiFeedbackItem[] = [
+      {
+        type: FeedbackType.Syntax,
+        severity: FeedbackSeverity.Error,
+        message: '第 12 行缺少分号',
+        suggestion: '在 `foo()` 后补齐分号。',
+      },
+      {
+        type: FeedbackType.Syntax,
+        severity: FeedbackSeverity.Error,
+        message: '第 26 行缺少分号',
+        suggestion: '在 `Foo()` 后补齐分号。',
+      },
+    ];
+    const originalItems = structuredClone(items);
+    jest
+      .spyOn(h.provider, 'analyzeSubmission')
+      .mockImplementation(async (_context, execution) => {
+        await execution.onDiagnosticHandle?.(diagnostic.handle);
+        return items;
+      });
+    h.feedback.insertMany.mockImplementation((documents: AiFeedbackItem[]) => {
+      items[0].message = 'synthetic mutation after compaction';
+      documents[0].message = 'synthetic persistence mutation';
+      return Promise.resolve([]);
+    });
+
+    try {
+      expect(await h.processor.processOnce(1)).toMatchObject({ succeeded: 1 });
+      expect(diagnostic.saveCompaction).toHaveBeenCalledTimes(1);
+      expect(diagnostic.saveCompaction).toHaveBeenCalledWith({
+        jobId: h.job._id.toString(),
+        claimNo: 1,
+        compactionReached: true,
+        compactorInput: originalItems,
+        compactorOutput: [
+          expect.objectContaining({
+            type: FeedbackType.Syntax,
+            severity: FeedbackSeverity.Error,
+            message:
+              '存在多处语句末尾缺少分号的问题，导致代码无法稳定编译或运行。',
+            suggestion: '在 `foo()` 后补齐分号。；在 `Foo()` 后补齐分号。',
+          }),
+        ],
+        reason: null,
+        captureFailed: false,
+      });
+      expect(h.release).toHaveBeenCalledTimes(1);
+    } finally {
+      await h.module.close();
+    }
+  });
+
+  it.each(['provider', 'claim', 'compactor'] as const)(
+    'records an unreached output when %s fails without changing the business failure',
+    async (stage) => {
+      const h = await harness();
+      const diagnostic = diagnosticFor(h.job.submissionId.toString());
+      const items: AiFeedbackItem[] = [
+        {
+          type: FeedbackType.Other,
+          severity: FeedbackSeverity.Warn,
+          message: '合成问题',
+        },
+      ];
+      jest
+        .spyOn(h.provider, 'analyzeSubmission')
+        .mockImplementation(async (_context, execution) => {
+          await execution.onDiagnosticHandle?.(diagnostic.handle);
+          if (stage === 'provider') {
+            throw new AiFeedbackProviderError(
+              'TIMEOUT',
+              true,
+              'synthetic timeout',
+            );
+          }
+          return items;
+        });
+      if (stage === 'claim') h.jobModel.exists.mockResolvedValue(null);
+      if (stage === 'compactor') {
+        jest
+          .spyOn(compactor, 'compactAiFeedbackItems')
+          .mockImplementation(() => {
+            throw new Error('synthetic compactor failure');
+          });
+      }
+
+      try {
+        expect(await h.processor.processOnce(1)).toMatchObject(
+          stage === 'provider'
+            ? { failed: 1, dead: 0 }
+            : { failed: 0, dead: 1 },
+        );
+        expect(diagnostic.saveCompaction).toHaveBeenCalledWith({
+          jobId: h.job._id.toString(),
+          claimNo: 1,
+          compactionReached: stage === 'compactor',
+          compactorInput: stage === 'compactor' ? items : null,
+          compactorOutput: null,
+          reason:
+            stage === 'provider'
+              ? 'PROVIDER_NOT_COMPLETED'
+              : stage === 'claim'
+                ? 'CLAIM_NOT_VALIDATED'
+                : 'COMPACTION_NOT_COMPLETED',
+          captureFailed: false,
+        });
+        expect(h.feedback.insertMany).not.toHaveBeenCalled();
+        expect(h.release).toHaveBeenCalledTimes(1);
+        expect(h.jobModel.findOneAndUpdate.mock.calls[2][1]).toMatchObject({
+          $set: {
+            failureCode:
+              stage === 'provider' ? 'UPSTREAM_UNAVAILABLE' : 'INTERNAL_ERROR',
+          },
+        });
+      } finally {
+        await h.module.close();
+      }
+    },
+  );
+
+  it('awaits the diagnostic for a legitimate empty result before releasing the guard', async () => {
+    const h = await harness();
+    const diagnostic = diagnosticFor(h.job.submissionId.toString());
+    let finishSave: () => void = () => undefined;
+    let markStarted: () => void = () => undefined;
+    const saveFinished = new Promise<void>((resolveSaved) => {
+      finishSave = resolveSaved;
+    });
+    const saveStarted = new Promise<void>((resolveStarted) => {
+      markStarted = resolveStarted;
+    });
+    diagnostic.saveCompaction.mockImplementation(async () => {
+      markStarted();
+      await saveFinished;
+    });
+    jest
+      .spyOn(h.provider, 'analyzeSubmission')
+      .mockImplementation(async (_context, execution) => {
+        await execution.onDiagnosticHandle?.(diagnostic.handle);
+        return [];
+      });
+    const processing = h.processor.processOnce(1);
+    try {
+      await Promise.race([
+        saveStarted,
+        processing.then((result) => {
+          throw new Error(
+            `Processor completed before compaction diagnostics: ${JSON.stringify(result)}`,
+          );
+        }),
+      ]);
+      expect(diagnostic.saveCompaction).toHaveBeenCalledWith(
+        expect.objectContaining({
+          compactionReached: true,
+          compactorInput: [],
+          compactorOutput: [],
+          reason: null,
+        }),
+      );
+      expect(h.feedback.insertMany).not.toHaveBeenCalled();
+      expect(h.release).not.toHaveBeenCalled();
+      finishSave();
+      expect(await processing).toMatchObject({ succeeded: 1, dead: 0 });
+      expect(h.release).toHaveBeenCalledTimes(1);
+    } finally {
+      finishSave();
+      try {
+        await processing;
+      } finally {
+        await h.module.close();
+      }
+    }
+  });
+
+  it('marks a failed input snapshot without changing compaction or persistence', async () => {
+    const h = await harness();
+    const diagnostic = diagnosticFor(h.job.submissionId.toString());
+    const items: AiFeedbackItem[] = [
+      {
+        type: FeedbackType.Other,
+        severity: FeedbackSeverity.Info,
+        message: '有具体依据的肯定',
+      },
+    ];
+    jest
+      .spyOn(h.provider, 'analyzeSubmission')
+      .mockImplementation(async (_context, execution) => {
+        await execution.onDiagnosticHandle?.(diagnostic.handle);
+        return items;
+      });
+    jest.spyOn(globalThis, 'structuredClone').mockImplementationOnce(() => {
+      throw new Error('synthetic clone failure');
+    });
+    try {
+      expect(await h.processor.processOnce(1)).toMatchObject({ succeeded: 1 });
+      expect(diagnostic.saveCompaction).toHaveBeenCalledWith(
+        expect.objectContaining({
+          compactionReached: true,
+          compactorInput: null,
+          compactorOutput: [expect.objectContaining(items[0])],
+          reason: null,
+          captureFailed: true,
+        }),
+      );
+      expect(h.feedback.insertMany).toHaveBeenCalledTimes(1);
+      expect(h.release).toHaveBeenCalledTimes(1);
+    } finally {
+      await h.module.close();
+    }
+  });
+
+  it.each([false, true])(
+    'isolates compaction write and logging failures when providerFailed=%s',
+    async (providerFailed) => {
+      const h = await harness();
+      const diagnostic = diagnosticFor(h.job.submissionId.toString());
+      diagnostic.saveCompaction.mockRejectedValue(
+        new Error('private synthetic diagnostic error'),
+      );
+      jest.spyOn(Logger.prototype, 'warn').mockImplementation(() => {
+        throw new Error('synthetic diagnostic logger failure');
+      });
+      const analyze = jest
+        .spyOn(h.provider, 'analyzeSubmission')
+        .mockImplementation(async (_context, execution) => {
+          await execution.onDiagnosticHandle?.(diagnostic.handle);
+          if (providerFailed) {
+            throw new AiFeedbackProviderError(
+              'TIMEOUT',
+              true,
+              'synthetic timeout',
+            );
+          }
+          return [];
+        });
+      try {
+        expect(await h.processor.processOnce(1)).toMatchObject(
+          providerFailed ? { failed: 1, dead: 0 } : { succeeded: 1, dead: 0 },
+        );
+        expect(analyze).toHaveBeenCalledTimes(1);
+        expect(h.release).toHaveBeenCalledTimes(1);
+        expect(h.feedback.insertMany).not.toHaveBeenCalled();
+      } finally {
+        await h.module.close();
+      }
+    },
+  );
 });
 
 describe('reference failures are terminal before every provider, including stub', () => {

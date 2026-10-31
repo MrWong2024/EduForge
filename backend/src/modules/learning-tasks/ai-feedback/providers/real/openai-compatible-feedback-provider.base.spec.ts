@@ -61,6 +61,17 @@ function execution(): AiFeedbackExecution {
   };
 }
 
+type DiagnosticHandle = Parameters<
+  NonNullable<AiFeedbackExecution['onDiagnosticHandle']>
+>[0];
+
+function diagnosticResponseBody(content: string, finishReason = 'stop') {
+  return JSON.stringify({
+    choices: [{ finish_reason: finishReason, message: { content } }],
+    usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 },
+  });
+}
+
 describe('AI Feedback providers (fake fetch only)', () => {
   let fetchMock: jest.SpiedFunction<typeof fetch>;
   let logMock: jest.SpiedFunction<Logger['log']>;
@@ -81,6 +92,35 @@ describe('AI Feedback providers (fake fetch only)', () => {
       value: new AiFeedbackRequestBodyDumper(new Logger('unit'), directory),
     });
     return directory;
+  }
+
+  async function diagnosticProvider(overrides: Record<string, unknown> = {}) {
+    const provider = new BailianFeedbackProvider(
+      configService({
+        NODE_ENV: 'development',
+        AI_FEEDBACK_DUMP_REQUEST_BODY: true,
+        ...overrides,
+      }),
+    );
+    const directory = await useTestDumpDirectory(provider);
+    const handles: DiagnosticHandle[] = [];
+    const hooks = execution();
+    hooks.onDiagnosticHandle = jest.fn((handle: DiagnosticHandle) => {
+      handles.push(handle);
+    });
+    return { provider, directory, handles, hooks };
+  }
+
+  async function readResponseDiagnostic(
+    directory: string,
+    handle: DiagnosticHandle,
+  ) {
+    return JSON.parse(
+      await fs.readFile(
+        resolve(directory, 'diagnostics', `${handle.traceId}.response.json`),
+        'utf8',
+      ),
+    ) as Record<string, unknown>;
   }
 
   beforeEach(() => {
@@ -229,8 +269,18 @@ describe('AI Feedback providers (fake fetch only)', () => {
   ])(
     'does not touch files for environment %s and flag %p',
     async (nodeEnv, flag) => {
+      const createHandle = jest.spyOn(
+        AiFeedbackRequestBodyDumper.prototype,
+        'createHandle',
+      );
       const save = jest
         .spyOn(AiFeedbackRequestBodyDumper.prototype, 'save')
+        .mockResolvedValue(undefined);
+      const saveResponse = jest
+        .spyOn(AiFeedbackRequestBodyDumper.prototype, 'saveResponse')
+        .mockResolvedValue(undefined);
+      const saveCompaction = jest
+        .spyOn(AiFeedbackRequestBodyDumper.prototype, 'saveCompaction')
         .mockResolvedValue(undefined);
       const mkdir = jest.spyOn(fs, 'mkdir');
       const writeFile = jest.spyOn(fs, 'writeFile');
@@ -243,11 +293,17 @@ describe('AI Feedback providers (fake fetch only)', () => {
         }),
       );
 
-      await expect(
-        provider.analyzeSubmission(context, execution()),
-      ).resolves.toEqual([]);
+      const hooks = execution();
+      hooks.onDiagnosticHandle = jest.fn();
+      await expect(provider.analyzeSubmission(context, hooks)).resolves.toEqual(
+        [],
+      );
 
+      expect(createHandle).not.toHaveBeenCalled();
       expect(save).not.toHaveBeenCalled();
+      expect(saveResponse).not.toHaveBeenCalled();
+      expect(saveCompaction).not.toHaveBeenCalled();
+      expect(hooks.onDiagnosticHandle).not.toHaveBeenCalled();
       expect(mkdir).not.toHaveBeenCalled();
       expect(writeFile).not.toHaveBeenCalled();
       expect(fetchMock).toHaveBeenCalledTimes(1);
@@ -255,9 +311,18 @@ describe('AI Feedback providers (fake fetch only)', () => {
   );
 
   it('does not retain a preflight, budget rejection, or failed reservation', async () => {
+    const createHandle = jest.spyOn(
+      AiFeedbackRequestBodyDumper.prototype,
+      'createHandle',
+    );
     const save = jest
       .spyOn(AiFeedbackRequestBodyDumper.prototype, 'save')
       .mockResolvedValue(undefined);
+    const saveResponse = jest
+      .spyOn(AiFeedbackRequestBodyDumper.prototype, 'saveResponse')
+      .mockResolvedValue(undefined);
+    const mkdir = jest.spyOn(fs, 'mkdir');
+    const writeFile = jest.spyOn(fs, 'writeFile');
     const provider = new BailianFeedbackProvider(
       configService({
         NODE_ENV: 'development',
@@ -266,20 +331,29 @@ describe('AI Feedback providers (fake fetch only)', () => {
       }),
     );
     provider.assertInputEligible(context);
+    const budgetHooks = execution();
+    budgetHooks.onDiagnosticHandle = jest.fn();
     await expect(
       provider.analyzeSubmission(
         { ...context, codeText: '中'.repeat(10000) },
-        execution(),
+        budgetHooks,
       ),
     ).rejects.toMatchObject({ code: 'INPUT_BUDGET_EXCEEDED' });
     const hooks = execution();
+    hooks.onDiagnosticHandle = jest.fn();
     const failure = new Error('synthetic reservation failure');
     hooks.reserveRequest = jest.fn().mockRejectedValue(failure);
     await expect(provider.analyzeSubmission(context, hooks)).rejects.toBe(
       failure,
     );
 
+    expect(createHandle).not.toHaveBeenCalled();
     expect(save).not.toHaveBeenCalled();
+    expect(saveResponse).not.toHaveBeenCalled();
+    expect(budgetHooks.onDiagnosticHandle).not.toHaveBeenCalled();
+    expect(hooks.onDiagnosticHandle).not.toHaveBeenCalled();
+    expect(mkdir).not.toHaveBeenCalled();
+    expect(writeFile).not.toHaveBeenCalled();
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
@@ -313,13 +387,19 @@ describe('AI Feedback providers (fake fetch only)', () => {
         AI_FEEDBACK_DUMP_REQUEST_BODY: true,
       }),
     );
+    await useTestDumpDirectory(provider);
     let finishRetention: (() => void) | undefined;
+    let beginRetention: (() => void) | undefined;
+    const retentionStarted = new Promise<void>((resolve) => {
+      beginRetention = resolve;
+    });
     const save = jest
       .spyOn(AiFeedbackRequestBodyDumper.prototype, 'save')
       .mockImplementation(
         () =>
           new Promise<void>((resolve) => {
             finishRetention = resolve;
+            beginRetention?.();
           }),
       );
     fetchMock.mockImplementation(() => {
@@ -327,7 +407,7 @@ describe('AI Feedback providers (fake fetch only)', () => {
       return Promise.resolve(chatResponse(JSON.stringify({ items: [item] })));
     });
     const pending = provider.analyzeSubmission(context, execution());
-    await Promise.resolve();
+    await retentionStarted;
     expect(save).toHaveBeenCalledTimes(1);
     expect(fetchMock).not.toHaveBeenCalled();
     expect(jest.getTimerCount()).toBe(0);
@@ -335,6 +415,560 @@ describe('AI Feedback providers (fake fetch only)', () => {
     finishRetention();
 
     await expect(pending).resolves.toMatchObject([item]);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('retains raw response text and distinct validation, normalization and cap stages', async () => {
+    const { provider, directory, handles, hooks } = await diagnosticProvider();
+    const upstreamItems = [
+      {
+        type: 'OTHER',
+        severity: 'INFO',
+        message: '结论：空集合返回空结果。\n\n依据：保留首次出现次序。',
+        tags: ['correctness', 'correctness'],
+      },
+      { ...item, message: '第二条合成反馈。' },
+      { ...item, message: '第三条合成反馈。' },
+    ];
+    const rawResponseBody =
+      ' \n' +
+      diagnosticResponseBody(JSON.stringify({ items: upstreamItems })) +
+      '\n ';
+    const response = new Response(rawResponseBody, { status: 200 });
+    const readText = jest.spyOn(response, 'text');
+    const readJson = jest.spyOn(response, 'json');
+    fetchMock.mockResolvedValue(response);
+
+    const result = await provider.analyzeSubmission(context, hooks);
+
+    expect(handles).toHaveLength(1);
+    const handle = handles[0];
+    const saved = await readResponseDiagnostic(directory, handle);
+    const normalized = [
+      { ...upstreamItems[0], tags: ['correctness'] },
+      upstreamItems[1],
+      upstreamItems[2],
+    ];
+    expect(saved).toMatchObject({
+      traceId: handle.traceId,
+      submissionId: context.submissionId,
+      requestFileName: handle.requestFileName,
+      requestSaved: true,
+      createdAt: handle.createdAt,
+      httpStatus: 200,
+      rawResponseBody,
+      validatedItemsBeforeNormalize: upstreamItems,
+      normalizedItemsBeforeCap: normalized,
+      providerItemsAfterCap: normalized.slice(0, 2),
+      reachedStage: 'provider_capped',
+      failureCode: null,
+    });
+    expect(typeof saved.recordedAt).toBe('string');
+    expect(result).toMatchObject(normalized.slice(0, 2));
+    expect(result).toHaveLength(2);
+    expect(readText).toHaveBeenCalledTimes(1);
+    expect(readJson).not.toHaveBeenCalled();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(hooks.reportUsage).toHaveBeenCalledTimes(1);
+    expect(hooks.reportUsage).toHaveBeenCalledWith({
+      promptTokens: 10,
+      completionTokens: 5,
+      totalTokens: 15,
+    });
+    expect(handle.requestFileName).toBe(`${handle.traceId}.json`);
+    const [, init] = fetchMock.mock.calls[0];
+    if (typeof init?.body !== 'string')
+      throw new Error('Expected request body');
+    expect(init.body).not.toContain(handle.traceId);
+    expect(init.body).not.toContain('traceId');
+    expect(
+      await fs.readFile(resolve(directory, handle.requestFileName)),
+    ).toEqual(Buffer.from(init.body, 'utf8'));
+    expect(await fs.readdir(resolve(directory, 'diagnostics'))).toEqual([
+      `${handle.traceId}.response.json`,
+    ]);
+  });
+
+  it.each([
+    {
+      label: 'HTTP rejection',
+      status: 429,
+      body: diagnosticResponseBody(JSON.stringify({ items: [item] })),
+      code: 'RATE_LIMIT_UPSTREAM',
+      retryable: true,
+      stage: 'response_parsed',
+      hasUsage: true,
+    },
+    {
+      label: 'HTTP rejection with non-JSON text',
+      status: 401,
+      body: 'unauthorized 合成响应\n',
+      code: 'UNAUTHORIZED',
+      retryable: false,
+      stage: 'response_body_read',
+      hasUsage: false,
+    },
+    {
+      label: 'output limit',
+      status: 200,
+      body: diagnosticResponseBody(JSON.stringify({ items: [item] }), 'length'),
+      code: 'OUTPUT_LIMIT_REACHED',
+      retryable: false,
+      stage: 'response_parsed',
+      hasUsage: true,
+    },
+    {
+      label: 'malformed response JSON',
+      status: 200,
+      body: '{"choices":',
+      code: 'BAD_RESPONSE',
+      retryable: false,
+      stage: 'response_body_read',
+      hasUsage: false,
+    },
+    {
+      label: 'malformed feedback JSON',
+      status: 200,
+      body: diagnosticResponseBody('not-feedback-json'),
+      code: 'BAD_RESPONSE',
+      retryable: false,
+      stage: 'response_parsed',
+      hasUsage: true,
+    },
+    {
+      label: 'invalid feedback structure',
+      status: 200,
+      body: diagnosticResponseBody(JSON.stringify({ items: 'invalid' })),
+      code: 'BAD_RESPONSE',
+      retryable: false,
+      stage: 'response_parsed',
+      hasUsage: true,
+    },
+    {
+      label: 'a later invalid item',
+      status: 200,
+      body: diagnosticResponseBody(
+        JSON.stringify({ items: [item, { ...item, unexpected: true }] }),
+      ),
+      code: 'BAD_RESPONSE',
+      retryable: false,
+      stage: 'response_parsed',
+      hasUsage: true,
+    },
+  ])(
+    'retains raw text for $label without inventing uncompleted item stages',
+    async ({ status, body, code, retryable, stage, hasUsage }) => {
+      const { provider, directory, handles, hooks } =
+        await diagnosticProvider();
+      fetchMock.mockResolvedValue(new Response(body, { status }));
+
+      await expect(
+        provider.analyzeSubmission(context, hooks),
+      ).rejects.toMatchObject({ code, retryable });
+
+      expect(handles).toHaveLength(1);
+      const saved = await readResponseDiagnostic(directory, handles[0]);
+      expect(saved).toMatchObject({
+        requestSaved: true,
+        httpStatus: status,
+        rawResponseBody: body,
+        validatedItemsBeforeNormalize: null,
+        normalizedItemsBeforeCap: null,
+        providerItemsAfterCap: null,
+        reachedStage: stage,
+        failureCode: code,
+      });
+      expect(hooks.reportUsage).toHaveBeenCalledTimes(1);
+      expect(hooks.reportUsage).toHaveBeenCalledWith(
+        hasUsage
+          ? { promptTokens: 10, completionTokens: 5, totalTokens: 15 }
+          : null,
+      );
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+    },
+  );
+
+  it('distinguishes a valid empty response from stages that were not completed', async () => {
+    const { provider, directory, handles, hooks } = await diagnosticProvider();
+    const rawResponseBody = diagnosticResponseBody('{"items":[]}');
+    fetchMock.mockResolvedValue(new Response(rawResponseBody, { status: 200 }));
+
+    await expect(provider.analyzeSubmission(context, hooks)).resolves.toEqual(
+      [],
+    );
+
+    expect(await readResponseDiagnostic(directory, handles[0])).toMatchObject({
+      rawResponseBody,
+      validatedItemsBeforeNormalize: [],
+      normalizedItemsBeforeCap: [],
+      providerItemsAfterCap: [],
+      reachedStage: 'provider_capped',
+      failureCode: null,
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('records unavailable raw response and null stages after a network failure', async () => {
+    const { provider, directory, handles, hooks } = await diagnosticProvider();
+    fetchMock.mockRejectedValue({ name: 'AbortError' });
+
+    await expect(
+      provider.analyzeSubmission(context, hooks),
+    ).rejects.toMatchObject({ code: 'TIMEOUT', retryable: true });
+
+    expect(await readResponseDiagnostic(directory, handles[0])).toMatchObject({
+      httpStatus: null,
+      rawResponseBody: null,
+      validatedItemsBeforeNormalize: null,
+      normalizedItemsBeforeCap: null,
+      providerItemsAfterCap: null,
+      reachedStage: 'request_ready',
+      failureCode: 'TIMEOUT',
+    });
+    expect(hooks.reportUsage).toHaveBeenCalledTimes(1);
+    expect(hooks.reportUsage).toHaveBeenCalledWith(null);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps concurrent traces separate for the same submission', async () => {
+    const { provider, directory } = await diagnosticProvider();
+    const handles: DiagnosticHandle[] = [];
+    const hooks = [execution(), execution()];
+    hooks.forEach((hook, index) => {
+      hook.onDiagnosticHandle = jest.fn((handle: DiagnosticHandle) => {
+        handles[index] = handle;
+      });
+    });
+    const messages = ['first synthetic response', 'second synthetic response'];
+    const rawBodies = messages.map((message) =>
+      diagnosticResponseBody(JSON.stringify({ items: [{ ...item, message }] })),
+    );
+    fetchMock.mockImplementation((_url, init) => {
+      if (typeof init?.body !== 'string') throw new Error('Expected body');
+      const index = init.body.includes('CONCURRENT_FIRST_SOURCE') ? 0 : 1;
+      return Promise.resolve(new Response(rawBodies[index], { status: 200 }));
+    });
+
+    const results = await Promise.all(
+      hooks.map((hook, index) =>
+        provider.analyzeSubmission(
+          {
+            ...context,
+            codeText:
+              index === 0
+                ? 'CONCURRENT_FIRST_SOURCE'
+                : 'CONCURRENT_SECOND_SOURCE',
+          },
+          hook,
+        ),
+      ),
+    );
+
+    expect(handles).toHaveLength(2);
+    expect(handles[0].traceId).not.toBe(handles[1].traceId);
+    for (let index = 0; index < 2; index++) {
+      expect(results[index]).toMatchObject([
+        { ...item, message: messages[index] },
+      ]);
+      expect(
+        await readResponseDiagnostic(directory, handles[index]),
+      ).toMatchObject({
+        traceId: handles[index].traceId,
+        requestFileName: handles[index].requestFileName,
+        rawResponseBody: rawBodies[index],
+        providerItemsAfterCap: [{ ...item, message: messages[index] }],
+      });
+      expect(hooks[index].reportUsage).toHaveBeenCalledTimes(1);
+    }
+    expect(
+      (await fs.readdir(directory)).filter((name) => name.endsWith('.json')),
+    ).toHaveLength(2);
+    expect(
+      (await fs.readdir(resolve(directory, 'diagnostics'))).sort(),
+    ).toEqual(
+      handles.map((handle) => `${handle.traceId}.response.json`).sort(),
+    );
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('retains a correlated response after request-file writing fails', async () => {
+    const { provider, directory, handles, hooks } = await diagnosticProvider();
+    const writeFile = fs.writeFile;
+    jest.spyOn(fs, 'writeFile').mockImplementation((file, data, options) => {
+      if (typeof file === 'string' && dirname(file) === directory) {
+        return Promise.reject(new Error('synthetic request write failure'));
+      }
+      return writeFile(file, data, options);
+    });
+    const rawResponseBody = diagnosticResponseBody(
+      JSON.stringify({ items: [item] }),
+    );
+    fetchMock.mockResolvedValue(new Response(rawResponseBody, { status: 200 }));
+
+    await expect(
+      provider.analyzeSubmission(context, hooks),
+    ).resolves.toMatchObject([item]);
+
+    expect(handles).toHaveLength(1);
+    expect(await readResponseDiagnostic(directory, handles[0])).toMatchObject({
+      traceId: handles[0].traceId,
+      requestFileName: handles[0].requestFileName,
+      requestSaved: false,
+      rawResponseBody,
+      reachedStage: 'provider_capped',
+      failureCode: null,
+    });
+    expect(
+      (await fs.readdir(directory)).filter((name) => name.endsWith('.json')),
+    ).toEqual([]);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(hooks.reportUsage).toHaveBeenCalledTimes(1);
+    expect(warnMock).toHaveBeenCalledWith(
+      'AI feedback request body retention failed: submissionId=unit-submission',
+    );
+  });
+
+  it.each([
+    'initialization',
+    'callback',
+    'response write',
+    'serialization',
+    'snapshot',
+  ])(
+    'keeps one fetch and usage result when diagnostic %s fails',
+    async (failurePoint) => {
+      const { provider, directory, handles, hooks } =
+        await diagnosticProvider();
+      const rawResponseBody = diagnosticResponseBody(
+        JSON.stringify({ items: [item] }),
+      );
+      fetchMock.mockResolvedValue(
+        new Response(rawResponseBody, { status: 200 }),
+      );
+      const diagnosticFailure = new Error('synthetic diagnostic-only failure');
+      if (failurePoint === 'initialization') {
+        jest
+          .spyOn(AiFeedbackRequestBodyDumper.prototype, 'createHandle')
+          .mockImplementation(() => {
+            throw diagnosticFailure;
+          });
+      } else if (failurePoint === 'callback') {
+        hooks.onDiagnosticHandle = jest
+          .fn()
+          .mockRejectedValue(diagnosticFailure);
+      } else if (failurePoint === 'response write') {
+        const writeFile = fs.writeFile;
+        jest
+          .spyOn(fs, 'writeFile')
+          .mockImplementation((file, data, options) => {
+            if (typeof file === 'string' && file.endsWith('.response.json')) {
+              return Promise.reject(diagnosticFailure);
+            }
+            return writeFile(file, data, options);
+          });
+      } else if (failurePoint === 'serialization') {
+        const stringify = JSON.stringify;
+        jest.spyOn(JSON, 'stringify').mockImplementation((value: unknown) => {
+          if (
+            value &&
+            typeof value === 'object' &&
+            'rawResponseBody' in value
+          ) {
+            throw diagnosticFailure;
+          }
+          return stringify(value);
+        });
+      } else {
+        jest.spyOn(globalThis, 'structuredClone').mockImplementationOnce(() => {
+          throw diagnosticFailure;
+        });
+      }
+
+      await expect(
+        provider.analyzeSubmission(context, hooks),
+      ).resolves.toMatchObject([item]);
+
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      expect(hooks.reportUsage).toHaveBeenCalledTimes(1);
+      expect(hooks.reportUsage).toHaveBeenCalledWith({
+        promptTokens: 10,
+        completionTokens: 5,
+        totalTokens: 15,
+      });
+      expect(warnMock).not.toHaveBeenCalledWith(
+        expect.stringContaining('synthetic diagnostic-only failure'),
+      );
+      if (
+        failurePoint === 'response write' ||
+        failurePoint === 'serialization'
+      ) {
+        expect(
+          (await fs.readdir(directory)).filter((name) =>
+            name.endsWith('.json'),
+          ),
+        ).toHaveLength(1);
+        if (failurePoint === 'response write') {
+          expect(await fs.readdir(resolve(directory, 'diagnostics'))).toEqual(
+            [],
+          );
+        } else {
+          await expect(
+            fs.readdir(resolve(directory, 'diagnostics')),
+          ).rejects.toMatchObject({ code: 'ENOENT' });
+        }
+        expect(warnMock).toHaveBeenCalledWith(
+          'AI feedback response diagnostics retention failed: submissionId=unit-submission',
+        );
+      }
+      if (failurePoint === 'snapshot') {
+        expect(handles).toHaveLength(1);
+        const saved = await readResponseDiagnostic(directory, handles[0]);
+        expect(saved).toMatchObject({
+          captureFailed: true,
+          validatedItemsBeforeNormalize: null,
+          normalizedItemsBeforeCap: [item],
+          providerItemsAfterCap: [item],
+          reachedStage: 'provider_capped',
+          failureCode: null,
+        });
+      }
+    },
+  );
+
+  it('keeps the original Provider error when response diagnostics fail', async () => {
+    const { provider, hooks } = await diagnosticProvider();
+    jest
+      .spyOn(AiFeedbackRequestBodyDumper.prototype, 'saveResponse')
+      .mockRejectedValue(new Error('synthetic diagnostic save failure'));
+    fetchMock.mockResolvedValue(
+      new Response(diagnosticResponseBody(JSON.stringify({ items: [item] })), {
+        status: 429,
+      }),
+    );
+
+    await expect(
+      provider.analyzeSubmission(context, hooks),
+    ).rejects.toMatchObject({
+      code: 'RATE_LIMIT_UPSTREAM',
+      retryable: true,
+    });
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(hooks.reportUsage).toHaveBeenCalledTimes(1);
+    expect(hooks.reportUsage).toHaveBeenCalledWith({
+      promptTokens: 10,
+      completionTokens: 5,
+      totalTokens: 15,
+    });
+  });
+
+  it('preserves usage persistence errors with response retention enabled', async () => {
+    const { provider, directory, handles, hooks } = await diagnosticProvider();
+    const rawResponseBody = diagnosticResponseBody(
+      JSON.stringify({ items: [item] }),
+    );
+    const failure = new Error('synthetic usage persistence failure');
+    hooks.reportUsage = jest.fn().mockRejectedValue(failure);
+    fetchMock.mockResolvedValue(new Response(rawResponseBody, { status: 200 }));
+
+    await expect(provider.analyzeSubmission(context, hooks)).rejects.toBe(
+      failure,
+    );
+
+    expect(hooks.reportUsage).toHaveBeenCalledTimes(1);
+    expect(hooks.reportUsage).toHaveBeenCalledWith({
+      promptTokens: 10,
+      completionTokens: 5,
+      totalTokens: 15,
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(await readResponseDiagnostic(directory, handles[0])).toMatchObject({
+      rawResponseBody,
+      reachedStage: 'response_parsed',
+      validatedItemsBeforeNormalize: null,
+      normalizedItemsBeforeCap: null,
+      providerItemsAfterCap: null,
+    });
+  });
+
+  it('clears the HTTP timer before awaiting response diagnostic I/O', async () => {
+    const { provider, hooks } = await diagnosticProvider({
+      BAILIAN_TIMEOUT_MS: 1000,
+    });
+    let enterRetention: (() => void) | undefined;
+    let finishRetention: (() => void) | undefined;
+    const entered = new Promise<void>((resolve) => {
+      enterRetention = resolve;
+    });
+    jest
+      .spyOn(AiFeedbackRequestBodyDumper.prototype, 'saveResponse')
+      .mockImplementation(() => {
+        enterRetention?.();
+        return new Promise<void>((resolve) => {
+          finishRetention = resolve;
+        });
+      });
+    fetchMock.mockResolvedValue(
+      chatResponse(JSON.stringify({ items: [item] })),
+    );
+    const pending = provider.analyzeSubmission(context, hooks);
+    try {
+      await entered;
+      expect(jest.getTimerCount()).toBe(0);
+      const signal = fetchMock.mock.calls[0][1]?.signal;
+      expect(signal?.aborted).toBe(false);
+      await jest.advanceTimersByTimeAsync(5000);
+      expect(signal?.aborted).toBe(false);
+      expect(jest.getTimerCount()).toBe(0);
+    } finally {
+      finishRetention?.();
+    }
+    await expect(pending).resolves.toMatchObject([item]);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps response text reading inside the HTTP timeout', async () => {
+    const { provider, directory, handles, hooks } = await diagnosticProvider({
+      BAILIAN_TIMEOUT_MS: 1000,
+    });
+    let enterBodyRead: (() => void) | undefined;
+    const entered = new Promise<void>((resolve) => {
+      enterBodyRead = resolve;
+    });
+    fetchMock.mockImplementation((_url, init) => {
+      const response = chatResponse(JSON.stringify({ items: [item] }));
+      jest.spyOn(response, 'text').mockImplementation(
+        () =>
+          new Promise<string>((_resolve, reject) => {
+            const abortError = new Error('synthetic response body abort');
+            abortError.name = 'AbortError';
+            init?.signal?.addEventListener('abort', () => reject(abortError), {
+              once: true,
+            });
+            enterBodyRead?.();
+          }),
+      );
+      return Promise.resolve(response);
+    });
+    const assertion = expect(
+      provider.analyzeSubmission(context, hooks),
+    ).rejects.toMatchObject({ code: 'TIMEOUT', retryable: true });
+    await entered;
+    expect(jest.getTimerCount()).toBe(1);
+    await jest.advanceTimersByTimeAsync(1000);
+    await assertion;
+
+    expect(await readResponseDiagnostic(directory, handles[0])).toMatchObject({
+      httpStatus: 200,
+      rawResponseBody: null,
+      reachedStage: 'http_response',
+      validatedItemsBeforeNormalize: null,
+      normalizedItemsBeforeCap: null,
+      providerItemsAfterCap: null,
+      failureCode: 'TIMEOUT',
+    });
+    expect(hooks.reportUsage).toHaveBeenCalledTimes(1);
+    expect(hooks.reportUsage).toHaveBeenCalledWith(null);
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
@@ -477,15 +1111,21 @@ describe('AI Feedback providers (fake fetch only)', () => {
   it.each([undefined, '', ' \t '])(
     'rejects a missing or blank key (%p) before fetch',
     async (apiKey) => {
-      const provider = new BailianFeedbackProvider(
-        configService({ BAILIAN_API_KEY: apiKey }),
-      );
+      const { provider, directory, handles, hooks } = await diagnosticProvider({
+        BAILIAN_API_KEY: apiKey,
+      });
 
       await expect(
-        provider.analyzeSubmission(context, execution()),
+        provider.analyzeSubmission(context, hooks),
       ).rejects.toMatchObject({
         code: 'MISSING_API_KEY',
         retryable: false,
+      });
+      expect(handles).toEqual([]);
+      expect(hooks.onDiagnosticHandle).not.toHaveBeenCalled();
+      expect(hooks.reserveRequest).not.toHaveBeenCalled();
+      await expect(fs.readdir(directory)).rejects.toMatchObject({
+        code: 'ENOENT',
       });
       expect(fetchMock).not.toHaveBeenCalled();
     },
