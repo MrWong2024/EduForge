@@ -40,6 +40,42 @@ describe('compactAiFeedbackItems', () => {
     expect(compacted[0].message).toContain('分号');
   });
 
+  it.each([
+    {
+      difference: 'case',
+      firstSuggestion: '在 `foo()` 后补齐分号。',
+      nextSuggestion: '在 `Foo()` 后补齐分号。',
+    },
+    {
+      difference: 'operator',
+      firstSuggestion: '将条件改为 `ready`。',
+      nextSuggestion: '将条件改为 `!ready`。',
+    },
+  ])(
+    'preserves $difference differences when merging suggestions',
+    ({ firstSuggestion, nextSuggestion }) => {
+      const compacted = compactAiFeedbackItems([
+        buildItem({
+          type: FeedbackType.Syntax,
+          severity: FeedbackSeverity.Error,
+          message: '第 12 行缺少分号',
+          suggestion: firstSuggestion,
+        }),
+        buildItem({
+          type: FeedbackType.Syntax,
+          severity: FeedbackSeverity.Error,
+          message: '第 26 行缺少分号',
+          suggestion: nextSuggestion,
+        }),
+      ]);
+
+      expect(compacted).toHaveLength(1);
+      expect(compacted[0].suggestion).toBe(
+        `${firstSuggestion}；${nextSuggestion}`,
+      );
+    },
+  );
+
   it('drops low-value praise INFO when actionable error exists', () => {
     const items: AiFeedbackItem[] = [
       buildItem({
@@ -163,6 +199,12 @@ describe('compactAiFeedbackItems', () => {
         severity: FeedbackSeverity.Error,
         message: '第 40 行缺少分号',
         suggestion: nextSuggestion,
+      }),
+      buildItem({
+        type: FeedbackType.Syntax,
+        severity: FeedbackSeverity.Error,
+        message: '第 54 行缺少分号',
+        suggestion: '仅保留前两段建议，不展示这一段。',
       }),
     ]);
 

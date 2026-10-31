@@ -214,7 +214,7 @@ const collectMergedSuggestion = (items: AiFeedbackItem[]) => {
   const seen = new Set<string>();
   for (const item of items) {
     const display = item.suggestion ?? '';
-    const key = normalizeForCompare(display);
+    const key = display.replace(/\s+/g, ' ').trim();
     if (!key || seen.has(key)) {
       continue;
     }
