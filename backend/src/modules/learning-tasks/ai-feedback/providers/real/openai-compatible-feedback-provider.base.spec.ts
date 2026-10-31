@@ -221,7 +221,7 @@ describe('AI Feedback providers (fake fetch only)', () => {
         model: 'qwen-plus',
         temperature: 0.2,
         max_tokens: 2048,
-        enable_thinking: false,
+        enable_thinking: true,
       });
       const userMessage = payload.messages[1].content;
       for (const material of [
@@ -1019,7 +1019,7 @@ describe('AI Feedback providers (fake fetch only)', () => {
       model: 'qwen-plus',
       temperature: 0.2,
       max_tokens: 2048,
-      enable_thinking: false,
+      enable_thinking: true,
     });
     expect(payload.messages.map((message) => message.role)).toEqual([
       'system',
@@ -1028,6 +1028,97 @@ describe('AI Feedback providers (fake fetch only)', () => {
     expect(typeof payload.messages[0].content).toBe('string');
     expect(payload.messages[1].content).toContain(context.codeText);
   });
+
+  it('uses only final content while retaining raw reasoning and reported usage', async () => {
+    const { provider, directory, handles, hooks } = await diagnosticProvider();
+    const finalItem = {
+      type: 'OTHER',
+      severity: 'INFO',
+      message: '源码为空输入返回空结果，符合任务要求。',
+      tags: ['correctness'],
+    };
+    const reasoningItem = {
+      type: 'BUG',
+      severity: 'ERROR',
+      message: '合成思考内容，不得作为最终反馈。',
+    };
+    const rawResponse = JSON.stringify({
+      choices: [
+        {
+          finish_reason: 'stop',
+          message: {
+            reasoning_content: JSON.stringify({ items: [reasoningItem] }),
+            content: JSON.stringify({ items: [finalItem] }),
+          },
+        },
+      ],
+      usage: {
+        prompt_tokens: 10,
+        completion_tokens: 8,
+        total_tokens: 18,
+        completion_tokens_details: { reasoning_tokens: 6 },
+      },
+    });
+    fetchMock.mockResolvedValue(new Response(rawResponse));
+
+    const result = await provider.analyzeSubmission(context, hooks);
+
+    expect(result).toHaveLength(1);
+    expect(result[0]).toMatchObject(finalItem);
+    expect(result[0].message).toBe(finalItem.message);
+    expect(result[0]).not.toHaveProperty('reasoning_content');
+    expect(hooks.reportUsage).toHaveBeenCalledTimes(1);
+    expect(hooks.reportUsage).toHaveBeenCalledWith({
+      promptTokens: 10,
+      completionTokens: 8,
+      totalTokens: 18,
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(handles).toHaveLength(1);
+    const saved = await readResponseDiagnostic(directory, handles[0]);
+    expect(saved.rawResponseBody).toBe(rawResponse);
+    expect(saved.providerItemsAfterCap).toEqual([finalItem]);
+  });
+
+  it.each([undefined, 'not valid feedback JSON'])(
+    'rejects content=%p without using valid-looking reasoning as a fallback',
+    async (content) => {
+      const provider = new BailianFeedbackProvider(configService());
+      const hooks = execution();
+      fetchMock.mockResolvedValue(
+        new Response(
+          JSON.stringify({
+            choices: [
+              {
+                finish_reason: 'stop',
+                message: {
+                  content,
+                  reasoning_content: JSON.stringify({ items: [item] }),
+                },
+              },
+            ],
+            usage: {
+              prompt_tokens: 10,
+              completion_tokens: 8,
+              total_tokens: 18,
+              completion_tokens_details: { reasoning_tokens: 6 },
+            },
+          }),
+        ),
+      );
+
+      await expect(
+        provider.analyzeSubmission(context, hooks),
+      ).rejects.toMatchObject({ code: 'BAD_RESPONSE', retryable: false });
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      expect(hooks.reportUsage).toHaveBeenCalledTimes(1);
+      expect(hooks.reportUsage).toHaveBeenCalledWith({
+        promptTokens: 10,
+        completionTokens: 8,
+        totalTokens: 18,
+      });
+    },
+  );
 
   it.each([
     { prefix: 'Valid shape example A', count: 1 },

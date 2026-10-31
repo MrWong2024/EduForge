@@ -139,7 +139,11 @@ Mock Bailian 等测试组合的执行方案见 [Backend Testing Playbook](./hand
 | `AI_FEEDBACK_WORKER_INTERVAL_MS` | `10000` | Joi → ConfigService | 后台自动消费间隔（ms），正整数。 |
 | `AI_FEEDBACK_WORKER_BATCH_SIZE` | `5` | Joi → ConfigService | 后台自动消费批次大小，正整数。 |
 
-Bailian 固定使用非流式、顶层 `enable_thinking:false` 与 `max_tokens`，无思考开关、extra_body 或第二套输出上限。`AI_FEEDBACK_MAX_CODE_CHARS` 与 `BAILIAN_MAX_RETRIES` 已废止：移除校验、读取及 example，ignored env 残留不恢复截断或 Provider 重试。每 Job 最多三次处理机会，无新增次数配置，内部执行见 Service Owner。模型路由及默认值保持不变。
+Bailian 固定使用非流式、请求体顶层 `enable_thinking:true` 与 `max_tokens`，不使用 extra_body 封装；无关闭思考的运行开关，不新增 `thinking_budget`、`reasoning_effort` 或第二套输出上限。`AI_FEEDBACK_MAX_OUTPUT_TOKENS`、`BAILIAN_TIMEOUT_MS` 的配置入口、默认值及范围均保持不变。
+
+按[阿里云 OpenAI-compatible Chat Completions 参数定义](https://help.aliyun.com/zh/model-studio/qwen-api-via-openai-chat-completions)，当前 Qwen 调用的 `max_tokens` 限制回答长度，不包含思维链；`thinking_budget` 才是独立的思考过程长度参数，本项目不设置它。因此现有 `max_tokens` 不是思维链与回答的全部输出 Token 总限额。超时和 `finish_reason=length` 沿用原失败语义，不降级关闭思考，也不发起非思考重试；`content` / `reasoning_content` 隔离及 usage 计量职责沿用 [Provider Card B](./handoff-backend-service-map.md#provider-card-b)。
+
+`AI_FEEDBACK_MAX_CODE_CHARS` 与 `BAILIAN_MAX_RETRIES` 已废止：移除校验、读取及 example，ignored env 残留不恢复截断或 Provider 重试。每 Job 最多三次处理机会，无新增次数配置，内部执行见 Service Owner。模型路由及默认值保持不变。
 
 条件必填与安全配置：
 

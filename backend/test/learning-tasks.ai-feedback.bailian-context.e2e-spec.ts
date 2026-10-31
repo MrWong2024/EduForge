@@ -778,7 +778,7 @@ describe('LearningTasks AI Feedback Bailian Context (e2e)', () => {
     expect(capturedPayloads).toHaveLength(1);
     expect(matchedPayload).toMatchObject({
       max_tokens: 2048,
-      enable_thinking: false,
+      enable_thinking: true,
     });
     expect(matchedPayload).not.toHaveProperty('extra_body');
     expect(matchedPayload).not.toHaveProperty('max_completion_tokens');

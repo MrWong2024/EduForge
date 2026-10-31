@@ -289,7 +289,7 @@ export abstract class OpenAiCompatibleFeedbackProviderBase implements AiFeedback
     const payload = {
       model: config.model,
       messages,
-      enable_thinking: false,
+      enable_thinking: true,
       max_tokens: config.maxOutputTokens,
       temperature: 0.2,
     };
