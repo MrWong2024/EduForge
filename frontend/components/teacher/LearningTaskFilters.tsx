@@ -460,33 +460,42 @@ export function LearningTaskFilters({
           }
         />
       ) : (
-        <div className="overflow-x-auto rounded-lg border border-zinc-200 bg-white">
-          <table className="min-w-[1360px] w-full table-fixed border-collapse text-sm">
-            <colgroup>
-              <col className="w-[220px]" />
-              <col className="w-[360px]" />
-              <col className="w-[140px]" />
-              <col className="w-[110px]" />
-              <col className="w-[110px]" />
-              <col className="w-[120px]" />
-              <col className="w-[170px]" />
-              <col className="w-[130px]" />
+        <div className="min-w-0 rounded-lg border border-zinc-200 bg-white">
+          <table
+            role="table"
+            aria-label="任务模板列表"
+            className="block w-full table-fixed border-collapse text-sm lg:table"
+          >
+            <colgroup className="hidden lg:table-column-group">
+              <col />
+              <col className="w-[11rem]" />
+              <col className="w-[9rem]" />
+              <col className="w-[9rem]" />
+              <col className="w-[7rem]" />
             </colgroup>
-            <thead className="bg-zinc-50 text-left text-xs font-semibold tracking-wide text-zinc-700">
-              <tr>
-                <th className="px-4 py-3">标题</th>
-                <th className="px-4 py-3">描述</th>
-                <th className="px-4 py-3">知识模块</th>
-                <th className="px-4 py-3">状态</th>
-                <th className="px-4 py-3">可见性</th>
-                <th className="px-4 py-3">课程分类</th>
-                <th className="px-4 py-3">评分配置</th>
-                <th className="sticky right-0 z-20 bg-zinc-50 px-4 py-3 shadow-[inset_1px_0_0_0_#e4e4e7]">
+            <thead
+              role="rowgroup"
+              className="sr-only bg-zinc-50 text-left text-xs font-semibold tracking-wide text-zinc-700 lg:not-sr-only lg:table-header-group"
+            >
+              <tr role="row">
+                <th role="columnheader" scope="col" className="px-3 py-3">
+                  任务
+                </th>
+                <th role="columnheader" scope="col" className="px-3 py-3">
+                  分类
+                </th>
+                <th role="columnheader" scope="col" className="px-3 py-3">
+                  状态
+                </th>
+                <th role="columnheader" scope="col" className="px-3 py-3">
+                  评分配置
+                </th>
+                <th role="columnheader" scope="col" className="px-3 py-3">
                   操作
                 </th>
               </tr>
             </thead>
-            <tbody>
+            <tbody role="rowgroup" className="block lg:table-row-group">
               {sortedTasks.map((task, index) => {
                 const statusUpper = toStatusUpper(task.status);
                 const rubricSummary = summarizeRubric(task.rubric);
@@ -531,66 +540,106 @@ export function LearningTaskFilters({
 
                 return (
                   <tr
+                    role="row"
                     key={task.id ?? `learning-task-${index}`}
-                    className="border-t border-zinc-100 align-top"
+                    className="grid min-w-0 grid-cols-2 gap-4 border-t border-zinc-100 px-4 py-5 align-top [overflow-wrap:anywhere] sm:grid-cols-4 lg:table-row lg:p-0"
                   >
-                    <td className="px-4 py-3">
-                      <div className="space-y-1">
-                        <p className="max-h-[3rem] overflow-hidden break-words text-sm font-semibold leading-6 text-zinc-900">
+                    <td
+                      role="cell"
+                      className="col-span-full block min-w-0 lg:table-cell lg:px-3 lg:py-4"
+                    >
+                      <div className="space-y-2">
+                        <p className="break-words text-sm font-semibold leading-6 text-zinc-900">
                           {titleText}
                         </p>
                         {publisherLabel ? (
-                          <span className="inline-flex items-center rounded-full border border-sky-200 bg-sky-50 px-2 py-0.5 text-[11px] font-medium text-sky-700">
+                          <span className="inline-flex max-w-full items-center rounded-full border border-sky-200 bg-sky-50 px-2 py-0.5 text-[11px] font-medium text-sky-700">
                             {publisherLabel}
                           </span>
                         ) : null}
-                      </div>
-                    </td>
-                    <td className="px-4 py-3">
-                      <p
-                        className="max-h-[4.5rem] overflow-hidden break-words text-sm leading-6 text-zinc-700"
-                        title={descriptionText}
-                      >
-                        {descriptionText}
-                      </p>
-                    </td>
-                    <td className="px-4 py-3 break-words text-zinc-700">
-                      {toDisplayText(task.knowledgeModule)}
-                    </td>
-                    <td className="px-4 py-3">
-                      <div className="space-y-1">
-                        <span
-                          className={`inline-flex rounded border px-2 py-0.5 text-xs font-semibold ${statusBadgeClass}`}
+                        <p
+                          className="max-h-[4.5rem] overflow-hidden break-words text-sm leading-6 text-zinc-700"
+                          title={descriptionText}
                         >
-                          {toDisplayText(task.status)}
-                        </span>
-                        <p className="text-xs leading-5 text-zinc-500">
-                          {getStatusHint(task.status)}
+                          {descriptionText}
                         </p>
                       </div>
                     </td>
-                    <td className="px-4 py-3">
-                      <span
-                        className={`inline-flex rounded border px-2 py-0.5 text-xs font-semibold ${visibilityBadgeClass}`}
+                    <td
+                      role="cell"
+                      className="block min-w-0 lg:table-cell lg:px-3 lg:py-4"
+                    >
+                      <p
+                        aria-hidden="true"
+                        className="mb-2 text-xs font-semibold text-zinc-500 lg:hidden"
                       >
-                        {toTaskTemplateVisibilityLabel(task.visibility)}
-                      </span>
+                        分类
+                      </p>
+                      <div className="space-y-3">
+                        <div className="space-y-1">
+                          <p className="text-xs text-zinc-500">课程分类</p>
+                          <span
+                            className={`inline-flex max-w-full rounded border px-2 py-0.5 text-xs font-medium ${
+                              isUnclassifiedTaskCourseLabel(task.courseLabel)
+                                ? "border-zinc-200 bg-zinc-100 text-zinc-700"
+                                : "border-indigo-200 bg-indigo-100 text-indigo-700"
+                            }`}
+                          >
+                            {toTaskCourseLabelDisplayText(task.courseLabel)}
+                          </span>
+                        </div>
+                        <div className="space-y-1">
+                          <p className="text-xs text-zinc-500">知识模块</p>
+                          <p className="text-zinc-700">
+                            {toDisplayText(task.knowledgeModule)}
+                          </p>
+                        </div>
+                      </div>
                     </td>
-                    <td className="px-4 py-3">
-                      <span
-                        className={`inline-flex rounded border px-2 py-0.5 text-xs font-medium ${
-                          isUnclassifiedTaskCourseLabel(task.courseLabel)
-                            ? "border-zinc-200 bg-zinc-100 text-zinc-700"
-                            : "border-indigo-200 bg-indigo-100 text-indigo-700"
-                        }`}
+                    <td
+                      role="cell"
+                      className="block min-w-0 lg:table-cell lg:px-3 lg:py-4"
+                    >
+                      <p
+                        aria-hidden="true"
+                        className="mb-2 text-xs font-semibold text-zinc-500 lg:hidden"
                       >
-                        {toTaskCourseLabelDisplayText(task.courseLabel)}
-                      </span>
+                        状态
+                      </p>
+                      <div className="space-y-3">
+                        <div className="space-y-1">
+                          <span
+                            className={`inline-flex max-w-full rounded border px-2 py-0.5 text-xs font-semibold ${statusBadgeClass}`}
+                          >
+                            {toDisplayText(task.status)}
+                          </span>
+                          <p className="text-xs leading-5 text-zinc-500">
+                            {getStatusHint(task.status)}
+                          </p>
+                        </div>
+                        <div className="space-y-1">
+                          <p className="text-xs text-zinc-500">可见性</p>
+                          <span
+                            className={`inline-flex max-w-full rounded border px-2 py-0.5 text-xs font-semibold ${visibilityBadgeClass}`}
+                          >
+                            {toTaskTemplateVisibilityLabel(task.visibility)}
+                          </span>
+                        </div>
+                      </div>
                     </td>
-                    <td className="px-4 py-3">
+                    <td
+                      role="cell"
+                      className="block min-w-0 lg:table-cell lg:px-3 lg:py-4"
+                    >
+                      <p
+                        aria-hidden="true"
+                        className="mb-2 text-xs font-semibold text-zinc-500 lg:hidden"
+                      >
+                        评分配置
+                      </p>
                       <div className="space-y-1">
                         <span
-                          className={`inline-flex rounded border px-2 py-0.5 text-xs font-semibold ${rubricBadgeClass}`}
+                          className={`inline-flex max-w-full rounded border px-2 py-0.5 text-xs font-semibold ${rubricBadgeClass}`}
                         >
                           {rubricSummary.configured ? "已配置" : "未配置"}
                         </span>
@@ -599,7 +648,16 @@ export function LearningTaskFilters({
                         </p>
                       </div>
                     </td>
-                    <td className="sticky right-0 z-10 break-words bg-white px-4 py-3 shadow-[inset_1px_0_0_0_#e4e4e7]">
+                    <td
+                      role="cell"
+                      className="block min-w-0 lg:table-cell lg:px-3 lg:py-4"
+                    >
+                      <p
+                        aria-hidden="true"
+                        className="mb-2 text-xs font-semibold text-zinc-500 lg:hidden"
+                      >
+                        操作
+                      </p>
                       {taskId ? (
                         <div className="flex flex-col items-start gap-1">
                           <Link
