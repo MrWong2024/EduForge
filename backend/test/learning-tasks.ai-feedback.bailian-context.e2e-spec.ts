@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { AiContextReaderService } from '../src/modules/learning-tasks/ai-context/ai-context-reader.service';
 import type { AiContextRef } from '../src/modules/learning-tasks/ai-context/ai-context.types';
 import { INestApplication, ValidationPipe } from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
+import { ConfigModule, ConfigService } from '@nestjs/config';
 import { Test, TestingModule } from '@nestjs/testing';
 import { getModelToken } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
@@ -76,6 +76,24 @@ const validUsage = {
   prompt_tokens: 100,
   completion_tokens: 20,
   total_tokens: 120,
+  prompt_tokens_details: { text_tokens: 100, cached_tokens: 30 },
+  completion_tokens_details: { text_tokens: 20, reasoning_tokens: 12 },
+};
+const fixedSampleUsage = {
+  prompt_tokens: 12993,
+  completion_tokens: 3632,
+  total_tokens: 16625,
+  prompt_tokens_details: { text_tokens: 12993, cached_tokens: 0 },
+  completion_tokens_details: { text_tokens: 3632, reasoning_tokens: 3230 },
+};
+const expectedValidRequestUsage = {
+  promptTokens: 100,
+  completionTokens: 20,
+  totalTokens: 120,
+  inputTextTokens: 100,
+  cachedInputTokens: 30,
+  outputTextTokens: 20,
+  reasoningTokens: 12,
 };
 const validContent = JSON.stringify({
   items: [
@@ -377,9 +395,23 @@ describe('LearningTasks AI Feedback Bailian Context (e2e)', () => {
       process.env.AI_FEEDBACK_DEBUG_ENABLED = 'true';
 
       // Load AppModule after env is set, otherwise provider config can be fixed too early.
-      const appModuleExports =
-        // eslint-disable-next-line @typescript-eslint/no-require-imports
-        require('../src/app.module') as typeof AppModuleExports;
+      // strictBindCallApply=false drops bind's type; restore the known signature.
+      const originalForRoot = ConfigModule.forRoot.bind(
+        ConfigModule,
+      ) as typeof ConfigModule.forRoot;
+      const isolatedConfig = jest
+        .spyOn(ConfigModule, 'forRoot')
+        .mockImplementation((options) =>
+          originalForRoot({ ...options, envFilePath: ['.env.test'] }),
+        );
+      let appModuleExports: typeof AppModuleExports;
+      try {
+        appModuleExports =
+          // eslint-disable-next-line @typescript-eslint/no-require-imports
+          require('../src/app.module') as typeof AppModuleExports;
+      } finally {
+        isolatedConfig.mockRestore();
+      }
       const { AppModule } = appModuleExports;
       if (!process.env.MONGO_URI) {
         throw new Error(
@@ -451,6 +483,9 @@ describe('LearningTasks AI Feedback Bailian Context (e2e)', () => {
           ['root', 'dbOwner', 'dbAdminAnyDatabase'].includes(r.role),
         ),
       ).toBe(false);
+      console.info(
+        'Bailian context E2E gate: standard_test / eduforge_test; envFiles=.env.test; APP readWrite',
+      );
       expect(
         await aiFeedbackJobModel.countDocuments({
           status: {
@@ -724,6 +759,7 @@ describe('LearningTasks AI Feedback Bailian Context (e2e)', () => {
 
   it('passes task context and zh-cn instruction to mock Bailian and keeps feedback pipeline persisted', async () => {
     clearCapturedPayloads();
+    setResponses([{ usage: fixedSampleUsage }]);
 
     const createdSubmission = await studentAgent
       .post(
@@ -809,16 +845,17 @@ describe('LearningTasks AI Feedback Bailian Context (e2e)', () => {
       'Invalid example C: five praise-only INFO items.',
     );
     expect(systemPrompt).toContain(
-      'Valid boundary example C (correct but improvable): return exactly 1 integrated item with brief acknowledgement + 1~2 actionable improvements.',
+      'Valid boundary example C (supported affirmation without suggestion)',
     );
     expect(systemPrompt).toContain(
-      'Valid boundary example D (truly nothing to improve): {"items":[]}.',
+      'Valid protocol boundary example D (empty-array compatibility): {"items":[]}.',
     );
     expect(systemPrompt).toContain(
-      'Invalid example E: mostly correct code with improvable points but returns {"items":[]}.',
+      'Invalid example E: an evaluable submission with a concrete conclusion',
     );
+    expect(systemPrompt).toContain('rubric 的语义识别并审查所有实质评价维度');
     expect(systemPrompt).toContain(
-      'Use {"items":[]} only when there is truly nothing worth flagging, no actionable suggestion, and no learning-value improvement point.',
+      '来源、执行者及模拟声明只作用于其实际指向的活动、段落或材料',
     );
     expect(userPrompt).not.toContain('NOTE_EXCLUDED_FROM_A1_MODEL_INPUT');
     expect(userPrompt).not.toContain('B revised');
@@ -828,8 +865,8 @@ describe('LearningTasks AI Feedback Bailian Context (e2e)', () => {
     );
     expect(userPrompt).toContain('TaskRubric:');
     expect(userPrompt).toContain('必须处理边界条件');
-    expect(userPrompt).toContain(
-      'Differentiate between "feature not implemented" and "logic exists but cannot run due to syntax/compile errors".',
+    expect(systemPrompt).toContain(
+      '必须区分“未实现功能”与“已写出逻辑但因语法/编译错误无法运行”',
     );
     expect(userPrompt).toContain(
       'Prefer exactly one item. Output two items only when the second category is clearly independent and improves student understanding.',
@@ -841,8 +878,9 @@ describe('LearningTasks AI Feedback Bailian Context (e2e)', () => {
     expect(userPrompt).toContain(
       'Language hint may be missing or incorrect; prioritize code evidence for language-specific judgement.',
     );
+    expect(systemPrompt).toContain('返回 1 条 INFO，suggestion 可以省略');
     expect(userPrompt).toContain(
-      'Boundary rule: if the submission is mostly correct but still improvable, return one integrated item; return empty items only when truly nothing can be improved.',
+      'keep all substantive dimensions traceable in message',
     );
     expect(userPrompt).toContain(
       'AIUsageDeclaration: I used AI for brainstorming only.',
@@ -859,11 +897,20 @@ describe('LearningTasks AI Feedback Bailian Context (e2e)', () => {
       usage: {
         reservedRequests: 1,
         reportedRequests: 1,
-        promptTokens: 100,
-        completionTokens: 20,
-        totalTokens: 120,
+        unreportedRequests: 0,
+        promptTokens: 12993,
+        completionTokens: 3632,
+        totalTokens: 16625,
+        inputTextTokens: 12993,
+        cachedInputTokens: 0,
+        uncachedInputTokens: 12993,
+        outputTextTokens: 3632,
+        reasoningTokens: 3230,
+        answerTokens: 402,
       },
     });
+    const teacherDetail = await readReview(submissionId, teacherAgent);
+    expect(teacherDetail.aiReview.usage).toEqual(detail.aiReview.usage);
     console.info(
       'A2 success public aiReview=' + JSON.stringify(detail.aiReview),
     );
@@ -873,6 +920,22 @@ describe('LearningTasks AI Feedback Bailian Context (e2e)', () => {
       .exec();
     expect(savedRecord?.requests?.[0].inputBytes).toBe(
       Buffer.byteLength(JSON.stringify(matchedPayload?.messages), 'utf8'),
+    );
+    expect(savedRecord?.requests?.[0].usage).toEqual({
+      promptTokens: 12993,
+      completionTokens: 3632,
+      totalTokens: 16625,
+      inputTextTokens: 12993,
+      cachedInputTokens: 0,
+      outputTextTokens: 3632,
+      reasoningTokens: 3230,
+    });
+    expect(savedRecord?.requests?.[0].usage).not.toHaveProperty('answerTokens');
+    expect(savedRecord?.requests?.[0].usage).not.toHaveProperty(
+      'uncachedInputTokens',
+    );
+    expect(savedRecord?.requests?.[0].usage).not.toHaveProperty(
+      'unreportedRequests',
     );
     expect(JSON.stringify(savedRecord?.requests)).not.toContain(
       'SOURCE_TAIL_A2',
@@ -983,9 +1046,16 @@ describe('LearningTasks AI Feedback Bailian Context (e2e)', () => {
         usage: {
           reservedRequests: 0,
           reportedRequests: 0,
+          unreportedRequests: 0,
           promptTokens: 0,
           completionTokens: 0,
           totalTokens: 0,
+          inputTextTokens: 0,
+          cachedInputTokens: 0,
+          uncachedInputTokens: 0,
+          outputTextTokens: 0,
+          reasoningTokens: 0,
+          answerTokens: 0,
         },
       });
       expect(getCapturedPayloads()).toHaveLength(0);
@@ -1039,11 +1109,26 @@ describe('LearningTasks AI Feedback Bailian Context (e2e)', () => {
         usage: {
           reservedRequests: 1,
           reportedRequests: reported,
+          unreportedRequests: reported ? 0 : 1,
           promptTokens: reported ? 100 : null,
           completionTokens: reported ? 20 : null,
           totalTokens: reported ? 120 : null,
+          inputTextTokens: reported ? 100 : null,
+          cachedInputTokens: reported ? 30 : null,
+          uncachedInputTokens: reported ? 70 : null,
+          outputTextTokens: reported ? 20 : null,
+          reasoningTokens: reported ? 12 : null,
+          answerTokens: reported ? 8 : null,
         },
       });
+      const failedJob = await aiFeedbackJobModel
+        .findOne({ submissionId: new Types.ObjectId(id) })
+        .lean()
+        .exec();
+      expect(failedJob?.requests).toHaveLength(1);
+      expect(failedJob?.requests?.[0].usage).toEqual(
+        reported ? expectedValidRequestUsage : null,
+      );
       expect(getCapturedPayloads()).toHaveLength(1);
       expect(
         await feedbackModel.countDocuments({
@@ -1069,9 +1154,16 @@ describe('LearningTasks AI Feedback Bailian Context (e2e)', () => {
       usage: {
         reservedRequests: 1,
         reportedRequests: 0,
+        unreportedRequests: 1,
         promptTokens: null,
         completionTokens: null,
         totalTokens: null,
+        inputTextTokens: null,
+        cachedInputTokens: null,
+        uncachedInputTokens: null,
+        outputTextTokens: null,
+        reasoningTokens: null,
+        answerTokens: null,
       },
     });
     expect(JSON.stringify(student.aiReview)).not.toMatch(
@@ -1079,15 +1171,75 @@ describe('LearningTasks AI Feedback Bailian Context (e2e)', () => {
     );
   });
 
-  it.each([false, true])(
-    'counts retryable failure usage across three claims; unknownFirst=%p',
-    async (unknownFirst) => {
+  it.each([
+    {
+      scenario: 'all three request records have full details',
+      firstUsage: validUsage,
+      expectedFirstUsage: expectedValidRequestUsage,
+      expectedUsage: {
+        reservedRequests: 3,
+        reportedRequests: 3,
+        unreportedRequests: 0,
+        promptTokens: 300,
+        completionTokens: 60,
+        totalTokens: 360,
+        inputTextTokens: 300,
+        cachedInputTokens: 90,
+        uncachedInputTokens: 210,
+        outputTextTokens: 60,
+        reasoningTokens: 36,
+        answerTokens: 24,
+      },
+    },
+    {
+      scenario: 'one request has no reasoning detail',
+      firstUsage: {
+        ...validUsage,
+        completion_tokens_details: { text_tokens: 20 },
+      },
+      expectedFirstUsage: {
+        ...expectedValidRequestUsage,
+        reasoningTokens: null,
+      },
+      expectedUsage: {
+        reservedRequests: 3,
+        reportedRequests: 3,
+        unreportedRequests: 0,
+        promptTokens: 300,
+        completionTokens: 60,
+        totalTokens: 360,
+        inputTextTokens: 300,
+        cachedInputTokens: 90,
+        uncachedInputTokens: 210,
+        outputTextTokens: 60,
+        reasoningTokens: null,
+        answerTokens: null,
+      },
+    },
+    {
+      scenario: 'one request has no valid main usage',
+      firstUsage: undefined,
+      expectedFirstUsage: null,
+      expectedUsage: {
+        reservedRequests: 3,
+        reportedRequests: 2,
+        unreportedRequests: 1,
+        promptTokens: null,
+        completionTokens: null,
+        totalTokens: null,
+        inputTextTokens: null,
+        cachedInputTokens: null,
+        uncachedInputTokens: null,
+        outputTextTokens: null,
+        reasoningTokens: null,
+        answerTokens: null,
+      },
+    },
+  ])(
+    'counts retryable failure usage across all claims when $scenario',
+    async ({ firstUsage, expectedFirstUsage, expectedUsage }) => {
       clearCapturedPayloads();
-      setResponses([
-        { status: 429, usage: unknownFirst ? undefined : validUsage },
-        { status: 503 },
-        {},
-      ]);
+      setResponses([{ status: 429, usage: firstUsage }, { status: 503 }, {}]);
       const id = await submitAndRequest();
       expect(await processOwned(1)).toMatchObject({
         failed: 1,
@@ -1121,17 +1273,19 @@ describe('LearningTasks AI Feedback Bailian Context (e2e)', () => {
         maxAttempts: 3,
       });
       expect(job?.requests?.map((r) => r.claimNo)).toEqual([1, 2, 3]);
+      expect(job?.requests?.map((r) => r.usage)).toEqual([
+        expectedFirstUsage,
+        expectedValidRequestUsage,
+        expectedValidRequestUsage,
+      ]);
       expect(getCapturedPayloads()).toHaveLength(3);
-      expect((await readReview(id)).aiReview.usage).toEqual({
-        reservedRequests: 3,
-        reportedRequests: unknownFirst ? 2 : 3,
-        promptTokens: unknownFirst ? null : 300,
-        completionTokens: unknownFirst ? null : 60,
-        totalTokens: unknownFirst ? null : 360,
-      });
+      expect((await readReview(id)).aiReview.usage).toEqual(expectedUsage);
+      expect((await readReview(id, teacherAgent)).aiReview.usage).toEqual(
+        expectedUsage,
+      );
       console.info(
         'A2 retry evidence: requests=3; totalTokens=' +
-          (unknownFirst ? 'null' : '360'),
+          expectedUsage.totalTokens,
       );
     },
   );
@@ -1151,7 +1305,14 @@ describe('LearningTasks AI Feedback Bailian Context (e2e)', () => {
       failure: { code: 'UPSTREAM_UNAVAILABLE' },
       retryScheduled: false,
       nextRetryAt: null,
-      usage: { reservedRequests: 3, reportedRequests: 3, totalTokens: 360 },
+      usage: {
+        reservedRequests: 3,
+        reportedRequests: 3,
+        unreportedRequests: 0,
+        totalTokens: 360,
+        reasoningTokens: 36,
+        answerTokens: 24,
+      },
     });
     expect(await processOwned(1)).toMatchObject({
       processed: 0,
@@ -1183,7 +1344,12 @@ describe('LearningTasks AI Feedback Bailian Context (e2e)', () => {
       });
       expect((await readReview(id)).aiReview).toMatchObject({
         failure: { code: 'UPSTREAM_UNAVAILABLE' },
-        usage: { reservedRequests: 1, reportedRequests: 0, totalTokens: null },
+        usage: {
+          reservedRequests: 1,
+          reportedRequests: 0,
+          unreportedRequests: 1,
+          totalTokens: null,
+        },
       });
       await makeDue(id);
       expect(await processOwned(1)).toMatchObject({
@@ -1192,6 +1358,7 @@ describe('LearningTasks AI Feedback Bailian Context (e2e)', () => {
       expect((await readReview(id)).aiReview.usage).toMatchObject({
         reservedRequests: 2,
         reportedRequests: 1,
+        unreportedRequests: 1,
         totalTokens: null,
       });
       expect(getCapturedPayloads()).toHaveLength(2);
@@ -1262,6 +1429,7 @@ describe('LearningTasks AI Feedback Bailian Context (e2e)', () => {
       usage: {
         reservedRequests: null,
         reportedRequests: null,
+        unreportedRequests: null,
         totalTokens: null,
       },
     });

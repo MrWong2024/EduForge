@@ -39,5 +39,48 @@ export function readReportedUsage(data: unknown): AiTokenUsage | null {
     promptTokens: prompt,
     completionTokens: completion,
     totalTokens: total,
+    inputTextTokens: readDetail(
+      usage,
+      'prompt_tokens_details',
+      'text_tokens',
+      prompt,
+    ),
+    cachedInputTokens: readDetail(
+      usage,
+      'prompt_tokens_details',
+      'cached_tokens',
+      prompt,
+    ),
+    outputTextTokens: readDetail(
+      usage,
+      'completion_tokens_details',
+      'text_tokens',
+      completion,
+    ),
+    reasoningTokens: readDetail(
+      usage,
+      'completion_tokens_details',
+      'reasoning_tokens',
+      completion,
+    ),
   };
+}
+
+function readDetail(
+  usage: object,
+  group: string,
+  field: string,
+  maximum: number,
+): number | null {
+  if (!(group in usage)) return null;
+  const details = (usage as Record<string, unknown>)[group];
+  if (!details || typeof details !== 'object' || !(field in details))
+    return null;
+  const value = (details as Record<string, unknown>)[field];
+  return typeof value === 'number' &&
+    Number.isSafeInteger(value) &&
+    value >= 0 &&
+    value <= maximum
+    ? value
+    : null;
 }

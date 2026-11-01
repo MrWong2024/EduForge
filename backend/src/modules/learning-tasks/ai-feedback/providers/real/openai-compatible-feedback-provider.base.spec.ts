@@ -26,6 +26,12 @@ const item = {
   severity: 'WARN',
   message: 'Use a descriptive name.',
 };
+const missingUsageDetails = {
+  inputTextTokens: null,
+  cachedInputTokens: null,
+  outputTextTokens: null,
+  reasoningTokens: null,
+};
 
 function chatResponse(content: string) {
   return new Response(
@@ -471,6 +477,7 @@ describe('AI Feedback providers (fake fetch only)', () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(hooks.reportUsage).toHaveBeenCalledTimes(1);
     expect(hooks.reportUsage).toHaveBeenCalledWith({
+      ...missingUsageDetails,
       promptTokens: 10,
       completionTokens: 5,
       totalTokens: 15,
@@ -581,7 +588,12 @@ describe('AI Feedback providers (fake fetch only)', () => {
       expect(hooks.reportUsage).toHaveBeenCalledTimes(1);
       expect(hooks.reportUsage).toHaveBeenCalledWith(
         hasUsage
-          ? { promptTokens: 10, completionTokens: 5, totalTokens: 15 }
+          ? {
+              ...missingUsageDetails,
+              promptTokens: 10,
+              completionTokens: 5,
+              totalTokens: 15,
+            }
           : null,
       );
       expect(fetchMock).toHaveBeenCalledTimes(1);
@@ -791,6 +803,7 @@ describe('AI Feedback providers (fake fetch only)', () => {
       expect(fetchMock).toHaveBeenCalledTimes(1);
       expect(hooks.reportUsage).toHaveBeenCalledTimes(1);
       expect(hooks.reportUsage).toHaveBeenCalledWith({
+        ...missingUsageDetails,
         promptTokens: 10,
         completionTokens: 5,
         totalTokens: 15,
@@ -856,6 +869,7 @@ describe('AI Feedback providers (fake fetch only)', () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(hooks.reportUsage).toHaveBeenCalledTimes(1);
     expect(hooks.reportUsage).toHaveBeenCalledWith({
+      ...missingUsageDetails,
       promptTokens: 10,
       completionTokens: 5,
       totalTokens: 15,
@@ -877,6 +891,7 @@ describe('AI Feedback providers (fake fetch only)', () => {
 
     expect(hooks.reportUsage).toHaveBeenCalledTimes(1);
     expect(hooks.reportUsage).toHaveBeenCalledWith({
+      ...missingUsageDetails,
       promptTokens: 10,
       completionTokens: 5,
       totalTokens: 15,
@@ -1053,10 +1068,14 @@ describe('AI Feedback providers (fake fetch only)', () => {
         },
       ],
       usage: {
-        prompt_tokens: 10,
-        completion_tokens: 8,
-        total_tokens: 18,
-        completion_tokens_details: { reasoning_tokens: 6 },
+        prompt_tokens: 12993,
+        completion_tokens: 3632,
+        total_tokens: 16625,
+        prompt_tokens_details: { text_tokens: 12993, cached_tokens: 0 },
+        completion_tokens_details: {
+          text_tokens: 3632,
+          reasoning_tokens: 3230,
+        },
       },
     });
     fetchMock.mockResolvedValue(new Response(rawResponse));
@@ -1069,9 +1088,13 @@ describe('AI Feedback providers (fake fetch only)', () => {
     expect(result[0]).not.toHaveProperty('reasoning_content');
     expect(hooks.reportUsage).toHaveBeenCalledTimes(1);
     expect(hooks.reportUsage).toHaveBeenCalledWith({
-      promptTokens: 10,
-      completionTokens: 8,
-      totalTokens: 18,
+      promptTokens: 12993,
+      completionTokens: 3632,
+      totalTokens: 16625,
+      inputTextTokens: 12993,
+      cachedInputTokens: 0,
+      outputTextTokens: 3632,
+      reasoningTokens: 3230,
     });
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(handles).toHaveLength(1);
@@ -1113,9 +1136,11 @@ describe('AI Feedback providers (fake fetch only)', () => {
       expect(fetchMock).toHaveBeenCalledTimes(1);
       expect(hooks.reportUsage).toHaveBeenCalledTimes(1);
       expect(hooks.reportUsage).toHaveBeenCalledWith({
+        ...missingUsageDetails,
         promptTokens: 10,
         completionTokens: 8,
         totalTokens: 18,
+        reasoningTokens: 6,
       });
     },
   );
@@ -1391,6 +1416,7 @@ describe('AI Feedback providers (fake fetch only)', () => {
         ),
       ).rejects.toMatchObject({ code });
       expect(hooks.reportUsage).toHaveBeenCalledWith({
+        ...missingUsageDetails,
         promptTokens: 10,
         completionTokens: 5,
         totalTokens: 15,

@@ -38,8 +38,15 @@ export type AiReviewSummary = {
   usage: {
     reservedRequests: number | null;
     reportedRequests: number | null;
+    unreportedRequests: number | null;
     promptTokens: number | null;
+    inputTextTokens: number | null;
+    cachedInputTokens: number | null;
+    uncachedInputTokens: number | null;
     completionTokens: number | null;
+    outputTextTokens: number | null;
+    reasoningTokens: number | null;
+    answerTokens: number | null;
     totalTokens: number | null;
   };
 };
@@ -62,6 +69,37 @@ export function buildAiReviewSummary(
           0,
         )
       : null;
+  // New totals require every reservation's own value; unknowns are not zero.
+  const sumKnown = (read: (record: AiRequestRecord) => number | null) => {
+    if (!known) return null;
+    let total = 0;
+    for (const record of records) {
+      const value = read(record);
+      if (value === null || !Number.isSafeInteger(total + value)) return null;
+      total += value;
+    }
+    return total;
+  };
+  type DetailField =
+    | 'inputTextTokens'
+    | 'cachedInputTokens'
+    | 'outputTextTokens'
+    | 'reasoningTokens';
+  const detail = (record: AiRequestRecord, field: DetailField) => {
+    const usage = record.usage;
+    if (!usage) return null;
+    const value = usage[field];
+    const maximum =
+      field === 'inputTextTokens' || field === 'cachedInputTokens'
+        ? usage.promptTokens
+        : usage.completionTokens;
+    return typeof value === 'number' &&
+      Number.isSafeInteger(value) &&
+      value >= 0 &&
+      value <= maximum
+      ? value
+      : null;
+  };
   const retryDate =
     current &&
     job.status === AiFeedbackJobStatus.Failed &&
@@ -97,8 +135,30 @@ export function buildAiReviewSummary(
     usage: {
       reservedRequests: known ? records.length : null,
       reportedRequests: known ? reported.length : null,
+      unreportedRequests: known ? records.length - reported.length : null,
       promptTokens: sum('promptTokens'),
+      inputTextTokens: sumKnown((record) => detail(record, 'inputTextTokens')),
+      cachedInputTokens: sumKnown((record) =>
+        detail(record, 'cachedInputTokens'),
+      ),
+      uncachedInputTokens: sumKnown((record) => {
+        const cached = detail(record, 'cachedInputTokens');
+        return cached === null || !record.usage
+          ? null
+          : record.usage.promptTokens - cached;
+      }),
       completionTokens: sum('completionTokens'),
+      outputTextTokens: sumKnown((record) =>
+        detail(record, 'outputTextTokens'),
+      ),
+      reasoningTokens: sumKnown((record) => detail(record, 'reasoningTokens')),
+      answerTokens: sumKnown((record) => {
+        const output = detail(record, 'outputTextTokens');
+        const reasoning = detail(record, 'reasoningTokens');
+        return output === null || reasoning === null || reasoning > output
+          ? null
+          : output - reasoning;
+      }),
       totalTokens: sum('totalTokens'),
     },
   };

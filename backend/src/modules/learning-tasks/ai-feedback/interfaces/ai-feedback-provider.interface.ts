@@ -24,6 +24,10 @@ export type AiTokenUsage = {
   promptTokens: number;
   completionTokens: number;
   totalTokens: number;
+  inputTextTokens?: number | null;
+  cachedInputTokens?: number | null;
+  outputTextTokens?: number | null;
+  reasoningTokens?: number | null;
 };
 export type AiRequestReservation = {
   provider: 'bailian';

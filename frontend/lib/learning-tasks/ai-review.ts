@@ -54,8 +54,15 @@ export type AiReview = {
   usage: {
     reservedRequests: number | null;
     reportedRequests: number | null;
+    unreportedRequests: number | null;
     promptTokens: number | null;
+    inputTextTokens: number | null;
+    cachedInputTokens: number | null;
+    uncachedInputTokens: number | null;
     completionTokens: number | null;
+    outputTextTokens: number | null;
+    reasoningTokens: number | null;
+    answerTokens: number | null;
     totalTokens: number | null;
   };
 };
@@ -101,8 +108,15 @@ export function toAiReview(value: unknown): AiReview | undefined {
     usage: {
       reservedRequests: countOrNull(usage.reservedRequests),
       reportedRequests: countOrNull(usage.reportedRequests),
+      unreportedRequests: countOrNull(usage.unreportedRequests),
       promptTokens: countOrNull(usage.promptTokens),
+      inputTextTokens: countOrNull(usage.inputTextTokens),
+      cachedInputTokens: countOrNull(usage.cachedInputTokens),
+      uncachedInputTokens: countOrNull(usage.uncachedInputTokens),
       completionTokens: countOrNull(usage.completionTokens),
+      outputTextTokens: countOrNull(usage.outputTextTokens),
+      reasoningTokens: countOrNull(usage.reasoningTokens),
+      answerTokens: countOrNull(usage.answerTokens),
       totalTokens: countOrNull(usage.totalTokens),
     },
   };
@@ -117,5 +131,7 @@ export function getAutoRefreshPhase(
     ? "FAILED"
     : null;
 }
-export const displayAiUsage = (value: number | null | undefined): string =>
-  value === null || value === undefined ? "未知" : String(value);
+export const displayAiUsage = (value: number | null | undefined): string => {
+  const count = countOrNull(value);
+  return count === null ? "未知" : String(count);
+};

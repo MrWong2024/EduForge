@@ -22,10 +22,35 @@ const known = {
   usage: {
     reservedRequests: 1,
     reportedRequests: 1,
-    promptTokens: 100,
-    completionTokens: 20,
-    totalTokens: 120,
+    unreportedRequests: 0,
+    promptTokens: 12993,
+    inputTextTokens: 12993,
+    cachedInputTokens: 0,
+    uncachedInputTokens: 12993,
+    completionTokens: 3632,
+    outputTextTokens: 3632,
+    reasoningTokens: 3230,
+    answerTokens: 402,
+    totalTokens: 16625,
   },
+};
+const usageDetailFields = [
+  "inputTextTokens",
+  "cachedInputTokens",
+  "outputTextTokens",
+  "reasoningTokens",
+  "answerTokens",
+  "uncachedInputTokens",
+  "unreportedRequests",
+] as const;
+const unknownUsageDetails = {
+  inputTextTokens: null,
+  cachedInputTokens: null,
+  outputTextTokens: null,
+  reasoningTokens: null,
+  answerTokens: null,
+  uncachedInputTokens: null,
+  unreportedRequests: null,
 };
 test("adapts all public AI fields and retains reported usage", () => {
   expect(
@@ -34,6 +59,76 @@ test("adapts all public AI fields and retains reported usage", () => {
       aiReview: known,
     }).aiReview,
   ).toEqual(known);
+});
+
+test("maps nonzero cached input and all reported breakdown fields independently", () => {
+  const usage = {
+    reservedRequests: 3,
+    reportedRequests: 3,
+    unreportedRequests: 0,
+    promptTokens: 100,
+    inputTextTokens: 91,
+    cachedInputTokens: 30,
+    uncachedInputTokens: 70,
+    completionTokens: 20,
+    outputTextTokens: 12,
+    reasoningTokens: 5,
+    answerTokens: 7,
+    totalTokens: 120,
+  };
+  expect(toAiReview({ ...known, usage })?.usage).toEqual(usage);
+});
+
+test("retains reported calculated values without computing them from other fields", () => {
+  expect(
+    toAiReview({
+      ...known,
+      usage: {
+        answerTokens: 402,
+        uncachedInputTokens: 12993,
+        unreportedRequests: 2,
+      },
+    })?.usage,
+  ).toEqual({
+    reservedRequests: null,
+    reportedRequests: null,
+    unreportedRequests: 2,
+    promptTokens: null,
+    inputTextTokens: null,
+    cachedInputTokens: null,
+    uncachedInputTokens: 12993,
+    completionTokens: null,
+    outputTextTokens: null,
+    reasoningTokens: null,
+    answerTokens: 402,
+    totalTokens: null,
+  });
+});
+
+test("preserves explicit zero and isolates invalid or missing usage details", () => {
+  for (const field of usageDetailFields) {
+    expect(
+      toAiReview({ ...known, usage: { ...known.usage, [field]: 0 } })?.usage,
+    ).toEqual({ ...known.usage, [field]: 0 });
+    for (const value of [
+      undefined,
+      null,
+      "0",
+      -1,
+      0.5,
+      NaN,
+      Infinity,
+      -Infinity,
+      Number.MAX_SAFE_INTEGER + 1,
+    ]) {
+      expect(
+        toAiReview({ ...known, usage: { ...known.usage, [field]: value } })
+          ?.usage,
+      ).toEqual({ ...known.usage, [field]: null });
+    }
+  }
+  for (const value of [-1, 0.5, NaN, Infinity, Number.MAX_SAFE_INTEGER + 1])
+    expect(displayAiUsage(value)).toBe("未知");
 });
 test("keeps unknown totals distinct from known zero without fabricating history", () => {
   const review = toAiReview({
@@ -48,6 +143,7 @@ test("keeps unknown totals distinct from known zero without fabricating history"
     },
   });
   expect(review?.usage).toEqual({
+    ...unknownUsageDetails,
     reservedRequests: 2,
     reportedRequests: 1,
     promptTokens: null,
@@ -69,6 +165,7 @@ test("keeps unknown totals distinct from known zero without fabricating history"
     })?.usage.totalTokens,
   ).toBe(0);
   expect(toAiReview({ ...known, usage: {} })?.usage).toEqual({
+    ...unknownUsageDetails,
     reservedRequests: null,
     reportedRequests: null,
     promptTokens: null,
@@ -260,6 +357,41 @@ test("an uncertain POST can only be recovered by a subsequent explicit successfu
   // No replay: completion leaves no active POST; a user must begin one.
   expect(operations.view.busy).toBeNull();
   expect(operations.beginRequest()).not.toBeNull();
+});
+
+test("legacy complete details without new usage fields can confirm an uncertain POST", () => {
+  const legacyUsage = {
+    reservedRequests: 0,
+    reportedRequests: 0,
+    promptTokens: 0,
+    completionTokens: 0,
+    totalTokens: 0,
+  };
+  for (const field of usageDetailFields)
+    expect(legacyUsage).not.toHaveProperty(field);
+  const detail = toSubmissionDetailResponse({
+    id: "s",
+    contentRevision: 0,
+    aiFeedbackStatus: "NOT_REQUESTED",
+    aiReview: { ...requestable, usage: legacyUsage },
+  });
+  expect(detail.aiReview?.usage).toEqual({
+    ...legacyUsage,
+    ...unknownUsageDetails,
+  });
+  const operations = makeOperations();
+  expect(operations.finishRequest(operations.beginRequest()!)).toBe(false);
+  expect(operations.view.needsConfirmation).toBe(true);
+  expect(operations.beginRead(false)).toBeNull();
+  expect(operations.beginRequest()).toBeNull();
+  expect(operations.finishRead(operations.beginRead(true)!, detail)).toBe(true);
+  expect(operations.view.needsConfirmation).toBe(false);
+  expect(operations.view.review?.usage).toEqual({
+    ...legacyUsage,
+    ...unknownUsageDetails,
+  });
+  expect(operations.view.canRequest).toBe(true);
+  expect(operations.view.busy).toBeNull();
 });
 test("failed, incomplete or non-true confirmation cannot unlock an uncertain request", () => {
   for (const detail of [

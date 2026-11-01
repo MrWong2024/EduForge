@@ -320,12 +320,36 @@ function SubmissionAiReviewPanel({
         <div className="mt-2 grid gap-2 break-words sm:grid-cols-2">
           <p>请求预留数：{displayAiUsage(usage?.reservedRequests)}</p>
           <p>获得实报用量的请求数：{displayAiUsage(usage?.reportedRequests)}</p>
-          <p>输入 Token：{displayAiUsage(usage?.promptTokens)}</p>
-          <p>输出 Token：{displayAiUsage(usage?.completionTokens)}</p>
+          <p>
+            未获得实报用量的请求数（计算值）：
+            {displayAiUsage(usage?.unreportedRequests)}
+          </p>
+          <p>输入 Token 总量：{displayAiUsage(usage?.promptTokens)}</p>
+          <p>文本输入 Token：{displayAiUsage(usage?.inputTextTokens)}</p>
+          <p>缓存命中输入 Token：{displayAiUsage(usage?.cachedInputTokens)}</p>
+          <p>
+            未命中缓存输入 Token（计算值）：
+            {displayAiUsage(usage?.uncachedInputTokens)}
+          </p>
+          <p>
+            输出 Token 总量（含思考）：
+            {displayAiUsage(usage?.completionTokens)}
+          </p>
+          <p>
+            文本输出 Token（含思考）：
+            {displayAiUsage(usage?.outputTextTokens)}
+          </p>
+          <p>思考 Token：{displayAiUsage(usage?.reasoningTokens)}</p>
+          <p>最终回答 Token（计算值）：{displayAiUsage(usage?.answerTokens)}</p>
           <p>实报总 Token：{displayAiUsage(usage?.totalTokens)}</p>
         </div>
         <p className="mt-2">
           预留不代表供应商必然收到请求；未知用量不会补算为零。本页不估算金额。
+        </p>
+        <p className="mt-2">
+          思考包含在输出及总量中；文本与缓存是不同分类，不能将所有条目相加。
+          计算值由已知实报数据得出，缺少依据时显示未知。
+          最终回答用量包含模型返回的 JSON 等内容，并非页面反馈文字的单独用量。
         </p>
       </details>
     </section>
