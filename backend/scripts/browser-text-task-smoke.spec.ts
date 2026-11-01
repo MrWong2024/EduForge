@@ -12,9 +12,39 @@ import {
   assertSyntheticAccount,
   cleanupFilters,
   SYNTHETIC_PASSWORD,
+  SMOKE_TASK_KEYS,
+  isSmokeTaskTitle,
 } from './browser-text-task-smoke';
 
 describe('B1-2 thin smoke support gates (no database)', () => {
+  it('uses stable local fixture titles and accepts exact old titles only for cleanup', () => {
+    expect(SMOKE_TASK_KEYS).toEqual([
+      'EDIT',
+      'AI_REQUEST',
+      'TEACHER_REVIEW',
+      'REVISION',
+    ]);
+    for (const key of SMOKE_TASK_KEYS) {
+      expect(isSmokeTaskTitle('b1-2-unit ' + key, 'b1-2-unit')).toBe(true);
+      expect(isSmokeTaskTitle('b1-2-other ' + key, 'b1-2-unit', true)).toBe(
+        false,
+      );
+    }
+    for (const key of [
+      'DISABLED',
+      'TEACHER_ONLY',
+      'MANUAL',
+      'FIRST_SUBMISSION_AUTO',
+    ]) {
+      expect(isSmokeTaskTitle('b1-2-unit ' + key, 'b1-2-unit')).toBe(false);
+      expect(isSmokeTaskTitle('b1-2-unit ' + key, 'b1-2-unit', true)).toBe(
+        true,
+      );
+    }
+    expect(isSmokeTaskTitle('b1-2-unit MANUAL extra', 'b1-2-unit', true)).toBe(
+      false,
+    );
+  });
   const teacherId = new Types.ObjectId();
   const studentId = new Types.ObjectId();
   const taskId = new Types.ObjectId();

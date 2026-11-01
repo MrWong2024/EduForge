@@ -8,7 +8,6 @@ import { RefreshButton } from "@/components/blocks/RefreshButton";
 import { TaskRubric } from "@/components/learning-tasks/TaskRubric";
 import {
   canSubmitTextTask,
-  getAiModeLabel,
   getTaskSnapshotMessage,
 } from "@/lib/learning-tasks/ai-review";
 import { SubmissionForm } from "@/components/student/SubmissionForm";
@@ -460,7 +459,7 @@ export default async function StudentTaskDetailPage({
     canRequestAiByStatus,
     readOnly
       ? readOnlyMessage
-      : "AI 申请资格请到提交详情核对；仅教师可申请 AI 不影响符合条件的作业提交。",
+      : "AI 申请资格请到提交详情核对。",
   );
   const latestSubmissionId = safeGet<string | undefined>(
     viewModel.data.latest,
@@ -517,12 +516,7 @@ export default async function StudentTaskDetailPage({
       <section className="rounded-lg border border-zinc-200 bg-white p-4 text-sm">
         <h2 className="text-base font-semibold text-zinc-900">任务基础信息</h2>
         <div className="mt-3 grid gap-2 md:grid-cols-2">
-          <p>
-            平台 AI：
-            {getAiModeLabel(
-              viewModel.data.classroomTask.settings.aiFeedbackMode,
-            )}
-          </p>
+          <p>学生或教师可在提交详情主动申请 AI 反馈。</p>
           <p className="break-words">
             {getTaskSnapshotMessage(
               viewModel.data.classroomTask.taskSnapshotAvailable,

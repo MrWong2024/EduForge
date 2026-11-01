@@ -368,7 +368,7 @@ describe('LearningTasks (e2e)', () => {
     classroomId = room.id;
     const instance = await teacherAgent
       .post('/api/classrooms/' + classroomId + '/tasks')
-      .send({ taskId, settings: { aiFeedbackMode: 'FIRST_SUBMISSION_AUTO' } })
+      .send({ taskId })
       .expect(201);
     classroomTaskId = (instance.body as { id: string }).id;
     await studentAgent
@@ -394,7 +394,7 @@ describe('LearningTasks (e2e)', () => {
     expect(typeof submissionBody.id).toBe('string');
     expect(submissionBody.attemptNo).toBe(1);
     submissionId = submissionBody.id;
-    expect(submissionBody.aiFeedbackStatus).toBe('PENDING');
+    expect(submissionBody.aiFeedbackStatus).toBe('NOT_REQUESTED');
 
     const teacherDetail = await teacherAgent
       .get(`/api/learning-tasks/submissions/${submissionId}`)
@@ -410,7 +410,7 @@ describe('LearningTasks (e2e)', () => {
     expect(teacherDetailBody.content.codeText).toBe(
       'function quicksort(arr) { return arr; }',
     );
-    expect(teacherDetailBody.aiFeedbackStatus).toBe('PENDING');
+    expect(teacherDetailBody.aiFeedbackStatus).toBe('NOT_REQUESTED');
     expect(teacherDetailBody).not.toHaveProperty('passwordHash');
 
     const studentDetail = await studentAgent

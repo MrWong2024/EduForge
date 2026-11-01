@@ -264,7 +264,6 @@ describe('Classroom Export Snapshot (e2e)', () => {
         taskId,
         dueAt: new Date(Date.now() - 60 * 1000).toISOString(),
         settings: {
-          aiFeedbackMode: 'MANUAL',
           allowLate: true,
         },
       })

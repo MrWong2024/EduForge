@@ -96,17 +96,12 @@ describe('A1 classroom text task backend contract (HTTP)', () => {
     taskIds.push(id);
     return id;
   };
-  const publish = async (
-    agent: Agent,
-    classroom: Resource,
-    id: string,
-    mode?: string,
-  ) => {
+  const publish = async (agent: Agent, classroom: Resource, id: string) => {
     const res = await agent
       .post('/api/classrooms/' + classroom.id + '/tasks')
       .send({
         taskId: id,
-        ...(mode ? { settings: { aiFeedbackMode: mode } } : {}),
+        settings: { allowLate: true, maxAttempts: 10 },
       })
       .expect(201);
     const body = res.body as ClassroomTaskResponseDto;
@@ -229,8 +224,6 @@ describe('A1 classroom text task backend contract (HTTP)', () => {
     expect(config.get('AI_FEEDBACK_PROVIDER')).toBe('stub');
     expect(config.get('MAIL_PROVIDER')).toBe('log');
     config.set('LEARNING_TASK_SUBMISSION_COOLDOWN_MS', 0);
-    config.set('AI_FEEDBACK_AUTO_ON_SUBMIT', true);
-    config.set('AI_FEEDBACK_AUTO_ON_FIRST_ATTEMPT_ONLY', false);
     const agents: Agent[] = [];
     for (const role of ['teacher', 'teacher', 'student', 'student']) {
       const email = namespace + '-' + agents.length + '@example.invalid';
@@ -417,7 +410,7 @@ describe('A1 classroom text task backend contract (HTTP)', () => {
     };
     await verifyTemplates();
 
-    const instance = await publish(teacherA, classA, id, 'TEACHER_ONLY');
+    const instance = await publish(teacherA, classA, id);
     expect(instance.task).not.toHaveProperty('stage');
     const instanceId = new Types.ObjectId(instance.id);
     const rawInstance = await instances.collection.findOne({ _id: instanceId });
@@ -460,7 +453,7 @@ describe('A1 classroom text task backend contract (HTTP)', () => {
       expect(mineBody.task).not.toHaveProperty('stage');
       expect(mineBody.participationStatus).toMatchObject({
         canSubmit: true,
-        canRequestAiFeedback: false,
+        canRequestAiFeedback: true,
       });
       const dashboard = await teacherA
         .get(classroomUrl + '/dashboard')
@@ -499,7 +492,12 @@ describe('A1 classroom text task backend contract (HTTP)', () => {
     instanceA = await publish(teacherA, classA, taskId);
     expect(instanceA.taskSnapshotAvailable).toBe(true);
     expect(instanceA.task).toMatchObject(oldContent);
-    expect(instanceA.settings?.aiFeedbackMode).toBe('TEACHER_ONLY');
+    expect(instanceA.settings).toEqual({ allowLate: true, maxAttempts: 10 });
+    expect(
+      await instances.collection.findOne({
+        _id: new Types.ObjectId(instanceA.id),
+      }),
+    ).not.toHaveProperty('settings.aiFeedbackMode');
     first = await submit(studentA, classA, instanceA);
     second = await submit(studentA, classA, instanceA, {
       codeText: 'second source',
@@ -524,7 +522,7 @@ describe('A1 classroom text task backend contract (HTTP)', () => {
       .patch('/api/learning-tasks/tasks/' + taskId)
       .send(newContent)
       .expect(200);
-    instanceB = await publish(teacherB, classB, taskId, 'MANUAL');
+    instanceB = await publish(teacherB, classB, taskId);
     foreign = await submit(studentB, classB, instanceB);
     expect(instanceB.task).toMatchObject(newContent);
     await teacherA
@@ -567,9 +565,7 @@ describe('A1 classroom text task backend contract (HTTP)', () => {
       };
       expect(mine.task).toMatchObject(expected);
       expect(mine.classroomTask.taskSnapshotAvailable).toBe(true);
-      expect(mine.participationStatus.canRequestAiFeedback).toBe(
-        instance.id === instanceB.id,
-      );
+      expect(mine.participationStatus.canRequestAiFeedback).toBe(true);
       const dashboard = (
         await teacher
           .get('/api/classrooms/' + classroom.id + '/dashboard')
@@ -707,7 +703,14 @@ describe('A1 classroom text task backend contract (HTTP)', () => {
     });
     for (const payload of [
       { taskId: id, taskSnapshot: oldContent },
-      ...['INVALID', null].map((mode) => ({
+      ...[
+        'MANUAL',
+        'DISABLED',
+        'TEACHER_ONLY',
+        'FIRST_SUBMISSION_AUTO',
+        'INVALID',
+        null,
+      ].map((mode) => ({
         taskId: id,
         settings: { aiFeedbackMode: mode },
       })),
@@ -722,7 +725,7 @@ describe('A1 classroom text task backend contract (HTTP)', () => {
         classroomId: new Types.ObjectId(classA.id),
       }),
     ).toBe(before);
-    const instance = await publish(teacherA, classA, id, 'DISABLED');
+    const instance = await publish(teacherA, classA, id);
     for (const payload of [
       { taskSnapshot: newContent },
       { aiFeedbackMode: 'MANUAL' },
@@ -797,17 +800,16 @@ describe('A1 classroom text task backend contract (HTTP)', () => {
     ).toEqual(oldContent);
   });
 
-  it('enforces all four modes, first-attempt-only auto, idempotency, global switch and removed membership', async () => {
+  it('allows owner students and classroom teachers to request manually with idempotency and membership protection', async () => {
     expect((await getDetail(studentA, first.id)).aiReview).toMatchObject({
-      canRequest: false,
+      canRequest: true,
       inputCoverage: 'NOT_SENT',
       usage: { reservedRequests: 0, reportedRequests: 0, totalTokens: 0 },
     });
     expect((await getDetail(teacherA, first.id)).aiReview.canRequest).toBe(
       true,
     );
-    await ask(studentA, first.id).expect(403);
-    const accepted = await ask(teacherA, first.id).expect(200);
+    const accepted = await ask(studentA, first.id).expect(200);
     const again = await ask(teacherA, first.id).expect(200);
     expect((again.body as { jobId: string }).jobId).toBe(
       (accepted.body as { jobId: string }).jobId,
@@ -815,49 +817,13 @@ describe('A1 classroom text task backend contract (HTTP)', () => {
     expect(
       await jobs.countDocuments({ submissionId: new Types.ObjectId(first.id) }),
     ).toBe(1);
-    await ask(studentB, foreign.id).expect(200);
     await ask(teacherB, foreign.id).expect(200);
+    await ask(studentB, foreign.id).expect(200);
     expect(
       await jobs.countDocuments({
         submissionId: new Types.ObjectId(foreign.id),
       }),
     ).toBe(1);
-    for (const mode of ['DISABLED', 'MANUAL', 'FIRST_SUBMISSION_AUTO']) {
-      const id = await makeTask(teacherA);
-      const instance = await publish(teacherA, classA, id, mode);
-      const a = await submit(studentA, classA, instance),
-        b = await submit(studentA, classA, instance);
-      expect(a.aiFeedbackStatus).toBe(
-        mode === 'FIRST_SUBMISSION_AUTO' ? 'PENDING' : 'NOT_REQUESTED',
-      );
-      expect(b.aiFeedbackStatus).toBe('NOT_REQUESTED');
-      const studentReview = (await getDetail(studentA, b.id)).aiReview;
-      const teacherReview = (await getDetail(teacherA, b.id)).aiReview;
-      expect(studentReview.canRequest).toBe(mode !== 'DISABLED');
-      expect(teacherReview.canRequest).toBe(mode !== 'DISABLED');
-      expect(studentReview.usage).toEqual(teacherReview.usage);
-      expect(studentReview.failure).toEqual(teacherReview.failure);
-      expect(studentReview.inputCoverage).toEqual(teacherReview.inputCoverage);
-      await ask(studentA, b.id).expect(mode === 'DISABLED' ? 403 : 200);
-      expect((await getDetail(studentA, b.id)).aiReview.canRequest).toBe(false);
-      await ask(teacherA, b.id).expect(mode === 'DISABLED' ? 403 : 200);
-      if (mode === 'DISABLED')
-        expect(
-          await jobs.countDocuments({
-            classroomTaskId: new Types.ObjectId(instance.id),
-          }),
-        ).toBe(0);
-    }
-    app.get(ConfigService).set('AI_FEEDBACK_AUTO_ON_SUBMIT', false);
-    const off = await publish(
-      teacherA,
-      classA,
-      await makeTask(teacherA),
-      'FIRST_SUBMISSION_AUTO',
-    );
-    expect((await submit(studentA, classA, off)).aiFeedbackStatus).toBe(
-      'NOT_REQUESTED',
-    );
     await teacherB
       .post(
         '/api/classrooms/' +
@@ -871,11 +837,71 @@ describe('A1 classroom text task backend contract (HTTP)', () => {
     expect((await getDetail(studentB, foreign.id)).aiReview.canRequest).toBe(
       false,
     );
-    expect(
-      (await getDetail(studentB, foreign.id)).aiReview.requestBlockReason,
-    ).toBe('当前用户或课堂 AI 策略不允许申请 AI 反馈。');
     await ask(studentB, foreign.id).expect(403);
     await ask(teacherB, foreign.id).expect(200);
+  });
+
+  it('ignores residual legacy settings without exposing or rewriting them, and processes existing eligible jobs', async () => {
+    const instance = await publish(teacherA, classA, await makeTask(teacherA));
+    const objectId = new Types.ObjectId(instance.id);
+    // Compatibility fixture only: an old Mixed setting remains in another environment.
+    await instances.collection.updateOne(
+      { _id: objectId, createdBy: userIds[0] },
+      {
+        $set: {
+          'settings.aiFeedbackMode': 'DISABLED',
+          'settings.legacyPrivate': 'hidden',
+        },
+      },
+    );
+    const before = await instances.collection.findOne({ _id: objectId });
+    const url = '/api/classrooms/' + classA.id + '/tasks';
+    const detail = (await teacherA.get(url + '/' + instance.id).expect(200))
+      .body as ClassroomTaskResponseDto;
+    const list = (await teacherA.get(url).expect(200)).body as {
+      items: ClassroomTaskResponseDto[];
+    };
+    const mine = (
+      await studentA
+        .get(url + '/' + instance.id + '/my-task-detail')
+        .expect(200)
+    ).body as {
+      classroomTask: { settings: object };
+      participationStatus: { canRequestAiFeedback: boolean };
+    };
+    for (const settings of [
+      detail.settings,
+      list.items.find((item) => item.id === instance.id)?.settings,
+      mine.classroomTask.settings,
+    ]) {
+      expect(settings).toEqual({ allowLate: true, maxAttempts: 10 });
+    }
+    expect(mine.participationStatus.canRequestAiFeedback).toBe(true);
+    expect(await instances.collection.findOne({ _id: objectId })).toEqual(
+      before,
+    );
+    const created = await submit(studentA, classA, instance);
+    expect(created.aiFeedbackStatus).toBe('NOT_REQUESTED');
+    expect((await getDetail(studentA, created.id)).aiReview.canRequest).toBe(
+      true,
+    );
+    const accepted = await ask(studentA, created.id).expect(200);
+    const repeated = await ask(teacherA, created.id).expect(200);
+    expect((repeated.body as { jobId: string }).jobId).toBe(
+      (accepted.body as { jobId: string }).jobId,
+    );
+    await processOwned(20);
+    expect((await getDetail(studentA, created.id)).aiFeedbackStatus).toBe(
+      'SUCCEEDED',
+    );
+    expect(
+      await jobs.countDocuments({
+        submissionId: new Types.ObjectId(created.id),
+      }),
+    ).toBe(1);
+    expect(await instances.collection.findOne({ _id: objectId })).toEqual(
+      before,
+    );
   });
 
   it('keeps historical reads without backfill, rejects new legacy actions, and kills ineligible jobs without Provider', async () => {
@@ -956,13 +982,6 @@ describe('A1 classroom text task backend contract (HTTP)', () => {
         .expect(200)
     ).body as List;
     expect(legacyList.total).toBe(2);
-    const disabled = await publish(
-      teacherA,
-      classA,
-      await makeTask(teacherA),
-      'DISABLED',
-    );
-    const disabledSubmission = await submit(studentA, classA, disabled);
     const provider = jest.spyOn(
       app.get(DefaultStubAiFeedbackProvider),
       'analyzeSubmission',
@@ -973,10 +992,6 @@ describe('A1 classroom text task backend contract (HTTP)', () => {
     const ownCases = [
       { submissionId: saved._id, classroomTaskId: old._id },
       { submissionId: unbound._id },
-      {
-        submissionId: new Types.ObjectId(disabledSubmission.id),
-        classroomTaskId: new Types.ObjectId(disabled.id),
-      },
     ];
     for (const item of ownCases)
       await jobs.create({
@@ -990,11 +1005,11 @@ describe('A1 classroom text task backend contract (HTTP)', () => {
         attempts: 0,
         maxAttempts: 3,
       });
-    expect(await processOwned(3)).toEqual({
-      processed: 3,
+    expect(await processOwned(2)).toEqual({
+      processed: 2,
       succeeded: 0,
       failed: 0,
-      dead: 3,
+      dead: 2,
     });
     expect(provider).not.toHaveBeenCalled();
     for (const item of ownCases) {

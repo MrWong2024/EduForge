@@ -57,7 +57,7 @@
 | TaskAiContextRefs | `components/teacher/TaskAiContextRefs.tsx` | 普通多行引用 JSON 编辑、就近结构错误与格式化；只读时有引用才按包展示全部路径，无 JSON/复制控件或空配置占位；不渲染路径链接/HTML，不读 ZIP，不进入学生或课堂实例页 |
 | ai-context-refs | `lib/learning-tasks/ai-context-refs.ts` | 引用基本结构解析、稳定格式化、语义差异与局部作者编辑判断；保持路径及数组顺序，不复制后端 ZIP 安全校验 |
 | LearningTaskFilters | `components/teacher/LearningTaskFilters.tsx` | 模板视图/筛选的 URL 状态、分页、列表展示与编辑/查看入口；保留列表返回上下文，筛选后回首屏；复用共享可见性和排序模块，不在当前页伪造完整候选或发起发布/归档 |
-| PublishClassroomTaskForm | `components/teacher/PublishClassroomTaskForm.tsx` | 可见已发布模板的筛选、候选追加加载、选择状态与实例发布；筛选变化重置候选，课程分类复用共享候选；发布者来源与已选模板摘要由本组件展示；候选未提供 rubric 时提示到模板详情核对，不宣称未配置。实例截止/迟交/次数和发布时平台 AI 模式选择属于此表单；不创建/编辑模板，不自行判定后端候选全集 |
+| PublishClassroomTaskForm | `components/teacher/PublishClassroomTaskForm.tsx` | 可见已发布模板的筛选、候选追加加载、选择状态与实例发布；筛选变化重置候选，课程分类复用共享候选；发布者来源与已选模板摘要由本组件展示；候选未提供 rubric 时提示到模板详情核对，不宣称未配置。实例截止/迟交/次数属于此表单；不提供 AI 策略选择，不创建/编辑模板，不自行判定后端候选全集 |
 | ClassroomTaskLifecycleActions | `components/teacher/ClassroomTaskLifecycleActions.tsx` | 实例状态展示、关闭/恢复提交及确认/请求状态；恢复只改变运行状态，不自动改截止、迟交或次数设置；RECALLED 无动作，不做物理删除或发布表单 |
 | EditClassroomTaskForm | `components/teacher/EditClassroomTaskForm.tsx` | 列表行内展开、草稿输入与实例截止/迟交/次数设置保存；ACTIVE/CLOSED 可编辑，RECALLED 无入口；不修改模板或状态流 |
 | PublishTaskStatusButton | `components/teacher/PublishTaskStatusButton.tsx` | 单一模板发布操作；当前 classroomTask 详情页不使用，模板生命周期入口留在模板层 |
@@ -91,7 +91,7 @@
 | RequestAiFeedbackButton | `components/student/RequestAiFeedbackButton.tsx` | 师生复用的申请按钮展示；disabled/pending 与动作回调由 SubmissionAiReview 提供，不独立持有资格或请求时序 |
 | AiProcessingHint | `components/student/AiProcessingHint.tsx` | 统一 AI 处理中提示；通用状态文案复用 UI Status |
 | SubmissionAutoRefresh | `components/student/SubmissionAutoRefresh.tsx` | 仅学生提交详情：以共享区块已接纳状态在 PENDING/RUNNING 或 FAILED 且计划重试时调用局部读取；操作中和待显式确认时暂停；终态及信息不足停止；沿用退避、失焦暂停和定时器清理，不用于草稿页 |
-| StudentTaskDetailPage | `app/student/classrooms/[classroomId]/tasks/[classroomTaskId]/page.tsx` | 实例教学内容与历史提交加载，明确快照/参与资格控制提交，消费 completionStatus；组合共享 rubric 和提交表单，仅显式刷新，模式不代替提交资格 |
+| StudentTaskDetailPage | `app/student/classrooms/[classroomId]/tasks/[classroomTaskId]/page.tsx` | 实例教学内容与历史提交加载，明确快照/后端参与资格控制提交，消费 completionStatus；组合共享 rubric 和提交表单，仅显式刷新，提示师生在提交详情主动申请 AI |
 | StudentSubmissionDetailPage | `app/student/submissions/[submissionId]/page.tsx` | 权威详情/反馈加载、返回导航及共享作品/AI 展示，限定状态自动刷新；query 不补业务事实 |
 
 共享文本教学展示：
@@ -124,7 +124,7 @@
 | Paths | `lib/routes/paths.ts` | 路径构造及模板/班级/任务上下文导航的单一来源；不在业务页硬编码重复路径 |
 | Text submission helpers | `lib/learning-tasks/text-submission.ts` | 原文请求构造、码点校验、保存后 POST 门禁与同一详情恢复路径、已知公开提交错误安全适配；产品实际调用 |
 | Submission AI operations | `lib/learning-tasks/submission-ai-operations.ts` | 单个挂载提交内的操作标识、串行读写、确认资格与已接纳摘要；无网络、无全局锁，不定义后端 Job 状态转换 |
-| AI Review | `lib/learning-tasks/ai-review.ts` | 模式/快照展示、严格摘要适配及学生轮询资格的纯逻辑，不推断后端授权 |
+| AI Review | `lib/learning-tasks/ai-review.ts` | 快照展示、严格摘要适配及学生轮询资格的纯逻辑，不推断后端授权 |
 | UI Status | `lib/ui/status.ts` | AI 状态文案与通用错误摘要的统一入口 |
 | Task Course Labels | `lib/learning-tasks/course-labels.ts` | 课程分类候选、未分类口径、显示/归一化工具的前端单一来源；不从局部查询结果倒推候选 |
 | Task Template Visibility/Scope | `lib/learning-tasks/template-visibility-scope.ts` | 模板可见性与列表 scope 的值域、文案、normalize；不在页面和表单散落魔法字符串 |

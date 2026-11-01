@@ -69,7 +69,7 @@ backend/
 AI Feedback：
 
 - 产品 request 只负责确保持久化 Job，Worker 调度与 Processor 执行独立；Provider 选择不等于后台自动消费开关。
-- 平台 AI 请求及首提自动入队由实例策略与既有开关共同控制，后续提交未请求 AI 时没有 Job 属于正常状态，不应隐式补成处理中。
+- 平台 AI 反馈统一由有权师生主动申请；首提与后续提交均不自动入队，没有 Job 属于正常状态，不应隐式补成处理中。公开实例不含策略字段，旧字段不参与运行判断；详细合同见 API/DTO Owner。
 - 受控 debug / process-once 是非产品执行入口，与 Worker 共用处理链，不能代替产品请求或后台消费模型。
 - 完整源码、说明、声明及发布快照已纳入有界 AI 辅助评阅，持久化请求预留与实报用量并提供安全详情摘要；字段见 [DTO Owner](./handoff-backend-dto-cheatsheet.md#submission-request--response-family)。
 - 已支持任务配置 ZIP 文本资料、发布实例固定引用与 Processor 运行时重读；参考材料参与既有完整输入预算，失败提供安全摘要且不影响已保存作品。路径/字段、调用、运行资源和证据分别见 DTO、Service、Config 与 Testing Owner；不提供下载界面、Word/PDF/图片解析或资料管理平台。
@@ -84,7 +84,7 @@ AI Feedback：
 
 教学主链路：
 
-- 新发布课堂实例保存固定教学文字/量规与平台 AI 策略；源码和提交说明逐次保存，读取与 Worker 使用所属实例内容。旧记录保持只读且不回填，缺快照实例禁止新提交/新 AI 请求；公开边界见 API/DTO Owner。
+- 新发布课堂实例保存固定教学文字/量规及既有提交设置；源码和提交说明逐次保存，读取与 Worker 使用所属实例内容。旧记录保持只读且不回填，缺快照实例禁止新提交/新 AI 请求；公开边界见 API/DTO Owner。
 - 学生通过加入码入班，查看学习任务、提交作业并读取反馈；教师可读取正式成员和实例提交，进入稳定提交详情并批阅。
 - 课堂任务实例支持独立的运行状态管理、截止与提交规则配置；不把实例管理重新混回模板生命周期。具体动作和字段见 [API](./handoff-backend-api-map.md#classroom-tasksclassrooms-子资源) / [DTO](./handoff-backend-dto-cheatsheet.md#classroomtask-dto--response-family)。
 

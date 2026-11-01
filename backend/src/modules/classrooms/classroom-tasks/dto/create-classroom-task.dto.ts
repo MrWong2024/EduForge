@@ -7,17 +7,9 @@ import {
   ValidateNested,
   Min,
   IsDateString,
-  IsEnum,
-  ValidateIf,
 } from 'class-validator';
 
-import { AiFeedbackMode } from '../classroom-task-content';
-
 class ClassroomTaskSettingsDto {
-  @ValidateIf((_, value: unknown) => value !== undefined)
-  @IsEnum(AiFeedbackMode)
-  aiFeedbackMode?: AiFeedbackMode;
-
   @IsOptional()
   @IsBoolean()
   allowLate?: boolean;

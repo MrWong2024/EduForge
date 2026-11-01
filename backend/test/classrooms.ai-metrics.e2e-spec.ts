@@ -113,8 +113,6 @@ describe('Classrooms AI Metrics (e2e)', () => {
   let previousWorkerEnabled: string | undefined;
   let previousDebugEnabled: string | undefined;
   let previousMaxPerMinute: string | undefined;
-  let previousAutoOnSubmit: string | undefined;
-  let previousFirstAttemptOnly: string | undefined;
   let previousSubmissionCooldownMs: string | undefined;
 
   const teacherEmail = `teacher.metrics.${Date.now()}@example.com`;
@@ -195,11 +193,6 @@ describe('Classrooms AI Metrics (e2e)', () => {
       process.env.AI_FEEDBACK_MAX_PER_CLASSROOMTASK_PER_MINUTE;
     process.env.AI_FEEDBACK_MAX_PER_CLASSROOMTASK_PER_MINUTE =
       DEFAULT_MAX_PER_MINUTE;
-    previousAutoOnSubmit = process.env.AI_FEEDBACK_AUTO_ON_SUBMIT;
-    process.env.AI_FEEDBACK_AUTO_ON_SUBMIT = 'true';
-    previousFirstAttemptOnly =
-      process.env.AI_FEEDBACK_AUTO_ON_FIRST_ATTEMPT_ONLY;
-    process.env.AI_FEEDBACK_AUTO_ON_FIRST_ATTEMPT_ONLY = 'false';
     previousSubmissionCooldownMs =
       process.env.LEARNING_TASK_SUBMISSION_COOLDOWN_MS;
     process.env.LEARNING_TASK_SUBMISSION_COOLDOWN_MS = '0';
@@ -304,11 +297,11 @@ describe('Classrooms AI Metrics (e2e)', () => {
     const [createdClassroomTaskA, createdClassroomTaskB] = await Promise.all([
       teacherAgent
         .post(`/api/classrooms/${classroomAId}/tasks`)
-        .send({ taskId, settings: { aiFeedbackMode: 'MANUAL' } })
+        .send({ taskId })
         .expect(201),
       teacherAgent
         .post(`/api/classrooms/${classroomBId}/tasks`)
-        .send({ taskId, settings: { aiFeedbackMode: 'MANUAL' } })
+        .send({ taskId })
         .expect(201),
     ]);
     const classroomTaskABody =
@@ -351,17 +344,6 @@ describe('Classrooms AI Metrics (e2e)', () => {
     } else {
       process.env.AI_FEEDBACK_MAX_PER_CLASSROOMTASK_PER_MINUTE =
         previousMaxPerMinute;
-    }
-    if (previousAutoOnSubmit === undefined) {
-      delete process.env.AI_FEEDBACK_AUTO_ON_SUBMIT;
-    } else {
-      process.env.AI_FEEDBACK_AUTO_ON_SUBMIT = previousAutoOnSubmit;
-    }
-    if (previousFirstAttemptOnly === undefined) {
-      delete process.env.AI_FEEDBACK_AUTO_ON_FIRST_ATTEMPT_ONLY;
-    } else {
-      process.env.AI_FEEDBACK_AUTO_ON_FIRST_ATTEMPT_ONLY =
-        previousFirstAttemptOnly;
     }
     if (previousSubmissionCooldownMs === undefined) {
       delete process.env.LEARNING_TASK_SUBMISSION_COOLDOWN_MS;

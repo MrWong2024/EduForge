@@ -129,18 +129,18 @@ Superseded by: [Decision 17](#17-数据库连接的环境与用途约束)
 所有与 AI 运行相关的报表、成功率、错误分布、反馈产出统计默认继承 `classroomTaskId` 维度。  
 后续新增统计能力时，应优先保留该隔离维度，不得回退为 `taskId` 聚合。  
 
-## 10) AI 入队触发采用 attempt-based 策略治理
+## 10) AI 反馈统一由师生手动申请
+
+**Status**：原 attempt-based 首提自动触发决策已被本决策取代。
 
 **Decision**  
-AI 反馈的自动入队不再默认“每次提交都触发”，而采用基于提交次数（attempt）的策略控制模型：首提自动入队，后续提交默认不自动入队。  
+取消 DISABLED、TEACHER_ONLY、MANUAL、FIRST_SUBMISSION_AUTO 四种课堂实例策略。所有提交均不自动入队；学生本人和所属班级有权教师通过正式 API 主动申请，不保存、传输或展示策略字段，也不补写固定 MANUAL。
 
 **Rationale**  
-避免重复提交导致队列与外部调用成本失控，同时保留“即时反馈助教”的教学定位。  
+将作品保存与评阅受理分开，统一师生申请入口，同时保留授权、版本固定、幂等与既有执行成本护栏。
 
 **Consequences**  
-提交后是否入队成为一个明确的策略控制点，而非隐式行为。  
-系统需能够区分“未处理”与“未请求”的语义。  
-成本治理从执行层扩展到触发层，形成双层控制结构。  
+旧字段缺失或残留均不控制行为，读取不回填、不清理；既有冻结、Job、反馈和用量事实保留。现行接口、数据及配置合同分别由 [API](./handoff-backend-api-map.md#learning-tasks)、[DTO](./handoff-backend-dto-cheatsheet.md#classroomtask-dto--response-family) 与 [Config Matrix](./handoff-backend-config-matrix.md#5-ai-请求与退役配置) 维护。
 
 ## 11) 手工触发 AI 入队属于产品能力，与 debug/运维能力分层
 
@@ -161,7 +161,7 @@ AI 触发与 AI 执行保持分层设计，避免职责混淆。
 AI 状态推导统一口径：存在 Job 映射为执行态；不存在 Job 视为 `NOT_REQUESTED`，而非隐式 `PENDING`。  
 
 **Rationale**  
-在 attempt-based 策略下，“未入队”具有明确业务语义，必须稳定可观测，并与 dashboard/报表统计一致。  
+统一手动申请后，“未入队”具有明确业务语义，必须稳定可观测，并与 dashboard/报表统计一致。
 
 **Consequences**  
 状态推导逻辑必须以“是否存在 Job”为第一判断。  

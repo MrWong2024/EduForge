@@ -43,6 +43,7 @@ type CreatedTaskResponse = {
 
 type CreatedSubmissionResponse = {
   id: string;
+  contentRevision: number;
 };
 
 type ProcessOnceResponse = {
@@ -258,6 +259,7 @@ describe('LearningTasks AI Feedback Bailian Context (e2e)', () => {
     return res.body as {
       aiFeedbackStatus: string;
       aiReview: AiReviewSummary;
+      contentRevision: number;
       content: { codeText: string; submissionNote: string };
     };
   };
@@ -279,7 +281,10 @@ describe('LearningTasks AI Feedback Bailian Context (e2e)', () => {
     submissionIds.push(id);
     await studentAgent
       .post('/api/learning-tasks/submissions/' + id + '/ai-feedback/request')
-      .send({ expectedRevision: 0 })
+      .send({
+        expectedRevision: (res.body as CreatedSubmissionResponse)
+          .contentRevision,
+      })
       .expect(200);
     return id;
   };
@@ -320,10 +325,10 @@ describe('LearningTasks AI Feedback Bailian Context (e2e)', () => {
     contextTaskIds.push(id);
     return id;
   };
-  const publishContext = async (id: string, mode = 'MANUAL') => {
+  const publishContext = async (id: string) => {
     const response = await teacherAgent
       .post('/api/classrooms/' + classroomIds[0] + '/tasks')
-      .send({ taskId: id, settings: { aiFeedbackMode: mode } })
+      .send({ taskId: id })
       .expect(201);
     const instance = (response.body as CreatedTaskResponse).id;
     instanceIds.push(instance);
@@ -351,11 +356,13 @@ describe('LearningTasks AI Feedback Bailian Context (e2e)', () => {
     submissionIds.push(id);
     return id;
   };
-  const requestContext = (id: string) =>
-    studentAgent
+  const requestContext = async (id: string) => {
+    const detail = await readReview(id);
+    return studentAgent
       .post('/api/learning-tasks/submissions/' + id + '/ai-feedback/request')
-      .send({ expectedRevision: 0 })
+      .send({ expectedRevision: detail.contentRevision })
       .expect(200);
+  };
   const makeDue = async (id: string) => {
     // Approved controlled scheduling advancement; no status/attempt/usage rewrite.
     await aiFeedbackJobModel.updateOne(
@@ -546,7 +553,6 @@ describe('LearningTasks AI Feedback Bailian Context (e2e)', () => {
         .post(`/api/learning-tasks/tasks/${taskId}/publish`)
         .send({})
         .expect(201);
-      configService.set('AI_FEEDBACK_AUTO_ON_SUBMIT', false);
       configService.set('LEARNING_TASK_SUBMISSION_COOLDOWN_MS', 0);
       const course = await teacherAgent
         .post('/api/courses')
@@ -576,7 +582,7 @@ describe('LearningTasks AI Feedback Bailian Context (e2e)', () => {
         }
         const instance = await teacherAgent
           .post('/api/classrooms/' + body.id + '/tasks')
-          .send({ taskId, settings: { aiFeedbackMode: 'MANUAL' } })
+          .send({ taskId })
           .expect(201);
         instanceIds.push((instance.body as CreatedTaskResponse).id);
       }
@@ -786,12 +792,7 @@ describe('LearningTasks AI Feedback Bailian Context (e2e)', () => {
     submissionId = (createdSubmission.body as CreatedSubmissionResponse).id;
     submissionIds.push(submissionId);
 
-    await studentAgent
-      .post(
-        `/api/learning-tasks/submissions/${submissionId}/ai-feedback/request`,
-      )
-      .send({ expectedRevision: 0 })
-      .expect(200);
+    await requestContext(submissionId);
 
     const processResult: ProcessOnceResponse = await processOwned(1);
     expect(processResult.processed).toBe(1);
@@ -973,10 +974,7 @@ describe('LearningTasks AI Feedback Bailian Context (e2e)', () => {
       .expect(201);
     const id = (created.body as CreatedSubmissionResponse).id;
     submissionIds.push(id);
-    await studentAgent
-      .post('/api/learning-tasks/submissions/' + id + '/ai-feedback/request')
-      .send({ expectedRevision: 0 })
-      .expect(200);
+    await requestContext(id);
     expect(await processOwned(1)).toEqual({
       processed: 1,
       succeeded: 1,
@@ -1065,10 +1063,7 @@ describe('LearningTasks AI Feedback Bailian Context (e2e)', () => {
           source: FeedbackSource.AI,
         }),
       ).toBe(0);
-      const repeated = await studentAgent
-        .post('/api/learning-tasks/submissions/' + id + '/ai-feedback/request')
-        .send({ expectedRevision: 0 })
-        .expect(200);
+      const repeated = await requestContext(id);
       expect(repeated.body).toMatchObject({ status: 'DEAD' });
       expect(await processOwned(1)).toMatchObject({
         processed: 0,
@@ -1372,14 +1367,7 @@ describe('LearningTasks AI Feedback Bailian Context (e2e)', () => {
     setResponses([]);
     const id = await submitAndRequest();
     const requests = await Promise.all(
-      Array.from({ length: 3 }, () =>
-        studentAgent
-          .post(
-            '/api/learning-tasks/submissions/' + id + '/ai-feedback/request',
-          )
-          .send({ expectedRevision: 0 })
-          .expect(200),
-      ),
+      Array.from({ length: 3 }, () => requestContext(id)),
     );
     expect(
       new Set(requests.map((r) => (r.body as { jobId: string }).jobId)).size,
@@ -1400,10 +1388,7 @@ describe('LearningTasks AI Feedback Bailian Context (e2e)', () => {
           .exec()
       )?.attempts,
     ).toBe(1);
-    const repeated = await studentAgent
-      .post('/api/learning-tasks/submissions/' + id + '/ai-feedback/request')
-      .send({ expectedRevision: 0 })
-      .expect(200);
+    const repeated = await requestContext(id);
     expect(repeated.body).toMatchObject({ status: 'SUCCEEDED' });
     expect(await processOwned(1)).toMatchObject({
       processed: 0,
@@ -1615,7 +1600,7 @@ describe('LearningTasks AI Feedback Bailian Context (e2e)', () => {
       expect(json).toContain('ZIP_REQUIREMENTS');
       expect(json).toContain('ZIP_RUBRIC');
       expect(json).toContain('taskSnapshotAvailable');
-      expect(json).toContain('MANUAL');
+      expect(json).not.toContain('aiFeedbackMode');
     }
     const my = await studentAgent
       .get(base + '/' + instance + '/my-task-detail')
@@ -1662,80 +1647,69 @@ describe('LearningTasks AI Feedback Bailian Context (e2e)', () => {
     expect((await readReview(submission)).aiReview.inputCoverage).toBe('FULL');
   });
 
-  it.each([false, true])(
-    'keeps saved work when queued materials disappear (FIRST_SUBMISSION_AUTO=%s)',
-    async (automatic) => {
-      clearCapturedPayloads();
-      const config = app.get(ConfigService);
-      config.set('AI_FEEDBACK_AUTO_ON_SUBMIT', automatic);
-      const id = await contextTask();
-      const instance = await publishContext(
-        id,
-        automatic ? 'FIRST_SUBMISSION_AUTO' : 'MANUAL',
-      );
-      const submission = await submitContext(instance);
-      if (!automatic) await requestContext(submission);
-      const pending = await aiFeedbackJobModel
+  it('keeps saved work when manually requested materials disappear', async () => {
+    clearCapturedPayloads();
+    const id = await contextTask();
+    const instance = await publishContext(id);
+    const submission = await submitContext(instance);
+    await requestContext(submission);
+    const pending = await aiFeedbackJobModel
+      .findOne({ submissionId: new Types.ObjectId(submission) })
+      .lean();
+    expect(pending?.status).toBe('PENDING');
+    await rm(resolve(contextRoot, 'book/teacher.zip'));
+    try {
+      expect(await processOwned(1)).toMatchObject({ processed: 1, dead: 1 });
+      const detail = await readReview(submission);
+      expect(detail.content).toMatchObject({
+        codeText: 'STUDENT_ZIP_CODE',
+        submissionNote: 'STUDENT_ZIP_NOTE',
+      });
+      expect(detail.aiReview).toMatchObject({
+        failure: {
+          code: 'AI_CONTEXT_UNAVAILABLE',
+          message:
+            '作业已保存，任务参考资料暂不可用，本次未生成 AI 反馈，请联系教师。',
+        },
+        usage: { reservedRequests: 0 },
+        retryScheduled: false,
+        inputCoverage: 'NOT_SENT',
+      });
+      expect(getCapturedPayloads()).toHaveLength(0);
+      expect(
+        await feedbackModel.countDocuments({
+          submissionId: new Types.ObjectId(submission),
+        }),
+      ).toBe(0);
+      expect(await submissionModel.countDocuments({ _id: submission })).toBe(1);
+      const job = await aiFeedbackJobModel
         .findOne({ submissionId: new Types.ObjectId(submission) })
         .lean();
-      expect(pending?.status).toBe('PENDING');
-      await rm(resolve(contextRoot, 'book/teacher.zip'));
-      try {
-        expect(await processOwned(1)).toMatchObject({ processed: 1, dead: 1 });
-        const detail = await readReview(submission);
-        expect(detail.content).toMatchObject({
-          codeText: 'STUDENT_ZIP_CODE',
-          submissionNote: 'STUDENT_ZIP_NOTE',
-        });
-        expect(detail.aiReview).toMatchObject({
-          failure: {
-            code: 'AI_CONTEXT_UNAVAILABLE',
-            message:
-              '作业已保存，任务参考资料暂不可用，本次未生成 AI 反馈，请联系教师。',
-          },
-          usage: { reservedRequests: 0 },
-          retryScheduled: false,
-          inputCoverage: 'NOT_SENT',
-        });
-        expect(getCapturedPayloads()).toHaveLength(0);
-        expect(
-          await feedbackModel.countDocuments({
-            submissionId: new Types.ObjectId(submission),
-          }),
-        ).toBe(0);
-        expect(await submissionModel.countDocuments({ _id: submission })).toBe(
-          1,
-        );
-        const job = await aiFeedbackJobModel
-          .findOne({ submissionId: new Types.ObjectId(submission) })
-          .lean();
-        expect(job).toMatchObject({
-          status: 'DEAD',
-          attempts: 1,
-          failureCode: 'AI_CONTEXT_UNAVAILABLE',
-          notBefore: null,
-          lockedAt: null,
-        });
-        const retry = await requestContext(submission);
-        expect(retry.body).toMatchObject({ status: 'DEAD' });
-        const safe = JSON.stringify(detail.aiReview);
-        for (const hidden of [
-          'aiContextRefs',
-          'teacher.zip',
-          'ENOENT',
-          contextRoot,
-          '# REF_B',
-        ])
-          expect(safe).not.toContain(hidden);
-      } finally {
-        await copyFile(
-          resolve(__dirname, 'fixtures/ai-context/teacher.zip'),
-          resolve(contextRoot, 'book/teacher.zip'),
-        );
-        config.set('AI_FEEDBACK_AUTO_ON_SUBMIT', false);
-      }
-    },
-  );
+      expect(job).toMatchObject({
+        status: 'DEAD',
+        attempts: 1,
+        failureCode: 'AI_CONTEXT_UNAVAILABLE',
+        notBefore: null,
+        lockedAt: null,
+      });
+      const retry = await requestContext(submission);
+      expect(retry.body).toMatchObject({ status: 'DEAD' });
+      const safe = JSON.stringify(detail.aiReview);
+      for (const hidden of [
+        'aiContextRefs',
+        'teacher.zip',
+        'ENOENT',
+        contextRoot,
+        '# REF_B',
+      ])
+        expect(safe).not.toContain(hidden);
+    } finally {
+      await copyFile(
+        resolve(__dirname, 'fixtures/ai-context/teacher.zip'),
+        resolve(contextRoot, 'book/teacher.zip'),
+      );
+    }
+  });
 
   it('uses the existing complete messages budget when references push an otherwise small submission over it', async () => {
     clearCapturedPayloads();

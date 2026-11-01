@@ -172,8 +172,6 @@ describe('LearningTasks AI Feedback Guards (e2e)', () => {
   let previousMaxItems: string | undefined;
   let previousMaxConcurrency: string | undefined;
   let previousMaxPerMinute: string | undefined;
-  let previousAutoOnSubmit: string | undefined;
-  let previousFirstAttemptOnly: string | undefined;
   let previousCooldown: string | undefined;
 
   const fixtureNamespace = 'ai-bailian-guards-' + Date.now();
@@ -249,11 +247,6 @@ describe('LearningTasks AI Feedback Guards (e2e)', () => {
       process.env.AI_FEEDBACK_MAX_PER_CLASSROOMTASK_PER_MINUTE;
     process.env.AI_FEEDBACK_MAX_PER_CLASSROOMTASK_PER_MINUTE =
       describeDefaultMaxPerMinute;
-    previousAutoOnSubmit = process.env.AI_FEEDBACK_AUTO_ON_SUBMIT;
-    process.env.AI_FEEDBACK_AUTO_ON_SUBMIT = 'true';
-    previousFirstAttemptOnly =
-      process.env.AI_FEEDBACK_AUTO_ON_FIRST_ATTEMPT_ONLY;
-    process.env.AI_FEEDBACK_AUTO_ON_FIRST_ATTEMPT_ONLY = 'false';
     process.env.BAILIAN_API_KEY = 'test-key';
     process.env.BAILIAN_BASE_URL = mockBaseUrl;
     previousCooldown = process.env.LEARNING_TASK_SUBMISSION_COOLDOWN_MS;
@@ -377,7 +370,7 @@ describe('LearningTasks AI Feedback Guards (e2e)', () => {
 
     const createdClassroomTask = await teacherAgent
       .post(`/api/classrooms/${classroomId}/tasks`)
-      .send({ taskId, settings: { aiFeedbackMode: 'MANUAL' } })
+      .send({ taskId })
       .expect(201);
     const classroomTaskBody =
       createdClassroomTask.body as CreatedClassroomTaskResponse;
@@ -436,17 +429,6 @@ describe('LearningTasks AI Feedback Guards (e2e)', () => {
     } else {
       process.env.AI_FEEDBACK_MAX_PER_CLASSROOMTASK_PER_MINUTE =
         previousMaxPerMinute;
-    }
-    if (previousAutoOnSubmit === undefined) {
-      delete process.env.AI_FEEDBACK_AUTO_ON_SUBMIT;
-    } else {
-      process.env.AI_FEEDBACK_AUTO_ON_SUBMIT = previousAutoOnSubmit;
-    }
-    if (previousFirstAttemptOnly === undefined) {
-      delete process.env.AI_FEEDBACK_AUTO_ON_FIRST_ATTEMPT_ONLY;
-    } else {
-      process.env.AI_FEEDBACK_AUTO_ON_FIRST_ATTEMPT_ONLY =
-        previousFirstAttemptOnly;
     }
     if (previousCooldown === undefined) {
       delete process.env.LEARNING_TASK_SUBMISSION_COOLDOWN_MS;

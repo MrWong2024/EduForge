@@ -17,7 +17,10 @@ import { ClassroomTask } from '../src/modules/classrooms/classroom-tasks/schemas
 import { Task } from '../src/modules/learning-tasks/schemas/task.schema';
 import { Submission } from '../src/modules/learning-tasks/schemas/submission.schema';
 import { Feedback } from '../src/modules/learning-tasks/schemas/feedback.schema';
-import { AiFeedbackJob } from '../src/modules/learning-tasks/ai-feedback/schemas/ai-feedback-job.schema';
+import {
+  AiFeedbackJob,
+  AiFeedbackJobStatus,
+} from '../src/modules/learning-tasks/ai-feedback/schemas/ai-feedback-job.schema';
 import { AiFeedbackProcessor } from '../src/modules/learning-tasks/ai-feedback/services/ai-feedback-processor.service';
 
 jest.setTimeout(30000);
@@ -52,6 +55,7 @@ type CreatedClassroomTaskResponse = {
 type CreatedSubmissionResponse = {
   id: string;
   attemptNo: number;
+  contentRevision: number;
   aiFeedbackStatus: string;
 };
 
@@ -70,6 +74,13 @@ type SubmissionListItem = {
 type SubmissionDetailResponse = {
   id: string;
   aiFeedbackStatus: string;
+  aiReview: {
+    usage: {
+      reservedRequests: number;
+      reportedRequests: number;
+      totalTokens: number;
+    };
+  };
   content?: {
     codeText?: string | null;
   };
@@ -158,8 +169,12 @@ describe('LearningTasks AI Feedback Trigger Policy (e2e)', () => {
     await app.init();
     app.get(ConfigService).set('LEARNING_TASK_SUBMISSION_COOLDOWN_MS', 0);
 
-    teacherAgent = request.agent(app.getHttpServer());
-    studentAgent = request.agent(app.getHttpServer());
+    teacherAgent = request
+      .agent(app.getHttpServer())
+      .timeout({ response: 10000, deadline: 15000 });
+    studentAgent = request
+      .agent(app.getHttpServer())
+      .timeout({ response: 10000, deadline: 15000 });
 
     userModel = app.get(getModelToken(User.name));
     sessionModel = app.get(getModelToken(Session.name));
@@ -171,6 +186,14 @@ describe('LearningTasks AI Feedback Trigger Policy (e2e)', () => {
     feedbackModel = app.get(getModelToken(Feedback.name));
     aiFeedbackJobModel = app.get(getModelToken(AiFeedbackJob.name));
     aiFeedbackProcessor = app.get(AiFeedbackProcessor);
+
+    expect(process.env.NODE_ENV).toBe('test');
+    expect(process.env.EDUFORGE_DATABASE_PURPOSE).toBe('standard_test');
+    expect(userModel.db.name).toBe('eduforge_test');
+    userModel.db.set('maxTimeMS', 10000);
+    expect(app.get(ConfigService).get('AI_FEEDBACK_PROVIDER')).toBe('stub');
+    expect(app.get(ConfigService).get('MAIL_PROVIDER')).toBe('log');
+    console.info('Manual request database gate: standard_test / eduforge_test');
 
     const [teacherHash, studentHash] = await Promise.all([
       bcrypt.hash(teacherPassword, 10),
@@ -215,7 +238,7 @@ describe('LearningTasks AI Feedback Trigger Policy (e2e)', () => {
       .post('/api/learning-tasks/tasks')
       .send({
         title: 'Trigger Policy Task',
-        description: 'Validate attempt-based auto enqueue policy.',
+        description: 'Validate manual requests on every attempt.',
         knowledgeModule: 'ai-policy',
         status: 'DRAFT',
       })
@@ -230,7 +253,7 @@ describe('LearningTasks AI Feedback Trigger Policy (e2e)', () => {
 
     const createdClassroomTask = await teacherAgent
       .post(`/api/classrooms/${classroomId}/tasks`)
-      .send({ taskId, settings: { aiFeedbackMode: 'FIRST_SUBMISSION_AUTO' } })
+      .send({ taskId })
       .expect(201);
     const classroomTaskBody =
       createdClassroomTask.body as CreatedClassroomTaskResponse;
@@ -264,54 +287,106 @@ describe('LearningTasks AI Feedback Trigger Policy (e2e)', () => {
       process.env.AI_FEEDBACK_AUTO_ON_FIRST_ATTEMPT_ONLY = previousFirstOnly;
     }
 
-    if (!KEEP_DB) {
-      const submissionObjectIds = submissionIds.map(
-        (id) => new Types.ObjectId(id),
-      );
-      if (submissionObjectIds.length > 0) {
-        await feedbackModel.deleteMany({
-          submissionId: { $in: submissionObjectIds },
-        });
-        await aiFeedbackJobModel.deleteMany({
-          submissionId: { $in: submissionObjectIds },
-        });
-        await submissionModel.deleteMany({ _id: { $in: submissionObjectIds } });
+    try {
+      if (!KEEP_DB && userModel) {
+        const submissionObjectIds = submissionIds.map(
+          (id) => new Types.ObjectId(id),
+        );
+        if (submissionObjectIds.length > 0) {
+          await feedbackModel.deleteMany({
+            submissionId: { $in: submissionObjectIds },
+          });
+          await aiFeedbackJobModel.deleteMany({
+            submissionId: { $in: submissionObjectIds },
+          });
+          await submissionModel.deleteMany({
+            _id: { $in: submissionObjectIds },
+          });
+        }
+        if (classroomTaskId) {
+          await classroomTaskModel.deleteOne({
+            _id: new Types.ObjectId(classroomTaskId),
+          });
+        }
+        if (taskId) {
+          await taskModel.deleteOne({ _id: new Types.ObjectId(taskId) });
+        }
+        if (classroomId) {
+          await classroomModel.deleteOne({
+            _id: new Types.ObjectId(classroomId),
+          });
+        }
+        if (courseId) {
+          await courseModel.deleteOne({ _id: new Types.ObjectId(courseId) });
+        }
+        if (classroomId)
+          await app
+            .get<Model<Enrollment>>(getModelToken(Enrollment.name))
+            .deleteMany({ classroomId: new Types.ObjectId(classroomId) });
+        const users = await userModel
+          .find({ email: { $in: [teacherEmail, studentEmail] } })
+          .select('_id')
+          .lean()
+          .exec();
+        const userIds = users.map((user) => user._id);
+        if (userIds.length > 0) {
+          await sessionModel.deleteMany({ userId: { $in: userIds } });
+          await userModel.deleteMany({ _id: { $in: userIds } });
+        }
+        expect(
+          await feedbackModel.countDocuments({
+            submissionId: {
+              $in: submissionIds.map((id) => new Types.ObjectId(id)),
+            },
+          }),
+        ).toBe(0);
+        expect(
+          await aiFeedbackJobModel.countDocuments({
+            submissionId: {
+              $in: submissionIds.map((id) => new Types.ObjectId(id)),
+            },
+          }),
+        ).toBe(0);
+        expect(
+          await submissionModel.countDocuments({
+            _id: { $in: submissionIds.map((id) => new Types.ObjectId(id)) },
+          }),
+        ).toBe(0);
+        expect(
+          await userModel.countDocuments({
+            email: { $in: [teacherEmail, studentEmail] },
+          }),
+        ).toBe(0);
+        if (classroomTaskId)
+          expect(
+            await classroomTaskModel.countDocuments({
+              _id: new Types.ObjectId(classroomTaskId),
+            }),
+          ).toBe(0);
+        if (taskId)
+          expect(
+            await taskModel.countDocuments({ _id: new Types.ObjectId(taskId) }),
+          ).toBe(0);
+        if (classroomId)
+          expect(
+            await classroomModel.countDocuments({
+              _id: new Types.ObjectId(classroomId),
+            }),
+          ).toBe(0);
+        if (courseId)
+          expect(
+            await courseModel.countDocuments({
+              _id: new Types.ObjectId(courseId),
+            }),
+          ).toBe(0);
+        console.info('Manual request scoped cleanup verified');
       }
-      if (classroomTaskId) {
-        await classroomTaskModel.deleteOne({
-          _id: new Types.ObjectId(classroomTaskId),
-        });
-      }
-      if (taskId) {
-        await taskModel.deleteOne({ _id: new Types.ObjectId(taskId) });
-      }
-      if (classroomId) {
-        await classroomModel.deleteOne({
-          _id: new Types.ObjectId(classroomId),
-        });
-      }
-      if (courseId) {
-        await courseModel.deleteOne({ _id: new Types.ObjectId(courseId) });
-      }
-      if (classroomId)
-        await app
-          .get<Model<Enrollment>>(getModelToken(Enrollment.name))
-          .deleteMany({ classroomId: new Types.ObjectId(classroomId) });
-      const users = await userModel
-        .find({ email: { $in: [teacherEmail, studentEmail] } })
-        .select('_id')
-        .lean()
-        .exec();
-      const userIds = users.map((user) => user._id);
-      if (userIds.length > 0) {
-        await sessionModel.deleteMany({ userId: { $in: userIds } });
-        await userModel.deleteMany({ _id: { $in: userIds } });
-      }
+    } finally {
+      if (app) await app.close();
     }
-    await app.close();
   });
 
-  it('auto-enqueues first attempt only, supports manual request for later attempts, and then succeeds', async () => {
+  it('never auto-enqueues even with retired flags set, edits the same attempt, and admits teacher and student manual requests', async () => {
     const firstSubmission = await studentAgent
       .post(
         `/api/classrooms/${classroomId}/tasks/${classroomTaskId}/submissions`,
@@ -326,7 +401,7 @@ describe('LearningTasks AI Feedback Trigger Policy (e2e)', () => {
     const firstBody = firstSubmission.body as CreatedSubmissionResponse;
     submissionIds.push(firstBody.id);
     expect(firstBody.attemptNo).toBe(1);
-    expect(firstBody.aiFeedbackStatus).toBe('PENDING');
+    expect(firstBody.aiFeedbackStatus).toBe('NOT_REQUESTED');
 
     const secondSubmission = await studentAgent
       .post(
@@ -360,15 +435,47 @@ describe('LearningTasks AI Feedback Trigger Policy (e2e)', () => {
         submissionId: new Types.ObjectId(secondBody.id),
       }),
     ]);
-    expect(firstJobCount).toBe(1);
+    expect(firstJobCount).toBe(0);
     expect(secondJobCount).toBe(0);
+
+    for (const id of [firstBody.id, secondBody.id]) {
+      const stored = await submissionModel.collection.findOne({
+        _id: new Types.ObjectId(id),
+      });
+      expect(stored).not.toHaveProperty('reviewStartedAt');
+    }
+    const editedResponse = await studentAgent
+      .patch('/api/learning-tasks/submissions/' + secondBody.id)
+      .send({
+        expectedRevision: secondBody.contentRevision,
+        content: {
+          codeText: 'function secondAttemptPolicy() { return 3; }',
+          language: 'typescript',
+        },
+      })
+      .expect(200);
+    const edited = editedResponse.body as CreatedSubmissionResponse;
+    expect(edited.id).toBe(secondBody.id);
+    expect(edited.attemptNo).toBe(2);
+    expect(edited.contentRevision).toBe(secondBody.contentRevision + 1);
+    const firstRequest = await teacherAgent
+      .post(
+        '/api/learning-tasks/submissions/' +
+          firstBody.id +
+          '/ai-feedback/request',
+      )
+      .send({ expectedRevision: firstBody.contentRevision })
+      .expect(200);
+    expect((firstRequest.body as RequestAiFeedbackResponse).status).toBe(
+      'PENDING',
+    );
 
     const requestResult = await studentAgent
       .post(
         `/api/learning-tasks/submissions/${secondBody.id}/ai-feedback/request`,
       )
       .send({
-        expectedRevision: 0,
+        expectedRevision: edited.contentRevision,
         reason: 'Need AI feedback for second attempt',
       })
       .expect(200);
@@ -382,7 +489,10 @@ describe('LearningTasks AI Feedback Trigger Policy (e2e)', () => {
       .post(
         `/api/learning-tasks/submissions/${secondBody.id}/ai-feedback/request`,
       )
-      .send({ expectedRevision: 0, reason: 'Idempotency check' })
+      .send({
+        expectedRevision: edited.contentRevision,
+        reason: 'Idempotency check',
+      })
       .expect(200);
     const requestAgainBody = requestAgain.body as RequestAiFeedbackResponse;
     expect(requestAgainBody.jobId).toBe(requestBody.jobId);
@@ -405,6 +515,39 @@ describe('LearningTasks AI Feedback Trigger Policy (e2e)', () => {
     );
     expect(secondAfterRequest?.aiFeedbackStatus).toBe('PENDING');
 
+    await studentAgent
+      .patch('/api/learning-tasks/submissions/' + secondBody.id)
+      .send({
+        expectedRevision: edited.contentRevision,
+        content: {
+          codeText: 'cannot replace admitted work',
+          language: 'typescript',
+        },
+      })
+      .expect(409);
+    expect(
+      await aiFeedbackJobModel.countDocuments({
+        submissionId: new Types.ObjectId(secondBody.id),
+      }),
+    ).toBe(1);
+    expect(
+      (await submissionModel.findById(secondBody.id).lean().exec())
+        ?.contentRevision,
+    ).toBe(edited.contentRevision);
+    expect(
+      await aiFeedbackJobModel.countDocuments({
+        submissionId: {
+          $nin: submissionIds.map((id) => new Types.ObjectId(id)),
+        },
+        status: {
+          $in: [
+            AiFeedbackJobStatus.Pending,
+            AiFeedbackJobStatus.Failed,
+            AiFeedbackJobStatus.Running,
+          ],
+        },
+      }),
+    ).toBe(0);
     await aiFeedbackProcessor.processOnce(5);
 
     let secondFinalStatus = '';
@@ -429,6 +572,11 @@ describe('LearningTasks AI Feedback Trigger Policy (e2e)', () => {
     const detailBody =
       secondDetailAfterProcess.body as SubmissionDetailResponse;
     expect(detailBody.aiFeedbackStatus).toBe('SUCCEEDED');
+    expect(detailBody.aiReview.usage).toMatchObject({
+      reservedRequests: 0,
+      reportedRequests: 0,
+      totalTokens: 0,
+    });
     expect(detailBody.content?.codeText).toContain('secondAttemptPolicy');
 
     const feedbackList = await studentAgent
@@ -437,5 +585,26 @@ describe('LearningTasks AI Feedback Trigger Policy (e2e)', () => {
     const feedbackItems = feedbackList.body as unknown[];
     expect(Array.isArray(feedbackItems)).toBe(true);
     expect(feedbackItems.length).toBeGreaterThanOrEqual(1);
+    const job = await aiFeedbackJobModel
+      .findOne({ submissionId: new Types.ObjectId(secondBody.id) })
+      .lean()
+      .exec();
+    expect(job).toMatchObject({ status: 'SUCCEEDED', budgetVersion: 1 });
+    expect(job?.requests).toEqual([]);
+    const finalRequest = await teacherAgent
+      .post(
+        '/api/learning-tasks/submissions/' +
+          secondBody.id +
+          '/ai-feedback/request',
+      )
+      .send({ expectedRevision: edited.contentRevision })
+      .expect(200);
+    expect(finalRequest.body as RequestAiFeedbackResponse).toMatchObject({
+      jobId: requestBody.jobId,
+      status: 'SUCCEEDED',
+    });
+    console.info(
+      'Manual chain verified: publish -> submit -> no job/unlocked -> edit same attempt -> manual request -> pinned revision -> same job -> stub feedback/usage',
+    );
   });
 });

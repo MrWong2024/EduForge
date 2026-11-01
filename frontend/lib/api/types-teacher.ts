@@ -1,7 +1,3 @@
-import {
-  normalizeAiFeedbackMode,
-  type AiFeedbackMode,
-} from "@/lib/learning-tasks/ai-review";
 import { safeGet } from "@/lib/ui/format";
 import {
   readAiContextRefs,
@@ -202,7 +198,6 @@ export const CLASSROOM_TASK_STATUSES = [
 export type ClassroomTaskStatus = (typeof CLASSROOM_TASK_STATUSES)[number];
 
 export type ClassroomTaskSummary = {
-  aiFeedbackMode?: AiFeedbackMode;
   taskSnapshotAvailable?: boolean;
   rubric?: Record<string, unknown>;
   classroomTaskId?: string;
@@ -289,7 +284,6 @@ export type DashboardResponse = UnknownRecord & {
 };
 
 export type ClassroomTask = {
-  aiFeedbackMode?: AiFeedbackMode;
   taskSnapshotAvailable?: boolean;
   rubric?: Record<string, unknown>;
   id?: string;
@@ -323,7 +317,6 @@ export type PublishClassroomTaskRequest = {
   taskId: string;
   dueAt?: string;
   settings?: {
-    aiFeedbackMode?: AiFeedbackMode;
     allowLate?: boolean;
     maxAttempts?: number;
   };
@@ -1097,7 +1090,6 @@ export const toClassroomTaskSummary = (
   const settingsRecord = asRecord(safeGet(record, "settings", undefined));
 
   return {
-    aiFeedbackMode: normalizeAiFeedbackMode(settingsRecord.aiFeedbackMode),
     taskSnapshotAvailable: asBoolean(record.taskSnapshotAvailable),
     rubric:
       taskRecord.rubric &&
@@ -1141,7 +1133,6 @@ export const toClassroomTask = (payload: unknown): ClassroomTask => {
   const settingsRecord = asRecord(safeGet(record, "settings", undefined));
 
   return {
-    aiFeedbackMode: normalizeAiFeedbackMode(settingsRecord.aiFeedbackMode),
     taskSnapshotAvailable: asBoolean(record.taskSnapshotAvailable),
     rubric:
       taskRecord.rubric &&

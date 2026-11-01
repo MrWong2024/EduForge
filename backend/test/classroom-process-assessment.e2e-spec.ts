@@ -37,6 +37,7 @@ type CreatedClassroomResponse = { id: string; joinCode: string };
 type CreatedTaskResponse = { id: string };
 type CreatedClassroomTaskResponse = { id: string };
 type CreatedSubmissionResponse = {
+  contentRevision: number;
   id: string;
   attemptNo: number;
   aiFeedbackStatus: string;
@@ -99,8 +100,6 @@ describe('Classroom Process Assessment (e2e)', () => {
 
   let previousWorkerEnabled: string | undefined;
   let previousDebugEnabled: string | undefined;
-  let previousAutoOnSubmit: string | undefined;
-  let previousFirstAttemptOnly: string | undefined;
   let previousSubmissionCooldownMs: string | undefined;
 
   const teacherEmail = `teacher.process.assessment.${Date.now()}@example.com`;
@@ -136,11 +135,6 @@ describe('Classroom Process Assessment (e2e)', () => {
     process.env.AI_FEEDBACK_WORKER_ENABLED = 'false';
     previousDebugEnabled = process.env.AI_FEEDBACK_DEBUG_ENABLED;
     process.env.AI_FEEDBACK_DEBUG_ENABLED = 'true';
-    previousAutoOnSubmit = process.env.AI_FEEDBACK_AUTO_ON_SUBMIT;
-    process.env.AI_FEEDBACK_AUTO_ON_SUBMIT = 'true';
-    previousFirstAttemptOnly =
-      process.env.AI_FEEDBACK_AUTO_ON_FIRST_ATTEMPT_ONLY;
-    process.env.AI_FEEDBACK_AUTO_ON_FIRST_ATTEMPT_ONLY = 'true';
     previousSubmissionCooldownMs =
       process.env.LEARNING_TASK_SUBMISSION_COOLDOWN_MS;
     process.env.LEARNING_TASK_SUBMISSION_COOLDOWN_MS = '0';
@@ -225,17 +219,6 @@ describe('Classroom Process Assessment (e2e)', () => {
       delete process.env.AI_FEEDBACK_DEBUG_ENABLED;
     } else {
       process.env.AI_FEEDBACK_DEBUG_ENABLED = previousDebugEnabled;
-    }
-    if (previousAutoOnSubmit === undefined) {
-      delete process.env.AI_FEEDBACK_AUTO_ON_SUBMIT;
-    } else {
-      process.env.AI_FEEDBACK_AUTO_ON_SUBMIT = previousAutoOnSubmit;
-    }
-    if (previousFirstAttemptOnly === undefined) {
-      delete process.env.AI_FEEDBACK_AUTO_ON_FIRST_ATTEMPT_ONLY;
-    } else {
-      process.env.AI_FEEDBACK_AUTO_ON_FIRST_ATTEMPT_ONLY =
-        previousFirstAttemptOnly;
     }
     if (previousSubmissionCooldownMs === undefined) {
       delete process.env.LEARNING_TASK_SUBMISSION_COOLDOWN_MS;
@@ -365,14 +348,12 @@ describe('Classroom Process Assessment (e2e)', () => {
         .post(`/api/classrooms/${classroomId}/tasks`)
         .send({
           taskId: taskAId,
-          settings: { aiFeedbackMode: 'FIRST_SUBMISSION_AUTO' },
         })
         .expect(201),
       teacherAgent
         .post(`/api/classrooms/${classroomId}/tasks`)
         .send({
           taskId: taskBId,
-          settings: { aiFeedbackMode: 'FIRST_SUBMISSION_AUTO' },
         })
         .expect(201),
     ]);
@@ -421,6 +402,22 @@ describe('Classroom Process Assessment (e2e)', () => {
     const submissionA1Body = submissionA1.body as CreatedSubmissionResponse;
     const submissionA2Body = submissionA2.body as CreatedSubmissionResponse;
     submissionIds.push(submissionA1Body.id, submissionA2Body.id);
+    await studentAAgent
+      .post(
+        '/api/learning-tasks/submissions/' +
+          submissionA1Body.id +
+          '/ai-feedback/request',
+      )
+      .send({ expectedRevision: submissionA1Body.contentRevision })
+      .expect(200);
+    await studentAAgent
+      .post(
+        '/api/learning-tasks/submissions/' +
+          submissionA2Body.id +
+          '/ai-feedback/request',
+      )
+      .send({ expectedRevision: submissionA2Body.contentRevision })
+      .expect(200);
 
     const submissionA3 = await studentAAgent
       .post(

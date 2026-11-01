@@ -94,7 +94,7 @@
   - 注意：模板可见性、发布资格及本班已发布排除由后端候选接口决定，前端不自行伪造候选全集。当前候选 DTO 不提供 rubric，缺少该字段只能提示到模板详情核对，不能判断模板未配置评分参考。
 - 班级任务实例：`/teacher/classrooms/:id/tasks/page.tsx` + 发布/生命周期/编辑组件 -> `/api/proxy/classrooms/:id/tasks*`。
   - 对应后端：`GET/POST/PATCH /api/classrooms/:id/tasks*` 与 `/status`。
-  - 注意：发布表单在既有 settings 内发送所选平台 AI 模式，默认仅教师发起，保留截止/迟交/次数；发布后模式只读。列表/详情消费实例模式、快照可用性及投影教学内容，不另取当前模板覆盖。实例配置与状态动作分开发送。
+  - 注意：发布表单只发送既有截止/迟交/次数设置，不发送 AI 策略字段。列表/详情消费快照可用性及投影教学内容，不另取当前模板覆盖，不适配或展示旧策略。实例配置与状态动作分开发送；学生或教师可在提交详情主动申请 AI 反馈。
 - 课堂任务提交列表：`submissions/page.tsx` -> `/api/proxy/classrooms/:cid/tasks/:ctid/submissions`。
   - 对应后端：`GET /api/classrooms/:classroomId/tasks/:classroomTaskId/submissions`。
   - 注意：只按 `classroomTaskId` 读取，不用 `taskId` 兜底过滤。
@@ -116,7 +116,7 @@
   - 注意：消费 `participationStatus`；模板当前状态不作为前端阻断依据。
 - 学生提交：`SubmissionForm` -> `/api/proxy/classrooms/:cid/tasks/:ctid/submissions`。
   - 对应后端：`POST /api/classrooms/:classroomId/tasks/:classroomTaskId/submissions`。
-  - 注意：提交入口要求明确快照可用且后端 canSubmit=true，不以模板状态或 AI 发起权限代替提交资格。content 中的源码和可选说明原样发送；说明按 Unicode 码点校验。取得有效提交 ID 后锁住当前表单并走既有路径进入本次详情，导航恢复只打开该已保存提交，query 只用于返回导航；成功缺 ID 或网络结果未确认时先核对历史，不自动重放。按 AllExceptionsFilter 实际公开 message 局部适配已知冷却等待、关闭/缺快照和迟交原因，其他异常沿用安全通用提示；迟交、冷却和授权仍由后端最终校验。
+  - 注意：提交入口要求明确快照可用且后端 canSubmit=true，不以模板状态或 AI 发起权限代替提交资格。content 中的源码和可选说明原样发送；说明按 Unicode 码点校验。取得有效提交 ID 后锁住当前表单并走既有路径进入本次详情，导航恢复只打开该已保存提交，query 只用于返回导航；提交成功不表示 AI 已申请。成功缺 ID 或网络结果未确认时先核对历史，不自动重放。按 AllExceptionsFilter 实际公开 message 局部适配已知冷却等待、关闭/缺快照和迟交原因，其他异常沿用安全通用提示；迟交、冷却和授权仍由后端最终校验。
 - 学生 submission detail：`student/submissions/:id/page.tsx` -> `/api/proxy/learning-tasks/submissions/:id*`。
   - 对应后端：submission detail、feedback list。
   - 注意：学生任务草稿页仅显式刷新；学生提交详情仅在处理中或已安排重试时状态驱动刷新，复用现有读源，无历史详情 N+1。

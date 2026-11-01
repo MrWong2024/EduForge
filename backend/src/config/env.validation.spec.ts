@@ -98,6 +98,18 @@ describe('Mail env validation (no external I/O)', () => {
 });
 
 describe('AI Feedback env validation (no external I/O)', () => {
+  it('leaves retired automatic submission variables unknown without defaults or validation', () => {
+    expect(validate().value).not.toHaveProperty('AI_FEEDBACK_AUTO_ON_SUBMIT');
+    expect(validate().value).not.toHaveProperty(
+      'AI_FEEDBACK_AUTO_ON_FIRST_ATTEMPT_ONLY',
+    );
+    const result = validate({
+      AI_FEEDBACK_AUTO_ON_SUBMIT: 'obsolete',
+      AI_FEEDBACK_AUTO_ON_FIRST_ATTEMPT_ONLY: 'obsolete',
+    });
+    expect(result.error).toBeUndefined();
+  });
+
   it('defaults to stub without real API keys and supplies all worker defaults', () => {
     const result = validate();
 

@@ -35,11 +35,11 @@ EduForge 当前是面向教师与学生的教学任务平台，已形成以下�
 
 ## 5. 文本教学任务承载（CURRENT）
 
-首批文本教学任务承载工程范围已闭合：沿 Task → ClassroomTask → Submission → Feedback，支持固定发布内容、源码与独立说明、实例平台 AI 策略、完整文本辅助评阅及用量读取，并形成教师发布、学生提交、人工反馈和修订的真实前后端页面链。
+首批文本教学任务承载工程范围已闭合：沿 Task → ClassroomTask → Submission → Feedback，支持固定发布内容、源码与独立说明、完整文本辅助评阅及用量读取，并形成教师发布、学生提交、人工反馈和修订的真实前后端页面链。当前 AI 反馈统一由有权师生主动申请，实例策略配置已取消。
 
-- 后端合同、前端页面及对应工程验收完成；隔离数据库与合成账号的 Agent-assisted Browser smoke 使用现有 stub，代表性只读/失败恢复、草稿保护与响应式操作已闭合。
+- 原文本教学工程的后端合同、前端页面及对应工程验收完成；历史隔离数据库与合成账号的 Agent-assisted Browser smoke 使用现有 stub，代表性只读/失败恢复、草稿保护与响应式操作已闭合。该历史 UI 证据不表示本轮统一手动申请变更已重新完成真实页面验收。
 - 详细合同由 [Backend API](./handoff-backend-api-map.md)、[Backend DTO](./handoff-backend-dto-cheatsheet.md) 与 [Frontend API](./handoff-frontend-api-map.md) / [Component Map](./handoff-frontend-component-map.md) Owner 维护；证据职责及验收支持见 [Backend testing playbook](./handoff-backend-testing-playbook.md) 和 [Frontend testing playbook](./handoff-frontend-testing-playbook.md)。
-- 真实模型质量、教学可理解性及真实课堂效果尚未验证；工程完成不等于真实课堂试教通过。
+- 第14章任务的真实模型质量已有人工签收，范围由 [Backend Testing Playbook](./handoff-backend-testing-playbook.md#ai-反馈指令文本收敛与本地诊断) 维护；该结论不表示所有任务质量或真实课堂效果均已验证，工程完成不等于真实课堂试教通过。
 
 ## 6. ZIP 依赖资料接入（CURRENT）
 

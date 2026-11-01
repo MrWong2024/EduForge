@@ -1,24 +1,3 @@
-export const AI_FEEDBACK_MODES = [
-  "DISABLED",
-  "TEACHER_ONLY",
-  "MANUAL",
-  "FIRST_SUBMISSION_AUTO",
-] as const;
-export type AiFeedbackMode = (typeof AI_FEEDBACK_MODES)[number];
-export const AI_MODE_LABELS: Record<AiFeedbackMode, string> = {
-  DISABLED: "不使用平台 AI 反馈",
-  TEACHER_ONLY: "仅教师发起",
-  MANUAL: "师生手动发起",
-  FIRST_SUBMISSION_AUTO: "首次提交自动申请",
-};
-export const normalizeAiFeedbackMode = (
-  value: unknown,
-): AiFeedbackMode | undefined =>
-  AI_FEEDBACK_MODES.find((mode) => mode === value);
-export const getAiModeLabel = (value: unknown): string => {
-  const mode = normalizeAiFeedbackMode(value);
-  return mode ? AI_MODE_LABELS[mode] : "平台 AI 策略信息暂不可用";
-};
 export const getTaskSnapshotMessage = (
   available: boolean | undefined,
 ): string =>

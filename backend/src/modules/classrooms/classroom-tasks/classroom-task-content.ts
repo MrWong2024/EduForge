@@ -24,13 +24,6 @@ export function publicTaskContent(task: TaskSnapshot): PublicTaskContent {
   };
 }
 
-export enum AiFeedbackMode {
-  Disabled = 'DISABLED',
-  TeacherOnly = 'TEACHER_ONLY',
-  Manual = 'MANUAL',
-  FirstSubmissionAuto = 'FIRST_SUBMISSION_AUTO',
-}
-
 export const MISSING_TASK_SNAPSHOT_MESSAGE =
   '该课堂任务未保存发布内容，请教师重新布置后继续。';
 
@@ -48,11 +41,4 @@ export function snapshotTask(task: Task): TaskSnapshot {
     rubric:
       task.rubric === undefined ? undefined : structuredClone(task.rubric),
   };
-}
-
-export function studentCanRequestAi(mode: AiFeedbackMode | undefined): boolean {
-  return (
-    mode === AiFeedbackMode.Manual ||
-    mode === AiFeedbackMode.FirstSubmissionAuto
-  );
 }

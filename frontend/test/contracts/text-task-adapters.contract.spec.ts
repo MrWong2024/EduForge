@@ -9,7 +9,6 @@ import {
   toSubmissionDetailResponse as toTeacherDetail,
 } from "../../lib/api/types-teacher";
 import {
-  AI_FEEDBACK_MODES,
   canSubmitTextTask,
   getTaskSnapshotMessage,
 } from "../../lib/learning-tasks/ai-review";
@@ -253,46 +252,52 @@ test("allows an empty note and rejects whitespace-only source", () => {
   ).toBe("  code\n ");
 });
 
-test("consumes four real instance modes without losing existing settings", () => {
-  for (const aiFeedbackMode of AI_FEEDBACK_MODES) {
-    const payload = {
-      id: "instance",
-      taskSnapshotAvailable: true,
-      publishedAt: "2026-10-01T00:00:00.000Z",
-      dueAt: "2026-10-20T00:00:00.000Z",
-      settings: { aiFeedbackMode, allowLate: false, maxAttempts: 2 },
-      task: {
-        title: "发布标题",
-        description: "发布说明",
-        status: "ARCHIVED",
-        rubric: { dimensions: { design: 20 }, notes: "教师参考" },
-      },
-    };
-    const detail = toClassroomTask(payload),
-      list = toClassroomTaskSummary(payload);
-    expect(detail).toMatchObject({
-      aiFeedbackMode,
-      taskSnapshotAvailable: true,
-      allowLate: false,
-      maxAttempts: 2,
-      dueAt: "2026-10-20T00:00:00.000Z",
+test("keeps snapshot and submission settings without adapting a retired policy", () => {
+  const payload = {
+    id: "instance",
+    taskSnapshotAvailable: true,
+    publishedAt: "2026-10-01T00:00:00.000Z",
+    dueAt: "2026-10-20T00:00:00.000Z",
+    settings: { allowLate: false, maxAttempts: 2 },
+    task: {
       title: "发布标题",
       description: "发布说明",
+      status: "ARCHIVED",
       rubric: { dimensions: { design: 20 }, notes: "教师参考" },
-    });
-    expect(list).toMatchObject({
-      aiFeedbackMode,
-      taskSnapshotAvailable: true,
-      allowLate: false,
-      maxAttempts: 2,
-    });
-  }
+    },
+  };
+  const detail = toClassroomTask(payload),
+    list = toClassroomTaskSummary(payload);
+  expect(detail).toMatchObject({
+    taskSnapshotAvailable: true,
+    allowLate: false,
+    maxAttempts: 2,
+    dueAt: "2026-10-20T00:00:00.000Z",
+    title: "发布标题",
+    description: "发布说明",
+    rubric: { dimensions: { design: 20 }, notes: "教师参考" },
+  });
+  expect(list).toMatchObject({
+    taskSnapshotAvailable: true,
+    allowLate: false,
+    maxAttempts: 2,
+  });
+  // A residual field from another environment has no display adapter output.
+  const legacy = {
+    ...payload,
+    settings: { ...payload.settings, aiFeedbackMode: "DISABLED" },
+  };
+  expect(toClassroomTask(legacy)).not.toHaveProperty("aiFeedbackMode");
+  expect(toClassroomTaskSummary(legacy)).toEqual(list);
+  expect(
+    toMyTaskDetailResponse({ classroomTask: legacy }).classroomTask.settings,
+  ).toEqual(payload.settings);
 });
 test("requires explicit snapshot and backend submit permission, independent of AI request permission", () => {
   const detail = toMyTaskDetailResponse({
     classroomTask: {
       taskSnapshotAvailable: true,
-      settings: { aiFeedbackMode: "TEACHER_ONLY" },
+      settings: { allowLate: true, maxAttempts: 2 },
     },
     task: { status: "ARCHIVED" },
     participationStatus: {
@@ -303,7 +308,11 @@ test("requires explicit snapshot and backend submit permission, independent of A
       message: null,
     },
   });
-  expect(detail.classroomTask.settings.aiFeedbackMode).toBe("TEACHER_ONLY");
+  expect(detail.classroomTask.settings).toEqual({
+    allowLate: true,
+    maxAttempts: 2,
+  });
+  expect(detail.participationStatus?.canRequestAiFeedback).toBe(false);
   expect(
     canSubmitTextTask(
       detail.classroomTask.taskSnapshotAvailable,

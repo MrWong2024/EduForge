@@ -1,9 +1,7 @@
 import { safeGet } from "@/lib/ui/format";
 
 import {
-  normalizeAiFeedbackMode,
   toAiReview,
-  type AiFeedbackMode,
   type AiReview,
 } from "@/lib/learning-tasks/ai-review";
 
@@ -165,7 +163,6 @@ export type MyTaskDetailResponse = {
   classroomTask: UnknownRecord & {
     taskSnapshotAvailable?: boolean;
     settings: {
-      aiFeedbackMode?: AiFeedbackMode;
       allowLate?: boolean;
       maxAttempts?: number;
     };
@@ -502,7 +499,6 @@ export const toMyTaskDetailResponse = (
       taskSnapshotAvailable:
         asNullableBoolean(classroomTask.taskSnapshotAvailable) ?? undefined,
       settings: {
-        aiFeedbackMode: normalizeAiFeedbackMode(settings.aiFeedbackMode),
         allowLate: asNullableBoolean(settings.allowLate) ?? undefined,
         maxAttempts: asNumber(settings.maxAttempts),
       },

@@ -1,6 +1,5 @@
 import { AiContextReaderService } from '../ai-context/ai-context-reader.service';
 import { Enrollment } from '../../classrooms/enrollments/schemas/enrollment.schema';
-import { AiFeedbackMode } from '../../classrooms/classroom-tasks/classroom-task-content';
 import { ConfigService } from '@nestjs/config';
 import { Model, Mongoose, Schema, Types } from 'mongoose';
 import { ClassroomTask } from '../../classrooms/classroom-tasks/schemas/classroom-task.schema';
@@ -90,7 +89,7 @@ const createHarness = (
       description: 'Published description',
       knowledgeModule: 'Module',
     },
-    settings: { aiFeedbackMode: AiFeedbackMode.Manual },
+    settings: {},
   };
   const classroom = {
     _id: classroomId,
@@ -107,7 +106,7 @@ const createHarness = (
   const submissionModel = {
     findById: jest.fn(() => makeQuery(submission)),
     findOne: jest.fn(() => makeQuery(null)),
-    create: jest.fn(),
+    create: jest.fn<Promise<unknown>, [Record<string, unknown>]>(),
     findOneAndUpdate: jest.fn(() =>
       makeQuery({ ...submission, reviewStartedAt: new Date() }),
     ),
@@ -123,7 +122,6 @@ const createHarness = (
   const userModel = { findById: jest.fn(() => makeQuery(null)) };
   const aiFeedbackJobService = {
     getReviewJob: jest.fn().mockResolvedValue(null),
-    enqueue: jest.fn(),
     ensureJobForSubmission: jest.fn().mockResolvedValue({
       jobId: objectId().toString(),
       status: AiFeedbackJobStatus.Pending,
@@ -765,7 +763,9 @@ describe('LearningTasksService student participation status gates', () => {
       ),
     ).rejects.toThrow('班级已归档，不能继续提交该任务。');
     expect(harness.submissionModel.create).not.toHaveBeenCalled();
-    expect(harness.aiFeedbackJobService.enqueue).not.toHaveBeenCalled();
+    expect(
+      harness.aiFeedbackJobService.ensureJobForSubmission,
+    ).not.toHaveBeenCalled();
   });
 
   it('rejects classroom submissions for closed classroomTasks before creating submission or AI job', async () => {
@@ -782,7 +782,9 @@ describe('LearningTasksService student participation status gates', () => {
       ),
     ).rejects.toThrow('课堂任务已关闭，不能继续提交。');
     expect(harness.submissionModel.create).not.toHaveBeenCalled();
-    expect(harness.aiFeedbackJobService.enqueue).not.toHaveBeenCalled();
+    expect(
+      harness.aiFeedbackJobService.ensureJobForSubmission,
+    ).not.toHaveBeenCalled();
   });
 
   it('allows classroom submissions for archived task templates when runtime state is active', async () => {
@@ -801,7 +803,6 @@ describe('LearningTasksService student participation status gates', () => {
       meta: undefined,
       status: 'SUBMITTED',
     });
-    harness.aiFeedbackJobService.enqueue.mockResolvedValue(undefined);
 
     await expect(
       harness.service.createSubmissionForClassroomTask(
@@ -815,6 +816,12 @@ describe('LearningTasksService student participation status gates', () => {
       classroomTaskId: harness.ids.classroomTaskId.toString(),
     });
     expect(harness.submissionModel.create).toHaveBeenCalledTimes(1);
+    expect(harness.submissionModel.create.mock.calls[0][0]).not.toHaveProperty(
+      'reviewStartedAt',
+    );
+    expect(
+      harness.aiFeedbackJobService.ensureJobForSubmission,
+    ).not.toHaveBeenCalled();
   });
 });
 

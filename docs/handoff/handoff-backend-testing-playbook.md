@@ -137,7 +137,7 @@ Mongo password、production credential、Bailian API Key、SMTP password、第�
 
 - `learning-tasks/ai-context` unit 负责真实 yauzl 精确读取与顺序、路径/realpath、格式/编码/CRC、声明/实际字节保护及关闭；用固定 stdlib ZIP 夹具与已知正文作独立 expected，两个维护中的第14章教材包仅只读核验，不以 reader 输出生成 expected。
 - DTO / classroom-task-content / prompt / Processor unit 分别负责嵌套白名单及 null、快照深复制与公开投影、参考/作品分区和不可执行指令、资料错误在 stub/Provider 前终止。既有 budget/provider unit 继续证明实际 messages 计量、等于上限允许及请求预留前拒绝。
-- 扩展既有 classroom text contract 与 Bailian context HTTP E2E，证明正式 API 白名单/持久化、最终生效引用验证与无部分写入、候选快照固定、成员投影、实际 mock HTTP 请求包含多包材料、异步资料失效/输入超限及首提作品保留。它们不证明 Browser、真实模型质量或课堂效果。
+- 扩展既有 classroom text contract 与 Bailian context HTTP E2E，证明正式 API 白名单/持久化、最终生效引用验证与无部分写入、候选快照固定、成员投影、实际 mock HTTP 请求包含多包材料、异步资料失效/输入超限及作品保留。需要 Job 的正常场景在提交后由有权师生通过正式 request API 携带实际 expectedRevision 手动申请，不用自动触发或直接造 Job 代替产品链。它们不证明 Browser、真实模型质量或课堂效果。
 - 固定 ZIP 位于 `backend/test/fixtures/ai-context`；异常只作用于 spec-owned 临时目录副本，使用实例级窄范围读取根注入，不引入产品配置。HTTP 上下文继续 standard_test / APP、Worker=false、mail=log；每次消费前拒绝外来 PENDING/FAILED/RUNNING。finally 精确清理自有数据、Session、临时 ZIP、mock/Nest/DB，并验证残留；不修改真实教材或全库清空。
 
 ### AI 反馈指令、文本收敛与本地诊断
@@ -164,7 +164,7 @@ npm run browser:text-smoke -- cleanup --namespace b1-2-<unique> --confirm-namesp
 ```
 
 - 每次调用为独立进程，仅读取 `backend/.env.browser-acceptance`，复用既有环境构造、用途/URI 声明门禁和连接后实际库名门禁；再核对实际 APP/ADMIN 数据库角色。完整数据库映射仍归 Config Matrix。
-- `prepare` 只通过当前 UserSchema 和密码 helper seed namespace 专属 teacher/student；固定合成应用密码由脚本测试常量统一维护。课程、班级、四个不同已发布私有模板及入班走前端同源 BFF 的正式 HTTP API。课堂发布、作品提交、产品 AI 申请和教师反馈留给真实 Browser。
+- `prepare` 只通过当前 UserSchema 和密码 helper seed namespace 专属 teacher/student；固定合成应用密码由脚本测试常量统一维护。课程、班级、四个不同已发布私有模板及入班走前端同源 BFF 的正式 HTTP API；模板数量、标题及 ownership 由脚本本地稳定 fixture 标识维护，不依赖业务策略枚举；旧策略标题仅作为历史 namespace 的精确 cleanup 兼容标识，不用于 inspect/process。课堂发布、作品提交、产品 AI 申请和教师反馈留给真实 Browser。
 - `inspect --prepared` 只读核验账号固定值及最小前置；普通 `inspect` 读取 ownership 限定的资源、保存原文版本及 Job/反馈终态。异常前置不自动修复。确需替换时显式运行 `npm run browser:text-smoke -- replace --namespace b1-2-<unique> --confirm-namespace b1-2-<unique>`：先清理并核对旧残留，再重新准备；不得手工改密码或业务状态绕过核验。
 - `process-ai` 在 APP/ADMIN 声明门禁通过后才动态导入 AppModule，以 `createApplicationContext` 启动且不 listen；实际 ConfigService 必须为 Browser 用途、stub、worker=false、debug=false，实际数据库名和 APP 角色也须匹配。正常索引初始化仍可能写入数据库。
 - 处理前核对 Job→Submission→ClassroomTask→合成师生/班级的完整 ownership；全库 PENDING/FAILED/RUNNING 必须恰好只有目标，且为 budgetVersion=1、PENDING、attempts=0。外来、多目标或 legacy 非终态立即拒绝，不修改它们。随后只调用真实 `AiFeedbackProcessor.processOnce(1)` 一次，读取该目标及实际 stub 反馈核对结果，finally 等待上下文关闭。

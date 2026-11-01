@@ -18,10 +18,7 @@ import {
 } from "@/lib/api/types-teacher";
 import { getMe } from "@/lib/auth/session";
 import { normalizeTaskCourseLabel } from "@/lib/learning-tasks/course-labels";
-import {
-  getAiModeLabel,
-  getTaskSnapshotMessage,
-} from "@/lib/learning-tasks/ai-review";
+import { getTaskSnapshotMessage } from "@/lib/learning-tasks/ai-review";
 import { paths } from "@/lib/routes/paths";
 import { getCommonErrorSummary } from "@/lib/ui/status";
 import {
@@ -438,7 +435,7 @@ export default async function ClassroomTasksPage({
             <thead className="bg-zinc-50 text-left text-zinc-600">
               <tr>
                 <th className="px-4 py-3">任务标题</th>
-                <th className="px-4 py-3">平台 AI / 发布内容</th>
+                <th className="px-4 py-3">发布内容</th>
                 <th className="px-4 py-3">截止时间</th>
                 <th className="px-4 py-3">允许迟交</th>
                 <th className="px-4 py-3">最大尝试次数</th>
@@ -493,7 +490,6 @@ export default async function ClassroomTasksPage({
                       </div>
                     </td>
                     <td className="px-4 py-3">
-                      <p>{getAiModeLabel(task.aiFeedbackMode)}</p>
                       <p className="mt-1 max-w-xs whitespace-normal break-words text-xs text-zinc-500">
                         {getTaskSnapshotMessage(task.taskSnapshotAvailable)}
                       </p>

@@ -124,8 +124,6 @@ Mock Bailian 等测试组合的执行方案见 [Backend Testing Playbook](./hand
 | `AI_FEEDBACK_MAX_OUTPUT_TOKENS` | `2048` | Joi / Provider fallback | 上游 max_tokens；整数 `256..4096`。 |
 | `AI_FEEDBACK_MAX_CONCURRENCY`                  | `2`                                                 | Joi                                                  | 进程级并发上限；整数，范围 `1..20`。                                                              |
 | `AI_FEEDBACK_MAX_PER_CLASSROOMTASK_PER_MINUTE` | `30`                                                | Joi                                                  | 每 `classroomTaskId` 的本地软限流；整数，范围 `1..600`。                                             |
-| `AI_FEEDBACK_AUTO_ON_SUBMIT`                   | `true`                                              | Joi                                                  | 仅允许具备 FIRST_SUBMISSION_AUTO 策略的实例首提尝试创建 AI Job。                                                 |
-| `AI_FEEDBACK_AUTO_ON_FIRST_ATTEMPT_ONLY`       | `true`                                              | Joi                                                  | 兼容旧首提配置；false 不能将实例首提自动模式扩大到每次提交。                                           |
 | `AI_FEEDBACK_MAX_ITEMS`                        | `2`                                                 | Joi                                                  | 每次保存反馈条目上限；允许范围 `1..10`。                                        |
 | `LEARNING_TASK_SUBMISSION_COOLDOWN_MS`         | `300000`                                            | Joi                                                  | 学生提交冷却窗口（ms）；按同一 student + classroomTask 判定，`0` 表示关闭冷却。 |
 | `AI_FEEDBACK_DEBUG_ENABLED`                    | `false`                                             | Joi                                                  | debug/ops 配置开关；职责见第 3 节。                                                            |
@@ -153,21 +151,13 @@ Bailian 固定使用非流式、请求体顶层 `enable_thinking:true` 与 `max_
 - 真实 SMTP 密码与 AI Key 只通过 env 提供，example 只保留占位符，不提交 secret。
 - Mail 发送、transport 与日志行为由 [Backend Service Map](./handoff-backend-service-map.md) 维护。
 
-## 5) AI 入队触发策略（attempt-based）组合语义
+## 5) AI 请求与退役配置
 
-以下组合控制新提交自动 enqueue；实例模式由发布确定，默认值/值域见 [DTO ClassroomTask](./handoff-backend-dto-cheatsheet.md#classroomtask-dto--response-family)，手动授权见 API Owner。只有 FIRST_SUBMISSION_AUTO 且 attemptNo=1 才可能自动入队，其它实例模式不被全局开关覆盖。默认值见第 4 节。
-
-| `AI_FEEDBACK_AUTO_ON_SUBMIT` | `AI_FEEDBACK_AUTO_ON_FIRST_ATTEMPT_ONLY` | 自动入队配置效果 |
-|---|---|---|
-| `true` | `true` | FIRST_SUBMISSION_AUTO 实例仅首提自动入队。 |
-| `true` | `false` | 仍只允许 FIRST_SUBMISSION_AUTO 实例首提，不能扩大为每次入队。 |
-| `false` | 任意 | 不自动入队；不影响独立的手工入队方式。 |
-
-未触发自动入队不表示配置异常；具体公开状态投影见 [DTO / Public Data Contract Cheatsheet](./handoff-backend-dto-cheatsheet.md)。
+AI Job 统一由有权师生正式手动申请，提交本身不触发入队。`AI_FEEDBACK_AUTO_ON_SUBMIT` 与 `AI_FEEDBACK_AUTO_ON_FIRST_ATTEMPT_ONLY` 已退役，不再运行读取或 Joi 声明；真实环境中残留旧值不能恢复自动入队，不因此改变通用 unknown 配置策略或增加启动失败条件。产品授权见 [API Learning Tasks](./handoff-backend-api-map.md#learning-tasks)，公开状态见 [DTO / Public Data Contract Cheatsheet](./handoff-backend-dto-cheatsheet.md)。
 
 ## 6) 护栏配置建议范围
 
-下表仅维护配置级运维建议；变量默认值与合法范围统一见第 4 节，自动入队组合见第 5 节。
+下表仅维护配置级运维建议；变量默认值与合法范围统一见第 4 节。
 
 | 护栏项 | 变量 | 建议范围（交付运维） |
 |---|---|---|

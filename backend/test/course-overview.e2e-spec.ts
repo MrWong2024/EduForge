@@ -98,8 +98,6 @@ describe('Course Overview (e2e)', () => {
 
   let previousWorkerEnabled: string | undefined;
   let previousDebugEnabled: string | undefined;
-  let previousAutoOnSubmit: string | undefined;
-  let previousFirstAttemptOnly: string | undefined;
 
   const teacherEmail = `teacher.course.overview.${Date.now()}@example.com`;
   const studentAEmail = `studentA.course.overview.${Date.now()}@example.com`;
@@ -132,11 +130,6 @@ describe('Course Overview (e2e)', () => {
     process.env.AI_FEEDBACK_WORKER_ENABLED = 'false';
     previousDebugEnabled = process.env.AI_FEEDBACK_DEBUG_ENABLED;
     process.env.AI_FEEDBACK_DEBUG_ENABLED = 'true';
-    previousAutoOnSubmit = process.env.AI_FEEDBACK_AUTO_ON_SUBMIT;
-    process.env.AI_FEEDBACK_AUTO_ON_SUBMIT = 'true';
-    previousFirstAttemptOnly =
-      process.env.AI_FEEDBACK_AUTO_ON_FIRST_ATTEMPT_ONLY;
-    process.env.AI_FEEDBACK_AUTO_ON_FIRST_ATTEMPT_ONLY = 'false';
 
     const moduleFixture: TestingModule = await Test.createTestingModule({
       imports: [AppModule],
@@ -213,17 +206,6 @@ describe('Course Overview (e2e)', () => {
       delete process.env.AI_FEEDBACK_DEBUG_ENABLED;
     } else {
       process.env.AI_FEEDBACK_DEBUG_ENABLED = previousDebugEnabled;
-    }
-    if (previousAutoOnSubmit === undefined) {
-      delete process.env.AI_FEEDBACK_AUTO_ON_SUBMIT;
-    } else {
-      process.env.AI_FEEDBACK_AUTO_ON_SUBMIT = previousAutoOnSubmit;
-    }
-    if (previousFirstAttemptOnly === undefined) {
-      delete process.env.AI_FEEDBACK_AUTO_ON_FIRST_ATTEMPT_ONLY;
-    } else {
-      process.env.AI_FEEDBACK_AUTO_ON_FIRST_ATTEMPT_ONLY =
-        previousFirstAttemptOnly;
     }
 
     const cleanupErrors: unknown[] = [];

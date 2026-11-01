@@ -44,18 +44,6 @@ export class AiFeedbackJobService {
     private readonly aiFeedbackJobModel: Model<AiFeedbackJob>,
   ) {}
 
-  async enqueue(submission: Submission & { _id: Types.ObjectId }) {
-    try {
-      return await this.ensureJobForSubmission(submission);
-    } catch (error) {
-      this.logger.error(
-        `Failed to enqueue AiFeedbackJob for submissionId=${submission._id.toString()}`,
-        error as Error,
-      );
-      return null;
-    }
-  }
-
   async ensureJobForSubmission(
     submission: Submission & { _id: Types.ObjectId },
   ): Promise<AiFeedbackJobEnsureResult> {

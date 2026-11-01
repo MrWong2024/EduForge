@@ -1,5 +1,4 @@
 import { AiContextReaderService } from '../../../learning-tasks/ai-context/ai-context-reader.service';
-import { AiFeedbackMode } from '../classroom-task-content';
 import { Model, Types } from 'mongoose';
 import { Classroom, ClassroomStatus } from '../../schemas/classroom.schema';
 import { Course } from '../../../courses/schemas/course.schema';
@@ -136,7 +135,7 @@ const createHarness = (options: HarnessOptions = {}) => {
       description: 'Published description',
       knowledgeModule: 'Module',
     },
-    settings: { aiFeedbackMode: AiFeedbackMode.Manual },
+    settings: {},
   };
   const task = {
     _id: taskId,

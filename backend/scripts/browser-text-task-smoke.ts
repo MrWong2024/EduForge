@@ -61,9 +61,32 @@ import {
   AiFeedbackJobSchema,
   AiFeedbackJobStatus,
 } from '../src/modules/learning-tasks/ai-feedback/schemas/ai-feedback-job.schema';
-import { AiFeedbackMode } from '../src/modules/classrooms/classroom-tasks/classroom-task-content';
 
 export const SYNTHETIC_PASSWORD = '12345678';
+export const SMOKE_TASK_KEYS = [
+  'EDIT',
+  'AI_REQUEST',
+  'TEACHER_REVIEW',
+  'REVISION',
+];
+
+export function isSmokeTaskTitle(
+  title: string,
+  namespace: string,
+  cleanupLegacy = false,
+): boolean {
+  // Old titles identify historical owned namespaces only during cleanup.
+  const keys = cleanupLegacy
+    ? [
+        ...SMOKE_TASK_KEYS,
+        'DISABLED',
+        'TEACHER_ONLY',
+        'MANUAL',
+        'FIRST_SUBMISSION_AUTO',
+      ]
+    : SMOKE_TASK_KEYS;
+  return keys.some((key) => title === namespace + ' ' + key);
+}
 export const SMOKE_MATERIALS = {
   A: {
     codeText:
@@ -102,10 +125,7 @@ type ClassroomRow = IdRow &
     'courseId' | 'teacherId' | 'studentIds' | 'name' | 'joinCode'
   >;
 type ClassroomTaskRow = IdRow &
-  Pick<
-    ClassroomTask,
-    'classroomId' | 'taskId' | 'createdBy' | 'settings' | 'status'
-  >;
+  Pick<ClassroomTask, 'classroomId' | 'taskId' | 'createdBy' | 'status'>;
 type SubmissionRow = IdRow &
   Pick<
     Submission,
@@ -285,7 +305,11 @@ function models(connection: Connection) {
     enrollments: connection.model(Enrollment.name, EnrollmentSchema),
   };
 }
-async function inventory(connection: Connection, record: SmokeRecord) {
+async function inventory(
+  connection: Connection,
+  record: SmokeRecord,
+  cleanupLegacy = false,
+) {
   const m = models(connection);
   const teacherId = new Types.ObjectId(record.teacherId);
   const studentId = new Types.ObjectId(record.studentId);
@@ -318,7 +342,6 @@ async function inventory(connection: Connection, record: SmokeRecord) {
     .lean<ClassroomRow[]>()
     .maxTimeMS(5000)
     .exec();
-  const modes = Object.values(AiFeedbackMode);
   if (
     courses.some(
       (row) =>
@@ -326,8 +349,7 @@ async function inventory(connection: Connection, record: SmokeRecord) {
         (record.courseId && row._id.toString() !== record.courseId),
     ) ||
     tasks.some(
-      (row) =>
-        !modes.some((mode) => row.title === record.namespace + ' ' + mode),
+      (row) => !isSmokeTaskTitle(row.title, record.namespace, cleanupLegacy),
     ) ||
     classrooms.some(
       (row) =>
@@ -346,7 +368,7 @@ async function inventory(connection: Connection, record: SmokeRecord) {
         { taskId: { $in: taskIds } },
       ],
     })
-    .select('_id classroomId taskId createdBy settings status')
+    .select('_id classroomId taskId createdBy status')
     .lean<ClassroomTaskRow[]>()
     .maxTimeMS(5000)
     .exec();
@@ -609,9 +631,9 @@ async function prepare(
     });
     record.classroomId = stringField(classroom, 'id');
     saveRecord(record);
-    for (const mode of Object.values(AiFeedbackMode)) {
+    for (const fixtureKey of SMOKE_TASK_KEYS) {
       const task = await request('learning-tasks/tasks', {
-        title: namespace + ' ' + mode,
+        title: namespace + ' ' + fixtureKey,
         description:
           '合成编程任务：将数组求和逻辑拆为 sum.js 与 main.js 两个 FILE 片段；提交独立说明并按教师意见修订。此材料仅用于工程验收。',
         knowledgeModule: '合成数组与函数',
@@ -661,7 +683,7 @@ async function inspect(
     if (
       owned.courses.length !== 1 ||
       owned.classrooms.length !== 1 ||
-      owned.tasks.length !== 4 ||
+      owned.tasks.length !== SMOKE_TASK_KEYS.length ||
       owned.tasks.some(
         (task) =>
           task.status !== TaskStatus.Published || task.visibility !== 'PRIVATE',
@@ -691,7 +713,6 @@ async function inspect(
         })),
         classroomTasks: owned.classroomTasks.map((row) => ({
           id: row._id.toString(),
-          mode: row.settings?.aiFeedbackMode,
           status: row.status,
         })),
       },
@@ -736,7 +757,7 @@ async function cleanup(
   connection: Connection,
   record: SmokeRecord,
 ): Promise<void> {
-  const owned = await inventory(connection, record);
+  const owned = await inventory(connection, record, true);
   if (owned.jobs.some((job) => job.status === AiFeedbackJobStatus.Running))
     fail('SMOKE_IN_FLIGHT_JOB_REFUSES_CLEANUP');
   const strings = (rows: IdRow[]) => rows.map((row) => row._id.toString());
@@ -771,7 +792,7 @@ async function cleanup(
       .deleteMany(filters.sessions, { maxTimeMS: 5000 });
   await owned.m.users.deleteMany(filters.users).maxTimeMS(5000).exec();
   await inspect(connection, record);
-  const residual = await inventory(connection, record);
+  const residual = await inventory(connection, record, true);
   if (
     residual.users.length ||
     residual.courses.length ||

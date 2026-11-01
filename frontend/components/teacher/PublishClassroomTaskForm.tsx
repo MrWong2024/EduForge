@@ -16,12 +16,6 @@ import {
   TASK_COURSE_LABEL_UNCLASSIFIED,
   toTaskCourseLabelDisplayText,
 } from "@/lib/learning-tasks/course-labels";
-import {
-  AI_FEEDBACK_MODES,
-  AI_MODE_LABELS,
-  normalizeAiFeedbackMode,
-  type AiFeedbackMode,
-} from "@/lib/learning-tasks/ai-review";
 import { paths } from "@/lib/routes/paths";
 import { buildQueryString, getPublisherLabel } from "@/lib/ui/format";
 
@@ -188,8 +182,6 @@ export function PublishClassroomTaskForm({
   );
   const [dueAt, setDueAt] = useState<string>("");
   const [isDueAtPickerActive, setIsDueAtPickerActive] = useState(false);
-  const [aiFeedbackMode, setAiFeedbackMode] =
-    useState<AiFeedbackMode>("TEACHER_ONLY");
   const [allowLate, setAllowLate] = useState<boolean>(true);
   const [maxAttempts, setMaxAttempts] = useState<string>("");
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -523,7 +515,6 @@ export function PublishClassroomTaskForm({
 
       const settings: NonNullable<PublishClassroomTaskRequest["settings"]> = {
         allowLate,
-        aiFeedbackMode,
       };
       if (typeof parsedMaxAttempts === "number") {
         settings.maxAttempts = parsedMaxAttempts;
@@ -886,36 +877,10 @@ export function PublishClassroomTaskForm({
           </label>
         </div>
 
-        <div className="space-y-2 text-sm">
-          <label className="block" htmlFor="publish-ai-mode">
-            平台 AI 反馈策略
-          </label>
-          <select
-            id="publish-ai-mode"
-            value={aiFeedbackMode}
-            onChange={(event) =>
-              setAiFeedbackMode(
-                normalizeAiFeedbackMode(event.target.value) ?? "TEACHER_ONLY",
-              )
-            }
-            className="w-full rounded-md border border-zinc-300 px-3 py-2"
-          >
-            {AI_FEEDBACK_MODES.map((mode) => (
-              <option key={mode} value={mode}>
-                {AI_MODE_LABELS[mode]}
-              </option>
-            ))}
-          </select>
-          <p className="text-xs text-zinc-600">
-            发布后的策略只读。这里只控制 EduForge 平台 AI 反馈，外部 AI
-            是否允许使用仍由具体学习任务规定。
-          </p>
-          {aiFeedbackMode === "FIRST_SUBMISSION_AUTO" ? (
-            <p className="text-xs text-zinc-600">
-              首次提交自动申请依赖系统开启自动处理；后续可按权限手动申请，不保证自动生成成功。
-            </p>
-          ) : null}
-        </div>
+        <p className="text-xs text-zinc-600">
+          学生或教师可在提交详情主动申请 AI 反馈。外部 AI
+          是否允许使用仍由具体学习任务规定。
+        </p>
 
         <label className="flex items-center gap-2 text-sm text-zinc-700">
           <input

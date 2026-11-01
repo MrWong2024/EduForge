@@ -37,6 +37,7 @@ type CreatedClassroomResponse = { id: string; joinCode: string };
 type CreatedTaskResponse = { id: string };
 type CreatedClassroomTaskResponse = { id: string };
 type CreatedSubmissionResponse = {
+  contentRevision: number;
   id: string;
   attemptNo: number;
   aiFeedbackStatus: string;
@@ -111,8 +112,6 @@ describe('Classroom Student Task Detail (e2e)', () => {
 
   let previousWorkerEnabled: string | undefined;
   let previousDebugEnabled: string | undefined;
-  let previousAutoOnSubmit: string | undefined;
-  let previousFirstAttemptOnly: string | undefined;
   let previousSubmissionCooldownMs: string | undefined;
 
   const teacherEmail = `teacher.student.detail.${Date.now()}@example.com`;
@@ -150,11 +149,6 @@ describe('Classroom Student Task Detail (e2e)', () => {
     process.env.AI_FEEDBACK_WORKER_ENABLED = 'false';
     previousDebugEnabled = process.env.AI_FEEDBACK_DEBUG_ENABLED;
     process.env.AI_FEEDBACK_DEBUG_ENABLED = 'true';
-    previousAutoOnSubmit = process.env.AI_FEEDBACK_AUTO_ON_SUBMIT;
-    process.env.AI_FEEDBACK_AUTO_ON_SUBMIT = 'true';
-    previousFirstAttemptOnly =
-      process.env.AI_FEEDBACK_AUTO_ON_FIRST_ATTEMPT_ONLY;
-    process.env.AI_FEEDBACK_AUTO_ON_FIRST_ATTEMPT_ONLY = 'true';
     previousSubmissionCooldownMs =
       process.env.LEARNING_TASK_SUBMISSION_COOLDOWN_MS;
     process.env.LEARNING_TASK_SUBMISSION_COOLDOWN_MS = '0';
@@ -247,7 +241,7 @@ describe('Classroom Student Task Detail (e2e)', () => {
 
     const createdClassroomTask = await teacherAgent
       .post(`/api/classrooms/${classroomId}/tasks`)
-      .send({ taskId, settings: { aiFeedbackMode: 'FIRST_SUBMISSION_AUTO' } })
+      .send({ taskId })
       .expect(201);
     classroomTaskId = (
       createdClassroomTask.body as CreatedClassroomTaskResponse
@@ -269,17 +263,6 @@ describe('Classroom Student Task Detail (e2e)', () => {
       delete process.env.AI_FEEDBACK_DEBUG_ENABLED;
     } else {
       process.env.AI_FEEDBACK_DEBUG_ENABLED = previousDebugEnabled;
-    }
-    if (previousAutoOnSubmit === undefined) {
-      delete process.env.AI_FEEDBACK_AUTO_ON_SUBMIT;
-    } else {
-      process.env.AI_FEEDBACK_AUTO_ON_SUBMIT = previousAutoOnSubmit;
-    }
-    if (previousFirstAttemptOnly === undefined) {
-      delete process.env.AI_FEEDBACK_AUTO_ON_FIRST_ATTEMPT_ONLY;
-    } else {
-      process.env.AI_FEEDBACK_AUTO_ON_FIRST_ATTEMPT_ONLY =
-        previousFirstAttemptOnly;
     }
     if (previousSubmissionCooldownMs === undefined) {
       delete process.env.LEARNING_TASK_SUBMISSION_COOLDOWN_MS;
@@ -352,7 +335,15 @@ describe('Classroom Student Task Detail (e2e)', () => {
       firstSubmission.body as CreatedSubmissionResponse;
     submissionIds.push(firstSubmissionBody.id);
     expect(firstSubmissionBody.attemptNo).toBe(1);
-    expect(firstSubmissionBody.aiFeedbackStatus).toBe('PENDING');
+    expect(firstSubmissionBody.aiFeedbackStatus).toBe('NOT_REQUESTED');
+    await studentAgent
+      .post(
+        '/api/learning-tasks/submissions/' +
+          firstSubmissionBody.id +
+          '/ai-feedback/request',
+      )
+      .send({ expectedRevision: firstSubmissionBody.contentRevision })
+      .expect(200);
 
     await aiFeedbackProcessor.processOnce(5);
 

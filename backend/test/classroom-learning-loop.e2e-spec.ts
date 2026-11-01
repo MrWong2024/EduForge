@@ -48,6 +48,7 @@ type CreatedClassroomTaskResponse = {
 };
 
 type CreatedSubmissionResponse = {
+  contentRevision: number;
   id: string;
   attemptNo: number;
   aiFeedbackStatus?: string;
@@ -283,7 +284,6 @@ describe('Classroom Learning Loop (e2e)', () => {
         settings: {
           allowLate: false,
           maxAttempts: 2,
-          aiFeedbackMode: 'FIRST_SUBMISSION_AUTO',
         },
       })
       .expect(201);
@@ -313,6 +313,14 @@ describe('Classroom Learning Loop (e2e)', () => {
     expect(typeof submissionBody.id).toBe('string');
     expect(submissionBody.attemptNo).toBe(1);
     submissionId = submissionBody.id;
+    await studentAgent
+      .post(
+        '/api/learning-tasks/submissions/' +
+          submissionBody.id +
+          '/ai-feedback/request',
+      )
+      .send({ expectedRevision: submissionBody.contentRevision })
+      .expect(200);
 
     await aiFeedbackProcessor.processOnce();
 

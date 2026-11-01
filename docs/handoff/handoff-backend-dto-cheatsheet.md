@@ -123,11 +123,11 @@ my-task-detail 另稳定返回 `participationStatus={readOnly,canSubmit,canReque
 
 | `reason` | `readOnly` | `canSubmit / canRequestAiFeedback` | `message` |
 | --- | --- | --- | --- |
-| `ACTIVE` | 有快照时 false，否则 true | 有快照可提交；AI 还需学生可用模式 | null |
+| `ACTIVE` | 有快照时 false，否则 true | 有快照时均 true，否则均 false | null |
 | `CLASSROOM_NOT_ACTIVE` | true | false / false | 班级已归档或不可参与，仅可查看历史提交与反馈。 |
 | `CLASSROOM_TASK_NOT_ACTIVE` | true | false / false | 课堂任务已关闭或不可参与，仅可查看历史提交与反馈。 |
 
-班级/实例 ACTIVE 时，有快照且模式为 MANUAL / FIRST_SUBMISSION_AUTO 才 canRequestAiFeedback=true；缺快照 canSubmit/canRequestAiFeedback 均 false。reason/message 的班级/实例含义与优先级不变，模式本身说明 AI 策略限制。这些值是展示信号；动作授权边界、原因优先级和模板兼容行为见 [API Classroom Tasks](./handoff-backend-api-map.md#classroom-tasksclassrooms-子资源)。
+班级/实例 ACTIVE 且有快照时，canSubmit/canRequestAiFeedback 均为 true；缺快照时均为 false。旧策略字段缺失或残留均不影响投影。这些值是展示信号；动作授权边界、原因优先级和模板兼容行为见 [API Classroom Tasks](./handoff-backend-api-map.md#classroom-tasksclassrooms-子资源)。
 
 ## Classroom Tasks（Classrooms 子资源）
 
@@ -137,7 +137,7 @@ my-task-detail 另稳定返回 `participationStatus={readOnly,canSubmit,canReque
 
 | DTO | 字段合同 |
 | --- | --- |
-| `CreateClassroomTaskDto` | 必填 `taskId`（MongoId）；可选 `dueAt`（DateString）；可选 nested `settings` 用 `ValidateNested + Type`，其中 `allowLate?` 为 Boolean，`maxAttempts?` 为整数且 >=1；`aiFeedbackMode?` 为 DISABLED / TEACHER_ONLY / MANUAL / FIRST_SUBMISSION_AUTO，省略默认 TEACHER_ONLY，显式 null 或非法值为 400。发布请求不能指定 taskSnapshot。 |
+| `CreateClassroomTaskDto` | 必填 `taskId`（MongoId）；可选 `dueAt`（DateString）；可选 nested `settings` 用 `ValidateNested + Type`，仅接受 `allowLate?`（Boolean）、`maxAttempts?`（整数且 >=1）。`settings.aiFeedbackMode` 已退役，夹带任何值（包括 MANUAL）均由严格白名单返回 400；不保存默认策略或替代字段。发布请求不能指定 taskSnapshot。 |
 | `UpdateClassroomTaskDto` | 至少一个扁平字段：`dueAt?`（DateString，null/空字符串清空）、`allowLate?`（Boolean，null 不合法）、`maxAttempts?`（整数 >=1，null/空字符串清空）。不接受 `taskId/classroomId/publishedAt/createdBy/status/taskSnapshot/aiFeedbackMode` 或 nested `settings`。 |
 | `UpdateClassroomTaskStatusDto` | 必填 `status`，`IsIn` 值域 `ACTIVE \| CLOSED \| RECALLED`。允许值不等同于允许状态转换，见 API Owner。 |
 | [QueryClassroomTaskDto](../../backend/src/modules/classrooms/classroom-tasks/dto/query-classroom-task.dto.ts) | 分页校验；可选 `status` 使用 `TaskStatus`（`DRAFT \| PUBLISHED \| ARCHIVED`），不要误当为实例状态筛选枚举。 |
@@ -152,7 +152,8 @@ my-task-detail 另稳定返回 `participationStatus={readOnly,canSubmit,canReque
 
 - `status: ACTIVE | CLOSED | RECALLED`；普通列表/详情与 my-task-detail 对旧数据缺省按 ACTIVE 兼容输出。
 - `taskPublisher: {id,name?} | null` 来自模板发布者，安全字段仅 id/name。
-- `task={title,description,knowledgeModule,courseLabel?,difficulty?,rubric?,status}`；教学字段取实际快照，缺快照旧实例只作当前模板投影，不能称为发布原文。`status` 仍为当前模板资产状态。`taskSnapshotAvailable:boolean` 仅有实际快照时为 true；`settings.aiFeedbackMode` 返回实例模式，旧记录缺省只读投影为 TEACHER_ONLY。
+- `task={title,description,knowledgeModule,courseLabel?,difficulty?,rubric?,status}`；教学字段取实际快照，缺快照旧实例只作当前模板投影，不能称为发布原文。`status` 仍为当前模板资产状态。`taskSnapshotAvailable:boolean` 仅有实际快照时为 true。
+- 公开 `settings` 仅白名单投影 `allowLate/maxAttempts`，保留原有缺省/可选语义；Mongo Mixed 中残留的旧策略或其它内部字段均不展开透出。发布返回、教师列表/详情及学生详情使用同一公开边界；GET 不回填、不清理、不更新时间戳。
 - 发布候选的 Query / response 与 Task 模板 family 共用，见[发布候选模板](#发布候选模板)。
 
 ### Submission request / response family
@@ -167,7 +168,7 @@ my-task-detail 另稳定返回 `participationStatus={readOnly,canSubmit,canReque
 - `editing.reason`：可编辑时 null；稳定阻断值为 `INVALID_STATE | REVIEW_STARTED | NOT_OWNER | CLASSROOM_TASK_REQUIRED | CLASSROOM_TASK_UNAVAILABLE | TASK_MISMATCH | SNAPSHOT_MISSING | ENROLLMENT_INACTIVE | CLASSROOM_UNAVAILABLE | CLASSROOM_ARCHIVED | CLASSROOM_TASK_CLOSED | DEADLINE_PASSED | UNAVAILABLE`。客户端仅在有效 revision 且明确 canEdit=true 时开入口，资格不等同于 AI 申请资格。
 - `submittedAt/createdAt/isLate/lateBySeconds` 始终保留首次提交事实；`lastEditedAt/lastEditIsLate` 仅由实际内容保存成对更新，按保存时当前 dueAt/allowLate 判定。`updatedAt` 不是内容修改时间；`reviewStartedAt` 表示正式受理评阅，之后不自动清除，不表示 Feedback/Job 已创建。
 - 版本/评阅状态冲突及反馈幂等 payload 不一致返回 409。正式 HTTP 沿用全局错误响应 `{statusCode,timestamp,path,message}`，不透传 Service 异常中的内部 code/reason；客户端按已知 message 并读取权威详情核对原因。拒绝和恢复流程见 Service Owner。
-- `aiFeedbackStatus` 值域 `NOT_REQUESTED | PENDING | RUNNING | SUCCEEDED | FAILED | DEAD`，无 job 显式返回 `NOT_REQUESTED`。后续 attempt 尚未手工 request 时也可能合法地为 NOT_REQUESTED。
+- `aiFeedbackStatus` 值域 `NOT_REQUESTED | PENDING | RUNNING | SUCCEEDED | FAILED | DEAD`，无 job 显式返回 `NOT_REQUESTED`。首提与后续 attempt 在尚无手工 request 或其它既有评阅事实时均为 NOT_REQUESTED，不因提交自动进入评阅。
 - 详情新增 `aiReview={provider,canRequest,requestBlockReason,failure,retryScheduled,nextRetryAt,inputCoverage,usage}`：
   - provider 为 `bailian | stub | null`；canRequest 仅表示当前用户符合 A1 申请资格且尚无 Job，允许时 requestBlockReason=null，否则为安全中文原因。授权及 POST 幂等合同见 API Owner。
   - failure 为 null 或 `{code,message}`；code 白名单为 `AI_CONTEXT_UNAVAILABLE | AI_CONTEXT_LIMIT_EXCEEDED | INPUT_BUDGET_EXCEEDED | OUTPUT_LIMIT_REACHED | PROVIDER_CONFIGURATION | RATE_LIMITED | UPSTREAM_UNAVAILABLE | INVALID_RESPONSE | TASK_INELIGIBLE | LEGACY_JOB_UNSUPPORTED | INTERNAL_ERROR`。message 为服务端安全中文，不返回 lastError、堆栈、上游原文或连接信息。输入超限文案为“作业已保存，完整内容超过 AI 输入限额，本次未生成 AI 反馈。”；次数耗尽保留最后原因。
@@ -191,7 +192,7 @@ my-task-detail 另稳定返回 `participationStatus={readOnly,canSubmit,canReque
 
 顶层返回 `{classroom,classroomTask,task,me,submissions,latest,completionStatus,participationStatus}`：
 
-- `classroom={id,name,courseId,status}`；`classroomTask={id,classroomId,taskId,taskSnapshotAvailable,status,publishedAt,dueAt?,settings?}`（settings 含 aiFeedbackMode）；`task={id,title,description,knowledgeModule,courseLabel?,difficulty?,rubric?,status}`；`me={studentId}`。
+- `classroom={id,name,courseId,status}`；`classroomTask={id,classroomId,taskId,taskSnapshotAvailable,status,publishedAt,dueAt?,settings?}`（settings 使用上述 allowLate/maxAttempts 白名单）；`task={id,title,description,knowledgeModule,courseLabel?,difficulty?,rubric?,status}`；`me={studentId}`。
 - `submissions[]`：`{id,attemptNo,createdAt,aiFeedbackStatus,feedbackSummary,feedbackItems?}`。
 - `latest`：`{submissionId,attemptNo,aiFeedbackStatus,feedbackSummary,feedbackItems?} | null`；未提交时为 null。
 - `feedbackSummary={totalItems,topTags,severityBreakdown}`，只统计 AI 反馈；`topTags` 为 `{tag,count}[]`；`severityBreakdown={INFO,WARN,ERROR}`。空摘要为总量 0、tags 空数组、三类严重程度计数 0。

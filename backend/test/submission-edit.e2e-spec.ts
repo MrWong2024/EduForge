@@ -91,7 +91,7 @@ describe('B1-2 submission content edits and review admission (HTTP)', () => {
   const instanceUrl = (id: string) =>
     '/api/classrooms/' + classroom.id + '/tasks/' + id;
 
-  const publish = async (mode = 'TEACHER_ONLY') => {
+  const publish = async () => {
     const task = (
       await teacher
         .post('/api/learning-tasks/tasks')
@@ -111,7 +111,6 @@ describe('B1-2 submission content edits and review admission (HTTP)', () => {
         .post('/api/classrooms/' + classroom.id + '/tasks')
         .send({
           taskId: task.id,
-          settings: { aiFeedbackMode: mode },
         })
         .expect(201)
     ).body as Published;
@@ -213,7 +212,6 @@ describe('B1-2 submission content edits and review admission (HTTP)', () => {
     expect(config.get('MAIL_PROVIDER')).toBe('log');
     expect(config.get('AI_FEEDBACK_WORKER_ENABLED')).not.toBe(true);
     config.set('LEARNING_TASK_SUBMISSION_COOLDOWN_MS', 0);
-    config.set('AI_FEEDBACK_AUTO_ON_SUBMIT', true);
     const agents: Agent[] = [];
     for (const role of ['teacher', 'student', 'student']) {
       const email = namespace + '-' + agents.length + '@example.invalid';
@@ -389,14 +387,11 @@ describe('B1-2 submission content edits and review admission (HTTP)', () => {
     expect(omittedNote.content.submissionNote).toBe('');
   });
 
-  it.each(['MANUAL', 'DISABLED', 'TEACHER_ONLY'])(
-    'keeps %s editing independent of AI request policy',
-    async (mode) => {
-      const created = await submit(await publish(mode));
-      await edit(created.id).expect(200);
-      await noReviewRecords(created.id);
-    },
-  );
+  it('keeps submissions editable until an explicit review request', async () => {
+    const created = await submit(await publish());
+    await edit(created.id).expect(200);
+    await noReviewRecords(created.id);
+  });
 
   it('rejects non-owner and teacher writes and invalid DTOs without changing any content', async () => {
     const created = await submit(await publish());
@@ -779,43 +774,18 @@ describe('B1-2 submission content edits and review admission (HTTP)', () => {
     }
   });
 
-  it('pins automatic first submissions before Job creation and avoids locking when auto is off or this is a later attempt', async () => {
-    const published = await publish('FIRST_SUBMISSION_AUTO');
-    const actualEnqueue = jobService.enqueue.bind(
-      jobService,
-    ) as AiFeedbackJobService['enqueue'];
-    const createSpy = jest.spyOn(jobService, 'enqueue');
-    let observedPin = false;
-    createSpy.mockImplementationOnce(async (submission) => {
-      const persisted = await submissions.collection.findOne({
-        _id: submission._id,
-      });
-      observedPin =
-        persisted?.reviewStartedAt instanceof Date &&
-        persisted.contentRevision === 0;
-      return actualEnqueue(submission);
-    });
-    try {
-      const first = await submit(published);
-      expect(observedPin).toBe(true);
-      expect(createSpy).toHaveBeenCalledTimes(1);
-      expect((await detail(student, first.id)).editing.reason).toBe(
-        'REVIEW_STARTED',
-      );
-      await edit(first.id).expect(409);
-    } finally {
-      createSpy.mockRestore();
-    }
-    const later = await submit(published);
-    expect(later.attemptNo).toBe(2);
-    await edit(later.id).expect(200);
-    config.set('AI_FEEDBACK_AUTO_ON_SUBMIT', false);
-    try {
-      const off = await submit(await publish('FIRST_SUBMISSION_AUTO'));
-      await edit(off.id).expect(200);
-      await noReviewRecords(off.id);
-    } finally {
-      config.set('AI_FEEDBACK_AUTO_ON_SUBMIT', true);
+  it('leaves both first and later submissions without jobs or review locks until manual admission', async () => {
+    const published = await publish();
+    for (const attemptNo of [1, 2]) {
+      const created = await submit(published);
+      expect(created.attemptNo).toBe(attemptNo);
+      expect((await raw(created.id))?.reviewStartedAt).toBeUndefined();
+      expect((await detail(student, created.id)).editing.canEdit).toBe(true);
+      await noReviewRecords(created.id);
+      await edit(created.id).expect(200);
+      expect((await raw(created.id))?.contentRevision).toBe(1);
+      expect((await raw(created.id))?.attemptNo).toBe(attemptNo);
+      await noReviewRecords(created.id);
     }
   });
 
@@ -1004,14 +974,13 @@ describe('B1-2 submission content edits and review admission (HTTP)', () => {
     );
   });
 
-  it('allows the original student entry to recover failed automatic enqueue without reopening edits', async () => {
-    const published = await publish('FIRST_SUBMISSION_AUTO');
+  it('allows the owner student to reconcile a failed manual job write without reopening edits', async () => {
+    const created = await submit(await publish());
     const spy = jest
       .spyOn(jobs, 'create')
-      .mockRejectedValueOnce(new Error('Synthetic automatic enqueue failure'));
-    let created: Detail;
+      .mockRejectedValueOnce(new Error('Synthetic manual job write failure'));
     try {
-      created = await submit(published);
+      await askAi(created.id, 0, student).expect(500);
     } finally {
       spy.mockRestore();
     }

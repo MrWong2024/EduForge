@@ -7,10 +7,7 @@ import { Model } from 'mongoose';
 import { Feedback, FeedbackSource } from '../../schemas/feedback.schema';
 import { Submission } from '../../schemas/submission.schema';
 import { ClassroomTask } from '../../../classrooms/classroom-tasks/schemas/classroom-task.schema';
-import {
-  AiFeedbackMode,
-  TaskSnapshot,
-} from '../../../classrooms/classroom-tasks/classroom-task-content';
+import { TaskSnapshot } from '../../../classrooms/classroom-tasks/classroom-task-content';
 import {
   AiFeedbackJob,
   AiFeedbackJobStatus,
@@ -38,6 +35,10 @@ type SubmissionAnalysisSource = Pick<
   'taskId' | 'classroomTaskId' | 'attemptNo' | 'content' | 'meta'
 > &
   WithId;
+type ClassroomTaskAnalysisSource = Pick<
+  ClassroomTask,
+  'taskId' | 'taskSnapshot'
+>;
 class AiFeedbackEligibilityError extends Error {}
 type TaskAnalysisSource = Pick<
   TaskSnapshot,
@@ -111,7 +112,7 @@ export class AiFeedbackProcessor {
         }
         const classroomTask = await this.classroomTaskModel
           .findById(submission.classroomTaskId)
-          .lean()
+          .lean<ClassroomTaskAnalysisSource>()
           .exec();
         if (
           !classroomTask ||
@@ -125,11 +126,6 @@ export class AiFeedbackProcessor {
           throw new AiFeedbackEligibilityError(
             'AI_ELIGIBILITY: TASK_SNAPSHOT_MISSING',
           );
-        }
-        if (
-          classroomTask.settings?.aiFeedbackMode === AiFeedbackMode.Disabled
-        ) {
-          throw new AiFeedbackEligibilityError('AI_ELIGIBILITY: DISABLED');
         }
         const analysisContext = this.buildAnalysisContext(
           submission,

@@ -93,12 +93,12 @@ Teacher / Student 主链路已接真实后端：账户、教学容器、模板�
 - AI 反馈介入成效分析不重算后端结果或指标分母，不从学生分页重算班级摘要；不可比数据不能误表示为真实持平，也不能据此宣称成绩、能力或因果贡献。
 - raw JSON 不能成为主产品视图或主链路操作前提。
 
-文本教学页面已接入发布模式、只读 rubric、保存原文及师生共享 AI 摘要；学生详情受限自动刷新，学生任务草稿页与教师批阅页只显式刷新。具体调用与组件职责见 API/Component Owner。
+文本教学页面保留发布设置、只读 rubric、保存原文及师生共享 AI 摘要，AI 统一由有权师生主动申请，不再展示或传输策略；学生详情受限自动刷新，学生任务草稿页与教师批阅页只显式刷新。具体调用与组件职责见 API/Component Owner。
 
 当前实现边界：
 
 - 部分页面仍有低权重 raw JSON 调试块；正式运维页面、模板删除/复制/批量操作及资料编辑 UI 尚未提供。
-- 文本教学工程验收已闭合：隔离数据库、合成师生与真实前后端的 Agent-assisted Browser smoke 验证了保存回读、四模式代表流程、人工反馈/修订、只读与失败恢复、草稿保护及代表性响应式操作。使用现有 stub；真实模型质量、教学可理解性及真实课堂效果尚未验证。
+- 文本教学原有工程验收已闭合：隔离数据库、合成师生与真实前后端的历史 Agent-assisted Browser smoke 验证了当时的保存回读、策略流程、人工反馈/修订、只读与失败恢复、草稿保护及代表性响应式操作，使用现有 stub。该历史证据不表示取消策略后已重做页面验收。第14章任务已有真实模型质量人工签收，范围见 [Backend Testing Playbook](./handoff-backend-testing-playbook.md#ai-反馈指令文本收敛与本地诊断)；不扩展为真实课堂效果结论。
 - 已有 non-UI scripted Browser evidence / micro-profile，不等于产品 UI 已验收；实际证据边界由 [Frontend Testing Playbook](./handoff-frontend-testing-playbook.md) 维护。
 - 当前页面族与真实主链路不代表未来学习证据产品形态已经实现；阶段见 [Roadmap](./handoff-roadmap.md)，稳定产品与交互原则见 [Design Baseline](./handoff-frontend-design-baseline.md)。
 

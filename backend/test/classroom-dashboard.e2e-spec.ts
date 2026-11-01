@@ -54,6 +54,7 @@ type CreatedClassroomTaskResponse = {
 };
 
 type CreatedSubmissionResponse = {
+  contentRevision: number;
   id: string;
   attemptNo: number;
   aiFeedbackStatus?: string;
@@ -298,7 +299,6 @@ describe('Classroom Dashboards (e2e)', () => {
         settings: {
           allowLate: true,
           maxAttempts: 3,
-          aiFeedbackMode: 'FIRST_SUBMISSION_AUTO',
         },
       })
       .expect(201);
@@ -335,6 +335,14 @@ describe('Classroom Dashboards (e2e)', () => {
       .expect(201);
     const submissionBody = createdSubmission.body as CreatedSubmissionResponse;
     submissionId = submissionBody.id;
+    await studentAgent
+      .post(
+        '/api/learning-tasks/submissions/' +
+          submissionBody.id +
+          '/ai-feedback/request',
+      )
+      .send({ expectedRevision: submissionBody.contentRevision })
+      .expect(200);
 
     const studentDashboardBefore = await studentAgent
       .get('/api/classrooms/mine/dashboard')

@@ -49,6 +49,7 @@ type CreatedTaskResponse = {
 type CreatedSubmissionResponse = {
   id: string;
   attemptNo: number;
+  contentRevision: number;
 };
 
 type ProcessOnceResponse = {
@@ -73,6 +74,7 @@ type SubmissionListItem = {
 type SubmissionDetailBody = {
   id: string;
   aiFeedbackStatus?: string;
+  contentRevision: number;
   content?: {
     codeText?: string | null;
     language?: string | null;
@@ -312,7 +314,7 @@ describe('LearningTasks AI Feedback Ops (e2e) - pipeline & debug gate ON', () =>
     classroomId = room.id;
     const instance = await teacherAgent
       .post('/api/classrooms/' + classroomId + '/tasks')
-      .send({ taskId, settings: { aiFeedbackMode: 'FIRST_SUBMISSION_AUTO' } })
+      .send({ taskId })
       .expect(201);
     classroomTaskId = (instance.body as { id: string }).id;
     await studentAgent
@@ -337,6 +339,13 @@ describe('LearningTasks AI Feedback Ops (e2e) - pipeline & debug gate ON', () =>
     const submissionBody = createdSubmission.body as CreatedSubmissionResponse;
     submissionId = submissionBody.id;
     expect(submissionBody.attemptNo).toBe(1);
+
+    await studentAgent
+      .post(
+        `/api/learning-tasks/submissions/${submissionId}/ai-feedback/request`,
+      )
+      .send({ expectedRevision: submissionBody.contentRevision })
+      .expect(200);
 
     const pendingJobs = await teacherAgent
       .get('/api/learning-tasks/ai-feedback/jobs')
@@ -402,7 +411,10 @@ describe('LearningTasks AI Feedback Ops (e2e) - pipeline & debug gate ON', () =>
 
     await teacherAgent
       .post(`/api/learning-tasks/submissions/${submissionId}/feedback`)
-      .send({ expectedRevision: 0, ...teacherFeedbackPayload })
+      .send({
+        expectedRevision: submissionBody.contentRevision,
+        ...teacherFeedbackPayload,
+      })
       .expect(201);
 
     const succeededJobs = await teacherAgent
@@ -538,8 +550,6 @@ describe('LearningTasks AI Feedback Ops (e2e) - stub worker default loop', () =>
   let previousProvider: string | undefined;
   let previousIntervalMs: string | undefined;
   let previousBatchSize: string | undefined;
-  let previousAutoOnSubmit: string | undefined;
-  let previousFirstAttemptOnly: string | undefined;
 
   const teacherEmail = `teacher.worker.${Date.now()}@example.com`;
   const studentEmail = `student.worker.${Date.now()}@example.com`;
@@ -595,11 +605,6 @@ describe('LearningTasks AI Feedback Ops (e2e) - stub worker default loop', () =>
     process.env.AI_FEEDBACK_WORKER_INTERVAL_MS = '120';
     previousBatchSize = process.env.AI_FEEDBACK_WORKER_BATCH_SIZE;
     process.env.AI_FEEDBACK_WORKER_BATCH_SIZE = '2';
-    previousAutoOnSubmit = process.env.AI_FEEDBACK_AUTO_ON_SUBMIT;
-    process.env.AI_FEEDBACK_AUTO_ON_SUBMIT = 'false';
-    previousFirstAttemptOnly =
-      process.env.AI_FEEDBACK_AUTO_ON_FIRST_ATTEMPT_ONLY;
-    process.env.AI_FEEDBACK_AUTO_ON_FIRST_ATTEMPT_ONLY = 'true';
 
     const moduleFixture: TestingModule = await Test.createTestingModule({
       imports: [AppModule],
@@ -620,7 +625,6 @@ describe('LearningTasks AI Feedback Ops (e2e) - stub worker default loop', () =>
     configService.set('AI_FEEDBACK_WORKER_ENABLED', true);
     configService.set('AI_FEEDBACK_WORKER_INTERVAL_MS', 120);
     configService.set('AI_FEEDBACK_WORKER_BATCH_SIZE', 2);
-    configService.set('AI_FEEDBACK_AUTO_ON_SUBMIT', false);
     // Observe real processing without replacing the stub worker lifecycle.
     processOnceSpy = jest.spyOn(app.get(AiFeedbackProcessor), 'processOnce');
     await app.init();
@@ -692,7 +696,7 @@ describe('LearningTasks AI Feedback Ops (e2e) - stub worker default loop', () =>
     classroomId = room.id;
     const instance = await teacherAgent
       .post('/api/classrooms/' + classroomId + '/tasks')
-      .send({ taskId, settings: { aiFeedbackMode: 'FIRST_SUBMISSION_AUTO' } })
+      .send({ taskId })
       .expect(201);
     classroomTaskId = (instance.body as { id: string }).id;
     await studentAgent
@@ -734,17 +738,6 @@ describe('LearningTasks AI Feedback Ops (e2e) - stub worker default loop', () =>
       delete process.env.AI_FEEDBACK_WORKER_BATCH_SIZE;
     } else {
       process.env.AI_FEEDBACK_WORKER_BATCH_SIZE = previousBatchSize;
-    }
-    if (previousAutoOnSubmit === undefined) {
-      delete process.env.AI_FEEDBACK_AUTO_ON_SUBMIT;
-    } else {
-      process.env.AI_FEEDBACK_AUTO_ON_SUBMIT = previousAutoOnSubmit;
-    }
-    if (previousFirstAttemptOnly === undefined) {
-      delete process.env.AI_FEEDBACK_AUTO_ON_FIRST_ATTEMPT_ONLY;
-    } else {
-      process.env.AI_FEEDBACK_AUTO_ON_FIRST_ATTEMPT_ONLY =
-        previousFirstAttemptOnly;
     }
 
     if (!KEEP_DB) {
@@ -825,13 +818,17 @@ describe('LearningTasks AI Feedback Ops (e2e) - stub worker default loop', () =>
       .expect(200);
     const detailBeforeStatus = (detailBefore.body as SubmissionDetailBody)
       .aiFeedbackStatus;
-    expect(['NOT_REQUESTED', 'PENDING']).toContain(detailBeforeStatus);
+    expect(detailBeforeStatus).toBe('NOT_REQUESTED');
 
     const requestResult = await studentAgent
       .post(
         `/api/learning-tasks/submissions/${submissionId}/ai-feedback/request`,
       )
-      .send({ expectedRevision: 0, reason: 'worker-loop-check' })
+      .send({
+        expectedRevision: (detailBefore.body as SubmissionDetailBody)
+          .contentRevision,
+        reason: 'worker-loop-check',
+      })
       .expect(200);
     expect(
       ['PENDING', 'RUNNING', 'SUCCEEDED'].includes(

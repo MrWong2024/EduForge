@@ -12,10 +12,7 @@ import { AiContextReaderService } from '../ai-context/ai-context-reader.service'
 import { ConfigService } from '@nestjs/config';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
-import {
-  AiFeedbackMode,
-  MISSING_TASK_SNAPSHOT_MESSAGE,
-} from '../../classrooms/classroom-tasks/classroom-task-content';
+import { MISSING_TASK_SNAPSHOT_MESSAGE } from '../../classrooms/classroom-tasks/classroom-task-content';
 import {
   Enrollment,
   EnrollmentRole,
@@ -1202,11 +1199,6 @@ export class LearningTasksService {
         .exec();
 
       const attemptNo = (lastSubmission?.attemptNo ?? 0) + 1;
-      const shouldEnqueue = this.shouldAutoEnqueue(
-        attemptNo,
-        classroomTask?.settings?.aiFeedbackMode,
-      );
-
       try {
         const submission = await this.submissionModel.create({
           taskId: taskObjectId,
@@ -1214,7 +1206,6 @@ export class LearningTasksService {
           studentId: studentObjectId,
           attemptNo,
           contentRevision: 0,
-          ...(shouldEnqueue ? { reviewStartedAt: submittedAt } : {}),
           submittedAt,
           isLate,
           lateBySeconds,
@@ -1223,18 +1214,16 @@ export class LearningTasksService {
           status: SubmissionStatus.Submitted,
         });
 
-        let aiFeedbackStatus = AiFeedbackStatus.NotRequested;
-        if (shouldEnqueue) {
-          const enqueued = await this.aiFeedbackJobService.enqueue(submission);
-          if (enqueued)
-            aiFeedbackStatus = this.toAiFeedbackStatus(enqueued.status);
-        }
         const editing = await this.getSubmissionEditing(
           submission,
           { id: userId, roles: [...STUDENT_ROLES] },
           classroomTask,
         );
-        return this.toSubmissionResponse(submission, aiFeedbackStatus, editing);
+        return this.toSubmissionResponse(
+          submission,
+          AiFeedbackStatus.NotRequested,
+          editing,
+        );
       } catch (error) {
         const mongoError = error as { code?: number };
         if (mongoError.code !== 11000 || attempt === 2) {
@@ -1530,21 +1519,6 @@ export class LearningTasksService {
     return normalized.size > 0 ? Array.from(normalized) : ['other'];
   }
 
-  private shouldAutoEnqueue(
-    attemptNo: number,
-    mode: AiFeedbackMode | undefined,
-  ) {
-    const autoOnSubmit = this.configService.get<unknown>(
-      'AI_FEEDBACK_AUTO_ON_SUBMIT',
-    );
-    return (
-      mode === AiFeedbackMode.FirstSubmissionAuto &&
-      attemptNo === 1 &&
-      autoOnSubmit !== false &&
-      autoOnSubmit !== 'false'
-    );
-  }
-
   private getSubmissionCooldownMs() {
     const value = this.configService.get<unknown>(
       'LEARNING_TASK_SUBMISSION_COOLDOWN_MS',
@@ -1631,7 +1605,7 @@ export class LearningTasksService {
       // Only the existing eligibility exceptions are public blocking reasons.
       // Unknown DB/config/programming failures still propagate as server errors.
       if (error instanceof ForbiddenException)
-        return '当前用户或课堂 AI 策略不允许申请 AI 反馈。';
+        return '当前用户无权申请该提交的 AI 反馈。';
       if (error instanceof ConflictException) {
         if (error.message === MISSING_TASK_SNAPSHOT_MESSAGE)
           return MISSING_TASK_SNAPSHOT_MESSAGE;
@@ -1692,17 +1666,6 @@ export class LearningTasksService {
     }
     if (!classroomTask.taskSnapshot)
       throw new ConflictException(MISSING_TASK_SNAPSHOT_MESSAGE);
-    const mode = classroomTask.settings?.aiFeedbackMode;
-    if (
-      mode === AiFeedbackMode.Disabled ||
-      (!teacher &&
-        mode !== AiFeedbackMode.Manual &&
-        mode !== AiFeedbackMode.FirstSubmissionAuto)
-    ) {
-      throw new ForbiddenException(
-        'Classroom task AI feedback policy forbids this request',
-      );
-    }
   }
 
   private async ensureStudentParticipationContextIsActive(

@@ -11,11 +11,9 @@ import { Model, PipelineStage, Types } from 'mongoose';
 import { Classroom } from '../../schemas/classroom.schema';
 import { Course } from '../../../courses/schemas/course.schema';
 import {
-  AiFeedbackMode,
   MISSING_TASK_SNAPSHOT_MESSAGE,
   snapshotTask,
   publicTaskContent,
-  studentCanRequestAi,
 } from '../classroom-task-content';
 import { ClassroomTask } from '../schemas/classroom-task.schema';
 import { CreateClassroomTaskDto } from '../dto/create-classroom-task.dto';
@@ -322,8 +320,6 @@ export class ClassroomTasksService {
     const dueAt = dto.dueAt ? new Date(dto.dueAt) : undefined;
     const settings = {
       allowLate: dto.settings?.allowLate ?? true,
-      aiFeedbackMode:
-        dto.settings?.aiFeedbackMode ?? AiFeedbackMode.TeacherOnly,
       ...(dto.settings?.maxAttempts !== undefined
         ? { maxAttempts: dto.settings.maxAttempts }
         : {}),
@@ -1314,10 +1310,8 @@ export class ClassroomTasksService {
         publishedAt: classroomTask.publishedAt,
         dueAt: classroomTask.dueAt,
         settings: {
-          ...classroomTask.settings,
-          aiFeedbackMode:
-            classroomTask.settings?.aiFeedbackMode ??
-            AiFeedbackMode.TeacherOnly,
+          allowLate: classroomTask.settings?.allowLate,
+          maxAttempts: classroomTask.settings?.maxAttempts,
         },
         taskSnapshotAvailable: Boolean(classroomTask.taskSnapshot),
       },
@@ -1420,9 +1414,7 @@ export class ClassroomTasksService {
     return {
       readOnly: !classroomTask.taskSnapshot,
       canSubmit: Boolean(classroomTask.taskSnapshot),
-      canRequestAiFeedback:
-        Boolean(classroomTask.taskSnapshot) &&
-        studentCanRequestAi(classroomTask.settings?.aiFeedbackMode),
+      canRequestAiFeedback: Boolean(classroomTask.taskSnapshot),
       reason: 'ACTIVE',
       message: null,
     };
@@ -1885,9 +1877,8 @@ export class ClassroomTasksService {
       publishedAt: classroomTask.publishedAt,
       dueAt: classroomTask.dueAt,
       settings: {
-        ...classroomTask.settings,
-        aiFeedbackMode:
-          classroomTask.settings?.aiFeedbackMode ?? AiFeedbackMode.TeacherOnly,
+        allowLate: classroomTask.settings?.allowLate,
+        maxAttempts: classroomTask.settings?.maxAttempts,
       },
       taskSnapshotAvailable: Boolean(classroomTask.taskSnapshot),
       createdBy: classroomTask.createdBy.toString(),

@@ -9,10 +9,7 @@ import {
 } from "@/lib/api/error-presenter";
 import { toClassroomSummary, toClassroomTask } from "@/lib/api/types-teacher";
 import { TaskRubric } from "@/components/learning-tasks/TaskRubric";
-import {
-  getAiModeLabel,
-  getTaskSnapshotMessage,
-} from "@/lib/learning-tasks/ai-review";
+import { getTaskSnapshotMessage } from "@/lib/learning-tasks/ai-review";
 import { paths } from "@/lib/routes/paths";
 import { getCommonErrorSummary } from "@/lib/ui/status";
 import { toDisplayDate, toDisplayText } from "@/lib/ui/format";
@@ -158,7 +155,7 @@ export default async function ClassroomTaskDetailPage({
 
       <section className="rounded-lg border border-zinc-200 bg-white p-4 text-sm">
         <div className="grid gap-2 md:grid-cols-2">
-          <p>平台 AI：{getAiModeLabel(task.aiFeedbackMode)}</p>
+          <p>学生或教师可在提交详情主动申请 AI 反馈。</p>
           <p>发布内容：{getTaskSnapshotMessage(task.taskSnapshotAvailable)}</p>
           <p>任务名称：{toDisplayText(task.title, "未命名任务")}</p>
           <p>截止时间：{toDisplayDate(task.dueAt)}</p>

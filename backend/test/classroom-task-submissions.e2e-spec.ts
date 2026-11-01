@@ -6,9 +6,6 @@ import * as bcrypt from 'bcryptjs';
 import cookieParser from 'cookie-parser';
 import request from 'supertest';
 import { App } from 'supertest/types';
-
-const previousAutoOnSubmit = process.env.AI_FEEDBACK_AUTO_ON_SUBMIT;
-process.env.AI_FEEDBACK_AUTO_ON_SUBMIT = 'false';
 const previousSubmissionCooldownMs =
   process.env.LEARNING_TASK_SUBMISSION_COOLDOWN_MS;
 process.env.LEARNING_TASK_SUBMISSION_COOLDOWN_MS = '0';
@@ -358,11 +355,6 @@ describe('Classroom Task Submissions List (e2e)', () => {
   });
 
   afterAll(async () => {
-    if (previousAutoOnSubmit === undefined) {
-      delete process.env.AI_FEEDBACK_AUTO_ON_SUBMIT;
-    } else {
-      process.env.AI_FEEDBACK_AUTO_ON_SUBMIT = previousAutoOnSubmit;
-    }
     if (previousSubmissionCooldownMs === undefined) {
       delete process.env.LEARNING_TASK_SUBMISSION_COOLDOWN_MS;
     } else {
