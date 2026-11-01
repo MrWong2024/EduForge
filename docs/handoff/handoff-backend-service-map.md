@@ -323,19 +323,23 @@ Global SoT 只保留理解跨 Service workflow 必需的稳定不变量，不追
 - Upstream: `ClassroomsService` 校验教师角色后委托总览、学生列表或详情计算。
 - Downstream / Dependencies: `ClassroomModel`、`CourseModel`、`ClassroomTaskModel`、`TaskModel`、`SubmissionModel`、`AiFeedbackJobModel`、`FeedbackModel`、`UserModel`、`EnrollmentService`；同文件纯计算入口 `buildAiLearningAnalyticsStandardSamples`。
 - Consistency / State / Idempotency:
-  - 有效任务按 classroomId 与 ClassroomTask.publishedAt 窗口选取，再排除任务；按 `publishedAt asc, classroomTaskId asc` 稳定排序。任务入选后保留完整提交链，不再按窗口裁剪提交。
-  - 每个 studentId + classroomTaskId 最多一个标准样本；提交顺序为 `attemptNo asc, submittedAt asc, submissionId asc`。requested 表示存在任意 Job，delivered 表示存在 SUCCEEDED Job；anchor 取顺序最早的成功 Job 所属提交，其 Job.updatedAt 作为反馈完成时间。
-  - postSubmission 必须为 anchor 后第一条 attemptNo 更大且 submittedAt 严格晚于反馈完成时间的提交；质量可比的后续提交还必须有成功 Job。代码变化仅作 CRLF→LF 与整体 trim。
-  - 质量代理按 ERROR + WARN×0.5，以半分整数计算；可比样本分别按 before>after、before=after=0、before=after>0、before<after 判改善、保持无问题、仍有问题但持平、恶化；不可比时负荷为空，不伪造零。两类持平只向 legacy STABLE 投影，stableCount 等于两类持平计数之和。
+  - 三个读取入口使用同一有效任务集合：按 classroomId、ClassroomTask.publishedAt 窗口及排除项筛选，保留 ACTIVE/CLOSED 与既有缺省状态兼容，排除 RECALLED 和未知状态；按 `publishedAt asc, classroomTaskId asc` 稳定排序。任务入选后保留完整提交链，不按窗口裁剪提交。正式撤回只允许无提交实例，此筛选修复有效任务数与空任务行，不代表撤回实例曾污染正常改善率分母。
+  - 每个 studentId + classroomTaskId 最多一个标准样本；稳定提交顺序为 `attemptNo asc, submittedAt asc, submissionId asc`。requested 表示存在任意 Job；delivered 要求 SUCCEEDED Job 加该提交至少一条实际 AI Feedback，排除已知 stub。成功空反馈没有可用评价；实际 INFO 条目可以有零 ERROR/WARN 负荷。历史来源缺失的实际反馈可作记录对照，但不能被推定为真实 Provider 或相同模型。
+  - V1.2 取代旧“首个后续版本”口径：基线从有效反馈中按可确认的 Job.updatedAt 完成时间取最早项，同刻以稳定提交顺序打破平局。较早 attempt 后补评不能把基线移向更晚。内容形成时间使用可靠 lastEditedAt，未编辑或符合旧初始版本约定时用 submittedAt；contentRevision>0 缺可靠编辑时间时保持未知，不用申请时间、完成时间或当前时间补造。
+  - 后续版本必须是基线以外的提交，且内容形成时间严格晚于基线反馈完成时间，不要求 attemptNo 更大；反馈前创建、反馈后修改的旧 attempt 可以入选。从有有效反馈的后续版本中，按内容形成时间取最新比较终点，同刻稳定打破平局，不按 Job 完成先后选择。基线已冻结，不虚构同一提交的历史 revision；每次只读重算，不持久化结果。
+  - 新增提交与作品更新分开：resubmitted 只计基线反馈完成后新建的其它 Submission；revised 计可确认的后续作品更新，包括编辑已有提交。代码变化检查所有现存可确认后续版本是否至少一份不同于基线，仅归一 CRLF/LF，不 trim、不删注释或改变大小写；说明/语言更新可算 revised，但不冒充代码变化。未保存完整编辑历史，不能还原全部“改后又改回”过程。
+  - 反馈条目负荷按 ERROR + WARN×0.5，以半单位整数累计后计算；可比样本分别按 before>after、before=after=0、before=after>0、before<after 判负荷下降、前后均无 ERROR/WARN、非零负荷持平、负荷上升；不可比时负荷为空，不伪造零。两类持平只向 legacy STABLE 投影，stableCount 等于两类持平计数之和，四类结果之和等于可比样本数。它不是缺陷数、正确率、成绩或能力分数。
   - 学生 overallOutcome 由所有可比样本的 issueLoadDeltaHalfUnitsTotal 决定：无样本为 INSUFFICIENT_DATA，总和正/零/负分别为 IMPROVED_OVERALL/NO_NET_CHANGE/REGRESSED_OVERALL；growthTrend 仅对应映射为 INSUFFICIENT_DATA/IMPROVING/STABLE/DECLINING，不独立重算。净零允许改善与恶化抵消。
-  - engagementStatus 按互斥顺序判断：未提交→已提交未请求→已请求未交付→已交付未重提→已重提不可比→质量可比；它表示当前范围内到达的最深阶段。
-  - 比率按对应计数计算：AI 学生覆盖率 = requested 去重学生数 / ACTIVE 学生数；AI 任务覆盖率 = requested student-task / submitted student-task；交付率 = delivered / requested；重提交率 = resubmitted / delivered；代码变化率 = codeChanged / resubmitted；可比率 = comparable / delivered；改善/两类持平/恶化率 = 各对应结果数 / comparable。任务趋势沿用 student-task 分母，不计算班级级 distinct-student coverage；三个平均值只取 comparable。比例与平均值保留 4 位小数，零分母归零。
+  - engagementStatus 按互斥顺序判断：未提交→已提交未请求→已请求未交付可用反馈→已交付但尚无可确认更新→已更新不可比→可比；以 revised 代替 resubmitted 判断参与阶段，不推断态度或能力。
+  - 比率按对应计数计算：学生请求覆盖率 = requested 去重学生数 / ACTIVE 学生数；任务请求覆盖率 = requested student-task / submitted student-task；可用反馈交付率 = delivered / requested；重提交率 = resubmitted / delivered；作品更新率 = revised / delivered；代码变化率 = codeChanged / revised；可比率 = comparable / delivered；四类结果比率 = 各对应结果数 / comparable。任务趋势沿用 student-task 分母，不计算班级级 distinct-student coverage；三个平均值只取 comparable。所有比率自身零分母及无可比均值返回 null，真实零保留 0；后端不提前舍入，分类保留半单位事实。
+  - 比较追溯只投影安全元信息：基线、比较终点、包含所有执行状态的最新内容版本及较新未比较提示；时序无法确认时保持未知。来源读取现有 Job/provider/attempts 与实际 requests；known Bailian 仅当当前成功 `claimNo===attempts` 有唯一匹配实际请求时取模型，否则未知，不读取当前环境补造历史。模型不同允许数值对照并提示，同名也不证明 Prompt 或模型内部版本相同。
+  - evidenceSummary 在班级/任务/学生汇总中分别计来源或模型不完整的可比样本、已知模型不同的可比样本、存在被排除模拟评阅的样本；每个学生—任务每项至多一次，提示项可重叠，不能相加充当分母。字段和值域由 DTO Owner 维护。
 - Isolation: 专用 Service 用 `_id + teacherId` 查询课堂；学生详情要求当前课堂 ACTIVE Enrollment。Feedback 查询与计算均限定 AI 来源，Job/提交/反馈按 classroomTaskId，不能混入相同 taskId 的其他课堂。
 - Side Effects: 全部只读；不写数据库，不调用 Provider 或 Worker。
 - Important Performance / Recovery:
   - 先批量读取 owner 课堂、有效任务、ACTIVE 成员及公开上下文；学生按 `studentNo,studentName,studentId` 稳定排序。q 只对姓名/学号做 trim 后不区分大小写的内存子串匹配，不构造 Mongo regex，不搜索 studentId。
   - 无指标筛选（含 q-only）时先分页 q 结果，再仅为当前页加载 Submission/Job/AI Feedback；有 overallOutcome 或 engagementStatus 筛选时先对 q 候选批量构造 metrics，再做 AND 筛选、计数与分页，并复用已算结果。
-  - q 后无候选时跳过样本查询；所有路径使用 projection、lean、批量查询与 Map 配对，避免按学生/任务 N+1；空任务、成员或样本稳定返回空/零值聚合。
+  - q 后无候选时跳过样本查询；所有路径使用 projection、lean、批量查询与 Map 配对，避免按学生/任务 N+1；空任务、成员或样本按 DTO 保留空集合、零计数及 null 指标。
 - SoT: `backend/src/modules/classrooms/services/ai-learning-analytics.service.ts`；`backend/src/modules/classrooms/dto/query-ai-learning-analytics.dto.ts`；`backend/src/modules/classrooms/types/ai-learning-analytics.types.ts`。
 - Boundary / Non-responsibility: 公开方法学版本、枚举/响应投影及解释边界见 [API Map](./handoff-backend-api-map.md#classrooms)，输入/返回类型从上述 SoT 定位；本卡保留内部配对与聚合算法，不将结果升级为成绩、能力或因果判断。
 

@@ -1,5 +1,7 @@
 import type {
   AiLearningAnalyticsDetailedOutcome,
+  AiLearningAnalyticsComparisonWarning,
+  AiLearningAnalyticsEvidenceSummary,
   AiLearningAnalyticsEngagementStatus,
   AiLearningAnalyticsGrowthTrend,
   AiLearningAnalyticsMethodologyVersion,
@@ -12,7 +14,50 @@ import {
   AI_LEARNING_ANALYTICS_ENGAGEMENT_STATUSES,
   AI_LEARNING_ANALYTICS_OVERALL_OUTCOMES,
 } from "@/lib/api/types-teacher";
-import { getSingleSearchParam, parsePositiveInt } from "@/lib/ui/format";
+import {
+  buildQueryString,
+  getSingleSearchParam,
+  parsePositiveInt,
+} from "@/lib/ui/format";
+import { paths } from "@/lib/routes/paths";
+
+export const AI_LEARNING_ANALYTICS_WARNING_LABELS: Record<
+  AiLearningAnalyticsComparisonWarning,
+  string
+> = {
+  EMPTY_FEEDBACK: "成功处理但无实际反馈条目，未作为评价端点",
+  SIMULATED_REVIEW_EXCLUDED: "模拟评阅已排除",
+  SOURCE_UNKNOWN: "评阅来源不确定，仅作已有记录对照",
+  MODEL_UNKNOWN: "历史模型未知，无法确认模型一致",
+  MODEL_CHANGED: "比较端点使用了不同模型",
+  TIME_UNKNOWN: "时间信息不足，无法确认完整更新时序",
+};
+
+export const buildAiLearningAnalyticsSubmissionHref = (
+  submissionId: string,
+  classroomId: string,
+  classroomTaskId: string,
+): string =>
+  `${paths.teacher.submissionDetail(submissionId)}?${buildQueryString({ classroomId, classroomTaskId })}`;
+
+export const getAiLearningAnalyticsEvidenceNotes = (
+  evidence: AiLearningAnalyticsEvidenceSummary,
+): string[] => {
+  const notes: string[] = [];
+  if (evidence.sourceUncertainComparableCount > 0)
+    notes.push(
+      `来源或模型信息不完整的可对照样本 ${evidence.sourceUncertainComparableCount}`,
+    );
+  if (evidence.modelChangedComparableCount > 0)
+    notes.push(
+      `已知模型不同的可对照样本 ${evidence.modelChangedComparableCount}`,
+    );
+  if (evidence.simulatedExcludedSampleCount > 0)
+    notes.push(
+      `存在已排除模拟评阅的样本 ${evidence.simulatedExcludedSampleCount}`,
+    );
+  return notes;
+};
 
 export const AI_LEARNING_ANALYTICS_STUDENT_SECTION_ID = "student-analysis";
 
@@ -39,9 +84,9 @@ export const AI_LEARNING_ANALYTICS_GROWTH_TREND_LABELS: Record<
   AiLearningAnalyticsGrowthTrend,
   string
 > = {
-  IMPROVING: "问题负荷改善",
+  IMPROVING: "可比任务负荷净下降",
   STABLE: "变化持平",
-  DECLINING: "问题负荷恶化",
+  DECLINING: "可比任务负荷净上升",
   INSUFFICIENT_DATA: "可比数据不足",
 };
 
@@ -49,21 +94,21 @@ export const AI_LEARNING_ANALYTICS_OUTCOME_LABELS: Record<
   AiLearningAnalyticsOutcome,
   string
 > = {
-  IMPROVED: "改善",
+  IMPROVED: "负荷下降",
   STABLE: "持平",
-  REGRESSED: "恶化",
-  NOT_COMPARABLE: "不可比较",
+  REGRESSED: "负荷上升",
+  NOT_COMPARABLE: "不可对照",
 };
 
 export const AI_LEARNING_ANALYTICS_DETAILED_OUTCOME_LABELS: Record<
   AiLearningAnalyticsDetailedOutcome,
   string
 > = {
-  IMPROVED: "改善",
+  IMPROVED: "负荷下降",
   REMAINED_CLEAN: "前后均无 ERROR/WARN",
-  UNCHANGED_WITH_ISSUES: "问题负荷未减少",
-  REGRESSED: "恶化",
-  NOT_COMPARABLE: "不可比较",
+  UNCHANGED_WITH_ISSUES: "非零负荷持平",
+  REGRESSED: "负荷上升",
+  NOT_COMPARABLE: "不可对照",
 };
 
 export const AI_LEARNING_ANALYTICS_DETAILED_OUTCOME_COMPACT_LABELS: Record<
@@ -79,9 +124,9 @@ export const AI_LEARNING_ANALYTICS_OVERALL_OUTCOME_LABELS: Record<
   string
 > = {
   INSUFFICIENT_DATA: "可比数据不足",
-  IMPROVED_OVERALL: "总体改善",
+  IMPROVED_OVERALL: "可比任务负荷净下降",
   NO_NET_CHANGE: "净变化为零",
-  REGRESSED_OVERALL: "总体恶化",
+  REGRESSED_OVERALL: "可比任务负荷净上升",
 };
 
 export const AI_LEARNING_ANALYTICS_ENGAGEMENT_STATUS_LABELS: Record<
@@ -90,10 +135,10 @@ export const AI_LEARNING_ANALYTICS_ENGAGEMENT_STATUS_LABELS: Record<
 > = {
   NO_SUBMISSION: "未提交任务",
   SUBMITTED_WITHOUT_AI_REQUEST: "已提交，未请求 AI 反馈",
-  AI_REQUESTED_WITHOUT_DELIVERY: "已请求 AI 反馈，暂无成功交付",
-  AI_DELIVERED_WITHOUT_RESUBMISSION: "已获 AI 反馈，未再次提交",
-  RESUBMITTED_WITHOUT_COMPARABLE: "已再次提交，暂无质量可比结果",
-  QUALITY_COMPARABLE: "已形成质量可比结果",
+  AI_REQUESTED_WITHOUT_DELIVERY: "已请求 AI 反馈，暂无可用反馈交付",
+  AI_DELIVERED_WITHOUT_REVISION: "已获可用反馈，尚无可确认的后续更新",
+  REVISED_WITHOUT_COMPARABLE: "已有作品更新，暂无反馈可对照结果",
+  QUALITY_COMPARABLE: "已形成反馈可对照结果",
 };
 
 export const AI_LEARNING_ANALYTICS_OVERALL_OUTCOME_OPTIONS =
@@ -111,7 +156,7 @@ export const AI_LEARNING_ANALYTICS_ENGAGEMENT_STATUS_OPTIONS =
 export const getAiLearningAnalyticsMethodologyVersionLabel = (
   version: AiLearningAnalyticsMethodologyVersion,
 ): string =>
-  version === "AI_FEEDBACK_INTERVENTION_V1_1" ? "V1.1" : "版本未知";
+  version === "AI_FEEDBACK_INTERVENTION_V1_2" ? "V1.2" : "版本未知";
 
 export type AiLearningAnalyticsSearchParams = {
   window?: string | string[];
@@ -194,9 +239,7 @@ export const resolveAiLearningAnalyticsQueryState = (
     query.excludedTaskIds,
   ),
   q: parseAiLearningAnalyticsSearchQuery(query.q),
-  overallOutcome: parseAiLearningAnalyticsOverallOutcome(
-    query.overallOutcome,
-  ),
+  overallOutcome: parseAiLearningAnalyticsOverallOutcome(query.overallOutcome),
   engagementStatus: parseAiLearningAnalyticsEngagementStatus(
     query.engagementStatus,
   ),
@@ -223,30 +266,43 @@ export const toAiLearningAnalyticsSearchParamEntries = (
   return entries;
 };
 
-export const formatAiLearningAnalyticsPercent = (rate: number): string => {
-  const percent = Math.round(rate * 1000) / 10;
-  return Number.isInteger(percent) ? `${percent}%` : `${percent.toFixed(1)}%`;
+export const formatAiLearningAnalyticsPercent = (
+  rate: number | null,
+): string => {
+  if (rate === null || !Number.isFinite(rate)) return "—";
+  if (rate !== 0 && Math.abs(rate) < 0.00001) {
+    return rate > 0 ? "<0.001%" : ">-0.001%";
+  }
+  return `${Number((rate * 100).toPrecision(4))}%`;
 };
 
-export const formatAiLearningAnalyticsIssueLoad = (value: number): string => {
-  const normalized = Math.abs(value) < 0.0001 ? 0 : value;
-  const rounded = Math.round(normalized * 100) / 100;
-  return Number.isInteger(rounded) ? `${rounded}` : `${rounded.toFixed(2)}`;
-};
+export const formatAiLearningAnalyticsIssueLoad = (
+  value: number | null,
+): string =>
+  value === null || !Number.isFinite(value)
+    ? "—"
+    : String(Number(value.toPrecision(4)));
 
-export const formatAiLearningAnalyticsDelta = (value: number): string => {
-  const normalized = Math.abs(value) < 0.0001 ? 0 : value;
-  const formatted = formatAiLearningAnalyticsIssueLoad(normalized);
-  return normalized > 0 ? `+${formatted}` : formatted;
+export const formatAiLearningAnalyticsDelta = (
+  value: number | null,
+): string => {
+  const formatted = formatAiLearningAnalyticsIssueLoad(value);
+  return value !== null && value > 0 ? `+${formatted}` : formatted;
 };
 
 export const getAiLearningAnalyticsDeltaMeaning = (
-  value: number,
-): "改善" | "差值为零" | "恶化" =>
-  value > 0 ? "改善" : value < 0 ? "恶化" : "差值为零";
+  value: number | null,
+): "负荷下降" | "差值为零" | "负荷上升" | "不可对照" =>
+  value === null
+    ? "不可对照"
+    : value > 0
+      ? "负荷下降"
+      : value < 0
+        ? "负荷上升"
+        : "差值为零";
 
 export type AiLearningAnalyticsTeachingAttention = {
-  lowestResubmissionTask: AiLearningAnalyticsTaskTrend | null;
+  lowestRevisionTask: AiLearningAnalyticsTaskTrend | null;
   mostRegressedTask: AiLearningAnalyticsTaskTrend | null;
   highestImprovedRateTask: AiLearningAnalyticsTaskTrend | null;
 };
@@ -254,22 +310,25 @@ export type AiLearningAnalyticsTeachingAttention = {
 export const selectAiLearningAnalyticsTeachingAttention = (
   taskTrends: AiLearningAnalyticsTaskTrend[],
 ): AiLearningAnalyticsTeachingAttention => {
-  let lowestResubmissionTask: AiLearningAnalyticsTaskTrend | null = null;
+  let lowestRevisionTask: AiLearningAnalyticsTaskTrend | null = null;
   let mostRegressedTask: AiLearningAnalyticsTaskTrend | null = null;
   let highestImprovedRateTask: AiLearningAnalyticsTaskTrend | null = null;
 
   for (const task of taskTrends) {
     if (
       task.aiDeliveredStudentCount > 0 &&
-      (lowestResubmissionTask === null ||
-        task.postFeedbackResubmissionRate <
-          lowestResubmissionTask.postFeedbackResubmissionRate)
+      task.postFeedbackRevisionRate !== null &&
+      task.postFeedbackRevisionRate < 1 &&
+      (lowestRevisionTask === null ||
+        task.postFeedbackRevisionRate <
+          (lowestRevisionTask.postFeedbackRevisionRate ?? Infinity))
     ) {
-      lowestResubmissionTask = task;
+      lowestRevisionTask = task;
     }
 
     if (
       task.qualityComparableStudentCount > 0 &&
+      task.regressedStudentCount > 0 &&
       (mostRegressedTask === null ||
         task.regressedStudentCount > mostRegressedTask.regressedStudentCount)
     ) {
@@ -278,15 +337,17 @@ export const selectAiLearningAnalyticsTeachingAttention = (
 
     if (
       task.qualityComparableStudentCount > 0 &&
+      task.improvedStudentCount > 0 &&
+      task.improvedRate !== null &&
       (highestImprovedRateTask === null ||
-        task.improvedRate > highestImprovedRateTask.improvedRate)
+        task.improvedRate > (highestImprovedRateTask.improvedRate ?? -Infinity))
     ) {
       highestImprovedRateTask = task;
     }
   }
 
   return {
-    lowestResubmissionTask,
+    lowestRevisionTask,
     mostRegressedTask,
     highestImprovedRateTask,
   };

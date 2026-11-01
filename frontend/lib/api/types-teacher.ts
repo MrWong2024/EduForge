@@ -604,16 +604,43 @@ export type ProcessAssessmentResponse = {
   raw: UnknownRecord;
 };
 
+export type AiLearningAnalyticsEvidenceSummary = {
+  sourceUncertainComparableCount: number;
+  modelChangedComparableCount: number;
+  simulatedExcludedSampleCount: number;
+};
+
+export const AI_LEARNING_ANALYTICS_COMPARISON_WARNINGS = [
+  "EMPTY_FEEDBACK",
+  "SIMULATED_REVIEW_EXCLUDED",
+  "SOURCE_UNKNOWN",
+  "MODEL_UNKNOWN",
+  "MODEL_CHANGED",
+  "TIME_UNKNOWN",
+] as const;
+export type AiLearningAnalyticsComparisonWarning =
+  (typeof AI_LEARNING_ANALYTICS_COMPARISON_WARNINGS)[number];
+export type AiLearningAnalyticsReviewEndpoint = {
+  submissionId: string;
+  attemptNo: number | null;
+  contentRevision: number | null;
+  submittedAt: string | null;
+  lastEditedAt: string | null;
+  contentVersionAt: string | null;
+  feedbackCompletedAt: string | null;
+  provider: "bailian" | "stub" | null;
+  model: string | null;
+};
+
 export const AI_LEARNING_ANALYTICS_WINDOWS = ["all", "7d", "30d"] as const;
 export type AiLearningAnalyticsWindow =
   (typeof AI_LEARNING_ANALYTICS_WINDOWS)[number];
 
 export const AI_LEARNING_ANALYTICS_METHODOLOGY_VERSIONS = [
-  "AI_FEEDBACK_INTERVENTION_V1_1",
+  "AI_FEEDBACK_INTERVENTION_V1_2",
 ] as const;
 export type AiLearningAnalyticsMethodologyVersion =
-  | (typeof AI_LEARNING_ANALYTICS_METHODOLOGY_VERSIONS)[number]
-  | "UNKNOWN";
+  (typeof AI_LEARNING_ANALYTICS_METHODOLOGY_VERSIONS)[number] | "UNKNOWN";
 
 export const AI_LEARNING_ANALYTICS_GROWTH_TRENDS = [
   "IMPROVING",
@@ -656,8 +683,8 @@ export const AI_LEARNING_ANALYTICS_ENGAGEMENT_STATUSES = [
   "NO_SUBMISSION",
   "SUBMITTED_WITHOUT_AI_REQUEST",
   "AI_REQUESTED_WITHOUT_DELIVERY",
-  "AI_DELIVERED_WITHOUT_RESUBMISSION",
-  "RESUBMITTED_WITHOUT_COMPARABLE",
+  "AI_DELIVERED_WITHOUT_REVISION",
+  "REVISED_WITHOUT_COMPARABLE",
   "QUALITY_COMPARABLE",
 ] as const;
 export type AiLearningAnalyticsEngagementStatus =
@@ -690,6 +717,7 @@ export type AiLearningAnalyticsSummary = {
   aiRequestedStudentTaskCount: number;
   aiDeliveredStudentTaskCount: number;
   postFeedbackResubmittedStudentTaskCount: number;
+  postFeedbackRevisedStudentTaskCount: number;
   postFeedbackCodeChangedStudentTaskCount: number;
   qualityComparableStudentTaskCount: number;
   improvedStudentTaskCount: number;
@@ -697,19 +725,21 @@ export type AiLearningAnalyticsSummary = {
   unchangedWithIssuesStudentTaskCount: number;
   stableStudentTaskCount: number;
   regressedStudentTaskCount: number;
-  aiStudentCoverageRate: number;
-  aiTaskCoverageRate: number;
-  aiDeliveryRate: number;
-  postFeedbackResubmissionRate: number;
-  postFeedbackCodeChangeRate: number;
-  qualityComparableRate: number;
-  improvedRate: number;
-  remainedCleanRate: number;
-  unchangedWithIssuesRate: number;
-  regressedRate: number;
-  averageIssueLoadBefore: number;
-  averageIssueLoadAfter: number;
-  averageIssueLoadDelta: number;
+  aiStudentCoverageRate: number | null;
+  aiTaskCoverageRate: number | null;
+  aiDeliveryRate: number | null;
+  postFeedbackResubmissionRate: number | null;
+  postFeedbackRevisionRate: number | null;
+  postFeedbackCodeChangeRate: number | null;
+  qualityComparableRate: number | null;
+  improvedRate: number | null;
+  remainedCleanRate: number | null;
+  unchangedWithIssuesRate: number | null;
+  regressedRate: number | null;
+  evidenceSummary: AiLearningAnalyticsEvidenceSummary;
+  averageIssueLoadBefore: number | null;
+  averageIssueLoadAfter: number | null;
+  averageIssueLoadDelta: number | null;
 };
 
 export type AiLearningAnalyticsTaskTrend = {
@@ -721,6 +751,7 @@ export type AiLearningAnalyticsTaskTrend = {
   aiRequestedStudentCount: number;
   aiDeliveredStudentCount: number;
   postFeedbackResubmittedStudentCount: number;
+  postFeedbackRevisedStudentCount: number;
   postFeedbackCodeChangedStudentCount: number;
   qualityComparableStudentCount: number;
   improvedStudentCount: number;
@@ -728,17 +759,19 @@ export type AiLearningAnalyticsTaskTrend = {
   unchangedWithIssuesStudentCount: number;
   stableStudentCount: number;
   regressedStudentCount: number;
-  aiTaskCoverageRate: number;
-  postFeedbackResubmissionRate: number;
-  postFeedbackCodeChangeRate: number;
-  qualityComparableRate: number;
-  improvedRate: number;
-  remainedCleanRate: number;
-  unchangedWithIssuesRate: number;
-  regressedRate: number;
-  averageIssueLoadBefore: number;
-  averageIssueLoadAfter: number;
-  averageIssueLoadDelta: number;
+  aiTaskCoverageRate: number | null;
+  postFeedbackResubmissionRate: number | null;
+  postFeedbackRevisionRate: number | null;
+  postFeedbackCodeChangeRate: number | null;
+  qualityComparableRate: number | null;
+  improvedRate: number | null;
+  remainedCleanRate: number | null;
+  unchangedWithIssuesRate: number | null;
+  regressedRate: number | null;
+  evidenceSummary: AiLearningAnalyticsEvidenceSummary;
+  averageIssueLoadBefore: number | null;
+  averageIssueLoadAfter: number | null;
+  averageIssueLoadDelta: number | null;
 };
 
 export type AiLearningAnalyticsOverviewResponse = {
@@ -754,6 +787,7 @@ export type AiLearningAnalyticsStudentMetrics = {
   aiRequestedTasksCount: number;
   aiDeliveredTasksCount: number;
   postFeedbackResubmittedTasksCount: number;
+  postFeedbackRevisedTasksCount: number;
   postFeedbackCodeChangedTasksCount: number;
   qualityComparableTasksCount: number;
   improvedTasksCount: number;
@@ -761,11 +795,13 @@ export type AiLearningAnalyticsStudentMetrics = {
   unchangedWithIssuesTasksCount: number;
   stableTasksCount: number;
   regressedTasksCount: number;
-  averageIssueLoadBefore: number;
-  averageIssueLoadAfter: number;
-  averageIssueLoadDelta: number;
+  evidenceSummary: AiLearningAnalyticsEvidenceSummary;
+  averageIssueLoadBefore: number | null;
+  averageIssueLoadAfter: number | null;
+  averageIssueLoadDelta: number | null;
   overallOutcome: AiLearningAnalyticsOverallOutcome;
   engagementStatus: AiLearningAnalyticsEngagementStatus;
+  postFeedbackRevisionRate: number | null;
   growthTrend: AiLearningAnalyticsGrowthTrend;
 };
 
@@ -777,6 +813,7 @@ export type AiLearningAnalyticsStudentItem =
   };
 
 export type AiLearningAnalyticsStudentsResponse = {
+  methodology: AiLearningAnalyticsMethodology;
   context: AiLearningAnalyticsContext;
   page: number;
   limit: number;
@@ -800,6 +837,12 @@ export type AiLearningAnalyticsTaskPoint = {
   aiRequested: boolean;
   aiDelivered: boolean;
   postFeedbackResubmitted: boolean;
+  postFeedbackRevised: boolean;
+  baselineReview: AiLearningAnalyticsReviewEndpoint | null;
+  comparisonReview: AiLearningAnalyticsReviewEndpoint | null;
+  latestRevision: AiLearningAnalyticsReviewEndpoint | null;
+  hasNewerUncomparedRevision: boolean | null;
+  comparisonWarnings: AiLearningAnalyticsComparisonWarning[];
   postFeedbackCodeChanged: boolean;
   qualityComparable: boolean;
   issueLoadBefore: number | null;
@@ -1566,6 +1609,59 @@ export const toProcessAssessmentResponse = (
   };
 };
 
+const toAiLearningAnalyticsNullableNumber = (value: unknown): number | null =>
+  typeof value === "number" && Number.isFinite(value) ? value : null;
+
+const toAiLearningAnalyticsEvidenceSummary = (
+  value: unknown,
+): AiLearningAnalyticsEvidenceSummary => {
+  const record = asRecord(value);
+  return {
+    sourceUncertainComparableCount: toRequiredNumber(
+      record.sourceUncertainComparableCount,
+    ),
+    modelChangedComparableCount: toRequiredNumber(
+      record.modelChangedComparableCount,
+    ),
+    simulatedExcludedSampleCount: toRequiredNumber(
+      record.simulatedExcludedSampleCount,
+    ),
+  };
+};
+
+const toAiLearningAnalyticsReviewEndpoint = (
+  value: unknown,
+): AiLearningAnalyticsReviewEndpoint | null => {
+  const record = asRecord(value);
+  const submissionId = asString(record.submissionId);
+  if (!submissionId) return null;
+  const timestamp = (value: unknown): string | null =>
+    typeof value === "string" && Number.isFinite(Date.parse(value))
+      ? value
+      : null;
+  return {
+    submissionId,
+    attemptNo:
+      typeof record.attemptNo === "number" &&
+      Number.isSafeInteger(record.attemptNo) &&
+      record.attemptNo > 0
+        ? record.attemptNo
+        : null,
+    contentRevision: toAiLearningAnalyticsNullableNumber(
+      record.contentRevision,
+    ),
+    submittedAt: timestamp(record.submittedAt),
+    lastEditedAt: timestamp(record.lastEditedAt),
+    contentVersionAt: timestamp(record.contentVersionAt),
+    feedbackCompletedAt: timestamp(record.feedbackCompletedAt),
+    provider:
+      record.provider === "bailian" || record.provider === "stub"
+        ? record.provider
+        : null,
+    model: asNullableString(record.model) ?? null,
+  };
+};
+
 const unwrapAiLearningAnalyticsRecord = (payload: unknown): UnknownRecord => {
   const record = asRecord(payload);
   const dataRecord = asRecord(safeGet(record, "data", undefined));
@@ -1619,8 +1715,8 @@ const normalizeAiLearningAnalyticsOutcome = (
 const normalizeAiLearningAnalyticsMethodologyVersion = (
   value: unknown,
 ): AiLearningAnalyticsMethodologyVersion =>
-  asString(value) === "AI_FEEDBACK_INTERVENTION_V1_1"
-    ? "AI_FEEDBACK_INTERVENTION_V1_1"
+  asString(value) === "AI_FEEDBACK_INTERVENTION_V1_2"
+    ? "AI_FEEDBACK_INTERVENTION_V1_2"
     : "UNKNOWN";
 
 const normalizeAiLearningAnalyticsDetailedOutcome = (
@@ -1662,8 +1758,8 @@ const normalizeAiLearningAnalyticsEngagementStatus = (
     status === "NO_SUBMISSION" ||
     status === "SUBMITTED_WITHOUT_AI_REQUEST" ||
     status === "AI_REQUESTED_WITHOUT_DELIVERY" ||
-    status === "AI_DELIVERED_WITHOUT_RESUBMISSION" ||
-    status === "RESUBMITTED_WITHOUT_COMPARABLE" ||
+    status === "AI_DELIVERED_WITHOUT_REVISION" ||
+    status === "REVISED_WITHOUT_COMPARABLE" ||
     status === "QUALITY_COMPARABLE"
   ) {
     return status;
@@ -1702,7 +1798,7 @@ const toAiLearningAnalyticsMethodology = (
     qualityProxy: toRequiredString(record.qualityProxy, "ERROR_PLUS_HALF_WARN"),
     disclaimer: toRequiredString(
       record.disclaimer,
-      "本分析仅反映 EduForge AI 反馈介入后的提交行为与代码问题代理变化，不代表 AI 对学习成绩或能力提升的因果贡献。",
+      "本分析仅反映 EduForge AI 反馈介入后的作品更新与反馈条目负荷变化，不代表 AI 对学习成绩或能力提升的因果贡献。",
     ),
   };
 };
@@ -1721,6 +1817,9 @@ const toAiLearningAnalyticsSummary = (
     ),
     aiDeliveredStudentTaskCount: toRequiredNumber(
       record.aiDeliveredStudentTaskCount,
+    ),
+    postFeedbackRevisedStudentTaskCount: toRequiredNumber(
+      record.postFeedbackRevisedStudentTaskCount,
     ),
     postFeedbackResubmittedStudentTaskCount: toRequiredNumber(
       record.postFeedbackResubmittedStudentTaskCount,
@@ -1742,23 +1841,45 @@ const toAiLearningAnalyticsSummary = (
     regressedStudentTaskCount: toRequiredNumber(
       record.regressedStudentTaskCount,
     ),
-    aiStudentCoverageRate: toRequiredNumber(record.aiStudentCoverageRate),
-    aiTaskCoverageRate: toRequiredNumber(record.aiTaskCoverageRate),
-    aiDeliveryRate: toRequiredNumber(record.aiDeliveryRate),
-    postFeedbackResubmissionRate: toRequiredNumber(
+    aiStudentCoverageRate: toAiLearningAnalyticsNullableNumber(
+      record.aiStudentCoverageRate,
+    ),
+    aiTaskCoverageRate: toAiLearningAnalyticsNullableNumber(
+      record.aiTaskCoverageRate,
+    ),
+    aiDeliveryRate: toAiLearningAnalyticsNullableNumber(record.aiDeliveryRate),
+    postFeedbackResubmissionRate: toAiLearningAnalyticsNullableNumber(
       record.postFeedbackResubmissionRate,
     ),
-    postFeedbackCodeChangeRate: toRequiredNumber(
+    postFeedbackRevisionRate: toAiLearningAnalyticsNullableNumber(
+      record.postFeedbackRevisionRate,
+    ),
+    postFeedbackCodeChangeRate: toAiLearningAnalyticsNullableNumber(
       record.postFeedbackCodeChangeRate,
     ),
-    qualityComparableRate: toRequiredNumber(record.qualityComparableRate),
-    improvedRate: toRequiredNumber(record.improvedRate),
-    remainedCleanRate: toRequiredNumber(record.remainedCleanRate),
-    unchangedWithIssuesRate: toRequiredNumber(record.unchangedWithIssuesRate),
-    regressedRate: toRequiredNumber(record.regressedRate),
-    averageIssueLoadBefore: toRequiredNumber(record.averageIssueLoadBefore),
-    averageIssueLoadAfter: toRequiredNumber(record.averageIssueLoadAfter),
-    averageIssueLoadDelta: toRequiredNumber(record.averageIssueLoadDelta),
+    qualityComparableRate: toAiLearningAnalyticsNullableNumber(
+      record.qualityComparableRate,
+    ),
+    improvedRate: toAiLearningAnalyticsNullableNumber(record.improvedRate),
+    remainedCleanRate: toAiLearningAnalyticsNullableNumber(
+      record.remainedCleanRate,
+    ),
+    unchangedWithIssuesRate: toAiLearningAnalyticsNullableNumber(
+      record.unchangedWithIssuesRate,
+    ),
+    regressedRate: toAiLearningAnalyticsNullableNumber(record.regressedRate),
+    evidenceSummary: toAiLearningAnalyticsEvidenceSummary(
+      record.evidenceSummary,
+    ),
+    averageIssueLoadBefore: toAiLearningAnalyticsNullableNumber(
+      record.averageIssueLoadBefore,
+    ),
+    averageIssueLoadAfter: toAiLearningAnalyticsNullableNumber(
+      record.averageIssueLoadAfter,
+    ),
+    averageIssueLoadDelta: toAiLearningAnalyticsNullableNumber(
+      record.averageIssueLoadDelta,
+    ),
   };
 };
 
@@ -1774,6 +1895,9 @@ const toAiLearningAnalyticsTaskTrend = (
     submittedStudentCount: toRequiredNumber(record.submittedStudentCount),
     aiRequestedStudentCount: toRequiredNumber(record.aiRequestedStudentCount),
     aiDeliveredStudentCount: toRequiredNumber(record.aiDeliveredStudentCount),
+    postFeedbackRevisedStudentCount: toRequiredNumber(
+      record.postFeedbackRevisedStudentCount,
+    ),
     postFeedbackResubmittedStudentCount: toRequiredNumber(
       record.postFeedbackResubmittedStudentCount,
     ),
@@ -1792,21 +1916,41 @@ const toAiLearningAnalyticsTaskTrend = (
     ),
     stableStudentCount: toRequiredNumber(record.stableStudentCount),
     regressedStudentCount: toRequiredNumber(record.regressedStudentCount),
-    aiTaskCoverageRate: toRequiredNumber(record.aiTaskCoverageRate),
-    postFeedbackResubmissionRate: toRequiredNumber(
+    aiTaskCoverageRate: toAiLearningAnalyticsNullableNumber(
+      record.aiTaskCoverageRate,
+    ),
+    postFeedbackResubmissionRate: toAiLearningAnalyticsNullableNumber(
       record.postFeedbackResubmissionRate,
     ),
-    postFeedbackCodeChangeRate: toRequiredNumber(
+    postFeedbackRevisionRate: toAiLearningAnalyticsNullableNumber(
+      record.postFeedbackRevisionRate,
+    ),
+    postFeedbackCodeChangeRate: toAiLearningAnalyticsNullableNumber(
       record.postFeedbackCodeChangeRate,
     ),
-    qualityComparableRate: toRequiredNumber(record.qualityComparableRate),
-    improvedRate: toRequiredNumber(record.improvedRate),
-    remainedCleanRate: toRequiredNumber(record.remainedCleanRate),
-    unchangedWithIssuesRate: toRequiredNumber(record.unchangedWithIssuesRate),
-    regressedRate: toRequiredNumber(record.regressedRate),
-    averageIssueLoadBefore: toRequiredNumber(record.averageIssueLoadBefore),
-    averageIssueLoadAfter: toRequiredNumber(record.averageIssueLoadAfter),
-    averageIssueLoadDelta: toRequiredNumber(record.averageIssueLoadDelta),
+    qualityComparableRate: toAiLearningAnalyticsNullableNumber(
+      record.qualityComparableRate,
+    ),
+    improvedRate: toAiLearningAnalyticsNullableNumber(record.improvedRate),
+    remainedCleanRate: toAiLearningAnalyticsNullableNumber(
+      record.remainedCleanRate,
+    ),
+    unchangedWithIssuesRate: toAiLearningAnalyticsNullableNumber(
+      record.unchangedWithIssuesRate,
+    ),
+    regressedRate: toAiLearningAnalyticsNullableNumber(record.regressedRate),
+    evidenceSummary: toAiLearningAnalyticsEvidenceSummary(
+      record.evidenceSummary,
+    ),
+    averageIssueLoadBefore: toAiLearningAnalyticsNullableNumber(
+      record.averageIssueLoadBefore,
+    ),
+    averageIssueLoadAfter: toAiLearningAnalyticsNullableNumber(
+      record.averageIssueLoadAfter,
+    ),
+    averageIssueLoadDelta: toAiLearningAnalyticsNullableNumber(
+      record.averageIssueLoadDelta,
+    ),
   };
 };
 
@@ -1818,6 +1962,9 @@ const toAiLearningAnalyticsStudentMetrics = (
     submittedTasksCount: toRequiredNumber(record.submittedTasksCount),
     aiRequestedTasksCount: toRequiredNumber(record.aiRequestedTasksCount),
     aiDeliveredTasksCount: toRequiredNumber(record.aiDeliveredTasksCount),
+    postFeedbackRevisedTasksCount: toRequiredNumber(
+      record.postFeedbackRevisedTasksCount,
+    ),
     postFeedbackResubmittedTasksCount: toRequiredNumber(
       record.postFeedbackResubmittedTasksCount,
     ),
@@ -1834,14 +1981,26 @@ const toAiLearningAnalyticsStudentMetrics = (
     ),
     stableTasksCount: toRequiredNumber(record.stableTasksCount),
     regressedTasksCount: toRequiredNumber(record.regressedTasksCount),
-    averageIssueLoadBefore: toRequiredNumber(record.averageIssueLoadBefore),
-    averageIssueLoadAfter: toRequiredNumber(record.averageIssueLoadAfter),
-    averageIssueLoadDelta: toRequiredNumber(record.averageIssueLoadDelta),
+    evidenceSummary: toAiLearningAnalyticsEvidenceSummary(
+      record.evidenceSummary,
+    ),
+    averageIssueLoadBefore: toAiLearningAnalyticsNullableNumber(
+      record.averageIssueLoadBefore,
+    ),
+    averageIssueLoadAfter: toAiLearningAnalyticsNullableNumber(
+      record.averageIssueLoadAfter,
+    ),
+    averageIssueLoadDelta: toAiLearningAnalyticsNullableNumber(
+      record.averageIssueLoadDelta,
+    ),
     overallOutcome: normalizeAiLearningAnalyticsOverallOutcome(
       record.overallOutcome,
     ),
     engagementStatus: normalizeAiLearningAnalyticsEngagementStatus(
       record.engagementStatus,
+    ),
+    postFeedbackRevisionRate: toAiLearningAnalyticsNullableNumber(
+      record.postFeedbackRevisionRate,
     ),
     growthTrend: normalizeAiLearningAnalyticsGrowthTrend(record.growthTrend),
   };
@@ -1871,12 +2030,25 @@ const toAiLearningAnalyticsTaskPoint = (
     attemptsCount: toRequiredNumber(record.attemptsCount),
     aiRequested: asBoolean(record.aiRequested) ?? false,
     aiDelivered: asBoolean(record.aiDelivered) ?? false,
+    postFeedbackRevised: asBoolean(record.postFeedbackRevised) ?? false,
+    baselineReview: toAiLearningAnalyticsReviewEndpoint(record.baselineReview),
+    comparisonReview: toAiLearningAnalyticsReviewEndpoint(
+      record.comparisonReview,
+    ),
+    latestRevision: toAiLearningAnalyticsReviewEndpoint(record.latestRevision),
+    hasNewerUncomparedRevision:
+      asBoolean(record.hasNewerUncomparedRevision) ?? null,
+    comparisonWarnings: AI_LEARNING_ANALYTICS_COMPARISON_WARNINGS.filter(
+      (warning) => asStringArray(record.comparisonWarnings).includes(warning),
+    ),
     postFeedbackResubmitted: asBoolean(record.postFeedbackResubmitted) ?? false,
     postFeedbackCodeChanged: asBoolean(record.postFeedbackCodeChanged) ?? false,
     qualityComparable: asBoolean(record.qualityComparable) ?? false,
-    issueLoadBefore: asNullableNumber(record.issueLoadBefore) ?? null,
-    issueLoadAfter: asNullableNumber(record.issueLoadAfter) ?? null,
-    issueLoadDelta: asNullableNumber(record.issueLoadDelta) ?? null,
+    issueLoadBefore: toAiLearningAnalyticsNullableNumber(
+      record.issueLoadBefore,
+    ),
+    issueLoadAfter: toAiLearningAnalyticsNullableNumber(record.issueLoadAfter),
+    issueLoadDelta: toAiLearningAnalyticsNullableNumber(record.issueLoadDelta),
     detailedOutcome: normalizeAiLearningAnalyticsDetailedOutcome(
       record.detailedOutcome,
     ),
@@ -1905,6 +2077,7 @@ export const toAiLearningAnalyticsStudentsResponse = (
   const source = unwrapAiLearningAnalyticsRecord(payload);
   const filtersRecord = asRecord(source.filters);
   return {
+    methodology: toAiLearningAnalyticsMethodology(source.methodology),
     context: toAiLearningAnalyticsContext(source.context),
     page: Math.max(1, toRequiredNumber(source.page) || 1),
     limit: Math.max(1, toRequiredNumber(source.limit) || 20),

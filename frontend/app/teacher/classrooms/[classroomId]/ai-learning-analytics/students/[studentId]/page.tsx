@@ -4,6 +4,7 @@ import { EmptyState } from "@/components/blocks/EmptyState";
 import { ErrorState } from "@/components/blocks/ErrorState";
 import { PageHeader } from "@/components/blocks/PageHeader";
 import { AiLearningAnalyticsStudentIssueLoadComparisonChart } from "@/components/teacher/AiLearningAnalyticsCharts";
+import { AiLearningAnalyticsEvidenceNotes } from "@/components/teacher/AiLearningAnalyticsSummary";
 import {
   AiLearningAnalyticsMethodologyPanel,
   AiLearningAnalyticsMetricGuide,
@@ -16,12 +17,16 @@ import {
 import {
   toAiLearningAnalyticsStudentDetailResponse,
   type AiLearningAnalyticsTaskPoint,
+  type AiLearningAnalyticsReviewEndpoint,
 } from "@/lib/api/types-teacher";
 import {
   AI_LEARNING_ANALYTICS_DETAILED_OUTCOME_LABELS,
   AI_LEARNING_ANALYTICS_ENGAGEMENT_STATUS_LABELS,
   AI_LEARNING_ANALYTICS_OVERALL_OUTCOME_LABELS,
   AI_LEARNING_ANALYTICS_WINDOW_LABELS,
+  AI_LEARNING_ANALYTICS_WARNING_LABELS,
+  buildAiLearningAnalyticsSubmissionHref,
+  formatAiLearningAnalyticsPercent,
   formatAiLearningAnalyticsDelta,
   formatAiLearningAnalyticsIssueLoad,
   getAiLearningAnalyticsDeltaMeaning,
@@ -75,17 +80,19 @@ const formatNullableIssueLoad = (value: number | null): string =>
   value === null ? "—" : formatAiLearningAnalyticsIssueLoad(value);
 
 const formatComparableDelta = (
-  value: number,
+  value: number | null,
   comparableCount: number,
 ): string =>
-  comparableCount > 0
+  comparableCount > 0 && value !== null
     ? `${formatAiLearningAnalyticsDelta(value)}（${getAiLearningAnalyticsDeltaMeaning(value)}）`
     : "—";
 
 function StudentTaskPointsTable({
   taskPoints,
+  classroomId,
 }: {
   taskPoints: AiLearningAnalyticsTaskPoint[];
+  classroomId: string;
 }) {
   if (taskPoints.length === 0) {
     return (
@@ -105,13 +112,17 @@ function StudentTaskPointsTable({
             <th className="px-3 py-2.5">发布时间</th>
             <th className="px-3 py-2.5 text-center">提交次数</th>
             <th className="px-3 py-2.5 text-center">请求 EduForge AI 反馈</th>
-            <th className="px-3 py-2.5 text-center">成功交付 AI 反馈</th>
-            <th className="px-3 py-2.5 text-center">反馈后重提</th>
+            <th className="px-3 py-2.5 text-center">可用反馈交付</th>
+            <th className="px-3 py-2.5 text-center">反馈后新增提交</th>
+            <th className="px-3 py-2.5 text-center">反馈后作品更新</th>
             <th className="px-3 py-2.5 text-center">代码变化</th>
-            <th className="px-3 py-2.5 text-center">质量可比</th>
-            <th className="px-3 py-2.5 text-center">问题负荷 before → after</th>
+            <th className="px-3 py-2.5 text-center">反馈可对照</th>
+            <th className="px-3 py-2.5 text-center">
+              反馈条目负荷 before → after
+            </th>
             <th className="px-3 py-2.5 text-center">差值</th>
             <th className="px-3 py-2.5">结果</th>
+            <th className="px-3 py-2.5">比较版本与证据</th>
           </tr>
         </thead>
         <tbody>
@@ -138,6 +149,7 @@ function StudentTaskPointsTable({
                 task.aiRequested,
                 task.aiDelivered,
                 task.postFeedbackResubmitted,
+                task.postFeedbackRevised,
                 task.postFeedbackCodeChanged,
                 task.qualityComparable,
               ].map((value, valueIndex) => (
@@ -145,7 +157,12 @@ function StudentTaskPointsTable({
                   key={`${task.classroomTaskId}-boolean-${valueIndex}`}
                   className="px-3 py-2.5 text-center text-zinc-800"
                 >
-                  {toBooleanText(value)}
+                  {!value &&
+                  valueIndex >= 2 &&
+                  valueIndex <= 4 &&
+                  task.comparisonWarnings.includes("TIME_UNKNOWN")
+                    ? "尚未确认"
+                    : toBooleanText(value)}
                 </td>
               ))}
               <td className="px-3 py-2.5 text-center tabular-nums text-zinc-800">
@@ -164,11 +181,89 @@ function StudentTaskPointsTable({
                   ]
                 }
               </td>
+              <td className="min-w-80 px-3 py-2.5 text-zinc-700">
+                <ReviewEndpoint
+                  label="介入基线"
+                  review={task.baselineReview}
+                  classroomId={classroomId}
+                  classroomTaskId={task.classroomTaskId}
+                />
+                <ReviewEndpoint
+                  label="比较终点"
+                  review={task.comparisonReview}
+                  classroomId={classroomId}
+                  classroomTaskId={task.classroomTaskId}
+                />
+                <ReviewEndpoint
+                  label="最新现存版本"
+                  review={task.latestRevision}
+                  classroomId={classroomId}
+                  classroomTaskId={task.classroomTaskId}
+                />
+                <p className="mt-2 text-xs text-amber-900">
+                  {task.hasNewerUncomparedRevision === true
+                    ? "存在较新版本未纳入当前比较。"
+                    : task.hasNewerUncomparedRevision === null
+                      ? "最新版本时序未知，无法确认是否有更新未纳入。"
+                      : "未发现可确认的较新未纳入版本。"}
+                </p>
+                {task.comparisonWarnings.map((warning) => (
+                  <p key={warning} className="mt-1 text-xs text-amber-900">
+                    {AI_LEARNING_ANALYTICS_WARNING_LABELS[warning]}
+                  </p>
+                ))}
+              </td>
             </tr>
           ))}
         </tbody>
       </table>
     </div>
+  );
+}
+
+function ReviewEndpoint({
+  label,
+  review,
+  classroomId,
+  classroomTaskId,
+}: {
+  label: string;
+  review: AiLearningAnalyticsReviewEndpoint | null;
+  classroomId: string;
+  classroomTaskId: string;
+}) {
+  if (!review)
+    return <p className="mt-2 text-xs">{label}：未知或暂无可用端点</p>;
+  return (
+    <details className="mt-2 text-xs leading-5">
+      <summary>
+        {label}：第 {review.attemptNo ?? "未知"} 次提交，revision{" "}
+        {review.contentRevision ?? "未知"}
+      </summary>
+      <Link
+        className="text-blue-700 hover:underline"
+        href={buildAiLearningAnalyticsSubmissionHref(
+          review.submissionId,
+          classroomId,
+          classroomTaskId,
+        )}
+      >
+        查看该作品
+      </Link>
+      <p>提交时间：{toDisplayDate(review.submittedAt)}</p>
+      <p>最近编辑：{toDisplayDate(review.lastEditedAt)}</p>
+      <p>内容形成：{toDisplayDate(review.contentVersionAt)}</p>
+      <p>反馈完成：{toDisplayDate(review.feedbackCompletedAt)}</p>
+      <p>
+        来源：
+        {review.provider === "stub"
+          ? "模拟评阅（排除）"
+          : review.provider === "bailian"
+            ? "Bailian"
+            : "未知来源，仅作记录对照"}
+        ；模型：{review.model ?? "未知"}
+      </p>
+    </details>
   );
 }
 
@@ -185,10 +280,7 @@ export default async function AiLearningAnalyticsStudentPage({
       queryState.excludedTaskIds,
     ),
   });
-  const backToAnalyticsHref = buildBackToAnalyticsHref(
-    classroomId,
-    queryState,
-  );
+  const backToAnalyticsHref = buildBackToAnalyticsHref(classroomId, queryState);
 
   let payload: unknown;
   try {
@@ -252,10 +344,11 @@ export default async function AiLearningAnalyticsStudentPage({
   const primaryMetrics = [
     ["已提交任务数", summary.submittedTasksCount],
     ["AI 反馈请求任务数", summary.aiRequestedTasksCount],
-    ["AI 反馈交付任务数", summary.aiDeliveredTasksCount],
+    ["可用反馈交付任务数", summary.aiDeliveredTasksCount],
     ["反馈后重提任务数", summary.postFeedbackResubmittedTasksCount],
+    ["反馈后作品更新任务数", summary.postFeedbackRevisedTasksCount],
     ["代码变化任务数", summary.postFeedbackCodeChangedTasksCount],
-    ["质量可比任务数", summary.qualityComparableTasksCount],
+    ["反馈可对照任务数", summary.qualityComparableTasksCount],
   ] as const;
 
   return (
@@ -290,6 +383,13 @@ export default async function AiLearningAnalyticsStudentPage({
         <p className="mt-1 text-xs text-zinc-500">
           以下指标直接来自学生详情接口，不由任务表重新汇总。
         </p>
+        <p className="mt-2 text-xs text-zinc-600">
+          作品更新率{" "}
+          {formatAiLearningAnalyticsPercent(summary.postFeedbackRevisionRate)}
+          ；可对照任务 {summary.qualityComparableTasksCount} / 可用反馈交付任务{" "}
+          {summary.aiDeliveredTasksCount}，结果仅代表可对照子集。
+        </p>
+        <AiLearningAnalyticsEvidenceNotes evidence={summary.evidenceSummary} />
         <div className="mt-3 grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
           {primaryMetrics.map(([label, value]) => (
             <article
@@ -326,20 +426,22 @@ export default async function AiLearningAnalyticsStudentPage({
             <p className="mt-1 text-[11px] leading-5 text-zinc-500">
               {hasComparableTasks
                 ? `基于 ${summary.qualityComparableTasksCount} 个可比任务`
-                : "暂无质量可比任务"}
+                : "暂无反馈可对照任务"}
             </p>
           </div>
           <div>
             <dt className="text-xs text-zinc-500">四类精细结果任务数</dt>
             <dd className="mt-0.5 font-medium tabular-nums text-zinc-900">
-              改善 {summary.improvedTasksCount} · 前后均无 ERROR/WARN{" "}
-              {summary.remainedCleanTasksCount} · 问题负荷未减少{" "}
-              {summary.unchangedWithIssuesTasksCount} · 恶化{" "}
+              负荷下降 {summary.improvedTasksCount} · 前后均无 ERROR/WARN{" "}
+              {summary.remainedCleanTasksCount} · 非零负荷持平{" "}
+              {summary.unchangedWithIssuesTasksCount} · 负荷上升{" "}
               {summary.regressedTasksCount}
             </dd>
           </div>
           <div>
-            <dt className="text-xs text-zinc-500">平均问题负荷 before → after</dt>
+            <dt className="text-xs text-zinc-500">
+              平均反馈条目负荷 before → after
+            </dt>
             <dd className="mt-0.5 font-medium tabular-nums text-zinc-900">
               {hasComparableTasks
                 ? `${formatAiLearningAnalyticsIssueLoad(summary.averageIssueLoadBefore)} → ${formatAiLearningAnalyticsIssueLoad(summary.averageIssueLoadAfter)}`
@@ -347,7 +449,7 @@ export default async function AiLearningAnalyticsStudentPage({
             </dd>
           </div>
           <div>
-            <dt className="text-xs text-zinc-500">平均问题负荷差值</dt>
+            <dt className="text-xs text-zinc-500">平均反馈条目负荷差值</dt>
             <dd className="mt-0.5 font-medium tabular-nums text-zinc-900">
               {formatComparableDelta(
                 summary.averageIssueLoadDelta,
@@ -357,9 +459,9 @@ export default async function AiLearningAnalyticsStudentPage({
           </div>
         </dl>
         <p className="mt-3 text-xs leading-5 text-zinc-500">
-          总体结果按当前范围内全部可比任务的问题负荷净变化计算，不按任务发布时间做趋势回归，也不是能力成长或退步结论。
+          总体结果按当前范围内全部可比任务的反馈条目负荷净变化计算，不按任务发布时间做趋势回归，也不是能力成长或退步结论。
           {summary.overallOutcome === "NO_NET_CHANGE"
-            ? "“净变化为零”可能由改善和恶化相互抵消。"
+            ? "“净变化为零”可能由负荷下降和负荷上升相互抵消。"
             : ""}
         </p>
       </section>
@@ -375,12 +477,12 @@ export default async function AiLearningAnalyticsStudentPage({
           </h2>
           <p className="mt-1 text-xs leading-5 text-zinc-500">
             该图比较同一课堂任务内 AI
-            反馈前后的问题负荷，不代表不同任务之间的成绩或能力成长曲线。
+            反馈前后的反馈条目负荷，不代表不同任务之间的成绩或能力成长曲线。
           </p>
           <div className="mt-3">
             <EmptyState
               title="当前学生暂无可比较的介入前后任务"
-              description="摘要和全任务明细仍保留；不可比较任务不会被绘制为 0。"
+              description="摘要和全任务明细仍保留；不可对照任务不会被绘制为 0。"
             />
           </div>
         </section>
@@ -389,10 +491,14 @@ export default async function AiLearningAnalyticsStudentPage({
       <section className="rounded-lg border border-zinc-200 bg-white p-4">
         <h2 className="text-sm font-semibold text-zinc-900">全任务明细</h2>
         <p className="mt-1 text-xs text-zinc-500">
-          覆盖当前有效任务，包括无提交和不可比较任务；布尔值使用“是 / 否”明确表达。
+          覆盖当前有效任务，包括无提交和不可对照任务；布尔值使用“是 /
+          否”明确表达。
         </p>
         <div className="mt-3">
-          <StudentTaskPointsTable taskPoints={taskPoints} />
+          <StudentTaskPointsTable
+            taskPoints={taskPoints}
+            classroomId={classroomId}
+          />
         </div>
       </section>
 

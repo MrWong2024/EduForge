@@ -58,10 +58,7 @@ function buildRowLayouts<T extends TaskNamedRow>(
   let currentTop = ROW_START;
   const layouts = rows.map((row) => {
     const titleLines = wrapTaskTitle(row.taskTitle);
-    const height = Math.max(
-      MIN_ROW_HEIGHT,
-      28 + titleLines.length * 16,
-    );
+    const height = Math.max(MIN_ROW_HEIGHT, 28 + titleLines.length * 16);
     const layout = {
       row,
       top: currentTop,
@@ -144,10 +141,12 @@ function BeforeAfterComparisonChart({
   title,
   description,
   rows,
+  axisLabel,
 }: {
   title: string;
   description: string;
   rows: BeforeAfterRow[];
+  axisLabel: string;
 }) {
   if (rows.length === 0) {
     return (
@@ -209,140 +208,146 @@ function BeforeAfterComparisonChart({
             );
           })}
 
-          {layouts.map(({ row, top, height: rowHeight, centerY, titleLines }, index) => {
-            const hasComparable =
-              row.before !== null && row.after !== null && row.delta !== null;
-            const beforeX = hasComparable ? toX(row.before as number) : 0;
-            const afterX = hasComparable ? toX(row.after as number) : 0;
-            const pointsOverlap =
-              hasComparable && Math.abs(beforeX - afterX) < 0.5;
-            const beforeY = centerY + (pointsOverlap ? 7 : 0);
-            const afterY = centerY - (pointsOverlap ? 7 : 0);
-            return (
-              <g key={row.key}>
-                <title>{row.accessibleText}</title>
-                <rect
-                  x="0"
-                  y={top}
-                  width={CHART_WIDTH}
-                  height={rowHeight}
-                  fill={index % 2 === 0 ? "#fafafa" : "#ffffff"}
-                />
-                {ticks.map((tick) => {
-                  const x = PLOT_LEFT + tick * plotWidth;
-                  return (
-                    <line
-                      key={tick}
-                      x1={x}
-                      x2={x}
-                      y1={top}
-                      y2={top + rowHeight}
-                      stroke={tick === 0 ? "#a1a1aa" : "#e4e4e7"}
-                      strokeWidth={tick === 0 ? "1.5" : "1"}
-                    />
-                  );
-                })}
-                <line
-                  x1="0"
-                  x2={CHART_WIDTH}
-                  y1={top}
-                  y2={top}
-                  stroke="#e4e4e7"
-                />
-                <SvgTaskTitle lines={titleLines} centerY={centerY} />
-                <line
-                  x1={PLOT_LEFT}
-                  x2={PLOT_RIGHT}
-                  y1={centerY}
-                  y2={centerY}
-                  stroke="#d4d4d8"
-                />
-                {hasComparable ? (
-                  <>
-                    <line
-                      x1={beforeX}
-                      x2={afterX}
-                      y1={beforeY}
-                      y2={afterY}
-                      stroke="#71717a"
-                      strokeWidth="3"
-                    />
-                    <circle
-                      cx={beforeX}
-                      cy={beforeY}
-                      r="6"
-                      fill="#ffffff"
-                      stroke="#2563eb"
-                      strokeWidth="3"
-                    />
-                    <polygon
-                      points={
-                        afterX +
-                        "," +
-                        (afterY - 7) +
-                        " " +
-                        (afterX + 7) +
-                        "," +
-                        afterY +
-                        " " +
-                        afterX +
-                        "," +
-                        (afterY + 7) +
-                        " " +
-                        (afterX - 7) +
-                        "," +
-                        afterY
-                      }
-                      fill="#f97316"
-                      stroke="#9a3412"
-                      strokeWidth="1.5"
-                    />
-                    <text
-                      x={DETAIL_X}
-                      y={centerY - 7}
-                      fontSize="11"
-                      fill="#27272a"
-                    >
-                      前{" "}
-                      {formatAiLearningAnalyticsIssueLoad(row.before as number)}
-                      {" "}→ 后{" "}
-                      {formatAiLearningAnalyticsIssueLoad(row.after as number)}
-                    </text>
-                    <text
-                      x={DETAIL_X}
-                      y={centerY + 12}
-                      fontSize="10"
-                      fill="#52525b"
-                    >
-                      差值{" "}
-                      {formatAiLearningAnalyticsDelta(row.delta as number)}
-                      {" · "}
-                      {row.detailLabel}
-                    </text>
-                  </>
-                ) : (
-                  <>
-                    <text
-                      x={PLOT_LEFT + 10}
-                      y={centerY + 4}
-                      fontSize="11"
-                      fill="#71717a"
-                    >
-                      暂无可比样本
-                    </text>
-                    <text
-                      x={DETAIL_X}
-                      y={centerY + 4}
-                      fontSize="10"
-                      fill="#71717a"
-                    >
-                      {row.detailLabel}
-                    </text>
-                  </>
-                )}
-              </g>
-            );
-          })}
+          {layouts.map(
+            ({ row, top, height: rowHeight, centerY, titleLines }, index) => {
+              const hasComparable =
+                row.before !== null && row.after !== null && row.delta !== null;
+              const beforeX = hasComparable ? toX(row.before as number) : 0;
+              const afterX = hasComparable ? toX(row.after as number) : 0;
+              const pointsOverlap =
+                hasComparable && Math.abs(beforeX - afterX) < 0.5;
+              const beforeY = centerY + (pointsOverlap ? 7 : 0);
+              const afterY = centerY - (pointsOverlap ? 7 : 0);
+              return (
+                <g key={row.key}>
+                  <title>{row.accessibleText}</title>
+                  <rect
+                    x="0"
+                    y={top}
+                    width={CHART_WIDTH}
+                    height={rowHeight}
+                    fill={index % 2 === 0 ? "#fafafa" : "#ffffff"}
+                  />
+                  {ticks.map((tick) => {
+                    const x = PLOT_LEFT + tick * plotWidth;
+                    return (
+                      <line
+                        key={tick}
+                        x1={x}
+                        x2={x}
+                        y1={top}
+                        y2={top + rowHeight}
+                        stroke={tick === 0 ? "#a1a1aa" : "#e4e4e7"}
+                        strokeWidth={tick === 0 ? "1.5" : "1"}
+                      />
+                    );
+                  })}
+                  <line
+                    x1="0"
+                    x2={CHART_WIDTH}
+                    y1={top}
+                    y2={top}
+                    stroke="#e4e4e7"
+                  />
+                  <SvgTaskTitle lines={titleLines} centerY={centerY} />
+                  <line
+                    x1={PLOT_LEFT}
+                    x2={PLOT_RIGHT}
+                    y1={centerY}
+                    y2={centerY}
+                    stroke="#d4d4d8"
+                  />
+                  {hasComparable ? (
+                    <>
+                      <line
+                        x1={beforeX}
+                        x2={afterX}
+                        y1={beforeY}
+                        y2={afterY}
+                        stroke="#71717a"
+                        strokeWidth="3"
+                      />
+                      <circle
+                        cx={beforeX}
+                        cy={beforeY}
+                        r="6"
+                        fill="#ffffff"
+                        stroke="#2563eb"
+                        strokeWidth="3"
+                      />
+                      <polygon
+                        points={
+                          afterX +
+                          "," +
+                          (afterY - 7) +
+                          " " +
+                          (afterX + 7) +
+                          "," +
+                          afterY +
+                          " " +
+                          afterX +
+                          "," +
+                          (afterY + 7) +
+                          " " +
+                          (afterX - 7) +
+                          "," +
+                          afterY
+                        }
+                        fill="#f97316"
+                        stroke="#9a3412"
+                        strokeWidth="1.5"
+                      />
+                      <text
+                        x={DETAIL_X}
+                        y={centerY - 7}
+                        fontSize="11"
+                        fill="#27272a"
+                      >
+                        前{" "}
+                        {formatAiLearningAnalyticsIssueLoad(
+                          row.before as number,
+                        )}{" "}
+                        → 后{" "}
+                        {formatAiLearningAnalyticsIssueLoad(
+                          row.after as number,
+                        )}
+                      </text>
+                      <text
+                        x={DETAIL_X}
+                        y={centerY + 12}
+                        fontSize="10"
+                        fill="#52525b"
+                      >
+                        差值{" "}
+                        {formatAiLearningAnalyticsDelta(row.delta as number)}
+                        {" · "}
+                        {row.detailLabel}
+                      </text>
+                    </>
+                  ) : (
+                    <>
+                      <text
+                        x={PLOT_LEFT + 10}
+                        y={centerY + 4}
+                        fontSize="11"
+                        fill="#71717a"
+                      >
+                        暂无可比样本
+                      </text>
+                      <text
+                        x={DETAIL_X}
+                        y={centerY + 4}
+                        fontSize="10"
+                        fill="#71717a"
+                      >
+                        {row.detailLabel}
+                      </text>
+                    </>
+                  )}
+                </g>
+              );
+            },
+          )}
 
           <line
             x1={PLOT_LEFT}
@@ -359,7 +364,7 @@ function BeforeAfterComparisonChart({
             fontSize="11"
             fill="#52525b"
           >
-            平均问题负荷（横轴从 0 开始，数值越低越好）
+            {axisLabel}（横轴从 0 开始）
           </text>
         </svg>
       </div>
@@ -385,15 +390,13 @@ export function AiLearningAnalyticsTaskIssueLoadComparisonChart({
     const accessibleText = [
       "任务：" + task.taskTitle,
       "发布时间：" + toDisplayDate(task.publishedAt),
-      "AI 反馈前平均问题负荷：" +
-        (before === null
-          ? "—"
-          : formatAiLearningAnalyticsIssueLoad(before)),
-      "AI 反馈后平均问题负荷：" +
+      "AI 反馈前平均反馈条目负荷：" +
+        (before === null ? "—" : formatAiLearningAnalyticsIssueLoad(before)),
+      "AI 反馈后平均反馈条目负荷：" +
         (after === null ? "—" : formatAiLearningAnalyticsIssueLoad(after)),
       "平均差值：" +
         (delta === null ? "—" : formatAiLearningAnalyticsDelta(delta)),
-      "质量可比样本数：" + task.qualityComparableStudentCount,
+      "反馈可对照样本数：" + task.qualityComparableStudentCount,
     ].join("；");
     return {
       key: task.classroomTaskId || "class-task-" + index,
@@ -413,8 +416,9 @@ export function AiLearningAnalyticsTaskIssueLoadComparisonChart({
   return (
     <BeforeAfterComparisonChart
       title="各任务 AI 反馈前后问题对比"
-      description="每行对比一个课堂任务中质量可比样本的平均问题负荷。数值越低，表示该版本检测到的 ERROR/WARN 问题负荷越低；不同任务难度未校正，不应把任务间差异直接理解为连续成长趋势。"
+      description="每行对比一个课堂任务中反馈可对照样本的平均反馈条目负荷。数值越低，表示实际反馈中 ERROR/WARN 条目的约定加权负荷越低；不同任务难度未校正，不应把任务间差异直接理解为连续成长趋势。"
       rows={rows}
+      axisLabel="平均反馈条目负荷"
     />
   );
 }
@@ -438,14 +442,11 @@ export function AiLearningAnalyticsStudentIssueLoadComparisonChart({
     const accessibleText = [
       "任务：" + task.taskTitle,
       "发布时间：" + toDisplayDate(task.publishedAt),
-      "AI 反馈前问题负荷：" +
-        (before === null
-          ? "—"
-          : formatAiLearningAnalyticsIssueLoad(before)),
-      "AI 反馈后问题负荷：" +
+      "AI 反馈前反馈条目负荷：" +
+        (before === null ? "—" : formatAiLearningAnalyticsIssueLoad(before)),
+      "AI 反馈后反馈条目负荷：" +
         (after === null ? "—" : formatAiLearningAnalyticsIssueLoad(after)),
-      "差值：" +
-        (delta === null ? "—" : formatAiLearningAnalyticsDelta(delta)),
+      "差值：" + (delta === null ? "—" : formatAiLearningAnalyticsDelta(delta)),
       "结果：" + outcomeLabel,
     ].join("；");
     return {
@@ -463,8 +464,9 @@ export function AiLearningAnalyticsStudentIssueLoadComparisonChart({
   return (
     <BeforeAfterComparisonChart
       title="个人各任务 AI 反馈前后问题对比"
-      description="该图比较同一课堂任务内 AI 反馈前后的问题负荷，不代表不同任务之间的成绩或能力成长曲线。"
+      description="该图比较同一课堂任务内 AI 反馈前后的反馈条目负荷，不代表不同任务之间的成绩或能力成长曲线。"
       rows={rows}
+      axisLabel="反馈条目负荷"
     />
   );
 }
@@ -474,23 +476,19 @@ type OutcomeDistributionRow = TaskNamedRow & {
   remainedClean: number;
   unchangedWithIssues: number;
   regressed: number;
-  improvedRate: number;
-  remainedCleanRate: number;
-  unchangedWithIssuesRate: number;
-  regressedRate: number;
+  improvedRate: number | null;
+  remainedCleanRate: number | null;
+  unchangedWithIssuesRate: number | null;
+  regressedRate: number | null;
   total: number;
   accessibleText: string;
 };
 
 type OutcomeSegment = {
-  key:
-    | "improved"
-    | "remainedClean"
-    | "unchangedWithIssues"
-    | "regressed";
+  key: "improved" | "remainedClean" | "unchangedWithIssues" | "regressed";
   label: string;
   count: number;
-  rate: number;
+  rate: number | null;
   fill: string;
   stroke: string;
 };
@@ -502,7 +500,7 @@ function OutcomeLegend() {
         <span className="inline-flex h-4 w-5 items-center justify-center border border-emerald-700 bg-emerald-100 text-[9px] text-emerald-900">
           ↓
         </span>
-        改善
+        负荷下降
       </span>
       <span className="inline-flex items-center gap-2">
         <span className="inline-flex h-4 w-5 items-center justify-center border border-sky-700 bg-sky-50 text-[9px] text-sky-900">
@@ -514,13 +512,13 @@ function OutcomeLegend() {
         <span className="inline-flex h-4 w-5 items-center justify-center border border-amber-700 bg-amber-100 text-[9px] text-amber-900">
           ＝
         </span>
-        问题负荷未减少
+        非零负荷持平
       </span>
       <span className="inline-flex items-center gap-2">
         <span className="inline-flex h-4 w-5 items-center justify-center border border-red-700 bg-red-100 text-[9px] text-red-900">
           ↑
         </span>
-        恶化
+        负荷上升
       </span>
     </div>
   );
@@ -533,11 +531,11 @@ export function AiLearningAnalyticsComparableOutcomeChart({
 }) {
   const rows: OutcomeDistributionRow[] = taskTrends.map((task, index) => {
     const total = task.qualityComparableStudentCount;
-    const toSegmentText = (label: string, count: number, rate: number) =>
+    const toSegmentText = (label: string, count: number, rate: number | null) =>
       label +
       "：" +
       count +
-      "，占该任务质量可比样本 " +
+      "，占该任务反馈可对照样本 " +
       (total > 0 ? formatAiLearningAnalyticsPercent(rate) : "无对应分母");
     return {
       key: task.classroomTaskId || "outcome-task-" + index,
@@ -555,19 +553,23 @@ export function AiLearningAnalyticsComparableOutcomeChart({
       accessibleText: [
         "任务：" + task.taskTitle,
         "发布时间：" + toDisplayDate(task.publishedAt),
-        "质量可比样本总数：" + total,
-        toSegmentText("改善", task.improvedStudentCount, task.improvedRate),
+        "反馈可对照样本总数：" + total,
+        toSegmentText("负荷下降", task.improvedStudentCount, task.improvedRate),
         toSegmentText(
           "前后均无 ERROR/WARN",
           task.remainedCleanStudentCount,
           task.remainedCleanRate,
         ),
         toSegmentText(
-          "问题负荷未减少",
+          "非零负荷持平",
           task.unchangedWithIssuesStudentCount,
           task.unchangedWithIssuesRate,
         ),
-        toSegmentText("恶化", task.regressedStudentCount, task.regressedRate),
+        toSegmentText(
+          "负荷上升",
+          task.regressedStudentCount,
+          task.regressedRate,
+        ),
       ].join("；"),
     };
   });
@@ -580,7 +582,8 @@ export function AiLearningAnalyticsComparableOutcomeChart({
             各任务可比样本结果分布
           </h3>
           <p className="mt-1 text-xs leading-5 text-zinc-500">
-            每条横向堆叠条以该任务的质量可比样本数为分母，展示四类 V1.1 精细结果。
+            每条横向堆叠条以该任务的反馈可对照样本数为分母，展示四类 V1.2
+            精细结果。
           </p>
         </figcaption>
         <p className="mt-3 rounded-md border border-dashed border-zinc-300 bg-zinc-50 p-5 text-sm text-zinc-600">
@@ -602,14 +605,15 @@ export function AiLearningAnalyticsComparableOutcomeChart({
           各任务可比样本结果分布
         </h3>
         <p className="mt-1 text-xs leading-5 text-zinc-500">
-          每条横向堆叠条以该任务的质量可比样本数为分母，展示四类 V1.1 精细结果。
+          每条横向堆叠条以该任务的反馈可对照样本数为分母，展示四类 V1.2
+          精细结果。
         </p>
       </figcaption>
       <OutcomeLegend />
       <div className="mt-2 overflow-x-auto" tabIndex={0}>
         <svg
           role="img"
-          aria-label="各任务可比样本结果分布。每条横向堆叠条以该任务的质量可比样本数为分母，区分改善、前后均无 ERROR/WARN、问题负荷未减少和恶化。"
+          aria-label="各任务可比样本结果分布。每条横向堆叠条以该任务的反馈可对照样本数为分母，区分负荷下降、前后均无 ERROR/WARN、非零负荷持平和负荷上升。"
           viewBox={"0 0 " + CHART_WIDTH + " " + height}
           width={CHART_WIDTH}
           height={height}
@@ -633,7 +637,11 @@ export function AiLearningAnalyticsComparableOutcomeChart({
               patternUnits="userSpaceOnUse"
             >
               <rect width="7" height="7" fill="#fef3c7" />
-              <path d="M-1,7 L7,-1 M3,9 L9,3" stroke="#b45309" strokeWidth="1" />
+              <path
+                d="M-1,7 L7,-1 M3,9 L9,3"
+                stroke="#b45309"
+                strokeWidth="1"
+              />
             </pattern>
             <pattern
               id="ai-analytics-regressed-pattern"
@@ -642,146 +650,177 @@ export function AiLearningAnalyticsComparableOutcomeChart({
               patternUnits="userSpaceOnUse"
             >
               <rect width="8" height="8" fill="#fee2e2" />
-              <path d="M0,0 L8,8 M8,0 L0,8" stroke="#b91c1c" strokeWidth="0.8" />
+              <path
+                d="M0,0 L8,8 M8,0 L0,8"
+                stroke="#b91c1c"
+                strokeWidth="0.8"
+              />
             </pattern>
           </defs>
 
-          {layouts.map(({ row, top, height: rowHeight, centerY, titleLines }, index) => {
-            const segments: OutcomeSegment[] = [
-              {
-                key: "improved",
-                label: "改善",
-                count: row.improved,
-                rate: row.improvedRate,
-                fill: "#dcfce7",
-                stroke: "#15803d",
-              },
-              {
-                key: "remainedClean",
-                label: "前后均无 ERROR/WARN",
-                count: row.remainedClean,
-                rate: row.remainedCleanRate,
-                fill: "url(#ai-analytics-remained-clean-pattern)",
-                stroke: "#0369a1",
-              },
-              {
-                key: "unchangedWithIssues",
-                label: "问题负荷未减少",
-                count: row.unchangedWithIssues,
-                rate: row.unchangedWithIssuesRate,
-                fill: "url(#ai-analytics-unchanged-with-issues-pattern)",
-                stroke: "#b45309",
-              },
-              {
-                key: "regressed",
-                label: "恶化",
-                count: row.regressed,
-                rate: row.regressedRate,
-                fill: "url(#ai-analytics-regressed-pattern)",
-                stroke: "#b91c1c",
-              },
-            ];
-            let currentX = PLOT_LEFT;
-            return (
-              <g key={row.key}>
-                <title>{row.accessibleText}</title>
-                <rect
-                  x="0"
-                  y={top}
-                  width={CHART_WIDTH}
-                  height={rowHeight}
-                  fill={index % 2 === 0 ? "#fafafa" : "#ffffff"}
-                />
-                <line
-                  x1="0"
-                  x2={CHART_WIDTH}
-                  y1={top}
-                  y2={top}
-                  stroke="#e4e4e7"
-                />
-                <SvgTaskTitle lines={titleLines} centerY={centerY} />
-                {row.total > 0 ? (
-                  <>
-                    <rect
-                      x={PLOT_LEFT}
-                      y={centerY - 13}
-                      width={barWidth}
-                      height="26"
-                      fill="#ffffff"
-                      stroke="#a1a1aa"
-                    />
-                    {segments.map((segment) => {
-                      const ratio = segment.count / row.total;
-                      const width = ratio * barWidth;
-                      const x = currentX;
-                      currentX += width;
-                      if (segment.count === 0) {
-                        return null;
-                      }
-                      const tooltip =
-                        row.taskTitle +
-                        "；" +
-                        segment.label +
-                        "：" +
-                        segment.count +
-                        "；占质量可比样本：" +
-                        formatAiLearningAnalyticsPercent(segment.rate);
-                      return (
-                        <g key={segment.key}>
-                          <title>{tooltip}</title>
-                          <rect
-                            x={x}
-                            y={centerY - 13}
-                            width={width}
-                            height="26"
-                            fill={segment.fill}
-                            stroke={segment.stroke}
-                            strokeWidth="1.5"
-                          />
-                          {width >= 34 ? (
-                            <text
-                              x={x + width / 2}
-                              y={centerY + 4}
-                              textAnchor="middle"
-                              fontSize="10"
-                              fontWeight="600"
-                              fill="#27272a"
-                            >
-                              {segment.count}
-                            </text>
-                          ) : null}
-                        </g>
-                      );
-                    })}
-                    <text x={DETAIL_X} y={centerY - 15} fontSize="10" fill="#52525b">
-                      可比总数 {row.total}
+          {layouts.map(
+            ({ row, top, height: rowHeight, centerY, titleLines }, index) => {
+              const segments: OutcomeSegment[] = [
+                {
+                  key: "improved",
+                  label: "负荷下降",
+                  count: row.improved,
+                  rate: row.improvedRate,
+                  fill: "#dcfce7",
+                  stroke: "#15803d",
+                },
+                {
+                  key: "remainedClean",
+                  label: "前后均无 ERROR/WARN",
+                  count: row.remainedClean,
+                  rate: row.remainedCleanRate,
+                  fill: "url(#ai-analytics-remained-clean-pattern)",
+                  stroke: "#0369a1",
+                },
+                {
+                  key: "unchangedWithIssues",
+                  label: "非零负荷持平",
+                  count: row.unchangedWithIssues,
+                  rate: row.unchangedWithIssuesRate,
+                  fill: "url(#ai-analytics-unchanged-with-issues-pattern)",
+                  stroke: "#b45309",
+                },
+                {
+                  key: "regressed",
+                  label: "负荷上升",
+                  count: row.regressed,
+                  rate: row.regressedRate,
+                  fill: "url(#ai-analytics-regressed-pattern)",
+                  stroke: "#b91c1c",
+                },
+              ];
+              let currentX = PLOT_LEFT;
+              return (
+                <g key={row.key}>
+                  <title>{row.accessibleText}</title>
+                  <rect
+                    x="0"
+                    y={top}
+                    width={CHART_WIDTH}
+                    height={rowHeight}
+                    fill={index % 2 === 0 ? "#fafafa" : "#ffffff"}
+                  />
+                  <line
+                    x1="0"
+                    x2={CHART_WIDTH}
+                    y1={top}
+                    y2={top}
+                    stroke="#e4e4e7"
+                  />
+                  <SvgTaskTitle lines={titleLines} centerY={centerY} />
+                  {row.total > 0 ? (
+                    <>
+                      <rect
+                        x={PLOT_LEFT}
+                        y={centerY - 13}
+                        width={barWidth}
+                        height="26"
+                        fill="#ffffff"
+                        stroke="#a1a1aa"
+                      />
+                      {segments.map((segment) => {
+                        const ratio = segment.count / row.total;
+                        const width = ratio * barWidth;
+                        const x = currentX;
+                        currentX += width;
+                        if (segment.count === 0) {
+                          return null;
+                        }
+                        const tooltip =
+                          row.taskTitle +
+                          "；" +
+                          segment.label +
+                          "：" +
+                          segment.count +
+                          "；占反馈可对照样本：" +
+                          formatAiLearningAnalyticsPercent(segment.rate);
+                        return (
+                          <g key={segment.key}>
+                            <title>{tooltip}</title>
+                            <rect
+                              x={x}
+                              y={centerY - 13}
+                              width={width}
+                              height="26"
+                              fill={segment.fill}
+                              stroke={segment.stroke}
+                              strokeWidth="1.5"
+                            />
+                            {width >= 34 ? (
+                              <text
+                                x={x + width / 2}
+                                y={centerY + 4}
+                                textAnchor="middle"
+                                fontSize="10"
+                                fontWeight="600"
+                                fill="#27272a"
+                              >
+                                {segment.count}
+                              </text>
+                            ) : null}
+                          </g>
+                        );
+                      })}
+                      <text
+                        x={DETAIL_X}
+                        y={centerY - 15}
+                        fontSize="10"
+                        fill="#52525b"
+                      >
+                        可比总数 {row.total}
+                      </text>
+                      <text
+                        x={DETAIL_X}
+                        y={centerY + 1}
+                        fontSize="10"
+                        fill="#166534"
+                      >
+                        负荷下降 {row.improved}
+                      </text>
+                      <text
+                        x={DETAIL_X + 70}
+                        y={centerY + 1}
+                        fontSize="10"
+                        fill="#075985"
+                      >
+                        均无 ERROR/WARN {row.remainedClean}
+                      </text>
+                      <text
+                        x={DETAIL_X}
+                        y={centerY + 17}
+                        fontSize="10"
+                        fill="#92400e"
+                      >
+                        非零负荷持平 {row.unchangedWithIssues}
+                      </text>
+                      <text
+                        x={DETAIL_X + 125}
+                        y={centerY + 17}
+                        fontSize="10"
+                        fill="#991b1b"
+                      >
+                        负荷上升 {row.regressed}
+                      </text>
+                    </>
+                  ) : (
+                    <text
+                      x={PLOT_LEFT + 10}
+                      y={centerY + 4}
+                      fontSize="11"
+                      fill="#71717a"
+                    >
+                      暂无可比样本
                     </text>
-                    <text x={DETAIL_X} y={centerY + 1} fontSize="10" fill="#166534">
-                      改善 {row.improved}
-                    </text>
-                    <text x={DETAIL_X + 70} y={centerY + 1} fontSize="10" fill="#075985">
-                      均无 ERROR/WARN {row.remainedClean}
-                    </text>
-                    <text x={DETAIL_X} y={centerY + 17} fontSize="10" fill="#92400e">
-                      问题负荷未减少 {row.unchangedWithIssues}
-                    </text>
-                    <text x={DETAIL_X + 125} y={centerY + 17} fontSize="10" fill="#991b1b">
-                      恶化 {row.regressed}
-                    </text>
-                  </>
-                ) : (
-                  <text
-                    x={PLOT_LEFT + 10}
-                    y={centerY + 4}
-                    fontSize="11"
-                    fill="#71717a"
-                  >
-                    暂无可比样本
-                  </text>
-                )}
-              </g>
-            );
-          })}
+                  )}
+                </g>
+              );
+            },
+          )}
           <line
             x1={PLOT_LEFT}
             x2={PLOT_RIGHT}
@@ -796,12 +835,13 @@ export function AiLearningAnalyticsComparableOutcomeChart({
             fontSize="11"
             fill="#52525b"
           >
-            该任务质量可比样本占比（0%–100%）
+            该任务反馈可对照样本占比（0%–100%）
           </text>
         </svg>
       </div>
       <p className="mt-3 text-xs leading-5 text-zinc-600">
-        V1.1 已将旧版“持平”拆分为“前后均无 ERROR/WARN”和“问题负荷未减少”。前者只表示两次 AI 分析均未检测到 ERROR/WARN，不代表代码不存在其他问题。
+        结果分为“前后均无 ERROR/WARN”和“非零负荷持平”。前后均无 ERROR/WARN
+        需要两端均有实际反馈条目，不代表代码正确。
       </p>
       <ul className="sr-only">
         {rows.map((row) => (

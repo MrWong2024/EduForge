@@ -145,14 +145,15 @@
   - 注意：下载链接继续走 `/api/proxy/**`，与页面 JSON 使用同一排除口径；CSV 字段由后端导出实现决定。
 - AI 反馈介入成效分析总览：`ai-learning-analytics/page.tsx` -> `client.fetchJson("classrooms/:id/ai-learning-analytics?..." )` -> `/api/proxy/classrooms/:id/ai-learning-analytics` -> `GET /api/classrooms/:classroomId/ai-learning-analytics`。
   - 使用 `toAiLearningAnalyticsOverviewResponse`；query 仅为 `window=all|7d|30d` 与逗号分隔的 `excludedTaskIds`，不携带学生搜索、筛选或分页参数。
-  - 方法学 `scope` 仍为 `AI_FEEDBACK_INTERVENTION_V1`，新增 `version=AI_FEEDBACK_INTERVENTION_V1_1`；mapper 直接映射班级与任务级精细计数和后端 rate。
+  - 三类响应方法学均为 V1.2，`scope/sampleUnit/qualityProxy` 标识保持；mapper 直接映射班级与任务计数、作品更新率、evidenceSummary 和后端 nullable 指标，未知不补0。
 - AI 反馈介入成效分析学生列表：同一 `page.tsx` -> `/api/proxy/classrooms/:id/ai-learning-analytics/students` -> `GET /api/classrooms/:classroomId/ai-learning-analytics/students`。
   - 使用 `toAiLearningAnalyticsStudentsResponse`；与总览传递相同 `window/excludedTaskIds`，另固定 `limit=100` 并从 URL 传 `page/q/overallOutcome/engagementStatus`；后三项为 AND 语义，后端先搜索筛选再分页。
-  - 响应映射 `context/total/activeStudentsTotal/filters/items`：`total` 是筛选后总数，`activeStudentsTotal` 是全部 ACTIVE 学生数，`filters` 是后端规范化回显。
+  - 响应映射 `context/methodology/total/activeStudentsTotal/filters/items`：`total` 是筛选后总数，`activeStudentsTotal` 是全部 ACTIVE 学生数，`filters` 是后端规范化回显；参与阶段使用更新后的后端枚举。
 - AI 反馈介入成效分析学生详情：`ai-learning-analytics/students/[studentId]/page.tsx` -> `/api/proxy/classrooms/:id/ai-learning-analytics/students/:studentId` -> `GET /api/classrooms/:classroomId/ai-learning-analytics/students/:studentId`。
   - 使用 `toAiLearningAnalyticsStudentDetailResponse`；后端请求只传 `window/excludedTaskIds`，URL 中的 `page/q/overallOutcome/engagementStatus` 仅用于返回班级分析时恢复列表状态，绝不传给详情接口。
+  - taskPoint 适配基线、比较端点、最新版本、较新未比较标记和稳定原因；null 与未知来源/模型保留，版本链接只使用后端对应 submissionId 及课堂上下文，不从 attemptNo 猜测提交。公开形状与值域见 [Backend DTO Analytics](./handoff-backend-dto-cheatsheet.md#ai-learning-analytics)。
 - 三个 mapper 直接消费 `detailedOutcome/overallOutcome/engagementStatus`；legacy `outcome/growthTrend/stable*Count` 继续映射并保留在 raw/兼容类型中。
-- 上述三条正式请求全部由 `fetchJson` 经 `/api/proxy/**` 发出；前端只适配后端返回值与枚举，结合可比计数识别无可比数据并保留 null，不重算 anchor、配对、issueLoad、`detailedOutcome`、`overallOutcome`、`engagementStatus`、rate 分母或任何聚合指标。
+- 上述三条正式请求全部由 `fetchJson` 经 `/api/proxy/**` 发出；前端只适配后端返回值与枚举，本模块所有 nullable 比率/均值保持 null，真实0保留为0，不调用通用必需数字适配补零。不重算基线/终点、issueLoad、`detailedOutcome`、`overallOutcome`、`engagementStatus`、rate 分母或任何聚合指标。
 - 教学快照预检：`export/snapshot/page.tsx` -> `/api/proxy/classrooms/:id/export/snapshot`。
   - 对应后端：`GET /api/classrooms/:classroomId/export/snapshot`。
 - Demo 沙箱：`_demo` pages -> native fetch `/api/_demo/**`。
@@ -166,7 +167,7 @@
 - 不把 URL query 透传数据当 submission detail 主体数据源；主体以 `GET /api/learning-tasks/submissions/:id` 为准。
 - 不在前端重算过程性评价评分、CSV 字段、Enrollment 权限或班级归属；这些由后端接口判定。
 - 不在前端持久化 `excludedTaskIds`；过程性评价排除任务仅作为 URL 查询条件。
-- AI 反馈介入成效分析同样不持久化 `excludedTaskIds`，且不得用当前学生分页结果重算班级摘要；个人可空问题负荷必须保持 `number | null`。
+- AI 反馈介入成效分析同样不持久化 `excludedTaskIds`，且不得用当前学生分页结果重算班级摘要；所有可空反馈条目负荷、比率及均值必须保持 `number | null`，较新未比较的未知标记保持 null。
 - 不用模板当前 `PUBLISHED/ARCHIVED` 状态阻断既有 classroomTask 的学生运行态；消费后端 `participationStatus`。
 - 后端 debug/ops 与产品 AI request 保持独立调用边界；当前前端没有正式 debug/ops 调用链。
 - 不把 `/_demo/**` 或 `/api/_demo/**` 的内存接口当正式 API 接入口。

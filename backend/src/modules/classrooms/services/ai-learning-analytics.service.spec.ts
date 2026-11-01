@@ -47,12 +47,16 @@ const submission = (params: {
   attemptNo: number;
   submittedAt: string;
   codeText: string;
+  contentRevision?: number;
+  lastEditedAt?: string;
 }) => ({
   _id: params.id ?? objectId(),
   studentId: params.studentId,
   classroomTaskId: params.classroomTaskId,
   attemptNo: params.attemptNo,
   submittedAt: new Date(params.submittedAt),
+  contentRevision: params.contentRevision,
+  lastEditedAt: params.lastEditedAt ? new Date(params.lastEditedAt) : undefined,
   content: { codeText: params.codeText, language: 'typescript' },
 });
 
@@ -60,11 +64,17 @@ const job = (params: {
   submissionId: Types.ObjectId;
   status: AiFeedbackJobStatus;
   updatedAt?: string;
+  provider?: 'bailian' | 'stub';
+  attempts?: number;
+  requests?: Array<{ claimNo: number; provider: 'bailian'; model: string }>;
 }) => ({
   _id: objectId(),
   submissionId: params.submissionId,
   status: params.status,
   updatedAt: params.updatedAt ? new Date(params.updatedAt) : undefined,
+  provider: params.provider,
+  attempts: params.attempts,
+  requests: params.requests,
 });
 
 const feedback = (params: {
@@ -119,7 +129,6 @@ const createServiceHarness = (options: ServiceHarnessOptions = {}) => {
   });
   const classroomTaskQuery = makeQuery(classroomTasks);
   const taskQuery = makeQuery(taskTitleRows);
-  const submissionQuery = makeQuery(options.submissions ?? []);
   const jobQuery = makeQuery(options.jobs ?? []);
   const feedbackQuery = makeQuery(options.feedbackItems ?? []);
   const userQuery = makeQuery(options.students ?? []);
@@ -142,10 +151,22 @@ const createServiceHarness = (options: ServiceHarnessOptions = {}) => {
     find: jest.fn().mockReturnValue(taskQuery),
   };
   const submissionModel = {
-    find: jest.fn((filter: unknown) => {
-      capturedSubmissionFilter = filter;
-      return submissionQuery;
-    }),
+    find: jest.fn(
+      (filter: {
+        classroomTaskId: { $in: Types.ObjectId[] };
+        studentId: { $in: Types.ObjectId[] };
+      }) => {
+        capturedSubmissionFilter = filter;
+        return makeQuery(
+          (options.submissions ?? []).filter(
+            (item) =>
+              filter.classroomTaskId.$in.some((id) =>
+                id.equals(item.classroomTaskId),
+              ) && filter.studentId.$in.some((id) => id.equals(item.studentId)),
+          ),
+        );
+      },
+    ),
   };
   const aiFeedbackJobModel = {
     find: jest.fn().mockReturnValue(jobQuery),
@@ -216,8 +237,8 @@ describe('AI learning analytics DTO and public semantics', () => {
       'NO_SUBMISSION',
       'SUBMITTED_WITHOUT_AI_REQUEST',
       'AI_REQUESTED_WITHOUT_DELIVERY',
-      'AI_DELIVERED_WITHOUT_RESUBMISSION',
-      'RESUBMITTED_WITHOUT_COMPARABLE',
+      'AI_DELIVERED_WITHOUT_REVISION',
+      'REVISED_WITHOUT_COMPARABLE',
       'QUALITY_COMPARABLE',
     ]);
   });
@@ -250,7 +271,7 @@ describe('AI learning analytics DTO and public semantics', () => {
     await expect(validate(invalidPage)).resolves.toHaveLength(2);
   });
 
-  it('normalizes q and validates search length plus V1.1 filters', async () => {
+  it('normalizes q and validates search length plus V1.2 filters', async () => {
     const normalized = plainToInstance(QueryAiLearningAnalyticsStudentsDto, {
       q: '  张三  ',
       overallOutcome: 'IMPROVED_OVERALL',
@@ -294,8 +315,8 @@ describe('AI learning analytics DTO and public semantics', () => {
     [0, 0, 0, 0, 0, 'NO_SUBMISSION'],
     [1, 0, 0, 0, 0, 'SUBMITTED_WITHOUT_AI_REQUEST'],
     [1, 1, 0, 0, 0, 'AI_REQUESTED_WITHOUT_DELIVERY'],
-    [1, 1, 1, 0, 0, 'AI_DELIVERED_WITHOUT_RESUBMISSION'],
-    [1, 1, 1, 1, 0, 'RESUBMITTED_WITHOUT_COMPARABLE'],
+    [1, 1, 1, 0, 0, 'AI_DELIVERED_WITHOUT_REVISION'],
+    [1, 1, 1, 1, 0, 'REVISED_WITHOUT_COMPARABLE'],
     [1, 1, 1, 1, 1, 'QUALITY_COMPARABLE'],
     [0, 1, 1, 1, 1, 'NO_SUBMISSION'],
   ] as const)(
@@ -304,7 +325,7 @@ describe('AI learning analytics DTO and public semantics', () => {
       submittedTasksCount,
       aiRequestedTasksCount,
       aiDeliveredTasksCount,
-      postFeedbackResubmittedTasksCount,
+      postFeedbackRevisedTasksCount,
       qualityComparableTasksCount,
       expected,
     ) => {
@@ -313,12 +334,435 @@ describe('AI learning analytics DTO and public semantics', () => {
           submittedTasksCount,
           aiRequestedTasksCount,
           aiDeliveredTasksCount,
-          postFeedbackResubmittedTasksCount,
+          postFeedbackRevisedTasksCount,
           qualityComparableTasksCount,
         }),
       ).toBe(expected);
     },
   );
+});
+
+describe('V1.2 independently specified timelines (no database)', () => {
+  const at = (hour: number) =>
+    `2026-09-01T${String(hour).padStart(2, '0')}:00:00.000Z`;
+  const timeline = () => {
+    const studentId = objectId();
+    const classroomTaskId = objectId();
+    const draft = (attemptNo: number, hour: number, codeText = 'base') =>
+      submission({
+        studentId,
+        classroomTaskId,
+        attemptNo,
+        submittedAt: at(hour),
+        codeText,
+        contentRevision: 0,
+      });
+    const reviewed = (
+      item: ReturnType<typeof submission>,
+      hour: number,
+      model = 'model-a',
+    ) =>
+      job({
+        submissionId: item._id,
+        status: AiFeedbackJobStatus.Succeeded,
+        updatedAt: at(hour),
+        provider: 'bailian',
+        attempts: 1,
+        requests: [{ claimNo: 1, provider: 'bailian', model }],
+      });
+    const item = (
+      value: ReturnType<typeof submission>,
+      severity = FeedbackSeverity.Info,
+    ) => feedback({ submissionId: value._id, severity });
+    return { studentId, classroomTaskId, draft, reviewed, item };
+  };
+
+  it('uses the newest reviewed content, even when an older draft finishes last and the third round reverses improvement', () => {
+    const t = timeline();
+    const a = t.draft(1, 0),
+      b = t.draft(2, 2, 'second'),
+      c = t.draft(3, 4, 'third');
+    const [sample] = buildAiLearningAnalyticsStandardSamples(
+      [c, a, b],
+      [t.reviewed(a, 1), t.reviewed(b, 8), t.reviewed(c, 6)],
+      [
+        t.item(a, FeedbackSeverity.Error),
+        t.item(b),
+        t.item(c, FeedbackSeverity.Error),
+        t.item(c, FeedbackSeverity.Warn),
+      ],
+    );
+    // Hand calculation: 1 -> 1.5, a regression of half a load unit.
+    expect(sample).toMatchObject({
+      attemptsCount: 3,
+      qualityComparable: true,
+      postFeedbackRevised: true,
+      issueLoadBeforeHalfUnits: 2,
+      issueLoadAfterHalfUnits: 3,
+      issueLoadDeltaHalfUnits: -1,
+      outcome: 'REGRESSED',
+    });
+    expect(sample.baselineReview?.submissionId).toBe(a._id.toString());
+    expect(sample.comparisonReview?.submissionId).toBe(c._id.toString());
+    expect(sample.hasNewerUncomparedRevision).toBe(false);
+  });
+
+  it('keeps the first completed intervention when a teacher later reviews an earlier attempt', () => {
+    const t = timeline();
+    const a = t.draft(1, 0),
+      b = t.draft(2, 1),
+      c = t.draft(3, 3);
+    const [before] = buildAiLearningAnalyticsStandardSamples(
+      [a, b, c],
+      [t.reviewed(b, 2), t.reviewed(c, 4)],
+      [t.item(b, FeedbackSeverity.Error), t.item(c)],
+    );
+    const [after] = buildAiLearningAnalyticsStandardSamples(
+      [a, b, c],
+      [t.reviewed(a, 9), t.reviewed(b, 2), t.reviewed(c, 4)],
+      [t.item(a), t.item(b, FeedbackSeverity.Error), t.item(c)],
+    );
+    for (const sample of [before, after]) {
+      expect(sample.baselineReview?.submissionId).toBe(b._id.toString());
+      expect(sample.comparisonReview?.submissionId).toBe(c._id.toString());
+      expect(sample.issueLoadDeltaHalfUnits).toBe(2);
+    }
+  });
+
+  it('recognizes an older attempt edited after feedback without inventing a new submission or revision history', () => {
+    const t = timeline();
+    const old = {
+      ...t.draft(1, 0, ' revised '),
+      contentRevision: 1,
+      lastEditedAt: new Date(at(4)),
+    };
+    const baseline = t.draft(2, 1);
+    const [sample] = buildAiLearningAnalyticsStandardSamples(
+      [old, baseline],
+      [t.reviewed(baseline, 2), t.reviewed(old, 5)],
+      [t.item(baseline, FeedbackSeverity.Error), t.item(old)],
+    );
+    expect(sample).toMatchObject({
+      attemptsCount: 2,
+      postFeedbackResubmitted: false,
+      postFeedbackRevised: true,
+      postFeedbackCodeChanged: true,
+      qualityComparable: true,
+    });
+    expect(sample.baselineReview?.attemptNo).toBe(2);
+    expect(sample.comparisonReview).toMatchObject({
+      submissionId: old._id.toString(),
+      attemptNo: 1,
+      contentRevision: 1,
+      submittedAt: at(0),
+      lastEditedAt: at(4),
+      contentVersionAt: at(4),
+    });
+  });
+
+  it('looks through all existing later versions for code change and preserves meaningful outer whitespace', () => {
+    const t = timeline();
+    const a = t.draft(1, 0, 'a\r\nb'),
+      b = t.draft(2, 2, 'a\nb'),
+      c = t.draft(3, 4, ' a\nb');
+    const records = [t.reviewed(a, 1)];
+    const feedbacks = [t.item(a)];
+    const [same] = buildAiLearningAnalyticsStandardSamples(
+      [a, b],
+      records,
+      feedbacks,
+    );
+    const [changed] = buildAiLearningAnalyticsStandardSamples(
+      [a, b, c],
+      records,
+      feedbacks,
+    );
+    expect(same).toMatchObject({
+      postFeedbackRevised: true,
+      postFeedbackCodeChanged: false,
+    });
+    expect(changed.postFeedbackCodeChanged).toBe(true);
+  });
+
+  it.each(['none', 'PENDING', 'FAILED', 'empty', 'stub'] as const)(
+    'retains a usable comparison and exposes the newer %s version',
+    (kind) => {
+      const t = timeline();
+      const a = t.draft(1, 0),
+        b = t.draft(2, 2),
+        c = t.draft(3, 4);
+      const jobs = [t.reviewed(a, 1), t.reviewed(b, 3)];
+      if (kind !== 'none')
+        jobs.push({
+          ...t.reviewed(c, 5),
+          ...(kind === 'stub' ? { provider: 'stub' as const } : {}),
+          ...(kind === 'PENDING'
+            ? { status: AiFeedbackJobStatus.Pending }
+            : {}),
+          ...(kind === 'FAILED' ? { status: AiFeedbackJobStatus.Failed } : {}),
+        });
+      const feedbacks = [
+        t.item(a, FeedbackSeverity.Error),
+        t.item(b),
+        ...(kind === 'stub' ? [t.item(c)] : []),
+      ];
+      const [sample] = buildAiLearningAnalyticsStandardSamples(
+        [a, b, c],
+        jobs,
+        feedbacks,
+      );
+      expect(sample.comparisonReview?.submissionId).toBe(b._id.toString());
+      expect(sample.latestRevision?.submissionId).toBe(c._id.toString());
+      expect(sample.hasNewerUncomparedRevision).toBe(true);
+      expect(sample.issueLoadAfterHalfUnits).toBe(0);
+      if (kind === 'empty')
+        expect(sample.comparisonWarnings).toContain('EMPTY_FEEDBACK');
+      if (kind === 'stub')
+        expect(sample.comparisonWarnings).toContain(
+          'SIMULATED_REVIEW_EXCLUDED',
+        );
+    },
+  );
+
+  it('does not manufacture clean feedback from an empty success, but accepts actual INFO as zero load', () => {
+    const t = timeline();
+    const a = t.draft(1, 0),
+      b = t.draft(2, 2);
+    const jobs = [t.reviewed(a, 1), t.reviewed(b, 3)];
+    const [empty] = buildAiLearningAnalyticsStandardSamples([a, b], jobs, []);
+    const [info] = buildAiLearningAnalyticsStandardSamples([a, b], jobs, [
+      t.item(a),
+      t.item(b),
+    ]);
+    expect(empty).toMatchObject({
+      aiDelivered: false,
+      qualityComparable: false,
+      issueLoadBeforeHalfUnits: null,
+      detailedOutcome: 'NOT_COMPARABLE',
+    });
+    expect(empty.comparisonWarnings).toContain('EMPTY_FEEDBACK');
+    expect(info).toMatchObject({
+      aiDelivered: true,
+      qualityComparable: true,
+      issueLoadBeforeHalfUnits: 0,
+      issueLoadAfterHalfUnits: 0,
+      detailedOutcome: 'REMAINED_CLEAN',
+    });
+  });
+
+  it('keeps historical source uncertain and resolves models only from one request matching the successful claim', () => {
+    const t = timeline();
+    const a = t.draft(1, 0),
+      b = t.draft(2, 2);
+    const known = t.reviewed(b, 3, 'model-b');
+    const old = job({
+      submissionId: a._id,
+      status: AiFeedbackJobStatus.Succeeded,
+      updatedAt: at(1),
+    });
+    const [historical] = buildAiLearningAnalyticsStandardSamples(
+      [a, b],
+      [old, known],
+      [t.item(a), t.item(b)],
+    );
+    expect(historical.baselineReview).toMatchObject({
+      provider: null,
+      model: null,
+    });
+    expect(historical.comparisonWarnings).toEqual(
+      expect.arrayContaining(['SOURCE_UNKNOWN', 'MODEL_UNKNOWN']),
+    );
+    const firstClaim = t.reviewed(a, 1);
+    const [missing] = buildAiLearningAnalyticsStandardSamples(
+      [a, b],
+      [{ ...firstClaim, attempts: 2 }, known],
+      [t.item(a), t.item(b)],
+    );
+    expect(missing.baselineReview?.model).toBeNull();
+    const [matched] = buildAiLearningAnalyticsStandardSamples(
+      [a, b],
+      [
+        {
+          ...firstClaim,
+          attempts: 2,
+          requests: [
+            { claimNo: 1, provider: 'bailian', model: 'stale' },
+            { claimNo: 2, provider: 'bailian', model: 'model-a' },
+          ],
+        },
+        known,
+      ],
+      [t.item(a), t.item(b)],
+    );
+    expect(matched.baselineReview?.model).toBe('model-a');
+    expect(matched.comparisonWarnings).toContain('MODEL_CHANGED');
+    const [ambiguous] = buildAiLearningAnalyticsStandardSamples(
+      [a, b],
+      [
+        {
+          ...firstClaim,
+          requests: [
+            { claimNo: 1, provider: 'bailian', model: 'a' },
+            { claimNo: 1, provider: 'bailian', model: 'b' },
+          ],
+        },
+        known,
+      ],
+      [t.item(a), t.item(b)],
+    );
+    expect(ambiguous.baselineReview?.model).toBeNull();
+    const [invalidAttempt] = buildAiLearningAnalyticsStandardSamples(
+      [{ ...a, attemptNo: Number.NaN }],
+      [t.reviewed(a, 1)],
+      [t.item(a)],
+    );
+    expect(invalidAttempt.baselineReview?.attemptNo).toBeNull();
+    expect(invalidAttempt.baselineReview).not.toHaveProperty('requests');
+  });
+
+  it('does not fall back to creation time for a positive revision missing its edit time or invent a completion time', () => {
+    const t = timeline();
+    const a = t.draft(1, 0),
+      b = { ...t.draft(2, 2), contentRevision: 2 };
+    const [sample] = buildAiLearningAnalyticsStandardSamples(
+      [a, b],
+      [t.reviewed(a, 1), t.reviewed(b, 3)],
+      [t.item(a), t.item(b)],
+    );
+    expect(sample).toMatchObject({
+      qualityComparable: false,
+      latestRevision: null,
+      hasNewerUncomparedRevision: null,
+      postFeedbackResubmitted: true,
+      postFeedbackRevised: true,
+    });
+    expect(sample.comparisonWarnings).toContain('TIME_UNKNOWN');
+    for (const lastEditedAt of [new Date('invalid'), new Date(at(0))]) {
+      const [invalidEdit] = buildAiLearningAnalyticsStandardSamples(
+        [a, { ...b, lastEditedAt }],
+        [t.reviewed(a, 1), t.reviewed(b, 3)],
+        [t.item(a), t.item(b)],
+      );
+      expect(invalidEdit.qualityComparable).toBe(false);
+      expect(invalidEdit.hasNewerUncomparedRevision).toBeNull();
+    }
+    const [missingCompletion] = buildAiLearningAnalyticsStandardSamples(
+      [a],
+      [{ ...t.reviewed(a, 1), updatedAt: undefined }],
+      [t.item(a)],
+    );
+    expect(missingCompletion).toMatchObject({
+      aiDelivered: true,
+      baselineReview: null,
+      qualityComparable: false,
+      hasNewerUncomparedRevision: null,
+    });
+    expect(missingCompletion.comparisonWarnings).toContain('TIME_UNKNOWN');
+  });
+
+  it('aggregates one sample per student-task without rounding or double-counting overlapping evidence', async () => {
+    const timelines = [timeline(), timeline(), timeline()];
+    const submissions: ReturnType<typeof submission>[] = [];
+    const jobs: ReturnType<typeof job>[] = [];
+    const feedbackItems: ReturnType<typeof feedback>[] = [];
+    for (const [index, t] of timelines.entries()) {
+      const a = t.draft(1, 0),
+        b = t.draft(2, 2);
+      submissions.push(a, b);
+      jobs.push(
+        index === 0
+          ? job({
+              submissionId: a._id,
+              status: AiFeedbackJobStatus.Succeeded,
+              updatedAt: at(1),
+            })
+          : t.reviewed(a, 1),
+      );
+      jobs.push(t.reviewed(b, 3, index === 1 ? 'model-b' : 'model-a'));
+      feedbackItems.push(
+        t.item(a, index === 0 ? FeedbackSeverity.Warn : FeedbackSeverity.Info),
+        t.item(b),
+      );
+      if (index === 1) {
+        const c = t.draft(3, 4);
+        submissions.push(c);
+        jobs.push({ ...t.reviewed(c, 5), provider: 'stub' });
+        feedbackItems.push(t.item(c));
+      }
+    }
+    const harness = createServiceHarness({
+      activeStudentIds: timelines.map((t) => t.studentId),
+      classroomTasks: timelines.map((t) => ({
+        _id: t.classroomTaskId,
+        taskId: objectId(),
+        publishedAt: new Date(at(0)),
+      })),
+      submissions,
+      jobs,
+      feedbackItems,
+    });
+    const overview = await harness.service.getOverview(
+      harness.classroomId.toString(),
+      {},
+      harness.teacherId.toString(),
+    );
+    expect(overview.summary).toMatchObject({
+      qualityComparableStudentTaskCount: 3,
+      improvedStudentTaskCount: 1,
+      remainedCleanStudentTaskCount: 2,
+      postFeedbackRevisedStudentTaskCount: 3,
+      postFeedbackRevisionRate: 1,
+      postFeedbackCodeChangeRate: 0,
+      improvedRate: 1 / 3,
+      averageIssueLoadBefore: 1 / 6,
+      averageIssueLoadAfter: 0,
+      averageIssueLoadDelta: 1 / 6,
+      evidenceSummary: {
+        sourceUncertainComparableCount: 1,
+        modelChangedComparableCount: 1,
+        simulatedExcludedSampleCount: 1,
+      },
+    });
+    const list = await harness.service.getStudents(
+      harness.classroomId.toString(),
+      {},
+      harness.teacherId.toString(),
+    );
+    expect(list.methodology.version).toBe('AI_FEEDBACK_INTERVENTION_V1_2');
+    expect(
+      list.items.reduce(
+        (sum, item) => sum + item.qualityComparableTasksCount,
+        0,
+      ),
+    ).toBe(3);
+    for (const t of timelines) {
+      const detail = await harness.service.getStudentDetail(
+        harness.classroomId.toString(),
+        t.studentId.toString(),
+        {},
+        harness.teacherId.toString(),
+      );
+      expect(detail.summary.postFeedbackRevisedTasksCount).toBe(1);
+      expect(
+        list.items.find((item) => item.studentId === t.studentId.toString()),
+      ).toMatchObject(detail.summary);
+      expect(
+        detail.summary.improvedTasksCount +
+          detail.summary.remainedCleanTasksCount +
+          detail.summary.unchangedWithIssuesTasksCount +
+          detail.summary.regressedTasksCount,
+      ).toBe(detail.summary.qualityComparableTasksCount);
+      expect(
+        detail.summary.postFeedbackCodeChangedTasksCount,
+      ).toBeLessThanOrEqual(detail.summary.postFeedbackRevisedTasksCount);
+    }
+    expect(
+      overview.taskTrends.reduce(
+        (sum, task) => sum + task.qualityComparableStudentCount,
+        0,
+      ),
+    ).toBe(3);
+  });
 });
 
 describe('AI learning analytics standard sample rules', () => {
@@ -373,6 +817,7 @@ describe('AI learning analytics standard sample rules', () => {
         }),
       ],
       [
+        feedback({ submissionId: postId, severity: FeedbackSeverity.Info }),
         feedback({
           submissionId: earlierId,
           severity: FeedbackSeverity.Error,
@@ -441,7 +886,13 @@ describe('AI learning analytics standard sample rules', () => {
           updatedAt: '2026-02-01T04:00:00.000Z',
         }),
       ],
-      [],
+      [
+        feedback({ submissionId: anchor._id, severity: FeedbackSeverity.Info }),
+        feedback({
+          submissionId: afterCompletion._id,
+          severity: FeedbackSeverity.Info,
+        }),
+      ],
     );
 
     expect(samples[0]).toMatchObject({
@@ -479,7 +930,7 @@ describe('AI learning analytics standard sample rules', () => {
           updatedAt: '2026-02-01T02:00:00.000Z',
         }),
       ],
-      [],
+      [feedback({ submissionId: anchor._id, severity: FeedbackSeverity.Info })],
     );
 
     expect(samples[0]).toMatchObject({
@@ -492,9 +943,9 @@ describe('AI learning analytics standard sample rules', () => {
     });
   });
 
-  it('normalizes only CRLF and outer whitespace for code-change comparison', () => {
-    expect(normalizeAiLearningAnalyticsCode('  a\r\n  b  ')).toBe('a\n  b');
-    expect(normalizeAiLearningAnalyticsCode('a\r\n  b')).toBe(
+  it('normalizes only CRLF and preserves outer whitespace for code-change comparison', () => {
+    expect(normalizeAiLearningAnalyticsCode('  a\r\n  b  ')).toBe('  a\n  b  ');
+    expect(normalizeAiLearningAnalyticsCode('a\r\n  b')).not.toBe(
       normalizeAiLearningAnalyticsCode('\n a\n  b \n'),
     );
     expect(normalizeAiLearningAnalyticsCode('a\n  b')).not.toBe(
@@ -505,7 +956,7 @@ describe('AI learning analytics standard sample rules', () => {
     );
   });
 
-  it('uses ERROR=1, WARN=0.5, INFO=0, ignores non-AI feedback and treats empty succeeded feedback as load 0', () => {
+  it('uses ERROR=1, WARN=0.5, actual INFO=0 and ignores non-AI feedback', () => {
     const studentId = objectId();
     const classroomTaskId = objectId();
     const before = submission({
@@ -537,6 +988,7 @@ describe('AI learning analytics standard sample rules', () => {
         }),
       ],
       [
+        feedback({ submissionId: after._id, severity: FeedbackSeverity.Info }),
         feedback({
           submissionId: before._id,
           severity: FeedbackSeverity.Error,
@@ -591,6 +1043,9 @@ describe('AI learning analytics standard sample rules', () => {
         codeText: 'b',
       });
       const toFeedback = (submissionId: Types.ObjectId, halfUnits: number) => [
+        ...(halfUnits === 0
+          ? [feedback({ submissionId, severity: FeedbackSeverity.Info })]
+          : []),
         ...Array.from({ length: Math.floor(halfUnits / 2) }, () =>
           feedback({ submissionId, severity: FeedbackSeverity.Error }),
         ),
@@ -652,7 +1107,7 @@ describe('AI learning analytics standard sample rules', () => {
           status: AiFeedbackJobStatus.Failed,
         }),
       ],
-      [],
+      [feedback({ submissionId: before._id, severity: FeedbackSeverity.Info })],
     );
 
     expect(sample).toMatchObject({
@@ -683,26 +1138,26 @@ describe('AiLearningAnalyticsService aggregation boundaries', () => {
     });
     expect(result.methodology).toMatchObject({
       scope: 'AI_FEEDBACK_INTERVENTION_V1',
-      version: 'AI_FEEDBACK_INTERVENTION_V1_1',
+      version: 'AI_FEEDBACK_INTERVENTION_V1_2',
     });
     expect(result.summary).toMatchObject({
       activeStudentsCount: 0,
       submittedStudentTaskCount: 0,
       aiRequestedStudentTaskCount: 0,
       aiDeliveredStudentTaskCount: 0,
-      aiStudentCoverageRate: 0,
-      aiTaskCoverageRate: 0,
+      aiStudentCoverageRate: null,
+      aiTaskCoverageRate: null,
       remainedCleanStudentTaskCount: 0,
       unchangedWithIssuesStudentTaskCount: 0,
-      remainedCleanRate: 0,
-      unchangedWithIssuesRate: 0,
-      regressedRate: 0,
-      averageIssueLoadDelta: 0,
+      remainedCleanRate: null,
+      unchangedWithIssuesRate: null,
+      regressedRate: null,
+      averageIssueLoadDelta: null,
     });
     expect(result.taskTrends).toEqual([]);
   });
 
-  it('returns zero-safe rates and keeps zero-submission tasks in taskTrends', async () => {
+  it('keeps zero-submission tasks, real zero coverage and unknown zero-denominator rates distinct', async () => {
     const classroomTaskId = objectId();
     const taskId = objectId();
     const activeStudentId = objectId();
@@ -727,18 +1182,18 @@ describe('AiLearningAnalyticsService aggregation boundaries', () => {
       activeStudentsCount: 1,
       submittedStudentTaskCount: 0,
       aiStudentCoverageRate: 0,
-      aiTaskCoverageRate: 0,
-      aiDeliveryRate: 0,
-      postFeedbackResubmissionRate: 0,
-      postFeedbackCodeChangeRate: 0,
-      qualityComparableRate: 0,
-      improvedRate: 0,
-      remainedCleanRate: 0,
-      unchangedWithIssuesRate: 0,
-      regressedRate: 0,
-      averageIssueLoadBefore: 0,
-      averageIssueLoadAfter: 0,
-      averageIssueLoadDelta: 0,
+      aiTaskCoverageRate: null,
+      aiDeliveryRate: null,
+      postFeedbackResubmissionRate: null,
+      postFeedbackCodeChangeRate: null,
+      qualityComparableRate: null,
+      improvedRate: null,
+      remainedCleanRate: null,
+      unchangedWithIssuesRate: null,
+      regressedRate: null,
+      averageIssueLoadBefore: null,
+      averageIssueLoadAfter: null,
+      averageIssueLoadDelta: null,
     });
     expect(result.taskTrends).toHaveLength(1);
     expect(result.taskTrends[0]).toMatchObject({
@@ -748,11 +1203,11 @@ describe('AiLearningAnalyticsService aggregation boundaries', () => {
       qualityComparableStudentCount: 0,
       remainedCleanStudentCount: 0,
       unchangedWithIssuesStudentCount: 0,
-      aiTaskCoverageRate: 0,
-      improvedRate: 0,
-      remainedCleanRate: 0,
-      unchangedWithIssuesRate: 0,
-      regressedRate: 0,
+      aiTaskCoverageRate: null,
+      improvedRate: null,
+      remainedCleanRate: null,
+      unchangedWithIssuesRate: null,
+      regressedRate: null,
     });
   });
 
@@ -857,6 +1312,16 @@ describe('AiLearningAnalyticsService aggregation boundaries', () => {
       });
       submissions.push(before, after);
       if (index < 4) {
+        feedbackItems.push(
+          feedback({
+            submissionId: before._id,
+            severity: FeedbackSeverity.Info,
+          }),
+          feedback({
+            submissionId: after._id,
+            severity: FeedbackSeverity.Info,
+          }),
+        );
         jobs.push(
           job({
             submissionId: before._id,
@@ -1110,6 +1575,7 @@ describe('AiLearningAnalyticsService aggregation boundaries', () => {
         }),
       ],
       feedbackItems: [
+        feedback({ submissionId: after._id, severity: FeedbackSeverity.Info }),
         feedback({
           submissionId: before._id,
           severity: FeedbackSeverity.Error,
@@ -1235,6 +1701,7 @@ describe('AiLearningAnalyticsService aggregation boundaries', () => {
       unknown
     >;
     expect(taskFilter.publishedAt?.$gte).toBeInstanceOf(Date);
+    expect(taskFilter).toHaveProperty('status.$in', ['ACTIVE', 'CLOSED', null]);
     expect(taskFilter._id?.$nin?.map((id) => id.toString())).toEqual([
       excludedClassroomTaskId.toString(),
     ]);

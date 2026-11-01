@@ -1,4 +1,5 @@
 import { INestApplication, ValidationPipe } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { Test, TestingModule } from '@nestjs/testing';
 import { getModelToken } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
@@ -41,10 +42,26 @@ import {
 } from '../src/modules/learning-tasks/ai-feedback/schemas/ai-feedback-job.schema';
 import { User } from '../src/modules/users/schemas/user.schema';
 
-jest.setTimeout(30000);
+jest.setTimeout(90000);
 
 const KEEP_DB = process.env.KEEP_E2E_DB === '1';
 
+type EvidenceSummary = {
+  sourceUncertainComparableCount: number;
+  modelChangedComparableCount: number;
+  simulatedExcludedSampleCount: number;
+};
+type ReviewEndpoint = {
+  submissionId: string;
+  attemptNo: number | null;
+  contentRevision: number | null;
+  submittedAt: string | null;
+  lastEditedAt: string | null;
+  contentVersionAt: string | null;
+  feedbackCompletedAt: string | null;
+  provider: string | null;
+  model: string | null;
+};
 type AnalyticsOverview = {
   context: {
     classroomId: string;
@@ -66,6 +83,8 @@ type AnalyticsOverview = {
     aiRequestedStudentTaskCount: number;
     aiDeliveredStudentTaskCount: number;
     postFeedbackResubmittedStudentTaskCount: number;
+    postFeedbackRevisedStudentTaskCount: number;
+    evidenceSummary: EvidenceSummary;
     postFeedbackCodeChangedStudentTaskCount: number;
     qualityComparableStudentTaskCount: number;
     improvedStudentTaskCount: number;
@@ -73,19 +92,20 @@ type AnalyticsOverview = {
     unchangedWithIssuesStudentTaskCount: number;
     stableStudentTaskCount: number;
     regressedStudentTaskCount: number;
-    aiStudentCoverageRate: number;
-    aiTaskCoverageRate: number;
-    aiDeliveryRate: number;
-    postFeedbackResubmissionRate: number;
-    postFeedbackCodeChangeRate: number;
-    qualityComparableRate: number;
-    improvedRate: number;
-    remainedCleanRate: number;
-    unchangedWithIssuesRate: number;
-    regressedRate: number;
-    averageIssueLoadBefore: number;
-    averageIssueLoadAfter: number;
-    averageIssueLoadDelta: number;
+    aiStudentCoverageRate: number | null;
+    aiTaskCoverageRate: number | null;
+    aiDeliveryRate: number | null;
+    postFeedbackResubmissionRate: number | null;
+    postFeedbackRevisionRate: number | null;
+    postFeedbackCodeChangeRate: number | null;
+    qualityComparableRate: number | null;
+    improvedRate: number | null;
+    remainedCleanRate: number | null;
+    unchangedWithIssuesRate: number | null;
+    regressedRate: number | null;
+    averageIssueLoadBefore: number | null;
+    averageIssueLoadAfter: number | null;
+    averageIssueLoadDelta: number | null;
   };
   taskTrends: Array<{
     classroomTaskId: string;
@@ -93,6 +113,8 @@ type AnalyticsOverview = {
     aiRequestedStudentCount: number;
     aiDeliveredStudentCount: number;
     postFeedbackResubmittedStudentCount: number;
+    postFeedbackRevisedStudentCount: number;
+    evidenceSummary: EvidenceSummary;
     postFeedbackCodeChangedStudentCount: number;
     qualityComparableStudentCount: number;
     improvedStudentCount: number;
@@ -100,9 +122,9 @@ type AnalyticsOverview = {
     unchangedWithIssuesStudentCount: number;
     stableStudentCount: number;
     regressedStudentCount: number;
-    remainedCleanRate: number;
-    unchangedWithIssuesRate: number;
-    regressedRate: number;
+    remainedCleanRate: number | null;
+    unchangedWithIssuesRate: number | null;
+    regressedRate: number | null;
     publishedAt: string;
   }>;
 };
@@ -126,6 +148,9 @@ type AnalyticsStudentList = {
     aiRequestedTasksCount: number;
     aiDeliveredTasksCount: number;
     postFeedbackResubmittedTasksCount: number;
+    postFeedbackRevisedTasksCount: number;
+    postFeedbackRevisionRate: number | null;
+    evidenceSummary: EvidenceSummary;
     postFeedbackCodeChangedTasksCount: number;
     qualityComparableTasksCount: number;
     improvedTasksCount: number;
@@ -155,6 +180,12 @@ type AnalyticsStudentDetail = {
     aiRequested: boolean;
     aiDelivered: boolean;
     postFeedbackResubmitted: boolean;
+    postFeedbackRevised: boolean;
+    baselineReview: ReviewEndpoint | null;
+    comparisonReview: ReviewEndpoint | null;
+    latestRevision: ReviewEndpoint | null;
+    hasNewerUncomparedRevision: boolean | null;
+    comparisonWarnings: string[];
     postFeedbackCodeChanged: boolean;
     qualityComparable: boolean;
     issueLoadBefore: number | null;
@@ -307,6 +338,79 @@ describe('Classroom AI learning analytics (e2e)', () => {
     });
   };
 
+  const publishOwnedTask = async (title: string) => {
+    const task = (
+      await teacherAgent
+        .post('/api/learning-tasks/tasks')
+        .send({
+          title,
+          description: 'Synthetic V1.2 analytics requirements',
+          knowledgeModule: 'analytics-v1.2',
+          status: 'PUBLISHED',
+          visibility: 'PRIVATE',
+        })
+        .expect(201)
+    ).body as { id: string };
+    createdTaskIds.push(new Types.ObjectId(task.id));
+    const instance = (
+      await teacherAgent
+        .post('/api/classrooms/' + classroomId.toString() + '/tasks')
+        .send({ taskId: task.id })
+        .expect(201)
+    ).body as { id: string };
+    createdClassroomTaskIds.push(new Types.ObjectId(instance.id));
+    return { taskId: task.id, id: instance.id };
+  };
+  const analysisForTask = async (id: string) => {
+    const query = {
+      excludedTaskIds: createdClassroomTaskIds
+        .filter((item) => item.toString() !== id)
+        .map((item) => item.toString())
+        .join(','),
+    };
+    const base =
+      '/api/classrooms/' + classroomId.toString() + '/ai-learning-analytics';
+    const overview = (await teacherAgent.get(base).query(query).expect(200))
+      .body as AnalyticsOverview;
+    const students = (
+      await teacherAgent
+        .get(base + '/students')
+        .query(query)
+        .expect(200)
+    ).body as AnalyticsStudentList;
+    const detail = (
+      await teacherAgent
+        .get(base + '/students/' + activeStudentId.toString())
+        .query(query)
+        .expect(200)
+    ).body as AnalyticsStudentDetail;
+    return { overview, students, detail };
+  };
+  const rawTaskFacts = async (id: string) => {
+    const objectId = new Types.ObjectId(id);
+    const submissions = await submissionModel.collection
+      .find({ classroomTaskId: objectId }, { maxTimeMS: 10000 })
+      .sort({ _id: 1 })
+      .toArray();
+    return {
+      submissions,
+      jobs: await aiFeedbackJobModel.collection
+        .find({ classroomTaskId: objectId }, { maxTimeMS: 10000 })
+        .sort({ _id: 1 })
+        .toArray(),
+      feedback: await feedbackModel.collection
+        .find(
+          { submissionId: { $in: submissions.map((item) => item._id) } },
+          { maxTimeMS: 10000 },
+        )
+        .sort({ _id: 1 })
+        .toArray(),
+      classroomTask: await classroomTaskModel.collection.findOne({
+        _id: objectId,
+      }),
+    };
+  };
+
   beforeAll(async () => {
     previousWorkerEnabled = process.env.AI_FEEDBACK_WORKER_ENABLED;
     previousProvider = process.env.AI_FEEDBACK_PROVIDER;
@@ -348,9 +452,38 @@ describe('Classroom AI learning analytics (e2e)', () => {
     feedbackModel = app.get(getModelToken(Feedback.name));
     aiFeedbackJobModel = app.get(getModelToken(AiFeedbackJob.name));
 
-    teacherAgent = request.agent(app.getHttpServer());
-    otherTeacherAgent = request.agent(app.getHttpServer());
-    activeStudentAgent = request.agent(app.getHttpServer());
+    expect(process.env.NODE_ENV).toBe('test');
+    expect(process.env.EDUFORGE_DATABASE_PURPOSE).toBe('standard_test');
+    expect(userModel.db.name).toBe('eduforge_test');
+    userModel.db.set('maxTimeMS', 10000);
+    const database = userModel.db.db;
+    if (!database) throw new Error('Missing connected test database');
+    const auth = (await database.command(
+      { connectionStatus: 1, showPrivileges: false },
+      { timeoutMS: 5000 },
+    )) as {
+      authInfo: { authenticatedUserRoles: Array<{ role: string; db: string }> };
+    };
+    expect(auth.authInfo.authenticatedUserRoles).toEqual([
+      { role: 'readWrite', db: 'eduforge_test' },
+    ]);
+    const config = app.get(ConfigService);
+    expect(config.get('AI_FEEDBACK_PROVIDER')).toBe('stub');
+    expect(config.get('AI_FEEDBACK_WORKER_ENABLED')).not.toBe(true);
+    expect(config.get('MAIL_PROVIDER')).toBe('log');
+    config.set('LEARNING_TASK_SUBMISSION_COOLDOWN_MS', 0);
+    console.info(
+      'Analytics V1.2 gate: standard_test / eduforge_test / APP readWrite / worker=false / stub / mail=log',
+    );
+    teacherAgent = request
+      .agent(app.getHttpServer())
+      .timeout({ response: 10000, deadline: 15000 });
+    otherTeacherAgent = request
+      .agent(app.getHttpServer())
+      .timeout({ response: 10000, deadline: 15000 });
+    activeStudentAgent = request
+      .agent(app.getHttpServer())
+      .timeout({ response: 10000, deadline: 15000 });
 
     const [teacherHash, otherTeacherHash, studentHash] = await Promise.all([
       bcrypt.hash(teacherPassword, 10),
@@ -717,6 +850,15 @@ describe('Classroom AI learning analytics (e2e)', () => {
       }),
     ]);
 
+    await insertFeedback({
+      submissionId: stableAnchor._id,
+      severity: FeedbackSeverity.Info,
+    });
+    await insertFeedback({
+      submissionId: stablePost._id,
+      severity: FeedbackSeverity.Info,
+    });
+
     const regressedAnchorTime = new Date(now - 39 * dayMs);
     const regressedPostTime = new Date(now - 38 * dayMs);
     const regressedAnchor = await createSubmission({
@@ -757,6 +899,11 @@ describe('Classroom AI learning analytics (e2e)', () => {
         severity: FeedbackSeverity.Error,
       }),
     ]);
+
+    await insertFeedback({
+      submissionId: regressedAnchor._id,
+      severity: FeedbackSeverity.Info,
+    });
 
     const failedSubmission = await createSubmission({
       classroomTaskId: failedClassroomTaskId,
@@ -801,6 +948,11 @@ describe('Classroom AI learning analytics (e2e)', () => {
       studentId: activeStudentId,
       status: AiFeedbackJobStatus.Succeeded,
       updatedAt: earlyCompletedAt,
+    });
+
+    await insertFeedback({
+      submissionId: earlyAnchor._id,
+      severity: FeedbackSeverity.Info,
     });
 
     const unchangedAnchorTime = new Date(now - 70 * 60 * 60 * 1000);
@@ -891,6 +1043,11 @@ describe('Classroom AI learning analytics (e2e)', () => {
       updatedAt: new Date(now - 6 * 60 * 60 * 1000),
     });
 
+    await insertFeedback({
+      submissionId: deliveredOnly._id,
+      severity: FeedbackSeverity.Info,
+    });
+
     const resubmittedAnchorTime = new Date(now - 43 * 60 * 60 * 1000);
     const resubmittedAnchor = await createSubmission({
       classroomTaskId: improvedClassroomTaskId,
@@ -915,6 +1072,11 @@ describe('Classroom AI learning analytics (e2e)', () => {
       studentId: resubmittedWithoutComparableStudentId,
       status: AiFeedbackJobStatus.Succeeded,
       updatedAt: new Date(now - 42 * 60 * 60 * 1000),
+    });
+
+    await insertFeedback({
+      submissionId: resubmittedAnchor._id,
+      severity: FeedbackSeverity.Info,
     });
 
     const removedSubmission = await createSubmission({
@@ -953,41 +1115,67 @@ describe('Classroom AI learning analytics (e2e)', () => {
   });
 
   afterAll(async () => {
-    if (!KEEP_DB && app) {
-      await Promise.all([
-        feedbackModel.deleteMany({
-          submissionId: { $in: createdSubmissionIds },
-        }),
-        aiFeedbackJobModel.deleteMany({
-          submissionId: { $in: createdSubmissionIds },
-        }),
-        submissionModel.deleteMany({ _id: { $in: createdSubmissionIds } }),
-        enrollmentModel.deleteMany({
-          classroomId: { $in: createdClassroomIds },
-        }),
-        classroomTaskModel.deleteMany({
-          _id: { $in: createdClassroomTaskIds },
-        }),
-        taskModel.deleteMany({ _id: { $in: createdTaskIds } }),
-        classroomModel.deleteMany({ _id: { $in: createdClassroomIds } }),
-        courseModel.deleteMany({ _id: { $in: createdCourseIds } }),
-        sessionModel.deleteMany({ userId: { $in: createdUserIds } }),
-        userModel.deleteMany({ _id: { $in: createdUserIds } }),
-      ]);
-    }
-
-    if (app) {
-      await app.close();
-    }
-    if (previousWorkerEnabled === undefined) {
-      delete process.env.AI_FEEDBACK_WORKER_ENABLED;
-    } else {
-      process.env.AI_FEEDBACK_WORKER_ENABLED = previousWorkerEnabled;
-    }
-    if (previousProvider === undefined) {
-      delete process.env.AI_FEEDBACK_PROVIDER;
-    } else {
-      process.env.AI_FEEDBACK_PROVIDER = previousProvider;
+    try {
+      if (!KEEP_DB && app && userModel) {
+        await Promise.all([
+          feedbackModel.deleteMany({
+            submissionId: { $in: createdSubmissionIds },
+          }),
+          aiFeedbackJobModel.deleteMany({
+            submissionId: { $in: createdSubmissionIds },
+          }),
+          submissionModel.deleteMany({ _id: { $in: createdSubmissionIds } }),
+          enrollmentModel.deleteMany({
+            classroomId: { $in: createdClassroomIds },
+          }),
+          classroomTaskModel.deleteMany({
+            _id: { $in: createdClassroomTaskIds },
+          }),
+          taskModel.deleteMany({ _id: { $in: createdTaskIds } }),
+          classroomModel.deleteMany({ _id: { $in: createdClassroomIds } }),
+          courseModel.deleteMany({ _id: { $in: createdCourseIds } }),
+          sessionModel.deleteMany({ userId: { $in: createdUserIds } }),
+          userModel.deleteMany({ _id: { $in: createdUserIds } }),
+        ]);
+        const residual = await Promise.all([
+          feedbackModel.countDocuments({
+            submissionId: { $in: createdSubmissionIds },
+          }),
+          aiFeedbackJobModel.countDocuments({
+            submissionId: { $in: createdSubmissionIds },
+          }),
+          submissionModel.countDocuments({
+            _id: { $in: createdSubmissionIds },
+          }),
+          enrollmentModel.countDocuments({
+            classroomId: { $in: createdClassroomIds },
+          }),
+          classroomTaskModel.countDocuments({
+            _id: { $in: createdClassroomTaskIds },
+          }),
+          taskModel.countDocuments({ _id: { $in: createdTaskIds } }),
+          classroomModel.countDocuments({ _id: { $in: createdClassroomIds } }),
+          courseModel.countDocuments({ _id: { $in: createdCourseIds } }),
+          sessionModel.countDocuments({ userId: { $in: createdUserIds } }),
+          userModel.countDocuments({ _id: { $in: createdUserIds } }),
+        ]);
+        expect(residual).toEqual(Array<number>(10).fill(0));
+        console.info(
+          'Analytics scoped fixture cleanup: 10 collections residual=0',
+        );
+      }
+    } finally {
+      try {
+        if (app) await app.close();
+        if (userModel) expect(userModel.db.readyState).toBe(0);
+      } finally {
+        if (previousWorkerEnabled === undefined)
+          delete process.env.AI_FEEDBACK_WORKER_ENABLED;
+        else process.env.AI_FEEDBACK_WORKER_ENABLED = previousWorkerEnabled;
+        if (previousProvider === undefined)
+          delete process.env.AI_FEEDBACK_PROVIDER;
+        else process.env.AI_FEEDBACK_PROVIDER = previousProvider;
+      }
     }
   });
 
@@ -1030,11 +1218,11 @@ describe('Classroom AI learning analytics (e2e)', () => {
     });
     expect(body.methodology).toEqual({
       scope: 'AI_FEEDBACK_INTERVENTION_V1',
-      version: 'AI_FEEDBACK_INTERVENTION_V1_1',
+      version: 'AI_FEEDBACK_INTERVENTION_V1_2',
       sampleUnit: 'STUDENT_CLASSROOM_TASK',
       qualityProxy: 'ERROR_PLUS_HALF_WARN',
       disclaimer:
-        '本分析仅反映 EduForge AI 反馈介入后的提交行为与代码问题代理变化，不代表 AI 对学习成绩或能力提升的因果贡献。',
+        '本分析仅反映 EduForge AI 反馈介入后的作品更新与反馈条目负荷变化，不代表 AI 对学习成绩或能力提升的因果贡献。',
     });
     expect(body.summary).toEqual({
       activeStudentsCount: 6,
@@ -1042,19 +1230,26 @@ describe('Classroom AI learning analytics (e2e)', () => {
       aiRequestedStudentTaskCount: 9,
       aiDeliveredStudentTaskCount: 7,
       postFeedbackResubmittedStudentTaskCount: 5,
-      postFeedbackCodeChangedStudentTaskCount: 4,
+      postFeedbackRevisedStudentTaskCount: 5,
+      evidenceSummary: {
+        sourceUncertainComparableCount: 4,
+        modelChangedComparableCount: 0,
+        simulatedExcludedSampleCount: 0,
+      },
+      postFeedbackCodeChangedStudentTaskCount: 5,
       qualityComparableStudentTaskCount: 4,
       improvedStudentTaskCount: 1,
       remainedCleanStudentTaskCount: 1,
       unchangedWithIssuesStudentTaskCount: 1,
       stableStudentTaskCount: 2,
       regressedStudentTaskCount: 1,
-      aiStudentCoverageRate: 0.6667,
+      aiStudentCoverageRate: 4 / 6,
       aiTaskCoverageRate: 0.9,
-      aiDeliveryRate: 0.7778,
-      postFeedbackResubmissionRate: 0.7143,
-      postFeedbackCodeChangeRate: 0.8,
-      qualityComparableRate: 0.5714,
+      aiDeliveryRate: 7 / 9,
+      postFeedbackResubmissionRate: 5 / 7,
+      postFeedbackRevisionRate: 5 / 7,
+      postFeedbackCodeChangeRate: 1,
+      qualityComparableRate: 4 / 7,
       improvedRate: 0.25,
       remainedCleanRate: 0.25,
       unchangedWithIssuesRate: 0.25,
@@ -1115,7 +1310,7 @@ describe('Classroom AI learning analytics (e2e)', () => {
     });
     expect(stable).toMatchObject({
       postFeedbackResubmittedStudentCount: 1,
-      postFeedbackCodeChangedStudentCount: 0,
+      postFeedbackCodeChangedStudentCount: 1,
       qualityComparableStudentCount: 1,
       remainedCleanStudentCount: 1,
       unchangedWithIssuesStudentCount: 0,
@@ -1276,7 +1471,7 @@ describe('Classroom AI learning analytics (e2e)', () => {
       aiRequestedTasksCount: 6,
       aiDeliveredTasksCount: 5,
       postFeedbackResubmittedTasksCount: 4,
-      postFeedbackCodeChangedTasksCount: 3,
+      postFeedbackCodeChangedTasksCount: 4,
       qualityComparableTasksCount: 4,
       improvedTasksCount: 1,
       remainedCleanTasksCount: 1,
@@ -1293,6 +1488,10 @@ describe('Classroom AI learning analytics (e2e)', () => {
       submittedTasksCount: 0,
       aiRequestedTasksCount: 0,
       qualityComparableTasksCount: 0,
+      postFeedbackRevisionRate: null,
+      averageIssueLoadBefore: null,
+      averageIssueLoadAfter: null,
+      averageIssueLoadDelta: null,
       overallOutcome: 'INSUFFICIENT_DATA',
       engagementStatus: 'NO_SUBMISSION',
       growthTrend: 'INSUFFICIENT_DATA',
@@ -1355,13 +1554,13 @@ describe('Classroom AI learning analytics (e2e)', () => {
     }
   });
 
-  it('filters all six engagement stages and the V1.1 overall outcome', async () => {
+  it('filters all six engagement stages and the V1.2 overall outcome', async () => {
     const expectedEngagementStudents: Record<string, Types.ObjectId> = {
       NO_SUBMISSION: zeroSubmissionStudentId,
       SUBMITTED_WITHOUT_AI_REQUEST: submittedWithoutAiStudentId,
       AI_REQUESTED_WITHOUT_DELIVERY: requestedWithoutDeliveryStudentId,
-      AI_DELIVERED_WITHOUT_RESUBMISSION: deliveredWithoutResubmissionStudentId,
-      RESUBMITTED_WITHOUT_COMPARABLE: resubmittedWithoutComparableStudentId,
+      AI_DELIVERED_WITHOUT_REVISION: deliveredWithoutResubmissionStudentId,
+      REVISED_WITHOUT_COMPARABLE: resubmittedWithoutComparableStudentId,
       QUALITY_COMPARABLE: activeStudentId,
     };
 
@@ -1475,7 +1674,7 @@ describe('Classroom AI learning analytics (e2e)', () => {
             regressedClassroomTaskId.toString(),
             unchangedWithIssuesClassroomTaskId.toString(),
           ].join(','),
-          engagementStatus: 'AI_DELIVERED_WITHOUT_RESUBMISSION',
+          engagementStatus: 'AI_DELIVERED_WITHOUT_REVISION',
         })
         .expect(200),
     ]);
@@ -1495,13 +1694,13 @@ describe('Classroom AI learning analytics (e2e)', () => {
       items: [
         {
           studentId: activeStudentId.toString(),
-          engagementStatus: 'AI_DELIVERED_WITHOUT_RESUBMISSION',
+          engagementStatus: 'AI_DELIVERED_WITHOUT_REVISION',
         },
       ],
     });
   });
 
-  it('rejects invalid V1.1 filters and overlong q through the global DTO pipe', async () => {
+  it('rejects invalid V1.2 filters and overlong q through the global DTO pipe', async () => {
     await teacherAgent
       .get(
         `/api/classrooms/${classroomId.toString()}/ai-learning-analytics/students`,
@@ -1578,8 +1777,15 @@ describe('Classroom AI learning analytics (e2e)', () => {
       detailedOutcome: 'IMPROVED',
       outcome: 'IMPROVED',
     });
+    expect(improved?.baselineReview).toMatchObject({
+      provider: null,
+      model: null,
+    });
+    expect(improved?.comparisonWarnings).toEqual(
+      expect.arrayContaining(['SOURCE_UNKNOWN', 'MODEL_UNKNOWN']),
+    );
     expect(stable).toMatchObject({
-      postFeedbackCodeChanged: false,
+      postFeedbackCodeChanged: true,
       qualityComparable: true,
       issueLoadBefore: 0,
       issueLoadAfter: 0,
@@ -1645,5 +1851,393 @@ describe('Classroom AI learning analytics (e2e)', () => {
         `/api/classrooms/${classroomId.toString()}/ai-learning-analytics/students/not-an-object-id`,
       )
       .expect(404);
+  });
+  it('excludes formally recalled and unknown tasks, retaining CLOSED and missing legacy state consistently', async () => {
+    const baseline = (
+      await teacherAgent
+        .get(
+          '/api/classrooms/' +
+            classroomId.toString() +
+            '/ai-learning-analytics',
+        )
+        .expect(200)
+    ).body as AnalyticsOverview;
+    const recalled = await publishOwnedTask('Empty recalled analytics task');
+    const closed = await publishOwnedTask('Closed analytics task');
+    const legacy = await publishOwnedTask('Legacy active analytics task');
+    const unknown = await publishOwnedTask('Unknown state analytics task');
+    await teacherAgent
+      .patch(
+        '/api/classrooms/' +
+          classroomId.toString() +
+          '/tasks/' +
+          recalled.id +
+          '/status',
+      )
+      .send({ status: 'RECALLED' })
+      .expect(200);
+    await teacherAgent
+      .patch(
+        '/api/classrooms/' +
+          classroomId.toString() +
+          '/tasks/' +
+          closed.id +
+          '/status',
+      )
+      .send({ status: 'CLOSED' })
+      .expect(200);
+    // Contract-specific historical/unknown status fixtures, restricted to this spec's exact IDs.
+    await classroomTaskModel.collection.updateOne(
+      { _id: new Types.ObjectId(legacy.id) },
+      { $unset: { status: '' } },
+    );
+    await classroomTaskModel.collection.updateOne(
+      { _id: new Types.ObjectId(unknown.id) },
+      { $set: { status: 'UNKNOWN' } },
+    );
+    const base =
+      '/api/classrooms/' + classroomId.toString() + '/ai-learning-analytics';
+    const overview = (await teacherAgent.get(base).expect(200))
+      .body as AnalyticsOverview;
+    const students = (await teacherAgent.get(base + '/students').expect(200))
+      .body as AnalyticsStudentList;
+    const detail = (
+      await teacherAgent
+        .get(base + '/students/' + activeStudentId.toString())
+        .expect(200)
+    ).body as AnalyticsStudentDetail;
+    expect(overview.context.effectiveTaskCount).toBe(9);
+    expect(students.context.effectiveTaskCount).toBe(9);
+    expect(overview.summary).toEqual(baseline.summary);
+    const effectiveTaskSets: Array<Array<{ classroomTaskId: string }>> = [
+      overview.taskTrends,
+      detail.taskPoints,
+    ];
+    for (const points of effectiveTaskSets) {
+      expect(points.map((item) => item.classroomTaskId)).toEqual(
+        expect.arrayContaining([closed.id, legacy.id]),
+      );
+      expect(points.map((item) => item.classroomTaskId)).not.toContain(
+        recalled.id,
+      );
+      expect(points.map((item) => item.classroomTaskId)).not.toContain(
+        unknown.id,
+      );
+    }
+    expect(detail.taskPoints).toHaveLength(9);
+    expect(
+      await submissionModel.countDocuments({
+        classroomTaskId: new Types.ObjectId(recalled.id),
+      }),
+    ).toBe(0);
+  });
+
+  it('reads real PATCH revision and manual review admission for an older attempt updated after intervention, without GET writes', async () => {
+    const instance = await publishOwnedTask('Formal edited older attempt');
+    type Submitted = {
+      id: string;
+      attemptNo: number;
+      contentRevision: number;
+      submittedAt: string;
+      lastEditedAt: string | null;
+    };
+    const submit = async (codeText: string) => {
+      const body = (
+        await activeStudentAgent
+          .post(
+            '/api/classrooms/' +
+              classroomId.toString() +
+              '/tasks/' +
+              instance.id +
+              '/submissions',
+          )
+          .send({ content: { codeText, language: 'typescript' } })
+          .expect(201)
+      ).body as Submitted;
+      createdSubmissionIds.push(new Types.ObjectId(body.id));
+      return body;
+    };
+    const older = await submit('const before = 0;');
+    const baseline = await submit('const baseline = 1;');
+    const requestAi = async (id: string, revision: number) =>
+      activeStudentAgent
+        .post('/api/learning-tasks/submissions/' + id + '/ai-feedback/request')
+        .send({ expectedRevision: revision })
+        .expect(200);
+    await requestAi(baseline.id, baseline.contentRevision);
+    const completedAt = new Date();
+    // Synthetic statistics input only; no Provider execution is claimed.
+    const complete = async (id: string, at: Date, model: string) => {
+      await aiFeedbackJobModel.collection.updateOne(
+        { submissionId: new Types.ObjectId(id), studentId: activeStudentId },
+        {
+          $set: {
+            status: AiFeedbackJobStatus.Succeeded,
+            provider: 'bailian',
+            attempts: 1,
+            updatedAt: at,
+            requests: [
+              {
+                claimNo: 1,
+                provider: 'bailian',
+                model,
+                reservedAt: at,
+                inputBytes: 10,
+                maxOutputTokens: 10,
+                usage: null,
+              },
+            ],
+          },
+        },
+      );
+    };
+    await complete(baseline.id, completedAt, 'synthetic-model-a');
+    await insertFeedback({
+      submissionId: new Types.ObjectId(baseline.id),
+      severity: FeedbackSeverity.Error,
+    });
+    const edited = (
+      await activeStudentAgent
+        .patch('/api/learning-tasks/submissions/' + older.id)
+        .send({
+          expectedRevision: older.contentRevision,
+          content: {
+            codeText: 'const revised = 2;',
+            language: 'typescript',
+            submissionNote: 'After feedback',
+          },
+        })
+        .expect(200)
+    ).body as Submitted;
+    expect(edited.id).toBe(older.id);
+    expect(edited.attemptNo).toBe(1);
+    expect(edited.contentRevision).toBe(1);
+    expect(edited.lastEditedAt).toEqual(expect.any(String));
+    expect(new Date(edited.lastEditedAt!).getTime()).toBeGreaterThan(
+      completedAt.getTime(),
+    );
+    await requestAi(older.id, edited.contentRevision);
+    await activeStudentAgent
+      .patch('/api/learning-tasks/submissions/' + older.id)
+      .send({
+        expectedRevision: edited.contentRevision,
+        content: {
+          codeText: 'cannot replace admitted version',
+          language: 'typescript',
+        },
+      })
+      .expect(409);
+    await complete(older.id, new Date(), 'synthetic-model-a');
+    await insertFeedback({
+      submissionId: new Types.ObjectId(older.id),
+      severity: FeedbackSeverity.Info,
+    });
+    const before = await rawTaskFacts(instance.id);
+    const { overview, students, detail } = await analysisForTask(instance.id);
+    expect(await rawTaskFacts(instance.id)).toEqual(before);
+    const point = detail.taskPoints[0];
+    expect(point).toMatchObject({
+      classroomTaskId: instance.id,
+      attemptsCount: 2,
+      postFeedbackResubmitted: false,
+      postFeedbackRevised: true,
+      postFeedbackCodeChanged: true,
+      qualityComparable: true,
+      issueLoadBefore: 1,
+      issueLoadAfter: 0,
+      issueLoadDelta: 1,
+      detailedOutcome: 'IMPROVED',
+      hasNewerUncomparedRevision: false,
+    });
+    expect(point.baselineReview).toMatchObject({
+      submissionId: baseline.id,
+      attemptNo: 2,
+      contentRevision: 0,
+      feedbackCompletedAt: completedAt.toISOString(),
+      provider: 'bailian',
+      model: 'synthetic-model-a',
+    });
+    expect(point.comparisonReview).toMatchObject({
+      submissionId: older.id,
+      attemptNo: 1,
+      contentRevision: 1,
+      submittedAt: older.submittedAt,
+      lastEditedAt: edited.lastEditedAt,
+      contentVersionAt: edited.lastEditedAt,
+      provider: 'bailian',
+      model: 'synthetic-model-a',
+    });
+    expect(point.latestRevision?.submissionId).toBe(older.id);
+    expect(overview.summary).toMatchObject({
+      submittedStudentTaskCount: 1,
+      aiDeliveredStudentTaskCount: 1,
+      postFeedbackResubmittedStudentTaskCount: 0,
+      postFeedbackRevisedStudentTaskCount: 1,
+      postFeedbackCodeChangedStudentTaskCount: 1,
+      qualityComparableStudentTaskCount: 1,
+      postFeedbackResubmissionRate: 0,
+      postFeedbackRevisionRate: 1,
+      postFeedbackCodeChangeRate: 1,
+    });
+    expect(overview.taskTrends[0]).toMatchObject({
+      postFeedbackRevisedStudentCount: 1,
+      qualityComparableStudentCount: 1,
+    });
+    expect(
+      students.items.find(
+        (item) => item.studentId === activeStudentId.toString(),
+      ),
+    ).toMatchObject({
+      postFeedbackResubmittedTasksCount: 0,
+      postFeedbackRevisedTasksCount: 1,
+      qualityComparableTasksCount: 1,
+      evidenceSummary: {
+        sourceUncertainComparableCount: 0,
+        modelChangedComparableCount: 0,
+        simulatedExcludedSampleCount: 0,
+      },
+    });
+    console.info(
+      'Analytics formal edited chain: baseline attempt 2/revision 0 -> comparison attempt 1/revision 1; resubmitted=false revised=true codeChanged=true; GET facts unchanged',
+    );
+  });
+
+  it('keeps the latest reviewed content endpoint through out-of-order completion and exposes newer unusable versions', async () => {
+    const instance = await publishOwnedTask(
+      'Three rounds with out-of-order reviews',
+    );
+    const taskId = new Types.ObjectId(instance.taskId),
+      classroomTaskId = new Types.ObjectId(instance.id);
+    const at = (hours: number) => new Date(Date.UTC(2026, 0, 1, hours));
+    await classroomTaskModel.collection.updateOne(
+      { _id: classroomTaskId },
+      { $set: { publishedAt: at(0) } },
+    );
+    const make = (attemptNo: number, hour: number, codeText: string) =>
+      createSubmission({
+        classroomTaskId,
+        taskId,
+        studentId: activeStudentId,
+        attemptNo,
+        submittedAt: at(hour),
+        codeText,
+      });
+    const baseline = await make(1, 1, 'baseline');
+    const lower = await make(2, 4, 'baseline');
+    const higher = await make(3, 6, 'changed');
+    for (const [submission, completion, severity, model] of [
+      [baseline, 2, FeedbackSeverity.Warn, 'model-a'],
+      [lower, 12, FeedbackSeverity.Info, 'model-a'],
+      [higher, 8, FeedbackSeverity.Error, 'model-b'],
+    ] as const) {
+      await insertJob({
+        submissionId: submission._id,
+        taskId,
+        classroomTaskId,
+        studentId: activeStudentId,
+        status: AiFeedbackJobStatus.Succeeded,
+        updatedAt: at(completion),
+      });
+      await aiFeedbackJobModel.collection.updateOne(
+        { submissionId: submission._id },
+        {
+          $set: {
+            provider: 'bailian',
+            attempts: 1,
+            requests: [{ claimNo: 1, provider: 'bailian', model }],
+          },
+        },
+      );
+      await insertFeedback({ submissionId: submission._id, severity });
+    }
+    const newest = await make(4, 14, 'newer unreviewed work');
+    const expectedPair = {
+      baselineReview: {
+        submissionId: baseline._id.toString(),
+        contentVersionAt: at(1).toISOString(),
+        feedbackCompletedAt: at(2).toISOString(),
+      },
+      comparisonReview: {
+        submissionId: higher._id.toString(),
+        contentVersionAt: at(6).toISOString(),
+        feedbackCompletedAt: at(8).toISOString(),
+      },
+      qualityComparable: true,
+      issueLoadBefore: 0.5,
+      issueLoadAfter: 1,
+      issueLoadDelta: -0.5,
+      detailedOutcome: 'REGRESSED',
+      postFeedbackRevised: true,
+      postFeedbackResubmitted: true,
+      postFeedbackCodeChanged: true,
+      hasNewerUncomparedRevision: true,
+    };
+    for (const state of [
+      'UNREQUESTED',
+      AiFeedbackJobStatus.Pending,
+      AiFeedbackJobStatus.Failed,
+      'EMPTY',
+      'STUB',
+    ] as const) {
+      if (state === AiFeedbackJobStatus.Pending)
+        await insertJob({
+          submissionId: newest._id,
+          taskId,
+          classroomTaskId,
+          studentId: activeStudentId,
+          status: AiFeedbackJobStatus.Pending,
+          updatedAt: at(15),
+        });
+      if (state !== 'UNREQUESTED' && state !== AiFeedbackJobStatus.Pending)
+        await aiFeedbackJobModel.collection.updateOne(
+          { submissionId: newest._id },
+          {
+            $set: {
+              status:
+                state === AiFeedbackJobStatus.Failed
+                  ? AiFeedbackJobStatus.Failed
+                  : AiFeedbackJobStatus.Succeeded,
+              updatedAt: at(15),
+              ...(state === 'STUB' ? { provider: 'stub' } : {}),
+            },
+          },
+        );
+      if (state === 'STUB')
+        await insertFeedback({
+          submissionId: newest._id,
+          severity: FeedbackSeverity.Info,
+        });
+      const before = await rawTaskFacts(instance.id);
+      const { overview, detail } = await analysisForTask(instance.id);
+      expect(await rawTaskFacts(instance.id)).toEqual(before);
+      const point = detail.taskPoints[0];
+      expect(point).toMatchObject(expectedPair);
+      expect(point.latestRevision?.submissionId).toBe(newest._id.toString());
+      expect(point.comparisonWarnings).toContain('MODEL_CHANGED');
+      if (state === 'EMPTY')
+        expect(point.comparisonWarnings).toContain('EMPTY_FEEDBACK');
+      if (state === 'STUB')
+        expect(point.comparisonWarnings).toContain('SIMULATED_REVIEW_EXCLUDED');
+      expect(overview.summary.evidenceSummary).toEqual({
+        sourceUncertainComparableCount: 0,
+        modelChangedComparableCount: 1,
+        simulatedExcludedSampleCount: state === 'STUB' ? 1 : 0,
+      });
+    }
+    // A revision with missing edit time cannot be sorted by its initial submit time.
+    await submissionModel.collection.updateOne(
+      { _id: newest._id },
+      { $set: { contentRevision: 1 }, $unset: { lastEditedAt: '' } },
+    );
+    const uncertain = (await analysisForTask(instance.id)).detail.taskPoints[0];
+    expect(uncertain.comparisonReview?.submissionId).toBe(
+      higher._id.toString(),
+    );
+    expect(uncertain.latestRevision).toBeNull();
+    expect(uncertain.hasNewerUncomparedRevision).toBeNull();
+    expect(uncertain.comparisonWarnings).toContain('TIME_UNKNOWN');
+    console.info(
+      'Analytics multi-round result: WARN baseline at 02:00 -> ERROR third content at 06:00; INFO second review completing at 12:00 does not replace it',
+    );
   });
 });

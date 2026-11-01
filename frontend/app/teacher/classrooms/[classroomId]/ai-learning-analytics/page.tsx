@@ -53,7 +53,11 @@ import {
 } from "@/lib/ai-learning-analytics";
 import { paths } from "@/lib/routes/paths";
 import { getCommonErrorSummary } from "@/lib/ui/status";
-import { buildQueryString, toDisplayDate, toDisplayText } from "@/lib/ui/format";
+import {
+  buildQueryString,
+  toDisplayDate,
+  toDisplayText,
+} from "@/lib/ui/format";
 
 const STUDENT_PAGE_SIZE = 100;
 
@@ -157,7 +161,8 @@ const getScopeNotice = (
   if (summary.submittedStudentTaskCount === 0) {
     return {
       title: "当前范围暂无学生提交",
-      description: "任务仍会出现在任务明细中，但暂时没有学生 × 课堂任务提交样本。",
+      description:
+        "任务仍会出现在任务明细中，但暂时没有学生 × 课堂任务提交样本。",
     };
   }
   if (summary.aiRequestedStudentTaskCount === 0) {
@@ -168,14 +173,14 @@ const getScopeNotice = (
   }
   if (summary.aiDeliveredStudentTaskCount === 0) {
     return {
-      title: "当前范围暂无成功交付的 AI 反馈",
-      description: "已有反馈请求，但尚无 SUCCEEDED AI job 可用于观察后续行为。",
+      title: "当前范围暂无可用反馈交付",
+      description: "已有反馈请求，但尚无非模拟可用反馈可用于观察后续行为。",
     };
   }
   if (summary.qualityComparableStudentTaskCount === 0) {
     return {
       title: "当前范围暂无可比较的介入前后样本",
-      description: "摘要和任务明细仍保留；问题负荷对比图不会伪造为持平。",
+      description: "摘要和任务明细仍保留；反馈条目负荷对比图不会伪造为持平。",
     };
   }
   return null;
@@ -214,9 +219,7 @@ export default async function AiLearningAnalyticsPage({
   const rawQuery = await searchParams;
   const queryState = resolveAiLearningAnalyticsQueryState(rawQuery);
   const excludedTaskIdsQueryValue =
-    toAiLearningAnalyticsExcludedTaskIdsQueryValue(
-      queryState.excludedTaskIds,
-    );
+    toAiLearningAnalyticsExcludedTaskIdsQueryValue(queryState.excludedTaskIds);
   const currentQueryEntries = toAiLearningAnalyticsSearchParamEntries({
     window: queryState.window,
     page: String(queryState.page),
@@ -391,9 +394,7 @@ export default async function AiLearningAnalyticsPage({
         />
       ) : null}
 
-      <AiLearningAnalyticsTeachingAttention
-        taskTrends={overview.taskTrends}
-      />
+      <AiLearningAnalyticsTeachingAttention taskTrends={overview.taskTrends} />
 
       <section className="rounded-lg border border-zinc-200 bg-zinc-50 p-4">
         <h2 className="text-sm font-semibold text-zinc-900">
@@ -426,7 +427,7 @@ export default async function AiLearningAnalyticsPage({
           课堂任务分析明细
         </h2>
         <p className="mt-1 text-xs text-zinc-500">
-          覆盖当前有效任务，包括零提交任务；“—”表示没有对应分母或质量可比样本。
+          覆盖当前有效任务，包括零提交任务；“—”表示没有对应分母或反馈可对照样本。
         </p>
         <div className="mt-3">
           <AiLearningAnalyticsTaskTable taskTrends={overview.taskTrends} />
@@ -443,7 +444,7 @@ export default async function AiLearningAnalyticsPage({
           名，不进行前端排序或排名。
         </p>
         <p className="mt-1 text-xs leading-5 text-zinc-500">
-          “总体变化”由后端按当前范围内全部可比任务的问题负荷净变化给出，不是时间序列回归，也不是能力成长或退步结论。
+          “总体变化”由后端按当前范围内全部可比任务的反馈条目负荷净变化给出，不是时间序列回归，也不是能力成长或退步结论。
         </p>
         <AiLearningAnalyticsStudentFilters
           classroomId={classroomId}
@@ -477,27 +478,24 @@ export default async function AiLearningAnalyticsPage({
               students.total > 0 &&
               students.items.length === 0 &&
               students.page > 1;
-            const clearFiltersHref =
-              withAiLearningAnalyticsStudentSectionHash(
-                buildClassAnalyticsHref(classroomId, {
-                  window: context.window,
-                  excludedTaskIds: queryState.excludedTaskIds,
-                  page: 1,
-                }),
-              );
-            const firstPageHref =
-              withAiLearningAnalyticsStudentSectionHash(
-                buildClassAnalyticsHref(classroomId, {
-                  window: context.window,
-                  excludedTaskIds: queryState.excludedTaskIds,
-                  page: 1,
-                  q: students.filters.q ?? undefined,
-                  overallOutcome:
-                    students.filters.overallOutcome ?? undefined,
-                  engagementStatus:
-                    students.filters.engagementStatus ?? undefined,
-                }),
-              );
+            const clearFiltersHref = withAiLearningAnalyticsStudentSectionHash(
+              buildClassAnalyticsHref(classroomId, {
+                window: context.window,
+                excludedTaskIds: queryState.excludedTaskIds,
+                page: 1,
+              }),
+            );
+            const firstPageHref = withAiLearningAnalyticsStudentSectionHash(
+              buildClassAnalyticsHref(classroomId, {
+                window: context.window,
+                excludedTaskIds: queryState.excludedTaskIds,
+                page: 1,
+                q: students.filters.q ?? undefined,
+                overallOutcome: students.filters.overallOutcome ?? undefined,
+                engagementStatus:
+                  students.filters.engagementStatus ?? undefined,
+              }),
+            );
             return (
               <>
                 <p className="mt-3 text-sm text-zinc-600">

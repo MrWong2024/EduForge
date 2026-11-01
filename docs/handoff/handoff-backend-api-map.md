@@ -109,8 +109,8 @@ Notes:
 - Process Assessment JSON / CSV 均为 teacher owner 的过程性指标，不能作为正式成绩仲裁；二者使用相同窗口、排除项与查询口径，CSV 媒体类型为 `text/csv; charset=utf-8`。临时任务排除只改变本次分析，不修改教学数据；零提交及排除全部任务时仍返回当前 ACTIVE 学生。
 - PA 的合法窗口、term 旧链接兼容、零值、rubric 及 CSV 数据合同见 [DTO Process Assessment](./handoff-backend-dto-cheatsheet.md#process-assessment)；评分、risk 与排除重算见 [Service Card 08G](./handoff-backend-service-map.md#service-card-08g)。
 - AI Learning Analytics 三个入口统一 teacher only + classroom owner only；课堂不存在或非 owner 返回 `404 Classroom not found`。学生详情仅允许当前课堂 ACTIVE Enrollment 学生，REMOVED、外班及非法学生 id 均安全返回 `404`。
-- Analytics 以课堂任务发布时间界定分析任务范围，呈现 AI 反馈介入后的班级、任务与学生结果。学生列表的 q 只匹配姓名/学号，不区分大小写，按字符串子串匹配；q、overallOutcome 与 engagementStatus 采用 AND 组合。非法 Query 按 DTO 校验拒绝（`400`）。公开参数/分页结果、方法学 V1.1、枚举与零值见 [DTO Analytics](./handoff-backend-dto-cheatsheet.md#ai-learning-analytics)，配对与搜索筛选分页算法见 [Service Card 08I](./handoff-backend-service-map.md#service-card-08i)。
-- Analytics 仅反映 EduForge AI 反馈介入后的提交行为及代码问题代理变化，不覆盖全部 AI 使用，不是正式成绩、学习能力或因果贡献结论，也不能证明学生已阅读/采纳反馈。净结果不代表时间序列趋势；反馈阶段不表示态度、AI 依赖、能力或风险。
+- Analytics 以课堂任务发布时间界定范围，三个入口统一保留有效 ACTIVE/CLOSED 任务的完整提交链，并支持当前查询临时排除。学生列表的 q 只匹配姓名/学号，不区分大小写，按字符串子串匹配；q、overallOutcome 与 engagementStatus 采用 AND 组合。非法 Query 按 DTO 校验拒绝（`400`）。方法学 V1.2 取代旧“首个后续版本”比较，区分新增提交与作品更新；公开参数、比较追溯、来源提示及 nullable 指标见 [DTO Analytics](./handoff-backend-dto-cheatsheet.md#ai-learning-analytics)，配对与搜索筛选分页算法见 [Service Card 08I](./handoff-backend-service-map.md#service-card-08i)。
+- Analytics 为只读记录对照，不回填、重评、解锁或改写历史业务事实。可用反馈交付排除已知模拟评阅与成功空反馈，历史来源未知不认证为真实模型；不同来源/模型、未比较较新版本及证据不足均提供安全提示。分析仅反映现存作品更新与反馈条目负荷，不覆盖全部 AI 使用，不是缺陷数、正确率、正式成绩、学习能力或因果贡献结论，也不能证明已阅读、理解或采纳。净结果可能相互抵消，不代表时间序列趋势；反馈阶段不表示态度、AI 依赖、能力或风险。
 - Snapshot 是 teacher owner 的体积受控教学数据快照导出，超量数据附带截断提示；Query、meta/notes、公开投影与敏感省略见 [DTO Snapshot](./handoff-backend-dto-cheatsheet.md#classroom-export-snapshot)，组合与截断策略见 [Service Card 08H](./handoff-backend-service-map.md#service-card-08h)。
 - 班级状态为 `ACTIVE | ARCHIVED`，PATCH 支持归档/恢复，保留 POST archive。仅无 ClassroomTask 且无 Enrollment 记录（包含 REMOVED 历史）的空班级可删除；legacy studentIds 仅作删除防御校验。非空时返回 `409 Conflict`，`code=CLASSROOM_NOT_EMPTY`，message=`该班级已有成员或任务记录，不能删除，只能归档`。
 

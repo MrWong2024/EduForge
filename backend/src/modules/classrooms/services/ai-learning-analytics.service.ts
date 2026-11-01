@@ -6,7 +6,6 @@ import {
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import { WithId } from '../../../common/types/with-id.type';
-import { WithTimestamps } from '../../../common/types/with-timestamps.type';
 import { Course } from '../../courses/schemas/course.schema';
 import {
   AiFeedbackJob,
@@ -22,6 +21,10 @@ import { Task } from '../../learning-tasks/schemas/task.schema';
 import { User } from '../../users/schemas/user.schema';
 import { ClassroomTask } from '../classroom-tasks/schemas/classroom-task.schema';
 import {
+  CLASSROOM_TASK_STATUS_ACTIVE,
+  CLASSROOM_TASK_STATUS_CLOSED,
+} from '../classroom-tasks/classroom-task-status.constants';
+import {
   AI_LEARNING_ANALYTICS_WINDOWS,
   AiLearningAnalyticsWindow,
   QueryAiLearningAnalyticsDto,
@@ -35,6 +38,7 @@ import {
   AI_LEARNING_ANALYTICS_SAMPLE_UNIT,
   AI_LEARNING_ANALYTICS_SCOPE,
   AI_LEARNING_ANALYTICS_VERSION,
+  AI_LEARNING_ANALYTICS_COMPARISON_WARNINGS,
 } from '../types/ai-learning-analytics.types';
 import type {
   AiLearningAnalyticsDetailedOutcome,
@@ -42,6 +46,9 @@ import type {
   AiLearningAnalyticsGrowthTrend,
   AiLearningAnalyticsOutcome,
   AiLearningAnalyticsOverallOutcome,
+  AiLearningAnalyticsComparisonWarning,
+  AiLearningAnalyticsReview,
+  AiLearningAnalyticsEvidenceSummary,
 } from '../types/ai-learning-analytics.types';
 
 export {
@@ -75,11 +82,22 @@ type TaskTitleLean = Pick<Task, 'title'> & WithId;
 type StudentPublicLean = Pick<User, 'name' | 'studentNo'> & WithId;
 type AnalyticsSubmissionLean = Pick<
   Submission,
-  'classroomTaskId' | 'studentId' | 'attemptNo' | 'submittedAt'
+  | 'classroomTaskId'
+  | 'studentId'
+  | 'attemptNo'
+  | 'submittedAt'
+  | 'contentRevision'
+  | 'lastEditedAt'
 > & { content: { codeText: string } } & WithId;
-type AnalyticsJobLean = Pick<AiFeedbackJob, 'submissionId' | 'status'> &
-  WithId &
-  WithTimestamps;
+type AnalyticsJobLean = Pick<
+  AiFeedbackJob,
+  'submissionId' | 'status' | 'provider'
+> &
+  WithId & {
+    updatedAt?: Date;
+    attempts?: number;
+    requests?: Array<{ claimNo: number; provider: 'bailian'; model: string }>;
+  };
 type AnalyticsFeedbackLean = Pick<
   Feedback,
   'submissionId' | 'source' | 'severity'
@@ -124,6 +142,7 @@ export type AiLearningAnalyticsStandardSample = {
   aiRequested: boolean;
   aiDelivered: boolean;
   postFeedbackResubmitted: boolean;
+  postFeedbackRevised: boolean;
   postFeedbackCodeChanged: boolean;
   qualityComparable: boolean;
   issueLoadBeforeHalfUnits: number | null;
@@ -131,6 +150,11 @@ export type AiLearningAnalyticsStandardSample = {
   issueLoadDeltaHalfUnits: number | null;
   detailedOutcome: AiLearningAnalyticsDetailedOutcome;
   outcome: AiLearningAnalyticsOutcome;
+  baselineReview: AiLearningAnalyticsReview | null;
+  comparisonReview: AiLearningAnalyticsReview | null;
+  latestRevision: AiLearningAnalyticsReview | null;
+  hasNewerUncomparedRevision: boolean | null;
+  comparisonWarnings: AiLearningAnalyticsComparisonWarning[];
 };
 
 type SampleAggregate = {
@@ -138,6 +162,7 @@ type SampleAggregate = {
   aiRequestedCount: number;
   aiDeliveredCount: number;
   postFeedbackResubmittedCount: number;
+  postFeedbackRevisedCount: number;
   postFeedbackCodeChangedCount: number;
   qualityComparableCount: number;
   improvedCount: number;
@@ -145,9 +170,10 @@ type SampleAggregate = {
   unchangedWithIssuesCount: number;
   stableCount: number;
   regressedCount: number;
-  averageIssueLoadBefore: number;
-  averageIssueLoadAfter: number;
-  averageIssueLoadDelta: number;
+  averageIssueLoadBefore: number | null;
+  averageIssueLoadAfter: number | null;
+  averageIssueLoadDelta: number | null;
+  evidenceSummary: AiLearningAnalyticsEvidenceSummary;
   issueLoadDeltaHalfUnitsTotal: number;
 };
 
@@ -167,7 +193,7 @@ const toValidTimestamp = (value: Date | undefined): number | null => {
 };
 
 export const normalizeAiLearningAnalyticsCode = (codeText: string) =>
-  codeText.replace(/\r\n/g, '\n').trim();
+  codeText.replace(/\r\n/g, '\n');
 
 const compareAnalyticsSubmissions = (
   left: AnalyticsSubmissionLean,
@@ -253,7 +279,7 @@ export const deriveAiLearningAnalyticsEngagementStatus = (metrics: {
   submittedTasksCount: number;
   aiRequestedTasksCount: number;
   aiDeliveredTasksCount: number;
-  postFeedbackResubmittedTasksCount: number;
+  postFeedbackRevisedTasksCount: number;
   qualityComparableTasksCount: number;
 }): AiLearningAnalyticsEngagementStatus => {
   if (metrics.submittedTasksCount === 0) {
@@ -265,13 +291,90 @@ export const deriveAiLearningAnalyticsEngagementStatus = (metrics: {
   if (metrics.aiDeliveredTasksCount === 0) {
     return 'AI_REQUESTED_WITHOUT_DELIVERY';
   }
-  if (metrics.postFeedbackResubmittedTasksCount === 0) {
-    return 'AI_DELIVERED_WITHOUT_RESUBMISSION';
+  if (metrics.postFeedbackRevisedTasksCount === 0) {
+    return 'AI_DELIVERED_WITHOUT_REVISION';
   }
   return metrics.qualityComparableTasksCount === 0
-    ? 'RESUBMITTED_WITHOUT_COMPARABLE'
+    ? 'REVISED_WITHOUT_COMPARABLE'
     : 'QUALITY_COMPARABLE';
 };
+
+const contentVersionTimestamp = (
+  submission: AnalyticsSubmissionLean,
+): number | null => {
+  const submittedAt = toValidTimestamp(submission.submittedAt);
+  const revision = submission.contentRevision;
+  if (
+    revision !== undefined &&
+    (!Number.isSafeInteger(revision) || revision < 0)
+  )
+    return null;
+  if (revision !== undefined && revision > 0) {
+    const editedAt = toValidTimestamp(submission.lastEditedAt);
+    return submittedAt !== null && editedAt !== null && editedAt >= submittedAt
+      ? editedAt
+      : null;
+  }
+  // Legacy initial versions have no revision or edit record. An inconsistent
+  // edit record is not evidence that the present content existed at submission.
+  return submission.lastEditedAt === undefined ? submittedAt : null;
+};
+
+const compareContentVersions = (
+  left: AnalyticsSubmissionLean,
+  right: AnalyticsSubmissionLean,
+) =>
+  (contentVersionTimestamp(left) ?? 0) -
+    (contentVersionTimestamp(right) ?? 0) ||
+  compareAnalyticsSubmissions(left, right);
+
+const successfulRequestModel = (
+  job: AnalyticsJobLean | undefined,
+): string | null => {
+  if (
+    job?.status !== AiFeedbackJobStatus.Succeeded ||
+    job.provider !== 'bailian' ||
+    !Number.isSafeInteger(job.attempts) ||
+    (job.attempts ?? 0) < 1
+  )
+    return null;
+  const matching = (job.requests ?? []).filter(
+    (record) => record.claimNo === job.attempts,
+  );
+  if (matching.length !== 1 || matching[0].provider !== 'bailian') return null;
+  const model = matching[0].model;
+  return typeof model === 'string' && model.trim().length > 0 ? model : null;
+};
+
+const timestampIso = (value: number | null) =>
+  value === null ? null : new Date(value).toISOString();
+const reviewProjection = (
+  submission: AnalyticsSubmissionLean,
+  job: AnalyticsJobLean | undefined,
+): AiLearningAnalyticsReview => ({
+  submissionId: submission._id.toString(),
+  attemptNo:
+    Number.isSafeInteger(submission.attemptNo) && submission.attemptNo > 0
+      ? submission.attemptNo
+      : null,
+  contentRevision:
+    Number.isSafeInteger(submission.contentRevision) &&
+    (submission.contentRevision ?? -1) >= 0
+      ? (submission.contentRevision ?? null)
+      : null,
+  submittedAt: timestampIso(toValidTimestamp(submission.submittedAt)),
+  lastEditedAt: timestampIso(toValidTimestamp(submission.lastEditedAt)),
+  contentVersionAt: timestampIso(contentVersionTimestamp(submission)),
+  feedbackCompletedAt:
+    job?.status === AiFeedbackJobStatus.Succeeded
+      ? timestampIso(toValidTimestamp(job.updatedAt))
+      : null,
+  provider:
+    job?.provider === 'bailian' || job?.provider === 'stub'
+      ? job.provider
+      : null,
+  model: successfulRequestModel(job),
+});
 
 export const buildAiLearningAnalyticsStandardSamples = (
   submissions: AnalyticsSubmissionLean[],
@@ -280,179 +383,197 @@ export const buildAiLearningAnalyticsStandardSamples = (
 ): AiLearningAnalyticsStandardSample[] => {
   const jobsBySubmissionId = new Map<string, AnalyticsJobLean[]>();
   for (const job of jobs) {
-    const submissionId = job.submissionId.toString();
-    const bucket = jobsBySubmissionId.get(submissionId) ?? [];
+    const key = job.submissionId.toString();
+    const bucket = jobsBySubmissionId.get(key) ?? [];
     bucket.push(job);
-    jobsBySubmissionId.set(submissionId, bucket);
+    jobsBySubmissionId.set(key, bucket);
   }
-  for (const bucket of jobsBySubmissionId.values()) {
-    bucket.sort((left, right) =>
-      left._id.toString().localeCompare(right._id.toString()),
+  for (const bucket of jobsBySubmissionId.values())
+    bucket.sort(
+      (left, right) =>
+        (toValidTimestamp(left.updatedAt) ?? Infinity) -
+          (toValidTimestamp(right.updatedAt) ?? Infinity) ||
+        left._id.toString().localeCompare(right._id.toString()),
     );
-  }
-
   const feedbackBySubmissionId = new Map<string, AnalyticsFeedbackLean[]>();
   for (const feedback of feedbackItems) {
-    if (feedback.source !== FeedbackSource.AI) {
-      continue;
-    }
-    const submissionId = feedback.submissionId.toString();
-    const bucket = feedbackBySubmissionId.get(submissionId) ?? [];
+    if (feedback.source !== FeedbackSource.AI) continue;
+    const key = feedback.submissionId.toString();
+    const bucket = feedbackBySubmissionId.get(key) ?? [];
     bucket.push(feedback);
-    feedbackBySubmissionId.set(submissionId, bucket);
+    feedbackBySubmissionId.set(key, bucket);
   }
-
-  const submissionsByStudentTask = new Map<string, AnalyticsSubmissionLean[]>();
+  const grouped = new Map<string, AnalyticsSubmissionLean[]>();
   for (const submission of submissions) {
-    if (!submission.classroomTaskId) {
-      continue;
-    }
-    const key = `${submission.studentId.toString()}:${submission.classroomTaskId.toString()}`;
-    const bucket = submissionsByStudentTask.get(key) ?? [];
+    if (!submission.classroomTaskId) continue;
+    const key =
+      submission.studentId.toString() +
+      ':' +
+      submission.classroomTaskId.toString();
+    const bucket = grouped.get(key) ?? [];
     bucket.push(submission);
-    submissionsByStudentTask.set(key, bucket);
+    grouped.set(key, bucket);
   }
-
   const samples: AiLearningAnalyticsStandardSample[] = [];
-  for (const bucket of submissionsByStudentTask.values()) {
+  for (const bucket of grouped.values()) {
     bucket.sort(compareAnalyticsSubmissions);
-    const firstSubmission = bucket[0];
-    const studentId = firstSubmission.studentId.toString();
-    const classroomTaskId = firstSubmission.classroomTaskId?.toString();
-    if (!classroomTaskId) {
-      continue;
-    }
-
-    const aiRequested = bucket.some(
-      (submission) =>
-        (jobsBySubmissionId.get(submission._id.toString())?.length ?? 0) > 0,
-    );
-    const anchorSubmission = bucket.find((submission) =>
-      (jobsBySubmissionId.get(submission._id.toString()) ?? []).some(
+    const classroomTaskId = bucket[0].classroomTaskId;
+    if (!classroomTaskId) continue;
+    const warnings = new Set<AiLearningAnalyticsComparisonWarning>();
+    const available: Array<{
+      submission: AnalyticsSubmissionLean;
+      job: AnalyticsJobLean;
+    }> = [];
+    let aiRequested = false;
+    for (const submission of bucket) {
+      if (contentVersionTimestamp(submission) === null)
+        warnings.add('TIME_UNKNOWN');
+      const submissionJobs =
+        jobsBySubmissionId.get(submission._id.toString()) ?? [];
+      aiRequested ||= submissionJobs.length > 0;
+      const succeeded = submissionJobs.filter(
         (job) => job.status === AiFeedbackJobStatus.Succeeded,
-      ),
-    );
-
-    if (!anchorSubmission) {
-      samples.push({
-        studentId,
-        classroomTaskId,
-        attemptsCount: bucket.length,
-        aiRequested,
-        aiDelivered: false,
-        postFeedbackResubmitted: false,
-        postFeedbackCodeChanged: false,
-        qualityComparable: false,
-        issueLoadBeforeHalfUnits: null,
-        issueLoadAfterHalfUnits: null,
-        issueLoadDeltaHalfUnits: null,
-        detailedOutcome: 'NOT_COMPARABLE',
-        outcome: 'NOT_COMPARABLE',
-      });
-      continue;
-    }
-
-    const anchorJob = (
-      jobsBySubmissionId.get(anchorSubmission._id.toString()) ?? []
-    ).find((job) => job.status === AiFeedbackJobStatus.Succeeded);
-    const feedbackCompletedAt = toValidTimestamp(anchorJob?.updatedAt);
-    if (feedbackCompletedAt === null) {
-      samples.push({
-        studentId,
-        classroomTaskId,
-        attemptsCount: bucket.length,
-        aiRequested,
-        aiDelivered: true,
-        postFeedbackResubmitted: false,
-        postFeedbackCodeChanged: false,
-        qualityComparable: false,
-        issueLoadBeforeHalfUnits: null,
-        issueLoadAfterHalfUnits: null,
-        issueLoadDeltaHalfUnits: null,
-        detailedOutcome: 'NOT_COMPARABLE',
-        outcome: 'NOT_COMPARABLE',
-      });
-      continue;
-    }
-
-    const isAfterFeedback = (submission: AnalyticsSubmissionLean) => {
-      const submittedAt = toValidTimestamp(submission.submittedAt);
-      return (
-        submission.attemptNo > anchorSubmission.attemptNo &&
-        submittedAt !== null &&
-        submittedAt > feedbackCompletedAt
       );
-    };
-    const postSubmission = bucket.find(isAfterFeedback);
-    const comparableAfterSubmission = bucket.find(
-      (submission) =>
-        isAfterFeedback(submission) &&
-        (jobsBySubmissionId.get(submission._id.toString()) ?? []).some(
-          (job) => job.status === AiFeedbackJobStatus.Succeeded,
-        ),
-    );
-    const postFeedbackCodeChanged = postSubmission
-      ? normalizeAiLearningAnalyticsCode(anchorSubmission.content.codeText) !==
-        normalizeAiLearningAnalyticsCode(postSubmission.content.codeText)
-      : false;
-
-    if (!comparableAfterSubmission) {
-      samples.push({
-        studentId,
-        classroomTaskId,
-        attemptsCount: bucket.length,
-        aiRequested,
-        aiDelivered: true,
-        postFeedbackResubmitted: !!postSubmission,
-        postFeedbackCodeChanged,
-        qualityComparable: false,
-        issueLoadBeforeHalfUnits: null,
-        issueLoadAfterHalfUnits: null,
-        issueLoadDeltaHalfUnits: null,
-        detailedOutcome: 'NOT_COMPARABLE',
-        outcome: 'NOT_COMPARABLE',
-      });
-      continue;
+      const feedbacks =
+        feedbackBySubmissionId.get(submission._id.toString()) ?? [];
+      if (succeeded.length > 0 && feedbacks.length === 0)
+        warnings.add('EMPTY_FEEDBACK');
+      if (succeeded.some((job) => job.provider === 'stub'))
+        warnings.add('SIMULATED_REVIEW_EXCLUDED');
+      const effective = succeeded.find(
+        (job) => job.provider !== 'stub' && feedbacks.length > 0,
+      );
+      if (effective) {
+        available.push({ submission, job: effective });
+        if (toValidTimestamp(effective.updatedAt) === null)
+          warnings.add('TIME_UNKNOWN');
+        if (effective.provider !== 'bailian') warnings.add('SOURCE_UNKNOWN');
+        if (successfulRequestModel(effective) === null)
+          warnings.add('MODEL_UNKNOWN');
+      }
     }
-
-    const issueLoadBeforeHalfUnits = toIssueLoadHalfUnits(
-      feedbackBySubmissionId.get(anchorSubmission._id.toString()) ?? [],
+    const timed = available.filter(
+      (entry) => toValidTimestamp(entry.job.updatedAt) !== null,
     );
-    const issueLoadAfterHalfUnits = toIssueLoadHalfUnits(
-      feedbackBySubmissionId.get(comparableAfterSubmission._id.toString()) ??
-        [],
+    timed.sort(
+      (left, right) =>
+        (toValidTimestamp(left.job.updatedAt) ?? 0) -
+          (toValidTimestamp(right.job.updatedAt) ?? 0) ||
+        compareAnalyticsSubmissions(left.submission, right.submission),
     );
-    const issueLoadDeltaHalfUnits =
-      issueLoadBeforeHalfUnits - issueLoadAfterHalfUnits;
-    const { detailedOutcome, outcome } = classifyAiLearningAnalyticsOutcome(
-      issueLoadBeforeHalfUnits,
-      issueLoadAfterHalfUnits,
+    const baseline = timed[0];
+    const completedAt = toValidTimestamp(baseline?.job.updatedAt);
+    const otherSubmissions = bucket.filter(
+      (submission) =>
+        submission._id.toString() !== baseline?.submission._id.toString(),
     );
-
+    const laterVersions =
+      completedAt === null
+        ? []
+        : otherSubmissions.filter(
+            (submission) =>
+              (contentVersionTimestamp(submission) ?? -Infinity) > completedAt,
+          );
+    const postFeedbackResubmitted =
+      completedAt !== null &&
+      otherSubmissions.some(
+        (submission) =>
+          (toValidTimestamp(submission.submittedAt) ?? -Infinity) > completedAt,
+      );
+    const postFeedbackRevised =
+      postFeedbackResubmitted || laterVersions.length > 0;
+    const postFeedbackCodeChanged =
+      baseline !== undefined &&
+      laterVersions.some(
+        (submission) =>
+          normalizeAiLearningAnalyticsCode(submission.content.codeText) !==
+          normalizeAiLearningAnalyticsCode(
+            baseline.submission.content.codeText,
+          ),
+      );
+    const comparable = available.filter((entry) =>
+      laterVersions.includes(entry.submission),
+    );
+    comparable.sort((left, right) =>
+      compareContentVersions(right.submission, left.submission),
+    );
+    const comparison = comparable[0];
+    const qualityComparable =
+      baseline !== undefined && comparison !== undefined;
+    const before = qualityComparable
+      ? toIssueLoadHalfUnits(
+          feedbackBySubmissionId.get(baseline.submission._id.toString()) ?? [],
+        )
+      : null;
+    const after = qualityComparable
+      ? toIssueLoadHalfUnits(
+          feedbackBySubmissionId.get(comparison.submission._id.toString()) ??
+            [],
+        )
+      : null;
+    const delta = before !== null && after !== null ? before - after : null;
+    const outcome =
+      before !== null && after !== null
+        ? classifyAiLearningAnalyticsOutcome(before, after)
+        : {
+            detailedOutcome: 'NOT_COMPARABLE' as const,
+            outcome: 'NOT_COMPARABLE' as const,
+          };
+    const baselineReview = baseline
+      ? reviewProjection(baseline.submission, baseline.job)
+      : null;
+    const comparisonReview = comparison
+      ? reviewProjection(comparison.submission, comparison.job)
+      : null;
+    if (
+      baselineReview?.model &&
+      comparisonReview?.model &&
+      baselineReview.model !== comparisonReview.model
+    )
+      warnings.add('MODEL_CHANGED');
+    const orderedVersions = bucket.every(
+      (submission) => contentVersionTimestamp(submission) !== null,
+    )
+      ? [...bucket].sort((left, right) => compareContentVersions(right, left))
+      : null;
+    const latest = orderedVersions?.[0];
+    const latestJob = latest
+      ? (jobsBySubmissionId.get(latest._id.toString()) ?? [])[0]
+      : undefined;
+    const reference = comparison?.submission ?? baseline?.submission;
+    const hasNewerUncomparedRevision =
+      latest && reference && contentVersionTimestamp(reference) !== null
+        ? latest._id.toString() !== reference._id.toString() &&
+          compareContentVersions(latest, reference) > 0
+        : null;
     samples.push({
-      studentId,
-      classroomTaskId,
+      studentId: bucket[0].studentId.toString(),
+      classroomTaskId: classroomTaskId.toString(),
       attemptsCount: bucket.length,
       aiRequested,
-      aiDelivered: true,
-      postFeedbackResubmitted: !!postSubmission,
+      aiDelivered: available.length > 0,
+      postFeedbackResubmitted,
+      postFeedbackRevised,
       postFeedbackCodeChanged,
-      qualityComparable: true,
-      issueLoadBeforeHalfUnits,
-      issueLoadAfterHalfUnits,
-      issueLoadDeltaHalfUnits,
-      detailedOutcome,
-      outcome,
+      qualityComparable,
+      issueLoadBeforeHalfUnits: before,
+      issueLoadAfterHalfUnits: after,
+      issueLoadDeltaHalfUnits: delta,
+      ...outcome,
+      baselineReview,
+      comparisonReview,
+      latestRevision: latest ? reviewProjection(latest, latestJob) : null,
+      hasNewerUncomparedRevision,
+      comparisonWarnings: AI_LEARNING_ANALYTICS_COMPARISON_WARNINGS.filter(
+        (warning) => warnings.has(warning),
+      ),
     });
   }
-
-  samples.sort((left, right) => {
-    const studentComparison = left.studentId.localeCompare(right.studentId);
-    return studentComparison !== 0
-      ? studentComparison
-      : left.classroomTaskId.localeCompare(right.classroomTaskId);
-  });
-  return samples;
+  return samples.sort(
+    (left, right) =>
+      left.studentId.localeCompare(right.studentId) ||
+      left.classroomTaskId.localeCompare(right.classroomTaskId),
+  );
 };
 
 @Injectable()
@@ -524,6 +645,7 @@ export class AiLearningAnalyticsService {
         aiDeliveredStudentTaskCount: aggregate.aiDeliveredCount,
         postFeedbackResubmittedStudentTaskCount:
           aggregate.postFeedbackResubmittedCount,
+        postFeedbackRevisedStudentTaskCount: aggregate.postFeedbackRevisedCount,
         postFeedbackCodeChangedStudentTaskCount:
           aggregate.postFeedbackCodeChangedCount,
         qualityComparableStudentTaskCount: aggregate.qualityComparableCount,
@@ -548,9 +670,13 @@ export class AiLearningAnalyticsService {
           aggregate.postFeedbackResubmittedCount,
           aggregate.aiDeliveredCount,
         ),
+        postFeedbackRevisionRate: this.toRate(
+          aggregate.postFeedbackRevisedCount,
+          aggregate.aiDeliveredCount,
+        ),
         postFeedbackCodeChangeRate: this.toRate(
           aggregate.postFeedbackCodeChangedCount,
-          aggregate.postFeedbackResubmittedCount,
+          aggregate.postFeedbackRevisedCount,
         ),
         qualityComparableRate: this.toRate(
           aggregate.qualityComparableCount,
@@ -575,6 +701,7 @@ export class AiLearningAnalyticsService {
         averageIssueLoadBefore: aggregate.averageIssueLoadBefore,
         averageIssueLoadAfter: aggregate.averageIssueLoadAfter,
         averageIssueLoadDelta: aggregate.averageIssueLoadDelta,
+        evidenceSummary: aggregate.evidenceSummary,
       },
       taskTrends: base.tasks.map((task) =>
         this.buildTaskTrend(
@@ -673,6 +800,7 @@ export class AiLearningAnalyticsService {
 
     return {
       context: base.context,
+      methodology: base.methodology,
       page,
       limit,
       total: filteredStudents.length,
@@ -761,6 +889,9 @@ export class AiLearningAnalyticsService {
 
     const taskFilter: Record<string, unknown> = {
       classroomId: classroomObjectId,
+      status: {
+        $in: [CLASSROOM_TASK_STATUS_ACTIVE, CLASSROOM_TASK_STATUS_CLOSED, null],
+      },
     };
     if (lowerBound) {
       taskFilter.publishedAt = { $gte: lowerBound };
@@ -885,7 +1016,7 @@ export class AiLearningAnalyticsService {
         },
       })
       .select(
-        '_id classroomTaskId studentId attemptNo submittedAt content.codeText',
+        '_id classroomTaskId studentId attemptNo submittedAt content.codeText contentRevision lastEditedAt',
       )
       .sort({
         studentId: 1,
@@ -904,7 +1035,9 @@ export class AiLearningAnalyticsService {
     const [jobs, feedbackItems] = await Promise.all([
       this.aiFeedbackJobModel
         .find({ submissionId: { $in: submissionIds } })
-        .select('_id submissionId status updatedAt')
+        .select(
+          '_id submissionId status updatedAt provider attempts requests.claimNo requests.provider requests.model',
+        )
         .sort({ submissionId: 1, _id: 1 })
         .lean<AnalyticsJobLean[]>()
         .exec(),
@@ -931,6 +1064,7 @@ export class AiLearningAnalyticsService {
     let aiRequestedCount = 0;
     let aiDeliveredCount = 0;
     let postFeedbackResubmittedCount = 0;
+    let postFeedbackRevisedCount = 0;
     let postFeedbackCodeChangedCount = 0;
     let qualityComparableCount = 0;
     let improvedCount = 0;
@@ -941,11 +1075,17 @@ export class AiLearningAnalyticsService {
     let issueLoadBeforeHalfUnitsTotal = 0;
     let issueLoadAfterHalfUnitsTotal = 0;
     let issueLoadDeltaHalfUnitsTotal = 0;
+    const evidenceSummary: AiLearningAnalyticsEvidenceSummary = {
+      sourceUncertainComparableCount: 0,
+      modelChangedComparableCount: 0,
+      simulatedExcludedSampleCount: 0,
+    };
 
     for (const sample of samples) {
       aiRequestedCount += sample.aiRequested ? 1 : 0;
       aiDeliveredCount += sample.aiDelivered ? 1 : 0;
       postFeedbackResubmittedCount += sample.postFeedbackResubmitted ? 1 : 0;
+      postFeedbackRevisedCount += sample.postFeedbackRevised ? 1 : 0;
       postFeedbackCodeChangedCount += sample.postFeedbackCodeChanged ? 1 : 0;
       qualityComparableCount += sample.qualityComparable ? 1 : 0;
       improvedCount += sample.detailedOutcome === 'IMPROVED' ? 1 : 0;
@@ -962,7 +1102,18 @@ export class AiLearningAnalyticsService {
         issueLoadBeforeHalfUnitsTotal += sample.issueLoadBeforeHalfUnits ?? 0;
         issueLoadAfterHalfUnitsTotal += sample.issueLoadAfterHalfUnits ?? 0;
         issueLoadDeltaHalfUnitsTotal += sample.issueLoadDeltaHalfUnits ?? 0;
+        if (
+          !sample.baselineReview?.provider ||
+          !sample.comparisonReview?.provider ||
+          !sample.baselineReview.model ||
+          !sample.comparisonReview.model
+        )
+          evidenceSummary.sourceUncertainComparableCount += 1;
+        if (sample.comparisonWarnings.includes('MODEL_CHANGED'))
+          evidenceSummary.modelChangedComparableCount += 1;
       }
+      if (sample.comparisonWarnings.includes('SIMULATED_REVIEW_EXCLUDED'))
+        evidenceSummary.simulatedExcludedSampleCount += 1;
     }
 
     return {
@@ -970,6 +1121,7 @@ export class AiLearningAnalyticsService {
       aiRequestedCount,
       aiDeliveredCount,
       postFeedbackResubmittedCount,
+      postFeedbackRevisedCount,
       postFeedbackCodeChangedCount,
       qualityComparableCount,
       improvedCount,
@@ -990,6 +1142,7 @@ export class AiLearningAnalyticsService {
         qualityComparableCount,
       ),
       issueLoadDeltaHalfUnitsTotal,
+      evidenceSummary,
     };
   }
 
@@ -1008,6 +1161,7 @@ export class AiLearningAnalyticsService {
       aiDeliveredStudentCount: aggregate.aiDeliveredCount,
       postFeedbackResubmittedStudentCount:
         aggregate.postFeedbackResubmittedCount,
+      postFeedbackRevisedStudentCount: aggregate.postFeedbackRevisedCount,
       postFeedbackCodeChangedStudentCount:
         aggregate.postFeedbackCodeChangedCount,
       qualityComparableStudentCount: aggregate.qualityComparableCount,
@@ -1024,9 +1178,13 @@ export class AiLearningAnalyticsService {
         aggregate.postFeedbackResubmittedCount,
         aggregate.aiDeliveredCount,
       ),
+      postFeedbackRevisionRate: this.toRate(
+        aggregate.postFeedbackRevisedCount,
+        aggregate.aiDeliveredCount,
+      ),
       postFeedbackCodeChangeRate: this.toRate(
         aggregate.postFeedbackCodeChangedCount,
-        aggregate.postFeedbackResubmittedCount,
+        aggregate.postFeedbackRevisedCount,
       ),
       qualityComparableRate: this.toRate(
         aggregate.qualityComparableCount,
@@ -1051,6 +1209,7 @@ export class AiLearningAnalyticsService {
       averageIssueLoadBefore: aggregate.averageIssueLoadBefore,
       averageIssueLoadAfter: aggregate.averageIssueLoadAfter,
       averageIssueLoadDelta: aggregate.averageIssueLoadDelta,
+      evidenceSummary: aggregate.evidenceSummary,
     };
   }
 
@@ -1065,6 +1224,11 @@ export class AiLearningAnalyticsService {
       aiRequestedTasksCount: aggregate.aiRequestedCount,
       aiDeliveredTasksCount: aggregate.aiDeliveredCount,
       postFeedbackResubmittedTasksCount: aggregate.postFeedbackResubmittedCount,
+      postFeedbackRevisedTasksCount: aggregate.postFeedbackRevisedCount,
+      postFeedbackRevisionRate: this.toRate(
+        aggregate.postFeedbackRevisedCount,
+        aggregate.aiDeliveredCount,
+      ),
       postFeedbackCodeChangedTasksCount: aggregate.postFeedbackCodeChangedCount,
       qualityComparableTasksCount: aggregate.qualityComparableCount,
       improvedTasksCount: aggregate.improvedCount,
@@ -1075,6 +1239,7 @@ export class AiLearningAnalyticsService {
       averageIssueLoadBefore: aggregate.averageIssueLoadBefore,
       averageIssueLoadAfter: aggregate.averageIssueLoadAfter,
       averageIssueLoadDelta: aggregate.averageIssueLoadDelta,
+      evidenceSummary: aggregate.evidenceSummary,
       overallOutcome,
       growthTrend:
         mapAiLearningAnalyticsOverallOutcomeToGrowthTrend(overallOutcome),
@@ -1098,6 +1263,7 @@ export class AiLearningAnalyticsService {
       aiRequested: sample?.aiRequested ?? false,
       aiDelivered: sample?.aiDelivered ?? false,
       postFeedbackResubmitted: sample?.postFeedbackResubmitted ?? false,
+      postFeedbackRevised: sample?.postFeedbackRevised ?? false,
       postFeedbackCodeChanged: sample?.postFeedbackCodeChanged ?? false,
       qualityComparable: sample?.qualityComparable ?? false,
       issueLoadBefore: this.toNullableIssueLoad(
@@ -1107,6 +1273,13 @@ export class AiLearningAnalyticsService {
       issueLoadDelta: this.toNullableIssueLoad(sample?.issueLoadDeltaHalfUnits),
       detailedOutcome: sample?.detailedOutcome ?? 'NOT_COMPARABLE',
       outcome: sample?.outcome ?? 'NOT_COMPARABLE',
+      baselineReview: sample?.baselineReview ?? null,
+      comparisonReview: sample?.comparisonReview ?? null,
+      latestRevision: sample?.latestRevision ?? null,
+      hasNewerUncomparedRevision: sample
+        ? sample.hasNewerUncomparedRevision
+        : false,
+      comparisonWarnings: sample?.comparisonWarnings ?? [],
     };
   }
 
@@ -1220,19 +1393,15 @@ export class AiLearningAnalyticsService {
   }
 
   private toRate(numerator: number, denominator: number) {
-    return denominator > 0 ? this.round(numerator / denominator) : 0;
+    return denominator > 0 ? numerator / denominator : null;
   }
 
   private toIssueLoadAverage(totalHalfUnits: number, count: number) {
-    return count > 0 ? this.round(totalHalfUnits / 2 / count) : 0;
+    return count > 0 ? totalHalfUnits / 2 / count : null;
   }
 
   private toNullableIssueLoad(value: number | null | undefined) {
     return value === null || value === undefined ? null : value / 2;
-  }
-
-  private round(value: number) {
-    return Number(value.toFixed(4));
   }
 
   private parseObjectId(value: string, fieldName: string) {

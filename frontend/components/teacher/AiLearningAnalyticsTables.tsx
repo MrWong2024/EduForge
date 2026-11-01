@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { EmptyState } from "@/components/blocks/EmptyState";
+import { AiLearningAnalyticsEvidenceNotes } from "./AiLearningAnalyticsSummary";
 import type {
   AiLearningAnalyticsEngagementStatus,
   AiLearningAnalyticsOverallOutcome,
@@ -20,16 +21,15 @@ import { paths } from "@/lib/routes/paths";
 import { buildQueryString, toDisplayDate } from "@/lib/ui/format";
 
 const formatRateWithDenominator = (
-  rate: number,
+  rate: number | null,
   denominator: number,
-): string =>
-  denominator > 0 ? formatAiLearningAnalyticsPercent(rate) : "—";
+): string => (denominator > 0 ? formatAiLearningAnalyticsPercent(rate) : "—");
 
 const formatComparableDelta = (
-  value: number,
+  value: number | null,
   comparableCount: number,
 ): string =>
-  comparableCount > 0
+  comparableCount > 0 && value !== null
     ? formatAiLearningAnalyticsDelta(value) +
       "（" +
       getAiLearningAnalyticsDeltaMeaning(value) +
@@ -63,14 +63,12 @@ export function AiLearningAnalyticsTaskTable({
         </colgroup>
         <thead className="bg-zinc-50 text-left text-zinc-600">
           <tr>
-            <th className="sticky left-0 z-20 bg-zinc-50 px-3 py-2.5">
-              任务
-            </th>
+            <th className="sticky left-0 z-20 bg-zinc-50 px-3 py-2.5">任务</th>
             <th className="px-3 py-2.5">提交与 AI 反馈</th>
             <th className="px-3 py-2.5">反馈后响应</th>
-            <th className="px-3 py-2.5">质量可比</th>
+            <th className="px-3 py-2.5">反馈可对照</th>
             <th className="px-3 py-2.5">结果分布</th>
-            <th className="px-3 py-2.5">问题负荷变化</th>
+            <th className="px-3 py-2.5">反馈条目负荷变化</th>
           </tr>
         </thead>
         <tbody>
@@ -95,9 +93,17 @@ export function AiLearningAnalyticsTaskTable({
                 <td className="px-3 py-3 tabular-nums text-zinc-800">
                   <p>提交：{task.submittedStudentCount}</p>
                   <p className="mt-1">请求：{task.aiRequestedStudentCount}</p>
-                  <p className="mt-1">交付：{task.aiDeliveredStudentCount}</p>
+                  <p className="mt-1">
+                    可用反馈交付：{task.aiDeliveredStudentCount}
+                  </p>
                 </td>
                 <td className="px-3 py-3 tabular-nums text-zinc-800">
+                  <p>
+                    作品更新：{task.postFeedbackRevisedStudentCount} ·{" "}
+                    {formatAiLearningAnalyticsPercent(
+                      task.postFeedbackRevisionRate,
+                    )}
+                  </p>
                   <p>
                     重提：{task.postFeedbackResubmittedStudentCount} ·{" "}
                     {formatRateWithDenominator(
@@ -109,15 +115,18 @@ export function AiLearningAnalyticsTaskTable({
                     代码变化：{task.postFeedbackCodeChangedStudentCount}
                   </p>
                   <p className="mt-1 leading-5">
-                    首次反馈后重提代码变化率：
+                    现存后续版本代码变化率：
                     {formatRateWithDenominator(
                       task.postFeedbackCodeChangeRate,
-                      task.postFeedbackResubmittedStudentCount,
+                      task.postFeedbackRevisedStudentCount,
                     )}
                   </p>
                 </td>
                 <td className="px-3 py-3 tabular-nums text-zinc-800">
-                  <p>可比：{task.qualityComparableStudentCount}</p>
+                  <p>
+                    可对照 / 可用交付：{task.qualityComparableStudentCount} /{" "}
+                    {task.aiDeliveredStudentCount}
+                  </p>
                   <p className="mt-1 text-xs text-zinc-500">
                     可比率：
                     {formatRateWithDenominator(
@@ -125,10 +134,13 @@ export function AiLearningAnalyticsTaskTable({
                       task.aiDeliveredStudentCount,
                     )}
                   </p>
+                  <AiLearningAnalyticsEvidenceNotes
+                    evidence={task.evidenceSummary}
+                  />
                 </td>
                 <td className="px-3 py-3 tabular-nums text-zinc-800">
                   <p>
-                    改善：{task.improvedStudentCount} ·{" "}
+                    负荷下降：{task.improvedStudentCount} ·{" "}
                     {formatRateWithDenominator(
                       task.improvedRate,
                       task.qualityComparableStudentCount,
@@ -142,14 +154,14 @@ export function AiLearningAnalyticsTaskTable({
                     )}
                   </p>
                   <p className="mt-1">
-                    问题负荷未减少：{task.unchangedWithIssuesStudentCount} ·{" "}
+                    非零负荷持平：{task.unchangedWithIssuesStudentCount} ·{" "}
                     {formatRateWithDenominator(
                       task.unchangedWithIssuesRate,
                       task.qualityComparableStudentCount,
                     )}
                   </p>
                   <p className="mt-1">
-                    恶化：{task.regressedStudentCount} ·{" "}
+                    负荷上升：{task.regressedStudentCount} ·{" "}
                     {formatRateWithDenominator(
                       task.regressedRate,
                       task.qualityComparableStudentCount,
@@ -258,12 +270,10 @@ export function AiLearningAnalyticsStudentsTable({
         </colgroup>
         <thead className="bg-zinc-50 text-left text-zinc-600">
           <tr>
-            <th className="sticky left-0 z-20 bg-zinc-50 px-3 py-2.5">
-              学生
-            </th>
+            <th className="sticky left-0 z-20 bg-zinc-50 px-3 py-2.5">学生</th>
             <th className="px-3 py-2.5 text-center">任务参与</th>
             <th className="px-3 py-2.5">反馈响应</th>
-            <th className="px-3 py-2.5">质量可比</th>
+            <th className="px-3 py-2.5">反馈可对照</th>
             <th className="px-3 py-2.5">结果分布</th>
             <th className="px-3 py-2.5">平均变化</th>
             <th className="px-3 py-2.5">总体变化</th>
@@ -297,12 +307,18 @@ export function AiLearningAnalyticsStudentsTable({
                 </td>
                 <td className="px-3 py-3 tabular-nums text-zinc-800">
                   <p>
-                    请求 / 交付：{student.aiRequestedTasksCount} /{" "}
+                    请求 / 可用反馈交付：{student.aiRequestedTasksCount} /{" "}
                     {student.aiDeliveredTasksCount}
                   </p>
+                  <p className="mt-1">
+                    作品更新 {student.postFeedbackRevisedTasksCount} ·{" "}
+                    {formatAiLearningAnalyticsPercent(
+                      student.postFeedbackRevisionRate,
+                    )}
+                  </p>
                   <p className="mt-1 leading-5">
-                    重提 {student.postFeedbackResubmittedTasksCount} ·
-                    代码变化 {student.postFeedbackCodeChangedTasksCount}
+                    重提 {student.postFeedbackResubmittedTasksCount} · 代码变化{" "}
+                    {student.postFeedbackCodeChangedTasksCount}
                   </p>
                   <p className="mt-1 text-xs leading-5 text-zinc-500">
                     反馈阶段：
@@ -315,8 +331,12 @@ export function AiLearningAnalyticsStudentsTable({
                 </td>
                 <td className="px-3 py-3 tabular-nums text-zinc-800">
                   <p className="font-medium">
-                    {student.qualityComparableTasksCount}
+                    {student.qualityComparableTasksCount} /{" "}
+                    {student.aiDeliveredTasksCount}
                   </p>
+                  <AiLearningAnalyticsEvidenceNotes
+                    evidence={student.evidenceSummary}
+                  />
                   <p className="mt-1 text-xs leading-5 text-zinc-500">
                     {hasComparable
                       ? "基于 " +
@@ -326,14 +346,14 @@ export function AiLearningAnalyticsStudentsTable({
                   </p>
                 </td>
                 <td className="px-3 py-3 tabular-nums text-zinc-800">
-                  <p>改善 {student.improvedTasksCount}</p>
+                  <p>负荷下降 {student.improvedTasksCount}</p>
                   <p className="mt-1">
                     均无 ERROR/WARN {student.remainedCleanTasksCount}
                   </p>
                   <p className="mt-1">
-                    问题负荷未减少 {student.unchangedWithIssuesTasksCount}
+                    非零负荷持平 {student.unchangedWithIssuesTasksCount}
                   </p>
-                  <p className="mt-1">恶化 {student.regressedTasksCount}</p>
+                  <p className="mt-1">负荷上升 {student.regressedTasksCount}</p>
                 </td>
                 <td className="px-3 py-3 tabular-nums text-zinc-800">
                   {formatComparableDelta(
@@ -354,11 +374,11 @@ export function AiLearningAnalyticsStudentsTable({
                       ? "基于 " +
                         student.qualityComparableTasksCount +
                         " 个可比任务"
-                      : "暂无质量可比任务"}
+                      : "暂无反馈可对照任务"}
                   </p>
                   {student.overallOutcome === "NO_NET_CHANGE" ? (
                     <p className="mt-1 text-[11px] leading-5 text-zinc-500">
-                      可能包含改善与恶化相互抵消。
+                      可能包含负荷下降与负荷上升相互抵消。
                     </p>
                   ) : null}
                 </td>
