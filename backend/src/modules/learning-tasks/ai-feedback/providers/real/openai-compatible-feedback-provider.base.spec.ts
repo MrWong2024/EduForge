@@ -1120,14 +1120,57 @@ describe('AI Feedback providers (fake fetch only)', () => {
     },
   );
 
+  // Explicit synthetic expectations cover text preservation, not model quality.
+  const mixedSourceMessage = [
+    '作品结果：源码用已见书目集合筛选重复项并依次追加，符合首次出现顺序去重和空列表返回空结果的要求。',
+    '正式检查：助手按任务允许的工具代跑方式，在 Python 3.12 环境执行 python checks.py，报告空列表及 A、B、A 用例的预期与结果一致；该报告可作为检查材料，平台未复现。',
+    '协作与采纳：任务卡明确去重边界，context.md 用于传递输入约定；差异审查对照集合筛选与原有排序方案，并说明为保持首次出现顺序而采纳前者，协作及采纳依据具体。',
+    '本人解释与变式：你说明了已见集合如何识别重复项；变式已有转小写后去重的代码、命令与报告输出，但仅标为“完成示例”，是否对应本人亲手修改和运行尚不清楚。',
+  ].join('\n\n');
+  const supportedCollaborationMessage = [
+    '作品与检查：源码按首次出现顺序去重并处理空列表；助手按允许方式提供的环境、命令及用例结果齐全，正式检查报告符合要求，平台未复现。',
+    '协作与采纳：任务卡界定去重边界，context.md 传递输入约定，差异审查及保序采纳理由具体。',
+    '本人解释与变式：你解释了集合判重与保序追加，并明确记载本人在 Python 3.12 执行 python variant.py，将 A、a、B 转为 a、b；代码、命令、预期及报告结果相符。按提交记录，这些要求已有具体依据。',
+  ].join('\n\n');
+  const simpleAffirmation = {
+    type: 'OTHER',
+    severity: 'INFO',
+    message: '源码为空列表设置了独立返回分支，符合空列表返回空列表的任务要求。',
+    suggestion: undefined,
+  };
+
   it.each([
-    { prefix: 'Valid shape example A', count: 1 },
-    { prefix: 'Valid shape example B', count: 2 },
-    { prefix: 'Valid boundary example C', count: 1 },
-    { prefix: 'Schema example:', count: 1 },
+    {
+      prefix: 'Valid shape example A',
+      count: 1,
+      expected: {
+        type: 'OTHER',
+        severity: 'WARN',
+        message: mixedSourceMessage,
+        suggestion:
+          '仅澄清“完成示例”是否对应你本人亲手修改和运行；如已完成，可直接使用现有材料说明归属，未完成的如实标明。',
+      },
+    },
+    { prefix: 'Valid shape example B', count: 2, expected: undefined },
+    {
+      prefix: 'Valid boundary example C',
+      count: 1,
+      expected: simpleAffirmation,
+    },
+    {
+      prefix: 'Valid boundary example E',
+      count: 1,
+      expected: {
+        type: 'OTHER',
+        severity: 'INFO',
+        message: supportedCollaborationMessage,
+        suggestion: undefined,
+      },
+    },
+    { prefix: 'Schema example:', count: 1, expected: simpleAffirmation },
   ])(
-    'parses the actual $prefix JSON example through fake-fetch Provider',
-    async ({ prefix, count }) => {
+    'parses and preserves the actual $prefix through Provider and compactor',
+    async ({ prefix, count, expected }) => {
       const exampleLine = buildSystemPrompt()
         .split('\n')
         .find((line) => line.startsWith(prefix));
@@ -1141,63 +1184,20 @@ describe('AI Feedback providers (fake fetch only)', () => {
       const parsed = await new BailianFeedbackProvider(
         configService(),
       ).analyzeSubmission(context, execution());
+      const compacted = compactAiFeedbackItems(parsed);
 
       expect(parsed).toHaveLength(count);
+      expect(compacted).toHaveLength(count);
+      if (expected) {
+        expect(parsed[0]).toMatchObject(expected);
+        expect(parsed[0].message).toBe(expected.message);
+        expect(compacted[0]).toMatchObject(expected);
+        expect(compacted[0].message).toBe(expected.message);
+        expect(compacted[0].suggestion).toBe(expected.suggestion);
+      }
       expect(fetchMock).toHaveBeenCalledTimes(1);
     },
   );
-
-  it('preserves synthetic dimension paragraphs and evidence boundaries through parsing and compaction', async () => {
-    const provider = new BailianFeedbackProvider(configService());
-    const syntheticContext: AiSubmissionAnalysisContext = {
-      ...context,
-      language: 'python',
-      taskTitle: '标签去重与协作实践',
-      taskDescription:
-        '保持首次出现次序并去重；记录真实协作，给出本人独立解释及亲手变式。',
-      taskRubric: {
-        notes:
-          '评价作品行为、运行依据、真实协作和本人实践；不复述内部参考资料。',
-      },
-      codeText:
-        'def unique_labels(labels):\n    return list(dict.fromkeys(labels))',
-      submissionNote:
-        '助手报告空列表及重复标签检查通过，属于工具代跑。任务卡和采纳记录为教学模拟；尚未提供本人独立解释和亲手变式。',
-      aiUsageDeclaration: '助手代跑检查；协作材料为教学模拟。',
-    };
-    // This response is synthetic text, not evidence of real-model quality.
-    const syntheticMessage = [
-      '作品行为：源码用 dict.fromkeys 去重并保留首次出现次序，空列表返回空列表。',
-      '运行依据：助手报告空列表及重复标签检查通过，属于工具代跑；平台未执行，不能据此确认本人运行。',
-      '真实协作：任务卡和采纳记录明确标为教学模拟，内容可供核对，但不足以确认任务要求的真实协作。',
-      '本人实践：提交说明明确尚未提供独立解释和亲手变式，任务所需本人实践证据不足；代码正确不能单独证明本人掌握，也不据此推断作弊。',
-    ].join('\n\n');
-    const syntheticItem = {
-      type: 'OTHER',
-      severity: 'WARN',
-      message: syntheticMessage,
-      suggestion:
-        '按任务要求补充真实协作材料及本人解释、亲手变式的实际记录；未完成的如实说明。',
-      tags: ['correctness', 'documentation'],
-    };
-    fetchMock.mockResolvedValue(
-      chatResponse(JSON.stringify({ items: [syntheticItem] })),
-    );
-
-    const parsed = await provider.analyzeSubmission(
-      syntheticContext,
-      execution(),
-    );
-    const compacted = compactAiFeedbackItems(parsed);
-
-    expect(parsed).toHaveLength(1);
-    expect(parsed[0]).toMatchObject(syntheticItem);
-    expect(parsed[0].message).toBe(syntheticMessage);
-    expect(compacted).toHaveLength(1);
-    expect(compacted[0]).toMatchObject(syntheticItem);
-    expect(compacted[0].message).toBe(syntheticMessage);
-    expect(fetchMock).toHaveBeenCalledTimes(1);
-  });
 
   it.each([undefined, '', ' \t '])(
     'rejects a missing or blank key (%p) before fetch',
