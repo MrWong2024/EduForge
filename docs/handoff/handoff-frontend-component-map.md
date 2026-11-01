@@ -130,7 +130,8 @@
 | Task Template Visibility/Scope | `lib/learning-tasks/template-visibility-scope.ts` | 模板可见性与列表 scope 的值域、文案、normalize；不在页面和表单散落魔法字符串 |
 | Task Template List Sorting | `lib/learning-tasks/template-list-sorting.ts` | 当前页模板默认排序单一来源：mine 最近更新优先，shared 已发布优先后按时间，all 我的模板优先；不复制多套 compare |
 | UI Rubric | `lib/ui/rubric.ts` | 教师创建/编辑及学生评分标准复用的四维中文映射入口；不在页面各自维护 labelMap |
-| UI Format | `lib/ui/format.ts` | query/date/display/safeGet 等共享工具；不重复实现同类 parse |
+| Submission Language | `lib/learning-tasks/submission-language.ts` | 提交语言选项目录与师生只读 label 映射，不转换请求值 |
+| UI Format | `lib/ui/format.ts` | query/date/display/safeGet 及共享首次提交迟交时长展示工具；不重复实现同类 parse |
 | Proxy Route | `app/api/proxy/[...path]/route.ts` | 正式 BFF 转发模块的修改落点，详细合同归 Frontend API Map；不绕过 proxy 或向其中加入业务逻辑 |
 
 ## 10) Maintenance / 修改边界

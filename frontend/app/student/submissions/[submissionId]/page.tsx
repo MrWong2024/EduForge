@@ -15,9 +15,11 @@ import {
 } from "@/lib/api/types-student";
 import { paths } from "@/lib/routes/paths";
 import { getCommonErrorSummary } from "@/lib/ui/status";
+import { toDisplaySubmissionLanguage } from "@/lib/learning-tasks/submission-language";
 import {
   getSingleSearchParam,
   toDisplayDate,
+  toDisplayLateDuration,
   toDisplayText,
 } from "@/lib/ui/format";
 
@@ -27,49 +29,6 @@ type SubmissionDetailPageProps = {
     classroomId?: string | string[];
     classroomTaskId?: string | string[];
   }>;
-};
-
-const toDisplayLateDuration = (value: unknown): string | undefined => {
-  if (
-    typeof value !== "number" ||
-    !Number.isFinite(value) ||
-    !Number.isInteger(value) ||
-    value < 0
-  ) {
-    return undefined;
-  }
-
-  if (value === 0) {
-    return "超时不足 1 秒";
-  }
-
-  const secondsPerMinute = 60;
-  const secondsPerHour = 60 * secondsPerMinute;
-  const secondsPerDay = 24 * secondsPerHour;
-
-  if (value < secondsPerMinute) {
-    return `超时 ${value} 秒`;
-  }
-
-  if (value < secondsPerHour) {
-    const minutes = Math.floor(value / secondsPerMinute);
-    const seconds = value % secondsPerMinute;
-    return seconds > 0
-      ? `超时 ${minutes} 分钟 ${seconds} 秒`
-      : `超时 ${minutes} 分钟`;
-  }
-
-  if (value < secondsPerDay) {
-    const hours = Math.floor(value / secondsPerHour);
-    const minutes = Math.floor((value % secondsPerHour) / secondsPerMinute);
-    return minutes > 0
-      ? `超时 ${hours} 小时 ${minutes} 分钟`
-      : `超时 ${hours} 小时`;
-  }
-
-  const days = Math.floor(value / secondsPerDay);
-  const hours = Math.floor((value % secondsPerDay) / secondsPerHour);
-  return hours > 0 ? `超时 ${days} 天 ${hours} 小时` : `超时 ${days} 天`;
 };
 
 const getStudentSubmissionErrorSummary = (status: number): string => {
@@ -214,7 +173,7 @@ export default async function StudentSubmissionDetailPage({
       <section className="break-words rounded-lg border border-zinc-200 bg-white p-4 text-sm text-zinc-700">
         <div className="grid gap-2 md:grid-cols-2">
           <p>任务标题：{toDisplayText(viewModel.detail.taskTitle)}</p>
-          <p>语言：{toDisplayText(viewModel.detail.language)}</p>
+          <p>语言：{toDisplaySubmissionLanguage(viewModel.detail.language)}</p>
           <p>首次提交时间：{toDisplayDate(viewModel.detail.submittedAt)}</p>
           <p>
             最近修改时间：

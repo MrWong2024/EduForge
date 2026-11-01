@@ -26,6 +26,11 @@ import {
   selectSubmissionDisplayDetail,
   getSubmissionRevisionError,
 } from "../../lib/learning-tasks/text-submission";
+import {
+  SUBMISSION_LANGUAGE_OPTIONS,
+  toDisplaySubmissionLanguage,
+} from "../../lib/learning-tasks/submission-language";
+import { toDisplayLateDuration } from "../../lib/ui/format";
 
 test("student task history uses actual createdAt instants and keeps equal-time input order", () => {
   const submissions = [
@@ -573,4 +578,84 @@ test("unknown or mismatched error messages never become user-facing raw exceptio
   expect(
     getTextSubmissionError(403, { code: "LATE_SUBMISSION_NOT_ALLOWED" }),
   ).toBe("无权限提交该课堂任务。");
+});
+
+test("submission language labels share the unchanged option values and order", () => {
+  const options = [
+    { value: "auto", label: "自动识别（默认）" },
+    { value: "java", label: "Java" },
+    { value: "javascript", label: "JavaScript" },
+    { value: "typescript", label: "TypeScript" },
+    { value: "python", label: "Python" },
+    { value: "c", label: "C" },
+    { value: "cpp", label: "C++" },
+    { value: "other", label: "Other" },
+  ];
+  expect(SUBMISSION_LANGUAGE_OPTIONS).toEqual(options);
+  for (const { value, label } of options) {
+    expect(toDisplaySubmissionLanguage(value)).toBe(label);
+    expect(toDisplaySubmissionLanguage(` \t${value.toUpperCase()}\n `)).toBe(
+      label,
+    );
+  }
+  expect(SUBMISSION_LANGUAGE_OPTIONS).toEqual(options);
+});
+
+test("submission language display preserves unknown spelling and rejects missing values", () => {
+  expect(toDisplaySubmissionLanguage(" Rust ")).toBe("Rust");
+  expect(toDisplaySubmissionLanguage(" CuStOm-Lang ")).toBe("CuStOm-Lang");
+  for (const value of [undefined, null, "", " \t\n ", 0, true, {}, []]) {
+    expect(toDisplaySubmissionLanguage(value)).toBe("—");
+  }
+});
+
+test("language labels do not replace raw request or student and teacher response values", () => {
+  for (const language of [
+    "auto",
+    "java",
+    "javascript",
+    "typescript",
+    "python",
+    "c",
+    "cpp",
+    "other",
+    "CuStOm-Lang",
+  ]) {
+    expect(buildTextSubmissionRequest("code", language, "").content.language).toBe(
+      language,
+    );
+    expect(
+      buildUpdateSubmissionRequest(0, "code", language, "").content.language,
+    ).toBe(language);
+    const payload = { content: { language, codeText: "code" } };
+    for (const detail of [
+      toSubmissionDetailResponse(payload),
+      toTeacherDetail(payload),
+    ]) {
+      expect(detail.language).toBe(language);
+      expect(detail.content.language).toBe(language);
+      expect(detail.raw).toBe(payload);
+    }
+  }
+});
+
+test("late duration keeps the existing second, minute, hour and day boundaries", () => {
+  for (const [seconds, label] of [
+    [0, "超时不足 1 秒"],
+    [59, "超时 59 秒"],
+    [60, "超时 1 分钟"],
+    [61, "超时 1 分钟 1 秒"],
+    [3599, "超时 59 分钟 59 秒"],
+    [3600, "超时 1 小时"],
+    [3661, "超时 1 小时 1 分钟"],
+    [86399, "超时 23 小时 59 分钟"],
+    [86400, "超时 1 天"],
+    [90061, "超时 1 天 1 小时"],
+    [1438856, "超时 16 天 15 小时"],
+  ] as const) {
+    expect(toDisplayLateDuration(seconds)).toBe(label);
+  }
+  for (const value of [undefined, null, "60", -1, 1.5, Number.NaN, Infinity]) {
+    expect(toDisplayLateDuration(value)).toBeUndefined();
+  }
 });

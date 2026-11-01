@@ -7,6 +7,7 @@ import Link from "next/link";
 import { ErrorState } from "@/components/blocks/ErrorState";
 import { fetchJson, BrowserFetchJsonError } from "@/lib/api/browser-client";
 import { toSubmissionDetailResponse } from "@/lib/api/types-student";
+import { SUBMISSION_LANGUAGE_OPTIONS } from "@/lib/learning-tasks/submission-language";
 import {
   buildTextSubmissionRequest,
   canCreateTextSubmission,
@@ -26,17 +27,6 @@ type SubmissionErrorState = {
   status?: number;
   summary: string;
 };
-
-const LANGUAGE_OPTIONS = [
-  { value: "auto", label: "自动识别（默认）" },
-  { value: "java", label: "Java" },
-  { value: "javascript", label: "JavaScript" },
-  { value: "typescript", label: "TypeScript" },
-  { value: "python", label: "Python" },
-  { value: "c", label: "C" },
-  { value: "cpp", label: "C++" },
-  { value: "other", label: "Other" },
-] as const;
 
 export function SubmissionForm({
   classroomId,
@@ -164,7 +154,7 @@ export function SubmissionForm({
               onChange={(event) => setLanguage(event.target.value)}
               className="w-full rounded-md border border-zinc-300 px-3 py-2 text-sm outline-none focus:border-zinc-500"
             >
-              {LANGUAGE_OPTIONS.map((option) => (
+              {SUBMISSION_LANGUAGE_OPTIONS.map((option) => (
                 <option key={option.value} value={option.value}>
                   {option.label}
                 </option>

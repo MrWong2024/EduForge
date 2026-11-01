@@ -20,9 +20,11 @@ import {
 } from "@/lib/api/types-teacher";
 import { paths } from "@/lib/routes/paths";
 import { getCommonErrorSummary } from "@/lib/ui/status";
+import { toDisplaySubmissionLanguage } from "@/lib/learning-tasks/submission-language";
 import {
   getSingleSearchParam,
   toDisplayDate,
+  toDisplayLateDuration,
   toDisplayText,
 } from "@/lib/ui/format";
 
@@ -181,6 +183,10 @@ export default async function TeacherSubmissionDetailPage({
   const classroomDashboardHref = viewModel.context.classroomId
     ? paths.teacher.classroomDashboard(viewModel.context.classroomId)
     : null;
+  const lateDurationText =
+    viewModel.context.isLate === true
+      ? toDisplayLateDuration(viewModel.context.lateBySeconds)
+      : undefined;
 
   return (
     <section className="min-w-0 space-y-4">
@@ -232,7 +238,7 @@ export default async function TeacherSubmissionDetailPage({
           <div>
             <p className="text-zinc-500">语言</p>
             <p className="font-medium text-zinc-900">
-              {toDisplayText(viewModel.context.language)}
+              {toDisplaySubmissionLanguage(viewModel.context.language)}
             </p>
           </div>
           <div>
@@ -251,10 +257,7 @@ export default async function TeacherSubmissionDetailPage({
             <p className="text-zinc-500">首次提交是否迟交</p>
             <p className="font-medium text-zinc-900">
               {toDisplayText(viewModel.context.isLate)}
-              {viewModel.context.isLate &&
-              viewModel.context.lateBySeconds !== undefined
-                ? `（超时 ${viewModel.context.lateBySeconds} 秒）`
-                : ""}
+              {lateDurationText ? `（${lateDurationText}）` : ""}
             </p>
           </div>
           <div>

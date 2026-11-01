@@ -127,6 +127,49 @@ export const toDisplayDate = (iso?: string | null): string => {
   }).format(date);
 };
 
+export const toDisplayLateDuration = (value: unknown): string | undefined => {
+  if (
+    typeof value !== "number" ||
+    !Number.isFinite(value) ||
+    !Number.isInteger(value) ||
+    value < 0
+  ) {
+    return undefined;
+  }
+
+  if (value === 0) {
+    return "超时不足 1 秒";
+  }
+
+  const secondsPerMinute = 60;
+  const secondsPerHour = 60 * secondsPerMinute;
+  const secondsPerDay = 24 * secondsPerHour;
+
+  if (value < secondsPerMinute) {
+    return `超时 ${value} 秒`;
+  }
+
+  if (value < secondsPerHour) {
+    const minutes = Math.floor(value / secondsPerMinute);
+    const seconds = value % secondsPerMinute;
+    return seconds > 0
+      ? `超时 ${minutes} 分钟 ${seconds} 秒`
+      : `超时 ${minutes} 分钟`;
+  }
+
+  if (value < secondsPerDay) {
+    const hours = Math.floor(value / secondsPerHour);
+    const minutes = Math.floor((value % secondsPerHour) / secondsPerMinute);
+    return minutes > 0
+      ? `超时 ${hours} 小时 ${minutes} 分钟`
+      : `超时 ${hours} 小时`;
+  }
+
+  const days = Math.floor(value / secondsPerDay);
+  const hours = Math.floor((value % secondsPerDay) / secondsPerHour);
+  return hours > 0 ? `超时 ${days} 天 ${hours} 小时` : `超时 ${days} 天`;
+};
+
 export const toDisplayText = (value: unknown, fallback = "—"): string => {
   if (typeof value === "string" && value.trim()) {
     return value.trim();
