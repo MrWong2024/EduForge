@@ -148,7 +148,7 @@ Mongo password、production credential、Bailian API Key、SMTP password、第�
 - Processor unit 以 mock claim、Provider 和持久化核对同次调用关联、claim 核验及 compactor input/output；合并文件只证明持久化前候选，不证明数据库落库。覆盖成功、合法空结果、失败或未到达阶段的 null/到达标记，以及独立 Provider 不伪造合并阶段；fake fetch/mock 只证明诊断链，不证明模型质量或真实数据库终态。
 - 文件诊断回归覆盖关闭/环境门禁、预检及预算/预留拒绝不落盘、三类文件同 stem、请求保存失败后的关联、独占创建不覆盖、并发隔离与源码/dist 的 cwd 独立定位；验证请求 I/O 在 HTTP timer 前、响应/合并 I/O 在清理后，且写入失败不改变业务结果、usage、重试或请求次数。
 - 文件系统测试只写各自创建的仓库内 `.local/deliverables/` 唯一临时目录（请求/Provider 使用 `.tmp-ai-request-tests-`，Processor 使用 `.tmp-ai-processor-diagnostics-` 前缀），在 teardown/finally 中精确清理自有目录，不读取或删除已有真实留存；不加载真实凭据、不创建 AppModule 或数据库连接、不调用真实模型。合成参考通过不代表真实课堂资料已抓取核验；运行配置合同见 [Config Matrix](./handoff-backend-config-matrix.md#实际发送边界请求体留存)。
-- 此前真实模型单次样本已复核，暴露允许工具协作被额外要求本人重跑、局部来源声明外推、材料存在与本人归属混淆，以及协作/采纳维度覆盖不足的问题。本轮新提示词的“第14章 12 项资料真实模型质量复核”仍待完成；合成示例、字符串单测或 fake fetch 通过不能关闭该阶段。
+- “第14章 12 项资料真实模型质量复核”已完成，教师已确认本次真实模型反馈符合该任务的评阅要求。真实模型质量以实际请求、响应及最终反馈的人工复核为依据；合成示例、字符串单测和 fake fetch 仅证明各自工程合同，不能单独替代真实模型质量复核。
 
 ### 6.2 文本教学任务专用 Smoke 支持
 
