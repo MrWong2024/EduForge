@@ -377,6 +377,147 @@ describe('V1.2 independently specified timelines (no database)', () => {
     return { studentId, classroomTaskId, draft, reviewed, item };
   };
 
+  it('does not let a historical non-endpoint review contaminate selected comparison source warnings', async () => {
+    const t = timeline();
+    const a = t.draft(1, 0),
+      b = t.draft(2, 2),
+      c = t.draft(3, 4);
+    const submissions = [a, b, c];
+    const jobs = [
+      t.reviewed(a, 1),
+      job({
+        submissionId: b._id,
+        status: AiFeedbackJobStatus.Succeeded,
+        updatedAt: at(3),
+      }),
+      t.reviewed(c, 5),
+    ];
+    const feedbackItems = [
+      t.item(a, FeedbackSeverity.Error),
+      t.item(b, FeedbackSeverity.Warn),
+      t.item(c),
+    ];
+    const [sample] = buildAiLearningAnalyticsStandardSamples(
+      submissions,
+      jobs,
+      feedbackItems,
+    );
+    expect(sample.baselineReview?.submissionId).toBe(a._id.toString());
+    expect(sample.comparisonReview?.submissionId).toBe(c._id.toString());
+    expect(sample).toMatchObject({
+      issueLoadBeforeHalfUnits: 2,
+      issueLoadAfterHalfUnits: 0,
+      issueLoadDeltaHalfUnits: 2,
+      detailedOutcome: 'IMPROVED',
+    });
+    const harness = createServiceHarness({
+      activeStudentIds: [t.studentId],
+      classroomTasks: [
+        {
+          _id: t.classroomTaskId,
+          taskId: objectId(),
+          publishedAt: new Date(at(0)),
+        },
+      ],
+      submissions,
+      jobs,
+      feedbackItems,
+    });
+    const overview = await harness.service.getOverview(
+      harness.classroomId.toString(),
+      {},
+      harness.teacherId.toString(),
+    );
+    expect(
+      overview.summary.evidenceSummary.sourceUncertainComparableCount,
+    ).toBe(0);
+    expect(sample.comparisonWarnings).toEqual([]);
+  });
+
+  it.each([false, true])(
+    'keeps unknown selected endpoint warnings with baseline only=%s',
+    async (baselineOnly) => {
+      const t = timeline();
+      const a = t.draft(1, 0),
+        b = t.draft(2, 2),
+        c = t.draft(3, 4);
+      const submissions = baselineOnly ? [a] : [a, b, c];
+      const jobs = baselineOnly
+        ? [
+            job({
+              submissionId: a._id,
+              status: AiFeedbackJobStatus.Succeeded,
+              updatedAt: at(1),
+            }),
+          ]
+        : [
+            t.reviewed(a, 1),
+            t.reviewed(b, 3),
+            job({
+              submissionId: c._id,
+              status: AiFeedbackJobStatus.Succeeded,
+              updatedAt: at(5),
+            }),
+          ];
+      const feedbackItems = baselineOnly
+        ? [t.item(a)]
+        : [
+            t.item(a, FeedbackSeverity.Error),
+            t.item(b, FeedbackSeverity.Warn),
+            t.item(c),
+          ];
+      const [sample] = buildAiLearningAnalyticsStandardSamples(
+        submissions,
+        jobs,
+        feedbackItems,
+      );
+      expect(sample.baselineReview?.submissionId).toBe(a._id.toString());
+      if (baselineOnly) {
+        expect(sample.comparisonReview).toBeNull();
+        expect(sample).toMatchObject({
+          qualityComparable: false,
+          issueLoadBeforeHalfUnits: null,
+          issueLoadAfterHalfUnits: null,
+          detailedOutcome: 'NOT_COMPARABLE',
+        });
+      } else {
+        expect(sample.comparisonReview?.submissionId).toBe(c._id.toString());
+        expect(sample).toMatchObject({
+          qualityComparable: true,
+          issueLoadBeforeHalfUnits: 2,
+          issueLoadAfterHalfUnits: 0,
+          issueLoadDeltaHalfUnits: 2,
+          detailedOutcome: 'IMPROVED',
+        });
+      }
+      expect(sample.comparisonWarnings).toEqual([
+        'SOURCE_UNKNOWN',
+        'MODEL_UNKNOWN',
+      ]);
+      const harness = createServiceHarness({
+        activeStudentIds: [t.studentId],
+        classroomTasks: [
+          {
+            _id: t.classroomTaskId,
+            taskId: objectId(),
+            publishedAt: new Date(at(0)),
+          },
+        ],
+        submissions,
+        jobs,
+        feedbackItems,
+      });
+      const overview = await harness.service.getOverview(
+        harness.classroomId.toString(),
+        {},
+        harness.teacherId.toString(),
+      );
+      expect(
+        overview.summary.evidenceSummary.sourceUncertainComparableCount,
+      ).toBe(baselineOnly ? 0 : 1);
+    },
+  );
+
   it('uses the newest reviewed content, even when an older draft finishes last and the third round reverses improvement', () => {
     const t = timeline();
     const a = t.draft(1, 0),
@@ -579,6 +720,8 @@ describe('V1.2 independently specified timelines (no database)', () => {
       [t.item(a), t.item(b)],
     );
     expect(missing.baselineReview?.model).toBeNull();
+    expect(missing.comparisonWarnings).toContain('MODEL_UNKNOWN');
+    expect(missing.comparisonWarnings).not.toContain('SOURCE_UNKNOWN');
     const [matched] = buildAiLearningAnalyticsStandardSamples(
       [a, b],
       [

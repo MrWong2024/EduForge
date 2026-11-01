@@ -447,9 +447,6 @@ export const buildAiLearningAnalyticsStandardSamples = (
         available.push({ submission, job: effective });
         if (toValidTimestamp(effective.updatedAt) === null)
           warnings.add('TIME_UNKNOWN');
-        if (effective.provider !== 'bailian') warnings.add('SOURCE_UNKNOWN');
-        if (successfulRequestModel(effective) === null)
-          warnings.add('MODEL_UNKNOWN');
       }
     }
     const timed = available.filter(
@@ -525,6 +522,11 @@ export const buildAiLearningAnalyticsStandardSamples = (
     const comparisonReview = comparison
       ? reviewProjection(comparison.submission, comparison.job)
       : null;
+    for (const review of [baselineReview, comparisonReview]) {
+      if (!review) continue;
+      if (review.provider === null) warnings.add('SOURCE_UNKNOWN');
+      if (review.model === null) warnings.add('MODEL_UNKNOWN');
+    }
     if (
       baselineReview?.model &&
       comparisonReview?.model &&
