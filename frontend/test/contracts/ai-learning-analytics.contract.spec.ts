@@ -10,6 +10,7 @@ import {
   formatAiLearningAnalyticsIssueLoad,
   formatAiLearningAnalyticsPercent,
   getAiLearningAnalyticsDeltaMeaning,
+  getAiLearningAnalyticsUncomparedRevisionMessage,
   getAiLearningAnalyticsEvidenceNotes,
   getAiLearningAnalyticsMethodologyVersionLabel,
   parseAiLearningAnalyticsEngagementStatus,
@@ -22,6 +23,56 @@ const evidence = {
   modelChangedComparableCount: 1,
   simulatedExcludedSampleCount: 1,
 };
+
+test("uncompared revision messaging distinguishes absence of a reference from uncertain timing", () => {
+  const cases = [
+    {
+      point: { hasNewerUncomparedRevision: true, latestRevision: null },
+      expected: "存在较新版本未纳入当前比较。",
+    },
+    {
+      point: { hasNewerUncomparedRevision: false },
+      expected: "未发现可确认的较新未纳入版本。",
+    },
+    {
+      point: {
+        hasNewerUncomparedRevision: null,
+        baselineReview: null,
+        comparisonReview: null,
+        latestRevision: {
+          submissionId: "known-latest",
+          attemptNo: 1,
+          contentRevision: 0,
+          submittedAt: "2026-10-01T00:00:00.000Z",
+          lastEditedAt: null,
+          contentVersionAt: "2026-10-01T00:00:00.000Z",
+          feedbackCompletedAt: null,
+          provider: null,
+          model: null,
+        },
+      },
+      expected: "尚无比较基线，暂无法判断较新未纳入版本。",
+    },
+    {
+      point: {
+        hasNewerUncomparedRevision: null,
+        baselineReview: { submissionId: "baseline" },
+      },
+      expected: "时间信息不足，无法确认是否存在较新未纳入版本。",
+    },
+  ];
+  for (const { point: input, expected } of cases) {
+    const point = toAiLearningAnalyticsStudentDetailResponse({
+      taskPoints: [input],
+    }).taskPoints[0];
+    expect(
+      getAiLearningAnalyticsUncomparedRevisionMessage(
+        point.hasNewerUncomparedRevision,
+        Boolean(point.baselineReview || point.comparisonReview),
+      ),
+    ).toBe(expected);
+  }
+});
 
 test("all three API adapters accept V1.2 and retain their evidence summaries", () => {
   const overview = toAiLearningAnalyticsOverviewResponse({

@@ -363,7 +363,7 @@ summary、taskTrend 和学生 metrics 均有 `evidenceSummary={sourceUncertainCo
 
 - `aiRequested` 表示有请求 Job；`aiDelivered` 表示有非模拟可用反馈，不能把成功空反馈算作零负荷。`postFeedbackResubmitted` 只指反馈后新增提交，`postFeedbackRevised` 包括可确认的反馈后编辑；两者不改变 attemptsCount。详细时间与选择算法见 Service Owner。
 - `baselineReview/comparisonReview/latestRevision` 均为 object|null，共同形状为 `{submissionId:string,attemptNo:number|null,contentRevision:number|null,submittedAt:string|null,lastEditedAt:string|null,contentVersionAt:string|null,feedbackCompletedAt:string|null,provider:bailian|stub|null,model:string|null}`；时间为 ISO，未知项为null。latestRevision 包括未申请、处理中、失败、空反馈及模拟版本，不限成功评阅；其中无完成事实不伪造完成时间。
-- `hasNewerUncomparedRevision:boolean|null` 表示相对于比较终点（无终点则基线）有较新未比较版本；无法可靠确认时为null，不冒充确定false。
+- `hasNewerUncomparedRevision:boolean|null` 表示相对于比较终点（无终点则基线）是否存在较新未比较版本，独立于全局最新版本选择；latestRevision=null 可以与此标记 true 并存。标记 null 可能表示尚无比较参考，也可能表示时间信息不足，不能一律解释为最新版本时序未知或确定false；完整判定见 [Service Card 08I](./handoff-backend-service-map.md#service-card-08i)。
 - `comparisonWarnings` 为稳定原因数组：`EMPTY_FEEDBACK | SIMULATED_REVIEW_EXCLUDED | SOURCE_UNKNOWN | MODEL_UNKNOWN | MODEL_CHANGED | TIME_UNKNOWN`。`SOURCE_UNKNOWN/MODEL_UNKNOWN` 仅检查实际存在的已选 baselineReview/comparisonReview；无比较终点时仍检查已有基线，不为 null 端点或非端点历史记录制造警告，来源已知不代表模型已知。`MODEL_CHANGED` 仍比较两端已知模型；`EMPTY_FEEDBACK/SIMULATED_REVIEW_EXCLUDED/TIME_UNKNOWN` 保留既有样本范围。来源缺失可作已有记录对照，但不能认证为真实 Provider；模型不同允许对照并提示，相同名称也不证明 Prompt 或内部版本相同。
 
 #### Analytics public enums / compatibility

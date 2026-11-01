@@ -30,6 +30,7 @@ import {
   formatAiLearningAnalyticsDelta,
   formatAiLearningAnalyticsIssueLoad,
   getAiLearningAnalyticsDeltaMeaning,
+  getAiLearningAnalyticsUncomparedRevisionMessage,
   resolveAiLearningAnalyticsQueryState,
   toAiLearningAnalyticsExcludedTaskIdsQueryValue,
   withAiLearningAnalyticsStudentSectionHash,
@@ -201,11 +202,10 @@ function StudentTaskPointsTable({
                   classroomTaskId={task.classroomTaskId}
                 />
                 <p className="mt-2 text-xs text-amber-900">
-                  {task.hasNewerUncomparedRevision === true
-                    ? "存在较新版本未纳入当前比较。"
-                    : task.hasNewerUncomparedRevision === null
-                      ? "最新版本时序未知，无法确认是否有更新未纳入。"
-                      : "未发现可确认的较新未纳入版本。"}
+                  {getAiLearningAnalyticsUncomparedRevisionMessage(
+                    task.hasNewerUncomparedRevision,
+                    Boolean(task.baselineReview || task.comparisonReview),
+                  )}
                 </p>
                 {task.comparisonWarnings.map((warning) => (
                   <p key={warning} className="mt-1 text-xs text-amber-900">

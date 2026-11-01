@@ -682,6 +682,9 @@ describe('V1.2 independently specified timelines (no database)', () => {
       detailedOutcome: 'NOT_COMPARABLE',
     });
     expect(empty.comparisonWarnings).toContain('EMPTY_FEEDBACK');
+    expect(empty.baselineReview).toBeNull();
+    expect(empty.latestRevision?.submissionId).toBe(b._id.toString());
+    expect(empty.hasNewerUncomparedRevision).toBeNull();
     expect(info).toMatchObject({
       aiDelivered: true,
       qualityComparable: true,
@@ -761,6 +764,112 @@ describe('V1.2 independently specified timelines (no database)', () => {
     );
     expect(invalidAttempt.baselineReview?.attemptNo).toBeNull();
     expect(invalidAttempt.baselineReview).not.toHaveProperty('requests');
+  });
+
+  it('confirms a known newer unreviewed version despite an unrelated historical revision with unknown timing', () => {
+    const t = timeline();
+    const a = t.draft(2, 0),
+      b = t.draft(3, 2),
+      c = t.draft(4, 4, 'newer work');
+    const d = {
+      ...t.draft(1, 0),
+      submittedAt: new Date('2026-08-31T23:00:00.000Z'),
+      contentRevision: 1,
+    };
+    const [sample] = buildAiLearningAnalyticsStandardSamples(
+      [a, b, c, d],
+      [t.reviewed(a, 1), t.reviewed(b, 3)],
+      [t.item(a, FeedbackSeverity.Error), t.item(b, FeedbackSeverity.Warn)],
+    );
+    expect(sample.baselineReview?.submissionId).toBe(a._id.toString());
+    expect(sample.comparisonReview?.submissionId).toBe(b._id.toString());
+    expect(sample).toMatchObject({
+      attemptsCount: 4,
+      qualityComparable: true,
+      issueLoadBeforeHalfUnits: 2,
+      issueLoadAfterHalfUnits: 1,
+      issueLoadDeltaHalfUnits: 1,
+      detailedOutcome: 'IMPROVED',
+      postFeedbackResubmitted: true,
+      postFeedbackRevised: true,
+      postFeedbackCodeChanged: true,
+      latestRevision: null,
+    });
+    expect(sample.comparisonWarnings).toEqual(['TIME_UNKNOWN']);
+    expect(sample.hasNewerUncomparedRevision).toBe(true);
+  });
+
+  it('uses the current comparison reference after a newer version is reviewed and preserves uncertainty without a known later version', () => {
+    const t = timeline();
+    const a = t.draft(2, 0),
+      b = t.draft(3, 2),
+      c = t.draft(4, 4);
+    const d = { ...t.draft(1, 0), contentRevision: 1 };
+    const jobs = [t.reviewed(a, 1), t.reviewed(b, 3)];
+    const feedbacks = [t.item(a, FeedbackSeverity.Error), t.item(b)];
+    const [withoutKnownNewer] = buildAiLearningAnalyticsStandardSamples(
+      [a, b, d],
+      jobs,
+      feedbacks,
+    );
+    expect(withoutKnownNewer.comparisonReview?.submissionId).toBe(
+      b._id.toString(),
+    );
+    expect(withoutKnownNewer.hasNewerUncomparedRevision).toBeNull();
+
+    const completedJobs = [...jobs, t.reviewed(c, 5)];
+    const completedFeedbacks = [...feedbacks, t.item(c)];
+    const [reviewedWithUnknown] = buildAiLearningAnalyticsStandardSamples(
+      [a, b, c, d],
+      completedJobs,
+      completedFeedbacks,
+    );
+    expect(reviewedWithUnknown.comparisonReview?.submissionId).toBe(
+      c._id.toString(),
+    );
+    expect(reviewedWithUnknown.hasNewerUncomparedRevision).toBeNull();
+    expect(reviewedWithUnknown.comparisonWarnings).toEqual(['TIME_UNKNOWN']);
+
+    const [reviewedWithoutUnknown] = buildAiLearningAnalyticsStandardSamples(
+      [a, b, c],
+      completedJobs,
+      completedFeedbacks,
+    );
+    expect(reviewedWithoutUnknown.comparisonReview?.submissionId).toBe(
+      c._id.toString(),
+    );
+    expect(reviewedWithoutUnknown.latestRevision?.submissionId).toBe(
+      c._id.toString(),
+    );
+    expect(reviewedWithoutUnknown.hasNewerUncomparedRevision).toBe(false);
+
+    const [untimedReference] = buildAiLearningAnalyticsStandardSamples(
+      [d],
+      [t.reviewed(d, 1)],
+      [t.item(d)],
+    );
+    expect(untimedReference.baselineReview?.submissionId).toBe(
+      d._id.toString(),
+    );
+    expect(untimedReference.baselineReview?.contentVersionAt).toBeNull();
+    expect(untimedReference.hasNewerUncomparedRevision).toBeNull();
+  });
+
+  it('uses the existing stable ordering for a known same-time later version despite unknown historical timing', () => {
+    const t = timeline();
+    const a = t.draft(2, 0),
+      b = t.draft(3, 2),
+      c = t.draft(4, 2);
+    const d = { ...t.draft(1, 0), contentRevision: 1 };
+    const [sample] = buildAiLearningAnalyticsStandardSamples(
+      [a, b, c, d],
+      [t.reviewed(a, 1), t.reviewed(b, 3)],
+      [t.item(a), t.item(b)],
+    );
+    expect(sample.comparisonReview?.submissionId).toBe(b._id.toString());
+    expect(sample.latestRevision).toBeNull();
+    expect(sample.hasNewerUncomparedRevision).toBe(true);
+    expect(sample.comparisonWarnings).toEqual(['TIME_UNKNOWN']);
   });
 
   it('does not fall back to creation time for a positive revision missing its edit time or invent a completion time', () => {
@@ -1415,6 +1524,10 @@ describe('AiLearningAnalyticsService aggregation boundaries', () => {
       aiRequested: false,
       aiDelivered: false,
       qualityComparable: false,
+      baselineReview: null,
+      comparisonReview: null,
+      hasNewerUncomparedRevision: null,
+      comparisonWarnings: [],
       issueLoadBefore: null,
       issueLoadAfter: null,
       issueLoadDelta: null,

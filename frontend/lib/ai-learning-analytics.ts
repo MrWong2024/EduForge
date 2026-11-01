@@ -8,6 +8,7 @@ import type {
   AiLearningAnalyticsOutcome,
   AiLearningAnalyticsOverallOutcome,
   AiLearningAnalyticsTaskTrend,
+  AiLearningAnalyticsTaskPoint,
   AiLearningAnalyticsWindow,
 } from "@/lib/api/types-teacher";
 import {
@@ -20,6 +21,21 @@ import {
   parsePositiveInt,
 } from "@/lib/ui/format";
 import { paths } from "@/lib/routes/paths";
+
+export const getAiLearningAnalyticsUncomparedRevisionMessage = (
+  hasNewerUncomparedRevision: AiLearningAnalyticsTaskPoint["hasNewerUncomparedRevision"],
+  hasComparisonReference: boolean,
+): string => {
+  if (hasNewerUncomparedRevision === true) {
+    return "存在较新版本未纳入当前比较。";
+  }
+  if (hasNewerUncomparedRevision === false) {
+    return "未发现可确认的较新未纳入版本。";
+  }
+  return hasComparisonReference
+    ? "时间信息不足，无法确认是否存在较新未纳入版本。"
+    : "尚无比较基线，暂无法判断较新未纳入版本。";
+};
 
 export const AI_LEARNING_ANALYTICS_WARNING_LABELS: Record<
   AiLearningAnalyticsComparisonWarning,

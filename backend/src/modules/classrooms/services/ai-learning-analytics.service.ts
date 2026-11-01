@@ -543,11 +543,27 @@ export const buildAiLearningAnalyticsStandardSamples = (
       ? (jobsBySubmissionId.get(latest._id.toString()) ?? [])[0]
       : undefined;
     const reference = comparison?.submission ?? baseline?.submission;
-    const hasNewerUncomparedRevision =
-      latest && reference && contentVersionTimestamp(reference) !== null
-        ? latest._id.toString() !== reference._id.toString() &&
-          compareContentVersions(latest, reference) > 0
-        : null;
+    let hasNewerUncomparedRevision: boolean | null = null;
+    if (reference && contentVersionTimestamp(reference) !== null) {
+      const otherVersions = bucket.filter(
+        (submission) => submission._id.toString() !== reference._id.toString(),
+      );
+      if (
+        otherVersions.some(
+          (submission) =>
+            contentVersionTimestamp(submission) !== null &&
+            compareContentVersions(submission, reference) > 0,
+        )
+      ) {
+        hasNewerUncomparedRevision = true;
+      } else {
+        hasNewerUncomparedRevision = otherVersions.some(
+          (submission) => contentVersionTimestamp(submission) === null,
+        )
+          ? null
+          : false;
+      }
+    }
     samples.push({
       studentId: bucket[0].studentId.toString(),
       classroomTaskId: classroomTaskId.toString(),
@@ -1280,7 +1296,7 @@ export class AiLearningAnalyticsService {
       latestRevision: sample?.latestRevision ?? null,
       hasNewerUncomparedRevision: sample
         ? sample.hasNewerUncomparedRevision
-        : false,
+        : null,
       comparisonWarnings: sample?.comparisonWarnings ?? [],
     };
   }
