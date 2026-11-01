@@ -1,4 +1,7 @@
+"use client";
+
 import Link from "next/link";
+import { useState } from "react";
 import type {
   AiLearningAnalyticsEngagementStatus,
   AiLearningAnalyticsOverallOutcome,
@@ -22,7 +25,22 @@ type AiLearningAnalyticsStudentFiltersProps = {
   engagementStatus: AiLearningAnalyticsEngagementStatus | undefined;
 };
 
-export function AiLearningAnalyticsStudentFilters({
+export function AiLearningAnalyticsStudentFilters(
+  props: AiLearningAnalyticsStudentFiltersProps,
+) {
+  const appliedFiltersKey = JSON.stringify([
+    props.classroomId,
+    props.window,
+    toAiLearningAnalyticsExcludedTaskIdsQueryValue(props.excludedTaskIds),
+    props.q ?? "",
+    props.overallOutcome ?? "",
+    props.engagementStatus ?? "",
+  ]);
+
+  return <StudentFilterForm key={appliedFiltersKey} {...props} />;
+}
+
+function StudentFilterForm({
   classroomId,
   window,
   excludedTaskIds,
@@ -30,6 +48,11 @@ export function AiLearningAnalyticsStudentFilters({
   overallOutcome,
   engagementStatus,
 }: AiLearningAnalyticsStudentFiltersProps) {
+  const [draft, setDraft] = useState({
+    q: q ?? "",
+    overallOutcome: overallOutcome ?? "",
+    engagementStatus: engagementStatus ?? "",
+  });
   const pathname = paths.teacher.classroomAiLearningAnalytics(classroomId);
   const excludedTaskIdsValue =
     toAiLearningAnalyticsExcludedTaskIdsQueryValue(excludedTaskIds);
@@ -68,7 +91,8 @@ export function AiLearningAnalyticsStudentFilters({
             name="q"
             placeholder="姓名或学号"
             maxLength={100}
-            defaultValue={q ?? ""}
+            value={draft.q}
+            onChange={(event) => setDraft({ ...draft, q: event.target.value })}
             className="mt-1 block h-9 w-full rounded-md border border-zinc-300 bg-white px-3 text-sm text-zinc-900 outline-none focus:border-blue-500"
           />
         </label>
@@ -76,7 +100,10 @@ export function AiLearningAnalyticsStudentFilters({
           总体结果
           <select
             name="overallOutcome"
-            defaultValue={overallOutcome ?? ""}
+            value={draft.overallOutcome}
+            onChange={(event) =>
+              setDraft({ ...draft, overallOutcome: event.target.value })
+            }
             className="mt-1 block h-9 w-full rounded-md border border-zinc-300 bg-white px-3 text-sm text-zinc-900 outline-none focus:border-blue-500"
           >
             <option value="">全部总体结果</option>
@@ -91,7 +118,10 @@ export function AiLearningAnalyticsStudentFilters({
           反馈参与阶段
           <select
             name="engagementStatus"
-            defaultValue={engagementStatus ?? ""}
+            value={draft.engagementStatus}
+            onChange={(event) =>
+              setDraft({ ...draft, engagementStatus: event.target.value })
+            }
             className="mt-1 block h-9 w-full rounded-md border border-zinc-300 bg-white px-3 text-sm text-zinc-900 outline-none focus:border-blue-500"
           >
             <option value="">全部反馈阶段</option>
@@ -111,6 +141,19 @@ export function AiLearningAnalyticsStudentFilters({
           </button>
           <Link
             href={clearHref}
+            onClick={(event) => {
+              if (
+                event.defaultPrevented ||
+                event.button !== 0 ||
+                event.ctrlKey ||
+                event.metaKey ||
+                event.shiftKey ||
+                event.altKey
+              ) {
+                return;
+              }
+              setDraft({ q: "", overallOutcome: "", engagementStatus: "" });
+            }}
             className="inline-flex h-9 items-center text-sm text-blue-700 hover:underline"
           >
             清空筛选

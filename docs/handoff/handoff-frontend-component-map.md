@@ -75,7 +75,7 @@
 | AiLearningAnalyticsPage | `app/teacher/classrooms/[classroomId]/ai-learning-analytics/page.tsx` | Server 页面负责条件解析、总览/学生并行读取、局部错误、任务选项降级和分页；摘要、教学关注、图表、表格与筛选下沉至对应组件，不从学生分页重算摘要 |
 | AiLearningAnalyticsStudentPage | `app/teacher/classrooms/[classroomId]/ai-learning-analytics/students/[studentId]/page.tsx` | Server 页面组合学生摘要、逐任务比较图与全任务明细，展示比较端点/最新版本、安全来源与未比较原因并链接对应提交；恢复返回列表上下文，直接消费后端结果，列表状态不扩大详情请求范围 |
 | TaskExclusionPanel | `components/teacher/TaskExclusionPanel.tsx` | 共享临时任务排除 Client Component，支持 process-assessment / ai-learning-analytics 模式；拥有 checkbox 草稿、应用/清空及导航 pending 状态，保留未显示的已选 ID；应用/清空回首屏并保持其他上下文，清空不携带当前 checkbox 选择；不持久化或修改教学数据 |
-| AiLearningAnalyticsStudentFilters | `components/teacher/AiLearningAnalyticsStudentFilters.tsx` | 纯 Server 原生表单承载姓名/学号、总体结果与反馈参与阶段筛选；保留统计范围，应用/清空回首屏并定位学生分析区；不引入客户端过滤、滚动或独立 Browser 状态 |
+| AiLearningAnalyticsStudentFilters | `components/teacher/AiLearningAnalyticsStudentFilters.tsx` | Client Component 仅管理姓名/学号、总体结果与反馈参与阶段的受控草稿，按已应用参数重新初始化并在正常清空点击时重置；保留原生 GET 表单与统计范围，应用/清空回首屏并定位学生分析区，筛选与统计仍由服务端完成 |
 | AiLearningAnalyticsSummary / AiLearningAnalyticsTeachingAttention | `components/teacher/AiLearningAnalyticsSummary.tsx` | 纯 Server 摘要展示后端 V1.2 计数、请求覆盖/可用反馈交付/更新率与证据提示，明确可比子集；教学关注带样本数，零上升/下降事件不生成相应极值提示，全部已更新不提示更新不足，不生成评分或风险等级 |
 | AiLearningAnalyticsTaskTable / AiLearningAnalyticsStudentsTable | `components/teacher/AiLearningAnalyticsTables.tsx` | 任务/学生表及四类结果分布展示，学生表组合总体结果、参与阶段与保留列表状态的详情入口；不做前端排序、过滤或排名 |
 | AiLearningAnalyticsCharts | `components/teacher/AiLearningAnalyticsCharts.tsx` | 班级/个人复用原生 SVG 逐任务 before/after 坐标及四类分布；班级轴为平均反馈条目负荷，个人轴为反馈条目负荷；负责可访问表达，不连接不同任务、不把 null 绘为0、不重算后端分母 |
