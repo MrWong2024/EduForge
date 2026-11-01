@@ -13,8 +13,8 @@
 
 | Component / Module | File | Responsibility / Boundary |
 |---|---|---|
-| TeacherShell | `components/layout/TeacherShell.tsx` | 教师端顶栏、主导航、登出与账户入口的组合；不要在业务页重复教师导航 |
-| StudentShell | `components/layout/StudentShell.tsx` | 学生端顶栏、主导航、登出与账户入口的组合；不要在业务页重复学生导航 |
+| TeacherShell | `components/layout/TeacherShell.tsx` | 教师端顶栏、主导航、登出与账户入口的组合；窄屏按组换行，短入口保持整词、账户摘要允许收缩截断；不要在业务页重复教师导航 |
+| StudentShell | `components/layout/StudentShell.tsx` | 学生端顶栏、主导航、登出与账户入口的组合；窄屏按组换行，短入口保持整词、账户摘要允许收缩截断；不要在业务页重复学生导航 |
 | Teacher Gate | `app/teacher/layout.tsx` | 统一调用教师 role gate 并承载角色不匹配 UI；不要在每个页面重复 gate |
 | Student Gate | `app/student/layout.tsx` | 统一调用学生 role gate 并承载角色不匹配 UI；不要在每个页面重复 gate |
 
@@ -106,7 +106,8 @@
 
 | Component / Module | File | Responsibility / Boundary |
 |---|---|---|
-| TaskContextHeader | `components/classroomTask/TaskContextHeader.tsx` | Teacher classroomTask 工作区的任务上下文与三件套 tabs；与 Paths 共同收口导航，不承担业务数据 SoT，不强行复用于 Student 或非 classroomTask 页面 |
+| ClassroomTask Layout | `app/teacher/classrooms/[classroomId]/tasks/[classroomTaskId]/layout.tsx` | 为工作区加载可选展示名称并传给 TaskContextHeader；辅助读取独立降级，不替代子页面主体数据或错误处理 |
+| TaskContextHeader | `components/classroomTask/TaskContextHeader.tsx` | 展示 layout 提供的班级／课堂任务名称及缺失占位，承载三件套 tabs；与 Paths 共同收口导航，不承担业务数据 SoT，不强行复用于 Student 或非 classroomTask 页面 |
 
 表单草稿、pending、菜单与展开状态归对应交互组件；跨页筛选/返回上下文归页面与现有 URL helper，不为普通导航建立全局状态副本。
 

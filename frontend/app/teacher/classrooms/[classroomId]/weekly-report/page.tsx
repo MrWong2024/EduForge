@@ -5,7 +5,7 @@ import { ErrorState } from "@/components/blocks/ErrorState";
 import { PageHeader } from "@/components/blocks/PageHeader";
 import { fetchJson, FetchJsonError } from "@/lib/api/client";
 import { buildErrorDescription, extractRawDetail } from "@/lib/api/error-presenter";
-import { toWeeklyReportResponse } from "@/lib/api/types-teacher";
+import { toClassroomSummary, toWeeklyReportResponse } from "@/lib/api/types-teacher";
 import { paths } from "@/lib/routes/paths";
 import { getCommonErrorSummary } from "@/lib/ui/status";
 import {
@@ -427,6 +427,7 @@ export default async function WeeklyReportPage({ params, searchParams }: WeeklyR
   }
 
   const rawRecord = asRecord(viewModel.data.raw);
+  const classroomName = toClassroomSummary(rawRecord.classroom).name;
   const sources: UnknownRecord[] = [
     asRecord(viewModel.data.summary),
     asRecord(viewModel.data.overview),
@@ -445,7 +446,7 @@ export default async function WeeklyReportPage({ params, searchParams }: WeeklyR
     <section className="space-y-4">
       <PageHeader
         title="班级周报"
-        description={`统计窗口：${REPORT_WINDOW_LABELS[viewModel.window]}`}
+        description={`班级：${classroomName ?? "班级名称暂不可用"} · 统计窗口：${REPORT_WINDOW_LABELS[viewModel.window]}`}
         actions={
           <div className="flex items-center gap-3 text-sm">
             <Link href={paths.teacher.classroomDashboard(classroomId)} className="text-blue-700 hover:underline">

@@ -38,12 +38,12 @@ export function LogoutButton() {
   };
 
   return (
-    <div className="flex items-center gap-2">
+    <div className="flex max-w-full shrink-0 flex-wrap items-center gap-2">
       <button
         type="button"
         onClick={handleLogout}
         disabled={isSubmitting}
-        className="rounded-md border border-zinc-300 px-3 py-1.5 text-sm text-zinc-700 hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-60"
+        className="shrink-0 whitespace-nowrap rounded-md border border-zinc-300 px-3 py-1.5 text-sm text-zinc-700 hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-60"
       >
         {isSubmitting ? "退出中..." : "退出登录"}
       </button>

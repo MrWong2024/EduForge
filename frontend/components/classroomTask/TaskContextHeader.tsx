@@ -8,11 +8,15 @@ import { paths } from "@/lib/routes/paths";
 type TaskContextHeaderProps = {
   classroomId: string;
   classroomTaskId: string;
+  classroomName?: string;
+  taskTitle?: string;
 };
 
 export function TaskContextHeader({
   classroomId,
   classroomTaskId,
+  classroomName,
+  taskTitle,
 }: TaskContextHeaderProps) {
   const pathname = usePathname();
   const trajectoryHref = paths.teacher.classroomTaskTrajectory(classroomId, classroomTaskId);
@@ -20,10 +24,10 @@ export function TaskContextHeader({
   const aiMetricsHref = paths.teacher.classroomTaskAiMetrics(classroomId, classroomTaskId);
 
   return (
-    <section>
+    <section className="min-w-0 break-words">
       <PageHeader
         title="课堂任务工作区"
-        description="围绕当前课堂任务查看学习轨迹、课堂复盘与 AI 指标。"
+        description={`班级：${classroomName?.trim() || "班级名称暂不可用"} · 任务：${taskTitle?.trim() || "任务名称暂不可用"}`}
       />
       <Tabs
         activeHref={pathname}

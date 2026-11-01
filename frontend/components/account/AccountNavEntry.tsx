@@ -14,11 +14,11 @@ export function AccountNavEntry({ href, user }: AccountNavEntryProps) {
   return (
     <Link
       href={href}
-      className="inline-flex max-w-[18rem] items-center px-2 py-1 text-sm text-zinc-700 transition-colors hover:text-zinc-900 hover:underline hover:underline-offset-4 focus-visible:rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-300"
+      className="inline-flex min-w-0 max-w-[18rem] items-center px-2 py-1 text-sm text-zinc-700 transition-colors hover:text-zinc-900 hover:underline hover:underline-offset-4 focus-visible:rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-300"
       aria-label="进入账户设置"
       title={identityLabel}
     >
-      <span className="block truncate whitespace-nowrap font-medium">{identityLabel}</span>
+      <span className="block min-w-0 truncate whitespace-nowrap font-medium">{identityLabel}</span>
     </Link>
   );
 }

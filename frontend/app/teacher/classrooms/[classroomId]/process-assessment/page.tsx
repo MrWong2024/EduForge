@@ -13,7 +13,10 @@ import {
 } from "@/lib/api/classroom-task-options";
 import { buildProxyPath, fetchJson, FetchJsonError } from "@/lib/api/client";
 import { buildErrorDescription, extractRawDetail } from "@/lib/api/error-presenter";
-import { toProcessAssessmentResponse } from "@/lib/api/types-teacher";
+import {
+  toClassroomDetailResponse,
+  toProcessAssessmentResponse,
+} from "@/lib/api/types-teacher";
 import { paths } from "@/lib/routes/paths";
 import { getCommonErrorSummary } from "@/lib/ui/status";
 import {
@@ -519,6 +522,7 @@ type ProcessAssessmentViewModel =
       excludedTaskIds: string[];
       taskOptions: ClassroomTaskOption[];
       taskOptionsLoadError?: string;
+      classroomName?: string;
       csvHref: string;
     }
   | {
@@ -566,7 +570,7 @@ export default async function ProcessAssessmentPage({
           taskOptionsLoadError:
             "排除任务列表加载失败，当前成绩仍按 URL 中的排除参数计算。",
         }));
-    const [payload, taskOptionsResult] = await Promise.all([
+    const [payload, taskOptionsResult, classroomName] = await Promise.all([
       fetchJson<unknown>(
         `classrooms/${encodeURIComponent(classroomId)}/process-assessment?${queryString}`,
         {
@@ -575,6 +579,13 @@ export default async function ProcessAssessmentPage({
         },
       ),
       taskOptionsPromise,
+      fetchJson<unknown>(`classrooms/${encodeURIComponent(classroomId)}`, {
+        origin,
+        cache: "no-store",
+        signal: AbortSignal.timeout(10000),
+      })
+        .then((payload) => toClassroomDetailResponse(payload).name)
+        .catch(() => undefined),
     ]);
 
     viewModel = {
@@ -584,6 +595,7 @@ export default async function ProcessAssessmentPage({
       excludedTaskIds: queryState.excludedTaskIds,
       taskOptions: taskOptionsResult.taskOptions,
       taskOptionsLoadError: taskOptionsResult.taskOptionsLoadError,
+      classroomName,
       csvHref,
     };
   } catch (error) {
@@ -648,7 +660,7 @@ export default async function ProcessAssessmentPage({
     <section className="space-y-4">
       <PageHeader
         title="过程性评价"
-        description={`统计窗口：${REPORT_WINDOW_LABELS[viewModel.window]}`}
+        description={`班级：${viewModel.classroomName ?? "班级名称暂不可用"} · 统计窗口：${REPORT_WINDOW_LABELS[viewModel.window]}`}
         actions={
           <div className="flex flex-wrap items-center gap-3 text-sm">
             <a

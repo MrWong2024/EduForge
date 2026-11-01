@@ -179,24 +179,6 @@ export default async function ClassroomTaskSubmissionsPage({
             >
               返回任务详情
             </Link>
-            <Link
-              href={paths.teacher.classroomTaskTrajectory(classroomId, classroomTaskId)}
-              className="text-blue-700 hover:underline"
-            >
-              学习轨迹
-            </Link>
-            <Link
-              href={paths.teacher.classroomTaskReviewPack(classroomId, classroomTaskId)}
-              className="text-blue-700 hover:underline"
-            >
-              课堂复盘
-            </Link>
-            <Link
-              href={paths.teacher.classroomTaskAiMetrics(classroomId, classroomTaskId)}
-              className="text-blue-700 hover:underline"
-            >
-              AI 指标
-            </Link>
           </div>
         }
       />

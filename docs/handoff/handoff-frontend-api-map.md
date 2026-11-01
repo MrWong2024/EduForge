@@ -95,6 +95,7 @@
 - 班级任务实例：`/teacher/classrooms/:id/tasks/page.tsx` + 发布/生命周期/编辑组件 -> `/api/proxy/classrooms/:id/tasks*`。
   - 对应后端：`GET/POST/PATCH /api/classrooms/:id/tasks*` 与 `/status`。
   - 注意：发布表单只发送既有截止/迟交/次数设置，不发送 AI 策略字段。列表/详情消费快照可用性及投影教学内容，不另取当前模板覆盖，不适配或展示旧策略。实例配置与状态动作分开发送；学生或教师可在提交详情主动申请 AI 反馈。
+- 课堂任务工作区名称：现有 Server `tasks/:classroomTaskId/layout.tsx` 经当前 request origin、Cookie/BFF 与 `no-store` 并行读取 `GET classrooms/:classroomId` 和 `GET classrooms/:classroomId/tasks/:classroomTaskId`，分别由 `toClassroomDetailResponse`、`toClassroomTask` 提取展示名称；任务标题沿用课堂实例正式投影，不另查当前模板。两项辅助读取各自有限超时、独立降级为明确占位，不替换 children 或子页主体错误处理。
 - 课堂任务提交列表：`submissions/page.tsx` -> `/api/proxy/classrooms/:cid/tasks/:ctid/submissions`。
   - 对应后端：`GET /api/classrooms/:classroomId/tasks/:classroomTaskId/submissions`。
   - 注意：只按 `classroomTaskId` 读取，不用 `taskId` 兜底过滤。
@@ -131,13 +132,14 @@
   - 旧响应兼容：新增用量字段不加入 `submission-ai-operations.ts` 的原始详情必需字段名单；旧版完整详情缺少新字段仍可通过事后显式读取，在不确定 POST 后恢复确认，不因此关闭原恢复路径或自动重放请求。
 - 班级周报：`weekly-report/page.tsx` -> `/api/proxy/classrooms/:id/weekly-report`。
   - 对应后端：`GET /api/classrooms/:classroomId/weekly-report`。
-  - 注意：窗口与公开数据见 [Backend DTO](./handoff-backend-dto-cheatsheet.md#weekly-report)，前端消费后端聚合结果。
+  - 注意：窗口与公开数据见 [Backend DTO](./handoff-backend-dto-cheatsheet.md#weekly-report)，前端消费后端聚合结果；页头名称通过 `toClassroomSummary` 复用现有 `data.raw.classroom`，不新增请求，缺失时显示明确占位。
 - 课程总览：`courses/:courseId/overview/page.tsx` -> `/api/proxy/courses/:courseId/overview`。
   - 对应后端：`GET /api/courses/:courseId/overview`。
 - 学习轨迹 / 课堂复盘 / AI 指标：三件套 Server pages -> `/api/proxy/classrooms/:cid/tasks/:ctid/{learning-trajectory,review-pack,ai-metrics}`。
   - 对应后端：三个课堂任务聚合接口。
 - 过程性评价 JSON：`process-assessment/page.tsx` -> `/api/proxy/classrooms/:id/process-assessment`。
   - 对应后端：`GET /api/classrooms/:classroomId/process-assessment`。
+  - 页头名称辅助读取一次 `GET classrooms/:classroomId`，与现有加载并行，经 `toClassroomDetailResponse` 取名；独立有限超时及失败占位，不改变统计主体错误处理。
   - window 适配：前端接受 `term | 7d | 30d | all`，其中 `term` 仅用于旧链接兼容并可传给后端；`24h` 与其他未知或非法值统一通过现有 query parser 规范化为默认 `all`。JSON 与 CSV 共用同一解析后的 window。
   - 注意：`excludedTaskIds` 仅适配为 URL 查询条件；直接消费后端任务维度指标（`iteratedTasksCount/aiRequestedTasksCount/aiSucceededTasksCount/avgWarnItems`），不重算评分。
 - 过程性评价 CSV：`process-assessment/page.tsx` -> `buildProxyPath("classrooms/:id/process-assessment.csv")`。
