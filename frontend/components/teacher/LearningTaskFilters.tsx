@@ -463,15 +463,14 @@ export function LearningTaskFilters({
         <div className="overflow-x-auto rounded-lg border border-zinc-200 bg-white">
           <table className="min-w-[1360px] w-full table-fixed border-collapse text-sm">
             <colgroup>
-              <col className="w-[16%]" />
-              <col className="w-[28%]" />
-              <col className="w-[8%]" />
-              <col className="w-[6%]" />
-              <col className="w-[10%]" />
-              <col className="w-[8%]" />
-              <col className="w-[9%]" />
-              <col className="w-[9%]" />
-              <col className="w-[6%]" />
+              <col className="w-[220px]" />
+              <col className="w-[360px]" />
+              <col className="w-[140px]" />
+              <col className="w-[110px]" />
+              <col className="w-[110px]" />
+              <col className="w-[120px]" />
+              <col className="w-[170px]" />
+              <col className="w-[130px]" />
             </colgroup>
             <thead className="bg-zinc-50 text-left text-xs font-semibold tracking-wide text-zinc-700">
               <tr>
@@ -482,7 +481,9 @@ export function LearningTaskFilters({
                 <th className="px-4 py-3">可见性</th>
                 <th className="px-4 py-3">课程分类</th>
                 <th className="px-4 py-3">评分配置</th>
-                <th className="px-4 py-3">操作</th>
+                <th className="sticky right-0 z-20 bg-zinc-50 px-4 py-3 shadow-[inset_1px_0_0_0_#e4e4e7]">
+                  操作
+                </th>
               </tr>
             </thead>
             <tbody>
@@ -598,17 +599,17 @@ export function LearningTaskFilters({
                         </p>
                       </div>
                     </td>
-                    <td className="whitespace-nowrap px-4 py-3">
+                    <td className="sticky right-0 z-10 break-words bg-white px-4 py-3 shadow-[inset_1px_0_0_0_#e4e4e7]">
                       {taskId ? (
                         <div className="flex flex-col items-start gap-1">
                           <Link
                             href={buildTaskEditHref(taskId)}
-                            className="text-blue-700 hover:underline"
+                            className="whitespace-nowrap text-blue-700 hover:underline"
                           >
                             {canEditTask ? "编辑" : "查看"}
                           </Link>
                           {isOwner && statusUpper === "ARCHIVED" ? (
-                            <p className="text-xs text-zinc-500">
+                            <p className="text-xs leading-5 text-zinc-500">
                               已归档，仅可查看
                             </p>
                           ) : null}
