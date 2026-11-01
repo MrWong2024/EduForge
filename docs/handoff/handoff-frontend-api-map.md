@@ -113,7 +113,7 @@
   - 注意：只提交 joinCode，入班权限与重复入班由后端判定。
 - 学生任务详情：`student/classrooms/:cid/tasks/:ctid/page.tsx` -> `/api/proxy/classrooms/:cid/tasks/:ctid/my-task-detail`。
   - 对应后端：`GET /api/classrooms/:classroomId/tasks/:classroomTaskId/my-task-detail`。
-  - 注意：消费 `participationStatus`；模板当前状态不作为前端阻断依据。
+  - 注意：消费 `participationStatus`；模板当前状态不作为前端阻断依据。前端历史展示按 `createdAt` 倒序，排序不改变后端 latest、完成状态及参与资格。
 - 学生提交：`SubmissionForm` -> `/api/proxy/classrooms/:cid/tasks/:ctid/submissions`。
   - 对应后端：`POST /api/classrooms/:classroomId/tasks/:classroomTaskId/submissions`。
   - 注意：提交入口要求明确快照可用且后端 canSubmit=true，不以模板状态或 AI 发起权限代替提交资格。content 中的源码和可选说明原样发送；说明按 Unicode 码点校验。取得有效提交 ID 后锁住当前表单并走既有路径进入本次详情，导航恢复只打开该已保存提交，query 只用于返回导航；提交成功不表示 AI 已申请。成功缺 ID 或网络结果未确认时先核对历史，不自动重放。按 AllExceptionsFilter 实际公开 message 局部适配已知冷却等待、关闭/缺快照和迟交原因，其他异常沿用安全通用提示；迟交、冷却和授权仍由后端最终校验。

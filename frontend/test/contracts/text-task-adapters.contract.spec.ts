@@ -27,6 +27,174 @@ import {
   getSubmissionRevisionError,
 } from "../../lib/learning-tasks/text-submission";
 
+test("student task history uses actual createdAt instants and keeps equal-time input order", () => {
+  const submissions = [
+    {
+      id: "offset-first",
+      attemptNo: 100,
+      createdAt: "2026-11-01T10:00:00+08:00",
+    },
+    {
+      id: "newest",
+      attemptNo: 1,
+      createdAt: "2026-11-01T02:30:00Z",
+      updatedAt: "2026-11-01T02:31:00Z",
+      lastEditedAt: "2026-11-01T02:31:00Z",
+    },
+    {
+      id: "same-instant-second",
+      attemptNo: 99,
+      createdAt: "2026-11-01T03:00:00+01:00",
+    },
+    {
+      id: "oldest",
+      attemptNo: 300,
+      createdAt: "2026-11-01T01:59:59Z",
+      updatedAt: "2099-01-01T00:00:00Z",
+      lastEditedAt: "2099-01-01T00:00:00Z",
+    },
+    {
+      id: "same-instant-third",
+      attemptNo: 200,
+      createdAt: "2026-10-31T22:00:00-04:00",
+    },
+  ];
+  const detail = toMyTaskDetailResponse({ submissions });
+  expect(detail.submissions.map((submission) => submission.id)).toEqual([
+    "newest",
+    "offset-first",
+    "same-instant-second",
+    "same-instant-third",
+    "oldest",
+  ]);
+});
+
+test("student task history puts unusable createdAt values last in their original order", () => {
+  const submissions = [
+    { id: "missing", updatedAt: "2099-01-01T00:00:00Z" },
+    { id: "epoch", createdAt: "1970-01-01T00:00:00Z" },
+    { id: "null", createdAt: null },
+    { id: "empty", createdAt: "" },
+    { id: "recent", createdAt: "2026-11-01T00:00:00Z" },
+    {
+      id: "invalid",
+      createdAt: "not-a-date",
+      lastEditedAt: "2099-01-01T00:00:00Z",
+    },
+    { id: "number", createdAt: 0 },
+    { id: "whitespace", createdAt: " \t " },
+  ];
+  const detail = toMyTaskDetailResponse({ submissions });
+  expect(detail.submissions.map((submission) => submission.id)).toEqual([
+    "recent",
+    "epoch",
+    "missing",
+    "null",
+    "empty",
+    "invalid",
+    "number",
+    "whitespace",
+  ]);
+});
+
+test("student task history accepts frozen empty and single-entry lists", () => {
+  const empty = Object.freeze([]);
+  expect(toMyTaskDetailResponse({ submissions: empty }).submissions).toEqual([]);
+  const submission = Object.freeze({
+    id: "only-submission",
+    createdAt: "2026-11-01T00:00:00Z",
+  });
+  const submissions = Object.freeze([submission]);
+  const detail = toMyTaskDetailResponse(Object.freeze({ submissions }));
+  expect(detail.submissions.map((item) => item.id)).toEqual(["only-submission"]);
+  expect(detail.submissions).not.toBe(submissions);
+  expect(detail.submissions[0]).toBe(submission);
+});
+
+test("history ordering preserves frozen records, feedback, raw facts and server task state", () => {
+  const feedbackItems = Object.freeze([
+    Object.freeze({
+      source: "AI",
+      type: "OTHER",
+      severity: "WARN",
+      message: "  保留反馈原文\n ",
+      suggestion: "  核对修改  ",
+      tags: Object.freeze(["synthetic"]),
+    }),
+  ]);
+  const feedbackSummary = Object.freeze({
+    totalItems: 1,
+    topTags: Object.freeze([Object.freeze({ tag: "synthetic", count: 1 })]),
+    severityBreakdown: Object.freeze({ INFO: 0, WARN: 1, ERROR: 0 }),
+  });
+  const older = Object.freeze({
+    id: "authoritative-latest",
+    attemptNo: 2,
+    createdAt: "2026-11-01T00:00:00Z",
+    aiFeedbackStatus: "SUCCEEDED",
+    feedbackSummary,
+    feedbackItems,
+  });
+  const newer = Object.freeze({
+    id: "first-in-history",
+    attemptNo: 1,
+    createdAt: "2026-11-01T01:00:00Z",
+    aiFeedbackStatus: "NOT_REQUESTED",
+  });
+  const submissions = Object.freeze([older, newer]);
+  const latest = Object.freeze({
+    submissionId: "authoritative-latest",
+    attemptNo: 2,
+    aiFeedbackStatus: "SUCCEEDED",
+    feedbackSummary,
+    feedbackItems,
+  });
+  const completionStatus = Object.freeze({
+    status: "QUALIFIED_WITH_WARNINGS",
+    severity: "WARN",
+    source: "AI",
+    latestSubmissionId: "authoritative-latest",
+    teacherFeedbackCount: 0,
+    aiFeedbackCount: 1,
+    teacherWorstSeverity: null,
+    aiWorstSeverity: "WARN",
+  });
+  const participationStatus = Object.freeze({
+    readOnly: true,
+    canSubmit: false,
+    canRequestAiFeedback: false,
+    reason: "CLASSROOM_TASK_NOT_ACTIVE",
+    message: "课堂任务已关闭",
+  });
+  const payload = Object.freeze({
+    submissions,
+    latest,
+    completionStatus,
+    participationStatus,
+  });
+  const before = JSON.stringify(payload);
+  const detail = toMyTaskDetailResponse(payload);
+  expect(detail.submissions.map((submission) => submission.id)).toEqual([
+    "first-in-history",
+    "authoritative-latest",
+  ]);
+  expect(detail.submissions).not.toBe(submissions);
+  expect(detail.submissions[0]).toBe(newer);
+  expect(detail.submissions[1]).toBe(older);
+  expect(detail.submissions[1].feedbackItems).toBe(feedbackItems);
+  expect(detail.submissions[1].feedbackSummary).toBe(feedbackSummary);
+  expect(detail.latest).toBe(latest);
+  expect(detail.completionStatus).toEqual(completionStatus);
+  expect(detail.participationStatus).toEqual(participationStatus);
+  expect(detail.raw).toBe(payload);
+  expect(detail.raw.submissions).toBe(submissions);
+  expect(JSON.stringify(payload)).toBe(before);
+  expect(submissions.map((submission) => submission.id)).toEqual([
+    "authoritative-latest",
+    "first-in-history",
+  ]);
+});
+
 test("only an explicit valid revision and complete server editing permission allow editing", () => {
   const valid = {
     contentRevision: 0,

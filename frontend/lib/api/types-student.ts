@@ -491,6 +491,24 @@ export const toMyTaskDetailResponse = (
   const latest = safeGet<unknown>(record, "latest", null);
   const classroomTask = asRecord(record.classroomTask);
   const settings = asRecord(classroomTask.settings);
+  const submissions = asRecordArray(safeGet(record, "submissions", undefined))
+    .map((submission) => ({
+      submission,
+      createdAtMs:
+        typeof submission.createdAt === "string"
+          ? Date.parse(submission.createdAt)
+          : Number.NaN,
+    }))
+    .sort((left, right) => {
+      if (!Number.isFinite(left.createdAtMs)) {
+        return Number.isFinite(right.createdAtMs) ? 1 : 0;
+      }
+      if (!Number.isFinite(right.createdAtMs)) {
+        return -1;
+      }
+      return right.createdAtMs - left.createdAtMs;
+    })
+    .map(({ submission }) => submission);
 
   return {
     classroom: asRecord(safeGet(record, "classroom", undefined)),
@@ -505,7 +523,7 @@ export const toMyTaskDetailResponse = (
     },
     task: asRecord(safeGet(record, "task", undefined)),
     me: asRecord(safeGet(record, "me", undefined)),
-    submissions: asRecordArray(safeGet(record, "submissions", undefined)),
+    submissions,
     latest: latest && typeof latest === "object" ? asRecord(latest) : null,
     completionStatus: toStudentTaskCompletionStatus(record.completionStatus),
     participationStatus: toStudentTaskParticipationStatus(
