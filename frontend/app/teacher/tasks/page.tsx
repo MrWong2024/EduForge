@@ -17,6 +17,7 @@ import {
   toLearningTaskListResponse,
 } from "@/lib/api/types-teacher";
 import { normalizeTaskCourseLabel } from "@/lib/learning-tasks/course-labels";
+import { parseDifficultyFilter } from "@/lib/learning-tasks/difficulty";
 import {
   DEFAULT_TASK_TEMPLATE_SCOPE,
   normalizeTaskTemplateScope,
@@ -58,6 +59,7 @@ type TeacherLearningTasksPageProps = {
     status?: string | string[];
     knowledgeModule?: string | string[];
     courseLabel?: string | string[];
+    difficulty?: string | string[];
     scope?: string | string[];
   }>;
 };
@@ -99,6 +101,7 @@ export default async function TeacherLearningTasksPage({
   const initialCourseLabelFilter = normalizeTaskCourseLabel(
     getSingleSearchParam(query.courseLabel),
   );
+  const initialDifficultyFilter = parseDifficultyFilter(query.difficulty);
   const initialScope =
     normalizeTaskTemplateScope(getSingleSearchParam(query.scope)) ??
     DEFAULT_TASK_TEMPLATE_SCOPE;
@@ -116,6 +119,7 @@ export default async function TeacherLearningTasksPage({
       limit: TASK_TEMPLATE_PAGE_LIMIT,
       scope: initialScope,
       courseLabel: initialCourseLabelFilter,
+      difficulty: initialDifficultyFilter,
       status: initialStatusFilter,
       knowledgeModule: initialKnowledgeModuleFilter,
     });
@@ -190,6 +194,7 @@ export default async function TeacherLearningTasksPage({
       status: initialStatusFilter,
       knowledgeModule: initialKnowledgeModuleFilter,
       courseLabel: initialCourseLabelFilter,
+      difficulty: initialDifficultyFilter,
       scope: initialScope,
     })}`;
 
@@ -260,6 +265,7 @@ export default async function TeacherLearningTasksPage({
           initialStatus={initialStatusFilter}
           initialKnowledgeModule={initialKnowledgeModuleFilter}
           initialCourseLabel={initialCourseLabelFilter}
+          initialDifficultyFilter={initialDifficultyFilter}
           initialPage={viewModel.taskList.page ?? initialPage}
           initialLimit={viewModel.taskList.limit ?? TASK_TEMPLATE_PAGE_LIMIT}
           total={viewModel.taskList.total}

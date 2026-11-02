@@ -542,6 +542,187 @@ describe('A1 classroom text task backend contract (HTTP)', () => {
     ).not.toHaveProperty('difficulty');
   });
 
+  it('filters template and publishable lists exactly before pagination without widening visibility', async () => {
+    const knowledgeModule = namespace + '-difficulty-filter';
+    const templatesUrl = '/api/learning-tasks/tasks';
+    const candidatesUrl =
+      '/api/classrooms/' + classA.id + '/publishable-task-templates';
+    const createSample = async (
+      agent: Agent,
+      name: string,
+      difficulty: string | undefined,
+      options: {
+        visibility?: string;
+        status?: string;
+        courseLabel?: string;
+      } = {},
+    ) => {
+      const response = await agent
+        .post(templatesUrl)
+        .send({
+          title: namespace + '-' + name,
+          description: 'Difficulty query fixture',
+          knowledgeModule,
+          courseLabel: options.courseLabel ?? 'Java 程序设计',
+          visibility: options.visibility ?? 'PRIVATE',
+          status: options.status ?? 'PUBLISHED',
+          ...(difficulty === undefined ? {} : { difficulty }),
+        })
+        .expect(201);
+      const id = (response.body as Resource).id;
+      taskIds.push(id);
+      return id;
+    };
+    const easyA = await createSample(teacherA, 'easy-a', 'easy');
+    const easyB = await createSample(teacherA, 'easy-b', 'easy');
+    const medium = await createSample(teacherA, 'medium', 'medium');
+    const hard = await createSample(teacherA, 'hard', 'hard');
+    const unknown = await createSample(teacherA, 'unknown', '综合');
+    const mixedCase = await createSample(teacherA, 'mixed-case', 'Easy');
+    const padded = await createSample(teacherA, 'padded', ' easy ');
+    const empty = await createSample(teacherA, 'empty', '');
+    const missing = await createSample(teacherA, 'missing', undefined);
+    const shared = await createSample(teacherB, 'shared', 'medium', {
+      visibility: 'SHARED',
+      courseLabel: 'Python 程序设计',
+    });
+    await createSample(teacherB, 'foreign-private', 'medium');
+    const draft = await createSample(teacherA, 'draft', 'medium', {
+      status: 'DRAFT',
+    });
+    const published = await createSample(
+      teacherA,
+      'already-published',
+      'medium',
+    );
+    await publish(teacherA, classA, published);
+
+    const templateQuery = {
+      knowledgeModule,
+      scope: 'all',
+      status: 'PUBLISHED',
+      limit: 100,
+    };
+    const candidateQuery = { knowledgeModule, limit: 100 };
+    const assertList = async (
+      url: string,
+      query: Record<string, unknown>,
+      expectedIds: string[],
+    ) => {
+      const response = await teacherA.get(url).query(query).expect(200);
+      const result = response.body as List;
+      expect(result.total).toBe(expectedIds.length);
+      expect(result.items.map((item) => item.id).sort()).toEqual(
+        [...expectedIds].sort(),
+      );
+    };
+    for (const [difficulty, templateIds, candidateIds] of [
+      ['easy', [easyA, easyB], [easyA, easyB]],
+      ['medium', [medium, shared, published], [medium, shared]],
+      ['hard', [hard], [hard]],
+    ] as const) {
+      await assertList(templatesUrl, { ...templateQuery, difficulty }, [
+        ...templateIds,
+      ]);
+      await assertList(candidatesUrl, { ...candidateQuery, difficulty }, [
+        ...candidateIds,
+      ]);
+    }
+    const nonstandardIds = [unknown, mixedCase, padded, empty, missing];
+    await assertList(templatesUrl, templateQuery, [
+      easyA,
+      easyB,
+      medium,
+      hard,
+      shared,
+      published,
+      ...nonstandardIds,
+    ]);
+    await assertList(candidatesUrl, candidateQuery, [
+      easyA,
+      easyB,
+      medium,
+      hard,
+      shared,
+      ...nonstandardIds,
+    ]);
+
+    for (const [url, query] of [
+      [templatesUrl, templateQuery],
+      [candidatesUrl, candidateQuery],
+    ] as const) {
+      const ids: string[] = [];
+      for (const page of [1, 2]) {
+        const response = await teacherA
+          .get(url)
+          .query({ ...query, difficulty: 'easy', page, limit: 1 })
+          .expect(200);
+        const result = response.body as List & { page: number; limit: number };
+        expect(result).toMatchObject({ total: 2, page, limit: 1 });
+        expect(result.items).toHaveLength(1);
+        ids.push(result.items[0].id);
+      }
+      expect(ids.sort()).toEqual([easyA, easyB].sort());
+      expect(new Set(ids).size).toBe(2);
+      for (const difficulty of [
+        '',
+        ' ',
+        'unknown',
+        'Easy',
+        ' easy ',
+        ['easy', 'hard'],
+      ]) {
+        await teacherA
+          .get(url)
+          .query({ ...query, difficulty })
+          .expect(400);
+      }
+      await teacherA
+        .get(url)
+        .query(query)
+        .query('difficulty[]=easy')
+        .expect(400);
+    }
+
+    await assertList(
+      templatesUrl,
+      { ...templateQuery, difficulty: 'medium', courseLabel: 'Java 程序设计' },
+      [medium, published],
+    );
+    await assertList(
+      candidatesUrl,
+      { ...candidateQuery, difficulty: 'medium', courseLabel: 'Java 程序设计' },
+      [medium],
+    );
+    await assertList(
+      templatesUrl,
+      { ...templateQuery, difficulty: 'medium', status: 'DRAFT' },
+      [draft],
+    );
+    await assertList(
+      templatesUrl,
+      {
+        ...templateQuery,
+        difficulty: 'medium',
+        scope: 'mine',
+        createdBy: userIds[1].toString(),
+      },
+      [medium, published],
+    );
+    await assertList(
+      templatesUrl,
+      { ...templateQuery, difficulty: 'medium', scope: 'shared' },
+      [shared],
+    );
+    await assertList(
+      candidatesUrl,
+      { ...candidateQuery, difficulty: 'medium', onlyMine: true },
+      [medium],
+    );
+    await teacherB.get(candidatesUrl).query({ difficulty: 'easy' }).expect(404);
+    await studentA.get(candidatesUrl).query({ difficulty: 'easy' }).expect(403);
+  });
+
   it('publishes, preserves each source/note, freezes A and B independently across read chains', async () => {
     taskId = await makeTask(teacherA);
     instanceA = await publish(teacherA, classA, taskId);

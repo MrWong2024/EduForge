@@ -30,7 +30,11 @@ import {
 } from "@/lib/learning-tasks/template-visibility-scope";
 import { sortTaskTemplatesByScope } from "@/lib/learning-tasks/template-list-sorting";
 import { getRubricSummary } from "@/lib/learning-tasks/rubric";
-import { getDifficultyLabel } from "@/lib/learning-tasks/difficulty";
+import {
+  TASK_DIFFICULTY_OPTIONS,
+  getDifficultyLabel,
+  parseDifficultyFilter,
+} from "@/lib/learning-tasks/difficulty";
 import { getTaskTemplateStatusLabel } from "@/lib/ui/status";
 
 type LearningTaskFiltersProps = {
@@ -40,6 +44,7 @@ type LearningTaskFiltersProps = {
   initialStatus?: string;
   initialKnowledgeModule?: string;
   initialCourseLabel?: string;
+  initialDifficultyFilter?: string;
   initialPage: number;
   initialLimit: number;
   total?: number;
@@ -99,6 +104,7 @@ export function LearningTaskFilters({
   initialStatus,
   initialKnowledgeModule,
   initialCourseLabel,
+  initialDifficultyFilter,
   initialPage,
   initialLimit,
   total,
@@ -116,6 +122,15 @@ export function LearningTaskFilters({
   const courseLabelFilter =
     normalizeTaskCourseLabel(
       searchParams.get("courseLabel") ?? initialCourseLabel,
+    ) ?? "";
+  const difficultyValues = searchParams.getAll("difficulty");
+  const difficultyFilter =
+    parseDifficultyFilter(
+      difficultyValues.length === 0
+        ? initialDifficultyFilter
+        : difficultyValues.length === 1
+          ? difficultyValues[0]
+          : difficultyValues,
     ) ?? "";
   const knowledgeModuleFilter = useMemo(() => {
     const value =
@@ -160,9 +175,14 @@ export function LearningTaskFilters({
   const currentTaskListUrl = useMemo(() => {
     const params = new URLSearchParams(searchParams.toString());
     params.delete("stage");
+    if (difficultyFilter) {
+      params.set("difficulty", difficultyFilter);
+    } else {
+      params.delete("difficulty");
+    }
     const currentQuery = params.toString();
     return currentQuery ? `${pathname}?${currentQuery}` : pathname;
-  }, [pathname, searchParams]);
+  }, [pathname, searchParams, difficultyFilter]);
 
   const buildTaskEditHref = (taskId: string): string => {
     const params = new URLSearchParams();
@@ -173,6 +193,11 @@ export function LearningTaskFilters({
   const replaceSearchQuery = (updater: (params: URLSearchParams) => void) => {
     const params = new URLSearchParams(searchParams.toString());
     params.delete("stage");
+    if (difficultyFilter) {
+      params.set("difficulty", difficultyFilter);
+    } else {
+      params.delete("difficulty");
+    }
     updater(params);
     const nextQuery = params.toString();
     router.replace(nextQuery ? `${pathname}?${nextQuery}` : pathname, {
@@ -220,6 +245,18 @@ export function LearningTaskFilters({
     });
   };
 
+  const setDifficultyFilterAndSync = (nextValue: string) => {
+    replaceSearchQuery((params) => {
+      const difficulty = parseDifficultyFilter(nextValue);
+      if (difficulty) {
+        params.set("difficulty", difficulty);
+      } else {
+        params.delete("difficulty");
+      }
+      params.set("page", "1");
+    });
+  };
+
   const goToPage = (page: number) => {
     replaceSearchQuery((params) => {
       params.set("page", String(Math.max(1, page)));
@@ -231,6 +268,7 @@ export function LearningTaskFilters({
       params.delete("status");
       params.delete("knowledgeModule");
       params.delete("courseLabel");
+      params.delete("difficulty");
       params.set("page", "1");
     });
   };
@@ -247,7 +285,8 @@ export function LearningTaskFilters({
   const hasActiveFilters =
     statusFilter !== "ALL" ||
     Boolean(knowledgeModuleFilter) ||
-    Boolean(courseLabelFilter);
+    Boolean(courseLabelFilter) ||
+    Boolean(difficultyFilter);
 
   return (
     <section className="space-y-4">
@@ -285,7 +324,7 @@ export function LearningTaskFilters({
         <p className="mt-1 text-sm text-zinc-600">
           调整筛选条件后将重新查询，并自动回到第一页。
         </p>
-        <div className="mt-4 grid gap-4 md:grid-cols-4">
+        <div className="mt-4 grid gap-4 md:grid-cols-5">
           <label className="block text-sm">
             <span className="mb-1 block text-zinc-700">状态</span>
             <select
@@ -334,6 +373,24 @@ export function LearningTaskFilters({
               {TASK_COURSE_LABELS.map((courseLabelOption) => (
                 <option key={courseLabelOption} value={courseLabelOption}>
                   {courseLabelOption}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          <label className="block text-sm">
+            <span className="mb-1 block text-zinc-700">任务难度</span>
+            <select
+              value={difficultyFilter}
+              onChange={(event) =>
+                setDifficultyFilterAndSync(event.target.value)
+              }
+              className="w-full rounded-md border border-zinc-300 px-3 py-2"
+            >
+              <option value="">全部难度</option>
+              {TASK_DIFFICULTY_OPTIONS.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
                 </option>
               ))}
             </select>

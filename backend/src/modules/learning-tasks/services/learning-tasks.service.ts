@@ -286,6 +286,9 @@ export class LearningTasksService {
     if (query.knowledgeModule) {
       baseFilter.knowledgeModule = query.knowledgeModule;
     }
+    if (query.difficulty !== undefined) {
+      baseFilter.difficulty = query.difficulty;
+    }
     if (query.courseLabel) {
       if (query.courseLabel === TASK_COURSE_LABEL_UNCLASSIFIED) {
         andFilters.push({

@@ -18,6 +18,7 @@ import {
 } from "@/lib/api/types-teacher";
 import { getMe } from "@/lib/auth/session";
 import { normalizeTaskCourseLabel } from "@/lib/learning-tasks/course-labels";
+import { parseDifficultyFilter } from "@/lib/learning-tasks/difficulty";
 import { getTaskSnapshotMessage } from "@/lib/learning-tasks/ai-review";
 import { paths } from "@/lib/routes/paths";
 import { getCommonErrorSummary } from "@/lib/ui/status";
@@ -37,6 +38,7 @@ type ClassroomTasksPageProps = {
     courseLabel?: string | string[];
     onlyMine?: string | string[];
     knowledgeModule?: string | string[];
+    difficulty?: string | string[];
   }>;
 };
 
@@ -66,6 +68,7 @@ type TasksViewModel =
       initialCourseLabelFilter?: string;
       initialOnlyMineFilter: boolean;
       initialKnowledgeModuleFilter?: string;
+      initialDifficultyFilter?: ReturnType<typeof parseDifficultyFilter>;
       currentUserId?: string;
     }
   | { mode: "error"; status: number; description: string };
@@ -207,6 +210,7 @@ export default async function ClassroomTasksPage({
   );
   const initialKnowledgeModuleFilter =
     getSingleSearchParam(query.knowledgeModule)?.trim() || undefined;
+  const initialDifficultyFilter = parseDifficultyFilter(query.difficulty);
   let viewModel: TasksViewModel = {
     mode: "error",
     status: 500,
@@ -221,6 +225,7 @@ export default async function ClassroomTasksPage({
       courseLabel: initialCourseLabelFilter,
       onlyMine: initialOnlyMineFilter ? "true" : undefined,
       knowledgeModule: initialKnowledgeModuleFilter,
+      difficulty: initialDifficultyFilter,
     });
     const publishedTasksQuery = buildQueryString({
       page: currentPublishedTasksPage,
@@ -265,6 +270,7 @@ export default async function ClassroomTasksPage({
       initialCourseLabelFilter,
       initialOnlyMineFilter,
       initialKnowledgeModuleFilter,
+      initialDifficultyFilter,
       currentUserId:
         typeof me?.id === "string" && me.id.trim() ? me.id.trim() : undefined,
     };
@@ -325,6 +331,7 @@ export default async function ClassroomTasksPage({
       courseLabel: initialCourseLabelFilter,
       onlyMine: initialOnlyMineFilter ? "true" : undefined,
       knowledgeModule: initialKnowledgeModuleFilter,
+      difficulty: initialDifficultyFilter,
     })}`;
 
   return (
@@ -395,6 +402,7 @@ export default async function ClassroomTasksPage({
         initialCourseLabelFilter={viewModel.initialCourseLabelFilter}
         initialOnlyMineFilter={viewModel.initialOnlyMineFilter}
         initialKnowledgeModuleFilter={viewModel.initialKnowledgeModuleFilter}
+        initialDifficultyFilter={viewModel.initialDifficultyFilter}
       />
 
       <p className="text-sm text-zinc-600">

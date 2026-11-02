@@ -7,9 +7,12 @@ import {
   IsString,
   Max,
   Min,
+  ValidateIf,
 } from 'class-validator';
 import { TASK_COURSE_LABELS } from '../../../learning-tasks/task-course-labels.constants';
 import type { TaskCourseLabel } from '../../../learning-tasks/task-course-labels.constants';
+import { TASK_DIFFICULTY_FILTER_VALUES } from '../../../learning-tasks/task-difficulty-filter.constants';
+import type { TaskDifficultyFilter } from '../../../learning-tasks/task-difficulty-filter.constants';
 
 const trimStringInput = ({ value }: { value: unknown }): unknown => {
   if (typeof value !== 'string') {
@@ -49,6 +52,10 @@ const toOptionalBoolean = ({ value }: { value: unknown }): unknown => {
 };
 
 export class QueryPublishableTaskTemplateDto {
+  @ValidateIf((_object, value: unknown) => value !== undefined)
+  @IsIn(TASK_DIFFICULTY_FILTER_VALUES)
+  difficulty?: TaskDifficultyFilter;
+
   @IsOptional()
   @Transform(trimStringInput)
   @IsIn(TASK_COURSE_LABELS)

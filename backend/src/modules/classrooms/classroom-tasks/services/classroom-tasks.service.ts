@@ -578,6 +578,9 @@ export class ClassroomTasksService {
     if (query.knowledgeModule) {
       baseFilter.knowledgeModule = query.knowledgeModule;
     }
+    if (query.difficulty !== undefined) {
+      baseFilter.difficulty = query.difficulty;
+    }
     if (query.onlyMine === true) {
       baseFilter.createdBy = teacherObjectId;
     } else {

@@ -56,8 +56,10 @@
 | EditLearningTaskForm | `components/teacher/EditLearningTaskForm.tsx` | 描述10行，单一“评阅标准（可选）”文字输入有非空白内容8行、否则3行；编辑态可纵向调整，只读长文本可滚动。可选难度的编辑/只读展示复用共享 helper，保存成功同步正式响应，失败保留草稿；字段请求语义见 API Map。rubric 保存复用纯 helper，成功后从正式响应同步文字；同 taskId 刷新 props 不覆盖草稿，页面按 taskId 重建表单。引用编辑区可见性固定于本次 taskId 首次成功加载的非空引用，清空保存及刷新不隐藏；引用成功保存独立更新比较基准。仅明确身份与作者匹配且状态可编辑时允许写入；保存与发布/归档共用 pending 边界，保留列表返回上下文，不承担课堂实例设置 |
 | TaskAiContextRefs | `components/teacher/TaskAiContextRefs.tsx` | 普通多行引用 JSON 编辑、就近结构错误与格式化；只读时有引用才按包展示全部路径，无 JSON/复制控件或空配置占位；不渲染路径链接/HTML，不读 ZIP，不进入学生或课堂实例页 |
 | ai-context-refs | `lib/learning-tasks/ai-context-refs.ts` | 引用基本结构解析、稳定格式化、语义差异与局部作者编辑判断；保持路径及数组顺序，不复制后端 ZIP 安全校验 |
-| LearningTaskFilters | `components/teacher/LearningTaskFilters.tsx` | 模板视图/筛选的 URL 状态、分页、列表展示与编辑/查看入口；“评阅标准”列复用纯 helper 显示文字已填写/未填写，“分类”单元格内复用共享难度显示；桌面五列、窄屏纵向条目，无需横向滚动；保留列表返回上下文，筛选后回首屏；复用共享可见性和排序模块，不在当前页伪造完整候选或发起发布/归档 |
-| PublishClassroomTaskForm | `components/teacher/PublishClassroomTaskForm.tsx` | 可见已发布模板的筛选、候选追加加载、选择状态与实例发布；筛选变化重置候选，课程分类复用共享候选；发布者来源与已选模板摘要由本组件展示，候选及摘要复用共享难度显示；评阅标准摘要复用纯 helper，候选未提供 rubric 时提示到模板详情核对，不宣称未填写。实例截止/迟交属于此表单；不提供 AI 策略选择，不创建/编辑模板，不自行判定后端候选全集 |
+| TeacherLearningTasksPage | `app/teacher/tasks/page.tsx` | 模板列表 SSR 参数解析、数据加载与外层实际分页链接；难度复用共享筛选解析并传给 LearningTaskFilters，保留列表和来源班级上下文，不在页面过滤已分页结果 |
+| LearningTaskFilters | `components/teacher/LearningTaskFilters.tsx` | 模板视图/筛选（含难度）的 URL 状态、分页、列表展示与编辑/查看入口；清空及活动筛选判断包含难度，控件由 URL/初始 props 恢复；“评阅标准”列复用纯 helper 显示文字已填写/未填写，“分类”单元格内复用共享难度显示；桌面五列、窄屏纵向条目，无需横向滚动；保留列表返回上下文，筛选后回首屏；复用共享可见性和排序模块，不在当前页伪造完整候选或发起发布/归档 |
+| ClassroomTasksPage | `app/teacher/classrooms/[classroomId]/tasks/page.tsx` | 班级任务与发布候选分别 SSR 加载，解析并下传候选难度；已发布列表请求不使用候选难度，其分页链接保留候选条件，具体调用合同见 API Map |
+| PublishClassroomTaskForm | `components/teacher/PublishClassroomTaskForm.tsx` | 可见已发布模板的筛选、候选追加加载、选择状态与实例发布；难度及既有筛选变化时清除选择并重置候选，复用请求 epoch 和局部等待状态，过期响应不污染新候选；等待及当前候选成员校验同时作用于控件和提交入口，截止/迟交草稿独立保留，详细状态合同见 API Map。课程分类复用共享候选；发布者来源与已选模板摘要由本组件展示，候选及摘要复用共享难度显示；评阅标准摘要复用纯 helper，候选未提供 rubric 时提示到模板详情核对，不宣称未填写。不提供 AI 策略选择，不创建/编辑模板，不自行判定后端候选全集 |
 | TeacherTaskDetailPage | `app/teacher/classrooms/[classroomId]/tasks/[classroomTaskId]/page.tsx` | 加载课堂任务正式投影，基础信息展示难度并组合共享 rubric；难度显示复用共享 helper，字段读源见 API Map |
 | ClassroomTaskLifecycleActions | `components/teacher/ClassroomTaskLifecycleActions.tsx` | 实例状态展示、关闭/恢复提交及确认/请求状态；恢复只改变运行状态，不自动改截止或迟交设置；RECALLED 无动作，不做物理删除或发布表单 |
 | EditClassroomTaskForm | `components/teacher/EditClassroomTaskForm.tsx` | 列表行内展开、草稿输入与实例截止/迟交设置保存；ACTIVE/CLOSED 可编辑，RECALLED 无入口；不修改模板或状态流 |
@@ -134,7 +136,7 @@
 | Task Template Visibility/Scope | `lib/learning-tasks/template-visibility-scope.ts` | 模板可见性与列表 scope 的值域、文案、normalize；不在页面和表单散落魔法字符串 |
 | Task Template List Sorting | `lib/learning-tasks/template-list-sorting.ts` | 当前页模板默认排序单一来源：mine 最近更新优先，shared 已发布优先后按时间，all 我的模板优先；不复制多套 compare |
 | Task Rubric | `lib/learning-tasks/rubric.ts` | 字符串 notes 读取、首尾 trim 与创建/编辑请求构造：创建空白省略 rubric，编辑空白发送 {}；不合并旧对象。共享只读/列表按文字判断填写状态，候选缺字段单独提示核对 |
-| Task Difficulty | `lib/learning-tasks/difficulty.ts` | 前端难度选项目录、统一文本显示、输入值与创建/编辑请求构造的纯 helper；由真实模板表单、模板选择及师生课堂详情复用，具体 UI 与请求口径见 Frontend API Map |
+| Task Difficulty | `lib/learning-tasks/difficulty.ts` | 前端难度选项目录、统一文本显示、输入值与创建/编辑请求构造，以及独立的精确筛选值解析 helper；由真实模板表单、模板选择/筛选 SSR 与组件及师生课堂详情复用，筛选不清洗原存储/展示值，具体 UI 与请求口径见 Frontend API Map |
 | Submission Language | `lib/learning-tasks/submission-language.ts` | 提交语言选项目录与师生只读 label 映射，不转换请求值 |
 | UI Format | `lib/ui/format.ts` | query/date/display/safeGet 及共享首次提交迟交时长展示工具；不重复实现同类 parse |
 | Proxy Route | `app/api/proxy/[...path]/route.ts` | 正式 BFF 转发模块的修改落点，详细合同归 Frontend API Map；不绕过 proxy 或向其中加入业务逻辑 |

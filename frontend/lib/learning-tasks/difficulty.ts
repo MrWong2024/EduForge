@@ -4,6 +4,11 @@ export const TASK_DIFFICULTY_OPTIONS = [
   { value: "hard", label: "挑战" },
 ] as const;
 
+export const parseDifficultyFilter = (
+  value: unknown,
+): (typeof TASK_DIFFICULTY_OPTIONS)[number]["value"] | undefined =>
+  TASK_DIFFICULTY_OPTIONS.find((option) => option.value === value)?.value;
+
 export const TASK_DIFFICULTY_HELP =
   "相对于本课程当前教学阶段：基础侧重直接运用，进阶侧重综合运用，挑战侧重开放设计或复杂问题。仅用于教学定位，不影响评阅标准。";
 

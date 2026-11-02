@@ -391,11 +391,12 @@ summary、taskTrend 和学生 metrics 均有 `evidenceSummary={sourceUncertainCo
 | --- | --- |
 | `CreateTaskDto` | 必填字符串 `title/description/knowledgeModule`；可选字符串 `difficulty`、对象 `rubric:Record<string,unknown>`、`courseLabel`、`visibility` 与 `status:DRAFT \| PUBLISHED`；status 默认 DRAFT。 |
 | `UpdateTaskDto` | 上述字段可选；status 的校验集合为 `DRAFT \| PUBLISHED \| ARCHIVED`，其编辑行为见 API；rubric 不静态约束内部 key。 |
-| `QueryTaskDto` | 可选 `scope:mine \| shared \| all`，默认 mine，trim + lowercase，空白视为未传；可选 status、字符串 knowledgeModule、courseLabel；分页校验；兼容 `createdBy` 用 IsMongoId。 |
+| `QueryTaskDto` | 可选 `scope:mine \| shared \| all`，默认 mine，trim + lowercase，空白视为未传；可选 status、字符串 knowledgeModule、courseLabel、difficulty（见下方查询合同）；分页校验；兼容 `createdBy` 用 IsMongoId。 |
 
 - Task 的创建、更新、模板列表及发布候选查询不接受 `stage`，严格白名单对旧参数返回 400；公开模板、课堂内容、学生详情及教师看板均不投影旧记录中的该字段。新 Task 和新快照不写入该字段；存量字段和旧索引通过[受控定向运维](./handoff-backend-config-matrix.md#taskstage-定向退役运维)处理。
 - knowledgeModule 无枚举白名单。`courseLabel` 使用 `TASK_COURSE_LABELS` 单选白名单（如未分类、通用编程、Java 程序设计、数据结构、人工智能）；trim 后空白转 undefined。更新中显式传入空白 courseLabel 表示清空；不是 Course 外键。
-- `difficulty` 为既有可选字符串，无后端三档枚举约束；创建省略不设置默认档位，更新省略保留原值，显式空串 `""` 清空。UI 选项与显示约定由 [Frontend API Map](./handoff-frontend-api-map.md#33-teacher-任务--提交--反馈) 维护。
+- Task 存储及 CreateTaskDto / UpdateTaskDto 的 `difficulty` 仍为既有可选字符串，无三档枚举约束；创建省略不设置默认档位，更新省略保留原值，显式空串 `""` 清空。UI 选项与显示约定由 [Frontend API Map](./handoff-frontend-api-map.md#33-teacher-任务--提交--反馈) 维护。
+- 难度查询合同：`QueryTaskDto` 与 `QueryPublishableTaskTemplateDto` 的可选 `difficulty` 仅接受准确单值 `easy/medium/hard`；省略表示不限制。显式空串、空白、未知值、大小写变体或数组均返回 400，不 trim、不转大小写、不推断别名。该限制仅用于查询，不收紧上述存储与写入字符串合同。
 - `visibility: PRIVATE | SHARED`，trim + uppercase，空白视为未传；创建默认 PRIVATE；公开读取旧数据缺省时按 SHARED 兼容。
 - `courseLabel=未分类` 查询兼容匹配字段缺省/空值。`createdBy` 保留输入兼容但不提供越权筛选；scope 的可见性含义见 [API Learning Tasks](./handoff-backend-api-map.md#learning-tasks)。
 - `TaskResponseDto`：`{id,title,description,knowledgeModule,courseLabel?,visibility,difficulty?,rubric?,aiContextRefs?,status,createdBy,publisher,createdAt,updatedAt,publishedAt?}`。`publisher={id,name?}|null`，不返回完整 User。
@@ -430,6 +431,7 @@ CreateTaskDto / UpdateTaskDto 通过继承 `TaskAiContextDto` 接受嵌套 `aiCo
 来源：[QueryPublishableTaskTemplateDto](../../backend/src/modules/classrooms/classroom-tasks/dto/query-publishable-task-template.dto.ts)、[PublishableTaskTemplateResponseDto](../../backend/src/modules/classrooms/classroom-tasks/dto/publishable-task-template-response.dto.ts)。
 
 - 可选 `courseLabel` 使用同一白名单；可选字符串 `knowledgeModule`；两者 trim 后空白转 undefined。
+- 可选 `difficulty` 沿用 [Task 模板 family 的难度查询合同](#task-template-dto--response-family)。
 - `onlyMine?` 经 Transform，支持布尔/数字 true/false/1/0，以及 trim + lowercase 后对应字符串；空白视为未传，再 IsBoolean。
 - 分页校验同通用分页约定。
 - 返回 `{items,total,page,limit}`；item 为 `{id,title,description,knowledgeModule,courseLabel?,visibility,difficulty?,status,createdBy,createdById,publisher,createdAt,updatedAt,publishedAt?}`；publisher 同上。候选资格与已发布排除见 [API Classroom Tasks](./handoff-backend-api-map.md#classroom-tasksclassrooms-子资源)，课程分类排序见 [Service Card 07](./handoff-backend-service-map.md#service-card-07)。

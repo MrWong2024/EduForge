@@ -82,22 +82,25 @@
 ### 3.3 Teacher 任务 / 提交 / 反馈
 
 - 任务模板列表：`/teacher/tasks/page.tsx` -> `/api/proxy/learning-tasks/tasks?...` -> `GET /api/learning-tasks/tasks`。
-  - 注意：`scope/courseLabel/status/knowledgeModule/page` 由 URL 驱动并透传后端。模板列表与课堂候选页忽略旧 URL 的 `stage`，筛选、分页和回跳链接不再携带它；后端参数合同见 [DTO Cheatsheet](./handoff-backend-dto-cheatsheet.md#learning-tasks)。
+  - 注意：`scope/courseLabel/status/knowledgeModule/difficulty/page` 由 URL 驱动并透传后端。模板列表与课堂候选页忽略旧 URL 的 `stage`，筛选、分页和回跳链接不再携带它；后端参数合同见 [DTO Cheatsheet](./handoff-backend-dto-cheatsheet.md#learning-tasks)。
+  - 难度筛选与下述模板写入选项分开：字段名“任务难度”，选项为全部难度（UI `""`，请求省略）、基础 `easy`、进阶 `medium`、挑战 `hard`，复用共享三档目录；不提供未设置/其他筛选。`parseDifficultyFilter` 只接受准确单个标准值，非法 URL 值（含数组）按全部显示且不传后端，后续筛选及分页导航移除非法值；不据此清洗存储或展示值。模板 SSR、筛选控件及外层实际分页链接使用规范化难度，筛选变更回第1页，保留其他条件和 fromClassroomId，编辑 returnTo 保留当前列表条件；清空筛选包含难度并沿用既有 scope 重置规则。
 - 任务模板创建：`CreateLearningTaskForm` -> `/api/proxy/learning-tasks/tasks` -> `POST /api/learning-tasks/tasks`。
   - 注意：初始 `status` 遵循后端创建 DTO；创建与后续生命周期请求不混用。
 - 任务模板编辑/生命周期：`EditLearningTaskForm` -> `/api/proxy/learning-tasks/tasks/:id*`。
   - 对应后端：`GET/PATCH /api/learning-tasks/tasks/:id`、`POST /publish`、`POST /archive`。
   - 注意：内容更新与生命周期采用各自后端接口，普通保存不构造状态流转；权限与生命周期由后端最终校验。
   - 教师模板类型及 create/detail/update/list 适配保留 `aiContextRefs`；字段缺省表示无引用，非法引用响应使加载/保存确认失败，不回退为空配置。页面创建沿上述 BFF 保存并省略引用，正式 API 及共享请求类型仍支持该字段；编辑仅在引用语义改变时发送完整数组，未变更省略，显式 `[]` 清空；成功响应更新比较基准。完整字段、验证与快照合同见 [Backend DTO ZIP 资料引用配置](./handoff-backend-dto-cheatsheet.md#zip-资料引用配置)。课堂公开接口及学生消费不补取教师模板资料。
-  - `difficulty` 的首期 UI 选项由 `lib/learning-tasks/difficulty.ts` 维护：未设置 `""`、基础 `easy`、进阶 `medium`、挑战 `hard`；这是前端约定，后端仍接受既有可选字符串，见 [Task template DTO](./handoff-backend-dto-cheatsheet.md#task-template-dto--response-family)。创建未选时省略字段，选定时发送英文值；编辑未变省略，明确清空发送 `difficulty:""`，不发送 null。未知非空原值以“现有值：…”选项保留，只有主动改选或清空才写入，不做别名、大小写或自动推断。成功创建重置难度，编辑成功按正式响应同步，失败保留草稿。
+  - `difficulty` 的首期写入 UI 选项由 `lib/learning-tasks/difficulty.ts` 维护：未设置 `""`、基础 `easy`、进阶 `medium`、挑战 `hard`；这是前端约定，后端创建/编辑仍接受既有可选字符串，见 [Task template DTO](./handoff-backend-dto-cheatsheet.md#task-template-dto--response-family)。创建未选时省略字段，选定时发送英文值；编辑未变省略，明确清空发送 `difficulty:""`，不发送 null。未知非空原值以“现有值：…”选项保留，只有主动改选或清空才写入，不做别名、大小写或自动推断。成功创建重置难度，编辑成功按正式响应同步，失败保留草稿。
   - 模板顶层 `difficulty` 原值进入模板 view model；表单只读、模板列表及发布选择复用同一显示函数：标准值为基础/进阶/挑战，缺失、空白或非法类型为未设置，未知非空字符串原样作安全文本显示并允许换行。难度只用于教学定位，不影响评阅标准或统计校正。
 - 班级发布候选：`PublishClassroomTaskForm` -> `/api/proxy/classrooms/:id/publishable-task-templates`。
   - 对应后端：`GET /api/classrooms/:id/publishable-task-templates`。
   - 注意：模板可见性、发布资格及本班已发布排除由后端候选接口决定，前端不自行伪造候选全集。当前候选 DTO 不提供 rubric，缺少该字段只能提示到模板详情核对，不能判断模板未填写评阅标准。
+  - 候选难度沿用上述筛选选项与解析口径，首次 SSR 查询和加载更多都传同一规范化条件；URL/权威 props 恢复控件与已应用条件。共用入口的筛选实际变化或清空即清除已选 taskId、使旧加载更多请求失效，保留截止/迟交草稿；更新期间禁止选择、加载更多及发布，submit handler 同时校验等待状态和当前候选成员。权威新结果替换候选池并同步页码/总数/limit，旧请求的成功、错误及 finally 均不得覆盖新状态，不自动选首条或重放发布；失败沿用原错误呈现并允许显式重试。
 - 班级任务实例：`/teacher/classrooms/:id/tasks/page.tsx` + 发布/生命周期/编辑组件 -> `/api/proxy/classrooms/:id/tasks*`。
   - 对应后端：`GET/POST/PATCH /api/classrooms/:id/tasks*` 与 `/status`。
   - 注意：发布表单只发送既有截止/迟交设置，不发送 AI 策略字段。列表/详情消费快照可用性及投影教学内容，不另取当前模板覆盖，不适配或展示旧策略。实例配置与状态动作分开发送；学生或教师可在提交详情主动申请 AI 反馈。
   - 发布请求仍仅使用 `taskId/dueAt/settings`，不传 difficulty；教师课堂详情的难度由 `toClassroomTask` 读取正式 `task.difficulty` 原值，后端负责发布快照。模板修改不覆盖已发布快照，前端不另查实时模板或回填缺失难度。
+  - 班级页面的 difficulty 只作用于待发布候选，已发布课堂任务请求不带该参数；已发布任务的分页链接保留规范化候选难度，避免翻页丢失候选条件。
 - 课堂任务工作区名称：现有 Server `tasks/:classroomTaskId/layout.tsx` 经当前 request origin、Cookie/BFF 与 `no-store` 并行读取 `GET classrooms/:classroomId` 和 `GET classrooms/:classroomId/tasks/:classroomTaskId`，分别由 `toClassroomDetailResponse`、`toClassroomTask` 提取展示名称；任务标题沿用课堂实例正式投影，不另查当前模板。两项辅助读取各自有限超时、独立降级为明确占位，不替换 children 或子页主体错误处理。
 - 课堂任务提交列表：`submissions/page.tsx` -> `/api/proxy/classrooms/:cid/tasks/:ctid/submissions`。
   - 对应后端：`GET /api/classrooms/:classroomId/tasks/:classroomTaskId/submissions`。

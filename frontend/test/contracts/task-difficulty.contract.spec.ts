@@ -5,7 +5,73 @@ import {
   toDifficultyInputValue,
   createDifficultyPayload,
   updateDifficultyPayload,
+  parseDifficultyFilter,
 } from "../../lib/learning-tasks/difficulty";
+import { buildQueryString } from "../../lib/ui/format";
+
+test("difficulty filters accept only exact individual values and omit all difficulties", () => {
+  expect(parseDifficultyFilter("easy")).toBe("easy");
+  expect(parseDifficultyFilter("medium")).toBe("medium");
+  expect(parseDifficultyFilter("hard")).toBe("hard");
+  for (const value of [
+    undefined,
+    null,
+    "",
+    " \t\n ",
+    "综合",
+    "Easy",
+    "EASY",
+    " easy ",
+    "easy,medium",
+    ["easy"],
+    ["easy", "hard"],
+    [],
+    0,
+    true,
+    {},
+  ]) {
+    expect(parseDifficultyFilter(value)).toBeUndefined();
+    expect(buildQueryString({ difficulty: parseDifficultyFilter(value) })).toBe(
+      "",
+    );
+  }
+});
+
+test("filter queries use the existing encoder and never send an empty difficulty", () => {
+  expect(buildQueryString({ difficulty: parseDifficultyFilter("easy") })).toBe(
+    "difficulty=easy",
+  );
+  expect(
+    buildQueryString({ difficulty: parseDifficultyFilter("medium") }),
+  ).toBe("difficulty=medium");
+  expect(buildQueryString({ difficulty: parseDifficultyFilter("hard") })).toBe(
+    "difficulty=hard",
+  );
+  expect(
+    buildQueryString({
+      difficulty: parseDifficultyFilter("medium"),
+      knowledgeModule: "综合 & 设计",
+      page: 2,
+    }),
+  ).toBe(
+    "difficulty=medium&knowledgeModule=%E7%BB%BC%E5%90%88+%26+%E8%AE%BE%E8%AE%A1&page=2",
+  );
+  expect(
+    buildQueryString({ page: 1, difficulty: parseDifficultyFilter("") }),
+  ).toBe("page=1");
+});
+
+test("filter parsing does not normalize stored difficulty or mutate URL arrays", () => {
+  const values = Object.freeze(["easy", "hard"]);
+  expect(parseDifficultyFilter(values)).toBeUndefined();
+  expect(values).toEqual(["easy", "hard"]);
+  for (const value of ["综合", "Easy", " easy "]) {
+    expect(parseDifficultyFilter(value)).toBeUndefined();
+    expect(getDifficultyLabel(value)).toBe(value);
+    expect(toDifficultyInputValue(value)).toBe(value);
+    expect(updateDifficultyPayload(value, value)).toEqual({});
+  }
+});
 
 test("difficulty options keep the teaching labels, storage values and order", () => {
   expect(TASK_DIFFICULTY_OPTIONS).toEqual([

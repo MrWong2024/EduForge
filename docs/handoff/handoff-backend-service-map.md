@@ -173,7 +173,7 @@ Global SoT 只保留理解跨 Service workflow 必需的稳定不变量，不追
   - 发布前检查班级 owner/运行态与模板发布态/可见性，从同一次 Task 读取形成候选 taskSnapshot（深复制引用），通过 AiContextReaderService 验证候选引用后保存同一份快照；`unique(classroomId,taskId)` 防重复发布，重复键转为受控拒绝。旧实例缺省状态按 ACTIVE 兼容。
   - 实例配置更新与生命周期分开处理；撤回前检查无提交，RECALLED 保持封闭。恢复提交仅改状态，不隐式改截止与提交设置；不支持撤回后重发同模板。
   - 发布返回、列表/详情、my-task-detail、教师/学生看板、提交详情标题及 AI 分析标题统一优先读实例快照；旧实例仅当前模板只读 fallback，不回填；课堂成员响应由 publicTaskContent 明确投影，避免展开内部引用。模板库/候选仍读当前 Task，资产状态保持当前值。
-  - 发布候选查询同时应用当前教师可见性、模板发布状态及已发布 taskId 排除；未显式指定课程分类时按班级课程分类优先排序。
+  - 发布候选查询同时应用当前教师可见性、模板发布状态及已发布 taskId 排除；难度按保存值精确匹配，与既有课程分类、知识模块和 onlyMine 条件取交集，同一最终 filter 用于分页前查询与 countDocuments。未显式指定课程分类时仍按班级课程分类优先排序，不对已发布课堂任务列表增加难度过滤；参数校验见 [DTO Cheatsheet](./handoff-backend-dto-cheatsheet.md#发布候选模板)。
   - 提交入口检查学生身份、Enrollment ACTIVE、课堂归属及班级/实例 ACTIVE，再通过 `createSubmissionForClassroomTask` 绑定实例主键；真正写 Submission 前，由 [Card 08](#service-card-08) 再次 enforce 运行态及截止/迟交边界。
 - Isolation: 查询与统计按 `classroomTaskId`，成员全集来自 Enrollment ACTIVE；不得按底层 taskId 跨班兜底。模板状态不决定既有实例学生运行态。
 - Side Effects: 写 ClassroomTask；学生提交委托 LearningTasksService 写 Submission，不创建 AI Job 或自动固定评阅版本。
@@ -191,6 +191,7 @@ Global SoT 只保留理解跨 Service workflow 必需的稳定不变量，不追
   - 保存模板前由 AiContextReaderService 验证最终生效引用，再应用全部编辑；创建 PUBLISHED 和实际 publish 同样验证，幂等 publish 不重建内容。
   - 模板承担资产管理，ClassroomTask 承担教学运行态；内容编辑不得隐式改变状态，同状态输入忽略后继续编辑，归档内容不可改。重复发布保持幂等；归档不检查/级联 ClassroomTask 引用，兼容 restore 入口不恢复归档模板。
   - 模板读范围由当前教师与共享可见性构造；legacy 缺省 visibility 兼容 SHARED，兼容 createdBy query 不突破当前教师范围；共享不转移作者写权限。分类为治理坐标，不作为 Course 外键或发布一致性约束；“未分类”查询兼容字段缺省任务。
+  - listTasks 的难度条件按保存值精确匹配，并与既有 scope、status、knowledgeModule、courseLabel 及作者范围取交集；同一完整 filter 在 skip/limit 前应用于 items 与 countDocuments，保留原排序。省略难度时不排除未知、缺失或空串值；查询值域见 [DTO Cheatsheet](./handoff-backend-dto-cheatsheet.md#task-template-dto--response-family)。
   - Submission 的 attemptNo 采用“查询最新编号 + 有界重试”，最多 3 次分配尝试，冲突不绕过唯一约束。旧通用写入口拒绝；新实例提交要求实际快照并逐次保存源码与说明，写 Submission 前重验班级/实例 ACTIVE，并校验截止与迟交规则，持久化提交时间及迟交结果，不以模板当前状态阻断既有实例。
   - 首提与后续提交均只保存作品，不创建 AI Job、不写 reviewStartedAt；无 Job 时返回 NOT_REQUESTED。手工请求复用 `ensureJobForSubmission`，不重复创建已有 Job；ensure 前统一校验提交/实例关联与快照，学生还重验本人、Enrollment ACTIVE 和班级/实例运行态，教师保留班级 ownership 评阅边界。缺失或残留的旧策略字段均不参与判断。
   - 教师反馈修改复用 submission 管理上下文，校验反馈属于该提交、来源为 TEACHER 且已有作者与当前教师一致。旧教师反馈无 createdBy 时在授权更新中补写，不批量迁移历史数据。

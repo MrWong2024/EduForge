@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useLayoutEffect, useMemo, useRef, useState, useTransition } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { ErrorState } from "@/components/blocks/ErrorState";
 import { BrowserFetchJsonError, fetchJson } from "@/lib/api/browser-client";
@@ -19,7 +19,11 @@ import {
 } from "@/lib/learning-tasks/course-labels";
 import { paths } from "@/lib/routes/paths";
 import { getCandidateRubricSummary } from "@/lib/learning-tasks/rubric";
-import { getDifficultyLabel } from "@/lib/learning-tasks/difficulty";
+import {
+  TASK_DIFFICULTY_OPTIONS,
+  getDifficultyLabel,
+  parseDifficultyFilter,
+} from "@/lib/learning-tasks/difficulty";
 import { buildQueryString, getPublisherLabel } from "@/lib/ui/format";
 import { getTaskTemplateStatusLabel } from "@/lib/ui/status";
 
@@ -33,6 +37,7 @@ type PublishClassroomTaskFormProps = {
   initialCourseLabelFilter?: string;
   initialOnlyMineFilter: boolean;
   initialKnowledgeModuleFilter?: string;
+  initialDifficultyFilter?: string;
 };
 
 type PublishErrorState = {
@@ -113,10 +118,13 @@ export function PublishClassroomTaskForm({
   initialCourseLabelFilter,
   initialOnlyMineFilter,
   initialKnowledgeModuleFilter,
+  initialDifficultyFilter,
 }: PublishClassroomTaskFormProps) {
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
+  const [isFilterPending, startFilterTransition] = useTransition();
+  const initialDifficulty = parseDifficultyFilter(initialDifficultyFilter) ?? "";
 
   const [taskId, setTaskId] = useState<string>("");
   const [courseLabelFilter, setCourseLabelFilter] = useState<string>(
@@ -126,6 +134,7 @@ export function PublishClassroomTaskForm({
   const [knowledgeModuleFilter, setKnowledgeModuleFilter] = useState<string>(
     initialKnowledgeModuleFilter ?? "",
   );
+  const [difficultyFilter, setDifficultyFilter] = useState(initialDifficulty);
   const [dueAt, setDueAt] = useState<string>("");
   const [isDueAtPickerActive, setIsDueAtPickerActive] = useState(false);
   const [allowLate, setAllowLate] = useState<boolean>(true);
@@ -158,6 +167,7 @@ export function PublishClassroomTaskForm({
     initialCourseLabelFilter,
     initialOnlyMineFilter,
     initialKnowledgeModuleFilter,
+    initialDifficulty,
   });
   const [previousTaskProps, setPreviousTaskProps] = useState({
     availableTasks,
@@ -166,28 +176,25 @@ export function PublishClassroomTaskForm({
     initialAvailableTasksLimit,
   });
 
-  if (
+  const filterPropsChanged =
     previousFilterProps.initialCourseLabelFilter !== initialCourseLabelFilter ||
     previousFilterProps.initialOnlyMineFilter !== initialOnlyMineFilter ||
-    previousFilterProps.initialKnowledgeModuleFilter !== initialKnowledgeModuleFilter
-  ) {
+    previousFilterProps.initialKnowledgeModuleFilter !==
+      initialKnowledgeModuleFilter ||
+    previousFilterProps.initialDifficulty !== initialDifficulty;
+
+  if (filterPropsChanged) {
     setPreviousFilterProps({
       initialCourseLabelFilter,
       initialOnlyMineFilter,
       initialKnowledgeModuleFilter,
+      initialDifficulty,
     });
-    if (previousFilterProps.initialCourseLabelFilter !== initialCourseLabelFilter) {
-      setCourseLabelFilter(initialCourseLabelFilter ?? "");
-    }
-    if (previousFilterProps.initialOnlyMineFilter !== initialOnlyMineFilter) {
-      setOnlyMine(initialOnlyMineFilter);
-    }
-    if (previousFilterProps.initialKnowledgeModuleFilter !== initialKnowledgeModuleFilter) {
-      setKnowledgeModuleFilter(initialKnowledgeModuleFilter ?? "");
-    }
+    setTaskId("");
   }
 
   if (
+    filterPropsChanged ||
     previousTaskProps.availableTasks !== availableTasks ||
     !Object.is(previousTaskProps.initialAvailableTasksTotal, initialAvailableTasksTotal) ||
     !Object.is(previousTaskProps.initialAvailableTasksPage, initialAvailableTasksPage) ||
@@ -199,6 +206,10 @@ export function PublishClassroomTaskForm({
       initialAvailableTasksPage,
       initialAvailableTasksLimit,
     });
+    setCourseLabelFilter(initialCourseLabelFilter ?? "");
+    setOnlyMine(initialOnlyMineFilter);
+    setKnowledgeModuleFilter(initialKnowledgeModuleFilter ?? "");
+    setDifficultyFilter(initialDifficulty);
     setLoadedTasks(availableTasks);
     setLoadedTotal(
       typeof initialAvailableTasksTotal === "number"
@@ -228,6 +239,10 @@ export function PublishClassroomTaskForm({
     initialAvailableTasksTotal,
     initialAvailableTasksPage,
     initialAvailableTasksLimit,
+    initialCourseLabelFilter,
+    initialOnlyMineFilter,
+    initialKnowledgeModuleFilter,
+    initialDifficulty,
   ]);
 
   const selectedTask = useMemo(
@@ -285,18 +300,49 @@ export function PublishClassroomTaskForm({
     setTaskId("");
   }
 
+  const isRefreshingCandidates =
+    isFilterPending ||
+    courseLabelFilter !== (initialCourseLabelFilter ?? "") ||
+    onlyMine !== initialOnlyMineFilter ||
+    knowledgeModuleFilter !== (initialKnowledgeModuleFilter ?? "") ||
+    difficultyFilter !== initialDifficulty;
+
+  const invalidateCandidateSelection = () => {
+    setTaskId("");
+    loadMoreEpochRef.current += 1;
+    setIsLoadingMore(false);
+    setLoadMoreError(null);
+  };
+
   const replaceSearchQuery = (updater: (params: URLSearchParams) => void) => {
     const params = new URLSearchParams(searchParams.toString());
     params.delete("stage");
     updater(params);
+    const difficultyValues = params.getAll("difficulty");
+    const difficulty = parseDifficultyFilter(
+      difficultyValues.length === 1 ? difficultyValues[0] : undefined,
+    );
+    if (difficulty) {
+      params.set("difficulty", difficulty);
+    } else {
+      params.delete("difficulty");
+    }
     params.delete("page");
     const nextQuery = params.toString();
-    router.replace(nextQuery ? `${pathname}?${nextQuery}` : pathname, {
-      scroll: false,
+    startFilterTransition(() => {
+      router.replace(nextQuery ? `${pathname}?${nextQuery}` : pathname, {
+        scroll: false,
+      });
     });
   };
 
   const setCourseLabelFilterAndSync = (nextValue: string) => {
+    if (isFilterPending || isSubmitting) {
+      return;
+    }
+    if (nextValue !== courseLabelFilter) {
+      invalidateCandidateSelection();
+    }
     setCourseLabelFilter(nextValue);
     replaceSearchQuery((params) => {
       if (nextValue) {
@@ -308,6 +354,12 @@ export function PublishClassroomTaskForm({
   };
 
   const setOnlyMineAndSync = (nextValue: boolean) => {
+    if (isFilterPending || isSubmitting) {
+      return;
+    }
+    if (nextValue !== onlyMine) {
+      invalidateCandidateSelection();
+    }
     setOnlyMine(nextValue);
     replaceSearchQuery((params) => {
       if (nextValue) {
@@ -319,6 +371,12 @@ export function PublishClassroomTaskForm({
   };
 
   const setKnowledgeModuleFilterAndSync = (nextValue: string) => {
+    if (isFilterPending || isSubmitting) {
+      return;
+    }
+    if (nextValue !== knowledgeModuleFilter) {
+      invalidateCandidateSelection();
+    }
     setKnowledgeModuleFilter(nextValue);
     replaceSearchQuery((params) => {
       if (nextValue) {
@@ -329,27 +387,57 @@ export function PublishClassroomTaskForm({
     });
   };
 
+  const setDifficultyFilterAndSync = (value: string) => {
+    if (isFilterPending || isSubmitting) {
+      return;
+    }
+    const nextValue = parseDifficultyFilter(value) ?? "";
+    if (nextValue !== difficultyFilter) {
+      invalidateCandidateSelection();
+    }
+    setDifficultyFilter(nextValue);
+    replaceSearchQuery((params) => {
+      if (nextValue) {
+        params.set("difficulty", nextValue);
+      } else {
+        params.delete("difficulty");
+      }
+    });
+  };
+
   const resetFilters = () => {
+    if (isFilterPending || isSubmitting) {
+      return;
+    }
+    invalidateCandidateSelection();
     setCourseLabelFilter("");
     setOnlyMine(false);
     setKnowledgeModuleFilter("");
+    setDifficultyFilter("");
     replaceSearchQuery((params) => {
       params.delete("courseLabel");
       params.delete("onlyMine");
       params.delete("knowledgeModule");
+      params.delete("difficulty");
     });
   };
 
   const hasActiveQueryFilters =
     Boolean(courseLabelFilter) ||
     onlyMine ||
-    Boolean(knowledgeModuleFilter);
+    Boolean(knowledgeModuleFilter) ||
+    Boolean(difficultyFilter);
   const hasMoreTasks = loadedTasks.length < loadedTotal;
   const dueAtInputType =
     dueAt || isDueAtPickerActive ? "datetime-local" : "text";
 
   const handleLoadMore = async () => {
-    if (isLoadingMore || !hasMoreTasks) {
+    if (
+      isSubmitting ||
+      isRefreshingCandidates ||
+      isLoadingMore ||
+      !hasMoreTasks
+    ) {
       return;
     }
 
@@ -360,6 +448,7 @@ export function PublishClassroomTaskForm({
       courseLabel: courseLabelFilter || undefined,
       onlyMine: onlyMine ? "true" : undefined,
       knowledgeModule: knowledgeModuleFilter || undefined,
+      difficulty: parseDifficultyFilter(difficultyFilter),
     });
 
     setIsLoadingMore(true);
@@ -377,6 +466,9 @@ export function PublishClassroomTaskForm({
       }
 
       setLoadedTasks((previous) => {
+        if (requestEpoch !== loadMoreEpochRef.current) {
+          return previous;
+        }
         const seenIds = new Set(
           previous
             .map((task) => (typeof task.id === "string" ? task.id.trim() : ""))
@@ -433,8 +525,20 @@ export function PublishClassroomTaskForm({
     }
   };
 
+  const selectTask = (nextTaskId: string) => {
+    if (isSubmitting || isRefreshingCandidates) {
+      return;
+    }
+    setTaskId(
+      loadedTasks.some((task) => task.id === nextTaskId) ? nextTaskId : "",
+    );
+  };
+
   const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+    if (isSubmitting || isRefreshingCandidates) {
+      return;
+    }
 
     setIsSubmitting(true);
     setErrorState(null);
@@ -442,7 +546,11 @@ export function PublishClassroomTaskForm({
 
     try {
       const publishTaskId = taskId.trim();
-      if (!publishTaskId) {
+      if (
+        !publishTaskId ||
+        !loadedTasks.some((task) => task.id === publishTaskId)
+      ) {
+        setTaskId("");
         setErrorState({
           summary: "请先选择一个已发布任务模板。",
         });
@@ -528,7 +636,7 @@ export function PublishClassroomTaskForm({
           先去创建任务模板
         </Link>
       </p>
-      {loadedTasks.length === 0 ? (
+      {!isRefreshingCandidates && loadedTasks.length === 0 ? (
         <div className="mt-3 rounded-md border border-zinc-200 bg-zinc-50 px-3 py-2 text-sm text-zinc-700">
           {hasActiveQueryFilters ? (
             <>
@@ -536,6 +644,7 @@ export function PublishClassroomTaskForm({
               <button
                 type="button"
                 onClick={resetFilters}
+                disabled={isFilterPending || isSubmitting}
                 className="mx-1 text-blue-700 underline"
               >
                 重置筛选
@@ -570,13 +679,14 @@ export function PublishClassroomTaskForm({
             模板筛选（实时查询）
           </p>
           <p className="mt-1 text-xs text-zinc-600">
-            调整课程分类、仅看我的模板或知识模块后，将重新检索候选模板。
+            调整课程分类、任务难度、仅看我的模板或知识模块后，将重新检索候选模板。
           </p>
-          <div className="mt-3 grid gap-3 md:grid-cols-4">
+          <div className="mt-3 grid gap-3 md:grid-cols-2 lg:grid-cols-5">
             <label className="block text-sm">
               <span className="mb-1 block text-zinc-700">课程分类</span>
               <select
                 value={courseLabelFilter}
+                disabled={isFilterPending || isSubmitting}
                 onChange={(event) =>
                   setCourseLabelFilterAndSync(event.target.value)
                 }
@@ -595,6 +705,7 @@ export function PublishClassroomTaskForm({
               <span className="mb-1 block text-zinc-700">知识模块</span>
               <select
                 value={knowledgeModuleFilter}
+                disabled={isFilterPending || isSubmitting}
                 onChange={(event) =>
                   setKnowledgeModuleFilterAndSync(event.target.value)
                 }
@@ -610,11 +721,31 @@ export function PublishClassroomTaskForm({
             </label>
 
             <label className="block text-sm">
+              <span className="mb-1 block text-zinc-700">任务难度</span>
+              <select
+                value={difficultyFilter}
+                disabled={isFilterPending || isSubmitting}
+                onChange={(event) =>
+                  setDifficultyFilterAndSync(event.target.value)
+                }
+                className="w-full rounded-md border border-zinc-300 px-3 py-2"
+              >
+                <option value="">全部难度</option>
+                {TASK_DIFFICULTY_OPTIONS.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            <label className="block text-sm">
               <span className="mb-1 block text-zinc-700">模板范围</span>
               <span className="flex h-[42px] items-center gap-2 rounded-md border border-zinc-300 px-3 py-2 text-zinc-700">
                 <input
                   type="checkbox"
                   checked={onlyMine}
+                  disabled={isFilterPending || isSubmitting}
                   onChange={(event) => setOnlyMineAndSync(event.target.checked)}
                 />
                 仅看我的模板
@@ -625,6 +756,7 @@ export function PublishClassroomTaskForm({
               <button
                 type="button"
                 onClick={resetFilters}
+                disabled={isFilterPending || isSubmitting}
                 className="rounded-md border border-zinc-300 px-3 py-2 text-sm text-zinc-700 hover:bg-zinc-100"
               >
                 重置筛选
@@ -632,7 +764,9 @@ export function PublishClassroomTaskForm({
             </div>
           </div>
           <p className="mt-2 text-xs text-zinc-500">
-            当前已显示 {loadedTasks.length} / {loadedTotal} 个候选模板
+            {isRefreshingCandidates
+              ? "正在更新候选模板，请稍候。"
+              : `当前已显示 ${loadedTasks.length} / ${loadedTotal} 个候选模板`}
           </p>
         </section>
 
@@ -640,7 +774,8 @@ export function PublishClassroomTaskForm({
           <span className="mb-1 block text-zinc-700">选择任务模板</span>
           <select
             value={taskId}
-            onChange={(event) => setTaskId(event.target.value)}
+            disabled={isSubmitting || isRefreshingCandidates}
+            onChange={(event) => selectTask(event.target.value)}
             className="w-full rounded-md border border-zinc-300 px-3 py-2"
           >
             <option value="">
@@ -696,8 +831,10 @@ export function PublishClassroomTaskForm({
                       </div>
                       <button
                         type="button"
-                        disabled={!task.id}
-                        onClick={() => setTaskId(task.id ?? "")}
+                        disabled={
+                          !task.id || isSubmitting || isRefreshingCandidates
+                        }
+                        onClick={() => selectTask(task.id ?? "")}
                         className="rounded-md border border-zinc-300 px-2 py-1 text-xs text-zinc-700 hover:bg-zinc-100 disabled:cursor-not-allowed disabled:opacity-60"
                       >
                         {isActive ? "已选中" : "选择此模板"}
@@ -728,7 +865,9 @@ export function PublishClassroomTaskForm({
                 <button
                   type="button"
                   onClick={handleLoadMore}
-                  disabled={isLoadingMore}
+                  disabled={
+                    isSubmitting || isRefreshingCandidates || isLoadingMore
+                  }
                   className="rounded-md border border-zinc-300 px-3 py-1.5 text-xs text-zinc-700 hover:bg-zinc-100 disabled:cursor-not-allowed disabled:opacity-60"
                 >
                   {isLoadingMore ? "加载中..." : "加载更多"}
@@ -813,7 +952,7 @@ export function PublishClassroomTaskForm({
 
         <button
           type="submit"
-          disabled={isSubmitting || loadedTasks.length === 0}
+          disabled={isSubmitting || isRefreshingCandidates || !selectedTask}
           className="rounded-md bg-zinc-900 px-4 py-2 text-sm font-medium text-white disabled:cursor-not-allowed disabled:bg-zinc-400"
         >
           {isSubmitting ? "发布中..." : "发布任务"}
