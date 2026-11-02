@@ -195,15 +195,15 @@ export function TaskExclusionPanel({
       ) : null}
       {hiddenSelectedTaskIds.length > 0 ? (
         <p className="rounded-md border border-zinc-200 bg-zinc-50 px-3 py-2 text-xs text-zinc-700">
-          有 {hiddenSelectedTaskIds.length} 个已选任务未在当前任务列表中显示；它们仍会保留在本次
-          {isProcessAssessment ? "页面与 CSV" : "分析"}查询参数中。
+          有 {hiddenSelectedTaskIds.length} 个已选任务未在当前任务列表中显示；本次
+          {isProcessAssessment ? "页面与 CSV" : "分析"}仍会排除这些任务。
         </p>
       ) : null}
 
       {tasks.length === 0 ? (
         <p className="rounded-md border border-zinc-200 bg-zinc-50 px-3 py-2 text-zinc-500">
           {taskOptionsLoadError
-            ? "当前无法展示可选任务；页面仍会按 URL 中的排除参数计算。"
+            ? "当前无法展示可选任务；页面仍会按已选的排除范围计算。"
             : "暂无可排除任务。"}
         </p>
       ) : (

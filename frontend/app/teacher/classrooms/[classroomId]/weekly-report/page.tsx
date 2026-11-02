@@ -7,7 +7,8 @@ import { fetchJson, FetchJsonError } from "@/lib/api/client";
 import { buildErrorDescription, extractRawDetail } from "@/lib/api/error-presenter";
 import { toClassroomSummary, toWeeklyReportResponse } from "@/lib/api/types-teacher";
 import { paths } from "@/lib/routes/paths";
-import { getCommonErrorSummary } from "@/lib/ui/status";
+import { getAiFailureReasonLabel, getCommonErrorSummary } from "@/lib/ui/status";
+import { getFeedbackTagLabel } from "@/lib/ui/feedback-tags";
 import {
   buildQueryString,
   getSingleSearchParam,
@@ -127,25 +128,13 @@ const toTopListText = (
   return records
     .slice(0, 5)
     .map((record, index) => {
-      const key = toDisplayText(record[keyField], `${fallbackLabel}${index + 1}`);
+      const key = keyField === "tag"
+        ? getFeedbackTagLabel(record[keyField])
+        : getAiFailureReasonLabel(record[keyField]);
       const count = toDisplayText(record.count, "0");
-      return `${key}（${count}）`;
+      return `${key === "—" ? `${fallbackLabel}${index + 1}` : key}（${count}）`;
     })
     .join("、");
-};
-
-const toRiskSampleText = (value: unknown): string => {
-  if (!Array.isArray(value) || value.length === 0) {
-    return "—";
-  }
-  const ids = value
-    .map((item) => toDisplayText(item, "").trim())
-    .filter((item) => item.length > 0);
-  if (ids.length === 0) {
-    return "—";
-  }
-  const preview = ids.slice(0, 5).join("、");
-  return ids.length > 5 ? `${preview} 等 ${ids.length} 人` : preview;
 };
 
 const toSummaryCards = (sources: UnknownRecord[]): WeeklyMetricCard[] => {
@@ -316,15 +305,11 @@ const toOverviewGroups = (
 
   const riskGroupRows = [
     {
-      label: "风险学生样本",
-      value: toRiskSampleText(pickValue(sources, ["atRisk.sampleStudentIds", "sampleStudentIds"])),
-    },
-    {
       label: "高频标签",
       value: toTopListText(topTags, "tag", "标签"),
     },
     {
-      label: "高频错误码",
+      label: "高频失败原因",
       value: toTopListText(aiErrors, "code", "错误"),
     },
   ].filter((row) => row.value !== "—");
@@ -526,12 +511,6 @@ export default async function WeeklyReportPage({ params, searchParams }: WeeklyR
         </>
       )}
 
-      <details className="rounded-lg border border-zinc-200 bg-zinc-50 p-4">
-        <summary className="cursor-pointer text-sm font-medium text-zinc-800">查看原始周报 JSON</summary>
-        <pre className="mt-3 overflow-auto text-xs text-zinc-700">
-          {JSON.stringify(viewModel.data.raw, null, 2)}
-        </pre>
-      </details>
     </section>
   );
 }

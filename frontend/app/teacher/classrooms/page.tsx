@@ -15,7 +15,7 @@ import {
   type ClassroomStatus,
 } from "@/lib/api/types-teacher";
 import { paths } from "@/lib/routes/paths";
-import { getCommonErrorSummary } from "@/lib/ui/status";
+import { getClassroomStatusLabel, getCommonErrorSummary } from "@/lib/ui/status";
 import { toDisplayText } from "@/lib/ui/format";
 
 export const metadata: Metadata = {
@@ -310,7 +310,7 @@ export default async function TeacherClassroomsPage({ searchParams }: TeacherCla
                           <p className="text-xs text-zinc-500">{statusMeta.hint}</p>
                         </div>
                       ) : (
-                        <span className="text-zinc-500">{toDisplayText(item.status)}</span>
+                        <span className="text-zinc-500">{getClassroomStatusLabel(item.status)}</span>
                       )}
                     </td>
                     <td className="px-4 py-3">{courseName ?? "未知课程"}</td>

@@ -18,7 +18,8 @@ import {
   toProcessAssessmentResponse,
 } from "@/lib/api/types-teacher";
 import { paths } from "@/lib/routes/paths";
-import { getCommonErrorSummary } from "@/lib/ui/status";
+import { getClassroomTaskStatusLabel, getCommonErrorSummary } from "@/lib/ui/status";
+import { getFeedbackTagLabel } from "@/lib/ui/feedback-tags";
 import {
   buildQueryString,
   getSingleSearchParam,
@@ -158,9 +159,9 @@ const toTopTagsSummary = (value: unknown): string => {
         return "";
       }
       if (count === null) {
-        return tag;
+        return getFeedbackTagLabel(tag);
       }
-      return `${tag} (${count})`;
+      return `${getFeedbackTagLabel(tag)} (${count})`;
     })
     .filter((item) => item.length > 0);
 
@@ -361,8 +362,8 @@ function ProcessAssessmentScoringGuide() {
             </li>
             <li>
               代码质量代理，占 20
-              分：根据 AI 反馈的问题严重程度进行评估。INFO
-              只是提示，不扣分；WARN 表示轻度问题，会少量扣分；ERROR
+              分：根据 AI 反馈的问题严重程度进行评估。提示
+              不扣分；警告表示轻度问题，会少量扣分；错误
               表示较明显的问题，扣分更重。
             </li>
           </ul>
@@ -379,7 +380,7 @@ function ProcessAssessmentScoringGuide() {
           <ul className="mt-2 list-disc space-y-1 pl-5">
             <li>
               如果只统计 1 个有效任务，学生提交 1 次、AI
-              请求成功，并且没有 WARN 或 ERROR，分数约为 98
+              请求成功，并且没有警告或错误，分数约为 98
               分。
             </li>
             <li>
@@ -509,7 +510,7 @@ const toTaskOptionMeta = (taskOption: ClassroomTaskOption): string => {
   const items = [
     `发布时间：${toDisplayDate(taskOption.publishedAt)}`,
     `截止：${toDisplayDate(taskOption.dueAt)}`,
-    `状态：${toDisplayText(taskOption.status)}`,
+    `状态：${getClassroomTaskStatusLabel(taskOption.status)}`,
   ];
   return items.join(" · ");
 };
@@ -888,14 +889,6 @@ export default async function ProcessAssessmentPage({
         ) : null}
       </section>
 
-      <details className="rounded-lg border border-zinc-200 bg-zinc-50 p-4">
-        <summary className="cursor-pointer text-sm font-medium text-zinc-800">
-          查看原始过程性评价 JSON
-        </summary>
-        <pre className="mt-3 overflow-auto text-xs text-zinc-700">
-          {JSON.stringify(viewModel.data.raw, null, 2)}
-        </pre>
-      </details>
     </section>
   );
 }

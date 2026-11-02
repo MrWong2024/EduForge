@@ -117,7 +117,7 @@
 |---|---|---|
 | Server API Client | `lib/api/client.ts` | Server/RSC 请求入口；调用合同见 Frontend API Map，不在页面拼后端绝对 URL |
 | Browser API Client | `lib/api/browser-client.ts` | Client 请求入口与统一错误类型；业务组件复用，不复制 fetch 基础设施 |
-| Error Presenter | `lib/api/error-presenter.ts` | 错误 detail 提取及展示整理，不改变后端语义 |
+| Error Presenter | `lib/api/error-presenter.ts` | 原始错误提取保留给内部原因识别；最终说明仅展示调用方已生成的业务 summary，不附原始 detail/code，不改变后端语义 |
 | Teacher Types Adapter | `lib/api/types-teacher.ts` | 教师 payload 解析与容错映射的修改落点；字段适配合同归 Frontend API Map，不在 JSX 深层散写访问 |
 | Classroom Task Options | `lib/api/classroom-task-options.ts` | 报表排除选项的共享只读加载模块；分页、去重和 payload 兼容细节见 Frontend API Map，不在各页复制或加入写操作 |
 | Student Types Adapter | `lib/api/types-student.ts` | 学生 payload 解析与容错映射的修改落点；不在 JSX 深层散写字段访问 |
@@ -126,7 +126,9 @@
 | Text submission helpers | `lib/learning-tasks/text-submission.ts` | 原文请求构造、码点校验、保存后 POST 门禁与同一详情恢复路径、已知公开提交错误安全适配；产品实际调用 |
 | Submission AI operations | `lib/learning-tasks/submission-ai-operations.ts` | 单个挂载提交内的操作标识、串行读写、确认资格与已接纳摘要；无网络、无全局锁，不定义后端 Job 状态转换 |
 | AI Review | `lib/learning-tasks/ai-review.ts` | 快照展示、严格摘要适配及学生轮询资格的纯逻辑，不推断后端授权 |
-| UI Status | `lib/ui/status.ts` | AI 状态文案与通用错误摘要的统一入口 |
+| UI Status | `lib/ui/status.ts` | 按领域显示模板、课程、班级、课堂任务、成员关系和账号状态，统一 AI 状态、失败原因及通用错误摘要；仅转换显示标签，不参与状态或资格判断 |
+| Feedback Options | `lib/ui/feedback-options.ts` | 反馈类型、严重程度、来源的中文显示；保留现有选项值、顺序及表单归一化，不把未知值伪装成已知分类 |
+| Feedback Tags | `lib/ui/feedback-tags.ts` | 预设反馈标签的中文 label 与未知非空标签原文显示；value、顺序及业务文本不变 |
 | Task Course Labels | `lib/learning-tasks/course-labels.ts` | 课程分类候选、未分类口径、显示/归一化工具的前端单一来源；不从局部查询结果倒推候选 |
 | Task Template Visibility/Scope | `lib/learning-tasks/template-visibility-scope.ts` | 模板可见性与列表 scope 的值域、文案、normalize；不在页面和表单散落魔法字符串 |
 | Task Template List Sorting | `lib/learning-tasks/template-list-sorting.ts` | 当前页模板默认排序单一来源：mine 最近更新优先，shared 已发布优先后按时间，all 我的模板优先；不复制多套 compare |

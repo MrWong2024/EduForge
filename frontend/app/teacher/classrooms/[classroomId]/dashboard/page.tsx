@@ -16,6 +16,7 @@ import {
 import { getMe } from "@/lib/auth/session";
 import { paths } from "@/lib/routes/paths";
 import { getCommonErrorSummary } from "@/lib/ui/status";
+import { getFeedbackTagLabel } from "@/lib/ui/feedback-tags";
 import {
   getPublisherLabel,
   safeGet,
@@ -591,7 +592,7 @@ export default async function ClassroomDashboardPage({
                                 key={tag.key}
                                 className="inline-flex items-center rounded-full border border-zinc-300 bg-zinc-50 px-2 py-0.5 text-xs text-zinc-700"
                               >
-                                {tag.label}
+                                {getFeedbackTagLabel(tag.label)}
                                 {typeof tag.count === "number"
                                   ? ` (${tag.count})`
                                   : ""}
@@ -667,14 +668,6 @@ export default async function ClassroomDashboardPage({
         )}
       </section>
 
-      <details className="rounded-lg border border-zinc-200 bg-zinc-50 p-4">
-        <summary className="cursor-pointer text-sm font-medium text-zinc-800">
-          查看原始数据（调试用）
-        </summary>
-        <pre className="mt-3 overflow-auto text-xs text-zinc-700">
-          {JSON.stringify(viewModel.dashboard, null, 2)}
-        </pre>
-      </details>
     </section>
   );
 }

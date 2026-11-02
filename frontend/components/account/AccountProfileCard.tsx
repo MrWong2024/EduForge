@@ -1,5 +1,6 @@
 import { type AccountUser, getPrimaryAccountName, getRoleLabels } from "@/components/account/account-types";
 import { toDisplayText } from "@/lib/ui/format";
+import { getAccountStatusLabel } from "@/lib/ui/status";
 
 type AccountProfileCardProps = {
   user: AccountUser;
@@ -29,7 +30,7 @@ export function AccountProfileCard({ user }: AccountProfileCardProps) {
         </div>
         <div>
           <p className="text-xs text-zinc-500">账号状态</p>
-          <p className="mt-1 text-sm text-zinc-900">{toDisplayText(user.status)}</p>
+          <p className="mt-1 text-sm text-zinc-900">{getAccountStatusLabel(user.status)}</p>
         </div>
         {typeof user.studentNo === "string" && user.studentNo.trim() ? (
           <div>

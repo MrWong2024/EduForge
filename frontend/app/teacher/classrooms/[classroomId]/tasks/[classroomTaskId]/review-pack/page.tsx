@@ -7,7 +7,13 @@ import { fetchJson, FetchJsonError } from "@/lib/api/client";
 import { buildErrorDescription, extractRawDetail } from "@/lib/api/error-presenter";
 import { toReviewPackResponse } from "@/lib/api/types-teacher";
 import { paths } from "@/lib/routes/paths";
-import { getCommonErrorSummary } from "@/lib/ui/status";
+import { getAiStatusLabel, getCommonErrorSummary } from "@/lib/ui/status";
+import { getFeedbackTagLabel } from "@/lib/ui/feedback-tags";
+import {
+  getFeedbackSeverityLabel,
+  getFeedbackSourceLabel,
+  getFeedbackTypeLabel,
+} from "@/lib/ui/feedback-options";
 import {
   buildQueryString,
   getSingleSearchParam,
@@ -326,7 +332,7 @@ const renderStudentTierRow = (
       </p>
     ) : null}
     {tierKey !== "notSubmitted" && student.latestAiStatus ? (
-      <p className="text-zinc-500">AI：{student.latestAiStatus}</p>
+      <p className="text-zinc-500">AI：{getAiStatusLabel(student.latestAiStatus)}</p>
     ) : null}
   </li>
 );
@@ -389,8 +395,8 @@ const buildOverviewMetricCards = (
       value: toPercentText(aiSuccessRateRaw),
       detail:
         typeof aiJobsTotal === "number"
-          ? `成功约 ${typeof aiSucceededEstimate === "number" ? aiSucceededEstimate : "—"} / 总 jobs ${aiJobsTotal}`
-          : "总 jobs：—",
+          ? `成功约 ${typeof aiSucceededEstimate === "number" ? aiSucceededEstimate : "—"} / 总处理任务 ${aiJobsTotal}`
+          : "总处理任务：—",
     },
     {
       key: "late",
@@ -449,7 +455,7 @@ const buildSummaryHighlights = (
 
   const topTag = topTagItems[0];
   const issueFocus = topTag
-    ? `当前最值得优先讲评的方向是「${topTag.label}」${typeof topTag.count === "number" ? `（${topTag.count} 次）` : ""}，可直接结合 ${examplesCount} 条去重样例展开。`
+    ? `当前最值得优先讲评的方向是「${getFeedbackTagLabel(topTag.label)}」${typeof topTag.count === "number" ? `（${topTag.count} 次）` : ""}，可直接结合 ${examplesCount} 条去重样例展开。`
     : examplesCount > 0
       ? `当前未形成明显的单一高频标签，可从 ${examplesCount} 条去重样例中挑选共性问题组织讲评。`
       : "当前未返回高频标签与典型样例，建议先结合提交管理页核查主要问题。";
@@ -686,7 +692,7 @@ export default async function ReviewPackPage({ params, searchParams }: ReviewPac
       </section>
 
       <p className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
-        隐私提示：复盘样例不包含敏感字段（如 codeText / prompt / apiKey）。
+        隐私提示：复盘样例不包含学生源码、模型请求内容或访问密钥。
       </p>
 
       <section className="rounded-lg border border-blue-200 bg-blue-50 p-4">
@@ -711,7 +717,7 @@ export default async function ReviewPackPage({ params, searchParams }: ReviewPac
                   <ul className="mt-2 space-y-1 text-sm text-zinc-700">
                     {topTagItems.slice(0, viewModel.query.topK).map((item) => (
                       <li key={item.key} className="flex items-center justify-between gap-2">
-                        <span className="truncate">{item.label}</span>
+                        <span className="truncate">{getFeedbackTagLabel(item.label)}</span>
                         <span className="shrink-0 text-zinc-500">{typeof item.count === "number" ? item.count : "—"}</span>
                       </li>
                     ))}
@@ -727,7 +733,7 @@ export default async function ReviewPackPage({ params, searchParams }: ReviewPac
                   <ul className="mt-2 space-y-1 text-sm text-zinc-700">
                     {topTypeItems.slice(0, viewModel.query.topK).map((item) => (
                       <li key={item.key} className="flex items-center justify-between gap-2">
-                        <span className="truncate">{item.label}</span>
+                        <span className="truncate">{getFeedbackTypeLabel(item.label)}</span>
                         <span className="shrink-0 text-zinc-500">{typeof item.count === "number" ? item.count : "—"}</span>
                       </li>
                     ))}
@@ -743,7 +749,7 @@ export default async function ReviewPackPage({ params, searchParams }: ReviewPac
                   <ul className="mt-2 space-y-1 text-sm text-zinc-700">
                     {topSeverityItems.slice(0, viewModel.query.topK).map((item) => (
                       <li key={item.key} className="flex items-center justify-between gap-2">
-                        <span className="truncate">{item.label}</span>
+                        <span className="truncate">{getFeedbackSeverityLabel(item.label)}</span>
                         <span className="shrink-0 text-zinc-500">{typeof item.count === "number" ? item.count : "—"}</span>
                       </li>
                     ))}
@@ -773,13 +779,13 @@ export default async function ReviewPackPage({ params, searchParams }: ReviewPac
                           {typeof item.attemptNo === "number" ? `尝试次数：${item.attemptNo}` : "尝试次数：—"}
                         </p>
                       </div>
-                      <p className="mt-1 text-xs text-zinc-500">主标签：{item.primaryTag}</p>
+                      <p className="mt-1 text-xs text-zinc-500">主标签：{getFeedbackTagLabel(item.primaryTag)}</p>
                       {item.matchedTags.length > 0 ? (
-                        <p className="mt-1 text-xs text-zinc-500">其他命中标签：{item.matchedTags.join(" / ")}</p>
+                        <p className="mt-1 text-xs text-zinc-500">其他命中标签：{item.matchedTags.map(getFeedbackTagLabel).join(" / ")}</p>
                       ) : null}
                       <p className="mt-1 text-xs text-zinc-500">
-                        严重程度：{item.severity ?? "—"} · 类型：{item.issueType ?? "—"}
-                        {item.source ? ` · 来源：${item.source}` : ""}
+                        严重程度：{getFeedbackSeverityLabel(item.severity)} · 类型：{getFeedbackTypeLabel(item.issueType)}
+                        {item.source ? ` · 来源：${getFeedbackSourceLabel(item.source)}` : ""}
                       </p>
                       <p className="mt-2">
                         <span className="font-medium text-zinc-900">反馈内容：</span>
@@ -848,10 +854,6 @@ export default async function ReviewPackPage({ params, searchParams }: ReviewPac
         </>
       )}
 
-      <details className="rounded-lg border border-zinc-200 bg-zinc-50 p-3">
-        <summary className="cursor-pointer text-sm font-medium text-zinc-700">查看原始数据（调试用）</summary>
-        <pre className="mt-3 overflow-auto text-xs text-zinc-600">{JSON.stringify(viewModel.data.raw, null, 2)}</pre>
-      </details>
     </section>
   );
 }

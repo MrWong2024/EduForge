@@ -12,7 +12,7 @@ import {
   type ClassroomStudent,
 } from "@/lib/api/types-teacher";
 import { paths } from "@/lib/routes/paths";
-import { getCommonErrorSummary } from "@/lib/ui/status";
+import { getCommonErrorSummary, getEnrollmentStatusLabel } from "@/lib/ui/status";
 import {
   buildQueryString,
   getSingleSearchParam,
@@ -71,7 +71,6 @@ type MembersViewModel =
       total: number;
       currentPage: number;
       totalPages: number;
-      studentsRaw: unknown;
       query: MembersQueryState;
     }
   | {
@@ -135,7 +134,6 @@ export default async function ClassroomMembersPage({ params, searchParams }: Mem
       total,
       currentPage,
       totalPages,
-      studentsRaw: studentsResponse.raw,
       query: queryState,
     };
   } catch (error) {
@@ -171,7 +169,7 @@ export default async function ClassroomMembersPage({ params, searchParams }: Mem
       />
 
       <section className="rounded-lg border border-zinc-200 bg-white p-4 text-sm text-zinc-700">
-        <p>成员以 Enrollment 为准；移除仅解除成员关系，不删除历史提交。</p>
+        <p>以当前班级名单为准；移除仅解除成员关系，不删除历史提交。</p>
       </section>
 
       <section className="rounded-lg border border-zinc-200 bg-white p-4 text-sm">
@@ -221,7 +219,7 @@ export default async function ClassroomMembersPage({ params, searchParams }: Mem
                       {student.email ? <p className="text-xs text-zinc-500">{student.email}</p> : null}
                     </td>
                     <td className="px-4 py-3">{toDisplayText(student.studentNo)}</td>
-                    <td className="px-4 py-3">{toDisplayText(student.status, "—")}</td>
+                    <td className="px-4 py-3">{getEnrollmentStatusLabel(student.status)}</td>
                     <td className="px-4 py-3">{toDisplayDate(student.enrolledAt)}</td>
                     <td className="px-4 py-3">
                       {statusUpper === "REMOVED" ? (
@@ -274,12 +272,6 @@ export default async function ClassroomMembersPage({ params, searchParams }: Mem
         </div>
       ) : null}
 
-      <details className="rounded-lg border border-zinc-200 bg-zinc-50 p-4">
-        <summary className="cursor-pointer text-sm font-medium text-zinc-800">查看原始成员 JSON</summary>
-        <pre className="mt-3 overflow-auto text-xs text-zinc-700">
-          {JSON.stringify(viewModel.studentsRaw, null, 2)}
-        </pre>
-      </details>
     </section>
   );
 }

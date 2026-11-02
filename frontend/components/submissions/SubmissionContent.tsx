@@ -21,7 +21,7 @@ export function SubmissionContent({
             {code}
           </pre>
         ) : (
-          <p className="mt-2 text-sm text-zinc-600">当前接口未返回代码内容。</p>
+          <p className="mt-2 text-sm text-zinc-600">代码内容暂不可用，请刷新核对。</p>
         )}
       </div>
       <div>

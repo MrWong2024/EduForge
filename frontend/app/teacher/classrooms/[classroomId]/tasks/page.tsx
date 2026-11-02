@@ -137,7 +137,7 @@ const getSubmissionWindowStatus = (
   if (!dueAt) {
     return {
       label: "可提交",
-      title: "课堂任务开放且未设置截止时间；最终提交权限仍以后端校验为准。",
+      title: "课堂任务开放且未设置截止时间；能否提交还需符合当前任务要求。",
       badgeClassName: "border-emerald-200 bg-emerald-50 text-emerald-700",
     };
   }
@@ -154,7 +154,7 @@ const getSubmissionWindowStatus = (
   if (dueTime >= Date.now()) {
     return {
       label: "可提交",
-      title: "课堂任务开放且尚未截止；最终提交权限仍以后端校验为准。",
+      title: "课堂任务开放且尚未截止；能否提交还需符合当前任务要求。",
       badgeClassName: "border-emerald-200 bg-emerald-50 text-emerald-700",
     };
   }
@@ -163,7 +163,7 @@ const getSubmissionWindowStatus = (
     return {
       label: "允许迟交",
       title:
-        "课堂任务已截止，但当前设置允许迟交；最终提交权限仍以后端校验为准。",
+        "课堂任务已截止，但当前设置允许迟交；能否提交还需符合当前任务要求。",
       badgeClassName: "border-amber-200 bg-amber-50 text-amber-700",
     };
   }
@@ -363,7 +363,7 @@ export default async function ClassroomTasksPage({
       />
 
       <section className="rounded-lg border border-zinc-200 bg-white p-4 text-sm text-zinc-700">
-        <p>此页管理当前班级的课堂任务实例（classroom task）。</p>
+        <p>此页管理本班课堂任务。</p>
         <p className="mt-1">
           这里先选择已发布任务模板，再配置截止时间、迟交与尝试次数等班级实例设置后发布。
         </p>
@@ -371,7 +371,7 @@ export default async function ClassroomTasksPage({
           候选模板按当前班级与筛选条件实时检索，包含你自己的模板与可见共享模板。
         </p>
         <p className="mt-1">
-          后端已自动排除当前班级已发布过的模板，并处理课程分类优先匹配排序。
+          候选列表不包含已布置到本班的模板，并优先显示与课程分类匹配的模板。
         </p>
         <p className="mt-2">
           若没有合适模板，请先前往
@@ -381,7 +381,7 @@ export default async function ClassroomTasksPage({
           >
             任务模板页
           </Link>
-          准备 `PUBLISHED` 模板，再回到本页发布到班级。
+          准备已发布模板，再回到本页发布到班级。
         </p>
       </section>
 
@@ -442,7 +442,7 @@ export default async function ClassroomTasksPage({
                 <th className="px-4 py-3">模板模块</th>
                 <th className="px-4 py-3">任务状态</th>
                 <th className="px-4 py-3">管理</th>
-                <th className="px-4 py-3">三件套入口</th>
+                <th className="px-4 py-3">任务分析</th>
               </tr>
             </thead>
             <tbody>

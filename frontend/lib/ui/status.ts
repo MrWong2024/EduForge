@@ -5,6 +5,48 @@ export type AiStatusTone =
   | "warning"
   | "danger";
 
+const getDomainStatusLabel = (
+  value: unknown,
+  labels: Readonly<Record<string, string>>,
+): string => {
+  if (
+    value === undefined ||
+    value === null ||
+    (typeof value === "string" && !value.trim())
+  ) {
+    return "—";
+  }
+  return typeof value === "string" && Object.hasOwn(labels, value)
+    ? labels[value]
+    : "未知状态";
+};
+
+export const getTaskTemplateStatusLabel = (value: unknown): string =>
+  getDomainStatusLabel(value, {
+    DRAFT: "草稿",
+    PUBLISHED: "已发布",
+    ARCHIVED: "已归档",
+  });
+
+export const getClassroomTaskStatusLabel = (value: unknown): string =>
+  getDomainStatusLabel(value, {
+    ACTIVE: "开放中",
+    CLOSED: "已关闭",
+    RECALLED: "已撤回",
+  });
+
+export const getEnrollmentStatusLabel = (value: unknown): string =>
+  getDomainStatusLabel(value, { ACTIVE: "在班", REMOVED: "已移除" });
+
+export const getAccountStatusLabel = (value: unknown): string =>
+  getDomainStatusLabel(value, { active: "正常", suspended: "已停用" });
+
+export const getCourseStatusLabel = (value: unknown): string =>
+  getDomainStatusLabel(value, { ACTIVE: "进行中", ARCHIVED: "已归档" });
+
+export const getClassroomStatusLabel = (value: unknown): string =>
+  getDomainStatusLabel(value, { ACTIVE: "进行中", ARCHIVED: "已归档" });
+
 const AI_STATUS_ORDER = [
   "NOT_REQUESTED",
   "PENDING",
@@ -29,10 +71,18 @@ const normalizeAiStatus = (status?: string | null): AiStatus | undefined => {
   return AI_STATUS_ORDER.find((item) => item === normalized);
 };
 
-export const getAiStatusLabel = (status?: string | null): string => {
-  const normalized = normalizeAiStatus(status);
+export const getAiStatusLabel = (status?: unknown): string => {
+  if (
+    status === undefined ||
+    status === null ||
+    (typeof status === "string" && !status.trim())
+  ) {
+    return "—";
+  }
+  const normalized =
+    typeof status === "string" ? normalizeAiStatus(status) : undefined;
   if (!normalized) {
-    return "暂无状态";
+    return "未知状态";
   }
 
   if (normalized === "NOT_REQUESTED") {
@@ -52,6 +102,33 @@ export const getAiStatusLabel = (status?: string | null): string => {
   }
 
   return "已终止";
+};
+
+const AI_FAILURE_REASON_LABELS: Readonly<Record<string, string>> = {
+  INPUT_BUDGET_EXCEEDED: "评阅材料超出处理范围",
+  OUTPUT_LIMIT_REACHED: "反馈内容超出长度限制",
+  UNAUTHORIZED: "AI 服务授权失败",
+  RATE_LIMIT_UPSTREAM: "AI 服务请求过于频繁",
+  RATE_LIMIT_LOCAL: "本次请求受到频率限制",
+  UPSTREAM_4XX: "AI 服务无法处理本次请求",
+  UPSTREAM_5XX: "AI 服务暂时不可用",
+  TIMEOUT: "AI 处理超时",
+  BAD_RESPONSE: "AI 返回内容暂不可用",
+  MISSING_API_KEY: "AI 服务尚未配置完成",
+};
+
+export const getAiFailureReasonLabel = (value: unknown): string => {
+  if (
+    value === undefined ||
+    value === null ||
+    (typeof value === "string" && !value.trim())
+  ) {
+    return "—";
+  }
+  return typeof value === "string" &&
+    Object.hasOwn(AI_FAILURE_REASON_LABELS, value)
+    ? AI_FAILURE_REASON_LABELS[value]
+    : "其他处理失败原因";
 };
 
 export const getAiStatusTone = (status?: string | null): AiStatusTone => {

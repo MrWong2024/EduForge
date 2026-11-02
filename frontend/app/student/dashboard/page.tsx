@@ -15,7 +15,11 @@ import {
   toStudentDashboardResponse,
 } from "@/lib/api/types-student";
 import { paths } from "@/lib/routes/paths";
-import { getCommonErrorSummary } from "@/lib/ui/status";
+import {
+  getAiStatusLabel,
+  getClassroomStatusLabel,
+  getCommonErrorSummary,
+} from "@/lib/ui/status";
 import {
   buildQueryString,
   getSingleSearchParam,
@@ -133,30 +137,30 @@ const getAiFeedbackStatusBadge = (
   const normalized = status?.trim().toUpperCase();
   if (normalized === "NOT_REQUESTED") {
     return {
-      label: "未请求",
+      label: getAiStatusLabel(status),
       title: "最新提交尚未请求 AI 反馈",
       tone: "neutral",
     };
   }
   if (normalized === "PENDING") {
-    return { label: "排队中", title: "AI 反馈正在排队生成", tone: "info" };
+    return { label: getAiStatusLabel(status), title: "AI 反馈正在排队生成", tone: "info" };
   }
   if (normalized === "RUNNING") {
-    return { label: "生成中", title: "AI 反馈正在生成", tone: "info" };
+    return { label: getAiStatusLabel(status), title: "AI 反馈正在生成", tone: "info" };
   }
   if (normalized === "SUCCEEDED") {
-    return { label: "已生成", title: "AI 反馈已生成", tone: "success" };
+    return { label: getAiStatusLabel(status), title: "AI 反馈已生成", tone: "success" };
   }
   if (normalized === "FAILED") {
-    return { label: "生成失败", title: "AI 反馈生成失败", tone: "danger" };
+    return { label: getAiStatusLabel(status), title: "AI 反馈生成失败", tone: "danger" };
   }
   if (normalized === "DEAD") {
-    return { label: "已终止", title: "AI 反馈任务已终止", tone: "neutral" };
+    return { label: getAiStatusLabel(status), title: "AI 反馈任务已终止", tone: "neutral" };
   }
 
   return {
-    label: "未知状态",
-    title: status ? `未知 AI 状态：${status}` : "最新提交暂无 AI 状态",
+    label: getAiStatusLabel(status),
+    title: "最新提交的 AI 状态暂不可用，请刷新核对。",
     tone: "neutral",
   };
 };
@@ -181,7 +185,7 @@ const getCompletionStatusBadge = (
     return hasLatestSubmission
       ? {
           label: "暂无结论",
-          title: "当前响应暂无完成情况结论，请稍后刷新或等待反馈生成",
+          title: "完成情况暂不可用，请稍后刷新或等待反馈生成",
           tone: "neutral",
         }
       : {
@@ -439,7 +443,7 @@ export default async function StudentDashboardPage({
                       </span>
                     </div>
                     <p className="text-sm text-zinc-600">
-                      班级状态: {toDisplayText(classroom.status)}
+                      班级状态: {getClassroomStatusLabel(classroom.status)}
                     </p>
                   </div>
                   <p className="text-sm text-zinc-600">
@@ -584,14 +588,6 @@ export default async function StudentDashboardPage({
         </div>
       )}
 
-      <details className="mt-4 rounded-lg border border-zinc-200 bg-zinc-50 p-4">
-        <summary className="cursor-pointer text-sm font-medium text-zinc-800">
-          查看原始数据（调试用）
-        </summary>
-        <pre className="mt-3 overflow-auto text-xs text-zinc-700">
-          {JSON.stringify(viewModel.data.raw, null, 2)}
-        </pre>
-      </details>
     </section>
   );
 }

@@ -8,6 +8,7 @@ import { buildErrorDescription, extractRawDetail } from "@/lib/api/error-present
 import { toLearningTrajectoryResponse } from "@/lib/api/types-teacher";
 import { paths } from "@/lib/routes/paths";
 import { getAiStatusLabel, getCommonErrorSummary } from "@/lib/ui/status";
+import { getFeedbackTagLabel } from "@/lib/ui/feedback-tags";
 import {
   buildQueryString,
   getSingleSearchParam,
@@ -207,7 +208,7 @@ const toTagSummary = (value: unknown): string => {
         return null;
       }
       const count = toFiniteNumber(record.count);
-      return count === null ? tag : `${tag}(${count})`;
+      return count === null ? getFeedbackTagLabel(tag) : `${getFeedbackTagLabel(tag)}(${count})`;
     })
     .filter((text): text is string => Boolean(text));
 
@@ -439,8 +440,7 @@ export default async function LearningTrajectoryPage({
             <tbody>
               {viewModel.data.items.map((item, index) => {
                 const status = item.latestAiFeedbackStatus;
-                const displayStatus =
-                  typeof status === "string" ? getAiStatusLabel(status) : toDisplayText(status);
+                const displayStatus = getAiStatusLabel(status);
                 const studentDisplayName = toStudentDisplayName(item);
                 const studentKey = item.studentId ?? item.student?.id ?? `student-${index}`;
                 const showExpandedDetail =
@@ -479,10 +479,7 @@ export default async function LearningTrajectoryPage({
                                         "aiFeedbackStatus",
                                         undefined
                                       );
-                                      const attemptStatus =
-                                        typeof attemptStatusRaw === "string"
-                                          ? getAiStatusLabel(attemptStatusRaw)
-                                          : toDisplayText(attemptStatusRaw);
+                                      const attemptStatus = getAiStatusLabel(attemptStatusRaw);
                                       const isLate = safeGet(attemptRecord, "isLate", undefined) === true;
                                       const attemptTime =
                                         safeGet(attemptRecord, "createdAt", undefined) ??
@@ -551,10 +548,6 @@ export default async function LearningTrajectoryPage({
         </div>
       ) : null}
 
-      <details className="rounded-lg border border-zinc-200 bg-zinc-50 p-4">
-        <summary className="cursor-pointer text-sm font-medium text-zinc-800">查看原始学习轨迹 JSON</summary>
-        <pre className="mt-3 overflow-auto text-xs text-zinc-700">{JSON.stringify(viewModel.data.raw, null, 2)}</pre>
-      </details>
     </section>
   );
 }

@@ -15,6 +15,12 @@ import {
 } from "@/lib/api/types-student";
 import { paths } from "@/lib/routes/paths";
 import { getCommonErrorSummary } from "@/lib/ui/status";
+import {
+  getFeedbackSeverityLabel,
+  getFeedbackSourceLabel,
+  getFeedbackTypeLabel,
+} from "@/lib/ui/feedback-options";
+import { getFeedbackTagLabel } from "@/lib/ui/feedback-tags";
 import { toDisplaySubmissionLanguage } from "@/lib/learning-tasks/submission-language";
 import {
   getSingleSearchParam,
@@ -242,15 +248,11 @@ export default async function StudentSubmissionDetailPage({
                   className="border-t border-zinc-100 align-top"
                 >
                   <td className="px-4 py-3">
-                    {item.source === "TEACHER"
-                      ? "教师反馈"
-                      : item.source === "AI"
-                        ? "AI 辅助反馈"
-                        : "其他反馈"}
+                    {getFeedbackSourceLabel(item.source)}
                   </td>
-                  <td className="px-4 py-3">{toDisplayText(item.type, "—")}</td>
+                  <td className="px-4 py-3">{getFeedbackTypeLabel(item.type)}</td>
                   <td className="px-4 py-3">
-                    {toDisplayText(item.severity, "—")}
+                    {getFeedbackSeverityLabel(item.severity)}
                   </td>
                   <td className="max-w-lg break-words px-4 py-3 whitespace-pre-wrap">
                     {toDisplayText(item.message)}
@@ -259,7 +261,7 @@ export default async function StudentSubmissionDetailPage({
                     {toDisplayText(item.suggestion, "暂无")}
                   </td>
                   <td className="px-4 py-3">
-                    {item.tags.length > 0 ? item.tags.join(", ") : "—"}
+                    {item.tags.length > 0 ? item.tags.map(getFeedbackTagLabel).join("、") : "—"}
                   </td>
                   <td className="px-4 py-3">{toDisplayDate(item.createdAt)}</td>
                 </tr>

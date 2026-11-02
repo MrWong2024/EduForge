@@ -19,7 +19,7 @@ import {
 import type { StudentTaskCompletionStatus } from "@/lib/api/types-student";
 import { toMyTaskDetailResponse } from "@/lib/api/types-student";
 import { paths } from "@/lib/routes/paths";
-import { getAiStatusHint, getCommonErrorSummary } from "@/lib/ui/status";
+import { getAiStatusHint, getAiStatusLabel, getCommonErrorSummary } from "@/lib/ui/status";
 import {
   buildQueryString,
   getSingleSearchParam,
@@ -172,33 +172,30 @@ const getAiFeedbackStatusBadge = (
   const normalized = normalizeAiStatus(status);
   if (normalized === "NOT_REQUESTED") {
     return {
-      label: "未请求",
+      label: getAiStatusLabel(status),
       title: "该提交尚未请求 AI 反馈",
       tone: "neutral",
     };
   }
   if (normalized === "PENDING") {
-    return { label: "排队中", title: "AI 反馈正在排队生成", tone: "info" };
+    return { label: getAiStatusLabel(status), title: "AI 反馈正在排队生成", tone: "info" };
   }
   if (normalized === "RUNNING") {
-    return { label: "生成中", title: "AI 反馈正在生成", tone: "info" };
+    return { label: getAiStatusLabel(status), title: "AI 反馈正在生成", tone: "info" };
   }
   if (normalized === "SUCCEEDED") {
-    return { label: "已生成", title: "AI 反馈已生成", tone: "success" };
+    return { label: getAiStatusLabel(status), title: "AI 反馈已生成", tone: "success" };
   }
   if (normalized === "FAILED") {
-    return { label: "生成失败", title: "AI 反馈生成失败", tone: "danger" };
+    return { label: getAiStatusLabel(status), title: "AI 反馈生成失败", tone: "danger" };
   }
   if (normalized === "DEAD") {
-    return { label: "已终止", title: "AI 反馈任务已终止", tone: "neutral" };
+    return { label: getAiStatusLabel(status), title: "AI 反馈任务已终止", tone: "neutral" };
   }
 
   return {
-    label: "未知状态",
-    title:
-      typeof status === "string" && status.trim()
-        ? `未知 AI 状态：${status}`
-        : "该提交暂无 AI 状态",
+    label: getAiStatusLabel(status),
+    title: "该提交的 AI 状态暂不可用，请刷新核对。",
     tone: "neutral",
   };
 };
@@ -223,7 +220,7 @@ const getCompletionStatusBadge = (
     return hasLatestSubmission
       ? {
           label: "暂无结论",
-          title: "当前响应暂无完成情况结论，请稍后刷新或等待反馈生成",
+          title: "完成情况暂不可用，请稍后刷新或等待反馈生成",
           tone: "neutral",
         }
       : {

@@ -4,6 +4,7 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { ErrorState } from "@/components/blocks/ErrorState";
 import { BrowserFetchJsonError, fetchJson } from "@/lib/api/browser-client";
+import { buildErrorDescription } from "@/lib/api/error-presenter";
 
 type PublishTaskStatusButtonProps = {
   taskId?: string;
@@ -42,9 +43,6 @@ const extractRawDetail = (data: unknown): string | undefined => {
 
   return message || code || undefined;
 };
-
-const buildErrorDescription = (summary: string, detail?: string): string =>
-  detail ? `${summary} Detail: ${detail}` : summary;
 
 export function PublishTaskStatusButton({ taskId, taskStatus }: PublishTaskStatusButtonProps) {
   const router = useRouter();
@@ -99,7 +97,7 @@ export function PublishTaskStatusButton({ taskId, taskStatus }: PublishTaskStatu
   };
 
   if (isMissingTaskId) {
-    return <p className="text-sm text-zinc-500">缺少 taskId，无法更新发布状态。</p>;
+    return <p className="text-sm text-zinc-500">任务信息暂不可用，无法更新发布状态。</p>;
   }
 
   return (

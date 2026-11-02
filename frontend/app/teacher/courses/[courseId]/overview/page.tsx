@@ -363,7 +363,7 @@ export default async function CourseOverviewPage({ params, searchParams }: Cours
       <section className="rounded-lg border border-zinc-200 bg-white p-4">
         <p className="text-sm font-medium text-zinc-900">课程摘要</p>
         <p className="mt-1 text-xs text-zinc-500">
-          班级总数来自 overview `total`。其余指标均基于当前页班级明细聚合，避免误读为全课程总量。
+          班级总数统计课程下的全部班级。其余指标均基于当前页班级明细汇总，不代表全课程总量。
         </p>
         <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
           <div className="rounded-md border border-zinc-200 bg-zinc-50 p-3">
@@ -473,14 +473,6 @@ export default async function CourseOverviewPage({ params, searchParams }: Cours
         </div>
       ) : null}
 
-      <details className="rounded-lg border border-zinc-200 bg-zinc-50 p-4">
-        <summary className="cursor-pointer text-sm font-medium text-zinc-800">
-          查看原始 JSON
-        </summary>
-        <pre className="mt-3 overflow-auto text-xs text-zinc-700">
-          {JSON.stringify(viewModel.data.raw, null, 2)}
-        </pre>
-      </details>
     </section>
   );
 }

@@ -12,7 +12,7 @@ import { getMe } from "@/lib/auth/session";
 import { toLearningTaskDetailResponse } from "@/lib/api/types-teacher";
 import { paths } from "@/lib/routes/paths";
 import { toSafeTaskListReturnTo } from "@/lib/routes/task-list-return-to";
-import { getCommonErrorSummary } from "@/lib/ui/status";
+import { getCommonErrorSummary, getTaskTemplateStatusLabel } from "@/lib/ui/status";
 import { getSingleSearchParam, toDisplayText } from "@/lib/ui/format";
 import {
   canEditTaskTemplate,
@@ -123,7 +123,7 @@ export default async function EditLearningTaskPage({
     <section className="space-y-4">
       <PageHeader
         title={canEditCurrentTask ? "编辑任务模板" : "查看任务模板"}
-        description={`模板：${toDisplayText(viewModel.task.title, "未命名模板")} | 状态：${toDisplayText(
+        description={`模板：${toDisplayText(viewModel.task.title, "未命名模板")} | 状态：${getTaskTemplateStatusLabel(
           viewModel.task.status,
         )}`}
         actions={
@@ -144,14 +144,14 @@ export default async function EditLearningTaskPage({
       <section className="rounded-lg border border-zinc-200 bg-white p-4 text-sm text-zinc-700">
         <p>
           {canEditCurrentTask
-            ? "此页用于维护 learning task 模板字段与评阅标准。"
+            ? "此页用于维护任务模板内容与评阅标准。"
             : isArchivedTask && viewModel.canEdit
               ? "此页展示已归档模板详情；归档模板当前只读，后续如需复用应复制为新草稿。"
               : "此页只读展示模板详情；当前身份或状态不允许编辑。"}
         </p>
         <p className="mt-1">
           当前模板：{toDisplayText(viewModel.task.title, "未命名模板")}（状态：
-          {toDisplayText(viewModel.task.status)}）
+          {getTaskTemplateStatusLabel(viewModel.task.status)}）
         </p>
       </section>
 

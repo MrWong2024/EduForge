@@ -52,11 +52,10 @@ import {
   type AiLearningAnalyticsSearchParams,
 } from "@/lib/ai-learning-analytics";
 import { paths } from "@/lib/routes/paths";
-import { getCommonErrorSummary } from "@/lib/ui/status";
+import { getClassroomTaskStatusLabel, getCommonErrorSummary } from "@/lib/ui/status";
 import {
   buildQueryString,
   toDisplayDate,
-  toDisplayText,
 } from "@/lib/ui/format";
 
 const STUDENT_PAGE_SIZE = 100;
@@ -139,7 +138,7 @@ const toTaskOptionMeta = (taskOption: ClassroomTaskOption): string =>
   [
     `发布时间：${toDisplayDate(taskOption.publishedAt)}`,
     `截止：${toDisplayDate(taskOption.dueAt)}`,
-    `状态：${toDisplayText(taskOption.status)}`,
+    `状态：${getClassroomTaskStatusLabel(taskOption.status)}`,
   ].join(" · ");
 
 const getScopeNotice = (
@@ -155,7 +154,7 @@ const getScopeNotice = (
   if (summary.activeStudentsCount === 0) {
     return {
       title: "当前班级暂无有效学生",
-      description: "分析学生范围仅包含当前 ACTIVE 学生。",
+      description: "分析学生范围仅包含当前在班学生。",
     };
   }
   if (summary.submittedStudentTaskCount === 0) {
@@ -401,7 +400,7 @@ export default async function AiLearningAnalyticsPage({
           课堂任务对比分析
         </h2>
         <p className="mt-1 text-xs leading-5 text-zinc-500">
-          按后端返回的任务顺序逐行对比，不把不同课堂任务连接成连续时间序列。
+          按任务列表顺序逐行对比，不把不同课堂任务连接成连续时间序列。
         </p>
         <div className="mt-3 space-y-3">
           {overview.taskTrends.length > 0 ? (
@@ -440,11 +439,11 @@ export default async function AiLearningAnalyticsPage({
       >
         <h2 className="text-sm font-semibold text-zinc-900">学生分析列表</h2>
         <p className="mt-1 text-xs text-zinc-500">
-          仅展示当前班级 ACTIVE 学生；每页最多 {STUDENT_PAGE_SIZE}
+          仅展示当前在班学生；每页最多 {STUDENT_PAGE_SIZE}
           名，不进行前端排序或排名。
         </p>
         <p className="mt-1 text-xs leading-5 text-zinc-500">
-          “总体变化”由后端按当前范围内全部可比任务的反馈条目负荷净变化给出，不是时间序列回归，也不是能力成长或退步结论。
+          “总体变化”按当前范围内全部可比任务的反馈条目负荷净变化计算，不是时间序列回归，也不是能力成长或退步结论。
         </p>
         <AiLearningAnalyticsStudentFilters
           classroomId={classroomId}
@@ -501,12 +500,12 @@ export default async function AiLearningAnalyticsPage({
                 <p className="mt-3 text-sm text-zinc-600">
                   {hasAppliedFilters ? (
                     <>
-                      共 {students.activeStudentsTotal} 名 ACTIVE 学生，筛选命中{" "}
+                      共 {students.activeStudentsTotal} 名在班学生，筛选命中{" "}
                       {students.total} 名，当前显示 {students.items.length} 名。
                     </>
                   ) : (
                     <>
-                      共 {students.activeStudentsTotal} 名 ACTIVE 学生，当前显示{" "}
+                      共 {students.activeStudentsTotal} 名在班学生，当前显示{" "}
                       {students.items.length} 名。
                     </>
                   )}
@@ -516,14 +515,14 @@ export default async function AiLearningAnalyticsPage({
                     <EmptyState
                       title={
                         students.activeStudentsTotal === 0
-                          ? "当前班级暂无 ACTIVE 学生"
+                          ? "当前班级暂无在班学生"
                           : students.total === 0
                             ? "没有学生符合当前搜索和筛选条件"
                             : "当前分页无数据"
                       }
                       description={
                         students.activeStudentsTotal === 0
-                          ? "学生分析列表仅覆盖当前 ACTIVE 学生。"
+                          ? "学生分析列表仅覆盖当前在班学生。"
                           : students.total === 0
                             ? "可清空或调整学生搜索与筛选条件后重试。"
                             : "可返回第 1 页继续查看。"
@@ -622,26 +621,6 @@ export default async function AiLearningAnalyticsPage({
         )}
       </section>
 
-      {process.env.NODE_ENV !== "production" ? (
-        <details className="rounded-lg border border-zinc-200 bg-zinc-50 p-4">
-          <summary className="cursor-pointer text-sm font-medium text-zinc-800">
-            查看原始 AI 反馈介入成效分析 JSON
-          </summary>
-          <pre className="mt-3 overflow-auto text-xs text-zinc-700">
-            {JSON.stringify(
-              {
-                overview: overview.raw,
-                students:
-                  studentListState.mode === "ready"
-                    ? studentListState.data.raw
-                    : { error: studentListState.error.description },
-              },
-              null,
-              2,
-            )}
-          </pre>
-        </details>
-      ) : null}
     </section>
   );
 }

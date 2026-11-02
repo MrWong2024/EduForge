@@ -237,7 +237,7 @@ function ReviewEndpoint({
   return (
     <details className="mt-2 text-xs leading-5">
       <summary>
-        {label}：第 {review.attemptNo ?? "未知"} 次提交，revision{" "}
+        {label}：第 {review.attemptNo ?? "未知"} 次提交，作品版本{" "}
         {review.contentRevision ?? "未知"}
       </summary>
       <Link
@@ -381,7 +381,7 @@ export default async function AiLearningAnalyticsStudentPage({
       <section className="rounded-lg border border-zinc-200 bg-white p-4">
         <h2 className="text-sm font-semibold text-zinc-900">学生分析摘要</h2>
         <p className="mt-1 text-xs text-zinc-500">
-          以下指标直接来自学生详情接口，不由任务表重新汇总。
+          以下指标为当前学生在所选范围内的分析结果，不由任务表重新汇总。
         </p>
         <p className="mt-2 text-xs text-zinc-600">
           作品更新率{" "}
@@ -432,7 +432,7 @@ export default async function AiLearningAnalyticsStudentPage({
           <div>
             <dt className="text-xs text-zinc-500">四类精细结果任务数</dt>
             <dd className="mt-0.5 font-medium tabular-nums text-zinc-900">
-              负荷下降 {summary.improvedTasksCount} · 前后均无 ERROR/WARN{" "}
+              负荷下降 {summary.improvedTasksCount} · 前后均无错误/警告{" "}
               {summary.remainedCleanTasksCount} · 非零负荷持平{" "}
               {summary.unchangedWithIssuesTasksCount} · 负荷上升{" "}
               {summary.regressedTasksCount}
@@ -502,16 +502,6 @@ export default async function AiLearningAnalyticsStudentPage({
         </div>
       </section>
 
-      {process.env.NODE_ENV !== "production" ? (
-        <details className="rounded-lg border border-zinc-200 bg-zinc-50 p-4">
-          <summary className="cursor-pointer text-sm font-medium text-zinc-800">
-            查看原始学生分析 JSON
-          </summary>
-          <pre className="mt-3 overflow-auto text-xs text-zinc-700">
-            {JSON.stringify(detail.raw, null, 2)}
-          </pre>
-        </details>
-      ) : null}
     </section>
   );
 }

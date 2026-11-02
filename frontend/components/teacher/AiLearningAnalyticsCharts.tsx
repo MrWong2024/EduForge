@@ -416,7 +416,7 @@ export function AiLearningAnalyticsTaskIssueLoadComparisonChart({
   return (
     <BeforeAfterComparisonChart
       title="各任务 AI 反馈前后问题对比"
-      description="每行对比一个课堂任务中反馈可对照样本的平均反馈条目负荷。数值越低，表示实际反馈中 ERROR/WARN 条目的约定加权负荷越低；不同任务难度未校正，不应把任务间差异直接理解为连续成长趋势。"
+      description="每行对比一个课堂任务中反馈可对照样本的平均反馈条目负荷。数值越低，表示实际反馈中错误/警告条目的约定加权负荷越低；不同任务难度未校正，不应把任务间差异直接理解为连续成长趋势。"
       rows={rows}
       axisLabel="平均反馈条目负荷"
     />
@@ -506,7 +506,7 @@ function OutcomeLegend() {
         <span className="inline-flex h-4 w-5 items-center justify-center border border-sky-700 bg-sky-50 text-[9px] text-sky-900">
           ○
         </span>
-        前后均无 ERROR/WARN
+        前后均无错误/警告
       </span>
       <span className="inline-flex items-center gap-2">
         <span className="inline-flex h-4 w-5 items-center justify-center border border-amber-700 bg-amber-100 text-[9px] text-amber-900">
@@ -556,7 +556,7 @@ export function AiLearningAnalyticsComparableOutcomeChart({
         "反馈可对照样本总数：" + total,
         toSegmentText("负荷下降", task.improvedStudentCount, task.improvedRate),
         toSegmentText(
-          "前后均无 ERROR/WARN",
+          "前后均无错误/警告",
           task.remainedCleanStudentCount,
           task.remainedCleanRate,
         ),
@@ -613,7 +613,7 @@ export function AiLearningAnalyticsComparableOutcomeChart({
       <div className="mt-2 overflow-x-auto" tabIndex={0}>
         <svg
           role="img"
-          aria-label="各任务可比样本结果分布。每条横向堆叠条以该任务的反馈可对照样本数为分母，区分负荷下降、前后均无 ERROR/WARN、非零负荷持平和负荷上升。"
+          aria-label="各任务可比样本结果分布。每条横向堆叠条以该任务的反馈可对照样本数为分母，区分负荷下降、前后均无错误/警告、非零负荷持平和负荷上升。"
           viewBox={"0 0 " + CHART_WIDTH + " " + height}
           width={CHART_WIDTH}
           height={height}
@@ -671,7 +671,7 @@ export function AiLearningAnalyticsComparableOutcomeChart({
                 },
                 {
                   key: "remainedClean",
-                  label: "前后均无 ERROR/WARN",
+                  label: "前后均无错误/警告",
                   count: row.remainedClean,
                   rate: row.remainedCleanRate,
                   fill: "url(#ai-analytics-remained-clean-pattern)",
@@ -788,7 +788,7 @@ export function AiLearningAnalyticsComparableOutcomeChart({
                         fontSize="10"
                         fill="#075985"
                       >
-                        均无 ERROR/WARN {row.remainedClean}
+                        均无错误/警告 {row.remainedClean}
                       </text>
                       <text
                         x={DETAIL_X}
@@ -840,7 +840,7 @@ export function AiLearningAnalyticsComparableOutcomeChart({
         </svg>
       </div>
       <p className="mt-3 text-xs leading-5 text-zinc-600">
-        结果分为“前后均无 ERROR/WARN”和“非零负荷持平”。前后均无 ERROR/WARN
+        结果分为“前后均无错误/警告”和“非零负荷持平”。前后均无错误/警告
         需要两端均有实际反馈条目，不代表代码正确。
       </p>
       <ul className="sr-only">

@@ -142,13 +142,11 @@ export function CreateLearningTaskForm() {
       if (!created.id) {
         throw new Error("创建结果无法确认");
       }
-      const createdTaskId = created.id?.trim();
       const actionMessage =
         action === "publish" ? "任务模板已发布" : "任务模板已保存为草稿";
-      const idMessage = createdTaskId ? `（ID: ${createdTaskId}）` : "";
       const rubricMessage = rubric ? "评阅标准已保存。" : "";
       setSuccessMessage(
-        `${actionMessage}${idMessage}。${rubricMessage ? ` ${rubricMessage}` : ""}`,
+        `${actionMessage}。${rubricMessage ? ` ${rubricMessage}` : ""}`,
       );
       resetForm();
       router.refresh();
@@ -273,7 +271,7 @@ export function CreateLearningTaskForm() {
                 使用下方按钮决定初始状态：可保存为草稿或直接发布模板。
               </div>
               <p className="mt-1 text-xs text-zinc-500">
-                不提供 `ARCHIVED` 创建入口。
+                已发布模板可在编辑页归档。
               </p>
             </div>
           </div>

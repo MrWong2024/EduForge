@@ -49,7 +49,7 @@ function DeterministicClassSummary({
       <span className="font-semibold tabular-nums">
         {summary.activeStudentsCount}
       </span>{" "}
-      名 ACTIVE 学生；{" "}
+      名当前在班学生；{" "}
       {summary.aiDeliveredStudentTaskCount > 0 ? (
         <>
           <span className="font-semibold tabular-nums">
@@ -124,7 +124,7 @@ export function AiLearningAnalyticsSummary({
     <section className="rounded-lg border border-zinc-200 bg-white p-4">
       <h2 className="text-sm font-semibold text-zinc-900">班级分析摘要</h2>
       <p className="mt-1 text-xs text-zinc-500">
-        以下汇总直接使用总览接口字段，不由当前学生分页结果重新计算。
+        以下汇总覆盖当前统计范围，不受学生列表分页影响。
       </p>
 
       <div className="mt-3">
@@ -148,12 +148,12 @@ export function AiLearningAnalyticsSummary({
             )}
           </p>
           <p className="mt-1 text-xs leading-5 text-blue-800">
-            至少一个已提交任务存在 EduForge AI 反馈请求的 ACTIVE
+            至少一个已提交任务存在 EduForge AI 反馈请求的当前在班
             学生占比；请求可以由教师或学生发起。
           </p>
           <dl className="mt-4 space-y-2 border-t border-blue-200 pt-3 text-sm">
             <div className="flex items-start justify-between gap-3">
-              <dt className="text-blue-800">ACTIVE 学生数</dt>
+              <dt className="text-blue-800">当前在班学生数</dt>
               <dd className="font-medium tabular-nums text-blue-950">
                 {summary.activeStudentsCount}
               </dd>
@@ -233,7 +233,7 @@ export function AiLearningAnalyticsSummary({
             {summary.qualityComparableStudentTaskCount}
           </p>
           <p className="mt-1 text-xs leading-5 text-emerald-800">
-            负荷下降 {summary.improvedStudentTaskCount} · 前后均无 ERROR/WARN{" "}
+            负荷下降 {summary.improvedStudentTaskCount} · 前后均无错误/警告{" "}
             {summary.remainedCleanStudentTaskCount} · 非零负荷持平{" "}
             {summary.unchangedWithIssuesStudentTaskCount} · 负荷上升{" "}
             {summary.regressedStudentTaskCount}
@@ -253,14 +253,14 @@ export function AiLearningAnalyticsSummary({
               </dd>
             </div>
             <div className="flex items-start justify-between gap-3">
-              <dt className="text-emerald-800">前后均无 ERROR/WARN 比率</dt>
+              <dt className="text-emerald-800">前后均无错误/警告比率</dt>
               <dd className="text-right font-medium tabular-nums text-emerald-950">
                 {formatRateWithDenominator(
                   summary.remainedCleanRate,
                   summary.qualityComparableStudentTaskCount,
                 )}
                 <span className="ml-1 block text-[11px] font-normal text-emerald-800">
-                  均无 ERROR/WARN {summary.remainedCleanStudentTaskCount} / 可比{" "}
+                  均无错误/警告 {summary.remainedCleanStudentTaskCount} / 可比{" "}
                   {summary.qualityComparableStudentTaskCount}
                 </span>
               </dd>
@@ -388,7 +388,7 @@ export function AiLearningAnalyticsTeachingAttention({
     <section className="rounded-lg border border-amber-200 bg-amber-50 p-4">
       <h2 className="text-sm font-semibold text-amber-950">教学关注</h2>
       <p className="mt-1 text-xs text-amber-800">
-        从后端返回的课堂任务统计中定位当前极值，便于继续核查具体任务。
+        根据当前课堂任务统计定位极值，便于继续核查具体任务。
       </p>
       <div className="mt-3 grid gap-3 lg:grid-cols-3">
         {attention.lowestRevisionTask ? (

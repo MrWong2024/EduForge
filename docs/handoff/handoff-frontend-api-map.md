@@ -18,7 +18,7 @@
 - `app/api/proxy/[...path]/route.ts` 固定 `runtime = "nodejs"`，仅透传必要请求头：`cookie/content-type/accept/user-agent`。
 - proxy 响应透传 `content-type/content-disposition/cache-control/location/set-cookie`；配置缺失或网络错误返回 `502` + `{ method, path, type }`。
 - JSON 请求默认 `cache: "no-store"`；下载类链接可直接使用 `buildProxyPath(...)` 生成 `/api/proxy/**` href。
-- 错误处理：Server 侧抛 `FetchJsonError`，Client 侧抛 `BrowserFetchJsonError`；展示层通过 `error-presenter.ts` 提取后端 `message/code/detail`。
+- 错误处理：Server 侧抛 `FetchJsonError`，Client 侧抛 `BrowserFetchJsonError`；原始 data 及 `error-presenter.ts` 提取的 message/code 继续用于内部原因识别，最终说明只显示已生成的业务 summary，不附原始错误；既有公开消息匹配与可操作提示保持。
 - `app/api/_demo/**` 与 `/_demo/**` 是 demo 沙箱，不参与正式 Teacher/Student 主链路。
 
 ## 2) API client / helper 文件地图
@@ -28,7 +28,7 @@
 | `frontend/lib/api/client.ts` | Server/RSC fetchJson；拼 `/api/proxy/**`；补 inbound cookie；默认 `no-store` | `app/teacher/**/page.tsx`、`app/student/**/page.tsx`、`lib/auth/session.ts` | Server 侧需要当前 request origin 时可传 `origin` |
 | `frontend/lib/api/browser-client.ts` | Client Component fetchJson；拼 `/api/proxy/**`；`credentials: include` | 表单、按钮、生命周期 action 组件 | 不直接拼后端绝对 URL |
 | `frontend/app/api/proxy/[...path]/route.ts` | BFF proxy；转发 method/body/header 到后端 `/api/**` | 所有正式业务请求 | 唯一正式后端代理入口；由 `FRONTEND_BACKEND_ORIGIN` 控制上游 |
-| `frontend/lib/api/error-presenter.ts` | 从错误 payload 提取 `message/code` 并拼展示文案 | 表单、页面错误态 | 不改变后端错误语义，只做展示整理 |
+| `frontend/lib/api/error-presenter.ts` | 保留原始错误提取，最终说明仅返回业务 summary | 表单、页面错误态及内部原因识别 | 不清空或改写原始 data，不改变公开消息匹配与后端语义 |
 | `frontend/lib/api/types-teacher.ts` | Teacher 域响应解析、容错 mapper、view-model 辅助类型 | 教师课程/班级/任务/报表页面 | API 字段变化先在这里或对应页面 mapper 收口 |
 | `frontend/lib/api/classroom-task-options.ts` | Server-side 分页读取完整课堂任务选项；固定每页 100、按 total/短页停止、最多 20 页并按 `classroomTaskId` 去重 | 过程性评价、AI 反馈介入成效分析 | 只读 `GET classrooms/:classroomId/tasks`；返回排除面板所需 `id/title/publishedAt/dueAt/status`，不承担写操作 |
 | `frontend/lib/api/types-student.ts` | Student 域响应解析、容错 mapper、状态解析 | 学生看板、任务详情、提交详情 | 不在 JSX 深层散写 payload 访问 |

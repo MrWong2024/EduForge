@@ -30,6 +30,7 @@ import {
 } from "@/lib/learning-tasks/template-visibility-scope";
 import { sortTaskTemplatesByScope } from "@/lib/learning-tasks/template-list-sorting";
 import { getRubricSummary } from "@/lib/learning-tasks/rubric";
+import { getTaskTemplateStatusLabel } from "@/lib/ui/status";
 
 type LearningTaskFiltersProps = {
   tasks: LearningTaskOption[];
@@ -48,15 +49,15 @@ type TaskStatusFilter = "ALL" | LearningTaskStatus;
 const STATUS_FILTER_OPTIONS: Array<{ value: TaskStatusFilter; label: string }> =
   [
     { value: "ALL", label: "全部状态" },
-    { value: "DRAFT", label: "DRAFT（草稿）" },
-    { value: "PUBLISHED", label: "PUBLISHED（已发布）" },
-    { value: "ARCHIVED", label: "ARCHIVED（已归档）" },
+    { value: "DRAFT", label: "草稿" },
+    { value: "PUBLISHED", label: "已发布" },
+    { value: "ARCHIVED", label: "已归档" },
   ];
 
 const SCOPE_SORT_HINTS: Record<TaskTemplateScope, string> = {
   mine: "默认按最近更新时间排序（同时间按创建时间）。",
-  shared: "默认优先展示 PUBLISHED 模板，其次按最近更新时间排序。",
-  all: "默认优先展示我的模板；他人共享模板内优先 PUBLISHED。",
+  shared: "默认优先展示已发布模板，其次按最近更新时间排序。",
+  all: "默认优先展示我的模板；他人共享模板内优先已发布模板。",
 };
 
 const toStatusUpper = (value: unknown): string =>
@@ -281,7 +282,7 @@ export function LearningTaskFilters({
       <section className="rounded-lg border border-zinc-200 bg-white p-4">
         <h2 className="text-base font-semibold text-zinc-900">模板筛选</h2>
         <p className="mt-1 text-sm text-zinc-600">
-          筛选条件会写入 URL 并触发后端实时查询；筛选变化后自动回到第一页。
+          调整筛选条件后将重新查询，并自动回到第一页。
         </p>
         <div className="mt-4 grid gap-4 md:grid-cols-4">
           <label className="block text-sm">
@@ -569,7 +570,7 @@ export function LearningTaskFilters({
                           <span
                             className={`inline-flex max-w-full rounded border px-2 py-0.5 text-xs font-semibold ${statusBadgeClass}`}
                           >
-                            {toDisplayText(task.status)}
+                            {getTaskTemplateStatusLabel(task.status)}
                           </span>
                           <p className="text-xs leading-5 text-zinc-500">
                             {getStatusHint(task.status)}

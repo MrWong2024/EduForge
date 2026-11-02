@@ -5,6 +5,7 @@ import { useLayoutEffect, useMemo, useRef, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { ErrorState } from "@/components/blocks/ErrorState";
 import { BrowserFetchJsonError, fetchJson } from "@/lib/api/browser-client";
+import { buildErrorDescription } from "@/lib/api/error-presenter";
 import {
   type LearningTaskOption,
   toPublishableTaskTemplateListResponse,
@@ -19,6 +20,7 @@ import {
 import { paths } from "@/lib/routes/paths";
 import { getCandidateRubricSummary } from "@/lib/learning-tasks/rubric";
 import { buildQueryString, getPublisherLabel } from "@/lib/ui/format";
+import { getTaskTemplateStatusLabel } from "@/lib/ui/status";
 
 type PublishClassroomTaskFormProps = {
   classroomId: string;
@@ -63,9 +65,6 @@ const extractRawDetail = (data: unknown): string | undefined => {
 
   return message || code || undefined;
 };
-
-const buildErrorDescription = (summary: string, detail?: string): string =>
-  detail ? `${summary} Detail: ${detail}` : summary;
 
 const toDisplayText = (value: unknown, fallback = "—"): string => {
   if (typeof value === "string" && value.trim()) {
@@ -431,7 +430,7 @@ export function PublishClassroomTaskForm({
         const summaryByStatus: Record<number, string> = {
           401: "登录状态已失效，请重新登录。",
           403: "无权限加载更多候选模板。",
-          404: "候选模板检索接口未启用、不可用或资源不存在。",
+          404: "候选模板暂不可用或不存在。",
         };
         const summary =
           summaryByStatus[error.status] ?? "加载更多候选模板失败，请稍后重试。";
@@ -540,7 +539,7 @@ export function PublishClassroomTaskForm({
         候选池按当前班级与筛选条件实时检索，默认包含你自己的模板与可见共享模板。
       </p>
       <p className="mt-1 text-sm text-zinc-600">
-        后端已自动排除本班已发布模板，并处理课程优先匹配排序。
+        候选中已排除本班已布置的模板，并优先显示课程匹配的模板。
       </p>
       <p className="mt-2 text-sm text-zinc-600">
         没有合适模板？
@@ -593,7 +592,7 @@ export function PublishClassroomTaskForm({
             模板筛选（实时查询）
           </p>
           <p className="mt-1 text-xs text-zinc-600">
-            课程分类、仅看我的模板、知识模块会写入 URL 并触发后端重新检索。
+            调整课程分类、仅看我的模板或知识模块后，将重新检索候选模板。
           </p>
           <div className="mt-3 grid gap-3 md:grid-cols-4">
             <label className="block text-sm">
@@ -773,7 +772,7 @@ export function PublishClassroomTaskForm({
               ) : null}
               <p>
                 <span className="text-zinc-500">状态：</span>
-                {toDisplayText(selectedTask.status)}
+                {getTaskTemplateStatusLabel(selectedTask.status)}
               </p>
               <p>
                 <span className="text-zinc-500">评阅标准：</span>
@@ -789,9 +788,6 @@ export function PublishClassroomTaskForm({
                   {toDisplayText(selectedTask.description)}
                 </div>
               </div>
-              <p className="md:col-span-2 text-xs text-zinc-500">
-                模板 ID：{toDisplayText(selectedTask.id)}
-              </p>
             </div>
           </div>
         ) : (
@@ -856,7 +852,7 @@ export function PublishClassroomTaskForm({
 
       {createdTaskId ? (
         <div className="mt-4 rounded-md border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-800">
-          <p>任务发布成功，课堂任务 ID：{createdTaskId}</p>
+          <p>任务发布成功。</p>
           <div className="mt-1 flex flex-wrap gap-3">
             <Link
               href={paths.teacher.classroomTaskDetail(

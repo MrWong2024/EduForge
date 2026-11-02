@@ -29,6 +29,7 @@ import {
 } from "@/lib/learning-tasks/template-visibility-scope";
 import { toSafeTaskListReturnTo } from "@/lib/routes/task-list-return-to";
 import { getPublisherLabel } from "@/lib/ui/format";
+import { getTaskTemplateStatusLabel } from "@/lib/ui/status";
 import {
   buildUpdateTaskRubric,
   getRubricNotes,
@@ -58,12 +59,6 @@ type EditLearningTaskFormErrorState = {
 };
 
 type TaskLifecycleAction = "publish" | "archive";
-
-const statusLabelMap: Record<LearningTaskStatus, string> = {
-  DRAFT: "草稿",
-  PUBLISHED: "已发布",
-  ARCHIVED: "已归档",
-};
 
 const USED_PUBLISHED_TEMPLATE_REVERT_DETAIL =
   "Published task templates used by classrooms cannot be changed back to draft";
@@ -291,13 +286,8 @@ export function EditLearningTaskForm({
       }
       setAiContextBaseline(updated.aiContextRefs ?? []);
       setRubricNotes(getRubricNotes(updated.rubric));
-      const updatedTaskId = updated.id?.trim();
       const suffix = "，评阅标准已更新。";
-      setSuccessMessage(
-        updatedTaskId
-          ? `任务模板更新成功（ID: ${updatedTaskId}）${suffix}`
-          : `任务模板更新成功${suffix}`,
-      );
+      setSuccessMessage(`任务模板更新成功${suffix}`);
       router.refresh();
     } catch (error) {
       if (error instanceof BrowserFetchJsonError) {
@@ -505,10 +495,12 @@ export function EditLearningTaskForm({
             <div className="block text-sm">
               <span className="mb-1 block text-zinc-700">当前状态</span>
               <div className="rounded-md border border-zinc-200 bg-zinc-50 px-3 py-2 text-zinc-700">
-                {statusLabelMap[currentStatus]}
+                {getTaskTemplateStatusLabel(
+                  hasKnownInitialStatus ? currentStatus : initialTask.status,
+                )}
               </div>
               <p className="mt-1 text-xs text-zinc-500">
-                普通保存只更新内容字段；状态流转需使用下方动作按钮。
+                普通保存只更新内容；修改状态请使用下方按钮。
               </p>
             </div>
           </div>

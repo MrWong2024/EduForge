@@ -141,15 +141,6 @@ export default async function ClassroomTaskDetailPage({
       </section>
 
       <TaskRubric rubric={task.rubric} />
-
-      <details className="rounded-lg border border-zinc-200 bg-zinc-50 p-4">
-        <summary className="cursor-pointer text-sm font-medium text-zinc-800">
-          查看原始任务详情 JSON
-        </summary>
-        <pre className="mt-3 overflow-auto text-xs text-zinc-700">
-          {JSON.stringify(task.raw, null, 2)}
-        </pre>
-      </details>
     </section>
   );
 }

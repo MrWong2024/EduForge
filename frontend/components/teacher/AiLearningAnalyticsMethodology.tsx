@@ -20,7 +20,7 @@ export function AiLearningAnalyticsMethodologyPanel({
         </div>
         <div>
           <dt>反馈条目负荷</dt>
-          <dd>ERROR + 0.5 × WARN；INFO = 0</dd>
+          <dd>错误 + 0.5 × 警告；提示 = 0</dd>
         </div>
         <div>
           <dt>方法学版本</dt>
@@ -59,7 +59,7 @@ export function AiLearningAnalyticsMetricGuide({
           <p className="mt-2">
             每个学生 ×
             课堂任务最多一个样本，多次请求不会重复加权。按课堂任务发布时间选择窗口，保留入选任务完整提交链。有效任务包括
-            ACTIVE、CLOSED，排除 RECALLED；仅覆盖当前 ACTIVE 学生。
+            开放中和已关闭的任务，排除已撤回的任务；仅覆盖当前在班学生。
           </p>
           <p className="mt-2">
             V1.2
@@ -72,14 +72,13 @@ export function AiLearningAnalyticsMetricGuide({
         <section>
           <h3 className="font-medium text-zinc-900">请求与可用反馈交付</h3>
           <p className="mt-2">
-            存在请求 Job 即计入请求，可以由教师或学生发起。可用反馈交付要求成功
-            Job 与实际 AI 反馈条目，已知 stub
-            模拟评阅排除。空成功反馈、排队、失败和终止都不作为比较端点；有 INFO
-            条目而无 ERROR/WARN 的可用反馈，负荷才为真实 0。
+            存在反馈处理任务即计入请求，可以由教师或学生发起。可用反馈交付要求处理成功且有实际
+            AI 反馈条目，已知模拟评阅排除。空成功反馈、排队、失败和终止都不作为比较端点；有提示
+            条目而无错误/警告的可用反馈，负荷才为真实 0。
           </p>
           <p className="mt-2">
             历史来源不明的反馈保留为已有记录对照，不推定为真实模型。模型只取对应实际请求记录；模型不同会提示，同名模型也不证明
-            Prompt 或内部版本一致。来源与模型提示项可以重叠，不能相加作为分母。
+            评阅提示或内部版本一致。来源与模型提示项可以重叠，不能相加作为分母。
           </p>
         </section>
         <section>
@@ -88,7 +87,7 @@ export function AiLearningAnalyticsMetricGuide({
             {variant === "class" ? (
               <>
                 <li>
-                  请求学生覆盖率：至少有请求任务的 ACTIVE 学生 / ACTIVE
+                  请求学生覆盖率：至少有请求任务的当前在班学生 / 当前在班
                   学生。请求任务覆盖率：存在请求的学生任务样本 /
                   已提交学生任务样本。
                 </li>
@@ -105,7 +104,7 @@ export function AiLearningAnalyticsMetricGuide({
             )}
             <li>
               反馈后新增提交：基线反馈完成后新创建其他
-              Submission；不含已有提交的修改。新增提交率分母为可用反馈交付样本。
+              提交；不含已有提交的修改。新增提交率分母为可用反馈交付样本。
             </li>
             <li>
               反馈后作品更新：可确认在反馈完成后形成的现存其他作品版本，包括新增提交或修改已有提交；修改不增加提交次数。作品更新率分母为可用反馈交付样本。
@@ -113,11 +112,11 @@ export function AiLearningAnalyticsMetricGuide({
             <li>
               现存后续版本代码变化率：存在至少一份代码不同于基线的现存后续作品 /
               作品更新样本。仅统一
-              CRLF/LF，保留首尾空白。说明或语言变化可构成更新，不冒充代码文本变化。没有完整编辑历史，不能识别全部“改后又改回”过程，也不能据此推断采纳或理解。
+              换行符形式，保留首尾空白。说明或语言变化可构成更新，不冒充代码文本变化。没有完整编辑历史，不能识别全部“改后又改回”过程，也不能据此推断采纳或理解。
             </li>
             <li>
               负荷下降、前后均无
-              ERROR/WARN、非零负荷持平、负荷上升四类互斥，计数之和等于可对照样本数；各结果比率分母均为可对照样本。不具备端点的任务不可对照，不归入四类。
+              错误/警告、非零负荷持平、负荷上升四类互斥，计数之和等于可对照样本数；各结果比率分母均为可对照样本。不具备端点的任务不可对照，不归入四类。
             </li>
             <li>
               各比率分母为 0 时为未知“—”；分子为 0 且分母大于 0 时显示真实
@@ -128,9 +127,9 @@ export function AiLearningAnalyticsMetricGuide({
         <section>
           <h3 className="font-medium text-zinc-900">负荷与总体结果</h3>
           <p className="mt-2">
-            反馈条目负荷使用 ERROR = 1、WARN = 0.5、INFO =
+            反馈条目负荷使用错误 = 1、警告 = 0.5、提示 =
             0。反馈可能评价源码、说明、协作和实践证据，条目数量还受合并、限条、模型差异影响；它不是缺陷数量或质量认证。“前后均无
-            ERROR/WARN”不等于代码正确。
+            错误/警告”不等于代码正确。
           </p>
           <p className="mt-2">
             {variant === "class" ? "学生列表" : "学生摘要"}

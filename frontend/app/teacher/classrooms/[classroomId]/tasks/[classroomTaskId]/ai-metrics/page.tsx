@@ -7,7 +7,8 @@ import { fetchJson, FetchJsonError } from "@/lib/api/client";
 import { buildErrorDescription, extractRawDetail } from "@/lib/api/error-presenter";
 import { toAiMetricsResponse } from "@/lib/api/types-teacher";
 import { paths } from "@/lib/routes/paths";
-import { getAiStatusLabel, getCommonErrorSummary } from "@/lib/ui/status";
+import { getAiFailureReasonLabel, getAiStatusLabel, getCommonErrorSummary } from "@/lib/ui/status";
+import { getFeedbackTagLabel } from "@/lib/ui/feedback-tags";
 import {
   buildQueryString,
   getSingleSearchParam,
@@ -249,12 +250,12 @@ export default async function AiMetricsPage({ params, searchParams }: AiMetricsP
 
       {viewModel.query.includeTags ? (
         <section className="rounded-lg border border-zinc-200 bg-white p-4">
-          <h2 className="text-sm font-semibold text-zinc-900">Top Tags</h2>
+          <h2 className="text-sm font-semibold text-zinc-900">高频问题标签</h2>
           {tags.length > 0 ? (
             <ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-zinc-700">
               {tags.map((item, index) => (
                 <li key={String(safeGet(item, "tag", `tag-${index}`))}>
-                  {toDisplayText(safeGet(item, "tag", undefined))}: {toDisplayText(safeGet(item, "count", undefined))}
+                  {getFeedbackTagLabel(safeGet(item, "tag", undefined))}: {toDisplayText(safeGet(item, "count", undefined))}
                 </li>
               ))}
             </ul>
@@ -270,17 +271,13 @@ export default async function AiMetricsPage({ params, searchParams }: AiMetricsP
           <ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-zinc-700">
             {viewModel.data.errors.map((item, index) => (
               <li key={String(safeGet(item, "code", `error-${index}`))}>
-                {toDisplayText(safeGet(item, "code", undefined))}: {toDisplayText(safeGet(item, "count", undefined))}
+                {getAiFailureReasonLabel(safeGet(item, "code", undefined))}: {toDisplayText(safeGet(item, "count", undefined))}
               </li>
             ))}
           </ul>
         </section>
       ) : null}
 
-      <details className="rounded-lg border border-zinc-200 bg-zinc-50 p-4">
-        <summary className="cursor-pointer text-sm font-medium text-zinc-800">查看原始 AI 指标 JSON</summary>
-        <pre className="mt-3 overflow-auto text-xs text-zinc-700">{JSON.stringify(viewModel.data.raw, null, 2)}</pre>
-      </details>
     </section>
   );
 }

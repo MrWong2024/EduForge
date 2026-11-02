@@ -37,6 +37,12 @@ export const extractRawDetail = (source: unknown): string | undefined => {
   return message || code || undefined;
 };
 
-export const buildErrorDescription = (summary: string, detail?: string): string =>
-  detail ? `${summary} Detail: ${detail}` : summary;
+export const buildErrorDescription = (
+  summary: string,
+  detail?: string,
+): string => {
+  // Preserve callers while keeping raw details available for internal checks.
+  void detail;
+  return summary;
+};
 

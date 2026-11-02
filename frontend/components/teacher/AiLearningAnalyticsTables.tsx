@@ -147,7 +147,7 @@ export function AiLearningAnalyticsTaskTable({
                     )}
                   </p>
                   <p className="mt-1">
-                    均无 ERROR/WARN：{task.remainedCleanStudentCount} ·{" "}
+                    均无错误/警告：{task.remainedCleanStudentCount} ·{" "}
                     {formatRateWithDenominator(
                       task.remainedCleanRate,
                       task.qualityComparableStudentCount,
@@ -348,7 +348,7 @@ export function AiLearningAnalyticsStudentsTable({
                 <td className="px-3 py-3 tabular-nums text-zinc-800">
                   <p>负荷下降 {student.improvedTasksCount}</p>
                   <p className="mt-1">
-                    均无 ERROR/WARN {student.remainedCleanTasksCount}
+                    均无错误/警告 {student.remainedCleanTasksCount}
                   </p>
                   <p className="mt-1">
                     非零负荷持平 {student.unchangedWithIssuesTasksCount}

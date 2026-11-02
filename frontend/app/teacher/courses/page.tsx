@@ -18,7 +18,7 @@ import {
   toTaskCourseLabelDisplayText,
 } from "@/lib/learning-tasks/course-labels";
 import { paths } from "@/lib/routes/paths";
-import { getCommonErrorSummary } from "@/lib/ui/status";
+import { getCommonErrorSummary, getCourseStatusLabel } from "@/lib/ui/status";
 import { getSingleSearchParam, parsePositiveInt, toDisplayText } from "@/lib/ui/format";
 
 export const metadata: Metadata = {
@@ -285,7 +285,7 @@ export default async function TeacherCoursesPage({ searchParams }: TeacherCourse
                           <p className="text-xs text-zinc-500">{statusMeta.hint}</p>
                         </div>
                       ) : (
-                        <span className="text-zinc-500">{toDisplayText(course.status)}</span>
+                        <span className="text-zinc-500">{getCourseStatusLabel(course.status)}</span>
                       )}
                     </td>
                     <td className="px-4 py-3 align-top">

@@ -13,6 +13,7 @@ import {
 } from "@/lib/api/types-teacher";
 import { paths } from "@/lib/routes/paths";
 import { toDisplayText } from "@/lib/ui/format";
+import { getClassroomStatusLabel } from "@/lib/ui/status";
 
 type EditClassroomFormProps = {
   classroomId: string;
@@ -28,7 +29,6 @@ type EditClassroomFormErrorState = {
 type ClassroomCourseDisplay = {
   title: string;
   details: string[];
-  showCourseIdFallback: boolean;
 };
 
 const getUpdateErrorSummary = (status: number, detail?: string): string => {
@@ -77,7 +77,6 @@ const getClassroomCourseDisplay = (
   return {
     title,
     details,
-    showCourseIdFallback: title === "课程信息暂不可用",
   };
 };
 
@@ -147,7 +146,7 @@ export function EditClassroomForm({ classroomId, initialClassroom }: EditClassro
     <section className="rounded-lg border border-zinc-200 bg-white p-4">
       <h2 className="text-base font-semibold text-zinc-900">编辑班级</h2>
       <p className="mt-1 text-sm text-zinc-600">
-        本页只修改班级基础信息。当前后端仅允许更新班级名称，所属课程与状态为只读展示。
+        本页可修改班级名称，所属课程与状态仅供查看。
       </p>
 
       <div className="mt-4 grid gap-2 text-sm text-zinc-600 md:grid-cols-3">
@@ -156,11 +155,8 @@ export function EditClassroomForm({ classroomId, initialClassroom }: EditClassro
           {courseDisplay.details.length > 0 ? (
             <p className="mt-1 text-xs text-zinc-500">{courseDisplay.details.join(" · ")}</p>
           ) : null}
-          {courseDisplay.showCourseIdFallback ? (
-            <p className="mt-1 text-xs text-zinc-400">课程 ID：{toDisplayText(initialClassroom.courseId)}</p>
-          ) : null}
         </div>
-        <p>当前状态：{toDisplayText(initialClassroom.status)}</p>
+        <p>当前状态：{getClassroomStatusLabel(initialClassroom.status)}</p>
         <p>加入码：{toDisplayText(initialClassroom.joinCode)}</p>
       </div>
 

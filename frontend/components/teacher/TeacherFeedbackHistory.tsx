@@ -8,6 +8,12 @@ import {
   type TeacherFeedbackItem,
 } from "@/lib/api/types-teacher";
 import { toDisplayDate, toDisplayText } from "@/lib/ui/format";
+import {
+  getFeedbackSourceLabel,
+  getFeedbackTypeLabel,
+  getFeedbackSeverityLabel,
+} from "@/lib/ui/feedback-options";
+import { getFeedbackTagLabel } from "@/lib/ui/feedback-tags";
 
 type TeacherFeedbackHistoryProps = {
   items: TeacherFeedbackItem[];
@@ -33,7 +39,10 @@ const FeedbackReadonlyBody = ({ item }: { item: TeacherFeedbackItem }) => (
       建议：{toDisplayText(item.suggestion)}
     </p>
     <p className="mt-1 break-words text-sm text-zinc-700">
-      标签：{item.tags.length > 0 ? item.tags.join(", ") : "—"}
+      标签：
+      {item.tags.length > 0
+        ? item.tags.map(getFeedbackTagLabel).join("，")
+        : "—"}
     </p>
     <div className="mt-1 space-y-1 text-xs text-zinc-500">
       <p>创建于：{toDisplayDate(item.createdAt)}</p>
@@ -98,17 +107,13 @@ export function TeacherFeedbackHistory({
                     <div className="flex flex-wrap items-start justify-between gap-3">
                       <div className="flex flex-wrap gap-2 text-xs">
                         <span className="rounded-full bg-zinc-900 px-2 py-1 font-medium text-white">
-                          {item.source === "TEACHER"
-                            ? "教师反馈"
-                            : item.source === "AI"
-                              ? "AI 辅助反馈"
-                              : "其他反馈"}
+                          {getFeedbackSourceLabel(item.source)}
                         </span>
                         <span className="rounded-full bg-zinc-200 px-2 py-1 text-zinc-700">
-                          {toDisplayText(item.severity)}
+                          {getFeedbackSeverityLabel(item.severity)}
                         </span>
                         <span className="rounded-full bg-zinc-200 px-2 py-1 text-zinc-700">
-                          {toDisplayText(item.type)}
+                          {getFeedbackTypeLabel(item.type)}
                         </span>
                       </div>
                       {canEdit ? (

@@ -219,12 +219,12 @@ export default async function TeacherLearningTasksPage({
       />
 
       <section className="rounded-lg border border-zinc-200 bg-white p-4 text-sm text-zinc-700">
-        <p>本页创建的是 learning task（任务模板）。</p>
+        <p>本页用于创建任务模板。</p>
         <p className="mt-1">
-          班级任务页发布的是 classroom task（班级实例），两者职责分离。
+          在班级任务页选择模板后，可将任务布置到班级。
         </p>
         <p className="mt-1">
-          班级发布页当前只显示 `PUBLISHED` 模板；创建区使用“保存为草稿 /
+          班级发布页当前只显示已发布模板；创建区使用“保存为草稿 /
           发布模板”动作决定初始状态。
         </p>
         <p className="mt-1">先筛选模板，再去班级任务页发布，效率更高。</p>
@@ -239,7 +239,7 @@ export default async function TeacherLearningTasksPage({
         </p>
         {fromClassroomId ? (
           <p className="mt-2 text-sm text-blue-700">
-            你正从班级任务页进入。建议先筛选 `PUBLISHED`
+            你正从班级任务页进入。建议先筛选已发布
             模板，选定后返回班级发布。
           </p>
         ) : null}

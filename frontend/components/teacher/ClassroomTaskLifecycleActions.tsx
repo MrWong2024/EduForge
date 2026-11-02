@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { ErrorState } from "@/components/blocks/ErrorState";
 import { BrowserFetchJsonError, fetchJson } from "@/lib/api/browser-client";
 import { buildErrorDescription, extractRawDetail } from "@/lib/api/error-presenter";
+import { getClassroomTaskStatusLabel } from "@/lib/ui/status";
 import {
   normalizeClassroomTaskStatus,
   type ClassroomTaskStatus,
@@ -29,26 +30,21 @@ type StatusActionTarget = "ACTIVE" | "CLOSED";
 const STATUS_META: Record<
   ClassroomTaskStatus,
   {
-    label: string;
     badgeClassName: string;
   }
 > = {
   ACTIVE: {
-    label: "开放中",
     badgeClassName: "border-emerald-300 bg-emerald-50 text-emerald-700",
   },
   CLOSED: {
-    label: "已关闭",
     badgeClassName: "border-zinc-300 bg-zinc-100 text-zinc-700",
   },
   RECALLED: {
-    label: "已撤回",
     badgeClassName: "border-amber-300 bg-amber-50 text-amber-700",
   },
 };
 
 const UNKNOWN_STATUS_META = {
-  label: "未知状态",
   badgeClassName: "border-zinc-300 bg-zinc-50 text-zinc-600",
 };
 
@@ -143,7 +139,7 @@ export function ClassroomTaskLifecycleActions({
   return (
     <div className="space-y-2">
       <span className={`inline-flex rounded border px-2 py-0.5 text-xs font-semibold ${statusMeta.badgeClassName}`}>
-        {statusMeta.label}
+        {getClassroomTaskStatusLabel(status)}
       </span>
       {submissionWindowBadge ? <div>{submissionWindowBadge}</div> : null}
 
