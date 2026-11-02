@@ -116,18 +116,18 @@ test("feedback labels preserve the existing values and ordering without inferrin
   ]);
   expect(FEEDBACK_SEVERITIES).toEqual(["INFO", "WARN", "ERROR"]);
   expect(FEEDBACK_TYPES.map(getFeedbackTypeLabel)).toEqual([
-    "语法",
-    "代码规范",
-    "设计",
-    "缺陷",
-    "性能",
-    "安全",
-    "其他",
+    "SYNTAX - 语法",
+    "STYLE - 代码规范",
+    "DESIGN - 设计",
+    "BUG - 缺陷",
+    "PERFORMANCE - 性能",
+    "SECURITY - 安全",
+    "OTHER - 其他",
   ]);
   expect(FEEDBACK_SEVERITIES.map(getFeedbackSeverityLabel)).toEqual([
-    "提示",
-    "警告",
-    "错误",
+    "INFO - 提示",
+    "WARN - 警告",
+    "ERROR - 错误",
   ]);
   for (const missing of [undefined, null, "", " \n "]) {
     expect(getFeedbackTypeLabel(missing)).toBe("—");
@@ -153,52 +153,60 @@ test("feedback labels preserve the existing values and ordering without inferrin
 });
 
 test("all preset tags retain their original value order and use readable labels", () => {
+  const expectedOptions = [
+    ["readability", "readability - 可读性"],
+    ["naming", "naming - 命名"],
+    ["style", "style - 代码风格"],
+    ["formatting", "formatting - 代码格式"],
+    ["complexity", "complexity - 复杂度"],
+    ["duplication", "duplication - 重复代码"],
+    ["edge-cases", "edge-cases - 边界情况"],
+    ["null-safety", "null-safety - 空值安全"],
+    ["exception-safety", "exception-safety - 异常安全"],
+    ["performance", "performance - 性能"],
+    ["memory", "memory - 内存使用"],
+    ["security", "security - 安全"],
+    ["correctness", "correctness - 正确性"],
+    ["bug-risk", "bug-risk - 缺陷风险"],
+    ["maintainability", "maintainability - 可维护性"],
+    ["testability", "testability - 可测试性"],
+    ["api-design", "api-design - 接口设计"],
+    ["abstraction", "abstraction - 抽象设计"],
+    ["encapsulation", "encapsulation - 封装"],
+    ["coupling", "coupling - 耦合度"],
+    ["cohesion", "cohesion - 内聚性"],
+    ["concurrency", "concurrency - 并发"],
+    ["io", "io - 输入输出"],
+    ["algorithm", "algorithm - 算法"],
+    ["data-structure", "data-structure - 数据结构"],
+    ["documentation", "documentation - 文档"],
+    ["logging", "logging - 日志"],
+    ["error-handling", "error-handling - 错误处理"],
+    ["validation", "validation - 校验"],
+    ["input-sanitization", "input-sanitization - 输入清理"],
+    ["resource-management", "resource-management - 资源管理"],
+    ["time-complexity", "time-complexity - 时间复杂度"],
+    ["space-complexity", "space-complexity - 空间复杂度"],
+    ["readability-comments", "readability-comments - 注释可读性"],
+    ["modularity", "modularity - 模块化"],
+    ["dead-code", "dead-code - 无效代码"],
+    ["unused", "unused - 未使用内容"],
+    ["other", "other - 其他"],
+  ] as const;
   expect(
     FEEDBACK_TAG_OPTIONS.map(({ value, label }) => [value, label]),
-  ).toEqual([
-    ["readability", "可读性"],
-    ["naming", "命名"],
-    ["style", "代码风格"],
-    ["formatting", "代码格式"],
-    ["complexity", "复杂度"],
-    ["duplication", "重复代码"],
-    ["edge-cases", "边界情况"],
-    ["null-safety", "空值安全"],
-    ["exception-safety", "异常安全"],
-    ["performance", "性能"],
-    ["memory", "内存使用"],
-    ["security", "安全"],
-    ["correctness", "正确性"],
-    ["bug-risk", "缺陷风险"],
-    ["maintainability", "可维护性"],
-    ["testability", "可测试性"],
-    ["api-design", "接口设计"],
-    ["abstraction", "抽象设计"],
-    ["encapsulation", "封装"],
-    ["coupling", "耦合度"],
-    ["cohesion", "内聚性"],
-    ["concurrency", "并发"],
-    ["io", "输入输出"],
-    ["algorithm", "算法"],
-    ["data-structure", "数据结构"],
-    ["documentation", "文档"],
-    ["logging", "日志"],
-    ["error-handling", "错误处理"],
-    ["validation", "校验"],
-    ["input-sanitization", "输入清理"],
-    ["resource-management", "资源管理"],
-    ["time-complexity", "时间复杂度"],
-    ["space-complexity", "空间复杂度"],
-    ["readability-comments", "注释可读性"],
-    ["modularity", "模块化"],
-    ["dead-code", "无效代码"],
-    ["unused", "未使用内容"],
-    ["other", "其他"],
-  ]);
+  ).toEqual(expectedOptions);
+  for (const [value, expected] of expectedOptions) {
+    expect(getFeedbackTagLabel(value)).toBe(expected);
+  }
+  expect(getFeedbackTagLabel("style")).toBe("style - 代码风格");
+  expect(getFeedbackTypeLabel("STYLE")).toBe("STYLE - 代码规范");
+  expect(getFeedbackTagLabel("STYLE")).toBe("STYLE");
+  expect(getFeedbackTypeLabel("style")).toBe("未知类型");
   const input = Object.freeze(["readability", "自定义主题", " CuStOm-Tag "]);
   const before = [...input];
   expect(input.map(getFeedbackTagLabel)).toEqual([
-    "可读性",
+    "readability - 可读性",
     "自定义主题",
     " CuStOm-Tag ",
   ]);

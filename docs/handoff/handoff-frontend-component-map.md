@@ -127,8 +127,8 @@
 | Submission AI operations | `lib/learning-tasks/submission-ai-operations.ts` | 单个挂载提交内的操作标识、串行读写、确认资格与已接纳摘要；无网络、无全局锁，不定义后端 Job 状态转换 |
 | AI Review | `lib/learning-tasks/ai-review.ts` | 快照展示、严格摘要适配及学生轮询资格的纯逻辑，不推断后端授权 |
 | UI Status | `lib/ui/status.ts` | 按领域显示模板、课程、班级、课堂任务、成员关系和账号状态，统一 AI 状态、失败原因及通用错误摘要；仅转换显示标签，不参与状态或资格判断 |
-| Feedback Options | `lib/ui/feedback-options.ts` | 反馈类型、严重程度、来源的中文显示；保留现有选项值、顺序及表单归一化，不把未知值伪装成已知分类 |
-| Feedback Tags | `lib/ui/feedback-tags.ts` | 预设反馈标签的中文 label 与未知非空标签原文显示；value、顺序及业务文本不变 |
+| Feedback Options | `lib/ui/feedback-options.ts` | 已知反馈类型、严重程度按“英文 value - 中文”双语显示，来源仍用中文；保留现有选项值、顺序及表单归一化，不把未知值伪装成已知分类 |
+| Feedback Tags | `lib/ui/feedback-tags.ts` | 预设反馈标签的 label 按“英文 value - 中文”双语显示，helper 直接返回 label，不重复拼接前缀；未知非空标签仍保留原文，value、顺序及业务文本不变 |
 | Task Course Labels | `lib/learning-tasks/course-labels.ts` | 课程分类候选、未分类口径、显示/归一化工具的前端单一来源；不从局部查询结果倒推候选 |
 | Task Template Visibility/Scope | `lib/learning-tasks/template-visibility-scope.ts` | 模板可见性与列表 scope 的值域、文案、normalize；不在页面和表单散落魔法字符串 |
 | Task Template List Sorting | `lib/learning-tasks/template-list-sorting.ts` | 当前页模板默认排序单一来源：mine 最近更新优先，shared 已发布优先后按时间，all 我的模板优先；不复制多套 compare |

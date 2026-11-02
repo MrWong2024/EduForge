@@ -14,19 +14,19 @@ export type FeedbackTypeValue = (typeof FEEDBACK_TYPES)[number];
 export type FeedbackSeverityValue = (typeof FEEDBACK_SEVERITIES)[number];
 
 const FEEDBACK_TYPE_LABELS: Record<FeedbackTypeValue, string> = {
-  SYNTAX: "语法",
-  STYLE: "代码规范",
-  DESIGN: "设计",
-  BUG: "缺陷",
-  PERFORMANCE: "性能",
-  SECURITY: "安全",
-  OTHER: "其他",
+  SYNTAX: "SYNTAX - 语法",
+  STYLE: "STYLE - 代码规范",
+  DESIGN: "DESIGN - 设计",
+  BUG: "BUG - 缺陷",
+  PERFORMANCE: "PERFORMANCE - 性能",
+  SECURITY: "SECURITY - 安全",
+  OTHER: "OTHER - 其他",
 };
 
 const FEEDBACK_SEVERITY_LABELS: Record<FeedbackSeverityValue, string> = {
-  INFO: "提示",
-  WARN: "警告",
-  ERROR: "错误",
+  INFO: "INFO - 提示",
+  WARN: "WARN - 警告",
+  ERROR: "ERROR - 错误",
 };
 
 const getFeedbackLabel = (
