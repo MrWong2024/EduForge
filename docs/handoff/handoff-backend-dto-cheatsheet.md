@@ -183,7 +183,7 @@ my-task-detail 另稳定返回 `participationStatus={readOnly,canSubmit,canReque
   - 只暴露摘要，不含执行记录、prompt、源码副本、原始响应、密钥或请求头；客户端不可写预算版本、用量、覆盖、次数和失败来源。轻量列表不含 aiReview.
 - `QueryClassroomTaskSubmissionsDto` 只有分页校验，默认 `page=1,limit=20`；返回 `{items,total,page,limit}`。item 为 `{id,taskId,classroomTaskId,student,attemptNo,submittedAt,isLate,lateBySeconds,status,aiFeedbackStatus,feedbackCount}`。
 - 列表 `student={id,email,roles,status,name,studentNo,employeeNo}`，后三项文本可为 null。`attemptNo` 是该学生在当前 classroomTaskId 下的独立序号，从 1 递增。
-- 列表 `feedbackCount` 为该 submission 的 Feedback 总条数，涵盖 `AI/TEACHER/SYSTEM`，没有反馈时为 0；它不是 AI-only 的 `feedbackSummary.totalItems`。
+- 列表 `feedbackCount` 为该 submission 的全来源 Feedback 总条数，没有反馈时为 0；它不是 AI-only 的 `feedbackSummary.totalItems`。
 - 详情允许公开 `content.codeText`；课堂任务提交列表不返回 codeText；以上投影均不返回 passwordHash。冷却错误携带公开重试提示 `retryAfterMs/retryAfterSeconds`；触发条件及错误码见 [API Classroom Tasks](./handoff-backend-api-map.md#classroom-tasksclassrooms-子资源)。
 
 ### My-task-detail / AI feedback summary family
@@ -440,7 +440,7 @@ CreateTaskDto / UpdateTaskDto 通过继承 `TaskAiContextDto` 接受嵌套 `aiCo
 | 字段 | 公开合同 |
 | --- | --- |
 | `expectedRevision` | 仅创建必填非负安全整数，拒绝缺失/null/字符串/负数/小数；版本前置不进入 Feedback 业务内容，更新沿用原合同。 |
-| `source` | 公开创建只允许 TEACHER（Equals），AI/SYSTEM/其他值/null 为 400；内部反馈与响应仍使用 AI / TEACHER / SYSTEM，更新不可写。 |
+| `source` | 合法来源仅 AI / TEACHER；公开创建只允许 TEACHER（Equals），其余值及 null 为 400；更新不可写。 |
 | `type` | 创建必填，更新可选；`SYNTAX \| STYLE \| DESIGN \| BUG \| PERFORMANCE \| SECURITY \| OTHER`。 |
 | `severity` | 创建必填，更新可选；`INFO \| WARN \| ERROR`。 |
 | `message` | 创建必填字符串；更新可选字符串且 MinLength(1)，空字符串不合法。 |

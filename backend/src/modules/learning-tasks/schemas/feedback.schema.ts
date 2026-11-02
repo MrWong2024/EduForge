@@ -8,7 +8,6 @@ export type FeedbackDocument = HydratedDocument<Feedback>;
 export enum FeedbackSource {
   AI = 'AI',
   Teacher = 'TEACHER',
-  System = 'SYSTEM',
 }
 
 export enum FeedbackType {

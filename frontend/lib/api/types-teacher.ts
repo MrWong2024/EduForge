@@ -474,7 +474,7 @@ export type TeacherSubmissionContext = {
 export type GroupedTeacherFeedbackItems = {
   teacher: TeacherFeedbackItem[];
   ai: TeacherFeedbackItem[];
-  system: TeacherFeedbackItem[];
+  other: TeacherFeedbackItem[];
 };
 
 export type LearningTrajectoryResponse = {
@@ -2376,26 +2376,25 @@ export const groupTeacherFeedbackItems = (
   const grouped: GroupedTeacherFeedbackItems = {
     teacher: [],
     ai: [],
-    system: [],
+    other: [],
   };
 
   for (const item of items) {
-    const source = (item.source ?? "").toUpperCase();
-    if (source === "TEACHER") {
+    if (item.source === "TEACHER") {
       grouped.teacher.push(item);
       continue;
     }
-    if (source === "AI") {
+    if (item.source === "AI") {
       grouped.ai.push(item);
       continue;
     }
-    grouped.system.push(item);
+    grouped.other.push(item);
   }
 
   return {
     teacher: sortFeedbackByCreatedAtDesc(grouped.teacher),
     ai: sortFeedbackByCreatedAtDesc(grouped.ai),
-    system: sortFeedbackByCreatedAtDesc(grouped.system),
+    other: sortFeedbackByCreatedAtDesc(grouped.other),
   };
 };
 

@@ -521,10 +521,10 @@ describe('Classroom Task Submissions List (e2e)', () => {
       },
       {
         submissionId: new Types.ObjectId(submissionAId),
-        source: FeedbackSource.System,
+        source: FeedbackSource.AI,
         type: FeedbackType.Other,
         severity: FeedbackSeverity.Warn,
-        message: `System feedback ${Date.now()}`,
+        message: `AI feedback ${Date.now()}`,
       },
     ]);
 

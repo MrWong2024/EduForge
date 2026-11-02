@@ -63,7 +63,7 @@
 | PublishTaskStatusButton | `components/teacher/PublishTaskStatusButton.tsx` | 单一模板发布操作；当前 classroomTask 详情页不使用，模板生命周期入口留在模板层 |
 | RemoveStudentButton | `components/teacher/RemoveStudentButton.tsx` | 单个成员移除及动作结果，不负责成员列表或成员关系判定 |
 | TeacherFeedbackForm | `components/teacher/TeacherFeedbackForm.tsx` | 教师反馈创建输入与提交，复用统一反馈选项；评语草稿绑定实际查看版本，刷新不重绑，冲突/未知结果保留草稿并显式核对当前作品与反馈后确认继续；标签可选，不提供 scoreHint 入口，合同与归一化归 API Owner |
-| TeacherFeedbackHistory | `components/teacher/TeacherFeedbackHistory.tsx` | 反馈历史组合与编辑态切换，同一时间只展开一个编辑表单；仅有 id 的教师反馈可修改，AI/SYSTEM 只读 |
+| TeacherFeedbackHistory | `components/teacher/TeacherFeedbackHistory.tsx` | 教师与 AI 反馈历史组合及编辑态切换，同一时间只展开一个编辑表单；仅明确 TEACHER 且有 id 的反馈可修改，AI 只读；未知或缺失来源有记录时才展示“其他反馈（来源未识别）”只读兜底，不作为正式业务来源 |
 | TeacherFeedbackEditForm | `components/teacher/TeacherFeedbackEditForm.tsx` | 单条教师反馈原地编辑、请求/错误状态、保存后退出编辑；与创建表单保持输入能力一致，不展示或编辑 scoreHint，不承担历史列表状态 |
 | TeacherSubmissionDetailPage | `app/teacher/submissions/[submissionId]/page.tsx` | 权威详情/反馈加载、返回导航及共享作品/AI 展示；可选评阅标准复用 TaskRubric，正式实例读源与失败边界见 API Map；AI 申请仅更新局部结果，不自动整页刷新，不以 AI 状态改变人工反馈表单 key；新增表单和历史编辑态归 feedback 组件 |
 

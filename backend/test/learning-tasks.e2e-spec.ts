@@ -112,7 +112,6 @@ describe('LearningTasks (e2e)', () => {
   let feedbackId = '';
   let mismatchedFeedbackId = '';
   let aiFeedbackId = '';
-  let systemFeedbackId = '';
 
   const teacherEmail = `teacher.${Date.now()}@example.com`;
   const otherTeacherEmail = `other.teacher.${Date.now()}@example.com`;
@@ -269,12 +268,9 @@ describe('LearningTasks (e2e)', () => {
       .filter(Boolean)
       .map((id) => new Types.ObjectId(id));
 
-    const feedbackIds = [
-      feedbackId,
-      mismatchedFeedbackId,
-      aiFeedbackId,
-      systemFeedbackId,
-    ].filter(Boolean);
+    const feedbackIds = [feedbackId, mismatchedFeedbackId, aiFeedbackId].filter(
+      Boolean,
+    );
     if (feedbackIds.length > 0) {
       cleanup.push(feedbackModel.deleteMany({ _id: { $in: feedbackIds } }));
     }
@@ -529,26 +525,15 @@ describe('LearningTasks (e2e)', () => {
       .send({ message: 'Should not reveal cross-submission feedback.' })
       .expect(404);
 
-    const [aiFeedback, systemFeedback] = await Promise.all([
-      feedbackModel.create({
-        submissionId: new Types.ObjectId(submissionId),
-        source: FeedbackSource.AI,
-        type: FeedbackType.Bug,
-        severity: FeedbackSeverity.Error,
-        message: `AI readonly feedback ${Date.now()}`,
-        tags: ['logic'],
-      }),
-      feedbackModel.create({
-        submissionId: new Types.ObjectId(submissionId),
-        source: FeedbackSource.System,
-        type: FeedbackType.Other,
-        severity: FeedbackSeverity.Info,
-        message: `System readonly feedback ${Date.now()}`,
-        tags: ['other'],
-      }),
-    ]);
+    const aiFeedback = await feedbackModel.create({
+      submissionId: new Types.ObjectId(submissionId),
+      source: FeedbackSource.AI,
+      type: FeedbackType.Bug,
+      severity: FeedbackSeverity.Error,
+      message: `AI readonly feedback ${Date.now()}`,
+      tags: ['logic'],
+    });
     aiFeedbackId = aiFeedback._id.toString();
-    systemFeedbackId = systemFeedback._id.toString();
 
     const aiUpdate = await teacherAgent
       .patch(
@@ -557,16 +542,6 @@ describe('LearningTasks (e2e)', () => {
       .send({ message: 'Trying to edit AI feedback.' })
       .expect(403);
     expect((aiUpdate.body as InvalidFeedbackTagsResponse).message).toBe(
-      'Only teacher feedback can be updated',
-    );
-
-    const systemUpdate = await teacherAgent
-      .patch(
-        `/api/learning-tasks/submissions/${submissionId}/feedback/${systemFeedbackId}`,
-      )
-      .send({ message: 'Trying to edit system feedback.' })
-      .expect(403);
-    expect((systemUpdate.body as InvalidFeedbackTagsResponse).message).toBe(
       'Only teacher feedback can be updated',
     );
 

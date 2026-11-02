@@ -509,13 +509,6 @@ describe('Classroom Learning Trajectory (e2e)', () => {
         severity: FeedbackSeverity.Info,
         message: `Trajectory teacher feedback ${Date.now()}`,
       },
-      {
-        submissionId: new Types.ObjectId(secondSubmissionBody.id),
-        source: FeedbackSource.System,
-        type: FeedbackType.Other,
-        severity: FeedbackSeverity.Warn,
-        message: `Trajectory system feedback ${Date.now()}`,
-      },
     ]);
 
     const defaultWindowTrajectory = await fetchTrajectory(undefined);

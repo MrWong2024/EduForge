@@ -251,7 +251,7 @@ Global SoT 只保留理解跨 Service workflow 必需的稳定不变量，不追
 - Upstream: 学生任务聚合详情入口。
 - Downstream / Dependencies: `ClassroomModel`、`ClassroomTaskModel`、`TaskModel`、`SubmissionModel`、`EnrollmentService`、`AiFeedbackJobService`、`FeedbackModel`。
 - Consistency / State / Idempotency:
-  - 完成态只对最新提交的完整 TEACHER/AI 反馈集合计算；SYSTEM 不参与，来源优先级 TEACHER > AI，同来源取最严重 ERROR > WARN > INFO。
+  - 完成态只对最新提交的完整 TEACHER/AI 反馈集合计算；来源优先级 TEACHER > AI，同来源取最严重 ERROR > WARN > INFO。
   - 无最新提交得到 NOT_SUBMITTED；最新提交无上述来源反馈得到 NO_FEEDBACK；所选来源 INFO/WARN/ERROR 分别映射 QUALIFIED/QUALIFIED_WITH_WARNINGS/UNQUALIFIED。
   - 关闭反馈明细或截断 preview 不影响完成态计算；无 Job 为 NOT_REQUESTED，不能推成正在执行。
 - Isolation: 校验学生及 Enrollment ACTIVE；全链路按 classroomTaskId，完成态只绑定 `latest.submissionId`，不混用历史 submissions 或其他实例。

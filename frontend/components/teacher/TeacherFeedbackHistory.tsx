@@ -55,7 +55,15 @@ export function TeacherFeedbackHistory({
   const groupedSections = [
     { key: "teacher", title: "教师反馈", items: groupedFeedback.teacher },
     { key: "ai", title: "AI 辅助反馈", items: groupedFeedback.ai },
-    { key: "system", title: "系统反馈", items: groupedFeedback.system },
+    ...(groupedFeedback.other.length > 0
+      ? [
+          {
+            key: "other",
+            title: "其他反馈（来源未识别）",
+            items: groupedFeedback.other,
+          },
+        ]
+      : []),
   ] as const;
 
   if (items.length === 0) {
@@ -79,9 +87,8 @@ export function TeacherFeedbackHistory({
           ) : (
             <ul className="mt-3 space-y-3">
               {section.items.map((item, index) => {
-                const canEdit =
-                  item.source?.toUpperCase() === "TEACHER" && !!item.id;
-                const isEditing = !!item.id && editingFeedbackId === item.id;
+                const canEdit = item.source === "TEACHER" && !!item.id;
+                const isEditing = canEdit && editingFeedbackId === item.id;
 
                 return (
                   <li

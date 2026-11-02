@@ -4,9 +4,11 @@ import {
   toSubmissionDetailResponse,
 } from "../../lib/api/types-student";
 import {
+  groupTeacherFeedbackItems,
   toClassroomTask,
   toClassroomTaskSummary,
   toSubmissionDetailResponse as toTeacherDetail,
+  toTeacherFeedbackListResponse,
 } from "../../lib/api/types-teacher";
 import {
   canSubmitTextTask,
@@ -31,6 +33,67 @@ import {
   toDisplaySubmissionLanguage,
 } from "../../lib/learning-tasks/submission-language";
 import { toDisplayLateDuration } from "../../lib/ui/format";
+
+test("teacher feedback groups keep teacher and AI records in descending creation time without mutating input", () => {
+  const items = toTeacherFeedbackListResponse([
+    {
+      id: "teacher-older",
+      source: "TEACHER",
+      createdAt: "2026-11-01T01:00:00Z",
+    },
+    { id: "ai-older", source: "AI", createdAt: "2026-11-01T02:00:00Z" },
+    {
+      id: "teacher-newer",
+      source: "TEACHER",
+      createdAt: "2026-11-01T03:00:00Z",
+    },
+    { id: "ai-newer", source: "AI", createdAt: "2026-11-01T04:00:00Z" },
+  ]).items;
+  const before = JSON.stringify(items);
+  Object.freeze(items);
+  for (const item of items) Object.freeze(item);
+  const grouped = groupTeacherFeedbackItems(items);
+  expect(grouped.teacher.map((item) => item.id)).toEqual([
+    "teacher-newer",
+    "teacher-older",
+  ]);
+  expect(grouped.ai.map((item) => item.id)).toEqual(["ai-newer", "ai-older"]);
+  expect(grouped.other).toEqual([]);
+  expect(grouped.teacher[0]).toBe(items[2]);
+  expect(grouped.ai[0]).toBe(items[3]);
+  expect(JSON.stringify(items)).toBe(before);
+});
+
+test("unknown and missing feedback sources retain the original records only in the other group", () => {
+  const items = toTeacherFeedbackListResponse([
+    { id: "unknown", source: "UNRECOGNIZED", message: "保留未知来源反馈" },
+    { id: "missing", message: "保留缺失来源反馈" },
+    { id: "lowercase", source: "teacher", message: "不推断正式来源" },
+  ]).items;
+  const grouped = groupTeacherFeedbackItems(items);
+  expect(grouped.teacher).toEqual([]);
+  expect(grouped.ai).toEqual([]);
+  expect(grouped.other).toEqual(items);
+  for (const [index, item] of grouped.other.entries()) {
+    expect(item).toBe(items[index]);
+  }
+});
+
+test("no feedback remains distinguishable from feedback with only an unrecognized source", () => {
+  expect(groupTeacherFeedbackItems([])).toEqual({
+    teacher: [],
+    ai: [],
+    other: [],
+  });
+  const items = toTeacherFeedbackListResponse([
+    { id: "unknown-only", source: "UNRECOGNIZED" },
+  ]).items;
+  const grouped = groupTeacherFeedbackItems(items);
+  expect(grouped.teacher).toEqual([]);
+  expect(grouped.ai).toEqual([]);
+  expect(grouped.other).toHaveLength(1);
+  expect(grouped.other[0]).toBe(items[0]);
+});
 
 test("student task history uses actual createdAt instants and keeps equal-time input order", () => {
   const submissions = [

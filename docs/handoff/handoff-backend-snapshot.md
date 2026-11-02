@@ -41,7 +41,7 @@ backend/
 - `Enrollment`：成员关系唯一权威来源；`classroom.studentIds` 仅 legacy 镜像，不参与授权或统计 fallback。
 - `Task` / `ClassroomTask`：任务模板资产与课堂运行实例拥有独立生命周期；模板共享不转移作者写权限，模板当前状态不重新阻断既有实例运行。
 - `Submission`：学生提交；课堂链路固定以 `classroomTaskId` 为隔离主键，旧通用模板写入口已拒绝；模板级只读查询按教师自有课堂范围收紧，不能充当跨班读取或统计兜底。
-- `Feedback`：统一承载教师、AI 与系统反馈，来源和作者决定各自修改边界。
+- `Feedback`：承载教师与 AI 反馈，来源和作者决定各自修改边界。
 - `AiFeedbackJob`：持久化 AI Feedback 处理生命周期；没有 Job 是正常产品状态，不等于正在处理。
 
 完整字段、状态值、公开投影和校验见 [DTO / Public Data Contract](./handoff-backend-dto-cheatsheet.md)，生命周期与公开权限见 [Backend API Map](./handoff-backend-api-map.md)，内部一致性与协作见 [Service Map](./handoff-backend-service-map.md)。
