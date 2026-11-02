@@ -260,9 +260,9 @@ export function CreateLearningTaskForm() {
             <textarea
               value={description}
               onChange={(event) => setDescription(event.target.value)}
-              rows={4}
+              rows={10}
               placeholder="请输入任务模板描述"
-              className="w-full rounded-md border border-zinc-300 px-3 py-2"
+              className="w-full resize-y overflow-auto rounded-md border border-zinc-300 px-3 py-2"
             />
           </label>
 
@@ -283,7 +283,7 @@ export function CreateLearningTaskForm() {
             <textarea
               value={rubricNotes}
               onChange={(event) => setRubricNotes(event.target.value)}
-              rows={3}
+              rows={8}
               placeholder={`例：检查是否通过继承和多态统一处理不同支付方式，避免在主流程中堆叠类型判断分支。
 关注类的职责划分、接口设计、命名规范和重复代码，要求说明关键设计理由。
 验证应覆盖正常、边界及非法输入，并提供输入、预期结果与实际结果。
