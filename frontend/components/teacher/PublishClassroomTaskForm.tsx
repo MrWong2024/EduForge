@@ -19,6 +19,7 @@ import {
 } from "@/lib/learning-tasks/course-labels";
 import { paths } from "@/lib/routes/paths";
 import { getCandidateRubricSummary } from "@/lib/learning-tasks/rubric";
+import { getDifficultyLabel } from "@/lib/learning-tasks/difficulty";
 import { buildQueryString, getPublisherLabel } from "@/lib/ui/format";
 import { getTaskTemplateStatusLabel } from "@/lib/ui/status";
 
@@ -650,7 +651,8 @@ export function PublishClassroomTaskForm({
             {loadedTasks.map((task) => (
               <option key={task.id ?? task.title} value={task.id}>
                 {task.title ?? "未命名任务"} |{" "}
-                {toDisplayText(task.knowledgeModule)}
+                {toDisplayText(task.knowledgeModule)} | 难度：
+                {getDifficultyLabel(task.difficulty)}
               </option>
             ))}
           </select>
@@ -705,6 +707,9 @@ export function PublishClassroomTaskForm({
                       模块：{toDisplayText(task.knowledgeModule)} | 评阅标准：
                       {rubricSummary}
                     </p>
+                    <p className="mt-1 whitespace-pre-wrap break-words text-xs text-zinc-500">
+                      任务难度：{getDifficultyLabel(task.difficulty)}
+                    </p>
                     <p className="mt-2 text-xs text-zinc-600">
                       描述摘要：{toDescriptionSnippet(task.description)}
                     </p>
@@ -758,6 +763,10 @@ export function PublishClassroomTaskForm({
               <p>
                 <span className="text-zinc-500">模块：</span>
                 {toDisplayText(selectedTask.knowledgeModule)}
+              </p>
+              <p className="min-w-0 whitespace-pre-wrap break-words">
+                <span className="text-zinc-500">任务难度：</span>
+                {getDifficultyLabel(selectedTask.difficulty)}
               </p>
               <div className="md:col-span-2">
                 <p className="mb-1 text-zinc-500">描述：</p>

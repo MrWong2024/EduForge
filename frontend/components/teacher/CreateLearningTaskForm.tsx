@@ -17,6 +17,11 @@ import {
   normalizeTaskCourseLabel,
 } from "@/lib/learning-tasks/course-labels";
 import {
+  TASK_DIFFICULTY_HELP,
+  TASK_DIFFICULTY_OPTIONS,
+  createDifficultyPayload,
+} from "@/lib/learning-tasks/difficulty";
+import {
   TASK_TEMPLATE_VISIBILITIES,
   TASK_TEMPLATE_VISIBILITY_LABELS,
   TASK_TEMPLATE_VISIBILITY_PRIVATE,
@@ -56,6 +61,7 @@ export function CreateLearningTaskForm() {
   const [description, setDescription] = useState("");
   const [knowledgeModule, setKnowledgeModule] = useState("");
   const [courseLabel, setCourseLabel] = useState("");
+  const [difficulty, setDifficulty] = useState("");
   const [visibility, setVisibility] = useState<TaskTemplateVisibility>(
     TASK_TEMPLATE_VISIBILITY_PRIVATE,
   );
@@ -72,6 +78,7 @@ export function CreateLearningTaskForm() {
     setDescription("");
     setKnowledgeModule("");
     setCourseLabel("");
+    setDifficulty("");
     setVisibility(TASK_TEMPLATE_VISIBILITY_PRIVATE);
     setRubricNotes("");
   };
@@ -120,6 +127,7 @@ export function CreateLearningTaskForm() {
       knowledgeModule: trimmedKnowledgeModule,
       visibility,
       status: action === "publish" ? "PUBLISHED" : "DRAFT",
+      ...createDifficultyPayload(difficulty),
     };
     if (normalizedCourseLabel) {
       requestBody.courseLabel = normalizedCourseLabel;
@@ -252,6 +260,23 @@ export function CreateLearningTaskForm() {
               </p>
             </label>
           </div>
+
+          <label className="block text-sm">
+            <span className="mb-1 block text-zinc-700">任务难度（可选）</span>
+            <select
+              value={difficulty}
+              onChange={(event) => setDifficulty(event.target.value)}
+              className="w-full rounded-md border border-zinc-300 px-3 py-2"
+            >
+              <option value="">未设置</option>
+              {TASK_DIFFICULTY_OPTIONS.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+            <p className="mt-1 text-xs text-zinc-500">{TASK_DIFFICULTY_HELP}</p>
+          </label>
 
           <label className="block text-sm">
             <span className="mb-1 block text-zinc-700">描述</span>

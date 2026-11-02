@@ -11,6 +11,7 @@ import {
   getTaskSnapshotMessage,
 } from "@/lib/learning-tasks/ai-review";
 import { SubmissionForm } from "@/components/student/SubmissionForm";
+import { getDifficultyLabel } from "@/lib/learning-tasks/difficulty";
 import { fetchJson, FetchJsonError } from "@/lib/api/client";
 import {
   buildErrorDescription,
@@ -523,6 +524,9 @@ export default async function StudentTaskDetailPage({
           <p>截止时间：{toDisplayDateOrFallback(dueAt)}</p>
           <p>是否允许迟交：{toAllowLateText(allowLate)}</p>
           <p>知识模块：{knowledgeModule}</p>
+          <p className="min-w-0 whitespace-pre-wrap break-words">
+            任务难度：{getDifficultyLabel(viewModel.data.task.difficulty)}
+          </p>
           <p className="flex items-center gap-2">
             <span>最新 AI 状态：</span>
             <StatusBadge badge={latestStatusBadge} />

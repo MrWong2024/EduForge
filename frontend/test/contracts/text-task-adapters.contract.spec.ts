@@ -7,6 +7,7 @@ import {
   groupTeacherFeedbackItems,
   toClassroomTask,
   toClassroomTaskSummary,
+  toLearningTaskOption,
   toSubmissionDetailResponse as toTeacherDetail,
   toTeacherFeedbackListResponse,
 } from "../../lib/api/types-teacher";
@@ -33,6 +34,84 @@ import {
   toDisplaySubmissionLanguage,
 } from "../../lib/learning-tasks/submission-language";
 import { toDisplayLateDuration } from "../../lib/ui/format";
+
+test("template difficulty comes from the top level without changing raw values", () => {
+  for (const difficulty of ["easy", "综合", "  综合\n设计  ", ""]) {
+    const payload = Object.freeze({
+      id: "template-1",
+      difficulty,
+      task: Object.freeze({ difficulty: "hard" }),
+    });
+    const option = toLearningTaskOption(payload);
+    expect(option.difficulty).toBe(difficulty);
+    expect(option.raw).toBe(payload);
+  }
+  for (const difficulty of [undefined, null, 1, true, {}]) {
+    expect(toLearningTaskOption({ difficulty }).difficulty).toBeUndefined();
+  }
+});
+
+test("teacher classroom difficulty uses only the formal task projection", () => {
+  const task = Object.freeze({ difficulty: "  综合\n设计  " });
+  const payload = Object.freeze({
+    task,
+    difficulty: "hard",
+    taskSnapshot: Object.freeze({ difficulty: "medium" }),
+    template: Object.freeze({ difficulty: "easy" }),
+  });
+  const detail = toClassroomTask(payload);
+  expect(detail.difficulty).toBe("  综合\n设计  ");
+  expect(detail.raw).toBe(payload);
+  expect(detail.raw.task).toBe(task);
+  for (const difficulty of [undefined, null, 1, ""]) {
+    const projected = toClassroomTask({ ...payload, task: { difficulty } });
+    expect(projected.difficulty).toBe(difficulty === "" ? "" : undefined);
+  }
+  expect(
+    toClassroomTask({ ...payload, task: undefined }).difficulty,
+  ).toBeUndefined();
+});
+
+test("student difficulty preserves the formal task and server state without live-template fallback", () => {
+  const task = Object.freeze({ difficulty: "综合", title: "发布时标题" });
+  const latest = Object.freeze({ submissionId: "older", attemptNo: 2 });
+  const payload = Object.freeze({
+    task,
+    difficulty: "hard",
+    template: Object.freeze({ difficulty: "easy" }),
+    classroomTask: Object.freeze({ taskSnapshotAvailable: true }),
+    submissions: Object.freeze([
+      Object.freeze({ id: "older", createdAt: "2026-11-01T00:00:00Z" }),
+      Object.freeze({ id: "newer", createdAt: "2026-11-01T01:00:00Z" }),
+    ]),
+    latest,
+    participationStatus: Object.freeze({
+      reason: "ACTIVE",
+      readOnly: false,
+      canSubmit: true,
+      canRequestAiFeedback: false,
+      message: null,
+    }),
+  });
+  const before = JSON.stringify(payload);
+  const detail = toMyTaskDetailResponse(payload);
+  expect(detail.task).toBe(task);
+  expect(detail.task.difficulty).toBe("综合");
+  expect(detail.raw).toBe(payload);
+  expect(detail.latest).toBe(latest);
+  expect(detail.submissions.map((item) => item.id)).toEqual(["newer", "older"]);
+  expect(detail.participationStatus).toEqual({
+    reason: "ACTIVE",
+    readOnly: false,
+    canSubmit: true,
+    canRequestAiFeedback: false,
+    message: null,
+  });
+  expect(
+    toMyTaskDetailResponse({ ...payload, task: {} }).task.difficulty,
+  ).toBeUndefined();
+  expect(JSON.stringify(payload)).toBe(before);
+});
 
 test("teacher feedback groups keep teacher and AI records in descending creation time without mutating input", () => {
   const items = toTeacherFeedbackListResponse([

@@ -30,6 +30,7 @@ import {
 } from "@/lib/learning-tasks/template-visibility-scope";
 import { sortTaskTemplatesByScope } from "@/lib/learning-tasks/template-list-sorting";
 import { getRubricSummary } from "@/lib/learning-tasks/rubric";
+import { getDifficultyLabel } from "@/lib/learning-tasks/difficulty";
 import { getTaskTemplateStatusLabel } from "@/lib/ui/status";
 
 type LearningTaskFiltersProps = {
@@ -551,6 +552,12 @@ export function LearningTaskFilters({
                           <p className="text-xs text-zinc-500">知识模块</p>
                           <p className="text-zinc-700">
                             {toDisplayText(task.knowledgeModule)}
+                          </p>
+                        </div>
+                        <div className="space-y-1">
+                          <p className="text-xs text-zinc-500">任务难度</p>
+                          <p className="whitespace-pre-wrap break-words text-zinc-700">
+                            {getDifficultyLabel(task.difficulty)}
                           </p>
                         </div>
                       </div>

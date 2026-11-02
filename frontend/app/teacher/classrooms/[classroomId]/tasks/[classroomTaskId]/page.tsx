@@ -10,6 +10,7 @@ import {
 import { toClassroomSummary, toClassroomTask } from "@/lib/api/types-teacher";
 import { TaskRubric } from "@/components/learning-tasks/TaskRubric";
 import { getTaskSnapshotMessage } from "@/lib/learning-tasks/ai-review";
+import { getDifficultyLabel } from "@/lib/learning-tasks/difficulty";
 import { paths } from "@/lib/routes/paths";
 import { getCommonErrorSummary } from "@/lib/ui/status";
 import { toDisplayDate, toDisplayText } from "@/lib/ui/format";
@@ -131,6 +132,9 @@ export default async function ClassroomTaskDetailPage({
           <p>学生或教师可在提交详情主动申请 AI 反馈。</p>
           <p>发布内容：{getTaskSnapshotMessage(task.taskSnapshotAvailable)}</p>
           <p>任务名称：{toDisplayText(task.title, "未命名任务")}</p>
+          <p className="min-w-0 whitespace-pre-wrap break-words">
+            任务难度：{getDifficultyLabel(task.difficulty)}
+          </p>
           <p>截止时间：{toDisplayDate(task.dueAt)}</p>
           <p>允许迟交：{toDisplayText(task.allowLate)}</p>
           <p>发布时间：{toDisplayDate(task.publishedAt)}</p>

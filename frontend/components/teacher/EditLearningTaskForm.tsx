@@ -21,6 +21,13 @@ import {
   normalizeTaskCourseLabel,
 } from "@/lib/learning-tasks/course-labels";
 import {
+  TASK_DIFFICULTY_HELP,
+  TASK_DIFFICULTY_OPTIONS,
+  getDifficultyLabel,
+  toDifficultyInputValue,
+  updateDifficultyPayload,
+} from "@/lib/learning-tasks/difficulty";
+import {
   TASK_TEMPLATE_VISIBILITIES,
   TASK_TEMPLATE_VISIBILITY_LABELS,
   TASK_TEMPLATE_VISIBILITY_SHARED,
@@ -167,6 +174,12 @@ export function EditLearningTaskForm({
   const [knowledgeModule, setKnowledgeModule] = useState(
     initialTask.knowledgeModule ?? "",
   );
+  const [difficultyBaseline, setDifficultyBaseline] = useState(
+    initialTask.difficulty,
+  );
+  const [difficulty, setDifficulty] = useState(() =>
+    toDifficultyInputValue(initialTask.difficulty),
+  );
   const [courseLabel, setCourseLabel] = useState(
     initialCourseLabel && initialCourseLabel !== TASK_COURSE_LABEL_UNCLASSIFIED
       ? initialCourseLabel
@@ -207,6 +220,12 @@ export function EditLearningTaskForm({
   const canArchive = !readOnly && ownerCanEdit && currentStatus === "PUBLISHED";
   const isActionPending = isPublishing || isArchiving;
   const effectiveReadOnly = readOnly || !ownerCanEdit;
+  const existingDifficulty = toDifficultyInputValue(difficultyBaseline);
+  const hasCustomDifficulty =
+    existingDifficulty !== "" &&
+    !TASK_DIFFICULTY_OPTIONS.some(
+      (option) => option.value === existingDifficulty,
+    );
 
   const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -261,6 +280,7 @@ export function EditLearningTaskForm({
       visibility,
       rubric: buildUpdateTaskRubric(rubricNotes),
       ...aiContextPatch,
+      ...updateDifficultyPayload(difficultyBaseline, difficulty),
     };
 
     try {
@@ -285,6 +305,8 @@ export function EditLearningTaskForm({
         throw new Error("保存结果无法确认");
       }
       setAiContextBaseline(updated.aiContextRefs ?? []);
+      setDifficultyBaseline(updated.difficulty);
+      setDifficulty(toDifficultyInputValue(updated.difficulty));
       setRubricNotes(getRubricNotes(updated.rubric));
       const suffix = "，评阅标准已更新。";
       setSuccessMessage(`任务模板更新成功${suffix}`);
@@ -478,6 +500,41 @@ export function EditLearningTaskForm({
               </p>
             </label>
           </div>
+
+          <label className="block text-sm">
+            <span className="mb-1 block text-zinc-700">任务难度（可选）</span>
+            {effectiveReadOnly ? (
+              <div className="whitespace-pre-wrap break-words rounded-md border border-zinc-200 bg-zinc-50 px-3 py-2 text-zinc-700">
+                {getDifficultyLabel(difficulty)}
+              </div>
+            ) : (
+              <select
+                value={difficulty}
+                onChange={(event) => setDifficulty(event.target.value)}
+                className="w-full rounded-md border border-zinc-300 px-3 py-2"
+              >
+                <option value="">未设置</option>
+                {TASK_DIFFICULTY_OPTIONS.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+                {hasCustomDifficulty ? (
+                  <option value={existingDifficulty}>
+                    现有值：{getDifficultyLabel(existingDifficulty)}
+                  </option>
+                ) : null}
+              </select>
+            )}
+            {!effectiveReadOnly &&
+            hasCustomDifficulty &&
+            difficulty === existingDifficulty ? (
+              <p className="mt-1 whitespace-pre-wrap break-words text-xs text-zinc-600">
+                现有值：{getDifficultyLabel(existingDifficulty)}
+              </p>
+            ) : null}
+            <p className="mt-1 text-xs text-zinc-500">{TASK_DIFFICULTY_HELP}</p>
+          </label>
 
           <label className="block text-sm">
             <span className="mb-1 block text-zinc-700">描述</span>

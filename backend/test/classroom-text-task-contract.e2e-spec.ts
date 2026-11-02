@@ -487,6 +487,61 @@ describe('A1 classroom text task backend contract (HTTP)', () => {
     expect(await jobs.countDocuments({ taskId: objectId })).toBe(0);
   });
 
+  it('saves, changes, preserves and clears optional template difficulty without a default', async () => {
+    const templatesUrl = '/api/learning-tasks/tasks';
+    const created = await teacherA
+      .post(templatesUrl)
+      .send({
+        ...oldContent,
+        title: namespace + '-difficulty',
+        difficulty: 'easy',
+      })
+      .expect(201);
+    const template = created.body as Resource & { difficulty?: string };
+    taskIds.push(template.id);
+    const objectId = new Types.ObjectId(template.id);
+    const taskUrl = templatesUrl + '/' + template.id;
+    expect(template.difficulty).toBe('easy');
+    expect(
+      (await tasks.collection.findOne({ _id: objectId }))?.difficulty,
+    ).toBe('easy');
+
+    for (const [payload, expected] of [
+      [{ difficulty: 'medium' }, 'medium'],
+      [{ title: namespace + '-difficulty-title-only' }, 'medium'],
+      [{ difficulty: '' }, ''],
+    ] as const) {
+      const updated = await teacherA.patch(taskUrl).send(payload).expect(200);
+      expect((updated.body as { difficulty?: string }).difficulty).toBe(
+        expected,
+      );
+      const detail = await teacherA.get(taskUrl).expect(200);
+      expect((detail.body as { difficulty?: string }).difficulty).toBe(
+        expected,
+      );
+      expect(
+        (await tasks.collection.findOne({ _id: objectId }))?.difficulty,
+      ).toBe(expected);
+    }
+
+    const omitted = await teacherA
+      .post(templatesUrl)
+      .send({
+        title: namespace + '-difficulty-omitted',
+        description: 'Optional difficulty contract',
+        knowledgeModule: 'difficulty-contract',
+      })
+      .expect(201);
+    const omittedTemplate = omitted.body as Resource;
+    taskIds.push(omittedTemplate.id);
+    expect(omitted.body as object).not.toHaveProperty('difficulty');
+    expect(
+      await tasks.collection.findOne({
+        _id: new Types.ObjectId(omittedTemplate.id),
+      }),
+    ).not.toHaveProperty('difficulty');
+  });
+
   it('publishes, preserves each source/note, freezes A and B independently across read chains', async () => {
     taskId = await makeTask(teacherA);
     instanceA = await publish(teacherA, classA, taskId);

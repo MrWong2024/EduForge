@@ -283,6 +283,7 @@ export type DashboardResponse = UnknownRecord & {
 };
 
 export type ClassroomTask = {
+  difficulty?: string;
   taskSnapshotAvailable?: boolean;
   rubric?: Record<string, unknown>;
   id?: string;
@@ -336,6 +337,7 @@ export const LEARNING_TASK_STATUSES = [
 export type LearningTaskStatus = (typeof LEARNING_TASK_STATUSES)[number];
 
 export type CreateLearningTaskRequest = {
+  difficulty?: string;
   title: string;
   description: string;
   knowledgeModule: string;
@@ -347,6 +349,7 @@ export type CreateLearningTaskRequest = {
 };
 
 export type UpdateLearningTaskRequest = {
+  difficulty?: string;
   title: string;
   description: string;
   knowledgeModule: string;
@@ -374,6 +377,7 @@ export type ListPublishableTaskTemplatesRequest = {
 };
 
 export type LearningTaskOption = {
+  difficulty?: string;
   id?: string;
   title?: string;
   description?: string;
@@ -1170,6 +1174,10 @@ export const toClassroomTask = (payload: unknown): ClassroomTask => {
   const settingsRecord = asRecord(safeGet(record, "settings", undefined));
 
   return {
+    difficulty:
+      typeof taskRecord.difficulty === "string"
+        ? taskRecord.difficulty
+        : undefined,
     taskSnapshotAvailable: asBoolean(record.taskSnapshotAvailable),
     rubric:
       taskRecord.rubric &&
@@ -1209,6 +1217,8 @@ export const toLearningTaskOption = (value: unknown): LearningTaskOption => {
   const createdByRecord = asRecord(record.createdBy);
   const rubricRecord = asRecord(record.rubric);
   return {
+    difficulty:
+      typeof record.difficulty === "string" ? record.difficulty : undefined,
     id: asString(record.id) ?? asString(record.taskId),
     title: asString(record.title),
     description: asString(record.description),
