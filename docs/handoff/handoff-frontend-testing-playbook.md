@@ -58,6 +58,7 @@ npm run build
 - 首个资产 `frontend/test/contracts/routes-paths.contract.spec.ts` 验证 `frontend/lib/routes/paths.ts` 的关键静态路径、动态段 URL-safe encoding、`tasksFromClassroom()` 的 classroomId 编码与 `status=PUBLISHED`，以及课堂任务 submissions 的双动态段编码。
 - contracts 使用 `test` / `expect` 与被测纯模块或静态工具公共 API，不使用 Browser fixture，不启动 Browser 或服务，不连接网络/数据库，也不依赖环境变量；Browser evidence 仍须按本文既有最低充分规则另行资格审查。
 - lint/typecheck/build 是代码变化后的静态门禁，不证明登录、Cookie、BFF、请求副作用或真实页面流程。
+- 公开首页复用既有路径合同与静态门禁：核对首页/登录目标、入口无会话或业务数据依赖、登录链接禁用预取，以及构建将 `/` 静态产出；不新增冻结案例文案、卡片数量或 JSX 结构的测试。静态通过不代替下方独立 HTTP、Agent-assisted 或人工证据。
 - lint 配置由 [`frontend/eslint.config.mjs`](../../frontend/eslint.config.mjs) 维护：JavaScript recommended 为基础，TypeScript recommended 在 TS/TSX 范围覆盖相应核心规则；完整 Next Core Web Vitals 与官方 Hooks flat recommended 保留框架及 Hooks/Compiler 检查，现代 React 插件只显式启用迁移所需规则，`import-x` 与 `jsx-a11y-x` 承接现有职责。配置同时维护 TS、TSX、MJS 等文件的解析、globals 和生成产物忽略；具体版本以 package.json/锁文件为准，不引入 type-aware lint 或额外 resolver。
 - TypeScript 承接仅限 TS/TSX：正式 typecheck 负责重复 JSX 属性、未定义 JSX 组件、字符串 ref、`this.isMounted()` 与 class render 无返回；MJS 仍由 ESLint 负责。自动 JSX runtime 下退役 `jsx-uses-react`，JSX 变量使用由 TypeScript ESLint scope/unused-vars 处理；现代组件命名检查不与旧 display-name 全域等价，也不新增 Context 命名要求。旧 no-deprecated 由现代拆分规则与 React 类型共同承担；no-unescaped-entities 作为旧 JSX 文本风格检查明确退役，不宣称 TypeScript 已覆盖。
 - `eslint-config.contract.spec.ts` 通过 ESLint 公共 API 加载真实最终配置，以固定正反例断言代表性规则的 ruleId/severity，并检查 TS/TSX/MJS 覆盖与生成目录忽略；测试支持 MJS 只读取源码做静态 lint，不导入执行。
@@ -82,6 +83,7 @@ npm run build
 - 登录、Session 创建/失效、角色/ownership、DTO、任务发布、Submission、Feedback、AI Feedback 请求与数据库终态，优先由 Backend testing playbook 中的 HTTP E2E 证明。
 - “业务重要”不构成 Browser 升级理由。公开 API 可证明的合同，不在 Browser 再模拟请求矩阵。
 - 前端 API helper/BFF 的静态 wiring 先由源码、typecheck/build 和 [Frontend API map](./handoff-frontend-api-map.md) 核对；只有真实 Browser origin、Cookie、credentials/CORS 或 Browser request behavior 无法由低层证明时，才进入 Browser 候选。
+- 公开首页可用已有 Next CLI 和独立空闲端口做一次性前端 HTTP 检查，临时将现有后端 origin 指向已确认无服务监听的本机地址；GET `/` 应为 200、无登录重定向，HTML 包含品牌、中文语言、演示身份与正确登录目标。该证据不需要 backend、数据库、fixture、假后端或新增持久 runner，也不重新证明完整登录流程。
 
 ## 7. Scripted Browser Governance
 
@@ -159,12 +161,15 @@ npm run test:browser
 
 | 候选链路 | 当前真实路由与目标 |
 |---|---|
+| 公开首页阅读 | `/` 的 `1536×864` 与 `390×844`：首屏及主要操作、案例锚点、details 展开、键盘焦点、长代码/表格局部滚动及无页面横向溢出；停留和阅读无业务 API/模型请求。仅核对登录链接目标，不提交账号或访问真实业务服务 |
 | 教师建课/班与发布 | `/login` → `/teacher/courses` 或 `/teacher/classrooms` → `/teacher/tasks` → `/teacher/classrooms/[classroomId]/tasks`；证明可创建/选择教学容器、创建或选择已发布模板并发布课堂任务 |
 | 教师查看教学状态 | `/teacher/classrooms/[classroomId]/dashboard`，按任务需要进入 submissions、learning-trajectory、review-pack 或 AI metrics；证明当前状态与导航可理解、可操作 |
 | 学生完成任务 | `/login` → `/student/dashboard` → `/student/classrooms/[classroomId]/tasks/[classroomTaskId]` → `/student/submissions/[submissionId]`；证明查看已发布任务、提交代码、查看/请求 AI Feedback，并在产品允许时再次提交 |
 | 教师查看提交与反馈 | `/teacher/classrooms/[classroomId]/tasks/[classroomTaskId]/submissions` → `/teacher/submissions/[submissionId]`；证明教师能进入提交详情并查看或补充反馈 |
 
 这些是候选 smoke，不是每个任务都要全部执行，也不表示尚未执行的流程已通过。未来产品方向不得提前写成当前 smoke。
+
+公开首页在已有可用交互式 Browser 工具时执行上述 Agent-assisted 检查；不下载 Browser、不新增 scripted UI 测试或运行无关 Cookie profile。工具不可用时逐项记为 not_executed，列明未完成页面动作；预置案例的验证记录不计入项目真实验收结果。
 
 文本教学任务的真实前后端 smoke 由 Agent 操作实际师生页面：课堂发布、源码与独立说明保存/历史回读、权限内 AI 申请与实际 stub 反馈、教师人工反馈、学生修订，以及任务关闭后的只读访问。它补充真实页面 wiring、防重复入口、正常冷却、失败后的显式核对与恢复、批阅草稿保护和代表性 CSS viewport 的客观可操作性；不重复完整服务端攻击矩阵或 pure 精确乱序。合成账号、前置、受控 APP Processor 与 ADMIN 精确清理引用 [Backend testing playbook §6.2](./handoff-backend-testing-playbook.md#62-文本教学任务专用-smoke-支持)，不在此复制 fixture 字段。
 
@@ -181,6 +186,7 @@ Human smoke 保留以下唯一职责：
 - 教师是否能快速理解看板、Submission、Feedback 与 Review 类界面并形成教学判断；
 - 页面是否符合 Frontend design baseline 的一致性、可读性与克制改动原则；
 - 真实教学流程是否合理，以及必须由实际教师/学生判断的体验。
+- 公开工程案例是否易懂、协作与验收叙事是否贴合教学，以及视觉是否兼顾既有一致性与 AI 协作氛围；这类签收由用户审阅，客观页面现象与教学理解、视觉判断分开报告。
 
 自动化或 Agent 可以收集客观现象，不能把主观体验、教学专业判断或真实使用合理性伪装成自动化通过。
 

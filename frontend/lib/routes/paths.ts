@@ -1,6 +1,7 @@
 const encodeSegment = (value: string) => encodeURIComponent(value);
 
 export const paths = {
+  home: "/",
   login: "/login",
   teacher: {
     home: "/teacher",

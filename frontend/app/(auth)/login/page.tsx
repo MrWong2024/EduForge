@@ -1,9 +1,11 @@
 import { redirect, unstable_rethrow } from "next/navigation";
+import Link from "next/link";
 import type { ReactNode } from "react";
 import { ErrorState } from "@/components/blocks/ErrorState";
 import { LoginForm } from "@/components/auth/LoginForm";
 import { FetchJsonError } from "@/lib/api/client";
 import { getRoleHomePath, getMe } from "@/lib/auth/session";
+import { paths } from "@/lib/routes/paths";
 
 const isDev = process.env.NODE_ENV !== "production";
 
@@ -62,12 +64,19 @@ function LoginFrame({ children }: { children: ReactNode }) {
       <div className="pointer-events-none absolute inset-0 -z-10 bg-[radial-gradient(circle_at_top,rgba(59,130,246,0.12),transparent_50%)]" />
       <div className="w-full overflow-hidden rounded-2xl border border-zinc-200 bg-white shadow-sm">
         <header className="border-b border-zinc-100 px-6 py-4 text-center md:px-8 md:py-5">
+          <Link
+            href={paths.home}
+            className="mb-4 inline-flex items-center gap-1 rounded text-sm text-blue-700 hover:text-blue-800 focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-blue-600"
+          >
+            <span aria-hidden="true">←</span> 返回首页
+          </Link>
           <h1 className="text-2xl font-semibold tracking-tight text-zinc-900 md:text-3xl">
-            重庆邮电大学智能化教学平台
+            EduForge · 智炼
           </h1>
           <p className="mx-auto mt-1 max-w-xl text-sm leading-5 text-zinc-600">
-            面向教师与学生的统一教学入口，支持课堂任务、AI 反馈与过程性评价。
+            面向 AI 协作编程的教学平台
           </p>
+          <p className="mt-2 text-xs text-zinc-500">重庆邮电大学智能化教学平台</p>
         </header>
 
         <div className="px-6 py-3 md:px-8 md:py-4">

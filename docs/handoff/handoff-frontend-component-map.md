@@ -33,6 +33,7 @@
 
 | Component / Module | File | Responsibility / Boundary |
 |---|---|---|
+| LoginFrame | `app/(auth)/login/page.tsx` | 登录页各状态共享的 EduForge · 智炼品牌与返回首页入口；只承载外壳，不改变页面原有会话探针、角色分流、next 或错误处理 |
 | LoginForm | `components/auth/LoginForm.tsx` | 登录表单、提交/错误状态、合法来源回跳与 role-home 跳转及忘记密码入口；不拥有 forgot/reset 接口合同 |
 | ForgotPasswordForm | `components/auth/ForgotPasswordForm.tsx` | 邮箱输入、空值校验、固定防枚举提示及发送倒计时状态；不推断邮箱是否存在，倒计时不替代后端安全边界 |
 | ResetPasswordForm | `components/auth/ResetPasswordForm.tsx` | 重置链接 token 的消费、新密码与确认输入、前端校验、提交及成功导航；不将 token 持久化 |
@@ -40,6 +41,14 @@
 | AccountProfileCard | `components/account/AccountProfileCard.tsx` | 只读展示当前用户身份资料；不提供资料编辑 |
 | ChangePasswordForm | `components/account/ChangePasswordForm.tsx` | 当前/新/确认密码输入、局部校验与提交状态，成功清空输入并展示结果；会话失效由后端处理 |
 | AccountNavEntry | `components/account/AccountNavEntry.tsx` | Shell 内当前用户身份摘要与账户入口；目标路径由调用方提供 |
+
+## 4.1) Public Entry
+
+| Component / Module | File | Responsibility / Boundary |
+|---|---|---|
+| PublicHomePage | `app/page.tsx` | 静态首页入口及 metadata，组合 PublicHome；不读取会话、Cookie、headers 或业务/模型数据，访问投影见 Route Map |
+| PublicHome | `components/public/PublicHome.tsx` | 品牌导航、首屏、师生价值、账号说明与正常文档流页脚，组合工程案例；使用真实 HTML/CSS 呈现，登录 Link 关闭预取，无业务请求或交互状态框架 |
+| OrbitPassCase | `components/public/OrbitPassCase.tsx` | 就近维护并展示虚构六步协作案例、代码差异、预置验证记录及独立说明/教学反馈；原生 details/summary 仅用于阅读展开，明确外部开发与平台教学边界，不执行案例或调用 API/模型 |
 
 ## 5) Teacher 交互组件
 
