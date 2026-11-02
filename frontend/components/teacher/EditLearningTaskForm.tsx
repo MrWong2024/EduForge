@@ -220,12 +220,6 @@ export function EditLearningTaskForm({
   const canArchive = !readOnly && ownerCanEdit && currentStatus === "PUBLISHED";
   const isActionPending = isPublishing || isArchiving;
   const effectiveReadOnly = readOnly || !ownerCanEdit;
-  const existingDifficulty = toDifficultyInputValue(difficultyBaseline);
-  const hasCustomDifficulty =
-    existingDifficulty !== "" &&
-    !TASK_DIFFICULTY_OPTIONS.some(
-      (option) => option.value === existingDifficulty,
-    );
 
   const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -519,20 +513,8 @@ export function EditLearningTaskForm({
                     {option.label}
                   </option>
                 ))}
-                {hasCustomDifficulty ? (
-                  <option value={existingDifficulty}>
-                    现有值：{getDifficultyLabel(existingDifficulty)}
-                  </option>
-                ) : null}
               </select>
             )}
-            {!effectiveReadOnly &&
-            hasCustomDifficulty &&
-            difficulty === existingDifficulty ? (
-              <p className="mt-1 whitespace-pre-wrap break-words text-xs text-zinc-600">
-                现有值：{getDifficultyLabel(existingDifficulty)}
-              </p>
-            ) : null}
             <p className="mt-1 text-xs text-zinc-500">{TASK_DIFFICULTY_HELP}</p>
           </label>
 

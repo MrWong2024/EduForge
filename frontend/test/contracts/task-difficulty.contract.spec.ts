@@ -61,15 +61,15 @@ test("filter queries use the existing encoder and never send an empty difficulty
   ).toBe("page=1");
 });
 
-test("filter parsing does not normalize stored difficulty or mutate URL arrays", () => {
+test("filter parsing and safe display leave source values and URL arrays unchanged", () => {
   const values = Object.freeze(["easy", "hard"]);
   expect(parseDifficultyFilter(values)).toBeUndefined();
   expect(values).toEqual(["easy", "hard"]);
   for (const value of ["综合", "Easy", " easy "]) {
     expect(parseDifficultyFilter(value)).toBeUndefined();
-    expect(getDifficultyLabel(value)).toBe(value);
-    expect(toDifficultyInputValue(value)).toBe(value);
-    expect(updateDifficultyPayload(value, value)).toEqual({});
+    expect(getDifficultyLabel(value)).toBe("未设置");
+    expect(toDifficultyInputValue(value)).toBe("");
+    expect(updateDifficultyPayload(value, "")).toEqual({});
   }
 });
 
@@ -82,6 +82,9 @@ test("difficulty options keep the teaching labels, storage values and order", ()
   expect(getDifficultyLabel("easy")).toBe("基础");
   expect(getDifficultyLabel("medium")).toBe("进阶");
   expect(getDifficultyLabel("hard")).toBe("挑战");
+  expect(toDifficultyInputValue("easy")).toBe("easy");
+  expect(toDifficultyInputValue("medium")).toBe("medium");
+  expect(toDifficultyInputValue("hard")).toBe("hard");
 });
 
 test("missing, blank and invalid difficulty values remain unset", () => {
@@ -91,10 +94,22 @@ test("missing, blank and invalid difficulty values remain unset", () => {
   }
 });
 
-test("unknown nonempty values preserve exact text without aliases or case guessing", () => {
-  for (const value of ["综合", "EASY", " easy ", "  综合\n设计  ", "<img>"]) {
-    expect(getDifficultyLabel(value)).toBe(value);
-    expect(toDifficultyInputValue(value)).toBe(value);
+test("nonstandard strings display and enter forms as unset without aliases or case guessing", () => {
+  for (const value of [
+    "综合",
+    "基础",
+    "进阶",
+    "挑战",
+    "Easy",
+    "EASY",
+    " easy ",
+    "  综合\n设计  ",
+    "unset",
+    "none",
+    "<img>",
+  ]) {
+    expect(getDifficultyLabel(value)).toBe("未设置");
+    expect(toDifficultyInputValue(value)).toBe("");
   }
 });
 
@@ -116,15 +131,23 @@ test("edit omits unchanged values and sends an explicit empty string to clear", 
   });
 });
 
-test("an unchanged legacy value survives unrelated edits and can be replaced or cleared", () => {
-  expect(updateDifficultyPayload("综合", "综合")).toEqual({});
-  expect(updateDifficultyPayload("综合", "medium")).toEqual({
-    difficulty: "medium",
-  });
-  expect(updateDifficultyPayload("综合", "")).toEqual({ difficulty: "" });
-  expect(updateDifficultyPayload("  综合\n设计  ", "  综合\n设计  ")).toEqual(
-    {},
-  );
+test("unexpected initial values do not write difficulty during unrelated edits", () => {
+  for (const initial of ["综合", "Easy", " easy ", "  综合\n设计  "]) {
+    expect(updateDifficultyPayload(initial, "")).toEqual({});
+    expect(updateDifficultyPayload(initial, "medium")).toEqual({
+      difficulty: "medium",
+    });
+  }
+});
+
+test("request helpers cannot emit custom difficulty values", () => {
+  for (const value of ["综合", "基础", "Easy", " easy ", " \t "]) {
+    expect(createDifficultyPayload(value)).toEqual({});
+    expect(updateDifficultyPayload("medium", value)).toEqual({
+      difficulty: "",
+    });
+    expect(updateDifficultyPayload(value, value)).toEqual({});
+  }
 });
 
 test("difficulty handling leaves input objects and the option catalog unchanged", () => {

@@ -90,8 +90,8 @@
   - 对应后端：`GET/PATCH /api/learning-tasks/tasks/:id`、`POST /publish`、`POST /archive`。
   - 注意：内容更新与生命周期采用各自后端接口，普通保存不构造状态流转；权限与生命周期由后端最终校验。
   - 教师模板类型及 create/detail/update/list 适配保留 `aiContextRefs`；字段缺省表示无引用，非法引用响应使加载/保存确认失败，不回退为空配置。页面创建沿上述 BFF 保存并省略引用，正式 API 及共享请求类型仍支持该字段；编辑仅在引用语义改变时发送完整数组，未变更省略，显式 `[]` 清空；成功响应更新比较基准。完整字段、验证与快照合同见 [Backend DTO ZIP 资料引用配置](./handoff-backend-dto-cheatsheet.md#zip-资料引用配置)。课堂公开接口及学生消费不补取教师模板资料。
-  - `difficulty` 的首期写入 UI 选项由 `lib/learning-tasks/difficulty.ts` 维护：未设置 `""`、基础 `easy`、进阶 `medium`、挑战 `hard`；这是前端约定，后端创建/编辑仍接受既有可选字符串，见 [Task template DTO](./handoff-backend-dto-cheatsheet.md#task-template-dto--response-family)。创建未选时省略字段，选定时发送英文值；编辑未变省略，明确清空发送 `difficulty:""`，不发送 null。未知非空原值以“现有值：…”选项保留，只有主动改选或清空才写入，不做别名、大小写或自动推断。成功创建重置难度，编辑成功按正式响应同步，失败保留草稿。
-  - 模板顶层 `difficulty` 原值进入模板 view model；表单只读、模板列表及发布选择复用同一显示函数：标准值为基础/进阶/挑战，缺失、空白或非法类型为未设置，未知非空字符串原样作安全文本显示并允许换行。难度只用于教学定位，不影响评阅标准或统计校正。
+  - `difficulty` 的写入 UI 仅有四状态，由 `lib/learning-tasks/difficulty.ts` 维护：未设置 `""`、基础 `easy`、进阶 `medium`、挑战 `hard`；后端写入约束见 [Task template DTO](./handoff-backend-dto-cheatsheet.md#task-template-dto--response-family)。创建未选时省略字段，选定时发送英文值；编辑未变省略，明确清空发送 `difficulty:""`，不发送 null 或自定义值。编辑下拉框不提供动态旧值选项，意外未知初值映射为未设置，未改难度时仍省略，不随标题修改隐式清理数据库。成功创建重置难度，编辑成功按正式响应同步，失败保留草稿。
+  - 模板顶层 `difficulty` 原值进入模板 view model，mapper 不转换或改写上游数据，raw 引用保持；表单只读、模板列表、发布选择及师生课堂详情复用同一安全显示函数：只有准确三档显示基础/进阶/挑战，缺失、null、空白、未知字符串或非法类型统一显示未设置。不做别名、大小写或自动判级，也不将安全显示回写数据库。难度只用于教学定位，不影响评阅标准或统计校正。
 - 班级发布候选：`PublishClassroomTaskForm` -> `/api/proxy/classrooms/:id/publishable-task-templates`。
   - 对应后端：`GET /api/classrooms/:id/publishable-task-templates`。
   - 注意：模板可见性、发布资格及本班已发布排除由后端候选接口决定，前端不自行伪造候选全集。当前候选 DTO 不提供 rubric，缺少该字段只能提示到模板详情核对，不能判断模板未填写评阅标准。

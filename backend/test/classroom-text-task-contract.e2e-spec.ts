@@ -41,7 +41,7 @@ const oldContent = {
     'A description\nKeep original external link https://example.invalid/a',
   knowledgeModule: 'old-module',
   courseLabel: 'Java 程序设计',
-  difficulty: 'old difficulty',
+  difficulty: 'easy',
   rubric: { criterion: 'old rubric' },
 };
 const newContent = {
@@ -49,7 +49,7 @@ const newContent = {
   description: 'B changed description',
   knowledgeModule: 'new-module',
   courseLabel: 'Java 程序设计',
-  difficulty: 'new difficulty',
+  difficulty: 'hard',
   rubric: { criterion: 'new rubric' },
 };
 const code =
@@ -507,6 +507,8 @@ describe('A1 classroom text task backend contract (HTTP)', () => {
     ).toBe('easy');
 
     for (const [payload, expected] of [
+      [{ difficulty: 'hard' }, 'hard'],
+      [{ difficulty: 'easy' }, 'easy'],
       [{ difficulty: 'medium' }, 'medium'],
       [{ title: namespace + '-difficulty-title-only' }, 'medium'],
       [{ difficulty: '' }, ''],
@@ -540,6 +542,40 @@ describe('A1 classroom text task backend contract (HTTP)', () => {
         _id: new Types.ObjectId(omittedTemplate.id),
       }),
     ).not.toHaveProperty('difficulty');
+
+    const beforeInvalid = await tasks.collection.findOne({ _id: objectId });
+    const authorCount = await tasks.countDocuments({ createdBy: userIds[0] });
+    for (const difficulty of [
+      null,
+      ' ',
+      '综合',
+      '基础',
+      'Easy',
+      ' easy ',
+      [],
+      ['easy'],
+      {},
+      1,
+    ]) {
+      await teacherA
+        .post(templatesUrl)
+        .send({
+          ...oldContent,
+          title: namespace + '-invalid-difficulty',
+          difficulty,
+        })
+        .expect(400);
+      expect(await tasks.countDocuments({ createdBy: userIds[0] })).toBe(
+        authorCount,
+      );
+      await teacherA
+        .patch(taskUrl)
+        .send({ title: namespace + '-rejected-difficulty-update', difficulty })
+        .expect(400);
+      expect(await tasks.collection.findOne({ _id: objectId })).toEqual(
+        beforeInvalid,
+      );
+    }
   });
 
   it('filters template and publishable lists exactly before pagination without widening visibility', async () => {
@@ -571,15 +607,19 @@ describe('A1 classroom text task backend contract (HTTP)', () => {
         .expect(201);
       const id = (response.body as Resource).id;
       taskIds.push(id);
+      expect((response.body as { difficulty?: string }).difficulty).toBe(
+        difficulty,
+      );
+      expect(
+        (await tasks.collection.findOne({ _id: new Types.ObjectId(id) }))
+          ?.difficulty,
+      ).toBe(difficulty);
       return id;
     };
     const easyA = await createSample(teacherA, 'easy-a', 'easy');
     const easyB = await createSample(teacherA, 'easy-b', 'easy');
     const medium = await createSample(teacherA, 'medium', 'medium');
     const hard = await createSample(teacherA, 'hard', 'hard');
-    const unknown = await createSample(teacherA, 'unknown', '综合');
-    const mixedCase = await createSample(teacherA, 'mixed-case', 'Easy');
-    const padded = await createSample(teacherA, 'padded', ' easy ');
     const empty = await createSample(teacherA, 'empty', '');
     const missing = await createSample(teacherA, 'missing', undefined);
     const shared = await createSample(teacherB, 'shared', 'medium', {
@@ -628,7 +668,6 @@ describe('A1 classroom text task backend contract (HTTP)', () => {
         ...candidateIds,
       ]);
     }
-    const nonstandardIds = [unknown, mixedCase, padded, empty, missing];
     await assertList(templatesUrl, templateQuery, [
       easyA,
       easyB,
@@ -636,7 +675,8 @@ describe('A1 classroom text task backend contract (HTTP)', () => {
       hard,
       shared,
       published,
-      ...nonstandardIds,
+      empty,
+      missing,
     ]);
     await assertList(candidatesUrl, candidateQuery, [
       easyA,
@@ -644,7 +684,8 @@ describe('A1 classroom text task backend contract (HTTP)', () => {
       medium,
       hard,
       shared,
-      ...nonstandardIds,
+      empty,
+      missing,
     ]);
 
     for (const [url, query] of [
@@ -721,6 +762,66 @@ describe('A1 classroom text task backend contract (HTTP)', () => {
     );
     await teacherB.get(candidatesUrl).query({ difficulty: 'easy' }).expect(404);
     await studentA.get(candidatesUrl).query({ difficulty: 'easy' }).expect(403);
+  });
+
+  it('rejects invalid template difficulty for new publication while historical snapshots stay readable and unchanged', async () => {
+    const id = await makeTask(teacherA);
+    const instance = await publish(teacherA, classA, id);
+    const templateId = new Types.ObjectId(id);
+    const instanceId = new Types.ObjectId(instance.id);
+    await instances.collection.updateOne(
+      { _id: instanceId, taskId: templateId },
+      { $set: { 'taskSnapshot.difficulty': 'historical difficulty' } },
+    );
+    const instanceBefore = await instances.collection.findOne({
+      _id: instanceId,
+    });
+    for (const difficulty of [null, '综合']) {
+      // Native writes construct only this spec's legacy compatibility record.
+      await tasks.collection.updateOne(
+        { _id: templateId, createdBy: userIds[0] },
+        { $set: { difficulty } },
+      );
+      const templateBefore = await tasks.collection.findOne({
+        _id: templateId,
+      });
+      const denied = await teacherB
+        .post('/api/classrooms/' + classB.id + '/tasks')
+        .send({ taskId: id })
+        .expect(400);
+      expect((denied.body as { message: string }).message).toBe(
+        '请先修改模板难度，再发布课堂任务。',
+      );
+      expect(
+        await instances.countDocuments({
+          classroomId: new Types.ObjectId(classB.id),
+          taskId: templateId,
+        }),
+      ).toBe(0);
+      const teacherDetail = await teacherA
+        .get('/api/classrooms/' + classA.id + '/tasks/' + instance.id)
+        .expect(200);
+      const studentDetail = await studentA
+        .get(
+          '/api/classrooms/' +
+            classA.id +
+            '/tasks/' +
+            instance.id +
+            '/my-task-detail',
+        )
+        .expect(200);
+      for (const detail of [teacherDetail, studentDetail]) {
+        expect(
+          (detail.body as { task: { difficulty: string } }).task.difficulty,
+        ).toBe('historical difficulty');
+      }
+      expect(await tasks.collection.findOne({ _id: templateId })).toEqual(
+        templateBefore,
+      );
+      expect(await instances.collection.findOne({ _id: instanceId })).toEqual(
+        instanceBefore,
+      );
+    }
   });
 
   it('publishes, preserves each source/note, freezes A and B independently across read chains', async () => {
@@ -1244,6 +1345,14 @@ describe('A1 classroom text task backend contract (HTTP)', () => {
   it('keeps historical reads without backfill, rejects new legacy actions, and kills ineligible jobs without Provider', async () => {
     // Minimal historical shapes are intentional compatibility fixtures, not a new publish path.
     const legacyTask = await makeTask(teacherA);
+    const legacyTaskId = new Types.ObjectId(legacyTask);
+    await tasks.collection.updateOne(
+      { _id: legacyTaskId, createdBy: userIds[0] },
+      { $set: { difficulty: '综合' } },
+    );
+    const legacyTemplateBefore = await tasks.collection.findOne({
+      _id: legacyTaskId,
+    });
     const old = await instances.create({
       classroomId: new Types.ObjectId(classA.id),
       taskId: new Types.ObjectId(legacyTask),
@@ -1252,6 +1361,9 @@ describe('A1 classroom text task backend contract (HTTP)', () => {
       status: 'ACTIVE',
     });
     instanceIds.push(old._id.toString());
+    const legacyInstanceBefore = await instances.collection.findOne({
+      _id: old._id,
+    });
     const saved = await submissions.create({
       taskId: new Types.ObjectId(legacyTask),
       classroomTaskId: old._id,
@@ -1289,6 +1401,26 @@ describe('A1 classroom text task backend contract (HTTP)', () => {
         .expect(200)
     ).body as ClassroomTaskResponseDto;
     expect(oldView.taskSnapshotAvailable).toBe(false);
+    expect(oldView.task.difficulty).toBe('综合');
+    const legacyStudentView = await studentA
+      .get(
+        '/api/classrooms/' +
+          classA.id +
+          '/tasks/' +
+          old._id.toString() +
+          '/my-task-detail',
+      )
+      .expect(200);
+    expect(
+      (legacyStudentView.body as { task: { difficulty: string } }).task
+        .difficulty,
+    ).toBe('综合');
+    expect(await tasks.collection.findOne({ _id: legacyTaskId })).toEqual(
+      legacyTemplateBefore,
+    );
+    expect(await instances.collection.findOne({ _id: old._id })).toEqual(
+      legacyInstanceBefore,
+    );
     const denied = await studentA
       .post(
         '/api/classrooms/' +

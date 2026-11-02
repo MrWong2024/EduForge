@@ -1,11 +1,19 @@
 import { TaskAiContextDto } from './ai-context-ref.dto';
-import { IsIn, IsEnum, IsObject, IsOptional, IsString } from 'class-validator';
+import {
+  IsIn,
+  IsEnum,
+  IsObject,
+  IsOptional,
+  IsString,
+  ValidateIf,
+} from 'class-validator';
 import { Transform } from 'class-transformer';
 import { TaskStatus } from '../schemas/task.schema';
 import { TASK_COURSE_LABELS } from '../task-course-labels.constants';
 import type { TaskCourseLabel } from '../task-course-labels.constants';
 import { TASK_VISIBILITIES } from '../task-template-visibility.constants';
 import type { TaskVisibility } from '../task-template-visibility.constants';
+import { TASK_DIFFICULTY_WRITE_VALUES } from '../task-difficulty-filter.constants';
 
 const trimCourseLabelInput = ({ value }: { value: unknown }): unknown => {
   if (typeof value !== 'string') {
@@ -46,8 +54,9 @@ export class UpdateTaskDto extends TaskAiContextDto {
   @IsIn(TASK_VISIBILITIES)
   visibility?: TaskVisibility;
 
-  @IsOptional()
+  @ValidateIf((_object, value: unknown) => value !== undefined)
   @IsString()
+  @IsIn(TASK_DIFFICULTY_WRITE_VALUES)
   difficulty?: string;
 
   @IsOptional()

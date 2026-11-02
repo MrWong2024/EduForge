@@ -24,7 +24,9 @@ Unit 与 HTTP E2E 可以覆盖同一业务区域，但不得重复承担同一�
 
 `test/submission-edit.e2e-spec.ts` 负责同次作品修改与正式评阅受理的真实 HTTP、版本竞争、首次提交事实、历史兼容及部分失败续行；复用正式鉴权/发布/提交与 spec-owned cleanup，不添加生产测试开关。expectedRevision 变更涉及的既有反馈/AI 请求继续保留各自原业务断言。合同明细引用 [Service Card 08](./handoff-backend-service-map.md#service-card-08)，实际 discovery/执行及退出码归当次报告。
 
-`test/classroom-text-task-contract.e2e-spec.ts` 在既有文本教学、难度写入/清空与发布快照验收内承担模板列表和班级发布候选的难度查询证据：真实 DTO 拒绝、分页前组合过滤、items/total 一致及可见性/ownership 边界。expected 来自显式构造的 fixture ID，复用 spec-owned namespace 和 cleanup；不证明 Browser 操作或导航竞争，查询合同见 [DTO](./handoff-backend-dto-cheatsheet.md#task-template-dto--response-family) 与 [Service](./handoff-backend-service-map.md#service-card-07)。
+`src/modules/learning-tasks/task-difficulty-validation.spec.ts` 不连接数据库，通过实际 CreateTaskDto / UpdateTaskDto 和内存 Mongoose Task 模型验证四状态、仅 undefined 跳过及 null/异常输入拒绝，不以常量数组断言替代真实校验。
+
+`test/classroom-text-task-contract.e2e-spec.ts` 在既有文本教学验收内负责难度四状态写入、省略/清空、非法 POST/PATCH 无新增或字段/时间戳变化、新发布拒绝非法来源，以及历史快照/只读 fallback 可读且不回写；同时保留模板列表与候选的严格查询、分页前组合过滤、items/total 一致和权限证据。expected 来自显式 fixture ID 和锁定合同，复用 spec-owned namespace 与 cleanup；不证明 Browser 操作或导航竞争，字段合同见 [DTO](./handoff-backend-dto-cheatsheet.md#task-template-dto--response-family)，发布边界见 [Service](./handoff-backend-service-map.md#service-card-07)。
 
 AI 反馈介入分析的 `ai-learning-analytics.service.spec.ts` 以独立固定时间线与手算结果覆盖 V1.2 配对、来源/时间缺证、空值和聚合；`test/classroom-ai-learning-analytics.e2e-spec.ts` 负责正式提交→修改→手动申请后的字段读取、三 API 一致性、授权/隔离/筛选、GET 前后持久事实不变及精确清理。统计 E2E 可构造 spec-owned Job/Feedback 完成事实，它证明读取计算，不证明 Provider 执行或真实模型质量；不以当前实现输出生成 expected。现行算法与字段分别归 [Service](./handoff-backend-service-map.md#service-card-08i) / [DTO](./handoff-backend-dto-cheatsheet.md#ai-learning-analytics)，实际执行状态归当次报告。
 

@@ -40,6 +40,7 @@ import {
 import { CreateSubmissionDto } from '../../../learning-tasks/dto/create-submission.dto';
 import { Task, TaskStatus } from '../../../learning-tasks/schemas/task.schema';
 import { TASK_COURSE_LABEL_UNCLASSIFIED } from '../../../learning-tasks/task-course-labels.constants';
+import { TASK_DIFFICULTY_WRITE_VALUES } from '../../../learning-tasks/task-difficulty-filter.constants';
 import {
   TASK_VISIBILITY_PRIVATE,
   TASK_VISIBILITY_SHARED,
@@ -312,6 +313,12 @@ export class ClassroomTasksService {
     }
     if (task.status !== TaskStatus.Published) {
       throw new BadRequestException('Task must be published');
+    }
+    if (
+      task.difficulty !== undefined &&
+      !TASK_DIFFICULTY_WRITE_VALUES.some((value) => value === task.difficulty)
+    ) {
+      throw new BadRequestException('请先修改模板难度，再发布课堂任务。');
     }
 
     const candidateSnapshot = snapshotTask(task);

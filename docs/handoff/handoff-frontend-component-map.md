@@ -53,7 +53,7 @@
 | EditClassroomForm | `components/teacher/EditClassroomForm.tsx` | 只编辑班级基础信息，当前可编辑字段为 `name`；所属课程、状态与加入码只读。通过班级更新能力保存并返回看板；不提供归档、恢复、删除或其他生命周期操作，生命周期动作归 ClassroomLifecycleActions |
 | ClassroomLifecycleActions | `components/teacher/ClassroomLifecycleActions.tsx` | 班级列表生命周期“更多”菜单：ACTIVE 归档/删除，ARCHIVED 恢复/删除；拥有菜单、pending、确认与结果状态，组合 FloatingMoreMenu 并保留当前列表视图；删除限制由后端判定，不混入基础编辑表单 |
 | CreateLearningTaskForm | `components/teacher/CreateLearningTaskForm.tsx` | 模板内容、课程分类、可见性、可选任务难度及单一“评阅标准（可选）”多行文字输入，difficulty/rubric 请求构造复用各自纯 helper；难度成功创建后重置；描述默认10行，评阅标准默认8行，两者均可纵向调整；不提供资料引用输入或添加入口；草稿/发布两种创建动作，无归档创建入口；保存失败保留全部输入，不负责课堂实例发布 |
-| EditLearningTaskForm | `components/teacher/EditLearningTaskForm.tsx` | 描述10行，单一“评阅标准（可选）”文字输入有非空白内容8行、否则3行；编辑态可纵向调整，只读长文本可滚动。可选难度的编辑/只读展示复用共享 helper，保存成功同步正式响应，失败保留草稿；字段请求语义见 API Map。rubric 保存复用纯 helper，成功后从正式响应同步文字；同 taskId 刷新 props 不覆盖草稿，页面按 taskId 重建表单。引用编辑区可见性固定于本次 taskId 首次成功加载的非空引用，清空保存及刷新不隐藏；引用成功保存独立更新比较基准。仅明确身份与作者匹配且状态可编辑时允许写入；保存与发布/归档共用 pending 边界，保留列表返回上下文，不承担课堂实例设置 |
+| EditLearningTaskForm | `components/teacher/EditLearningTaskForm.tsx` | 描述10行，单一“评阅标准（可选）”文字输入有非空白内容8行、否则3行；编辑态可纵向调整，只读长文本可滚动。可选难度仅四状态，无动态自定义旧值选项；编辑/安全显示及请求构造复用共享 helper，未知初值不随其他字段保存而隐式回写，成功同步正式响应、失败保留草稿；字段请求语义见 API Map。rubric 保存复用纯 helper，成功后从正式响应同步文字；同 taskId 刷新 props 不覆盖草稿，页面按 taskId 重建表单。引用编辑区可见性固定于本次 taskId 首次成功加载的非空引用，清空保存及刷新不隐藏；引用成功保存独立更新比较基准。仅明确身份与作者匹配且状态可编辑时允许写入；保存与发布/归档共用 pending 边界，保留列表返回上下文，不承担课堂实例设置 |
 | TaskAiContextRefs | `components/teacher/TaskAiContextRefs.tsx` | 普通多行引用 JSON 编辑、就近结构错误与格式化；只读时有引用才按包展示全部路径，无 JSON/复制控件或空配置占位；不渲染路径链接/HTML，不读 ZIP，不进入学生或课堂实例页 |
 | ai-context-refs | `lib/learning-tasks/ai-context-refs.ts` | 引用基本结构解析、稳定格式化、语义差异与局部作者编辑判断；保持路径及数组顺序，不复制后端 ZIP 安全校验 |
 | TeacherLearningTasksPage | `app/teacher/tasks/page.tsx` | 模板列表 SSR 参数解析、数据加载与外层实际分页链接；难度复用共享筛选解析并传给 LearningTaskFilters，保留列表和来源班级上下文，不在页面过滤已分页结果 |
@@ -136,7 +136,7 @@
 | Task Template Visibility/Scope | `lib/learning-tasks/template-visibility-scope.ts` | 模板可见性与列表 scope 的值域、文案、normalize；不在页面和表单散落魔法字符串 |
 | Task Template List Sorting | `lib/learning-tasks/template-list-sorting.ts` | 当前页模板默认排序单一来源：mine 最近更新优先，shared 已发布优先后按时间，all 我的模板优先；不复制多套 compare |
 | Task Rubric | `lib/learning-tasks/rubric.ts` | 字符串 notes 读取、首尾 trim 与创建/编辑请求构造：创建空白省略 rubric，编辑空白发送 {}；不合并旧对象。共享只读/列表按文字判断填写状态，候选缺字段单独提示核对 |
-| Task Difficulty | `lib/learning-tasks/difficulty.ts` | 前端难度选项目录、统一文本显示、输入值与创建/编辑请求构造，以及独立的精确筛选值解析 helper；由真实模板表单、模板选择/筛选 SSR 与组件及师生课堂详情复用，筛选不清洗原存储/展示值，具体 UI 与请求口径见 Frontend API Map |
+| Task Difficulty | `lib/learning-tasks/difficulty.ts` | 难度四状态的输入、安全显示和创建/编辑请求构造，以及独立的严格查询解析；未知输入只显示未设置，不生成自定义写入或隐式清理原值。由模板表单、模板选择/筛选 SSR 与组件及师生课堂详情复用，具体口径见 Frontend API Map |
 | Submission Language | `lib/learning-tasks/submission-language.ts` | 提交语言选项目录与师生只读 label 映射，不转换请求值 |
 | UI Format | `lib/ui/format.ts` | query/date/display/safeGet 及共享首次提交迟交时长展示工具；不重复实现同类 parse |
 | Proxy Route | `app/api/proxy/[...path]/route.ts` | 正式 BFF 转发模块的修改落点，详细合同归 Frontend API Map；不绕过 proxy 或向其中加入业务逻辑 |

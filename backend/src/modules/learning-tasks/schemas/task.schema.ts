@@ -8,6 +8,7 @@ import {
 } from '../task-template-visibility.constants';
 
 import type { AiContextRef } from '../ai-context/ai-context.types';
+import { TASK_DIFFICULTY_WRITE_VALUES } from '../task-difficulty-filter.constants';
 
 @Schema({ _id: false })
 class TaskAiContextRef {
@@ -48,7 +49,15 @@ export class Task {
   })
   visibility?: string;
 
-  @Prop()
+  @Prop({
+    type: String,
+    cast: false,
+    enum: TASK_DIFFICULTY_WRITE_VALUES,
+    validate: {
+      validator: (value: unknown) => value !== null,
+      message: 'Task difficulty cannot be null',
+    },
+  })
   difficulty?: string;
 
   @Prop({ type: [TaskAiContextRefSchema], default: undefined })
