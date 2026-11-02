@@ -101,7 +101,7 @@ describe('A1 classroom text task backend contract (HTTP)', () => {
       .post('/api/classrooms/' + classroom.id + '/tasks')
       .send({
         taskId: id,
-        settings: { allowLate: true, maxAttempts: 10 },
+        settings: { allowLate: true },
       })
       .expect(201);
     const body = res.body as ClassroomTaskResponseDto;
@@ -492,7 +492,12 @@ describe('A1 classroom text task backend contract (HTTP)', () => {
     instanceA = await publish(teacherA, classA, taskId);
     expect(instanceA.taskSnapshotAvailable).toBe(true);
     expect(instanceA.task).toMatchObject(oldContent);
-    expect(instanceA.settings).toEqual({ allowLate: true, maxAttempts: 10 });
+    expect(instanceA.settings).toEqual({ allowLate: true });
+    expect(
+      await instances.collection.findOne({
+        _id: new Types.ObjectId(instanceA.id),
+      }),
+    ).not.toHaveProperty('settings.maxAttempts');
     expect(
       await instances.collection.findOne({
         _id: new Types.ObjectId(instanceA.id),
@@ -696,13 +701,86 @@ describe('A1 classroom text task backend contract (HTTP)', () => {
     ).toBe(0);
   });
 
+  it('keeps allowLate defaults and false, clears dueAt, and rejects empty PATCH or null allowLate', async () => {
+    const url = '/api/classrooms/' + classA.id + '/tasks';
+    const created: ClassroomTaskResponseDto[] = [];
+    for (const example of [
+      { settings: undefined, allowLate: true },
+      { settings: {}, allowLate: true },
+      { settings: { allowLate: false }, allowLate: false },
+    ]) {
+      const id = await makeTask(teacherA);
+      const response = await teacherA
+        .post(url)
+        .send({
+          taskId: id,
+          ...(example.settings === undefined
+            ? {}
+            : { settings: example.settings }),
+        })
+        .expect(201);
+      const instance = response.body as ClassroomTaskResponseDto;
+      instanceIds.push(instance.id);
+      created.push(instance);
+      expect(instance.settings).toEqual({ allowLate: example.allowLate });
+      const stored = await instances.collection.findOne({
+        _id: new Types.ObjectId(instance.id),
+      });
+      expect(stored?.settings).toEqual({ allowLate: example.allowLate });
+    }
+
+    const instance = created[0];
+    if (!instance) throw new Error('Expected a published classroom task');
+    const taskUrl = url + '/' + instance.id;
+    const dueAt = '2099-01-01T00:00:00.000Z';
+    const updated = (
+      await teacherA
+        .patch(taskUrl)
+        .send({ dueAt, allowLate: false })
+        .expect(200)
+    ).body as ClassroomTaskResponseDto;
+    expect(updated.dueAt).toBe(dueAt);
+    expect(updated.settings).toEqual({ allowLate: false });
+
+    const allowLateOnly = (
+      await teacherA.patch(taskUrl).send({ allowLate: false }).expect(200)
+    ).body as ClassroomTaskResponseDto;
+    expect(allowLateOnly.dueAt).toBe(dueAt);
+    expect(allowLateOnly.settings).toEqual({ allowLate: false });
+
+    const cleared = (
+      await teacherA.patch(taskUrl).send({ dueAt: null }).expect(200)
+    ).body as ClassroomTaskResponseDto;
+    expect(cleared).not.toHaveProperty('dueAt');
+    expect(cleared.settings).toEqual({ allowLate: false });
+    const objectId = new Types.ObjectId(instance.id);
+    const before = await instances.collection.findOne({ _id: objectId });
+    expect(before).not.toHaveProperty('dueAt');
+    expect(before?.settings).toEqual({ allowLate: false });
+    for (const payload of [{}, { allowLate: null }]) {
+      await teacherA.patch(taskUrl).send(payload).expect(400);
+      expect(await instances.collection.findOne({ _id: objectId })).toEqual(
+        before,
+      );
+    }
+  });
+
   it('rejects forbidden public fields and note values with no writes; accepts code-point limit and preserves empty note', async () => {
     const id = await makeTask(teacherA);
+    const taskObjectId = new Types.ObjectId(id);
+    const templateBefore = await tasks.collection.findOne({
+      _id: taskObjectId,
+    });
     const before = await instances.countDocuments({
       classroomId: new Types.ObjectId(classA.id),
     });
     for (const payload of [
       { taskId: id, taskSnapshot: oldContent },
+      ...[2, null].map((maxAttempts) => ({
+        taskId: id,
+        dueAt: '2099-01-01T00:00:00.000Z',
+        settings: { allowLate: false, maxAttempts },
+      })),
       ...[
         'MANUAL',
         'DISABLED',
@@ -725,17 +803,39 @@ describe('A1 classroom text task backend contract (HTTP)', () => {
         classroomId: new Types.ObjectId(classA.id),
       }),
     ).toBe(before);
+    expect(await tasks.collection.findOne({ _id: taskObjectId })).toEqual(
+      templateBefore,
+    );
+    expect(await submissions.countDocuments({ taskId: taskObjectId })).toBe(0);
+    expect(await jobs.countDocuments({ taskId: taskObjectId })).toBe(0);
     const instance = await publish(teacherA, classA, id);
+    const instanceObjectId = new Types.ObjectId(instance.id);
+    const instanceBefore = await instances.collection.findOne({
+      _id: instanceObjectId,
+    });
     for (const payload of [
       { taskSnapshot: newContent },
       { aiFeedbackMode: 'MANUAL' },
       { settings: { aiFeedbackMode: 'MANUAL' } },
+      ...[2, null].map((maxAttempts) => ({
+        maxAttempts,
+        dueAt: '2099-01-01T00:00:00.000Z',
+        allowLate: false,
+      })),
     ]) {
       await teacherA
         .patch('/api/classrooms/' + classA.id + '/tasks/' + instance.id)
         .send(payload)
         .expect(400);
+      expect(
+        await instances.collection.findOne({ _id: instanceObjectId }),
+      ).toEqual(instanceBefore);
     }
+    expect(await tasks.collection.findOne({ _id: taskObjectId })).toEqual(
+      templateBefore,
+    );
+    expect(await submissions.countDocuments({ taskId: taskObjectId })).toBe(0);
+    expect(await jobs.countDocuments({ taskId: taskObjectId })).toBe(0);
     const url =
       '/api/classrooms/' + classA.id + '/tasks/' + instance.id + '/submissions';
     for (const invalid of [
@@ -850,6 +950,7 @@ describe('A1 classroom text task backend contract (HTTP)', () => {
       {
         $set: {
           'settings.aiFeedbackMode': 'DISABLED',
+          'settings.maxAttempts': 10,
           'settings.legacyPrivate': 'hidden',
         },
       },
@@ -874,7 +975,7 @@ describe('A1 classroom text task backend contract (HTTP)', () => {
       list.items.find((item) => item.id === instance.id)?.settings,
       mine.classroomTask.settings,
     ]) {
-      expect(settings).toEqual({ allowLate: true, maxAttempts: 10 });
+      expect(settings).toEqual({ allowLate: true });
     }
     expect(mine.participationStatus.canRequestAiFeedback).toBe(true);
     expect(await instances.collection.findOne({ _id: objectId })).toEqual(

@@ -488,13 +488,13 @@ test("allows an empty note and rejects whitespace-only source", () => {
   ).toBe("  code\n ");
 });
 
-test("keeps snapshot and submission settings without adapting a retired policy", () => {
+test("keeps snapshot and allowLate without projecting retired classroom settings", () => {
   const payload = {
     id: "instance",
     taskSnapshotAvailable: true,
     publishedAt: "2026-10-01T00:00:00.000Z",
     dueAt: "2026-10-20T00:00:00.000Z",
-    settings: { allowLate: false, maxAttempts: 2 },
+    settings: { allowLate: false },
     task: {
       title: "发布标题",
       description: "发布说明",
@@ -507,7 +507,6 @@ test("keeps snapshot and submission settings without adapting a retired policy",
   expect(detail).toMatchObject({
     taskSnapshotAvailable: true,
     allowLate: false,
-    maxAttempts: 2,
     dueAt: "2026-10-20T00:00:00.000Z",
     title: "发布标题",
     description: "发布说明",
@@ -516,24 +515,40 @@ test("keeps snapshot and submission settings without adapting a retired policy",
   expect(list).toMatchObject({
     taskSnapshotAvailable: true,
     allowLate: false,
-    maxAttempts: 2,
   });
-  // A residual field from another environment has no display adapter output.
+  expect(detail.raw).toBe(payload);
+  // Residual classroom settings remain raw facts, not formal adapter output.
   const legacy = {
     ...payload,
-    settings: { ...payload.settings, aiFeedbackMode: "DISABLED" },
+    maxAttempts: 99,
+    settings: {
+      ...payload.settings,
+      maxAttempts: 2,
+      aiFeedbackMode: "DISABLED",
+    },
   };
-  expect(toClassroomTask(legacy)).not.toHaveProperty("aiFeedbackMode");
-  expect(toClassroomTaskSummary(legacy)).toEqual(list);
-  expect(
-    toMyTaskDetailResponse({ classroomTask: legacy }).classroomTask.settings,
-  ).toEqual(payload.settings);
+  const legacyDetail = toClassroomTask(legacy);
+  const legacyList = toClassroomTaskSummary(legacy);
+  expect(legacyDetail).not.toHaveProperty("aiFeedbackMode");
+  expect(legacyDetail).not.toHaveProperty("maxAttempts");
+  expect(legacyList).not.toHaveProperty("maxAttempts");
+  expect(legacyList).toEqual(list);
+  expect(legacyDetail.allowLate).toBe(false);
+  expect(legacyDetail.raw).toBe(legacy);
+  expect(legacyDetail.raw.settings).toBe(legacy.settings);
+  expect(legacyDetail.raw).toHaveProperty("settings.maxAttempts", 2);
+  expect(legacyDetail.raw).toHaveProperty("maxAttempts", 99);
+  const studentPayload = { classroomTask: legacy };
+  const studentDetail = toMyTaskDetailResponse(studentPayload);
+  expect(studentDetail.classroomTask.settings).toEqual({ allowLate: false });
+  expect(studentDetail.raw).toBe(studentPayload);
+  expect(studentDetail.raw.classroomTask).toBe(legacy);
 });
 test("requires explicit snapshot and backend submit permission, independent of AI request permission", () => {
   const detail = toMyTaskDetailResponse({
     classroomTask: {
       taskSnapshotAvailable: true,
-      settings: { allowLate: true, maxAttempts: 2 },
+      settings: { allowLate: true },
     },
     task: { status: "ARCHIVED" },
     participationStatus: {
@@ -546,7 +561,6 @@ test("requires explicit snapshot and backend submit permission, independent of A
   });
   expect(detail.classroomTask.settings).toEqual({
     allowLate: true,
-    maxAttempts: 2,
   });
   expect(detail.participationStatus?.canRequestAiFeedback).toBe(false);
   expect(

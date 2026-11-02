@@ -209,7 +209,6 @@ export type ClassroomTaskSummary = {
   knowledgeModule?: string;
   dueAt?: string;
   allowLate?: boolean;
-  maxAttempts?: number;
   aiStatus?: string;
   taskPublisher?: PublisherSummary | null;
   publishedAt?: string;
@@ -294,7 +293,6 @@ export type ClassroomTask = {
   description?: string;
   dueAt?: string;
   allowLate?: boolean;
-  maxAttempts?: number;
   feedbackEnabled?: boolean;
   taskStatus?: string;
   taskPublisher?: PublisherSummary | null;
@@ -318,7 +316,6 @@ export type PublishClassroomTaskRequest = {
   dueAt?: string;
   settings?: {
     allowLate?: boolean;
-    maxAttempts?: number;
   };
 };
 
@@ -329,7 +326,6 @@ export type UpdateClassroomTaskStatusRequest = {
 export type UpdateClassroomTaskRequest = {
   dueAt?: string | null;
   allowLate?: boolean;
-  maxAttempts?: number | null;
 };
 
 export const LEARNING_TASK_STATUSES = [
@@ -1161,8 +1157,6 @@ export const toClassroomTaskSummary = (
     dueAt: asString(record.dueAt),
     allowLate:
       asBoolean(settingsRecord.allowLate) ?? asBoolean(record.allowLate),
-    maxAttempts:
-      asNumber(settingsRecord.maxAttempts) ?? asNumber(record.maxAttempts),
     aiStatus: asString(record.aiStatus) ?? asString(record.aiFeedbackStatus),
     taskPublisher: toPublisherSummary(record.taskPublisher),
     publishedAt:
@@ -1196,8 +1190,6 @@ export const toClassroomTask = (payload: unknown): ClassroomTask => {
     dueAt: asString(record.dueAt),
     allowLate:
       asBoolean(settingsRecord.allowLate) ?? asBoolean(record.allowLate),
-    maxAttempts:
-      asNumber(settingsRecord.maxAttempts) ?? asNumber(record.maxAttempts),
     feedbackEnabled: asBoolean(settingsRecord.feedbackEnabled),
     taskPublisher: toPublisherSummary(record.taskPublisher),
     taskStatus:

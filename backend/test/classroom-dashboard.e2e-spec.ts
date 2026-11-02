@@ -298,7 +298,6 @@ describe('Classroom Dashboards (e2e)', () => {
         dueAt: new Date(Date.now() + 12 * 60 * 60 * 1000).toISOString(),
         settings: {
           allowLate: true,
-          maxAttempts: 3,
         },
       })
       .expect(201);

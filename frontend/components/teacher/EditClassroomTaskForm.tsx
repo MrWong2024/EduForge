@@ -16,7 +16,6 @@ type EditClassroomTaskFormProps = {
   status?: string;
   dueAt?: string;
   allowLate?: boolean;
-  maxAttempts?: number;
 };
 
 type EditClassroomTaskFormErrorState = {
@@ -53,25 +52,12 @@ const toIsoDateTime = (value: string): string | undefined => {
   return date.toISOString();
 };
 
-const parseMaxAttempts = (value: string): number | null | undefined => {
-  const trimmed = value.trim();
-  if (!trimmed) {
-    return null;
-  }
-  const parsed = Number.parseInt(trimmed, 10);
-  if (!Number.isInteger(parsed) || parsed <= 0) {
-    return undefined;
-  }
-  return parsed;
-};
-
 export function EditClassroomTaskForm({
   classroomId,
   classroomTaskId,
   status,
   dueAt,
   allowLate,
-  maxAttempts,
 }: EditClassroomTaskFormProps) {
   const router = useRouter();
   const [isExpanded, setIsExpanded] = useState(false);
@@ -80,7 +66,6 @@ export function EditClassroomTaskForm({
   const [errorState, setErrorState] = useState<EditClassroomTaskFormErrorState | null>(null);
   const [nextDueAt, setNextDueAt] = useState("");
   const [nextAllowLate, setNextAllowLate] = useState<boolean>(true);
-  const [nextMaxAttempts, setNextMaxAttempts] = useState("");
 
   const statusValue = normalizeClassroomTaskStatus(status) ?? "ACTIVE";
   const canEdit = Boolean(classroomTaskId) && (statusValue === "ACTIVE" || statusValue === "CLOSED");
@@ -88,13 +73,8 @@ export function EditClassroomTaskForm({
   const hasChanges = useMemo(() => {
     const originalDueAt = toDateTimeLocalValue(dueAt);
     const originalAllowLate = typeof allowLate === "boolean" ? allowLate : true;
-    const originalMaxAttempts = typeof maxAttempts === "number" ? String(maxAttempts) : "";
-    return (
-      nextDueAt !== originalDueAt ||
-      nextAllowLate !== originalAllowLate ||
-      nextMaxAttempts !== originalMaxAttempts
-    );
-  }, [allowLate, dueAt, maxAttempts, nextAllowLate, nextDueAt, nextMaxAttempts]);
+    return nextDueAt !== originalDueAt || nextAllowLate !== originalAllowLate;
+  }, [allowLate, dueAt, nextAllowLate, nextDueAt]);
 
   if (!canEdit) {
     return null;
@@ -103,7 +83,6 @@ export function EditClassroomTaskForm({
   const handleExpand = () => {
     setNextDueAt(toDateTimeLocalValue(dueAt));
     setNextAllowLate(typeof allowLate === "boolean" ? allowLate : true);
-    setNextMaxAttempts(typeof maxAttempts === "number" ? String(maxAttempts) : "");
     setIsExpanded(true);
   };
 
@@ -113,7 +92,6 @@ export function EditClassroomTaskForm({
     setSuccessMessage(null);
     setNextDueAt(toDateTimeLocalValue(dueAt));
     setNextAllowLate(typeof allowLate === "boolean" ? allowLate : true);
-    setNextMaxAttempts(typeof maxAttempts === "number" ? String(maxAttempts) : "");
   };
 
   const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
@@ -130,14 +108,6 @@ export function EditClassroomTaskForm({
       return;
     }
 
-    const parsedMaxAttempts = parseMaxAttempts(nextMaxAttempts);
-    if (nextMaxAttempts.trim() && parsedMaxAttempts === undefined) {
-      setErrorState({
-        summary: "最大尝试次数必须为正整数。",
-      });
-      return;
-    }
-
     setIsSubmitting(true);
     setErrorState(null);
     setSuccessMessage(null);
@@ -145,7 +115,6 @@ export function EditClassroomTaskForm({
     const payload: UpdateClassroomTaskRequest = {
       dueAt: dueAtIso ?? null,
       allowLate: nextAllowLate,
-      maxAttempts: parsedMaxAttempts === undefined ? null : parsedMaxAttempts,
     };
 
     try {
@@ -215,20 +184,6 @@ export function EditClassroomTaskForm({
               onChange={(event) => setNextAllowLate(event.target.checked)}
             />
             允许迟交
-          </label>
-
-          <label className="block text-xs text-zinc-700">
-            <span className="mb-1 block">最大尝试次数（可清空）</span>
-            <input
-              type="number"
-              min={1}
-              step={1}
-              inputMode="numeric"
-              value={nextMaxAttempts}
-              onChange={(event) => setNextMaxAttempts(event.target.value)}
-              placeholder="留空表示不限制"
-              className="w-full rounded-md border border-zinc-300 px-2 py-1.5 text-xs"
-            />
           </label>
 
           <div className="flex flex-wrap items-center gap-2">

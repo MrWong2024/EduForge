@@ -40,7 +40,6 @@ export class ClassroomTask {
   @Prop({ type: Object, default: () => ({ allowLate: true }) })
   settings?: {
     allowLate?: boolean;
-    maxAttempts?: number;
   };
 
   @Prop({ type: Types.ObjectId, ref: User.name, required: true })

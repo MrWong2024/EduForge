@@ -74,7 +74,7 @@ export function ClassroomTaskLifecycleActions({
     const confirmMessage =
       targetStatus === "CLOSED"
         ? "确认关闭该课堂任务？关闭后将停止继续提交，已有记录会保留。"
-        : "确认恢复该课堂任务的提交？恢复后学生可继续提交；截止时间、迟交与最大尝试次数不会自动修改。";
+        : "确认恢复该课堂任务的提交？恢复后学生可继续提交；截止时间与迟交设置不会自动修改。";
 
     const confirmed = window.confirm(confirmMessage);
     if (!confirmed) {

@@ -179,7 +179,7 @@ Global SoT 只保留理解跨 Service workflow 必需的稳定不变量，不追
 - Side Effects: 写 ClassroomTask；学生提交委托 LearningTasksService 写 Submission，不创建 AI Job 或自动固定评阅版本。
 - Important Performance / Recovery: 列表用 aggregate 构造页数据与计数；模板发布者批量查 User。提交列表按页批量关联公开用户信息、job 状态及全来源 feedbackCount，缺失计数补零，避免 N+1。
 - SoT: `backend/src/modules/classrooms/classroom-tasks/services/classroom-tasks.service.ts`；`backend/src/modules/classrooms/classroom-tasks/schemas/classroom-task.schema.ts`；`backend/src/modules/classrooms/enrollments/services/enrollment.service.ts`。
-- Boundary / Non-responsibility: 完整状态转换/拒绝与 participationStatus 的公开合同见 [API Map](./handoff-backend-api-map.md#classroom-tasksclassrooms-子资源)，输入与返回数据见 [DTO Cheatsheet](./handoff-backend-dto-cheatsheet.md#classroom-tasksclassrooms-子资源)。公开 settings 使用 allowLate/maxAttempts 白名单，不展开 Mongo Mixed；participation 投影结合快照可用性，不计算截止、迟交或冷却；动作写入口仍是最终校验。
+- Boundary / Non-responsibility: 完整状态转换/拒绝与 participationStatus 的公开合同见 [API Map](./handoff-backend-api-map.md#classroom-tasksclassrooms-子资源)，输入与返回数据见 [DTO Cheatsheet](./handoff-backend-dto-cheatsheet.md#classroom-tasksclassrooms-子资源)。公开 settings 仅白名单投影 allowLate，不展开 Mongo Mixed 残留；participation 投影结合快照可用性，不计算截止、迟交或冷却；动作写入口仍是最终校验。
 
 ## Service Card 08
 

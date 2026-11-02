@@ -137,15 +137,15 @@ my-task-detail 另稳定返回 `participationStatus={readOnly,canSubmit,canReque
 
 | DTO | 字段合同 |
 | --- | --- |
-| `CreateClassroomTaskDto` | 必填 `taskId`（MongoId）；可选 `dueAt`（DateString）；可选 nested `settings` 用 `ValidateNested + Type`，仅接受 `allowLate?`（Boolean）、`maxAttempts?`（整数且 >=1）。`settings.aiFeedbackMode` 已退役，夹带任何值（包括 MANUAL）均由严格白名单返回 400；不保存默认策略或替代字段。发布请求不能指定 taskSnapshot。 |
-| `UpdateClassroomTaskDto` | 至少一个扁平字段：`dueAt?`（DateString，null/空字符串清空）、`allowLate?`（Boolean，null 不合法）、`maxAttempts?`（整数 >=1，null/空字符串清空）。不接受 `taskId/classroomId/publishedAt/createdBy/status/taskSnapshot/aiFeedbackMode` 或 nested `settings`。 |
+| `CreateClassroomTaskDto` | 必填 `taskId`（MongoId）；可选 `dueAt`（DateString）；可选 nested `settings` 用 `ValidateNested + Type`，仅接受 `allowLate?`（Boolean）。省略 settings 或传 {} 时 allowLate 默认 true，显式 false 保留。`settings.maxAttempts` 与 `settings.aiFeedbackMode` 已退役，夹带任何值（包括 null）均由严格白名单返回 400；不保存默认策略或替代字段。发布请求不能指定 taskSnapshot。 |
+| `UpdateClassroomTaskDto` | 至少一个扁平字段：`dueAt?`（DateString，null/空字符串清空）、`allowLate?`（Boolean，null 不合法）；空 PATCH 返回 400。不接受 `taskId/classroomId/publishedAt/createdBy/status/taskSnapshot/aiFeedbackMode/maxAttempts` 或 nested `settings`；退役的 maxAttempts 包括 null 均返回 400，与合法字段混用也整单拒绝。 |
 | `UpdateClassroomTaskStatusDto` | 必填 `status`，`IsIn` 值域 `ACTIVE \| CLOSED \| RECALLED`。允许值不等同于允许状态转换，见 API Owner。 |
 | [QueryClassroomTaskDto](../../backend/src/modules/classrooms/classroom-tasks/dto/query-classroom-task.dto.ts) | 分页校验；可选 `status` 使用 `TaskStatus`（`DRAFT \| PUBLISHED \| ARCHIVED`），不要误当为实例状态筛选枚举。 |
 
-更新的扁平 `allowLate/maxAttempts` 在返回数据中位于 `settings`；清空示例：
+更新的扁平 `allowLate` 在返回数据中位于 `settings`；清空截止时间示例：
 
 ```json
-{"dueAt": null, "maxAttempts": null}
+{"dueAt": null}
 ```
 
 `ClassroomTaskResponseDto`：`{id,classroomId,taskId,taskSnapshotAvailable,status,publishedAt,dueAt?,settings?,createdBy,createdAt,updatedAt,taskPublisher,task}`。
@@ -153,7 +153,7 @@ my-task-detail 另稳定返回 `participationStatus={readOnly,canSubmit,canReque
 - `status: ACTIVE | CLOSED | RECALLED`；普通列表/详情与 my-task-detail 对旧数据缺省按 ACTIVE 兼容输出。
 - `taskPublisher: {id,name?} | null` 来自模板发布者，安全字段仅 id/name。
 - `task={title,description,knowledgeModule,courseLabel?,difficulty?,rubric?,status}`；教学字段取实际快照，缺快照旧实例只作当前模板投影，不能称为发布原文。`status` 仍为当前模板资产状态。`taskSnapshotAvailable:boolean` 仅有实际快照时为 true。
-- 公开 `settings` 仅白名单投影 `allowLate/maxAttempts`，保留原有缺省/可选语义；Mongo Mixed 中残留的旧策略或其它内部字段均不展开透出。发布返回、教师列表/详情及学生详情使用同一公开边界；GET 不回填、不清理、不更新时间戳。
+- 公开 `settings` 仅白名单投影 `allowLate`，保留原有缺省/可选语义；Mongo Mixed 中残留的 maxAttempts、旧策略或其它内部字段均不展开透出。发布、更新返回、教师列表/详情及学生详情使用同一公开边界；GET 不回填、不清理、不更新时间戳。
 - 发布候选的 Query / response 与 Task 模板 family 共用，见[发布候选模板](#发布候选模板)。
 
 ### Submission request / response family
@@ -192,7 +192,7 @@ my-task-detail 另稳定返回 `participationStatus={readOnly,canSubmit,canReque
 
 顶层返回 `{classroom,classroomTask,task,me,submissions,latest,completionStatus,participationStatus}`：
 
-- `classroom={id,name,courseId,status}`；`classroomTask={id,classroomId,taskId,taskSnapshotAvailable,status,publishedAt,dueAt?,settings?}`（settings 使用上述 allowLate/maxAttempts 白名单）；`task={id,title,description,knowledgeModule,courseLabel?,difficulty?,rubric?,status}`；`me={studentId}`。
+- `classroom={id,name,courseId,status}`；`classroomTask={id,classroomId,taskId,taskSnapshotAvailable,status,publishedAt,dueAt?,settings?}`（settings 使用上述 allowLate 白名单）；`task={id,title,description,knowledgeModule,courseLabel?,difficulty?,rubric?,status}`；`me={studentId}`。
 - `submissions[]`：`{id,attemptNo,createdAt,aiFeedbackStatus,feedbackSummary,feedbackItems?}`。
 - `latest`：`{submissionId,attemptNo,aiFeedbackStatus,feedbackSummary,feedbackItems?} | null`；未提交时为 null。
 - `feedbackSummary={totalItems,topTags,severityBreakdown}`，只统计 AI 反馈；`topTags` 为 `{tag,count}[]`；`severityBreakdown={INFO,WARN,ERROR}`。空摘要为总量 0、tags 空数组、三类严重程度计数 0。

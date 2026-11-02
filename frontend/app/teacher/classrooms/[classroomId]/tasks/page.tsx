@@ -365,7 +365,7 @@ export default async function ClassroomTasksPage({
       <section className="rounded-lg border border-zinc-200 bg-white p-4 text-sm text-zinc-700">
         <p>此页管理本班课堂任务。</p>
         <p className="mt-1">
-          这里先选择已发布任务模板，再配置截止时间、迟交与尝试次数等班级实例设置后发布。
+          这里先选择已发布任务模板，再配置截止时间与迟交设置后发布到班级。
         </p>
         <p className="mt-1">
           候选模板按当前班级与筛选条件实时检索，包含你自己的模板与可见共享模板。
@@ -438,7 +438,6 @@ export default async function ClassroomTasksPage({
                 <th className="px-4 py-3">发布内容</th>
                 <th className="px-4 py-3">截止时间</th>
                 <th className="px-4 py-3">允许迟交</th>
-                <th className="px-4 py-3">最大尝试次数</th>
                 <th className="px-4 py-3">模板模块</th>
                 <th className="px-4 py-3">任务状态</th>
                 <th className="px-4 py-3">管理</th>
@@ -513,9 +512,6 @@ export default async function ClassroomTasksPage({
                         : "—"}
                     </td>
                     <td className="px-4 py-3">
-                      {toDisplayText(task.maxAttempts)}
-                    </td>
-                    <td className="px-4 py-3">
                       {toDisplayText(task.knowledgeModule)}
                     </td>
                     <td className="px-4 py-3">
@@ -562,7 +558,6 @@ export default async function ClassroomTasksPage({
                             status={task.status}
                             dueAt={task.dueAt}
                             allowLate={task.allowLate}
-                            maxAttempts={task.maxAttempts}
                           />
                         </div>
                       ) : (

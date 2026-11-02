@@ -102,18 +102,6 @@ const toIsoDateTime = (value: string): string | undefined => {
   return date.toISOString();
 };
 
-const parseOptionalPositiveInt = (value: string): number | undefined | null => {
-  const trimmed = value.trim();
-  if (!trimmed) {
-    return undefined;
-  }
-  const parsed = Number.parseInt(trimmed, 10);
-  if (!Number.isInteger(parsed) || parsed <= 0) {
-    return null;
-  }
-  return parsed;
-};
-
 export function PublishClassroomTaskForm({
   classroomId,
   currentUserId,
@@ -140,7 +128,6 @@ export function PublishClassroomTaskForm({
   const [dueAt, setDueAt] = useState<string>("");
   const [isDueAtPickerActive, setIsDueAtPickerActive] = useState(false);
   const [allowLate, setAllowLate] = useState<boolean>(true);
-  const [maxAttempts, setMaxAttempts] = useState<string>("");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errorState, setErrorState] = useState<PublishErrorState | null>(null);
   const [createdTaskId, setCreatedTaskId] = useState<string | null>(null);
@@ -462,20 +449,10 @@ export function PublishClassroomTaskForm({
       }
 
       const dueAtIso = toIsoDateTime(dueAt);
-      const parsedMaxAttempts = parseOptionalPositiveInt(maxAttempts);
-      if (parsedMaxAttempts === null) {
-        setErrorState({
-          summary: "最大尝试次数必须为正整数。",
-        });
-        return;
-      }
 
       const settings: NonNullable<PublishClassroomTaskRequest["settings"]> = {
         allowLate,
       };
-      if (typeof parsedMaxAttempts === "number") {
-        settings.maxAttempts = parsedMaxAttempts;
-      }
 
       const body: PublishClassroomTaskRequest = {
         taskId: publishTaskId,
@@ -796,7 +773,7 @@ export function PublishClassroomTaskForm({
           </p>
         )}
 
-        <div className="grid gap-4 md:grid-cols-2">
+        <div className="grid gap-4">
           <label className="block text-sm">
             <span className="mb-1 block text-zinc-700">截止时间</span>
             <input
@@ -806,22 +783,6 @@ export function PublishClassroomTaskForm({
               onChange={(event) => setDueAt(event.target.value)}
               onFocus={() => setIsDueAtPickerActive(true)}
               onBlur={() => setIsDueAtPickerActive(Boolean(dueAt))}
-              className="w-full rounded-md border border-zinc-300 px-3 py-2"
-            />
-          </label>
-
-          <label className="block text-sm">
-            <span className="mb-1 block text-zinc-700">
-              最大尝试次数（可选）
-            </span>
-            <input
-              type="number"
-              min={1}
-              step={1}
-              inputMode="numeric"
-              value={maxAttempts}
-              onChange={(event) => setMaxAttempts(event.target.value)}
-              placeholder="留空表示按系统默认"
               className="w-full rounded-md border border-zinc-300 px-3 py-2"
             />
           </label>

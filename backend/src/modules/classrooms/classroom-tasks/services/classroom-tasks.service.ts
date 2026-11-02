@@ -320,9 +320,6 @@ export class ClassroomTasksService {
     const dueAt = dto.dueAt ? new Date(dto.dueAt) : undefined;
     const settings = {
       allowLate: dto.settings?.allowLate ?? true,
-      ...(dto.settings?.maxAttempts !== undefined
-        ? { maxAttempts: dto.settings.maxAttempts }
-        : {}),
     };
 
     try {
@@ -386,10 +383,9 @@ export class ClassroomTasksService {
       );
     }
 
-    const hasDueAt = Object.hasOwn(dto, 'dueAt');
-    const hasAllowLate = Object.hasOwn(dto, 'allowLate');
-    const hasMaxAttempts = Object.hasOwn(dto, 'maxAttempts');
-    if (!hasDueAt && !hasAllowLate && !hasMaxAttempts) {
+    const hasDueAt = dto.dueAt !== undefined;
+    const hasAllowLate = dto.allowLate !== undefined;
+    if (!hasDueAt && !hasAllowLate) {
       throw new BadRequestException('At least one updatable field is required');
     }
 
@@ -405,13 +401,6 @@ export class ClassroomTasksService {
     }
     if (hasAllowLate) {
       setPatch['settings.allowLate'] = dto.allowLate;
-    }
-    if (hasMaxAttempts) {
-      if (dto.maxAttempts === null || dto.maxAttempts === undefined) {
-        unsetPatch['settings.maxAttempts'] = 1;
-      } else {
-        setPatch['settings.maxAttempts'] = dto.maxAttempts;
-      }
     }
 
     const updatePatch: {
@@ -1311,7 +1300,6 @@ export class ClassroomTasksService {
         dueAt: classroomTask.dueAt,
         settings: {
           allowLate: classroomTask.settings?.allowLate,
-          maxAttempts: classroomTask.settings?.maxAttempts,
         },
         taskSnapshotAvailable: Boolean(classroomTask.taskSnapshot),
       },
@@ -1878,7 +1866,6 @@ export class ClassroomTasksService {
       dueAt: classroomTask.dueAt,
       settings: {
         allowLate: classroomTask.settings?.allowLate,
-        maxAttempts: classroomTask.settings?.maxAttempts,
       },
       taskSnapshotAvailable: Boolean(classroomTask.taskSnapshot),
       createdBy: classroomTask.createdBy.toString(),

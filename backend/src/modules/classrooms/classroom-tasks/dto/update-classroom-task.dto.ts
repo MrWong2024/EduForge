@@ -2,9 +2,7 @@ import { Transform } from 'class-transformer';
 import {
   IsBoolean,
   IsDateString,
-  IsInt,
   IsOptional,
-  Min,
   ValidateIf,
 } from 'class-validator';
 
@@ -21,11 +19,4 @@ export class UpdateClassroomTaskDto {
   @ValidateIf((_, value) => value !== undefined)
   @IsBoolean()
   allowLate?: boolean;
-
-  @IsOptional()
-  @Transform(({ value }) => toNullWhenEmpty(value as unknown))
-  @ValidateIf((_, value) => value !== null && value !== undefined)
-  @IsInt()
-  @Min(1)
-  maxAttempts?: number | null;
 }

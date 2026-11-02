@@ -164,7 +164,6 @@ export type MyTaskDetailResponse = {
     taskSnapshotAvailable?: boolean;
     settings: {
       allowLate?: boolean;
-      maxAttempts?: number;
     };
   };
   task: UnknownRecord;
@@ -518,7 +517,6 @@ export const toMyTaskDetailResponse = (
         asNullableBoolean(classroomTask.taskSnapshotAvailable) ?? undefined,
       settings: {
         allowLate: asNullableBoolean(settings.allowLate) ?? undefined,
-        maxAttempts: asNumber(settings.maxAttempts),
       },
     },
     task: asRecord(safeGet(record, "task", undefined)),

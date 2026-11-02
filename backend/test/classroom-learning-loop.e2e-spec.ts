@@ -283,7 +283,6 @@ describe('Classroom Learning Loop (e2e)', () => {
         dueAt: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
         settings: {
           allowLate: false,
-          maxAttempts: 2,
         },
       })
       .expect(201);
