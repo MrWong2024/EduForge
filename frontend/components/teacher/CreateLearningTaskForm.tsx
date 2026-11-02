@@ -284,7 +284,10 @@ export function CreateLearningTaskForm() {
               value={rubricNotes}
               onChange={(event) => setRubricNotes(event.target.value)}
               rows={3}
-              placeholder="使用多态统一处理不同支付方式；说明关键设计理由，并提供正常输入与异常输入的验证记录。"
+              placeholder={`例：检查是否通过继承和多态统一处理不同支付方式，避免在主流程中堆叠类型判断分支。
+关注类的职责划分、接口设计、命名规范和重复代码，要求说明关键设计理由。
+验证应覆盖正常、边界及非法输入，并提供输入、预期结果与实际结果。
+评阅时结合源码和验证记录，说明已经达到的要求、存在的问题及必要的改进方向；材料不足的部分应说明判断边界。`}
               className="w-full resize-y overflow-auto rounded-md border border-zinc-300 px-3 py-2"
             />
             <p className="mt-1 text-xs text-zinc-500">
