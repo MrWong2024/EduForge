@@ -6,6 +6,9 @@ describe('AI feedback prompt constraints', () => {
     const systemPrompt = buildSystemPrompt();
 
     expect(systemPrompt).toContain(
+      '本次评阅提供定性反馈。依据任务说明和评阅标准，说明达成情况、具体依据及必要的改进建议，不主动生成数字成绩、分项分数或加权总分。',
+    );
+    expect(systemPrompt).toContain(
       'items length must be 1; only when a second issue category is clearly independent and cannot be merged may items length be 2',
     );
     expect(systemPrompt).toContain('Never output more than 2 items');
@@ -186,6 +189,7 @@ describe('AI feedback prompt constraints', () => {
     const systemPrompt = buildSystemPrompt();
 
     expect(userPrompt).toContain(`TaskRubric: ${JSON.stringify(rubric)}`);
+    expect(userPrompt).toContain('=== 课堂发布的任务说明与评阅标准 ===');
     expect(userPrompt).toContain(`AIUsageDeclaration: ${declaration}`);
     expect(userPrompt).toContain(
       [

@@ -52,12 +52,12 @@
 | CreateClassroomForm | `components/teacher/CreateClassroomForm.tsx` | 建班表单及局部输入/提交状态，不负责班级列表加载；名称示例不自动成为输入值 |
 | EditClassroomForm | `components/teacher/EditClassroomForm.tsx` | 只编辑班级基础信息，当前可编辑字段为 `name`；所属课程、状态与加入码只读。通过班级更新能力保存并返回看板；不提供归档、恢复、删除或其他生命周期操作，生命周期动作归 ClassroomLifecycleActions |
 | ClassroomLifecycleActions | `components/teacher/ClassroomLifecycleActions.tsx` | 班级列表生命周期“更多”菜单：ACTIVE 归档/删除，ARCHIVED 恢复/删除；拥有菜单、pending、确认与结果状态，组合 FloatingMoreMenu 并保留当前列表视图；删除限制由后端判定，不混入基础编辑表单 |
-| CreateLearningTaskForm | `components/teacher/CreateLearningTaskForm.tsx` | 模板内容、课程分类、可见性及基础 rubric 配置；不提供资料引用输入或添加入口；草稿/发布两种创建动作，无归档创建入口；保存失败保留全部输入，不负责课堂实例发布 |
-| EditLearningTaskForm | `components/teacher/EditLearningTaskForm.tsx` | 描述10行，评分说明有非空白内容8行、否则3行；编辑态可纵向调整，只读长文本可滚动。引用编辑区可见性固定于本次 taskId 首次成功加载的非空引用，清空保存及刷新不隐藏；成功保存独立更新比较基准，刷新 props 不覆盖草稿，页面按 taskId 重建表单。仅明确身份与作者匹配且状态可编辑时允许写入；保存与发布/归档共用 pending 边界，保留列表返回上下文，不承担课堂实例设置 |
+| CreateLearningTaskForm | `components/teacher/CreateLearningTaskForm.tsx` | 模板内容、课程分类、可见性及单一“评阅标准（可选）”多行文字输入，rubric 请求构造复用纯 helper；不提供资料引用输入或添加入口；草稿/发布两种创建动作，无归档创建入口；保存失败保留全部输入，不负责课堂实例发布 |
+| EditLearningTaskForm | `components/teacher/EditLearningTaskForm.tsx` | 描述10行，单一“评阅标准（可选）”文字输入有非空白内容8行、否则3行；编辑态可纵向调整，只读长文本可滚动。rubric 保存复用纯 helper，成功后从正式响应同步文字；同 taskId 刷新 props 不覆盖草稿，页面按 taskId 重建表单。引用编辑区可见性固定于本次 taskId 首次成功加载的非空引用，清空保存及刷新不隐藏；引用成功保存独立更新比较基准。仅明确身份与作者匹配且状态可编辑时允许写入；保存与发布/归档共用 pending 边界，保留列表返回上下文，不承担课堂实例设置 |
 | TaskAiContextRefs | `components/teacher/TaskAiContextRefs.tsx` | 普通多行引用 JSON 编辑、就近结构错误与格式化；只读时有引用才按包展示全部路径，无 JSON/复制控件或空配置占位；不渲染路径链接/HTML，不读 ZIP，不进入学生或课堂实例页 |
 | ai-context-refs | `lib/learning-tasks/ai-context-refs.ts` | 引用基本结构解析、稳定格式化、语义差异与局部作者编辑判断；保持路径及数组顺序，不复制后端 ZIP 安全校验 |
-| LearningTaskFilters | `components/teacher/LearningTaskFilters.tsx` | 模板视图/筛选的 URL 状态、分页、列表展示与编辑/查看入口；桌面五列、窄屏纵向条目，无需横向滚动；保留列表返回上下文，筛选后回首屏；复用共享可见性和排序模块，不在当前页伪造完整候选或发起发布/归档 |
-| PublishClassroomTaskForm | `components/teacher/PublishClassroomTaskForm.tsx` | 可见已发布模板的筛选、候选追加加载、选择状态与实例发布；筛选变化重置候选，课程分类复用共享候选；发布者来源与已选模板摘要由本组件展示；候选未提供 rubric 时提示到模板详情核对，不宣称未配置。实例截止/迟交/次数属于此表单；不提供 AI 策略选择，不创建/编辑模板，不自行判定后端候选全集 |
+| LearningTaskFilters | `components/teacher/LearningTaskFilters.tsx` | 模板视图/筛选的 URL 状态、分页、列表展示与编辑/查看入口；“评阅标准”列复用纯 helper 显示文字已填写/未填写；桌面五列、窄屏纵向条目，无需横向滚动；保留列表返回上下文，筛选后回首屏；复用共享可见性和排序模块，不在当前页伪造完整候选或发起发布/归档 |
+| PublishClassroomTaskForm | `components/teacher/PublishClassroomTaskForm.tsx` | 可见已发布模板的筛选、候选追加加载、选择状态与实例发布；筛选变化重置候选，课程分类复用共享候选；发布者来源与已选模板摘要由本组件展示；评阅标准摘要复用纯 helper，候选未提供 rubric 时提示到模板详情核对，不宣称未填写。实例截止/迟交/次数属于此表单；不提供 AI 策略选择，不创建/编辑模板，不自行判定后端候选全集 |
 | ClassroomTaskLifecycleActions | `components/teacher/ClassroomTaskLifecycleActions.tsx` | 实例状态展示、关闭/恢复提交及确认/请求状态；恢复只改变运行状态，不自动改截止、迟交或次数设置；RECALLED 无动作，不做物理删除或发布表单 |
 | EditClassroomTaskForm | `components/teacher/EditClassroomTaskForm.tsx` | 列表行内展开、草稿输入与实例截止/迟交/次数设置保存；ACTIVE/CLOSED 可编辑，RECALLED 无入口；不修改模板或状态流 |
 | PublishTaskStatusButton | `components/teacher/PublishTaskStatusButton.tsx` | 单一模板发布操作；当前 classroomTask 详情页不使用，模板生命周期入口留在模板层 |
@@ -65,7 +65,7 @@
 | TeacherFeedbackForm | `components/teacher/TeacherFeedbackForm.tsx` | 教师反馈创建输入与提交，复用统一反馈选项；评语草稿绑定实际查看版本，刷新不重绑，冲突/未知结果保留草稿并显式核对当前作品与反馈后确认继续；标签可选，不提供 scoreHint 入口，合同与归一化归 API Owner |
 | TeacherFeedbackHistory | `components/teacher/TeacherFeedbackHistory.tsx` | 反馈历史组合与编辑态切换，同一时间只展开一个编辑表单；仅有 id 的教师反馈可修改，AI/SYSTEM 只读 |
 | TeacherFeedbackEditForm | `components/teacher/TeacherFeedbackEditForm.tsx` | 单条教师反馈原地编辑、请求/错误状态、保存后退出编辑；与创建表单保持输入能力一致，不展示或编辑 scoreHint，不承担历史列表状态 |
-| TeacherSubmissionDetailPage | `app/teacher/submissions/[submissionId]/page.tsx` | 权威详情/反馈加载、返回导航及共享作品/AI 展示；可选评分参考复用 TaskRubric，正式实例读源与失败边界见 API Map；AI 申请仅更新局部结果，不自动整页刷新，不以 AI 状态改变人工反馈表单 key；新增表单和历史编辑态归 feedback 组件 |
+| TeacherSubmissionDetailPage | `app/teacher/submissions/[submissionId]/page.tsx` | 权威详情/反馈加载、返回导航及共享作品/AI 展示；可选评阅标准复用 TaskRubric，正式实例读源与失败边界见 API Map；AI 申请仅更新局部结果，不自动整页刷新，不以 AI 状态改变人工反馈表单 key；新增表单和历史编辑态归 feedback 组件 |
 
 ## 6) Teacher Analytics / Reports
 
@@ -98,7 +98,7 @@
 
 | Component / Module | File | Responsibility / Boundary |
 |---|---|---|
-| TaskRubric | `components/learning-tasks/TaskRubric.tsx` | 师生只读 rubric 展示，复用 UI Rubric 中文维度，不推断成绩 |
+| TaskRubric | `components/learning-tasks/TaskRubric.tsx` | 师生只读“评阅标准”，仅展示字符串 rubric.notes，保留换行、断行与未填写提示；读取复用纯 helper，不推断成绩 |
 | SubmissionContent | `components/submissions/SubmissionContent.tsx` | 师生作品原文展示；源码局部滚动、说明/声明纯文本换行，展示快照状态；白色作品面板保持明确前景色 |
 | SubmissionAiReview | `components/submissions/SubmissionAiReview.tsx` | 师生共享安全 AI 摘要；拥有当前提交的串行 POST/GET、操作标识及统一接纳结果；申请绑定页面实际展示作品版本，轮询不自动升级；成功 Job 持续关闭申请，不确定结果仅由事后显式完整读取重新核对；按提交 ID 隔离并卸载取消。学生组合受限轮询，教师仅显式整页刷新，不管理人工反馈草稿 |
 
@@ -130,7 +130,7 @@
 | Task Course Labels | `lib/learning-tasks/course-labels.ts` | 课程分类候选、未分类口径、显示/归一化工具的前端单一来源；不从局部查询结果倒推候选 |
 | Task Template Visibility/Scope | `lib/learning-tasks/template-visibility-scope.ts` | 模板可见性与列表 scope 的值域、文案、normalize；不在页面和表单散落魔法字符串 |
 | Task Template List Sorting | `lib/learning-tasks/template-list-sorting.ts` | 当前页模板默认排序单一来源：mine 最近更新优先，shared 已发布优先后按时间，all 我的模板优先；不复制多套 compare |
-| UI Rubric | `lib/ui/rubric.ts` | 教师创建/编辑及学生评分标准复用的四维中文映射入口；不在页面各自维护 labelMap |
+| Task Rubric | `lib/learning-tasks/rubric.ts` | 字符串 notes 读取、首尾 trim 与创建/编辑请求构造：创建空白省略 rubric，编辑空白发送 {}；不合并旧对象。共享只读/列表按文字判断填写状态，候选缺字段单独提示核对 |
 | Submission Language | `lib/learning-tasks/submission-language.ts` | 提交语言选项目录与师生只读 label 映射，不转换请求值 |
 | UI Format | `lib/ui/format.ts` | query/date/display/safeGet 及共享首次提交迟交时长展示工具；不重复实现同类 parse |
 | Proxy Route | `app/api/proxy/[...path]/route.ts` | 正式 BFF 转发模块的修改落点，详细合同归 Frontend API Map；不绕过 proxy 或向其中加入业务逻辑 |
@@ -140,7 +140,7 @@
 - component/module 新增、职责、composition 或 state owner 变化时更新本文；API 调用/字段适配细节更新 Frontend API Map，route 用途和状态更新 Route Map，UX/视觉原则及 testing evidence 回到各自 Owner。
 - 权限入口先看 Session/Auth 与角色 layout；前端角色门禁不替代后端授权。API payload 变化先看对应 adapter 与页面映射，不在 JSX 深层临时拼字段。
 - 三件套导航优先改 TaskContextHeader 与 Paths；学习轨迹页的摘要、attempts/tag details 扩展组合仍在对应 page，不为普通展示引入复杂组件体系。attempts 总反馈取 feedbackCount，不能混用 AI 摘要 totalItems；数据适配细节回到 API Owner。
-- submission detail 的调用链与主体数据源以 Frontend API Map 为准；师生正文和 AI 事实只来自详情 mapper；query 不提供正文或业务状态；教师可选评分参考的上下文定位与权威读源见 API Owner。
+- submission detail 的调用链与主体数据源以 Frontend API Map 为准；师生正文和 AI 事实只来自详情 mapper；query 不提供正文或业务状态；教师可选评阅标准的上下文定位与权威读源见 API Owner。
 - 模板创建/编辑/rubric 归模板层；实例发布归 PublishClassroomTaskForm，实例设置与状态流分别归 EditClassroomTaskForm 和 ClassroomTaskLifecycleActions。
 - 班级基础编辑归 EditClassroomForm，归档/恢复/删除归 ClassroomLifecycleActions；不要再次把生命周期动作混入编辑表单。
 - 去重时保留正式产品动作、只读/ownership 边界与共享模块唯一来源；不复制 API inventory、route implementation state、完整业务状态机或测试日志。

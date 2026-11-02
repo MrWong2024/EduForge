@@ -640,8 +640,7 @@ async function prepare(
         status: 'PUBLISHED',
         visibility: 'PRIVATE',
         rubric: {
-          dimensions: { correctness: 60, codeStyle: 40 },
-          notes: '合成验收评分参考：覆盖空数组及多个元素，并说明修改理由。',
+          notes: '合成验收评阅标准：覆盖空数组及多个元素，并说明修改理由。',
         },
       });
       record.taskIds.push(stringField(task, 'id'));

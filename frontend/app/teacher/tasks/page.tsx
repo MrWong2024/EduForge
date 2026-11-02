@@ -229,7 +229,7 @@ export default async function TeacherLearningTasksPage({
         </p>
         <p className="mt-1">先筛选模板，再去班级任务页发布，效率更高。</p>
         <p className="mt-1">
-          rubric 用于模板层的基础评分参考，班级发布页不配置 rubric。
+          评阅标准在模板中填写，班级发布页不单独配置。
         </p>
         <p className="mt-1">
           课程分类仅用于模板治理，不代表班级绑定课程，也不限制跨课程复用。

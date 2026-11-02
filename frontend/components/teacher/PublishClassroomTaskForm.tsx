@@ -17,6 +17,7 @@ import {
   toTaskCourseLabelDisplayText,
 } from "@/lib/learning-tasks/course-labels";
 import { paths } from "@/lib/routes/paths";
+import { getCandidateRubricSummary } from "@/lib/learning-tasks/rubric";
 import { buildQueryString, getPublisherLabel } from "@/lib/ui/format";
 
 type PublishClassroomTaskFormProps = {
@@ -35,11 +36,6 @@ type PublishErrorState = {
   status?: number;
   summary: string;
   detail?: string;
-};
-
-type RubricSummary = {
-  configured: boolean;
-  hint: string;
 };
 
 const extractRawDetail = (data: unknown): string | undefined => {
@@ -93,44 +89,6 @@ const toDescriptionSnippet = (value: unknown, maxLength = 90): string => {
     return trimmed;
   }
   return `${trimmed.slice(0, maxLength)}...`;
-};
-
-const toRubricSummary = (
-  rubric: Record<string, unknown> | undefined,
-): RubricSummary => {
-  if (!rubric || Object.keys(rubric).length === 0) {
-    return {
-      configured: false,
-      hint: "候选列表未提供评分参考，请到模板详情核对",
-    };
-  }
-
-  const dimensionsRaw = rubric.dimensions;
-  const dimensions =
-    dimensionsRaw &&
-    typeof dimensionsRaw === "object" &&
-    !Array.isArray(dimensionsRaw)
-      ? (dimensionsRaw as Record<string, unknown>)
-      : undefined;
-  const dimensionCount = dimensions
-    ? Object.values(dimensions).filter(
-        (value) => typeof value === "number" && Number.isFinite(value),
-      ).length
-    : 0;
-  const hasNotes =
-    typeof rubric.notes === "string" && rubric.notes.trim().length > 0;
-
-  if (dimensionCount > 0 || hasNotes) {
-    return {
-      configured: true,
-      hint: `${dimensionCount > 0 ? `${dimensionCount} 个维度` : "未识别维度"}${hasNotes ? "，含评分说明" : ""}`,
-    };
-  }
-
-  return {
-    configured: true,
-    hint: "已配置评分参考（自定义结构）",
-  };
 };
 
 const toIsoDateTime = (value: string): string | undefined => {
@@ -290,7 +248,7 @@ export function PublishClassroomTaskForm({
     [loadedTasks, taskId],
   );
   const selectedRubricSummary = useMemo(
-    () => toRubricSummary(selectedTask?.rubric),
+    () => getCandidateRubricSummary(selectedTask?.rubric),
     [selectedTask],
   );
   const selectedPublisherLabel = useMemo(
@@ -730,7 +688,7 @@ export function PublishClassroomTaskForm({
             </p>
             <ul className="mt-3 space-y-2">
               {loadedTasks.map((task, index) => {
-                const rubricSummary = toRubricSummary(task.rubric);
+                const rubricSummary = getCandidateRubricSummary(task.rubric);
                 const isActive = task.id && task.id === taskId;
                 const publisherLabel = getPublisherLabel(
                   task.publisher,
@@ -768,10 +726,8 @@ export function PublishClassroomTaskForm({
                       </button>
                     </div>
                     <p className="mt-1 text-xs text-zinc-500">
-                      模块：{toDisplayText(task.knowledgeModule)} | 评分参考：
-                      {rubricSummary.configured
-                        ? `已配置（${rubricSummary.hint}）`
-                        : "请到模板详情核对"}
+                      模块：{toDisplayText(task.knowledgeModule)} | 评阅标准：
+                      {rubricSummary}
                     </p>
                     <p className="mt-2 text-xs text-zinc-600">
                       描述摘要：{toDescriptionSnippet(task.description)}
@@ -820,10 +776,8 @@ export function PublishClassroomTaskForm({
                 {toDisplayText(selectedTask.status)}
               </p>
               <p>
-                <span className="text-zinc-500">评分参考：</span>
-                {selectedRubricSummary.configured
-                  ? `已配置（${selectedRubricSummary.hint}）`
-                  : selectedRubricSummary.hint}
+                <span className="text-zinc-500">评阅标准：</span>
+                {selectedRubricSummary}
               </p>
               <p>
                 <span className="text-zinc-500">模块：</span>

@@ -29,6 +29,7 @@ import {
   type TaskTemplateScope,
 } from "@/lib/learning-tasks/template-visibility-scope";
 import { sortTaskTemplatesByScope } from "@/lib/learning-tasks/template-list-sorting";
+import { getRubricSummary } from "@/lib/learning-tasks/rubric";
 
 type LearningTaskFiltersProps = {
   tasks: LearningTaskOption[];
@@ -43,11 +44,6 @@ type LearningTaskFiltersProps = {
 };
 
 type TaskStatusFilter = "ALL" | LearningTaskStatus;
-type RubricSummary = {
-  configured: boolean;
-  dimensionCount: number;
-  hasNotes: boolean;
-};
 
 const STATUS_FILTER_OPTIONS: Array<{ value: TaskStatusFilter; label: string }> =
   [
@@ -92,39 +88,6 @@ const getStatusHint = (status: unknown): string => {
     return "通常不会出现在班级发布可选列表";
   }
   return "状态缺失或未知";
-};
-
-const summarizeRubric = (
-  rubric: Record<string, unknown> | undefined,
-): RubricSummary => {
-  if (!rubric || Object.keys(rubric).length === 0) {
-    return {
-      configured: false,
-      dimensionCount: 0,
-      hasNotes: false,
-    };
-  }
-
-  const dimensionsRaw = rubric.dimensions;
-  const dimensions =
-    dimensionsRaw &&
-    typeof dimensionsRaw === "object" &&
-    !Array.isArray(dimensionsRaw)
-      ? (dimensionsRaw as Record<string, unknown>)
-      : undefined;
-  const dimensionCount = dimensions
-    ? Object.values(dimensions).filter(
-        (value) => typeof value === "number" && Number.isFinite(value),
-      ).length
-    : 0;
-  const hasNotes =
-    typeof rubric.notes === "string" && rubric.notes.trim().length > 0;
-
-  return {
-    configured: true,
-    dimensionCount,
-    hasNotes,
-  };
 };
 
 export function LearningTaskFilters({
@@ -488,7 +451,7 @@ export function LearningTaskFilters({
                   状态
                 </th>
                 <th role="columnheader" scope="col" className="px-3 py-3">
-                  评分配置
+                  评阅标准
                 </th>
                 <th role="columnheader" scope="col" className="px-3 py-3">
                   操作
@@ -498,15 +461,10 @@ export function LearningTaskFilters({
             <tbody role="rowgroup" className="block lg:table-row-group">
               {sortedTasks.map((task, index) => {
                 const statusUpper = toStatusUpper(task.status);
-                const rubricSummary = summarizeRubric(task.rubric);
+                const rubricSummary = getRubricSummary(task.rubric);
                 const titleText = toDisplayText(task.title, "未命名模板");
                 const descriptionText = toDisplayText(task.description);
                 const taskId = task.id;
-                const rubricHint = rubricSummary.configured
-                  ? rubricSummary.dimensionCount > 0 || rubricSummary.hasNotes
-                    ? `${rubricSummary.dimensionCount > 0 ? `${rubricSummary.dimensionCount} 个维度` : "未识别维度"}${rubricSummary.hasNotes ? "，含评分说明" : ""}`
-                    : "已配置（自定义结构）"
-                  : "未配置";
                 const statusBadgeClass =
                   statusUpper === "PUBLISHED"
                     ? "border-emerald-200 bg-emerald-100 text-emerald-700"
@@ -515,7 +473,7 @@ export function LearningTaskFilters({
                       : statusUpper === "ARCHIVED"
                         ? "border-zinc-300 bg-zinc-200 text-zinc-700"
                         : "border-zinc-200 bg-zinc-100 text-zinc-700";
-                const rubricBadgeClass = rubricSummary.configured
+                const rubricBadgeClass = rubricSummary === "已填写"
                   ? "border-sky-200 bg-sky-100 text-sky-700"
                   : "border-zinc-200 bg-zinc-100 text-zinc-700";
                 const visibility = normalizeTaskTemplateVisibility(
@@ -635,17 +593,14 @@ export function LearningTaskFilters({
                         aria-hidden="true"
                         className="mb-2 text-xs font-semibold text-zinc-500 lg:hidden"
                       >
-                        评分配置
+                        评阅标准
                       </p>
                       <div className="space-y-1">
                         <span
                           className={`inline-flex max-w-full rounded border px-2 py-0.5 text-xs font-semibold ${rubricBadgeClass}`}
                         >
-                          {rubricSummary.configured ? "已配置" : "未配置"}
+                          {rubricSummary}
                         </span>
-                        <p className="text-xs leading-5 text-zinc-500">
-                          {rubricHint}
-                        </p>
                       </div>
                     </td>
                     <td

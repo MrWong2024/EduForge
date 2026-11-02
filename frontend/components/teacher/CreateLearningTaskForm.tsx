@@ -22,7 +22,7 @@ import {
   TASK_TEMPLATE_VISIBILITY_PRIVATE,
   type TaskTemplateVisibility,
 } from "@/lib/learning-tasks/template-visibility-scope";
-import { getRubricDimensionLabel } from "@/lib/ui/rubric";
+import { buildCreateTaskRubric } from "@/lib/learning-tasks/rubric";
 
 type CreateLearningTaskFormErrorState = {
   status?: number;
@@ -50,25 +50,6 @@ const getCreateErrorSummary = (status: number): string => {
   return "创建任务模板失败，请稍后重试。";
 };
 
-const parseOptionalNonNegativeInt = (
-  value: string,
-): number | undefined | null => {
-  const trimmed = value.trim();
-  if (!trimmed) {
-    return undefined;
-  }
-  const parsed = Number(trimmed);
-  if (!Number.isInteger(parsed) || parsed < 0) {
-    return null;
-  }
-  return parsed;
-};
-
-const functionalityLabel = getRubricDimensionLabel("functionality");
-const correctnessLabel = getRubricDimensionLabel("correctness");
-const codeStyleLabel = getRubricDimensionLabel("codeStyle");
-const designLabel = getRubricDimensionLabel("design");
-
 export function CreateLearningTaskForm() {
   const router = useRouter();
   const [title, setTitle] = useState("");
@@ -78,10 +59,6 @@ export function CreateLearningTaskForm() {
   const [visibility, setVisibility] = useState<TaskTemplateVisibility>(
     TASK_TEMPLATE_VISIBILITY_PRIVATE,
   );
-  const [functionalityWeight, setFunctionalityWeight] = useState("");
-  const [correctnessWeight, setCorrectnessWeight] = useState("");
-  const [codeStyleWeight, setCodeStyleWeight] = useState("");
-  const [designWeight, setDesignWeight] = useState("");
   const [rubricNotes, setRubricNotes] = useState("");
   const [pendingAction, setPendingAction] = useState<CreateAction | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
@@ -96,10 +73,6 @@ export function CreateLearningTaskForm() {
     setKnowledgeModule("");
     setCourseLabel("");
     setVisibility(TASK_TEMPLATE_VISIBILITY_PRIVATE);
-    setFunctionalityWeight("");
-    setCorrectnessWeight("");
-    setCodeStyleWeight("");
-    setDesignWeight("");
     setRubricNotes("");
   };
 
@@ -117,13 +90,7 @@ export function CreateLearningTaskForm() {
     const trimmedDescription = description.trim();
     const trimmedKnowledgeModule = knowledgeModule.trim();
     const normalizedCourseLabel = normalizeTaskCourseLabel(courseLabel);
-    const trimmedRubricNotes = rubricNotes.trim();
-    const parsedFunctionalityWeight =
-      parseOptionalNonNegativeInt(functionalityWeight);
-    const parsedCorrectnessWeight =
-      parseOptionalNonNegativeInt(correctnessWeight);
-    const parsedCodeStyleWeight = parseOptionalNonNegativeInt(codeStyleWeight);
-    const parsedDesignWeight = parseOptionalNonNegativeInt(designWeight);
+    const rubric = buildCreateTaskRubric(rubricNotes);
 
     if (!trimmedTitle) {
       setErrorState({
@@ -143,51 +110,9 @@ export function CreateLearningTaskForm() {
       });
       return;
     }
-    if (parsedFunctionalityWeight === null) {
-      setErrorState({
-        description: `${functionalityLabel}必须是非负整数。`,
-      });
-      return;
-    }
-    if (parsedCorrectnessWeight === null) {
-      setErrorState({
-        description: `${correctnessLabel}必须是非负整数。`,
-      });
-      return;
-    }
-    if (parsedCodeStyleWeight === null) {
-      setErrorState({
-        description: `${codeStyleLabel}必须是非负整数。`,
-      });
-      return;
-    }
-    if (parsedDesignWeight === null) {
-      setErrorState({
-        description: `${designLabel}必须是非负整数。`,
-      });
-      return;
-    }
-
     setPendingAction(action);
     setSuccessMessage(null);
     setErrorState(null);
-
-    const rubricDimensions: Record<string, number> = {};
-    if (typeof parsedFunctionalityWeight === "number") {
-      rubricDimensions.functionality = parsedFunctionalityWeight;
-    }
-    if (typeof parsedCorrectnessWeight === "number") {
-      rubricDimensions.correctness = parsedCorrectnessWeight;
-    }
-    if (typeof parsedCodeStyleWeight === "number") {
-      rubricDimensions.codeStyle = parsedCodeStyleWeight;
-    }
-    if (typeof parsedDesignWeight === "number") {
-      rubricDimensions.design = parsedDesignWeight;
-    }
-
-    const hasRubricDimensions = Object.keys(rubricDimensions).length > 0;
-    const hasRubric = hasRubricDimensions || Boolean(trimmedRubricNotes);
 
     const requestBody: CreateLearningTaskRequest = {
       title: trimmedTitle,
@@ -199,15 +124,8 @@ export function CreateLearningTaskForm() {
     if (normalizedCourseLabel) {
       requestBody.courseLabel = normalizedCourseLabel;
     }
-    if (hasRubric) {
-      const rubricPayload: Record<string, unknown> = {};
-      if (hasRubricDimensions) {
-        rubricPayload.dimensions = rubricDimensions;
-      }
-      if (trimmedRubricNotes) {
-        rubricPayload.notes = trimmedRubricNotes;
-      }
-      requestBody.rubric = rubricPayload;
+    if (rubric) {
+      requestBody.rubric = rubric;
     }
 
     try {
@@ -228,7 +146,7 @@ export function CreateLearningTaskForm() {
       const actionMessage =
         action === "publish" ? "任务模板已发布" : "任务模板已保存为草稿";
       const idMessage = createdTaskId ? `（ID: ${createdTaskId}）` : "";
-      const rubricMessage = hasRubric ? "评分配置已保存。" : "";
+      const rubricMessage = rubric ? "评阅标准已保存。" : "";
       setSuccessMessage(
         `${actionMessage}${idMessage}。${rubricMessage ? ` ${rubricMessage}` : ""}`,
       );
@@ -360,85 +278,20 @@ export function CreateLearningTaskForm() {
             </div>
           </div>
 
-          <section className="rounded-md border border-zinc-200 bg-zinc-50 p-3">
-            <h3 className="text-sm font-medium text-zinc-900">
-              基础评分配置（Rubric）
-            </h3>
-            <p className="mt-1 text-xs text-zinc-600">
-              可选填写。若全部留空，本次创建不会提交 rubric 字段。
+          <label className="block text-sm">
+            <span className="mb-1 block text-zinc-700">评阅标准（可选）</span>
+            <textarea
+              value={rubricNotes}
+              onChange={(event) => setRubricNotes(event.target.value)}
+              rows={3}
+              placeholder="使用多态统一处理不同支付方式；说明关键设计理由，并提供正常输入与异常输入的验证记录。"
+              className="w-full resize-y overflow-auto rounded-md border border-zinc-300 px-3 py-2"
+            />
+            <p className="mt-1 text-xs text-zinc-500">
+              说明需要检查的内容、达成条件和重点。AI
+              将据此给出评价依据与必要的改进建议，不自动计算成绩。留空时，依据任务描述评阅。
             </p>
-
-            <div className="mt-3 grid gap-4 md:grid-cols-2">
-              <label className="block text-sm">
-                <span className="mb-1 block text-zinc-700">{`${functionalityLabel}（可选）`}</span>
-                <input
-                  type="number"
-                  min={0}
-                  step={1}
-                  inputMode="numeric"
-                  value={functionalityWeight}
-                  onChange={(event) =>
-                    setFunctionalityWeight(event.target.value)
-                  }
-                  placeholder="例如 40"
-                  className="w-full rounded-md border border-zinc-300 px-3 py-2"
-                />
-              </label>
-
-              <label className="block text-sm">
-                <span className="mb-1 block text-zinc-700">{`${correctnessLabel}（可选）`}</span>
-                <input
-                  type="number"
-                  min={0}
-                  step={1}
-                  inputMode="numeric"
-                  value={correctnessWeight}
-                  onChange={(event) => setCorrectnessWeight(event.target.value)}
-                  placeholder="例如 30"
-                  className="w-full rounded-md border border-zinc-300 px-3 py-2"
-                />
-              </label>
-
-              <label className="block text-sm">
-                <span className="mb-1 block text-zinc-700">{`${codeStyleLabel}（可选）`}</span>
-                <input
-                  type="number"
-                  min={0}
-                  step={1}
-                  inputMode="numeric"
-                  value={codeStyleWeight}
-                  onChange={(event) => setCodeStyleWeight(event.target.value)}
-                  placeholder="例如 20"
-                  className="w-full rounded-md border border-zinc-300 px-3 py-2"
-                />
-              </label>
-
-              <label className="block text-sm">
-                <span className="mb-1 block text-zinc-700">{`${designLabel}（可选）`}</span>
-                <input
-                  type="number"
-                  min={0}
-                  step={1}
-                  inputMode="numeric"
-                  value={designWeight}
-                  onChange={(event) => setDesignWeight(event.target.value)}
-                  placeholder="例如 10"
-                  className="w-full rounded-md border border-zinc-300 px-3 py-2"
-                />
-              </label>
-            </div>
-
-            <label className="mt-3 block text-sm">
-              <span className="mb-1 block text-zinc-700">评分说明（可选）</span>
-              <textarea
-                value={rubricNotes}
-                onChange={(event) => setRubricNotes(event.target.value)}
-                rows={3}
-                placeholder="例如：优先关注可运行性与命名规范"
-                className="w-full rounded-md border border-zinc-300 px-3 py-2"
-              />
-            </label>
-          </section>
+          </label>
         </fieldset>
         <div className="flex flex-wrap items-center gap-3">
           <button

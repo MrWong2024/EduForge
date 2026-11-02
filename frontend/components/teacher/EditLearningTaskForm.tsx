@@ -29,7 +29,10 @@ import {
 } from "@/lib/learning-tasks/template-visibility-scope";
 import { toSafeTaskListReturnTo } from "@/lib/routes/task-list-return-to";
 import { getPublisherLabel } from "@/lib/ui/format";
-import { getRubricDimensionLabel } from "@/lib/ui/rubric";
+import {
+  buildUpdateTaskRubric,
+  getRubricNotes,
+} from "@/lib/learning-tasks/rubric";
 import {
   TaskAiContextRefsEditor,
   TaskAiContextRefsReadOnly,
@@ -54,16 +57,6 @@ type EditLearningTaskFormErrorState = {
   description: string;
 };
 
-type RubricFormSeed = {
-  functionalityWeight: string;
-  correctnessWeight: string;
-  codeStyleWeight: string;
-  designWeight: string;
-  notes: string;
-  legacyUnstructured: boolean;
-  sourceRubric?: Record<string, unknown>;
-};
-
 type TaskLifecycleAction = "publish" | "archive";
 
 const statusLabelMap: Record<LearningTaskStatus, string> = {
@@ -81,99 +74,8 @@ const USED_PUBLISHED_TEMPLATE_REVERT_MESSAGE =
 const isLearningTaskStatus = (value: string): value is LearningTaskStatus =>
   value === "DRAFT" || value === "PUBLISHED" || value === "ARCHIVED";
 
-const asRecord = (value: unknown): Record<string, unknown> | undefined =>
-  value && typeof value === "object" && !Array.isArray(value)
-    ? (value as Record<string, unknown>)
-    : undefined;
-
 const toRawStatusUpper = (value: unknown): string =>
   typeof value === "string" ? value.trim().toUpperCase() : "";
-
-const parseOptionalNonNegativeInt = (
-  value: string,
-): number | undefined | null => {
-  const trimmed = value.trim();
-  if (!trimmed) {
-    return undefined;
-  }
-  const parsed = Number(trimmed);
-  if (!Number.isInteger(parsed) || parsed < 0) {
-    return null;
-  }
-  return parsed;
-};
-
-const pickNonNegativeInt = (...candidates: unknown[]): number | undefined => {
-  for (const candidate of candidates) {
-    if (
-      typeof candidate === "number" &&
-      Number.isInteger(candidate) &&
-      candidate >= 0
-    ) {
-      return candidate;
-    }
-  }
-  return undefined;
-};
-
-const functionalityLabel = getRubricDimensionLabel("functionality");
-const correctnessLabel = getRubricDimensionLabel("correctness");
-const codeStyleLabel = getRubricDimensionLabel("codeStyle");
-const designLabel = getRubricDimensionLabel("design");
-
-const extractRubricFormSeed = (
-  rubric: Record<string, unknown> | undefined,
-): RubricFormSeed => {
-  if (!rubric || Object.keys(rubric).length === 0) {
-    return {
-      functionalityWeight: "",
-      correctnessWeight: "",
-      codeStyleWeight: "",
-      designWeight: "",
-      notes: "",
-      legacyUnstructured: false,
-    };
-  }
-
-  const dimensions = asRecord(rubric.dimensions);
-  const functionality = pickNonNegativeInt(
-    dimensions?.functionality,
-    rubric.functionality,
-    rubric.functionalityWeight,
-  );
-  const correctness = pickNonNegativeInt(
-    dimensions?.correctness,
-    rubric.correctness,
-    rubric.correctnessWeight,
-  );
-  const codeStyle = pickNonNegativeInt(
-    dimensions?.codeStyle,
-    rubric.codeStyle,
-    rubric.codeStyleWeight,
-  );
-  const design = pickNonNegativeInt(
-    dimensions?.design,
-    rubric.design,
-    rubric.designWeight,
-  );
-  const notes = typeof rubric.notes === "string" ? rubric.notes.trim() : "";
-  const recognizedCount =
-    [functionality, correctness, codeStyle, design].filter(
-      (value) => typeof value === "number",
-    ).length + (notes ? 1 : 0);
-
-  return {
-    functionalityWeight:
-      typeof functionality === "number" ? String(functionality) : "",
-    correctnessWeight:
-      typeof correctness === "number" ? String(correctness) : "",
-    codeStyleWeight: typeof codeStyle === "number" ? String(codeStyle) : "",
-    designWeight: typeof design === "number" ? String(design) : "",
-    notes,
-    legacyUnstructured: Object.keys(rubric).length > 0 && recognizedCount === 0,
-    sourceRubric: rubric,
-  };
-};
 
 const getUpdateErrorSummary = (status: number): string => {
   if (status === 400) {
@@ -254,7 +156,6 @@ export function EditLearningTaskForm({
 }: EditLearningTaskFormProps) {
   const router = useRouter();
   const taskListReturnTo = toSafeTaskListReturnTo(returnTo);
-  const rubricSeed = extractRubricFormSeed(initialTask.rubric);
   const initialCourseLabel = normalizeTaskCourseLabel(initialTask.courseLabel);
   const rawInitialStatus = toRawStatusUpper(initialTask.status);
   const hasKnownInitialStatus = isLearningTaskStatus(rawInitialStatus);
@@ -281,17 +182,9 @@ export function EditLearningTaskForm({
   );
   const [visibility, setVisibility] =
     useState<TaskTemplateVisibility>(initialVisibility);
-  const [functionalityWeight, setFunctionalityWeight] = useState(
-    rubricSeed.functionalityWeight,
+  const [rubricNotes, setRubricNotes] = useState(() =>
+    getRubricNotes(initialTask.rubric),
   );
-  const [correctnessWeight, setCorrectnessWeight] = useState(
-    rubricSeed.correctnessWeight,
-  );
-  const [codeStyleWeight, setCodeStyleWeight] = useState(
-    rubricSeed.codeStyleWeight,
-  );
-  const [designWeight, setDesignWeight] = useState(rubricSeed.designWeight);
-  const [rubricNotes, setRubricNotes] = useState(rubricSeed.notes);
   const [showAiContextEditor] = useState(
     () => (initialTask.aiContextRefs?.length ?? 0) > 0,
   );
@@ -330,14 +223,6 @@ export function EditLearningTaskForm({
     const trimmedDescription = description.trim();
     const trimmedKnowledgeModule = knowledgeModule.trim();
     const normalizedCourseLabel = normalizeTaskCourseLabel(courseLabel);
-    const trimmedRubricNotes = rubricNotes.trim();
-    const parsedFunctionalityWeight =
-      parseOptionalNonNegativeInt(functionalityWeight);
-    const parsedCorrectnessWeight =
-      parseOptionalNonNegativeInt(correctnessWeight);
-    const parsedCodeStyleWeight = parseOptionalNonNegativeInt(codeStyleWeight);
-    const parsedDesignWeight = parseOptionalNonNegativeInt(designWeight);
-
     if (!trimmedTitle) {
       setErrorState({
         description: "请填写任务模板标题。",
@@ -356,31 +241,6 @@ export function EditLearningTaskForm({
       });
       return;
     }
-    if (parsedFunctionalityWeight === null) {
-      setErrorState({
-        description: `${functionalityLabel}必须是非负整数。`,
-      });
-      return;
-    }
-    if (parsedCorrectnessWeight === null) {
-      setErrorState({
-        description: `${correctnessLabel}必须是非负整数。`,
-      });
-      return;
-    }
-    if (parsedCodeStyleWeight === null) {
-      setErrorState({
-        description: `${codeStyleLabel}必须是非负整数。`,
-      });
-      return;
-    }
-    if (parsedDesignWeight === null) {
-      setErrorState({
-        description: `${designLabel}必须是非负整数。`,
-      });
-      return;
-    }
-
     let aiContextPatch: Pick<UpdateLearningTaskRequest, "aiContextRefs">;
     try {
       aiContextPatch = buildAiContextRefsPatch(
@@ -398,46 +258,15 @@ export function EditLearningTaskForm({
     setSuccessMessage(null);
     setErrorState(null);
 
-    const rubricDimensions: Record<string, number> = {};
-    if (typeof parsedFunctionalityWeight === "number") {
-      rubricDimensions.functionality = parsedFunctionalityWeight;
-    }
-    if (typeof parsedCorrectnessWeight === "number") {
-      rubricDimensions.correctness = parsedCorrectnessWeight;
-    }
-    if (typeof parsedCodeStyleWeight === "number") {
-      rubricDimensions.codeStyle = parsedCodeStyleWeight;
-    }
-    if (typeof parsedDesignWeight === "number") {
-      rubricDimensions.design = parsedDesignWeight;
-    }
-    const hasRubricDimensions = Object.keys(rubricDimensions).length > 0;
-    const hasRubricInput = hasRubricDimensions || Boolean(trimmedRubricNotes);
-    const shouldPreserveLegacyRubric =
-      !hasRubricInput &&
-      rubricSeed.legacyUnstructured &&
-      Boolean(rubricSeed.sourceRubric);
-
     const requestBody: UpdateLearningTaskRequest = {
       title: trimmedTitle,
       description: trimmedDescription,
       knowledgeModule: trimmedKnowledgeModule,
       courseLabel: normalizedCourseLabel ?? "",
       visibility,
+      rubric: buildUpdateTaskRubric(rubricNotes),
       ...aiContextPatch,
     };
-    if (hasRubricInput) {
-      const rubricPayload: Record<string, unknown> = {};
-      if (hasRubricDimensions) {
-        rubricPayload.dimensions = rubricDimensions;
-      }
-      if (trimmedRubricNotes) {
-        rubricPayload.notes = trimmedRubricNotes;
-      }
-      requestBody.rubric = rubricPayload;
-    } else if (shouldPreserveLegacyRubric) {
-      requestBody.rubric = rubricSeed.sourceRubric;
-    }
 
     try {
       const payload = await fetchJson<unknown>(
@@ -461,8 +290,9 @@ export function EditLearningTaskForm({
         throw new Error("保存结果无法确认");
       }
       setAiContextBaseline(updated.aiContextRefs ?? []);
+      setRubricNotes(getRubricNotes(updated.rubric));
       const updatedTaskId = updated.id?.trim();
-      const suffix = hasRubricInput ? "，评分配置已更新。" : "。";
+      const suffix = "，评阅标准已更新。";
       setSuccessMessage(
         updatedTaskId
           ? `任务模板更新成功（ID: ${updatedTaskId}）${suffix}`
@@ -564,7 +394,7 @@ export function EditLearningTaskForm({
         {effectiveReadOnly ? "查看任务模板" : "编辑任务模板"}
       </h2>
       <p className="mt-1 text-sm text-zinc-600">
-        修改的是 learning task 模板本身，不是班级任务实例。
+        修改模板不会更新已布置到班级的任务标准。
       </p>
       {readOnly ? (
         <p className="mt-2 text-xs text-zinc-600">
@@ -683,96 +513,21 @@ export function EditLearningTaskForm({
             </div>
           </div>
 
-          <section className="rounded-md border border-zinc-200 bg-zinc-50 p-3">
-            <h3 className="text-sm font-medium text-zinc-900">
-              基础评分配置（Rubric）
-            </h3>
-            <p className="mt-1 text-xs text-zinc-600">
-              使用结构化字段维护评分参考；无需手写 JSON。
+          <label className="block text-sm">
+            <span className="mb-1 block text-zinc-700">评阅标准（可选）</span>
+            <textarea
+              readOnly={effectiveReadOnly}
+              value={rubricNotes}
+              onChange={(event) => setRubricNotes(event.target.value)}
+              rows={rubricNotes.trim() ? 8 : 3}
+              placeholder="使用多态统一处理不同支付方式；说明关键设计理由，并提供正常输入与异常输入的验证记录。"
+              className="w-full resize-y overflow-auto rounded-md border border-zinc-300 px-3 py-2"
+            />
+            <p className="mt-1 text-xs text-zinc-500">
+              说明需要检查的内容、达成条件和重点。AI
+              将据此给出评价依据与必要的改进建议，不自动计算成绩。留空时，依据任务描述评阅。
             </p>
-            {rubricSeed.legacyUnstructured ? (
-              <p className="mt-1 text-xs text-amber-700">
-                检测到历史 rubric
-                结构，当前表单无法完整回填。若不填写新字段，保存时将保留历史结构。
-              </p>
-            ) : null}
-
-            <div className="mt-3 grid gap-4 md:grid-cols-2">
-              <label className="block text-sm">
-                <span className="mb-1 block text-zinc-700">{`${functionalityLabel}（可选）`}</span>
-                <input
-                  disabled={effectiveReadOnly}
-                  type="number"
-                  min={0}
-                  step={1}
-                  inputMode="numeric"
-                  value={functionalityWeight}
-                  onChange={(event) =>
-                    setFunctionalityWeight(event.target.value)
-                  }
-                  placeholder="例如 40"
-                  className="w-full rounded-md border border-zinc-300 px-3 py-2"
-                />
-              </label>
-
-              <label className="block text-sm">
-                <span className="mb-1 block text-zinc-700">{`${correctnessLabel}（可选）`}</span>
-                <input
-                  disabled={effectiveReadOnly}
-                  type="number"
-                  min={0}
-                  step={1}
-                  inputMode="numeric"
-                  value={correctnessWeight}
-                  onChange={(event) => setCorrectnessWeight(event.target.value)}
-                  placeholder="例如 30"
-                  className="w-full rounded-md border border-zinc-300 px-3 py-2"
-                />
-              </label>
-
-              <label className="block text-sm">
-                <span className="mb-1 block text-zinc-700">{`${codeStyleLabel}（可选）`}</span>
-                <input
-                  disabled={effectiveReadOnly}
-                  type="number"
-                  min={0}
-                  step={1}
-                  inputMode="numeric"
-                  value={codeStyleWeight}
-                  onChange={(event) => setCodeStyleWeight(event.target.value)}
-                  placeholder="例如 20"
-                  className="w-full rounded-md border border-zinc-300 px-3 py-2"
-                />
-              </label>
-
-              <label className="block text-sm">
-                <span className="mb-1 block text-zinc-700">{`${designLabel}（可选）`}</span>
-                <input
-                  disabled={effectiveReadOnly}
-                  type="number"
-                  min={0}
-                  step={1}
-                  inputMode="numeric"
-                  value={designWeight}
-                  onChange={(event) => setDesignWeight(event.target.value)}
-                  placeholder="例如 10"
-                  className="w-full rounded-md border border-zinc-300 px-3 py-2"
-                />
-              </label>
-            </div>
-
-            <label className="mt-3 block text-sm">
-              <span className="mb-1 block text-zinc-700">评分说明（可选）</span>
-              <textarea
-                readOnly={effectiveReadOnly}
-                value={rubricNotes}
-                onChange={(event) => setRubricNotes(event.target.value)}
-                rows={rubricNotes.trim() ? 8 : 3}
-                placeholder="例如：优先关注可运行性与命名规范"
-                className="w-full resize-y overflow-auto rounded-md border border-zinc-300 px-3 py-2"
-              />
-            </label>
-          </section>
+          </label>
         </fieldset>
 
         {effectiveReadOnly ? (

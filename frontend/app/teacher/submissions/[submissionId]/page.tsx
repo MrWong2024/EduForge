@@ -294,7 +294,7 @@ export default async function TeacherSubmissionDetailPage({
         <TaskRubric rubric={rubric} />
       ) : (
         <p className="text-sm text-zinc-600">
-          评分参考暂不可用，请从任务详情核对。
+          评阅标准暂不可用，请从任务详情核对。
         </p>
       )}
       <SubmissionAiReview

@@ -91,7 +91,7 @@
   - 教师模板类型及 create/detail/update/list 适配保留 `aiContextRefs`；字段缺省表示无引用，非法引用响应使加载/保存确认失败，不回退为空配置。页面创建沿上述 BFF 保存并省略引用，正式 API 及共享请求类型仍支持该字段；编辑仅在引用语义改变时发送完整数组，未变更省略，显式 `[]` 清空；成功响应更新比较基准。完整字段、验证与快照合同见 [Backend DTO ZIP 资料引用配置](./handoff-backend-dto-cheatsheet.md#zip-资料引用配置)。课堂公开接口及学生消费不补取教师模板资料。
 - 班级发布候选：`PublishClassroomTaskForm` -> `/api/proxy/classrooms/:id/publishable-task-templates`。
   - 对应后端：`GET /api/classrooms/:id/publishable-task-templates`。
-  - 注意：模板可见性、发布资格及本班已发布排除由后端候选接口决定，前端不自行伪造候选全集。当前候选 DTO 不提供 rubric，缺少该字段只能提示到模板详情核对，不能判断模板未配置评分参考。
+  - 注意：模板可见性、发布资格及本班已发布排除由后端候选接口决定，前端不自行伪造候选全集。当前候选 DTO 不提供 rubric，缺少该字段只能提示到模板详情核对，不能判断模板未填写评阅标准。
 - 班级任务实例：`/teacher/classrooms/:id/tasks/page.tsx` + 发布/生命周期/编辑组件 -> `/api/proxy/classrooms/:id/tasks*`。
   - 对应后端：`GET/POST/PATCH /api/classrooms/:id/tasks*` 与 `/status`。
   - 注意：发布表单只发送既有截止/迟交/次数设置，不发送 AI 策略字段。列表/详情消费快照可用性及投影教学内容，不另取当前模板覆盖，不适配或展示旧策略。实例配置与状态动作分开发送；学生或教师可在提交详情主动申请 AI 反馈。
@@ -104,7 +104,7 @@
   - 注意：正式 detail API `GET /api/learning-tasks/submissions/:id` 是主体 SoT；每次先 await detail 成功，再请求同一提交的 feedback；师生共用学生侧详情 mapper，保留完整源码、独立说明与已有声明原文，适配 aiReview；URL query 不提供标题、正文、提交时间、次数、迟交或 AI 状态；班级/课堂任务上下文用于返回导航。公开字段与 null/0 语义由 [Backend DTO](./handoff-backend-dto-cheatsheet.md#submission-request--response-family) 维护。
   - 新增教师反馈发送撰写时绑定的 `expectedRevision`；刷新 props 不重绑旧评语。409/结果不确定保留评语，显式读取权威作品及反馈列表，用户确认适用后再允许继续。教师反馈原地 PATCH 沿用原合同；固定、版本与幂等合同见 [Backend Service Card 08](./handoff-backend-service-map.md#service-card-08)。
 
-- 教师提交页的可选评分参考：在权威 detail/feedback 成功后，使用上下文 classroomId 与 detail 的权威 classroomTaskId 经 BFF 读取 `GET /api/classrooms/:classroomId/tasks/:classroomTaskId`，复用 `toClassroomTask`；仅当响应 taskId 与提交 detail 一致时展示实例投影 rubric。上下文只定位请求，评分事实来自正式响应；无上下文、读失败或不匹配时提示从任务详情核对，不替换已保存作品或反馈表单。
+- 教师提交页的可选评阅标准：在权威 detail/feedback 成功后，使用上下文 classroomId 与 detail 的权威 classroomTaskId 经 BFF 读取 `GET /api/classrooms/:classroomId/tasks/:classroomTaskId`，复用 `toClassroomTask`；仅当响应 taskId 与提交 detail 一致时展示实例投影 rubric。上下文只定位请求，评阅标准来自正式响应；无上下文、读失败或不匹配时提示从任务详情核对，不替换已保存作品或反馈表单。
 
 ### 3.4 Student 学习链路
 
