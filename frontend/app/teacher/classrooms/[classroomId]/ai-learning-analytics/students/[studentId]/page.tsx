@@ -105,25 +105,32 @@ function StudentTaskPointsTable({
   }
 
   return (
-    <div className="overflow-x-auto rounded-lg border border-zinc-200 bg-white">
-      <table className="w-full min-w-[1540px] border-collapse text-sm">
+    <div className="min-w-0 max-w-full overflow-x-auto rounded-lg border border-zinc-200 bg-white">
+      <table className="w-full min-w-[860px] table-fixed border-collapse text-sm leading-6 [overflow-wrap:anywhere] lg:min-w-0">
+        <colgroup>
+          <col className="w-[18%]" />
+          <col className="w-[13%]" />
+          <col className="w-[17%]" />
+          <col className="w-[17%]" />
+          <col className="w-[35%]" />
+        </colgroup>
         <thead className="bg-zinc-50 text-left text-zinc-600">
           <tr>
-            <th className="px-3 py-2.5">任务</th>
-            <th className="px-3 py-2.5">发布时间</th>
-            <th className="px-3 py-2.5 text-center">提交次数</th>
-            <th className="px-3 py-2.5 text-center">请求 EduForge AI 反馈</th>
-            <th className="px-3 py-2.5 text-center">可用反馈交付</th>
-            <th className="px-3 py-2.5 text-center">反馈后新增提交</th>
-            <th className="px-3 py-2.5 text-center">反馈后作品更新</th>
-            <th className="px-3 py-2.5 text-center">代码变化</th>
-            <th className="px-3 py-2.5 text-center">反馈可对照</th>
-            <th className="px-3 py-2.5 text-center">
-              反馈条目负荷 before → after
+            <th scope="col" className="px-3 py-2.5">
+              任务信息
             </th>
-            <th className="px-3 py-2.5 text-center">差值</th>
-            <th className="px-3 py-2.5">结果</th>
-            <th className="px-3 py-2.5">比较版本与证据</th>
+            <th scope="col" className="px-3 py-2.5">
+              AI 反馈
+            </th>
+            <th scope="col" className="px-3 py-2.5">
+              反馈后行为
+            </th>
+            <th scope="col" className="px-3 py-2.5">
+              比较结果
+            </th>
+            <th scope="col" className="px-3 py-2.5">
+              比较版本与证据
+            </th>
           </tr>
         </thead>
         <tbody>
@@ -132,57 +139,73 @@ function StudentTaskPointsTable({
               key={task.classroomTaskId || `student-task-point-${index}`}
               className="border-t border-zinc-100 align-top"
             >
-              <td className="max-w-72 px-3 py-2.5">
-                <p
-                  className="truncate font-medium text-zinc-900"
-                  title={task.taskTitle}
-                >
+              <td className="px-3 py-2.5">
+                <p className="font-medium text-zinc-900" title={task.taskTitle}>
                   {task.taskTitle}
                 </p>
+                <p className="mt-2 text-zinc-700">
+                  <span className="text-zinc-500">发布时间：</span>
+                  {toDisplayDate(task.publishedAt)}
+                </p>
+                <p className="mt-2 tabular-nums text-zinc-800">
+                  <span className="text-zinc-500">提交次数：</span>
+                  {task.attemptsCount}
+                </p>
               </td>
-              <td className="whitespace-nowrap px-3 py-2.5 text-zinc-700">
-                {toDisplayDate(task.publishedAt)}
+              <td className="space-y-2 px-3 py-2.5 text-zinc-800">
+                <p>
+                  <span className="text-zinc-500">请求 EduForge AI 反馈：</span>
+                  {toBooleanText(task.aiRequested)}
+                </p>
+                <p>
+                  <span className="text-zinc-500">可用反馈交付：</span>
+                  {toBooleanText(task.aiDelivered)}
+                </p>
               </td>
-              <td className="px-3 py-2.5 text-center tabular-nums text-zinc-800">
-                {task.attemptsCount}
+              <td className="space-y-2 px-3 py-2.5 text-zinc-800">
+                {[
+                  { label: "新增提交", value: task.postFeedbackResubmitted },
+                  { label: "作品更新", value: task.postFeedbackRevised },
+                  { label: "代码变化", value: task.postFeedbackCodeChanged },
+                ].map(({ label, value }) => (
+                  <p key={label}>
+                    <span className="text-zinc-500">{label}：</span>
+                    {!value && task.comparisonWarnings.includes("TIME_UNKNOWN")
+                      ? "尚未确认"
+                      : toBooleanText(value)}
+                  </p>
+                ))}
               </td>
-              {[
-                task.aiRequested,
-                task.aiDelivered,
-                task.postFeedbackResubmitted,
-                task.postFeedbackRevised,
-                task.postFeedbackCodeChanged,
-                task.qualityComparable,
-              ].map((value, valueIndex) => (
-                <td
-                  key={`${task.classroomTaskId}-boolean-${valueIndex}`}
-                  className="px-3 py-2.5 text-center text-zinc-800"
-                >
-                  {!value &&
-                  valueIndex >= 2 &&
-                  valueIndex <= 4 &&
-                  task.comparisonWarnings.includes("TIME_UNKNOWN")
-                    ? "尚未确认"
-                    : toBooleanText(value)}
-                </td>
-              ))}
-              <td className="px-3 py-2.5 text-center tabular-nums text-zinc-800">
-                {formatNullableIssueLoad(task.issueLoadBefore)} →{" "}
-                {formatNullableIssueLoad(task.issueLoadAfter)}
+              <td className="space-y-2 px-3 py-2.5 text-zinc-800">
+                <p>
+                  <span className="text-zinc-500">反馈可对照：</span>
+                  {toBooleanText(task.qualityComparable)}
+                </p>
+                <p>
+                  <span className="block text-zinc-500">
+                    反馈条目负荷 before → after
+                  </span>
+                  <span className="block tabular-nums">
+                    {formatNullableIssueLoad(task.issueLoadBefore)} →{" "}
+                    {formatNullableIssueLoad(task.issueLoadAfter)}
+                  </span>
+                </p>
+                <p className="tabular-nums">
+                  <span className="text-zinc-500">差值：</span>
+                  {task.issueLoadDelta === null
+                    ? "—"
+                    : formatAiLearningAnalyticsDelta(task.issueLoadDelta)}
+                </p>
+                <p>
+                  <span className="text-zinc-500">详细结果：</span>
+                  {
+                    AI_LEARNING_ANALYTICS_DETAILED_OUTCOME_LABELS[
+                      task.detailedOutcome
+                    ]
+                  }
+                </p>
               </td>
-              <td className="px-3 py-2.5 text-center tabular-nums text-zinc-800">
-                {task.issueLoadDelta === null
-                  ? "—"
-                  : formatAiLearningAnalyticsDelta(task.issueLoadDelta)}
-              </td>
-              <td className="px-3 py-2.5 text-zinc-800">
-                {
-                  AI_LEARNING_ANALYTICS_DETAILED_OUTCOME_LABELS[
-                    task.detailedOutcome
-                  ]
-                }
-              </td>
-              <td className="min-w-80 px-3 py-2.5 text-zinc-700">
+              <td className="px-3 py-2.5 text-zinc-700">
                 <ReviewEndpoint
                   label="介入基线"
                   review={task.baselineReview}
@@ -233,9 +256,13 @@ function ReviewEndpoint({
   classroomTaskId: string;
 }) {
   if (!review)
-    return <p className="mt-2 text-xs">{label}：未知或暂无可用端点</p>;
+    return (
+      <p className="mt-2 text-xs [overflow-wrap:anywhere]">
+        {label}：未知或暂无可用端点
+      </p>
+    );
   return (
-    <details className="mt-2 text-xs leading-5">
+    <details className="mt-2 min-w-0 text-xs leading-5 [overflow-wrap:anywhere]">
       <summary>
         {label}：第 {review.attemptNo ?? "未知"} 次提交，作品版本{" "}
         {review.contentRevision ?? "未知"}

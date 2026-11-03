@@ -762,32 +762,41 @@ export default async function ProcessAssessmentPage({
             <EmptyState title="暂无过程性评价数据" description="当前窗口下未返回可展示条目。" />
           </div>
         ) : (
-          <div className="mt-3 overflow-x-auto rounded-lg border border-zinc-200 bg-white">
-            <table className="w-full min-w-[1180px] border-collapse text-sm">
+          <div className="mt-3 min-w-0 overflow-x-auto rounded-lg border border-zinc-200 bg-white">
+            <table className="w-full min-w-[700px] table-fixed border-collapse text-sm [overflow-wrap:anywhere] lg:min-w-0">
+              <colgroup>
+                <col className="w-[6%]" />
+                <col className="w-[15%]" />
+                <col className="w-[16%]" />
+                <col className="w-[19%]" />
+                <col className="w-[13%]" />
+                <col className="w-[11%]" />
+                <col className="w-[20%]" />
+              </colgroup>
               <thead className="bg-zinc-50 text-left text-zinc-600">
-                <tr>
-                  <th className="w-14 whitespace-nowrap px-3 py-2.5 text-center">序号</th>
-                  <th className="w-56 whitespace-nowrap px-3 py-2.5 text-left">学生</th>
-                  <th className="w-44 whitespace-nowrap px-3 py-2.5 text-left">进度</th>
-                  <th className="min-w-[88px] whitespace-nowrap px-3 py-2.5 text-center">
-                    迭代任务数
+                <tr className="align-top">
+                  <th scope="col" className="px-2 py-2.5 text-center">
+                    序号
                   </th>
-                  <th className="min-w-[112px] whitespace-nowrap px-3 py-2.5 text-center">
-                    AI 覆盖任务数
+                  <th scope="col" className="px-3 py-2.5 text-left">
+                    学生
                   </th>
-                  <th className="min-w-[96px] whitespace-nowrap px-3 py-2.5 text-center">
-                    平均警告项
+                  <th scope="col" className="px-3 py-2.5 text-left">
+                    任务进度
                   </th>
-                  <th className="min-w-[96px] whitespace-nowrap px-3 py-2.5 text-center">
-                    平均错误项
+                  <th scope="col" className="px-3 py-2.5 text-left">
+                    AI 覆盖
+                    <span className="mt-1 block font-normal leading-5 text-zinc-500">
+                      总请求/成功均为次数
+                    </span>
                   </th>
-                  <th className="min-w-[72px] whitespace-nowrap px-3 py-2.5 text-center">
-                    得分
+                  <th scope="col" className="px-3 py-2.5 text-left">
+                    平均反馈项
                   </th>
-                  <th className="min-w-[72px] whitespace-nowrap px-3 py-2.5 text-center">
-                    风险
+                  <th scope="col" className="px-3 py-2.5 text-center">
+                    得分与风险
                   </th>
-                  <th className="min-w-[240px] whitespace-nowrap px-3 py-2.5 text-left">
+                  <th scope="col" className="px-3 py-2.5 text-left">
                     问题摘要
                   </th>
                 </tr>
@@ -795,48 +804,57 @@ export default async function ProcessAssessmentPage({
               <tbody>
                 {rows.map((row, index) => (
                   <tr key={row.key} className="border-t border-zinc-100 align-top">
-                    <td className="px-3 py-2.5 text-center tabular-nums text-zinc-700">
+                    <td className="px-2 py-2.5 text-center tabular-nums text-zinc-700">
                       {index + 1}
                     </td>
-                    <td className="px-3 py-2.5">
-                      <p className="font-medium text-zinc-900">{row.studentDisplayName}</p>
+                    <td className="break-words px-3 py-2.5 leading-6">
+                      <p className="font-medium text-zinc-900">
+                        {row.studentDisplayName}
+                      </p>
                       {row.studentSecondaryText ? (
-                        <p className="mt-0.5 text-[11px] text-zinc-500">{row.studentSecondaryText}</p>
+                        <p className="mt-1 text-zinc-500">{row.studentSecondaryText}</p>
                       ) : null}
                     </td>
-                    <td className="px-3 py-2.5">
-                      <p className="text-base font-semibold text-zinc-900">{row.progressDisplay}</p>
-                      <p className="mt-0.5 text-[11px] text-zinc-500">{row.progressSecondaryText}</p>
-                    </td>
-                    <td className="px-3 py-2.5 text-center tabular-nums text-zinc-800">
-                      {row.iteratedTasksCount}
-                    </td>
-                    <td className="px-3 py-2.5 text-center">
-                      <p className="font-medium tabular-nums text-zinc-900">
-                        {row.aiTaskCoverageDisplay}
+                    <td className="px-3 py-2.5 leading-6">
+                      <p className="text-base font-semibold text-zinc-900">
+                        {row.progressDisplay}
                       </p>
-                      <p className="mt-0.5 text-[11px] text-zinc-500">
+                      <p className="mt-1 text-zinc-500">{row.progressSecondaryText}</p>
+                      <p className="mt-1 text-zinc-700">
+                        迭代任务：
+                        <span className="tabular-nums">{row.iteratedTasksCount}</span>
+                      </p>
+                    </td>
+                    <td className="px-3 py-2.5 leading-6">
+                      <p className="font-medium tabular-nums text-zinc-900">
+                        覆盖任务：{row.aiTaskCoverageDisplay}
+                      </p>
+                      <p className="mt-1 text-zinc-500">
                         {row.aiTaskCoverageSecondaryText}
                       </p>
                     </td>
-                    <td className="px-3 py-2.5 text-center tabular-nums text-zinc-800">
-                      {row.avgWarnItemsDisplay}
-                    </td>
-                    <td className="px-3 py-2.5 text-center tabular-nums text-zinc-800">
-                      {row.avgErrorItemsDisplay}
-                    </td>
-                    <td className="px-3 py-2.5 text-center text-base font-semibold tabular-nums text-zinc-900">
-                      {row.scoreDisplay}
+                    <td className="px-3 py-2.5 leading-6 text-zinc-800">
+                      <p>
+                        平均警告：
+                        <span className="tabular-nums">{row.avgWarnItemsDisplay}</span>
+                      </p>
+                      <p className="mt-1">
+                        平均错误：
+                        <span className="tabular-nums">{row.avgErrorItemsDisplay}</span>
+                      </p>
                     </td>
                     <td className="px-3 py-2.5 text-center">
+                      <p className="text-base font-semibold tabular-nums text-zinc-900">
+                        {row.scoreDisplay}
+                      </p>
                       <span
-                        className={`inline-flex rounded-full px-2 py-0.5 text-xs font-medium ring-1 ${riskToneClassNameMap[row.riskTone]}`}
+                        className={`mt-2 inline-flex max-w-full rounded-full px-2 py-0.5 text-xs font-medium ring-1 ${riskToneClassNameMap[row.riskTone]}`}
                       >
                         {row.riskDisplay}
                       </span>
                     </td>
                     <td
-                      className="max-w-xl whitespace-pre-wrap break-words px-3 py-2.5 text-zinc-700"
+                      className="whitespace-pre-wrap break-words px-3 py-2.5 leading-6 text-zinc-700"
                       title={row.issueSummaryTitle}
                     >
                       {row.issueSummaryDisplay}

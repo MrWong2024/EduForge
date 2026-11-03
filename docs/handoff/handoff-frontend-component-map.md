@@ -95,9 +95,9 @@
 
 | Component / Module | File | Responsibility / Boundary |
 |---|---|---|
-| ProcessAssessmentPage | `app/teacher/classrooms/[classroomId]/process-assessment/page.tsx` | URL 条件、服务端加载、分页、摘要、评分说明与 CSV 入口组合；使用 TaskExclusionPanel 的过程性评价模式及共享任务选项 helper；不重算后端评分或持久化排除条件 |
+| ProcessAssessmentPage | `app/teacher/classrooms/[classroomId]/process-assessment/page.tsx` | URL 条件、服务端加载、分页、摘要、评分说明与 CSV 入口组合；明细按七列分行归组，桌面宽度内阅读全部指标，窄屏局部横滚；使用 TaskExclusionPanel 的过程性评价模式及共享任务选项 helper；不重算后端评分或持久化排除条件 |
 | AiLearningAnalyticsPage | `app/teacher/classrooms/[classroomId]/ai-learning-analytics/page.tsx` | Server 页面负责条件解析、总览/学生并行读取、局部错误、任务选项降级和分页；摘要、教学关注、图表、表格与筛选下沉至对应组件，不从学生分页重算摘要 |
-| AiLearningAnalyticsStudentPage | `app/teacher/classrooms/[classroomId]/ai-learning-analytics/students/[studentId]/page.tsx` | Server 页面组合学生摘要、逐任务比较图与全任务明细，展示比较端点/最新版本、安全来源与未比较原因并链接对应提交；恢复返回列表上下文，直接消费后端结果，列表状态不扩大详情请求范围 |
+| AiLearningAnalyticsStudentPage | `app/teacher/classrooms/[classroomId]/ai-learning-analytics/students/[studentId]/page.tsx` | Server 页面组合学生摘要、逐任务比较图与全任务明细；明细按五列分行归组，桌面默认可见比较证据，窄屏局部横滚；展示比较端点/最新版本、安全来源与未比较原因并链接对应提交；恢复返回列表上下文，直接消费后端结果，列表状态不扩大详情请求范围 |
 | TaskExclusionPanel | `components/teacher/TaskExclusionPanel.tsx` | 共享临时任务排除 Client Component，支持 process-assessment / ai-learning-analytics 模式；拥有 checkbox 草稿、应用/清空及导航 pending 状态，保留未显示的已选 ID；应用/清空回首屏并保持其他上下文，清空不携带当前 checkbox 选择；不持久化或修改教学数据 |
 | AiLearningAnalyticsStudentFilters | `components/teacher/AiLearningAnalyticsStudentFilters.tsx` | Client Component 仅管理姓名/学号、总体结果与反馈参与阶段的受控草稿，按已应用参数重新初始化并在正常清空点击时重置；保留原生 GET 表单与统计范围，应用/清空回首屏并定位学生分析区，筛选与统计仍由服务端完成 |
 | AiLearningAnalyticsSummary / AiLearningAnalyticsTeachingAttention | `components/teacher/AiLearningAnalyticsSummary.tsx` | 纯 Server 摘要展示后端 V1.2 计数、请求覆盖/可用反馈交付/更新率与证据提示，明确可比子集；教学关注带样本数，零上升/下降事件不生成相应极值提示，全部已更新不提示更新不足，不生成评分或风险等级 |
