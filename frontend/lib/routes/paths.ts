@@ -3,6 +3,11 @@ const encodeSegment = (value: string) => encodeURIComponent(value);
 export const paths = {
   home: "/",
   login: "/login",
+  cases: {
+    orbitpass: "/cases/orbitpass",
+    framepilot: "/cases/framepilot",
+    patchdock: "/cases/patchdock",
+  },
   teacher: {
     home: "/teacher",
     account: "/teacher/account",

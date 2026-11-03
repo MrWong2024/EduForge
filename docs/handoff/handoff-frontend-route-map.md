@@ -12,10 +12,15 @@
 
 | Route | 页面用途 | 主要数据 / 依赖 | 核心交互 / 边界 | 完成度 |
 |---|---|---|---|---|
-| `/` | EduForge · 智炼公开首页 | 静态介绍与虚构工程案例，无会话或业务数据依赖 | 所有访问者（包括已登录用户）查看相同内容；页内案例导航、只读材料展开、账号说明及登录入口，登录链接关闭预取；不重定向或执行模型/业务请求 | Done |
+| `/` | EduForge · 智炼公开首页与案例选择入口 | 平台介绍与局部单案例预览，无会话或业务数据依赖 | 所有访问者查看相同平台内容；手动切换 OrbitPass、FramePilot、PatchDock，默认 OrbitPass，左侧“查看协作案例”与右侧预览均进入当前选中案例的独立详情；顶部仅保留品牌与登录入口，登录链接关闭预取 | Done |
+| `/cases/orbitpass` | OrbitPass｜大会席位预约 | 静态工程案例与共享 CasesLayout | 独立 metadata、唯一正文 h1，阅读预约并发与重试的审查、修订及验收标准；自然滚动，返回首页/切换案例/登录由共享布局提供 | Done |
+| `/cases/framepilot` | FramePilot｜智能视频剪辑工作台 | 静态工程案例与共享 CasesLayout | 独立 metadata、唯一正文 h1，阅读字幕时间映射与静态时间轴；不处理真实视频，导航与访问边界同共享布局 | Done |
+| `/cases/patchdock` | PatchDock｜AI 代码补丁审查台 | 静态工程案例与共享 CasesLayout | 独立 metadata、唯一正文 h1，阅读文件快照补丁预检与差异；不实际应用补丁，导航与访问边界同共享布局 | Done |
 | `/login` | 登录与角色分流 | Auth / 当前用户 | 登录、保留合法来源回跳、按角色进入工作区；无角色时提示。共享外壳统一品牌，表单、无角色及探针错误状态均可返回首页；原会话与错误处理不变 | Done |
 | `/forgot-password` | 忘记密码 | Auth 密码重置请求 | 输入邮箱请求重置邮件；固定防枚举成功提示；可返回登录 | Done |
 | `/reset-password` | 重置密码 | Auth 密码重置 | 使用重置链接设置并确认新密码，成功后返回登录；token 处理归 API/Component Owner | Done |
+
+案例由三个明确的静态 page 提供，无 `/cases` 索引或动态 slug 分派；未知案例地址返回 404。案例页与首页均不读取会话、cookies、headers 或业务/模型数据；公开页面登录入口禁用预取。组件职责与内容边界见 [Component Map](./handoff-frontend-component-map.md#41-public-entry)。
 
 ## 2) Teacher 路由
 

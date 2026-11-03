@@ -47,8 +47,20 @@
 | Component / Module | File | Responsibility / Boundary |
 |---|---|---|
 | PublicHomePage | `app/page.tsx` | 静态首页入口及 metadata，组合 PublicHome；不读取会话、Cookie、headers 或业务/模型数据，访问投影见 Route Map |
-| PublicHome | `components/public/PublicHome.tsx` | 品牌导航、首屏、师生价值、账号说明与正常文档流页脚，组合工程案例；使用真实 HTML/CSS 呈现，登录 Link 关闭预取，无业务请求或交互状态框架 |
-| OrbitPassCase | `components/public/OrbitPassCase.tsx` | 就近维护并展示虚构六步协作案例、代码差异、预置验证记录及独立说明/教学反馈；原生 details/summary 仅用于阅读展开，明确外部开发与平台教学边界，不执行案例或调用 API/模型 |
+| PublicHome | `components/public/PublicHome.tsx` | Server Component 负责仅含品牌与登录入口的首页 header、footer 与 main 外壳，组合 PublicHomeHero；登录 Link 关闭预取，不读取会话或业务数据 |
+| PublicHomeHero | `components/public/PublicHomeHero.tsx` | 局部 Client 边界承载平台大标题/介绍、教学特色和案例预览；拥有唯一 activeIndex，默认 OrbitPass，将左侧“查看协作案例”的详情 Link 与受控 PublicCasePreview 绑定同一案例数据，不自动轮播 |
+| PublicCasePreview | `components/public/PublicCasePreview.tsx` | 接受 activeIndex/onSelect 的受控案例预览，导出 publicCasePreviews 供 Hero 复用；内部只保留键盘焦点 refs，维护 ARIA tabs 与左右/Home/End 键，展示简短片段/人的审查及对应静态详情链接，无业务或模型请求 |
+| CasesLayout | `app/cases/layout.tsx` | 三个详情共用的 Server 容器、返回首页/登录导航与页脚，组合 PublicCaseNav 承载案例切换；登录禁预取，小型文字说明外部开发验证与 EduForge 教学承载边界，不读取会话或业务数据 |
+| PublicCaseNav | `components/public/PublicCaseNav.tsx` | 由跨页 Link 组成的局部 Client 分段导航，以 usePathname 与 paths 中的静态案例目标精确匹配当前项，提供当前页视觉与 aria-current 语义；不持有独立选择状态，不读取会话或业务数据，视觉语言遵循 Design Baseline |
+| Case Pages | `app/cases/orbitpass/page.tsx`、`app/cases/framepilot/page.tsx`、`app/cases/patchdock/page.tsx` | 明确静态页面各自提供 metadata 并组合对应正文，不设置索引、动态 slug 分派或内容管理层；路由清单由 Route Map 维护 |
+| PublicCaseHeader | `components/public/PublicCaseHeader.tsx` | 三个案例详情共享的 Server 标题卡，固定案例类别首行，按调用方内容展示唯一 h1、简介和关键词；不拥有案例正文或交互状态，统一外观由 Design Baseline 维护 |
+| PublicCaseStep | `components/public/PublicCaseStep.tsx` | 三个详情共用的纵向步骤容器，维护步骤序号、h2 与正文层级，内容由各案例传入 |
+| PublicCaseCodeBlock | `components/public/PublicCaseCodeBlock.tsx` | 三个详情共用的代码、伪代码与文件树展示，保留文字标签、键盘焦点及局部横向滚动，不执行代码 |
+| OrbitPassCase | `components/public/OrbitPassCase.tsx` | 独立详情正文的预约规则、初稿缺陷、人的审查、修订方案、验收标准及说明参考/教学反馈；原观察记录改为输入、触发、预期与依据，保留原预约合同，不执行预约或测试 |
+| FramePilotCase | `components/public/FramePilotCase.tsx` | 独立详情的字幕裁切/重排/重复片段时间映射、固定输入对应的静态双时间轴与验收标准；不解码视频、生成字幕或实现播放器 |
+| PatchDockCase | `components/public/PatchDockCase.tsx` | 独立详情的文件快照补丁预检、文件树/diff 对照、验收标准与教学追问；只说明预检结论，不应用补丁、操作文件或执行命令 |
+
+三个正文组件就近维护材料，复用共享标题、步骤和代码展示组件，各有一个 h1，按任务约束、AI 初稿、人的审查、修订方案、验证场景与验收标准、独立说明与教学反馈组织；原生 details/summary 只用于阅读，长代码/表格局部滚动，无案例 API、模型调用或通用案例引擎。外观与事实呈现原则见 [Design Baseline](./handoff-frontend-design-baseline.md#62-公开入口与演示材料)。
 
 ## 5) Teacher 交互组件
 
