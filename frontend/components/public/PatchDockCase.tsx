@@ -17,18 +17,28 @@ const proposedDiff = `--- a/src/main.ts
  }`;
 
 const revisedSketch = `require patch.baselineId === snapshot.baselineId
-require onlyExistingUtf8TextEdits(patch)
+require onlyExistingFileEditOperations(patch) // 仅校验补丁操作，不读取目标文本
 rejectMalformedAsciiPaths(patch.targets)
 rejectCaseAmbiguity(snapshot.manifest, patch.targets)
+rejectDuplicateTargets(patch.targets)
+
+pendingEnvironmentChecks = []
+confirmedEdits = []
 
 for target in patch.targets:
   entry = requireExactManifestEntry(target.path)
   if entry.knownOutsideWorkspace: reject("路径越界")
+  // 路径与常规 UTF-8 文本类型未确认时，不读取 entry.text
   if not entry.confirmedRegularTextAndPath:
-    return needsEnvironmentCheck(target.path)
+    pendingEnvironmentChecks.append(target.path)
+    continue
   require countExactContextMatches(entry.text, target.context) === 1
+  confirmedEdits.append(locateEdit(entry.text, target)) // 只定位，不修改输入
 
-rejectDuplicateTargetsAndConflictingEdits(patch)
+rejectConflictingEdits(confirmedEdits) // 仅检查当前证据可确定的冲突
+if pendingEnvironmentChecks is not empty:
+  return needsEnvironmentCheck(pendingEnvironmentChecks)
+
 preview = buildDiffInSeparateBuffers(snapshot, patch)
 return { verdict: "preview", diff: preview }`;
 
@@ -48,13 +58,12 @@ const verificationScenarios = [
     basis: "匹配到文字不能替代基线一致；先核对基线，再判断上下文。",
   },
   {
-    name: "路径越界",
+    name: "路径约定与越界",
     input:
-      "目标为 src/../private.txt、/private.txt、C:/private.txt，或含反斜杠、. 路径段。",
-    expected:
-      "明确拒绝目标；不修正路径、不寻找替代文件，不生成可继续的修改条目。",
+      "目标为 src/../private.txt、src/../../private.txt、/private.txt、C:/private.txt，或含反斜杠、. 路径段。",
+    expected: "按路径约定明确拒绝；不修正路径、不寻找替代文件，不生成预览。",
     basis:
-      "ASCII 相对路径规则逐段核对；绝对路径、盘符、反斜杠及 .、.. 段均非法。",
+      "src/../private.txt 含禁止的父目录段，不能仅据此断言越出项目根；src/../../private.txt 从项目根解析后越界。绝对路径、盘符、反斜杠及 .、.. 段均违反约定。",
   },
   {
     name: "大小写歧义",
@@ -65,19 +74,22 @@ const verificationScenarios = [
     basis: "按清单原文精确匹配，同时检查仅大小写不同的冲突项。",
   },
   {
-    name: "链接或类型未确认",
+    name: "待核验目标与确定拒绝",
     input:
-      "目标为符号链接，或真实路径、文件类型尚未确认；另一目标已知指向工作区外。",
+      "场景一：只有链接、真实路径或类型未确认的目标。场景二：同一补丁包含待核验目标与已知工作区外目标，并交换两目标的输入顺序。",
     expected:
-      "前者标记“需要环境核验”，不报告安全；已知指向工作区外的目标直接拒绝。",
-    basis: "路径字符串与文本快照不能证明真实目标的位置和类型。",
+      "场景一：无确定拒绝原因时返回“需要环境核验”。场景二：无论目标顺序如何，均拒绝整个补丁，不生成预览。",
+    basis:
+      "待核验标记不能提前结束确定性拒绝检查；未确认目标不读取文本，已知工作区外目标必须拒绝。",
   },
   {
     name: "上下文与修改冲突",
-    input: "上下文匹配 0 处或多处；同一文件出现重复目标，或修改区间相互重叠。",
+    input:
+      "同一补丁有重复目标；或在路径与常规文本已确认的目标中，上下文匹配 0 处、多处，或已定位的修改区间重叠。",
     expected:
-      "分别报告上下文缺失、匹配歧义、重复目标或修改冲突；不选择第一处凑出差异。",
-    basis: "每项修改须有唯一定位；预览前整体核对目标与修改区间。",
+      "重复目标直接拒绝；已确认目标的上下文缺失、歧义或可确定冲突均拒绝，不选择第一处凑出差异。",
+    basis:
+      "重复目标检查不依赖文本；仅用已确认目标的文本定位和判定冲突，未知事项留待环境核验。",
   },
 ];
 
@@ -138,10 +150,7 @@ export function PatchDockCase() {
           初稿只检查路径以 src/ 开头、待替换文本能够找到，就给出“可继续”的结论。
           它没有回答：是不是同一份基线、目标在哪里、文字究竟匹配了几处。
         </p>
-        <details
-          className="mt-4 min-w-0 rounded-lg border border-zinc-200 bg-zinc-50"
-          open
-        >
+        <details className="mt-4 min-w-0 rounded-lg border border-zinc-200 bg-zinc-50">
           <summary className={summaryClassName}>查看初稿片段</summary>
           <p className="px-4 pb-2 text-xs leading-6 text-zinc-500">
             初稿与修订逻辑以伪代码呈现，只说明检查顺序。
@@ -163,7 +172,12 @@ export function PatchDockCase() {
         </blockquote>
         <ul className="mt-5 space-y-3 text-sm leading-7 text-zinc-700">
           <li>基线已从 A 变成 B，即使文字仍在，也必须重新审查。</li>
-          <li>src/../private.txt 同样满足前缀判断，却包含越界路径段。</li>
+          <li>
+            src/../private.txt
+            虽满足前缀判断，但违反禁止父目录段的约定，不能仅据此断言越出项目根；
+            src/../../private.txt
+            从项目根解析后越界。两者都直接拒绝，不做路径修正。
+          </li>
           <li>匹配两处时不能默认选第一处，重复修改也不能逐项忽略。</li>
         </ul>
       </PublicCaseStep>
@@ -222,7 +236,9 @@ export function PatchDockCase() {
         </div>
 
         <details className="mt-5 min-w-0 rounded-lg border border-zinc-200 bg-zinc-50">
-          <summary className={summaryClassName}>查看修订方案的关键逻辑</summary>
+          <summary className={summaryClassName}>
+            查看修订方案的关键逻辑（伪代码）
+          </summary>
           <PublicCaseCodeBlock label="先核对基线与路径，再构造差异的修订逻辑">
             {revisedSketch}
           </PublicCaseCodeBlock>
@@ -241,56 +257,66 @@ export function PatchDockCase() {
           预期先从任务约束写出，再用这些场景审查实现及 AI
           编写的检查。拒绝的具体原因和输入是否保持不变，都属于验收内容。
         </p>
-        <div
-          tabIndex={0}
-          role="region"
-          aria-label="六类补丁预检验证场景，可横向滚动"
-          className="mt-5 min-w-0 max-w-full overflow-x-auto rounded-xl border border-zinc-200 focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-[#0F766E]"
+        <details
+          className="mt-5 min-w-0 rounded-xl border border-zinc-200 bg-white"
+          open
         >
-          <table className="w-full min-w-[52rem] border-collapse text-left text-sm">
-            <caption className="sr-only">输入条件、验收预期与判断依据</caption>
-            <thead className="bg-zinc-50 text-xs text-zinc-600">
-              <tr>
-                <th scope="col" className="w-[8rem] px-4 py-3 font-medium">
-                  场景
-                </th>
-                <th scope="col" className="w-[17rem] px-4 py-3 font-medium">
-                  输入与触发条件
-                </th>
-                <th scope="col" className="w-[17rem] px-4 py-3 font-medium">
-                  预期结果
-                </th>
-                <th scope="col" className="px-4 py-3 font-medium">
-                  判断依据
-                </th>
-              </tr>
-            </thead>
-            <tbody>
-              {verificationScenarios.map((scenario) => (
-                <tr
-                  key={scenario.name}
-                  className="border-t border-zinc-200 align-top"
-                >
-                  <th
-                    scope="row"
-                    className="px-4 py-4 font-medium leading-7 text-zinc-900"
-                  >
-                    {scenario.name}
+          <summary className={summaryClassName}>
+            查看输入、验收预期与判断依据
+          </summary>
+          <div
+            tabIndex={0}
+            role="region"
+            aria-label="六类补丁预检验证场景，可横向滚动"
+            className="min-w-0 max-w-full overflow-x-auto rounded-b-xl border-t border-zinc-200 focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-[#0F766E]"
+          >
+            <table className="w-full min-w-[52rem] border-collapse text-left text-sm">
+              <caption className="sr-only">
+                输入条件、验收预期与判断依据
+              </caption>
+              <thead className="bg-zinc-50 text-xs text-zinc-600">
+                <tr>
+                  <th scope="col" className="w-[8rem] px-4 py-3 font-medium">
+                    场景
                   </th>
-                  <td className="px-4 py-4 leading-7 text-zinc-700">
-                    {scenario.input}
-                  </td>
-                  <td className="px-4 py-4 leading-7 text-zinc-700">
-                    {scenario.expected}
-                  </td>
-                  <td className="px-4 py-4 leading-7 text-zinc-600">
-                    {scenario.basis}
-                  </td>
+                  <th scope="col" className="w-[17rem] px-4 py-3 font-medium">
+                    输入与触发条件
+                  </th>
+                  <th scope="col" className="w-[17rem] px-4 py-3 font-medium">
+                    预期结果
+                  </th>
+                  <th scope="col" className="px-4 py-3 font-medium">
+                    判断依据
+                  </th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+              </thead>
+              <tbody>
+                {verificationScenarios.map((scenario) => (
+                  <tr
+                    key={scenario.name}
+                    className="border-t border-zinc-200 align-top"
+                  >
+                    <th
+                      scope="row"
+                      className="px-4 py-4 font-medium leading-7 text-zinc-900"
+                    >
+                      {scenario.name}
+                    </th>
+                    <td className="px-4 py-4 leading-7 text-zinc-700">
+                      {scenario.input}
+                    </td>
+                    <td className="px-4 py-4 leading-7 text-zinc-700">
+                      {scenario.expected}
+                    </td>
+                    <td className="px-4 py-4 leading-7 text-zinc-600">
+                      {scenario.basis}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </details>
       </PublicCaseStep>
 
       <PublicCaseStep

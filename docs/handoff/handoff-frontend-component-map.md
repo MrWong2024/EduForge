@@ -60,7 +60,7 @@
 | FramePilotCase | `components/public/FramePilotCase.tsx` | 独立详情的字幕裁切/重排/重复片段时间映射、固定输入对应的静态双时间轴与验收标准；不解码视频、生成字幕或实现播放器 |
 | PatchDockCase | `components/public/PatchDockCase.tsx` | 独立详情的文件快照补丁预检、文件树/diff 对照、验收标准与教学追问；只说明预检结论，不应用补丁、操作文件或执行命令 |
 
-三个正文组件就近维护材料，复用共享标题、步骤和代码展示组件，各有一个 h1，按任务约束、AI 初稿、人的审查、修订方案、验证场景与验收标准、独立说明与教学反馈组织；原生 details/summary 只用于阅读，长代码/表格局部滚动，无案例 API、模型调用或通用案例引擎。外观与事实呈现原则见 [Design Baseline](./handoff-frontend-design-baseline.md#62-公开入口与演示材料)。
+三个正文组件就近维护材料，复用共享标题、步骤和代码展示组件，各有一个 h1，按任务约束、AI 初稿、人的审查、修订方案、验证场景与验收标准、独立说明与教学反馈组织；原生 details/summary 只用于阅读，长代码/表格局部滚动，无案例 API、模型调用或通用案例引擎。外观与事实呈现原则见 [Design Baseline](./handoff-frontend-design-baseline.md#62-公开入口与演示材料)。初稿与修订材料默认收起，验收场景与独立说明默认展开，四类材料均可由阅读者通过原生展开控件切换。
 
 ## 5) Teacher 交互组件
 

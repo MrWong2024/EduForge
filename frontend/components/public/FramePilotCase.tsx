@@ -475,7 +475,9 @@ export function FramePilotCase() {
           字幕文字直接保留，不修剪、不改写。
         </p>
         <details className="mt-5 min-w-0 rounded-xl border border-zinc-200 bg-white">
-          <summary className={summaryClassName}>展开关键逻辑与排序规则</summary>
+          <summary className={summaryClassName}>
+            展开关键逻辑与排序规则（伪代码）
+          </summary>
           <PublicCaseCodeBlock label="修订逻辑，可横向滚动">
             {revisedLogic}
           </PublicCaseCodeBlock>
