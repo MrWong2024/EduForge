@@ -972,15 +972,6 @@ export function PublishClassroomTaskForm({
             >
               查看任务详情
             </Link>
-            <Link
-              href={paths.teacher.classroomTaskSubmissions(
-                classroomId,
-                createdTaskId,
-              )}
-              className="text-emerald-800 underline"
-            >
-              查看提交管理
-            </Link>
           </div>
         </div>
       ) : null}
