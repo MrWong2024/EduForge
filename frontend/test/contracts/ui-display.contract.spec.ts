@@ -287,15 +287,15 @@ test("public revision, submission and cooldown messages survive the final presen
   for (const [message, expected] of [
     [
       "作品内容已变化，请查看最新提交并核对草稿后明确继续。",
-      "作品内容已变化，当前操作依据的是旧版作品。草稿已保留，请刷新查看并明确确认后继续。",
+      "作品内容已变化，当前操作依据的是旧版作品。当前输入已保留，请在本页核对最新作品，确认后再继续。",
     ],
     [
       "本次提交已进入评阅，不能再修改作品；草稿仍保留，请核对提交详情。",
-      "本次提交已进入评阅，不能再修改作品。草稿已保留，请核对当前作品与反馈。",
+      "本次提交已进入评阅，不能再修改作品。未保存的修改已保留，请在本页核对当前作品与反馈。",
     ],
     [
       "提交的版本或评阅状态无效，当前操作已停止，请联系教师核对。",
-      "提交状态暂不可用。草稿已保留，请核对详情或联系教师。",
+      "提交状态暂不可用。当前输入已保留，请在本页核对详情或联系教师。",
     ],
   ]) {
     const body = { statusCode: 409, message };
@@ -343,5 +343,5 @@ test("public revision, submission and cooldown messages survive the final presen
       getSubmissionRevisionError(unknown),
       extractRawDetail(unknown),
     ),
-  ).toBe("提交状态已变化。草稿已保留，请先核对最新详情。");
+  ).toBe("提交状态已变化。当前输入已保留，请先在本页核对最新详情。");
 });

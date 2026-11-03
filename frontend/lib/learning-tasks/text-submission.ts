@@ -90,18 +90,18 @@ export function getSubmissionRevisionError(data: unknown): string {
     message ===
       "本次提交已进入评阅，不能再修改作品；草稿仍保留，请核对提交详情。"
   )
-    return "本次提交已进入评阅，不能再修改作品。草稿已保留，请核对当前作品与反馈。";
+    return "本次提交已进入评阅，不能再修改作品。未保存的修改已保留，请在本页核对当前作品与反馈。";
   if (
     code === "SUBMISSION_REVISION_CONFLICT" ||
     message === "作品内容已变化，请查看最新提交并核对草稿后明确继续。"
   )
-    return "作品内容已变化，当前操作依据的是旧版作品。草稿已保留，请刷新查看并明确确认后继续。";
+    return "作品内容已变化，当前操作依据的是旧版作品。当前输入已保留，请在本页核对最新作品，确认后再继续。";
   if (
     code === "SUBMISSION_INVALID_STATE" ||
     message === "提交的版本或评阅状态无效，当前操作已停止，请联系教师核对。"
   )
-    return "提交状态暂不可用。草稿已保留，请核对详情或联系教师。";
-  return "提交状态已变化。草稿已保留，请先核对最新详情。";
+    return "提交状态暂不可用。当前输入已保留，请在本页核对详情或联系教师。";
+  return "提交状态已变化。当前输入已保留，请先在本页核对最新详情。";
 }
 
 // Network completion does not clear a confirmed save.

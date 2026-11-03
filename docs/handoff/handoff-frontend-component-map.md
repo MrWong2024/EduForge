@@ -111,7 +111,7 @@
 |---|---|---|
 | JoinClassroomForm | `components/student/JoinClassroomForm.tsx` | 加入码输入与入班动作，不判断后端入班权限 |
 | SubmissionForm | `components/student/SubmissionForm.tsx` | 原文源码与独立可选说明输入、码点校验、请求防重复及公开业务错误安全适配；成功保存后锁住当前表单，导航恢复只打开同一提交详情，结果未确认先核对历史；多文件粘贴格式提示与示例由此维护，单文件无需 FILE 标记；不提供上传/结构化文件提交，不以模板当前状态自行阻断 |
-| EditSubmissionForm | `components/student/EditSubmissionForm.tsx` | 同次提交的受控代码/语言/说明草稿及 baseRevision；取消无写，保存采用权威详情，刷新不覆盖草稿/静默换版；冲突或未知结果锁住保存，显式读取作品并确认后继续，取消不绕过核对门禁，评阅已受理时保留可复制草稿；学生作品展示与共享 AI 区块使用同一当前详情 |
+| EditSubmissionForm | `components/student/EditSubmissionForm.tsx` | 同次提交的受控代码/语言/说明与 baseRevision，语言复用共享选项；正常保存采用权威详情、取消不写入，刷新不覆盖未保存输入或静默换版；冲突或未知结果保留当前输入并锁住保存，通过本页显式读取作品、核对确认后继续，异常取消不绕过核对门禁；评阅已受理时保留可复制的未保存修改，学生作品展示与共享 AI 区块使用同一当前详情 |
 | RequestAiFeedbackButton | `components/student/RequestAiFeedbackButton.tsx` | 师生复用的申请按钮展示；disabled/pending 与动作回调由 SubmissionAiReview 提供，不独立持有资格或请求时序 |
 | AiProcessingHint | `components/student/AiProcessingHint.tsx` | 统一 AI 处理中提示；通用状态文案复用 UI Status |
 | SubmissionAutoRefresh | `components/student/SubmissionAutoRefresh.tsx` | 仅学生提交详情：以共享区块已接纳状态在 PENDING/RUNNING 或 FAILED 且计划重试时调用局部读取；操作中和待显式确认时暂停；终态及信息不足停止；沿用退避、失焦暂停和定时器清理，不用于草稿页 |

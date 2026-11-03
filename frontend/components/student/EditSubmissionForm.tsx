@@ -21,6 +21,7 @@ import {
   isValidContentRevision,
   selectSubmissionDisplayDetail,
 } from "@/lib/learning-tasks/text-submission";
+import { SUBMISSION_LANGUAGE_OPTIONS } from "@/lib/learning-tasks/submission-language";
 import { toDisplayDate } from "@/lib/ui/format";
 
 type Draft = {
@@ -50,11 +51,23 @@ export function EditSubmissionForm({
   const changed =
     draft !== null &&
     !isDraftRevisionCurrent(draft.baseRevision, current.contentRevision);
+  const recovering = blocked || changed;
+  const canConfirmCurrent =
+    recovering &&
+    draft !== null &&
+    checked !== null &&
+    canEditSubmission(checked) &&
+    canEditSubmission(current) &&
+    isValidContentRevision(checked.contentRevision) &&
+    isValidContentRevision(current.contentRevision) &&
+    checked.contentRevision === current.contentRevision;
   const path = `learning-tasks/submissions/${encodeURIComponent(submissionId)}`;
 
   const startEdit = () => {
     if (
       blocked ||
+      busy ||
+      refreshing ||
       inFlight.current ||
       !canEditSubmission(current) ||
       !isValidContentRevision(current.contentRevision)
@@ -71,9 +84,10 @@ export function EditSubmissionForm({
     setMessage(null);
   };
   const checkCurrent = async () => {
-    if (inFlight.current) return;
+    if (!recovering || busy || refreshing || inFlight.current) return;
     inFlight.current = true;
     setBusy(true);
+    setBlocked(true);
     setChecked(null);
     try {
       const result = toSubmissionDetailResponse(
@@ -91,25 +105,58 @@ export function EditSubmissionForm({
       setChecked(result);
       if (!draft) setBlocked(false);
       setMessage(
-        canEditSubmission(result)
-          ? "已读取最新作品。请核对下方内容；确认后可将保留草稿用于当前作品。"
-          : (result.editing.message ??
-              "本次提交当前不能修改。草稿仍保留，可复制后取消编辑。"),
+        draft
+          ? "已读取最新已保存作品。下方展示已保存作品，上方未保存的修改仍保留，尚未保存。请核对后再决定是否继续修改。"
+          : "已读取最新已保存作品，下方展示当前已保存作品；修改资格与可用操作以当前页面为准。",
       );
       startTransition(() => router.refresh());
     } catch {
+      setChecked(null);
       setMessage(
-        "最新详情读取未完成，草稿已保留。请再次点击核对，暂不继续保存。",
+        draft
+          ? "最新已保存作品读取未完成，未保存的修改仍保留。请重试“查看最新已保存作品”，暂不能继续保存。"
+          : "最新已保存作品读取未完成，请重试“查看最新已保存作品”，暂不能开始修改。",
       );
     } finally {
       inFlight.current = false;
       setBusy(false);
     }
   };
+  const confirmCurrent = () => {
+    if (
+      !recovering ||
+      !draft ||
+      !checked ||
+      !canEditSubmission(checked) ||
+      !canEditSubmission(current) ||
+      !isValidContentRevision(checked.contentRevision) ||
+      !isValidContentRevision(current.contentRevision) ||
+      checked.contentRevision !== current.contentRevision ||
+      busy ||
+      refreshing ||
+      inFlight.current
+    )
+      return;
+    setDraft({ ...draft, baseRevision: checked.contentRevision });
+    setBlocked(false);
+    setChecked(null);
+    setMessage(
+      "已核对已保存作品，未保存的修改仍保留。请继续修改，完成后再点击“保存本次修改”。",
+    );
+  };
+  const cancelEdit = () => {
+    if (busy || refreshing || inFlight.current) return;
+    if (changed) setBlocked(true);
+    setDraft(null);
+    setMessage(null);
+    setChecked(null);
+  };
   const save = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (
       !draft ||
+      busy ||
+      refreshing ||
       inFlight.current ||
       blocked ||
       changed ||
@@ -152,7 +199,7 @@ export function EditSubmissionForm({
       ) {
         setBlocked(true);
         setMessage(
-          "保存响应不完整，结果待核对。草稿已保留，请先读取当前作品，避免重复保存。",
+          "保存响应不完整，结果待核对。未保存的修改已保留，请先查看最新已保存作品，避免重复保存。",
         );
         return;
       }
@@ -167,13 +214,13 @@ export function EditSubmissionForm({
           error.status === 409
             ? getSubmissionRevisionError(error.data)
             : error.status === 403
-              ? "当前无修改资格或已超过截止时间。草稿已保留，请核对详情。"
-              : "修改未保存，请检查内容并核对当前详情。草稿已保留。",
+              ? "当前无修改资格或已超过截止时间。未保存的修改已保留，请查看最新已保存作品。"
+              : "修改未保存，请检查内容并核对当前详情。未保存的修改已保留。",
         );
       } else {
         setBlocked(true);
         setMessage(
-          "网络中断、超时或服务异常，保存结果待核对。草稿已保留，请先读取当前作品，避免重复保存。",
+          "网络中断、超时或服务异常，保存结果待核对。未保存的修改已保留，请先查看最新已保存作品，避免重复保存。",
         );
       }
     } finally {
@@ -190,52 +237,52 @@ export function EditSubmissionForm({
           进入评阅前，可在参与资格与截止规则允许时修改同一份作品；教师仅查看不会锁定作品。
         </p>
         {!draft ? (
-          <>
-            <button
-              type="button"
-              onClick={startEdit}
-              disabled={
-                blocked || !canEditSubmission(current) || busy || refreshing
-              }
-              className="rounded-md bg-zinc-900 px-4 py-2 text-white disabled:bg-zinc-400"
-            >
-              修改本次提交
-            </button>
-            {!canEditSubmission(current) ? (
-              <p>
-                {current.editing.message ??
-                  "修改资格暂不可用，请刷新详情核对。"}
-              </p>
-            ) : null}
-            {blocked ? (
-              <button
-                type="button"
-                disabled={busy || refreshing}
-                onClick={() => void checkCurrent()}
-                className="ml-3 text-blue-700 underline"
-              >
-                读取当前作品并核对后再编辑
-              </button>
-            ) : null}
-          </>
+          <button
+            type="button"
+            onClick={startEdit}
+            disabled={
+              blocked || !canEditSubmission(current) || busy || refreshing
+            }
+            className="rounded-md bg-zinc-900 px-4 py-2 text-white disabled:bg-zinc-400"
+          >
+            修改本次提交
+          </button>
         ) : (
           <form onSubmit={save} className="space-y-3">
-            <fieldset disabled={busy} className="min-w-0 space-y-3">
+            <fieldset
+              disabled={busy || refreshing}
+              className="min-w-0 space-y-3"
+            >
               <label className="block">
                 编程语言
-                <input
+                <select
                   required
+                  disabled={!canEditSubmission(current)}
                   value={draft.language}
                   onChange={(event) =>
                     setDraft({ ...draft, language: event.target.value })
                   }
                   className="mt-1 w-full rounded-md border border-zinc-300 px-3 py-2"
-                />
+                >
+                  {SUBMISSION_LANGUAGE_OPTIONS.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                  {!SUBMISSION_LANGUAGE_OPTIONS.some(
+                    (option) => option.value === draft.language,
+                  ) ? (
+                    <option value={draft.language}>
+                      当前值：{draft.language}
+                    </option>
+                  ) : null}
+                </select>
               </label>
               <label className="block">
                 代码内容
                 <textarea
                   required
+                  readOnly={!canEditSubmission(current)}
                   rows={10}
                   value={draft.codeText}
                   onChange={(event) =>
@@ -247,6 +294,7 @@ export function EditSubmissionForm({
               <label className="block">
                 提交说明（可选）
                 <textarea
+                  readOnly={!canEditSubmission(current)}
                   rows={5}
                   value={draft.submissionNote}
                   onChange={(event) =>
@@ -259,75 +307,80 @@ export function EditSubmissionForm({
                 说明 {countCodePoints(draft.submissionNote)} / 20,000 个 Unicode
                 码点；代码与说明按原文保存。
               </p>
-              {changed ? (
-                <p role="status" className="text-amber-800">
-                  作品已有新版。当前输入仍基于开始编辑时的作品，草稿没有被刷新覆盖；请核对后明确继续。
-                </p>
-              ) : null}
               <div className="flex flex-wrap gap-3">
-                <button
-                  type="submit"
-                  disabled={
-                    blocked ||
-                    changed ||
-                    !canEditSubmission(current) ||
-                    refreshing
-                  }
-                  className="rounded-md bg-zinc-900 px-4 py-2 text-white disabled:bg-zinc-400"
-                >
-                  {busy ? "保存中…" : "保存本次修改"}
-                </button>
+                {canEditSubmission(current) ? (
+                  <button
+                    type="submit"
+                    disabled={recovering || busy || refreshing}
+                    className="rounded-md bg-zinc-900 px-4 py-2 text-white disabled:bg-zinc-400"
+                  >
+                    {busy ? "保存中…" : "保存本次修改"}
+                  </button>
+                ) : null}
                 <button
                   type="button"
-                  onClick={() => {
-                    setDraft(null);
-                    setMessage(null);
-                    setChecked(null);
-                  }}
+                  onClick={cancelEdit}
                   className="text-zinc-700 underline"
                 >
                   取消修改
-                </button>
-                <button
-                  type="button"
-                  onClick={() => void checkCurrent()}
-                  className="text-blue-700 underline"
-                >
-                  读取最新作品并核对
                 </button>
               </div>
             </fieldset>
           </form>
         )}
+        {!canEditSubmission(current) ? (
+          <p className="whitespace-pre-wrap break-words">
+            {current.editing.message ??
+              "当前修改资格不可用，请核对已保存作品或联系任课教师。"}
+            {draft ? "当前输入仍保留，可复制或取消修改。" : ""}
+          </p>
+        ) : null}
+        {recovering ? (
+          <div className="space-y-3 rounded-md border border-amber-200 bg-amber-50 p-3">
+            <h3 className="font-medium text-amber-900">先核对已保存作品</h3>
+            <p className="text-amber-900">
+              {!isValidContentRevision(current.contentRevision)
+                ? "当前已保存作品的版本信息不可用，请先查看最新已保存作品再核对。"
+                : changed
+                  ? "已保存作品的版本已变化。当前输入仍基于开始修改时的版本，未保存的修改已保留；请核对后明确继续。"
+                  : draft
+                    ? "当前修改需要先核对最新已保存作品，确认当前版本与修改资格后再继续。"
+                    : "请先查看最新已保存作品，核对当前版本与修改资格后再开始修改。"}
+            </p>
+            <div className="flex flex-wrap items-center gap-3">
+              <button
+                type="button"
+                disabled={busy || refreshing}
+                onClick={() => void checkCurrent()}
+                className="text-blue-700 underline disabled:text-zinc-500"
+              >
+                查看最新已保存作品
+              </button>
+              {canConfirmCurrent ? (
+                <button
+                  type="button"
+                  disabled={busy || refreshing}
+                  onClick={confirmCurrent}
+                  className="text-blue-700 underline disabled:text-zinc-500"
+                >
+                  已核对，继续修改
+                </button>
+              ) : null}
+            </div>
+            {draft &&
+            checked &&
+            (!isValidContentRevision(current.contentRevision) ||
+              checked.contentRevision !== current.contentRevision) ? (
+              <p className="text-amber-900">
+                已核对的版本已不是当前版本，或当前版本信息不可用；请重新查看最新已保存作品。
+              </p>
+            ) : null}
+          </div>
+        ) : null}
         {message ? (
           <p role="status" className="whitespace-pre-wrap break-words">
             {message}
           </p>
-        ) : null}
-        {draft &&
-        checked &&
-        canEditSubmission(checked) &&
-        isValidContentRevision(checked.contentRevision) ? (
-          <button
-            type="button"
-            disabled={
-              busy ||
-              refreshing ||
-              checked.contentRevision !== current.contentRevision
-            }
-            onClick={() => {
-              if (!isValidContentRevision(checked.contentRevision)) return;
-              setDraft({ ...draft, baseRevision: checked.contentRevision });
-              setBlocked(false);
-              setChecked(null);
-              setMessage(
-                "已确认当前作品，保留草稿可继续修改；保存仍以服务端当前状态为准。",
-              );
-            }}
-            className="text-blue-700 underline"
-          >
-            已核对最新作品，保留草稿继续编辑
-          </button>
         ) : null}
         {current.lastEditedAt ? (
           <p>

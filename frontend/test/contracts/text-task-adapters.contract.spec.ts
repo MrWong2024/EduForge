@@ -462,13 +462,13 @@ test("distinguishes real public 409 responses after the exception filter omits c
   const invalidState =
     "提交的版本或评阅状态无效，当前操作已停止，请联系教师核对。";
   expect(getSubmissionRevisionError(body(contentChanged))).toBe(
-    "作品内容已变化，当前操作依据的是旧版作品。草稿已保留，请刷新查看并明确确认后继续。",
+    "作品内容已变化，当前操作依据的是旧版作品。当前输入已保留，请在本页核对最新作品，确认后再继续。",
   );
   expect(getSubmissionRevisionError(body(reviewStarted))).toBe(
-    "本次提交已进入评阅，不能再修改作品。草稿已保留，请核对当前作品与反馈。",
+    "本次提交已进入评阅，不能再修改作品。未保存的修改已保留，请在本页核对当前作品与反馈。",
   );
   expect(getSubmissionRevisionError(body(invalidState))).toBe(
-    "提交状态暂不可用。草稿已保留，请核对详情或联系教师。",
+    "提交状态暂不可用。当前输入已保留，请在本页核对详情或联系教师。",
   );
   for (const message of [
     "private stack",
@@ -479,7 +479,7 @@ test("distinguishes real public 409 responses after the exception filter omits c
     null,
   ]) {
     expect(getSubmissionRevisionError(body(message))).toBe(
-      "提交状态已变化。草稿已保留，请先核对最新详情。",
+      "提交状态已变化。当前输入已保留，请先在本页核对最新详情。",
     );
   }
 });
