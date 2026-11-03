@@ -3,7 +3,7 @@
 ## Scope / Owner
 
 - 本文维护当前 `frontend/app/**` 实际存在的 route inventory：角色与访问投影、页面用途、主要数据/领域依赖、核心用户交互、route-specific 高层边界及 implementation state。当前源码是最高事实源。
-- `/teacher/**` 与 `/student/**` 由对应 layout 执行 server-side role gate：未登录重定向到 `/login`，角色不匹配展示 403 UI；前端入口约束不替代后端权限。
+- `/teacher/**` 与 `/student/**` 由对应 layout 执行 server-side role gate：仅在既有 gate 明确确认 401 后，将未登录访问重定向到干净的 `/`（不附带 query、hash 或 `next`）；角色不匹配仍展示 403 UI，其他错误沿用原处理；前端入口约束不替代后端权限。
 - 正式业务请求统一走 `/api/proxy/**`。API helper、BFF、backend endpoint、request/response adaptation 与 integration boundary 由 [Frontend API Map](./handoff-frontend-api-map.md) 维护；下表只列高层数据依赖，不维护第二套接口清单。
 - 组件职责、local state 与 composition 见 [Component Map](./handoff-frontend-component-map.md)，稳定 UX/视觉/交互原则见 [Design Baseline](./handoff-frontend-design-baseline.md)，Browser/smoke/evidence 见 [Frontend Testing Playbook](./handoff-frontend-testing-playbook.md)。本文不复制 DTO 字段、HTTP error matrix、普通分页参数、mapper、selector/Portal 或完整布局。
 - 完成度是 route implementation state：`Done` = 当前主视图、主要交互和真链路已存在；`Partial` = 页面存在但能力不完整。Done 不等于最终交付定版，也不替代 [Roadmap](./handoff-roadmap.md) 的 CURRENT/ACTIVE/PLANNED/DEFERRED。
@@ -16,9 +16,11 @@
 | `/cases/orbitpass` | OrbitPass｜大会席位预约 | 静态工程案例与共享 CasesLayout | 独立 metadata、唯一正文 h1，阅读预约并发与重试的审查、修订及验收标准；自然滚动，返回首页/切换案例/登录由共享布局提供 | Done |
 | `/cases/framepilot` | FramePilot｜智能视频剪辑工作台 | 静态工程案例与共享 CasesLayout | 独立 metadata、唯一正文 h1，阅读字幕时间映射与静态时间轴；不处理真实视频，导航与访问边界同共享布局 | Done |
 | `/cases/patchdock` | PatchDock｜AI 代码补丁审查台 | 静态工程案例与共享 CasesLayout | 独立 metadata、唯一正文 h1，阅读文件快照补丁预检与差异；不实际应用补丁，导航与访问边界同共享布局 | Done |
-| `/login` | 登录与角色分流 | Auth / 当前用户 | 登录、保留合法来源回跳、按角色进入工作区；无角色时提示。共享外壳统一品牌，表单、无角色及探针错误状态均可返回首页；原会话与错误处理不变 | Done |
+| `/login` | 登录与角色分流 | Auth / 当前用户 | 主动登录、保留合法 `next` 来源回跳、按角色进入工作区；无角色时提示。共享外壳统一品牌，表单、无角色及探针错误状态均可返回首页；原会话与错误处理不变 | Done |
 | `/forgot-password` | 忘记密码 | Auth 密码重置请求 | 输入邮箱请求重置邮件；固定防枚举成功提示；可返回登录 | Done |
 | `/reset-password` | 重置密码 | Auth 密码重置 | 使用重置链接设置并确认新密码，成功后返回登录；token 处理归 API/Component Owner | Done |
+
+注销请求成功后同样前往干净的 `/`；失败沿用原错误处理。
 
 案例由三个明确的静态 page 提供，无 `/cases` 索引或动态 slug 分派；未知案例地址返回 404。案例页与首页均不读取会话、cookies、headers 或业务/模型数据；公开页面登录入口禁用预取。组件职责与内容边界见 [Component Map](./handoff-frontend-component-map.md#41-public-entry)。
 

@@ -57,7 +57,7 @@ export async function requireRole(role: UserRole): Promise<RoleGateResult> {
     return { allowed: true, me };
   } catch (error) {
     if (error instanceof FetchJsonError && error.status === 401) {
-      redirect(paths.login);
+      redirect(paths.home);
     }
     throw error;
   }

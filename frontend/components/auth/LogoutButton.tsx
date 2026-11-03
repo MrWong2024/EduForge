@@ -28,7 +28,7 @@ export function LogoutButton() {
         throw new Error(`HTTP ${response.status}`);
       }
 
-      router.push(paths.login);
+      router.push(paths.home);
       router.refresh();
     } catch {
       setErrorMessage("注销失败，请重试。");
