@@ -262,13 +262,17 @@ export default async function StudentSubmissionDetailPage({
 
               <dl className="mt-4 min-w-0 [overflow-wrap:anywhere]">
                 <div>
-                  <dt className="text-sm font-medium text-zinc-600">反馈内容</dt>
-                  <dd className="mt-2 whitespace-pre-wrap text-base leading-7 text-zinc-900">
+                  <dt className="inline-flex whitespace-nowrap rounded-full border border-blue-200 bg-blue-50 px-2 py-0.5 text-xs font-medium text-blue-700">
+                    反馈内容
+                  </dt>
+                  <dd className="mt-2 whitespace-pre-wrap text-sm leading-6 text-zinc-900">
                     {toDisplayText(item.message)}
                   </dd>
                 </div>
                 <div className="mt-5 border-t border-zinc-100 pt-4">
-                  <dt className="text-sm font-medium text-zinc-700">修改建议</dt>
+                  <dt className="inline-flex whitespace-nowrap rounded-full border border-blue-200 bg-blue-50 px-2 py-0.5 text-xs font-medium text-blue-700">
+                    修改建议
+                  </dt>
                   <dd className="mt-2 whitespace-pre-wrap text-sm leading-6 text-zinc-700">
                     {toDisplayText(item.suggestion, "暂无")}
                   </dd>
