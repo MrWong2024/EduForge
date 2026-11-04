@@ -49,13 +49,7 @@ export function PublicHome() {
 
       <footer className="border-t border-zinc-100 bg-white">
         <div className="mx-auto flex max-w-7xl flex-wrap items-center justify-between gap-x-5 gap-y-1 px-5 py-3 text-xs leading-5 text-zinc-500 sm:px-8">
-          <p>
-            EduForge · 智炼{" "}
-            <span className="mx-1" aria-hidden="true">
-              ·
-            </span>{" "}
-            重庆邮电大学
-          </p>
+          <p>EduForge · 智炼</p>
           <a
             href="https://beian.miit.gov.cn/"
             target="_blank"

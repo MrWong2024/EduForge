@@ -61,7 +61,7 @@ export default function CasesLayout({ children }: { children: ReactNode }) {
             开发与验证在外部开发工具中进行；作品、独立说明与 AI/教师反馈由
             EduForge 承载。
           </p>
-          <p className="mt-3">EduForge · 智炼 · 重庆邮电大学</p>
+          <p className="mt-3">EduForge · 智炼</p>
         </div>
       </footer>
     </div>
