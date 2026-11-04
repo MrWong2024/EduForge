@@ -318,7 +318,7 @@ export function CreateLearningTaskForm() {
             <textarea
               value={rubricNotes}
               onChange={(event) => setRubricNotes(event.target.value)}
-              rows={8}
+              rows={10}
               placeholder={`建议与任务描述逐项对应，写清“看什么、凭什么判断、怎样帮助学生改进”：
 
 1. 功能与边界：根据哪些行为判断任务完成？重点检查哪些正常情况、边界情况和常见错误？接受哪些合理的等价实现？
@@ -333,7 +333,7 @@ export function CreateLearningTaskForm() {
 
 6. 反馈要求：指出具体问题、依据、原因、修改方向和复查方法，让学生知道下一步怎样改。材料不足时明确需要补充什么；没有实质问题时不强行提出建议，不直接用完整答案替代学生完成任务。
 
-评阅要求应事先体现在任务描述中，避免临时增加未告知学生的要求。`}
+评阅标准应与任务描述保持一致，并在学生开始任务前明确公开；评阅时不临时增加未告知学生的要求。`}
               className="w-full resize-y overflow-auto rounded-md border border-zinc-300 px-3 py-2"
             />
             <p className="mt-1 text-xs text-zinc-500">
