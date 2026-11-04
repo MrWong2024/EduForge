@@ -228,47 +228,70 @@ export default async function StudentSubmissionDetailPage({
           description="当前尚无可展示的反馈。处理完成也不表示作品已通过；请按任务要求和教师反馈继续核对。"
         />
       ) : (
-        <div className="overflow-x-auto rounded-lg border border-zinc-200 bg-white">
-          <table className="min-w-full border-collapse text-sm">
-            <thead className="bg-zinc-50 text-left text-zinc-600">
-              <tr>
-                <th className="px-4 py-3">来源</th>
-                <th className="px-4 py-3">类型</th>
-                <th className="px-4 py-3">严重程度</th>
-                <th className="px-4 py-3">反馈内容</th>
-                <th className="px-4 py-3">修改建议</th>
-                <th className="px-4 py-3">标签</th>
-                <th className="px-4 py-3">时间</th>
-              </tr>
-            </thead>
-            <tbody>
-              {viewModel.feedback.items.map((item, index) => (
-                <tr
-                  key={item.id ?? `feedback-${index}`}
-                  className="border-t border-zinc-100 align-top"
-                >
-                  <td className="px-4 py-3">
-                    {getFeedbackSourceLabel(item.source)}
-                  </td>
-                  <td className="px-4 py-3">{getFeedbackTypeLabel(item.type)}</td>
-                  <td className="px-4 py-3">
-                    {getFeedbackSeverityLabel(item.severity)}
-                  </td>
-                  <td className="max-w-lg break-words px-4 py-3 whitespace-pre-wrap">
+        <ul className="min-w-0 space-y-4">
+          {viewModel.feedback.items.map((item, index) => (
+            <li
+              key={item.id ?? `feedback-${index}`}
+              className="min-w-0 rounded-lg border border-zinc-200 bg-white p-4 sm:p-5"
+            >
+              <div className="flex min-w-0 flex-wrap items-start justify-between gap-x-6 gap-y-2 text-sm [overflow-wrap:anywhere]">
+                <dl className="flex min-w-0 max-w-full flex-wrap gap-x-4 gap-y-2">
+                  <div className="flex min-w-0 max-w-full flex-wrap gap-x-1">
+                    <dt className="text-zinc-500">来源：</dt>
+                    <dd className="min-w-0 text-zinc-700">
+                      {getFeedbackSourceLabel(item.source)}
+                    </dd>
+                  </div>
+                  <div className="flex min-w-0 max-w-full flex-wrap gap-x-1">
+                    <dt className="text-zinc-500">类型：</dt>
+                    <dd className="min-w-0 text-zinc-700">
+                      {getFeedbackTypeLabel(item.type)}
+                    </dd>
+                  </div>
+                  <div className="flex min-w-0 max-w-full flex-wrap gap-x-1">
+                    <dt className="text-zinc-500">严重程度：</dt>
+                    <dd className="min-w-0 font-medium text-zinc-700">
+                      {getFeedbackSeverityLabel(item.severity)}
+                    </dd>
+                  </div>
+                </dl>
+                <p className="min-w-0 max-w-full text-zinc-500">
+                  时间：{toDisplayDate(item.createdAt)}
+                </p>
+              </div>
+
+              <dl className="mt-4 min-w-0 [overflow-wrap:anywhere]">
+                <div>
+                  <dt className="text-sm font-medium text-zinc-600">反馈内容</dt>
+                  <dd className="mt-2 whitespace-pre-wrap text-base leading-7 text-zinc-900">
                     {toDisplayText(item.message)}
-                  </td>
-                  <td className="max-w-lg break-words px-4 py-3 whitespace-pre-wrap">
+                  </dd>
+                </div>
+                <div className="mt-5 border-t border-zinc-100 pt-4">
+                  <dt className="text-sm font-medium text-zinc-700">修改建议</dt>
+                  <dd className="mt-2 whitespace-pre-wrap text-sm leading-6 text-zinc-700">
                     {toDisplayText(item.suggestion, "暂无")}
-                  </td>
-                  <td className="px-4 py-3">
-                    {item.tags.length > 0 ? item.tags.map(getFeedbackTagLabel).join("、") : "—"}
-                  </td>
-                  <td className="px-4 py-3">{toDisplayDate(item.createdAt)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+                  </dd>
+                </div>
+                <div className="mt-4 flex min-w-0 items-start gap-2 text-sm">
+                  <dt className="shrink-0 text-zinc-500">标签：</dt>
+                  <dd className="flex min-w-0 flex-1 flex-wrap gap-2 text-zinc-600">
+                    {item.tags.length > 0
+                      ? item.tags.map((tag, tagIndex) => (
+                          <span
+                            key={tagIndex}
+                            className="min-w-0 max-w-full rounded-md bg-zinc-50 px-2 py-1"
+                          >
+                            {getFeedbackTagLabel(tag)}
+                          </span>
+                        ))
+                      : "—"}
+                  </dd>
+                </div>
+              </dl>
+            </li>
+          ))}
+        </ul>
       )}
     </section>
   );

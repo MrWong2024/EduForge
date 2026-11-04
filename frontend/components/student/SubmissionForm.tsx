@@ -177,8 +177,8 @@ export function SubmissionForm({
               required
               value={codeText}
               onChange={(event) => setCodeText(event.target.value)}
-              rows={8}
-              className="w-full rounded-md border border-zinc-300 px-3 py-2 text-sm outline-none focus:border-zinc-500"
+              rows={16}
+              className="w-full resize-y rounded-md border border-zinc-300 px-3 py-2 text-sm outline-none focus:border-zinc-500"
               placeholder="请输入要提交的代码内容"
             />
             <div className="rounded-md border border-zinc-200 bg-zinc-50 p-3 text-xs text-zinc-600">
@@ -212,10 +212,10 @@ export function SubmissionForm({
               id="submission-note"
               value={submissionNote}
               onChange={(event) => setSubmissionNote(event.target.value)}
-              rows={6}
+              rows={16}
               aria-describedby="submission-note-hint"
               aria-invalid={noteLength > SUBMISSION_NOTE_MAX_CODE_POINTS}
-              className="w-full rounded-md border border-zinc-300 px-3 py-2 text-sm outline-none focus:border-zinc-500"
+              className="w-full resize-y rounded-md border border-zinc-300 px-3 py-2 text-sm outline-none focus:border-zinc-500"
               placeholder="例如设计思路、实际运行核对、修订过程或 AI 协作说明；按任务要求填写即可。"
             />
             <p
