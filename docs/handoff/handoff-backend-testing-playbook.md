@@ -84,6 +84,21 @@ npm run test:e2e -- --runInBand --runTestsByPath ./test/users-me.e2e-spec.ts
 
 `test:watch` 不用于正式验收。是否执行全量 unit/E2E 由实际影响决定，不把“最终验证”解释为无差别全量运行。
 
+### import-users 定向离线回归
+
+`scripts/import-users.spec.ts` 与 `scripts/import-users-csv.spec.ts` 使用正式导入逻辑，数据库用途为 `none`：只允许合成输入、测试自有临时配置、fake connection/model 和隔离的无网络 CLI 子进程，不连接任何真实数据库，不加载机器真实 `.env` 或继承真实 Mongo、AI、SMTP 凭据，不启动 AppModule 或业务服务。连接替换必须在任何网络连接前生效；临时目录与子进程由创建它们的测试在 teardown/finally 中收口。
+
+纯 CSV 测试负责合法引用/换行、严格语法拒绝、物理行号及表头查找；fake connection/model 测试负责配置优先级、声明与实际库名门禁、模型建立顺序、dry-run 写路径隔离、更新统计、密码重置撤销及连接关闭。隔离 CLI 入口测试验证 `--help` 无环境/文件/连接依赖、原始环境缺失时拒绝、模块导入不自动执行，以及失败退出与日志脱敏；这些证据证明控制流和调用边界，不证明真实 MongoDB 终态。产品 `--dry-run` 仍可查询目标数据库，不能将测试的 `none` 边界当作产品配置。
+
+从 `backend` 目录先 discovery，结果必须恰好为这两个文件；通过后使用相同显式文件列表正式运行：
+
+```powershell
+npm.cmd run test -- --listTests --runInBand --runTestsByPath ./scripts/import-users.spec.ts ./scripts/import-users-csv.spec.ts
+npm.cmd run test -- --runInBand --runTestsByPath ./scripts/import-users.spec.ts ./scripts/import-users-csv.spec.ts
+```
+
+真实 MongoDB 的 dry-run 文档与元数据不变、真实更新结果及凭据撤销终态为 `not_executed`，归属后续“import-users 隔离数据库集成验收”；不得用 fake 或离线通过替代。CLI 配置来源、数据库映射与重置副作用由 [Config Matrix](./handoff-backend-config-matrix.md#import-users-独立导入-cli) 维护。
+
 ## 5. Database Purpose 与 Browser Process Roles
 
 每个进程在一次运行中只能属于一个 database purpose：

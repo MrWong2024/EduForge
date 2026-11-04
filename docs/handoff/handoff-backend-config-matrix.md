@@ -45,6 +45,16 @@ Browser acceptance 配置：
 - production 的 Schema 索引同步唯一入口是 `npm run sync-indexes`；不得依赖 production 启动时 `autoIndex` 建索引。
 - `sessions` 集合必须具备 `userId_1`、`token_1 unique`、`expiresAt_1 expireAfterSeconds:0`。
 
+### import-users 独立导入 CLI
+
+- 正式入口为 `npm run import-users`，保留 `--file`、`--dry-run`、`--reset-password`；`--help` 不要求环境、CSV 文件或数据库连接。
+- 正常执行先检查调用进程原始 `NODE_ENV`，只接受 `development`、`test`、`production`，不得由环境文件或默认值补齐。随后仅读取对应的 `backend/.env.<NODE_ENV>`；显式进程 `MONGO_ADMIN_URI` 优先于该文件，不叠加通用 `.env`，不回退 `MONGO_URI`，不改写 `process.env.MONGO_URI`，环境文件也不能改变已选定的 `NODE_ENV`。
+- 数据库映射与 purpose 合法性沿用本节权威定义；本 CLI 不支持 `browser_acceptance`，进程或所选文件声明该用途均拒绝。连接前精确校验管理 URI 的库名，连接后先核对实际 `databaseName`，通过后才建立模型和查询用户；不要求 AI、SMTP 等无关配置。
+- 使用独立 Mongoose 连接，明确 `autoCreate=false`、`autoIndex=false`，复用现有 Schema，不启动 AppModule、认证模块、Worker 或 Provider，不显式调用 `init`、`ensureIndexes`、`syncIndexes`、`createCollection` 等初始化写入入口。成功、失败及实际库名不符时均回收本轮连接。
+- `--dry-run` 可以读取目标库现有用户以计算**预计**创建、更新、跳过和失败数量；不创建或修改用户、不生成密码哈希、不撤销凭据、不处理作业、不调用模型或发送邮件。预计统计不是实际写入结果；离线测试与真实数据库验收的证据边界见 [Backend Testing Playbook](./handoff-backend-testing-playbook.md#import-users-定向离线回归)。
+- 默认不修改已有账号密码；`--reset-password` 在已有用户密码更新成功且确认匹配后，删除该 `userId` 的**全部会话**，并作废其尚未使用且未过期的密码重置令牌。撤销影响零条记录属于正常结果，用户文档未变化也不能跳过撤销；两项撤销均须尝试，任一失败或写入未确认时该行只计一次失败，不计更新成功。密码更新失败或未匹配时不继续撤销；再次显式重置仍执行完整更新与撤销流程。
+- 保留逐行部分成功语义，不使用整批事务；失败可能已经部分生效，不回滚、不自动重试。任一行失败或致命启动、连接、关闭错误均以非零状态退出，不把部分成功报告为全部完成。
+
 ### Task.stage 定向退役运维
 
 在实际项目的 `backend` 目录，通过同一正式入口选择定向模式：
