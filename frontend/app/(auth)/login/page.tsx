@@ -76,7 +76,6 @@ function LoginFrame({ children }: { children: ReactNode }) {
           <p className="mx-auto mt-1 max-w-xl text-sm leading-5 text-zinc-600">
             面向 AI 协作编程的教学平台
           </p>
-          <p className="mt-2 text-xs text-zinc-500">重庆邮电大学智能化教学平台</p>
         </header>
 
         <div className="px-6 py-3 md:px-8 md:py-4">

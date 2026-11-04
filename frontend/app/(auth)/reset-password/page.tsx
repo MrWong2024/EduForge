@@ -19,10 +19,10 @@ function AuthFrame({ children }: { children: ReactNode }) {
       <div className="w-full overflow-hidden rounded-2xl border border-zinc-200 bg-white shadow-sm">
         <header className="border-b border-zinc-100 px-6 py-4 text-center md:px-8 md:py-5">
           <h1 className="text-2xl font-semibold tracking-tight text-zinc-900 md:text-3xl">
-            重庆邮电大学智能化教学平台
+            EduForge · 智炼
           </h1>
           <p className="mx-auto mt-1 max-w-xl text-sm leading-5 text-zinc-600">
-            面向教师与学生的统一教学入口，支持课堂任务、AI 反馈与过程性评价。
+            面向 AI 协作编程的教学平台
           </p>
         </header>
 
