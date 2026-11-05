@@ -42,8 +42,26 @@ Browser acceptance 配置：
 | `test` | `true` |
 | `production` | `false` |
 
-- production 的 Schema 索引同步唯一入口是 `npm run sync-indexes`；不得依赖 production 启动时 `autoIndex` 建索引。
+- production 的 Schema 索引同步唯一入口为 [sync-indexes 普通模式](#sync-indexes-普通索引同步) 的显式 apply。应用启动时保持 `autoIndex=false`。
 - `sessions` 集合必须具备 `userId_1`、`token_1 unique`、`expiresAt_1 expireAfterSeconds:0`。
+
+### sync-indexes 普通索引同步
+
+在 `backend` 目录使用下列入口。执行前先按 [数据库治理规范](../database-conventions.md#4-索引同步与受控流程) 核对目标环境、库名、运维权限和变更范围。
+
+```text
+npm run sync-indexes -- --help
+npm run sync-indexes
+npm run sync-indexes -- --dry-run
+npm run sync-indexes -- --apply --confirm-db <精确库名>
+npm run sync-indexes -- --apply --confirm-db <精确库名> --allow-drop
+```
+
+- 无参数等价于 `--dry-run`，仅读取集合和索引元数据。`--help` 直接显示帮助，独立于环境文件与数据库连接。普通模式拒绝未知参数、重复参数、缺值、互斥组合和错误的确认库名。
+- 正常执行要求调用进程显式设置 `NODE_ENV` 为 `development`、`test` 或 `production`。文件配置只取对应的 `backend/.env.<NODE_ENV>`，其中的 `NODE_ENV` 无权更改目标。仅使用 `MONGO_ADMIN_URI`，显式进程值优先，显式空值报错。所选文件缺失且进程配置足够时可以继续，其他读取错误会退出。任一来源声明 `browser_acceptance` 或非法 purpose 都会拒绝。使用本节既有数据库映射，连接前校验 URI 声明库名，连接后校验实际库名。
+- 独立 Mongoose 连接及模型 Schema 克隆均设置 `autoCreate=false`、`autoIndex=false`。实际库名校验通过后注册正式模型 `User`、`Session`、`PasswordResetToken`、`Course`、`Classroom`、`Enrollment`、`ClassroomTask`、`Task`、`Submission`、`Feedback`、`AiFeedbackJob`，沿用正式集合映射与索引定义。连接由 CLI 统一回收。
+- 先预览并核对变更，再使用 `--apply --confirm-db <精确库名>`。计划使用 Mongoose `diffIndexes` 计算，列出模型、集合、待建集合、待删索引的名称与定义以及待建索引的定义。索引定义保留复合键顺序和 `unique`、TTL、`partialFilterExpression`、`sparse`、`collation` 等选项。apply 重新计算并输出本次计划，包含删除时须同传 `--allow-drop`，它只授权本次计划的删除。执行范围固定为本次计划，缺失集合只在 apply 时按计划显式创建。
+- 首次写入前复查全量计划，每个模型写入前再次核对其索引定义，完成后回读索引与差异。元数据中出现构建中的索引时停止。索引同步不是事务，旧索引删除后新索引创建可能失败。执行失败、计划漂移或回读异常时停止后续写入，尽力盘点已触及模型，报告部分生效或终态未确认。由操作者重新预览和决定后续操作。同库索引维护须串行，TTL 索引变更可影响文档的自动过期行为。
 
 ### import-users 独立导入 CLI
 
@@ -66,7 +84,7 @@ npm run sync-indexes -- --retire-task-stage --database <精确库名> --apply --
 ```
 
 - 只允许四个精确目标。`eduforge_browser_test` 仅读取 `.env.browser-acceptance` 的 `BROWSER_ACCEPTANCE_ADMIN_MONGO_URI`；`eduforge_test`、`eduforge_dev`、服务器 `eduforge` 分别仅读取 `.env.test`、`.env.development`、`.env.production` 的 `MONGO_ADMIN_URI`。不叠加 `.env` 或继承的连接串，不替换 URI 中的库名；连接前后均校验库名，另核对本地地址与运维角色。
-- 默认只读；apply 需要同库确认，不能与 dry-run 混用，未知参数拒绝。该分支在加载 AppModule 前分流，不创建 Nest 上下文，不启动业务服务或 Worker；直接使用现有 MongoDB 原生 collection API，无自动建库/建集合。无参数入口仍执行原有普通全模型同步，定向退役不得调用该路径。
+- 默认只读；apply 需要同库确认，不能与 dry-run 混用，未知参数拒绝。该分支在加载 AppModule 前分流，不创建 Nest 上下文，不启动业务服务或 Worker；直接使用现有 MongoDB 原生 collection API，无自动建库/建集合。无参数入口进入普通模式的只读预览，定向退役须显式传入 `--retire-task-stage`。
 - 操作固定为移除 `tasks.stage`、`classroomtasks.taskSnapshot.stage`，以及替换三个已知含 stage 的 Task 复合索引；实现与精确键定义见 [定向实现](../../backend/scripts/retire-task-stage.ts)。先备份，再建立并回读全部新索引，随后仅 `$unset` 两个字段，核对残留和其他内容后按实际名称删除旧索引。异常索引选项、键定义、快照或同名冲突均拒绝写入，不调整其他索引。
 - 当前定向脚本不接受显式 `collation` 选项；MongoDB 9 返回 `collation: { locale: "simple" }` 时也会按 `UNEXPECTED_INDEX_OPTIONS` 拒绝处理。这是该旧运维入口的兼容限制，不代表 Mongoose 应用连接不兼容；不得绕过门禁或以重新执行退役清理代替依赖升级验证。
 - 首次写入前，将带 BSON 类型的字段级 EJSON 和相关实际索引写入项目根目录 `.local/deliverables/task-stage-retirement-backups/<本轮标识>/<库名>/`，持久化并回读核验后才修改数据库；不覆盖旧材料。标识默认自动生成，也可用 `--backup-run <唯一标识>` 为同轮不同库归档。恢复材料不含完整文档或凭据，执行后保留；不自动恢复。

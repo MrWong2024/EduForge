@@ -99,6 +99,21 @@ npm.cmd run test -- --runInBand --runTestsByPath ./scripts/import-users.spec.ts 
 
 真实 MongoDB 的 dry-run 文档与元数据不变、真实更新结果及凭据撤销终态为 `not_executed`，归属后续“import-users 隔离数据库集成验收”；不得用 fake 或离线通过替代。CLI 配置来源、数据库映射与重置副作用由 [Config Matrix](./handoff-backend-config-matrix.md#import-users-独立导入-cli) 维护。
 
+### sync-indexes 离线回归
+
+`scripts/sync-indexes.spec.ts` 和 `scripts/retire-task-stage.spec.ts` 的数据库用途均为 `none`。使用合成配置、fake connection/model 和隔离的无网络 CLI 子进程调用正式代码。连接替身与网络阻断在任何连接动作前生效，测试配置只来自合成输入，临时文件与子进程由测试在 teardown/finally 中收口。
+
+普通模式的离线证据覆盖参数与配置门禁、模型范围、只读预览、固定计划执行、删除授权、计划漂移、终态核验及连接收尾。隔离 CLI 测试检查直接入口、导入模块、帮助、非法参数、退役分流及脱敏日志。既有退役 spec 验证定向合同继续成立。产品配置和执行合同由 [Config Matrix](./handoff-backend-config-matrix.md#sync-indexes-普通索引同步) 维护。
+
+从 `backend` 目录先执行 discovery，结果须恰好为上述两个文件。通过后使用同一文件列表正式运行。
+
+```powershell
+npm.cmd run test -- --listTests --runInBand --runTestsByPath ./scripts/sync-indexes.spec.ts ./scripts/retire-task-stage.spec.ts
+npm.cmd run test -- --runInBand --runTestsByPath ./scripts/sync-indexes.spec.ts ./scripts/retire-task-stage.spec.ts
+```
+
+fake 证据用于验证控制流、调用参数和操作边界。真实 MongoDB 的 dry-run 元数据不变、索引增删与选项、故障终态及 MongoDB 兼容性在离线回归中标为 `not_executed`，归属后续“sync-indexes 隔离数据库集成验收”。
+
 ## 5. Database Purpose 与 Browser Process Roles
 
 每个进程在一次运行中只能属于一个 database purpose：
