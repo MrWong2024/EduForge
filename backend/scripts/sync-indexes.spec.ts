@@ -13,9 +13,11 @@ import { SYNC_INDEX_SCHEMAS } from './sync-indexes-models';
 
 jest.mock('mongoose', () => {
   const actual = jest.requireActual<typeof import('mongoose')>('mongoose');
-  actual.createConnection = jest.fn(() => {
+  const denyConnection = () => {
     throw new Error('UNEXPECTED_REAL_CONNECTION');
-  });
+  };
+  actual.createConnection = jest.fn(denyConnection);
+  actual.mongo.MongoClient.prototype.connect = denyConnection;
   return actual;
 });
 jest.mock('../src/app.module', () => {
@@ -55,6 +57,15 @@ const installedTtl: mongo.IndexDescriptionInfo = {
   key: { expiresAt: 1 },
   expireAfterSeconds: 300,
 };
+const submissionTextIndex: mongo.IndexDescriptionInfo = {
+  v: 2,
+  name: 'submissionId_text',
+  key: { _fts: 'text', _ftsx: 1 },
+  weights: { submissionId: 1 },
+  default_language: 'english',
+  language_override: 'language',
+  textIndexVersion: 3,
+};
 
 type Diff = Awaited<ReturnType<SyncIndexModel['diffIndexes']>>;
 type ModelFixture = {
@@ -81,6 +92,7 @@ function fakeModel(fixture: ModelFixture, events: string[]) {
     if (!exists) return Promise.reject(new Error('MISSING_COLLECTION_READ'));
     return Promise.resolve(structuredClone(indexes));
   });
+  const schemaIndexes = jest.fn<SyncIndexDefinition[], []>(() => []);
   const diffIndexes = jest.fn<
     Promise<Diff>,
     Parameters<SyncIndexModel['diffIndexes']>
@@ -119,6 +131,7 @@ function fakeModel(fixture: ModelFixture, events: string[]) {
     name,
     collectionName,
     listIndexes,
+    schemaIndexes,
     diffIndexes,
     createCollection,
     cleanIndexes,
@@ -253,6 +266,65 @@ function noWrites(h: Harness) {
 
 function output(h: Harness) {
   return [...h.logs, ...h.errors].join('\n');
+}
+
+function disconnectedModel(name: string, source = new mongoose.Schema()) {
+  const schema = source.clone();
+  schema.set('autoCreate', false);
+  schema.set('autoIndex', false);
+  schema.set('autoSearchIndex', false);
+  schema.set('bufferCommands', false);
+  return new mongoose.Mongoose().model(name, schema);
+}
+
+function aiJobHarness(
+  submissionIndex?: mongo.IndexDescriptionInfo,
+  preceding: ModelFixture[] = [],
+) {
+  const name = 'AiFeedbackJob';
+  const source = SYNC_INDEX_SCHEMAS.find((entry) => entry.name === name);
+  if (!source) throw new Error('EXPECTED_AI_FEEDBACK_JOB_SCHEMA');
+  const native = disconnectedModel(name, source.schema);
+  const otherIndexes = native.schema
+    .indexes()
+    .filter(
+      ([key]) => !(Object.keys(key).length === 1 && key.submissionId === 1),
+    )
+    .map(([key], index): mongo.IndexDescriptionInfo => {
+      const serverKey: mongo.IndexDescriptionInfo['key'] = {};
+      for (const [field, direction] of Object.entries(key)) {
+        if (direction !== 1 && direction !== -1) {
+          throw new Error('EXPECTED_ORDINARY_AI_JOB_INDEX');
+        }
+        serverKey[field] = direction;
+      }
+      return { name: 'existing_' + index, key: serverKey };
+    });
+  const h = harness([
+    ...preceding,
+    {
+      name,
+      collectionName: 'aifeedbackjobs',
+      existing: submissionIndex
+        ? [...otherIndexes, submissionIndex]
+        : otherIndexes,
+    },
+  ]);
+  const job = h.models[preceding.length];
+  jest
+    .spyOn(native, 'listIndexes')
+    .mockImplementation(() => Promise.resolve(h.indexes[preceding.length]()));
+  job.schemaIndexes.mockImplementation(() => native.schema.indexes());
+  job.diffIndexes.mockImplementation((options) => native.diffIndexes(options));
+  return { h, job };
+}
+
+function promiseGate() {
+  let open!: () => void;
+  const promise = new Promise<void>((resolve) => {
+    open = resolve;
+  });
+  return { open, promise };
 }
 
 describe('sync-indexes ordinary plan and apply (offline)', () => {
@@ -556,6 +628,240 @@ describe('sync-indexes ordinary plan and apply (offline)', () => {
   });
 });
 
+describe('sync-indexes text index guard (offline)', () => {
+  it.each<[readonly string[]]>([
+    [[]],
+    [['--dry-run']],
+    [apply],
+    [[...apply, '--allow-drop']],
+  ])(
+    'rejects the submissionId text index before diff or writes with %j',
+    async (args) => {
+      const { h, job } = aiJobHarness(submissionTextIndex, [absent]);
+
+      expect(await h.run(args)).toBe(1);
+      expect(h.models[0].diffIndexes).toHaveBeenCalledTimes(1);
+      expect(job.diffIndexes).not.toHaveBeenCalled();
+      noWrites(h);
+      expect(jsonEvent(h, 'result')).toMatchObject({
+        status: 'failed',
+        writesAttempted: false,
+        error: { code: 'TEXT_INDEX_UNSUPPORTED' },
+      });
+      expect(h.connection.close).toHaveBeenCalledTimes(1);
+    },
+  );
+
+  it('rejects a text index declared in an isolated schema', async () => {
+    const h = harness([absent, addOnly]);
+    const schema = new mongoose.Schema({ title: String });
+    schema.index({ title: 'text' });
+    h.models[1].schemaIndexes.mockImplementation(() => schema.indexes());
+
+    expect(await h.run([...apply, '--allow-drop'])).toBe(1);
+    expect(h.models[1].diffIndexes).not.toHaveBeenCalled();
+    noWrites(h);
+    expect(jsonEvent(h, 'result')).toMatchObject({
+      error: { code: 'TEXT_INDEX_UNSUPPORTED' },
+    });
+  });
+
+  it.each([
+    { ordinaryReads: 1, phase: 'the all-model recheck' },
+    { ordinaryReads: 2, phase: 'the per-model recheck' },
+    { ordinaryReads: 3, phase: 'readback' },
+  ])(
+    'stops when text metadata first appears at $phase',
+    async ({ ordinaryReads }) => {
+      const h = harness([addOnly, absent]);
+      const model = h.models[0];
+      for (let index = 0; index < ordinaryReads; index += 1) {
+        model.listIndexes.mockImplementationOnce(() =>
+          Promise.resolve(h.indexes[0]()),
+        );
+      }
+      model.listIndexes.mockImplementation(() =>
+        Promise.resolve([
+          ...h.indexes[0](),
+          structuredClone(submissionTextIndex),
+        ]),
+      );
+
+      expect(await h.run(apply)).toBe(1);
+      const reachedReadback = ordinaryReads === 3;
+      expect(model.diffIndexes).toHaveBeenCalledTimes(ordinaryReads);
+      expect(model.createIndexes).toHaveBeenCalledTimes(
+        reachedReadback ? 1 : 0,
+      );
+      expect(h.models[1].createCollection).not.toHaveBeenCalled();
+      expect(h.models[1].cleanIndexes).not.toHaveBeenCalled();
+      expect(h.models[1].createIndexes).not.toHaveBeenCalled();
+      expect(jsonEvent(h, 'result')).toMatchObject({
+        status: 'failed',
+        writesAttempted: reachedReadback,
+        partialEffectsPossible: reachedReadback,
+        error: { code: 'TEXT_INDEX_UNSUPPORTED' },
+        models: [{ status: 'failed' }, { status: 'not-executed' }],
+      });
+      if (reachedReadback) {
+        expect(jsonEvent(h, 'result')).toMatchObject({
+          models: [
+            {
+              terminalState: 'observed',
+              finalIndexes: [idIndex, installedTtl, submissionTextIndex],
+            },
+            {},
+          ],
+        });
+      } else {
+        noWrites(h);
+      }
+      expect(output(h)).not.toContain('"terminalState":"verified"');
+    },
+  );
+
+  it('plans to build the missing submissionId unique index with Mongoose diff', async () => {
+    const { h } = aiJobHarness();
+
+    expect(await h.run(['--dry-run'])).toBe(0);
+    noWrites(h);
+    expect(jsonEvent(h, 'plan')).toMatchObject({
+      models: [
+        {
+          toDrop: [],
+          toCreate: [{ key: { submissionId: 1 }, options: { unique: true } }],
+        },
+      ],
+    });
+  });
+
+  it('verifies a matching ordinary unique index whose name contains text', async () => {
+    const { h } = aiJobHarness({
+      name: 'submissionId_unique_text_in_name',
+      key: { submissionId: 1 },
+      unique: true,
+    });
+
+    expect(await h.run(apply)).toBe(0);
+    noWrites(h);
+    expect(jsonEvent(h, 'plan')).toMatchObject({
+      models: [{ toDrop: [], toCreate: [] }],
+    });
+    expect(jsonEvent(h, 'result')).toMatchObject({
+      status: 'completed',
+      models: [{ terminalState: 'verified' }],
+    });
+  });
+});
+
+describe('sync-indexes sequential deletion (offline)', () => {
+  const middle = { name: 'middle_legacy', key: { legacyFlag: 1 } } as const;
+  const last = { name: 'z_legacy', key: { legacyScore: 1 } } as const;
+
+  it.each([
+    [legacy.name, 'observed'],
+    [middle.name, 'observed'],
+    [middle.name, 'unconfirmed'],
+  ] as const)(
+    'awaits one drop at a time and stops after %s fails (%s)',
+    async (failedName, terminalState) => {
+      const h = harness([
+        {
+          ...replace,
+          existing: [last, middle, legacy],
+          drop: [last.name, middle.name, legacy.name],
+        },
+        absent,
+      ]);
+      const model = h.models[0];
+      const native = disconnectedModel(model.name);
+      const removeFromFixture = model.cleanIndexes.getMockImplementation();
+      if (!removeFromFixture) throw new Error('EXPECTED_IN_MEMORY_DROP');
+      const started = promiseGate();
+      const release = promiseGate();
+      const readUnavailable = new Error('synthetic audit error');
+      const dropFailure = new mongoose.mongo.MongoServerError({
+        message: 'synthetic drop error',
+        code: 27,
+      });
+      const unexpectedDiff = jest
+        .spyOn(native, 'diffIndexes')
+        .mockRejectedValue(new Error('UNEXPECTED_DROP_PLAN_RECALCULATION'));
+      const dropIndex = jest
+        .spyOn(native.collection, 'dropIndex')
+        .mockImplementation(async (name) => {
+          if (name === legacy.name) {
+            started.open();
+            await release.promise;
+          }
+          if (name === failedName) {
+            if (terminalState === 'unconfirmed') {
+              model.listIndexes.mockRejectedValueOnce(readUnavailable);
+            }
+            throw dropFailure;
+          }
+          await removeFromFixture({ toDrop: [name] });
+          return { ok: 1 };
+        });
+      model.cleanIndexes.mockImplementation((options) =>
+        native.cleanIndexes(options),
+      );
+
+      const run = h.run([...apply, '--allow-drop']);
+      const firstDropStarted = await Promise.race([
+        started.promise.then(() => true),
+        run.then(() => false),
+      ]);
+      const callsBeforeRelease = dropIndex.mock.calls.map(([name]) => name);
+      release.open();
+      expect(await run).toBe(1);
+      expect(firstDropStarted).toBe(true);
+      expect(callsBeforeRelease).toEqual([legacy.name]);
+      const attempted =
+        failedName === legacy.name ? [legacy.name] : [legacy.name, middle.name];
+      expect(model.cleanIndexes.mock.calls).toEqual(
+        attempted.map((name) => [{ toDrop: [name] }]),
+      );
+      expect(dropIndex.mock.calls.map(([name]) => name)).toEqual(attempted);
+      expect(unexpectedDiff).not.toHaveBeenCalled();
+      expect(model.diffIndexes).toHaveBeenCalledTimes(3);
+      expect(model.createIndexes).not.toHaveBeenCalled();
+      expect(h.models[1].createCollection).not.toHaveBeenCalled();
+      expect(h.models[1].cleanIndexes).not.toHaveBeenCalled();
+      expect(h.models[1].createIndexes).not.toHaveBeenCalled();
+      expect(jsonEvent(h, 'plan')).toMatchObject({
+        models: [{ toDrop: [legacy, middle, last] }, {}],
+      });
+      expect(jsonEvent(h, 'result')).toMatchObject({
+        status: 'failed',
+        partialEffectsPossible: true,
+        error: { code: 'INDEX_APPLY_FAILED', driverCode: 27 },
+        models: [
+          terminalState === 'observed'
+            ? {
+                status: 'failed',
+                terminalState,
+                finalIndexes:
+                  failedName === legacy.name
+                    ? [idIndex, legacy, middle, last]
+                    : [idIndex, middle, last],
+              }
+            : {
+                status: 'failed',
+                terminalState,
+                auditError: { code: 'INDEX_FAILURE_AUDIT_FAILED' },
+              },
+          { status: 'not-executed' },
+        ],
+      });
+      if (terminalState === 'unconfirmed') {
+        expect(output(h)).not.toContain('"finalIndexes"');
+      }
+      expect(h.connection.close).toHaveBeenCalledTimes(1);
+    },
+  );
+});
+
 describe('sync-indexes ordinary configuration and cleanup (offline)', () => {
   it.each([undefined, '', 'staging', 'production '])(
     'rejects original NODE_ENV=%j before any environment read',
@@ -783,6 +1089,7 @@ describe('sync-indexes registry and argument isolation', () => {
     };
     const actual = new mongoose.Connection();
     const register = jest.fn((name: string, schema: Schema) => ({
+      schema,
       collection: {
         name: schema.options.collection ?? mongoose.pluralize()?.(name),
       },
@@ -805,6 +1112,8 @@ describe('sync-indexes registry and argument isolation', () => {
       expect(effectiveIndexes(clone)).toEqual(
         source && effectiveIndexes(source.schema),
       );
+      const adapter = models.find((model) => model.name === name);
+      expect(adapter?.schemaIndexes()).toEqual(clone.indexes());
     }
     expect(
       SYNC_INDEX_SCHEMAS.map(({ schema }) => ({
@@ -853,72 +1162,102 @@ describe('sync-indexes registry and argument isolation', () => {
     expect(modelCreate).not.toHaveBeenCalled();
   });
 
-  it('requests build metadata and closes the metadata cursor and connection when an index is in progress', async () => {
-    const h = harness();
-    const native = new mongoose.Connection();
-    const closeIndexCursor = jest.fn(() => Promise.resolve());
-    const closeCollectionCursor = jest.fn(() => Promise.resolve());
-    const runCursorCommand = jest.fn(() => ({
-      toArray: () =>
-        Promise.resolve([
+  it.each(['success', 'in-progress', 'read-failure'] as const)(
+    'sets the metadata cursor lifetime and closes cursors and the connection on %s',
+    async (outcome) => {
+      const h = harness();
+      const native = new mongoose.Connection();
+      const closeIndexCursor = jest.fn(() => Promise.resolve());
+      const closeCollectionCursor = jest.fn(() => Promise.resolve());
+      const toArray = jest.fn<Promise<unknown[]>, []>(() =>
+        Promise.resolve([structuredClone(idIndex)]),
+      );
+      if (outcome === 'in-progress') {
+        toArray.mockResolvedValueOnce([
           idIndex,
           {
             spec: { name: 'email_1', key: { email: 1 }, unique: true },
             buildUUID: 'synthetic-build-id',
           },
-        ]),
-      close: closeIndexCursor,
-    }));
-    Object.defineProperty(native, 'db', {
-      value: {
-        databaseName: database,
-        listCollections: () => ({
-          hasNext: () => Promise.resolve(true),
-          close: closeCollectionCursor,
+        ]);
+      } else if (outcome === 'read-failure') {
+        toArray.mockRejectedValueOnce(
+          new Error('synthetic cursor read failure'),
+        );
+      }
+      const runCursorCommand = jest.fn(() => ({
+        toArray,
+        close: closeIndexCursor,
+      }));
+      Object.defineProperty(native, 'db', {
+        value: {
+          databaseName: database,
+          listCollections: () => ({
+            hasNext: () => Promise.resolve(true),
+            close: closeCollectionCursor,
+          }),
+          runCursorCommand,
+        },
+      });
+      const forbidden = jest.fn(() => {
+        throw new Error('UNEXPECTED_WRITE');
+      });
+      const diffIndexes = jest.fn(() =>
+        Promise.resolve({ toDrop: [], toCreate: [] }),
+      );
+      Object.defineProperty(native, 'model', {
+        value: (name: string, schema: Schema) => ({
+          schema,
+          collection: { name: mongoose.pluralize()?.(name) },
+          diffIndexes,
+          createCollection: forbidden,
+          cleanIndexes: forbidden,
+          createIndexes: forbidden,
         }),
-        runCursorCommand,
-      },
-    });
-    const forbidden = jest.fn(() => {
-      throw new Error('UNEXPECTED_DIFF_OR_WRITE');
-    });
-    Object.defineProperty(native, 'model', {
-      value: (name: string) => ({
-        collection: { name: mongoose.pluralize()?.(name) },
-        diffIndexes: forbidden,
-        createCollection: forbidden,
-        cleanIndexes: forbidden,
-        createIndexes: forbidden,
-      }),
-    });
-    jest.spyOn(native, 'asPromise').mockResolvedValue(native);
-    const close = jest.spyOn(native, 'close').mockResolvedValue(undefined);
-    jest.mocked(mongoose.createConnection).mockReturnValueOnce(native);
-    const deps: Partial<SyncIndexesDependencies> = { ...h.deps };
-    delete deps.createConnection;
+      });
+      jest.spyOn(native, 'asPromise').mockResolvedValue(native);
+      const close = jest.spyOn(native, 'close').mockResolvedValue(undefined);
+      jest.mocked(mongoose.createConnection).mockReturnValueOnce(native);
+      const deps: Partial<SyncIndexesDependencies> = { ...h.deps };
+      delete deps.createConnection;
 
-    expect(await runSyncIndexesCli(['--dry-run'], deps)).toBe(1);
-    expect(h.createConnection).not.toHaveBeenCalled();
-    expect(mongoose.createConnection).toHaveBeenLastCalledWith(
-      adminUri,
-      expect.objectContaining({ autoCreate: false, autoIndex: false }),
-    );
-    expect(runCursorCommand).toHaveBeenCalledTimes(1);
-    expect(runCursorCommand).toHaveBeenCalledWith({
-      listIndexes: 'users',
-      cursor: {},
-      includeBuildUUIDs: true,
-    });
-    expect(closeIndexCursor).toHaveBeenCalledTimes(1);
-    expect(closeCollectionCursor).toHaveBeenCalledTimes(1);
-    expect(close).toHaveBeenCalledTimes(1);
-    expect(forbidden).not.toHaveBeenCalled();
-    expect(jsonEvent(h, 'result')).toMatchObject({
-      status: 'failed',
-      writesAttempted: false,
-      error: { code: 'INDEX_BUILD_IN_PROGRESS' },
-    });
-  });
+      const succeeded = outcome === 'success';
+      expect(await runSyncIndexesCli(['--dry-run'], deps)).toBe(
+        succeeded ? 0 : 1,
+      );
+      expect(h.createConnection).not.toHaveBeenCalled();
+      expect(mongoose.createConnection).toHaveBeenLastCalledWith(
+        adminUri,
+        expect.objectContaining({ autoCreate: false, autoIndex: false }),
+      );
+      const cursorCount = succeeded ? SYNC_INDEX_SCHEMAS.length : 1;
+      expect(runCursorCommand).toHaveBeenCalledTimes(cursorCount);
+      expect(runCursorCommand).toHaveBeenNthCalledWith(
+        1,
+        { listIndexes: 'users', cursor: {}, includeBuildUUIDs: true },
+        { timeoutMS: 65000, timeoutMode: 'cursorLifetime' },
+      );
+      expect(closeIndexCursor).toHaveBeenCalledTimes(cursorCount);
+      expect(closeCollectionCursor).toHaveBeenCalledTimes(cursorCount);
+      expect(close).toHaveBeenCalledTimes(1);
+      expect(diffIndexes).toHaveBeenCalledTimes(succeeded ? cursorCount : 0);
+      expect(forbidden).not.toHaveBeenCalled();
+      expect(jsonEvent(h, 'result')).toMatchObject({
+        status: succeeded ? 'preview' : 'failed',
+        writesAttempted: false,
+        ...(succeeded
+          ? {}
+          : {
+              error: {
+                code:
+                  outcome === 'in-progress'
+                    ? 'INDEX_BUILD_IN_PROGRESS'
+                    : 'INDEX_PREFLIGHT_FAILED',
+              },
+            }),
+      });
+    },
+  );
 
   it.each<[readonly string[]]>([
     [['--bogus']],

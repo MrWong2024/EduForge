@@ -105,6 +105,8 @@ npm.cmd run test -- --runInBand --runTestsByPath ./scripts/import-users.spec.ts 
 
 普通模式的离线证据覆盖参数与配置门禁、模型范围、只读预览、固定计划执行、删除授权、计划漂移、终态核验及连接收尾。隔离 CLI 测试检查直接入口、导入模块、帮助、非法参数、退役分流及脱敏日志。既有退役 spec 验证定向合同继续成立。产品配置和执行合同由 [Config Matrix](./handoff-backend-config-matrix.md#sync-indexes-普通索引同步) 维护。
 
+全文索引回归使用真实格式的合成索引元数据和隔离 Schema，核对普通唯一索引的比较边界、初始盘点拒绝时的零写入，以及复查和回读时的拒绝。可控删除 Promise 用于验证调用顺序、首错停止和部分生效报告。游标替身用于验证正式适配层传入的期限参数及游标收尾。
+
 从 `backend` 目录先执行 discovery，结果须恰好为上述两个文件。通过后使用同一文件列表正式运行。
 
 ```powershell
@@ -112,7 +114,7 @@ npm.cmd run test -- --listTests --runInBand --runTestsByPath ./scripts/sync-inde
 npm.cmd run test -- --runInBand --runTestsByPath ./scripts/sync-indexes.spec.ts ./scripts/retire-task-stage.spec.ts
 ```
 
-fake 证据用于验证控制流、调用参数和操作边界。真实 MongoDB 的 dry-run 元数据不变、索引增删与选项、故障终态及 MongoDB 兼容性在离线回归中标为 `not_executed`，归属后续“sync-indexes 隔离数据库集成验收”。
+离线证据用于验证控制流、调用参数和操作边界。真实 MongoDB 的元数据与兼容性、dry-run 前后元数据一致性、索引增删与选项、故障终态及实际慢响应超时行为均为 `not_executed`，归属后续“sync-indexes 隔离数据库集成验收”。
 
 ## 5. Database Purpose 与 Browser Process Roles
 

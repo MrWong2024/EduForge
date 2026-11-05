@@ -41,6 +41,7 @@ export interface SyncIndexModel {
   name: string;
   collectionName: string;
   listIndexes(this: void): Promise<mongo.IndexDescriptionInfo[]>;
+  schemaIndexes(this: void): SyncIndexDefinition[];
   diffIndexes(
     this: void,
     options: { indexOptionsToCreate: true },
@@ -96,11 +97,17 @@ async function listReadyIndexes(
   collectionName: string,
 ): Promise<mongo.IndexDescriptionInfo[]> {
   // A plain listIndexes response can include an in-progress build without marking it.
-  const cursor = db.runCursorCommand({
-    listIndexes: collectionName,
-    cursor: {},
-    includeBuildUUIDs: true,
-  });
+  const cursor = db.runCursorCommand(
+    {
+      listIndexes: collectionName,
+      cursor: {},
+      includeBuildUUIDs: true,
+    },
+    {
+      timeoutMS: CONNECTION_OPTIONS.timeoutMS,
+      timeoutMode: 'cursorLifetime',
+    },
+  );
   try {
     const indexes: unknown[] = await cursor.toArray();
     return indexes.map((index) => {
@@ -137,6 +144,7 @@ export function registerSyncIndexModels(
       collectionName,
       listIndexes: () =>
         listReadyIndexes(connectedDb(connection), collectionName),
+      schemaIndexes: () => model.schema.indexes(),
       diffIndexes: async (options) => {
         const result = await model.diffIndexes(options);
         const toDrop: unknown[] = result.toDrop;
@@ -256,6 +264,18 @@ async function readModelPlan(
   model: SyncIndexModel,
 ): Promise<ModelPlan> {
   const metadata = await readModelMetadata(connection, model);
+  // Mongoose's text-index comparison can match a non-text Schema index.
+  if (
+    metadata.indexes.some(
+      (index) =>
+        'textIndexVersion' in index ||
+        'weights' in index ||
+        Object.values(index.key).includes('text'),
+    ) ||
+    model.schemaIndexes().some(([key]) => Object.values(key).includes('text'))
+  ) {
+    throw new SyncIndexesError('TEXT_INDEX_UNSUPPORTED');
+  }
   // Mongoose treats NamespaceNotFound as an empty index set.
   const diff = await model.diffIndexes({ indexOptionsToCreate: true });
   const names = new Set(metadata.indexes.map((index) => index.name));
@@ -452,8 +472,9 @@ export async function runSyncIndexesCli(
           phase = 'INDEX_APPLY_FAILED';
           touched.set(model, outcome);
           if (plan.createCollection) await model.createCollection();
-          if (plan.toDrop.length)
-            await model.cleanIndexes({ toDrop: [...plan.toDrop] });
+          for (const name of plan.toDrop) {
+            await model.cleanIndexes({ toDrop: [name] });
+          }
           // Mongoose consumes this array while building indexes.
           if (plan.toCreate.length)
             await model.createIndexes({ toCreate: [...plan.toCreate] });
