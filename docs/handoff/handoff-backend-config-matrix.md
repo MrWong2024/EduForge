@@ -60,10 +60,12 @@ npm run sync-indexes -- --apply --confirm-db <精确库名> --allow-drop
 - 无参数等价于 `--dry-run`，仅读取集合和索引元数据。`--help` 直接显示帮助，独立于环境文件与数据库连接。普通模式拒绝未知参数、重复参数、缺值、互斥组合和错误的确认库名。
 - 正常执行要求调用进程显式设置 `NODE_ENV` 为 `development`、`test` 或 `production`。文件配置只取对应的 `backend/.env.<NODE_ENV>`，其中的 `NODE_ENV` 无权更改目标。仅使用 `MONGO_ADMIN_URI`，显式进程值优先，显式空值报错。所选文件缺失且进程配置足够时可以继续，其他读取错误会退出。任一来源声明 `browser_acceptance` 或非法 purpose 都会拒绝。使用本节既有数据库映射，连接前校验 URI 声明库名，连接后校验实际库名。
 - 独立 Mongoose 连接及模型 Schema 克隆均设置 `autoCreate=false`、`autoIndex=false`。实际库名校验通过后注册正式模型 `User`、`Session`、`PasswordResetToken`、`Course`、`Classroom`、`Enrollment`、`ClassroomTask`、`Task`、`Submission`、`Feedback`、`AiFeedbackJob`，沿用正式集合映射与索引定义。连接由 CLI 统一回收。
+- 连接就绪并确认实际库名后、注册模型前，`--apply` 检查驱动解析出的有效写确认配置。有效 `w=0` 时以 `UNACKNOWLEDGED_WRITE_CONCERN` 拒绝，仍可用无参数或 `--dry-run` 只读预览。其余写确认配置按原值生效。
 - 先预览并核对变更，再使用 `--apply --confirm-db <精确库名>`。计划使用 Mongoose `diffIndexes` 计算，列出模型、集合、待建集合、待删索引的名称与定义以及待建索引的定义。索引定义保留复合键顺序和 `unique`、TTL、`partialFilterExpression`、`sparse`、`collation` 等选项。apply 重新计算并输出本次计划，包含删除时须同传 `--allow-drop`，它只授权本次计划的删除。执行范围固定为本次计划，缺失集合只在 apply 时按计划显式创建。
-- 初始计划、首次写入前的全量复查、逐模型复查和写入后的回读都在计算差异前检查索引。实际元数据含 `textIndexVersion`、`weights` 或键值 `"text"`，或 Schema 展开后声明了全文索引，均以 `TEXT_INDEX_UNSUPPORTED` 拒绝。此限制适用于无参数、`--dry-run` 和 `--apply`，`--allow-drop` 也不能放行。初始盘点发现全文索引时，所有模型都保持零写入。
+- 按集合名执行一次完整的 `listCollections` 查询，同时读取集合是否存在和默认 `collation`，随后关闭游标。完整有效的元数据中，省略 `options.collation` 或显式指定 `locale: "simple"` 均按 simple 处理。默认非 simple 时在计算差异前以 `COLLECTION_COLLATION_UNSUPPORTED` 拒绝。读取失败或元数据无法判定时停止。集合默认规则参与计划、复查和回读，新建集合在创建索引前也须核对默认规则。集合默认 simple 时，单个索引可带非 simple 的 `collation`，仍由 Mongoose 计算受控变更。
+- 初始计划、首次写入前的全量复查、逐模型复查和写入后的回读都在计算差异前检查索引。实际元数据含 `textIndexVersion`、`weights` 或键值 `"text"`，或 Schema 展开后声明了全文索引，均以 `TEXT_INDEX_UNSUPPORTED` 拒绝。实际索引或展开后的 Schema 索引选项为 `hidden: true` 或 `prepareUnique: true` 时，分别以 `HIDDEN_INDEX_UNSUPPORTED` 或 `PREPARE_UNIQUE_UNSUPPORTED` 拒绝。两项选项缺省或为 `false` 时允许。上述元数据限制覆盖无参数、`--dry-run` 和 `--apply`，`--allow-drop` 也不能放行。初始盘点拒绝时，所有模型都保持零写入。
 - 每次原生索引盘点以 `includeBuildUUIDs: true` 读取，发现构建中的索引即停止正常计划或核验。游标使用 `timeoutMode: "cursorLifetime"`，沿用连接配置的 `timeoutMS: 65000` 作为单次游标的生命周期期限，读取结束后关闭游标。整条 CLI 的执行时间可超过这一期限。
-- 同一模型按固定计划的名称逐项等待删除完成，首次失败后停止剩余删除、建索引和后续模型写入。索引同步可能部分生效。执行失败、计划漂移或回读异常时尽力盘点已触及模型，读取成功标记为 `observed`，其 `finalIndexes` 仅代表当时观察到的快照，读取失败标记为 `unconfirmed`。`verified` 仅用于正常回读通过的结果。网络超时后，服务端操作仍可能完成。由操作者重新预览并决定后续操作。同库索引维护须串行，TTL 索引变更可影响文档的自动过期行为。
+- 同一模型按固定计划逐项等待删除完成，再按计划顺序逐项等待创建完成。首个删除或创建失败即停止本模型剩余操作和后续模型写入。索引同步可能部分生效。执行失败、计划漂移或回读异常时尽力盘点已触及模型，读取成功标记为 `observed`，其 `finalIndexes` 仅代表当时观察到的快照，读取失败标记为 `unconfirmed`。`verified` 仅用于正常回读通过的结果。网络超时后，服务端操作仍可能完成。由操作者重新预览并决定后续操作。同库索引维护须串行，TTL 索引变更可影响文档的自动过期行为。
 
 ### import-users 独立导入 CLI
 

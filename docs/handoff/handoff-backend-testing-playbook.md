@@ -107,6 +107,8 @@ npm.cmd run test -- --runInBand --runTestsByPath ./scripts/import-users.spec.ts 
 
 全文索引回归使用真实格式的合成索引元数据和隔离 Schema，核对普通唯一索引的比较边界、初始盘点拒绝时的零写入，以及复查和回读时的拒绝。可控删除 Promise 用于验证调用顺序、首错停止和部分生效报告。游标替身用于验证正式适配层传入的期限参数及游标收尾。
 
+创建回归通过真实 Mongoose 创建入口和底层 `createIndex` 替身验证顺序、首错停止及部分生效。写确认回归用未连接的真实驱动对象解析合成 URI，再经正式适配层检查预览与 apply 的分流。集合元数据替身用于验证选项读取、游标关闭、默认 collation 拒绝与漂移。合成索引元数据和隔离 Schema 用于验证 hidden 与 prepareUnique 的拒绝边界、零写入及失败盘点。
+
 从 `backend` 目录先执行 discovery，结果须恰好为上述两个文件。通过后使用同一文件列表正式运行。
 
 ```powershell
@@ -114,7 +116,7 @@ npm.cmd run test -- --listTests --runInBand --runTestsByPath ./scripts/sync-inde
 npm.cmd run test -- --runInBand --runTestsByPath ./scripts/sync-indexes.spec.ts ./scripts/retire-task-stage.spec.ts
 ```
 
-离线证据用于验证控制流、调用参数和操作边界。真实 MongoDB 的元数据与兼容性、dry-run 前后元数据一致性、索引增删与选项、故障终态及实际慢响应超时行为均为 `not_executed`，归属后续“sync-indexes 隔离数据库集成验收”。
+离线证据用于验证控制流、调用参数和操作边界。真实 MongoDB 的元数据与兼容性、dry-run 前后元数据一致性、索引增删与选项、服务端写确认、collation 继承、特殊索引行为、故障终态及实际慢响应超时行为均为 `not_executed`，归属后续“sync-indexes 隔离数据库集成验收”。
 
 ## 5. Database Purpose 与 Browser Process Roles
 
