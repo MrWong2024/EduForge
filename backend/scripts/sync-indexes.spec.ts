@@ -1469,13 +1469,14 @@ function nativeAdapterHarness(suffix = '') {
   const forbidden = jest.fn(() => {
     throw new Error('UNEXPECTED_WRITE');
   });
-  const diffIndexes = jest.fn(() =>
+  const diffIndexes = jest.fn<Promise<Diff>, [string]>(() =>
     Promise.resolve({ toDrop: [], toCreate: [] }),
   );
+  const createCollection = jest.fn<Promise<void>, [string]>(() => forbidden());
   const register = jest.fn((name: string, schema: Schema) => ({
     schema,
     collection: { name: mongoose.pluralize()?.(name) },
-    diffIndexes,
+    diffIndexes: () => diffIndexes(name),
     cleanIndexes: forbidden,
     createIndexes: forbidden,
   }));
@@ -1484,7 +1485,7 @@ function nativeAdapterHarness(suffix = '') {
       databaseName: database,
       listCollections,
       runCursorCommand,
-      createCollection: forbidden,
+      createCollection,
     },
   });
   Object.defineProperty(native, 'model', { value: register });
@@ -1518,6 +1519,7 @@ function nativeAdapterHarness(suffix = '') {
     closeCollectionCursor,
     forbidden,
     diffIndexes,
+    createCollection,
     run,
   };
 }
@@ -1828,7 +1830,11 @@ describe('sync-indexes registry and argument isolation', () => {
       expect(runCursorCommand).toHaveBeenNthCalledWith(
         1,
         { listIndexes: 'users', cursor: {}, includeBuildUUIDs: true },
-        { timeoutMS: 65000, timeoutMode: 'cursorLifetime' },
+        {
+          timeoutMS: 65000,
+          timeoutMode: 'cursorLifetime',
+          promoteValues: true,
+        },
       );
       expect(closeIndexCursor).toHaveBeenCalledTimes(cursorCount);
       expect(closeCollectionCursor).toHaveBeenCalledTimes(cursorCount);
@@ -1849,6 +1855,209 @@ describe('sync-indexes registry and argument isolation', () => {
               },
             }),
       });
+    },
+  );
+
+  it.each([
+    {
+      label: 'time series',
+      type: 'timeseries',
+      options: { timeseries: { timeField: 'createdAt', metaField: 'tenant' } },
+      code: 'COLLECTION_TYPE_UNSUPPORTED',
+    },
+    { label: 'view', type: 'view', code: 'COLLECTION_TYPE_UNSUPPORTED' },
+    {
+      label: 'unknown type',
+      type: 'other',
+      code: 'COLLECTION_TYPE_UNSUPPORTED',
+    },
+    { label: 'missing type', code: 'COLLECTION_METADATA_INVALID' },
+    { label: 'empty type', type: '', code: 'COLLECTION_METADATA_INVALID' },
+    { label: 'numeric type', type: 1, code: 'COLLECTION_METADATA_INVALID' },
+  ])(
+    'rejects $label before writing any collection',
+    async ({ code, ...entry }) => {
+      const a = nativeAdapterHarness();
+      a.readCollection.mockImplementation((name) =>
+        Promise.resolve(
+          name === 'users'
+            ? null
+            : name === 'courses'
+              ? { name, options: {}, ...entry }
+              : { name, type: 'collection', options: {} },
+        ),
+      );
+
+      expect(await a.run([...apply, '--allow-drop'])).toBe(1);
+      expect(a.listCollections).toHaveBeenNthCalledWith(1, { name: 'users' });
+      expect(a.listCollections).toHaveBeenLastCalledWith({ name: 'courses' });
+      expect(a.diffIndexes).toHaveBeenCalledWith('User');
+      expect(a.diffIndexes).not.toHaveBeenCalledWith('Course');
+      expect(a.createCollection).not.toHaveBeenCalled();
+      expect(a.forbidden).not.toHaveBeenCalled();
+      expect(a.closeCollectionCursor).toHaveBeenCalledTimes(
+        a.listCollections.mock.calls.length,
+      );
+      expect(a.close).toHaveBeenCalledTimes(1);
+      expect(jsonEvent(a.h, 'result')).toMatchObject({
+        status: 'failed',
+        writesAttempted: false,
+        partialEffectsPossible: false,
+        error: { code },
+      });
+    },
+  );
+
+  it('creates a truly missing collection and verifies its ordinary type', async () => {
+    const a = nativeAdapterHarness();
+    let created = false;
+    a.readCollection.mockImplementation((name) =>
+      Promise.resolve(
+        name === 'users' && !created
+          ? null
+          : { name, type: 'collection', options: {} },
+      ),
+    );
+    a.createCollection.mockImplementation(() => {
+      created = true;
+      return Promise.resolve();
+    });
+
+    expect(await a.run(apply)).toBe(0);
+    expect(a.createCollection.mock.calls).toEqual([['users']]);
+    expect(
+      a.listCollections.mock.calls.filter(([{ name }]) => name === 'users'),
+    ).toEqual(Array.from({ length: 5 }, () => [{ name: 'users' }]));
+    expect(a.forbidden).not.toHaveBeenCalled();
+    expect(a.closeCollectionCursor).toHaveBeenCalledTimes(
+      a.listCollections.mock.calls.length,
+    );
+    expect(a.close).toHaveBeenCalledTimes(1);
+    const result = jsonEvent(a.h, 'result');
+    expect(result).toMatchObject({
+      status: 'completed',
+      writesAttempted: true,
+    });
+    expect(result).toHaveProperty(
+      'models',
+      expect.arrayContaining([
+        expect.objectContaining({
+          collection: 'users',
+          terminalState: 'verified',
+          finalIndexes: [idIndex],
+        }),
+      ]),
+    );
+  });
+
+  it.each([2, 3])(
+    'stops when collection type changes at recheck %i',
+    async (changeAt) => {
+      const a = nativeAdapterHarness();
+      let reads = 0;
+      a.readCollection.mockImplementation((name) => {
+        const type =
+          name === 'users' && ++reads === changeAt ? 'view' : 'collection';
+        return Promise.resolve({ name, type, options: {} });
+      });
+
+      expect(await a.run([...apply, '--allow-drop'])).toBe(1);
+      expect(a.listCollections).toHaveBeenLastCalledWith({ name: 'users' });
+      expect(
+        a.diffIndexes.mock.calls.filter(([name]) => name === 'User'),
+      ).toHaveLength(changeAt - 1);
+      expect(a.createCollection).not.toHaveBeenCalled();
+      expect(a.forbidden).not.toHaveBeenCalled();
+      expect(a.closeCollectionCursor).toHaveBeenCalledTimes(
+        a.listCollections.mock.calls.length,
+      );
+      expect(a.close).toHaveBeenCalledTimes(1);
+      expect(jsonEvent(a.h, 'result')).toMatchObject({
+        status: 'failed',
+        writesAttempted: false,
+        error: { code: 'COLLECTION_TYPE_UNSUPPORTED' },
+      });
+    },
+  );
+
+  it.each([
+    { stage: 'post-create check', changeAt: 1 },
+    { stage: 'readback', changeAt: 2 },
+  ])(
+    'reports unconfirmed after type drift during $stage',
+    async ({ changeAt }) => {
+      const a = nativeAdapterHarness();
+      const missing = new Set(['users', 'sessions', 'passwordresettokens']);
+      let sessionReadsAfterCreation = 0;
+      let drifted = false;
+      a.readCollection.mockImplementation((name) => {
+        if (missing.has(name)) return Promise.resolve(null);
+        if (name === 'sessions' && ++sessionReadsAfterCreation === changeAt) {
+          drifted = true;
+        }
+        const type = drifted ? 'view' : 'collection';
+        return Promise.resolve({ name, type, options: {} });
+      });
+      a.createCollection.mockImplementation((name) => {
+        missing.delete(name);
+        return Promise.resolve();
+      });
+      if (changeAt === 1) {
+        a.diffIndexes.mockImplementation((name) =>
+          Promise.resolve({
+            toDrop: [],
+            toCreate: name === 'Session' ? [ttl] : [],
+          }),
+        );
+      }
+
+      expect(await a.run([...apply, '--allow-drop'])).toBe(1);
+      expect(a.createCollection.mock.calls).toEqual([['users'], ['sessions']]);
+      expect(a.forbidden).not.toHaveBeenCalled();
+      expect(a.runCursorCommand).toHaveBeenCalledWith(
+        { listIndexes: 'users', cursor: {}, includeBuildUUIDs: true },
+        expect.anything(),
+      );
+      expect(a.listCollections.mock.calls.slice(-2)).toEqual([
+        [{ name: 'users' }],
+        [{ name: 'sessions' }],
+      ]);
+      expect(a.closeCollectionCursor).toHaveBeenCalledTimes(
+        a.listCollections.mock.calls.length,
+      );
+      expect(a.close).toHaveBeenCalledTimes(1);
+      const auditError = { code: 'COLLECTION_TYPE_UNSUPPORTED' };
+      const result = jsonEvent(a.h, 'result');
+      expect(result).toMatchObject({
+        status: 'failed',
+        writesAttempted: true,
+        partialEffectsPossible: true,
+        error: auditError,
+      });
+      expect(result).toHaveProperty(
+        'models',
+        expect.arrayContaining([
+          expect.objectContaining({
+            collection: 'users',
+            status: 'succeeded',
+            terminalState: 'unconfirmed',
+            auditError,
+          }),
+          expect.objectContaining({
+            collection: 'sessions',
+            status: 'failed',
+            terminalState: 'unconfirmed',
+            auditError,
+          }),
+          expect.objectContaining({
+            collection: 'passwordresettokens',
+            status: 'not-executed',
+          }),
+        ]),
+      );
+      expect(output(a.h)).not.toContain('"terminalState":"verified"');
+      expect(output(a.h)).not.toContain('"collectionExists"');
+      expect(output(a.h)).not.toContain('"finalIndexes"');
     },
   );
 
@@ -1982,6 +2191,192 @@ function isolatedMain(args: string[], setup = '') {
       ', null, true);\n',
   );
 }
+
+describe('sync-indexes BSON numeric decoding (offline)', () => {
+  const sessionIndexes: mongo.IndexDescriptionInfo[] = [
+    idIndex,
+    { name: 'expiresAt_1', key: { expiresAt: 1 }, expireAfterSeconds: 0 },
+    { name: 'token_1', key: { token: 1 }, unique: true },
+    { name: 'userId_1', key: { userId: 1 } },
+  ];
+
+  it.each([
+    { args: ['--dry-run'], status: 'preview' },
+    { args: [...apply, '--allow-drop'], status: 'completed' },
+  ])(
+    'keeps matching indexes out of the $status plan',
+    async ({ args, status }) => {
+      const h = harness();
+      const uri = adminUri + '?promoteValues=false';
+      const deps: Partial<SyncIndexesDependencies> = {
+        ...h.deps,
+        env: { NODE_ENV: 'test', MONGO_ADMIN_URI: uri },
+      };
+      delete deps.createConnection;
+
+      const fixtureBytes = new Map<string, Uint8Array>();
+      const sessionReads = {
+        raw: [] as mongo.IndexDescriptionInfo[][],
+        mongoose: [] as mongo.IndexDescriptionInfo[][],
+      };
+      const rawOptions: (mongo.RunCursorCommandOptions | undefined)[] = [];
+      const forbidden = jest.fn(() => {
+        throw new Error('UNEXPECTED_WRITE');
+      });
+      let client: mongo.MongoClient | undefined;
+
+      function decode(
+        name: string,
+        cursor: mongo.AbstractCursor,
+        path: keyof typeof sessionReads,
+      ) {
+        const bytes = fixtureBytes.get(name);
+        // Use the real cursor's resolved decoder settings without iterating the network cursor.
+        const options: unknown = Reflect.get(cursor, 'deserializationOptions');
+        if (!bytes || !options || typeof options !== 'object') {
+          throw new Error('EXPECTED_BSON_FIXTURE_AND_CURSOR_OPTIONS');
+        }
+        const decoded: unknown = mongoose.mongo.BSON.deserialize(
+          bytes,
+          options,
+        ).indexes;
+        if (!Array.isArray(decoded)) throw new Error('EXPECTED_INDEX_METADATA');
+        const indexes = decoded as mongo.IndexDescriptionInfo[];
+        if (name === 'sessions') sessionReads[path].push(indexes);
+        return indexes;
+      }
+
+      jest
+        .mocked(mongoose.createConnection)
+        .mockImplementationOnce(
+          (receivedUri?: string, receivedOptions?: mongoose.ConnectOptions) => {
+            if (!receivedUri || !receivedOptions) {
+              throw new Error('EXPECTED_CONNECTION_ARGUMENTS');
+            }
+            const { autoCreate, autoIndex, ...driverOptions } = receivedOptions;
+            expect([autoCreate, autoIndex]).toEqual([false, false]);
+            const driverClient = new mongoose.mongo.MongoClient(
+              receivedUri,
+              driverOptions,
+            );
+            client = driverClient;
+            const driverDb = driverClient.db();
+            const native = new mongoose.Connection();
+            Object.defineProperty(native, 'model', {
+              value: (name: string, schema: Schema) => {
+                const model = disconnectedModel(name, schema);
+                const collection = driverDb.collection(model.collection.name);
+                const indexes =
+                  name === 'Session'
+                    ? sessionIndexes
+                    : [
+                        idIndex,
+                        ...schema.indexes().map(([key, options], index) => ({
+                          ...options,
+                          key,
+                          name: options.name ?? 'fixture_' + index,
+                        })),
+                      ];
+                fixtureBytes.set(
+                  collection.collectionName,
+                  mongoose.mongo.BSON.serialize({ indexes }),
+                );
+                jest
+                  .spyOn(model, 'listIndexes')
+                  .mockImplementation(async () => {
+                    const cursor = collection.listIndexes();
+                    try {
+                      return decode(
+                        collection.collectionName,
+                        cursor,
+                        'mongoose',
+                      );
+                    } finally {
+                      await cursor.close();
+                    }
+                  });
+                jest.spyOn(model, 'cleanIndexes').mockImplementation(forbidden);
+                jest
+                  .spyOn(model, 'createIndexes')
+                  .mockImplementation(forbidden);
+                return model;
+              },
+            });
+            Object.defineProperty(native, 'db', {
+              value: {
+                databaseName: driverDb.databaseName,
+                listCollections: ({ name }: { name: string }) => ({
+                  next: () =>
+                    Promise.resolve({ name, type: 'collection', options: {} }),
+                  close: () => Promise.resolve(),
+                }),
+                runCursorCommand: (
+                  command: mongo.Document,
+                  options?: mongo.RunCursorCommandOptions,
+                ) => {
+                  const name: unknown = command.listIndexes;
+                  if (typeof name !== 'string')
+                    throw new Error('EXPECTED_LIST_INDEXES');
+                  rawOptions.push(options);
+                  const cursor = driverDb.runCursorCommand(command, options);
+                  jest
+                    .spyOn(cursor, 'toArray')
+                    .mockImplementation(() =>
+                      Promise.resolve(decode(name, cursor, 'raw')),
+                    );
+                  return cursor;
+                },
+                createCollection: forbidden,
+              },
+            });
+            jest.spyOn(native, 'asPromise').mockResolvedValue(native);
+            jest.spyOn(native, 'getClient').mockReturnValue(driverClient);
+            jest
+              .spyOn(native, 'close')
+              .mockImplementation(() => driverClient.close());
+            return native;
+          },
+        );
+
+      expect(await runSyncIndexesCli(args, deps)).toBe(0);
+      expect(mongoose.createConnection).toHaveBeenLastCalledWith(
+        uri,
+        expect.objectContaining({ promoteValues: true }),
+      );
+      expect(client?.options).toHaveProperty('promoteValues', true);
+      expect(rawOptions.length).toBeGreaterThan(0);
+      for (const options of rawOptions) {
+        expect(options).toMatchObject({
+          promoteValues: true,
+          timeoutMS: 65000,
+          timeoutMode: 'cursorLifetime',
+        });
+      }
+      for (const reads of Object.values(sessionReads)) {
+        expect(reads.length).toBeGreaterThan(0);
+        for (const indexes of reads) {
+          expect(indexes).toEqual(sessionIndexes);
+          const ttlIndex = indexes.find(({ name }) => name === 'expiresAt_1');
+          expect(ttlIndex?.key.expiresAt).toBe(1);
+          expect(ttlIndex?.expireAfterSeconds).toBe(0);
+        }
+      }
+      expect(jsonEvent(h, 'plan')).toMatchObject({
+        models: SYNC_INDEX_SCHEMAS.map(({ name }) => ({
+          model: name,
+          createCollection: false,
+          toDrop: [],
+          toCreate: [],
+        })),
+      });
+      expect(jsonEvent(h, 'result')).toMatchObject({
+        status,
+        writesAttempted: false,
+      });
+      expect(forbidden).not.toHaveBeenCalled();
+    },
+  );
+});
 
 describe('sync-indexes isolated direct entry (no environment files or network)', () => {
   it('imports the real module without starting the CLI', () => {

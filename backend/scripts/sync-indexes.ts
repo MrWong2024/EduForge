@@ -21,6 +21,7 @@ import { SYNC_INDEX_SCHEMAS } from './sync-indexes-models';
 const CONNECTION_OPTIONS = {
   autoCreate: false,
   autoIndex: false,
+  promoteValues: true,
   serverSelectionTimeoutMS: 5000,
   connectTimeoutMS: 5000,
   socketTimeoutMS: 70000,
@@ -117,6 +118,7 @@ async function listReadyIndexes(
       includeBuildUUIDs: true,
     },
     {
+      promoteValues: CONNECTION_OPTIONS.promoteValues,
       timeoutMS: CONNECTION_OPTIONS.timeoutMS,
       timeoutMode: 'cursorLifetime',
     },
@@ -214,8 +216,15 @@ function createMongooseConnection(
         if (
           !isDocument(entry) ||
           entry.name !== name ||
-          !isDocument(entry.options)
+          typeof entry.type !== 'string' ||
+          entry.type.length === 0
         ) {
+          throw new SyncIndexesError('COLLECTION_METADATA_INVALID');
+        }
+        if (entry.type !== 'collection') {
+          throw new SyncIndexesError('COLLECTION_TYPE_UNSUPPORTED');
+        }
+        if (!isDocument(entry.options)) {
           throw new SyncIndexesError('COLLECTION_METADATA_INVALID');
         }
         if (!('collation' in entry.options)) return { collation: undefined };
