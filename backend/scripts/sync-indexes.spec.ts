@@ -212,9 +212,6 @@ function harness(fixtures: ModelFixture[] = [addOnly]) {
     return connection;
   });
   const readFile = jest.fn<string, [string]>(() => '');
-  const retire = jest
-    .fn<Promise<void>, [string[]]>()
-    .mockResolvedValue(undefined);
   const deps: SyncIndexesDependencies = {
     env: { NODE_ENV: 'test', MONGO_ADMIN_URI: adminUri },
     backendDirectory,
@@ -225,7 +222,6 @@ function harness(fixtures: ModelFixture[] = [addOnly]) {
       if (line.includes('"event":"plan"')) events.push('plan-printed');
     },
     error: (line) => errors.push(line),
-    retire,
   };
 
   return {
@@ -233,7 +229,6 @@ function harness(fixtures: ModelFixture[] = [addOnly]) {
     connection,
     createConnection,
     readFile,
-    retire,
     models: models.map(({ model }) => model),
     indexes: models.map(({ indexes }) => indexes),
     logs,
@@ -2062,7 +2057,6 @@ describe('sync-indexes registry and argument isolation', () => {
   );
 
   it.each<[readonly string[]]>([
-    [['--bogus']],
     [['--dry-run', '--dry-run']],
     [['--apply']],
     [['--apply', '--confirm-db']],
@@ -2078,30 +2072,40 @@ describe('sync-indexes registry and argument isolation', () => {
       expect(await h.run(args)).toBe(1);
       expect(h.readFile).not.toHaveBeenCalled();
       expect(h.createConnection).not.toHaveBeenCalled();
-      expect(h.retire).not.toHaveBeenCalled();
     },
   );
 
-  it('forwards an intact targeted apply command without ordinary config', async () => {
-    const h = harness();
-    h.deps.env = {};
-    const args = [
-      '--retire-task-stage',
-      '--database',
-      'eduforge',
-      '--apply',
-      '--confirm-db',
-      'eduforge',
-      '--backup-run',
-      'synthetic-run',
-    ];
+  it.each<[readonly string[]]>([
+    [['--bogus']],
+    [['--retire-task-stage']],
+    [['--retire-task-stage', '--help']],
+    [
+      [
+        '--retire-task-stage',
+        '--database',
+        'eduforge',
+        '--apply',
+        '--confirm-db',
+        'eduforge',
+        '--backup-run',
+        'synthetic-run',
+      ],
+    ],
+  ])(
+    'rejects unknown arguments %j before configuration or connection',
+    async (args) => {
+      const h = harness();
 
-    expect(await h.run(args)).toBe(0);
-    expect(h.retire).toHaveBeenCalledTimes(1);
-    expect(h.retire).toHaveBeenCalledWith(args);
-    expect(h.readFile).not.toHaveBeenCalled();
-    expect(h.createConnection).not.toHaveBeenCalled();
-  });
+      expect(await h.run(args)).toBe(1);
+      expect(jsonEvent(h, 'result')).toMatchObject({
+        status: 'failed',
+        writesAttempted: false,
+        error: { code: 'CLI_ARGUMENT_INVALID' },
+      });
+      expect(h.readFile).not.toHaveBeenCalled();
+      expect(h.createConnection).not.toHaveBeenCalled();
+    },
+  );
 });
 
 const entry = JSON.stringify(resolve(__dirname, 'sync-indexes.ts'));
@@ -2120,7 +2124,6 @@ tls.connect = denied;
 dns.lookup = denied;
 dns.resolveSrv = denied;
 dns.promises.resolveSrv = denied;
-let stageFixture;
 const isEnvFile = path => /(^|[\\/])\.env(?:\.|$)/.test(String(path));
 const readSync = fs.readFileSync;
 fs.readFileSync = function(path, ...args) {
@@ -2129,10 +2132,6 @@ fs.readFileSync = function(path, ...args) {
 };
 const read = fsPromises.readFile;
 fsPromises.readFile = function(path, ...args) {
-  if (stageFixture !== undefined && /[\\/]\.env\.production$/.test(String(path))) {
-    console.log('SYNTHETIC_STAGE_CONFIG_SELECTED');
-    return Promise.resolve(stageFixture);
-  }
   if (isEnvFile(path)) return denied();
   return read.call(this, path, ...args);
 };
@@ -2178,10 +2177,9 @@ function isolated(code: string) {
   );
 }
 
-function isolatedMain(args: string[], setup = '') {
+function isolatedMain(args: string[]) {
   return isolated(
-    setup +
-      '\nprocess.argv = [process.execPath, ' +
+    '\nprocess.argv = [process.execPath, ' +
       entry +
       ', ...' +
       JSON.stringify(args) +
@@ -2401,54 +2399,23 @@ describe('sync-indexes isolated direct entry (no environment files or network)',
     expect(result.stdout).toContain('--dry-run');
     expect(result.stdout).toContain('--confirm-db');
     expect(result.stdout).toContain('--allow-drop');
+    expect(result.stdout).not.toContain('--retire-task-stage');
     expect(result.stderr).toBe('');
   });
 
-  it('exits nonzero on unknown arguments without starting configuration or network', () => {
-    const result = isolatedMain(['--unrecognized']);
+  it.each<[string[]]>([
+    [['--unrecognized']],
+    [['--retire-task-stage', '--help']],
+  ])(
+    'exits nonzero on unknown arguments %j before configuration or network',
+    (args) => {
+      const result = isolatedMain(args);
 
-    expect(result.error).toBeUndefined();
-    expect(result.status).toBe(1);
-    expect(result.stderr).toContain('CLI_ARGUMENT_INVALID');
-    expect(result.stderr).not.toContain('UNEXPECTED_ENV_NETWORK_OR_APP');
-  });
-
-  it('routes targeted help to the existing retirement implementation', () => {
-    const result = isolatedMain(['--retire-task-stage', '--help']);
-
-    expect(result.error).toBeUndefined();
-    expect(result.status).toBe(0);
-    expect(result.stdout).toContain('--backup-run');
-    expect(result.stdout).toContain('--retire-task-stage');
-    expect(result.stderr).toBe('');
-  });
-
-  it('lets a legal targeted command reach its own configuration gate', () => {
-    const result = isolatedMain(
-      ['--retire-task-stage', '--database', 'eduforge', '--dry-run'],
-      'stageFixture = "MONGO_ADMIN_URI=mongodb://synthetic.invalid/eduforge_dev";',
-    );
-
-    expect(result.error).toBeUndefined();
-    expect(result.status).toBe(1);
-    expect(result.stdout.trim()).toBe('SYNTHETIC_STAGE_CONFIG_SELECTED');
-    expect(result.stderr).toContain('DECLARED_DATABASE_MISMATCH');
-    expect(result.stderr).not.toContain('NODE_ENV_REQUIRED');
-  });
-
-  it('keeps --allow-drop invalid in the targeted parser', () => {
-    const result = isolatedMain([
-      '--retire-task-stage',
-      '--database',
-      'eduforge',
-      '--apply',
-      '--confirm-db',
-      'eduforge',
-      '--allow-drop',
-    ]);
-
-    expect(result.error).toBeUndefined();
-    expect(result.status).toBe(1);
-    expect(result.stderr).toContain('UNKNOWN_ARGUMENT');
-  });
+      expect(result.error).toBeUndefined();
+      expect(result.status).toBe(1);
+      expect(result.stdout).toBe('');
+      expect(result.stderr).toContain('CLI_ARGUMENT_INVALID');
+      expect(result.stderr).not.toContain('UNEXPECTED_ENV_NETWORK_OR_APP');
+    },
+  );
 });

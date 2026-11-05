@@ -10,7 +10,6 @@ import {
   assertConnectedDatabaseMatchesPurpose,
   DatabaseGateError,
 } from '../src/config/database-purpose';
-import { runRetireTaskStageCli } from './retire-task-stage';
 import {
   parseSyncIndexesArguments,
   resolveSyncIndexesConfig,
@@ -81,7 +80,6 @@ export interface SyncIndexesDependencies {
   ): SyncIndexesConnection;
   log(this: void, message: string): void;
   error(this: void, message: string): void;
-  retire(this: void, args: string[]): Promise<void>;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -255,7 +253,6 @@ function defaultDependencies(): SyncIndexesDependencies {
     createConnection: createMongooseConnection,
     log: (message) => console.log(message),
     error: (message) => console.error(message),
-    retire: runRetireTaskStageCli,
   };
 }
 
@@ -420,7 +417,6 @@ const HELP = [
   'No arguments previews the index changes. Review the preview before applying.',
   'Apply computes and prints a fresh plan. --allow-drop authorizes only deletions in that apply plan.',
   'Index changes are not transactional. TTL indexes can expire documents.',
-  'For Task.stage retirement: npm run sync-indexes -- --retire-task-stage --help',
 ].join('\n');
 
 export async function runSyncIndexesCli(
@@ -428,11 +424,6 @@ export async function runSyncIndexesCli(
   overrides: Partial<SyncIndexesDependencies> = {},
 ): Promise<number> {
   const deps = { ...defaultDependencies(), ...overrides };
-  if (argv.includes('--retire-task-stage')) {
-    await deps.retire([...argv]);
-    return Number(process.exitCode ?? 0);
-  }
-
   let connection: SyncIndexesConnection | undefined;
   let databaseName: string | undefined;
   let mode: 'dry-run' | 'apply' | undefined;
