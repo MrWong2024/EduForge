@@ -109,7 +109,11 @@ npm.cmd run test -- --runInBand --runTestsByPath ./scripts/import-users.spec.ts 
 
 创建回归通过真实 Mongoose 创建入口和底层 `createIndex` 替身验证顺序、首错停止及部分生效。写确认回归用未连接的真实驱动对象解析合成 URI，再经正式适配层检查预览与 apply 的分流。集合元数据替身用于验证选项读取、游标关闭、默认 collation 拒绝与漂移。合成索引元数据和隔离 Schema 用于验证 hidden 与 prepareUnique 的拒绝边界、零写入及失败盘点。
 
-数字解码回归使用未连接的真实驱动解析正式适配层传入的配置，沿独立连接和原生游标的实际选项解码同一份 BSON，再以正式 Session Schema 克隆与真实 Mongoose 差异计算验证 `--dry-run` 和带 `--allow-drop` 的 apply 均为空计划、零写入调用。集合类型回归用合成元数据检查预检零写入、集合缺失时的模拟创建、类型漂移及写后发现类型不符时的失败报告。模拟连接、BSON 解码和模拟 DDL 属于离线证据。
+数字解码回归使用未连接的真实驱动解析正式适配层传入的合成 URI 和选项，沿独立连接和原生游标的实际配置解码同一份含 Long 的 BSON，再以正式 Session Schema 克隆与真实 Mongoose 差异计算核对 `--dry-run` 和带 `--allow-drop` 的 apply 均为空计划、零写入调用。合成元数据用于验证不支持的方向在两条读取路径中均会被拒绝。
+
+sparse 回归使用真实 Mongoose 差异计算验证缺省与 `false` 的双向等价、两侧均为 `false` 的一致性及 `true` 的差异，并核对原始快照和读取次数。直连门禁回归使用未连接的真实驱动对象取得有效值，以连接和模型替身验证拒绝发生在实际库名检查之后、模型注册和盘点之前，并核对零写入调用和连接收尾。
+
+集合类型回归用合成元数据检查预检零写入、集合缺失时的模拟创建、类型漂移及写后发现类型不符时的失败报告。模拟连接、BSON 解码和模拟 DDL 属于离线证据。
 
 从 `backend` 目录先执行 discovery，结果须恰好为 `scripts/sync-indexes.spec.ts`。通过后使用同一文件路径正式运行。
 
@@ -118,7 +122,7 @@ npm.cmd run test -- --listTests --runInBand --runTestsByPath ./scripts/sync-inde
 npm.cmd run test -- --runInBand --runTestsByPath ./scripts/sync-indexes.spec.ts
 ```
 
-离线证据用于验证控制流、调用参数和操作边界。真实 MongoDB 的元数据与兼容性、dry-run 前后元数据一致性、索引增删与选项、服务端写确认、collation 继承、特殊索引行为、故障终态及实际慢响应超时行为均为 `not_executed`，归属后续“sync-indexes 隔离数据库集成验收”。
+离线证据用于验证控制流、调用参数和操作边界。真实 MongoDB 的元数据与兼容性、dry-run 前后元数据一致性、索引增删与选项、服务端写确认、collation 继承、特殊索引行为、复制延迟、故障终态及实际慢响应超时行为均为 `not_executed`，归属后续“sync-indexes 隔离数据库集成验收”。
 
 ## 5. Database Purpose 与 Browser Process Roles
 

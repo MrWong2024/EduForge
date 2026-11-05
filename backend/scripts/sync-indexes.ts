@@ -21,6 +21,8 @@ const CONNECTION_OPTIONS = {
   autoCreate: false,
   autoIndex: false,
   promoteValues: true,
+  promoteLongs: true,
+  useBigInt64: false,
   serverSelectionTimeoutMS: 5000,
   connectTimeoutMS: 5000,
   socketTimeoutMS: 70000,
@@ -60,6 +62,7 @@ export interface SyncIndexModel {
 export interface SyncIndexesConnection {
   ready(this: void): Promise<void>;
   databaseName(this: void): string | undefined;
+  directConnection(this: void): boolean | undefined;
   writeConcernW(this: void): mongo.WriteConcern['w'] | undefined;
   models(this: void): readonly SyncIndexModel[];
   collectionMetadata(
@@ -104,6 +107,17 @@ function connectedDb(connection: Connection): mongo.Db {
   return connection.db;
 }
 
+function readIndexDescription(index: unknown): mongo.IndexDescriptionInfo {
+  if (
+    !isRecord(index) ||
+    typeof index.name !== 'string' ||
+    !isRecord(index.key)
+  ) {
+    throw new SyncIndexesError('INVALID_INDEX_METADATA');
+  }
+  return index as mongo.IndexDescriptionInfo;
+}
+
 async function listReadyIndexes(
   db: mongo.Db,
   collectionName: string,
@@ -117,6 +131,8 @@ async function listReadyIndexes(
     },
     {
       promoteValues: CONNECTION_OPTIONS.promoteValues,
+      promoteLongs: CONNECTION_OPTIONS.promoteLongs,
+      useBigInt64: CONNECTION_OPTIONS.useBigInt64,
       timeoutMS: CONNECTION_OPTIONS.timeoutMS,
       timeoutMode: 'cursorLifetime',
     },
@@ -133,14 +149,28 @@ async function listReadyIndexes(
       ) {
         throw new SyncIndexesError('INDEX_BUILD_IN_PROGRESS');
       }
-      if (typeof index.name !== 'string' || !isRecord(index.key)) {
-        throw new SyncIndexesError('INVALID_INDEX_METADATA');
-      }
-      return index as mongo.IndexDescriptionInfo;
+      return readIndexDescription(index);
     });
   } finally {
     await cursor.close();
   }
+}
+
+function assertSupportedIndexDirections(key: Record<string, unknown>) {
+  if (
+    Object.values(key).some(
+      (direction) =>
+        direction !== 1 && direction !== -1 && typeof direction !== 'string',
+    )
+  ) {
+    throw new SyncIndexesError('INDEX_KEY_DIRECTION_UNSUPPORTED');
+  }
+}
+
+function copyComparisonOptions<T extends { sparse?: boolean }>(options: T): T {
+  const copy = { ...options };
+  if (copy.sparse === false) delete copy.sparse;
+  return copy;
 }
 
 export function registerSyncIndexModels(
@@ -152,12 +182,35 @@ export function registerSyncIndexModels(
     isolatedSchema.set('autoIndex', false);
     const model = connection.model(name, isolatedSchema);
     const collectionName = model.collection.name;
+    const modelSchema = model.schema;
+    const readDatabaseIndexes = model.listIndexes.bind(
+      model,
+    ) as typeof model.listIndexes;
+    const readSchemaIndexes = modelSchema.indexes.bind(
+      modelSchema,
+    ) as typeof modelSchema.indexes;
+    // Mongoose compares these copies. The raw metadata still drives drift checks and reports.
+    model.listIndexes = async (...args) => {
+      const indexes: unknown[] = await readDatabaseIndexes(...args);
+      return indexes.map((entry) => {
+        const index = readIndexDescription(entry);
+        assertSupportedIndexDirections(index.key);
+        const copy = copyComparisonOptions(index);
+        copy.key = { ...index.key };
+        return copy;
+      });
+    };
+    modelSchema.indexes = (...args) =>
+      readSchemaIndexes(...args).map(([key, options]): SyncIndexDefinition => {
+        assertSupportedIndexDirections(key);
+        return [{ ...key }, copyComparisonOptions(options)];
+      });
     return {
       name,
       collectionName,
       listIndexes: () =>
         listReadyIndexes(connectedDb(connection), collectionName),
-      schemaIndexes: () => model.schema.indexes(),
+      schemaIndexes: () => readSchemaIndexes(),
       diffIndexes: async (options) => {
         const result = await model.diffIndexes(options);
         const toDrop: unknown[] = result.toDrop;
@@ -204,6 +257,7 @@ function createMongooseConnection(
       await connection.asPromise();
     },
     databaseName: () => connection.db?.databaseName,
+    directConnection: () => connection.getClient().options.directConnection,
     writeConcernW: () => connection.getClient().writeConcern?.w,
     models: () => registerSyncIndexModels(connection),
     collectionMetadata: async (name) => {
@@ -336,6 +390,8 @@ async function readModelPlan(
   ) {
     throw new SyncIndexesError('PREPARE_UNIQUE_UNSUPPORTED');
   }
+  for (const { key } of indexes) assertSupportedIndexDirections(key);
+  for (const [key] of schemaIndexes) assertSupportedIndexDirections(key);
   // Mongoose treats NamespaceNotFound as an empty index set.
   const diff = await model.diffIndexes({ indexOptionsToCreate: true });
   const names = new Set(indexes.map((index) => index.name));
@@ -459,6 +515,9 @@ export async function runSyncIndexesCli(
       databaseName: connection.databaseName(),
     });
     databaseName = config.expectedDatabaseName;
+    if (connection.directConnection() === true) {
+      throw new SyncIndexesError('DIRECT_CONNECTION_UNSUPPORTED');
+    }
     if (options.apply && connection.writeConcernW() === 0) {
       throw new SyncIndexesError('UNACKNOWLEDGED_WRITE_CONCERN');
     }

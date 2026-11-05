@@ -184,6 +184,7 @@ function harness(fixtures: ModelFixture[] = [addOnly]) {
       events.push('databaseName');
       return database;
     }),
+    directConnection: jest.fn<boolean | undefined, []>(),
     writeConcernW: jest.fn<mongo.WriteConcern['w'] | undefined, []>(),
     models: jest.fn<readonly SyncIndexModel[], []>(() => {
       events.push('register');
@@ -1373,6 +1374,7 @@ describe('sync-indexes ordinary configuration and cleanup (offline)', () => {
 
     expect(await h.run(apply)).toBe(1);
     expect(output(h)).toContain('DATABASE_CONNECTED_NAME_MISMATCH');
+    expect(h.connection.directConnection).not.toHaveBeenCalled();
     expect(h.connection.writeConcernW).not.toHaveBeenCalled();
     expect(h.connection.models).not.toHaveBeenCalled();
     expect(h.connection.close).toHaveBeenCalledTimes(1);
@@ -1471,6 +1473,7 @@ function nativeAdapterHarness(suffix = '') {
   const register = jest.fn((name: string, schema: Schema) => ({
     schema,
     collection: { name: mongoose.pluralize()?.(name) },
+    listIndexes: jest.fn(() => Promise.resolve([])),
     diffIndexes: () => diffIndexes(name),
     cleanIndexes: forbidden,
     createIndexes: forbidden,
@@ -1548,6 +1551,7 @@ describe('sync-indexes registry and argument isolation', () => {
     const actual = new mongoose.Connection();
     const register = jest.fn((name: string, schema: Schema) => ({
       schema,
+      listIndexes: jest.fn(() => Promise.resolve([])),
       collection: {
         name: schema.options.collection ?? mongoose.pluralize()?.(name),
       },
@@ -1608,7 +1612,9 @@ describe('sync-indexes registry and argument isolation', () => {
       value: { createCollection: nativeCreate },
     });
     Object.defineProperty(native, 'model', {
-      value: (name: string) => ({
+      value: (name: string, schema: Schema) => ({
+        schema,
+        listIndexes: jest.fn(() => Promise.resolve([])),
         collection: { name: mongoose.pluralize()?.(name) },
         createCollection: modelCreate,
       }),
@@ -1689,12 +1695,10 @@ describe('sync-indexes registry and argument isolation', () => {
       expect(connectionOptions).not.toHaveProperty('writeConcern');
       expect(connectionOptions).not.toHaveProperty('w');
       expect(client.writeConcern?.w).toBe(expectedW);
-      if (args.includes('--apply')) {
-        expect(getClient).toHaveBeenCalledTimes(1);
-        expect(ready.mock.invocationCallOrder[0]).toBeLessThan(
-          getClient.mock.invocationCallOrder[0],
-        );
-      }
+      expect(getClient).toHaveBeenCalled();
+      expect(ready.mock.invocationCallOrder[0]).toBeLessThan(
+        getClient.mock.invocationCallOrder[0],
+      );
       if (denied) {
         expect(register).not.toHaveBeenCalled();
         expect(listCollections).not.toHaveBeenCalled();
@@ -1713,6 +1717,55 @@ describe('sync-indexes registry and argument isolation', () => {
       }
       expect(forbidden).not.toHaveBeenCalled();
       expect(close).toHaveBeenCalledTimes(1);
+    },
+  );
+
+  it.each([
+    { suffix: '?directConnection=true', args: [], denied: true },
+    { suffix: '?directConnection=true', args: ['--dry-run'], denied: true },
+    {
+      suffix: '?directConnection=true',
+      args: [...apply, '--allow-drop'],
+      denied: true,
+    },
+    {
+      suffix: '?directConnection=false',
+      args: [...apply, '--allow-drop'],
+      denied: false,
+    },
+    { suffix: '', args: ['--dry-run'], denied: false },
+  ])(
+    'uses the driver-parsed direct connection option $suffix for $args',
+    async ({ suffix, args, denied }) => {
+      const a = nativeAdapterHarness(suffix);
+      expect(a.client.options.directConnection).toBe(denied);
+      expect(await a.run(args)).toBe(denied ? 1 : 0);
+      expect(mongoose.createConnection).toHaveBeenLastCalledWith(
+        a.uri,
+        expect.objectContaining({ readPreference: 'primary' }),
+      );
+      expect(a.close).toHaveBeenCalledTimes(1);
+      expect(a.forbidden).not.toHaveBeenCalled();
+      expect(a.createCollection).not.toHaveBeenCalled();
+      if (denied) {
+        expect(a.ready.mock.invocationCallOrder[0]).toBeLessThan(
+          a.getClient.mock.invocationCallOrder[0],
+        );
+        expect(a.register).not.toHaveBeenCalled();
+        expect(a.listCollections).not.toHaveBeenCalled();
+        expect(a.runCursorCommand).not.toHaveBeenCalled();
+        expect(a.diffIndexes).not.toHaveBeenCalled();
+        expect(jsonEvent(a.h, 'result')).toMatchObject({
+          status: 'failed',
+          writesAttempted: false,
+          error: { code: 'DIRECT_CONNECTION_UNSUPPORTED' },
+        });
+        expect(output(a.h)).not.toContain(a.uri);
+      } else {
+        expect(a.register).toHaveBeenCalledTimes(SYNC_INDEX_SCHEMAS.length);
+        expect(a.listCollections).toHaveBeenCalled();
+        expect(a.diffIndexes).toHaveBeenCalled();
+      }
     },
   );
 
@@ -1829,6 +1882,8 @@ describe('sync-indexes registry and argument isolation', () => {
           timeoutMS: 65000,
           timeoutMode: 'cursorLifetime',
           promoteValues: true,
+          promoteLongs: true,
+          useBigInt64: false,
         },
       );
       expect(closeIndexCursor).toHaveBeenCalledTimes(cursorCount);
@@ -2190,190 +2245,432 @@ function isolatedMain(args: string[]) {
   );
 }
 
-describe('sync-indexes BSON numeric decoding (offline)', () => {
-  const sessionIndexes: mongo.IndexDescriptionInfo[] = [
-    idIndex,
-    { name: 'expiresAt_1', key: { expiresAt: 1 }, expireAfterSeconds: 0 },
-    { name: 'token_1', key: { token: 1 }, unique: true },
-    { name: 'userId_1', key: { userId: 1 } },
-  ];
+type ComparisonIndex = Omit<mongo.IndexDescriptionInfo, 'key'> & {
+  key: Record<string, unknown>;
+};
 
-  it.each([
-    { args: ['--dry-run'], status: 'preview' },
-    { args: [...apply, '--allow-drop'], status: 'completed' },
-  ])(
-    'keeps matching indexes out of the $status plan',
-    async ({ args, status }) => {
-      const h = harness();
-      const uri = adminUri + '?promoteValues=false';
-      const deps: Partial<SyncIndexesDependencies> = {
-        ...h.deps,
-        env: { NODE_ENV: 'test', MONGO_ADMIN_URI: uri },
-      };
-      delete deps.createConnection;
+const sessionUserIndex = { name: 'userId_1', key: { userId: 1 } };
+const matchingSessionIndexes: ComparisonIndex[] = [
+  idIndex,
+  { name: 'expiresAt_1', key: { expiresAt: 1 }, expireAfterSeconds: 0 },
+  { name: 'token_1', key: { token: 1 }, unique: true },
+  sessionUserIndex,
+];
 
-      const fixtureBytes = new Map<string, Uint8Array>();
-      const sessionReads = {
-        raw: [] as mongo.IndexDescriptionInfo[][],
-        mongoose: [] as mongo.IndexDescriptionInfo[][],
-      };
-      const rawOptions: (mongo.RunCursorCommandOptions | undefined)[] = [];
-      const forbidden = jest.fn(() => {
-        throw new Error('UNEXPECTED_WRITE');
-      });
-      let client: mongo.MongoClient | undefined;
+function withSessionUserIndex(index: ComparisonIndex) {
+  return [...matchingSessionIndexes.slice(0, -1), index];
+}
 
-      function decode(
-        name: string,
-        cursor: mongo.AbstractCursor,
-        path: keyof typeof sessionReads,
-      ) {
-        const bytes = fixtureBytes.get(name);
-        // Use the real cursor's resolved decoder settings without iterating the network cursor.
-        const options: unknown = Reflect.get(cursor, 'deserializationOptions');
-        if (!bytes || !options || typeof options !== 'object') {
-          throw new Error('EXPECTED_BSON_FIXTURE_AND_CURSOR_OPTIONS');
-        }
-        const decoded: unknown = mongoose.mongo.BSON.deserialize(
-          bytes,
-          options,
-        ).indexes;
-        if (!Array.isArray(decoded)) throw new Error('EXPECTED_INDEX_METADATA');
-        const indexes = decoded as mongo.IndexDescriptionInfo[];
-        if (name === 'sessions') sessionReads[path].push(indexes);
-        return indexes;
-      }
+function sessionUserDeclaration(schema: Schema): SyncIndexDefinition {
+  const index = schema.indexes().find(([key]) => Object.hasOwn(key, 'userId'));
+  if (!index) throw new Error('EXPECTED_SESSION_USER_INDEX');
+  return index;
+}
 
-      jest
-        .mocked(mongoose.createConnection)
-        .mockImplementationOnce(
-          (receivedUri?: string, receivedOptions?: mongoose.ConnectOptions) => {
-            if (!receivedUri || !receivedOptions) {
-              throw new Error('EXPECTED_CONNECTION_ARGUMENTS');
-            }
-            const { autoCreate, autoIndex, ...driverOptions } = receivedOptions;
-            expect([autoCreate, autoIndex]).toEqual([false, false]);
-            const driverClient = new mongoose.mongo.MongoClient(
-              receivedUri,
-              driverOptions,
-            );
-            client = driverClient;
-            const driverDb = driverClient.db();
-            const native = new mongoose.Connection();
-            Object.defineProperty(native, 'model', {
-              value: (name: string, schema: Schema) => {
-                const model = disconnectedModel(name, schema);
-                const collection = driverDb.collection(model.collection.name);
-                const indexes =
-                  name === 'Session'
-                    ? sessionIndexes
-                    : [
-                        idIndex,
-                        ...schema.indexes().map(([key, options], index) => ({
-                          ...options,
-                          key,
-                          name: options.name ?? 'fixture_' + index,
-                        })),
-                      ];
-                fixtureBytes.set(
-                  collection.collectionName,
-                  mongoose.mongo.BSON.serialize({ indexes }),
-                );
+function realComparisonHarness(
+  suffix = '',
+  fixture: {
+    sessionIndexes?: ComparisonIndex[];
+    comparisonIndexes?: ComparisonIndex[];
+    recheckedIndexes?: ComparisonIndex[];
+    configureSession?: (schema: Schema) => void;
+    missingUserIndex?: boolean;
+  } = {},
+) {
+  const h = harness();
+  const uri = adminUri + suffix;
+  const deps: Partial<SyncIndexesDependencies> = {
+    ...h.deps,
+    env: { NODE_ENV: 'test', MONGO_ADMIN_URI: uri },
+  };
+  delete deps.createConnection;
+
+  const { BSON } = mongoose.mongo;
+  const fixtureBytes = new Map<string, Uint8Array>();
+  const comparisonBytes =
+    fixture.comparisonIndexes &&
+    BSON.serialize({ indexes: fixture.comparisonIndexes });
+  const recheckedBytes =
+    fixture.recheckedIndexes &&
+    BSON.serialize({ indexes: fixture.recheckedIndexes });
+  const sessionReads = {
+    raw: [] as mongo.IndexDescriptionInfo[][],
+    mongoose: [] as mongo.IndexDescriptionInfo[][],
+  };
+  const descendingReads = new Set<keyof typeof sessionReads>();
+  const rawOptions: (mongo.RunCursorCommandOptions | undefined)[] = [];
+  const forbidden = jest.fn(() => {
+    throw new Error('UNEXPECTED_WRITE');
+  });
+  let userDiff:
+    | jest.SpyInstance<
+        Promise<mongoose.IndexesDiff>,
+        [options?: Record<string, unknown>]
+      >
+    | undefined;
+  let client: mongo.MongoClient | undefined;
+
+  function decode(
+    name: string,
+    cursor: mongo.AbstractCursor,
+    source: keyof typeof sessionReads,
+  ) {
+    let bytes = fixtureBytes.get(name);
+    if (name === 'sessions') {
+      if (source === 'mongoose' && comparisonBytes) bytes = comparisonBytes;
+      if (source === 'raw' && recheckedBytes && sessionReads.raw.length)
+        bytes = recheckedBytes;
+    }
+    // Read the real driver's decoder settings without iterating a network cursor.
+    const options: unknown = Reflect.get(cursor, 'deserializationOptions');
+    if (!bytes || !options || typeof options !== 'object')
+      throw new Error('EXPECTED_BSON_FIXTURE_AND_CURSOR_OPTIONS');
+    const decoded: unknown = BSON.deserialize(bytes, options).indexes;
+    if (!Array.isArray(decoded)) throw new Error('EXPECTED_INDEX_METADATA');
+    const indexes = decoded as mongo.IndexDescriptionInfo[];
+    if (name === 'sessions') sessionReads[source].push(indexes);
+    if (indexes.some(({ key }) => Object.values(key).includes(-1)))
+      descendingReads.add(source);
+    return indexes;
+  }
+
+  function run(args: readonly string[]) {
+    jest
+      .mocked(mongoose.createConnection)
+      .mockImplementationOnce(
+        (receivedUri?: string, receivedOptions?: mongoose.ConnectOptions) => {
+          if (!receivedUri || !receivedOptions)
+            throw new Error('EXPECTED_CONNECTION_ARGUMENTS');
+          const { autoCreate, autoIndex, ...driverOptions } = receivedOptions;
+          expect([autoCreate, autoIndex]).toEqual([false, false]);
+          const driverClient = new mongoose.mongo.MongoClient(
+            receivedUri,
+            driverOptions,
+          );
+          client = driverClient;
+          const driverDb = driverClient.db();
+          const native = new mongoose.Connection();
+          Object.defineProperty(native, 'model', {
+            value: (name: string, schema: Schema) => {
+              const model = disconnectedModel(name, schema);
+              if (name === 'Session') fixture.configureSession?.(model.schema);
+              const collection = driverDb.collection(model.collection.name);
+              let indexes: ComparisonIndex[];
+              if (name === 'Session') {
+                indexes = fixture.sessionIndexes ?? matchingSessionIndexes;
+              } else if (name === 'User' && fixture.missingUserIndex) {
+                indexes = [idIndex];
+                userDiff = jest.spyOn(model, 'diffIndexes');
+              } else {
+                indexes = [
+                  idIndex,
+                  ...schema.indexes().map(([key, options], index) => ({
+                    ...options,
+                    key,
+                    name: options.name ?? 'fixture_' + index,
+                  })),
+                ];
+              }
+              fixtureBytes.set(
+                collection.collectionName,
+                BSON.serialize({ indexes }),
+              );
+              jest.spyOn(model, 'listIndexes').mockImplementation(async () => {
+                const cursor = collection.listIndexes();
+                try {
+                  return decode(collection.collectionName, cursor, 'mongoose');
+                } finally {
+                  await cursor.close();
+                }
+              });
+              jest.spyOn(model, 'cleanIndexes').mockImplementation(forbidden);
+              jest.spyOn(model, 'createIndexes').mockImplementation(forbidden);
+              return model;
+            },
+          });
+          Object.defineProperty(native, 'db', {
+            value: {
+              databaseName: driverDb.databaseName,
+              listCollections: ({ name }: { name: string }) => ({
+                next: () =>
+                  Promise.resolve({ name, type: 'collection', options: {} }),
+                close: () => Promise.resolve(),
+              }),
+              runCursorCommand: (
+                command: mongo.Document,
+                options?: mongo.RunCursorCommandOptions,
+              ) => {
+                const name: unknown = command.listIndexes;
+                if (typeof name !== 'string')
+                  throw new Error('EXPECTED_LIST_INDEXES');
+                rawOptions.push(options);
+                const cursor = driverDb.runCursorCommand(command, options);
                 jest
-                  .spyOn(model, 'listIndexes')
-                  .mockImplementation(async () => {
-                    const cursor = collection.listIndexes();
-                    try {
-                      return decode(
-                        collection.collectionName,
-                        cursor,
-                        'mongoose',
-                      );
-                    } finally {
-                      await cursor.close();
-                    }
-                  });
-                jest.spyOn(model, 'cleanIndexes').mockImplementation(forbidden);
-                jest
-                  .spyOn(model, 'createIndexes')
-                  .mockImplementation(forbidden);
-                return model;
+                  .spyOn(cursor, 'toArray')
+                  .mockImplementation(() =>
+                    Promise.resolve(decode(name, cursor, 'raw')),
+                  );
+                return cursor;
               },
-            });
-            Object.defineProperty(native, 'db', {
-              value: {
-                databaseName: driverDb.databaseName,
-                listCollections: ({ name }: { name: string }) => ({
-                  next: () =>
-                    Promise.resolve({ name, type: 'collection', options: {} }),
-                  close: () => Promise.resolve(),
-                }),
-                runCursorCommand: (
-                  command: mongo.Document,
-                  options?: mongo.RunCursorCommandOptions,
-                ) => {
-                  const name: unknown = command.listIndexes;
-                  if (typeof name !== 'string')
-                    throw new Error('EXPECTED_LIST_INDEXES');
-                  rawOptions.push(options);
-                  const cursor = driverDb.runCursorCommand(command, options);
-                  jest
-                    .spyOn(cursor, 'toArray')
-                    .mockImplementation(() =>
-                      Promise.resolve(decode(name, cursor, 'raw')),
-                    );
-                  return cursor;
-                },
-                createCollection: forbidden,
-              },
-            });
-            jest.spyOn(native, 'asPromise').mockResolvedValue(native);
-            jest.spyOn(native, 'getClient').mockReturnValue(driverClient);
-            jest
-              .spyOn(native, 'close')
-              .mockImplementation(() => driverClient.close());
-            return native;
-          },
-        );
-
-      expect(await runSyncIndexesCli(args, deps)).toBe(0);
-      expect(mongoose.createConnection).toHaveBeenLastCalledWith(
-        uri,
-        expect.objectContaining({ promoteValues: true }),
+              createCollection: forbidden,
+            },
+          });
+          jest.spyOn(native, 'asPromise').mockResolvedValue(native);
+          jest.spyOn(native, 'getClient').mockReturnValue(driverClient);
+          jest
+            .spyOn(native, 'close')
+            .mockImplementation(() => driverClient.close());
+          return native;
+        },
       );
-      expect(client?.options).toHaveProperty('promoteValues', true);
-      expect(rawOptions.length).toBeGreaterThan(0);
-      for (const options of rawOptions) {
-        expect(options).toMatchObject({
-          promoteValues: true,
+    return runSyncIndexesCli(args, deps);
+  }
+
+  return {
+    h,
+    uri,
+    sessionReads,
+    descendingReads,
+    rawOptions,
+    forbidden,
+    userDiff: () => userDiff,
+    clientOptions: () => client?.options,
+    run,
+  };
+}
+
+const comparisonModes = [
+  { args: ['--dry-run'], status: 'preview', reads: 1 },
+  { args: [...apply, '--allow-drop'], status: 'completed', reads: 4 },
+];
+
+function expectEmptyComparison(
+  a: ReturnType<typeof realComparisonHarness>,
+  status: string,
+) {
+  expect(jsonEvent(a.h, 'plan')).toMatchObject({
+    models: SYNC_INDEX_SCHEMAS.map(({ name }) => ({
+      model: name,
+      createCollection: false,
+      toDrop: [],
+      toCreate: [],
+    })),
+  });
+  expect(jsonEvent(a.h, 'result')).toMatchObject({
+    status,
+    writesAttempted: false,
+  });
+  expect(a.forbidden).not.toHaveBeenCalled();
+}
+
+describe('sync-indexes BSON numeric decoding (offline)', () => {
+  it.each(
+    [
+      '?promoteValues=false',
+      '?promoteLongs=false',
+      '?useBigInt64=true',
+    ].flatMap((suffix) => comparisonModes.map((mode) => ({ suffix, ...mode }))),
+  )(
+    'keeps matching indexes out of the $status plan with $suffix',
+    async ({ args, status, suffix, reads }) => {
+      const a = realComparisonHarness(suffix, {
+        sessionIndexes: withSessionUserIndex({
+          ...sessionUserIndex,
+          key: { userId: mongoose.mongo.BSON.Long.fromNumber(1) },
+        }),
+      });
+      const options = {
+        promoteValues: true,
+        promoteLongs: true,
+        useBigInt64: false,
+      };
+
+      expect(await a.run(args)).toBe(0);
+      expect(mongoose.createConnection).toHaveBeenLastCalledWith(
+        a.uri,
+        expect.objectContaining(options),
+      );
+      expect(a.clientOptions()).toMatchObject(options);
+      expect(a.rawOptions.length).toBeGreaterThan(0);
+      for (const rawOptions of a.rawOptions) {
+        expect(rawOptions).toMatchObject({
+          ...options,
           timeoutMS: 65000,
           timeoutMode: 'cursorLifetime',
         });
       }
-      for (const reads of Object.values(sessionReads)) {
-        expect(reads.length).toBeGreaterThan(0);
-        for (const indexes of reads) {
-          expect(indexes).toEqual(sessionIndexes);
+      for (const snapshots of Object.values(a.sessionReads)) {
+        expect(snapshots).toHaveLength(reads);
+        for (const indexes of snapshots) {
+          expect(indexes).toEqual(matchingSessionIndexes);
           const ttlIndex = indexes.find(({ name }) => name === 'expiresAt_1');
           expect(ttlIndex?.key.expiresAt).toBe(1);
           expect(ttlIndex?.expireAfterSeconds).toBe(0);
         }
       }
-      expect(jsonEvent(h, 'plan')).toMatchObject({
-        models: SYNC_INDEX_SCHEMAS.map(({ name }) => ({
-          model: name,
-          createCollection: false,
-          toDrop: [],
-          toCreate: [],
-        })),
-      });
-      expect(jsonEvent(h, 'result')).toMatchObject({
-        status,
-        writesAttempted: false,
-      });
-      expect(forbidden).not.toHaveBeenCalled();
+      expect(a.descendingReads).toEqual(new Set(['raw', 'mongoose']));
+      expectEmptyComparison(a, status);
     },
   );
+
+  it.each(['raw metadata', 'Mongoose comparison', 'Schema'] as const)(
+    'rejects unsupported index directions from %s before any model writes',
+    async (source) => {
+      const decimalIndexes = withSessionUserIndex({
+        ...sessionUserIndex,
+        key: { userId: mongoose.mongo.BSON.Decimal128.fromString('1') },
+      });
+      const a = realComparisonHarness('', {
+        missingUserIndex: true,
+        ...(source === 'raw metadata'
+          ? { sessionIndexes: decimalIndexes }
+          : {}),
+        ...(source === 'Mongoose comparison'
+          ? { comparisonIndexes: decimalIndexes }
+          : {}),
+        ...(source === 'Schema'
+          ? {
+              configureSession: (schema: Schema) => {
+                const [key] = sessionUserDeclaration(schema);
+                Reflect.set(key, 'userId', 2);
+              },
+            }
+          : {}),
+      });
+
+      expect(await a.run([...apply, '--allow-drop'])).toBe(1);
+      const userDiff = a.userDiff();
+      expect(userDiff).toHaveBeenCalledTimes(1);
+      await expect(userDiff?.mock.results[0]?.value).resolves.toMatchObject({
+        toCreate: [[{ email: 1 }, { unique: true }]],
+      });
+      expect(a.sessionReads.raw).toHaveLength(1);
+      expect(a.sessionReads.mongoose).toHaveLength(
+        source === 'Mongoose comparison' ? 1 : 0,
+      );
+      expect(jsonEvent(a.h, 'result')).toMatchObject({
+        status: 'failed',
+        writesAttempted: false,
+        error: { code: 'INDEX_KEY_DIRECTION_UNSUPPORTED' },
+      });
+      expect(a.forbidden).not.toHaveBeenCalled();
+    },
+  );
+
+  it('preserves hashed string directions in metadata and Schema', async () => {
+    const a = realComparisonHarness('', {
+      sessionIndexes: withSessionUserIndex({
+        name: 'userId_hashed',
+        key: { userId: 'hashed' },
+      }),
+      configureSession: (schema) => {
+        const [key] = sessionUserDeclaration(schema);
+        key.userId = 'hashed';
+      },
+    });
+
+    expect(await a.run(['--dry-run'])).toBe(0);
+    expectEmptyComparison(a, 'preview');
+  });
+});
+
+describe('sync-indexes sparse comparison (offline)', () => {
+  it.each(
+    [
+      { dbSparse: false, schemaSparse: undefined },
+      { dbSparse: undefined, schemaSparse: false },
+      { dbSparse: false, schemaSparse: false },
+    ].flatMap((sparse) =>
+      comparisonModes.map((mode) => ({ ...sparse, ...mode })),
+    ),
+  )(
+    'treats sparse=$dbSparse and Schema sparse=$schemaSparse as equivalent in $status',
+    async ({ args, status, reads, dbSparse, schemaSparse }) => {
+      const index = {
+        ...sessionUserIndex,
+        ...(dbSparse === undefined ? {} : { sparse: dbSparse }),
+      };
+      const sessionIndexes = withSessionUserIndex(index);
+      const original = structuredClone(sessionIndexes);
+      let declaration: SyncIndexDefinition | undefined;
+      const a = realComparisonHarness('', {
+        sessionIndexes,
+        configureSession: (schema) => {
+          declaration = sessionUserDeclaration(schema);
+          if (schemaSparse !== undefined) declaration[1].sparse = schemaSparse;
+        },
+      });
+
+      expect(await a.run(args)).toBe(0);
+      expectEmptyComparison(a, status);
+      expect(sessionIndexes).toEqual(original);
+      expect(declaration?.[1].sparse).toBe(schemaSparse);
+      for (const snapshots of Object.values(a.sessionReads)) {
+        expect(snapshots).toHaveLength(reads);
+        for (const indexes of snapshots) expect(indexes).toEqual(original);
+      }
+      if (status === 'completed') {
+        const finalIndexes: unknown = expect.arrayContaining([index]);
+        expect(jsonEvent(a.h, 'result')).toHaveProperty(
+          'models',
+          expect.arrayContaining([
+            expect.objectContaining({
+              model: 'Session',
+              terminalState: 'verified',
+              finalIndexes,
+            }),
+          ]),
+        );
+      }
+    },
+  );
+
+  it.each([false, true])(
+    'retains the distinction for sparse:true with DB sparse=%s',
+    async (dbSparse) => {
+      const index = { ...sessionUserIndex, sparse: dbSparse };
+      const a = realComparisonHarness('', {
+        sessionIndexes: withSessionUserIndex(index),
+        configureSession: (schema) => {
+          sessionUserDeclaration(schema)[1].sparse = !dbSparse;
+        },
+      });
+
+      expect(await a.run(['--dry-run'])).toBe(0);
+      expect(jsonEvent(a.h, 'plan')).toHaveProperty(
+        'models',
+        expect.arrayContaining([
+          expect.objectContaining({
+            model: 'Session',
+            toDrop: [index],
+            toCreate: [
+              { key: { userId: 1 }, options: dbSparse ? {} : { sparse: true } },
+            ],
+          }),
+        ]),
+      );
+      expect(a.forbidden).not.toHaveBeenCalled();
+    },
+  );
+
+  it('stops when the original sparse flag drifts despite equivalent comparison', async () => {
+    const a = realComparisonHarness('', {
+      sessionIndexes: withSessionUserIndex({
+        ...sessionUserIndex,
+        sparse: false,
+      }),
+      recheckedIndexes: matchingSessionIndexes,
+    });
+
+    expect(await a.run([...apply, '--allow-drop'])).toBe(1);
+    expect(jsonEvent(a.h, 'result')).toMatchObject({
+      status: 'failed',
+      writesAttempted: false,
+      error: { code: 'INDEX_PLAN_DRIFT' },
+    });
+    expect(a.sessionReads.raw).toHaveLength(2);
+    expect(a.forbidden).not.toHaveBeenCalled();
+  });
 });
 
 describe('sync-indexes isolated direct entry (no environment files or network)', () => {
