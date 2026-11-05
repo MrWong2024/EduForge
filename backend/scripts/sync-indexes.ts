@@ -167,9 +167,35 @@ function assertSupportedIndexDirections(key: Record<string, unknown>) {
   }
 }
 
-function copyComparisonOptions<T extends { sparse?: boolean }>(options: T): T {
+function normalizeSubmissionPartialFilter(filter: unknown) {
+  if (!isDocument(filter)) return;
+  const keys = Reflect.ownKeys(filter);
+  if (keys.length !== 1 || keys[0] !== 'classroomTaskId') return;
+
+  const condition = filter.classroomTaskId;
+  if (condition === null) return { classroomTaskId: null };
+  if (!isDocument(condition)) return;
+  const operators = Reflect.ownKeys(condition);
+  if (operators.length !== 1) return;
+
+  if (operators[0] === '$eq' && condition.$eq === null) {
+    return { classroomTaskId: null };
+  }
+  if (
+    operators[0] === '$type' &&
+    (condition.$type === 'objectId' || condition.$type === 7)
+  ) {
+    return { classroomTaskId: { $type: 'objectId' } };
+  }
+}
+
+function copyComparisonOptions<
+  T extends { sparse?: boolean; partialFilterExpression?: unknown },
+>(options: T): T {
   const copy = { ...options };
   if (copy.sparse === false) delete copy.sparse;
+  const filter = normalizeSubmissionPartialFilter(copy.partialFilterExpression);
+  if (filter !== undefined) copy.partialFilterExpression = filter;
   return copy;
 }
 

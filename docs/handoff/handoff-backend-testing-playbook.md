@@ -113,6 +113,8 @@ npm.cmd run test -- --runInBand --runTestsByPath ./scripts/import-users.spec.ts 
 
 sparse 回归使用真实 Mongoose 差异计算验证缺省与 `false` 的双向等价、两侧均为 `false` 的一致性及 `true` 的差异，并核对原始快照和读取次数。直连门禁回归使用未连接的真实驱动对象取得有效值，以连接和模型替身验证拒绝发生在实际库名检查之后、模型注册和盘点之前，并核对零写入调用和连接收尾。
 
+部分索引回归使用正式 Submission Schema 克隆与真实 Mongoose 差异计算。两组等价写法在数据库和 Schema 两侧互换，核对 `--dry-run` 和带 `--allow-drop` 的 apply 均为空计划、零 DDL 调用。额外字段、额外操作符和其他类型值仍产生差异。回归也核对原始对象、待删定义、回读值及读取次数，并验证仅原始写法变化也会触发写前漂移拒绝。
+
 集合类型回归用合成元数据检查预检零写入、集合缺失时的模拟创建、类型漂移及写后发现类型不符时的失败报告。模拟连接、BSON 解码和模拟 DDL 属于离线证据。
 
 从 `backend` 目录先执行 discovery，结果须恰好为 `scripts/sync-indexes.spec.ts`。通过后使用同一文件路径正式运行。
@@ -122,7 +124,7 @@ npm.cmd run test -- --listTests --runInBand --runTestsByPath ./scripts/sync-inde
 npm.cmd run test -- --runInBand --runTestsByPath ./scripts/sync-indexes.spec.ts
 ```
 
-离线证据用于验证控制流、调用参数和操作边界。真实 MongoDB 的元数据与兼容性、dry-run 前后元数据一致性、索引增删与选项、服务端写确认、collation 继承、特殊索引行为、复制延迟、故障终态及实际慢响应超时行为均为 `not_executed`，归属后续“sync-indexes 隔离数据库集成验收”。
+离线证据用于验证控制流、调用参数和操作边界。真实 MongoDB 的元数据与兼容性、dry-run 前后元数据一致性、索引增删与选项、服务端写确认、collation 继承、特殊索引行为、复制延迟、故障终态及实际慢响应超时行为均为 `not_executed`。真实部分索引定义、实际唯一约束空窗及并发写入也为 `not_executed`。上述实测归属后续“sync-indexes 隔离数据库集成验收”。
 
 ## 5. Database Purpose 与 Browser Process Roles
 

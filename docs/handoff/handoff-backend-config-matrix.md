@@ -65,12 +65,17 @@ npm run sync-indexes -- --apply --confirm-db <精确库名> --allow-drop
 - 连接就绪并确认实际库名后、注册模型前，`--apply` 检查驱动解析出的有效写确认配置。有效 `w=0` 时以 `UNACKNOWLEDGED_WRITE_CONCERN` 拒绝，仍可用无参数或 `--dry-run` 只读预览。其余写确认配置按原值生效。
 - 先用 `--dry-run` 审阅计划，再按需显式使用 `--apply --confirm-db <精确库名>`，最后独立读取实际集合和索引元数据，通过 `listCollections` 和 `listIndexes` 的返回结果逐项对照预期定义。计划使用 Mongoose `diffIndexes` 计算，列出模型、集合、待建集合、待删索引的名称与定义以及待建索引的定义。索引定义保留复合键顺序和 `unique`、TTL、`partialFilterExpression`、`sparse`、`collation` 等选项。apply 重新计算并输出本次计划，包含删除时须同传 `--allow-drop`，它只授权本次计划的删除。执行范围固定为本次计划，缺失集合只在 apply 时按计划显式创建。
 - Mongoose 差异比较将数据库索引与 Schema 索引比较副本中的布尔值 `sparse: false` 视为缺省。`sparse: true` 仍有独立语义。等价的建索引定义可省略 `sparse: false`，原始索引元数据、计划快照和回读证据保留实际值。
+- 部分索引的 `partialFilterExpression` 须为顶层只有自有键 `classroomTaskId` 的普通文档，才按以下两组规则比较：
+  - `{ classroomTaskId: null }` 与 `{ classroomTaskId: { $eq: null } }` 等价，统一为前者。
+  - `{ classroomTaskId: { $type: 'objectId' } }` 与 `{ classroomTaskId: { $type: 7 } }` 等价，统一为前者，其中 `7` 必须为 JS number。
+
+  使用内层文档时，该文档必须是只含对应自有键 `$eq` 或 `$type` 的普通文档。带额外字段、额外操作符、其他类型值或其他表达式形状时，仍沿用原有比较规则。归一化作用于数据库索引和 Schema 索引的比较副本，等价创建定义可采用规范形式。原始元数据、Schema 声明、冻结快照、待删索引和 `finalIndexes` 保留原始写法。原始过滤器写法在写前复查时变化，即使两种写法语义等价，仍触发 `INDEX_PLAN_DRIFT`。
 - 按集合名执行一次完整的 `listCollections` 查询，同时读取存在性、类型和默认 `collation`，随后关闭游标。仅返回 `null` 时判为不存在。已存在对象必须为 `type: "collection"`。时序集合、视图和其他非空类型字符串以 `COLLECTION_TYPE_UNSUPPORTED` 拒绝。类型缺失、为空字符串或为非字符串时，以 `COLLECTION_METADATA_INVALID` 拒绝。类型和默认规则在计划、复查和回读时均需校验，新建集合在创建索引前也须核对。
 - 完整有效的集合元数据中，省略 `options.collation` 或显式指定 `locale: "simple"` 均按 simple 处理。默认非 simple 时在计算差异前以 `COLLECTION_COLLATION_UNSUPPORTED` 拒绝。读取失败或元数据无法判定时停止。集合默认 simple 时，单个索引可带非 simple 的 `collation`，仍由 Mongoose 计算受控变更。
 - 初始计划、首次写入前的全量复查、逐模型复查和写入后的回读都在计算差异前检查索引。实际元数据含 `textIndexVersion`、`weights` 或键值 `"text"`，或 Schema 展开后声明了全文索引，均以 `TEXT_INDEX_UNSUPPORTED` 拒绝。实际索引或展开后的 Schema 索引选项为 `hidden: true` 或 `prepareUnique: true` 时，分别以 `HIDDEN_INDEX_UNSUPPORTED` 或 `PREPARE_UNIQUE_UNSUPPORTED` 拒绝。两项选项缺省或为 `false` 时允许。上述元数据限制覆盖无参数、`--dry-run` 和 `--apply`，`--allow-drop` 也不能放行。初始盘点拒绝时，所有模型都保持零写入。
 - 原生盘点和 Mongoose 比较均检查索引键方向，覆盖实际索引和 Schema 声明。数值方向只接受 JS number 的 `1` 与 `-1`，包括 `hashed` 在内的字符串方向沿用现有处理规则。Decimal128、残留的 Long 或 Int32 对象、bigint 及其他不支持的方向表示以 `INDEX_KEY_DIRECTION_UNSUPPORTED` 拒绝。初始全量预检拒绝时所有模型零写入，复查或回读拒绝时停止后续写入并进入失败盘点。
 - 每次原生索引盘点以 `includeBuildUUIDs: true` 读取，发现构建中的索引即停止正常计划或核验。游标使用 `timeoutMode: "cursorLifetime"`，沿用连接配置的 `timeoutMS: 65000` 作为单次游标的生命周期期限，读取结束后关闭游标。整条 CLI 的执行时间可超过这一期限。
-- 同一模型按固定计划逐项等待删除完成，再按计划顺序逐项等待创建完成。首个删除或创建失败即停止本模型剩余操作和后续模型写入。索引同步可能部分生效。执行失败、计划漂移或回读异常时尽力盘点已触及模型，读取成功标记为 `observed`，其 `finalIndexes` 仅代表当时观察到的快照。盘点失败时标记为 `unconfirmed` 并清除旧快照，集合类型门禁拒绝也按盘点失败处理。网络超时后，服务端操作仍可能完成。由操作者重新预览并决定后续操作。同库索引维护须串行，TTL 索引变更可影响文档的自动过期行为。
+- 同一模型按固定计划逐项等待删除完成，再按计划顺序逐项等待创建完成。实际索引替换分开删除和创建，替换唯一索引期间可能存在约束空窗。首个删除或创建失败即停止本模型剩余操作和后续模型写入。索引同步可能部分生效。执行失败、计划漂移或回读异常时尽力盘点已触及模型，读取成功标记为 `observed`，其 `finalIndexes` 仅代表当时观察到的快照。盘点失败时标记为 `unconfirmed` 并清除旧快照，集合类型门禁拒绝也按盘点失败处理。网络超时后，服务端操作仍可能完成。由操作者重新预览并决定后续操作。同库索引维护须串行，TTL 索引变更可影响文档的自动过期行为。
 - `verified` 表示通过普通模式当前支持范围内的回读校验。Mongoose 的差异计算仍可能忽略额外的单字段 `{ _id: 'hashed' }` 索引（例如 `_id_hashed`），空计划和 `verified` 均不能证明已识别所有额外索引。独立复核发现此类索引时，应先确认其用途，尤其是否用于分片，不能依据普通模式结果直接删除。
 
 ### import-users 独立导入 CLI

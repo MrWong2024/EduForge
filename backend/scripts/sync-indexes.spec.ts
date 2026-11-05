@@ -1,6 +1,7 @@
 import { spawnSync } from 'node:child_process';
 import { resolve } from 'node:path';
 import mongoose, { type mongo, type Schema } from 'mongoose';
+import { SubmissionSchema } from '../src/modules/learning-tasks/schemas/submission.schema';
 import {
   registerSyncIndexModels,
   runSyncIndexesCli,
@@ -2267,13 +2268,25 @@ function sessionUserDeclaration(schema: Schema): SyncIndexDefinition {
   return index;
 }
 
+function comparisonIndexesFor(schema: Schema): ComparisonIndex[] {
+  return [
+    idIndex,
+    ...schema.indexes().map(([key, options], index) => ({
+      ...options,
+      key,
+      name: options.name ?? 'fixture_' + index,
+    })),
+  ];
+}
+
 function realComparisonHarness(
   suffix = '',
   fixture: {
-    sessionIndexes?: ComparisonIndex[];
+    modelName?: 'Session' | 'Submission';
+    indexes?: ComparisonIndex[];
     comparisonIndexes?: ComparisonIndex[];
     recheckedIndexes?: ComparisonIndex[];
-    configureSession?: (schema: Schema) => void;
+    configureSchema?: (schema: Schema) => void;
     missingUserIndex?: boolean;
   } = {},
 ) {
@@ -2293,11 +2306,13 @@ function realComparisonHarness(
   const recheckedBytes =
     fixture.recheckedIndexes &&
     BSON.serialize({ indexes: fixture.recheckedIndexes });
-  const sessionReads = {
+  const trackedModel = fixture.modelName ?? 'Session';
+  let trackedCollection: string | undefined;
+  const indexReads = {
     raw: [] as mongo.IndexDescriptionInfo[][],
     mongoose: [] as mongo.IndexDescriptionInfo[][],
   };
-  const descendingReads = new Set<keyof typeof sessionReads>();
+  const descendingReads = new Set<keyof typeof indexReads>();
   const rawOptions: (mongo.RunCursorCommandOptions | undefined)[] = [];
   const forbidden = jest.fn(() => {
     throw new Error('UNEXPECTED_WRITE');
@@ -2313,12 +2328,12 @@ function realComparisonHarness(
   function decode(
     name: string,
     cursor: mongo.AbstractCursor,
-    source: keyof typeof sessionReads,
+    source: keyof typeof indexReads,
   ) {
     let bytes = fixtureBytes.get(name);
-    if (name === 'sessions') {
+    if (name === trackedCollection) {
       if (source === 'mongoose' && comparisonBytes) bytes = comparisonBytes;
-      if (source === 'raw' && recheckedBytes && sessionReads.raw.length)
+      if (source === 'raw' && recheckedBytes && indexReads.raw.length)
         bytes = recheckedBytes;
     }
     // Read the real driver's decoder settings without iterating a network cursor.
@@ -2328,7 +2343,7 @@ function realComparisonHarness(
     const decoded: unknown = BSON.deserialize(bytes, options).indexes;
     if (!Array.isArray(decoded)) throw new Error('EXPECTED_INDEX_METADATA');
     const indexes = decoded as mongo.IndexDescriptionInfo[];
-    if (name === 'sessions') sessionReads[source].push(indexes);
+    if (name === trackedCollection) indexReads[source].push(indexes);
     if (indexes.some(({ key }) => Object.values(key).includes(-1)))
       descendingReads.add(source);
     return indexes;
@@ -2353,23 +2368,21 @@ function realComparisonHarness(
           Object.defineProperty(native, 'model', {
             value: (name: string, schema: Schema) => {
               const model = disconnectedModel(name, schema);
-              if (name === 'Session') fixture.configureSession?.(model.schema);
               const collection = driverDb.collection(model.collection.name);
+              if (name === trackedModel) {
+                trackedCollection = collection.collectionName;
+                fixture.configureSchema?.(model.schema);
+              }
               let indexes: ComparisonIndex[];
-              if (name === 'Session') {
-                indexes = fixture.sessionIndexes ?? matchingSessionIndexes;
+              if (name === trackedModel && fixture.indexes) {
+                indexes = fixture.indexes;
+              } else if (name === 'Session') {
+                indexes = matchingSessionIndexes;
               } else if (name === 'User' && fixture.missingUserIndex) {
                 indexes = [idIndex];
                 userDiff = jest.spyOn(model, 'diffIndexes');
               } else {
-                indexes = [
-                  idIndex,
-                  ...schema.indexes().map(([key, options], index) => ({
-                    ...options,
-                    key,
-                    name: options.name ?? 'fixture_' + index,
-                  })),
-                ];
+                indexes = comparisonIndexesFor(schema);
               }
               fixtureBytes.set(
                 collection.collectionName,
@@ -2429,7 +2442,7 @@ function realComparisonHarness(
   return {
     h,
     uri,
-    sessionReads,
+    indexReads,
     descendingReads,
     rawOptions,
     forbidden,
@@ -2474,7 +2487,7 @@ describe('sync-indexes BSON numeric decoding (offline)', () => {
     'keeps matching indexes out of the $status plan with $suffix',
     async ({ args, status, suffix, reads }) => {
       const a = realComparisonHarness(suffix, {
-        sessionIndexes: withSessionUserIndex({
+        indexes: withSessionUserIndex({
           ...sessionUserIndex,
           key: { userId: mongoose.mongo.BSON.Long.fromNumber(1) },
         }),
@@ -2499,7 +2512,7 @@ describe('sync-indexes BSON numeric decoding (offline)', () => {
           timeoutMode: 'cursorLifetime',
         });
       }
-      for (const snapshots of Object.values(a.sessionReads)) {
+      for (const snapshots of Object.values(a.indexReads)) {
         expect(snapshots).toHaveLength(reads);
         for (const indexes of snapshots) {
           expect(indexes).toEqual(matchingSessionIndexes);
@@ -2522,15 +2535,13 @@ describe('sync-indexes BSON numeric decoding (offline)', () => {
       });
       const a = realComparisonHarness('', {
         missingUserIndex: true,
-        ...(source === 'raw metadata'
-          ? { sessionIndexes: decimalIndexes }
-          : {}),
+        ...(source === 'raw metadata' ? { indexes: decimalIndexes } : {}),
         ...(source === 'Mongoose comparison'
           ? { comparisonIndexes: decimalIndexes }
           : {}),
         ...(source === 'Schema'
           ? {
-              configureSession: (schema: Schema) => {
+              configureSchema: (schema: Schema) => {
                 const [key] = sessionUserDeclaration(schema);
                 Reflect.set(key, 'userId', 2);
               },
@@ -2544,8 +2555,8 @@ describe('sync-indexes BSON numeric decoding (offline)', () => {
       await expect(userDiff?.mock.results[0]?.value).resolves.toMatchObject({
         toCreate: [[{ email: 1 }, { unique: true }]],
       });
-      expect(a.sessionReads.raw).toHaveLength(1);
-      expect(a.sessionReads.mongoose).toHaveLength(
+      expect(a.indexReads.raw).toHaveLength(1);
+      expect(a.indexReads.mongoose).toHaveLength(
         source === 'Mongoose comparison' ? 1 : 0,
       );
       expect(jsonEvent(a.h, 'result')).toMatchObject({
@@ -2559,11 +2570,11 @@ describe('sync-indexes BSON numeric decoding (offline)', () => {
 
   it('preserves hashed string directions in metadata and Schema', async () => {
     const a = realComparisonHarness('', {
-      sessionIndexes: withSessionUserIndex({
+      indexes: withSessionUserIndex({
         name: 'userId_hashed',
         key: { userId: 'hashed' },
       }),
-      configureSession: (schema) => {
+      configureSchema: (schema) => {
         const [key] = sessionUserDeclaration(schema);
         key.userId = 'hashed';
       },
@@ -2594,8 +2605,8 @@ describe('sync-indexes sparse comparison (offline)', () => {
       const original = structuredClone(sessionIndexes);
       let declaration: SyncIndexDefinition | undefined;
       const a = realComparisonHarness('', {
-        sessionIndexes,
-        configureSession: (schema) => {
+        indexes: sessionIndexes,
+        configureSchema: (schema) => {
           declaration = sessionUserDeclaration(schema);
           if (schemaSparse !== undefined) declaration[1].sparse = schemaSparse;
         },
@@ -2605,7 +2616,7 @@ describe('sync-indexes sparse comparison (offline)', () => {
       expectEmptyComparison(a, status);
       expect(sessionIndexes).toEqual(original);
       expect(declaration?.[1].sparse).toBe(schemaSparse);
-      for (const snapshots of Object.values(a.sessionReads)) {
+      for (const snapshots of Object.values(a.indexReads)) {
         expect(snapshots).toHaveLength(reads);
         for (const indexes of snapshots) expect(indexes).toEqual(original);
       }
@@ -2630,8 +2641,8 @@ describe('sync-indexes sparse comparison (offline)', () => {
     async (dbSparse) => {
       const index = { ...sessionUserIndex, sparse: dbSparse };
       const a = realComparisonHarness('', {
-        sessionIndexes: withSessionUserIndex(index),
-        configureSession: (schema) => {
+        indexes: withSessionUserIndex(index),
+        configureSchema: (schema) => {
           sessionUserDeclaration(schema)[1].sparse = !dbSparse;
         },
       });
@@ -2655,7 +2666,7 @@ describe('sync-indexes sparse comparison (offline)', () => {
 
   it('stops when the original sparse flag drifts despite equivalent comparison', async () => {
     const a = realComparisonHarness('', {
-      sessionIndexes: withSessionUserIndex({
+      indexes: withSessionUserIndex({
         ...sessionUserIndex,
         sparse: false,
       }),
@@ -2668,7 +2679,184 @@ describe('sync-indexes sparse comparison (offline)', () => {
       writesAttempted: false,
       error: { code: 'INDEX_PLAN_DRIFT' },
     });
-    expect(a.sessionReads.raw).toHaveLength(2);
+    expect(a.indexReads.raw).toHaveLength(2);
+    expect(a.forbidden).not.toHaveBeenCalled();
+  });
+});
+
+type SubmissionIndexField = 'taskId' | 'classroomTaskId';
+
+const nullFilter = { classroomTaskId: null };
+const explicitNullFilter = { classroomTaskId: { $eq: null } };
+const objectIdFilter = { classroomTaskId: { $type: 'objectId' } };
+const numericObjectIdFilter = { classroomTaskId: { $type: 7 } };
+
+function isSubmissionAttemptIndex(
+  key: Record<string, unknown>,
+  field: SubmissionIndexField,
+) {
+  return Object.hasOwn(key, field) && key.attemptNo === 1;
+}
+
+function submissionIndexFixture(
+  field: SubmissionIndexField,
+  filter: mongo.Document,
+) {
+  const indexes = comparisonIndexesFor(SubmissionSchema);
+  const index = indexes.find(({ key }) => isSubmissionAttemptIndex(key, field));
+  if (!index) throw new Error('EXPECTED_SUBMISSION_ATTEMPT_INDEX');
+  index.partialFilterExpression = filter;
+  return { indexes, index };
+}
+
+describe('sync-indexes Submission partial filter comparison (offline)', () => {
+  const equivalents = [
+    {
+      label: 'null equality',
+      field: 'taskId',
+      canonical: nullFilter,
+      alternate: explicitNullFilter,
+    },
+    {
+      label: 'ObjectId type',
+      field: 'classroomTaskId',
+      canonical: objectIdFilter,
+      alternate: numericObjectIdFilter,
+    },
+  ] as const;
+
+  it.each(
+    equivalents.flatMap(({ label, field, canonical, alternate }) =>
+      [
+        { side: 'database', dbFilter: alternate, schemaFilter: canonical },
+        { side: 'Schema', dbFilter: canonical, schemaFilter: alternate },
+      ].flatMap((variant) =>
+        comparisonModes.map((mode) => ({ label, field, ...variant, ...mode })),
+      ),
+    ),
+  )(
+    'treats $label as equivalent with the alternate form in $side during $status',
+    async ({ field, dbFilter, schemaFilter, args, status, reads }) => {
+      const sharedDeclarations = structuredClone(SubmissionSchema.indexes());
+      const { indexes, index } = submissionIndexFixture(field, dbFilter);
+      const original = structuredClone(indexes);
+      const originalSchemaFilter = structuredClone(schemaFilter);
+      let declaration: SyncIndexDefinition | undefined;
+      const a = realComparisonHarness('', {
+        modelName: 'Submission',
+        indexes,
+        configureSchema: (schema) => {
+          declaration = schema
+            .indexes()
+            .find(([key]) => isSubmissionAttemptIndex(key, field));
+          if (!declaration) throw new Error('EXPECTED_SUBMISSION_DECLARATION');
+          declaration[1].partialFilterExpression = schemaFilter;
+        },
+      });
+
+      expect(await a.run(args)).toBe(0);
+      expectEmptyComparison(a, status);
+      expect(indexes).toEqual(original);
+      expect(SubmissionSchema.indexes()).toEqual(sharedDeclarations);
+      expect(declaration?.[1].partialFilterExpression).toBe(schemaFilter);
+      expect(declaration?.[1].partialFilterExpression).toEqual(
+        originalSchemaFilter,
+      );
+      for (const snapshots of Object.values(a.indexReads)) {
+        expect(snapshots).toHaveLength(reads);
+        for (const snapshot of snapshots) expect(snapshot).toEqual(original);
+      }
+      if (status === 'completed') {
+        const finalIndexes: unknown = expect.arrayContaining([index]);
+        expect(jsonEvent(a.h, 'result')).toHaveProperty(
+          'models',
+          expect.arrayContaining([
+            expect.objectContaining({
+              model: 'Submission',
+              terminalState: 'verified',
+              finalIndexes,
+            }),
+          ]),
+        );
+      }
+    },
+  );
+
+  it.each([
+    {
+      label: 'an additional top-level predicate',
+      field: 'taskId',
+      filter: { ...explicitNullFilter, attemptNo: { $gt: 1 } },
+      schemaFilter: nullFilter,
+    },
+    {
+      label: 'an additional nested operator',
+      field: 'taskId',
+      filter: { classroomTaskId: { $eq: null, $exists: true } },
+      schemaFilter: nullFilter,
+    },
+    {
+      label: 'a different BSON type',
+      field: 'classroomTaskId',
+      filter: { classroomTaskId: { $type: 'string' } },
+      schemaFilter: objectIdFilter,
+    },
+  ] as const)(
+    'preserves a real difference for $label',
+    async ({ field, filter, schemaFilter }) => {
+      const { indexes, index } = submissionIndexFixture(field, filter);
+      const a = realComparisonHarness('', { modelName: 'Submission', indexes });
+
+      expect(await a.run(['--dry-run'])).toBe(0);
+      expect(jsonEvent(a.h, 'plan')).toHaveProperty(
+        'models',
+        expect.arrayContaining([
+          expect.objectContaining({
+            model: 'Submission',
+            toDrop: [index],
+            toCreate: [
+              {
+                key: index.key,
+                options: {
+                  unique: true,
+                  partialFilterExpression: schemaFilter,
+                },
+              },
+            ],
+          }),
+        ]),
+      );
+      expect(a.forbidden).not.toHaveBeenCalled();
+    },
+  );
+
+  it('rejects raw filter drift even when the two filters compare as equivalent', async () => {
+    const original = submissionIndexFixture('taskId', explicitNullFilter);
+    const rechecked = submissionIndexFixture('taskId', nullFilter);
+    const a = realComparisonHarness('', {
+      modelName: 'Submission',
+      indexes: original.indexes,
+      recheckedIndexes: rechecked.indexes,
+    });
+
+    expect(await a.run([...apply, '--allow-drop'])).toBe(1);
+    expect(jsonEvent(a.h, 'plan')).toHaveProperty(
+      'models',
+      expect.arrayContaining([
+        expect.objectContaining({
+          model: 'Submission',
+          toDrop: [],
+          toCreate: [],
+        }),
+      ]),
+    );
+    expect(jsonEvent(a.h, 'result')).toMatchObject({
+      status: 'failed',
+      writesAttempted: false,
+      error: { code: 'INDEX_PLAN_DRIFT' },
+    });
+    expect(a.indexReads.raw).toEqual([original.indexes, rechecked.indexes]);
+    expect(a.indexReads.mongoose).toEqual([original.indexes, original.indexes]);
     expect(a.forbidden).not.toHaveBeenCalled();
   });
 });
