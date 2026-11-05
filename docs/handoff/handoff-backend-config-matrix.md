@@ -47,7 +47,7 @@ Browser acceptance 配置：
 
 ### sync-indexes 普通索引同步
 
-在 `backend` 目录使用下列入口。执行前先按 [数据库治理规范](../database-conventions.md#4-索引同步与受控流程) 核对目标环境、库名、运维权限和变更范围。
+在 `backend` 目录运行。执行前按 [数据库治理规范](../database-conventions.md#4-索引同步与受控流程) 核对目标环境、库名、运维权限、变更范围和恢复方案。
 
 ```text
 npm run sync-indexes -- --help
@@ -57,26 +57,14 @@ npm run sync-indexes -- --apply --confirm-db <精确库名>
 npm run sync-indexes -- --apply --confirm-db <精确库名> --allow-drop
 ```
 
-- 无参数等价于 `--dry-run`，仅读取集合和索引元数据。`--help` 直接显示帮助，独立于环境文件与数据库连接。普通模式拒绝未知参数、重复参数、缺值、互斥组合和错误的确认库名。
-- 正常执行要求调用进程显式设置 `NODE_ENV` 为 `development`、`test` 或 `production`。文件配置只取对应的 `backend/.env.<NODE_ENV>`，其中的 `NODE_ENV` 无权更改目标。仅使用 `MONGO_ADMIN_URI`，显式进程值优先，显式空值报错。所选文件缺失且进程配置足够时可以继续，其他读取错误会退出。任一来源声明 `browser_acceptance` 或非法 purpose 都会拒绝。使用本节既有数据库映射，连接前校验 URI 声明库名，连接后校验实际库名。
-- 独立 Mongoose 连接及模型 Schema 克隆均设置 `autoCreate=false`、`autoIndex=false`。连接门禁通过后注册正式模型 `User`、`Session`、`PasswordResetToken`、`Course`、`Classroom`、`Enrollment`、`ClassroomTask`、`Task`、`Submission`、`Feedback`、`AiFeedbackJob`，沿用正式集合映射与索引定义。连接由 CLI 统一回收。
-- 连接就绪并确认实际库名后、注册模型和盘点前，检查驱动解析出的有效 `directConnection`。值为 `true` 时，无参数、`--dry-run` 和 `--apply` 均以 `DIRECT_CONNECTION_UNSUPPORTED` 拒绝。值为 `false` 或缺省时继续使用驱动的普通副本集发现方式和 `readPreference: "primary"`。
-- 普通 CLI 的独立连接和原生索引盘点游标使用同一组固定的 BSON 数字解码选项 `promoteValues: true`、`promoteLongs: true`、`useBigInt64: false`，覆盖管理 URI 中相反的设置。应用连接配置独立于此策略。
-- 连接就绪并确认实际库名后、注册模型前，`--apply` 检查驱动解析出的有效写确认配置。有效 `w=0` 时以 `UNACKNOWLEDGED_WRITE_CONCERN` 拒绝，仍可用无参数或 `--dry-run` 只读预览。其余写确认配置按原值生效。
-- 先用 `--dry-run` 审阅计划，再按需显式使用 `--apply --confirm-db <精确库名>`，最后独立读取实际集合和索引元数据，通过 `listCollections` 和 `listIndexes` 的返回结果逐项对照预期定义。计划使用 Mongoose `diffIndexes` 计算，列出模型、集合、待建集合、待删索引的名称与定义以及待建索引的定义。索引定义保留复合键顺序和 `unique`、TTL、`partialFilterExpression`、`sparse`、`collation` 等选项。apply 重新计算并输出本次计划，包含删除时须同传 `--allow-drop`，它只授权本次计划的删除。执行范围固定为本次计划，缺失集合只在 apply 时按计划显式创建。
-- Mongoose 差异比较将数据库索引与 Schema 索引比较副本中的布尔值 `sparse: false` 视为缺省。`sparse: true` 仍有独立语义。等价的建索引定义可省略 `sparse: false`，原始索引元数据、计划快照和回读证据保留实际值。
-- 部分索引的 `partialFilterExpression` 须为顶层只有自有键 `classroomTaskId` 的普通文档，才按以下两组规则比较：
-  - `{ classroomTaskId: null }` 与 `{ classroomTaskId: { $eq: null } }` 等价，统一为前者。
-  - `{ classroomTaskId: { $type: 'objectId' } }` 与 `{ classroomTaskId: { $type: 7 } }` 等价，统一为前者，其中 `7` 必须为 JS number。
-
-  使用内层文档时，该文档必须是只含对应自有键 `$eq` 或 `$type` 的普通文档。带额外字段、额外操作符、其他类型值或其他表达式形状时，仍沿用原有比较规则。归一化作用于数据库索引和 Schema 索引的比较副本，等价创建定义可采用规范形式。原始元数据、Schema 声明、冻结快照、待删索引和 `finalIndexes` 保留原始写法。原始过滤器写法在写前复查时变化，即使两种写法语义等价，仍触发 `INDEX_PLAN_DRIFT`。
-- 按集合名执行一次完整的 `listCollections` 查询，同时读取存在性、类型和默认 `collation`，随后关闭游标。仅返回 `null` 时判为不存在。已存在对象必须为 `type: "collection"`。时序集合、视图和其他非空类型字符串以 `COLLECTION_TYPE_UNSUPPORTED` 拒绝。类型缺失、为空字符串或为非字符串时，以 `COLLECTION_METADATA_INVALID` 拒绝。类型和默认规则在计划、复查和回读时均需校验，新建集合在创建索引前也须核对。
-- 完整有效的集合元数据中，省略 `options.collation` 或显式指定 `locale: "simple"` 均按 simple 处理。默认非 simple 时在计算差异前以 `COLLECTION_COLLATION_UNSUPPORTED` 拒绝。读取失败或元数据无法判定时停止。集合默认 simple 时，单个索引可带非 simple 的 `collation`，仍由 Mongoose 计算受控变更。
-- 初始计划、首次写入前的全量复查、逐模型复查和写入后的回读都在计算差异前检查索引。实际元数据含 `textIndexVersion`、`weights` 或键值 `"text"`，或 Schema 展开后声明了全文索引，均以 `TEXT_INDEX_UNSUPPORTED` 拒绝。实际索引或展开后的 Schema 索引选项为 `hidden: true` 或 `prepareUnique: true` 时，分别以 `HIDDEN_INDEX_UNSUPPORTED` 或 `PREPARE_UNIQUE_UNSUPPORTED` 拒绝。两项选项缺省或为 `false` 时允许。上述元数据限制覆盖无参数、`--dry-run` 和 `--apply`，`--allow-drop` 也不能放行。初始盘点拒绝时，所有模型都保持零写入。
-- 原生盘点和 Mongoose 比较均检查索引键方向，覆盖实际索引和 Schema 声明。数值方向只接受 JS number 的 `1` 与 `-1`，包括 `hashed` 在内的字符串方向沿用现有处理规则。Decimal128、残留的 Long 或 Int32 对象、bigint 及其他不支持的方向表示以 `INDEX_KEY_DIRECTION_UNSUPPORTED` 拒绝。初始全量预检拒绝时所有模型零写入，复查或回读拒绝时停止后续写入并进入失败盘点。
-- 每次原生索引盘点以 `includeBuildUUIDs: true` 读取，发现构建中的索引即停止正常计划或核验。游标使用 `timeoutMode: "cursorLifetime"`，沿用连接配置的 `timeoutMS: 65000` 作为单次游标的生命周期期限，读取结束后关闭游标。整条 CLI 的执行时间可超过这一期限。
-- 同一模型按固定计划逐项等待删除完成，再按计划顺序逐项等待创建完成。实际索引替换分开删除和创建，替换唯一索引期间可能存在约束空窗。首个删除或创建失败即停止本模型剩余操作和后续模型写入。索引同步可能部分生效。执行失败、计划漂移或回读异常时尽力盘点已触及模型，读取成功标记为 `observed`，其 `finalIndexes` 仅代表当时观察到的快照。盘点失败时标记为 `unconfirmed` 并清除旧快照，集合类型门禁拒绝也按盘点失败处理。网络超时后，服务端操作仍可能完成。由操作者重新预览并决定后续操作。同库索引维护须串行，TTL 索引变更可影响文档的自动过期行为。
-- `verified` 表示通过普通模式当前支持范围内的回读校验。Mongoose 的差异计算仍可能忽略额外的单字段 `{ _id: 'hashed' }` 索引（例如 `_id_hashed`），空计划和 `verified` 均不能证明已识别所有额外索引。独立复核发现此类索引时，应先确认其用途，尤其是否用于分片，不能依据普通模式结果直接删除。
+- 无参数等价于只读 `--dry-run`，`--help` 独立于环境配置和数据库连接。CLI 拒绝未知、重复和冲突参数。普通执行要求调用进程显式设置 `NODE_ENV` 为 `development`、`test` 或 `production`。文件来源仅为对应的 `backend/.env.<NODE_ENV>`，以显式进程 `MONGO_ADMIN_URI` 优先。显式空值、非法 purpose 或任一来源声明 `browser_acceptance` 均拒绝。所选文件缺失且进程配置足够时可继续。连接前校验 URI 声明库名，连接后校验实际库名。
+- 独立 Mongoose 连接和正式模型 Schema 克隆均禁用自动建集合和索引。CLI 按主节点读取，拒绝有效的 `directConnection=true`；apply 额外拒绝有效的 `w=0`。独立连接固定 `raw: false`，与原生索引游标均使用 `promoteValues: true`、`promoteLongs: true`、`useBigInt64: false`。原生索引盘点开启 `includeBuildUUIDs`，使用有界游标期限，结束后关闭游标和连接。
+- 先用 `--dry-run` 审阅。apply 重新生成并输出本次完整计划，包含待建集合、待删索引的原始定义和待建索引定义，只有精确库名确认通过才进入写入阶段。含删除的计划必须同传 `--allow-drop`。逐模型执行前用集合 UUID 与原始计划复查目标，按冻结计划逐项等待删建。首个写前检查或 DDL 错误即停止后续写入。后续模型发生漂移时，前面操作可能已完成。
+- 每个阶段读取集合存在性、类型、默认 collation 和 `info.uuid`。只接受普通集合及默认 simple collation，已存在的集合须有合法 UUID。新建集合后立即记录 UUID 作为最终验收的身份基线。构建中、全文、`hidden: true`、`prepareUnique: true` 和不支持的键方向仍拒绝。复合键含会被 JS 对象重新排序的字段，或待建索引名称已被保留索引占用时，预检拒绝。UUID 复查用于发现读到的同名集合替换，检查与实际写入之间仍有竞争窗口。
+- 计划和写前复查基于各阶段同一份原生索引盘点。Mongoose `diffIndexes()` 使用比较副本，沿用 `sparse: false` 与缺省等价。部分过滤器仅支持两个精确等价规则。顶层普通文档须只含自有键 `classroomTaskId`，值可以是 `null` 或仅含 `$eq: null` 的普通文档，也可以是仅含 `$type: 'objectId'` 或 `$type: 7` 的普通文档。这里的 `7` 必须为 JS number。附加谓词和其他表达式继续按原定义比较。计划、原始定义及结果使用 Canonical Extended JSON；比较归一化只作用于副本。
+- 进入 apply 后统一在末尾重新读取本次计划的全部模型，逐项检查实际定义与正式 Schema，包括有序键、唯一性、TTL、sparse、当前部分过滤器、collation、特殊状态和显式索引名称。默认索引须同时满足名称 `_id_` 与键 `{ _id: 1 }`，元数据可以省略 `unique: true`。额外索引（包括 `_id_hashed`）列入剩余差异。各模型独立报告验收通过、有差异或无法确认。验收只读，单项失败后继续检查其他模型。
+- 输出分别报告操作完成、失败、未执行及各模型验收结果。命令成功后的终态差异可能到末尾才发现。执行错误保留，即使最终定义恰好达标也退出非零；验收差异、无法确认或关闭连接失败亦退出非零。超时后服务端仍可能完成 DDL，由操作者依据回读结果决定后续定向修复。
+- 同库集合和索引维护串行进行。替换唯一索引前暂停相关业务写入，删建分步执行期间可能出现约束空窗。TTL 变更可影响文档的自动过期。测试口径见 [Backend Testing Playbook](./handoff-backend-testing-playbook.md#sync-indexes-定向验收)。
 
 ### import-users 独立导入 CLI
 

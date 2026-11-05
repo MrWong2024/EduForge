@@ -99,32 +99,34 @@ npm.cmd run test -- --runInBand --runTestsByPath ./scripts/import-users.spec.ts 
 
 真实 MongoDB 的 dry-run 文档与元数据不变、真实更新结果及凭据撤销终态为 `not_executed`，归属后续“import-users 隔离数据库集成验收”；不得用 fake 或离线通过替代。CLI 配置来源、数据库映射与重置副作用由 [Config Matrix](./handoff-backend-config-matrix.md#import-users-独立导入-cli) 维护。
 
-### sync-indexes 离线回归
+### sync-indexes 定向验收
 
-`scripts/sync-indexes.spec.ts` 的数据库用途为 `none`。使用合成配置、fake connection/model 和隔离的无网络 CLI 子进程调用正式代码。连接替身与网络阻断在任何连接动作前生效，测试配置只来自合成输入，临时文件与子进程由测试在 teardown/finally 中收口。
+产品合同由 [Config Matrix](./handoff-backend-config-matrix.md#sync-indexes-普通索引同步) 维护。离线回归与真实数据库集成分别使用独立进程。
 
-普通模式的离线证据覆盖参数与配置门禁、模型范围、只读预览、固定计划执行、删除授权、计划漂移、终态核验及连接收尾。隔离 CLI 测试检查直接入口、导入模块、帮助、非法参数及脱敏日志。旧 `--retire-task-stage` 参数（包括与帮助或旧 apply 参数组合）以非零退出码和 `CLI_ARGUMENT_INVALID` 拒绝，回归核对配置读取与连接均零调用。产品配置和执行合同由 [Config Matrix](./handoff-backend-config-matrix.md#sync-indexes-普通索引同步) 维护。
+**离线回归。** `scripts/sync-indexes.spec.ts` 使用 purpose `none`。只使用合成配置和无网络替身，连接替身与网络阻断在任何网络动作前生效。覆盖 CLI、配置和库名门禁、预览零写入、删除授权、逐项执行和首错停止、计划及 UUID 漂移、统一末尾验收、退出码与资源回收。通过空 diff 反例验证实际定义验收，使用 BSON 和正式 Schema 克隆验证无损输出、数字解码、sparse、部分过滤器及特殊索引限制。离线证据证明控制流、调用边界和数据处理。
 
-全文索引回归使用真实格式的合成索引元数据和隔离 Schema，核对普通唯一索引的比较边界、初始盘点拒绝时的零写入，以及复查和回读时的拒绝。可控删除 Promise 用于验证调用顺序、首错停止和部分生效报告。游标替身用于验证正式适配层传入的期限参数及游标收尾。
-
-创建回归通过真实 Mongoose 创建入口和底层 `createIndex` 替身验证顺序、首错停止及部分生效。写确认回归用未连接的真实驱动对象解析合成 URI，再经正式适配层检查预览与 apply 的分流。集合元数据替身用于验证选项读取、游标关闭、默认 collation 拒绝与漂移。合成索引元数据和隔离 Schema 用于验证 hidden 与 prepareUnique 的拒绝边界、零写入及失败盘点。
-
-数字解码回归使用未连接的真实驱动解析正式适配层传入的合成 URI 和选项，沿独立连接和原生游标的实际配置解码同一份含 Long 的 BSON，再以正式 Session Schema 克隆与真实 Mongoose 差异计算核对 `--dry-run` 和带 `--allow-drop` 的 apply 均为空计划、零写入调用。合成元数据用于验证不支持的方向在两条读取路径中均会被拒绝。
-
-sparse 回归使用真实 Mongoose 差异计算验证缺省与 `false` 的双向等价、两侧均为 `false` 的一致性及 `true` 的差异，并核对原始快照和读取次数。直连门禁回归使用未连接的真实驱动对象取得有效值，以连接和模型替身验证拒绝发生在实际库名检查之后、模型注册和盘点之前，并核对零写入调用和连接收尾。
-
-部分索引回归使用正式 Submission Schema 克隆与真实 Mongoose 差异计算。两组等价写法在数据库和 Schema 两侧互换，核对 `--dry-run` 和带 `--allow-drop` 的 apply 均为空计划、零 DDL 调用。额外字段、额外操作符和其他类型值仍产生差异。回归也核对原始对象、待删定义、回读值及读取次数，并验证仅原始写法变化也会触发写前漂移拒绝。
-
-集合类型回归用合成元数据检查预检零写入、集合缺失时的模拟创建、类型漂移及写后发现类型不符时的失败报告。模拟连接、BSON 解码和模拟 DDL 属于离线证据。
-
-从 `backend` 目录先执行 discovery，结果须恰好为 `scripts/sync-indexes.spec.ts`。通过后使用同一文件路径正式运行。
+从 `backend` 目录先运行 discovery，确认仅命中下列文件后使用相同路径执行。
 
 ```powershell
 npm.cmd run test -- --listTests --runInBand --runTestsByPath ./scripts/sync-indexes.spec.ts
 npm.cmd run test -- --runInBand --runTestsByPath ./scripts/sync-indexes.spec.ts
 ```
 
-离线证据用于验证控制流、调用参数和操作边界。真实 MongoDB 的元数据与兼容性、dry-run 前后元数据一致性、索引增删与选项、服务端写确认、collation 继承、特殊索引行为、复制延迟、故障终态及实际慢响应超时行为均为 `not_executed`。真实部分索引定义、实际唯一约束空窗及并发写入也为 `not_executed`。上述实测归属后续“sync-indexes 隔离数据库集成验收”。
+**真实数据库集成。** `test/sync-indexes.e2e-spec.ts` 使用 purpose `standard_test` 和现有 `test:e2e` runner。独立进程只从 `backend/.env.test` 读取 `MONGO_ADMIN_URI`，连接前后均校验目标为本地 `eduforge_test`。通过正式 Schema 克隆映射到本轮唯一前缀的专属集合，调用正式 CLI 的连接、盘点、执行及验收路径。结束时仅按登记名称删除本轮创建的集合，核对残留并关闭连接。HTTP 应用和其他业务服务均不启动。
+
+该 spec 核对缺失集合及索引的真实补建、关键唯一索引、Session TTL、Submission 两个部分唯一索引、再次执行无变更、预览零写入、删除授权、重复键导致部分成功后的验收，以及集合重建前后的真实 UUID。写前 UUID 漂移的确定性停止、BSON 精度和难以稳定制造的故障由离线回归负责。生产拓扑、唯一约束空窗、并发写入、复制延迟及真实网络超时均在本组验收范围之外。
+
+在独立 PowerShell 子进程中从 `backend` 目录执行。discovery 必须恰好命中指定 spec，随后使用相同文件路径正式运行。
+
+```powershell
+$env:NODE_ENV = "test"
+$env:EDUFORGE_DATABASE_PURPOSE = "standard_test"
+Remove-Item Env:MONGO_URI, Env:MONGO_ADMIN_URI, Env:BROWSER_ACCEPTANCE_APP_MONGO_URI, Env:BROWSER_ACCEPTANCE_ADMIN_MONGO_URI, Env:KEEP_E2E_DB -ErrorAction SilentlyContinue
+npm.cmd run test:e2e -- --listTests --runInBand --runTestsByPath ./test/sync-indexes.e2e-spec.ts
+npm.cmd run test:e2e -- --runInBand --runTestsByPath ./test/sync-indexes.e2e-spec.ts
+```
+
+目标配置、权限或本地服务不可用时，真实数据库验收记为 `not_executed`。实际执行结果及清理核验见任务验收记录。
 
 ## 5. Database Purpose 与 Browser Process Roles
 

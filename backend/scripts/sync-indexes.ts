@@ -1,5 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
+import { isDeepStrictEqual } from 'node:util';
 import mongoose, {
   type Connection,
   type IndexDefinition,
@@ -20,6 +21,7 @@ import { SYNC_INDEX_SCHEMAS } from './sync-indexes-models';
 const CONNECTION_OPTIONS = {
   autoCreate: false,
   autoIndex: false,
+  raw: false,
   promoteValues: true,
   promoteLongs: true,
   useBigInt64: false,
@@ -34,6 +36,7 @@ const CONNECTION_OPTIONS = {
 
 export type SyncIndexDefinition = [IndexDefinition, IndexOptions];
 export type CollectionMetadata = {
+  uuid: string;
   collation: Record<string, unknown> | undefined;
 };
 
@@ -50,6 +53,7 @@ export interface SyncIndexModel {
   diffIndexes(
     this: void,
     options: { indexOptionsToCreate: true },
+    indexes: readonly mongo.IndexDescriptionInfo[],
   ): Promise<IndexDiff>;
   createCollection(this: void): Promise<unknown>;
   cleanIndexes(this: void, options: { toDrop: string[] }): Promise<unknown>;
@@ -157,6 +161,16 @@ async function listReadyIndexes(
 }
 
 function assertSupportedIndexDirections(key: Record<string, unknown>) {
+  const fields = Object.keys(key);
+  // BSON preserves key order, but JS objects move array-index keys to the front.
+  if (
+    fields.length > 1 &&
+    fields.some(
+      (field) => /^(0|[1-9]\d*)$/.test(field) && Number(field) < 2 ** 32 - 1,
+    )
+  ) {
+    throw new SyncIndexesError('INDEX_KEY_ORDER_UNSUPPORTED');
+  }
   if (
     Object.values(key).some(
       (direction) =>
@@ -201,31 +215,19 @@ function copyComparisonOptions<
 
 export function registerSyncIndexModels(
   connection: Connection,
+  schemas = SYNC_INDEX_SCHEMAS,
 ): SyncIndexModel[] {
-  return SYNC_INDEX_SCHEMAS.map(({ name, schema }) => {
+  return schemas.map(({ name, schema }) => {
     const isolatedSchema = schema.clone();
     isolatedSchema.set('autoCreate', false);
     isolatedSchema.set('autoIndex', false);
     const model = connection.model(name, isolatedSchema);
     const collectionName = model.collection.name;
     const modelSchema = model.schema;
-    const readDatabaseIndexes = model.listIndexes.bind(
-      model,
-    ) as typeof model.listIndexes;
     const readSchemaIndexes = modelSchema.indexes.bind(
       modelSchema,
     ) as typeof modelSchema.indexes;
-    // Mongoose compares these copies. The raw metadata still drives drift checks and reports.
-    model.listIndexes = async (...args) => {
-      const indexes: unknown[] = await readDatabaseIndexes(...args);
-      return indexes.map((entry) => {
-        const index = readIndexDescription(entry);
-        assertSupportedIndexDirections(index.key);
-        const copy = copyComparisonOptions(index);
-        copy.key = { ...index.key };
-        return copy;
-      });
-    };
+    // The isolated model compares copies; the snapshot remains evidence of what was read.
     modelSchema.indexes = (...args) =>
       readSchemaIndexes(...args).map(([key, options]): SyncIndexDefinition => {
         assertSupportedIndexDirections(key);
@@ -237,8 +239,23 @@ export function registerSyncIndexModels(
       listIndexes: () =>
         listReadyIndexes(connectedDb(connection), collectionName),
       schemaIndexes: () => readSchemaIndexes(),
-      diffIndexes: async (options) => {
-        const result = await model.diffIndexes(options);
+      diffIndexes: async (options, indexes) => {
+        const originalListIndexes = model.listIndexes.bind(
+          model,
+        ) as typeof model.listIndexes;
+        let result: Awaited<ReturnType<typeof model.diffIndexes>>;
+        model.listIndexes = () =>
+          Promise.resolve(
+            indexes.map((index) => ({
+              ...copyComparisonOptions(index),
+              key: { ...index.key },
+            })),
+          );
+        try {
+          result = await model.diffIndexes(options);
+        } finally {
+          model.listIndexes = originalListIndexes;
+        }
         const toDrop: unknown[] = result.toDrop;
         const toCreate: unknown[] = result.toCreate;
         if (
@@ -273,9 +290,10 @@ export function registerSyncIndexModels(
   });
 }
 
-function createMongooseConnection(
+export function createMongooseConnection(
   uri: string,
   options: typeof CONNECTION_OPTIONS,
+  schemas = SYNC_INDEX_SCHEMAS,
 ): SyncIndexesConnection {
   const connection = mongoose.createConnection(uri, options);
   return {
@@ -285,7 +303,7 @@ function createMongooseConnection(
     databaseName: () => connection.db?.databaseName,
     directConnection: () => connection.getClient().options.directConnection,
     writeConcernW: () => connection.getClient().writeConcern?.w,
-    models: () => registerSyncIndexModels(connection),
+    models: () => registerSyncIndexModels(connection, schemas),
     collectionMetadata: async (name) => {
       const cursor = connectedDb(connection).listCollections({ name });
       try {
@@ -305,7 +323,17 @@ function createMongooseConnection(
         if (!isDocument(entry.options)) {
           throw new SyncIndexesError('COLLECTION_METADATA_INVALID');
         }
-        if (!('collation' in entry.options)) return { collation: undefined };
+        const uuid = isDocument(entry.info) ? entry.info.uuid : undefined;
+        if (
+          !(uuid instanceof mongoose.mongo.BSON.Binary) ||
+          uuid.sub_type !== mongoose.mongo.BSON.Binary.SUBTYPE_UUID ||
+          uuid.length() !== 16
+        ) {
+          throw new SyncIndexesError('COLLECTION_UUID_INVALID');
+        }
+        const uuidHex = uuid.toUUID().toHexString(false);
+        if (!('collation' in entry.options))
+          return { uuid: uuidHex, collation: undefined };
         const { collation } = entry.options;
         if (
           !isDocument(collation) ||
@@ -314,7 +342,7 @@ function createMongooseConnection(
         ) {
           throw new SyncIndexesError('COLLECTION_METADATA_INVALID');
         }
-        return { collation };
+        return { uuid: uuidHex, collation };
       } finally {
         await cursor.close();
       }
@@ -336,11 +364,12 @@ function defaultDependencies(): SyncIndexesDependencies {
   };
 }
 
-type ModelPlan = IndexDiff & {
-  createCollection: boolean;
-  collectionCollation: 'simple' | null;
+type ModelState = {
+  collection: CollectionMetadata | null;
   indexes: mongo.IndexDescriptionInfo[];
 };
+
+type ModelPlan = ModelState & IndexDiff & { expected: SyncIndexDefinition[] };
 
 function validateModels(models: readonly SyncIndexModel[]) {
   if (
@@ -379,14 +408,20 @@ function assertSupportedCollectionCollation(
   }
 }
 
-async function readModelPlan(
+async function readModelState(
   connection: SyncIndexesConnection,
   model: SyncIndexModel,
-): Promise<ModelPlan> {
+): Promise<ModelState> {
   const collection = await connection.collectionMetadata(model.collectionName);
   assertSupportedCollectionCollation(collection?.collation);
   const indexes = await readIndexMetadata(model, collection !== null);
-  const schemaIndexes = model.schemaIndexes();
+  return { collection, indexes };
+}
+
+function assertSupportedIndexes(
+  indexes: mongo.IndexDescriptionInfo[],
+  schemaIndexes: SyncIndexDefinition[],
+) {
   // Mongoose's text-index comparison can match a non-text Schema index.
   if (
     indexes.some(
@@ -418,19 +453,41 @@ async function readModelPlan(
   }
   for (const { key } of indexes) assertSupportedIndexDirections(key);
   for (const [key] of schemaIndexes) assertSupportedIndexDirections(key);
-  // Mongoose treats NamespaceNotFound as an empty index set.
-  const diff = await model.diffIndexes({ indexOptionsToCreate: true });
+}
+
+async function readModelPlan(
+  connection: SyncIndexesConnection,
+  model: SyncIndexModel,
+): Promise<ModelPlan> {
+  const state = await readModelState(connection, model);
+  const { indexes } = state;
+  const expected = model.schemaIndexes();
+  assertSupportedIndexes(indexes, expected);
+  const diff = await model.diffIndexes({ indexOptionsToCreate: true }, indexes);
   const names = new Set(indexes.map((index) => index.name));
   if (
     new Set(diff.toDrop).size !== diff.toDrop.length ||
-    diff.toDrop.some((name) => !names.has(name) || name === '_id_')
+    diff.toDrop.some(
+      (name) => !names.has(name) || name === '_id_' || name === '*',
+    )
   ) {
     throw new SyncIndexesError('INDEX_PLAN_DRIFT');
   }
+  const dropping = new Set(diff.toDrop);
+  const retainedNames = new Set(
+    indexes.map(({ name }) => name ?? '').filter((name) => !dropping.has(name)),
+  );
+  retainedNames.add('_id_');
+  for (const [key, options] of diff.toCreate) {
+    const name = options.name ?? Object.entries(key).flat().join('_');
+    if (name === '*' || retainedNames.has(name)) {
+      throw new SyncIndexesError('INDEX_NAME_CONFLICT');
+    }
+    retainedNames.add(name);
+  }
   return {
-    createCollection: collection === null,
-    collectionCollation: collection === null ? null : 'simple',
-    indexes,
+    ...state,
+    expected,
     toDrop: [...diff.toDrop].sort(),
     toCreate: [...diff.toCreate],
   };
@@ -439,31 +496,32 @@ async function readModelPlan(
 const snapshot = (value: unknown) =>
   mongoose.mongo.BSON.EJSON.stringify(value, { relaxed: false });
 
-function verifyReadback(before: ModelPlan, after: ModelPlan) {
-  const retained = before.indexes.filter(
-    (index) => !before.toDrop.includes(index.name ?? ''),
+function isDefaultIdIndex(index: mongo.IndexDescriptionInfo) {
+  return (
+    index.name === '_id_' &&
+    isDeepStrictEqual(Object.entries(index.key), [['_id', 1]])
   );
-  const actual = new Map(after.indexes.map((index) => [index.name, index]));
-  // Creating an ordinary collection also installs its default _id index.
-  const expectedCount =
-    retained.length +
-    before.toCreate.length +
-    (before.createCollection ? 1 : 0);
-  if (
-    after.createCollection ||
-    after.toDrop.length ||
-    after.toCreate.length ||
-    after.indexes.length !== expectedCount ||
-    (before.createCollection && !actual.has('_id_')) ||
-    retained.some(
-      (index) => snapshot(actual.get(index.name) ?? null) !== snapshot(index),
-    ) ||
-    before.toCreate.some(
-      ([, options]) => options.name !== undefined && !actual.has(options.name),
+}
+
+function matchesIndex(
+  [key, options]: SyncIndexDefinition,
+  index: mongo.IndexDescriptionInfo,
+) {
+  const expected = copyComparisonOptions(options);
+  const actual = copyComparisonOptions(index);
+  return (
+    (expected.name === undefined || expected.name === actual.name) &&
+    isDeepStrictEqual(Object.entries(key), Object.entries(index.key)) &&
+    (expected.unique === true) === (actual.unique === true) &&
+    expected.expireAfterSeconds === actual.expireAfterSeconds &&
+    expected.sparse === actual.sparse &&
+    snapshot(expected.partialFilterExpression ?? null) ===
+      snapshot(actual.partialFilterExpression ?? null) &&
+    isDeepStrictEqual(
+      expected.collation ?? { locale: 'simple' },
+      actual.collation ?? { locale: 'simple' },
     )
-  ) {
-    throw new SyncIndexesError('INDEX_READBACK_MISMATCH');
-  }
+  );
 }
 
 type SafeFailure = { code: string; driverCode?: number };
@@ -484,15 +542,181 @@ function safeFailure(error: unknown, fallback: string): SafeFailure {
   return { code: fallback };
 }
 
+type IndexDefinitionReport = { key: IndexDefinition; options: IndexOptions };
+type Operation = (
+  | { kind: 'createCollection' }
+  | { kind: 'dropIndex'; name: string }
+  | ({ kind: 'createIndex' } & IndexDefinitionReport)
+) & { status: 'completed' | 'failed' | 'not-executed'; error?: SafeFailure };
+
+type IndexDifferences = {
+  missingCollection?: true;
+  collectionUuidChanged?: { expected: string; actual: string };
+  missingDefaultIndex?: true;
+  missingIndexes: IndexDefinitionReport[];
+  extraIndexes: mongo.IndexDescriptionInfo[];
+};
+
 type ModelOutcome = {
   model: string;
   collection: string;
   status: 'preview' | 'succeeded' | 'failed' | 'not-executed';
+  operations: Operation[];
   terminalState?: 'verified' | 'observed' | 'unconfirmed';
   collectionExists?: boolean;
+  collectionUuid?: string;
   finalIndexes?: mongo.IndexDescriptionInfo[];
-  auditError?: SafeFailure;
+  verification?:
+    | { status: 'passed' }
+    | { status: 'different'; differences: IndexDifferences }
+    | { status: 'unconfirmed'; error: SafeFailure };
 };
+
+type PlannedModel = {
+  model: SyncIndexModel;
+  outcome: ModelOutcome;
+  plan: ModelPlan;
+  original: string;
+  expectedUuid: string | undefined;
+};
+
+function planOperations(plan: ModelPlan) {
+  const operations: Operation[] = [];
+  if (!plan.collection) {
+    operations.push({ kind: 'createCollection', status: 'not-executed' });
+  }
+  for (const name of plan.toDrop) {
+    operations.push({ kind: 'dropIndex', name, status: 'not-executed' });
+  }
+  for (const [key, options] of plan.toCreate) {
+    operations.push({
+      kind: 'createIndex',
+      key,
+      options,
+      status: 'not-executed',
+    });
+  }
+  return operations;
+}
+
+async function executeModelPlan(
+  connection: SyncIndexesConnection,
+  entry: PlannedModel,
+) {
+  const { model, outcome, original } = entry;
+  try {
+    if (snapshot(await readModelPlan(connection, model)) !== original) {
+      throw new SyncIndexesError('INDEX_PLAN_DRIFT');
+    }
+  } catch (error: unknown) {
+    outcome.status = 'failed';
+    return safeFailure(error, 'INDEX_PREFLIGHT_FAILED');
+  }
+
+  for (const operation of outcome.operations) {
+    try {
+      switch (operation.kind) {
+        case 'createCollection':
+          await model.createCollection();
+          break;
+        case 'dropIndex':
+          await model.cleanIndexes({ toDrop: [operation.name] });
+          break;
+        case 'createIndex':
+          // Mongoose may continue after item errors when it receives multiple definitions.
+          await model.createIndexes({
+            toCreate: [[operation.key, operation.options]],
+          });
+          break;
+      }
+      operation.status = 'completed';
+      if (operation.kind === 'createCollection') {
+        const created = await connection.collectionMetadata(
+          model.collectionName,
+        );
+        if (!created) throw new SyncIndexesError('CREATED_COLLECTION_MISSING');
+        entry.expectedUuid = created.uuid;
+        assertSupportedCollectionCollation(created.collation);
+      }
+    } catch (error: unknown) {
+      const failure = safeFailure(error, 'INDEX_APPLY_FAILED');
+      outcome.status = 'failed';
+      if (operation.status !== 'completed') {
+        operation.status = 'failed';
+        operation.error = failure;
+      }
+      return failure;
+    }
+  }
+  outcome.status = 'succeeded';
+}
+
+async function verifyModel(
+  connection: SyncIndexesConnection,
+  entry: PlannedModel,
+) {
+  const { model, outcome, plan, expectedUuid } = entry;
+  try {
+    const { collection, indexes } = await readModelState(connection, model);
+    outcome.collectionExists = collection !== null;
+    outcome.collectionUuid = collection?.uuid;
+    outcome.finalIndexes = indexes;
+    assertSupportedIndexes(indexes, plan.expected);
+    if (collection && expectedUuid === undefined) {
+      throw new SyncIndexesError('COLLECTION_IDENTITY_UNCONFIRMED');
+    }
+
+    const extras = indexes.filter((index) => !isDefaultIdIndex(index));
+    const missingIndexes = plan.expected.flatMap((definition) => {
+      const match = extras.findIndex((index) =>
+        matchesIndex(definition, index),
+      );
+      if (match === -1) {
+        const [key, options] = definition;
+        return [{ key, options }];
+      }
+      extras.splice(match, 1);
+      return [];
+    });
+    const differences: IndexDifferences = {
+      missingIndexes,
+      extraIndexes: extras,
+    };
+    if (!collection) differences.missingCollection = true;
+    if (
+      collection &&
+      expectedUuid !== undefined &&
+      collection.uuid !== expectedUuid
+    ) {
+      differences.collectionUuidChanged = {
+        expected: expectedUuid,
+        actual: collection.uuid,
+      };
+    }
+    if (collection && !indexes.some(isDefaultIdIndex))
+      differences.missingDefaultIndex = true;
+
+    if (
+      differences.missingCollection ||
+      differences.collectionUuidChanged ||
+      differences.missingDefaultIndex ||
+      missingIndexes.length ||
+      extras.length
+    ) {
+      outcome.terminalState = 'observed';
+      outcome.verification = { status: 'different', differences };
+    } else {
+      outcome.terminalState = 'verified';
+      outcome.verification = { status: 'passed' };
+    }
+  } catch (error: unknown) {
+    outcome.terminalState = 'unconfirmed';
+    outcome.verification = {
+      status: 'unconfirmed',
+      error: safeFailure(error, 'INDEX_READBACK_FAILED'),
+    };
+  }
+}
 
 const HELP = [
   'Usage: npm run sync-indexes -- [--dry-run | --apply --confirm-db <database> [--allow-drop]]',
@@ -512,9 +736,7 @@ export async function runSyncIndexesCli(
   let phase = 'CLI_ARGUMENT_INVALID';
   let failure: SafeFailure | undefined;
   let closeError: SafeFailure | undefined;
-  let active: ModelOutcome | undefined;
   const outcomes: ModelOutcome[] = [];
-  const touched = new Map<SyncIndexModel, ModelOutcome>();
   try {
     const options = parseSyncIndexesArguments(argv);
     if (options.help) {
@@ -556,32 +778,39 @@ export async function runSyncIndexesCli(
         model: model.name,
         collection: model.collectionName,
         status: 'not-executed',
+        operations: [],
       };
       outcomes.push(outcome);
       return { model, outcome };
     });
 
-    const plans: Array<{
-      model: SyncIndexModel;
-      outcome: ModelOutcome;
-      plan: ModelPlan;
-      original: string;
-    }> = [];
+    const plans: PlannedModel[] = [];
     for (const { model, outcome } of work) {
-      active = outcome;
-      const plan = await readModelPlan(connection, model);
-      plans.push({ model, outcome, plan, original: snapshot(plan) });
+      try {
+        const plan = await readModelPlan(connection, model);
+        outcome.operations = planOperations(plan);
+        plans.push({
+          model,
+          outcome,
+          plan,
+          original: snapshot(plan),
+          expectedUuid: plan.collection?.uuid,
+        });
+      } catch (error: unknown) {
+        outcome.status = 'failed';
+        throw error;
+      }
     }
-    active = undefined;
     deps.log(
-      mongoose.mongo.BSON.EJSON.stringify({
+      snapshot({
         event: 'plan',
         mode,
         databaseName,
         models: plans.map(({ outcome, plan }) => ({
           model: outcome.model,
           collection: outcome.collection,
-          createCollection: plan.createCollection,
+          createCollection: plan.collection === null,
+          collectionUuid: plan.collection?.uuid,
           toDrop: plan.indexes.filter((index) =>
             plan.toDrop.includes(index.name ?? ''),
           ),
@@ -594,77 +823,17 @@ export async function runSyncIndexesCli(
       for (const outcome of outcomes) outcome.status = 'preview';
     } else {
       if (!options.allowDrop && plans.some(({ plan }) => plan.toDrop.length)) {
-        throw new SyncIndexesError('DROP_CONFIRMATION_REQUIRED');
-      }
-      for (const { model, outcome, original } of plans) {
-        active = outcome;
-        if (snapshot(await readModelPlan(connection, model)) !== original) {
-          throw new SyncIndexesError('INDEX_PLAN_DRIFT');
+        failure = { code: 'DROP_CONFIRMATION_REQUIRED' };
+      } else {
+        for (const entry of plans) {
+          failure = await executeModelPlan(connection, entry);
+          if (failure) break;
         }
       }
-      for (const { model, outcome, plan, original } of plans) {
-        active = outcome;
-        phase = 'INDEX_PREFLIGHT_FAILED';
-        if (snapshot(await readModelPlan(connection, model)) !== original) {
-          throw new SyncIndexesError('INDEX_PLAN_DRIFT');
-        }
-        if (
-          plan.createCollection ||
-          plan.toDrop.length ||
-          plan.toCreate.length
-        ) {
-          phase = 'INDEX_APPLY_FAILED';
-          touched.set(model, outcome);
-          if (plan.createCollection) {
-            await model.createCollection();
-            const created = await connection.collectionMetadata(
-              model.collectionName,
-            );
-            if (created === null)
-              throw new SyncIndexesError('INDEX_READBACK_MISMATCH');
-            assertSupportedCollectionCollation(created.collation);
-          }
-          for (const name of plan.toDrop) {
-            await model.cleanIndexes({ toDrop: [name] });
-          }
-          // Mongoose consumes the supplied array and continues after item errors.
-          for (const definition of plan.toCreate) {
-            await model.createIndexes({ toCreate: [definition] });
-          }
-        }
-        phase = 'INDEX_READBACK_FAILED';
-        const final = await readModelPlan(connection, model);
-        verifyReadback(plan, final);
-        outcome.status = 'succeeded';
-        outcome.terminalState = 'verified';
-        outcome.collectionExists = true;
-        outcome.finalIndexes = final.indexes;
-      }
+      for (const entry of plans) await verifyModel(connection, entry);
     }
   } catch (error: unknown) {
     failure = safeFailure(error, phase);
-    if (active) active.status = 'failed';
-    if (connection) {
-      for (const [model, outcome] of touched) {
-        try {
-          const collection = await connection.collectionMetadata(
-            model.collectionName,
-          );
-          const observed = await readIndexMetadata(model, collection !== null);
-          outcome.terminalState = 'observed';
-          outcome.collectionExists = collection !== null;
-          outcome.finalIndexes = observed;
-        } catch (auditError: unknown) {
-          outcome.terminalState = 'unconfirmed';
-          outcome.auditError = safeFailure(
-            auditError,
-            'INDEX_FAILURE_AUDIT_FAILED',
-          );
-          delete outcome.collectionExists;
-          delete outcome.finalIndexes;
-        }
-      }
-    }
   } finally {
     if (connection) {
       try {
@@ -675,15 +844,22 @@ export async function runSyncIndexesCli(
     }
   }
 
-  const failed = !!(failure || closeError);
-  const result = JSON.stringify({
+  const verificationFailed = outcomes.some(
+    ({ verification }) => verification && verification.status !== 'passed',
+  );
+  const failed = !!(failure || closeError || verificationFailed);
+  const writesAttempted = outcomes.some(({ operations }) =>
+    operations.some(({ status }) => status !== 'not-executed'),
+  );
+  const result = snapshot({
     event: 'result',
     mode,
     databaseName,
     status: failed ? 'failed' : mode === 'apply' ? 'completed' : 'preview',
     models: outcomes,
-    writesAttempted: touched.size > 0,
-    partialEffectsPossible: !!failure && touched.size > 0,
+    writesAttempted,
+    partialEffectsPossible:
+      !!(failure || verificationFailed) && writesAttempted,
     error: failure,
     closeError,
   });
@@ -699,7 +875,7 @@ if (require.main === module) {
     })
     .catch(() => {
       console.error(
-        JSON.stringify({
+        snapshot({
           event: 'result',
           status: 'failed',
           error: { code: 'SYNC_INDEXES_FAILED' },
