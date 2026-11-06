@@ -103,7 +103,7 @@ npm.cmd run test -- --runInBand --runTestsByPath ./scripts/import-users.spec.ts 
 
 产品合同由 [Config Matrix](./handoff-backend-config-matrix.md#sync-indexes-普通索引同步) 维护。离线回归与真实数据库集成分别使用独立进程。
 
-**离线回归。** `scripts/sync-indexes.spec.ts` 使用 purpose `none`。只使用合成配置和无网络替身，连接替身与网络阻断在任何网络动作前生效。覆盖 CLI、配置和库名门禁、预览零写入、删除授权、逐项执行和首错停止、计划及 UUID 漂移、统一末尾验收、退出码与资源回收。通过空 diff 反例验证实际定义验收，使用 BSON 和正式 Schema 克隆验证无损输出、数字解码、sparse、部分过滤器及特殊索引限制。离线证据证明控制流、调用边界和数据处理。
+**离线回归。** `scripts/sync-indexes.spec.ts` 使用 purpose `none`。只使用合成配置和无网络替身，连接替身与网络阻断在任何网络动作前生效。覆盖 CLI、库名和支持范围门禁、预览零写入、删除授权、逐项执行和首错停止、UUID 漂移叠加索引错误时的诊断、统一末尾验收、退出码与资源回收。真实 BSON、未连接驱动对象、正式 Schema 克隆及受控输出流用于验证解码、比较、特殊定义拒绝和报告降级。共享的测试生命周期逻辑配合可控 Promise 验证超时停止和清理门禁。这些证据验证控制流、调用边界和数据处理。
 
 从 `backend` 目录先运行 discovery，确认仅命中下列文件后使用相同路径执行。
 
@@ -112,7 +112,9 @@ npm.cmd run test -- --listTests --runInBand --runTestsByPath ./scripts/sync-inde
 npm.cmd run test -- --runInBand --runTestsByPath ./scripts/sync-indexes.spec.ts
 ```
 
-**真实数据库集成。** `test/sync-indexes.e2e-spec.ts` 使用 purpose `standard_test` 和现有 `test:e2e` runner。独立进程只从 `backend/.env.test` 读取 `MONGO_ADMIN_URI`，连接前后均校验目标为本地 `eduforge_test`。通过正式 Schema 克隆映射到本轮唯一前缀的专属集合，调用正式 CLI 的连接、盘点、执行及验收路径。结束时仅按登记名称删除本轮创建的集合，核对残留并关闭连接。HTTP 应用和其他业务服务均不启动。
+**真实数据库集成。** `test/sync-indexes.e2e-spec.ts` 使用 purpose `standard_test` 和现有 `test:e2e` runner。独立进程只从 `backend/.env.test` 读取 `MONGO_ADMIN_URI`，目标限于本机可写 standalone MongoDB 的 `eduforge_test`。驱动解析后须恰有一个 loopback seed，SRV、副本集和负载均衡配置会被拒绝。准备、正式 CLI 与清理均核验实际选中服务器地址、standalone 类型和实际库名。通过正式 Schema 克隆映射到本轮唯一前缀的专属集合，调用正式 CLI 的连接、盘点、执行及验收路径。HTTP 应用和其他业务服务均不启动。
+
+测试期限早于 Jest 外层超时。停止后禁止发起新的测试写入，收尾时先等待在途调用收束。确认已发出的写命令结果、实际目标和集合名称及 UUID 归属后，才删除本轮登记集合，核对残留并关闭连接。任一清理门禁无法确认时，保留相关集合并报告残留或无法确认项。超时、Promise 拒绝或关闭连接本身均不足以证明服务端已取消写入。
 
 该 spec 核对缺失集合及索引的真实补建、关键唯一索引、Session TTL、Submission 两个部分唯一索引、再次执行无变更、预览零写入、删除授权、重复键导致部分成功后的验收，以及集合重建前后的真实 UUID。写前 UUID 漂移的确定性停止、BSON 精度和难以稳定制造的故障由离线回归负责。生产拓扑、唯一约束空窗、并发写入、复制延迟及真实网络超时均在本组验收范围之外。
 

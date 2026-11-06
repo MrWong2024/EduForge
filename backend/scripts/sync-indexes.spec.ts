@@ -1,9 +1,12 @@
 import { spawnSync } from 'node:child_process';
 import { resolve } from 'node:path';
+import { Writable } from 'node:stream';
 import mongoose, { type mongo, type Schema } from 'mongoose';
 import { SubmissionSchema } from '../src/modules/learning-tasks/schemas/submission.schema';
+import { createSyncIndexesLifecycle } from '../test/helpers/sync-indexes-lifecycle';
 import {
   runSyncIndexesCli,
+  writeSyncIndexesLine,
   type CollectionMetadata,
   type SyncIndexDefinition,
   type SyncIndexModel,
@@ -40,12 +43,12 @@ const legacy = {
   name: 'account_created',
   key: { accountId: 1, createdAt: -1 },
   unique: true,
-  partialFilterExpression: { active: true },
+  partialFilterExpression: { classroomTaskId: null },
   collation: { locale: 'en', strength: 2 },
 } satisfies mongo.IndexDescriptionInfo;
 const replacement: SyncIndexDefinition = [
   { accountId: 1, createdAt: -1 },
-  { name: 'account_created', sparse: true },
+  { sparse: true },
 ];
 const installedReplacement: mongo.IndexDescriptionInfo = {
   name: 'account_created',
@@ -54,7 +57,7 @@ const installedReplacement: mongo.IndexDescriptionInfo = {
 };
 const ttl: SyncIndexDefinition = [
   { expiresAt: 1 },
-  { name: 'expiry_ttl', expireAfterSeconds: 300 },
+  { expireAfterSeconds: 300 },
 ];
 const installedTtl: mongo.IndexDescriptionInfo = {
   name: 'expiry_ttl',
@@ -183,6 +186,7 @@ function harness(fixtures: ModelFixture[] = [addOnly]) {
     }),
     directConnection: jest.fn<boolean | undefined, []>(),
     writeConcernW: jest.fn<mongo.WriteConcern['w'] | undefined, []>(),
+    assertSupportedTopology: jest.fn(() => Promise.resolve()),
     models: jest.fn<readonly SyncIndexModel[], []>(() => {
       events.push('register');
       return models.map(({ model }) => model);
@@ -219,7 +223,9 @@ function harness(fixtures: ModelFixture[] = [addOnly]) {
       logs.push(line);
       if (line.includes('"event":"plan"')) events.push('plan-printed');
     },
-    error: (line) => errors.push(line),
+    error: (line) => {
+      errors.push(line);
+    },
   };
 
   return {
@@ -449,6 +455,54 @@ describe('sync-indexes planning, execution, and verification (offline)', () => {
     },
   );
 
+  it.each([
+    ['read failure', 'INDEX_READBACK_FAILED'],
+    ['hidden index', 'HIDDEN_INDEX_UNSUPPORTED'],
+  ] as const)(
+    'keeps UUID drift when verification also encounters a %s',
+    async (issue, code) => {
+      const h = harness([addOnly, replace, absent]);
+      const read = h.connection.collectionMetadata.getMockImplementation();
+      if (!read) throw new Error('EXPECTED_METADATA_FIXTURE');
+      h.connection.collectionMetadata.mockImplementation((name) =>
+        name === 'tasks' && h.events.includes('plan-printed')
+          ? Promise.resolve({ collation: undefined, uuid: changedUuid })
+          : read(name),
+      );
+      h.models[1].listIndexes.mockImplementation(() => {
+        if (!h.events.includes('plan-printed')) {
+          return Promise.resolve([idIndex, legacy]);
+        }
+        return issue === 'read failure'
+          ? Promise.reject(new Error('private read error'))
+          : Promise.resolve([idIndex, { ...legacy, hidden: true }]);
+      });
+
+      expect(await h.run([...apply, '--allow-drop'])).toBe(1);
+      expect(h.models[0].createIndexes).toHaveBeenCalledTimes(1);
+      expect(h.models[1].cleanIndexes).not.toHaveBeenCalled();
+      expect(h.models[2].createCollection).not.toHaveBeenCalled();
+      expect(jsonEvent(h, 'result')).toMatchObject({
+        models: [
+          { verification: { status: 'passed' } },
+          {
+            collectionUuid: changedUuid,
+            verification: {
+              status: 'unconfirmed',
+              collectionUuidChanged: {
+                expected: initialUuid,
+                actual: changedUuid,
+              },
+              error: { code },
+            },
+          },
+          { verification: { status: 'different' } },
+        ],
+      });
+      expect(output(h)).not.toContain('private read error');
+    },
+  );
+
   it.each(['drop', 'create'] as const)(
     'stops all later writes after a %s fails and records partial execution',
     async (kind) => {
@@ -514,7 +568,7 @@ describe('sync-indexes planning, execution, and verification (offline)', () => {
   );
 
   it('awaits each operation and records a mid-creation error before the remaining creation', async () => {
-    const extra: SyncIndexDefinition = [{ value: 1 }, { name: 'value_idx' }];
+    const extra: SyncIndexDefinition = [{ value: 1 }, {}];
     const h = harness([
       {
         ...addOnly,
@@ -683,39 +737,35 @@ describe('sync-indexes planning, execution, and verification (offline)', () => {
 
   it.each([
     [{ ...installedReplacement, key: { createdAt: -1, accountId: 1 } }],
-    [{ ...installedReplacement, name: 'same_definition_wrong_name' }],
     [{ ...installedReplacement, collation: { locale: 'en', strength: 2 } }],
-  ])(
-    'checks order, explicit names and collation with an empty plan: %j',
-    async (actual) => {
-      const h = harness([
+  ])('checks order and collation with an empty plan: %j', async (actual) => {
+    const h = harness([
+      {
+        ...replace,
+        existing: [actual],
+        drop: [],
+        create: [],
+        expected: [replacement],
+      },
+    ]);
+    expect(await h.run(apply)).toBe(1);
+    noWrites(h);
+    expect(jsonEvent(h, 'result')).toMatchObject({
+      models: [
         {
-          ...replace,
-          existing: [actual],
-          drop: [],
-          create: [],
-          expected: [replacement],
-        },
-      ]);
-      expect(await h.run(apply)).toBe(1);
-      noWrites(h);
-      expect(jsonEvent(h, 'result')).toMatchObject({
-        models: [
-          {
-            verification: {
-              status: 'different',
-              differences: {
-                missingIndexes: [
-                  { key: replacement[0], options: replacement[1] },
-                ],
-                extraIndexes: [actual],
-              },
+          verification: {
+            status: 'different',
+            differences: {
+              missingIndexes: [
+                { key: replacement[0], options: replacement[1] },
+              ],
+              extraIndexes: [actual],
             },
           },
-        ],
-      });
-    },
-  );
+        },
+      ],
+    });
+  });
 
   it('recognizes the default index by both exact name and key', async () => {
     const h = harness([{ name: 'User', collectionName: 'users' }]);
@@ -753,6 +803,241 @@ describe('sync-indexes planning, execution, and verification (offline)', () => {
     expect(model.createIndexes).not.toHaveBeenCalled();
     expect(jsonEvent(h, 'result')).toMatchObject({
       models: [{ verification: { status: 'unconfirmed' } }],
+    });
+  });
+});
+
+describe('sync-indexes output boundaries (offline)', () => {
+  it('waits for the plan write callback before issuing DDL', async () => {
+    const h = harness();
+    let signal!: () => void;
+    let completeWrite: ((error?: Error | null) => void) | undefined;
+    const started = new Promise<void>((resolve) => {
+      signal = resolve;
+    });
+    const stream = new Writable({
+      write(_chunk, _encoding, callback) {
+        completeWrite = callback;
+        signal();
+      },
+    });
+    h.deps.log = (line) => {
+      if (line.includes('"event":"plan"'))
+        return writeSyncIndexesLine(stream, line);
+      h.logs.push(line);
+    };
+    const running = h.run(apply);
+    await Promise.race([started, running]);
+    try {
+      expect(completeWrite).toBeDefined();
+      noWrites(h);
+    } finally {
+      completeWrite?.();
+      await running;
+      stream.destroy();
+    }
+    expect(await running).toBe(0);
+    expect(h.models[0].createIndexes).toHaveBeenCalledTimes(1);
+  });
+
+  it.each(['asynchronous EPIPE', 'synchronous write error'] as const)(
+    'reports %s during the plan as a failure with no DDL',
+    async (kind) => {
+      const h = harness();
+      const error = Object.assign(new Error('private output error'), {
+        code: 'EPIPE',
+      });
+      const stream = new Writable({
+        write(_chunk, _encoding, callback) {
+          queueMicrotask(() => callback(error));
+        },
+      });
+      if (kind === 'synchronous write error') {
+        jest.spyOn(stream, 'write').mockImplementation(() => {
+          throw error;
+        });
+      }
+      h.deps.log = (line) => writeSyncIndexesLine(stream, line);
+      expect(await h.run(apply)).toBe(1);
+      noWrites(h);
+      expect(h.connection.close).toHaveBeenCalledTimes(1);
+      expect(jsonEvent(h, 'result')).toMatchObject({
+        status: 'failed',
+        error: { code: 'PLAN_OUTPUT_FAILED' },
+        writesAttempted: false,
+      });
+      expect(output(h)).not.toContain('private output error');
+      stream.destroy();
+    },
+  );
+
+  it.each([true, false])(
+    'exits nonzero when the result channel breaks (stderr available %j)',
+    async (stderrAvailable) => {
+      const h = harness();
+      const error = Object.assign(new Error('private output error'), {
+        code: 'EPIPE',
+      });
+      const stream = new Writable({
+        write(_chunk, _encoding, callback) {
+          queueMicrotask(() => callback(error));
+        },
+      });
+      h.deps.log = (line) => {
+        if (line.includes('"event":"result"'))
+          return writeSyncIndexesLine(stream, line);
+        h.logs.push(line);
+      };
+      const stderr = jest.fn((line: string) => {
+        if (!stderrAvailable) return Promise.reject(error);
+        h.errors.push(line);
+        return Promise.resolve();
+      });
+      h.deps.error = stderr;
+      expect(await h.run(apply)).toBe(1);
+      expect(h.models[0].createIndexes).toHaveBeenCalledTimes(1);
+      expect(h.connection.close).toHaveBeenCalledTimes(1);
+      expect(stderr).toHaveBeenCalledTimes(1);
+      if (stderrAvailable) {
+        expect(jsonEvent(h, 'result')).toMatchObject({
+          status: 'failed',
+          reportError: {
+            code: 'RESULT_OUTPUT_FAILED',
+            rawMetadataOmitted: true,
+          },
+          models: [
+            {
+              operations: [{ status: 'completed' }],
+              verification: { status: 'passed' },
+            },
+          ],
+        });
+      } else {
+        expect(h.errors).toHaveLength(0);
+      }
+      stream.destroy();
+    },
+  );
+
+  it('degrades an unserializable result without losing the original execution error or safe states', async () => {
+    const h = harness([{ ...replace, create: [replacement, ttl] }, absent]);
+    const model = h.models[0];
+    model.createIndexes.mockRejectedValueOnce(
+      new mongoose.mongo.MongoServerError({
+        message: 'private duplicate key',
+        code: 11000,
+      }),
+    );
+    const read = model.listIndexes.getMockImplementation();
+    if (!read) throw new Error('EXPECTED_READ_FIXTURE');
+    model.listIndexes.mockImplementation(() =>
+      model.createIndexes.mock.calls.length
+        ? Promise.resolve([
+            idIndex,
+            {
+              name: 'unsafe_serialization_fixture',
+              key: { evidence: 1 },
+              evidence: { _bsontype: 'private_serializer_fixture' },
+            },
+          ])
+        : read(),
+    );
+
+    expect(await h.run([...apply, '--allow-drop'])).toBe(1);
+    expect(h.connection.close).toHaveBeenCalledTimes(1);
+    expect(jsonEvent(h, 'result')).toMatchObject({
+      status: 'failed',
+      error: { code: 'INDEX_APPLY_FAILED', driverCode: 11000 },
+      reportError: {
+        code: 'REPORT_SERIALIZATION_FAILED',
+        rawMetadataOmitted: true,
+      },
+      models: [
+        {
+          collectionUuid: initialUuid,
+          operations: [
+            { status: 'completed' },
+            { status: 'failed' },
+            { status: 'not-executed' },
+          ],
+          verification: { status: 'different' },
+        },
+        {
+          operations: [{ status: 'not-executed' }, { status: 'not-executed' }],
+          verification: { status: 'different' },
+        },
+      ],
+    });
+    expect(h.errors).toHaveLength(1);
+    expect(h.errors[0]).not.toMatch(
+      /private_|unsafe_serialization_fixture|"finalIndexes"|"options"|"key"/,
+    );
+  });
+});
+
+describe('sync-indexes integration lifecycle (offline)', () => {
+  it('stops new writes at the deadline and permits cleanup only after confirmed settlement', async () => {
+    const lifecycle = createSyncIndexesLifecycle();
+    let release!: () => void;
+    const pending = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const write = jest.fn(() => pending);
+    const nextWrite = jest.fn(() => Promise.resolve());
+    const cleanup = jest.fn();
+    jest.useFakeTimers();
+    try {
+      const running = lifecycle.run(100, async () => {
+        await lifecycle.write(write);
+        await lifecycle.write(nextWrite);
+      });
+      const expired = expect(running).rejects.toThrow(
+        'SYNC_INDEXES_E2E_DEADLINE',
+      );
+      await jest.advanceTimersByTimeAsync(0);
+      expect(write).toHaveBeenCalledTimes(1);
+      await jest.advanceTimersByTimeAsync(100);
+      await expired;
+      await expect(lifecycle.write(nextWrite)).rejects.toThrow(
+        'SYNC_INDEXES_E2E_STOPPED',
+      );
+      const wait = lifecycle.stopAndWait(10);
+      await jest.advanceTimersByTimeAsync(10);
+      const beforeSettlement = await wait;
+      if (beforeSettlement.cleanupAllowed) cleanup();
+      expect(beforeSettlement).toEqual({
+        settled: false,
+        uncertainWrite: false,
+        cleanupAllowed: false,
+      });
+      expect(cleanup).not.toHaveBeenCalled();
+
+      release();
+      const afterSettlement = await lifecycle.stopAndWait(1000);
+      if (afterSettlement.cleanupAllowed) cleanup();
+      expect(afterSettlement).toEqual({
+        settled: true,
+        uncertainWrite: false,
+        cleanupAllowed: true,
+      });
+      expect(nextWrite).not.toHaveBeenCalled();
+      expect(cleanup).toHaveBeenCalledTimes(1);
+    } finally {
+      release();
+      jest.useRealTimers();
+    }
+  });
+
+  it('does not permit cleanup after an uncertain write even when its promise settled', async () => {
+    const lifecycle = createSyncIndexesLifecycle();
+    const error = new Error('write response not received');
+    await expect(lifecycle.write(() => Promise.reject(error))).rejects.toBe(
+      error,
+    );
+    expect(await lifecycle.stopAndWait(0)).toEqual({
+      settled: true,
+      uncertainWrite: true,
+      cleanupAllowed: false,
     });
   });
 });
@@ -995,6 +1280,7 @@ function realComparisonHarness(
     recheckedIndexes?: readonly unknown[];
     configureSchema?: (schema: Schema) => void;
     metadata?: (name: string) => unknown;
+    hello?: () => Promise<mongo.Document>;
   } = {},
 ) {
   const h = harness();
@@ -1015,6 +1301,10 @@ function realComparisonHarness(
   const registrations: Array<[string, Schema, string]> = [];
   const indexClosures: jest.SpyInstance[] = [];
   const closeCollectionCursor = jest.fn(() => Promise.resolve());
+  const hello = jest.fn<Promise<mongo.Document>, [mongo.Document]>(
+    fixture.hello ??
+      (() => Promise.resolve({ ok: 1, isWritablePrimary: true })),
+  );
   const forbidden = jest.fn(() => {
     throw new Error('UNEXPECTED_WRITE_OR_SECOND_METADATA_READ');
   });
@@ -1031,6 +1321,7 @@ function realComparisonHarness(
   let trackedCollection: string | undefined;
   let client: mongo.MongoClient | undefined;
   const rawOptions: (mongo.RunCursorCommandOptions | undefined)[] = [];
+  const collectionOptions: (mongo.ListCollectionsOptions | undefined)[] = [];
 
   function run(args: readonly string[]) {
     jest
@@ -1072,10 +1363,34 @@ function realComparisonHarness(
           Object.defineProperty(native, 'db', {
             value: {
               databaseName: driverDb.databaseName,
-              listCollections: ({ name }: { name: string }) => ({
-                next: () => Promise.resolve(metadata(name)),
-                close: closeCollectionCursor,
-              }),
+              command: hello,
+              listCollections: (
+                { name }: { name: string },
+                options?: mongo.ListCollectionsOptions,
+              ) => {
+                collectionOptions.push(options);
+                const cursor = driverDb.listCollections({ name }, options);
+                jest.spyOn(cursor, 'next').mockImplementation(() => {
+                  const decoderOptions: unknown = Reflect.get(
+                    cursor,
+                    'deserializationOptions',
+                  );
+                  if (!decoderOptions || typeof decoderOptions !== 'object') {
+                    throw new Error('EXPECTED_COLLECTION_CURSOR_OPTIONS');
+                  }
+                  const decoded: unknown = BSON.deserialize(
+                    BSON.serialize({ entry: metadata(name) }),
+                    decoderOptions,
+                  ).entry;
+                  return Promise.resolve(
+                    decoded as mongo.CollectionInfo | null,
+                  );
+                });
+                jest
+                  .spyOn(cursor, 'close')
+                  .mockImplementation(closeCollectionCursor);
+                return cursor;
+              },
               runCursorCommand: (
                 command: mongo.Document,
                 options?: mongo.RunCursorCommandOptions,
@@ -1137,6 +1452,8 @@ function realComparisonHarness(
     rawOptions,
     registrations,
     metadata,
+    hello,
+    collectionOptions,
     forbidden,
     indexClosures,
     closeCollectionCursor,
@@ -1228,6 +1545,28 @@ describe('sync-indexes driver and Schema adapter (offline)', () => {
   });
 
   it.each([
+    ['mongos', 'SHARDED_TOPOLOGY_UNSUPPORTED'],
+    ['failed handshake', 'CONNECTION_FAILED'],
+  ] as const)('rejects %s before model registration', async (kind, code) => {
+    const a = realComparisonHarness({
+      hello: () =>
+        kind === 'mongos'
+          ? Promise.resolve({ ok: 1, msg: 'isdbgrid' })
+          : Promise.reject(new Error('private handshake error')),
+    });
+    expect(await a.run(apply)).toBe(1);
+    expect(a.hello.mock.calls[0]?.[0]).toEqual({ hello: 1 });
+    expect(a.registrations).toHaveLength(0);
+    expect(a.metadata).not.toHaveBeenCalled();
+    expect(a.forbidden).not.toHaveBeenCalled();
+    expect(jsonEvent(a.h, 'result')).toMatchObject({
+      error: { code },
+      writesAttempted: false,
+    });
+    expect(output(a.h)).not.toContain('private handshake error');
+  });
+
+  it.each([
     ['missing UUID', undefined],
     ['malformed UUID string', initialUuid],
     [
@@ -1273,6 +1612,36 @@ describe('sync-indexes driver and Schema adapter (offline)', () => {
       expect(await a.run(apply)).toBe(1);
       expect(a.rawOptions).toHaveLength(0);
       expect(a.forbidden).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each(['initial plan', 'write recheck'] as const)(
+    'refuses encrypted collection metadata at %s',
+    async (phase) => {
+      let taskReads = 0;
+      const a = realComparisonHarness({
+        metadata: (name) => ({
+          name,
+          type: 'collection',
+          options:
+            name === 'tasks' &&
+            ++taskReads >= (phase === 'initial plan' ? 1 : 2)
+              ? {
+                  encryptedFields: {
+                    escCollection: 'private_encryption_fixture',
+                  },
+                }
+              : {},
+          info: { uuid: new mongoose.mongo.BSON.UUID(initialUuid) },
+        }),
+      });
+      expect(await a.run([...apply, '--allow-drop'])).toBe(1);
+      expect(a.forbidden).not.toHaveBeenCalled();
+      expect(jsonEvent(a.h, 'result')).toMatchObject({
+        error: { code: 'ENCRYPTED_COLLECTION_UNSUPPORTED' },
+        writesAttempted: false,
+      });
+      expect(output(a.h)).not.toContain('private_encryption_fixture');
     },
   );
 
@@ -1331,6 +1700,43 @@ describe('sync-indexes driver and Schema adapter (offline)', () => {
   );
 
   it.each([
+    [{ name: 'explicit_user_idx' }, 'SCHEMA_INDEX_NAME_UNSUPPORTED'],
+    [{ collation: { locale: 'en' } }, 'SCHEMA_INDEX_COLLATION_UNSUPPORTED'],
+  ] as const)(
+    'refuses unsupported Schema index options %j before DDL',
+    async (options, code) => {
+      const a = realComparisonHarness({
+        configureSchema: (schema) => {
+          Object.assign(sessionUserDeclaration(schema)[1], options);
+        },
+      });
+      expect(await a.run(apply)).toBe(1);
+      expect(a.forbidden).not.toHaveBeenCalled();
+      expect(jsonEvent(a.h, 'result')).toMatchObject({
+        error: { code },
+        writesAttempted: false,
+      });
+    },
+  );
+
+  it('can still plan replacement of an actual non-simple index on a simple collection', async () => {
+    const actual = { ...sessionUserIndex, collation: { locale: 'en' } };
+    const a = realComparisonHarness({
+      indexes: [...matchingSessionIndexes.slice(0, -1), actual],
+    });
+    expect(await a.run(['--dry-run'])).toBe(0);
+    const plan: unknown = expect.arrayContaining([
+      expect.objectContaining({
+        model: 'Session',
+        toDrop: [actual],
+        toCreate: [{ key: { userId: 1 }, options: {} }],
+      }),
+    ]);
+    expect(jsonEvent(a.h, 'plan')).toHaveProperty('models', plan);
+    expect(a.forbidden).not.toHaveBeenCalled();
+  });
+
+  it.each([
     ['hidden', 'HIDDEN_INDEX_UNSUPPORTED'],
     ['prepareUnique', 'PREPARE_UNIQUE_UNSUPPORTED'],
   ] as const)(
@@ -1347,7 +1753,7 @@ describe('sync-indexes driver and Schema adapter (offline)', () => {
     },
   );
 
-  it('honors pinned BSON numeric decoding for the raw input to real Mongoose and final verification', async () => {
+  it('pins BSON numeric and UUID decoding in real driver cursors despite URI options', async () => {
     const indexes = [
       ...matchingSessionIndexes.slice(0, -1),
       {
@@ -1357,7 +1763,8 @@ describe('sync-indexes driver and Schema adapter (offline)', () => {
     ];
     const a = realComparisonHarness({
       indexes,
-      suffix: '?promoteValues=false&promoteLongs=false&raw=true',
+      suffix:
+        '?promoteValues=false&promoteLongs=false&raw=true&promoteBuffers=true',
     });
     expect(await a.run([...apply, '--allow-drop'])).toBe(0);
     expectEmptyComparison(a, 'completed');
@@ -1366,13 +1773,16 @@ describe('sync-indexes driver and Schema adapter (offline)', () => {
       promoteLongs: true,
       useBigInt64: false,
       raw: false,
+      promoteBuffers: false,
     });
     expect(a.rawOptions[0]).toMatchObject({
       promoteValues: true,
       promoteLongs: true,
       useBigInt64: false,
+      promoteBuffers: false,
       timeoutMode: 'cursorLifetime',
     });
+    expect(a.collectionOptions[0]).toMatchObject({ promoteBuffers: false });
     expect(a.rawReads[0]).toEqual(matchingSessionIndexes);
     expect(jsonEvent(a.h, 'result')).toHaveProperty(
       'models',
@@ -1442,36 +1852,51 @@ describe('sync-indexes driver and Schema adapter (offline)', () => {
     });
   });
 
-  it('reports _id_hashed as an extra actual index even when Mongoose planned no deletion', async () => {
-    const hashed = { name: '_id_hashed', key: { _id: 'hashed' } };
-    const a = realComparisonHarness({
-      indexes: [...matchingSessionIndexes, hashed],
-    });
-    expect(await a.run([...apply, '--allow-drop'])).toBe(1);
-    expect(jsonEvent(a.h, 'plan')).toHaveProperty(
-      'models',
-      expect.arrayContaining([
-        expect.objectContaining({ model: 'Session', toDrop: [], toCreate: [] }),
-      ]),
-    );
-    const differences: unknown = expect.objectContaining({
-      extraIndexes: [hashed],
-    });
-    const verification: unknown = expect.objectContaining({
-      status: 'different',
-      differences,
-    });
-    expect(jsonEvent(a.h, 'result')).toHaveProperty(
-      'models',
-      expect.arrayContaining([
-        expect.objectContaining({
-          model: 'Session',
-          verification,
-        }),
-      ]),
-    );
-    expect(a.forbidden).not.toHaveBeenCalled();
-  });
+  it.each([
+    ['preview', ['--dry-run'], 0],
+    ['apply', [...apply, '--allow-drop'], 1],
+  ] as const)(
+    'reports custom-named hashed _id during %s without planning a deletion',
+    async (mode, args, exit) => {
+      const hashed = { name: 'private_id_hash', key: { _id: 'hashed' } };
+      const a = realComparisonHarness({
+        indexes: [...matchingSessionIndexes, hashed],
+      });
+      expect(await a.run(args)).toBe(exit);
+      const manualReview: unknown = expect.arrayContaining([
+        expect.objectContaining(hashed),
+      ]);
+      expect(jsonEvent(a.h, 'plan')).toHaveProperty(
+        'models',
+        expect.arrayContaining([
+          expect.objectContaining({
+            model: 'Session',
+            toDrop: [],
+            toCreate: [],
+            manualReview,
+          }),
+        ]),
+      );
+      expect(a.forbidden).not.toHaveBeenCalled();
+      if (mode === 'preview') return;
+      const differences: unknown = expect.objectContaining({
+        extraIndexes: [hashed],
+      });
+      const verification: unknown = expect.objectContaining({
+        status: 'different',
+        differences,
+      });
+      expect(jsonEvent(a.h, 'result')).toHaveProperty(
+        'models',
+        expect.arrayContaining([
+          expect.objectContaining({
+            model: 'Session',
+            verification,
+          }),
+        ]),
+      );
+    },
+  );
 
   it('emits the exact BSON Long in both the drop plan and final observed metadata', async () => {
     const { BSON } = mongoose.mongo;
@@ -1479,7 +1904,7 @@ describe('sync-indexes driver and Schema adapter (offline)', () => {
     const extra = {
       name: 'review_cutoff',
       key: { cutoff: 1 },
-      partialFilterExpression: { cutoff: { $gt: threshold } },
+      evidence: threshold,
     };
     const a = realComparisonHarness({
       indexes: [...matchingSessionIndexes, extra],
@@ -1492,7 +1917,7 @@ describe('sync-indexes driver and Schema adapter (offline)', () => {
       const parsed = jsonEvent(a.h, event, false);
       const indexes: unknown = expect.arrayContaining([
         expect.objectContaining({
-          partialFilterExpression: extra.partialFilterExpression,
+          evidence: threshold,
         }),
       ]);
       const match: unknown = expect.arrayContaining([
@@ -1611,48 +2036,149 @@ describe('sync-indexes Submission partial filter comparison (offline)', () => {
       label: 'an additional top-level predicate',
       field: 'taskId',
       filter: { ...explicitNullFilter, attemptNo: { $gt: 1 } },
-      schemaFilter: nullFilter,
     },
     {
       label: 'an additional nested operator',
       field: 'taskId',
       filter: { classroomTaskId: { $eq: null, $exists: true } },
-      schemaFilter: nullFilter,
     },
     {
       label: 'a different BSON type',
       field: 'classroomTaskId',
       filter: { classroomTaskId: { $type: 'string' } },
-      schemaFilter: objectIdFilter,
     },
   ] as const)(
-    'preserves a real difference for $label',
-    async ({ field, filter, schemaFilter }) => {
-      const { indexes, index } = submissionIndexFixture(field, filter);
+    'rejects an index filter with $label before it can enter the plan',
+    async ({ field, filter }) => {
+      const { indexes } = submissionIndexFixture(field, filter);
       const a = realComparisonHarness({ modelName: 'Submission', indexes });
 
-      expect(await a.run(['--dry-run'])).toBe(0);
-      expect(jsonEvent(a.h, 'plan')).toHaveProperty(
-        'models',
-        expect.arrayContaining([
-          expect.objectContaining({
-            model: 'Submission',
-            toDrop: [index],
-            toCreate: [
-              {
-                key: index.key,
-                options: {
-                  unique: true,
-                  partialFilterExpression: schemaFilter,
-                },
-              },
-            ],
-          }),
-        ]),
-      );
+      expect(await a.run([...apply, '--allow-drop'])).toBe(1);
+      expect(jsonEvent(a.h, 'result')).toMatchObject({
+        error: { code: 'PARTIAL_FILTER_UNSUPPORTED' },
+        writesAttempted: false,
+      });
+      expect(output(a.h)).not.toContain('"event":"plan"');
       expect(a.forbidden).not.toHaveBeenCalled();
     },
   );
+
+  it.each([
+    ['null', null],
+    ['array', [null]],
+    ['additional operator', { classroomTaskId: { $eq: null, $exists: true } }],
+  ] as const)(
+    'applies the same partial filter guard to a Schema %s',
+    async (_kind, partialFilterExpression) => {
+      const a = realComparisonHarness({
+        configureSchema: (schema) => {
+          Reflect.set(
+            sessionUserDeclaration(schema)[1],
+            'partialFilterExpression',
+            partialFilterExpression,
+          );
+        },
+      });
+      expect(await a.run(apply)).toBe(1);
+      expect(a.forbidden).not.toHaveBeenCalled();
+      expect(jsonEvent(a.h, 'result')).toMatchObject({
+        error: { code: 'PARTIAL_FILTER_UNSUPPORTED' },
+        writesAttempted: false,
+      });
+      expect(output(a.h)).not.toContain('"event":"plan"');
+    },
+  );
+
+  it('refuses both sides of real BSON snapshot collisions, including serializer markers', async () => {
+    const { BSON } = mongoose.mongo;
+    const filters = [
+      { audit: { $eq: 1 } },
+      { audit: { $eq: { $numberInt: '1' } } },
+      {
+        audit: {
+          $eq: new Map([
+            ['normal', 1],
+            ['123', 2],
+          ]),
+        },
+      },
+      {
+        audit: {
+          $eq: new Map([
+            ['123', 2],
+            ['normal', 1],
+          ]),
+        },
+      },
+      { audit: { $eq: new Map([['_bsontype', 'private_serializer_marker']]) } },
+    ];
+    const buffers = filters.map((filter) => BSON.serialize(filter));
+    const decoded = buffers.map((buffer) => BSON.deserialize(buffer));
+    expect(buffers[0]).not.toEqual(buffers[1]);
+    expect(buffers[2]).not.toEqual(buffers[3]);
+    expect(BSON.EJSON.stringify(decoded[0], { relaxed: false })).toBe(
+      BSON.EJSON.stringify(decoded[1], { relaxed: false }),
+    );
+    expect(decoded[2]).toEqual(decoded[3]);
+    expect(() =>
+      BSON.EJSON.stringify(decoded[4], { relaxed: false }),
+    ).toThrow();
+
+    for (const partialFilterExpression of filters) {
+      const name = 'extra_partial_fixture';
+      const a = realComparisonHarness({
+        indexes: [
+          ...matchingSessionIndexes,
+          { name, key: { audit: 1 }, partialFilterExpression },
+        ],
+      });
+      expect(await a.run([...apply, '--allow-drop'])).toBe(1);
+      expect(a.forbidden).not.toHaveBeenCalled();
+      expect(jsonEvent(a.h, 'result')).toMatchObject({
+        error: { code: 'PARTIAL_FILTER_UNSUPPORTED', indexName: name },
+        writesAttempted: false,
+      });
+      expect(output(a.h)).not.toContain('"event":"plan"');
+      expect(output(a.h)).not.toContain('"partialFilterExpression"');
+      expect(output(a.h)).not.toContain('private_serializer_marker');
+    }
+  });
+
+  it('keeps unsupported partial filters out of the report during final readback', async () => {
+    const h = harness();
+    const read = h.models[0].listIndexes.getMockImplementation();
+    if (!read) throw new Error('EXPECTED_READ_FIXTURE');
+    h.models[0].listIndexes.mockImplementation(() =>
+      h.models[0].createIndexes.mock.calls.length
+        ? Promise.resolve([
+            idIndex,
+            installedTtl,
+            {
+              name: 'unsafe_readback',
+              key: { other: 1 },
+              partialFilterExpression: { other: 'private_unsupported_filter' },
+            },
+          ])
+        : read(),
+    );
+    expect(await h.run(apply)).toBe(1);
+    expect(jsonEvent(h, 'result')).toMatchObject({
+      models: [
+        {
+          operations: [{ status: 'completed' }],
+          verification: {
+            status: 'unconfirmed',
+            error: {
+              code: 'PARTIAL_FILTER_UNSUPPORTED',
+              indexName: 'unsafe_readback',
+            },
+          },
+        },
+      ],
+    });
+    expect(output(h)).not.toContain('private_unsupported_filter');
+    expect(output(h)).not.toContain('"finalIndexes"');
+  });
 
   it('rejects raw filter drift even when the two filters compare as equivalent', async () => {
     const original = submissionIndexFixture('taskId', explicitNullFilter);

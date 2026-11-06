@@ -1,5 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
+import type { Writable } from 'node:stream';
 import { isDeepStrictEqual } from 'node:util';
 import mongoose, {
   type Connection,
@@ -22,6 +23,7 @@ const CONNECTION_OPTIONS = {
   autoCreate: false,
   autoIndex: false,
   raw: false,
+  promoteBuffers: false,
   promoteValues: true,
   promoteLongs: true,
   useBigInt64: false,
@@ -68,6 +70,7 @@ export interface SyncIndexesConnection {
   databaseName(this: void): string | undefined;
   directConnection(this: void): boolean | undefined;
   writeConcernW(this: void): mongo.WriteConcern['w'] | undefined;
+  assertSupportedTopology(this: void): Promise<void>;
   models(this: void): readonly SyncIndexModel[];
   collectionMetadata(
     this: void,
@@ -85,8 +88,8 @@ export interface SyncIndexesDependencies {
     uri: string,
     options: typeof CONNECTION_OPTIONS,
   ): SyncIndexesConnection;
-  log(this: void, message: string): void;
-  error(this: void, message: string): void;
+  log(this: void, message: string): void | Promise<void>;
+  error(this: void, message: string): void | Promise<void>;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -134,6 +137,7 @@ async function listReadyIndexes(
       includeBuildUUIDs: true,
     },
     {
+      promoteBuffers: CONNECTION_OPTIONS.promoteBuffers,
       promoteValues: CONNECTION_OPTIONS.promoteValues,
       promoteLongs: CONNECTION_OPTIONS.promoteLongs,
       useBigInt64: CONNECTION_OPTIONS.useBigInt64,
@@ -211,6 +215,27 @@ function copyComparisonOptions<
   const filter = normalizeSubmissionPartialFilter(copy.partialFilterExpression);
   if (filter !== undefined) copy.partialFilterExpression = filter;
   return copy;
+}
+
+class UnsupportedIndexError extends SyncIndexesError {
+  constructor(
+    code: string,
+    readonly indexName: string | undefined,
+  ) {
+    super(code);
+  }
+}
+
+function assertSupportedPartialFilter(
+  filter: unknown,
+  indexName: string | undefined,
+) {
+  if (
+    filter !== undefined &&
+    normalizeSubmissionPartialFilter(filter) === undefined
+  ) {
+    throw new UnsupportedIndexError('PARTIAL_FILTER_UNSUPPORTED', indexName);
+  }
 }
 
 export function registerSyncIndexModels(
@@ -294,6 +319,7 @@ export function createMongooseConnection(
   uri: string,
   options: typeof CONNECTION_OPTIONS,
   schemas = SYNC_INDEX_SCHEMAS,
+  checkServer?: (db: mongo.Db, client: mongo.MongoClient) => Promise<void>,
 ): SyncIndexesConnection {
   const connection = mongoose.createConnection(uri, options);
   return {
@@ -303,9 +329,23 @@ export function createMongooseConnection(
     databaseName: () => connection.db?.databaseName,
     directConnection: () => connection.getClient().options.directConnection,
     writeConcernW: () => connection.getClient().writeConcern?.w,
+    assertSupportedTopology: async () => {
+      const db = connectedDb(connection);
+      const hello: unknown = await db.command({ hello: 1 });
+      if (!isRecord(hello) || hello.ok !== 1) {
+        throw new SyncIndexesError('TOPOLOGY_CHECK_FAILED');
+      }
+      if (hello.msg === 'isdbgrid') {
+        throw new SyncIndexesError('SHARDED_TOPOLOGY_UNSUPPORTED');
+      }
+      await checkServer?.(db, connection.getClient());
+    },
     models: () => registerSyncIndexModels(connection, schemas),
     collectionMetadata: async (name) => {
-      const cursor = connectedDb(connection).listCollections({ name });
+      const cursor = connectedDb(connection).listCollections(
+        { name },
+        { promoteBuffers: CONNECTION_OPTIONS.promoteBuffers },
+      );
       try {
         const entry: unknown = await cursor.next();
         if (entry === null) return null;
@@ -322,6 +362,9 @@ export function createMongooseConnection(
         }
         if (!isDocument(entry.options)) {
           throw new SyncIndexesError('COLLECTION_METADATA_INVALID');
+        }
+        if ('encryptedFields' in entry.options) {
+          throw new SyncIndexesError('ENCRYPTED_COLLECTION_UNSUPPORTED');
         }
         const uuid = isDocument(entry.info) ? entry.info.uuid : undefined;
         if (
@@ -353,14 +396,36 @@ export function createMongooseConnection(
   };
 }
 
+export function writeSyncIndexesLine(stream: Writable, message: string) {
+  return new Promise<void>((resolveWrite, reject) => {
+    const onError = (error: Error) => reject(error);
+    stream.once('error', onError);
+    try {
+      stream.write(`${message}\n`, (error) => {
+        if (error) {
+          // Writable can emit the paired error after calling the callback.
+          setImmediate(() => stream.off('error', onError));
+          reject(error);
+        } else {
+          stream.off('error', onError);
+          resolveWrite();
+        }
+      });
+    } catch (error: unknown) {
+      stream.off('error', onError);
+      reject(error instanceof Error ? error : new Error('STREAM_WRITE_FAILED'));
+    }
+  });
+}
+
 function defaultDependencies(): SyncIndexesDependencies {
   return {
     env: process.env,
     backendDirectory: resolve(__dirname, '..'),
     readFile: (path) => readFileSync(path, 'utf8'),
     createConnection: createMongooseConnection,
-    log: (message) => console.log(message),
-    error: (message) => console.error(message),
+    log: (message) => writeSyncIndexesLine(process.stdout, message),
+    error: (message) => writeSyncIndexesLine(process.stderr, message),
   };
 }
 
@@ -413,9 +478,20 @@ async function readModelState(
   model: SyncIndexModel,
 ): Promise<ModelState> {
   const collection = await connection.collectionMetadata(model.collectionName);
-  assertSupportedCollectionCollation(collection?.collation);
-  const indexes = await readIndexMetadata(model, collection !== null);
+  const indexes = await readCollectionIndexes(model, collection);
   return { collection, indexes };
+}
+
+function readCollectionIndexes(
+  model: SyncIndexModel,
+  collection: CollectionMetadata | null,
+) {
+  assertSupportedCollectionCollation(collection?.collation);
+  return readIndexMetadata(model, collection !== null);
+}
+
+function defaultIndexName(key: IndexDefinition) {
+  return Object.entries(key).flat().join('_');
 }
 
 function assertSupportedIndexes(
@@ -451,8 +527,34 @@ function assertSupportedIndexes(
   ) {
     throw new SyncIndexesError('PREPARE_UNIQUE_UNSUPPORTED');
   }
-  for (const { key } of indexes) assertSupportedIndexDirections(key);
-  for (const [key] of schemaIndexes) assertSupportedIndexDirections(key);
+  for (const index of indexes) {
+    assertSupportedIndexDirections(index.key);
+    assertSupportedPartialFilter(index.partialFilterExpression, index.name);
+  }
+  for (const [key, options] of schemaIndexes) {
+    assertSupportedIndexDirections(key);
+    if (options.name !== undefined) {
+      throw new UnsupportedIndexError(
+        'SCHEMA_INDEX_NAME_UNSUPPORTED',
+        options.name,
+      );
+    }
+    const name = defaultIndexName(key);
+    if (
+      options.collation !== undefined &&
+      (!isDocument(options.collation) || options.collation.locale !== 'simple')
+    ) {
+      throw new UnsupportedIndexError(
+        'SCHEMA_INDEX_COLLATION_UNSUPPORTED',
+        name,
+      );
+    }
+    assertSupportedPartialFilter(options.partialFilterExpression, name);
+  }
+}
+
+function isHashedIdIndex(index: mongo.IndexDescriptionInfo) {
+  return isDeepStrictEqual(Object.entries(index.key), [['_id', 'hashed']]);
 }
 
 async function readModelPlan(
@@ -464,6 +566,10 @@ async function readModelPlan(
   const expected = model.schemaIndexes();
   assertSupportedIndexes(indexes, expected);
   const diff = await model.diffIndexes({ indexOptionsToCreate: true }, indexes);
+  const manualNames = new Set(
+    indexes.filter(isHashedIdIndex).map(({ name }) => name),
+  );
+  const toDrop = diff.toDrop.filter((name) => !manualNames.has(name));
   const names = new Set(indexes.map((index) => index.name));
   if (
     new Set(diff.toDrop).size !== diff.toDrop.length ||
@@ -473,13 +579,13 @@ async function readModelPlan(
   ) {
     throw new SyncIndexesError('INDEX_PLAN_DRIFT');
   }
-  const dropping = new Set(diff.toDrop);
+  const dropping = new Set(toDrop);
   const retainedNames = new Set(
     indexes.map(({ name }) => name ?? '').filter((name) => !dropping.has(name)),
   );
   retainedNames.add('_id_');
   for (const [key, options] of diff.toCreate) {
-    const name = options.name ?? Object.entries(key).flat().join('_');
+    const name = options.name ?? defaultIndexName(key);
     if (name === '*' || retainedNames.has(name)) {
       throw new SyncIndexesError('INDEX_NAME_CONFLICT');
     }
@@ -488,7 +594,7 @@ async function readModelPlan(
   return {
     ...state,
     expected,
-    toDrop: [...diff.toDrop].sort(),
+    toDrop: toDrop.sort(),
     toCreate: [...diff.toCreate],
   };
 }
@@ -524,13 +630,16 @@ function matchesIndex(
   );
 }
 
-type SafeFailure = { code: string; driverCode?: number };
+type SafeFailure = { code: string; driverCode?: number; indexName?: string };
 function safeFailure(error: unknown, fallback: string): SafeFailure {
   if (
     (error instanceof SyncIndexesError || error instanceof DatabaseGateError) &&
     /^[A-Z][A-Z0-9_]{0,79}$/.test(error.code)
   ) {
-    return { code: error.code };
+    return error instanceof UnsupportedIndexError &&
+      error.indexName !== undefined
+      ? { code: error.code, indexName: error.indexName }
+      : { code: error.code };
   }
   if (
     isRecord(error) &&
@@ -569,7 +678,11 @@ type ModelOutcome = {
   verification?:
     | { status: 'passed' }
     | { status: 'different'; differences: IndexDifferences }
-    | { status: 'unconfirmed'; error: SafeFailure };
+    | {
+        status: 'unconfirmed';
+        error: SafeFailure;
+        collectionUuidChanged?: IndexDifferences['collectionUuidChanged'];
+      };
 };
 
 type PlannedModel = {
@@ -656,12 +769,26 @@ async function verifyModel(
   entry: PlannedModel,
 ) {
   const { model, outcome, plan, expectedUuid } = entry;
+  let collectionUuidChanged: IndexDifferences['collectionUuidChanged'];
   try {
-    const { collection, indexes } = await readModelState(connection, model);
+    const collection = await connection.collectionMetadata(
+      model.collectionName,
+    );
     outcome.collectionExists = collection !== null;
     outcome.collectionUuid = collection?.uuid;
-    outcome.finalIndexes = indexes;
+    if (
+      collection &&
+      expectedUuid !== undefined &&
+      collection.uuid !== expectedUuid
+    ) {
+      collectionUuidChanged = {
+        expected: expectedUuid,
+        actual: collection.uuid,
+      };
+    }
+    const indexes = await readCollectionIndexes(model, collection);
     assertSupportedIndexes(indexes, plan.expected);
+    outcome.finalIndexes = indexes;
     if (collection && expectedUuid === undefined) {
       throw new SyncIndexesError('COLLECTION_IDENTITY_UNCONFIRMED');
     }
@@ -683,16 +810,8 @@ async function verifyModel(
       extraIndexes: extras,
     };
     if (!collection) differences.missingCollection = true;
-    if (
-      collection &&
-      expectedUuid !== undefined &&
-      collection.uuid !== expectedUuid
-    ) {
-      differences.collectionUuidChanged = {
-        expected: expectedUuid,
-        actual: collection.uuid,
-      };
-    }
+    if (collectionUuidChanged)
+      differences.collectionUuidChanged = collectionUuidChanged;
     if (collection && !indexes.some(isDefaultIdIndex))
       differences.missingDefaultIndex = true;
 
@@ -714,8 +833,46 @@ async function verifyModel(
     outcome.verification = {
       status: 'unconfirmed',
       error: safeFailure(error, 'INDEX_READBACK_FAILED'),
+      ...(collectionUuidChanged && { collectionUuidChanged }),
     };
   }
+}
+
+function summarizeOutcome(outcome: ModelOutcome) {
+  const {
+    model,
+    collection,
+    status,
+    operations,
+    terminalState,
+    collectionExists,
+    collectionUuid,
+    verification,
+  } = outcome;
+  return {
+    model,
+    collection,
+    status,
+    terminalState,
+    collectionExists,
+    collectionUuid,
+    operations: operations.map((operation) => ({
+      kind: operation.kind,
+      status: operation.status,
+      error: operation.error,
+      ...(operation.kind === 'dropIndex' && { name: operation.name }),
+    })),
+    verification: verification && {
+      status: verification.status,
+      ...(verification.status === 'unconfirmed' && {
+        error: verification.error,
+        collectionUuidChanged: verification.collectionUuidChanged,
+      }),
+      ...(verification.status === 'different' && {
+        collectionUuidChanged: verification.differences.collectionUuidChanged,
+      }),
+    },
+  };
 }
 
 const HELP = [
@@ -740,7 +897,8 @@ export async function runSyncIndexesCli(
   try {
     const options = parseSyncIndexesArguments(argv);
     if (options.help) {
-      deps.log(HELP);
+      phase = 'HELP_OUTPUT_FAILED';
+      await deps.log(HELP);
       return 0;
     }
 
@@ -769,6 +927,7 @@ export async function runSyncIndexesCli(
     if (options.apply && connection.writeConcernW() === 0) {
       throw new SyncIndexesError('UNACKNOWLEDGED_WRITE_CONCERN');
     }
+    await connection.assertSupportedTopology();
 
     phase = 'INDEX_PREFLIGHT_FAILED';
     const models = connection.models();
@@ -801,23 +960,27 @@ export async function runSyncIndexesCli(
         throw error;
       }
     }
-    deps.log(
-      snapshot({
-        event: 'plan',
-        mode,
-        databaseName,
-        models: plans.map(({ outcome, plan }) => ({
-          model: outcome.model,
-          collection: outcome.collection,
-          createCollection: plan.collection === null,
-          collectionUuid: plan.collection?.uuid,
-          toDrop: plan.indexes.filter((index) =>
-            plan.toDrop.includes(index.name ?? ''),
-          ),
-          toCreate: plan.toCreate.map(([key, options]) => ({ key, options })),
-        })),
-      }),
-    );
+    const planMessage = snapshot({
+      event: 'plan',
+      mode,
+      databaseName,
+      models: plans.map(({ outcome, plan }) => ({
+        model: outcome.model,
+        collection: outcome.collection,
+        createCollection: plan.collection === null,
+        collectionUuid: plan.collection?.uuid,
+        toDrop: plan.indexes.filter((index) =>
+          plan.toDrop.includes(index.name ?? ''),
+        ),
+        toCreate: plan.toCreate.map(([key, options]) => ({ key, options })),
+        manualReview: plan.indexes
+          .filter(isHashedIdIndex)
+          .map(({ name, key }) => ({ name, key })),
+      })),
+    });
+    phase = 'PLAN_OUTPUT_FAILED';
+    await deps.log(planMessage);
+    phase = 'INDEX_APPLY_FAILED';
 
     if (!options.apply) {
       for (const outcome of outcomes) outcome.status = 'preview';
@@ -851,21 +1014,53 @@ export async function runSyncIndexesCli(
   const writesAttempted = outcomes.some(({ operations }) =>
     operations.some(({ status }) => status !== 'not-executed'),
   );
-  const result = snapshot({
-    event: 'result',
+  const resultFields = {
+    event: 'result' as const,
     mode,
     databaseName,
-    status: failed ? 'failed' : mode === 'apply' ? 'completed' : 'preview',
-    models: outcomes,
     writesAttempted,
     partialEffectsPossible:
       !!(failure || verificationFailed) && writesAttempted,
     error: failure,
     closeError,
-  });
-  if (failed) deps.error(result);
-  else deps.log(result);
-  return failed ? 1 : 0;
+  };
+  const result = {
+    ...resultFields,
+    status: failed ? 'failed' : mode === 'apply' ? 'completed' : 'preview',
+    models: outcomes,
+  };
+  const summary = (
+    code: 'REPORT_SERIALIZATION_FAILED' | 'RESULT_OUTPUT_FAILED',
+  ) =>
+    JSON.stringify({
+      ...resultFields,
+      status: 'failed',
+      models: outcomes.map(summarizeOutcome),
+      reportError: { code, rawMetadataOmitted: true },
+    });
+  let message: string;
+  let serializationFailed = false;
+  try {
+    message = snapshot(result);
+  } catch {
+    message = summary('REPORT_SERIALIZATION_FAILED');
+    serializationFailed = true;
+  }
+  const useErrorStream = failed || serializationFailed;
+  try {
+    await (useErrorStream ? deps.error(message) : deps.log(message));
+  } catch {
+    const fallback = serializationFailed
+      ? message
+      : summary('RESULT_OUTPUT_FAILED');
+    try {
+      await (useErrorStream ? deps.log(fallback) : deps.error(fallback));
+    } catch {
+      // Neither output stream can deliver the result.
+    }
+    return 1;
+  }
+  return useErrorStream ? 1 : 0;
 }
 
 if (require.main === module) {
@@ -873,14 +1068,19 @@ if (require.main === module) {
     .then((code) => {
       process.exitCode = code;
     })
-    .catch(() => {
-      console.error(
-        snapshot({
-          event: 'result',
-          status: 'failed',
-          error: { code: 'SYNC_INDEXES_FAILED' },
-        }),
-      );
+    .catch(async () => {
       process.exitCode = 1;
+      try {
+        await writeSyncIndexesLine(
+          process.stderr,
+          JSON.stringify({
+            event: 'result',
+            status: 'failed',
+            error: { code: 'SYNC_INDEXES_FAILED' },
+          }),
+        );
+      } catch {
+        // A broken stderr cannot deliver the last-resort result.
+      }
     });
 }
