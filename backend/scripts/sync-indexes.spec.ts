@@ -1077,11 +1077,11 @@ describe('sync-indexes integration cleanup deadline (offline)', () => {
           owned,
           target,
           closeConnections,
-          totalBudgetMs: 100,
-          drainWaitMs: 10,
-          requestTimeoutMs: 30,
-          reportReserveMs: 40,
-          closeReserveMs: 20,
+          totalBudgetMs: 80_000,
+          drainWaitMs: 10_000,
+          requestTimeoutMs: 10_000,
+          reportReserveMs: 10_000,
+          closeReserveMs: 10_000,
         }),
     };
   }
@@ -1109,7 +1109,7 @@ describe('sync-indexes integration cleanup deadline (offline)', () => {
     const cleanup = fixture.run();
     await jest.advanceTimersByTimeAsync(0);
     expect(fixture.target.assertOwned).toHaveBeenCalledTimes(1);
-    clock = 41;
+    clock = 60_000;
     confirmOwnership();
 
     expect(await cleanup).toMatchObject({
@@ -1125,31 +1125,57 @@ describe('sync-indexes integration cleanup deadline (offline)', () => {
     expect(fixture.closeConnections).toHaveBeenCalledTimes(1);
   });
 
-  it('records the acknowledged in-flight drop after the write cutoff without starting another', async () => {
-    const fixture = cleanupFixture();
-    let acknowledgeDrop!: (dropped: boolean) => void;
-    fixture.target.drop.mockReturnValueOnce(
-      new Promise<boolean>((resolve) => {
-        acknowledgeDrop = resolve;
-      }),
-    );
+  it.each([
+    { remaining: [], cleanupIssue: undefined },
+    { remaining: ['second'], cleanupIssue: 'cleanup-deadline' },
+  ])(
+    'records the in-flight drop confirmed after the write cutoff with remaining=$remaining',
+    async ({ remaining, cleanupIssue }) => {
+      const fixture = cleanupFixture();
+      if (!remaining.length) fixture.owned.delete('second');
+      const startedAt = jest.now();
+      let elapsedBeforeDrop = 0;
+      jest
+        .spyOn(performance, 'now')
+        .mockImplementation(() => elapsedBeforeDrop + (jest.now() - startedAt));
+      fixture.target.assertOwned.mockImplementationOnce(() => {
+        elapsedBeforeDrop = 59_000;
+        return Promise.resolve();
+      });
+      fixture.target.drop.mockImplementationOnce(
+        (_name, timeoutMS) =>
+          new Promise<boolean>((resolve, reject) => {
+            const replyDelayMs = 3_000;
+            setTimeout(
+              () => {
+                if (timeoutMS < replyDelayMs) {
+                  reject(new Error('simulated drop timeout'));
+                } else {
+                  resolve(true);
+                }
+              },
+              Math.min(timeoutMS, replyDelayMs),
+            );
+          }),
+      );
 
-    const cleanup = fixture.run();
-    await jest.advanceTimersByTimeAsync(0);
-    expect(fixture.target.drop).toHaveBeenCalledTimes(1);
-    await jest.advanceTimersByTimeAsync(45);
-    acknowledgeDrop(true);
+      const cleanup = fixture.run();
+      await jest.advanceTimersByTimeAsync(0);
+      expect(performance.now()).toBe(59_000);
+      await jest.advanceTimersByTimeAsync(3_000);
+      expect(performance.now()).toBe(62_000);
 
-    expect(await cleanup).toMatchObject({
-      cleanupIssue: 'cleanup-deadline',
-      observedResidual: ['second'],
-      completed: ['first'],
-      registered: ['second'],
-      connectionsClosed: true,
-    });
-    expect(fixture.target.drop).toHaveBeenCalledTimes(1);
-    expect(fixture.owned.has('first')).toBe(false);
-  });
+      expect(fixture.target.drop.mock.calls).toEqual([['first', 6_000]]);
+      expect(await cleanup).toMatchObject({
+        cleanupIssue,
+        observedResidual: remaining,
+        completed: ['first'],
+        registered: remaining,
+        connectionsClosed: true,
+      });
+      expect([...fixture.owned.keys()]).toEqual(remaining);
+    },
+  );
 
   it('keeps the registration and does not claim success when a drop is still unconfirmed', async () => {
     const fixture = cleanupFixture();
@@ -1162,8 +1188,8 @@ describe('sync-indexes integration cleanup deadline (offline)', () => {
 
     const cleanup = fixture.run();
     await jest.advanceTimersByTimeAsync(0);
-    expect(fixture.target.drop).toHaveBeenCalledTimes(1);
-    await jest.advanceTimersByTimeAsync(60);
+    expect(fixture.target.drop).toHaveBeenCalledWith('first', 10_000);
+    await jest.advanceTimersByTimeAsync(65_000);
 
     expect(await cleanup).toMatchObject({
       cleanupIssue: 'drop-unconfirmed:first',
@@ -1193,7 +1219,7 @@ describe('sync-indexes integration cleanup deadline (offline)', () => {
     );
 
     const cleanup = fixture.run();
-    await jest.advanceTimersByTimeAsync(100);
+    await jest.advanceTimersByTimeAsync(80_000);
     expect(await cleanup).toMatchObject({
       cleanupIssue: 'residual-unconfirmed',
       observedResidual: 'unconfirmed',

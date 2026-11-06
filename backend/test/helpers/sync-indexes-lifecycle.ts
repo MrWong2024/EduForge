@@ -198,7 +198,11 @@ export async function cleanupSyncIndexesCollections({
 
         let timeoutMS: number;
         try {
-          timeoutMS = cleanupRequestTime(writeDeadline, requestTimeoutMs);
+          cleanupRequestTime(writeDeadline, requestTimeoutMs);
+          timeoutMS = cleanupRequestTime(
+            dropObservationDeadline,
+            requestTimeoutMs,
+          );
         } catch {
           cleanupIssue = 'cleanup-deadline';
           break;
@@ -218,8 +222,6 @@ export async function cleanupSyncIndexesCollections({
           break;
         }
       }
-      if (performance.now() >= writeDeadline)
-        cleanupIssue ??= 'cleanup-deadline';
     } else if (trusted) {
       cleanupIssue = settled ? 'write-unconfirmed' : 'calls-still-in-flight';
     }
