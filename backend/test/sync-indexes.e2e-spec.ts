@@ -24,7 +24,10 @@ import {
   Submission,
   SubmissionSchema,
 } from '../src/modules/learning-tasks/schemas/submission.schema';
-import { createSyncIndexesLifecycle } from './helpers/sync-indexes-lifecycle';
+import {
+  cleanupSyncIndexesCollections,
+  createSyncIndexesLifecycle,
+} from './helpers/sync-indexes-lifecycle';
 
 const { MongoClient, BSON } = mongoose.mongo;
 const testDatabase = TEST_DATABASE_NAMES.standard_test;
@@ -45,6 +48,9 @@ const allowedNames = Object.values(collections);
 const apply = ['--apply', '--confirm-db', testDatabase];
 const lifecycle = createSyncIndexesLifecycle();
 const testDeadlineMs = 60_000;
+const cleanupBudgetMs = 80_000;
+const cleanupReportReserveMs = 10_000;
+const cleanupCloseReserveMs = 10_000;
 const drainWaitMs = 10_000;
 const fixtureClientOptions = {
   serverSelectionTimeoutMS: 5000,
@@ -111,6 +117,7 @@ const closeCliConnections = new Set<() => Promise<void>>();
 async function assertLocalStandalone(
   connected: mongo.Db,
   connectedClient: mongo.MongoClient,
+  timeoutMS?: number,
 ) {
   assertConnectedDatabaseMatchesPurpose({
     nodeEnv: testEnvironment.NODE_ENV,
@@ -128,7 +135,7 @@ async function assertLocalStandalone(
   try {
     const hello: unknown = await connected
       .admin()
-      .command({ hello: 1 })
+      .command({ hello: 1 }, { timeoutMS })
       .catch(() => {
         throw new Error('SYNC_INDEXES_E2E_HELLO_UNAVAILABLE');
       });
@@ -182,8 +189,11 @@ function runTest(name: string, operation: () => Promise<void>) {
   it(name, () => lifecycle.run(testDeadlineMs, operation));
 }
 
-async function collectionInfo(name: string) {
-  const cursor = database().listCollections({ name }, { nameOnly: false });
+async function collectionInfo(name: string, timeoutMS?: number) {
+  const cursor = database().listCollections(
+    { name },
+    { nameOnly: false, timeoutMS },
+  );
   try {
     return await cursor.next();
   } finally {
@@ -199,8 +209,8 @@ function uuidFromInfo(info: mongo.CollectionInfo | null, name: string) {
   return uuid.toUUID().toHexString().replaceAll('-', '');
 }
 
-async function collectionUuid(name: string) {
-  return uuidFromInfo(await collectionInfo(name), name);
+async function collectionUuid(name: string, timeoutMS?: number) {
+  return uuidFromInfo(await collectionInfo(name, timeoutMS), name);
 }
 
 async function indexes(name: string) {
@@ -224,22 +234,20 @@ async function createOwned(name: string) {
   return collection;
 }
 
-async function assertOwned(name: string) {
+async function assertOwned(name: string, timeoutMS?: number) {
   const uuid = owned.get(name);
   if (
     !allowedNames.includes(name) ||
     !uuid ||
-    uuid !== (await collectionUuid(name))
+    uuid !== (await collectionUuid(name, timeoutMS))
   ) {
     throw new Error(`SYNC_INDEXES_E2E_CLEANUP_OWNERSHIP_CHANGED ${name}`);
   }
 }
 
-async function dropOwned(name: string, cleanup = false) {
+async function dropOwned(name: string) {
   await assertOwned(name);
-  const drop = () => database().collection(name).drop();
-  if (cleanup) await drop();
-  else await lifecycle.write(drop);
+  await lifecycle.write(() => database().collection(name).drop());
   owned.delete(name);
 }
 
@@ -429,62 +437,56 @@ describe('sync-indexes against an isolated MongoDB namespace', () => {
   );
 
   afterAll(async () => {
-    const { settled, uncertainWrite, cleanupAllowed } =
-      await lifecycle.stopAndWait(drainWaitMs);
-    let cleanupIssue: string | undefined;
-    let remaining: string[] | undefined;
-    let connectionsClosed: boolean;
-    try {
-      if (db && client) {
-        let trusted = false;
-        try {
-          await assertLocalStandalone(db, client);
-          trusted = true;
-        } catch {
-          cleanupIssue = 'target-unconfirmed';
-        }
-        if (trusted && cleanupAllowed) {
-          for (const name of owned.keys()) {
-            try {
-              await dropOwned(name, true);
-            } catch {
-              cleanupIssue = `drop-unconfirmed:${name}`;
-              break;
+    const fixtureDb = db;
+    const fixtureClient = client;
+    const cleanup = await cleanupSyncIndexesCollections({
+      lifecycle,
+      owned,
+      totalBudgetMs: cleanupBudgetMs,
+      drainWaitMs,
+      requestTimeoutMs: fixtureClientOptions.timeoutMS,
+      reportReserveMs: cleanupReportReserveMs,
+      closeReserveMs: cleanupCloseReserveMs,
+      target:
+        fixtureDb && fixtureClient
+          ? {
+              verify: (timeoutMS) =>
+                assertLocalStandalone(fixtureDb, fixtureClient, timeoutMS),
+              assertOwned,
+              drop: (name, timeoutMS) =>
+                fixtureDb.collection(name).drop({ timeoutMS }),
+              readResidual: async (timeoutMS) => {
+                const observed = await Promise.all(
+                  allowedNames.map(async (name) =>
+                    (await collectionInfo(name, timeoutMS)) ? [name] : [],
+                  ),
+                );
+                return observed.flat();
+              },
             }
-          }
-        } else if (trusted) {
-          cleanupIssue = settled
-            ? 'write-unconfirmed'
-            : 'calls-still-in-flight';
+          : undefined,
+      closeConnections: async () => {
+        const closed = await Promise.allSettled([
+          ...[...closeCliConnections].map((close) => close()),
+          client?.close(),
+        ]);
+        if (closed.some(({ status }) => status === 'rejected')) {
+          throw new Error('SYNC_INDEXES_E2E_CLOSE_UNCONFIRMED');
         }
-        if (trusted) {
-          try {
-            const observed = await Promise.all(
-              allowedNames.map(async (name) =>
-                (await collectionInfo(name)) ? [name] : [],
-              ),
-            );
-            remaining = observed.flat();
-          } catch {
-            cleanupIssue ??= 'residual-unconfirmed';
-          }
-        }
-      }
-    } finally {
-      const closed = await Promise.allSettled([
-        ...[...closeCliConnections].map((close) => close()),
-        client?.close(),
-      ]);
-      connectionsClosed =
-        settled && closed.every(({ status }) => status === 'fulfilled');
-    }
-    if (!db && settled && connectionsClosed) {
+      },
+    });
+    if (!fixtureDb && cleanup.settled && cleanup.connectionsClosed) {
       console.info(
         `sync-indexes e2e prefix=${prefix} fixture=not_started client=closed`,
       );
       return;
     }
-    if (!cleanupIssue && remaining?.length === 0 && connectionsClosed) {
+    if (
+      !cleanup.cleanupIssue &&
+      Array.isArray(cleanup.observedResidual) &&
+      cleanup.observedResidual.length === 0 &&
+      cleanup.connectionsClosed
+    ) {
       console.info(
         `sync-indexes e2e prefix=${prefix} residual=0 client=closed`,
       );
@@ -493,12 +495,8 @@ describe('sync-indexes against an isolated MongoDB namespace', () => {
     throw new Error(
       `SYNC_INDEXES_E2E_CLEANUP_INCOMPLETE ${JSON.stringify({
         prefix,
-        cleanupIssue: cleanupIssue ?? 'remaining-or-close-unconfirmed',
-        settled,
-        uncertainWrite,
-        observedResidual: remaining ?? 'unconfirmed',
-        registered: [...owned.keys()],
-        connectionsClosed,
+        ...cleanup,
+        cleanupIssue: cleanup.cleanupIssue ?? 'remaining-or-close-unconfirmed',
       })}`,
     );
   });

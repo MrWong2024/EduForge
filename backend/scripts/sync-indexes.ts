@@ -242,6 +242,18 @@ export function registerSyncIndexModels(
   connection: Connection,
   schemas = SYNC_INDEX_SCHEMAS,
 ): SyncIndexModel[] {
+  for (const { schema } of schemas) {
+    const collation: unknown = schema.options.collation;
+    if (
+      collation !== undefined &&
+      (!isDocument(collation) ||
+        Reflect.ownKeys(collation).length !== 1 ||
+        !Object.hasOwn(collation, 'locale') ||
+        collation.locale !== 'simple')
+    ) {
+      throw new SyncIndexesError('SCHEMA_COLLATION_UNSUPPORTED');
+    }
+  }
   return schemas.map(({ name, schema }) => {
     const isolatedSchema = schema.clone();
     isolatedSchema.set('autoCreate', false);
@@ -365,6 +377,9 @@ export function createMongooseConnection(
         }
         if ('encryptedFields' in entry.options) {
           throw new SyncIndexesError('ENCRYPTED_COLLECTION_UNSUPPORTED');
+        }
+        if ('clusteredIndex' in entry.options) {
+          throw new SyncIndexesError('CLUSTERED_COLLECTION_UNSUPPORTED');
         }
         const uuid = isDocument(entry.info) ? entry.info.uuid : undefined;
         if (

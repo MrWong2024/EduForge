@@ -3,8 +3,12 @@ import { resolve } from 'node:path';
 import { Writable } from 'node:stream';
 import mongoose, { type mongo, type Schema } from 'mongoose';
 import { SubmissionSchema } from '../src/modules/learning-tasks/schemas/submission.schema';
-import { createSyncIndexesLifecycle } from '../test/helpers/sync-indexes-lifecycle';
 import {
+  cleanupSyncIndexesCollections,
+  createSyncIndexesLifecycle,
+} from '../test/helpers/sync-indexes-lifecycle';
+import {
+  createMongooseConnection,
   runSyncIndexesCli,
   writeSyncIndexesLine,
   type CollectionMetadata,
@@ -1042,6 +1046,167 @@ describe('sync-indexes integration lifecycle (offline)', () => {
   });
 });
 
+describe('sync-indexes integration cleanup deadline (offline)', () => {
+  function cleanupFixture() {
+    const owned = new Map([
+      ['first', initialUuid],
+      ['second', changedUuid],
+    ]);
+    const target = {
+      verify: jest.fn<Promise<void>, [number]>(() => Promise.resolve()),
+      assertOwned: jest.fn<Promise<void>, [string, number]>(() =>
+        Promise.resolve(),
+      ),
+      drop: jest.fn<Promise<boolean>, [string, number]>(() =>
+        Promise.resolve(true),
+      ),
+      readResidual: jest.fn<Promise<string[]>, [number]>(() =>
+        Promise.resolve([...owned.keys()]),
+      ),
+    };
+    const closeConnections = jest.fn<Promise<void>, []>(() =>
+      Promise.resolve(),
+    );
+    return {
+      owned,
+      target,
+      closeConnections,
+      run: () =>
+        cleanupSyncIndexesCollections({
+          lifecycle: createSyncIndexesLifecycle(),
+          owned,
+          target,
+          closeConnections,
+          totalBudgetMs: 100,
+          drainWaitMs: 10,
+          requestTimeoutMs: 30,
+          reportReserveMs: 40,
+          closeReserveMs: 20,
+        }),
+    };
+  }
+
+  beforeEach(() => {
+    jest.useFakeTimers();
+  });
+
+  afterEach(() => {
+    jest.restoreAllMocks();
+    jest.useRealTimers();
+  });
+
+  it('rechecks the deadline after UUID lookup even if its timer has not fired', async () => {
+    const fixture = cleanupFixture();
+    let clock = 0;
+    jest.spyOn(performance, 'now').mockImplementation(() => clock);
+    let confirmOwnership!: () => void;
+    fixture.target.assertOwned.mockReturnValueOnce(
+      new Promise<void>((resolve) => {
+        confirmOwnership = resolve;
+      }),
+    );
+
+    const cleanup = fixture.run();
+    await jest.advanceTimersByTimeAsync(0);
+    expect(fixture.target.assertOwned).toHaveBeenCalledTimes(1);
+    clock = 41;
+    confirmOwnership();
+
+    expect(await cleanup).toMatchObject({
+      cleanupIssue: 'cleanup-deadline',
+      observedResidual: ['first', 'second'],
+      completed: [],
+      registered: ['first', 'second'],
+      connectionsClosed: true,
+    });
+    expect(fixture.target.assertOwned).toHaveBeenCalledTimes(1);
+    expect(fixture.target.drop).not.toHaveBeenCalled();
+    expect(fixture.target.readResidual).toHaveBeenCalledTimes(1);
+    expect(fixture.closeConnections).toHaveBeenCalledTimes(1);
+  });
+
+  it('records the acknowledged in-flight drop after the write cutoff without starting another', async () => {
+    const fixture = cleanupFixture();
+    let acknowledgeDrop!: (dropped: boolean) => void;
+    fixture.target.drop.mockReturnValueOnce(
+      new Promise<boolean>((resolve) => {
+        acknowledgeDrop = resolve;
+      }),
+    );
+
+    const cleanup = fixture.run();
+    await jest.advanceTimersByTimeAsync(0);
+    expect(fixture.target.drop).toHaveBeenCalledTimes(1);
+    await jest.advanceTimersByTimeAsync(45);
+    acknowledgeDrop(true);
+
+    expect(await cleanup).toMatchObject({
+      cleanupIssue: 'cleanup-deadline',
+      observedResidual: ['second'],
+      completed: ['first'],
+      registered: ['second'],
+      connectionsClosed: true,
+    });
+    expect(fixture.target.drop).toHaveBeenCalledTimes(1);
+    expect(fixture.owned.has('first')).toBe(false);
+  });
+
+  it('keeps the registration and does not claim success when a drop is still unconfirmed', async () => {
+    const fixture = cleanupFixture();
+    let acknowledgeDrop!: (dropped: boolean) => void;
+    fixture.target.drop.mockReturnValueOnce(
+      new Promise<boolean>((resolve) => {
+        acknowledgeDrop = resolve;
+      }),
+    );
+
+    const cleanup = fixture.run();
+    await jest.advanceTimersByTimeAsync(0);
+    expect(fixture.target.drop).toHaveBeenCalledTimes(1);
+    await jest.advanceTimersByTimeAsync(60);
+
+    expect(await cleanup).toMatchObject({
+      cleanupIssue: 'drop-unconfirmed:first',
+      observedResidual: 'unconfirmed',
+      completed: [],
+      registered: ['first', 'second'],
+      connectionsClosed: false,
+    });
+    expect(fixture.target.drop).toHaveBeenCalledTimes(1);
+    expect(fixture.closeConnections).toHaveBeenCalledTimes(1);
+    acknowledgeDrop(true);
+  });
+
+  it('bounds residual verification and connection closure separately under the total deadline', async () => {
+    const fixture = cleanupFixture();
+    let reportResidual!: (names: string[]) => void;
+    let close!: () => void;
+    fixture.target.readResidual.mockReturnValueOnce(
+      new Promise<string[]>((resolve) => {
+        reportResidual = resolve;
+      }),
+    );
+    fixture.closeConnections.mockReturnValueOnce(
+      new Promise<void>((resolve) => {
+        close = resolve;
+      }),
+    );
+
+    const cleanup = fixture.run();
+    await jest.advanceTimersByTimeAsync(100);
+    expect(await cleanup).toMatchObject({
+      cleanupIssue: 'residual-unconfirmed',
+      observedResidual: 'unconfirmed',
+      completed: ['first', 'second'],
+      registered: [],
+      connectionsClosed: false,
+    });
+    expect(fixture.closeConnections).toHaveBeenCalledTimes(1);
+    reportResidual([]);
+    close();
+  });
+});
+
 describe('sync-indexes ordinary configuration and cleanup (offline)', () => {
   it.each([undefined, '', 'staging', 'production '])(
     'rejects original NODE_ENV=%j before any environment read',
@@ -1281,6 +1446,11 @@ function realComparisonHarness(
     configureSchema?: (schema: Schema) => void;
     metadata?: (name: string) => unknown;
     hello?: () => Promise<mongo.Document>;
+    schemas?: typeof SYNC_INDEX_SCHEMAS;
+    dropFixtures?: ReadonlyMap<
+      string,
+      { name: string; key: mongo.IndexDescriptionInfo['key'] }
+    >;
   } = {},
 ) {
   const h = harness();
@@ -1290,6 +1460,11 @@ function realComparisonHarness(
     env: { NODE_ENV: 'test', MONGO_ADMIN_URI: uri },
   };
   delete deps.createConnection;
+  const schemas = fixture.schemas;
+  if (schemas) {
+    deps.createConnection = (uri, options) =>
+      createMongooseConnection(uri, options, schemas);
+  }
 
   const { BSON } = mongoose.mongo;
   const native = new mongoose.Connection();
@@ -1308,6 +1483,7 @@ function realComparisonHarness(
   const forbidden = jest.fn(() => {
     throw new Error('UNEXPECTED_WRITE_OR_SECOND_METADATA_READ');
   });
+  const dropped: Array<{ model: string; index: string }> = [];
   const metadata = jest.fn((name: string) =>
     fixture.metadata
       ? fixture.metadata(name)
@@ -1344,18 +1520,39 @@ function realComparisonHarness(
               registrations.push([name, schema, model.collection.name]);
               const tracked = name === (fixture.modelName ?? 'Session');
               if (tracked) trackedCollection = model.collection.name;
-              const indexes =
+              const initialIndexes =
                 (tracked && fixture.indexes) ||
                 (name === 'Session'
                   ? matchingSessionIndexes
                   : comparisonIndexesFor(schema));
+              const dropFixture = fixture.dropFixtures?.get(name);
+              const indexes = dropFixture
+                ? [...initialIndexes, dropFixture]
+                : initialIndexes;
               fixtureBytes.set(
                 model.collection.name,
                 BSON.serialize({ indexes }),
               );
               if (tracked) fixture.configureSchema?.(model.schema);
               jest.spyOn(model, 'listIndexes').mockImplementation(forbidden);
-              jest.spyOn(model, 'cleanIndexes').mockImplementation(forbidden);
+              jest
+                .spyOn(model, 'cleanIndexes')
+                .mockImplementation((options) => {
+                  const indexName = dropFixture?.name;
+                  if (
+                    !indexName ||
+                    options?.toDrop?.length !== 1 ||
+                    options.toDrop[0] !== indexName
+                  ) {
+                    return forbidden();
+                  }
+                  dropped.push({ model: name, index: indexName });
+                  fixtureBytes.set(
+                    model.collection.name,
+                    BSON.serialize({ indexes: initialIndexes }),
+                  );
+                  return Promise.resolve([indexName]);
+                });
               jest.spyOn(model, 'createIndexes').mockImplementation(forbidden);
               return model;
             },
@@ -1455,6 +1652,7 @@ function realComparisonHarness(
     hello,
     collectionOptions,
     forbidden,
+    dropped,
     indexClosures,
     closeCollectionCursor,
     clientOptions: () => client?.options,
@@ -1479,6 +1677,22 @@ function expectEmptyComparison(
   });
   expect(a.forbidden).not.toHaveBeenCalled();
 }
+
+function withSessionSchemaCollation(collation: unknown) {
+  return SYNC_INDEX_SCHEMAS.map(({ name, schema }) => {
+    if (name !== 'Session') return { name, schema };
+    const clone = schema.clone();
+    Reflect.set(clone.options, 'collation', collation);
+    expect(
+      clone.indexes().every(([, options]) => options.collation === undefined),
+    ).toBe(true);
+    return { name, schema: clone };
+  });
+}
+
+const clusteredOptions = {
+  clusteredIndex: { key: { _id: 1 }, unique: true, name: '_id_' },
+};
 
 describe('sync-indexes driver and Schema adapter (offline)', () => {
   it('clones the exact formal registry without mutating shared Schema declarations', async () => {
@@ -1642,6 +1856,155 @@ describe('sync-indexes driver and Schema adapter (offline)', () => {
         writesAttempted: false,
       });
       expect(output(a.h)).not.toContain('private_encryption_fixture');
+    },
+  );
+
+  it.each(
+    [false, true].flatMap((withTtl) =>
+      [['--dry-run'], [...apply, '--allow-drop']].map((args) => ({
+        withTtl,
+        args,
+      })),
+    ),
+  )(
+    'rejects clustered metadata before planning with TTL=$withTtl and $args',
+    async ({ withTtl, args }) => {
+      const a = realComparisonHarness({
+        metadata: (name) => ({
+          name,
+          type: 'collection',
+          options:
+            name === 'sessions'
+              ? {
+                  ...clusteredOptions,
+                  ...(withTtl && { expireAfterSeconds: 300 }),
+                }
+              : {},
+          info: { uuid: new mongoose.mongo.BSON.UUID(initialUuid) },
+        }),
+        dropFixtures: new Map([
+          ['User', { name: 'earlier_extra', key: { legacy: 1 } }],
+        ]),
+      });
+      expect(await a.run(args)).toBe(1);
+      expect(a.dropped).toEqual([]);
+      expect(a.forbidden).not.toHaveBeenCalled();
+      expect(a.closeCollectionCursor).toHaveBeenCalled();
+      expect(output(a.h)).not.toContain('"event":"plan"');
+      expect(jsonEvent(a.h, 'result')).toMatchObject({
+        error: { code: 'CLUSTERED_COLLECTION_UNSUPPORTED' },
+        writesAttempted: false,
+      });
+    },
+  );
+
+  it('keeps earlier DDL but stops current and later writes when the recheck finds clustered metadata', async () => {
+    let sessionReads = 0;
+    const a = realComparisonHarness({
+      metadata: (name) => ({
+        name,
+        type: 'collection',
+        options:
+          name === 'sessions' && ++sessionReads >= 2 ? clusteredOptions : {},
+        info: { uuid: new mongoose.mongo.BSON.UUID(initialUuid) },
+      }),
+      dropFixtures: new Map([
+        ['User', { name: 'earlier_extra', key: { legacy: 1 } }],
+        ['Session', { name: 'current_extra', key: { legacy: 1 } }],
+        ['PasswordResetToken', { name: 'later_extra', key: { legacy: 1 } }],
+      ]),
+    });
+    expect(await a.run([...apply, '--allow-drop'])).toBe(1);
+    expect(a.dropped).toEqual([{ model: 'User', index: 'earlier_extra' }]);
+    expect(a.forbidden).not.toHaveBeenCalled();
+    const models: unknown = expect.arrayContaining([
+      expect.objectContaining({
+        model: 'User',
+        operations: [
+          { kind: 'dropIndex', name: 'earlier_extra', status: 'completed' },
+        ],
+      }),
+      expect.objectContaining({
+        model: 'Session',
+        operations: [
+          { kind: 'dropIndex', name: 'current_extra', status: 'not-executed' },
+        ],
+      }),
+      expect.objectContaining({
+        model: 'PasswordResetToken',
+        operations: [
+          { kind: 'dropIndex', name: 'later_extra', status: 'not-executed' },
+        ],
+      }),
+    ]);
+    expect(jsonEvent(a.h, 'result')).toHaveProperty('models', models);
+    expect(jsonEvent(a.h, 'result')).toMatchObject({
+      error: { code: 'CLUSTERED_COLLECTION_UNSUPPORTED' },
+      writesAttempted: true,
+    });
+  });
+
+  it('marks final readback unconfirmed if the collection becomes clustered', async () => {
+    let sessionReads = 0;
+    const a = realComparisonHarness({
+      metadata: (name) => ({
+        name,
+        type: 'collection',
+        options:
+          name === 'sessions' && ++sessionReads === 3 ? clusteredOptions : {},
+        info: { uuid: new mongoose.mongo.BSON.UUID(initialUuid) },
+      }),
+    });
+    expect(await a.run([...apply, '--allow-drop'])).toBe(1);
+    expect(a.forbidden).not.toHaveBeenCalled();
+    const models: unknown = expect.arrayContaining([
+      expect.objectContaining({
+        model: 'Session',
+        terminalState: 'unconfirmed',
+        verification: {
+          status: 'unconfirmed',
+          error: { code: 'CLUSTERED_COLLECTION_UNSUPPORTED' },
+        },
+      }),
+    ]);
+    expect(jsonEvent(a.h, 'result')).toHaveProperty('models', models);
+    expect(jsonEvent(a.h, 'result')).toMatchObject({ status: 'failed' });
+  });
+
+  it.each([
+    { collation: { locale: 'en', strength: 2 }, args: ['--dry-run'] },
+    {
+      collation: { locale: 'en', strength: 2 },
+      args: [...apply, '--allow-drop'],
+    },
+    { collation: null, args: apply },
+    { collation: { locale: 'simple', strength: 2 }, args: apply },
+  ])(
+    'rejects Schema-level collation $collation before registering any model',
+    async ({ collation, args }) => {
+      const a = realComparisonHarness({
+        schemas: withSessionSchemaCollation(collation),
+      });
+      expect(await a.run(args)).toBe(1);
+      expect(a.registrations).toEqual([]);
+      expect(a.metadata).not.toHaveBeenCalled();
+      expect(a.forbidden).not.toHaveBeenCalled();
+      expect(output(a.h)).not.toContain('"event":"plan"');
+      expect(jsonEvent(a.h, 'result')).toMatchObject({
+        error: { code: 'SCHEMA_COLLATION_UNSUPPORTED' },
+        writesAttempted: false,
+      });
+    },
+  );
+
+  it.each([undefined, { locale: 'simple' }])(
+    'accepts Schema-level collation %j',
+    async (collation) => {
+      const a = realComparisonHarness({
+        schemas: withSessionSchemaCollation(collation),
+      });
+      expect(await a.run(apply)).toBe(0);
+      expectEmptyComparison(a, 'completed');
     },
   );
 
