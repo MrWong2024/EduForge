@@ -381,6 +381,9 @@ export function createMongooseConnection(
         if ('clusteredIndex' in entry.options) {
           throw new SyncIndexesError('CLUSTERED_COLLECTION_UNSUPPORTED');
         }
+        if (entry.options.capped === true) {
+          throw new SyncIndexesError('CAPPED_COLLECTION_UNSUPPORTED');
+        }
         const uuid = isDocument(entry.info) ? entry.info.uuid : undefined;
         if (
           !(uuid instanceof mongoose.mongo.BSON.Binary) ||

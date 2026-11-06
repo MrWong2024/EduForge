@@ -1501,7 +1501,10 @@ function realComparisonHarness(
   const rawReads: mongo.IndexDescriptionInfo[][] = [];
   const registrations: Array<[string, Schema, string]> = [];
   const indexClosures: jest.SpyInstance[] = [];
-  const closeCollectionCursor = jest.fn(() => Promise.resolve());
+  const closeCollectionCursor = jest.fn<void, []>();
+  const closeConnection = jest.fn((client: mongo.MongoClient) =>
+    client.close(),
+  );
   const hello = jest.fn<Promise<mongo.Document>, [mongo.Document]>(
     fixture.hello ??
       (() => Promise.resolve({ ok: 1, isWritablePrimary: true })),
@@ -1609,9 +1612,11 @@ function realComparisonHarness(
                     decoded as mongo.CollectionInfo | null,
                   );
                 });
-                jest
-                  .spyOn(cursor, 'close')
-                  .mockImplementation(closeCollectionCursor);
+                const close = cursor.close.bind(cursor) as typeof cursor.close;
+                jest.spyOn(cursor, 'close').mockImplementation((options) => {
+                  closeCollectionCursor();
+                  return close(options);
+                });
                 return cursor;
               },
               runCursorCommand: (
@@ -1661,7 +1666,7 @@ function realComparisonHarness(
           jest.spyOn(native, 'getClient').mockReturnValue(driverClient);
           jest
             .spyOn(native, 'close')
-            .mockImplementation(() => driverClient.close());
+            .mockImplementation(() => closeConnection(driverClient));
           return native;
         },
       );
@@ -1681,6 +1686,7 @@ function realComparisonHarness(
     dropped,
     indexClosures,
     closeCollectionCursor,
+    closeConnection,
     clientOptions: () => client?.options,
   };
 }
@@ -1716,9 +1722,25 @@ function withSessionSchemaCollation(collation: unknown) {
   });
 }
 
+function expectComparisonResourcesClosed(
+  a: ReturnType<typeof realComparisonHarness>,
+) {
+  expect(a.closeCollectionCursor).toHaveBeenCalledTimes(
+    a.metadata.mock.calls.length,
+  );
+  for (const close of a.indexClosures) expect(close).toHaveBeenCalledTimes(1);
+  expect(a.closeConnection).toHaveBeenCalledTimes(1);
+}
+
 const clusteredOptions = {
   clusteredIndex: { key: { _id: 1 }, unique: true, name: '_id_' },
 };
+
+const cappedOptions = { capped: true };
+const unsupportedCollectionOptions = [
+  ['clustered', clusteredOptions, 'CLUSTERED_COLLECTION_UNSUPPORTED'],
+  ['capped', cappedOptions, 'CAPPED_COLLECTION_UNSUPPORTED'],
+] as const;
 
 describe('sync-indexes driver and Schema adapter (offline)', () => {
   it('clones the exact formal registry without mutating shared Schema declarations', async () => {
@@ -1924,78 +1946,175 @@ describe('sync-indexes driver and Schema adapter (offline)', () => {
     },
   );
 
-  it('keeps earlier DDL but stops current and later writes when the recheck finds clustered metadata', async () => {
-    let sessionReads = 0;
+  it('rejects a capped collection with matching indexes in apply', async () => {
     const a = realComparisonHarness({
+      indexes: matchingSessionIndexes,
       metadata: (name) => ({
         name,
         type: 'collection',
-        options:
-          name === 'sessions' && ++sessionReads >= 2 ? clusteredOptions : {},
+        options: name === 'sessions' ? cappedOptions : {},
         info: { uuid: new mongoose.mongo.BSON.UUID(initialUuid) },
       }),
-      dropFixtures: new Map([
-        ['User', { name: 'earlier_extra', key: { legacy: 1 } }],
-        ['Session', { name: 'current_extra', key: { legacy: 1 } }],
-        ['PasswordResetToken', { name: 'later_extra', key: { legacy: 1 } }],
-      ]),
     });
-    expect(await a.run([...apply, '--allow-drop'])).toBe(1);
-    expect(a.dropped).toEqual([{ model: 'User', index: 'earlier_extra' }]);
-    expect(a.forbidden).not.toHaveBeenCalled();
-    const models: unknown = expect.arrayContaining([
-      expect.objectContaining({
-        model: 'User',
-        operations: [
-          { kind: 'dropIndex', name: 'earlier_extra', status: 'completed' },
-        ],
-      }),
-      expect.objectContaining({
-        model: 'Session',
-        operations: [
-          { kind: 'dropIndex', name: 'current_extra', status: 'not-executed' },
-        ],
-      }),
-      expect.objectContaining({
-        model: 'PasswordResetToken',
-        operations: [
-          { kind: 'dropIndex', name: 'later_extra', status: 'not-executed' },
-        ],
-      }),
-    ]);
-    expect(jsonEvent(a.h, 'result')).toHaveProperty('models', models);
+    expect(await a.run(apply)).toBe(1);
     expect(jsonEvent(a.h, 'result')).toMatchObject({
-      error: { code: 'CLUSTERED_COLLECTION_UNSUPPORTED' },
-      writesAttempted: true,
+      status: 'failed',
+      error: { code: 'CAPPED_COLLECTION_UNSUPPORTED' },
+      writesAttempted: false,
     });
+    expect(a.dropped).toEqual([]);
+    expect(a.forbidden).not.toHaveBeenCalled();
+    expectComparisonResourcesClosed(a);
   });
 
-  it('marks final readback unconfirmed if the collection becomes clustered', async () => {
-    let sessionReads = 0;
-    const a = realComparisonHarness({
-      metadata: (name) => ({
-        name,
-        type: 'collection',
-        options:
-          name === 'sessions' && ++sessionReads === 3 ? clusteredOptions : {},
-        info: { uuid: new mongoose.mongo.BSON.UUID(initialUuid) },
-      }),
-    });
-    expect(await a.run([...apply, '--allow-drop'])).toBe(1);
-    expect(a.forbidden).not.toHaveBeenCalled();
-    const models: unknown = expect.arrayContaining([
-      expect.objectContaining({
-        model: 'Session',
-        terminalState: 'unconfirmed',
-        verification: {
-          status: 'unconfirmed',
-          error: { code: 'CLUSTERED_COLLECTION_UNSUPPORTED' },
-        },
-      }),
-    ]);
-    expect(jsonEvent(a.h, 'result')).toHaveProperty('models', models);
-    expect(jsonEvent(a.h, 'result')).toMatchObject({ status: 'failed' });
-  });
+  it.each(
+    [['--dry-run'], [...apply, '--allow-drop']].map((args) => ({ args })),
+  )(
+    'rejects capped metadata before any DDL with $args even when an earlier model has a plan',
+    async ({ args }) => {
+      const a = realComparisonHarness({
+        metadata: (name) => ({
+          name,
+          type: 'collection',
+          options: name === 'sessions' ? cappedOptions : {},
+          info: { uuid: new mongoose.mongo.BSON.UUID(initialUuid) },
+        }),
+        dropFixtures: new Map([
+          ['User', { name: 'earlier_extra', key: { legacy: 1 } }],
+        ]),
+      });
+      expect(await a.run(args)).toBe(1);
+      const result = jsonEvent(a.h, 'result');
+      expect(result).toMatchObject({
+        status: 'failed',
+        error: { code: 'CAPPED_COLLECTION_UNSUPPORTED' },
+        writesAttempted: false,
+      });
+      expect(result).toHaveProperty(
+        'models.0',
+        expect.objectContaining({
+          model: 'User',
+          operations: [
+            {
+              kind: 'dropIndex',
+              name: 'earlier_extra',
+              status: 'not-executed',
+            },
+          ],
+        }),
+      );
+      expect(output(a.h)).not.toContain('"event":"plan"');
+      expect(a.dropped).toEqual([]);
+      expect(a.forbidden).not.toHaveBeenCalled();
+      expectComparisonResourcesClosed(a);
+    },
+  );
+
+  it.each([{}, { capped: false }])(
+    'accepts collection options %j without changing the matching index plan',
+    async (options) => {
+      const a = realComparisonHarness({
+        metadata: (name) => ({
+          name,
+          type: 'collection',
+          options: name === 'sessions' ? options : {},
+          info: { uuid: new mongoose.mongo.BSON.UUID(initialUuid) },
+        }),
+      });
+      expect(await a.run(apply)).toBe(0);
+      expectEmptyComparison(a, 'completed');
+      expect(jsonEvent(a.h, 'result')).toHaveProperty(
+        'models.1.verification.status',
+        'passed',
+      );
+      expect(a.dropped).toEqual([]);
+      expectComparisonResourcesClosed(a);
+    },
+  );
+
+  it.each(unsupportedCollectionOptions)(
+    'keeps earlier DDL but stops current and later writes when the recheck finds %s metadata',
+    async (_label, options, code) => {
+      let sessionReads = 0;
+      const a = realComparisonHarness({
+        metadata: (name) => ({
+          name,
+          type: 'collection',
+          options: name === 'sessions' && ++sessionReads >= 2 ? options : {},
+          info: { uuid: new mongoose.mongo.BSON.UUID(initialUuid) },
+        }),
+        dropFixtures: new Map([
+          ['User', { name: 'earlier_extra', key: { legacy: 1 } }],
+          ['Session', { name: 'current_extra', key: { legacy: 1 } }],
+          ['PasswordResetToken', { name: 'later_extra', key: { legacy: 1 } }],
+        ]),
+      });
+      expect(await a.run([...apply, '--allow-drop'])).toBe(1);
+      expect(a.dropped).toEqual([{ model: 'User', index: 'earlier_extra' }]);
+      expect(a.forbidden).not.toHaveBeenCalled();
+      const models: unknown = expect.arrayContaining([
+        expect.objectContaining({
+          model: 'User',
+          operations: [
+            { kind: 'dropIndex', name: 'earlier_extra', status: 'completed' },
+          ],
+        }),
+        expect.objectContaining({
+          model: 'Session',
+          operations: [
+            {
+              kind: 'dropIndex',
+              name: 'current_extra',
+              status: 'not-executed',
+            },
+          ],
+        }),
+        expect.objectContaining({
+          model: 'PasswordResetToken',
+          operations: [
+            { kind: 'dropIndex', name: 'later_extra', status: 'not-executed' },
+          ],
+        }),
+      ]);
+      expect(jsonEvent(a.h, 'result')).toHaveProperty('models', models);
+      expect(jsonEvent(a.h, 'result')).toMatchObject({
+        error: { code },
+        writesAttempted: true,
+      });
+      expectComparisonResourcesClosed(a);
+    },
+  );
+
+  it.each(unsupportedCollectionOptions)(
+    'marks final readback unconfirmed if the collection becomes %s',
+    async (_label, options, code) => {
+      let sessionReads = 0;
+      const a = realComparisonHarness({
+        metadata: (name) => ({
+          name,
+          type: 'collection',
+          options: name === 'sessions' && ++sessionReads === 3 ? options : {},
+          info: { uuid: new mongoose.mongo.BSON.UUID(initialUuid) },
+        }),
+      });
+      expect(await a.run([...apply, '--allow-drop'])).toBe(1);
+      expect(a.forbidden).not.toHaveBeenCalled();
+      const models: unknown = expect.arrayContaining([
+        expect.objectContaining({
+          model: 'Session',
+          terminalState: 'unconfirmed',
+          verification: {
+            status: 'unconfirmed',
+            error: { code },
+          },
+        }),
+      ]);
+      expect(jsonEvent(a.h, 'result')).toHaveProperty('models', models);
+      expect(jsonEvent(a.h, 'result')).toMatchObject({ status: 'failed' });
+      expect(a.dropped).toEqual([]);
+      expectComparisonResourcesClosed(a);
+    },
+  );
 
   it.each([
     { collation: { locale: 'en', strength: 2 }, args: ['--dry-run'] },

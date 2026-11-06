@@ -105,7 +105,7 @@ npm.cmd run test -- --runInBand --runTestsByPath ./scripts/import-users.spec.ts 
 
 产品合同由 [Config Matrix](./handoff-backend-config-matrix.md#sync-indexes-普通索引同步) 维护。离线回归与真实数据库集成分别使用独立进程。
 
-**离线回归。** `scripts/sync-indexes.spec.ts` 使用 purpose `none`。只使用合成配置和无网络替身，连接替身与网络阻断在任何网络动作前生效。覆盖 CLI、库名和支持范围门禁、预览零写入、删除授权、逐项执行和首错停止、UUID 漂移叠加索引错误时的诊断、统一末尾验收、退出码与资源回收。真实 BSON、未连接驱动对象、正式 Schema 克隆及受控输出流用于验证解码、比较、特殊定义拒绝和报告降级。共享的测试生命周期逻辑配合可控 Promise 验证超时停止和清理门禁。这些证据验证控制流、调用边界和数据处理。
+**离线回归。** `scripts/sync-indexes.spec.ts` 使用 purpose `none`。只使用合成配置和无网络替身，连接替身与网络阻断在任何网络动作前生效。覆盖 CLI、库名和支持范围门禁、预览零写入、删除授权、逐项执行和首错停止、UUID 漂移叠加索引错误时的诊断、统一末尾验收、退出码与资源回收。capped 门禁使用合成元数据覆盖初始盘点、写前复查和最终回读，证据范围仅限离线控制流。真实 BSON、未连接驱动对象、正式 Schema 克隆及受控输出流用于验证解码、比较、特殊定义拒绝和报告降级。共享的测试生命周期逻辑配合可控 Promise 验证超时停止和清理门禁。这些证据验证控制流、调用边界和数据处理。
 
 从 `backend` 目录先运行 discovery，确认仅命中下列文件后使用相同路径执行。
 
