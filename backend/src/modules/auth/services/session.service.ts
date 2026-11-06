@@ -1,4 +1,4 @@
-import { Injectable, OnModuleInit } from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import { randomBytes } from 'crypto';
@@ -9,17 +9,12 @@ import { WithId } from '../../../common/types/with-id.type';
 type IdOnly = WithId;
 
 @Injectable()
-export class SessionService implements OnModuleInit {
+export class SessionService {
   private readonly maxSessionsPerUser = 5;
 
   constructor(
     @InjectModel(Session.name) private readonly sessionModel: Model<Session>,
   ) {}
-
-  async onModuleInit() {
-    // Ensure session indexes exist even when autoIndex is disabled.
-    await this.sessionModel.ensureIndexes();
-  }
 
   async createUserSession(userId: Types.ObjectId): Promise<string> {
     const sessionToken = randomBytes(32).toString('hex');

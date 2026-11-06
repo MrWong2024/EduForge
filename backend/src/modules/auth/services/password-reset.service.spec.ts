@@ -191,7 +191,6 @@ describe('PasswordResetService', () => {
       updateOne: updateUser,
     };
     const passwordResetTokenModel = {
-      ensureIndexes: jest.fn().mockResolvedValue(undefined),
       create: createResetToken,
       findOne: findPasswordResetToken,
       updateOne: markTokenUsed,

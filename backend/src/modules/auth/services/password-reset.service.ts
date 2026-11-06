@@ -3,7 +3,6 @@ import {
   Injectable,
   InternalServerErrorException,
   Logger,
-  OnModuleInit,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectModel } from '@nestjs/mongoose';
@@ -25,7 +24,7 @@ type UserWithMeta = User & WithId & WithTimestamps;
 type PasswordResetTokenWithMeta = PasswordResetToken & WithId & WithTimestamps;
 
 @Injectable()
-export class PasswordResetService implements OnModuleInit {
+export class PasswordResetService {
   private static readonly REQUEST_COOLDOWN_MS = 60 * 1000;
   private readonly logger = new Logger(PasswordResetService.name);
   private readonly resetTokenTtlMinutes = 30;
@@ -41,11 +40,6 @@ export class PasswordResetService implements OnModuleInit {
     @InjectModel(PasswordResetToken.name)
     private readonly passwordResetTokenModel: Model<PasswordResetToken>,
   ) {}
-
-  async onModuleInit() {
-    // Ensure reset-token indexes exist even when autoIndex is disabled.
-    await this.passwordResetTokenModel.ensureIndexes();
-  }
 
   async requestPasswordReset(email: string): Promise<{ message: string }> {
     const normalizedEmail = email.trim().toLowerCase();

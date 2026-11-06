@@ -22,6 +22,8 @@
 
 Unit 与 HTTP E2E 可以覆盖同一业务区域，但不得重复承担同一主断言：局部规则留在 unit，真实 HTTP/认证/数据库终态留在 E2E。
 
+`src/modules/auth/services/auth-index-initialization.spec.ts` 的数据库用途为 `none`，通过实际 Nest `TestingModule.init()` 验证 `SessionService` 和 `PasswordResetService` 初始化期间不会主动调用索引写入入口。
+
 `test/submission-edit.e2e-spec.ts` 负责同次作品修改与正式评阅受理的真实 HTTP、版本竞争、首次提交事实、历史兼容及部分失败续行；复用正式鉴权/发布/提交与 spec-owned cleanup，不添加生产测试开关。expectedRevision 变更涉及的既有反馈/AI 请求继续保留各自原业务断言。合同明细引用 [Service Card 08](./handoff-backend-service-map.md#service-card-08)，实际 discovery/执行及退出码归当次报告。
 
 `src/modules/learning-tasks/task-difficulty-validation.spec.ts` 不连接数据库，通过实际 CreateTaskDto / UpdateTaskDto 和内存 Mongoose Task 模型验证四状态、仅 undefined 跳过及 null/异常输入拒绝，不以常量数组断言替代真实校验。
