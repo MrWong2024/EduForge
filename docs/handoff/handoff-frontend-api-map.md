@@ -19,7 +19,6 @@
 - proxy 响应透传 `content-type/content-disposition/cache-control/location/set-cookie`；配置缺失或网络错误返回 `502` + `{ method, path, type }`。
 - JSON 请求默认 `cache: "no-store"`；下载类链接可直接使用 `buildProxyPath(...)` 生成 `/api/proxy/**` href。
 - 错误处理：Server 侧抛 `FetchJsonError`，Client 侧抛 `BrowserFetchJsonError`；原始 data 及 `error-presenter.ts` 提取的 message/code 继续用于内部原因识别，最终说明只显示已生成的业务 summary，不附原始错误；既有公开消息匹配与可操作提示保持。
-- `app/api/_demo/**` 与 `/_demo/**` 是 demo 沙箱，不参与正式 Teacher/Student 主链路。
 
 ## 2) API client / helper 文件地图
 
@@ -165,9 +164,6 @@
 - 上述三条正式请求全部由 `fetchJson` 经 `/api/proxy/**` 发出；前端只适配后端返回值与枚举，本模块所有 nullable 比率/均值保持 null，真实0保留为0，不调用通用必需数字适配补零。不重算基线/终点、issueLoad、`detailedOutcome`、`overallOutcome`、`engagementStatus`、rate 分母或任何聚合指标。
 - 教学快照预检：`export/snapshot/page.tsx` -> `/api/proxy/classrooms/:id/export/snapshot`。
   - 对应后端：`GET /api/classrooms/:classroomId/export/snapshot`。
-- Demo 沙箱：`_demo` pages -> native fetch `/api/_demo/**`。
-  - 对应后端：无；这是前端内存 route。
-  - 注意：不经过 BFF proxy，也不作为正式 API 接入口。
 
 ## 4) 高风险调用边界
 
@@ -179,7 +175,6 @@
 - AI 反馈介入成效分析同样不持久化 `excludedTaskIds`，且不得用当前学生分页结果重算班级摘要；所有可空反馈条目负荷、比率及均值必须保持 `number | null`，较新未比较的未知标记保持 null。
 - 不用模板当前 `PUBLISHED/ARCHIVED` 状态阻断既有 classroomTask 的学生运行态；消费后端 `participationStatus`。
 - 后端 debug/ops 与产品 AI request 保持独立调用边界；当前前端没有正式 debug/ops 调用链。
-- 不把 `/_demo/**` 或 `/api/_demo/**` 的内存接口当正式 API 接入口。
 
 ## 5) 维护规则
 

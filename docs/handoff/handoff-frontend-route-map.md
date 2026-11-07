@@ -69,8 +69,6 @@
 
 | Route | 页面用途 | 主要数据 / 依赖 | 核心交互 / 边界 | 当前实现 |
 |---|---|---|---|---|
-| `/_demo/**` | demo 沙箱页 | 前端内存 demo 数据 | 与正式主链路解耦，仅用于演示 | demo-only |
-| `/api/_demo/**` | demo 本地路由 | 前端内存数据，无后端 API | 不作为生产业务调用链 | demo-only |
 | `/api/proxy/[...path]` | 正式 BFF 代理入口 | Backend API；实现见 [Frontend API Map](./handoff-frontend-api-map.md) | 正式业务主链路必经，业务页面不绕过代理 | 已接入 |
 
 当前没有正式 `/ops/**` 前端页面；debug/ops 的后端接口与启用边界由 API Owner 维护。

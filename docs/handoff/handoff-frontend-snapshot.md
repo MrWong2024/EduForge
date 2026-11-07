@@ -16,8 +16,7 @@ frontend/
 │  ├─ (auth)/                  # 登录与密码恢复页面族
 │  ├─ teacher/                 # 教师角色入口与教学页面
 │  ├─ student/                 # 学生角色入口与学习页面
-│  ├─ api/                     # 同域 BFF 与隔离的 demo 接口
-│  └─ _demo/                   # 本地 demo 沙箱，非主交付链
+│  └─ api/                     # 同域 BFF
 ├─ components/                 # 角色 Shell、共享区块及领域交互组件
 └─ lib/                        # API client/type adaptation、认证会话、
                                # 路由常量与共享展示语义
@@ -48,7 +47,6 @@ Student：
 
 辅助：
 
-- demo 沙箱及其内存接口与正式主链路隔离。
 - 当前没有正式运维前端页面；受控后端诊断入口不代表已具备产品化运维 UI。
 
 ## 3) 公共机制与职责边界
