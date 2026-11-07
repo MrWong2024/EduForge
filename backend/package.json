@@ -86,7 +86,7 @@
     "collectCoverageFrom": [
       "src/**/*.(t|j)s"
     ],
-    "coverageDirectory": "./coverage",
+    "coverageDirectory": "<rootDir>/../.local/deliverables/coverage",
     "testEnvironment": "node"
   },
   "overrides": {

@@ -60,7 +60,7 @@ npm run test -- --runInBand
 
 `npm run typecheck` 使用 `tsconfig.typecheck.json`，覆盖 `src/**/*.ts`、`test/**/*.ts`、`scripts/**/*.ts`；仅检查类型，不生成编译产物或增量缓存，不排除特定测试文件。该全量静态门禁不可由 build 或 Jest 运行结果替代。
 
-普通 unit runner 的 Jest `rootDir` 为 `backend`；coverage 只统计 `src/**/*.(t|j)s`，输出到 `backend/coverage`。
+普通 unit runner 的 Jest `rootDir` 为 `backend`；coverage 只统计 `src/**/*.(t|j)s`，输出到仓库根目录下的 `.local/deliverables/coverage/`，报告可再生成。
 
 `backend/test/*.e2e-spec.ts` 由 `test:e2e`（`test/jest-e2e.json`）独立管理，不进入普通 unit runner。HTTP E2E 必须在 Jest 启动前显式选择测试环境，并保持默认 cleanup：
 
@@ -223,7 +223,7 @@ npm run browser:text-smoke -- cleanup --namespace b1-2-<unique> --confirm-namesp
 - `process-ai` 在 APP/ADMIN 声明门禁通过后才动态导入 AppModule，以 `createApplicationContext` 启动且不 listen；实际 ConfigService 必须为 Browser 用途、stub、worker=false、debug=false，实际数据库名和 APP 角色也须匹配。正常索引初始化仍可能写入数据库。
 - 处理前核对 Job→Submission→ClassroomTask→合成师生/班级的完整 ownership；全库 PENDING/FAILED/RUNNING 必须恰好只有目标，且为 budgetVersion=1、PENDING、attempts=0。外来、多目标或 legacy 非终态立即拒绝，不修改它们。随后只调用真实 `AiFeedbackProcessor.processOnce(1)` 一次，读取该目标及实际 stub 反馈核对结果，finally 等待上下文关闭。
 - `processOnce` 是全库扫描入口，上述查询不是并发锁。操作者必须独占验收时段，排除其他 Worker/Profile/生产者并串行形成、消费目标；`--confirm-exclusive` 记录的是该运行前提，不能代替隔离审计。不启用长期 Worker、debug HTTP 或真实模型。
-- 最小恢复记录仅保存 namespace、端口、准确资源 ID，位于 ignored `backend/coverage/browser-text-task-smoke/<namespace>.json`；Cookie 仅在准备过程内存中使用，不持久化 Cookie、Session、Mongo URI 或基础设施凭据。
+- 最小恢复记录仅保存 namespace、端口、准确资源 ID，位于仓库根目录下 ignored `.local/deliverables/browser-text-task-smoke/<namespace>.json`；Cookie 仅在准备过程内存中使用，不持久化 Cookie、Session、Mongo URI 或基础设施凭据。`.local/deliverables/` 包含恢复资料，不能整体当作可清空缓存。
 - CLI 总截止为 120 秒，HTTP 请求 15 秒；ADMIN 连接建立/选择和查询采用有限超时，连接在 finally 中关闭。写入或 cleanup 结果不明时保留恢复记录，先用 `inspect` 和进程/端口审计确认实际状态，不直接重放。
 - 清理前停止本轮写入与处理并等待在途动作结束。cleanup 使用准确 ID 和关联 ownership，顺序为 Feedback/Job → Submission → ClassroomTask/Task → Enrollment/Classroom/Course → 合成用户 Session/必要 PasswordResetToken → User；拒绝仍在 RUNNING 的自有 Job，不 dropDatabase、不清空集合。完成后核对业务与认证关联残留为零；同一 namespace 的 cleanup 可安全重复，恢复记录在确认资源收尾后再删除。
 - 支持纯测试为 `scripts/browser-text-task-smoke.spec.ts`；沿第 4 节 Jest runner 用相同目标参数先 discovery，再执行。它只证明新增门禁、ownership、固定密码和 cleanup 选择，不证明真实 Browser 流程。

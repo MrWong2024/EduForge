@@ -6,7 +6,7 @@ import {
   existsSync,
   unlinkSync,
 } from 'node:fs';
-import { resolve } from 'node:path';
+import { dirname, resolve } from 'node:path';
 import { createRequire } from 'node:module';
 import { parse } from 'dotenv';
 import mongoose, { type Connection, Types } from 'mongoose';
@@ -220,20 +220,17 @@ function statePath(namespace: string): string {
   return resolve(
     __dirname,
     '..',
-    'coverage',
+    '..',
+    '.local',
+    'deliverables',
     'browser-text-task-smoke',
     namespace + '.json',
   );
 }
 function saveRecord(record: SmokeRecord): void {
-  mkdirSync(resolve(__dirname, '..', 'coverage', 'browser-text-task-smoke'), {
-    recursive: true,
-  });
-  writeFileSync(
-    statePath(record.namespace),
-    JSON.stringify(record, null, 2) + '\n',
-    'utf8',
-  );
+  const file = statePath(record.namespace);
+  mkdirSync(dirname(file), { recursive: true });
+  writeFileSync(file, JSON.stringify(record, null, 2) + '\n', 'utf8');
 }
 function loadRecord(namespace: string): SmokeRecord {
   const raw: unknown = JSON.parse(readFileSync(statePath(namespace), 'utf8'));
