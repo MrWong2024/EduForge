@@ -219,7 +219,7 @@ function harness(fixtures: ModelFixture[] = [addOnly]) {
   });
   const readFile = jest.fn<string, [string]>(() => '');
   const deps: SyncIndexesDependencies = {
-    env: { NODE_ENV: 'test', MONGO_ADMIN_URI: adminUri },
+    env: { NODE_ENV: 'test', MONGO_URI: adminUri },
     backendDirectory,
     readFile,
     createConnection,
@@ -1239,7 +1239,7 @@ describe('sync-indexes ordinary configuration and cleanup (offline)', () => {
     async (nodeEnv) => {
       const h = harness();
       h.deps.env = { NODE_ENV: nodeEnv };
-      h.readFile.mockReturnValue('NODE_ENV=test\nMONGO_ADMIN_URI=' + adminUri);
+      h.readFile.mockReturnValue('NODE_ENV=test\nMONGO_URI=' + adminUri);
 
       expect(await h.run()).toBe(1);
       expect(h.readFile).not.toHaveBeenCalled();
@@ -1257,9 +1257,7 @@ describe('sync-indexes ordinary configuration and cleanup (offline)', () => {
       const h = harness();
       const fileUri = 'mongodb://file.invalid/' + db;
       h.deps.env = { NODE_ENV: env };
-      h.readFile.mockReturnValue(
-        'NODE_ENV=staging\nMONGO_ADMIN_URI=' + fileUri,
-      );
+      h.readFile.mockReturnValue('NODE_ENV=staging\nMONGO_URI=' + fileUri);
       h.connection.databaseName.mockReturnValue(db);
 
       expect(await h.run()).toBe(0);
@@ -1276,40 +1274,99 @@ describe('sync-indexes ordinary configuration and cleanup (offline)', () => {
     },
   );
 
-  it('uses a valid process admin URI ahead of the selected file URI', async () => {
+  it('uses a valid process MONGO_URI ahead of the selected file URI', async () => {
     const h = harness();
-    h.readFile.mockReturnValue(
-      'MONGO_ADMIN_URI=mongodb://file.invalid/eduforge_dev',
-    );
+    h.readFile.mockReturnValue('MONGO_URI=mongodb://file.invalid/eduforge_dev');
 
     expect(await h.run()).toBe(0);
     expect(h.createConnection).toHaveBeenCalledWith(
       adminUri,
       expect.any(Object),
     );
-    expect(h.deps.env.MONGO_URI).toBeUndefined();
+    expect(h.deps.env).toEqual({ NODE_ENV: 'test', MONGO_URI: adminUri });
   });
 
   it.each(['', ' \t '])(
-    'rejects an explicit blank admin URI %j',
+    'rejects an explicit blank MONGO_URI %j without falling back',
     async (uri) => {
       const h = harness();
-      h.deps.env.MONGO_ADMIN_URI = uri;
-      h.readFile.mockReturnValue('MONGO_ADMIN_URI=' + adminUri);
+      h.deps.env.MONGO_URI = uri;
+      h.deps.env.MONGO_ADMIN_URI = adminUri;
+      h.readFile.mockReturnValue('MONGO_URI=' + adminUri);
 
       expect(await h.run()).toBe(1);
+      expect(output(h)).toContain('MONGO_URI_REQUIRED');
       expect(h.createConnection).not.toHaveBeenCalled();
     },
   );
 
-  it('does not fall back to MONGO_URI in either source', async () => {
-    const h = harness();
-    h.deps.env = { NODE_ENV: 'test', MONGO_URI: adminUri };
-    h.readFile.mockReturnValue('MONGO_URI=' + adminUri);
+  it.each(['process', 'file'])(
+    'accepts only MONGO_URI from the %s source',
+    async (source) => {
+      const h = harness();
+      h.deps.env = {
+        NODE_ENV: 'test',
+        ...(source === 'process' ? { MONGO_URI: adminUri } : {}),
+      };
+      h.readFile.mockReturnValue(
+        source === 'file' ? 'MONGO_URI=' + adminUri : '',
+      );
+      const originalEnvironment = { ...h.deps.env };
 
-    expect(await h.run()).toBe(1);
-    expect(h.createConnection).not.toHaveBeenCalled();
-  });
+      expect(await h.run()).toBe(0);
+      expect(h.createConnection).toHaveBeenCalledWith(
+        adminUri,
+        expect.any(Object),
+      );
+      expect(h.deps.env).toEqual(originalEnvironment);
+      noWrites(h);
+    },
+  );
+
+  it.each(['process', 'file', 'both'])(
+    'ignores legacy-only MONGO_ADMIN_URI in %s sources',
+    async (source) => {
+      const h = harness();
+      h.deps.env = {
+        NODE_ENV: 'test',
+        ...(source !== 'file' ? { MONGO_ADMIN_URI: adminUri } : {}),
+      };
+      h.readFile.mockReturnValue(
+        source !== 'process' ? 'MONGO_ADMIN_URI=' + adminUri : '',
+      );
+
+      expect(await h.run()).toBe(1);
+      expect(output(h)).toContain('MONGO_URI_REQUIRED');
+      expect(h.createConnection).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each(['process', 'file'])(
+    'uses the %s MONGO_URI and ignores coexisting legacy values',
+    async (source) => {
+      const h = harness();
+      const legacyUri = 'mongodb://legacy.invalid/eduforge';
+      h.deps.env = {
+        NODE_ENV: 'test',
+        MONGO_ADMIN_URI: legacyUri,
+        ...(source === 'process' ? { MONGO_URI: adminUri } : {}),
+      };
+      h.readFile.mockReturnValue(
+        'MONGO_ADMIN_URI=' +
+          legacyUri +
+          (source === 'file' ? '\nMONGO_URI=' + adminUri : ''),
+      );
+      const originalEnvironment = { ...h.deps.env };
+
+      expect(await h.run()).toBe(0);
+      expect(h.createConnection).toHaveBeenCalledWith(
+        adminUri,
+        expect.any(Object),
+      );
+      expect(h.deps.env).toEqual(originalEnvironment);
+      noWrites(h);
+    },
+  );
 
   it.each([
     ['browser_acceptance', 'standard_test'],
@@ -1346,7 +1403,7 @@ describe('sync-indexes ordinary configuration and cleanup (offline)', () => {
 
   it('requires the exact declared name and rejects the wrong apply confirmation before connection', async () => {
     const h = harness();
-    h.deps.env.MONGO_ADMIN_URI = adminUri + '_extra';
+    h.deps.env.MONGO_URI = adminUri + '_extra';
 
     expect(await h.run()).toBe(1);
     expect(output(h)).toContain('DATABASE_DECLARED_NAME_MISMATCH');
@@ -1483,7 +1540,7 @@ function realComparisonHarness(
   const uri = adminUri + (fixture.suffix ?? '');
   const deps: Partial<SyncIndexesDependencies> = {
     ...h.deps,
-    env: { NODE_ENV: 'test', MONGO_ADMIN_URI: uri },
+    env: { NODE_ENV: 'test', MONGO_URI: uri },
   };
   delete deps.createConnection;
   const schemas = fixture.schemas;

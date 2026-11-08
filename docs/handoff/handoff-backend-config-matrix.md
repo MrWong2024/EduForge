@@ -23,20 +23,20 @@ purpose 仅在 test 环境允许上述两个值；空值、未知值或非 test 
 
 连接串与环境文件口径：
 
-- `MONGO_URI` 是应用连接配置；`MONGO_ADMIN_URI` 是索引同步、导入、迁移等运维操作的连接配置。声明与实际 databaseName 必须符合上述映射；缺失或不匹配均 fail-closed，不回退到其他数据库。
-- 当前本机 development、standard_test、browser_acceptance 经用户明确授权共用现有 `root@admin` 账号，仍分别使用上表中的三个独立数据库；账号共用不允许用途、环境文件或数据库混用。应用与管理变量保留配置入口和进程职责，同一用途下可使用相同 URI，不表示本机存在不同的 APP/ADMIN 账号。该有限本机例外的治理入口见 [数据库规范 §2.5](../database-conventions.md#25-用户明确授权的独立本机环境例外)。
+- `MONGO_URI` 是应用、索引同步、导入和 Browser 进程唯一有效的数据库连接配置键。旧管理及 Browser 专用连接键不再参与选择，不提供别名或回退，也不因旧键存在而单独拒绝配置。声明与实际 databaseName 必须符合上述映射；缺失或不匹配均 fail-closed，不回退到其他数据库。
+- 当前本机 development、standard_test、browser_acceptance 经用户明确授权共用现有 `root@admin` 账号，仍分别使用上表中的三个独立数据库；账号共用不允许用途、环境文件或数据库混用。应用与管理操作保留独立进程职责，同一用途下共用 `MONGO_URI`，不表示本机存在不同的 APP/ADMIN 账号。该有限本机例外的治理入口见 [数据库规范 §2.5](../database-conventions.md#25-用户明确授权的独立本机环境例外)。
 - 本机三个用途以本机 standalone MongoDB 为前提，对应 tracked example 的 URI 默认省略 `directConnection`；该参数不替代目标、用途、库名或实际认证核验。
-- 本机例外之外，专用应用账号权限限于对应库 `readWrite`，专用管理账号用于索引同步、导入、迁移等人工/脚本操作。当前 production 的 `MONGO_URI` 与 `MONGO_ADMIN_URI` 使用相同连接串和 `root` 账号；本机例外不改变生产映射或配置。
+- 本机例外之外，专用应用账号权限限于对应库 `readWrite`，专用管理账号用于索引同步、导入、迁移等人工/脚本操作。当前 production 的 `MONGO_URI` 使用 `root` 账号；本机例外不改变生产映射。
 - 普通后端环境配置来源按优先级为 `.env.<NODE_ENV>`、`.env`；tracked example 与各环境配置组合见第 3 节，真实 `.env*` 是 ignored 本机配置，不得提交。
 
 Browser acceptance 配置：
 
-- `backend/.env.browser-acceptance` 是本机 ignored 文件，tracked 模板为 `backend/.env.browser-acceptance.example`；仅含 `EDUFORGE_DATABASE_PURPOSE`、`BROWSER_ACCEPTANCE_APP_MONGO_URI` 和 `BROWSER_ACCEPTANCE_ADMIN_MONGO_URI`。
-- APP URI 对应应用的 `MONGO_URI`；ADMIN URI 是管理进程配置，不注入 Nest 应用连接。满足下述本机 root 门禁时，APP/ADMIN 可以使用相同 URI；例外之外仍须使用不同 URI，并保留 APP 仅具目标库 `readWrite`、ADMIN 仅具目标库 `dbOwner` 的专用账号校验。
+- `backend/.env.browser-acceptance` 是本机 ignored 文件，tracked 模板为 `backend/.env.browser-acceptance.example`；仅声明 `EDUFORGE_DATABASE_PURPOSE=browser_acceptance` 和 `MONGO_URI`。Browser 连接只选择该专属文件的 `MONGO_URI`，不接受继承变量或旧连接键补齐，不叠加其他环境文件。
+- Browser backend、`process-ai` 与管理 CLI 共用该 URI，仍各自在独立进程中运行；APP/ADMIN 只表示应用与管理职责，不再表示两个配置入口或专用数据库账号分支。
 - 本机 root 例外仅接受单一 loopback standalone MongoDB 目标的 `mongodb://` URI，用户名为 `root`、显式 `authSource=admin`、库名为 `eduforge_browser_test`。Browser URI 判断允许合法省略 `directConnection` 或显式设置 `false`、`true`；拒绝非 loopback、SRV、多主机以及 proxy、`replicaSet`、`loadBalanced` 等代理或远端发现配置，不得借该例外连接服务器或生产目标。[sync-indexes](#sync-indexes-普通索引同步) 仍单独拒绝有效的 `directConnection=true`，不能用 Browser 准入结果替代该 CLI 门禁。
-- Browser 连接后先核对实际 `databaseName`；本机 root 路径还必须同时核验 `authenticatedUsers` 中的 `root@admin` 身份与 `authenticatedUserRoles` 中的 `root@admin` 角色。URI 声明不能替代实际认证，任一门禁不符均 fail-closed；专用账号路径继续按对应 APP/ADMIN 权限门禁执行。
+- Browser 连接后先核对实际 `databaseName`；Smoke 还必须同时核验 `authenticatedUsers` 中的唯一 `root@admin` 身份与 `authenticatedUserRoles` 中的唯一 `root@admin` 角色。URI 声明不能替代实际认证，任一门禁不符均 fail-closed。
 - Browser backend 的固定网络配置为 `127.0.0.1`、CORS origin `http://localhost:3000`；`BACKEND_PORT` 默认 `5000`，是唯一允许 shell 覆写的配置项。AI/Mail 配置组合见第 3 节。
-- Browser acceptance 使用独立 purpose 与 APP/ADMIN URI 配置；具体 process roles、启动门禁、环境隔离、连接核验及 fixture/verifier 边界见 [Backend Testing Playbook](./handoff-backend-testing-playbook.md)。
+- Browser acceptance 使用独立 purpose 与专属环境文件中的单一 `MONGO_URI`；具体 process roles、启动门禁、环境隔离、连接核验及 fixture/verifier 边界见 [Backend Testing Playbook](./handoff-backend-testing-playbook.md)。
 
 索引与 `autoIndex`：
 
@@ -61,7 +61,7 @@ npm run sync-indexes -- --apply --confirm-db <精确库名>
 npm run sync-indexes -- --apply --confirm-db <精确库名> --allow-drop
 ```
 
-- 无参数等价于只读 `--dry-run`，`--help` 独立于环境配置和数据库连接。CLI 拒绝未知、重复和冲突参数。普通执行要求调用进程显式设置 `NODE_ENV` 为 `development`、`test` 或 `production`。文件来源仅为对应的 `backend/.env.<NODE_ENV>`，以显式进程 `MONGO_ADMIN_URI` 优先。显式空值、非法 purpose 或任一来源声明 `browser_acceptance` 均拒绝。所选文件缺失且进程配置足够时可继续。连接前校验 URI 声明库名，连接后校验实际库名。
+- 无参数等价于只读 `--dry-run`，`--help` 独立于环境配置和数据库连接。CLI 拒绝未知、重复和冲突参数。普通执行要求调用进程显式设置 `NODE_ENV` 为 `development`、`test` 或 `production`。文件来源仅为对应的 `backend/.env.<NODE_ENV>`，按 `env.MONGO_URI ?? file.MONGO_URI` 选择；不叠加通用 `.env`，不改写 `process.env`，文件不能改变已选定的 `NODE_ENV`。缺失或显式空值以 `MONGO_URI_REQUIRED` 拒绝，不回退旧管理键；非法 purpose 或任一来源声明 `browser_acceptance` 均拒绝。所选文件缺失且进程配置足够时可继续。连接前校验 URI 声明库名，连接后校验实际库名。
 - 独立 Mongoose 连接和正式模型 Schema 克隆均禁用自动建集合和索引。CLI 按主节点读取，拒绝有效的 `directConnection=true`，apply 额外拒绝有效的 `w=0`。正式连接和原生元数据读取固定 `promoteBuffers: false`、`promoteValues: true`、`promoteLongs: true`、`useBigInt64: false`，独立连接另固定 `raw: false`。原生索引盘点开启 `includeBuildUUIDs`，使用有界游标期限，结束后关闭游标和连接。
 - 正式连接就绪后执行只读握手。检测到 `mongos` 或握手失败时，停止模型维护。工具的运维范围限于非分片部署，操作者须排除直接连接 shard 节点的情况，因为握手门禁仅识别 `mongos`。
 - 先用 `--dry-run` 审阅。apply 重新生成本次完整计划，包含待建集合、待删索引的原始定义和待建索引定义。库名确认、删除授权和计划输出成功后才进入写入阶段。含删除的计划必须同传 `--allow-drop`。逐模型执行前用集合 UUID 与原始计划复查目标，按冻结计划逐项等待删建。首个写前检查或 DDL 错误即停止后续写入。后续模型发生漂移时，前面操作可能已完成。
@@ -76,8 +76,8 @@ npm run sync-indexes -- --apply --confirm-db <精确库名> --allow-drop
 ### import-users 独立导入 CLI
 
 - 正式入口为 `npm run import-users`，保留 `--file`、`--dry-run`、`--reset-password`；`--help` 不要求环境、CSV 文件或数据库连接。
-- 正常执行先检查调用进程原始 `NODE_ENV`，只接受 `development`、`test`、`production`，不得由环境文件或默认值补齐。随后仅读取对应的 `backend/.env.<NODE_ENV>`；显式进程 `MONGO_ADMIN_URI` 优先于该文件，不叠加通用 `.env`，不回退 `MONGO_URI`，不改写 `process.env.MONGO_URI`，环境文件也不能改变已选定的 `NODE_ENV`。
-- 数据库映射与 purpose 合法性沿用本节权威定义；本 CLI 不支持 `browser_acceptance`，进程或所选文件声明该用途均拒绝。连接前精确校验管理 URI 的库名，连接后先核对实际 `databaseName`，通过后才建立模型和查询用户；不要求 AI、SMTP 等无关配置。
+- 正常执行先检查调用进程原始 `NODE_ENV`，只接受 `development`、`test`、`production`，不得由环境文件或默认值补齐。随后仅读取对应的 `backend/.env.<NODE_ENV>`，按 `env.MONGO_URI ?? file.MONGO_URI` 选择；不叠加通用 `.env`，不改写 `process.env`，文件不能改变已选定的 `NODE_ENV`。缺失或显式空值以 `MONGO_URI_REQUIRED` 拒绝，不回退旧管理键；所选文件缺失且进程配置足够时可继续。
+- 数据库映射与 purpose 合法性沿用本节权威定义；本 CLI 不支持 `browser_acceptance`，进程或所选文件声明该用途均拒绝。连接前精确校验 URI 的库名，连接后先核对实际 `databaseName`，通过后才建立模型和查询用户；不要求 AI、SMTP 等无关配置。
 - 使用独立 Mongoose 连接，明确 `autoCreate=false`、`autoIndex=false`，复用现有 Schema，不启动 AppModule、认证模块、Worker 或 Provider，不显式调用 `init`、`ensureIndexes`、`syncIndexes`、`createCollection` 等初始化写入入口。成功、失败及实际库名不符时均回收本轮连接。
 - `--dry-run` 可以读取目标库现有用户以计算**预计**创建、更新、跳过和失败数量；不创建或修改用户、不生成密码哈希、不撤销凭据、不处理作业、不调用模型或发送邮件。预计统计不是实际写入结果；离线测试与真实数据库验收的证据边界见 [Backend Testing Playbook](./handoff-backend-testing-playbook.md#import-users-定向离线回归)。
 - 默认不修改已有账号密码；`--reset-password` 在已有用户密码更新成功且确认匹配后，删除该 `userId` 的**全部会话**，并作废其尚未使用且未过期的密码重置令牌。撤销影响零条记录属于正常结果，用户文档未变化也不能跳过撤销；两项撤销均须尝试，任一失败或写入未确认时该行只计一次失败，不计更新成功。密码更新失败或未匹配时不继续撤销；再次显式重置仍执行完整更新与撤销流程。

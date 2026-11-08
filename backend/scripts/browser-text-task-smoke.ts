@@ -159,33 +159,21 @@ export function assertNamespace(namespace: string): void {
 }
 export function assertSmokeRole(
   roles: DbRole[],
-  role: 'APP' | 'ADMIN',
-  authentication?: {
+  authentication: {
     mongoUri: string | undefined;
     authenticatedUsers: { user: string; db: string }[];
   },
 ): void {
-  if (isLocalRootBrowserUri(authentication?.mongoUri)) {
-    if (
-      authentication?.authenticatedUsers.length !== 1 ||
-      authentication.authenticatedUsers[0].user !== 'root' ||
-      authentication.authenticatedUsers[0].db !== 'admin' ||
-      roles.length !== 1 ||
-      roles[0].role !== 'root' ||
-      roles[0].db !== 'admin'
-    )
-      fail('SMOKE_DATABASE_AUTHENTICATION_MISMATCH');
-    return;
-  }
-  const expected = role === 'APP' ? 'readWrite' : 'dbOwner';
   if (
-    !roles.length ||
-    roles.some(
-      (entry) =>
-        entry.db !== 'eduforge_browser_test' || entry.role !== expected,
-    )
+    !isLocalRootBrowserUri(authentication.mongoUri) ||
+    authentication.authenticatedUsers.length !== 1 ||
+    authentication.authenticatedUsers[0].user !== 'root' ||
+    authentication.authenticatedUsers[0].db !== 'admin' ||
+    roles.length !== 1 ||
+    roles[0].role !== 'root' ||
+    roles[0].db !== 'admin'
   )
-    fail('SMOKE_DATABASE_ROLE_MISMATCH');
+    fail('SMOKE_DATABASE_AUTHENTICATION_MISMATCH');
 }
 export function assertExclusiveJob(
   targetId: string,
@@ -289,7 +277,6 @@ function readEnvironment(): {
 }
 async function verifyConnection(
   connection: Connection,
-  role: 'APP' | 'ADMIN',
   mongoUri: string | undefined,
 ): Promise<void> {
   assertConnectedDatabaseMatchesPurpose({
@@ -316,7 +303,7 @@ async function verifyConnection(
         db: stringField(entry, 'db'),
       }))
     : [];
-  assertSmokeRole(roles, role, { mongoUri, authenticatedUsers });
+  assertSmokeRole(roles, { mongoUri, authenticatedUsers });
 }
 function models(connection: Connection) {
   return {
@@ -849,7 +836,7 @@ async function cleanup(
 async function processAi(record: SmokeRecord, jobId: string): Promise<void> {
   if (!Types.ObjectId.isValid(jobId)) fail('SMOKE_JOB_ID_INVALID');
   process.env = readEnvironment().environment;
-  const load = createRequire(__filename); // App imports follow both declaration gates.
+  const load = createRequire(__filename); // App imports follow the dedicated-file gate.
   const { NestFactory } = await import('@nestjs/core');
   const { ConfigService } = await import('@nestjs/config');
   const { getConnectionToken } = await import('@nestjs/mongoose');
@@ -874,7 +861,7 @@ async function processAi(record: SmokeRecord, jobId: string): Promise<void> {
     )
       fail('SMOKE_PROCESSOR_CONFIGURATION_MISMATCH');
     const connection = app.get<Connection>(getConnectionToken());
-    await verifyConnection(connection, 'APP', config.get<string>('mongo.uri'));
+    await verifyConnection(connection, config.get<string>('mongo.uri'));
     const owned = await inventory(connection, record);
     const job = owned.jobs.find((row) => row._id.toString() === jobId);
     if (!job) fail('SMOKE_TARGET_JOB_NOT_OWNED');
@@ -973,26 +960,18 @@ async function main(): Promise<void> {
     return;
   }
   const { file, environment } = readEnvironment();
-  delete environment.MONGO_URI;
   process.env = environment;
   let connection: Connection | undefined;
   try {
-    connection = mongoose.createConnection(
-      file.BROWSER_ACCEPTANCE_ADMIN_MONGO_URI,
-      {
-        autoIndex: false,
-        autoCreate: false,
-        serverSelectionTimeoutMS: 5000,
-        connectTimeoutMS: 5000,
-        socketTimeoutMS: 10000,
-      },
-    );
+    connection = mongoose.createConnection(file.MONGO_URI, {
+      autoIndex: false,
+      autoCreate: false,
+      serverSelectionTimeoutMS: 5000,
+      connectTimeoutMS: 5000,
+      socketTimeoutMS: 10000,
+    });
     await connection.asPromise();
-    await verifyConnection(
-      connection,
-      'ADMIN',
-      file.BROWSER_ACCEPTANCE_ADMIN_MONGO_URI,
-    );
+    await verifyConnection(connection, file.MONGO_URI);
     if (command === 'prepare') {
       const frontendPort = Number(option('--frontend-port') ?? 3100);
       const backendPort = Number(option('--backend-port') ?? 5100);

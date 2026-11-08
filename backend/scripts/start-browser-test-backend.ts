@@ -23,7 +23,7 @@ async function bootstrap(): Promise<void> {
     mongoUri: process.env.MONGO_URI,
   });
 
-  // Application imports must follow both Browser URI declaration gates.
+  // Application imports must follow the dedicated-file Browser URI gate.
   const loadApplication = createRequire(__filename);
   const { NestFactory } = await import('@nestjs/core');
   const { ConfigService } = await import('@nestjs/config');
@@ -58,8 +58,7 @@ async function bootstrap(): Promise<void> {
         purpose: 'browser_acceptance',
         databaseName: connection.db?.databaseName,
         envFile: '.env.browser-acceptance',
-        applicationUriSource: 'BROWSER_ACCEPTANCE_APP_MONGO_URI',
-        adminUriUsed: false,
+        applicationUriSource: 'MONGO_URI',
         host: '127.0.0.1',
         port,
       }),

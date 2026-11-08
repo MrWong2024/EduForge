@@ -51,19 +51,14 @@ export function createBrowserAcceptanceEnvironment(
   inherited: NodeJS.ProcessEnv,
 ): NodeJS.ProcessEnv {
   const purpose = file.EDUFORGE_DATABASE_PURPOSE;
-  const appUri = file.BROWSER_ACCEPTANCE_APP_MONGO_URI;
-  const adminUri = file.BROWSER_ACCEPTANCE_ADMIN_MONGO_URI;
-  for (const mongoUri of [appUri, adminUri]) {
-    assertBrowserAcceptancePreImportEnvironment({
-      nodeEnv: 'test',
-      purpose,
-      mongoUri,
-    });
-  }
-  if (appUri === adminUri && !isLocalRootBrowserUri(appUri)) {
-    throw new DatabaseGateError(
-      'BROWSER_APPLICATION_URI_MUST_DIFFER_FROM_ADMIN',
-    );
+  const mongoUri = file.MONGO_URI;
+  assertBrowserAcceptancePreImportEnvironment({
+    nodeEnv: 'test',
+    purpose,
+    mongoUri,
+  });
+  if (!isLocalRootBrowserUri(mongoUri)) {
+    throw new DatabaseGateError('BROWSER_DATABASE_LOCAL_ROOT_URI_REQUIRED');
   }
 
   const environment = { ...inherited };
@@ -77,13 +72,13 @@ export function createBrowserAcceptanceEnvironment(
       delete environment[key];
     }
   }
-  // Only the three declared file keys participate. No dotenv overlay, admin
-  // connection, external provider or background business worker is inherited.
+  // Only MONGO_URI and purpose from the dedicated file participate. No dotenv
+  // overlay, connection, external provider or background worker is inherited.
   return {
     ...environment,
     NODE_ENV: 'test',
     EDUFORGE_DATABASE_PURPOSE: purpose,
-    MONGO_URI: appUri,
+    MONGO_URI: mongoUri,
     BACKEND_PORT: inherited.BACKEND_PORT ?? '5000',
     FRONTEND_URL: 'http://localhost:3000',
     MAIL_PROVIDER: 'log',

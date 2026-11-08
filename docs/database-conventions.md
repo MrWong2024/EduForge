@@ -89,7 +89,7 @@ Mongoose Schema 技术红线与 Codex 执行规则以 `docs/codex-rules.md` 为�
 
 用户明确授权时，独立本机开发环境可在 development 与隔离测试用途中复用现有高权限账号。项目配置 Owner 必须明确例外适用的本机目标、用途、独立库名及连接与实际认证门禁；该例外不适用于服务器、共享环境或 production，也不豁免数据库名校验、用途隔离、凭证保护和任务写入授权。
 
-应用与管理连接仍保留各自配置入口和进程职责；账号或 URI 相同不等于允许将管理操作混入应用进程。具体本机账号事实和 Browser 连接约束由 [Backend Config Matrix](./handoff/handoff-backend-config-matrix.md#1-数据库连接串与索引治理) 维护，其他环境继续遵循默认账号权限模型。
+应用与管理操作仍保留独立进程职责；配置键、账号或 URI 相同不等于允许将管理操作混入应用进程。具体连接配置入口、本机账号事实和 Browser 连接约束由 [Backend Config Matrix](./handoff/handoff-backend-config-matrix.md#1-数据库连接串与索引治理) 维护，其他环境继续遵循默认账号权限模型。
 
 ---
 

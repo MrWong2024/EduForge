@@ -200,8 +200,8 @@ export function resolveImportConfig(
     nodeEnv,
     env.EDUFORGE_DATABASE_PURPOSE ?? file.EDUFORGE_DATABASE_PURPOSE,
   );
-  const uri = env.MONGO_ADMIN_URI ?? file.MONGO_ADMIN_URI;
-  if (!uri?.trim()) throw new ImportUsersError('MONGO_ADMIN_URI_REQUIRED');
+  const uri = env.MONGO_URI ?? file.MONGO_URI;
+  if (!uri?.trim()) throw new ImportUsersError('MONGO_URI_REQUIRED');
   const databaseEnvironment = { nodeEnv, purpose };
   assertDeclaredDatabaseMatchesPurpose({
     ...databaseEnvironment,

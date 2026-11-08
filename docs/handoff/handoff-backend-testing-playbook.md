@@ -114,7 +114,7 @@ npm.cmd run test -- --listTests --runInBand --runTestsByPath ./scripts/sync-inde
 npm.cmd run test -- --runInBand --runTestsByPath ./scripts/sync-indexes.spec.ts
 ```
 
-**真实数据库集成。** `test/sync-indexes.e2e-spec.ts` 使用 purpose `standard_test` 和现有 `test:e2e` runner。独立进程只从 `backend/.env.test` 读取 `MONGO_ADMIN_URI`，目标限于本机可写 standalone MongoDB 的 `eduforge_test`。驱动解析后须恰有一个 loopback seed，SRV、副本集和负载均衡配置会被拒绝。准备、正式 CLI 与清理均核验实际选中服务器地址、standalone 类型和实际库名。通过正式 Schema 克隆映射到本轮唯一前缀的专属集合，调用正式 CLI 的连接、盘点、执行及验收路径。HTTP 应用和其他业务服务均不启动。
+**真实数据库集成。** `test/sync-indexes.e2e-spec.ts` 使用 purpose `standard_test` 和现有 `test:e2e` runner。独立进程只从 `backend/.env.test` 读取 `MONGO_URI`，目标限于本机可写 standalone MongoDB 的 `eduforge_test`。驱动解析后须恰有一个 loopback seed，SRV、副本集和负载均衡配置会被拒绝。准备、正式 CLI 与清理均核验实际选中服务器地址、standalone 类型和实际库名。通过正式 Schema 克隆映射到本轮唯一前缀的专属集合，调用正式 CLI 的连接、盘点、执行及验收路径。HTTP 应用和其他业务服务均不启动。
 
 测试期限早于 Jest 外层超时，停止后禁止发起新的测试写入。`afterAll` 从入口计算独立的清理总预算，早于 Jest 的 90 秒期限，覆盖在途调用收束、目标核验、归属查询、删除、残留报告与连接关闭，并为报告和关闭保留时间。确认已发出的写命令结果与实际目标后，每次删除分别在集合名称及 UUID 归属查询前、查询返回后且发出删除前检查期限。到期停止发起新删除，已发出的删除按实际完成或未确认记录。删除未确认时保留登记，残留或连接关闭无法确认时如实报告。超时、Promise 拒绝或关闭连接本身均不足以证明服务端已取消写入。清理期限及未确认状态使用受控时钟和 Promise 做离线回归，实库验收覆盖正常收尾。
 
@@ -146,14 +146,14 @@ npm.cmd run test:e2e -- --runInBand --runTestsByPath ./test/sync-indexes.e2e-spe
 
 数据库具体名称、URI、账号与环境文件映射仍由 [Backend config matrix](./handoff-backend-config-matrix.md#1-数据库连接串与索引治理) 唯一维护，本手册不复制完整 Config Matrix。`standard_test` 与 `browser_acceptance` 使用独立 database 实现 database-level isolation；namespace、collection prefix 等逻辑隔离不能替代 database-level isolation。不同 purpose 不得在同一进程混用配置，也不得依赖继承变量、dotenv 顺序或后加载覆盖选择数据库。
 
-本机共用账号的有限例外及 Browser URI、实际认证门禁以 Config Matrix 为准；APP/ADMIN 表示配置入口和进程职责，不要求该例外使用不同账号。Browser 运行仍须分别通过连接声明、实际库名及认证身份/权限核验，账号共用不合并下述进程边界。
+本机共用账号及 Browser 单一 `MONGO_URI`、实际认证门禁以 Config Matrix 为准；APP/ADMIN 仅表示独立进程职责。Browser 运行仍须分别通过连接声明、实际库名及认证身份/权限核验，同一 URI 不合并下述进程边界。
 
 Browser 相关进程角色边界：
 
 | 进程 | Database purpose | 连接与进程职责 |
 |---|---|---|
-| Playwright / Browser runner | `none` | 不得直接获得或连接 Mongo APP / ADMIN URI |
-| Browser backend | `browser_acceptance` | 通过独立 `start:browser-test` launcher 使用 Browser Acceptance APP connection；ADMIN 声明只校验、不注入 Nest 应用 |
+| Playwright / Browser runner | `none` | 不得直接获得或连接 Mongo URI |
+| Browser backend | `browser_acceptance` | 通过独立 `start:browser-test` launcher 从 Browser 专属文件取得 `MONGO_URI`，只承担 APP 应用职责 |
 | 文本教学任务 `process-ai` | `browser_acceptance` | 独立 APP 应用上下文；不 listen、不启动 Worker，只在独占验收时段消费唯一合格目标，见 §6.2 |
 | 文本教学任务 `prepare/inspect/cleanup/replace` | `browser_acceptance` | 独立 ADMIN 管理进程；不导入 AppModule，不与 HTTP backend 或 Browser 合并，见 §6.2 |
 
@@ -163,7 +163,7 @@ Browser launcher foundation 负责受控启动、正常初始化所需索引元�
 
 最低充分证据入口（执行状态以当次报告为准）：
 
-- `src/config/database-purpose.spec.ts`：purpose/URI/connected-name、APP/ADMIN 声明、环境隔离与 launcher 静态合同；先 `npm run test -- --listTests --runInBand --runTestsByPath ./src/config/database-purpose.spec.ts`，确认唯一目标后去掉 `--listTests` 执行。
+- `src/config/database-purpose.spec.ts`：purpose/URI/connected-name、Browser 单 URI 声明、环境隔离与 launcher 静态合同；先 `npm run test -- --listTests --runInBand --runTestsByPath ./src/config/database-purpose.spec.ts`，确认唯一目标后去掉 `--listTests` 执行。
 - 代表性真实 HTTP 回归：`test/users-me.e2e-spec.ts`；先用相同定向参数加 `--listTests` 做 discovery，再运行本手册第 4 节命令。保持 spec-owned cleanup 与 app close。
 - Browser 正向验收：独立前台运行 `npm run start:browser-test`（必要时通过 `BACKEND_PORT` 选择已核对空闲端口），确认实际数据库与安全启动摘要，再请求 `http://127.0.0.1:<port>/api` 得到 200。仅执行启动/健康检查时，停止该运行单元并确认端口释放即可；写入型文本教学 smoke 另须按 §6.2 精确 cleanup。
 
@@ -221,10 +221,10 @@ npm run browser:text-smoke -- inspect --namespace b1-2-<unique>
 npm run browser:text-smoke -- cleanup --namespace b1-2-<unique> --confirm-namespace b1-2-<unique>
 ```
 
-- 每次调用为独立进程，仅读取 `backend/.env.browser-acceptance`，复用环境构造、用途/URI 声明门禁和连接后实际库名门禁；实际认证按 [Config Matrix](./handoff-backend-config-matrix.md#1-数据库连接串与索引治理) 的本机例外或专用账号路径核验，不以进程角色名称推断数据库账号。
+- 每次调用为独立进程，仅读取 `backend/.env.browser-acceptance` 中的 `MONGO_URI` 与 purpose，复用环境构造、用途/URI 声明门禁和连接后实际库名门禁；实际认证按 [Config Matrix](./handoff-backend-config-matrix.md#1-数据库连接串与索引治理) 的本机 root 门禁核验，不以进程角色名称推断数据库账号。
 - `prepare` 只通过当前 UserSchema 和密码 helper seed namespace 专属 teacher/student；固定合成应用密码由脚本测试常量统一维护。课程、班级、四个不同已发布私有模板及入班走前端同源 BFF 的正式 HTTP API；模板数量、标题及 ownership 由脚本本地稳定 fixture 标识维护，不依赖业务策略枚举；旧策略标题仅作为历史 namespace 的精确 cleanup 兼容标识，不用于 inspect/process。课堂发布、作品提交、产品 AI 申请和教师反馈留给真实 Browser。
 - `inspect --prepared` 只读核验账号固定值及最小前置；普通 `inspect` 读取 ownership 限定的资源、保存原文版本及 Job/反馈终态。异常前置不自动修复。确需替换时显式运行 `npm run browser:text-smoke -- replace --namespace b1-2-<unique> --confirm-namespace b1-2-<unique>`：先清理并核对旧残留，再重新准备；不得手工改密码或业务状态绕过核验。
-- `process-ai` 在 APP/ADMIN 声明门禁通过后才动态导入 AppModule，以 `createApplicationContext` 启动且不 listen；实际 ConfigService 必须为 Browser 用途、stub、worker=false、debug=false，实际数据库名与 APP 连接的认证门禁也须匹配。正常索引初始化仍可能写入数据库。
+- `process-ai` 在 Browser 专属文件的用途与单 URI 声明门禁通过后才动态导入 AppModule，以 `createApplicationContext` 启动且不 listen；实际 ConfigService 必须为 Browser 用途、stub、worker=false、debug=false，实际数据库名与 APP 连接的认证门禁也须匹配。正常索引初始化仍可能写入数据库。
 - 处理前核对 Job→Submission→ClassroomTask→合成师生/班级的完整 ownership；全库 PENDING/FAILED/RUNNING 必须恰好只有目标，且为 budgetVersion=1、PENDING、attempts=0。外来、多目标或 legacy 非终态立即拒绝，不修改它们。随后只调用真实 `AiFeedbackProcessor.processOnce(1)` 一次，读取该目标及实际 stub 反馈核对结果，finally 等待上下文关闭。
 - `processOnce` 是全库扫描入口，上述查询不是并发锁。操作者必须独占验收时段，排除其他 Worker/Profile/生产者并串行形成、消费目标；`--confirm-exclusive` 记录的是该运行前提，不能代替隔离审计。不启用长期 Worker、debug HTTP 或真实模型。
 - 最小恢复记录仅保存 namespace、端口、准确资源 ID，位于仓库根目录下 ignored `.local/deliverables/browser-text-task-smoke/<namespace>.json`；Cookie 仅在准备过程内存中使用，不持久化 Cookie、Session、Mongo URI 或基础设施凭据。`.local/deliverables/` 包含恢复资料，不能整体当作可清空缓存。
@@ -238,7 +238,7 @@ npm run browser:text-smoke -- cleanup --namespace b1-2-<unique> --confirm-namesp
 
 1. **Fixture 准入与边界：**先评估正式 API、已有 test factory / builder 或合法 synthetic seed 能否最低成本形成起点；只有它们不足时才新增专用 fixture。fixture 只构造 legal、minimal、deterministic、synthetic 前置，不得成为第二套产品、业务状态机、catalog / seed 治理或 UI 测试后门，也不得直接改库制造正式产品不可达状态、绕过业务不变量或引入 test-only lifecycle state；只能直接改库形成的状态须回到 [Frontend testing playbook](./handoff-frontend-testing-playbook.md) 的 `internal_corruption_only` 分类与 [Codex instruction spec](../codex-instruction-spec.md) §3.9 重新判断证据必要性。
 2. **变更触发：**UI copy、layout、selector、styling 或 visual arrangement 变化本身不触发 fixture / verifier 数据合同变更；只有 DTO、Schema、ownership、role、lifecycle / state precondition、正式 API contract 或 Profile 所需持久业务事实真实变化时，才评估最低充分同步。
-3. **Ownership、namespace 与进程角色：**每个 Profile 创建的持久 synthetic resource 必须具有唯一、可识别、可回收的 ownership / namespace，只能修改或清理自身资源；shared、canonical 与其他 Profile 数据默认只读，namespace 不替代 database-level isolation。进程角色继续遵循第 5 节：runner 为 `none` 且不持有 Mongo URI，Browser backend 使用 `browser_acceptance` APP connection，fixture / verifier / cleanup 管理进程使用 `browser_acceptance` ADMIN connection，APP 与 ADMIN 不得为方便而混入同一 runner / backend 进程。
+3. **Ownership、namespace 与进程角色：**每个 Profile 创建的持久 synthetic resource 必须具有唯一、可识别、可回收的 ownership / namespace，只能修改或清理自身资源；shared、canonical 与其他 Profile 数据默认只读，namespace 不替代 database-level isolation。进程角色继续遵循第 5 节：runner 为 `none` 且不持有 Mongo URI，Browser backend 是 `browser_acceptance` APP 应用进程，fixture / verifier / cleanup 是同用途的独立 ADMIN 管理进程；共用 URI 不允许 APP 与 ADMIN 为方便而混入同一 runner / backend 进程。
 4. **Verifier 职责：**只有正式不变量存在真实证据缺口时才建立 verifier。prepared verifier 原则上只读确认前置，不创建、修复、迁移、删除或补齐数据；不满足时报告 fixture / precondition 问题。post verifier 仅补 Browser 持久副作用中尚未由 HTTP E2E 或其他低层证据充分证明的部分，不为 Profile 完整感重复 role / ownership、state gate、rejection、idempotency、无非法副作用或数据库终态等既有证据；assertion 只锁定正式合同，不把历史偶然 count、调试字段、runner 信息、日志数量或非正式 cardinality 升级为门禁。
 5. **最低充分闭环：**按实际准入步骤形成 `prepare → optional prepared verify → Browser backend / evidence → optional post verify → cleanup → optional residual verify`，并保持同一 Git code state、同一已验证前置与同一 ownership / namespace。该序列不是每个 Profile 的固定模板；不需要 fixture、数据库写入、verifier 或 residual 核对时必须省略对应步骤。
 6. **Cleanup：**cleanup 必须 precise、ownership-scoped，并在可行时保持幂等与安全可重复；不得使用 `dropDatabase`、广域删除，也不得触碰未知、非当前 Profile 或其他执行中任务的资源。写入或 cleanup 结果不确定时，先只读核对服务端权威状态、ownership、已产生副作用与 residual，再决定下一步，不盲目重跑副作用或破坏性操作。

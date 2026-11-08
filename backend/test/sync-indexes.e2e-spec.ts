@@ -382,7 +382,7 @@ describe('sync-indexes against an isolated MongoDB namespace', () => {
       } catch {
         throw new Error('SYNC_INDEXES_E2E_ENV_FILE_UNAVAILABLE');
       }
-      const mongoUri = parse(file).MONGO_ADMIN_URI;
+      const mongoUri = parse(file).MONGO_URI;
       if (!mongoUri)
         throw new Error('SYNC_INDEXES_E2E_MANAGEMENT_URI_REQUIRED');
       assertDeclaredDatabaseMatchesPurpose({ nodeEnv, purpose, mongoUri });

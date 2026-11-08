@@ -17,16 +17,12 @@ import { envValidationSchema } from './env.validation';
 
 const uri = (database: string, user = 'synthetic-app') =>
   `mongodb://${user}:synthetic-password@127.0.0.1:1/${database}`;
-const browserFile = {
-  EDUFORGE_DATABASE_PURPOSE: 'browser_acceptance',
-  BROWSER_ACCEPTANCE_APP_MONGO_URI: uri('eduforge_browser_test'),
-  BROWSER_ACCEPTANCE_ADMIN_MONGO_URI: uri(
-    'eduforge_browser_test',
-    'synthetic-admin',
-  ),
-};
 const localRootUri = (host = '127.0.0.1:27017') =>
   `mongodb://root:synthetic-password@${host}/eduforge_browser_test?authSource=admin`;
+const browserFile = {
+  EDUFORGE_DATABASE_PURPOSE: 'browser_acceptance',
+  MONGO_URI: localRootUri('127.0.0.1:1'),
+};
 
 describe('database purpose gates (no database connection)', () => {
   it('defaults an omitted test purpose to standard_test', () => {
@@ -174,17 +170,16 @@ describe('database purpose gates (no database connection)', () => {
   });
 });
 
-describe('local root Browser URI exception (no database connection)', () => {
+describe('local root Browser URI gate (no database connection)', () => {
   it.each(['127.0.0.1:27017', 'localhost:27017', '[::1]:27017'])(
-    'accepts one loopback host %s and permits the same app/admin URI',
+    'accepts one loopback host %s from the dedicated file',
     (host) => {
       const mongoUri = localRootUri(host);
       expect(isLocalRootBrowserUri(mongoUri)).toBe(true);
       const result = createBrowserAcceptanceEnvironment(
         {
           ...browserFile,
-          BROWSER_ACCEPTANCE_APP_MONGO_URI: mongoUri,
-          BROWSER_ACCEPTANCE_ADMIN_MONGO_URI: mongoUri,
+          MONGO_URI: mongoUri,
         },
         { MONGO_ADMIN_URI: 'stale', AI_FEEDBACK_WORKER_ENABLED: 'true' },
       );
@@ -208,8 +203,7 @@ describe('local root Browser URI exception (no database connection)', () => {
         createBrowserAcceptanceEnvironment(
           {
             ...browserFile,
-            BROWSER_ACCEPTANCE_APP_MONGO_URI: mongoUri,
-            BROWSER_ACCEPTANCE_ADMIN_MONGO_URI: mongoUri,
+            MONGO_URI: mongoUri,
           },
           {},
         ).MONGO_URI,
@@ -271,25 +265,26 @@ describe('local root Browser URI exception (no database connection)', () => {
   ])('rejects %s without exposing parser errors', (_name, mongoUri) => {
     expect(() => isLocalRootBrowserUri(mongoUri)).not.toThrow();
     expect(isLocalRootBrowserUri(mongoUri)).toBe(false);
-  });
-
-  it('keeps purpose and database gates before the local root exception', () => {
-    const shared = {
-      ...browserFile,
-      BROWSER_ACCEPTANCE_APP_MONGO_URI: localRootUri(),
-      BROWSER_ACCEPTANCE_ADMIN_MONGO_URI: localRootUri(),
-    };
     expect(() =>
       createBrowserAcceptanceEnvironment(
-        { ...shared, EDUFORGE_DATABASE_PURPOSE: 'standard_test' },
+        { ...browserFile, MONGO_URI: mongoUri },
+        {},
+      ),
+    ).toThrow();
+  });
+
+  it('keeps purpose and database gates before the local root URI gate', () => {
+    expect(() =>
+      createBrowserAcceptanceEnvironment(
+        { ...browserFile, EDUFORGE_DATABASE_PURPOSE: 'standard_test' },
         {},
       ),
     ).toThrow('BROWSER_DATABASE_ENVIRONMENT_REQUIRED');
     expect(() =>
       createBrowserAcceptanceEnvironment(
         {
-          ...shared,
-          BROWSER_ACCEPTANCE_APP_MONGO_URI: localRootUri().replace(
+          ...browserFile,
+          MONGO_URI: localRootUri().replace(
             '/eduforge_browser_test?',
             '/eduforge_test?',
           ),
@@ -299,21 +294,20 @@ describe('local root Browser URI exception (no database connection)', () => {
     ).toThrow('DATABASE_DECLARED_NAME_MISMATCH');
   });
 
-  it('returns only the fixed gate error for a rejected identical root URI', () => {
+  it('returns only the fixed gate error for a rejected root URI', () => {
     const mongoUri = localRootUri('example.invalid:27017');
     try {
       createBrowserAcceptanceEnvironment(
         {
           ...browserFile,
-          BROWSER_ACCEPTANCE_APP_MONGO_URI: mongoUri,
-          BROWSER_ACCEPTANCE_ADMIN_MONGO_URI: mongoUri,
+          MONGO_URI: mongoUri,
         },
         {},
       );
       throw new Error('The gate should have failed');
     } catch (error) {
       expect(String(error)).toBe(
-        'DatabaseGateError: BROWSER_APPLICATION_URI_MUST_DIFFER_FROM_ADMIN',
+        'DatabaseGateError: BROWSER_DATABASE_LOCAL_ROOT_URI_REQUIRED',
       );
       expect(String(error)).not.toContain('synthetic-password');
       expect(String(error)).not.toContain('mongodb://');
@@ -344,13 +338,18 @@ describe('Browser environment and launcher isolation', () => {
       BACKEND_PORT: '5003',
       PATH: 'synthetic-path',
     };
-    const result = createBrowserAcceptanceEnvironment(browserFile, inherited);
+    const result = createBrowserAcceptanceEnvironment(
+      {
+        ...browserFile,
+        MONGO_ADMIN_URI: uri('eduforge'),
+        BROWSER_ACCEPTANCE_APP_MONGO_URI: uri('eduforge_test'),
+        BROWSER_ACCEPTANCE_ADMIN_MONGO_URI: uri('eduforge_test'),
+      },
+      inherited,
+    );
     expect(result.NODE_ENV).toBe('test');
     expect(result.EDUFORGE_DATABASE_PURPOSE).toBe('browser_acceptance');
-    expect(result.MONGO_URI).toBe(browserFile.BROWSER_ACCEPTANCE_APP_MONGO_URI);
-    expect(result.MONGO_URI).not.toBe(
-      browserFile.BROWSER_ACCEPTANCE_ADMIN_MONGO_URI,
-    );
+    expect(result.MONGO_URI).toBe(browserFile.MONGO_URI);
     for (const key of [
       'MONGO_ADMIN_URI',
       'BROWSER_ACCEPTANCE_APP_MONGO_URI',
@@ -375,37 +374,30 @@ describe('Browser environment and launcher isolation', () => {
     expect(envValidationSchema.validate(result).error).toBeUndefined();
   });
 
-  it.each([
-    'BROWSER_ACCEPTANCE_APP_MONGO_URI',
-    'BROWSER_ACCEPTANCE_ADMIN_MONGO_URI',
-  ])('requires %s to declare the Browser database', (key) => {
-    for (const value of [undefined, uri('eduforge_test')]) {
+  it('requires the dedicated file MONGO_URI without inherited or legacy fallback', () => {
+    for (const value of [undefined, '', uri('eduforge_test')]) {
       expect(() =>
         createBrowserAcceptanceEnvironment(
-          { ...browserFile, [key]: value },
-          {},
+          {
+            ...browserFile,
+            MONGO_URI: value,
+            MONGO_ADMIN_URI: localRootUri(),
+            BROWSER_ACCEPTANCE_APP_MONGO_URI: localRootUri(),
+            BROWSER_ACCEPTANCE_ADMIN_MONGO_URI: localRootUri(),
+          },
+          { MONGO_URI: localRootUri() },
         ),
       ).toThrow('DATABASE_DECLARED_NAME_MISMATCH');
     }
   });
 
-  it('requires the file purpose and distinct app/admin URIs', () => {
+  it('requires the file purpose without inherited fallback', () => {
     expect(() =>
       createBrowserAcceptanceEnvironment(
         { ...browserFile, EDUFORGE_DATABASE_PURPOSE: undefined },
-        {},
+        { EDUFORGE_DATABASE_PURPOSE: 'browser_acceptance' },
       ),
     ).toThrow('BROWSER_DATABASE_ENVIRONMENT_REQUIRED');
-    expect(() =>
-      createBrowserAcceptanceEnvironment(
-        {
-          ...browserFile,
-          BROWSER_ACCEPTANCE_APP_MONGO_URI:
-            browserFile.BROWSER_ACCEPTANCE_ADMIN_MONGO_URI,
-        },
-        {},
-      ),
-    ).toThrow('BROWSER_APPLICATION_URI_MUST_DIFFER_FROM_ADMIN');
   });
 
   it('validates purpose without supplying a fallback Mongo URI', () => {

@@ -116,7 +116,7 @@ function harness(
   const env = settings.env ?? {
     NODE_ENV: 'test',
     EDUFORGE_DATABASE_PURPOSE: 'standard_test',
-    MONGO_ADMIN_URI: testUri,
+    MONGO_URI: testUri,
   };
   const readFile = jest.fn((path: string) => {
     events.push(`read:${path}`);
@@ -233,7 +233,7 @@ describe('import-users CLI configuration and connection gates (no database)', ()
     async (nodeEnv) => {
       const h = harness({
         env: nodeEnv === undefined ? {} : { NODE_ENV: nodeEnv },
-        envFile: `NODE_ENV=development\nMONGO_ADMIN_URI=${testUri}`,
+        envFile: `NODE_ENV=development\nMONGO_URI=${testUri}`,
       });
       expect(await h.run()).toBe(1);
       expect(h.readFile).not.toHaveBeenCalled();
@@ -249,7 +249,7 @@ describe('import-users CLI configuration and connection gates (no database)', ()
     const h = harness({
       env: {
         NODE_ENV: nodeEnv,
-        MONGO_ADMIN_URI: `mongodb://127.0.0.1/${database}`,
+        MONGO_URI: `mongodb://127.0.0.1/${database}`,
       },
       databaseName: database,
     });
@@ -262,10 +262,9 @@ describe('import-users CLI configuration and connection gates (no database)', ()
     expectNoWrites(h);
   });
 
-  it('uses the explicit process admin URI and keeps the selected environment', async () => {
+  it('uses the explicit process MONGO_URI and keeps the selected environment', async () => {
     const h = harness({
-      envFile:
-        'NODE_ENV=production\nMONGO_ADMIN_URI=mongodb://127.0.0.1/eduforge',
+      envFile: 'NODE_ENV=production\nMONGO_URI=mongodb://127.0.0.1/eduforge',
     });
     const before = { ...h.dependencies.env };
     const inheritedAppUri = process.env.MONGO_URI;
@@ -275,17 +274,17 @@ describe('import-users CLI configuration and connection gates (no database)', ()
     expect(process.env.MONGO_URI).toBe(inheritedAppUri);
   });
 
-  it('can read only the chosen file admin URI without unrelated app settings', async () => {
+  it('can read only the chosen file MONGO_URI without unrelated app settings', async () => {
     const h = harness({
       env: { NODE_ENV: 'test' },
-      envFile: `MONGO_ADMIN_URI=${testUri}\nAI_FEEDBACK_WORKER_ENABLED=invalid\nSMTP_PORT=invalid`,
+      envFile: `MONGO_URI=${testUri}\nAI_FEEDBACK_WORKER_ENABLED=invalid\nSMTP_PORT=invalid`,
     });
     expect(await h.run()).toBe(0);
     expect(h.createConnection.mock.calls[0][0]).toBe(testUri);
     expectNoWrites(h);
   });
 
-  it('allows a missing chosen file when the process admin URI is explicit', async () => {
+  it('allows a missing chosen file when the process MONGO_URI is explicit', async () => {
     const h = harness({ missingEnvFile: true });
     expect(await h.run()).toBe(0);
     expect(h.connection.close).toHaveBeenCalledTimes(1);
@@ -293,22 +292,74 @@ describe('import-users CLI configuration and connection gates (no database)', ()
 
   it.each([
     { NODE_ENV: 'test' },
-    { NODE_ENV: 'test', MONGO_URI: testUri },
-    { NODE_ENV: 'test', MONGO_ADMIN_URI: '' },
+    { NODE_ENV: 'test', MONGO_URI: '' },
     {
       NODE_ENV: 'test',
-      MONGO_ADMIN_URI: 'mongodb://127.0.0.1/eduforge_test_extra',
+      MONGO_URI: 'mongodb://127.0.0.1/eduforge_test_extra',
     },
-    { NODE_ENV: 'test', MONGO_ADMIN_URI: 'mongodb://127.0.0.1/' },
-  ])(
-    'rejects missing or wrong admin database without connecting',
-    async (env) => {
-      const h = harness({ env });
+    { NODE_ENV: 'test', MONGO_URI: 'mongodb://127.0.0.1/' },
+  ])('rejects missing or wrong database without connecting', async (env) => {
+    const h = harness({ env });
+    expect(await h.run()).toBe(1);
+    expect(h.createConnection).not.toHaveBeenCalled();
+    expect(h.readFile.mock.calls.map(([path]) => path)).not.toContain(csvPath);
+  });
+
+  it.each(['', '   '])(
+    'rejects explicit empty process MONGO_URI=%j without fallback',
+    async (mongoUri) => {
+      const h = harness({
+        env: {
+          NODE_ENV: 'test',
+          MONGO_URI: mongoUri,
+          MONGO_ADMIN_URI: testUri,
+        },
+        envFile: `MONGO_URI=${testUri}`,
+      });
       expect(await h.run()).toBe(1);
+      expect(h.errors).toEqual([
+        '[import-users] error code=MONGO_URI_REQUIRED',
+      ]);
       expect(h.createConnection).not.toHaveBeenCalled();
-      expect(h.readFile.mock.calls.map(([path]) => path)).not.toContain(
-        csvPath,
-      );
+      expectNoWrites(h);
+    },
+  );
+
+  it.each(['process', 'file'])(
+    'does not select a legacy-only MONGO_ADMIN_URI from the %s',
+    async (source) => {
+      const h = harness({
+        env:
+          source === 'process'
+            ? { NODE_ENV: 'test', MONGO_ADMIN_URI: testUri }
+            : { NODE_ENV: 'test' },
+        envFile: source === 'file' ? `MONGO_ADMIN_URI=${testUri}` : '',
+      });
+      expect(await h.run()).toBe(1);
+      expect(h.errors).toEqual([
+        '[import-users] error code=MONGO_URI_REQUIRED',
+      ]);
+      expect(h.createConnection).not.toHaveBeenCalled();
+      expectNoWrites(h);
+    },
+  );
+
+  it.each(['process', 'file'])(
+    'uses MONGO_URI from the %s while ignoring coexisting legacy values',
+    async (source) => {
+      const h = harness({
+        env: {
+          NODE_ENV: 'test',
+          MONGO_ADMIN_URI: 'ignored-legacy-process-value',
+          ...(source === 'process' ? { MONGO_URI: testUri } : {}),
+        },
+        envFile:
+          'MONGO_ADMIN_URI=ignored-legacy-file-value\n' +
+          (source === 'file' ? `MONGO_URI=${testUri}` : ''),
+      });
+      expect(await h.run()).toBe(0);
+      expect(h.createConnection.mock.calls[0][0]).toBe(testUri);
+      expectNoWrites(h);
     },
   );
 
@@ -320,7 +371,7 @@ describe('import-users CLI configuration and connection gates (no database)', ()
           source === 'process'
             ? {
                 NODE_ENV: 'test',
-                MONGO_ADMIN_URI: testUri,
+                MONGO_URI: testUri,
                 EDUFORGE_DATABASE_PURPOSE: 'browser_acceptance',
               }
             : undefined,

@@ -87,13 +87,12 @@ describe('B1-2 thin smoke support gates (no database)', () => {
     status: 'ACTIVE' as const,
   };
 
+  const localRootUri =
+    'mongodb://root:synthetic%40password@127.0.0.1:1/eduforge_browser_test?authSource=admin';
   it('reuses fail-closed declared-purpose and actual-database gates', () => {
     const file = {
       EDUFORGE_DATABASE_PURPOSE: 'browser_acceptance',
-      BROWSER_ACCEPTANCE_APP_MONGO_URI:
-        'mongodb://127.0.0.1/eduforge_browser_test?appName=app',
-      BROWSER_ACCEPTANCE_ADMIN_MONGO_URI:
-        'mongodb://127.0.0.1/eduforge_browser_test?appName=admin',
+      MONGO_URI: localRootUri,
     };
     expect(() =>
       createBrowserAcceptanceEnvironment(
@@ -105,7 +104,7 @@ describe('B1-2 thin smoke support gates (no database)', () => {
       createBrowserAcceptanceEnvironment(
         {
           ...file,
-          BROWSER_ACCEPTANCE_APP_MONGO_URI: 'mongodb://127.0.0.1/eduforge_dev',
+          MONGO_URI: 'mongodb://127.0.0.1/eduforge_dev',
         },
         {},
       ),
@@ -118,85 +117,70 @@ describe('B1-2 thin smoke support gates (no database)', () => {
       }),
     ).toThrow();
     const environment = createBrowserAcceptanceEnvironment(file, {
+      MONGO_URI: 'mongodb://127.0.0.1/eduforge_test',
       MONGO_ADMIN_URI: 'inherited',
       AI_FEEDBACK_WORKER_ENABLED: 'true',
     });
+    expect(environment.MONGO_URI).toBe(localRootUri);
     expect(environment.MONGO_ADMIN_URI).toBeUndefined();
     expect(environment.BROWSER_ACCEPTANCE_ADMIN_MONGO_URI).toBeUndefined();
     expect(environment.AI_FEEDBACK_WORKER_ENABLED).toBe('false');
   });
-  it('refuses swapped, privileged or cross-database roles', () => {
+  it('does not recover a missing file URI from inherited or legacy values', () => {
     expect(() =>
-      assertSmokeRole(
-        [{ db: 'eduforge_browser_test', role: 'readWrite' }],
-        'APP',
+      createBrowserAcceptanceEnvironment(
+        {
+          EDUFORGE_DATABASE_PURPOSE: 'browser_acceptance',
+          MONGO_ADMIN_URI: localRootUri,
+          BROWSER_ACCEPTANCE_APP_MONGO_URI: localRootUri,
+          BROWSER_ACCEPTANCE_ADMIN_MONGO_URI: localRootUri,
+        },
+        { MONGO_URI: localRootUri },
       ),
-    ).not.toThrow();
-    expect(() =>
-      assertSmokeRole(
-        [{ db: 'eduforge_browser_test', role: 'dbOwner' }],
-        'ADMIN',
-      ),
-    ).not.toThrow();
-    expect(() =>
-      assertSmokeRole(
-        [{ db: 'eduforge_browser_test', role: 'dbOwner' }],
-        'APP',
-      ),
-    ).toThrow();
-    expect(() =>
-      assertSmokeRole([{ db: 'admin', role: 'root' }], 'ADMIN'),
-    ).toThrow();
-    expect(() => assertSmokeRole([], 'APP')).toThrow();
+    ).toThrow('DATABASE_DECLARED_NAME_MISMATCH');
   });
-  const localRootUri =
-    'mongodb://root:synthetic%40password@127.0.0.1:1/eduforge_browser_test?authSource=admin';
-  it.each(['APP', 'ADMIN'] as const)(
-    'accepts local root for %s only with the actual root user and role',
-    (role) => {
+  it('accepts only the actual local root user and role', () => {
+    expect(() =>
+      assertSmokeRole([{ db: 'admin', role: 'root' }], {
+        mongoUri: localRootUri,
+        authenticatedUsers: [{ user: 'root', db: 'admin' }],
+      }),
+    ).not.toThrow();
+  });
+  it('rejects missing, incorrect or additional authenticated users and roles', () => {
+    for (const authenticatedUsers of [
+      [],
+      [{ user: 'other', db: 'admin' }],
+      [{ user: 'root', db: 'eduforge_browser_test' }],
+      [
+        { user: 'root', db: 'admin' },
+        { user: 'other', db: 'admin' },
+      ],
+    ])
       expect(() =>
-        assertSmokeRole([{ db: 'admin', role: 'root' }], role, {
+        assertSmokeRole([{ db: 'admin', role: 'root' }], {
+          mongoUri: localRootUri,
+          authenticatedUsers,
+        }),
+      ).toThrow('SMOKE_DATABASE_AUTHENTICATION_MISMATCH');
+    for (const roles of [
+      [],
+      [{ db: 'admin', role: 'readWrite' }],
+      [{ db: 'eduforge_browser_test', role: 'root' }],
+      [{ db: 'eduforge_browser_test', role: 'readWrite' }],
+      [{ db: 'eduforge_browser_test', role: 'dbOwner' }],
+      [
+        { db: 'admin', role: 'root' },
+        { db: 'eduforge_browser_test', role: 'readWrite' },
+      ],
+    ])
+      expect(() =>
+        assertSmokeRole(roles, {
           mongoUri: localRootUri,
           authenticatedUsers: [{ user: 'root', db: 'admin' }],
         }),
-      ).not.toThrow();
-    },
-  );
-  it.each(['APP', 'ADMIN'] as const)(
-    'rejects missing, incorrect or additional authenticated users for %s',
-    (role) => {
-      for (const authenticatedUsers of [
-        [],
-        [{ user: 'other', db: 'admin' }],
-        [{ user: 'root', db: 'eduforge_browser_test' }],
-        [
-          { user: 'root', db: 'admin' },
-          { user: 'other', db: 'admin' },
-        ],
-      ])
-        expect(() =>
-          assertSmokeRole([{ db: 'admin', role: 'root' }], role, {
-            mongoUri: localRootUri,
-            authenticatedUsers,
-          }),
-        ).toThrow('SMOKE_DATABASE_AUTHENTICATION_MISMATCH');
-      for (const roles of [
-        [],
-        [{ db: 'admin', role: 'readWrite' }],
-        [{ db: 'eduforge_browser_test', role: 'root' }],
-        [
-          { db: 'admin', role: 'root' },
-          { db: 'eduforge_browser_test', role: 'readWrite' },
-        ],
-      ])
-        expect(() =>
-          assertSmokeRole(roles, role, {
-            mongoUri: localRootUri,
-            authenticatedUsers: [{ user: 'root', db: 'admin' }],
-          }),
-        ).toThrow('SMOKE_DATABASE_AUTHENTICATION_MISMATCH');
-    },
-  );
+      ).toThrow('SMOKE_DATABASE_AUTHENTICATION_MISMATCH');
+  });
   it('rejects remote hosts and explicit replica-set or proxy options', () => {
     for (const mongoUri of [
       localRootUri.replace('127.0.0.1', 'remote.example.invalid'),
@@ -204,15 +188,15 @@ describe('B1-2 thin smoke support gates (no database)', () => {
       localRootUri + '&proxyHost=127.0.0.1',
     ])
       expect(() =>
-        assertSmokeRole([{ db: 'admin', role: 'root' }], 'APP', {
+        assertSmokeRole([{ db: 'admin', role: 'root' }], {
           mongoUri,
           authenticatedUsers: [{ user: 'root', db: 'admin' }],
         }),
-      ).toThrow('SMOKE_DATABASE_ROLE_MISMATCH');
+      ).toThrow('SMOKE_DATABASE_AUTHENTICATION_MISMATCH');
   });
   it('reports only safe codes when local root authentication fails', () => {
     try {
-      assertSmokeRole([{ db: 'admin', role: 'root' }], 'ADMIN', {
+      assertSmokeRole([{ db: 'admin', role: 'root' }], {
         mongoUri: localRootUri,
         authenticatedUsers: [],
       });
