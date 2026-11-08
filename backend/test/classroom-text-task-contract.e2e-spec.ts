@@ -29,6 +29,10 @@ import { DefaultStubAiFeedbackProvider } from '../src/modules/learning-tasks/ai-
 import { ClassroomTaskResponseDto } from '../src/modules/classrooms/classroom-tasks/dto/classroom-task-response.dto';
 import { SubmissionResponseDto } from '../src/modules/learning-tasks/dto/submission-response.dto';
 import { SubmissionDetailResponseDto } from '../src/modules/learning-tasks/dto/submission-detail-response.dto';
+import {
+  assertLocalStandardTestAuthentication,
+  assertLocalStandardTestEnvironment,
+} from './helpers/local-test-database-auth';
 
 jest.setTimeout(90000);
 type Agent = ReturnType<typeof request.agent>;
@@ -159,6 +163,11 @@ describe('A1 classroom text task backend contract (HTTP)', () => {
     return app.get(AiFeedbackProcessor).processOnce(batch);
   };
   beforeAll(async () => {
+    assertLocalStandardTestEnvironment({
+      nodeEnv: process.env.NODE_ENV,
+      purpose: process.env.EDUFORGE_DATABASE_PURPOSE,
+      mongoUri: process.env.MONGO_URI,
+    });
     const module = await Test.createTestingModule({
       imports: [AppModule],
     }).compile();
@@ -187,25 +196,20 @@ describe('A1 classroom text task backend contract (HTTP)', () => {
     expect(process.env.EDUFORGE_DATABASE_PURPOSE).toBe('standard_test');
     expect(users.db.name).toBe('eduforge_test');
     users.db.set('maxTimeMS', 10000);
-    const auth = await users.db.db?.command(
+    const database = users.db.db;
+    if (!database) throw new Error('Missing connected test database');
+    const auth = await database.command(
       { connectionStatus: 1, showPrivileges: false },
       { timeoutMS: 5000 },
     );
-    const roles = (
-      auth as {
-        authInfo: {
-          authenticatedUserRoles: Array<{ role: string; db: string }>;
-        };
-      }
-    ).authInfo.authenticatedUserRoles;
-    expect(
-      roles.some((r) => r.role === 'readWrite' && r.db === 'eduforge_test'),
-    ).toBe(true);
-    expect(
-      roles.some((r) =>
-        ['root', 'dbOwner', 'dbAdminAnyDatabase'].includes(r.role),
-      ),
-    ).toBe(false);
+    assertLocalStandardTestAuthentication({
+      nodeEnv: process.env.NODE_ENV,
+      purpose: process.env.EDUFORGE_DATABASE_PURPOSE,
+      mongoUri: app.get(ConfigService).get<string>('MONGO_URI'),
+      databaseName: database.databaseName,
+      connectedHost: users.db.host,
+      authInfo: auth.authInfo,
+    });
     expect(
       await jobs.countDocuments({
         status: {
@@ -218,7 +222,8 @@ describe('A1 classroom text task backend contract (HTTP)', () => {
       }),
     ).toBe(0);
     console.info(
-      'A1 database gate: standard_test / eduforge_test; namespace=' + namespace,
+      'A1 database gate: standard_test / eduforge_test / local root@admin verified; namespace=' +
+        namespace,
     );
     const config = app.get(ConfigService);
     expect(config.get('AI_FEEDBACK_PROVIDER')).toBe('stub');
@@ -344,7 +349,11 @@ describe('A1 classroom text task backend contract (HTTP)', () => {
         console.info('A1 scoped cleanup verified: ' + namespace);
       }
     } finally {
-      if (app) await app.close();
+      if (app) {
+        await app.close();
+        if (users) expect(users.db.readyState).toBe(0);
+        console.info('A1 app/DB closed');
+      }
     }
   });
 

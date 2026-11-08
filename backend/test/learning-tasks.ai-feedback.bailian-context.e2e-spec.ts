@@ -32,6 +32,10 @@ import {
 } from '../src/modules/learning-tasks/ai-feedback/schemas/ai-feedback-job.schema';
 import { AiReviewSummary } from '../src/modules/learning-tasks/ai-feedback/lib/ai-review-summary';
 import type * as AppModuleExports from '../src/app.module';
+import {
+  assertLocalStandardTestAuthentication,
+  assertLocalStandardTestEnvironment,
+} from './helpers/local-test-database-auth';
 
 jest.setTimeout(30000);
 
@@ -425,6 +429,11 @@ describe('LearningTasks AI Feedback Bailian Context (e2e)', () => {
           'MONGO_URI is required for learning-tasks ai-feedback bailian context e2e.',
         );
       }
+      assertLocalStandardTestEnvironment({
+        nodeEnv: process.env.NODE_ENV,
+        purpose: process.env.EDUFORGE_DATABASE_PURPOSE,
+        mongoUri: process.env.MONGO_URI,
+      });
 
       const contextReader = new AiContextReaderService();
       Object.defineProperty(contextReader, 'resourceRoot', {
@@ -452,6 +461,9 @@ describe('LearningTasks AI Feedback Bailian Context (e2e)', () => {
       expect(configService.get<string>('AI_FEEDBACK_PROVIDER')).toBe('bailian');
       expect(configService.get<string>('BAILIAN_BASE_URL')).toBe(mock.url);
       expect(configService.get('AI_FEEDBACK_WORKER_ENABLED')).toBe(false);
+      expect(configService.get<string>('AI_FEEDBACK_DEBUG_ENABLED')).toBe(
+        'true',
+      );
       expect(configService.get('MAIL_PROVIDER')).toBe('log');
 
       teacherAgent = request
@@ -471,27 +483,22 @@ describe('LearningTasks AI Feedback Bailian Context (e2e)', () => {
       expect(process.env.EDUFORGE_DATABASE_PURPOSE).toBe('standard_test');
       expect(userModel.db.name).toBe('eduforge_test');
       userModel.db.set('maxTimeMS', 10000);
-      const auth = await userModel.db.db?.command(
+      const database = userModel.db.db;
+      if (!database) throw new Error('Missing connected test database');
+      const auth = await database.command(
         { connectionStatus: 1, showPrivileges: false },
         { timeoutMS: 5000 },
       );
-      const roles = (
-        auth as {
-          authInfo: {
-            authenticatedUserRoles: Array<{ role: string; db: string }>;
-          };
-        }
-      ).authInfo.authenticatedUserRoles;
-      expect(
-        roles.some((r) => r.role === 'readWrite' && r.db === 'eduforge_test'),
-      ).toBe(true);
-      expect(
-        roles.some((r) =>
-          ['root', 'dbOwner', 'dbAdminAnyDatabase'].includes(r.role),
-        ),
-      ).toBe(false);
+      assertLocalStandardTestAuthentication({
+        nodeEnv: process.env.NODE_ENV,
+        purpose: process.env.EDUFORGE_DATABASE_PURPOSE,
+        mongoUri: configService.get<string>('MONGO_URI'),
+        databaseName: database.databaseName,
+        connectedHost: userModel.db.host,
+        authInfo: auth.authInfo,
+      });
       console.info(
-        'Bailian context E2E gate: standard_test / eduforge_test; envFiles=.env.test; APP readWrite',
+        'Bailian context E2E gate: standard_test / eduforge_test; envFiles=.env.test; local root@admin verified; local mock / debug=true',
       );
       expect(
         await aiFeedbackJobModel.countDocuments({

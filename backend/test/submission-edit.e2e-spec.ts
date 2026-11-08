@@ -28,6 +28,10 @@ import {
 import { Submission } from '../src/modules/learning-tasks/schemas/submission.schema';
 import { Task } from '../src/modules/learning-tasks/schemas/task.schema';
 import { User } from '../src/modules/users/schemas/user.schema';
+import {
+  assertLocalStandardTestAuthentication,
+  assertLocalStandardTestEnvironment,
+} from './helpers/local-test-database-auth';
 
 jest.setTimeout(90000);
 type Agent = ReturnType<typeof request.agent>;
@@ -156,6 +160,11 @@ describe('B1-2 submission content edits and review admission (HTTP)', () => {
   };
 
   beforeAll(async () => {
+    assertLocalStandardTestEnvironment({
+      nodeEnv: process.env.NODE_ENV,
+      purpose: process.env.EDUFORGE_DATABASE_PURPOSE,
+      mongoUri: process.env.MONGO_URI,
+    });
     const module = await Test.createTestingModule({
       imports: [AppModule],
     }).compile();
@@ -199,15 +208,18 @@ describe('B1-2 submission content edits and review admission (HTTP)', () => {
       { timeoutMS: 5000 },
     )) as { version: string };
     expect(build.version).toBe('9.0.4');
-    const auth = (await database.command(
+    const auth = await database.command(
       { connectionStatus: 1, showPrivileges: false },
       { timeoutMS: 5000 },
-    )) as {
-      authInfo: { authenticatedUserRoles: Array<{ role: string; db: string }> };
-    };
-    expect(auth.authInfo.authenticatedUserRoles).toEqual([
-      { role: 'readWrite', db: 'eduforge_test' },
-    ]);
+    );
+    assertLocalStandardTestAuthentication({
+      nodeEnv: process.env.NODE_ENV,
+      purpose: process.env.EDUFORGE_DATABASE_PURPOSE,
+      mongoUri: config.get<string>('MONGO_URI'),
+      databaseName: database.databaseName,
+      connectedHost: users.db.host,
+      authInfo: auth.authInfo,
+    });
     expect(config.get('AI_FEEDBACK_PROVIDER')).toBe('stub');
     expect(config.get('MAIL_PROVIDER')).toBe('log');
     expect(config.get('AI_FEEDBACK_WORKER_ENABLED')).not.toBe(true);
@@ -255,7 +267,7 @@ describe('B1-2 submission content edits and review admission (HTTP)', () => {
         .send({ joinCode: classroom.joinCode })
         .expect(201);
     console.info(
-      'B1-2 database gate: standard_test / eduforge_test / 127.0.0.1:27017 / MongoDB 9.0.4 / readWrite only; namespace=' +
+      'B1-2 database gate: standard_test / eduforge_test / 127.0.0.1:27017 / MongoDB 9.0.4 / root@admin verified; namespace=' +
         namespace,
     );
   });
@@ -333,7 +345,11 @@ describe('B1-2 submission content edits and review admission (HTTP)', () => {
         );
       }
     } finally {
-      if (app) await app.close();
+      if (app) {
+        await app.close();
+        if (users) expect(users.db.readyState).toBe(0);
+        console.info('B1-2 app/DB closed');
+      }
     }
   });
 

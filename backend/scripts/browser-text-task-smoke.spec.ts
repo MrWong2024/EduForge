@@ -150,7 +150,7 @@ describe('B1-2 thin smoke support gates (no database)', () => {
     expect(() => assertSmokeRole([], 'APP')).toThrow();
   });
   const localRootUri =
-    'mongodb://root:synthetic%40password@127.0.0.1:1/eduforge_browser_test?authSource=admin&directConnection=true';
+    'mongodb://root:synthetic%40password@127.0.0.1:1/eduforge_browser_test?authSource=admin';
   it.each(['APP', 'ADMIN'] as const)(
     'accepts local root for %s only with the actual root user and role',
     (role) => {
@@ -197,10 +197,9 @@ describe('B1-2 thin smoke support gates (no database)', () => {
         ).toThrow('SMOKE_DATABASE_AUTHENTICATION_MISMATCH');
     },
   );
-  it('does not grant the root exception to remote or redirectable connections', () => {
+  it('rejects remote hosts and explicit replica-set or proxy options', () => {
     for (const mongoUri of [
       localRootUri.replace('127.0.0.1', 'remote.example.invalid'),
-      localRootUri.replace('&directConnection=true', ''),
       localRootUri + '&replicaSet=synthetic',
       localRootUri + '&proxyHost=127.0.0.1',
     ])

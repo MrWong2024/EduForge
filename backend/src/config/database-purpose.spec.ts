@@ -26,7 +26,7 @@ const browserFile = {
   ),
 };
 const localRootUri = (host = '127.0.0.1:27017') =>
-  `mongodb://root:synthetic-password@${host}/eduforge_browser_test?authSource=admin&directConnection=true`;
+  `mongodb://root:synthetic-password@${host}/eduforge_browser_test?authSource=admin`;
 
 describe('database purpose gates (no database connection)', () => {
   it('defaults an omitted test purpose to standard_test', () => {
@@ -176,7 +176,7 @@ describe('database purpose gates (no database connection)', () => {
 
 describe('local root Browser URI exception (no database connection)', () => {
   it.each(['127.0.0.1:27017', 'localhost:27017', '[::1]:27017'])(
-    'accepts one direct loopback host %s and permits the same app/admin URI',
+    'accepts one loopback host %s and permits the same app/admin URI',
     (host) => {
       const mongoUri = localRootUri(host);
       expect(isLocalRootBrowserUri(mongoUri)).toBe(true);
@@ -195,6 +195,28 @@ describe('local root Browser URI exception (no database connection)', () => {
     },
   );
 
+  it.each([
+    ['omitted', ''],
+    ['false', '&directConnection=false'],
+    ['true', '&directConnection=true'],
+  ])(
+    'accepts directConnection %s for the local standalone URI',
+    (_name, option) => {
+      const mongoUri = localRootUri() + option;
+      expect(isLocalRootBrowserUri(mongoUri)).toBe(true);
+      expect(
+        createBrowserAcceptanceEnvironment(
+          {
+            ...browserFile,
+            BROWSER_ACCEPTANCE_APP_MONGO_URI: mongoUri,
+            BROWSER_ACCEPTANCE_ADMIN_MONGO_URI: mongoUri,
+          },
+          {},
+        ).MONGO_URI,
+      ).toBe(mongoUri);
+    },
+  );
+
   it('decodes credentials and authSource without connecting', () => {
     const connect = jest
       .spyOn(mongo.MongoClient.prototype, 'connect')
@@ -204,7 +226,7 @@ describe('local root Browser URI exception (no database connection)', () => {
     try {
       expect(
         isLocalRootBrowserUri(
-          'mongodb://%72oot:synthetic%40%3A%2F%3F%23%25@localhost/eduforge_browser_test?authSource=%61dmin&directConnection=true&authMechanism=SCRAM-SHA-256',
+          'mongodb://%72oot:synthetic%40%3A%2F%3F%23%25@localhost/eduforge_browser_test?authSource=%61dmin&authMechanism=SCRAM-SHA-256',
         ),
       ).toBe(true);
       expect(connect).not.toHaveBeenCalled();
@@ -225,23 +247,18 @@ describe('local root Browser URI exception (no database connection)', () => {
       'wrong auth source',
       localRootUri().replace('authSource=admin', 'authSource=other'),
     ],
-    ['missing auth source', localRootUri().replace('authSource=admin&', '')],
+    ['missing auth source', localRootUri().replace('?authSource=admin', '')],
     ['missing password', localRootUri().replace(':synthetic-password@', '@')],
-    [
-      'missing direct connection',
-      localRootUri().replace('&directConnection=true', ''),
-    ],
-    [
-      'indirect connection',
-      localRootUri().replace('directConnection=true', 'directConnection=false'),
-    ],
     ['proxy', localRootUri() + '&proxyHost=example.invalid'],
-    ['replica discovery', localRootUri() + '&replicaSet=synthetic'],
+    ['explicit replica set', localRootUri() + '&replicaSet=synthetic'],
     ['load balancing', localRootUri() + '&loadBalanced=true'],
     ['load balancing option', localRootUri() + '&loadBalanced=false'],
     ['SRV option', localRootUri() + '&srvServiceName=synthetic'],
     ['external auth mechanism', localRootUri() + '&authMechanism=GSSAPI'],
-    ['ambiguous direct option', localRootUri() + '&DIRECTCONNECTION=false'],
+    [
+      'ambiguous direct option',
+      localRootUri() + '&directConnection=true&DIRECTCONNECTION=false',
+    ],
     [
       'wrong database',
       localRootUri().replace('/eduforge_browser_test?', '/eduforge_test?'),

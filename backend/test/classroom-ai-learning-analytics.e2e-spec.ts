@@ -41,6 +41,10 @@ import {
   AiFeedbackJobStatus,
 } from '../src/modules/learning-tasks/ai-feedback/schemas/ai-feedback-job.schema';
 import { User } from '../src/modules/users/schemas/user.schema';
+import {
+  assertLocalStandardTestAuthentication,
+  assertLocalStandardTestEnvironment,
+} from './helpers/local-test-database-auth';
 
 jest.setTimeout(90000);
 
@@ -426,6 +430,11 @@ describe('Classroom AI learning analytics (e2e)', () => {
         'MONGO_URI is required for classroom AI learning analytics e2e.',
       );
     }
+    assertLocalStandardTestEnvironment({
+      nodeEnv: process.env.NODE_ENV,
+      purpose: process.env.EDUFORGE_DATABASE_PURPOSE,
+      mongoUri: process.env.MONGO_URI,
+    });
     const moduleFixture: TestingModule = await Test.createTestingModule({
       imports: [appModuleImport.AppModule],
     }).compile();
@@ -458,22 +467,25 @@ describe('Classroom AI learning analytics (e2e)', () => {
     userModel.db.set('maxTimeMS', 10000);
     const database = userModel.db.db;
     if (!database) throw new Error('Missing connected test database');
-    const auth = (await database.command(
+    const auth = await database.command(
       { connectionStatus: 1, showPrivileges: false },
       { timeoutMS: 5000 },
-    )) as {
-      authInfo: { authenticatedUserRoles: Array<{ role: string; db: string }> };
-    };
-    expect(auth.authInfo.authenticatedUserRoles).toEqual([
-      { role: 'readWrite', db: 'eduforge_test' },
-    ]);
+    );
     const config = app.get(ConfigService);
+    assertLocalStandardTestAuthentication({
+      nodeEnv: process.env.NODE_ENV,
+      purpose: process.env.EDUFORGE_DATABASE_PURPOSE,
+      mongoUri: config.get<string>('MONGO_URI'),
+      databaseName: database.databaseName,
+      connectedHost: userModel.db.host,
+      authInfo: auth.authInfo,
+    });
     expect(config.get('AI_FEEDBACK_PROVIDER')).toBe('stub');
     expect(config.get('AI_FEEDBACK_WORKER_ENABLED')).not.toBe(true);
     expect(config.get('MAIL_PROVIDER')).toBe('log');
     config.set('LEARNING_TASK_SUBMISSION_COOLDOWN_MS', 0);
     console.info(
-      'Analytics V1.2 gate: standard_test / eduforge_test / APP readWrite / worker=false / stub / mail=log',
+      'Analytics V1.2 gate: standard_test / eduforge_test / local root@admin verified / worker=false / stub / mail=log',
     );
     teacherAgent = request
       .agent(app.getHttpServer())
@@ -1168,6 +1180,7 @@ describe('Classroom AI learning analytics (e2e)', () => {
       try {
         if (app) await app.close();
         if (userModel) expect(userModel.db.readyState).toBe(0);
+        if (app) console.info('Analytics app/DB closed');
       } finally {
         if (previousWorkerEnabled === undefined)
           delete process.env.AI_FEEDBACK_WORKER_ENABLED;

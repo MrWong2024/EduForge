@@ -31,7 +31,6 @@ export function isLocalRootBrowserUri(mongoUri: string | undefined): boolean {
       hosts.length === 1 &&
       ['127.0.0.1', 'localhost', '::1'].includes(hosts[0].host ?? '') &&
       !hosts[0].socketPath &&
-      options.directConnection === true &&
       options.dbName === TEST_DATABASE_NAMES.browser_acceptance &&
       credentials?.username === 'root' &&
       credentials.source === 'admin' &&
