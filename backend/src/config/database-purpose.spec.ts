@@ -1,5 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
+import { mongo } from 'mongoose';
 import {
   assertBrowserAcceptancePreImportEnvironment,
   assertConnectedDatabaseMatchesPurpose,
@@ -8,7 +9,10 @@ import {
   readDeclaredDatabaseName,
   resolveTestDatabasePurpose,
 } from './database-purpose';
-import { createBrowserAcceptanceEnvironment } from './browser-acceptance-environment';
+import {
+  createBrowserAcceptanceEnvironment,
+  isLocalRootBrowserUri,
+} from './browser-acceptance-environment';
 import { envValidationSchema } from './env.validation';
 
 const uri = (database: string, user = 'synthetic-app') =>
@@ -21,6 +25,8 @@ const browserFile = {
     'synthetic-admin',
   ),
 };
+const localRootUri = (host = '127.0.0.1:27017') =>
+  `mongodb://root:synthetic-password@${host}/eduforge_browser_test?authSource=admin&directConnection=true`;
 
 describe('database purpose gates (no database connection)', () => {
   it('defaults an omitted test purpose to standard_test', () => {
@@ -164,6 +170,136 @@ describe('database purpose gates (no database connection)', () => {
       expect(String(error)).not.toContain('synthetic-password');
       expect(String(error)).not.toContain('mongodb://');
       expect(String(error)).toContain('DATABASE_DECLARED_NAME_MISMATCH');
+    }
+  });
+});
+
+describe('local root Browser URI exception (no database connection)', () => {
+  it.each(['127.0.0.1:27017', 'localhost:27017', '[::1]:27017'])(
+    'accepts one direct loopback host %s and permits the same app/admin URI',
+    (host) => {
+      const mongoUri = localRootUri(host);
+      expect(isLocalRootBrowserUri(mongoUri)).toBe(true);
+      const result = createBrowserAcceptanceEnvironment(
+        {
+          ...browserFile,
+          BROWSER_ACCEPTANCE_APP_MONGO_URI: mongoUri,
+          BROWSER_ACCEPTANCE_ADMIN_MONGO_URI: mongoUri,
+        },
+        { MONGO_ADMIN_URI: 'stale', AI_FEEDBACK_WORKER_ENABLED: 'true' },
+      );
+      expect(result.MONGO_URI).toBe(mongoUri);
+      expect(result.MONGO_ADMIN_URI).toBeUndefined();
+      expect(result.BROWSER_ACCEPTANCE_ADMIN_MONGO_URI).toBeUndefined();
+      expect(result.AI_FEEDBACK_WORKER_ENABLED).toBe('false');
+    },
+  );
+
+  it('decodes credentials and authSource without connecting', () => {
+    const connect = jest
+      .spyOn(mongo.MongoClient.prototype, 'connect')
+      .mockImplementation(() => {
+        throw new Error('A pure URI gate must not connect');
+      });
+    try {
+      expect(
+        isLocalRootBrowserUri(
+          'mongodb://%72oot:synthetic%40%3A%2F%3F%23%25@localhost/eduforge_browser_test?authSource=%61dmin&directConnection=true&authMechanism=SCRAM-SHA-256',
+        ),
+      ).toBe(true);
+      expect(connect).not.toHaveBeenCalled();
+    } finally {
+      connect.mockRestore();
+    }
+  });
+
+  it.each<[string, string | undefined]>([
+    ['missing URI', undefined],
+    ['remote host', localRootUri('example.invalid:27017')],
+    ['lookalike localhost', localRootUri('localhost.example.invalid:27017')],
+    ['loopback lookalike', localRootUri('127.0.0.1.example.invalid:27017')],
+    ['SRV', localRootUri('localhost').replace('mongodb://', 'mongodb+srv://')],
+    ['multiple hosts', localRootUri('127.0.0.1:27017,localhost:27017')],
+    ['wrong username', localRootUri().replace('root:', 'synthetic-app:')],
+    [
+      'wrong auth source',
+      localRootUri().replace('authSource=admin', 'authSource=other'),
+    ],
+    ['missing auth source', localRootUri().replace('authSource=admin&', '')],
+    ['missing password', localRootUri().replace(':synthetic-password@', '@')],
+    [
+      'missing direct connection',
+      localRootUri().replace('&directConnection=true', ''),
+    ],
+    [
+      'indirect connection',
+      localRootUri().replace('directConnection=true', 'directConnection=false'),
+    ],
+    ['proxy', localRootUri() + '&proxyHost=example.invalid'],
+    ['replica discovery', localRootUri() + '&replicaSet=synthetic'],
+    ['load balancing', localRootUri() + '&loadBalanced=true'],
+    ['load balancing option', localRootUri() + '&loadBalanced=false'],
+    ['SRV option', localRootUri() + '&srvServiceName=synthetic'],
+    ['external auth mechanism', localRootUri() + '&authMechanism=GSSAPI'],
+    ['ambiguous direct option', localRootUri() + '&DIRECTCONNECTION=false'],
+    [
+      'wrong database',
+      localRootUri().replace('/eduforge_browser_test?', '/eduforge_test?'),
+    ],
+    ['overridden database', localRootUri() + '&dbName=eduforge_test'],
+    [
+      'invalid credential encoding',
+      localRootUri().replace('synthetic-password', '%ZZ'),
+    ],
+  ])('rejects %s without exposing parser errors', (_name, mongoUri) => {
+    expect(() => isLocalRootBrowserUri(mongoUri)).not.toThrow();
+    expect(isLocalRootBrowserUri(mongoUri)).toBe(false);
+  });
+
+  it('keeps purpose and database gates before the local root exception', () => {
+    const shared = {
+      ...browserFile,
+      BROWSER_ACCEPTANCE_APP_MONGO_URI: localRootUri(),
+      BROWSER_ACCEPTANCE_ADMIN_MONGO_URI: localRootUri(),
+    };
+    expect(() =>
+      createBrowserAcceptanceEnvironment(
+        { ...shared, EDUFORGE_DATABASE_PURPOSE: 'standard_test' },
+        {},
+      ),
+    ).toThrow('BROWSER_DATABASE_ENVIRONMENT_REQUIRED');
+    expect(() =>
+      createBrowserAcceptanceEnvironment(
+        {
+          ...shared,
+          BROWSER_ACCEPTANCE_APP_MONGO_URI: localRootUri().replace(
+            '/eduforge_browser_test?',
+            '/eduforge_test?',
+          ),
+        },
+        {},
+      ),
+    ).toThrow('DATABASE_DECLARED_NAME_MISMATCH');
+  });
+
+  it('returns only the fixed gate error for a rejected identical root URI', () => {
+    const mongoUri = localRootUri('example.invalid:27017');
+    try {
+      createBrowserAcceptanceEnvironment(
+        {
+          ...browserFile,
+          BROWSER_ACCEPTANCE_APP_MONGO_URI: mongoUri,
+          BROWSER_ACCEPTANCE_ADMIN_MONGO_URI: mongoUri,
+        },
+        {},
+      );
+      throw new Error('The gate should have failed');
+    } catch (error) {
+      expect(String(error)).toBe(
+        'DatabaseGateError: BROWSER_APPLICATION_URI_MUST_DIFFER_FROM_ADMIN',
+      );
+      expect(String(error)).not.toContain('synthetic-password');
+      expect(String(error)).not.toContain('mongodb://');
     }
   });
 });

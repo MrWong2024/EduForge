@@ -11,7 +11,10 @@ import { createRequire } from 'node:module';
 import { parse } from 'dotenv';
 import mongoose, { type Connection, Types } from 'mongoose';
 import type { INestApplicationContext, Type } from '@nestjs/common';
-import { createBrowserAcceptanceEnvironment } from '../src/config/browser-acceptance-environment';
+import {
+  createBrowserAcceptanceEnvironment,
+  isLocalRootBrowserUri,
+} from '../src/config/browser-acceptance-environment';
 import {
   assertConnectedDatabaseMatchesPurpose,
   DatabaseGateError,
@@ -154,7 +157,26 @@ export function assertNamespace(namespace: string): void {
   if (!/^b1-2-[a-z0-9-]{4,64}$/.test(namespace))
     fail('SMOKE_NAMESPACE_INVALID');
 }
-export function assertSmokeRole(roles: DbRole[], role: 'APP' | 'ADMIN'): void {
+export function assertSmokeRole(
+  roles: DbRole[],
+  role: 'APP' | 'ADMIN',
+  authentication?: {
+    mongoUri: string | undefined;
+    authenticatedUsers: { user: string; db: string }[];
+  },
+): void {
+  if (isLocalRootBrowserUri(authentication?.mongoUri)) {
+    if (
+      authentication?.authenticatedUsers.length !== 1 ||
+      authentication.authenticatedUsers[0].user !== 'root' ||
+      authentication.authenticatedUsers[0].db !== 'admin' ||
+      roles.length !== 1 ||
+      roles[0].role !== 'root' ||
+      roles[0].db !== 'admin'
+    )
+      fail('SMOKE_DATABASE_AUTHENTICATION_MISMATCH');
+    return;
+  }
   const expected = role === 'APP' ? 'readWrite' : 'dbOwner';
   if (
     !roles.length ||
@@ -268,6 +290,7 @@ function readEnvironment(): {
 async function verifyConnection(
   connection: Connection,
   role: 'APP' | 'ADMIN',
+  mongoUri: string | undefined,
 ): Promise<void> {
   assertConnectedDatabaseMatchesPurpose({
     nodeEnv: 'test',
@@ -279,15 +302,21 @@ async function verifyConnection(
     { connectionStatus: 1, showPrivileges: false },
     { timeoutMS: 5000 },
   );
-  const rawRoles = readObject(
-    readObject(status).authInfo,
-  ).authenticatedUserRoles;
+  const authInfo = readObject(readObject(status).authInfo);
+  const rawRoles = authInfo.authenticatedUserRoles;
   if (!Array.isArray(rawRoles)) fail('SMOKE_DATABASE_ROLE_MISMATCH');
   const roles = rawRoles.map((entry: unknown) => ({
     db: stringField(entry, 'db'),
     role: stringField(entry, 'role'),
   }));
-  assertSmokeRole(roles, role);
+  const rawUsers = authInfo.authenticatedUsers;
+  const authenticatedUsers = Array.isArray(rawUsers)
+    ? rawUsers.map((entry: unknown) => ({
+        user: stringField(entry, 'user'),
+        db: stringField(entry, 'db'),
+      }))
+    : [];
+  assertSmokeRole(roles, role, { mongoUri, authenticatedUsers });
 }
 function models(connection: Connection) {
   return {
@@ -845,7 +874,7 @@ async function processAi(record: SmokeRecord, jobId: string): Promise<void> {
     )
       fail('SMOKE_PROCESSOR_CONFIGURATION_MISMATCH');
     const connection = app.get<Connection>(getConnectionToken());
-    await verifyConnection(connection, 'APP');
+    await verifyConnection(connection, 'APP', config.get<string>('mongo.uri'));
     const owned = await inventory(connection, record);
     const job = owned.jobs.find((row) => row._id.toString() === jobId);
     if (!job) fail('SMOKE_TARGET_JOB_NOT_OWNED');
@@ -959,7 +988,11 @@ async function main(): Promise<void> {
       },
     );
     await connection.asPromise();
-    await verifyConnection(connection, 'ADMIN');
+    await verifyConnection(
+      connection,
+      'ADMIN',
+      file.BROWSER_ACCEPTANCE_ADMIN_MONGO_URI,
+    );
     if (command === 'prepare') {
       const frontendPort = Number(option('--frontend-port') ?? 3100);
       const backendPort = Number(option('--backend-port') ?? 5100);

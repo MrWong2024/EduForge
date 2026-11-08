@@ -24,13 +24,16 @@ purpose 仅在 test 环境允许上述两个值；空值、未知值或非 test 
 连接串与环境文件口径：
 
 - `MONGO_URI` 是应用连接配置；`MONGO_ADMIN_URI` 是索引同步、导入、迁移等运维操作的连接配置。声明与实际 databaseName 必须符合上述映射；缺失或不匹配均 fail-closed，不回退到其他数据库。
-- development/test 使用两类账号：`*_app` 用于应用运行，权限限于对应库 `readWrite`；`*_db_admin` 用于索引同步、导入、迁移等人工/脚本操作。当前 production 的 `MONGO_URI` 与 `MONGO_ADMIN_URI` 使用相同连接串和 `root` 账号。
+- 当前本机 development、standard_test、browser_acceptance 经用户明确授权共用现有 `root@admin` 账号，仍分别使用上表中的三个独立数据库；账号共用不允许用途、环境文件或数据库混用。应用与管理变量保留配置入口和进程职责，同一用途下可使用相同 URI，不表示本机存在不同的 APP/ADMIN 账号。该有限本机例外的治理入口见 [数据库规范 §2.5](../database-conventions.md#25-用户明确授权的独立本机环境例外)。
+- 本机例外之外，专用应用账号权限限于对应库 `readWrite`，专用管理账号用于索引同步、导入、迁移等人工/脚本操作。当前 production 的 `MONGO_URI` 与 `MONGO_ADMIN_URI` 使用相同连接串和 `root` 账号；本机例外不改变生产映射或配置。
 - 普通后端环境配置来源按优先级为 `.env.<NODE_ENV>`、`.env`；tracked example 与各环境配置组合见第 3 节，真实 `.env*` 是 ignored 本机配置，不得提交。
 
 Browser acceptance 配置：
 
 - `backend/.env.browser-acceptance` 是本机 ignored 文件，tracked 模板为 `backend/.env.browser-acceptance.example`；仅含 `EDUFORGE_DATABASE_PURPOSE`、`BROWSER_ACCEPTANCE_APP_MONGO_URI` 和 `BROWSER_ACCEPTANCE_ADMIN_MONGO_URI`。
-- APP URI 对应应用的 `MONGO_URI`；ADMIN URI 是管理角色配置，不注入 Nest 应用连接；APP/ADMIN URI 必须不同。
+- APP URI 对应应用的 `MONGO_URI`；ADMIN URI 是管理进程配置，不注入 Nest 应用连接。满足下述本机 root 门禁时，APP/ADMIN 可以使用相同 URI；例外之外仍须使用不同 URI，并保留 APP 仅具目标库 `readWrite`、ADMIN 仅具目标库 `dbOwner` 的专用账号校验。
+- 本机 root 例外仅接受单一 loopback MongoDB 目标的 `mongodb://` URI，用户名为 `root`、显式 `authSource=admin`、库名为 `eduforge_browser_test`，且明确设置 `directConnection=true`。拒绝非 loopback、SRV、多主机以及 proxy、`replicaSet`、`loadBalanced` 等代理或远端发现配置；不得借该例外连接服务器或生产目标。
+- Browser 连接后先核对实际 `databaseName`；本机 root 路径还必须同时核验 `authenticatedUsers` 中的 `root@admin` 身份与 `authenticatedUserRoles` 中的 `root@admin` 角色。URI 声明不能替代实际认证，任一门禁不符均 fail-closed；专用账号路径继续按对应 APP/ADMIN 权限门禁执行。
 - Browser backend 的固定网络配置为 `127.0.0.1`、CORS origin `http://localhost:3000`；`BACKEND_PORT` 默认 `5000`，是唯一允许 shell 覆写的配置项。AI/Mail 配置组合见第 3 节。
 - Browser acceptance 使用独立 purpose 与 APP/ADMIN URI 配置；具体 process roles、启动门禁、环境隔离、连接核验及 fixture/verifier 边界见 [Backend Testing Playbook](./handoff-backend-testing-playbook.md)。
 

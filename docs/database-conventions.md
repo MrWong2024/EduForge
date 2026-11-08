@@ -9,7 +9,7 @@ Mongoose Schema 技术红线与 Codex 执行规则以 `docs/codex-rules.md` 为�
 
 ## 1. 数据库命名与环境隔离
 
-数据库必须按运行环境进行 database-level isolation，禁止 development、test、staging、production 共库使用。最低要求是使用独立 `databaseName`，并按环境账号/权限与连接配置进行隔离；除非项目另有部署或安全要求，本规范不默认要求不同环境运行在独立 MongoDB server、cluster 或 physical instance。
+数据库必须按运行环境进行 database-level isolation，禁止 development、test、staging、production 共库使用。最低要求是使用独立 `databaseName`，默认按环境账号/权限与连接配置进行隔离；用户明确授权的独立本机环境账号例外见 §2.5，不豁免数据库隔离。除非项目另有部署或安全要求，本规范不默认要求不同环境运行在独立 MongoDB server、cluster 或 physical instance。
 
 推荐命名模板：
 
@@ -41,8 +41,8 @@ Mongoose Schema 技术红线与 Codex 执行规则以 `docs/codex-rules.md` 为�
 
 权限原则：
 
-- 仅对应数据库的 `readWrite`
-- 不得使用 `root`、`admin`、`dbOwner` 作为应用运行账号
+- 默认仅对应数据库的 `readWrite`；§2.5 的明确本地例外单独约束
+- 除 §2.5 的明确本地例外外，不得使用 `root`、`admin`、`dbOwner` 作为应用运行账号
 - 不得拥有跨库权限，除非有明确架构决策
 
 ### 2.2 运维账号
@@ -60,9 +60,8 @@ Mongoose Schema 技术红线与 Codex 执行规则以 `docs/codex-rules.md` 为�
 
 权限原则：
 
-- `dbOwner` 或满足运维脚本需求的最小权限
-- 不得写入应用运行配置或源码
-- 不得由应用进程常驻使用
+- 默认使用 `dbOwner` 或满足运维脚本需求的最小权限；§2.5 的明确本地例外单独约束
+- 除 §2.5 的明确本地例外外，不得写入应用运行配置或由应用进程常驻使用；凭证始终不得写入源码
 
 ### 2.3 只读账号（可选）
 
@@ -85,6 +84,12 @@ Mongoose Schema 技术红线与 Codex 执行规则以 `docs/codex-rules.md` 为�
 
 - 数据库账号、连接串、密码、密钥不得进入仓库。
 - 相关凭证应由环境变量、密钥管理或部署平台提供。
+
+### 2.5 用户明确授权的独立本机环境例外
+
+用户明确授权时，独立本机开发环境可在 development 与隔离测试用途中复用现有高权限账号。项目配置 Owner 必须明确例外适用的本机目标、用途、独立库名及连接与实际认证门禁；该例外不适用于服务器、共享环境或 production，也不豁免数据库名校验、用途隔离、凭证保护和任务写入授权。
+
+应用与管理连接仍保留各自配置入口和进程职责；账号或 URI 相同不等于允许将管理操作混入应用进程。具体本机账号事实和 Browser 连接约束由 [Backend Config Matrix](./handoff/handoff-backend-config-matrix.md#1-数据库连接串与索引治理) 维护，其他环境继续遵循默认账号权限模型。
 
 ---
 
@@ -277,7 +282,7 @@ production 关闭 `autoIndex` 的原因：
 
 ## 9. 禁止事项（红线）
 
-- 禁止应用运行时使用 `root`、`admin`、`dbOwner` 账号
+- 除 §2.5 的明确本地例外外，禁止应用运行时使用 `root`、`admin`、`dbOwner` 账号
 - 禁止 development、test 连接 production 数据库
 - 禁止 production 启用 Mongoose `autoIndex`
 - 禁止将数据库账号、连接串、密码、密钥写入仓库

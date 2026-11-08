@@ -146,9 +146,11 @@ npm.cmd run test:e2e -- --runInBand --runTestsByPath ./test/sync-indexes.e2e-spe
 
 数据库具体名称、URI、账号与环境文件映射仍由 [Backend config matrix](./handoff-backend-config-matrix.md#1-数据库连接串与索引治理) 唯一维护，本手册不复制完整 Config Matrix。`standard_test` 与 `browser_acceptance` 使用独立 database 实现 database-level isolation；namespace、collection prefix 等逻辑隔离不能替代 database-level isolation。不同 purpose 不得在同一进程混用配置，也不得依赖继承变量、dotenv 顺序或后加载覆盖选择数据库。
 
+本机共用账号的有限例外及 Browser URI、实际认证门禁以 Config Matrix 为准；APP/ADMIN 表示配置入口和进程职责，不要求该例外使用不同账号。Browser 运行仍须分别通过连接声明、实际库名及认证身份/权限核验，账号共用不合并下述进程边界。
+
 Browser 相关进程角色边界：
 
-| 进程 | Database purpose | 数据库角色 |
+| 进程 | Database purpose | 连接与进程职责 |
 |---|---|---|
 | Playwright / Browser runner | `none` | 不得直接获得或连接 Mongo APP / ADMIN URI |
 | Browser backend | `browser_acceptance` | 通过独立 `start:browser-test` launcher 使用 Browser Acceptance APP connection；ADMIN 声明只校验、不注入 Nest 应用 |
@@ -217,10 +219,10 @@ npm run browser:text-smoke -- inspect --namespace b1-2-<unique>
 npm run browser:text-smoke -- cleanup --namespace b1-2-<unique> --confirm-namespace b1-2-<unique>
 ```
 
-- 每次调用为独立进程，仅读取 `backend/.env.browser-acceptance`，复用既有环境构造、用途/URI 声明门禁和连接后实际库名门禁；再核对实际 APP/ADMIN 数据库角色。完整数据库映射仍归 Config Matrix。
+- 每次调用为独立进程，仅读取 `backend/.env.browser-acceptance`，复用环境构造、用途/URI 声明门禁和连接后实际库名门禁；实际认证按 [Config Matrix](./handoff-backend-config-matrix.md#1-数据库连接串与索引治理) 的本机例外或专用账号路径核验，不以进程角色名称推断数据库账号。
 - `prepare` 只通过当前 UserSchema 和密码 helper seed namespace 专属 teacher/student；固定合成应用密码由脚本测试常量统一维护。课程、班级、四个不同已发布私有模板及入班走前端同源 BFF 的正式 HTTP API；模板数量、标题及 ownership 由脚本本地稳定 fixture 标识维护，不依赖业务策略枚举；旧策略标题仅作为历史 namespace 的精确 cleanup 兼容标识，不用于 inspect/process。课堂发布、作品提交、产品 AI 申请和教师反馈留给真实 Browser。
 - `inspect --prepared` 只读核验账号固定值及最小前置；普通 `inspect` 读取 ownership 限定的资源、保存原文版本及 Job/反馈终态。异常前置不自动修复。确需替换时显式运行 `npm run browser:text-smoke -- replace --namespace b1-2-<unique> --confirm-namespace b1-2-<unique>`：先清理并核对旧残留，再重新准备；不得手工改密码或业务状态绕过核验。
-- `process-ai` 在 APP/ADMIN 声明门禁通过后才动态导入 AppModule，以 `createApplicationContext` 启动且不 listen；实际 ConfigService 必须为 Browser 用途、stub、worker=false、debug=false，实际数据库名和 APP 角色也须匹配。正常索引初始化仍可能写入数据库。
+- `process-ai` 在 APP/ADMIN 声明门禁通过后才动态导入 AppModule，以 `createApplicationContext` 启动且不 listen；实际 ConfigService 必须为 Browser 用途、stub、worker=false、debug=false，实际数据库名与 APP 连接的认证门禁也须匹配。正常索引初始化仍可能写入数据库。
 - 处理前核对 Job→Submission→ClassroomTask→合成师生/班级的完整 ownership；全库 PENDING/FAILED/RUNNING 必须恰好只有目标，且为 budgetVersion=1、PENDING、attempts=0。外来、多目标或 legacy 非终态立即拒绝，不修改它们。随后只调用真实 `AiFeedbackProcessor.processOnce(1)` 一次，读取该目标及实际 stub 反馈核对结果，finally 等待上下文关闭。
 - `processOnce` 是全库扫描入口，上述查询不是并发锁。操作者必须独占验收时段，排除其他 Worker/Profile/生产者并串行形成、消费目标；`--confirm-exclusive` 记录的是该运行前提，不能代替隔离审计。不启用长期 Worker、debug HTTP 或真实模型。
 - 最小恢复记录仅保存 namespace、端口、准确资源 ID，位于仓库根目录下 ignored `.local/deliverables/browser-text-task-smoke/<namespace>.json`；Cookie 仅在准备过程内存中使用，不持久化 Cookie、Session、Mongo URI 或基础设施凭据。`.local/deliverables/` 包含恢复资料，不能整体当作可清空缓存。

@@ -1,7 +1,51 @@
+import { mongo } from 'mongoose';
 import {
   assertBrowserAcceptancePreImportEnvironment,
   DatabaseGateError,
+  readDeclaredDatabaseName,
+  TEST_DATABASE_NAMES,
 } from './database-purpose';
+
+export function isLocalRootBrowserUri(mongoUri: string | undefined): boolean {
+  if (
+    !mongoUri?.startsWith('mongodb://') ||
+    readDeclaredDatabaseName(mongoUri) !==
+      TEST_DATABASE_NAMES.browser_acceptance
+  )
+    return false;
+  try {
+    const keys = [...new URL(mongoUri).searchParams.keys()].map((key) =>
+      key.toLowerCase(),
+    );
+    if (
+      new Set(keys).size !== keys.length ||
+      keys.some((key) =>
+        /^(proxy|replicaset$|loadbalanced$|srv|dbname$)/.test(key),
+      )
+    )
+      return false;
+    // The constructor parses the URI; no connection or authentication is started.
+    const options = new mongo.MongoClient(mongoUri).options;
+    const { credentials, hosts } = options;
+    return (
+      hosts.length === 1 &&
+      ['127.0.0.1', 'localhost', '::1'].includes(hosts[0].host ?? '') &&
+      !hosts[0].socketPath &&
+      options.directConnection === true &&
+      options.dbName === TEST_DATABASE_NAMES.browser_acceptance &&
+      credentials?.username === 'root' &&
+      credentials.source === 'admin' &&
+      credentials.password.length > 0 &&
+      ['DEFAULT', 'SCRAM-SHA-1', 'SCRAM-SHA-256'].includes(
+        credentials.mechanism,
+      ) &&
+      Object.keys(credentials.mechanismProperties).length === 0
+    );
+  } catch {
+    // Driver parse errors can contain credentials; expose only a boolean gate.
+    return false;
+  }
+}
 
 export function createBrowserAcceptanceEnvironment(
   file: Record<string, string | undefined>,
@@ -17,7 +61,7 @@ export function createBrowserAcceptanceEnvironment(
       mongoUri,
     });
   }
-  if (appUri === adminUri) {
+  if (appUri === adminUri && !isLocalRootBrowserUri(appUri)) {
     throw new DatabaseGateError(
       'BROWSER_APPLICATION_URI_MUST_DIFFER_FROM_ADMIN',
     );

@@ -149,6 +149,82 @@ describe('B1-2 thin smoke support gates (no database)', () => {
     ).toThrow();
     expect(() => assertSmokeRole([], 'APP')).toThrow();
   });
+  const localRootUri =
+    'mongodb://root:synthetic%40password@127.0.0.1:1/eduforge_browser_test?authSource=admin&directConnection=true';
+  it.each(['APP', 'ADMIN'] as const)(
+    'accepts local root for %s only with the actual root user and role',
+    (role) => {
+      expect(() =>
+        assertSmokeRole([{ db: 'admin', role: 'root' }], role, {
+          mongoUri: localRootUri,
+          authenticatedUsers: [{ user: 'root', db: 'admin' }],
+        }),
+      ).not.toThrow();
+    },
+  );
+  it.each(['APP', 'ADMIN'] as const)(
+    'rejects missing, incorrect or additional authenticated users for %s',
+    (role) => {
+      for (const authenticatedUsers of [
+        [],
+        [{ user: 'other', db: 'admin' }],
+        [{ user: 'root', db: 'eduforge_browser_test' }],
+        [
+          { user: 'root', db: 'admin' },
+          { user: 'other', db: 'admin' },
+        ],
+      ])
+        expect(() =>
+          assertSmokeRole([{ db: 'admin', role: 'root' }], role, {
+            mongoUri: localRootUri,
+            authenticatedUsers,
+          }),
+        ).toThrow('SMOKE_DATABASE_AUTHENTICATION_MISMATCH');
+      for (const roles of [
+        [],
+        [{ db: 'admin', role: 'readWrite' }],
+        [{ db: 'eduforge_browser_test', role: 'root' }],
+        [
+          { db: 'admin', role: 'root' },
+          { db: 'eduforge_browser_test', role: 'readWrite' },
+        ],
+      ])
+        expect(() =>
+          assertSmokeRole(roles, role, {
+            mongoUri: localRootUri,
+            authenticatedUsers: [{ user: 'root', db: 'admin' }],
+          }),
+        ).toThrow('SMOKE_DATABASE_AUTHENTICATION_MISMATCH');
+    },
+  );
+  it('does not grant the root exception to remote or redirectable connections', () => {
+    for (const mongoUri of [
+      localRootUri.replace('127.0.0.1', 'remote.example.invalid'),
+      localRootUri.replace('&directConnection=true', ''),
+      localRootUri + '&replicaSet=synthetic',
+      localRootUri + '&proxyHost=127.0.0.1',
+    ])
+      expect(() =>
+        assertSmokeRole([{ db: 'admin', role: 'root' }], 'APP', {
+          mongoUri,
+          authenticatedUsers: [{ user: 'root', db: 'admin' }],
+        }),
+      ).toThrow('SMOKE_DATABASE_ROLE_MISMATCH');
+  });
+  it('reports only safe codes when local root authentication fails', () => {
+    try {
+      assertSmokeRole([{ db: 'admin', role: 'root' }], 'ADMIN', {
+        mongoUri: localRootUri,
+        authenticatedUsers: [],
+      });
+      throw new Error('Expected the authentication gate to reject');
+    } catch (error) {
+      expect(String(error)).toContain('SMOKE_DATABASE_AUTHENTICATION_MISMATCH');
+      expect(String(error)).not.toContain('mongodb://');
+      expect(String(error)).not.toContain('synthetic%40password');
+      expect(String(error)).not.toContain('synthetic@password');
+    }
+  });
   it('allows only the exact current pending target', () => {
     expect(() => assertExclusiveJob(jobId.toString(), [job])).not.toThrow();
     for (const jobs of [
