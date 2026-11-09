@@ -48,8 +48,6 @@ import {
 
 jest.setTimeout(90000);
 
-const KEEP_DB = process.env.KEEP_E2E_DB === '1';
-
 type EvidenceSummary = {
   sourceUncertainComparableCount: number;
   modelChangedComparableCount: number;
@@ -1128,7 +1126,7 @@ describe('Classroom AI learning analytics (e2e)', () => {
 
   afterAll(async () => {
     try {
-      if (!KEEP_DB && app && userModel) {
+      if (app && userModel) {
         await Promise.all([
           feedbackModel.deleteMany({
             submissionId: { $in: createdSubmissionIds },

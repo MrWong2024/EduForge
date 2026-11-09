@@ -15,8 +15,6 @@ import { Enrollment } from '../src/modules/classrooms/enrollments/schemas/enroll
 
 jest.setTimeout(30000);
 
-const KEEP_DB = process.env.KEEP_E2E_DB === '1';
-
 const ensureMongoUri = () => {
   if (!process.env.MONGO_URI) {
     throw new Error('MONGO_URI is required for classroom students e2e.');
@@ -270,38 +268,32 @@ describe('Classroom Students List (e2e)', () => {
   });
 
   afterAll(async () => {
-    if (!KEEP_DB) {
-      const cleanup: Promise<unknown>[] = [];
-      if (classroomId) {
-        cleanup.push(
-          enrollmentModel.deleteMany({
-            classroomId: new Types.ObjectId(classroomId),
-          }),
-        );
-        cleanup.push(
-          classroomModel.deleteOne({
-            _id: new Types.ObjectId(classroomId),
-          }),
-        );
-      }
-      if (courseId) {
-        cleanup.push(
-          courseModel.deleteOne({
-            _id: new Types.ObjectId(courseId),
-          }),
-        );
-      }
-      if (createdUserIds.length > 0) {
-        const userObjectIds = createdUserIds.map(
-          (id) => new Types.ObjectId(id),
-        );
-        cleanup.push(
-          sessionModel.deleteMany({ userId: { $in: userObjectIds } }),
-        );
-        cleanup.push(userModel.deleteMany({ _id: { $in: userObjectIds } }));
-      }
-      await Promise.all(cleanup);
+    const cleanup: Promise<unknown>[] = [];
+    if (classroomId) {
+      cleanup.push(
+        enrollmentModel.deleteMany({
+          classroomId: new Types.ObjectId(classroomId),
+        }),
+      );
+      cleanup.push(
+        classroomModel.deleteOne({
+          _id: new Types.ObjectId(classroomId),
+        }),
+      );
     }
+    if (courseId) {
+      cleanup.push(
+        courseModel.deleteOne({
+          _id: new Types.ObjectId(courseId),
+        }),
+      );
+    }
+    if (createdUserIds.length > 0) {
+      const userObjectIds = createdUserIds.map((id) => new Types.ObjectId(id));
+      cleanup.push(sessionModel.deleteMany({ userId: { $in: userObjectIds } }));
+      cleanup.push(userModel.deleteMany({ _id: { $in: userObjectIds } }));
+    }
+    await Promise.all(cleanup);
     await app.close();
   });
 

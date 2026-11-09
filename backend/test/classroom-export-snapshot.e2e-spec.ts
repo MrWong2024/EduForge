@@ -20,8 +20,6 @@ import { AiFeedbackJob } from '../src/modules/learning-tasks/ai-feedback/schemas
 
 jest.setTimeout(30000);
 
-const KEEP_DB = process.env.KEEP_E2E_DB === '1';
-
 const ensureMongoUri = () => {
   if (!process.env.MONGO_URI) {
     throw new Error('MONGO_URI is required for classroom export snapshot e2e.');
@@ -171,52 +169,50 @@ describe('Classroom Export Snapshot (e2e)', () => {
       process.env.AI_FEEDBACK_DEBUG_ENABLED = previousDebugEnabled;
     }
 
-    if (!KEEP_DB) {
-      const cleanup: Promise<unknown>[] = [];
-      if (submissionId) {
-        const submissionObjectId = new Types.ObjectId(submissionId);
-        cleanup.push(
-          feedbackModel.deleteMany({ submissionId: submissionObjectId }),
-        );
-        cleanup.push(
-          aiFeedbackJobModel.deleteMany({ submissionId: submissionObjectId }),
-        );
-        cleanup.push(submissionModel.deleteOne({ _id: submissionObjectId }));
-      }
-      if (classroomTaskId) {
-        cleanup.push(
-          classroomTaskModel.deleteOne({
-            _id: new Types.ObjectId(classroomTaskId),
-          }),
-        );
-      }
-      if (taskId) {
-        cleanup.push(taskModel.deleteOne({ _id: new Types.ObjectId(taskId) }));
-      }
-      if (classroomId) {
-        cleanup.push(
-          enrollmentModel.deleteMany({
-            classroomId: new Types.ObjectId(classroomId),
-          }),
-        );
-        cleanup.push(
-          classroomModel.deleteOne({ _id: new Types.ObjectId(classroomId) }),
-        );
-      }
-      if (courseId) {
-        cleanup.push(
-          courseModel.deleteOne({ _id: new Types.ObjectId(courseId) }),
-        );
-      }
-      const userIds = [teacherId, studentId]
-        .filter(Boolean)
-        .map((id) => new Types.ObjectId(id));
-      if (userIds.length > 0) {
-        cleanup.push(sessionModel.deleteMany({ userId: { $in: userIds } }));
-        cleanup.push(userModel.deleteMany({ _id: { $in: userIds } }));
-      }
-      await Promise.all(cleanup);
+    const cleanup: Promise<unknown>[] = [];
+    if (submissionId) {
+      const submissionObjectId = new Types.ObjectId(submissionId);
+      cleanup.push(
+        feedbackModel.deleteMany({ submissionId: submissionObjectId }),
+      );
+      cleanup.push(
+        aiFeedbackJobModel.deleteMany({ submissionId: submissionObjectId }),
+      );
+      cleanup.push(submissionModel.deleteOne({ _id: submissionObjectId }));
     }
+    if (classroomTaskId) {
+      cleanup.push(
+        classroomTaskModel.deleteOne({
+          _id: new Types.ObjectId(classroomTaskId),
+        }),
+      );
+    }
+    if (taskId) {
+      cleanup.push(taskModel.deleteOne({ _id: new Types.ObjectId(taskId) }));
+    }
+    if (classroomId) {
+      cleanup.push(
+        enrollmentModel.deleteMany({
+          classroomId: new Types.ObjectId(classroomId),
+        }),
+      );
+      cleanup.push(
+        classroomModel.deleteOne({ _id: new Types.ObjectId(classroomId) }),
+      );
+    }
+    if (courseId) {
+      cleanup.push(
+        courseModel.deleteOne({ _id: new Types.ObjectId(courseId) }),
+      );
+    }
+    const userIds = [teacherId, studentId]
+      .filter(Boolean)
+      .map((id) => new Types.ObjectId(id));
+    if (userIds.length > 0) {
+      cleanup.push(sessionModel.deleteMany({ userId: { $in: userIds } }));
+      cleanup.push(userModel.deleteMany({ _id: { $in: userIds } }));
+    }
+    await Promise.all(cleanup);
 
     await app.close();
   });

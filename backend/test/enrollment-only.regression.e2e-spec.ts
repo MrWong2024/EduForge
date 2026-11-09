@@ -16,8 +16,6 @@ import { ClassroomTask } from '../src/modules/classrooms/classroom-tasks/schemas
 
 jest.setTimeout(30000);
 
-const KEEP_DB = process.env.KEEP_E2E_DB === '1';
-
 const ensureMongoUri = () => {
   if (!process.env.MONGO_URI) {
     throw new Error(
@@ -251,49 +249,43 @@ describe('Enrollment Only Regression Lock (e2e)', () => {
   });
 
   afterAll(async () => {
-    if (!KEEP_DB) {
-      const cleanup: Promise<unknown>[] = [];
-      if (createdClassroomIds.length > 0) {
-        cleanup.push(
-          classroomTaskModel.deleteMany({
-            classroomId: {
-              $in: createdClassroomIds.map((id) => new Types.ObjectId(id)),
-            },
-          }),
-        );
-        cleanup.push(
-          enrollmentModel.deleteMany({
-            classroomId: {
-              $in: createdClassroomIds.map((id) => new Types.ObjectId(id)),
-            },
-          }),
-        );
-        cleanup.push(
-          classroomModel.deleteMany({
-            _id: {
-              $in: createdClassroomIds.map((id) => new Types.ObjectId(id)),
-            },
-          }),
-        );
-      }
-      if (createdCourseIds.length > 0) {
-        cleanup.push(
-          courseModel.deleteMany({
-            _id: { $in: createdCourseIds.map((id) => new Types.ObjectId(id)) },
-          }),
-        );
-      }
-      if (createdUserIds.length > 0) {
-        const userObjectIds = createdUserIds.map(
-          (id) => new Types.ObjectId(id),
-        );
-        cleanup.push(
-          sessionModel.deleteMany({ userId: { $in: userObjectIds } }),
-        );
-        cleanup.push(userModel.deleteMany({ _id: { $in: userObjectIds } }));
-      }
-      await Promise.all(cleanup);
+    const cleanup: Promise<unknown>[] = [];
+    if (createdClassroomIds.length > 0) {
+      cleanup.push(
+        classroomTaskModel.deleteMany({
+          classroomId: {
+            $in: createdClassroomIds.map((id) => new Types.ObjectId(id)),
+          },
+        }),
+      );
+      cleanup.push(
+        enrollmentModel.deleteMany({
+          classroomId: {
+            $in: createdClassroomIds.map((id) => new Types.ObjectId(id)),
+          },
+        }),
+      );
+      cleanup.push(
+        classroomModel.deleteMany({
+          _id: {
+            $in: createdClassroomIds.map((id) => new Types.ObjectId(id)),
+          },
+        }),
+      );
     }
+    if (createdCourseIds.length > 0) {
+      cleanup.push(
+        courseModel.deleteMany({
+          _id: { $in: createdCourseIds.map((id) => new Types.ObjectId(id)) },
+        }),
+      );
+    }
+    if (createdUserIds.length > 0) {
+      const userObjectIds = createdUserIds.map((id) => new Types.ObjectId(id));
+      cleanup.push(sessionModel.deleteMany({ userId: { $in: userObjectIds } }));
+      cleanup.push(userModel.deleteMany({ _id: { $in: userObjectIds } }));
+    }
+    await Promise.all(cleanup);
     await app.close();
   });
 

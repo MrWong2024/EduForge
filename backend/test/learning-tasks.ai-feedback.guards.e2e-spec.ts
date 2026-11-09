@@ -26,7 +26,6 @@ import {
 
 jest.setTimeout(30000);
 
-const KEEP_DB = process.env.KEEP_E2E_DB === '1';
 const ensureMongoUri = () => {
   if (!process.env.MONGO_URI) {
     throw new Error(
@@ -437,7 +436,7 @@ describe('LearningTasks AI Feedback Guards (e2e)', () => {
     }
 
     try {
-      if (!KEEP_DB && userModel) {
+      if (userModel) {
         const submissionObjectIds = submissionIds.map(
           (id) => new Types.ObjectId(id),
         );

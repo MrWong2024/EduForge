@@ -31,7 +31,6 @@ jest.setTimeout(30000);
 const waitMs = (ms: number) =>
   new Promise((resolve) => setTimeout(resolve, ms));
 
-const KEEP_DB = process.env.KEEP_E2E_DB === '1';
 const ensureMongoUri = () => {
   if (!process.env.MONGO_URI) {
     throw new Error(
@@ -221,11 +220,6 @@ describe('LearningTasks AI Feedback Ops (e2e) - pipeline & debug gate ON', () =>
       delete process.env.AI_FEEDBACK_DEBUG_ENABLED;
     } else {
       process.env.AI_FEEDBACK_DEBUG_ENABLED = previousDebugEnabled;
-    }
-
-    if (KEEP_DB) {
-      await app.close();
-      return;
     }
 
     const cleanup: Promise<unknown>[] = [];
@@ -740,55 +734,52 @@ describe('LearningTasks AI Feedback Ops (e2e) - stub worker default loop', () =>
       process.env.AI_FEEDBACK_WORKER_BATCH_SIZE = previousBatchSize;
     }
 
-    if (!KEEP_DB) {
-      const cleanup: Promise<unknown>[] = [];
-      const submissionObjectIds = submissionIds.map(
-        (id) => new Types.ObjectId(id),
+    const cleanup: Promise<unknown>[] = [];
+    const submissionObjectIds = submissionIds.map(
+      (id) => new Types.ObjectId(id),
+    );
+    if (submissionObjectIds.length > 0) {
+      cleanup.push(
+        feedbackModel.deleteMany({
+          submissionId: { $in: submissionObjectIds },
+        }),
       );
-      if (submissionObjectIds.length > 0) {
-        cleanup.push(
-          feedbackModel.deleteMany({
-            submissionId: { $in: submissionObjectIds },
-          }),
-        );
-        cleanup.push(
-          aiFeedbackJobModel.deleteMany({
-            submissionId: { $in: submissionObjectIds },
-          }),
-        );
-        cleanup.push(
-          submissionModel.deleteMany({ _id: { $in: submissionObjectIds } }),
-        );
-      }
-      if (taskId) {
-        cleanup.push(taskModel.deleteOne({ _id: taskId }));
-      }
-      const userIds = [teacherId, studentId]
-        .filter(Boolean)
-        .map((id) => new Types.ObjectId(id));
-      if (userIds.length > 0) {
-        cleanup.push(sessionModel.deleteMany({ userId: { $in: userIds } }));
-        cleanup.push(userModel.deleteMany({ _id: { $in: userIds } }));
-      }
-      for (const operation of cleanup) await operation;
-      if (classroomTaskId)
-        await app
-          .get<Model<ClassroomTask>>(getModelToken(ClassroomTask.name))
-          .deleteOne({ _id: classroomTaskId });
-      if (classroomId) {
-        await app
-          .get<Model<Enrollment>>(getModelToken(Enrollment.name))
-          .deleteMany({ classroomId: new Types.ObjectId(classroomId) });
-        await app
-          .get<Model<Classroom>>(getModelToken(Classroom.name))
-          .deleteOne({ _id: classroomId });
-      }
-      if (courseId)
-        await app
-          .get<Model<Course>>(getModelToken(Course.name))
-          .deleteOne({ _id: courseId });
+      cleanup.push(
+        aiFeedbackJobModel.deleteMany({
+          submissionId: { $in: submissionObjectIds },
+        }),
+      );
+      cleanup.push(
+        submissionModel.deleteMany({ _id: { $in: submissionObjectIds } }),
+      );
     }
-
+    if (taskId) {
+      cleanup.push(taskModel.deleteOne({ _id: taskId }));
+    }
+    const userIds = [teacherId, studentId]
+      .filter(Boolean)
+      .map((id) => new Types.ObjectId(id));
+    if (userIds.length > 0) {
+      cleanup.push(sessionModel.deleteMany({ userId: { $in: userIds } }));
+      cleanup.push(userModel.deleteMany({ _id: { $in: userIds } }));
+    }
+    for (const operation of cleanup) await operation;
+    if (classroomTaskId)
+      await app
+        .get<Model<ClassroomTask>>(getModelToken(ClassroomTask.name))
+        .deleteOne({ _id: classroomTaskId });
+    if (classroomId) {
+      await app
+        .get<Model<Enrollment>>(getModelToken(Enrollment.name))
+        .deleteMany({ classroomId: new Types.ObjectId(classroomId) });
+      await app
+        .get<Model<Classroom>>(getModelToken(Classroom.name))
+        .deleteOne({ _id: classroomId });
+    }
+    if (courseId)
+      await app
+        .get<Model<Course>>(getModelToken(Course.name))
+        .deleteOne({ _id: courseId });
     await app.close();
     expect(aiFeedbackJobModel.db.readyState).toBe(0);
     const httpServer: unknown = app.getHttpServer();

@@ -12,8 +12,6 @@ import { Session } from '../src/modules/auth/schemas/session.schema';
 
 jest.setTimeout(30000);
 
-const KEEP_DB = process.env.KEEP_E2E_DB === '1';
-
 const ensureMongoUri = () => {
   if (!process.env.MONGO_URI) {
     throw new Error('MONGO_URI is required for users /me e2e tests.');
@@ -89,7 +87,7 @@ describe('Users /me profile update (e2e)', () => {
   });
 
   afterAll(async () => {
-    if (!KEEP_DB && createdUserId) {
+    if (createdUserId) {
       const userObjectId = new Types.ObjectId(createdUserId);
       await Promise.all([
         sessionModel.deleteMany({ userId: userObjectId }),

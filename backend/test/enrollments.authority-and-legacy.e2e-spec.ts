@@ -15,8 +15,6 @@ import { Enrollment } from '../src/modules/classrooms/enrollments/schemas/enroll
 
 jest.setTimeout(30000);
 
-const KEEP_DB = process.env.KEEP_E2E_DB === '1';
-
 const ensureMongoUri = () => {
   if (!process.env.MONGO_URI) {
     throw new Error('MONGO_URI is required for enrollments authority e2e.');
@@ -208,42 +206,38 @@ describe('Enrollments Authority And Legacy Compatibility (e2e)', () => {
   });
 
   afterAll(async () => {
-    if (!KEEP_DB) {
-      const cleanup: Promise<unknown>[] = [];
-      if (createdClassroomIds.length > 0) {
-        cleanup.push(
-          enrollmentModel.deleteMany({
-            classroomId: {
-              $in: createdClassroomIds.map((id) => new Types.ObjectId(id)),
-            },
-          }),
-        );
-        cleanup.push(
-          classroomModel.deleteMany({
-            _id: {
-              $in: createdClassroomIds.map((id) => new Types.ObjectId(id)),
-            },
-          }),
-        );
-      }
-      if (createdCourseIds.length > 0) {
-        cleanup.push(
-          courseModel.deleteMany({
-            _id: { $in: createdCourseIds.map((id) => new Types.ObjectId(id)) },
-          }),
-        );
-      }
-      const userObjectIds = [teacherId, studentId, legacyStudentId]
-        .filter(Boolean)
-        .map((id) => new Types.ObjectId(id));
-      if (userObjectIds.length > 0) {
-        cleanup.push(
-          sessionModel.deleteMany({ userId: { $in: userObjectIds } }),
-        );
-        cleanup.push(userModel.deleteMany({ _id: { $in: userObjectIds } }));
-      }
-      await Promise.all(cleanup);
+    const cleanup: Promise<unknown>[] = [];
+    if (createdClassroomIds.length > 0) {
+      cleanup.push(
+        enrollmentModel.deleteMany({
+          classroomId: {
+            $in: createdClassroomIds.map((id) => new Types.ObjectId(id)),
+          },
+        }),
+      );
+      cleanup.push(
+        classroomModel.deleteMany({
+          _id: {
+            $in: createdClassroomIds.map((id) => new Types.ObjectId(id)),
+          },
+        }),
+      );
     }
+    if (createdCourseIds.length > 0) {
+      cleanup.push(
+        courseModel.deleteMany({
+          _id: { $in: createdCourseIds.map((id) => new Types.ObjectId(id)) },
+        }),
+      );
+    }
+    const userObjectIds = [teacherId, studentId, legacyStudentId]
+      .filter(Boolean)
+      .map((id) => new Types.ObjectId(id));
+    if (userObjectIds.length > 0) {
+      cleanup.push(sessionModel.deleteMany({ userId: { $in: userObjectIds } }));
+      cleanup.push(userModel.deleteMany({ _id: { $in: userObjectIds } }));
+    }
+    await Promise.all(cleanup);
     await app.close();
   });
 

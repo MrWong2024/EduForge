@@ -12,8 +12,6 @@ import { Session } from '../src/modules/auth/schemas/session.schema';
 
 jest.setTimeout(30000);
 
-const KEEP_DB = process.env.KEEP_E2E_DB === '1';
-
 const ensureMongoUri = () => {
   if (!process.env.MONGO_URI) {
     throw new Error(
@@ -121,11 +119,6 @@ describe('LearningTasks AI Feedback Ops (e2e) - debug gate OFF', () => {
       delete process.env.AI_FEEDBACK_DEBUG_ENABLED;
     } else {
       process.env.AI_FEEDBACK_DEBUG_ENABLED = previousDebugEnabled;
-    }
-
-    if (KEEP_DB) {
-      await app.close();
-      return;
     }
 
     const cleanupErrors: unknown[] = [];

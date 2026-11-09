@@ -368,7 +368,6 @@ describe('sync-indexes against an isolated MongoDB namespace', () => {
         'MONGO_ADMIN_URI',
         'BROWSER_ACCEPTANCE_APP_MONGO_URI',
         'BROWSER_ACCEPTANCE_ADMIN_MONGO_URI',
-        'KEEP_E2E_DB',
       ];
       if (
         inheritedConnections.some((name) => process.env[name] !== undefined)

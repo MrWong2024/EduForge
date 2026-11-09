@@ -22,8 +22,6 @@ import { AiFeedbackProcessor } from '../src/modules/learning-tasks/ai-feedback/s
 
 jest.setTimeout(30000);
 
-const KEEP_DB = process.env.KEEP_E2E_DB === '1';
-
 const ensureMongoUri = () => {
   if (!process.env.MONGO_URI) {
     throw new Error(
@@ -227,66 +225,62 @@ describe('Classroom Process Assessment (e2e)', () => {
         previousSubmissionCooldownMs;
     }
 
-    if (!KEEP_DB) {
-      const cleanup: Promise<unknown>[] = [];
-      if (submissionIds.length > 0) {
-        const submissionObjectIds = submissionIds.map(
-          (id) => new Types.ObjectId(id),
-        );
-        cleanup.push(
-          feedbackModel.deleteMany({
-            submissionId: { $in: submissionObjectIds },
-          }),
-        );
-        cleanup.push(
-          aiFeedbackJobModel.deleteMany({
-            submissionId: { $in: submissionObjectIds },
-          }),
-        );
-        cleanup.push(
-          submissionModel.deleteMany({ _id: { $in: submissionObjectIds } }),
-        );
-      }
-      if (classroomTaskAId || classroomTaskBId) {
-        const classroomTaskIds = [classroomTaskAId, classroomTaskBId]
-          .filter(Boolean)
-          .map((id) => new Types.ObjectId(id));
-        cleanup.push(
-          classroomTaskModel.deleteMany({ _id: { $in: classroomTaskIds } }),
-        );
-      }
-      if (taskAId || taskBId) {
-        const taskIds = [taskAId, taskBId]
-          .filter(Boolean)
-          .map((id) => new Types.ObjectId(id));
-        cleanup.push(taskModel.deleteMany({ _id: { $in: taskIds } }));
-      }
-      if (classroomId) {
-        cleanup.push(
-          enrollmentModel.deleteMany({
-            classroomId: new Types.ObjectId(classroomId),
-          }),
-        );
-        cleanup.push(
-          classroomModel.deleteOne({ _id: new Types.ObjectId(classroomId) }),
-        );
-      }
-      if (courseId) {
-        cleanup.push(
-          courseModel.deleteOne({ _id: new Types.ObjectId(courseId) }),
-        );
-      }
-      const userObjectIds = [teacherId, studentAId, studentBId]
+    const cleanup: Promise<unknown>[] = [];
+    if (submissionIds.length > 0) {
+      const submissionObjectIds = submissionIds.map(
+        (id) => new Types.ObjectId(id),
+      );
+      cleanup.push(
+        feedbackModel.deleteMany({
+          submissionId: { $in: submissionObjectIds },
+        }),
+      );
+      cleanup.push(
+        aiFeedbackJobModel.deleteMany({
+          submissionId: { $in: submissionObjectIds },
+        }),
+      );
+      cleanup.push(
+        submissionModel.deleteMany({ _id: { $in: submissionObjectIds } }),
+      );
+    }
+    if (classroomTaskAId || classroomTaskBId) {
+      const classroomTaskIds = [classroomTaskAId, classroomTaskBId]
         .filter(Boolean)
         .map((id) => new Types.ObjectId(id));
-      if (userObjectIds.length > 0) {
-        cleanup.push(
-          sessionModel.deleteMany({ userId: { $in: userObjectIds } }),
-        );
-        cleanup.push(userModel.deleteMany({ _id: { $in: userObjectIds } }));
-      }
-      await Promise.all(cleanup);
+      cleanup.push(
+        classroomTaskModel.deleteMany({ _id: { $in: classroomTaskIds } }),
+      );
     }
+    if (taskAId || taskBId) {
+      const taskIds = [taskAId, taskBId]
+        .filter(Boolean)
+        .map((id) => new Types.ObjectId(id));
+      cleanup.push(taskModel.deleteMany({ _id: { $in: taskIds } }));
+    }
+    if (classroomId) {
+      cleanup.push(
+        enrollmentModel.deleteMany({
+          classroomId: new Types.ObjectId(classroomId),
+        }),
+      );
+      cleanup.push(
+        classroomModel.deleteOne({ _id: new Types.ObjectId(classroomId) }),
+      );
+    }
+    if (courseId) {
+      cleanup.push(
+        courseModel.deleteOne({ _id: new Types.ObjectId(courseId) }),
+      );
+    }
+    const userObjectIds = [teacherId, studentAId, studentBId]
+      .filter(Boolean)
+      .map((id) => new Types.ObjectId(id));
+    if (userObjectIds.length > 0) {
+      cleanup.push(sessionModel.deleteMany({ userId: { $in: userObjectIds } }));
+      cleanup.push(userModel.deleteMany({ _id: { $in: userObjectIds } }));
+    }
+    await Promise.all(cleanup);
 
     await app.close();
   });

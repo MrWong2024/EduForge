@@ -25,8 +25,6 @@ import { AiFeedbackJob } from '../src/modules/learning-tasks/ai-feedback/schemas
 
 jest.setTimeout(30000);
 
-const KEEP_DB = process.env.KEEP_E2E_DB === '1';
-
 const ensureMongoUri = () => {
   if (!process.env.MONGO_URI) {
     throw new Error('MONGO_URI is required for learning-tasks e2e tests.');
@@ -258,11 +256,6 @@ describe('LearningTasks (e2e)', () => {
   });
 
   afterAll(async () => {
-    if (KEEP_DB) {
-      await app.close();
-      return;
-    }
-
     const cleanup: Promise<unknown>[] = [];
     const userIds = [teacherId, otherTeacherId, studentId]
       .filter(Boolean)

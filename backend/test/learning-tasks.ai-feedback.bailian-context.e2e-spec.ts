@@ -39,8 +39,6 @@ import {
 
 jest.setTimeout(30000);
 
-const KEEP_DB = process.env.KEEP_E2E_DB === '1';
-
 type CreatedTaskResponse = {
   id: string;
 };
@@ -632,7 +630,7 @@ describe('LearningTasks AI Feedback Bailian Context (e2e)', () => {
     }
 
     try {
-      if (!KEEP_DB && userModel) {
+      if (userModel) {
         const cleanup: Promise<unknown>[] = [];
         for (const ownedId of submissionIds) {
           const submissionObjectId = new Types.ObjectId(ownedId);

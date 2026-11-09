@@ -70,7 +70,6 @@ npm run test -- --runInBand
 $env:NODE_ENV = "test"
 $env:EDUFORGE_DATABASE_PURPOSE = "standard_test"
 Remove-Item Env:MONGO_URI, Env:MONGO_ADMIN_URI, Env:BROWSER_ACCEPTANCE_APP_MONGO_URI, Env:BROWSER_ACCEPTANCE_ADMIN_MONGO_URI -ErrorAction SilentlyContinue
-Remove-Item Env:KEEP_E2E_DB -ErrorAction SilentlyContinue
 npm run test:e2e -- --runInBand
 ```
 
@@ -80,7 +79,6 @@ npm run test:e2e -- --runInBand
 $env:NODE_ENV = "test"
 $env:EDUFORGE_DATABASE_PURPOSE = "standard_test"
 Remove-Item Env:MONGO_URI, Env:MONGO_ADMIN_URI, Env:BROWSER_ACCEPTANCE_APP_MONGO_URI, Env:BROWSER_ACCEPTANCE_ADMIN_MONGO_URI -ErrorAction SilentlyContinue
-Remove-Item Env:KEEP_E2E_DB -ErrorAction SilentlyContinue
 npm run test:e2e -- --runInBand --runTestsByPath ./test/users-me.e2e-spec.ts
 ```
 
@@ -125,7 +123,7 @@ npm.cmd run test -- --runInBand --runTestsByPath ./scripts/sync-indexes.spec.ts
 ```powershell
 $env:NODE_ENV = "test"
 $env:EDUFORGE_DATABASE_PURPOSE = "standard_test"
-Remove-Item Env:MONGO_URI, Env:MONGO_ADMIN_URI, Env:BROWSER_ACCEPTANCE_APP_MONGO_URI, Env:BROWSER_ACCEPTANCE_ADMIN_MONGO_URI, Env:KEEP_E2E_DB -ErrorAction SilentlyContinue
+Remove-Item Env:MONGO_URI, Env:MONGO_ADMIN_URI, Env:BROWSER_ACCEPTANCE_APP_MONGO_URI, Env:BROWSER_ACCEPTANCE_ADMIN_MONGO_URI -ErrorAction SilentlyContinue
 npm.cmd run test:e2e -- --listTests --runInBand --runTestsByPath ./test/sync-indexes.e2e-spec.ts
 npm.cmd run test:e2e -- --runInBand --runTestsByPath ./test/sync-indexes.e2e-spec.ts
 ```
@@ -179,7 +177,7 @@ Browser launcher foundation 负责受控启动、正常初始化所需索引元�
 - 启用受控 Worker 循环的专项须在自有 fixture cleanup 前停止定时调度并等待已发起的处理结束，再关闭 app / DB，避免处理与清理或断开连接竞争。
 - 当前没有通用共享 Browser fixture 或集中式 cleanup 框架；文本教学任务使用 §6.2 的薄专用 CLI。HTTP E2E 的数据库终态仍由 spec 内断言与必要的 model 查询证明。
 - spec-local repetition 本身不构成 gap；只有重复代码开始造成具体维护风险时，才按 [Codex instruction spec](../codex-instruction-spec.md) §3.10 评估最低充分 shared helper。
-- `KEEP_E2E_DB=1` 只用于明确的本地诊断；正式验收和 CI 默认不得设置。保留数据时必须报告并由原 spec 的 ownership 信息指导精确清理。
+- 正常、调试及 CI 均须执行原有 scoped cleanup，不提供主动跳过模式。零残留覆盖本轮业务、认证及关联数据；从空库开始的独占测试窗口结束后应恢复零文档，集合和索引可以保留。清理失败、进程中断或结果未知时如实报告，必要恢复记录保留至资源确认收尾。
 - 写入超时或连接结果未知时不得直接重跑；先只读核对 app、数据库和任务 namespace 的实际状态。
 - 第 5 节的 Browser Acceptance foundation 不自动要求 fixture、verifier 或 cleanup 资产；只有 Browser 持久写入或复杂跨进程终态无法由已有低层证据充分证明时，才允许评估新资产。
 

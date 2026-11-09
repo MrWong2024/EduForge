@@ -22,8 +22,6 @@ import { AiFeedbackProcessor } from '../src/modules/learning-tasks/ai-feedback/s
 
 jest.setTimeout(30000);
 
-const KEEP_DB = process.env.KEEP_E2E_DB === '1';
-
 const ensureMongoUri = () => {
   if (!process.env.MONGO_URI) {
     throw new Error(
@@ -271,49 +269,47 @@ describe('Classroom Student Task Detail (e2e)', () => {
         previousSubmissionCooldownMs;
     }
 
-    if (!KEEP_DB) {
-      const submissionObjectIds = submissionIds.map(
-        (id) => new Types.ObjectId(id),
-      );
-      if (submissionObjectIds.length > 0) {
-        await feedbackModel.deleteMany({
-          submissionId: { $in: submissionObjectIds },
-        });
-        await aiFeedbackJobModel.deleteMany({
-          submissionId: { $in: submissionObjectIds },
-        });
-        await submissionModel.deleteMany({ _id: { $in: submissionObjectIds } });
-      }
-      if (classroomTaskId) {
-        await classroomTaskModel.deleteOne({
-          _id: new Types.ObjectId(classroomTaskId),
-        });
-      }
-      if (taskId) {
-        await taskModel.deleteOne({ _id: new Types.ObjectId(taskId) });
-      }
-      if (classroomId) {
-        await classroomModel.deleteOne({
-          _id: new Types.ObjectId(classroomId),
-        });
-      }
-      if (courseId) {
-        await courseModel.deleteOne({ _id: new Types.ObjectId(courseId) });
-      }
-      if (classroomId)
-        await app
-          .get<Model<Enrollment>>(getModelToken(Enrollment.name))
-          .deleteMany({ classroomId: new Types.ObjectId(classroomId) });
-      const users = await userModel
-        .find({ email: { $in: [teacherEmail, studentEmail] } })
-        .select('_id')
-        .lean()
-        .exec();
-      const userIds = users.map((user) => user._id);
-      if (userIds.length > 0) {
-        await sessionModel.deleteMany({ userId: { $in: userIds } });
-        await userModel.deleteMany({ _id: { $in: userIds } });
-      }
+    const submissionObjectIds = submissionIds.map(
+      (id) => new Types.ObjectId(id),
+    );
+    if (submissionObjectIds.length > 0) {
+      await feedbackModel.deleteMany({
+        submissionId: { $in: submissionObjectIds },
+      });
+      await aiFeedbackJobModel.deleteMany({
+        submissionId: { $in: submissionObjectIds },
+      });
+      await submissionModel.deleteMany({ _id: { $in: submissionObjectIds } });
+    }
+    if (classroomTaskId) {
+      await classroomTaskModel.deleteOne({
+        _id: new Types.ObjectId(classroomTaskId),
+      });
+    }
+    if (taskId) {
+      await taskModel.deleteOne({ _id: new Types.ObjectId(taskId) });
+    }
+    if (classroomId) {
+      await classroomModel.deleteOne({
+        _id: new Types.ObjectId(classroomId),
+      });
+    }
+    if (courseId) {
+      await courseModel.deleteOne({ _id: new Types.ObjectId(courseId) });
+    }
+    if (classroomId)
+      await app
+        .get<Model<Enrollment>>(getModelToken(Enrollment.name))
+        .deleteMany({ classroomId: new Types.ObjectId(classroomId) });
+    const users = await userModel
+      .find({ email: { $in: [teacherEmail, studentEmail] } })
+      .select('_id')
+      .lean()
+      .exec();
+    const userIds = users.map((user) => user._id);
+    if (userIds.length > 0) {
+      await sessionModel.deleteMany({ userId: { $in: userIds } });
+      await userModel.deleteMany({ _id: { $in: userIds } });
     }
 
     await app.close();

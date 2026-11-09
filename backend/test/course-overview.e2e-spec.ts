@@ -24,8 +24,6 @@ import { AiFeedbackProcessor } from '../src/modules/learning-tasks/ai-feedback/s
 
 jest.setTimeout(30000);
 
-const KEEP_DB = process.env.KEEP_E2E_DB === '1';
-
 const ensureMongoUri = () => {
   if (!process.env.MONGO_URI) {
     throw new Error('MONGO_URI is required for course overview e2e.');
@@ -210,88 +208,84 @@ describe('Course Overview (e2e)', () => {
 
     const cleanupErrors: unknown[] = [];
     try {
-      if (!KEEP_DB) {
-        const cleanup: Promise<unknown>[] = [];
-        const classroomIds = [classroomAId, classroomBId, classroomCId]
-          .filter(Boolean)
-          .map((id) => new Types.ObjectId(id));
-        const submissionObjectIds = submissionIds.map(
-          (id) => new Types.ObjectId(id),
+      const cleanup: Promise<unknown>[] = [];
+      const classroomIds = [classroomAId, classroomBId, classroomCId]
+        .filter(Boolean)
+        .map((id) => new Types.ObjectId(id));
+      const submissionObjectIds = submissionIds.map(
+        (id) => new Types.ObjectId(id),
+      );
+      if (submissionObjectIds.length > 0) {
+        cleanup.push(
+          feedbackModel.deleteMany({
+            submissionId: { $in: submissionObjectIds },
+          }),
         );
-        if (submissionObjectIds.length > 0) {
-          cleanup.push(
-            feedbackModel.deleteMany({
-              submissionId: { $in: submissionObjectIds },
-            }),
-          );
-          cleanup.push(
-            aiFeedbackJobModel.deleteMany({
-              submissionId: { $in: submissionObjectIds },
-            }),
-          );
-          cleanup.push(
-            submissionModel.deleteMany({ _id: { $in: submissionObjectIds } }),
-          );
-        }
-        if (
-          classroomTaskAId ||
-          classroomTaskASecondId ||
-          classroomTaskBId ||
-          classroomTaskCId
-        ) {
-          const classroomTaskIds = [
-            classroomTaskAId,
-            classroomTaskASecondId,
-            classroomTaskBId,
-            classroomTaskCId,
-          ]
-            .filter(Boolean)
-            .map((id) => new Types.ObjectId(id));
-          if (classroomTaskIds.length > 0) {
-            cleanup.push(
-              classroomTaskModel.deleteMany({ _id: { $in: classroomTaskIds } }),
-            );
-          }
-        }
-        if (taskId || secondaryTaskId) {
-          const taskIds = [taskId, secondaryTaskId]
-            .filter(Boolean)
-            .map((id) => new Types.ObjectId(id));
-          if (taskIds.length > 0) {
-            cleanup.push(taskModel.deleteMany({ _id: { $in: taskIds } }));
-          }
-        }
-        if (classroomIds.length > 0) {
-          cleanup.push(
-            enrollmentModel.deleteMany({ classroomId: { $in: classroomIds } }),
-          );
-          cleanup.push(
-            classroomModel.deleteMany({ _id: { $in: classroomIds } }),
-          );
-        }
-        if (courseId) {
-          cleanup.push(
-            courseModel.deleteOne({ _id: new Types.ObjectId(courseId) }),
-          );
-        }
-        const userIds = [teacherId, studentAId, studentBId]
+        cleanup.push(
+          aiFeedbackJobModel.deleteMany({
+            submissionId: { $in: submissionObjectIds },
+          }),
+        );
+        cleanup.push(
+          submissionModel.deleteMany({ _id: { $in: submissionObjectIds } }),
+        );
+      }
+      if (
+        classroomTaskAId ||
+        classroomTaskASecondId ||
+        classroomTaskBId ||
+        classroomTaskCId
+      ) {
+        const classroomTaskIds = [
+          classroomTaskAId,
+          classroomTaskASecondId,
+          classroomTaskBId,
+          classroomTaskCId,
+        ]
           .filter(Boolean)
           .map((id) => new Types.ObjectId(id));
-        if (userIds.length > 0) {
-          cleanup.push(sessionModel.deleteMany({ userId: { $in: userIds } }));
-          cleanup.push(userModel.deleteMany({ _id: { $in: userIds } }));
+        if (classroomTaskIds.length > 0) {
+          cleanup.push(
+            classroomTaskModel.deleteMany({ _id: { $in: classroomTaskIds } }),
+          );
         }
-        const results = await Promise.allSettled(cleanup);
-        for (const result of results) {
-          if (result.status === 'rejected') cleanupErrors.push(result.reason);
+      }
+      if (taskId || secondaryTaskId) {
+        const taskIds = [taskId, secondaryTaskId]
+          .filter(Boolean)
+          .map((id) => new Types.ObjectId(id));
+        if (taskIds.length > 0) {
+          cleanup.push(taskModel.deleteMany({ _id: { $in: taskIds } }));
         }
-        if (classroomIds.length > 0) {
-          expect(
-            await enrollmentModel.countDocuments({
-              classroomId: { $in: classroomIds },
-            }),
-          ).toBe(0);
-        }
+      }
+      if (classroomIds.length > 0) {
+        cleanup.push(
+          enrollmentModel.deleteMany({ classroomId: { $in: classroomIds } }),
+        );
+        cleanup.push(classroomModel.deleteMany({ _id: { $in: classroomIds } }));
+      }
+      if (courseId) {
+        cleanup.push(
+          courseModel.deleteOne({ _id: new Types.ObjectId(courseId) }),
+        );
+      }
+      const userIds = [teacherId, studentAId, studentBId]
+        .filter(Boolean)
+        .map((id) => new Types.ObjectId(id));
+      if (userIds.length > 0) {
+        cleanup.push(sessionModel.deleteMany({ userId: { $in: userIds } }));
+        cleanup.push(userModel.deleteMany({ _id: { $in: userIds } }));
+      }
+      const results = await Promise.allSettled(cleanup);
+      for (const result of results) {
+        if (result.status === 'rejected') cleanupErrors.push(result.reason);
+      }
+      if (classroomIds.length > 0) {
+        expect(
+          await enrollmentModel.countDocuments({
+            classroomId: { $in: classroomIds },
+          }),
+        ).toBe(0);
       }
     } catch (error) {
       cleanupErrors.push(error);

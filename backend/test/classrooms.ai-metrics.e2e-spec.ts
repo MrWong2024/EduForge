@@ -23,7 +23,6 @@ import { AiFeedbackJob } from '../src/modules/learning-tasks/ai-feedback/schemas
 
 jest.setTimeout(30000);
 
-const KEEP_DB = process.env.KEEP_E2E_DB === '1';
 const DEFAULT_MAX_PER_MINUTE = '1000';
 
 const ensureMongoUri = () => {
@@ -352,56 +351,54 @@ describe('Classrooms AI Metrics (e2e)', () => {
         previousSubmissionCooldownMs;
     }
 
-    if (!KEEP_DB) {
-      const submissionObjectIds = submissionIds.map(
-        (id) => new Types.ObjectId(id),
-      );
-      if (submissionObjectIds.length > 0) {
-        await feedbackModel.deleteMany({
-          submissionId: { $in: submissionObjectIds },
+    const submissionObjectIds = submissionIds.map(
+      (id) => new Types.ObjectId(id),
+    );
+    if (submissionObjectIds.length > 0) {
+      await feedbackModel.deleteMany({
+        submissionId: { $in: submissionObjectIds },
+      });
+      await aiFeedbackJobModel.deleteMany({
+        submissionId: { $in: submissionObjectIds },
+      });
+      await submissionModel.deleteMany({ _id: { $in: submissionObjectIds } });
+    }
+    if (classroomTaskAId || classroomTaskBId) {
+      const classroomTaskIds = [classroomTaskAId, classroomTaskBId]
+        .filter(Boolean)
+        .map((id) => new Types.ObjectId(id));
+      if (classroomTaskIds.length > 0) {
+        await classroomTaskModel.deleteMany({
+          _id: { $in: classroomTaskIds },
         });
-        await aiFeedbackJobModel.deleteMany({
-          submissionId: { $in: submissionObjectIds },
-        });
-        await submissionModel.deleteMany({ _id: { $in: submissionObjectIds } });
       }
-      if (classroomTaskAId || classroomTaskBId) {
-        const classroomTaskIds = [classroomTaskAId, classroomTaskBId]
-          .filter(Boolean)
-          .map((id) => new Types.ObjectId(id));
-        if (classroomTaskIds.length > 0) {
-          await classroomTaskModel.deleteMany({
-            _id: { $in: classroomTaskIds },
-          });
-        }
+    }
+    if (taskId) {
+      await taskModel.deleteOne({ _id: new Types.ObjectId(taskId) });
+    }
+    if (classroomAId || classroomBId) {
+      const classroomIds = [classroomAId, classroomBId]
+        .filter(Boolean)
+        .map((id) => new Types.ObjectId(id));
+      if (classroomIds.length > 0) {
+        await app
+          .get<Model<Enrollment>>(getModelToken(Enrollment.name))
+          .deleteMany({ classroomId: { $in: classroomIds } });
+        await classroomModel.deleteMany({ _id: { $in: classroomIds } });
       }
-      if (taskId) {
-        await taskModel.deleteOne({ _id: new Types.ObjectId(taskId) });
-      }
-      if (classroomAId || classroomBId) {
-        const classroomIds = [classroomAId, classroomBId]
-          .filter(Boolean)
-          .map((id) => new Types.ObjectId(id));
-        if (classroomIds.length > 0) {
-          await app
-            .get<Model<Enrollment>>(getModelToken(Enrollment.name))
-            .deleteMany({ classroomId: { $in: classroomIds } });
-          await classroomModel.deleteMany({ _id: { $in: classroomIds } });
-        }
-      }
-      if (courseId) {
-        await courseModel.deleteOne({ _id: new Types.ObjectId(courseId) });
-      }
-      const users = await userModel
-        .find({ email: { $in: [teacherEmail, studentEmail] } })
-        .select('_id')
-        .lean()
-        .exec();
-      const userIds = users.map((user) => user._id);
-      if (userIds.length > 0) {
-        await sessionModel.deleteMany({ userId: { $in: userIds } });
-        await userModel.deleteMany({ _id: { $in: userIds } });
-      }
+    }
+    if (courseId) {
+      await courseModel.deleteOne({ _id: new Types.ObjectId(courseId) });
+    }
+    const users = await userModel
+      .find({ email: { $in: [teacherEmail, studentEmail] } })
+      .select('_id')
+      .lean()
+      .exec();
+    const userIds = users.map((user) => user._id);
+    if (userIds.length > 0) {
+      await sessionModel.deleteMany({ userId: { $in: userIds } });
+      await userModel.deleteMany({ _id: { $in: userIds } });
     }
     await app.close();
   });

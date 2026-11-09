@@ -19,8 +19,6 @@ import { Feedback } from '../src/modules/learning-tasks/schemas/feedback.schema'
 import { AiFeedbackJob } from '../src/modules/learning-tasks/ai-feedback/schemas/ai-feedback-job.schema';
 import { AiFeedbackProcessor } from '../src/modules/learning-tasks/ai-feedback/services/ai-feedback-processor.service';
 
-const KEEP_DB = process.env.KEEP_E2E_DB === '1';
-
 const ensureMongoUri = () => {
   if (!process.env.MONGO_URI) {
     throw new Error('MONGO_URI is required for classroom learning loop e2e.');
@@ -176,11 +174,6 @@ describe('Classroom Learning Loop (e2e)', () => {
       delete process.env.AI_FEEDBACK_DEBUG_ENABLED;
     } else {
       process.env.AI_FEEDBACK_DEBUG_ENABLED = previousDebugEnabled;
-    }
-
-    if (KEEP_DB) {
-      await app.close();
-      return;
     }
 
     const cleanup: Promise<unknown>[] = [];

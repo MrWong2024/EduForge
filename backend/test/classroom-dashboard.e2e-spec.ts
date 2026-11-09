@@ -25,7 +25,6 @@ $env:AI_FEEDBACK_DEBUG_ENABLED="true"
 $env:AI_FEEDBACK_WORKER_ENABLED="false"
 npm run test:e2e -- classroom-dashboard.e2e-spec.ts
 */
-const KEEP_DB = process.env.KEEP_E2E_DB === '1';
 
 const ensureMongoUri = () => {
   if (!process.env.MONGO_URI) {
@@ -206,7 +205,6 @@ describe('Classroom Dashboards (e2e)', () => {
     }
 
     try {
-      if (KEEP_DB) return;
       const userIds = [teacherId, studentId]
         .filter(Boolean)
         .map((id) => new Types.ObjectId(id));
