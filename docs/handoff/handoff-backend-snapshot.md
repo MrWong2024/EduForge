@@ -38,7 +38,7 @@ backend/
 - `User`：账号、角色与基础身份实体；凭据不进入公开投影。
 - `Session` / `PasswordResetToken`：分别承载服务端登录会话与一次性密码重置凭据，认证、邮件和会话失效协作形成账户恢复链。
 - `Course` / `Classroom`：课程与班级具有独立生命周期；课程分类是治理坐标，不形成额外外键或权限边界。
-- `Enrollment`：成员关系唯一权威来源；`Classroom.studentIds` 的代码路径已退役，本轮未执行真实数据库旧字段清理。
+- `Enrollment`：成员关系唯一权威来源；`Classroom.studentIds` 的代码路径及服务器生产库旧字段已退役。本地开发库因旧编译产物仍可能双写，尚未清理；恢复材料与边界见 [Config Matrix](./handoff-backend-config-matrix.md#classroomstudentids-定向退役运维)。
 - `Task` / `ClassroomTask`：任务模板资产与课堂运行实例拥有独立生命周期；模板共享不转移作者写权限，模板当前状态不重新阻断既有实例运行。
 - `Submission`：学生提交；课堂链路固定以 `classroomTaskId` 为隔离主键，旧通用模板写入口已拒绝；模板级只读查询按教师自有课堂范围收紧，不能充当跨班读取或统计兜底。
 - `Feedback`：承载教师与 AI 反馈，来源和作者决定各自修改边界。

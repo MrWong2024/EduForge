@@ -89,6 +89,12 @@ npm run sync-indexes -- --apply --confirm-db <精确库名> --allow-drop
 
 历史恢复材料的归档路径为项目根目录下的 `.local/deliverables/task-stage-retirement-backups/<本轮标识>/<库名>/`，已有备份应继续保留。
 
+### Classroom.studentIds 定向退役运维
+
+生产恢复材料位于两端项目根目录下的 `.local/deliverables/classroom-studentids-retirement/20261109-f7ae0105f7b4/eduforge/`。服务器保留原备份，本地保留 SHA-256 一致的副本；备份与恢复说明应继续保留。
+
+恢复仅按 BSON 备份中的准确 `_id` 还原原始 `studentIds`，保留 BSON 类型和数组顺序；不替换整份文档，不 upsert 已删除文档，不覆盖后来重新出现或已变化的字段，不修改 Enrollment。恢复须另行明确授权，不在正常启动或运行路径中自动执行。
+
 ## 2) Cookie、CORS 与前端代理
 
 - 会话 Cookie：`ef_session`，`HttpOnly=true`、`sameSite=lax`、`secure=(NODE_ENV=production)`、`path=/`、`maxAge=SESSION_TTL_MS`（当前 `7d`）。
