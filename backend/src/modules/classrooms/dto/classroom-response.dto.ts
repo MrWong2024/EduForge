@@ -17,7 +17,6 @@ export class ClassroomResponseDto {
   teacherId!: string;
   joinCode!: string;
   status!: ClassroomStatus;
-  studentIds?: string[];
   createdAt!: Date;
   updatedAt!: Date;
 }

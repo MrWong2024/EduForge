@@ -131,7 +131,6 @@ export class ClassroomsService {
         });
         return this.toClassroomResponse(
           classroom,
-          true,
           this.toCourseSummary(course),
         );
       } catch (error) {
@@ -168,13 +167,13 @@ export class ClassroomsService {
     if (dto.name !== undefined || dto.status !== undefined) {
       await classroom.save();
     }
-    return this.toClassroomResponse(classroom, true);
+    return this.toClassroomResponse(classroom);
   }
 
   async deleteClassroom(id: string, userId: string) {
     await this.ensureTeacher(userId);
     const classroom = await this.findOwnedClassroomOrThrow(id, userId);
-    await this.assertClassroomCanBeDeleted(classroom._id, classroom.studentIds);
+    await this.assertClassroomCanBeDeleted(classroom._id);
     await this.classroomModel.deleteOne({ _id: classroom._id }).exec();
     return { ok: true };
   }
@@ -213,7 +212,6 @@ export class ClassroomsService {
         items.map((classroom) =>
           this.toClassroomResponse(
             classroom,
-            false,
             courseMap.get(classroom.courseId.toString()) ?? null,
           ),
         ),
@@ -239,7 +237,7 @@ export class ClassroomsService {
     const isOwner = classroom.teacherId.toString() === userId;
 
     if (isTeacher && isOwner) {
-      return this.toClassroomResponse(classroom, true);
+      return this.toClassroomResponse(classroom);
     }
     if (isStudent) {
       await this.assertStudentInClassroomActive(classroom._id, userId);
@@ -443,24 +441,11 @@ export class ClassroomsService {
       throw new BadRequestException('Classroom is archived');
     }
 
-    // Migration strategy (AD): dual-write during transition.
-    // Enrollment is source of truth; classroom.studentIds remains legacy mirror
-    // until backfill + full reader migration are complete.
     await this.enrollmentService.enrollStudent(
       classroom._id.toString(),
       userId,
     );
-    await this.classroomModel
-      .updateOne(
-        { _id: classroom._id },
-        { $addToSet: { studentIds: new Types.ObjectId(userId) } },
-      )
-      .exec();
-    const updated = await this.classroomModel
-      .findById(classroom._id)
-      .lean<ClassroomWithMeta>()
-      .exec();
-    return this.toClassroomResponse(updated ?? classroom);
+    return this.toClassroomResponse(classroom);
   }
 
   async removeStudent(id: string, studentId: string, userId: string) {
@@ -476,17 +461,7 @@ export class ClassroomsService {
       classroom._id.toString(),
       studentId,
     );
-    await this.classroomModel
-      .updateOne(
-        { _id: classroom._id },
-        { $pull: { studentIds: new Types.ObjectId(studentId) } },
-      )
-      .exec();
-    const updated = await this.classroomModel
-      .findById(classroom._id)
-      .lean<ClassroomWithMeta>()
-      .exec();
-    return this.toClassroomResponse(updated ?? classroom, true);
+    return this.toClassroomResponse(classroom);
   }
 
   private async ensureTeacher(userId: string) {
@@ -535,15 +510,8 @@ export class ClassroomsService {
 
   private async toClassroomResponse(
     classroom: ClassroomWithMeta,
-    includeStudents = false,
     course: ClassroomCourseSummaryDto | null | undefined = undefined,
   ) {
-    // Legacy output compatibility:
-    // `studentIds` is a derived response field from Enrollment ACTIVE records.
-    // Authorization/statistics must not read classroom.studentIds.
-    const studentIds = includeStudents
-      ? await this.enrollmentService.listActiveStudentIds(classroom._id)
-      : undefined;
     const courseSummary =
       course === undefined
         ? await this.findCourseSummaryById(classroom.courseId)
@@ -556,7 +524,6 @@ export class ClassroomsService {
       teacherId: classroom.teacherId.toString(),
       joinCode: classroom.joinCode,
       status: classroom.status,
-      studentIds,
       createdAt: classroom.createdAt ?? new Date(0),
       updatedAt: classroom.updatedAt ?? new Date(0),
     } as ClassroomResponseDto;
@@ -672,18 +639,14 @@ export class ClassroomsService {
     return classroom;
   }
 
-  private async assertClassroomCanBeDeleted(
-    classroomId: Types.ObjectId,
-    studentIds: Types.ObjectId[] | undefined,
-  ) {
+  private async assertClassroomCanBeDeleted(classroomId: Types.ObjectId) {
     const [classroomTask, enrollment] = await Promise.all([
       this.classroomTaskModel.exists({ classroomId }).exec(),
       this.enrollmentModel.exists({ classroomId }).exec(),
     ]);
     const hasClassroomTask = !!classroomTask;
     const hasEnrollment = !!enrollment;
-    const hasLegacyStudentIds = (studentIds?.length ?? 0) > 0;
-    if (hasClassroomTask || hasEnrollment || hasLegacyStudentIds) {
+    if (hasClassroomTask || hasEnrollment) {
       throw new ConflictException({
         statusCode: 409,
         code: ClassroomsService.CLASSROOM_NOT_EMPTY_CODE,

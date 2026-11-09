@@ -78,7 +78,7 @@
 
 - 创建必填 `courseId`（`IsMongoId`）、`name`（`IsString`）；更新允许可选字符串 `name` 与枚举 `status: ACTIVE | ARCHIVED`；入班必填字符串 `joinCode`。
 - `QueryClassroomDto`：可选 MongoId `courseId`、枚举 `status: ACTIVE | ARCHIVED` 与分页校验。
-- `ClassroomResponseDto`：`{id,courseId,course?,name,teacherId,joinCode,status,studentIds?,createdAt,updatedAt}`。只读 `course` 是 `{id,code?,name?,term?,courseLabel?,status?}`；关联缺失可省略，`courseId` 保留。`studentIds` 是 legacy 输出，成员权威边界见 [API Classrooms](./handoff-backend-api-map.md#classrooms)。
+- `ClassroomResponseDto`：`{id,courseId,course?,name,teacherId,joinCode,status,createdAt,updatedAt}`，不再输出 `studentIds`。只读 `course` 是 `{id,code?,name?,term?,courseLabel?,status?}`；关联缺失可省略，`courseId` 保留。成员权威边界见 [API Classrooms](./handoff-backend-api-map.md#classrooms)。
 - [QueryClassroomStudentsDto](../../backend/src/modules/classrooms/dto/query-classroom-students.dto.ts)：分页校验，默认 `page=1,limit=20`；`includeRemoved?` 用 `IsBooleanString`，默认 false，`1/true` 启用。返回 `{items,total,page,limit}`，成员 item 为 `{id,email,roles,status,name,studentNo,employeeNo,joinedAt}`，不返回 `passwordHash`。成员状态筛选及默认排序见 API / [Service Card 04](./handoff-backend-service-map.md#service-card-04)。
 
 ### Teacher / Student Dashboard response family

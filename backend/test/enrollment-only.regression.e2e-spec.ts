@@ -1,7 +1,7 @@
 import { INestApplication, ValidationPipe } from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
-import { getModelToken } from '@nestjs/mongoose';
-import { Model, Types } from 'mongoose';
+import { getConnectionToken, getModelToken } from '@nestjs/mongoose';
+import { Connection, Model, Types } from 'mongoose';
 import * as bcrypt from 'bcryptjs';
 import cookieParser from 'cookie-parser';
 import request from 'supertest';
@@ -14,15 +14,12 @@ import { Classroom } from '../src/modules/classrooms/schemas/classroom.schema';
 import { Enrollment } from '../src/modules/classrooms/enrollments/schemas/enrollment.schema';
 import { ClassroomTask } from '../src/modules/classrooms/classroom-tasks/schemas/classroom-task.schema';
 
-jest.setTimeout(30000);
+import {
+  assertLocalStandardTestAuthentication,
+  assertLocalStandardTestEnvironment,
+} from './helpers/local-test-database-auth';
 
-const ensureMongoUri = () => {
-  if (!process.env.MONGO_URI) {
-    throw new Error(
-      'MONGO_URI is required for enrollment-only regression e2e.',
-    );
-  }
-};
+jest.setTimeout(30000);
 
 type CreatedCourseResponse = { id: string };
 type CreatedClassroomResponse = { id: string; joinCode: string };
@@ -153,7 +150,11 @@ describe('Enrollment Only Regression Lock (e2e)', () => {
   };
 
   beforeAll(async () => {
-    ensureMongoUri();
+    assertLocalStandardTestEnvironment({
+      nodeEnv: process.env.NODE_ENV,
+      purpose: process.env.EDUFORGE_DATABASE_PURPOSE,
+      mongoUri: process.env.MONGO_URI,
+    });
 
     const moduleFixture: TestingModule = await Test.createTestingModule({
       imports: [AppModule],
@@ -170,6 +171,22 @@ describe('Enrollment Only Regression Lock (e2e)', () => {
     );
     app.use(cookieParser());
     await app.init();
+
+    const connection = app.get<Connection>(getConnectionToken());
+    const database = connection.db;
+    if (!database) throw new Error('Missing connected test database');
+    const auth = await database.command(
+      { connectionStatus: 1, showPrivileges: false, maxTimeMS: 5000 },
+      { timeoutMS: 5000 },
+    );
+    assertLocalStandardTestAuthentication({
+      nodeEnv: process.env.NODE_ENV,
+      purpose: process.env.EDUFORGE_DATABASE_PURPOSE,
+      mongoUri: process.env.MONGO_URI,
+      databaseName: database.databaseName,
+      connectedHost: connection.host,
+      authInfo: auth.authInfo,
+    });
 
     teacherAgent = request.agent(app.getHttpServer());
     studentAAgent = request.agent(app.getHttpServer());
@@ -249,44 +266,51 @@ describe('Enrollment Only Regression Lock (e2e)', () => {
   });
 
   afterAll(async () => {
-    const cleanup: Promise<unknown>[] = [];
-    if (createdClassroomIds.length > 0) {
-      cleanup.push(
-        classroomTaskModel.deleteMany({
-          classroomId: {
-            $in: createdClassroomIds.map((id) => new Types.ObjectId(id)),
-          },
-        }),
-      );
-      cleanup.push(
-        enrollmentModel.deleteMany({
-          classroomId: {
-            $in: createdClassroomIds.map((id) => new Types.ObjectId(id)),
-          },
-        }),
-      );
-      cleanup.push(
-        classroomModel.deleteMany({
-          _id: {
-            $in: createdClassroomIds.map((id) => new Types.ObjectId(id)),
-          },
-        }),
-      );
+    try {
+      const cleanup: Promise<unknown>[] = [];
+      if (createdClassroomIds.length > 0) {
+        cleanup.push(
+          classroomTaskModel.deleteMany({
+            classroomId: {
+              $in: createdClassroomIds.map((id) => new Types.ObjectId(id)),
+            },
+          }),
+        );
+        cleanup.push(
+          enrollmentModel.deleteMany({
+            classroomId: {
+              $in: createdClassroomIds.map((id) => new Types.ObjectId(id)),
+            },
+          }),
+        );
+        cleanup.push(
+          classroomModel.deleteMany({
+            _id: {
+              $in: createdClassroomIds.map((id) => new Types.ObjectId(id)),
+            },
+          }),
+        );
+      }
+      if (createdCourseIds.length > 0) {
+        cleanup.push(
+          courseModel.deleteMany({
+            _id: { $in: createdCourseIds.map((id) => new Types.ObjectId(id)) },
+          }),
+        );
+      }
+      if (createdUserIds.length > 0) {
+        const userObjectIds = createdUserIds.map(
+          (id) => new Types.ObjectId(id),
+        );
+        cleanup.push(
+          sessionModel.deleteMany({ userId: { $in: userObjectIds } }),
+        );
+        cleanup.push(userModel.deleteMany({ _id: { $in: userObjectIds } }));
+      }
+      await Promise.all(cleanup);
+    } finally {
+      await app?.close();
     }
-    if (createdCourseIds.length > 0) {
-      cleanup.push(
-        courseModel.deleteMany({
-          _id: { $in: createdCourseIds.map((id) => new Types.ObjectId(id)) },
-        }),
-      );
-    }
-    if (createdUserIds.length > 0) {
-      const userObjectIds = createdUserIds.map((id) => new Types.ObjectId(id));
-      cleanup.push(sessionModel.deleteMany({ userId: { $in: userObjectIds } }));
-      cleanup.push(userModel.deleteMany({ _id: { $in: userObjectIds } }));
-    }
-    await Promise.all(cleanup);
-    await app.close();
   });
 
   it('1) authorization anti-cheat: dirty studentIds must not grant classroom access', async () => {
@@ -299,12 +323,17 @@ describe('Enrollment Only Regression Lock (e2e)', () => {
         userId: new Types.ObjectId(studentAId),
       })
       .exec();
-    await classroomModel
-      .updateOne(
-        { _id: classroomObjectId },
-        { $addToSet: { studentIds: new Types.ObjectId(studentAId) } },
-      )
-      .exec();
+    await classroomModel.collection.updateOne(
+      { _id: classroomObjectId },
+      { $addToSet: { studentIds: new Types.ObjectId(studentAId) } },
+    );
+    const pollutedClassroom = await classroomModel.collection.findOne({
+      _id: classroomObjectId,
+    });
+    expect(pollutedClassroom).toMatchObject({
+      _id: classroomObjectId,
+      studentIds: [new Types.ObjectId(studentAId)],
+    });
 
     const classroomAccess = await studentAAgent.get(
       `/api/classrooms/${classroomId}`,
@@ -337,12 +366,17 @@ describe('Enrollment Only Regression Lock (e2e)', () => {
       expect(report.progress.studentsCount).toBe(0);
     });
 
-    await classroomModel
-      .updateOne(
-        { _id: classroomObjectId },
-        { $addToSet: { studentIds: new Types.ObjectId(studentBId) } },
-      )
-      .exec();
+    await classroomModel.collection.updateOne(
+      { _id: classroomObjectId },
+      { $addToSet: { studentIds: new Types.ObjectId(studentBId) } },
+    );
+    const pollutedClassroom = await classroomModel.collection.findOne({
+      _id: classroomObjectId,
+    });
+    expect(pollutedClassroom).toMatchObject({
+      _id: classroomObjectId,
+      studentIds: [new Types.ObjectId(studentBId)],
+    });
 
     const reportAfterPollution = await fetchWeeklyReport(classroomId);
     expect(reportAfterPollution.progress.studentsCount).toBe(0);
@@ -358,12 +392,17 @@ describe('Enrollment Only Regression Lock (e2e)', () => {
         userId: new Types.ObjectId(studentCId),
       })
       .exec();
-    await classroomModel
-      .updateOne(
-        { _id: classroomObjectId },
-        { $addToSet: { studentIds: new Types.ObjectId(studentCId) } },
-      )
-      .exec();
+    await classroomModel.collection.updateOne(
+      { _id: classroomObjectId },
+      { $addToSet: { studentIds: new Types.ObjectId(studentCId) } },
+    );
+    const pollutedClassroom = await classroomModel.collection.findOne({
+      _id: classroomObjectId,
+    });
+    expect(pollutedClassroom).toMatchObject({
+      _id: classroomObjectId,
+      studentIds: [new Types.ObjectId(studentCId)],
+    });
 
     const mine = await studentCAgent
       .get('/api/classrooms/mine/dashboard')
@@ -407,12 +446,17 @@ describe('Enrollment Only Regression Lock (e2e)', () => {
       .send({ joinCode: classroomABody.joinCode })
       .expect(201);
 
-    await classroomModel
-      .updateOne(
-        { _id: new Types.ObjectId(classroomBBody.id) },
-        { $addToSet: { studentIds: new Types.ObjectId(studentDId) } },
-      )
-      .exec();
+    await classroomModel.collection.updateOne(
+      { _id: new Types.ObjectId(classroomBBody.id) },
+      { $addToSet: { studentIds: new Types.ObjectId(studentDId) } },
+    );
+    const pollutedClassroom = await classroomModel.collection.findOne({
+      _id: new Types.ObjectId(classroomBBody.id),
+    });
+    expect(pollutedClassroom).toMatchObject({
+      _id: new Types.ObjectId(classroomBBody.id),
+      studentIds: [new Types.ObjectId(studentDId)],
+    });
 
     const overview = await teacherAgent
       .get(`/api/courses/${courseId}/overview`)
@@ -455,15 +499,39 @@ describe('Enrollment Only Regression Lock (e2e)', () => {
   it('6) rejects deleting classroom with enrollment history (including REMOVED)', async () => {
     const { classroomId, joinCode } =
       await createCourseAndClassroom('DEL-ENROLL');
+    const enrollmentFilter = {
+      classroomId: new Types.ObjectId(classroomId),
+      userId: new Types.ObjectId(studentAId),
+    };
 
     await studentAAgent
       .post('/api/classrooms/join')
       .send({ joinCode })
       .expect(201);
+    expect(
+      await enrollmentModel.findOne(enrollmentFilter).exec(),
+    ).toMatchObject({
+      role: 'STUDENT',
+      status: 'ACTIVE',
+    });
+    const activeResponse = await teacherAgent
+      .delete(`/api/classrooms/${classroomId}`)
+      .expect(409);
+    expect(activeResponse.body).toMatchObject({
+      code: 'CLASSROOM_NOT_EMPTY',
+      message: '该班级已有成员或任务记录，不能删除，只能归档',
+    });
+
     await teacherAgent
       .post(`/api/classrooms/${classroomId}/students/${studentAId}/remove`)
       .send({})
       .expect(201);
+    expect(
+      await enrollmentModel.findOne(enrollmentFilter).exec(),
+    ).toMatchObject({
+      role: 'STUDENT',
+      status: 'REMOVED',
+    });
 
     const response = await teacherAgent
       .delete(`/api/classrooms/${classroomId}`)
@@ -516,5 +584,37 @@ describe('Enrollment Only Regression Lock (e2e)', () => {
   it('10) keeps classroom management authorization unchanged', async () => {
     const { classroomId } = await createCourseAndClassroom('AUTHZ');
     await studentBAgent.delete(`/api/classrooms/${classroomId}`).expect(403);
+  });
+
+  it('11) allows deleting a classroom with only legacy studentIds and no enrollment or task', async () => {
+    const { classroomId } = await createCourseAndClassroom('DEL-LEGACY');
+    const classroomObjectId = new Types.ObjectId(classroomId);
+    await classroomModel.collection.updateOne(
+      { _id: classroomObjectId },
+      { $addToSet: { studentIds: new Types.ObjectId(studentAId) } },
+    );
+    const pollutedClassroom = await classroomModel.collection.findOne({
+      _id: classroomObjectId,
+    });
+    expect(pollutedClassroom).toMatchObject({
+      _id: classroomObjectId,
+      studentIds: [new Types.ObjectId(studentAId)],
+    });
+    expect(
+      await enrollmentModel.countDocuments({ classroomId: classroomObjectId }),
+    ).toBe(0);
+    expect(
+      await classroomTaskModel.countDocuments({
+        classroomId: classroomObjectId,
+      }),
+    ).toBe(0);
+
+    const deleted = await teacherAgent
+      .delete(`/api/classrooms/${classroomId}`)
+      .expect(200);
+    expect(deleted.body).toEqual({ ok: true });
+    expect(
+      await classroomModel.collection.findOne({ _id: classroomObjectId }),
+    ).toBeNull();
   });
 });

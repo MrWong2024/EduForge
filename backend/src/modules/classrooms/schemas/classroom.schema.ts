@@ -24,9 +24,6 @@ export class Classroom {
   @Prop({ required: true })
   joinCode!: string;
 
-  @Prop({ type: [Types.ObjectId], ref: User.name, default: [] })
-  studentIds!: Types.ObjectId[];
-
   @Prop({
     type: String,
     required: true,

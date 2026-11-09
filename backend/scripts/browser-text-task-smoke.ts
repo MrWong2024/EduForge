@@ -123,10 +123,7 @@ type CourseRow = IdRow & Pick<Course, 'createdBy' | 'code'>;
 type TaskRow = IdRow &
   Pick<Task, 'createdBy' | 'title' | 'status' | 'visibility'>;
 type ClassroomRow = IdRow &
-  Pick<
-    Classroom,
-    'courseId' | 'teacherId' | 'studentIds' | 'name' | 'joinCode'
-  >;
+  Pick<Classroom, 'courseId' | 'teacherId' | 'name' | 'joinCode'>;
 type ClassroomTaskRow = IdRow &
   Pick<ClassroomTask, 'classroomId' | 'taskId' | 'createdBy' | 'status'>;
 type SubmissionRow = IdRow &
@@ -207,6 +204,20 @@ export function assertTargetOwnership(
     !record.taskIds.includes(classroomTask.taskId.toString())
   )
     fail('SMOKE_TARGET_OWNERSHIP_MISMATCH');
+}
+export function assertEnrollmentOwnership(
+  enrollments: Pick<Enrollment, 'classroomId' | 'userId'>[],
+  studentId: Types.ObjectId,
+  classroomIds: Types.ObjectId[],
+): void {
+  if (
+    enrollments.some(
+      (row) =>
+        !row.userId.equals(studentId) ||
+        !classroomIds.some((id) => id.equals(row.classroomId)),
+    )
+  )
+    fail('SMOKE_ENROLLMENT_OWNERSHIP_MISMATCH');
 }
 export async function assertSyntheticAccount(
   user: UserRow | null,
@@ -351,7 +362,7 @@ async function inventory(
     .exec();
   const classrooms = await m.classrooms
     .find({ teacherId })
-    .select('_id courseId teacherId studentIds name joinCode')
+    .select('_id courseId teacherId name joinCode')
     .lean<ClassroomRow[]>()
     .maxTimeMS(5000)
     .exec();
@@ -367,8 +378,7 @@ async function inventory(
     classrooms.some(
       (row) =>
         row.name !== record.namespace + ' 合成验收班' ||
-        !courses.some((course) => course._id.equals(row.courseId)) ||
-        row.studentIds.some((id) => !id.equals(studentId)),
+        !courses.some((course) => course._id.equals(row.courseId)),
     )
   )
     fail('SMOKE_CONTAINER_OWNERSHIP_MISMATCH');
@@ -459,14 +469,7 @@ async function inventory(
     .lean<(IdRow & Pick<Enrollment, 'classroomId' | 'userId'>)[]>()
     .maxTimeMS(5000)
     .exec();
-  if (
-    enrollments.some(
-      (row) =>
-        !row.userId.equals(studentId) ||
-        !classroomIds.some((id) => id.equals(row.classroomId)),
-    )
-  )
-    fail('SMOKE_ENROLLMENT_OWNERSHIP_MISMATCH');
+  assertEnrollmentOwnership(enrollments, studentId, classroomIds);
   return {
     m,
     users,

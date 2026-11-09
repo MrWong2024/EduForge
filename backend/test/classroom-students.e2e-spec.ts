@@ -1,7 +1,7 @@
 import { INestApplication, ValidationPipe } from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
-import { getModelToken } from '@nestjs/mongoose';
-import { Model, Types } from 'mongoose';
+import { getConnectionToken, getModelToken } from '@nestjs/mongoose';
+import { Connection, Model, Types } from 'mongoose';
 import * as bcrypt from 'bcryptjs';
 import cookieParser from 'cookie-parser';
 import request from 'supertest';
@@ -13,13 +13,12 @@ import { Course } from '../src/modules/courses/schemas/course.schema';
 import { Classroom } from '../src/modules/classrooms/schemas/classroom.schema';
 import { Enrollment } from '../src/modules/classrooms/enrollments/schemas/enrollment.schema';
 
-jest.setTimeout(30000);
+import {
+  assertLocalStandardTestAuthentication,
+  assertLocalStandardTestEnvironment,
+} from './helpers/local-test-database-auth';
 
-const ensureMongoUri = () => {
-  if (!process.env.MONGO_URI) {
-    throw new Error('MONGO_URI is required for classroom students e2e.');
-  }
-};
+jest.setTimeout(30000);
 
 type CreatedCourseResponse = {
   id: string;
@@ -114,7 +113,11 @@ describe('Classroom Students List (e2e)', () => {
   };
 
   beforeAll(async () => {
-    ensureMongoUri();
+    assertLocalStandardTestEnvironment({
+      nodeEnv: process.env.NODE_ENV,
+      purpose: process.env.EDUFORGE_DATABASE_PURPOSE,
+      mongoUri: process.env.MONGO_URI,
+    });
 
     const moduleFixture: TestingModule = await Test.createTestingModule({
       imports: [AppModule],
@@ -131,6 +134,22 @@ describe('Classroom Students List (e2e)', () => {
     );
     app.use(cookieParser());
     await app.init();
+
+    const connection = app.get<Connection>(getConnectionToken());
+    const database = connection.db;
+    if (!database) throw new Error('Missing connected test database');
+    const auth = await database.command(
+      { connectionStatus: 1, showPrivileges: false, maxTimeMS: 5000 },
+      { timeoutMS: 5000 },
+    );
+    assertLocalStandardTestAuthentication({
+      nodeEnv: process.env.NODE_ENV,
+      purpose: process.env.EDUFORGE_DATABASE_PURPOSE,
+      mongoUri: process.env.MONGO_URI,
+      databaseName: database.databaseName,
+      connectedHost: connection.host,
+      authInfo: auth.authInfo,
+    });
 
     ownerTeacherAgent = request.agent(app.getHttpServer());
     otherTeacherAgent = request.agent(app.getHttpServer());
@@ -268,33 +287,40 @@ describe('Classroom Students List (e2e)', () => {
   });
 
   afterAll(async () => {
-    const cleanup: Promise<unknown>[] = [];
-    if (classroomId) {
-      cleanup.push(
-        enrollmentModel.deleteMany({
-          classroomId: new Types.ObjectId(classroomId),
-        }),
-      );
-      cleanup.push(
-        classroomModel.deleteOne({
-          _id: new Types.ObjectId(classroomId),
-        }),
-      );
+    try {
+      const cleanup: Promise<unknown>[] = [];
+      if (classroomId) {
+        cleanup.push(
+          enrollmentModel.deleteMany({
+            classroomId: new Types.ObjectId(classroomId),
+          }),
+        );
+        cleanup.push(
+          classroomModel.deleteOne({
+            _id: new Types.ObjectId(classroomId),
+          }),
+        );
+      }
+      if (courseId) {
+        cleanup.push(
+          courseModel.deleteOne({
+            _id: new Types.ObjectId(courseId),
+          }),
+        );
+      }
+      if (createdUserIds.length > 0) {
+        const userObjectIds = createdUserIds.map(
+          (id) => new Types.ObjectId(id),
+        );
+        cleanup.push(
+          sessionModel.deleteMany({ userId: { $in: userObjectIds } }),
+        );
+        cleanup.push(userModel.deleteMany({ _id: { $in: userObjectIds } }));
+      }
+      await Promise.all(cleanup);
+    } finally {
+      await app?.close();
     }
-    if (courseId) {
-      cleanup.push(
-        courseModel.deleteOne({
-          _id: new Types.ObjectId(courseId),
-        }),
-      );
-    }
-    if (createdUserIds.length > 0) {
-      const userObjectIds = createdUserIds.map((id) => new Types.ObjectId(id));
-      cleanup.push(sessionModel.deleteMany({ userId: { $in: userObjectIds } }));
-      cleanup.push(userModel.deleteMany({ _id: { $in: userObjectIds } }));
-    }
-    await Promise.all(cleanup);
-    await app.close();
   });
 
   it('owner teacher can list students with page/limit and response has no sensitive fields', async () => {
@@ -337,21 +363,29 @@ describe('Classroom Students List (e2e)', () => {
       .send({})
       .expect(201);
 
-    await classroomModel
-      .updateOne(
-        { _id: new Types.ObjectId(classroomId) },
-        {
-          $addToSet: {
-            studentIds: {
-              $each: [
-                new Types.ObjectId(removedStudentId),
-                new Types.ObjectId(legacyPollutedStudentId),
-              ],
-            },
+    await classroomModel.collection.updateOne(
+      { _id: new Types.ObjectId(classroomId) },
+      {
+        $addToSet: {
+          studentIds: {
+            $each: [
+              new Types.ObjectId(removedStudentId),
+              new Types.ObjectId(legacyPollutedStudentId),
+            ],
           },
         },
-      )
-      .exec();
+      },
+    );
+    const pollutedClassroom = await classroomModel.collection.findOne({
+      _id: new Types.ObjectId(classroomId),
+    });
+    expect(pollutedClassroom).toMatchObject({
+      _id: new Types.ObjectId(classroomId),
+      studentIds: [
+        new Types.ObjectId(removedStudentId),
+        new Types.ObjectId(legacyPollutedStudentId),
+      ],
+    });
 
     const defaultList = await listStudents(ownerTeacherAgent, 1, 20);
     const includeRemovedFalseList = await listStudents(

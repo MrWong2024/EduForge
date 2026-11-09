@@ -9,6 +9,7 @@ import {
   assertSmokeRole,
   assertExclusiveJob,
   assertTargetOwnership,
+  assertEnrollmentOwnership,
   assertSyntheticAccount,
   cleanupFilters,
   SYNTHETIC_PASSWORD,
@@ -253,6 +254,42 @@ describe('B1-2 thin smoke support gates (no database)', () => {
         classroomId: new Types.ObjectId(),
       }),
     ).toThrow();
+  });
+  it('accepts enrollments owned by the current student and classrooms', () => {
+    expect(() =>
+      assertEnrollmentOwnership(
+        [{ userId: studentId, classroomId }],
+        studentId,
+        [classroomId],
+      ),
+    ).not.toThrow();
+  });
+  it('accepts an empty enrollment inventory', () => {
+    expect(() => assertEnrollmentOwnership([], studentId, [])).not.toThrow();
+  });
+  it('rejects an enrollment belonging to an external student', () => {
+    expect(() =>
+      assertEnrollmentOwnership(
+        [
+          { userId: studentId, classroomId },
+          { userId: new Types.ObjectId(), classroomId },
+        ],
+        studentId,
+        [classroomId],
+      ),
+    ).toThrow('SMOKE_ENROLLMENT_OWNERSHIP_MISMATCH');
+  });
+  it('rejects an enrollment belonging to an external classroom', () => {
+    expect(() =>
+      assertEnrollmentOwnership(
+        [
+          { userId: studentId, classroomId },
+          { userId: studentId, classroomId: new Types.ObjectId() },
+        ],
+        studentId,
+        [classroomId],
+      ),
+    ).toThrow('SMOKE_ENROLLMENT_OWNERSHIP_MISMATCH');
   });
   it('uses one fixed password and refuses a prepared account with another hash', async () => {
     expect(SYNTHETIC_PASSWORD).toBe('12345678');

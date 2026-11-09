@@ -16,7 +16,7 @@
 - 全局 `SessionAuthGuard` 通过 `APP_GUARD` 保护非 `@Public()` 路由；公开例外包括登录、忘记密码、重置密码等显式 Public 路由。
 - `RolesGuard` 由 Controller 显式启用；Service 继续执行资源归属校验，前端 role gate 仅承担体验层入口约束，不能替代后端授权。
 - `TEACHER` 管理自己创建/拥有的课程、班级、课堂任务、提交与报表；`STUDENT` 仅访问自己 Enrollment ACTIVE 的班级任务、自己的提交与反馈。
-- 成员与默认教学统计的权威来源为 Enrollment-only（`role=STUDENT,status=ACTIVE`）；`classroom.studentIds` 仅 legacy 镜像，不作为授权、统计或 fallback。
+- 成员与默认教学统计的权威来源为 Enrollment-only（`role=STUDENT,status=ACTIVE`）；旧 `classroom.studentIds` 已退役，不再输出或作为 fallback，公开数据见 [DTO Classroom family](./handoff-backend-dto-cheatsheet.md#classrooms)。
 - 课堂分析、报表、复盘、导出以及课堂提交读取均按 `classroomId + classroomTaskId + studentId` 的资源边界隔离；禁止使用模板 `taskId` 兜底跨班聚合。通用模板入口的独立语义见 Learning Tasks。
 - 认证失败返回 `401 Unauthorized`；debug/ops 门禁关闭时优先返回 `404`，不暴露入口存在性。
 
@@ -112,7 +112,7 @@ Notes:
 - Analytics 以课堂任务发布时间界定范围，三个入口统一保留有效 ACTIVE/CLOSED 任务的完整提交链，并支持当前查询临时排除。学生列表的 q 只匹配姓名/学号，不区分大小写，按字符串子串匹配；q、overallOutcome 与 engagementStatus 采用 AND 组合。非法 Query 按 DTO 校验拒绝（`400`）。方法学 V1.2 取代旧“首个后续版本”比较，区分新增提交与作品更新；公开参数、比较追溯、来源提示及 nullable 指标见 [DTO Analytics](./handoff-backend-dto-cheatsheet.md#ai-learning-analytics)，配对与搜索筛选分页算法见 [Service Card 08I](./handoff-backend-service-map.md#service-card-08i)。
 - Analytics 为只读记录对照，不回填、重评、解锁或改写历史业务事实。可用反馈交付排除已知模拟评阅与成功空反馈，历史来源未知不认证为真实模型；不同来源/模型、未比较较新版本及证据不足均提供安全提示。分析仅反映现存作品更新与反馈条目负荷，不覆盖全部 AI 使用，不是缺陷数、正确率、正式成绩、学习能力或因果贡献结论，也不能证明已阅读、理解或采纳。净结果可能相互抵消，不代表时间序列趋势；反馈阶段不表示态度、AI 依赖、能力或风险。
 - Snapshot 是 teacher owner 的体积受控教学数据快照导出，超量数据附带截断提示；Query、meta/notes、公开投影与敏感省略见 [DTO Snapshot](./handoff-backend-dto-cheatsheet.md#classroom-export-snapshot)，组合与截断策略见 [Service Card 08H](./handoff-backend-service-map.md#service-card-08h)。
-- 班级状态为 `ACTIVE | ARCHIVED`，PATCH 支持归档/恢复，保留 POST archive。仅无 ClassroomTask 且无 Enrollment 记录（包含 REMOVED 历史）的空班级可删除；legacy studentIds 仅作删除防御校验。非空时返回 `409 Conflict`，`code=CLASSROOM_NOT_EMPTY`，message=`该班级已有成员或任务记录，不能删除，只能归档`。
+- 班级状态为 `ACTIVE | ARCHIVED`，PATCH 支持归档/恢复，保留 POST archive。仅无 ClassroomTask 且无 Enrollment 记录（包含 REMOVED 历史）的空班级可删除；只有旧 studentIds 残留不再阻止删除。非空时返回 `409 Conflict`，`code=CLASSROOM_NOT_EMPTY`，message=`该班级已有成员或任务记录，不能删除，只能归档`。
 
 ## Classroom Tasks（Classrooms 子资源）
 

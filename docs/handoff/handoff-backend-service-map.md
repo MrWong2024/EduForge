@@ -15,7 +15,6 @@
 
 - 成员关系：`Enrollment(role=STUDENT,status=ACTIVE)` 是唯一权威来源（Enrollment-only）。
 - 隔离键：课堂分析/报表/复盘/导出统一按 `classroomTaskId` 隔离，禁止用 `taskId` 做跨班兜底聚合。
-- `Classroom.studentIds`：仅 legacy 输出/镜像字段；授权与统计读路径不依赖该字段。
 
 Global SoT 只保留理解跨 Service workflow 必需的稳定不变量，不追加 endpoint、DTO、前端或测试明细；已有专项 Owner 时优先引用。
 
@@ -126,10 +125,10 @@ Global SoT 只保留理解跨 Service workflow 必需的稳定不变量，不追
 - Downstream / Dependencies: `ClassroomModel`、`ClassroomTaskModel`、`EnrollmentModel`、`CourseModel`、`UserModel`、`EnrollmentService`；教师/学生看板、周报、过程性评价、导出、AI Learning Analytics 专用 Service。
 - Consistency / State / Idempotency:
   - joinCode 分配最多尝试 8 次；归档状态下禁止普通信息编辑，状态恢复走专用状态处理。
-  - 空班级删除主判定为无 ClassroomTask 且无任何 Enrollment 历史（含 REMOVED）；`studentIds` 仅作防御性辅助，不能取代主判定。
-  - join/remove 先通过 Enrollment upsert/update 写 ACTIVE/REMOVED，再按需更新 legacy `studentIds` 镜像；授权与统计不读镜像兜底。
+  - 只有无 ClassroomTask 且无任何 Enrollment 历史（含 REMOVED）的班级可删除；旧成员数组残留不参与删除判断。
+  - join/remove 仅通过 Enrollment upsert/update 写 ACTIVE/REMOVED，保留成员历史，不维护或回填 Classroom 成员数组。
 - Isolation: Service 负责管理/加入角色及 `teacherId` 归属边界；成员判定委托 EnrollmentService。向统计 Service 委托前保留角色校验，下游按课堂任务隔离。
-- Side Effects: 写班级与 Enrollment，按需同步成员镜像；统计委托本身不写业务数据。
+- Side Effects: 班级管理写 Classroom；join/remove 只写 Enrollment，不再因成员镜像更新 Classroom.updatedAt；统计委托本身不写业务数据。
 - Important Performance / Recovery: 班级列表按页批量查 Course，成员列表按页批量查 User，避免 N+1；关联课程缺失不阻断班级读取。
 - SoT: `backend/src/modules/classrooms/services/classrooms.service.ts`；`backend/src/modules/classrooms/enrollments/services/enrollment.service.ts`；`backend/src/modules/classrooms/enrollments/schemas/enrollment.schema.ts`。
 - Boundary / Non-responsibility: 不在入口 Service 重算专用报表；公开生命周期与成员读取行为见 [API Map](./handoff-backend-api-map.md#classrooms)，公开数据见 [DTO Cheatsheet](./handoff-backend-dto-cheatsheet.md#classrooms)。

@@ -1,7 +1,7 @@
 import { INestApplication, ValidationPipe } from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
-import { getModelToken } from '@nestjs/mongoose';
-import { Model, Types } from 'mongoose';
+import { getConnectionToken, getModelToken } from '@nestjs/mongoose';
+import { Connection, Model, Types } from 'mongoose';
 import * as bcrypt from 'bcryptjs';
 import cookieParser from 'cookie-parser';
 import request from 'supertest';
@@ -13,13 +13,12 @@ import { Course } from '../src/modules/courses/schemas/course.schema';
 import { Classroom } from '../src/modules/classrooms/schemas/classroom.schema';
 import { Enrollment } from '../src/modules/classrooms/enrollments/schemas/enrollment.schema';
 
-jest.setTimeout(30000);
+import {
+  assertLocalStandardTestAuthentication,
+  assertLocalStandardTestEnvironment,
+} from './helpers/local-test-database-auth';
 
-const ensureMongoUri = () => {
-  if (!process.env.MONGO_URI) {
-    throw new Error('MONGO_URI is required for enrollments authority e2e.');
-  }
-};
+jest.setTimeout(30000);
 
 type CreatedCourseResponse = {
   id: string;
@@ -117,6 +116,15 @@ describe('Enrollments Authority And Legacy Compatibility (e2e)', () => {
       .expect(201);
     const classroomBody = createdClassroom.body as CreatedClassroomResponse;
     createdClassroomIds.push(classroomBody.id);
+    expect(classroomBody).not.toHaveProperty('studentIds');
+    expect(classroomBody).toMatchObject({
+      courseId,
+      course: {
+        id: courseId,
+        name: `Enrollments ${suffix}`,
+        term: '2026-Spring',
+      },
+    });
 
     return {
       courseId,
@@ -144,7 +152,11 @@ describe('Enrollments Authority And Legacy Compatibility (e2e)', () => {
   };
 
   beforeAll(async () => {
-    ensureMongoUri();
+    assertLocalStandardTestEnvironment({
+      nodeEnv: process.env.NODE_ENV,
+      purpose: process.env.EDUFORGE_DATABASE_PURPOSE,
+      mongoUri: process.env.MONGO_URI,
+    });
 
     const moduleFixture: TestingModule = await Test.createTestingModule({
       imports: [AppModule],
@@ -161,6 +173,22 @@ describe('Enrollments Authority And Legacy Compatibility (e2e)', () => {
     );
     app.use(cookieParser());
     await app.init();
+
+    const connection = app.get<Connection>(getConnectionToken());
+    const database = connection.db;
+    if (!database) throw new Error('Missing connected test database');
+    const auth = await database.command(
+      { connectionStatus: 1, showPrivileges: false, maxTimeMS: 5000 },
+      { timeoutMS: 5000 },
+    );
+    assertLocalStandardTestAuthentication({
+      nodeEnv: process.env.NODE_ENV,
+      purpose: process.env.EDUFORGE_DATABASE_PURPOSE,
+      mongoUri: process.env.MONGO_URI,
+      databaseName: database.databaseName,
+      connectedHost: connection.host,
+      authInfo: auth.authInfo,
+    });
 
     teacherAgent = request.agent(app.getHttpServer());
     studentAgent = request.agent(app.getHttpServer());
@@ -206,72 +234,149 @@ describe('Enrollments Authority And Legacy Compatibility (e2e)', () => {
   });
 
   afterAll(async () => {
-    const cleanup: Promise<unknown>[] = [];
-    if (createdClassroomIds.length > 0) {
-      cleanup.push(
-        enrollmentModel.deleteMany({
-          classroomId: {
-            $in: createdClassroomIds.map((id) => new Types.ObjectId(id)),
-          },
-        }),
-      );
-      cleanup.push(
-        classroomModel.deleteMany({
-          _id: {
-            $in: createdClassroomIds.map((id) => new Types.ObjectId(id)),
-          },
-        }),
-      );
+    try {
+      const cleanup: Promise<unknown>[] = [];
+      if (createdClassroomIds.length > 0) {
+        cleanup.push(
+          enrollmentModel.deleteMany({
+            classroomId: {
+              $in: createdClassroomIds.map((id) => new Types.ObjectId(id)),
+            },
+          }),
+        );
+        cleanup.push(
+          classroomModel.deleteMany({
+            _id: {
+              $in: createdClassroomIds.map((id) => new Types.ObjectId(id)),
+            },
+          }),
+        );
+      }
+      if (createdCourseIds.length > 0) {
+        cleanup.push(
+          courseModel.deleteMany({
+            _id: { $in: createdCourseIds.map((id) => new Types.ObjectId(id)) },
+          }),
+        );
+      }
+      const userObjectIds = [teacherId, studentId, legacyStudentId]
+        .filter(Boolean)
+        .map((id) => new Types.ObjectId(id));
+      if (userObjectIds.length > 0) {
+        cleanup.push(
+          sessionModel.deleteMany({ userId: { $in: userObjectIds } }),
+        );
+        cleanup.push(userModel.deleteMany({ _id: { $in: userObjectIds } }));
+      }
+      await Promise.all(cleanup);
+    } finally {
+      await app?.close();
     }
-    if (createdCourseIds.length > 0) {
-      cleanup.push(
-        courseModel.deleteMany({
-          _id: { $in: createdCourseIds.map((id) => new Types.ObjectId(id)) },
-        }),
-      );
-    }
-    const userObjectIds = [teacherId, studentId, legacyStudentId]
-      .filter(Boolean)
-      .map((id) => new Types.ObjectId(id));
-    if (userObjectIds.length > 0) {
-      cleanup.push(sessionModel.deleteMany({ userId: { $in: userObjectIds } }));
-      cleanup.push(userModel.deleteMany({ _id: { $in: userObjectIds } }));
-    }
-    await Promise.all(cleanup);
-    await app.close();
   });
 
   it('A/B: enrollment authority for join/remove with weekly-report counts', async () => {
-    const { classroomId, joinCode } = await createCourseAndClassroom('AB');
-
-    await studentAgent
-      .post('/api/classrooms/join')
-      .send({ joinCode })
-      .expect(201);
-
-    await pollUntil(async () => {
-      await studentAgent.get(`/api/classrooms/${classroomId}`).expect(200);
+    const { courseId, classroomId, joinCode } =
+      await createCourseAndClassroom('AB');
+    const classroomObjectId = new Types.ObjectId(classroomId);
+    const studentObjectId = new Types.ObjectId(studentId);
+    const expectedClassroom = {
+      id: classroomId,
+      courseId,
+      course: {
+        id: courseId,
+        name: 'Enrollments AB',
+        term: '2026-Spring',
+      },
+    };
+    const createdDocument = await classroomModel.collection.findOne({
+      _id: classroomObjectId,
     });
+    expect(createdDocument).toMatchObject({ _id: classroomObjectId });
+    expect(createdDocument).not.toHaveProperty('studentIds');
+
+    const detail = await teacherAgent
+      .get(`/api/classrooms/${classroomId}`)
+      .expect(200);
+    expect(detail.body).toMatchObject(expectedClassroom);
+    expect(detail.body).not.toHaveProperty('studentIds');
+
+    const updated = await teacherAgent
+      .patch(`/api/classrooms/${classroomId}`)
+      .send({ name: 'Classroom-AB-updated' })
+      .expect(200);
+    expect(updated.body).toMatchObject({
+      ...expectedClassroom,
+      name: 'Classroom-AB-updated',
+    });
+    expect(updated.body).not.toHaveProperty('studentIds');
+
+    let enrollmentId: Types.ObjectId | undefined;
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      const joined = await studentAgent
+        .post('/api/classrooms/join')
+        .send({ joinCode })
+        .expect(201);
+      expect(joined.body).toMatchObject(expectedClassroom);
+      expect(joined.body).not.toHaveProperty('studentIds');
+
+      const enrollments = await enrollmentModel
+        .find({ classroomId: classroomObjectId })
+        .exec();
+      expect(enrollments).toHaveLength(1);
+      enrollmentId ??= enrollments[0]._id;
+      expect(enrollments[0]).toMatchObject({
+        _id: enrollmentId,
+        userId: studentObjectId,
+        role: 'STUDENT',
+        status: 'ACTIVE',
+      });
+      const joinedDocument = await classroomModel.collection.findOne({
+        _id: classroomObjectId,
+      });
+      expect(joinedDocument).toMatchObject({ _id: classroomObjectId });
+      expect(joinedDocument).not.toHaveProperty('studentIds');
+
+      await pollUntil(async () => {
+        await studentAgent.get(`/api/classrooms/${classroomId}`).expect(200);
+      });
+    }
 
     const weeklyBefore = await teacherAgent
       .get(`/api/classrooms/${classroomId}/weekly-report`)
       .query({ window: '7d' })
       .expect(200);
     const weeklyBeforeBody = weeklyBefore.body as WeeklyReportResponse;
-    expect(weeklyBeforeBody.progress.studentsCount).toBeGreaterThanOrEqual(1);
+    expect(weeklyBeforeBody.progress.studentsCount).toBe(1);
     expect(typeof weeklyBeforeBody.progress.submissionRate).toBe('number');
 
-    await teacherAgent
-      .post(`/api/classrooms/${classroomId}/students/${studentId}/remove`)
-      .send({})
-      .expect(201);
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      const removed = await teacherAgent
+        .post(`/api/classrooms/${classroomId}/students/${studentId}/remove`)
+        .send({})
+        .expect(201);
+      expect(removed.body).toMatchObject(expectedClassroom);
+      expect(removed.body).not.toHaveProperty('studentIds');
 
-    await pollUntil(async () => {
-      const response = await studentAgent.get(`/api/classrooms/${classroomId}`);
-      if (response.status === 200) {
-        throw new Error('Expected removed student to lose classroom access');
-      }
-    });
+      const enrollments = await enrollmentModel
+        .find({ classroomId: classroomObjectId })
+        .exec();
+      expect(enrollments).toHaveLength(1);
+      expect(enrollments[0]).toMatchObject({
+        _id: enrollmentId,
+        userId: studentObjectId,
+        role: 'STUDENT',
+        status: 'REMOVED',
+      });
+      const removedDocument = await classroomModel.collection.findOne({
+        _id: classroomObjectId,
+      });
+      expect(removedDocument).toMatchObject({ _id: classroomObjectId });
+      expect(removedDocument).not.toHaveProperty('studentIds');
+
+      await pollUntil(async () => {
+        await studentAgent.get(`/api/classrooms/${classroomId}`).expect(403);
+      });
+    }
 
     const weeklyAfter = await teacherAgent
       .get(`/api/classrooms/${classroomId}/weekly-report`)
@@ -289,12 +394,17 @@ describe('Enrollments Authority And Legacy Compatibility (e2e)', () => {
     const classroomObjectId = new Types.ObjectId(classroomId);
 
     await enrollmentModel.deleteMany({ classroomId: classroomObjectId });
-    await classroomModel
-      .updateOne(
-        { _id: classroomObjectId },
-        { $addToSet: { studentIds: new Types.ObjectId(legacyStudentId) } },
-      )
-      .exec();
+    await classroomModel.collection.updateOne(
+      { _id: classroomObjectId },
+      { $addToSet: { studentIds: new Types.ObjectId(legacyStudentId) } },
+    );
+    const pollutedClassroom = await classroomModel.collection.findOne({
+      _id: classroomObjectId,
+    });
+    expect(pollutedClassroom).toMatchObject({
+      _id: classroomObjectId,
+      studentIds: [new Types.ObjectId(legacyStudentId)],
+    });
 
     const classroomAccess = await legacyStudentAgent.get(
       `/api/classrooms/${classroomId}`,
