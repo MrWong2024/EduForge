@@ -49,12 +49,21 @@ type CreatedClassroomTaskResponse = {
 
 type CreatedSubmissionResponse = {
   id: string;
+  contentRevision: number | null;
 };
 
 type TeacherDashboardTask = {
   classroomTaskId: string;
   submissionsCount: number;
   distinctStudentsSubmitted: number;
+  aiFeedback: {
+    pending: number;
+    running: number;
+    succeeded: number;
+    failed: number;
+    dead: number;
+    notRequested: number;
+  };
 };
 
 type TeacherDashboardResponse = {
@@ -64,7 +73,10 @@ type TeacherDashboardResponse = {
 type StudentDashboardTask = {
   classroomTaskId: string;
   mySubmissionsCount: number;
-  myLatestSubmission: { submissionId: string } | null;
+  myLatestSubmission: {
+    submissionId: string;
+    aiFeedbackStatus: string;
+  } | null;
 };
 
 type StudentDashboardResponse = {
@@ -363,7 +375,14 @@ describe('Classroom Dashboard Isolation (e2e)', () => {
     const submissionBBody = submissionB.body as CreatedSubmissionResponse;
     createdSubmissionIds.push(submissionBBody.id);
 
-    await teacherAgent
+    await student1Agent
+      .post(
+        `/api/learning-tasks/submissions/${submissionABody.id}/ai-feedback/request`,
+      )
+      .send({ expectedRevision: submissionABody.contentRevision })
+      .expect(200);
+
+    const processedJobs = await teacherAgent
       .post('/api/learning-tasks/ai-feedback/jobs/process-once')
       .send({})
       .expect((res) => {
@@ -373,6 +392,12 @@ describe('Classroom Dashboard Isolation (e2e)', () => {
           );
         }
       });
+    expect(processedJobs.body).toMatchObject({
+      processed: 1,
+      succeeded: 1,
+      failed: 0,
+      dead: 0,
+    });
 
     const teacherDashboardA = await teacherAgent
       .get(`/api/classrooms/${classroomABody.id}/dashboard`)
@@ -384,6 +409,14 @@ describe('Classroom Dashboard Isolation (e2e)', () => {
     expect(taskA).toBeDefined();
     expect(taskA?.submissionsCount).toBe(1);
     expect(taskA?.distinctStudentsSubmitted).toBe(1);
+    expect(taskA?.aiFeedback).toEqual({
+      pending: 0,
+      running: 0,
+      succeeded: 1,
+      failed: 0,
+      dead: 0,
+      notRequested: 0,
+    });
 
     const teacherDashboardB = await teacherAgent
       .get(`/api/classrooms/${classroomBBody.id}/dashboard`)
@@ -395,6 +428,14 @@ describe('Classroom Dashboard Isolation (e2e)', () => {
     expect(taskB).toBeDefined();
     expect(taskB?.submissionsCount).toBe(1);
     expect(taskB?.distinctStudentsSubmitted).toBe(1);
+    expect(taskB?.aiFeedback).toEqual({
+      pending: 0,
+      running: 0,
+      succeeded: 0,
+      failed: 0,
+      dead: 0,
+      notRequested: 1,
+    });
 
     const student1Dashboard = await student1Agent
       .get('/api/classrooms/mine/dashboard')
@@ -420,6 +461,10 @@ describe('Classroom Dashboard Isolation (e2e)', () => {
     );
     expect(student1TaskA?.mySubmissionsCount).toBe(1);
     expect(student1TaskA?.myLatestSubmission).toBeDefined();
+    expect(student1TaskA?.myLatestSubmission).toMatchObject({
+      submissionId: submissionABody.id,
+      aiFeedbackStatus: 'SUCCEEDED',
+    });
     expect(student1TaskB?.mySubmissionsCount ?? 0).toBe(0);
     expect(student1TaskB?.myLatestSubmission ?? null).toBeNull();
 
@@ -442,6 +487,10 @@ describe('Classroom Dashboard Isolation (e2e)', () => {
     );
     expect(student2TaskB?.mySubmissionsCount).toBe(1);
     expect(student2TaskB?.myLatestSubmission).toBeDefined();
+    expect(student2TaskB?.myLatestSubmission).toMatchObject({
+      submissionId: submissionBBody.id,
+      aiFeedbackStatus: 'NOT_REQUESTED',
+    });
     expect(student2TaskA?.mySubmissionsCount ?? 0).toBe(0);
     expect(student2TaskA?.myLatestSubmission ?? null).toBeNull();
   });

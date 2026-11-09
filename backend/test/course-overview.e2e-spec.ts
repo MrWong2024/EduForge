@@ -16,10 +16,7 @@ import { ClassroomTask } from '../src/modules/classrooms/classroom-tasks/schemas
 import { Task } from '../src/modules/learning-tasks/schemas/task.schema';
 import { Submission } from '../src/modules/learning-tasks/schemas/submission.schema';
 import { Feedback } from '../src/modules/learning-tasks/schemas/feedback.schema';
-import {
-  AiFeedbackJob,
-  AiFeedbackJobStatus,
-} from '../src/modules/learning-tasks/ai-feedback/schemas/ai-feedback-job.schema';
+import { AiFeedbackJob } from '../src/modules/learning-tasks/ai-feedback/schemas/ai-feedback-job.schema';
 import { AiFeedbackProcessor } from '../src/modules/learning-tasks/ai-feedback/services/ai-feedback-processor.service';
 
 jest.setTimeout(30000);
@@ -34,7 +31,7 @@ type CreatedCourseResponse = { id: string };
 type CreatedClassroomResponse = { id: string; joinCode: string };
 type CreatedTaskResponse = { id: string };
 type CreatedClassroomTaskResponse = { id: string };
-type CreatedSubmissionResponse = { id: string };
+type CreatedSubmissionResponse = { id: string; contentRevision: number };
 type ValidationErrorResponse = { message?: unknown };
 
 type CourseOverviewResponse = {
@@ -429,9 +426,8 @@ describe('Course Overview (e2e)', () => {
         },
       })
       .expect(201);
-    submissionIds.push(
-      (createdSubmissionA1.body as CreatedSubmissionResponse).id,
-    );
+    const submissionA1 = createdSubmissionA1.body as CreatedSubmissionResponse;
+    submissionIds.push(submissionA1.id);
 
     const createdSubmissionB1 = await studentAAgent
       .post(
@@ -444,9 +440,8 @@ describe('Course Overview (e2e)', () => {
         },
       })
       .expect(201);
-    submissionIds.push(
-      (createdSubmissionB1.body as CreatedSubmissionResponse).id,
-    );
+    const submissionB1 = createdSubmissionB1.body as CreatedSubmissionResponse;
+    submissionIds.push(submissionB1.id);
 
     const createdSubmissionA2 = await studentBAgent
       .post(
@@ -459,11 +454,34 @@ describe('Course Overview (e2e)', () => {
         },
       })
       .expect(201);
-    submissionIds.push(
-      (createdSubmissionA2.body as CreatedSubmissionResponse).id,
-    );
+    const submissionA2 = createdSubmissionA2.body as CreatedSubmissionResponse;
+    submissionIds.push(submissionA2.id);
 
-    await aiFeedbackProcessor.processOnce(20);
+    await studentAAgent
+      .post(
+        `/api/learning-tasks/submissions/${submissionA1.id}/ai-feedback/request`,
+      )
+      .send({ expectedRevision: submissionA1.contentRevision })
+      .expect(200);
+    await studentAAgent
+      .post(
+        `/api/learning-tasks/submissions/${submissionB1.id}/ai-feedback/request`,
+      )
+      .send({ expectedRevision: submissionB1.contentRevision })
+      .expect(200);
+    await studentBAgent
+      .post(
+        `/api/learning-tasks/submissions/${submissionA2.id}/ai-feedback/request`,
+      )
+      .send({ expectedRevision: submissionA2.contentRevision })
+      .expect(200);
+
+    expect(await aiFeedbackProcessor.processOnce(20)).toEqual({
+      processed: 3,
+      succeeded: 3,
+      failed: 0,
+      dead: 0,
+    });
 
     const overview = await teacherAgent
       .get(`/api/courses/${courseId}/overview`)
@@ -499,28 +517,12 @@ describe('Course Overview (e2e)', () => {
 
     // AI success rate nullability and formula:
     // jobsTotal = 0 -> null; jobsTotal > 0 -> succeededJobs/jobsTotal.
+    expect(classroomAOverview?.ai.jobsTotal).toBe(2);
+    expect(classroomAOverview?.ai.aiSuccessRate).toBe(1);
+    expect(classroomBOverview?.ai.jobsTotal).toBe(1);
+    expect(classroomBOverview?.ai.aiSuccessRate).toBe(1);
     expect(classroomCOverview?.ai.jobsTotal).toBe(0);
     expect(classroomCOverview?.ai.aiSuccessRate).toBeNull();
-
-    const classroomAJobTaskIds = [
-      new Types.ObjectId(classroomTaskAId),
-      new Types.ObjectId(classroomTaskASecondId),
-    ];
-    const classroomAJobsTotal = await aiFeedbackJobModel.countDocuments({
-      classroomTaskId: { $in: classroomAJobTaskIds },
-    });
-    const classroomASucceededJobs = await aiFeedbackJobModel.countDocuments({
-      classroomTaskId: { $in: classroomAJobTaskIds },
-      status: AiFeedbackJobStatus.Succeeded,
-    });
-    const expectedClassroomAAiSuccessRate =
-      classroomAJobsTotal > 0
-        ? classroomASucceededJobs / classroomAJobsTotal
-        : null;
-    expect(classroomAOverview?.ai.jobsTotal).toBe(classroomAJobsTotal);
-    expect(classroomAOverview?.ai.aiSuccessRate).toBe(
-      expectedClassroomAAiSuccessRate,
-    );
 
     for (const item of overviewBody.items) {
       expect(typeof item.submissionRate).toBe('number');

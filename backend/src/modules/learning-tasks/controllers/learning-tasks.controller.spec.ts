@@ -1,3 +1,4 @@
+import { BadRequestException } from '@nestjs/common';
 import { GUARDS_METADATA } from '@nestjs/common/constants';
 import { ROLES_KEY } from '../../../common/decorators/roles.decorator';
 import { RolesGuard } from '../../../common/guards/roles.guard';
@@ -10,13 +11,14 @@ import { LearningTasksController } from './learning-tasks.controller';
 
 describe('LearningTasksController', () => {
   const createController = () => {
+    const restoreError = new BadRequestException(
+      'Archived task templates cannot be restored to draft; clone as draft instead',
+    );
     const learningTasksService = {
       archiveTask: jest
         .fn()
         .mockResolvedValue({ id: 'task-1', status: 'ARCHIVED' }),
-      restoreTask: jest
-        .fn()
-        .mockResolvedValue({ id: 'task-1', status: 'DRAFT' }),
+      restoreTask: jest.fn().mockRejectedValue(restoreError),
     };
     const controller = new LearningTasksController(
       learningTasksService as unknown as LearningTasksService,
@@ -25,7 +27,7 @@ describe('LearningTasksController', () => {
       {} as unknown as LearningTasksReportsService,
     );
 
-    return { controller, learningTasksService };
+    return { controller, learningTasksService, restoreError };
   };
 
   it('delegates archiveTask to the service with the current teacher id', async () => {
@@ -61,12 +63,14 @@ describe('LearningTasksController', () => {
     expect(guards).toEqual([RolesGuard]);
   });
 
-  it('delegates restoreTask to the service with the current teacher id', async () => {
-    const { controller, learningTasksService } = createController();
+  it('delegates restoreTask and passes through the disabled restore rejection unchanged', async () => {
+    const { controller, learningTasksService, restoreError } =
+      createController();
 
-    const result = await controller.restoreTask('task-1', { id: 'teacher-1' });
+    await expect(
+      controller.restoreTask('task-1', { id: 'teacher-1' }),
+    ).rejects.toBe(restoreError);
 
-    expect(result).toEqual({ id: 'task-1', status: 'DRAFT' });
     expect(learningTasksService.restoreTask).toHaveBeenCalledWith(
       'task-1',
       'teacher-1',

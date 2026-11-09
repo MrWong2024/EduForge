@@ -23,7 +23,7 @@ import { AiFeedbackJob } from '../src/modules/learning-tasks/ai-feedback/schemas
 
 jest.setTimeout(30000);
 
-const DEFAULT_MAX_PER_MINUTE = '1000';
+const DEFAULT_MAX_PER_MINUTE = '30';
 
 const ensureMongoUri = () => {
   if (!process.env.MONGO_URI) {

@@ -1100,7 +1100,7 @@ describe('AI learning analytics standard sample rules', () => {
     });
   });
 
-  it('does not count a next attempt submitted before job completion, but picks the first later attempt', () => {
+  it('excludes later content versions formed before baseline feedback completion', () => {
     const studentId = objectId();
     const classroomTaskId = objectId();
     const anchor = submission({
