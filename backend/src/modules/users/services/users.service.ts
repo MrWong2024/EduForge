@@ -5,7 +5,7 @@ import {
   UnauthorizedException,
 } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
-import { Model } from 'mongoose';
+import { Model, Types } from 'mongoose';
 import { UpdateProfileDto } from '../dto/update-profile.dto';
 import { ChangePasswordDto } from '../dto/change-password.dto';
 import { User } from '../schemas/user.schema';
@@ -18,7 +18,13 @@ import {
 } from '../password.utils';
 import { SessionService } from '../../auth/services/session.service';
 
-type UserLean = User & WithId & WithTimestamps;
+type PublicUserProfileLean = Pick<
+  User,
+  'email' | 'roles' | 'status' | 'name' | 'studentNo' | 'employeeNo'
+> & {
+  _id: Types.ObjectId;
+  createdAt?: Date;
+};
 type UserWithPassword = User &
   WithId &
   WithTimestamps & { passwordHash?: string };
@@ -50,7 +56,7 @@ export class UsersService {
     const user = await this.userModel
       .findById(userId)
       .select(this.publicUserProjection)
-      .lean<UserLean>()
+      .lean<PublicUserProfileLean>()
       .exec();
     if (!user) {
       throw new NotFoundException('User not found');
@@ -74,7 +80,7 @@ export class UsersService {
         { returnDocument: 'after', runValidators: true },
       )
       .select(this.publicUserProjection)
-      .lean<UserLean>()
+      .lean<PublicUserProfileLean>()
       .exec();
     if (!user) {
       throw new NotFoundException('User not found');
@@ -145,7 +151,7 @@ export class UsersService {
     return payload;
   }
 
-  private toPublicUserProfile(user: UserLean): PublicUserProfile {
+  private toPublicUserProfile(user: PublicUserProfileLean): PublicUserProfile {
     return {
       id: user._id.toString(),
       email: user.email,
