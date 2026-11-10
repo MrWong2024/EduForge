@@ -28,6 +28,35 @@ import {
   getSubmissionRevisionError,
   getTextSubmissionError,
 } from "../../lib/learning-tasks/text-submission";
+import { toTaskTemplateVisibilityLabel } from "../../lib/learning-tasks/template-visibility-scope";
+
+test("template visibility labels distinguish exact values, missing values and invalid raw values", () => {
+  for (const [value, expected] of [
+    ["PRIVATE", "私有"],
+    ["SHARED", "共享"],
+    [undefined, "—"],
+    [null, "—"],
+    ["", "—"],
+    [" \t\n ", "—"],
+    ["UNKNOWN", "未知可见性"],
+    ["private", "未知可见性"],
+    ["shared", "未知可见性"],
+    ["Shared", "未知可见性"],
+    [" PRIVATE", "未知可见性"],
+    ["SHARED ", "未知可见性"],
+    ["\tSHARED\n", "未知可见性"],
+    [Object.freeze([]), "未知可见性"],
+    [Object.freeze(["SHARED"]), "未知可见性"],
+    [Object.freeze({}), "未知可见性"],
+    [Object.freeze({ visibility: "SHARED" }), "未知可见性"],
+    [0, "未知可见性"],
+    [1, "未知可见性"],
+    [true, "未知可见性"],
+    [false, "未知可见性"],
+  ] as const) {
+    expect(toTaskTemplateVisibilityLabel(value)).toBe(expected);
+  }
+});
 
 test("status labels use each domain's meaning and distinguish missing from unknown values", () => {
   const cases = [

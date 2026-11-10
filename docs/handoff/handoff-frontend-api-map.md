@@ -88,6 +88,9 @@
 - 任务模板编辑/生命周期：`EditLearningTaskForm` -> `/api/proxy/learning-tasks/tasks/:id*`。
   - 对应后端：`GET/PATCH /api/learning-tasks/tasks/:id`、`POST /publish`、`POST /archive`。
   - 注意：内容更新与生命周期采用各自后端接口，普通保存不构造状态流转；权限与生命周期由后端最终校验。
+  - 模板 visibility 响应统一委托 `normalizeTaskTemplateVisibility`，仅原值严格等于 PRIVATE/SHARED 合法，其余为 undefined；不 trim、转换大小写或强制转换，不补共享或其他合法默认值。输入不改写，raw 保持原有来源引用；URL scope 规范化、新建默认 PRIVATE 与后端请求规范化保持。标签仅精确两值显示私有/共享，缺失、null、空串及纯空白显示“—”，其他非法原值显示“未知可见性”；mapper 已归为 undefined 时沿用占位。后端可见范围、存储校验和权限错误顺序见 [Backend API Learning Tasks](./handoff-backend-api-map.md#learning-tasks)。
+  - 编辑详情 409 提示“任务模板可见性异常，请刷新页面核对。”；保存、发布、归档 409 提示“任务模板可见性异常，暂时无法操作，请刷新页面核对。”，保留状态码、内部原始错误及既有错误呈现。当前权威 visibility 或草稿不可用时只读并提示刷新核对，不以旧合法草稿掩盖异常初值。
+  - 保存响应除现有 id 与资料引用确认，还须返回合法 visibility 且与本次实际发送值一致；全部确认先于任何保存基准更新、成功提示及刷新。缺失、非法或不一致时提示“保存结果无法确认，请刷新页面核对后再操作。”，保留草稿，不自动刷新或重放 PATCH；该结果不能证明服务端未写入。正常成功与生命周期成功处理沿原流程。
   - 教师模板类型及 create/detail/update/list 适配保留 `aiContextRefs`；字段缺省表示无引用，非法引用响应使加载/保存确认失败，不回退为空配置。页面创建沿上述 BFF 保存并省略引用，正式 API 及共享请求类型仍支持该字段；编辑仅在引用语义改变时发送完整数组，未变更省略，显式 `[]` 清空；成功响应更新比较基准。完整字段、验证与快照合同见 [Backend DTO ZIP 资料引用配置](./handoff-backend-dto-cheatsheet.md#zip-资料引用配置)。课堂公开接口及学生消费不补取教师模板资料。
   - `difficulty` 的写入 UI 仅有四状态，由 `lib/learning-tasks/difficulty.ts` 维护：未设置 `""`、基础 `easy`、进阶 `medium`、挑战 `hard`；后端写入约束见 [Task template DTO](./handoff-backend-dto-cheatsheet.md#task-template-dto--response-family)。创建未选时省略字段，选定时发送英文值；编辑未变省略，明确清空发送 `difficulty:""`，不发送 null 或自定义值。编辑下拉框不提供动态旧值选项，意外未知初值映射为未设置，未改难度时仍省略，不随标题修改隐式清理数据库。成功创建重置难度，编辑成功按正式响应同步，失败保留草稿。
   - 模板顶层 `difficulty` 原值进入模板 view model，mapper 不转换或改写上游数据，raw 引用保持；表单只读、模板列表、发布选择及师生课堂详情复用同一安全显示函数：只有准确三档显示基础/进阶/挑战，缺失、null、空白、未知字符串或非法类型统一显示未设置。不做别名、大小写或自动判级，也不将安全显示回写数据库。难度只用于教学定位，不影响评阅标准或统计校正。

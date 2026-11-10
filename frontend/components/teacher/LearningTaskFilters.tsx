@@ -541,7 +541,9 @@ export function LearningTaskFilters({
                 const visibilityBadgeClass =
                   visibility === "PRIVATE"
                     ? "border-zinc-300 bg-zinc-100 text-zinc-700"
-                    : "border-emerald-200 bg-emerald-100 text-emerald-700";
+                    : visibility === "SHARED"
+                      ? "border-emerald-200 bg-emerald-100 text-emerald-700"
+                      : "border-zinc-200 bg-zinc-100 text-zinc-700";
                 const isKnownStatus = isKnownLearningTaskStatus(statusUpper);
                 const isOwner = Boolean(
                   currentUserId &&
@@ -549,7 +551,10 @@ export function LearningTaskFilters({
                   task.createdById === currentUserId,
                 );
                 const canEditTask =
-                  isKnownStatus && isOwner && statusUpper !== "ARCHIVED";
+                  isKnownStatus &&
+                  isOwner &&
+                  statusUpper !== "ARCHIVED" &&
+                  visibility !== undefined;
                 const publisherLabel = getPublisherLabel(
                   task.publisher,
                   currentUserId,

@@ -34,16 +34,12 @@ export const TASK_TEMPLATE_SCOPE_LABELS: Record<TaskTemplateScope, string> = {
 };
 
 export const normalizeTaskTemplateVisibility = (
-  value: unknown
+  value: unknown,
 ): TaskTemplateVisibility | undefined => {
-  if (typeof value !== "string") {
-    return undefined;
-  }
-  const trimmed = value.trim().toUpperCase();
-  if (trimmed === TASK_TEMPLATE_VISIBILITY_PRIVATE) {
+  if (value === TASK_TEMPLATE_VISIBILITY_PRIVATE) {
     return TASK_TEMPLATE_VISIBILITY_PRIVATE;
   }
-  if (trimmed === TASK_TEMPLATE_VISIBILITY_SHARED) {
+  if (value === TASK_TEMPLATE_VISIBILITY_SHARED) {
     return TASK_TEMPLATE_VISIBILITY_SHARED;
   }
   return undefined;
@@ -69,7 +65,16 @@ export const normalizeTaskTemplateScope = (
 };
 
 export const toTaskTemplateVisibilityLabel = (value: unknown): string => {
-  const normalized =
-    normalizeTaskTemplateVisibility(value) ?? TASK_TEMPLATE_VISIBILITY_SHARED;
-  return TASK_TEMPLATE_VISIBILITY_LABELS[normalized];
+  const normalized = normalizeTaskTemplateVisibility(value);
+  if (normalized !== undefined) {
+    return TASK_TEMPLATE_VISIBILITY_LABELS[normalized];
+  }
+  if (
+    value === undefined ||
+    value === null ||
+    (typeof value === "string" && value.trim() === "")
+  ) {
+    return "—";
+  }
+  return "未知可见性";
 };

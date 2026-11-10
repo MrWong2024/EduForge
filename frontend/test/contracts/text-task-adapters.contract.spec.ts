@@ -8,7 +8,12 @@ import {
   normalizeClassroomTaskStatus,
   toClassroomTask,
   toClassroomTaskSummary,
+  toLearningTaskCreateResponse,
+  toLearningTaskDetailResponse,
+  toLearningTaskListResponse,
   toLearningTaskOption,
+  toLearningTaskUpdateResponse,
+  toPublishableTaskTemplateListResponse,
   toSubmissionDetailResponse as toTeacherDetail,
   toTeacherFeedbackListResponse,
 } from "../../lib/api/types-teacher";
@@ -35,6 +40,7 @@ import {
   toDisplaySubmissionLanguage,
 } from "../../lib/learning-tasks/submission-language";
 import { toDisplayLateDuration } from "../../lib/ui/format";
+import { normalizeTaskTemplateVisibility } from "../../lib/learning-tasks/template-visibility-scope";
 
 test("classroom status adapters preserve only the three exact persisted states", () => {
   for (const status of ["ACTIVE", "CLOSED", "RECALLED"] as const) {
@@ -109,6 +115,128 @@ test("classroom status adapters reject present invalid values without coercion o
     expect(payload.status).toBe(status);
     expect(payload).toEqual({ id: "invalid-status", status });
   }
+});
+
+test("template visibility preserves only exact PRIVATE and SHARED without changing the input", () => {
+  for (const visibility of ["PRIVATE", "SHARED"] as const) {
+    const payload = Object.freeze({
+      id: "template-visibility",
+      title: "模板标题",
+      status: "PUBLISHED",
+      visibility,
+    });
+    const before = { ...payload };
+    const option = toLearningTaskOption(payload);
+    expect(normalizeTaskTemplateVisibility(visibility)).toBe(visibility);
+    expect(option.visibility).toBe(visibility);
+    expect(option.title).toBe("模板标题");
+    expect(option.status).toBe("PUBLISHED");
+    expect(option.raw).toBe(payload);
+    expect(payload).toEqual(before);
+  }
+});
+
+test("template visibility keeps a genuinely absent property unknown without adding a default", () => {
+  const payload = Object.freeze({ id: "missing-visibility" });
+  expect(Object.hasOwn(payload, "visibility")).toBe(false);
+  expect(normalizeTaskTemplateVisibility(undefined)).toBeUndefined();
+  const option = toLearningTaskOption(payload);
+  expect(option.visibility).toBeUndefined();
+  expect(option.raw).toBe(payload);
+  expect(Object.hasOwn(payload, "visibility")).toBe(false);
+  expect(payload).toEqual({ id: "missing-visibility" });
+});
+
+test("template visibility rejects present invalid values without coercion or input changes", () => {
+  for (const visibility of [
+    undefined,
+    null,
+    "",
+    " \t\n ",
+    "UNKNOWN",
+    "private",
+    "shared",
+    "Private",
+    "Shared",
+    " PRIVATE",
+    "SHARED ",
+    "\tSHARED\n",
+    Object.freeze([]),
+    Object.freeze(["SHARED"]),
+    Object.freeze(["PRIVATE"]),
+    Object.freeze({}),
+    Object.freeze({ visibility: "SHARED" }),
+    0,
+    1,
+    true,
+    false,
+  ]) {
+    const payload = Object.freeze({ id: "invalid-visibility", visibility });
+    expect(Object.hasOwn(payload, "visibility")).toBe(true);
+    expect(normalizeTaskTemplateVisibility(visibility)).toBeUndefined();
+    const option = toLearningTaskOption(payload);
+    expect(option.visibility).toBeUndefined();
+    expect(option.raw).toBe(payload);
+    expect(Object.hasOwn(payload, "visibility")).toBe(true);
+    expect(payload.visibility).toBe(visibility);
+    expect(payload).toEqual({ id: "invalid-visibility", visibility });
+  }
+});
+
+test("template detail, write and list response wrappers delegate strict visibility without replacing raw references", () => {
+  const privateTask = Object.freeze({ id: "private", visibility: "PRIVATE" });
+  const sharedTask = Object.freeze({ id: "shared", visibility: "SHARED" });
+  const invalidTask = Object.freeze({ id: "invalid", visibility: " shared " });
+  const missingTask = Object.freeze({ id: "missing" });
+  for (const [payload, expected] of [
+    [privateTask, "PRIVATE"],
+    [sharedTask, "SHARED"],
+    [invalidTask, undefined],
+    [missingTask, undefined],
+  ] as const) {
+    const envelope = Object.freeze({ data: payload });
+    for (const adapt of [
+      toLearningTaskDetailResponse,
+      toLearningTaskCreateResponse,
+      toLearningTaskUpdateResponse,
+    ]) {
+      const result = adapt(envelope);
+      expect(result.visibility).toBe(expected);
+      expect(result.raw).toBe(payload);
+      expect(envelope.data).toBe(payload);
+    }
+  }
+  const items = Object.freeze([
+    privateTask,
+    sharedTask,
+    invalidTask,
+    missingTask,
+  ]);
+  const envelope = Object.freeze({ items, total: 4, page: 1, limit: 4 });
+  for (const adapt of [
+    toLearningTaskListResponse,
+    toPublishableTaskTemplateListResponse,
+  ]) {
+    const result = adapt(envelope);
+    expect(result.items.map((item) => item.visibility)).toEqual([
+      "PRIVATE",
+      "SHARED",
+      undefined,
+      undefined,
+    ]);
+    expect(result.items.map((item) => item.id)).toEqual([
+      "private",
+      "shared",
+      "invalid",
+      "missing",
+    ]);
+    expect(result.total).toBe(4);
+    expect(result.raw).toBe(envelope);
+    result.items.forEach((item, index) => expect(item.raw).toBe(items[index]));
+  }
+  expect(envelope.items).toBe(items);
+  expect(invalidTask.visibility).toBe(" shared ");
+  expect(Object.hasOwn(missingTask, "visibility")).toBe(false);
 });
 
 test("template difficulty comes from the top level without changing raw values", () => {

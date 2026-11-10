@@ -30,7 +30,6 @@ import {
 import {
   TASK_TEMPLATE_VISIBILITIES,
   TASK_TEMPLATE_VISIBILITY_LABELS,
-  TASK_TEMPLATE_VISIBILITY_SHARED,
   normalizeTaskTemplateVisibility,
   type TaskTemplateVisibility,
 } from "@/lib/learning-tasks/template-visibility-scope";
@@ -92,6 +91,9 @@ const getUpdateErrorSummary = (status: number): string => {
   if (status === 404) {
     return "任务模板不存在或功能未启用/不可用。";
   }
+  if (status === 409) {
+    return "任务模板可见性异常，暂时无法操作，请刷新页面核对。";
+  }
   if (status >= 500) {
     return "更新任务模板失败，请稍后重试。";
   }
@@ -102,7 +104,10 @@ const buildUpdateErrorDescription = (
   status: number,
   detail?: string,
 ): string => {
-  if (detail?.includes(USED_PUBLISHED_TEMPLATE_REVERT_DETAIL)) {
+  if (
+    status !== 409 &&
+    detail?.includes(USED_PUBLISHED_TEMPLATE_REVERT_DETAIL)
+  ) {
     return USED_PUBLISHED_TEMPLATE_REVERT_MESSAGE;
   }
   return buildErrorDescription(getUpdateErrorSummary(status), detail);
@@ -112,6 +117,9 @@ const getLifecycleActionErrorSummary = (
   action: TaskLifecycleAction,
   status: number,
 ): string => {
+  if (status === 409) {
+    return "任务模板可见性异常，暂时无法操作，请刷新页面核对。";
+  }
   if (action === "publish") {
     if (status === 400) {
       return "当前模板状态不允许发布。";
@@ -161,9 +169,9 @@ export function EditLearningTaskForm({
   const initialCourseLabel = normalizeTaskCourseLabel(initialTask.courseLabel);
   const rawInitialStatus = toRawStatusUpper(initialTask.status);
   const hasKnownInitialStatus = isLearningTaskStatus(rawInitialStatus);
-  const initialVisibility =
-    normalizeTaskTemplateVisibility(initialTask.visibility) ??
-    TASK_TEMPLATE_VISIBILITY_SHARED;
+  const initialVisibility = normalizeTaskTemplateVisibility(
+    initialTask.visibility,
+  );
   const publisherLabel = getPublisherLabel(
     initialTask.publisher,
     currentUserId,
@@ -188,8 +196,9 @@ export function EditLearningTaskForm({
   const [currentStatus, setCurrentStatus] = useState<LearningTaskStatus>(
     hasKnownInitialStatus ? rawInitialStatus : "DRAFT",
   );
-  const [visibility, setVisibility] =
-    useState<TaskTemplateVisibility>(initialVisibility);
+  const [visibility, setVisibility] = useState<
+    TaskTemplateVisibility | undefined
+  >(initialVisibility);
   const [rubricNotes, setRubricNotes] = useState(() =>
     getRubricNotes(initialTask.rubric),
   );
@@ -216,14 +225,22 @@ export function EditLearningTaskForm({
     initialTask.createdById,
     hasKnownInitialStatus ? currentStatus : undefined,
   );
-  const canPublish = !readOnly && ownerCanEdit && currentStatus === "DRAFT";
-  const canArchive = !readOnly && ownerCanEdit && currentStatus === "PUBLISHED";
+  const hasValidVisibility =
+    initialVisibility !== undefined && visibility !== undefined;
+  const effectiveReadOnly = readOnly || !ownerCanEdit || !hasValidVisibility;
+  const canPublish = !effectiveReadOnly && currentStatus === "DRAFT";
+  const canArchive = !effectiveReadOnly && currentStatus === "PUBLISHED";
   const isActionPending = isPublishing || isArchiving;
-  const effectiveReadOnly = readOnly || !ownerCanEdit;
 
   const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    if (effectiveReadOnly || isSubmitting || isActionPending) {
+    const submittedVisibility = visibility;
+    if (
+      effectiveReadOnly ||
+      submittedVisibility === undefined ||
+      isSubmitting ||
+      isActionPending
+    ) {
       return;
     }
 
@@ -271,7 +288,7 @@ export function EditLearningTaskForm({
       description: trimmedDescription,
       knowledgeModule: trimmedKnowledgeModule,
       courseLabel: normalizedCourseLabel ?? "",
-      visibility,
+      visibility: submittedVisibility,
       rubric: buildUpdateTaskRubric(rubricNotes),
       ...aiContextPatch,
       ...updateDifficultyPayload(difficultyBaseline, difficulty),
@@ -293,10 +310,14 @@ export function EditLearningTaskForm({
       const updated = toLearningTaskUpdateResponse(payload);
       if (
         updated.id !== taskId ||
+        updated.visibility !== submittedVisibility ||
         "aiContextRefs" in
           buildAiContextRefsPatch(aiContextText, updated.aiContextRefs ?? [])
       ) {
-        throw new Error("保存结果无法确认");
+        setErrorState({
+          description: "保存结果无法确认，请刷新页面核对后再操作。",
+        });
+        return;
       }
       setAiContextBaseline(updated.aiContextRefs ?? []);
       setDifficultyBaseline(updated.difficulty);
@@ -422,6 +443,11 @@ export function EditLearningTaskForm({
           当前任务模板状态暂不可用，暂不允许编辑。
         </p>
       ) : null}
+      {!hasValidVisibility ? (
+        <p className="mt-2 rounded-md border border-zinc-200 bg-zinc-50 px-3 py-2 text-sm text-zinc-700">
+          任务模板的可见性暂不可用，只能查看。请刷新页面核对。
+        </p>
+      ) : null}
 
       <form onSubmit={handleSubmit} className="mt-4 space-y-4">
         <fieldset
@@ -477,12 +503,19 @@ export function EditLearningTaskForm({
               <span className="mb-1 block text-zinc-700">模板可见性</span>
               <select
                 disabled={effectiveReadOnly}
-                value={visibility}
+                value={hasValidVisibility ? visibility : ""}
                 onChange={(event) =>
-                  setVisibility(event.target.value as TaskTemplateVisibility)
+                  setVisibility(
+                    normalizeTaskTemplateVisibility(event.target.value),
+                  )
                 }
                 className="w-full rounded-md border border-zinc-300 px-3 py-2"
               >
+                {!hasValidVisibility ? (
+                  <option value="" disabled>
+                    可见性暂不可用
+                  </option>
+                ) : null}
                 {TASK_TEMPLATE_VISIBILITIES.map((item) => (
                   <option key={item} value={item}>
                     {TASK_TEMPLATE_VISIBILITY_LABELS[item]}

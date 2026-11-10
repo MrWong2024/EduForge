@@ -18,6 +18,7 @@ import {
   canEditTaskTemplate,
   isTaskTemplateAuthor,
 } from "@/lib/learning-tasks/ai-context-refs";
+import { normalizeTaskTemplateVisibility } from "@/lib/learning-tasks/template-visibility-scope";
 
 type EditLearningTaskPageProps = {
   params: Promise<{ taskId: string }>;
@@ -50,6 +51,9 @@ const getTaskLoadSummary = (status: number): string => {
   }
   if (status === 404) {
     return "任务模板不存在或功能未启用/不可用。";
+  }
+  if (status === 409) {
+    return "任务模板可见性异常，请刷新页面核对。";
   }
   return getCommonErrorSummary(status, "加载任务模板");
 };
@@ -113,11 +117,15 @@ export default async function EditLearningTaskPage({
   }
 
   const isArchivedTask = viewModel.task.status === "ARCHIVED";
-  const canEditCurrentTask = canEditTaskTemplate(
-    viewModel.currentUserId,
-    viewModel.task.createdById,
-    viewModel.task.status,
-  );
+  const hasValidVisibility =
+    normalizeTaskTemplateVisibility(viewModel.task.visibility) !== undefined;
+  const canEditCurrentTask =
+    hasValidVisibility &&
+    canEditTaskTemplate(
+      viewModel.currentUserId,
+      viewModel.task.createdById,
+      viewModel.task.status,
+    );
 
   return (
     <section className="space-y-4">
@@ -145,9 +153,11 @@ export default async function EditLearningTaskPage({
         <p>
           {canEditCurrentTask
             ? "此页用于维护任务模板内容与评阅标准。"
-            : isArchivedTask && viewModel.canEdit
-              ? "此页展示已归档模板详情；归档模板当前只读，后续如需复用应复制为新草稿。"
-              : "此页只读展示模板详情；当前身份或状态不允许编辑。"}
+            : !hasValidVisibility
+              ? "此页只读展示模板详情；任务模板可见性异常，请刷新页面核对。"
+              : isArchivedTask && viewModel.canEdit
+                ? "此页展示已归档模板详情；归档模板当前只读，后续如需复用应复制为新草稿。"
+                : "此页只读展示模板详情；当前身份或状态不允许编辑。"}
         </p>
         <p className="mt-1">
           当前模板：{toDisplayText(viewModel.task.title, "未命名模板")}（状态：
