@@ -40,8 +40,8 @@ export class Submission {
   @Prop({ type: Types.ObjectId, ref: Task.name, required: true })
   taskId!: Types.ObjectId;
 
-  @Prop({ type: Types.ObjectId, ref: ClassroomTask.name })
-  classroomTaskId?: Types.ObjectId;
+  @Prop({ type: Types.ObjectId, ref: ClassroomTask.name, required: true })
+  classroomTaskId!: Types.ObjectId;
 
   @Prop({ type: Types.ObjectId, ref: User.name, required: true })
   studentId!: Types.ObjectId;

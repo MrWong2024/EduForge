@@ -578,6 +578,7 @@ describe('B1-2 submission content edits and review admission (HTTP)', () => {
       .expect(201);
     await edit(created.id).expect(403);
     expect(await raw(created.id)).toEqual(before);
+    expect((await detail(student, created.id)).id).toBe(created.id);
     await student
       .post('/api/classrooms/join')
       .send({ joinCode: classroom.joinCode })
@@ -596,33 +597,65 @@ describe('B1-2 submission content edits and review admission (HTTP)', () => {
       .expect(200);
     await edit(second.id).expect(403);
     expect(await raw(second.id)).toEqual(secondBefore);
+    expect((await detail(student, second.id)).id).toBe(second.id);
     await teacher
       .patch('/api/classrooms/' + classroom.id)
       .send({ status: 'ACTIVE' })
       .expect(200);
     // Historical missing/mismatched links are corruption-only compatibility fixtures.
-    for (const mutation of [
-      { $unset: { taskSnapshot: '' } },
-      { $set: { taskId: new Types.ObjectId() } },
+    for (const scenario of [
+      { mutation: { $unset: { taskSnapshot: '' } }, status: 403 },
+      {
+        mutation: { $set: { taskId: new Types.ObjectId() } },
+        status: 409,
+        message: 'Submission does not match classroom task',
+      },
+      {
+        mutation: { $set: { classroomId: new Types.ObjectId() } },
+        status: 404,
+        message: 'Classroom not found',
+      },
     ]) {
       const instance = await publish();
       const saved = await submit(instance);
       const snapshot = await raw(saved.id);
       await instances.collection.updateOne(
         { _id: new Types.ObjectId(instance.id) },
-        mutation,
+        scenario.mutation,
       );
-      await edit(saved.id).expect(403);
+      const denied = await edit(saved.id).expect(scenario.status);
+      if (scenario.message)
+        expect((denied.body as { message: string }).message).toBe(
+          scenario.message,
+        );
       expect(await raw(saved.id)).toEqual(snapshot);
+      await noReviewRecords(saved.id);
     }
-    const unbound = await submit(await publish());
-    await submissions.collection.updateOne(
-      { _id: new Types.ObjectId(unbound.id) },
-      { $unset: { classroomTaskId: '' } },
-    );
-    const unboundBefore = await raw(unbound.id);
-    await edit(unbound.id).expect(403);
-    expect(await raw(unbound.id)).toEqual(unboundBefore);
+    for (const scenario of [
+      {
+        mutation: { $unset: { classroomTaskId: '' } },
+        status: 409,
+        message: 'Submission has no valid classroom task',
+      },
+      {
+        mutation: { $set: { classroomTaskId: new Types.ObjectId() } },
+        status: 404,
+        message: 'Classroom task not found',
+      },
+    ]) {
+      const invalid = await submit(await publish());
+      await submissions.collection.updateOne(
+        { _id: new Types.ObjectId(invalid.id) },
+        scenario.mutation,
+      );
+      const invalidBefore = await raw(invalid.id);
+      const denied = await edit(invalid.id).expect(scenario.status);
+      expect((denied.body as { message: string }).message).toBe(
+        scenario.message,
+      );
+      expect(await raw(invalid.id)).toEqual(invalidBefore);
+      await noReviewRecords(invalid.id);
+    }
   });
 
   it('permits editing an earlier attempt and leaves new-attempt cooldown and counts intact', async () => {

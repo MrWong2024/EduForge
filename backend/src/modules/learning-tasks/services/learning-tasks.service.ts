@@ -83,13 +83,12 @@ type TagStat = {
 type TaskWithMeta = Task & WithId & WithTimestamps;
 type SubmissionWithMeta = Submission & WithId & WithTimestamps;
 type FeedbackWithMeta = Feedback & WithId & WithTimestamps;
-type ClassroomTaskWithClassroom = ClassroomTask & WithId;
 type ClassroomTaskDeadlineConfig = Pick<
   ClassroomTask,
   'classroomId' | 'taskId' | 'status' | 'dueAt' | 'settings' | 'taskSnapshot'
 > &
   WithId;
-type SubmissionDetailTaskLean = Pick<Task, 'title' | 'createdBy'> & WithId;
+type SubmissionDetailTaskLean = Pick<Task, 'title'> & WithId;
 type SubmissionDetailStudentLean = Pick<User, 'name'> & WithId;
 type SubmissionDetailClassroomLean = Pick<Classroom, 'teacherId'> & WithId;
 type ParticipationClassroomLean = Pick<Classroom, 'status'> & WithId;
@@ -522,6 +521,7 @@ export class LearningTasksService {
       .find({
         taskId: new Types.ObjectId(taskId),
         studentId: new Types.ObjectId(userId),
+        $expr: { $eq: [{ $type: '$classroomTaskId' }, 'objectId'] },
       })
       .sort({ attemptNo: 1 })
       .lean<SubmissionWithMeta[]>()
@@ -604,12 +604,9 @@ export class LearningTasksService {
     if (!submission) {
       throw new NotFoundException('Submission not found');
     }
-    const { task, classroomTask } =
-      await this.loadSubmissionAuthContext(submission);
-    await this.ensureTeacherCanManageSubmission(
-      submission,
-      task,
-      classroomTask,
+    const { classroom } = await this.loadSubmissionAuthContext(submission);
+    this.ensureTeacherCanManageSubmission(
+      classroom,
       userId,
       'Not allowed to add feedback',
     );
@@ -619,12 +616,6 @@ export class LearningTasksService {
     }
     if (typeof dto.message !== 'string' || dto.message.length === 0) {
       throw new BadRequestException('message should not be empty');
-    }
-    if (
-      classroomTask &&
-      classroomTask.taskId.toString() !== submission.taskId.toString()
-    ) {
-      throw new ConflictException('Submission does not match classroom task');
     }
     const normalizedTags = this.normalizeTeacherFeedbackTags(dto.tags);
     const payload = {
@@ -719,12 +710,9 @@ export class LearningTasksService {
       throw new NotFoundException('Feedback not found');
     }
 
-    const { task, classroomTask } =
-      await this.loadSubmissionAuthContext(submission);
-    await this.ensureTeacherCanManageSubmission(
-      submission,
-      task,
-      classroomTask,
+    const { classroom } = await this.loadSubmissionAuthContext(submission);
+    this.ensureTeacherCanManageSubmission(
+      classroom,
       userId,
       'Not allowed to update feedback',
     );
@@ -762,7 +750,10 @@ export class LearningTasksService {
     return this.toFeedbackResponse(feedback);
   }
 
-  async listFeedback(submissionId: string, userId: string) {
+  async listFeedback(
+    submissionId: string,
+    user: { id: string; roles?: string[] },
+  ) {
     const submission = await this.submissionModel
       .findById(submissionId)
       .lean<SubmissionWithMeta>()
@@ -770,15 +761,15 @@ export class LearningTasksService {
     if (!submission) {
       throw new NotFoundException('Submission not found');
     }
-    const { task, classroomTask } =
-      await this.loadSubmissionAuthContext(submission);
-    const isOwner = submission.studentId.toString() === userId;
+    const isOwner = submission.studentId.toString() === user.id;
+    if (!isOwner && !hasAnyRole(user.roles ?? [], TEACHER_ROLES)) {
+      throw new ForbiddenException('Not allowed to view feedback');
+    }
+    const { classroom } = await this.loadSubmissionAuthContext(submission);
     if (!isOwner) {
-      await this.ensureTeacherCanManageSubmission(
-        submission,
-        task,
-        classroomTask,
-        userId,
+      this.ensureTeacherCanManageSubmission(
+        classroom,
+        user.id,
         'Not allowed to view feedback',
       );
     }
@@ -804,35 +795,26 @@ export class LearningTasksService {
       throw new NotFoundException('Submission not found');
     }
 
-    const [task, student, classroomTask] = await Promise.all([
-      this.taskModel
-        .findById(submission.taskId)
-        .select('_id title createdBy')
-        .lean<SubmissionDetailTaskLean>()
-        .exec(),
-      this.userModel
-        .findById(submission.studentId)
-        .select('_id name')
-        .lean<SubmissionDetailStudentLean>()
-        .exec(),
-      submission.classroomTaskId
-        ? this.classroomTaskModel
-            .findById(submission.classroomTaskId)
-            .select('_id classroomId taskId taskSnapshot settings status dueAt')
-            .lean<ClassroomTaskWithClassroom>()
-            .exec()
-        : Promise.resolve(null),
-    ]);
-    if (!task) {
-      throw new NotFoundException('Task not found');
+    const isStudentOwner =
+      hasAnyRole(user.roles ?? [], STUDENT_ROLES) &&
+      submission.studentId.toString() === user.id;
+    if (!isStudentOwner && !hasAnyRole(user.roles ?? [], TEACHER_ROLES)) {
+      throw new ForbiddenException('Not allowed to view submission detail');
     }
-
-    await this.ensureCanViewSubmissionDetail(
-      submission,
-      task,
-      classroomTask,
-      user,
-    );
+    const { task, classroomTask, classroom } =
+      await this.loadSubmissionAuthContext(submission);
+    if (!isStudentOwner) {
+      this.ensureTeacherCanManageSubmission(
+        classroom,
+        user.id,
+        'Not allowed to view submission detail',
+      );
+    }
+    const student = await this.userModel
+      .findById(submission.studentId)
+      .select('_id name')
+      .lean<SubmissionDetailStudentLean>()
+      .exec();
 
     const job = await this.aiFeedbackJobService.getReviewJob(submission._id);
     const reason = await this.aiRequestBlockReason(submission, user);
@@ -1049,13 +1031,12 @@ export class LearningTasksService {
       reason: 'UNAVAILABLE',
       message: '请打开提交详情核对当前修改资格。',
     },
-  ) {
+  ): SubmissionResponseDto {
     return {
       id: submission._id.toString(),
       taskId: submission.taskId.toString(),
-      classroomTaskId: submission.classroomTaskId
-        ? submission.classroomTaskId.toString()
-        : undefined,
+      classroomTaskId:
+        this.requireSubmissionClassroomTaskId(submission).toString(),
       studentId: submission.studentId.toString(),
       attemptNo: submission.attemptNo,
       ...this.submissionVersionFields(submission),
@@ -1076,13 +1057,13 @@ export class LearningTasksService {
       lateBySeconds: submission.lateBySeconds ?? 0,
       createdAt: submission.createdAt ?? new Date(0),
       updatedAt: submission.updatedAt ?? new Date(0),
-    } as SubmissionResponseDto;
+    };
   }
 
   private toSubmissionDetailResponse(
     submission: SubmissionWithMeta,
     task: SubmissionDetailTaskLean,
-    classroomTask: ClassroomTaskWithClassroom | null,
+    classroomTask: ClassroomTaskDeadlineConfig,
     student: SubmissionDetailStudentLean | null,
     aiFeedbackStatus: AiFeedbackStatus,
     aiReview: AiReviewSummary,
@@ -1092,13 +1073,12 @@ export class LearningTasksService {
     return {
       id: submission._id.toString(),
       taskId: submission.taskId.toString(),
-      classroomTaskId: submission.classroomTaskId
-        ? submission.classroomTaskId.toString()
-        : null,
+      classroomTaskId:
+        this.requireSubmissionClassroomTaskId(submission).toString(),
       studentId: submission.studentId.toString(),
       studentName: student?.name ?? null,
-      taskTitle: classroomTask?.taskSnapshot?.title ?? task.title ?? null,
-      taskSnapshotAvailable: Boolean(classroomTask?.taskSnapshot),
+      taskTitle: classroomTask.taskSnapshot?.title ?? task.title ?? null,
+      taskSnapshotAvailable: Boolean(classroomTask.taskSnapshot),
       meta: submission.meta
         ? { aiUsageDeclaration: submission.meta.aiUsageDeclaration }
         : undefined,
@@ -1123,7 +1103,7 @@ export class LearningTasksService {
     taskId: string,
     dto: CreateSubmissionDto,
     userId: string,
-    classroomTaskId?: string,
+    classroomTaskId: string,
   ) {
     const task = await this.taskModel
       .findById(taskId)
@@ -1135,36 +1115,34 @@ export class LearningTasksService {
 
     const taskObjectId = new Types.ObjectId(taskId);
     const studentObjectId = new Types.ObjectId(userId);
-    const classroomTaskObjectId = classroomTaskId
-      ? new Types.ObjectId(classroomTaskId)
-      : undefined;
-    const classroomTask = classroomTaskObjectId
-      ? await this.classroomTaskModel
-          .findById(classroomTaskObjectId)
-          .select('_id classroomId taskId status dueAt settings taskSnapshot')
-          .lean<ClassroomTaskDeadlineConfig>()
-          .exec()
-      : null;
-    if (classroomTaskObjectId && !classroomTask) {
+    if (
+      typeof classroomTaskId !== 'string' ||
+      !Types.ObjectId.isValid(classroomTaskId)
+    ) {
+      throw new ConflictException('Submission has no valid classroom task');
+    }
+    const classroomTaskObjectId = new Types.ObjectId(classroomTaskId);
+    const classroomTask = await this.classroomTaskModel
+      .findById(classroomTaskObjectId)
+      .select('_id classroomId taskId status dueAt settings taskSnapshot')
+      .lean<ClassroomTaskDeadlineConfig>()
+      .exec();
+    if (!classroomTask) {
       throw new NotFoundException('Classroom task not found');
     }
-    if (classroomTask) {
-      if (classroomTask.taskId.toString() !== taskObjectId.toString()) {
-        throw new ConflictException('Classroom task does not match task');
-      }
-      if (!classroomTask.taskSnapshot) {
-        throw new ConflictException(MISSING_TASK_SNAPSHOT_MESSAGE);
-      }
-      await this.ensureStudentParticipationContextIsActive(
-        classroomTask,
-        'submit',
-      );
-    } else if (task.status !== TaskStatus.Published) {
-      throw new BadRequestException('Task is not published');
+    if (classroomTask.taskId.toString() !== taskObjectId.toString()) {
+      throw new ConflictException('Classroom task does not match task');
     }
+    if (!classroomTask.taskSnapshot) {
+      throw new ConflictException(MISSING_TASK_SNAPSHOT_MESSAGE);
+    }
+    await this.ensureStudentParticipationContextIsActive(
+      classroomTask,
+      'submit',
+    );
     const submittedAt = new Date();
-    const dueAt = classroomTask?.dueAt ?? undefined;
-    const allowLate = classroomTask?.settings?.allowLate !== false;
+    const dueAt = classroomTask.dueAt ?? undefined;
+    const allowLate = classroomTask.settings?.allowLate !== false;
     const isLate = !!dueAt && submittedAt.getTime() > dueAt.getTime();
     const lateBySeconds =
       dueAt && isLate
@@ -1183,15 +1161,10 @@ export class LearningTasksService {
       classroomTaskObjectId,
       submittedAt,
     );
-    const attemptScopeFilter = classroomTaskObjectId
-      ? {
-          classroomTaskId: classroomTaskObjectId,
-          studentId: studentObjectId,
-        }
-      : {
-          taskId: taskObjectId,
-          studentId: studentObjectId,
-        };
+    const attemptScopeFilter = {
+      classroomTaskId: classroomTaskObjectId,
+      studentId: studentObjectId,
+    };
 
     for (let attempt = 0; attempt < 3; attempt += 1) {
       const lastSubmission = await this.submissionModel
@@ -1544,13 +1517,9 @@ export class LearningTasksService {
 
   private async ensureSubmissionCooldownNotHit(
     studentId: Types.ObjectId,
-    classroomTaskId: Types.ObjectId | undefined,
+    classroomTaskId: Types.ObjectId,
     submittedAt: Date,
   ) {
-    if (!classroomTaskId) {
-      return;
-    }
-
     const cooldownMs = this.getSubmissionCooldownMs();
     if (cooldownMs <= 0) {
       return;
@@ -1634,22 +1603,8 @@ export class LearningTasksService {
     if (!teacher && !(student && submission.studentId.toString() === user.id)) {
       throw new ForbiddenException('Not allowed to request AI feedback');
     }
-    if (!submission.classroomTaskId) {
-      throw new ConflictException(MISSING_TASK_SNAPSHOT_MESSAGE);
-    }
-    const classroomTask = await this.classroomTaskModel
-      .findById(submission.classroomTaskId)
-      .lean<ClassroomTaskDeadlineConfig>()
-      .exec();
-    if (!classroomTask) throw new NotFoundException('Classroom task not found');
-    if (classroomTask.taskId.toString() !== submission.taskId.toString()) {
-      throw new ConflictException('Submission does not match classroom task');
-    }
-    const classroom = await this.classroomModel
-      .findById(classroomTask.classroomId)
-      .lean()
-      .exec();
-    if (!classroom) throw new NotFoundException('Classroom not found');
+    const { classroomTask, classroom } =
+      await this.loadSubmissionAuthContext(submission);
     if (teacher) {
       if (classroom.teacherId.toString() !== user.id)
         throw new ForbiddenException('Not allowed to request AI feedback');
@@ -1700,95 +1655,63 @@ export class LearningTasksService {
     }
   }
 
-  private async ensureCanViewSubmissionDetail(
-    submission: SubmissionWithMeta,
-    task: SubmissionDetailTaskLean,
-    classroomTask: ClassroomTaskWithClassroom | null,
-    user: { id: string; roles?: string[] },
-  ) {
-    const roles = user.roles ?? [];
-    const isSubmissionOwner = submission.studentId.toString() === user.id;
-    if (hasAnyRole(roles, STUDENT_ROLES) && isSubmissionOwner) {
-      return;
-    }
-
-    if (hasAnyRole(roles, TEACHER_ROLES)) {
-      await this.ensureTeacherCanViewSubmissionDetail(
-        submission,
-        task,
-        classroomTask,
-        user.id,
-      );
-      return;
-    }
-
-    throw new ForbiddenException('Not allowed to view submission detail');
-  }
-
-  private async ensureTeacherCanViewSubmissionDetail(
-    submission: SubmissionWithMeta,
-    task: SubmissionDetailTaskLean,
-    classroomTask: ClassroomTaskWithClassroom | null,
-    userId: string,
-  ) {
-    await this.ensureTeacherCanManageSubmission(
-      submission,
-      task,
-      classroomTask,
-      userId,
-      'Not allowed to view submission detail',
-    );
-  }
-
-  private async ensureTeacherCanManageSubmission(
-    submission: SubmissionWithMeta,
-    task: SubmissionDetailTaskLean,
-    classroomTask: ClassroomTaskWithClassroom | null,
+  private ensureTeacherCanManageSubmission(
+    classroom: SubmissionDetailClassroomLean,
     userId: string,
     deniedMessage: string,
   ) {
-    if (submission.classroomTaskId) {
-      if (!classroomTask) {
-        throw new NotFoundException('Classroom task not found');
-      }
-      const classroom = await this.classroomModel
-        .findById(classroomTask.classroomId)
-        .select('_id teacherId')
-        .lean<SubmissionDetailClassroomLean>()
-        .exec();
-      if (!classroom) {
-        throw new NotFoundException('Classroom not found');
-      }
-      if (classroom.teacherId.toString() !== userId) {
-        throw new ForbiddenException(deniedMessage);
-      }
-      return;
-    }
-
-    if (task.createdBy.toString() !== userId) {
+    if (classroom.teacherId.toString() !== userId) {
       throw new ForbiddenException(deniedMessage);
     }
   }
 
+  private requireSubmissionClassroomTaskId(
+    submission: SubmissionWithMeta,
+  ): Types.ObjectId {
+    if (!(submission.classroomTaskId instanceof Types.ObjectId)) {
+      throw new ConflictException('Submission has no valid classroom task');
+    }
+    return submission.classroomTaskId;
+  }
+
   private async loadSubmissionAuthContext(submission: SubmissionWithMeta) {
+    const classroomTaskId = this.requireSubmissionClassroomTaskId(submission);
     const [task, classroomTask] = await Promise.all([
       this.taskModel
         .findById(submission.taskId)
-        .select('_id title createdBy')
+        .select('_id title')
         .lean<SubmissionDetailTaskLean>()
         .exec(),
-      submission.classroomTaskId
-        ? this.classroomTaskModel
-            .findById(submission.classroomTaskId)
-            .select('_id classroomId taskId taskSnapshot settings status dueAt')
-            .lean<ClassroomTaskWithClassroom>()
-            .exec()
-        : Promise.resolve(null),
+      this.classroomTaskModel
+        .findById(classroomTaskId)
+        .select('_id classroomId taskId taskSnapshot settings status dueAt')
+        .lean<ClassroomTaskDeadlineConfig>()
+        .exec(),
     ]);
     if (!task) {
       throw new NotFoundException('Task not found');
     }
-    return { task, classroomTask };
+    if (!classroomTask) {
+      throw new NotFoundException('Classroom task not found');
+    }
+    if (
+      !(classroomTask.taskId instanceof Types.ObjectId) ||
+      !classroomTask.taskId.equals(submission.taskId)
+    ) {
+      throw new ConflictException('Submission does not match classroom task');
+    }
+    if (!(classroomTask.classroomId instanceof Types.ObjectId)) {
+      throw new NotFoundException('Classroom not found');
+    }
+    const classroom = await this.classroomModel
+      .findById(classroomTask.classroomId)
+      .select('_id teacherId')
+      .lean<SubmissionDetailClassroomLean>()
+      .exec();
+    if (!classroom) {
+      throw new NotFoundException('Classroom not found');
+    }
+    return { task, classroomTask, classroom };
   }
 
   private hasFeedbackUpdateFields(dto: UpdateFeedbackDto) {

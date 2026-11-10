@@ -190,9 +190,9 @@ export class LearningTasksController {
   @Get('submissions/:id/feedback')
   listFeedback(
     @Param('id') submissionId: string,
-    @CurrentUser() user: { id: string },
+    @CurrentUser() user: { id: string; roles?: string[] },
   ) {
-    return this.learningTasksService.listFeedback(submissionId, user.id);
+    return this.learningTasksService.listFeedback(submissionId, user);
   }
 
   @UseGuards(RolesGuard)

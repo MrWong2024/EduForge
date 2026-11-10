@@ -52,7 +52,7 @@ type ClassroomTaskFixture = {
 
 type SubmissionFixture = {
   _id: Types.ObjectId;
-  classroomTaskId?: Types.ObjectId | null;
+  classroomTaskId?: Types.ObjectId | Types.ObjectId[] | string | null;
   taskId: Types.ObjectId;
   studentId: Types.ObjectId;
   attemptNo: number;
@@ -112,10 +112,12 @@ const createHarness = (data: HarnessData = {}) => {
     data.classroomTasks?.[0]?.taskId ??
     data.submissions?.[0]?.taskId ??
     objectId();
+  const submissionClassroomTaskId = data.submissions?.[0]?.classroomTaskId;
   const classroomTaskId =
     data.classroomTasks?.[0]?._id ??
-    data.submissions?.[0]?.classroomTaskId ??
-    objectId();
+    (submissionClassroomTaskId instanceof Types.ObjectId
+      ? submissionClassroomTaskId
+      : objectId());
   const classroom: ClassroomFixture = {
     _id: classroomId,
     name: 'Class A',
@@ -210,15 +212,9 @@ const createHarness = (data: HarnessData = {}) => {
   };
   const filterSubmissions = (filter: Record<string, unknown>) => {
     const studentId = filter.studentId as Types.ObjectId | undefined;
-    const orClauses = (filter.$or as Array<Record<string, unknown>>) ?? [];
-    const classroomTaskClause = orClauses[0] as
-      { classroomTaskId?: { $in?: Types.ObjectId[] } } | undefined;
-    const fallbackClause = orClauses[1] as
-      { taskId?: { $in?: Types.ObjectId[] } } | undefined;
-    const classroomTaskIds = toIdSet(
-      classroomTaskClause?.classroomTaskId?.$in ?? [],
-    );
-    const taskIds = toIdSet(fallbackClause?.taskId?.$in ?? []);
+    const classroomTaskFilter = filter.classroomTaskId as
+      { $in?: Types.ObjectId[] } | undefined;
+    const classroomTaskIds = toIdSet(classroomTaskFilter?.$in ?? []);
     return submissions.filter((submission) => {
       if (
         studentId &&
@@ -226,11 +222,17 @@ const createHarness = (data: HarnessData = {}) => {
       ) {
         return false;
       }
-      const classroomTaskId = submission.classroomTaskId?.toString();
-      if (classroomTaskId) {
-        return classroomTaskIds.has(classroomTaskId);
+      const association = submission.classroomTaskId;
+      if (filter.$expr && !(association instanceof Types.ObjectId)) {
+        return false;
       }
-      return taskIds.has(submission.taskId.toString());
+      // MongoDB $in also matches an ObjectId inside an array without the scalar guard.
+      const values = Array.isArray(association) ? association : [association];
+      return values.some(
+        (value) =>
+          value instanceof Types.ObjectId &&
+          classroomTaskIds.has(value.toString()),
+      );
     });
   };
 
@@ -326,6 +328,7 @@ const createHarness = (data: HarnessData = {}) => {
     submissionModel,
     feedbackModel,
     userModel,
+    aiFeedbackJobService,
     ids: { studentId, classroomId, taskId, classroomTaskId },
   };
 };
@@ -668,6 +671,75 @@ describe('StudentLearningDashboardService', () => {
     });
   });
 
+  it('only counts scalar classroom associations without inferring a unique template match', async () => {
+    const classroomTaskId = objectId();
+    const taskId = objectId();
+    const studentId = objectId();
+    const firstSubmission = {
+      _id: objectId(),
+      classroomTaskId,
+      taskId,
+      studentId,
+      attemptNo: 1,
+      createdAt: new Date('2026-01-02T00:00:00.000Z'),
+    };
+    const latestSubmission = {
+      ...firstSubmission,
+      _id: objectId(),
+      attemptNo: 2,
+      createdAt: new Date('2026-01-03T00:00:00.000Z'),
+    };
+    const invalidSubmissions = [
+      undefined,
+      null,
+      classroomTaskId.toString(),
+      [classroomTaskId],
+    ].map((association) => ({
+      _id: objectId(),
+      ...(association === undefined ? {} : { classroomTaskId: association }),
+      taskId,
+      studentId,
+      attemptNo: 100,
+      createdAt: new Date('2026-01-04T00:00:00.000Z'),
+    }));
+    const harness = createHarness({
+      submissions: [firstSubmission, latestSubmission, ...invalidSubmissions],
+      feedbacks: [
+        {
+          submissionId: latestSubmission._id,
+          source: FeedbackSource.Teacher,
+          severity: FeedbackSeverity.Info,
+        },
+        ...invalidSubmissions.map((submission) => ({
+          submissionId: submission._id,
+          source: FeedbackSource.Teacher,
+          severity: FeedbackSeverity.Error,
+        })),
+      ],
+    });
+
+    const task = await getFirstTask(harness.service, studentId);
+
+    expect(harness.submissionModel.find).toHaveBeenCalledWith({
+      classroomTaskId: { $in: [classroomTaskId] },
+      $expr: { $eq: [{ $type: '$classroomTaskId' }, 'objectId'] },
+      studentId,
+    });
+    expect(task.mySubmissionsCount).toBe(2);
+    expect(task.myLatestSubmission?.submissionId).toBe(
+      latestSubmission._id.toString(),
+    );
+    expect(task.completionStatus).toMatchObject({
+      status: 'QUALIFIED',
+      source: FeedbackSource.Teacher,
+      latestSubmissionId: latestSubmission._id.toString(),
+      teacherFeedbackCount: 1,
+    });
+    expect(
+      harness.aiFeedbackJobService.getStatusMapBySubmissionIds,
+    ).toHaveBeenCalledWith([firstSubmission._id, latestSubmission._id]);
+  });
+
   it.each([
     [FeedbackSeverity.Info, 'QUALIFIED'],
     [FeedbackSeverity.Warn, 'QUALIFIED_WITH_WARNINGS'],
@@ -1002,10 +1074,10 @@ describe('StudentLearningDashboardService', () => {
       },
     });
     const submissionFilter = harness.submissionModel.find.mock.calls[0][0] as {
-      $or: Array<{ classroomTaskId?: { $in?: Types.ObjectId[] } }>;
+      classroomTaskId: { $in: Types.ObjectId[] };
     };
     expect(
-      submissionFilter.$or[0].classroomTaskId?.$in?.map((id) => id.toString()),
+      submissionFilter.classroomTaskId.$in.map((id) => id.toString()),
     ).toEqual([activeClassroomTaskId.toString()]);
   });
 

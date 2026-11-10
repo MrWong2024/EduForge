@@ -30,6 +30,7 @@ export async function teacherSubmissionScope(
   ).map((item) => item._id);
   return {
     taskId: new Types.ObjectId(taskId),
-    $or: [{ classroomTaskId: { $in: instanceIds } }, { classroomTaskId: null }],
+    classroomTaskId: { $in: instanceIds },
+    $expr: { $eq: [{ $type: '$classroomTaskId' }, 'objectId'] },
   };
 }

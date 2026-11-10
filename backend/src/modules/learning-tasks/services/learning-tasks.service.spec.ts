@@ -18,7 +18,11 @@ import { AiFeedbackJobStatus } from '../ai-feedback/schemas/ai-feedback-job.sche
 import { AiFeedbackJobService } from '../ai-feedback/services/ai-feedback-job.service';
 import { CreateSubmissionDto } from '../dto/create-submission.dto';
 import { Feedback } from '../schemas/feedback.schema';
-import { Submission, SubmissionStatus } from '../schemas/submission.schema';
+import {
+  Submission,
+  SubmissionSchema,
+  SubmissionStatus,
+} from '../schemas/submission.schema';
 import { Task, TaskStatus } from '../schemas/task.schema';
 import {
   TASK_TEMPLATE_SCOPE_ALL,
@@ -61,6 +65,7 @@ const createHarness = (
   } = {},
 ) => {
   const studentId = objectId();
+  const teacherId = objectId();
   const classroomId = objectId();
   const classroomTaskId = objectId();
   const taskId = objectId();
@@ -77,6 +82,7 @@ const createHarness = (
   };
   const task = {
     _id: taskId,
+    createdBy: teacherId,
     status: options.taskStatus ?? TaskStatus.Published,
   };
   const classroomTask = {
@@ -93,6 +99,7 @@ const createHarness = (
   };
   const classroom = {
     _id: classroomId,
+    teacherId,
     status: options.classroomStatus ?? ClassroomStatus.Active,
   };
 
@@ -105,7 +112,9 @@ const createHarness = (
   const taskModel = { findById: jest.fn(() => makeQuery(task)) };
   const submissionModel = {
     findById: jest.fn(() => makeQuery(submission)),
-    findOne: jest.fn(() => makeQuery(null)),
+    findOne: jest.fn<ReturnType<typeof makeQuery>, [Record<string, unknown>]>(
+      () => makeQuery(null),
+    ),
     create: jest.fn<Promise<unknown>, [Record<string, unknown>]>(),
     findOneAndUpdate: jest.fn(() =>
       makeQuery({ ...submission, reviewStartedAt: new Date() }),
@@ -147,7 +156,21 @@ const createHarness = (
     submissionModel,
     aiFeedbackJobService,
     enrollmentModel,
-    ids: { studentId, classroomId, classroomTaskId, taskId, submissionId },
+    classroomTaskModel,
+    classroomModel,
+    feedbackModel,
+    submission,
+    task,
+    classroomTask,
+    classroom,
+    ids: {
+      studentId,
+      teacherId,
+      classroomId,
+      classroomTaskId,
+      taskId,
+      submissionId,
+    },
   };
 };
 
@@ -861,5 +884,169 @@ describe('AI review detail eligibility (no database)', () => {
       }),
     ).rejects.toThrow('Not allowed to view submission detail');
     expect(h.aiFeedbackJobService.getReviewJob).not.toHaveBeenCalled();
+  });
+});
+
+describe('Submission classroom association contract (no database)', () => {
+  afterEach(() => jest.restoreAllMocks());
+
+  it('requires a classroomTaskId in offline Schema validation without adding a default', () => {
+    const schema = SubmissionSchema.clone();
+    schema.set('autoCreate', false);
+    schema.set('autoIndex', false);
+    const model = new Mongoose().model<Submission>('OfflineSubmission', schema);
+    const fields = {
+      taskId: objectId(),
+      studentId: objectId(),
+      attemptNo: 1,
+      content: submissionDto.content,
+      status: SubmissionStatus.Submitted,
+    };
+    const missing = new model(fields);
+    expect(missing.classroomTaskId).toBeUndefined();
+    expect(missing.validateSync()?.errors.classroomTaskId).toMatchObject({
+      kind: 'required',
+    });
+    expect(
+      new model({ ...fields, classroomTaskId: null }).validateSync()?.errors
+        .classroomTaskId,
+    ).toMatchObject({ kind: 'required' });
+    expect(
+      new model({ ...fields, classroomTaskId: objectId() }).validateSync(),
+    ).toBeUndefined();
+  });
+
+  it.each([
+    ['missing', undefined],
+    ['null', null],
+    ['hex string', objectId().toString()],
+    ['invalid string', 'invalid-reference'],
+    ['number', 7],
+    ['object', {}],
+    ['ObjectId array', [objectId()]],
+  ])(
+    'rejects %s classroomTaskId before reading AI or freezing content',
+    async (_label, value) => {
+      const h = createHarness();
+      if (value === undefined)
+        Reflect.deleteProperty(h.submission, 'classroomTaskId');
+      else Reflect.set(h.submission, 'classroomTaskId', value);
+      const owner = { id: h.ids.studentId.toString(), roles: ['student'] };
+      for (const action of [
+        () =>
+          h.service.getSubmissionDetail(h.ids.submissionId.toString(), owner),
+        () =>
+          h.service.requestAiFeedback(h.ids.submissionId.toString(), owner, {
+            expectedRevision: 0,
+          }),
+      ]) {
+        await expect(action()).rejects.toMatchObject({
+          status: 409,
+          message: 'Submission has no valid classroom task',
+        });
+      }
+      expect(h.classroomTaskModel.findById).not.toHaveBeenCalled();
+      expect(h.aiFeedbackJobService.getReviewJob).not.toHaveBeenCalled();
+      expect(
+        h.aiFeedbackJobService.ensureJobForSubmission,
+      ).not.toHaveBeenCalled();
+      expect(h.submissionModel.findOneAndUpdate).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each([
+    ['missing classroom task', 404, 'Classroom task not found'],
+    ['task mismatch', 409, 'Submission does not match classroom task'],
+    ['missing classroom', 404, 'Classroom not found'],
+  ])(
+    'rejects %s with the public association error before AI reads',
+    async (kind, status, message) => {
+      const h = createHarness();
+      if (kind === 'missing classroom task')
+        h.classroomTaskModel.findById.mockImplementation(() => makeQuery(null));
+      else if (kind === 'task mismatch')
+        Reflect.set(h.classroomTask, 'taskId', objectId());
+      else h.classroomModel.findById.mockImplementation(() => makeQuery(null));
+      await expect(
+        h.service.getSubmissionDetail(h.ids.submissionId.toString(), {
+          id: h.ids.studentId.toString(),
+          roles: ['student'],
+        }),
+      ).rejects.toMatchObject({ status, message });
+      expect(h.aiFeedbackJobService.getReviewJob).not.toHaveBeenCalled();
+      expect(h.submissionModel.findOneAndUpdate).not.toHaveBeenCalled();
+    },
+  );
+
+  it('does not grant the template author another classroom teacher authority', async () => {
+    const h = createHarness();
+    Reflect.set(h.classroom, 'teacherId', objectId());
+    await expect(
+      h.service.getSubmissionDetail(h.ids.submissionId.toString(), {
+        id: h.ids.teacherId.toString(),
+        roles: ['teacher'],
+      }),
+    ).rejects.toMatchObject({
+      status: 403,
+      message: 'Not allowed to view submission detail',
+    });
+    expect(h.aiFeedbackJobService.getReviewJob).not.toHaveBeenCalled();
+  });
+
+  it('keeps a non-owner student feedback request forbidden before inspecting invalid associations', async () => {
+    const h = createHarness();
+    Reflect.deleteProperty(h.submission, 'classroomTaskId');
+    await expect(
+      h.service.listFeedback(h.ids.submissionId.toString(), {
+        id: objectId().toString(),
+        roles: ['student'],
+      }),
+    ).rejects.toMatchObject({
+      status: 403,
+      message: 'Not allowed to view feedback',
+    });
+    expect(h.taskModel.findById).not.toHaveBeenCalled();
+    expect(h.classroomTaskModel.findById).not.toHaveBeenCalled();
+    expect(h.aiFeedbackJobService.getReviewJob).not.toHaveBeenCalled();
+  });
+
+  it('lets the owner read a valid historical submission without active enrollment or classroom', async () => {
+    const h = createHarness({ classroomStatus: ClassroomStatus.Archived });
+    jest.spyOn(h.enrollmentModel, 'exists').mockResolvedValue(null);
+    await expect(
+      h.service.getSubmissionDetail(h.ids.submissionId.toString(), {
+        id: h.ids.studentId.toString(),
+        roles: ['student'],
+      }),
+    ).resolves.toMatchObject({
+      id: h.ids.submissionId.toString(),
+      classroomTaskId: h.ids.classroomTaskId.toString(),
+    });
+  });
+
+  it('allocates attempts and checks cooldown only within the classroom instance', async () => {
+    const h = createHarness();
+    h.submissionModel.create.mockImplementation((payload) =>
+      Promise.resolve({ ...payload, _id: objectId() }),
+    );
+    await h.service.createSubmissionForClassroomTask(
+      h.ids.taskId.toString(),
+      h.ids.classroomTaskId.toString(),
+      submissionDto,
+      h.ids.studentId.toString(),
+    );
+    expect(h.submissionModel.findOne).toHaveBeenCalledTimes(2);
+    for (const [filter] of h.submissionModel.findOne.mock.calls)
+      expect(filter).toEqual({
+        studentId: h.ids.studentId,
+        classroomTaskId: h.ids.classroomTaskId,
+      });
+    expect(h.submissionModel.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        classroomTaskId: h.ids.classroomTaskId,
+        attemptNo: 1,
+        contentRevision: 0,
+      }),
+    );
   });
 });

@@ -5,7 +5,7 @@ import { SubmissionEditing } from './submission-response.dto';
 export class SubmissionDetailResponseDto {
   id!: string;
   taskId!: string;
-  classroomTaskId!: string | null;
+  classroomTaskId!: string;
   studentId!: string;
   studentName!: string | null;
   taskTitle!: string | null;

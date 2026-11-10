@@ -233,29 +233,13 @@ export class StudentLearningDashboardService {
     );
 
     const classroomTaskIds = classroomTasks.map((task) => task._id);
-    const taskIds = classroomTasks.map((task) => task.taskId);
-    const classroomTaskIdsByTaskId = new Map<string, string[]>();
-    for (const task of classroomTasks) {
-      const taskId = task.taskId.toString();
-      const current = classroomTaskIdsByTaskId.get(taskId) ?? [];
-      current.push(task._id.toString());
-      classroomTaskIdsByTaskId.set(taskId, current);
-    }
     const submissions =
       classroomTaskIds.length === 0
         ? []
         : await this.submissionModel
             .find({
-              $or: [
-                { classroomTaskId: { $in: classroomTaskIds } },
-                {
-                  taskId: { $in: taskIds },
-                  $or: [
-                    { classroomTaskId: { $exists: false } },
-                    { classroomTaskId: null },
-                  ],
-                },
-              ],
+              classroomTaskId: { $in: classroomTaskIds },
+              $expr: { $eq: [{ $type: '$classroomTaskId' }, 'objectId'] },
               studentId: new Types.ObjectId(userId),
             })
             .sort({ createdAt: -1 })
@@ -273,18 +257,7 @@ export class StudentLearningDashboardService {
       { count: number; latest?: SubmissionWithMeta }
     >();
     for (const submission of submissions) {
-      let key = submission.classroomTaskId?.toString();
-      if (!key) {
-        const fallbackTaskKeys = classroomTaskIdsByTaskId.get(
-          submission.taskId.toString(),
-        );
-        if (fallbackTaskKeys && fallbackTaskKeys.length === 1) {
-          key = fallbackTaskKeys[0];
-        }
-      }
-      if (!key) {
-        continue;
-      }
+      const key = submission.classroomTaskId.toString();
       const entry = submissionStatsMap.get(key) ?? { count: 0 };
       entry.count += 1;
       if (!entry.latest) {

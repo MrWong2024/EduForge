@@ -10,7 +10,7 @@ export type SubmissionEditing = {
 export class SubmissionResponseDto {
   id!: string;
   taskId!: string;
-  classroomTaskId?: string;
+  classroomTaskId!: string;
   studentId!: string;
   attemptNo!: number;
   contentRevision!: number | null;

@@ -156,7 +156,7 @@ Global SoT 只保留理解跨 Service workflow 必需的稳定不变量，不追
 - Upstream: `ClassroomsService`，由其执行学生角色校验。
 - Downstream / Dependencies: `ClassroomModel`、`CourseModel`、`ClassroomTaskModel`、`SubmissionModel`、`FeedbackModel`、`UserModel`、`AiFeedbackJobService`、`EnrollmentService`。
 - Consistency / State / Idempotency: 先取得 ACTIVE Enrollment 班级，再筛选 ACTIVE 班级与 ACTIVE 实例；模板当前状态不参与运行态过滤。按公开的到期/历史时间规则形成最终任务集合，再分页班级分组；无可见任务的班级不形成空分组，total 从最终分组计算。
-- Isolation: 提交与状态仅围绕最终返回的 `classroomTaskIds`；完成态只读取 `myLatestSubmission.submissionId` 的反馈，不按 taskId、classroomTaskId 或 studentId 粗聚合历史反馈。
+- Isolation: 提交查询限定学生本人及最终返回的 `classroomTaskIds`，同时校验字段 BSON 类型为标量 ObjectId；不查询无关联提交，也不以同模板唯一实例推测归属。完成态只读取 `myLatestSubmission.submissionId` 的反馈，不按 taskId、classroomTaskId 或 studentId 粗聚合历史反馈。
 - Side Effects: 只读。
 - Important Performance / Recovery: 当前页班级的课程/教师批量查找，提交、job 状态及完成态批量计算。无提交保留空最新提交状态；无 job 使用 NOT_REQUESTED。完成态来源/严重度优先级同 [Card 08D](#service-card-08dfeature-my-task-detail-z3)。
 - SoT: `backend/src/modules/classrooms/services/student-learning-dashboard.service.ts`；`backend/src/modules/classrooms/enrollments/services/enrollment.service.ts`。
@@ -192,7 +192,7 @@ Global SoT 只保留理解跨 Service workflow 必需的稳定不变量，不追
   - 模板承担资产管理，ClassroomTask 承担教学运行态；内容编辑不得隐式改变状态，同状态输入忽略后继续编辑，归档内容不可改。重复发布保持幂等；归档不检查/级联 ClassroomTask 引用，兼容 restore 入口不恢复归档模板。
   - 模板读范围由当前教师与共享可见性构造；legacy 缺省 visibility 兼容 SHARED，兼容 createdBy query 不突破当前教师范围；共享不转移作者写权限。分类为治理坐标，不作为 Course 外键或发布一致性约束；“未分类”查询兼容字段缺省任务。
   - listTasks 的难度条件按保存值精确匹配，并与既有 scope、status、knowledgeModule、courseLabel 及作者范围取交集；同一完整 filter 在 skip/limit 前应用于 items 与 countDocuments，保留原排序。省略难度时不排除未知、缺失或空串值；查询值域见 [DTO Cheatsheet](./handoff-backend-dto-cheatsheet.md#task-template-dto--response-family)。
-  - Submission 的 attemptNo 采用“查询最新编号 + 有界重试”，最多 3 次分配尝试，冲突不绕过唯一约束。旧通用写入口拒绝；新实例提交要求实际快照并逐次保存源码与说明，写 Submission 前重验班级/实例 ACTIVE，并校验截止与迟交规则，持久化提交时间及迟交结果，不以模板当前状态阻断既有实例。
+  - Submission 的 classroomTaskId 在 Schema 与内部创建入口必填；attemptNo 分配、冷却及创建时的既有提交查询始终按 classroomTaskId + studentId，不推测实例或按模板分配编号。attemptNo 采用“查询最新编号 + 有界重试”，最多 3 次分配尝试，冲突不绕过唯一约束。旧通用写入口拒绝；新实例提交要求实际快照并逐次保存源码与说明，写 Submission 前重验班级/实例 ACTIVE，并校验截止与迟交规则，持久化提交时间及迟交结果，不以模板当前状态阻断既有实例。
   - 首提与后续提交均只保存作品，不创建 AI Job、不写 reviewStartedAt；无 Job 时返回 NOT_REQUESTED。手工请求复用 `ensureJobForSubmission`，不重复创建已有 Job；ensure 前统一校验提交/实例关联与快照，学生还重验本人、Enrollment ACTIVE 和班级/实例运行态，教师保留班级 ownership 评阅边界。缺失或残留的旧策略字段均不参与判断。
   - 教师反馈修改复用 submission 管理上下文，校验反馈属于该提交、来源为 TEACHER 且已有作者与当前教师一致。旧教师反馈无 createdBy 时在授权更新中补写，不批量迁移历史数据。
   - 同次作品修改：身份、课堂关联/快照、成员、运行态、输入、截止及历史 Feedback/Job 检查完成后，按 `_id + expectedRevision + 未进入评阅` 单文档条件更新，原子替换允许内容、成对写修改时间/迟交事实并递增 revision。revision=0 的条件显式兼容字段缺失；已有非法版本/评阅状态 fail-closed。任何历史 Feedback/任意状态 Job 都禁止编辑，不要求最新 attempt；不建新 Submission、不增加 attempt、不触发 AI，也不套用创建冷却。首次提交/报表事实保持不变。
@@ -200,9 +200,9 @@ Global SoT 只保留理解跨 Service workflow 必需的稳定不变量，不追
   - Submission 与 Feedback/Job 不组成跨集合事务。固定后关联写失败、超时或返回不确定均不解锁；详情仍显示不能修改，客户端保留草稿，先读权威详情/反馈列表再由用户明确续行。Job 始终沿 submissionId 唯一键幂等，不重置 FAILED/DEAD/SUCCEEDED、不重新排队。
   - 教师反馈创建显式挑选规范业务 payload，版本前置不 spread 进文档；仅捕获预期复合唯一键重复，查回后核对 submission、作者及完整规范 source/type/severity/message/suggestion/tags/scoreHint。完全一致返回既有反馈，不同明确冲突；其它 E11000 继续失败。教师反馈 PATCH 不增加第二套版本机制。历史缺字段只读兼容、不迁移、不修复。
   - 提交详情复用 `buildAiReviewSummary` 对同一 Job 的所有预留请求（含失败尝试）构造用量摘要：各细分独立检查完整性，派生项先逐请求验证再汇总，避免跨请求异常相互抵消；未知及超安全范围不输出失真数值。摘要只读派生，不写回 requests 或升级 budgetVersion；公开字段、包含关系及历史口径见 [Submission DTO](./handoff-backend-dto-cheatsheet.md#submission-request--response-family)。
-- Isolation: 学生只访问本人 Submission；教师管理上下文在有 classroomTaskId 时沿实例定位班级 owner，否则沿 Task 定位作者。教师默认提交列表与计数共同过滤当前 Enrollment ACTIVE，移除学生历史记录保留；课堂链路保留 classroomTaskId，历史无关联提交只读。模板级 list/stats 与 ReportsService 共用 teacherSubmissionScope，在分页/计数/去重/反馈聚合前限定自有班级实例和旧无关联提交。
+- Isolation: 学生只访问本人 Submission；单条读取及写入复用课堂关联上下文校验，教师管理权仅沿实例定位所属班级 owner。Schema required 不替代运行时异常数据保护，关联失败早于内容更新、评阅固定和关联写入；AI 明细仍在授权之后读取。教师默认提交列表与计数共同过滤当前 Enrollment ACTIVE，移除学生历史记录保留。模板级 list/stats 与 ReportsService 共用 teacherSubmissionScope，在分页/计数/去重/反馈聚合前限定自有班级中属于当前 Task 的实例及标量 ObjectId 关联；listMySubmissions 同样排除无关联和非法类型记录。
 - Side Effects: 写模板、Submission、Feedback；正式手工申请委托 JobService 确保 Job。课堂提交冷却及 AI 执行参数见 [Config Matrix](./handoff-backend-config-matrix.md)。
-- Important Performance / Recovery: 列表筛选在数据库中组合执行；批量关联发布者与 Job 状态。发布候选复合索引分别以 `createdBy` 或 `visibility` 为前缀，后接 `status,courseLabel,knowledgeModule,updatedAt,createdAt`，支持本人及共享分支；模板列表另有 `{status:1,knowledgeModule:1,createdAt:-1}`。这里描述 Schema 定义，不代表存量数据库旧索引已清理；编号重试耗尽安全拒绝。
+- Important Performance / Recovery: 列表筛选在数据库中组合执行；批量关联发布者与 Job 状态。发布候选复合索引分别以 `createdBy` 或 `visibility` 为前缀，后接 `status,courseLabel,knowledgeModule,updatedAt,createdAt`，支持本人及共享分支；模板列表另有 `{status:1,knowledgeModule:1,createdAt:-1}`。这些 Schema 声明不代表实库旧索引已清理。Submission 现有两个 partial unique 索引及其他索引定义保持不变，旧专用索引声明与实库清理待下一阶段处理；本轮只退役无课堂关联的读写/授权兼容。缺快照历史实例的读取投影及既有写入门禁继续保留；编号重试耗尽安全拒绝。
 - SoT: `backend/src/modules/learning-tasks/services/learning-tasks.service.ts`；`backend/src/modules/learning-tasks/schemas/task.schema.ts`；`backend/src/modules/learning-tasks/schemas/submission.schema.ts`；`backend/src/modules/learning-tasks/ai-feedback/services/ai-feedback-job.service.ts`；`backend/src/modules/learning-tasks/ai-feedback/lib/ai-review-summary.ts`。
 - Boundary / Non-responsibility: 公开生命周期、提交详情读源及 detail/list 内容暴露差异见 [API Map](./handoff-backend-api-map.md#learning-tasks)，字段/validation 见 [DTO Cheatsheet](./handoff-backend-dto-cheatsheet.md#learning-tasks)；本 Service 不执行 Provider 推理，不用模板资产状态代替课堂运行态。
 
@@ -352,7 +352,7 @@ Global SoT 只保留理解跨 Service workflow 必需的稳定不变量，不追
 - Upstream: 任务共性问题报表入口。
 - Downstream / Dependencies: `TaskModel`、`SubmissionModel`、`FeedbackModel`、`ClassroomModel`、`ClassroomTaskModel`、teacherSubmissionScope。
 - Consistency / State / Idempotency: 统计仅纳入 AI/TEACHER 反馈；聚合 limit 收敛到 1..10，每个 tag 的样例最多 3 条；无反馈返回空聚合。
-- Isolation: 校验任务作者；沿 teacherSubmissionScope 先限制该教师自有班级实例及旧无课堂关联提交，再统计/去重/聚合反馈，不能跨教师班级。
+- Isolation: 校验任务作者；沿 teacherSubmissionScope 先限制该教师自有班级中属于当前 Task 的实例及标量 ObjectId 关联，再统计/去重/聚合反馈，不能跨教师班级。
 - Side Effects: 只读。
 - Important Performance / Recovery: 单次 aggregate + facet 同时形成 tags、types 与样例，避免重复扫描。
 - SoT: `backend/src/modules/learning-tasks/services/learning-tasks-reports.service.ts`。

@@ -19,7 +19,12 @@ import {
   Submission,
   SubmissionStatus,
 } from '../src/modules/learning-tasks/schemas/submission.schema';
-import { Feedback } from '../src/modules/learning-tasks/schemas/feedback.schema';
+import {
+  Feedback,
+  FeedbackSource,
+  FeedbackType,
+  FeedbackSeverity,
+} from '../src/modules/learning-tasks/schemas/feedback.schema';
 import {
   AiFeedbackJob,
   AiFeedbackJobStatus,
@@ -947,6 +952,8 @@ describe('A1 classroom text task backend contract (HTTP)', () => {
         b = await getDetail(agent, second.id);
       expect(a.content).toEqual(first.content);
       expect(b.content).toEqual(second.content);
+      expect(a.classroomTaskId).toBe(instanceA.id);
+      expect(b.classroomTaskId).toBe(instanceA.id);
       expect(a.taskTitle).toBe(oldContent.title);
       expect(a.taskSnapshotAvailable).toBe(true);
       expect(a.meta).toEqual({ aiUsageDeclaration: 'Brainstorming only' });
@@ -1045,6 +1052,162 @@ describe('A1 classroom text task backend contract (HTTP)', () => {
         submissionId: new Types.ObjectId(foreign.id),
       }),
     ).toBe(0);
+  });
+
+  it('excludes native invalid classroom links from lists and rejects their public operations without writes', async () => {
+    const template = await makeTask(teacherA);
+    const ownInstance = await publish(teacherA, classA, template);
+    const otherInstance = await publish(teacherB, classB, template);
+    const own = await submit(studentA, classA, ownInstance);
+    const other = await submit(studentB, classB, otherInstance);
+    expect(own.classroomTaskId).toBe(ownInstance.id);
+    expect(other.classroomTaskId).toBe(otherInstance.id);
+    const database = submissions.db.db;
+    if (!database) throw new Error('Missing connected test database');
+    const nativeSubmissions = database.collection(submissions.collection.name);
+    // Native writes preserve invalid BSON shapes instead of Mongoose casting them.
+    // Every record belongs to this spec's student IDs and existing exact cleanup.
+    const invalid = [
+      undefined,
+      null,
+      ownInstance.id,
+      [new Types.ObjectId(ownInstance.id)],
+    ].map((classroomTaskId, index) => ({
+      _id: new Types.ObjectId(),
+      taskId: new Types.ObjectId(template),
+      studentId: userIds[index === 1 ? 3 : 2],
+      ...(classroomTaskId === undefined ? {} : { classroomTaskId }),
+      attemptNo: 100 + index,
+      submittedAt: new Date(),
+      createdAt: new Date(),
+      updatedAt: new Date(),
+      contentRevision: 0,
+      content: {
+        codeText: 'invalid association fixture',
+        language: 'typescript',
+      },
+      status: SubmissionStatus.Submitted,
+    }));
+    await nativeSubmissions.insertMany(invalid);
+    const existingFeedback = await feedback.create({
+      submissionId: invalid[0]._id,
+      createdBy: userIds[0],
+      source: FeedbackSource.Teacher,
+      type: FeedbackType.Other,
+      severity: FeedbackSeverity.Warn,
+      message: 'Native unbound feedback fixture',
+      tags: ['naming'],
+    });
+    const filter = { _id: { $in: invalid.map((item) => item._id) } };
+    const before = await nativeSubmissions
+      .find(filter)
+      .sort({ _id: 1 })
+      .toArray();
+    const feedbackBefore = await feedback.collection.findOne({
+      _id: existingFeedback._id,
+    });
+
+    const list = (
+      await teacherA
+        .get('/api/learning-tasks/tasks/' + template + '/submissions')
+        .query({ page: 1, limit: 1 })
+        .expect(200)
+    ).body as List;
+    expect(list.total).toBe(1);
+    expect(list.items.map((item) => item.id)).toEqual([own.id]);
+    const nextPage = (
+      await teacherA
+        .get('/api/learning-tasks/tasks/' + template + '/submissions')
+        .query({ page: 2, limit: 1 })
+        .expect(200)
+    ).body as List;
+    expect(nextPage).toMatchObject({ total: 1, items: [] });
+    await teacherB
+      .get('/api/learning-tasks/tasks/' + template + '/submissions')
+      .expect(403);
+    const mine = (
+      await studentA
+        .get('/api/learning-tasks/tasks/' + template + '/submissions/mine')
+        .expect(200)
+    ).body as Array<{ id: string; classroomTaskId: string }>;
+    expect(mine.map((item) => item.id)).toEqual([own.id]);
+    expect(mine[0].classroomTaskId).toBe(ownInstance.id);
+    const stats = (
+      await teacherA
+        .get('/api/learning-tasks/tasks/' + template + '/stats')
+        .expect(200)
+    ).body as {
+      submissionsCount: number;
+      distinctStudentsCount: number;
+      topTags: string[];
+    };
+    expect(stats).toMatchObject({
+      submissionsCount: 1,
+      distinctStudentsCount: 1,
+      topTags: [],
+    });
+    const report = (
+      await teacherA
+        .get('/api/learning-tasks/tasks/' + template + '/reports/common-issues')
+        .expect(200)
+    ).body as {
+      summary: { submissionsCount: number; distinctStudentsCount: number };
+      topTags: unknown[];
+    };
+    expect(report.summary).toEqual({
+      submissionsCount: 1,
+      distinctStudentsCount: 1,
+    });
+    expect(report.topTags).toEqual([]);
+
+    const url = '/api/learning-tasks/submissions/' + invalid[0]._id.toString();
+    const invalidMessage = 'Submission has no valid classroom task';
+    await studentB.get(url + '/feedback').expect(403);
+    for (const agent of [teacherA, studentA]) {
+      const detail = await agent.get(url).expect(409);
+      expect((detail.body as { message: string }).message).toBe(invalidMessage);
+      const listFeedback = await agent.get(url + '/feedback').expect(409);
+      expect((listFeedback.body as { message: string }).message).toBe(
+        invalidMessage,
+      );
+      const ai = await ask(agent, invalid[0]._id.toString()).expect(409);
+      expect((ai.body as { message: string }).message).toBe(invalidMessage);
+    }
+    const deniedFeedback = await teacherA
+      .post(url + '/feedback')
+      .send({
+        expectedRevision: 0,
+        source: 'TEACHER',
+        type: 'OTHER',
+        severity: 'INFO',
+        message: 'Must not persist',
+      })
+      .expect(409);
+    expect((deniedFeedback.body as { message: string }).message).toBe(
+      invalidMessage,
+    );
+    const deniedPatch = await teacherA
+      .patch(url + '/feedback/' + existingFeedback._id.toString())
+      .send({ message: 'Must not replace historical feedback' })
+      .expect(409);
+    expect((deniedPatch.body as { message: string }).message).toBe(
+      invalidMessage,
+    );
+    const arrayDetail = await studentA
+      .get('/api/learning-tasks/submissions/' + invalid[3]._id.toString())
+      .expect(409);
+    expect((arrayDetail.body as { message: string }).message).toBe(
+      invalidMessage,
+    );
+    expect(
+      await nativeSubmissions.find(filter).sort({ _id: 1 }).toArray(),
+    ).toEqual(before);
+    expect(
+      await feedback.collection.findOne({ _id: existingFeedback._id }),
+    ).toEqual(feedbackBefore);
+    const related = { submissionId: { $in: invalid.map((item) => item._id) } };
+    expect(await feedback.countDocuments(related)).toBe(1);
+    expect(await jobs.countDocuments(related)).toBe(0);
   });
 
   it('keeps allowLate defaults and false, clears dueAt, and rejects empty PATCH or null allowLate', async () => {
@@ -1381,13 +1544,17 @@ describe('A1 classroom text task backend contract (HTTP)', () => {
       content: { codeText: 'old source', language: 'typescript' },
       status: SubmissionStatus.Submitted,
     });
-    const unbound = await submissions.create({
+    const unbound = {
+      _id: new Types.ObjectId(),
       taskId: new Types.ObjectId(legacyTask),
       studentId: userIds[2],
       attemptNo: 1,
       content: { codeText: 'unbound source', language: 'typescript' },
       status: SubmissionStatus.Submitted,
-    });
+    };
+    const database = submissions.db.db;
+    if (!database) throw new Error('Missing connected test database');
+    await database.collection(submissions.collection.name).insertOne(unbound);
     await teacherA
       .post(
         '/api/learning-tasks/submissions/' + saved._id.toString() + '/feedback',
@@ -1459,7 +1626,10 @@ describe('A1 classroom text task backend contract (HTTP)', () => {
         .get('/api/learning-tasks/tasks/' + legacyTask + '/submissions')
         .expect(200)
     ).body as List;
-    expect(legacyList.total).toBe(2);
+    expect(legacyList.total).toBe(1);
+    expect(legacyList.items.map((item) => item.id)).toEqual([
+      saved._id.toString(),
+    ]);
     const provider = jest.spyOn(
       app.get(DefaultStubAiFeedbackProvider),
       'analyzeSubmission',
