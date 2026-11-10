@@ -8,6 +8,7 @@ import { PageHeader } from "@/components/blocks/PageHeader";
 import { TeacherFeedbackForm } from "@/components/teacher/TeacherFeedbackForm";
 import { TeacherFeedbackHistory } from "@/components/teacher/TeacherFeedbackHistory";
 import { fetchJson, FetchJsonError } from "@/lib/api/client";
+import { getMe } from "@/lib/auth/session";
 import {
   buildErrorDescription,
   extractRawDetail,
@@ -146,6 +147,10 @@ export default async function TeacherSubmissionDetailPage({
       />
     );
   }
+
+  const me = await getMe().catch(() => null);
+  const currentUserId =
+    typeof me?.id === "string" && me.id.trim() ? me.id : undefined;
 
   let rubric: Record<string, unknown> | undefined;
   let rubricAvailable = false;
@@ -320,9 +325,15 @@ export default async function TeacherSubmissionDetailPage({
 
       <section className="space-y-3">
         <h2 className="text-base font-semibold text-zinc-900">反馈历史</h2>
+        {currentUserId === undefined ? (
+          <p className="text-sm text-zinc-600">
+            当前身份暂无法确认，历史反馈仅供查看，请刷新页面后再试。
+          </p>
+        ) : null}
         <TeacherFeedbackHistory
           items={viewModel.feedback.items}
           submissionId={submissionId}
+          currentUserId={currentUserId}
         />
       </section>
     </section>

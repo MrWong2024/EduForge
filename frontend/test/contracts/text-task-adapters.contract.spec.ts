@@ -41,6 +41,7 @@ import {
 } from "../../lib/learning-tasks/submission-language";
 import { toDisplayLateDuration } from "../../lib/ui/format";
 import { normalizeTaskTemplateVisibility } from "../../lib/learning-tasks/template-visibility-scope";
+import { canEditTeacherFeedback } from "../../lib/learning-tasks/teacher-feedback";
 
 test("classroom status adapters preserve only the three exact persisted states", () => {
   for (const status of ["ACTIVE", "CLOSED", "RECALLED"] as const) {
@@ -314,6 +315,144 @@ test("student difficulty preserves the formal task and server state without live
   expect(
     toMyTaskDetailResponse({ ...payload, task: {} }).task.difficulty,
   ).toBeUndefined();
+  expect(JSON.stringify(payload)).toBe(before);
+});
+
+test("teacher feedback editing requires an explicit matching author and preserves its input", () => {
+  const feedback = Object.freeze({
+    id: "feedback-1",
+    source: "TEACHER",
+    createdBy: "teacher-1",
+    message: "保留教师反馈正文",
+  });
+  const before = { ...feedback };
+  expect(canEditTeacherFeedback(feedback, "teacher-1")).toBe(true);
+  expect(feedback).toEqual(before);
+});
+
+test("teacher feedback editing rejects missing, blank and non-string identifiers even when both identities match", () => {
+  const valid = Object.freeze({
+    id: "feedback-1",
+    source: "TEACHER",
+    createdBy: "teacher-1",
+  });
+  const missingId = Object.freeze({
+    source: "TEACHER",
+    createdBy: "teacher-1",
+  });
+  const missingAuthor = Object.freeze({ id: "feedback-1", source: "TEACHER" });
+  expect(canEditTeacherFeedback(missingId, "teacher-1")).toBe(false);
+  expect(canEditTeacherFeedback(missingAuthor, "teacher-1")).toBe(false);
+  expect(canEditTeacherFeedback(missingAuthor, undefined)).toBe(false);
+  expect(Object.hasOwn(missingId, "id")).toBe(false);
+  expect(Object.hasOwn(missingAuthor, "createdBy")).toBe(false);
+  for (const value of [
+    undefined,
+    null,
+    "",
+    " \t\n ",
+    1,
+    false,
+    Object.freeze([]),
+    Object.freeze({}),
+  ]) {
+    const invalidId = Object.freeze({ ...valid, id: value });
+    const invalidAuthor = Object.freeze({ ...valid, createdBy: value });
+    expect(canEditTeacherFeedback(invalidId, "teacher-1")).toBe(false);
+    expect(canEditTeacherFeedback(valid, value)).toBe(false);
+    expect(canEditTeacherFeedback(invalidAuthor, "teacher-1")).toBe(false);
+    expect(canEditTeacherFeedback(invalidAuthor, value)).toBe(false);
+    expect(invalidId.id).toBe(value);
+    expect(invalidAuthor.createdBy).toBe(value);
+  }
+});
+
+test("teacher feedback editing does not infer sources or normalize identity matches", () => {
+  const valid = Object.freeze({
+    id: "feedback-1",
+    source: "TEACHER",
+    createdBy: "teacher-1",
+  });
+  const missingSource = Object.freeze({
+    id: "feedback-1",
+    createdBy: "teacher-1",
+  });
+  expect(canEditTeacherFeedback(missingSource, "teacher-1")).toBe(false);
+  expect(Object.hasOwn(missingSource, "source")).toBe(false);
+  for (const source of [
+    undefined,
+    null,
+    "AI",
+    "UNKNOWN",
+    "teacher",
+    " TEACHER ",
+  ]) {
+    const feedback = Object.freeze({ ...valid, source });
+    expect(canEditTeacherFeedback(feedback, "teacher-1")).toBe(false);
+    expect(feedback.source).toBe(source);
+  }
+  for (const [createdBy, currentUserId] of [
+    ["other-teacher", "teacher-1"],
+    [" teacher-1", "teacher-1"],
+    ["teacher-1", "teacher-1 "],
+    ["Teacher-1", "teacher-1"],
+    ["teacher-1", "TEACHER-1"],
+  ]) {
+    const feedback = Object.freeze({ ...valid, createdBy });
+    expect(canEditTeacherFeedback(feedback, currentUserId)).toBe(false);
+    expect(feedback.createdBy).toBe(createdBy);
+  }
+  const identicalRawIds = Object.freeze({ ...valid, createdBy: " teacher-1 " });
+  expect(canEditTeacherFeedback(identicalRawIds, " teacher-1 ")).toBe(true);
+  expect(identicalRawIds.createdBy).toBe(" teacher-1 ");
+});
+
+test("teacher feedback adapters preserve known authors and leave absent or null authors unknown without changing content or raw references", () => {
+  const content = Object.freeze({
+    source: "TEACHER",
+    type: "STYLE",
+    severity: "WARN",
+    message: "保留教师反馈正文",
+    suggestion: "保留修改建议",
+    tags: Object.freeze(["readability"]),
+    createdAt: "2026-11-01T01:00:00Z",
+  });
+  const known = Object.freeze({
+    ...content,
+    id: "known",
+    createdBy: "teacher-1",
+  });
+  const missing = Object.freeze({ ...content, id: "missing" });
+  const nullAuthor = Object.freeze({ ...content, id: "null", createdBy: null });
+  const items = Object.freeze([known, missing, nullAuthor]);
+  const payload = Object.freeze({ items });
+  const before = JSON.stringify(payload);
+  const result = toTeacherFeedbackListResponse(payload);
+
+  expect(result.items.map((item) => item.createdBy)).toEqual([
+    "teacher-1",
+    undefined,
+    undefined,
+  ]);
+  expect(
+    result.items.map((item) => canEditTeacherFeedback(item, "teacher-1")),
+  ).toEqual([true, false, false]);
+  for (const [index, item] of result.items.entries()) {
+    expect(item.raw).toBe(items[index]);
+    expect(item).toMatchObject({
+      source: "TEACHER",
+      type: "STYLE",
+      severity: "WARN",
+      message: "保留教师反馈正文",
+      suggestion: "保留修改建议",
+      tags: ["readability"],
+      createdAt: "2026-11-01T01:00:00Z",
+    });
+  }
+  expect(result.raw).toBe(payload);
+  expect(payload.items).toBe(items);
+  expect(Object.hasOwn(missing, "createdBy")).toBe(false);
+  expect(nullAuthor.createdBy).toBeNull();
   expect(JSON.stringify(payload)).toBe(before);
 });
 

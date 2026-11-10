@@ -12,6 +12,7 @@ import type {
   TeacherFeedbackItem,
   UpdateTeacherFeedbackRequest,
 } from "@/lib/api/types-teacher";
+import { canEditTeacherFeedback } from "@/lib/learning-tasks/teacher-feedback";
 import {
   FEEDBACK_SEVERITIES,
   FEEDBACK_TYPES,
@@ -30,6 +31,7 @@ import {
 type TeacherFeedbackEditFormProps = {
   feedback: TeacherFeedbackItem;
   submissionId: string;
+  currentUserId?: string;
   onCancel: () => void;
   onSaved?: () => void;
 };
@@ -68,10 +70,12 @@ const getUpdateFeedbackErrorSummary = (status: number): string => {
 export function TeacherFeedbackEditForm({
   feedback,
   submissionId,
+  currentUserId,
   onCancel,
   onSaved,
 }: TeacherFeedbackEditFormProps) {
   const router = useRouter();
+  const canEdit = canEditTeacherFeedback(feedback, currentUserId);
   const initialValues = useMemo(
     () => ({
       type: normalizeFeedbackType(feedback.type),
@@ -115,6 +119,9 @@ export function TeacherFeedbackEditForm({
 
   const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+    if (!canEdit || isSubmitting) {
+      return;
+    }
     setValidationError(null);
     setErrorState(null);
 
@@ -192,6 +199,7 @@ export function TeacherFeedbackEditForm({
           <span className="mb-1 block text-zinc-700">类型</span>
           <select
             value={type}
+            disabled={!canEdit || isSubmitting}
             onChange={(event) =>
               setType(event.target.value as FeedbackTypeValue)
             }
@@ -209,6 +217,7 @@ export function TeacherFeedbackEditForm({
           <span className="mb-1 block text-zinc-700">严重级别</span>
           <select
             value={severity}
+            disabled={!canEdit || isSubmitting}
             onChange={(event) =>
               setSeverity(event.target.value as FeedbackSeverityValue)
             }
@@ -227,6 +236,7 @@ export function TeacherFeedbackEditForm({
         <span className="mb-1 block text-zinc-700">反馈内容</span>
         <textarea
           value={message}
+          disabled={!canEdit || isSubmitting}
           onChange={(event) => setMessage(event.target.value)}
           rows={4}
           className="w-full rounded-md border border-zinc-300 px-3 py-2"
@@ -238,6 +248,7 @@ export function TeacherFeedbackEditForm({
         <span className="mb-1 block text-zinc-700">建议（可选）</span>
         <textarea
           value={suggestion}
+          disabled={!canEdit || isSubmitting}
           onChange={(event) => setSuggestion(event.target.value)}
           rows={3}
           className="w-full rounded-md border border-zinc-300 px-3 py-2"
@@ -245,7 +256,10 @@ export function TeacherFeedbackEditForm({
         />
       </label>
 
-      <fieldset className="mt-3 block text-sm">
+      <fieldset
+        disabled={!canEdit || isSubmitting}
+        className="mt-3 block text-sm"
+      >
         <legend className="mb-2 block text-zinc-700">
           标签（可选，多选；不选将归为“其他”）
         </legend>
@@ -275,7 +289,7 @@ export function TeacherFeedbackEditForm({
       <div className="mt-4 flex flex-wrap items-center gap-3">
         <button
           type="submit"
-          disabled={isSubmitting || !hasChanges}
+          disabled={!canEdit || isSubmitting || !hasChanges}
           className="rounded-md bg-zinc-900 px-4 py-2 text-sm font-medium text-white disabled:cursor-not-allowed disabled:bg-zinc-400"
         >
           {isSubmitting ? "保存中..." : "保存修改"}
@@ -292,6 +306,12 @@ export function TeacherFeedbackEditForm({
           <span className="text-xs text-zinc-500">内容未变化</span>
         ) : null}
       </div>
+
+      {!canEdit ? (
+        <p className="mt-3 text-sm text-zinc-700">
+          当前无法修改这条反馈，请刷新页面核对作者和登录状态。
+        </p>
+      ) : null}
 
       {validationError ? (
         <p className="mt-3 text-sm text-red-700">{validationError}</p>

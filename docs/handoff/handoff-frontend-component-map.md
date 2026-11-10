@@ -87,9 +87,9 @@
 | PublishTaskStatusButton | `components/teacher/PublishTaskStatusButton.tsx` | 单一模板发布操作；当前 classroomTask 详情页不使用，模板生命周期入口留在模板层 |
 | RemoveStudentButton | `components/teacher/RemoveStudentButton.tsx` | 单个成员移除及动作结果，不负责成员列表或成员关系判定 |
 | TeacherFeedbackForm | `components/teacher/TeacherFeedbackForm.tsx` | 教师反馈创建输入与提交，复用统一反馈选项；评语草稿绑定实际查看版本，刷新不重绑，冲突/未知结果保留草稿并显式核对当前作品与反馈后确认继续；标签可选，不提供 scoreHint 入口，合同与归一化归 API Owner |
-| TeacherFeedbackHistory | `components/teacher/TeacherFeedbackHistory.tsx` | 教师与 AI 反馈历史组合及编辑态切换，同一时间只展开一个编辑表单；仅明确 TEACHER 且有 id 的反馈可修改，AI 只读；未知或缺失来源有记录时才展示“其他反馈（来源未识别）”只读兜底，不作为正式业务来源 |
-| TeacherFeedbackEditForm | `components/teacher/TeacherFeedbackEditForm.tsx` | 单条教师反馈原地编辑、请求/错误状态、保存后退出编辑；与创建表单保持输入能力一致，不展示或编辑 scoreHint，不承担历史列表状态 |
-| TeacherSubmissionDetailPage | `app/teacher/submissions/[submissionId]/page.tsx` | 权威详情/反馈加载、返回导航及共享作品/AI 展示；可选评阅标准复用 TaskRubric，正式实例读源与失败边界见 API Map；AI 申请仅更新局部结果，不自动整页刷新，不以 AI 状态改变人工反馈表单 key；新增表单和历史编辑态归 feedback 组件 |
+| TeacherFeedbackHistory | `components/teacher/TeacherFeedbackHistory.tsx` | 教师与 AI 反馈历史组合及编辑态切换，同一时间只展开一个编辑表单；每次 render 用当前 item/currentUserId 调用 canEditTeacherFeedback，canEdit 与 isEditing 共同阻止旧展开状态绕过新资格。无资格保留正文、建议、标签、日期和原分组；未知或缺失来源有记录时才展示“其他反馈（来源未识别）”只读兜底，不作为正式业务来源 |
+| TeacherFeedbackEditForm | `components/teacher/TeacherFeedbackEditForm.tsx` | 单条教师反馈原地编辑；独立用当前 feedback/currentUserId 调用同一资格 helper，控件与保存 handler 均拒绝无资格或 pending，守卫早于请求构造和提交状态，取消入口保留。失败保留草稿，成功沿原流程退出编辑；与创建表单保持输入能力一致，不展示或编辑 scoreHint，不承担历史列表状态；调用合同见 API Map |
+| TeacherSubmissionDetailPage | `app/teacher/submissions/[submissionId]/page.tsx` | 权威详情/反馈加载、返回导航及共享作品/AI 展示；通过既有 getMe 向历史组件仅传当前用户 ID，辅助身份失败只令历史修改降级，顺序及身份来源合同见 API Map。可选评阅标准复用 TaskRubric；AI 申请仅更新局部结果，不自动整页刷新，不以 AI 状态改变人工反馈表单 key；新增表单和历史编辑态归 feedback 组件 |
 
 ## 6) Teacher Analytics / Reports
 
@@ -150,6 +150,7 @@
 | Text submission helpers | `lib/learning-tasks/text-submission.ts` | 原文请求构造、码点校验、保存后 POST 门禁与同一详情恢复路径、已知公开提交错误安全适配；产品实际调用 |
 | Submission AI operations | `lib/learning-tasks/submission-ai-operations.ts` | 单个挂载提交内的操作标识、串行读写、确认资格与已接纳摘要；无网络、无全局锁，不定义后端 Job 状态转换 |
 | AI Review | `lib/learning-tasks/ai-review.ts` | 快照展示、严格摘要适配及学生轮询资格的纯逻辑，不推断后端授权 |
+| Teacher Feedback Eligibility | `lib/learning-tasks/teacher-feedback.ts` | canEditTeacherFeedback 供 History / EditForm 实际复用；仅读取反馈 id/source/createdBy 与 currentUserId 的窄职责纯资格判断，不修改输入或推导身份；规则见 Frontend API Map，不替代后端授权 |
 | UI Status | `lib/ui/status.ts` | 按领域显示模板、课程、班级、课堂任务、成员关系和账号状态，统一 AI 状态、失败原因及通用错误摘要；仅转换显示标签，不参与状态或资格判断 |
 | Feedback Options | `lib/ui/feedback-options.ts` | 已知反馈类型、严重程度按“英文 value - 中文”双语显示，来源仍用中文；保留现有选项值、顺序及表单归一化，不把未知值伪装成已知分类 |
 | Feedback Tags | `lib/ui/feedback-tags.ts` | 预设反馈标签的 label 按“英文 value - 中文”双语显示，helper 直接返回 label，不重复拼接前缀；未知非空标签仍保留原文，value、顺序及业务文本不变 |

@@ -7,6 +7,7 @@ import {
   groupTeacherFeedbackItems,
   type TeacherFeedbackItem,
 } from "@/lib/api/types-teacher";
+import { canEditTeacherFeedback } from "@/lib/learning-tasks/teacher-feedback";
 import { toDisplayDate, toDisplayText } from "@/lib/ui/format";
 import {
   getFeedbackSourceLabel,
@@ -18,6 +19,7 @@ import { getFeedbackTagLabel } from "@/lib/ui/feedback-tags";
 type TeacherFeedbackHistoryProps = {
   items: TeacherFeedbackItem[];
   submissionId: string;
+  currentUserId?: string;
 };
 
 const hasUpdatedAtChanged = (item: TeacherFeedbackItem): boolean => {
@@ -56,6 +58,7 @@ const FeedbackReadonlyBody = ({ item }: { item: TeacherFeedbackItem }) => (
 export function TeacherFeedbackHistory({
   items,
   submissionId,
+  currentUserId,
 }: TeacherFeedbackHistoryProps) {
   const [editingFeedbackId, setEditingFeedbackId] = useState<string | null>(
     null,
@@ -96,7 +99,7 @@ export function TeacherFeedbackHistory({
           ) : (
             <ul className="mt-3 space-y-3">
               {section.items.map((item, index) => {
-                const canEdit = item.source === "TEACHER" && !!item.id;
+                const canEdit = canEditTeacherFeedback(item, currentUserId);
                 const isEditing = canEdit && editingFeedbackId === item.id;
 
                 return (
@@ -137,6 +140,7 @@ export function TeacherFeedbackHistory({
                       <TeacherFeedbackEditForm
                         feedback={item}
                         submissionId={submissionId}
+                        currentUserId={currentUserId}
                         onCancel={() => setEditingFeedbackId(null)}
                         onSaved={() => setEditingFeedbackId(null)}
                       />

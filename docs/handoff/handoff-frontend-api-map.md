@@ -51,7 +51,7 @@
   - 调用页面：`/reset-password`。
   - 注意：token 只从 URL query 读取，不写入 storage/cookie。
 - 当前用户：`lib/auth/session.ts` -> `client.fetchJson("users/me")` -> `/api/proxy/users/me` -> `GET /api/users/me`。
-  - 调用方：`app/teacher/layout.tsx`、`app/student/layout.tsx`。
+  - 调用方：`app/teacher/layout.tsx`、`app/student/layout.tsx`、教师提交详情页。
   - 注意：Teacher / Student role gate 的登录态锚点。
 - 当前用户改密：`ChangePasswordForm` -> `/api/proxy/users/me/change-password` -> `POST /api/users/me/change-password`。
   - 注意：会话失效策略由后端处理，前端不自行清理其它 session。
@@ -112,6 +112,9 @@
 - 提交详情和反馈：Teacher/Student submission pages + feedback forms -> `/api/proxy/learning-tasks/submissions/:id*`。
   - 对应后端：submission detail、feedback list、teacher feedback create/update。
   - 注意：正式 detail API `GET /api/learning-tasks/submissions/:id` 是主体 SoT；每次先 await detail 成功，再请求同一提交的 feedback；师生共用学生侧详情 mapper，保留完整源码、独立说明与已有声明原文，适配 aiReview；URL query 不提供标题、正文、提交时间、次数、迟交或 AI 状态；班级/课堂任务上下文用于返回导航。公开字段与 null/0 语义由 [Backend DTO](./handoff-backend-dto-cheatsheet.md#submission-request--response-family) 维护。
+  - 教师提交详情 Server Page 在主体加载成功后独立调用既有 `getMe()`，仅把正式响应中非空、非纯空白的字符串 id 原值作为 currentUserId 传入 History / EditForm，不传整个用户或其他身份数据。身份读取失败或 id 不可用时，历史反馈只读并提示刷新；不替换已加载的作品/反馈，不改变 layout 角色检查、新增反馈或 AI 请求。
+  - 历史反馈修改资格由 `canEditTeacherFeedback` 统一判断：来源精确为 TEACHER，反馈 id、currentUserId 和 createdBy 均为非空非纯空白字符串，且作者与当前用户原字符串精确相等；不 trim 后比较、转换大小写、补作者或增加 ObjectId 格式规则。未知/他人作者、AI 和未知来源只关闭修改入口，原记录仍可读；共享 mapper 与 createdBy 可选投影保持，最终班级管理权及作者授权见 [Backend API Learning Tasks](./handoff-backend-api-map.md#learning-tasks)。
+  - 历史修改继续 PATCH `learning-tasks/submissions/:submissionId/feedback/:feedbackId`，只发送原差异业务字段，不发送身份、作者、来源、归属或时间戳。403 等失败保留状态码、内部原始错误和草稿，不调用 onSaved、刷新或自动重放；成功沿用 onSaved 与 router.refresh，不新增响应确认或认领协议。
   - 新增教师反馈发送撰写时绑定的 `expectedRevision`；刷新 props 不重绑旧评语。409/结果不确定保留评语，显式读取权威作品及反馈列表，用户确认适用后再允许继续。教师反馈原地 PATCH 沿用原合同；固定、版本与幂等合同见 [Backend Service Card 08](./handoff-backend-service-map.md#service-card-08)。
 
 - 教师提交页的可选评阅标准：在权威 detail/feedback 成功后，使用上下文 classroomId 与 detail 的权威 classroomTaskId 经 BFF 读取 `GET /api/classrooms/:classroomId/tasks/:classroomTaskId`，复用 `toClassroomTask`；仅当响应 taskId 与提交 detail 一致时展示实例投影 rubric。上下文只定位请求，评阅标准来自正式响应；无上下文、读失败或不匹配时提示从任务详情核对，不替换已保存作品或反馈表单。
