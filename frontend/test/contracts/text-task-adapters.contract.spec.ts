@@ -5,6 +5,7 @@ import {
 } from "../../lib/api/types-student";
 import {
   groupTeacherFeedbackItems,
+  normalizeClassroomTaskStatus,
   toClassroomTask,
   toClassroomTaskSummary,
   toLearningTaskOption,
@@ -34,6 +35,81 @@ import {
   toDisplaySubmissionLanguage,
 } from "../../lib/learning-tasks/submission-language";
 import { toDisplayLateDuration } from "../../lib/ui/format";
+
+test("classroom status adapters preserve only the three exact persisted states", () => {
+  for (const status of ["ACTIVE", "CLOSED", "RECALLED"] as const) {
+    const task = Object.freeze({ title: "发布标题", status: "ARCHIVED" });
+    const payload = Object.freeze({
+      id: "classroom-task",
+      status,
+      taskSnapshotAvailable: true,
+      task,
+    });
+    const before = { ...payload };
+    const detail = toClassroomTask(payload);
+    const summary = toClassroomTaskSummary(payload);
+    expect(normalizeClassroomTaskStatus(status)).toBe(status);
+    expect(detail.status).toBe(status);
+    expect(summary.status).toBe(status);
+    expect(detail.taskStatus).toBe("ARCHIVED");
+    expect(summary.taskStatus).toBe("ARCHIVED");
+    expect(detail.raw).toBe(payload);
+    expect(detail.raw.task).toBe(task);
+    expect(payload).toEqual(before);
+  }
+});
+
+test("classroom status adapters leave a genuinely absent property unknown", () => {
+  const task = Object.freeze({ title: "发布标题", status: "PUBLISHED" });
+  const payload = Object.freeze({ id: "missing-status", task });
+  expect(Object.hasOwn(payload, "status")).toBe(false);
+  expect(normalizeClassroomTaskStatus(undefined)).toBeUndefined();
+  const detail = toClassroomTask(payload);
+  const summary = toClassroomTaskSummary(payload);
+  expect(detail.status).toBeUndefined();
+  expect(summary.status).toBeUndefined();
+  expect(detail.raw).toBe(payload);
+  expect(detail.raw.task).toBe(task);
+  expect(Object.hasOwn(payload, "status")).toBe(false);
+  expect(payload).toEqual({ id: "missing-status", task });
+});
+
+test("classroom status adapters reject present invalid values without coercion or input changes", () => {
+  for (const status of [
+    undefined,
+    null,
+    "",
+    " \t\n ",
+    "UNKNOWN",
+    "active",
+    "closed",
+    "recalled",
+    "Active",
+    " ACTIVE",
+    "CLOSED ",
+    "\tRECALLED\n",
+    Object.freeze([]),
+    Object.freeze(["ACTIVE"]),
+    Object.freeze({}),
+    Object.freeze({ status: "ACTIVE" }),
+    0,
+    1,
+    true,
+    false,
+  ]) {
+    const payload = Object.freeze({ id: "invalid-status", status });
+    expect(Object.hasOwn(payload, "status")).toBe(true);
+    expect(normalizeClassroomTaskStatus(status)).toBeUndefined();
+    const detail = toClassroomTask(payload);
+    const summary = toClassroomTaskSummary(payload);
+    expect(detail.status).toBeUndefined();
+    expect(summary.status).toBeUndefined();
+    expect(detail.raw).toBe(payload);
+    expect(Object.hasOwn(payload, "status")).toBe(true);
+    expect(payload.status).toBe(status);
+    expect(payload).toEqual({ id: "invalid-status", status });
+  }
+});
 
 test("template difficulty comes from the top level without changing raw values", () => {
   for (const difficulty of ["easy", "综合", "  综合\n设计  ", ""]) {

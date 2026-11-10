@@ -1151,7 +1151,7 @@ export const toClassroomTaskSummary = (
       asString(record.name),
     description:
       asString(taskRecord.description) ?? asString(record.description),
-    status: normalizeClassroomTaskStatus(record.status) ?? "ACTIVE",
+    status: normalizeClassroomTaskStatus(record.status),
     taskStatus:
       asString(taskRecord.status) ??
       asString(record.taskStatus) ??
@@ -1188,7 +1188,7 @@ export const toClassroomTask = (payload: unknown): ClassroomTask => {
     id: asString(record.id) ?? asString(record.classroomTaskId),
     classroomId: asString(record.classroomId),
     taskId: asString(record.taskId),
-    status: normalizeClassroomTaskStatus(record.status) ?? "ACTIVE",
+    status: normalizeClassroomTaskStatus(record.status),
     title:
       asString(taskRecord.title) ??
       asString(record.title) ??
@@ -2162,17 +2162,12 @@ export const toExportSnapshotResponse = (
 export const normalizeClassroomTaskStatus = (
   value: unknown,
 ): ClassroomTaskStatus | undefined => {
-  const status = asString(value);
-  if (!status) {
-    return undefined;
-  }
-  const normalized = status.toUpperCase();
   if (
-    normalized === "ACTIVE" ||
-    normalized === "CLOSED" ||
-    normalized === "RECALLED"
+    value === "ACTIVE" ||
+    value === "CLOSED" ||
+    value === "RECALLED"
   ) {
-    return normalized;
+    return value;
   }
   return undefined;
 };

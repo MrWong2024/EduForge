@@ -67,8 +67,8 @@ export function EditClassroomTaskForm({
   const [nextDueAt, setNextDueAt] = useState("");
   const [nextAllowLate, setNextAllowLate] = useState<boolean>(true);
 
-  const statusValue = normalizeClassroomTaskStatus(status) ?? "ACTIVE";
-  const canEdit = Boolean(classroomTaskId) && (statusValue === "ACTIVE" || statusValue === "CLOSED");
+  const statusValue = normalizeClassroomTaskStatus(status);
+  const canEdit = !!classroomTaskId && (statusValue === "ACTIVE" || statusValue === "CLOSED");
 
   const hasChanges = useMemo(() => {
     const originalDueAt = toDateTimeLocalValue(dueAt);
@@ -96,7 +96,7 @@ export function EditClassroomTaskForm({
 
   const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    if (!classroomTaskId || isSubmitting) {
+    if (!canEdit || isSubmitting) {
       return;
     }
 
@@ -139,6 +139,7 @@ export function EditClassroomTaskForm({
           401: "登录状态已失效，请重新登录。",
           403: "无权限编辑该课堂任务。",
           404: "课堂任务不存在或已不可用。",
+          409: "课堂任务状态异常，暂时无法修改，请刷新页面核对。",
         };
         setErrorState({
           status: error.status,

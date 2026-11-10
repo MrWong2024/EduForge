@@ -97,6 +97,8 @@
   - 候选难度沿用上述筛选选项与解析口径，首次 SSR 查询和加载更多都传同一规范化条件；URL/权威 props 恢复控件与已应用条件。共用入口的筛选实际变化或清空即清除已选 taskId、使旧加载更多请求失效，保留截止/迟交草稿；更新期间禁止选择、加载更多及发布，submit handler 同时校验等待状态和当前候选成员。权威新结果替换候选池并同步页码/总数/limit，旧请求的成功、错误及 finally 均不得覆盖新状态，不自动选首条或重放发布；失败沿用原错误呈现并允许显式重试。
 - 班级任务实例：`/teacher/classrooms/:id/tasks/page.tsx` + 发布/生命周期/编辑组件 -> `/api/proxy/classrooms/:id/tasks*`。
   - 对应后端：`GET/POST/PATCH /api/classrooms/:id/tasks*` 与 `/status`。
+  - `toClassroomTaskSummary`、`toClassroomTask` 共用 `normalizeClassroomTaskStatus`，仅接受原始值严格等于 `ACTIVE`、`CLOSED`、`RECALLED`；不 trim、转换大小写或强制转换类型，其余输入为 undefined，不再补 ACTIVE，也不映射为其他合法状态。保留可选状态类型、输入对象不变及详情 raw 原引用；未知状态不移除只读导航、教学内容或已有记录。
+  - 实例设置 PATCH 保持原路径与 `dueAt/allowLate` 请求体；409 摘要为“课堂任务状态异常，暂时无法修改，请刷新页面核对。”，保留原状态码、内部原始错误与 ErrorState 呈现。保存失败保留草稿，不自动重放 PATCH；服务端错误、权限和生命周期合同见 [Backend API Classroom Tasks](./handoff-backend-api-map.md#classroom-tasksclassrooms-子资源)。
   - 注意：发布表单只发送既有截止/迟交设置，不发送 AI 策略字段。列表/详情消费快照可用性及投影教学内容，不另取当前模板覆盖，不适配或展示旧策略。实例配置与状态动作分开发送；学生或教师可在提交详情主动申请 AI 反馈。
   - 发布请求仍仅使用 `taskId/dueAt/settings`，不传 difficulty；教师课堂详情的难度由 `toClassroomTask` 读取正式 `task.difficulty` 原值，后端负责发布快照。模板修改不覆盖已发布快照，前端不另查实时模板或回填缺失难度。
   - 班级页面的 difficulty 只作用于待发布候选，已发布课堂任务请求不带该参数；已发布任务的分页链接保留规范化候选难度，避免翻页丢失候选条件。
