@@ -154,6 +154,9 @@ const createHarness = (options: HarnessOptions = {}) => {
   };
   const courseModel = {};
   const classroomTaskModel = {
+    create: jest.fn((payload: Record<string, unknown>) =>
+      Promise.resolve({ ...classroomTask, ...payload }),
+    ),
     findOne: jest.fn(() => makeQuery(classroomTask)),
     findOneAndUpdate: jest.fn(),
     aggregate: jest.fn((pipeline: PipelineStage[]) => {
@@ -248,6 +251,7 @@ const createHarness = (options: HarnessOptions = {}) => {
       id: objectId().toString(),
     }),
   };
+  const aiContextReader = new AiContextReaderService();
 
   const service = new ClassroomTasksService(
     classroomModel as unknown as Model<Classroom>,
@@ -260,16 +264,20 @@ const createHarness = (options: HarnessOptions = {}) => {
     enrollmentService as unknown as EnrollmentService,
     aiFeedbackJobService as unknown as AiFeedbackJobService,
     learningTasksService as unknown as LearningTasksService,
-    new AiContextReaderService(),
+    aiContextReader,
   );
 
   return {
     service,
     classroom,
+    classroomModel,
     classroomTask,
     classroomTaskModel,
+    task,
+    taskModel,
     feedbackModel,
     learningTasksService,
+    aiContextReader,
     ids: { studentId, classroomId, classroomTaskId, taskId },
   };
 };
@@ -343,6 +351,191 @@ const submissionDto = {
     language: 'javascript',
   },
 };
+
+describe('ClassroomTasksService new publication visibility contract', () => {
+  it.each([
+    { visibility: 'PRIVATE', own: true },
+    { visibility: 'SHARED', own: true },
+    { visibility: 'SHARED', own: false },
+  ])(
+    'publishes exact $visibility with own=$own',
+    async ({ visibility, own }) => {
+      const h = createHarness({ userRoles: ['teacher'] });
+      Object.assign(h.task, {
+        visibility,
+        createdBy: own ? h.ids.studentId : objectId(),
+      });
+      const validate = jest.spyOn(h.aiContextReader, 'validateForSave');
+
+      const result = await h.service.createClassroomTask(
+        h.ids.classroomId.toString(),
+        { taskId: h.ids.taskId.toString() },
+        h.ids.studentId.toString(),
+      );
+
+      expect(result).toMatchObject({
+        taskId: h.ids.taskId.toString(),
+        status: 'ACTIVE',
+        taskSnapshotAvailable: true,
+        task: { title: 'Task A' },
+      });
+      expect(validate).toHaveBeenCalledTimes(1);
+      expect(h.classroomTaskModel.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          classroomId: h.ids.classroomId,
+          taskId: h.ids.taskId,
+          createdBy: h.ids.studentId,
+        }),
+      );
+      expect(
+        h.classroomTaskModel.create.mock.calls[0]?.[0].taskSnapshot,
+      ).toMatchObject({ title: 'Task A' });
+    },
+  );
+
+  it.each([
+    { label: 'missing', fields: {} },
+    { label: 'undefined', fields: { visibility: undefined } },
+    { label: 'null', fields: { visibility: null } },
+    { label: 'empty', fields: { visibility: '' } },
+    { label: 'blank', fields: { visibility: ' ' } },
+    { label: 'unknown', fields: { visibility: 'UNKNOWN' } },
+    { label: 'lowercase', fields: { visibility: 'shared' } },
+    { label: 'padded', fields: { visibility: ' SHARED ' } },
+    { label: 'array', fields: { visibility: ['SHARED'] } },
+    { label: 'object', fields: { visibility: {} } },
+    { label: 'number', fields: { visibility: 1 } },
+    { label: 'boolean', fields: { visibility: true } },
+  ])(
+    'rejects author $label visibility before snapshot or writes',
+    async ({ fields }) => {
+      const h = createHarness({ userRoles: ['teacher'] });
+      Object.assign(h.task, fields);
+      const readRefs = jest.fn(() => []);
+      Object.defineProperty(h.task, 'aiContextRefs', { get: readRefs });
+      const validate = jest.spyOn(h.aiContextReader, 'validateForSave');
+      const before = { ...h.task };
+
+      await expect(
+        h.service.createClassroomTask(
+          h.ids.classroomId.toString(),
+          { taskId: h.ids.taskId.toString() },
+          h.ids.studentId.toString(),
+        ),
+      ).rejects.toMatchObject({
+        status: 409,
+        message: 'Task has invalid visibility',
+      });
+      expect(readRefs).not.toHaveBeenCalled();
+      expect(validate).not.toHaveBeenCalled();
+      expect(h.classroomTaskModel.create).not.toHaveBeenCalled();
+      expect({ ...h.task }).toEqual(before);
+    },
+  );
+
+  it.each([
+    { visibility: 'PRIVATE' },
+    { visibility: undefined },
+    { visibility: null },
+    { visibility: 'shared' },
+    { visibility: ' SHARED ' },
+    { visibility: ['SHARED'] },
+  ])(
+    'hides non-author template visibility $visibility with the original 404',
+    async ({ visibility }) => {
+      const h = createHarness({ userRoles: ['teacher'] });
+      Object.assign(h.task, { visibility, createdBy: objectId() });
+      const validate = jest.spyOn(h.aiContextReader, 'validateForSave');
+
+      await expect(
+        h.service.createClassroomTask(
+          h.ids.classroomId.toString(),
+          { taskId: h.ids.taskId.toString() },
+          h.ids.studentId.toString(),
+        ),
+      ).rejects.toMatchObject({ status: 404, message: 'Task not found' });
+      expect(validate).not.toHaveBeenCalled();
+      expect(h.classroomTaskModel.create).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each([
+    {
+      gate: 'role',
+      status: 403,
+      message: 'Not allowed to manage classroom tasks',
+    },
+    { gate: 'owner', status: 404, message: 'Classroom not found' },
+    {
+      gate: 'archived',
+      status: 400,
+      message: 'Archived classrooms cannot publish tasks',
+    },
+  ])(
+    'preserves the $gate gate before inspecting invalid visibility',
+    async ({ gate, status, message }) => {
+      const h = createHarness({
+        userRoles: gate === 'role' ? ['student'] : ['teacher'],
+        classroomStatus:
+          gate === 'archived'
+            ? ClassroomStatus.Archived
+            : ClassroomStatus.Active,
+      });
+      if (gate === 'owner') {
+        h.classroomModel.findOne.mockReturnValueOnce(makeQuery(null));
+      }
+      const validate = jest.spyOn(h.aiContextReader, 'validateForSave');
+
+      await expect(
+        h.service.createClassroomTask(
+          h.ids.classroomId.toString(),
+          { taskId: h.ids.taskId.toString() },
+          h.ids.studentId.toString(),
+        ),
+      ).rejects.toMatchObject({ status, message });
+      expect(h.taskModel.findById).not.toHaveBeenCalled();
+      expect(validate).not.toHaveBeenCalled();
+      expect(h.classroomTaskModel.create).not.toHaveBeenCalled();
+    },
+  );
+
+  it('keeps the missing template 404 and rejects invalid visibility before publication eligibility', async () => {
+    const h = createHarness({
+      userRoles: ['teacher'],
+      taskStatus: TaskStatus.Draft,
+    });
+    h.taskModel.findById.mockReturnValueOnce(makeQuery(null));
+    const publish = () =>
+      h.service.createClassroomTask(
+        h.ids.classroomId.toString(),
+        { taskId: h.ids.taskId.toString() },
+        h.ids.studentId.toString(),
+      );
+    await expect(publish()).rejects.toMatchObject({
+      status: 404,
+      message: 'Task not found',
+    });
+    await expect(publish()).rejects.toMatchObject({
+      status: 409,
+      message: 'Task has invalid visibility',
+    });
+    expect(h.classroomTaskModel.create).not.toHaveBeenCalled();
+  });
+
+  it('does not gate existing classroom reads on the source template visibility', async () => {
+    const h = createHarness();
+    Object.assign(h.task, { visibility: ['SHARED'] });
+    const detail = await h.service.getClassroomTask(
+      h.ids.classroomId.toString(),
+      h.ids.classroomTaskId.toString(),
+      h.ids.studentId.toString(),
+    );
+    expect(detail.task).toMatchObject({ title: 'Published task' });
+    const mine = await getMyTaskDetailCompletionStatus(h.service, h.ids);
+    expect(mine.classroomTask.status).toBe('ACTIVE');
+    expect(mine.participationStatus.canSubmit).toBe(true);
+  });
+});
 
 describe('ClassroomTasksService persisted status contract', () => {
   it.each([
@@ -845,6 +1038,7 @@ describe('ClassroomTasksService listPublishableTaskTemplates publisher contract'
         title: 'Shared Template A',
         description: 'Description A',
         knowledgeModule: 'module-a',
+        visibility: 'SHARED',
         status: TaskStatus.Published,
         createdBy: publisherIdA,
         createdAt: new Date('2026-01-01T00:00:00.000Z'),
@@ -856,6 +1050,7 @@ describe('ClassroomTasksService listPublishableTaskTemplates publisher contract'
         title: 'Shared Template B',
         description: 'Description B',
         knowledgeModule: 'module-b',
+        visibility: 'SHARED',
         status: TaskStatus.Published,
         createdBy: publisherIdB,
         createdAt: new Date('2026-01-04T00:00:00.000Z'),
@@ -867,6 +1062,7 @@ describe('ClassroomTasksService listPublishableTaskTemplates publisher contract'
         title: 'Shared Template Missing Publisher',
         description: 'Description C',
         knowledgeModule: 'module-c',
+        visibility: 'SHARED',
         status: TaskStatus.Published,
         createdBy: missingPublisherId,
         createdAt: new Date('2026-01-07T00:00:00.000Z'),
@@ -932,6 +1128,7 @@ describe('ClassroomTasksService listPublishableTaskTemplates publisher contract'
 
     expect(result.items).toHaveLength(3);
     expect(result.items[0]).toMatchObject({
+      visibility: 'SHARED',
       createdBy: publisherIdA.toString(),
       createdById: publisherIdA.toString(),
       publisher: { id: publisherIdA.toString(), name: 'Publisher A' },
@@ -952,84 +1149,91 @@ describe('ClassroomTasksService listPublishableTaskTemplates publisher contract'
     expect(userModel.find).toHaveBeenCalledTimes(1);
   });
 
-  it('keeps existing publishable filters when onlyMine and query filters are provided', async () => {
-    const classroomId = objectId();
-    const courseId = objectId();
-    const teacherId = objectId();
-    const excludedTaskId = objectId();
-    const classroom = {
-      _id: classroomId,
-      courseId,
-    };
-    const classroomModel = {
-      findOne: jest.fn(() => makeQuery(classroom)),
-    };
-    const courseModel = {
-      findById: jest.fn(() =>
-        makeQuery({ _id: courseId, courseLabel: 'CS101' }),
-      ),
-    };
-    const classroomTaskModel = {
-      distinct: jest.fn(() => makeExecOnly([excludedTaskId])),
-    };
-    const taskModel = {
-      aggregate: jest.fn(() => makeAggregate([])),
-      countDocuments: jest.fn().mockResolvedValue(0),
-    };
-    const userModel = {
-      findById: jest.fn(() => makeQuery({ roles: ['teacher'] })),
-      find: jest.fn(() => makeQuery([])),
-    };
-    const service = new ClassroomTasksService(
-      classroomModel as unknown as Model<Classroom>,
-      courseModel as unknown as Model<Course>,
-      classroomTaskModel as unknown as Model<ClassroomTask>,
-      taskModel as unknown as Model<Task>,
-      {} as unknown as Model<Submission>,
-      {} as unknown as Model<Feedback>,
-      userModel as unknown as Model<User>,
-      {} as unknown as EnrollmentService,
-      {} as unknown as AiFeedbackJobService,
-      {} as unknown as LearningTasksService,
-      new AiContextReaderService(),
-    );
+  it.each([true, false, undefined])(
+    'filters scalar visibility before pagination and counting with onlyMine=%s',
+    async (onlyMine) => {
+      const classroomId = objectId();
+      const courseId = objectId();
+      const teacherId = objectId();
+      const excludedTaskId = objectId();
+      const classroom = {
+        _id: classroomId,
+        courseId,
+      };
+      const classroomModel = {
+        findOne: jest.fn(() => makeQuery(classroom)),
+      };
+      const courseModel = {
+        findById: jest.fn(() =>
+          makeQuery({ _id: courseId, courseLabel: 'CS101' }),
+        ),
+      };
+      const classroomTaskModel = {
+        distinct: jest.fn(() => makeExecOnly([excludedTaskId])),
+      };
+      const taskModel = {
+        aggregate: jest.fn((pipeline: PipelineStage[]) => {
+          void pipeline;
+          return makeAggregate([]);
+        }),
+        countDocuments: jest.fn().mockResolvedValue(0),
+      };
+      const userModel = {
+        findById: jest.fn(() => makeQuery({ roles: ['teacher'] })),
+        find: jest.fn(() => makeQuery([])),
+      };
+      const service = new ClassroomTasksService(
+        classroomModel as unknown as Model<Classroom>,
+        courseModel as unknown as Model<Course>,
+        classroomTaskModel as unknown as Model<ClassroomTask>,
+        taskModel as unknown as Model<Task>,
+        {} as unknown as Model<Submission>,
+        {} as unknown as Model<Feedback>,
+        userModel as unknown as Model<User>,
+        {} as unknown as EnrollmentService,
+        {} as unknown as AiFeedbackJobService,
+        {} as unknown as LearningTasksService,
+        new AiContextReaderService(),
+      );
 
-    await service.listPublishableTaskTemplates(
-      classroomId.toString(),
-      {
-        page: 2,
-        limit: 10,
-        onlyMine: true,
-        knowledgeModule: 'module-a',
-      },
-      teacherId.toString(),
-    );
+      await service.listPublishableTaskTemplates(
+        classroomId.toString(),
+        {
+          page: 2,
+          limit: 10,
+          onlyMine,
+          knowledgeModule: 'module-a',
+        },
+        teacherId.toString(),
+      );
 
-    const aggregateCalls = taskModel.aggregate.mock.calls as unknown as Array<
-      [Array<Record<string, unknown>>, ...unknown[]]
-    >;
-    const firstAggregateCall = aggregateCalls[0];
-    if (!firstAggregateCall) {
-      throw new Error('Expected taskModel.aggregate to be called');
-    }
-    const itemsPipeline = firstAggregateCall[0];
-    expect(itemsPipeline[0]).toEqual({
-      $match: {
+      const firstAggregateCall = taskModel.aggregate.mock.calls[0];
+      if (!firstAggregateCall) {
+        throw new Error('Expected taskModel.aggregate to be called');
+      }
+      const itemsPipeline = firstAggregateCall[0];
+      const baseFilter = {
         status: TaskStatus.Published,
+        visibility: { $in: ['PRIVATE', 'SHARED'] },
+        $expr: { $eq: [{ $type: '$visibility' }, 'string'] },
         _id: { $nin: [excludedTaskId] },
         knowledgeModule: 'module-a',
-        createdBy: teacherId,
-      },
-    });
-    expect(taskModel.countDocuments).toHaveBeenCalledWith({
-      status: TaskStatus.Published,
-      _id: { $nin: [excludedTaskId] },
-      knowledgeModule: 'module-a',
-      createdBy: teacherId,
-    });
-    expect(itemsPipeline).toContainEqual({ $skip: 10 });
-    expect(itemsPipeline).toContainEqual({ $limit: 10 });
-  });
+      };
+      const expectedFilter =
+        onlyMine === true
+          ? { ...baseFilter, createdBy: teacherId }
+          : {
+              $and: [
+                baseFilter,
+                { $or: [{ createdBy: teacherId }, { visibility: 'SHARED' }] },
+              ],
+            };
+      expect(itemsPipeline[0]).toEqual({ $match: expectedFilter });
+      expect(taskModel.countDocuments).toHaveBeenCalledWith(expectedFilter);
+      expect(itemsPipeline).toContainEqual({ $skip: 10 });
+      expect(itemsPipeline).toContainEqual({ $limit: 10 });
+    },
+  );
 });
 
 describe('ClassroomTasksService getMyTaskDetail participationStatus', () => {

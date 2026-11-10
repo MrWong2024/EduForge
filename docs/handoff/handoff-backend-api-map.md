@@ -172,14 +172,17 @@ Notes:
 
 Notes:
 
-- 模板可见性只影响读取，不改变作者的管理权限。课程分类不参与权限、发布约束或跨课程复用限制；字段/默认/白名单见 [DTO Task template](./handoff-backend-dto-cheatsheet.md#task-template-dto--response-family)。
+- 模板可见性限定模板读取及新课堂发布，不改变作者管理权限，也不为已发布课堂实例、快照或缺快照历史投影、作品、反馈及 AI 请求增加模板可见性门禁。课程分类不参与权限、发布约束或跨课程复用限制；字段/默认/白名单见 [DTO Task template](./handoff-backend-dto-cheatsheet.md#task-template-dto--response-family)。
 - 模板创建仅允许初始 DRAFT/PUBLISHED，不能直接创建 ARCHIVED；后续单向 `DRAFT -> PUBLISHED -> ARCHIVED`。
 - 普通 PATCH 不承担生命周期变更：status 与当前状态不同时返回 `400 Task template status must be changed through lifecycle actions`；相同时忽略该字段并继续编辑其它内容。ARCHIVED 模板普通更新返回 `400 Archived tasks cannot be updated`。
 - 创建/保存模板先验证最终生效的 ZIP 引用；创建 PUBLISHED、DRAFT 实际 publish 及课堂发布均须读取验证。DTO 非法和缺失/损坏/不可读/不支持/超限资料返回 400，使用引用/条目序号及安全原因，不暴露系统路径；不保存部分编辑、不创建无效实例。模板已 PUBLISHED 的重复 publish 保持既有幂等语义。配置及公开投影见 [DTO ZIP 资料引用](./handoff-backend-dto-cheatsheet.md#zip-资料引用配置)。
 - publish 为 teacher only、作者 only；DRAFT 可发布，PUBLISHED 幂等返回当前模板，ARCHIVED 返回 `400 Archived task templates cannot be published`。
 - archive 为 teacher only、作者 only；仅 PUBLISHED 可归档，其余返回 `400 Only published task templates can be archived`。被 ClassroomTask 引用仍可归档，不影响已发布实例运行。
 - restore 仅作为 teacher/作者的兼容入口，稳定返回 `400 Archived task templates cannot be restored to draft; clone as draft instead`，不再恢复归档模板。
-- 列表 scope 语义：mine 是本人全部模板；shared 是共享池（包含本人共享模板和旧数据缺省 visibility）；all 是本人全部与共享池的可见全集。createdBy 仅保留字段兼容，不能成为越权筛选入口。详情允许作者读取，其他人仅可读共享模板（旧数据缺省也视为共享），他人的 PRIVATE 模板返回 `404`。
+- 模板列表仅纳入实际保存的合法标量 visibility：mine 为本人的 PRIVATE/SHARED 模板，shared 为实际 SHARED（包含本人共享模板），all 为本人合法模板与实际共享模板的并集；合法值及原 scope、status、分类、知识模块和难度条件共同在分页与计数前过滤，items 与 total 使用同一完整条件。createdBy 查询兼容保持，不能扩大权限。发布候选 onlyMine=true 与默认/false 均先排除异常 visibility，再按本人/他人共享、PUBLISHED、已发布排除及原筛选排序规则处理。
+- 存储 visibility 只接受原值严格等于 PRIVATE/SHARED，不 trim、转换大小写或强制转换；缺失、null、空白、未知值、数组等均非法，响应不补合法默认值。作者详情遇非法值返回 `409 Task has invalid visibility`；非作者仅能读取实际 SHARED，PRIVATE 或非法值均为 `404 Task not found`。update/publish/archive 保持原权限检查优先（非作者 update/publish 为 404，archive 为 403），通过后先拒绝非法存量，再修改或保存；重复 publish 也检查，普通 PATCH 即使提供合法 visibility 也不能顺带修复。restore 的固定拒绝保持。
+- 新课堂发布先校验教师身份、班级 owner 与班级运行态，再检查模板：不存在为原 404；非作者使用 PRIVATE 或非法值为 `404 Task not found`，作者遇非法值为上述 409。该检查早于快照、资料引用验证和实例创建，合法模板仍遵循原 PUBLISHED、难度、引用及重复发布合同。
+- Task.visibility 缺省共享兼容本次仅完成后端退役；前端标签、编辑初始值默认 SHARED、宽松响应归一化及未知值徽章样式待下一阶段。
 - 新作品只经课堂实例入口创建；旧通用提交 POST 返回 409，message=“请从班级任务入口提交。”。模板级 submissions/stats/common-issues 继续要求模板作者权限，仅纳入该教师自有班级中属于当前模板的课堂实例；范围过滤先于分页、total、学生去重和反馈聚合。共享模板不授予作者访问他人班级作品的权限。学生 mine 仍仅本人；这些列表及学生看板只接受标量 ObjectId 的 classroomTaskId，不纳入无关联或非法类型提交，不按 taskId 推测归属。
 - 提交详情与反馈读取要求有效课堂关联：学生本人可读合法历史作品，不额外要求当前 ACTIVE Enrollment 或 ACTIVE 班级；教师权限仅来自所属班级 owner，不回退模板作者。正常无权用户仍为 `403`；Submission、Task、Feedback 不存在及 Feedback 不属于该提交时保留相应 `404`。字段及 detail/list 的代码暴露区别见 [DTO Submission](./handoff-backend-dto-cheatsheet.md#submission-request--response-family)。
 - 提交详情、反馈 GET/POST/PATCH、提交 PATCH 与 AI request 在基础身份/权限前置检查后统一校验关联：classroomTaskId 缺失、null 或非标量 ObjectId 返回 `409 Submission has no valid classroom task`；实例不存在返回 `404 Classroom task not found`；实例与提交的 taskId 不一致返回 `409 Submission does not match classroom task`；所属班级不存在返回 `404 Classroom not found`。关联失败早于作品修改、评阅版本固定及 Feedback/Job 写入；提交 PATCH 的关联异常不再沿用旧 `403`。

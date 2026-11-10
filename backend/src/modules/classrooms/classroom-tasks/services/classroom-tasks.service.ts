@@ -294,7 +294,7 @@ export class ClassroomTasksService {
     await this.ensureTeacher(userId);
     const classroom = await this.classroomModel
       .findOne({ _id: classroomId, teacherId: new Types.ObjectId(userId) })
-      .lean()
+      .lean<ClassroomWithMeta>()
       .exec();
     if (!classroom) {
       throw new NotFoundException('Classroom not found');
@@ -303,15 +303,18 @@ export class ClassroomTasksService {
       throw new BadRequestException('Archived classrooms cannot publish tasks');
     }
 
-    const task = await this.taskModel.findById(dto.taskId).lean().exec();
+    const task = await this.taskModel
+      .findById(dto.taskId)
+      .lean<TaskWithMeta>()
+      .exec();
     if (
       !task ||
       (task.createdBy.toString() !== userId &&
-        this.toTaskVisibilityForRead(task.visibility) !==
-          TASK_VISIBILITY_SHARED)
+        task.visibility !== TASK_VISIBILITY_SHARED)
     ) {
       throw new NotFoundException('Task not found');
     }
+    this.requireTaskVisibility(task.visibility);
     if (task.status !== TaskStatus.Published) {
       throw new BadRequestException('Task must be published');
     }
@@ -575,6 +578,8 @@ export class ClassroomTasksService {
     const andFilters: Record<string, unknown>[] = [];
     const baseFilter: Record<string, unknown> = {
       status: TaskStatus.Published,
+      visibility: { $in: [TASK_VISIBILITY_PRIVATE, TASK_VISIBILITY_SHARED] },
+      $expr: { $eq: [{ $type: '$visibility' }, 'string'] },
     };
     if (publishedTaskIds.length > 0) {
       baseFilter._id = { $nin: publishedTaskIds };
@@ -591,7 +596,7 @@ export class ClassroomTasksService {
       andFilters.push({
         $or: [
           { createdBy: teacherObjectId },
-          ...this.getSharedVisibilityFilter(),
+          { visibility: TASK_VISIBILITY_SHARED },
         ],
       });
     }
@@ -1630,15 +1635,6 @@ export class ClassroomTasksService {
     return left.studentId.localeCompare(right.studentId);
   }
 
-  private getSharedVisibilityFilter(): Record<string, unknown>[] {
-    return [
-      { visibility: TASK_VISIBILITY_SHARED },
-      { visibility: { $exists: false } },
-      { visibility: null },
-      { visibility: '' },
-    ];
-  }
-
   private getUnclassifiedCourseLabelFilter(): Record<string, unknown>[] {
     return [
       { courseLabel: TASK_COURSE_LABEL_UNCLASSIFIED },
@@ -1648,28 +1644,11 @@ export class ClassroomTasksService {
     ];
   }
 
-  private toSanitizedTaskVisibility(
-    value: unknown,
-  ): TaskVisibility | undefined {
-    if (typeof value !== 'string') {
-      return undefined;
+  private requireTaskVisibility(value: unknown): TaskVisibility {
+    if (value === TASK_VISIBILITY_PRIVATE || value === TASK_VISIBILITY_SHARED) {
+      return value;
     }
-    const trimmed = value.trim().toUpperCase();
-    if (!trimmed) {
-      return undefined;
-    }
-    if (trimmed === TASK_VISIBILITY_PRIVATE) {
-      return TASK_VISIBILITY_PRIVATE;
-    }
-    if (trimmed === TASK_VISIBILITY_SHARED) {
-      return TASK_VISIBILITY_SHARED;
-    }
-    return undefined;
-  }
-
-  private toTaskVisibilityForRead(value: unknown): TaskVisibility {
-    const sanitized = this.toSanitizedTaskVisibility(value);
-    return sanitized ?? TASK_VISIBILITY_SHARED;
+    throw new ConflictException('Task has invalid visibility');
   }
 
   private toSanitizedCourseLabel(value: unknown): string | undefined {
@@ -1838,7 +1817,7 @@ export class ClassroomTasksService {
       description: task.description,
       knowledgeModule: task.knowledgeModule,
       courseLabel: this.toSanitizedCourseLabel(task.courseLabel),
-      visibility: this.toTaskVisibilityForRead(task.visibility),
+      visibility: this.requireTaskVisibility(task.visibility),
       difficulty: task.difficulty,
       status: task.status,
       createdBy: createdById,

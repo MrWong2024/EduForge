@@ -163,13 +163,18 @@ export class LearningTasksService {
   }
 
   async updateTask(id: string, dto: UpdateTaskDto, userId: string) {
-    const task = await this.taskModel.findOne({
-      _id: id,
-      createdBy: new Types.ObjectId(userId),
-    });
-    if (!task) {
+    const storedTask = await this.taskModel
+      .findOne({
+        _id: id,
+        createdBy: new Types.ObjectId(userId),
+      })
+      .lean<TaskWithMeta>()
+      .exec();
+    if (!storedTask) {
       throw new NotFoundException('Task not found');
     }
+    this.requireTaskVisibility(storedTask.visibility);
+    const task = this.taskModel.hydrate(storedTask);
     if (task.status === TaskStatus.Archived) {
       throw new BadRequestException('Archived tasks cannot be updated');
     }
@@ -213,13 +218,18 @@ export class LearningTasksService {
   }
 
   async publishTask(id: string, userId: string) {
-    const task = await this.taskModel.findOne({
-      _id: id,
-      createdBy: new Types.ObjectId(userId),
-    });
-    if (!task) {
+    const storedTask = await this.taskModel
+      .findOne({
+        _id: id,
+        createdBy: new Types.ObjectId(userId),
+      })
+      .lean<TaskWithMeta>()
+      .exec();
+    if (!storedTask) {
       throw new NotFoundException('Task not found');
     }
+    this.requireTaskVisibility(storedTask.visibility);
+    const task = this.taskModel.hydrate(storedTask);
     if (task.status === TaskStatus.Archived) {
       throw new BadRequestException(
         LearningTasksService.ARCHIVED_TASK_TEMPLATE_PUBLISH_MESSAGE,
@@ -241,13 +251,18 @@ export class LearningTasksService {
   }
 
   async archiveTask(id: string, teacherId: string) {
-    const task = await this.taskModel.findById(id).exec();
-    if (!task) {
+    const storedTask = await this.taskModel
+      .findById(id)
+      .lean<TaskWithMeta>()
+      .exec();
+    if (!storedTask) {
       throw new NotFoundException('Task not found');
     }
-    if (task.createdBy.toString() !== teacherId) {
+    if (storedTask.createdBy.toString() !== teacherId) {
       throw new ForbiddenException('Not allowed to archive task');
     }
+    this.requireTaskVisibility(storedTask.visibility);
+    const task = this.taskModel.hydrate(storedTask);
     if (task.status !== TaskStatus.Published) {
       throw new BadRequestException(
         LearningTasksService.ONLY_PUBLISHED_TASK_TEMPLATE_ARCHIVE_MESSAGE,
@@ -278,7 +293,10 @@ export class LearningTasksService {
     const scope = this.resolveTaskTemplateScope(query.scope);
     const legacyCreatedBy = query.createdBy?.trim();
     const andFilters: Record<string, unknown>[] = [];
-    const baseFilter: Record<string, unknown> = {};
+    const baseFilter: Record<string, unknown> = {
+      visibility: { $in: [TASK_VISIBILITY_PRIVATE, TASK_VISIBILITY_SHARED] },
+      $expr: { $eq: [{ $type: '$visibility' }, 'string'] },
+    };
     if (query.status) {
       baseFilter.status = query.status;
     }
@@ -311,12 +329,12 @@ export class LearningTasksService {
       // createdBy remains for legacy query compatibility, but mine scope is always current teacher.
       baseFilter.createdBy = userObjectId;
     } else if (scope === TASK_TEMPLATE_SCOPE_SHARED) {
-      andFilters.push({ $or: this.getSharedVisibilityConditions() });
+      baseFilter.visibility = TASK_VISIBILITY_SHARED;
     } else if (scope === TASK_TEMPLATE_SCOPE_ALL) {
       andFilters.push({
         $or: [
           { createdBy: userObjectId },
-          ...this.getSharedVisibilityConditions(),
+          { visibility: TASK_VISIBILITY_SHARED },
         ],
       });
     }
@@ -365,9 +383,10 @@ export class LearningTasksService {
       throw new NotFoundException('Task not found');
     }
     const isOwner = task.createdBy.toString() === userId;
-    if (!isOwner && !this.isTaskSharedVisibility(task.visibility)) {
+    if (!isOwner && task.visibility !== TASK_VISIBILITY_SHARED) {
       throw new NotFoundException('Task not found');
     }
+    this.requireTaskVisibility(task.visibility);
     const publisher = await this.getPublisherSummaryById(task.createdBy);
     return this.toTaskResponse(task, publisher);
   }
@@ -902,7 +921,7 @@ export class LearningTasksService {
       description: task.description,
       knowledgeModule: task.knowledgeModule,
       courseLabel: this.toSanitizedCourseLabel(task.courseLabel),
-      visibility: this.toTaskVisibilityForRead(task.visibility),
+      visibility: this.requireTaskVisibility(task.visibility),
       difficulty: task.difficulty,
       rubric: task.rubric,
       aiContextRefs: task.aiContextRefs?.map((ref) => ({
@@ -1005,22 +1024,14 @@ export class LearningTasksService {
     return TASK_TEMPLATE_SCOPE_DEFAULT;
   }
 
-  private getSharedVisibilityConditions(): Record<string, unknown>[] {
-    return [
-      { visibility: TASK_VISIBILITY_SHARED },
-      { visibility: { $exists: false } },
-      { visibility: null },
-      { visibility: '' },
-    ];
-  }
-
-  private isTaskSharedVisibility(visibility: unknown): boolean {
-    return this.toTaskVisibilityForRead(visibility) === TASK_VISIBILITY_SHARED;
-  }
-
-  private toTaskVisibilityForRead(visibility: unknown): TaskVisibility {
-    const sanitized = this.toSanitizedTaskVisibility(visibility);
-    return sanitized ?? TASK_VISIBILITY_SHARED;
+  private requireTaskVisibility(visibility: unknown): TaskVisibility {
+    if (
+      visibility !== TASK_VISIBILITY_PRIVATE &&
+      visibility !== TASK_VISIBILITY_SHARED
+    ) {
+      throw new ConflictException('Task has invalid visibility');
+    }
+    return visibility;
   }
 
   private toSubmissionResponse(

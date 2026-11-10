@@ -398,7 +398,7 @@ summary、taskTrend 和学生 metrics 均有 `evidenceSummary={sourceUncertainCo
 - knowledgeModule 无枚举白名单。`courseLabel` 使用 `TASK_COURSE_LABELS` 单选白名单（如未分类、通用编程、Java 程序设计、数据结构、人工智能）；trim 后空白转 undefined。更新中显式传入空白 courseLabel 表示清空；不是 Course 外键。
 - Task 的新写入值域由 CreateTaskDto / UpdateTaskDto 与 Schema 共同约束：字段缺失或空串 `""` 表示未设置，三个准确英文值 `easy/medium/hard` 表示标准档位。创建省略不设置默认档位，PATCH 省略保留原值，显式空串清空；仅 undefined 跳过字段校验，null、空白、未知值、中文标签、大小写或首尾空格变体、数组、对象及数字均拒绝，不做值转换。UI 选项与安全显示约定由 [Frontend API Map](./handoff-frontend-api-map.md#33-teacher-任务--提交--反馈) 维护。
 - 难度查询合同：`QueryTaskDto` 与 `QueryPublishableTaskTemplateDto` 的可选 `difficulty` 仅接受准确单值 `easy/medium/hard`；省略表示不限制。显式空串、空白、未知值、大小写变体或数组均返回 400，不 trim、不转大小写、不推断别名。写入允许空串不代表查询也允许空串。
-- `visibility: PRIVATE | SHARED`，trim + uppercase，空白视为未传；创建默认 PRIVATE；公开读取旧数据缺省时按 SHARED 兼容。
+- 请求 `visibility: PRIVATE | SHARED` 保持 trim + uppercase、空白视为未传，创建默认 PRIVATE；请求规范化不适用于存储值校验。成功响应仍为合法枚举，不补 SHARED 或其他默认值；存量异常的读取、授权及写前拒绝边界见 [API Learning Tasks](./handoff-backend-api-map.md#learning-tasks)。
 - `courseLabel=未分类` 查询兼容匹配字段缺省/空值。`createdBy` 保留输入兼容但不提供越权筛选；scope 的可见性含义见 [API Learning Tasks](./handoff-backend-api-map.md#learning-tasks)。
 - `TaskResponseDto`：`{id,title,description,knowledgeModule,courseLabel?,visibility,difficulty?,rubric?,aiContextRefs?,status,createdBy,publisher,createdAt,updatedAt,publishedAt?}`。`publisher={id,name?}|null`，不返回完整 User。
 

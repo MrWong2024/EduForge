@@ -26,6 +26,7 @@ import {
 import { Task, TaskStatus } from '../schemas/task.schema';
 import {
   TASK_TEMPLATE_SCOPE_ALL,
+  TASK_VISIBILITY_PRIVATE,
   TASK_VISIBILITY_SHARED,
 } from '../task-template-visibility.constants';
 import { LearningTasksService } from './learning-tasks.service';
@@ -184,21 +185,28 @@ const createTaskManagementHarness = (
 ) => {
   const teacherId = objectId();
   const taskId = objectId();
-  const task = {
+  const storedTask = {
     _id: taskId,
     title: 'Task',
     description: 'Description',
     knowledgeModule: 'Module',
+    visibility: TASK_VISIBILITY_PRIVATE,
     status: options.taskStatus ?? TaskStatus.Archived,
     createdBy: options.createdBy ?? teacherId,
     createdAt: new Date('2026-01-01T00:00:00.000Z'),
     updatedAt: new Date('2026-01-02T00:00:00.000Z'),
+  };
+  const task = {
+    ...storedTask,
     save: jest.fn().mockResolvedValue(undefined),
   };
   const findByIdResult =
-    'findByIdResult' in options ? options.findByIdResult : task;
+    'findByIdResult' in options ? options.findByIdResult : storedTask;
   const findOneResult =
-    'findOneResult' in options ? options.findOneResult : task;
+    'findOneResult' in options ? options.findOneResult : storedTask;
+  const findByIdQuery = makeQuery(findByIdResult);
+  const findOneQuery = makeQuery(findOneResult);
+  const findQuery = makeQuery([]);
   const taskModel = {
     create: jest.fn((payload: Record<string, unknown>) => ({
       _id: taskId,
@@ -206,12 +214,20 @@ const createTaskManagementHarness = (
       updatedAt: new Date('2026-01-02T00:00:00.000Z'),
       ...payload,
     })),
-    findById: jest.fn(() => ({
-      exec: jest.fn().mockResolvedValue(findByIdResult),
-    })),
-    findOne: jest.fn().mockResolvedValue(findOneResult),
+    findById: jest.fn(() => findByIdQuery),
+    findOne: jest.fn(() => findOneQuery),
+    find: jest.fn<ReturnType<typeof makeQuery>, [Record<string, unknown>]>(
+      () => findQuery,
+    ),
+    countDocuments: jest
+      .fn<Promise<number>, [Record<string, unknown>]>()
+      .mockResolvedValue(0),
+    hydrate: jest.fn((raw: typeof storedTask) => Object.assign(task, raw)),
   };
   const classroomTaskModel = {};
+  const userModel = { find: jest.fn(() => makeQuery([])) };
+  const aiContextReader = new AiContextReaderService();
+  const validateForSave = jest.spyOn(aiContextReader, 'validateForSave');
   const service = new LearningTasksService(
     { get: jest.fn() } as unknown as ConfigService,
     taskModel as unknown as Model<Task>,
@@ -219,16 +235,22 @@ const createTaskManagementHarness = (
     {} as unknown as Model<Feedback>,
     classroomTaskModel as unknown as Model<ClassroomTask>,
     {} as unknown as Model<Classroom>,
-    {} as unknown as Model<User>,
+    userModel as unknown as Model<User>,
     {} as unknown as AiFeedbackJobService,
     {} as Model<Enrollment>,
-    new AiContextReaderService(),
+    aiContextReader,
   );
 
   return {
     service,
     taskModel,
     task,
+    storedTask,
+    findByIdQuery,
+    findOneQuery,
+    findQuery,
+    userModel,
+    validateForSave,
     ids: { teacherId, taskId },
   };
 };
@@ -262,6 +284,7 @@ describe('LearningTasksService task template lifecycle', () => {
     expect(result).toMatchObject({
       id: harness.ids.taskId.toString(),
       status: TaskStatus.Draft,
+      visibility: TASK_VISIBILITY_PRIVATE,
       createdBy: harness.ids.teacherId.toString(),
       publishedAt: undefined,
     });
@@ -272,6 +295,7 @@ describe('LearningTasksService task template lifecycle', () => {
     expect(harness.taskModel.create).toHaveBeenCalledWith(
       expect.objectContaining({
         status: TaskStatus.Draft,
+        visibility: TASK_VISIBILITY_PRIVATE,
       }),
     );
   });
@@ -395,6 +419,11 @@ describe('LearningTasksService task template lifecycle', () => {
     expect(harness.task.status).toBe(TaskStatus.Published);
     expect(harness.task.title).toBe('Updated title');
     expect(harness.task.description).toBe('Updated description');
+    expect(harness.taskModel.hydrate).toHaveBeenCalledWith(harness.storedTask);
+    expect(harness.taskModel.hydrate.mock.calls[0]?.[0]).toBe(
+      harness.storedTask,
+    );
+    expect(harness.storedTask.title).toBe('Task');
     expect(harness.task.save).toHaveBeenCalledTimes(1);
   });
 
@@ -414,6 +443,11 @@ describe('LearningTasksService task template lifecycle', () => {
     });
     expect(result.publishedAt).toBeDefined();
     expect(harness.task.status).toBe(TaskStatus.Published);
+    expect(harness.taskModel.hydrate.mock.calls[0]?.[0]).toBe(
+      harness.storedTask,
+    );
+    expect(harness.findOneQuery.lean).toHaveBeenCalledTimes(1);
+    expect(harness.findOneQuery.exec).toHaveBeenCalledTimes(1);
     expect(harness.task.save).toHaveBeenCalledTimes(1);
   });
 
@@ -446,6 +480,11 @@ describe('LearningTasksService task template lifecycle', () => {
       status: TaskStatus.Archived,
     });
     expect(harness.task.status).toBe(TaskStatus.Archived);
+    expect(harness.taskModel.hydrate.mock.calls[0]?.[0]).toBe(
+      harness.storedTask,
+    );
+    expect(harness.findByIdQuery.lean).toHaveBeenCalledTimes(1);
+    expect(harness.findByIdQuery.exec).toHaveBeenCalledTimes(1);
     expect(harness.task.save).toHaveBeenCalledTimes(1);
   });
 
@@ -558,6 +597,278 @@ describe('LearningTasksService task template lifecycle', () => {
       ),
     ).rejects.toThrow('Task not found');
   });
+});
+
+describe('LearningTasksService stored task visibility', () => {
+  const invalidVisibilityCases: Array<{ label: string; value?: unknown }> = [
+    { label: 'missing' },
+    { label: 'undefined', value: undefined },
+    { label: 'null', value: null },
+    { label: 'empty string', value: '' },
+    { label: 'whitespace', value: ' \t' },
+    { label: 'unknown', value: 'UNKNOWN' },
+    { label: 'lowercase shared', value: 'shared' },
+    { label: 'lowercase private', value: 'private' },
+    { label: 'padded shared', value: ' SHARED ' },
+    { label: 'padded private', value: ' PRIVATE ' },
+    { label: 'shared array', value: ['SHARED'] },
+    { label: 'private array', value: ['PRIVATE'] },
+    { label: 'empty array', value: [] },
+    { label: 'object', value: { visibility: 'SHARED' } },
+    { label: 'number', value: 1 },
+    { label: 'boolean', value: true },
+  ];
+
+  it.each(['PRIVATE', 'SHARED'] as const)(
+    'returns exact stored %s to its author without a visibility default',
+    async (visibility) => {
+      const harness = createTaskManagementHarness();
+      harness.storedTask.visibility = visibility;
+
+      await expect(
+        harness.service.getTask(
+          harness.ids.taskId.toString(),
+          harness.ids.teacherId.toString(),
+        ),
+      ).resolves.toMatchObject({ visibility });
+      expect(harness.taskModel.hydrate).not.toHaveBeenCalled();
+      expect(harness.task.save).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each(invalidVisibilityCases)(
+    'rejects stored $label for authors and hides it from non-authors',
+    async (testCase) => {
+      const harness = createTaskManagementHarness();
+      if ('value' in testCase) {
+        Reflect.set(harness.storedTask, 'visibility', testCase.value);
+      } else {
+        Reflect.deleteProperty(harness.storedTask, 'visibility');
+      }
+      expect(Object.hasOwn(harness.storedTask, 'visibility')).toBe(
+        'value' in testCase,
+      );
+
+      await expect(
+        harness.service.getTask(
+          harness.ids.taskId.toString(),
+          harness.ids.teacherId.toString(),
+        ),
+      ).rejects.toMatchObject({
+        status: 409,
+        message: 'Task has invalid visibility',
+      });
+      await expect(
+        harness.service.getTask(
+          harness.ids.taskId.toString(),
+          objectId().toString(),
+        ),
+      ).rejects.toMatchObject({ status: 404, message: 'Task not found' });
+      expect(harness.userModel.find).not.toHaveBeenCalled();
+      expect(harness.taskModel.hydrate).not.toHaveBeenCalled();
+      expect(harness.task.save).not.toHaveBeenCalled();
+    },
+  );
+
+  it('hides a valid PRIVATE task from a non-author', async () => {
+    const harness = createTaskManagementHarness();
+
+    await expect(
+      harness.service.getTask(
+        harness.ids.taskId.toString(),
+        objectId().toString(),
+      ),
+    ).rejects.toMatchObject({ status: 404, message: 'Task not found' });
+    expect(harness.userModel.find).not.toHaveBeenCalled();
+  });
+
+  it('keeps an already PUBLISHED legal task publish idempotent', async () => {
+    const harness = createTaskManagementHarness({
+      taskStatus: TaskStatus.Published,
+    });
+
+    await expect(
+      harness.service.publishTask(
+        harness.ids.taskId.toString(),
+        harness.ids.teacherId.toString(),
+      ),
+    ).resolves.toMatchObject({
+      visibility: 'PRIVATE',
+      status: TaskStatus.Published,
+    });
+    expect(harness.taskModel.hydrate.mock.calls[0]?.[0]).toBe(
+      harness.storedTask,
+    );
+    expect(harness.task.save).not.toHaveBeenCalled();
+    expect(harness.validateForSave).not.toHaveBeenCalled();
+  });
+
+  const invalidWriteCases: Array<{
+    label: string;
+    action: 'update' | 'publish' | 'archive';
+    status: TaskStatus;
+    value?: unknown;
+  }> = [
+    { label: 'missing update', action: 'update', status: TaskStatus.Draft },
+    { label: 'missing publish', action: 'publish', status: TaskStatus.Draft },
+    {
+      label: 'missing idempotent publish',
+      action: 'publish',
+      status: TaskStatus.Published,
+    },
+    {
+      label: 'missing archive',
+      action: 'archive',
+      status: TaskStatus.Published,
+    },
+    {
+      label: 'null update',
+      action: 'update',
+      status: TaskStatus.Published,
+      value: null,
+    },
+    {
+      label: 'array publish',
+      action: 'publish',
+      status: TaskStatus.Draft,
+      value: ['SHARED'],
+    },
+  ];
+
+  it.each(invalidWriteCases)(
+    'rejects $label before hydrate, mutation, reference validation or save',
+    async (testCase) => {
+      const harness = createTaskManagementHarness({
+        taskStatus: testCase.status,
+      });
+      if ('value' in testCase) {
+        Reflect.set(harness.storedTask, 'visibility', testCase.value);
+      } else {
+        Reflect.deleteProperty(harness.storedTask, 'visibility');
+      }
+      const before = { ...harness.storedTask };
+      const id = harness.ids.taskId.toString();
+      const teacherId = harness.ids.teacherId.toString();
+      const result =
+        testCase.action === 'update'
+          ? harness.service.updateTask(
+              id,
+              { title: 'Must not change', visibility: 'SHARED' },
+              teacherId,
+            )
+          : testCase.action === 'publish'
+            ? harness.service.publishTask(id, teacherId)
+            : harness.service.archiveTask(id, teacherId);
+
+      await expect(result).rejects.toMatchObject({
+        status: 409,
+        message: 'Task has invalid visibility',
+      });
+      expect(harness.storedTask).toEqual(before);
+      expect(harness.task.title).toBe('Task');
+      expect(harness.task.status).toBe(testCase.status);
+      expect(harness.taskModel.hydrate).not.toHaveBeenCalled();
+      expect(harness.task.save).not.toHaveBeenCalled();
+      expect(harness.validateForSave).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each(['update', 'publish'] as const)(
+    'keeps non-author %s on the owner-scoped 404 path before hydration',
+    async (action) => {
+      const harness = createTaskManagementHarness({ findOneResult: null });
+      Reflect.deleteProperty(harness.storedTask, 'visibility');
+      const id = harness.ids.taskId.toString();
+      const teacherId = harness.ids.teacherId.toString();
+      const result =
+        action === 'update'
+          ? harness.service.updateTask(id, { visibility: 'SHARED' }, teacherId)
+          : harness.service.publishTask(id, teacherId);
+
+      await expect(result).rejects.toMatchObject({
+        status: 404,
+        message: 'Task not found',
+      });
+      expect(harness.taskModel.findOne).toHaveBeenCalledWith({
+        _id: id,
+        createdBy: harness.ids.teacherId,
+      });
+      expect(harness.taskModel.hydrate).not.toHaveBeenCalled();
+      expect(harness.task.save).not.toHaveBeenCalled();
+    },
+  );
+
+  it('keeps non-author archive on the 403 path for missing visibility', async () => {
+    const harness = createTaskManagementHarness({ createdBy: objectId() });
+    Reflect.deleteProperty(harness.storedTask, 'visibility');
+
+    await expect(
+      harness.service.archiveTask(
+        harness.ids.taskId.toString(),
+        harness.ids.teacherId.toString(),
+      ),
+    ).rejects.toMatchObject({
+      status: 403,
+      message: 'Not allowed to archive task',
+    });
+    expect(harness.taskModel.hydrate).not.toHaveBeenCalled();
+    expect(harness.task.save).not.toHaveBeenCalled();
+  });
+
+  it.each(['mine', 'shared', 'all'] as const)(
+    'applies the complete %s filter before pagination and uses it for total',
+    async (scope) => {
+      const harness = createTaskManagementHarness();
+      await harness.service.listTasks(
+        {
+          scope,
+          status: TaskStatus.Published,
+          knowledgeModule: 'Module',
+          difficulty: 'medium',
+          courseLabel: '通用编程',
+          createdBy: objectId().toString(),
+          page: 2,
+          limit: 1,
+        },
+        harness.ids.teacherId.toString(),
+      );
+
+      const baseFilter: Record<string, unknown> = {
+        visibility:
+          scope === 'shared' ? 'SHARED' : { $in: ['PRIVATE', 'SHARED'] },
+        $expr: { $eq: [{ $type: '$visibility' }, 'string'] },
+        status: 'PUBLISHED',
+        knowledgeModule: 'Module',
+        difficulty: 'medium',
+        courseLabel: '通用编程',
+      };
+      if (scope === 'mine') baseFilter.createdBy = harness.ids.teacherId;
+      const expectedFilter =
+        scope === 'all'
+          ? {
+              $and: [
+                baseFilter,
+                {
+                  $or: [
+                    { createdBy: harness.ids.teacherId },
+                    { visibility: 'SHARED' },
+                  ],
+                },
+              ],
+            }
+          : baseFilter;
+      expect(harness.taskModel.find).toHaveBeenCalledWith(expectedFilter);
+      expect(harness.taskModel.countDocuments).toHaveBeenCalledWith(
+        expectedFilter,
+      );
+      expect(harness.taskModel.countDocuments.mock.calls[0]?.[0]).toBe(
+        harness.taskModel.find.mock.calls[0]?.[0],
+      );
+      expect(harness.findQuery.sort).toHaveBeenCalledWith({ createdAt: -1 });
+      expect(harness.findQuery.skip).toHaveBeenCalledWith(1);
+      expect(harness.findQuery.limit).toHaveBeenCalledWith(1);
+    },
+  );
 });
 
 describe('LearningTasksService task template publisher contract', () => {

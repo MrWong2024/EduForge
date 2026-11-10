@@ -838,6 +838,314 @@ describe('A1 classroom text task backend contract (HTTP)', () => {
     }
   });
 
+  it('persists visibility defaults and normalized inputs through the legal template lifecycle', async () => {
+    const url = '/api/learning-tasks/tasks';
+    const created: string[] = [];
+    for (const [label, visibility, expected, status] of [
+      ['default', undefined, 'PRIVATE', 'DRAFT'],
+      ['explicit-shared', 'SHARED', 'SHARED', 'PUBLISHED'],
+      ['normalized-shared', ' shared ', 'SHARED', 'PUBLISHED'],
+    ] as const) {
+      const response = await teacherA
+        .post(url)
+        .send({
+          ...oldContent,
+          title: namespace + '-visibility-' + label,
+          status,
+          ...(visibility === undefined ? {} : { visibility }),
+        })
+        .expect(201);
+      const id = (response.body as Resource).id;
+      taskIds.push(id);
+      created.push(id);
+      expect(response.body as object).toMatchObject({
+        visibility: expected,
+        status,
+      });
+      expect(
+        await tasks.collection.findOne({ _id: new Types.ObjectId(id) }),
+      ).toHaveProperty('visibility', expected);
+    }
+    const [privateId, sharedId] = created;
+    const privateUrl = url + '/' + privateId;
+    const updated = await teacherA
+      .patch(privateUrl)
+      .send({
+        title: namespace + '-visibility-edited',
+        visibility: ' private ',
+      })
+      .expect(200);
+    expect(updated.body as object).toMatchObject({
+      title: namespace + '-visibility-edited',
+      visibility: 'PRIVATE',
+      status: 'DRAFT',
+    });
+    expect(
+      await tasks.collection.findOne({ _id: new Types.ObjectId(privateId) }),
+    ).toMatchObject({
+      title: namespace + '-visibility-edited',
+      visibility: 'PRIVATE',
+      status: 'DRAFT',
+    });
+    const published = await teacherA.post(privateUrl + '/publish').expect(201);
+    expect(published.body as object).toMatchObject({
+      visibility: 'PRIVATE',
+      status: 'PUBLISHED',
+    });
+    const publishedBefore = await tasks.collection.findOne({
+      _id: new Types.ObjectId(privateId),
+    });
+    const publishedAt: unknown = publishedBefore?.publishedAt;
+    if (!(publishedAt instanceof Date)) {
+      throw new Error('Expected stored publishedAt to be a Date');
+    }
+    expect(publishedBefore).toMatchObject({
+      visibility: 'PRIVATE',
+      status: 'PUBLISHED',
+      publishedAt,
+    });
+    const repeated = await teacherA.post(privateUrl + '/publish').expect(201);
+    expect(repeated.body).toEqual(published.body);
+    expect(
+      await tasks.collection.findOne({ _id: new Types.ObjectId(privateId) }),
+    ).toEqual(publishedBefore);
+
+    expect((await publish(teacherA, classA, privateId)).taskId).toBe(privateId);
+    expect((await publish(teacherB, classB, sharedId)).taskId).toBe(sharedId);
+    await teacherB.get(privateUrl).expect(404);
+    await teacherB
+      .post('/api/classrooms/' + classB.id + '/tasks')
+      .send({ taskId: privateId })
+      .expect(404);
+    expect(
+      await instances.countDocuments({
+        classroomId: new Types.ObjectId(classB.id),
+        taskId: new Types.ObjectId(privateId),
+      }),
+    ).toBe(0);
+    const archived = await teacherA.post(privateUrl + '/archive').expect(201);
+    expect(archived.body as object).toMatchObject({
+      visibility: 'PRIVATE',
+      status: 'ARCHIVED',
+    });
+    expect(
+      await tasks.collection.findOne({ _id: new Types.ObjectId(privateId) }),
+    ).toMatchObject({
+      visibility: 'PRIVATE',
+      status: 'ARCHIVED',
+      publishedAt,
+    });
+  });
+
+  it('filters raw invalid visibility before pagination and rejects repairs or publication without writes', async () => {
+    const knowledgeModule = namespace + '-visibility-filter';
+    const templatesUrl = '/api/learning-tasks/tasks';
+    const candidatesUrl =
+      '/api/classrooms/' + classA.id + '/publishable-task-templates';
+    const ownPrivate = await makeTask(
+      teacherA,
+      { ...oldContent, title: namespace + '-own-private', knowledgeModule },
+      'PRIVATE',
+    );
+    const ownShared = await makeTask(teacherA, {
+      ...oldContent,
+      title: namespace + '-own-shared',
+      knowledgeModule,
+    });
+    const foreignShared = await makeTask(teacherB, {
+      ...oldContent,
+      title: namespace + '-foreign-shared',
+      knowledgeModule,
+    });
+    const foreignPrivate = await makeTask(
+      teacherB,
+      { ...oldContent, title: namespace + '-foreign-private', knowledgeModule },
+      'PRIVATE',
+    );
+    const invalid = [
+      { label: 'missing', status: 'PUBLISHED' },
+      { label: 'null', status: 'PUBLISHED', visibility: null },
+      { label: 'empty', status: 'PUBLISHED', visibility: '' },
+      { label: 'unknown', status: 'PUBLISHED', visibility: 'UNKNOWN' },
+      { label: 'array', status: 'PUBLISHED', visibility: ['SHARED'] },
+      { label: 'missing-draft', status: 'DRAFT' },
+    ].map((sample) => ({ ...sample, _id: new Types.ObjectId() }));
+    for (const sample of invalid) {
+      taskIds.push(sample._id.toString());
+      const timestamp = new Date('2020-01-01T00:00:00.000Z');
+      // Native inserts preserve malformed values and truly absent fields.
+      await tasks.collection.insertOne({
+        ...oldContent,
+        _id: sample._id,
+        title: namespace + '-visibility-' + sample.label,
+        knowledgeModule,
+        createdBy: userIds[0],
+        status: sample.status,
+        ...('visibility' in sample ? { visibility: sample.visibility } : {}),
+        ...(sample.status === 'PUBLISHED' ? { publishedAt: timestamp } : {}),
+        createdAt: timestamp,
+        updatedAt: timestamp,
+      });
+      const raw = await tasks.collection.findOne({ _id: sample._id });
+      expect(raw).toMatchObject({
+        status: sample.status,
+        updatedAt: timestamp,
+      });
+      if ('visibility' in sample) {
+        expect(raw).toHaveProperty('visibility', sample.visibility);
+      } else {
+        expect(raw).not.toHaveProperty('visibility');
+      }
+    }
+    const ownedIds = [ownPrivate, ownShared, foreignShared, foreignPrivate]
+      .map((id) => new Types.ObjectId(id))
+      .concat(invalid.map((sample) => sample._id));
+    const readOwnedFacts = async () => ({
+      tasks: await tasks.collection
+        .find({ _id: { $in: ownedIds } }, { maxTimeMS: 10000 })
+        .sort({ _id: 1 })
+        .toArray(),
+      instances: await instances.collection
+        .find({ taskId: { $in: ownedIds } }, { maxTimeMS: 10000 })
+        .sort({ _id: 1 })
+        .toArray(),
+    });
+    const before = await readOwnedFacts();
+    expect(before.tasks).toHaveLength(10);
+    expect(before.instances).toEqual([]);
+    const ownIds = [ownPrivate, ownShared];
+    const sharedIds = [ownShared, foreignShared];
+    const allIds = [ownPrivate, ownShared, foreignShared];
+    for (const [url, query, expectedIds] of [
+      [templatesUrl, { scope: 'mine', status: 'PUBLISHED' }, ownIds],
+      [templatesUrl, { scope: 'shared', status: 'PUBLISHED' }, sharedIds],
+      [templatesUrl, { scope: 'all', status: 'PUBLISHED' }, allIds],
+      [candidatesUrl, {}, allIds],
+      [candidatesUrl, { onlyMine: false }, allIds],
+      [candidatesUrl, { onlyMine: true }, ownIds],
+    ] as const) {
+      const all = (
+        await teacherA
+          .get(url)
+          .query({ knowledgeModule, ...query, limit: 100 })
+          .expect(200)
+      ).body as List;
+      expect(all.total).toBe(expectedIds.length);
+      expect(all.items.map((item) => item.id).sort()).toEqual(
+        [...expectedIds].sort(),
+      );
+      const pageIds: string[] = [];
+      for (let page = 1; page <= expectedIds.length + 1; page += 1) {
+        const result = (
+          await teacherA
+            .get(url)
+            .query({ knowledgeModule, ...query, page, limit: 1 })
+            .expect(200)
+        ).body as List;
+        expect(result.total).toBe(expectedIds.length);
+        expect(result.items).toHaveLength(page <= expectedIds.length ? 1 : 0);
+        pageIds.push(...result.items.map((item) => item.id));
+      }
+      expect(pageIds.sort()).toEqual([...expectedIds].sort());
+    }
+
+    const [missing, , , , , missingDraft] = invalid;
+    for (const sample of invalid) {
+      const response = await teacherA
+        .get(templatesUrl + '/' + sample._id.toString())
+        .expect(409);
+      expect(response.body as object).toMatchObject({
+        message: 'Task has invalid visibility',
+      });
+    }
+    for (const sample of [missingDraft, missing]) {
+      const url = templatesUrl + '/' + sample._id.toString();
+      const updated = await teacherA
+        .patch(url)
+        .send({
+          visibility: 'PRIVATE',
+          title: 'Must not repair raw visibility',
+        })
+        .expect(409);
+      expect(updated.body as object).toMatchObject({
+        message: 'Task has invalid visibility',
+      });
+      const published = await teacherA.post(url + '/publish').expect(409);
+      expect(published.body as object).toMatchObject({
+        message: 'Task has invalid visibility',
+      });
+    }
+    const missingUrl = templatesUrl + '/' + missing._id.toString();
+    const archived = await teacherA.post(missingUrl + '/archive').expect(409);
+    expect(archived.body as object).toMatchObject({
+      message: 'Task has invalid visibility',
+    });
+    const authorPublication = await teacherA
+      .post('/api/classrooms/' + classA.id + '/tasks')
+      .send({ taskId: missing._id.toString() })
+      .expect(409);
+    expect(authorPublication.body as object).toMatchObject({
+      message: 'Task has invalid visibility',
+    });
+    const nonAuthorDetail = await teacherB.get(missingUrl).expect(404);
+    expect(nonAuthorDetail.body as object).toMatchObject({
+      message: 'Task not found',
+    });
+    await teacherB
+      .patch(missingUrl)
+      .send({ visibility: 'PRIVATE' })
+      .expect(404);
+    await teacherB.post(missingUrl + '/publish').expect(404);
+    await teacherB.post(missingUrl + '/archive').expect(403);
+    const nonAuthorPublication = await teacherB
+      .post('/api/classrooms/' + classB.id + '/tasks')
+      .send({ taskId: missing._id.toString() })
+      .expect(404);
+    expect(nonAuthorPublication.body as object).toMatchObject({
+      message: 'Task not found',
+    });
+    expect(await readOwnedFacts()).toEqual(before);
+  });
+
+  it('keeps published classroom and student reads independent of invalid source visibility', async () => {
+    const id = await makeTask(teacherA, {
+      ...oldContent,
+      title: namespace + '-visibility-existing-snapshot',
+    });
+    const instance = await publish(teacherA, classA, id);
+    const templateId = new Types.ObjectId(id);
+    const instanceId = new Types.ObjectId(instance.id);
+    await tasks.collection.updateOne(
+      { _id: templateId, createdBy: userIds[0] },
+      { $unset: { visibility: '' } },
+    );
+    const templateBefore = await tasks.collection.findOne({ _id: templateId });
+    const instanceBefore = await instances.collection.findOne({
+      _id: instanceId,
+    });
+    expect(templateBefore).not.toHaveProperty('visibility');
+    const url = '/api/classrooms/' + classA.id + '/tasks/' + instance.id;
+    for (const agent of [teacherA, studentA]) {
+      const detail = await agent.get(url).expect(200);
+      expect(detail.body as object).toMatchObject({
+        id: instance.id,
+        taskSnapshotAvailable: true,
+        task: instance.task,
+      });
+    }
+    const mine = await studentA.get(url + '/my-task-detail').expect(200);
+    expect(mine.body as object).toMatchObject({
+      classroomTask: { id: instance.id, taskSnapshotAvailable: true },
+      task: instance.task,
+    });
+    expect(await tasks.collection.findOne({ _id: templateId })).toEqual(
+      templateBefore,
+    );
+    expect(await instances.collection.findOne({ _id: instanceId })).toEqual(
+      instanceBefore,
+    );
+  });
+
   it('publishes, preserves each source/note, freezes A and B independently across read chains', async () => {
     taskId = await makeTask(teacherA);
     instanceA = await publish(teacherA, classA, taskId);
