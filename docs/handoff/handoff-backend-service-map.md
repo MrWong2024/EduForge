@@ -197,6 +197,7 @@ Global SoT 只保留理解跨 Service workflow 必需的稳定不变量，不追
   - 首提与后续提交均只保存作品，不创建 AI Job、不写 reviewStartedAt；无 Job 时返回 NOT_REQUESTED。手工请求复用 `ensureJobForSubmission`，不重复创建已有 Job；ensure 前统一校验提交/实例关联与快照，学生还重验本人、Enrollment ACTIVE 和班级/实例运行态，教师保留班级 ownership 评阅边界。缺失或残留的旧策略字段均不参与判断。
   - 教师反馈修改沿用 hydrated 文档及现有 ID 比较方式，按原顺序检查提交归属、班级管理上下文、TEACHER 来源和作者身份；全部通过后才赋值反馈字段并 save，不补写作者、不修改 Submission 评阅事实。公开拒绝及历史读取边界见 [API Learning Tasks](./handoff-backend-api-map.md#learning-tasks)。
   - 同次作品修改：身份、课堂关联/快照、成员、运行态、输入、截止及历史 Feedback/Job 检查完成后，按 `_id + expectedRevision + 未进入评阅` 单文档条件更新，原子替换允许内容、成对写修改时间/迟交事实并递增 revision。revision=0 的条件显式兼容字段缺失；已有非法版本/评阅状态 fail-closed。任何历史 Feedback/任意状态 Job 都禁止编辑，不要求最新 attempt；不建新 Submission、不增加 attempt、不触发 AI，也不套用创建冷却。首次提交/报表事实保持不变。
+  - 本地开发库与生产库的本轮合格历史 Submission 已完成 contentRevision 缺失→0 的受控补录及原生回读；历史基线语义见 [Submission 版本字段说明](./handoff-backend-dto-cheatsheet.md#submission-request--response-family)。现有缺失值读取、原子更新/CAS 及 Analytics 的兼容代码仍保留，待下一阶段退役；当前评阅冻结与版本时间规则保持。
   - 评阅固定：新增教师反馈与师生手动 AI request 先完成全部权限、关联、快照及业务输入校验，再以同一 revision 条件原子写入 reviewStartedAt，成功即正式受理；已有有效固定时间且 revision 相同允许继续合法评阅。学生先保存则旧评阅 409；评阅先受理则旧编辑 409，绝不读取新版替换 expectedRevision 重放。GET/轮询/资格读取无固定写入。
   - Submission 与 Feedback/Job 不组成跨集合事务。固定后关联写失败、超时或返回不确定均不解锁；详情仍显示不能修改，客户端保留草稿，先读权威详情/反馈列表再由用户明确续行。Job 始终沿 submissionId 唯一键幂等，不重置 FAILED/DEAD/SUCCEEDED、不重新排队。
   - 教师反馈创建显式挑选规范业务 payload，版本前置不 spread 进文档；仅捕获预期复合唯一键重复，查回后核对 submission、作者及完整规范 source/type/severity/message/suggestion/tags/scoreHint。完全一致返回既有反馈，不同明确冲突；其它 E11000 继续失败。教师反馈 PATCH 不增加第二套版本机制。历史缺字段只读兼容、不迁移、不修复。
