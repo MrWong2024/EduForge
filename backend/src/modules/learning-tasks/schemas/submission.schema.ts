@@ -90,13 +90,6 @@ SubmissionSchema.index(
     partialFilterExpression: { classroomTaskId: { $type: 'objectId' } },
   },
 );
-SubmissionSchema.index(
-  { taskId: 1, studentId: 1, attemptNo: 1 },
-  {
-    unique: true,
-    partialFilterExpression: { classroomTaskId: null },
-  },
-);
 SubmissionSchema.index({ taskId: 1, studentId: 1 });
 // Supports teacher list/stats queries on taskId with createdAt sort; adds write overhead.
 SubmissionSchema.index({ taskId: 1, createdAt: -1 });

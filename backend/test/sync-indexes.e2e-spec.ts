@@ -9,7 +9,6 @@ import {
 } from '../scripts/sync-indexes';
 import {
   assertConnectedDatabaseMatchesPurpose,
-  assertDeclaredDatabaseMatchesPurpose,
   TEST_DATABASE_NAMES,
 } from '../src/config/database-purpose';
 import {
@@ -28,6 +27,10 @@ import {
   cleanupSyncIndexesCollections,
   createSyncIndexesLifecycle,
 } from './helpers/sync-indexes-lifecycle';
+import {
+  assertLocalStandardTestAuthentication,
+  assertLocalStandardTestEnvironment,
+} from './helpers/local-test-database-auth';
 
 const { MongoClient, BSON } = mongoose.mongo;
 const testDatabase = TEST_DATABASE_NAMES.standard_test;
@@ -119,6 +122,7 @@ async function assertLocalStandalone(
   connectedClient: mongo.MongoClient,
   timeoutMS?: number,
 ) {
+  const startedAt = performance.now();
   assertConnectedDatabaseMatchesPurpose({
     nodeEnv: testEnvironment.NODE_ENV,
     purpose: testEnvironment.EDUFORGE_DATABASE_PURPOSE,
@@ -166,6 +170,31 @@ async function assertLocalStandalone(
     throw new Error('SYNC_INDEXES_E2E_ACTUAL_NODE_NOT_LOCAL');
   }
   standaloneAddress = address;
+
+  // The topology and authentication checks share cleanup's original time budget.
+  const authTimeoutMS =
+    timeoutMS === undefined
+      ? fixtureClientOptions.timeoutMS
+      : Math.floor(timeoutMS - (performance.now() - startedAt));
+  if (authTimeoutMS <= 0)
+    throw new Error('SYNC_INDEXES_E2E_AUTHENTICATION_DEADLINE');
+  const auth = await connected
+    .admin()
+    .command(
+      { connectionStatus: 1, showPrivileges: false },
+      { timeoutMS: authTimeoutMS },
+    )
+    .catch(() => {
+      throw new Error('SYNC_INDEXES_E2E_AUTHENTICATION_UNAVAILABLE');
+    });
+  assertLocalStandardTestAuthentication({
+    nodeEnv: testEnvironment.NODE_ENV,
+    purpose: testEnvironment.EDUFORGE_DATABASE_PURPOSE,
+    mongoUri: managementUri,
+    databaseName: connected.databaseName,
+    connectedHost: match[1] === '[::1]' ? '::1' : '127.0.0.1',
+    authInfo: auth.authInfo,
+  });
 }
 
 async function connectLocal(clientToCheck: mongo.MongoClient) {
@@ -384,7 +413,7 @@ describe('sync-indexes against an isolated MongoDB namespace', () => {
       const mongoUri = parse(file).MONGO_URI;
       if (!mongoUri)
         throw new Error('SYNC_INDEXES_E2E_MANAGEMENT_URI_REQUIRED');
-      assertDeclaredDatabaseMatchesPurpose({ nodeEnv, purpose, mongoUri });
+      assertLocalStandardTestEnvironment({ nodeEnv, purpose, mongoUri });
       managementUri = mongoUri;
 
       try {
@@ -430,7 +459,7 @@ describe('sync-indexes against an isolated MongoDB namespace', () => {
         }
       }
       console.info(
-        `sync-indexes e2e database=${testDatabase} node=${standaloneAddress ?? 'unconfirmed'} topology=standalone prefix=${prefix}`,
+        `sync-indexes e2e database=${testDatabase} node=${standaloneAddress ?? 'unconfirmed'} topology=standalone identity=root@admin role=root@admin prefix=${prefix}`,
       );
     }),
   );
@@ -549,19 +578,11 @@ describe('sync-indexes against an isolated MongoDB namespace', () => {
         { classroomTaskId: { $type: 7 } },
       ]).toContainEqual(classroom?.partialFilterExpression);
 
-      const personal = submissionIndexes.find(
-        ({ name }) => name === 'taskId_1_studentId_1_attemptNo_1',
-      );
-      expect(personal?.unique).toBe(true);
-      expect(Object.entries(personal?.key ?? {})).toEqual([
-        ['taskId', 1],
-        ['studentId', 1],
-        ['attemptNo', 1],
-      ]);
-      expect([
-        { classroomTaskId: null },
-        { classroomTaskId: { $eq: null } },
-      ]).toContainEqual(personal?.partialFilterExpression);
+      expect(
+        submissionIndexes.find(
+          ({ name }) => name === 'taskId_1_studentId_1_attemptNo_1',
+        ),
+      ).toBeUndefined();
 
       const repeated = await runCli(apply);
       expect(repeated.exitCode).toBe(0);
@@ -577,44 +598,90 @@ describe('sync-indexes against an isolated MongoDB namespace', () => {
   );
 
   runTest(
-    'keeps preview and denied apply read-only and deletes an authorized extra index',
+    'previews and retires only the historical Submission index with explicit drop authorization',
     async () => {
-      const name = collections.sessions;
-      expect(owned.get(name)).toBe(await collectionUuid(name));
-      await lifecycle.write(() =>
-        database().collection(name).createIndex({ legacyOnly: 1 }),
+      const name = collections.submissions;
+      const legacyIndexName = 'taskId_1_studentId_1_attemptNo_1';
+      const targets = normalModels.map(({ collection }) => collection);
+      await assertOwned(name);
+      // BSON comparison also preserves compound-key order and every index option.
+      const preserved = BSON.serialize({
+        metadata: await readMetadata(targets),
+      });
+      const createdIndex = await lifecycle.write(() =>
+        database()
+          .collection(name)
+          .createIndex(
+            { taskId: 1, studentId: 1, attemptNo: 1 },
+            {
+              unique: true,
+              partialFilterExpression: { classroomTaskId: null },
+            },
+          ),
       );
-      const targets = [name, collections.submissions, collections.jobs];
-      const before = await readMetadata(targets);
+      expect(createdIndex).toBe(legacyIndexName);
+      const before = BSON.serialize({ metadata: await readMetadata(targets) });
       const preview = await runCli(['--dry-run']);
       expect(preview.exitCode).toBe(0);
       expect(preview.result.writesAttempted).toBe(false);
-      expect(
-        preview.plan.models.find(({ collection }) => collection === name)
-          ?.toDrop,
-      ).toMatchObject([{ name: 'legacyOnly_1' }]);
-      expect(await readMetadata(targets)).toEqual(before);
+      expect(preview.plan.models).toHaveLength(normalModels.length);
+      for (const model of preview.plan.models) {
+        expect(model.createCollection).toBe(false);
+        expect(model.toCreate).toEqual([]);
+        expect(model.toDrop.map(({ name: indexName }) => indexName)).toEqual(
+          model.collection === name ? [legacyIndexName] : [],
+        );
+      }
+      expect(BSON.serialize({ metadata: await readMetadata(targets) })).toEqual(
+        before,
+      );
 
       const denied = await runCli(apply);
       expect(denied.exitCode).toBe(1);
       expect(denied.result.error?.code).toBe('DROP_CONFIRMATION_REQUIRED');
       expect(denied.result.writesAttempted).toBe(false);
-      expect(await readMetadata(targets)).toEqual(before);
+      expect(denied.plan.models).toEqual(preview.plan.models);
+      expect(BSON.serialize({ metadata: await readMetadata(targets) })).toEqual(
+        before,
+      );
 
       const allowed = await runCli([...apply, '--allow-drop']);
       expect(allowed.exitCode).toBe(0);
-      expect(
-        allowed.result.models.find(({ collection }) => collection === name),
-      ).toMatchObject({
-        verification: { status: 'passed' },
-        operations: [{ kind: 'dropIndex', status: 'completed' }],
-      });
-      expect((await indexes(name)).map((index) => index.name).sort()).toEqual([
-        '_id_',
-        'expiresAt_1',
-        'token_1',
-        'userId_1',
-      ]);
+      expect(allowed.result.status).toBe('completed');
+      expect(allowed.result.writesAttempted).toBe(true);
+      expect(allowed.plan.models).toEqual(preview.plan.models);
+      for (const model of allowed.result.models) {
+        expect(model.verification?.status).toBe('passed');
+        expect(model.operations).toEqual(
+          model.collection === name
+            ? [
+                expect.objectContaining({
+                  kind: 'dropIndex',
+                  name: legacyIndexName,
+                  status: 'completed',
+                }),
+              ]
+            : [],
+        );
+      }
+      expect(BSON.serialize({ metadata: await readMetadata(targets) })).toEqual(
+        preserved,
+      );
+
+      const repeated = await runCli(apply);
+      expect(repeated.exitCode).toBe(0);
+      expect(repeated.result.status).toBe('completed');
+      expect(repeated.result.writesAttempted).toBe(false);
+      for (const model of repeated.plan.models) {
+        expect(model).toMatchObject({
+          createCollection: false,
+          toDrop: [],
+          toCreate: [],
+        });
+      }
+      expect(BSON.serialize({ metadata: await readMetadata(targets) })).toEqual(
+        preserved,
+      );
     },
   );
 

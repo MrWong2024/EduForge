@@ -2507,6 +2507,12 @@ const nullFilter = { classroomTaskId: null };
 const explicitNullFilter = { classroomTaskId: { $eq: null } };
 const objectIdFilter = { classroomTaskId: { $type: 'objectId' } };
 const numericObjectIdFilter = { classroomTaskId: { $type: 7 } };
+const historicalSubmissionAttemptIndex = {
+  name: 'taskId_1_studentId_1_attemptNo_1',
+  key: { taskId: 1, studentId: 1, attemptNo: 1 } as const,
+  unique: true,
+  partialFilterExpression: nullFilter,
+} satisfies ComparisonIndex;
 
 function isSubmissionAttemptIndex(
   key: Record<string, unknown>,
@@ -2520,6 +2526,13 @@ function submissionIndexFixture(
   filter: mongo.Document,
 ) {
   const indexes = comparisonIndexesFor(SubmissionSchema);
+  if (field === 'taskId') {
+    const index = {
+      ...historicalSubmissionAttemptIndex,
+      partialFilterExpression: filter,
+    };
+    return { indexes: [...indexes, index], index };
+  }
   const index = indexes.find(({ key }) => isSubmissionAttemptIndex(key, field));
   if (!index) throw new Error('EXPECTED_SUBMISSION_ATTEMPT_INDEX');
   index.partialFilterExpression = filter;
@@ -2527,6 +2540,41 @@ function submissionIndexFixture(
 }
 
 describe('sync-indexes Submission partial filter comparison (offline)', () => {
+  it.each([
+    ['null equality', nullFilter],
+    ['explicit null equality', explicitNullFilter],
+  ] as const)(
+    'plans only the retired Submission index drop for %s without recreating it',
+    async (_label, filter) => {
+      const sharedDeclarations = structuredClone(SubmissionSchema.indexes());
+      expect(
+        sharedDeclarations.some(([key]) =>
+          isSubmissionAttemptIndex(key, 'taskId'),
+        ),
+      ).toBe(false);
+      const { indexes, index } = submissionIndexFixture('taskId', filter);
+      const a = realComparisonHarness({ modelName: 'Submission', indexes });
+
+      expect(await a.run(['--dry-run'])).toBe(0);
+      expect(jsonEvent(a.h, 'plan')).toMatchObject({
+        models: SYNC_INDEX_SCHEMAS.map(({ name }) => ({
+          model: name,
+          createCollection: false,
+          toDrop: name === 'Submission' ? [index] : [],
+          toCreate: [],
+        })),
+      });
+      expect(jsonEvent(a.h, 'result')).toMatchObject({
+        status: 'preview',
+        writesAttempted: false,
+      });
+      expect(SubmissionSchema.indexes()).toEqual(sharedDeclarations);
+      expect(a.dropped).toEqual([]);
+      expect(a.forbidden).not.toHaveBeenCalled();
+      expectComparisonResourcesClosed(a);
+    },
+  );
+
   const equivalents = [
     {
       label: 'null equality',
@@ -2563,6 +2611,12 @@ describe('sync-indexes Submission partial filter comparison (offline)', () => {
         modelName: 'Submission',
         indexes,
         configureSchema: (schema) => {
+          if (field === 'taskId') {
+            schema.index(historicalSubmissionAttemptIndex.key, {
+              unique: true,
+              partialFilterExpression: schemaFilter,
+            });
+          }
           declaration = schema
             .indexes()
             .find(([key]) => isSubmissionAttemptIndex(key, field));
@@ -2752,6 +2806,12 @@ describe('sync-indexes Submission partial filter comparison (offline)', () => {
       modelName: 'Submission',
       indexes: original.indexes,
       recheckedIndexes: rechecked.indexes,
+      configureSchema: (schema) => {
+        schema.index(historicalSubmissionAttemptIndex.key, {
+          unique: true,
+          partialFilterExpression: nullFilter,
+        });
+      },
     });
 
     expect(await a.run([...apply, '--allow-drop'])).toBe(1);
