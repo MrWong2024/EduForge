@@ -1210,6 +1210,232 @@ describe('A1 classroom text task backend contract (HTTP)', () => {
     expect(await jobs.countDocuments(related)).toBe(0);
   });
 
+  it('filters invalid persisted statuses before pagination and rejects single-task operations without writes', async () => {
+    const classroom = (
+      await teacherA
+        .post('/api/classrooms')
+        .send({ courseId: courseIds[0], name: namespace + '-status-contract' })
+        .expect(201)
+    ).body as Resource;
+    classIds.push(classroom.id);
+    await studentA
+      .post('/api/classrooms/join')
+      .send({ joinCode: classroom.joinCode })
+      .expect(201);
+    const url = '/api/classrooms/' + classroom.id + '/tasks';
+    const created: ClassroomTaskResponseDto[] = [];
+    for (const label of [
+      'active',
+      'closed',
+      'recalled',
+      'missing',
+      'null',
+      'unknown',
+      'array',
+    ]) {
+      const id = await makeTask(teacherA, {
+        ...oldContent,
+        title: namespace + '-status-' + label,
+      });
+      const instance = await publish(teacherA, classroom, id);
+      created.push(instance);
+      expect(instance.status).toBe('ACTIVE');
+      expect(
+        await instances.collection.findOne({
+          _id: new Types.ObjectId(instance.id),
+        }),
+      ).toHaveProperty('status', 'ACTIVE');
+    }
+    const [active, closed, recalled, missing, nullState, unknown, arrayState] =
+      created;
+    for (const status of ['CLOSED', 'ACTIVE', 'CLOSED']) {
+      const response = await teacherA
+        .patch(url + '/' + closed.id + '/status')
+        .send({ status })
+        .expect(200);
+      expect((response.body as ClassroomTaskResponseDto).status).toBe(status);
+      expect(
+        await instances.collection.findOne({
+          _id: new Types.ObjectId(closed.id),
+        }),
+      ).toHaveProperty('status', status);
+    }
+    await teacherA
+      .patch(url + '/' + recalled.id + '/status')
+      .send({ status: 'RECALLED' })
+      .expect(200);
+    const recalledBefore = await instances.collection.findOne({
+      _id: new Types.ObjectId(recalled.id),
+    });
+    expect(recalledBefore).toHaveProperty('status', 'RECALLED');
+    await teacherA
+      .patch(url + '/' + recalled.id + '/status')
+      .send({ status: 'ACTIVE' })
+      .expect(400);
+    expect(
+      await instances.collection.findOne({
+        _id: new Types.ObjectId(recalled.id),
+      }),
+    ).toEqual(recalledBefore);
+
+    await submit(studentA, classroom, missing);
+    await instances.collection.updateOne(
+      { _id: new Types.ObjectId(missing.id) },
+      { $unset: { status: '' } },
+    );
+    for (const [instance, status] of [
+      [nullState, null],
+      [unknown, 'UNKNOWN'],
+      [arrayState, ['ACTIVE']],
+    ] as const) {
+      await instances.collection.updateOne(
+        { _id: new Types.ObjectId(instance.id) },
+        { $set: { status } },
+      );
+    }
+    // The list query's status still selects Task.status, not ClassroomTask.status.
+    await teacherA
+      .post('/api/learning-tasks/tasks/' + closed.taskId + '/archive')
+      .expect(201);
+    const ownedIds = created.map((item) => new Types.ObjectId(item.id));
+    const readOwnedFacts = async () => {
+      const ownedSubmissions = await submissions.collection
+        .find({ classroomTaskId: { $in: ownedIds } }, { maxTimeMS: 10000 })
+        .sort({ _id: 1 })
+        .toArray();
+      return {
+        instances: await instances.collection
+          .find({ _id: { $in: ownedIds } }, { maxTimeMS: 10000 })
+          .sort({ _id: 1 })
+          .toArray(),
+        tasks: await tasks.collection
+          .find(
+            {
+              _id: {
+                $in: created.map((item) => new Types.ObjectId(item.taskId)),
+              },
+            },
+            { maxTimeMS: 10000 },
+          )
+          .sort({ _id: 1 })
+          .toArray(),
+        submissions: ownedSubmissions,
+        feedback: await feedback.collection
+          .find(
+            { submissionId: { $in: ownedSubmissions.map((item) => item._id) } },
+            { maxTimeMS: 10000 },
+          )
+          .sort({ _id: 1 })
+          .toArray(),
+        jobs: await jobs.collection
+          .find({ classroomTaskId: { $in: ownedIds } }, { maxTimeMS: 10000 })
+          .sort({ _id: 1 })
+          .toArray(),
+      };
+    };
+    const before = await readOwnedFacts();
+    expect(before.submissions).toHaveLength(1);
+    for (const instance of [missing, nullState, unknown, arrayState]) {
+      const raw = before.instances.find(
+        (item) => item._id.toString() === instance.id,
+      );
+      expect(raw).toBeDefined();
+      if (instance === missing) expect(raw).not.toHaveProperty('status');
+      if (instance === nullState) expect(raw).toHaveProperty('status', null);
+      if (instance === unknown) expect(raw).toHaveProperty('status', 'UNKNOWN');
+      if (instance === arrayState)
+        expect(raw).toHaveProperty('status', ['ACTIVE']);
+    }
+
+    for (const [instance, status] of [
+      [active, 'ACTIVE'],
+      [closed, 'CLOSED'],
+      [recalled, 'RECALLED'],
+    ] as const) {
+      const response = await teacherA.get(url + '/' + instance.id).expect(200);
+      expect((response.body as ClassroomTaskResponseDto).status).toBe(status);
+    }
+    const expectedIds = [active.id, closed.id, recalled.id].sort();
+    for (const agent of [teacherA, studentA]) {
+      const all = (await agent.get(url).query({ limit: 100 }).expect(200))
+        .body as List;
+      expect(all.total).toBe(3);
+      expect(all.items.map((item) => item.id).sort()).toEqual(expectedIds);
+      const pageIds: string[] = [];
+      for (const page of [1, 2, 3, 4]) {
+        const result = (
+          await agent.get(url).query({ page, limit: 1 }).expect(200)
+        ).body as List;
+        expect(result.total).toBe(3);
+        expect(result.items).toHaveLength(page <= 3 ? 1 : 0);
+        pageIds.push(...result.items.map((item) => item.id));
+      }
+      expect(pageIds.sort()).toEqual(expectedIds);
+      for (const [status, ids] of [
+        ['ARCHIVED', [closed.id]],
+        ['PUBLISHED', [active.id, recalled.id]],
+      ] as const) {
+        const result = (
+          await agent.get(url).query({ status, limit: 100 }).expect(200)
+        ).body as List;
+        expect(result.total).toBe(ids.length);
+        expect(result.items.map((item) => item.id).sort()).toEqual(
+          [...ids].sort(),
+        );
+      }
+    }
+    const invalidUrl = url + '/' + missing.id;
+    const submissionPayload = {
+      content: {
+        codeText: 'status conflict must not create an attempt',
+        language: 'typescript',
+      },
+    };
+    await teacherB.get(invalidUrl).expect(403);
+    await studentB.get(invalidUrl + '/my-task-detail').expect(403);
+    await studentB
+      .post(invalidUrl + '/submissions')
+      .send(submissionPayload)
+      .expect(403);
+    await studentA.patch(invalidUrl).send({ allowLate: false }).expect(403);
+    await studentA
+      .patch(invalidUrl + '/status')
+      .send({ status: 'ACTIVE' })
+      .expect(403);
+    for (const instance of [missing, nullState, unknown, arrayState]) {
+      const response = await teacherA.get(url + '/' + instance.id).expect(409);
+      expect(response.body as object).toMatchObject({
+        message: 'Classroom task has invalid status',
+      });
+    }
+    const mine = await studentA.get(invalidUrl + '/my-task-detail').expect(409);
+    expect(mine.body as object).toMatchObject({
+      message: 'Classroom task has invalid status',
+    });
+    const configuration = await teacherA
+      .patch(invalidUrl)
+      .send({ dueAt: '2035-01-01T00:00:00.000Z', allowLate: false })
+      .expect(409);
+    expect(configuration.body as object).toMatchObject({
+      message: 'Classroom task has invalid status',
+    });
+    const lifecycle = await teacherA
+      .patch(invalidUrl + '/status')
+      .send({ status: 'ACTIVE' })
+      .expect(409);
+    expect(lifecycle.body as object).toMatchObject({
+      message: 'Classroom task has invalid status',
+    });
+    const rejectedSubmission = await studentA
+      .post(invalidUrl + '/submissions')
+      .send(submissionPayload)
+      .expect(409);
+    expect(rejectedSubmission.body as object).toMatchObject({
+      message: 'Classroom task has invalid status',
+    });
+    expect(await readOwnedFacts()).toEqual(before);
+  });
+
   it('keeps allowLate defaults and false, clears dueAt, and rejects empty PATCH or null allowLate', async () => {
     const url = '/api/classrooms/' + classA.id + '/tasks';
     const created: ClassroomTaskResponseDto[] = [];

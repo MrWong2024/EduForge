@@ -150,7 +150,7 @@ my-task-detail 另稳定返回 `participationStatus={readOnly,canSubmit,canReque
 
 `ClassroomTaskResponseDto`：`{id,classroomId,taskId,taskSnapshotAvailable,status,publishedAt,dueAt?,settings?,createdBy,createdAt,updatedAt,taskPublisher,task}`。
 
-- `status: ACTIVE | CLOSED | RECALLED`；普通列表/详情与 my-task-detail 对旧数据缺省按 ACTIVE 兼容输出。
+- `status: ACTIVE | CLOSED | RECALLED`，仅输出真实保存的合法标量状态，不补造 ACTIVE 或扩展为 nullable；异常状态与列表过滤合同见 [API Classroom Tasks](./handoff-backend-api-map.md#classroom-tasksclassrooms-子资源)。
 - `taskPublisher: {id,name?} | null` 来自模板发布者，安全字段仅 id/name。
 - `task={title,description,knowledgeModule,courseLabel?,difficulty?,rubric?,status}`；教学字段取实际快照，缺快照旧实例只作当前模板投影，不能称为发布原文。`status` 仍为当前模板资产状态。`taskSnapshotAvailable:boolean` 仅有实际快照时为 true。
 - 公开 `settings` 仅白名单投影 `allowLate`，保留原有缺省/可选语义；Mongo Mixed 中残留的 maxAttempts、旧策略或其它内部字段均不展开透出。发布、更新返回、教师列表/详情及学生详情使用同一公开边界；GET 不回填、不清理、不更新时间戳。

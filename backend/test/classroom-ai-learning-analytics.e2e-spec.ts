@@ -167,6 +167,7 @@ type AnalyticsStudentList = {
 };
 
 type AnalyticsStudentDetail = {
+  context: AnalyticsOverview['context'];
   student: {
     studentId: string;
     studentName: string;
@@ -1863,7 +1864,7 @@ describe('Classroom AI learning analytics (e2e)', () => {
       )
       .expect(404);
   });
-  it('excludes formally recalled and unknown tasks, retaining CLOSED and missing legacy state consistently', async () => {
+  it('retains only scalar ACTIVE and CLOSED tasks consistently without changing invalid historical states', async () => {
     const baseline = (
       await teacherAgent
         .get(
@@ -1873,10 +1874,43 @@ describe('Classroom AI learning analytics (e2e)', () => {
         )
         .expect(200)
     ).body as AnalyticsOverview;
+    const baselineExpectedIds = [
+      improvedClassroomTaskId,
+      stableClassroomTaskId,
+      regressedClassroomTaskId,
+      zeroSubmissionClassroomTaskId,
+      failedClassroomTaskId,
+      earlyOnlyClassroomTaskId,
+      unchangedWithIssuesClassroomTaskId,
+    ]
+      .map((id) => id.toString())
+      .sort();
+    expect(
+      baseline.taskTrends.map((item) => item.classroomTaskId).sort(),
+    ).toEqual(baselineExpectedIds);
+    const active = await publishOwnedTask('Active analytics task');
     const recalled = await publishOwnedTask('Empty recalled analytics task');
     const closed = await publishOwnedTask('Closed analytics task');
-    const legacy = await publishOwnedTask('Legacy active analytics task');
+    const legacy = await publishOwnedTask('Missing state analytics task');
+    const nullState = await publishOwnedTask('Null state analytics task');
     const unknown = await publishOwnedTask('Unknown state analytics task');
+    const arrayState = await publishOwnedTask('Array state analytics task');
+    const added = [
+      active,
+      recalled,
+      closed,
+      legacy,
+      nullState,
+      unknown,
+      arrayState,
+    ];
+    for (const instance of added) {
+      expect(
+        await classroomTaskModel.collection.findOne({
+          _id: new Types.ObjectId(instance.id),
+        }),
+      ).toHaveProperty('status', 'ACTIVE');
+    }
     await teacherAgent
       .patch(
         '/api/classrooms/' +
@@ -1906,6 +1940,26 @@ describe('Classroom AI learning analytics (e2e)', () => {
       { _id: new Types.ObjectId(unknown.id) },
       { $set: { status: 'UNKNOWN' } },
     );
+    await classroomTaskModel.collection.updateOne(
+      { _id: new Types.ObjectId(nullState.id) },
+      { $set: { status: null } },
+    );
+    await classroomTaskModel.collection.updateOne(
+      { _id: new Types.ObjectId(arrayState.id) },
+      { $set: { status: ['ACTIVE'] } },
+    );
+    const before = await Promise.all(
+      added.map((instance) => rawTaskFacts(instance.id)),
+    );
+    expect(before[0].classroomTask).toHaveProperty('status', 'ACTIVE');
+    expect(before[1].classroomTask).toHaveProperty('status', 'RECALLED');
+    expect(before[2].classroomTask).toHaveProperty('status', 'CLOSED');
+    expect(before[3].classroomTask).not.toBeNull();
+    expect(before[3].classroomTask).not.toHaveProperty('status');
+    expect(before[4].classroomTask).toHaveProperty('status', null);
+    expect(before[5].classroomTask).toHaveProperty('status', 'UNKNOWN');
+    expect(before[6].classroomTask).toHaveProperty('status', ['ACTIVE']);
+    const expectedIds = [...baselineExpectedIds, active.id, closed.id].sort();
     const base =
       '/api/classrooms/' + classroomId.toString() + '/ai-learning-analytics';
     const overview = (await teacherAgent.get(base).expect(200))
@@ -1917,25 +1971,23 @@ describe('Classroom AI learning analytics (e2e)', () => {
         .get(base + '/students/' + activeStudentId.toString())
         .expect(200)
     ).body as AnalyticsStudentDetail;
-    expect(overview.context.effectiveTaskCount).toBe(9);
-    expect(students.context.effectiveTaskCount).toBe(9);
+    expect(overview.context.effectiveTaskCount).toBe(expectedIds.length);
+    expect(students.context.effectiveTaskCount).toBe(expectedIds.length);
+    expect(detail.context.effectiveTaskCount).toBe(expectedIds.length);
     expect(overview.summary).toEqual(baseline.summary);
     const effectiveTaskSets: Array<Array<{ classroomTaskId: string }>> = [
       overview.taskTrends,
       detail.taskPoints,
     ];
     for (const points of effectiveTaskSets) {
-      expect(points.map((item) => item.classroomTaskId)).toEqual(
-        expect.arrayContaining([closed.id, legacy.id]),
-      );
-      expect(points.map((item) => item.classroomTaskId)).not.toContain(
-        recalled.id,
-      );
-      expect(points.map((item) => item.classroomTaskId)).not.toContain(
-        unknown.id,
+      expect(points.map((item) => item.classroomTaskId).sort()).toEqual(
+        expectedIds,
       );
     }
-    expect(detail.taskPoints).toHaveLength(9);
+    expect(detail.taskPoints).toHaveLength(expectedIds.length);
+    for (const [index, instance] of added.entries()) {
+      expect(await rawTaskFacts(instance.id)).toEqual(before[index]);
+    }
     expect(
       await submissionModel.countDocuments({
         classroomTaskId: new Types.ObjectId(recalled.id),

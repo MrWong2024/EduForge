@@ -908,8 +908,9 @@ export class AiLearningAnalyticsService {
     const taskFilter: Record<string, unknown> = {
       classroomId: classroomObjectId,
       status: {
-        $in: [CLASSROOM_TASK_STATUS_ACTIVE, CLASSROOM_TASK_STATUS_CLOSED, null],
+        $in: [CLASSROOM_TASK_STATUS_ACTIVE, CLASSROOM_TASK_STATUS_CLOSED],
       },
+      $expr: { $eq: [{ $type: '$status' }, 'string'] },
     };
     if (lowerBound) {
       taskFilter.publishedAt = { $gte: lowerBound };

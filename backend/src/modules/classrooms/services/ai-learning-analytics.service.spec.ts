@@ -1957,7 +1957,11 @@ describe('AiLearningAnalyticsService aggregation boundaries', () => {
       unknown
     >;
     expect(taskFilter.publishedAt?.$gte).toBeInstanceOf(Date);
-    expect(taskFilter).toHaveProperty('status.$in', ['ACTIVE', 'CLOSED', null]);
+    // The harness records query shape; real Mongo filtering is covered by E2E.
+    expect(taskFilter).toHaveProperty('status.$in', ['ACTIVE', 'CLOSED']);
+    expect(taskFilter).toHaveProperty('$expr', {
+      $eq: [{ $type: '$status' }, 'string'],
+    });
     expect(taskFilter._id?.$nin?.map((id) => id.toString())).toEqual([
       excludedClassroomTaskId.toString(),
     ]);

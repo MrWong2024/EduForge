@@ -66,6 +66,7 @@ import {
 import { WithId } from '../../../../common/types/with-id.type';
 import { WithTimestamps } from '../../../../common/types/with-timestamps.type';
 import {
+  CLASSROOM_TASK_STATUSES,
   CLASSROOM_TASK_STATUS_ACTIVE,
   CLASSROOM_TASK_STATUS_CLOSED,
   CLASSROOM_TASK_STATUS_RECALLED,
@@ -381,9 +382,7 @@ export class ClassroomTasksService {
       throw new NotFoundException('Classroom task not found');
     }
 
-    const currentStatus = this.toClassroomTaskStatusForRead(
-      classroomTask.status,
-    );
+    const currentStatus = this.requireClassroomTaskStatus(classroomTask.status);
     if (currentStatus === CLASSROOM_TASK_STATUS_RECALLED) {
       throw new BadRequestException(
         'Recalled classroom tasks cannot be updated',
@@ -479,9 +478,7 @@ export class ClassroomTasksService {
       throw new NotFoundException('Classroom task not found');
     }
 
-    const currentStatus = this.toClassroomTaskStatusForRead(
-      classroomTask.status,
-    );
+    const currentStatus = this.requireClassroomTaskStatus(classroomTask.status);
     const targetStatus = dto.status;
 
     if (targetStatus === currentStatus) {
@@ -676,7 +673,11 @@ export class ClassroomTasksService {
 
     const page = query.page ?? 1;
     const limit = Math.min(query.limit ?? 20, 100);
-    const match = { classroomId: new Types.ObjectId(classroomId) };
+    const match = {
+      classroomId: new Types.ObjectId(classroomId),
+      status: { $in: [...CLASSROOM_TASK_STATUSES] },
+      $expr: { $eq: [{ $type: '$status' }, 'string'] },
+    };
     const basePipeline: PipelineStage[] = [
       { $match: match },
       {
@@ -805,7 +806,7 @@ export class ClassroomTasksService {
       throw new NotFoundException('Classroom task not found');
     }
     if (
-      this.toClassroomTaskStatusForRead(classroomTask.status) !==
+      this.requireClassroomTaskStatus(classroomTask.status) !==
       CLASSROOM_TASK_STATUS_ACTIVE
     ) {
       throw new ConflictException('课堂任务已关闭，不能继续提交。');
@@ -1284,7 +1285,7 @@ export class ClassroomTasksService {
     const completionStatus = latestSubmission
       ? buildCompletionStatus(latestSubmission.id, completionFeedbacks)
       : buildNotSubmittedCompletionStatus();
-    const classroomTaskStatus = this.toClassroomTaskStatusForRead(
+    const classroomTaskStatus = this.requireClassroomTaskStatus(
       classroomTask.status,
     );
     const participationStatus = this.buildStudentTaskParticipationStatus(
@@ -1849,16 +1850,15 @@ export class ClassroomTasksService {
     } as PublishableTaskTemplateItemResponseDto;
   }
 
-  private toClassroomTaskStatusForRead(
-    status: ClassroomTask['status'] | undefined | null,
-  ): ClassroomTaskStatus {
-    if (status === CLASSROOM_TASK_STATUS_CLOSED) {
-      return CLASSROOM_TASK_STATUS_CLOSED;
+  private requireClassroomTaskStatus(status: unknown): ClassroomTaskStatus {
+    if (
+      status === CLASSROOM_TASK_STATUS_ACTIVE ||
+      status === CLASSROOM_TASK_STATUS_CLOSED ||
+      status === CLASSROOM_TASK_STATUS_RECALLED
+    ) {
+      return status;
     }
-    if (status === CLASSROOM_TASK_STATUS_RECALLED) {
-      return CLASSROOM_TASK_STATUS_RECALLED;
-    }
-    return CLASSROOM_TASK_STATUS_ACTIVE;
+    throw new ConflictException('Classroom task has invalid status');
   }
 
   private toClassroomTaskResponse(
@@ -1871,7 +1871,7 @@ export class ClassroomTasksService {
       id: classroomTask._id.toString(),
       classroomId: classroomTask.classroomId.toString(),
       taskId: classroomTask.taskId.toString(),
-      status: this.toClassroomTaskStatusForRead(classroomTask.status),
+      status: this.requireClassroomTaskStatus(classroomTask.status),
       publishedAt: classroomTask.publishedAt,
       dueAt: classroomTask.dueAt,
       settings: {

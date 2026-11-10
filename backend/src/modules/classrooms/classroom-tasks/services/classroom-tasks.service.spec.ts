@@ -1,5 +1,5 @@
 import { AiContextReaderService } from '../../../learning-tasks/ai-context/ai-context-reader.service';
-import { Model, Types } from 'mongoose';
+import { Model, PipelineStage, Types } from 'mongoose';
 import { Classroom, ClassroomStatus } from '../../schemas/classroom.schema';
 import { Course } from '../../../courses/schemas/course.schema';
 import { ClassroomTask } from '../schemas/classroom-task.schema';
@@ -121,6 +121,7 @@ const createHarness = (options: HarnessOptions = {}) => {
   const classroom = {
     _id: classroomId,
     name: 'Class A',
+    teacherId: studentId,
     courseId: objectId(),
     status: options.classroomStatus ?? ClassroomStatus.Active,
   };
@@ -128,6 +129,7 @@ const createHarness = (options: HarnessOptions = {}) => {
     _id: classroomTaskId,
     classroomId,
     taskId,
+    createdBy: studentId,
     publishedAt: new Date('2026-01-01T00:00:00.000Z'),
     status: options.classroomTaskStatus ?? CLASSROOM_TASK_STATUS_ACTIVE,
     taskSnapshot: {
@@ -139,6 +141,7 @@ const createHarness = (options: HarnessOptions = {}) => {
   };
   const task = {
     _id: taskId,
+    createdBy: studentId,
     title: 'Task A',
     description: 'Task Description',
     knowledgeModule: 'module',
@@ -152,6 +155,11 @@ const createHarness = (options: HarnessOptions = {}) => {
   const courseModel = {};
   const classroomTaskModel = {
     findOne: jest.fn(() => makeQuery(classroomTask)),
+    findOneAndUpdate: jest.fn(),
+    aggregate: jest.fn((pipeline: PipelineStage[]) => {
+      void pipeline;
+      return makeAggregate([]);
+    }),
   };
   const taskModel = {
     findById: jest.fn(() => makeQuery(task)),
@@ -257,6 +265,9 @@ const createHarness = (options: HarnessOptions = {}) => {
 
   return {
     service,
+    classroom,
+    classroomTask,
+    classroomTaskModel,
     feedbackModel,
     learningTasksService,
     ids: { studentId, classroomId, classroomTaskId, taskId },
@@ -332,6 +343,178 @@ const submissionDto = {
     language: 'javascript',
   },
 };
+
+describe('ClassroomTasksService persisted status contract', () => {
+  it.each([
+    CLASSROOM_TASK_STATUS_ACTIVE,
+    CLASSROOM_TASK_STATUS_CLOSED,
+    CLASSROOM_TASK_STATUS_RECALLED,
+  ])(
+    'returns the persisted %s status without normalization',
+    async (status) => {
+      const h = createHarness({ classroomTaskStatus: status });
+      await expect(
+        h.service.getClassroomTask(
+          h.ids.classroomId.toString(),
+          h.ids.classroomTaskId.toString(),
+          h.ids.studentId.toString(),
+        ),
+      ).resolves.toMatchObject({ status });
+    },
+  );
+
+  it.each([
+    ['missing', undefined],
+    ['undefined', undefined],
+    ['null', null],
+    ['empty string', ''],
+    ['unknown string', 'LEGACY'],
+    ['lowercase string', 'active'],
+    ['empty array', []],
+    ['array containing ACTIVE', ['ACTIVE']],
+    ['object', {}],
+    ['number', 1],
+    ['boolean', true],
+  ] as const)(
+    'rejects the raw %s status in ordinary detail',
+    async (kind, value) => {
+      const h = createHarness();
+      // Mutate the returned raw fixture so ?? ACTIVE cannot replace anomalies.
+      if (kind === 'missing') Reflect.deleteProperty(h.classroomTask, 'status');
+      else Reflect.set(h.classroomTask, 'status', value);
+      expect(Object.hasOwn(h.classroomTask, 'status')).toBe(kind !== 'missing');
+      expect(h.classroomTask.status).toEqual(value);
+      await expect(
+        h.service.getClassroomTask(
+          h.ids.classroomId.toString(),
+          h.ids.classroomTaskId.toString(),
+          h.ids.studentId.toString(),
+        ),
+      ).rejects.toMatchObject({
+        status: 409,
+        message: 'Classroom task has invalid status',
+      });
+      expect(h.classroomTaskModel.findOneAndUpdate).not.toHaveBeenCalled();
+    },
+  );
+
+  it('rejects missing status before parameter, lifecycle or submission writes', async () => {
+    const h = createHarness({ userRoles: ['teacher', 'student'] });
+    Reflect.deleteProperty(h.classroomTask, 'status');
+    const classroomId = h.ids.classroomId.toString();
+    const classroomTaskId = h.ids.classroomTaskId.toString();
+    const userId = h.ids.studentId.toString();
+    const original = { ...h.classroomTask };
+    const actions = [
+      () =>
+        h.service.updateClassroomTask(
+          classroomId,
+          classroomTaskId,
+          { allowLate: false },
+          userId,
+        ),
+      () =>
+        h.service.updateClassroomTaskStatus(
+          classroomId,
+          classroomTaskId,
+          { status: CLASSROOM_TASK_STATUS_CLOSED },
+          userId,
+        ),
+      () =>
+        h.service.createClassroomTaskSubmission(
+          classroomId,
+          classroomTaskId,
+          submissionDto,
+          userId,
+        ),
+      () => h.service.getMyTaskDetail(classroomId, classroomTaskId, {}, userId),
+    ];
+    for (const action of actions) {
+      await expect(action()).rejects.toMatchObject({
+        status: 409,
+        message: 'Classroom task has invalid status',
+      });
+    }
+    expect(h.classroomTask).toEqual(original);
+    expect(Object.hasOwn(h.classroomTask, 'status')).toBe(false);
+    expect(h.classroomTaskModel.findOneAndUpdate).not.toHaveBeenCalled();
+    expect(
+      h.learningTasksService.createSubmissionForClassroomTask,
+    ).not.toHaveBeenCalled();
+  });
+
+  it('keeps the teacher role gate before invalid status on parameter updates', async () => {
+    const h = createHarness({ userRoles: ['student'] });
+    Reflect.set(h.classroomTask, 'status', null);
+    await expect(
+      h.service.updateClassroomTask(
+        h.ids.classroomId.toString(),
+        h.ids.classroomTaskId.toString(),
+        { allowLate: false },
+        h.ids.studentId.toString(),
+      ),
+    ).rejects.toMatchObject({ status: 403 });
+    expect(h.classroomTaskModel.findOne).not.toHaveBeenCalled();
+    expect(h.classroomTaskModel.findOneAndUpdate).not.toHaveBeenCalled();
+  });
+
+  it('keeps Enrollment refusal before invalid status on student submission', async () => {
+    const h = createHarness({ isMember: false });
+    Reflect.set(h.classroomTask, 'status', ['ACTIVE']);
+    await expect(
+      h.service.createClassroomTaskSubmission(
+        h.ids.classroomId.toString(),
+        h.ids.classroomTaskId.toString(),
+        submissionDto,
+        h.ids.studentId.toString(),
+      ),
+    ).rejects.toMatchObject({ status: 403 });
+    expect(h.classroomTaskModel.findOne).not.toHaveBeenCalled();
+    expect(
+      h.learningTasksService.createSubmissionForClassroomTask,
+    ).not.toHaveBeenCalled();
+  });
+
+  it('keeps another teacher forbidden before inspecting an invalid detail status', async () => {
+    const h = createHarness({ userRoles: ['teacher'] });
+    h.classroom.teacherId = objectId();
+    Reflect.deleteProperty(h.classroomTask, 'status');
+    await expect(
+      h.service.getClassroomTask(
+        h.ids.classroomId.toString(),
+        h.ids.classroomTaskId.toString(),
+        h.ids.studentId.toString(),
+      ),
+    ).rejects.toMatchObject({ status: 403 });
+  });
+
+  it('shares scalar instance status filtering before pagination and count while retaining template status filtering', async () => {
+    const h = createHarness({ userRoles: ['teacher'] });
+    await h.service.listClassroomTasks(
+      h.ids.classroomId.toString(),
+      { status: TaskStatus.Published, page: 2, limit: 2 },
+      h.ids.studentId.toString(),
+    );
+    const [items, total] = h.classroomTaskModel.aggregate.mock.calls.map(
+      ([pipeline]) => pipeline,
+    );
+    // This mock verifies query construction; E2E covers MongoDB filtering.
+    expect(h.classroomTaskModel.aggregate).toHaveBeenCalledTimes(2);
+    expect(items[0]).toEqual({
+      $match: {
+        classroomId: h.ids.classroomId,
+        status: { $in: ['ACTIVE', 'CLOSED', 'RECALLED'] },
+        $expr: { $eq: [{ $type: '$status' }, 'string'] },
+      },
+    });
+    expect(items.slice(0, 4)).toEqual(total.slice(0, 4));
+    expect(items[3]).toEqual({
+      $match: { 'task.status': TaskStatus.Published },
+    });
+    expect(items.slice(-2)).toEqual([{ $skip: 2 }, { $limit: 2 }]);
+    expect(total.at(-1)).toEqual({ $count: 'total' });
+  });
+});
 
 describe('ClassroomTasksService createClassroomTaskSubmission participation status', () => {
   it('allows ACTIVE classroom, ACTIVE classroomTask and PUBLISHED task submissions', async () => {
