@@ -739,7 +739,7 @@ export class LearningTasksService {
     if (feedback.source !== FeedbackSource.Teacher) {
       throw new ForbiddenException('Only teacher feedback can be updated');
     }
-    if (feedback.createdBy && feedback.createdBy.toString() !== userId) {
+    if (feedback.createdBy?.toString() !== userId) {
       throw new ForbiddenException('Not allowed to update feedback');
     }
 
@@ -761,10 +761,6 @@ export class LearningTasksService {
     if (dto.scoreHint !== undefined) {
       feedback.scoreHint = dto.scoreHint;
     }
-    if (!feedback.createdBy) {
-      feedback.createdBy = new Types.ObjectId(userId);
-    }
-
     await feedback.save();
     return this.toFeedbackResponse(feedback);
   }

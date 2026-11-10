@@ -454,7 +454,7 @@ CreateTaskDto / UpdateTaskDto 通过继承 `TaskAiContextDto` 接受嵌套 `aiCo
 
 更新至少一个可写字段；Update DTO 对可选字段采用 `ValidateIf(value !== undefined)`，显式 null 不合法。更新白名单不含 `source/submissionId/createdBy/createdAt/updatedAt` 或任何任务、学生、课堂归属字段。
 
-`FeedbackResponseDto`：`{id,submissionId,createdBy?,source,type,severity,message,suggestion?,tags?,scoreHint?,createdAt,updatedAt}`。`createdBy` 为作者 id，不是 User 对象；旧 TEACHER feedback 可缺省，createdAt 是原创建时间。新建/更新时作者补写、可修改来源及权限见 [API Learning Tasks](./handoff-backend-api-map.md#learning-tasks)。
+`FeedbackResponseDto`：`{id,submissionId,createdBy?,source,type,severity,message,suggestion?,tags?,scoreHint?,createdAt,updatedAt}`。`createdBy` 为可选作者 id，不是 User 对象；AI feedback 和缺作者历史 TEACHER feedback 可缺省，createdAt 是原创建时间。可选投影不表示允许通过更新认领或补写作者；创建作者、更新资格及历史读取边界见 [API Learning Tasks](./handoff-backend-api-map.md#learning-tasks)。
 
 ## AI Feedback diagnostics / request family
 

@@ -192,8 +192,9 @@ Notes:
 - 公开教师创建反馈只接受 source=TEACHER；非 TEACHER 值返回 400，不写反馈或 AI Job。内部 Processor 仍保存 AI 来源。
 - Submission PATCH 只允许具备学生角色的提交本人；校验有效课堂关联、发布快照、ACTIVE Enrollment 与班级/课堂任务运行态及保存时截止规则，不以是否最新 attempt 代替资格。已进入评阅或已有任何 Feedback/Job 均禁止修改；请求及详情字段见 [DTO Submission](./handoff-backend-dto-cheatsheet.md#submission-request--response-family)。
 - 新增教师反馈与产品 AI request 均要求必填 `expectedRevision`，先完成权限、关联、快照和输入校验，再正式受理评阅；已有 Job 也不能跳过本次版本和权限校验。竞争失败明确返回 409；查看详情、反馈列表及轮询不固定作品，不回填、清理历史字段或改写时间戳。既有冻结及 Job/反馈/用量事实保留；符合既有执行条件的 Job 继续处理，不补建或重置。版本竞争、固定成功后关联写失败的续行与幂等由 [Service Card 08](./handoff-backend-service-map.md#service-card-08) 维护；教师反馈 PATCH 保留原合同。
-- 教师反馈更新要求有效课堂关联及所属班级 owner 管理权；feedback 不存在或不属于该 submission 返回 `404`。仅 TEACHER 来源可改，非 TEACHER 返回 `403 Only teacher feedback can be updated`；已有 createdBy 时还必须是该作者，否则 `403 Not allowed to update feedback`。
-- 新建 TEACHER feedback 记录当前教师作者；旧 TEACHER feedback 缺失 createdBy 时，有管理权教师可更新并补写作者，保留原 createdAt。字段白名单与兼容投影仅见 [DTO Feedback](./handoff-backend-dto-cheatsheet.md#feedback-dto--response-family)，内部协作见 [Service Card 08](./handoff-backend-service-map.md#service-card-08)。
+- 教师反馈更新要求有效课堂关联及所属班级 owner 管理权；feedback 不存在或不属于该 submission 返回 `404 Feedback not found`。班级权限检查后，仅 TEACHER 来源可改，非 TEACHER 返回 `403 Only teacher feedback can be updated`；随后检查作者，createdBy 缺失、为 null 或其现有 ID 比较结果不等于当前用户，均返回 `403 Not allowed to update feedback`。拒绝发生在反馈字段修改和保存之前，普通更新不补写或认领作者。
+- 新建 TEACHER feedback 由服务端记录当前教师作者，重复创建的幂等及 `FEEDBACK_PAYLOAD_CONFLICT` 规则保持；合法更新保留 createdBy 和原 createdAt，updatedAt 沿用 timestamps。AI feedback 可合法没有教师作者；缺作者历史反馈仍按原权限读取，GET 不补写或隐藏反馈。字段白名单与可选投影见 [DTO Feedback](./handoff-backend-dto-cheatsheet.md#feedback-dto--response-family)，内部协作见 [Service Card 08](./handoff-backend-service-map.md#service-card-08)。
+- 教师反馈缺作者更新与自动认领的后端退役完成；TeacherFeedbackHistory / TeacherFeedbackEditForm 的前端作者资格收口待下一阶段。
 
 ## AI Feedback Debug / Ops（门禁接口）
 

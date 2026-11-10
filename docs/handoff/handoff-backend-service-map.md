@@ -195,7 +195,7 @@ Global SoT 只保留理解跨 Service workflow 必需的稳定不变量，不追
   - listTasks 的难度条件按保存值精确匹配，并与既有 scope、status、knowledgeModule、courseLabel 及作者范围取交集；同一完整 filter 在 skip/limit 前应用于 items 与 countDocuments，保留原排序。省略难度时不排除未知、缺失或空串值；查询值域见 [DTO Cheatsheet](./handoff-backend-dto-cheatsheet.md#task-template-dto--response-family)。
   - Submission 的 classroomTaskId 在 Schema 与内部创建入口必填；attemptNo 分配、冷却及创建时的既有提交查询始终按 classroomTaskId + studentId，不推测实例或按模板分配编号。attemptNo 采用“查询最新编号 + 有界重试”，最多 3 次分配尝试，冲突不绕过唯一约束。旧通用写入口拒绝；新实例提交要求实际快照并逐次保存源码与说明，写 Submission 前重验班级/实例 ACTIVE，并校验截止与迟交规则，持久化提交时间及迟交结果，不以模板当前状态阻断既有实例。
   - 首提与后续提交均只保存作品，不创建 AI Job、不写 reviewStartedAt；无 Job 时返回 NOT_REQUESTED。手工请求复用 `ensureJobForSubmission`，不重复创建已有 Job；ensure 前统一校验提交/实例关联与快照，学生还重验本人、Enrollment ACTIVE 和班级/实例运行态，教师保留班级 ownership 评阅边界。缺失或残留的旧策略字段均不参与判断。
-  - 教师反馈修改复用 submission 管理上下文，校验反馈属于该提交、来源为 TEACHER 且已有作者与当前教师一致。旧教师反馈无 createdBy 时在授权更新中补写，不批量迁移历史数据。
+  - 教师反馈修改沿用 hydrated 文档及现有 ID 比较方式，按原顺序检查提交归属、班级管理上下文、TEACHER 来源和作者身份；全部通过后才赋值反馈字段并 save，不补写作者、不修改 Submission 评阅事实。公开拒绝及历史读取边界见 [API Learning Tasks](./handoff-backend-api-map.md#learning-tasks)。
   - 同次作品修改：身份、课堂关联/快照、成员、运行态、输入、截止及历史 Feedback/Job 检查完成后，按 `_id + expectedRevision + 未进入评阅` 单文档条件更新，原子替换允许内容、成对写修改时间/迟交事实并递增 revision。revision=0 的条件显式兼容字段缺失；已有非法版本/评阅状态 fail-closed。任何历史 Feedback/任意状态 Job 都禁止编辑，不要求最新 attempt；不建新 Submission、不增加 attempt、不触发 AI，也不套用创建冷却。首次提交/报表事实保持不变。
   - 评阅固定：新增教师反馈与师生手动 AI request 先完成全部权限、关联、快照及业务输入校验，再以同一 revision 条件原子写入 reviewStartedAt，成功即正式受理；已有有效固定时间且 revision 相同允许继续合法评阅。学生先保存则旧评阅 409；评阅先受理则旧编辑 409，绝不读取新版替换 expectedRevision 重放。GET/轮询/资格读取无固定写入。
   - Submission 与 Feedback/Job 不组成跨集合事务。固定后关联写失败、超时或返回不确定均不解锁；详情仍显示不能修改，客户端保留草稿，先读权威详情/反馈列表再由用户明确续行。Job 始终沿 submissionId 唯一键幂等，不重置 FAILED/DEAD/SUCCEEDED、不重新排队。

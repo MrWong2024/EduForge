@@ -17,7 +17,13 @@ import { AiFeedbackStatus } from '../ai-feedback/interfaces/ai-feedback-status.e
 import { AiFeedbackJobStatus } from '../ai-feedback/schemas/ai-feedback-job.schema';
 import { AiFeedbackJobService } from '../ai-feedback/services/ai-feedback-job.service';
 import { CreateSubmissionDto } from '../dto/create-submission.dto';
-import { Feedback } from '../schemas/feedback.schema';
+import { UpdateFeedbackDto } from '../dto/update-feedback.dto';
+import {
+  Feedback,
+  FeedbackSeverity,
+  FeedbackSource,
+  FeedbackType,
+} from '../schemas/feedback.schema';
 import {
   Submission,
   SubmissionSchema,
@@ -121,7 +127,10 @@ const createHarness = (
       makeQuery({ ...submission, reviewStartedAt: new Date() }),
     ),
   };
-  const feedbackModel = { exists: jest.fn().mockResolvedValue(null) };
+  const feedbackModel = {
+    exists: jest.fn().mockResolvedValue(null),
+    findById: jest.fn(() => makeQuery(null)),
+  };
   const classroomTaskModel = {
     findById: jest.fn(() => makeQuery(classroomTask)),
     exists: jest.fn(() => ({ exec: jest.fn().mockResolvedValue(null) })),
@@ -1156,6 +1165,191 @@ describe('LearningTasksService student participation status gates', () => {
     expect(
       harness.aiFeedbackJobService.ensureJobForSubmission,
     ).not.toHaveBeenCalled();
+  });
+});
+
+describe('LearningTasksService teacher feedback update authorship', () => {
+  const update: UpdateFeedbackDto = {
+    type: FeedbackType.Design,
+    severity: FeedbackSeverity.Warn,
+    message: 'Updated teacher feedback',
+    suggestion: 'Extract a focused function',
+    tags: ['readability', 'style'],
+    scoreHint: 88,
+  };
+  const createFeedbackHarness = () => {
+    const h = createHarness();
+    Object.assign(h.submission, {
+      contentRevision: 2,
+      reviewStartedAt: new Date('2026-01-03T00:00:00.000Z'),
+      lastEditedAt: new Date('2026-01-02T00:00:00.000Z'),
+      lastEditIsLate: false,
+    });
+    const feedback = {
+      _id: objectId(),
+      submissionId: h.ids.submissionId,
+      createdBy: h.ids.teacherId,
+      source: FeedbackSource.Teacher,
+      type: FeedbackType.Style,
+      severity: FeedbackSeverity.Info,
+      message: 'Original teacher feedback',
+      suggestion: 'Original suggestion',
+      tags: ['naming'],
+      scoreHint: 60,
+      createdAt: new Date('2026-01-03T00:01:00.000Z'),
+      updatedAt: new Date('2026-01-03T00:01:00.000Z'),
+      save: jest.fn().mockResolvedValue(undefined),
+    };
+    const feedbackQuery = makeQuery(feedback);
+    h.feedbackModel.findById.mockReturnValue(feedbackQuery);
+    return { ...h, feedback, feedbackQuery };
+  };
+
+  it('updates all writable fields for the classroom owner and author without rewriting authorship or creation time', async () => {
+    const h = createFeedbackHarness();
+    const createdBy = h.feedback.createdBy;
+    const createdAt = h.feedback.createdAt;
+    const submissionBefore = { ...h.submission };
+    Reflect.deleteProperty(h.classroomTask, 'taskSnapshot');
+
+    const result = await h.service.updateFeedback(
+      h.ids.submissionId.toString(),
+      h.feedback._id.toString(),
+      update,
+      h.ids.teacherId.toString(),
+    );
+
+    expect(result).toMatchObject({
+      id: h.feedback._id.toString(),
+      submissionId: h.ids.submissionId.toString(),
+      createdBy: h.ids.teacherId.toString(),
+      source: 'TEACHER',
+      type: 'DESIGN',
+      severity: 'WARN',
+      message: 'Updated teacher feedback',
+      suggestion: 'Extract a focused function',
+      tags: ['readability', 'style'],
+      scoreHint: 88,
+      createdAt,
+    });
+    expect(h.feedback.createdBy).toBe(createdBy);
+    expect(h.feedback.createdAt).toBe(createdAt);
+    expect(h.feedback.save).toHaveBeenCalledTimes(1);
+    expect(h.feedbackQuery.lean).not.toHaveBeenCalled();
+    expect(h.submission).toEqual(submissionBefore);
+    expect(h.submissionModel.findOneAndUpdate).not.toHaveBeenCalled();
+    expect(h.submissionModel.create).not.toHaveBeenCalled();
+    expect(
+      h.aiFeedbackJobService.ensureJobForSubmission,
+    ).not.toHaveBeenCalled();
+  });
+
+  it.each(['missing', 'null', 'other author'] as const)(
+    'rejects %s before feedback assignment or save without changing submission facts',
+    async (kind) => {
+      const h = createFeedbackHarness();
+      if (kind === 'missing') {
+        Reflect.deleteProperty(h.feedback, 'createdBy');
+      } else {
+        Reflect.set(
+          h.feedback,
+          'createdBy',
+          kind === 'null' ? null : objectId(),
+        );
+      }
+      expect(Object.hasOwn(h.feedback, 'createdBy')).toBe(kind !== 'missing');
+      const feedbackBefore = { ...h.feedback };
+      const submissionBefore = { ...h.submission };
+
+      await expect(
+        h.service.updateFeedback(
+          h.ids.submissionId.toString(),
+          h.feedback._id.toString(),
+          update,
+          h.ids.teacherId.toString(),
+        ),
+      ).rejects.toMatchObject({
+        status: 403,
+        message: 'Not allowed to update feedback',
+      });
+      expect(h.feedback).toEqual(feedbackBefore);
+      expect(Object.hasOwn(h.feedback, 'createdBy')).toBe(kind !== 'missing');
+      expect(h.feedback.save).not.toHaveBeenCalled();
+      expect(h.submission).toEqual(submissionBefore);
+      expect(h.submissionModel.findOneAndUpdate).not.toHaveBeenCalled();
+      expect(h.submissionModel.create).not.toHaveBeenCalled();
+      expect(
+        h.aiFeedbackJobService.ensureJobForSubmission,
+      ).not.toHaveBeenCalled();
+    },
+  );
+
+  it('keeps a feedback belonging to another submission on the 404 path before classroom or author checks', async () => {
+    const h = createFeedbackHarness();
+    h.feedback.submissionId = objectId();
+    Reflect.deleteProperty(h.feedback, 'createdBy');
+    const before = { ...h.feedback };
+
+    await expect(
+      h.service.updateFeedback(
+        h.ids.submissionId.toString(),
+        h.feedback._id.toString(),
+        update,
+        h.ids.teacherId.toString(),
+      ),
+    ).rejects.toMatchObject({ status: 404, message: 'Feedback not found' });
+    expect(h.taskModel.findById).not.toHaveBeenCalled();
+    expect(h.classroomTaskModel.findById).not.toHaveBeenCalled();
+    expect(h.classroomModel.findById).not.toHaveBeenCalled();
+    expect(h.feedback).toEqual(before);
+    expect(h.feedback.save).not.toHaveBeenCalled();
+    expect(h.submissionModel.findOneAndUpdate).not.toHaveBeenCalled();
+  });
+
+  it('preserves the dedicated AI source rejection when a feedback has no teacher author', async () => {
+    const h = createFeedbackHarness();
+    h.feedback.source = FeedbackSource.AI;
+    Reflect.deleteProperty(h.feedback, 'createdBy');
+    const before = { ...h.feedback };
+
+    await expect(
+      h.service.updateFeedback(
+        h.ids.submissionId.toString(),
+        h.feedback._id.toString(),
+        update,
+        h.ids.teacherId.toString(),
+      ),
+    ).rejects.toMatchObject({
+      status: 403,
+      message: 'Only teacher feedback can be updated',
+    });
+    expect(h.feedback).toEqual(before);
+    expect(h.feedback.save).not.toHaveBeenCalled();
+    expect(h.submissionModel.findOneAndUpdate).not.toHaveBeenCalled();
+  });
+
+  it('checks classroom management before feedback source or author eligibility', async () => {
+    const h = createFeedbackHarness();
+    h.classroom.teacherId = objectId();
+    h.feedback.source = FeedbackSource.AI;
+    const readAuthor = jest.fn(() => undefined);
+    Object.defineProperty(h.feedback, 'createdBy', { get: readAuthor });
+
+    await expect(
+      h.service.updateFeedback(
+        h.ids.submissionId.toString(),
+        h.feedback._id.toString(),
+        update,
+        h.ids.teacherId.toString(),
+      ),
+    ).rejects.toMatchObject({
+      status: 403,
+      message: 'Not allowed to update feedback',
+    });
+    expect(readAuthor).not.toHaveBeenCalled();
+    expect(h.feedback.message).toBe('Original teacher feedback');
+    expect(h.feedback.save).not.toHaveBeenCalled();
+    expect(h.submissionModel.findOneAndUpdate).not.toHaveBeenCalled();
   });
 });
 
