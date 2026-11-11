@@ -142,6 +142,8 @@
 
 ### 3.5 AI Feedback / 报表 / 导出
 
+课程总览、课堂复盘、班级周报的共性窗口规则：先由 `getSingleSearchParam` 对重复 window 取首值，再由 `parseEnum` 按各页允许集合精确匹配原值，默认 `all`。省略、空值、不在允许集合内的旧窗口、`term`、大小写或空白变体及其他非法值统一回落 `all`，不 trim 或转换大小写；请求始终显式发送同一规范化 window。
+
 - AI Feedback 产品请求：`SubmissionAiReview`（组合 RequestAiFeedbackButton） -> `/api/proxy/learning-tasks/submissions/:id/ai-feedback/request`。
   - 对应后端：`POST /api/learning-tasks/submissions/:submissionId/ai-feedback/request`。
   - 师生手动申请的精确快照 409 优先于版本错误 helper，匹配失败继续现有版本/通用提示；不把快照错误加入 getSubmissionRevisionError，也不增加教师反馈表单的快照门禁。
@@ -150,11 +152,14 @@
   - 旧响应兼容：新增用量字段不加入 `submission-ai-operations.ts` 的原始详情必需字段名单；旧版完整详情缺少新字段仍可通过事后显式读取，在不确定 POST 后恢复确认，不因此关闭原恢复路径或自动重放请求。
 - 班级周报：`weekly-report/page.tsx` -> `/api/proxy/classrooms/:id/weekly-report`。
   - 对应后端：`GET /api/classrooms/:classroomId/weekly-report`。
+  - 页面窗口为 `7d | 30d | all`；解析与请求沿用本节三页报表共性窗口规则。
   - 注意：窗口与公开数据见 [Backend DTO](./handoff-backend-dto-cheatsheet.md#weekly-report)，前端消费后端聚合结果；页头名称通过 `toClassroomSummary` 复用现有 `data.raw.classroom`，不新增请求，缺失时显示明确占位。
 - 课程总览：`courses/:courseId/overview/page.tsx` -> `/api/proxy/courses/:courseId/overview`。
   - 对应后端：`GET /api/courses/:courseId/overview`。
+  - 页面窗口为 `all | 7d`；解析与请求沿用本节三页报表共性窗口规则，后端数据合同见 [Backend DTO](./handoff-backend-dto-cheatsheet.md#课程总览)。
 - 学习轨迹 / 课堂复盘 / AI 指标：三件套 Server pages -> `/api/proxy/classrooms/:cid/tasks/:ctid/{learning-trajectory,review-pack,ai-metrics}`。
   - 对应后端：三个课堂任务聚合接口。
+  - 课堂复盘窗口为 `all | 7d`；解析与请求沿用本节三页报表共性窗口规则，后端数据合同见 [Backend DTO](./handoff-backend-dto-cheatsheet.md#review-pack)。
   - 学习轨迹姓名只消费 `student.name`，不再映射或读取旧姓名别名；缺姓名时仍依次按学号、邮箱、`未知学生` 降级展示。后端字段结构及 nullable 合同见 [Backend DTO](./handoff-backend-dto-cheatsheet.md#learning-trajectory)。
   - 学习轨迹 window 仅接受精确的 `all | 7d`，默认 `all`；省略、空值、`24h`、`30d`、`term`、大小写或空白变体及其他未知值统一沿用 `parseEnum` 回落为 `all`，不 trim 或转换大小写。重复 window 沿用 `getSingleSearchParam` 取首值，请求使用同一规范化 window。
 - 过程性评价 JSON：`process-assessment/page.tsx` -> `/api/proxy/classrooms/:id/process-assessment`。

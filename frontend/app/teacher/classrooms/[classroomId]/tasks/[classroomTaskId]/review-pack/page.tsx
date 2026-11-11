@@ -32,14 +32,10 @@ type ReviewPackPageProps = {
   }>;
 };
 
-const REVIEW_WINDOWS = ["24h", "7d", "30d", "all"] as const;
-const DISPLAY_REVIEW_WINDOWS = ["all", "7d"] as const;
+const REVIEW_WINDOWS = ["all", "7d"] as const;
 type ReviewWindow = (typeof REVIEW_WINDOWS)[number];
-type DisplayReviewWindow = (typeof DISPLAY_REVIEW_WINDOWS)[number];
 const WINDOW_LABELS: Record<ReviewWindow, string> = {
-  "24h": "近24小时",
   "7d": "近7天",
-  "30d": "近30天",
   all: "全部",
 };
 
@@ -591,7 +587,7 @@ export default async function ReviewPackPage({ params, searchParams }: ReviewPac
         <div className="mt-2 flex flex-wrap items-center gap-4 text-zinc-700">
           <div className="flex items-center gap-2">
             <span>统计窗口:</span>
-            {DISPLAY_REVIEW_WINDOWS.map((windowValue: DisplayReviewWindow) => {
+            {REVIEW_WINDOWS.map((windowValue: ReviewWindow) => {
               const active = windowValue === viewModel.query.window;
               return (
                 <Link

@@ -70,7 +70,7 @@ Notes:
 
 - teacher only；资源必须由当前教师创建，课程总览仅涵盖该教师名下班级，并遵守全局 Enrollment-only 与课堂任务隔离边界。
 - 总览是当前课程口径下的提交覆盖与 AI 运行概览，支持无时间下界的历史读取；各窗口、兼容提交率与整体覆盖率的区别见 [DTO 课程总览](./handoff-backend-dto-cheatsheet.md#课程总览)，聚合见 [Service Card 08C](./handoff-backend-service-map.md#service-card-08c)。
-- 课程总览的旧窗口 `1h/24h` 请求返回 `400`；课程总览前端旧链接适配待下一阶段。
+- 课程总览的旧窗口 `1h/24h` 请求返回 `400`。
 - 课程状态为 `ACTIVE | ARCHIVED`；PATCH 支持归档与恢复。已归档课程可通过状态更新恢复，但不允许普通内容编辑。
 - 仅无任何班级引用的空课程可删除；非空时返回 `409 Conflict`，`code=COURSE_NOT_EMPTY`，message=`该课程下已有班级记录，不能删除，只能归档`。
 - 引用检查与内部一致性见 [Service Card 03](./handoff-backend-service-map.md#service-card-03)。课程分类是对齐坐标，不构成外键或额外权限边界；字段与返回数据见 [DTO Courses](./handoff-backend-dto-cheatsheet.md#courses)。
@@ -105,7 +105,7 @@ Notes:
 - 学生看板要求当前 Enrollment ACTIVE，默认只展示 ACTIVE 班级内 ACTIVE 课堂任务。模板变为 ARCHIVED/DRAFT 不影响既有实例可见性。有截止时间的任务在截止后 30 天内仍显示为近期过期，更早的归为历史；无截止时间的任务在发布后 90 天内显示，更早的归为历史。includeHistorical 仅放开时间窗口，不放开班级或课堂任务状态边界。
 - 看板的状态字段、公开摘要及缺失关联兼容见 [DTO Dashboard / Student state](./handoff-backend-dto-cheatsheet.md#teacher--student-dashboard-response-family)；归档建议与任务筛选计算分别见 [Service Card 05](./handoff-backend-service-map.md#service-card-05) / [06](./handoff-backend-service-map.md#service-card-06)。
 - Weekly report 是 teacher owner 的班级进度/风险/AI 概览，学生范围为当前 Enrollment ACTIVE；窗口与公开数据见 [DTO Weekly report](./handoff-backend-dto-cheatsheet.md#weekly-report)，内部计算见 [Service Card 08B](./handoff-backend-service-map.md#service-card-08b)。
-- Weekly report 的旧窗口 `1h/24h` 请求返回 `400`；班级周报前端旧链接适配待下一阶段。
+- Weekly report 的旧窗口 `1h/24h` 请求返回 `400`。
 - Process Assessment JSON / CSV 均为 teacher owner 的过程性指标，不能作为正式成绩仲裁；二者使用相同窗口、排除项与查询口径，CSV 媒体类型为 `text/csv; charset=utf-8`。临时任务排除只改变本次分析，不修改教学数据；零提交及排除全部任务时仍返回当前 ACTIVE 学生。
 - PA JSON / CSV 两入口对合法教师的 `window=term` 请求均由共用 DTO 的 `IsIn` 校验返回 `400`；既有认证、角色与班级归属规则不变。
 - PA 的合法窗口与默认值、零值、rubric 及 CSV 数据合同见 [DTO Process Assessment](./handoff-backend-dto-cheatsheet.md#process-assessment)；评分、risk 与排除重算见 [Service Card 08G](./handoff-backend-service-map.md#service-card-08g)。
@@ -148,7 +148,7 @@ Notes:
 - 实例提交列表非 owner 返回 `404`；严格按 classroomTaskId 读取，默认只包含当前 ACTIVE 学生的 submissions，total 与 items 的成员范围一致。默认提交时间倒序及实现见 [Service Card 07](./handoff-backend-service-map.md#service-card-07)；公开列表、全来源 feedbackCount 与详情内容暴露区别见 DTO Submission。
 - my-task-detail 为 student only，仍要求 Enrollment ACTIVE。participationStatus 只提供状态层只读信号，原因优先级为 `CLASSROOM_NOT_ACTIVE > CLASSROOM_TASK_NOT_ACTIVE > ACTIVE`；模板状态只供展示，不决定学生运行态。该信号结合快照可用性，不计算截止、迟交或冷却；不能替代动作入口的最终校验；字段及反馈预览合同见 [DTO My-task-detail](./handoff-backend-dto-cheatsheet.md#my-task-detail--ai-feedback-summary-family)。
 - Learning trajectory 覆盖当前 ACTIVE 学生，包括未提交学生；Review pack 提供该实例的典型问题样例与完整学生分层。两者均支持资源范围内无时间下界的读取，窗口、返回形状和安全暴露分别见 [DTO Trajectory](./handoff-backend-dto-cheatsheet.md#learning-trajectory) / [Review pack](./handoff-backend-dto-cheatsheet.md#review-pack)；内部聚合/样例选择见 [Service Card 08E](./handoff-backend-service-map.md#service-card-08efeature-learning-trajectory-z4) / [08F](./handoff-backend-service-map.md#service-card-08f)。
-- Review pack 的旧窗口 `24h/30d` 请求返回 `400`；课堂复盘前端旧链接适配待下一阶段。
+- Review pack 的旧窗口 `24h/30d` 请求返回 `400`。
 - Learning trajectory 的旧窗口 `24h/30d` 请求返回 `400`。
 - Learning trajectory 已移除旧姓名别名 `items[].studentName`，统一使用结构化 student，详细字段与 nullable 合同见 [DTO Trajectory](./handoff-backend-dto-cheatsheet.md#learning-trajectory)。
 - AI metrics 的 jobs 与 feedback 均严格按 classroomTaskId 隔离，不跨班；独立窗口集合与 nullable 延迟等公开数据见 [DTO AI Metrics](./handoff-backend-dto-cheatsheet.md#ai-metrics)，内部指标实现见 [Service Card 11](./handoff-backend-service-map.md#service-card-11)。

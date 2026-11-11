@@ -29,8 +29,7 @@ type CourseOverviewPageProps = {
   }>;
 };
 
-const DISPLAY_WINDOWS = ["all", "7d"] as const;
-const OVERVIEW_WINDOWS = ["1h", "24h", "7d", "all"] as const;
+const OVERVIEW_WINDOWS = ["all", "7d"] as const;
 const SORT_FIELDS = [
   "studentsCount",
   "overallSubmissionCoverage",
@@ -43,11 +42,8 @@ const SORT_ORDERS = ["asc", "desc"] as const;
 const COURSE_OVERVIEW_PAGE_SIZE = 100;
 
 type CourseOverviewWindow = (typeof OVERVIEW_WINDOWS)[number];
-type CourseOverviewDisplayWindow = (typeof DISPLAY_WINDOWS)[number];
 
 const WINDOW_LABELS: Record<CourseOverviewWindow, string> = {
-  "1h": "近 1 小时",
-  "24h": "近 24 小时",
   "7d": "近 7 天",
   all: "全部",
 };
@@ -260,7 +256,7 @@ export default async function CourseOverviewPage({ params, searchParams }: Cours
     })}`;
   };
 
-  const windowItems = DISPLAY_WINDOWS.map((windowValue: CourseOverviewDisplayWindow) => ({
+  const windowItems = OVERVIEW_WINDOWS.map((windowValue: CourseOverviewWindow) => ({
     value: windowValue,
     label: WINDOW_LABELS[windowValue],
     href: buildHref({ window: windowValue, page: 1 }),
@@ -322,9 +318,6 @@ export default async function CourseOverviewPage({ params, searchParams }: Cours
             })}
             <span className="text-zinc-500">
               当前：{WINDOW_LABELS[viewModel.query.window]}
-              {!DISPLAY_WINDOWS.includes(viewModel.query.window as CourseOverviewDisplayWindow)
-                ? "（旧链接兼容）"
-                : ""}
             </span>
           </div>
 

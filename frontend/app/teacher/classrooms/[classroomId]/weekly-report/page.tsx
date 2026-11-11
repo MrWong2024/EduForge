@@ -23,12 +23,9 @@ type WeeklyReportPageProps = {
   searchParams: Promise<{ window?: string | string[] }>;
 };
 
-const SUPPORTED_REPORT_WINDOWS = ["24h", "7d", "30d", "all"] as const;
+const SUPPORTED_REPORT_WINDOWS = ["7d", "30d", "all"] as const;
 type ReportWindow = (typeof SUPPORTED_REPORT_WINDOWS)[number];
-const DISPLAY_REPORT_WINDOWS = ["7d", "30d", "all"] as const;
-type DisplayReportWindow = (typeof DISPLAY_REPORT_WINDOWS)[number];
 const REPORT_WINDOW_LABELS: Record<ReportWindow, string> = {
-  "24h": "近24小时",
   "7d": "近7天",
   "30d": "近30天",
   all: "全部",
@@ -344,7 +341,7 @@ const getRequestOrigin = async (): Promise<string> => {
   return `${protocol}://${host}`;
 };
 
-const buildWindowHref = (classroomId: string, windowValue: DisplayReportWindow): string => {
+const buildWindowHref = (classroomId: string, windowValue: ReportWindow): string => {
   const query = buildQueryString({ window: windowValue });
   const basePath = paths.teacher.classroomWeeklyReport(classroomId);
   return query ? `${basePath}?${query}` : basePath;
@@ -421,10 +418,6 @@ export default async function WeeklyReportPage({ params, searchParams }: WeeklyR
   const summaryCards = toSummaryCards(sources);
   const overviewGroups = toOverviewGroups(sources, rawRecord);
   const generatedAtText = toDisplayDate(safeGet(rawRecord, "generatedAt", undefined));
-  const compatibilityHint =
-    !DISPLAY_REPORT_WINDOWS.includes(viewModel.window as DisplayReportWindow)
-      ? "（旧链接兼容）"
-      : "";
   const hasData = summaryCards.length > 0 || overviewGroups.length > 0;
 
   return (
@@ -449,7 +442,7 @@ export default async function WeeklyReportPage({ params, searchParams }: WeeklyR
         <div className="mt-2 flex flex-wrap items-center gap-4 text-zinc-700">
           <div className="flex items-center gap-2">
             <span>统计窗口:</span>
-            {DISPLAY_REPORT_WINDOWS.map((windowValue) => {
+            {SUPPORTED_REPORT_WINDOWS.map((windowValue) => {
               const isActive = windowValue === viewModel.window;
               return (
                 <Link
@@ -463,7 +456,6 @@ export default async function WeeklyReportPage({ params, searchParams }: WeeklyR
             })}
             <span className="text-zinc-500">
               当前：{REPORT_WINDOW_LABELS[viewModel.window]}
-              {compatibilityHint}
             </span>
           </div>
         </div>
