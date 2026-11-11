@@ -138,8 +138,6 @@ export class ProcessAssessmentService {
   > = {
     '7d': 7 * 24 * 60 * 60 * 1000,
     '30d': 30 * 24 * 60 * 60 * 1000,
-    // TODO: connect term boundary once semester timeline source is available.
-    term: 30 * 24 * 60 * 60 * 1000,
   };
 
   constructor(

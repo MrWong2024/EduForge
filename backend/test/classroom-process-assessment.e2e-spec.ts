@@ -1,13 +1,13 @@
-import { INestApplication, ValidationPipe } from '@nestjs/common';
+import { INestApplication } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Test, TestingModule } from '@nestjs/testing';
 import { getModelToken } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import * as bcrypt from 'bcryptjs';
-import cookieParser from 'cookie-parser';
 import request from 'supertest';
 import { App } from 'supertest/types';
 import { AppModule } from '../src/app.module';
+import { configureApp } from '../src/app.setup';
 import { User } from '../src/modules/users/schemas/user.schema';
 import { Session } from '../src/modules/auth/schemas/session.schema';
 import { Course } from '../src/modules/courses/schemas/course.schema';
@@ -19,16 +19,12 @@ import { Submission } from '../src/modules/learning-tasks/schemas/submission.sch
 import { Feedback } from '../src/modules/learning-tasks/schemas/feedback.schema';
 import { AiFeedbackJob } from '../src/modules/learning-tasks/ai-feedback/schemas/ai-feedback-job.schema';
 import { AiFeedbackProcessor } from '../src/modules/learning-tasks/ai-feedback/services/ai-feedback-processor.service';
+import {
+  assertLocalStandardTestAuthentication,
+  assertLocalStandardTestEnvironment,
+} from './helpers/local-test-database-auth';
 
 jest.setTimeout(30000);
-
-const ensureMongoUri = () => {
-  if (!process.env.MONGO_URI) {
-    throw new Error(
-      'MONGO_URI is required for classroom process-assessment e2e.',
-    );
-  }
-};
 
 type CreatedCourseResponse = { id: string };
 type CreatedClassroomResponse = { id: string; joinCode: string };
@@ -95,6 +91,7 @@ describe('Classroom Process Assessment (e2e)', () => {
   let taskAId = '';
   let taskBId = '';
   const submissionIds: string[] = [];
+  let fixtureAuthorized = false;
 
   let previousWorkerEnabled: string | undefined;
   let previousDebugEnabled: string | undefined;
@@ -109,6 +106,26 @@ describe('Classroom Process Assessment (e2e)', () => {
   const waitMs = (ms: number) =>
     new Promise((resolve) => setTimeout(resolve, ms));
 
+  const expectEmptyDatabase = async (phase: string) => {
+    const database = userModel.db.db;
+    if (!database) throw new Error('Missing connected test database');
+    const cursor = database.listCollections({}, { maxTimeMS: 5000 });
+    try {
+      const collections = await cursor.toArray();
+      const counts: Record<string, number> = {};
+      for (const collection of collections) {
+        expect(collection.type).toBe('collection');
+        counts[collection.name] = await database
+          .collection(collection.name)
+          .countDocuments({}, { maxTimeMS: 5000 });
+      }
+      console.info('Process assessment database counts: ' + phase, counts);
+      expect(Object.values(counts).every((count) => count === 0)).toBe(true);
+    } finally {
+      await cursor.close();
+    }
+  };
+
   const login = async (
     agent: ReturnType<typeof request.agent>,
     email: string,
@@ -119,15 +136,17 @@ describe('Classroom Process Assessment (e2e)', () => {
       .send({ email, password })
       .expect((res) => {
         if (![200, 201].includes(res.status)) {
-          throw new Error(
-            `Unexpected login status ${res.status}, body=${JSON.stringify(res.body)}`,
-          );
+          throw new Error(`Unexpected login status ${res.status}`);
         }
       });
   };
 
   beforeAll(async () => {
-    ensureMongoUri();
+    assertLocalStandardTestEnvironment({
+      nodeEnv: process.env.NODE_ENV,
+      purpose: process.env.EDUFORGE_DATABASE_PURPOSE,
+      mongoUri: process.env.MONGO_URI,
+    });
 
     previousWorkerEnabled = process.env.AI_FEEDBACK_WORKER_ENABLED;
     process.env.AI_FEEDBACK_WORKER_ENABLED = 'false';
@@ -142,22 +161,20 @@ describe('Classroom Process Assessment (e2e)', () => {
     }).compile();
 
     app = moduleFixture.createNestApplication();
-    app.setGlobalPrefix('api');
-    app.useGlobalPipes(
-      new ValidationPipe({
-        whitelist: true,
-        transform: true,
-        forbidNonWhitelisted: true,
-      }),
-    );
-    app.use(cookieParser());
+    configureApp(app);
     await app.init();
     configService = app.get(ConfigService);
     configService.set('LEARNING_TASK_SUBMISSION_COOLDOWN_MS', 0);
 
-    teacherAgent = request.agent(app.getHttpServer());
-    studentAAgent = request.agent(app.getHttpServer());
-    studentBAgent = request.agent(app.getHttpServer());
+    teacherAgent = request
+      .agent(app.getHttpServer())
+      .timeout({ response: 5000, deadline: 10000 });
+    studentAAgent = request
+      .agent(app.getHttpServer())
+      .timeout({ response: 5000, deadline: 10000 });
+    studentBAgent = request
+      .agent(app.getHttpServer())
+      .timeout({ response: 5000, deadline: 10000 });
 
     userModel = app.get(getModelToken(User.name));
     sessionModel = app.get(getModelToken(Session.name));
@@ -171,35 +188,61 @@ describe('Classroom Process Assessment (e2e)', () => {
     aiFeedbackJobModel = app.get(getModelToken(AiFeedbackJob.name));
     aiFeedbackProcessor = app.get(AiFeedbackProcessor);
 
+    userModel.db.set('maxTimeMS', 10000);
+    const database = userModel.db.db;
+    if (!database) throw new Error('Missing connected test database');
+    const hello = await database.command({ hello: 1 }, { timeoutMS: 5000 });
+    expect(hello.setName).toBeUndefined();
+    expect(hello.msg).not.toBe('isdbgrid');
+    expect(hello.isWritablePrimary).toBe(true);
+    const auth = await database.command(
+      { connectionStatus: 1, showPrivileges: false },
+      { timeoutMS: 5000 },
+    );
+    assertLocalStandardTestAuthentication({
+      nodeEnv: process.env.NODE_ENV,
+      purpose: process.env.EDUFORGE_DATABASE_PURPOSE,
+      mongoUri: configService.get<string>('MONGO_URI'),
+      databaseName: database.databaseName,
+      connectedHost: userModel.db.host,
+      authInfo: auth.authInfo,
+    });
+    expect(configService.get('AI_FEEDBACK_WORKER_ENABLED')).toBe(false);
+    expect(configService.get('AI_FEEDBACK_PROVIDER')).toBe('stub');
+    expect(process.env.AI_FEEDBACK_REAL_ENABLED).toBe('false');
+    expect(configService.get('MAIL_PROVIDER')).toBe('log');
+    console.info(
+      'Process assessment database gate: standard_test / eduforge_test / loopback standalone / root@admin user and role verified',
+    );
+    await expectEmptyDatabase('before fixtures');
+    fixtureAuthorized = true;
+
     const [teacherHash, studentAHash, studentBHash] = await Promise.all([
       bcrypt.hash(teacherPassword, 10),
       bcrypt.hash(studentPassword, 10),
       bcrypt.hash(studentPassword, 10),
     ]);
 
-    const [teacher, studentA, studentB] = await Promise.all([
-      userModel.create({
-        email: teacherEmail,
-        passwordHash: teacherHash,
-        roles: ['teacher'],
-      }),
-      userModel.create({
-        email: studentAEmail,
-        passwordHash: studentAHash,
-        roles: ['student'],
-        name: '学生甲',
-        studentNo: 'S-A-001',
-      }),
-      userModel.create({
-        email: studentBEmail,
-        passwordHash: studentBHash,
-        roles: ['student'],
-        name: '   ',
-      }),
-    ]);
-
+    const teacher = await userModel.create({
+      email: teacherEmail,
+      passwordHash: teacherHash,
+      roles: ['teacher'],
+    });
     teacherId = teacher._id.toString();
+    const studentA = await userModel.create({
+      email: studentAEmail,
+      passwordHash: studentAHash,
+      roles: ['student'],
+      name: '学生甲',
+      studentNo: 'S-A-001',
+    });
     studentAId = studentA._id.toString();
+    const studentB = await userModel.create({
+      email: studentBEmail,
+      passwordHash: studentBHash,
+      roles: ['student'],
+      name: '   ',
+    });
     studentBId = studentB._id.toString();
 
     await login(teacherAgent, teacherEmail, teacherPassword);
@@ -208,81 +251,92 @@ describe('Classroom Process Assessment (e2e)', () => {
   });
 
   afterAll(async () => {
-    if (previousWorkerEnabled === undefined) {
-      delete process.env.AI_FEEDBACK_WORKER_ENABLED;
-    } else {
-      process.env.AI_FEEDBACK_WORKER_ENABLED = previousWorkerEnabled;
-    }
-    if (previousDebugEnabled === undefined) {
-      delete process.env.AI_FEEDBACK_DEBUG_ENABLED;
-    } else {
-      process.env.AI_FEEDBACK_DEBUG_ENABLED = previousDebugEnabled;
-    }
-    if (previousSubmissionCooldownMs === undefined) {
-      delete process.env.LEARNING_TASK_SUBMISSION_COOLDOWN_MS;
-    } else {
-      process.env.LEARNING_TASK_SUBMISSION_COOLDOWN_MS =
-        previousSubmissionCooldownMs;
-    }
-
-    const cleanup: Promise<unknown>[] = [];
-    if (submissionIds.length > 0) {
-      const submissionObjectIds = submissionIds.map(
-        (id) => new Types.ObjectId(id),
-      );
-      cleanup.push(
-        feedbackModel.deleteMany({
-          submissionId: { $in: submissionObjectIds },
-        }),
-      );
-      cleanup.push(
-        aiFeedbackJobModel.deleteMany({
-          submissionId: { $in: submissionObjectIds },
-        }),
-      );
-      cleanup.push(
-        submissionModel.deleteMany({ _id: { $in: submissionObjectIds } }),
-      );
-    }
-    if (classroomTaskAId || classroomTaskBId) {
-      const classroomTaskIds = [classroomTaskAId, classroomTaskBId]
+    try {
+      if (!fixtureAuthorized) return;
+      const cleanup: Promise<unknown>[] = [];
+      if (submissionIds.length > 0) {
+        const submissionObjectIds = submissionIds.map(
+          (id) => new Types.ObjectId(id),
+        );
+        cleanup.push(
+          feedbackModel.deleteMany({
+            submissionId: { $in: submissionObjectIds },
+          }),
+        );
+        cleanup.push(
+          aiFeedbackJobModel.deleteMany({
+            submissionId: { $in: submissionObjectIds },
+          }),
+        );
+        cleanup.push(
+          submissionModel.deleteMany({ _id: { $in: submissionObjectIds } }),
+        );
+      }
+      if (classroomTaskAId || classroomTaskBId) {
+        const classroomTaskIds = [classroomTaskAId, classroomTaskBId]
+          .filter(Boolean)
+          .map((id) => new Types.ObjectId(id));
+        cleanup.push(
+          classroomTaskModel.deleteMany({ _id: { $in: classroomTaskIds } }),
+        );
+      }
+      if (taskAId || taskBId) {
+        const taskIds = [taskAId, taskBId]
+          .filter(Boolean)
+          .map((id) => new Types.ObjectId(id));
+        cleanup.push(taskModel.deleteMany({ _id: { $in: taskIds } }));
+      }
+      if (classroomId) {
+        cleanup.push(
+          enrollmentModel.deleteMany({
+            classroomId: new Types.ObjectId(classroomId),
+          }),
+        );
+        cleanup.push(
+          classroomModel.deleteOne({ _id: new Types.ObjectId(classroomId) }),
+        );
+      }
+      if (courseId) {
+        cleanup.push(
+          courseModel.deleteOne({ _id: new Types.ObjectId(courseId) }),
+        );
+      }
+      const userObjectIds = [teacherId, studentAId, studentBId]
         .filter(Boolean)
         .map((id) => new Types.ObjectId(id));
-      cleanup.push(
-        classroomTaskModel.deleteMany({ _id: { $in: classroomTaskIds } }),
-      );
+      if (userObjectIds.length > 0) {
+        cleanup.push(
+          sessionModel.deleteMany({ userId: { $in: userObjectIds } }),
+        );
+        cleanup.push(userModel.deleteMany({ _id: { $in: userObjectIds } }));
+      }
+      const results = await Promise.allSettled(cleanup);
+      if (results.some((result) => result.status === 'rejected')) {
+        throw new Error('Process assessment scoped fixture cleanup failed');
+      }
+      await expectEmptyDatabase('after scoped cleanup');
+    } finally {
+      try {
+        await app?.close();
+      } finally {
+        if (previousWorkerEnabled === undefined) {
+          delete process.env.AI_FEEDBACK_WORKER_ENABLED;
+        } else {
+          process.env.AI_FEEDBACK_WORKER_ENABLED = previousWorkerEnabled;
+        }
+        if (previousDebugEnabled === undefined) {
+          delete process.env.AI_FEEDBACK_DEBUG_ENABLED;
+        } else {
+          process.env.AI_FEEDBACK_DEBUG_ENABLED = previousDebugEnabled;
+        }
+        if (previousSubmissionCooldownMs === undefined) {
+          delete process.env.LEARNING_TASK_SUBMISSION_COOLDOWN_MS;
+        } else {
+          process.env.LEARNING_TASK_SUBMISSION_COOLDOWN_MS =
+            previousSubmissionCooldownMs;
+        }
+      }
     }
-    if (taskAId || taskBId) {
-      const taskIds = [taskAId, taskBId]
-        .filter(Boolean)
-        .map((id) => new Types.ObjectId(id));
-      cleanup.push(taskModel.deleteMany({ _id: { $in: taskIds } }));
-    }
-    if (classroomId) {
-      cleanup.push(
-        enrollmentModel.deleteMany({
-          classroomId: new Types.ObjectId(classroomId),
-        }),
-      );
-      cleanup.push(
-        classroomModel.deleteOne({ _id: new Types.ObjectId(classroomId) }),
-      );
-    }
-    if (courseId) {
-      cleanup.push(
-        courseModel.deleteOne({ _id: new Types.ObjectId(courseId) }),
-      );
-    }
-    const userObjectIds = [teacherId, studentAId, studentBId]
-      .filter(Boolean)
-      .map((id) => new Types.ObjectId(id));
-    if (userObjectIds.length > 0) {
-      cleanup.push(sessionModel.deleteMany({ userId: { $in: userObjectIds } }));
-      cleanup.push(userModel.deleteMany({ _id: { $in: userObjectIds } }));
-    }
-    await Promise.all(cleanup);
-
-    await app.close();
   });
 
   it('returns process-assessment panel and csv export', async () => {
@@ -303,99 +357,90 @@ describe('Classroom Process Assessment (e2e)', () => {
     const classroomBody = createdClassroom.body as CreatedClassroomResponse;
     classroomId = classroomBody.id;
 
-    const [createdTaskA, createdTaskB] = await Promise.all([
-      teacherAgent
-        .post('/api/learning-tasks/tasks')
-        .send({
-          title: 'Process Task A',
-          description: 'Task A for process assessment.',
-          knowledgeModule: 'process-assessment',
-          status: 'DRAFT',
-        })
-        .expect(201),
-      teacherAgent
-        .post('/api/learning-tasks/tasks')
-        .send({
-          title: 'Process Task B',
-          description: 'Task B for process assessment.',
-          knowledgeModule: 'process-assessment',
-          status: 'DRAFT',
-        })
-        .expect(201),
-    ]);
+    const createdTaskA = await teacherAgent
+      .post('/api/learning-tasks/tasks')
+      .send({
+        title: 'Process Task A',
+        description: 'Task A for process assessment.',
+        knowledgeModule: 'process-assessment',
+        status: 'DRAFT',
+      })
+      .expect(201);
     taskAId = (createdTaskA.body as CreatedTaskResponse).id;
+    const createdTaskB = await teacherAgent
+      .post('/api/learning-tasks/tasks')
+      .send({
+        title: 'Process Task B',
+        description: 'Task B for process assessment.',
+        knowledgeModule: 'process-assessment',
+        status: 'DRAFT',
+      })
+      .expect(201);
     taskBId = (createdTaskB.body as CreatedTaskResponse).id;
 
-    await Promise.all([
-      teacherAgent
-        .post(`/api/learning-tasks/tasks/${taskAId}/publish`)
-        .send({})
-        .expect(201),
-      teacherAgent
-        .post(`/api/learning-tasks/tasks/${taskBId}/publish`)
-        .send({})
-        .expect(201),
-    ]);
+    await teacherAgent
+      .post(`/api/learning-tasks/tasks/${taskAId}/publish`)
+      .send({})
+      .expect(201);
+    await teacherAgent
+      .post(`/api/learning-tasks/tasks/${taskBId}/publish`)
+      .send({})
+      .expect(201);
 
-    const [createdClassroomTaskA, createdClassroomTaskB] = await Promise.all([
-      teacherAgent
-        .post(`/api/classrooms/${classroomId}/tasks`)
-        .send({
-          taskId: taskAId,
-        })
-        .expect(201),
-      teacherAgent
-        .post(`/api/classrooms/${classroomId}/tasks`)
-        .send({
-          taskId: taskBId,
-        })
-        .expect(201),
-    ]);
+    const createdClassroomTaskA = await teacherAgent
+      .post(`/api/classrooms/${classroomId}/tasks`)
+      .send({
+        taskId: taskAId,
+      })
+      .expect(201);
     classroomTaskAId = (
       createdClassroomTaskA.body as CreatedClassroomTaskResponse
     ).id;
+    const createdClassroomTaskB = await teacherAgent
+      .post(`/api/classrooms/${classroomId}/tasks`)
+      .send({
+        taskId: taskBId,
+      })
+      .expect(201);
     classroomTaskBId = (
       createdClassroomTaskB.body as CreatedClassroomTaskResponse
     ).id;
 
-    await Promise.all([
-      studentAAgent
-        .post('/api/classrooms/join')
-        .send({ joinCode: classroomBody.joinCode })
-        .expect(201),
-      studentBAgent
-        .post('/api/classrooms/join')
-        .send({ joinCode: classroomBody.joinCode })
-        .expect(201),
-    ]);
+    await studentAAgent
+      .post('/api/classrooms/join')
+      .send({ joinCode: classroomBody.joinCode })
+      .expect(201);
+    await studentBAgent
+      .post('/api/classrooms/join')
+      .send({ joinCode: classroomBody.joinCode })
+      .expect(201);
 
-    const [submissionA1, submissionA2] = await Promise.all([
-      studentAAgent
-        .post(
-          `/api/classrooms/${classroomId}/tasks/${classroomTaskAId}/submissions`,
-        )
-        .send({
-          content: {
-            codeText: 'function paA1() { return 1; }',
-            language: 'typescript',
-          },
-        })
-        .expect(201),
-      studentAAgent
-        .post(
-          `/api/classrooms/${classroomId}/tasks/${classroomTaskBId}/submissions`,
-        )
-        .send({
-          content: {
-            codeText: 'function paB1() { return 2; }',
-            language: 'typescript',
-          },
-        })
-        .expect(201),
-    ]);
+    const submissionA1 = await studentAAgent
+      .post(
+        `/api/classrooms/${classroomId}/tasks/${classroomTaskAId}/submissions`,
+      )
+      .send({
+        content: {
+          codeText: 'function paA1() { return 1; }',
+          language: 'typescript',
+        },
+      })
+      .expect(201);
     const submissionA1Body = submissionA1.body as CreatedSubmissionResponse;
+    submissionIds.push(submissionA1Body.id);
+    const submissionA2 = await studentAAgent
+      .post(
+        `/api/classrooms/${classroomId}/tasks/${classroomTaskBId}/submissions`,
+      )
+      .send({
+        content: {
+          codeText: 'function paB1() { return 2; }',
+          language: 'typescript',
+        },
+      })
+      .expect(201);
     const submissionA2Body = submissionA2.body as CreatedSubmissionResponse;
-    submissionIds.push(submissionA1Body.id, submissionA2Body.id);
+    submissionIds.push(submissionA2Body.id);
     await studentAAgent
       .post(
         '/api/learning-tasks/submissions/' +
@@ -516,12 +561,61 @@ describe('Classroom Process Assessment (e2e)', () => {
     expect(csvStudentIds.sort()).toEqual(
       body.items.map((item) => item.studentId).sort(),
     );
+
+    for (const window of ['7d', '30d']) {
+      const response = await teacherAgent
+        .get(`/api/classrooms/${classroomId}/process-assessment`)
+        .query({ window })
+        .expect(200);
+      const windowBody = response.body as ProcessAssessmentResponse;
+      expect(windowBody.window).toBe(window);
+      expect(windowBody.total).toBe(body.total);
+      expect(windowBody.items).toEqual(body.items);
+    }
+    for (const window of [undefined, '7d', '30d']) {
+      const path =
+        `/api/classrooms/${classroomId}/process-assessment.csv` +
+        (window === undefined ? '' : `?window=${window}`);
+      const response = await teacherAgent.get(path).expect(200);
+      expect(String(response.headers['content-type'] ?? '')).toContain(
+        'text/csv',
+      );
+      const lines = (response.text ?? '').trim().split('\n');
+      expect(lines[0]).toBe(csvLines[0]);
+      expect(lines.length - 1).toBe(body.items.length);
+      expect(
+        lines
+          .slice(1)
+          .map((line) => line.split(',')[2])
+          .sort(),
+      ).toEqual(body.items.map((item) => item.studentId).sort());
+    }
   });
 
-  it('rejects invalid process-assessment window', async () => {
-    await teacherAgent
-      .get(`/api/classrooms/${classroomId}/process-assessment`)
-      .query({ window: 'not-supported' })
-      .expect(400);
+  it.each(['process-assessment', 'process-assessment.csv'])(
+    'rejects term and other invalid windows at %s through the public DTO',
+    async (endpoint) => {
+      for (const window of ['term', 'not-supported']) {
+        const path = `/api/classrooms/${classroomId}/${endpoint}?window=${window}`;
+        const response = await teacherAgent.get(path).expect(400);
+        expect(response.body).toMatchObject({ statusCode: 400, path });
+        expect(response.body).toHaveProperty(
+          'message',
+          expect.stringContaining(
+            'window must be one of the following values: 7d, 30d, all',
+          ),
+        );
+      }
+    },
+  );
+
+  it('keeps authentication and role rejection ahead of term validation', async () => {
+    await studentAAgent
+      .get(`/api/classrooms/${classroomId}/process-assessment?window=term`)
+      .expect(403);
+    await request(app.getHttpServer())
+      .get(`/api/classrooms/${classroomId}/process-assessment.csv?window=term`)
+      .timeout({ response: 5000, deadline: 10000 })
+      .expect(401);
   });
 });

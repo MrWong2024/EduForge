@@ -251,6 +251,7 @@ const createAssessmentHarness = () => {
     excludedClassroomTaskId,
     outsideClassroomTaskId,
     service,
+    classroomTaskModel,
     submissionModel,
     aiFeedbackJobModel,
     feedbackModel,
@@ -649,6 +650,58 @@ describe('ProcessAssessmentService task-dimension scoring', () => {
 });
 
 describe('ProcessAssessmentService getProcessAssessment', () => {
+  it.each<[QueryProcessAssessmentDto, 'all' | '7d' | '30d', string | null]>([
+    [{}, 'all', null],
+    [{ window: 'all' }, 'all', null],
+    [{ window: '7d' }, '7d', '2026-11-04T12:00:00.000Z'],
+    [{ window: '30d' }, '30d', '2026-10-12T12:00:00.000Z'],
+  ])(
+    'resolves %j to %s with the expected task, submission and feedback time bounds',
+    async (query, expectedWindow, expectedLowerBound) => {
+      const clock = jest
+        .spyOn(Date, 'now')
+        .mockReturnValue(Date.parse('2026-11-11T12:00:00.000Z'));
+      try {
+        const {
+          classroomId,
+          teacherId,
+          service,
+          classroomTaskModel,
+          submissionModel,
+          feedbackModel,
+        } = createAssessmentHarness();
+        const result = await service.getProcessAssessment(
+          classroomId.toString(),
+          query,
+          teacherId.toString(),
+        );
+
+        expect(result.window).toBe(expectedWindow);
+        expect(classroomTaskModel.find).toHaveBeenCalledWith({
+          classroomId,
+          ...(expectedLowerBound === null
+            ? {}
+            : { publishedAt: { $gte: new Date(expectedLowerBound) } }),
+        });
+        for (const match of [
+          firstMatch(submissionModel.aggregate.mock.calls[0][0]),
+          firstMatch(feedbackModel.aggregate.mock.calls[0][0]),
+        ]) {
+          if (expectedLowerBound === null) {
+            expect(match).not.toHaveProperty('createdAt');
+          } else {
+            expect(match.createdAt).toEqual({
+              $gte: new Date(expectedLowerBound),
+            });
+          }
+          expect(match).not.toHaveProperty('publishedAt');
+        }
+      } finally {
+        clock.mockRestore();
+      }
+    },
+  );
+
   it('keeps active students with zero submissions in the list and fixes their score at 0', async () => {
     const {
       classroomId,

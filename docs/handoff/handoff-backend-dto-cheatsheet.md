@@ -274,7 +274,7 @@ my-task-detail 另稳定返回 `participationStatus={readOnly,canSubmit,canReque
 
 | Query | validation / default |
 | --- | --- |
-| `window?` | `IsIn`：`term \| 7d \| 30d \| all`；默认 all；term 仅兼容窗口，**24h 不合法**。 |
+| `window?` | `IsIn`：仅 `7d \| 30d \| all`；省略时默认 all；**24h 不合法**。 |
 | `page? / limit?` | 分页校验；默认 `1 / 50`。 |
 | `sort?` | `score \| submissionsCount \| submittedTasksCount \| aiRequestedCount \| riskLevel`，默认 score。 |
 | `order?` | `asc \| desc`，默认 desc。 |
