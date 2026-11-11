@@ -179,7 +179,7 @@
 - AI 反馈介入成效分析学生详情：`ai-learning-analytics/students/[studentId]/page.tsx` -> `/api/proxy/classrooms/:id/ai-learning-analytics/students/:studentId` -> `GET /api/classrooms/:classroomId/ai-learning-analytics/students/:studentId`。
   - 使用 `toAiLearningAnalyticsStudentDetailResponse`；后端请求只传 `window/excludedTaskIds`，URL 中的 `page/q/overallOutcome/engagementStatus` 仅用于返回班级分析时恢复列表状态，绝不传给详情接口。
   - taskPoint 适配基线、比较端点、最新版本、较新未比较标记和稳定原因；null 与未知来源/模型保留，版本链接只使用后端对应 submissionId 及课堂上下文，不从 attemptNo 猜测提交。公开形状与值域见 [Backend DTO Analytics](./handoff-backend-dto-cheatsheet.md#ai-learning-analytics)。
-- 三个 mapper 直接消费 `detailedOutcome/overallOutcome/engagementStatus`；legacy `outcome/growthTrend/stable*Count` 继续映射并保留在 raw/兼容类型中。
+- 三个 mapper 的业务投影只消费 `detailedOutcome/overallOutcome/engagementStatus` 等现行字段，字段合同见 [Backend DTO Analytics](./handoff-backend-dto-cheatsheet.md#ai-learning-analytics)；raw 仍引用 unwrap 后的原始 source，不修改输入或清洗 raw。
 - 上述三条正式请求全部由 `fetchJson` 经 `/api/proxy/**` 发出；前端只适配后端返回值与枚举，本模块所有 nullable 比率/均值保持 null，真实0保留为0，不调用通用必需数字适配补零。不重算基线/终点、issueLoad、`detailedOutcome`、`overallOutcome`、`engagementStatus`、rate 分母或任何聚合指标。
 - 教学快照预检：`export/snapshot/page.tsx` -> `/api/proxy/classrooms/:id/export/snapshot`。
   - 对应后端：`GET /api/classrooms/:classroomId/export/snapshot`。

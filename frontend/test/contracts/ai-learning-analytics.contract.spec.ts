@@ -24,6 +24,141 @@ const evidence = {
   simulatedExcludedSampleCount: 1,
 };
 
+test("retired analytics fields stay outside normalized projections without changing current metrics or raw sources", () => {
+  const overviewSource = {
+    summary: {
+      remainedCleanStudentTaskCount: 1,
+      unchangedWithIssuesStudentTaskCount: 2,
+      stableStudentTaskCount: 99,
+    },
+    taskTrends: [
+      {
+        classroomTaskId: "task-current",
+        remainedCleanStudentCount: 1,
+        unchangedWithIssuesStudentCount: 2,
+        stableStudentCount: 99,
+      },
+    ],
+  };
+  const studentsSource = {
+    items: [
+      {
+        studentId: "student-current",
+        studentName: "Current Student",
+        remainedCleanTasksCount: 1,
+        unchangedWithIssuesTasksCount: 2,
+        stableTasksCount: 99,
+        overallOutcome: "REGRESSED_OVERALL",
+        engagementStatus: "QUALITY_COMPARABLE",
+        growthTrend: "IMPROVING",
+        postFeedbackRevisedTasksCount: 2,
+        postFeedbackResubmittedTasksCount: 1,
+      },
+      {
+        studentId: "student-legacy-only",
+        stableTasksCount: 99,
+        growthTrend: "IMPROVING",
+      },
+    ],
+  };
+  const detailSource = {
+    summary: {
+      remainedCleanTasksCount: 1,
+      unchangedWithIssuesTasksCount: 2,
+      stableTasksCount: 99,
+      overallOutcome: "NO_NET_CHANGE",
+      engagementStatus: "QUALITY_COMPARABLE",
+      growthTrend: "DECLINING",
+    },
+    taskPoints: [
+      {
+        classroomTaskId: "task-current",
+        detailedOutcome: "REMAINED_CLEAN",
+        outcome: "REGRESSED",
+        postFeedbackRevised: true,
+        postFeedbackResubmitted: false,
+      },
+      { classroomTaskId: "task-legacy-only", outcome: "IMPROVED" },
+    ],
+  };
+  const overviewInput = { data: overviewSource };
+  const studentsInput = { data: studentsSource };
+  const detailInput = { data: detailSource };
+  const overviewBefore = structuredClone(overviewInput);
+  const studentsBefore = structuredClone(studentsInput);
+  const detailBefore = structuredClone(detailInput);
+  const overview = toAiLearningAnalyticsOverviewResponse(overviewInput);
+  const students = toAiLearningAnalyticsStudentsResponse(studentsInput);
+  const detail = toAiLearningAnalyticsStudentDetailResponse(detailInput);
+
+  expect(overview.summary).not.toHaveProperty("stableStudentTaskCount");
+  expect(overview.summary).toMatchObject({
+    remainedCleanStudentTaskCount: 1,
+    unchangedWithIssuesStudentTaskCount: 2,
+  });
+  for (const trend of overview.taskTrends) {
+    expect(trend).not.toHaveProperty("stableStudentCount");
+  }
+  expect(overview.taskTrends[0]).toMatchObject({
+    classroomTaskId: "task-current",
+    remainedCleanStudentCount: 1,
+    unchangedWithIssuesStudentCount: 2,
+  });
+  for (const student of students.items) {
+    expect(student).not.toHaveProperty("stableTasksCount");
+    expect(student).not.toHaveProperty("growthTrend");
+  }
+  expect(students.items[0]).toMatchObject({
+    studentId: "student-current",
+    studentName: "Current Student",
+    remainedCleanTasksCount: 1,
+    unchangedWithIssuesTasksCount: 2,
+    overallOutcome: "REGRESSED_OVERALL",
+    engagementStatus: "QUALITY_COMPARABLE",
+    postFeedbackRevisedTasksCount: 2,
+    postFeedbackResubmittedTasksCount: 1,
+  });
+  expect(students.items[1]).toMatchObject({
+    studentId: "student-legacy-only",
+    remainedCleanTasksCount: 0,
+    unchangedWithIssuesTasksCount: 0,
+    overallOutcome: "INSUFFICIENT_DATA",
+    engagementStatus: "NO_SUBMISSION",
+  });
+  expect(detail.summary).not.toHaveProperty("stableTasksCount");
+  expect(detail.summary).not.toHaveProperty("growthTrend");
+  expect(detail.summary).toMatchObject({
+    remainedCleanTasksCount: 1,
+    unchangedWithIssuesTasksCount: 2,
+    overallOutcome: "NO_NET_CHANGE",
+    engagementStatus: "QUALITY_COMPARABLE",
+  });
+  for (const point of detail.taskPoints) {
+    expect(point).not.toHaveProperty("outcome");
+  }
+  expect(detail.taskPoints[0]).toMatchObject({
+    classroomTaskId: "task-current",
+    detailedOutcome: "REMAINED_CLEAN",
+    postFeedbackRevised: true,
+    postFeedbackResubmitted: false,
+  });
+  expect(detail.taskPoints[1].detailedOutcome).toBe("NOT_COMPARABLE");
+
+  expect(overview.raw).toBe(overviewSource);
+  expect(students.raw).toBe(studentsSource);
+  expect(detail.raw).toBe(detailSource);
+  expect(overview.raw).toHaveProperty("summary.stableStudentTaskCount", 99);
+  expect(overview.raw).toHaveProperty("taskTrends.0.stableStudentCount", 99);
+  expect(students.raw).toHaveProperty("items.0.stableTasksCount", 99);
+  expect(students.raw).toHaveProperty("items.0.growthTrend", "IMPROVING");
+  expect(detail.raw).toHaveProperty("summary.stableTasksCount", 99);
+  expect(detail.raw).toHaveProperty("summary.growthTrend", "DECLINING");
+  expect(detail.raw).toHaveProperty("taskPoints.0.outcome", "REGRESSED");
+  expect(overviewInput).toEqual(overviewBefore);
+  expect(studentsInput).toEqual(studentsBefore);
+  expect(detailInput).toEqual(detailBefore);
+});
+
 test("uncompared revision messaging distinguishes absence of a reference from uncertain timing", () => {
   const cases = [
     {

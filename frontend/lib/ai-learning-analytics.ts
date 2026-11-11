@@ -3,9 +3,7 @@ import type {
   AiLearningAnalyticsComparisonWarning,
   AiLearningAnalyticsEvidenceSummary,
   AiLearningAnalyticsEngagementStatus,
-  AiLearningAnalyticsGrowthTrend,
   AiLearningAnalyticsMethodologyVersion,
-  AiLearningAnalyticsOutcome,
   AiLearningAnalyticsOverallOutcome,
   AiLearningAnalyticsTaskTrend,
   AiLearningAnalyticsTaskPoint,
@@ -94,26 +92,6 @@ export const AI_LEARNING_ANALYTICS_WINDOW_LABELS: Record<
   "7d": "近 7 天发布的任务",
   "30d": "近 30 天发布的任务",
   all: "全部任务",
-};
-
-export const AI_LEARNING_ANALYTICS_GROWTH_TREND_LABELS: Record<
-  AiLearningAnalyticsGrowthTrend,
-  string
-> = {
-  IMPROVING: "可比任务负荷净下降",
-  STABLE: "变化持平",
-  DECLINING: "可比任务负荷净上升",
-  INSUFFICIENT_DATA: "可比数据不足",
-};
-
-export const AI_LEARNING_ANALYTICS_OUTCOME_LABELS: Record<
-  AiLearningAnalyticsOutcome,
-  string
-> = {
-  IMPROVED: "负荷下降",
-  STABLE: "持平",
-  REGRESSED: "负荷上升",
-  NOT_COMPARABLE: "不可对照",
 };
 
 export const AI_LEARNING_ANALYTICS_DETAILED_OUTCOME_LABELS: Record<

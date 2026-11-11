@@ -641,24 +641,6 @@ export const AI_LEARNING_ANALYTICS_METHODOLOGY_VERSIONS = [
 export type AiLearningAnalyticsMethodologyVersion =
   (typeof AI_LEARNING_ANALYTICS_METHODOLOGY_VERSIONS)[number] | "UNKNOWN";
 
-export const AI_LEARNING_ANALYTICS_GROWTH_TRENDS = [
-  "IMPROVING",
-  "STABLE",
-  "DECLINING",
-  "INSUFFICIENT_DATA",
-] as const;
-export type AiLearningAnalyticsGrowthTrend =
-  (typeof AI_LEARNING_ANALYTICS_GROWTH_TRENDS)[number];
-
-export const AI_LEARNING_ANALYTICS_OUTCOMES = [
-  "IMPROVED",
-  "STABLE",
-  "REGRESSED",
-  "NOT_COMPARABLE",
-] as const;
-export type AiLearningAnalyticsOutcome =
-  (typeof AI_LEARNING_ANALYTICS_OUTCOMES)[number];
-
 export const AI_LEARNING_ANALYTICS_DETAILED_OUTCOMES = [
   "IMPROVED",
   "REMAINED_CLEAN",
@@ -722,7 +704,6 @@ export type AiLearningAnalyticsSummary = {
   improvedStudentTaskCount: number;
   remainedCleanStudentTaskCount: number;
   unchangedWithIssuesStudentTaskCount: number;
-  stableStudentTaskCount: number;
   regressedStudentTaskCount: number;
   aiStudentCoverageRate: number | null;
   aiTaskCoverageRate: number | null;
@@ -756,7 +737,6 @@ export type AiLearningAnalyticsTaskTrend = {
   improvedStudentCount: number;
   remainedCleanStudentCount: number;
   unchangedWithIssuesStudentCount: number;
-  stableStudentCount: number;
   regressedStudentCount: number;
   aiTaskCoverageRate: number | null;
   postFeedbackResubmissionRate: number | null;
@@ -792,7 +772,6 @@ export type AiLearningAnalyticsStudentMetrics = {
   improvedTasksCount: number;
   remainedCleanTasksCount: number;
   unchangedWithIssuesTasksCount: number;
-  stableTasksCount: number;
   regressedTasksCount: number;
   evidenceSummary: AiLearningAnalyticsEvidenceSummary;
   averageIssueLoadBefore: number | null;
@@ -801,7 +780,6 @@ export type AiLearningAnalyticsStudentMetrics = {
   overallOutcome: AiLearningAnalyticsOverallOutcome;
   engagementStatus: AiLearningAnalyticsEngagementStatus;
   postFeedbackRevisionRate: number | null;
-  growthTrend: AiLearningAnalyticsGrowthTrend;
 };
 
 export type AiLearningAnalyticsStudentItem =
@@ -848,7 +826,6 @@ export type AiLearningAnalyticsTaskPoint = {
   issueLoadAfter: number | null;
   issueLoadDelta: number | null;
   detailedOutcome: AiLearningAnalyticsDetailedOutcome;
-  outcome: AiLearningAnalyticsOutcome;
 };
 
 export type AiLearningAnalyticsStudentDetailResponse = {
@@ -1679,36 +1656,6 @@ const normalizeAiLearningAnalyticsWindow = (
     : "all";
 };
 
-const normalizeAiLearningAnalyticsGrowthTrend = (
-  value: unknown,
-): AiLearningAnalyticsGrowthTrend => {
-  const trend = asString(value);
-  if (
-    trend === "IMPROVING" ||
-    trend === "STABLE" ||
-    trend === "DECLINING" ||
-    trend === "INSUFFICIENT_DATA"
-  ) {
-    return trend;
-  }
-  return "INSUFFICIENT_DATA";
-};
-
-const normalizeAiLearningAnalyticsOutcome = (
-  value: unknown,
-): AiLearningAnalyticsOutcome => {
-  const outcome = asString(value);
-  if (
-    outcome === "IMPROVED" ||
-    outcome === "STABLE" ||
-    outcome === "REGRESSED" ||
-    outcome === "NOT_COMPARABLE"
-  ) {
-    return outcome;
-  }
-  return "NOT_COMPARABLE";
-};
-
 const normalizeAiLearningAnalyticsMethodologyVersion = (
   value: unknown,
 ): AiLearningAnalyticsMethodologyVersion =>
@@ -1834,7 +1781,6 @@ const toAiLearningAnalyticsSummary = (
     unchangedWithIssuesStudentTaskCount: toRequiredNumber(
       record.unchangedWithIssuesStudentTaskCount,
     ),
-    stableStudentTaskCount: toRequiredNumber(record.stableStudentTaskCount),
     regressedStudentTaskCount: toRequiredNumber(
       record.regressedStudentTaskCount,
     ),
@@ -1911,7 +1857,6 @@ const toAiLearningAnalyticsTaskTrend = (
     unchangedWithIssuesStudentCount: toRequiredNumber(
       record.unchangedWithIssuesStudentCount,
     ),
-    stableStudentCount: toRequiredNumber(record.stableStudentCount),
     regressedStudentCount: toRequiredNumber(record.regressedStudentCount),
     aiTaskCoverageRate: toAiLearningAnalyticsNullableNumber(
       record.aiTaskCoverageRate,
@@ -1976,7 +1921,6 @@ const toAiLearningAnalyticsStudentMetrics = (
     unchangedWithIssuesTasksCount: toRequiredNumber(
       record.unchangedWithIssuesTasksCount,
     ),
-    stableTasksCount: toRequiredNumber(record.stableTasksCount),
     regressedTasksCount: toRequiredNumber(record.regressedTasksCount),
     evidenceSummary: toAiLearningAnalyticsEvidenceSummary(
       record.evidenceSummary,
@@ -1999,7 +1943,6 @@ const toAiLearningAnalyticsStudentMetrics = (
     postFeedbackRevisionRate: toAiLearningAnalyticsNullableNumber(
       record.postFeedbackRevisionRate,
     ),
-    growthTrend: normalizeAiLearningAnalyticsGrowthTrend(record.growthTrend),
   };
 };
 
@@ -2049,7 +1992,6 @@ const toAiLearningAnalyticsTaskPoint = (
     detailedOutcome: normalizeAiLearningAnalyticsDetailedOutcome(
       record.detailedOutcome,
     ),
-    outcome: normalizeAiLearningAnalyticsOutcome(record.outcome),
   };
 };
 

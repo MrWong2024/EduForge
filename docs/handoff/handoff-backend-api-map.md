@@ -111,7 +111,7 @@ Notes:
 - PA 的合法窗口与默认值、零值、rubric 及 CSV 数据合同见 [DTO Process Assessment](./handoff-backend-dto-cheatsheet.md#process-assessment)；评分、risk 与排除重算见 [Service Card 08G](./handoff-backend-service-map.md#service-card-08g)。
 - AI Learning Analytics 三个入口统一 teacher only + classroom owner only；课堂不存在或非 owner 返回 `404 Classroom not found`。学生详情仅允许当前课堂 ACTIVE Enrollment 学生，REMOVED、外班及非法学生 id 均安全返回 `404`。
 - Analytics 以课堂任务发布时间界定范围，三个入口仅纳入状态为合法标量字符串 ACTIVE/CLOSED 的任务，排除 RECALLED、缺失、null、未知值及数组等非法类型；保留入选任务的完整提交链，并支持当前查询临时排除。学生列表的 q 只匹配姓名/学号，不区分大小写，按字符串子串匹配；q、overallOutcome 与 engagementStatus 采用 AND 组合。非法 Query 按 DTO 校验拒绝（`400`）。方法学 V1.2 取代旧“首个后续版本”比较，区分新增提交与作品更新；公开参数、比较追溯、来源提示及 nullable 指标见 [DTO Analytics](./handoff-backend-dto-cheatsheet.md#ai-learning-analytics)，配对与搜索筛选分页算法见 [Service Card 08I](./handoff-backend-service-map.md#service-card-08i)。
-- Analytics 后端旧返回投影已退役，现行字段合同见 [DTO Analytics](./handoff-backend-dto-cheatsheet.md#ai-learning-analytics)；“Analytics 旧字段前端类型、mapper 与标签清理”待下一阶段。
+- Analytics 后端旧返回投影已退役，现行字段合同见 [DTO Analytics](./handoff-backend-dto-cheatsheet.md#ai-learning-analytics)。
 - Analytics 为只读记录对照，不回填、重评、解锁或改写历史业务事实。可用反馈交付排除已知模拟评阅与成功空反馈，历史来源未知不认证为真实模型；不同来源/模型、未比较较新版本及证据不足均提供安全提示。分析仅反映现存作品更新与反馈条目负荷，不覆盖全部 AI 使用，不是缺陷数、正确率、正式成绩、学习能力或因果贡献结论，也不能证明已阅读、理解或采纳。净结果可能相互抵消，不代表时间序列趋势；反馈阶段不表示态度、AI 依赖、能力或风险。
 - Snapshot 是 teacher owner 的体积受控教学数据快照导出，超量数据附带截断提示；Query、meta/notes、公开投影与敏感省略见 [DTO Snapshot](./handoff-backend-dto-cheatsheet.md#classroom-export-snapshot)，组合与截断策略见 [Service Card 08H](./handoff-backend-service-map.md#service-card-08h)。
 - Snapshot 对合法教师的显式 `window=term` 请求沿既有 DTO 校验返回 `400`；认证、角色与班级 owner 检查顺序不变。
