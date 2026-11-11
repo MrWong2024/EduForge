@@ -588,6 +588,24 @@ describe('Classroom Learning Trajectory (e2e)', () => {
 
     const defaultWindowTrajectory = await fetchTrajectory(undefined);
     expect(defaultWindowTrajectory.window).toBe('all');
+    const studentAInDefault = defaultWindowTrajectory.items.find(
+      (item) => item.studentId === studentAId,
+    );
+    expect(studentAInDefault?.attemptsCount).toBe(3);
+    expect(
+      studentAInDefault?.attempts.map((attempt) => attempt.submissionId).sort(),
+    ).toEqual(
+      [
+        firstSubmissionBody.id,
+        secondSubmissionBody.id,
+        thirdSubmissionBody.id,
+      ].sort(),
+    );
+    expect(
+      defaultWindowTrajectory.items.find(
+        (item) => item.studentId === studentBId,
+      ),
+    ).toMatchObject({ studentId: studentBId, attemptsCount: 0 });
 
     const trajectoryAll = await fetchTrajectory('all');
     expect(trajectoryAll.window).toBe('all');
@@ -616,6 +634,15 @@ describe('Classroom Learning Trajectory (e2e)', () => {
       email: studentBEmail.toLowerCase(),
     });
     expect(studentAItem?.attemptsCount).toBe(3);
+    expect(
+      studentAItem?.attempts.map((attempt) => attempt.submissionId).sort(),
+    ).toEqual(
+      [
+        firstSubmissionBody.id,
+        secondSubmissionBody.id,
+        thirdSubmissionBody.id,
+      ].sort(),
+    );
     expect(studentBItem?.attemptsCount).toBe(0);
     expect(typeof studentAItem?.trend.errorCountFirst).toBe('number');
     expect(typeof studentAItem?.trend.errorCountLatest).toBe('number');
@@ -646,6 +673,12 @@ describe('Classroom Learning Trajectory (e2e)', () => {
       (item) => item.studentId === studentAId,
     );
     expect(studentAIn7d?.attemptsCount).toBe(2);
+    expect(
+      studentAIn7d?.attempts.map((attempt) => attempt.submissionId).sort(),
+    ).toEqual([secondSubmissionBody.id, thirdSubmissionBody.id].sort());
+    expect(
+      trajectory7d.items.find((item) => item.studentId === studentBId),
+    ).toMatchObject({ studentId: studentBId, attemptsCount: 0 });
 
     const trajectoryLimit100 = await teacherAgent
       .get(
@@ -673,5 +706,31 @@ describe('Classroom Learning Trajectory (e2e)', () => {
         includeTagDetails: true,
       })
       .expect(400);
+
+    const trajectoryPath = `/api/classrooms/${classroomId}/tasks/${classroomTaskId}/learning-trajectory`;
+    for (const window of ['24h', '30d']) {
+      const rejected = await teacherAgent
+        .get(trajectoryPath)
+        .query({ window })
+        .expect(400);
+      expect(rejected.body).toMatchObject({
+        statusCode: 400,
+        path: `${trajectoryPath}?window=${window}`,
+      });
+      expect(rejected.body).toHaveProperty(
+        'message',
+        expect.stringContaining('window must be one of the following values:'),
+      );
+    }
+
+    await studentAAgent
+      .get(trajectoryPath)
+      .query({ window: '24h' })
+      .expect(403);
+    await request(app.getHttpServer())
+      .get(trajectoryPath)
+      .timeout({ response: 5000, deadline: 10000 })
+      .query({ window: '30d' })
+      .expect(401);
   });
 });

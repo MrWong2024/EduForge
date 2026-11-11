@@ -219,7 +219,7 @@ my-task-detail 另稳定返回 `participationStatus={readOnly,canSubmit,canReque
 
 来源：[QueryLearningTrajectoryDto](../../backend/src/modules/classrooms/classroom-tasks/dto/query-learning-trajectory.dto.ts)、[ClassroomTasksService](../../backend/src/modules/classrooms/classroom-tasks/services/classroom-tasks.service.ts)。
 
-- `window?: all | 7d | 24h | 30d`，默认 all，24h/30d 为兼容窗口；分页校验，默认 `page=1,limit=20`。
+- `window?: all | 7d`，默认 all；分页校验，默认 `page=1,limit=20`。
 - `sort?: latestAttemptAt | attemptsCount | errorRate | notSubmitted`，默认 latestAttemptAt；`order?: asc | desc`，默认 desc。
 - `includeAttempts? / includeTagDetails?` 用 IsBooleanString，均默认 true；显式传值时仅 `"true"` 启用，`"1"` 虽通过布尔字符串校验但不会启用。
 - 返回 `{classroomId,classroomTaskId,window,generatedAt,page,limit,total,items}`。
