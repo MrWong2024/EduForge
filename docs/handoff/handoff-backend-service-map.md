@@ -237,7 +237,7 @@ Global SoT 只保留理解跨 Service workflow 必需的稳定不变量，不追
 - Side Effects: 只读。
 - Important Performance / Recovery: 以 classroomTaskIds 批次聚合，避免逐 task 查询。
 - SoT: `backend/src/modules/classrooms/services/teacher-classroom-weekly-report.service.ts`。
-- Boundary / Non-responsibility: 窗口兼容集合、参数及公开数据见 [DTO Cheatsheet](./handoff-backend-dto-cheatsheet.md#query-dto--public-response读取接口)，endpoint 合同见 [API Map](./handoff-backend-api-map.md#classrooms)。
+- Boundary / Non-responsibility: 窗口集合、参数及公开数据见 [DTO Cheatsheet](./handoff-backend-dto-cheatsheet.md#query-dto--public-response读取接口)，endpoint 合同见 [API Map](./handoff-backend-api-map.md#classrooms)。
 
 ## Service Card 08C
 

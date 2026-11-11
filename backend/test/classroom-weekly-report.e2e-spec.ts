@@ -1,12 +1,13 @@
-import { INestApplication, ValidationPipe } from '@nestjs/common';
+import { INestApplication } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { Test, TestingModule } from '@nestjs/testing';
 import { getModelToken } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import * as bcrypt from 'bcryptjs';
-import cookieParser from 'cookie-parser';
 import request from 'supertest';
 import { App } from 'supertest/types';
 import { AppModule } from '../src/app.module';
+import { configureApp } from '../src/app.setup';
 import { User } from '../src/modules/users/schemas/user.schema';
 import { Session } from '../src/modules/auth/schemas/session.schema';
 import { Course } from '../src/modules/courses/schemas/course.schema';
@@ -21,20 +22,18 @@ import {
   AiFeedbackJobStatus,
 } from '../src/modules/learning-tasks/ai-feedback/schemas/ai-feedback-job.schema';
 import { AiFeedbackProcessor } from '../src/modules/learning-tasks/ai-feedback/services/ai-feedback-processor.service';
+import {
+  assertLocalStandardTestAuthentication,
+  assertLocalStandardTestEnvironment,
+} from './helpers/local-test-database-auth';
 
 jest.setTimeout(30000);
-
-const ensureMongoUri = () => {
-  if (!process.env.MONGO_URI) {
-    throw new Error('MONGO_URI is required for classroom weekly report e2e.');
-  }
-};
 
 type CreatedCourseResponse = { id: string };
 type CreatedClassroomResponse = { id: string; joinCode: string };
 type CreatedTaskResponse = { id: string };
 type CreatedClassroomTaskResponse = { id: string };
-type CreatedSubmissionResponse = { id: string };
+type CreatedSubmissionResponse = { id: string; contentRevision: number };
 
 type WeeklyReportJob = Pick<
   AiFeedbackJob,
@@ -67,6 +66,7 @@ type WeeklyReportResponse = {
 
 describe('Classroom Weekly Report (e2e)', () => {
   let app: INestApplication<App>;
+  let moduleFixture: TestingModule | undefined;
   let userModel: Model<User>;
   let sessionModel: Model<Session>;
   let courseModel: Model<Course>;
@@ -90,6 +90,8 @@ describe('Classroom Weekly Report (e2e)', () => {
   let studentId = '';
   let previousWorkerEnabled: string | undefined;
   let previousDebugEnabled: string | undefined;
+  let fixtureAuthorized = false;
+  let environmentOverridden = false;
 
   const teacherEmail = `teacher.weekly.${Date.now()}@example.com`;
   const studentEmail = `student.weekly.${Date.now()}@example.com`;
@@ -106,39 +108,58 @@ describe('Classroom Weekly Report (e2e)', () => {
       .send({ email, password })
       .expect((res) => {
         if (![200, 201].includes(res.status)) {
-          throw new Error(
-            `Unexpected login status ${res.status}, body=${JSON.stringify(res.body)}`,
-          );
+          throw new Error(`Unexpected login status ${res.status}`);
         }
       });
   };
 
+  const expectEmptyDatabase = async (phase: string) => {
+    const database = userModel.db.db;
+    if (!database) throw new Error('Missing connected test database');
+    const cursor = database.listCollections({}, { maxTimeMS: 5000 });
+    try {
+      const collections = await cursor.toArray();
+      const counts: Record<string, number> = {};
+      for (const collection of collections) {
+        expect(collection.type).toBe('collection');
+        counts[collection.name] = await database
+          .collection(collection.name)
+          .countDocuments({}, { maxTimeMS: 5000 });
+      }
+      console.info('Weekly report database counts: ' + phase, counts);
+      expect(Object.values(counts).every((count) => count === 0)).toBe(true);
+    } finally {
+      await cursor.close();
+    }
+  };
+
   beforeAll(async () => {
-    ensureMongoUri();
+    assertLocalStandardTestEnvironment({
+      nodeEnv: process.env.NODE_ENV,
+      purpose: process.env.EDUFORGE_DATABASE_PURPOSE,
+      mongoUri: process.env.MONGO_URI,
+    });
 
     previousWorkerEnabled = process.env.AI_FEEDBACK_WORKER_ENABLED;
-    process.env.AI_FEEDBACK_WORKER_ENABLED = 'false';
     previousDebugEnabled = process.env.AI_FEEDBACK_DEBUG_ENABLED;
+    environmentOverridden = true;
+    process.env.AI_FEEDBACK_WORKER_ENABLED = 'false';
     process.env.AI_FEEDBACK_DEBUG_ENABLED = 'true';
 
-    const moduleFixture: TestingModule = await Test.createTestingModule({
+    moduleFixture = await Test.createTestingModule({
       imports: [AppModule],
     }).compile();
 
     app = moduleFixture.createNestApplication();
-    app.setGlobalPrefix('api');
-    app.useGlobalPipes(
-      new ValidationPipe({
-        whitelist: true,
-        transform: true,
-        forbidNonWhitelisted: true,
-      }),
-    );
-    app.use(cookieParser());
+    configureApp(app);
     await app.init();
 
-    teacherAgent = request.agent(app.getHttpServer());
-    studentAgent = request.agent(app.getHttpServer());
+    teacherAgent = request
+      .agent(app.getHttpServer())
+      .timeout({ response: 5000, deadline: 10000 });
+    studentAgent = request
+      .agent(app.getHttpServer())
+      .timeout({ response: 5000, deadline: 10000 });
 
     userModel = app.get(getModelToken(User.name));
     sessionModel = app.get(getModelToken(Session.name));
@@ -152,111 +173,147 @@ describe('Classroom Weekly Report (e2e)', () => {
     aiFeedbackJobModel = app.get(getModelToken(AiFeedbackJob.name));
     aiFeedbackProcessor = app.get(AiFeedbackProcessor);
 
+    userModel.db.set('maxTimeMS', 10000);
+    const database = userModel.db.db;
+    if (!database) throw new Error('Missing connected test database');
+    const hello = await database.command({ hello: 1 }, { timeoutMS: 5000 });
+    expect(hello.setName).toBeUndefined();
+    expect(hello.msg).not.toBe('isdbgrid');
+    expect(hello.isWritablePrimary).toBe(true);
+    const auth = await database.command(
+      { connectionStatus: 1, showPrivileges: false },
+      { timeoutMS: 5000 },
+    );
+    const config = app.get(ConfigService);
+    assertLocalStandardTestAuthentication({
+      nodeEnv: process.env.NODE_ENV,
+      purpose: process.env.EDUFORGE_DATABASE_PURPOSE,
+      mongoUri: config.get<string>('MONGO_URI'),
+      databaseName: database.databaseName,
+      connectedHost: userModel.db.host,
+      authInfo: auth.authInfo,
+    });
+    expect(config.get('AI_FEEDBACK_WORKER_ENABLED')).toBe(false);
+    expect(config.get('AI_FEEDBACK_PROVIDER')).toBe('stub');
+    expect(process.env.AI_FEEDBACK_REAL_ENABLED).toBe('false');
+    expect(config.get('MAIL_PROVIDER')).toBe('log');
+    console.info(
+      'Weekly report database gate: standard_test / eduforge_test / loopback standalone / root@admin user and role verified',
+    );
+    await expectEmptyDatabase('before fixtures');
+    fixtureAuthorized = true;
+
     const [teacherHash, studentHash] = await Promise.all([
       bcrypt.hash(teacherPassword, 10),
       bcrypt.hash(studentPassword, 10),
     ]);
 
-    const [teacher, student] = await Promise.all([
-      userModel.create({
-        email: teacherEmail,
-        passwordHash: teacherHash,
-        roles: ['teacher'],
-      }),
-      userModel.create({
-        email: studentEmail,
-        passwordHash: studentHash,
-        roles: ['student'],
-      }),
-    ]);
+    const teacher = await userModel.create({
+      email: teacherEmail,
+      passwordHash: teacherHash,
+      roles: ['teacher'],
+    });
     teacherId = teacher._id.toString();
+    const student = await userModel.create({
+      email: studentEmail,
+      passwordHash: studentHash,
+      roles: ['student'],
+    });
     studentId = student._id.toString();
   });
 
   afterAll(async () => {
-    if (previousWorkerEnabled === undefined) {
-      delete process.env.AI_FEEDBACK_WORKER_ENABLED;
-    } else {
-      process.env.AI_FEEDBACK_WORKER_ENABLED = previousWorkerEnabled;
-    }
-    if (previousDebugEnabled === undefined) {
-      delete process.env.AI_FEEDBACK_DEBUG_ENABLED;
-    } else {
-      process.env.AI_FEEDBACK_DEBUG_ENABLED = previousDebugEnabled;
-    }
-
     const cleanupErrors: unknown[] = [];
     try {
-      const cleanup: Promise<unknown>[] = [];
-      const userIds = [teacherId, studentId]
-        .filter(Boolean)
-        .map((id) => new Types.ObjectId(id));
-      if (submissionId) {
-        const submissionObjectId = new Types.ObjectId(submissionId);
-        cleanup.push(
-          feedbackModel.deleteMany({ submissionId: submissionObjectId }),
-        );
-        cleanup.push(
-          aiFeedbackJobModel.deleteMany({ submissionId: submissionObjectId }),
-        );
-        cleanup.push(submissionModel.deleteOne({ _id: submissionObjectId }));
-      }
-      if (classroomTaskId) {
-        cleanup.push(
-          classroomTaskModel.deleteOne({
-            _id: new Types.ObjectId(classroomTaskId),
-          }),
-        );
-      }
-      if (taskId) {
-        cleanup.push(taskModel.deleteOne({ _id: new Types.ObjectId(taskId) }));
-      }
-      if (classroomId) {
-        cleanup.push(
-          enrollmentModel.deleteMany({
-            classroomId: new Types.ObjectId(classroomId),
-          }),
-        );
-        cleanup.push(
-          classroomModel.deleteOne({ _id: new Types.ObjectId(classroomId) }),
-        );
-      }
-      if (courseId) {
-        cleanup.push(
-          courseModel.deleteOne({ _id: new Types.ObjectId(courseId) }),
-        );
-      }
-      if (userIds.length > 0) {
-        cleanup.push(sessionModel.deleteMany({ userId: { $in: userIds } }));
-        cleanup.push(userModel.deleteMany({ _id: { $in: userIds } }));
-      }
-      const results = await Promise.allSettled(cleanup);
-      for (const result of results) {
-        if (result.status === 'rejected') cleanupErrors.push(result.reason);
-      }
-      if (classroomId) {
-        expect(
-          await enrollmentModel.countDocuments({
-            classroomId: new Types.ObjectId(classroomId),
-          }),
-        ).toBe(0);
-      }
-      if (userIds.length > 0) {
-        expect(
-          await sessionModel.countDocuments({ userId: { $in: userIds } }),
-        ).toBe(0);
+      if (fixtureAuthorized) {
+        const cleanup: Promise<unknown>[] = [];
+        const userIds = [teacherId, studentId]
+          .filter(Boolean)
+          .map((id) => new Types.ObjectId(id));
+        if (submissionId) {
+          const submissionObjectId = new Types.ObjectId(submissionId);
+          cleanup.push(
+            feedbackModel.deleteMany({ submissionId: submissionObjectId }),
+          );
+          cleanup.push(
+            aiFeedbackJobModel.deleteMany({ submissionId: submissionObjectId }),
+          );
+          cleanup.push(submissionModel.deleteOne({ _id: submissionObjectId }));
+        }
+        if (classroomTaskId) {
+          cleanup.push(
+            classroomTaskModel.deleteOne({
+              _id: new Types.ObjectId(classroomTaskId),
+            }),
+          );
+        }
+        if (taskId) {
+          cleanup.push(
+            taskModel.deleteOne({ _id: new Types.ObjectId(taskId) }),
+          );
+        }
+        if (classroomId) {
+          cleanup.push(
+            enrollmentModel.deleteMany({
+              classroomId: new Types.ObjectId(classroomId),
+            }),
+          );
+          cleanup.push(
+            classroomModel.deleteOne({ _id: new Types.ObjectId(classroomId) }),
+          );
+        }
+        if (courseId) {
+          cleanup.push(
+            courseModel.deleteOne({ _id: new Types.ObjectId(courseId) }),
+          );
+        }
+        if (userIds.length > 0) {
+          cleanup.push(sessionModel.deleteMany({ userId: { $in: userIds } }));
+          cleanup.push(userModel.deleteMany({ _id: { $in: userIds } }));
+        }
+        const results = await Promise.allSettled(cleanup);
+        for (const result of results) {
+          if (result.status === 'rejected') cleanupErrors.push(result.reason);
+        }
+        await expectEmptyDatabase('after scoped cleanup');
+        if (classroomId) {
+          expect(
+            await enrollmentModel.countDocuments({
+              classroomId: new Types.ObjectId(classroomId),
+            }),
+          ).toBe(0);
+        }
+        if (userIds.length > 0) {
+          expect(
+            await sessionModel.countDocuments({ userId: { $in: userIds } }),
+          ).toBe(0);
+        }
       }
     } catch (error) {
       cleanupErrors.push(error);
     } finally {
       try {
-        await app?.close();
+        if (app) await app.close();
+        else await moduleFixture?.close();
       } catch (error) {
         cleanupErrors.push(error);
+      } finally {
+        if (environmentOverridden) {
+          if (previousWorkerEnabled === undefined) {
+            delete process.env.AI_FEEDBACK_WORKER_ENABLED;
+          } else {
+            process.env.AI_FEEDBACK_WORKER_ENABLED = previousWorkerEnabled;
+          }
+          if (previousDebugEnabled === undefined) {
+            delete process.env.AI_FEEDBACK_DEBUG_ENABLED;
+          } else {
+            process.env.AI_FEEDBACK_DEBUG_ENABLED = previousDebugEnabled;
+          }
+        }
       }
     }
     if (cleanupErrors.length > 0) {
-      throw new AggregateError(cleanupErrors, 'Weekly report cleanup failed.');
+      throw new Error(`Weekly report cleanup failed: ${cleanupErrors.length}`);
     }
   });
 
@@ -327,13 +384,14 @@ describe('Classroom Weekly Report (e2e)', () => {
         },
       })
       .expect(201);
-    submissionId = (createdSubmission.body as CreatedSubmissionResponse).id;
+    const submissionBody = createdSubmission.body as CreatedSubmissionResponse;
+    submissionId = submissionBody.id;
 
     await teacherAgent
       .post(
         `/api/learning-tasks/submissions/${submissionId}/ai-feedback/request`,
       )
-      .send({ expectedRevision: 0 })
+      .send({ expectedRevision: submissionBody.contentRevision })
       .expect(200);
 
     const jobs = await aiFeedbackJobModel
@@ -348,6 +406,19 @@ describe('Classroom Weekly Report (e2e)', () => {
     expect(jobs[0].studentId.toString()).toBe(studentId);
     expect(jobs[0].status).toBe(AiFeedbackJobStatus.Pending);
 
+    const foreignJobs = await aiFeedbackJobModel
+      .countDocuments({
+        status: {
+          $in: [
+            AiFeedbackJobStatus.Pending,
+            AiFeedbackJobStatus.Failed,
+            AiFeedbackJobStatus.Running,
+          ],
+        },
+        submissionId: { $ne: new Types.ObjectId(submissionId) },
+      })
+      .maxTimeMS(5000);
+    expect(foreignJobs).toBe(0);
     const processed = await aiFeedbackProcessor.processOnce(5);
     expect(processed.succeeded).toBe(1);
     const completedJob = await aiFeedbackJobModel
@@ -357,35 +428,54 @@ describe('Classroom Weekly Report (e2e)', () => {
       .exec();
     expect(completedJob?.status).toBe(AiFeedbackJobStatus.Succeeded);
 
-    const report = await teacherAgent
-      .get(`/api/classrooms/${classroomId}/weekly-report`)
-      .query({ window: '7d', includeRiskStudentIds: true })
-      .expect(200);
-    const body = report.body as WeeklyReportResponse;
+    const reportPath = `/api/classrooms/${classroomId}/weekly-report`;
+    for (const window of [undefined, 'all', '7d', '30d']) {
+      const report = await teacherAgent
+        .get(reportPath)
+        .query(window === undefined ? {} : { window })
+        .query(window === '7d' ? { includeRiskStudentIds: true } : {})
+        .expect(200);
+      const body = report.body as WeeklyReportResponse;
+      expect(body.window).toBe(window ?? 'all');
+      expect(body.progress).toMatchObject({
+        studentsCount: 1,
+        publishedClassroomTasks: 1,
+        dueClassroomTasks: 0,
+        distinctStudentsSubmitted: 1,
+        submissionRate: 1,
+      });
+      expect(body.aiHealth.jobs).toEqual({
+        total: 1,
+        succeeded: 1,
+        failed: 0,
+        dead: 0,
+        pending: 0,
+        running: 0,
+      });
+      expect(body.aiHealth.successRate).toBe(1);
+      expect(Array.isArray(body.topTags)).toBe(true);
+    }
 
-    expect(body.window).toBe('7d');
-    expect(body.progress.studentsCount).toBeGreaterThanOrEqual(1);
-    expect(body.progress.publishedClassroomTasks).toBeGreaterThanOrEqual(1);
-    expect(body.aiHealth.jobs.total).toBe(1);
-    expect(body.aiHealth.jobs.succeeded).toBe(1);
-    expect(body.aiHealth.successRate).toBe(1);
-    expect(Array.isArray(body.topTags)).toBe(true);
-
-    const defaultWindowReport = await teacherAgent
-      .get(`/api/classrooms/${classroomId}/weekly-report`)
-      .expect(200);
-    const defaultWindowBody = defaultWindowReport.body as WeeklyReportResponse;
-    expect(defaultWindowBody.window).toBe('all');
-
-    const allWindowReport = await teacherAgent
-      .get(`/api/classrooms/${classroomId}/weekly-report`)
-      .query({ window: 'all' })
-      .expect(200);
-    const allWindowBody = allWindowReport.body as WeeklyReportResponse;
-
-    expect(defaultWindowBody.progress).toEqual(allWindowBody.progress);
-    expect(defaultWindowBody.aiHealth.jobs).toEqual(
-      allWindowBody.aiHealth.jobs,
-    );
+    for (const window of ['1h', '24h']) {
+      const rejected = await teacherAgent
+        .get(reportPath)
+        .query({ window })
+        .expect(400);
+      expect(rejected.body).toHaveProperty('statusCode', 400);
+      expect(rejected.body).toHaveProperty(
+        'message',
+        expect.stringContaining('window must be one of the following values:'),
+      );
+      expect(rejected.body).toHaveProperty(
+        'path',
+        `${reportPath}?window=${window}`,
+      );
+    }
+    await studentAgent.get(reportPath).query({ window: '1h' }).expect(403);
+    await request(app.getHttpServer())
+      .get(reportPath)
+      .timeout({ response: 5000, deadline: 10000 })
+      .query({ window: '24h' })
+      .expect(401);
   });
 });

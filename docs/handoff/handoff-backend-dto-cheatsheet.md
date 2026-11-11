@@ -208,7 +208,7 @@ my-task-detail 另稳定返回 `participationStatus={readOnly,canSubmit,canReque
 
 来源：[QueryCourseOverviewDto](../../backend/src/modules/courses/dto/query-course-overview.dto.ts)、[CourseOverviewService](../../backend/src/modules/courses/services/course-overview.service.ts)。
 
-- `window?: all | 1h | 24h | 7d`，`IsIn`，默认 all；`1h/24h/7d` 兼容可用。
+- `window?: all | 7d`，`IsIn`，默认 all。
 - `sort?: studentsCount | submissionRate | overallSubmissionCoverage | aiSuccessRate | pendingJobs | failedJobs`，默认 aiSuccessRate；`order?: asc | desc`，默认 desc。
 - 分页校验，默认 `page=1,limit=20`。
 - item 的 `submissionRate` 保持“至少提交过一次的学生覆盖率”：`distinctStudentsSubmitted / studentsCount`，零分母为 0。
@@ -232,7 +232,7 @@ my-task-detail 另稳定返回 `participationStatus={readOnly,canSubmit,canReque
 
 来源：[QueryClassReviewPackDto](../../backend/src/modules/classrooms/classroom-tasks/dto/query-class-review-pack.dto.ts)、[ClassReviewPackService](../../backend/src/modules/classrooms/classroom-tasks/services/class-review-pack.service.ts)。
 
-- `window?: all | 7d | 24h | 30d`，默认 all，24h/30d 为兼容窗口；`topK?` 经 Type(Number)，整数 1..30，默认 10；`examplesPerTag?` 同样转换，整数 1..5，默认 2。
+- `window?: all | 7d`，默认 all；`topK?` 经 Type(Number)，整数 1..30，默认 10；`examplesPerTag?` 同样转换，整数 1..5，默认 2。
 - 顶层 `{classroomId,classroomTaskId,window,generatedAt,overview,commonIssues,examples,studentTiers}`。
 - `overview` 包含 `studentsCount/submittedStudentsCount/submissionRate/attemptsDistribution/lateSubmissionsCount/lateStudentsCount` 与 `ai={jobsTotal,successRate,errorsTop}`。
 - `commonIssues` 包含 `topTags/topTypes/topSeverities`；topTags 是按标签计数，多标签反馈可贡献多个标签。`examples` 是按 feedbackId 去重的典型样例池，元素 `{feedbackId,submissionId,attemptNo,severity,type,message,suggestion,source,primaryTag,matchedTags,tags}`。
@@ -261,7 +261,7 @@ my-task-detail 另稳定返回 `participationStatus={readOnly,canSubmit,canReque
 
 来源：[QueryClassroomWeeklyReportDto](../../backend/src/modules/classrooms/dto/query-classroom-weekly-report.dto.ts)、[TeacherClassroomWeeklyReportService](../../backend/src/modules/classrooms/services/teacher-classroom-weekly-report.service.ts)。
 
-- `window?: all | 7d | 30d | 24h | 1h`，IsIn，默认 all；24h/1h 是后端兼容窗口。
+- `window?: all | 7d | 30d`，IsIn，默认 all。
 - `includeRiskStudentIds?` 用 IsBooleanString，控制风险学生样本 id 暴露。
 - 返回 `{classroom,window,generatedAt,progress,atRisk,aiHealth,topTags}`；`classroom={id,name,courseId,status}`。
 - `progress` 为 `{studentsCount,publishedClassroomTasks,dueClassroomTasks,distinctStudentsSubmitted,submissionRate,lateSubmissionsCount,lateStudentsCount}`。

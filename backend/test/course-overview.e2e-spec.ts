@@ -1,12 +1,13 @@
-import { INestApplication, ValidationPipe } from '@nestjs/common';
+import { INestApplication } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { Test, TestingModule } from '@nestjs/testing';
 import { getModelToken } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import * as bcrypt from 'bcryptjs';
-import cookieParser from 'cookie-parser';
 import request from 'supertest';
 import { App } from 'supertest/types';
 import { AppModule } from '../src/app.module';
+import { configureApp } from '../src/app.setup';
 import { User } from '../src/modules/users/schemas/user.schema';
 import { Session } from '../src/modules/auth/schemas/session.schema';
 import { Course } from '../src/modules/courses/schemas/course.schema';
@@ -16,16 +17,17 @@ import { ClassroomTask } from '../src/modules/classrooms/classroom-tasks/schemas
 import { Task } from '../src/modules/learning-tasks/schemas/task.schema';
 import { Submission } from '../src/modules/learning-tasks/schemas/submission.schema';
 import { Feedback } from '../src/modules/learning-tasks/schemas/feedback.schema';
-import { AiFeedbackJob } from '../src/modules/learning-tasks/ai-feedback/schemas/ai-feedback-job.schema';
+import {
+  AiFeedbackJob,
+  AiFeedbackJobStatus,
+} from '../src/modules/learning-tasks/ai-feedback/schemas/ai-feedback-job.schema';
 import { AiFeedbackProcessor } from '../src/modules/learning-tasks/ai-feedback/services/ai-feedback-processor.service';
+import {
+  assertLocalStandardTestAuthentication,
+  assertLocalStandardTestEnvironment,
+} from './helpers/local-test-database-auth';
 
 jest.setTimeout(30000);
-
-const ensureMongoUri = () => {
-  if (!process.env.MONGO_URI) {
-    throw new Error('MONGO_URI is required for course overview e2e.');
-  }
-};
 
 type CreatedCourseResponse = { id: string };
 type CreatedClassroomResponse = { id: string; joinCode: string };
@@ -61,6 +63,7 @@ type CourseOverviewResponse = {
 
 describe('Course Overview (e2e)', () => {
   let app: INestApplication<App>;
+  let moduleFixture: TestingModule | undefined;
   let userModel: Model<User>;
   let sessionModel: Model<Session>;
   let courseModel: Model<Course>;
@@ -93,6 +96,8 @@ describe('Course Overview (e2e)', () => {
 
   let previousWorkerEnabled: string | undefined;
   let previousDebugEnabled: string | undefined;
+  let environmentOverridden = false;
+  let fixtureAuthorized = false;
 
   const teacherEmail = `teacher.course.overview.${Date.now()}@example.com`;
   const studentAEmail = `studentA.course.overview.${Date.now()}@example.com`;
@@ -111,40 +116,61 @@ describe('Course Overview (e2e)', () => {
       .send({ email, password })
       .expect((res) => {
         if (![200, 201].includes(res.status)) {
-          throw new Error(
-            `Unexpected login status ${res.status}, body=${JSON.stringify(res.body)}`,
-          );
+          throw new Error(`Unexpected login status ${res.status}`);
         }
       });
   };
 
+  const expectEmptyDatabase = async (phase: string) => {
+    const database = userModel.db.db;
+    if (!database) throw new Error('Missing connected test database');
+    const cursor = database.listCollections({}, { maxTimeMS: 5000 });
+    try {
+      const collections = await cursor.toArray();
+      const counts: Record<string, number> = {};
+      for (const collection of collections) {
+        expect(collection.type).toBe('collection');
+        counts[collection.name] = await database
+          .collection(collection.name)
+          .countDocuments({}, { maxTimeMS: 5000 });
+      }
+      console.info('Course overview database counts: ' + phase, counts);
+      expect(Object.values(counts).every((count) => count === 0)).toBe(true);
+    } finally {
+      await cursor.close();
+    }
+  };
+
   beforeAll(async () => {
-    ensureMongoUri();
+    assertLocalStandardTestEnvironment({
+      nodeEnv: process.env.NODE_ENV,
+      purpose: process.env.EDUFORGE_DATABASE_PURPOSE,
+      mongoUri: process.env.MONGO_URI,
+    });
 
     previousWorkerEnabled = process.env.AI_FEEDBACK_WORKER_ENABLED;
-    process.env.AI_FEEDBACK_WORKER_ENABLED = 'false';
     previousDebugEnabled = process.env.AI_FEEDBACK_DEBUG_ENABLED;
+    environmentOverridden = true;
+    process.env.AI_FEEDBACK_WORKER_ENABLED = 'false';
     process.env.AI_FEEDBACK_DEBUG_ENABLED = 'true';
 
-    const moduleFixture: TestingModule = await Test.createTestingModule({
+    moduleFixture = await Test.createTestingModule({
       imports: [AppModule],
     }).compile();
 
     app = moduleFixture.createNestApplication();
-    app.setGlobalPrefix('api');
-    app.useGlobalPipes(
-      new ValidationPipe({
-        whitelist: true,
-        transform: true,
-        forbidNonWhitelisted: true,
-      }),
-    );
-    app.use(cookieParser());
+    configureApp(app);
     await app.init();
 
-    teacherAgent = request.agent(app.getHttpServer());
-    studentAAgent = request.agent(app.getHttpServer());
-    studentBAgent = request.agent(app.getHttpServer());
+    teacherAgent = request
+      .agent(app.getHttpServer())
+      .timeout({ response: 5000, deadline: 10000 });
+    studentAAgent = request
+      .agent(app.getHttpServer())
+      .timeout({ response: 5000, deadline: 10000 });
+    studentBAgent = request
+      .agent(app.getHttpServer())
+      .timeout({ response: 5000, deadline: 10000 });
 
     userModel = app.get(getModelToken(User.name));
     sessionModel = app.get(getModelToken(Session.name));
@@ -158,32 +184,59 @@ describe('Course Overview (e2e)', () => {
     aiFeedbackJobModel = app.get(getModelToken(AiFeedbackJob.name));
     aiFeedbackProcessor = app.get(AiFeedbackProcessor);
 
+    userModel.db.set('maxTimeMS', 10000);
+    const database = userModel.db.db;
+    if (!database) throw new Error('Missing connected test database');
+    const configService = app.get(ConfigService);
+    const hello = await database.command({ hello: 1 }, { timeoutMS: 5000 });
+    expect(hello.setName).toBeUndefined();
+    expect(hello.msg).not.toBe('isdbgrid');
+    expect(hello.isWritablePrimary).toBe(true);
+    const auth = await database.command(
+      { connectionStatus: 1, showPrivileges: false },
+      { timeoutMS: 5000 },
+    );
+    assertLocalStandardTestAuthentication({
+      nodeEnv: process.env.NODE_ENV,
+      purpose: process.env.EDUFORGE_DATABASE_PURPOSE,
+      mongoUri: configService.get<string>('MONGO_URI'),
+      databaseName: database.databaseName,
+      connectedHost: userModel.db.host,
+      authInfo: auth.authInfo,
+    });
+    expect(configService.get('AI_FEEDBACK_WORKER_ENABLED')).toBe(false);
+    expect(configService.get('AI_FEEDBACK_PROVIDER')).toBe('stub');
+    expect(process.env.AI_FEEDBACK_REAL_ENABLED).toBe('false');
+    expect(configService.get('MAIL_PROVIDER')).toBe('log');
+    console.info(
+      'Course overview database gate: standard_test / eduforge_test / loopback standalone / root@admin user and role verified',
+    );
+    await expectEmptyDatabase('before fixtures');
+    fixtureAuthorized = true;
+
     const [teacherHash, studentAHash, studentBHash] = await Promise.all([
       bcrypt.hash(teacherPassword, 10),
       bcrypt.hash(studentAPassword, 10),
       bcrypt.hash(studentBPassword, 10),
     ]);
 
-    const [teacher, studentA, studentB] = await Promise.all([
-      userModel.create({
-        email: teacherEmail,
-        passwordHash: teacherHash,
-        roles: ['teacher'],
-      }),
-      userModel.create({
-        email: studentAEmail,
-        passwordHash: studentAHash,
-        roles: ['student'],
-      }),
-      userModel.create({
-        email: studentBEmail,
-        passwordHash: studentBHash,
-        roles: ['student'],
-      }),
-    ]);
-
+    const teacher = await userModel.create({
+      email: teacherEmail,
+      passwordHash: teacherHash,
+      roles: ['teacher'],
+    });
     teacherId = teacher._id.toString();
+    const studentA = await userModel.create({
+      email: studentAEmail,
+      passwordHash: studentAHash,
+      roles: ['student'],
+    });
     studentAId = studentA._id.toString();
+    const studentB = await userModel.create({
+      email: studentBEmail,
+      passwordHash: studentBHash,
+      roles: ['student'],
+    });
     studentBId = studentB._id.toString();
 
     await login(teacherAgent, teacherEmail, teacherPassword);
@@ -192,105 +245,110 @@ describe('Course Overview (e2e)', () => {
   });
 
   afterAll(async () => {
-    if (previousWorkerEnabled === undefined) {
-      delete process.env.AI_FEEDBACK_WORKER_ENABLED;
-    } else {
-      process.env.AI_FEEDBACK_WORKER_ENABLED = previousWorkerEnabled;
-    }
-    if (previousDebugEnabled === undefined) {
-      delete process.env.AI_FEEDBACK_DEBUG_ENABLED;
-    } else {
-      process.env.AI_FEEDBACK_DEBUG_ENABLED = previousDebugEnabled;
-    }
-
     const cleanupErrors: unknown[] = [];
     try {
-      const cleanup: Promise<unknown>[] = [];
-      const classroomIds = [classroomAId, classroomBId, classroomCId]
-        .filter(Boolean)
-        .map((id) => new Types.ObjectId(id));
-      const submissionObjectIds = submissionIds.map(
-        (id) => new Types.ObjectId(id),
-      );
-      if (submissionObjectIds.length > 0) {
-        cleanup.push(
-          feedbackModel.deleteMany({
-            submissionId: { $in: submissionObjectIds },
-          }),
-        );
-        cleanup.push(
-          aiFeedbackJobModel.deleteMany({
-            submissionId: { $in: submissionObjectIds },
-          }),
-        );
-        cleanup.push(
-          submissionModel.deleteMany({ _id: { $in: submissionObjectIds } }),
-        );
-      }
-      if (
-        classroomTaskAId ||
-        classroomTaskASecondId ||
-        classroomTaskBId ||
-        classroomTaskCId
-      ) {
-        const classroomTaskIds = [
-          classroomTaskAId,
-          classroomTaskASecondId,
-          classroomTaskBId,
-          classroomTaskCId,
-        ]
+      if (fixtureAuthorized) {
+        const cleanup: Promise<unknown>[] = [];
+        const classroomIds = [classroomAId, classroomBId, classroomCId]
           .filter(Boolean)
           .map((id) => new Types.ObjectId(id));
-        if (classroomTaskIds.length > 0) {
+        const submissionObjectIds = submissionIds.map(
+          (id) => new Types.ObjectId(id),
+        );
+        if (submissionObjectIds.length > 0) {
           cleanup.push(
-            classroomTaskModel.deleteMany({ _id: { $in: classroomTaskIds } }),
+            feedbackModel.deleteMany({
+              submissionId: { $in: submissionObjectIds },
+            }),
+          );
+          cleanup.push(
+            aiFeedbackJobModel.deleteMany({
+              submissionId: { $in: submissionObjectIds },
+            }),
+          );
+          cleanup.push(
+            submissionModel.deleteMany({ _id: { $in: submissionObjectIds } }),
           );
         }
-      }
-      if (taskId || secondaryTaskId) {
-        const taskIds = [taskId, secondaryTaskId]
+        if (
+          classroomTaskAId ||
+          classroomTaskASecondId ||
+          classroomTaskBId ||
+          classroomTaskCId
+        ) {
+          const classroomTaskIds = [
+            classroomTaskAId,
+            classroomTaskASecondId,
+            classroomTaskBId,
+            classroomTaskCId,
+          ]
+            .filter(Boolean)
+            .map((id) => new Types.ObjectId(id));
+          if (classroomTaskIds.length > 0) {
+            cleanup.push(
+              classroomTaskModel.deleteMany({ _id: { $in: classroomTaskIds } }),
+            );
+          }
+        }
+        if (taskId || secondaryTaskId) {
+          const taskIds = [taskId, secondaryTaskId]
+            .filter(Boolean)
+            .map((id) => new Types.ObjectId(id));
+          if (taskIds.length > 0) {
+            cleanup.push(taskModel.deleteMany({ _id: { $in: taskIds } }));
+          }
+        }
+        if (classroomIds.length > 0) {
+          cleanup.push(
+            enrollmentModel.deleteMany({ classroomId: { $in: classroomIds } }),
+          );
+          cleanup.push(
+            classroomModel.deleteMany({ _id: { $in: classroomIds } }),
+          );
+        }
+        if (courseId) {
+          cleanup.push(
+            courseModel.deleteOne({ _id: new Types.ObjectId(courseId) }),
+          );
+        }
+        const userIds = [teacherId, studentAId, studentBId]
           .filter(Boolean)
           .map((id) => new Types.ObjectId(id));
-        if (taskIds.length > 0) {
-          cleanup.push(taskModel.deleteMany({ _id: { $in: taskIds } }));
+        if (userIds.length > 0) {
+          cleanup.push(sessionModel.deleteMany({ userId: { $in: userIds } }));
+          cleanup.push(userModel.deleteMany({ _id: { $in: userIds } }));
         }
-      }
-      if (classroomIds.length > 0) {
-        cleanup.push(
-          enrollmentModel.deleteMany({ classroomId: { $in: classroomIds } }),
-        );
-        cleanup.push(classroomModel.deleteMany({ _id: { $in: classroomIds } }));
-      }
-      if (courseId) {
-        cleanup.push(
-          courseModel.deleteOne({ _id: new Types.ObjectId(courseId) }),
-        );
-      }
-      const userIds = [teacherId, studentAId, studentBId]
-        .filter(Boolean)
-        .map((id) => new Types.ObjectId(id));
-      if (userIds.length > 0) {
-        cleanup.push(sessionModel.deleteMany({ userId: { $in: userIds } }));
-        cleanup.push(userModel.deleteMany({ _id: { $in: userIds } }));
-      }
-      const results = await Promise.allSettled(cleanup);
-      for (const result of results) {
-        if (result.status === 'rejected') cleanupErrors.push(result.reason);
-      }
-      if (classroomIds.length > 0) {
-        expect(
-          await enrollmentModel.countDocuments({
-            classroomId: { $in: classroomIds },
-          }),
-        ).toBe(0);
+        const results = await Promise.allSettled(cleanup);
+        for (const result of results) {
+          if (result.status === 'rejected') cleanupErrors.push(result.reason);
+        }
+        await expectEmptyDatabase('after scoped cleanup');
       }
     } catch (error) {
       cleanupErrors.push(error);
     } finally {
       try {
-        await app?.close();
+        if (app) await app.close();
+        else await moduleFixture?.close();
+        if (userModel) expect(userModel.db.readyState).toBe(0);
+        console.info(
+          'Course overview application and database connection closed',
+        );
       } catch (error) {
         cleanupErrors.push(error);
+      } finally {
+        if (environmentOverridden) {
+          if (previousWorkerEnabled === undefined) {
+            delete process.env.AI_FEEDBACK_WORKER_ENABLED;
+          } else {
+            process.env.AI_FEEDBACK_WORKER_ENABLED = previousWorkerEnabled;
+          }
+          if (previousDebugEnabled === undefined) {
+            delete process.env.AI_FEEDBACK_DEBUG_ENABLED;
+          } else {
+            process.env.AI_FEEDBACK_DEBUG_ENABLED = previousDebugEnabled;
+          }
+        }
       }
     }
     if (cleanupErrors.length > 0) {
@@ -312,26 +370,23 @@ describe('Course Overview (e2e)', () => {
       .expect(201);
     courseId = (createdCourse.body as CreatedCourseResponse).id;
 
-    const [createdClassroomA, createdClassroomB, createdClassroomC] =
-      await Promise.all([
-        teacherAgent
-          .post('/api/classrooms')
-          .send({ courseId, name: 'Overview-Classroom-A' })
-          .expect(201),
-        teacherAgent
-          .post('/api/classrooms')
-          .send({ courseId, name: 'Overview-Classroom-B' })
-          .expect(201),
-        teacherAgent
-          .post('/api/classrooms')
-          .send({ courseId, name: 'Overview-Classroom-C' })
-          .expect(201),
-      ]);
+    const createdClassroomA = await teacherAgent
+      .post('/api/classrooms')
+      .send({ courseId, name: 'Overview-Classroom-A' })
+      .expect(201);
     const classroomABody = createdClassroomA.body as CreatedClassroomResponse;
-    const classroomBBody = createdClassroomB.body as CreatedClassroomResponse;
-    const classroomCBody = createdClassroomC.body as CreatedClassroomResponse;
     classroomAId = classroomABody.id;
+    const createdClassroomB = await teacherAgent
+      .post('/api/classrooms')
+      .send({ courseId, name: 'Overview-Classroom-B' })
+      .expect(201);
+    const classroomBBody = createdClassroomB.body as CreatedClassroomResponse;
     classroomBId = classroomBBody.id;
+    const createdClassroomC = await teacherAgent
+      .post('/api/classrooms')
+      .send({ courseId, name: 'Overview-Classroom-C' })
+      .expect(201);
+    const classroomCBody = createdClassroomC.body as CreatedClassroomResponse;
     classroomCId = classroomCBody.id;
 
     const createdTask = await teacherAgent
@@ -366,54 +421,45 @@ describe('Course Overview (e2e)', () => {
       .send({})
       .expect(201);
 
-    const [
-      classroomTaskA,
-      classroomTaskB,
-      classroomTaskASecond,
-      classroomTaskC,
-    ] = await Promise.all([
-      teacherAgent
-        .post(`/api/classrooms/${classroomAId}/tasks`)
-        .send({ taskId })
-        .expect(201),
-      teacherAgent
-        .post(`/api/classrooms/${classroomBId}/tasks`)
-        .send({ taskId })
-        .expect(201),
-      teacherAgent
-        .post(`/api/classrooms/${classroomAId}/tasks`)
-        .send({ taskId: secondaryTaskId })
-        .expect(201),
-      teacherAgent
-        .post(`/api/classrooms/${classroomCId}/tasks`)
-        .send({ taskId })
-        .expect(201),
-    ]);
+    const classroomTaskA = await teacherAgent
+      .post(`/api/classrooms/${classroomAId}/tasks`)
+      .send({ taskId })
+      .expect(201);
     classroomTaskAId = (classroomTaskA.body as CreatedClassroomTaskResponse).id;
+    const classroomTaskB = await teacherAgent
+      .post(`/api/classrooms/${classroomBId}/tasks`)
+      .send({ taskId })
+      .expect(201);
     classroomTaskBId = (classroomTaskB.body as CreatedClassroomTaskResponse).id;
+    const classroomTaskASecond = await teacherAgent
+      .post(`/api/classrooms/${classroomAId}/tasks`)
+      .send({ taskId: secondaryTaskId })
+      .expect(201);
     classroomTaskASecondId = (
       classroomTaskASecond.body as CreatedClassroomTaskResponse
     ).id;
+    const classroomTaskC = await teacherAgent
+      .post(`/api/classrooms/${classroomCId}/tasks`)
+      .send({ taskId })
+      .expect(201);
     classroomTaskCId = (classroomTaskC.body as CreatedClassroomTaskResponse).id;
 
-    await Promise.all([
-      studentAAgent
-        .post('/api/classrooms/join')
-        .send({ joinCode: classroomABody.joinCode })
-        .expect(201),
-      studentAAgent
-        .post('/api/classrooms/join')
-        .send({ joinCode: classroomBBody.joinCode })
-        .expect(201),
-      studentAAgent
-        .post('/api/classrooms/join')
-        .send({ joinCode: classroomCBody.joinCode })
-        .expect(201),
-      studentBAgent
-        .post('/api/classrooms/join')
-        .send({ joinCode: classroomABody.joinCode })
-        .expect(201),
-    ]);
+    await studentAAgent
+      .post('/api/classrooms/join')
+      .send({ joinCode: classroomABody.joinCode })
+      .expect(201);
+    await studentAAgent
+      .post('/api/classrooms/join')
+      .send({ joinCode: classroomBBody.joinCode })
+      .expect(201);
+    await studentAAgent
+      .post('/api/classrooms/join')
+      .send({ joinCode: classroomCBody.joinCode })
+      .expect(201);
+    await studentBAgent
+      .post('/api/classrooms/join')
+      .send({ joinCode: classroomABody.joinCode })
+      .expect(201);
 
     const createdSubmissionA1 = await studentAAgent
       .post(
@@ -476,6 +522,21 @@ describe('Course Overview (e2e)', () => {
       .send({ expectedRevision: submissionA2.contentRevision })
       .expect(200);
 
+    const foreignJobs = await aiFeedbackJobModel
+      .countDocuments({
+        status: {
+          $in: [
+            AiFeedbackJobStatus.Pending,
+            AiFeedbackJobStatus.Failed,
+            AiFeedbackJobStatus.Running,
+          ],
+        },
+        submissionId: {
+          $nin: submissionIds.map((id) => new Types.ObjectId(id)),
+        },
+      })
+      .maxTimeMS(5000);
+    expect(foreignJobs).toBe(0);
     expect(await aiFeedbackProcessor.processOnce(20)).toEqual({
       processed: 3,
       succeeded: 3,
@@ -597,59 +658,129 @@ describe('Course Overview (e2e)', () => {
       .expect(400);
   });
 
-  it('supports window=all and defaults to all while preserving legacy windows', async () => {
-    const legacyWindowOverview = await teacherAgent
-      .get(`/api/courses/${courseId}/overview`)
-      .query({ window: '24h' })
-      .expect(200);
-    const legacyWindowBody =
-      legacyWindowOverview.body as CourseOverviewResponse;
-    expect(legacyWindowBody.window).toBe('24h');
-
-    const defaultWindowOverview = await teacherAgent
-      .get(`/api/courses/${courseId}/overview`)
-      .expect(200);
-    const defaultWindowBody =
-      defaultWindowOverview.body as CourseOverviewResponse;
-    expect(defaultWindowBody.window).toBe('all');
-
+  it('keeps default/all history and filters seven-day metrics by classroom task creation', async () => {
     const oldDate = new Date(Date.now() - 10 * 24 * 60 * 60 * 1000);
-    await classroomTaskModel.collection.updateMany(
-      {
-        _id: {
-          $in: [
-            new Types.ObjectId(classroomTaskAId),
-            new Types.ObjectId(classroomTaskASecondId),
-          ],
-        },
+    const oldTaskFilter = {
+      _id: {
+        $in: [
+          new Types.ObjectId(classroomTaskAId),
+          new Types.ObjectId(classroomTaskASecondId),
+        ],
       },
+    };
+    const updated = await classroomTaskModel.collection.updateMany(
+      oldTaskFilter,
       { $set: { createdAt: oldDate } },
+      { maxTimeMS: 5000 },
     );
+    expect(updated.matchedCount).toBe(2);
+    expect(updated.modifiedCount).toBe(2);
+    const oldTaskCursor = classroomTaskModel.collection.find<{
+      _id: Types.ObjectId;
+      createdAt: Date;
+    }>(oldTaskFilter, {
+      projection: { _id: 1, createdAt: 1 },
+      maxTimeMS: 5000,
+    });
+    try {
+      const oldTasks = await oldTaskCursor.toArray();
+      expect(oldTasks.map((task) => task._id.toString()).sort()).toEqual(
+        [classroomTaskAId, classroomTaskASecondId].sort(),
+      );
+      for (const task of oldTasks) {
+        expect(task.createdAt).toEqual(oldDate);
+      }
+    } finally {
+      await oldTaskCursor.close();
+    }
 
-    const allOverview = await teacherAgent
-      .get(`/api/courses/${courseId}/overview`)
-      .query({ window: 'all' })
-      .expect(200);
-    const allBody = allOverview.body as CourseOverviewResponse;
-    expect(allBody.window).toBe('all');
+    for (const window of [undefined, 'all', '7d'] as const) {
+      const query = window === undefined ? {} : { window };
+      const response = await teacherAgent
+        .get(`/api/courses/${courseId}/overview`)
+        .query(query)
+        .expect(200);
+      const body = response.body as CourseOverviewResponse;
+      expect(body.window).toBe(window ?? 'all');
+      expect(body.total).toBe(3);
+      expect(body.items.map((item) => item.classroomId).sort()).toEqual(
+        [classroomAId, classroomBId, classroomCId].sort(),
+      );
+      expect(
+        body.items.find((item) => item.classroomId === classroomAId),
+      ).toMatchObject({
+        studentsCount: 2,
+        publishedClassroomTasks: window === '7d' ? 0 : 2,
+        distinctStudentsSubmitted: window === '7d' ? 0 : 2,
+        submissionRate: window === '7d' ? 0 : 1,
+        overallSubmissionCoverage: window === '7d' ? 0 : 0.5,
+        lateSubmissionsCount: 0,
+        lateStudentsCount: 0,
+        ai: {
+          jobsTotal: window === '7d' ? 0 : 2,
+          pendingJobs: 0,
+          failedJobs: 0,
+          aiSuccessRate: window === '7d' ? null : 1,
+        },
+      });
+      expect(
+        body.items.find((item) => item.classroomId === classroomBId),
+      ).toMatchObject({
+        studentsCount: 1,
+        publishedClassroomTasks: 1,
+        distinctStudentsSubmitted: 1,
+        submissionRate: 1,
+        overallSubmissionCoverage: 1,
+        lateSubmissionsCount: 0,
+        lateStudentsCount: 0,
+        ai: {
+          jobsTotal: 1,
+          pendingJobs: 0,
+          failedJobs: 0,
+          aiSuccessRate: 1,
+        },
+      });
+      expect(
+        body.items.find((item) => item.classroomId === classroomCId),
+      ).toMatchObject({
+        studentsCount: 1,
+        publishedClassroomTasks: 1,
+        distinctStudentsSubmitted: 0,
+        submissionRate: 0,
+        overallSubmissionCoverage: 0,
+        lateSubmissionsCount: 0,
+        lateStudentsCount: 0,
+        ai: {
+          jobsTotal: 0,
+          pendingJobs: 0,
+          failedJobs: 0,
+          aiSuccessRate: null,
+        },
+      });
+    }
+  });
 
-    const sevenDaysOverview = await teacherAgent
-      .get(`/api/courses/${courseId}/overview`)
-      .query({ window: '7d' })
-      .expect(200);
-    const sevenDaysBody = sevenDaysOverview.body as CourseOverviewResponse;
-    expect(sevenDaysBody.window).toBe('7d');
+  it.each(['1h', '24h'])(
+    'rejects retired window=%s with the public DTO error',
+    async (window) => {
+      const path = `/api/courses/${courseId}/overview?window=${window}`;
+      const response = await teacherAgent.get(path).expect(400);
+      expect(response.body).toMatchObject({ statusCode: 400, path });
+      expect(response.body).toHaveProperty(
+        'message',
+        expect.stringContaining('window must be one of the following values'),
+      );
+    },
+  );
 
-    const allClassroomA = allBody.items.find(
-      (item) => item.classroomId === classroomAId,
-    );
-    const sevenDaysClassroomA = sevenDaysBody.items.find(
-      (item) => item.classroomId === classroomAId,
-    );
-    expect(allClassroomA?.publishedClassroomTasks).toBe(2);
-    expect(sevenDaysClassroomA?.publishedClassroomTasks).toBe(0);
-    expect(allClassroomA?.distinctStudentsSubmitted).toBe(2);
-    expect(sevenDaysClassroomA?.distinctStudentsSubmitted).toBe(0);
+  it('preserves role and authentication rejection for retired windows', async () => {
+    await studentAAgent
+      .get(`/api/courses/${courseId}/overview?window=24h`)
+      .expect(403);
+    await request(app.getHttpServer())
+      .get(`/api/courses/${courseId}/overview?window=1h`)
+      .timeout({ response: 5000, deadline: 10000 })
+      .expect(401);
   });
 
   it('rejects invalid course overview window', async () => {

@@ -1,12 +1,12 @@
-import { INestApplication, ValidationPipe } from '@nestjs/common';
+import { INestApplication } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Test, TestingModule } from '@nestjs/testing';
 import { getModelToken } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import * as bcrypt from 'bcryptjs';
-import cookieParser from 'cookie-parser';
 import request from 'supertest';
 import { App } from 'supertest/types';
+import { configureApp } from '../src/app.setup';
 import { User } from '../src/modules/users/schemas/user.schema';
 import { Session } from '../src/modules/auth/schemas/session.schema';
 import { Course } from '../src/modules/courses/schemas/course.schema';
@@ -45,6 +45,7 @@ type ReviewPackResponse = {
     studentsCount: number;
     submittedStudentsCount: number;
     submissionRate: number;
+    ai: { jobsTotal: number; successRate: number };
   };
   commonIssues: {
     topTags: Array<{ tag: string; count: number }>;
@@ -87,6 +88,7 @@ type ReviewPackResponse = {
 
 describe('Classroom Review Pack (e2e)', () => {
   let app: INestApplication<App>;
+  let moduleFixture: TestingModule | undefined;
   let userModel: Model<User>;
   let sessionModel: Model<Session>;
   let courseModel: Model<Course>;
@@ -109,6 +111,8 @@ describe('Classroom Review Pack (e2e)', () => {
   let classroomTaskId = '';
   let taskId = '';
   const extraStudentIds: string[] = [];
+  let fixtureAuthorized = false;
+  let environmentOverridden = false;
 
   let previousWorkerEnabled: string | undefined;
   let previousDebugEnabled: string | undefined;
@@ -129,17 +133,36 @@ describe('Classroom Review Pack (e2e)', () => {
       .send({ email, password })
       .expect((res) => {
         if (![200, 201].includes(res.status)) {
-          throw new Error(
-            `Unexpected login status ${res.status}, body=${JSON.stringify(res.body)}`,
-          );
+          throw new Error(`Unexpected login status ${res.status}`);
         }
       });
   };
 
+  const expectEmptyDatabase = async (phase: string) => {
+    const database = userModel.db.db;
+    if (!database) throw new Error('Missing connected test database');
+    const cursor = database.listCollections({}, { maxTimeMS: 5000 });
+    try {
+      const collections = await cursor.toArray();
+      const counts: Record<string, number> = {};
+      for (const collection of collections) {
+        expect(collection.type).toBe('collection');
+        counts[collection.name] = await database
+          .collection(collection.name)
+          .countDocuments({}, { maxTimeMS: 5000 });
+      }
+      console.info('Review pack database counts: ' + phase, counts);
+      expect(Object.values(counts).every((count) => count === 0)).toBe(true);
+    } finally {
+      await cursor.close();
+    }
+  };
+
   beforeAll(async () => {
     previousWorkerEnabled = process.env.AI_FEEDBACK_WORKER_ENABLED;
-    process.env.AI_FEEDBACK_WORKER_ENABLED = 'false';
     previousDebugEnabled = process.env.AI_FEEDBACK_DEBUG_ENABLED;
+    environmentOverridden = true;
+    process.env.AI_FEEDBACK_WORKER_ENABLED = 'false';
     process.env.AI_FEEDBACK_DEBUG_ENABLED = 'true';
 
     const appModuleImport =
@@ -151,20 +174,12 @@ describe('Classroom Review Pack (e2e)', () => {
       purpose: process.env.EDUFORGE_DATABASE_PURPOSE,
       mongoUri: process.env.MONGO_URI,
     });
-    const moduleFixture: TestingModule = await Test.createTestingModule({
+    moduleFixture = await Test.createTestingModule({
       imports: [appModuleImport.AppModule],
     }).compile();
 
     app = moduleFixture.createNestApplication();
-    app.setGlobalPrefix('api');
-    app.useGlobalPipes(
-      new ValidationPipe({
-        whitelist: true,
-        transform: true,
-        forbidNonWhitelisted: true,
-      }),
-    );
-    app.use(cookieParser());
+    configureApp(app);
     await app.init();
 
     teacherAgent = request
@@ -191,6 +206,10 @@ describe('Classroom Review Pack (e2e)', () => {
     userModel.db.set('maxTimeMS', 10000);
     const database = userModel.db.db;
     if (!database) throw new Error('Missing connected test database');
+    const hello = await database.command({ hello: 1 }, { timeoutMS: 5000 });
+    expect(hello.setName).toBeUndefined();
+    expect(hello.msg).not.toBe('isdbgrid');
+    expect(hello.isWritablePrimary).toBe(true);
     const auth = await database.command(
       { connectionStatus: 1, showPrivileges: false },
       { timeoutMS: 5000 },
@@ -207,7 +226,13 @@ describe('Classroom Review Pack (e2e)', () => {
     expect(config.get('AI_FEEDBACK_PROVIDER')).toBe('stub');
     expect(config.get('AI_FEEDBACK_WORKER_ENABLED')).toBe(false);
     expect(config.get('AI_FEEDBACK_DEBUG_ENABLED')).toBe('true');
+    expect(process.env.AI_FEEDBACK_REAL_ENABLED).toBe('false');
     expect(config.get('MAIL_PROVIDER')).toBe('log');
+    console.info(
+      'Review pack database gate: standard_test / eduforge_test / loopback standalone / root@admin user and role verified',
+    );
+    await expectEmptyDatabase('before fixtures');
+    fixtureAuthorized = true;
 
     const [teacherHash, studentAHash, studentBHash] = await Promise.all([
       bcrypt.hash(teacherPassword, 10),
@@ -218,30 +243,28 @@ describe('Classroom Review Pack (e2e)', () => {
     teacherId = new Types.ObjectId().toString();
     studentAId = new Types.ObjectId().toString();
     studentBId = new Types.ObjectId().toString();
-    await Promise.all([
-      userModel.create({
-        _id: new Types.ObjectId(teacherId),
-        email: teacherEmail,
-        passwordHash: teacherHash,
-        roles: ['teacher'],
-      }),
-      userModel.create({
-        _id: new Types.ObjectId(studentAId),
-        email: studentAEmail,
-        passwordHash: studentAHash,
-        roles: ['student'],
-        name: 'Student Alpha',
-        studentNo: 'S-A-0001',
-      }),
-      userModel.create({
-        _id: new Types.ObjectId(studentBId),
-        email: studentBEmail,
-        passwordHash: studentBHash,
-        roles: ['student'],
-        name: 'Student Beta',
-        studentNo: 'S-B-0001',
-      }),
-    ]);
+    await userModel.create({
+      _id: new Types.ObjectId(teacherId),
+      email: teacherEmail,
+      passwordHash: teacherHash,
+      roles: ['teacher'],
+    });
+    await userModel.create({
+      _id: new Types.ObjectId(studentAId),
+      email: studentAEmail,
+      passwordHash: studentAHash,
+      roles: ['student'],
+      name: 'Student Alpha',
+      studentNo: 'S-A-0001',
+    });
+    await userModel.create({
+      _id: new Types.ObjectId(studentBId),
+      email: studentBEmail,
+      passwordHash: studentBHash,
+      roles: ['student'],
+      name: 'Student Beta',
+      studentNo: 'S-B-0001',
+    });
 
     await login(teacherAgent, teacherEmail, teacherPassword);
     await login(studentAAgent, studentAEmail, studentPassword);
@@ -250,6 +273,7 @@ describe('Classroom Review Pack (e2e)', () => {
 
   afterAll(async () => {
     try {
+      if (!fixtureAuthorized) return;
       const cleanup: Promise<unknown>[] = [];
       if (classroomTaskId) {
         const classroomTaskObjectId = new Types.ObjectId(classroomTaskId);
@@ -320,21 +344,33 @@ describe('Classroom Review Pack (e2e)', () => {
         );
         cleanup.push(userModel.deleteMany({ _id: { $in: userObjectIds } }));
       }
-      await Promise.all(cleanup);
+      const results = await Promise.allSettled(cleanup);
+      const failedCount = results.filter(
+        (result) => result.status === 'rejected',
+      ).length;
+      await expectEmptyDatabase('after scoped cleanup');
+      if (failedCount > 0) {
+        throw new Error(
+          `Review pack scoped fixture cleanup failed: ${failedCount}`,
+        );
+      }
     } finally {
       try {
         if (app) await app.close();
+        else await moduleFixture?.close();
         if (userModel) expect(userModel.db.readyState).toBe(0);
       } finally {
-        if (previousWorkerEnabled === undefined) {
-          delete process.env.AI_FEEDBACK_WORKER_ENABLED;
-        } else {
-          process.env.AI_FEEDBACK_WORKER_ENABLED = previousWorkerEnabled;
-        }
-        if (previousDebugEnabled === undefined) {
-          delete process.env.AI_FEEDBACK_DEBUG_ENABLED;
-        } else {
-          process.env.AI_FEEDBACK_DEBUG_ENABLED = previousDebugEnabled;
+        if (environmentOverridden) {
+          if (previousWorkerEnabled === undefined) {
+            delete process.env.AI_FEEDBACK_WORKER_ENABLED;
+          } else {
+            process.env.AI_FEEDBACK_WORKER_ENABLED = previousWorkerEnabled;
+          }
+          if (previousDebugEnabled === undefined) {
+            delete process.env.AI_FEEDBACK_DEBUG_ENABLED;
+          } else {
+            process.env.AI_FEEDBACK_DEBUG_ENABLED = previousDebugEnabled;
+          }
         }
       }
     }
@@ -385,16 +421,14 @@ describe('Classroom Review Pack (e2e)', () => {
       createdClassroomTask.body as CreatedClassroomTaskResponse
     ).id;
 
-    await Promise.all([
-      studentAAgent
-        .post('/api/classrooms/join')
-        .send({ joinCode: classroomBody.joinCode })
-        .expect(201),
-      studentBAgent
-        .post('/api/classrooms/join')
-        .send({ joinCode: classroomBody.joinCode })
-        .expect(201),
-    ]);
+    await studentAAgent
+      .post('/api/classrooms/join')
+      .send({ joinCode: classroomBody.joinCode })
+      .expect(201);
+    await studentBAgent
+      .post('/api/classrooms/join')
+      .send({ joinCode: classroomBody.joinCode })
+      .expect(201);
 
     const studentCId = new Types.ObjectId();
     const studentDId = new Types.ObjectId();
@@ -404,44 +438,34 @@ describe('Classroom Review Pack (e2e)', () => {
       studentDId.toString(),
       studentEId.toString(),
     );
-    const [studentC, studentD, studentE] = await userModel.create([
-      {
-        _id: studentCId,
-        email: `studentC.review.pack.${Date.now()}@example.com`,
-        passwordHash: await bcrypt.hash(studentPassword, 10),
-        roles: ['student'],
-        name: 'Student Gamma',
-        studentNo: 'S-C-0001',
-      },
-      {
-        _id: studentDId,
-        email: `studentD.review.pack.${Date.now()}@example.com`,
-        passwordHash: await bcrypt.hash(studentPassword, 10),
-        roles: ['student'],
-        name: 'Student Delta',
-        studentNo: 'S-D-0001',
-      },
-      {
-        _id: studentEId,
-        email: `studentE.review.pack.${Date.now()}@example.com`,
-        passwordHash: await bcrypt.hash(studentPassword, 10),
-        roles: ['student'],
-      },
-    ]);
-    await enrollmentModel.create([
-      {
+    const studentC = await userModel.create({
+      _id: studentCId,
+      email: `studentC.review.pack.${Date.now()}@example.com`,
+      passwordHash: await bcrypt.hash(studentPassword, 10),
+      roles: ['student'],
+      name: 'Student Gamma',
+      studentNo: 'S-C-0001',
+    });
+    const studentD = await userModel.create({
+      _id: studentDId,
+      email: `studentD.review.pack.${Date.now()}@example.com`,
+      passwordHash: await bcrypt.hash(studentPassword, 10),
+      roles: ['student'],
+      name: 'Student Delta',
+      studentNo: 'S-D-0001',
+    });
+    const studentE = await userModel.create({
+      _id: studentEId,
+      email: `studentE.review.pack.${Date.now()}@example.com`,
+      passwordHash: await bcrypt.hash(studentPassword, 10),
+      roles: ['student'],
+    });
+    for (const student of [studentC, studentD, studentE]) {
+      await enrollmentModel.create({
         classroomId: new Types.ObjectId(classroomId),
-        userId: studentC._id,
-      },
-      {
-        classroomId: new Types.ObjectId(classroomId),
-        userId: studentD._id,
-      },
-      {
-        classroomId: new Types.ObjectId(classroomId),
-        userId: studentE._id,
-      },
-    ]);
+        userId: student._id,
+      });
+    }
 
     const classroomTaskObjectId = new Types.ObjectId(classroomTaskId);
     const taskObjectId = new Types.ObjectId(taskId);
@@ -506,6 +530,7 @@ describe('Classroom Review Pack (e2e)', () => {
           submittedAt: oldSubmissionDate,
         },
       },
+      { maxTimeMS: 5000 },
     );
     expect(backdateResult.matchedCount).toBe(1);
     expect(backdateResult.modifiedCount).toBe(1);
@@ -515,7 +540,7 @@ describe('Classroom Review Pack (e2e)', () => {
         submittedAt?: Date;
       }>(
         { _id: studentELatest._id },
-        { projection: { createdAt: 1, submittedAt: 1 } },
+        { projection: { createdAt: 1, submittedAt: 1 }, maxTimeMS: 5000 },
       );
     expect(backdatedStudentESubmission).toBeDefined();
     expect(backdatedStudentESubmission?.createdAt?.getTime()).toBe(
@@ -528,7 +553,7 @@ describe('Classroom Review Pack (e2e)', () => {
       Date.now() - 30 * 24 * 60 * 60 * 1000,
     );
 
-    await aiFeedbackJobModel.create([
+    for (const job of [
       {
         submissionId: studentAAttempt2._id,
         taskId: taskObjectId,
@@ -564,9 +589,11 @@ describe('Classroom Review Pack (e2e)', () => {
         studentId: studentELatest.studentId,
         status: AiFeedbackJobStatus.Failed,
       },
-    ]);
+    ]) {
+      await aiFeedbackJobModel.create(job);
+    }
 
-    await feedbackModel.create([
+    for (const feedback of [
       {
         submissionId: studentAAttempt1._id,
         source: FeedbackSource.AI,
@@ -591,12 +618,19 @@ describe('Classroom Review Pack (e2e)', () => {
         message: 'Teacher error feedback should not affect latestErrorCount',
         tags: ['readability'],
       },
-    ]);
+    ]) {
+      await feedbackModel.create(feedback);
+    }
+
+    const reviewPackPath = `/api/classrooms/${classroomId}/tasks/${classroomTaskId}/review-pack`;
+    const defaultReviewPack = await teacherAgent
+      .get(reviewPackPath)
+      .query({ examplesPerTag: 2, topK: 10 })
+      .expect(200);
+    const defaultBody = defaultReviewPack.body as ReviewPackResponse;
 
     const reviewPack = await teacherAgent
-      .get(
-        `/api/classrooms/${classroomId}/tasks/${classroomTaskId}/review-pack`,
-      )
+      .get(reviewPackPath)
       .query({
         window: 'all',
         examplesPerTag: 2,
@@ -722,5 +756,81 @@ describe('Classroom Review Pack (e2e)', () => {
         (item) => item.studentId === studentE._id.toString(),
       ),
     ).toBe(true);
+
+    for (const expected of [
+      {
+        result: defaultBody,
+        window: 'all',
+        submittedStudents: 5,
+        watchIds: [studentD._id.toString(), studentE._id.toString()],
+        notSubmittedIds: [],
+      },
+      {
+        result: body,
+        window: 'all',
+        submittedStudents: 5,
+        watchIds: [studentD._id.toString(), studentE._id.toString()],
+        notSubmittedIds: [],
+      },
+      {
+        result: body7d,
+        window: '7d',
+        submittedStudents: 4,
+        watchIds: [studentD._id.toString()],
+        notSubmittedIds: [studentE._id.toString()],
+      },
+    ]) {
+      expect(expected.result.window).toBe(expected.window);
+      expect(expected.result.overview.studentsCount).toBe(5);
+      expect(expected.result.overview.submittedStudentsCount).toBe(
+        expected.submittedStudents,
+      );
+      expect(expected.result.overview.submissionRate).toBe(
+        expected.submittedStudents / 5,
+      );
+      expect(expected.result.overview.ai.jobsTotal).toBe(5);
+      expect(expected.result.overview.ai.successRate).toBe(4 / 5);
+      expect(
+        expected.result.studentTiers.good.map((item) => item.studentId).sort(),
+      ).toEqual([studentAId, studentBId, studentC._id.toString()].sort());
+      expect(
+        expected.result.studentTiers.watch.map((item) => item.studentId).sort(),
+      ).toEqual(expected.watchIds.sort());
+      expect(
+        expected.result.studentTiers.notSubmitted
+          .map((item) => item.studentId)
+          .sort(),
+      ).toEqual(expected.notSubmittedIds.sort());
+      expect(
+        expected.result.studentTiers.good.find(
+          (item) => item.studentId === studentAId,
+        )?.attemptsCount,
+      ).toBe(2);
+    }
+
+    for (const window of ['24h', '30d']) {
+      const rejected = await teacherAgent
+        .get(reviewPackPath)
+        .query({ window })
+        .expect(400);
+      expect(rejected.body).toHaveProperty('statusCode', 400);
+      expect(rejected.body).toHaveProperty(
+        'message',
+        expect.stringContaining('window must be one of the following values:'),
+      );
+      expect(rejected.body).toHaveProperty(
+        'path',
+        `${reviewPackPath}?window=${window}`,
+      );
+    }
+    await studentAAgent
+      .get(reviewPackPath)
+      .query({ window: '24h' })
+      .expect(403);
+    await request(app.getHttpServer())
+      .get(reviewPackPath)
+      .timeout({ response: 5000, deadline: 10000 })
+      .query({ window: '30d' })
+      .expect(401);
   });
 });
