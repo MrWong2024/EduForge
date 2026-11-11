@@ -855,7 +855,7 @@ export type ClassroomStudent = {
   name?: string;
   email?: string;
   studentNo?: string;
-  status?: string;
+  status?: "ACTIVE" | "REMOVED";
   enrolledAt?: string;
   raw: UnknownRecord;
 };
@@ -2137,9 +2137,10 @@ export const normalizeCourseStatus = (
   return undefined;
 };
 
-const normalizeStudentStatus = (value: unknown): string | undefined => {
-  const status = asString(value);
-  return status ? status.toUpperCase() : undefined;
+const normalizeStudentStatus = (
+  value: unknown,
+): ClassroomStudent["status"] => {
+  return value === "ACTIVE" || value === "REMOVED" ? value : undefined;
 };
 
 const toClassroomStudent = (value: unknown): ClassroomStudent => {
@@ -2162,10 +2163,7 @@ const toClassroomStudent = (value: unknown): ClassroomStudent => {
       asString(record.studentNo) ??
       asString(profileRecord.studentNo) ??
       asString(safeGet(record, "student.number", undefined)),
-    status:
-      normalizeStudentStatus(record.status) ??
-      normalizeStudentStatus(record.enrollmentStatus) ??
-      "ACTIVE",
+    status: normalizeStudentStatus(record.status),
     enrolledAt:
       asString(record.enrolledAt) ??
       asString(record.joinedAt) ??

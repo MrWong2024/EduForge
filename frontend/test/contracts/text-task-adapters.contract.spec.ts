@@ -6,6 +6,7 @@ import {
 import {
   groupTeacherFeedbackItems,
   normalizeClassroomTaskStatus,
+  toClassroomStudentsResponse,
   toClassroomTask,
   toClassroomTaskSummary,
   toLearningTaskCreateResponse,
@@ -44,6 +45,215 @@ import {
 import { toDisplayLateDuration } from "../../lib/ui/format";
 import { normalizeTaskTemplateVisibility } from "../../lib/learning-tasks/template-visibility-scope";
 import { canEditTeacherFeedback } from "../../lib/learning-tasks/teacher-feedback";
+
+test("classroom members preserve exact formal states, user fields and pagination", () => {
+  const active = Object.freeze({
+    id: "student-active",
+    email: "active@example.invalid",
+    roles: Object.freeze(["student"]),
+    status: "ACTIVE",
+    name: "在班成员",
+    studentNo: "S-001",
+    employeeNo: "E-001",
+    joinedAt: "2026-11-01T08:00:00.000Z",
+  });
+  const removed = Object.freeze({
+    id: "student-removed",
+    email: "removed@example.invalid",
+    roles: Object.freeze(["student"]),
+    status: "REMOVED",
+    name: "已移除成员",
+    studentNo: "S-002",
+    employeeNo: "E-002",
+    joinedAt: "2026-11-02T08:00:00.000Z",
+  });
+  const payload = Object.freeze({
+    items: Object.freeze([active, removed]),
+    total: 123,
+    page: 2,
+    limit: 100,
+  });
+  const before = structuredClone(payload);
+  const result = toClassroomStudentsResponse(payload);
+
+  expect(result).toMatchObject({
+    items: [
+      {
+        userId: "student-active",
+        email: "active@example.invalid",
+        status: "ACTIVE",
+        name: "在班成员",
+        studentNo: "S-001",
+        enrolledAt: "2026-11-01T08:00:00.000Z",
+      },
+      {
+        userId: "student-removed",
+        email: "removed@example.invalid",
+        status: "REMOVED",
+        name: "已移除成员",
+        studentNo: "S-002",
+        enrolledAt: "2026-11-02T08:00:00.000Z",
+      },
+    ],
+    total: 123,
+    page: 2,
+    limit: 100,
+  });
+  expect(result.raw).toBe(payload);
+  expect(result.items[0].raw).toBe(active);
+  expect(result.items[1].raw).toBe(removed);
+  expect(payload).toEqual(before);
+});
+
+test("classroom members leave absent status unknown despite valid legacy aliases", () => {
+  for (const enrollmentStatus of ["ACTIVE", "REMOVED"] as const) {
+    const member = Object.freeze({
+      id: "missing-status",
+      name: "保留成员资料",
+      enrollmentStatus,
+    });
+    const payload = Object.freeze({
+      items: Object.freeze([member]),
+      total: 17,
+    });
+    const before = structuredClone(payload);
+    const result = toClassroomStudentsResponse(payload);
+
+    expect(result.items).toHaveLength(1);
+    expect(result.items[0]).toMatchObject({
+      userId: "missing-status",
+      name: "保留成员资料",
+    });
+    expect(result.items[0].status).toBeUndefined();
+    expect(result.total).toBe(17);
+    expect(result.raw).toBe(payload);
+    expect(result.items[0].raw).toBe(member);
+    expect(result.items[0].raw.enrollmentStatus).toBe(enrollmentStatus);
+    expect(Object.hasOwn(member, "status")).toBe(false);
+    expect(payload).toEqual(before);
+  }
+});
+
+test("classroom members reject invalid status without normalization, defaults or alias rescue", () => {
+  for (const status of [
+    undefined,
+    null,
+    "",
+    " \t\n ",
+    "UNKNOWN",
+    "active",
+    "removed",
+    "Active",
+    "Removed",
+    " ACTIVE",
+    "ACTIVE ",
+    "REMOVED ",
+    "\tREMOVED\n",
+    Object.freeze([]),
+    Object.freeze(["ACTIVE"]),
+    Object.freeze({}),
+    Object.freeze({ status: "ACTIVE" }),
+    0,
+    1,
+    true,
+    false,
+  ]) {
+    const member = Object.freeze({
+      id: "invalid-status",
+      name: "保留异常状态成员",
+      status,
+      enrollmentStatus: "ACTIVE",
+    });
+    const payload = Object.freeze({
+      items: Object.freeze([member]),
+      total: 19,
+    });
+    const before = structuredClone(payload);
+    const result = toClassroomStudentsResponse(payload);
+
+    expect(result.items).toHaveLength(1);
+    expect(result.items[0].userId).toBe("invalid-status");
+    expect(result.items[0].name).toBe("保留异常状态成员");
+    expect(result.items[0].status).toBeUndefined();
+    expect(result.total).toBe(19);
+    expect(result.raw).toBe(payload);
+    expect(result.items[0].raw).toBe(member);
+    expect(Object.hasOwn(member, "status")).toBe(true);
+    expect(member.status).toBe(status);
+    expect(result.items[0].raw.enrollmentStatus).toBe("ACTIVE");
+    expect(payload).toEqual(before);
+  }
+});
+
+test("classroom members use formal status when the legacy alias conflicts", () => {
+  for (const [status, enrollmentStatus] of [
+    ["ACTIVE", "REMOVED"],
+    ["REMOVED", "ACTIVE"],
+  ] as const) {
+    const member = Object.freeze({
+      id: "conflicting-status",
+      status,
+      enrollmentStatus,
+    });
+    const payload = Object.freeze({ items: Object.freeze([member]) });
+    const before = structuredClone(payload);
+    const result = toClassroomStudentsResponse(payload);
+
+    expect(result.items[0].status).toBe(status);
+    expect(result.raw).toBe(payload);
+    expect(result.items[0].raw).toBe(member);
+    expect(result.items[0].raw.enrollmentStatus).toBe(enrollmentStatus);
+    expect(payload).toEqual(before);
+  }
+});
+
+test("classroom member response wrappers share strict parsing and retain raw references", () => {
+  const active = Object.freeze({ id: "wrapped-active", status: "ACTIVE" });
+  const removed = Object.freeze({ id: "wrapped-removed", status: "REMOVED" });
+  const invalid = Object.freeze({
+    id: "wrapped-invalid",
+    status: " active ",
+    enrollmentStatus: "ACTIVE",
+  });
+  const missing = Object.freeze({
+    id: "wrapped-missing",
+    enrollmentStatus: "REMOVED",
+  });
+  for (const { payload, member, expectedStatus } of [
+    {
+      payload: Object.freeze([active]),
+      member: active,
+      expectedStatus: "ACTIVE",
+    },
+    {
+      payload: Object.freeze({ items: Object.freeze([removed]) }),
+      member: removed,
+      expectedStatus: "REMOVED",
+    },
+    {
+      payload: Object.freeze({
+        data: Object.freeze({ items: Object.freeze([invalid]) }),
+      }),
+      member: invalid,
+      expectedStatus: undefined,
+    },
+    {
+      payload: Object.freeze({ data: Object.freeze([missing]) }),
+      member: missing,
+      expectedStatus: undefined,
+    },
+  ] as const) {
+    const before = structuredClone(payload);
+    const result = toClassroomStudentsResponse(payload);
+
+    expect(result.items).toHaveLength(1);
+    expect(result.items[0].userId).toBe(member.id);
+    expect(result.items[0].status).toBe(expectedStatus);
+    expect(result.raw).toBe(payload);
+    expect(result.items[0].raw).toBe(member);
+    expect(payload).toEqual(before);
+  }
+});
 
 test("learning trajectory keeps structured student details and statistics without projecting old name aliases", () => {
   const student = Object.freeze({

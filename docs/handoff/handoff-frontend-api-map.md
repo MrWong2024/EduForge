@@ -77,6 +77,7 @@
 - 班级成员：`members/page.tsx`、`RemoveStudentButton` -> `/api/proxy/classrooms/:id/students*`。
   - 对应后端：`GET /api/classrooms/:id/students`、`POST /api/classrooms/:id/students/:uid/remove`。
   - 注意：成员列表使用正式后端读源，禁止回退到 `studentIds`。
+  - 状态适配：`ClassroomStudent.status` 为可选的 `"ACTIVE" | "REMOVED"`，仅保留 `record.status` 原值精确匹配的两态；不 trim、转换大小写或强制转换类型。缺失及其他非法值均为 `undefined`，不读取旧别名 `enrollmentStatus`，不再默认 `ACTIVE`，未知状态不推定为在班成员；保留成员信息、输入内容及 `raw` 原对象引用。
 
 ### 3.3 Teacher 任务 / 提交 / 反馈
 

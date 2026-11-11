@@ -52,8 +52,6 @@ const resolveQueryState = (
   page: parsePositiveInt(getSingleSearchParam(query.page), 1, { min: 1 }),
 });
 
-const toStatusUpper = (status?: string): string => (status ?? "").trim().toUpperCase();
-
 const buildMembersHref = (classroomId: string, queryState: MembersQueryState): string => {
   const query = buildQueryString({
     includeRemoved: queryState.includeRemoved ? "1" : "0",
@@ -209,7 +207,6 @@ export default async function ClassroomMembersPage({ params, searchParams }: Mem
             </thead>
             <tbody>
               {viewModel.students.map((student, index) => {
-                const statusUpper = toStatusUpper(student.status);
                 const displayName = student.name ?? student.email ?? `成员 ${index + 1}`;
 
                 return (
@@ -222,12 +219,14 @@ export default async function ClassroomMembersPage({ params, searchParams }: Mem
                     <td className="px-4 py-3">{getEnrollmentStatusLabel(student.status)}</td>
                     <td className="px-4 py-3">{toDisplayDate(student.enrolledAt)}</td>
                     <td className="px-4 py-3">
-                      {statusUpper === "REMOVED" ? (
-                        <span className="text-zinc-500">已移除</span>
-                      ) : student.userId ? (
+                      {student.status === "ACTIVE" && student.userId ? (
                         <RemoveStudentButton classroomId={classroomId} studentUserId={student.userId} />
-                      ) : (
+                      ) : student.status === "REMOVED" ? (
+                        <span className="text-zinc-500">已移除</span>
+                      ) : student.status === "ACTIVE" ? (
                         <span className="text-zinc-500">缺少成员标识</span>
+                      ) : (
+                        <span className="text-zinc-500">状态未知，暂不可操作</span>
                       )}
                     </td>
                   </tr>
