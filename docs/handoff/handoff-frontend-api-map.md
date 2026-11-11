@@ -131,6 +131,7 @@
 - 学生任务详情：`student/classrooms/:cid/tasks/:ctid/page.tsx` -> `/api/proxy/classrooms/:cid/tasks/:ctid/my-task-detail`。
   - 对应后端：`GET /api/classrooms/:classroomId/tasks/:classroomTaskId/my-task-detail`。
   - 注意：消费 `participationStatus`；模板当前状态不作为前端阻断依据。前端历史展示按 `createdAt` 倒序，排序不改变后端 latest、完成状态及参与资格。
+  - 参与原因白名单与 [Backend DTO：Student completion / participation public state](./handoff-backend-dto-cheatsheet.md#student-completion--participation-public-state) 的当前集合一致，合法原因及后端计算规则由该 Owner 维护；不再接受 `TASK_NOT_PUBLISHED`，旧或未知原因按参与资格不可用处理，不推定允许提交。
   - 基础信息难度直接读取正式响应的 `viewModel.data.task.difficulty`，复用上述共享显示规则；沿用后端 task 投影，不查询实时模板补值。
 - 学生提交：`SubmissionForm` -> `/api/proxy/classrooms/:cid/tasks/:ctid/submissions`。
   - 对应后端：`POST /api/classrooms/:classroomId/tasks/:classroomTaskId/submissions`。

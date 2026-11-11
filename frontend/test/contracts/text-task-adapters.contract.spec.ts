@@ -1364,6 +1364,157 @@ test("requires explicit snapshot and backend submit permission, independent of A
   expect(canSubmitTextTask(true, undefined)).toBe(false);
   expect(canSubmitTextTask(true, false)).toBe(false);
 });
+test("preserves classroom-level participation flags and message", () => {
+  const participationStatus = Object.freeze({
+    reason: "CLASSROOM_NOT_ACTIVE",
+    readOnly: true,
+    canSubmit: false,
+    canRequestAiFeedback: false,
+    message: "班级已归档或不可参与，仅可查看历史提交与反馈。",
+  });
+  const payload = Object.freeze({ participationStatus });
+  const before = structuredClone(payload);
+  const detail = toMyTaskDetailResponse(payload);
+
+  expect(detail.participationStatus).toEqual({
+    reason: "CLASSROOM_NOT_ACTIVE",
+    readOnly: true,
+    canSubmit: false,
+    canRequestAiFeedback: false,
+    message: "班级已归档或不可参与，仅可查看历史提交与反馈。",
+  });
+  expect(detail.raw).toBe(payload);
+  expect(payload).toEqual(before);
+});
+
+test("rejects the retired participation reason without losing task or history facts", () => {
+  const classroom = Object.freeze({
+    id: "classroom-1",
+    name: "班级",
+    status: "ACTIVE",
+  });
+  const classroomTask = Object.freeze({
+    id: "classroom-task-1",
+    taskSnapshotAvailable: true,
+    settings: Object.freeze({ allowLate: true }),
+  });
+  const task = Object.freeze({
+    id: "task-1",
+    title: "已保存的任务标题",
+    description: "  保留任务内容\n ",
+    status: "ARCHIVED",
+  });
+  const submission = Object.freeze({
+    id: "submission-1",
+    attemptNo: 1,
+    createdAt: "2026-11-01T08:00:00.000Z",
+    content: Object.freeze({ codeText: "  保留历史源码\n " }),
+  });
+  const submissions = Object.freeze([submission]);
+  const latest = Object.freeze({ submissionId: "submission-1", attemptNo: 1 });
+  const completionStatus = Object.freeze({
+    status: "NO_FEEDBACK",
+    severity: null,
+    source: null,
+    latestSubmissionId: "submission-1",
+    teacherFeedbackCount: 0,
+    aiFeedbackCount: 0,
+    teacherWorstSeverity: null,
+    aiWorstSeverity: null,
+  });
+  for (const flags of [
+    { readOnly: true, canSubmit: false, canRequestAiFeedback: false },
+    { readOnly: false, canSubmit: true, canRequestAiFeedback: true },
+  ]) {
+    const participationStatus = Object.freeze({
+      ...flags,
+      reason: "TASK_NOT_PUBLISHED",
+      message: "旧参与原因提示",
+    });
+    const payload = Object.freeze({
+      classroom,
+      classroomTask,
+      task,
+      submissions,
+      latest,
+      completionStatus,
+      participationStatus,
+    });
+    const before = structuredClone(payload);
+    const detail = toMyTaskDetailResponse(payload);
+
+    expect(detail.participationStatus).toBeUndefined();
+    expect(detail.participationStatus?.canRequestAiFeedback).not.toBe(true);
+    expect(detail.classroomTask.taskSnapshotAvailable).toBe(true);
+    expect(
+      canSubmitTextTask(
+        detail.classroomTask.taskSnapshotAvailable,
+        detail.participationStatus?.canSubmit,
+      ),
+    ).toBe(false);
+    expect(detail.classroom).toBe(classroom);
+    expect(detail.classroomTask).toEqual(classroomTask);
+    expect(detail.task).toBe(task);
+    expect(detail.submissions).toEqual([submission]);
+    expect(detail.submissions[0]).toBe(submission);
+    expect(detail.latest).toBe(latest);
+    expect(detail.completionStatus).toEqual(completionStatus);
+    expect(detail.raw).toBe(payload);
+    expect(detail.raw.classroomTask).toBe(classroomTask);
+    expect(detail.raw.submissions).toBe(submissions);
+    expect(detail.raw.participationStatus).toBe(participationStatus);
+    expect(detail.raw).toHaveProperty(
+      "participationStatus.reason",
+      "TASK_NOT_PUBLISHED",
+    );
+    expect(payload).toEqual(before);
+  }
+});
+
+test("keeps unknown and genuinely missing participation reasons unavailable", () => {
+  for (const { participationStatus, hasReason } of [
+    {
+      participationStatus: Object.freeze({
+        reason: "UNKNOWN",
+        readOnly: false,
+        canSubmit: true,
+        canRequestAiFeedback: true,
+        message: "未知原因",
+      }),
+      hasReason: true,
+    },
+    {
+      participationStatus: Object.freeze({
+        readOnly: false,
+        canSubmit: true,
+        canRequestAiFeedback: true,
+        message: "缺少原因",
+      }),
+      hasReason: false,
+    },
+  ]) {
+    const payload = Object.freeze({
+      classroomTask: Object.freeze({ taskSnapshotAvailable: true }),
+      participationStatus,
+    });
+    const before = structuredClone(payload);
+    const detail = toMyTaskDetailResponse(payload);
+
+    expect(detail.participationStatus).toBeUndefined();
+    expect(detail.participationStatus?.canRequestAiFeedback).not.toBe(true);
+    expect(
+      canSubmitTextTask(
+        detail.classroomTask.taskSnapshotAvailable,
+        detail.participationStatus?.canSubmit,
+      ),
+    ).toBe(false);
+    expect(detail.raw).toBe(payload);
+    expect(detail.raw.participationStatus).toBe(participationStatus);
+    expect(Object.hasOwn(participationStatus, "reason")).toBe(hasReason);
+    expect(payload).toEqual(before);
+  }
+});
+
 test("keeps missing and false snapshot distinct and closes incomplete participation", () => {
   expect(
     toMyTaskDetailResponse({ classroomTask: { taskSnapshotAvailable: false } })

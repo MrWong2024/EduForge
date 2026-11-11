@@ -91,9 +91,7 @@ export type StudentTaskVisibilityStatus =
 export type StudentTaskParticipationReason =
   | "ACTIVE"
   | "CLASSROOM_NOT_ACTIVE"
-  | "CLASSROOM_TASK_NOT_ACTIVE"
-  // Compatibility only: backend no longer emits this reason.
-  | "TASK_NOT_PUBLISHED";
+  | "CLASSROOM_TASK_NOT_ACTIVE";
 
 export type StudentTaskParticipationStatus = {
   readOnly: boolean;
@@ -310,8 +308,7 @@ const isStudentTaskParticipationReason = (
 ): value is StudentTaskParticipationReason =>
   value === "ACTIVE" ||
   value === "CLASSROOM_NOT_ACTIVE" ||
-  value === "CLASSROOM_TASK_NOT_ACTIVE" ||
-  value === "TASK_NOT_PUBLISHED";
+  value === "CLASSROOM_TASK_NOT_ACTIVE";
 
 const toStudentDashboardLatestSubmission = (
   value: unknown,
