@@ -156,6 +156,7 @@
 - 学习轨迹 / 课堂复盘 / AI 指标：三件套 Server pages -> `/api/proxy/classrooms/:cid/tasks/:ctid/{learning-trajectory,review-pack,ai-metrics}`。
   - 对应后端：三个课堂任务聚合接口。
   - 学习轨迹姓名只消费 `student.name`，不再映射或读取旧姓名别名；缺姓名时仍依次按学号、邮箱、`未知学生` 降级展示。后端字段结构及 nullable 合同见 [Backend DTO](./handoff-backend-dto-cheatsheet.md#learning-trajectory)。
+  - 学习轨迹 window 仅接受精确的 `all | 7d`，默认 `all`；省略、空值、`24h`、`30d`、`term`、大小写或空白变体及其他未知值统一沿用 `parseEnum` 回落为 `all`，不 trim 或转换大小写。重复 window 沿用 `getSingleSearchParam` 取首值，请求使用同一规范化 window。
 - 过程性评价 JSON：`process-assessment/page.tsx` -> `/api/proxy/classrooms/:id/process-assessment`。
   - 对应后端：`GET /api/classrooms/:classroomId/process-assessment`。
   - 页头名称辅助读取一次 `GET classrooms/:classroomId`，与现有加载并行，经 `toClassroomDetailResponse` 取名；独立有限超时及失败占位，不改变统计主体错误处理。

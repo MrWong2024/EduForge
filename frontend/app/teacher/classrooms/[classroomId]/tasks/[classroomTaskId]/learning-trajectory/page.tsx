@@ -33,20 +33,16 @@ type LearningTrajectoryPageProps = {
   }>;
 };
 
-const TRAJECTORY_WINDOWS = ["24h", "7d", "30d", "all"] as const;
-const TRAJECTORY_DISPLAY_WINDOWS = ["all", "7d"] as const;
+const TRAJECTORY_WINDOWS = ["all", "7d"] as const;
 const TRAJECTORY_SORT_FIELDS = ["latestAttemptAt", "attemptsCount", "errorRate", "notSubmitted"] as const;
 const TRAJECTORY_SORT_ORDERS = ["asc", "desc"] as const;
 const LEARNING_TRAJECTORY_PAGE_SIZE = 100;
 
 type TrajectoryWindow = (typeof TRAJECTORY_WINDOWS)[number];
-type TrajectoryDisplayWindow = (typeof TRAJECTORY_DISPLAY_WINDOWS)[number];
 type TrajectorySortField = (typeof TRAJECTORY_SORT_FIELDS)[number];
 type TrajectorySortOrder = (typeof TRAJECTORY_SORT_ORDERS)[number];
 const TRAJECTORY_WINDOW_LABELS: Record<TrajectoryWindow, string> = {
-  "24h": "近24小时",
   "7d": "近7天",
-  "30d": "近30天",
   all: "全部",
 };
 
@@ -347,7 +343,7 @@ export default async function LearningTrajectoryPage({
         <div className="mt-2 flex flex-wrap items-center gap-4 text-zinc-700">
           <div className="flex items-center gap-2">
             <span>窗口:</span>
-            {TRAJECTORY_DISPLAY_WINDOWS.map((windowValue: TrajectoryDisplayWindow) => {
+            {TRAJECTORY_WINDOWS.map((windowValue: TrajectoryWindow) => {
               const active = windowValue === viewModel.query.window;
               return (
                 <Link
