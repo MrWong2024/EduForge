@@ -28,6 +28,7 @@ import {
   getSubmissionRevisionError,
   getTextSubmissionError,
 } from "../../lib/learning-tasks/text-submission";
+import { getTaskSnapshotErrorMessage } from "../../lib/learning-tasks/ai-review";
 import { toTaskTemplateVisibilityLabel } from "../../lib/learning-tasks/template-visibility-scope";
 
 test("template visibility labels distinguish exact values, missing values and invalid raw values", () => {
@@ -344,8 +345,8 @@ test("public revision, submission and cooldown messages survive the final presen
     [409, "课堂任务已关闭，不能继续提交。", "课堂任务已关闭，不能继续提交。"],
     [
       409,
-      "该课堂任务未保存发布内容，请教师重新布置后继续。",
-      "该课堂任务未保存发布内容，请教师重新布置后继续。",
+      "课堂任务内容快照缺失或无效，请联系教师核对。",
+      "课堂任务内容快照缺失或无效，请联系教师核对。",
     ],
     [
       403,
@@ -373,4 +374,36 @@ test("public revision, submission and cooldown messages survive the final presen
       extractRawDetail(unknown),
     ),
   ).toBe("提交状态已变化。当前输入已保留，请先在本页核对最新详情。");
+});
+
+test("snapshot errors retain only the safe public summary in the final presentation layer", () => {
+  for (const status of [403, 409]) {
+    const data = {
+      message: "课堂任务内容快照缺失或无效，请联系教师核对。",
+      code: "PRIVATE_INTERNAL_CODE",
+    };
+    const detail = extractRawDetail({ data });
+    expect(detail).toBe(
+      "课堂任务内容快照缺失或无效，请联系教师核对。 (code: PRIVATE_INTERNAL_CODE)",
+    );
+    expect(
+      buildErrorDescription(
+        getTaskSnapshotErrorMessage(status, data) ?? "课堂任务加载失败。",
+        detail,
+      ),
+    ).toBe("课堂任务内容快照缺失或无效，请联系教师核对。");
+  }
+  for (const message of [
+    "该课堂任务未保存发布内容，请教师重新布置后继续。",
+    "课堂任务内容快照缺失或无效，请联系教师核对。 private synthetic stack",
+    "private synthetic stack",
+  ]) {
+    const data = { message, code: "PRIVATE_INTERNAL_CODE" };
+    expect(
+      buildErrorDescription(
+        getTaskSnapshotErrorMessage(409, data) ?? "课堂任务加载失败。",
+        extractRawDetail({ data }),
+      ),
+    ).toBe("课堂任务加载失败。");
+  }
 });

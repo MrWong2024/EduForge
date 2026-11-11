@@ -6,6 +6,7 @@ import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { ErrorState } from "@/components/blocks/ErrorState";
 import { BrowserFetchJsonError, fetchJson } from "@/lib/api/browser-client";
 import { buildErrorDescription } from "@/lib/api/error-presenter";
+import { getTaskSnapshotErrorMessage } from "@/lib/learning-tasks/ai-review";
 import {
   type LearningTaskOption,
   toPublishableTaskTemplateListResponse,
@@ -595,6 +596,9 @@ export function PublishClassroomTaskForm({
           404: "任务发布功能未启用、不可用或资源不存在。",
         };
         const summary =
+          (error.status === 409
+            ? getTaskSnapshotErrorMessage(error.status, error.data)
+            : undefined) ??
           summaryByStatus[error.status] ?? "发布任务失败，请稍后重试。";
 
         setErrorState({

@@ -19,6 +19,7 @@ import {
 } from "../../lib/api/types-teacher";
 import {
   canSubmitTextTask,
+  getTaskSnapshotErrorMessage,
   getTaskSnapshotMessage,
 } from "../../lib/learning-tasks/ai-review";
 import {
@@ -1005,8 +1006,12 @@ test("keeps missing and false snapshot distinct and closes incomplete participat
     toMyTaskDetailResponse({ classroomTask: {} }).classroomTask
       .taskSnapshotAvailable,
   ).toBeUndefined();
+  expect(getTaskSnapshotMessage(true)).toBe("已保存的课堂任务内容");
   expect(getTaskSnapshotMessage(false)).toBe(
-    "未保存发布时任务内容，当前说明为模板现状；请教师重新布置后继续。",
+    "课堂任务内容快照缺失或无效，请联系教师核对。",
+  );
+  expect(getTaskSnapshotMessage(undefined)).toBe(
+    "课堂任务内容信息暂不可用，请刷新核对后继续。",
   );
   const detail = toMyTaskDetailResponse({
     participationStatus: {
@@ -1018,6 +1023,55 @@ test("keeps missing and false snapshot distinct and closes incomplete participat
   expect(detail.participationStatus?.canSubmit).toBe(false);
   expect(detail.participationStatus?.canRequestAiFeedback).toBe(false);
   expect(detail.participationStatus?.readOnly).toBe(true);
+});
+
+test("recognizes only the exact public snapshot error for 403 or 409", () => {
+  const message = "课堂任务内容快照缺失或无效，请联系教师核对。";
+  const body = Object.freeze({ message, code: "PRIVATE_INTERNAL_CODE" });
+  for (const status of [403, 409]) {
+    expect(getTaskSnapshotErrorMessage(status, body)).toBe(
+      "课堂任务内容快照缺失或无效，请联系教师核对。",
+    );
+  }
+  for (const status of [200, 400, 401, 404, 422, 429, 500]) {
+    expect(getTaskSnapshotErrorMessage(status, body)).toBeUndefined();
+  }
+  for (const data of [
+    undefined,
+    null,
+    message,
+    [],
+    [message],
+    Object.assign([], { message }),
+    {},
+    { code: "TASK_SNAPSHOT_MISSING" },
+    { message: undefined },
+    { message: null },
+    { message: 0 },
+    { message: false },
+    { message: {} },
+    { message: [message] },
+    { message: "unknown error" },
+    { message: "该课堂任务未保存发布内容，请教师重新布置后继续。" },
+    {
+      message:
+        "未保存发布时任务内容，当前说明为模板现状；请教师重新布置后继续。",
+    },
+    { message: ` ${message}` },
+    { message: `${message} ` },
+    { message: `${message}\nprivate synthetic stack` },
+  ]) {
+    expect(getTaskSnapshotErrorMessage(409, data)).toBeUndefined();
+  }
+  expect(getTextSubmissionError(409, body)).toBe(
+    "课堂任务内容快照缺失或无效，请联系教师核对。",
+  );
+  expect(getTextSubmissionError(403, body)).toBe("无权限提交该课堂任务。");
+  expect(
+    getTextSubmissionError(409, {
+      message: "该课堂任务未保存发布内容，请教师重新布置后继续。",
+    }),
+  ).toBe("提交作业失败，请稍后重试。");
 });
 
 test("a saved submission stays locked after busy ends and recovery opens that same detail", () => {
@@ -1043,7 +1097,7 @@ test("maps only actual public messages for cooldown, conflicts and late submissi
   for (const message of [
     "班级已归档，不能继续提交该任务。",
     "课堂任务已关闭，不能继续提交。",
-    "该课堂任务未保存发布内容，请教师重新布置后继续。",
+    "课堂任务内容快照缺失或无效，请联系教师核对。",
   ])
     expect(getTextSubmissionError(409, body(409, message))).toBe(message);
   expect(

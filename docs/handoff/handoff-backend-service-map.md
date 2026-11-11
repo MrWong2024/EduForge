@@ -177,7 +177,7 @@ Global SoT 只保留理解跨 Service workflow 必需的稳定不变量，不追
   - 新课堂发布写路径同时检查来源难度符合 [Task 写入值域](./handoff-backend-dto-cheatsheet.md#task-template-dto--response-family) 或缺失；非法值返回 400，提示先修改模板难度，不生成非法新快照。snapshotTask 只负责新发布构建，不承担历史读取回退或额外规范化。
   - 实例配置更新与生命周期分开处理；撤回前检查无提交，RECALLED 保持封闭。恢复提交仅改状态，不隐式改截止与提交设置；不支持撤回后重发同模板。
   - 发布返回、列表/详情及 my-task-detail 的教学内容只读实际实例快照，课堂成员响应由 publicTaskContent 明确投影。Task 查询保留存在性、资产状态、发布者及权限职责；模板库和候选继续读取当前模板。
-  - 本地开发库与生产库的存量缺失快照已按当前模板内容补齐；当前模板教学内容回退的后端代码已退役，前端旧提示语及新错误适配待下一阶段。
+  - 本地开发库与生产库的存量缺失快照已按当前模板内容补齐；当前模板教学内容回退的前后端代码已退役，前端提示及局部错误适配见 [Frontend API Map](./handoff-frontend-api-map.md#33-teacher-任务--提交--反馈)。
   - 发布候选 onlyMine 与默认两路均以合法 visibility 的 $in 结合聚合表达式 $type=string 限定顶层标量，排除数组及异常值，再应用当前教师可见性、模板发布状态及已发布 taskId 排除；难度按保存值精确匹配，与既有课程分类、知识模块和 onlyMine 条件取交集，同一最终 filter 用于分页前查询与 countDocuments。未显式指定课程分类时仍按班级课程分类优先排序，不对已发布课堂任务列表增加难度过滤；参数校验见 [DTO Cheatsheet](./handoff-backend-dto-cheatsheet.md#发布候选模板)。
   - 提交入口检查学生身份、Enrollment ACTIVE、课堂归属及班级/实例 ACTIVE，再通过 `createSubmissionForClassroomTask` 绑定实例主键；真正写 Submission 前，由 [Card 08](#service-card-08) 再次 enforce 运行态及截止/迟交边界。
 - Isolation: 查询与统计按 `classroomTaskId`，成员全集来自 Enrollment ACTIVE；不得按底层 taskId 跨班兜底。模板状态不决定既有实例学生运行态。

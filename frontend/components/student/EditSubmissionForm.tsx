@@ -22,6 +22,7 @@ import {
   selectSubmissionDisplayDetail,
 } from "@/lib/learning-tasks/text-submission";
 import { SUBMISSION_LANGUAGE_OPTIONS } from "@/lib/learning-tasks/submission-language";
+import { getTaskSnapshotErrorMessage } from "@/lib/learning-tasks/ai-review";
 import { toDisplayDate } from "@/lib/ui/format";
 
 type Draft = {
@@ -209,13 +210,18 @@ export function EditSubmissionForm({
       startTransition(() => router.refresh());
     } catch (error) {
       if (error instanceof BrowserFetchJsonError && error.status < 500) {
+        const snapshotMessage = error.status === 403
+          ? getTaskSnapshotErrorMessage(error.status, error.data)
+          : undefined;
         setBlocked(error.status === 409 || error.status === 403);
         setMessage(
-          error.status === 409
-            ? getSubmissionRevisionError(error.data)
-            : error.status === 403
-              ? "当前无修改资格或已超过截止时间。未保存的修改已保留，请查看最新已保存作品。"
-              : "修改未保存，请检查内容并核对当前详情。未保存的修改已保留。",
+          snapshotMessage
+            ? snapshotMessage + "未保存的修改已保留。"
+            : error.status === 409
+              ? getSubmissionRevisionError(error.data)
+              : error.status === 403
+                ? "当前无修改资格或已超过截止时间。未保存的修改已保留，请查看最新已保存作品。"
+                : "修改未保存，请检查内容并核对当前详情。未保存的修改已保留。",
         );
       } else {
         setBlocked(true);

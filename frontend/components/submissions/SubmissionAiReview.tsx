@@ -13,6 +13,7 @@ import { SubmissionAutoRefresh } from "@/components/student/SubmissionAutoRefres
 import {
   displayAiUsage,
   getAutoRefreshPhase,
+  getTaskSnapshotErrorMessage,
   type AiReview,
 } from "@/lib/learning-tasks/ai-review";
 import {
@@ -166,7 +167,8 @@ function SubmissionAiReviewPanel({
           error instanceof BrowserFetchJsonError ? error.status : undefined,
         message:
           error instanceof BrowserFetchJsonError && error.status === 409
-            ? getSubmissionRevisionError(error.data)
+            ? getTaskSnapshotErrorMessage(error.status, error.data) ??
+              getSubmissionRevisionError(error.data)
             : error instanceof BrowserFetchJsonError && error.status < 500
               ? getCommonErrorSummary(error.status, "申请 AI 辅助反馈") +
                 "请显式刷新详情核对当前资格。"

@@ -101,7 +101,9 @@
 - 班级任务实例：`/teacher/classrooms/:id/tasks/page.tsx` + 发布/生命周期/编辑组件 -> `/api/proxy/classrooms/:id/tasks*`。
   - 对应后端：`GET/POST/PATCH /api/classrooms/:id/tasks*` 与 `/status`。
   - `toClassroomTaskSummary`、`toClassroomTask` 共用 `normalizeClassroomTaskStatus`，仅接受原始值严格等于 `ACTIVE`、`CLOSED`、`RECALLED`；不 trim、转换大小写或强制转换类型，其余输入为 undefined，不再补 ACTIVE，也不映射为其他合法状态。保留可选状态类型、输入对象不变及详情 raw 原引用；未知状态不移除只读导航、教学内容或已有记录。
-  - 实例设置 PATCH 保持原路径与 `dueAt/allowLate` 请求体；409 摘要为“课堂任务状态异常，暂时无法修改，请刷新页面核对。”，保留原状态码、内部原始错误与 ErrorState 呈现。保存失败保留草稿，不自动重放 PATCH；服务端错误、权限和生命周期合同见 [Backend API Classroom Tasks](./handoff-backend-api-map.md#classroom-tasksclassrooms-子资源)。
+  - 实例设置 PATCH 保持原路径与 `dueAt/allowLate` 请求体；精确快照异常优先显示共享安全提示，其余 409 继续显示“课堂任务状态异常，暂时无法修改，请刷新页面核对。”，保留原状态码、内部原始错误与 ErrorState 呈现。保存失败保留草稿，不自动重放 PATCH；服务端错误、权限和生命周期合同见 [Backend API Classroom Tasks](./handoff-backend-api-map.md#classroom-tasksclassrooms-子资源)。
+  - 快照三态由 `getTaskSnapshotMessage` 统一显示：true 为“已保存的课堂任务内容”，false 为“课堂任务内容快照缺失或无效，请联系教师核对。”，undefined 为“课堂任务内容信息暂不可用，请刷新核对后继续。”。保留严格布尔适配和提交资格判断，不查询当前模板补课堂内容。
+  - `getTaskSnapshotErrorMessage` 只识别 403/409 下非 null、非数组对象的 message 原值精确等于上述快照异常消息，并返回固定安全提示；不 trim、匹配子串或依据 code 推测。教师任务列表/详情、学生任务详情、设置与生命周期，以及发布表单的发布请求按各自入口状态局部接入，匹配失败沿用原错误分支；发布候选加载、筛选和分页保持原处理。原始 status/data 与 detail 提取继续保留，最终说明仅展示安全 summary。后端入口状态码和写前拒绝由 [Backend API Owner](./handoff-backend-api-map.md#classroom-tasksclassrooms-子资源) 维护。
   - 注意：发布表单只发送既有截止/迟交设置，不发送 AI 策略字段。列表/详情消费快照可用性及投影教学内容，不另取当前模板覆盖，不适配或展示旧策略。实例配置与状态动作分开发送；学生或教师可在提交详情主动申请 AI 反馈。
   - 发布请求仍仅使用 `taskId/dueAt/settings`，不传 difficulty；教师课堂详情的难度由 `toClassroomTask` 读取正式 `task.difficulty` 原值，后端负责发布快照。模板修改不覆盖已发布快照，前端不另查实时模板或回填缺失难度。
   - 班级页面的 difficulty 只作用于待发布候选，已发布课堂任务请求不带该参数；已发布任务的分页链接保留规范化候选难度，避免翻页丢失候选条件。
@@ -131,16 +133,18 @@
   - 基础信息难度直接读取正式响应的 `viewModel.data.task.difficulty`，复用上述共享显示规则；沿用后端 task 投影，不查询实时模板补值。
 - 学生提交：`SubmissionForm` -> `/api/proxy/classrooms/:cid/tasks/:ctid/submissions`。
   - 对应后端：`POST /api/classrooms/:classroomId/tasks/:classroomTaskId/submissions`。
-  - 注意：提交入口要求明确快照可用且后端 canSubmit=true，不以模板状态或 AI 发起权限代替提交资格。content 中的源码和可选说明原样发送；说明按 Unicode 码点校验。取得有效提交 ID 后锁住当前表单并走既有路径进入本次详情，导航恢复只打开该已保存提交，query 只用于返回导航；提交成功不表示 AI 已申请。成功缺 ID 或网络结果未确认时先核对历史，不自动重放。按 AllExceptionsFilter 实际公开 message 局部适配已知冷却等待、关闭/缺快照和迟交原因，其他异常沿用安全通用提示；迟交、冷却和授权仍由后端最终校验。
+  - 注意：提交入口要求明确快照可用且后端 canSubmit=true，不以模板状态或 AI 发起权限代替提交资格。content 中的源码和可选说明原样发送；说明按 Unicode 码点校验。取得有效提交 ID 后锁住当前表单并走既有路径进入本次详情，导航恢复只打开该已保存提交，query 只用于返回导航；提交成功不表示 AI 已申请。成功缺 ID 或网络结果未确认时先核对历史，不自动重放。getTextSubmissionError 在 409 分支使用共享快照错误 helper，旧快照消息不再是正向白名单；归档、关闭、迟交、冷却及未知错误沿用原处理。迟交、冷却和授权仍由后端最终校验。
 - 学生 submission detail：`student/submissions/:id/page.tsx` -> `/api/proxy/learning-tasks/submissions/:id*`。
   - 对应后端：submission detail、feedback list。
   - 注意：学生任务草稿页仅显式刷新；学生提交详情仅在处理中或已安排重试时状态驱动刷新，复用现有读源，无历史详情 N+1。
   - `EditSubmissionForm` 经同源 BFF PATCH 同一 submission，使用编辑开始时的 `expectedRevision` 和允许 content 字段，正常保存显式发送说明；取消不写，成功采用权威详情。mapper 严格消费 revision/editing，缺失或未知关闭入口；冲突/未知结果保留草稿，读取作品并由用户明确核对，不自动换新 attempt、合并或重放。
+  - 作品编辑仅对精确快照 403 使用共享提示并追加“未保存的修改已保留。”；其他权限及版本错误维持原分支，blocked/busy、草稿与结果不确定恢复机制保持。
 
 ### 3.5 AI Feedback / 报表 / 导出
 
 - AI Feedback 产品请求：`SubmissionAiReview`（组合 RequestAiFeedbackButton） -> `/api/proxy/learning-tasks/submissions/:id/ai-feedback/request`。
   - 对应后端：`POST /api/learning-tasks/submissions/:submissionId/ai-feedback/request`。
+  - 师生手动申请的精确快照 409 优先于版本错误 helper，匹配失败继续现有版本/通用提示；不把快照错误加入 getSubmissionRevisionError，也不增加教师反馈表单的快照门禁。
   - 注意：请求携带页面实际展示作品的 `expectedRevision`，轮询发现新版不能视为用户已查看；需要明确刷新作品后申请。仅有效 revision 且 aiReview.canRequest=true 开启动作，缺摘要关闭并提供刷新。成功采用接口真实返回状态，已有 Job 不重新排队；当前提交内串行申请与读取，操作标识拒绝旧结果，页面 props 不作为 POST 后确认。成功 Job 持续锁定申请；结果不确定后，只接受事后用户显式发起、完整成功的详情读取重新判断资格，不自动重放 POST。按钮、正文与轮询共用同一已接纳结果。学生详情可按状态刷新，教师详情仅局部显示申请结果并提示显式刷新，保护人工反馈草稿。request 不返回完整 aiReview；执行仍归后端。BFF 保持既有 PATCH/JSON body 透传。
   - 师生共用 `lib/learning-tasks/ai-review.ts` 的 `toAiReview` 适配及 `SubmissionAiReview` 展示后端用量摘要；页面不重新统计或派生 Token。新增细分及计算字段缺省、null 或非法时统一映射 null，合法 0 保留显示“0”，未知显示“未知”。公开字段、计算值含义和包含关系由 [Submission DTO](./handoff-backend-dto-cheatsheet.md#submission-request--response-family) 维护。
   - 旧响应兼容：新增用量字段不加入 `submission-ai-operations.ts` 的原始详情必需字段名单；旧版完整详情缺少新字段仍可通过事后显式读取，在不确定 POST 后恢复确认，不因此关闭原恢复路径或自动重放请求。

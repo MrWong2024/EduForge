@@ -1,11 +1,29 @@
+const TASK_SNAPSHOT_ERROR_MESSAGE =
+  "课堂任务内容快照缺失或无效，请联系教师核对。";
+
 export const getTaskSnapshotMessage = (
   available: boolean | undefined,
 ): string =>
   available === true
-    ? "发布时的任务内容"
+    ? "已保存的课堂任务内容"
     : available === false
-      ? "未保存发布时任务内容，当前说明为模板现状；请教师重新布置后继续。"
-      : "发布内容信息暂不可用，请刷新核对后继续。";
+      ? TASK_SNAPSHOT_ERROR_MESSAGE
+      : "课堂任务内容信息暂不可用，请刷新核对后继续。";
+
+export function getTaskSnapshotErrorMessage(
+  status: number,
+  data: unknown,
+): string | undefined {
+  return (status === 403 || status === 409) &&
+    data !== null &&
+    typeof data === "object" &&
+    !Array.isArray(data) &&
+    "message" in data &&
+    data.message === TASK_SNAPSHOT_ERROR_MESSAGE
+    ? TASK_SNAPSHOT_ERROR_MESSAGE
+    : undefined;
+}
+
 export const canSubmitTextTask = (
   snapshot: boolean | undefined,
   canSubmit: boolean | undefined,

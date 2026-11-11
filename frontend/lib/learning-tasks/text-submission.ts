@@ -1,5 +1,6 @@
 import { paths } from "../routes/paths";
 import { getCommonErrorSummary } from "../ui/status";
+import { getTaskSnapshotErrorMessage } from "./ai-review";
 import type {
   CreateSubmissionRequest,
   SubmissionDetailResponse,
@@ -123,9 +124,12 @@ export const getSavedSubmissionHref = (
 const submissionConflictMessages = new Set([
   "班级已归档，不能继续提交该任务。",
   "课堂任务已关闭，不能继续提交。",
-  "该课堂任务未保存发布内容，请教师重新布置后继续。",
 ]);
 export function getTextSubmissionError(status: number, data: unknown): string {
+  if (status === 409) {
+    const snapshotMessage = getTaskSnapshotErrorMessage(status, data);
+    if (snapshotMessage !== undefined) return snapshotMessage;
+  }
   const message =
     data && typeof data === "object" && "message" in data
       ? data.message

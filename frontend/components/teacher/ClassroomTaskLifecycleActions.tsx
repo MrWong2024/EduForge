@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { ErrorState } from "@/components/blocks/ErrorState";
 import { BrowserFetchJsonError, fetchJson } from "@/lib/api/browser-client";
 import { buildErrorDescription, extractRawDetail } from "@/lib/api/error-presenter";
+import { getTaskSnapshotErrorMessage } from "@/lib/learning-tasks/ai-review";
 import { getClassroomTaskStatusLabel } from "@/lib/ui/status";
 import {
   normalizeClassroomTaskStatus,
@@ -118,7 +119,9 @@ export function ClassroomTaskLifecycleActions({
         };
         setErrorState({
           status: error.status,
-          summary: summaryByStatus[error.status] ?? (targetStatus === "CLOSED"
+          summary: (error.status === 409
+            ? getTaskSnapshotErrorMessage(error.status, error.data)
+            : undefined) ?? summaryByStatus[error.status] ?? (targetStatus === "CLOSED"
             ? "关闭任务失败，请稍后重试。"
             : "恢复提交失败，请稍后重试。"),
           detail,

@@ -8,6 +8,7 @@ import { RefreshButton } from "@/components/blocks/RefreshButton";
 import { TaskRubric } from "@/components/learning-tasks/TaskRubric";
 import {
   canSubmitTextTask,
+  getTaskSnapshotErrorMessage,
   getTaskSnapshotMessage,
 } from "@/lib/learning-tasks/ai-review";
 import { SubmissionForm } from "@/components/student/SubmissionForm";
@@ -356,9 +357,12 @@ export default async function StudentTaskDetailPage({
     if (error instanceof FetchJsonError) {
       const detail = extractRawDetail(error);
       const summary =
-        error.status === 403
+        (error.status === 409
+          ? getTaskSnapshotErrorMessage(error.status, error.data)
+          : undefined) ??
+        (error.status === 403
           ? "无权限访问该任务详情。"
-          : getCommonErrorSummary(error.status, "加载任务详情");
+          : getCommonErrorSummary(error.status, "加载任务详情"));
 
       viewModel = {
         mode: "error",

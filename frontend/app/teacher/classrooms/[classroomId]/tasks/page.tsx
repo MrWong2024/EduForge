@@ -19,7 +19,10 @@ import {
 import { getMe } from "@/lib/auth/session";
 import { normalizeTaskCourseLabel } from "@/lib/learning-tasks/course-labels";
 import { parseDifficultyFilter } from "@/lib/learning-tasks/difficulty";
-import { getTaskSnapshotMessage } from "@/lib/learning-tasks/ai-review";
+import {
+  getTaskSnapshotErrorMessage,
+  getTaskSnapshotMessage,
+} from "@/lib/learning-tasks/ai-review";
 import { paths } from "@/lib/routes/paths";
 import { getCommonErrorSummary } from "@/lib/ui/status";
 import {
@@ -278,9 +281,12 @@ export default async function ClassroomTasksPage({
     if (error instanceof FetchJsonError) {
       const detail = extractRawDetail(error);
       const summary =
-        error.status === 403
+        (error.status === 409
+          ? getTaskSnapshotErrorMessage(error.status, error.data)
+          : undefined) ??
+        (error.status === 403
           ? "无权限管理任务。"
-          : getCommonErrorSummary(error.status, "加载班级任务列表");
+          : getCommonErrorSummary(error.status, "加载班级任务列表"));
       viewModel = {
         mode: "error",
         status: error.status,

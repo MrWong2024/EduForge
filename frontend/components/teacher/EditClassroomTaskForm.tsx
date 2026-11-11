@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { ErrorState } from "@/components/blocks/ErrorState";
 import { BrowserFetchJsonError, fetchJson } from "@/lib/api/browser-client";
 import { buildErrorDescription, extractRawDetail } from "@/lib/api/error-presenter";
+import { getTaskSnapshotErrorMessage } from "@/lib/learning-tasks/ai-review";
 import {
   normalizeClassroomTaskStatus,
   type UpdateClassroomTaskRequest,
@@ -143,7 +144,9 @@ export function EditClassroomTaskForm({
         };
         setErrorState({
           status: error.status,
-          summary: summaryByStatus[error.status] ?? "保存设置失败，请稍后重试。",
+          summary: (error.status === 409
+            ? getTaskSnapshotErrorMessage(error.status, error.data)
+            : undefined) ?? summaryByStatus[error.status] ?? "保存设置失败，请稍后重试。",
           detail: extractRawDetail(error.data),
         });
       } else {
