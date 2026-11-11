@@ -43,8 +43,6 @@ import {
 import type {
   AiLearningAnalyticsDetailedOutcome,
   AiLearningAnalyticsEngagementStatus,
-  AiLearningAnalyticsGrowthTrend,
-  AiLearningAnalyticsOutcome,
   AiLearningAnalyticsOverallOutcome,
   AiLearningAnalyticsComparisonWarning,
   AiLearningAnalyticsReview,
@@ -55,8 +53,6 @@ export {
   AI_LEARNING_ANALYTICS_DETAILED_OUTCOMES,
   AI_LEARNING_ANALYTICS_DISCLAIMER,
   AI_LEARNING_ANALYTICS_ENGAGEMENT_STATUSES,
-  AI_LEARNING_ANALYTICS_GROWTH_TRENDS,
-  AI_LEARNING_ANALYTICS_OUTCOMES,
   AI_LEARNING_ANALYTICS_OVERALL_OUTCOMES,
   AI_LEARNING_ANALYTICS_QUALITY_PROXY,
   AI_LEARNING_ANALYTICS_SAMPLE_UNIT,
@@ -66,8 +62,6 @@ export {
 export type {
   AiLearningAnalyticsDetailedOutcome,
   AiLearningAnalyticsEngagementStatus,
-  AiLearningAnalyticsGrowthTrend,
-  AiLearningAnalyticsOutcome,
   AiLearningAnalyticsOverallOutcome,
 } from '../types/ai-learning-analytics.types';
 
@@ -143,7 +137,6 @@ export type AiLearningAnalyticsStandardSample = {
   issueLoadAfterHalfUnits: number | null;
   issueLoadDeltaHalfUnits: number | null;
   detailedOutcome: AiLearningAnalyticsDetailedOutcome;
-  outcome: AiLearningAnalyticsOutcome;
   baselineReview: AiLearningAnalyticsReview | null;
   comparisonReview: AiLearningAnalyticsReview | null;
   latestRevision: AiLearningAnalyticsReview | null;
@@ -162,7 +155,6 @@ type SampleAggregate = {
   improvedCount: number;
   remainedCleanCount: number;
   unchangedWithIssuesCount: number;
-  stableCount: number;
   regressedCount: number;
   averageIssueLoadBefore: number | null;
   averageIssueLoadAfter: number | null;
@@ -224,19 +216,18 @@ const classifyAiLearningAnalyticsOutcome = (
   issueLoadAfterHalfUnits: number,
 ): {
   detailedOutcome: AiLearningAnalyticsDetailedOutcome;
-  outcome: AiLearningAnalyticsOutcome;
 } => {
   const issueLoadDeltaHalfUnits =
     issueLoadBeforeHalfUnits - issueLoadAfterHalfUnits;
   if (issueLoadDeltaHalfUnits > 0) {
-    return { detailedOutcome: 'IMPROVED', outcome: 'IMPROVED' };
+    return { detailedOutcome: 'IMPROVED' };
   }
   if (issueLoadDeltaHalfUnits < 0) {
-    return { detailedOutcome: 'REGRESSED', outcome: 'REGRESSED' };
+    return { detailedOutcome: 'REGRESSED' };
   }
   return issueLoadBeforeHalfUnits === 0
-    ? { detailedOutcome: 'REMAINED_CLEAN', outcome: 'STABLE' }
-    : { detailedOutcome: 'UNCHANGED_WITH_ISSUES', outcome: 'STABLE' };
+    ? { detailedOutcome: 'REMAINED_CLEAN' }
+    : { detailedOutcome: 'UNCHANGED_WITH_ISSUES' };
 };
 
 export const deriveAiLearningAnalyticsOverallOutcome = (
@@ -252,21 +243,6 @@ export const deriveAiLearningAnalyticsOverallOutcome = (
   return issueLoadDeltaHalfUnitsTotal < 0
     ? 'REGRESSED_OVERALL'
     : 'NO_NET_CHANGE';
-};
-
-export const mapAiLearningAnalyticsOverallOutcomeToGrowthTrend = (
-  overallOutcome: AiLearningAnalyticsOverallOutcome,
-): AiLearningAnalyticsGrowthTrend => {
-  const mapping: Record<
-    AiLearningAnalyticsOverallOutcome,
-    AiLearningAnalyticsGrowthTrend
-  > = {
-    INSUFFICIENT_DATA: 'INSUFFICIENT_DATA',
-    IMPROVED_OVERALL: 'IMPROVING',
-    NO_NET_CHANGE: 'STABLE',
-    REGRESSED_OVERALL: 'DECLINING',
-  };
-  return mapping[overallOutcome];
 };
 
 export const deriveAiLearningAnalyticsEngagementStatus = (metrics: {
@@ -505,7 +481,6 @@ export const buildAiLearningAnalyticsStandardSamples = (
         ? classifyAiLearningAnalyticsOutcome(before, after)
         : {
             detailedOutcome: 'NOT_COMPARABLE' as const,
-            outcome: 'NOT_COMPARABLE' as const,
           };
     const baselineReview = baseline
       ? reviewProjection(baseline.submission, baseline.job)
@@ -659,7 +634,6 @@ export class AiLearningAnalyticsService {
         improvedStudentTaskCount: aggregate.improvedCount,
         remainedCleanStudentTaskCount: aggregate.remainedCleanCount,
         unchangedWithIssuesStudentTaskCount: aggregate.unchangedWithIssuesCount,
-        stableStudentTaskCount: aggregate.stableCount,
         regressedStudentTaskCount: aggregate.regressedCount,
         aiStudentCoverageRate: this.toRate(
           requestedStudentIds.size,
@@ -1058,7 +1032,6 @@ export class AiLearningAnalyticsService {
     let improvedCount = 0;
     let remainedCleanCount = 0;
     let unchangedWithIssuesCount = 0;
-    let stableCount = 0;
     let regressedCount = 0;
     let issueLoadBeforeHalfUnitsTotal = 0;
     let issueLoadAfterHalfUnitsTotal = 0;
@@ -1080,11 +1053,6 @@ export class AiLearningAnalyticsService {
       remainedCleanCount += sample.detailedOutcome === 'REMAINED_CLEAN' ? 1 : 0;
       unchangedWithIssuesCount +=
         sample.detailedOutcome === 'UNCHANGED_WITH_ISSUES' ? 1 : 0;
-      stableCount +=
-        sample.detailedOutcome === 'REMAINED_CLEAN' ||
-        sample.detailedOutcome === 'UNCHANGED_WITH_ISSUES'
-          ? 1
-          : 0;
       regressedCount += sample.detailedOutcome === 'REGRESSED' ? 1 : 0;
       if (sample.qualityComparable) {
         issueLoadBeforeHalfUnitsTotal += sample.issueLoadBeforeHalfUnits ?? 0;
@@ -1115,7 +1083,6 @@ export class AiLearningAnalyticsService {
       improvedCount,
       remainedCleanCount,
       unchangedWithIssuesCount,
-      stableCount,
       regressedCount,
       averageIssueLoadBefore: this.toIssueLoadAverage(
         issueLoadBeforeHalfUnitsTotal,
@@ -1156,7 +1123,6 @@ export class AiLearningAnalyticsService {
       improvedStudentCount: aggregate.improvedCount,
       remainedCleanStudentCount: aggregate.remainedCleanCount,
       unchangedWithIssuesStudentCount: aggregate.unchangedWithIssuesCount,
-      stableStudentCount: aggregate.stableCount,
       regressedStudentCount: aggregate.regressedCount,
       aiTaskCoverageRate: this.toRate(
         aggregate.aiRequestedCount,
@@ -1222,15 +1188,12 @@ export class AiLearningAnalyticsService {
       improvedTasksCount: aggregate.improvedCount,
       remainedCleanTasksCount: aggregate.remainedCleanCount,
       unchangedWithIssuesTasksCount: aggregate.unchangedWithIssuesCount,
-      stableTasksCount: aggregate.stableCount,
       regressedTasksCount: aggregate.regressedCount,
       averageIssueLoadBefore: aggregate.averageIssueLoadBefore,
       averageIssueLoadAfter: aggregate.averageIssueLoadAfter,
       averageIssueLoadDelta: aggregate.averageIssueLoadDelta,
       evidenceSummary: aggregate.evidenceSummary,
       overallOutcome,
-      growthTrend:
-        mapAiLearningAnalyticsOverallOutcomeToGrowthTrend(overallOutcome),
     };
     return {
       ...baseMetrics,
@@ -1260,7 +1223,6 @@ export class AiLearningAnalyticsService {
       issueLoadAfter: this.toNullableIssueLoad(sample?.issueLoadAfterHalfUnits),
       issueLoadDelta: this.toNullableIssueLoad(sample?.issueLoadDeltaHalfUnits),
       detailedOutcome: sample?.detailedOutcome ?? 'NOT_COMPARABLE',
-      outcome: sample?.outcome ?? 'NOT_COMPARABLE',
       baselineReview: sample?.baselineReview ?? null,
       comparisonReview: sample?.comparisonReview ?? null,
       latestRevision: sample?.latestRevision ?? null,

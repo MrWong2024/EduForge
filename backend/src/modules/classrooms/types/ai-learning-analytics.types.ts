@@ -9,15 +9,6 @@ export const AI_LEARNING_ANALYTICS_QUALITY_PROXY =
 export const AI_LEARNING_ANALYTICS_DISCLAIMER =
   '本分析仅反映 EduForge AI 反馈介入后的作品更新与反馈条目负荷变化，不代表 AI 对学习成绩或能力提升的因果贡献。';
 
-export const AI_LEARNING_ANALYTICS_OUTCOMES = [
-  'IMPROVED',
-  'STABLE',
-  'REGRESSED',
-  'NOT_COMPARABLE',
-] as const;
-export type AiLearningAnalyticsOutcome =
-  (typeof AI_LEARNING_ANALYTICS_OUTCOMES)[number];
-
 export const AI_LEARNING_ANALYTICS_DETAILED_OUTCOMES = [
   'IMPROVED',
   'REMAINED_CLEAN',
@@ -27,15 +18,6 @@ export const AI_LEARNING_ANALYTICS_DETAILED_OUTCOMES = [
 ] as const;
 export type AiLearningAnalyticsDetailedOutcome =
   (typeof AI_LEARNING_ANALYTICS_DETAILED_OUTCOMES)[number];
-
-export const AI_LEARNING_ANALYTICS_GROWTH_TRENDS = [
-  'INSUFFICIENT_DATA',
-  'IMPROVING',
-  'STABLE',
-  'DECLINING',
-] as const;
-export type AiLearningAnalyticsGrowthTrend =
-  (typeof AI_LEARNING_ANALYTICS_GROWTH_TRENDS)[number];
 
 export const AI_LEARNING_ANALYTICS_OVERALL_OUTCOMES = [
   'INSUFFICIENT_DATA',

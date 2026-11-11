@@ -92,7 +92,6 @@ type AnalyticsOverview = {
     improvedStudentTaskCount: number;
     remainedCleanStudentTaskCount: number;
     unchangedWithIssuesStudentTaskCount: number;
-    stableStudentTaskCount: number;
     regressedStudentTaskCount: number;
     aiStudentCoverageRate: number | null;
     aiTaskCoverageRate: number | null;
@@ -123,7 +122,6 @@ type AnalyticsOverview = {
     improvedStudentCount: number;
     remainedCleanStudentCount: number;
     unchangedWithIssuesStudentCount: number;
-    stableStudentCount: number;
     regressedStudentCount: number;
     remainedCleanRate: number | null;
     unchangedWithIssuesRate: number | null;
@@ -159,11 +157,9 @@ type AnalyticsStudentList = {
     improvedTasksCount: number;
     remainedCleanTasksCount: number;
     unchangedWithIssuesTasksCount: number;
-    stableTasksCount: number;
     regressedTasksCount: number;
     overallOutcome: string;
     engagementStatus: string;
-    growthTrend: string;
   }>;
 };
 
@@ -196,7 +192,6 @@ type AnalyticsStudentDetail = {
     issueLoadAfter: number | null;
     issueLoadDelta: number | null;
     detailedOutcome: string;
-    outcome: string;
   }>;
 };
 
@@ -261,6 +256,8 @@ describe('Classroom AI learning analytics (e2e)', () => {
 
   let previousWorkerEnabled: string | undefined;
   let previousProvider: string | undefined;
+  let moduleFixture: TestingModule | undefined;
+  let fixtureAuthorized = false;
 
   const login = async (
     agent: ReturnType<typeof request.agent>,
@@ -272,9 +269,7 @@ describe('Classroom AI learning analytics (e2e)', () => {
       .send({ email, password })
       .expect((response) => {
         if (![200, 201].includes(response.status)) {
-          throw new Error(
-            `Unexpected login status ${response.status}: ${JSON.stringify(response.body)}`,
-          );
+          throw new Error(`Unexpected login status ${response.status}`);
         }
       });
   };
@@ -416,6 +411,26 @@ describe('Classroom AI learning analytics (e2e)', () => {
     };
   };
 
+  const expectEmptyDatabase = async (phase: string) => {
+    const database = userModel.db.db;
+    if (!database) throw new Error('Missing connected test database');
+    const cursor = database.listCollections({}, { maxTimeMS: 5000 });
+    try {
+      const collections = await cursor.toArray();
+      const counts: Record<string, number> = {};
+      for (const collection of collections) {
+        expect(collection.type).toBe('collection');
+        counts[collection.name] = await database
+          .collection(collection.name)
+          .countDocuments({}, { maxTimeMS: 5000 });
+      }
+      console.info('Analytics database counts: ' + phase, counts);
+      expect(Object.values(counts).every((count) => count === 0)).toBe(true);
+    } finally {
+      await cursor.close();
+    }
+  };
+
   beforeAll(async () => {
     previousWorkerEnabled = process.env.AI_FEEDBACK_WORKER_ENABLED;
     previousProvider = process.env.AI_FEEDBACK_PROVIDER;
@@ -436,7 +451,7 @@ describe('Classroom AI learning analytics (e2e)', () => {
       purpose: process.env.EDUFORGE_DATABASE_PURPOSE,
       mongoUri: process.env.MONGO_URI,
     });
-    const moduleFixture: TestingModule = await Test.createTestingModule({
+    moduleFixture = await Test.createTestingModule({
       imports: [appModuleImport.AppModule],
     }).compile();
     app = moduleFixture.createNestApplication();
@@ -468,6 +483,10 @@ describe('Classroom AI learning analytics (e2e)', () => {
     userModel.db.set('maxTimeMS', 10000);
     const database = userModel.db.db;
     if (!database) throw new Error('Missing connected test database');
+    const hello = await database.command({ hello: 1 }, { timeoutMS: 5000 });
+    expect(hello.setName).toBeUndefined();
+    expect(hello.msg).not.toBe('isdbgrid');
+    expect(hello.isWritablePrimary).toBe(true);
     const auth = await database.command(
       { connectionStatus: 1, showPrivileges: false },
       { timeoutMS: 5000 },
@@ -482,12 +501,15 @@ describe('Classroom AI learning analytics (e2e)', () => {
       authInfo: auth.authInfo,
     });
     expect(config.get('AI_FEEDBACK_PROVIDER')).toBe('stub');
-    expect(config.get('AI_FEEDBACK_WORKER_ENABLED')).not.toBe(true);
+    expect(config.get('AI_FEEDBACK_WORKER_ENABLED')).toBe(false);
+    expect(process.env.AI_FEEDBACK_REAL_ENABLED).toBe('false');
     expect(config.get('MAIL_PROVIDER')).toBe('log');
     config.set('LEARNING_TASK_SUBMISSION_COOLDOWN_MS', 0);
     console.info(
-      'Analytics V1.2 gate: standard_test / eduforge_test / local root@admin verified / worker=false / stub / mail=log',
+      'Analytics V1.2 gate: standard_test / eduforge_test / loopback standalone / root@admin user and role verified / worker=false / stub / real=false / mail=log',
     );
+    await expectEmptyDatabase('before fixtures');
+    fixtureAuthorized = true;
     teacherAgent = request
       .agent(app.getHttpServer())
       .timeout({ response: 10000, deadline: 15000 });
@@ -503,76 +525,83 @@ describe('Classroom AI learning analytics (e2e)', () => {
       bcrypt.hash(teacherPassword, 10),
       bcrypt.hash(studentPassword, 10),
     ]);
-    const users = await userModel.create([
-      {
-        email: teacherEmail,
-        passwordHash: teacherHash,
-        roles: ['teacher'],
-        name: 'Analytics Teacher',
-      },
-      {
-        email: otherTeacherEmail,
-        passwordHash: otherTeacherHash,
-        roles: ['teacher'],
-        name: 'Other Teacher',
-      },
-      {
-        email: activeStudentEmail,
-        passwordHash: studentHash,
-        roles: ['student'],
-        name: 'Active Student',
-        studentNo: 'S-001',
-      },
-      {
-        email: zeroStudentEmail,
-        passwordHash: studentHash,
-        roles: ['student'],
-        name: 'Zero Submission Student',
-        studentNo: 'S-002',
-      },
-      {
-        email: submittedWithoutAiEmail,
-        passwordHash: studentHash,
-        roles: ['student'],
-        name: 'Submitted Without AI Student',
-        studentNo: 'S-005',
-      },
-      {
-        email: requestedWithoutDeliveryEmail,
-        passwordHash: studentHash,
-        roles: ['student'],
-        name: 'Requested Without Delivery Student',
-        studentNo: 'S-006',
-      },
-      {
-        email: deliveredWithoutResubmissionEmail,
-        passwordHash: studentHash,
-        roles: ['student'],
-        name: 'Delivered Without Resubmission Student',
-        studentNo: 'S-007',
-      },
-      {
-        email: resubmittedWithoutComparableEmail,
-        passwordHash: studentHash,
-        roles: ['student'],
-        name: 'Resubmitted Without Comparable Student',
-        studentNo: 'S-008',
-      },
-      {
-        email: removedStudentEmail,
-        passwordHash: studentHash,
-        roles: ['student'],
-        name: 'Removed Student',
-        studentNo: 'S-003',
-      },
-      {
-        email: foreignStudentEmail,
-        passwordHash: studentHash,
-        roles: ['student'],
-        name: 'Foreign Student',
-        studentNo: 'S-004',
-      },
-    ]);
+    const users = await userModel.create(
+      [
+        {
+          email: teacherEmail,
+          passwordHash: teacherHash,
+          roles: ['teacher'],
+          name: 'Analytics Teacher',
+        },
+        {
+          email: otherTeacherEmail,
+          passwordHash: otherTeacherHash,
+          roles: ['teacher'],
+          name: 'Other Teacher',
+        },
+        {
+          email: activeStudentEmail,
+          passwordHash: studentHash,
+          roles: ['student'],
+          name: 'Active Student',
+          studentNo: 'S-001',
+        },
+        {
+          email: zeroStudentEmail,
+          passwordHash: studentHash,
+          roles: ['student'],
+          name: 'Zero Submission Student',
+          studentNo: 'S-002',
+        },
+        {
+          email: submittedWithoutAiEmail,
+          passwordHash: studentHash,
+          roles: ['student'],
+          name: 'Submitted Without AI Student',
+          studentNo: 'S-005',
+        },
+        {
+          email: requestedWithoutDeliveryEmail,
+          passwordHash: studentHash,
+          roles: ['student'],
+          name: 'Requested Without Delivery Student',
+          studentNo: 'S-006',
+        },
+        {
+          email: deliveredWithoutResubmissionEmail,
+          passwordHash: studentHash,
+          roles: ['student'],
+          name: 'Delivered Without Resubmission Student',
+          studentNo: 'S-007',
+        },
+        {
+          email: resubmittedWithoutComparableEmail,
+          passwordHash: studentHash,
+          roles: ['student'],
+          name: 'Resubmitted Without Comparable Student',
+          studentNo: 'S-008',
+        },
+        {
+          email: removedStudentEmail,
+          passwordHash: studentHash,
+          roles: ['student'],
+          name: 'Removed Student',
+          studentNo: 'S-003',
+        },
+        {
+          email: foreignStudentEmail,
+          passwordHash: studentHash,
+          roles: ['student'],
+          name: 'Foreign Student',
+          studentNo: 'S-004',
+        },
+      ].map((user) => {
+        const _id = new Types.ObjectId();
+        createdUserIds.push(_id);
+        return { ...user, _id };
+      }),
+      { ordered: true },
+    );
     [
       teacherId,
       otherTeacherId,
@@ -585,13 +614,10 @@ describe('Classroom AI learning analytics (e2e)', () => {
       removedStudentId,
       foreignStudentId,
     ] = users.map((user) => user._id);
-    createdUserIds.push(...users.map((user) => user._id));
 
-    await Promise.all([
-      login(teacherAgent, teacherEmail, teacherPassword),
-      login(otherTeacherAgent, otherTeacherEmail, teacherPassword),
-      login(activeStudentAgent, activeStudentEmail, studentPassword),
-    ]);
+    await login(teacherAgent, teacherEmail, teacherPassword);
+    await login(otherTeacherAgent, otherTeacherEmail, teacherPassword);
+    await login(activeStudentAgent, activeStudentEmail, studentPassword);
 
     const course = await courseModel.create({
       code: `AIA-${Date.now()}`,
@@ -603,77 +629,86 @@ describe('Classroom AI learning analytics (e2e)', () => {
     courseId = course._id;
     createdCourseIds.push(courseId);
 
-    const [classroom, otherClassroom] = await classroomModel.create([
-      {
-        courseId,
-        name: 'AI Analytics Classroom',
-        teacherId,
-        joinCode: `AIA${Date.now().toString().slice(-5)}`,
-        status: ClassroomStatus.Active,
-      },
-      {
-        courseId,
-        name: 'Other AI Analytics Classroom',
-        teacherId: otherTeacherId,
-        joinCode: `AIB${Date.now().toString().slice(-5)}`,
-        status: ClassroomStatus.Active,
-      },
-    ]);
+    const [classroom, otherClassroom] = await classroomModel.create(
+      [
+        {
+          courseId,
+          name: 'AI Analytics Classroom',
+          teacherId,
+          joinCode: `AIA${Date.now().toString().slice(-5)}`,
+          status: ClassroomStatus.Active,
+        },
+        {
+          courseId,
+          name: 'Other AI Analytics Classroom',
+          teacherId: otherTeacherId,
+          joinCode: `AIB${Date.now().toString().slice(-5)}`,
+          status: ClassroomStatus.Active,
+        },
+      ].map((classroom) => {
+        const _id = new Types.ObjectId();
+        createdClassroomIds.push(_id);
+        return { ...classroom, _id };
+      }),
+      { ordered: true },
+    );
     classroomId = classroom._id;
     otherClassroomId = otherClassroom._id;
-    createdClassroomIds.push(classroomId, otherClassroomId);
 
-    await enrollmentModel.create([
-      {
-        classroomId,
-        userId: activeStudentId,
-        role: EnrollmentRole.Student,
-        status: EnrollmentStatus.Active,
-      },
-      {
-        classroomId,
-        userId: zeroSubmissionStudentId,
-        role: EnrollmentRole.Student,
-        status: EnrollmentStatus.Active,
-      },
-      {
-        classroomId,
-        userId: submittedWithoutAiStudentId,
-        role: EnrollmentRole.Student,
-        status: EnrollmentStatus.Active,
-      },
-      {
-        classroomId,
-        userId: requestedWithoutDeliveryStudentId,
-        role: EnrollmentRole.Student,
-        status: EnrollmentStatus.Active,
-      },
-      {
-        classroomId,
-        userId: deliveredWithoutResubmissionStudentId,
-        role: EnrollmentRole.Student,
-        status: EnrollmentStatus.Active,
-      },
-      {
-        classroomId,
-        userId: resubmittedWithoutComparableStudentId,
-        role: EnrollmentRole.Student,
-        status: EnrollmentStatus.Active,
-      },
-      {
-        classroomId,
-        userId: removedStudentId,
-        role: EnrollmentRole.Student,
-        status: EnrollmentStatus.Removed,
-        removedAt: new Date(),
-      },
-      {
-        classroomId: otherClassroomId,
-        userId: foreignStudentId,
-        role: EnrollmentRole.Student,
-        status: EnrollmentStatus.Active,
-      },
-    ]);
+    await enrollmentModel.create(
+      [
+        {
+          classroomId,
+          userId: activeStudentId,
+          role: EnrollmentRole.Student,
+          status: EnrollmentStatus.Active,
+        },
+        {
+          classroomId,
+          userId: zeroSubmissionStudentId,
+          role: EnrollmentRole.Student,
+          status: EnrollmentStatus.Active,
+        },
+        {
+          classroomId,
+          userId: submittedWithoutAiStudentId,
+          role: EnrollmentRole.Student,
+          status: EnrollmentStatus.Active,
+        },
+        {
+          classroomId,
+          userId: requestedWithoutDeliveryStudentId,
+          role: EnrollmentRole.Student,
+          status: EnrollmentStatus.Active,
+        },
+        {
+          classroomId,
+          userId: deliveredWithoutResubmissionStudentId,
+          role: EnrollmentRole.Student,
+          status: EnrollmentStatus.Active,
+        },
+        {
+          classroomId,
+          userId: resubmittedWithoutComparableStudentId,
+          role: EnrollmentRole.Student,
+          status: EnrollmentStatus.Active,
+        },
+        {
+          classroomId,
+          userId: removedStudentId,
+          role: EnrollmentRole.Student,
+          status: EnrollmentStatus.Removed,
+          removedAt: new Date(),
+        },
+        {
+          classroomId: otherClassroomId,
+          userId: foreignStudentId,
+          role: EnrollmentRole.Student,
+          status: EnrollmentStatus.Active,
+        },
+      ],
+      { ordered: true },
+    );
 
     const taskDefinitions = [
       'Improved Task',
@@ -685,109 +720,121 @@ describe('Classroom AI learning analytics (e2e)', () => {
       'Unchanged With Issues Task',
     ];
     const tasks = await taskModel.create(
-      taskDefinitions.map((title) => ({
-        title: `Current template: ${title}`,
-        description: `${title} for controlled analytics`,
-        knowledgeModule: 'ai-learning-analytics',
-        status: TaskStatus.Published,
-        createdBy: teacherId,
-        publishedAt: new Date(),
-      })),
+      taskDefinitions.map((title) => {
+        const _id = new Types.ObjectId();
+        createdTaskIds.push(_id);
+        return {
+          _id,
+          title: `Current template: ${title}`,
+          description: `${title} for controlled analytics`,
+          knowledgeModule: 'ai-learning-analytics',
+          status: TaskStatus.Published,
+          createdBy: teacherId,
+          publishedAt: new Date(),
+        };
+      }),
+      { ordered: true },
     );
-    createdTaskIds.push(...tasks.map((task) => task._id));
 
     const now = Date.now();
     const dayMs = 24 * 60 * 60 * 1000;
-    const classroomTasks = await classroomTaskModel.create([
-      {
-        classroomId,
-        taskId: tasks[0]._id,
-        taskSnapshot: {
-          title: taskDefinitions[0],
-          description: tasks[0].description,
-          knowledgeModule: tasks[0].knowledgeModule,
+    const classroomTasks = await classroomTaskModel.create(
+      [
+        {
+          classroomId,
+          taskId: tasks[0]._id,
+          taskSnapshot: {
+            title: taskDefinitions[0],
+            description: tasks[0].description,
+            knowledgeModule: tasks[0].knowledgeModule,
+          },
+          publishedAt: new Date(now - 2 * dayMs),
+          createdBy: teacherId,
         },
-        publishedAt: new Date(now - 2 * dayMs),
-        createdBy: teacherId,
-      },
-      {
-        classroomId,
-        taskId: tasks[1]._id,
-        taskSnapshot: {
-          title: taskDefinitions[1],
-          description: tasks[1].description,
-          knowledgeModule: tasks[1].knowledgeModule,
+        {
+          classroomId,
+          taskId: tasks[1]._id,
+          taskSnapshot: {
+            title: taskDefinitions[1],
+            description: tasks[1].description,
+            knowledgeModule: tasks[1].knowledgeModule,
+          },
+          publishedAt: new Date(now - 20 * dayMs),
+          createdBy: teacherId,
         },
-        publishedAt: new Date(now - 20 * dayMs),
-        createdBy: teacherId,
-      },
-      {
-        classroomId,
-        taskId: tasks[2]._id,
-        taskSnapshot: {
-          title: taskDefinitions[2],
-          description: tasks[2].description,
-          knowledgeModule: tasks[2].knowledgeModule,
+        {
+          classroomId,
+          taskId: tasks[2]._id,
+          taskSnapshot: {
+            title: taskDefinitions[2],
+            description: tasks[2].description,
+            knowledgeModule: tasks[2].knowledgeModule,
+          },
+          publishedAt: new Date(now - 40 * dayMs),
+          createdBy: teacherId,
         },
-        publishedAt: new Date(now - 40 * dayMs),
-        createdBy: teacherId,
-      },
-      {
-        classroomId,
-        taskId: tasks[3]._id,
-        taskSnapshot: {
-          title: taskDefinitions[3],
-          description: tasks[3].description,
-          knowledgeModule: tasks[3].knowledgeModule,
+        {
+          classroomId,
+          taskId: tasks[3]._id,
+          taskSnapshot: {
+            title: taskDefinitions[3],
+            description: tasks[3].description,
+            knowledgeModule: tasks[3].knowledgeModule,
+          },
+          publishedAt: new Date(now - 1.5 * dayMs),
+          createdBy: teacherId,
         },
-        publishedAt: new Date(now - 1.5 * dayMs),
-        createdBy: teacherId,
-      },
-      {
-        classroomId,
-        taskId: tasks[4]._id,
-        taskSnapshot: {
-          title: taskDefinitions[4],
-          description: tasks[4].description,
-          knowledgeModule: tasks[4].knowledgeModule,
+        {
+          classroomId,
+          taskId: tasks[4]._id,
+          taskSnapshot: {
+            title: taskDefinitions[4],
+            description: tasks[4].description,
+            knowledgeModule: tasks[4].knowledgeModule,
+          },
+          publishedAt: new Date(now - dayMs),
+          createdBy: teacherId,
         },
-        publishedAt: new Date(now - dayMs),
-        createdBy: teacherId,
-      },
-      {
-        classroomId,
-        taskId: tasks[5]._id,
-        taskSnapshot: {
-          title: taskDefinitions[5],
-          description: tasks[5].description,
-          knowledgeModule: tasks[5].knowledgeModule,
+        {
+          classroomId,
+          taskId: tasks[5]._id,
+          taskSnapshot: {
+            title: taskDefinitions[5],
+            description: tasks[5].description,
+            knowledgeModule: tasks[5].knowledgeModule,
+          },
+          publishedAt: new Date(now - 0.5 * dayMs),
+          createdBy: teacherId,
         },
-        publishedAt: new Date(now - 0.5 * dayMs),
-        createdBy: teacherId,
-      },
-      {
-        classroomId,
-        taskId: tasks[6]._id,
-        taskSnapshot: {
-          title: taskDefinitions[6],
-          description: tasks[6].description,
-          knowledgeModule: tasks[6].knowledgeModule,
+        {
+          classroomId,
+          taskId: tasks[6]._id,
+          taskSnapshot: {
+            title: taskDefinitions[6],
+            description: tasks[6].description,
+            knowledgeModule: tasks[6].knowledgeModule,
+          },
+          publishedAt: new Date(now - 3 * dayMs),
+          createdBy: teacherId,
         },
-        publishedAt: new Date(now - 3 * dayMs),
-        createdBy: teacherId,
-      },
-      {
-        classroomId: otherClassroomId,
-        taskId: tasks[0]._id,
-        taskSnapshot: {
-          title: taskDefinitions[0],
-          description: tasks[0].description,
-          knowledgeModule: tasks[0].knowledgeModule,
+        {
+          classroomId: otherClassroomId,
+          taskId: tasks[0]._id,
+          taskSnapshot: {
+            title: taskDefinitions[0],
+            description: tasks[0].description,
+            knowledgeModule: tasks[0].knowledgeModule,
+          },
+          publishedAt: new Date(now - 2 * dayMs),
+          createdBy: otherTeacherId,
         },
-        publishedAt: new Date(now - 2 * dayMs),
-        createdBy: otherTeacherId,
-      },
-    ]);
+      ].map((classroomTask) => {
+        const _id = new Types.ObjectId();
+        createdClassroomTaskIds.push(_id);
+        return { ...classroomTask, _id };
+      }),
+      { ordered: true },
+    );
     [
       improvedClassroomTaskId,
       stableClassroomTaskId,
@@ -798,9 +845,6 @@ describe('Classroom AI learning analytics (e2e)', () => {
       unchangedWithIssuesClassroomTaskId,
       otherClassroomTaskId,
     ] = classroomTasks.map((classroomTask) => classroomTask._id);
-    createdClassroomTaskIds.push(
-      ...classroomTasks.map((classroomTask) => classroomTask._id),
-    );
 
     const improvedAnchorTime = new Date(now - 46 * 60 * 60 * 1000);
     const improvedCompletedAt = new Date(now - 45 * 60 * 60 * 1000);
@@ -830,36 +874,34 @@ describe('Classroom AI learning analytics (e2e)', () => {
       submittedAt: improvedPostTime,
       codeText: 'function improve() { return 2; }',
     });
-    await Promise.all([
-      insertJob({
-        submissionId: improvedAnchor._id,
-        taskId: tasks[0]._id,
-        classroomTaskId: improvedClassroomTaskId,
-        studentId: activeStudentId,
-        status: AiFeedbackJobStatus.Succeeded,
-        updatedAt: improvedCompletedAt,
-      }),
-      insertJob({
-        submissionId: improvedPost._id,
-        taskId: tasks[0]._id,
-        classroomTaskId: improvedClassroomTaskId,
-        studentId: activeStudentId,
-        status: AiFeedbackJobStatus.Succeeded,
-        updatedAt: new Date(improvedPostTime.getTime() + 60 * 60 * 1000),
-      }),
-      insertFeedback({
-        submissionId: improvedAnchor._id,
-        severity: FeedbackSeverity.Error,
-      }),
-      insertFeedback({
-        submissionId: improvedAnchor._id,
-        severity: FeedbackSeverity.Warn,
-      }),
-      insertFeedback({
-        submissionId: improvedPost._id,
-        severity: FeedbackSeverity.Warn,
-      }),
-    ]);
+    await insertJob({
+      submissionId: improvedAnchor._id,
+      taskId: tasks[0]._id,
+      classroomTaskId: improvedClassroomTaskId,
+      studentId: activeStudentId,
+      status: AiFeedbackJobStatus.Succeeded,
+      updatedAt: improvedCompletedAt,
+    });
+    await insertJob({
+      submissionId: improvedPost._id,
+      taskId: tasks[0]._id,
+      classroomTaskId: improvedClassroomTaskId,
+      studentId: activeStudentId,
+      status: AiFeedbackJobStatus.Succeeded,
+      updatedAt: new Date(improvedPostTime.getTime() + 60 * 60 * 1000),
+    });
+    await insertFeedback({
+      submissionId: improvedAnchor._id,
+      severity: FeedbackSeverity.Error,
+    });
+    await insertFeedback({
+      submissionId: improvedAnchor._id,
+      severity: FeedbackSeverity.Warn,
+    });
+    await insertFeedback({
+      submissionId: improvedPost._id,
+      severity: FeedbackSeverity.Warn,
+    });
 
     const stableAnchorTime = new Date(now - 19 * dayMs);
     const stablePostTime = new Date(now - 18 * dayMs);
@@ -879,29 +921,27 @@ describe('Classroom AI learning analytics (e2e)', () => {
       submittedAt: stablePostTime,
       codeText: '\nconst stable = 1;\n  console.log(stable);\n',
     });
-    await Promise.all([
-      insertJob({
-        submissionId: stableAnchor._id,
-        taskId: tasks[1]._id,
-        classroomTaskId: stableClassroomTaskId,
-        studentId: activeStudentId,
-        status: AiFeedbackJobStatus.Succeeded,
-        updatedAt: new Date(stableAnchorTime.getTime() + 60 * 60 * 1000),
-      }),
-      insertJob({
-        submissionId: stablePost._id,
-        taskId: tasks[1]._id,
-        classroomTaskId: stableClassroomTaskId,
-        studentId: activeStudentId,
-        status: AiFeedbackJobStatus.Succeeded,
-        updatedAt: new Date(stablePostTime.getTime() + 60 * 60 * 1000),
-      }),
-      insertFeedback({
-        submissionId: stablePost._id,
-        severity: FeedbackSeverity.Error,
-        source: FeedbackSource.Teacher,
-      }),
-    ]);
+    await insertJob({
+      submissionId: stableAnchor._id,
+      taskId: tasks[1]._id,
+      classroomTaskId: stableClassroomTaskId,
+      studentId: activeStudentId,
+      status: AiFeedbackJobStatus.Succeeded,
+      updatedAt: new Date(stableAnchorTime.getTime() + 60 * 60 * 1000),
+    });
+    await insertJob({
+      submissionId: stablePost._id,
+      taskId: tasks[1]._id,
+      classroomTaskId: stableClassroomTaskId,
+      studentId: activeStudentId,
+      status: AiFeedbackJobStatus.Succeeded,
+      updatedAt: new Date(stablePostTime.getTime() + 60 * 60 * 1000),
+    });
+    await insertFeedback({
+      submissionId: stablePost._id,
+      severity: FeedbackSeverity.Error,
+      source: FeedbackSource.Teacher,
+    });
 
     await insertFeedback({
       submissionId: stableAnchor._id,
@@ -930,28 +970,26 @@ describe('Classroom AI learning analytics (e2e)', () => {
       submittedAt: regressedPostTime,
       codeText: 'const regress = broken;',
     });
-    await Promise.all([
-      insertJob({
-        submissionId: regressedAnchor._id,
-        taskId: tasks[2]._id,
-        classroomTaskId: regressedClassroomTaskId,
-        studentId: activeStudentId,
-        status: AiFeedbackJobStatus.Succeeded,
-        updatedAt: new Date(regressedAnchorTime.getTime() + 60 * 60 * 1000),
-      }),
-      insertJob({
-        submissionId: regressedPost._id,
-        taskId: tasks[2]._id,
-        classroomTaskId: regressedClassroomTaskId,
-        studentId: activeStudentId,
-        status: AiFeedbackJobStatus.Succeeded,
-        updatedAt: new Date(regressedPostTime.getTime() + 60 * 60 * 1000),
-      }),
-      insertFeedback({
-        submissionId: regressedPost._id,
-        severity: FeedbackSeverity.Error,
-      }),
-    ]);
+    await insertJob({
+      submissionId: regressedAnchor._id,
+      taskId: tasks[2]._id,
+      classroomTaskId: regressedClassroomTaskId,
+      studentId: activeStudentId,
+      status: AiFeedbackJobStatus.Succeeded,
+      updatedAt: new Date(regressedAnchorTime.getTime() + 60 * 60 * 1000),
+    });
+    await insertJob({
+      submissionId: regressedPost._id,
+      taskId: tasks[2]._id,
+      classroomTaskId: regressedClassroomTaskId,
+      studentId: activeStudentId,
+      status: AiFeedbackJobStatus.Succeeded,
+      updatedAt: new Date(regressedPostTime.getTime() + 60 * 60 * 1000),
+    });
+    await insertFeedback({
+      submissionId: regressedPost._id,
+      severity: FeedbackSeverity.Error,
+    });
 
     await insertFeedback({
       submissionId: regressedAnchor._id,
@@ -1026,32 +1064,30 @@ describe('Classroom AI learning analytics (e2e)', () => {
       submittedAt: unchangedPostTime,
       codeText: 'const unchanged = 2;',
     });
-    await Promise.all([
-      insertJob({
-        submissionId: unchangedAnchor._id,
-        taskId: tasks[6]._id,
-        classroomTaskId: unchangedWithIssuesClassroomTaskId,
-        studentId: activeStudentId,
-        status: AiFeedbackJobStatus.Succeeded,
-        updatedAt: new Date(unchangedAnchorTime.getTime() + 60 * 60 * 1000),
-      }),
-      insertJob({
-        submissionId: unchangedPost._id,
-        taskId: tasks[6]._id,
-        classroomTaskId: unchangedWithIssuesClassroomTaskId,
-        studentId: activeStudentId,
-        status: AiFeedbackJobStatus.Succeeded,
-        updatedAt: new Date(unchangedPostTime.getTime() + 60 * 60 * 1000),
-      }),
-      insertFeedback({
-        submissionId: unchangedAnchor._id,
-        severity: FeedbackSeverity.Warn,
-      }),
-      insertFeedback({
-        submissionId: unchangedPost._id,
-        severity: FeedbackSeverity.Warn,
-      }),
-    ]);
+    await insertJob({
+      submissionId: unchangedAnchor._id,
+      taskId: tasks[6]._id,
+      classroomTaskId: unchangedWithIssuesClassroomTaskId,
+      studentId: activeStudentId,
+      status: AiFeedbackJobStatus.Succeeded,
+      updatedAt: new Date(unchangedAnchorTime.getTime() + 60 * 60 * 1000),
+    });
+    await insertJob({
+      submissionId: unchangedPost._id,
+      taskId: tasks[6]._id,
+      classroomTaskId: unchangedWithIssuesClassroomTaskId,
+      studentId: activeStudentId,
+      status: AiFeedbackJobStatus.Succeeded,
+      updatedAt: new Date(unchangedPostTime.getTime() + 60 * 60 * 1000),
+    });
+    await insertFeedback({
+      submissionId: unchangedAnchor._id,
+      severity: FeedbackSeverity.Warn,
+    });
+    await insertFeedback({
+      submissionId: unchangedPost._id,
+      severity: FeedbackSeverity.Warn,
+    });
 
     await createSubmission({
       classroomTaskId: zeroSubmissionClassroomTaskId,
@@ -1169,8 +1205,8 @@ describe('Classroom AI learning analytics (e2e)', () => {
 
   afterAll(async () => {
     try {
-      if (app && userModel) {
-        await Promise.all([
+      if (fixtureAuthorized) {
+        const cleanupResults = await Promise.allSettled([
           feedbackModel.deleteMany({
             submissionId: { $in: createdSubmissionIds },
           }),
@@ -1190,6 +1226,10 @@ describe('Classroom AI learning analytics (e2e)', () => {
           sessionModel.deleteMany({ userId: { $in: createdUserIds } }),
           userModel.deleteMany({ _id: { $in: createdUserIds } }),
         ]);
+        await expectEmptyDatabase('after scoped cleanup');
+        if (cleanupResults.some((result) => result.status === 'rejected')) {
+          throw new Error('Analytics scoped fixture cleanup failed');
+        }
         const residual = await Promise.all([
           feedbackModel.countDocuments({
             submissionId: { $in: createdSubmissionIds },
@@ -1220,6 +1260,7 @@ describe('Classroom AI learning analytics (e2e)', () => {
     } finally {
       try {
         if (app) await app.close();
+        else await moduleFixture?.close();
         if (userModel) expect(userModel.db.readyState).toBe(0);
         if (app) console.info('Analytics app/DB closed');
       } finally {
@@ -1236,6 +1277,7 @@ describe('Classroom AI learning analytics (e2e)', () => {
   it('enforces authentication, TEACHER role and owner-only non-disclosure', async () => {
     await request(app.getHttpServer())
       .get(`/api/classrooms/${classroomId.toString()}/ai-learning-analytics`)
+      .timeout({ response: 10000, deadline: 15000 })
       .expect(401);
 
     await activeStudentAgent
@@ -1262,6 +1304,12 @@ describe('Classroom AI learning analytics (e2e)', () => {
       .get(`/api/classrooms/${classroomId.toString()}/ai-learning-analytics`)
       .expect(200);
     const body = response.body as AnalyticsOverview;
+    expect(response.body).not.toHaveProperty('summary.stableStudentTaskCount');
+    for (const index of body.taskTrends.keys()) {
+      expect(response.body).not.toHaveProperty(
+        `taskTrends.${index}.stableStudentCount`,
+      );
+    }
 
     expect(body.context).toMatchObject({
       classroomId: classroomId.toString(),
@@ -1295,7 +1343,6 @@ describe('Classroom AI learning analytics (e2e)', () => {
       improvedStudentTaskCount: 1,
       remainedCleanStudentTaskCount: 1,
       unchangedWithIssuesStudentTaskCount: 1,
-      stableStudentTaskCount: 2,
       regressedStudentTaskCount: 1,
       aiStudentCoverageRate: 4 / 6,
       aiTaskCoverageRate: 0.9,
@@ -1312,10 +1359,12 @@ describe('Classroom AI learning analytics (e2e)', () => {
       averageIssueLoadAfter: 0.5,
       averageIssueLoadDelta: 0,
     });
-    expect(body.summary.stableStudentTaskCount).toBe(
-      body.summary.remainedCleanStudentTaskCount +
-        body.summary.unchangedWithIssuesStudentTaskCount,
-    );
+    expect(
+      body.summary.improvedStudentTaskCount +
+        body.summary.remainedCleanStudentTaskCount +
+        body.summary.unchangedWithIssuesStudentTaskCount +
+        body.summary.regressedStudentTaskCount,
+    ).toBe(body.summary.qualityComparableStudentTaskCount);
     expect(body.taskTrends).toHaveLength(7);
     expect(
       body.taskTrends.some(
@@ -1370,7 +1419,6 @@ describe('Classroom AI learning analytics (e2e)', () => {
       qualityComparableStudentCount: 1,
       remainedCleanStudentCount: 1,
       unchangedWithIssuesStudentCount: 0,
-      stableStudentCount: 1,
       remainedCleanRate: 1,
       unchangedWithIssuesRate: 0,
       regressedRate: 0,
@@ -1404,16 +1452,17 @@ describe('Classroom AI learning analytics (e2e)', () => {
       qualityComparableStudentCount: 1,
       remainedCleanStudentCount: 0,
       unchangedWithIssuesStudentCount: 1,
-      stableStudentCount: 1,
       remainedCleanRate: 0,
       unchangedWithIssuesRate: 1,
       regressedRate: 0,
     });
     for (const taskTrend of body.taskTrends) {
-      expect(taskTrend.stableStudentCount).toBe(
-        taskTrend.remainedCleanStudentCount +
-          taskTrend.unchangedWithIssuesStudentCount,
-      );
+      expect(
+        taskTrend.improvedStudentCount +
+          taskTrend.remainedCleanStudentCount +
+          taskTrend.unchangedWithIssuesStudentCount +
+          taskTrend.regressedStudentCount,
+      ).toBe(taskTrend.qualityComparableStudentCount);
     }
   });
 
@@ -1503,6 +1552,15 @@ describe('Classroom AI learning analytics (e2e)', () => {
       .expect(200);
     const first = firstPage.body as AnalyticsStudentList;
     const second = secondPage.body as AnalyticsStudentList;
+    for (const response of [firstPage, secondPage]) {
+      const items = (response.body as AnalyticsStudentList).items;
+      for (const index of items.keys()) {
+        expect(response.body).not.toHaveProperty(
+          `items.${index}.stableTasksCount`,
+        );
+        expect(response.body).not.toHaveProperty(`items.${index}.growthTrend`);
+      }
+    }
 
     expect(first).toMatchObject({
       context: {
@@ -1537,11 +1595,9 @@ describe('Classroom AI learning analytics (e2e)', () => {
       improvedTasksCount: 1,
       remainedCleanTasksCount: 1,
       unchangedWithIssuesTasksCount: 1,
-      stableTasksCount: 2,
       regressedTasksCount: 1,
       overallOutcome: 'NO_NET_CHANGE',
       engagementStatus: 'QUALITY_COMPARABLE',
-      growthTrend: 'STABLE',
     });
     expect(second.items[0]).toMatchObject({
       studentId: zeroSubmissionStudentId.toString(),
@@ -1555,7 +1611,6 @@ describe('Classroom AI learning analytics (e2e)', () => {
       averageIssueLoadDelta: null,
       overallOutcome: 'INSUFFICIENT_DATA',
       engagementStatus: 'NO_SUBMISSION',
-      growthTrend: 'INSUFFICIENT_DATA',
     });
     expect(
       [...first.items, ...second.items].some(
@@ -1655,7 +1710,6 @@ describe('Classroom AI learning analytics (e2e)', () => {
         {
           studentId: activeStudentId.toString(),
           overallOutcome: 'NO_NET_CHANGE',
-          growthTrend: 'STABLE',
         },
       ],
     });
@@ -1789,6 +1843,11 @@ describe('Classroom AI learning analytics (e2e)', () => {
       )
       .expect(200);
     const body = response.body as AnalyticsStudentDetail;
+    expect(response.body).not.toHaveProperty('summary.stableTasksCount');
+    expect(response.body).not.toHaveProperty('summary.growthTrend');
+    for (const index of body.taskPoints.keys()) {
+      expect(response.body).not.toHaveProperty(`taskPoints.${index}.outcome`);
+    }
 
     expect(body.student).toEqual({
       studentId: activeStudentId.toString(),
@@ -1798,10 +1857,8 @@ describe('Classroom AI learning analytics (e2e)', () => {
     expect(body.summary).toMatchObject({
       remainedCleanTasksCount: 1,
       unchangedWithIssuesTasksCount: 1,
-      stableTasksCount: 2,
       overallOutcome: 'NO_NET_CHANGE',
       engagementStatus: 'QUALITY_COMPARABLE',
-      growthTrend: 'STABLE',
     });
     expect(body.taskPoints).toHaveLength(7);
     const improved = body.taskPoints.find(
@@ -1836,7 +1893,6 @@ describe('Classroom AI learning analytics (e2e)', () => {
       issueLoadAfter: 0.5,
       issueLoadDelta: 1,
       detailedOutcome: 'IMPROVED',
-      outcome: 'IMPROVED',
     });
     expect(improved?.baselineReview).toMatchObject({
       provider: null,
@@ -1852,14 +1908,12 @@ describe('Classroom AI learning analytics (e2e)', () => {
       issueLoadAfter: 0,
       issueLoadDelta: 0,
       detailedOutcome: 'REMAINED_CLEAN',
-      outcome: 'STABLE',
     });
     expect(regressed).toMatchObject({
       issueLoadBefore: 0,
       issueLoadAfter: 1,
       issueLoadDelta: -1,
       detailedOutcome: 'REGRESSED',
-      outcome: 'REGRESSED',
     });
     expect(failed).toMatchObject({
       aiRequested: true,
@@ -1869,7 +1923,6 @@ describe('Classroom AI learning analytics (e2e)', () => {
       issueLoadAfter: null,
       issueLoadDelta: null,
       detailedOutcome: 'NOT_COMPARABLE',
-      outcome: 'NOT_COMPARABLE',
     });
     expect(earlyOnly).toMatchObject({
       attemptsCount: 2,
@@ -1878,21 +1931,18 @@ describe('Classroom AI learning analytics (e2e)', () => {
       postFeedbackCodeChanged: false,
       qualityComparable: false,
       detailedOutcome: 'NOT_COMPARABLE',
-      outcome: 'NOT_COMPARABLE',
     });
     expect(zero).toMatchObject({
       attemptsCount: 0,
       aiRequested: false,
       aiDelivered: false,
       detailedOutcome: 'NOT_COMPARABLE',
-      outcome: 'NOT_COMPARABLE',
     });
     expect(unchangedWithIssues).toMatchObject({
       issueLoadBefore: 0.5,
       issueLoadAfter: 0.5,
       issueLoadDelta: 0,
       detailedOutcome: 'UNCHANGED_WITH_ISSUES',
-      outcome: 'STABLE',
     });
   });
 

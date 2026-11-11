@@ -9,14 +9,11 @@ import {
 import {
   AI_LEARNING_ANALYTICS_DETAILED_OUTCOMES,
   AI_LEARNING_ANALYTICS_ENGAGEMENT_STATUSES,
-  AI_LEARNING_ANALYTICS_GROWTH_TRENDS,
-  AI_LEARNING_ANALYTICS_OUTCOMES,
   AI_LEARNING_ANALYTICS_OVERALL_OUTCOMES,
   AiLearningAnalyticsService,
   buildAiLearningAnalyticsStandardSamples,
   deriveAiLearningAnalyticsEngagementStatus,
   deriveAiLearningAnalyticsOverallOutcome,
-  mapAiLearningAnalyticsOverallOutcomeToGrowthTrend,
   normalizeAiLearningAnalyticsCode,
 } from './ai-learning-analytics.service';
 import { AiFeedbackJobStatus } from '../../learning-tasks/ai-feedback/schemas/ai-feedback-job.schema';
@@ -199,19 +196,7 @@ const createServiceHarness = (options: ServiceHarnessOptions = {}) => {
 };
 
 describe('AI learning analytics DTO and public semantics', () => {
-  it('locks the public outcome and growth-trend value sets', () => {
-    expect(AI_LEARNING_ANALYTICS_OUTCOMES).toEqual([
-      'IMPROVED',
-      'STABLE',
-      'REGRESSED',
-      'NOT_COMPARABLE',
-    ]);
-    expect(AI_LEARNING_ANALYTICS_GROWTH_TRENDS).toEqual([
-      'INSUFFICIENT_DATA',
-      'IMPROVING',
-      'STABLE',
-      'DECLINING',
-    ]);
+  it('locks the public detailed outcome, overall outcome and engagement value sets', () => {
     expect(AI_LEARNING_ANALYTICS_DETAILED_OUTCOMES).toEqual([
       'IMPROVED',
       'REMAINED_CLEAN',
@@ -285,7 +270,7 @@ describe('AI learning analytics DTO and public semantics', () => {
     await expect(validate(invalid)).resolves.toHaveLength(3);
   });
 
-  it('derives overall outcomes once and maps them to legacy growth trends', () => {
+  it('derives overall outcomes from comparable count and net delta', () => {
     expect(deriveAiLearningAnalyticsOverallOutcome(0, 10)).toBe(
       'INSUFFICIENT_DATA',
     );
@@ -296,11 +281,6 @@ describe('AI learning analytics DTO and public semantics', () => {
     expect(deriveAiLearningAnalyticsOverallOutcome(2, -1)).toBe(
       'REGRESSED_OVERALL',
     );
-    expect(
-      AI_LEARNING_ANALYTICS_OVERALL_OUTCOMES.map(
-        mapAiLearningAnalyticsOverallOutcomeToGrowthTrend,
-      ),
-    ).toEqual(['INSUFFICIENT_DATA', 'IMPROVING', 'STABLE', 'DECLINING']);
   });
 
   it.each([
@@ -543,7 +523,7 @@ describe('V1.2 independently specified timelines (no database)', () => {
       issueLoadBeforeHalfUnits: 2,
       issueLoadAfterHalfUnits: 3,
       issueLoadDeltaHalfUnits: -1,
-      outcome: 'REGRESSED',
+      detailedOutcome: 'REGRESSED',
     });
     expect(sample.baselineReview?.submissionId).toBe(a._id.toString());
     expect(sample.comparisonReview?.submissionId).toBe(c._id.toString());
@@ -1164,7 +1144,6 @@ describe('AI learning analytics standard sample rules', () => {
       issueLoadAfterHalfUnits: 0,
       issueLoadDeltaHalfUnits: 2,
       detailedOutcome: 'IMPROVED',
-      outcome: 'IMPROVED',
     });
   });
 
@@ -1223,7 +1202,6 @@ describe('AI learning analytics standard sample rules', () => {
       postFeedbackCodeChanged: true,
       qualityComparable: true,
       detailedOutcome: 'REMAINED_CLEAN',
-      outcome: 'STABLE',
     });
   });
 
@@ -1264,7 +1242,6 @@ describe('AI learning analytics standard sample rules', () => {
       postFeedbackCodeChanged: false,
       qualityComparable: false,
       detailedOutcome: 'NOT_COMPARABLE',
-      outcome: 'NOT_COMPARABLE',
     });
   });
 
@@ -1341,18 +1318,17 @@ describe('AI learning analytics standard sample rules', () => {
       issueLoadAfterHalfUnits: 0,
       issueLoadDeltaHalfUnits: 3,
       detailedOutcome: 'IMPROVED',
-      outcome: 'IMPROVED',
     });
   });
 
   it.each([
-    [2, 0, 'IMPROVED', 'IMPROVED'],
-    [0, 0, 'REMAINED_CLEAN', 'STABLE'],
-    [1, 1, 'UNCHANGED_WITH_ISSUES', 'STABLE'],
-    [0, 2, 'REGRESSED', 'REGRESSED'],
+    [2, 0, 'IMPROVED'],
+    [0, 0, 'REMAINED_CLEAN'],
+    [1, 1, 'UNCHANGED_WITH_ISSUES'],
+    [0, 2, 'REGRESSED'],
   ] as const)(
-    'classifies beforeHalfUnits=%s afterHalfUnits=%s as %s with legacy %s',
-    (beforeHalfUnits, afterHalfUnits, detailedOutcome, outcome) => {
+    'classifies beforeHalfUnits=%s afterHalfUnits=%s as %s',
+    (beforeHalfUnits, afterHalfUnits, detailedOutcome) => {
       const studentId = objectId();
       const classroomTaskId = objectId();
       const before = submission({
@@ -1402,7 +1378,8 @@ describe('AI learning analytics standard sample rules', () => {
         ],
       );
 
-      expect(sample).toMatchObject({ detailedOutcome, outcome });
+      expect(sample).toMatchObject({ detailedOutcome });
+      expect(sample).not.toHaveProperty('outcome');
     },
   );
 
@@ -1448,7 +1425,6 @@ describe('AI learning analytics standard sample rules', () => {
       issueLoadAfterHalfUnits: null,
       issueLoadDeltaHalfUnits: null,
       detailedOutcome: 'NOT_COMPARABLE',
-      outcome: 'NOT_COMPARABLE',
     });
   });
 });
@@ -1606,7 +1582,6 @@ describe('AiLearningAnalyticsService aggregation boundaries', () => {
       unchangedWithIssuesTasksCount: 0,
       overallOutcome: 'INSUFFICIENT_DATA',
       engagementStatus: 'NO_SUBMISSION',
-      growthTrend: 'INSUFFICIENT_DATA',
     });
     expect(detail.taskPoints).toHaveLength(1);
     expect(detail.taskPoints[0]).toMatchObject({
@@ -1622,11 +1597,10 @@ describe('AiLearningAnalyticsService aggregation boundaries', () => {
       issueLoadAfter: null,
       issueLoadDelta: null,
       detailedOutcome: 'NOT_COMPARABLE',
-      outcome: 'NOT_COMPARABLE',
     });
   });
 
-  it('returns all four growth trends and does not repeat-weight multiple AI jobs within one student-task sample', async () => {
+  it('returns current overall outcomes and does not repeat-weight multiple AI jobs within one student-task sample', async () => {
     const classroomTaskId = objectId();
     const taskId = objectId();
     const studentIds = Array.from({ length: 5 }, () => objectId());
@@ -1634,11 +1608,11 @@ describe('AiLearningAnalyticsService aggregation boundaries', () => {
     const jobs: ReturnType<typeof job>[] = [];
     const feedbackItems: ReturnType<typeof feedback>[] = [];
     const expectedOutcomes = [
-      ['IMPROVED_OVERALL', 'IMPROVING'],
-      ['NO_NET_CHANGE', 'STABLE'],
-      ['NO_NET_CHANGE', 'STABLE'],
-      ['REGRESSED_OVERALL', 'DECLINING'],
-      ['INSUFFICIENT_DATA', 'INSUFFICIENT_DATA'],
+      'IMPROVED_OVERALL',
+      'NO_NET_CHANGE',
+      'NO_NET_CHANGE',
+      'REGRESSED_OVERALL',
+      'INSUFFICIENT_DATA',
     ];
 
     for (let index = 0; index < studentIds.length; index += 1) {
@@ -1742,16 +1716,33 @@ describe('AiLearningAnalyticsService aggregation boundaries', () => {
       teacherId.toString(),
     );
 
+    expect(result.items.map((item) => item.overallOutcome)).toEqual(
+      expectedOutcomes,
+    );
     expect(
-      result.items.map((item) => [item.overallOutcome, item.growthTrend]),
-    ).toEqual(expectedOutcomes);
+      result.items.map((item) => [
+        item.improvedTasksCount,
+        item.remainedCleanTasksCount,
+        item.unchangedWithIssuesTasksCount,
+        item.regressedTasksCount,
+      ]),
+    ).toEqual([
+      [1, 0, 0, 0],
+      [0, 1, 0, 0],
+      [0, 0, 1, 0],
+      [0, 0, 0, 1],
+      [0, 0, 0, 0],
+    ]);
     for (const item of result.items) {
       expect(item.submittedTasksCount).toBe(1);
       expect(item.aiRequestedTasksCount).toBeLessThanOrEqual(1);
       expect(item.aiDeliveredTasksCount).toBeLessThanOrEqual(1);
-      expect(item.stableTasksCount).toBe(
-        item.remainedCleanTasksCount + item.unchangedWithIssuesTasksCount,
-      );
+      expect(
+        item.improvedTasksCount +
+          item.remainedCleanTasksCount +
+          item.unchangedWithIssuesTasksCount +
+          item.regressedTasksCount,
+      ).toBe(item.qualityComparableTasksCount);
     }
     expect(result.items[1]).toMatchObject({
       remainedCleanTasksCount: 1,
@@ -1767,26 +1758,36 @@ describe('AiLearningAnalyticsService aggregation boundaries', () => {
       {},
       teacherId.toString(),
     );
-    expect(overview.summary.stableStudentTaskCount).toBe(
-      overview.summary.remainedCleanStudentTaskCount +
-        overview.summary.unchangedWithIssuesStudentTaskCount,
-    );
+    expect(
+      overview.summary.improvedStudentTaskCount +
+        overview.summary.remainedCleanStudentTaskCount +
+        overview.summary.unchangedWithIssuesStudentTaskCount +
+        overview.summary.regressedStudentTaskCount,
+    ).toBe(overview.summary.qualityComparableStudentTaskCount);
     expect(overview.summary).toMatchObject({
       qualityComparableStudentTaskCount: 4,
       improvedStudentTaskCount: 1,
       remainedCleanStudentTaskCount: 1,
       unchangedWithIssuesStudentTaskCount: 1,
-      stableStudentTaskCount: 2,
       regressedStudentTaskCount: 1,
       improvedRate: 0.25,
       remainedCleanRate: 0.25,
       unchangedWithIssuesRate: 0.25,
       regressedRate: 0.25,
     });
-    expect(overview.taskTrends[0].stableStudentCount).toBe(
-      overview.taskTrends[0].remainedCleanStudentCount +
-        overview.taskTrends[0].unchangedWithIssuesStudentCount,
-    );
+    expect(overview.taskTrends[0]).toMatchObject({
+      qualityComparableStudentCount: 4,
+      improvedStudentCount: 1,
+      remainedCleanStudentCount: 1,
+      unchangedWithIssuesStudentCount: 1,
+      regressedStudentCount: 1,
+    });
+    expect(
+      overview.taskTrends[0].improvedStudentCount +
+        overview.taskTrends[0].remainedCleanStudentCount +
+        overview.taskTrends[0].unchangedWithIssuesStudentCount +
+        overview.taskTrends[0].regressedStudentCount,
+    ).toBe(overview.taskTrends[0].qualityComparableStudentCount);
   });
 
   it('searches only name and studentNo with trimmed case-insensitive substrings', async () => {
@@ -1963,7 +1964,6 @@ describe('AiLearningAnalyticsService aggregation boundaries', () => {
     expect(improved.items[0]).toMatchObject({
       overallOutcome: 'IMPROVED_OVERALL',
       engagementStatus: 'QUALITY_COMPARABLE',
-      growthTrend: 'IMPROVING',
     });
 
     submissionModel.find.mockClear();

@@ -353,33 +353,31 @@ disclaimer：本分析仅反映 EduForge AI 反馈介入后的作品更新与反
 
 计数 family 的精确命名如下，全部为 number，空样本计数为 0：
 
-- 总览 summary：`activeStudentsCount`；`submittedStudentTaskCount,aiRequestedStudentTaskCount,aiDeliveredStudentTaskCount,postFeedbackResubmittedStudentTaskCount,postFeedbackRevisedStudentTaskCount,postFeedbackCodeChangedStudentTaskCount,qualityComparableStudentTaskCount,improvedStudentTaskCount,remainedCleanStudentTaskCount,unchangedWithIssuesStudentTaskCount,stableStudentTaskCount,regressedStudentTaskCount`。
-- taskTrend：`classroomTaskId,taskId,taskTitle,publishedAt`；`submittedStudentCount,aiRequestedStudentCount,aiDeliveredStudentCount,postFeedbackResubmittedStudentCount,postFeedbackRevisedStudentCount,postFeedbackCodeChangedStudentCount,qualityComparableStudentCount,improvedStudentCount,remainedCleanStudentCount,unchangedWithIssuesStudentCount,stableStudentCount,regressedStudentCount`。
-- 学生 item 与详情 summary 共用 metrics：`submittedTasksCount,aiRequestedTasksCount,aiDeliveredTasksCount,postFeedbackResubmittedTasksCount,postFeedbackRevisedTasksCount,postFeedbackCodeChangedTasksCount,qualityComparableTasksCount,improvedTasksCount,remainedCleanTasksCount,unchangedWithIssuesTasksCount,stableTasksCount,regressedTasksCount`，另含 `overallOutcome,growthTrend,engagementStatus`；列表 item 还包含学生摘要。
+- 总览 summary：`activeStudentsCount`；`submittedStudentTaskCount,aiRequestedStudentTaskCount,aiDeliveredStudentTaskCount,postFeedbackResubmittedStudentTaskCount,postFeedbackRevisedStudentTaskCount,postFeedbackCodeChangedStudentTaskCount,qualityComparableStudentTaskCount,improvedStudentTaskCount,remainedCleanStudentTaskCount,unchangedWithIssuesStudentTaskCount,regressedStudentTaskCount`。
+- taskTrend：`classroomTaskId,taskId,taskTitle,publishedAt`；`submittedStudentCount,aiRequestedStudentCount,aiDeliveredStudentCount,postFeedbackResubmittedStudentCount,postFeedbackRevisedStudentCount,postFeedbackCodeChangedStudentCount,qualityComparableStudentCount,improvedStudentCount,remainedCleanStudentCount,unchangedWithIssuesStudentCount,regressedStudentCount`。
+- 学生 item 与详情 summary 共用 metrics：`submittedTasksCount,aiRequestedTasksCount,aiDeliveredTasksCount,postFeedbackResubmittedTasksCount,postFeedbackRevisedTasksCount,postFeedbackCodeChangedTasksCount,qualityComparableTasksCount,improvedTasksCount,remainedCleanTasksCount,unchangedWithIssuesTasksCount,regressedTasksCount`，另含 `overallOutcome,engagementStatus`；列表 item 还包含学生摘要。
 
 总览 summary 与 taskTrend 共有 rate：`aiTaskCoverageRate,postFeedbackResubmissionRate,postFeedbackRevisionRate,postFeedbackCodeChangeRate,qualityComparableRate,improvedRate,remainedCleanRate,unchangedWithIssuesRate,regressedRate`；summary 另有 `aiStudentCoverageRate,aiDeliveryRate`，学生 metrics 同样提供 `postFeedbackRevisionRate`。所有 rate 均为 number|null，自身零分母为 null，分子0且分母大于0为真实0。summary、taskTrend 和学生 metrics 均返回 `averageIssueLoadBefore,averageIssueLoadAfter,averageIssueLoadDelta:number|null`，无可比样本时为 null；后端不提前舍入比率或均值。
 
 summary、taskTrend 和学生 metrics 均有 `evidenceSummary={sourceUncertainComparableCount,modelChangedComparableCount,simulatedExcludedSampleCount}`，三个非负计数分别提示来源/模型不完整的可比样本、已知模型不同的可比样本及存在被排除模拟评阅的样本；可重叠，不可相加作为分母。
 
-`taskPoint`：`{classroomTaskId,taskId,taskTitle,publishedAt,attemptsCount,aiRequested,aiDelivered,postFeedbackResubmitted,postFeedbackRevised,postFeedbackCodeChanged,qualityComparable,issueLoadBefore,issueLoadAfter,issueLoadDelta,detailedOutcome,outcome,baselineReview,comparisonReview,latestRevision,hasNewerUncomparedRevision,comparisonWarnings}`。未提交点次数为0、上述六个行为布尔值为false；不可比较点三个 issueLoad 为null、两种 outcome 均为 NOT_COMPARABLE。可比较点 issueLoad 是 number，delta 正值表达反馈条目负荷下降，不等同代码正确性或能力变化。
+`taskPoint`：`{classroomTaskId,taskId,taskTitle,publishedAt,attemptsCount,aiRequested,aiDelivered,postFeedbackResubmitted,postFeedbackRevised,postFeedbackCodeChanged,qualityComparable,issueLoadBefore,issueLoadAfter,issueLoadDelta,detailedOutcome,baselineReview,comparisonReview,latestRevision,hasNewerUncomparedRevision,comparisonWarnings}`。未提交点次数为0、上述六个行为布尔值为false；不可比较点三个 issueLoad 为null、detailedOutcome 为 NOT_COMPARABLE。可比较点 issueLoad 是 number，delta 正值表达反馈条目负荷下降，不等同代码正确性或能力变化。
 
 - `aiRequested` 表示有请求 Job；`aiDelivered` 表示有非模拟可用反馈，不能把成功空反馈算作零负荷。`postFeedbackResubmitted` 只指反馈后新增提交，`postFeedbackRevised` 包括可确认的反馈后编辑；两者不改变 attemptsCount。详细时间与选择算法见 Service Owner。
 - `baselineReview/comparisonReview/latestRevision` 均为 object|null，共同形状为 `{submissionId:string,attemptNo:number|null,contentRevision:number|null,submittedAt:string|null,lastEditedAt:string|null,contentVersionAt:string|null,feedbackCompletedAt:string|null,provider:bailian|stub|null,model:string|null}`；时间为 ISO，未知项为null。latestRevision 包括未申请、处理中、失败、空反馈及模拟版本，不限成功评阅；其中无完成事实不伪造完成时间。contentRevision 缺失或非法时投影 null、contentVersionAt 未知；版本有效性及历史补录语义见 [Submission 版本字段说明](#submission-request--response-family)，内容时间算法见 [Service Card 08I](./handoff-backend-service-map.md#service-card-08i)。
 - `hasNewerUncomparedRevision:boolean|null` 表示相对于比较终点（无终点则基线）是否存在较新未比较版本，独立于全局最新版本选择；latestRevision=null 可以与此标记 true 并存。标记 null 可能表示尚无比较参考，也可能表示时间信息不足，不能一律解释为最新版本时序未知或确定false；完整判定见 [Service Card 08I](./handoff-backend-service-map.md#service-card-08i)。
 - `comparisonWarnings` 为稳定原因数组：`EMPTY_FEEDBACK | SIMULATED_REVIEW_EXCLUDED | SOURCE_UNKNOWN | MODEL_UNKNOWN | MODEL_CHANGED | TIME_UNKNOWN`。`SOURCE_UNKNOWN/MODEL_UNKNOWN` 仅检查实际存在的已选 baselineReview/comparisonReview；无比较终点时仍检查已有基线，不为 null 端点或非端点历史记录制造警告，来源已知不代表模型已知。`MODEL_CHANGED` 仍比较两端已知模型；`EMPTY_FEEDBACK/SIMULATED_REVIEW_EXCLUDED/TIME_UNKNOWN` 保留既有样本范围。来源缺失可作已有记录对照，但不能认证为真实 Provider；模型不同允许对照并提示，相同名称也不证明 Prompt 或内部版本相同。
 
-#### Analytics public enums / compatibility
+#### Analytics public enums
 
 | 字段 | 值域 |
 | --- | --- |
-| `outcome` | `IMPROVED \| STABLE \| REGRESSED \| NOT_COMPARABLE` |
 | `detailedOutcome` | `IMPROVED \| REMAINED_CLEAN \| UNCHANGED_WITH_ISSUES \| REGRESSED \| NOT_COMPARABLE` |
 | `overallOutcome` | `INSUFFICIENT_DATA \| IMPROVED_OVERALL \| NO_NET_CHANGE \| REGRESSED_OVERALL` |
-| `growthTrend` | `INSUFFICIENT_DATA \| IMPROVING \| STABLE \| DECLINING` |
 | `engagementStatus` | `NO_SUBMISSION \| SUBMITTED_WITHOUT_AI_REQUEST \| AI_REQUESTED_WITHOUT_DELIVERY \| AI_DELIVERED_WITHOUT_REVISION \| REVISED_WITHOUT_COMPARABLE \| QUALITY_COMPARABLE` |
 
-- V1.2 保留 legacy `stable*Count/growthTrend/outcome`：stable 数量涵盖 remainedClean 与 unchangedWithIssues 两类，二者都兼容投影为 outcome=STABLE；前者表示可比且前后均无 ERROR/WARN，后者表示非零反馈条目负荷持平。其它结果标签为负荷下降、负荷上升和不可对照。
-- overallOutcome 表达当前任务范围净结果，growthTrend 是其 legacy 投影；NO_NET_CHANGE 可能包含改善与恶化抵消，不能理解为时间序列趋势。无可比样本时 overallOutcome/growthTrend 为 INSUFFICIENT_DATA。
+- REMAINED_CLEAN 表示可比且前后均无 ERROR/WARN，UNCHANGED_WITH_ISSUES 表示非零反馈条目负荷持平。其它结果标签为负荷下降、负荷上升和不可对照。
+- overallOutcome 表达当前任务范围净结果；NO_NET_CHANGE 可能包含改善与恶化抵消，不能理解为时间序列趋势。无可比样本时 overallOutcome 为 INSUFFICIENT_DATA。
 - engagementStatus 表示当前范围到达的最深互斥反馈阶段，以作品更新替代旧重提阶段，旧 `AI_DELIVERED_WITHOUT_RESUBMISSION/RESUBMITTED_WITHOUT_COMPARABLE` 不再是现行查询值；时序不足只表示尚无可确认更新，不能断言未修改。产品解释边界见 API；V1.2 基线/最新已评阅内容版本选择、半单位整数算法、比率分母及计算、搜索筛选分页执行顺序唯一由 [Service Card 08I](./handoff-backend-service-map.md#service-card-08i) 维护。
 - 以上投影不返回 codeText、submission 原文、prompt、原始 requests、Provider 原始响应、参考资料、API key、密码/hash 或内部半分字段；学生公开摘要不暴露 email 或完整 User。
 
