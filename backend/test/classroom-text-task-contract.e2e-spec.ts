@@ -2075,6 +2075,7 @@ describe('A1 classroom text task backend contract (HTTP)', () => {
       classroomTaskId: old._id,
       studentId: userIds[2],
       attemptNo: 1,
+      contentRevision: 0,
       content: { codeText: 'old source', language: 'typescript' },
       status: SubmissionStatus.Submitted,
     });

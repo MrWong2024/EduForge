@@ -1,4 +1,5 @@
 import { INestApplication, ValidationPipe } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { Test, TestingModule } from '@nestjs/testing';
 import { getModelToken } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
@@ -6,7 +7,6 @@ import * as bcrypt from 'bcryptjs';
 import cookieParser from 'cookie-parser';
 import request from 'supertest';
 import { App } from 'supertest/types';
-import { AppModule } from '../src/app.module';
 import { User } from '../src/modules/users/schemas/user.schema';
 import { Session } from '../src/modules/auth/schemas/session.schema';
 import { Course } from '../src/modules/courses/schemas/course.schema';
@@ -28,14 +28,12 @@ import {
   AiFeedbackJob,
   AiFeedbackJobStatus,
 } from '../src/modules/learning-tasks/ai-feedback/schemas/ai-feedback-job.schema';
+import {
+  assertLocalStandardTestAuthentication,
+  assertLocalStandardTestEnvironment,
+} from './helpers/local-test-database-auth';
 
 jest.setTimeout(30000);
-
-const ensureMongoUri = () => {
-  if (!process.env.MONGO_URI) {
-    throw new Error('MONGO_URI is required for classroom review-pack e2e.');
-  }
-};
 
 type CreatedCourseResponse = { id: string };
 type CreatedClassroomResponse = { id: string; joinCode: string };
@@ -139,15 +137,22 @@ describe('Classroom Review Pack (e2e)', () => {
   };
 
   beforeAll(async () => {
-    ensureMongoUri();
-
     previousWorkerEnabled = process.env.AI_FEEDBACK_WORKER_ENABLED;
     process.env.AI_FEEDBACK_WORKER_ENABLED = 'false';
     previousDebugEnabled = process.env.AI_FEEDBACK_DEBUG_ENABLED;
     process.env.AI_FEEDBACK_DEBUG_ENABLED = 'true';
 
+    const appModuleImport =
+      jest.requireActual<typeof import('../src/app.module')>(
+        '../src/app.module',
+      );
+    assertLocalStandardTestEnvironment({
+      nodeEnv: process.env.NODE_ENV,
+      purpose: process.env.EDUFORGE_DATABASE_PURPOSE,
+      mongoUri: process.env.MONGO_URI,
+    });
     const moduleFixture: TestingModule = await Test.createTestingModule({
-      imports: [AppModule],
+      imports: [appModuleImport.AppModule],
     }).compile();
 
     app = moduleFixture.createNestApplication();
@@ -162,9 +167,15 @@ describe('Classroom Review Pack (e2e)', () => {
     app.use(cookieParser());
     await app.init();
 
-    teacherAgent = request.agent(app.getHttpServer());
-    studentAAgent = request.agent(app.getHttpServer());
-    studentBAgent = request.agent(app.getHttpServer());
+    teacherAgent = request
+      .agent(app.getHttpServer())
+      .timeout({ response: 5000, deadline: 10000 });
+    studentAAgent = request
+      .agent(app.getHttpServer())
+      .timeout({ response: 5000, deadline: 10000 });
+    studentBAgent = request
+      .agent(app.getHttpServer())
+      .timeout({ response: 5000, deadline: 10000 });
 
     userModel = app.get(getModelToken(User.name));
     sessionModel = app.get(getModelToken(Session.name));
@@ -177,19 +188,45 @@ describe('Classroom Review Pack (e2e)', () => {
     feedbackModel = app.get(getModelToken(Feedback.name));
     aiFeedbackJobModel = app.get(getModelToken(AiFeedbackJob.name));
 
+    userModel.db.set('maxTimeMS', 10000);
+    const database = userModel.db.db;
+    if (!database) throw new Error('Missing connected test database');
+    const auth = await database.command(
+      { connectionStatus: 1, showPrivileges: false },
+      { timeoutMS: 5000 },
+    );
+    const config = app.get(ConfigService);
+    assertLocalStandardTestAuthentication({
+      nodeEnv: process.env.NODE_ENV,
+      purpose: process.env.EDUFORGE_DATABASE_PURPOSE,
+      mongoUri: config.get<string>('MONGO_URI'),
+      databaseName: database.databaseName,
+      connectedHost: userModel.db.host,
+      authInfo: auth.authInfo,
+    });
+    expect(config.get('AI_FEEDBACK_PROVIDER')).toBe('stub');
+    expect(config.get('AI_FEEDBACK_WORKER_ENABLED')).toBe(false);
+    expect(config.get('AI_FEEDBACK_DEBUG_ENABLED')).toBe('true');
+    expect(config.get('MAIL_PROVIDER')).toBe('log');
+
     const [teacherHash, studentAHash, studentBHash] = await Promise.all([
       bcrypt.hash(teacherPassword, 10),
       bcrypt.hash(studentPassword, 10),
       bcrypt.hash(studentPassword, 10),
     ]);
 
-    const [teacher, studentA, studentB] = await Promise.all([
+    teacherId = new Types.ObjectId().toString();
+    studentAId = new Types.ObjectId().toString();
+    studentBId = new Types.ObjectId().toString();
+    await Promise.all([
       userModel.create({
+        _id: new Types.ObjectId(teacherId),
         email: teacherEmail,
         passwordHash: teacherHash,
         roles: ['teacher'],
       }),
       userModel.create({
+        _id: new Types.ObjectId(studentAId),
         email: studentAEmail,
         passwordHash: studentAHash,
         roles: ['student'],
@@ -197,6 +234,7 @@ describe('Classroom Review Pack (e2e)', () => {
         studentNo: 'S-A-0001',
       }),
       userModel.create({
+        _id: new Types.ObjectId(studentBId),
         email: studentBEmail,
         passwordHash: studentBHash,
         roles: ['student'],
@@ -205,98 +243,101 @@ describe('Classroom Review Pack (e2e)', () => {
       }),
     ]);
 
-    teacherId = teacher._id.toString();
-    studentAId = studentA._id.toString();
-    studentBId = studentB._id.toString();
-
     await login(teacherAgent, teacherEmail, teacherPassword);
     await login(studentAAgent, studentAEmail, studentPassword);
     await login(studentBAgent, studentBEmail, studentPassword);
   });
 
   afterAll(async () => {
-    if (previousWorkerEnabled === undefined) {
-      delete process.env.AI_FEEDBACK_WORKER_ENABLED;
-    } else {
-      process.env.AI_FEEDBACK_WORKER_ENABLED = previousWorkerEnabled;
-    }
-    if (previousDebugEnabled === undefined) {
-      delete process.env.AI_FEEDBACK_DEBUG_ENABLED;
-    } else {
-      process.env.AI_FEEDBACK_DEBUG_ENABLED = previousDebugEnabled;
-    }
+    try {
+      const cleanup: Promise<unknown>[] = [];
+      if (classroomTaskId) {
+        const classroomTaskObjectId = new Types.ObjectId(classroomTaskId);
+        const submissions = await submissionModel
+          .find({ classroomTaskId: classroomTaskObjectId })
+          .select('_id')
+          .lean<Array<{ _id: Types.ObjectId }>>()
+          .exec();
+        const submissionObjectIds = submissions.map((row) => row._id);
 
-    const cleanup: Promise<unknown>[] = [];
-    if (classroomTaskId) {
-      const classroomTaskObjectId = new Types.ObjectId(classroomTaskId);
-      const submissions = await submissionModel
-        .find({ classroomTaskId: classroomTaskObjectId })
-        .select('_id')
-        .lean<Array<{ _id: Types.ObjectId }>>()
-        .exec();
-      const submissionObjectIds = submissions.map((row) => row._id);
+        if (submissionObjectIds.length > 0) {
+          cleanup.push(
+            feedbackModel.deleteMany({
+              submissionId: { $in: submissionObjectIds },
+            }),
+          );
+          cleanup.push(
+            aiFeedbackJobModel.deleteMany({
+              submissionId: { $in: submissionObjectIds },
+            }),
+          );
+        }
 
-      if (submissionObjectIds.length > 0) {
         cleanup.push(
-          feedbackModel.deleteMany({
-            submissionId: { $in: submissionObjectIds },
-          }),
-        );
-        cleanup.push(
-          aiFeedbackJobModel.deleteMany({
-            submissionId: { $in: submissionObjectIds },
+          submissionModel.deleteMany({
+            classroomTaskId: classroomTaskObjectId,
           }),
         );
       }
-
-      cleanup.push(
-        submissionModel.deleteMany({
-          classroomTaskId: classroomTaskObjectId,
-        }),
-      );
+      if (classroomTaskId) {
+        cleanup.push(
+          classroomTaskModel.deleteOne({
+            _id: new Types.ObjectId(classroomTaskId),
+          }),
+        );
+      }
+      if (taskId) {
+        cleanup.push(taskModel.deleteOne({ _id: new Types.ObjectId(taskId) }));
+      }
+      if (classroomId) {
+        cleanup.push(
+          enrollmentModel.deleteMany({
+            classroomId: new Types.ObjectId(classroomId),
+          }),
+        );
+        cleanup.push(
+          classroomModel.deleteOne({
+            _id: new Types.ObjectId(classroomId),
+          }),
+        );
+      }
+      if (courseId) {
+        cleanup.push(
+          courseModel.deleteOne({ _id: new Types.ObjectId(courseId) }),
+        );
+      }
+      const userObjectIds = [
+        teacherId,
+        studentAId,
+        studentBId,
+        ...extraStudentIds,
+      ]
+        .filter(Boolean)
+        .map((id) => new Types.ObjectId(id));
+      if (userObjectIds.length > 0) {
+        cleanup.push(
+          sessionModel.deleteMany({ userId: { $in: userObjectIds } }),
+        );
+        cleanup.push(userModel.deleteMany({ _id: { $in: userObjectIds } }));
+      }
+      await Promise.all(cleanup);
+    } finally {
+      try {
+        if (app) await app.close();
+        if (userModel) expect(userModel.db.readyState).toBe(0);
+      } finally {
+        if (previousWorkerEnabled === undefined) {
+          delete process.env.AI_FEEDBACK_WORKER_ENABLED;
+        } else {
+          process.env.AI_FEEDBACK_WORKER_ENABLED = previousWorkerEnabled;
+        }
+        if (previousDebugEnabled === undefined) {
+          delete process.env.AI_FEEDBACK_DEBUG_ENABLED;
+        } else {
+          process.env.AI_FEEDBACK_DEBUG_ENABLED = previousDebugEnabled;
+        }
+      }
     }
-    if (classroomTaskId) {
-      cleanup.push(
-        classroomTaskModel.deleteOne({
-          _id: new Types.ObjectId(classroomTaskId),
-        }),
-      );
-    }
-    if (taskId) {
-      cleanup.push(taskModel.deleteOne({ _id: new Types.ObjectId(taskId) }));
-    }
-    if (classroomId) {
-      cleanup.push(
-        enrollmentModel.deleteMany({
-          classroomId: new Types.ObjectId(classroomId),
-        }),
-      );
-      cleanup.push(
-        classroomModel.deleteOne({
-          _id: new Types.ObjectId(classroomId),
-        }),
-      );
-    }
-    if (courseId) {
-      cleanup.push(
-        courseModel.deleteOne({ _id: new Types.ObjectId(courseId) }),
-      );
-    }
-    const userObjectIds = [
-      teacherId,
-      studentAId,
-      studentBId,
-      ...extraStudentIds,
-    ]
-      .filter(Boolean)
-      .map((id) => new Types.ObjectId(id));
-    if (userObjectIds.length > 0) {
-      cleanup.push(sessionModel.deleteMany({ userId: { $in: userObjectIds } }));
-      cleanup.push(userModel.deleteMany({ _id: { $in: userObjectIds } }));
-    }
-    await Promise.all(cleanup);
-
-    await app.close();
   });
 
   it('builds stable student tiers by latest submission with AI status and AI error count', async () => {
@@ -355,8 +396,17 @@ describe('Classroom Review Pack (e2e)', () => {
         .expect(201),
     ]);
 
+    const studentCId = new Types.ObjectId();
+    const studentDId = new Types.ObjectId();
+    const studentEId = new Types.ObjectId();
+    extraStudentIds.push(
+      studentCId.toString(),
+      studentDId.toString(),
+      studentEId.toString(),
+    );
     const [studentC, studentD, studentE] = await userModel.create([
       {
+        _id: studentCId,
         email: `studentC.review.pack.${Date.now()}@example.com`,
         passwordHash: await bcrypt.hash(studentPassword, 10),
         roles: ['student'],
@@ -364,6 +414,7 @@ describe('Classroom Review Pack (e2e)', () => {
         studentNo: 'S-C-0001',
       },
       {
+        _id: studentDId,
         email: `studentD.review.pack.${Date.now()}@example.com`,
         passwordHash: await bcrypt.hash(studentPassword, 10),
         roles: ['student'],
@@ -371,17 +422,12 @@ describe('Classroom Review Pack (e2e)', () => {
         studentNo: 'S-D-0001',
       },
       {
+        _id: studentEId,
         email: `studentE.review.pack.${Date.now()}@example.com`,
         passwordHash: await bcrypt.hash(studentPassword, 10),
         roles: ['student'],
       },
     ]);
-    extraStudentIds.push(
-      studentC._id.toString(),
-      studentD._id.toString(),
-      studentE._id.toString(),
-    );
-
     await enrollmentModel.create([
       {
         classroomId: new Types.ObjectId(classroomId),
@@ -410,6 +456,7 @@ describe('Classroom Review Pack (e2e)', () => {
         classroomTaskId: classroomTaskObjectId,
         studentId: new Types.ObjectId(studentId),
         attemptNo,
+        contentRevision: 0,
         submittedAt: new Date(),
         isLate: false,
         lateBySeconds: 0,

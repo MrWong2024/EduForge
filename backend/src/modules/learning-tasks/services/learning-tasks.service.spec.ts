@@ -1355,6 +1355,50 @@ describe('LearningTasksService teacher feedback update authorship', () => {
 
 describe('AI review detail eligibility (no database)', () => {
   afterEach(() => jest.restoreAllMocks());
+
+  it.each([
+    ['missing', undefined],
+    ['null', null],
+    ['string', '0'],
+    ['array', [0]],
+    ['negative', -1],
+    ['fractional', 0.5],
+    ['unsafe integer', Number.MAX_SAFE_INTEGER + 1],
+  ])(
+    'projects a %s revision as unknown and blocks editing',
+    async (_label, revision) => {
+      const h = createHarness();
+      if (revision === undefined) {
+        Reflect.deleteProperty(h.submission, 'contentRevision');
+      } else {
+        Object.assign(h.submission, { contentRevision: revision });
+      }
+      const student = { id: h.ids.studentId.toString(), roles: ['student'] };
+
+      const detail = await h.service.getSubmissionDetail(
+        h.ids.submissionId.toString(),
+        student,
+      );
+      expect(detail).toMatchObject({
+        contentRevision: null,
+        editing: { canEdit: false, reason: 'INVALID_STATE' },
+        aiReview: { canRequest: true },
+      });
+      await expect(
+        h.service.requestAiFeedback(h.ids.submissionId.toString(), student, {
+          expectedRevision: 0,
+        }),
+      ).rejects.toMatchObject({
+        status: 409,
+        response: { code: 'SUBMISSION_INVALID_STATE' },
+      });
+      expect(h.submissionModel.findOneAndUpdate).not.toHaveBeenCalled();
+      expect(
+        h.aiFeedbackJobService.ensureJobForSubmission,
+      ).not.toHaveBeenCalled();
+    },
+  );
+
   it('reuses request eligibility for an authorized detail with no Job', async () => {
     const h = createHarness();
     const detail = await h.service.getSubmissionDetail(
@@ -1404,6 +1448,7 @@ describe('Submission classroom association contract (no database)', () => {
       taskId: objectId(),
       studentId: objectId(),
       attemptNo: 1,
+      contentRevision: 0,
       content: submissionDto.content,
       status: SubmissionStatus.Submitted,
     };
@@ -1418,6 +1463,34 @@ describe('Submission classroom association contract (no database)', () => {
     ).toMatchObject({ kind: 'required' });
     expect(
       new model({ ...fields, classroomTaskId: objectId() }).validateSync(),
+    ).toBeUndefined();
+  });
+
+  it('requires a persisted content revision in offline Schema validation', () => {
+    const schema = SubmissionSchema.clone();
+    schema.set('autoCreate', false);
+    schema.set('autoIndex', false);
+    const model = new Mongoose().model<Submission>('OfflineSubmission', schema);
+    const fields = {
+      taskId: objectId(),
+      classroomTaskId: objectId(),
+      studentId: objectId(),
+      attemptNo: 1,
+      content: submissionDto.content,
+      status: SubmissionStatus.Submitted,
+    };
+
+    const missing = new model(fields);
+    expect(missing.contentRevision).toBeUndefined();
+    expect(missing.validateSync()?.errors.contentRevision).toMatchObject({
+      kind: 'required',
+    });
+    expect(
+      new model({ ...fields, contentRevision: null }).validateSync()?.errors
+        .contentRevision,
+    ).toMatchObject({ kind: 'required' });
+    expect(
+      new model({ ...fields, contentRevision: 0 }).validateSync(),
     ).toBeUndefined();
   });
 

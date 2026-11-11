@@ -82,13 +82,8 @@ type TaskTitleLean = Pick<Task, 'title'> & WithId;
 type StudentPublicLean = Pick<User, 'name' | 'studentNo'> & WithId;
 type AnalyticsSubmissionLean = Pick<
   Submission,
-  | 'classroomTaskId'
-  | 'studentId'
-  | 'attemptNo'
-  | 'submittedAt'
-  | 'contentRevision'
-  | 'lastEditedAt'
-> & { content: { codeText: string } } & WithId;
+  'classroomTaskId' | 'studentId' | 'attemptNo' | 'submittedAt' | 'lastEditedAt'
+> & { content: { codeText: string }; contentRevision?: unknown } & WithId;
 type AnalyticsJobLean = Pick<
   AiFeedbackJob,
   'submissionId' | 'status' | 'provider'
@@ -299,24 +294,23 @@ export const deriveAiLearningAnalyticsEngagementStatus = (metrics: {
     : 'QUALITY_COMPARABLE';
 };
 
+const isValidContentRevision = (revision: unknown): revision is number =>
+  typeof revision === 'number' &&
+  Number.isSafeInteger(revision) &&
+  revision >= 0;
+
 const contentVersionTimestamp = (
   submission: AnalyticsSubmissionLean,
 ): number | null => {
-  const submittedAt = toValidTimestamp(submission.submittedAt);
   const revision = submission.contentRevision;
-  if (
-    revision !== undefined &&
-    (!Number.isSafeInteger(revision) || revision < 0)
-  )
-    return null;
-  if (revision !== undefined && revision > 0) {
+  if (!isValidContentRevision(revision)) return null;
+  const submittedAt = toValidTimestamp(submission.submittedAt);
+  if (revision > 0) {
     const editedAt = toValidTimestamp(submission.lastEditedAt);
     return submittedAt !== null && editedAt !== null && editedAt >= submittedAt
       ? editedAt
       : null;
   }
-  // Legacy initial versions have no revision or edit record. An inconsistent
-  // edit record is not evidence that the present content existed at submission.
   return submission.lastEditedAt === undefined ? submittedAt : null;
 };
 
@@ -357,11 +351,9 @@ const reviewProjection = (
     Number.isSafeInteger(submission.attemptNo) && submission.attemptNo > 0
       ? submission.attemptNo
       : null,
-  contentRevision:
-    Number.isSafeInteger(submission.contentRevision) &&
-    (submission.contentRevision ?? -1) >= 0
-      ? (submission.contentRevision ?? null)
-      : null,
+  contentRevision: isValidContentRevision(submission.contentRevision)
+    ? submission.contentRevision
+    : null,
   submittedAt: timestampIso(toValidTimestamp(submission.submittedAt)),
   lastEditedAt: timestampIso(toValidTimestamp(submission.lastEditedAt)),
   contentVersionAt: timestampIso(contentVersionTimestamp(submission)),

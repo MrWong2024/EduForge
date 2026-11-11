@@ -61,10 +61,10 @@ export class Submission {
   @Prop({ required: true, type: SubmissionContentSchema })
   content!: SubmissionContent;
 
-  // No schema default: historical documents remain distinguishable from invalid
-  // persisted values. New submissions explicitly write revision zero.
-  @Prop({ type: Number, min: 0 })
-  contentRevision?: number;
+  // New submissions explicitly write revision zero. A default would hide a
+  // missing persisted version when hydrating an existing submission.
+  @Prop({ type: Number, required: true, min: 0 })
+  contentRevision!: number;
 
   @Prop({ type: Date })
   lastEditedAt?: Date;

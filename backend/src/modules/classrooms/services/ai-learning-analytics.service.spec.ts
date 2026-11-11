@@ -47,7 +47,7 @@ const submission = (params: {
   attemptNo: number;
   submittedAt: string;
   codeText: string;
-  contentRevision?: number;
+  contentRevision: number;
   lastEditedAt?: string;
 }) => ({
   _id: params.id ?? objectId(),
@@ -358,7 +358,7 @@ describe('V1.2 independently specified timelines (no database)', () => {
         contentRevision: 0,
       });
     const reviewed = (
-      item: ReturnType<typeof submission>,
+      item: { _id: Types.ObjectId },
       hour: number,
       model = 'model-a',
     ) =>
@@ -371,7 +371,7 @@ describe('V1.2 independently specified timelines (no database)', () => {
         requests: [{ claimNo: 1, provider: 'bailian', model }],
       });
     const item = (
-      value: ReturnType<typeof submission>,
+      value: { _id: Types.ObjectId },
       severity = FeedbackSeverity.Info,
     ) => feedback({ submissionId: value._id, severity });
     return { studentId, classroomTaskId, draft, reviewed, item };
@@ -912,6 +912,64 @@ describe('V1.2 independently specified timelines (no database)', () => {
     expect(missingCompletion.comparisonWarnings).toContain('TIME_UNKNOWN');
   });
 
+  it.each([
+    ['missing', {}],
+    ['null', { contentRevision: null }],
+    ['array', { contentRevision: [0] }],
+  ])(
+    'keeps submission and review facts with a %s revision and unknown content time',
+    (_label, revisionFields) => {
+      const t = timeline();
+      const first = t.draft(1, 0);
+      const second = {
+        _id: objectId(),
+        studentId: t.studentId,
+        classroomTaskId: t.classroomTaskId,
+        attemptNo: 2,
+        submittedAt: new Date(at(2)),
+        content: { codeText: 'different', language: 'typescript' },
+        ...revisionFields,
+      };
+      const firstReview = t.reviewed(first, 1);
+      const secondReview = t.reviewed(second, 3);
+      const secondFeedback = t.item(second);
+      const [sample] = buildAiLearningAnalyticsStandardSamples(
+        [first, second],
+        [firstReview, secondReview],
+        [t.item(first), secondFeedback],
+      );
+      expect(sample).toMatchObject({
+        attemptsCount: 2,
+        aiRequested: true,
+        aiDelivered: true,
+        postFeedbackResubmitted: true,
+        postFeedbackRevised: true,
+        postFeedbackCodeChanged: false,
+        qualityComparable: false,
+        comparisonReview: null,
+        latestRevision: null,
+        hasNewerUncomparedRevision: null,
+      });
+      expect(sample.comparisonWarnings).toEqual(['TIME_UNKNOWN']);
+
+      const [secondOnly] = buildAiLearningAnalyticsStandardSamples(
+        [second],
+        [secondReview],
+        [secondFeedback],
+      );
+      expect(secondOnly).toMatchObject({
+        aiRequested: true,
+        aiDelivered: true,
+        baselineReview: {
+          contentRevision: null,
+          submittedAt: at(2),
+          contentVersionAt: null,
+          feedbackCompletedAt: at(3),
+        },
+      });
+    },
+  );
+
   it('aggregates one sample per student-task without rounding or double-counting overlapping evidence', async () => {
     const timelines = [timeline(), timeline(), timeline()];
     const submissions: ReturnType<typeof submission>[] = [];
@@ -1031,6 +1089,7 @@ describe('AI learning analytics standard sample rules', () => {
       attemptNo: 1,
       submittedAt: '2026-01-01T00:00:00.000Z',
       codeText: 'anchor',
+      contentRevision: 0,
     });
     const sameAttemptLaterId = submission({
       id: laterId,
@@ -1039,6 +1098,7 @@ describe('AI learning analytics standard sample rules', () => {
       attemptNo: 1,
       submittedAt: '2026-01-01T00:00:00.000Z',
       codeText: 'not-anchor',
+      contentRevision: 0,
     });
     const post = submission({
       id: postId,
@@ -1047,6 +1107,7 @@ describe('AI learning analytics standard sample rules', () => {
       attemptNo: 2,
       submittedAt: '2026-01-03T00:00:00.000Z',
       codeText: 'post',
+      contentRevision: 0,
     });
 
     const samples = buildAiLearningAnalyticsStandardSamples(
@@ -1109,6 +1170,7 @@ describe('AI learning analytics standard sample rules', () => {
       attemptNo: 1,
       submittedAt: '2026-02-01T00:00:00.000Z',
       codeText: 'before',
+      contentRevision: 0,
     });
     const beforeCompletion = submission({
       studentId,
@@ -1116,6 +1178,7 @@ describe('AI learning analytics standard sample rules', () => {
       attemptNo: 2,
       submittedAt: '2026-02-01T01:00:00.000Z',
       codeText: 'ignored',
+      contentRevision: 0,
     });
     const afterCompletion = submission({
       studentId,
@@ -1123,6 +1186,7 @@ describe('AI learning analytics standard sample rules', () => {
       attemptNo: 3,
       submittedAt: '2026-02-01T03:00:00.000Z',
       codeText: 'after',
+      contentRevision: 0,
     });
     const samples = buildAiLearningAnalyticsStandardSamples(
       [anchor, beforeCompletion, afterCompletion],
@@ -1165,6 +1229,7 @@ describe('AI learning analytics standard sample rules', () => {
       attemptNo: 1,
       submittedAt: '2026-02-01T00:00:00.000Z',
       codeText: 'before',
+      contentRevision: 0,
     });
     const tooEarly = submission({
       studentId,
@@ -1172,6 +1237,7 @@ describe('AI learning analytics standard sample rules', () => {
       attemptNo: 2,
       submittedAt: '2026-02-01T01:00:00.000Z',
       codeText: 'after',
+      contentRevision: 0,
     });
     const samples = buildAiLearningAnalyticsStandardSamples(
       [anchor, tooEarly],
@@ -1217,6 +1283,7 @@ describe('AI learning analytics standard sample rules', () => {
       attemptNo: 1,
       submittedAt: '2026-03-01T00:00:00.000Z',
       codeText: 'a',
+      contentRevision: 0,
     });
     const after = submission({
       studentId,
@@ -1224,6 +1291,7 @@ describe('AI learning analytics standard sample rules', () => {
       attemptNo: 2,
       submittedAt: '2026-03-02T00:00:00.000Z',
       codeText: 'b',
+      contentRevision: 0,
     });
     const samples = buildAiLearningAnalyticsStandardSamples(
       [before, after],
@@ -1286,6 +1354,7 @@ describe('AI learning analytics standard sample rules', () => {
         attemptNo: 1,
         submittedAt: '2026-04-01T00:00:00.000Z',
         codeText: 'a',
+        contentRevision: 0,
       });
       const after = submission({
         studentId,
@@ -1293,6 +1362,7 @@ describe('AI learning analytics standard sample rules', () => {
         attemptNo: 2,
         submittedAt: '2026-04-02T00:00:00.000Z',
         codeText: 'b',
+        contentRevision: 0,
       });
       const toFeedback = (submissionId: Types.ObjectId, halfUnits: number) => [
         ...(halfUnits === 0
@@ -1338,6 +1408,7 @@ describe('AI learning analytics standard sample rules', () => {
       attemptNo: 1,
       submittedAt: '2026-05-01T00:00:00.000Z',
       codeText: 'a',
+      contentRevision: 0,
     });
     const after = submission({
       studentId,
@@ -1345,6 +1416,7 @@ describe('AI learning analytics standard sample rules', () => {
       attemptNo: 2,
       submittedAt: '2026-05-02T00:00:00.000Z',
       codeText: 'b',
+      contentRevision: 0,
     });
     const [sample] = buildAiLearningAnalyticsStandardSamples(
       [before, after],
@@ -1558,6 +1630,7 @@ describe('AiLearningAnalyticsService aggregation boundaries', () => {
         attemptNo: 1,
         submittedAt: `2026-06-0${index + 1}T00:00:00.000Z`,
         codeText: 'before',
+        contentRevision: 0,
       });
       const after = submission({
         studentId: studentIds[index],
@@ -1565,6 +1638,7 @@ describe('AiLearningAnalyticsService aggregation boundaries', () => {
         attemptNo: 2,
         submittedAt: `2026-06-0${index + 1}T03:00:00.000Z`,
         codeText: 'after',
+        contentRevision: 0,
       });
       submissions.push(before, after);
       if (index < 4) {
@@ -1792,6 +1866,7 @@ describe('AiLearningAnalyticsService aggregation boundaries', () => {
       attemptNo: 1,
       submittedAt: '2026-07-01T00:00:00.000Z',
       codeText: 'before',
+      contentRevision: 0,
     });
     const after = submission({
       studentId: studentIds[0],
@@ -1799,6 +1874,7 @@ describe('AiLearningAnalyticsService aggregation boundaries', () => {
       attemptNo: 2,
       submittedAt: '2026-07-02T00:00:00.000Z',
       codeText: 'after',
+      contentRevision: 0,
     });
     const {
       service,
@@ -1923,6 +1999,7 @@ describe('AiLearningAnalyticsService aggregation boundaries', () => {
       attemptNo: 1,
       submittedAt: '2020-01-01T00:00:00.000Z',
       codeText: 'old but included',
+      contentRevision: 0,
     });
     const {
       service,

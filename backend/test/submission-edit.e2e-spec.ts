@@ -1,13 +1,13 @@
-import { INestApplication, ValidationPipe } from '@nestjs/common';
+import { INestApplication } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { getModelToken } from '@nestjs/mongoose';
 import { Test } from '@nestjs/testing';
 import * as bcrypt from 'bcryptjs';
-import cookieParser from 'cookie-parser';
 import { Model, Types } from 'mongoose';
 import request from 'supertest';
 import { App } from 'supertest/types';
 import { AppModule } from '../src/app.module';
+import { configureApp } from '../src/app.setup';
 import { Session } from '../src/modules/auth/schemas/session.schema';
 import { ClassroomTask } from '../src/modules/classrooms/classroom-tasks/schemas/classroom-task.schema';
 import { Enrollment } from '../src/modules/classrooms/enrollments/schemas/enrollment.schema';
@@ -49,6 +49,7 @@ type Detail = Resource & {
   reviewStartedAt: string | null;
   editing: { canEdit: boolean; reason: string | null; message: string | null };
   content: { language: string; codeText: string; submissionNote: string };
+  meta?: { aiUsageDeclaration?: string };
 };
 type Published = Resource & { taskId: string };
 const original = {
@@ -169,15 +170,7 @@ describe('B1-2 submission content edits and review admission (HTTP)', () => {
       imports: [AppModule],
     }).compile();
     app = module.createNestApplication();
-    app.setGlobalPrefix('api');
-    app.use(cookieParser());
-    app.useGlobalPipes(
-      new ValidationPipe({
-        whitelist: true,
-        transform: true,
-        forbidNonWhitelisted: true,
-      }),
-    );
+    configureApp(app);
     await app.init();
     users = app.get(getModelToken(User.name));
     sessions = app.get(getModelToken(Session.name));
@@ -703,9 +696,14 @@ describe('B1-2 submission content edits and review admission (HTTP)', () => {
     const final = await detail(student, created.id);
     expect(final.contentRevision).toBe(1);
     expect(final.content).toEqual(winner);
-    expect(
-      (responses.find((r) => r.status === 409)!.body as { code: string }).code,
-    ).toBe('SUBMISSION_REVISION_CONFLICT');
+    const conflict = responses.find((response) => response.status === 409);
+    expect(conflict?.body).toMatchObject({
+      statusCode: 409,
+      path: submissionUrl(created.id),
+      message: '作品内容已变化，请查看最新提交并核对草稿后明确继续。',
+    });
+    expect(conflict?.body).not.toHaveProperty('code');
+    expect(conflict?.body).not.toHaveProperty('reason');
     await noReviewRecords(created.id);
   });
 
@@ -756,9 +754,14 @@ describe('B1-2 submission content edits and review admission (HTTP)', () => {
     await giveFeedback(created.id).expect(201);
     const firstPin = (await detail(student, created.id)).reviewStartedAt;
     const denied = await edit(created.id).expect(409);
-    expect((denied.body as { code: string }).code).toBe(
-      'SUBMISSION_REVIEW_STARTED',
-    );
+    expect(denied.body).toMatchObject({
+      statusCode: 409,
+      path: submissionUrl(created.id),
+      message:
+        '本次提交已进入评阅，不能再修改作品；草稿仍保留，请核对提交详情。',
+    });
+    expect(denied.body).not.toHaveProperty('code');
+    expect(denied.body).not.toHaveProperty('reason');
     await giveFeedback(created.id, 0, {
       ...reviewPayload,
       message: 'Additional feedback.',
@@ -1046,37 +1049,160 @@ describe('B1-2 submission content edits and review admission (HTTP)', () => {
     ).toBe(1);
   });
 
-  it('projects historical missing revisions as zero without read backfill and supports all new write entry points', async () => {
-    for (const action of ['edit', 'feedback', 'ai']) {
-      const created = await submit(await publish());
-      await submissions.collection.updateOne(
-        { _id: new Types.ObjectId(created.id) },
-        { $unset: { contentRevision: '', reviewStartedAt: '' } },
-      );
-      const before = await raw(created.id);
-      const legacy = await detail(student, created.id);
-      expect(legacy.contentRevision).toBe(0);
-      expect(legacy.editing.canEdit).toBe(true);
-      expect(await raw(created.id)).toEqual(before);
-      if (action === 'edit') {
-        await edit(created.id).expect(200);
-        expect((await raw(created.id))?.contentRevision).toBe(1);
-      } else {
-        await (
-          action === 'feedback' ? giveFeedback(created.id) : askAi(created.id)
-        ).expect(action === 'feedback' ? 201 : 200);
-        expect((await detail(student, created.id)).contentRevision).toBe(0);
-        expect((await detail(student, created.id)).reviewStartedAt).toEqual(
-          expect.any(String),
-        );
-      }
+  it('keeps missing revisions unknown and readable while rejecting all new writes without backfill', async () => {
+    const created = await submit(await publish());
+    await submissions.collection.updateOne(
+      { _id: new Types.ObjectId(created.id) },
+      { $unset: { contentRevision: '' } },
+    );
+    const before = await raw(created.id);
+    expect(before).not.toBeNull();
+    expect(before).not.toHaveProperty('contentRevision');
+    expect(before).not.toHaveProperty('reviewStartedAt');
+    for (const agent of [student, teacher]) {
+      const view = await detail(agent, created.id);
+      expect(view.contentRevision).toBeNull();
+      expect(view.content).toEqual(original);
+      expect(view.meta).toEqual({ aiUsageDeclaration: 'Synthetic test only' });
+      expect(view.reviewStartedAt).toBeNull();
     }
+    expect((await detail(student, created.id)).editing).toMatchObject({
+      canEdit: false,
+      reason: 'INVALID_STATE',
+    });
+    expect(await raw(created.id)).toEqual(before);
+    await edit(created.id, 0, changed, otherStudent).expect(403);
+    for (const [response, path] of [
+      [await edit(created.id), submissionUrl(created.id)],
+      [await giveFeedback(created.id), submissionUrl(created.id) + '/feedback'],
+      [
+        await askAi(created.id),
+        submissionUrl(created.id) + '/ai-feedback/request',
+      ],
+    ] as const) {
+      expect(response.status).toBe(409);
+      expect(response.body).toMatchObject({
+        statusCode: 409,
+        path,
+        message: '提交的版本或评阅状态无效，当前操作已停止，请联系教师核对。',
+      });
+      expect(response.body).not.toHaveProperty('code');
+      expect(response.body).not.toHaveProperty('reason');
+    }
+    expect(await raw(created.id)).toEqual(before);
+    await noReviewRecords(created.id);
+  });
+
+  it.each(['missing', 'array'] as const)(
+    'rejects a revision made %s after review validation but before the real Mongo CAS',
+    async (revisionState) => {
+      const created = await submit(await publish());
+      const database = submissions.db.db;
+      if (!database) throw new Error('Missing connected test database');
+      expect((await raw(created.id))?.contentRevision).toBe(0);
+      let beforeWrite: Awaited<ReturnType<typeof raw>> | undefined;
+      let restoreExec: (() => void) | undefined;
+      const actualFindOneAndUpdate = submissions.findOneAndUpdate.bind(
+        submissions,
+      ) as Model<Submission>['findOneAndUpdate'];
+      const writeSpy = jest
+        .spyOn(submissions, 'findOneAndUpdate')
+        .mockImplementationOnce((filter, update, options) => {
+          const query = actualFindOneAndUpdate<Submission>(
+            filter,
+            update,
+            options,
+          );
+          const execSpy = jest
+            .spyOn(query, 'exec')
+            .mockImplementationOnce(async (): Promise<Submission | null> => {
+              // The service has read revision 0 and validated review admission.
+              // Corrupt only this owned fixture immediately before the real CAS.
+              await database
+                .collection(submissions.collection.name)
+                .updateOne(
+                  { _id: new Types.ObjectId(created.id) },
+                  revisionState === 'missing'
+                    ? { $unset: { contentRevision: '' } }
+                    : { $set: { contentRevision: [0] } },
+                );
+              beforeWrite = await raw(created.id);
+              expect(beforeWrite).not.toBeNull();
+              if (revisionState === 'missing') {
+                expect(beforeWrite).not.toHaveProperty('contentRevision');
+              } else {
+                expect(beforeWrite?.contentRevision).toEqual([0]);
+              }
+              expect(beforeWrite).not.toHaveProperty('reviewStartedAt');
+              execSpy.mockRestore();
+              return query.exec();
+            });
+          restoreExec = () => execSpy.mockRestore();
+          return query;
+        });
+      try {
+        const rejected = await giveFeedback(created.id).expect(409);
+        expect(writeSpy).toHaveBeenCalledTimes(1);
+        expect(beforeWrite).toBeDefined();
+        expect(rejected.body).toMatchObject({
+          statusCode: 409,
+          path: submissionUrl(created.id) + '/feedback',
+          message: '提交的版本或评阅状态无效，当前操作已停止，请联系教师核对。',
+        });
+        expect(rejected.body).not.toHaveProperty('code');
+        expect(rejected.body).not.toHaveProperty('reason');
+        expect(await raw(created.id)).toEqual(beforeWrite);
+        await noReviewRecords(created.id);
+      } finally {
+        restoreExec?.();
+        writeSpy.mockRestore();
+      }
+    },
+  );
+
+  it('keeps existing feedback readable and author-editable when the submission revision is missing', async () => {
+    const created = await submit(await publish());
+    const accepted = (await giveFeedback(created.id).expect(201))
+      .body as Resource;
+    await submissions.collection.updateOne(
+      { _id: new Types.ObjectId(created.id) },
+      { $unset: { contentRevision: '' } },
+    );
+    const before = await raw(created.id);
+    expect(before).not.toHaveProperty('contentRevision');
+    for (const agent of [student, teacher]) {
+      const response = await agent
+        .get(submissionUrl(created.id) + '/feedback')
+        .expect(200);
+      expect(response.body).toEqual([
+        expect.objectContaining({
+          id: accepted.id,
+          message: reviewPayload.message,
+        }),
+      ]);
+    }
+    expect(await raw(created.id)).toEqual(before);
+    const edited = await teacher
+      .patch(submissionUrl(created.id) + '/feedback/' + accepted.id)
+      .send({ message: 'Clarified existing teacher feedback.' })
+      .expect(200);
+    expect(edited.body).toMatchObject({
+      id: accepted.id,
+      createdBy: userIds[0].toHexString(),
+      message: 'Clarified existing teacher feedback.',
+    });
+    expect(await raw(created.id)).toEqual(before);
+    const associated = { submissionId: new Types.ObjectId(created.id) };
+    expect(await feedback.countDocuments(associated)).toBe(1);
+    expect(await jobs.countDocuments(associated)).toBe(0);
   });
 
   it('rejects illegal persisted revisions and review states at every write entry without repairing them', async () => {
     // Raw collection writes are restricted to these intentional corruption-only fixtures.
     const invalidFields: Record<string, unknown>[] = [
-      ...[null, '0', -1, 0.5].map((contentRevision) => ({ contentRevision })),
+      ...[null, '0', -1, 0.5, [0]].map((contentRevision) => ({
+        contentRevision,
+      })),
       ...[null, '2026-01-01', 0].map((reviewStartedAt) => ({
         reviewStartedAt,
       })),
@@ -1092,18 +1218,29 @@ describe('B1-2 submission content edits and review admission (HTTP)', () => {
         .collection(submissions.collection.name)
         .updateOne({ _id: new Types.ObjectId(created.id) }, { $set: fields });
       const before = await raw(created.id);
+      expect(before).toMatchObject(fields);
       const view = await detail(student, created.id);
       expect(view.editing.canEdit).toBe(false);
       if ('contentRevision' in fields) expect(view.contentRevision).toBeNull();
-      for (const response of [
-        await edit(created.id),
-        await giveFeedback(created.id),
-        await askAi(created.id),
-      ]) {
+      for (const [response, path] of [
+        [await edit(created.id), submissionUrl(created.id)],
+        [
+          await giveFeedback(created.id),
+          submissionUrl(created.id) + '/feedback',
+        ],
+        [
+          await askAi(created.id),
+          submissionUrl(created.id) + '/ai-feedback/request',
+        ],
+      ] as const) {
         expect(response.status).toBe(409);
-        expect((response.body as { code: string }).code).toBe(
-          'SUBMISSION_INVALID_STATE',
-        );
+        expect(response.body).toMatchObject({
+          statusCode: 409,
+          path,
+          message: '提交的版本或评阅状态无效，当前操作已停止，请联系教师核对。',
+        });
+        expect(response.body).not.toHaveProperty('code');
+        expect(response.body).not.toHaveProperty('reason');
       }
       expect(await raw(created.id)).toEqual(before);
       await noReviewRecords(created.id);

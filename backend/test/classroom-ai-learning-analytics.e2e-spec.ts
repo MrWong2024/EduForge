@@ -291,6 +291,7 @@ describe('Classroom AI learning analytics (e2e)', () => {
       taskId: params.taskId,
       studentId: params.studentId,
       attemptNo: params.attemptNo,
+      contentRevision: 0,
       submittedAt: params.submittedAt,
       isLate: false,
       lateBySeconds: 0,

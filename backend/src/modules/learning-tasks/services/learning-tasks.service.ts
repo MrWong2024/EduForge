@@ -1226,7 +1226,6 @@ export class LearningTasksService {
     submission: SubmissionWithMeta,
   ): number | null {
     const revision: unknown = submission.contentRevision;
-    if (revision === undefined) return 0;
     return typeof revision === 'number' &&
       Number.isSafeInteger(revision) &&
       revision >= 0
@@ -1279,14 +1278,13 @@ export class LearningTasksService {
   }
 
   private submissionRevisionFilter(expectedRevision: number) {
-    return expectedRevision === 0
-      ? {
-          $or: [
-            { contentRevision: 0 },
-            { contentRevision: { $exists: false } },
-          ],
-        }
-      : { contentRevision: expectedRevision };
+    return {
+      contentRevision: expectedRevision,
+      // Query equality also matches array elements. Check the stored field type.
+      $expr: {
+        $in: [{ $type: '$contentRevision' }, ['int', 'long', 'double']],
+      },
+    };
   }
 
   private throwSubmissionConflict(
