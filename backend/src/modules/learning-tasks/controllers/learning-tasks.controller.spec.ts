@@ -1,4 +1,3 @@
-import { BadRequestException } from '@nestjs/common';
 import { GUARDS_METADATA } from '@nestjs/common/constants';
 import { ROLES_KEY } from '../../../common/decorators/roles.decorator';
 import { RolesGuard } from '../../../common/guards/roles.guard';
@@ -11,14 +10,10 @@ import { LearningTasksController } from './learning-tasks.controller';
 
 describe('LearningTasksController', () => {
   const createController = () => {
-    const restoreError = new BadRequestException(
-      'Archived task templates cannot be restored to draft; clone as draft instead',
-    );
     const learningTasksService = {
       archiveTask: jest
         .fn()
         .mockResolvedValue({ id: 'task-1', status: 'ARCHIVED' }),
-      restoreTask: jest.fn().mockRejectedValue(restoreError),
     };
     const controller = new LearningTasksController(
       learningTasksService as unknown as LearningTasksService,
@@ -27,7 +22,7 @@ describe('LearningTasksController', () => {
       {} as unknown as LearningTasksReportsService,
     );
 
-    return { controller, learningTasksService, restoreError };
+    return { controller, learningTasksService };
   };
 
   it('delegates archiveTask to the service with the current teacher id', async () => {
@@ -57,41 +52,6 @@ describe('LearningTasksController', () => {
     const guards = Reflect.getMetadata(
       GUARDS_METADATA,
       archiveHandler as (...args: unknown[]) => unknown,
-    ) as unknown[] | undefined;
-
-    expect(roles).toEqual(TEACHER_ROLES);
-    expect(guards).toEqual([RolesGuard]);
-  });
-
-  it('delegates restoreTask and passes through the disabled restore rejection unchanged', async () => {
-    const { controller, learningTasksService, restoreError } =
-      createController();
-
-    await expect(
-      controller.restoreTask('task-1', { id: 'teacher-1' }),
-    ).rejects.toBe(restoreError);
-
-    expect(learningTasksService.restoreTask).toHaveBeenCalledWith(
-      'task-1',
-      'teacher-1',
-    );
-  });
-
-  it('keeps restoreTask behind teacher roles and RolesGuard', () => {
-    createController();
-    const restoreHandler = Object.getOwnPropertyDescriptor(
-      LearningTasksController.prototype,
-      'restoreTask',
-    )?.value as ((...args: unknown[]) => unknown) | undefined;
-    expect(restoreHandler).toBeDefined();
-
-    const roles = Reflect.getMetadata(
-      ROLES_KEY,
-      restoreHandler as (...args: unknown[]) => unknown,
-    ) as string[] | undefined;
-    const guards = Reflect.getMetadata(
-      GUARDS_METADATA,
-      restoreHandler as (...args: unknown[]) => unknown,
     ) as unknown[] | undefined;
 
     expect(roles).toEqual(TEACHER_ROLES);

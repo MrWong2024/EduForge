@@ -65,7 +65,6 @@ Notes:
 | GET    | `/api/courses`                    | 教师分页查询课程。                      |
 | GET    | `/api/courses/:id`                | 教师获取单课程详情。                    |
 | GET    | `/api/courses/:courseId/overview` | 课程总览（AB）。                        |
-| POST   | `/api/courses/:id/archive`        | 归档课程。                              |
 
 Notes:
 
@@ -73,7 +72,7 @@ Notes:
 - 总览是当前课程口径下的提交覆盖与 AI 运行概览，支持无时间下界的历史读取；各窗口、兼容提交率与整体覆盖率的区别见 [DTO 课程总览](./handoff-backend-dto-cheatsheet.md#课程总览)，聚合见 [Service Card 08C](./handoff-backend-service-map.md#service-card-08c)。
 - 课程状态为 `ACTIVE | ARCHIVED`；PATCH 支持归档与恢复。已归档课程可通过状态更新恢复，但不允许普通内容编辑。
 - 仅无任何班级引用的空课程可删除；非空时返回 `409 Conflict`，`code=COURSE_NOT_EMPTY`，message=`该课程下已有班级记录，不能删除，只能归档`。
-- 兼容保留 POST archive，收口到相同归档行为；引用检查与内部一致性见 [Service Card 03](./handoff-backend-service-map.md#service-card-03)。课程分类是对齐坐标，不构成外键或额外权限边界；字段与返回数据见 [DTO Courses](./handoff-backend-dto-cheatsheet.md#courses)。
+- 引用检查与内部一致性见 [Service Card 03](./handoff-backend-service-map.md#service-card-03)。课程分类是对齐坐标，不构成外键或额外权限边界；字段与返回数据见 [DTO Courses](./handoff-backend-dto-cheatsheet.md#courses)。
 
 ## Classrooms
 
@@ -95,7 +94,6 @@ Notes:
 | GET    | `/api/classrooms/:classroomId/export/snapshot`        | 教学数据快照导出（Z9）。                                                                                                  |
 | GET    | `/api/classrooms/:id`                                 | 获取班级详情（teacher owner 或 student member）。                                                                         |
 | GET    | `/api/classrooms/:id/students`                        | 教师分页查看班级正式成员列表（默认 Enrollment ACTIVE；`includeRemoved=1/true` 可包含 REMOVED）。                          |
-| POST   | `/api/classrooms/:id/archive`                         | 教师归档班级。                                                                                                            |
 | POST   | `/api/classrooms/:id/students/:uid/remove`            | 教师移除学生。                                                                                                            |
 
 Notes:
@@ -112,7 +110,7 @@ Notes:
 - Analytics 以课堂任务发布时间界定范围，三个入口仅纳入状态为合法标量字符串 ACTIVE/CLOSED 的任务，排除 RECALLED、缺失、null、未知值及数组等非法类型；保留入选任务的完整提交链，并支持当前查询临时排除。学生列表的 q 只匹配姓名/学号，不区分大小写，按字符串子串匹配；q、overallOutcome 与 engagementStatus 采用 AND 组合。非法 Query 按 DTO 校验拒绝（`400`）。方法学 V1.2 取代旧“首个后续版本”比较，区分新增提交与作品更新；公开参数、比较追溯、来源提示及 nullable 指标见 [DTO Analytics](./handoff-backend-dto-cheatsheet.md#ai-learning-analytics)，配对与搜索筛选分页算法见 [Service Card 08I](./handoff-backend-service-map.md#service-card-08i)。
 - Analytics 为只读记录对照，不回填、重评、解锁或改写历史业务事实。可用反馈交付排除已知模拟评阅与成功空反馈，历史来源未知不认证为真实模型；不同来源/模型、未比较较新版本及证据不足均提供安全提示。分析仅反映现存作品更新与反馈条目负荷，不覆盖全部 AI 使用，不是缺陷数、正确率、正式成绩、学习能力或因果贡献结论，也不能证明已阅读、理解或采纳。净结果可能相互抵消，不代表时间序列趋势；反馈阶段不表示态度、AI 依赖、能力或风险。
 - Snapshot 是 teacher owner 的体积受控教学数据快照导出，超量数据附带截断提示；Query、meta/notes、公开投影与敏感省略见 [DTO Snapshot](./handoff-backend-dto-cheatsheet.md#classroom-export-snapshot)，组合与截断策略见 [Service Card 08H](./handoff-backend-service-map.md#service-card-08h)。
-- 班级状态为 `ACTIVE | ARCHIVED`，PATCH 支持归档/恢复，保留 POST archive。仅无 ClassroomTask 且无 Enrollment 记录（包含 REMOVED 历史）的空班级可删除；只有旧 studentIds 残留不再阻止删除。非空时返回 `409 Conflict`，`code=CLASSROOM_NOT_EMPTY`，message=`该班级已有成员或任务记录，不能删除，只能归档`。
+- 班级状态为 `ACTIVE | ARCHIVED`，PATCH 支持归档/恢复。仅无 ClassroomTask 且无 Enrollment 记录（包含 REMOVED 历史）的空班级可删除；只有旧 studentIds 残留不再阻止删除。非空时返回 `409 Conflict`，`code=CLASSROOM_NOT_EMPTY`，message=`该班级已有成员或任务记录，不能删除，只能归档`。
 
 ## Classroom Tasks（Classrooms 子资源）
 
@@ -156,10 +154,8 @@ Notes:
 | PATCH  | `/api/learning-tasks/tasks/:id`                                      | 更新任务。                                        |
 | POST   | `/api/learning-tasks/tasks/:id/publish`                              | 发布任务。                                        |
 | POST   | `/api/learning-tasks/tasks/:id/archive`                              | 将作者自己的已发布任务模板归档。                  |
-| POST   | `/api/learning-tasks/tasks/:id/restore`                              | 兼容保留入口；稳定返回 400，不再恢复归档模板。    |
 | GET    | `/api/learning-tasks/tasks`                                          | 分页查询任务。                                    |
 | GET    | `/api/learning-tasks/tasks/:id`                                      | 任务详情。                                        |
-| POST   | `/api/learning-tasks/tasks/:id/submissions`                          | 旧入口：409，提示从班级任务入口提交。      |
 | GET    | `/api/learning-tasks/tasks/:id/submissions/mine`                     | 学生查看自己的提交与 `aiFeedbackStatus`。         |
 | GET    | `/api/learning-tasks/tasks/:id/submissions`                          | 教师分页查看某任务提交。                          |
 | GET    | `/api/learning-tasks/submissions/:id`                                | 提交详情及安全 AI 评阅摘要（学生本人或有权教师可见）。      |
@@ -179,11 +175,10 @@ Notes:
 - 创建/保存模板先验证最终生效的 ZIP 引用；创建 PUBLISHED、DRAFT 实际 publish 及课堂发布均须读取验证。DTO 非法和缺失/损坏/不可读/不支持/超限资料返回 400，使用引用/条目序号及安全原因，不暴露系统路径；不保存部分编辑、不创建无效实例。模板已 PUBLISHED 的重复 publish 保持既有幂等语义。配置及公开投影见 [DTO ZIP 资料引用](./handoff-backend-dto-cheatsheet.md#zip-资料引用配置)。
 - publish 为 teacher only、作者 only；DRAFT 可发布，PUBLISHED 幂等返回当前模板，ARCHIVED 返回 `400 Archived task templates cannot be published`。
 - archive 为 teacher only、作者 only；仅 PUBLISHED 可归档，其余返回 `400 Only published task templates can be archived`。被 ClassroomTask 引用仍可归档，不影响已发布实例运行。
-- restore 仅作为 teacher/作者的兼容入口，稳定返回 `400 Archived task templates cannot be restored to draft; clone as draft instead`，不再恢复归档模板。
 - 模板列表仅纳入实际保存的合法标量 visibility：mine 为本人的 PRIVATE/SHARED 模板，shared 为实际 SHARED（包含本人共享模板），all 为本人合法模板与实际共享模板的并集；合法值及原 scope、status、分类、知识模块和难度条件共同在分页与计数前过滤，items 与 total 使用同一完整条件。createdBy 查询兼容保持，不能扩大权限。发布候选 onlyMine=true 与默认/false 均先排除异常 visibility，再按本人/他人共享、PUBLISHED、已发布排除及原筛选排序规则处理。
-- 存储 visibility 只接受原值严格等于 PRIVATE/SHARED，不 trim、转换大小写或强制转换；缺失、null、空白、未知值、数组等均非法，响应不补合法默认值。作者详情遇非法值返回 `409 Task has invalid visibility`；非作者仅能读取实际 SHARED，PRIVATE 或非法值均为 `404 Task not found`。update/publish/archive 保持原权限检查优先（非作者 update/publish 为 404，archive 为 403），通过后先拒绝非法存量，再修改或保存；重复 publish 也检查，普通 PATCH 即使提供合法 visibility 也不能顺带修复。restore 的固定拒绝保持。
+- 存储 visibility 只接受原值严格等于 PRIVATE/SHARED，不 trim、转换大小写或强制转换；缺失、null、空白、未知值、数组等均非法，响应不补合法默认值。作者详情遇非法值返回 `409 Task has invalid visibility`；非作者仅能读取实际 SHARED，PRIVATE 或非法值均为 `404 Task not found`。update/publish/archive 保持原权限检查优先（非作者 update/publish 为 404，archive 为 403），通过后先拒绝非法存量，再修改或保存；重复 publish 也检查，普通 PATCH 即使提供合法 visibility 也不能顺带修复。
 - 新课堂发布先校验教师身份、班级 owner 与班级运行态，再检查模板：不存在为原 404；非作者使用 PRIVATE 或非法值为 `404 Task not found`，作者遇非法值为上述 409。该检查早于快照、资料引用验证和实例创建，合法模板仍遵循原 PUBLISHED、难度、引用及重复发布合同。
-- 新作品只经课堂实例入口创建；旧通用提交 POST 返回 409，message=“请从班级任务入口提交。”。模板级 submissions/stats/common-issues 继续要求模板作者权限，仅纳入该教师自有班级中属于当前模板的课堂实例；范围过滤先于分页、total、学生去重和反馈聚合。共享模板不授予作者访问他人班级作品的权限。学生 mine 仍仅本人；这些列表及学生看板只接受标量 ObjectId 的 classroomTaskId，不纳入无关联或非法类型提交，不按 taskId 推测归属。
+- 新作品只经课堂实例入口创建。模板级 submissions/stats/common-issues 继续要求模板作者权限，仅纳入该教师自有班级中属于当前模板的课堂实例；范围过滤先于分页、total、学生去重和反馈聚合。共享模板不授予作者访问他人班级作品的权限。学生 mine 仍仅本人；这些列表及学生看板只接受标量 ObjectId 的 classroomTaskId，不纳入无关联或非法类型提交，不按 taskId 推测归属。
 - 提交详情与反馈读取要求有效课堂关联：学生本人可读合法历史作品，不额外要求当前 ACTIVE Enrollment 或 ACTIVE 班级；教师权限仅来自所属班级 owner，不回退模板作者。正常无权用户仍为 `403`；Submission、Task、Feedback 不存在及 Feedback 不属于该提交时保留相应 `404`。字段及 detail/list 的代码暴露区别见 [DTO Submission](./handoff-backend-dto-cheatsheet.md#submission-request--response-family)。
 - 提交详情、反馈 GET/POST/PATCH、提交 PATCH 与 AI request 在基础身份/权限前置检查后统一校验关联：classroomTaskId 缺失、null 或非标量 ObjectId 返回 `409 Submission has no valid classroom task`；实例不存在返回 `404 Classroom task not found`；实例与提交的 taskId 不一致返回 `409 Submission does not match classroom task`；所属班级不存在返回 `404 Classroom not found`。关联失败早于作品修改、评阅版本固定及 Feedback/Job 写入；提交 PATCH 的关联异常不再沿用旧 `403`。
 - 所有新提交均不自动创建 AI Job，也不因提交动作固定评阅版本；师生统一从正式 AI request 主动申请。该产品能力受登录、RBAC 与资源归属保护，不受 AI_FEEDBACK_DEBUG_ENABLED 门禁影响。按保存的 classroomTaskId 校验提交/实例/班级关联及快照：学生须本人、Enrollment ACTIVE、班级/实例 ACTIVE；教师须所属班级 owner，可评阅已移出学生的既有作品。旧策略字段缺失或残留均不控制申请资格。合法请求复用既有 Job 的真实状态幂等返回 200，包括 FAILED/DEAD/SUCCEEDED；不重置次数或重新排队，无 retry/reset 入口。合法申请仍先返回 Job，完整输入限额拒绝在异步处理后从详情读取，不改变作品提交成功；无新增预检接口。

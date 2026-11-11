@@ -19,7 +19,6 @@ import { CurrentUser } from '../../../common/decorators/current-user.decorator';
 import { CreateTaskDto } from '../dto/create-task.dto';
 import { UpdateTaskDto } from '../dto/update-task.dto';
 import { QueryTaskDto } from '../dto/query-task.dto';
-import { CreateSubmissionDto } from '../dto/create-submission.dto';
 import { UpdateSubmissionDto } from '../dto/update-submission.dto';
 import { CreateFeedbackDto } from '../dto/create-feedback.dto';
 import { UpdateFeedbackDto } from '../dto/update-feedback.dto';
@@ -79,13 +78,6 @@ export class LearningTasksController {
 
   @UseGuards(RolesGuard)
   @Roles(...TEACHER_ROLES)
-  @Post('tasks/:id/restore')
-  restoreTask(@Param('id') id: string, @CurrentUser() user: { id: string }) {
-    return this.learningTasksService.restoreTask(id, user.id);
-  }
-
-  @UseGuards(RolesGuard)
-  @Roles(...TEACHER_ROLES)
   @Get('tasks')
   listTasks(@Query() query: QueryTaskDto, @CurrentUser() user: { id: string }) {
     return this.learningTasksService.listTasks(query, user.id);
@@ -96,17 +88,6 @@ export class LearningTasksController {
   @Get('tasks/:id')
   getTask(@Param('id') id: string, @CurrentUser() user: { id: string }) {
     return this.learningTasksService.getTask(id, user.id);
-  }
-
-  @UseGuards(RolesGuard)
-  @Roles(...STUDENT_ROLES)
-  @Post('tasks/:id/submissions')
-  createSubmission(
-    @Param('id') taskId: string,
-    @Body() dto: CreateSubmissionDto,
-    @CurrentUser() user: { id: string },
-  ) {
-    return this.learningTasksService.createSubmission(taskId, dto, user.id);
   }
 
   @UseGuards(RolesGuard)

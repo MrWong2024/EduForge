@@ -224,7 +224,9 @@ describe('A1 classroom text task backend contract (HTTP)', () => {
         namespace,
     );
     const config = app.get(ConfigService);
+    expect(config.get('AI_FEEDBACK_WORKER_ENABLED')).toBe(false);
     expect(config.get('AI_FEEDBACK_PROVIDER')).toBe('stub');
+    expect(process.env.AI_FEEDBACK_REAL_ENABLED).toBe('false');
     expect(config.get('MAIL_PROVIDER')).toBe('log');
     config.set('LEARNING_TASK_SUBMISSION_COOLDOWN_MS', 0);
     const agents: Agent[] = [];
@@ -351,6 +353,163 @@ describe('A1 classroom text task backend contract (HTTP)', () => {
         await app.close();
         if (users) expect(users.db.readyState).toBe(0);
         console.info('A1 app/DB closed');
+      }
+    }
+  });
+
+  it('returns public 404 for four retired POST routes without changing owned business records', async () => {
+    const course = (
+      await teacherA
+        .post('/api/courses')
+        .send({
+          code: namespace + '-retired-post',
+          name: 'Retired POST Course',
+          term: '2026',
+        })
+        .expect(201)
+    ).body as Resource;
+    courseIds.push(course.id);
+    const classroom = (
+      await teacherA
+        .post('/api/classrooms')
+        .send({ courseId: course.id, name: 'Retired POST Classroom' })
+        .expect(201)
+    ).body as Resource;
+    classIds.push(classroom.id);
+    await studentA
+      .post('/api/classrooms/join')
+      .send({ joinCode: classroom.joinCode })
+      .expect(201);
+    const publishedId = await makeTask(teacherA, {
+      ...oldContent,
+      title: namespace + '-retired-submit',
+    });
+    const instance = await publish(teacherA, classroom, publishedId);
+    const saved = await submit(studentA, classroom, instance);
+    const archivedId = await makeTask(teacherA, {
+      ...oldContent,
+      title: namespace + '-retired-restore',
+    });
+    await teacherA
+      .post('/api/learning-tasks/tasks/' + archivedId + '/archive')
+      .expect(201);
+    const ownedTaskIds = [publishedId, archivedId].map(
+      (id) => new Types.ObjectId(id),
+    );
+    const classroomId = new Types.ObjectId(classroom.id);
+    const readFacts = async () => {
+      const ownedSubmissions = await submissions.collection
+        .find({ taskId: { $in: ownedTaskIds } }, { maxTimeMS: 10000 })
+        .sort({ _id: 1 })
+        .toArray();
+      const submissionIds = ownedSubmissions.map((item) => item._id);
+      return {
+        course: await courses.collection.findOne(
+          { _id: new Types.ObjectId(course.id) },
+          { maxTimeMS: 10000 },
+        ),
+        classroom: await classrooms.collection.findOne(
+          { _id: classroomId },
+          { maxTimeMS: 10000 },
+        ),
+        tasks: await tasks.collection
+          .find({ _id: { $in: ownedTaskIds } }, { maxTimeMS: 10000 })
+          .sort({ _id: 1 })
+          .toArray(),
+        enrollments: await enrollments.collection
+          .find({ classroomId }, { maxTimeMS: 10000 })
+          .sort({ _id: 1 })
+          .toArray(),
+        instances: await instances.collection
+          .find({ classroomId }, { maxTimeMS: 10000 })
+          .sort({ _id: 1 })
+          .toArray(),
+        submissions: ownedSubmissions,
+        feedback: await feedback.collection
+          .find({ submissionId: { $in: submissionIds } }, { maxTimeMS: 10000 })
+          .sort({ _id: 1 })
+          .toArray(),
+        jobs: await jobs.collection
+          .find({ taskId: { $in: ownedTaskIds } }, { maxTimeMS: 10000 })
+          .sort({ _id: 1 })
+          .toArray(),
+      };
+    };
+    const before = await readFacts();
+    expect(before.course).toHaveProperty('status', 'ACTIVE');
+    expect(before.classroom).toHaveProperty('status', 'ACTIVE');
+    expect(before.tasks).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ _id: ownedTaskIds[0], status: 'PUBLISHED' }),
+        expect.objectContaining({ _id: ownedTaskIds[1], status: 'ARCHIVED' }),
+      ]),
+    );
+    expect(before.instances).toHaveLength(1);
+    expect(before.submissions).toHaveLength(1);
+    expect(before.submissions[0]._id.toString()).toBe(saved.id);
+    expect(before.feedback).toEqual([]);
+    expect(before.jobs).toEqual([]);
+    for (const [agent, path, body] of [
+      [teacherA, '/api/courses/' + course.id + '/archive', {}],
+      [teacherA, '/api/classrooms/' + classroom.id + '/archive', {}],
+      [teacherA, '/api/learning-tasks/tasks/' + archivedId + '/restore', {}],
+      [
+        studentA,
+        '/api/learning-tasks/tasks/' + publishedId + '/submissions',
+        {
+          content: {
+            codeText: code,
+            language: 'typescript',
+            submissionNote: note,
+          },
+          meta: { aiUsageDeclaration: 'Brainstorming only' },
+        },
+      ],
+    ] as const) {
+      const response = await agent.post(path).send(body).expect(404);
+      expect(response.body as object).toMatchObject({ statusCode: 404, path });
+      expect(await readFacts()).toEqual(before);
+    }
+  });
+
+  it('keeps formal course and classroom PATCH archive and restore lifecycles', async () => {
+    const course = (
+      await teacherA
+        .post('/api/courses')
+        .send({
+          code: namespace + '-patch-lifecycle',
+          name: 'PATCH Lifecycle Course',
+          term: '2026',
+        })
+        .expect(201)
+    ).body as Resource;
+    courseIds.push(course.id);
+    const classroom = (
+      await teacherA
+        .post('/api/classrooms')
+        .send({ courseId: course.id, name: 'PATCH Lifecycle Classroom' })
+        .expect(201)
+    ).body as Resource;
+    classIds.push(classroom.id);
+    for (const [path, id, collection] of [
+      ['/api/classrooms/', classroom.id, classrooms.collection],
+      ['/api/courses/', course.id, courses.collection],
+    ] as const) {
+      const filter = { _id: new Types.ObjectId(id) };
+      expect(await collection.findOne(filter)).toHaveProperty(
+        'status',
+        'ACTIVE',
+      );
+      for (const status of ['ARCHIVED', 'ACTIVE']) {
+        const response = await teacherA
+          .patch(path + id)
+          .send({ status })
+          .expect(200);
+        expect(response.body as object).toMatchObject({ id, status });
+        expect(await collection.findOne(filter)).toHaveProperty(
+          'status',
+          status,
+        );
       }
     }
   });
@@ -2443,10 +2602,6 @@ describe('A1 classroom text task backend contract (HTTP)', () => {
     for (const id of [saved._id.toString(), unbound._id.toString()])
       for (const agent of [teacherA, studentA])
         await ask(agent, id).expect(409);
-    await studentA
-      .post('/api/learning-tasks/tasks/' + legacyTask + '/submissions')
-      .send({ content: { codeText: code, language: 'typescript' } })
-      .expect(409);
     expect(await submissions.collection.findOne({ _id: saved._id })).toEqual(
       initial,
     );

@@ -420,14 +420,6 @@ export class ClassroomsService {
     );
   }
 
-  async archiveClassroom(id: string, userId: string) {
-    return this.updateClassroom(
-      id,
-      { status: ClassroomStatus.Archived },
-      userId,
-    );
-  }
-
   async joinClassroom(dto: JoinClassroomDto, userId: string) {
     await this.ensureStudent(userId);
     const classroom = await this.classroomModel

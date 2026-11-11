@@ -142,10 +142,6 @@ export class CoursesService {
     return this.toCourseResponse(course);
   }
 
-  async archiveCourse(id: string, userId: string) {
-    return this.updateCourse(id, { status: CourseStatus.Archived }, userId);
-  }
-
   async deleteCourse(id: string, userId: string) {
     await this.ensureTeacher(userId);
     const course = await this.findOwnedCourseOrThrow(id, userId);

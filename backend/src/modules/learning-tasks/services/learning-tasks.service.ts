@@ -112,8 +112,6 @@ export class LearningTasksService {
     'Archived task templates cannot be published';
   private static readonly ONLY_PUBLISHED_TASK_TEMPLATE_ARCHIVE_MESSAGE =
     'Only published task templates can be archived';
-  private static readonly RESTORE_TASK_TEMPLATE_DISABLED_MESSAGE =
-    'Archived task templates cannot be restored to draft; clone as draft instead';
   private static readonly LATE_SUBMISSION_NOT_ALLOWED_CODE =
     'LATE_SUBMISSION_NOT_ALLOWED';
   private static readonly INVALID_FEEDBACK_TAGS_MESSAGE =
@@ -275,19 +273,6 @@ export class LearningTasksService {
     return this.toTaskResponse(task);
   }
 
-  async restoreTask(id: string, userId: string) {
-    const task = await this.taskModel.findById(id).exec();
-    if (!task) {
-      throw new NotFoundException('Task not found');
-    }
-    if (task.createdBy.toString() !== userId) {
-      throw new ForbiddenException('Not allowed to restore task');
-    }
-    throw new BadRequestException(
-      LearningTasksService.RESTORE_TASK_TEMPLATE_DISABLED_MESSAGE,
-    );
-  }
-
   async listTasks(query: QueryTaskDto, userId: string) {
     const page = query.page ?? 1;
     const limit = Math.min(query.limit ?? 20, 100);
@@ -391,13 +376,6 @@ export class LearningTasksService {
     this.requireTaskVisibility(task.visibility);
     const publisher = await this.getPublisherSummaryById(task.createdBy);
     return this.toTaskResponse(task, publisher);
-  }
-
-  createSubmission(taskId: string, dto: CreateSubmissionDto, userId: string) {
-    void taskId;
-    void dto;
-    void userId;
-    throw new ConflictException('请从班级任务入口提交。');
   }
 
   async createSubmissionForClassroomTask(

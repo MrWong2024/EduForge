@@ -572,45 +572,6 @@ describe('LearningTasksService task template lifecycle', () => {
     });
     expect(harness.task.save).toHaveBeenCalledTimes(1);
   });
-
-  it('rejects restoring an archived task template with the clone-as-draft message', async () => {
-    const harness = createTaskManagementHarness({
-      taskStatus: TaskStatus.Archived,
-    });
-
-    await expect(
-      harness.service.restoreTask(
-        harness.ids.taskId.toString(),
-        harness.ids.teacherId.toString(),
-      ),
-    ).rejects.toThrow(
-      'Archived task templates cannot be restored to draft; clone as draft instead',
-    );
-    expect(harness.task.save).not.toHaveBeenCalled();
-  });
-
-  it('rejects restoring a task owned by another teacher', async () => {
-    const harness = createTaskManagementHarness({ createdBy: objectId() });
-
-    await expect(
-      harness.service.restoreTask(
-        harness.ids.taskId.toString(),
-        harness.ids.teacherId.toString(),
-      ),
-    ).rejects.toThrow('Not allowed to restore task');
-    expect(harness.task.save).not.toHaveBeenCalled();
-  });
-
-  it('rejects restoring a missing task', async () => {
-    const harness = createTaskManagementHarness({ findByIdResult: null });
-
-    await expect(
-      harness.service.restoreTask(
-        harness.ids.taskId.toString(),
-        harness.ids.teacherId.toString(),
-      ),
-    ).rejects.toThrow('Task not found');
-  });
 });
 
 describe('LearningTasksService stored task visibility', () => {

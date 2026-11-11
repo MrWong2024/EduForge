@@ -238,16 +238,6 @@ export class ClassroomsController {
 
   @UseGuards(RolesGuard)
   @Roles(...TEACHER_ROLES)
-  @Post(':id/archive')
-  archiveClassroom(
-    @Param('id') id: string,
-    @CurrentUser() user: { id: string },
-  ) {
-    return this.classroomsService.archiveClassroom(id, user.id);
-  }
-
-  @UseGuards(RolesGuard)
-  @Roles(...TEACHER_ROLES)
   @Post(':id/students/:uid/remove')
   removeStudent(
     @Param('id') id: string,

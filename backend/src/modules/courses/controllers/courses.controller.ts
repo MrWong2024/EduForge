@@ -86,11 +86,4 @@ export class CoursesController {
       user.id,
     );
   }
-
-  @UseGuards(RolesGuard)
-  @Roles(...TEACHER_ROLES)
-  @Post(':id/archive')
-  archiveCourse(@Param('id') id: string, @CurrentUser() user: { id: string }) {
-    return this.coursesService.archiveCourse(id, user.id);
-  }
 }
