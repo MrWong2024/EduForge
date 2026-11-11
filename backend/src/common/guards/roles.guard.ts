@@ -4,7 +4,6 @@ import {
   ForbiddenException,
   Injectable,
 } from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
 import { Reflector } from '@nestjs/core';
 import { ROLES_KEY } from '../decorators/roles.decorator';
 import { IS_PUBLIC_KEY } from '../decorators/public.decorator';
@@ -16,10 +15,7 @@ import {
 
 @Injectable()
 export class RolesGuard implements CanActivate {
-  constructor(
-    private readonly reflector: Reflector,
-    private readonly configService: ConfigService,
-  ) {}
+  constructor(private readonly reflector: Reflector) {}
 
   canActivate(context: ExecutionContext): boolean {
     const isPublic =
@@ -36,12 +32,6 @@ export class RolesGuard implements CanActivate {
         context.getHandler(),
         context.getClass(),
       ]) ?? [];
-
-    const isEnforced =
-      this.configService.get<string>('AUTHZ_ENFORCE_ROLES') !== 'false';
-    if (!isEnforced) {
-      return true;
-    }
 
     const request = context.switchToHttp().getRequest<{
       user?: { id: string; roles?: string[] };

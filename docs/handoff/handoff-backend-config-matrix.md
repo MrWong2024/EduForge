@@ -159,7 +159,6 @@ Mock Bailian 等测试组合的执行方案见 [Backend Testing Playbook](./hand
 | `LEARNING_TASK_SUBMISSION_COOLDOWN_MS`         | `300000`                                            | Joi                                                  | 学生提交冷却窗口（ms）；按同一 student + classroomTask 判定，`0` 表示关闭冷却。 |
 | `AI_FEEDBACK_DEBUG_ENABLED`                    | `false`                                             | Joi                                                  | debug/ops 配置开关；职责见第 3 节。                                                            |
 | `AI_FEEDBACK_DUMP_REQUEST_BODY` | `false` | Joi → ConfigService | 布尔值；仅显式 true 且 development 启用本地请求/响应/合并诊断，环境、目录和启停方式见第 3 节。 |
-| `AUTHZ_ENFORCE_ROLES`                          | `true`                                              | Joi                                                  | 角色校验配置开关。                                                    |
 | `BAILIAN_API_KEY` | 无 | Joi | 真实 Provider Key；必填条件见下文。 |
 | `BAILIAN_BASE_URL`                             | `https://dashscope.aliyuncs.com/compatible-mode/v1` | Joi                                                  | 阿里云百炼大陆站 OpenAI-compatible 基础地址。                                   |
 | `BAILIAN_MODEL`                                | `qwen-plus`                                         | Joi                                                  | 百炼模型名；环境显式配置见第 3 节。                        |
@@ -173,6 +172,8 @@ Bailian 固定使用非流式、请求体顶层 `enable_thinking:true` 与 `max_
 按[阿里云 OpenAI-compatible Chat Completions 参数定义](https://help.aliyun.com/zh/model-studio/qwen-api-via-openai-chat-completions)，当前 Qwen 调用的 `max_tokens` 限制回答长度，不包含思维链；`thinking_budget` 才是独立的思考过程长度参数，本项目不设置它。因此现有 `max_tokens` 不是思维链与回答的全部输出 Token 总限额。超时和 `finish_reason=length` 沿用原失败语义，不降级关闭思考，也不发起非思考重试；`content` / `reasoning_content` 隔离及 usage 计量职责沿用 [Provider Card B](./handoff-backend-service-map.md#provider-card-b)。
 
 `AI_FEEDBACK_MAX_CODE_CHARS` 与 `BAILIAN_MAX_RETRIES` 已废止：移除校验、读取及 example，ignored env 残留不恢复截断或 Provider 重试。每 Job 最多三次处理机会，无新增次数配置，内部执行见 Service Owner。模型路由及默认值保持不变。
+
+`AUTHZ_ENFORCE_ROLES` 已退役，不再读取、校验或注入默认值；遗留值可作为普通未知配置存在，但不再影响授权。显式绑定 `RolesGuard` 的非 `@Public()` 路由持续执行现有角色校验。
 
 条件必填与安全配置：
 

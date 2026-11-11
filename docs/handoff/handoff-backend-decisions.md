@@ -87,10 +87,14 @@ Bailian provider 只接受严格 JSON 对象，字段白名单、值域白名单
 支持多端登录但避免会话无限增长。  
 认证失效控制在服务端，不依赖客户端 token 自行管理。  
 
-## 7) RBAC 已启用并默认 enforce（兼容期开关可回滚）
+## 7) RBAC 已启用并默认 enforce（历史兼容期开关）
+
+Status: SUPERSEDED
+
+Superseded by: [Config Matrix：核心 env 列表与默认值](./handoff-backend-config-matrix.md#4-核心-env-列表与默认值)
 
 **Decision**  
-`RolesGuard` 已启用并真正执行角色校验：`@Public()` 直通；未命中 `@Roles(...)` 元数据的受保护路由默认 `403`；兼容期可用 `AUTHZ_ENFORCE_ROLES=false` 暂时关闭 enforce。  
+该决策形成时，`RolesGuard` 已启用并真正执行角色校验：`@Public()` 直通；未命中 `@Roles(...)` 元数据的受保护路由默认 `403`；当时兼容期允许用 `AUTHZ_ENFORCE_ROLES=false` 暂时关闭 enforce。
 
 **Rationale**  
 认证与授权职责已分层：`SessionAuthGuard` 负责登录态，`RolesGuard` 负责角色授权，service 继续保留资源级兜底校验防绕过。  
@@ -98,7 +102,7 @@ Bailian provider 只接受严格 JSON 对象，字段白名单、值域白名单
 
 **Consequences**  
 controller 的 `@UseGuards(RolesGuard) + @Roles(...)` 成为授权主门禁，service 校验作为第二道防线。  
-出现兼容性风险时可通过 `AUTHZ_ENFORCE_ROLES=false` 快速回滚，再逐步补齐注解与用例。  
+当时保留兼容期开关用于风险回滚与逐步补齐注解、用例；该历史回滚方式现已退役，当前规则以上述 Config Matrix 为准。
 
 ## 8) 数据库环境必须 fail-fast（运行期与运维脚本双重校验）
 
