@@ -174,6 +174,7 @@ Global SoT 只保留理解跨 Service workflow 必需的稳定不变量，不追
   - 新课堂发布写路径同时检查来源难度符合 [Task 写入值域](./handoff-backend-dto-cheatsheet.md#task-template-dto--response-family) 或缺失；非法值返回 400，提示先修改模板难度，不生成非法新快照。校验不放入兼供历史读取的 snapshotTask helper，已有快照及旧实例只读 fallback 保持可读，不因显示归一化回写。
   - 实例配置更新与生命周期分开处理；撤回前检查无提交，RECALLED 保持封闭。恢复提交仅改状态，不隐式改截止与提交设置；不支持撤回后重发同模板。
   - 发布返回、列表/详情、my-task-detail、教师/学生看板、提交详情标题及 AI 分析标题统一优先读实例快照；旧实例仅当前模板只读 fallback，不回填；课堂成员响应由 publicTaskContent 明确投影，避免展开内部引用。模板库/候选仍读当前 Task，资产状态保持当前值。
+  - 本地开发库与生产库的存量缺失快照已按当前模板内容补齐；应用中的缺快照兼容代码仍待退役。
   - 发布候选 onlyMine 与默认两路均以合法 visibility 的 $in 结合聚合表达式 $type=string 限定顶层标量，排除数组及异常值，再应用当前教师可见性、模板发布状态及已发布 taskId 排除；难度按保存值精确匹配，与既有课程分类、知识模块和 onlyMine 条件取交集，同一最终 filter 用于分页前查询与 countDocuments。未显式指定课程分类时仍按班级课程分类优先排序，不对已发布课堂任务列表增加难度过滤；参数校验见 [DTO Cheatsheet](./handoff-backend-dto-cheatsheet.md#发布候选模板)。
   - 提交入口检查学生身份、Enrollment ACTIVE、课堂归属及班级/实例 ACTIVE，再通过 `createSubmissionForClassroomTask` 绑定实例主键；真正写 Submission 前，由 [Card 08](#service-card-08) 再次 enforce 运行态及截止/迟交边界。
 - Isolation: 查询与统计按 `classroomTaskId`，成员全集来自 Enrollment ACTIVE；不得按底层 taskId 跨班兜底。模板状态不决定既有实例学生运行态。
