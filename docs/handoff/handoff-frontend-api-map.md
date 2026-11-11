@@ -158,7 +158,7 @@
 - 过程性评价 JSON：`process-assessment/page.tsx` -> `/api/proxy/classrooms/:id/process-assessment`。
   - 对应后端：`GET /api/classrooms/:classroomId/process-assessment`。
   - 页头名称辅助读取一次 `GET classrooms/:classroomId`，与现有加载并行，经 `toClassroomDetailResponse` 取名；独立有限超时及失败占位，不改变统计主体错误处理。
-  - window 适配：前端接受 `term | 7d | 30d | all`，其中 `term` 仅用于旧链接兼容并可传给后端；`24h` 与其他未知或非法值统一通过现有 query parser 规范化为默认 `all`。JSON 与 CSV 共用同一解析后的 window。
+  - window 适配：前端仅接受精确的 `7d | 30d | all`；省略、空值、`term`、`24h`、大小写或空白变体及其他未知值统一沿用 `parseEnum` 回落为 `all`，不设 term 特判、不 trim 或转换大小写。重复 window 沿用 `getSingleSearchParam` 取首值；JSON 与 CSV 共用同一解析后的 window。
   - 注意：`excludedTaskIds` 仅适配为 URL 查询条件；直接消费后端任务维度指标（`iteratedTasksCount/aiRequestedTasksCount/aiSucceededTasksCount/avgWarnItems`），不重算评分。
 - 过程性评价 CSV：`process-assessment/page.tsx` -> `buildProxyPath("classrooms/:id/process-assessment.csv")`。
   - 对应后端：`GET /api/classrooms/:classroomId/process-assessment.csv`。

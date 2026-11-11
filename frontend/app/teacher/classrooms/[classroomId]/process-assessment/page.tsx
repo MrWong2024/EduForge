@@ -41,13 +41,10 @@ type ProcessAssessmentSearchParams = {
   excludedTaskIds?: string | string[];
 } & Record<string, string | string[] | undefined>;
 
-const SUPPORTED_REPORT_WINDOWS = ["term", "7d", "30d", "all"] as const;
+const SUPPORTED_REPORT_WINDOWS = ["7d", "30d", "all"] as const;
 type ReportWindow = (typeof SUPPORTED_REPORT_WINDOWS)[number];
-const DISPLAY_REPORT_WINDOWS = ["7d", "30d", "all"] as const;
-type DisplayReportWindow = (typeof DISPLAY_REPORT_WINDOWS)[number];
 const PROCESS_ASSESSMENT_PAGE_SIZE = 100;
 const REPORT_WINDOW_LABELS: Record<ReportWindow, string> = {
-  term: "学期",
   "7d": "近7天",
   "30d": "近30天",
   all: "全部",
@@ -479,7 +476,7 @@ const resolveQueryState = (
 
 const buildWindowHref = (
   classroomId: string,
-  windowValue: DisplayReportWindow,
+  windowValue: ReportWindow,
   excludedTaskIds: string[],
 ): string => {
   const query = buildQueryString({
@@ -632,10 +629,6 @@ export default async function ProcessAssessmentPage({
     typeof generatedAtValue === "string" || typeof generatedAtValue === "number"
       ? toDisplayDate(String(generatedAtValue))
       : "—";
-  const compatibilityHint =
-    !DISPLAY_REPORT_WINDOWS.includes(viewModel.window as DisplayReportWindow)
-      ? "（旧链接兼容）"
-      : "";
   const rubricSummaryText = toRubricSummaryText(asRecord(viewModel.data.raw));
   const displayedStudentsCount = rows.length;
   const totalStudentsCount =
@@ -687,7 +680,7 @@ export default async function ProcessAssessmentPage({
         <div className="mt-2 flex flex-wrap items-center gap-4 text-zinc-700">
           <div className="flex items-center gap-2">
             <span>统计窗口:</span>
-            {DISPLAY_REPORT_WINDOWS.map((windowValue) => {
+            {SUPPORTED_REPORT_WINDOWS.map((windowValue) => {
               const isActive = windowValue === viewModel.window;
               return (
                 <Link
@@ -705,7 +698,6 @@ export default async function ProcessAssessmentPage({
             })}
             <span className="text-zinc-500">
               当前：{REPORT_WINDOW_LABELS[viewModel.window]}
-              {compatibilityHint}
             </span>
           </div>
         </div>
