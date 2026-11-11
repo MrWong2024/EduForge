@@ -2,7 +2,6 @@ import {
   IsIn,
   IsEnum,
   IsInt,
-  IsMongoId,
   IsOptional,
   IsString,
   Max,
@@ -69,8 +68,4 @@ export class QueryTaskDto {
   @Min(1)
   @Max(100)
   limit?: number;
-
-  @IsOptional()
-  @IsMongoId()
-  createdBy?: string;
 }

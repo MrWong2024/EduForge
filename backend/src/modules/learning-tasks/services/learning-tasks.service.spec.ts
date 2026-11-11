@@ -801,7 +801,6 @@ describe('LearningTasksService stored task visibility', () => {
           knowledgeModule: 'Module',
           difficulty: 'medium',
           courseLabel: '通用编程',
-          createdBy: objectId().toString(),
           page: 2,
           limit: 1,
         },

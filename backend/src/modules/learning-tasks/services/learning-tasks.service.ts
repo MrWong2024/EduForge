@@ -278,7 +278,6 @@ export class LearningTasksService {
     const limit = Math.min(query.limit ?? 20, 100);
     const userObjectId = new Types.ObjectId(userId);
     const scope = this.resolveTaskTemplateScope(query.scope);
-    const legacyCreatedBy = query.createdBy?.trim();
     const andFilters: Record<string, unknown>[] = [];
     const baseFilter: Record<string, unknown> = {
       visibility: { $in: [TASK_VISIBILITY_PRIVATE, TASK_VISIBILITY_SHARED] },
@@ -308,12 +307,6 @@ export class LearningTasksService {
       }
     }
     if (scope === TASK_TEMPLATE_SCOPE_MINE) {
-      if (legacyCreatedBy && legacyCreatedBy !== userId) {
-        this.logger.debug(
-          `Ignoring createdBy filter outside current teacher scope: requested=${legacyCreatedBy}, current=${userId}`,
-        );
-      }
-      // createdBy remains for legacy query compatibility, but mine scope is always current teacher.
       baseFilter.createdBy = userObjectId;
     } else if (scope === TASK_TEMPLATE_SCOPE_SHARED) {
       baseFilter.visibility = TASK_VISIBILITY_SHARED;

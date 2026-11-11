@@ -175,7 +175,8 @@ Notes:
 - 创建/保存模板先验证最终生效的 ZIP 引用；创建 PUBLISHED、DRAFT 实际 publish 及课堂发布均须读取验证。DTO 非法和缺失/损坏/不可读/不支持/超限资料返回 400，使用引用/条目序号及安全原因，不暴露系统路径；不保存部分编辑、不创建无效实例。模板已 PUBLISHED 的重复 publish 保持既有幂等语义。配置及公开投影见 [DTO ZIP 资料引用](./handoff-backend-dto-cheatsheet.md#zip-资料引用配置)。
 - publish 为 teacher only、作者 only；DRAFT 可发布，PUBLISHED 幂等返回当前模板，ARCHIVED 返回 `400 Archived task templates cannot be published`。
 - archive 为 teacher only、作者 only；仅 PUBLISHED 可归档，其余返回 `400 Only published task templates can be archived`。被 ClassroomTask 引用仍可归档，不影响已发布实例运行。
-- 模板列表仅纳入实际保存的合法标量 visibility：mine 为本人的 PRIVATE/SHARED 模板，shared 为实际 SHARED（包含本人共享模板），all 为本人合法模板与实际共享模板的并集；合法值及原 scope、status、分类、知识模块和难度条件共同在分页与计数前过滤，items 与 total 使用同一完整条件。createdBy 查询兼容保持，不能扩大权限。发布候选 onlyMine=true 与默认/false 均先排除异常 visibility，再按本人/他人共享、PUBLISHED、已发布排除及原筛选排序规则处理。
+- 模板列表仅纳入实际保存的合法标量 visibility：mine 为本人的 PRIVATE/SHARED 模板，shared 为实际 SHARED（包含本人共享模板），all 为本人合法模板与实际共享模板的并集；合法值及原 scope、status、分类、知识模块和难度条件共同在分页与计数前过滤，items 与 total 使用同一完整条件。发布候选 onlyMine=true 与默认/false 均先排除异常 visibility，再按本人/他人共享、PUBLISHED、已发布排除及原筛选排序规则处理。
+- 模板列表不再接受 `createdBy` 查询参数；合法教师会话且其他参数合法时，携带该参数（包括本人或其他教师的合法 ObjectId）由既有全局白名单校验返回 400，message 包含 `property createdBy should not exist`。原认证与角色检查顺序保持。
 - 存储 visibility 只接受原值严格等于 PRIVATE/SHARED，不 trim、转换大小写或强制转换；缺失、null、空白、未知值、数组等均非法，响应不补合法默认值。作者详情遇非法值返回 `409 Task has invalid visibility`；非作者仅能读取实际 SHARED，PRIVATE 或非法值均为 `404 Task not found`。update/publish/archive 保持原权限检查优先（非作者 update/publish 为 404，archive 为 403），通过后先拒绝非法存量，再修改或保存；重复 publish 也检查，普通 PATCH 即使提供合法 visibility 也不能顺带修复。
 - 新课堂发布先校验教师身份、班级 owner 与班级运行态，再检查模板：不存在为原 404；非作者使用 PRIVATE 或非法值为 `404 Task not found`，作者遇非法值为上述 409。该检查早于快照、资料引用验证和实例创建，合法模板仍遵循原 PUBLISHED、难度、引用及重复发布合同。
 - 新作品只经课堂实例入口创建。模板级 submissions/stats/common-issues 继续要求模板作者权限，仅纳入该教师自有班级中属于当前模板的课堂实例；范围过滤先于分页、total、学生去重和反馈聚合。共享模板不授予作者访问他人班级作品的权限。学生 mine 仍仅本人；这些列表及学生看板只接受标量 ObjectId 的 classroomTaskId，不纳入无关联或非法类型提交，不按 taskId 推测归属。

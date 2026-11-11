@@ -912,7 +912,6 @@ describe('A1 classroom text task backend contract (HTTP)', () => {
         ...templateQuery,
         difficulty: 'medium',
         scope: 'mine',
-        createdBy: userIds[1].toString(),
       },
       [medium, published],
     );
@@ -928,6 +927,34 @@ describe('A1 classroom text task backend contract (HTTP)', () => {
     );
     await teacherB.get(candidatesUrl).query({ difficulty: 'easy' }).expect(404);
     await studentA.get(candidatesUrl).query({ difficulty: 'easy' }).expect(403);
+  });
+
+  it('rejects retired createdBy list queries across default and explicit scopes', async () => {
+    for (const [agent, scope, createdBy] of [
+      [teacherA, undefined, userIds[0].toString()],
+      [teacherA, 'mine', userIds[1].toString()],
+      [teacherB, 'shared', ''],
+      [teacherB, 'all', 'invalid author'],
+    ] as const) {
+      const query = new URLSearchParams({
+        status: 'PUBLISHED',
+        knowledgeModule: namespace + ' query retirement',
+        page: '1',
+        limit: '1',
+        ...(scope === undefined ? {} : { scope }),
+        createdBy,
+      });
+      const path = '/api/learning-tasks/tasks?' + query.toString();
+      const response = await agent.get(path).expect(400);
+      expect(response.body as object).toMatchObject({
+        statusCode: 400,
+        path,
+      });
+      expect(response.body as object).toHaveProperty(
+        'message',
+        expect.stringContaining('property createdBy should not exist'),
+      );
+    }
   });
 
   it('rejects invalid template difficulty for new publication while historical snapshots stay readable and unchanged', async () => {
