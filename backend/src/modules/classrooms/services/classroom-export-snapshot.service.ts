@@ -54,8 +54,7 @@ type ProcessAssessmentSnapshotItem = {
 
 @Injectable()
 export class ClassroomExportSnapshotService {
-  private static readonly DEFAULT_WINDOW: ClassroomExportSnapshotWindow =
-    'term';
+  private static readonly DEFAULT_WINDOW: ClassroomExportSnapshotWindow = '30d';
   private static readonly DEFAULT_LIMIT_STUDENTS = 200;
   private static readonly DEFAULT_LIMIT_ASSESSMENT = 200;
   private static readonly TOP_K = 10;
@@ -91,7 +90,7 @@ export class ClassroomExportSnapshotService {
     )
       ? (query.window as ClassroomExportSnapshotWindow)
       : ClassroomExportSnapshotService.DEFAULT_WINDOW;
-    const effectiveWindow: '7d' | '30d' = window === '7d' ? '7d' : '30d';
+    const effectiveWindow: '7d' | '30d' = window;
     const includePerTask = this.parseBooleanQuery(query.includePerTask, true);
     const limitStudents = this.toBoundedLimit(
       query.limitStudents,
@@ -106,11 +105,6 @@ export class ClassroomExportSnapshotService {
         ClassroomExportSnapshotService.WINDOW_MS_MAP[effectiveWindow],
     );
     const notes: string[] = [];
-    if (window === 'term') {
-      notes.push(
-        'term currently maps to 30d because semester boundary source is not connected yet.',
-      );
-    }
 
     const classroom = await this.classroomModel
       .findOne({

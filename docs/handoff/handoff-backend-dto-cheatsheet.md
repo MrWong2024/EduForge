@@ -306,13 +306,13 @@ CSV 空学号为空单元格，topTags 为 `tag:count` 以分号连接；JSON/CS
 
 | Query | validation / default |
 | --- | --- |
-| `window?` | `IsIn`：`7d \| 30d \| term`，默认 term；不支持 all。 |
+| `window?` | `IsIn`：仅精确 `7d \| 30d`，省略时默认 30d；显式传入 term、24h、all 等其他值均不合法。 |
 | `limitStudents? / limitAssessment?` | `Type(Number) + IsInt`，范围 1..1000，分别默认 200。 |
 | `includePerTask?` | `IsBooleanString`；默认 true，显式值仅 `"true"` 启用；`"1"` 不启用。 |
 
 稳定顶层：`{meta,course,classroom,students,classroomTasks,summary,statsByClassroomTask,statsByStudent,processAssessment}`。
 
-- `meta={generatedAt,window,effectiveWindow,notes:string[]}`；当前 term 回显仍为 term，effectiveWindow 为 30d，notes 说明该兼容口径；不把它描述为已接入学期边界。
+- `meta={generatedAt,window,effectiveWindow,notes:string[]}`；window 与 effectiveWindow 相同，省略窗口时均为 30d。notes 保留逐任务省略与截断说明，不再包含 term 映射说明。
 - `course={id,code,name,term,status}`；`classroom={id,name,courseId,status}`；`students={total,exported}`，total 是正式学生总数，exported 是导出的 statsByStudent 项数。
 - `classroomTasks[]={classroomTaskId,taskId,publishedAt,dueAt,allowLate}`，时间可为 null；allowLate 是 boolean。
 - `summary={progress,aiHealth,commonIssues,late}`；progress/aiHealth 复用 Weekly report family，`late={lateSubmissionsCount,lateStudentsCount}`。

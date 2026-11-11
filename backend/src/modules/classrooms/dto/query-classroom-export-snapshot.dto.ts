@@ -8,7 +8,7 @@ import {
   Min,
 } from 'class-validator';
 
-export const CLASSROOM_EXPORT_SNAPSHOT_WINDOWS = ['7d', '30d', 'term'] as const;
+export const CLASSROOM_EXPORT_SNAPSHOT_WINDOWS = ['7d', '30d'] as const;
 export type ClassroomExportSnapshotWindow =
   (typeof CLASSROOM_EXPORT_SNAPSHOT_WINDOWS)[number];
 
