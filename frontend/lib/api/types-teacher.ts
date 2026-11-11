@@ -2112,29 +2112,13 @@ export const normalizeClassroomTaskStatus = (
 export const normalizeClassroomStatus = (
   value: unknown,
 ): ClassroomStatus | undefined => {
-  const status = asString(value);
-  if (!status) {
-    return undefined;
-  }
-  const normalized = status.toUpperCase();
-  if (normalized === "ACTIVE" || normalized === "ARCHIVED") {
-    return normalized;
-  }
-  return undefined;
+  return value === "ACTIVE" || value === "ARCHIVED" ? value : undefined;
 };
 
 export const normalizeCourseStatus = (
   value: unknown,
 ): CourseStatus | undefined => {
-  const status = asString(value);
-  if (!status) {
-    return undefined;
-  }
-  const normalized = status.toUpperCase();
-  if (normalized === "ACTIVE" || normalized === "ARCHIVED") {
-    return normalized;
-  }
-  return undefined;
+  return value === "ACTIVE" || value === "ARCHIVED" ? value : undefined;
 };
 
 const normalizeStudentStatus = (

@@ -88,13 +88,20 @@ export function CourseLifecycleActions({ courseId, status }: CourseLifecycleActi
   const [isMenuOpen, setIsMenuOpen] = useState(false);
 
   const isSubmitting = pendingAction !== null;
-  const isArchived = status === "ARCHIVED";
+  const canArchive = status === "ACTIVE";
+  const canRestore = status === "ARCHIVED";
 
   const handleStatusUpdate = async (targetStatus: CourseStatus) => {
-    const action: "archive" | "restore" = targetStatus === "ARCHIVED" ? "archive" : "restore";
-    if (isSubmitting) {
+    if (
+      isSubmitting ||
+      !(
+        (canArchive && targetStatus === "ARCHIVED") ||
+        (canRestore && targetStatus === "ACTIVE")
+      )
+    ) {
       return;
     }
+    const action: "archive" | "restore" = targetStatus === "ARCHIVED" ? "archive" : "restore";
     setIsMenuOpen(false);
 
     const confirmed = window.confirm(
@@ -195,7 +202,7 @@ export function CourseLifecycleActions({ courseId, status }: CourseLifecycleActi
         disabled={isSubmitting}
         label={isSubmitting ? "处理中..." : "更多"}
       >
-        {isArchived ? (
+        {canRestore ? (
           <button
             type="button"
             role="menuitem"
@@ -205,7 +212,7 @@ export function CourseLifecycleActions({ courseId, status }: CourseLifecycleActi
           >
             恢复
           </button>
-        ) : (
+        ) : canArchive ? (
           <button
             type="button"
             role="menuitem"
@@ -215,6 +222,8 @@ export function CourseLifecycleActions({ courseId, status }: CourseLifecycleActi
           >
             归档
           </button>
+        ) : (
+          <p className="px-3 py-1.5 text-xs text-zinc-500">状态未知，暂不能归档或恢复</p>
         )}
 
         <div className="my-1 border-t border-zinc-100" />
@@ -230,7 +239,7 @@ export function CourseLifecycleActions({ courseId, status }: CourseLifecycleActi
         </button>
       </FloatingMoreMenu>
 
-      {isArchived ? (
+      {canRestore ? (
         pendingAction === "restore" ? (
           <p className="text-xs text-zinc-500">正在恢复课程...</p>
         ) : null

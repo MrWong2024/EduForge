@@ -67,12 +67,12 @@
 | Component / Module | File | Responsibility / Boundary |
 |---|---|---|
 | CreateCourseForm | `components/teacher/CreateCourseForm.tsx` | 建课表单与成功导航，课程分类复用共享候选；学期示例不自动成为输入值 |
-| CourseLifecycleActions | `components/teacher/CourseLifecycleActions.tsx` | 课程列表“更多”菜单、动作 pending/确认/结果状态，组合 FloatingMoreMenu；负责归档、恢复与删除，保留当前列表视图；空对象删除条件由后端判定 |
+| CourseLifecycleActions | `components/teacher/CourseLifecycleActions.tsx` | 课程列表“更多”菜单、动作 pending/确认/结果状态，组合 FloatingMoreMenu 并保留当前列表视图；每次 render 由当前 props 同时控制 UI 与独立 handler，仅允许 ACTIVE→ARCHIVED 归档、ARCHIVED→ACTIVE 恢复，未知状态只关闭归档/恢复；删除入口及 handler 不增加状态限制，资格由后端判定；基础编辑保持独立 |
 | EditCourseForm | `components/teacher/EditCourseForm.tsx` | 课程基础信息编辑与保存；课程分类复用共享候选并可清空，不承担列表加载 |
 | CourseOverviewPage | `app/teacher/courses/[courseId]/overview/page.tsx` | 服务端加载、窗口/排序/分页及只读班级明细组合；页面摘要只汇总当前页，指标字段适配与含义遵循 API Owner，不把分页摘要当全课程统计 |
 | CreateClassroomForm | `components/teacher/CreateClassroomForm.tsx` | 建班表单及局部输入/提交状态，不负责班级列表加载；名称示例不自动成为输入值 |
 | EditClassroomForm | `components/teacher/EditClassroomForm.tsx` | 只编辑班级基础信息，当前可编辑字段为 `name`；所属课程、状态与加入码只读。通过班级更新能力保存并返回看板；不提供归档、恢复、删除或其他生命周期操作，生命周期动作归 ClassroomLifecycleActions |
-| ClassroomLifecycleActions | `components/teacher/ClassroomLifecycleActions.tsx` | 班级列表生命周期“更多”菜单：ACTIVE 归档/删除，ARCHIVED 恢复/删除；拥有菜单、pending、确认与结果状态，组合 FloatingMoreMenu 并保留当前列表视图；删除限制由后端判定，不混入基础编辑表单 |
+| ClassroomLifecycleActions | `components/teacher/ClassroomLifecycleActions.tsx` | 班级列表生命周期“更多”菜单，拥有菜单、pending、确认与结果状态，组合 FloatingMoreMenu 并保留当前列表视图；每次 render 由当前 props 同时控制 UI 与独立 handler，仅允许 ACTIVE→ARCHIVED 归档、ARCHIVED→ACTIVE 恢复，未知状态只关闭归档/恢复；删除入口及 handler 不增加状态限制，资格由后端判定，不混入基础编辑表单 |
 | CreateLearningTaskForm | `components/teacher/CreateLearningTaskForm.tsx` | 模板内容、课程分类、可见性、可选任务难度及单一“评阅标准（可选）”多行文字输入，difficulty/rubric 请求构造复用各自纯 helper；难度成功创建后重置；描述和评阅标准默认均为10行，两者均可纵向调整；不提供资料引用输入或添加入口；草稿/发布两种创建动作，无归档创建入口；保存失败保留全部输入，不负责课堂实例发布 |
 | EditLearningTaskForm | `components/teacher/EditLearningTaskForm.tsx` | 描述和单一“评阅标准（可选）”文字输入默认均为10行，评阅标准高度不随是否有内容变化；编辑态可纵向调整，只读长文本可滚动。可选难度仅四状态，无动态自定义旧值选项；编辑/安全显示及请求构造复用共享 helper，未知初值不随其他字段保存而隐式回写，成功同步正式响应、失败保留草稿；字段请求语义见 API Map。rubric 保存复用纯 helper，成功后从正式响应同步文字；同 taskId 刷新 props 不覆盖草稿，页面按 taskId 重建表单。引用编辑区可见性固定于本次 taskId 首次成功加载的非空引用，清空保存及刷新不隐藏；引用成功保存独立更新比较基准。仅明确身份与作者匹配、状态可编辑且当前权威初值及草稿 visibility 均合法时允许写入，控件与独立 handler 共用资格；异常初值不被旧合法草稿掩盖，可见性控件显示明确占位并保留只读内容。保存确认通过前不更新基准或提示成功，未确认及失败保留草稿；错误与确认合同见 API Map。保存与发布/归档共用 pending 边界，保留列表返回上下文，不承担课堂实例设置 |
 | TaskAiContextRefs | `components/teacher/TaskAiContextRefs.tsx` | 普通多行引用 JSON 编辑、就近结构错误与格式化；只读时有引用才按包展示全部路径，无 JSON/复制控件或空配置占位；不渲染路径链接/HTML，不读 ZIP，不进入学生或课堂实例页 |

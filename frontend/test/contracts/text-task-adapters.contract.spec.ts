@@ -5,10 +5,23 @@ import {
 } from "../../lib/api/types-student";
 import {
   groupTeacherFeedbackItems,
+  normalizeClassroomStatus,
   normalizeClassroomTaskStatus,
+  normalizeCourseStatus,
+  toClassroomCreateResponse,
+  toClassroomDetailResponse,
+  toClassroomListResponse,
   toClassroomStudentsResponse,
+  toClassroomSummary,
   toClassroomTask,
   toClassroomTaskSummary,
+  toClassroomUpdateResponse,
+  toCourseCreateResponse,
+  toCourseDetailResponse,
+  toCourseListResponse,
+  toCourseOverviewResponse,
+  toCourseSummary,
+  toCourseUpdateResponse,
   toLearningTaskCreateResponse,
   toLearningTaskDetailResponse,
   toLearningTaskListResponse,
@@ -45,6 +58,280 @@ import {
 import { toDisplayLateDuration } from "../../lib/ui/format";
 import { normalizeTaskTemplateVisibility } from "../../lib/learning-tasks/template-visibility-scope";
 import { canEditTeacherFeedback } from "../../lib/learning-tasks/teacher-feedback";
+
+test("course and classroom status normalizers preserve only the exact formal states", () => {
+  for (const status of ["ACTIVE", "ARCHIVED"] as const) {
+    for (const normalize of [normalizeCourseStatus, normalizeClassroomStatus]) {
+      expect(normalize(status)).toBe(status);
+    }
+  }
+});
+
+test("course and classroom status normalizers reject missing and invalid values without coercion", () => {
+  const missing: Readonly<Record<string, unknown>> = Object.freeze({});
+  for (const normalize of [normalizeCourseStatus, normalizeClassroomStatus]) {
+    expect(normalize(missing.status)).toBeUndefined();
+    for (const status of [
+      undefined,
+      null,
+      "",
+      " \t\n ",
+      "UNKNOWN",
+      "active",
+      "archived",
+      "Active",
+      "Archived",
+      " ACTIVE",
+      "ACTIVE ",
+      "ARCHIVED ",
+      "\tARCHIVED\n",
+      Object.freeze([]),
+      Object.freeze(["ACTIVE"]),
+      Object.freeze({}),
+      Object.freeze({ status: "ARCHIVED" }),
+      0,
+      1,
+      true,
+      false,
+    ]) {
+      expect(normalize(status)).toBeUndefined();
+    }
+  }
+  expect(Object.hasOwn(missing, "status")).toBe(false);
+  expect(missing).toEqual({});
+});
+
+test("direct course and classroom mappers preserve adjacent fields and their existing raw semantics", () => {
+  const nestedCourse = Object.freeze({
+    id: "course-1",
+    name: "课程",
+    status: "archived",
+  });
+  for (const { fields, expectedStatus, hasStatus } of [
+    { fields: { status: "ACTIVE" }, expectedStatus: "ACTIVE", hasStatus: true },
+    {
+      fields: { status: "ARCHIVED" },
+      expectedStatus: "ARCHIVED",
+      hasStatus: true,
+    },
+    {
+      fields: { status: " active " },
+      expectedStatus: undefined,
+      hasStatus: true,
+    },
+    { fields: {}, expectedStatus: undefined, hasStatus: false },
+  ] as const) {
+    const course = Object.freeze({
+      id: "course-1",
+      code: "CS-101",
+      name: "课程名称",
+      term: "2026秋",
+      ...fields,
+    });
+    const classroom = Object.freeze({
+      id: "classroom-1",
+      courseId: "course-1",
+      name: "班级名称",
+      joinCode: "JOIN-001",
+      course: nestedCourse,
+      ...fields,
+    });
+    const beforeCourse = structuredClone(course);
+    const beforeClassroom = structuredClone(classroom);
+
+    for (const adapt of [toCourseSummary, toCourseCreateResponse]) {
+      const result = adapt(course);
+      expect(result).toMatchObject({
+        id: "course-1",
+        code: "CS-101",
+        name: "课程名称",
+        term: "2026秋",
+      });
+      expect(result.status).toBe(expectedStatus);
+      expect(result.raw).toBe(course);
+    }
+    for (const adapt of [toClassroomSummary, toClassroomCreateResponse]) {
+      const result = adapt(classroom);
+      expect(result).toMatchObject({
+        id: "classroom-1",
+        courseId: "course-1",
+        name: "班级名称",
+        joinCode: "JOIN-001",
+        course: { id: "course-1", name: "课程", status: "archived" },
+      });
+      expect(result.status).toBe(expectedStatus);
+    }
+    expect(toClassroomSummary(classroom)).not.toHaveProperty("raw");
+    expect(toClassroomCreateResponse(classroom).raw).toBe(classroom);
+    expect(Object.hasOwn(course, "status")).toBe(hasStatus);
+    expect(Object.hasOwn(classroom, "status")).toBe(hasStatus);
+    expect(course).toEqual(beforeCourse);
+    expect(classroom).toEqual(beforeClassroom);
+  }
+});
+
+test("course and classroom detail and update wrappers do not rescue invalid selected data status", () => {
+  const course = Object.freeze({
+    id: "selected-course",
+    code: "CS-102",
+    name: "选中课程",
+    term: "2026秋",
+    status: "archived",
+  });
+  const classroom = Object.freeze({
+    id: "selected-classroom",
+    courseId: "selected-course",
+    name: "选中班级",
+    joinCode: "JOIN-002",
+    status: " ACTIVE ",
+  });
+  const coursePayload = Object.freeze({ status: "ACTIVE", data: course });
+  const classroomPayload = Object.freeze({
+    status: "ARCHIVED",
+    data: classroom,
+  });
+  const beforeCourse = structuredClone(coursePayload);
+  const beforeClassroom = structuredClone(classroomPayload);
+
+  for (const adapt of [toCourseDetailResponse, toCourseUpdateResponse]) {
+    const result = adapt(coursePayload);
+    expect(result).toMatchObject({
+      id: "selected-course",
+      code: "CS-102",
+      name: "选中课程",
+      term: "2026秋",
+    });
+    expect(result.status).toBeUndefined();
+    expect(result.raw).toBe(course);
+  }
+  for (const adapt of [toClassroomDetailResponse, toClassroomUpdateResponse]) {
+    const result = adapt(classroomPayload);
+    expect(result).toMatchObject({
+      id: "selected-classroom",
+      courseId: "selected-course",
+      name: "选中班级",
+      joinCode: "JOIN-002",
+    });
+    expect(result.status).toBeUndefined();
+    expect(result).not.toHaveProperty("raw");
+  }
+  expect(coursePayload.data).toBe(course);
+  expect(classroomPayload.data).toBe(classroom);
+  expect(coursePayload).toEqual(beforeCourse);
+  expect(classroomPayload).toEqual(beforeClassroom);
+});
+
+test("course and classroom lists retain mixed-status rows, order and pagination", () => {
+  const courses = Object.freeze([
+    Object.freeze({ id: "course-active", status: "ACTIVE" }),
+    Object.freeze({ id: "course-unknown", status: " archived " }),
+    Object.freeze({ id: "course-archived", status: "ARCHIVED" }),
+  ]);
+  const classrooms = Object.freeze([
+    Object.freeze({ id: "classroom-archived", status: "ARCHIVED" }),
+    Object.freeze({ id: "classroom-unknown", status: "active" }),
+    Object.freeze({ id: "classroom-active", status: "ACTIVE" }),
+  ]);
+  const coursePayload = Object.freeze({
+    data: Object.freeze({ items: courses, total: 31, page: 3, limit: 100 }),
+  });
+  const classroomPayload = Object.freeze({
+    items: classrooms,
+    total: 42,
+    page: 4,
+    limit: 100,
+  });
+  const beforeCourse = structuredClone(coursePayload);
+  const beforeClassroom = structuredClone(classroomPayload);
+  const courseResult = toCourseListResponse(coursePayload);
+  const classroomResult = toClassroomListResponse(classroomPayload);
+
+  expect(courseResult).toMatchObject({ total: 31, page: 3, limit: 100 });
+  expect(courseResult.items.map((item) => item.id)).toEqual([
+    "course-active",
+    "course-unknown",
+    "course-archived",
+  ]);
+  expect(courseResult.items.map((item) => item.status)).toEqual([
+    "ACTIVE",
+    undefined,
+    "ARCHIVED",
+  ]);
+  expect(courseResult.raw).toBe(coursePayload);
+  courseResult.items.forEach((item, index) =>
+    expect(item.raw).toBe(courses[index]),
+  );
+  expect(classroomResult).toMatchObject({ total: 42, page: 4, limit: 100 });
+  expect(classroomResult.items.map((item) => item.id)).toEqual([
+    "classroom-archived",
+    "classroom-unknown",
+    "classroom-active",
+  ]);
+  expect(classroomResult.items.map((item) => item.status)).toEqual([
+    "ARCHIVED",
+    undefined,
+    "ACTIVE",
+  ]);
+  expect(classroomResult).not.toHaveProperty("raw");
+  classroomResult.items.forEach((item) =>
+    expect(item).not.toHaveProperty("raw"),
+  );
+  expect(coursePayload.data.items).toBe(courses);
+  expect(classroomPayload.items).toBe(classrooms);
+  expect(coursePayload).toEqual(beforeCourse);
+  expect(classroomPayload).toEqual(beforeClassroom);
+});
+
+test("course overview keeps selected course status strict and preserves source raw references", () => {
+  const course = Object.freeze({
+    id: "overview-course",
+    code: "CS-103",
+    name: "总览课程",
+    term: "2026秋",
+    status: " ARCHIVED ",
+  });
+  const item = Object.freeze({
+    classroomId: "overview-classroom",
+    name: "总览班级",
+    studentsCount: 2,
+  });
+  const source = Object.freeze({
+    course,
+    window: "all",
+    page: 2,
+    limit: 20,
+    total: 21,
+    items: Object.freeze([item]),
+  });
+  const payload = Object.freeze({
+    course: Object.freeze({ id: "outer-course", status: "ACTIVE" }),
+    data: source,
+  });
+  const before = structuredClone(payload);
+  const result = toCourseOverviewResponse(payload);
+
+  expect(result.course).toMatchObject({
+    id: "overview-course",
+    code: "CS-103",
+    name: "总览课程",
+    term: "2026秋",
+  });
+  expect(result.course?.status).toBeUndefined();
+  expect(result.course?.raw).toBe(course);
+  expect(result).toMatchObject({
+    window: "all",
+    page: 2,
+    limit: 20,
+    total: 21,
+    items: [
+      { classroomId: "overview-classroom", name: "总览班级", studentsCount: 2 },
+    ],
+  });
+  expect(result.raw).toBe(source);
+  expect(result.items[0].raw).toBe(item);
+  expect(payload.data).toBe(source);
+  expect(payload).toEqual(before);
+});
 
 test("classroom members preserve exact formal states, user fields and pagination", () => {
   const active = Object.freeze({

@@ -74,6 +74,7 @@
 - 班级生命周期：`ClassroomLifecycleActions` -> `/api/proxy/classrooms/:id` -> `PATCH/DELETE /api/classrooms/:id`。
   - 调用页面：`/teacher/classrooms`。
   - 注意：`CLASSROOM_NOT_EMPTY` 只做展示；Enrollment 历史由后端判定。
+- 课程/班级主响应状态适配：`normalizeCourseStatus`、`normalizeClassroomStatus` 仅接受原值精确等于 `ACTIVE` 或 `ARCHIVED`；不经 `asString` 预处理，不 trim、转换大小写或强制转换类型，其余输入（含缺失）均为 `undefined`，不补合法默认值、不修改输入。班级内附带的 `ClassroomCourseSummary.status` 仍为普通字符串投影，不在该收口范围。后端状态及接口规则见 [API Courses](./handoff-backend-api-map.md#courses) / [Classrooms](./handoff-backend-api-map.md#classrooms)。
 - 班级成员：`members/page.tsx`、`RemoveStudentButton` -> `/api/proxy/classrooms/:id/students*`。
   - 对应后端：`GET /api/classrooms/:id/students`、`POST /api/classrooms/:id/students/:uid/remove`。
   - 注意：成员列表使用正式后端读源，禁止回退到 `studentIds`。
