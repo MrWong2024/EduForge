@@ -176,6 +176,8 @@
 - 上述三条正式请求全部由 `fetchJson` 经 `/api/proxy/**` 发出；前端只适配后端返回值与枚举，本模块所有 nullable 比率/均值保持 null，真实0保留为0，不调用通用必需数字适配补零。不重算基线/终点、issueLoad、`detailedOutcome`、`overallOutcome`、`engagementStatus`、rate 分母或任何聚合指标。
 - 教学快照预检：`export/snapshot/page.tsx` -> `/api/proxy/classrooms/:id/export/snapshot`。
   - 对应后端：`GET /api/classrooms/:classroomId/export/snapshot`。
+  - window 适配：前端仅接受精确的 `7d | 30d`，页面默认 `7d`；省略、空值、`term`、`24h`、`all`、大小写或空白变体及其他未知值统一沿用 `parseEnum` 回落为 `7d`，不设旧值特判、不 trim 或转换大小写。重复 window 沿用 `getSingleSearchParam` 取首值。
+  - 请求始终显式发送解析后的 window；后端省略窗口时的默认值及响应合同见 [Backend DTO Snapshot](./handoff-backend-dto-cheatsheet.md#classroom-export-snapshot)。
 
 ## 4) 高风险调用边界
 

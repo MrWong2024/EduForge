@@ -27,7 +27,7 @@ type SnapshotExportPageProps = {
   }>;
 };
 
-const SNAPSHOT_WINDOWS = ["24h", "7d", "30d"] as const;
+const SNAPSHOT_WINDOWS = ["7d", "30d"] as const;
 type SnapshotWindow = (typeof SNAPSHOT_WINDOWS)[number];
 
 type SnapshotQueryState = {
