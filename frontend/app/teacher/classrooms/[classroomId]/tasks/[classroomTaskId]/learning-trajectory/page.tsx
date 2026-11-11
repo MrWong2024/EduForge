@@ -145,7 +145,7 @@ const pickText = (...candidates: unknown[]): string | null => {
 };
 
 const toStudentDisplayName = (item: TrajectoryItem): string => {
-  const name = pickText(item.student?.name, item.studentName, safeGet(item.raw, "name", undefined));
+  const name = pickText(item.student?.name);
   if (name) {
     return name;
   }

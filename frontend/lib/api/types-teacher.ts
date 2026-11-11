@@ -498,7 +498,6 @@ export type LearningTrajectoryStudentPublic = {
 
 export type LearningTrajectoryItem = {
   studentId?: string;
-  studentName?: string | null;
   student?: LearningTrajectoryStudentPublic;
   attemptsCount?: number;
   latestAttemptAt?: string | null;
@@ -1402,10 +1401,6 @@ const toLearningTrajectoryItem = (value: unknown): LearningTrajectoryItem => {
 
   return {
     studentId,
-    studentName:
-      asNullableString(record.studentName) ??
-      asNullableString(student?.name) ??
-      asNullableString(record.name),
     student:
       student ??
       (studentId

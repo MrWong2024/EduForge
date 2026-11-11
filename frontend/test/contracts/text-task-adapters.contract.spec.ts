@@ -13,6 +13,7 @@ import {
   toLearningTaskListResponse,
   toLearningTaskOption,
   toLearningTaskUpdateResponse,
+  toLearningTrajectoryResponse,
   toPublishableTaskTemplateListResponse,
   toSubmissionDetailResponse as toTeacherDetail,
   toTeacherFeedbackListResponse,
@@ -43,6 +44,162 @@ import {
 import { toDisplayLateDuration } from "../../lib/ui/format";
 import { normalizeTaskTemplateVisibility } from "../../lib/learning-tasks/template-visibility-scope";
 import { canEditTeacherFeedback } from "../../lib/learning-tasks/teacher-feedback";
+
+test("learning trajectory keeps structured student details and statistics without projecting old name aliases", () => {
+  const student = Object.freeze({
+    id: "student-1",
+    name: "正式姓名",
+    studentNo: "S-001",
+    email: "student-1@example.com",
+  });
+  const item = Object.freeze({
+    studentId: "student-1",
+    student,
+    studentName: "旧别名姓名",
+    name: "旧顶层姓名",
+    attemptsCount: 3,
+    latestAttemptAt: "2026-11-10T08:00:00.000Z",
+    latestAiFeedbackStatus: "SUCCEEDED",
+    trend: {
+      errorCountFirst: 4,
+      errorCountLatest: 1,
+      errorDelta: -3,
+      topTagsFirst: [{ tag: "logic", count: 4 }],
+      topTagsLatest: [{ tag: "logic", count: 1 }],
+    },
+    attempts: [
+      {
+        submissionId: "submission-3",
+        attemptNo: 3,
+        createdAt: "2026-11-10T08:00:00.000Z",
+        isLate: false,
+        aiFeedbackStatus: "SUCCEEDED",
+        feedbackCount: 2,
+        feedbackSummary: {
+          totalItems: 1,
+          severityBreakdown: { INFO: 0, WARN: 0, ERROR: 1 },
+          topTags: [{ tag: "logic", count: 1 }],
+        },
+      },
+    ],
+  });
+  const payload = Object.freeze({
+    classroomId: "classroom-1",
+    classroomTaskId: "classroom-task-1",
+    window: "7d",
+    page: 2,
+    limit: 5,
+    total: 6,
+    items: Object.freeze([item]),
+  });
+  const before = structuredClone(payload);
+  const result = toLearningTrajectoryResponse(payload);
+  expect(result).toMatchObject({
+    classroomId: "classroom-1",
+    classroomTaskId: "classroom-task-1",
+    window: "7d",
+    page: 2,
+    limit: 5,
+    total: 6,
+    items: [
+      {
+        studentId: "student-1",
+        student: {
+          id: "student-1",
+          name: "正式姓名",
+          studentNo: "S-001",
+          email: "student-1@example.com",
+        },
+        attemptsCount: 3,
+        latestAttemptAt: "2026-11-10T08:00:00.000Z",
+        latestAiFeedbackStatus: "SUCCEEDED",
+        trend: {
+          errorCountFirst: 4,
+          errorCountLatest: 1,
+          errorDelta: -3,
+          topTagsFirst: [{ tag: "logic", count: 4 }],
+          topTagsLatest: [{ tag: "logic", count: 1 }],
+        },
+        attempts: [
+          {
+            submissionId: "submission-3",
+            attemptNo: 3,
+            createdAt: "2026-11-10T08:00:00.000Z",
+            isLate: false,
+            aiFeedbackStatus: "SUCCEEDED",
+            feedbackCount: 2,
+            feedbackSummary: {
+              totalItems: 1,
+              severityBreakdown: { INFO: 0, WARN: 0, ERROR: 1 },
+              topTags: [{ tag: "logic", count: 1 }],
+            },
+          },
+        ],
+      },
+    ],
+  });
+  expect(result.items[0]).not.toHaveProperty("studentName");
+  expect(result.raw).toBe(payload);
+  expect(result.items[0].raw).toBe(item);
+  expect(result.items[0].student?.raw).toBe(student);
+  expect(result.items[0].raw.studentName).toBe("旧别名姓名");
+  expect(result.items[0].raw.name).toBe("旧顶层姓名");
+  expect(payload).toEqual(before);
+});
+
+for (const nameState of ["null", "missing"] as const) {
+  test(`learning trajectory preserves a ${nameState} structured name despite populated old aliases`, () => {
+    const student = Object.freeze(
+      nameState === "null"
+        ? { id: "student-2", name: null, studentNo: "S-002", email: null }
+        : { id: "student-2", studentNo: "S-002", email: null },
+    );
+    const item = Object.freeze({
+      studentId: "student-2",
+      student,
+      studentName: "旧别名姓名",
+      name: "旧顶层姓名",
+      attemptsCount: 0,
+    });
+    const payload = Object.freeze({ items: Object.freeze([item]) });
+    const before = structuredClone(payload);
+    const result = toLearningTrajectoryResponse(payload);
+    expect(result.items[0].student?.name).toBe(
+      nameState === "null" ? null : undefined,
+    );
+    expect(result.items[0].student).toMatchObject({
+      id: "student-2",
+      studentNo: "S-002",
+      email: null,
+    });
+    expect(result.items[0].attemptsCount).toBe(0);
+    expect(result.items[0]).not.toHaveProperty("studentName");
+    expect(result.raw).toBe(payload);
+    expect(result.items[0].raw).toBe(item);
+    expect(result.items[0].student?.raw).toBe(student);
+    expect(Object.hasOwn(student, "name")).toBe(nameState === "null");
+    expect(payload).toEqual(before);
+  });
+}
+
+test("learning trajectory keeps the studentId-only fallback without synthesizing a name from old aliases", () => {
+  const item = Object.freeze({
+    studentId: "student-3",
+    studentName: "旧别名姓名",
+    name: "旧顶层姓名",
+  });
+  const payload = Object.freeze({ items: Object.freeze([item]) });
+  const before = structuredClone(payload);
+  const result = toLearningTrajectoryResponse(payload);
+  expect(result.items[0].studentId).toBe("student-3");
+  expect(result.items[0].student).toEqual({ id: "student-3", raw: {} });
+  expect(result.items[0].student).not.toHaveProperty("name");
+  expect(result.items[0]).not.toHaveProperty("studentName");
+  expect(result.raw).toBe(payload);
+  expect(result.items[0].raw).toBe(item);
+  expect(Object.hasOwn(item, "student")).toBe(false);
+  expect(payload).toEqual(before);
+});
 
 test("classroom status adapters preserve only the three exact persisted states", () => {
   for (const status of ["ACTIVE", "CLOSED", "RECALLED"] as const) {
