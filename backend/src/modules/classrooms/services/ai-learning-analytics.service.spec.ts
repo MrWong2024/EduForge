@@ -94,6 +94,7 @@ type ServiceHarnessOptions = {
     _id: Types.ObjectId;
     taskId: Types.ObjectId;
     publishedAt: Date;
+    taskSnapshot?: unknown;
   }>;
   students?: Array<{
     _id: Types.ObjectId;
@@ -111,10 +112,6 @@ const createServiceHarness = (options: ServiceHarnessOptions = {}) => {
   const courseId = objectId();
   const classroomTasks = options.classroomTasks ?? [];
   const activeStudentIds = options.activeStudentIds ?? [];
-  const taskTitleRows = classroomTasks.map((classroomTask, index) => ({
-    _id: classroomTask.taskId,
-    title: `Task ${index + 1}`,
-  }));
 
   const classroomQuery = makeQuery({
     _id: classroomId,
@@ -128,7 +125,6 @@ const createServiceHarness = (options: ServiceHarnessOptions = {}) => {
     term: '2026-Spring',
   });
   const classroomTaskQuery = makeQuery(classroomTasks);
-  const taskQuery = makeQuery(taskTitleRows);
   const jobQuery = makeQuery(options.jobs ?? []);
   const feedbackQuery = makeQuery(options.feedbackItems ?? []);
   const userQuery = makeQuery(options.students ?? []);
@@ -146,9 +142,6 @@ const createServiceHarness = (options: ServiceHarnessOptions = {}) => {
       capturedClassroomTaskFilter = filter;
       return classroomTaskQuery;
     }),
-  };
-  const taskModel = {
-    find: jest.fn().mockReturnValue(taskQuery),
   };
   const submissionModel = {
     find: jest.fn(
@@ -186,7 +179,6 @@ const createServiceHarness = (options: ServiceHarnessOptions = {}) => {
     classroomModel as never,
     courseModel as never,
     classroomTaskModel as never,
-    taskModel as never,
     submissionModel as never,
     aiFeedbackJobModel as never,
     feedbackModel as never,
@@ -417,6 +409,11 @@ describe('V1.2 independently specified timelines (no database)', () => {
           _id: t.classroomTaskId,
           taskId: objectId(),
           publishedAt: new Date(at(0)),
+          taskSnapshot: {
+            title: 'Published task',
+            description: 'Published description',
+            knowledgeModule: 'analytics',
+          },
         },
       ],
       submissions,
@@ -501,6 +498,11 @@ describe('V1.2 independently specified timelines (no database)', () => {
             _id: t.classroomTaskId,
             taskId: objectId(),
             publishedAt: new Date(at(0)),
+            taskSnapshot: {
+              title: 'Published task',
+              description: 'Published description',
+              knowledgeModule: 'analytics',
+            },
           },
         ],
         submissions,
@@ -1006,6 +1008,11 @@ describe('V1.2 independently specified timelines (no database)', () => {
         _id: t.classroomTaskId,
         taskId: objectId(),
         publishedAt: new Date(at(0)),
+        taskSnapshot: {
+          title: 'Published task',
+          description: 'Published description',
+          knowledgeModule: 'analytics',
+        },
       })),
       submissions,
       jobs,
@@ -1492,6 +1499,11 @@ describe('AiLearningAnalyticsService aggregation boundaries', () => {
           _id: classroomTaskId,
           taskId,
           publishedAt: new Date('2026-06-01T00:00:00.000Z'),
+          taskSnapshot: {
+            title: 'Published task',
+            description: 'Published description',
+            knowledgeModule: 'analytics',
+          },
         },
       ],
     });
@@ -1522,6 +1534,7 @@ describe('AiLearningAnalyticsService aggregation boundaries', () => {
     expect(result.taskTrends).toHaveLength(1);
     expect(result.taskTrends[0]).toMatchObject({
       classroomTaskId: classroomTaskId.toString(),
+      taskTitle: 'Published task',
       submittedStudentCount: 0,
       aiRequestedStudentCount: 0,
       qualityComparableStudentCount: 0,
@@ -1553,6 +1566,11 @@ describe('AiLearningAnalyticsService aggregation boundaries', () => {
           _id: classroomTaskId,
           taskId,
           publishedAt: new Date('2026-06-01T00:00:00.000Z'),
+          taskSnapshot: {
+            title: 'Published task',
+            description: 'Published description',
+            knowledgeModule: 'analytics',
+          },
         },
       ],
     });
@@ -1706,6 +1724,11 @@ describe('AiLearningAnalyticsService aggregation boundaries', () => {
           _id: classroomTaskId,
           taskId,
           publishedAt: new Date('2026-06-01T00:00:00.000Z'),
+          taskSnapshot: {
+            title: 'Published task',
+            description: 'Published description',
+            knowledgeModule: 'analytics',
+          },
         },
       ],
       submissions,
@@ -1831,6 +1854,11 @@ describe('AiLearningAnalyticsService aggregation boundaries', () => {
             _id: classroomTaskId,
             taskId: objectId(),
             publishedAt: new Date(),
+            taskSnapshot: {
+              title: 'Published task',
+              description: 'Published description',
+              knowledgeModule: 'analytics',
+            },
           },
         ],
       });
@@ -1891,7 +1919,16 @@ describe('AiLearningAnalyticsService aggregation boundaries', () => {
         studentNo: `C-00${index + 1}`,
       })),
       classroomTasks: [
-        { _id: classroomTaskId, taskId, publishedAt: new Date() },
+        {
+          _id: classroomTaskId,
+          taskId,
+          publishedAt: new Date(),
+          taskSnapshot: {
+            title: 'Published task',
+            description: 'Published description',
+            knowledgeModule: 'analytics',
+          },
+        },
       ],
       submissions: [before, after],
       jobs: [
@@ -1970,7 +2007,16 @@ describe('AiLearningAnalyticsService aggregation boundaries', () => {
           { _id: activeStudentId, name: 'Only Student', studentNo: 'ONLY-1' },
         ],
         classroomTasks: [
-          { _id: objectId(), taskId: objectId(), publishedAt: new Date() },
+          {
+            _id: objectId(),
+            taskId: objectId(),
+            publishedAt: new Date(),
+            taskSnapshot: {
+              title: 'Published task',
+              description: 'Published description',
+              knowledgeModule: 'analytics',
+            },
+          },
         ],
       });
 
@@ -2014,6 +2060,11 @@ describe('AiLearningAnalyticsService aggregation boundaries', () => {
           _id: includedClassroomTaskId,
           taskId,
           publishedAt: new Date(),
+          taskSnapshot: {
+            title: 'Published task',
+            description: 'Published description',
+            knowledgeModule: 'analytics',
+          },
         },
       ],
       submissions: [includedSubmission],

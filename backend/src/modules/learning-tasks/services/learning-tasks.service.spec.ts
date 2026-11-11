@@ -89,6 +89,7 @@ const createHarness = (
   };
   const task = {
     _id: taskId,
+    title: 'Current template title',
     createdBy: teacherId,
     status: options.taskStatus ?? TaskStatus.Published,
   };
@@ -130,6 +131,10 @@ const createHarness = (
   const feedbackModel = {
     exists: jest.fn().mockResolvedValue(null),
     findById: jest.fn(() => makeQuery(null)),
+    find: jest.fn(() => makeQuery([])),
+    create: jest.fn((payload: Record<string, unknown>) =>
+      Promise.resolve({ _id: objectId(), ...payload }),
+    ),
   };
   const classroomTaskModel = {
     findById: jest.fn(() => makeQuery(classroomTask)),
@@ -1077,8 +1082,9 @@ describe('LearningTasksService student participation status gates', () => {
     ).toHaveBeenCalledTimes(1);
   });
 
-  it('keeps non-owner AI requests on the existing forbidden path', async () => {
+  it('keeps non-owner AI requests on the existing forbidden path even with an invalid snapshot', async () => {
     const harness = createHarness({ submissionStudentId: objectId() });
+    Reflect.set(harness.classroomTask, 'taskSnapshot', {});
 
     await expect(
       harness.service.requestAiFeedback(
@@ -1164,6 +1170,173 @@ describe('LearningTasksService student participation status gates', () => {
     );
     expect(
       harness.aiFeedbackJobService.ensureJobForSubmission,
+    ).not.toHaveBeenCalled();
+  });
+});
+
+describe('LearningTasksService invalid classroom snapshots (no database)', () => {
+  afterEach(() => jest.restoreAllMocks());
+  const message = '课堂任务内容快照缺失或无效，请联系教师核对。';
+
+  it.each([
+    { name: 'missing', snapshot: undefined },
+    {
+      name: 'malformed',
+      snapshot: {
+        title: 'Invalid snapshot title',
+        description: 'Invalid snapshot description',
+        knowledgeModule: 42,
+      },
+    },
+  ])(
+    'keeps saved work and feedback readable for a $name snapshot while rejecting new submissions, edits and AI before writes',
+    async ({ snapshot }) => {
+      const h = createHarness();
+      if (snapshot === undefined) {
+        Reflect.deleteProperty(h.classroomTask, 'taskSnapshot');
+      } else {
+        Reflect.set(h.classroomTask, 'taskSnapshot', snapshot);
+      }
+      const content = {
+        language: 'javascript',
+        codeText: 'saved code',
+        submissionNote: 'saved note',
+      };
+      const meta = { aiUsageDeclaration: 'saved declaration' };
+      Object.assign(h.submission, { content, meta });
+      const submissionBefore = { ...h.submission };
+      const feedback = {
+        _id: objectId(),
+        submissionId: h.ids.submissionId,
+        source: FeedbackSource.Teacher,
+        message: 'Saved feedback',
+      };
+      const student = { id: h.ids.studentId.toString(), roles: ['student'] };
+      const detail = await h.service.getSubmissionDetail(
+        h.ids.submissionId.toString(),
+        student,
+      );
+      expect(detail).toMatchObject({
+        taskTitle: null,
+        taskSnapshotAvailable: false,
+        content,
+        meta,
+        editing: { canEdit: false, reason: 'SNAPSHOT_MISSING', message },
+        aiReview: { canRequest: false, requestBlockReason: message },
+      });
+      await expect(
+        h.service.createSubmissionForClassroomTask(
+          h.ids.taskId.toString(),
+          h.ids.classroomTaskId.toString(),
+          submissionDto,
+          student.id,
+        ),
+      ).rejects.toMatchObject({ status: 409, message });
+      await expect(
+        h.service.updateSubmission(
+          h.ids.submissionId.toString(),
+          { expectedRevision: 0, content },
+          student,
+        ),
+      ).rejects.toMatchObject({
+        status: 403,
+        response: { reason: 'SNAPSHOT_MISSING', message },
+      });
+      for (const actor of [
+        student,
+        { id: h.ids.teacherId.toString(), roles: ['teacher'] },
+      ]) {
+        await expect(
+          h.service.requestAiFeedback(h.ids.submissionId.toString(), actor, {
+            expectedRevision: 0,
+          }),
+        ).rejects.toMatchObject({ status: 409, message });
+      }
+      h.feedbackModel.exists.mockResolvedValue({ _id: feedback._id });
+      h.feedbackModel.find.mockReturnValue(makeQuery([feedback]));
+      await expect(
+        h.service.listFeedback(h.ids.submissionId.toString(), student),
+      ).resolves.toMatchObject([
+        { id: feedback._id.toString(), message: 'Saved feedback' },
+      ]);
+      await expect(
+        h.service.getSubmissionDetail(h.ids.submissionId.toString(), student),
+      ).resolves.toMatchObject({
+        taskTitle: null,
+        taskSnapshotAvailable: false,
+        content,
+        meta,
+        editing: { canEdit: false, reason: 'REVIEW_STARTED' },
+      });
+      expect(h.submission).toEqual(submissionBefore);
+      expect(h.submissionModel.create).not.toHaveBeenCalled();
+      expect(h.submissionModel.findOneAndUpdate).not.toHaveBeenCalled();
+      expect(h.feedbackModel.create).not.toHaveBeenCalled();
+      expect(
+        h.aiFeedbackJobService.ensureJobForSubmission,
+      ).not.toHaveBeenCalled();
+    },
+  );
+
+  it('reads a valid snapshot title independently of the current template', async () => {
+    const h = createHarness();
+    const detail = await h.service.getSubmissionDetail(
+      h.ids.submissionId.toString(),
+      { id: h.ids.studentId.toString(), roles: ['student'] },
+    );
+    expect(h.task.title).toBe('Current template title');
+    expect(detail.taskTitle).toBe('Published task');
+    expect(detail.taskSnapshotAvailable).toBe(true);
+  });
+
+  it.each(['INVALID_STATE', 'REVIEW_STARTED'] as const)(
+    'keeps %s ahead of the invalid snapshot editing branch',
+    async (reason) => {
+      const h = createHarness();
+      Reflect.set(h.classroomTask, 'taskSnapshot', {});
+      if (reason === 'INVALID_STATE') {
+        Reflect.deleteProperty(h.submission, 'contentRevision');
+      } else {
+        Object.assign(h.submission, { reviewStartedAt: new Date() });
+      }
+      const before = { ...h.submission };
+      await expect(
+        h.service.updateSubmission(
+          h.ids.submissionId.toString(),
+          { expectedRevision: 0, content: submissionDto.content },
+          { id: h.ids.studentId.toString(), roles: ['student'] },
+        ),
+      ).rejects.toMatchObject({
+        status: 409,
+        response: { code: 'SUBMISSION_' + reason },
+      });
+      expect(h.submission).toEqual(before);
+      expect(h.submissionModel.findOneAndUpdate).not.toHaveBeenCalled();
+      expect(
+        h.aiFeedbackJobService.ensureJobForSubmission,
+      ).not.toHaveBeenCalled();
+    },
+  );
+
+  it('does not add a snapshot gate to teacher feedback creation', async () => {
+    const h = createHarness();
+    Reflect.set(h.classroomTask, 'taskSnapshot', []);
+    const result = await h.service.createFeedback(
+      h.ids.submissionId.toString(),
+      {
+        expectedRevision: 0,
+        source: FeedbackSource.Teacher,
+        type: FeedbackType.Style,
+        severity: FeedbackSeverity.Info,
+        message: 'Teacher review remains allowed',
+      },
+      h.ids.teacherId.toString(),
+    );
+    expect(result.message).toBe('Teacher review remains allowed');
+    expect(h.submissionModel.findOneAndUpdate).toHaveBeenCalledTimes(1);
+    expect(h.feedbackModel.create).toHaveBeenCalledTimes(1);
+    expect(
+      h.aiFeedbackJobService.ensureJobForSubmission,
     ).not.toHaveBeenCalled();
   });
 });

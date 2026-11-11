@@ -24,8 +24,22 @@ export function publicTaskContent(task: TaskSnapshot): PublicTaskContent {
   };
 }
 
-export const MISSING_TASK_SNAPSHOT_MESSAGE =
-  '该课堂任务未保存发布内容，请教师重新布置后继续。';
+export const INVALID_TASK_SNAPSHOT_MESSAGE =
+  '课堂任务内容快照缺失或无效，请联系教师核对。';
+
+export function isValidTaskSnapshot(value: unknown): value is TaskSnapshot {
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    !Array.isArray(value) &&
+    'title' in value &&
+    typeof value.title === 'string' &&
+    'description' in value &&
+    typeof value.description === 'string' &&
+    'knowledgeModule' in value &&
+    typeof value.knowledgeModule === 'string'
+  );
+}
 
 export function snapshotTask(task: Task): TaskSnapshot {
   return {

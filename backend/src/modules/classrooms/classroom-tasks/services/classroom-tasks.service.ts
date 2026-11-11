@@ -11,7 +11,8 @@ import { Model, PipelineStage, Types } from 'mongoose';
 import { Classroom } from '../../schemas/classroom.schema';
 import { Course } from '../../../courses/schemas/course.schema';
 import {
-  MISSING_TASK_SNAPSHOT_MESSAGE,
+  INVALID_TASK_SNAPSHOT_MESSAGE,
+  isValidTaskSnapshot,
   snapshotTask,
   publicTaskContent,
 } from '../classroom-task-content';
@@ -326,6 +327,7 @@ export class ClassroomTasksService {
     }
 
     const candidateSnapshot = snapshotTask(task);
+    this.requireTaskSnapshot(candidateSnapshot);
     await this.aiContextReader.validateForSave(candidateSnapshot.aiContextRefs);
     const publishedAt = new Date();
     const dueAt = dto.dueAt ? new Date(dto.dueAt) : undefined;
@@ -397,6 +399,7 @@ export class ClassroomTasksService {
     if (!hasDueAt && !hasAllowLate) {
       throw new BadRequestException('At least one updatable field is required');
     }
+    this.requireTaskSnapshot(classroomTask.taskSnapshot);
 
     const setPatch: Record<string, unknown> = {};
     const unsetPatch: Record<string, 1> = {};
@@ -520,6 +523,7 @@ export class ClassroomTasksService {
         );
       }
     }
+    this.requireTaskSnapshot(classroomTask.taskSnapshot);
 
     const updatedClassroomTask = await this.classroomTaskModel
       .findOneAndUpdate(
@@ -817,9 +821,7 @@ export class ClassroomTasksService {
       throw new ConflictException('课堂任务已关闭，不能继续提交。');
     }
 
-    if (!classroomTask.taskSnapshot) {
-      throw new ConflictException(MISSING_TASK_SNAPSHOT_MESSAGE);
-    }
+    this.requireTaskSnapshot(classroomTask.taskSnapshot);
     const task = await this.taskModel
       .findById(classroomTask.taskId)
       .select('_id')
@@ -1293,12 +1295,13 @@ export class ClassroomTasksService {
     const classroomTaskStatus = this.requireClassroomTaskStatus(
       classroomTask.status,
     );
+    const teachingContent = this.requireTaskSnapshot(
+      classroomTask.taskSnapshot,
+    );
     const participationStatus = this.buildStudentTaskParticipationStatus(
       classroom.status,
       classroomTaskStatus,
-      classroomTask,
     );
-    const teachingContent = classroomTask.taskSnapshot ?? snapshotTask(task);
 
     return {
       classroom: {
@@ -1317,7 +1320,7 @@ export class ClassroomTasksService {
         settings: {
           allowLate: classroomTask.settings?.allowLate,
         },
-        taskSnapshotAvailable: Boolean(classroomTask.taskSnapshot),
+        taskSnapshotAvailable: true,
       },
       task: {
         id: task._id.toString(),
@@ -1395,7 +1398,6 @@ export class ClassroomTasksService {
   private buildStudentTaskParticipationStatus(
     classroomStatus: ClassroomStatus,
     classroomTaskStatus: ClassroomTaskStatus,
-    classroomTask: ClassroomTask,
   ): StudentTaskParticipationStatus {
     if (classroomStatus !== ClassroomStatus.Active) {
       return {
@@ -1416,9 +1418,9 @@ export class ClassroomTasksService {
       };
     }
     return {
-      readOnly: !classroomTask.taskSnapshot,
-      canSubmit: Boolean(classroomTask.taskSnapshot),
-      canRequestAiFeedback: Boolean(classroomTask.taskSnapshot),
+      readOnly: false,
+      canSubmit: true,
+      canRequestAiFeedback: true,
       reason: 'ACTIVE',
       message: null,
     };
@@ -1845,18 +1847,21 @@ export class ClassroomTasksService {
     task: Task,
     taskPublisher?: PublisherSummary | null,
   ) {
-    const teachingContent = classroomTask.taskSnapshot ?? snapshotTask(task);
+    const status = this.requireClassroomTaskStatus(classroomTask.status);
+    const teachingContent = this.requireTaskSnapshot(
+      classroomTask.taskSnapshot,
+    );
     return {
       id: classroomTask._id.toString(),
       classroomId: classroomTask.classroomId.toString(),
       taskId: classroomTask.taskId.toString(),
-      status: this.requireClassroomTaskStatus(classroomTask.status),
+      status,
       publishedAt: classroomTask.publishedAt,
       dueAt: classroomTask.dueAt,
       settings: {
         allowLate: classroomTask.settings?.allowLate,
       },
-      taskSnapshotAvailable: Boolean(classroomTask.taskSnapshot),
+      taskSnapshotAvailable: true,
       createdBy: classroomTask.createdBy.toString(),
       createdAt: classroomTask.createdAt ?? new Date(0),
       updatedAt: classroomTask.updatedAt ?? new Date(0),
@@ -1867,6 +1872,13 @@ export class ClassroomTasksService {
         status: task.status,
       },
     } as ClassroomTaskResponseDto;
+  }
+
+  private requireTaskSnapshot(value: unknown) {
+    if (!isValidTaskSnapshot(value)) {
+      throw new ConflictException(INVALID_TASK_SNAPSHOT_MESSAGE);
+    }
+    return value;
   }
 
   private async getPublisherSummaryById(

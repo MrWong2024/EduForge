@@ -128,6 +128,7 @@ async function harness() {
               taskSnapshot: {
                 title: 'unit',
                 description: 'fixture',
+                knowledgeModule: 'unit module',
                 rubric: { requirement: 'unit' },
               },
             }),
@@ -185,6 +186,62 @@ describe('claim and paid request persistence gates (no database)', () => {
     expect(historical.budgetVersion).toBeUndefined();
     expect(historical.requests).toBeUndefined();
   });
+  it.each([
+    { name: 'missing', snapshot: undefined },
+    {
+      name: 'malformed',
+      snapshot: { title: 'unit', description: 'fixture', knowledgeModule: 42 },
+    },
+  ])(
+    'rejects a $name snapshot before Reader or Provider work',
+    async ({ snapshot }) => {
+      const h = await harness();
+      const classroomModel = h.module.get<{ findById: jest.Mock }>(
+        getModelToken(ClassroomTask.name),
+      );
+      classroomModel.findById.mockReturnValue(
+        query({
+          taskId: h.job.taskId,
+          ...(snapshot === undefined ? {} : { taskSnapshot: snapshot }),
+        }),
+      );
+      const read = jest.spyOn(h.module.get(AiContextReaderService), 'read');
+      const analyze = jest.spyOn(h.provider, 'analyzeSubmission');
+      try {
+        expect(await h.processor.processOnce(1)).toEqual({
+          processed: 1,
+          succeeded: 0,
+          failed: 0,
+          dead: 1,
+        });
+        expect(read).not.toHaveBeenCalled();
+        expect(analyze).not.toHaveBeenCalled();
+        expect(h.guards.acquire).not.toHaveBeenCalled();
+        expect(h.feedback.insertMany).not.toHaveBeenCalled();
+        expect(h.jobModel.updateOne).not.toHaveBeenCalled();
+        expect(h.jobModel.findOneAndUpdate.mock.calls[2]).toEqual([
+          {
+            _id: h.job._id,
+            status: 'RUNNING',
+            attempts: 1,
+            lockOwner: 'unit-claim',
+          },
+          {
+            $set: {
+              status: 'DEAD',
+              failureCode: 'TASK_INELIGIBLE',
+              lastError: 'AI_FEEDBACK: TASK_INELIGIBLE',
+              notBefore: null,
+              lockedAt: null,
+              lockOwner: null,
+            },
+          },
+        ]);
+      } finally {
+        await h.module.close();
+      }
+    },
+  );
   it.each(['unmatched', 'database failure'])(
     'blocks fetch when reservation is %s and never schedules a paid replay',
     async (mode) => {
@@ -314,7 +371,11 @@ describe('claim and paid request persistence gates (no database)', () => {
     classroomModel.findById.mockReturnValue(
       query({
         taskId: h.job.taskId,
-        taskSnapshot: { title: 'unit', description: '中'.repeat(20000) },
+        taskSnapshot: {
+          title: 'unit',
+          description: '中'.repeat(20000),
+          knowledgeModule: 'unit module',
+        },
       }),
     );
     const fetchMock = jest

@@ -111,6 +111,7 @@ type AnalyticsOverview = {
   };
   taskTrends: Array<{
     classroomTaskId: string;
+    taskTitle: string;
     submittedStudentCount: number;
     aiRequestedStudentCount: number;
     aiDeliveredStudentCount: number;
@@ -685,7 +686,7 @@ describe('Classroom AI learning analytics (e2e)', () => {
     ];
     const tasks = await taskModel.create(
       taskDefinitions.map((title) => ({
-        title,
+        title: `Current template: ${title}`,
         description: `${title} for controlled analytics`,
         knowledgeModule: 'ai-learning-analytics',
         status: TaskStatus.Published,
@@ -701,48 +702,88 @@ describe('Classroom AI learning analytics (e2e)', () => {
       {
         classroomId,
         taskId: tasks[0]._id,
+        taskSnapshot: {
+          title: taskDefinitions[0],
+          description: tasks[0].description,
+          knowledgeModule: tasks[0].knowledgeModule,
+        },
         publishedAt: new Date(now - 2 * dayMs),
         createdBy: teacherId,
       },
       {
         classroomId,
         taskId: tasks[1]._id,
+        taskSnapshot: {
+          title: taskDefinitions[1],
+          description: tasks[1].description,
+          knowledgeModule: tasks[1].knowledgeModule,
+        },
         publishedAt: new Date(now - 20 * dayMs),
         createdBy: teacherId,
       },
       {
         classroomId,
         taskId: tasks[2]._id,
+        taskSnapshot: {
+          title: taskDefinitions[2],
+          description: tasks[2].description,
+          knowledgeModule: tasks[2].knowledgeModule,
+        },
         publishedAt: new Date(now - 40 * dayMs),
         createdBy: teacherId,
       },
       {
         classroomId,
         taskId: tasks[3]._id,
+        taskSnapshot: {
+          title: taskDefinitions[3],
+          description: tasks[3].description,
+          knowledgeModule: tasks[3].knowledgeModule,
+        },
         publishedAt: new Date(now - 1.5 * dayMs),
         createdBy: teacherId,
       },
       {
         classroomId,
         taskId: tasks[4]._id,
+        taskSnapshot: {
+          title: taskDefinitions[4],
+          description: tasks[4].description,
+          knowledgeModule: tasks[4].knowledgeModule,
+        },
         publishedAt: new Date(now - dayMs),
         createdBy: teacherId,
       },
       {
         classroomId,
         taskId: tasks[5]._id,
+        taskSnapshot: {
+          title: taskDefinitions[5],
+          description: tasks[5].description,
+          knowledgeModule: tasks[5].knowledgeModule,
+        },
         publishedAt: new Date(now - 0.5 * dayMs),
         createdBy: teacherId,
       },
       {
         classroomId,
         taskId: tasks[6]._id,
+        taskSnapshot: {
+          title: taskDefinitions[6],
+          description: tasks[6].description,
+          knowledgeModule: tasks[6].knowledgeModule,
+        },
         publishedAt: new Date(now - 3 * dayMs),
         createdBy: teacherId,
       },
       {
         classroomId: otherClassroomId,
         taskId: tasks[0]._id,
+        taskSnapshot: {
+          title: taskDefinitions[0],
+          description: tasks[0].description,
+          knowledgeModule: tasks[0].knowledgeModule,
+        },
         publishedAt: new Date(now - 2 * dayMs),
         createdBy: otherTeacherId,
       },
@@ -1313,6 +1354,7 @@ describe('Classroom AI learning analytics (e2e)', () => {
         task.classroomTaskId === unchangedWithIssuesClassroomTaskId.toString(),
     );
     expect(improved).toMatchObject({
+      taskTitle: 'Improved Task',
       submittedStudentCount: 2,
       aiRequestedStudentCount: 2,
       aiDeliveredStudentCount: 2,
@@ -1322,6 +1364,7 @@ describe('Classroom AI learning analytics (e2e)', () => {
       improvedStudentCount: 1,
     });
     expect(stable).toMatchObject({
+      taskTitle: 'Stable Task',
       postFeedbackResubmittedStudentCount: 1,
       postFeedbackCodeChangedStudentCount: 1,
       qualityComparableStudentCount: 1,
@@ -1333,19 +1376,23 @@ describe('Classroom AI learning analytics (e2e)', () => {
       regressedRate: 0,
     });
     expect(regressed).toMatchObject({
+      taskTitle: 'Regressed Task',
       qualityComparableStudentCount: 1,
       regressedStudentCount: 1,
     });
     expect(failed).toMatchObject({
+      taskTitle: 'Failed Request Task',
       submittedStudentCount: 2,
       aiRequestedStudentCount: 2,
       aiDeliveredStudentCount: 0,
     });
     expect(zero).toMatchObject({
+      taskTitle: 'Zero Submission Task',
       submittedStudentCount: 1,
       aiRequestedStudentCount: 0,
     });
     expect(earlyOnly).toMatchObject({
+      taskTitle: 'Early Only Task',
       submittedStudentCount: 2,
       aiRequestedStudentCount: 2,
       aiDeliveredStudentCount: 2,
@@ -1353,6 +1400,7 @@ describe('Classroom AI learning analytics (e2e)', () => {
       qualityComparableStudentCount: 0,
     });
     expect(unchangedWithIssues).toMatchObject({
+      taskTitle: 'Unchanged With Issues Task',
       qualityComparableStudentCount: 1,
       remainedCleanStudentCount: 0,
       unchangedWithIssuesStudentCount: 1,

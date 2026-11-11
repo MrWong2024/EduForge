@@ -352,6 +352,136 @@ const submissionDto = {
   },
 };
 
+describe('ClassroomTasksService snapshot contract', () => {
+  it.each(['missing', 'invalid'] as const)(
+    'rejects %s snapshots before classroom mutations and submission creation',
+    async (kind) => {
+      const h = createHarness({ userRoles: ['teacher', 'student'] });
+      if (kind === 'missing')
+        Reflect.deleteProperty(h.classroomTask, 'taskSnapshot');
+      else Reflect.set(h.classroomTask, 'taskSnapshot', { title: 'unusable' });
+      const before = { ...h.classroomTask };
+      const classroomId = h.ids.classroomId.toString();
+      const instanceId = h.ids.classroomTaskId.toString();
+      const userId = h.ids.studentId.toString();
+      const actions = [
+        () => h.service.getClassroomTask(classroomId, instanceId, userId),
+        () => h.service.getMyTaskDetail(classroomId, instanceId, {}, userId),
+        () =>
+          h.service.updateClassroomTask(
+            classroomId,
+            instanceId,
+            { allowLate: false },
+            userId,
+          ),
+        () =>
+          h.service.updateClassroomTaskStatus(
+            classroomId,
+            instanceId,
+            { status: CLASSROOM_TASK_STATUS_CLOSED },
+            userId,
+          ),
+        () =>
+          h.service.createClassroomTaskSubmission(
+            classroomId,
+            instanceId,
+            submissionDto,
+            userId,
+          ),
+      ];
+      for (const action of actions) {
+        await expect(action()).rejects.toMatchObject({
+          status: 409,
+          message: '课堂任务内容快照缺失或无效，请联系教师核对。',
+        });
+      }
+      expect(h.classroomTask).toEqual(before);
+      expect(Object.hasOwn(h.classroomTask, 'taskSnapshot')).toBe(
+        kind !== 'missing',
+      );
+      expect(h.classroomTaskModel.findOneAndUpdate).not.toHaveBeenCalled();
+      expect(
+        h.learningTasksService.createSubmissionForClassroomTask,
+      ).not.toHaveBeenCalled();
+    },
+  );
+
+  it('rejects an invalid returned list item without adding a snapshot filter to the count', async () => {
+    const h = createHarness({ userRoles: ['teacher'] });
+    Reflect.set(h.classroomTask, 'taskSnapshot', []);
+    h.classroomTaskModel.aggregate
+      .mockReturnValueOnce(
+        makeAggregate([{ ...h.classroomTask, task: h.task }]),
+      )
+      .mockReturnValueOnce(makeAggregate([{ total: 1 }]));
+    await expect(
+      h.service.listClassroomTasks(
+        h.ids.classroomId.toString(),
+        {},
+        h.ids.studentId.toString(),
+      ),
+    ).rejects.toMatchObject({
+      status: 409,
+      message: '课堂任务内容快照缺失或无效，请联系教师核对。',
+    });
+    const pipelines = h.classroomTaskModel.aggregate.mock.calls.map(
+      ([pipeline]) => pipeline,
+    );
+    expect(JSON.stringify(pipelines)).not.toContain('taskSnapshot');
+  });
+
+  it('validates new publication content before create and keeps the existing role refusal first', async () => {
+    const h = createHarness({ userRoles: ['teacher'] });
+    Object.assign(h.task, { visibility: 'PRIVATE', title: null });
+    const validate = jest.spyOn(h.aiContextReader, 'validateForSave');
+    await expect(
+      h.service.createClassroomTask(
+        h.ids.classroomId.toString(),
+        { taskId: h.ids.taskId.toString() },
+        h.ids.studentId.toString(),
+      ),
+    ).rejects.toMatchObject({
+      status: 409,
+      message: '课堂任务内容快照缺失或无效，请联系教师核对。',
+    });
+    expect(h.classroomTaskModel.create).not.toHaveBeenCalled();
+    expect(validate).not.toHaveBeenCalled();
+    validate.mockRestore();
+
+    const denied = createHarness({ userRoles: ['student'] });
+    Reflect.deleteProperty(denied.classroomTask, 'taskSnapshot');
+    await expect(
+      denied.service.updateClassroomTask(
+        denied.ids.classroomId.toString(),
+        denied.ids.classroomTaskId.toString(),
+        { allowLate: false },
+        denied.ids.studentId.toString(),
+      ),
+    ).rejects.toMatchObject({ status: 403 });
+    expect(denied.classroomTaskModel.findOneAndUpdate).not.toHaveBeenCalled();
+  });
+
+  it('keeps lifecycle refusal before invalid snapshot and never changes the instance', async () => {
+    const h = createHarness({
+      userRoles: ['teacher'],
+      classroomTaskStatus: CLASSROOM_TASK_STATUS_RECALLED,
+    });
+    Reflect.deleteProperty(h.classroomTask, 'taskSnapshot');
+    await expect(
+      h.service.updateClassroomTaskStatus(
+        h.ids.classroomId.toString(),
+        h.ids.classroomTaskId.toString(),
+        { status: CLASSROOM_TASK_STATUS_ACTIVE },
+        h.ids.studentId.toString(),
+      ),
+    ).rejects.toMatchObject({
+      status: 400,
+      message: 'Recalled classroom tasks cannot be reopened or closed',
+    });
+    expect(h.classroomTaskModel.findOneAndUpdate).not.toHaveBeenCalled();
+  });
+});
+
 describe('ClassroomTasksService new publication visibility contract', () => {
   it.each([
     { visibility: 'PRIVATE', own: true },
@@ -929,6 +1059,11 @@ describe('ClassroomTasksService listClassroomTasks publisher contract', () => {
         createdBy: teacherId,
         createdAt: new Date('2026-01-01T00:00:00.000Z'),
         updatedAt: new Date('2026-01-02T00:00:00.000Z'),
+        taskSnapshot: {
+          title: 'Published snapshot',
+          description: 'Snapshot description',
+          knowledgeModule: 'snapshot-module',
+        },
         task: {
           title: 'Published Template',
           description: 'Description',
@@ -946,6 +1081,11 @@ describe('ClassroomTasksService listClassroomTasks publisher contract', () => {
         createdBy: teacherId,
         createdAt: new Date('2026-01-03T00:00:00.000Z'),
         updatedAt: new Date('2026-01-04T00:00:00.000Z'),
+        taskSnapshot: {
+          title: 'Second snapshot',
+          description: 'Second description',
+          knowledgeModule: 'second-module',
+        },
         task: {
           title: 'Draft Template',
           description: 'Description',
@@ -1003,6 +1143,7 @@ describe('ClassroomTasksService listClassroomTasks publisher contract', () => {
         name: 'Publisher One',
       },
       task: {
+        title: 'Published snapshot',
         status: TaskStatus.Published,
       },
     });
@@ -1012,6 +1153,7 @@ describe('ClassroomTasksService listClassroomTasks publisher contract', () => {
         id: missingPublisherId.toString(),
       },
       task: {
+        title: 'Second snapshot',
         status: TaskStatus.Draft,
       },
     });

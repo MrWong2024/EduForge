@@ -17,9 +17,9 @@ import {
   FeedbackSource,
 } from '../../learning-tasks/schemas/feedback.schema';
 import { Submission } from '../../learning-tasks/schemas/submission.schema';
-import { Task } from '../../learning-tasks/schemas/task.schema';
 import { User } from '../../users/schemas/user.schema';
 import { ClassroomTask } from '../classroom-tasks/schemas/classroom-task.schema';
+import { isValidTaskSnapshot } from '../classroom-tasks/classroom-task-content';
 import {
   CLASSROOM_TASK_STATUS_ACTIVE,
   CLASSROOM_TASK_STATUS_CLOSED,
@@ -75,10 +75,9 @@ type ClassroomContextLean = Pick<Classroom, 'courseId' | 'name'> & WithId;
 type CourseContextLean = Pick<Course, 'code' | 'name' | 'term'> & WithId;
 type ClassroomTaskAnalyticsLean = Pick<
   ClassroomTask,
-  'taskId' | 'publishedAt' | 'taskSnapshot'
+  'taskId' | 'publishedAt'
 > &
-  WithId;
-type TaskTitleLean = Pick<Task, 'title'> & WithId;
+  WithId & { taskSnapshot?: unknown };
 type StudentPublicLean = Pick<User, 'name' | 'studentNo'> & WithId;
 type AnalyticsSubmissionLean = Pick<
   Submission,
@@ -607,8 +606,6 @@ export class AiLearningAnalyticsService {
     private readonly courseModel: Model<Course>,
     @InjectModel(ClassroomTask.name)
     private readonly classroomTaskModel: Model<ClassroomTask>,
-    @InjectModel(Task.name)
-    private readonly taskModel: Model<Task>,
     @InjectModel(Submission.name)
     private readonly submissionModel: Model<Submission>,
     @InjectModel(AiFeedbackJob.name)
@@ -926,32 +923,12 @@ export class AiLearningAnalyticsService {
         .exec(),
     ]);
 
-    const taskIds = Array.from(
-      new Map(
-        classroomTasks.map((classroomTask) => [
-          classroomTask.taskId.toString(),
-          classroomTask.taskId,
-        ]),
-      ).values(),
-    );
-    const taskTitles =
-      taskIds.length === 0
-        ? []
-        : await this.taskModel
-            .find({ _id: { $in: taskIds } })
-            .select('_id title')
-            .lean<TaskTitleLean[]>()
-            .exec();
-    const taskTitleMap = new Map(
-      taskTitles.map((task) => [task._id.toString(), task.title]),
-    );
     const tasks = classroomTasks.map((classroomTask) => ({
       classroomTaskId: classroomTask._id.toString(),
       taskId: classroomTask.taskId.toString(),
-      taskTitle:
-        classroomTask.taskSnapshot?.title ??
-        taskTitleMap.get(classroomTask.taskId.toString()) ??
-        '未知任务',
+      taskTitle: isValidTaskSnapshot(classroomTask.taskSnapshot)
+        ? classroomTask.taskSnapshot.title
+        : '未知任务',
       publishedAt: classroomTask.publishedAt,
     }));
     const canonicalActiveStudentIds = Array.from(

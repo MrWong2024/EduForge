@@ -7,7 +7,10 @@ import { Model } from 'mongoose';
 import { Feedback, FeedbackSource } from '../../schemas/feedback.schema';
 import { Submission } from '../../schemas/submission.schema';
 import { ClassroomTask } from '../../../classrooms/classroom-tasks/schemas/classroom-task.schema';
-import { TaskSnapshot } from '../../../classrooms/classroom-tasks/classroom-task-content';
+import {
+  isValidTaskSnapshot,
+  TaskSnapshot,
+} from '../../../classrooms/classroom-tasks/classroom-task-content';
 import {
   AiFeedbackJob,
   AiFeedbackJobStatus,
@@ -122,9 +125,9 @@ export class AiFeedbackProcessor {
             'AI_ELIGIBILITY: CLASSROOM_TASK_ASSOCIATION_INVALID',
           );
         }
-        if (!classroomTask.taskSnapshot) {
+        if (!isValidTaskSnapshot(classroomTask.taskSnapshot)) {
           throw new AiFeedbackEligibilityError(
-            'AI_ELIGIBILITY: TASK_SNAPSHOT_MISSING',
+            'AI_ELIGIBILITY: TASK_SNAPSHOT_INVALID',
           );
         }
         const analysisContext = this.buildAnalysisContext(

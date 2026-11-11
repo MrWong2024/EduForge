@@ -135,6 +135,7 @@ Notes:
 
 - 管理、提交列表、轨迹、复盘和 AI metrics 入口要求 teacher owner；普通任务列表/详情允许 owner teacher 或当前 Enrollment ACTIVE 学生。实例必须属于路径所指班级。
 - 普通课堂任务列表在分页和计数前仅纳入状态为合法标量字符串 ACTIVE/CLOSED/RECALLED 的实例，items 与 total 共用基础筛选；缺失、null、未知值及数组等非法类型不纳入。Query `status` 仍筛选关联模板的 `Task.status`，不改变为课堂实例状态筛选。
+- 普通课堂详情、学生 my-task-detail 及普通列表本次返回页遇到缺失或结构无效的教学快照时返回 `409`，message 为“课堂任务内容快照缺失或无效，请联系教师核对。”；列表不额外扫描全量或过滤异常快照改变分页与 total。实例配置 PATCH、状态 PATCH 和新提交在实际写入前检查快照，沿用原权限、关联及相应状态检查的优先级；GET 不修复快照。
 - 发布候选查询仅 owner teacher 可读，非 owner 返回 `404`；仅返回当前教师可见的已发布模板（自己私有、自己共享、他人共享），排除当前班级已发布过的模板。字段见 [DTO 发布候选](./handoff-backend-dto-cheatsheet.md#发布候选模板)；课程分类优先与排序见 [Service Card 07](./handoff-backend-service-map.md#service-card-07)，索引见 [08](./handoff-backend-service-map.md#service-card-08)。
 - 发布需校验教师拥有班级且班级可发布，模板为 PUBLISHED 且属于该教师或共享可见；已知 ID 不能绕过可见性，他人不可见模板返回 404。服务端发布时保存教学内容，模板之后编辑/归档不改写实例；发布和更新均不接受 AI 策略字段，普通 PATCH 继续拒绝快照等禁止字段。外链文字被保存，不保证外部文件内容固定。
 - 新实例默认 ACTIVE；生命周期允许 `ACTIVE -> CLOSED`、`ACTIVE -> RECALLED`、`CLOSED -> ACTIVE`；撤回要求无提交。拒绝 RECALLED 恢复/再次流转以及 CLOSED -> RECALLED；已有提交而试图撤回返回 `400`，提示只能关闭。
@@ -172,7 +173,7 @@ Notes:
 
 Notes:
 
-- 模板可见性限定模板读取及新课堂发布，不改变作者管理权限，也不为已发布课堂实例、快照或缺快照历史投影、作品、反馈及 AI 请求增加模板可见性门禁。课程分类不参与权限、发布约束或跨课程复用限制；字段/默认/白名单见 [DTO Task template](./handoff-backend-dto-cheatsheet.md#task-template-dto--response-family)。
+- 模板可见性限定模板读取及新课堂发布，不改变作者管理权限，也不为已发布课堂实例、快照、作品、反馈及 AI 请求增加模板可见性门禁。课程分类不参与权限、发布约束或跨课程复用限制；字段/默认/白名单见 [DTO Task template](./handoff-backend-dto-cheatsheet.md#task-template-dto--response-family)。
 - 模板创建仅允许初始 DRAFT/PUBLISHED，不能直接创建 ARCHIVED；后续单向 `DRAFT -> PUBLISHED -> ARCHIVED`。
 - 普通 PATCH 不承担生命周期变更：status 与当前状态不同时返回 `400 Task template status must be changed through lifecycle actions`；相同时忽略该字段并继续编辑其它内容。ARCHIVED 模板普通更新返回 `400 Archived tasks cannot be updated`。
 - 创建/保存模板先验证最终生效的 ZIP 引用；创建 PUBLISHED、DRAFT 实际 publish 及课堂发布均须读取验证。DTO 非法和缺失/损坏/不可读/不支持/超限资料返回 400，使用引用/条目序号及安全原因，不暴露系统路径；不保存部分编辑、不创建无效实例。模板已 PUBLISHED 的重复 publish 保持既有幂等语义。配置及公开投影见 [DTO ZIP 资料引用](./handoff-backend-dto-cheatsheet.md#zip-资料引用配置)。
@@ -188,7 +189,7 @@ Notes:
 - 所有新提交均不自动创建 AI Job，也不因提交动作固定评阅版本；师生统一从正式 AI request 主动申请。该产品能力受登录、RBAC 与资源归属保护，不受 AI_FEEDBACK_DEBUG_ENABLED 门禁影响。按保存的 classroomTaskId 校验提交/实例/班级关联及快照：学生须本人、Enrollment ACTIVE、班级/实例 ACTIVE；教师须所属班级 owner，可评阅已移出学生的既有作品。旧策略字段缺失或残留均不控制申请资格。合法请求复用既有 Job 的真实状态幂等返回 200，包括 FAILED/DEAD/SUCCEEDED；不重置次数或重新排队，无 retry/reset 入口。合法申请仍先返回 Job，完整输入限额拒绝在异步处理后从详情读取，不改变作品提交成功；无新增预检接口。
 - ZIP 读取不进入同步 request：申请仍先检查权限并幂等返回真实 Job 状态。Processor 每次执行重读实例指定资料；不可用或资源超限在 Provider 前直接 DEAD，零模型请求、零伪反馈，分别返回 AI_CONTEXT_UNAVAILABLE / AI_CONTEXT_LIMIT_EXCEEDED 的安全中文摘要，明确作业已保存、未生成反馈并联系教师。完整 messages 超限仍为 INPUT_BUDGET_EXCEEDED。手动申请后的资料/预算失败不回滚作品，无自动换版本、重放或 retry/reset 产品入口。
 - 提交详情在原有读取授权之后增加安全 aiReview，师生获得相同的失败、用量和覆盖事实，当前用户动作资格可不同；轻量列表不扩展摘要。字段与 null/0 语义见 [DTO Submission](./handoff-backend-dto-cheatsheet.md#submission-request--response-family)，页面不依赖 debug/ops。
-- 有效课堂关联但缺快照的旧实例保留已有作品/反馈读取及现行教师反馈权限和写入边界，不迁移或读时回填；新提交和新 AI 请求返回 409，message=“该课堂任务未保存发布内容，请教师重新布置后继续。”，作品编辑保留缺快照门禁。旧模板投影不代表发布时原文；可用性字段见 DTO Owner。
+- 有效课堂关联但快照缺失或结构无效时，已保存的作品/反馈仍可按原权限读取；新提交及师生手动 AI request 返回上述快照异常 `409`。AI 检查发生在原权限和关联校验之后、受理评阅及 ensureJob 之前。作品编辑保持现有资格顺序，进入 `SNAPSHOT_MISSING` 分支时返回 `403`，使用同一公开消息；更早的版本、评阅或授权拒绝保持原优先级。教师 Feedback POST/PATCH 沿用原权限、作者、版本及冻结边界，不增加快照要求。提交标题与可用性投影见 DTO Owner。
 - 公开教师创建反馈只接受 source=TEACHER；非 TEACHER 值返回 400，不写反馈或 AI Job。内部 Processor 仍保存 AI 来源。
 - Submission PATCH 只允许具备学生角色的提交本人；校验有效课堂关联、发布快照、ACTIVE Enrollment 与班级/课堂任务运行态及保存时截止规则，不以是否最新 attempt 代替资格。已进入评阅或已有任何 Feedback/Job 均禁止修改；请求及详情字段见 [DTO Submission](./handoff-backend-dto-cheatsheet.md#submission-request--response-family)。
 - 新增教师反馈与产品 AI request 均要求必填 `expectedRevision`，先完成各入口既有权限、关联及输入校验，再正式受理评阅；AI request 还要求发布快照，教师反馈创建不新增该快照门禁。已有 Job 也不能跳过本次版本和权限校验。竞争失败明确返回 409；查看详情、反馈列表及轮询不固定作品，不回填、清理历史字段或改写时间戳。既有冻结及 Job/反馈/用量事实保留；符合既有执行条件的 Job 继续处理，不补建或重置。版本竞争、固定成功后关联写失败的续行与幂等由 [Service Card 08](./handoff-backend-service-map.md#service-card-08) 维护。

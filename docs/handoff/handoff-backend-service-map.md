@@ -141,6 +141,7 @@ Global SoT 只保留理解跨 Service workflow 必需的稳定不变量，不追
 - Downstream / Dependencies: `ClassroomModel`、`ClassroomTaskModel`、`SubmissionModel`、`FeedbackModel`、`AiFeedbackJobModel`、`UserModel`、`EnrollmentService`。
 - Consistency / State / Idempotency:
   - 在聚合前按 ClassroomTask 状态白名单选任务，并在组装前防御过滤；summary 与任务统计使用同一最终任务集合。普通看板不以模板当前状态过滤既有实例。
+  - 教学标题及知识模块只取结构有效的实例快照，异常时显示“未知任务”“未知知识模块”，保留原统计范围。Task lookup 继续提供当前模板状态、发布者及归档建议；内部快照在公开响应前剔除。
   - 默认教学统计只纳入当前 ACTIVE Enrollment 学生的提交、迟交、AI 与 tags；移除学生的历史记录保留，但不进入这些统计。tags 仅取 AI 来源并保留 top 5；未请求数为 `max(0, submissionsCount-requestedCount)`，缺失聚合补零。
   - 归档建议只针对 ACTIVE 班级，要求无当前活跃任务、最近 30 天无学生提交且通过 30 天新班级保护；建议专用的活跃任务判定要求实例 ACTIVE、模板 PUBLISHED，且截止未超 30 天缓冲，或无截止但发布在 90 天内。该判定不受是否包含关闭任务影响。
 - Isolation: 先校验班级 `teacherId`；后续提交/AI/tags 全部限定最终可见 `classroomTaskIds`。
@@ -156,6 +157,7 @@ Global SoT 只保留理解跨 Service workflow 必需的稳定不变量，不追
 - Upstream: `ClassroomsService`，由其执行学生角色校验。
 - Downstream / Dependencies: `ClassroomModel`、`CourseModel`、`ClassroomTaskModel`、`SubmissionModel`、`FeedbackModel`、`UserModel`、`AiFeedbackJobService`、`EnrollmentService`。
 - Consistency / State / Idempotency: 先取得 ACTIVE Enrollment 班级，再筛选 ACTIVE 班级与 ACTIVE 实例；模板当前状态不参与运行态过滤。按公开的到期/历史时间规则形成最终任务集合，再分页班级分组；无可见任务的班级不形成空分组，total 从最终分组计算。
+  - 教学标题只取结构有效的实例快照，异常显示“未知任务”且保留原任务与提交事实；Task join/unwind 继续维持模板存在性的原范围。内部快照不进入公开投影。
 - Isolation: 提交查询限定学生本人及最终返回的 `classroomTaskIds`，同时校验字段 BSON 类型为标量 ObjectId；不查询无关联提交，也不以同模板唯一实例推测归属。完成态只读取 `myLatestSubmission.submissionId` 的反馈，不按 taskId、classroomTaskId 或 studentId 粗聚合历史反馈。
 - Side Effects: 只读。
 - Important Performance / Recovery: 当前页班级的课程/教师批量查找，提交、job 状态及完成态批量计算。无提交保留空最新提交状态；无 job 使用 NOT_REQUESTED。完成态来源/严重度优先级同 [Card 08D](#service-card-08dfeature-my-task-detail-z3)。
@@ -169,12 +171,13 @@ Global SoT 只保留理解跨 Service workflow 必需的稳定不变量，不追
 - Upstream: 课堂任务管理、实例提交及实例聚合入口。
 - Downstream / Dependencies: `ClassroomModel`、`ClassroomTaskModel`、`TaskModel`、`SubmissionModel`、`FeedbackModel`、`UserModel`、`EnrollmentService`、`AiFeedbackJobService`、`LearningTasksService`、`AiContextReaderService`。
 - Consistency / State / Idempotency:
-  - 发布前检查班级 owner/运行态与模板发布态/可见性，从同一次 Task 读取形成候选 taskSnapshot（深复制引用），通过 AiContextReaderService 验证候选引用后保存同一份快照；`unique(classroomId,taskId)` 防重复发布，重复键转为受控拒绝。正式发布实际保存 ACTIVE；Schema 的 required、enum 与新建 default ACTIVE 保持不变。
+  - 发布前检查班级 owner/运行态与模板发布态/可见性，从同一次 Task 读取形成候选 taskSnapshot（深复制引用），在 create 前确认基本结构并通过 AiContextReaderService 验证候选引用，再保存同一份快照；`unique(classroomId,taskId)` 防重复发布，重复键转为受控拒绝。taskSnapshot 在 Schema required、immutable 且无 default；正式发布实际保存 ACTIVE。
+  - 共享 isValidTaskSnapshot 仅要求非 null、非数组对象，且 title、description、knowledgeModule 为字符串；允许空字符串，不 trim，不将可选教学字段或 ZIP 的新写入规则强加给已有快照。普通详情、my-task-detail、本次列表页及动作使用该判定，权限、关联和相应状态检查优先；配置/状态更新和新提交均在写前拒绝异常，公开消息及状态码见 API Owner。
   - 单条入口与响应映射使用局部严格状态判定，沿原权限顺序拒绝异常保存值，不归一化或回填。普通列表在共享基础 pipeline 中先筛选合法标量状态，再生成页数据与计数；公开范围及错误合同见 [API Classroom Tasks](./handoff-backend-api-map.md#classroom-tasksclassrooms-子资源)。
-  - 新课堂发布写路径同时检查来源难度符合 [Task 写入值域](./handoff-backend-dto-cheatsheet.md#task-template-dto--response-family) 或缺失；非法值返回 400，提示先修改模板难度，不生成非法新快照。校验不放入兼供历史读取的 snapshotTask helper，已有快照及旧实例只读 fallback 保持可读，不因显示归一化回写。
+  - 新课堂发布写路径同时检查来源难度符合 [Task 写入值域](./handoff-backend-dto-cheatsheet.md#task-template-dto--response-family) 或缺失；非法值返回 400，提示先修改模板难度，不生成非法新快照。snapshotTask 只负责新发布构建，不承担历史读取回退或额外规范化。
   - 实例配置更新与生命周期分开处理；撤回前检查无提交，RECALLED 保持封闭。恢复提交仅改状态，不隐式改截止与提交设置；不支持撤回后重发同模板。
-  - 发布返回、列表/详情、my-task-detail、教师/学生看板、提交详情标题及 AI 分析标题统一优先读实例快照；旧实例仅当前模板只读 fallback，不回填；课堂成员响应由 publicTaskContent 明确投影，避免展开内部引用。模板库/候选仍读当前 Task，资产状态保持当前值。
-  - 本地开发库与生产库的存量缺失快照已按当前模板内容补齐；应用中的缺快照兼容代码仍待退役。
+  - 发布返回、列表/详情及 my-task-detail 的教学内容只读实际实例快照，课堂成员响应由 publicTaskContent 明确投影。Task 查询保留存在性、资产状态、发布者及权限职责；模板库和候选继续读取当前模板。
+  - 本地开发库与生产库的存量缺失快照已按当前模板内容补齐；当前模板教学内容回退的后端代码已退役，前端旧提示语及新错误适配待下一阶段。
   - 发布候选 onlyMine 与默认两路均以合法 visibility 的 $in 结合聚合表达式 $type=string 限定顶层标量，排除数组及异常值，再应用当前教师可见性、模板发布状态及已发布 taskId 排除；难度按保存值精确匹配，与既有课程分类、知识模块和 onlyMine 条件取交集，同一最终 filter 用于分页前查询与 countDocuments。未显式指定课程分类时仍按班级课程分类优先排序，不对已发布课堂任务列表增加难度过滤；参数校验见 [DTO Cheatsheet](./handoff-backend-dto-cheatsheet.md#发布候选模板)。
   - 提交入口检查学生身份、Enrollment ACTIVE、课堂归属及班级/实例 ACTIVE，再通过 `createSubmissionForClassroomTask` 绑定实例主键；真正写 Submission 前，由 [Card 08](#service-card-08) 再次 enforce 运行态及截止/迟交边界。
 - Isolation: 查询与统计按 `classroomTaskId`，成员全集来自 Enrollment ACTIVE；不得按底层 taskId 跨班兜底。模板状态不决定既有实例学生运行态。
@@ -206,7 +209,7 @@ Global SoT 只保留理解跨 Service workflow 必需的稳定不变量，不追
   - 提交详情复用 `buildAiReviewSummary` 对同一 Job 的所有预留请求（含失败尝试）构造用量摘要：各细分独立检查完整性，派生项先逐请求验证再汇总，避免跨请求异常相互抵消；未知及超安全范围不输出失真数值。摘要只读派生，不写回 requests 或升级 budgetVersion；公开字段、包含关系及历史口径见 [Submission DTO](./handoff-backend-dto-cheatsheet.md#submission-request--response-family)。
 - Isolation: 学生只访问本人 Submission；单条读取及写入复用课堂关联上下文校验，教师管理权仅沿实例定位所属班级 owner。Schema required 不替代运行时异常数据保护，关联失败早于内容更新、评阅固定和关联写入；AI 明细仍在授权之后读取。教师默认提交列表与计数共同过滤当前 Enrollment ACTIVE，移除学生历史记录保留。模板级 list/stats 与 ReportsService 共用 teacherSubmissionScope，在分页/计数/去重/反馈聚合前限定自有班级中属于当前 Task 的实例及标量 ObjectId 关联；listMySubmissions 同样排除无关联和非法类型记录。
 - Side Effects: 写模板、Submission、Feedback；正式手工申请委托 JobService 确保 Job。课堂提交冷却及 AI 执行参数见 [Config Matrix](./handoff-backend-config-matrix.md)。
-- Important Performance / Recovery: 列表筛选在数据库中组合执行；批量关联发布者与 Job 状态。发布候选复合索引分别以 `createdBy` 或 `visibility` 为前缀，后接 `status,courseLabel,knowledgeModule,updatedAt,createdAt`，支持本人及共享分支；模板列表另有 `{status:1,knowledgeModule:1,createdAt:-1}`。Submission 已移除无课堂关联的 `{taskId:1,studentId:1,attemptNo:1}` 唯一索引声明；本地 `eduforge_dev`、`eduforge_test`、`eduforge_browser_test` 和生产 `eduforge` 的对应旧索引均已完成定向清理，现行 `{classroomTaskId:1,studentId:1,attemptNo:1}` 唯一索引及其 ObjectId partial 条件、其他索引和集合元数据保持不变。缺快照历史实例的读取投影及既有写入门禁继续保留；编号重试耗尽安全拒绝。
+- Important Performance / Recovery: 列表筛选在数据库中组合执行；批量关联发布者与 Job 状态。发布候选复合索引分别以 `createdBy` 或 `visibility` 为前缀，后接 `status,courseLabel,knowledgeModule,updatedAt,createdAt`，支持本人及共享分支；模板列表另有 `{status:1,knowledgeModule:1,createdAt:-1}`。Submission 已移除无课堂关联的 `{taskId:1,studentId:1,attemptNo:1}` 唯一索引声明；本地 `eduforge_dev`、`eduforge_test`、`eduforge_browser_test` 和生产 `eduforge` 的对应旧索引均已完成定向清理，现行 `{classroomTaskId:1,studentId:1,attemptNo:1}` 唯一索引及其 ObjectId partial 条件、其他索引和集合元数据保持不变。快照异常时保留提交正文/反馈读取及原教师反馈边界，标题投影 null、资格沿现有顺序关闭；编号重试耗尽安全拒绝。
 - SoT: `backend/src/modules/learning-tasks/services/learning-tasks.service.ts`；`backend/src/modules/learning-tasks/schemas/task.schema.ts`；`backend/src/modules/learning-tasks/schemas/submission.schema.ts`；`backend/src/modules/learning-tasks/ai-feedback/services/ai-feedback-job.service.ts`；`backend/src/modules/learning-tasks/ai-feedback/lib/ai-review-summary.ts`。
 - Boundary / Non-responsibility: 公开生命周期、提交详情读源及 detail/list 内容暴露差异见 [API Map](./handoff-backend-api-map.md#learning-tasks)，字段/validation 见 [DTO Cheatsheet](./handoff-backend-dto-cheatsheet.md#learning-tasks)；本 Service 不执行 Provider 推理，不用模板资产状态代替课堂运行态。
 
@@ -326,9 +329,10 @@ Global SoT 只保留理解跨 Service workflow 必需的稳定不变量，不追
 - Service: `backend/src/modules/classrooms/services/ai-learning-analytics.service.ts`
 - Domain / Responsibility: 解析有效任务，构造学生—课堂任务标准样本，再聚合班级/任务/学生分析并完成搜索筛选分页。
 - Upstream: `ClassroomsService` 校验教师角色后委托总览、学生列表或详情计算。
-- Downstream / Dependencies: `ClassroomModel`、`CourseModel`、`ClassroomTaskModel`、`TaskModel`、`SubmissionModel`、`AiFeedbackJobModel`、`FeedbackModel`、`UserModel`、`EnrollmentService`；同文件纯计算入口 `buildAiLearningAnalyticsStandardSamples`。
+- Downstream / Dependencies: `ClassroomModel`、`CourseModel`、`ClassroomTaskModel`、`SubmissionModel`、`AiFeedbackJobModel`、`FeedbackModel`、`UserModel`、`EnrollmentService`；同文件纯计算入口 `buildAiLearningAnalyticsStandardSamples`。
 - Consistency / State / Idempotency:
   - 三个读取入口使用同一有效任务集合：按 classroomId、ClassroomTask.publishedAt 窗口及排除项筛选，共享查询同时限制 ACTIVE/CLOSED 值域与标量字符串类型，不再兼容缺省状态；按 `publishedAt asc, classroomTaskId asc` 稳定排序。任务入选后保留完整提交链，不按窗口裁剪提交。正式撤回只允许无提交实例，此筛选修复有效任务数与空任务行，不代表撤回实例曾污染正常改善率分母。
+  - 教学标题只取结构有效的实例快照，异常显示“未知任务”，不删除任务或少计提交、Job 与反馈事实；已移除仅用于标题回退的 Task 查询与依赖。
   - 每个 studentId + classroomTaskId 最多一个标准样本；稳定提交顺序为 `attemptNo asc, submittedAt asc, submissionId asc`。requested 表示存在任意 Job；delivered 要求 SUCCEEDED Job 加该提交至少一条实际 AI Feedback，排除已知 stub。成功空反馈没有可用评价；实际 INFO 条目可以有零 ERROR/WARN 负荷。历史来源缺失的实际反馈可作记录对照，但不能被推定为真实 Provider 或相同模型。
   - V1.2 取代旧“首个后续版本”口径：基线从有效反馈中按可确认的 Job.updatedAt 完成时间取最早项，同刻以稳定提交顺序打破平局。较早 attempt 后补评不能把基线移向更晚。内容形成时间先要求实际 number 类型的非负安全整数版本；缺失、null 或非法版本均为未知，仅合法 revision=0 且 lastEditedAt 缺失时使用有效 submittedAt，正版本须有有效且不早于 submittedAt 的 lastEditedAt。其它情况保持未知，不用申请时间、完成时间或当前时间补造；不因此在查询层排除 Submission 或丢弃关联 Job/Feedback 事实。
   - 后续版本必须是基线以外的提交，且内容形成时间严格晚于基线反馈完成时间，不要求 attemptNo 更大；反馈前创建、反馈后修改的旧 attempt 可以入选。从有有效反馈的后续版本中，按内容形成时间取最新比较终点，同刻稳定打破平局，不按 Job 完成先后选择。基线已冻结，不虚构同一提交的历史 revision；每次只读重算，不持久化结果。
@@ -410,7 +414,7 @@ Global SoT 只保留理解跨 Service workflow 必需的稳定不变量，不追
 - Consistency / State / Idempotency:
   - findOneAndUpdate 按 createdAt 原子 claim，同时检查 PENDING/FAILED、调度到期、budgetVersion=1、attempts < maxAttempts 和既有锁条件，在同一次写入增加 attempts 并设 RUNNING。attempts 表示认领次数，本地限流也消耗机会；失败更新不再递增。所有认领后 Job 记录和终态写入匹配 ID、RUNNING、本次 attempts 及 lockOwner。
   - 每次处理由 AiContextReaderService 只读取所属实例快照指定 ZIP；不回查当前模板、不向数据库保存正文副本。资料读取在 Provider 及 stub 之前，失败安全终止、不调用模型。参考文件以引用序号/条目来源标记为分析数据，与发布要求、评分参考、学生源码和说明/声明分区；参考实现不是唯一合法答案或运行证据，不要求复述全文/内部路径。完整 messages 仍进入 Provider 的现有字节预算。
-  - 读取 Submission 后核对 Job/Submission/实例归属，读取所属实例的固定 title/description/rubric 形成 AiSubmissionAnalysisContext，codeText/language/submissionNote/meta.aiUsageDeclaration 完整来自当前 Submission，说明与源码分别标记且不能覆盖教师要求；旧实例策略字段不拒绝既有可执行 Job。调用 Provider 后在写库前以内存 compactor 收敛，同类问题合并，存在 ERROR/WARN 时去掉独立低价值 INFO。compactor 保留展示文本的分段和有效缩进，另用规范化文本比较去重；不凭空改写肯定正文或补写通用建议。
+  - 读取 Submission 后核对 Job/Submission/实例归属，并用共享结构判定校验实际快照；缺失或无效沿 TASK_INELIGIBLE 终态收尾，不调用 Provider。所属实例的固定 title/description/rubric 形成 AiSubmissionAnalysisContext，codeText/language/submissionNote/meta.aiUsageDeclaration 完整来自当前 Submission，说明与源码分别标记且不能覆盖教师要求；旧实例策略字段不拒绝既有可执行 Job。调用 Provider 后在写库前以内存 compactor 收敛，同类问题合并，存在 ERROR/WARN 时去掉独立低价值 INFO。compactor 保留展示文本的分段和有效缩进，另用规范化文本比较去重；不凭空改写肯定正文或补写通用建议。
   - 可选诊断 handle 由 Provider 经当前 execution 回调传入，仅保留于本次 Processor 局部变量，不进入模型请求、headers 或数据库。Processor 记录 Job/claim 标识、是否到达 compactor 及其 input/output；失败或 claim 失效未到达时如实标记，未产生的阶段值为 null，合法空结果仍为 `[]`。合并输出是持久化前候选，不证明已经落库；独立 Provider 调用不伪造 Processor 合并文件。
   - Job/Processor 是唯一重试负责人：仅本地/上游限流、上游 5xx 和超时可在剩余机会内 FAILED，并按既有 30 秒起指数退避（最大 10 分钟）；其他不可重试失败和耗尽次数直接 DEAD，清理锁与调度时间，保留安全失败代码。数据库记录/反馈/终态写入异常不能成为再次调用模型的理由。
   - 每次真实 HTTP 前通过回调在当前 claim 持久化预留，以 claimNo 标识，最多三条；包含 provider、model、完整输入 bytes、输出 token 上限、reservedAt、usage=null。预留失败或未匹配禁止 fetch；供应商可能已收到的未知预留不归零、不删除。reportUsage 沿现有 `requests.$.usage` 整对象写入实报及可选数值明细，落库先于反馈处理；数据库不保存 prompt/源码副本/完整请求正文/原始响应/密钥/请求头。可选本地诊断副作用见 [Provider Card B](#provider-card-b)。

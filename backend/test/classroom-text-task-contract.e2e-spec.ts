@@ -1,13 +1,14 @@
-import { INestApplication, ValidationPipe } from '@nestjs/common';
+import { INestApplication } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Test } from '@nestjs/testing';
 import { getModelToken } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import * as bcrypt from 'bcryptjs';
-import cookieParser from 'cookie-parser';
 import request from 'supertest';
+import type { Response } from 'supertest';
 import { App } from 'supertest/types';
 import { AppModule } from '../src/app.module';
+import { configureApp } from '../src/app.setup';
 import { User } from '../src/modules/users/schemas/user.schema';
 import { Session } from '../src/modules/auth/schemas/session.schema';
 import { Course } from '../src/modules/courses/schemas/course.schema';
@@ -43,7 +44,7 @@ jest.setTimeout(90000);
 type Agent = ReturnType<typeof request.agent>;
 type Resource = { id: string; joinCode?: string };
 type List = { total: number; items: Array<{ id: string }> };
-const missingSnapshot = '该课堂任务未保存发布内容，请教师重新布置后继续。';
+const invalidSnapshot = '课堂任务内容快照缺失或无效，请联系教师核对。';
 const oldContent = {
   title: 'Frozen A requirements',
   description:
@@ -177,15 +178,7 @@ describe('A1 classroom text task backend contract (HTTP)', () => {
       imports: [AppModule],
     }).compile();
     app = module.createNestApplication();
-    app.setGlobalPrefix('api');
-    app.use(cookieParser());
-    app.useGlobalPipes(
-      new ValidationPipe({
-        whitelist: true,
-        transform: true,
-        forbidNonWhitelisted: true,
-      }),
-    );
+    configureApp(app);
     await app.init();
     users = app.get(getModelToken(User.name));
     sessions = app.get(getModelToken(Session.name));
@@ -2048,10 +2041,302 @@ describe('A1 classroom text task backend contract (HTTP)', () => {
     );
   });
 
-  it('keeps historical reads without backfill, rejects new legacy actions, and kills ineligible jobs without Provider', async () => {
-    // Minimal historical shapes are intentional compatibility fixtures, not a new publish path.
+  it('rejects missing and malformed snapshots without writes while preserving dashboard and analytics facts', async () => {
+    const classroom = (
+      await teacherA
+        .post('/api/classrooms')
+        .send({
+          courseId: courseIds[0],
+          name: namespace + '-snapshot-contract',
+        })
+        .expect(201)
+    ).body as Resource;
+    classIds.push(classroom.id);
+    await studentA
+      .post('/api/classrooms/join')
+      .send({ joinCode: classroom.joinCode })
+      .expect(201);
+    const affected = await publish(
+      teacherA,
+      classroom,
+      await makeTask(teacherA),
+    );
+    const healthy = await publish(
+      teacherA,
+      classroom,
+      await makeTask(teacherA),
+    );
+    const saved = await submit(studentA, classroom, affected);
+    const affectedId = new Types.ObjectId(affected.id);
+    const savedId = new Types.ObjectId(saved.id);
+    const classroomUrl = '/api/classrooms/' + classroom.id;
+    const instanceUrl = classroomUrl + '/tasks/' + affected.id;
+    const submissionUrl = '/api/learning-tasks/submissions/' + saved.id;
+    const privatePath = 'teacher/PRIVATE_SNAPSHOT_REFERENCE.zip';
+    const currentTitle = 'CURRENT_TEMPLATE_MUST_NOT_REPLACE_SNAPSHOT';
+    // Optional internal references must not leak from an otherwise valid snapshot.
+    await instances.collection.updateOne(
+      { _id: new Types.ObjectId(healthy.id) },
+      {
+        $set: {
+          'taskSnapshot.aiContextRefs': [
+            { archivePath: privatePath, entryPaths: ['private/notes.md'] },
+          ],
+        },
+      },
+    );
+    for (const item of [affected, healthy]) {
+      await teacherA
+        .patch('/api/learning-tasks/tasks/' + item.taskId)
+        .send({ title: currentTitle })
+        .expect(200);
+    }
+    const readFacts = async () => ({
+      instance: await instances.collection.findOne({ _id: affectedId }),
+      submission: await submissions.collection.findOne({ _id: savedId }),
+      submissionCount: await submissions.countDocuments({
+        classroomTaskId: affectedId,
+      }),
+      feedback: await feedback.collection
+        .find({ submissionId: savedId })
+        .toArray(),
+      jobs: await jobs.collection.find({ submissionId: savedId }).toArray(),
+    });
+    const expectPrivateContentHidden = (body: unknown) => {
+      const serialized = JSON.stringify(body);
+      expect(serialized).not.toContain('"taskSnapshot":');
+      expect(serialized).not.toContain('"aiContextRefs":');
+      expect(serialized).not.toContain(privatePath);
+      expect(serialized).not.toContain(currentTitle);
+    };
+    const malformed = {
+      ...oldContent,
+      title: 42,
+      aiContextRefs: [
+        { archivePath: privatePath, entryPaths: ['private/notes.md'] },
+      ],
+    };
+    for (const kind of ['missing', 'malformed'] as const) {
+      await instances.collection.updateOne(
+        { _id: affectedId },
+        kind === 'missing'
+          ? { $unset: { taskSnapshot: '' } }
+          : { $set: { taskSnapshot: malformed } },
+      );
+      const before = await readFacts();
+      if (kind === 'missing')
+        expect(before.instance).not.toHaveProperty('taskSnapshot');
+      else expect(before.instance).toHaveProperty('taskSnapshot', malformed);
+      expect(before.submissionCount).toBe(1);
+      expect(before.submission).not.toHaveProperty('reviewStartedAt');
+      expect(before.feedback).toEqual([]);
+      expect(before.jobs).toEqual([]);
+
+      await teacherB.get(instanceUrl).expect(403);
+      await studentB.get(instanceUrl + '/my-task-detail').expect(403);
+      await studentA.patch(instanceUrl).send({ allowLate: false }).expect(403);
+      await teacherB.patch(instanceUrl).send({ allowLate: false }).expect(404);
+      const blocked = [
+        () => teacherA.get(instanceUrl),
+        () => studentA.get(instanceUrl + '/my-task-detail'),
+        () =>
+          teacherA
+            .patch(instanceUrl)
+            .send({ allowLate: false, dueAt: '2035-01-01T00:00:00.000Z' }),
+        () =>
+          teacherA.patch(instanceUrl + '/status').send({ status: 'CLOSED' }),
+        () =>
+          studentA
+            .post(instanceUrl + '/submissions')
+            .send({ content: { codeText: code, language: 'typescript' } }),
+        () => ask(teacherA, saved.id),
+        () => ask(studentA, saved.id),
+      ];
+      for (const operation of blocked) {
+        const response = await operation().expect(409);
+        expect(response.body).toMatchObject({
+          statusCode: 409,
+          message: invalidSnapshot,
+        });
+        expect(response.body).not.toHaveProperty('code');
+        expect(response.body).not.toHaveProperty('reason');
+        expectPrivateContentHidden(response.body);
+      }
+      const editResponse = await studentA
+        .patch(submissionUrl)
+        .send({
+          expectedRevision: 0,
+          content: { codeText: 'unchanged draft', language: 'typescript' },
+        })
+        .expect(403);
+      expect(editResponse.body).toMatchObject({
+        statusCode: 403,
+        message: invalidSnapshot,
+      });
+      const readable = await getDetail(studentA, saved.id);
+      expect(readable).toMatchObject({
+        taskTitle: null,
+        taskSnapshotAvailable: false,
+        content: {
+          codeText: code,
+          language: 'typescript',
+          submissionNote: note,
+        },
+        meta: { aiUsageDeclaration: 'Brainstorming only' },
+        editing: { canEdit: false, reason: 'SNAPSHOT_MISSING' },
+        aiReview: { canRequest: false },
+      });
+      expectPrivateContentHidden(readable);
+
+      const pages: Response[] = [];
+      for (const page of [1, 2]) {
+        pages.push(
+          await teacherA.get(classroomUrl + '/tasks').query({ page, limit: 1 }),
+        );
+      }
+      expect(pages.map((response) => response.status).sort()).toEqual([
+        200, 409,
+      ]);
+      const validPage = pages.find((response) => response.status === 200)
+        ?.body as List;
+      expect(validPage.total).toBe(2);
+      expect(validPage.items.map((item) => item.id)).toEqual([healthy.id]);
+      const invalidPage = pages.find((response) => response.status === 409);
+      expect(invalidPage?.body).toMatchObject({
+        statusCode: 409,
+        message: invalidSnapshot,
+      });
+      const emptyPage = await teacherA
+        .get(classroomUrl + '/tasks')
+        .query({ page: 3, limit: 1 })
+        .expect(200);
+      expect(emptyPage.body).toMatchObject({ total: 2, items: [] });
+      const healthyDetail = await teacherA
+        .get(classroomUrl + '/tasks/' + healthy.id)
+        .expect(200);
+      expect(healthyDetail.body as ClassroomTaskResponseDto).toMatchObject({
+        taskSnapshotAvailable: true,
+        task: oldContent,
+      });
+      const teacherDashboard = await teacherA
+        .get(classroomUrl + '/dashboard')
+        .expect(200);
+      const teacherBody = teacherDashboard.body as {
+        summary: { publishedTasksCount: number };
+        tasks: Array<{
+          classroomTaskId: string;
+          title: string;
+          knowledgeModule: string;
+          submissionsCount: number;
+        }>;
+      };
+      expect(teacherBody.summary.publishedTasksCount).toBe(2);
+      expect(
+        teacherBody.tasks.map((item) => item.classroomTaskId).sort(),
+      ).toEqual([affected.id, healthy.id].sort());
+      expect(
+        teacherBody.tasks.find((item) => item.classroomTaskId === affected.id),
+      ).toMatchObject({
+        title: '未知任务',
+        knowledgeModule: '未知知识模块',
+        submissionsCount: 1,
+      });
+      const studentDashboard = await studentA
+        .get('/api/classrooms/mine/dashboard')
+        .query({ limit: 100 })
+        .expect(200);
+      const studentBody = studentDashboard.body as {
+        items: Array<{
+          classroom: { id: string };
+          tasks: Array<{
+            classroomTaskId: string;
+            title: string;
+            mySubmissionsCount: number;
+          }>;
+        }>;
+      };
+      const studentTasks = studentBody.items.find(
+        (item) => item.classroom.id === classroom.id,
+      )?.tasks;
+      expect(studentTasks).toHaveLength(2);
+      expect(
+        studentTasks?.find((item) => item.classroomTaskId === affected.id),
+      ).toMatchObject({
+        title: '未知任务',
+        mySubmissionsCount: 1,
+      });
+      const analytics = await teacherA
+        .get(classroomUrl + '/ai-learning-analytics')
+        .expect(200);
+      const analyticsBody = analytics.body as {
+        context: { effectiveTaskCount: number };
+        taskTrends: Array<{
+          classroomTaskId: string;
+          taskTitle: string;
+          submittedStudentCount: number;
+        }>;
+      };
+      expect(analyticsBody.context.effectiveTaskCount).toBe(2);
+      expect(
+        analyticsBody.taskTrends.map((item) => item.classroomTaskId).sort(),
+      ).toEqual([affected.id, healthy.id].sort());
+      expect(
+        analyticsBody.taskTrends.find(
+          (item) => item.classroomTaskId === affected.id,
+        ),
+      ).toMatchObject({
+        taskTitle: '未知任务',
+        submittedStudentCount: 1,
+      });
+      const analyticsStudent = await teacherA
+        .get(
+          classroomUrl +
+            '/ai-learning-analytics/students/' +
+            userIds[2].toString(),
+        )
+        .expect(200);
+      const analyticsStudentBody = analyticsStudent.body as {
+        summary: { submittedTasksCount: number };
+        taskPoints: Array<{
+          classroomTaskId: string;
+          taskTitle: string;
+          attemptsCount: number;
+        }>;
+      };
+      expect(analyticsStudentBody.summary.submittedTasksCount).toBe(1);
+      expect(analyticsStudentBody.taskPoints).toHaveLength(2);
+      expect(
+        analyticsStudentBody.taskPoints.find(
+          (item) => item.classroomTaskId === affected.id,
+        ),
+      ).toMatchObject({
+        taskTitle: '未知任务',
+        attemptsCount: 1,
+      });
+      for (const body of [
+        validPage,
+        healthyDetail.body,
+        teacherBody,
+        studentBody,
+        analyticsBody,
+        analyticsStudentBody,
+      ]) {
+        expectPrivateContentHidden(body);
+      }
+      expect(await readFacts()).toEqual(before);
+    }
+  });
+
+  it('preserves submission and feedback history without snapshot fallback and kills ineligible jobs without Provider', async () => {
     const legacyTask = await makeTask(teacherA);
     const legacyTaskId = new Types.ObjectId(legacyTask);
+    const published = await publish(teacherA, classA, legacyTask);
+    const old = { _id: new Types.ObjectId(published.id) };
+    // Native removal on an explicitly published fixture proves actual absence.
+    await instances.collection.updateOne(
+      { _id: old._id },
+      { $unset: { taskSnapshot: '' } },
+    );
     await tasks.collection.updateOne(
       { _id: legacyTaskId, createdBy: userIds[0] },
       { $set: { difficulty: '综合' } },
@@ -2059,17 +2344,10 @@ describe('A1 classroom text task backend contract (HTTP)', () => {
     const legacyTemplateBefore = await tasks.collection.findOne({
       _id: legacyTaskId,
     });
-    const old = await instances.create({
-      classroomId: new Types.ObjectId(classA.id),
-      taskId: new Types.ObjectId(legacyTask),
-      createdBy: userIds[0],
-      publishedAt: new Date(),
-      status: 'ACTIVE',
-    });
-    instanceIds.push(old._id.toString());
     const legacyInstanceBefore = await instances.collection.findOne({
       _id: old._id,
     });
+    expect(legacyInstanceBefore).not.toHaveProperty('taskSnapshot');
     const saved = await submissions.create({
       taskId: new Types.ObjectId(legacyTask),
       classroomTaskId: old._id,
@@ -2090,29 +2368,35 @@ describe('A1 classroom text task backend contract (HTTP)', () => {
     const database = submissions.db.db;
     if (!database) throw new Error('Missing connected test database');
     await database.collection(submissions.collection.name).insertOne(unbound);
-    await teacherA
-      .post(
-        '/api/learning-tasks/submissions/' + saved._id.toString() + '/feedback',
-      )
-      .send({
-        expectedRevision: 0,
-        source: 'TEACHER',
-        type: 'OTHER',
-        severity: 'INFO',
-        message: 'old feedback',
-      })
-      .expect(201);
+    const existingFeedback = (
+      await teacherA
+        .post(
+          '/api/learning-tasks/submissions/' +
+            saved._id.toString() +
+            '/feedback',
+        )
+        .send({
+          expectedRevision: 0,
+          source: 'TEACHER',
+          type: 'OTHER',
+          severity: 'INFO',
+          message: 'old feedback',
+        })
+        .expect(201)
+    ).body as Resource;
     const initial = await submissions.collection.findOne({ _id: saved._id });
     const detail = await getDetail(studentA, saved._id.toString());
     expect(detail.taskSnapshotAvailable).toBe(false);
+    expect(detail.taskTitle).toBeNull();
+    expect(detail.content.codeText).toBe('old source');
     expect(detail.content.submissionNote).toBe('');
-    const oldView = (
-      await teacherA
-        .get('/api/classrooms/' + classA.id + '/tasks/' + old._id.toString())
-        .expect(200)
-    ).body as ClassroomTaskResponseDto;
-    expect(oldView.taskSnapshotAvailable).toBe(false);
-    expect(oldView.task.difficulty).toBe('综合');
+    const oldView = await teacherA
+      .get('/api/classrooms/' + classA.id + '/tasks/' + old._id.toString())
+      .expect(409);
+    expect(oldView.body).toMatchObject({
+      statusCode: 409,
+      message: invalidSnapshot,
+    });
     const legacyStudentView = await studentA
       .get(
         '/api/classrooms/' +
@@ -2121,11 +2405,24 @@ describe('A1 classroom text task backend contract (HTTP)', () => {
           old._id.toString() +
           '/my-task-detail',
       )
+      .expect(409);
+    expect(legacyStudentView.body).toMatchObject({
+      statusCode: 409,
+      message: invalidSnapshot,
+    });
+    const feedbackUrl =
+      '/api/learning-tasks/submissions/' + saved._id.toString() + '/feedback';
+    const readableFeedback = await studentA.get(feedbackUrl).expect(200);
+    expect(readableFeedback.body).toEqual([
+      expect.objectContaining({
+        id: existingFeedback.id,
+        message: 'old feedback',
+      }),
+    ]);
+    await teacherA
+      .patch(feedbackUrl + '/' + existingFeedback.id)
+      .send({ message: 'Updated historical feedback' })
       .expect(200);
-    expect(
-      (legacyStudentView.body as { task: { difficulty: string } }).task
-        .difficulty,
-    ).toBe('综合');
     expect(await tasks.collection.findOne({ _id: legacyTaskId })).toEqual(
       legacyTemplateBefore,
     );
@@ -2142,7 +2439,7 @@ describe('A1 classroom text task backend contract (HTTP)', () => {
       )
       .send({ content: { codeText: code, language: 'typescript' } })
       .expect(409);
-    expect((denied.body as { message: string }).message).toBe(missingSnapshot);
+    expect((denied.body as { message: string }).message).toBe(invalidSnapshot);
     for (const id of [saved._id.toString(), unbound._id.toString()])
       for (const agent of [teacherA, studentA])
         await ask(agent, id).expect(409);

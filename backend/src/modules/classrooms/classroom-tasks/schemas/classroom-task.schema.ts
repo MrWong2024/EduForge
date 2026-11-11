@@ -20,8 +20,8 @@ export class ClassroomTask {
   @Prop({ type: Types.ObjectId, ref: Task.name, required: true })
   taskId!: Types.ObjectId;
 
-  @Prop({ type: Object, immutable: true })
-  taskSnapshot?: TaskSnapshot;
+  @Prop({ type: Object, required: true, immutable: true })
+  taskSnapshot!: TaskSnapshot;
 
   @Prop({
     type: String,

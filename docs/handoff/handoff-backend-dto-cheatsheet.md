@@ -127,7 +127,7 @@ my-task-detail 另稳定返回 `participationStatus={readOnly,canSubmit,canReque
 | `CLASSROOM_NOT_ACTIVE` | true | false / false | 班级已归档或不可参与，仅可查看历史提交与反馈。 |
 | `CLASSROOM_TASK_NOT_ACTIVE` | true | false / false | 课堂任务已关闭或不可参与，仅可查看历史提交与反馈。 |
 
-班级/实例 ACTIVE 且有快照时，canSubmit/canRequestAiFeedback 均为 true；缺快照时均为 false。旧策略字段缺失或残留均不影响投影。这些值是展示信号；动作授权边界、原因优先级和模板兼容行为见 [API Classroom Tasks](./handoff-backend-api-map.md#classroom-tasksclassrooms-子资源)。
+正常 my-task-detail 响应在班级/实例 ACTIVE 时，canSubmit/canRequestAiFeedback 均为 true；缺失或结构异常快照按 API 合同拒绝该聚合详情。旧策略字段缺失或残留均不影响投影。这些值是展示信号；动作授权边界和原因优先级见 [API Classroom Tasks](./handoff-backend-api-map.md#classroom-tasksclassrooms-子资源)。
 
 ## Classroom Tasks（Classrooms 子资源）
 
@@ -152,7 +152,7 @@ my-task-detail 另稳定返回 `participationStatus={readOnly,canSubmit,canReque
 
 - `status: ACTIVE | CLOSED | RECALLED`，仅输出真实保存的合法标量状态，不补造 ACTIVE 或扩展为 nullable；异常状态与列表过滤合同见 [API Classroom Tasks](./handoff-backend-api-map.md#classroom-tasksclassrooms-子资源)。
 - `taskPublisher: {id,name?} | null` 来自模板发布者，安全字段仅 id/name。
-- `task={title,description,knowledgeModule,courseLabel?,difficulty?,rubric?,status}`；教学字段取实际快照，缺快照旧实例只作当前模板投影，不能称为发布原文。`status` 仍为当前模板资产状态。`taskSnapshotAvailable:boolean` 仅有实际快照时为 true。
+- `task={title,description,knowledgeModule,courseLabel?,difficulty?,rubric?,status}`；教学字段只取结构有效的实际快照，正常响应的 `taskSnapshotAvailable:boolean` 为 true。异常读取及写入拒绝见 API Owner。`status` 仍为当前模板资产状态；公开投影不包含原始快照、aiContextRefs 或资料路径。
 - 公开 `settings` 仅白名单投影 `allowLate`，保留原有缺省/可选语义；Mongo Mixed 中残留的 maxAttempts、旧策略或其它内部字段均不展开透出。发布、更新返回、教师列表/详情及学生详情使用同一公开边界；GET 不回填、不清理、不更新时间戳。
 - 发布候选的 Query / response 与 Task 模板 family 共用，见[发布候选模板](#发布候选模板)。
 
@@ -162,7 +162,7 @@ my-task-detail 另稳定返回 `participationStatus={readOnly,canSubmit,canReque
 
 - 课堂任务提交使用 `CreateSubmissionDto`（旧通用入口仍复用输入 DTO，但拒绝写入）：`content={codeText:string,language:string,submissionNote?:string}`，nested validation；可选 `meta={aiUsageDeclaration?:string}`。创建与修改共用的 codeText/language 使用 `IsString + IsNotEmpty`，必须为非空字符串，空字符串 "" 在 DTO 阶段返回 400；保留原文、不 trim，不改变纯空白字符串的既有口径，language 无枚举白名单。submissionNote 可省略/空字符串，null、非字符串或超过 20,000 Unicode 码点返回 400；通过 ValidateIf 跳过 undefined、IsString 与 Unicode Matches 校验，保留原文/换行/缩进，省略时完整 content 响应统一为 ""。限制是产品字段长度，不是模型 Token 预算。多源码保持 `===== FILE: 相对路径 =====` 文本约定，仍要求源码，不提供纯文字提交类型。请求不接受客户端指定 submission 归属或 attemptNo。
 - `SubmissionResponseDto`：`{id,taskId,classroomTaskId,studentId,attemptNo,content,meta?,status,aiFeedbackStatus,submittedAt,isLate,lateBySeconds,createdAt,updatedAt}`；`content={codeText,language,submissionNote}`，submissionNote 始终为字符串；meta 只白名单投影 aiUsageDeclaration。`submittedAt` 表示提交时刻，`isLate` 是迟交标志，`lateBySeconds` 是迟交秒数。
-- `SubmissionDetailResponseDto`：`{id,taskId,classroomTaskId,taskSnapshotAvailable,studentId,studentName,taskTitle,language,content,meta?,submittedAt,attemptNo,isLate,lateBySeconds,aiFeedbackStatus,aiReview}`；`studentName/taskTitle/language/submittedAt/attemptNo` 可为 null，`content={language:string|null,codeText:string|null,submissionNote:string}`；taskTitle 有快照时取实例标题。meta 仅返回已有 aiUsageDeclaration，不暴露任意内部字段、不从说明派生声明。taskSnapshotAvailable 为实际实例快照可用性，有效关联但缺快照的旧实例仍为 false，并保留当前模板内容的历史读取投影。
+- `SubmissionDetailResponseDto`：`{id,taskId,classroomTaskId,taskSnapshotAvailable,studentId,studentName,taskTitle,language,content,meta?,submittedAt,attemptNo,isLate,lateBySeconds,aiFeedbackStatus,aiReview}`；`studentName/taskTitle/language/submittedAt/attemptNo` 可为 null，`content={language:string|null,codeText:string|null,submissionNote:string}`；taskTitle 只取结构有效的实例快照标题，快照缺失或无效时为 null，taskSnapshotAvailable=false。已保存正文、语言、说明、声明及反馈仍按原权限读取。meta 仅返回已有 aiUsageDeclaration，不暴露任意内部字段、不从说明派生声明；GET 不补写快照或取当前模板替代。
 - 上述两个 DTO 的 `classroomTaskId` 均为必需 string，来自已验证的保存值，不输出 undefined/null 或从请求参数补造；关联异常不再作为正常详情返回，列表排除无关联及非法类型记录。权限与关联错误语义见 [API Learning Tasks](./handoff-backend-api-map.md#learning-tasks)。
 - `UpdateSubmissionDto`：必填 `expectedRevision` 为非负安全整数（无字符串转换；缺失/null/负数/小数拒绝）；必填非 null object `content`，完整替换 `language/codeText/submissionNote` 并复用创建文本规则，说明省略为 ""，原文不 trim。拒绝所有归属、时间、attempt、revision、评阅状态和 meta 系统字段。PATCH 成功返回权威 `SubmissionDetailResponseDto`。
 - 上述创建/提交响应与详情共同提供 `contentRevision:number|null`、`lastEditedAt:Date|null`、`lastEditIsLate:boolean|null`、`reviewStartedAt:Date|null` 和 `editing={canEdit:boolean,reason:string|null,message:string|null}`。新建 revision=0、修改时间对为 null；仅实际 number 类型的非负安全整数是有效版本，缺失、null 或非法值均投影 null，并令 editing.canEdit=false、editing.reason=INVALID_STATE。合法课堂关联下已获授权的作品内容、说明、声明及反馈仍可读取，GET 不回填版本、不固定评阅或改写时间戳。非法时间/状态同样 fail-closed；投影 null 不代表可修改。

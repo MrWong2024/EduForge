@@ -1,4 +1,5 @@
 import { INestApplication, ValidationPipe } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { Test, TestingModule } from '@nestjs/testing';
 import { getConnectionToken, getModelToken } from '@nestjs/mongoose';
 import { Connection, Model, Types } from 'mongoose';
@@ -6,7 +7,6 @@ import * as bcrypt from 'bcryptjs';
 import cookieParser from 'cookie-parser';
 import request from 'supertest';
 import { App } from 'supertest/types';
-import { AppModule } from '../src/app.module';
 import { User } from '../src/modules/users/schemas/user.schema';
 import { Session } from '../src/modules/auth/schemas/session.schema';
 import { Course } from '../src/modules/courses/schemas/course.schema';
@@ -47,6 +47,11 @@ type CourseOverviewResponse = {
 
 describe('Enrollment Only Regression Lock (e2e)', () => {
   let app: INestApplication<App>;
+  let moduleFixture: TestingModule | undefined;
+  let connection: Connection | undefined;
+  let previousWorkerEnabled: string | undefined;
+  let previousProvider: string | undefined;
+  let previousMailProvider: string | undefined;
   let userModel: Model<User>;
   let sessionModel: Model<Session>;
   let courseModel: Model<Course>;
@@ -150,13 +155,23 @@ describe('Enrollment Only Regression Lock (e2e)', () => {
   };
 
   beforeAll(async () => {
+    previousWorkerEnabled = process.env.AI_FEEDBACK_WORKER_ENABLED;
+    previousProvider = process.env.AI_FEEDBACK_PROVIDER;
+    previousMailProvider = process.env.MAIL_PROVIDER;
+    process.env.AI_FEEDBACK_WORKER_ENABLED = 'false';
+    process.env.AI_FEEDBACK_PROVIDER = 'stub';
+    process.env.MAIL_PROVIDER = 'log';
+    const { AppModule } =
+      jest.requireActual<typeof import('../src/app.module')>(
+        '../src/app.module',
+      );
     assertLocalStandardTestEnvironment({
       nodeEnv: process.env.NODE_ENV,
       purpose: process.env.EDUFORGE_DATABASE_PURPOSE,
       mongoUri: process.env.MONGO_URI,
     });
 
-    const moduleFixture: TestingModule = await Test.createTestingModule({
+    moduleFixture = await Test.createTestingModule({
       imports: [AppModule],
     }).compile();
 
@@ -172,7 +187,8 @@ describe('Enrollment Only Regression Lock (e2e)', () => {
     app.use(cookieParser());
     await app.init();
 
-    const connection = app.get<Connection>(getConnectionToken());
+    connection = app.get<Connection>(getConnectionToken());
+    connection.set('maxTimeMS', 10000);
     const database = connection.db;
     if (!database) throw new Error('Missing connected test database');
     const auth = await database.command(
@@ -182,17 +198,32 @@ describe('Enrollment Only Regression Lock (e2e)', () => {
     assertLocalStandardTestAuthentication({
       nodeEnv: process.env.NODE_ENV,
       purpose: process.env.EDUFORGE_DATABASE_PURPOSE,
-      mongoUri: process.env.MONGO_URI,
+      mongoUri: app.get(ConfigService).get<string>('MONGO_URI'),
       databaseName: database.databaseName,
       connectedHost: connection.host,
       authInfo: auth.authInfo,
     });
 
-    teacherAgent = request.agent(app.getHttpServer());
-    studentAAgent = request.agent(app.getHttpServer());
-    studentBAgent = request.agent(app.getHttpServer());
-    studentCAgent = request.agent(app.getHttpServer());
-    studentDAgent = request.agent(app.getHttpServer());
+    const config = app.get(ConfigService);
+    expect(config.get('AI_FEEDBACK_WORKER_ENABLED')).toBe(false);
+    expect(config.get('AI_FEEDBACK_PROVIDER')).toBe('stub');
+    expect(config.get('MAIL_PROVIDER')).toBe('log');
+
+    teacherAgent = request
+      .agent(app.getHttpServer())
+      .timeout({ response: 5000, deadline: 10000 });
+    studentAAgent = request
+      .agent(app.getHttpServer())
+      .timeout({ response: 5000, deadline: 10000 });
+    studentBAgent = request
+      .agent(app.getHttpServer())
+      .timeout({ response: 5000, deadline: 10000 });
+    studentCAgent = request
+      .agent(app.getHttpServer())
+      .timeout({ response: 5000, deadline: 10000 });
+    studentDAgent = request
+      .agent(app.getHttpServer())
+      .timeout({ response: 5000, deadline: 10000 });
 
     userModel = app.get(getModelToken(User.name));
     sessionModel = app.get(getModelToken(Session.name));
@@ -215,48 +246,40 @@ describe('Enrollment Only Regression Lock (e2e)', () => {
       bcrypt.hash(studentPassword, 10),
     ]);
 
-    const [teacher, studentA, studentB, studentC, studentD] = await Promise.all(
-      [
-        userModel.create({
-          email: teacherEmail,
-          passwordHash: teacherHash,
-          roles: ['teacher'],
-        }),
-        userModel.create({
-          email: studentAEmail,
-          passwordHash: studentAHash,
-          roles: ['student'],
-        }),
-        userModel.create({
-          email: studentBEmail,
-          passwordHash: studentBHash,
-          roles: ['student'],
-        }),
-        userModel.create({
-          email: studentCEmail,
-          passwordHash: studentCHash,
-          roles: ['student'],
-        }),
-        userModel.create({
-          email: studentDEmail,
-          passwordHash: studentDHash,
-          roles: ['student'],
-        }),
-      ],
-    );
-
-    teacherId = teacher._id.toString();
-    studentAId = studentA._id.toString();
-    studentBId = studentB._id.toString();
-    studentCId = studentC._id.toString();
-    studentDId = studentD._id.toString();
-    createdUserIds.push(
-      teacherId,
-      studentAId,
-      studentBId,
-      studentCId,
-      studentDId,
-    );
+    const userFixtures = [
+      {
+        email: teacherEmail,
+        passwordHash: teacherHash,
+        roles: ['teacher'],
+      },
+      {
+        email: studentAEmail,
+        passwordHash: studentAHash,
+        roles: ['student'],
+      },
+      {
+        email: studentBEmail,
+        passwordHash: studentBHash,
+        roles: ['student'],
+      },
+      {
+        email: studentCEmail,
+        passwordHash: studentCHash,
+        roles: ['student'],
+      },
+      {
+        email: studentDEmail,
+        passwordHash: studentDHash,
+        roles: ['student'],
+      },
+    ];
+    for (const fixture of userFixtures) {
+      const _id = new Types.ObjectId();
+      createdUserIds.push(_id.toString());
+      await userModel.create({ _id, ...fixture });
+    }
+    [teacherId, studentAId, studentBId, studentCId, studentDId] =
+      createdUserIds;
 
     await login(teacherAgent, teacherEmail, teacherPassword);
     await login(studentAAgent, studentAEmail, studentPassword);
@@ -309,7 +332,21 @@ describe('Enrollment Only Regression Lock (e2e)', () => {
       }
       await Promise.all(cleanup);
     } finally {
-      await app?.close();
+      try {
+        if (app) await app.close();
+        else await moduleFixture?.close();
+        if (connection) expect(connection.readyState).toBe(0);
+      } finally {
+        if (previousWorkerEnabled === undefined)
+          delete process.env.AI_FEEDBACK_WORKER_ENABLED;
+        else process.env.AI_FEEDBACK_WORKER_ENABLED = previousWorkerEnabled;
+        if (previousProvider === undefined)
+          delete process.env.AI_FEEDBACK_PROVIDER;
+        else process.env.AI_FEEDBACK_PROVIDER = previousProvider;
+        if (previousMailProvider === undefined)
+          delete process.env.MAIL_PROVIDER;
+        else process.env.MAIL_PROVIDER = previousMailProvider;
+      }
     }
   });
 
@@ -546,6 +583,11 @@ describe('Enrollment Only Regression Lock (e2e)', () => {
     await classroomTaskModel.create({
       classroomId: new Types.ObjectId(classroomId),
       taskId: new Types.ObjectId(),
+      taskSnapshot: {
+        title: 'Existing classroom task',
+        description: 'Preserves the classroom deletion boundary',
+        knowledgeModule: 'enrollment-only',
+      },
       createdBy: new Types.ObjectId(teacherId),
       publishedAt: new Date(),
     });

@@ -12,7 +12,10 @@ import { AiContextReaderService } from '../ai-context/ai-context-reader.service'
 import { ConfigService } from '@nestjs/config';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
-import { MISSING_TASK_SNAPSHOT_MESSAGE } from '../../classrooms/classroom-tasks/classroom-task-content';
+import {
+  INVALID_TASK_SNAPSHOT_MESSAGE,
+  isValidTaskSnapshot,
+} from '../../classrooms/classroom-tasks/classroom-task-content';
 import {
   Enrollment,
   EnrollmentRole,
@@ -88,7 +91,6 @@ type ClassroomTaskDeadlineConfig = Pick<
   'classroomId' | 'taskId' | 'status' | 'dueAt' | 'settings' | 'taskSnapshot'
 > &
   WithId;
-type SubmissionDetailTaskLean = Pick<Task, 'title'> & WithId;
 type SubmissionDetailStudentLean = Pick<User, 'name'> & WithId;
 type SubmissionDetailClassroomLean = Pick<Classroom, 'teacherId'> & WithId;
 type ParticipationClassroomLean = Pick<Classroom, 'status'> & WithId;
@@ -816,7 +818,7 @@ export class LearningTasksService {
     if (!isStudentOwner && !hasAnyRole(user.roles ?? [], TEACHER_ROLES)) {
       throw new ForbiddenException('Not allowed to view submission detail');
     }
-    const { task, classroomTask, classroom } =
+    const { classroomTask, classroom } =
       await this.loadSubmissionAuthContext(submission);
     if (!isStudentOwner) {
       this.ensureTeacherCanManageSubmission(
@@ -849,7 +851,6 @@ export class LearningTasksService {
     );
     return this.toSubmissionDetailResponse(
       submission,
-      task,
       classroomTask,
       student ?? null,
       job ? this.toAiFeedbackStatus(job.status) : AiFeedbackStatus.NotRequested,
@@ -1069,7 +1070,6 @@ export class LearningTasksService {
 
   private toSubmissionDetailResponse(
     submission: SubmissionWithMeta,
-    task: SubmissionDetailTaskLean,
     classroomTask: ClassroomTaskDeadlineConfig,
     student: SubmissionDetailStudentLean | null,
     aiFeedbackStatus: AiFeedbackStatus,
@@ -1077,6 +1077,7 @@ export class LearningTasksService {
     editing: SubmissionEditing,
   ): SubmissionDetailResponseDto {
     const language = submission.content?.language ?? null;
+    const snapshotAvailable = isValidTaskSnapshot(classroomTask.taskSnapshot);
     return {
       id: submission._id.toString(),
       taskId: submission.taskId.toString(),
@@ -1084,8 +1085,8 @@ export class LearningTasksService {
         this.requireSubmissionClassroomTaskId(submission).toString(),
       studentId: submission.studentId.toString(),
       studentName: student?.name ?? null,
-      taskTitle: classroomTask.taskSnapshot?.title ?? task.title ?? null,
-      taskSnapshotAvailable: Boolean(classroomTask.taskSnapshot),
+      taskTitle: snapshotAvailable ? classroomTask.taskSnapshot.title : null,
+      taskSnapshotAvailable: snapshotAvailable,
       meta: submission.meta
         ? { aiUsageDeclaration: submission.meta.aiUsageDeclaration }
         : undefined,
@@ -1140,8 +1141,8 @@ export class LearningTasksService {
     if (classroomTask.taskId.toString() !== taskObjectId.toString()) {
       throw new ConflictException('Classroom task does not match task');
     }
-    if (!classroomTask.taskSnapshot) {
-      throw new ConflictException(MISSING_TASK_SNAPSHOT_MESSAGE);
+    if (!isValidTaskSnapshot(classroomTask.taskSnapshot)) {
+      throw new ConflictException(INVALID_TASK_SNAPSHOT_MESSAGE);
     }
     await this.ensureStudentParticipationContextIsActive(
       classroomTask,
@@ -1439,8 +1440,8 @@ export class LearningTasksService {
       );
     if (classroomTask.taskId.toString() !== submission.taskId.toString())
       return blocked('TASK_MISMATCH', '提交与课堂任务不匹配，不能修改。');
-    if (!classroomTask.taskSnapshot)
-      return blocked('SNAPSHOT_MISSING', MISSING_TASK_SNAPSHOT_MESSAGE);
+    if (!isValidTaskSnapshot(classroomTask.taskSnapshot))
+      return blocked('SNAPSHOT_MISSING', INVALID_TASK_SNAPSHOT_MESSAGE);
     const member = await this.enrollmentModel.exists({
       classroomId: classroomTask.classroomId,
       userId: submission.studentId,
@@ -1584,8 +1585,8 @@ export class LearningTasksService {
       if (error instanceof ForbiddenException)
         return '当前用户无权申请该提交的 AI 反馈。';
       if (error instanceof ConflictException) {
-        if (error.message === MISSING_TASK_SNAPSHOT_MESSAGE)
-          return MISSING_TASK_SNAPSHOT_MESSAGE;
+        if (error.message === INVALID_TASK_SNAPSHOT_MESSAGE)
+          return INVALID_TASK_SNAPSHOT_MESSAGE;
         if (
           error.message === '班级已归档，不能请求 AI 反馈。' ||
           error.message === '课堂任务已关闭，不能请求 AI 反馈。'
@@ -1627,8 +1628,8 @@ export class LearningTasksService {
         'requestAi',
       );
     }
-    if (!classroomTask.taskSnapshot)
-      throw new ConflictException(MISSING_TASK_SNAPSHOT_MESSAGE);
+    if (!isValidTaskSnapshot(classroomTask.taskSnapshot))
+      throw new ConflictException(INVALID_TASK_SNAPSHOT_MESSAGE);
   }
 
   private async ensureStudentParticipationContextIsActive(
@@ -1684,8 +1685,8 @@ export class LearningTasksService {
     const [task, classroomTask] = await Promise.all([
       this.taskModel
         .findById(submission.taskId)
-        .select('_id title')
-        .lean<SubmissionDetailTaskLean>()
+        .select('_id')
+        .lean<IdOnly>()
         .exec(),
       this.classroomTaskModel
         .findById(classroomTaskId)
@@ -1716,7 +1717,7 @@ export class LearningTasksService {
     if (!classroom) {
       throw new NotFoundException('Classroom not found');
     }
-    return { task, classroomTask, classroom };
+    return { classroomTask, classroom };
   }
 
   private hasFeedbackUpdateFields(dto: UpdateFeedbackDto) {

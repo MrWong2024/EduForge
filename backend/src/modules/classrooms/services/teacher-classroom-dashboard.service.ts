@@ -3,6 +3,7 @@ import { InjectModel } from '@nestjs/mongoose';
 import { Model, PipelineStage, Types } from 'mongoose';
 import { Classroom, ClassroomStatus } from '../schemas/classroom.schema';
 import { ClassroomTask } from '../classroom-tasks/schemas/classroom-task.schema';
+import { isValidTaskSnapshot } from '../classroom-tasks/classroom-task-content';
 import {
   CLASSROOM_TASK_STATUS_ACTIVE,
   CLASSROOM_TASK_STATUS_CLOSED,
@@ -32,8 +33,7 @@ type ClassroomTaskDashboardItem = {
   taskId: Types.ObjectId;
   taskPublisherId?: Types.ObjectId | null;
   taskTemplateStatus?: TaskStatus | null;
-  title: string;
-  knowledgeModule: string;
+  taskSnapshot?: unknown;
   publishedAt: Date;
   dueAt?: Date;
   classroomTaskStatus: string;
@@ -150,20 +150,7 @@ export class TeacherClassroomDashboardService {
           publishedAt: 1,
           dueAt: 1,
           taskTemplateStatus: '$task.status',
-          title: {
-            $cond: [
-              { $ifNull: ['$taskSnapshot', false] },
-              '$taskSnapshot.title',
-              '$task.title',
-            ],
-          },
-          knowledgeModule: {
-            $cond: [
-              { $ifNull: ['$taskSnapshot', false] },
-              '$taskSnapshot.knowledgeModule',
-              '$task.knowledgeModule',
-            ],
-          },
+          taskSnapshot: 1,
         },
       },
       { $sort: { publishedAt: -1 } },
@@ -395,6 +382,9 @@ export class TeacherClassroomDashboardService {
       },
       archiveSuggestion,
       tasks: visibleClassroomTasks.map((task) => {
+        const snapshot = isValidTaskSnapshot(task.taskSnapshot)
+          ? task.taskSnapshot
+          : null;
         const key = task._id.toString();
         const submissions = submissionStatsMap.get(key);
         const submissionsCount = submissions?.submissionsCount ?? 0;
@@ -425,8 +415,8 @@ export class TeacherClassroomDashboardService {
             publisherMap,
           ),
           taskTemplateStatus: task.taskTemplateStatus ?? null,
-          title: task.title,
-          knowledgeModule: task.knowledgeModule,
+          title: snapshot?.title ?? '未知任务',
+          knowledgeModule: snapshot?.knowledgeModule ?? '未知知识模块',
           publishedAt: task.publishedAt.toISOString(),
           dueAt: task.dueAt ? task.dueAt.toISOString() : null,
           submissionsCount,

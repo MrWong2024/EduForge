@@ -597,7 +597,11 @@ describe('B1-2 submission content edits and review admission (HTTP)', () => {
       .expect(200);
     // Historical missing/mismatched links are corruption-only compatibility fixtures.
     for (const scenario of [
-      { mutation: { $unset: { taskSnapshot: '' } }, status: 403 },
+      {
+        mutation: { $unset: { taskSnapshot: '' } },
+        status: 403,
+        message: '课堂任务内容快照缺失或无效，请联系教师核对。',
+      },
       {
         mutation: { $set: { taskId: new Types.ObjectId() } },
         status: 409,
@@ -616,12 +620,23 @@ describe('B1-2 submission content edits and review admission (HTTP)', () => {
         { _id: new Types.ObjectId(instance.id) },
         scenario.mutation,
       );
+      const instanceBefore = await instances.collection.findOne({
+        _id: new Types.ObjectId(instance.id),
+      });
+      expect(instanceBefore).not.toBeNull();
+      if ('$unset' in scenario.mutation)
+        expect(instanceBefore).not.toHaveProperty('taskSnapshot');
       const denied = await edit(saved.id).expect(scenario.status);
       if (scenario.message)
         expect((denied.body as { message: string }).message).toBe(
           scenario.message,
         );
       expect(await raw(saved.id)).toEqual(snapshot);
+      expect(
+        await instances.collection.findOne({
+          _id: new Types.ObjectId(instance.id),
+        }),
+      ).toEqual(instanceBefore);
       await noReviewRecords(saved.id);
     }
     for (const scenario of [

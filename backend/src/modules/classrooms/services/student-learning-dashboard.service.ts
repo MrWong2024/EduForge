@@ -4,6 +4,7 @@ import { Model, PipelineStage, Types } from 'mongoose';
 import { Classroom, ClassroomStatus } from '../schemas/classroom.schema';
 import { QueryClassroomDto } from '../dto/query-classroom.dto';
 import { ClassroomTask } from '../classroom-tasks/schemas/classroom-task.schema';
+import { isValidTaskSnapshot } from '../classroom-tasks/classroom-task-content';
 import { CLASSROOM_TASK_STATUS_ACTIVE } from '../classroom-tasks/classroom-task-status.constants';
 import { Submission } from '../../learning-tasks/schemas/submission.schema';
 import {
@@ -36,12 +37,16 @@ type ClassroomTaskStudentAggregateItem = {
   _id: Types.ObjectId;
   classroomId: Types.ObjectId;
   taskId: Types.ObjectId;
-  title: string;
+  taskSnapshot?: unknown;
   publishedAt?: Date | string | null;
   dueAt?: Date | string | null;
 };
 
-type ClassroomTaskStudentItem = ClassroomTaskStudentAggregateItem & {
+type ClassroomTaskStudentItem = Omit<
+  ClassroomTaskStudentAggregateItem,
+  'taskSnapshot'
+> & {
+  title: string;
   studentVisibilityStatus: StudentTaskVisibilityStatus;
   isHistorical: boolean;
 };
@@ -135,13 +140,7 @@ export class StudentLearningDashboardService {
           taskId: 1,
           publishedAt: 1,
           dueAt: 1,
-          title: {
-            $cond: [
-              { $ifNull: ['$taskSnapshot', false] },
-              '$taskSnapshot.title',
-              '$task.title',
-            ],
-          },
+          taskSnapshot: 1,
         },
       },
       { $sort: { publishedAt: -1 } },
@@ -152,13 +151,16 @@ export class StudentLearningDashboardService {
 
     const now = new Date();
     const visibleClassroomTasks = rawClassroomTasks
-      .map((task): ClassroomTaskStudentItem => {
+      .map(({ taskSnapshot, ...task }): ClassroomTaskStudentItem => {
         const studentVisibilityStatus = this.getStudentTaskVisibilityStatus(
           task,
           now,
         );
         return {
           ...task,
+          title: isValidTaskSnapshot(taskSnapshot)
+            ? taskSnapshot.title
+            : '未知任务',
           studentVisibilityStatus,
           isHistorical: studentVisibilityStatus === 'HISTORICAL',
         };
