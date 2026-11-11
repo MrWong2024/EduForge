@@ -105,6 +105,7 @@ Notes:
 - 学生看板要求当前 Enrollment ACTIVE，默认只展示 ACTIVE 班级内 ACTIVE 课堂任务。模板变为 ARCHIVED/DRAFT 不影响既有实例可见性。有截止时间的任务在截止后 30 天内仍显示为近期过期，更早的归为历史；无截止时间的任务在发布后 90 天内显示，更早的归为历史。includeHistorical 仅放开时间窗口，不放开班级或课堂任务状态边界。
 - 看板的状态字段、公开摘要及缺失关联兼容见 [DTO Dashboard / Student state](./handoff-backend-dto-cheatsheet.md#teacher--student-dashboard-response-family)；归档建议与任务筛选计算分别见 [Service Card 05](./handoff-backend-service-map.md#service-card-05) / [06](./handoff-backend-service-map.md#service-card-06)。
 - Weekly report 是 teacher owner 的班级进度/风险/AI 概览，学生范围为当前 Enrollment ACTIVE；窗口与公开数据见 [DTO Weekly report](./handoff-backend-dto-cheatsheet.md#weekly-report)，内部计算见 [Service Card 08B](./handoff-backend-service-map.md#service-card-08b)。
+- Weekly report 与 Snapshot 均允许 owner 读取实际状态为 `ACTIVE` 或 `ARCHIVED` 的班级历史报表；缺失、null、未知字符串、大小写/空白变体、数组及其他非法状态返回 `409`，message 精确为 `Classroom has invalid status`，GET 不修复或回写状态及时间戳。原认证、角色与 ownership 拒绝优先级保持：无会话 `401`、学生 `403`、非 owner `404 Classroom not found`，不因异常状态向非 owner 泄露状态信息。
 - Weekly report 的旧窗口 `1h/24h` 请求返回 `400`。
 - Process Assessment JSON / CSV 均为 teacher owner 的过程性指标，不能作为正式成绩仲裁；二者使用相同窗口、排除项与查询口径，CSV 媒体类型为 `text/csv; charset=utf-8`。临时任务排除只改变本次分析，不修改教学数据；零提交及排除全部任务时仍返回当前 ACTIVE 学生。
 - PA JSON / CSV 两入口对合法教师的 `window=term` 请求均由共用 DTO 的 `IsIn` 校验返回 `400`；既有认证、角色与班级归属规则不变。
@@ -114,6 +115,7 @@ Notes:
 - Analytics 后端旧返回投影已退役，现行字段合同见 [DTO Analytics](./handoff-backend-dto-cheatsheet.md#ai-learning-analytics)。
 - Analytics 为只读记录对照，不回填、重评、解锁或改写历史业务事实。可用反馈交付排除已知模拟评阅与成功空反馈，历史来源未知不认证为真实模型；不同来源/模型、未比较较新版本及证据不足均提供安全提示。分析仅反映现存作品更新与反馈条目负荷，不覆盖全部 AI 使用，不是缺陷数、正确率、正式成绩、学习能力或因果贡献结论，也不能证明已阅读、理解或采纳。净结果可能相互抵消，不代表时间序列趋势；反馈阶段不表示态度、AI 依赖、能力或风险。
 - Snapshot 是 teacher owner 的体积受控教学数据快照导出，超量数据附带截断提示；Query、meta/notes、公开投影与敏感省略见 [DTO Snapshot](./handoff-backend-dto-cheatsheet.md#classroom-export-snapshot)，组合与截断策略见 [Service Card 08H](./handoff-backend-service-map.md#service-card-08h)。
+- Snapshot 复用 Weekly report 的班级状态校验并自然传播上述 `409`；保留原班级、课程读取及 `Course not found` 错误优先级。导出存在先行及并发只读查询，不承诺在 `409` 前零查询或跨查询原子快照。
 - Snapshot 对合法教师的显式 `window=term` 请求沿既有 DTO 校验返回 `400`；认证、角色与班级 owner 检查顺序不变。
 - 班级状态为 `ACTIVE | ARCHIVED`，PATCH 支持归档/恢复。仅无 ClassroomTask 且无 Enrollment 记录（包含 REMOVED 历史）的空班级可删除；只有旧 studentIds 残留不再阻止删除。非空时返回 `409 Conflict`，`code=CLASSROOM_NOT_EMPTY`，message=`该班级已有成员或任务记录，不能删除，只能归档`。
 

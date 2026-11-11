@@ -47,6 +47,7 @@ type SnapshotResponse = {
     notes: string[];
   };
   course: { term: string };
+  classroom: { id: string; status: string };
   students: {
     total: number;
   };
@@ -66,6 +67,7 @@ type SnapshotResponse = {
 
 describe('Classroom Export Snapshot (e2e)', () => {
   let app: INestApplication<App>;
+  let moduleFixture: TestingModule | undefined;
   let userModel: Model<User>;
   let sessionModel: Model<Session>;
   let courseModel: Model<Course>;
@@ -127,8 +129,13 @@ describe('Classroom Export Snapshot (e2e)', () => {
           .collection(collection.name)
           .countDocuments({}, { maxTimeMS: 5000 });
       }
-      console.info('Snapshot database counts: ' + phase, counts);
+      const total = Object.values(counts).reduce(
+        (sum, count) => sum + count,
+        0,
+      );
+      console.info('Snapshot database counts: ' + phase, { counts, total });
       expect(Object.values(counts).every((count) => count === 0)).toBe(true);
+      expect(total).toBe(0);
     } finally {
       await cursor.close();
     }
@@ -182,18 +189,18 @@ describe('Classroom Export Snapshot (e2e)', () => {
   };
 
   beforeAll(async () => {
+    previousWorkerEnabled = process.env.AI_FEEDBACK_WORKER_ENABLED;
+    previousDebugEnabled = process.env.AI_FEEDBACK_DEBUG_ENABLED;
     assertLocalStandardTestEnvironment({
       nodeEnv: process.env.NODE_ENV,
       purpose: process.env.EDUFORGE_DATABASE_PURPOSE,
       mongoUri: process.env.MONGO_URI,
     });
 
-    previousWorkerEnabled = process.env.AI_FEEDBACK_WORKER_ENABLED;
     process.env.AI_FEEDBACK_WORKER_ENABLED = 'false';
-    previousDebugEnabled = process.env.AI_FEEDBACK_DEBUG_ENABLED;
     process.env.AI_FEEDBACK_DEBUG_ENABLED = 'true';
 
-    const moduleFixture: TestingModule = await Test.createTestingModule({
+    moduleFixture = await Test.createTestingModule({
       imports: [AppModule],
     }).compile();
 
@@ -346,7 +353,8 @@ describe('Classroom Export Snapshot (e2e)', () => {
       await expectEmptyDatabase('after scoped cleanup');
     } finally {
       try {
-        await app?.close();
+        if (app) await app.close();
+        else await moduleFixture?.close();
       } finally {
         if (previousWorkerEnabled === undefined) {
           delete process.env.AI_FEEDBACK_WORKER_ENABLED;
@@ -599,6 +607,117 @@ describe('Classroom Export Snapshot (e2e)', () => {
       );
     },
   );
+
+  it('keeps native valid states readable and rejects invalid states without repairs', async () => {
+    const database = userModel.db.db;
+    if (!database) throw new Error('Missing connected test database');
+    const classrooms = database.collection<Record<string, unknown>>(
+      classroomModel.collection.name,
+    );
+    const filter = { _id: new Types.ObjectId(classroomId) };
+    const original = await classrooms.findOne(filter, { maxTimeMS: 5000 });
+    if (!original) throw new Error('Missing snapshot fixture classroom');
+    const originalHasStatus = Object.hasOwn(original, 'status');
+    const course = await courseModel.collection.findOne(
+      { _id: new Types.ObjectId(courseId) },
+      { projection: { status: 1 }, maxTimeMS: 5000 },
+    );
+    expect(course?.status).toBe('ACTIVE');
+    const path = `/api/classrooms/${classroomId}/export/snapshot?window=30d&includePerTask=true`;
+    const scenarios: Array<{ status?: unknown; expectedStatus: 200 | 409 }> = [
+      { status: 'ACTIVE', expectedStatus: 200 },
+      { status: 'ARCHIVED', expectedStatus: 200 },
+      { expectedStatus: 409 },
+      { status: ['ACTIVE'], expectedStatus: 409 },
+    ];
+
+    try {
+      for (const scenario of scenarios) {
+        const hasStatus = Object.hasOwn(scenario, 'status');
+        const update = await classrooms.updateOne(
+          filter,
+          hasStatus
+            ? { $set: { status: scenario.status } }
+            : { $unset: { status: '' } },
+          { maxTimeMS: 5000 },
+        );
+        expect(update.matchedCount).toBe(1);
+        const beforeGet = await classrooms.findOne(filter, { maxTimeMS: 5000 });
+        if (!beforeGet) throw new Error('Missing polluted snapshot classroom');
+        expect(Object.hasOwn(beforeGet, 'status')).toBe(hasStatus);
+        if (hasStatus) expect(beforeGet.status).toStrictEqual(scenario.status);
+        if (Array.isArray(scenario.status)) {
+          expect(Array.isArray(beforeGet.status)).toBe(true);
+        }
+        const beforeDigests = await readBusinessDigests();
+
+        const response = await teacherAgent
+          .get(path)
+          .expect(scenario.expectedStatus);
+        if (scenario.expectedStatus === 200) {
+          const body = response.body as SnapshotResponse;
+          expect(body.classroom).toMatchObject({
+            id: classroomId,
+            status: scenario.status,
+          });
+          expect(body.course.term).toBe('2026-Spring');
+          expect(body.meta.window).toBe('30d');
+          expect(body.meta.effectiveWindow).toBe('30d');
+          expect(body.students.total).toBe(1);
+          expect(body.summary.progress.publishedClassroomTasks).toBe(2);
+          expect(body.statsByClassroomTask).toHaveLength(2);
+          for (const task of body.statsByClassroomTask) {
+            expect(task.submissions).toEqual({
+              total: 1,
+              lateTotal: 1,
+              distinctStudents: 1,
+            });
+          }
+          expect(body.statsByStudent).toHaveLength(1);
+          expect(body.statsByStudent[0]).toMatchObject({
+            studentId,
+            submittedTasksCount: 2,
+            submissionsCount: 2,
+            lateSubmissionsCount: 2,
+            aiRequestedCount: 1,
+            aiSucceededCount: 0,
+          });
+        } else {
+          expect(response.body).toMatchObject({
+            statusCode: 409,
+            message: 'Classroom has invalid status',
+            path,
+          });
+          if (!hasStatus) {
+            const denied = await otherTeacherAgent.get(path).expect(404);
+            expect(denied.body).toMatchObject({
+              statusCode: 404,
+              message: 'Classroom not found',
+              path,
+            });
+          }
+        }
+
+        const afterGet = await classrooms.findOne(filter, { maxTimeMS: 5000 });
+        expect(afterGet).toStrictEqual(beforeGet);
+        expect(afterGet?.createdAt).toEqual(beforeGet.createdAt);
+        expect(afterGet?.updatedAt).toEqual(beforeGet.updatedAt);
+        expect(await readBusinessDigests()).toEqual(beforeDigests);
+      }
+    } finally {
+      const restored = await classrooms.updateOne(
+        filter,
+        originalHasStatus
+          ? { $set: { status: original.status } }
+          : { $unset: { status: '' } },
+        { maxTimeMS: 5000 },
+      );
+      expect(restored.matchedCount).toBe(1);
+      expect(
+        await classrooms.findOne(filter, { maxTimeMS: 5000 }),
+      ).toStrictEqual(original);
+    }
+  });
 
   it.each(['term', '24h', 'all'])(
     'rejects explicit window=%s through the public DTO',

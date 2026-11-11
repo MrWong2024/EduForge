@@ -264,6 +264,7 @@ my-task-detail 另稳定返回 `participationStatus={readOnly,canSubmit,canReque
 - `window?: all | 7d | 30d`，IsIn，默认 all。
 - `includeRiskStudentIds?` 用 IsBooleanString，控制风险学生样本 id 暴露。
 - 返回 `{classroom,window,generatedAt,progress,atRisk,aiHealth,topTags}`；`classroom={id,name,courseId,status}`。
+- `classroom.status` 直接返回实际保存且已验证的合法 `ACTIVE | ARCHIVED`，不对缺失或 null 补默认值；异常状态及错误优先级见 [API Classrooms](./handoff-backend-api-map.md#classrooms)。
 - `progress` 为 `{studentsCount,publishedClassroomTasks,dueClassroomTasks,distinctStudentsSubmitted,submissionRate,lateSubmissionsCount,lateStudentsCount}`。
 - `atRisk={notSubmittedStudentsCount,sampleStudentIds}`；未开启 id 暴露时 sampleStudentIds 为 `[]`。
 - `aiHealth={jobs,successRate,rateLimitRatio,timeoutRatio,errors}`；jobs/errors 复用 AI Metrics 中的数量与 code/count 形状，三个比率零分母为 0。风险与聚合口径见 [Service Card 08B](./handoff-backend-service-map.md#service-card-08b)。

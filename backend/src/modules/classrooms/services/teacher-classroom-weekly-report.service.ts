@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  ConflictException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
@@ -107,6 +108,12 @@ export class TeacherClassroomWeeklyReportService {
     if (!classroom) {
       throw new NotFoundException('Classroom not found');
     }
+    if (
+      classroom.status !== ClassroomStatus.Active &&
+      classroom.status !== ClassroomStatus.Archived
+    ) {
+      throw new ConflictException('Classroom has invalid status');
+    }
 
     // Weekly report metric contract (AA):
     // 1) Time-window filtering uses createdAt consistently across tasks/submissions/jobs/feedback.
@@ -181,7 +188,7 @@ export class TeacherClassroomWeeklyReportService {
         id: classroom._id.toString(),
         name: classroom.name,
         courseId: classroom.courseId.toString(),
-        status: classroom.status ?? ClassroomStatus.Active,
+        status: classroom.status,
       },
       window: windowLabel,
       generatedAt: now.toISOString(),

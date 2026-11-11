@@ -35,6 +35,13 @@ type CreatedTaskResponse = { id: string };
 type CreatedClassroomTaskResponse = { id: string };
 type CreatedSubmissionResponse = { id: string; contentRevision: number };
 
+type RawWeeklyReportClassroom = {
+  _id: Types.ObjectId;
+  status?: unknown;
+  createdAt?: Date;
+  updatedAt?: Date;
+};
+
 type WeeklyReportJob = Pick<
   AiFeedbackJob,
   'submissionId' | 'taskId' | 'classroomTaskId' | 'studentId' | 'status'
@@ -42,6 +49,7 @@ type WeeklyReportJob = Pick<
 
 type WeeklyReportResponse = {
   window: string;
+  classroom: { status: 'ACTIVE' | 'ARCHIVED' };
   progress: {
     studentsCount: number;
     publishedClassroomTasks: number;
@@ -79,6 +87,7 @@ describe('Classroom Weekly Report (e2e)', () => {
   let aiFeedbackJobModel: Model<AiFeedbackJob>;
   let aiFeedbackProcessor: AiFeedbackProcessor;
   let teacherAgent: ReturnType<typeof request.agent>;
+  let otherTeacherAgent: ReturnType<typeof request.agent>;
   let studentAgent: ReturnType<typeof request.agent>;
 
   let courseId = '';
@@ -87,6 +96,7 @@ describe('Classroom Weekly Report (e2e)', () => {
   let taskId = '';
   let submissionId = '';
   let teacherId = '';
+  let otherTeacherId = '';
   let studentId = '';
   let previousWorkerEnabled: string | undefined;
   let previousDebugEnabled: string | undefined;
@@ -94,6 +104,7 @@ describe('Classroom Weekly Report (e2e)', () => {
   let environmentOverridden = false;
 
   const teacherEmail = `teacher.weekly.${Date.now()}@example.com`;
+  const otherTeacherEmail = `other.teacher.weekly.${Date.now()}@example.com`;
   const studentEmail = `student.weekly.${Date.now()}@example.com`;
   const teacherPassword = 'TeacherPass123!';
   const studentPassword = 'StudentPass123!';
@@ -126,8 +137,15 @@ describe('Classroom Weekly Report (e2e)', () => {
           .collection(collection.name)
           .countDocuments({}, { maxTimeMS: 5000 });
       }
-      console.info('Weekly report database counts: ' + phase, counts);
+      const total = Object.values(counts).reduce(
+        (sum, count) => sum + count,
+        0,
+      );
+      console.info('Weekly report database counts: ' + phase, counts, {
+        total,
+      });
       expect(Object.values(counts).every((count) => count === 0)).toBe(true);
+      expect(total).toBe(0);
     } finally {
       await cursor.close();
     }
@@ -155,6 +173,9 @@ describe('Classroom Weekly Report (e2e)', () => {
     await app.init();
 
     teacherAgent = request
+      .agent(app.getHttpServer())
+      .timeout({ response: 5000, deadline: 10000 });
+    otherTeacherAgent = request
       .agent(app.getHttpServer())
       .timeout({ response: 5000, deadline: 10000 });
     studentAgent = request
@@ -214,6 +235,12 @@ describe('Classroom Weekly Report (e2e)', () => {
       roles: ['teacher'],
     });
     teacherId = teacher._id.toString();
+    const otherTeacher = await userModel.create({
+      email: otherTeacherEmail,
+      passwordHash: teacherHash,
+      roles: ['teacher'],
+    });
+    otherTeacherId = otherTeacher._id.toString();
     const student = await userModel.create({
       email: studentEmail,
       passwordHash: studentHash,
@@ -227,7 +254,7 @@ describe('Classroom Weekly Report (e2e)', () => {
     try {
       if (fixtureAuthorized) {
         const cleanup: Promise<unknown>[] = [];
-        const userIds = [teacherId, studentId]
+        const userIds = [teacherId, otherTeacherId, studentId]
           .filter(Boolean)
           .map((id) => new Types.ObjectId(id));
         if (submissionId) {
@@ -319,6 +346,7 @@ describe('Classroom Weekly Report (e2e)', () => {
 
   it('returns teacher classroom weekly report with progress, ai health and tags', async () => {
     await login(teacherAgent, teacherEmail, teacherPassword);
+    await login(otherTeacherAgent, otherTeacherEmail, teacherPassword);
     await login(studentAgent, studentEmail, studentPassword);
 
     const createdCourse = await teacherAgent
@@ -477,5 +505,120 @@ describe('Classroom Weekly Report (e2e)', () => {
       .timeout({ response: 5000, deadline: 10000 })
       .query({ window: '24h' })
       .expect(401);
+
+    const database = classroomModel.db.db;
+    if (!database) throw new Error('Missing connected test database');
+    const classrooms = database.collection<RawWeeklyReportClassroom>(
+      classroomModel.collection.name,
+    );
+    const filter = { _id: new Types.ObjectId(classroomId) };
+    const original = await classrooms.findOne(filter, { timeoutMS: 5000 });
+    if (!original) throw new Error('Missing owned classroom fixture');
+    const originalHasStatus = Object.hasOwn(original, 'status');
+    const statusReportPath = `${reportPath}?window=all&includeRiskStudentIds=true`;
+
+    try {
+      for (const status of ['ACTIVE', 'ARCHIVED'] as const) {
+        const saved = await classrooms.updateOne(
+          filter,
+          { $set: { status } },
+          { timeoutMS: 5000 },
+        );
+        expect(saved.matchedCount).toBe(1);
+        const before = await classrooms.findOne(filter, { timeoutMS: 5000 });
+        if (!before) throw new Error('Missing saved classroom fixture');
+        expect(Object.hasOwn(before, 'status')).toBe(true);
+        expect(before.status).toBe(status);
+        expect(typeof before.status).toBe('string');
+
+        const report = await teacherAgent.get(statusReportPath).expect(200);
+        const body = report.body as WeeklyReportResponse;
+        expect(body.classroom.status).toBe(status);
+        expect(body.progress).toMatchObject({
+          studentsCount: 1,
+          publishedClassroomTasks: 1,
+          dueClassroomTasks: 0,
+          distinctStudentsSubmitted: 1,
+          submissionRate: 1,
+        });
+        expect(body.aiHealth.jobs).toEqual({
+          total: 1,
+          succeeded: 1,
+          failed: 0,
+          dead: 0,
+          pending: 0,
+          running: 0,
+        });
+        const after = await classrooms.findOne(filter, { timeoutMS: 5000 });
+        expect(after).toStrictEqual(before);
+        expect(after?.createdAt).toEqual(before.createdAt);
+        expect(after?.updatedAt).toEqual(before.updatedAt);
+      }
+
+      const invalidStatuses: unknown[] = [
+        undefined,
+        null,
+        'UNKNOWN',
+        ['ACTIVE'],
+      ];
+      for (const status of invalidStatuses) {
+        const saved = await classrooms.updateOne(
+          filter,
+          status === undefined
+            ? { $unset: { status: '' } }
+            : { $set: { status } },
+          { timeoutMS: 5000 },
+        );
+        expect(saved.matchedCount).toBe(1);
+        const before = await classrooms.findOne(filter, { timeoutMS: 5000 });
+        if (!before) throw new Error('Missing polluted classroom fixture');
+        expect(Object.hasOwn(before, 'status')).toBe(status !== undefined);
+        if (status !== undefined) {
+          expect(before.status).toStrictEqual(status);
+          expect(typeof before.status).toBe(typeof status);
+          expect(Array.isArray(before.status)).toBe(Array.isArray(status));
+        }
+
+        const rejected = await teacherAgent.get(statusReportPath).expect(409);
+        expect(rejected.body).toMatchObject({
+          statusCode: 409,
+          message: 'Classroom has invalid status',
+          path: statusReportPath,
+        });
+
+        if (status === undefined) {
+          const notOwned = await otherTeacherAgent
+            .get(statusReportPath)
+            .expect(404);
+          expect(notOwned.body).toMatchObject({
+            statusCode: 404,
+            message: 'Classroom not found',
+            path: statusReportPath,
+          });
+          await studentAgent.get(statusReportPath).expect(403);
+          await request(app.getHttpServer())
+            .get(statusReportPath)
+            .timeout({ response: 5000, deadline: 10000 })
+            .expect(401);
+        }
+
+        const after = await classrooms.findOne(filter, { timeoutMS: 5000 });
+        expect(after).toStrictEqual(before);
+        expect(after?.createdAt).toEqual(before.createdAt);
+        expect(after?.updatedAt).toEqual(before.updatedAt);
+      }
+    } finally {
+      const restored = await classrooms.updateOne(
+        filter,
+        originalHasStatus
+          ? { $set: { status: original.status } }
+          : { $unset: { status: '' } },
+        { timeoutMS: 5000 },
+      );
+      expect(restored.matchedCount).toBe(1);
+      expect(
+        await classrooms.findOne(filter, { timeoutMS: 5000 }),
+      ).toStrictEqual(original);
+    }
   });
 });
