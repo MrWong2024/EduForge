@@ -149,7 +149,7 @@
   - 师生手动申请的精确快照 409 优先于版本错误 helper，匹配失败继续现有版本/通用提示；不把快照错误加入 getSubmissionRevisionError，也不增加教师反馈表单的快照门禁。
   - 注意：请求携带页面实际展示作品的 `expectedRevision`，轮询发现新版不能视为用户已查看；需要明确刷新作品后申请。仅有效 revision 且 aiReview.canRequest=true 开启动作，缺摘要关闭并提供刷新。成功采用接口真实返回状态，已有 Job 不重新排队；当前提交内串行申请与读取，操作标识拒绝旧结果，页面 props 不作为 POST 后确认。成功 Job 持续锁定申请；结果不确定后，只接受事后用户显式发起、完整成功的详情读取重新判断资格，不自动重放 POST。按钮、正文与轮询共用同一已接纳结果。学生详情可按状态刷新，教师详情仅局部显示申请结果并提示显式刷新，保护人工反馈草稿。request 不返回完整 aiReview；执行仍归后端。BFF 保持既有 PATCH/JSON body 透传。
   - 师生共用 `lib/learning-tasks/ai-review.ts` 的 `toAiReview` 适配及 `SubmissionAiReview` 展示后端用量摘要；页面不重新统计或派生 Token。新增细分及计算字段缺省、null 或非法时统一映射 null，合法 0 保留显示“0”，未知显示“未知”。公开字段、计算值含义和包含关系由 [Submission DTO](./handoff-backend-dto-cheatsheet.md#submission-request--response-family) 维护。
-  - 旧响应兼容：新增用量字段不加入 `submission-ai-operations.ts` 的原始详情必需字段名单；旧版完整详情缺少新字段仍可通过事后显式读取，在不确定 POST 后恢复确认，不因此关闭原恢复路径或自动重放请求。
+  - 受控详情确认：原始 `detail.raw.aiReview.usage` 必须包含 [Submission DTO](./handoff-backend-dto-cheatsheet.md#submission-request--response-family) 规定的全部自有字段；缺键响应不作为完整确认，字段明确为 null 仍表示合法未知信息，不补造用量。
 - 班级周报：`weekly-report/page.tsx` -> `/api/proxy/classrooms/:id/weekly-report`。
   - 对应后端：`GET /api/classrooms/:classroomId/weekly-report`。
   - 页面窗口为 `7d | 30d | all`；解析与请求沿用本节三页报表共性窗口规则。

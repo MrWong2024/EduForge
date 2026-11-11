@@ -274,9 +274,16 @@ const requestable = {
   usage: {
     reservedRequests: 0,
     reportedRequests: 0,
-    promptTokens: null,
-    completionTokens: null,
-    totalTokens: null,
+    unreportedRequests: 0,
+    promptTokens: 0,
+    inputTextTokens: 0,
+    cachedInputTokens: 0,
+    uncachedInputTokens: 0,
+    completionTokens: 0,
+    outputTextTokens: 0,
+    reasoningTokens: 0,
+    answerTokens: 0,
+    totalTokens: 0,
   },
 };
 const makeDetail = (status = "NOT_REQUESTED", canRequest: unknown = true) =>
@@ -359,7 +366,42 @@ test("an uncertain POST can only be recovered by a subsequent explicit successfu
   expect(operations.beginRequest()).not.toBeNull();
 });
 
-test("legacy complete details without new usage fields can confirm an uncertain POST", () => {
+test("each missing current usage field rejects explicit confirmation despite mapper null defaults", () => {
+  for (const field of usageDetailFields) {
+    const usage: Partial<typeof known.usage> = { ...known.usage };
+    delete usage[field];
+    const source = {
+      id: "s",
+      contentRevision: 2,
+      aiFeedbackStatus: "SUCCEEDED",
+      aiReview: { ...known, usage },
+    };
+    const detail = toSubmissionDetailResponse(source);
+    expect(Object.hasOwn(usage, field)).toBe(false);
+    expect(detail.raw).toBe(source);
+    expect(detail.raw).not.toHaveProperty(`aiReview.usage.${field}`);
+    expect(detail.aiReview?.usage[field]).toBeNull();
+
+    const operations = makeOperations();
+    const previousReview = operations.view.review;
+    expect(operations.finishRead(operations.beginRead(true)!, detail)).toBe(
+      false,
+    );
+    expect(operations.view).toMatchObject({
+      status: "NOT_REQUESTED",
+      contentRevision: 0,
+      displayedRevision: 0,
+      needsConfirmation: true,
+      busy: null,
+      canRequest: false,
+    });
+    expect(operations.view.review).toBe(previousReview);
+    expect(operations.beginRequest()).toBeNull();
+    expect(operations.beginRead(false)).toBeNull();
+  }
+});
+
+test("a legacy five-field detail cannot confirm an uncertain POST and a complete explicit read restores eligibility", () => {
   const legacyUsage = {
     reservedRequests: 0,
     reportedRequests: 0,
@@ -380,18 +422,106 @@ test("legacy complete details without new usage fields can confirm an uncertain 
     ...unknownUsageDetails,
   });
   const operations = makeOperations();
+  const previousReview = operations.view.review;
   expect(operations.finishRequest(operations.beginRequest()!)).toBe(false);
   expect(operations.view.needsConfirmation).toBe(true);
   expect(operations.beginRead(false)).toBeNull();
   expect(operations.beginRequest()).toBeNull();
-  expect(operations.finishRead(operations.beginRead(true)!, detail)).toBe(true);
-  expect(operations.view.needsConfirmation).toBe(false);
-  expect(operations.view.review?.usage).toEqual({
-    ...legacyUsage,
-    ...unknownUsageDetails,
+  expect(operations.finishRead(operations.beginRead(true)!, detail)).toBe(false);
+  expect(operations.view).toMatchObject({
+    status: "NOT_REQUESTED",
+    contentRevision: 0,
+    displayedRevision: 0,
+    needsConfirmation: true,
+    busy: null,
+    canRequest: false,
   });
+  expect(operations.view.review).toBe(previousReview);
+  expect(operations.beginRead(false)).toBeNull();
+  expect(operations.beginRequest()).toBeNull();
+
+  expect(
+    operations.finishRead(operations.beginRead(true)!, makeDetail()),
+  ).toBe(true);
+  expect(operations.view.needsConfirmation).toBe(false);
+  expect(operations.view.review?.usage).toEqual(requestable.usage);
   expect(operations.view.canRequest).toBe(true);
   expect(operations.view.busy).toBeNull();
+  expect(operations.beginRequest()?.expectedRevision).toBe(0);
+});
+
+test("an ordinary automatic read also rejects a missing usage field and requires explicit confirmation", () => {
+  const usage: Partial<typeof known.usage> = { ...known.usage };
+  delete usage.inputTextTokens;
+  const detail = toSubmissionDetailResponse({
+    id: "s",
+    contentRevision: 1,
+    aiFeedbackStatus: "SUCCEEDED",
+    aiReview: { ...known, usage },
+  });
+  const operations = makeOperations();
+  const previousReview = operations.view.review;
+  const read = operations.beginRead(false)!;
+  expect(operations.finishRead(read, detail)).toBe(false);
+  expect(operations.view).toMatchObject({
+    status: "NOT_REQUESTED",
+    contentRevision: 0,
+    displayedRevision: 0,
+    needsConfirmation: true,
+    busy: null,
+    canRequest: false,
+  });
+  expect(operations.view.review).toBe(previousReview);
+  expect(operations.beginRead(false)).toBeNull();
+  expect(operations.beginRequest()).toBeNull();
+  expect(
+    operations.finishRead(operations.beginRead(true)!, makeDetail()),
+  ).toBe(true);
+  expect(operations.view.needsConfirmation).toBe(false);
+  expect(operations.view.busy).toBeNull();
+});
+
+test("complete unknown usage can confirm a historical terminal job without enabling a new request", () => {
+  const usage = {
+    reservedRequests: null,
+    reportedRequests: null,
+    unreportedRequests: null,
+    promptTokens: null,
+    inputTextTokens: null,
+    cachedInputTokens: null,
+    uncachedInputTokens: null,
+    completionTokens: null,
+    outputTextTokens: null,
+    reasoningTokens: null,
+    answerTokens: null,
+    totalTokens: null,
+  };
+  const detail = toSubmissionDetailResponse({
+    id: "s",
+    contentRevision: 0,
+    aiFeedbackStatus: "SUCCEEDED",
+    aiReview: {
+      ...known,
+      provider: null,
+      inputCoverage: "UNKNOWN",
+      canRequest: false,
+      usage,
+    },
+  });
+  const operations = makeOperations();
+  expect(operations.finishRead(operations.beginRead(true)!, detail)).toBe(true);
+  expect(operations.view).toMatchObject({
+    status: "SUCCEEDED",
+    needsConfirmation: false,
+    busy: null,
+    canRequest: false,
+  });
+  expect(operations.view.review).toMatchObject({
+    provider: null,
+    inputCoverage: "UNKNOWN",
+    usage,
+  });
+  expect(operations.beginRequest()).toBeNull();
 });
 test("failed, incomplete or non-true confirmation cannot unlock an uncertain request", () => {
   for (const detail of [
@@ -522,6 +652,26 @@ test("AI requests require the displayed work revision and polling cannot silentl
     aiReview: requestable,
   });
   expect(operations.finishRead(operations.beginRead(false)!, newer)).toBe(true);
+  expect(operations.view.status).toBe("NOT_REQUESTED");
+  expect(operations.view.review).toMatchObject({
+    provider: null,
+    inputCoverage: "NOT_SENT",
+    canRequest: true,
+    usage: {
+      reservedRequests: 0,
+      reportedRequests: 0,
+      unreportedRequests: 0,
+      promptTokens: 0,
+      inputTextTokens: 0,
+      cachedInputTokens: 0,
+      uncachedInputTokens: 0,
+      completionTokens: 0,
+      outputTextTokens: 0,
+      reasoningTokens: 0,
+      answerTokens: 0,
+      totalTokens: 0,
+    },
+  });
   expect(operations.view.contentRevision).toBe(1);
   expect(operations.view.displayedRevision).toBe(0);
   expect(operations.beginRequest()).toBeNull();

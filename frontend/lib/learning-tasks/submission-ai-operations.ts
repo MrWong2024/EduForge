@@ -190,8 +190,15 @@ function isCompleteAiDetail(
     [
       "reservedRequests",
       "reportedRequests",
+      "unreportedRequests",
       "promptTokens",
+      "inputTextTokens",
+      "cachedInputTokens",
+      "uncachedInputTokens",
       "completionTokens",
+      "outputTextTokens",
+      "reasoningTokens",
+      "answerTokens",
       "totalTokens",
     ].every((key) => Object.hasOwn(usage, key))
   );
