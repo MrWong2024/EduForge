@@ -223,7 +223,7 @@ my-task-detail 另稳定返回 `participationStatus={readOnly,canSubmit,canReque
 - `sort?: latestAttemptAt | attemptsCount | errorRate | notSubmitted`，默认 latestAttemptAt；`order?: asc | desc`，默认 desc。
 - `includeAttempts? / includeTagDetails?` 用 IsBooleanString，均默认 true；显式传值时仅 `"true"` 启用，`"1"` 虽通过布尔字符串校验但不会启用。
 - 返回 `{classroomId,classroomTaskId,window,generatedAt,page,limit,total,items}`。
-- item：`{studentId,studentName,student,attemptsCount,latestAttemptAt,latestAiFeedbackStatus,trend,attempts}`；`student={id,name,studentNo,email}`，文本可为 null；`studentName` 为兼容字段。无提交学生也有 item，次数 0、latest 时间/AI 状态为 null。
+- item：`{studentId,student,attemptsCount,latestAttemptAt,latestAiFeedbackStatus,trend,attempts}`；`student={id,name,studentNo,email}`，文本可为 null。无提交学生也有 item，次数 0、latest 时间/AI 状态为 null。
 - `trend={errorCountFirst,errorCountLatest,errorDelta,topTagsFirst,topTagsLatest}`；tags 是 `{tag,count}[]`。
 - `attempts[]`：`{submissionId,attemptNo,createdAt,isLate,lateBySeconds,aiFeedbackStatus,feedbackCount,feedbackSummary}`；关闭 includeAttempts 时返回 `[]`。`feedbackCount` 是全来源总量；`feedbackSummary` 复用上文 AI-only family，关闭 tag details 时摘要 tags 为空数组。
 - 不返回 passwordHash 或提交正文。页内排序与反馈聚合见 [Service Card 08E](./handoff-backend-service-map.md#service-card-08efeature-learning-trajectory-z4)。

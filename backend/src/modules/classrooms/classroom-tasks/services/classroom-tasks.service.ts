@@ -222,7 +222,6 @@ type LearningTrajectoryAttempt = {
 };
 type LearningTrajectoryItem = {
   studentId: string;
-  studentName: string | null;
   student: LearningTrajectoryStudentPublic;
   attemptsCount: number;
   latestAttemptAt: string | null;
@@ -1096,7 +1095,6 @@ export class ClassroomTasksService {
       if (studentSubmissions.length === 0) {
         return {
           studentId,
-          studentName: studentPublic.name,
           student: studentPublic,
           attemptsCount: 0,
           latestAttemptAt: null,
@@ -1150,7 +1148,6 @@ export class ClassroomTasksService {
 
       return {
         studentId,
-        studentName: studentPublic.name,
         student: studentPublic,
         attemptsCount: studentSubmissions.length,
         latestAttemptAt: (
