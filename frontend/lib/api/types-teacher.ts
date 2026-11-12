@@ -2129,29 +2129,14 @@ const normalizeStudentStatus = (
 
 const toClassroomStudent = (value: unknown): ClassroomStudent => {
   const record = asRecord(value);
-  const userRecord = asRecord(safeGet(record, "user", undefined));
-  const profileRecord = asRecord(safeGet(record, "profile", undefined));
 
   return {
-    userId:
-      asString(record.userId) ??
-      asString(record.studentId) ??
-      asString(record.id) ??
-      asString(userRecord.id),
-    name:
-      asString(record.name) ??
-      asString(record.studentName) ??
-      asString(userRecord.name),
-    email: asString(record.email) ?? asString(userRecord.email),
-    studentNo:
-      asString(record.studentNo) ??
-      asString(profileRecord.studentNo) ??
-      asString(safeGet(record, "student.number", undefined)),
+    userId: asString(record.id),
+    name: asString(record.name),
+    email: asString(record.email),
+    studentNo: asString(record.studentNo),
     status: normalizeStudentStatus(record.status),
-    enrolledAt:
-      asString(record.enrolledAt) ??
-      asString(record.joinedAt) ??
-      asString(record.createdAt),
+    enrolledAt: asString(record.joinedAt),
     raw: record,
   };
 };
@@ -2159,39 +2144,15 @@ const toClassroomStudent = (value: unknown): ClassroomStudent => {
 export const toClassroomStudentsResponse = (
   payload: unknown,
 ): ClassroomStudentsResponse => {
-  if (Array.isArray(payload)) {
-    return {
-      items: payload.map((item) => toClassroomStudent(item)),
-      total: payload.length,
-      page: 1,
-      limit: payload.length,
-      raw: payload,
-    };
-  }
-
   const record = asRecord(payload);
-  const dataRecord = asRecord(safeGet(record, "data", undefined));
-  const candidateItems =
-    safeGet<unknown>(record, "items", undefined) ??
-    safeGet<unknown>(record, "data.items", undefined) ??
-    safeGet<unknown>(record, "data", undefined);
 
   return {
-    items: asRecordArray(candidateItems).map((item) =>
+    items: asRecordArray(record.items).map((item) =>
       toClassroomStudent(item),
     ),
-    total:
-      asNumber(record.total) ??
-      asNumber(safeGet(record, "pagination.total", undefined)) ??
-      asNumber(dataRecord.total),
-    page:
-      asNumber(record.page) ??
-      asNumber(safeGet(record, "pagination.page", undefined)) ??
-      asNumber(dataRecord.page),
-    limit:
-      asNumber(record.limit) ??
-      asNumber(safeGet(record, "pagination.limit", undefined)) ??
-      asNumber(dataRecord.limit),
+    total: asNumber(record.total),
+    page: asNumber(record.page),
+    limit: asNumber(record.limit),
     raw: payload,
   };
 };

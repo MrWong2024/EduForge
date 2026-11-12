@@ -494,51 +494,198 @@ test("classroom members use formal status when the legacy alias conflicts", () =
   }
 });
 
-test("classroom member response wrappers share strict parsing and retain raw references", () => {
-  const active = Object.freeze({ id: "wrapped-active", status: "ACTIVE" });
-  const removed = Object.freeze({ id: "wrapped-removed", status: "REMOVED" });
-  const invalid = Object.freeze({
-    id: "wrapped-invalid",
-    status: " active ",
-    enrollmentStatus: "ACTIVE",
+test("classroom members use only formal fields when every legacy source conflicts", () => {
+  const member = Object.freeze({
+    id: " formal-member ",
+    userId: "legacy-user-id",
+    studentId: "legacy-student-id",
+    name: " 正式姓名 ",
+    studentName: "旧姓名",
+    email: " formal@example.invalid ",
+    studentNo: " S-101 ",
+    joinedAt: " 2026-11-01T08:00:00.000Z ",
+    enrolledAt: "2020-01-01T00:00:00.000Z",
+    createdAt: "2019-01-01T00:00:00.000Z",
+    user: Object.freeze({
+      id: "legacy-nested-id",
+      name: "嵌套旧姓名",
+      email: "legacy@example.invalid",
+    }),
+    profile: Object.freeze({ studentNo: "S-LEGACY-PROFILE" }),
+    student: Object.freeze({ number: "S-LEGACY-STUDENT" }),
+    status: "ACTIVE",
+    roles: Object.freeze(["student"]),
+    employeeNo: "E-101",
   });
-  const missing = Object.freeze({
-    id: "wrapped-missing",
-    enrollmentStatus: "REMOVED",
+  const payload = Object.freeze({ items: Object.freeze([member]) });
+  const before = structuredClone(payload);
+  const result = toClassroomStudentsResponse(payload);
+
+  expect(result.items).toEqual([
+    {
+      userId: "formal-member",
+      name: "正式姓名",
+      email: "formal@example.invalid",
+      studentNo: "S-101",
+      enrolledAt: "2026-11-01T08:00:00.000Z",
+      status: "ACTIVE",
+      raw: member,
+    },
+  ]);
+  expect(result.items[0]).not.toHaveProperty("roles");
+  expect(result.items[0]).not.toHaveProperty("employeeNo");
+  expect(result.raw).toBe(payload);
+  expect(result.items[0].raw).toBe(member);
+  expect(result.items[0].raw.user).toBe(member.user);
+  expect(result.items[0].raw.userId).toBe("legacy-user-id");
+  expect(result.items[0].raw.enrolledAt).toBe("2020-01-01T00:00:00.000Z");
+  expect(payload).toStrictEqual(before);
+});
+
+test("classroom members retain ACTIVE rows without filling invalid formal fields from aliases", () => {
+  const aliases = Object.freeze({
+    userId: "legacy-user-id",
+    studentId: "legacy-student-id",
+    studentName: "旧姓名",
+    user: Object.freeze({
+      id: "legacy-nested-id",
+      name: "嵌套旧姓名",
+      email: "legacy@example.invalid",
+    }),
+    profile: Object.freeze({ studentNo: "S-LEGACY-PROFILE" }),
+    student: Object.freeze({ number: "S-LEGACY-STUDENT" }),
+    enrolledAt: "2020-01-01T00:00:00.000Z",
+    createdAt: "2019-01-01T00:00:00.000Z",
   });
-  for (const { payload, member, expectedStatus } of [
-    {
-      payload: Object.freeze([active]),
-      member: active,
-      expectedStatus: "ACTIVE",
-    },
-    {
-      payload: Object.freeze({ items: Object.freeze([removed]) }),
-      member: removed,
-      expectedStatus: "REMOVED",
-    },
-    {
-      payload: Object.freeze({
-        data: Object.freeze({ items: Object.freeze([invalid]) }),
+  const missing = Object.freeze({ ...aliases, status: "ACTIVE" });
+  for (const field of ["id", "name", "email", "studentNo", "joinedAt"]) {
+    expect(Object.hasOwn(missing, field)).toBe(false);
+  }
+  for (const member of [
+    missing,
+    Object.freeze({
+      ...aliases,
+      id: null,
+      name: null,
+      email: null,
+      studentNo: null,
+      joinedAt: null,
+      status: "ACTIVE",
+    }),
+    Object.freeze({
+      ...aliases,
+      id: Object.freeze({ id: "invalid-id" }),
+      name: false,
+      email: 101,
+      studentNo: Object.freeze(["S-INVALID"]),
+      joinedAt: " \t ",
+      status: "ACTIVE",
+    }),
+  ]) {
+    const payload = Object.freeze({ items: Object.freeze([member]) });
+    const before = structuredClone(payload);
+    const result = toClassroomStudentsResponse(payload);
+
+    expect(result.items).toEqual([
+      {
+        userId: undefined,
+        name: undefined,
+        email: undefined,
+        studentNo: undefined,
+        enrolledAt: undefined,
+        status: "ACTIVE",
+        raw: member,
+      },
+    ]);
+    expect(result.raw).toBe(payload);
+    expect(result.items[0].raw).toBe(member);
+    expect(result.items[0].raw.userId).toBe("legacy-user-id");
+    expect(result.items[0].raw.enrolledAt).toBe("2020-01-01T00:00:00.000Z");
+    expect(payload).toStrictEqual(before);
+  }
+});
+
+test("classroom member legacy wrappers no longer project members or infer pagination", () => {
+  const member = Object.freeze({ id: "legacy-wrapped", status: "ACTIVE" });
+  const items = Object.freeze([member]);
+  for (const payload of [
+    items,
+    Object.freeze({
+      data: Object.freeze({ items, total: 23, page: 3, limit: 10 }),
+    }),
+    Object.freeze({ data: items }),
+  ]) {
+    const before = structuredClone(payload);
+    const result = toClassroomStudentsResponse(payload);
+
+    expect(result.items).toEqual([]);
+    expect(result.total).toBeUndefined();
+    expect(result.page).toBeUndefined();
+    expect(result.limit).toBeUndefined();
+    expect(result.raw).toBe(payload);
+    expect(payload).toStrictEqual(before);
+  }
+});
+
+test("classroom member top-level items and pagination override conflicting legacy structures", () => {
+  const member = Object.freeze({ id: "formal-top-level", status: "REMOVED" });
+  const legacy = Object.freeze({ id: "legacy-nested", status: "ACTIVE" });
+  for (const { items, expectedUserIds } of [
+    { items: Object.freeze([member]), expectedUserIds: ["formal-top-level"] },
+    { items: Object.freeze([]), expectedUserIds: [] },
+  ]) {
+    const payload = Object.freeze({
+      items,
+      total: 41,
+      page: 2,
+      limit: 100,
+      data: Object.freeze({
+        items: Object.freeze([legacy]),
+        total: 903,
+        page: 9,
+        limit: 3,
       }),
-      member: invalid,
-      expectedStatus: undefined,
-    },
-    {
-      payload: Object.freeze({ data: Object.freeze([missing]) }),
-      member: missing,
-      expectedStatus: undefined,
-    },
-  ] as const) {
+      pagination: Object.freeze({ total: 707, page: 7, limit: 7 }),
+    });
+    const before = structuredClone(payload);
+    const result = toClassroomStudentsResponse(payload);
+
+    expect(result.items.map((item) => item.userId)).toEqual(expectedUserIds);
+    expect(result.total).toBe(41);
+    expect(result.page).toBe(2);
+    expect(result.limit).toBe(100);
+    if (items.length > 0) {
+      expect(result.items[0].status).toBe("REMOVED");
+      expect(result.items[0].raw).toBe(member);
+    }
+    expect(result.raw).toBe(payload);
+    expect(payload).toStrictEqual(before);
+  }
+});
+
+test("classroom member missing or invalid top-level pagination never uses legacy values", () => {
+  const member = Object.freeze({ id: "formal-no-pagination", status: "ACTIVE" });
+  for (const fields of [
+    Object.freeze({}),
+    Object.freeze({ total: null, page: "2", limit: Number.NaN }),
+  ]) {
+    const payload = Object.freeze({
+      items: Object.freeze([member]),
+      ...fields,
+      data: Object.freeze({ total: 903, page: 9, limit: 3 }),
+      pagination: Object.freeze({ total: 707, page: 7, limit: 7 }),
+    });
     const before = structuredClone(payload);
     const result = toClassroomStudentsResponse(payload);
 
     expect(result.items).toHaveLength(1);
-    expect(result.items[0].userId).toBe(member.id);
-    expect(result.items[0].status).toBe(expectedStatus);
+    expect(result.items[0].userId).toBe("formal-no-pagination");
+    expect(result.total).toBeUndefined();
+    expect(result.page).toBeUndefined();
+    expect(result.limit).toBeUndefined();
     expect(result.raw).toBe(payload);
     expect(result.items[0].raw).toBe(member);
-    expect(payload).toEqual(before);
+    expect(payload).toStrictEqual(before);
   }
 });
 

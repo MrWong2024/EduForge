@@ -78,7 +78,9 @@
 - 班级成员：`members/page.tsx`、`RemoveStudentButton` -> `/api/proxy/classrooms/:id/students*`。
   - 对应后端：`GET /api/classrooms/:id/students`、`POST /api/classrooms/:id/students/:uid/remove`。
   - 注意：成员列表使用正式后端读源，禁止回退到 `studentIds`。
-  - 状态适配：`ClassroomStudent.status` 为可选的 `"ACTIVE" | "REMOVED"`，仅保留 `record.status` 原值精确匹配的两态；不 trim、转换大小写或强制转换类型。缺失及其他非法值均为 `undefined`，不读取旧别名 `enrollmentStatus`，不再默认 `ACTIVE`，未知状态不推定为在班成员；保留成员信息、输入内容及 `raw` 原对象引用。
+  - 响应适配：只消费正式顶层 `items/total/page/limit`，公开字段合同见 [Backend DTO：Classrooms](./handoff-backend-dto-cheatsheet.md#classrooms)。裸数组、`data.items`、`data` 数组及 `data` 内或 `pagination.*` 的分页不再参与适配；顶层空 `items` 不被旧包装替换，正式分页缺失或非法时保持 `undefined`，只有旧包装时降级为空列表且分页均为 `undefined`。
+  - 字段适配：`id → userId`、`joinedAt → enrolledAt` 是前端命名转换；`name/email/studentNo` 只读成员顶层同名字段，旧 ID、资料、时间别名及嵌套来源不再补足缺失或非法的正式字段。不因成员缺字段过滤整行，不改写输入；根 `raw` 保持原 payload 引用，对象成员的 `raw` 保持原对象引用，旧键可保留于 `raw` 但不参与投影。
+  - 状态适配：`ClassroomStudent.status` 为可选的 `"ACTIVE" | "REMOVED"`，仅保留 `record.status` 原值精确匹配的两态；不 trim、转换大小写或强制转换类型。缺失及其他非法值均为 `undefined`，不读取旧别名 `enrollmentStatus`，不再默认 `ACTIVE`，未知状态不推定为在班成员。
 
 ### 3.3 Teacher 任务 / 提交 / 反馈
 
