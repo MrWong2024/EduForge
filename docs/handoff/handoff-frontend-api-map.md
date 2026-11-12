@@ -53,6 +53,8 @@
 - 当前用户：`lib/auth/session.ts` -> `client.fetchJson("users/me")` -> `/api/proxy/users/me` -> `GET /api/users/me`。
   - 调用方：`app/teacher/layout.tsx`、`app/student/layout.tsx`、教师提交详情页。
   - 注意：Teacher / Student role gate 的登录态锚点。
+  - 角色消费：资格、首页选择与账户标签只读取 `roles` 数组，公开数据见 [Backend DTO Auth](./handoff-backend-dto-cheatsheet.md#auth-public-responses) / [Users](./handoff-backend-dto-cheatsheet.md#users)。内部 `TEACHER/STUDENT` 分别对应 API 原值精确为 `teacher/student` 的元素；旧单值 `role` 不再参与，不通过 `String`、trim 或大小写转换修正角色元素。
+  - 首页与标签：双教学角色仍教师优先；admin-only、user-only 或无教学角色仍无教学端首页资格，沿用既有展示降级。正式小写角色按原值映射账户标签，未知非空字符串只按原文展示，不授予资格；纯空白和非字符串不生成标签。前端入口判断不替代后端授权。
 - 当前用户改密：`ChangePasswordForm` -> `/api/proxy/users/me/change-password` -> `POST /api/users/me/change-password`。
   - 注意：会话失效策略由后端处理，前端不自行清理其它 session。
 

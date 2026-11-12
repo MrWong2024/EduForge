@@ -2,32 +2,24 @@ export type AccountUser = {
   id?: string;
   name?: string | null;
   email?: string | null;
-  role?: string | null;
   roles?: string[] | null;
   status?: string | null;
   studentNo?: string | null;
   employeeNo?: string | null;
 };
 
-const normalizeRole = (role: string | null | undefined): string =>
-  String(role ?? "").trim().toUpperCase();
-
-const ROLE_LABELS: Record<string, string> = {
-  TEACHER: "教师",
-  STUDENT: "学生",
-  ADMIN: "管理员",
-  USER: "用户",
-};
+const ROLE_LABELS = new Map<string, string>([
+  ["teacher", "教师"],
+  ["student", "学生"],
+  ["admin", "管理员"],
+  ["user", "用户"],
+]);
 
 export const getRoleLabels = (user: AccountUser): string[] => {
-  const fromRoles = Array.isArray(user.roles) ? user.roles : [];
-  const fromSingleRole = user.role ? [user.role] : [];
-  const normalized = [...fromRoles, ...fromSingleRole]
-    .map((role) => normalizeRole(role))
-    .filter((role) => role.length > 0);
-
-  const unique = [...new Set(normalized)];
-  return unique.map((role) => ROLE_LABELS[role] ?? role);
+  const roles = Array.isArray(user.roles)
+    ? user.roles.filter((role) => typeof role === "string" && role.trim().length > 0)
+    : [];
+  return Array.from(new Set(roles), (role) => ROLE_LABELS.get(role) ?? role);
 };
 
 export const getPrimaryAccountName = (user: AccountUser): string => {
