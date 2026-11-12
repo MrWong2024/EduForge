@@ -186,20 +186,13 @@ const toCompactText = (value: string, maxLength = 120): { text: string; title?: 
 
 const toProcessAssessmentTableRows = (items: UnknownRecord[]): ProcessAssessmentTableRow[] =>
   items.map((item, index) => {
-    const studentName = toDisplayText(
-      safeGet(item, "studentName", undefined) ?? safeGet(item, "name", undefined),
-      ""
-    ).trim();
+    const studentName = toDisplayText(safeGet(item, "studentName", undefined), "").trim();
     const studentNo = toDisplayText(safeGet(item, "studentNo", undefined), "").trim();
     const studentId = toDisplayText(safeGet(item, "studentId", undefined), "").trim();
     const studentDisplayName = studentName || "未知学生";
     const studentSecondaryText = studentNo ? `学号：${studentNo}` : "";
 
-    const submittedTasksRate = toFiniteNumber(safeGet(item, "submittedTasksRate", undefined));
-    const progressFallbackRate = toFiniteNumber(
-      safeGet(item, "completionRate", undefined) ?? safeGet(item, "progress", undefined)
-    );
-    const progressRate = submittedTasksRate ?? progressFallbackRate;
+    const progressRate = toFiniteNumber(safeGet(item, "submittedTasksRate", undefined));
     const submittedTasksCount = toFiniteNumber(safeGet(item, "submittedTasksCount", undefined));
     const publishedTasksCount = toFiniteNumber(safeGet(item, "publishedTasksCount", undefined));
     const progressSecondaryText =
@@ -208,14 +201,8 @@ const toProcessAssessmentTableRows = (items: UnknownRecord[]): ProcessAssessment
         : "—";
     const scoreValue = toFiniteNumber(safeGet(item, "score", undefined));
 
-    const risk = toRiskLabel(safeGet(item, "riskLevel", undefined) ?? safeGet(item, "risk", undefined));
-    const comment = toDisplayText(
-      safeGet(item, "comment", undefined) ?? safeGet(item, "note", undefined),
-      ""
-    ).trim();
-    const tagSummary = toTopTagsSummary(safeGet(item, "topTags", undefined));
-    const issueSummaryRaw = comment || tagSummary || "";
-    const issueSummary = toCompactText(issueSummaryRaw);
+    const risk = toRiskLabel(safeGet(item, "riskLevel", undefined));
+    const issueSummary = toCompactText(toTopTagsSummary(safeGet(item, "topTags", undefined)));
 
     const aiRequestedCount = toFiniteNumber(safeGet(item, "aiRequestedCount", undefined)) ?? 0;
     const aiSucceededCount = toFiniteNumber(safeGet(item, "aiSucceededCount", undefined)) ?? 0;
@@ -233,7 +220,7 @@ const toProcessAssessmentTableRows = (items: UnknownRecord[]): ProcessAssessment
     const aiTaskCoverageSecondaryText = `成功任务 ${aiSucceededTasksCount}；总请求 ${aiRequestedCount} / 成功 ${aiSucceededCount}`;
 
     return {
-      key: String(studentId || safeGet(item, "id", undefined) || index),
+      key: String(studentId || index),
       studentDisplayName,
       studentSecondaryText,
       progressDisplay: toPercentText(progressRate),

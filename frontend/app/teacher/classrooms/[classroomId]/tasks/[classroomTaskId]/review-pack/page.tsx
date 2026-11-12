@@ -7,7 +7,7 @@ import { fetchJson, FetchJsonError } from "@/lib/api/client";
 import { buildErrorDescription, extractRawDetail } from "@/lib/api/error-presenter";
 import { toReviewPackResponse } from "@/lib/api/types-teacher";
 import { paths } from "@/lib/routes/paths";
-import { getAiStatusLabel, getCommonErrorSummary } from "@/lib/ui/status";
+import { getCommonErrorSummary } from "@/lib/ui/status";
 import { getFeedbackTagLabel } from "@/lib/ui/feedback-tags";
 import {
   getFeedbackSeverityLabel,
@@ -143,16 +143,6 @@ const toOptionalText = (value: unknown): string | undefined => {
   return text ? text : undefined;
 };
 
-const pickText = (source: unknown, paths: readonly string[]): string | undefined => {
-  for (const path of paths) {
-    const text = toOptionalText(safeGet(source, path, undefined));
-    if (text) {
-      return text;
-    }
-  }
-  return undefined;
-};
-
 const pickNumber = (source: unknown, paths: readonly string[]): number | undefined => {
   const candidateValues: unknown[] = paths.map((path) => safeGet<unknown>(source, path, undefined));
 
@@ -222,12 +212,12 @@ const toPercentText = (value: number | undefined): string => {
 
 const toIssueDistributionItems = (
   source: unknown[],
-  labelPaths: readonly string[]
+  labelKey: "tag" | "type" | "severity"
 ): IssueDistributionItem[] =>
   source
     .map((item, index) => {
-      const label = pickText(item, labelPaths) ?? `未命名项 ${index + 1}`;
-      const count = pickNumber(item, ["count", "total", "value"]);
+      const label = toOptionalText(safeGet(item, labelKey, undefined)) ?? `未命名项 ${index + 1}`;
+      const count = pickNumber(item, ["count"]);
       return {
         key: `${label}-${index}`,
         label,
@@ -275,7 +265,6 @@ type StudentTierCardView = {
     studentNo?: string;
     attemptsCount?: number;
     latestErrorCount?: number;
-    latestAiStatus?: string;
   }>;
 };
 
@@ -299,7 +288,6 @@ const toStudentTierCard = (
       studentNo,
       attemptsCount: typeof item.attemptsCount === "number" ? item.attemptsCount : undefined,
       latestErrorCount: typeof item.latestErrorCount === "number" ? item.latestErrorCount : undefined,
-      latestAiStatus: toOptionalText(item.latestAiFeedbackStatus),
     };
   });
 
@@ -327,9 +315,6 @@ const renderStudentTierRow = (
         {typeof student.latestErrorCount === "number" ? student.latestErrorCount : "—"}
       </p>
     ) : null}
-    {tierKey !== "notSubmitted" && student.latestAiStatus ? (
-      <p className="text-zinc-500">AI：{getAiStatusLabel(student.latestAiStatus)}</p>
-    ) : null}
   </li>
 );
 
@@ -338,35 +323,26 @@ const buildOverviewMetricCards = (
   window: ReviewWindow,
   examplesCount: number
 ): OverviewMetricCard[] => {
-  const studentsCount = pickNumber(overview, ["studentsCount", "studentCount", "totalStudents"]);
-  const submittedStudentsCount = pickNumber(overview, [
-    "submittedStudentsCount",
-    "submittedCount",
-    "submissionsCount",
-  ]);
-  const submissionRateRaw = pickNumber(overview, ["submissionRate", "submitRate"]);
-  const submissionRateComputed =
-    submissionRateRaw ??
-    (typeof studentsCount === "number" && studentsCount > 0 && typeof submittedStudentsCount === "number"
-      ? submittedStudentsCount / studentsCount
-      : undefined);
+  const studentsCount = pickNumber(overview, ["studentsCount"]);
+  const submittedStudentsCount = pickNumber(overview, ["submittedStudentsCount"]);
+  const submissionRate = pickNumber(overview, ["submissionRate"]);
 
   const ai = safeGet<unknown>(overview, "ai", {});
-  const aiJobsTotal = pickNumber(ai, ["jobsTotal", "totalJobs", "jobs"]);
-  const aiSuccessRateRaw = pickNumber(ai, ["successRate", "aiSuccessRate"]);
+  const aiJobsTotal = pickNumber(ai, ["jobsTotal"]);
+  const aiSuccessRateRaw = pickNumber(ai, ["successRate"]);
   const aiSuccessPercent = toPercentNumber(aiSuccessRateRaw);
   const aiSucceededEstimate =
     typeof aiSuccessPercent === "number" && typeof aiJobsTotal === "number"
       ? Math.round((aiSuccessPercent / 100) * aiJobsTotal)
       : undefined;
 
-  const lateSubmissionsCount = pickNumber(overview, ["lateSubmissionsCount", "lateCount"]);
-  const lateStudentsCount = pickNumber(overview, ["lateStudentsCount", "lateStudentCount"]);
+  const lateSubmissionsCount = pickNumber(overview, ["lateSubmissionsCount"]);
+  const lateStudentsCount = pickNumber(overview, ["lateStudentsCount"]);
 
   const attemptZero = pickNumber(overview, ["attemptsDistribution.0"]);
   const attemptOne = pickNumber(overview, ["attemptsDistribution.1"]);
   const attemptTwo = pickNumber(overview, ["attemptsDistribution.2"]);
-  const attemptThreePlus = pickNumber(overview, ["attemptsDistribution.3plus", "attemptsDistribution.3+"]);
+  const attemptThreePlus = pickNumber(overview, ["attemptsDistribution.3plus"]);
   const attemptDistributionItems: AttemptDistributionItem[] = [
     { key: "0", label: "0次", count: attemptZero },
     { key: "1", label: "1次", count: attemptOne },
@@ -381,8 +357,8 @@ const buildOverviewMetricCards = (
       title: "提交覆盖",
       value: `${typeof submittedStudentsCount === "number" ? submittedStudentsCount : "—"} / ${typeof studentsCount === "number" ? studentsCount : "—"}`,
       detail:
-        typeof submissionRateComputed === "number"
-          ? `提交率 ${toPercentText(submissionRateComputed)}（${WINDOW_LABELS[window]}）`
+        typeof submissionRate === "number"
+          ? `提交率 ${toPercentText(submissionRate)}（${WINDOW_LABELS[window]}）`
           : `提交率 —（${WINDOW_LABELS[window]}）`,
     },
     {
@@ -422,24 +398,15 @@ const buildSummaryHighlights = (
   examplesCount: number,
   studentTierCards: StudentTierCardView[]
 ): string[] => {
-  const studentsCount = pickNumber(overview, ["studentsCount", "studentCount", "totalStudents"]);
-  const submittedStudentsCount = pickNumber(overview, [
-    "submittedStudentsCount",
-    "submittedCount",
-    "submissionsCount",
-  ]);
-  const submissionRateRaw = pickNumber(overview, ["submissionRate", "submitRate"]);
-  const submissionRateComputed =
-    submissionRateRaw ??
-    (typeof studentsCount === "number" && studentsCount > 0 && typeof submittedStudentsCount === "number"
-      ? submittedStudentsCount / studentsCount
-      : undefined);
-  const attemptThreePlus = pickNumber(overview, ["attemptsDistribution.3plus", "attemptsDistribution.3+"]);
+  const studentsCount = pickNumber(overview, ["studentsCount"]);
+  const submittedStudentsCount = pickNumber(overview, ["submittedStudentsCount"]);
+  const submissionRate = pickNumber(overview, ["submissionRate"]);
+  const attemptThreePlus = pickNumber(overview, ["attemptsDistribution.3plus"]);
   const attemptTwo = pickNumber(overview, ["attemptsDistribution.2"]);
 
   const coverageBase =
     typeof studentsCount === "number" && typeof submittedStudentsCount === "number"
-      ? `当前窗口（${WINDOW_LABELS[window]}）提交覆盖 ${submittedStudentsCount}/${studentsCount}（提交率 ${toPercentText(submissionRateComputed)}）。`
+      ? `当前窗口（${WINDOW_LABELS[window]}）提交覆盖 ${submittedStudentsCount}/${studentsCount}（提交率 ${toPercentText(submissionRate)}）。`
       : `当前窗口（${WINDOW_LABELS[window]}）提交覆盖数据暂不完整。`;
 
   const coverageIteration =
@@ -531,9 +498,9 @@ export default async function ReviewPackPage({ params, searchParams }: ReviewPac
   const topTags = safeGet<unknown[]>(viewModel.data.commonIssues, "topTags", []);
   const topTypes = safeGet<unknown[]>(viewModel.data.commonIssues, "topTypes", []);
   const topSeverities = safeGet<unknown[]>(viewModel.data.commonIssues, "topSeverities", []);
-  const topTagItems = toIssueDistributionItems(topTags, ["tag", "name", "label", "value"]);
-  const topTypeItems = toIssueDistributionItems(topTypes, ["type", "name", "label", "value"]);
-  const topSeverityItems = toIssueDistributionItems(topSeverities, ["severity", "level", "name", "value"]);
+  const topTagItems = toIssueDistributionItems(topTags, "tag");
+  const topTypeItems = toIssueDistributionItems(topTypes, "type");
+  const topSeverityItems = toIssueDistributionItems(topSeverities, "severity");
   const exampleCards = toExampleCards(viewModel.data.examples);
   const studentTierCards = buildStudentTierCards(viewModel.data.studentTiers);
   const hasStudentTierData = studentTierCards.some((card) => card.students.length > 0);

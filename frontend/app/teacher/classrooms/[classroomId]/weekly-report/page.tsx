@@ -13,7 +13,6 @@ import {
   buildQueryString,
   getSingleSearchParam,
   parseEnum,
-  safeGet,
   toDisplayDate,
   toDisplayText,
 } from "@/lib/ui/format";
@@ -91,18 +90,6 @@ const toPercentText = (value: unknown): string => {
   return Number.isInteger(rounded) ? `${rounded}%` : `${rounded.toFixed(1)}%`;
 };
 
-const pickValue = (sources: UnknownRecord[], paths: string[]): unknown => {
-  for (const source of sources) {
-    for (const path of paths) {
-      const value = safeGet(source, path, undefined);
-      if (hasMeaningfulValue(value)) {
-        return value;
-      }
-    }
-  }
-  return undefined;
-};
-
 const formatMetricValue = (value: unknown, kind: MetricKind): string => {
   if (!hasMeaningfulValue(value)) {
     return "—";
@@ -134,66 +121,54 @@ const toTopListText = (
     .join("、");
 };
 
-const toSummaryCards = (sources: UnknownRecord[]): WeeklyMetricCard[] => {
+const toSummaryCards = (data: ReturnType<typeof toWeeklyReportResponse>): WeeklyMetricCard[] => {
   const definitions: Array<{
     key: string;
     label: string;
     kind: MetricKind;
-    paths: string[];
+    value: unknown;
   }> = [
     {
       key: "studentsCount",
       label: "学生总数",
       kind: "number",
-      paths: ["studentsCount", "summary.studentsCount", "progress.studentsCount"],
+      value: data.progress.studentsCount,
     },
     {
       key: "publishedClassroomTasks",
       label: "已发布任务数",
       kind: "number",
-      paths: [
-        "publishedClassroomTasks",
-        "summary.publishedClassroomTasks",
-        "progress.publishedClassroomTasks",
-      ],
+      value: data.progress.publishedClassroomTasks,
     },
     {
       key: "distinctStudentsSubmitted",
       label: "有提交学生数",
       kind: "number",
-      paths: [
-        "distinctStudentsSubmitted",
-        "summary.distinctStudentsSubmitted",
-        "progress.distinctStudentsSubmitted",
-      ],
+      value: data.progress.distinctStudentsSubmitted,
     },
     {
       key: "submissionRate",
       label: "提交率",
       kind: "percent",
-      paths: ["submissionRate", "summary.submissionRate", "progress.submissionRate"],
+      value: data.progress.submissionRate,
     },
     {
       key: "aiSuccessRate",
       label: "AI 成功率",
       kind: "percent",
-      paths: ["aiSuccessRate", "summary.aiSuccessRate", "aiHealth.successRate"],
+      value: data.aiHealth.successRate,
     },
     {
       key: "notSubmittedStudentsCount",
       label: "未提交学生数",
       kind: "number",
-      paths: [
-        "notSubmittedStudentsCount",
-        "summary.notSubmittedStudentsCount",
-        "atRisk.notSubmittedStudentsCount",
-      ],
+      value: data.atRisk.notSubmittedStudentsCount,
     },
   ];
 
   return definitions
     .map((definition) => {
-      const value = pickValue(sources, definition.paths);
+      const value = definition.value;
       if (!hasMeaningfulValue(value)) {
         return null;
       }
@@ -207,43 +182,31 @@ const toSummaryCards = (sources: UnknownRecord[]): WeeklyMetricCard[] => {
 };
 
 const toOverviewGroups = (
-  sources: UnknownRecord[],
-  rawRecord: UnknownRecord
+  data: ReturnType<typeof toWeeklyReportResponse>
 ): WeeklyOverviewGroup[] => {
-  const topTags = asRecordArray(safeGet(rawRecord, "topTags", undefined));
-  const aiErrors = asRecordArray(safeGet(rawRecord, "aiHealth.errors", undefined));
+  const topTags = data.topTags;
+  const aiErrors = asRecordArray(data.aiHealth.errors);
+  const jobs = asRecord(data.aiHealth.jobs);
 
   const progressGroupRows = [
     {
       label: "已截止任务数",
       value: formatMetricValue(
-        pickValue(sources, [
-          "dueClassroomTasks",
-          "summary.dueClassroomTasks",
-          "progress.dueClassroomTasks",
-        ]),
+        data.progress.dueClassroomTasks,
         "number"
       ),
     },
     {
       label: "迟交次数",
       value: formatMetricValue(
-        pickValue(sources, [
-          "lateSubmissionsCount",
-          "summary.lateSubmissionsCount",
-          "progress.lateSubmissionsCount",
-        ]),
+        data.progress.lateSubmissionsCount,
         "number"
       ),
     },
     {
       label: "迟交学生数",
       value: formatMetricValue(
-        pickValue(sources, [
-          "lateStudentsCount",
-          "summary.lateStudentsCount",
-          "progress.lateStudentsCount",
-        ]),
+        data.progress.lateStudentsCount,
         "number"
       ),
     },
@@ -253,48 +216,48 @@ const toOverviewGroups = (
     {
       label: "AI 任务总数",
       value: formatMetricValue(
-        pickValue(sources, ["aiHealth.jobs.total", "jobs.total", "total"]),
+        jobs.total,
         "number"
       ),
     },
     {
       label: "成功 / 失败",
       value: `${formatMetricValue(
-        pickValue(sources, ["aiHealth.jobs.succeeded", "jobs.succeeded", "succeeded"]),
+        jobs.succeeded,
         "number"
       )} / ${formatMetricValue(
-        pickValue(sources, ["aiHealth.jobs.failed", "jobs.failed", "failed"]),
+        jobs.failed,
         "number"
       )}`,
     },
     {
       label: "排队中 / 处理中",
       value: `${formatMetricValue(
-        pickValue(sources, ["aiHealth.jobs.pending", "jobs.pending", "pending"]),
+        jobs.pending,
         "number"
       )} / ${formatMetricValue(
-        pickValue(sources, ["aiHealth.jobs.running", "jobs.running", "running"]),
+        jobs.running,
         "number"
       )}`,
     },
     {
       label: "终止任务数",
       value: formatMetricValue(
-        pickValue(sources, ["aiHealth.jobs.dead", "jobs.dead", "dead"]),
+        jobs.dead,
         "number"
       ),
     },
     {
       label: "限流占比",
       value: formatMetricValue(
-        pickValue(sources, ["aiHealth.rateLimitRatio", "rateLimitRatio"]),
+        data.aiHealth.rateLimitRatio,
         "percent"
       ),
     },
     {
       label: "超时占比",
       value: formatMetricValue(
-        pickValue(sources, ["aiHealth.timeoutRatio", "timeoutRatio"]),
+        data.aiHealth.timeoutRatio,
         "percent"
       ),
     },
@@ -408,16 +371,10 @@ export default async function WeeklyReportPage({ params, searchParams }: WeeklyR
     );
   }
 
-  const rawRecord = asRecord(viewModel.data.raw);
-  const classroomName = toClassroomSummary(rawRecord.classroom).name;
-  const sources: UnknownRecord[] = [
-    asRecord(viewModel.data.summary),
-    asRecord(viewModel.data.overview),
-    rawRecord,
-  ];
-  const summaryCards = toSummaryCards(sources);
-  const overviewGroups = toOverviewGroups(sources, rawRecord);
-  const generatedAtText = toDisplayDate(safeGet(rawRecord, "generatedAt", undefined));
+  const classroomName = toClassroomSummary(viewModel.data.classroom).name;
+  const summaryCards = toSummaryCards(viewModel.data);
+  const overviewGroups = toOverviewGroups(viewModel.data);
+  const generatedAtText = toDisplayDate(viewModel.data.generatedAt);
   const hasData = summaryCards.length > 0 || overviewGroups.length > 0;
 
   return (

@@ -162,13 +162,14 @@
 - 班级周报：`weekly-report/page.tsx` -> `/api/proxy/classrooms/:id/weekly-report`。
   - 对应后端：`GET /api/classrooms/:classroomId/weekly-report`。
   - 页面窗口为 `7d | 30d | all`；解析与请求沿用本节三页报表共性窗口规则。
-  - 注意：窗口与公开数据见 [Backend DTO](./handoff-backend-dto-cheatsheet.md#weekly-report)，前端消费后端聚合结果；页头名称通过 `toClassroomSummary` 复用现有 `data.raw.classroom`，不新增请求，缺失时显示明确占位。
+  - 注意：窗口与公开数据见 [Backend DTO](./handoff-backend-dto-cheatsheet.md#weekly-report)。前端只消费顶层 `classroom/progress/atRisk/aiHealth/topTags` 及 `window/generatedAt`；旧 `summary/overview/data`、扁平指标和替代 jobs 路径不再参与选值，也不再投影无用的顶层 `classroomId/items`。页头通过 `toClassroomSummary` 读取正式 `classroom` 投影，不新增请求；正式来源缺失沿用占位与空态，真实 0 和现有格式保持，raw 仍引用原根对象。
 - 课程总览：`courses/:courseId/overview/page.tsx` -> `/api/proxy/courses/:courseId/overview`。
   - 对应后端：`GET /api/courses/:courseId/overview`。
   - 页面窗口为 `all | 7d`；解析与请求沿用本节三页报表共性窗口规则，后端数据合同见 [Backend DTO](./handoff-backend-dto-cheatsheet.md#课程总览)。
 - 学习轨迹 / 课堂复盘 / AI 指标：三件套 Server pages -> `/api/proxy/classrooms/:cid/tasks/:ctid/{learning-trajectory,review-pack,ai-metrics}`。
   - 对应后端：三个课堂任务聚合接口。
   - 课堂复盘窗口为 `all | 7d`；解析与请求沿用本节三页报表共性窗口规则，后端数据合同见 [Backend DTO](./handoff-backend-dto-cheatsheet.md#review-pack)。
+  - 课堂复盘只从正式 `overview/commonIssues` 读取概览、摘要与问题分布，不再用旧指标别名或按人数补算缺失率；分布只取正式 `tag/type/severity/count`。分层学生的 ID/姓名仅消费 `studentId/studentName`，不以旧别名补足，也不再投影或展示后端未返回的 ReviewPack 专用 `latestAiFeedbackStatus`；未知姓名、学号 null、真实 0、原格式和 raw 引用保持。样例的正式 `tags/matchedTags`、合并去重和提交链接继续保留。
   - 学习轨迹姓名只消费 `student.name`，不再映射或读取旧姓名别名；缺姓名时仍依次按学号、邮箱、`未知学生` 降级展示。后端字段结构及 nullable 合同见 [Backend DTO](./handoff-backend-dto-cheatsheet.md#learning-trajectory)。
   - 学习轨迹 window 仅接受精确的 `all | 7d`，默认 `all`；省略、空值、`24h`、`30d`、`term`、大小写或空白变体及其他未知值统一沿用 `parseEnum` 回落为 `all`，不 trim 或转换大小写。重复 window 沿用 `getSingleSearchParam` 取首值，请求使用同一规范化 window。
 - 过程性评价 JSON：`process-assessment/page.tsx` -> `/api/proxy/classrooms/:id/process-assessment`。
@@ -176,6 +177,7 @@
   - 页头名称辅助读取一次 `GET classrooms/:classroomId`，与现有加载并行，经 `toClassroomDetailResponse` 取名；独立有限超时及失败占位，不改变统计主体错误处理。
   - window 适配：前端仅接受精确的 `7d | 30d | all`；省略、空值、`term`、`24h`、大小写或空白变体及其他未知值统一沿用 `parseEnum` 回落为 `all`，不设 term 特判、不 trim 或转换大小写。重复 window 沿用 `getSingleSearchParam` 取首值；JSON 与 CSV 共用同一解析后的 window。
   - 注意：`excludedTaskIds` 仅适配为 URL 查询条件；直接消费后端任务维度指标（`iteratedTasksCount/aiRequestedTasksCount/aiSucceededTasksCount/avgWarnItems`），不重算评分。
+  - 响应与行适配见 [Backend DTO Process Assessment](./handoff-backend-dto-cheatsheet.md#process-assessment)：列表及分页只取顶层 `items/page/limit/total`，不再读取 `rows/data/pagination`，空 `items` 不救援、缺失或非法分页保持 `undefined`。表格的行标识、姓名、进度率、风险与问题摘要分别只取正式 `studentId/studentName/submittedTasksRate/riskLevel/topTags`，不以旧字段或任务数量补足；未知显示、数字字符串与风险格式、真实 0、空标签、行序和原对象引用保持。
 - 过程性评价 CSV：`process-assessment/page.tsx` -> `buildProxyPath("classrooms/:id/process-assessment.csv")`。
   - 对应后端：`GET /api/classrooms/:classroomId/process-assessment.csv`。
   - 注意：下载链接继续走 `/api/proxy/**`，与页面 JSON 使用同一排除口径；CSV 字段由后端导出实现决定。
@@ -194,6 +196,7 @@
   - 对应后端：`GET /api/classrooms/:classroomId/export/snapshot`。
   - window 适配：前端仅接受精确的 `7d | 30d`，页面默认 `7d`；省略、空值、`term`、`24h`、`all`、大小写或空白变体及其他未知值统一沿用 `parseEnum` 回落为 `7d`，不设旧值特判、不 trim 或转换大小写。重复 window 沿用 `getSingleSearchParam` 取首值。
   - 请求始终显式发送解析后的 window；后端省略窗口时的默认值及响应合同见 [Backend DTO Snapshot](./handoff-backend-dto-cheatsheet.md#classroom-export-snapshot)。
+  - 预检只投影根 `meta/summary`，notes 仅取 `meta.notes` 字符串数组，不从 `data` 或单字符串补足；不再投影无用的顶层 `classroomId/window`。空正式分组和提示保持为空，合法 notes 原文与顺序、对象分组引用及根 raw 保持；只有旧包装时仍保留 raw 诊断，不新增整页协议错误。
 
 ## 4) 高风险调用边界
 

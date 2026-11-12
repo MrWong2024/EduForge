@@ -58,17 +58,6 @@ const asStringArray = (value: unknown): string[] =>
     ? value.filter((item): item is string => typeof item === "string")
     : [];
 
-const pickFirstNonEmptyRecord = (...candidates: unknown[]): UnknownRecord => {
-  for (const candidate of candidates) {
-    const record = asRecord(candidate);
-    if (Object.keys(record).length > 0) {
-      return record;
-    }
-  }
-
-  return {};
-};
-
 const toPublisherSummary = (value: unknown): PublisherSummary | null => {
   const record = asRecord(value);
   const id = asString(record.id);
@@ -539,7 +528,6 @@ export type ReviewPackTierStudentItem = {
   studentNo?: string | null;
   attemptsCount?: number;
   latestErrorCount?: number;
-  latestAiFeedbackStatus?: string | null;
   raw: UnknownRecord;
 };
 
@@ -562,11 +550,13 @@ export type AiMetricsResponse = {
 };
 
 export type WeeklyReportResponse = {
-  classroomId?: string;
+  classroom: UnknownRecord;
   window?: string;
-  summary: UnknownRecord;
-  overview: UnknownRecord;
-  items: UnknownRecord[];
+  generatedAt?: string;
+  progress: UnknownRecord;
+  atRisk: UnknownRecord;
+  aiHealth: UnknownRecord;
+  topTags: UnknownRecord[];
   raw: UnknownRecord;
 };
 
@@ -842,8 +832,6 @@ export type AiLearningAnalyticsStudentDetailResponse = {
 };
 
 export type ExportSnapshotResponse = {
-  classroomId?: string;
-  window?: string;
   meta: UnknownRecord;
   notes: string[];
   summary: UnknownRecord;
@@ -1388,25 +1376,14 @@ const toReviewPackTierStudentItem = (
   value: unknown,
 ): ReviewPackTierStudentItem => {
   const record = asRecord(value);
-  const studentNameCandidate =
-    asString(record.studentName) ??
-    asString(record.name) ??
-    asString(safeGet(record, "student.name", undefined));
-  const studentName =
-    studentNameCandidate && studentNameCandidate.trim()
-      ? studentNameCandidate.trim()
-      : "未知学生";
+  const studentName = asString(record.studentName) ?? "未知学生";
 
   return {
-    studentId:
-      asString(record.studentId) ??
-      asString(record.id) ??
-      asString(record.userId),
+    studentId: asString(record.studentId),
     studentName,
     studentNo: asNullableString(record.studentNo),
     attemptsCount: asNumber(record.attemptsCount),
     latestErrorCount: asNumber(record.latestErrorCount),
-    latestAiFeedbackStatus: asNullableString(record.latestAiFeedbackStatus),
     raw: record,
   };
 };
@@ -1474,25 +1451,15 @@ export const toWeeklyReportResponse = (
   payload: unknown,
 ): WeeklyReportResponse => {
   const record = asRecord(payload);
-  const summary = pickFirstNonEmptyRecord(
-    safeGet(record, "summary", undefined),
-    safeGet(record, "data.summary", undefined),
-  );
-  const overview = pickFirstNonEmptyRecord(
-    safeGet(record, "overview", undefined),
-    safeGet(record, "data.overview", undefined),
-  );
-  const items =
-    asRecordArray(safeGet(record, "items", undefined)).length > 0
-      ? asRecordArray(safeGet(record, "items", undefined))
-      : asRecordArray(safeGet(record, "data.items", undefined));
 
   return {
-    classroomId: asString(record.classroomId),
+    classroom: asRecord(record.classroom),
     window: asString(record.window),
-    summary,
-    overview,
-    items,
+    generatedAt: asString(record.generatedAt),
+    progress: asRecord(record.progress),
+    atRisk: asRecord(record.atRisk),
+    aiHealth: asRecord(record.aiHealth),
+    topTags: asRecordArray(record.topTags),
     raw: record,
   };
 };
@@ -1501,36 +1468,14 @@ export const toProcessAssessmentResponse = (
   payload: unknown,
 ): ProcessAssessmentResponse => {
   const record = asRecord(payload);
-  const itemsCandidates = [
-    safeGet<unknown>(record, "items", undefined),
-    safeGet<unknown>(record, "rows", undefined),
-    safeGet<unknown>(record, "data.items", undefined),
-    safeGet<unknown>(record, "data.rows", undefined),
-    safeGet<unknown>(record, "data", undefined),
-  ];
-
-  let items: UnknownRecord[] = [];
-  for (const candidate of itemsCandidates) {
-    const list = asRecordArray(candidate);
-    if (list.length > 0) {
-      items = list;
-      break;
-    }
-  }
 
   return {
     classroomId: asString(record.classroomId),
     window: asString(record.window),
-    page:
-      asNumber(record.page) ??
-      asNumber(safeGet(record, "pagination.page", undefined)),
-    limit:
-      asNumber(record.limit) ??
-      asNumber(safeGet(record, "pagination.limit", undefined)),
-    total:
-      asNumber(record.total) ??
-      asNumber(safeGet(record, "pagination.total", undefined)),
-    items,
+    page: asNumber(record.page),
+    limit: asNumber(record.limit),
+    total: asNumber(record.total),
+    items: asRecordArray(record.items),
     raw: record,
   };
 };
@@ -2026,24 +1971,12 @@ export const toExportSnapshotResponse = (
   payload: unknown,
 ): ExportSnapshotResponse => {
   const record = asRecord(payload);
-  const meta = pickFirstNonEmptyRecord(
-    safeGet(record, "meta", undefined),
-    safeGet(record, "data.meta", undefined),
-  );
-  const notesRaw = safeGet<unknown>(meta, "notes", undefined);
-  const notes = asStringArray(notesRaw);
-  const summary = pickFirstNonEmptyRecord(
-    safeGet(record, "summary", undefined),
-    safeGet(record, "data.summary", undefined),
-  );
-  const singleNote = asString(notesRaw);
+  const meta = asRecord(record.meta);
 
   return {
-    classroomId: asString(record.classroomId),
-    window: asString(record.window),
     meta,
-    notes: notes.length > 0 ? notes : singleNote ? [singleNote] : [],
-    summary,
+    notes: asStringArray(meta.notes),
+    summary: asRecord(record.summary),
     raw: record,
   };
 };
