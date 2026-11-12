@@ -1130,23 +1130,18 @@ export const toSubmitTaskResponse = (payload: unknown): SubmitTaskResponse =>
 
 export const toLearningTaskOption = (value: unknown): LearningTaskOption => {
   const record = asRecord(value);
-  const createdByRecord = asRecord(record.createdBy);
   const rubricRecord = asRecord(record.rubric);
   return {
     difficulty:
       typeof record.difficulty === "string" ? record.difficulty : undefined,
-    id: asString(record.id) ?? asString(record.taskId),
+    id: asString(record.id),
     title: asString(record.title),
     description: asString(record.description),
     status: asString(record.status),
     knowledgeModule: asString(record.knowledgeModule),
     courseLabel: asString(record.courseLabel),
     visibility: normalizeTaskTemplateVisibility(record.visibility),
-    createdById:
-      asString(record.createdBy) ??
-      asString(createdByRecord.id) ??
-      asString(createdByRecord._id) ??
-      asString(createdByRecord.userId),
+    createdById: asString(record.createdBy),
     publisher: toPublisherSummary(record.publisher),
     createdAt: asString(record.createdAt),
     updatedAt: asString(record.updatedAt),
@@ -1162,21 +1157,10 @@ export const toLearningTaskOption = (value: unknown): LearningTaskOption => {
 export const toLearningTaskListResponse = (
   payload: unknown,
 ): LearningTaskListResponse => {
-  if (Array.isArray(payload)) {
-    return {
-      items: payload.map((item) => toLearningTaskOption(item)),
-      raw: payload,
-    };
-  }
-
   const record = asRecord(payload);
-  const candidateItems =
-    safeGet<unknown>(record, "items", undefined) ??
-    safeGet<unknown>(record, "data.items", undefined) ??
-    safeGet<unknown>(record, "data", undefined);
 
   return {
-    items: asRecordArray(candidateItems).map((item) =>
+    items: asRecordArray(record.items).map((item) =>
       toLearningTaskOption(item),
     ),
     page: asNumber(record.page),
@@ -1193,28 +1177,19 @@ export const toPublishableTaskTemplateListResponse = (
 export const toLearningTaskDetailResponse = (
   payload: unknown,
 ): LearningTaskDetailResponse => {
-  const record = asRecord(payload);
-  const dataRecord = asRecord(safeGet(record, "data", undefined));
-  const source = Object.keys(dataRecord).length > 0 ? dataRecord : record;
-  return toLearningTaskOption(source);
+  return toLearningTaskOption(payload);
 };
 
 export const toLearningTaskCreateResponse = (
   payload: unknown,
 ): LearningTaskCreateResponse => {
-  const record = asRecord(payload);
-  const dataRecord = asRecord(safeGet(record, "data", undefined));
-  const source = Object.keys(dataRecord).length > 0 ? dataRecord : record;
-  return toLearningTaskOption(source);
+  return toLearningTaskOption(payload);
 };
 
 export const toLearningTaskUpdateResponse = (
   payload: unknown,
 ): LearningTaskUpdateResponse => {
-  const record = asRecord(payload);
-  const dataRecord = asRecord(safeGet(record, "data", undefined));
-  const source = Object.keys(dataRecord).length > 0 ? dataRecord : record;
-  return toLearningTaskOption(source);
+  return toLearningTaskOption(payload);
 };
 
 export const toClassroomTasksResponse = (

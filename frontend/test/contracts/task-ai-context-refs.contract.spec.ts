@@ -20,16 +20,23 @@ const refs = [
   },
   { archivePath: "教材/学生.zip", entryPaths: ["work/demo.cpp"] },
 ];
+for (const ref of refs) {
+  Object.freeze(ref.entryPaths);
+  Object.freeze(ref);
+}
+Object.freeze(refs);
 
 test("teacher template response adapters retain exact paths and configured order", () => {
-  const payload = { id: "task", aiContextRefs: refs };
+  const payload = Object.freeze({ id: "task", aiContextRefs: refs });
+  const before = structuredClone(payload);
   for (const adapt of [
     toLearningTaskDetailResponse,
     toLearningTaskCreateResponse,
     toLearningTaskUpdateResponse,
   ]) {
-    expect(adapt(payload).aiContextRefs).toEqual(refs);
-    expect(adapt({ data: payload }).aiContextRefs).toEqual(refs);
+    const result = adapt(payload);
+    expect(result.aiContextRefs).toEqual(refs);
+    expect(result.raw).toBe(payload);
     expect(adapt({ id: "legacy" }).aiContextRefs).toBeUndefined();
     expect(adapt({ aiContextRefs: [] }).aiContextRefs).toEqual([]);
     for (const invalid of [null, {}, [{ ...refs[0], entryPaths: null }]]) {
@@ -40,6 +47,103 @@ test("teacher template response adapters retain exact paths and configured order
     toLearningTaskListResponse({ items: [payload], total: 1 }).items[0]
       .aiContextRefs,
   ).toEqual(refs);
+  expect(payload).toStrictEqual(before);
+});
+
+test("old data wrappers do not restore template identity, author or references", () => {
+  const data = Object.freeze({
+    id: "wrapped-task",
+    createdBy: "author",
+    visibility: "PRIVATE",
+    status: "DRAFT",
+    aiContextRefs: refs,
+  });
+  const input = Object.freeze({ data });
+  const before = structuredClone(input);
+  for (const adapt of [
+    toLearningTaskDetailResponse,
+    toLearningTaskCreateResponse,
+    toLearningTaskUpdateResponse,
+  ]) {
+    const result = adapt(input);
+    expect(result.id).toBeUndefined();
+    expect(result.createdById).toBeUndefined();
+    expect(result.visibility).toBeUndefined();
+    expect(result.aiContextRefs).toBeUndefined();
+    expect(isTaskTemplateAuthor("author", result.createdById)).toBe(false);
+    expect(
+      canEditTaskTemplate("author", result.createdById, result.status),
+    ).toBe(false);
+    expect(result.raw).toBe(input);
+    expect(result.raw.data).toBe(data);
+  }
+  expect(input).toStrictEqual(before);
+});
+
+test("root references keep exact order or absence without parsing conflicting data references", () => {
+  const validData = Object.freeze({ id: "data-task", aiContextRefs: refs });
+  const invalidData = Object.freeze({ id: "data-task", aiContextRefs: null });
+  for (const { input, expected } of [
+    {
+      input: Object.freeze({
+        id: "root-task",
+        aiContextRefs: refs,
+        data: invalidData,
+      }),
+      expected: refs,
+    },
+    {
+      input: Object.freeze({ id: "root-task", data: validData }),
+      expected: undefined,
+    },
+    {
+      input: Object.freeze({
+        id: "root-task",
+        aiContextRefs: undefined,
+        data: validData,
+      }),
+      expected: undefined,
+    },
+    {
+      input: Object.freeze({
+        id: "root-task",
+        aiContextRefs: Object.freeze([]),
+        data: validData,
+      }),
+      expected: [],
+    },
+  ]) {
+    const before = structuredClone(input);
+    for (const adapt of [
+      toLearningTaskDetailResponse,
+      toLearningTaskCreateResponse,
+      toLearningTaskUpdateResponse,
+    ]) {
+      const result = adapt(input);
+      expect(result.id).toBe("root-task");
+      expect(result.aiContextRefs).toEqual(expected);
+      expect(result.raw).toBe(input);
+      expect(result.raw.data).toBe(input.data);
+    }
+    expect(input).toStrictEqual(before);
+  }
+});
+
+test("invalid root references retain the original error despite valid references inside data", () => {
+  const data = Object.freeze({ id: "data-task", aiContextRefs: refs });
+  const input = Object.freeze({ id: "root-task", aiContextRefs: null, data });
+  const before = structuredClone(input);
+  for (const adapt of [
+    toLearningTaskDetailResponse,
+    toLearningTaskCreateResponse,
+    toLearningTaskUpdateResponse,
+  ]) {
+    expect(() => adapt(input)).toThrow(
+      new Error("AI 评阅参考资料必须是 JSON 数组；无引用请填写 []。"),
+    );
+  }
+  expect(input.data).toBe(data);
+  expect(input).toStrictEqual(before);
 });
 
 test("accepts arrays including explicit empty configuration", () => {

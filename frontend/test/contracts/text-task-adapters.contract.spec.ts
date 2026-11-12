@@ -58,6 +58,10 @@ import {
 import { toDisplayLateDuration } from "../../lib/ui/format";
 import { normalizeTaskTemplateVisibility } from "../../lib/learning-tasks/template-visibility-scope";
 import { canEditTeacherFeedback } from "../../lib/learning-tasks/teacher-feedback";
+import {
+  canEditTaskTemplate,
+  isTaskTemplateAuthor,
+} from "../../lib/learning-tasks/ai-context-refs";
 
 test("course and classroom status normalizers preserve only the exact formal states", () => {
   for (const status of ["ACTIVE", "ARCHIVED"] as const) {
@@ -1370,7 +1374,7 @@ test("template visibility rejects present invalid values without coercion or inp
   }
 });
 
-test("template detail, write and list response wrappers delegate strict visibility without replacing raw references", () => {
+test("template detail, write and list responses preserve strict visibility and raw references", () => {
   const privateTask = Object.freeze({ id: "private", visibility: "PRIVATE" });
   const sharedTask = Object.freeze({ id: "shared", visibility: "SHARED" });
   const invalidTask = Object.freeze({ id: "invalid", visibility: " shared " });
@@ -1381,17 +1385,17 @@ test("template detail, write and list response wrappers delegate strict visibili
     [invalidTask, undefined],
     [missingTask, undefined],
   ] as const) {
-    const envelope = Object.freeze({ data: payload });
+    const before = structuredClone(payload);
     for (const adapt of [
       toLearningTaskDetailResponse,
       toLearningTaskCreateResponse,
       toLearningTaskUpdateResponse,
     ]) {
-      const result = adapt(envelope);
+      const result = adapt(payload);
       expect(result.visibility).toBe(expected);
       expect(result.raw).toBe(payload);
-      expect(envelope.data).toBe(payload);
     }
+    expect(payload).toStrictEqual(before);
   }
   const items = Object.freeze([
     privateTask,
@@ -1400,6 +1404,7 @@ test("template detail, write and list response wrappers delegate strict visibili
     missingTask,
   ]);
   const envelope = Object.freeze({ items, total: 4, page: 1, limit: 4 });
+  const beforeList = structuredClone(envelope);
   for (const adapt of [
     toLearningTaskListResponse,
     toPublishableTaskTemplateListResponse,
@@ -1424,6 +1429,321 @@ test("template detail, write and list response wrappers delegate strict visibili
   expect(envelope.items).toBe(items);
   expect(invalidTask.visibility).toBe(" shared ");
   expect(Object.hasOwn(missingTask, "visibility")).toBe(false);
+  expect(envelope).toStrictEqual(beforeList);
+});
+
+test("template root responses preserve formal identity, author and optional fields despite legacy conflicts", () => {
+  const rubric = Object.freeze({ notes: "保留正式评阅说明" });
+  const payload = Object.freeze({
+    id: "formal-template",
+    taskId: "legacy-template-id",
+    createdBy: "teacher-formal",
+    createdById: "ignored-top-level-author",
+    title: "正式模板",
+    description: "正式模板说明",
+    knowledgeModule: "programming",
+    courseLabel: "程序设计基础",
+    status: "DRAFT",
+    visibility: "PRIVATE",
+    difficulty: "  综合\n设计  ",
+    rubric,
+    aiContextRefs: Object.freeze([]),
+    publisher: Object.freeze({ id: "teacher-publisher", name: "正式发布者" }),
+    createdAt: "2026-11-01T08:00:00.000Z",
+    updatedAt: "2026-11-12T08:00:00.000Z",
+    raw: Object.freeze({ id: "ignored-raw-id", createdBy: "teacher-raw" }),
+    data: Object.freeze({
+      id: "ignored-data-id",
+      createdBy: Object.freeze({ id: "teacher-data" }),
+      title: "旧包装标题",
+      visibility: "SHARED",
+    }),
+  });
+  const before = structuredClone(payload);
+  for (const adapt of [
+    toLearningTaskOption,
+    toLearningTaskDetailResponse,
+    toLearningTaskCreateResponse,
+    toLearningTaskUpdateResponse,
+  ]) {
+    const result = adapt(payload);
+    expect(result).toMatchObject({
+      id: "formal-template",
+      createdById: "teacher-formal",
+      title: "正式模板",
+      description: "正式模板说明",
+      knowledgeModule: "programming",
+      courseLabel: "程序设计基础",
+      status: "DRAFT",
+      visibility: "PRIVATE",
+      difficulty: "  综合\n设计  ",
+      rubric: { notes: "保留正式评阅说明" },
+      publisher: { id: "teacher-publisher", name: "正式发布者" },
+      createdAt: "2026-11-01T08:00:00.000Z",
+      updatedAt: "2026-11-12T08:00:00.000Z",
+    });
+    expect(result.aiContextRefs).toEqual([]);
+    expect(result.rubric).toBe(rubric);
+    expect(result.raw).toBe(payload);
+    expect(isTaskTemplateAuthor("teacher-formal", result.createdById)).toBe(true);
+    expect(
+      canEditTaskTemplate("teacher-formal", result.createdById, result.status),
+    ).toBe(true);
+    expect(isTaskTemplateAuthor("teacher-publisher", result.createdById)).toBe(
+      false,
+    );
+  }
+  expect(payload).toStrictEqual(before);
+});
+
+test("template IDs and author eligibility are never restored from aliases or author objects", () => {
+  for (const scenario of [
+    {
+      fields: Object.freeze({ createdBy: Object.freeze({ id: "teacher-self" }) }),
+      expectedId: undefined,
+    },
+    {
+      fields: Object.freeze({
+        id: null,
+        createdBy: Object.freeze({ _id: "teacher-self" }),
+      }),
+      expectedId: undefined,
+    },
+    {
+      fields: Object.freeze({
+        id: Object.freeze(["invalid-template-id"]),
+        createdBy: Object.freeze({ userId: "teacher-self" }),
+      }),
+      expectedId: undefined,
+    },
+    {
+      fields: Object.freeze({ id: "formal-template", createdBy: null }),
+      expectedId: "formal-template",
+    },
+    {
+      fields: Object.freeze({ id: "formal-template", createdBy: 42 }),
+      expectedId: "formal-template",
+    },
+    {
+      fields: Object.freeze({ id: "formal-template" }),
+      expectedId: "formal-template",
+    },
+  ]) {
+    const payload = Object.freeze({
+      ...scenario.fields,
+      taskId: "legacy-template-id",
+      createdById: "teacher-self",
+      title: "保留模板资料",
+      visibility: "PRIVATE",
+      status: "DRAFT",
+      publisher: Object.freeze({ id: "teacher-self", name: "公开发布者" }),
+      raw: Object.freeze({ id: "raw-template-id", createdBy: "teacher-self" }),
+      data: Object.freeze({ id: "data-template-id", createdBy: "teacher-self" }),
+    });
+    const before = structuredClone(payload);
+    const result = toLearningTaskOption(payload);
+
+    expect(result.id).toBe(scenario.expectedId);
+    expect(result.createdById).toBeUndefined();
+    expect(result.title).toBe("保留模板资料");
+    expect(result.publisher).toEqual({ id: "teacher-self", name: "公开发布者" });
+    expect(isTaskTemplateAuthor("teacher-self", result.createdById)).toBe(false);
+    expect(
+      canEditTaskTemplate("teacher-self", result.createdById, result.status),
+    ).toBe(false);
+    expect(result.raw).toBe(payload);
+    expect(result.raw.createdById).toBe("teacher-self");
+    expect(payload).toStrictEqual(before);
+  }
+});
+
+test("template single-entity data wrappers cannot supply identity, visibility or optional content", () => {
+  const source = Object.freeze({
+    id: "ignored-template",
+    createdBy: "teacher-self",
+    title: "旧包装模板",
+    visibility: "SHARED",
+    rubric: Object.freeze({ notes: "旧包装说明" }),
+    aiContextRefs: Object.freeze([]),
+    publisher: Object.freeze({ id: "teacher-self" }),
+  });
+  const payload = Object.freeze({ data: source });
+  const before = structuredClone(payload);
+  for (const adapt of [
+    toLearningTaskDetailResponse,
+    toLearningTaskCreateResponse,
+    toLearningTaskUpdateResponse,
+  ]) {
+    const result = adapt(payload);
+    expect(result.id).toBeUndefined();
+    expect(result.createdById).toBeUndefined();
+    expect(result.title).toBeUndefined();
+    expect(result.visibility).toBeUndefined();
+    expect(result.rubric).toBeUndefined();
+    expect(result.aiContextRefs).toBeUndefined();
+    expect(result.publisher).toBeNull();
+    expect(result.raw).toBe(payload);
+    expect(result.raw.data).toBe(source);
+  }
+  expect(payload).toStrictEqual(before);
+});
+
+test("template and candidate lists retain formal author sources, row order and missing-ID rows", () => {
+  const first = Object.freeze({
+    id: "template-first",
+    taskId: "ignored-task-id",
+    createdBy: "teacher-self",
+    title: "正式模板",
+    status: "PUBLISHED",
+    visibility: "PRIVATE",
+    rubric: Object.freeze({}),
+    aiContextRefs: Object.freeze([]),
+    publisher: null,
+  });
+  const unidentified = Object.freeze({
+    taskId: "legacy-only-task-id",
+    createdBy: "teacher-other",
+    title: "保留缺少正式标识的行",
+    status: "PUBLISHED",
+    visibility: "SHARED",
+  });
+  const candidate = Object.freeze({
+    id: "candidate-third",
+    createdBy: "teacher-candidate",
+    createdById: "ignored-candidate-author",
+    title: "正式发布候选",
+    status: "PUBLISHED",
+    visibility: "SHARED",
+    difficulty: "hard",
+    createdAt: "2026-11-01T08:00:00.000Z",
+    updatedAt: "2026-11-12T08:00:00.000Z",
+    publisher: Object.freeze({ id: "teacher-publisher", name: "候选发布者" }),
+  });
+  const items = Object.freeze([first, unidentified, candidate]);
+  const payload = Object.freeze({
+    items,
+    total: 3,
+    page: 1,
+    limit: 100,
+    data: Object.freeze({
+      items: Object.freeze([Object.freeze({ id: "ignored-nested-task" })]),
+    }),
+  });
+  const before = structuredClone(payload);
+  const unpagedPayload = Object.freeze({ items: Object.freeze([candidate]) });
+  const beforeUnpaged = structuredClone(unpagedPayload);
+  for (const adapt of [
+    toLearningTaskListResponse,
+    toPublishableTaskTemplateListResponse,
+  ]) {
+    const result = adapt(payload);
+    expect(result.items.map((item) => item.id)).toEqual([
+      "template-first",
+      undefined,
+      "candidate-third",
+    ]);
+    expect(result.items.map((item) => item.createdById)).toEqual([
+      "teacher-self",
+      "teacher-other",
+      "teacher-candidate",
+    ]);
+    expect(result).toMatchObject({ total: 3, page: 1, limit: 100 });
+    expect(result.items[0].rubric).toBeUndefined();
+    expect(result.items[0].aiContextRefs).toEqual([]);
+    expect(result.items[0].publisher).toBeNull();
+    expect(result.items[1].title).toBe("保留缺少正式标识的行");
+    expect(result.items[2]).toMatchObject({
+      title: "正式发布候选",
+      difficulty: "hard",
+      publisher: { id: "teacher-publisher", name: "候选发布者" },
+      createdAt: "2026-11-01T08:00:00.000Z",
+      updatedAt: "2026-11-12T08:00:00.000Z",
+    });
+    expect(result.items[2].rubric).toBeUndefined();
+    expect(result.items[2].aiContextRefs).toBeUndefined();
+    expect(Object.hasOwn(candidate, "rubric")).toBe(false);
+    expect(Object.hasOwn(candidate, "aiContextRefs")).toBe(false);
+    expect(result.raw).toBe(payload);
+    result.items.forEach((item, index) => expect(item.raw).toBe(items[index]));
+    const unpaged = adapt(unpagedPayload);
+    expect(unpaged.items).toHaveLength(1);
+    expect(unpaged.items[0].id).toBe("candidate-third");
+    expect(unpaged.items[0].raw).toBe(candidate);
+    expect(unpaged.total).toBeUndefined();
+    expect(unpaged.page).toBeUndefined();
+    expect(unpaged.limit).toBeUndefined();
+    expect(unpaged.raw).toBe(unpagedPayload);
+  }
+  expect(payload).toStrictEqual(before);
+  expect(unpagedPayload).toStrictEqual(beforeUnpaged);
+});
+
+test("template and candidate lists reject old wrappers and never rescue unusable top-level items", () => {
+  const legacyItems = Object.freeze([
+    Object.freeze({ id: "legacy-task", createdBy: "teacher-self" }),
+  ]);
+  const legacyData = Object.freeze({
+    items: legacyItems,
+    total: 9,
+    page: 3,
+    limit: 3,
+  });
+  for (const scenario of [
+    { payload: legacyItems, total: undefined, page: undefined, limit: undefined },
+    {
+      payload: Object.freeze({ data: legacyData }),
+      total: undefined,
+      page: undefined,
+      limit: undefined,
+    },
+    {
+      payload: Object.freeze({ data: legacyItems }),
+      total: undefined,
+      page: undefined,
+      limit: undefined,
+    },
+    {
+      payload: Object.freeze({
+        items: Object.freeze([]),
+        total: 0,
+        page: 1,
+        limit: 100,
+        data: legacyData,
+      }),
+      total: 0,
+      page: 1,
+      limit: 100,
+    },
+    {
+      payload: Object.freeze({ items: null, data: legacyData }),
+      total: undefined,
+      page: undefined,
+      limit: undefined,
+    },
+    {
+      payload: Object.freeze({
+        items: Object.freeze({ items: legacyItems }),
+        data: legacyData,
+      }),
+      total: undefined,
+      page: undefined,
+      limit: undefined,
+    },
+  ]) {
+    const before = structuredClone(scenario.payload);
+    for (const adapt of [
+      toLearningTaskListResponse,
+      toPublishableTaskTemplateListResponse,
+    ]) {
+      const result = adapt(scenario.payload);
+      expect(result.items).toEqual([]);
+      expect(result.total).toBe(scenario.total);
+      expect(result.page).toBe(scenario.page);
+      expect(result.limit).toBe(scenario.limit);
+      expect(result.raw).toBe(scenario.payload);
+    }
+    expect(scenario.payload).toStrictEqual(before);
+  }
 });
 
 test("template difficulty comes from the top level without changing raw values", () => {

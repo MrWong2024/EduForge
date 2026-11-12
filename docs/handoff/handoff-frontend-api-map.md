@@ -90,6 +90,8 @@
 
 - 任务模板列表：`/teacher/tasks/page.tsx` -> `/api/proxy/learning-tasks/tasks?...` -> `GET /api/learning-tasks/tasks`。
   - 注意：`scope/courseLabel/status/knowledgeModule/difficulty/page` 由 URL 驱动并透传后端。模板列表与课堂候选页忽略旧 URL 的 `stage`，筛选、分页和回跳链接不再携带它；后端参数合同见 [DTO Cheatsheet](./handoff-backend-dto-cheatsheet.md#learning-tasks)。
+  - 模板及发布候选的实体标识仅取正式 `id`，内部 `createdById` 仅由正式字符串 `createdBy` 命名转换；不从响应旧 `taskId`、作者对象、顶层 `createdById`、publisher 或 raw 补身份。详情、创建与更新只适配正式根对象，两类列表只读根 `items/total/page/limit`；旧裸数组和 `data` 包装不补列表、分页或身份，缺 ID 的对象行仍保留。公开字段见 [Backend DTO Task template](./handoff-backend-dto-cheatsheet.md#task-template-dto--response-family)；编辑路由及课堂发布请求中的正式 `taskId` 保持。
+  - 可选 rubric、资料引用及其他正式信息继续沿现有解析；引用缺省为 `undefined`、显式 `[]` 保留、非法正式引用仍拒绝，旧 `data` 不参与救援或覆盖。列表 raw 保持原 payload，对象成员 raw 保持原成员，单实体 raw 保持原根对象；不修改输入或清洗 raw 中的旧键。
   - 难度筛选与下述模板写入选项分开：字段名“任务难度”，选项为全部难度（UI `""`，请求省略）、基础 `easy`、进阶 `medium`、挑战 `hard`，复用共享三档目录；不提供未设置/其他筛选。`parseDifficultyFilter` 只接受准确单个标准值，非法 URL 值（含数组）按全部显示且不传后端，后续筛选及分页导航移除非法值；不据此清洗存储或展示值。模板 SSR、筛选控件及外层实际分页链接使用规范化难度，筛选变更回第1页，保留其他条件和 fromClassroomId，编辑 returnTo 保留当前列表条件；清空筛选包含难度并沿用既有 scope 重置规则。
 - 任务模板创建：`CreateLearningTaskForm` -> `/api/proxy/learning-tasks/tasks` -> `POST /api/learning-tasks/tasks`。
   - 注意：初始 `status` 遵循后端创建 DTO；创建与后续生命周期请求不混用。
@@ -104,7 +106,7 @@
   - 模板顶层 `difficulty` 原值进入模板 view model，mapper 不转换或改写上游数据，raw 引用保持；表单只读、模板列表、发布选择及师生课堂详情复用同一安全显示函数：只有准确三档显示基础/进阶/挑战，缺失、null、空白、未知字符串或非法类型统一显示未设置。不做别名、大小写或自动判级，也不将安全显示回写数据库。难度只用于教学定位，不影响评阅标准或统计校正。
 - 班级发布候选：`PublishClassroomTaskForm` -> `/api/proxy/classrooms/:id/publishable-task-templates`。
   - 对应后端：`GET /api/classrooms/:id/publishable-task-templates`。
-  - 注意：模板可见性、发布资格及本班已发布排除由后端候选接口决定，前端不自行伪造候选全集。当前候选 DTO 不提供 rubric，缺少该字段只能提示到模板详情核对，不能判断模板未填写评阅标准。
+  - 注意：模板可见性、发布资格及本班已发布排除由后端候选接口决定，前端不自行伪造候选全集。当前候选 DTO 不提供 rubric、aiContextRefs，继续允许缺省；缺少 rubric 只能提示到模板详情核对，不能判断模板未填写评阅标准。后端候选的 `createdById` 仍是合法字段，但前端不新增读取回退，作者来源仍为字符串 `createdBy`；完整字段见 [Backend DTO 发布候选模板](./handoff-backend-dto-cheatsheet.md#发布候选模板)。
   - 候选难度沿用上述筛选选项与解析口径，首次 SSR 查询和加载更多都传同一规范化条件；URL/权威 props 恢复控件与已应用条件。共用入口的筛选实际变化或清空即清除已选 taskId、使旧加载更多请求失效，保留截止/迟交草稿；更新期间禁止选择、加载更多及发布，submit handler 同时校验等待状态和当前候选成员。权威新结果替换候选池并同步页码/总数/limit，旧请求的成功、错误及 finally 均不得覆盖新状态，不自动选首条或重放发布；失败沿用原错误呈现并允许显式重试。
 - 班级任务实例：`/teacher/classrooms/:id/tasks/page.tsx` + 发布/生命周期/编辑组件 -> `/api/proxy/classrooms/:id/tasks*`。
   - 对应后端：`GET/POST/PATCH /api/classrooms/:id/tasks*` 与 `/status`。
