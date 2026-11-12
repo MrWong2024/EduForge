@@ -168,6 +168,7 @@
   - 页面窗口为 `all | 7d`；解析与请求沿用本节三页报表共性窗口规则，后端数据合同见 [Backend DTO](./handoff-backend-dto-cheatsheet.md#课程总览)。
 - 学习轨迹 / 课堂复盘 / AI 指标：三件套 Server pages -> `/api/proxy/classrooms/:cid/tasks/:ctid/{learning-trajectory,review-pack,ai-metrics}`。
   - 对应后端：三个课堂任务聚合接口。
+  - AI 指标保留内部展示名称：`statusBreakdown` 只取正式 `summary.jobs`，`tags` 只取正式 `feedback.topTags`；不再读取顶层同名旧字段或 `summary.statusBreakdown`，正式来源缺失、非法或为空时沿现有对象/数组降级，不补足。窗口、includeTags 及公开数据见 [Backend DTO AI Metrics](./handoff-backend-dto-cheatsheet.md#ai-metrics)；真实 0、null 耗时、含 total 的状态展示与对象/raw 引用保持。
   - 课堂复盘窗口为 `all | 7d`；解析与请求沿用本节三页报表共性窗口规则，后端数据合同见 [Backend DTO](./handoff-backend-dto-cheatsheet.md#review-pack)。
   - 课堂复盘只从正式 `overview/commonIssues` 读取概览、摘要与问题分布，不再用旧指标别名或按人数补算缺失率；分布只取正式 `tag/type/severity/count`。分层学生的 ID/姓名仅消费 `studentId/studentName`，不以旧别名补足，也不再投影或展示后端未返回的 ReviewPack 专用 `latestAiFeedbackStatus`；未知姓名、学号 null、真实 0、原格式和 raw 引用保持。样例的正式 `tags/matchedTags`、合并去重和提交链接继续保留。
   - 学习轨迹姓名只消费 `student.name`，不再映射或读取旧姓名别名；缺姓名时仍依次按学号、邮箱、`未知学生` 降级展示。后端字段结构及 nullable 合同见 [Backend DTO](./handoff-backend-dto-cheatsheet.md#learning-trajectory)。
@@ -190,7 +191,7 @@
 - AI 反馈介入成效分析学生详情：`ai-learning-analytics/students/[studentId]/page.tsx` -> `/api/proxy/classrooms/:id/ai-learning-analytics/students/:studentId` -> `GET /api/classrooms/:classroomId/ai-learning-analytics/students/:studentId`。
   - 使用 `toAiLearningAnalyticsStudentDetailResponse`；后端请求只传 `window/excludedTaskIds`，URL 中的 `page/q/overallOutcome/engagementStatus` 仅用于返回班级分析时恢复列表状态，绝不传给详情接口。
   - taskPoint 适配基线、比较端点、最新版本、较新未比较标记和稳定原因；null 与未知来源/模型保留，版本链接只使用后端对应 submissionId 及课堂上下文，不从 attemptNo 猜测提交。公开形状与值域见 [Backend DTO Analytics](./handoff-backend-dto-cheatsheet.md#ai-learning-analytics)。
-- 三个 mapper 的业务投影只消费 `detailedOutcome/overallOutcome/engagementStatus` 等现行字段，字段合同见 [Backend DTO Analytics](./handoff-backend-dto-cheatsheet.md#ai-learning-analytics)；raw 仍引用 unwrap 后的原始 source，不修改输入或清洗 raw。
+- 三个 Analytics mapper 直接消费正式根对象，不再解包 `data`；根字段缺失、非法或为空时不从 `data` 补足，只有旧包装时沿既有缺字段规则降级，不新增整页协议错误。业务投影只消费 `detailedOutcome/overallOutcome/engagementStatus` 等现行字段，字段合同见 [Backend DTO Analytics](./handoff-backend-dto-cheatsheet.md#ai-learning-analytics)；raw 严格引用原根对象，不修改输入或清洗 raw，旧 `data` 可继续保留于 raw 中。
 - 上述三条正式请求全部由 `fetchJson` 经 `/api/proxy/**` 发出；前端只适配后端返回值与枚举，本模块所有 nullable 比率/均值保持 null，真实0保留为0，不调用通用必需数字适配补零。不重算基线/终点、issueLoad、`detailedOutcome`、`overallOutcome`、`engagementStatus`、rate 分母或任何聚合指标。
 - 教学快照预检：`export/snapshot/page.tsx` -> `/api/proxy/classrooms/:id/export/snapshot`。
   - 对应后端：`GET /api/classrooms/:classroomId/export/snapshot`。

@@ -25,24 +25,24 @@ const evidence = {
 };
 
 test("retired analytics fields stay outside normalized projections without changing current metrics or raw sources", () => {
-  const overviewSource = {
-    summary: {
+  const overviewSource = Object.freeze({
+    summary: Object.freeze({
       remainedCleanStudentTaskCount: 1,
       unchangedWithIssuesStudentTaskCount: 2,
       stableStudentTaskCount: 99,
-    },
-    taskTrends: [
-      {
+    }),
+    taskTrends: Object.freeze([
+      Object.freeze({
         classroomTaskId: "task-current",
         remainedCleanStudentCount: 1,
         unchangedWithIssuesStudentCount: 2,
         stableStudentCount: 99,
-      },
-    ],
-  };
-  const studentsSource = {
-    items: [
-      {
+      }),
+    ]),
+  });
+  const studentsSource = Object.freeze({
+    items: Object.freeze([
+      Object.freeze({
         studentId: "student-current",
         studentName: "Current Student",
         remainedCleanTasksCount: 1,
@@ -53,37 +53,40 @@ test("retired analytics fields stay outside normalized projections without chang
         growthTrend: "IMPROVING",
         postFeedbackRevisedTasksCount: 2,
         postFeedbackResubmittedTasksCount: 1,
-      },
-      {
+      }),
+      Object.freeze({
         studentId: "student-legacy-only",
         stableTasksCount: 99,
         growthTrend: "IMPROVING",
-      },
-    ],
-  };
-  const detailSource = {
-    summary: {
+      }),
+    ]),
+  });
+  const detailSource = Object.freeze({
+    summary: Object.freeze({
       remainedCleanTasksCount: 1,
       unchangedWithIssuesTasksCount: 2,
       stableTasksCount: 99,
       overallOutcome: "NO_NET_CHANGE",
       engagementStatus: "QUALITY_COMPARABLE",
       growthTrend: "DECLINING",
-    },
-    taskPoints: [
-      {
+    }),
+    taskPoints: Object.freeze([
+      Object.freeze({
         classroomTaskId: "task-current",
         detailedOutcome: "REMAINED_CLEAN",
         outcome: "REGRESSED",
         postFeedbackRevised: true,
         postFeedbackResubmitted: false,
-      },
-      { classroomTaskId: "task-legacy-only", outcome: "IMPROVED" },
-    ],
-  };
-  const overviewInput = { data: overviewSource };
-  const studentsInput = { data: studentsSource };
-  const detailInput = { data: detailSource };
+      }),
+      Object.freeze({
+        classroomTaskId: "task-legacy-only",
+        outcome: "IMPROVED",
+      }),
+    ]),
+  });
+  const overviewInput = overviewSource;
+  const studentsInput = studentsSource;
+  const detailInput = detailSource;
   const overviewBefore = structuredClone(overviewInput);
   const studentsBefore = structuredClone(studentsInput);
   const detailBefore = structuredClone(detailInput);
@@ -159,6 +162,307 @@ test("retired analytics fields stay outside normalized projections without chang
   expect(detailInput).toEqual(detailBefore);
 });
 
+test("analytics adapters use formal root results, pagination and filters despite conflicting data", () => {
+  const context = Object.freeze({
+    classroomId: "root-classroom",
+    classroomName: "根班级",
+    courseId: "root-course",
+    window: "30d",
+    effectiveTaskCount: 2,
+    excludedTaskIds: Object.freeze(["root-excluded-task"]),
+  });
+  const rootMethodology = Object.freeze({
+    version: "AI_FEEDBACK_INTERVENTION_V1_2",
+  });
+  const data = Object.freeze({
+    context: Object.freeze({
+      classroomId: "ignored-classroom",
+      window: "7d",
+      effectiveTaskCount: 99,
+    }),
+    methodology: Object.freeze({ version: "UNKNOWN" }),
+    summary: Object.freeze({
+      activeStudentsCount: 99,
+      submittedTasksCount: 99,
+      averageIssueLoadDelta: -99,
+    }),
+    student: Object.freeze({
+      studentId: "ignored-student",
+      studentName: "嵌套学生",
+    }),
+    taskTrends: Object.freeze([
+      Object.freeze({ classroomTaskId: "ignored-trend" }),
+    ]),
+    items: Object.freeze([Object.freeze({ studentId: "ignored-student" })]),
+    taskPoints: Object.freeze([
+      Object.freeze({ classroomTaskId: "ignored-point" }),
+    ]),
+    page: 9,
+    limit: 1,
+    total: 99,
+    activeStudentsTotal: 100,
+    filters: Object.freeze({
+      q: "ignored",
+      overallOutcome: "REGRESSED_OVERALL",
+      engagementStatus: "NO_SUBMISSION",
+    }),
+  });
+  const overviewInput = Object.freeze({
+    context,
+    methodology: rootMethodology,
+    summary: Object.freeze({
+      activeStudentsCount: 8,
+      submittedStudentTaskCount: 3,
+      aiDeliveryRate: 0,
+      averageIssueLoadDelta: null,
+    }),
+    taskTrends: Object.freeze([
+      Object.freeze({
+        classroomTaskId: "root-trend",
+        taskTitle: "正式任务",
+        submittedStudentCount: 3,
+        postFeedbackRevisionRate: 0,
+      }),
+    ]),
+    data,
+  });
+  const studentsInput = Object.freeze({
+    context,
+    methodology: rootMethodology,
+    page: 2,
+    limit: 3,
+    total: 4,
+    activeStudentsTotal: 8,
+    filters: Object.freeze({
+      q: "正式",
+      overallOutcome: "NO_NET_CHANGE",
+      engagementStatus: "QUALITY_COMPARABLE",
+    }),
+    items: Object.freeze([
+      Object.freeze({
+        studentId: "root-student-2",
+        studentName: "正式学生",
+        studentNo: null,
+        submittedTasksCount: 2,
+        overallOutcome: "NO_NET_CHANGE",
+        engagementStatus: "QUALITY_COMPARABLE",
+      }),
+      Object.freeze({ studentId: "root-student-1", studentName: "另一学生" }),
+    ]),
+    data,
+  });
+  const detailInput = Object.freeze({
+    context,
+    methodology: rootMethodology,
+    student: Object.freeze({
+      studentId: "root-student-2",
+      studentName: "正式学生",
+      studentNo: null,
+    }),
+    summary: Object.freeze({
+      submittedTasksCount: 2,
+      averageIssueLoadDelta: 0,
+      overallOutcome: "NO_NET_CHANGE",
+      engagementStatus: "QUALITY_COMPARABLE",
+    }),
+    taskPoints: Object.freeze([
+      Object.freeze({
+        classroomTaskId: "root-point",
+        attemptsCount: 0,
+        issueLoadDelta: null,
+        latestRevision: null,
+        hasNewerUncomparedRevision: true,
+      }),
+    ]),
+    data,
+  });
+  const overviewBefore = structuredClone(overviewInput);
+  const studentsBefore = structuredClone(studentsInput);
+  const detailBefore = structuredClone(detailInput);
+  const overview = toAiLearningAnalyticsOverviewResponse(overviewInput);
+  const students = toAiLearningAnalyticsStudentsResponse(studentsInput);
+  const detail = toAiLearningAnalyticsStudentDetailResponse(detailInput);
+
+  expect(overview.summary).toMatchObject({
+    activeStudentsCount: 8,
+    submittedStudentTaskCount: 3,
+    aiDeliveryRate: 0,
+    averageIssueLoadDelta: null,
+  });
+  expect(overview.taskTrends).toMatchObject([
+    {
+      classroomTaskId: "root-trend",
+      taskTitle: "正式任务",
+      submittedStudentCount: 3,
+      postFeedbackRevisionRate: 0,
+    },
+  ]);
+  expect(students).toMatchObject({
+    page: 2,
+    limit: 3,
+    total: 4,
+    activeStudentsTotal: 8,
+    filters: {
+      q: "正式",
+      overallOutcome: "NO_NET_CHANGE",
+      engagementStatus: "QUALITY_COMPARABLE",
+    },
+  });
+  expect(students.items.map((student) => student.studentId)).toEqual([
+    "root-student-2",
+    "root-student-1",
+  ]);
+  expect(students.items[0]).toMatchObject({
+    studentName: "正式学生",
+    studentNo: null,
+    submittedTasksCount: 2,
+    overallOutcome: "NO_NET_CHANGE",
+    engagementStatus: "QUALITY_COMPARABLE",
+  });
+  expect(detail.student).toEqual({
+    studentId: "root-student-2",
+    studentName: "正式学生",
+    studentNo: null,
+  });
+  expect(detail.summary).toMatchObject({
+    submittedTasksCount: 2,
+    averageIssueLoadDelta: 0,
+    overallOutcome: "NO_NET_CHANGE",
+    engagementStatus: "QUALITY_COMPARABLE",
+  });
+  expect(detail.taskPoints).toMatchObject([
+    {
+      classroomTaskId: "root-point",
+      attemptsCount: 0,
+      issueLoadDelta: null,
+      latestRevision: null,
+      hasNewerUncomparedRevision: true,
+    },
+  ]);
+  for (const { response, input, before } of [
+    { response: overview, input: overviewInput, before: overviewBefore },
+    { response: students, input: studentsInput, before: studentsBefore },
+    { response: detail, input: detailInput, before: detailBefore },
+  ]) {
+    expect(response.context).toMatchObject({
+      classroomId: "root-classroom",
+      classroomName: "根班级",
+      courseId: "root-course",
+      window: "30d",
+      effectiveTaskCount: 2,
+      excludedTaskIds: ["root-excluded-task"],
+    });
+    expect(response.methodology.version).toBe("AI_FEEDBACK_INTERVENTION_V1_2");
+    expect(response.raw).toBe(input);
+    expect(response.raw.data).toBe(data);
+    expect(input).toStrictEqual(before);
+  }
+});
+
+test("analytics adapters do not unwrap data-only responses or rescue empty and invalid root fields", () => {
+  const data = Object.freeze({
+    context: Object.freeze({ classroomId: "ignored-classroom", window: "7d" }),
+    methodology: Object.freeze({ version: "AI_FEEDBACK_INTERVENTION_V1_2" }),
+    summary: Object.freeze({
+      activeStudentsCount: 7,
+      submittedTasksCount: 6,
+      averageIssueLoadDelta: 5,
+    }),
+    student: Object.freeze({
+      studentId: "ignored-student",
+      studentName: "嵌套学生",
+    }),
+    taskTrends: Object.freeze([
+      Object.freeze({ classroomTaskId: "ignored-trend" }),
+    ]),
+    items: Object.freeze([Object.freeze({ studentId: "ignored-student" })]),
+    taskPoints: Object.freeze([
+      Object.freeze({ classroomTaskId: "ignored-point" }),
+    ]),
+    page: 9,
+    limit: 1,
+    total: 7,
+    activeStudentsTotal: 10,
+    filters: Object.freeze({
+      q: "ignored",
+      overallOutcome: "REGRESSED_OVERALL",
+      engagementStatus: "QUALITY_COMPARABLE",
+    }),
+  });
+  for (const input of [
+    Object.freeze({ data }),
+    Object.freeze({
+      context: Object.freeze({}),
+      methodology: Object.freeze({}),
+      summary: Object.freeze({}),
+      student: Object.freeze({}),
+      taskTrends: Object.freeze([]),
+      items: Object.freeze([]),
+      taskPoints: Object.freeze([]),
+      filters: Object.freeze({}),
+      data,
+    }),
+    Object.freeze({
+      context: null,
+      methodology: false,
+      summary: Object.freeze([]),
+      student: "invalid",
+      taskTrends: null,
+      items: Object.freeze({}),
+      taskPoints: false,
+      page: "9",
+      limit: null,
+      total: Number.NaN,
+      activeStudentsTotal: -1,
+      filters: null,
+      data,
+    }),
+  ]) {
+    const before = structuredClone(input);
+    const overview = toAiLearningAnalyticsOverviewResponse(input);
+    const students = toAiLearningAnalyticsStudentsResponse(input);
+    const detail = toAiLearningAnalyticsStudentDetailResponse(input);
+
+    expect(overview.summary).toMatchObject({
+      activeStudentsCount: 0,
+      averageIssueLoadDelta: null,
+    });
+    expect(overview.taskTrends).toEqual([]);
+    expect(students).toMatchObject({
+      page: 1,
+      limit: 20,
+      total: 0,
+      activeStudentsTotal: 0,
+      filters: { q: null, overallOutcome: null, engagementStatus: null },
+      items: [],
+    });
+    expect(detail.student).toEqual({
+      studentId: "",
+      studentName: "未知学生",
+      studentNo: null,
+    });
+    expect(detail.summary).toMatchObject({
+      submittedTasksCount: 0,
+      averageIssueLoadDelta: null,
+      overallOutcome: "INSUFFICIENT_DATA",
+      engagementStatus: "NO_SUBMISSION",
+    });
+    expect(detail.taskPoints).toEqual([]);
+    for (const response of [overview, students, detail]) {
+      expect(response.context).toMatchObject({
+        classroomId: "",
+        classroomName: "未命名班级",
+        window: "all",
+        effectiveTaskCount: 0,
+        excludedTaskIds: [],
+      });
+      expect(response.methodology.version).toBe("UNKNOWN");
+      expect(response.raw).toBe(input);
+      expect(response.raw.data).toBe(data);
+    }
+    expect(input).toStrictEqual(before);
+  }
+});
 test("uncompared revision messaging distinguishes absence of a reference from uncertain timing", () => {
   const cases = [
     {

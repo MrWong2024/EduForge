@@ -1426,22 +1426,14 @@ export const toReviewPackResponse = (payload: unknown): ReviewPackResponse => {
 export const toAiMetricsResponse = (payload: unknown): AiMetricsResponse => {
   const record = asRecord(payload);
   const summary = asRecord(safeGet(record, "summary", undefined));
-  const statusBreakdown =
-    asRecord(safeGet(record, "statusBreakdown", undefined)) ||
-    asRecord(safeGet(summary, "statusBreakdown", undefined));
-  const jobsBreakdown = asRecord(safeGet(summary, "jobs", undefined));
 
   return {
     classroomId: asString(record.classroomId),
     classroomTaskId: asString(record.classroomTaskId),
     window: asString(record.window),
     summary,
-    statusBreakdown:
-      Object.keys(statusBreakdown).length > 0 ? statusBreakdown : jobsBreakdown,
-    tags:
-      asRecordArray(safeGet(record, "tags", undefined)).length > 0
-        ? asRecordArray(safeGet(record, "tags", undefined))
-        : asRecordArray(safeGet(record, "feedback.topTags", undefined)),
+    statusBreakdown: asRecord(summary.jobs),
+    tags: asRecordArray(safeGet(record, "feedback.topTags", undefined)),
     errors: asRecordArray(safeGet(record, "errors", undefined)),
     raw: record,
   };
@@ -1531,12 +1523,6 @@ const toAiLearningAnalyticsReviewEndpoint = (
         : null,
     model: asNullableString(record.model) ?? null,
   };
-};
-
-const unwrapAiLearningAnalyticsRecord = (payload: unknown): UnknownRecord => {
-  const record = asRecord(payload);
-  const dataRecord = asRecord(safeGet(record, "data", undefined));
-  return Object.keys(dataRecord).length > 0 ? dataRecord : record;
 };
 
 const toRequiredString = (value: unknown, fallback = ""): string =>
@@ -1895,7 +1881,7 @@ const toAiLearningAnalyticsTaskPoint = (
 export const toAiLearningAnalyticsOverviewResponse = (
   payload: unknown,
 ): AiLearningAnalyticsOverviewResponse => {
-  const source = unwrapAiLearningAnalyticsRecord(payload);
+  const source = asRecord(payload);
   return {
     context: toAiLearningAnalyticsContext(source.context),
     methodology: toAiLearningAnalyticsMethodology(source.methodology),
@@ -1910,7 +1896,7 @@ export const toAiLearningAnalyticsOverviewResponse = (
 export const toAiLearningAnalyticsStudentsResponse = (
   payload: unknown,
 ): AiLearningAnalyticsStudentsResponse => {
-  const source = unwrapAiLearningAnalyticsRecord(payload);
+  const source = asRecord(payload);
   const filtersRecord = asRecord(source.filters);
   return {
     methodology: toAiLearningAnalyticsMethodology(source.methodology),
@@ -1949,7 +1935,7 @@ export const toAiLearningAnalyticsStudentsResponse = (
 export const toAiLearningAnalyticsStudentDetailResponse = (
   payload: unknown,
 ): AiLearningAnalyticsStudentDetailResponse => {
-  const source = unwrapAiLearningAnalyticsRecord(payload);
+  const source = asRecord(payload);
   const studentRecord = asRecord(source.student);
   return {
     context: toAiLearningAnalyticsContext(source.context),

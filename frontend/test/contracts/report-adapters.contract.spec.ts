@@ -1,5 +1,6 @@
 import { test, expect } from "@playwright/test";
 import {
+  toAiMetricsResponse,
   toExportSnapshotResponse,
   toProcessAssessmentResponse,
   toReviewPackResponse,
@@ -698,6 +699,186 @@ test("snapshot previews do not rescue missing or empty groups and never turn a s
     expect(result.raw).toBe(payload);
     expect(result).not.toHaveProperty("classroomId");
     expect(result).not.toHaveProperty("window");
+    expect(payload).toStrictEqual(before);
+  }
+});
+
+test("AI Metrics use formal jobs and feedback tags despite conflicting root sources", () => {
+  const jobs = Object.freeze({
+    total: 5,
+    pending: 1,
+    running: 1,
+    succeeded: 2,
+    failed: 1,
+    dead: 0,
+  });
+  const summary = Object.freeze({
+    jobs,
+    successRate: 0.4,
+    avgAttempts: 1.2,
+    avgLatencyMs: null,
+  });
+  const firstError = Object.freeze({ code: "TIMEOUT", count: 1 });
+  const secondError = Object.freeze({ code: "RATE_LIMIT", count: 0 });
+  const firstTag = Object.freeze({ tag: "logic", count: 2 });
+  const secondTag = Object.freeze({ tag: "boundary", count: 0 });
+  const payload = Object.freeze({
+    classroomId: "classroom-ai-metrics",
+    classroomTaskId: "classroom-task-ai-metrics",
+    generatedAt: "2026-11-12T09:00:00.000Z",
+    window: "24h",
+    summary,
+    errors: Object.freeze([firstError, secondError]),
+    feedback: Object.freeze({
+      avgItemsPerSubmission: 1,
+      totalItems: 2,
+      topTags: Object.freeze([firstTag, secondTag]),
+    }),
+    statusBreakdown: Object.freeze({ total: 999, succeeded: 999 }),
+    tags: Object.freeze([Object.freeze({ tag: "ignored-tag", count: 999 })]),
+  });
+  const before = structuredClone(payload);
+  const result = toAiMetricsResponse(payload);
+
+  expect(result).toMatchObject({
+    classroomId: "classroom-ai-metrics",
+    classroomTaskId: "classroom-task-ai-metrics",
+    window: "24h",
+    summary: { successRate: 0.4, avgAttempts: 1.2, avgLatencyMs: null },
+  });
+  expect(result.statusBreakdown).toEqual({
+    total: 5,
+    pending: 1,
+    running: 1,
+    succeeded: 2,
+    failed: 1,
+    dead: 0,
+  });
+  expect(Object.keys(result.statusBreakdown)).toEqual([
+    "total",
+    "pending",
+    "running",
+    "succeeded",
+    "failed",
+    "dead",
+  ]);
+  expect(result.errors).toEqual([
+    { code: "TIMEOUT", count: 1 },
+    { code: "RATE_LIMIT", count: 0 },
+  ]);
+  expect(result.tags).toEqual([
+    { tag: "logic", count: 2 },
+    { tag: "boundary", count: 0 },
+  ]);
+  expect(result.summary).toBe(summary);
+  expect(result.statusBreakdown).toBe(jobs);
+  expect(result.errors[0]).toBe(firstError);
+  expect(result.errors[1]).toBe(secondError);
+  expect(result.tags[0]).toBe(firstTag);
+  expect(result.tags[1]).toBe(secondTag);
+  expect(result.raw).toBe(payload);
+  expect(payload).toStrictEqual(before);
+});
+
+test("AI Metrics keep zero summary values, null latency and explicit empty feedback tags", () => {
+  const jobs = Object.freeze({
+    total: 0,
+    pending: 0,
+    running: 0,
+    succeeded: 0,
+    failed: 0,
+    dead: 0,
+  });
+  const summary = Object.freeze({
+    jobs,
+    successRate: 0,
+    avgAttempts: 0,
+    avgLatencyMs: null,
+  });
+  const payload = Object.freeze({
+    summary,
+    errors: Object.freeze([]),
+    feedback: Object.freeze({
+      avgItemsPerSubmission: 0,
+      totalItems: 0,
+      topTags: Object.freeze([]),
+    }),
+    statusBreakdown: Object.freeze({ total: 999 }),
+    tags: Object.freeze([Object.freeze({ tag: "ignored-tag", count: 999 })]),
+  });
+  const before = structuredClone(payload);
+  const result = toAiMetricsResponse(payload);
+
+  expect(result.summary).toMatchObject({
+    successRate: 0,
+    avgAttempts: 0,
+    avgLatencyMs: null,
+  });
+  expect(result.statusBreakdown).toEqual({
+    total: 0,
+    pending: 0,
+    running: 0,
+    succeeded: 0,
+    failed: 0,
+    dead: 0,
+  });
+  expect(result.tags).toEqual([]);
+  expect(result.errors).toEqual([]);
+  expect(result.summary).toBe(summary);
+  expect(result.statusBreakdown).toBe(jobs);
+  expect(result.raw).toBe(payload);
+  expect(payload).toStrictEqual(before);
+});
+
+test("AI Metrics never rescue missing, invalid or empty formal sources from retired root fields", () => {
+  const invalidSummary = Object.freeze({ jobs: Object.freeze([]) });
+  const emptyJobs = Object.freeze({});
+  const emptySummary = Object.freeze({ jobs: emptyJobs });
+  for (const scenario of [
+    {
+      fields: Object.freeze({}),
+      summaryRef: undefined,
+      jobsRef: undefined,
+    },
+    {
+      fields: Object.freeze({ summary: null, feedback: 7, errors: null }),
+      summaryRef: undefined,
+      jobsRef: undefined,
+    },
+    {
+      fields: Object.freeze({
+        summary: invalidSummary,
+        feedback: Object.freeze({ topTags: Object.freeze({}) }),
+        errors: Object.freeze({}),
+      }),
+      summaryRef: invalidSummary,
+      jobsRef: undefined,
+    },
+    {
+      fields: Object.freeze({
+        summary: emptySummary,
+        feedback: Object.freeze({ topTags: Object.freeze([]) }),
+        errors: Object.freeze([]),
+      }),
+      summaryRef: emptySummary,
+      jobsRef: emptyJobs,
+    },
+  ]) {
+    const payload = Object.freeze({
+      ...scenario.fields,
+      statusBreakdown: Object.freeze({ total: 999, succeeded: 999 }),
+      tags: Object.freeze([Object.freeze({ tag: "ignored-tag", count: 999 })]),
+    });
+    const before = structuredClone(payload);
+    const result = toAiMetricsResponse(payload);
+
+    if (scenario.summaryRef) expect(result.summary).toBe(scenario.summaryRef);
+    else expect(result.summary).toEqual({});
+    expect(result.statusBreakdown).toEqual({});
+    if (scenario.jobsRef) expect(result.statusBreakdown).toBe(scenario.jobsRef);
+    expect(result.tags).toEqual([]);
+    expect(result.errors).toEqual([]);
+    expect(result.raw).toBe(payload);
     expect(payload).toStrictEqual(before);
   }
 });
