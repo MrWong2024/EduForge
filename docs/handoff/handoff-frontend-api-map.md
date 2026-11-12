@@ -110,6 +110,8 @@
   - 候选难度沿用上述筛选选项与解析口径，首次 SSR 查询和加载更多都传同一规范化条件；URL/权威 props 恢复控件与已应用条件。共用入口的筛选实际变化或清空即清除已选 taskId、使旧加载更多请求失效，保留截止/迟交草稿；更新期间禁止选择、加载更多及发布，submit handler 同时校验等待状态和当前候选成员。权威新结果替换候选池并同步页码/总数/limit，旧请求的成功、错误及 finally 均不得覆盖新状态，不自动选首条或重放发布；失败沿用原错误呈现并允许显式重试。
 - 班级任务实例：`/teacher/classrooms/:id/tasks/page.tsx` + 发布/生命周期/编辑组件 -> `/api/proxy/classrooms/:id/tasks*`。
   - 对应后端：`GET/POST/PATCH /api/classrooms/:id/tasks*` 与 `/status`。
+  - 响应身份只取正式根 `id`：summary 将其命名为内部 `classroomTaskId`，详情保留 `id`；真实根关系字段 `classroomId/taskId`、URL 中的实例 ID 和发布请求 `taskId` 保持，不由嵌套模板 ID 补足。教学内容只取 `task`，迟交设置只取 `settings.allowLate`，发布时间只取根 `publishedAt`，旧根内容、设置及嵌套发布时间不再补足；公开字段见 [Backend DTO ClassroomTask](./handoff-backend-dto-cheatsheet.md#classroomtask-dto--response-family)。
+  - 实体直接适配根对象，列表只消费根 `items/page/limit/total`，不再选择 `data` 或裸数组、不从数组长度派生分页；空或缺失正式来源沿原降级，缺 ID 的对象行仍保留。详情及发布响应 raw 保持原根引用，summary/list 不新增 raw；移除无实际消费者的 summary `aiStatus` 和详情 `feedbackEnabled` 专用投影，不改输入或清洗历史键。
   - `toClassroomTaskSummary`、`toClassroomTask` 共用 `normalizeClassroomTaskStatus`，仅接受原始值严格等于 `ACTIVE`、`CLOSED`、`RECALLED`；不 trim、转换大小写或强制转换类型，其余输入为 undefined，不再补 ACTIVE，也不映射为其他合法状态。保留可选状态类型、输入对象不变及详情 raw 原引用；未知状态不移除只读导航、教学内容或已有记录。
   - 实例设置 PATCH 保持原路径与 `dueAt/allowLate` 请求体；精确快照异常优先显示共享安全提示，其余 409 继续显示“课堂任务状态异常，暂时无法修改，请刷新页面核对。”，保留原状态码、内部原始错误与 ErrorState 呈现。保存失败保留草稿，不自动重放 PATCH；服务端错误、权限和生命周期合同见 [Backend API Classroom Tasks](./handoff-backend-api-map.md#classroom-tasksclassrooms-子资源)。
   - 快照三态由 `getTaskSnapshotMessage` 统一显示：true 为“已保存的课堂任务内容”，false 为“课堂任务内容快照缺失或无效，请联系教师核对。”，undefined 为“课堂任务内容信息暂不可用，请刷新核对后继续。”。保留严格布尔适配和提交资格判断，不查询当前模板补课堂内容。

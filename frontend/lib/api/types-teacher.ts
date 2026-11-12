@@ -198,7 +198,6 @@ export type ClassroomTaskSummary = {
   knowledgeModule?: string;
   dueAt?: string;
   allowLate?: boolean;
-  aiStatus?: string;
   taskPublisher?: PublisherSummary | null;
   publishedAt?: string;
 };
@@ -283,7 +282,6 @@ export type ClassroomTask = {
   description?: string;
   dueAt?: string;
   allowLate?: boolean;
-  feedbackEnabled?: boolean;
   taskStatus?: string;
   taskPublisher?: PublisherSummary | null;
   publishedAt?: string;
@@ -1056,31 +1054,17 @@ export const toClassroomTaskSummary = (
       !Array.isArray(taskRecord.rubric)
         ? asRecord(taskRecord.rubric)
         : undefined,
-    classroomTaskId: asString(record.classroomTaskId) ?? asString(record.id),
-    taskId:
-      asString(record.taskId) ??
-      asString(taskRecord.id) ??
-      asString(taskRecord.taskId),
-    title:
-      asString(taskRecord.title) ??
-      asString(record.title) ??
-      asString(record.name),
-    description:
-      asString(taskRecord.description) ?? asString(record.description),
+    classroomTaskId: asString(record.id),
+    taskId: asString(record.taskId),
+    title: asString(taskRecord.title),
+    description: asString(taskRecord.description),
     status: normalizeClassroomTaskStatus(record.status),
-    taskStatus:
-      asString(taskRecord.status) ??
-      asString(record.taskStatus) ??
-      asString(record.learningTaskStatus),
-    knowledgeModule:
-      asString(taskRecord.knowledgeModule) ?? asString(record.knowledgeModule),
+    taskStatus: asString(taskRecord.status),
+    knowledgeModule: asString(taskRecord.knowledgeModule),
     dueAt: asString(record.dueAt),
-    allowLate:
-      asBoolean(settingsRecord.allowLate) ?? asBoolean(record.allowLate),
-    aiStatus: asString(record.aiStatus) ?? asString(record.aiFeedbackStatus),
+    allowLate: asBoolean(settingsRecord.allowLate),
     taskPublisher: toPublisherSummary(record.taskPublisher),
-    publishedAt:
-      asString(record.publishedAt) ?? asString(taskRecord.publishedAt),
+    publishedAt: asString(record.publishedAt),
   };
 };
 
@@ -1101,25 +1085,16 @@ export const toClassroomTask = (payload: unknown): ClassroomTask => {
       !Array.isArray(taskRecord.rubric)
         ? asRecord(taskRecord.rubric)
         : undefined,
-    id: asString(record.id) ?? asString(record.classroomTaskId),
+    id: asString(record.id),
     classroomId: asString(record.classroomId),
     taskId: asString(record.taskId),
     status: normalizeClassroomTaskStatus(record.status),
-    title:
-      asString(taskRecord.title) ??
-      asString(record.title) ??
-      asString(record.name),
-    description:
-      asString(taskRecord.description) ?? asString(record.description),
+    title: asString(taskRecord.title),
+    description: asString(taskRecord.description),
     dueAt: asString(record.dueAt),
-    allowLate:
-      asBoolean(settingsRecord.allowLate) ?? asBoolean(record.allowLate),
-    feedbackEnabled: asBoolean(settingsRecord.feedbackEnabled),
+    allowLate: asBoolean(settingsRecord.allowLate),
     taskPublisher: toPublisherSummary(record.taskPublisher),
-    taskStatus:
-      asString(taskRecord.status) ??
-      asString(record.taskStatus) ??
-      asString(record.learningTaskStatus),
+    taskStatus: asString(taskRecord.status),
     publishedAt: asString(record.publishedAt),
     raw: record,
   };
@@ -1195,29 +1170,15 @@ export const toLearningTaskUpdateResponse = (
 export const toClassroomTasksResponse = (
   payload: unknown,
 ): ClassroomTasksResponse => {
-  if (Array.isArray(payload)) {
-    return {
-      items: payload.map((item) => toClassroomTaskSummary(item)),
-      page: 1,
-      limit: payload.length,
-      total: payload.length,
-    };
-  }
-
   const record = asRecord(payload);
-  const dataRecord = asRecord(safeGet(record, "data", undefined));
-  const source = Object.keys(dataRecord).length > 0 ? dataRecord : record;
-  const candidateItems =
-    safeGet<unknown>(source, "items", undefined) ??
-    safeGet<unknown>(source, "data", undefined);
 
   return {
-    items: asRecordArray(candidateItems).map((item) =>
+    items: asRecordArray(record.items).map((item) =>
       toClassroomTaskSummary(item),
     ),
-    page: asNumber(source.page),
-    limit: asNumber(source.limit),
-    total: asNumber(source.total),
+    page: asNumber(record.page),
+    limit: asNumber(record.limit),
+    total: asNumber(record.total),
   };
 };
 

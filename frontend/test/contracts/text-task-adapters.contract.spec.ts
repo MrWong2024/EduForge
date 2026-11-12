@@ -15,6 +15,7 @@ import {
   toClassroomSummary,
   toClassroomTask,
   toClassroomTaskSummary,
+  toClassroomTasksResponse,
   toClassroomUpdateResponse,
   toCourseCreateResponse,
   toCourseDetailResponse,
@@ -30,6 +31,7 @@ import {
   toLearningTrajectoryResponse,
   toPublishableTaskTemplateListResponse,
   toSubmissionDetailResponse as toTeacherDetail,
+  toSubmitTaskResponse,
   toTeacherFeedbackListResponse,
 } from "../../lib/api/types-teacher";
 import {
@@ -1305,6 +1307,366 @@ test("classroom status adapters reject present invalid values without coercion o
     expect(Object.hasOwn(payload, "status")).toBe(true);
     expect(payload.status).toBe(status);
     expect(payload).toEqual({ id: "invalid-status", status });
+  }
+});
+
+test("classroom task entries use formal identity, content and settings without legacy overrides", () => {
+  for (const allowLate of [true, false]) {
+    const rubric = Object.freeze({});
+    const task = Object.freeze({
+      id: "ignored-nested-template-id",
+      taskId: "ignored-nested-task-id",
+      title: "正式发布标题",
+      description: "正式发布说明",
+      knowledgeModule: "formal-module",
+      status: "ARCHIVED",
+      difficulty: "  综合\n设计  ",
+      rubric,
+      publishedAt: "2020-01-01T00:00:00.000Z",
+    });
+    const settings = Object.freeze({ allowLate, feedbackEnabled: true });
+    const payload = Object.freeze({
+      id: "formal-instance",
+      classroomTaskId: "legacy-instance-id",
+      classroomId: "actual-classroom",
+      taskId: "actual-template",
+      taskSnapshotAvailable: true,
+      status: "ACTIVE",
+      title: "旧根标题",
+      name: "旧根名称",
+      description: "旧根说明",
+      knowledgeModule: "legacy-module",
+      taskStatus: "ROOT_STATUS",
+      learningTaskStatus: "ROOT_LEARNING_STATUS",
+      allowLate: !allowLate,
+      difficulty: "ignored-root-difficulty",
+      publishedAt: "2026-11-12T08:00:00.000Z",
+      dueAt: "2026-11-30T08:00:00.000Z",
+      task,
+      settings,
+      taskPublisher: Object.freeze({ id: "publisher-1", name: "正式发布者" }),
+      createdBy: "ignored-publisher",
+      aiStatus: "legacy-ai-status",
+      aiFeedbackStatus: "legacy-feedback-status",
+      data: Object.freeze({ id: "ignored-data-instance" }),
+    });
+    const before = structuredClone(payload);
+    const expectedCommon = {
+      taskSnapshotAvailable: true,
+      taskId: "actual-template",
+      status: "ACTIVE",
+      title: "正式发布标题",
+      description: "正式发布说明",
+      taskStatus: "ARCHIVED",
+      dueAt: "2026-11-30T08:00:00.000Z",
+      allowLate,
+      publishedAt: "2026-11-12T08:00:00.000Z",
+      taskPublisher: { id: "publisher-1", name: "正式发布者" },
+    };
+    const expectedSummary = {
+      ...expectedCommon,
+      classroomTaskId: "formal-instance",
+      knowledgeModule: "formal-module",
+    };
+    const summary = toClassroomTaskSummary(payload);
+    expect(summary).toMatchObject(expectedSummary);
+    expect(summary.rubric).toBe(rubric);
+    expect(summary).not.toHaveProperty("raw");
+    expect(summary).not.toHaveProperty("difficulty");
+    expect(summary).not.toHaveProperty("aiStatus");
+
+    for (const adapt of [toClassroomTask, toSubmitTaskResponse]) {
+      const detail = adapt(payload);
+      expect(detail).toMatchObject({
+        ...expectedCommon,
+        id: "formal-instance",
+        classroomId: "actual-classroom",
+        difficulty: "  综合\n设计  ",
+      });
+      expect(detail.rubric).toBe(rubric);
+      expect(detail).not.toHaveProperty("feedbackEnabled");
+      expect(detail.raw).toBe(payload);
+      expect(detail.raw.task).toBe(task);
+      expect(detail.raw.settings).toBe(settings);
+      expect(detail.raw).toHaveProperty("settings.feedbackEnabled", true);
+      expect(detail.raw).toHaveProperty("aiStatus", "legacy-ai-status");
+    }
+
+    const listPayload = Object.freeze({
+      items: Object.freeze([payload]),
+      total: 1,
+      page: 1,
+      limit: 100,
+    });
+    const beforeList = structuredClone(listPayload);
+    const list = toClassroomTasksResponse(listPayload);
+    expect(list).toMatchObject({
+      items: [expectedSummary],
+      total: 1,
+      page: 1,
+      limit: 100,
+    });
+    expect(list.items[0].rubric).toBe(rubric);
+    expect(list).not.toHaveProperty("raw");
+    expect(list.items[0]).not.toHaveProperty("raw");
+    expect(list.items[0]).not.toHaveProperty("aiStatus");
+    expect(listPayload).toStrictEqual(beforeList);
+    expect(payload).toStrictEqual(before);
+  }
+});
+
+test("classroom task entries do not rescue missing or invalid formal identity, content and settings", () => {
+  const nestedAliases = Object.freeze({
+    id: "ignored-nested-template-id",
+    taskId: "ignored-nested-task-id",
+    publishedAt: "2020-01-01T00:00:00.000Z",
+  });
+  for (const scenario of [
+    {
+      fields: Object.freeze({}),
+      task: nestedAliases,
+      settings: Object.freeze({ feedbackEnabled: true }),
+      hasId: false,
+    },
+    {
+      fields: Object.freeze({ id: null, taskId: null, publishedAt: null }),
+      task: Object.freeze({
+        ...nestedAliases,
+        title: 12,
+        description: null,
+        status: false,
+        knowledgeModule: Object.freeze([]),
+      }),
+      settings: Object.freeze({ allowLate: "false", feedbackEnabled: true }),
+      hasId: true,
+    },
+    {
+      fields: Object.freeze({
+        id: Object.freeze([]),
+        taskId: Object.freeze({ id: "invalid-task-id" }),
+        publishedAt: 42,
+      }),
+      task: Object.freeze({
+        ...nestedAliases,
+        title: " \t ",
+        description: false,
+        status: Object.freeze({}),
+        knowledgeModule: null,
+        rubric: Object.freeze([]),
+      }),
+      settings: Object.freeze({ allowLate: null, feedbackEnabled: true }),
+      hasId: true,
+    },
+  ]) {
+    const payload = Object.freeze({
+      ...scenario.fields,
+      classroomTaskId: "legacy-instance-id",
+      classroomId: "actual-classroom",
+      taskSnapshotAvailable: "true",
+      status: "ACTIVE",
+      task: scenario.task,
+      settings: scenario.settings,
+      title: "旧根标题",
+      name: "旧根名称",
+      description: "旧根说明",
+      knowledgeModule: "legacy-module",
+      taskStatus: "ROOT_STATUS",
+      learningTaskStatus: "ROOT_LEARNING_STATUS",
+      allowLate: true,
+      createdBy: "ignored-publisher",
+      aiStatus: "legacy-ai-status",
+      aiFeedbackStatus: "legacy-feedback-status",
+      taskSnapshot: Object.freeze({ title: "忽略的快照内容" }),
+    });
+    const before = structuredClone(payload);
+    const summary = toClassroomTaskSummary(payload);
+    expect(summary.classroomTaskId).toBeUndefined();
+    expect(summary.taskId).toBeUndefined();
+    expect(summary.title).toBeUndefined();
+    expect(summary.description).toBeUndefined();
+    expect(summary.taskStatus).toBeUndefined();
+    expect(summary.knowledgeModule).toBeUndefined();
+    expect(summary.publishedAt).toBeUndefined();
+    expect(summary.allowLate).toBeUndefined();
+    expect(summary.taskSnapshotAvailable).toBeUndefined();
+    expect(summary.rubric).toBeUndefined();
+    expect(summary.taskPublisher).toBeNull();
+    expect(summary.status).toBe("ACTIVE");
+    expect(summary).not.toHaveProperty("aiStatus");
+    expect(summary).not.toHaveProperty("raw");
+
+    for (const adapt of [toClassroomTask, toSubmitTaskResponse]) {
+      const detail = adapt(payload);
+      expect(detail.id).toBeUndefined();
+      expect(detail.taskId).toBeUndefined();
+      expect(detail.classroomId).toBe("actual-classroom");
+      expect(detail.title).toBeUndefined();
+      expect(detail.description).toBeUndefined();
+      expect(detail.taskStatus).toBeUndefined();
+      expect(detail.publishedAt).toBeUndefined();
+      expect(detail.allowLate).toBeUndefined();
+      expect(detail.taskSnapshotAvailable).toBeUndefined();
+      expect(detail.rubric).toBeUndefined();
+      expect(detail.taskPublisher).toBeNull();
+      expect(detail.status).toBe("ACTIVE");
+      expect(detail).not.toHaveProperty("feedbackEnabled");
+      expect(detail.raw).toBe(payload);
+      expect(detail.raw.task).toBe(scenario.task);
+      expect(detail.raw.settings).toBe(scenario.settings);
+    }
+    expect(Object.hasOwn(payload, "id")).toBe(scenario.hasId);
+    expect(Object.hasOwn(payload, "taskId")).toBe(scenario.hasId);
+    expect(payload).toStrictEqual(before);
+  }
+});
+
+test("classroom task lists retain root row order, missing-ID rows and optional pagination", () => {
+  const first = Object.freeze({
+    id: "instance-first",
+    taskId: "template-first",
+    status: "CLOSED",
+    task: Object.freeze({ title: "第一项" }),
+  });
+  const unidentified = Object.freeze({
+    classroomTaskId: "legacy-instance-id",
+    taskId: "template-without-instance-id",
+    status: "ACTIVE",
+    task: Object.freeze({ title: "保留缺少正式 ID 的行" }),
+  });
+  const last = Object.freeze({
+    id: "instance-last",
+    taskId: "template-last",
+    status: "RECALLED",
+    task: Object.freeze({ title: "最后一项" }),
+  });
+  const items = Object.freeze([first, unidentified, last]);
+  const payload = Object.freeze({
+    items,
+    total: 3,
+    page: 1,
+    limit: 100,
+    data: Object.freeze({
+      items: Object.freeze([Object.freeze({ id: "ignored-instance" })]),
+      total: 999,
+      page: 9,
+      limit: 9,
+    }),
+  });
+  const unpagedPayload = Object.freeze({ items: Object.freeze([first]) });
+  const before = structuredClone(payload);
+  const beforeUnpaged = structuredClone(unpagedPayload);
+  const result = toClassroomTasksResponse(payload);
+
+  expect(result.items.map((item) => item.classroomTaskId)).toEqual([
+    "instance-first",
+    undefined,
+    "instance-last",
+  ]);
+  expect(result.items.map((item) => item.taskId)).toEqual([
+    "template-first",
+    "template-without-instance-id",
+    "template-last",
+  ]);
+  expect(result.items.map((item) => item.title)).toEqual([
+    "第一项",
+    "保留缺少正式 ID 的行",
+    "最后一项",
+  ]);
+  expect(result.items.map((item) => item.status)).toEqual([
+    "CLOSED",
+    "ACTIVE",
+    "RECALLED",
+  ]);
+  expect(result).toMatchObject({ total: 3, page: 1, limit: 100 });
+  expect(result).not.toHaveProperty("raw");
+  result.items.forEach((item) => {
+    expect(item).not.toHaveProperty("raw");
+    expect(item).not.toHaveProperty("aiStatus");
+  });
+  const unpaged = toClassroomTasksResponse(unpagedPayload);
+  expect(unpaged.items).toHaveLength(1);
+  expect(unpaged.items[0].classroomTaskId).toBe("instance-first");
+  expect(unpaged.total).toBeUndefined();
+  expect(unpaged.page).toBeUndefined();
+  expect(unpaged.limit).toBeUndefined();
+  expect(unpaged).not.toHaveProperty("raw");
+  expect(payload).toStrictEqual(before);
+  expect(unpagedPayload).toStrictEqual(beforeUnpaged);
+});
+
+test("classroom task lists reject old wrappers and never rescue empty or invalid root items and pagination", () => {
+  const oldItems = Object.freeze([Object.freeze({ id: "ignored-instance" })]);
+  const oldData = Object.freeze({
+    items: oldItems,
+    total: 999,
+    page: 9,
+    limit: 9,
+  });
+  for (const scenario of [
+    { payload: oldItems, total: undefined, page: undefined, limit: undefined },
+    {
+      payload: Object.freeze({ data: oldData }),
+      total: undefined,
+      page: undefined,
+      limit: undefined,
+    },
+    {
+      payload: Object.freeze({ data: oldItems }),
+      total: undefined,
+      page: undefined,
+      limit: undefined,
+    },
+    {
+      payload: Object.freeze({
+        data: Object.freeze({ data: oldItems, total: 999, page: 9, limit: 9 }),
+      }),
+      total: undefined,
+      page: undefined,
+      limit: undefined,
+    },
+    {
+      payload: Object.freeze({
+        items: Object.freeze([]),
+        total: 0,
+        page: 0,
+        limit: 0,
+        data: oldData,
+      }),
+      total: 0,
+      page: 0,
+      limit: 0,
+    },
+    {
+      payload: Object.freeze({
+        items: null,
+        total: Number.NaN,
+        page: "2",
+        limit: null,
+        data: oldData,
+      }),
+      total: undefined,
+      page: undefined,
+      limit: undefined,
+    },
+    {
+      payload: Object.freeze({
+        items: Object.freeze({ invalid: true }),
+        data: oldData,
+      }),
+      total: undefined,
+      page: undefined,
+      limit: undefined,
+    },
+  ]) {
+    const before = structuredClone(scenario.payload);
+    const result = toClassroomTasksResponse(scenario.payload);
+
+    expect(result.items).toEqual([]);
+    expect(result.total).toBe(scenario.total);
+    expect(result.page).toBe(scenario.page);
+    expect(result.limit).toBe(scenario.limit);
+    expect(result).not.toHaveProperty("raw");
+    expect(scenario.payload).toStrictEqual(before);
   }
 });
 
