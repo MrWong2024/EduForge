@@ -871,7 +871,7 @@ export type ClassroomStudentsResponse = {
 export const toClassroomSummary = (value: unknown): ClassroomSummary => {
   const record = asRecord(value);
   return {
-    id: asString(record.id) ?? asString(record.classroomId),
+    id: asString(record.id),
     name: asString(record.name),
     joinCode: asString(record.joinCode),
     status: normalizeClassroomStatus(record.status),
@@ -885,7 +885,7 @@ const toClassroomCourseSummary = (
 ): ClassroomCourseSummary | undefined => {
   const record = asRecord(value);
   const course = {
-    id: asString(record.id) ?? asString(record.courseId),
+    id: asString(record.id),
     code: asString(record.code),
     name: asString(record.name),
     term: asString(record.term),
@@ -907,7 +907,7 @@ export const toClassroomCreateResponse = (
 ): ClassroomCreateResponse => {
   const record = asRecord(payload);
   return {
-    id: asString(record.id) ?? asString(record.classroomId),
+    id: asString(record.id),
     courseId: asString(record.courseId),
     course: toClassroomCourseSummary(record.course),
     name: asString(record.name),
@@ -920,38 +920,22 @@ export const toClassroomCreateResponse = (
 export const toClassroomDetailResponse = (
   payload: unknown,
 ): ClassroomDetailResponse => {
-  const record = asRecord(payload);
-  const dataRecord = asRecord(safeGet(record, "data", undefined));
-  const source = Object.keys(dataRecord).length > 0 ? dataRecord : record;
-  return toClassroomSummary(source);
+  return toClassroomSummary(payload);
 };
 
 export const toClassroomUpdateResponse = (
   payload: unknown,
 ): ClassroomUpdateResponse => {
-  const record = asRecord(payload);
-  const dataRecord = asRecord(safeGet(record, "data", undefined));
-  const source = Object.keys(dataRecord).length > 0 ? dataRecord : record;
-  return toClassroomSummary(source);
+  return toClassroomSummary(payload);
 };
 
 export const toClassroomListResponse = (
   payload: unknown,
 ): ClassroomListResponse => {
-  if (Array.isArray(payload)) {
-    return {
-      items: payload.map((item) => toClassroomSummary(item)),
-    };
-  }
-
   const record = asRecord(payload);
-  const candidateItems =
-    safeGet<unknown>(record, "items", undefined) ??
-    safeGet<unknown>(record, "data.items", undefined) ??
-    safeGet<unknown>(record, "data", undefined);
 
   return {
-    items: asRecordArray(candidateItems).map((item) =>
+    items: asRecordArray(record.items).map((item) =>
       toClassroomSummary(item),
     ),
     page: asNumber(record.page),
@@ -963,7 +947,7 @@ export const toClassroomListResponse = (
 export const toCourseSummary = (value: unknown): CourseSummary => {
   const record = asRecord(value);
   return {
-    id: asString(record.id) ?? asString(record.courseId),
+    id: asString(record.id),
     code: asString(record.code),
     name: asString(record.name),
     term: asString(record.term),
@@ -980,7 +964,7 @@ export const toCourseCreateResponse = (
 ): CourseCreateResponse => {
   const record = asRecord(payload);
   return {
-    id: asString(record.id) ?? asString(record.courseId),
+    id: asString(record.id),
     code: asString(record.code),
     name: asString(record.name),
     term: asString(record.term),
@@ -993,19 +977,13 @@ export const toCourseCreateResponse = (
 export const toCourseDetailResponse = (
   payload: unknown,
 ): CourseDetailResponse => {
-  const record = asRecord(payload);
-  const dataRecord = asRecord(safeGet(record, "data", undefined));
-  const source = Object.keys(dataRecord).length > 0 ? dataRecord : record;
-  return toCourseSummary(source);
+  return toCourseSummary(payload);
 };
 
 export const toCourseUpdateResponse = (
   payload: unknown,
 ): CourseUpdateResponse => {
-  const record = asRecord(payload);
-  const dataRecord = asRecord(safeGet(record, "data", undefined));
-  const source = Object.keys(dataRecord).length > 0 ? dataRecord : record;
-  return toCourseSummary(source);
+  return toCourseSummary(payload);
 };
 
 const toCourseOverviewErrorItem = (value: unknown): CourseOverviewErrorItem => {
@@ -1042,37 +1020,13 @@ const toCourseOverviewItem = (value: unknown): CourseOverviewItem => {
 };
 
 export const toCourseListResponse = (payload: unknown): CourseListResponse => {
-  if (Array.isArray(payload)) {
-    return {
-      items: payload.map((item) => toCourseSummary(item)),
-      total: payload.length,
-      page: 1,
-      limit: payload.length,
-      raw: payload,
-    };
-  }
-
   const record = asRecord(payload);
-  const dataRecord = asRecord(safeGet(record, "data", undefined));
-  const candidateItems =
-    safeGet<unknown>(record, "items", undefined) ??
-    safeGet<unknown>(record, "data.items", undefined) ??
-    safeGet<unknown>(record, "data", undefined);
 
   return {
-    items: asRecordArray(candidateItems).map((item) => toCourseSummary(item)),
-    total:
-      asNumber(record.total) ??
-      asNumber(safeGet(record, "pagination.total", undefined)) ??
-      asNumber(dataRecord.total),
-    page:
-      asNumber(record.page) ??
-      asNumber(safeGet(record, "pagination.page", undefined)) ??
-      asNumber(dataRecord.page),
-    limit:
-      asNumber(record.limit) ??
-      asNumber(safeGet(record, "pagination.limit", undefined)) ??
-      asNumber(dataRecord.limit),
+    items: asRecordArray(record.items).map((item) => toCourseSummary(item)),
+    total: asNumber(record.total),
+    page: asNumber(record.page),
+    limit: asNumber(record.limit),
     raw: payload,
   };
 };
@@ -1081,23 +1035,21 @@ export const toCourseOverviewResponse = (
   payload: unknown,
 ): CourseOverviewResponse => {
   const record = asRecord(payload);
-  const dataRecord = asRecord(safeGet(record, "data", undefined));
-  const source = Object.keys(dataRecord).length > 0 ? dataRecord : record;
 
   return {
     course:
-      Object.keys(asRecord(safeGet(source, "course", undefined))).length > 0
-        ? toCourseSummary(safeGet(source, "course", undefined))
+      Object.keys(asRecord(safeGet(record, "course", undefined))).length > 0
+        ? toCourseSummary(safeGet(record, "course", undefined))
         : undefined,
-    window: asString(source.window),
-    generatedAt: asString(source.generatedAt),
-    page: asNumber(source.page),
-    limit: asNumber(source.limit),
-    total: asNumber(source.total),
-    items: asRecordArray(safeGet(source, "items", undefined)).map((item) =>
+    window: asString(record.window),
+    generatedAt: asString(record.generatedAt),
+    page: asNumber(record.page),
+    limit: asNumber(record.limit),
+    total: asNumber(record.total),
+    items: asRecordArray(safeGet(record, "items", undefined)).map((item) =>
       toCourseOverviewItem(item),
     ),
-    raw: source,
+    raw: record,
   };
 };
 

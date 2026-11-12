@@ -104,6 +104,7 @@ test("course and classroom status normalizers reject missing and invalid values 
 test("direct course and classroom mappers preserve adjacent fields and their existing raw semantics", () => {
   const nestedCourse = Object.freeze({
     id: "course-1",
+    courseId: "legacy-nested-course",
     name: "课程",
     status: "archived",
   });
@@ -123,13 +124,18 @@ test("direct course and classroom mappers preserve adjacent fields and their exi
   ] as const) {
     const course = Object.freeze({
       id: "course-1",
+      courseId: "legacy-course",
       code: "CS-101",
       name: "课程名称",
       term: "2026秋",
+      courseLabel: "程序设计基础",
+      createdAt: "2026-09-01T08:00:00.000Z",
+      updatedAt: "2026-11-01T08:00:00.000Z",
       ...fields,
     });
     const classroom = Object.freeze({
       id: "classroom-1",
+      classroomId: "legacy-classroom",
       courseId: "course-1",
       name: "班级名称",
       joinCode: "JOIN-001",
@@ -146,10 +152,15 @@ test("direct course and classroom mappers preserve adjacent fields and their exi
         code: "CS-101",
         name: "课程名称",
         term: "2026秋",
+        courseLabel: "程序设计基础",
       });
       expect(result.status).toBe(expectedStatus);
       expect(result.raw).toBe(course);
     }
+    expect(toCourseSummary(course)).toMatchObject({
+      createdAt: "2026-09-01T08:00:00.000Z",
+      updatedAt: "2026-11-01T08:00:00.000Z",
+    });
     for (const adapt of [toClassroomSummary, toClassroomCreateResponse]) {
       const result = adapt(classroom);
       expect(result).toMatchObject({
@@ -170,7 +181,7 @@ test("direct course and classroom mappers preserve adjacent fields and their exi
   }
 });
 
-test("course and classroom detail and update wrappers do not rescue invalid selected data status", () => {
+test("course and classroom detail and update consume top-level fields despite conflicting data", () => {
   const course = Object.freeze({
     id: "selected-course",
     code: "CS-102",
@@ -185,10 +196,20 @@ test("course and classroom detail and update wrappers do not rescue invalid sele
     joinCode: "JOIN-002",
     status: " ACTIVE ",
   });
-  const coursePayload = Object.freeze({ status: "ACTIVE", data: course });
-  const classroomPayload = Object.freeze({
+  const ignoredCourse = Object.freeze({
+    id: "ignored-course",
+    name: "忽略的课程",
+    status: "ACTIVE",
+  });
+  const ignoredClassroom = Object.freeze({
+    id: "ignored-classroom",
+    name: "忽略的班级",
     status: "ARCHIVED",
-    data: classroom,
+  });
+  const coursePayload = Object.freeze({ ...course, data: ignoredCourse });
+  const classroomPayload = Object.freeze({
+    ...classroom,
+    data: ignoredClassroom,
   });
   const beforeCourse = structuredClone(coursePayload);
   const beforeClassroom = structuredClone(classroomPayload);
@@ -202,7 +223,7 @@ test("course and classroom detail and update wrappers do not rescue invalid sele
       term: "2026秋",
     });
     expect(result.status).toBeUndefined();
-    expect(result.raw).toBe(course);
+    expect(result.raw).toBe(coursePayload);
   }
   for (const adapt of [toClassroomDetailResponse, toClassroomUpdateResponse]) {
     const result = adapt(classroomPayload);
@@ -215,8 +236,8 @@ test("course and classroom detail and update wrappers do not rescue invalid sele
     expect(result.status).toBeUndefined();
     expect(result).not.toHaveProperty("raw");
   }
-  expect(coursePayload.data).toBe(course);
-  expect(classroomPayload.data).toBe(classroom);
+  expect(coursePayload.data).toBe(ignoredCourse);
+  expect(classroomPayload.data).toBe(ignoredClassroom);
   expect(coursePayload).toEqual(beforeCourse);
   expect(classroomPayload).toEqual(beforeClassroom);
 });
@@ -233,7 +254,10 @@ test("course and classroom lists retain mixed-status rows, order and pagination"
     Object.freeze({ id: "classroom-active", status: "ACTIVE" }),
   ]);
   const coursePayload = Object.freeze({
-    data: Object.freeze({ items: courses, total: 31, page: 3, limit: 100 }),
+    items: courses,
+    total: 31,
+    page: 3,
+    limit: 100,
   });
   const classroomPayload = Object.freeze({
     items: classrooms,
@@ -276,15 +300,16 @@ test("course and classroom lists retain mixed-status rows, order and pagination"
   classroomResult.items.forEach((item) =>
     expect(item).not.toHaveProperty("raw"),
   );
-  expect(coursePayload.data.items).toBe(courses);
+  expect(coursePayload.items).toBe(courses);
   expect(classroomPayload.items).toBe(classrooms);
   expect(coursePayload).toEqual(beforeCourse);
   expect(classroomPayload).toEqual(beforeClassroom);
 });
 
-test("course overview keeps selected course status strict and preserves source raw references", () => {
+test("course overview preserves top-level metrics, exact zero, nullable AI and raw references", () => {
   const course = Object.freeze({
     id: "overview-course",
+    courseId: "legacy-overview-course",
     code: "CS-103",
     name: "总览课程",
     term: "2026秋",
@@ -294,18 +319,47 @@ test("course overview keeps selected course status strict and preserves source r
     classroomId: "overview-classroom",
     name: "总览班级",
     studentsCount: 2,
+    publishedClassroomTasks: 3,
+    distinctStudentsSubmitted: 0,
+    overallSubmissionCoverage: 0,
+    submissionRate: 0,
+    lateSubmissionsCount: 0,
+    lateStudentsCount: 0,
+    ai: Object.freeze({
+      jobsTotal: 0,
+      pendingJobs: 0,
+      failedJobs: 0,
+      aiSuccessRate: null,
+      topErrors: Object.freeze([
+        Object.freeze({ code: "RATE_LIMIT", count: 0 }),
+      ]),
+    }),
   });
-  const source = Object.freeze({
+  const emptyItem = Object.freeze({
+    classroomId: "overview-empty-classroom",
+    name: "空班级",
+    studentsCount: 0,
+    ai: Object.freeze({ aiSuccessRate: 0 }),
+  });
+  const ignored = Object.freeze({
+    course: Object.freeze({ id: "ignored-course", status: "ACTIVE" }),
+    window: "7d",
+    page: 99,
+    limit: 1,
+    total: 999,
+    items: Object.freeze([
+      Object.freeze({ classroomId: "ignored-classroom", studentsCount: 999 }),
+    ]),
+  });
+  const payload = Object.freeze({
     course,
     window: "all",
+    generatedAt: "2026-11-01T09:00:00.000Z",
     page: 2,
     limit: 20,
     total: 21,
-    items: Object.freeze([item]),
-  });
-  const payload = Object.freeze({
-    course: Object.freeze({ id: "outer-course", status: "ACTIVE" }),
-    data: source,
+    items: Object.freeze([item, emptyItem]),
+    data: ignored,
   });
   const before = structuredClone(payload);
   const result = toCourseOverviewResponse(payload);
@@ -320,17 +374,347 @@ test("course overview keeps selected course status strict and preserves source r
   expect(result.course?.raw).toBe(course);
   expect(result).toMatchObject({
     window: "all",
+    generatedAt: "2026-11-01T09:00:00.000Z",
     page: 2,
     limit: 20,
     total: 21,
     items: [
-      { classroomId: "overview-classroom", name: "总览班级", studentsCount: 2 },
+      {
+        classroomId: "overview-classroom",
+        name: "总览班级",
+        studentsCount: 2,
+        publishedClassroomTasks: 3,
+        distinctStudentsSubmitted: 0,
+        overallSubmissionCoverage: 0,
+        submissionRate: 0,
+        lateSubmissionsCount: 0,
+        lateStudentsCount: 0,
+        aiJobsTotal: 0,
+        aiPendingJobs: 0,
+        aiFailedJobs: 0,
+        aiSuccessRate: null,
+        topErrors: [{ code: "RATE_LIMIT", count: 0 }],
+      },
+      {
+        classroomId: "overview-empty-classroom",
+        name: "空班级",
+        studentsCount: 0,
+        aiSuccessRate: 0,
+      },
     ],
   });
-  expect(result.raw).toBe(source);
+  expect(result.raw).toBe(payload);
   expect(result.items[0].raw).toBe(item);
-  expect(payload.data).toBe(source);
-  expect(payload).toEqual(before);
+  expect(result.items[1].raw).toBe(emptyItem);
+  expect(payload.data).toBe(ignored);
+  expect(payload).toStrictEqual(before);
+});
+
+test("entity and nested course IDs do not fall back to old aliases when formal IDs are unusable", () => {
+  for (const scenario of [
+    {
+      idFields: Object.freeze({}),
+      hasId: false,
+      courseAdapt: toCourseSummary,
+      classroomAdapt: toClassroomSummary,
+      classroomRaw: false,
+    },
+    {
+      idFields: Object.freeze({ id: null }),
+      hasId: true,
+      courseAdapt: toCourseCreateResponse,
+      classroomAdapt: toClassroomCreateResponse,
+      classroomRaw: true,
+    },
+    {
+      idFields: Object.freeze({ id: Object.freeze(["invalid-id"]) }),
+      hasId: true,
+      courseAdapt: toCourseUpdateResponse,
+      classroomAdapt: toClassroomUpdateResponse,
+      classroomRaw: false,
+    },
+  ]) {
+    const nestedCourse = Object.freeze({
+      courseId: "legacy-nested-course",
+      name: "保留的课程摘要",
+      status: "archived",
+      ...scenario.idFields,
+    });
+    const course = Object.freeze({
+      courseId: "legacy-course-id",
+      code: "CS-104",
+      name: "保留课程",
+      term: "2026秋",
+      ...scenario.idFields,
+    });
+    const classroom = Object.freeze({
+      classroomId: "legacy-classroom-id",
+      courseId: "actual-related-course",
+      name: "保留班级",
+      joinCode: "JOIN-004",
+      course: nestedCourse,
+      ...scenario.idFields,
+    });
+    const beforeCourse = structuredClone(course);
+    const beforeClassroom = structuredClone(classroom);
+    const courseResult = scenario.courseAdapt(course);
+    const classroomResult = scenario.classroomAdapt(classroom);
+
+    expect(courseResult.id).toBeUndefined();
+    expect(courseResult).toMatchObject({
+      code: "CS-104",
+      name: "保留课程",
+      term: "2026秋",
+    });
+    expect(courseResult.raw).toBe(course);
+    expect(classroomResult.id).toBeUndefined();
+    expect(classroomResult).toMatchObject({
+      courseId: "actual-related-course",
+      name: "保留班级",
+      joinCode: "JOIN-004",
+      course: { name: "保留的课程摘要", status: "archived" },
+    });
+    expect(classroomResult.course?.id).toBeUndefined();
+    expect(classroomResult.course).not.toHaveProperty("raw");
+    expect(Object.hasOwn(classroomResult, "raw")).toBe(scenario.classroomRaw);
+    if ("raw" in classroomResult) expect(classroomResult.raw).toBe(classroom);
+    expect(Object.hasOwn(course, "id")).toBe(scenario.hasId);
+    expect(Object.hasOwn(classroom, "id")).toBe(scenario.hasId);
+    expect(Object.hasOwn(nestedCourse, "id")).toBe(scenario.hasId);
+    expect(course).toStrictEqual(beforeCourse);
+    expect(classroom).toStrictEqual(beforeClassroom);
+  }
+});
+
+test("detail and update fields are not rescued from data when top-level fields are missing or invalid", () => {
+  const course = Object.freeze({
+    id: null,
+    courseId: "legacy-course",
+    code: false,
+    term: null,
+    status: " active ",
+    data: Object.freeze({
+      id: "data-course",
+      code: "CS-DATA",
+      name: "嵌套课程",
+      term: "2026秋",
+      status: "ACTIVE",
+    }),
+  });
+  const classroom = Object.freeze({
+    id: Object.freeze({ value: "invalid-classroom-id" }),
+    classroomId: "legacy-classroom",
+    courseId: "actual-related-course",
+    name: null,
+    joinCode: false,
+    status: null,
+    data: Object.freeze({
+      id: "data-classroom",
+      courseId: "data-course",
+      name: "嵌套班级",
+      joinCode: "DATA-JOIN",
+      status: "ARCHIVED",
+      course: Object.freeze({ id: "data-course", name: "嵌套课程" }),
+    }),
+  });
+  const beforeCourse = structuredClone(course);
+  const beforeClassroom = structuredClone(classroom);
+
+  for (const adapt of [toCourseDetailResponse, toCourseUpdateResponse]) {
+    const result = adapt(course);
+    expect(result.id).toBeUndefined();
+    expect(result.code).toBeUndefined();
+    expect(result.name).toBeUndefined();
+    expect(result.term).toBeUndefined();
+    expect(result.status).toBeUndefined();
+    expect(result.raw).toBe(course);
+  }
+  for (const adapt of [toClassroomDetailResponse, toClassroomUpdateResponse]) {
+    const result = adapt(classroom);
+    expect(result.id).toBeUndefined();
+    expect(result.name).toBeUndefined();
+    expect(result.joinCode).toBeUndefined();
+    expect(result.status).toBeUndefined();
+    expect(result.course).toBeUndefined();
+    expect(result.courseId).toBe("actual-related-course");
+    expect(result).not.toHaveProperty("raw");
+  }
+  expect(Object.hasOwn(course, "name")).toBe(false);
+  expect(course).toStrictEqual(beforeCourse);
+  expect(classroom).toStrictEqual(beforeClassroom);
+});
+
+test("classroom optional course summaries retain readable fields without requiring a course ID", () => {
+  const onlyAlias = Object.freeze({ courseId: "legacy-nested-course" });
+  const partial = Object.freeze({
+    courseId: "legacy-nested-course",
+    name: "局部课程摘要",
+    term: "2026秋",
+    status: "archived",
+  });
+  for (const scenario of [
+    { fields: Object.freeze({}), expectedCourse: undefined },
+    { fields: Object.freeze({ course: onlyAlias }), expectedCourse: undefined },
+    {
+      fields: Object.freeze({ course: partial }),
+      expectedCourse: {
+        id: undefined,
+        code: undefined,
+        name: "局部课程摘要",
+        term: "2026秋",
+        courseLabel: undefined,
+        status: "archived",
+      },
+    },
+  ]) {
+    const payload = Object.freeze({
+      id: "classroom-optional-course",
+      courseId: "actual-related-course",
+      name: "保留班级",
+      ...scenario.fields,
+    });
+    const before = structuredClone(payload);
+    const result = toClassroomSummary(payload);
+
+    expect(result).toMatchObject({
+      id: "classroom-optional-course",
+      courseId: "actual-related-course",
+      name: "保留班级",
+    });
+    expect(result.course).toEqual(scenario.expectedCourse);
+    expect(result).not.toHaveProperty("raw");
+    if (scenario.expectedCourse) expect(result.course).not.toHaveProperty("raw");
+    expect(payload).toStrictEqual(before);
+  }
+});
+
+test("course and classroom lists retire legacy wrappers without inferring pagination", () => {
+  const row = Object.freeze({ id: "legacy-row", status: "ACTIVE" });
+  const items = Object.freeze([row]);
+  for (const payload of [
+    items,
+    Object.freeze({
+      data: Object.freeze({ items, total: 19, page: 3, limit: 5 }),
+    }),
+    Object.freeze({ data: items }),
+  ]) {
+    const before = structuredClone(payload);
+    for (const { adapt, hasRaw } of [
+      { adapt: toCourseListResponse, hasRaw: true },
+      { adapt: toClassroomListResponse, hasRaw: false },
+    ]) {
+      const result = adapt(payload);
+      expect(result.items).toEqual([]);
+      expect(result.total).toBeUndefined();
+      expect(result.page).toBeUndefined();
+      expect(result.limit).toBeUndefined();
+      expect(Object.hasOwn(result, "raw")).toBe(hasRaw);
+      if ("raw" in result) expect(result.raw).toBe(payload);
+    }
+    expect(payload).toStrictEqual(before);
+  }
+});
+
+test("course and classroom list items and pagination use only their top-level sources", () => {
+  const first = Object.freeze({
+    id: "formal-first",
+    courseId: "actual-related-course",
+    status: "ACTIVE",
+  });
+  const second = Object.freeze({ id: "formal-second", status: "ARCHIVED" });
+  const formalItems = Object.freeze([first, second]);
+  const ignored = Object.freeze({
+    items: Object.freeze([Object.freeze({ id: "ignored-row" })]),
+    total: 707,
+    page: 7,
+    limit: 7,
+  });
+  for (const scenario of [
+    {
+      fields: Object.freeze({ items: formalItems, total: 41, page: 2, limit: 100 }),
+      expectedIds: ["formal-first", "formal-second"],
+      total: 41,
+      page: 2,
+      limit: 100,
+    },
+    {
+      fields: Object.freeze({ items: Object.freeze([]), total: 0, page: 1, limit: 100 }),
+      expectedIds: [],
+      total: 0,
+      page: 1,
+      limit: 100,
+    },
+    {
+      fields: Object.freeze({}),
+      expectedIds: [],
+      total: undefined,
+      page: undefined,
+      limit: undefined,
+    },
+    {
+      fields: Object.freeze({ items: null, total: null, page: "2", limit: Number.NaN }),
+      expectedIds: [],
+      total: undefined,
+      page: undefined,
+      limit: undefined,
+    },
+  ]) {
+    const payload = Object.freeze({
+      ...scenario.fields,
+      data: ignored,
+      pagination: Object.freeze({ total: 903, page: 9, limit: 3 }),
+    });
+    const before = structuredClone(payload);
+    for (const { adapt, hasRaw } of [
+      { adapt: toCourseListResponse, hasRaw: true },
+      { adapt: toClassroomListResponse, hasRaw: false },
+    ]) {
+      const result = adapt(payload);
+      expect(result.items.map((item) => item.id)).toEqual(scenario.expectedIds);
+      expect(result.total).toBe(scenario.total);
+      expect(result.page).toBe(scenario.page);
+      expect(result.limit).toBe(scenario.limit);
+      expect(Object.hasOwn(result, "raw")).toBe(hasRaw);
+      if ("raw" in result) expect(result.raw).toBe(payload);
+      result.items.forEach((item, index) => {
+        expect(Object.hasOwn(item, "raw")).toBe(hasRaw);
+        if ("raw" in item) expect(item.raw).toBe(formalItems[index]);
+      });
+      if (!hasRaw && scenario.expectedIds.length > 0) {
+        expect(result.items[0]).toMatchObject({ courseId: "actual-related-course" });
+      }
+    }
+    expect(payload).toStrictEqual(before);
+  }
+});
+
+test("course overview safely ignores a data-only response instead of rescuing its fields", () => {
+  const payload = Object.freeze({
+    data: Object.freeze({
+      course: Object.freeze({ id: "ignored-course", status: "ACTIVE" }),
+      window: "all",
+      generatedAt: "2026-11-01T09:00:00.000Z",
+      total: 9,
+      page: 1,
+      limit: 20,
+      items: Object.freeze([Object.freeze({ classroomId: "ignored-classroom" })]),
+    }),
+  });
+  const before = structuredClone(payload);
+  const result = toCourseOverviewResponse(payload);
+
+  expect(result).toEqual({
+    course: undefined,
+    window: undefined,
+    generatedAt: undefined,
+    total: undefined,
+    page: undefined,
+    limit: undefined,
+    items: [],
+    raw: payload,
+  });
+  expect(result.raw).toBe(payload);
+  expect(payload).toStrictEqual(before);
 });
 
 test("classroom members preserve exact formal states, user fields and pagination", () => {
