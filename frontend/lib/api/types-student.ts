@@ -597,13 +597,9 @@ export const toListFeedbackResponse = (
   }
 
   const record = asRecord(payload);
-  const candidateItems =
-    safeGet<unknown>(record, "items", undefined) ??
-    safeGet<unknown>(record, "data.items", undefined) ??
-    safeGet<unknown>(record, "data", undefined);
 
   return {
-    items: asRecordArray(candidateItems).map((item) => toFeedbackItem(item)),
+    items: [],
     raw: record,
   };
 };

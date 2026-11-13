@@ -1,5 +1,6 @@
 import { test, expect } from "@playwright/test";
 import {
+  toListFeedbackResponse,
   toMyTaskDetailResponse,
   toSubmissionDetailResponse,
 } from "../../lib/api/types-student";
@@ -2277,13 +2278,16 @@ test("teacher feedback editing does not infer sources or normalize identity matc
 
 test("teacher feedback adapters preserve known authors and leave absent or null authors unknown without changing content or raw references", () => {
   const content = Object.freeze({
+    submissionId: "submission-1",
     source: "TEACHER",
     type: "STYLE",
     severity: "WARN",
     message: "保留教师反馈正文",
     suggestion: "保留修改建议",
     tags: Object.freeze(["readability"]),
+    scoreHint: 0,
     createdAt: "2026-11-01T01:00:00Z",
+    updatedAt: "2026-11-01T02:00:00Z",
   });
   const known = Object.freeze({
     ...content,
@@ -2292,36 +2296,138 @@ test("teacher feedback adapters preserve known authors and leave absent or null 
   });
   const missing = Object.freeze({ ...content, id: "missing" });
   const nullAuthor = Object.freeze({ ...content, id: "null", createdBy: null });
-  const items = Object.freeze([known, missing, nullAuthor]);
-  const payload = Object.freeze({ items });
+  const payload = Object.freeze([known, missing, nullAuthor]);
   const before = JSON.stringify(payload);
-  const result = toTeacherFeedbackListResponse(payload);
 
-  expect(result.items.map((item) => item.createdBy)).toEqual([
-    "teacher-1",
-    undefined,
-    undefined,
-  ]);
-  expect(
-    result.items.map((item) => canEditTeacherFeedback(item, "teacher-1")),
-  ).toEqual([true, false, false]);
-  for (const [index, item] of result.items.entries()) {
-    expect(item.raw).toBe(items[index]);
-    expect(item).toMatchObject({
-      source: "TEACHER",
-      type: "STYLE",
-      severity: "WARN",
-      message: "保留教师反馈正文",
-      suggestion: "保留修改建议",
-      tags: ["readability"],
-      createdAt: "2026-11-01T01:00:00Z",
-    });
+  for (const adapt of [toListFeedbackResponse, toTeacherFeedbackListResponse]) {
+    const result = adapt(payload);
+    if (!Array.isArray(result.raw)) {
+      throw new Error("Expected feedback array raw projection");
+    }
+
+    expect(result.items.map((item) => item.id)).toEqual([
+      "known",
+      "missing",
+      "null",
+    ]);
+    expect(result.items.map((item) => item.createdBy)).toEqual([
+      "teacher-1",
+      undefined,
+      undefined,
+    ]);
+    expect(
+      result.items.map((item) => canEditTeacherFeedback(item, "teacher-1")),
+    ).toEqual([true, false, false]);
+    for (const [index, item] of result.items.entries()) {
+      expect(item.raw).toBe(payload[index]);
+      expect(result.raw[index]).toBe(payload[index]);
+      expect(item).toMatchObject({
+        submissionId: "submission-1",
+        source: "TEACHER",
+        type: "STYLE",
+        severity: "WARN",
+        message: "保留教师反馈正文",
+        suggestion: "保留修改建议",
+        tags: ["readability"],
+        scoreHint: 0,
+        createdAt: "2026-11-01T01:00:00Z",
+        updatedAt: "2026-11-01T02:00:00Z",
+      });
+    }
+    expect(result.raw).toEqual([known, missing, nullAuthor]);
   }
-  expect(result.raw).toBe(payload);
-  expect(payload.items).toBe(items);
   expect(Object.hasOwn(missing, "createdBy")).toBe(false);
   expect(nullAuthor.createdBy).toBeNull();
   expect(JSON.stringify(payload)).toBe(before);
+});
+
+test("feedback arrays retain input order and the existing invalid-member degradation", () => {
+  const first = Object.freeze({ id: "first", message: "第一条" });
+  const last = Object.freeze({ id: "last", source: "AI", message: "最后一条" });
+  const payload = Object.freeze([first, null, 7, Object.freeze([]), last]);
+  const before = structuredClone(payload);
+
+  for (const adapt of [toListFeedbackResponse, toTeacherFeedbackListResponse]) {
+    expect(adapt([])).toStrictEqual({ items: [], raw: [] });
+    const result = adapt(payload);
+    if (!Array.isArray(result.raw)) {
+      throw new Error("Expected feedback array raw projection");
+    }
+
+    expect(result.items.map((item) => item.id)).toEqual([
+      "first",
+      undefined,
+      undefined,
+      undefined,
+      "last",
+    ]);
+    expect(result.items[0].raw).toBe(first);
+    expect(result.items[4].raw).toBe(last);
+    expect(result.raw[0]).toBe(first);
+    expect(result.raw[4]).toBe(last);
+    expect(result.raw).toStrictEqual([first, {}, {}, {}, last]);
+    for (const index of [1, 2, 3]) {
+      expect(result.items[index]).toStrictEqual({
+        id: undefined,
+        submissionId: undefined,
+        createdBy: undefined,
+        source: undefined,
+        type: undefined,
+        severity: undefined,
+        message: undefined,
+        suggestion: undefined,
+        tags: [],
+        scoreHint: undefined,
+        createdAt: undefined,
+        updatedAt: undefined,
+        raw: {},
+      });
+    }
+  }
+  expect(payload).toStrictEqual(before);
+});
+
+const wrappedFeedback = Object.freeze({
+  id: "legacy-feedback",
+  submissionId: "submission-1",
+  createdBy: "teacher-1",
+  source: "TEACHER",
+  type: "STYLE",
+  severity: "WARN",
+  message: "旧包装正文",
+  createdAt: "2026-11-01T01:00:00Z",
+  updatedAt: "2026-11-01T02:00:00Z",
+});
+
+for (const [label, payload] of [
+  ["items", { items: [wrappedFeedback] }],
+  ["data.items", { data: { items: [wrappedFeedback] } }],
+  ["data array", { data: [wrappedFeedback] }],
+] as const) {
+  test(`feedback adapters retire ${label} without changing object raw references`, () => {
+    const before = structuredClone(payload);
+
+    for (const adapt of [toListFeedbackResponse, toTeacherFeedbackListResponse]) {
+      const result = adapt(payload);
+
+      expect(result.items).toStrictEqual([]);
+      expect(result.raw).toBe(payload);
+    }
+    expect(payload).toStrictEqual(before);
+  });
+}
+
+test("other non-array feedback inputs keep empty lists and existing object degradation", () => {
+  for (const adapt of [toListFeedbackResponse, toTeacherFeedbackListResponse]) {
+    for (const payload of [undefined, null, 7, "feedback", false]) {
+      expect(adapt(payload)).toStrictEqual({ items: [], raw: {} });
+    }
+    const object = Object.freeze({ id: "single-feedback", message: "单条对象" });
+    const result = adapt(object);
+
+    expect(result.items).toStrictEqual([]);
+    expect(result.raw).toBe(object);
+  }
 });
 
 test("teacher feedback groups keep teacher and AI records in descending creation time without mutating input", () => {

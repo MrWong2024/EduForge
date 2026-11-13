@@ -127,6 +127,7 @@
   - 注意：只按 `classroomTaskId` 读取，不用 `taskId` 兜底过滤。
 - 提交详情和反馈：Teacher/Student submission pages + feedback forms -> `/api/proxy/learning-tasks/submissions/:id*`。
   - 对应后端：submission detail、feedback list、teacher feedback create/update。
+  - 反馈列表只消费正式裸数组，`items`、`data.items`、`data` 数组包装不再供数；字段合同见 [Backend DTO：Feedback DTO / response family](./handoff-backend-dto-cheatsheet.md#feedback-dto--response-family)。
   - 注意：正式 detail API `GET /api/learning-tasks/submissions/:id` 是主体 SoT；每次先 await detail 成功，再请求同一提交的 feedback；师生共用学生侧详情 mapper，保留完整源码、独立说明与已有声明原文，适配 aiReview；URL query 不提供标题、正文、提交时间、次数、迟交或 AI 状态；班级/课堂任务上下文用于返回导航。公开字段与 null/0 语义由 [Backend DTO](./handoff-backend-dto-cheatsheet.md#submission-request--response-family) 维护。
   - 教师提交详情 Server Page 在主体加载成功后独立调用既有 `getMe()`，仅把正式响应中非空、非纯空白的字符串 id 原值作为 currentUserId 传入 History / EditForm，不传整个用户或其他身份数据。身份读取失败或 id 不可用时，历史反馈只读并提示刷新；不替换已加载的作品/反馈，不改变 layout 角色检查、新增反馈或 AI 请求。
   - 历史反馈修改资格由 `canEditTeacherFeedback` 统一判断：来源精确为 TEACHER，反馈 id、currentUserId 和 createdBy 均为非空非纯空白字符串，且作者与当前用户原字符串精确相等；不 trim 后比较、转换大小写、补作者或增加 ObjectId 格式规则。未知/他人作者、AI 和未知来源只关闭修改入口，原记录仍可读；共享 mapper 与 createdBy 可选投影保持，最终班级管理权及作者授权见 [Backend API Learning Tasks](./handoff-backend-api-map.md#learning-tasks)。
