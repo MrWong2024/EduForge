@@ -67,7 +67,7 @@ type TasksViewModel =
       availableTasks: ReturnType<
         typeof toPublishableTaskTemplateListResponse
       >["items"];
-      availableTasksTotal?: number;
+      availableTasksTotal: number;
       availableTasksPage?: number;
       availableTasksLimit?: number;
       initialCourseLabelFilter?: string;
@@ -264,7 +264,17 @@ export default async function ClassroomTasksPage({
     const learningTasks =
       toPublishableTaskTemplateListResponse(learningTasksPayload);
 
-    if (isValidPaginationTotal(taskList.total)) {
+    if (!isValidPaginationTotal(taskList.total)) {
+      viewModel = {
+        mode: "error",
+        description: "课堂任务列表数据不完整，请刷新后重试。",
+      };
+    } else if (!isValidPaginationTotal(learningTasks.total)) {
+      viewModel = {
+        mode: "error",
+        description: "候选模板列表数据不完整，请刷新后重试。",
+      };
+    } else {
       viewModel = {
         mode: "ready",
         classroomName: classroom.name,
@@ -280,11 +290,6 @@ export default async function ClassroomTasksPage({
         initialDifficultyFilter,
         currentUserId:
           typeof me?.id === "string" && me.id.trim() ? me.id.trim() : undefined,
-      };
-    } else {
-      viewModel = {
-        mode: "error",
-        description: "课堂任务列表数据不完整，请刷新后重试。",
       };
     }
   } catch (error) {

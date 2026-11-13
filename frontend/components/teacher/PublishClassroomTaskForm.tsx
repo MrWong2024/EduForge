@@ -18,6 +18,7 @@ import {
   TASK_COURSE_LABEL_UNCLASSIFIED,
   toTaskCourseLabelDisplayText,
 } from "@/lib/learning-tasks/course-labels";
+import { isValidPaginationTotal } from "@/lib/pagination";
 import { paths } from "@/lib/routes/paths";
 import { getCandidateRubricSummary } from "@/lib/learning-tasks/rubric";
 import {
@@ -32,7 +33,7 @@ type PublishClassroomTaskFormProps = {
   classroomId: string;
   currentUserId?: string;
   availableTasks: LearningTaskOption[];
-  initialAvailableTasksTotal?: number;
+  initialAvailableTasksTotal: number;
   initialAvailableTasksPage?: number;
   initialAvailableTasksLimit?: number;
   initialCourseLabelFilter?: string;
@@ -145,9 +146,7 @@ export function PublishClassroomTaskForm({
   const [loadedTasks, setLoadedTasks] =
     useState<LearningTaskOption[]>(availableTasks);
   const [loadedTotal, setLoadedTotal] = useState<number>(
-    typeof initialAvailableTasksTotal === "number"
-      ? initialAvailableTasksTotal
-      : availableTasks.length,
+    initialAvailableTasksTotal,
   );
   const [loadedPage, setLoadedPage] = useState<number>(
     typeof initialAvailableTasksPage === "number" &&
@@ -212,11 +211,7 @@ export function PublishClassroomTaskForm({
     setKnowledgeModuleFilter(initialKnowledgeModuleFilter ?? "");
     setDifficultyFilter(initialDifficulty);
     setLoadedTasks(availableTasks);
-    setLoadedTotal(
-      typeof initialAvailableTasksTotal === "number"
-        ? initialAvailableTasksTotal
-        : availableTasks.length,
-    );
+    setLoadedTotal(initialAvailableTasksTotal);
     setLoadedPage(
       typeof initialAvailableTasksPage === "number" &&
         initialAvailableTasksPage > 0
@@ -465,6 +460,10 @@ export function PublishClassroomTaskForm({
       if (requestEpoch !== loadMoreEpochRef.current) {
         return;
       }
+      if (!isValidPaginationTotal(response.total)) {
+        setLoadMoreError("候选模板列表数据不完整，请重试加载更多。");
+        return;
+      }
 
       setLoadedTasks((previous) => {
         if (requestEpoch !== loadMoreEpochRef.current) {
@@ -499,9 +498,7 @@ export function PublishClassroomTaskForm({
       if (typeof response.limit === "number" && response.limit > 0) {
         setLoadedLimit(response.limit);
       }
-      if (typeof response.total === "number" && response.total >= 0) {
-        setLoadedTotal(response.total);
-      }
+      setLoadedTotal(response.total);
     } catch (error) {
       if (requestEpoch !== loadMoreEpochRef.current) {
         return;

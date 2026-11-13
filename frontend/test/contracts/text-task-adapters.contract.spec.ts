@@ -892,7 +892,7 @@ test("course and classroom list items and pagination use only their top-level so
   }
 });
 
-test("course, classroom and template list mappers preserve finite totals that the page count guard rejects", () => {
+test("course, classroom, template and candidate list mappers preserve finite totals that the page count guard rejects", () => {
   const row = Object.freeze({ id: "formal-row", status: "ACTIVE" });
   for (const total of [-1, 1.5, Number.MAX_SAFE_INTEGER + 1]) {
     const payload = Object.freeze({
@@ -907,6 +907,7 @@ test("course, classroom and template list mappers preserve finite totals that th
       toCourseListResponse,
       toClassroomListResponse,
       toLearningTaskListResponse,
+      toPublishableTaskTemplateListResponse,
     ]) {
       const result = adapt(payload);
 
@@ -2482,7 +2483,10 @@ test("template and candidate lists retain formal author sources, row order and m
     }),
   });
   const before = structuredClone(payload);
-  const unpagedPayload = Object.freeze({ items: Object.freeze([candidate]) });
+  const unpagedPayload = Object.freeze({
+    items: Object.freeze([candidate]),
+    data: Object.freeze({ total: 999 }),
+  });
   const beforeUnpaged = structuredClone(unpagedPayload);
   for (const adapt of [
     toLearningTaskListResponse,
@@ -2500,9 +2504,7 @@ test("template and candidate lists retain formal author sources, row order and m
       "teacher-candidate",
     ]);
     expect(result).toMatchObject({ total: 3, page: 1, limit: 100 });
-    if (adapt === toLearningTaskListResponse) {
-      expect(isValidPaginationTotal(result.total)).toBe(true);
-    }
+    expect(isValidPaginationTotal(result.total)).toBe(true);
     expect(result.items[0].rubric).toBeUndefined();
     expect(result.items[0].aiContextRefs).toEqual([]);
     expect(result.items[0].publisher).toBeNull();
@@ -2525,9 +2527,7 @@ test("template and candidate lists retain formal author sources, row order and m
     expect(unpaged.items[0].id).toBe("candidate-third");
     expect(unpaged.items[0].raw).toBe(candidate);
     expect(unpaged.total).toBeUndefined();
-    if (adapt === toLearningTaskListResponse) {
-      expect(isValidPaginationTotal(unpaged.total)).toBe(false);
-    }
+    expect(isValidPaginationTotal(unpaged.total)).toBe(false);
     expect(unpaged.page).toBeUndefined();
     expect(unpaged.limit).toBeUndefined();
     expect(unpaged.raw).toBe(unpagedPayload);
@@ -2595,6 +2595,39 @@ test("template and candidate lists reject old wrappers and never rescue unusable
       limit: 100,
     },
     {
+      payload: Object.freeze({
+        items: Object.freeze([]),
+        total: null,
+        data: legacyData,
+      }),
+      total: undefined,
+      validTotal: false,
+      page: undefined,
+      limit: undefined,
+    },
+    {
+      payload: Object.freeze({
+        items: Object.freeze([]),
+        total: "3",
+        data: legacyData,
+      }),
+      total: undefined,
+      validTotal: false,
+      page: undefined,
+      limit: undefined,
+    },
+    {
+      payload: Object.freeze({
+        items: Object.freeze([]),
+        total: Number.POSITIVE_INFINITY,
+        data: legacyData,
+      }),
+      total: undefined,
+      validTotal: false,
+      page: undefined,
+      limit: undefined,
+    },
+    {
       payload: Object.freeze({ items: null, data: legacyData }),
       total: undefined,
       validTotal: false,
@@ -2620,9 +2653,7 @@ test("template and candidate lists reject old wrappers and never rescue unusable
       const result = adapt(scenario.payload);
       expect(result.items).toEqual([]);
       expect(result.total).toBe(scenario.total);
-      if (adapt === toLearningTaskListResponse) {
-        expect(isValidPaginationTotal(result.total)).toBe(scenario.validTotal);
-      }
+      expect(isValidPaginationTotal(result.total)).toBe(scenario.validTotal);
       expect(result.page).toBe(scenario.page);
       expect(result.limit).toBe(scenario.limit);
       expect(result.raw).toBe(scenario.payload);
