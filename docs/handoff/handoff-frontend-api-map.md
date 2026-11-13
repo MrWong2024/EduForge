@@ -171,6 +171,7 @@
   - 受控详情确认：原始 `detail.raw.aiReview.usage` 必须包含 [Submission DTO](./handoff-backend-dto-cheatsheet.md#submission-request--response-family) 规定的全部自有字段；缺键响应不作为完整确认，字段明确为 null 仍表示合法未知信息，不补造用量。
 - 班级周报：`weekly-report/page.tsx` -> `/api/proxy/classrooms/:id/weekly-report`。
   - 对应后端：`GET /api/classrooms/:classroomId/weekly-report`。
+  - 四项比率均按固定 ratio 转为百分比展示，保留现有精度、数字字符串解析及空值处理。
   - 页面窗口为 `7d | 30d | all`；解析与请求沿用本节三页报表共性窗口规则。
   - 注意：窗口与公开数据见 [Backend DTO](./handoff-backend-dto-cheatsheet.md#weekly-report)。前端只消费顶层 `classroom/progress/atRisk/aiHealth/topTags` 及 `window/generatedAt`；旧 `summary/overview/data`、扁平指标和替代 jobs 路径不再参与选值，也不再投影无用的顶层 `classroomId/items`。页头通过 `toClassroomSummary` 读取正式 `classroom` 投影，不新增请求；正式来源缺失沿用占位与空态，真实 0 和现有格式保持，raw 仍引用原根对象。
 - 课程总览：`courses/:courseId/overview/page.tsx` -> `/api/proxy/courses/:courseId/overview`。
@@ -181,11 +182,13 @@
   - 对应后端：三个课堂任务聚合接口。
   - AI 指标保留内部展示名称：`statusBreakdown` 只取正式 `summary.jobs`，`tags` 只取正式 `feedback.topTags`；不再读取顶层同名旧字段或 `summary.statusBreakdown`，正式来源缺失、非法或为空时沿现有对象/数组降级，不补足。窗口、includeTags 及公开数据见 [Backend DTO AI Metrics](./handoff-backend-dto-cheatsheet.md#ai-metrics)；真实 0、null 耗时、含 total 的状态展示与对象/raw 引用保持。
   - 课堂复盘窗口为 `all | 7d`；解析与请求沿用本节三页报表共性窗口规则，后端数据合同见 [Backend DTO](./handoff-backend-dto-cheatsheet.md#review-pack)。
+  - 课堂复盘的提交率与 AI 成功率固定按 ratio 展示；“成功约 N”仍使用未格式化百分数还原后的比率估算。
   - 课堂复盘只从正式 `overview/commonIssues` 读取概览、摘要与问题分布，不再用旧指标别名或按人数补算缺失率；分布只取正式 `tag/type/severity/count`。分层学生的 ID/姓名仅消费 `studentId/studentName`，不以旧别名补足，也不再投影或展示后端未返回的 ReviewPack 专用 `latestAiFeedbackStatus`；未知姓名、学号 null、真实 0、原格式和 raw 引用保持。样例的正式 `tags/matchedTags`、合并去重和提交链接继续保留。
   - 学习轨迹的根 `studentId` 与结构化 `student.id` 独立解析，不互补或合成学生对象；名称仅从结构化 `student` 依次选择姓名、学号、邮箱、`未知学生`，不读取旧姓名别名或从 raw 补学号/邮箱。尝试显示时间只取 `createdAt`，不回退 `submittedAt`。后端字段结构及 nullable 合同见 [Backend DTO](./handoff-backend-dto-cheatsheet.md#learning-trajectory)。
   - 学习轨迹 window 仅接受精确的 `all | 7d`，默认 `all`；省略、空值、`24h`、`30d`、`term`、大小写或空白变体及其他未知值统一沿用 `parseEnum` 回落为 `all`，不 trim 或转换大小写。重复 window 沿用 `getSingleSearchParam` 取首值，请求使用同一规范化 window。
 - 过程性评价 JSON：`process-assessment/page.tsx` -> `/api/proxy/classrooms/:id/process-assessment`。
   - 对应后端：`GET /api/classrooms/:classroomId/process-assessment`。
+  - 行覆盖率、当前页平均覆盖率与 AI 请求成功率固定按 ratio 展示；rubric 权重按 ratio 转为满分贡献，score 与平均得分保持分数展示，不再转换。
   - 页头名称辅助读取一次 `GET classrooms/:classroomId`，与现有加载并行，经 `toClassroomDetailResponse` 取名；独立有限超时及失败占位，不改变统计主体错误处理。
   - window 适配：前端仅接受精确的 `7d | 30d | all`；省略、空值、`term`、`24h`、大小写或空白变体及其他未知值统一沿用 `parseEnum` 回落为 `all`，不设 term 特判、不 trim 或转换大小写。重复 window 沿用 `getSingleSearchParam` 取首值；JSON 与 CSV 共用同一解析后的 window。
   - 注意：`excludedTaskIds` 仅适配为 URL 查询条件；直接消费后端任务维度指标（`iteratedTasksCount/aiRequestedTasksCount/aiSucceededTasksCount/avgWarnItems`），不重算评分。

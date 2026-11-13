@@ -198,7 +198,7 @@ const toPercentNumber = (value: number | undefined): number | undefined => {
   if (typeof value !== "number" || !Number.isFinite(value) || value < 0) {
     return undefined;
   }
-  return value <= 1 ? value * 100 : value;
+  return value * 100;
 };
 
 const toPercentText = (value: number | undefined): string => {

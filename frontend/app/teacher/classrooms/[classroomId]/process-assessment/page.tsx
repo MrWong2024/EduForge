@@ -105,7 +105,7 @@ const toPercentText = (value: number | null): string => {
   if (value === null) {
     return "—";
   }
-  const percent = value <= 1 ? value * 100 : value;
+  const percent = value * 100;
   const rounded = Math.round(percent * 10) / 10;
   return Number.isInteger(rounded) ? `${rounded}%` : `${rounded.toFixed(1)}%`;
 };
@@ -295,7 +295,7 @@ const toRubricSummaryText = (raw: UnknownRecord): string | null => {
     return null;
   }
 
-  const toPointText = (value: number) => toScoreText((value <= 1 ? value : value / 100) * 100);
+  const toPointText = (value: number) => toScoreText(value * 100);
   return `当前评价口径：任务覆盖率 ${toPointText(submittedTasksRate)} 分，提交迭代质量 ${toPointText(
     submissionsCount
   )} 分，AI 使用质量 ${toPointText(aiRequestQualityProxy)} 分，代码质量代理 ${toPointText(

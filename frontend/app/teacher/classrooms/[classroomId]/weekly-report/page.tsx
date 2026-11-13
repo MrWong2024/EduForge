@@ -85,7 +85,7 @@ const toPercentText = (value: unknown): string => {
   if (numeric === null) {
     return "—";
   }
-  const percent = numeric <= 1 ? numeric * 100 : numeric;
+  const percent = numeric * 100;
   const rounded = Math.round(percent * 10) / 10;
   return Number.isInteger(rounded) ? `${rounded}%` : `${rounded.toFixed(1)}%`;
 };
