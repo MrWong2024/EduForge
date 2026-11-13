@@ -23,6 +23,7 @@ import {
   getTaskSnapshotErrorMessage,
   getTaskSnapshotMessage,
 } from "@/lib/learning-tasks/ai-review";
+import { isValidPaginationTotal } from "@/lib/pagination";
 import { paths } from "@/lib/routes/paths";
 import { getCommonErrorSummary } from "@/lib/ui/status";
 import {
@@ -62,6 +63,7 @@ type TasksViewModel =
       mode: "ready";
       classroomName?: string;
       taskList: ReturnType<typeof toClassroomTasksResponse>;
+      total: number;
       availableTasks: ReturnType<
         typeof toPublishableTaskTemplateListResponse
       >["items"];
@@ -74,7 +76,7 @@ type TasksViewModel =
       initialDifficultyFilter?: ReturnType<typeof parseDifficultyFilter>;
       currentUserId?: string;
     }
-  | { mode: "error"; status: number; description: string };
+  | { mode: "error"; status?: number; description: string };
 
 const parseOnlyMine = (value: string | undefined): boolean => {
   if (!value) {
@@ -262,21 +264,29 @@ export default async function ClassroomTasksPage({
     const learningTasks =
       toPublishableTaskTemplateListResponse(learningTasksPayload);
 
-    viewModel = {
-      mode: "ready",
-      classroomName: classroom.name,
-      taskList,
-      availableTasks: learningTasks.items,
-      availableTasksTotal: learningTasks.total,
-      availableTasksPage: learningTasks.page,
-      availableTasksLimit: learningTasks.limit,
-      initialCourseLabelFilter,
-      initialOnlyMineFilter,
-      initialKnowledgeModuleFilter,
-      initialDifficultyFilter,
-      currentUserId:
-        typeof me?.id === "string" && me.id.trim() ? me.id.trim() : undefined,
-    };
+    if (isValidPaginationTotal(taskList.total)) {
+      viewModel = {
+        mode: "ready",
+        classroomName: classroom.name,
+        taskList,
+        total: taskList.total,
+        availableTasks: learningTasks.items,
+        availableTasksTotal: learningTasks.total,
+        availableTasksPage: learningTasks.page,
+        availableTasksLimit: learningTasks.limit,
+        initialCourseLabelFilter,
+        initialOnlyMineFilter,
+        initialKnowledgeModuleFilter,
+        initialDifficultyFilter,
+        currentUserId:
+          typeof me?.id === "string" && me.id.trim() ? me.id.trim() : undefined,
+      };
+    } else {
+      viewModel = {
+        mode: "error",
+        description: "课堂任务列表数据不完整，请刷新后重试。",
+      };
+    }
   } catch (error) {
     if (error instanceof FetchJsonError) {
       const detail = extractRawDetail(error);
@@ -305,10 +315,7 @@ export default async function ClassroomTasksPage({
     );
   }
 
-  const totalPublishedTasks =
-    typeof viewModel.taskList.total === "number"
-      ? viewModel.taskList.total
-      : viewModel.taskList.items.length;
+  const totalPublishedTasks = viewModel.total;
   const publishedTasksLimit =
     typeof viewModel.taskList.limit === "number" &&
     Number.isFinite(viewModel.taskList.limit) &&

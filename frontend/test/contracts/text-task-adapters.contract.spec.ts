@@ -1968,7 +1968,10 @@ test("classroom task lists retain root row order, missing-ID rows and optional p
       limit: 9,
     }),
   });
-  const unpagedPayload = Object.freeze({ items: Object.freeze([first]) });
+  const unpagedPayload = Object.freeze({
+    items: Object.freeze([first]),
+    data: Object.freeze({ total: 999 }),
+  });
   const before = structuredClone(payload);
   const beforeUnpaged = structuredClone(unpagedPayload);
   const result = toClassroomTasksResponse(payload);
@@ -1994,6 +1997,7 @@ test("classroom task lists retain root row order, missing-ID rows and optional p
     "RECALLED",
   ]);
   expect(result).toMatchObject({ total: 3, page: 1, limit: 100 });
+  expect(isValidPaginationTotal(result.total)).toBe(true);
   expect(result).not.toHaveProperty("raw");
   result.items.forEach((item) => {
     expect(item).not.toHaveProperty("raw");
@@ -2003,6 +2007,7 @@ test("classroom task lists retain root row order, missing-ID rows and optional p
   expect(unpaged.items).toHaveLength(1);
   expect(unpaged.items[0].classroomTaskId).toBe("instance-first");
   expect(unpaged.total).toBeUndefined();
+  expect(isValidPaginationTotal(unpaged.total)).toBe(false);
   expect(unpaged.page).toBeUndefined();
   expect(unpaged.limit).toBeUndefined();
   expect(unpaged).not.toHaveProperty("raw");
@@ -2019,16 +2024,24 @@ test("classroom task lists reject old wrappers and never rescue empty or invalid
     limit: 9,
   });
   for (const scenario of [
-    { payload: oldItems, total: undefined, page: undefined, limit: undefined },
+    {
+      payload: oldItems,
+      total: undefined,
+      validTotal: false,
+      page: undefined,
+      limit: undefined,
+    },
     {
       payload: Object.freeze({ data: oldData }),
       total: undefined,
+      validTotal: false,
       page: undefined,
       limit: undefined,
     },
     {
       payload: Object.freeze({ data: oldItems }),
       total: undefined,
+      validTotal: false,
       page: undefined,
       limit: undefined,
     },
@@ -2037,6 +2050,7 @@ test("classroom task lists reject old wrappers and never rescue empty or invalid
         data: Object.freeze({ data: oldItems, total: 999, page: 9, limit: 9 }),
       }),
       total: undefined,
+      validTotal: false,
       page: undefined,
       limit: undefined,
     },
@@ -2049,8 +2063,22 @@ test("classroom task lists reject old wrappers and never rescue empty or invalid
         data: oldData,
       }),
       total: 0,
+      validTotal: true,
       page: 0,
       limit: 0,
+    },
+    {
+      payload: Object.freeze({
+        items: Object.freeze([]),
+        total: 9,
+        page: 4,
+        limit: 100,
+        data: oldData,
+      }),
+      total: 9,
+      validTotal: true,
+      page: 4,
+      limit: 100,
     },
     {
       payload: Object.freeze({
@@ -2061,6 +2089,7 @@ test("classroom task lists reject old wrappers and never rescue empty or invalid
         data: oldData,
       }),
       total: undefined,
+      validTotal: false,
       page: undefined,
       limit: undefined,
     },
@@ -2070,6 +2099,7 @@ test("classroom task lists reject old wrappers and never rescue empty or invalid
         data: oldData,
       }),
       total: undefined,
+      validTotal: false,
       page: undefined,
       limit: undefined,
     },
@@ -2079,10 +2109,54 @@ test("classroom task lists reject old wrappers and never rescue empty or invalid
 
     expect(result.items).toEqual([]);
     expect(result.total).toBe(scenario.total);
+    expect(isValidPaginationTotal(result.total)).toBe(scenario.validTotal);
     expect(result.page).toBe(scenario.page);
     expect(result.limit).toBe(scenario.limit);
     expect(result).not.toHaveProperty("raw");
     expect(scenario.payload).toStrictEqual(before);
+  }
+});
+
+test("classroom task list totals retain mapper parsing while the page count guard rejects invalid counts", () => {
+  const row = Object.freeze({
+    id: "formal-instance",
+    taskId: "formal-template",
+    status: "ACTIVE",
+    task: Object.freeze({ title: "正式课堂任务" }),
+  });
+  for (const { total, expectedTotal } of [
+    { total: null, expectedTotal: undefined },
+    { total: "3", expectedTotal: undefined },
+    { total: Number.POSITIVE_INFINITY, expectedTotal: undefined },
+    { total: -1, expectedTotal: -1 },
+    { total: 1.5, expectedTotal: 1.5 },
+    {
+      total: Number.MAX_SAFE_INTEGER + 1,
+      expectedTotal: 9007199254740992,
+    },
+  ]) {
+    const payload = Object.freeze({
+      items: Object.freeze([row]),
+      total,
+      page: 2,
+      limit: 100,
+      data: Object.freeze({ total: 999 }),
+    });
+    const before = structuredClone(payload);
+    const result = toClassroomTasksResponse(payload);
+
+    expect(result.items.map((item) => item.classroomTaskId)).toEqual([
+      "formal-instance",
+    ]);
+    expect(result.items[0].taskId).toBe("formal-template");
+    expect(result.items[0].title).toBe("正式课堂任务");
+    expect(result.total).toBe(expectedTotal);
+    expect(isValidPaginationTotal(result.total)).toBe(false);
+    expect(result.page).toBe(2);
+    expect(result.limit).toBe(100);
+    expect(result).not.toHaveProperty("raw");
+    expect(result.items[0]).not.toHaveProperty("raw");
+    expect(payload).toStrictEqual(before);
   }
 });
 
