@@ -35,6 +35,7 @@ import {
   toSubmitTaskResponse,
   toTeacherFeedbackListResponse,
 } from "../../lib/api/types-teacher";
+import { toLearningTrajectoryStudentDisplayName } from "../../lib/learning-trajectory";
 import {
   canSubmitTextTask,
   getTaskSnapshotErrorMessage,
@@ -1177,6 +1178,8 @@ test("learning trajectory keeps structured student details and statistics withou
   expect(result.raw).toBe(payload);
   expect(result.items[0].raw).toBe(item);
   expect(result.items[0].student?.raw).toBe(student);
+  expect(result.items[0].trend).toBe(item.trend);
+  expect(result.items[0].attempts[0]).toBe(item.attempts[0]);
   expect(result.items[0].raw.studentName).toBe("旧别名姓名");
   expect(result.items[0].raw.name).toBe("旧顶层姓名");
   expect(payload).toEqual(before);
@@ -1195,6 +1198,16 @@ for (const nameState of ["null", "missing"] as const) {
       studentName: "旧别名姓名",
       name: "旧顶层姓名",
       attemptsCount: 0,
+      latestAttemptAt: null,
+      latestAiFeedbackStatus: null,
+      trend: Object.freeze({
+        errorCountFirst: 0,
+        errorCountLatest: 0,
+        errorDelta: 0,
+        topTagsFirst: Object.freeze([]),
+        topTagsLatest: Object.freeze([]),
+      }),
+      attempts: Object.freeze([]),
     });
     const payload = Object.freeze({ items: Object.freeze([item]) });
     const before = structuredClone(payload);
@@ -1207,34 +1220,198 @@ for (const nameState of ["null", "missing"] as const) {
       studentNo: "S-002",
       email: null,
     });
-    expect(result.items[0].attemptsCount).toBe(0);
+    expect(result.items[0]).toMatchObject({
+      attemptsCount: 0,
+      latestAttemptAt: null,
+      latestAiFeedbackStatus: null,
+      trend: {
+        errorCountFirst: 0,
+        errorCountLatest: 0,
+        errorDelta: 0,
+        topTagsFirst: [],
+        topTagsLatest: [],
+      },
+      attempts: [],
+    });
+    expect(toLearningTrajectoryStudentDisplayName(result.items[0].student)).toBe(
+      "学号：S-002",
+    );
     expect(result.items[0]).not.toHaveProperty("studentName");
     expect(result.raw).toBe(payload);
     expect(result.items[0].raw).toBe(item);
     expect(result.items[0].student?.raw).toBe(student);
+    expect(result.items[0].trend).toBe(item.trend);
     expect(Object.hasOwn(student, "name")).toBe(nameState === "null");
     expect(payload).toEqual(before);
   });
 }
 
-test("learning trajectory keeps the studentId-only fallback without synthesizing a name from old aliases", () => {
+test("learning trajectory preserves a root-only student ID without synthesizing student details or reading old display fields", () => {
   const item = Object.freeze({
     studentId: "student-3",
     studentName: "旧别名姓名",
     name: "旧顶层姓名",
+    studentNo: "LEGACY-003",
+    email: "legacy-student@example.com",
   });
   const payload = Object.freeze({ items: Object.freeze([item]) });
   const before = structuredClone(payload);
   const result = toLearningTrajectoryResponse(payload);
   expect(result.items[0].studentId).toBe("student-3");
-  expect(result.items[0].student).toEqual({ id: "student-3", raw: {} });
-  expect(result.items[0].student).not.toHaveProperty("name");
+  expect(result.items[0].student).toBeUndefined();
+  expect(toLearningTrajectoryStudentDisplayName(result.items[0].student)).toBe(
+    "未知学生",
+  );
   expect(result.items[0]).not.toHaveProperty("studentName");
   expect(result.raw).toBe(payload);
   expect(result.items[0].raw).toBe(item);
   expect(Object.hasOwn(item, "student")).toBe(false);
   expect(payload).toEqual(before);
 });
+
+for (const { label, root, student, expectedId, expectedStudent } of [
+  {
+    label: "nested-only ID",
+    root: {},
+    student: {
+      id: " nested-id ",
+      name: " 仅子对象姓名 ",
+      studentNo: null,
+      email: null,
+    },
+    expectedId: undefined,
+    expectedStudent: {
+      id: "nested-id",
+      name: "仅子对象姓名",
+      studentNo: null,
+      email: null,
+    },
+  },
+  {
+    label: "conflicting root and nested IDs",
+    root: { studentId: " root-id " },
+    student: { id: " nested-id ", name: "独立资料" },
+    expectedId: "root-id",
+    expectedStudent: {
+      id: "nested-id",
+      name: "独立资料",
+      studentNo: undefined,
+      email: undefined,
+    },
+  },
+  {
+    label: "student details without a nested ID",
+    root: { studentId: " root-id " },
+    student: { name: " 无子ID的学生 ", studentNo: " S-004 ", email: null },
+    expectedId: "root-id",
+    expectedStudent: {
+      id: undefined,
+      name: "无子ID的学生",
+      studentNo: "S-004",
+      email: null,
+    },
+  },
+] as const) {
+  test(`learning trajectory keeps independent identity sources for ${label}`, () => {
+    const item = Object.freeze({ ...root, student: Object.freeze(student) });
+    const payload = Object.freeze({ items: Object.freeze([item]) });
+    const before = structuredClone(payload);
+    const result = toLearningTrajectoryResponse(payload);
+
+    expect(result.items).toHaveLength(1);
+    expect(result.items[0].studentId).toBe(expectedId);
+    expect(result.items[0].student).toStrictEqual({
+      ...expectedStudent,
+      raw: student,
+    });
+    expect(result.raw).toBe(payload);
+    expect(result.items[0].raw).toBe(item);
+    expect(result.items[0].student?.raw).toBe(student);
+    expect(payload).toStrictEqual(before);
+  });
+}
+
+test("learning trajectory never synthesizes a student from root ID when student is null, invalid or empty", () => {
+  for (const student of [
+    null,
+    "invalid-student",
+    Object.freeze([]),
+    Object.freeze({}),
+  ]) {
+    const item = Object.freeze({ studentId: " root-id ", student });
+    const payload = Object.freeze({ items: Object.freeze([item]) });
+    const before = structuredClone(payload);
+    const result = toLearningTrajectoryResponse(payload);
+
+    expect(result.items).toHaveLength(1);
+    expect(result.items[0].studentId).toBe("root-id");
+    expect(result.items[0].student).toBeUndefined();
+    expect(result.items[0].raw).toBe(item);
+    expect(result.items[0].raw.student).toBe(student);
+    expect(payload).toStrictEqual(before);
+  }
+});
+
+for (const { label, student, expectedName } of [
+  {
+    label: "name before number and email",
+    student: {
+      name: " 正式姓名 ",
+      studentNo: " S-005 ",
+      email: " student-5@example.com ",
+    },
+    expectedName: "正式姓名",
+  },
+  {
+    label: "student number after a blank name",
+    student: {
+      name: " \t ",
+      studentNo: " S-006 ",
+      email: " student-6@example.com ",
+    },
+    expectedName: "学号：S-006",
+  },
+  {
+    label: "email after null name and blank number",
+    student: {
+      name: null,
+      studentNo: " \n ",
+      email: " student-7@example.com ",
+    },
+    expectedName: "student-7@example.com",
+  },
+  {
+    label: "unknown after empty structured fields despite raw aliases",
+    student: {
+      name: " ",
+      studentNo: null,
+      email: " \t ",
+      studentName: "旧子对象姓名",
+      displayName: "旧子对象显示名",
+    },
+    expectedName: "未知学生",
+  },
+] as const) {
+  test(`learning trajectory display selects ${label} using only structured student details`, () => {
+    const item = Object.freeze({
+      student: Object.freeze(student),
+      studentName: "旧别名姓名",
+      name: "旧顶层姓名",
+      studentNo: "LEGACY-ROOT-NUMBER",
+      email: "legacy-root@example.com",
+    });
+    const payload = Object.freeze({ items: Object.freeze([item]) });
+    const before = structuredClone(payload);
+    const result = toLearningTrajectoryResponse(payload);
+
+    expect(toLearningTrajectoryStudentDisplayName(result.items[0].student)).toBe(
+      expectedName,
+    );
+    expect(result.items[0].student?.raw).toBe(student);
+    expect(result.items[0].raw).toBe(item);
+    expect(payload).toStrictEqual(before);
+  });
+}
 
 test("classroom status adapters preserve only the three exact persisted states", () => {
   for (const status of ["ACTIVE", "CLOSED", "RECALLED"] as const) {

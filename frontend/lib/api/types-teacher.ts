@@ -1247,18 +1247,10 @@ const toLearningTrajectoryItem = (value: unknown): LearningTrajectoryItem => {
   const record = asRecord(value);
   const studentRecord = asRecord(safeGet(record, "student", undefined));
   const student = toLearningTrajectoryStudentPublic(studentRecord);
-  const studentId = asString(record.studentId) ?? student?.id;
 
   return {
-    studentId,
-    student:
-      student ??
-      (studentId
-        ? {
-            id: studentId,
-            raw: {},
-          }
-        : undefined),
+    studentId: asString(record.studentId),
+    student,
     attemptsCount: asNumber(record.attemptsCount),
     latestAttemptAt: asNullableString(record.latestAttemptAt),
     latestAiFeedbackStatus: asNullableString(record.latestAiFeedbackStatus),

@@ -6,6 +6,7 @@ import { PageHeader } from "@/components/blocks/PageHeader";
 import { fetchJson, FetchJsonError } from "@/lib/api/client";
 import { buildErrorDescription, extractRawDetail } from "@/lib/api/error-presenter";
 import { toLearningTrajectoryResponse } from "@/lib/api/types-teacher";
+import { toLearningTrajectoryStudentDisplayName } from "@/lib/learning-trajectory";
 import { paths } from "@/lib/routes/paths";
 import { getAiStatusLabel, getCommonErrorSummary } from "@/lib/ui/status";
 import { getFeedbackTagLabel } from "@/lib/ui/feedback-tags";
@@ -138,33 +139,6 @@ const pickText = (...candidates: unknown[]): string | null => {
     }
   }
   return null;
-};
-
-const toStudentDisplayName = (item: TrajectoryItem): string => {
-  const name = pickText(item.student?.name);
-  if (name) {
-    return name;
-  }
-
-  const studentNo = pickText(
-    item.student?.studentNo,
-    safeGet(item.raw, "studentNo", undefined),
-    safeGet(item.raw, "student.studentNo", undefined)
-  );
-  if (studentNo) {
-    return `学号：${studentNo}`;
-  }
-
-  const email = pickText(
-    item.student?.email,
-    safeGet(item.raw, "email", undefined),
-    safeGet(item.raw, "student.email", undefined)
-  );
-  if (email) {
-    return email;
-  }
-
-  return "未知学生";
 };
 
 const toFiniteNumber = (value: unknown): number | null => {
@@ -437,7 +411,7 @@ export default async function LearningTrajectoryPage({
               {viewModel.data.items.map((item, index) => {
                 const status = item.latestAiFeedbackStatus;
                 const displayStatus = getAiStatusLabel(status);
-                const studentDisplayName = toStudentDisplayName(item);
+                const studentDisplayName = toLearningTrajectoryStudentDisplayName(item.student);
                 const studentKey = item.studentId ?? item.student?.id ?? `student-${index}`;
                 const showExpandedDetail =
                   viewModel.query.includeAttempts || viewModel.query.includeTagDetails;
@@ -477,9 +451,7 @@ export default async function LearningTrajectoryPage({
                                       );
                                       const attemptStatus = getAiStatusLabel(attemptStatusRaw);
                                       const isLate = safeGet(attemptRecord, "isLate", undefined) === true;
-                                      const attemptTime =
-                                        safeGet(attemptRecord, "createdAt", undefined) ??
-                                        safeGet(attemptRecord, "submittedAt", null);
+                                      const attemptTime = safeGet(attemptRecord, "createdAt", null);
 
                                       return (
                                         <li key={`${String(studentKey)}-attempt-${attemptIndex}`}>
