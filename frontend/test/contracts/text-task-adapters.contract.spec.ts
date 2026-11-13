@@ -35,6 +35,11 @@ import {
   toSubmitTaskResponse,
   toTeacherFeedbackListResponse,
 } from "../../lib/api/types-teacher";
+import {
+  averageAiSuccessRate,
+  averageOverallSubmissionCoverage,
+  toCourseOverviewPercentText,
+} from "../../lib/course-overview";
 import { toLearningTrajectoryStudentDisplayName } from "../../lib/learning-trajectory";
 import {
   canSubmitTextTask,
@@ -411,11 +416,164 @@ test("course overview preserves top-level metrics, exact zero, nullable AI and r
       },
     ],
   });
+  const beforeItems = structuredClone(result.items);
+  const averageCoverage = averageOverallSubmissionCoverage(result.items);
+  const averageAi = averageAiSuccessRate(result.items);
+
+  expect(
+    toCourseOverviewPercentText(result.items[0].overallSubmissionCoverage),
+  ).toBe("0%");
+  expect(toCourseOverviewPercentText(result.items[0].submissionRate)).toBe("0%");
+  expect(toCourseOverviewPercentText(result.items[0].aiSuccessRate)).toBe("—");
+  expect(toCourseOverviewPercentText(result.items[1].aiSuccessRate)).toBe("0%");
+  expect(averageCoverage).toBe(0);
+  expect(averageAi).toBe(0);
+  expect(toCourseOverviewPercentText(averageCoverage)).toBe("0%");
+  expect(toCourseOverviewPercentText(averageAi)).toBe("0%");
+  expect(result.items).toStrictEqual(beforeItems);
   expect(result.raw).toBe(payload);
   expect(result.items[0].raw).toBe(item);
   expect(result.items[1].raw).toBe(emptyItem);
   expect(payload.data).toBe(ignored);
   expect(payload).toStrictEqual(before);
+});
+
+test("course overview formats ratios once with the existing one-decimal precision and placeholders", () => {
+  for (const [value, expected] of [
+    [0, "0%"],
+    [1, "100%"],
+    [0.005, "0.5%"],
+    [0.1234, "12.3%"],
+    [0.1236, "12.4%"],
+    [0.00004, "0%"],
+    [null, "—"],
+    [undefined, "—"],
+  ] as const) {
+    expect(toCourseOverviewPercentText(value)).toBe(expected);
+  }
+});
+
+test("course overview low-ratio summaries stay in ratio units and give each classroom equal weight", () => {
+  const first = Object.freeze({
+    classroomId: "small-classroom",
+    studentsCount: 1,
+    publishedClassroomTasks: 1,
+    overallSubmissionCoverage: 0.002,
+    submissionRate: 0.9,
+    ai: Object.freeze({ jobsTotal: 1, aiSuccessRate: 0.005 }),
+  });
+  const second = Object.freeze({
+    classroomId: "large-classroom",
+    studentsCount: 999,
+    publishedClassroomTasks: 300,
+    overallSubmissionCoverage: 0.008,
+    submissionRate: 0.1,
+    ai: Object.freeze({ jobsTotal: 999, aiSuccessRate: 0.015 }),
+  });
+  const payload = Object.freeze({ items: Object.freeze([first, second]) });
+  const before = structuredClone(payload);
+  const result = toCourseOverviewResponse(payload);
+  const beforeItems = structuredClone(result.items);
+  const averageCoverage = averageOverallSubmissionCoverage(result.items);
+  const averageAi = averageAiSuccessRate(result.items);
+
+  // Equal classroom means are (0.002 + 0.008) / 2 and
+  // (0.005 + 0.015) / 2, before any percentage conversion or rounding.
+  expect(averageCoverage).toBe(0.005);
+  expect(averageAi).toBe(0.01);
+  expect(toCourseOverviewPercentText(averageCoverage)).toBe("0.5%");
+  expect(toCourseOverviewPercentText(averageAi)).toBe("1%");
+  expect(result.items).toStrictEqual(beforeItems);
+  expect(result.raw).toBe(payload);
+  expect(result.items[0].raw).toBe(first);
+  expect(result.items[1].raw).toBe(second);
+  expect(payload).toStrictEqual(before);
+});
+
+test("course overview averages keep zero and use an independent valid-sample denominator for each ratio", () => {
+  const payload = {
+    items: [
+      { overallSubmissionCoverage: 0, ai: { aiSuccessRate: null } },
+      { overallSubmissionCoverage: 0.5, ai: { aiSuccessRate: 0 } },
+      { overallSubmissionCoverage: null, ai: { aiSuccessRate: 0.5 } },
+      { submissionRate: 1, ai: { aiSuccessRate: 1 } },
+      { overallSubmissionCoverage: "0.5", ai: { aiSuccessRate: "0.7" } },
+      { overallSubmissionCoverage: -1, ai: { aiSuccessRate: -1 } },
+      {
+        overallSubmissionCoverage: Number.NaN,
+        ai: { aiSuccessRate: Number.POSITIVE_INFINITY },
+      },
+      {},
+    ],
+  };
+  const before = structuredClone(payload);
+  const result = toCourseOverviewResponse(payload);
+  const beforeItems = structuredClone(result.items);
+  const averageCoverage = averageOverallSubmissionCoverage(result.items);
+  const averageAi = averageAiSuccessRate(result.items);
+
+  // Coverage has two valid samples; AI has three. Missing values do not add zero.
+  expect(averageCoverage).toBe(0.25);
+  expect(averageAi).toBe(0.5);
+  expect(toCourseOverviewPercentText(averageCoverage)).toBe("25%");
+  expect(toCourseOverviewPercentText(averageAi)).toBe("50%");
+  expect(result.items).toStrictEqual(beforeItems);
+  expect(payload).toStrictEqual(before);
+});
+
+test("course overview ratios above one display and participate in averages without clamping or unit guessing", () => {
+  const result = toCourseOverviewResponse({
+    items: [
+      {
+        overallSubmissionCoverage: 1.25,
+        submissionRate: 1.25,
+        ai: { aiSuccessRate: 1.25 },
+      },
+      { overallSubmissionCoverage: 2, ai: { aiSuccessRate: 0.25 } },
+    ],
+  });
+  const averageCoverage = averageOverallSubmissionCoverage(result.items);
+  const averageAi = averageAiSuccessRate(result.items);
+
+  expect(
+    toCourseOverviewPercentText(result.items[0].overallSubmissionCoverage),
+  ).toBe("125%");
+  expect(toCourseOverviewPercentText(result.items[0].submissionRate)).toBe("125%");
+  expect(toCourseOverviewPercentText(result.items[0].aiSuccessRate)).toBe("125%");
+  expect(averageCoverage).toBe(1.625);
+  expect(averageAi).toBe(0.75);
+  expect(toCourseOverviewPercentText(averageCoverage)).toBe("162.5%");
+  expect(toCourseOverviewPercentText(averageAi)).toBe("75%");
+});
+
+test("course overview empty or invalid-only samples have no mean and invalid display inputs keep placeholders", () => {
+  for (const payload of [
+    { items: [] },
+    {
+      items: [
+        {},
+        { overallSubmissionCoverage: null, ai: { aiSuccessRate: null } },
+        { overallSubmissionCoverage: "1", ai: { aiSuccessRate: "1" } },
+        { overallSubmissionCoverage: -1, ai: { aiSuccessRate: -1 } },
+        {
+          overallSubmissionCoverage: Number.NaN,
+          ai: { aiSuccessRate: Number.POSITIVE_INFINITY },
+        },
+      ],
+    },
+  ]) {
+    const result = toCourseOverviewResponse(payload);
+    const averageCoverage = averageOverallSubmissionCoverage(result.items);
+    const averageAi = averageAiSuccessRate(result.items);
+
+    expect(averageCoverage).toBeUndefined();
+    expect(averageAi).toBeUndefined();
+    expect(toCourseOverviewPercentText(averageCoverage)).toBe("—");
+    expect(toCourseOverviewPercentText(averageAi)).toBe("—");
+  }
+  for (const value of [-0.1, Number.NaN, Number.POSITIVE_INFINITY, "0.5"]) {
+    expect(toCourseOverviewPercentText(value)).toBe("—");
+  }
 });
 
 test("entity and nested course IDs do not fall back to old aliases when formal IDs are unusable", () => {

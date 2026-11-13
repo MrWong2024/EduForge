@@ -175,6 +175,7 @@
   - 注意：窗口与公开数据见 [Backend DTO](./handoff-backend-dto-cheatsheet.md#weekly-report)。前端只消费顶层 `classroom/progress/atRisk/aiHealth/topTags` 及 `window/generatedAt`；旧 `summary/overview/data`、扁平指标和替代 jobs 路径不再参与选值，也不再投影无用的顶层 `classroomId/items`。页头通过 `toClassroomSummary` 读取正式 `classroom` 投影，不新增请求；正式来源缺失沿用占位与空态，真实 0 和现有格式保持，raw 仍引用原根对象。
 - 课程总览：`courses/:courseId/overview/page.tsx` -> `/api/proxy/courses/:courseId/overview`。
   - 对应后端：`GET /api/courses/:courseId/overview`。
+  - 比例固定按 ratio 展示，当前页两项比例均值按班级等权计算并保持 ratio，仅在最终展示时转换一次为百分比；不按数值大小猜测单位，也不将分页摘要视为全课程平均。
   - 页面窗口为 `all | 7d`；解析与请求沿用本节三页报表共性窗口规则，后端数据合同见 [Backend DTO](./handoff-backend-dto-cheatsheet.md#课程总览)。
 - 学习轨迹 / 课堂复盘 / AI 指标：三件套 Server pages -> `/api/proxy/classrooms/:cid/tasks/:ctid/{learning-trajectory,review-pack,ai-metrics}`。
   - 对应后端：三个课堂任务聚合接口。
