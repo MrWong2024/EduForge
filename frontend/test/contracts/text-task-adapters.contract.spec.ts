@@ -66,6 +66,7 @@ import {
   toDisplaySubmissionLanguage,
 } from "../../lib/learning-tasks/submission-language";
 import { toDisplayLateDuration } from "../../lib/ui/format";
+import { getTaskTemplateStatusLabel } from "../../lib/ui/status";
 import { normalizeTaskTemplateVisibility } from "../../lib/learning-tasks/template-visibility-scope";
 import { canEditTeacherFeedback } from "../../lib/learning-tasks/teacher-feedback";
 import {
@@ -2341,6 +2342,123 @@ test("classroom task list totals retain mapper parsing while the page count guar
     expect(payload).toStrictEqual(before);
   }
 });
+
+for (const { group, cases } of [
+  {
+    group: "formal states",
+    cases: [
+      [{ status: "DRAFT" }, "DRAFT", true, "草稿"],
+      [{ status: "PUBLISHED" }, "PUBLISHED", true, "已发布"],
+      [{ status: "ARCHIVED" }, "ARCHIVED", false, "已归档"],
+    ],
+  },
+  {
+    group: "noncanonical strings",
+    cases: [
+      [{ status: "draft" }, "draft", false, "未知状态"],
+      [{ status: "Published" }, "Published", false, "未知状态"],
+      [{ status: " DRAFT " }, " DRAFT ", false, "未知状态"],
+      [{ status: "\tPUBLISHED\n" }, "\tPUBLISHED\n", false, "未知状态"],
+      [{ status: "UNKNOWN" }, "UNKNOWN", false, "未知状态"],
+      [{ status: "" }, "", false, "—"],
+      [{ status: " \t\n " }, " \t\n ", false, "—"],
+    ],
+  },
+  {
+    group: "missing and nonstring states",
+    cases: [
+      [{}, undefined, false, "—"],
+      [{ status: null }, undefined, false, "—"],
+      [{ status: 42 }, undefined, false, "—"],
+      [{ status: false }, undefined, false, "—"],
+      [{ status: Object.freeze(["DRAFT"]) }, undefined, false, "—"],
+      [{ status: Object.freeze({ status: "DRAFT" }) }, undefined, false, "—"],
+    ],
+  },
+] as const) {
+  test(`template ${group} keep exact status, edit eligibility and labels through all response adapters`, () => {
+    const rows = Object.freeze(
+      cases.map(([fields], index) =>
+        Object.freeze({
+          id: `status-template-${index}`,
+          createdBy: "teacher-self",
+          createdById: "legacy-author",
+          visibility: "PRIVATE",
+          ...fields,
+          data: Object.freeze({ status: "DRAFT" }),
+          raw: Object.freeze({ status: "PUBLISHED" }),
+        }),
+      ),
+    );
+    const beforeRows = structuredClone(rows);
+    for (const [index, scenario] of cases.entries()) {
+      const [, expectedStatus, editable, label] = scenario;
+      const row = rows[index];
+      for (const adapt of [
+        toLearningTaskOption,
+        toLearningTaskDetailResponse,
+        toLearningTaskCreateResponse,
+        toLearningTaskUpdateResponse,
+      ]) {
+        const result = adapt(row);
+
+        expect(result.status).toBe(expectedStatus);
+        expect(
+          canEditTaskTemplate("teacher-self", result.createdById, result.status),
+        ).toBe(editable);
+        expect(getTaskTemplateStatusLabel(result.status)).toBe(label);
+        expect(result.id).toBe(`status-template-${index}`);
+        expect(result.createdById).toBe("teacher-self");
+        expect(result.visibility).toBe("PRIVATE");
+        expect(result.raw).toBe(row);
+      }
+    }
+
+    const payload = Object.freeze({
+      items: rows,
+      total: rows.length,
+      page: 2,
+      limit: 100,
+      data: Object.freeze({
+        items: Object.freeze([{ id: "legacy-template", status: "DRAFT" }]),
+        total: 999,
+        page: 9,
+        limit: 9,
+      }),
+    });
+    const before = structuredClone(payload);
+    for (const adapt of [
+      toLearningTaskListResponse,
+      toPublishableTaskTemplateListResponse,
+    ]) {
+      const result = adapt(payload);
+
+      expect(result.items.map((item) => item.status)).toEqual(
+        cases.map(([, expectedStatus]) => expectedStatus),
+      );
+      expect(result.total).toBe(rows.length);
+      expect(result.page).toBe(2);
+      expect(result.limit).toBe(100);
+      expect(result.raw).toBe(payload);
+      for (const [index, scenario] of cases.entries()) {
+        const [, expectedStatus, editable, label] = scenario;
+        const item = result.items[index];
+
+        expect(item.status).toBe(expectedStatus);
+        expect(
+          canEditTaskTemplate("teacher-self", item.createdById, item.status),
+        ).toBe(editable);
+        expect(getTaskTemplateStatusLabel(item.status)).toBe(label);
+        expect(item.id).toBe(`status-template-${index}`);
+        expect(item.createdById).toBe("teacher-self");
+        expect(item.visibility).toBe("PRIVATE");
+        expect(item.raw).toBe(rows[index]);
+      }
+    }
+    expect(rows).toStrictEqual(beforeRows);
+    expect(payload).toStrictEqual(before);
+  });
+}
 
 test("template visibility preserves only exact PRIVATE and SHARED without changing the input", () => {
   for (const visibility of ["PRIVATE", "SHARED"] as const) {

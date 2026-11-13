@@ -72,11 +72,8 @@ const USED_PUBLISHED_TEMPLATE_REVERT_DETAIL =
 const USED_PUBLISHED_TEMPLATE_REVERT_MESSAGE =
   "该模板已发布到班级，不能改回草稿。若需要停止学生提交，请到对应班级任务中关闭任务。";
 
-const isLearningTaskStatus = (value: string): value is LearningTaskStatus =>
+const isLearningTaskStatus = (value: unknown): value is LearningTaskStatus =>
   value === "DRAFT" || value === "PUBLISHED" || value === "ARCHIVED";
-
-const toRawStatusUpper = (value: unknown): string =>
-  typeof value === "string" ? value.trim().toUpperCase() : "";
 
 const getUpdateErrorSummary = (status: number): string => {
   if (status === 400) {
@@ -167,7 +164,7 @@ export function EditLearningTaskForm({
   const router = useRouter();
   const taskListReturnTo = toSafeTaskListReturnTo(returnTo);
   const initialCourseLabel = normalizeTaskCourseLabel(initialTask.courseLabel);
-  const rawInitialStatus = toRawStatusUpper(initialTask.status);
+  const rawInitialStatus = initialTask.status;
   const hasKnownInitialStatus = isLearningTaskStatus(rawInitialStatus);
   const initialVisibility = normalizeTaskTemplateVisibility(
     initialTask.visibility,

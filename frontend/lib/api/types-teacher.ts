@@ -1109,7 +1109,7 @@ export const toLearningTaskOption = (value: unknown): LearningTaskOption => {
     id: asString(record.id),
     title: asString(record.title),
     description: asString(record.description),
-    status: asString(record.status),
+    status: typeof record.status === "string" ? record.status : undefined,
     knowledgeModule: asString(record.knowledgeModule),
     courseLabel: asString(record.courseLabel),
     visibility: normalizeTaskTemplateVisibility(record.visibility),

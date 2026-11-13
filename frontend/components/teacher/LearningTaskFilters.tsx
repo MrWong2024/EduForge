@@ -14,6 +14,7 @@ import {
   type LearningTaskOption,
   type LearningTaskStatus,
 } from "@/lib/api/types-teacher";
+import { canEditTaskTemplate } from "@/lib/learning-tasks/ai-context-refs";
 import {
   TASK_COURSE_LABELS,
   normalizeTaskCourseLabel,
@@ -69,11 +70,6 @@ const SCOPE_SORT_HINTS: Record<TaskTemplateScope, string> = {
 const toStatusUpper = (value: unknown): string =>
   typeof value === "string" ? value.trim().toUpperCase() : "";
 
-const isKnownLearningTaskStatus = (
-  value: string,
-): value is LearningTaskStatus =>
-  value === "DRAFT" || value === "PUBLISHED" || value === "ARCHIVED";
-
 const toStatusFilter = (value: string | undefined): TaskStatusFilter => {
   const normalized = toStatusUpper(value);
   if (
@@ -87,11 +83,10 @@ const toStatusFilter = (value: string | undefined): TaskStatusFilter => {
 };
 
 const getStatusHint = (status: unknown): string => {
-  const normalized = toStatusUpper(status);
-  if (normalized === "PUBLISHED") {
+  if (status === "PUBLISHED") {
     return "可发布到班级";
   }
-  if (normalized === "DRAFT" || normalized === "ARCHIVED") {
+  if (status === "DRAFT" || status === "ARCHIVED") {
     return "通常不会出现在班级发布可选列表";
   }
   return "状态缺失或未知";
@@ -518,17 +513,16 @@ export function LearningTaskFilters({
             </thead>
             <tbody role="rowgroup" className="block lg:table-row-group">
               {sortedTasks.map((task, index) => {
-                const statusUpper = toStatusUpper(task.status);
                 const rubricSummary = getRubricSummary(task.rubric);
                 const titleText = toDisplayText(task.title, "未命名模板");
                 const descriptionText = toDisplayText(task.description);
                 const taskId = task.id;
                 const statusBadgeClass =
-                  statusUpper === "PUBLISHED"
+                  task.status === "PUBLISHED"
                     ? "border-emerald-200 bg-emerald-100 text-emerald-700"
-                    : statusUpper === "DRAFT"
+                    : task.status === "DRAFT"
                       ? "border-amber-200 bg-amber-100 text-amber-700"
-                      : statusUpper === "ARCHIVED"
+                      : task.status === "ARCHIVED"
                         ? "border-zinc-300 bg-zinc-200 text-zinc-700"
                         : "border-zinc-200 bg-zinc-100 text-zinc-700";
                 const rubricBadgeClass = rubricSummary === "已填写"
@@ -543,17 +537,14 @@ export function LearningTaskFilters({
                     : visibility === "SHARED"
                       ? "border-emerald-200 bg-emerald-100 text-emerald-700"
                       : "border-zinc-200 bg-zinc-100 text-zinc-700";
-                const isKnownStatus = isKnownLearningTaskStatus(statusUpper);
                 const isOwner = Boolean(
                   currentUserId &&
                   task.createdById &&
                   task.createdById === currentUserId,
                 );
                 const canEditTask =
-                  isKnownStatus &&
-                  isOwner &&
-                  statusUpper !== "ARCHIVED" &&
-                  visibility !== undefined;
+                  visibility !== undefined &&
+                  canEditTaskTemplate(currentUserId, task.createdById, task.status);
                 const publisherLabel = getPublisherLabel(
                   task.publisher,
                   currentUserId,
@@ -690,7 +681,7 @@ export function LearningTaskFilters({
                           >
                             {canEditTask ? "编辑" : "查看"}
                           </Link>
-                          {isOwner && statusUpper === "ARCHIVED" ? (
+                          {isOwner && task.status === "ARCHIVED" ? (
                             <p className="text-xs leading-5 text-zinc-500">
                               已归档，仅可查看
                             </p>

@@ -234,6 +234,12 @@ test("editing requires known identity, exact author match and a mutable template
     ["a", "a", "ARCHIVED"],
     ["a", "a", undefined],
     ["a", "a", "UNKNOWN"],
+    ["a", "a", "draft"],
+    ["a", "a", "Published"],
+    ["a", "a", " DRAFT "],
+    ["a", "a", "\tPUBLISHED\n"],
+    ["a", "a", ""],
+    ["a", "a", " \t\n "],
     [" ", " ", "DRAFT"],
   ])
     expect(canEditTaskTemplate(user, owner, status)).toBe(false);
