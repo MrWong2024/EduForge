@@ -213,10 +213,11 @@
 - AI 反馈介入成效分析学生列表：同一 `page.tsx` -> `/api/proxy/classrooms/:id/ai-learning-analytics/students` -> `GET /api/classrooms/:classroomId/ai-learning-analytics/students`。
   - 使用 `toAiLearningAnalyticsStudentsResponse`；与总览传递相同 `window/excludedTaskIds`，另固定 `limit=100` 并从 URL 传 `page/q/overallOutcome/engagementStatus`；后三项为 AND 语义，后端先搜索筛选再分页。
   - 响应映射 `context/methodology/total/activeStudentsTotal/filters/items`：`total` 是筛选后总数，`activeStudentsTotal` 是全部 ACTIVE 学生数，`filters` 是后端规范化回显；参与阶段使用更新后的后端枚举。
+  - 两项计数只读正式根字段，不再缺省补零或将负数夹零，也不从旧包装、另一计数、行数或总览摘要补足；SSR 分别复用 `isValidPaginationTotal`，只有两项均通过才供人数、分页与空态消费。任一非法仅在学生列表结果区显示“学生分析列表数据不完整，请刷新后重试。”，不填写虚构 HTTP 状态；保留已加载总览、学生筛选控件及其他区域，任务选项仍独立降级。公开计数合同见 [Backend DTO Analytics](./handoff-backend-dto-cheatsheet.md#ai-learning-analytics)。
 - AI 反馈介入成效分析学生详情：`ai-learning-analytics/students/[studentId]/page.tsx` -> `/api/proxy/classrooms/:id/ai-learning-analytics/students/:studentId` -> `GET /api/classrooms/:classroomId/ai-learning-analytics/students/:studentId`。
   - 使用 `toAiLearningAnalyticsStudentDetailResponse`；后端请求只传 `window/excludedTaskIds`，URL 中的 `page/q/overallOutcome/engagementStatus` 仅用于返回班级分析时恢复列表状态，绝不传给详情接口。
   - taskPoint 适配基线、比较端点、最新版本、较新未比较标记和稳定原因；null 与未知来源/模型保留，版本链接只使用后端对应 submissionId 及课堂上下文，不从 attemptNo 猜测提交。公开形状与值域见 [Backend DTO Analytics](./handoff-backend-dto-cheatsheet.md#ai-learning-analytics)。
-- 三个 Analytics mapper 直接消费正式根对象，不再解包 `data`；根字段缺失、非法或为空时不从 `data` 补足，只有旧包装时沿既有缺字段规则降级，不新增整页协议错误。业务投影只消费 `detailedOutcome/overallOutcome/engagementStatus` 等现行字段，字段合同见 [Backend DTO Analytics](./handoff-backend-dto-cheatsheet.md#ai-learning-analytics)；raw 严格引用原根对象，不修改输入或清洗 raw，旧 `data` 可继续保留于 raw 中。
+- 三个 Analytics mapper 直接消费正式根对象，不再解包 `data`；根字段缺失、非法或为空时不从 `data` 补足，只有旧包装时沿既有缺字段规则降级，不新增整页协议错误；学生列表的两项计数按上方学生列表条目的局部门禁处理。业务投影只消费 `detailedOutcome/overallOutcome/engagementStatus` 等现行字段，字段合同见 [Backend DTO Analytics](./handoff-backend-dto-cheatsheet.md#ai-learning-analytics)；raw 严格引用原根对象，不修改输入或清洗 raw，旧 `data` 可继续保留于 raw 中。
 - 上述三条正式请求全部由 `fetchJson` 经 `/api/proxy/**` 发出；前端只适配后端返回值与枚举，本模块所有 nullable 比率/均值保持 null，真实0保留为0，不调用通用必需数字适配补零。不重算基线/终点、issueLoad、`detailedOutcome`、`overallOutcome`、`engagementStatus`、rate 分母或任何聚合指标。
 - 教学快照预检：`export/snapshot/page.tsx` -> `/api/proxy/classrooms/:id/export/snapshot`。
   - 对应后端：`GET /api/classrooms/:classroomId/export/snapshot`。

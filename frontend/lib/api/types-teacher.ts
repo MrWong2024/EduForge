@@ -779,8 +779,8 @@ export type AiLearningAnalyticsStudentsResponse = {
   context: AiLearningAnalyticsContext;
   page: number;
   limit: number;
-  total: number;
-  activeStudentsTotal: number;
+  total?: number;
+  activeStudentsTotal?: number;
   filters: {
     q: string | null;
     overallOutcome: AiLearningAnalyticsOverallOutcome | null;
@@ -1828,11 +1828,8 @@ export const toAiLearningAnalyticsStudentsResponse = (
     context: toAiLearningAnalyticsContext(source.context),
     page: Math.max(1, toRequiredNumber(source.page) || 1),
     limit: Math.max(1, toRequiredNumber(source.limit) || 20),
-    total: Math.max(0, toRequiredNumber(source.total)),
-    activeStudentsTotal: Math.max(
-      0,
-      toRequiredNumber(source.activeStudentsTotal),
-    ),
+    total: asNumber(source.total),
+    activeStudentsTotal: asNumber(source.activeStudentsTotal),
     filters: {
       q: asNullableString(filtersRecord.q) ?? null,
       overallOutcome:

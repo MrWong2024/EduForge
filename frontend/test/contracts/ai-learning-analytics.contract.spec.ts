@@ -1,4 +1,5 @@
 import { expect, test } from "@playwright/test";
+import { isValidPaginationTotal } from "@/lib/pagination";
 import {
   toAiLearningAnalyticsOverviewResponse,
   toAiLearningAnalyticsStudentsResponse,
@@ -308,6 +309,8 @@ test("analytics adapters use formal root results, pagination and filters despite
       engagementStatus: "QUALITY_COMPARABLE",
     },
   });
+  expect(isValidPaginationTotal(students.total)).toBe(true);
+  expect(isValidPaginationTotal(students.activeStudentsTotal)).toBe(true);
   expect(students.items.map((student) => student.studentId)).toEqual([
     "root-student-2",
     "root-student-1",
@@ -359,6 +362,103 @@ test("analytics adapters use formal root results, pagination and filters despite
   }
 });
 
+test("analytics student counts preserve zero, filtered empty results and empty pages with positive counts", () => {
+  for (const counts of [
+    { total: 0, activeStudentsTotal: 0 },
+    { total: 0, activeStudentsTotal: 8 },
+    { total: 4, activeStudentsTotal: 8 },
+  ]) {
+    const input = Object.freeze({
+      ...counts,
+      page: 2,
+      limit: 3,
+      items: Object.freeze([]),
+      data: Object.freeze({ total: 99, activeStudentsTotal: 100 }),
+      pagination: Object.freeze({ total: 77, activeStudentsTotal: 88 }),
+    });
+    const before = structuredClone(input);
+    const students = toAiLearningAnalyticsStudentsResponse(input);
+
+    expect(students.total).toBe(counts.total);
+    expect(students.activeStudentsTotal).toBe(counts.activeStudentsTotal);
+    expect(isValidPaginationTotal(students.total)).toBe(true);
+    expect(isValidPaginationTotal(students.activeStudentsTotal)).toBe(true);
+    expect(students.items).toEqual([]);
+    expect(students.page).toBe(2);
+    expect(students.limit).toBe(3);
+    expect(students.raw).toBe(input);
+    expect(input).toStrictEqual(before);
+  }
+});
+
+test("analytics student count fields each reject invalid root values without rescuing them from old wrappers or another count", () => {
+  const row = Object.freeze({
+    studentId: "count-student",
+    studentName: "计数学生",
+    studentNo: null,
+    submittedTasksCount: 0,
+  });
+  const data = Object.freeze({ total: 99, activeStudentsTotal: 100 });
+  const pagination = Object.freeze({ total: 77, activeStudentsTotal: 88 });
+  for (const { field, otherField, validCounts, expectedOther } of [
+    {
+      field: "total",
+      otherField: "activeStudentsTotal",
+      validCounts: { activeStudentsTotal: 8 },
+      expectedOther: 8,
+    },
+    {
+      field: "activeStudentsTotal",
+      otherField: "total",
+      validCounts: { total: 4 },
+      expectedOther: 4,
+    },
+  ] as const) {
+    for (const { value, expected } of [
+      { value: undefined, expected: undefined },
+      { value: null, expected: undefined },
+      { value: "4", expected: undefined },
+      { value: Number.NaN, expected: undefined },
+      { value: Number.POSITIVE_INFINITY, expected: undefined },
+      { value: Number.NEGATIVE_INFINITY, expected: undefined },
+      { value: -1, expected: -1 },
+      { value: 1.5, expected: 1.5 },
+      { value: Number.MAX_SAFE_INTEGER + 1, expected: 9007199254740992 },
+    ]) {
+      const input = Object.freeze({
+        ...validCounts,
+        ...(value === undefined ? {} : { [field]: value }),
+        page: 2,
+        limit: 3,
+        items: Object.freeze([row]),
+        data,
+        pagination,
+      });
+      const before = structuredClone(input);
+      const students = toAiLearningAnalyticsStudentsResponse(input);
+
+      expect(students[field]).toBe(expected);
+      expect(isValidPaginationTotal(students[field])).toBe(false);
+      expect(students[otherField]).toBe(expectedOther);
+      expect(isValidPaginationTotal(students[otherField])).toBe(true);
+      expect(students.items).toHaveLength(1);
+      expect(students.items[0]).toMatchObject({
+        studentId: "count-student",
+        studentName: "计数学生",
+        studentNo: null,
+        submittedTasksCount: 0,
+      });
+      expect(students.items[0]).not.toHaveProperty("raw");
+      expect(students.page).toBe(2);
+      expect(students.limit).toBe(3);
+      expect(students.raw).toBe(input);
+      expect(students.raw.data).toBe(data);
+      expect(students.raw.pagination).toBe(pagination);
+      expect(input).toStrictEqual(before);
+    }
+  }
+});
+
 test("analytics adapters do not unwrap data-only responses or rescue empty and invalid root fields", () => {
   const data = Object.freeze({
     context: Object.freeze({ classroomId: "ignored-classroom", window: "7d" }),
@@ -389,34 +489,43 @@ test("analytics adapters do not unwrap data-only responses or rescue empty and i
       engagementStatus: "QUALITY_COMPARABLE",
     }),
   });
-  for (const input of [
-    Object.freeze({ data }),
-    Object.freeze({
-      context: Object.freeze({}),
-      methodology: Object.freeze({}),
-      summary: Object.freeze({}),
-      student: Object.freeze({}),
-      taskTrends: Object.freeze([]),
-      items: Object.freeze([]),
-      taskPoints: Object.freeze([]),
-      filters: Object.freeze({}),
-      data,
-    }),
-    Object.freeze({
-      context: null,
-      methodology: false,
-      summary: Object.freeze([]),
-      student: "invalid",
-      taskTrends: null,
-      items: Object.freeze({}),
-      taskPoints: false,
-      page: "9",
-      limit: null,
-      total: Number.NaN,
-      activeStudentsTotal: -1,
-      filters: null,
-      data,
-    }),
+  for (const { input, expectedCounts } of [
+    {
+      input: Object.freeze({ data }),
+      expectedCounts: { total: undefined, activeStudentsTotal: undefined },
+    },
+    {
+      input: Object.freeze({
+        context: Object.freeze({}),
+        methodology: Object.freeze({}),
+        summary: Object.freeze({}),
+        student: Object.freeze({}),
+        taskTrends: Object.freeze([]),
+        items: Object.freeze([]),
+        taskPoints: Object.freeze([]),
+        filters: Object.freeze({}),
+        data,
+      }),
+      expectedCounts: { total: undefined, activeStudentsTotal: undefined },
+    },
+    {
+      input: Object.freeze({
+        context: null,
+        methodology: false,
+        summary: Object.freeze([]),
+        student: "invalid",
+        taskTrends: null,
+        items: Object.freeze({}),
+        taskPoints: false,
+        page: "9",
+        limit: null,
+        total: Number.NaN,
+        activeStudentsTotal: -1,
+        filters: null,
+        data,
+      }),
+      expectedCounts: { total: undefined, activeStudentsTotal: -1 },
+    },
   ]) {
     const before = structuredClone(input);
     const overview = toAiLearningAnalyticsOverviewResponse(input);
@@ -431,11 +540,13 @@ test("analytics adapters do not unwrap data-only responses or rescue empty and i
     expect(students).toMatchObject({
       page: 1,
       limit: 20,
-      total: 0,
-      activeStudentsTotal: 0,
+      total: expectedCounts.total,
+      activeStudentsTotal: expectedCounts.activeStudentsTotal,
       filters: { q: null, overallOutcome: null, engagementStatus: null },
       items: [],
     });
+    expect(isValidPaginationTotal(students.total)).toBe(false);
+    expect(isValidPaginationTotal(students.activeStudentsTotal)).toBe(false);
     expect(detail.student).toEqual({
       studentId: "",
       studentName: "未知学生",

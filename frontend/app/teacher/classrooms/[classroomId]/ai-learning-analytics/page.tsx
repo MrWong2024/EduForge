@@ -51,6 +51,7 @@ import {
   withAiLearningAnalyticsStudentSectionHash,
   type AiLearningAnalyticsSearchParams,
 } from "@/lib/ai-learning-analytics";
+import { isValidPaginationTotal } from "@/lib/pagination";
 import { paths } from "@/lib/routes/paths";
 import { getClassroomTaskStatusLabel, getCommonErrorSummary } from "@/lib/ui/status";
 import {
@@ -66,12 +67,18 @@ type AiLearningAnalyticsPageProps = {
 };
 
 type PresentedError = {
-  status: number;
+  status?: number;
   description: string;
 };
 
 type StudentListState =
-  | { mode: "ready"; data: AiLearningAnalyticsStudentsResponse }
+  | {
+      mode: "ready";
+      data: AiLearningAnalyticsStudentsResponse & {
+        total: number;
+        activeStudentsTotal: number;
+      };
+    }
   | { mode: "error"; error: PresentedError };
 
 const getRequestOrigin = async (): Promise<string> => {
@@ -277,16 +284,32 @@ export default async function AiLearningAnalyticsPage({
   }
 
   const overview = toAiLearningAnalyticsOverviewResponse(overviewResult.value);
-  const studentListState: StudentListState =
-    studentsResult.status === "fulfilled"
-      ? {
-          mode: "ready",
-          data: toAiLearningAnalyticsStudentsResponse(studentsResult.value),
-        }
-      : {
-          mode: "error",
-          error: presentError(studentsResult.reason, "加载学生分析列表"),
-        };
+  let studentListState: StudentListState;
+  if (studentsResult.status === "fulfilled") {
+    const data = toAiLearningAnalyticsStudentsResponse(studentsResult.value);
+    const { total, activeStudentsTotal } = data;
+    if (
+      isValidPaginationTotal(total) &&
+      isValidPaginationTotal(activeStudentsTotal)
+    ) {
+      studentListState = {
+        mode: "ready",
+        data: { ...data, total, activeStudentsTotal },
+      };
+    } else {
+      studentListState = {
+        mode: "error",
+        error: {
+          description: "学生分析列表数据不完整，请刷新后重试。",
+        },
+      };
+    }
+  } else {
+    studentListState = {
+      mode: "error",
+      error: presentError(studentsResult.reason, "加载学生分析列表"),
+    };
+  }
   const taskOptions =
     taskOptionsResult.status === "fulfilled" ? taskOptionsResult.value : [];
   const taskOptionsLoadError =
