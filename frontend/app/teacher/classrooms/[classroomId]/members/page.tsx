@@ -11,6 +11,7 @@ import {
   toClassroomSummary,
   type ClassroomStudent,
 } from "@/lib/api/types-teacher";
+import { isValidPaginationTotal } from "@/lib/pagination";
 import { paths } from "@/lib/routes/paths";
 import { getCommonErrorSummary, getEnrollmentStatusLabel } from "@/lib/ui/status";
 import {
@@ -73,7 +74,7 @@ type MembersViewModel =
     }
   | {
       mode: "error";
-      status: number;
+      status?: number;
       description: string;
     };
 
@@ -118,22 +119,29 @@ export default async function ClassroomMembersPage({ params, searchParams }: Mem
 
     const classroom = toClassroomSummary(classroomPayload);
     const studentsResponse = toClassroomStudentsResponse(studentsPayload);
-    const total = studentsResponse.total ?? studentsResponse.items.length;
-    const totalPages = Math.max(1, Math.ceil(total / MEMBERS_PAGE_SIZE));
-    const currentPage = Math.min(
-      Math.max(studentsResponse.page ?? queryState.page, 1),
-      totalPages
-    );
+    if (isValidPaginationTotal(studentsResponse.total)) {
+      const total = studentsResponse.total;
+      const totalPages = Math.max(1, Math.ceil(total / MEMBERS_PAGE_SIZE));
+      const currentPage = Math.min(
+        Math.max(studentsResponse.page ?? queryState.page, 1),
+        totalPages
+      );
 
-    viewModel = {
-      mode: "ready",
-      classroomName: classroom.name,
-      students: studentsResponse.items,
-      total,
-      currentPage,
-      totalPages,
-      query: queryState,
-    };
+      viewModel = {
+        mode: "ready",
+        classroomName: classroom.name,
+        students: studentsResponse.items,
+        total,
+        currentPage,
+        totalPages,
+        query: queryState,
+      };
+    } else {
+      viewModel = {
+        mode: "error",
+        description: "班级成员列表数据不完整，请刷新后重试。",
+      };
+    }
   } catch (error) {
     if (error instanceof FetchJsonError) {
       const detail = extractRawDetail(error);

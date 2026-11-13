@@ -1017,6 +1017,7 @@ test("classroom members preserve exact formal states, user fields and pagination
     page: 2,
     limit: 100,
   });
+  expect(isValidPaginationTotal(result.total)).toBe(true);
   expect(result.raw).toBe(payload);
   expect(result.items[0].raw).toBe(active);
   expect(result.items[1].raw).toBe(removed);
@@ -1251,6 +1252,7 @@ test("classroom member legacy wrappers no longer project members or infer pagina
 
     expect(result.items).toEqual([]);
     expect(result.total).toBeUndefined();
+    expect(isValidPaginationTotal(result.total)).toBe(false);
     expect(result.page).toBeUndefined();
     expect(result.limit).toBeUndefined();
     expect(result.raw).toBe(payload);
@@ -1261,13 +1263,18 @@ test("classroom member legacy wrappers no longer project members or infer pagina
 test("classroom member top-level items and pagination override conflicting legacy structures", () => {
   const member = Object.freeze({ id: "formal-top-level", status: "REMOVED" });
   const legacy = Object.freeze({ id: "legacy-nested", status: "ACTIVE" });
-  for (const { items, expectedUserIds } of [
-    { items: Object.freeze([member]), expectedUserIds: ["formal-top-level"] },
-    { items: Object.freeze([]), expectedUserIds: [] },
+  for (const { items, expectedUserIds, total } of [
+    {
+      items: Object.freeze([member]),
+      expectedUserIds: ["formal-top-level"],
+      total: 41,
+    },
+    { items: Object.freeze([]), expectedUserIds: [], total: 41 },
+    { items: Object.freeze([]), expectedUserIds: [], total: 0 },
   ]) {
     const payload = Object.freeze({
       items,
-      total: 41,
+      total,
       page: 2,
       limit: 100,
       data: Object.freeze({
@@ -1282,7 +1289,8 @@ test("classroom member top-level items and pagination override conflicting legac
     const result = toClassroomStudentsResponse(payload);
 
     expect(result.items.map((item) => item.userId)).toEqual(expectedUserIds);
-    expect(result.total).toBe(41);
+    expect(result.total).toBe(total);
+    expect(isValidPaginationTotal(result.total)).toBe(true);
     expect(result.page).toBe(2);
     expect(result.limit).toBe(100);
     if (items.length > 0) {
@@ -1299,6 +1307,12 @@ test("classroom member missing or invalid top-level pagination never uses legacy
   for (const fields of [
     Object.freeze({}),
     Object.freeze({ total: null, page: "2", limit: Number.NaN }),
+    Object.freeze({ total: "41", page: "2", limit: Number.NaN }),
+    Object.freeze({
+      total: Number.POSITIVE_INFINITY,
+      page: "2",
+      limit: Number.NaN,
+    }),
   ]) {
     const payload = Object.freeze({
       items: Object.freeze([member]),
@@ -1312,8 +1326,34 @@ test("classroom member missing or invalid top-level pagination never uses legacy
     expect(result.items).toHaveLength(1);
     expect(result.items[0].userId).toBe("formal-no-pagination");
     expect(result.total).toBeUndefined();
+    expect(isValidPaginationTotal(result.total)).toBe(false);
     expect(result.page).toBeUndefined();
     expect(result.limit).toBeUndefined();
+    expect(result.raw).toBe(payload);
+    expect(result.items[0].raw).toBe(member);
+    expect(payload).toStrictEqual(before);
+  }
+});
+
+test("classroom member list finite totals keep mapper values but fail the page count guard when invalid", () => {
+  const member = Object.freeze({ id: "formal-count-member", status: "ACTIVE" });
+  for (const total of [-1, 1.5, Number.MAX_SAFE_INTEGER + 1]) {
+    const payload = Object.freeze({
+      items: Object.freeze([member]),
+      total,
+      page: 2,
+      limit: 100,
+    });
+    const before = structuredClone(payload);
+    const result = toClassroomStudentsResponse(payload);
+
+    expect(result.items.map((item) => item.userId)).toEqual([
+      "formal-count-member",
+    ]);
+    expect(result.total).toBe(total);
+    expect(isValidPaginationTotal(result.total)).toBe(false);
+    expect(result.page).toBe(2);
+    expect(result.limit).toBe(100);
     expect(result.raw).toBe(payload);
     expect(result.items[0].raw).toBe(member);
     expect(payload).toStrictEqual(before);
