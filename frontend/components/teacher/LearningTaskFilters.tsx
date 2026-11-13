@@ -47,7 +47,7 @@ type LearningTaskFiltersProps = {
   initialDifficultyFilter?: string;
   initialPage: number;
   initialLimit: number;
-  total?: number;
+  total: number;
 };
 
 type TaskStatusFilter = "ALL" | LearningTaskStatus;
@@ -144,8 +144,7 @@ export function LearningTaskFilters({
   );
 
   const limit = initialLimit > 0 ? initialLimit : 20;
-  const totalCount =
-    typeof total === "number" && total >= 0 ? total : tasks.length;
+  const totalCount = total;
   const totalPages = Math.max(1, Math.ceil(totalCount / limit));
   const canGoPrevious = currentPage > 1;
   const canGoNext = currentPage < totalPages;

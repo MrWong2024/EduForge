@@ -66,7 +66,7 @@
 
 | Component / Module | File | Responsibility / Boundary |
 |---|---|---|
-| Pagination Total Guard | `lib/pagination.ts` | 为 `app/teacher/courses/page.tsx`、`app/teacher/classrooms/page.tsx` 提供纯 `isValidPaginationTotal` 守卫，只校验 total 值；页面负责读取错误与正常分页，消费范围见 [Frontend API Map](./handoff-frontend-api-map.md#32-teacher-课程--班级--成员) |
+| Pagination Total Guard | `lib/pagination.ts` | 为 `app/teacher/courses/page.tsx`、`app/teacher/classrooms/page.tsx`、`app/teacher/tasks/page.tsx` 提供纯 `isValidPaginationTotal` 守卫，只校验 total 值；页面负责读取错误与正常分页，消费范围见 [API Map 课程/班级](./handoff-frontend-api-map.md#32-teacher-课程--班级--成员) 与[模板](./handoff-frontend-api-map.md#33-teacher-任务--提交--反馈) |
 | CreateCourseForm | `components/teacher/CreateCourseForm.tsx` | 建课表单与成功导航，课程分类复用共享候选；学期示例不自动成为输入值 |
 | CourseLifecycleActions | `components/teacher/CourseLifecycleActions.tsx` | 课程列表“更多”菜单、动作 pending/确认/结果状态，组合 FloatingMoreMenu 并保留当前列表视图；每次 render 由当前 props 同时控制 UI 与独立 handler，仅允许 ACTIVE→ARCHIVED 归档、ARCHIVED→ACTIVE 恢复，未知状态只关闭归档/恢复；删除入口及 handler 不增加状态限制，资格由后端判定；基础编辑保持独立 |
 | EditCourseForm | `components/teacher/EditCourseForm.tsx` | 课程基础信息编辑与保存；课程分类复用共享候选并可清空，不承担列表加载 |
@@ -79,8 +79,8 @@
 | EditLearningTaskForm | `components/teacher/EditLearningTaskForm.tsx` | 描述和单一“评阅标准（可选）”文字输入默认均为10行，评阅标准高度不随是否有内容变化；编辑态可纵向调整，只读长文本可滚动。可选难度仅四状态，无动态自定义旧值选项；编辑/安全显示及请求构造复用共享 helper，未知初值不随其他字段保存而隐式回写，成功同步正式响应、失败保留草稿；字段请求语义见 API Map。rubric 保存复用纯 helper，成功后从正式响应同步文字；同 taskId 刷新 props 不覆盖草稿，页面按 taskId 重建表单。引用编辑区可见性固定于本次 taskId 首次成功加载的非空引用，清空保存及刷新不隐藏；引用成功保存独立更新比较基准。仅明确身份与作者匹配、状态可编辑且当前权威初值及草稿 visibility 均合法时允许写入，控件与独立 handler 共用资格；异常初值不被旧合法草稿掩盖，可见性控件显示明确占位并保留只读内容。保存确认通过前不更新基准或提示成功，未确认及失败保留草稿；错误与确认合同见 API Map。保存与发布/归档共用 pending 边界，保留列表返回上下文，不承担课堂实例设置 |
 | TaskAiContextRefs | `components/teacher/TaskAiContextRefs.tsx` | 普通多行引用 JSON 编辑、就近结构错误与格式化；只读时有引用才按包展示全部路径，无 JSON/复制控件或空配置占位；不渲染路径链接/HTML，不读 ZIP，不进入学生或课堂实例页 |
 | ai-context-refs | `lib/learning-tasks/ai-context-refs.ts` | 引用基本结构解析、稳定格式化、语义差异与局部作者编辑判断；保持路径及数组顺序，不复制后端 ZIP 安全校验 |
-| TeacherLearningTasksPage | `app/teacher/tasks/page.tsx` | 模板列表 SSR 参数解析、数据加载与外层实际分页链接；难度复用共享筛选解析并传给 LearningTaskFilters，保留列表和来源班级上下文，不在页面过滤已分页结果 |
-| LearningTaskFilters | `components/teacher/LearningTaskFilters.tsx` | 模板视图/筛选（含难度）的 URL 状态、分页、列表展示与编辑/查看入口；清空及活动筛选判断包含难度，控件由 URL/初始 props 恢复；“评阅标准”列复用纯 helper 显示文字已填写/未填写，“分类”单元格内复用共享难度显示；桌面五列、窄屏纵向条目，无需横向滚动；保留列表返回上下文，筛选后回首屏；复用共享可见性和排序模块，PRIVATE/SHARED 保持各自样式，未知可见性用中性徽章；合法可见性与原作者、状态条件共同决定编辑资格，异常保留查看导航和整行内容。不在当前页伪造完整候选或发起发布/归档 |
+| TeacherLearningTasksPage | `app/teacher/tasks/page.tsx` | 模板列表 SSR 参数解析、数据加载、总数校验与外层实际分页链接；难度复用共享筛选解析并传给 LearningTaskFilters，保留列表和来源班级上下文，不在页面过滤已分页结果；total 消费合同见 [Frontend API Map](./handoff-frontend-api-map.md#33-teacher-任务--提交--反馈) |
+| LearningTaskFilters | `components/teacher/LearningTaskFilters.tsx` | 模板视图/筛选（含难度）的 URL 状态、分页、列表展示与编辑/查看入口；消费 SSR 传入的必填已验证 total，详细合同见 [Frontend API Map](./handoff-frontend-api-map.md#33-teacher-任务--提交--反馈)；清空及活动筛选判断包含难度，控件由 URL/初始 props 恢复；“评阅标准”列复用纯 helper 显示文字已填写/未填写，“分类”单元格内复用共享难度显示；桌面五列、窄屏纵向条目，无需横向滚动；保留列表返回上下文，筛选后回首屏；复用共享可见性和排序模块，PRIVATE/SHARED 保持各自样式，未知可见性用中性徽章；合法可见性与原作者、状态条件共同决定编辑资格，异常保留查看导航和整行内容。不在当前页伪造完整候选或发起发布/归档 |
 | ClassroomTasksPage | `app/teacher/classrooms/[classroomId]/tasks/page.tsx` | 班级任务与发布候选分别 SSR 加载，解析并下传候选难度；已发布列表请求不使用候选难度，其分页链接保留候选条件，具体调用合同见 API Map |
 | PublishClassroomTaskForm | `components/teacher/PublishClassroomTaskForm.tsx` | 可见已发布模板的筛选、候选追加加载、选择状态与实例发布；难度及既有筛选变化时清除选择并重置候选，复用请求 epoch 和局部等待状态，过期响应不污染新候选；等待及当前候选成员校验同时作用于控件和提交入口，截止/迟交草稿独立保留，详细状态合同见 API Map。课程分类复用共享候选；发布者来源与已选模板摘要由本组件展示，候选及摘要复用共享难度显示；评阅标准摘要复用纯 helper，候选未提供 rubric 时提示到模板详情核对，不宣称未填写。不提供 AI 策略选择，不创建/编辑模板，不自行判定后端候选全集 |
 | TeacherTaskDetailPage | `app/teacher/classrooms/[classroomId]/tasks/[classroomTaskId]/page.tsx` | 加载课堂任务正式投影，基础信息展示难度并组合共享 rubric；难度显示复用共享 helper，字段读源见 API Map |

@@ -22,6 +22,7 @@ import {
   DEFAULT_TASK_TEMPLATE_SCOPE,
   normalizeTaskTemplateScope,
 } from "@/lib/learning-tasks/template-visibility-scope";
+import { isValidPaginationTotal } from "@/lib/pagination";
 import { paths } from "@/lib/routes/paths";
 import {
   buildQueryString,
@@ -48,9 +49,10 @@ type LearningTasksViewModel =
   | {
       mode: "ready";
       taskList: ReturnType<typeof toLearningTaskListResponse>;
+      total: number;
       currentUserId?: string;
     }
-  | { mode: "error"; status: number; description: string };
+  | { mode: "error"; status?: number; description: string };
 
 type TeacherLearningTasksPageProps = {
   searchParams: Promise<{
@@ -131,12 +133,21 @@ export default async function TeacherLearningTasksPage({
       getMe().catch(() => null),
     ]);
 
-    viewModel = {
-      mode: "ready",
-      taskList: toLearningTaskListResponse(payload),
-      currentUserId:
-        typeof me?.id === "string" && me.id.trim() ? me.id.trim() : undefined,
-    };
+    const taskList = toLearningTaskListResponse(payload);
+    if (isValidPaginationTotal(taskList.total)) {
+      viewModel = {
+        mode: "ready",
+        taskList,
+        total: taskList.total,
+        currentUserId:
+          typeof me?.id === "string" && me.id.trim() ? me.id.trim() : undefined,
+      };
+    } else {
+      viewModel = {
+        mode: "error",
+        description: "任务模板列表数据不完整，请刷新后重试。",
+      };
+    }
   } catch (error) {
     if (error instanceof FetchJsonError) {
       const detail = extractRawDetail(error);
@@ -161,10 +172,7 @@ export default async function TeacherLearningTasksPage({
     );
   }
 
-  const totalTaskTemplates =
-    typeof viewModel.taskList.total === "number"
-      ? viewModel.taskList.total
-      : viewModel.taskList.items.length;
+  const totalTaskTemplates = viewModel.total;
   const taskTemplateLimit =
     typeof viewModel.taskList.limit === "number" &&
     Number.isFinite(viewModel.taskList.limit) &&
@@ -268,7 +276,7 @@ export default async function TeacherLearningTasksPage({
           initialDifficultyFilter={initialDifficultyFilter}
           initialPage={viewModel.taskList.page ?? initialPage}
           initialLimit={viewModel.taskList.limit ?? TASK_TEMPLATE_PAGE_LIMIT}
-          total={viewModel.taskList.total}
+          total={viewModel.total}
         />
       </div>
 
