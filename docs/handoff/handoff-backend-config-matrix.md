@@ -85,9 +85,7 @@ npm run sync-indexes -- --apply --confirm-db <精确库名> --allow-drop
 
 ### Task.stage 定向退役运维
 
-用户已确认 `Task.stage` 迁移完成。一次性运维入口已移除，原实现可从 Git 历史查阅。
-
-历史恢复材料的归档路径为项目根目录下的 `.local/deliverables/task-stage-retirement-backups/<本轮标识>/<库名>/`，已有备份应继续保留。
+用户已确认 `Task.stage` 迁移完成。一次性运维入口已移除，原实现可从 Git 历史查阅。恢复备份已按用户要求删除。
 
 ### Classroom.studentIds 定向退役运维
 

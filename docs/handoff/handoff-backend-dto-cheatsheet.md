@@ -394,7 +394,7 @@ summary、taskTrend 和学生 metrics 均有 `evidenceSummary={sourceUncertainCo
 | `UpdateTaskDto` | 上述字段可选；status 的校验集合为 `DRAFT \| PUBLISHED \| ARCHIVED`，其编辑行为见 API；rubric 不静态约束内部 key。 |
 | `QueryTaskDto` | 可选 `scope:mine \| shared \| all`，默认 mine，trim + lowercase，空白视为未传；可选 status、字符串 knowledgeModule、courseLabel、difficulty（见下方查询合同）；分页校验。 |
 
-- Task 的创建、更新、模板列表及发布候选查询不接受 `stage`，严格白名单对旧参数返回 400；公开模板、课堂内容、学生详情及教师看板均不投影旧记录中的该字段。新 Task 和新快照不写入该字段；存量字段和旧索引通过[受控定向运维](./handoff-backend-config-matrix.md#taskstage-定向退役运维)处理。
+- Task 的创建、更新、模板列表及发布候选查询不接受 `stage`，严格白名单对旧参数返回 400；公开模板、课堂内容、学生详情及教师看板均不投影旧记录中的该字段。新 Task 和新快照不写入该字段；迁移完成状态见[退役运维记录](./handoff-backend-config-matrix.md#taskstage-定向退役运维)。
 - knowledgeModule 无枚举白名单。`courseLabel` 使用 `TASK_COURSE_LABELS` 单选白名单（如未分类、通用编程、Java 程序设计、数据结构、人工智能）；trim 后空白转 undefined。更新中显式传入空白 courseLabel 表示清空；不是 Course 外键。
 - Task 的新写入值域由 CreateTaskDto / UpdateTaskDto 与 Schema 共同约束：字段缺失或空串 `""` 表示未设置，三个准确英文值 `easy/medium/hard` 表示标准档位。创建省略不设置默认档位，PATCH 省略保留原值，显式空串清空；仅 undefined 跳过字段校验，null、空白、未知值、中文标签、大小写或首尾空格变体、数组、对象及数字均拒绝，不做值转换。UI 选项与安全显示约定由 [Frontend API Map](./handoff-frontend-api-map.md#33-teacher-任务--提交--反馈) 维护。
 - 难度查询合同：`QueryTaskDto` 与 `QueryPublishableTaskTemplateDto` 的可选 `difficulty` 仅接受准确单值 `easy/medium/hard`；省略表示不限制。显式空串、空白、未知值、大小写变体或数组均返回 400，不 trim、不转大小写、不推断别名。写入允许空串不代表查询也允许空串。
