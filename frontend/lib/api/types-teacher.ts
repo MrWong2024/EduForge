@@ -762,8 +762,8 @@ export type AiLearningAnalyticsStudentMetrics = {
   averageIssueLoadBefore: number | null;
   averageIssueLoadAfter: number | null;
   averageIssueLoadDelta: number | null;
-  overallOutcome: AiLearningAnalyticsOverallOutcome;
-  engagementStatus: AiLearningAnalyticsEngagementStatus;
+  overallOutcome: AiLearningAnalyticsOverallOutcome | undefined;
+  engagementStatus: AiLearningAnalyticsEngagementStatus | undefined;
   postFeedbackRevisionRate: number | null;
 };
 
@@ -783,8 +783,8 @@ export type AiLearningAnalyticsStudentsResponse = {
   activeStudentsTotal?: number;
   filters: {
     q: string | null;
-    overallOutcome: AiLearningAnalyticsOverallOutcome | null;
-    engagementStatus: AiLearningAnalyticsEngagementStatus | null;
+    overallOutcome: AiLearningAnalyticsOverallOutcome | null | undefined;
+    engagementStatus: AiLearningAnalyticsEngagementStatus | null | undefined;
   };
   items: AiLearningAnalyticsStudentItem[];
   raw: UnknownRecord;
@@ -810,7 +810,7 @@ export type AiLearningAnalyticsTaskPoint = {
   issueLoadBefore: number | null;
   issueLoadAfter: number | null;
   issueLoadDelta: number | null;
-  detailedOutcome: AiLearningAnalyticsDetailedOutcome;
+  detailedOutcome: AiLearningAnalyticsDetailedOutcome | undefined;
 };
 
 export type AiLearningAnalyticsStudentDetailResponse = {
@@ -1473,50 +1473,47 @@ const normalizeAiLearningAnalyticsMethodologyVersion = (
 
 const normalizeAiLearningAnalyticsDetailedOutcome = (
   value: unknown,
-): AiLearningAnalyticsDetailedOutcome => {
-  const outcome = asString(value);
+): AiLearningAnalyticsDetailedOutcome | undefined => {
   if (
-    outcome === "IMPROVED" ||
-    outcome === "REMAINED_CLEAN" ||
-    outcome === "UNCHANGED_WITH_ISSUES" ||
-    outcome === "REGRESSED" ||
-    outcome === "NOT_COMPARABLE"
+    value === "IMPROVED" ||
+    value === "REMAINED_CLEAN" ||
+    value === "UNCHANGED_WITH_ISSUES" ||
+    value === "REGRESSED" ||
+    value === "NOT_COMPARABLE"
   ) {
-    return outcome;
+    return value;
   }
-  return "NOT_COMPARABLE";
+  return undefined;
 };
 
 const normalizeAiLearningAnalyticsOverallOutcome = (
   value: unknown,
-): AiLearningAnalyticsOverallOutcome => {
-  const outcome = asString(value);
+): AiLearningAnalyticsOverallOutcome | undefined => {
   if (
-    outcome === "INSUFFICIENT_DATA" ||
-    outcome === "IMPROVED_OVERALL" ||
-    outcome === "NO_NET_CHANGE" ||
-    outcome === "REGRESSED_OVERALL"
+    value === "INSUFFICIENT_DATA" ||
+    value === "IMPROVED_OVERALL" ||
+    value === "NO_NET_CHANGE" ||
+    value === "REGRESSED_OVERALL"
   ) {
-    return outcome;
+    return value;
   }
-  return "INSUFFICIENT_DATA";
+  return undefined;
 };
 
 const normalizeAiLearningAnalyticsEngagementStatus = (
   value: unknown,
-): AiLearningAnalyticsEngagementStatus => {
-  const status = asString(value);
+): AiLearningAnalyticsEngagementStatus | undefined => {
   if (
-    status === "NO_SUBMISSION" ||
-    status === "SUBMITTED_WITHOUT_AI_REQUEST" ||
-    status === "AI_REQUESTED_WITHOUT_DELIVERY" ||
-    status === "AI_DELIVERED_WITHOUT_REVISION" ||
-    status === "REVISED_WITHOUT_COMPARABLE" ||
-    status === "QUALITY_COMPARABLE"
+    value === "NO_SUBMISSION" ||
+    value === "SUBMITTED_WITHOUT_AI_REQUEST" ||
+    value === "AI_REQUESTED_WITHOUT_DELIVERY" ||
+    value === "AI_DELIVERED_WITHOUT_REVISION" ||
+    value === "REVISED_WITHOUT_COMPARABLE" ||
+    value === "QUALITY_COMPARABLE"
   ) {
-    return status;
+    return value;
   }
-  return "NO_SUBMISSION";
+  return undefined;
 };
 
 const toAiLearningAnalyticsContext = (
@@ -1833,15 +1830,13 @@ export const toAiLearningAnalyticsStudentsResponse = (
     filters: {
       q: asNullableString(filtersRecord.q) ?? null,
       overallOutcome:
-        filtersRecord.overallOutcome === null ||
-        filtersRecord.overallOutcome === undefined
+        filtersRecord.overallOutcome === null
           ? null
           : normalizeAiLearningAnalyticsOverallOutcome(
               filtersRecord.overallOutcome,
             ),
       engagementStatus:
-        filtersRecord.engagementStatus === null ||
-        filtersRecord.engagementStatus === undefined
+        filtersRecord.engagementStatus === null
           ? null
           : normalizeAiLearningAnalyticsEngagementStatus(
               filtersRecord.engagementStatus,

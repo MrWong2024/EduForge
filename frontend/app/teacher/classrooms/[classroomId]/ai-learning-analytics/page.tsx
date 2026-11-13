@@ -77,6 +77,11 @@ type StudentListState =
       data: AiLearningAnalyticsStudentsResponse & {
         total: number;
         activeStudentsTotal: number;
+        filters: {
+          q: AiLearningAnalyticsStudentsResponse["filters"]["q"];
+          overallOutcome: AiLearningAnalyticsOverallOutcome | null;
+          engagementStatus: AiLearningAnalyticsEngagementStatus | null;
+        };
       };
     }
   | { mode: "error"; error: PresentedError };
@@ -287,14 +292,26 @@ export default async function AiLearningAnalyticsPage({
   let studentListState: StudentListState;
   if (studentsResult.status === "fulfilled") {
     const data = toAiLearningAnalyticsStudentsResponse(studentsResult.value);
-    const { total, activeStudentsTotal } = data;
+    const { total, activeStudentsTotal, filters } = data;
+    const { overallOutcome, engagementStatus } = filters;
     if (
       isValidPaginationTotal(total) &&
-      isValidPaginationTotal(activeStudentsTotal)
+      isValidPaginationTotal(activeStudentsTotal) &&
+      overallOutcome !== undefined &&
+      engagementStatus !== undefined
     ) {
       studentListState = {
         mode: "ready",
-        data: { ...data, total, activeStudentsTotal },
+        data: {
+          ...data,
+          total,
+          activeStudentsTotal,
+          filters: {
+            q: filters.q,
+            overallOutcome,
+            engagementStatus,
+          },
+        },
       };
     } else {
       studentListState = {

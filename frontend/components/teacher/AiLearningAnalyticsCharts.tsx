@@ -3,10 +3,10 @@ import type {
   AiLearningAnalyticsTaskTrend,
 } from "@/lib/api/types-teacher";
 import {
-  AI_LEARNING_ANALYTICS_DETAILED_OUTCOME_LABELS,
   formatAiLearningAnalyticsDelta,
   formatAiLearningAnalyticsIssueLoad,
   formatAiLearningAnalyticsPercent,
+  getAiLearningAnalyticsDetailedOutcomeLabel,
 } from "@/lib/ai-learning-analytics";
 import { toDisplayDate } from "@/lib/ui/format";
 
@@ -437,8 +437,9 @@ export function AiLearningAnalyticsStudentIssueLoadComparisonChart({
     const before = hasComparable ? task.issueLoadBefore : null;
     const after = hasComparable ? task.issueLoadAfter : null;
     const delta = hasComparable ? task.issueLoadDelta : null;
-    const outcomeLabel =
-      AI_LEARNING_ANALYTICS_DETAILED_OUTCOME_LABELS[task.detailedOutcome];
+    const outcomeLabel = getAiLearningAnalyticsDetailedOutcomeLabel(
+      task.detailedOutcome,
+    );
     const accessibleText = [
       "任务：" + task.taskTitle,
       "发布时间：" + toDisplayDate(task.publishedAt),

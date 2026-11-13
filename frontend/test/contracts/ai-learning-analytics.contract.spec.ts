@@ -10,6 +10,9 @@ import {
   formatAiLearningAnalyticsDelta,
   formatAiLearningAnalyticsIssueLoad,
   formatAiLearningAnalyticsPercent,
+  getAiLearningAnalyticsDetailedOutcomeLabel,
+  getAiLearningAnalyticsOverallOutcomeLabel,
+  getAiLearningAnalyticsEngagementStatusLabel,
   getAiLearningAnalyticsDeltaMeaning,
   getAiLearningAnalyticsUncomparedRevisionMessage,
   getAiLearningAnalyticsEvidenceNotes,
@@ -24,6 +27,372 @@ const evidence = {
   modelChangedComparableCount: 1,
   simulatedExcludedSampleCount: 1,
 };
+
+test("formal overall outcomes retain every business conclusion and its existing label", () => {
+  const cases = [
+    ["INSUFFICIENT_DATA", "可比数据不足"],
+    ["IMPROVED_OVERALL", "可比任务负荷净下降"],
+    ["NO_NET_CHANGE", "净变化为零"],
+    ["REGRESSED_OVERALL", "可比任务负荷净上升"],
+  ] as const;
+  const rows = Object.freeze(
+    cases.map(([overallOutcome], index) =>
+      Object.freeze({
+        studentId: `overall-${index}`,
+        overallOutcome,
+        engagementStatus: "QUALITY_COMPARABLE",
+        growthTrend: "IMPROVING",
+        data: Object.freeze({ overallOutcome: "REGRESSED_OVERALL" }),
+      }),
+    ),
+  );
+  const input = Object.freeze({ items: rows });
+  const before = structuredClone(input);
+  const students = toAiLearningAnalyticsStudentsResponse(input);
+
+  expect(students.items.map((student) => student.studentId)).toEqual([
+    "overall-0",
+    "overall-1",
+    "overall-2",
+    "overall-3",
+  ]);
+  for (const [index, [expected, label]] of cases.entries()) {
+    const detailInput = Object.freeze({ summary: rows[index] });
+    const detail = toAiLearningAnalyticsStudentDetailResponse(detailInput);
+
+    expect(students.items[index].overallOutcome).toBe(expected);
+    expect(detail.summary.overallOutcome).toBe(expected);
+    expect(
+      getAiLearningAnalyticsOverallOutcomeLabel(
+        students.items[index].overallOutcome,
+      ),
+    ).toBe(label);
+    expect(
+      getAiLearningAnalyticsOverallOutcomeLabel(detail.summary.overallOutcome),
+    ).toBe(label);
+    expect(students.items[index].engagementStatus).toBe("QUALITY_COMPARABLE");
+    expect(detail.summary.engagementStatus).toBe("QUALITY_COMPARABLE");
+    expect(detail.raw).toBe(detailInput);
+  }
+  expect(students.raw).toBe(input);
+  expect(input).toStrictEqual(before);
+});
+
+test("formal engagement stages retain all six values including no submission and their existing labels", () => {
+  const cases = [
+    ["NO_SUBMISSION", "未提交任务"],
+    ["SUBMITTED_WITHOUT_AI_REQUEST", "已提交，未请求 AI 反馈"],
+    ["AI_REQUESTED_WITHOUT_DELIVERY", "已请求 AI 反馈，暂无可用反馈交付"],
+    ["AI_DELIVERED_WITHOUT_REVISION", "已获可用反馈，尚无可确认的后续更新"],
+    ["REVISED_WITHOUT_COMPARABLE", "已有作品更新，暂无反馈可对照结果"],
+    ["QUALITY_COMPARABLE", "已形成反馈可对照结果"],
+  ] as const;
+  const rows = Object.freeze(
+    cases.map(([engagementStatus], index) =>
+      Object.freeze({
+        studentId: `engagement-${index}`,
+        overallOutcome: "INSUFFICIENT_DATA",
+        engagementStatus,
+        data: Object.freeze({ engagementStatus: "QUALITY_COMPARABLE" }),
+      }),
+    ),
+  );
+  const input = Object.freeze({ items: rows });
+  const before = structuredClone(input);
+  const students = toAiLearningAnalyticsStudentsResponse(input);
+
+  expect(students.items).toHaveLength(6);
+  for (const [index, [expected, label]] of cases.entries()) {
+    const detailInput = Object.freeze({ summary: rows[index] });
+    const detail = toAiLearningAnalyticsStudentDetailResponse(detailInput);
+
+    expect(students.items[index].studentId).toBe(`engagement-${index}`);
+    expect(students.items[index].engagementStatus).toBe(expected);
+    expect(detail.summary.engagementStatus).toBe(expected);
+    expect(
+      getAiLearningAnalyticsEngagementStatusLabel(
+        students.items[index].engagementStatus,
+      ),
+    ).toBe(label);
+    expect(
+      getAiLearningAnalyticsEngagementStatusLabel(detail.summary.engagementStatus),
+    ).toBe(label);
+    expect(students.items[index].overallOutcome).toBe("INSUFFICIENT_DATA");
+    expect(detail.summary.overallOutcome).toBe("INSUFFICIENT_DATA");
+    expect(detail.raw).toBe(detailInput);
+  }
+  expect(students.raw).toBe(input);
+  expect(input).toStrictEqual(before);
+});
+
+test("formal task outcomes retain all five values including not comparable and their existing labels", () => {
+  const cases = [
+    ["IMPROVED", "负荷下降"],
+    ["REMAINED_CLEAN", "前后均无错误或警告"],
+    ["UNCHANGED_WITH_ISSUES", "非零负荷持平"],
+    ["REGRESSED", "负荷上升"],
+    ["NOT_COMPARABLE", "不可对照"],
+  ] as const;
+  const points = Object.freeze(
+    cases.map(([detailedOutcome], index) =>
+      Object.freeze({
+        classroomTaskId: `outcome-${index}`,
+        detailedOutcome,
+        outcome: "REGRESSED",
+        data: Object.freeze({ detailedOutcome: "IMPROVED" }),
+      }),
+    ),
+  );
+  const input = Object.freeze({ taskPoints: points });
+  const before = structuredClone(input);
+  const detail = toAiLearningAnalyticsStudentDetailResponse(input);
+
+  expect(detail.taskPoints).toHaveLength(5);
+  for (const [index, [expected, label]] of cases.entries()) {
+    expect(detail.taskPoints[index].classroomTaskId).toBe(`outcome-${index}`);
+    expect(detail.taskPoints[index].detailedOutcome).toBe(expected);
+    expect(
+      getAiLearningAnalyticsDetailedOutcomeLabel(
+        detail.taskPoints[index].detailedOutcome,
+      ),
+    ).toBe(label);
+  }
+  expect(detail.raw).toBe(input);
+  expect(input).toStrictEqual(before);
+});
+
+test("invalid student result fields stay unknown independently of other results, counts and old sources", () => {
+  const legacy = Object.freeze({
+    overallOutcome: "IMPROVED_OVERALL",
+    engagementStatus: "QUALITY_COMPARABLE",
+  });
+  for (const { field, otherField, valid, expectedOther, variants } of [
+    {
+      field: "overallOutcome",
+      otherField: "engagementStatus",
+      valid: { engagementStatus: "QUALITY_COMPARABLE" },
+      expectedOther: "QUALITY_COMPARABLE",
+      variants: ["improved_overall", " IMPROVED_OVERALL ", "\tNO_NET_CHANGE\n"],
+    },
+    {
+      field: "engagementStatus",
+      otherField: "overallOutcome",
+      valid: { overallOutcome: "NO_NET_CHANGE" },
+      expectedOther: "NO_NET_CHANGE",
+      variants: ["no_submission", " NO_SUBMISSION ", "\tQUALITY_COMPARABLE\n"],
+    },
+  ] as const) {
+    for (const value of [
+      undefined,
+      null,
+      "",
+      "FUTURE",
+      ...variants,
+      42,
+      false,
+      Object.freeze(["IMPROVED_OVERALL"]),
+      Object.freeze({ overallOutcome: "IMPROVED_OVERALL" }),
+    ]) {
+      const row = Object.freeze({
+        ...valid,
+        ...(value === undefined ? {} : { [field]: value }),
+        studentId: "unknown-result-student",
+        submittedTasksCount: 3,
+        postFeedbackRevisionRate: 0,
+        averageIssueLoadDelta: null,
+        outcome: "IMPROVED",
+        growthTrend: "IMPROVING",
+        data: legacy,
+      });
+      const input = Object.freeze({
+        items: Object.freeze([row]),
+        data: { items: [legacy] },
+      });
+      const detailInput = Object.freeze({
+        summary: row,
+        data: { summary: legacy },
+      });
+      const before = structuredClone(input);
+      const detailBefore = structuredClone(detailInput);
+      const students = toAiLearningAnalyticsStudentsResponse(input);
+      const detail = toAiLearningAnalyticsStudentDetailResponse(detailInput);
+
+      expect(students.items).toHaveLength(1);
+      expect(students.items[0].studentId).toBe("unknown-result-student");
+      expect(students.items[0]).not.toHaveProperty("raw");
+      for (const metrics of [students.items[0], detail.summary]) {
+        expect(metrics[field]).toBeUndefined();
+        expect(metrics[otherField]).toBe(expectedOther);
+        expect(metrics).toMatchObject({
+          submittedTasksCount: 3,
+          postFeedbackRevisionRate: 0,
+          averageIssueLoadDelta: null,
+        });
+        if (field === "overallOutcome") {
+          expect(
+            getAiLearningAnalyticsOverallOutcomeLabel(metrics.overallOutcome),
+          ).toBe("结果未知");
+          expect(
+            getAiLearningAnalyticsEngagementStatusLabel(metrics.engagementStatus),
+          ).toBe("已形成反馈可对照结果");
+        } else {
+          expect(
+            getAiLearningAnalyticsEngagementStatusLabel(metrics.engagementStatus),
+          ).toBe("参与阶段未知");
+          expect(
+            getAiLearningAnalyticsOverallOutcomeLabel(metrics.overallOutcome),
+          ).toBe("净变化为零");
+        }
+      }
+      expect(students.raw).toBe(input);
+      expect(detail.raw).toBe(detailInput);
+      expect(input).toStrictEqual(before);
+      expect(detailInput).toStrictEqual(detailBefore);
+    }
+  }
+});
+
+test("invalid detailed results stay unknown despite comparable zero-load points and old outcomes", () => {
+  for (const value of [
+    undefined,
+    null,
+    "",
+    "FUTURE",
+    "not_comparable",
+    " NOT_COMPARABLE ",
+    "\tIMPROVED\n",
+    42,
+    false,
+    Object.freeze(["IMPROVED"]),
+    Object.freeze({ detailedOutcome: "IMPROVED" }),
+  ]) {
+    const point = Object.freeze({
+      ...(value === undefined ? {} : { detailedOutcome: value }),
+      classroomTaskId: "unknown-result-task",
+      attemptsCount: 3,
+      qualityComparable: true,
+      issueLoadBefore: 0,
+      issueLoadAfter: 0,
+      issueLoadDelta: 0,
+      outcome: "IMPROVED",
+      data: Object.freeze({ detailedOutcome: "REMAINED_CLEAN" }),
+    });
+    const input = Object.freeze({
+      taskPoints: Object.freeze([point]),
+      data: Object.freeze({ taskPoints: [{ detailedOutcome: "NOT_COMPARABLE" }] }),
+    });
+    const before = structuredClone(input);
+    const detail = toAiLearningAnalyticsStudentDetailResponse(input);
+
+    expect(detail.taskPoints).toHaveLength(1);
+    expect(detail.taskPoints[0]).toMatchObject({
+      classroomTaskId: "unknown-result-task",
+      detailedOutcome: undefined,
+      attemptsCount: 3,
+      qualityComparable: true,
+      issueLoadBefore: 0,
+      issueLoadAfter: 0,
+      issueLoadDelta: 0,
+    });
+    expect(
+      getAiLearningAnalyticsDetailedOutcomeLabel(
+        detail.taskPoints[0].detailedOutcome,
+      ),
+    ).toBe("结果未知");
+    expect(detail.raw).toBe(input);
+    expect(input).toStrictEqual(before);
+  }
+});
+
+test("student filter echoes distinguish explicit null and formal values from independently missing or invalid fields", () => {
+  const data = Object.freeze({
+    filters: Object.freeze({
+      q: "ignored",
+      overallOutcome: "IMPROVED_OVERALL",
+      engagementStatus: "NO_SUBMISSION",
+    }),
+  });
+  for (const { field, otherField, other, cases } of [
+    {
+      field: "overallOutcome",
+      otherField: "engagementStatus",
+      other: "QUALITY_COMPARABLE",
+      cases: [
+        [null, null],
+        ["NO_NET_CHANGE", "NO_NET_CHANGE"],
+        [undefined, undefined],
+        ["FUTURE", undefined],
+        [" NO_NET_CHANGE ", undefined],
+        ["no_net_change", undefined],
+        [42, undefined],
+      ],
+    },
+    {
+      field: "engagementStatus",
+      otherField: "overallOutcome",
+      other: "NO_NET_CHANGE",
+      cases: [
+        [null, null],
+        ["QUALITY_COMPARABLE", "QUALITY_COMPARABLE"],
+        [undefined, undefined],
+        ["FUTURE", undefined],
+        [" QUALITY_COMPARABLE ", undefined],
+        ["quality_comparable", undefined],
+        [false, undefined],
+      ],
+    },
+  ] as const) {
+    for (const [value, expected] of cases) {
+      const input = Object.freeze({
+        total: 4,
+        activeStudentsTotal: 8,
+        filters: Object.freeze({
+          q: " 正式搜索 ",
+          [otherField]: other,
+          ...(value === undefined ? {} : { [field]: value }),
+        }),
+        items: Object.freeze([
+          {
+            studentId: "unknown-results",
+            overallOutcome: "FUTURE",
+            engagementStatus: "FUTURE",
+          },
+        ]),
+        data,
+      });
+      const before = structuredClone(input);
+      const students = toAiLearningAnalyticsStudentsResponse(input);
+
+      expect(students.filters[field]).toBe(expected);
+      expect(students.filters[otherField]).toBe(other);
+      expect(students.filters.q).toBe("正式搜索");
+      expect(isValidPaginationTotal(students.total)).toBe(true);
+      expect(isValidPaginationTotal(students.activeStudentsTotal)).toBe(true);
+      expect(students.items).toHaveLength(1);
+      expect(students.items[0].overallOutcome).toBeUndefined();
+      expect(students.items[0].engagementStatus).toBeUndefined();
+      expect(students.raw).toBe(input);
+      expect(students.raw.data).toBe(data);
+      expect(input).toStrictEqual(before);
+    }
+  }
+  for (const filters of [undefined, null, false, "invalid", Object.freeze([])]) {
+    const input = Object.freeze({
+      ...(filters === undefined ? {} : { filters }),
+      data,
+    });
+    const before = structuredClone(input);
+    const students = toAiLearningAnalyticsStudentsResponse(input);
+
+    expect(students.filters).toEqual({
+      q: null,
+      overallOutcome: undefined,
+      engagementStatus: undefined,
+    });
+    expect(students.raw).toBe(input);
+    expect(input).toStrictEqual(before);
+  }
+});
 
 test("retired analytics fields stay outside normalized projections without changing current metrics or raw sources", () => {
   const overviewSource = Object.freeze({
@@ -126,8 +495,8 @@ test("retired analytics fields stay outside normalized projections without chang
     studentId: "student-legacy-only",
     remainedCleanTasksCount: 0,
     unchangedWithIssuesTasksCount: 0,
-    overallOutcome: "INSUFFICIENT_DATA",
-    engagementStatus: "NO_SUBMISSION",
+    overallOutcome: undefined,
+    engagementStatus: undefined,
   });
   expect(detail.summary).not.toHaveProperty("stableTasksCount");
   expect(detail.summary).not.toHaveProperty("growthTrend");
@@ -146,7 +515,7 @@ test("retired analytics fields stay outside normalized projections without chang
     postFeedbackRevised: true,
     postFeedbackResubmitted: false,
   });
-  expect(detail.taskPoints[1].detailedOutcome).toBe("NOT_COMPARABLE");
+  expect(detail.taskPoints[1].detailedOutcome).toBeUndefined();
 
   expect(overview.raw).toBe(overviewSource);
   expect(students.raw).toBe(studentsSource);
@@ -542,7 +911,11 @@ test("analytics adapters do not unwrap data-only responses or rescue empty and i
       limit: 20,
       total: expectedCounts.total,
       activeStudentsTotal: expectedCounts.activeStudentsTotal,
-      filters: { q: null, overallOutcome: null, engagementStatus: null },
+      filters: {
+        q: null,
+        overallOutcome: undefined,
+        engagementStatus: undefined,
+      },
       items: [],
     });
     expect(isValidPaginationTotal(students.total)).toBe(false);
@@ -555,8 +928,8 @@ test("analytics adapters do not unwrap data-only responses or rescue empty and i
     expect(detail.summary).toMatchObject({
       submittedTasksCount: 0,
       averageIssueLoadDelta: null,
-      overallOutcome: "INSUFFICIENT_DATA",
-      engagementStatus: "NO_SUBMISSION",
+      overallOutcome: undefined,
+      engagementStatus: undefined,
     });
     expect(detail.taskPoints).toEqual([]);
     for (const response of [overview, students, detail]) {

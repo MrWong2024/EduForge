@@ -135,6 +135,27 @@ export const AI_LEARNING_ANALYTICS_ENGAGEMENT_STATUS_LABELS: Record<
   QUALITY_COMPARABLE: "已形成反馈可对照结果",
 };
 
+export const getAiLearningAnalyticsDetailedOutcomeLabel = (
+  outcome: AiLearningAnalyticsDetailedOutcome | undefined,
+): string =>
+  outcome === undefined
+    ? "结果未知"
+    : AI_LEARNING_ANALYTICS_DETAILED_OUTCOME_LABELS[outcome];
+
+export const getAiLearningAnalyticsOverallOutcomeLabel = (
+  outcome: AiLearningAnalyticsOverallOutcome | undefined,
+): string =>
+  outcome === undefined
+    ? "结果未知"
+    : AI_LEARNING_ANALYTICS_OVERALL_OUTCOME_LABELS[outcome];
+
+export const getAiLearningAnalyticsEngagementStatusLabel = (
+  status: AiLearningAnalyticsEngagementStatus | undefined,
+): string =>
+  status === undefined
+    ? "参与阶段未知"
+    : AI_LEARNING_ANALYTICS_ENGAGEMENT_STATUS_LABELS[status];
+
 export const AI_LEARNING_ANALYTICS_OVERALL_OUTCOME_OPTIONS =
   AI_LEARNING_ANALYTICS_OVERALL_OUTCOMES.map((value) => ({
     value,

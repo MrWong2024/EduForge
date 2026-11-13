@@ -20,9 +20,6 @@ import {
   type AiLearningAnalyticsReviewEndpoint,
 } from "@/lib/api/types-teacher";
 import {
-  AI_LEARNING_ANALYTICS_DETAILED_OUTCOME_LABELS,
-  AI_LEARNING_ANALYTICS_ENGAGEMENT_STATUS_LABELS,
-  AI_LEARNING_ANALYTICS_OVERALL_OUTCOME_LABELS,
   AI_LEARNING_ANALYTICS_WINDOW_LABELS,
   AI_LEARNING_ANALYTICS_WARNING_LABELS,
   buildAiLearningAnalyticsSubmissionHref,
@@ -30,6 +27,9 @@ import {
   formatAiLearningAnalyticsDelta,
   formatAiLearningAnalyticsIssueLoad,
   getAiLearningAnalyticsDeltaMeaning,
+  getAiLearningAnalyticsDetailedOutcomeLabel,
+  getAiLearningAnalyticsEngagementStatusLabel,
+  getAiLearningAnalyticsOverallOutcomeLabel,
   getAiLearningAnalyticsUncomparedRevisionMessage,
   resolveAiLearningAnalyticsQueryState,
   toAiLearningAnalyticsExcludedTaskIdsQueryValue,
@@ -198,11 +198,9 @@ function StudentTaskPointsTable({
                 </p>
                 <p>
                   <span className="text-zinc-500">详细结果：</span>
-                  {
-                    AI_LEARNING_ANALYTICS_DETAILED_OUTCOME_LABELS[
-                      task.detailedOutcome
-                    ]
-                  }
+                  {getAiLearningAnalyticsDetailedOutcomeLabel(
+                    task.detailedOutcome,
+                  )}
                 </p>
               </td>
               <td className="px-3 py-2.5 text-zinc-700">
@@ -434,21 +432,17 @@ export default async function AiLearningAnalyticsStudentPage({
           <div>
             <dt className="text-xs text-zinc-500">反馈参与阶段</dt>
             <dd className="mt-0.5 font-medium text-zinc-900">
-              {
-                AI_LEARNING_ANALYTICS_ENGAGEMENT_STATUS_LABELS[
-                  summary.engagementStatus
-                ]
-              }
+              {getAiLearningAnalyticsEngagementStatusLabel(
+                summary.engagementStatus,
+              )}
             </dd>
           </div>
           <div>
             <dt className="text-xs text-zinc-500">总体结果</dt>
             <dd className="mt-0.5 font-medium text-zinc-900">
-              {
-                AI_LEARNING_ANALYTICS_OVERALL_OUTCOME_LABELS[
-                  summary.overallOutcome
-                ]
-              }
+              {getAiLearningAnalyticsOverallOutcomeLabel(
+                summary.overallOutcome,
+              )}
             </dd>
             <p className="mt-1 text-[11px] leading-5 text-zinc-500">
               {hasComparableTasks

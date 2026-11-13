@@ -9,12 +9,12 @@ import type {
   AiLearningAnalyticsWindow,
 } from "@/lib/api/types-teacher";
 import {
-  AI_LEARNING_ANALYTICS_ENGAGEMENT_STATUS_LABELS,
-  AI_LEARNING_ANALYTICS_OVERALL_OUTCOME_LABELS,
   formatAiLearningAnalyticsDelta,
   formatAiLearningAnalyticsIssueLoad,
   formatAiLearningAnalyticsPercent,
   getAiLearningAnalyticsDeltaMeaning,
+  getAiLearningAnalyticsEngagementStatusLabel,
+  getAiLearningAnalyticsOverallOutcomeLabel,
   toAiLearningAnalyticsExcludedTaskIdsQueryValue,
 } from "@/lib/ai-learning-analytics";
 import { paths } from "@/lib/routes/paths";
@@ -322,11 +322,9 @@ export function AiLearningAnalyticsStudentsTable({
                   </p>
                   <p className="mt-1 text-xs leading-5 text-zinc-500">
                     反馈阶段：
-                    {
-                      AI_LEARNING_ANALYTICS_ENGAGEMENT_STATUS_LABELS[
-                        student.engagementStatus
-                      ]
-                    }
+                    {getAiLearningAnalyticsEngagementStatusLabel(
+                      student.engagementStatus,
+                    )}
                   </p>
                 </td>
                 <td className="px-3 py-3 tabular-nums text-zinc-800">
@@ -363,11 +361,9 @@ export function AiLearningAnalyticsStudentsTable({
                 </td>
                 <td className="px-3 py-3 text-zinc-800">
                   <p className="font-medium">
-                    {
-                      AI_LEARNING_ANALYTICS_OVERALL_OUTCOME_LABELS[
-                        student.overallOutcome
-                      ]
-                    }
+                    {getAiLearningAnalyticsOverallOutcomeLabel(
+                      student.overallOutcome,
+                    )}
                   </p>
                   <p className="mt-1 text-xs leading-5 text-zinc-500">
                     {hasComparable
