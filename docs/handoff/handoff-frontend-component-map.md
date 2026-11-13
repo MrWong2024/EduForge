@@ -95,6 +95,7 @@
 
 | Component / Module | File | Responsibility / Boundary |
 |---|---|---|
+| Teacher Dashboard Display | `lib/teacher-dashboard.ts` | 供 `app/teacher/classrooms/[classroomId]/dashboard/page.tsx` 提取摘要与任务展示数据，保留既有计数和标签展示规则；正式读源及接口合同见 [Frontend API Map](./handoff-frontend-api-map.md#32-teacher-课程--班级--成员) |
 | ProcessAssessmentPage | `app/teacher/classrooms/[classroomId]/process-assessment/page.tsx` | URL 条件、服务端加载、分页、摘要、评分说明与 CSV 入口组合；明细按七列分行归组，桌面宽度内阅读全部指标，窄屏局部横滚；使用 TaskExclusionPanel 的过程性评价模式及共享任务选项 helper；不重算后端评分或持久化排除条件 |
 | AiLearningAnalyticsPage | `app/teacher/classrooms/[classroomId]/ai-learning-analytics/page.tsx` | Server 页面负责条件解析、总览/学生并行读取、局部错误、任务选项降级和分页；摘要、教学关注、图表、表格与筛选下沉至对应组件，不从学生分页重算摘要 |
 | AiLearningAnalyticsStudentPage | `app/teacher/classrooms/[classroomId]/ai-learning-analytics/students/[studentId]/page.tsx` | Server 页面组合学生摘要、逐任务比较图与全任务明细；明细按五列分行归组，桌面默认可见比较证据，窄屏局部横滚；展示比较端点/最新版本、安全来源与未比较原因并链接对应提交；恢复返回列表上下文，直接消费后端结果，列表状态不扩大详情请求范围 |

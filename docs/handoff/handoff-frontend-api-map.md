@@ -71,6 +71,8 @@
   - 注意：`COURSE_NOT_EMPTY` 只做展示，不在前端重判删除条件。
 - 班级列表与详情：Server pages -> `/api/proxy/classrooms*` -> `GET /api/classrooms*`。
   - 调用页面：`/teacher/classrooms*`。
+- 教师班级看板：`teacher/classrooms/[classroomId]/dashboard/page.tsx` -> `/api/proxy/classrooms/:id/dashboard` -> `GET /api/classrooms/:id/dashboard`。
+  - 列表、摘要及任务展示通过 `getDashboardItems` 与 `lib/teacher-dashboard.ts` 仅消费正式读源，备用包装与字段别名不再补值；公开字段合同见 [Backend DTO：Teacher / Student Dashboard response family](./handoff-backend-dto-cheatsheet.md#teacher--student-dashboard-response-family)。
 - 班级创建/编辑：`CreateClassroomForm`、`EditClassroomForm` -> `/api/proxy/classrooms*` -> `POST/PATCH /api/classrooms*`。
   - 调用页面：`/teacher/classrooms*`。
 - 班级生命周期：`ClassroomLifecycleActions` -> `/api/proxy/classrooms/:id` -> `PATCH/DELETE /api/classrooms/:id`。

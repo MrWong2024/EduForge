@@ -15,6 +15,10 @@ import {
 } from "@/lib/api/types-teacher";
 import { getMe } from "@/lib/auth/session";
 import { paths } from "@/lib/routes/paths";
+import {
+  getTeacherDashboardSummary,
+  getTeacherDashboardTaskDisplay,
+} from "@/lib/teacher-dashboard";
 import { getCommonErrorSummary } from "@/lib/ui/status";
 import { getFeedbackTagLabel } from "@/lib/ui/feedback-tags";
 import {
@@ -27,17 +31,6 @@ import {
 type DashboardPageProps = {
   params: Promise<{ classroomId: string }>;
   searchParams: Promise<{ includeClosedTasks?: string | string[] }>;
-};
-
-type UnknownRecord = Record<string, unknown>;
-
-type TaskAiBreakdown = {
-  succeeded: number;
-  failed: number;
-  pending: number;
-  running: number;
-  dead: number;
-  notRequested: number;
 };
 
 type TaskTemplateStatusBadge = {
@@ -79,124 +72,6 @@ const getClosedTasksToggleHref = (
 
 const toOptionalText = (value: unknown): string | undefined =>
   typeof value === "string" && value.trim() ? value.trim() : undefined;
-
-const toCount = (value: unknown): number | undefined => {
-  if (typeof value === "number" && Number.isFinite(value)) {
-    return Math.max(0, Math.trunc(value));
-  }
-
-  if (typeof value === "string" && value.trim()) {
-    const parsed = Number(value);
-    if (Number.isFinite(parsed)) {
-      return Math.max(0, Math.trunc(parsed));
-    }
-  }
-
-  return undefined;
-};
-
-const pickCount = (
-  source: unknown,
-  paths: readonly string[],
-  fallback = 0,
-): number => {
-  for (const path of paths) {
-    const candidate = toCount(safeGet<unknown>(source, path, undefined));
-    if (typeof candidate === "number") {
-      return candidate;
-    }
-  }
-  return fallback;
-};
-
-const toTaskAiBreakdown = (item: UnknownRecord): TaskAiBreakdown => ({
-  succeeded: pickCount(
-    item,
-    [
-      "aiFeedback.succeeded",
-      "aiFeedback.SUCCEEDED",
-      "aiStatusBreakdown.SUCCEEDED",
-    ],
-    0,
-  ),
-  failed: pickCount(
-    item,
-    ["aiFeedback.failed", "aiFeedback.FAILED", "aiStatusBreakdown.FAILED"],
-    0,
-  ),
-  pending: pickCount(
-    item,
-    ["aiFeedback.pending", "aiFeedback.PENDING", "aiStatusBreakdown.PENDING"],
-    0,
-  ),
-  running: pickCount(
-    item,
-    ["aiFeedback.running", "aiFeedback.RUNNING", "aiStatusBreakdown.RUNNING"],
-    0,
-  ),
-  dead: pickCount(
-    item,
-    ["aiFeedback.dead", "aiFeedback.DEAD", "aiStatusBreakdown.DEAD"],
-    0,
-  ),
-  notRequested: pickCount(
-    item,
-    [
-      "aiFeedback.notRequested",
-      "aiFeedback.NOT_REQUESTED",
-      "aiStatusBreakdown.NOT_REQUESTED",
-    ],
-    0,
-  ),
-});
-
-const toTopTags = (
-  item: UnknownRecord,
-  limit = 3,
-): Array<{ key: string; label: string; count?: number }> => {
-  const rawTags = safeGet<unknown[]>(item, "topTags", []);
-  if (!Array.isArray(rawTags)) {
-    return [];
-  }
-
-  const result: Array<{ key: string; label: string; count?: number }> = [];
-  const seen = new Set<string>();
-
-  rawTags.forEach((tagItem, index) => {
-    if (result.length >= limit) {
-      return;
-    }
-
-    const tagRecord =
-      tagItem && typeof tagItem === "object" && !Array.isArray(tagItem)
-        ? (tagItem as UnknownRecord)
-        : undefined;
-    const label =
-      toOptionalText(tagRecord?.tag) ??
-      toOptionalText(tagRecord?.name) ??
-      toOptionalText(tagRecord?.label) ??
-      toOptionalText(tagItem);
-
-    if (!label) {
-      return;
-    }
-
-    const normalized = label.toLowerCase();
-    if (seen.has(normalized)) {
-      return;
-    }
-    seen.add(normalized);
-
-    const count = toCount(tagRecord?.count);
-    result.push({
-      key: `${normalized}-${index}`,
-      label,
-      count,
-    });
-  });
-
-  return result;
-};
 
 const getTaskTemplateStatusBadge = (
   status: string | null | undefined,
@@ -256,21 +131,8 @@ export default async function ClassroomDashboardPage({
     const classroom = toClassroomSummary(classroomPayload);
     const dashboard = toDashboardResponse(dashboardPayload);
     const dashboardItems = getDashboardItems(dashboard);
-    const studentsCount = pickCount(
-      dashboard,
-      ["summary.studentsCount", "studentsCount"],
-      0,
-    );
-    const publishedTasksCount = pickCount(
-      dashboard,
-      ["summary.publishedTasksCount", "publishedTasksCount"],
-      dashboardItems.length,
-    );
-    const lateStudentsTotal = pickCount(
-      dashboard,
-      ["summary.lateStudentsTotal", "lateStudentsTotal"],
-      0,
-    );
+    const { studentsCount, publishedTasksCount, lateStudentsTotal } =
+      getTeacherDashboardSummary(dashboard, dashboardItems.length);
 
     viewModel = {
       mode: "ready",
@@ -469,32 +331,16 @@ export default async function ClassroomDashboardPage({
               </thead>
               <tbody>
                 {viewModel.dashboardItems.map((item, index) => {
-                  const classroomTaskId =
-                    toOptionalText(item.classroomTaskId) ??
-                    toOptionalText(item.id) ??
-                    undefined;
-                  const submittedStudentsCount = pickCount(
-                    item,
-                    ["distinctStudentsSubmitted"],
-                    0,
-                  );
-                  const submissionsCount = pickCount(
-                    item,
-                    ["submissionsCount"],
-                    0,
-                  );
-                  const lateDistinctStudentsCount = pickCount(
-                    item,
-                    ["lateDistinctStudentsCount"],
-                    0,
-                  );
-                  const lateSubmissionsCount = pickCount(
-                    item,
-                    ["lateSubmissionsCount"],
-                    0,
-                  );
-                  const aiBreakdown = toTaskAiBreakdown(item);
-                  const topTags = toTopTags(item);
+                  const {
+                    classroomTaskId,
+                    title,
+                    submittedStudentsCount,
+                    submissionsCount,
+                    lateDistinctStudentsCount,
+                    lateSubmissionsCount,
+                    aiBreakdown,
+                    topTags,
+                  } = getTeacherDashboardTaskDisplay(item);
                   const classroomTaskStatus = toOptionalText(
                     item.classroomTaskStatus,
                   );
@@ -520,12 +366,7 @@ export default async function ClassroomDashboardPage({
                         }`}
                       >
                         <div className="space-y-1">
-                          <p>
-                            {toDisplayText(
-                              item.title ?? item.name,
-                              "未命名任务",
-                            )}
-                          </p>
+                          <p>{title}</p>
                           {isClosedTask ? (
                             <div>
                               <span className="inline-flex w-fit items-center rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-xs font-medium text-slate-600">

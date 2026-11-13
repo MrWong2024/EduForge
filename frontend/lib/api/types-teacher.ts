@@ -237,9 +237,7 @@ export type ClassroomTasksResponse = {
 
 export type TeacherDashboardTaskItem = UnknownRecord & {
   classroomTaskId?: string;
-  id?: string;
   title?: string;
-  name?: string;
   dueAt?: string | null;
   classroomTaskStatus?: string;
   taskTemplateStatus?: "DRAFT" | "PUBLISHED" | "ARCHIVED" | null;
@@ -266,7 +264,6 @@ export type TeacherClassroomArchiveSuggestion = {
 
 export type DashboardResponse = UnknownRecord & {
   tasks?: TeacherDashboardTaskItem[];
-  items?: TeacherDashboardTaskItem[];
   archiveSuggestion?: TeacherClassroomArchiveSuggestion;
 };
 
@@ -2084,23 +2081,7 @@ export const groupTeacherFeedbackItems = (
 
 export const getDashboardItems = (
   dashboard: DashboardResponse,
-): TeacherDashboardTaskItem[] => {
-  const candidates = [
-    safeGet<unknown>(dashboard, "items", undefined),
-    safeGet<unknown>(dashboard, "tasks", undefined),
-    safeGet<unknown>(dashboard, "data.items", undefined),
-    safeGet<unknown>(dashboard, "data.tasks", undefined),
-  ];
-
-  for (const candidate of candidates) {
-    const list = asRecordArray(candidate);
-    if (list.length > 0) {
-      return list as TeacherDashboardTaskItem[];
-    }
-  }
-
-  return [];
-};
+): TeacherDashboardTaskItem[] => asRecordArray(dashboard.tasks);
 
 export const getDashboardAiBreakdown = (
   dashboard: DashboardResponse,
