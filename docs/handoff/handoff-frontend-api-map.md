@@ -141,10 +141,11 @@
 - 提交详情和反馈：Teacher/Student submission pages + feedback forms -> `/api/proxy/learning-tasks/submissions/:id*`。
   - 对应后端：submission detail、feedback list、teacher feedback create/update。
   - 反馈列表只消费正式裸数组，`items`、`data.items`、`data` 数组包装不再供数；字段合同见 [Backend DTO：Feedback DTO / response family](./handoff-backend-dto-cheatsheet.md#feedback-dto--response-family)。
+  - 共享反馈条目的 `source` 为字符串时原样保留，包括空串与纯空白；非字符串保持 `undefined`，不 trim 或转换大小写。教师反馈分组只精确识别 `TEACHER/AI`，其余进入 `other`，来源标签显示“其他反馈（来源未识别）”；未知来源保留记录，不能修正为教师来源以获得修改资格。
   - 共享提交详情 mapper 只消费根对象与正式 `submittedAt`，已退役 `data` / `submission` 包装选择及前端 `createdAt` 补值；`language` 仍依次读取根字段与 `content.language`，服务现行创建/详情合同，字段定义见下述 Backend DTO。
   - 注意：正式 detail API `GET /api/learning-tasks/submissions/:id` 是主体 SoT；每次先 await detail 成功，再请求同一提交的 feedback；师生共用学生侧详情 mapper，保留完整源码、独立说明与已有声明原文，适配 aiReview；URL query 不提供标题、正文、提交时间、次数、迟交或 AI 状态；班级/课堂任务上下文用于返回导航。公开字段与 null/0 语义由 [Backend DTO](./handoff-backend-dto-cheatsheet.md#submission-request--response-family) 维护。
   - 教师提交详情 Server Page 在主体加载成功后独立调用既有 `getMe()`，仅把正式响应中非空、非纯空白的字符串 id 原值作为 currentUserId 传入 History / EditForm，不传整个用户或其他身份数据。身份读取失败或 id 不可用时，历史反馈只读并提示刷新；不替换已加载的作品/反馈，不改变 layout 角色检查、新增反馈或 AI 请求。
-  - 历史反馈修改资格由 `canEditTeacherFeedback` 统一判断：来源精确为 TEACHER，反馈 id、currentUserId 和 createdBy 均为非空非纯空白字符串，且作者与当前用户原字符串精确相等；不 trim 后比较、转换大小写、补作者或增加 ObjectId 格式规则。未知/他人作者、AI 和未知来源只关闭修改入口，原记录仍可读；共享 mapper 与 createdBy 可选投影保持，最终班级管理权及作者授权见 [Backend API Learning Tasks](./handoff-backend-api-map.md#learning-tasks)。
+  - 历史反馈修改资格由 `canEditTeacherFeedback` 统一判断：来源精确为 TEACHER，反馈 id、currentUserId 和 createdBy 均为非空非纯空白字符串，且作者与当前用户原字符串精确相等；不 trim 后比较、转换大小写、补作者或增加 ObjectId 格式规则。未知/他人作者、AI 和未知来源只关闭修改入口，原记录仍可读；createdBy 可选投影保持，最终班级管理权及作者授权见 [Backend API Learning Tasks](./handoff-backend-api-map.md#learning-tasks)。
   - 历史修改继续 PATCH `learning-tasks/submissions/:submissionId/feedback/:feedbackId`，只发送原差异业务字段，不发送身份、作者、来源、归属或时间戳。403 等失败保留状态码、内部原始错误和草稿，不调用 onSaved、刷新或自动重放；成功沿用 onSaved 与 router.refresh，不新增响应确认或认领协议。
   - 新增教师反馈发送撰写时绑定的 `expectedRevision`；刷新 props 不重绑旧评语。409/结果不确定保留评语，显式读取权威作品及反馈列表，用户确认适用后再允许继续。教师反馈原地 PATCH 沿用原合同；固定、版本与幂等合同见 [Backend Service Card 08](./handoff-backend-service-map.md#service-card-08)。
 

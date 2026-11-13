@@ -411,7 +411,7 @@ const toFeedbackItem = (value: unknown): FeedbackItem => {
     id: asString(record.id),
     submissionId: asString(record.submissionId),
     createdBy: asString(record.createdBy),
-    source: asString(record.source),
+    source: typeof record.source === "string" ? record.source : undefined,
     type: asString(record.type),
     severity: asString(record.severity),
     message: asString(record.message),

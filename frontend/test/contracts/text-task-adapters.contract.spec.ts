@@ -66,6 +66,7 @@ import {
   toDisplaySubmissionLanguage,
 } from "../../lib/learning-tasks/submission-language";
 import { toDisplayLateDuration } from "../../lib/ui/format";
+import { getFeedbackSourceLabel } from "../../lib/ui/feedback-options";
 import { getTaskTemplateStatusLabel } from "../../lib/ui/status";
 import { normalizeTaskTemplateVisibility } from "../../lib/learning-tasks/template-visibility-scope";
 import { canEditTeacherFeedback } from "../../lib/learning-tasks/teacher-feedback";
@@ -3039,6 +3040,136 @@ test("student difficulty preserves the formal task and server state without live
   expect(JSON.stringify(payload)).toBe(before);
 });
 
+for (const { group, cases, counts } of [
+  {
+    group: "formal sources",
+    cases: [
+      [{ source: "TEACHER" }, "TEACHER", "teacher", "教师反馈", true],
+      [{ source: "AI" }, "AI", "ai", "AI 辅助反馈", false],
+    ],
+    counts: { teacher: 1, ai: 1, other: 0 },
+  },
+  {
+    group: "noncanonical source strings",
+    cases: [
+      [
+        { source: "teacher" },
+        "teacher",
+        "other",
+        "其他反馈（来源未识别）",
+        false,
+      ],
+      [
+        { source: "TeAcHeR" },
+        "TeAcHeR",
+        "other",
+        "其他反馈（来源未识别）",
+        false,
+      ],
+      [
+        { source: " TEACHER " },
+        " TEACHER ",
+        "other",
+        "其他反馈（来源未识别）",
+        false,
+      ],
+      [
+        { source: "\tAI\n" },
+        "\tAI\n",
+        "other",
+        "其他反馈（来源未识别）",
+        false,
+      ],
+      [
+        { source: "UNKNOWN" },
+        "UNKNOWN",
+        "other",
+        "其他反馈（来源未识别）",
+        false,
+      ],
+      [{ source: "" }, "", "other", "其他反馈（来源未识别）", false],
+      [
+        { source: " \t\n " },
+        " \t\n ",
+        "other",
+        "其他反馈（来源未识别）",
+        false,
+      ],
+    ],
+    counts: { teacher: 0, ai: 0, other: 7 },
+  },
+  {
+    group: "missing and nonstring sources",
+    cases: [
+      [{}, undefined, "other", "其他反馈（来源未识别）", false],
+      [{ source: null }, undefined, "other", "其他反馈（来源未识别）", false],
+      [{ source: 42 }, undefined, "other", "其他反馈（来源未识别）", false],
+      [{ source: false }, undefined, "other", "其他反馈（来源未识别）", false],
+      [
+        { source: Object.freeze(["TEACHER"]) },
+        undefined,
+        "other",
+        "其他反馈（来源未识别）",
+        false,
+      ],
+      [
+        { source: Object.freeze({ source: "TEACHER" }) },
+        undefined,
+        "other",
+        "其他反馈（来源未识别）",
+        false,
+      ],
+    ],
+    counts: { teacher: 0, ai: 0, other: 6 },
+  },
+] as const) {
+  test(`feedback ${group} retain exact projections, groups, labels and edit eligibility through both adapters`, () => {
+    const payload = Object.freeze(
+      cases.map(([fields], index) =>
+        Object.freeze({
+          id: `source-${index}`,
+          createdBy: "teacher-1",
+          ...fields,
+          message: "保留反馈正文",
+          scoreHint: 0,
+          createdAt: "2026-11-01T01:00:00Z",
+          data: Object.freeze({ source: "TEACHER" }),
+          raw: Object.freeze({ source: "AI" }),
+        }),
+      ),
+    );
+    const before = structuredClone(payload);
+    for (const adapt of [toListFeedbackResponse, toTeacherFeedbackListResponse]) {
+      const result = adapt(payload);
+      if (!Array.isArray(result.raw)) {
+        throw new Error("Expected feedback array raw projection");
+      }
+      const grouped = groupTeacherFeedbackItems(result.items);
+
+      expect(result.items).toHaveLength(cases.length);
+      expect(result.raw).not.toBe(payload);
+      expect(grouped.teacher).toHaveLength(counts.teacher);
+      expect(grouped.ai).toHaveLength(counts.ai);
+      expect(grouped.other).toHaveLength(counts.other);
+      for (const [index, scenario] of cases.entries()) {
+        const [, expectedSource, expectedGroup, label, editable] = scenario;
+        const item = result.items[index];
+
+        expect(item.id).toBe(`source-${index}`);
+        expect(item.source).toBe(expectedSource);
+        expect(grouped[expectedGroup]).toContain(item);
+        expect(getFeedbackSourceLabel(item.source)).toBe(label);
+        expect(canEditTeacherFeedback(item, "teacher-1")).toBe(editable);
+        expect(item.message).toBe("保留反馈正文");
+        expect(item.scoreHint).toBe(0);
+        expect(item.raw).toBe(payload[index]);
+        expect(result.raw[index]).toBe(payload[index]);
+      }
+    }
+    expect(payload).toStrictEqual(before);
+  });
+}
+
 test("teacher feedback editing requires an explicit matching author and preserves its input", () => {
   const feedback = Object.freeze({
     id: "feedback-1",
@@ -3148,7 +3279,23 @@ test("teacher feedback adapters preserve known authors and leave absent or null 
   });
   const missing = Object.freeze({ ...content, id: "missing" });
   const nullAuthor = Object.freeze({ ...content, id: "null", createdBy: null });
-  const payload = Object.freeze([known, missing, nullAuthor]);
+  const otherAuthor = Object.freeze({
+    ...content,
+    id: "other-author",
+    createdBy: "teacher-2",
+  });
+  const invalidId = Object.freeze({
+    ...content,
+    id: " \t ",
+    createdBy: "teacher-1",
+  });
+  const payload = Object.freeze([
+    known,
+    missing,
+    nullAuthor,
+    otherAuthor,
+    invalidId,
+  ]);
   const before = JSON.stringify(payload);
 
   for (const adapt of [toListFeedbackResponse, toTeacherFeedbackListResponse]) {
@@ -3161,15 +3308,19 @@ test("teacher feedback adapters preserve known authors and leave absent or null 
       "known",
       "missing",
       "null",
+      "other-author",
+      undefined,
     ]);
     expect(result.items.map((item) => item.createdBy)).toEqual([
       "teacher-1",
       undefined,
       undefined,
+      "teacher-2",
+      "teacher-1",
     ]);
     expect(
       result.items.map((item) => canEditTeacherFeedback(item, "teacher-1")),
-    ).toEqual([true, false, false]);
+    ).toEqual([true, false, false, false, false]);
     for (const [index, item] of result.items.entries()) {
       expect(item.raw).toBe(payload[index]);
       expect(result.raw[index]).toBe(payload[index]);
@@ -3186,7 +3337,13 @@ test("teacher feedback adapters preserve known authors and leave absent or null 
         updatedAt: "2026-11-01T02:00:00Z",
       });
     }
-    expect(result.raw).toEqual([known, missing, nullAuthor]);
+    expect(result.raw).toEqual([
+      known,
+      missing,
+      nullAuthor,
+      otherAuthor,
+      invalidId,
+    ]);
   }
   expect(Object.hasOwn(missing, "createdBy")).toBe(false);
   expect(nullAuthor.createdBy).toBeNull();
