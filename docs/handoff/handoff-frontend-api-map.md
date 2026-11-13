@@ -136,6 +136,7 @@
 ### 3.4 Student 学习链路
 
 - 学生看板：`student/dashboard/page.tsx` -> `/api/proxy/classrooms/mine/dashboard` -> `GET /api/classrooms/mine/dashboard`。
+  - 仅消费正式响应，已退役备用响应包装与字段别名回退；公开字段合同见 [Backend DTO：Teacher / Student Dashboard response family](./handoff-backend-dto-cheatsheet.md#teacher--student-dashboard-response-family)。
   - 注意：完成状态消费后端 `completionStatus`，不从 AI 状态或历史提交二次推断。
 - 加入班级：`JoinClassroomForm` -> `/api/proxy/classrooms/join` -> `POST /api/classrooms/join`。
   - 注意：只提交 joinCode，入班权限与重复入班由后端判定。

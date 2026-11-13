@@ -261,15 +261,14 @@ const toStudentDashboardTaskItem = (
   const visibilityStatus = asString(record.studentVisibilityStatus);
 
   return {
-    classroomTaskId: asString(record.classroomTaskId) ?? asString(record.id),
+    classroomTaskId: asString(record.classroomTaskId),
     taskId: asString(record.taskId),
-    title: asString(record.title) ?? asString(record.name),
+    title: asString(record.title),
     publishedAt: asString(record.publishedAt),
     dueAt: asString(record.dueAt),
     myLatestSubmission: latestSubmission,
     mySubmissionsCount: asNumber(record.mySubmissionsCount),
-    aiFeedbackStatus:
-      latestSubmission?.aiFeedbackStatus ?? asString(record.aiFeedbackStatus),
+    aiFeedbackStatus: latestSubmission?.aiFeedbackStatus,
     completionStatus: toStudentTaskCompletionStatus(record.completionStatus),
     studentVisibilityStatus: isStudentTaskVisibilityStatus(visibilityStatus)
       ? visibilityStatus
@@ -322,7 +321,7 @@ const toStudentDashboardLatestSubmission = (
   }
 
   return {
-    submissionId: asString(record.submissionId) ?? asString(record.id),
+    submissionId: asString(record.submissionId),
     attemptNo: asNumber(record.attemptNo),
     createdAt: asString(record.createdAt),
     aiFeedbackStatus: asString(record.aiFeedbackStatus),
@@ -388,14 +387,10 @@ const toStudentDashboardClassroomItem = (
   const courseRecord = asRecord(safeGet(classroomRecord, "course", undefined));
 
   return {
-    classroomId:
-      asString(classroomRecord.id) ??
-      asString(record.classroomId) ??
-      asString(record.id),
-    classroomName:
-      asString(classroomRecord.name) ?? asString(record.classroomName),
-    courseId: asString(classroomRecord.courseId) ?? asString(record.courseId),
-    status: asString(classroomRecord.status) ?? asString(record.status),
+    classroomId: asString(classroomRecord.id),
+    classroomName: asString(classroomRecord.name),
+    courseId: asString(classroomRecord.courseId),
+    status: asString(classroomRecord.status),
     teacher: {
       id: asString(teacherRecord.id) ?? "",
       name: asNullableString(teacherRecord.name) ?? null,
@@ -456,21 +451,10 @@ export const toJoinClassroomResponse = (
 export const toStudentDashboardResponse = (
   payload: unknown,
 ): StudentDashboardResponse => {
-  if (Array.isArray(payload)) {
-    return {
-      items: payload.map((item) => toStudentDashboardClassroomItem(item)),
-      raw: {},
-    };
-  }
-
   const record = asRecord(payload);
-  const candidateItems =
-    safeGet<unknown>(record, "items", undefined) ??
-    safeGet<unknown>(record, "data.items", undefined) ??
-    safeGet<unknown>(record, "data", undefined);
 
   return {
-    items: asRecordArray(candidateItems).map((item) =>
+    items: asRecordArray(record.items).map((item) =>
       toStudentDashboardClassroomItem(item),
     ),
     total: asNumber(record.total),
