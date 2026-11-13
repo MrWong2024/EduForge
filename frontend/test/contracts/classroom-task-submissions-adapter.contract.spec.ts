@@ -1,4 +1,5 @@
 import { test, expect } from "@playwright/test";
+import { isValidPaginationTotal } from "@/lib/pagination";
 import { toClassroomTaskSubmissionsResponse } from "../../lib/api/types-teacher";
 
 // Expected values follow the locked list contract and Backend DTO
@@ -73,6 +74,7 @@ test("formal lists preserve root pagination, row fields, zero feedback and null 
     total: 102,
     raw: payload,
   });
+  expect(isValidPaginationTotal(result.total)).toBe(true);
   expect(result.raw).toBe(payload);
   expect(result.items[0].raw).toBe(first);
   expect(result.items[1].raw).toBe(second);
@@ -82,14 +84,16 @@ test("formal lists preserve root pagination, row fields, zero feedback and null 
 test("formal empty pages retain their total even when it is greater than zero", () => {
   for (const total of [0, 7]) {
     const payload = { items: [], page: 2, limit: 100, total };
+    const result = toClassroomTaskSubmissionsResponse(payload);
 
-    expect(toClassroomTaskSubmissionsResponse(payload)).toStrictEqual({
+    expect(result).toStrictEqual({
       items: [],
       page: 2,
       limit: 100,
       total,
       raw: payload,
     });
+    expect(isValidPaginationTotal(result.total)).toBe(true);
   }
 });
 
@@ -150,6 +154,7 @@ test("formal sources win conflicts while raw keeps retired keys and existing str
     total: 1,
     raw: payload,
   });
+  expect(isValidPaginationTotal(result.total)).toBe(true);
   expect(result.raw).toBe(payload);
   expect(result.items[0].raw).toBe(row);
   expect(payload).toStrictEqual(before);
@@ -263,9 +268,10 @@ for (const { label, root, data } of [
   });
 }
 
-test("missing, nonfinite and numeric-string root pagination never use pagination or data fields", () => {
+test("missing, null, nonfinite and numeric-string root pagination never use pagination or data fields", () => {
   for (const root of [
     {},
+    { page: null, limit: null, total: null },
     {
       page: Number.NaN,
       limit: Number.POSITIVE_INFINITY,
@@ -279,6 +285,7 @@ test("missing, nonfinite and numeric-string root pagination never use pagination
       pagination: { page: 2, limit: 20, total: 7 },
       data: { page: 3, limit: 30, total: 8 },
     };
+    const before = structuredClone(payload);
     const result = toClassroomTaskSubmissionsResponse(payload);
 
     expect(result.items).toHaveLength(1);
@@ -286,6 +293,35 @@ test("missing, nonfinite and numeric-string root pagination never use pagination
     expect(result.page).toBeUndefined();
     expect(result.limit).toBeUndefined();
     expect(result.total).toBeUndefined();
+    expect(isValidPaginationTotal(result.total)).toBe(false);
+    expect(result.raw).toBe(payload);
+    expect(result.items[0].raw).toBe(payload.items[0]);
+    expect(payload).toStrictEqual(before);
+  }
+});
+
+test("finite submission totals keep mapper values while the page count guard rejects invalid counts", () => {
+  const row = Object.freeze({ id: "formal-count-submission" });
+  for (const total of [-1, 1.5, Number.MAX_SAFE_INTEGER + 1]) {
+    const payload = Object.freeze({
+      items: Object.freeze([row]),
+      total,
+      page: 2,
+      limit: 100,
+    });
+    const before = structuredClone(payload);
+    const result = toClassroomTaskSubmissionsResponse(payload);
+
+    expect(result.items.map((item) => item.submissionId)).toStrictEqual([
+      "formal-count-submission",
+    ]);
+    expect(result.total).toBe(total);
+    expect(isValidPaginationTotal(result.total)).toBe(false);
+    expect(result.page).toBe(2);
+    expect(result.limit).toBe(100);
+    expect(result.raw).toBe(payload);
+    expect(result.items[0].raw).toBe(row);
+    expect(payload).toStrictEqual(before);
   }
 });
 

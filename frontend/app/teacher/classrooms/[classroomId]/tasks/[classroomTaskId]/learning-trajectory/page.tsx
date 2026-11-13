@@ -7,6 +7,7 @@ import { fetchJson, FetchJsonError } from "@/lib/api/client";
 import { buildErrorDescription, extractRawDetail } from "@/lib/api/error-presenter";
 import { toLearningTrajectoryResponse } from "@/lib/api/types-teacher";
 import { toLearningTrajectoryStudentDisplayName } from "@/lib/learning-trajectory";
+import { isValidPaginationTotal } from "@/lib/pagination";
 import { paths } from "@/lib/routes/paths";
 import { getAiStatusLabel, getCommonErrorSummary } from "@/lib/ui/status";
 import { getFeedbackTagLabel } from "@/lib/ui/feedback-tags";
@@ -126,9 +127,10 @@ type TrajectoryViewModel =
   | {
       mode: "ready";
       data: ReturnType<typeof toLearningTrajectoryResponse>;
+      total: number;
       query: TrajectoryQueryState;
     }
-  | { mode: "error"; status: number; description: string };
+  | { mode: "error"; status?: number; description: string };
 
 type TrajectoryItem = ReturnType<typeof toLearningTrajectoryResponse>["items"][number];
 
@@ -240,11 +242,19 @@ export default async function LearningTrajectoryPage({
 
     const data = toLearningTrajectoryResponse(payload);
 
-    viewModel = {
-      mode: "ready",
-      data,
-      query: queryState,
-    };
+    if (isValidPaginationTotal(data.total)) {
+      viewModel = {
+        mode: "ready",
+        data,
+        total: data.total,
+        query: queryState,
+      };
+    } else {
+      viewModel = {
+        mode: "error",
+        description: "学习轨迹数据不完整，请刷新后重试。",
+      };
+    }
   } catch (error) {
     if (error instanceof FetchJsonError) {
       const detail = extractRawDetail(error);
@@ -270,8 +280,7 @@ export default async function LearningTrajectoryPage({
   const routePath = paths.teacher.classroomTaskTrajectory(classroomId, classroomTaskId);
   const queryRecord = toQueryRecord(viewModel.query);
   const displayedStudentsCount = viewModel.data.items.length;
-  const totalStudentsCount =
-    typeof viewModel.data.total === "number" ? viewModel.data.total : displayedStudentsCount;
+  const totalStudentsCount = viewModel.total;
   const currentLimit =
     typeof viewModel.data.limit === "number" && viewModel.data.limit > 0
       ? viewModel.data.limit

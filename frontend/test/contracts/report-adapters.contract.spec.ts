@@ -6,6 +6,7 @@ import {
   toReviewPackResponse,
   toWeeklyReportResponse,
 } from "../../lib/api/types-teacher";
+import { isValidPaginationTotal } from "../../lib/pagination";
 
 test("weekly reports preserve formal groups, zero values and source references despite legacy conflicts", () => {
   const classroom = Object.freeze({
@@ -243,6 +244,7 @@ test("process assessments preserve formal rows, pagination, counts and object id
   const before = structuredClone(payload);
   const result = toProcessAssessmentResponse(payload);
 
+  expect(isValidPaginationTotal(result.total)).toBe(true);
   expect(result).toMatchObject({
     classroomId: "classroom-pa",
     window: "30d",
@@ -281,6 +283,78 @@ test("process assessments preserve formal rows, pagination, counts and object id
   expect(result.raw).toBe(payload);
   expect(result.raw.rubric).toBe(rubric);
   expect(payload).toStrictEqual(before);
+});
+
+test("process assessment totals accept zero and empty pages with positive totals", () => {
+  const row = Object.freeze({
+    studentId: "student-pa-total",
+    studentName: "正式成员",
+    submittedTasksCount: 0,
+  });
+  for (const scenario of [
+    { items: Object.freeze([row]), total: 0 },
+    { items: Object.freeze([]), total: 31 },
+  ]) {
+    const payload = Object.freeze({
+      items: scenario.items,
+      total: scenario.total,
+      page: 2,
+      limit: 100,
+      data: Object.freeze({ total: 99 }),
+      pagination: Object.freeze({ total: 88 }),
+    });
+    const before = structuredClone(payload);
+    const result = toProcessAssessmentResponse(payload);
+
+    expect(result.total).toBe(scenario.total);
+    expect(isValidPaginationTotal(result.total)).toBe(true);
+    expect(result).toMatchObject({ page: 2, limit: 100 });
+    expect(result.items).toStrictEqual(scenario.items);
+    if (scenario.items.length > 0) expect(result.items[0]).toBe(row);
+    expect(result.raw).toBe(payload);
+    expect(payload).toStrictEqual(before);
+  }
+});
+
+test("process assessment totals reject unavailable and finite invalid roots without old totals or row-count rescue", () => {
+  const row = Object.freeze({
+    studentId: "student-pa-total",
+    studentName: "保留当前页成员",
+  });
+  for (const total of [undefined, null, "8", Number.NaN, Infinity]) {
+    const payload = Object.freeze({
+      items: Object.freeze([row]),
+      ...(total === undefined ? {} : { total }),
+      data: Object.freeze({ total: 8 }),
+      pagination: Object.freeze({ total: 8 }),
+    });
+    const before = structuredClone(payload);
+    const result = toProcessAssessmentResponse(payload);
+
+    expect(result.total).toBeUndefined();
+    expect(isValidPaginationTotal(result.total)).toBe(false);
+    expect(result.items).toHaveLength(1);
+    expect(result.items[0]).toBe(row);
+    expect(result.raw).toBe(payload);
+    expect(payload).toStrictEqual(before);
+  }
+
+  for (const total of [-1, 1.5, Number.MAX_SAFE_INTEGER + 1]) {
+    const payload = Object.freeze({
+      items: Object.freeze([row]),
+      total,
+      data: Object.freeze({ total: 8 }),
+      pagination: Object.freeze({ total: 8 }),
+    });
+    const before = structuredClone(payload);
+    const result = toProcessAssessmentResponse(payload);
+
+    expect(result.total).toBe(total);
+    expect(isValidPaginationTotal(result.total)).toBe(false);
+    expect(result.items[0]).toBe(row);
+    expect(result.raw).toBe(payload);
+    expect(payload).toStrictEqual(before);
+  }
 });
 
 test("process assessments retire rows and data wrappers and never repair items or pagination", () => {
@@ -346,6 +420,7 @@ test("process assessments retire rows and data wrappers and never repair items o
     expect(result.page).toBeUndefined();
     expect(result.limit).toBeUndefined();
     expect(result.total).toBeUndefined();
+    expect(isValidPaginationTotal(result.total)).toBe(false);
     if (scenario.ids.length > 0) expect(result.items[0]).toBe(formal);
     expect(result.raw).toBe(payload);
     expect(payload).toStrictEqual(before);

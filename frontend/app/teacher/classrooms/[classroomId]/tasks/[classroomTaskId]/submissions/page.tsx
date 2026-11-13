@@ -6,6 +6,7 @@ import { PageHeader } from "@/components/blocks/PageHeader";
 import { fetchJson, FetchJsonError } from "@/lib/api/client";
 import { buildErrorDescription, extractRawDetail } from "@/lib/api/error-presenter";
 import { toClassroomTaskSubmissionsResponse, toClassroomSummary } from "@/lib/api/types-teacher";
+import { isValidPaginationTotal } from "@/lib/pagination";
 import { paths } from "@/lib/routes/paths";
 import { getAiStatusLabel, getCommonErrorSummary } from "@/lib/ui/status";
 import {
@@ -50,10 +51,11 @@ type TaskSubmissionsViewModel =
       mode: "ready";
       classroomName?: string;
       submissionsResponse: ReturnType<typeof toClassroomTaskSubmissionsResponse>;
+      total: number;
     }
   | {
       mode: "error";
-      status: number;
+      status?: number;
       description: string;
     };
 
@@ -107,11 +109,19 @@ export default async function ClassroomTaskSubmissionsPage({
     ]);
 
     const submissionsResponse = toClassroomTaskSubmissionsResponse(submissionsPayload);
-    viewModel = {
-      mode: "ready",
-      classroomName: toClassroomSummary(classroomPayload).name,
-      submissionsResponse,
-    };
+    if (isValidPaginationTotal(submissionsResponse.total)) {
+      viewModel = {
+        mode: "ready",
+        classroomName: toClassroomSummary(classroomPayload).name,
+        submissionsResponse,
+        total: submissionsResponse.total,
+      };
+    } else {
+      viewModel = {
+        mode: "error",
+        description: "任务提交列表数据不完整，请刷新后重试。",
+      };
+    }
   } catch (error) {
     if (error instanceof FetchJsonError) {
       const detail = extractRawDetail(error);
@@ -136,10 +146,7 @@ export default async function ClassroomTaskSubmissionsPage({
   const routePath = paths.teacher.classroomTaskSubmissions(classroomId, classroomTaskId);
   const submissions = viewModel.submissionsResponse.items;
   const displayedSubmissionsCount = submissions.length;
-  const totalSubmissionsCount =
-    typeof viewModel.submissionsResponse.total === "number"
-      ? viewModel.submissionsResponse.total
-      : displayedSubmissionsCount;
+  const totalSubmissionsCount = viewModel.total;
   const currentPageSource =
     typeof viewModel.submissionsResponse.page === "number" &&
     viewModel.submissionsResponse.page > 0

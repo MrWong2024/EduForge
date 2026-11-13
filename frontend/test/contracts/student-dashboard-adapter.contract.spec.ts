@@ -1,5 +1,6 @@
 import { test, expect } from "@playwright/test";
 import { toStudentDashboardResponse } from "../../lib/api/types-student";
+import { isValidPaginationTotal } from "../../lib/pagination";
 
 // Expected values follow the locked dashboard contract and Backend DTO
 // "Teacher / Student Dashboard response family" / completion public state.
@@ -97,6 +98,7 @@ test("formal dashboards preserve summaries, submissions, completion, nulls and s
   const before = structuredClone(payload);
   const result = toStudentDashboardResponse(payload);
 
+  expect(isValidPaginationTotal(result.total)).toBe(true);
   expect(result).toMatchObject({
     total: 2,
     page: 1,
@@ -234,6 +236,7 @@ test("formal fields win over conflicting wrappers, aliases and task-level AI sta
   const before = structuredClone(payload);
   const result = toStudentDashboardResponse(payload);
 
+  expect(isValidPaginationTotal(result.total)).toBe(true);
   expect(result).toMatchObject({ total: 0, page: 0, limit: 0 });
   expect(result.items).toHaveLength(1);
   expect(result.items[0]).toMatchObject({
@@ -300,26 +303,77 @@ test("empty, missing or invalid root items never fall back to old containers", (
 
       expect(result.items).toEqual([]);
       expect(result).toMatchObject({ total: 0, page: 1, limit: 20 });
+      expect(isValidPaginationTotal(result.total)).toBe(true);
       expect(result.raw).toBe(payload);
     }
   }
 });
 
 test("pagination keeps finite root numbers without using nested numbers or coercion", () => {
-  const result = toStudentDashboardResponse({
-    items: [],
-    total: "4",
-    page: Number.NaN,
-    limit: Number.POSITIVE_INFINITY,
-    data: { total: 4, page: 2, limit: 20 },
+  const row = Object.freeze({
+    classroom: Object.freeze({ id: "classroom-total" }),
+    tasks: Object.freeze([]),
   });
 
-  expect(result.total).toBeUndefined();
-  expect(result.page).toBeUndefined();
-  expect(result.limit).toBeUndefined();
-  expect(
-    toStudentDashboardResponse({ total: -1, page: 1.5, limit: 0 }),
-  ).toMatchObject({ total: -1, page: 1.5, limit: 0 });
+  for (const total of [undefined, null, "4", Number.NaN, Infinity]) {
+    const payload = Object.freeze({
+      items: Object.freeze([row]),
+      ...(total === undefined ? {} : { total }),
+      page: Number.NaN,
+      limit: Number.POSITIVE_INFINITY,
+      data: Object.freeze({ total: 4, page: 2, limit: 20 }),
+      pagination: Object.freeze({ total: 4 }),
+    });
+    const before = structuredClone(payload);
+    const result = toStudentDashboardResponse(payload);
+
+    expect(result.total).toBeUndefined();
+    expect(isValidPaginationTotal(result.total)).toBe(false);
+    expect(result.page).toBeUndefined();
+    expect(result.limit).toBeUndefined();
+    expect(result.items).toHaveLength(1);
+    expect(result.items[0].raw).toBe(row);
+    expect(result.raw).toBe(payload);
+    expect(payload).toStrictEqual(before);
+  }
+
+  for (const total of [-1, 1.5, Number.MAX_SAFE_INTEGER + 1]) {
+    const payload = Object.freeze({
+      items: Object.freeze([row]),
+      total,
+      page: 1.5,
+      limit: 0,
+      data: Object.freeze({ total: 4 }),
+      pagination: Object.freeze({ total: 4 }),
+    });
+    const before = structuredClone(payload);
+    const result = toStudentDashboardResponse(payload);
+
+    expect(result).toMatchObject({ total, page: 1.5, limit: 0 });
+    expect(isValidPaginationTotal(result.total)).toBe(false);
+    expect(result.items[0].raw).toBe(row);
+    expect(result.raw).toBe(payload);
+    expect(payload).toStrictEqual(before);
+  }
+});
+
+test("empty dashboard items accept a positive formal total without a row-count consistency rule", () => {
+  const payload = Object.freeze({
+    items: Object.freeze([]),
+    total: 11,
+    page: 3,
+    limit: 100,
+    data: Object.freeze({ total: 99 }),
+    pagination: Object.freeze({ total: 88 }),
+  });
+  const before = structuredClone(payload);
+  const result = toStudentDashboardResponse(payload);
+
+  expect(result.items).toStrictEqual([]);
+  expect(result).toMatchObject({ total: 11, page: 3, limit: 100 });
+  expect(isValidPaginationTotal(result.total)).toBe(true);
+  expect(result.raw).toBe(payload);
+  expect(payload).toStrictEqual(before);
 });
 
 for (const [label, formalValue] of [

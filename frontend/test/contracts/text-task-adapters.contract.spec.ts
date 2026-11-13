@@ -1526,6 +1526,7 @@ test("learning trajectory keeps structured student details and statistics withou
       },
     ],
   });
+  expect(isValidPaginationTotal(result.total)).toBe(true);
   expect(result.items[0]).not.toHaveProperty("studentName");
   expect(result.raw).toBe(payload);
   expect(result.items[0].raw).toBe(item);
@@ -1535,6 +1536,73 @@ test("learning trajectory keeps structured student details and statistics withou
   expect(result.items[0].raw.studentName).toBe("旧别名姓名");
   expect(result.items[0].raw.name).toBe("旧顶层姓名");
   expect(payload).toEqual(before);
+});
+
+test("learning trajectory accepts zero and positive formal totals on empty pages without legacy overrides", () => {
+  for (const total of [0, 7]) {
+    const payload = Object.freeze({
+      items: Object.freeze([]),
+      total,
+      page: 2,
+      limit: 100,
+      data: Object.freeze({ total: 999 }),
+      pagination: Object.freeze({ total: 777 }),
+    });
+    const before = structuredClone(payload);
+    const result = toLearningTrajectoryResponse(payload);
+
+    expect(result.items).toEqual([]);
+    expect(result.total).toBe(total);
+    expect(isValidPaginationTotal(result.total)).toBe(true);
+    expect(result.page).toBe(2);
+    expect(result.limit).toBe(100);
+    expect(result.raw).toBe(payload);
+    expect(payload).toStrictEqual(before);
+  }
+});
+
+test("learning trajectory keeps formal rows and total projections while the page count guard rejects invalid counts", () => {
+  const student = Object.freeze({
+    id: "trajectory-count-student",
+    name: "计数学生",
+  });
+  const row = Object.freeze({ studentId: "trajectory-count-student", student });
+  for (const { fields, expectedTotal } of [
+    { fields: {}, expectedTotal: undefined },
+    { fields: { total: null }, expectedTotal: undefined },
+    { fields: { total: "7" }, expectedTotal: undefined },
+    { fields: { total: Number.POSITIVE_INFINITY }, expectedTotal: undefined },
+    { fields: { total: -1 }, expectedTotal: -1 },
+    { fields: { total: 1.5 }, expectedTotal: 1.5 },
+    {
+      fields: { total: Number.MAX_SAFE_INTEGER + 1 },
+      expectedTotal: 9007199254740992,
+    },
+  ] as const) {
+    const payload = Object.freeze({
+      items: Object.freeze([row]),
+      ...fields,
+      page: 2,
+      limit: 100,
+      data: Object.freeze({ total: 999 }),
+      pagination: Object.freeze({ total: 777 }),
+    });
+    const before = structuredClone(payload);
+    const result = toLearningTrajectoryResponse(payload);
+
+    expect(result.items.map((item) => item.studentId)).toEqual([
+      "trajectory-count-student",
+    ]);
+    expect(result.items[0].student?.id).toBe("trajectory-count-student");
+    expect(result.total).toBe(expectedTotal);
+    expect(isValidPaginationTotal(result.total)).toBe(false);
+    expect(result.page).toBe(2);
+    expect(result.limit).toBe(100);
+    expect(result.raw).toBe(payload);
+    expect(result.items[0].raw).toBe(row);
+    expect(result.items[0].student?.raw).toBe(student);
+    expect(payload).toStrictEqual(before);
+  }
 });
 
 for (const nameState of ["null", "missing"] as const) {

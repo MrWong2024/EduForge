@@ -14,6 +14,7 @@ import {
   StudentTaskCompletionStatus,
   toStudentDashboardResponse,
 } from "@/lib/api/types-student";
+import { isValidPaginationTotal } from "@/lib/pagination";
 import { paths } from "@/lib/routes/paths";
 import {
   getAiStatusLabel,
@@ -79,10 +80,11 @@ type StudentDashboardViewModel =
   | {
       mode: "ready";
       data: ReturnType<typeof toStudentDashboardResponse>;
+      total: number;
     }
   | {
       mode: "error";
-      status: number;
+      status?: number;
       description: string;
     };
 
@@ -278,10 +280,19 @@ export default async function StudentDashboardPage({
       },
     );
 
-    viewModel = {
-      mode: "ready",
-      data: toStudentDashboardResponse(payload),
-    };
+    const data = toStudentDashboardResponse(payload);
+    if (isValidPaginationTotal(data.total)) {
+      viewModel = {
+        mode: "ready",
+        data,
+        total: data.total,
+      };
+    } else {
+      viewModel = {
+        mode: "error",
+        description: "学习看板数据不完整，请刷新后重试。",
+      };
+    }
   } catch (error) {
     if (error instanceof FetchJsonError) {
       const detail = extractRawDetail(error);
@@ -309,10 +320,7 @@ export default async function StudentDashboardPage({
   }
 
   const classroomItems = viewModel.data.items;
-  const totalClassrooms =
-    typeof viewModel.data.total === "number" && viewModel.data.total >= 0
-      ? viewModel.data.total
-      : classroomItems.length;
+  const totalClassrooms = viewModel.total;
   const dashboardLimit =
     typeof viewModel.data.limit === "number" && viewModel.data.limit > 0
       ? Math.floor(viewModel.data.limit)

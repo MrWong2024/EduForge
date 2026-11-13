@@ -17,6 +17,7 @@ import {
   toClassroomDetailResponse,
   toProcessAssessmentResponse,
 } from "@/lib/api/types-teacher";
+import { isValidPaginationTotal } from "@/lib/pagination";
 import { paths } from "@/lib/routes/paths";
 import { getClassroomTaskStatusLabel, getCommonErrorSummary } from "@/lib/ui/status";
 import { getFeedbackTagLabel } from "@/lib/ui/feedback-tags";
@@ -503,6 +504,7 @@ type ProcessAssessmentViewModel =
   | {
       mode: "ready";
       data: ReturnType<typeof toProcessAssessmentResponse>;
+      total: number;
       window: ReportWindow;
       excludedTaskIds: string[];
       taskOptions: ClassroomTaskOption[];
@@ -512,7 +514,7 @@ type ProcessAssessmentViewModel =
     }
   | {
       mode: "error";
-      status: number;
+      status?: number;
       description: string;
     };
 
@@ -573,16 +575,25 @@ export default async function ProcessAssessmentPage({
         .catch(() => undefined),
     ]);
 
-    viewModel = {
-      mode: "ready",
-      data: toProcessAssessmentResponse(payload),
-      window: queryState.window,
-      excludedTaskIds: queryState.excludedTaskIds,
-      taskOptions: taskOptionsResult.taskOptions,
-      taskOptionsLoadError: taskOptionsResult.taskOptionsLoadError,
-      classroomName,
-      csvHref,
-    };
+    const data = toProcessAssessmentResponse(payload);
+    if (isValidPaginationTotal(data.total)) {
+      viewModel = {
+        mode: "ready",
+        data,
+        total: data.total,
+        window: queryState.window,
+        excludedTaskIds: queryState.excludedTaskIds,
+        taskOptions: taskOptionsResult.taskOptions,
+        taskOptionsLoadError: taskOptionsResult.taskOptionsLoadError,
+        classroomName,
+        csvHref,
+      };
+    } else {
+      viewModel = {
+        mode: "error",
+        description: "过程性评价数据不完整，请刷新后重试。",
+      };
+    }
   } catch (error) {
     if (error instanceof FetchJsonError) {
       const detail = extractRawDetail(error);
@@ -618,8 +629,7 @@ export default async function ProcessAssessmentPage({
       : "—";
   const rubricSummaryText = toRubricSummaryText(asRecord(viewModel.data.raw));
   const displayedStudentsCount = rows.length;
-  const totalStudentsCount =
-    typeof viewModel.data.total === "number" ? viewModel.data.total : displayedStudentsCount;
+  const totalStudentsCount = viewModel.total;
   const currentPageSource =
     typeof viewModel.data.page === "number" && viewModel.data.page > 0
       ? viewModel.data.page

@@ -131,6 +131,7 @@
 - 课堂任务提交列表：`submissions/page.tsx` -> `/api/proxy/classrooms/:cid/tasks/:ctid/submissions`。
   - 对应后端：`GET /api/classrooms/:classroomId/tasks/:classroomTaskId/submissions`。
   - 仅消费正式根列表、分页与行字段，备用包装及字段别名不再补值；行 `id`、`student.id`、`student.name` 分别是内部 `submissionId`、`studentId`、`studentName` 的正式来源。公开字段合同见 [Backend DTO：Submission request / response family](./handoff-backend-dto-cheatsheet.md#submission-request--response-family)。
+  - 主列表 SSR 在 mapper 后复用 `isValidPaginationTotal`，统计与分页只用验证后的正式 total，0 合法，不再用当前页长度补总数；缺失或非法时进入本地读取错误，显示“任务提交列表数据不完整，请刷新后重试。”，不填写虚构 HTTP 状态。
   - 注意：只按 `classroomTaskId` 读取，不用 `taskId` 兜底过滤。
 - 提交详情和反馈：Teacher/Student submission pages + feedback forms -> `/api/proxy/learning-tasks/submissions/:id*`。
   - 对应后端：submission detail、feedback list、teacher feedback create/update。
@@ -148,6 +149,7 @@
 
 - 学生看板：`student/dashboard/page.tsx` -> `/api/proxy/classrooms/mine/dashboard` -> `GET /api/classrooms/mine/dashboard`。
   - 仅消费正式响应，已退役备用响应包装与字段别名回退；公开字段合同见 [Backend DTO：Teacher / Student Dashboard response family](./handoff-backend-dto-cheatsheet.md#teacher--student-dashboard-response-family)。
+  - SSR 在 mapper 后复用 `isValidPaginationTotal`，班级分组总数与分页只用验证后的正式 total，0 合法，不再用当前页分组数补值；缺失或非法时进入本地读取错误，显示“学习看板数据不完整，请刷新后重试。”，不填写虚构 HTTP 状态。
   - 注意：完成状态消费后端 `completionStatus`，不从 AI 状态或历史提交二次推断。
 - 加入班级：`JoinClassroomForm` -> `/api/proxy/classrooms/join` -> `POST /api/classrooms/join`。
   - 注意：只提交 joinCode，入班权限与重复入班由后端判定。
@@ -192,9 +194,11 @@
   - 课堂复盘的提交率与 AI 成功率固定按 ratio 展示；“成功约 N”仍使用未格式化百分数还原后的比率估算。
   - 课堂复盘只从正式 `overview/commonIssues` 读取概览、摘要与问题分布，不再用旧指标别名或按人数补算缺失率；分布只取正式 `tag/type/severity/count`。分层学生的 ID/姓名仅消费 `studentId/studentName`，不以旧别名补足，也不再投影或展示后端未返回的 ReviewPack 专用 `latestAiFeedbackStatus`；未知姓名、学号 null、真实 0、原格式和 raw 引用保持。样例的正式 `tags/matchedTags`、合并去重和提交链接继续保留。
   - 学习轨迹的根 `studentId` 与结构化 `student.id` 独立解析，不互补或合成学生对象；名称仅从结构化 `student` 依次选择姓名、学号、邮箱、`未知学生`，不读取旧姓名别名或从 raw 补学号/邮箱。尝试显示时间只取 `createdAt`，不回退 `submittedAt`。后端字段结构及 nullable 合同见 [Backend DTO](./handoff-backend-dto-cheatsheet.md#learning-trajectory)。
+  - 学习轨迹 SSR 在 mapper 后复用 `isValidPaginationTotal`，人数总数与分页只用验证后的正式 total，0 合法，不再用当前页人数补值；缺失或非法时进入本地读取错误，显示“学习轨迹数据不完整，请刷新后重试。”，不填写虚构 HTTP 状态。
   - 学习轨迹 window 仅接受精确的 `all | 7d`，默认 `all`；省略、空值、`24h`、`30d`、`term`、大小写或空白变体及其他未知值统一沿用 `parseEnum` 回落为 `all`，不 trim 或转换大小写。重复 window 沿用 `getSingleSearchParam` 取首值，请求使用同一规范化 window。
 - 过程性评价 JSON：`process-assessment/page.tsx` -> `/api/proxy/classrooms/:id/process-assessment`。
   - 对应后端：`GET /api/classrooms/:classroomId/process-assessment`。
+  - 主 JSON 响应在 mapper 后复用 `isValidPaginationTotal`，列表总数与分页只用验证后的正式 total，0 合法，不再用当前页人数补值；缺失或非法时进入本地读取错误，显示“过程性评价数据不完整，请刷新后重试。”，不填写虚构 HTTP 状态。当前页摘要与辅助任务选项、班级名称读取不纳入此门禁。
   - 行覆盖率、当前页平均覆盖率与 AI 请求成功率固定按 ratio 展示；rubric 权重按 ratio 转为满分贡献，score 与平均得分保持分数展示，不再转换。
   - 页头名称辅助读取一次 `GET classrooms/:classroomId`，与现有加载并行，经 `toClassroomDetailResponse` 取名；独立有限超时及失败占位，不改变统计主体错误处理。
   - window 适配：前端仅接受精确的 `7d | 30d | all`；省略、空值、`term`、`24h`、大小写或空白变体及其他未知值统一沿用 `parseEnum` 回落为 `all`，不设 term 特判、不 trim 或转换大小写。重复 window 沿用 `getSingleSearchParam` 取首值；JSON 与 CSV 共用同一解析后的 window。
