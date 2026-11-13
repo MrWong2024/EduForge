@@ -66,6 +66,7 @@
 - 课程创建/编辑：`CreateCourseForm`、`EditCourseForm` -> `/api/proxy/courses*` -> `POST/PATCH /api/courses*`。
   - 调用页面：`/teacher/courses*`。
   - 注意：`courseLabel` 值域来源仍由前端统一候选和后端 DTO 校验共同约束。
+  - 创建以 `toCourseCreateResponse` 适配的正式根 `id` 确认后才执行原成功导航。以下四个创建/发布入口在成功 HTTP 后缺 ID，或模板响应适配抛出时，均进入“结果待核对”：保留草稿、暂停当前挂载表单再次提交，不自动提示成功、清稿、导航、刷新或重发；先到对应列表核对，完整刷新或重新进入表单后再操作。输入、筛选、props 同步或普通 `router.refresh` 不解除局部保护；正式字段仍见 [Backend DTO Courses](./handoff-backend-dto-cheatsheet.md#courses)。
 - 课程生命周期：`CourseLifecycleActions` -> `/api/proxy/courses/:id` -> `PATCH/DELETE /api/courses/:id`。
   - 调用页面：`/teacher/courses`。
   - 注意：`COURSE_NOT_EMPTY` 只做展示，不在前端重判删除条件。
@@ -75,6 +76,7 @@
   - 列表、摘要及任务展示通过 `getDashboardItems` 与 `lib/teacher-dashboard.ts` 仅消费正式读源，备用包装与字段别名不再补值；公开字段合同见 [Backend DTO：Teacher / Student Dashboard response family](./handoff-backend-dto-cheatsheet.md#teacher--student-dashboard-response-family)。
 - 班级创建/编辑：`CreateClassroomForm`、`EditClassroomForm` -> `/api/proxy/classrooms*` -> `POST/PATCH /api/classrooms*`。
   - 调用页面：`/teacher/classrooms*`。
+  - 创建只确认 `toClassroomCreateResponse` 的正式根 `id`，有 ID 才沿原流程进入班级看板；缺 ID 遵循上述创建/发布待核对规则，不再提示已创建或退回列表后刷新。正式字段见 [Backend DTO Classrooms](./handoff-backend-dto-cheatsheet.md#classrooms)。
 - 班级生命周期：`ClassroomLifecycleActions` -> `/api/proxy/classrooms/:id` -> `PATCH/DELETE /api/classrooms/:id`。
   - 调用页面：`/teacher/classrooms`。
   - 注意：`CLASSROOM_NOT_EMPTY` 只做展示；Enrollment 历史由后端判定。
@@ -100,6 +102,7 @@
   - 难度筛选与下述模板写入选项分开：字段名“任务难度”，选项为全部难度（UI `""`，请求省略）、基础 `easy`、进阶 `medium`、挑战 `hard`，复用共享三档目录；不提供未设置/其他筛选。`parseDifficultyFilter` 只接受准确单个标准值，非法 URL 值（含数组）按全部显示且不传后端，后续筛选及分页导航移除非法值；不据此清洗存储或展示值。模板 SSR、筛选控件及外层实际分页链接使用规范化难度，筛选变更回第1页，保留其他条件和 fromClassroomId，编辑 returnTo 保留当前列表条件；清空筛选包含难度并沿用既有 scope 重置规则。
 - 任务模板创建：`CreateLearningTaskForm` -> `/api/proxy/learning-tasks/tasks` -> `POST /api/learning-tasks/tasks`。
   - 注意：初始 `status` 遵循后端创建 DTO；创建与后续生命周期请求不混用。
+  - 保存草稿与创建已发布模板共用成功响应确认：窄范围处理 `toLearningTaskCreateResponse` 适配及正式根 `id` 检查，适配抛出或缺 ID 均按上述规则待核对并保护两个提交入口；仅确认成功后保留原成功提示、表单重置和刷新。字段与资料引用合同见 [Backend DTO Task template](./handoff-backend-dto-cheatsheet.md#task-template-dto--response-family)。
 - 任务模板编辑/生命周期：`EditLearningTaskForm` -> `/api/proxy/learning-tasks/tasks/:id*`。
   - 对应后端：`GET/PATCH /api/learning-tasks/tasks/:id`、`POST /publish`、`POST /archive`。
   - 注意：内容更新与生命周期采用各自后端接口，普通保存不构造状态流转；权限与生命周期由后端最终校验。
@@ -111,6 +114,7 @@
   - 模板顶层 `difficulty` 原值进入模板 view model，mapper 不转换或改写上游数据，raw 引用保持；表单只读、模板列表、发布选择及师生课堂详情复用同一安全显示函数：只有准确三档显示基础/进阶/挑战，缺失、null、空白、未知字符串或非法类型统一显示未设置。不做别名、大小写或自动判级，也不将安全显示回写数据库。难度只用于教学定位，不影响评阅标准或统计校正。
 - 班级发布候选：`PublishClassroomTaskForm` -> `/api/proxy/classrooms/:id/publishable-task-templates`。
   - 对应后端：`GET /api/classrooms/:id/publishable-task-templates`。
+  - 发布仍使用 `POST /api/classrooms/:id/tasks`，以 `toSubmitTaskResponse` 的正式根实例 `id` 确认；缺 ID 按上述规则待核对，不以请求 taskId 或候选记录补足，不设置成功结果或刷新，保留选择、截止/迟交草稿及候选池。候选筛选与 props 同步不解除当前挂载表单的提交保护；正式发布响应见 [Backend DTO ClassroomTask](./handoff-backend-dto-cheatsheet.md#classroomtask-dto--response-family)。
   - 注意：模板可见性、发布资格及本班已发布排除由后端候选接口决定，前端不自行伪造候选全集。当前候选 DTO 不提供 rubric、aiContextRefs，继续允许缺省；缺少 rubric 只能提示到模板详情核对，不能判断模板未填写评阅标准。后端候选的 `createdById` 仍是合法字段，但前端不新增读取回退，作者来源仍为字符串 `createdBy`；完整字段见 [Backend DTO 发布候选模板](./handoff-backend-dto-cheatsheet.md#发布候选模板)。
   - SSR 在主列表 total 通过后复用 `isValidPaginationTotal` 校验候选 total，只向表单传入已验证的必填 `initialAvailableTasksTotal`；初始化与权威 props 同步直接使用该值。候选 total 非法时显示整页“候选模板列表数据不完整，请刷新后重试。”，不承诺保留已卸载表单的候选池或草稿。
   - 加载更多响应先检查请求 epoch，再验证 total；非法时仅显示局部“候选模板列表数据不完整，请重试加载更多。”，不提交候选列表、page、limit 或 total，保留上一份有效候选、选择和截止/迟交草稿。既有 finally 按 epoch 结束 loading 后，用户可显式重试同一下一页；不自动重试。合法响应直接提交验证后的 total，保持原合并与分页策略。

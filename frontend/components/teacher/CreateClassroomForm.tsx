@@ -66,12 +66,16 @@ export function CreateClassroomForm({ courses, initialCourseId }: CreateClassroo
   const [courseId, setCourseId] = useState(defaultCourseId);
   const [name, setName] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [successMessage, setSuccessMessage] = useState<string | null>(null);
+  const [requiresVerification, setRequiresVerification] = useState(false);
   const [errorState, setErrorState] = useState<CreateClassroomFormErrorState | null>(null);
   const classroomNamePlaceholder = getClassroomNamePlaceholder();
 
   const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+    if (isSubmitting || requiresVerification) {
+      return;
+    }
+
     const trimmedName = name.trim();
     const trimmedCourseId = courseId.trim();
 
@@ -89,7 +93,6 @@ export function CreateClassroomForm({ courses, initialCourseId }: CreateClassroo
     }
 
     setIsSubmitting(true);
-    setSuccessMessage(null);
     setErrorState(null);
 
     const requestBody: CreateClassroomRequest = {
@@ -108,14 +111,16 @@ export function CreateClassroomForm({ courses, initialCourseId }: CreateClassroo
       });
 
       const response = toClassroomCreateResponse(payload);
-      if (response.id) {
-        router.push(paths.teacher.classroomDashboard(response.id));
+      if (!response.id) {
+        setRequiresVerification(true);
+        setErrorState({
+          description:
+            "创建结果信息不完整，请先在班级列表核对。本表单已暂停再次提交，核对后刷新页面再操作。",
+        });
         return;
       }
 
-      setSuccessMessage("班级已创建。");
-      router.push(paths.teacher.classrooms);
-      router.refresh();
+      router.push(paths.teacher.classroomDashboard(response.id));
     } catch (error) {
       if (error instanceof BrowserFetchJsonError) {
         const summary = getCreateErrorSummary(error.status);
@@ -173,7 +178,7 @@ export function CreateClassroomForm({ courses, initialCourseId }: CreateClassroo
           <div className="md:col-span-2">
             <button
               type="submit"
-              disabled={isSubmitting}
+              disabled={isSubmitting || requiresVerification}
               className="rounded-md bg-zinc-900 px-4 py-2 text-sm font-medium text-white disabled:cursor-not-allowed disabled:bg-zinc-400"
             >
               {isSubmitting ? "创建中..." : "创建班级"}
@@ -182,11 +187,13 @@ export function CreateClassroomForm({ courses, initialCourseId }: CreateClassroo
         </form>
       )}
 
-      {successMessage ? <p className="mt-3 text-sm text-emerald-700">{successMessage}</p> : null}
-
       {errorState ? (
         <div className="mt-4">
-          <ErrorState status={errorState.status} title="创建班级失败" description={errorState.description} />
+          <ErrorState
+            status={errorState.status}
+            title={requiresVerification ? "班级创建结果待核对" : "创建班级失败"}
+            description={errorState.description}
+          />
         </div>
       ) : null}
     </section>

@@ -58,12 +58,16 @@ export function CreateCourseForm() {
   const [term, setTerm] = useState("");
   const [courseLabel, setCourseLabel] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [successMessage, setSuccessMessage] = useState<string | null>(null);
+  const [requiresVerification, setRequiresVerification] = useState(false);
   const [errorState, setErrorState] = useState<CreateCourseFormErrorState | null>(null);
   const termPlaceholder = getTermPlaceholder();
 
   const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+    if (isSubmitting || requiresVerification) {
+      return;
+    }
+
     const trimmedCode = code.trim();
     const trimmedName = name.trim();
     const trimmedTerm = term.trim();
@@ -77,7 +81,6 @@ export function CreateCourseForm() {
     }
 
     setIsSubmitting(true);
-    setSuccessMessage(null);
     setErrorState(null);
 
     const requestBody: CreateCourseRequest = {
@@ -100,14 +103,16 @@ export function CreateCourseForm() {
       });
 
       const response = toCourseCreateResponse(payload);
-      if (response.id) {
-        router.push(paths.teacher.courseOverview(response.id));
+      if (!response.id) {
+        setRequiresVerification(true);
+        setErrorState({
+          description:
+            "创建结果信息不完整，请先在课程列表核对。本表单已暂停再次提交，核对后刷新页面再操作。",
+        });
         return;
       }
 
-      setSuccessMessage("课程已创建。");
-      router.push(paths.teacher.courses);
-      router.refresh();
+      router.push(paths.teacher.courseOverview(response.id));
     } catch (error) {
       if (error instanceof BrowserFetchJsonError) {
         const summary = getCreateErrorSummary(error.status);
@@ -183,7 +188,7 @@ export function CreateCourseForm() {
         <div className="md:col-span-4">
           <button
             type="submit"
-            disabled={isSubmitting}
+            disabled={isSubmitting || requiresVerification}
             className="rounded-md bg-zinc-900 px-4 py-2 text-sm font-medium text-white disabled:cursor-not-allowed disabled:bg-zinc-400"
           >
             {isSubmitting ? "创建中..." : "创建课程"}
@@ -191,11 +196,13 @@ export function CreateCourseForm() {
         </div>
       </form>
 
-      {successMessage ? <p className="mt-3 text-sm text-emerald-700">{successMessage}</p> : null}
-
       {errorState ? (
         <div className="mt-4">
-          <ErrorState status={errorState.status} title="创建课程失败" description={errorState.description} />
+          <ErrorState
+            status={errorState.status}
+            title={requiresVerification ? "课程创建结果待核对" : "创建课程失败"}
+            description={errorState.description}
+          />
         </div>
       ) : null}
     </section>

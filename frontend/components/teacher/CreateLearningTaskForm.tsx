@@ -68,6 +68,7 @@ export function CreateLearningTaskForm() {
   const [rubricNotes, setRubricNotes] = useState("");
   const [pendingAction, setPendingAction] = useState<CreateAction | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
+  const [requiresVerification, setRequiresVerification] = useState(false);
   const [errorState, setErrorState] =
     useState<CreateLearningTaskFormErrorState | null>(null);
 
@@ -83,13 +84,21 @@ export function CreateLearningTaskForm() {
     setRubricNotes("");
   };
 
+  const markRequiresVerification = () => {
+    setRequiresVerification(true);
+    setErrorState({
+      description:
+        "创建结果信息不完整，请先在任务模板列表核对。本表单已暂停再次提交，核对后刷新页面再操作。",
+    });
+  };
+
   const submitCreate = async (
     event: React.FormEvent<HTMLFormElement>,
     action: CreateAction,
   ) => {
     event.preventDefault();
 
-    if (isSubmitting) {
+    if (isSubmitting || requiresVerification) {
       return;
     }
 
@@ -146,9 +155,16 @@ export function CreateLearningTaskForm() {
         body: JSON.stringify(requestBody),
       });
 
-      const created = toLearningTaskCreateResponse(payload);
+      let created: ReturnType<typeof toLearningTaskCreateResponse>;
+      try {
+        created = toLearningTaskCreateResponse(payload);
+      } catch {
+        markRequiresVerification();
+        return;
+      }
       if (!created.id) {
-        throw new Error("创建结果无法确认");
+        markRequiresVerification();
+        return;
       }
       const actionMessage =
         action === "publish" ? "任务模板已发布" : "任务模板已保存为草稿";
@@ -345,7 +361,7 @@ export function CreateLearningTaskForm() {
         <div className="flex flex-wrap items-center gap-3">
           <button
             type="submit"
-            disabled={isSubmitting}
+            disabled={isSubmitting || requiresVerification}
             className="rounded-md bg-zinc-900 px-4 py-2 text-sm font-medium text-white disabled:cursor-not-allowed disabled:bg-zinc-400"
           >
             {pendingAction === "draft" ? "保存中..." : "保存为草稿"}
@@ -353,7 +369,7 @@ export function CreateLearningTaskForm() {
           <button
             type="button"
             onClick={handlePublishTemplate}
-            disabled={isSubmitting}
+            disabled={isSubmitting || requiresVerification}
             className="rounded-md border border-emerald-300 px-4 py-2 text-sm font-medium text-emerald-700 enabled:hover:bg-emerald-50 disabled:cursor-not-allowed disabled:opacity-60"
           >
             {pendingAction === "publish" ? "发布中..." : "发布模板"}
@@ -369,7 +385,7 @@ export function CreateLearningTaskForm() {
         <div className="mt-4">
           <ErrorState
             status={errorState.status}
-            title="创建任务模板失败"
+            title={requiresVerification ? "任务模板创建结果待核对" : "创建任务模板失败"}
             description={errorState.description}
           />
         </div>

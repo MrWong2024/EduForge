@@ -141,6 +141,7 @@ export function PublishClassroomTaskForm({
   const [isDueAtPickerActive, setIsDueAtPickerActive] = useState(false);
   const [allowLate, setAllowLate] = useState<boolean>(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [requiresVerification, setRequiresVerification] = useState(false);
   const [errorState, setErrorState] = useState<PublishErrorState | null>(null);
   const [createdTaskId, setCreatedTaskId] = useState<string | null>(null);
   const [loadedTasks, setLoadedTasks] =
@@ -534,7 +535,7 @@ export function PublishClassroomTaskForm({
 
   const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    if (isSubmitting || isRefreshingCandidates) {
+    if (isSubmitting || isRefreshingCandidates || requiresVerification) {
       return;
     }
 
@@ -582,7 +583,15 @@ export function PublishClassroomTaskForm({
       );
 
       const response = toSubmitTaskResponse(payload);
-      setCreatedTaskId(response.id ?? null);
+      if (!response.id) {
+        setRequiresVerification(true);
+        setErrorState({
+          summary:
+            "发布结果信息不完整，请先在本班已发布任务列表核对。本表单已暂停再次提交，核对后刷新页面再操作。",
+        });
+        return;
+      }
+      setCreatedTaskId(response.id);
       router.refresh();
     } catch (error) {
       if (error instanceof BrowserFetchJsonError) {
@@ -953,7 +962,7 @@ export function PublishClassroomTaskForm({
 
         <button
           type="submit"
-          disabled={isSubmitting || isRefreshingCandidates || !selectedTask}
+          disabled={isSubmitting || isRefreshingCandidates || requiresVerification || !selectedTask}
           className="rounded-md bg-zinc-900 px-4 py-2 text-sm font-medium text-white disabled:cursor-not-allowed disabled:bg-zinc-400"
         >
           {isSubmitting ? "发布中..." : "发布任务"}
@@ -981,7 +990,7 @@ export function PublishClassroomTaskForm({
         <div className="mt-4">
           <ErrorState
             status={errorState.status}
-            title="发布任务失败"
+            title={requiresVerification ? "任务发布结果待核对" : "发布任务失败"}
             description={buildErrorDescription(
               errorState.summary,
               errorState.detail,
