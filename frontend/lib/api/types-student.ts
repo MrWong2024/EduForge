@@ -45,16 +45,6 @@ const asNullableBoolean = (value: unknown): boolean | null | undefined => {
   return undefined;
 };
 
-const pickFirstNonEmptyRecord = (...candidates: unknown[]): UnknownRecord => {
-  for (const candidate of candidates) {
-    const record = asRecord(candidate);
-    if (Object.keys(record).length > 0) {
-      return record;
-    }
-  }
-  return {};
-};
-
 export type JoinClassroomResponse = {
   id?: string;
   name?: string;
@@ -515,12 +505,7 @@ export const toMyTaskDetailResponse = (
 export const toSubmissionDetailResponse = (
   payload: unknown,
 ): SubmissionDetailResponse => {
-  const record = asRecord(payload);
-  const dataRecord = pickFirstNonEmptyRecord(
-    safeGet(record, "data", undefined),
-    safeGet(record, "submission", undefined),
-  );
-  const source = Object.keys(dataRecord).length > 0 ? dataRecord : record;
+  const source = asRecord(payload);
   const contentRecord = asRecord(safeGet(source, "content", undefined));
   const meta = asRecord(source.meta);
   const editing = asRecord(source.editing);
@@ -575,9 +560,7 @@ export const toSubmissionDetailResponse = (
       codeText: originalText(contentRecord.codeText),
       submissionNote: originalText(contentRecord.submissionNote),
     },
-    submittedAt:
-      asNullableString(source.submittedAt) ??
-      asNullableString(source.createdAt),
+    submittedAt: asNullableString(source.submittedAt),
     attemptNo: asNullableNumber(source.attemptNo),
     isLate: asNullableBoolean(source.isLate) ?? false,
     lateBySeconds: asNumber(source.lateBySeconds) ?? 0,

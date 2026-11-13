@@ -2659,6 +2659,340 @@ test("history ordering preserves frozen records, feedback, raw facts and server 
   ]);
 });
 
+test("formal create responses keep root identity, revision zero and content language with original text", () => {
+  const codeText = "  print('created')\r\n\t ";
+  const submissionNote = "  创建说明\n😀  ";
+  const declaration = "  使用 AI 讨论思路\n  ";
+  const payload = Object.freeze({
+    id: "created-submission",
+    taskId: "task-1",
+    classroomTaskId: "classroom-task-1",
+    studentId: "student-1",
+    content: Object.freeze({ language: "python", codeText, submissionNote }),
+    meta: Object.freeze({ aiUsageDeclaration: declaration }),
+    submittedAt: "2026-11-13T01:00:00.000Z",
+    createdAt: "2026-11-13T01:00:00.000Z",
+    attemptNo: 1,
+    contentRevision: 0,
+    lastEditedAt: null,
+    lastEditIsLate: null,
+    reviewStartedAt: null,
+    editing: Object.freeze({ canEdit: true, reason: null, message: null }),
+    isLate: false,
+    lateBySeconds: 0,
+    aiFeedbackStatus: "NOT_REQUESTED",
+  });
+  const before = structuredClone(payload);
+
+  for (const adapt of [toSubmissionDetailResponse, toTeacherDetail]) {
+    const result = adapt(payload);
+
+    expect(result).toMatchObject({
+      id: "created-submission",
+      taskId: "task-1",
+      classroomTaskId: "classroom-task-1",
+      studentId: "student-1",
+      language: "python",
+      content: { language: "python", codeText, submissionNote },
+      meta: { aiUsageDeclaration: declaration },
+      submittedAt: "2026-11-13T01:00:00.000Z",
+      attemptNo: 1,
+      contentRevision: 0,
+      lastEditedAt: null,
+      lastEditIsLate: null,
+      reviewStartedAt: null,
+      editing: { canEdit: true, reason: null, message: null },
+      isLate: false,
+      lateBySeconds: 0,
+      aiFeedbackStatus: "NOT_REQUESTED",
+    });
+    expect(canEditSubmission(result)).toBe(true);
+    expect(result.raw).toBe(payload);
+  }
+  expect(payload).toStrictEqual(before);
+});
+
+test("formal detail and saved edit responses preserve root facts and original content", () => {
+  const codeText = "  const updated = true;\n\t ";
+  const submissionNote = "  修改说明\n  ";
+  const declaration = "  已独立核对 AI 建议\n ";
+  const payload = Object.freeze({
+    id: "updated-submission",
+    taskId: "task-2",
+    classroomTaskId: "classroom-task-2",
+    studentId: "student-2",
+    studentName: "王同学",
+    taskTitle: "正式快照标题",
+    taskSnapshotAvailable: true,
+    language: "typescript",
+    content: Object.freeze({ language: "typescript", codeText, submissionNote }),
+    meta: Object.freeze({ aiUsageDeclaration: declaration }),
+    submittedAt: "2026-11-13T02:00:00.000Z",
+    attemptNo: 2,
+    contentRevision: 1,
+    lastEditedAt: "2026-11-13T03:00:00.000Z",
+    lastEditIsLate: true,
+    reviewStartedAt: null,
+    editing: Object.freeze({ canEdit: true, reason: null, message: null }),
+    isLate: false,
+    lateBySeconds: 0,
+    aiFeedbackStatus: "NOT_REQUESTED",
+  });
+  const before = structuredClone(payload);
+
+  for (const adapt of [toSubmissionDetailResponse, toTeacherDetail]) {
+    const result = adapt(payload);
+
+    expect(result).toMatchObject({
+      id: "updated-submission",
+      taskId: "task-2",
+      classroomTaskId: "classroom-task-2",
+      studentId: "student-2",
+      studentName: "王同学",
+      taskTitle: "正式快照标题",
+      taskSnapshotAvailable: true,
+      language: "typescript",
+      content: { language: "typescript", codeText, submissionNote },
+      meta: { aiUsageDeclaration: declaration },
+      submittedAt: "2026-11-13T02:00:00.000Z",
+      attemptNo: 2,
+      contentRevision: 1,
+      lastEditedAt: "2026-11-13T03:00:00.000Z",
+      lastEditIsLate: true,
+      reviewStartedAt: null,
+      editing: { canEdit: true, reason: null, message: null },
+      isLate: false,
+      lateBySeconds: 0,
+      aiFeedbackStatus: "NOT_REQUESTED",
+    });
+    expect(result.raw).toBe(payload);
+  }
+  expect(payload).toStrictEqual(before);
+});
+
+test("submission root fields win over conflicting data and submission objects", () => {
+  const legacy = Object.freeze({
+    id: "legacy-submission",
+    taskId: "legacy-task",
+    classroomTaskId: "legacy-classroom-task",
+    studentId: "legacy-student",
+    language: "legacy-language",
+    content: Object.freeze({
+      language: "legacy-language",
+      codeText: "old code",
+      submissionNote: "old note",
+    }),
+    meta: Object.freeze({ aiUsageDeclaration: "old declaration" }),
+    submittedAt: "2000-01-01T00:00:00.000Z",
+    contentRevision: 99,
+    editing: Object.freeze({ canEdit: true, reason: null, message: null }),
+    taskSnapshotAvailable: true,
+    aiFeedbackStatus: "SUCCEEDED",
+    aiReview: Object.freeze({ canRequest: true }),
+  });
+  const payload = Object.freeze({
+    id: "formal-submission",
+    taskId: "formal-task",
+    classroomTaskId: "formal-classroom-task",
+    studentId: "formal-student",
+    language: null,
+    content: Object.freeze({
+      language: " python ",
+      codeText: "  root code\n ",
+      submissionNote: "",
+    }),
+    meta: Object.freeze({ aiUsageDeclaration: "" }),
+    submittedAt: null,
+    createdAt: "2026-11-13T04:00:00.000Z",
+    contentRevision: 0,
+    editing: Object.freeze({
+      canEdit: false,
+      reason: "REVIEW_STARTED",
+      message: "已进入评阅",
+    }),
+    taskSnapshotAvailable: false,
+    aiFeedbackStatus: "NOT_REQUESTED",
+    aiReview: Object.freeze({ canRequest: false }),
+    data: legacy,
+    submission: legacy,
+  });
+  const before = structuredClone(payload);
+
+  for (const adapt of [toSubmissionDetailResponse, toTeacherDetail]) {
+    const result = adapt(payload);
+
+    expect(result).toMatchObject({
+      id: "formal-submission",
+      taskId: "formal-task",
+      classroomTaskId: "formal-classroom-task",
+      studentId: "formal-student",
+      language: "python",
+      content: {
+        language: "python",
+        codeText: "  root code\n ",
+        submissionNote: "",
+      },
+      meta: { aiUsageDeclaration: "" },
+      submittedAt: null,
+      contentRevision: 0,
+      editing: {
+        canEdit: false,
+        reason: "REVIEW_STARTED",
+        message: "已进入评阅",
+      },
+      taskSnapshotAvailable: false,
+      aiFeedbackStatus: "NOT_REQUESTED",
+      aiReview: { canRequest: false },
+    });
+    expect(canEditSubmission(result)).toBe(false);
+    expect(result.raw).toBe(payload);
+    expect(result.raw.data).toBe(legacy);
+    expect(result.raw.submission).toBe(legacy);
+  }
+  expect(payload).toStrictEqual(before);
+});
+
+for (const key of ["data", "submission"] as const) {
+  test(`retired submission ${key} objects cannot supply missing root facts or operation permission`, () => {
+    const legacy = Object.freeze({
+      id: "legacy-submission",
+      taskId: "legacy-task",
+      classroomTaskId: "legacy-classroom-task",
+      studentId: "legacy-student",
+      content: Object.freeze({
+        language: "python",
+        codeText: "legacy code",
+        submissionNote: "legacy note",
+      }),
+      meta: Object.freeze({ aiUsageDeclaration: "legacy declaration" }),
+      submittedAt: "2026-11-13T05:00:00.000Z",
+      contentRevision: 0,
+      editing: Object.freeze({ canEdit: true, reason: null, message: null }),
+      taskSnapshotAvailable: true,
+      aiReview: Object.freeze({ canRequest: true }),
+    });
+    const payload = Object.freeze({ [key]: legacy });
+    const before = structuredClone(payload);
+
+    for (const adapt of [toSubmissionDetailResponse, toTeacherDetail]) {
+      const result = adapt(payload);
+
+      expect(result).toMatchObject({
+        id: undefined,
+        taskId: undefined,
+        classroomTaskId: undefined,
+        studentId: undefined,
+        language: undefined,
+        content: {
+          language: undefined,
+          codeText: undefined,
+          submissionNote: undefined,
+        },
+        meta: undefined,
+        submittedAt: undefined,
+        contentRevision: undefined,
+        editing: { canEdit: false, reason: null, message: null },
+        taskSnapshotAvailable: undefined,
+        aiReview: undefined,
+      });
+      expect(canEditSubmission(result)).toBe(false);
+      expect(result.raw).toBe(payload);
+    }
+    expect(payload).toStrictEqual(before);
+  });
+}
+
+test("unusable root submission fields are not rescued by complete legacy objects", () => {
+  const legacy = Object.freeze({
+    id: "legacy-submission",
+    content: Object.freeze({
+      language: "python",
+      codeText: "legacy code",
+      submissionNote: "legacy note",
+    }),
+    meta: Object.freeze({ aiUsageDeclaration: "legacy declaration" }),
+    contentRevision: 5,
+    editing: Object.freeze({ canEdit: true, reason: null, message: null }),
+    taskSnapshotAvailable: true,
+    aiReview: Object.freeze({ canRequest: true }),
+  });
+  const payload = Object.freeze({
+    id: " \t ",
+    language: 7,
+    content: Object.freeze({ language: " ", codeText: null, submissionNote: 7 }),
+    meta: Object.freeze({ aiUsageDeclaration: null }),
+    contentRevision: null,
+    editing: Object.freeze({ canEdit: true, reason: null, message: null }),
+    taskSnapshotAvailable: false,
+    aiReview: null,
+    data: legacy,
+    submission: legacy,
+  });
+  const before = structuredClone(payload);
+
+  for (const adapt of [toSubmissionDetailResponse, toTeacherDetail]) {
+    const result = adapt(payload);
+
+    expect(result).toMatchObject({
+      id: undefined,
+      language: undefined,
+      content: { language: undefined, codeText: null, submissionNote: undefined },
+      meta: undefined,
+      contentRevision: null,
+      editing: { canEdit: false, reason: null, message: null },
+      taskSnapshotAvailable: false,
+      aiReview: undefined,
+    });
+    expect(canEditSubmission(result)).toBe(false);
+    expect(result.raw).toBe(payload);
+  }
+  expect(payload).toStrictEqual(before);
+});
+
+test("submittedAt uses only its nullable trimmed root string without createdAt rescue or date validation", () => {
+  for (const [submittedAt, expected] of [
+    [" 2026-11-13T06:00:00.000Z ", "2026-11-13T06:00:00.000Z"],
+    [null, null],
+    [undefined, undefined],
+    [7, undefined],
+    [" \t\n ", undefined],
+    [" not-a-date ", "not-a-date"],
+  ] as const) {
+    const payload = Object.freeze({
+      submittedAt,
+      createdAt: "2026-11-13T07:00:00.000Z",
+    });
+
+    for (const adapt of [toSubmissionDetailResponse, toTeacherDetail]) {
+      const result = adapt(payload);
+
+      expect(result.submittedAt).toBe(expected);
+      expect(result.raw).toBe(payload);
+      expect(payload.submittedAt).toBe(submittedAt);
+    }
+  }
+});
+
+test("non-object submission inputs keep the existing empty-record degradation", () => {
+  for (const payload of [
+    undefined,
+    null,
+    7,
+    "submission",
+    [{ id: "legacy-array" }],
+  ]) {
+    for (const adapt of [toSubmissionDetailResponse, toTeacherDetail]) {
+      const result = adapt(payload);
+
+      expect(result.id).toBeUndefined();
+      expect(result.contentRevision).toBeUndefined();
+      expect(result.editing.canEdit).toBe(false);
+      expect(result.aiReview).toBeUndefined();
+      expect(result.raw).toStrictEqual({});
+    }
+  }
+});
+
 test("only an explicit valid revision and complete server editing permission allow editing", () => {
   const valid = {
     contentRevision: 0,
