@@ -14,6 +14,7 @@ import {
   toCourseListResponse,
   type ClassroomStatus,
 } from "@/lib/api/types-teacher";
+import { isValidPaginationTotal } from "@/lib/pagination";
 import { paths } from "@/lib/routes/paths";
 import { getClassroomStatusLabel, getCommonErrorSummary } from "@/lib/ui/status";
 import { toDisplayText } from "@/lib/ui/format";
@@ -103,11 +104,12 @@ type ClassroomsViewModel =
   | {
       mode: "ready";
       response: ReturnType<typeof toClassroomListResponse>;
+      total: number;
       selectedCourseId?: string;
       courses: ReturnType<typeof toCourseListResponse>["items"];
       statusView: ClassroomStatusView;
     }
-  | { mode: "error"; status: number; description: string };
+  | { mode: "error"; status?: number; description: string };
 
 export default async function TeacherClassroomsPage({ searchParams }: TeacherClassroomsPageProps) {
   const query = await searchParams;
@@ -152,13 +154,21 @@ export default async function TeacherClassroomsPage({ searchParams }: TeacherCla
 
     const list = toClassroomListResponse(classroomsPayload);
     const courses = toCourseListResponse(coursesPayload).items;
-    viewModel = {
-      mode: "ready",
-      response: list,
-      selectedCourseId,
-      courses,
-      statusView,
-    };
+    if (isValidPaginationTotal(list.total)) {
+      viewModel = {
+        mode: "ready",
+        response: list,
+        total: list.total,
+        selectedCourseId,
+        courses,
+        statusView,
+      };
+    } else {
+      viewModel = {
+        mode: "error",
+        description: "班级列表数据不完整，请刷新后重试。",
+      };
+    }
   } catch (error) {
     if (error instanceof FetchJsonError) {
       const detail = extractRawDetail(error);
@@ -189,10 +199,7 @@ export default async function TeacherClassroomsPage({ searchParams }: TeacherCla
       ? viewModel.response.limit
       : limit;
   const displayedClassroomsCount = viewModel.response.items.length;
-  const totalClassroomsCount =
-    typeof viewModel.response.total === "number"
-      ? viewModel.response.total
-      : displayedClassroomsCount;
+  const totalClassroomsCount = viewModel.total;
   const totalPages = Math.max(1, Math.ceil(totalClassroomsCount / currentLimit));
   const currentPage = Math.min(currentPageSource, totalPages);
   const showPagination = totalClassroomsCount > currentLimit;

@@ -79,6 +79,7 @@
   - 调用页面：`/teacher/classrooms`。
   - 注意：`CLASSROOM_NOT_EMPTY` 只做展示；Enrollment 历史由后端判定。
 - 课程/班级基础响应适配：实体标识只取正式 `id`，包括班级内嵌课程；旧 `courseId/classroomId` 不再作为实体 ID 别名补足。创建、详情与更新只消费顶层实体，课程总览只消费顶层 `course/items` 及元信息，不再选择 `data`。两种列表只读顶层 `items` 和同名分页字段；裸数组、`data.items`、`data` 数组及旧分页来源不再参与，缺失或非法分页保持 `undefined`，不从数组长度派生。完整字段与统计合同见 [Backend DTO Courses](./handoff-backend-dto-cheatsheet.md#courses)、[Classrooms](./handoff-backend-dto-cheatsheet.md#classrooms) 及[课程总览](./handoff-backend-dto-cheatsheet.md#课程总览)。
+- 教师课程与班级主列表在 mapper 之后通过 `isValidPaginationTotal` 执行页面门禁：只接受正式根字段中的非负安全整数 number `total`，0 合法；缺失或非法时进入读取错误，不用当前页长度或默认值补足总数。班级页辅助课程请求只消费 `items` 供选项和名称映射，不适用此门禁。
 - 关系与可选摘要：真实关系字段 `Classroom.courseId` 和总览行 `items[].classroomId` 保留；班级内嵌 `course` 可缺省，不影响班级及所属课程 ID。课程摘要有可读资料但缺少 `id` 时仍按原规则保留，不强制完整对象，也不从旧实体别名恢复标识。
 - 课程/班级主响应状态适配：`normalizeCourseStatus`、`normalizeClassroomStatus` 仅接受原值精确等于 `ACTIVE` 或 `ARCHIVED`；不经 `asString` 预处理，不 trim、转换大小写或强制转换类型，其余输入（含缺失）均为 `undefined`，不补合法默认值、不修改输入。班级内附带的 `ClassroomCourseSummary.status` 仍为普通字符串投影，不在该收口范围。后端状态及接口规则见 [API Courses](./handoff-backend-api-map.md#courses) / [Classrooms](./handoff-backend-api-map.md#classrooms)。
 - 班级成员：`members/page.tsx`、`RemoveStudentButton` -> `/api/proxy/classrooms/:id/students*`。

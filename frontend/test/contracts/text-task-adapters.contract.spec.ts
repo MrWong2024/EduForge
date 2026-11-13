@@ -1,4 +1,5 @@
 import { test, expect } from "@playwright/test";
+import { isValidPaginationTotal } from "@/lib/pagination";
 import {
   toListFeedbackResponse,
   toMyTaskDetailResponse,
@@ -284,6 +285,7 @@ test("course and classroom lists retain mixed-status rows, order and pagination"
   const classroomResult = toClassroomListResponse(classroomPayload);
 
   expect(courseResult).toMatchObject({ total: 31, page: 3, limit: 100 });
+  expect(isValidPaginationTotal(courseResult.total)).toBe(true);
   expect(courseResult.items.map((item) => item.id)).toEqual([
     "course-active",
     "course-unknown",
@@ -299,6 +301,7 @@ test("course and classroom lists retain mixed-status rows, order and pagination"
     expect(item.raw).toBe(courses[index]),
   );
   expect(classroomResult).toMatchObject({ total: 42, page: 4, limit: 100 });
+  expect(isValidPaginationTotal(classroomResult.total)).toBe(true);
   expect(classroomResult.items.map((item) => item.id)).toEqual([
     "classroom-archived",
     "classroom-unknown",
@@ -772,6 +775,7 @@ test("course and classroom lists retire legacy wrappers without inferring pagina
       const result = adapt(payload);
       expect(result.items).toEqual([]);
       expect(result.total).toBeUndefined();
+      expect(isValidPaginationTotal(result.total)).toBe(false);
       expect(result.page).toBeUndefined();
       expect(result.limit).toBeUndefined();
       expect(Object.hasOwn(result, "raw")).toBe(hasRaw);
@@ -800,6 +804,7 @@ test("course and classroom list items and pagination use only their top-level so
       fields: Object.freeze({ items: formalItems, total: 41, page: 2, limit: 100 }),
       expectedIds: ["formal-first", "formal-second"],
       total: 41,
+      validTotal: true,
       page: 2,
       limit: 100,
     },
@@ -807,13 +812,44 @@ test("course and classroom list items and pagination use only their top-level so
       fields: Object.freeze({ items: Object.freeze([]), total: 0, page: 1, limit: 100 }),
       expectedIds: [],
       total: 0,
+      validTotal: true,
       page: 1,
+      limit: 100,
+    },
+    {
+      fields: Object.freeze({
+        items: Object.freeze([]),
+        total: 41,
+        page: 2,
+        limit: 100,
+      }),
+      expectedIds: [],
+      total: 41,
+      validTotal: true,
+      page: 2,
+      limit: 100,
+    },
+    {
+      fields: Object.freeze({ items: formalItems, page: 2, limit: 100 }),
+      expectedIds: ["formal-first", "formal-second"],
+      total: undefined,
+      validTotal: false,
+      page: 2,
+      limit: 100,
+    },
+    {
+      fields: Object.freeze({ items: formalItems, total: "41", page: 2, limit: 100 }),
+      expectedIds: ["formal-first", "formal-second"],
+      total: undefined,
+      validTotal: false,
+      page: 2,
       limit: 100,
     },
     {
       fields: Object.freeze({}),
       expectedIds: [],
       total: undefined,
+      validTotal: false,
       page: undefined,
       limit: undefined,
     },
@@ -821,6 +857,7 @@ test("course and classroom list items and pagination use only their top-level so
       fields: Object.freeze({ items: null, total: null, page: "2", limit: Number.NaN }),
       expectedIds: [],
       total: undefined,
+      validTotal: false,
       page: undefined,
       limit: undefined,
     },
@@ -838,6 +875,7 @@ test("course and classroom list items and pagination use only their top-level so
       const result = adapt(payload);
       expect(result.items.map((item) => item.id)).toEqual(scenario.expectedIds);
       expect(result.total).toBe(scenario.total);
+      expect(isValidPaginationTotal(result.total)).toBe(scenario.validTotal);
       expect(result.page).toBe(scenario.page);
       expect(result.limit).toBe(scenario.limit);
       expect(Object.hasOwn(result, "raw")).toBe(hasRaw);
@@ -851,6 +889,44 @@ test("course and classroom list items and pagination use only their top-level so
       }
     }
     expect(payload).toStrictEqual(before);
+  }
+});
+
+test("course and classroom list mappers preserve finite totals that the page count guard rejects", () => {
+  const row = Object.freeze({ id: "formal-row", status: "ACTIVE" });
+  for (const total of [-1, 1.5, Number.MAX_SAFE_INTEGER + 1]) {
+    const payload = Object.freeze({
+      items: Object.freeze([row]),
+      total,
+      page: 1,
+      limit: 100,
+    });
+    const before = structuredClone(payload);
+
+    for (const adapt of [toCourseListResponse, toClassroomListResponse]) {
+      const result = adapt(payload);
+
+      expect(result.total).toBe(total);
+      expect(isValidPaginationTotal(result.total)).toBe(false);
+      expect(result.items.map((item) => item.id)).toEqual(["formal-row"]);
+    }
+    expect(payload).toStrictEqual(before);
+  }
+});
+
+test("pagination total guard accepts the safe integer boundary and rejects unknown values without coercion", () => {
+  expect(isValidPaginationTotal(Number.MAX_SAFE_INTEGER)).toBe(true);
+  for (const value of [
+    undefined,
+    null,
+    "0",
+    true,
+    {},
+    [],
+    Number.NaN,
+    Number.POSITIVE_INFINITY,
+  ]) {
+    expect(isValidPaginationTotal(value)).toBe(false);
   }
 });
 

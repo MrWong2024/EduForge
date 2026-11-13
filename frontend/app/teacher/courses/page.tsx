@@ -17,6 +17,7 @@ import {
   isUnclassifiedTaskCourseLabel,
   toTaskCourseLabelDisplayText,
 } from "@/lib/learning-tasks/course-labels";
+import { isValidPaginationTotal } from "@/lib/pagination";
 import { paths } from "@/lib/routes/paths";
 import { getCommonErrorSummary, getCourseStatusLabel } from "@/lib/ui/status";
 import { getSingleSearchParam, parsePositiveInt, toDisplayText } from "@/lib/ui/format";
@@ -97,9 +98,10 @@ type CoursesViewModel =
   | {
       mode: "ready";
       response: ReturnType<typeof toCourseListResponse>;
+      total: number;
       statusView: CourseStatusView;
     }
-  | { mode: "error"; status: number; description: string };
+  | { mode: "error"; status?: number; description: string };
 
 export default async function TeacherCoursesPage({ searchParams }: TeacherCoursesPageProps) {
   const query = await searchParams;
@@ -132,11 +134,19 @@ export default async function TeacherCoursesPage({ searchParams }: TeacherCourse
       cache: "no-store",
     });
     const response = toCourseListResponse(payload);
-    viewModel = {
-      mode: "ready",
-      response,
-      statusView,
-    };
+    if (isValidPaginationTotal(response.total)) {
+      viewModel = {
+        mode: "ready",
+        response,
+        total: response.total,
+        statusView,
+      };
+    } else {
+      viewModel = {
+        mode: "error",
+        description: "课程列表数据不完整，请刷新后重试。",
+      };
+    }
   } catch (error) {
     if (error instanceof FetchJsonError) {
       const detail = extractRawDetail(error);
@@ -167,8 +177,7 @@ export default async function TeacherCoursesPage({ searchParams }: TeacherCourse
       ? viewModel.response.limit
       : limit;
   const displayedCoursesCount = viewModel.response.items.length;
-  const totalCoursesCount =
-    typeof viewModel.response.total === "number" ? viewModel.response.total : displayedCoursesCount;
+  const totalCoursesCount = viewModel.total;
   const totalPages = Math.max(1, Math.ceil(totalCoursesCount / currentLimit));
   const currentPage = Math.min(currentPageSource, totalPages);
   const showPagination = totalCoursesCount > currentLimit;
