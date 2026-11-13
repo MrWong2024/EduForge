@@ -66,11 +66,11 @@
 
 | Component / Module | File | Responsibility / Boundary |
 |---|---|---|
-| Pagination Total Guard | `lib/pagination.ts` | 为 `app/teacher/courses/page.tsx`、`app/teacher/classrooms/page.tsx`、`app/teacher/classrooms/[classroomId]/members/page.tsx`、`app/teacher/tasks/page.tsx`、`app/teacher/classrooms/[classroomId]/tasks/page.tsx` 及 `components/teacher/PublishClassroomTaskForm.tsx` 提供纯 `isValidPaginationTotal` 守卫，只校验 total 值；消费方负责读取错误与分页，消费范围见 [API Map 课程/班级/成员](./handoff-frontend-api-map.md#32-teacher-课程--班级--成员) 与[任务模板/课堂实例](./handoff-frontend-api-map.md#33-teacher-任务--提交--反馈) |
+| Pagination Total Guard | `lib/pagination.ts` | 为 `app/teacher/courses/page.tsx`、`app/teacher/courses/[courseId]/overview/page.tsx`、`app/teacher/classrooms/page.tsx`、`app/teacher/classrooms/[classroomId]/members/page.tsx`、`app/teacher/tasks/page.tsx`、`app/teacher/classrooms/[classroomId]/tasks/page.tsx` 及 `components/teacher/PublishClassroomTaskForm.tsx` 提供纯 `isValidPaginationTotal` 守卫，只校验 total 值；消费方负责读取错误与分页，消费范围见 [API Map 课程/班级/成员](./handoff-frontend-api-map.md#32-teacher-课程--班级--成员)、[任务模板/课堂实例](./handoff-frontend-api-map.md#33-teacher-任务--提交--反馈) 与[报表](./handoff-frontend-api-map.md#35-ai-feedback--报表--导出) |
 | CreateCourseForm | `components/teacher/CreateCourseForm.tsx` | 建课表单与成功导航，课程分类复用共享候选；学期示例不自动成为输入值 |
 | CourseLifecycleActions | `components/teacher/CourseLifecycleActions.tsx` | 课程列表“更多”菜单、动作 pending/确认/结果状态，组合 FloatingMoreMenu 并保留当前列表视图；每次 render 由当前 props 同时控制 UI 与独立 handler，仅允许 ACTIVE→ARCHIVED 归档、ARCHIVED→ACTIVE 恢复，未知状态只关闭归档/恢复；删除入口及 handler 不增加状态限制，资格由后端判定；基础编辑保持独立 |
 | EditCourseForm | `components/teacher/EditCourseForm.tsx` | 课程基础信息编辑与保存；课程分类复用共享候选并可清空，不承担列表加载 |
-| CourseOverviewPage | `app/teacher/courses/[courseId]/overview/page.tsx` | 服务端加载、窗口/排序/分页及只读班级明细组合；页面摘要只汇总当前页，指标字段适配与含义遵循 API Owner，不把分页摘要当全课程统计 |
+| CourseOverviewPage | `app/teacher/courses/[courseId]/overview/page.tsx` | 服务端加载、窗口/排序/分页及只读班级明细组合；班级总数消费验证后的正式 total，其余摘要仅基于当前页，比例均值不作为全课程统计；详细消费合同见 [Frontend API Map](./handoff-frontend-api-map.md#35-ai-feedback--报表--导出) |
 | Course Overview Ratios | `lib/course-overview.ts` | 供 `app/teacher/courses/[courseId]/overview/page.tsx` 格式化 ratio 并计算当前页两项等权比例均值，页面保留摘要组合与分页职责；展示合同见 [Frontend API Map](./handoff-frontend-api-map.md#35-ai-feedback--报表--导出) |
 | CreateClassroomForm | `components/teacher/CreateClassroomForm.tsx` | 建班表单及局部输入/提交状态，不负责班级列表加载；名称示例不自动成为输入值 |
 | EditClassroomForm | `components/teacher/EditClassroomForm.tsx` | 只编辑班级基础信息，当前可编辑字段为 `name`；所属课程、状态与加入码只读。通过班级更新能力保存并返回看板；不提供归档、恢复、删除或其他生命周期操作，生命周期动作归 ClassroomLifecycleActions |

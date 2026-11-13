@@ -12,6 +12,7 @@ import {
   toCourseOverviewPercentText,
 } from "@/lib/course-overview";
 import { toTaskCourseLabelDisplayText } from "@/lib/learning-tasks/course-labels";
+import { isValidPaginationTotal } from "@/lib/pagination";
 import { paths } from "@/lib/routes/paths";
 import { getCommonErrorSummary } from "@/lib/ui/status";
 import {
@@ -106,13 +107,14 @@ const getRequestOrigin = async (): Promise<string> => {
 };
 
 const buildOverviewSummary = (
-  data: ReturnType<typeof toCourseOverviewResponse>
+  data: ReturnType<typeof toCourseOverviewResponse>,
+  totalClassrooms: number
 ): CourseOverviewSummary => {
   const items = data.items;
   const classroomsInPage = items.length;
 
   return {
-    classroomsTotal: typeof data.total === "number" ? data.total : items.length,
+    classroomsTotal: totalClassrooms,
     classroomsInPage,
     averageOverallSubmissionCoverageInPage: averageOverallSubmissionCoverage(items),
     averageAiSuccessRateInPage: averageAiSuccessRate(items),
@@ -131,7 +133,7 @@ type CourseOverviewViewModel =
       hasPrev: boolean;
       hasNext: boolean;
     }
-  | { mode: "error"; status: number; description: string };
+  | { mode: "error"; status?: number; description: string };
 
 export default async function CourseOverviewPage({ params, searchParams }: CourseOverviewPageProps) {
   const { courseId } = await params;
@@ -160,31 +162,38 @@ export default async function CourseOverviewPage({ params, searchParams }: Cours
       }
     );
     const data = toCourseOverviewResponse(payload);
-    const totalClassrooms = typeof data.total === "number" ? data.total : data.items.length;
-    const responseLimit =
-      typeof data.limit === "number" && Number.isFinite(data.limit) && data.limit > 0
-        ? Math.floor(data.limit)
-        : query.limit;
-    const responsePage =
-      typeof data.page === "number" && Number.isFinite(data.page) && data.page > 0
-        ? Math.floor(data.page)
-        : query.page;
-    const totalPages = Math.max(1, Math.ceil(totalClassrooms / responseLimit));
-    const currentPage = Math.min(responsePage, totalPages);
-    const showPagination = totalClassrooms > responseLimit;
-    const hasPrev = showPagination && currentPage > 1;
-    const hasNext = showPagination && currentPage < totalPages;
-    viewModel = {
-      mode: "ready",
-      data,
-      query,
-      currentPage,
-      totalClassrooms,
-      totalPages,
-      showPagination,
-      hasPrev,
-      hasNext,
-    };
+    if (isValidPaginationTotal(data.total)) {
+      const totalClassrooms = data.total;
+      const responseLimit =
+        typeof data.limit === "number" && Number.isFinite(data.limit) && data.limit > 0
+          ? Math.floor(data.limit)
+          : query.limit;
+      const responsePage =
+        typeof data.page === "number" && Number.isFinite(data.page) && data.page > 0
+          ? Math.floor(data.page)
+          : query.page;
+      const totalPages = Math.max(1, Math.ceil(totalClassrooms / responseLimit));
+      const currentPage = Math.min(responsePage, totalPages);
+      const showPagination = totalClassrooms > responseLimit;
+      const hasPrev = showPagination && currentPage > 1;
+      const hasNext = showPagination && currentPage < totalPages;
+      viewModel = {
+        mode: "ready",
+        data,
+        query,
+        currentPage,
+        totalClassrooms,
+        totalPages,
+        showPagination,
+        hasPrev,
+        hasNext,
+      };
+    } else {
+      viewModel = {
+        mode: "error",
+        description: "课程总览数据不完整，请刷新后重试。",
+      };
+    }
   } catch (error) {
     if (error instanceof FetchJsonError) {
       const detail = extractRawDetail(error);
@@ -211,7 +220,7 @@ export default async function CourseOverviewPage({ params, searchParams }: Cours
   }
 
   const course = viewModel.data.course;
-  const summary = buildOverviewSummary(viewModel.data);
+  const summary = buildOverviewSummary(viewModel.data, viewModel.totalClassrooms);
   const buildHref = (next: Partial<CourseOverviewQueryState>): string => {
     const merged = { ...viewModel.query, ...next };
     return `${paths.teacher.courseOverview(courseId)}?${buildQueryString({

@@ -380,6 +380,7 @@ test("course overview preserves top-level metrics, exact zero, nullable AI and r
   const before = structuredClone(payload);
   const result = toCourseOverviewResponse(payload);
 
+  expect(isValidPaginationTotal(result.total)).toBe(true);
   expect(result.course).toMatchObject({
     id: "overview-course",
     code: "CS-103",
@@ -439,6 +440,77 @@ test("course overview preserves top-level metrics, exact zero, nullable AI and r
   expect(result.items[1].raw).toBe(emptyItem);
   expect(payload.data).toBe(ignored);
   expect(payload).toStrictEqual(before);
+});
+
+test("course overview count guard accepts zero and positive totals on empty pages", () => {
+  for (const total of [0, 7]) {
+    const payload = Object.freeze({
+      items: Object.freeze([]),
+      total,
+      page: 2,
+      limit: 100,
+      data: Object.freeze({ total: 999 }),
+      pagination: Object.freeze({ total: 777 }),
+    });
+    const before = structuredClone(payload);
+    const result = toCourseOverviewResponse(payload);
+
+    expect(result.items).toEqual([]);
+    expect(result.total).toBe(total);
+    expect(isValidPaginationTotal(result.total)).toBe(true);
+    expect(result.page).toBe(2);
+    expect(result.limit).toBe(100);
+    expect(result.raw).toBe(payload);
+    expect(payload).toStrictEqual(before);
+  }
+});
+
+test("course overview keeps formal rows and total projections while the page count guard rejects invalid counts", () => {
+  const course = Object.freeze({ id: "overview-count-course", name: "计数课程" });
+  const row = Object.freeze({
+    classroomId: "overview-count-classroom",
+    name: "计数班级",
+    studentsCount: 1,
+    ai: Object.freeze({ aiSuccessRate: null }),
+  });
+  for (const { fields, expectedTotal } of [
+    { fields: {}, expectedTotal: undefined },
+    { fields: { total: null }, expectedTotal: undefined },
+    { fields: { total: "7" }, expectedTotal: undefined },
+    { fields: { total: Number.POSITIVE_INFINITY }, expectedTotal: undefined },
+    { fields: { total: -1 }, expectedTotal: -1 },
+    { fields: { total: 1.5 }, expectedTotal: 1.5 },
+    {
+      fields: { total: Number.MAX_SAFE_INTEGER + 1 },
+      expectedTotal: 9007199254740992,
+    },
+  ] as const) {
+    const payload = Object.freeze({
+      course,
+      items: Object.freeze([row]),
+      ...fields,
+      page: 2,
+      limit: 100,
+      data: Object.freeze({ total: 999 }),
+      pagination: Object.freeze({ total: 777 }),
+    });
+    const before = structuredClone(payload);
+    const result = toCourseOverviewResponse(payload);
+
+    expect(result.course?.id).toBe("overview-count-course");
+    expect(result.items.map((item) => item.classroomId)).toEqual([
+      "overview-count-classroom",
+    ]);
+    expect(result.items[0].name).toBe("计数班级");
+    expect(result.total).toBe(expectedTotal);
+    expect(isValidPaginationTotal(result.total)).toBe(false);
+    expect(result.page).toBe(2);
+    expect(result.limit).toBe(100);
+    expect(result.raw).toBe(payload);
+    expect(result.course?.raw).toBe(course);
+    expect(result.items[0].raw).toBe(row);
+    expect(payload).toStrictEqual(before);
+  }
 });
 
 test("course overview formats ratios once with the existing one-decimal precision and placeholders", () => {
@@ -960,6 +1032,7 @@ test("course overview safely ignores a data-only response instead of rescuing it
     items: [],
     raw: payload,
   });
+  expect(isValidPaginationTotal(result.total)).toBe(false);
   expect(result.raw).toBe(payload);
   expect(payload).toStrictEqual(before);
 });
