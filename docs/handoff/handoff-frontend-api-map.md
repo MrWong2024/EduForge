@@ -124,6 +124,7 @@
 - 课堂任务工作区名称：现有 Server `tasks/:classroomTaskId/layout.tsx` 经当前 request origin、Cookie/BFF 与 `no-store` 并行读取 `GET classrooms/:classroomId` 和 `GET classrooms/:classroomId/tasks/:classroomTaskId`，分别由 `toClassroomDetailResponse`、`toClassroomTask` 提取展示名称；任务标题沿用课堂实例正式投影，不另查当前模板。两项辅助读取各自有限超时、独立降级为明确占位，不替换 children 或子页主体错误处理。
 - 课堂任务提交列表：`submissions/page.tsx` -> `/api/proxy/classrooms/:cid/tasks/:ctid/submissions`。
   - 对应后端：`GET /api/classrooms/:classroomId/tasks/:classroomTaskId/submissions`。
+  - 仅消费正式根列表、分页与行字段，备用包装及字段别名不再补值；行 `id`、`student.id`、`student.name` 分别是内部 `submissionId`、`studentId`、`studentName` 的正式来源。公开字段合同见 [Backend DTO：Submission request / response family](./handoff-backend-dto-cheatsheet.md#submission-request--response-family)。
   - 注意：只按 `classroomTaskId` 读取，不用 `taskId` 兜底过滤。
 - 提交详情和反馈：Teacher/Student submission pages + feedback forms -> `/api/proxy/learning-tasks/submissions/:id*`。
   - 对应后端：submission detail、feedback list、teacher feedback create/update。
