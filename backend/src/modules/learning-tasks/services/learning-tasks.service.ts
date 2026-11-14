@@ -64,7 +64,7 @@ import {
   AiReviewSummary,
 } from '../ai-feedback/lib/ai-review-summary';
 import { AiFeedbackJobService } from '../ai-feedback/services/ai-feedback-job.service';
-import { AiFeedbackJobStatus } from '../ai-feedback/schemas/ai-feedback-job.schema';
+import { toAiFeedbackStatus } from '../ai-feedback/lib/ai-feedback-status';
 import { AiFeedbackStatus } from '../ai-feedback/interfaces/ai-feedback-status.enum';
 import {
   cleanFeedbackTag,
@@ -400,6 +400,7 @@ export class LearningTasksService {
     );
     const ensured =
       await this.aiFeedbackJobService.ensureJobForSubmission(pinned);
+    const aiFeedbackStatus = toAiFeedbackStatus(ensured.status);
 
     if (dto.reason) {
       this.logger.debug(
@@ -410,8 +411,8 @@ export class LearningTasksService {
     return {
       submissionId: submission._id.toString(),
       jobId: ensured.jobId,
-      status: ensured.status,
-      aiFeedbackStatus: this.toAiFeedbackStatus(ensured.status),
+      status: aiFeedbackStatus,
+      aiFeedbackStatus,
     };
   }
 
@@ -824,7 +825,7 @@ export class LearningTasksService {
       submission,
       classroomTask,
       student ?? null,
-      job ? this.toAiFeedbackStatus(job.status) : AiFeedbackStatus.NotRequested,
+      job ? toAiFeedbackStatus(job.status) : AiFeedbackStatus.NotRequested,
       review,
       editing,
     );
@@ -1700,17 +1701,6 @@ export class LearningTasksService {
       dto.tags !== undefined ||
       dto.scoreHint !== undefined
     );
-  }
-
-  private toAiFeedbackStatus(status: AiFeedbackJobStatus) {
-    const mapped = {
-      [AiFeedbackJobStatus.Pending]: AiFeedbackStatus.Pending,
-      [AiFeedbackJobStatus.Running]: AiFeedbackStatus.Running,
-      [AiFeedbackJobStatus.Succeeded]: AiFeedbackStatus.Succeeded,
-      [AiFeedbackJobStatus.Failed]: AiFeedbackStatus.Failed,
-      [AiFeedbackJobStatus.Dead]: AiFeedbackStatus.Dead,
-    }[status];
-    return mapped ?? AiFeedbackStatus.NotRequested;
   }
 
   private toFeedbackResponse(feedback: FeedbackWithMeta) {

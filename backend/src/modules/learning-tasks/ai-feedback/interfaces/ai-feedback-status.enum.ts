@@ -5,4 +5,5 @@ export enum AiFeedbackStatus {
   Succeeded = 'SUCCEEDED',
   Failed = 'FAILED',
   Dead = 'DEAD',
+  Unknown = 'UNKNOWN',
 }

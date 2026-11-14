@@ -70,7 +70,7 @@ type SubmissionStats = {
 };
 
 type AiFeedbackStats = {
-  _id: { classroomTaskId: Types.ObjectId; status: AiFeedbackJobStatus };
+  _id: { classroomTaskId: Types.ObjectId; status: unknown };
   count: number;
 };
 
@@ -325,6 +325,7 @@ export class TeacherClassroomDashboardService {
         succeeded: number;
         failed: number;
         dead: number;
+        unknown: number;
       }
     >();
     for (const stat of aiFeedbackStats) {
@@ -335,6 +336,7 @@ export class TeacherClassroomDashboardService {
         succeeded: 0,
         failed: 0,
         dead: 0,
+        unknown: 0,
       };
       if (stat._id.status === AiFeedbackJobStatus.Pending) {
         current.pending += stat.count;
@@ -346,6 +348,8 @@ export class TeacherClassroomDashboardService {
         current.failed += stat.count;
       } else if (stat._id.status === AiFeedbackJobStatus.Dead) {
         current.dead += stat.count;
+      } else {
+        current.unknown += stat.count;
       }
       aiFeedbackMap.set(classroomTaskId, current);
     }
@@ -397,15 +401,16 @@ export class TeacherClassroomDashboardService {
           succeeded: 0,
           failed: 0,
           dead: 0,
+          unknown: 0,
         };
         const totalRequested =
           aiFeedbackCounts.pending +
           aiFeedbackCounts.running +
           aiFeedbackCounts.succeeded +
           aiFeedbackCounts.failed +
-          aiFeedbackCounts.dead;
-        const rawNotRequested = submissionsCount - totalRequested;
-        const notRequested = rawNotRequested > 0 ? rawNotRequested : 0;
+          aiFeedbackCounts.dead +
+          aiFeedbackCounts.unknown;
+        const notRequested = Math.max(submissionsCount - totalRequested, 0);
         return {
           classroomTaskId: task._id.toString(),
           classroomTaskStatus: task.classroomTaskStatus,

@@ -16,6 +16,7 @@ import { User } from '../../users/schemas/user.schema';
 import { AiFeedbackStatus } from '../ai-feedback/interfaces/ai-feedback-status.enum';
 import { AiFeedbackJobStatus } from '../ai-feedback/schemas/ai-feedback-job.schema';
 import { AiFeedbackJobService } from '../ai-feedback/services/ai-feedback-job.service';
+import type { AiReviewJob } from '../ai-feedback/lib/ai-review-summary';
 import { CreateSubmissionDto } from '../dto/create-submission.dto';
 import { UpdateFeedbackDto } from '../dto/update-feedback.dto';
 import {
@@ -62,6 +63,14 @@ const submissionDto: CreateSubmissionDto = {
     language: 'javascript',
   },
 };
+
+const formalAiFeedbackStatuses = [
+  [AiFeedbackJobStatus.Pending, AiFeedbackStatus.Pending],
+  [AiFeedbackJobStatus.Running, AiFeedbackStatus.Running],
+  [AiFeedbackJobStatus.Succeeded, AiFeedbackStatus.Succeeded],
+  [AiFeedbackJobStatus.Failed, AiFeedbackStatus.Failed],
+  [AiFeedbackJobStatus.Dead, AiFeedbackStatus.Dead],
+] as const;
 
 const createHarness = (
   options: {
@@ -115,7 +124,9 @@ const createHarness = (
     'Enrollment',
     new Schema<Enrollment>(),
   );
-  jest.spyOn(enrollmentModel, 'exists').mockResolvedValue({ _id: objectId() });
+  const enrollmentExists = jest
+    .spyOn(enrollmentModel, 'exists')
+    .mockResolvedValue({ _id: objectId() });
   const configService = { get: jest.fn() };
   const taskModel = { findById: jest.fn(() => makeQuery(task)) };
   const submissionModel = {
@@ -167,10 +178,12 @@ const createHarness = (
 
   return {
     service,
+    configService,
     taskModel,
     submissionModel,
     aiFeedbackJobService,
     enrollmentModel,
+    enrollmentExists,
     classroomTaskModel,
     classroomModel,
     feedbackModel,
@@ -1489,6 +1502,44 @@ describe('LearningTasksService teacher feedback update authorship', () => {
 describe('AI review detail eligibility (no database)', () => {
   afterEach(() => jest.restoreAllMocks());
 
+  it.each(formalAiFeedbackStatuses)(
+    'projects the formal %s Job status through the real detail reader without writes',
+    async (status, expected) => {
+      const h = createHarness();
+      const job: AiReviewJob = {
+        status,
+        budgetVersion: 1,
+        provider: 'stub',
+        attempts: 0,
+        maxAttempts: 3,
+        requests: [],
+      };
+      const before = structuredClone(job);
+      h.aiFeedbackJobService.getReviewJob.mockResolvedValue(job);
+
+      const detail = await h.service.getSubmissionDetail(
+        h.ids.submissionId.toString(),
+        { id: h.ids.studentId.toString(), roles: ['student'] },
+      );
+
+      expect(detail).toMatchObject({
+        aiFeedbackStatus: expected,
+        editing: { canEdit: false, reason: 'REVIEW_STARTED' },
+        aiReview: { canRequest: false },
+      });
+      expect(h.aiFeedbackJobService.getReviewJob).toHaveBeenCalledWith(
+        h.ids.submissionId,
+      );
+      expect(
+        h.aiFeedbackJobService.ensureJobForSubmission,
+      ).not.toHaveBeenCalled();
+      expect(h.submissionModel.findOneAndUpdate).not.toHaveBeenCalled();
+      expect(h.submissionModel.create).not.toHaveBeenCalled();
+      expect(h.feedbackModel.create).not.toHaveBeenCalled();
+      expect(job).toStrictEqual(before);
+    },
+  );
+
   it.each([
     ['missing', undefined],
     ['null', null],
@@ -1538,6 +1589,10 @@ describe('AI review detail eligibility (no database)', () => {
       h.ids.submissionId.toString(),
       { id: h.ids.studentId.toString(), roles: ['student'] },
     );
+    expect(detail).toMatchObject({
+      aiFeedbackStatus: AiFeedbackStatus.NotRequested,
+      editing: { canEdit: true, reason: null },
+    });
     expect(detail.aiReview).toMatchObject({
       canRequest: true,
       requestBlockReason: null,
@@ -1545,6 +1600,152 @@ describe('AI review detail eligibility (no database)', () => {
       inputCoverage: 'NOT_SENT',
       usage: { reservedRequests: 0, totalTokens: 0 },
     });
+    expect(h.aiFeedbackJobService.getReviewJob).toHaveBeenCalledWith(
+      h.ids.submissionId,
+    );
+    expect(
+      h.aiFeedbackJobService.ensureJobForSubmission,
+    ).not.toHaveBeenCalled();
+    expect(h.submissionModel.findOneAndUpdate).not.toHaveBeenCalled();
+    expect(h.submissionModel.create).not.toHaveBeenCalled();
+    expect(h.feedbackModel.create).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ...formalAiFeedbackStatuses,
+    [undefined, AiFeedbackStatus.Unknown],
+    [['PENDING'], AiFeedbackStatus.Unknown],
+    ['NOT_REQUESTED', AiFeedbackStatus.Unknown],
+  ] as const)(
+    'returns one public projection for both request fields from ensured status %s after validation and review acceptance',
+    async (status, expected) => {
+      const h = createHarness();
+      const jobId = objectId().toString();
+      const ensured = { jobId, status };
+      const before = structuredClone(ensured);
+      h.aiFeedbackJobService.ensureJobForSubmission.mockResolvedValue(ensured);
+
+      const result = await h.service.requestAiFeedback(
+        h.ids.submissionId.toString(),
+        { id: h.ids.studentId.toString(), roles: ['student'] },
+        { expectedRevision: 0 },
+      );
+
+      expect(result).toEqual({
+        submissionId: h.ids.submissionId.toString(),
+        jobId,
+        status: expected,
+        aiFeedbackStatus: expected,
+      });
+      expect(h.enrollmentExists).toHaveBeenCalledTimes(1);
+      expect(h.submissionModel.findOneAndUpdate).toHaveBeenCalledTimes(1);
+      expect(
+        h.aiFeedbackJobService.ensureJobForSubmission,
+      ).toHaveBeenCalledTimes(1);
+      const reviewStartedAtMatcher: unknown = expect.any(Date);
+      expect(
+        h.aiFeedbackJobService.ensureJobForSubmission,
+      ).toHaveBeenCalledWith(
+        expect.objectContaining({
+          _id: h.ids.submissionId,
+          contentRevision: 0,
+          reviewStartedAt: reviewStartedAtMatcher,
+        }),
+      );
+      expect(h.enrollmentExists.mock.invocationCallOrder[0]).toBeLessThan(
+        h.submissionModel.findOneAndUpdate.mock.invocationCallOrder[0],
+      );
+      expect(
+        h.submissionModel.findOneAndUpdate.mock.invocationCallOrder[0],
+      ).toBeLessThan(
+        h.aiFeedbackJobService.ensureJobForSubmission.mock
+          .invocationCallOrder[0],
+      );
+      expect(ensured).toStrictEqual(before);
+    },
+  );
+
+  it('keeps an unknown existing Job read-only and non-retryable while preserving failure and reported usage', async () => {
+    const h = createHarness();
+    h.configService.get.mockImplementation((key: string) =>
+      key === 'AI_FEEDBACK_WORKER_ENABLED' ? true : undefined,
+    );
+    const job: AiReviewJob = {
+      status: ['PENDING'],
+      budgetVersion: 1,
+      provider: 'bailian',
+      failureCode: 'RATE_LIMITED',
+      attempts: 1,
+      maxAttempts: 3,
+      notBefore: new Date('2099-01-01T00:00:00.000Z'),
+      requests: [
+        {
+          claimNo: 1,
+          provider: 'bailian',
+          model: 'synthetic-model',
+          inputBytes: 12,
+          maxOutputTokens: 32,
+          reservedAt: new Date('2026-01-01T01:00:00.000Z'),
+          usage: {
+            promptTokens: 10,
+            completionTokens: 6,
+            totalTokens: 16,
+            inputTextTokens: 10,
+            cachedInputTokens: 2,
+            outputTextTokens: 6,
+            reasoningTokens: 2,
+          },
+        },
+      ],
+    };
+    const before = structuredClone(job);
+    h.aiFeedbackJobService.getReviewJob.mockResolvedValue(job);
+
+    const detail = await h.service.getSubmissionDetail(
+      h.ids.submissionId.toString(),
+      { id: h.ids.studentId.toString(), roles: ['student'] },
+    );
+
+    expect(detail).toMatchObject({
+      aiFeedbackStatus: AiFeedbackStatus.Unknown,
+      editing: { canEdit: false, reason: 'REVIEW_STARTED' },
+    });
+    expect(detail.aiReview).toEqual({
+      provider: 'bailian',
+      canRequest: false,
+      requestBlockReason: '该提交已有 AI 评阅任务，不能重复创建。',
+      failure: {
+        code: 'RATE_LIMITED',
+        message: 'AI 服务请求过于频繁，请稍后查看处理状态。',
+      },
+      retryScheduled: false,
+      nextRetryAt: null,
+      inputCoverage: 'UNKNOWN',
+      usage: {
+        reservedRequests: 1,
+        reportedRequests: 1,
+        unreportedRequests: 0,
+        promptTokens: 10,
+        inputTextTokens: 10,
+        cachedInputTokens: 2,
+        uncachedInputTokens: 8,
+        completionTokens: 6,
+        outputTextTokens: 6,
+        reasoningTokens: 2,
+        answerTokens: 4,
+        totalTokens: 16,
+      },
+    });
+    expect(h.configService.get).toHaveBeenCalledWith(
+      'AI_FEEDBACK_WORKER_ENABLED',
+    );
+    expect(
+      h.aiFeedbackJobService.ensureJobForSubmission,
+    ).not.toHaveBeenCalled();
+    expect(h.submissionModel.findOneAndUpdate).not.toHaveBeenCalled();
+    expect(h.submissionModel.create).not.toHaveBeenCalled();
+    expect(h.feedbackModel.create).not.toHaveBeenCalled();
+    expect(job).toStrictEqual(before);
   });
   it('propagates internal eligibility errors instead of presenting an ordinary block', async () => {
     const h = createHarness();

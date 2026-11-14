@@ -18,7 +18,7 @@ export const AI_REVIEW_FAILURE_MESSAGES = {
 } as const;
 export type AiReviewFailureCode = keyof typeof AI_REVIEW_FAILURE_MESSAGES;
 export type AiReviewJob = {
-  status: AiFeedbackJobStatus;
+  status?: unknown;
   budgetVersion?: number;
   provider?: 'bailian' | 'stub';
   failureCode?: AiReviewFailureCode;

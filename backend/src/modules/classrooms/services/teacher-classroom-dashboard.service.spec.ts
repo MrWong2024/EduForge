@@ -450,6 +450,7 @@ const createHarness = (data: HarnessData = {}) => {
     classroomTaskModel,
     submissionModel,
     feedbackModel,
+    aiFeedbackJobModel,
     userModel,
     ids: { classroomId, teacherId },
   };
@@ -583,7 +584,7 @@ describe('TeacherClassroomDashboardService', () => {
       taskPublisher: { name: 'Template Owner' },
       taskTemplateStatus: TaskStatus.Published,
       submissionsCount: 1,
-      aiFeedback: { succeeded: 1, failed: 0, notRequested: 0 },
+      aiFeedback: { succeeded: 1, failed: 0, unknown: 0, notRequested: 0 },
       topTags: [{ tag: 'correctness', count: 1 }],
     });
     expect(dashboard.summary).toMatchObject({
@@ -769,7 +770,7 @@ describe('TeacherClassroomDashboardService', () => {
       taskPublisher: { name: 'Template Owner' },
       taskTemplateStatus: TaskStatus.Draft,
       submissionsCount: 1,
-      aiFeedback: { failed: 1, notRequested: 0 },
+      aiFeedback: { failed: 1, unknown: 0, notRequested: 0 },
     });
   });
 
@@ -851,6 +852,7 @@ describe('TeacherClassroomDashboardService', () => {
         succeeded: 1,
         failed: 0,
         dead: 0,
+        unknown: 0,
         notRequested: 0,
       },
       topTags: [{ tag: 'correctness', count: 1 }],
@@ -919,10 +921,103 @@ describe('TeacherClassroomDashboardService', () => {
         succeeded: 0,
         failed: 0,
         dead: 0,
+        unknown: 0,
         notRequested: 0,
       },
       topTags: [],
     });
+  });
+
+  it('counts exact Job states and unknown aggregate quantities separately from submissions without Jobs', async () => {
+    const classroomId = objectId();
+    const classroomTaskId = objectId();
+    const studentId = objectId();
+    const harness = createHarness({
+      classroomTasks: [
+        {
+          _id: classroomTaskId,
+          taskId: objectId(),
+          classroomId,
+          status: CLASSROOM_TASK_STATUS_ACTIVE,
+          taskSnapshot: {
+            title: 'Task With Mixed Job States',
+            description: 'Saved task description',
+            knowledgeModule: 'module',
+          },
+          publishedAt: new Date('2026-01-01T00:00:00.000Z'),
+        },
+      ],
+      submissions: Array.from({ length: 22 }, () => ({
+        _id: objectId(),
+        classroomTaskId,
+        studentId,
+      })),
+    });
+    const rawStats = Object.freeze([
+      {
+        _id: { classroomTaskId, status: 'PENDING' },
+        count: 2,
+      },
+      {
+        _id: { classroomTaskId, status: 'RUNNING' },
+        count: 1,
+      },
+      {
+        _id: { classroomTaskId, status: 'SUCCEEDED' },
+        count: 3,
+      },
+      {
+        _id: { classroomTaskId, status: 'FAILED' },
+        count: 1,
+      },
+      {
+        _id: { classroomTaskId, status: 'DEAD' },
+        count: 2,
+      },
+      {
+        _id: { classroomTaskId, status: Object.freeze(['PENDING']) },
+        count: 3,
+      },
+      {
+        _id: { classroomTaskId, status: 'constructor' },
+        count: 2,
+      },
+      {
+        _id: { classroomTaskId, status: '__proto__' },
+        count: 1,
+      },
+      {
+        _id: { classroomTaskId, status: 'UNRECOGNIZED' },
+        count: 4,
+      },
+    ]);
+    const before = JSON.stringify(rawStats);
+    harness.aiFeedbackJobModel.aggregate.mockReturnValueOnce(
+      makeAggregate(rawStats),
+    );
+
+    const dashboard = await harness.service.getDashboard(
+      classroomId.toString(),
+      harness.ids.teacherId.toString(),
+    );
+
+    expect(dashboard.tasks).toHaveLength(1);
+    expect(dashboard.tasks[0]).toMatchObject({
+      classroomTaskId: classroomTaskId.toString(),
+      submissionsCount: 22,
+      distinctStudentsSubmitted: 1,
+    });
+    expect(dashboard.tasks[0].aiFeedback).toEqual({
+      pending: 2,
+      running: 1,
+      succeeded: 3,
+      failed: 1,
+      dead: 2,
+      unknown: 10,
+      notRequested: 3,
+    });
+    expect(harness.aiFeedbackJobModel.aggregate).toHaveBeenCalledTimes(1);
+    expect(JSON.stringify(rawStats)).toBe(before);
   });
 
   it('keeps ACTIVE dashboard items for DRAFT and ARCHIVED templates and exposes template status', async () => {

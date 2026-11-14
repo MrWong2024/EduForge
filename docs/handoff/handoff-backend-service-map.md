@@ -142,7 +142,7 @@ Global SoT 只保留理解跨 Service workflow 必需的稳定不变量，不追
 - Consistency / State / Idempotency:
   - 在聚合前按 ClassroomTask 状态白名单选任务，并在组装前防御过滤；summary 与任务统计使用同一最终任务集合。普通看板不以模板当前状态过滤既有实例。
   - 教学标题及知识模块只取结构有效的实例快照，异常时显示“未知任务”“未知知识模块”，保留原统计范围。Task lookup 继续提供当前模板状态、发布者及归档建议；内部快照在公开响应前剔除。
-  - 默认教学统计只纳入当前 ACTIVE Enrollment 学生的提交、迟交、AI 与 tags；移除学生的历史记录保留，但不进入这些统计。tags 仅取 AI 来源并保留 top 5；未请求数为 `max(0, submissionsCount-requestedCount)`，缺失聚合补零。
+  - 默认教学统计只纳入当前 ACTIVE Enrollment 学生的提交、迟交、AI 与 tags；移除学生的历史记录保留，但不进入这些统计。tags 仅取 AI 来源并保留 top 5；requestedCount 包含正式五态及未知状态 Job，未知数量不再计为未申请，未请求数仍为 `max(0, submissionsCount-requestedCount)`。缺失聚合补零，公开桶及计数边界见 [DTO Cheatsheet](./handoff-backend-dto-cheatsheet.md#classrooms)。
   - 归档建议只针对 ACTIVE 班级，要求无当前活跃任务、最近 30 天无学生提交且通过 30 天新班级保护；建议专用的活跃任务判定要求实例 ACTIVE、模板 PUBLISHED，且截止未超 30 天缓冲，或无截止但发布在 90 天内。该判定不受是否包含关闭任务影响。
 - Isolation: 先校验班级 `teacherId`；后续提交/AI/tags 全部限定最终可见 `classroomTaskIds`。
 - Side Effects: 只读聚合；归档建议不执行归档或其他写操作。
@@ -372,7 +372,7 @@ Global SoT 只保留理解跨 Service workflow 必需的稳定不变量，不追
 - Domain / Responsibility: 手工确保 Job、诊断查询与批量状态映射。
 - Upstream: `LearningTasksService` 手工请求，诊断读取入口及看板/提交查询。
 - Downstream / Dependencies: `AiFeedbackJobModel`。
-- Consistency / State / Idempotency: `unique(submissionId)` 防重复；新建 PENDING Job 显式保存 budgetVersion=1、空请求记录、attempts=0 和 maxAttempts=3；预算版本无 Schema 默认值，历史文档不水合为新版。`ensureJobForSubmission` 先查既有 Job，创建遇并发重复键时回查返回；无 Job 由调用方回落 NOT_REQUESTED，未知 Job 状态映射 FAILED 并记录诊断日志。
+- Consistency / State / Idempotency: `unique(submissionId)` 防重复；新建 PENDING Job 显式保存 budgetVersion=1、空请求记录、attempts=0 和 maxAttempts=3；预算版本无 Schema 默认值，历史文档不水合为新版。`ensureJobForSubmission` 先查既有 Job，创建遇并发重复键时回查返回；已有异常状态 Job 同样保留 ID，不重置或重排队。批量读取与 `LearningTasksService` 的详情及手工申请复用模块内纯函数 `lib/ai-feedback-status.ts`：已有 Job 的未知状态投影为 UNKNOWN，仅保留安全诊断；无 Job 仍由调用方依据不存在回落 NOT_REQUESTED，空 ID 集合不查询、无匹配 Job 不制造 Map 项。公开投影与申请响应合同见 [DTO Cheatsheet](./handoff-backend-dto-cheatsheet.md#ai-feedback-diagnostics--request-family)。
 - Isolation: Job 绑定 submissionId 并保留课堂任务关联；资源归属由 LearningTasksService 请求入口先行校验。
 - Side Effects: 写 Job，记录重复或异常日志。
 - Important Performance / Recovery: 显式 ensure 不吞掉非重复键错误。状态映射按 submissionIds 的 `$in` 批量读取，避免逐提交查询。

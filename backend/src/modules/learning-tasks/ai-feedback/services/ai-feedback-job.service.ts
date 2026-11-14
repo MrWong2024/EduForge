@@ -7,6 +7,7 @@ import {
 } from '../schemas/ai-feedback-job.schema';
 import { Submission } from '../../schemas/submission.schema';
 import { AiFeedbackStatus } from '../interfaces/ai-feedback-status.enum';
+import { toAiFeedbackStatus } from '../lib/ai-feedback-status';
 import { AiReviewJob } from '../lib/ai-review-summary';
 import { WithId } from '../../../../common/types/with-id.type';
 import { WithTimestamps } from '../../../../common/types/with-timestamps.type';
@@ -26,10 +27,10 @@ export type AiFeedbackJobListItem = {
 };
 
 type AiFeedbackJobLean = AiFeedbackJob & WithId & WithTimestamps;
-type AiFeedbackJobIdAndStatus = Pick<AiFeedbackJob, 'status'> & WithId;
+type AiFeedbackJobIdAndStatus = WithId & { status?: unknown };
 export type AiFeedbackJobEnsureResult = {
   jobId: string;
-  status: AiFeedbackJobStatus;
+  status: unknown;
 };
 
 @Injectable()
@@ -126,7 +127,7 @@ export class AiFeedbackJobService {
     const jobs = await this.aiFeedbackJobModel
       .find({ submissionId: { $in: ids } })
       .select('submissionId status')
-      .lean()
+      .lean<{ submissionId: Types.ObjectId; status?: unknown }[]>()
       .exec();
 
     for (const job of jobs) {
@@ -139,18 +140,10 @@ export class AiFeedbackJobService {
     return statusMap;
   }
 
-  private mapAiFeedbackStatus(status: AiFeedbackJobStatus) {
-    const mapped = {
-      [AiFeedbackJobStatus.Pending]: AiFeedbackStatus.Pending,
-      [AiFeedbackJobStatus.Running]: AiFeedbackStatus.Running,
-      [AiFeedbackJobStatus.Succeeded]: AiFeedbackStatus.Succeeded,
-      [AiFeedbackJobStatus.Failed]: AiFeedbackStatus.Failed,
-      [AiFeedbackJobStatus.Dead]: AiFeedbackStatus.Dead,
-    }[status];
-
-    if (!mapped) {
-      this.logger.debug(`Unknown aiFeedback job status: ${String(status)}`);
-      return AiFeedbackStatus.NotRequested;
+  private mapAiFeedbackStatus(status: unknown) {
+    const mapped = toAiFeedbackStatus(status);
+    if (mapped === AiFeedbackStatus.Unknown) {
+      this.logger.debug('Unknown aiFeedback job status');
     }
 
     return mapped;

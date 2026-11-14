@@ -95,7 +95,7 @@
 - `classroom`：`{id,name,courseId,status,joinCode}`。
 - `summary`：`{studentsCount,publishedTasksCount,lateSubmissionsTotal,lateStudentsTotal}`。
 - `tasks[]`：`{classroomTaskId,classroomTaskStatus,taskId,taskPublisher,taskTemplateStatus,title,knowledgeModule,publishedAt,dueAt,submissionsCount,distinctStudentsSubmitted,lateSubmissionsCount,lateDistinctStudentsCount,aiFeedback,topTags}`。
-- `taskTemplateStatus` 为 `DRAFT | PUBLISHED | ARCHIVED | null`；`taskPublisher` 为 `{id,name?} | null`，不含完整 User；`dueAt` 可为 null。`aiFeedback` 包含 `pending/running/succeeded/failed/dead/notRequested` 数量；`topTags` 是 `{tag,count}[]`。
+- `taskTemplateStatus` 为 `DRAFT | PUBLISHED | ARCHIVED | null`；`taskPublisher` 为 `{id,name?} | null`，不含完整 User；`dueAt` 可为 null。`aiFeedback` 包含 `pending/running/succeeded/failed/dead/unknown/notRequested` 七个必填 number，无对应统计时为 0。`unknown` 按原聚合范围中非精确五态 Job 的数量累加；内部 requested 包含五态及 unknown，`notRequested=max(submissionsCount-requested,0)`，不公开 requested 或改变统计单位。`topTags` 是 `{tag,count}[]`。
 - `archiveSuggestion`：`{suggested:boolean,reason,message,lastSubmissionAt,latestActiveTaskDueAt,inactiveDays}`；后五项均可为 null。`reason` 非空值为 `NO_ACTIVE_TASKS | NO_RECENT_SUBMISSIONS | NO_ACTIVE_TASKS_AND_NO_RECENT_SUBMISSIONS`；时间为字符串，`inactiveDays` 为 number。判定过程见 [Service Card 05](./handoff-backend-service-map.md#service-card-05)。
 
 学生看板返回 `{items,total,page,limit}`；`items[]` 为 `{classroom,tasks}`，`total` 是最终班级分组数。
@@ -170,7 +170,7 @@ my-task-detail 另稳定返回 `participationStatus={readOnly,canSubmit,canReque
 - `editing.reason`：可编辑时 null；稳定阻断值为 `INVALID_STATE | REVIEW_STARTED | NOT_OWNER | CLASSROOM_TASK_REQUIRED | CLASSROOM_TASK_UNAVAILABLE | TASK_MISMATCH | SNAPSHOT_MISSING | ENROLLMENT_INACTIVE | CLASSROOM_UNAVAILABLE | CLASSROOM_ARCHIVED | CLASSROOM_TASK_CLOSED | DEADLINE_PASSED | UNAVAILABLE`。客户端仅在有效 revision 且明确 canEdit=true 时开入口，资格不等同于 AI 申请资格。
 - `submittedAt/createdAt/isLate/lateBySeconds` 始终保留首次提交事实；`lastEditedAt/lastEditIsLate` 仅由实际内容保存成对更新，按保存时当前 dueAt/allowLate 判定。`updatedAt` 不是内容修改时间；`reviewStartedAt` 表示正式受理评阅，之后不自动清除，不表示 Feedback/Job 已创建。
 - 版本/评阅状态冲突及反馈幂等 payload 不一致返回 409。正式 HTTP 沿用全局错误响应 `{statusCode,timestamp,path,message}`，不透传 Service 异常中的内部 code/reason；客户端按已知 message 并读取权威详情核对原因。拒绝和恢复流程见 Service Owner。
-- `aiFeedbackStatus` 值域 `NOT_REQUESTED | PENDING | RUNNING | SUCCEEDED | FAILED | DEAD`，无 job 显式返回 `NOT_REQUESTED`。首提与后续 attempt 在尚无手工 request 或其它既有评阅事实时均为 NOT_REQUESTED，不因提交自动进入评阅。
+- `aiFeedbackStatus` 值域 `NOT_REQUESTED | PENDING | RUNNING | SUCCEEDED | FAILED | DEAD | UNKNOWN`。无 Job 由调用方按不存在判定为 `NOT_REQUESTED`；已有 Job 仅精确五态保留，其余存储值（含缺失、非字符串及 `NOT_REQUESTED`）投影为 `UNKNOWN`，不 trim、改大小写或强制转字符串。`UNKNOWN` 仅为公开读取投影，不是持久化状态，不推导失败、终止或可重试；已有 Job 的详情仍为 `canRequest=false` 且关闭作品编辑，保留原失败与用量事实，不伪造重试计划。首提与后续 attempt 在尚无手工 request 或其它既有评阅事实时均为 NOT_REQUESTED，不因提交自动进入评阅。
 - 详情新增 `aiReview={provider,canRequest,requestBlockReason,failure,retryScheduled,nextRetryAt,inputCoverage,usage}`：
   - provider 为 `bailian | stub | null`；canRequest 仅表示当前用户符合 A1 申请资格且尚无 Job，允许时 requestBlockReason=null，否则为安全中文原因。该辅助资格不代替有效版本校验，客户端仍须结合 contentRevision，正式 POST 重新检查；授权及幂等合同见 API Owner。
   - failure 为 null 或 `{code,message}`；code 白名单为 `AI_CONTEXT_UNAVAILABLE | AI_CONTEXT_LIMIT_EXCEEDED | INPUT_BUDGET_EXCEEDED | OUTPUT_LIMIT_REACHED | PROVIDER_CONFIGURATION | RATE_LIMITED | UPSTREAM_UNAVAILABLE | INVALID_RESPONSE | TASK_INELIGIBLE | LEGACY_JOB_UNSUPPORTED | INTERNAL_ERROR`。message 为服务端安全中文，不返回 lastError、堆栈、上游原文或连接信息。输入超限文案为“作业已保存，完整内容超过 AI 输入限额，本次未生成 AI 反馈。”；次数耗尽保留最后原因。
@@ -461,6 +461,7 @@ CreateTaskDto / UpdateTaskDto 通过继承 `TaskAiContextDto` 接受嵌套 `aiCo
 来源：[RequestAiFeedbackDto](../../backend/src/modules/learning-tasks/dto/request-ai-feedback.dto.ts)、[QueryAiFeedbackJobsDto](../../backend/src/modules/learning-tasks/dto/query-ai-feedback-jobs.dto.ts)、[ProcessAiFeedbackJobsDto](../../backend/src/modules/learning-tasks/dto/process-ai-feedback-jobs.dto.ts)。
 
 - `RequestAiFeedbackDto`：必填 `expectedRevision`，规则同 Submission PATCH；可选 `reason:string`，最长 200。已有 Job 也必须校验本次 expectedRevision，不自动补最新版。
+  - 成功响应为 `{submissionId,jobId,status,aiFeedbackStatus}`；两个状态字段使用同一次公开状态投影，已有异常 Job 时均为 `UNKNOWN`，ID 与原 HTTP 成功语义保持。状态合同见上文 `aiFeedbackStatus`；先校验、再固定评阅版本、再 ensure，已有 Job 不新增、重置或重排队。POST 原有评阅固定可写 Submission，不等同于零写 GET。
 - `QueryAiFeedbackJobsDto`：可选 `status:PENDING | RUNNING | SUCCEEDED | FAILED | DEAD`；`limit` 转整数，1..100，默认 20。
 - `ProcessAiFeedbackJobsDto`：可选 `batchSize`，整数 1..50，body 不声明数值字符串转换；省略时使用 Processor 的默认批次设置，配置入口见 [Config Matrix](./handoff-backend-config-matrix.md)。
 - 诊断 Job item：`{id,submissionId,status,attempts,maxAttempts,notBefore,lockedAt,lockOwner,lastError?,createdAt,updatedAt}`；新版 attempts 为已持久化认领次数，maxAttempts 固定 3；历史诊断缺省 attempts=0、maxAttempts=3，notBefore/lockedAt/lockOwner/createdAt/updatedAt 可为 null。来源：[AiFeedbackJobService.listJobs](../../backend/src/modules/learning-tasks/ai-feedback/services/ai-feedback-job.service.ts)。
