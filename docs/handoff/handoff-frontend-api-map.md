@@ -156,13 +156,13 @@
 - 学生看板：`student/dashboard/page.tsx` -> `/api/proxy/classrooms/mine/dashboard` -> `GET /api/classrooms/mine/dashboard`。
   - 仅消费正式响应，已退役备用响应包装与字段别名回退；公开字段合同见 [Backend DTO：Teacher / Student Dashboard response family](./handoff-backend-dto-cheatsheet.md#teacher--student-dashboard-response-family)。
   - SSR 在 mapper 后复用 `isValidPaginationTotal`，班级分组总数与分页只用验证后的正式 total，0 合法，不再用当前页分组数补值；缺失或非法时进入本地读取错误，显示“学习看板数据不完整，请刷新后重试。”，不填写虚构 HTTP 状态。
-  - 注意：完成状态消费后端 `completionStatus`，不从 AI 状态或历史提交二次推断。
+  - 注意：完成态及附属枚举、任务可见性按原值精确识别；非法完成主值按既有不可用语义处理，非法附属枚举保留 null 降级，不从 AI 状态或历史提交二次推断。`isHistorical` 仍独立解析；完成态值域见 [Backend DTO：Student completion / participation public state](./handoff-backend-dto-cheatsheet.md#student-completion--participation-public-state)，可见性值域见上述 Dashboard response family。
 - 加入班级：`JoinClassroomForm` -> `/api/proxy/classrooms/join` -> `POST /api/classrooms/join`。
   - 注意：只提交 joinCode，入班权限与重复入班由后端判定。
 - 学生任务详情：`student/classrooms/:cid/tasks/:ctid/page.tsx` -> `/api/proxy/classrooms/:cid/tasks/:ctid/my-task-detail`。
   - 对应后端：`GET /api/classrooms/:classroomId/tasks/:classroomTaskId/my-task-detail`。
-  - 注意：消费 `participationStatus`；模板当前状态不作为前端阻断依据。前端历史展示按 `createdAt` 倒序，排序不改变后端 latest、完成状态及参与资格。
-  - 参与原因白名单与 [Backend DTO：Student completion / participation public state](./handoff-backend-dto-cheatsheet.md#student-completion--participation-public-state) 的当前集合一致，合法原因及后端计算规则由该 Owner 维护；不再接受 `TASK_NOT_PUBLISHED`，旧或未知原因按参与资格不可用处理，不推定允许提交。
+  - 注意：消费 `participationStatus`，完成态沿用上述原值识别与降级；模板当前状态不作为前端阻断依据。前端历史展示按 `createdAt` 倒序，排序不改变后端 latest、完成状态及参与资格。
+  - 参与原因按原值精确匹配 [Backend DTO：Student completion / participation public state](./handoff-backend-dto-cheatsheet.md#student-completion--participation-public-state) 的当前集合，合法原因及后端计算规则由该 Owner 维护；不再接受 `TASK_NOT_PUBLISHED`，非法或缺失原因按参与资格不可用处理，不由快照或允许标志补值，不推定允许提交。
   - 基础信息难度直接读取正式响应的 `viewModel.data.task.difficulty`，复用上述共享显示规则；沿用后端 task 投影，不查询实时模板补值。
 - 学生提交：`SubmissionForm` -> `/api/proxy/classrooms/:cid/tasks/:ctid/submissions`。
   - 对应后端：`POST /api/classrooms/:classroomId/tasks/:classroomTaskId/submissions`。

@@ -188,6 +188,106 @@ test("formal dashboards preserve summaries, submissions, completion, nulls and s
   expect(payload).toStrictEqual(before);
 });
 
+test("formal dashboard completion states retain all exact severities and sources", () => {
+  const completions = Object.freeze([
+    {
+      status: "NOT_SUBMITTED",
+      severity: null,
+      source: null,
+      latestSubmissionId: null,
+      teacherFeedbackCount: 0,
+      aiFeedbackCount: 0,
+      teacherWorstSeverity: null,
+      aiWorstSeverity: null,
+    },
+    {
+      status: "NO_FEEDBACK",
+      severity: null,
+      source: null,
+      latestSubmissionId: "submission-no-feedback",
+      teacherFeedbackCount: 0,
+      aiFeedbackCount: 0,
+      teacherWorstSeverity: null,
+      aiWorstSeverity: null,
+    },
+    {
+      status: "QUALIFIED",
+      severity: "INFO",
+      source: "AI",
+      latestSubmissionId: "submission-qualified",
+      teacherFeedbackCount: 0,
+      aiFeedbackCount: 1,
+      teacherWorstSeverity: null,
+      aiWorstSeverity: "INFO",
+    },
+    {
+      status: "QUALIFIED_WITH_WARNINGS",
+      severity: "WARN",
+      source: "TEACHER",
+      latestSubmissionId: "submission-warnings",
+      teacherFeedbackCount: 1,
+      aiFeedbackCount: 0,
+      teacherWorstSeverity: "WARN",
+      aiWorstSeverity: null,
+    },
+    {
+      status: "UNQUALIFIED",
+      severity: "ERROR",
+      source: "AI",
+      latestSubmissionId: "submission-unqualified",
+      teacherFeedbackCount: 0,
+      aiFeedbackCount: 1,
+      teacherWorstSeverity: null,
+      aiWorstSeverity: "ERROR",
+    },
+  ]);
+  const tasks = Object.freeze(
+    completions.map((completionStatus) => ({
+      completionStatus,
+      myLatestSubmission:
+        completionStatus.latestSubmissionId === null
+          ? null
+          : { submissionId: completionStatus.latestSubmissionId },
+    })),
+  );
+  const row = Object.freeze({ tasks });
+  const payload = Object.freeze({ items: Object.freeze([row]) });
+  const before = structuredClone(payload);
+  const result = toStudentDashboardResponse(payload);
+
+  expect(result.items[0].tasks.map((task) => task.completionStatus)).toStrictEqual(
+    completions,
+  );
+  expect(result.items[0].tasks).toHaveLength(5);
+  expect(result.items[0].tasks[0].myLatestSubmission).toBeNull();
+  for (const [index, task] of result.items[0].tasks.entries()) {
+    expect(task.raw).toBe(tasks[index]);
+  }
+  expect(result.items[0].raw).toBe(row);
+  expect(result.raw).toBe(payload);
+  expect(payload).toStrictEqual(before);
+});
+
+test("formal dashboard visibility states retain their independent historical flags", () => {
+  const tasks = Object.freeze([
+    { studentVisibilityStatus: "CURRENT", isHistorical: false },
+    { studentVisibilityStatus: "RECENTLY_EXPIRED", isHistorical: false },
+    { studentVisibilityStatus: "HISTORICAL", isHistorical: true },
+  ]);
+  const payload = Object.freeze({ items: Object.freeze([{ tasks }]) });
+  const before = structuredClone(payload);
+  const result = toStudentDashboardResponse(payload);
+
+  expect(
+    result.items[0].tasks.map((task) => ({
+      studentVisibilityStatus: task.studentVisibilityStatus,
+      isHistorical: task.isHistorical,
+    })),
+  ).toStrictEqual(tasks);
+  expect(result.raw).toBe(payload);
+  expect(payload).toStrictEqual(before);
+});
+
 test("formal fields win over conflicting wrappers, aliases and task-level AI status", () => {
   const latest = Object.freeze({
     submissionId: " formal-submission ",
@@ -513,7 +613,7 @@ test("completion remains an independent formal projection with the existing pars
             },
             mySubmissionsCount: 10,
             completionStatus: {
-              status: " NO_FEEDBACK ",
+              status: "NO_FEEDBACK",
               severity: null,
               source: null,
               latestSubmissionId: " submission-1 ",
@@ -573,4 +673,126 @@ test("completion remains an independent formal projection with the existing pars
     studentVisibilityStatus: "HISTORICAL",
     isHistorical: true,
   });
+});
+
+test("invalid dashboard completion states cannot be repaired by trimming, counts, submissions or old wrappers", () => {
+  for (const status of [
+    undefined,
+    null,
+    "",
+    " \t\n ",
+    " QUALIFIED ",
+    " NO_FEEDBACK ",
+    "qualified",
+    "No_Feedback",
+    "UNKNOWN",
+    7,
+    true,
+    ["QUALIFIED"],
+    {},
+  ]) {
+    const latest = Object.freeze({
+      submissionId: "submission-existing",
+      aiFeedbackStatus: "SUCCEEDED",
+    });
+    const task = Object.freeze({
+      myLatestSubmission: latest,
+      mySubmissionsCount: 2,
+      completionStatus: Object.freeze({
+        status,
+        severity: "INFO",
+        source: "AI",
+        teacherFeedbackCount: 0,
+        aiFeedbackCount: 3,
+        data: Object.freeze({ status: "QUALIFIED" }),
+      }),
+      data: Object.freeze({ completionStatus: { status: "QUALIFIED" } }),
+    });
+    const row = Object.freeze({ tasks: Object.freeze([task]) });
+    const payload = Object.freeze({ items: Object.freeze([row]) });
+    const before = structuredClone(payload);
+    const result = toStudentDashboardResponse(payload);
+
+    expect(result.items).toHaveLength(1);
+    expect(result.items[0].tasks).toHaveLength(1);
+    expect(result.items[0].tasks[0].completionStatus).toBeUndefined();
+    expect(result.items[0].tasks[0].mySubmissionsCount).toBe(2);
+    expect(result.items[0].tasks[0].myLatestSubmission?.raw).toBe(latest);
+    expect(result.items[0].tasks[0].raw).toBe(task);
+    expect(result.items[0].raw).toBe(row);
+    expect(result.raw).toBe(payload);
+    expect(payload).toStrictEqual(before);
+  }
+});
+
+test("each invalid completion companion becomes null without changing other dashboard fields", () => {
+  const formal = Object.freeze({
+    status: "QUALIFIED_WITH_WARNINGS",
+    severity: "WARN",
+    source: "TEACHER",
+    latestSubmissionId: "submission-1",
+    teacherFeedbackCount: 2,
+    aiFeedbackCount: 1,
+    teacherWorstSeverity: "WARN",
+    aiWorstSeverity: "ERROR",
+  });
+  for (const [field, value] of [
+    ["severity", " WARN "],
+    ["source", " TEACHER "],
+    ["teacherWorstSeverity", " WARN "],
+    ["aiWorstSeverity", " ERROR "],
+  ] as const) {
+    const task = Object.freeze({
+      completionStatus: Object.freeze({ ...formal, [field]: value }),
+    });
+    const payload = Object.freeze({ items: Object.freeze([{ tasks: [task] }]) });
+    const before = structuredClone(payload);
+    const result = toStudentDashboardResponse(payload);
+
+    expect(result.items[0].tasks[0].completionStatus).toStrictEqual({
+      ...formal,
+      [field]: null,
+    });
+    expect(result.items[0].tasks[0].raw).toBe(task);
+    expect(result.raw).toBe(payload);
+    expect(payload).toStrictEqual(before);
+  }
+});
+
+test("invalid dashboard visibility keeps rows and independent historical flags without old-source rescue", () => {
+  for (const [studentVisibilityStatus, isHistorical] of [
+    [undefined, true],
+    [null, false],
+    ["", true],
+    [" \t ", false],
+    [" CURRENT ", true],
+    ["historical", false],
+    ["UNKNOWN", true],
+    [7, false],
+    [true, true],
+    [["CURRENT"], false],
+    [{}, true],
+  ] as const) {
+    const task = Object.freeze({
+      studentVisibilityStatus,
+      isHistorical,
+      data: Object.freeze({ studentVisibilityStatus: "CURRENT" }),
+    });
+    const row = Object.freeze({ tasks: Object.freeze([task]) });
+    const payload = Object.freeze({ items: Object.freeze([row]) });
+    const before = structuredClone(payload);
+    const result = toStudentDashboardResponse(payload);
+
+    expect(result.items).toHaveLength(1);
+    expect(result.items[0].tasks).toHaveLength(1);
+    expect(result.items[0].tasks[0]).toMatchObject({
+      classroomTaskId: undefined,
+      studentVisibilityStatus: undefined,
+      isHistorical,
+    });
+    expect(result.items[0].tasks[0].raw).toBe(task);
+    expect(result.items[0].raw).toBe(row);
+    expect(result.raw).toBe(payload);
+    expect(payload).toStrictEqual(before);
+  }
 });

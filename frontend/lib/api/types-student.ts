@@ -248,7 +248,7 @@ const toStudentDashboardTaskItem = (
   const latestSubmission = toStudentDashboardLatestSubmission(
     safeGet(record, "myLatestSubmission", undefined),
   );
-  const visibilityStatus = asString(record.studentVisibilityStatus);
+  const visibilityStatus = record.studentVisibilityStatus;
 
   return {
     classroomTaskId: asString(record.classroomTaskId),
@@ -269,7 +269,7 @@ const toStudentDashboardTaskItem = (
 };
 
 const isCompletionStatusValue = (
-  value: string | undefined,
+  value: unknown,
 ): value is StudentTaskCompletionStatusValue =>
   value === "NOT_SUBMITTED" ||
   value === "NO_FEEDBACK" ||
@@ -278,22 +278,22 @@ const isCompletionStatusValue = (
   value === "UNQUALIFIED";
 
 const isCompletionSeverity = (
-  value: string | undefined,
+  value: unknown,
 ): value is StudentTaskCompletionSeverity =>
   value === "INFO" || value === "WARN" || value === "ERROR";
 
 const isCompletionSource = (
-  value: string | undefined,
+  value: unknown,
 ): value is StudentTaskCompletionSource =>
   value === "TEACHER" || value === "AI";
 
 const isStudentTaskVisibilityStatus = (
-  value: string | undefined,
+  value: unknown,
 ): value is StudentTaskVisibilityStatus =>
   value === "CURRENT" || value === "RECENTLY_EXPIRED" || value === "HISTORICAL";
 
 const isStudentTaskParticipationReason = (
-  value: string | undefined,
+  value: unknown,
 ): value is StudentTaskParticipationReason =>
   value === "ACTIVE" ||
   value === "CLASSROOM_NOT_ACTIVE" ||
@@ -323,14 +323,14 @@ const toStudentTaskCompletionStatus = (
   value: unknown,
 ): StudentTaskCompletionStatus | undefined => {
   const record = asRecord(value);
-  const status = asString(record.status);
+  const status = record.status;
   if (!isCompletionStatusValue(status)) {
     return undefined;
   }
-  const severity = asString(record.severity);
-  const source = asString(record.source);
-  const teacherWorstSeverity = asString(record.teacherWorstSeverity);
-  const aiWorstSeverity = asString(record.aiWorstSeverity);
+  const severity = record.severity;
+  const source = record.source;
+  const teacherWorstSeverity = record.teacherWorstSeverity;
+  const aiWorstSeverity = record.aiWorstSeverity;
 
   return {
     status,
@@ -352,7 +352,7 @@ const toStudentTaskParticipationStatus = (
   value: unknown,
 ): StudentTaskParticipationStatus | undefined => {
   const record = asRecord(value);
-  const reason = asString(record.reason);
+  const reason = record.reason;
   if (!isStudentTaskParticipationReason(reason)) {
     return undefined;
   }

@@ -4283,6 +4283,208 @@ test("keeps snapshot and allowLate without projecting retired classroom settings
   expect(studentDetail.raw).toBe(studentPayload);
   expect(studentDetail.raw.classroomTask).toBe(legacy);
 });
+test("student task details preserve all formal completion states and exact severity and source values", () => {
+  for (const completionStatus of [
+    {
+      status: "NOT_SUBMITTED",
+      severity: null,
+      source: null,
+      latestSubmissionId: null,
+      teacherFeedbackCount: 0,
+      aiFeedbackCount: 0,
+      teacherWorstSeverity: null,
+      aiWorstSeverity: null,
+    },
+    {
+      status: "NO_FEEDBACK",
+      severity: null,
+      source: null,
+      latestSubmissionId: "submission-1",
+      teacherFeedbackCount: 0,
+      aiFeedbackCount: 0,
+      teacherWorstSeverity: null,
+      aiWorstSeverity: null,
+    },
+    {
+      status: "QUALIFIED",
+      severity: "INFO",
+      source: "TEACHER",
+      latestSubmissionId: "submission-1",
+      teacherFeedbackCount: 1,
+      aiFeedbackCount: 1,
+      teacherWorstSeverity: "INFO",
+      aiWorstSeverity: "INFO",
+    },
+    {
+      status: "QUALIFIED_WITH_WARNINGS",
+      severity: "WARN",
+      source: "AI",
+      latestSubmissionId: "submission-1",
+      teacherFeedbackCount: 0,
+      aiFeedbackCount: 1,
+      teacherWorstSeverity: null,
+      aiWorstSeverity: "WARN",
+    },
+    {
+      status: "UNQUALIFIED",
+      severity: "ERROR",
+      source: "TEACHER",
+      latestSubmissionId: "submission-1",
+      teacherFeedbackCount: 1,
+      aiFeedbackCount: 1,
+      teacherWorstSeverity: "ERROR",
+      aiWorstSeverity: "ERROR",
+    },
+    {
+      status: "QUALIFIED_WITH_WARNINGS",
+      severity: "WARN",
+      source: "TEACHER",
+      latestSubmissionId: "submission-1",
+      teacherFeedbackCount: 1,
+      aiFeedbackCount: 1,
+      teacherWorstSeverity: "WARN",
+      aiWorstSeverity: "WARN",
+    },
+  ]) {
+    const payload = Object.freeze({
+      completionStatus: Object.freeze(completionStatus),
+    });
+    const before = structuredClone(payload);
+    const detail = toMyTaskDetailResponse(payload);
+
+    expect(detail.completionStatus).toEqual(completionStatus);
+    expect(detail.raw).toBe(payload);
+    expect(detail.raw.completionStatus).toBe(completionStatus);
+    expect(payload).toStrictEqual(before);
+  }
+  const payload = Object.freeze({
+    completionStatus: Object.freeze({
+      status: "NO_FEEDBACK",
+      latestSubmissionId: " submission-1 ",
+    }),
+  });
+  const before = structuredClone(payload);
+  const detail = toMyTaskDetailResponse(payload);
+
+  expect(detail.completionStatus).toEqual({
+    status: "NO_FEEDBACK",
+    severity: null,
+    source: null,
+    latestSubmissionId: "submission-1",
+    teacherFeedbackCount: 0,
+    aiFeedbackCount: 0,
+    teacherWorstSeverity: null,
+    aiWorstSeverity: null,
+  });
+  expect(detail.raw).toBe(payload);
+  expect(payload).toStrictEqual(before);
+});
+
+test("student task completion rejects invalid main states without deriving a conclusion from feedback, AI or history", () => {
+  const task = Object.freeze({ id: "task-1", title: "保留任务" });
+  const submission = Object.freeze({
+    id: "submission-1",
+    createdAt: "2026-11-01T08:00:00.000Z",
+  });
+  const submissions = Object.freeze([submission]);
+  const latest = Object.freeze({
+    submissionId: "submission-1",
+    aiFeedbackStatus: "SUCCEEDED",
+  });
+  const legacy = Object.freeze({
+    completionStatus: Object.freeze({ status: "QUALIFIED" }),
+  });
+  for (const fields of [
+    {},
+    { status: " QUALIFIED " },
+    { status: " NO_FEEDBACK " },
+    { status: "qualified" },
+    { status: "Qualified" },
+    { status: "" },
+    { status: " \t\n " },
+    { status: "UNKNOWN" },
+    { status: null },
+    { status: 42 },
+    { status: false },
+    { status: Object.freeze(["QUALIFIED"]) },
+    { status: Object.freeze({ status: "QUALIFIED" }) },
+  ]) {
+    const completionStatus = Object.freeze({
+      ...fields,
+      severity: "INFO",
+      source: "TEACHER",
+      latestSubmissionId: "submission-1",
+      teacherFeedbackCount: 2,
+      aiFeedbackCount: 0,
+      teacherWorstSeverity: "INFO",
+      aiWorstSeverity: null,
+      data: Object.freeze({ status: "QUALIFIED" }),
+      raw: Object.freeze({ status: "NO_FEEDBACK" }),
+    });
+    const payload = Object.freeze({
+      task,
+      submissions,
+      latest,
+      completionStatus,
+      data: legacy,
+      raw: legacy,
+    });
+    const before = structuredClone(payload);
+    const detail = toMyTaskDetailResponse(payload);
+
+    expect(detail.completionStatus).toBeUndefined();
+    expect(detail.task).toBe(task);
+    expect(detail.latest).toBe(latest);
+    expect(detail.submissions).toEqual([submission]);
+    expect(detail.submissions[0]).toBe(submission);
+    expect(detail.raw).toBe(payload);
+    expect(detail.raw.completionStatus).toBe(completionStatus);
+    expect(detail.raw.submissions).toBe(submissions);
+    expect(payload).toStrictEqual(before);
+  }
+});
+
+test("invalid completion attachments null only their own field while keeping a formal main result and other values", () => {
+  const expected = {
+    status: "QUALIFIED_WITH_WARNINGS",
+    severity: "WARN",
+    source: "AI",
+    latestSubmissionId: "submission-1",
+    teacherFeedbackCount: 0,
+    aiFeedbackCount: 1,
+    teacherWorstSeverity: null,
+    aiWorstSeverity: "WARN",
+  };
+  const legacy = Object.freeze({
+    severity: "WARN",
+    source: "AI",
+    teacherWorstSeverity: "ERROR",
+    aiWorstSeverity: "WARN",
+  });
+  for (const [field, value] of [
+    ["severity", " WARN "],
+    ["source", " AI "],
+    ["teacherWorstSeverity", " ERROR "],
+    ["aiWorstSeverity", "\tWARN\n"],
+  ] as const) {
+    const completionStatus = Object.freeze({
+      ...expected,
+      latestSubmissionId: " submission-1 ",
+      [field]: value,
+      data: legacy,
+      raw: legacy,
+    });
+    const payload = Object.freeze({ completionStatus });
+    const before = structuredClone(payload);
+    const detail = toMyTaskDetailResponse(payload);
+
+    expect(detail.completionStatus).toEqual({ ...expected, [field]: null });
+    expect(detail.raw).toBe(payload);
+    expect(detail.raw.completionStatus).toBe(completionStatus);
+    expect(payload).toStrictEqual(before);
+  }
+});
+
 test("requires explicit snapshot and backend submit permission, independent of AI request permission", () => {
   const detail = toMyTaskDetailResponse({
     classroomTask: {
@@ -4421,6 +4623,14 @@ test("rejects the retired participation reason without losing task or history fa
 });
 
 test("keeps unknown and genuinely missing participation reasons unavailable", () => {
+  const legacy = Object.freeze({
+    participationStatus: Object.freeze({
+      reason: "ACTIVE",
+      readOnly: false,
+      canSubmit: true,
+      canRequestAiFeedback: true,
+    }),
+  });
   for (const { participationStatus, hasReason } of [
     {
       participationStatus: Object.freeze({
@@ -4441,16 +4651,45 @@ test("keeps unknown and genuinely missing participation reasons unavailable", ()
       }),
       hasReason: false,
     },
+    ...[
+      " ACTIVE ",
+      "active",
+      "Active",
+      "\tACTIVE\n",
+      " CLASSROOM_NOT_ACTIVE ",
+      "CLASSROOM_TASK_NOT_ACTIVE ",
+      "classroom_task_not_active",
+      "",
+      " \t\n ",
+      null,
+      42,
+      false,
+      Object.freeze(["ACTIVE"]),
+      Object.freeze({ reason: "ACTIVE" }),
+    ].map((reason) => ({
+      participationStatus: Object.freeze({
+        reason,
+        readOnly: false,
+        canSubmit: true,
+        canRequestAiFeedback: true,
+        message: "保留非法原因原文",
+      }),
+      hasReason: true,
+    })),
   ]) {
     const payload = Object.freeze({
       classroomTask: Object.freeze({ taskSnapshotAvailable: true }),
+      task: Object.freeze({ status: "PUBLISHED" }),
       participationStatus,
+      data: legacy,
+      raw: legacy,
     });
     const before = structuredClone(payload);
     const detail = toMyTaskDetailResponse(payload);
 
     expect(detail.participationStatus).toBeUndefined();
     expect(detail.participationStatus?.canRequestAiFeedback).not.toBe(true);
+    expect(detail.classroomTask.taskSnapshotAvailable).toBe(true);
     expect(
       canSubmitTextTask(
         detail.classroomTask.taskSnapshotAvailable,
@@ -4459,6 +4698,9 @@ test("keeps unknown and genuinely missing participation reasons unavailable", ()
     ).toBe(false);
     expect(detail.raw).toBe(payload);
     expect(detail.raw.participationStatus).toBe(participationStatus);
+    expect(detail.raw.data).toBe(legacy);
+    expect(detail.raw.raw).toBe(legacy);
+    expect(detail.task).toBe(payload.task);
     expect(Object.hasOwn(participationStatus, "reason")).toBe(hasReason);
     expect(payload).toEqual(before);
   }
@@ -4485,11 +4727,13 @@ test("keeps missing and false snapshot distinct and closes incomplete participat
       reason: "ACTIVE",
       canSubmit: "true",
       canRequestAiFeedback: 1,
+      message: "  保留参与提示\n ",
     },
   });
   expect(detail.participationStatus?.canSubmit).toBe(false);
   expect(detail.participationStatus?.canRequestAiFeedback).toBe(false);
   expect(detail.participationStatus?.readOnly).toBe(true);
+  expect(detail.participationStatus?.message).toBe("保留参与提示");
 });
 
 test("recognizes only the exact public snapshot error for 403 or 409", () => {
