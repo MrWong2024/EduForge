@@ -357,6 +357,37 @@ export default async function AiLearningAnalyticsStudentPage({
 
   const detail = toAiLearningAnalyticsStudentDetailResponse(payload);
   const { context, student, summary, taskPoints } = detail;
+  const window = context.window;
+  if (window === undefined) {
+    return (
+      <section className="space-y-4">
+        <PageHeader
+          title="学生分析详情"
+          description={`统计窗口：${AI_LEARNING_ANALYTICS_WINDOW_LABELS[queryState.window]}`}
+          actions={
+            <div className="flex flex-wrap items-center gap-3 text-sm">
+              <Link
+                href={backToAnalyticsHref}
+                className="text-blue-700 hover:underline"
+              >
+                返回班级分析
+              </Link>
+              <Link
+                href={paths.teacher.classroomDashboard(classroomId)}
+                className="text-blue-700 hover:underline"
+              >
+                返回班级看板
+              </Link>
+            </div>
+          }
+        />
+        <ErrorState
+          title="学生分析详情加载失败"
+          description="学生分析详情数据不完整，请刷新后重试。"
+        />
+      </section>
+    );
+  }
   const hasComparableTasks = summary.qualityComparableTasksCount > 0;
   const hasComparablePoints = taskPoints.some(
     (task) => task.qualityComparable && task.issueLoadDelta !== null,
@@ -364,7 +395,7 @@ export default async function AiLearningAnalyticsStudentPage({
   const headerDescription = [
     student.studentNo ? `学号：${student.studentNo}` : "学号未设置",
     `班级：${context.classroomName}`,
-    `统计窗口：${AI_LEARNING_ANALYTICS_WINDOW_LABELS[context.window]}`,
+    `统计窗口：${AI_LEARNING_ANALYTICS_WINDOW_LABELS[window]}`,
   ].join(" · ");
   const primaryMetrics = [
     ["已提交任务数", summary.submittedTasksCount],

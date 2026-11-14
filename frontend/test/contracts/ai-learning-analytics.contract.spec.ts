@@ -28,6 +28,175 @@ const evidence = {
   simulatedExcludedSampleCount: 1,
 };
 
+test("all analytics adapters retain exact formal context windows over conflicting old sources", () => {
+  for (const window of ["all", "7d", "30d"]) {
+    const context = Object.freeze({
+      classroomId: "window-classroom",
+      classroomName: "窗口班级",
+      courseId: "window-course",
+      courseName: "窗口课程",
+      courseCode: "CS101",
+      courseTerm: null,
+      generatedAt: "2026-11-14T08:00:00.000Z",
+      window,
+      effectiveTaskCount: 0,
+      excludedTaskIds: Object.freeze(["excluded-task"]),
+    });
+    const data = Object.freeze({ context: Object.freeze({ window: "30d" }) });
+    const raw = Object.freeze({ context: Object.freeze({ window: "all" }) });
+    const input = Object.freeze({
+      context,
+      methodology,
+      window: "7d",
+      data,
+      raw,
+      items: Object.freeze([
+        Object.freeze({
+          studentId: "window-student",
+          studentNo: null,
+          submittedTasksCount: 0,
+        }),
+        Object.freeze({ studentName: "保留缺标识的行" }),
+      ]),
+      taskTrends: Object.freeze([
+        Object.freeze({
+          classroomTaskId: "window-trend",
+          postFeedbackRevisionRate: 0,
+        }),
+      ]),
+      taskPoints: Object.freeze([
+        Object.freeze({
+          classroomTaskId: "window-point",
+          attemptsCount: 0,
+          issueLoadDelta: null,
+        }),
+      ]),
+    });
+    const before = structuredClone(input);
+    for (const adapt of [
+      toAiLearningAnalyticsOverviewResponse,
+      toAiLearningAnalyticsStudentsResponse,
+      toAiLearningAnalyticsStudentDetailResponse,
+    ]) {
+      const response = adapt(input);
+
+      expect(response.context).toEqual(context);
+      expect(response.methodology.version).toBe("AI_FEEDBACK_INTERVENTION_V1_2");
+      if ("items" in response) {
+        expect(response.items.map((student) => student.studentId)).toEqual([
+          "window-student",
+          "",
+        ]);
+        expect(response.items[0]).toMatchObject({
+          studentNo: null,
+          submittedTasksCount: 0,
+        });
+        expect(response.items[1].studentName).toBe("保留缺标识的行");
+      }
+      if ("taskTrends" in response) {
+        expect(response.taskTrends).toMatchObject([
+          { classroomTaskId: "window-trend", postFeedbackRevisionRate: 0 },
+        ]);
+      }
+      if ("taskPoints" in response) {
+        expect(response.taskPoints).toMatchObject([
+          {
+            classroomTaskId: "window-point",
+            attemptsCount: 0,
+            issueLoadDelta: null,
+          },
+        ]);
+      }
+      expect(response.raw).toBe(input);
+      expect(response.raw.context).toBe(context);
+      expect(response.raw.window).toBe("7d");
+      expect(response.raw.data).toBe(data);
+      expect(response.raw.raw).toBe(raw);
+    }
+    expect(input).toStrictEqual(before);
+  }
+});
+
+test("all analytics adapters leave absent and invalid response windows unknown without alias or wrapper rescue", () => {
+  const context = Object.freeze({
+    classroomId: "window-classroom",
+    classroomName: "窗口班级",
+    effectiveTaskCount: 2,
+    excludedTaskIds: Object.freeze(["excluded-task"]),
+  });
+  const emptyContext = {
+    classroomId: "",
+    classroomName: "未命名班级",
+    effectiveTaskCount: 0,
+    excludedTaskIds: [],
+  };
+  for (const { fields, expectedContext } of [
+    { fields: {}, expectedContext: emptyContext },
+    { fields: { context: null }, expectedContext: emptyContext },
+    { fields: { context: "all" }, expectedContext: emptyContext },
+    { fields: { context: Object.freeze([]) }, expectedContext: emptyContext },
+    ...[
+      {},
+      { window: null },
+      { window: "" },
+      { window: " \t\n " },
+      { window: "ALL" },
+      { window: "7D" },
+      { window: " all " },
+      { window: "\t30d\n" },
+      { window: "FUTURE" },
+      { window: 42 },
+      { window: false },
+      { window: Object.freeze(["all"]) },
+      { window: Object.freeze({ window: "all" }) },
+    ].map((windowFields) => ({
+      fields: { context: Object.freeze({ ...context, ...windowFields }) },
+      expectedContext: context,
+    })),
+  ]) {
+    const data = Object.freeze({ context: Object.freeze({ window: "30d" }) });
+    const raw = Object.freeze({ context: Object.freeze({ window: "7d" }) });
+    const input = Object.freeze({
+      ...fields,
+      window: "all",
+      data,
+      raw,
+      items: Object.freeze([
+        { studentId: "window-student", submittedTasksCount: 0 },
+      ]),
+      taskTrends: Object.freeze([{ classroomTaskId: "window-trend" }]),
+      taskPoints: Object.freeze([{ classroomTaskId: "window-point" }]),
+    });
+    const before = structuredClone(input);
+    for (const adapt of [
+      toAiLearningAnalyticsOverviewResponse,
+      toAiLearningAnalyticsStudentsResponse,
+      toAiLearningAnalyticsStudentDetailResponse,
+    ]) {
+      const response = adapt(input);
+
+      expect(response.context).toMatchObject({
+        ...expectedContext,
+        window: undefined,
+      });
+      if ("items" in response) {
+        expect(response.items[0].studentId).toBe("window-student");
+      }
+      if ("taskTrends" in response) {
+        expect(response.taskTrends[0].classroomTaskId).toBe("window-trend");
+      }
+      if ("taskPoints" in response) {
+        expect(response.taskPoints[0].classroomTaskId).toBe("window-point");
+      }
+      expect(response.raw).toBe(input);
+      expect(response.raw.window).toBe("all");
+      expect(response.raw.data).toBe(data);
+      expect(response.raw.raw).toBe(raw);
+    }
+    expect(input).toStrictEqual(before);
+  }
+});
+
 test("formal overall outcomes retain every business conclusion and its existing label", () => {
   const cases = [
     ["INSUFFICIENT_DATA", "可比数据不足"],
@@ -936,7 +1105,7 @@ test("analytics adapters do not unwrap data-only responses or rescue empty and i
       expect(response.context).toMatchObject({
         classroomId: "",
         classroomName: "未命名班级",
-        window: "all",
+        window: undefined,
         effectiveTaskCount: 0,
         excludedTaskIds: [],
       });

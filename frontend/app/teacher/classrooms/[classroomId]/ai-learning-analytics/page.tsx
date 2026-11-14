@@ -40,6 +40,7 @@ import {
   type AiLearningAnalyticsEngagementStatus,
   type AiLearningAnalyticsOverallOutcome,
   type AiLearningAnalyticsStudentsResponse,
+  type AiLearningAnalyticsWindow,
 } from "@/lib/api/types-teacher";
 import {
   AI_LEARNING_ANALYTICS_DISPLAY_WINDOWS,
@@ -124,7 +125,7 @@ const presentError = (
 const buildClassAnalyticsHref = (
   classroomId: string,
   params: {
-    window: AiLearningAnalyticsOverviewResponse["context"]["window"];
+    window: AiLearningAnalyticsWindow;
     excludedTaskIds: string[];
     page: number;
     q?: string;
@@ -231,14 +232,6 @@ export default async function AiLearningAnalyticsPage({
   const queryState = resolveAiLearningAnalyticsQueryState(rawQuery);
   const excludedTaskIdsQueryValue =
     toAiLearningAnalyticsExcludedTaskIdsQueryValue(queryState.excludedTaskIds);
-  const currentQueryEntries = toAiLearningAnalyticsSearchParamEntries({
-    window: queryState.window,
-    page: String(queryState.page),
-    excludedTaskIds: excludedTaskIdsQueryValue,
-    q: queryState.q,
-    overallOutcome: queryState.overallOutcome,
-    engagementStatus: queryState.engagementStatus,
-  });
   const sharedQuery = {
     window: queryState.window,
     excludedTaskIds: excludedTaskIdsQueryValue,
@@ -288,7 +281,35 @@ export default async function AiLearningAnalyticsPage({
     );
   }
 
-  const overview = toAiLearningAnalyticsOverviewResponse(overviewResult.value);
+  const mappedOverview = toAiLearningAnalyticsOverviewResponse(
+    overviewResult.value,
+  );
+  const window = mappedOverview.context.window;
+  if (window === undefined) {
+    return (
+      <section className="space-y-4">
+        <PageHeader
+          title="AI 反馈介入成效分析"
+          description={`当前统计窗口：${AI_LEARNING_ANALYTICS_WINDOW_LABELS[queryState.window]}`}
+          actions={<HeaderActions classroomId={classroomId} />}
+        />
+        <ErrorState
+          title="AI 反馈介入成效分析加载失败"
+          description="AI 反馈介入成效分析数据不完整，请刷新后重试。"
+        />
+      </section>
+    );
+  }
+  const context = { ...mappedOverview.context, window };
+  const overview = { ...mappedOverview, context };
+  const currentQueryEntries = toAiLearningAnalyticsSearchParamEntries({
+    window: context.window,
+    page: String(queryState.page),
+    excludedTaskIds: excludedTaskIdsQueryValue,
+    q: queryState.q,
+    overallOutcome: queryState.overallOutcome,
+    engagementStatus: queryState.engagementStatus,
+  });
   let studentListState: StudentListState;
   if (studentsResult.status === "fulfilled") {
     const data = toAiLearningAnalyticsStudentsResponse(studentsResult.value);
@@ -346,7 +367,6 @@ export default async function AiLearningAnalyticsPage({
       metaText: toTaskOptionMeta(taskOption),
     }),
   );
-  const context = overview.context;
   const courseDescription = [
     context.courseName,
     context.courseCode ? `课程代码：${context.courseCode}` : null,

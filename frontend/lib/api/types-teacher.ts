@@ -664,7 +664,7 @@ export type AiLearningAnalyticsContext = {
   courseCode: string | null;
   courseTerm: string | null;
   generatedAt: string;
-  window: AiLearningAnalyticsWindow;
+  window: AiLearningAnalyticsWindow | undefined;
   effectiveTaskCount: number;
   excludedTaskIds: string[];
 };
@@ -1457,12 +1457,8 @@ const toRequiredNumber = (value: unknown): number => asNumber(value) ?? 0;
 
 const normalizeAiLearningAnalyticsWindow = (
   value: unknown,
-): AiLearningAnalyticsWindow => {
-  const window = asString(value);
-  return window === "7d" || window === "30d" || window === "all"
-    ? window
-    : "all";
-};
+): AiLearningAnalyticsWindow | undefined =>
+  value === "all" || value === "7d" || value === "30d" ? value : undefined;
 
 const normalizeAiLearningAnalyticsMethodologyVersion = (
   value: unknown,
