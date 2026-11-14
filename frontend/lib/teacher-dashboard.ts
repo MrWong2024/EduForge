@@ -102,6 +102,8 @@ export const getTeacherDashboardTaskDisplay = (
       toCount(safeGet<unknown>(item, "aiFeedback.running", undefined)) ?? 0,
     dead:
       toCount(safeGet<unknown>(item, "aiFeedback.dead", undefined)) ?? 0,
+    unknown:
+      toCount(safeGet<unknown>(item, "aiFeedback.unknown", undefined)) ?? 0,
     notRequested:
       toCount(safeGet<unknown>(item, "aiFeedback.notRequested", undefined)) ??
       0,

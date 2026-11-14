@@ -52,6 +52,102 @@ const unknownUsageDetails = {
   uncachedInputTokens: null,
   unreportedRequests: null,
 };
+
+test("detail and request mappers retain every formal AI status and their original payloads", () => {
+  for (const status of [
+    "NOT_REQUESTED",
+    "PENDING",
+    "RUNNING",
+    "SUCCEEDED",
+    "FAILED",
+    "DEAD",
+    "UNKNOWN",
+  ]) {
+    const source = Object.freeze({
+      id: "s",
+      aiFeedbackStatus: status,
+      data: Object.freeze({ aiFeedbackStatus: "DEAD" }),
+      raw: Object.freeze({ aiFeedbackStatus: "PENDING" }),
+    });
+    const before = structuredClone(source);
+    const detail = toSubmissionDetailResponse(source);
+
+    expect(detail.id).toBe("s");
+    expect(detail.aiFeedbackStatus).toBe(status);
+    expect(normalizeAiStatus(detail.aiFeedbackStatus)).toBe(status);
+    expect(detail.raw).toBe(source);
+    expect(source).toStrictEqual(before);
+  }
+  for (const status of [
+    "PENDING",
+    "RUNNING",
+    "SUCCEEDED",
+    "FAILED",
+    "DEAD",
+    "UNKNOWN",
+  ]) {
+    const source = Object.freeze({
+      submissionId: "s",
+      jobId: "j",
+      status,
+      aiFeedbackStatus: status,
+      data: Object.freeze({ status: "DEAD", aiFeedbackStatus: "DEAD" }),
+      raw: Object.freeze({ status: "PENDING", aiFeedbackStatus: "PENDING" }),
+    });
+    const before = structuredClone(source);
+    const result = toRequestAiFeedbackResponse(source);
+
+    expect(result.submissionId).toBe("s");
+    expect(result.jobId).toBe("j");
+    expect(result.status).toBe(status);
+    expect(result.aiFeedbackStatus).toBe(status);
+    expect(normalizeAiStatus(result.status)).toBe(status);
+    expect(normalizeAiStatus(result.aiFeedbackStatus)).toBe(status);
+    expect(result.raw).toBe(source);
+    expect(source).toStrictEqual(before);
+  }
+});
+
+test("the three AI confirmation fields keep raw strings and reject nonstrings without old-source rescue", () => {
+  for (const [value, expected] of [
+    ["", ""],
+    [" \t\n ", " \t\n "],
+    ["unknown", "unknown"],
+    [" UNKNOWN ", " UNKNOWN "],
+    ["\tPENDING\n", "\tPENDING\n"],
+    ["PeNdInG", "PeNdInG"],
+    ["FUTURE", "FUTURE"],
+    [undefined, undefined],
+    [null, undefined],
+    [42, undefined],
+    [false, undefined],
+    [Object.freeze(["UNKNOWN"]), undefined],
+    [Object.freeze({ status: "UNKNOWN" }), undefined],
+  ] as const) {
+    const source = Object.freeze({
+      id: "s",
+      submissionId: "s",
+      jobId: "j",
+      ...(value === undefined ? {} : { status: value, aiFeedbackStatus: value }),
+      data: Object.freeze({ status: "UNKNOWN", aiFeedbackStatus: "UNKNOWN" }),
+      raw: Object.freeze({ status: "PENDING", aiFeedbackStatus: "PENDING" }),
+    });
+    const before = structuredClone(source);
+    const detail = toSubmissionDetailResponse(source);
+    const result = toRequestAiFeedbackResponse(source);
+
+    expect(detail.aiFeedbackStatus).toBe(expected);
+    expect(result.status).toBe(expected);
+    expect(result.aiFeedbackStatus).toBe(expected);
+    expect(normalizeAiStatus(detail.aiFeedbackStatus)).toBeUndefined();
+    expect(normalizeAiStatus(result.status)).toBeUndefined();
+    expect(normalizeAiStatus(result.aiFeedbackStatus)).toBeUndefined();
+    expect(detail.raw).toBe(source);
+    expect(result.raw).toBe(source);
+    expect(source).toStrictEqual(before);
+  }
+});
+
 test("adapts all public AI fields and retains reported usage", () => {
   expect(
     toSubmissionDetailResponse({
@@ -234,6 +330,7 @@ test("polls only active processing or a scheduled FAILED retry", () => {
     "NOT_REQUESTED",
     "SUCCEEDED",
     "DEAD",
+    "UNKNOWN",
     "FUTURE",
     undefined,
   ])
@@ -304,7 +401,14 @@ const postResult = (status: string) =>
   });
 
 test("orders local reads and POST, and exposes only the real confirmed POST status", () => {
-  for (const status of ["PENDING", "SUCCEEDED", "DEAD"]) {
+  for (const status of [
+    "PENDING",
+    "RUNNING",
+    "SUCCEEDED",
+    "FAILED",
+    "DEAD",
+    "UNKNOWN",
+  ]) {
     const operations = makeOperations(),
       request = operations.beginRequest();
     expect(request).not.toBeNull();
@@ -316,12 +420,72 @@ test("orders local reads and POST, and exposes only the real confirmed POST stat
     expect(operations.view.canRequest).toBe(false);
     // The old pre-request summary is no longer displayed as current usage.
     expect(operations.view.review).toBeUndefined();
+    expect(operations.beginRequest()).toBeNull();
   }
   const operations = makeOperations(),
     read = operations.beginRead(true);
   expect(operations.beginRequest()).toBeNull();
   expect(operations.finishRead(read!, makeDetail())).toBe(true);
   expect(operations.view.canRequest).toBe(true);
+});
+
+test("POST confirmation preserves preferred-status and fallback precedence without requiring equal fields", () => {
+  for (const [status, aiFeedbackStatus, expected] of [
+    ["DEAD", "UNKNOWN", "UNKNOWN"],
+    ["UNKNOWN", "PENDING", "PENDING"],
+    ["UNKNOWN", " unknown ", "UNKNOWN"],
+    [undefined, "UNKNOWN", "UNKNOWN"],
+    ["RUNNING", undefined, "RUNNING"],
+  ] as const) {
+    const source = Object.freeze({
+      submissionId: "s",
+      jobId: "j",
+      status,
+      aiFeedbackStatus,
+    });
+    const before = structuredClone(source);
+    const result = toRequestAiFeedbackResponse(source);
+    const operations = makeOperations();
+
+    expect(result.status).toBe(status);
+    expect(result.aiFeedbackStatus).toBe(aiFeedbackStatus);
+    expect(
+      operations.finishRequest(operations.beginRequest()!, result),
+    ).toBe(true);
+    expect(operations.view.status).toBe(expected);
+    expect(operations.view.confirmedJob).toBe(true);
+    expect(operations.beginRequest()).toBeNull();
+    expect(result.raw).toBe(source);
+    expect(source).toStrictEqual(before);
+  }
+});
+
+test("nonexact POST states cannot be trimmed into confirmation when both fields are invalid or the fallback is absent", () => {
+  for (const fields of [
+    { status: " UNKNOWN ", aiFeedbackStatus: " UNKNOWN " },
+    { aiFeedbackStatus: "unknown" },
+    { status: "\tPENDING\n" },
+  ]) {
+    const source = Object.freeze({ submissionId: "s", jobId: "j", ...fields });
+    const before = structuredClone(source);
+    const result = toRequestAiFeedbackResponse(source);
+    const operations = makeOperations();
+
+    expect(
+      operations.finishRequest(operations.beginRequest()!, result),
+    ).toBe(false);
+    expect(operations.view).toMatchObject({
+      status: "NOT_REQUESTED",
+      confirmedJob: false,
+      needsConfirmation: true,
+      busy: null,
+      canRequest: false,
+    });
+    expect(operations.beginRequest()).toBeNull();
+    expect(operations.beginRead(false)).toBeNull();
+    expect(result.raw).toBe(source);
+    expect(source).toStrictEqual(before);
+  }
 });
 test("old read results before or after POST completion cannot regress confirmed status", () => {
   for (const returnWhilePostPending of [true, false]) {
@@ -364,6 +528,74 @@ test("an uncertain POST can only be recovered by a subsequent explicit successfu
   // No replay: completion leaves no active POST; a user must begin one.
   expect(operations.view.busy).toBeNull();
   expect(operations.beginRequest()).not.toBeNull();
+});
+
+test("only a complete explicit UNKNOWN detail recovers an uncertain POST and never confirms a new Job or reopens requests", () => {
+  const operations = makeOperations();
+  const previousReview = operations.view.review;
+  expect(operations.finishRequest(operations.beginRequest()!)).toBe(false);
+  expect(operations.beginRead(false)).toBeNull();
+  expect(operations.beginRequest()).toBeNull();
+
+  const source = Object.freeze({
+    id: "s",
+    contentRevision: 0,
+    aiFeedbackStatus: "UNKNOWN",
+    aiReview: Object.freeze({ ...known, inputCoverage: "UNKNOWN" }),
+  });
+  const before = structuredClone(source);
+  const nonexact = toSubmissionDetailResponse({
+    ...source,
+    aiFeedbackStatus: " UNKNOWN ",
+  });
+  expect(
+    operations.finishRead(operations.beginRead(true)!, nonexact),
+  ).toBe(false);
+  expect(operations.view.needsConfirmation).toBe(true);
+  expect(operations.view.confirmedJob).toBe(false);
+  expect(operations.beginRead(false)).toBeNull();
+
+  const usage: Partial<typeof known.usage> = { ...known.usage };
+  delete usage.reasoningTokens;
+  const incompleteSource = Object.freeze({
+    ...source,
+    aiReview: Object.freeze({ ...source.aiReview, usage }),
+  });
+  const incomplete = toSubmissionDetailResponse(incompleteSource);
+  expect(incomplete.raw).toBe(incompleteSource);
+  expect(incomplete.raw).not.toHaveProperty("aiReview.usage.reasoningTokens");
+  expect(incomplete.aiReview?.usage.reasoningTokens).toBeNull();
+  expect(
+    operations.finishRead(operations.beginRead(true)!, incomplete),
+  ).toBe(false);
+  expect(operations.view).toMatchObject({
+    status: "NOT_REQUESTED",
+    confirmedJob: false,
+    needsConfirmation: true,
+    busy: null,
+    canRequest: false,
+  });
+  expect(operations.view.review).toBe(previousReview);
+  expect(operations.beginRead(false)).toBeNull();
+  expect(operations.beginRequest()).toBeNull();
+
+  const complete = toSubmissionDetailResponse(source);
+  expect(
+    operations.finishRead(operations.beginRead(true)!, complete),
+  ).toBe(true);
+  expect(operations.view).toMatchObject({
+    status: "UNKNOWN",
+    contentRevision: 0,
+    displayedRevision: 0,
+    confirmedJob: false,
+    needsConfirmation: false,
+    busy: null,
+    canRequest: false,
+  });
+  expect(operations.view.review).toEqual({ ...known, inputCoverage: "UNKNOWN" });
+  expect(operations.beginRequest()).toBeNull();
+  expect(complete.raw).toBe(source);
+  expect(source).toStrictEqual(before);
 });
 
 test("each missing current usage field rejects explicit confirmation despite mapper null defaults", () => {

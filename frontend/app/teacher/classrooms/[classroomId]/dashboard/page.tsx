@@ -420,7 +420,8 @@ export default async function ClassroomDashboardPage({
                         </p>
                         <p className="mt-1 text-xs text-zinc-500">
                           处理中 {aiBreakdown.running} / 终止 {aiBreakdown.dead}{" "}
-                          / 未请求 {aiBreakdown.notRequested}
+                          / 未请求 {aiBreakdown.notRequested} / 状态未知{" "}
+                          {aiBreakdown.unknown}
                         </p>
                       </td>
                       <td

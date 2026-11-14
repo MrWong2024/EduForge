@@ -36,6 +36,7 @@ export const AI_STATUSES = [
   "SUCCEEDED",
   "FAILED",
   "DEAD",
+  "UNKNOWN",
 ] as const;
 export type AiStatus = (typeof AI_STATUSES)[number];
 export const normalizeAiStatus = (value: unknown): AiStatus | undefined =>

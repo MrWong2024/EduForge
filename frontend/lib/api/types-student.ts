@@ -564,7 +564,10 @@ export const toSubmissionDetailResponse = (
     attemptNo: asNullableNumber(source.attemptNo),
     isLate: asNullableBoolean(source.isLate) ?? false,
     lateBySeconds: asNumber(source.lateBySeconds) ?? 0,
-    aiFeedbackStatus: asString(source.aiFeedbackStatus),
+    aiFeedbackStatus:
+      typeof source.aiFeedbackStatus === "string"
+        ? source.aiFeedbackStatus
+        : undefined,
     raw: source,
   };
 };
@@ -595,8 +598,11 @@ export const toRequestAiFeedbackResponse = (
   return {
     submissionId: asString(record.submissionId),
     jobId: asString(record.jobId),
-    status: asString(record.status),
-    aiFeedbackStatus: asString(record.aiFeedbackStatus),
+    status: typeof record.status === "string" ? record.status : undefined,
+    aiFeedbackStatus:
+      typeof record.aiFeedbackStatus === "string"
+        ? record.aiFeedbackStatus
+        : undefined,
     raw: record,
   };
 };

@@ -73,7 +73,7 @@
 - 班级列表与详情：Server pages -> `/api/proxy/classrooms*` -> `GET /api/classrooms*`。
   - 调用页面：`/teacher/classrooms*`。
 - 教师班级看板：`teacher/classrooms/[classroomId]/dashboard/page.tsx` -> `/api/proxy/classrooms/:id/dashboard` -> `GET /api/classrooms/:id/dashboard`。
-  - 列表、摘要及任务展示通过 `getDashboardItems` 与 `lib/teacher-dashboard.ts` 仅消费正式读源，备用包装与字段别名不再补值；公开字段合同见 [Backend DTO：Teacher / Student Dashboard response family](./handoff-backend-dto-cheatsheet.md#teacher--student-dashboard-response-family)。
+  - 列表、摘要及任务展示通过 `getDashboardItems` 与 `lib/teacher-dashboard.ts` 仅消费正式读源，备用包装与字段别名不再补值；独立消费并显示 `aiFeedback.unknown`，不重新计算 `notRequested`。公开字段合同见 [Backend DTO：Teacher / Student Dashboard response family](./handoff-backend-dto-cheatsheet.md#teacher--student-dashboard-response-family)。
 - 班级创建/编辑：`CreateClassroomForm`、`EditClassroomForm` -> `/api/proxy/classrooms*` -> `POST/PATCH /api/classrooms*`。
   - 调用页面：`/teacher/classrooms*`。
   - 创建只确认 `toClassroomCreateResponse` 的正式根 `id`，有 ID 才沿原流程进入班级看板；缺 ID 遵循上述创建/发布待核对规则，不再提示已创建或退回列表后刷新。正式字段见 [Backend DTO Classrooms](./handoff-backend-dto-cheatsheet.md#classrooms)。
@@ -142,7 +142,7 @@
   - 对应后端：submission detail、feedback list、teacher feedback create/update。
   - 反馈列表只消费正式裸数组，`items`、`data.items`、`data` 数组包装不再供数；字段合同见 [Backend DTO：Feedback DTO / response family](./handoff-backend-dto-cheatsheet.md#feedback-dto--response-family)。
   - 共享反馈条目的 `source` 为字符串时原样保留，包括空串与纯空白；非字符串保持 `undefined`，不 trim 或转换大小写。教师反馈分组只精确识别 `TEACHER/AI`，其余进入 `other`，来源标签显示“其他反馈（来源未识别）”；未知来源保留记录，不能修正为教师来源以获得修改资格。
-  - 共享提交详情 mapper 只消费根对象与正式 `submittedAt`，已退役 `data` / `submission` 包装选择及前端 `createdAt` 补值；`language` 仍依次读取根字段与 `content.language`，服务现行创建/详情合同，字段定义见下述 Backend DTO。
+  - 共享提交详情 mapper 只消费根对象与正式 `submittedAt`，已退役 `data` / `submission` 包装选择及前端 `createdAt` 补值；`aiFeedbackStatus` 保留字符串原值，非字符串为 undefined，不 trim 或从旧包装补值。`language` 仍依次读取根字段与 `content.language`，服务现行创建/详情合同，字段定义见下述 Backend DTO。
   - 注意：正式 detail API `GET /api/learning-tasks/submissions/:id` 是主体 SoT；每次先 await detail 成功，再请求同一提交的 feedback；师生共用学生侧详情 mapper，保留完整源码、独立说明与已有声明原文，适配 aiReview；URL query 不提供标题、正文、提交时间、次数、迟交或 AI 状态；班级/课堂任务上下文用于返回导航。公开字段与 null/0 语义由 [Backend DTO](./handoff-backend-dto-cheatsheet.md#submission-request--response-family) 维护。
   - 教师提交详情 Server Page 在主体加载成功后独立调用既有 `getMe()`，仅把正式响应中非空、非纯空白的字符串 id 原值作为 currentUserId 传入 History / EditForm，不传整个用户或其他身份数据。身份读取失败或 id 不可用时，历史反馈只读并提示刷新；不替换已加载的作品/反馈，不改变 layout 角色检查、新增反馈或 AI 请求。
   - 历史反馈修改资格由 `canEditTeacherFeedback` 统一判断：来源精确为 TEACHER，反馈 id、currentUserId 和 createdBy 均为非空非纯空白字符串，且作者与当前用户原字符串精确相等；不 trim 后比较、转换大小写、补作者或增加 ObjectId 格式规则。未知/他人作者、AI 和未知来源只关闭修改入口，原记录仍可读；createdBy 可选投影保持，最终班级管理权及作者授权见 [Backend API Learning Tasks](./handoff-backend-api-map.md#learning-tasks)。
@@ -183,6 +183,7 @@
   - 注意：请求携带页面实际展示作品的 `expectedRevision`，轮询发现新版不能视为用户已查看；需要明确刷新作品后申请。仅有效 revision 且 aiReview.canRequest=true 开启动作，缺摘要关闭并提供刷新。成功采用接口真实返回状态，已有 Job 不重新排队；当前提交内串行申请与读取，操作标识拒绝旧结果，页面 props 不作为 POST 后确认。成功 Job 持续锁定申请；结果不确定后，只接受事后用户显式发起、完整成功的详情读取重新判断资格，不自动重放 POST。按钮、正文与轮询共用同一已接纳结果。学生详情可按状态刷新，教师详情仅局部显示申请结果并提示显式刷新，保护人工反馈草稿。request 不返回完整 aiReview；执行仍归后端。BFF 保持既有 PATCH/JSON body 透传。
   - 师生共用 `lib/learning-tasks/ai-review.ts` 的 `toAiReview` 适配及 `SubmissionAiReview` 展示后端用量摘要；页面不重新统计或派生 Token。新增细分及计算字段缺省、null 或非法时统一映射 null，合法 0 保留显示“0”，未知显示“未知”。公开字段、计算值含义和包含关系由 [Submission DTO](./handoff-backend-dto-cheatsheet.md#submission-request--response-family) 维护。
   - 受控详情确认：原始 `detail.raw.aiReview.usage` 必须包含 [Submission DTO](./handoff-backend-dto-cheatsheet.md#submission-request--response-family) 规定的全部自有字段；缺键响应不作为完整确认，字段明确为 null 仍表示合法未知信息，不补造用量。
+  - 申请响应 `status/aiFeedbackStatus` 同样保留字符串原值，非字符串为 undefined，不修正或补值；精确 `UNKNOWN` 可在原身份与 Job ID 校验后确认已有 Job，不改变后端资格。结果待核对仍仅由事后显式完整详情解除，该 GET 接受 UNKNOWN 不新增 `confirmedJob` 标记，也不启动定时轮询；学生成功 POST 后现有的一次摘要 GET 保留。公开状态与响应合同见 [Backend DTO](./handoff-backend-dto-cheatsheet.md#ai-feedback-diagnostics--request-family)。
 - 班级周报：`weekly-report/page.tsx` -> `/api/proxy/classrooms/:id/weekly-report`。
   - 对应后端：`GET /api/classrooms/:classroomId/weekly-report`。
   - 四项比率均按固定 ratio 转为百分比展示，保留现有精度、数字字符串解析及空值处理。

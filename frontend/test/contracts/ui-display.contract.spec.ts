@@ -2,7 +2,9 @@ import { expect, test } from "@playwright/test";
 import {
   getAccountStatusLabel,
   getAiFailureReasonLabel,
+  getAiStatusHint,
   getAiStatusLabel,
+  getAiStatusTone,
   getClassroomStatusLabel,
   getClassroomTaskStatusLabel,
   getCourseStatusLabel,
@@ -132,6 +134,38 @@ test("status labels use each domain's meaning and distinguish missing from unkno
   expect(getClassroomTaskStatusLabel("ARCHIVED")).toBe("未知状态");
   expect(getTaskTemplateStatusLabel("ACTIVE")).toBe("未知状态");
   expect(getAiStatusLabel(" pending ")).toBe("排队中");
+});
+
+test("exact UNKNOWN has a neutral existing-Job message without implying an execution outcome", () => {
+  expect({
+    label: getAiStatusLabel("UNKNOWN"),
+    tone: getAiStatusTone("UNKNOWN"),
+    hint: getAiStatusHint("UNKNOWN"),
+  }).toEqual({
+    label: "状态未知",
+    tone: "neutral",
+    hint: "已存在 AI 处理任务，但当前状态暂不可确认。请刷新详情核对。",
+  });
+});
+
+test("non-exact UNKNOWN strings keep the generic display fallback", () => {
+  for (const value of [
+    "unknown",
+    "Unknown",
+    " UNKNOWN",
+    "UNKNOWN ",
+    "\tUNKNOWN\n",
+  ]) {
+    expect({
+      label: getAiStatusLabel(value),
+      tone: getAiStatusTone(value),
+      hint: getAiStatusHint(value),
+    }).toEqual({
+      label: "未知状态",
+      tone: "neutral",
+      hint: "当前暂无 AI 状态。",
+    });
+  }
 });
 
 test("feedback labels preserve the existing values and ordering without inferring a positive INFO result", () => {

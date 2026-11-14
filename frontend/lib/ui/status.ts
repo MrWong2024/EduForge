@@ -72,6 +72,9 @@ const normalizeAiStatus = (status?: string | null): AiStatus | undefined => {
 };
 
 export const getAiStatusLabel = (status?: unknown): string => {
+  if (status === "UNKNOWN") {
+    return "状态未知";
+  }
   if (
     status === undefined ||
     status === null ||
@@ -132,6 +135,9 @@ export const getAiFailureReasonLabel = (value: unknown): string => {
 };
 
 export const getAiStatusTone = (status?: string | null): AiStatusTone => {
+  if (status === "UNKNOWN") {
+    return "neutral";
+  }
   const normalized = normalizeAiStatus(status);
   if (!normalized || normalized === "NOT_REQUESTED") {
     return "neutral";
@@ -150,6 +156,9 @@ export const getAiStatusTone = (status?: string | null): AiStatusTone => {
 };
 
 export const getAiStatusHint = (status?: string | null): string => {
+  if (status === "UNKNOWN") {
+    return "已存在 AI 处理任务，但当前状态暂不可确认。请刷新详情核对。";
+  }
   const normalized = normalizeAiStatus(status);
   if (!normalized) {
     return "当前暂无 AI 状态。";
