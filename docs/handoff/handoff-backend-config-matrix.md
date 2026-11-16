@@ -157,7 +157,6 @@ Mock Bailian 等测试组合的执行方案见 [Backend Testing Playbook](./hand
 | `LEARNING_TASK_SUBMISSION_COOLDOWN_MS`         | `300000`                                            | Joi                                                  | 学生提交冷却窗口（ms）；按同一 student + classroomTask 判定，`0` 表示关闭冷却。 |
 | `AI_FEEDBACK_DEBUG_ENABLED`                    | `false`                                             | Joi                                                  | debug/ops 配置开关；职责见第 3 节。                                                            |
 | `AI_FEEDBACK_DUMP_REQUEST_BODY` | `false` | Joi → ConfigService | 布尔值；仅显式 true 且 development 启用本地请求/响应/合并诊断，环境、目录和启停方式见第 3 节。 |
-| `AUTHZ_ENFORCE_ROLES`                          | `true`                                              | Joi                                                  | 角色校验配置开关。                                                    |
 | `BAILIAN_API_KEY` | 无 | Joi | 真实 Provider Key；必填条件见下文。 |
 | `BAILIAN_BASE_URL`                             | `https://dashscope.aliyuncs.com/compatible-mode/v1` | Joi                                                  | 阿里云百炼大陆站 OpenAI-compatible 基础地址。                                   |
 | `BAILIAN_MODEL`                                | `qwen-plus`                                         | Joi                                                  | 百炼模型名；环境显式配置见第 3 节。                        |
@@ -165,6 +164,8 @@ Mock Bailian 等测试组合的执行方案见 [Backend Testing Playbook](./hand
 | `AI_FEEDBACK_WORKER_ENABLED` | `false` | Joi → ConfigService | 布尔值；后台自动消费开关，职责见第 3 节。 |
 | `AI_FEEDBACK_WORKER_INTERVAL_MS` | `10000` | Joi → ConfigService | 后台自动消费间隔（ms），正整数。 |
 | `AI_FEEDBACK_WORKER_BATCH_SIZE` | `5` | Joi → ConfigService | 后台自动消费批次大小，正整数。 |
+
+使用 `RolesGuard` 的非 `@Public()` 入口固定执行既有角色校验；`AUTHZ_ENFORCE_ROLES` 已退役，不再校验或读取，残留值不能绕过角色授权。
 
 Bailian 固定使用非流式、请求体顶层 `enable_thinking:true` 与 `max_tokens`，不使用 extra_body 封装；无关闭思考的运行开关，不新增 `thinking_budget`、`reasoning_effort` 或第二套输出上限。`AI_FEEDBACK_MAX_OUTPUT_TOKENS`、`BAILIAN_TIMEOUT_MS` 的配置入口、默认值及范围均保持不变。
 

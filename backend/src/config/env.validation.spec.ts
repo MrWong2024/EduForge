@@ -13,6 +13,25 @@ function validate(overrides: Record<string, unknown> = {}) {
   };
 }
 
+describe('Retired role enforcement env configuration (no I/O)', () => {
+  it('does not supply a default for the retired key', () => {
+    const result = validate();
+
+    expect(result.error).toBeUndefined();
+    expect(result.value).not.toHaveProperty('AUTHZ_ENFORCE_ROLES');
+  });
+
+  it.each(['false', 'obsolete'])(
+    'accepts the retired key as an unknown setting (%s)',
+    (value) => {
+      const result = validate({ AUTHZ_ENFORCE_ROLES: value });
+
+      expect(result.error).toBeUndefined();
+      expect(result.value.AUTHZ_ENFORCE_ROLES).toBe(value);
+    },
+  );
+});
+
 describe('Mail env validation (no external I/O)', () => {
   const smtpEnv = {
     MAIL_PROVIDER: 'smtp',

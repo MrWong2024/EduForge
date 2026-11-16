@@ -77,7 +77,6 @@ export const envValidationSchema = Joi.object({
     .valid('true', 'false')
     .default('false'),
   AI_FEEDBACK_DUMP_REQUEST_BODY: Joi.boolean().default(false),
-  AUTHZ_ENFORCE_ROLES: Joi.string().valid('true', 'false').default('true'),
   BAILIAN_API_KEY: Joi.string().trim().allow(''),
   BAILIAN_BASE_URL: Joi.string()
     .uri({ scheme: [/https?/] })

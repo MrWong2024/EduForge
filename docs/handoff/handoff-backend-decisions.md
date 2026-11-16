@@ -89,6 +89,10 @@ Bailian provider 只接受严格 JSON 对象，字段白名单、值域白名单
 
 ## 7) RBAC 已启用并默认 enforce（兼容期开关可回滚）
 
+Status: SUPERSEDED
+
+Superseded by: [Decision 19](#19-角色授权始终执行)
+
 **Decision**  
 `RolesGuard` 已启用并真正执行角色校验：`@Public()` 直通；未命中 `@Roles(...)` 元数据的受保护路由默认 `403`；兼容期可用 `AUTHZ_ENFORCE_ROLES=false` 暂时关闭 enforce。  
 
@@ -271,3 +275,19 @@ AI Provider selection、后台 Worker 自动消费与 debug/manual 执行入口�
 **Consequences**
 
 各环境 provider / worker / model / mail 组合统一由 [Config Matrix](./handoff-backend-config-matrix.md) 维护，Decision Log 不固定 development/test/browser/production 组合。
+
+## 19) 角色授权始终执行
+
+Status: CURRENT
+
+**Decision**
+
+取消配置绕过，使用 `RolesGuard` 的非 `@Public()` 入口始终执行既有角色授权规则。
+
+**Rationale**
+
+角色授权属于固定安全约束，不应由环境配置关闭。
+
+**Consequences**
+
+既有角色校验规则保持不变；配置退役及残留值行为由 [Config Matrix](./handoff-backend-config-matrix.md#4-核心-env-列表与默认值) 维护。
