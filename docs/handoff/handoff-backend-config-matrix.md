@@ -135,6 +135,8 @@ Mock Bailian 等测试组合的执行方案见 [Backend Testing Playbook](./hand
 
 本节集中维护核心默认值与静态校验；环境显式配置见第 3 节，护栏建议范围见第 6 节。
 
+普通后端端口唯一配置入口为 `BACKEND_PORT`，未设置时使用 `5000`；旧 `PORT` 不再参与选择。
+
 | 变量                                           | 默认值                                              | 来源                                                 | 说明                                                                            |
 | ---------------------------------------------- | --------------------------------------------------- | ---------------------------------------------------- | ------------------------------------------------------------------------------- |
 | `NODE_ENV`                                     | `development`                                       | Joi                                                  | `development`、`test`、`production`。 |
@@ -153,7 +155,7 @@ Mock Bailian 等测试组合的执行方案见 [Backend Testing Playbook](./hand
 | `AI_FEEDBACK_MAX_OUTPUT_TOKENS` | `2048` | Joi / Provider fallback | 上游 max_tokens；整数 `256..4096`。 |
 | `AI_FEEDBACK_MAX_CONCURRENCY`                  | `2`                                                 | Joi                                                  | 进程级并发上限；整数，范围 `1..20`。                                                              |
 | `AI_FEEDBACK_MAX_PER_CLASSROOMTASK_PER_MINUTE` | `30`                                                | Joi                                                  | 每 `classroomTaskId` 的本地软限流；整数，范围 `1..600`。                                             |
-| `AI_FEEDBACK_MAX_ITEMS`                        | `2`                                                 | Joi                                                  | 每次保存反馈条目上限；允许范围 `1..10`。                                        |
+| `AI_FEEDBACK_MAX_ITEMS`                        | `2`                                                 | Joi                                                  | 每次保存反馈条目上限；允许整数范围 `1..2`。                                        |
 | `LEARNING_TASK_SUBMISSION_COOLDOWN_MS`         | `300000`                                            | Joi                                                  | 学生提交冷却窗口（ms）；按同一 student + classroomTask 判定，`0` 表示关闭冷却。 |
 | `AI_FEEDBACK_DEBUG_ENABLED`                    | `false`                                             | Joi                                                  | debug/ops 配置开关；职责见第 3 节。                                                            |
 | `AI_FEEDBACK_DUMP_REQUEST_BODY` | `false` | Joi → ConfigService | 布尔值；仅显式 true 且 development 启用本地请求/响应/合并诊断，环境、目录和启停方式见第 3 节。 |

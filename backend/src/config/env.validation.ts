@@ -25,7 +25,6 @@ export const envValidationSchema = Joi.object({
     otherwise: Joi.forbidden(),
   }),
   BACKEND_PORT: Joi.number().port(),
-  PORT: Joi.number().port(),
   FRONTEND_URL: Joi.string()
     .uri({ scheme: [/https?/] })
     .default('http://localhost:3000'),
@@ -68,7 +67,7 @@ export const envValidationSchema = Joi.object({
     .min(1)
     .max(600)
     .default(30),
-  AI_FEEDBACK_MAX_ITEMS: Joi.number().integer().min(1).max(10).default(2),
+  AI_FEEDBACK_MAX_ITEMS: Joi.number().integer().min(1).max(2).default(2),
   LEARNING_TASK_SUBMISSION_COOLDOWN_MS: Joi.number()
     .integer()
     .min(0)

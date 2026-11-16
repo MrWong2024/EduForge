@@ -13,6 +13,62 @@ function validate(overrides: Record<string, unknown> = {}) {
   };
 }
 
+describe('Backend port env validation (no I/O)', () => {
+  it.each(['4100', 'not-a-port'])(
+    'accepts retired PORT as an unknown setting (%s)',
+    (port) => {
+      const result = validate({ PORT: port });
+
+      expect(result.error).toBeUndefined();
+      expect(result.value.PORT).toBe(port);
+    },
+  );
+
+  it('preserves BACKEND_PORT conversion and port validation', () => {
+    const valid = validate({ BACKEND_PORT: '5100' });
+    expect(valid.error).toBeUndefined();
+    expect(valid.value.BACKEND_PORT).toBe(5100);
+
+    expect(validate({ BACKEND_PORT: 65536 }).error?.details).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ path: ['BACKEND_PORT'] }),
+      ]),
+    );
+  });
+});
+
+describe('AI feedback item limit env validation (no I/O)', () => {
+  it('defaults to two items', () => {
+    const result = validate();
+
+    expect(result.error).toBeUndefined();
+    expect(result.value.AI_FEEDBACK_MAX_ITEMS).toBe(2);
+  });
+
+  it.each([
+    [1, 1],
+    [2, 2],
+    ['1', 1],
+    ['2', 2],
+  ])('accepts %p as %p', (input, expected) => {
+    const result = validate({ AI_FEEDBACK_MAX_ITEMS: input });
+
+    expect(result.error).toBeUndefined();
+    expect(result.value.AI_FEEDBACK_MAX_ITEMS).toBe(expected);
+  });
+
+  it.each([0, 3, 4, 5, 6, 7, 8, 9, 10, 1.5, '3', '10', 'invalid'])(
+    'rejects invalid item limit %p',
+    (input) => {
+      expect(validate({ AI_FEEDBACK_MAX_ITEMS: input }).error?.details).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ path: ['AI_FEEDBACK_MAX_ITEMS'] }),
+        ]),
+      );
+    },
+  );
+});
+
 describe('Retired role enforcement env configuration (no I/O)', () => {
   it('does not supply a default for the retired key', () => {
     const result = validate();
