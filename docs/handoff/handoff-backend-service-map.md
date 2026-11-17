@@ -45,7 +45,7 @@ Global SoT 只保留理解跨 Service workflow 必需的稳定不变量，不追
 - Domain / Responsibility: Auth 与 Session 协作，校验登录凭据、注销会话并为认证 Guard 解析会话。
 - Upstream: 认证入口；`SessionAuthGuard` 的登录态校验。
 - Downstream / Dependencies: `UserModel`、`SessionModel`、`SessionService` 与共享密码 helper。
-- Consistency / State / Idempotency: 凭据校验成功后委托 `SessionService` 创建会话并执行单用户会话上限；token 缺失或失效时返回 `null`，过期会话在验证时删除后返回 `null`。
+- Consistency / State / Idempotency: 仅 active 用户可登录，签发 Session 使用本次密码校验时读取的 `credentialVersion`；创建后复核用户仍 active 且版本未变，失败撤销本次 Session。验证前将 Cookie 视为 unknown，只有当前 token 格式的字符串可哈希查询；会话须未过期且与 active User 的版本严格一致，成功后向 Guard 提供内部 `sessionId/credentialVersion`。
 - Isolation: 会话与用户身份按 `userId` 关联，不使用课堂任务隔离键。
 - Side Effects: 登录/注销通过 SessionService 写入或删除会话；验证过程可删除过期会话。
 - SoT: `backend/src/modules/auth/services/auth.service.ts`；`backend/src/modules/auth/schemas/session.schema.ts`；`backend/src/modules/auth/auth.constants.ts`。
@@ -56,11 +56,11 @@ Global SoT 只保留理解跨 Service workflow 必需的稳定不变量，不追
 - Service: `backend/src/modules/auth/services/session.service.ts`
 - Domain / Responsibility: Session 创建、单个注销与按用户批量失效。
 - Upstream: `AuthService` 登录/注销，`UsersService` 改密，`PasswordResetService` 重置密码。
-- Downstream / Dependencies: `SessionModel`、`randomBytes`。
-- Consistency / State / Idempotency: 使用 `expiresAt` 与 TTL 索引；单用户最多保留 5 个会话；支持保留当前会话后删除其余会话，或清空全部会话。删除入口未收到 token 时 no-op。
-- Isolation: 批量失效按 `userId`；被保留的当前 token 只用于该用户的排除条件。
-- Side Effects: 模块初始化时确保 session 索引，创建随机会话并写库，注销或淘汰时删库。
-- Important Performance / Recovery: 按 `createdAt desc` 排序并 `skip(5)` 取得超额会话后批量淘汰；过期/淘汰会话不再通过后续认证。
+- Downstream / Dependencies: `SessionModel`、`randomBytes`、SHA-256。
+- Consistency / State / Idempotency: 32 个安全随机字节形成外部 token，数据库仅存不可逆 `tokenHash` 及显式凭据版本；单用户会话上限保持 5，淘汰查询和最终删除均限定本次签发版本。注销先校验 token 格式，按 hash 删除；不合格式值不进入数据库。
+- Isolation: 按 `userId + credentialVersion` 隔离淘汰与清理。改密仅将指定当前 Session 从精确旧版本晋升到新版本，条件含 `_id/userId/旧版本/未过期`，不 upsert、不重建、不续期；其它旧凭据清理只处理 `< 新版本`。
+- Side Effects: 创建、晋升或删除会话；Service 初始化不主动执行索引 DDL，索引生命周期见 [Config Matrix](./handoff-backend-config-matrix.md#1-数据库连接串与索引治理)。
+- Important Performance / Recovery: 按 `createdAt desc` 排序并 `skip(5)` 淘汰超额会话；迟到旧登录不得删除新版本会话。逻辑有效性由版本及过期校验保障，不依赖物理清理或 TTL 执行时机。
 - SoT: `backend/src/modules/auth/services/session.service.ts`；`backend/src/modules/auth/schemas/session.schema.ts`。
 - Boundary / Non-responsibility: 不校验业务角色或课堂权限；会话有效期与 Cookie 配置见 [Config Matrix](./handoff-backend-config-matrix.md)。
 
@@ -83,12 +83,13 @@ Global SoT 只保留理解跨 Service workflow 必需的稳定不变量，不追
 - Upstream: 忘记密码与重置密码入口。
 - Downstream / Dependencies: `UserModel`、`PasswordResetTokenModel`、`MailService`、`SessionService`、`ConfigService` 与共享密码 helper。
 - Consistency / State / Idempotency:
-  - 仅可登录用户进入 token/邮件写链；不存在或不可登录用户不创建 token、不发邮件。按 `userId + createdAt` 检查 60 秒冷却，命中时不创建新 token、不失效旧 token、不发新邮件。
-  - 数据库只存 `tokenHash`，明文 token 只进入邮件链接；未命中冷却时创建新 token 并失效同用户既有未用 token。
-  - 重置时通过 `tokenHash` 定位，显式检查 `expiresAt/usedAt`；以未使用且未过期为条件原子消费 token，竞争未命中则拒绝继续改密。随后更新密码、失效该用户其余有效 token，并清空其全部 Session。
-- Isolation: reset token、冷却和 Session 失效均按 `userId`。
-- Side Effects: 初始化时确保 token 索引；写 token、发邮件、更新密码哈希、删除 Session。
-- Important Performance / Recovery: TTL 负责后台清理，不替代业务有效性检查；发信失败记录错误并使本次新 token 失效。重置写链异常记录并报错，已消费 token 不会因此恢复；该顺序写链不是跨集合事务回滚。
+  - 仅可登录用户进入 token/邮件写链。User 单文档按 active、读取版本及 `passwordResetRequestedAt=null 或 <= now-60秒` 原子占位，设置本次 now；只有成功者创建 token、发送邮件，时钟倒退或占位失败不重复签发、不清理其它 token。
+  - 数据库只存 `tokenHash`；token 显式保存占位版本和从 User 复制的 `requestedAt`，不从 `createdAt` 推断代次。签发后只使更早 `requestedAt` 的凭据失效；最新 User 时间立即取代旧请求。
+  - 新密码合法性及哈希准备成功后，原子消费仍未使用且未过期的 token；最终 User CAS 必须再次匹配 `_id/active/token版本/passwordResetRequestedAt=token.requestedAt`，同次写新 hash 并递增版本。claim 不替代最终 CAS，旧请求晚插入或 claim 后暂停均不能绕过该边界。
+  - 密码更新后的 Session/token 清理只处理 `< 本次新版本`，不误删之后签发的凭据；旧版本失效由认证版本条件保证。
+- Isolation: 按 `userId` 及占位时间/凭据版本隔离冷却、请求替代和清理。
+- Side Effects: 原子写 User 占位、写 token、发邮件、CAS 更新密码及版本、清理旧凭据；Service 初始化不主动执行索引 DDL。
+- Important Performance / Recovery: TTL 不替代有效性检查。发信失败只失效本次 token，不回退或清空 User 占位时间；改密、重置及导入也不清空该时间。User CAS 失败不恢复已消费 token，须重新申请链接；User 已更新后的后续故障可能部分生效，不自动回滚或重放。
 - SoT: `backend/src/modules/auth/services/password-reset.service.ts`；`backend/src/modules/auth/schemas/password-reset-token.schema.ts`。
 - Boundary / Non-responsibility: 防邮箱枚举的公开响应见 [API Map](./handoff-backend-api-map.md#auth)；输入校验定位该 Service 使用的密码 helper 与 Auth DTO，不在本卡复制消息和字段矩阵。
 
@@ -97,10 +98,10 @@ Global SoT 只保留理解跨 Service workflow 必需的稳定不变量，不追
 - Service: `backend/src/modules/users/services/users.service.ts`
 - Domain / Responsibility: 当前用户资料读写、改密及其 Session 失效协调。
 - Upstream: 用户资料与改密入口。
-- Downstream / Dependencies: `UserModel`、`SessionService` 与共享密码 helper。
-- Consistency / State / Idempotency: 改密前校验当前密码并复用新密码校验；成功后保留当前会话、失效其余历史会话。资料更新忽略 `undefined`，不会把未提交字段写入数据库。
+- Downstream / Dependencies: `UserModel`、`PasswordResetTokenModel`、`SessionService` 与共享密码 helper。
+- Consistency / State / Idempotency: 改密校验原文当前密码并复用新密码策略；以 Guard 内部上下文的版本为预期，User 单次 CAS 匹配 `_id/active/预期版本`，同次写 hash 并递增版本。仅将 Guard 指定的当前 Session 从精确旧版本晋升，不续期或重建；其余 Session/reset token 仅清理 `< 新版本`。资料更新仍只写白名单及已提交值。
 - Isolation: 所有操作绑定当前会话用户；公开资料读取采用 `lean + select` 最小投影。
-- Side Effects: 写资料、密码哈希；通过 `SessionService.clearUserSessions` 删除历史会话。
+- Side Effects: 写资料、CAS 更新密码及版本、晋升当前 Session、清理旧凭据；不新增事务或协调框架。
 - SoT: `backend/src/modules/users/services/users.service.ts`；`backend/src/modules/users/schemas/user.schema.ts`；`backend/src/modules/auth/schemas/session.schema.ts`。
 - Boundary / Non-responsibility: 公开可写字段、密码 validation 与安全暴露见 [DTO Cheatsheet](./handoff-backend-dto-cheatsheet.md#users)；公开行为见 [API Map](./handoff-backend-api-map.md#users)。
 

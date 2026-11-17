@@ -7,8 +7,8 @@ import {
 import { Reflector } from '@nestjs/core';
 import { AuthService } from '../../modules/auth/services/auth.service';
 import { SESSION_COOKIE_NAME } from '../../modules/auth/auth.constants';
-import { UserRole } from '../../modules/users/schemas/user-roles.constants';
 import { IS_PUBLIC_KEY } from '../decorators/public.decorator';
+import { AuthenticatedUser } from '../types/authenticated-user.type';
 
 @Injectable()
 export class SessionAuthGuard implements CanActivate {
@@ -28,8 +28,8 @@ export class SessionAuthGuard implements CanActivate {
     }
 
     const request = context.switchToHttp().getRequest<{
-      cookies?: Record<string, string>;
-      user?: { id: string; roles: UserRole[] };
+      cookies?: Record<string, unknown>;
+      user?: AuthenticatedUser;
     }>();
     const token = request.cookies?.[SESSION_COOKIE_NAME];
     if (!token) throw new UnauthorizedException('Unauthorized');
@@ -37,10 +37,7 @@ export class SessionAuthGuard implements CanActivate {
     if (!sessionUser) {
       throw new UnauthorizedException('Unauthorized');
     }
-    request.user = {
-      id: sessionUser.id,
-      roles: sessionUser.roles,
-    };
+    request.user = sessionUser;
     return true;
   }
 }

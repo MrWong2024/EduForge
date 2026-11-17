@@ -30,9 +30,15 @@
 
 | DTO | 必填字段与 validation / transform |
 | --- | --- |
-| `LoginDto` | `email: string` 用 `IsEmail`；`password: string` 用 `IsString + MinLength(6)`；DTO 不声明 trim。 |
+| `LoginDto` | `email: string` 用 `IsEmail`；`password: string` 用 `IsString`，保留原文，由共享密码规则校验。 |
 | `ForgotPasswordDto` | `email: string`，trim + lowercase，再 `IsString + IsEmail`。 |
-| `ResetPasswordDto` | `token: string`，trim 后 `IsString + MinLength(1)`；`newPassword: string`，trim 后 `IsString`，长度上下界引用 `USER_PASSWORD_MIN_LENGTH / USER_PASSWORD_MAX_LENGTH`，并由共享密码校验 helper 校验。 |
+| `ResetPasswordDto` | `token: string`，trim 后 `IsString + MinLength(1)`；`newPassword: string` 用 `IsString`，规范化与长度由共享密码规则统一校验。 |
+
+### 密码与公开错误合同
+
+- 新密码先 trim，规范化后至少 8 个 Unicode 码点，UTF-8 最多 72 字节；登录密码与 `currentPassword` 保留原文、不 trim，分别至少 6 个和 1 个 Unicode 码点，UTF-8 同样最多 72 字节。字符数量不使用 UTF-16 length，超字节输入不截断，也不进行旧超长密码兼容比较。
+- DTO 负责字符串等结构校验，Service 与正式导入复用共享密码 helper；字符串密码策略拒绝返回 400 与 `PASSWORD_POLICY_VIOLATION`，非字符串、非法邮箱等结构校验仍为 400。新密码不能与当前密码相同，原有拒绝语义保留。
+- 全局错误 JSON 为 `{statusCode,timestamp,path,message,code?}`；本批仅在对应 400 响应保留 `PASSWORD_POLICY_VIOLATION`、`RESET_TOKEN_INVALID` 两个公开 code，不透传任意异常字段。无效重置凭据的 message 为 `Reset token is invalid`；所有 5xx 的公开 message 统一为 `Internal server error`，其它 4xx 沿用既有 message 口径。
 
 ### Auth public responses
 
@@ -40,7 +46,7 @@
 
 - 登录返回用户投影 `{id,email,roles,status,createdAt}`；session token 不在 JSON 中返回。
 - 忘记密码返回 `{message: "如果邮箱存在，我们将发送密码重置邮件。"}`；重置成功返回 `{message: "密码已重置，请使用新密码登录。"}`。
-- Password Reset response 不返回 reset token、token hash、密码、passwordHash、凭据或用户内部对象。
+- 用户及 Password Reset 公开响应不返回密码、`passwordHash`、原始 token、`tokenHash`、`sessionId`、`credentialVersion`、`passwordResetRequestedAt` 或重置凭据内部字段；内部认证上下文不属于公开 response。
 - 注销使用 `{ok:true}`。公开性、防枚举、冷却和会话行为仅见 [API Auth](./handoff-backend-api-map.md#auth)。
 
 ## Users
@@ -51,8 +57,8 @@
 
 | Family | 公开输入 |
 | --- | --- |
-| `UpdateProfileDto` | 可选字符串 `name` 最长 100，`studentNo/employeeNo` 各最长 64；允许 `{}`，不要发送 JSON `null`。白名单仅这三个字段，不接受 `email/roles/status/passwordHash`。 |
-| `ChangePasswordDto` | 必填 `currentPassword`：字符串 1..128；必填 `newPassword`：字符串 8..128。新密码另做 trim 后非空校验，不能与当前密码相同；不接受目标 `userId`。 |
+| `UpdateProfileDto` | 可选字符串 `name` 最长 100，`studentNo/employeeNo` 各最长 64；允许 `{}`，不要发送 JSON `null`。白名单仅这三个字段，不接受 `email/roles/status/passwordHash` 或内部凭据字段。 |
+| `ChangePasswordDto` | 必填字符串 `currentPassword/newPassword`；原文、trim、Unicode 码点及 UTF-8 字节校验统一见[密码与公开错误合同](#密码与公开错误合同)；不接受目标 `userId`、`sessionId` 或 `credentialVersion`。 |
 
 当前用户读取与资料更新共用公开投影 `{id,email,roles,status,name?,studentNo?,employeeNo?,createdAt}`，不返回 `passwordHash`。改密成功数据为 `{ok:true}`；会话副作用见 [API Users](./handoff-backend-api-map.md#users)。
 

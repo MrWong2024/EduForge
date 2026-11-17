@@ -30,6 +30,16 @@ describe('Backend port configuration (no I/O)', () => {
     }
   });
 
+  it.each<[string, boolean]>([
+    ['development', false],
+    ['test', false],
+    ['production', true],
+  ])('provides a boolean Cookie Secure for %s', (environment, expected) => {
+    process.env.NODE_ENV = environment;
+    if (environment !== 'test') delete process.env.EDUFORGE_DATABASE_PURPOSE;
+    expect(configuration().auth.cookieSecure).toBe(expected);
+  });
+
   it.each<{
     label: string;
     backendPort?: string;

@@ -43,6 +43,7 @@ const testUri = 'mongodb://unit-admin:synthetic-secret@127.0.0.1/eduforge_test';
 const changedCsv = 'email,roles,name\nexisting@example.test,student,New Name';
 const existingUser = (): ExistingImportUser => ({
   _id: userId,
+  credentialVersion: 3,
   roles: ['student'],
   status: 'active',
   name: 'Old Name',
@@ -546,6 +547,29 @@ describe('import-users row results and preview (fake store only)', () => {
     expectNoWrites(h);
   });
 
+  it.each([
+    'first..last@example.test',
+    'first@-example.test',
+    'first@example..test',
+  ])(
+    'rejects invalid email %s using the authentication validator',
+    async (email) => {
+      const h = harness({ csv: `email,roles\n${email},student` });
+
+      expect(await h.run([])).toBe(1);
+      expect(h.store.findUser).not.toHaveBeenCalled();
+      expectCounts(h, {
+        total: 1,
+        created: 0,
+        updated: 0,
+        skipped: 0,
+        failed: 1,
+      });
+      expect(h.errors.join('\n')).toContain('CSV_EMAIL_INVALID');
+      expectNoWrites(h);
+    },
+  );
+
   it.each<[WriteResult, number, number, number, number]>([
     [{ ...written }, 0, 1, 0, 0],
     [{ ...written, modifiedCount: 0 }, 0, 0, 1, 0],
@@ -567,16 +591,21 @@ describe('import-users row results and preview (fake store only)', () => {
     },
   );
 
-  it('preserves optional blanks, replaces roles, and never resets a password implicitly', async () => {
+  it('preserves omitted status and optional blanks while updating roles without rotating credentials', async () => {
     const h = harness({
       csv: 'email,roles,name\nexisting@example.test,teacher,',
     });
-    h.store.findUser.mockResolvedValue(existingUser());
+    h.store.findUser.mockResolvedValue({
+      ...existingUser(),
+      status: 'suspended',
+    });
     h.store.updateUser.mockResolvedValue(written);
     expect(await h.run([])).toBe(0);
-    expect(h.store.updateUser).toHaveBeenCalledWith(userId, {
-      roles: ['teacher'],
-    });
+    expect(h.store.updateUser).toHaveBeenCalledWith(
+      userId,
+      { roles: ['teacher'] },
+      { expectedCredentialVersion: 3, rotateCredentials: false },
+    );
     expect(h.hashPassword).not.toHaveBeenCalled();
     expect(h.store.deleteSessions).not.toHaveBeenCalled();
     expect(h.store.invalidateResetTokens).not.toHaveBeenCalled();
@@ -732,16 +761,24 @@ describe('import-users explicit password resets (fake credentials only)', () => 
     });
     expect(maxTimeMS).toHaveBeenCalledWith(5000);
     expect(users.updateOne).toHaveBeenCalledWith(
-      { _id: userId },
-      { $set: { name: 'New Name', passwordHash: syntheticHash } },
+      { _id: userId, credentialVersion: 3 },
+      {
+        $set: { name: 'New Name', passwordHash: syntheticHash },
+        $inc: { credentialVersion: 1 },
+      },
       { runValidators: true, maxTimeMS: 5000 },
     );
     expect(sessions.deleteMany).toHaveBeenCalledWith(
-      { userId },
+      { userId, credentialVersion: { $lt: 4 } },
       { maxTimeMS: 5000 },
     );
     expect(resetTokens.updateMany).toHaveBeenCalledWith(
-      { userId, usedAt: null, expiresAt: { $gt: now } },
+      {
+        userId,
+        credentialVersion: { $lt: 4 },
+        usedAt: null,
+        expiresAt: { $gt: now },
+      },
       { $set: { usedAt: now } },
       { maxTimeMS: 5000 },
     );
@@ -749,26 +786,51 @@ describe('import-users explicit password resets (fake credentials only)', () => 
     expect(close).toHaveBeenCalledTimes(1);
   });
 
-  it.each([0, 1])(
-    'attempts both revocations after a matched password update with modifiedCount=%i',
-    async (modifiedCount) => {
-      const h = harness();
-      enableReset(h, modifiedCount);
-      expect(await h.run(['--reset-password'])).toBe(0);
+  it('attempts both version-bound revocations after a confirmed password rotation', async () => {
+    const h = harness();
+    enableReset(h);
+    expect(await h.run(['--reset-password'])).toBe(0);
+    expect(h.store.updateUser).toHaveBeenCalledWith(
+      userId,
+      expect.objectContaining({ passwordHash: syntheticHash }),
+      { expectedCredentialVersion: 3, rotateCredentials: true },
+    );
+    expect(h.store.deleteSessions).toHaveBeenCalledWith(userId, 4);
+    expect(h.store.invalidateResetTokens).toHaveBeenCalledWith(userId, 4, now);
+    expect(h.hashPassword).toHaveBeenCalledTimes(1);
+    expectCounts(h, {
+      total: 1,
+      created: 0,
+      updated: 1,
+      skipped: 0,
+      failed: 0,
+    });
+  });
+
+  it.each([false, true])(
+    'rotates once for an actual status change with resetPassword=%s',
+    async (resetPassword) => {
+      const h = harness({
+        csv: 'email,roles,status\nexisting@example.test,student,suspended',
+      });
+      enableReset(h);
+
+      expect(await h.run(resetPassword ? ['--reset-password'] : [])).toBe(0);
+      expect(h.store.updateUser).toHaveBeenCalledTimes(1);
       expect(h.store.updateUser).toHaveBeenCalledWith(
         userId,
-        expect.objectContaining({ passwordHash: syntheticHash }),
+        resetPassword
+          ? { status: 'suspended', passwordHash: syntheticHash }
+          : { status: 'suspended' },
+        { expectedCredentialVersion: 3, rotateCredentials: true },
       );
-      expect(h.store.deleteSessions).toHaveBeenCalledWith(userId);
-      expect(h.store.invalidateResetTokens).toHaveBeenCalledWith(userId, now);
-      expect(h.hashPassword).toHaveBeenCalledTimes(1);
-      expectCounts(h, {
-        total: 1,
-        created: 0,
-        updated: modifiedCount,
-        skipped: 1 - modifiedCount,
-        failed: 0,
-      });
+      expect(h.hashPassword).toHaveBeenCalledTimes(resetPassword ? 1 : 0);
+      expect(h.store.deleteSessions).toHaveBeenCalledWith(userId, 4);
+      expect(h.store.invalidateResetTokens).toHaveBeenCalledWith(
+        userId,
+        4,
+        now,
+      );
     },
   );
 
@@ -820,7 +882,7 @@ describe('import-users explicit password resets (fake credentials only)', () => 
     },
   );
 
-  it.each(['throw', 'unmatched', 'unacknowledged'])(
+  it.each(['throw', 'unmatched', 'unacknowledged', 'unmodified'])(
     'does not revoke credentials when the password update is %s',
     async (failure) => {
       const h = harness();
@@ -851,7 +913,7 @@ describe('import-users explicit password resets (fake credentials only)', () => 
 
   it('performs the full reset and both revocations on an explicit rerun', async () => {
     const h = harness();
-    enableReset(h, 0);
+    enableReset(h);
     expect(await h.run(['--reset-password'])).toBe(0);
     expect(await h.run(['--reset-password'])).toBe(0);
     expect(h.hashPassword).toHaveBeenCalledTimes(2);

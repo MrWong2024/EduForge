@@ -1490,7 +1490,7 @@ const sessionUserIndex = { name: 'userId_1', key: { userId: 1 } };
 const matchingSessionIndexes: ComparisonIndex[] = [
   idIndex,
   { name: 'expiresAt_1', key: { expiresAt: 1 }, expireAfterSeconds: 0 },
-  { name: 'token_1', key: { token: 1 }, unique: true },
+  { name: 'tokenHash_1', key: { tokenHash: 1 }, unique: true },
   sessionUserIndex,
 ];
 
@@ -2404,7 +2404,7 @@ describe('sync-indexes driver and Schema adapter (offline)', () => {
     const a = realComparisonHarness({
       indexes: [
         idIndex,
-        { name: 'expiresAt_1', key: { token: 1 }, unique: true },
+        { name: 'expiresAt_1', key: { tokenHash: 1 }, unique: true },
         sessionUserIndex,
         { name: 'legacy_1', key: { legacy: 1 } },
       ],

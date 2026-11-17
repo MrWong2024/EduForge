@@ -84,11 +84,39 @@ npm run test:e2e -- --runInBand --runTestsByPath ./test/users-me.e2e-spec.ts
 
 `test:watch` 不用于正式验收。是否执行全量 unit/E2E 由实际影响决定，不把“最终验证”解释为无差别全量运行。
 
+### 认证与凭据生命周期定向验收
+
+离线 unit 的用途为 `none`：`src/modules/users/password.utils.spec.ts` 负责 Unicode 码点、trim/原文、UTF-8 字节边界及超限输入不进入 bcrypt；`src/common/filters/all-exceptions.filter.spec.ts` 负责公开 code 白名单和 5xx 脱敏。配置与 AuthController 单测证明 Cookie Secure 的 boolean 来源及消费；PasswordResetService 单测证明占位失败、时钟倒退及邮件失败只影响本次 token；现有 auth-index-initialization 单测继续证明 Service 初始化零主动 DDL。导入与索引离线证据仍按下节分工，不以 fake 结果代替 Mongo 终态。
+
+`test/auth-security.e2e-spec.ts` 与既有 `users-me/users-change-password` HTTP E2E 使用正式 configureApp、Cookie parser、ValidationPipe、SessionAuthGuard 和异常过滤器。认证安全 spec 以真实 HTTP/Mongo 及受控 Promise 屏障证明 tokenHash 存储、Cookie 输入边界、active/版本认证、改密当前会话保留、重置/找回竞争和正式导入 Store 的凭据轮换；不以 sleep 排程，不发送真实邮件或调用真实模型，也不证明第二批前端交互。
+
+窄准备逻辑 `test/helpers/auth-test-environment.ts` 在 AppModule 导入前建立独立 `test/standard_test` 进程环境，仅解析 `.env.test` 的目标连接，清除继承连接与外部服务配置，在测试层阻止 AppModule 叠加加载其它环境文件。`auth-session-indexes.ts` 先经本机 standalone、实际 `eduforge_test`、root@admin 身份/角色门禁并确认认证集合无外来数据，再以正式 SessionSchema 及现有 sync-indexes CLI 预览、限定 apply 和读回；只允许删除已核实定义的旧 `token_1`，建立当前 Session 必需索引，发现其它删改计划即停止。
+
+同一认证集合的实库 spec 串行运行，与 sync-indexes 的独立集合集成分开进程。合成记录按 spec 登记 ID 清理，核对 User/Session/reset token 零残留后关闭 app 与独立 Store 连接；不清空未知记录或数据库。配置或门禁不符时停止对应实库验收，实际通过、失败和未执行状态归当次任务报告。
+
+从 `backend` 目录先 discovery；结果须恰好命中同一显式集合，再正式运行。以下离线命令使用独立 `none` 进程，不加载真实环境文件、不继承真实 Mongo/SMTP/Provider 凭据：
+
+```powershell
+$env:NODE_ENV = "test"
+npm.cmd run test -- --listTests --runInBand --runTestsByPath ./src/modules/users/password.utils.spec.ts ./src/common/filters/all-exceptions.filter.spec.ts
+npm.cmd run test -- --runInBand --runTestsByPath ./src/modules/users/password.utils.spec.ts ./src/common/filters/all-exceptions.filter.spec.ts
+```
+
+HTTP 集合在另一独立 `standard_test` 进程中运行，沿本节窄 helper 的环境与认证门禁：
+
+```powershell
+$env:NODE_ENV = "test"
+$env:EDUFORGE_DATABASE_PURPOSE = "standard_test"
+Remove-Item Env:MONGO_URI, Env:MONGO_ADMIN_URI, Env:BROWSER_ACCEPTANCE_APP_MONGO_URI, Env:BROWSER_ACCEPTANCE_ADMIN_MONGO_URI -ErrorAction SilentlyContinue
+npm.cmd run test:e2e -- --listTests --runInBand --runTestsByPath ./test/auth-security.e2e-spec.ts ./test/users-me.e2e-spec.ts ./test/users-change-password.e2e-spec.ts
+npm.cmd run test:e2e -- --runInBand --runTestsByPath ./test/auth-security.e2e-spec.ts ./test/users-me.e2e-spec.ts ./test/users-change-password.e2e-spec.ts
+```
+
 ### import-users 定向离线回归
 
 `scripts/import-users.spec.ts` 与 `scripts/import-users-csv.spec.ts` 使用正式导入逻辑，数据库用途为 `none`：只允许合成输入、测试自有临时配置、fake connection/model 和隔离的无网络 CLI 子进程，不连接任何真实数据库，不加载机器真实 `.env` 或继承真实 Mongo、AI、SMTP 凭据，不启动 AppModule 或业务服务。连接替换必须在任何网络连接前生效；临时目录与子进程由创建它们的测试在 teardown/finally 中收口。
 
-纯 CSV 测试负责合法引用/换行、严格语法拒绝、物理行号及表头查找；fake connection/model 测试负责配置优先级、声明与实际库名门禁、模型建立顺序、dry-run 写路径隔离、更新统计、密码重置撤销及连接关闭。隔离 CLI 入口测试验证 `--help` 无环境/文件/连接依赖、原始环境缺失时拒绝、模块导入不自动执行，以及失败退出与日志脱敏；这些证据证明控制流和调用边界，不证明真实 MongoDB 终态。产品 `--dry-run` 仍可查询目标数据库，不能将测试的 `none` 边界当作产品配置。
+纯 CSV 测试负责合法引用/换行、严格语法拒绝、物理行号及表头查找；fake connection/model 测试负责配置优先级、声明与实际库名门禁、模型建立顺序、dry-run 写路径隔离、正式邮箱校验、状态/密码版本轮换、版本限定双类撤销、更新统计及连接关闭。隔离 CLI 入口测试验证 `--help` 无环境/文件/连接依赖、原始环境缺失时拒绝、模块导入不自动执行，以及失败退出与日志脱敏；这些证据证明控制流和调用边界，不证明真实 MongoDB 终态。产品 `--dry-run` 仍可查询目标数据库，不能将测试的 `none` 边界当作产品配置。
 
 从 `backend` 目录先 discovery，结果必须恰好为这两个文件；通过后使用相同显式文件列表正式运行：
 
@@ -97,7 +125,7 @@ npm.cmd run test -- --listTests --runInBand --runTestsByPath ./scripts/import-us
 npm.cmd run test -- --runInBand --runTestsByPath ./scripts/import-users.spec.ts ./scripts/import-users-csv.spec.ts
 ```
 
-真实 MongoDB 的 dry-run 文档与元数据不变、真实更新结果及凭据撤销终态为 `not_executed`，归属后续“import-users 隔离数据库集成验收”；不得用 fake 或离线通过替代。CLI 配置来源、数据库映射与重置副作用由 [Config Matrix](./handoff-backend-config-matrix.md#import-users-独立导入-cli) 维护。
+真实导入 Store 的凭据轮换、状态保留和撤销终态由上节认证 HTTP/Mongo spec 使用正式 `importUsers/createMongooseStore` 验证，独立连接经门禁后使用并在 finally 关闭。真实 dry-run 的文档与元数据不变须由对应实库断言证明，不得从 fake 或离线通过推断。CLI 配置来源、数据库映射与重置副作用由 [Config Matrix](./handoff-backend-config-matrix.md#import-users-独立导入-cli) 维护。
 
 ### sync-indexes 定向验收
 
@@ -118,7 +146,7 @@ npm.cmd run test -- --runInBand --runTestsByPath ./scripts/sync-indexes.spec.ts
 
 测试期限早于 Jest 外层超时，停止后禁止发起新的测试写入。`afterAll` 从入口计算独立的清理总预算，早于 Jest 的 90 秒期限，覆盖在途调用收束、目标核验、归属查询、删除、残留报告与连接关闭，并为报告和关闭保留时间。确认已发出的写命令结果与实际目标后，每次删除分别在集合名称及 UUID 归属查询前、查询返回后且发出删除前检查期限。到期停止发起新删除，已发出的删除按实际完成或未确认记录。删除未确认时保留登记，残留或连接关闭无法确认时如实报告。超时、Promise 拒绝或关闭连接本身均不足以证明服务端已取消写入。清理期限及未确认状态使用受控时钟和 Promise 做离线回归，实库验收覆盖正常收尾。
 
-该 spec 核对缺失集合及索引的真实补建、关键唯一索引、Session TTL、Submission 现行实例部分唯一索引及旧专用索引默认不存在、再次执行无变更、重复键导致部分成功后的验收，以及集合重建前后的真实 UUID。旧索引退役场景仅在测试专属 Submission 集合显式创建历史索引，验证零写入预览、未授权拒绝、授权后仅删除该索引及再次空计划；保留索引以写前保存的原始元数据核对，覆盖其余 Submission 索引和其他测试模型索引。该场景不清理开发库、生产库或普通测试业务集合的旧索引。写前 UUID 漂移的确定性停止、BSON 精度和难以稳定制造的故障由离线回归负责。生产拓扑、唯一约束空窗、并发写入、复制延迟及真实网络超时均在本组验收范围之外。
+该 spec 核对缺失集合及索引的真实补建、Session tokenHash 唯一索引与 TTL、Submission 现行实例部分唯一索引及旧专用索引默认不存在、再次执行无变更、重复 tokenHash 导致部分成功后的验收，以及集合重建前后的真实 UUID；重复键夹具显式提供相同合成 hash，不用缺字段 null 冒充唯一性验证。旧索引退役场景仅在测试专属 Submission 集合显式创建历史索引，验证零写入预览、未授权拒绝、授权后仅删除该索引及再次空计划；保留索引以写前保存的原始元数据核对，覆盖其余 Submission 索引和其他测试模型索引。该场景不清理开发库、生产库或普通测试业务集合的旧索引。写前 UUID 漂移的确定性停止、BSON 精度和难以稳定制造的故障由离线回归负责。生产拓扑、唯一约束空窗、并发写入、复制延迟及真实网络超时均在本组验收范围之外。
 
 在独立 PowerShell 子进程中从 `backend` 目录执行。discovery 必须恰好命中指定 spec，随后使用相同文件路径正式运行。
 

@@ -26,11 +26,12 @@ export class AuthController {
     },
   ) {
     const result = await this.authService.login(dto);
-    const env = this.configService.get<string>('app.env') ?? 'development';
+    const cookieSecure =
+      this.configService.getOrThrow<boolean>('auth.cookieSecure');
     response.cookie(SESSION_COOKIE_NAME, result.sessionToken, {
       httpOnly: true,
       sameSite: 'lax',
-      secure: env === 'production',
+      secure: cookieSecure,
       maxAge: SESSION_TTL_MS,
       path: '/',
     });
@@ -39,17 +40,18 @@ export class AuthController {
 
   @Post('logout')
   async logout(
-    @Req() request: { cookies?: Record<string, string> },
+    @Req() request: { cookies?: Record<string, unknown> },
     @Res({ passthrough: true })
     response: { clearCookie: (name: string, options?: object) => void },
   ) {
     const token = request.cookies?.[SESSION_COOKIE_NAME];
     await this.authService.logout(token);
-    const env = this.configService.get<string>('app.env') ?? 'development';
+    const cookieSecure =
+      this.configService.getOrThrow<boolean>('auth.cookieSecure');
     response.clearCookie(SESSION_COOKIE_NAME, {
       httpOnly: true,
       sameSite: 'lax',
-      secure: env === 'production',
+      secure: cookieSecure,
       path: '/',
     });
     return { ok: true };

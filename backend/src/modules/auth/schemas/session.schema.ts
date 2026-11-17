@@ -9,8 +9,11 @@ export class Session {
   @Prop({ type: Types.ObjectId, ref: User.name, required: true })
   userId!: Types.ObjectId;
 
-  @Prop({ required: true })
-  token!: string;
+  @Prop({ type: String, required: true })
+  tokenHash!: string;
+
+  @Prop({ type: Number, required: true, min: 0, validate: Number.isInteger })
+  credentialVersion!: number;
 
   @Prop({ required: true })
   expiresAt!: Date;
@@ -18,5 +21,5 @@ export class Session {
 
 export const SessionSchema = SchemaFactory.createForClass(Session);
 SessionSchema.index({ expiresAt: 1 }, { expireAfterSeconds: 0 });
-SessionSchema.index({ token: 1 }, { unique: true });
+SessionSchema.index({ tokenHash: 1 }, { unique: true });
 SessionSchema.index({ userId: 1 });

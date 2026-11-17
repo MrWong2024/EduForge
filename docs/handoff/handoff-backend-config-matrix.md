@@ -47,7 +47,8 @@ Browser acceptance 配置：
 | `production` | `false` |
 
 - production 的 Schema 索引同步唯一入口为 [sync-indexes 普通模式](#sync-indexes-普通索引同步) 的显式 apply。应用启动时保持 `autoIndex=false`。
-- `sessions` 集合必须具备 `userId_1`、`token_1 unique`、`expiresAt_1 expireAfterSeconds:0`。
+- `sessions` 的会话凭据只存 SHA-256 十六进制 `tokenHash`，必须具备 `userId_1`、`tokenHash_1 unique`、`expiresAt_1 expireAfterSeconds:0`；明文 token 字段及 `token_1` 已从当前 Schema 退役。
+- 新版接入真实存量前，用户须通过独立运维完成 User 的 `credentialVersion/passwordResetRequestedAt` 对齐、旧 Session/reset token 失效及 Session 索引切换，并停止旧版本写入。当前 Schema、编译或合成测试不构成真实存量已对齐的证据；本规则不授予迁移或索引写入权限。具体边界见[当前数据契约与存量对齐](../database-conventions.md#当前数据契约与存量对齐)。
 
 ### sync-indexes 普通索引同步
 
@@ -80,7 +81,8 @@ npm run sync-indexes -- --apply --confirm-db <精确库名> --allow-drop
 - 数据库映射与 purpose 合法性沿用本节权威定义；本 CLI 不支持 `browser_acceptance`，进程或所选文件声明该用途均拒绝。连接前精确校验 URI 的库名，连接后先核对实际 `databaseName`，通过后才建立模型和查询用户；不要求 AI、SMTP 等无关配置。
 - 使用独立 Mongoose 连接，明确 `autoCreate=false`、`autoIndex=false`，复用现有 Schema，不启动 AppModule、认证模块、Worker 或 Provider，不显式调用 `init`、`ensureIndexes`、`syncIndexes`、`createCollection` 等初始化写入入口。成功、失败及实际库名不符时均回收本轮连接。
 - `--dry-run` 可以读取目标库现有用户以计算**预计**创建、更新、跳过和失败数量；不创建或修改用户、不生成密码哈希、不撤销凭据、不处理作业、不调用模型或发送邮件。预计统计不是实际写入结果；离线测试与真实数据库验收的证据边界见 [Backend Testing Playbook](./handoff-backend-testing-playbook.md#import-users-定向离线回归)。
-- 默认不修改已有账号密码；`--reset-password` 在已有用户密码更新成功且确认匹配后，删除该 `userId` 的**全部会话**，并作废其尚未使用且未过期的密码重置令牌。撤销影响零条记录属于正常结果，用户文档未变化也不能跳过撤销；两项撤销均须尝试，任一失败或写入未确认时该行只计一次失败，不计更新成功。密码更新失败或未匹配时不继续撤销；再次显式重置仍执行完整更新与撤销流程。
+- 邮箱 trim + lowercase 后复用认证 DTO 相同的 `isEmail` 校验；正式密码写入复用[共享密码策略](./handoff-backend-dto-cheatsheet.md#密码与公开错误合同)。默认不修改已有账号密码；CSV 省略 status 时保留数据库当前值，普通资料或 roles 更新不轮换凭据。
+- `--reset-password` 或实际 status 变化时，以读取的 `credentialVersion` 条件更新 User，同一次写入递增版本；两者同时发生只递增一次。确认密码/状态及版本写入后，仅删除该用户 `< 本次新版本` 的 Session，并作废同边界内尚未使用且未过期的重置令牌。两类撤销均须尝试，零条受影响记录正常；任一清理失败或写入未确认，该行只计一次失败，不计更新成功。CAS 未命中不继续撤销、不重试；再次显式重置重新读取版本执行完整流程。
 - 保留逐行部分成功语义，不使用整批事务；失败可能已经部分生效，不回滚、不自动重试。任一行失败或致命启动、连接、关闭错误均以非零状态退出，不把部分成功报告为全部完成。
 
 ### Task.stage 定向退役运维
@@ -93,7 +95,7 @@ npm run sync-indexes -- --apply --confirm-db <精确库名> --allow-drop
 
 ## 2) Cookie、CORS 与前端代理
 
-- 会话 Cookie：`ef_session`，`HttpOnly=true`、`sameSite=lax`、`secure=(NODE_ENV=production)`、`path=/`、`maxAge=SESSION_TTL_MS`（当前 `7d`）。
+- 会话 Cookie：`ef_session`，`HttpOnly=true`、`sameSite=lax`、`path=/`、`maxAge=SESSION_TTL_MS`（当前 `7d`）。`configuration.ts` 唯一计算 boolean `auth.cookieSecure`（production 为 true，其余 false），Controller 直接读取该值设置或清除 Cookie，不自行按环境或 fallback 推导。
 - 后端 CORS origin 由 `FRONTEND_URL` 控制，默认 `http://localhost:3000`。
 - `FRONTEND_BACKEND_ORIGIN` 是 frontend BFF 的 server-side upstream origin。
 - 本地开发模板：`frontend/.env.local.example` → 实际 `frontend/.env.local`，值为 `http://localhost:5000`。

@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { parse } from 'dotenv';
@@ -552,9 +552,9 @@ describe('sync-indexes against an isolated MongoDB namespace', () => {
         expireAfterSeconds: 0,
       });
       expect(
-        sessionIndexes.find(({ name }) => name === 'token_1'),
+        sessionIndexes.find(({ name }) => name === 'tokenHash_1'),
       ).toMatchObject({
-        key: { token: 1 },
+        key: { tokenHash: 1 },
         unique: true,
       });
       expect(
@@ -689,8 +689,14 @@ describe('sync-indexes against an isolated MongoDB namespace', () => {
     'stops at a real duplicate-key failure and verifies the partial result',
     async () => {
       const collection = await createOwned(collections.failingSessions);
+      const duplicateHash = createHash('sha256')
+        .update('synthetic-duplicate-session')
+        .digest('hex');
       await lifecycle.write(() =>
-        collection.insertMany([{ token: 'same' }, { token: 'same' }]),
+        collection.insertMany([
+          { tokenHash: duplicateHash, credentialVersion: 0 },
+          { tokenHash: duplicateHash, credentialVersion: 0 },
+        ]),
       );
       await lifecycle.write(() => collection.createIndex({ legacyOnly: 1 }));
       const models = [
@@ -712,7 +718,7 @@ describe('sync-indexes against an isolated MongoDB namespace', () => {
         session.verification?.differences?.missingIndexes.map(({ key }) =>
           Object.keys(key),
         ),
-      ).toEqual([['token'], ['userId']]);
+      ).toEqual([['tokenHash'], ['userId']]);
       expect(session.operations.map(({ status }) => status)).toEqual([
         'completed',
         'completed',

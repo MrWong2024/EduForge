@@ -6,6 +6,9 @@ export default () => ({
     port: Number.parseInt(process.env.BACKEND_PORT ?? '5000', 10),
     frontendUrl: process.env.FRONTEND_URL ?? 'http://localhost:3000',
   },
+  auth: {
+    cookieSecure: process.env.NODE_ENV === 'production',
+  },
   mail: {
     provider: process.env.MAIL_PROVIDER ?? 'log',
     from: process.env.MAIL_FROM ?? '',

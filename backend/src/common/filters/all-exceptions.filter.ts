@@ -23,8 +23,9 @@ export class AllExceptionsFilter implements ExceptionFilter {
         : HttpStatus.INTERNAL_SERVER_ERROR;
 
     let message = 'Internal server error';
+    let code: string | undefined;
 
-    if (exception instanceof HttpException) {
+    if (status < 500 && exception instanceof HttpException) {
       const responseBody = exception.getResponse();
       if (typeof responseBody === 'string') {
         message = responseBody;
@@ -35,9 +36,15 @@ export class AllExceptionsFilter implements ExceptionFilter {
         } else if (Array.isArray(maybeMessage)) {
           message = maybeMessage.filter(Boolean).join('; ');
         }
+        const candidate = (responseBody as { code?: unknown }).code;
+        if (
+          status === 400 &&
+          (candidate === 'RESET_TOKEN_INVALID' ||
+            candidate === 'PASSWORD_POLICY_VIOLATION')
+        ) {
+          code = candidate;
+        }
       }
-    } else if (exception instanceof Error && exception.message) {
-      message = exception.message;
     }
 
     const path = String(httpAdapter.getRequestUrl(request));
@@ -49,6 +56,7 @@ export class AllExceptionsFilter implements ExceptionFilter {
         timestamp: new Date().toISOString(),
         path,
         message,
+        ...(code === undefined ? {} : { code }),
       },
       status,
     );

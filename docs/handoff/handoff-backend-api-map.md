@@ -18,7 +18,7 @@
 - `TEACHER` 管理自己创建/拥有的课程、班级、课堂任务、提交与报表；`STUDENT` 仅访问自己 Enrollment ACTIVE 的班级任务、自己的提交与反馈。
 - 成员与默认教学统计的权威来源为 Enrollment-only（`role=STUDENT,status=ACTIVE`）；旧 `classroom.studentIds` 已退役，不再输出或作为 fallback，公开数据见 [DTO Classroom family](./handoff-backend-dto-cheatsheet.md#classrooms)。
 - 课堂分析、报表、复盘、导出以及课堂提交读取均按 `classroomId + classroomTaskId + studentId` 的资源边界隔离；禁止使用模板 `taskId` 兜底跨班聚合。通用模板入口的独立语义见 Learning Tasks。
-- 认证失败返回 `401 Unauthorized`；debug/ops 门禁关闭时优先返回 `404`，不暴露入口存在性。
+- 登录与会话均要求用户 active；会话须未过期且凭据版本有效，非字符串或不符合格式的 Cookie 不进入查询。认证失败、停用或凭据失效统一返回 `401 Unauthorized`，不区分账号不存在、停用和密码错误；debug/ops 门禁关闭时优先返回 `404`，不暴露入口存在性。
 
 ## App
 
@@ -33,13 +33,14 @@
 | POST   | `/api/auth/login`           | 登录并写入 `ef_session` Cookie（HttpOnly）。               |
 | POST   | `/api/auth/logout`          | 注销并清除 `ef_session` Cookie。                           |
 | POST   | `/api/auth/forgot-password` | 提交邮箱并触发一次性密码重置邮件（固定返回通用成功提示）。 |
-| POST   | `/api/auth/reset-password`  | 使用一次性 token 设置新密码，并清理该用户全部 sessions。   |
+| POST   | `/api/auth/reset-password`  | 使用一次性 token 设置新密码，使修改前的会话与重置凭据失效。 |
 
 Notes:
 
+- login/logout 成功均为 HTTP 201；forgot-password/reset-password 成功均为 HTTP 200。
 - 忘记密码与重置密码是公开入口。忘记密码对邮箱不存在、不可登录用户及正常请求统一返回通用成功提示，避免枚举；只有允许登录的用户才创建 token 并触发邮件。
-- 同一真实用户邮箱 60 秒内再次请求命中冷却时，不创建新 token、不失效旧 token、不重复发邮件，对外响应不变；邮件发送失败也维持通用提示。
-- 重置使用一次性 token；无效、已使用、过期或对应用户不可登录时返回 `400 Reset token is invalid`。成功后该用户的重置凭据失效并清理全部 sessions；不会自动登录或写入登录 Cookie。
+- 同一用户 60 秒冷却内只有占位成功者签发；占位失败者不创建 token、不清理其它 token、不发邮件，对外响应不变。邮件发送失败也维持相同通用提示；新的成功请求会取代旧请求。
+- 重置使用一次性 token；无效、已消费、过期、被新请求替代、旧凭据版本或用户不可登录时统一返回 400，公开 message/code 见 [DTO 密码与错误](./handoff-backend-dto-cheatsheet.md#密码与公开错误合同)。正常成功使修改前的全部会话与重置凭据失效，不会自动登录或写入登录 Cookie。竞争失败不恢复已消费 token，应重新申请重置链接；密码已写入后发生后续故障不自动回滚或重放。
 - 请求校验、公开 message 及凭据省略见 [DTO Auth](./handoff-backend-dto-cheatsheet.md#auth)；token 领取、失效与恢复策略见 [Service Card 01C](./handoff-backend-service-map.md#service-card-01c)。
 
 ## Users
@@ -53,7 +54,7 @@ Notes:
 Notes:
 
 - 读取与修改资料都基于当前登录会话，不接受替其他用户修改资料；公开资料白名单与相同返回投影见 [DTO Users](./handoff-backend-dto-cheatsheet.md#users)。
-- 自助改密先校验当前密码；成功后保留当前会话，失效该用户其它历史会话。内部协作见 [Service Card 02](./handoff-backend-service-map.md#service-card-02)。
+- `GET /api/users/me` 与自助改密正常成功均为 HTTP 200。改密先校验当前密码；无竞争成功后原 Cookie 继续有效，其它旧会话与旧重置凭据失效。竞争或当前会话已注销时返回 401，要求重新登录；若密码已写入，不回滚新密码或复活会话。内部协作见 [Service Card 02](./handoff-backend-service-map.md#service-card-02)，密码及错误字段见 [DTO](./handoff-backend-dto-cheatsheet.md#密码与公开错误合同)。
 
 ## Courses
 

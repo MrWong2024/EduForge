@@ -1,29 +1,28 @@
-import { INestApplication, ValidationPipe } from '@nestjs/common';
+import {
+  authTestEnvironment,
+  assertAuthTestConnection,
+} from './helpers/auth-test-environment';
+import { INestApplication } from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
-import { getModelToken } from '@nestjs/mongoose';
-import { Model, Types } from 'mongoose';
+import { getConnectionToken, getModelToken } from '@nestjs/mongoose';
+import { Connection, Model, Types } from 'mongoose';
 import * as bcrypt from 'bcryptjs';
-import cookieParser from 'cookie-parser';
 import request from 'supertest';
 import { App } from 'supertest/types';
 import { AppModule } from '../src/app.module';
+import { configureApp } from '../src/app.setup';
 import { User } from '../src/modules/users/schemas/user.schema';
 import { Session } from '../src/modules/auth/schemas/session.schema';
+import { PasswordResetToken } from '../src/modules/auth/schemas/password-reset-token.schema';
+import { prepareAuthSessionIndexes } from './helpers/auth-session-indexes';
 
 jest.setTimeout(30000);
-
-const ensureMongoUri = () => {
-  if (!process.env.MONGO_URI) {
-    throw new Error(
-      'MONGO_URI is required for users change-password e2e tests.',
-    );
-  }
-};
 
 describe('Users change password (e2e)', () => {
   let app: INestApplication<App>;
   let userModel: Model<User>;
   let sessionModel: Model<Session>;
+  let resetTokenModel: Model<PasswordResetToken>;
   let createdUserId = '';
 
   const userEmail = `users.change-password.${Date.now()}@example.com`;
@@ -36,55 +35,79 @@ describe('Users change password (e2e)', () => {
     await agent
       .post('/api/auth/login')
       .send({ email: userEmail, password })
-      .expect((res) => {
-        if (![200, 201].includes(res.status)) {
-          throw new Error(
-            `Unexpected login status ${res.status}, body=${JSON.stringify(res.body)}`,
-          );
-        }
-      });
+      .expect(201);
   };
 
   beforeAll(async () => {
-    ensureMongoUri();
+    await prepareAuthSessionIndexes();
 
     const moduleFixture: TestingModule = await Test.createTestingModule({
       imports: [AppModule],
     }).compile();
 
     app = moduleFixture.createNestApplication();
-    app.setGlobalPrefix('api');
-    app.useGlobalPipes(
-      new ValidationPipe({
-        whitelist: true,
-        transform: true,
-        forbidNonWhitelisted: true,
-      }),
-    );
-    app.use(cookieParser());
+    configureApp(app);
     await app.init();
+    await assertAuthTestConnection(app.get<Connection>(getConnectionToken()));
 
     userModel = app.get(getModelToken(User.name));
     sessionModel = app.get(getModelToken(Session.name));
+    resetTokenModel = app.get(getModelToken(PasswordResetToken.name));
 
     const passwordHash = await bcrypt.hash(currentPassword, 10);
-    const user = await userModel.create({
+    const userId = new Types.ObjectId();
+    createdUserId = userId.toString();
+    await userModel.create({
+      _id: userId,
       email: userEmail,
       passwordHash,
       roles: ['teacher'],
+      credentialVersion: 0,
+      passwordResetRequestedAt: null,
     });
-    createdUserId = user._id.toString();
   });
 
   afterAll(async () => {
-    if (createdUserId) {
-      const userObjectId = new Types.ObjectId(createdUserId);
-      await Promise.all([
-        sessionModel.deleteMany({ userId: userObjectId }),
-        userModel.deleteOne({ _id: userObjectId }),
-      ]);
+    try {
+      if (createdUserId) {
+        const userObjectId = new Types.ObjectId(createdUserId);
+        const cleanup = await Promise.allSettled([
+          sessionModel
+            .deleteMany({ userId: userObjectId })
+            .maxTimeMS(5000)
+            .exec(),
+          resetTokenModel
+            .deleteMany({ userId: userObjectId })
+            .maxTimeMS(5000)
+            .exec(),
+          userModel.deleteOne({ _id: userObjectId }).maxTimeMS(5000).exec(),
+        ]);
+        const residual = await Promise.all([
+          sessionModel
+            .countDocuments({ userId: userObjectId })
+            .maxTimeMS(5000)
+            .exec(),
+          resetTokenModel
+            .countDocuments({ userId: userObjectId })
+            .maxTimeMS(5000)
+            .exec(),
+          userModel
+            .countDocuments({ _id: userObjectId })
+            .maxTimeMS(5000)
+            .exec(),
+        ]);
+        expect(residual).toEqual([0, 0, 0]);
+        if (cleanup.some(({ status }) => status === 'rejected')) {
+          throw new Error('USERS_PASSWORD_AUTH_FIXTURE_CLEANUP_FAILED');
+        }
+      }
+    } finally {
+      try {
+        await app?.close();
+      } finally {
+        authTestEnvironment.restore();
+      }
     }
-    await app.close();
   });
 
   it('rejects unauthenticated requests', async () => {
@@ -120,7 +143,10 @@ describe('Users change password (e2e)', () => {
         currentPassword,
         newPassword: '        ',
       })
-      .expect(400);
+      .expect(400)
+      .expect(({ body }: { body: { code?: string } }) => {
+        expect(body.code).toBe('PASSWORD_POLICY_VIOLATION');
+      });
   });
 
   it('rejects when new password equals current password', async () => {
@@ -154,7 +180,17 @@ describe('Users change password (e2e)', () => {
         expect(body).toEqual({ ok: true });
       });
 
-    await primaryAgent.get('/api/users/me').expect(200);
+    const profile = await primaryAgent.get('/api/users/me').expect(200);
+    const profileBody = profile.body as Record<string, unknown>;
+    for (const field of [
+      'passwordHash',
+      'tokenHash',
+      'sessionId',
+      'credentialVersion',
+      'passwordResetRequestedAt',
+    ]) {
+      expect(Object.hasOwn(profileBody, field)).toBe(false);
+    }
     await secondaryAgent.get('/api/users/me').expect(401);
 
     const sessionCount = await sessionModel
@@ -170,13 +206,7 @@ describe('Users change password (e2e)', () => {
     await request(app.getHttpServer())
       .post('/api/auth/login')
       .send({ email: userEmail, password: nextPassword })
-      .expect((res) => {
-        if (![200, 201].includes(res.status)) {
-          throw new Error(
-            `Unexpected login status ${res.status}, body=${JSON.stringify(res.body)}`,
-          );
-        }
-      });
+      .expect(201);
 
     currentPassword = nextPassword;
   });

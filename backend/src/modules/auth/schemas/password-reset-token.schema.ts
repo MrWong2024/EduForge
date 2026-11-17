@@ -15,6 +15,12 @@ export class PasswordResetToken {
   @Prop({ required: true, unique: true })
   tokenHash!: string;
 
+  @Prop({ type: Number, required: true, min: 0, validate: Number.isInteger })
+  credentialVersion!: number;
+
+  @Prop({ type: Date, required: true })
+  requestedAt!: Date;
+
   @Prop({ required: true })
   expiresAt!: Date;
 

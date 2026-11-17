@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { parse as parseEnvironment } from 'dotenv';
-import * as bcrypt from 'bcryptjs';
+import { isEmail } from 'class-validator';
 import mongoose from 'mongoose';
 import type { Connection, Types } from 'mongoose';
 import {
@@ -30,10 +30,12 @@ import {
 } from '../src/modules/users/schemas/user-roles.constants';
 import { buildHeaderKeys, CsvInputError, parseCsv } from './import-users-csv';
 import type { CsvHeader, CsvRecord } from './import-users-csv';
+import {
+  hashPassword as hashUserPassword,
+  validateNewPassword,
+} from '../src/modules/users/password.utils';
 
 const INITIAL_PASSWORD = 'cqupt@ai';
-const PASSWORD_SALT_ROUNDS = 10;
-const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const CONNECTION_OPTIONS = {
   autoCreate: false,
   autoIndex: false,
@@ -60,6 +62,7 @@ export type ImportStats = {
 };
 export type ExistingImportUser = {
   _id: Types.ObjectId;
+  credentialVersion: number;
   roles?: string[];
   status?: string;
   name?: string;
@@ -82,6 +85,10 @@ export type WriteResult = {
   modifiedCount: number;
 };
 export type DeleteResult = { acknowledged: boolean; deletedCount: number };
+export type CredentialUpdate = {
+  expectedCredentialVersion: number;
+  rotateCredentials: boolean;
+};
 export interface ImportStore {
   findUser(this: void, email: string): Promise<ExistingImportUser | null>;
   createUser(this: void, payload: CreateUserPayload): Promise<void>;
@@ -89,11 +96,17 @@ export interface ImportStore {
     this: void,
     id: Types.ObjectId,
     changes: UpdateUserPayload,
+    credentials: CredentialUpdate,
   ): Promise<WriteResult>;
-  deleteSessions(this: void, id: Types.ObjectId): Promise<DeleteResult>;
+  deleteSessions(
+    this: void,
+    id: Types.ObjectId,
+    newVersion: number,
+  ): Promise<DeleteResult>;
   invalidateResetTokens(
     this: void,
     id: Types.ObjectId,
+    newVersion: number,
     now: Date,
   ): Promise<WriteResult>;
 }
@@ -214,7 +227,7 @@ export function resolveImportConfig(
   };
 }
 
-function createStore(connection: Connection): ImportStore {
+export function createMongooseStore(connection: Connection): ImportStore {
   const userSchema = UserSchema.clone();
   const sessionSchema = SessionSchema.clone();
   const resetTokenSchema = PasswordResetTokenSchema.clone();
@@ -233,20 +246,38 @@ function createStore(connection: Connection): ImportStore {
     createUser: async (payload) => {
       await users.create(payload);
     },
-    updateUser: (userId, changes) =>
+    updateUser: (userId, changes, credentials) =>
       users
         .updateOne(
-          { _id: userId },
-          { $set: changes },
+          {
+            _id: userId,
+            credentialVersion: credentials.expectedCredentialVersion,
+          },
+          {
+            $set: changes,
+            ...(credentials.rotateCredentials
+              ? { $inc: { credentialVersion: 1 } }
+              : {}),
+          },
           { runValidators: true, maxTimeMS: 5000 },
         )
         .exec(),
-    deleteSessions: (userId) =>
-      sessions.deleteMany({ userId }, { maxTimeMS: 5000 }).exec(),
-    invalidateResetTokens: (userId, now) =>
+    deleteSessions: (userId, newVersion) =>
+      sessions
+        .deleteMany(
+          { userId, credentialVersion: { $lt: newVersion } },
+          { maxTimeMS: 5000 },
+        )
+        .exec(),
+    invalidateResetTokens: (userId, newVersion, now) =>
       resetTokens
         .updateMany(
-          { userId, usedAt: null, expiresAt: { $gt: now } },
+          {
+            userId,
+            credentialVersion: { $lt: newVersion },
+            usedAt: null,
+            expiresAt: { $gt: now },
+          },
           { $set: { usedAt: now } },
           { maxTimeMS: 5000 },
         )
@@ -264,7 +295,7 @@ function createMongooseConnection(
       await connection.asPromise();
     },
     databaseName: () => connection.db?.databaseName,
-    createStore: () => createStore(connection),
+    createStore: () => createMongooseStore(connection),
     close: async () => {
       await connection.close();
     },
@@ -289,7 +320,7 @@ function normalizeRow(
     if (key && value) raw[key] = value;
   }
   const email = raw.email?.trim().toLowerCase();
-  if (!email || !EMAIL_PATTERN.test(email)) {
+  if (!email || !isEmail(email)) {
     throw new ImportUsersError('CSV_EMAIL_INVALID');
   }
   if (!raw.roles) throw new ImportUsersError('CSV_ROLES_REQUIRED');
@@ -365,17 +396,18 @@ function safeErrorCode(error: unknown): string {
 async function revokeCredentials(
   store: ImportStore,
   userId: Types.ObjectId,
+  newVersion: number,
   now: Date,
 ): Promise<void> {
   let failed = false;
   try {
-    const result = await store.deleteSessions(userId);
+    const result = await store.deleteSessions(userId, newVersion);
     if (result.acknowledged !== true) failed = true;
   } catch {
     failed = true;
   }
   try {
-    const result = await store.invalidateResetTokens(userId, now);
+    const result = await store.invalidateResetTokens(userId, newVersion, now);
     if (result.acknowledged !== true) failed = true;
   } catch {
     failed = true;
@@ -435,8 +467,13 @@ export async function importUsers(
       if (options.resetPassword) {
         changes.passwordHash = await deps.hashPassword();
       }
+      const rotateCredentials =
+        options.resetPassword || changes.status !== undefined;
       writeAttempted = true;
-      const result = await store.updateUser(existing._id, changes);
+      const result = await store.updateUser(existing._id, changes, {
+        expectedCredentialVersion: existing.credentialVersion,
+        rotateCredentials,
+      });
       if (result.acknowledged !== true) {
         throw new ImportUsersError('USER_UPDATE_UNCONFIRMED', true);
       }
@@ -446,8 +483,16 @@ export async function importUsers(
       if (result.modifiedCount !== 0 && result.modifiedCount !== 1) {
         throw new ImportUsersError('USER_UPDATE_RESULT_INVALID', true);
       }
-      if (options.resetPassword) {
-        await revokeCredentials(store, existing._id, deps.now());
+      if (rotateCredentials) {
+        if (result.modifiedCount !== 1) {
+          throw new ImportUsersError('USER_UPDATE_RESULT_INVALID', true);
+        }
+        await revokeCredentials(
+          store,
+          existing._id,
+          existing.credentialVersion + 1,
+          deps.now(),
+        );
       }
       if (result.modifiedCount === 1) stats.updated++;
       else stats.skipped++;
@@ -477,7 +522,7 @@ function defaultDependencies(): ImportDependencies {
     readFile: (filePath) =>
       new TextDecoder('utf-8', { fatal: true }).decode(readFileSync(filePath)),
     createConnection: createMongooseConnection,
-    hashPassword: () => bcrypt.hash(INITIAL_PASSWORD, PASSWORD_SALT_ROUNDS),
+    hashPassword: () => hashUserPassword(validateNewPassword(INITIAL_PASSWORD)),
     now: () => new Date(),
     log: (message) => console.log(message),
     error: (message) => console.error(message),

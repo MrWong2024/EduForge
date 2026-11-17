@@ -1,17 +1,9 @@
-import {
-  Body,
-  Controller,
-  Get,
-  HttpCode,
-  Patch,
-  Post,
-  Req,
-} from '@nestjs/common';
-import { SESSION_COOKIE_NAME } from '../../auth/auth.constants';
+import { Body, Controller, Get, HttpCode, Patch, Post } from '@nestjs/common';
 import { UsersService } from '../services/users.service';
 import { UpdateProfileDto } from '../dto/update-profile.dto';
 import { ChangePasswordDto } from '../dto/change-password.dto';
 import { CurrentUser } from '../../../common/decorators/current-user.decorator';
+import type { AuthenticatedUser } from '../../../common/types/authenticated-user.type';
 
 @Controller('users')
 export class UsersController {
@@ -30,11 +22,12 @@ export class UsersController {
   @Post('me/change-password')
   @HttpCode(200)
   changePassword(
-    @CurrentUser() user: { id: string },
+    @CurrentUser() user: AuthenticatedUser,
     @Body() dto: ChangePasswordDto,
-    @Req() request: { cookies?: Record<string, string> },
   ) {
-    const currentSessionToken = request.cookies?.[SESSION_COOKIE_NAME];
-    return this.usersService.changePassword(user.id, dto, currentSessionToken);
+    return this.usersService.changePassword(user.id, dto, {
+      sessionId: user.sessionId,
+      credentialVersion: user.credentialVersion,
+    });
   }
 }

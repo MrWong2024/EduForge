@@ -23,6 +23,18 @@ export class User {
   @Prop({ required: true, select: false })
   passwordHash!: string;
 
+  @Prop({
+    type: Number,
+    required: true,
+    min: 0,
+    validate: Number.isInteger,
+    default: 0,
+  })
+  credentialVersion!: number;
+
+  @Prop({ type: Date, default: null })
+  passwordResetRequestedAt!: Date | null;
+
   @Prop({ type: [String], default: [USER_ROLE_USER] })
   roles!: string[];
 

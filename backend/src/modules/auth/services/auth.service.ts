@@ -3,18 +3,25 @@ import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import { LoginDto } from '../dto/login.dto';
 import { Session } from '../schemas/session.schema';
-import { User } from '../../users/schemas/user.schema';
-import { comparePassword } from '../../users/password.utils';
+import { User, UserStatus } from '../../users/schemas/user.schema';
+import {
+  comparePassword,
+  validateLoginPassword,
+} from '../../users/password.utils';
 import { WithId } from '../../../common/types/with-id.type';
 import { WithTimestamps } from '../../../common/types/with-timestamps.type';
 import {
   AUTHENTICATED_ROLES,
   UserRole,
 } from '../../users/schemas/user-roles.constants';
-import { SessionService } from './session.service';
+import { AuthenticatedUser } from '../../../common/types/authenticated-user.type';
+import {
+  hashSessionToken,
+  isSessionToken,
+  SessionService,
+} from './session.service';
 
 type UserWithMeta = User & WithId & WithTimestamps & { passwordHash?: string };
-type SessionUserMeta = { id: string; roles: UserRole[] };
 
 @Injectable()
 export class AuthService {
@@ -26,20 +33,36 @@ export class AuthService {
 
   async login(dto: LoginDto) {
     const email = dto.email.trim().toLowerCase();
+    const password = validateLoginPassword(dto.password);
     const user = (await this.userModel
-      .findOne({ email })
+      .findOne({ email, status: UserStatus.Active })
       .select('+passwordHash')
       .exec()) as UserWithMeta | null;
     if (!user || !user.passwordHash) {
       throw new UnauthorizedException('Unauthorized');
     }
 
-    const isValid = await comparePassword(dto.password, user.passwordHash);
+    const isValid = await comparePassword(password, user.passwordHash);
     if (!isValid) {
       throw new UnauthorizedException('Unauthorized');
     }
 
-    const sessionToken = await this.sessionService.createUserSession(user._id);
+    const credentialVersion = user.credentialVersion;
+    const sessionToken = await this.sessionService.createUserSession(
+      user._id,
+      credentialVersion,
+    );
+    try {
+      const userStillValid = await this.userModel
+        .exists({ _id: user._id, status: UserStatus.Active, credentialVersion })
+        .exec();
+      if (!userStillValid) {
+        throw new UnauthorizedException('Unauthorized');
+      }
+    } catch (error) {
+      await this.sessionService.deleteSession(sessionToken);
+      throw error;
+    }
 
     return {
       sessionToken,
@@ -53,15 +76,17 @@ export class AuthService {
     };
   }
 
-  async logout(token?: string) {
+  async logout(token: unknown) {
     await this.sessionService.deleteSession(token);
   }
 
-  async validateSession(token?: string): Promise<SessionUserMeta | null> {
-    if (!token) {
+  async validateSession(token: unknown): Promise<AuthenticatedUser | null> {
+    if (!isSessionToken(token)) {
       return null;
     }
-    const session = await this.sessionModel.findOne({ token }).exec();
+    const session = await this.sessionModel
+      .findOne({ tokenHash: hashSessionToken(token) })
+      .exec();
     if (!session) {
       return null;
     }
@@ -69,11 +94,21 @@ export class AuthService {
       await this.sessionModel.deleteOne({ _id: session._id }).exec();
       return null;
     }
+    if (
+      !Number.isInteger(session.credentialVersion) ||
+      session.credentialVersion < 0
+    ) {
+      return null;
+    }
     const user = await this.userModel
-      .findById(session.userId)
-      .select('_id roles')
+      .findOne({
+        _id: session.userId,
+        status: UserStatus.Active,
+        credentialVersion: session.credentialVersion,
+      })
+      .select('_id roles credentialVersion')
       .exec();
-    if (!user) {
+    if (!user || user.credentialVersion !== session.credentialVersion) {
       return null;
     }
     const userRoles = Array.isArray(user.roles) ? user.roles : [];
@@ -83,6 +118,8 @@ export class AuthService {
     return {
       id: user._id.toString(),
       roles: normalizedRoles,
+      sessionId: session._id.toString(),
+      credentialVersion: session.credentialVersion,
     };
   }
 }

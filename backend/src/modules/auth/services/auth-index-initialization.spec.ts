@@ -7,6 +7,7 @@ import { PasswordResetToken } from '../schemas/password-reset-token.schema';
 import { Session } from '../schemas/session.schema';
 import { PasswordResetService } from './password-reset.service';
 import { SessionService } from './session.service';
+import { AuthService } from './auth.service';
 
 function createModelProvider(modelName: string) {
   const mockIndexMethod = (method: string) =>
@@ -28,13 +29,14 @@ function createModelProvider(modelName: string) {
 }
 
 describe('Auth index initialization', () => {
-  it('initializes both services without issuing index writes', async () => {
+  it('initializes auth services without issuing index writes', async () => {
     const modelProviders = [Session, PasswordResetToken, User].map(({ name }) =>
       createModelProvider(name),
     );
     const module = await Test.createTestingModule({
       providers: [
         SessionService,
+        AuthService,
         PasswordResetService,
         ...modelProviders,
         { provide: ConfigService, useValue: { get: jest.fn() } },
@@ -49,6 +51,7 @@ describe('Auth index initialization', () => {
       await module.init();
 
       expect(module.get(SessionService)).toBeInstanceOf(SessionService);
+      expect(module.get(AuthService)).toBeInstanceOf(AuthService);
       expect(module.get(PasswordResetService)).toBeInstanceOf(
         PasswordResetService,
       );

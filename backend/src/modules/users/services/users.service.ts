@@ -8,15 +8,16 @@ import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import { UpdateProfileDto } from '../dto/update-profile.dto';
 import { ChangePasswordDto } from '../dto/change-password.dto';
-import { User } from '../schemas/user.schema';
-import { WithId } from '../../../common/types/with-id.type';
-import { WithTimestamps } from '../../../common/types/with-timestamps.type';
+import { User, UserStatus } from '../schemas/user.schema';
+import { AuthenticatedUser } from '../../../common/types/authenticated-user.type';
 import {
   comparePassword,
   hashPassword,
+  validateCurrentPassword,
   validateNewPassword,
 } from '../password.utils';
 import { SessionService } from '../../auth/services/session.service';
+import { PasswordResetToken } from '../../auth/schemas/password-reset-token.schema';
 
 type PublicUserProfileLean = Pick<
   User,
@@ -25,9 +26,10 @@ type PublicUserProfileLean = Pick<
   _id: Types.ObjectId;
   createdAt?: Date;
 };
-type UserWithPassword = User &
-  WithId &
-  WithTimestamps & { passwordHash?: string };
+type UserWithPassword = Pick<
+  User,
+  'passwordHash' | 'status' | 'credentialVersion'
+> & { _id: Types.ObjectId };
 type PublicUserProfile = {
   id: string;
   email: string;
@@ -50,6 +52,8 @@ export class UsersService {
   constructor(
     private readonly sessionService: SessionService,
     @InjectModel(User.name) private readonly userModel: Model<User>,
+    @InjectModel(PasswordResetToken.name)
+    private readonly passwordResetTokenModel: Model<PasswordResetToken>,
   ) {}
 
   async getMe(userId: string): Promise<PublicUserProfile> {
@@ -91,26 +95,30 @@ export class UsersService {
   async changePassword(
     userId: string,
     dto: ChangePasswordDto,
-    currentSessionToken?: string,
+    context: Pick<AuthenticatedUser, 'sessionId' | 'credentialVersion'>,
   ): Promise<{ ok: true }> {
+    const currentPassword = validateCurrentPassword(dto.currentPassword);
+    const nextPassword = validateNewPassword(dto.newPassword);
     const user = await this.userModel
       .findById(userId)
-      .select('+passwordHash')
+      .select('status credentialVersion +passwordHash')
       .lean<UserWithPassword>()
       .exec();
-    if (!user || !user.passwordHash) {
-      throw new NotFoundException('User not found');
+    if (
+      !user ||
+      user.status !== UserStatus.Active ||
+      user.credentialVersion !== context.credentialVersion
+    ) {
+      throw new UnauthorizedException('Unauthorized');
     }
 
     const isCurrentPasswordValid = await comparePassword(
-      dto.currentPassword,
+      currentPassword,
       user.passwordHash,
     );
     if (!isCurrentPasswordValid) {
-      throw new UnauthorizedException('Current password is incorrect');
+      throw new UnauthorizedException('Unauthorized');
     }
-
-    const nextPassword = validateNewPassword(dto.newPassword);
 
     const isSameAsCurrent = await comparePassword(
       nextPassword,
@@ -123,15 +131,47 @@ export class UsersService {
     }
 
     const nextPasswordHash = await hashPassword(nextPassword);
-    await this.userModel
+    const updatedUser = await this.userModel
       .updateOne(
-        { _id: user._id },
-        { $set: { passwordHash: nextPasswordHash } },
+        {
+          _id: user._id,
+          status: UserStatus.Active,
+          credentialVersion: context.credentialVersion,
+        },
+        {
+          $set: { passwordHash: nextPasswordHash },
+          $inc: { credentialVersion: 1 },
+        },
       )
       .exec();
+    if (updatedUser.modifiedCount !== 1) {
+      throw new UnauthorizedException('Unauthorized');
+    }
 
-    await this.sessionService.clearUserSessions(user._id, currentSessionToken);
-
+    const nextVersion = context.credentialVersion + 1;
+    const promoted = await this.sessionService.promoteCurrentSession(
+      user._id.toString(),
+      context.sessionId,
+      context.credentialVersion,
+      nextVersion,
+    );
+    if (!promoted) {
+      throw new UnauthorizedException('Unauthorized');
+    }
+    await this.sessionService.clearUserSessionsBeforeVersion(
+      user._id.toString(),
+      nextVersion,
+    );
+    await this.passwordResetTokenModel
+      .updateMany(
+        {
+          userId: user._id,
+          credentialVersion: { $lt: nextVersion },
+          usedAt: null,
+        },
+        { $set: { usedAt: new Date() } },
+      )
+      .exec();
     return { ok: true };
   }
 
