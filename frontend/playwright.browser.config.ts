@@ -60,6 +60,7 @@ export default defineConfig({
       command: `node node_modules/next/dist/bin/next dev --hostname 127.0.0.1 --port ${frontendPort}`,
       url: `${frontendOrigin}/api/proxy/__browser_probe__/cookie/echo`,
       env: {
+        FRONTEND_URL: frontendOrigin,
         FRONTEND_BACKEND_ORIGIN: upstreamOrigin,
         NEXT_TELEMETRY_DISABLED: "1",
       },

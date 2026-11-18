@@ -33,13 +33,13 @@
 
 | Component / Module | File | Responsibility / Boundary |
 |---|---|---|
-| LoginFrame | `app/(auth)/login/page.tsx` | 登录页各状态共享的 EduForge · 智炼品牌与返回首页入口；只承载外壳，不改变页面原有会话探针、角色分流、next 或错误处理 |
-| LoginForm | `components/auth/LoginForm.tsx` | 登录表单、提交/错误状态、合法来源回跳与 role-home 跳转及忘记密码入口；不拥有 forgot/reset 接口合同 |
-| ForgotPasswordForm | `components/auth/ForgotPasswordForm.tsx` | 邮箱输入、空值校验、固定防枚举提示及发送倒计时状态；不推断邮箱是否存在，倒计时不替代后端安全边界 |
-| ResetPasswordForm | `components/auth/ResetPasswordForm.tsx` | 重置链接 token 的消费、新密码与确认输入、前端校验、提交及成功导航；不将 token 持久化 |
+| LoginFrame | `app/(auth)/login/page.tsx` | 登录页各状态共享的 EduForge · 智炼品牌与返回首页入口；承载会话探针和既有角色分流，错误只展示安全摘要，不输出开发环境原始 Detail |
+| LoginForm | `components/auth/LoginForm.tsx` | 登录输入、同步提交门禁与 pending 禁用、safe-next 优先于 role-home 的导航；POST 成功立即清空密码，独立确认当前用户后导航并保持锁定；探针失败提示状态确认失败，提供刷新核对或返回登录，不自动重放登录 |
+| ForgotPasswordForm | `components/auth/ForgotPasswordForm.tsx` | 邮箱输入、空值校验、同步提交门禁与 pending 禁用；成功保留邮箱并显示通用请求已提交提示，60 秒冷却同时约束 handler；不推断邮箱状态或承诺邮件送达，冷却不替代后端安全边界 |
+| ResetPasswordForm | `components/auth/ResetPasswordForm.tsx` | 消费链接 token、新密码与确认校验、同步提交门禁与 pending 禁用；成功清空密码并保持锁定完成态，提供返回登录；缺少 token 时只提供申请入口，不发请求或持久化 token |
 | AccountPageContent | `components/account/AccountPageContent.tsx` | 教师/学生账户页共享组合：资料卡、改密表单与调用方提供的返回入口；登录态加载留在页面 |
 | AccountProfileCard | `components/account/AccountProfileCard.tsx` | 只读展示当前用户身份资料；不提供资料编辑 |
-| ChangePasswordForm | `components/account/ChangePasswordForm.tsx` | 当前/新/确认密码输入、局部校验与提交状态，成功清空输入并展示结果；会话失效由后端处理 |
+| ChangePasswordForm | `components/account/ChangePasswordForm.tsx` | 当前/新/确认密码校验、同步提交门禁与 pending 禁用，成功清空密码；失败保留输入，凭据变化和结果不确定分别提供核实入口，不自动重试；会话策略由后端处理 |
 | AccountNavEntry | `components/account/AccountNavEntry.tsx` | Shell 内当前用户身份摘要与账户入口；目标路径由调用方提供 |
 
 ## 4.1) Public Entry
@@ -146,6 +146,10 @@
 | Classroom Task Options | `lib/api/classroom-task-options.ts` | 报表排除选项的共享只读加载模块；分页、去重和 payload 兼容细节见 Frontend API Map，不在各页复制或加入写操作 |
 | Student Types Adapter | `lib/api/types-student.ts` | 学生 payload 解析与容错映射的修改落点；不在 JSX 深层散写字段访问 |
 | Session/Auth | `lib/auth/session.ts` + `lib/auth/role-home.ts` | 登录态、角色判断与 role-home 的共同入口；不在业务页创建另一套角色跳转规则 |
+| Auth Safe Next | `lib/auth/safe-next.ts` | 登录表单实际复用的纯站内回跳验证与 URL 规范化；拒绝站外、反斜杠、控制字符及规范化后的双斜杠，不改变角色授权 |
+| Auth Password Policy | `lib/auth/password-policy.ts` | 认证表单共用的密码规范化、Unicode 码点/UTF-8 字节校验、新密码确认与相同密码提示；权威策略引用 [Backend DTO](./handoff-backend-dto-cheatsheet.md#密码与公开错误合同)，不截断输入 |
+| Auth Errors | `lib/auth/auth-errors.ts` | 认证表单按 Browser 错误状态和根对象稳定 code 生成安全摘要与恢复入口；不猜原始 message，不把网络或服务异常认定为未写入；请求失败保留草稿，由各表单拥有 pending/完成态 |
+| Frontend Origin | `lib/http/frontend-origin.ts` | Server Client 复用的纯配置验证与 origin 规范化；配置来源、默认值和 Cookie/BFF 边界由 [Frontend API Map](./handoff-frontend-api-map.md) 维护，不读取请求头推导目标 |
 | Paths | `lib/routes/paths.ts` | 路径构造及模板/班级/任务上下文导航的单一来源；不在业务页硬编码重复路径 |
 | Text submission helpers | `lib/learning-tasks/text-submission.ts` | 原文请求构造、码点校验、保存后 POST 门禁与同一详情恢复路径、已知公开提交错误安全适配；产品实际调用 |
 | Submission AI operations | `lib/learning-tasks/submission-ai-operations.ts` | 单个挂载提交内的操作标识、串行读写、确认资格与已接纳摘要；无网络、无全局锁，不定义后端 Job 状态转换 |

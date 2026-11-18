@@ -1,6 +1,5 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import { headers } from "next/headers";
 import { ErrorState } from "@/components/blocks/ErrorState";
 import { PageHeader } from "@/components/blocks/PageHeader";
 import { CreateLearningTaskForm } from "@/components/teacher/CreateLearningTaskForm";
@@ -32,16 +31,6 @@ import { getCommonErrorSummary } from "@/lib/ui/status";
 
 export const metadata: Metadata = {
   title: "任务模板",
-};
-
-const getRequestOrigin = async (): Promise<string> => {
-  const headerMap = await headers();
-  const host = headerMap.get("x-forwarded-host") ?? headerMap.get("host") ?? "";
-  if (!host) {
-    return "";
-  }
-  const protocol = headerMap.get("x-forwarded-proto") ?? "http";
-  return `${protocol}://${host}`;
 };
 
 type LearningTasksViewModel =
@@ -113,7 +102,6 @@ export default async function TeacherLearningTasksPage({
   };
 
   try {
-    const origin = await getRequestOrigin();
     const listQuery = buildQueryString({
       page: initialPage,
       limit: TASK_TEMPLATE_PAGE_LIMIT,
@@ -125,7 +113,6 @@ export default async function TeacherLearningTasksPage({
     });
     const [payload, me] = await Promise.all([
       fetchJson<unknown>(`learning-tasks/tasks?${listQuery}`, {
-        origin,
         cache: "no-store",
       }),
       getMe().catch(() => null),

@@ -1,32 +1,15 @@
 "use client";
 
 import Link from "next/link";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import type { SubmitEventHandler } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { ErrorState } from "@/components/blocks/ErrorState";
-import { fetchJson, BrowserFetchJsonError } from "@/lib/api/browser-client";
-import { buildErrorDescription, extractRawDetail } from "@/lib/api/error-presenter";
+import { fetchJson } from "@/lib/api/browser-client";
+import { getAuthError, type AuthError } from "@/lib/auth/auth-errors";
+import { PASSWORD_RULES, validatePassword } from "@/lib/auth/password-policy";
 import { getRoleHomePath, type RoleAwareMe } from "@/lib/auth/role-home";
-import { getCommonErrorSummary } from "@/lib/ui/status";
-
-type LoginErrorState = {
-  status?: number;
-  summary: string;
-  detail?: string;
-};
-
-const getSafeNextPath = (value: string | null): string | null => {
-  if (!value) {
-    return null;
-  }
-
-  if (!value.startsWith("/") || value.startsWith("//")) {
-    return null;
-  }
-
-  return value;
-};
+import { getSafeNextPath } from "@/lib/auth/safe-next";
 
 export function LoginForm() {
   const router = useRouter();
@@ -35,15 +18,28 @@ export function LoginForm() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [loginError, setLoginError] = useState<LoginErrorState | null>(null);
+  const [loginError, setLoginError] = useState<AuthError | null>(null);
   const [noRole, setNoRole] = useState(false);
+  const submittingRef = useRef(false);
 
   const handleSubmit: SubmitEventHandler<HTMLFormElement> = async (event) => {
     event.preventDefault();
+    if (submittingRef.current) {
+      return;
+    }
+    const validation = validatePassword(password, "login");
+    if (validation.error) {
+      setLoginError({ summary: validation.error });
+      return;
+    }
+
+    submittingRef.current = true;
     setIsSubmitting(true);
     setLoginError(null);
     setNoRole(false);
 
+    let loginSucceeded = false;
+    let navigating = false;
     try {
       await fetchJson<unknown>("auth/login", {
         method: "POST",
@@ -54,6 +50,8 @@ export function LoginForm() {
         body: JSON.stringify({ email, password }),
       });
 
+      loginSucceeded = true;
+      setPassword("");
       const me = await fetchJson<RoleAwareMe>("users/me", {
         method: "GET",
         cache: "no-store",
@@ -62,6 +60,7 @@ export function LoginForm() {
       const nextPath = getSafeNextPath(searchParams.get("next"));
       if (nextPath) {
         router.push(nextPath);
+        navigating = true;
         router.refresh();
         return;
       }
@@ -69,34 +68,19 @@ export function LoginForm() {
       const roleHomePath = getRoleHomePath(me);
       if (roleHomePath) {
         router.push(roleHomePath);
+        navigating = true;
         router.refresh();
         return;
       }
 
       setNoRole(true);
     } catch (error) {
-      if (error instanceof BrowserFetchJsonError) {
-        if (error.status === 401) {
-          setLoginError({
-            status: 401,
-            summary: "登录失败，请检查账号或密码。",
-          });
-          return;
-        }
-
-        setLoginError({
-          status: error.status,
-          summary: getCommonErrorSummary(error.status, "登录"),
-          detail: extractRawDetail(error.data),
-        });
-        return;
-      }
-
-      setLoginError({
-        summary: "登录请求失败，请稍后重试。",
-      });
+      setLoginError(getAuthError(error, loginSucceeded ? "login-probe" : "login"));
     } finally {
-      setIsSubmitting(false);
+      if (!navigating) {
+        submittingRef.current = false;
+        setIsSubmitting(false);
+      }
     }
   };
 
@@ -112,6 +96,7 @@ export function LoginForm() {
             type="email"
             required
             autoComplete="email"
+            disabled={isSubmitting}
             value={email}
             onChange={(event) => setEmail(event.target.value)}
             className="w-full rounded-md border border-zinc-300 px-3 py-2 text-sm outline-none focus:border-zinc-500"
@@ -128,11 +113,13 @@ export function LoginForm() {
             type="password"
             required
             autoComplete="current-password"
+            disabled={isSubmitting}
             value={password}
             onChange={(event) => setPassword(event.target.value)}
             className="w-full rounded-md border border-zinc-300 px-3 py-2 text-sm outline-none focus:border-zinc-500"
             placeholder="••••••••"
           />
+          <p className="text-xs text-zinc-500">{PASSWORD_RULES.login}</p>
         </div>
 
         <div className="flex justify-end">
@@ -167,9 +154,23 @@ export function LoginForm() {
         <div className="mt-4">
           <ErrorState
             status={loginError.status}
-            title={loginError.status === 401 ? "登录失败" : undefined}
-            description={buildErrorDescription(loginError.summary, loginError.detail)}
+            title="登录提示"
+            description={loginError.summary}
           />
+          {loginError.recovery === "check-login" ? (
+            <div className="mt-3 flex gap-4 text-sm">
+              <button
+                type="button"
+                onClick={() => window.location.reload()}
+                className="text-zinc-600 underline underline-offset-4 hover:text-zinc-900"
+              >
+                刷新核对登录状态
+              </button>
+              <Link href="/login" className="text-zinc-600 underline underline-offset-4 hover:text-zinc-900">
+                返回登录入口
+              </Link>
+            </div>
+          ) : null}
         </div>
       ) : null}
     </section>

@@ -13,7 +13,9 @@
 - 正式业务请求必须走同域 `/api/proxy/**`；业务页面和组件不得直接请求后端 origin。
 - 后端 origin 由 `FRONTEND_BACKEND_ORIGIN` 控制，BFF route 拼接为 `${FRONTEND_BACKEND_ORIGIN}/api/{path}`。
 - Session 依赖后端 `ef_session` Cookie；前端 client 请求统一 `credentials: "include"`。
-- Server Component / RSC 请求使用 `frontend/lib/api/client.ts`，它会读取 inbound `cookie` 并转发给 proxy。
+- Server Component / RSC 请求使用 server-only `frontend/lib/api/client.ts`，目标固定为经 `lib/http/frontend-origin.ts` 验证的 `FRONTEND_URL` + `/api/proxy/**`，继续通过真实 HTTP BFF 访问后端；不读取入站 Host 或 forwarded 头，不接受调用方 `origin`。
+- `FRONTEND_URL` 仅未设置时默认 `http://localhost:3000`；显式空值或非法值拒绝，错误不回显配置值。只接受无凭据、路径、query、fragment 的 HTTP(S) origin，允许末尾根斜杠规范化。部署时必须核对 Next 进程实际输入与可达站点拓扑；backend 同名配置不表示 frontend 已收到。
+- Server client 每次在当前请求上下文通过 `getInboundCookieHeader` 取得 Cookie，创建请求内 Headers 并转发；`getMe` 不重复复制 Cookie。固定 `redirect: "manual"`，调用方不可覆盖，3xx 沿非成功响应抛 `FetchJsonError`，不携带上下文自动跟随 Location。
 - Client Component 请求使用 `frontend/lib/api/browser-client.ts`，浏览器自动携带同域 Cookie。
 - `app/api/proxy/[...path]/route.ts` 固定 `runtime = "nodejs"`，仅透传必要请求头：`cookie/content-type/accept/user-agent`。
 - proxy 响应透传 `content-type/content-disposition/cache-control/location/set-cookie`；配置缺失或网络错误返回 `502` + `{ method, path, type }`。
@@ -24,7 +26,7 @@
 
 | 文件 | 主要职责 | 典型调用方 | 注意点 |
 |---|---|---|---|
-| `frontend/lib/api/client.ts` | Server/RSC fetchJson；拼 `/api/proxy/**`；补 inbound cookie；默认 `no-store` | `app/teacher/**/page.tsx`、`app/student/**/page.tsx`、`lib/auth/session.ts` | Server 侧需要当前 request origin 时可传 `origin` |
+| `frontend/lib/api/client.ts` | Server-only/RSC fetchJson；可信 origin + `/api/proxy/**`；补 inbound cookie；默认 `no-store` | `app/teacher/**/page.tsx`、`app/student/**/page.tsx`、`lib/auth/session.ts` | 无 `origin` 参数；目标来自 frontend 的 `FRONTEND_URL`；固定手动重定向 |
 | `frontend/lib/api/browser-client.ts` | Client Component fetchJson；拼 `/api/proxy/**`；`credentials: include` | 表单、按钮、生命周期 action 组件 | 不直接拼后端绝对 URL |
 | `frontend/app/api/proxy/[...path]/route.ts` | BFF proxy；转发 method/body/header 到后端 `/api/**` | 所有正式业务请求 | 唯一正式后端代理入口；由 `FRONTEND_BACKEND_ORIGIN` 控制上游 |
 | `frontend/lib/api/error-presenter.ts` | 保留原始错误提取，最终说明仅返回业务 summary | 表单、页面错误态及内部原因识别 | 不清空或改写原始 data，不改变公开消息匹配与后端语义 |
@@ -32,6 +34,7 @@
 | `frontend/lib/api/classroom-task-options.ts` | Server-side 分页读取完整课堂任务选项；固定每页 100、按 total/短页停止、最多 20 页并按 `classroomTaskId` 去重 | 过程性评价、AI 反馈介入成效分析 | 只读 `GET classrooms/:classroomId/tasks`；返回排除面板所需 `id/title/publishedAt/dueAt/status`，不承担写操作 |
 | `frontend/lib/api/types-student.ts` | Student 域响应解析、容错 mapper、状态解析 | 学生看板、任务详情、提交详情 | 不在 JSX 深层散写 payload 访问 |
 | `frontend/lib/auth/session.ts` | `GET users/me` 探针、role gate、登录态读取 | `app/teacher/layout.tsx`、`app/student/layout.tsx` | 当前用户探针驱动认证与角色分流；前端 gate 不替代后端授权 |
+| `frontend/lib/http/frontend-origin.ts` | 纯函数验证 frontend `FRONTEND_URL` | `lib/api/client.ts` | 不依赖请求头；配置错误不回显输入 |
 | `frontend/lib/http/server-cookie.ts` | Server-only 读取 inbound `cookie` header | `lib/api/client.ts` | 仅用于 Server/RSC 请求透传 session |
 
 当前扫描未发现 `frontend/src/lib/api/**`、`features/**/api*` 或 `hooks/**` 下独立 API helper；新增 helper 时应同步本文。
@@ -39,6 +42,8 @@
 ## 3) 业务域调用地图
 
 ### 3.1 Auth / 当前用户
+
+密码规范化、字符/字节边界与公开稳定错误字段以 [Backend DTO 认证合同](./handoff-backend-dto-cheatsheet.md#auth) 为权威；四表单通过 `lib/auth/password-policy.ts`、`lib/auth/auth-errors.ts` 消费，仅按 HTTP status 与根对象稳定 code 分类，不读取旧包装或猜测原始 message。生命周期与恢复交互由 Component / Route Map 维护。
 
 - 登录：`LoginForm` -> `browser-client.fetchJson("auth/login")` -> `/api/proxy/auth/login` -> `POST /api/auth/login`。
   - 调用页面：`/login`。
@@ -100,7 +105,7 @@
   - 注意：发布表单只发送既有截止/迟交设置，不发送 AI 策略字段。列表/详情消费快照可用性及投影教学内容，不另取当前模板覆盖，不适配或展示旧策略。实例配置与状态动作分开发送；学生或教师可在提交详情主动申请 AI 反馈。
   - 发布请求仍仅使用 `taskId/dueAt/settings`，不传 difficulty；教师课堂详情的难度由 `toClassroomTask` 读取正式 `task.difficulty` 原值，后端负责发布快照。模板修改不覆盖已发布快照，前端不另查实时模板或回填缺失难度。
   - 班级页面的 difficulty 只作用于待发布候选，已发布课堂任务请求不带该参数；已发布任务的分页链接保留规范化候选难度，避免翻页丢失候选条件。
-- 课堂任务工作区名称：现有 Server `tasks/:classroomTaskId/layout.tsx` 经当前 request origin、Cookie/BFF 与 `no-store` 并行读取 `GET classrooms/:classroomId` 和 `GET classrooms/:classroomId/tasks/:classroomTaskId`，分别由 `toClassroomDetailResponse`、`toClassroomTask` 提取展示名称；任务标题沿用课堂实例正式投影，不另查当前模板。两项辅助读取各自有限超时、独立降级为明确占位，不替换 children 或子页主体错误处理。
+- 课堂任务工作区名称：现有 Server `tasks/:classroomTaskId/layout.tsx` 经固定 SSR origin、请求内 Cookie/BFF 与 `no-store` 并行读取 `GET classrooms/:classroomId` 和 `GET classrooms/:classroomId/tasks/:classroomTaskId`，分别由 `toClassroomDetailResponse`、`toClassroomTask` 提取展示名称；任务标题沿用课堂实例正式投影，不另查当前模板。两项辅助读取各自有限超时、独立降级为明确占位，不替换 children 或子页主体错误处理。
 - 课堂任务提交列表：`submissions/page.tsx` -> `/api/proxy/classrooms/:cid/tasks/:ctid/submissions`。
   - 对应后端：`GET /api/classrooms/:classroomId/tasks/:classroomTaskId/submissions`。
   - 注意：只按 `classroomTaskId` 读取，不用 `taskId` 兜底过滤。

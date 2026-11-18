@@ -1,5 +1,4 @@
 import Link from "next/link";
-import { headers } from "next/headers";
 import { EmptyState } from "@/components/blocks/EmptyState";
 import { ErrorState } from "@/components/blocks/ErrorState";
 import { PageHeader } from "@/components/blocks/PageHeader";
@@ -50,16 +49,6 @@ const getStudentSubmissionErrorSummary = (status: number): string => {
   return getCommonErrorSummary(status);
 };
 
-const getRequestOrigin = async (): Promise<string> => {
-  const headerMap = await headers();
-  const host = headerMap.get("x-forwarded-host") ?? headerMap.get("host") ?? "";
-  if (!host) {
-    return "";
-  }
-  const protocol = headerMap.get("x-forwarded-proto") ?? "http";
-  return `${protocol}://${host}`;
-};
-
 type SubmissionFeedbackViewModel =
   | {
       mode: "ready";
@@ -92,14 +81,13 @@ export default async function StudentSubmissionDetailPage({
   };
 
   try {
-    const origin = await getRequestOrigin();
     const detailPayload = await fetchJson<unknown>(
       `learning-tasks/submissions/${encodeURIComponent(submissionId)}`,
-      { origin, cache: "no-store" },
+      { cache: "no-store" },
     );
     const feedbackPayload = await fetchJson<unknown>(
       `learning-tasks/submissions/${encodeURIComponent(submissionId)}/feedback`,
-      { origin, cache: "no-store" },
+      { cache: "no-store" },
     );
 
     const detail = toSubmissionDetailResponse(detailPayload);

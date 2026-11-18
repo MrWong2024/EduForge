@@ -1,5 +1,4 @@
 import Link from "next/link";
-import { headers } from "next/headers";
 import { ErrorState } from "@/components/blocks/ErrorState";
 import { PageHeader } from "@/components/blocks/PageHeader";
 import { EditLearningTaskForm } from "@/components/teacher/EditLearningTaskForm";
@@ -22,16 +21,6 @@ import {
 type EditLearningTaskPageProps = {
   params: Promise<{ taskId: string }>;
   searchParams: Promise<{ returnTo?: string | string[] }>;
-};
-
-const getRequestOrigin = async (): Promise<string> => {
-  const headerMap = await headers();
-  const host = headerMap.get("x-forwarded-host") ?? headerMap.get("host") ?? "";
-  if (!host) {
-    return "";
-  }
-  const protocol = headerMap.get("x-forwarded-proto") ?? "http";
-  return `${protocol}://${host}`;
 };
 
 type EditTaskViewModel =
@@ -68,10 +57,8 @@ export default async function EditLearningTaskPage({
   };
 
   try {
-    const origin = await getRequestOrigin();
     const [payload, me] = await Promise.all([
       fetchJson<unknown>(`learning-tasks/tasks/${encodeURIComponent(taskId)}`, {
-        origin,
         cache: "no-store",
       }),
       getMe().catch(() => null),

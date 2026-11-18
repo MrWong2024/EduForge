@@ -1,5 +1,4 @@
 import Link from "next/link";
-import { headers } from "next/headers";
 import { ErrorState } from "@/components/blocks/ErrorState";
 import { SubmissionAiReview } from "@/components/submissions/SubmissionAiReview";
 import { TaskRubric } from "@/components/learning-tasks/TaskRubric";
@@ -34,16 +33,6 @@ type TeacherSubmissionDetailPageProps = {
     classroomId?: string | string[];
     classroomTaskId?: string | string[];
   }>;
-};
-
-const getRequestOrigin = async (): Promise<string> => {
-  const headerMap = await headers();
-  const host = headerMap.get("x-forwarded-host") ?? headerMap.get("host") ?? "";
-  if (!host) {
-    return "";
-  }
-  const protocol = headerMap.get("x-forwarded-proto") ?? "http";
-  return `${protocol}://${host}`;
 };
 
 const getTeacherSubmissionErrorSummary = (status: number): string => {
@@ -105,14 +94,13 @@ export default async function TeacherSubmissionDetailPage({
   };
 
   try {
-    const origin = await getRequestOrigin();
     const detailPayload = await fetchJson<unknown>(
       `learning-tasks/submissions/${encodeURIComponent(submissionId)}`,
-      { origin, cache: "no-store" },
+      { cache: "no-store" },
     );
     const feedbackPayload = await fetchJson<unknown>(
       `learning-tasks/submissions/${encodeURIComponent(submissionId)}/feedback`,
-      { origin, cache: "no-store" },
+      { cache: "no-store" },
     );
 
     const detail = toSubmissionDetailResponse(detailPayload);
@@ -153,7 +141,7 @@ export default async function TeacherSubmissionDetailPage({
     try {
       const taskPayload = await fetchJson<unknown>(
         `classrooms/${encodeURIComponent(viewModel.context.classroomId)}/tasks/${encodeURIComponent(viewModel.detail.classroomTaskId)}`,
-        { origin: await getRequestOrigin(), cache: "no-store" },
+        { cache: "no-store" },
       );
       const task = toClassroomTask(taskPayload);
       if (task.taskId === viewModel.detail.taskId) {

@@ -141,7 +141,7 @@ scripted Browser 采用以下止损：
 - 准入理由是普通 HTTP E2E 无法完整证明真实 Browser 是否接受 `Set-Cookie`、Cookie 是否进入 Context store、HttpOnly 是否阻止 `document.cookie` 访问、后续 Browser 请求是否自动发送 Cookie，以及两个 Context 的 Cookie/Storage 是否隔离；不是因为 BFF 业务重要而升级 Browser。Header forwarding 逻辑、API 状态及普通业务分支仍由 HTTP E2E 负责。
 - 两个场景分别验证同一 Context 的 Cookie roundtrip，以及独立 Context A/B 的 Cookie、localStorage 与 sessionStorage 隔离。只导航到非 UI BFF route 并使用 Browser primitive，无 UI locator、表单、点击、视觉或业务页面断言。
 - Topology：系统 Chrome → real Next.js frontend origin → `/api/proxy/*` BFF → Node 标准库 synthetic upstream `/api/*`。Playwright `webServer` 托管两个服务，使用 health/BFF echo 就绪检查，`reuseExistingServer: false`，退出时回收其创建的进程；不复用来源不明的已有服务。
-- 默认 frontend `127.0.0.1:3100`、upstream `127.0.0.1:5100`；分别用 `EDUFORGE_BROWSER_FRONTEND_PORT`、`EDUFORGE_BROWSER_UPSTREAM_PORT` 覆盖。端口必须不同且专用，不允许 3000/5000；冲突时选择其他空闲端口，不终止已有进程。frontend 的 `FRONTEND_BACKEND_ORIGIN` 由 runner 显式设为该 synthetic upstream，运行真实 Next dev/BFF，涉及同一 `.next` 的命令必须串行。
+- 默认 frontend `127.0.0.1:3100`、upstream `127.0.0.1:5100`；分别用 `EDUFORGE_BROWSER_FRONTEND_PORT`、`EDUFORGE_BROWSER_UPSTREAM_PORT` 覆盖。端口必须不同且专用，不允许 3000/5000；冲突时选择其他空闲端口，不终止已有进程。frontend 的 `FRONTEND_URL` 由 runner 显式设为 frontendOrigin，`FRONTEND_BACKEND_ORIGIN` 显式设为该 synthetic upstream，运行真实 Next dev/BFF，涉及同一 `.next` 的命令必须串行。
 - 本 profile 不启动真实 backend、不连接任何数据库、不写磁盘业务数据。探针使用专用合成 Cookie `eduforge_browser_probe`，不使用真实 session Cookie；不需要 Browser acceptance DB、业务 fixture 或数据库 cleanup。
 
 从 `frontend` 目录独立执行：
@@ -177,6 +177,10 @@ npm run test:browser
 该执行方式是 Agent-assisted interactive Browser smoke，不是 scripted UI golden path 或 CI 资产。实际命令、请求、截图、结果与资源收尾归当次报告；stub 不证明真实模型质量，教学可理解性与真实课堂效果仍由 Human/真实教学验证承担。
 
 教师模板资料引用 UI 变更按实际影响选择 smoke：创建页无引用入口且请求省略引用；无引用模板编辑/只读栏目隐藏；有引用编辑会话在修改、非法输入、失败及清空保存/局部刷新后保持栏目，完整重载按持久值决定显示；未变更省略、正式 API 补引用后重新打开；只读仅显示完整分组文件列表；桌面/窄视口长文本滚动与编辑草稿保护。共享/归档权限、真实后端资源拒绝和学生公开页隐藏仅在对应边界受影响时复验。复用同一隔离基础及后端 §6.2 支持；不增加 scripted UI spec，不调用模型，不以历史后端通过代替当前页面证据。
+
+认证安全验收按职责分层：`auth-security.contract.spec.ts` 直接调用生产纯 helper，证明可信 frontend origin、safe-next、密码码点/UTF-8 字节边界及稳定错误分类；不以源码字符串或实现返回值生成 expected。真实 SSR HTTP 使用一次性内存 upstream / 攻击观察端与独立 Next，经 `/teacher/account` 的 layout → role gate → `getMe` 触发，证明恶意 Host/forwarded 输入不改变 BFF 目标、请求内 Cookie 到达可信上游且不到攻击端，以及 3xx 不自动跟随。入口被 Next 拒绝不构成该证明；观察端须有无 Cookie 连通性正控。该探针不连接数据库，与 `.next` 写入及真实 APP 验收串行，结束后精确回收，不建立长期 runner。
+
+四认证表单的 Agent-assisted smoke 使用 [Backend 窄认证 fixture](./handoff-backend-testing-playbook.md#窄认证-smoke-支持) 与受控 APP，核对 Login 的失败保留、成功清空与 next、Change 的正式改密和会话恢复、Forgot 通用成功与冷却、Reset 缺失/无效 token；少量代表性操作核对 pending 禁用和重复提交门禁。页面上的探针失败、Reset 成功/策略/普通 400/不确定结果可使用工具原生的精确临时拦截或延迟。受控响应只证明当前真实页面 UI，不证明真实 backend 重置成功或邮件送达；backend 凭据生命周期事实由后端既有 HTTP 证据承担。没有工具支持的具体交互、拦截或延迟逐项记 `not_executed`，归第二批前端交互验收，不能以纯合同/API/源码替代。实际执行和 cleanup 结果归任务报告。
 
 ## 9. Human Smoke
 

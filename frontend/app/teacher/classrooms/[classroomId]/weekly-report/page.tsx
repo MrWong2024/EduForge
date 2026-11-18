@@ -1,5 +1,4 @@
 import Link from "next/link";
-import { headers } from "next/headers";
 import { EmptyState } from "@/components/blocks/EmptyState";
 import { ErrorState } from "@/components/blocks/ErrorState";
 import { PageHeader } from "@/components/blocks/PageHeader";
@@ -333,17 +332,6 @@ const toOverviewGroups = (
   ].filter((group) => group.rows.length > 0);
 };
 
-const getRequestOrigin = async (): Promise<string> => {
-  const headerMap = await headers();
-  const host = headerMap.get("x-forwarded-host") ?? headerMap.get("host") ?? "";
-  if (!host) {
-    return "";
-  }
-
-  const protocol = headerMap.get("x-forwarded-proto") ?? "http";
-  return `${protocol}://${host}`;
-};
-
 const buildWindowHref = (classroomId: string, windowValue: DisplayReportWindow): string => {
   const query = buildQueryString({ window: windowValue });
   const basePath = paths.teacher.classroomWeeklyReport(classroomId);
@@ -375,11 +363,9 @@ export default async function WeeklyReportPage({ params, searchParams }: WeeklyR
   };
 
   try {
-    const origin = await getRequestOrigin();
     const payload = await fetchJson<unknown>(
       `classrooms/${encodeURIComponent(classroomId)}/weekly-report?${queryString}`,
       {
-        origin,
         cache: "no-store",
       }
     );

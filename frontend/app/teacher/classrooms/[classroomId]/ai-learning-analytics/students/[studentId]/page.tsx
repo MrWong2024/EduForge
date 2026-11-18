@@ -1,5 +1,4 @@
 import Link from "next/link";
-import { headers } from "next/headers";
 import { EmptyState } from "@/components/blocks/EmptyState";
 import { ErrorState } from "@/components/blocks/ErrorState";
 import { PageHeader } from "@/components/blocks/PageHeader";
@@ -43,16 +42,6 @@ import { buildQueryString, toDisplayDate } from "@/lib/ui/format";
 type AiLearningAnalyticsStudentPageProps = {
   params: Promise<{ classroomId: string; studentId: string }>;
   searchParams: Promise<AiLearningAnalyticsSearchParams>;
-};
-
-const getRequestOrigin = async (): Promise<string> => {
-  const headerMap = await headers();
-  const host = headerMap.get("x-forwarded-host") ?? headerMap.get("host") ?? "";
-  if (!host) {
-    return "";
-  }
-  const protocol = headerMap.get("x-forwarded-proto") ?? "http";
-  return `${protocol}://${host}`;
 };
 
 const buildBackToAnalyticsHref = (
@@ -311,10 +300,9 @@ export default async function AiLearningAnalyticsStudentPage({
 
   let payload: unknown;
   try {
-    const origin = await getRequestOrigin();
     payload = await fetchJson<unknown>(
       `classrooms/${encodeURIComponent(classroomId)}/ai-learning-analytics/students/${encodeURIComponent(studentId)}?${backendQuery}`,
-      { origin, cache: "no-store" },
+      { cache: "no-store" },
     );
   } catch (error) {
     const status = error instanceof FetchJsonError ? error.status : 500;

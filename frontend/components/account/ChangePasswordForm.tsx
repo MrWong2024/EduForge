@@ -1,33 +1,15 @@
 "use client";
 
-import { useState } from "react";
+import Link from "next/link";
+import { useRef, useState } from "react";
 import { ErrorState } from "@/components/blocks/ErrorState";
-import { BrowserFetchJsonError, fetchJson } from "@/lib/api/browser-client";
-import { buildErrorDescription, extractRawDetail } from "@/lib/api/error-presenter";
-
-type ChangePasswordErrorState = {
-  status?: number;
-  description: string;
-};
-
-const getChangePasswordErrorSummary = (status: number): string => {
-  if (status === 400) {
-    return "新密码不符合要求，请检查后重试。";
-  }
-  if (status === 401) {
-    return "当前密码错误，或登录状态已失效。";
-  }
-  if (status === 403) {
-    return "无权限执行该操作。";
-  }
-  if (status === 404) {
-    return "功能未启用、不可用或资源不存在。";
-  }
-  if (status >= 500) {
-    return "修改密码失败，请稍后重试。";
-  }
-  return "修改密码失败，请稍后重试。";
-};
+import { fetchJson } from "@/lib/api/browser-client";
+import { getAuthError, type AuthError } from "@/lib/auth/auth-errors";
+import {
+  PASSWORD_RULES,
+  validateNewPassword,
+  validatePassword,
+} from "@/lib/auth/password-policy";
 
 export function ChangePasswordForm() {
   const [currentPassword, setCurrentPassword] = useState("");
@@ -35,26 +17,29 @@ export function ChangePasswordForm() {
   const [confirmPassword, setConfirmPassword] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
-  const [errorState, setErrorState] = useState<ChangePasswordErrorState | null>(null);
+  const [errorState, setErrorState] = useState<AuthError | null>(null);
+  const submittingRef = useRef(false);
 
   const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-
-    if (!currentPassword.trim() || !newPassword.trim() || !confirmPassword.trim()) {
-      setErrorState({ description: "请填写当前密码、新密码和确认新密码。" });
-      return;
-    }
-    if (newPassword !== confirmPassword) {
-      setErrorState({ description: "新密码与确认新密码不一致。" });
-      return;
-    }
-    if (newPassword === currentPassword) {
-      setErrorState({ description: "新密码不能与当前密码相同。" });
+    if (submittingRef.current) {
       return;
     }
 
-    setIsSubmitting(true);
     setSuccessMessage(null);
+    const currentValidation = validatePassword(currentPassword, "current");
+    if (currentValidation.error) {
+      setErrorState({ summary: currentValidation.error });
+      return;
+    }
+    const newValidation = validateNewPassword(newPassword, confirmPassword, currentPassword);
+    if (newValidation.error) {
+      setErrorState({ summary: newValidation.error });
+      return;
+    }
+
+    submittingRef.current = true;
+    setIsSubmitting(true);
     setErrorState(null);
 
     try {
@@ -66,7 +51,7 @@ export function ChangePasswordForm() {
         },
         body: JSON.stringify({
           currentPassword,
-          newPassword,
+          newPassword: newValidation.value,
         }),
       });
 
@@ -75,19 +60,9 @@ export function ChangePasswordForm() {
       setNewPassword("");
       setConfirmPassword("");
     } catch (error) {
-      if (error instanceof BrowserFetchJsonError) {
-        const summary = getChangePasswordErrorSummary(error.status);
-        const detail = extractRawDetail(error);
-        setErrorState({
-          status: error.status,
-          description: buildErrorDescription(summary, detail),
-        });
-      } else {
-        setErrorState({
-          description: "修改密码失败，请稍后重试。",
-        });
-      }
+      setErrorState(getAuthError(error, "change"));
     } finally {
+      submittingRef.current = false;
       setIsSubmitting(false);
     }
   };
@@ -103,10 +78,12 @@ export function ChangePasswordForm() {
           <input
             type="password"
             autoComplete="current-password"
+            disabled={isSubmitting}
             value={currentPassword}
             onChange={(event) => setCurrentPassword(event.target.value)}
             className="w-full rounded-md border border-zinc-300 px-3 py-2"
           />
+          <span className="mt-1 block text-xs text-zinc-500">{PASSWORD_RULES.current}</span>
         </label>
 
         <label className="block text-sm">
@@ -114,10 +91,12 @@ export function ChangePasswordForm() {
           <input
             type="password"
             autoComplete="new-password"
+            disabled={isSubmitting}
             value={newPassword}
             onChange={(event) => setNewPassword(event.target.value)}
             className="w-full rounded-md border border-zinc-300 px-3 py-2"
           />
+          <span className="mt-1 block text-xs text-zinc-500">{PASSWORD_RULES.new}</span>
         </label>
 
         <label className="block text-sm">
@@ -125,6 +104,7 @@ export function ChangePasswordForm() {
           <input
             type="password"
             autoComplete="new-password"
+            disabled={isSubmitting}
             value={confirmPassword}
             onChange={(event) => setConfirmPassword(event.target.value)}
             className="w-full rounded-md border border-zinc-300 px-3 py-2"
@@ -146,7 +126,24 @@ export function ChangePasswordForm() {
 
       {errorState ? (
         <div className="mt-4">
-          <ErrorState status={errorState.status} title="修改密码失败" description={errorState.description} />
+          <ErrorState status={errorState.status} title="修改密码提示" description={errorState.summary} />
+          {errorState.recovery ? (
+            <div className="mt-3 text-sm">
+              <p className="mb-2 text-zinc-600">
+                如仍处于登录状态，请先通过顶部“退出登录”，再重新登录核实；改密结果不确定时可尝试新密码。
+              </p>
+              <div className="flex flex-wrap gap-4">
+                <Link href="/login" className="text-zinc-600 underline underline-offset-4 hover:text-zinc-900">
+                  重新登录核实
+                </Link>
+                {errorState.recovery === "reset" ? (
+                  <Link href="/forgot-password" className="text-zinc-600 underline underline-offset-4 hover:text-zinc-900">
+                    申请密码重置
+                  </Link>
+                ) : null}
+              </div>
+            </div>
+          ) : null}
         </div>
       ) : null}
     </section>

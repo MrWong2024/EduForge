@@ -96,7 +96,7 @@ npm run sync-indexes -- --apply --confirm-db <精确库名> --allow-drop
 ## 2) Cookie、CORS 与前端代理
 
 - 会话 Cookie：`ef_session`，`HttpOnly=true`、`sameSite=lax`、`path=/`、`maxAge=SESSION_TTL_MS`（当前 `7d`）。`configuration.ts` 唯一计算 boolean `auth.cookieSecure`（production 为 true，其余 false），Controller 直接读取该值设置或清除 Cookie，不自行按环境或 fallback 推导。
-- 后端 CORS origin 由 `FRONTEND_URL` 控制，默认 `http://localhost:3000`。
+- 后端 CORS origin 由 `FRONTEND_URL` 控制，默认 `http://localhost:3000`。frontend Next 进程也独立消费同名变量，作为 SSR 可信站点 origin；其默认、验证、HTTP BFF 与部署适配合同由 [Frontend API Map](./handoff-frontend-api-map.md#1-前端-api-调用强制口径) 维护，backend 配置不代表已注入 frontend。
 - `FRONTEND_BACKEND_ORIGIN` 是 frontend BFF 的 server-side upstream origin。
 - 本地开发模板：`frontend/.env.local.example` → 实际 `frontend/.env.local`，值为 `http://localhost:5000`。
 - 生产模板：`frontend/.env.production.example` → 实际 `frontend/.env.production`，值为 `http://127.0.0.1:5000`。

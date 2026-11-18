@@ -1,6 +1,5 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import { headers } from "next/headers";
 import { EmptyState } from "@/components/blocks/EmptyState";
 import { ErrorState } from "@/components/blocks/ErrorState";
 import { PageHeader } from "@/components/blocks/PageHeader";
@@ -40,17 +39,6 @@ type StudentDashboardPageProps = {
 };
 
 const STUDENT_DASHBOARD_PAGE_SIZE = 100;
-
-const getRequestOrigin = async (): Promise<string> => {
-  const headerMap = await headers();
-  const host = headerMap.get("x-forwarded-host") ?? headerMap.get("host") ?? "";
-  if (!host) {
-    return "";
-  }
-
-  const protocol = headerMap.get("x-forwarded-proto") ?? "http";
-  return `${protocol}://${host}`;
-};
 
 const isQueryTrue = (value: string | string[] | undefined): boolean => {
   const rawValue = Array.isArray(value) ? value[0] : value;
@@ -269,11 +257,9 @@ export default async function StudentDashboardPage({
   };
 
   try {
-    const origin = await getRequestOrigin();
     const payload = await fetchJson<unknown>(
       getDashboardPath(currentPage, includeHistorical),
       {
-        origin,
         cache: "no-store",
       },
     );

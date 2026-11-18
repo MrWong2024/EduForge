@@ -184,6 +184,7 @@ Browser 相关进程角色边界：
 | Browser backend | `browser_acceptance` | 通过独立 `start:browser-test` launcher 从 Browser 专属文件取得 `MONGO_URI`，只承担 APP 应用职责 |
 | 文本教学任务 `process-ai` | `browser_acceptance` | 独立 APP 应用上下文；不 listen、不启动 Worker，只在独占验收时段消费唯一合格目标，见 §6.2 |
 | 文本教学任务 `prepare/inspect/cleanup/replace` | `browser_acceptance` | 独立 ADMIN 管理进程；不导入 AppModule，不与 HTTP backend 或 Browser 合并，见 §6.2 |
+| 窄认证 `prepare/inspect/cleanup` | `browser_acceptance` | 独立 ADMIN 管理进程；仅维护两名 namespace 账号、认证关联清理及限定 Session 索引前置，见下文 |
 
 Browser launcher foundation 负责受控启动、正常初始化所需索引元数据和公开 `GET /api` 健康请求，本身不创建业务数据或证明师生 UI。文本教学任务另有 §6.2 的专用支持，供真实前后端 Agent-assisted smoke 使用；这不构成扩张通用 fixture 框架的理由。
 
@@ -259,6 +260,23 @@ npm run browser:text-smoke -- cleanup --namespace b1-2-<unique> --confirm-namesp
 - CLI 总截止为 120 秒，HTTP 请求 15 秒；ADMIN 连接建立/选择和查询采用有限超时，连接在 finally 中关闭。写入或 cleanup 结果不明时保留恢复记录，先用 `inspect` 和进程/端口审计确认实际状态，不直接重放。
 - 清理前停止本轮写入与处理并等待在途动作结束。cleanup 使用准确 ID 和关联 ownership，顺序为 Feedback/Job → Submission → ClassroomTask/Task → Enrollment/Classroom/Course → 合成用户 Session/必要 PasswordResetToken → User；拒绝仍在 RUNNING 的自有 Job，不 dropDatabase、不清空集合。完成后核对业务与认证关联残留为零；同一 namespace 的 cleanup 可安全重复，恢复记录在确认资源收尾后再删除。
 - 支持纯测试为 `scripts/browser-text-task-smoke.spec.ts`；沿第 4 节 Jest runner 用相同目标参数先 discovery，再执行。它只证明新增门禁、ownership、固定密码和 cleanup 选择，不证明真实 Browser 流程。
+
+### 窄认证 Smoke 支持
+
+`scripts/browser-auth-smoke.ts` 为认证页面的 Agent-assisted 验收提供独立 ADMIN 起点，不建立课程、班级或教学任务。从 `backend` 目录使用已安装的 ts-node/tsconfig-paths，依次执行：
+
+```powershell
+node -r ts-node/register -r tsconfig-paths/register ./scripts/browser-auth-smoke.ts prepare --namespace auth-batch2-<unique>
+node -r ts-node/register -r tsconfig-paths/register ./scripts/browser-auth-smoke.ts inspect --namespace auth-batch2-<unique>
+node -r ts-node/register -r tsconfig-paths/register ./scripts/browser-auth-smoke.ts cleanup --namespace auth-batch2-<unique>
+```
+
+- CLI 仅解析 `.env.browser-acceptance`，复用 Browser 环境构造与用途门禁；连接后核对实际库名、单 loopback writable standalone，以及唯一 `root@admin` 认证身份和角色。导入模块不执行 CLI，也不导入 AppModule。每次运行有 120 秒总截止，连接、查询和索引操作有有限超时，连接在 finally 关闭。
+- `prepare` 不覆盖已有恢复记录或 namespace 账号。须先由操作者确认 APP 和其它认证写入者均已停止；脚本再次核对认证三集合为空、没有在途认证操作，才盘点并补齐正式 SessionSchema 索引。仅允许删除精确定义为 `{token:1}, unique:true` 的旧 `token_1`；保留正确的 `_id_`、TTL、userId、tokenHash 唯一索引，未知定义或漂移立即拒绝，不调用其它用途的索引 CLI/helper。检查空集合与 currentOp 不代替独占进程审计。
+- 随后仅创建 namespace 专属 teacher/student 两名 active 合成账号。初始和改密场景的固定合成密码由脚本常量维护；`inspect` 只读核对 ID/email/role 归属、账号状态和当前凭据是否匹配已知合成状态，不输出密码或哈希。部分准备失败时只清理本次记录且归属已核实的精确目标。
+- 恢复记录位于 ignored `.local/deliverables/browser-auth-smoke/<namespace>.json`，仅保存 namespace 和两个 User ID。所有写入结果不明时先检查精确目标，不直接重试；恢复记录保留到收尾明确。
+- Browser 完成后先停止自建 APP/Next，再以记录 ID、namespace email 和 role 核验归属，顺序清理 Session、ResetToken、User 并读回零残留。合法改密或账号状态变化不影响 cleanup，cleanup 不校验初始密码或 credentialVersion；遇归属不符停止，不删除外来数据，不删库、不删集合或合法索引。确认清理后移除恢复记录。
+- 离线 `scripts/browser-auth-smoke.spec.ts` 使用用途 `none`、合成配置和内存替身，覆盖环境、实际身份、索引定义/漂移、namespace 冲突、部分准备及改密后的精确 cleanup。使用本手册 Jest runner 先 discovery 再定向执行；它不连接数据库、不加载真实环境文件，也不证明 UI 或真实数据库终态。前端合同、真实 SSR HTTP、受控响应和真实 APP UI 的证据职责由 [Frontend Testing Playbook](./handoff-frontend-testing-playbook.md) 维护。
 
 ### 6.3 Future Admitted Lifecycle
 

@@ -1,5 +1,4 @@
 import Link from "next/link";
-import { headers } from "next/headers";
 import { EmptyState } from "@/components/blocks/EmptyState";
 import { ErrorState } from "@/components/blocks/ErrorState";
 import { PageHeader } from "@/components/blocks/PageHeader";
@@ -73,16 +72,6 @@ type PresentedError = {
 type StudentListState =
   | { mode: "ready"; data: AiLearningAnalyticsStudentsResponse }
   | { mode: "error"; error: PresentedError };
-
-const getRequestOrigin = async (): Promise<string> => {
-  const headerMap = await headers();
-  const host = headerMap.get("x-forwarded-host") ?? headerMap.get("host") ?? "";
-  if (!host) {
-    return "";
-  }
-  const protocol = headerMap.get("x-forwarded-proto") ?? "http";
-  return `${protocol}://${host}`;
-};
 
 const presentError = (
   error: unknown,
@@ -240,18 +229,17 @@ export default async function AiLearningAnalyticsPage({
     overallOutcome: queryState.overallOutcome,
     engagementStatus: queryState.engagementStatus,
   });
-  const origin = await getRequestOrigin();
   const [overviewResult, studentsResult, taskOptionsResult] =
     await Promise.allSettled([
       fetchJson<unknown>(
         `classrooms/${encodeURIComponent(classroomId)}/ai-learning-analytics?${overviewQuery}`,
-        { origin, cache: "no-store" },
+        { cache: "no-store" },
       ),
       fetchJson<unknown>(
         `classrooms/${encodeURIComponent(classroomId)}/ai-learning-analytics/students?${studentsQuery}`,
-        { origin, cache: "no-store" },
+        { cache: "no-store" },
       ),
-      loadAllClassroomTaskOptions({ classroomId, origin }),
+      loadAllClassroomTaskOptions({ classroomId }),
     ]);
 
   if (overviewResult.status === "rejected") {

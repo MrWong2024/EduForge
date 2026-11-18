@@ -1,5 +1,4 @@
 import Link from "next/link";
-import { headers } from "next/headers";
 import { ErrorState } from "@/components/blocks/ErrorState";
 import { PageHeader } from "@/components/blocks/PageHeader";
 import { fetchJson, FetchJsonError } from "@/lib/api/client";
@@ -17,16 +16,6 @@ import { toDisplayDate, toDisplayText } from "@/lib/ui/format";
 
 type ClassroomTaskDetailPageProps = {
   params: Promise<{ classroomId: string; classroomTaskId: string }>;
-};
-
-const getRequestOrigin = async (): Promise<string> => {
-  const headerMap = await headers();
-  const host = headerMap.get("x-forwarded-host") ?? headerMap.get("host") ?? "";
-  if (!host) {
-    return "";
-  }
-  const protocol = headerMap.get("x-forwarded-proto") ?? "http";
-  return `${protocol}://${host}`;
 };
 
 type TaskDetailViewModel =
@@ -53,16 +42,13 @@ export default async function ClassroomTaskDetailPage({
   };
 
   try {
-    const origin = await getRequestOrigin();
     const [classroomPayload, taskPayload] = await Promise.all([
       fetchJson<unknown>(`classrooms/${encodeURIComponent(classroomId)}`, {
-        origin,
         cache: "no-store",
       }),
       fetchJson<unknown>(
         `classrooms/${encodeURIComponent(classroomId)}/tasks/${encodeURIComponent(classroomTaskId)}`,
         {
-          origin,
           cache: "no-store",
         },
       ),

@@ -1,5 +1,4 @@
 import Link from "next/link";
-import { headers } from "next/headers";
 import { EmptyState } from "@/components/blocks/EmptyState";
 import { ErrorState } from "@/components/blocks/ErrorState";
 import { PageHeader } from "@/components/blocks/PageHeader";
@@ -24,16 +23,6 @@ type ClassroomTaskSubmissionsPageProps = {
 };
 
 const SUBMISSIONS_PAGE_SIZE = 100;
-
-const getRequestOrigin = async (): Promise<string> => {
-  const headerMap = await headers();
-  const host = headerMap.get("x-forwarded-host") ?? headerMap.get("host") ?? "";
-  if (!host) {
-    return "";
-  }
-  const protocol = headerMap.get("x-forwarded-proto") ?? "http";
-  return `${protocol}://${host}`;
-};
 
 const getSubmissionsErrorSummary = (status: number): string => {
   if (status === 403) {
@@ -94,14 +83,11 @@ export default async function ClassroomTaskSubmissionsPage({
   };
 
   try {
-    const origin = await getRequestOrigin();
     const [classroomPayload, submissionsPayload] = await Promise.all([
       fetchJson<unknown>(`classrooms/${encodeURIComponent(classroomId)}`, {
-        origin,
         cache: "no-store",
       }),
       fetchJson<unknown>(submissionsPath, {
-        origin,
         cache: "no-store",
       }),
     ]);

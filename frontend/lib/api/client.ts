@@ -1,14 +1,13 @@
+import "server-only";
+
+import { getFrontendOrigin } from "@/lib/http/frontend-origin";
+import { getInboundCookieHeader } from "@/lib/http/server-cookie";
+
 const PROXY_PREFIX = "/api/proxy";
 
 const trimSlashes = (value: string) => value.replace(/^\/+|\/+$/g, "");
-const trimTrailingSlash = (value: string) => value.replace(/\/+$/g, "");
 
 const withServerCookie = async (headersInit?: HeadersInit): Promise<HeadersInit | undefined> => {
-  if (typeof window !== "undefined") {
-    return headersInit;
-  }
-
-  const { getInboundCookieHeader } = await import("@/lib/http/server-cookie");
   const inboundCookie = await getInboundCookieHeader();
   if (!inboundCookie) {
     return headersInit;
@@ -55,9 +54,7 @@ export class FetchJsonError extends Error {
   }
 }
 
-type FetchJsonOptions = RequestInit & {
-  origin?: string;
-};
+type FetchJsonOptions = Omit<RequestInit, "redirect">;
 
 export const buildProxyPath = (path: string): string => {
   const cleanPath = trimSlashes(path);
@@ -68,10 +65,9 @@ export async function fetchJson<T>(
   path: string,
   options: FetchJsonOptions = {}
 ): Promise<T> {
-  const { origin = "", cache, headers, ...requestInit } = options;
-  const cleanOrigin = origin ? trimTrailingSlash(origin) : "";
+  const { cache, headers, ...requestInit } = options;
   const proxyPath = buildProxyPath(path);
-  const requestUrl = cleanOrigin ? `${cleanOrigin}${proxyPath}` : proxyPath;
+  const requestUrl = `${getFrontendOrigin(process.env.FRONTEND_URL)}${proxyPath}`;
   const requestHeaders = await withServerCookie(headers);
 
   const response = await fetch(requestUrl, {
@@ -79,6 +75,7 @@ export async function fetchJson<T>(
     headers: requestHeaders,
     cache: cache ?? "no-store",
     credentials: "include",
+    redirect: "manual",
   });
 
   const body = await parseResponseBody(response);

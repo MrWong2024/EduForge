@@ -1,5 +1,4 @@
 import Link from "next/link";
-import { headers } from "next/headers";
 import { EmptyState } from "@/components/blocks/EmptyState";
 import { ErrorState } from "@/components/blocks/ErrorState";
 import { PageHeader } from "@/components/blocks/PageHeader";
@@ -84,17 +83,6 @@ type ExampleCardView = {
 };
 
 const STUDENT_TIER_PREVIEW_COUNT = 6;
-
-const getRequestOrigin = async (): Promise<string> => {
-  const headerMap = await headers();
-  const host = headerMap.get("x-forwarded-host") ?? headerMap.get("host") ?? "";
-  if (!host) {
-    return "";
-  }
-
-  const protocol = headerMap.get("x-forwarded-proto") ?? "http";
-  return `${protocol}://${host}`;
-};
 
 const resolveQueryState = (
   query: Awaited<ReviewPackPageProps["searchParams"]>
@@ -496,11 +484,9 @@ export default async function ReviewPackPage({ params, searchParams }: ReviewPac
   };
 
   try {
-    const origin = await getRequestOrigin();
     const payload = await fetchJson<unknown>(
       `classrooms/${encodeURIComponent(classroomId)}/tasks/${encodeURIComponent(classroomTaskId)}/review-pack?${queryString}`,
       {
-        origin,
         cache: "no-store",
       }
     );

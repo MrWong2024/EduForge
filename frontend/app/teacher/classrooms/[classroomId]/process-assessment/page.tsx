@@ -1,5 +1,4 @@
 import Link from "next/link";
-import { headers } from "next/headers";
 import { EmptyState } from "@/components/blocks/EmptyState";
 import { ErrorState } from "@/components/blocks/ErrorState";
 import { PageHeader } from "@/components/blocks/PageHeader";
@@ -409,17 +408,6 @@ function ProcessAssessmentScoringGuide() {
   );
 }
 
-const getRequestOrigin = async (): Promise<string> => {
-  const headerMap = await headers();
-  const host = headerMap.get("x-forwarded-host") ?? headerMap.get("host") ?? "";
-  if (!host) {
-    return "";
-  }
-
-  const protocol = headerMap.get("x-forwarded-proto") ?? "http";
-  return `${protocol}://${host}`;
-};
-
 type ProcessAssessmentQueryState = {
   window: ReportWindow;
   page: number;
@@ -562,9 +550,8 @@ export default async function ProcessAssessmentPage({
   };
 
   try {
-    const origin = await getRequestOrigin();
     const taskOptionsPromise: Promise<TaskOptionsLoadResult> =
-      loadAllClassroomTaskOptions({ classroomId, origin })
+      loadAllClassroomTaskOptions({ classroomId })
         .then((taskOptions) => ({ taskOptions }))
         .catch(() => ({
           taskOptions: [],
@@ -575,13 +562,11 @@ export default async function ProcessAssessmentPage({
       fetchJson<unknown>(
         `classrooms/${encodeURIComponent(classroomId)}/process-assessment?${queryString}`,
         {
-          origin,
           cache: "no-store",
         },
       ),
       taskOptionsPromise,
       fetchJson<unknown>(`classrooms/${encodeURIComponent(classroomId)}`, {
-        origin,
         cache: "no-store",
         signal: AbortSignal.timeout(10000),
       })

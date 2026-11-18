@@ -1,6 +1,5 @@
 import "server-only";
 
-import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { fetchJson, FetchJsonError } from "@/lib/api/client";
 import { hasRole, type RoleAwareMe, getRoleHomePath } from "@/lib/auth/role-home";
@@ -19,31 +18,11 @@ export type RoleGateResult =
   | { allowed: true; me: MeResponse }
   | { allowed: false; me: MeResponse };
 
-const getRequestOrigin = (headerMap: Headers): string => {
-  const host = headerMap.get("x-forwarded-host") ?? headerMap.get("host") ?? "";
-  if (!host) {
-    return "";
-  }
-
-  const protocol = headerMap.get("x-forwarded-proto") ?? "http";
-  return `${protocol}://${host}`;
-};
-
 export { hasRole, getRoleHomePath };
 
 export async function getMe(): Promise<MeResponse> {
-  const headerMap = await headers();
-  const requestHeaders = new Headers();
-  const cookie = headerMap.get("cookie");
-
-  if (cookie) {
-    requestHeaders.set("cookie", cookie);
-  }
-  requestHeaders.set("accept", "application/json");
-
   return fetchJson<MeResponse>("users/me", {
-    origin: getRequestOrigin(headerMap),
-    headers: requestHeaders,
+    headers: { accept: "application/json" },
     cache: "no-store",
   });
 }

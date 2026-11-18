@@ -1,5 +1,4 @@
 import Link from "next/link";
-import { headers } from "next/headers";
 import { EmptyState } from "@/components/blocks/EmptyState";
 import { ErrorState } from "@/components/blocks/ErrorState";
 import { PageHeader } from "@/components/blocks/PageHeader";
@@ -68,17 +67,6 @@ const StatusBadge = ({ badge }: { badge: StatusBadgeView }) => (
     {badge.label}
   </span>
 );
-
-const getRequestOrigin = async (): Promise<string> => {
-  const headerMap = await headers();
-  const host = headerMap.get("x-forwarded-host") ?? headerMap.get("host") ?? "";
-  if (!host) {
-    return "";
-  }
-
-  const protocol = headerMap.get("x-forwarded-proto") ?? "http";
-  return `${protocol}://${host}`;
-};
 
 const resolveQueryState = (
   query: Awaited<StudentTaskDetailPageProps["searchParams"]>,
@@ -336,13 +324,11 @@ export default async function StudentTaskDetailPage({
   };
 
   try {
-    const origin = await getRequestOrigin();
     const payload = await fetchJson<unknown>(
       `classrooms/${encodeURIComponent(classroomId)}/tasks/${encodeURIComponent(
         classroomTaskId,
       )}/my-task-detail?${queryString}`,
       {
-        origin,
         cache: "no-store",
       },
     );

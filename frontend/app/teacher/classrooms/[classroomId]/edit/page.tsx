@@ -1,5 +1,4 @@
 import Link from "next/link";
-import { headers } from "next/headers";
 import { ErrorState } from "@/components/blocks/ErrorState";
 import { PageHeader } from "@/components/blocks/PageHeader";
 import { EditClassroomForm } from "@/components/teacher/EditClassroomForm";
@@ -12,16 +11,6 @@ import { toDisplayText } from "@/lib/ui/format";
 
 type EditClassroomPageProps = {
   params: Promise<{ classroomId: string }>;
-};
-
-const getRequestOrigin = async (): Promise<string> => {
-  const headerMap = await headers();
-  const host = headerMap.get("x-forwarded-host") ?? headerMap.get("host") ?? "";
-  if (!host) {
-    return "";
-  }
-  const protocol = headerMap.get("x-forwarded-proto") ?? "http";
-  return `${protocol}://${host}`;
 };
 
 type EditClassroomViewModel =
@@ -52,9 +41,7 @@ export default async function EditClassroomPage({ params }: EditClassroomPagePro
   };
 
   try {
-    const origin = await getRequestOrigin();
     const payload = await fetchJson<unknown>(`classrooms/${encodeURIComponent(classroomId)}`, {
-      origin,
       cache: "no-store",
     });
     viewModel = {

@@ -1,14 +1,14 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { FormEvent } from "react";
-import { fetchJson, BrowserFetchJsonError } from "@/lib/api/browser-client";
+import { fetchJson } from "@/lib/api/browser-client";
+import { getAuthError } from "@/lib/auth/auth-errors";
 import { ErrorState } from "@/components/blocks/ErrorState";
-import { getCommonErrorSummary } from "@/lib/ui/status";
 
 const RESEND_COOLDOWN_SECONDS = 60;
-const SUCCESS_MESSAGE = "如果邮箱存在，我们已发送密码重置邮件，请检查收件箱。";
+const SUCCESS_MESSAGE = "请求已提交。如果邮箱存在且符合条件，将发送密码重置邮件，请稍后检查邮箱。";
 
 export function ForgotPasswordForm() {
   const [email, setEmail] = useState("");
@@ -16,6 +16,8 @@ export function ForgotPasswordForm() {
   const [cooldownSeconds, setCooldownSeconds] = useState(0);
   const [resultMessage, setResultMessage] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const submittingRef = useRef(false);
+  const cooldownUntilRef = useRef(0);
 
   useEffect(() => {
     if (cooldownSeconds <= 0) {
@@ -31,6 +33,9 @@ export function ForgotPasswordForm() {
 
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+    if (submittingRef.current || Date.now() < cooldownUntilRef.current) {
+      return;
+    }
 
     const trimmedEmail = email.trim();
     if (!trimmedEmail) {
@@ -39,6 +44,7 @@ export function ForgotPasswordForm() {
       return;
     }
 
+    submittingRef.current = true;
     setIsSubmitting(true);
     setErrorMessage(null);
     setResultMessage(null);
@@ -54,14 +60,12 @@ export function ForgotPasswordForm() {
       });
 
       setResultMessage(SUCCESS_MESSAGE);
+      cooldownUntilRef.current = Date.now() + RESEND_COOLDOWN_SECONDS * 1000;
       setCooldownSeconds(RESEND_COOLDOWN_SECONDS);
     } catch (error) {
-      if (error instanceof BrowserFetchJsonError) {
-        setErrorMessage(getCommonErrorSummary(error.status, "找回密码"));
-      } else {
-        setErrorMessage("请求失败，请稍后重试。");
-      }
+      setErrorMessage(getAuthError(error, "forgot").summary);
     } finally {
+      submittingRef.current = false;
       setIsSubmitting(false);
     }
   };
@@ -81,6 +85,7 @@ export function ForgotPasswordForm() {
             type="email"
             required
             autoComplete="email"
+            disabled={isSubmitting}
             value={email}
             onChange={(event) => setEmail(event.target.value)}
             className="w-full rounded-md border border-zinc-300 px-3 py-2 text-sm outline-none focus:border-zinc-500"
@@ -110,7 +115,7 @@ export function ForgotPasswordForm() {
 
       {errorMessage ? (
         <div className="mt-4">
-          <ErrorState title="发送失败" description={errorMessage} />
+          <ErrorState title="请求提示" description={errorMessage} />
         </div>
       ) : null}
 

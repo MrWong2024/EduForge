@@ -1,6 +1,5 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import { headers } from "next/headers";
 import { EmptyState } from "@/components/blocks/EmptyState";
 import { ErrorState } from "@/components/blocks/ErrorState";
 import { PageHeader } from "@/components/blocks/PageHeader";
@@ -89,16 +88,6 @@ const toStatusFilter = (statusView: ClassroomStatusView): ClassroomStatus | unde
   return undefined;
 };
 
-const getRequestOrigin = async (): Promise<string> => {
-  const headerMap = await headers();
-  const host = headerMap.get("x-forwarded-host") ?? headerMap.get("host") ?? "";
-  if (!host) {
-    return "";
-  }
-  const protocol = headerMap.get("x-forwarded-proto") ?? "http";
-  return `${protocol}://${host}`;
-};
-
 type ClassroomsViewModel =
   | {
       mode: "ready";
@@ -138,14 +127,11 @@ export default async function TeacherClassroomsPage({ searchParams }: TeacherCla
   };
 
   try {
-    const origin = await getRequestOrigin();
     const [classroomsPayload, coursesPayload] = await Promise.all([
       fetchJson<unknown>(`classrooms?${requestQuery.toString()}`, {
-        origin,
         cache: "no-store",
       }),
       fetchJson<unknown>("courses?page=1&limit=100", {
-        origin,
         cache: "no-store",
       }),
     ]);

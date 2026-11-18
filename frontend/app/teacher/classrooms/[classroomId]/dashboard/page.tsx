@@ -1,5 +1,4 @@
 import Link from "next/link";
-import { headers } from "next/headers";
 import { EmptyState } from "@/components/blocks/EmptyState";
 import { ErrorState } from "@/components/blocks/ErrorState";
 import { PageHeader } from "@/components/blocks/PageHeader";
@@ -43,16 +42,6 @@ type TaskAiBreakdown = {
 type TaskTemplateStatusBadge = {
   label: string;
   className: string;
-};
-
-const getRequestOrigin = async (): Promise<string> => {
-  const headerMap = await headers();
-  const host = headerMap.get("x-forwarded-host") ?? headerMap.get("host") ?? "";
-  if (!host) {
-    return "";
-  }
-  const protocol = headerMap.get("x-forwarded-proto") ?? "http";
-  return `${protocol}://${host}`;
 };
 
 const isQueryTrue = (value: string | string[] | undefined): boolean => {
@@ -240,14 +229,11 @@ export default async function ClassroomDashboardPage({
   };
 
   try {
-    const origin = await getRequestOrigin();
     const [classroomPayload, dashboardPayload, me] = await Promise.all([
       fetchJson<unknown>(`classrooms/${encodeURIComponent(classroomId)}`, {
-        origin,
         cache: "no-store",
       }),
       fetchJson<unknown>(getDashboardPath(classroomId, includeClosedTasks), {
-        origin,
         cache: "no-store",
       }),
       getMe().catch(() => null),

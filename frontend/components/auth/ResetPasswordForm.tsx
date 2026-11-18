@@ -1,10 +1,12 @@
 "use client";
 
 import Link from "next/link";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import type { FormEvent } from "react";
 import { ErrorState } from "@/components/blocks/ErrorState";
-import { fetchJson, BrowserFetchJsonError } from "@/lib/api/browser-client";
+import { fetchJson } from "@/lib/api/browser-client";
+import { getAuthError } from "@/lib/auth/auth-errors";
+import { PASSWORD_RULES, validateNewPassword } from "@/lib/auth/password-policy";
 
 type ResetPasswordFormProps = {
   token: string | null;
@@ -21,34 +23,28 @@ export function ResetPasswordForm({ token }: ResetPasswordFormProps) {
   const [errorMessage, setErrorMessage] = useState<string | null>(
     token ? null : RESET_TOKEN_ERROR
   );
+  const submittingRef = useRef(false);
+  const completedRef = useRef(false);
 
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+    if (submittingRef.current || completedRef.current) {
+      return;
+    }
 
     if (!token) {
       setErrorMessage(RESET_TOKEN_ERROR);
       return;
     }
 
-    const trimmedPassword = newPassword.trim();
-    if (!trimmedPassword) {
-      setErrorMessage("请输入新密码。");
+    const validation = validateNewPassword(newPassword, confirmPassword);
+    if (validation.error) {
+      setErrorMessage(validation.error);
       setSuccessMessage(null);
       return;
     }
 
-    if (trimmedPassword.length < 8) {
-      setErrorMessage("新密码至少需要 8 位。");
-      setSuccessMessage(null);
-      return;
-    }
-
-    if (trimmedPassword !== confirmPassword.trim()) {
-      setErrorMessage("两次输入的密码不一致。");
-      setSuccessMessage(null);
-      return;
-    }
-
+    submittingRef.current = true;
     setIsSubmitting(true);
     setErrorMessage(null);
     setSuccessMessage(null);
@@ -62,20 +58,18 @@ export function ResetPasswordForm({ token }: ResetPasswordFormProps) {
         },
         body: JSON.stringify({
           token,
-          newPassword: trimmedPassword,
+          newPassword: validation.value,
         }),
       });
 
+      completedRef.current = true;
       setSuccessMessage(SUCCESS_MESSAGE);
       setNewPassword("");
       setConfirmPassword("");
     } catch (error) {
-      if (error instanceof BrowserFetchJsonError) {
-        setErrorMessage(error.status === 400 ? RESET_TOKEN_ERROR : "请求失败，请稍后重试。");
-      } else {
-        setErrorMessage("请求失败，请稍后重试。");
-      }
+      setErrorMessage(getAuthError(error, "reset").summary);
     } finally {
+      submittingRef.current = false;
       setIsSubmitting(false);
     }
   };
@@ -111,11 +105,13 @@ export function ResetPasswordForm({ token }: ResetPasswordFormProps) {
             type="password"
             required
             autoComplete="new-password"
+            disabled={isSubmitting || Boolean(successMessage)}
             value={newPassword}
             onChange={(event) => setNewPassword(event.target.value)}
             className="w-full rounded-md border border-zinc-300 px-3 py-2 text-sm outline-none focus:border-zinc-500"
-            placeholder="不少于 8 位"
+            placeholder="不少于 8 个字符，最多 72 字节"
           />
+          <p className="text-xs text-zinc-500">{PASSWORD_RULES.new}</p>
         </div>
 
         <div className="space-y-1">
@@ -130,6 +126,7 @@ export function ResetPasswordForm({ token }: ResetPasswordFormProps) {
             type="password"
             required
             autoComplete="new-password"
+            disabled={isSubmitting || Boolean(successMessage)}
             value={confirmPassword}
             onChange={(event) => setConfirmPassword(event.target.value)}
             className="w-full rounded-md border border-zinc-300 px-3 py-2 text-sm outline-none focus:border-zinc-500"
@@ -163,7 +160,7 @@ export function ResetPasswordForm({ token }: ResetPasswordFormProps) {
 
       {errorMessage ? (
         <div className="mt-4">
-          <ErrorState title="重置失败" description={errorMessage} />
+          <ErrorState title="重置提示" description={errorMessage} />
         </div>
       ) : null}
 

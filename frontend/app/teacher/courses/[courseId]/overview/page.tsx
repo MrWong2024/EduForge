@@ -1,5 +1,4 @@
 import Link from "next/link";
-import { headers } from "next/headers";
 import { EmptyState } from "@/components/blocks/EmptyState";
 import { ErrorState } from "@/components/blocks/ErrorState";
 import { PageHeader } from "@/components/blocks/PageHeader";
@@ -94,16 +93,6 @@ const resolveQueryState = (
   }),
 });
 
-const getRequestOrigin = async (): Promise<string> => {
-  const headerMap = await headers();
-  const host = headerMap.get("x-forwarded-host") ?? headerMap.get("host") ?? "";
-  if (!host) {
-    return "";
-  }
-  const protocol = headerMap.get("x-forwarded-proto") ?? "http";
-  return `${protocol}://${host}`;
-};
-
 const toPercentNumber = (value: number | null | undefined): number | undefined => {
   if (typeof value !== "number" || !Number.isFinite(value) || value < 0) {
     return undefined;
@@ -188,11 +177,9 @@ export default async function CourseOverviewPage({ params, searchParams }: Cours
   };
 
   try {
-    const origin = await getRequestOrigin();
     const payload = await fetchJson<unknown>(
       `courses/${encodeURIComponent(courseId)}/overview?${queryString}`,
       {
-        origin,
         cache: "no-store",
       }
     );

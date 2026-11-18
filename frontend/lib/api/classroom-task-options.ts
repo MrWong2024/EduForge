@@ -15,12 +15,10 @@ export type ClassroomTaskOption = {
 
 type LoadAllClassroomTaskOptionsParams = {
   classroomId: string;
-  origin: string;
 };
 
 export async function loadAllClassroomTaskOptions({
   classroomId,
-  origin,
 }: LoadAllClassroomTaskOptionsParams): Promise<ClassroomTaskOption[]> {
   const taskOptions: ClassroomTaskOption[] = [];
   const seenTaskIds = new Set<string>();
@@ -33,7 +31,6 @@ export async function loadAllClassroomTaskOptions({
     const payload = await fetchJson<unknown>(
       `classrooms/${encodeURIComponent(classroomId)}/tasks?${query}`,
       {
-        origin,
         cache: "no-store",
       },
     );
