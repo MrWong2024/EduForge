@@ -18,10 +18,7 @@ import { Session } from '../src/modules/auth/schemas/session.schema';
 import { PasswordResetToken } from '../src/modules/auth/schemas/password-reset-token.schema';
 import { SessionService } from '../src/modules/auth/services/session.service';
 import { MailService } from '../src/modules/mail/mail.service';
-import {
-  hashPassword,
-  comparePassword,
-} from '../src/modules/users/password.utils';
+import * as passwordUtils from '../src/modules/users/password.utils';
 import { createMongooseStore, importUsers } from '../scripts/import-users';
 import { buildHeaderKeys, parseCsv } from '../scripts/import-users-csv';
 
@@ -115,7 +112,7 @@ describe('Authentication security (real HTTP and Mongo)', () => {
     await users.create({
       _id: id,
       email,
-      passwordHash: await hashPassword(password),
+      passwordHash: await passwordUtils.hashPassword(password),
       roles: ['teacher'],
       status,
     });
@@ -153,7 +150,7 @@ describe('Authentication security (real HTTP and Mongo)', () => {
       buildHeaderKeys(records[0].cells),
       { dryRun: false, resetPassword },
       {
-        hashPassword: () => hashPassword(nextPassword),
+        hashPassword: () => passwordUtils.hashPassword(nextPassword),
         now: () => new Date(),
         error: () => undefined,
       },
@@ -399,6 +396,41 @@ describe('Authentication security (real HTTP and Mongo)', () => {
     await login(user, nextPassword).expect(201);
   });
 
+  it('a reset paused after precheck cannot overwrite a password changed while hashing', async () => {
+    const user = await makeUser();
+    const cookie = cookieFrom(await login(user).expect(201));
+    await forgot(user).expect(200);
+    const token = latestToken(user);
+    const resetPassword = 'ResetDifferent789!';
+    const gate = barrier();
+    const originalHash = passwordUtils.hashPassword;
+    jest
+      .spyOn(passwordUtils, 'hashPassword')
+      .mockImplementationOnce(async (value) => {
+        gate.enter();
+        await gate.released;
+        return originalHash(value);
+      });
+    const pending = reset(token, resetPassword).then((response) => response);
+    try {
+      await gate.wait();
+      await change(cookie).expect(200);
+    } finally {
+      gate.release();
+    }
+    const response = await pending;
+    expect(response.status).toBe(400);
+    expect(publicResponse(response).message).toBe('Reset token is invalid');
+    expect(publicResponse(response).code).toBe('RESET_TOKEN_INVALID');
+    expect((await users.findById(user.id).exec())?.credentialVersion).toBe(1);
+    await probe(cookie).expect(200);
+    await login(user, nextPassword).expect(201);
+    await login(user, resetPassword).expect(401);
+    expect(
+      publicResponse(await reset(token, resetPassword).expect(400)).code,
+    ).toBe('RESET_TOKEN_INVALID');
+  });
+
   it('allows only one competing change and cannot revive a logged-out current session', async () => {
     const user = await makeUser();
     const cookie = cookieFrom(await login(user).expect(201));
@@ -499,7 +531,10 @@ describe('Authentication security (real HTTP and Mongo)', () => {
     expect(updated?.status).toBe('active');
     expect(
       updated !== null &&
-        (await comparePassword(nextPassword, updated.passwordHash)),
+        (await passwordUtils.comparePassword(
+          nextPassword,
+          updated.passwordHash,
+        )),
     ).toBe(true);
     await probe(cookie).expect(401);
     expect(publicResponse(await reset(token).expect(400)).code).toBe(
@@ -513,7 +548,7 @@ describe('Authentication security (real HTTP and Mongo)', () => {
       buildHeaderKeys(records[0].cells),
       { dryRun: false, resetPassword: false },
       {
-        hashPassword: () => hashPassword(password),
+        hashPassword: () => passwordUtils.hashPassword(password),
         now: () => new Date(),
         error: () => undefined,
       },

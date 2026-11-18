@@ -94,12 +94,6 @@ export class AuthService {
       await this.sessionModel.deleteOne({ _id: session._id }).exec();
       return null;
     }
-    if (
-      !Number.isInteger(session.credentialVersion) ||
-      session.credentialVersion < 0
-    ) {
-      return null;
-    }
     const user = await this.userModel
       .findOne({
         _id: session.userId,

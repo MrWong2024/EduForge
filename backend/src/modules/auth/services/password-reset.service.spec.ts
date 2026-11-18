@@ -1,4 +1,4 @@
-import { BadRequestException, Logger } from '@nestjs/common';
+import { Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { createHash } from 'crypto';
 import { Types } from 'mongoose';
@@ -36,6 +36,8 @@ type ClaimedToken = {
 type ServiceOptions = {
   user?: RequestUser | null;
   occupy?: boolean;
+  token?: boolean;
+  currentUser?: boolean;
   claim?: boolean;
   updateUser?: boolean;
 };
@@ -67,11 +69,20 @@ describe('PasswordResetService (no I/O)', () => {
       options.occupy === false || !user
         ? null
         : { ...user, passwordResetRequestedAt: NOW };
-    const claimedToken: ClaimedToken | null =
-      options.claim === false
-        ? null
-        : { userId, credentialVersion: 3, requestedAt: NOW };
-    const findUser = jest.fn(() => query(user));
+    const validToken: ClaimedToken = {
+      userId,
+      credentialVersion: 3,
+      requestedAt: NOW,
+    };
+    const claimedToken = options.claim === false ? null : validToken;
+    const findToken = jest.fn((_filter: Record<string, unknown>) => {
+      void _filter;
+      return query(options.token === false ? null : validToken);
+    });
+    const findUser = jest.fn((_filter: Record<string, unknown>) => {
+      void _filter;
+      return query(options.currentUser === false ? null : user);
+    });
     const occupyUser = jest.fn(
       (_filter: Record<string, unknown>, _update: Record<string, unknown>) => {
         void _filter;
@@ -132,6 +143,7 @@ describe('PasswordResetService (no I/O)', () => {
       } as never,
       {
         create: createToken,
+        findOne: findToken,
         findOneAndUpdate: claimToken,
         updateMany: invalidateTokens,
         updateOne: invalidateToken,
@@ -146,6 +158,7 @@ describe('PasswordResetService (no I/O)', () => {
         occupyUser,
         updateUser,
         createToken,
+        findToken,
         claimToken,
         invalidateTokens,
         invalidateToken,
@@ -312,12 +325,25 @@ describe('PasswordResetService (no I/O)', () => {
     expect(harness.mocks.occupyUser).toHaveBeenCalledTimes(1);
   });
 
-  it('prepares the normalized password before consuming a valid token and performs the final user CAS', async () => {
+  it('checks token and current user before hashing, then claims and performs the final user CAS', async () => {
     const harness = createService();
     await expect(
       harness.service.resetPassword(' synthetic-token ', '  NextPass123!  '),
     ).resolves.toEqual({
       message: '密码已重置，请使用新密码登录。',
+    });
+    const tokenFilter = harness.mocks.findToken.mock.calls[0]?.[0];
+    expect(tokenFilter?.usedAt).toBeNull();
+    expect(tokenFilter?.expiresAt).toEqual({ $gt: NOW });
+    expect(
+      tokenFilter?.tokenHash ===
+        createHash('sha256').update('synthetic-token').digest('hex'),
+    ).toBe(true);
+    expect(harness.mocks.findUser).toHaveBeenCalledWith({
+      _id: harness.userId,
+      status: UserStatus.Active,
+      credentialVersion: 3,
+      passwordResetRequestedAt: NOW,
     });
     expect(hashPassword).toHaveBeenCalledWith('NextPass123!');
     expect(harness.mocks.claimToken).toHaveBeenCalledWith(
@@ -346,17 +372,74 @@ describe('PasswordResetService (no I/O)', () => {
       4,
     );
     const hashOrder = jest.mocked(hashPassword).mock.invocationCallOrder[0];
+    const tokenReadOrder = harness.mocks.findToken.mock.invocationCallOrder[0];
+    const userReadOrder = harness.mocks.findUser.mock.invocationCallOrder[0];
     const claimOrder = harness.mocks.claimToken.mock.invocationCallOrder[0];
+    const userCasOrder = harness.mocks.updateUser.mock.invocationCallOrder[0];
+    expect(tokenReadOrder).toBeLessThan(userReadOrder);
+    expect(userReadOrder).toBeLessThan(hashOrder);
     expect(hashOrder).toBeLessThan(claimOrder);
+    expect(claimOrder).toBeLessThan(userCasOrder);
   });
 
-  it('does not claim a token when the new password policy rejects input', async () => {
-    const harness = createService();
+  it('preserves password-policy priority before token lookup or hashing', async () => {
+    const harness = createService({ token: false });
     await expect(
       harness.service.resetPassword('synthetic-token', 'short'),
-    ).rejects.toBeInstanceOf(BadRequestException);
+    ).rejects.toMatchObject({
+      status: 400,
+      response: { code: 'PASSWORD_POLICY_VIOLATION' },
+    });
+    expect(harness.mocks.findToken).not.toHaveBeenCalled();
+    expect(harness.mocks.findUser).not.toHaveBeenCalled();
     expect(hashPassword).not.toHaveBeenCalled();
     expect(harness.mocks.claimToken).not.toHaveBeenCalled();
+  });
+
+  it('rejects a missing valid-token lookup before hashing or changing any credentials', async () => {
+    const harness = createService({ token: false });
+    await expect(
+      harness.service.resetPassword('synthetic-token', 'NextPass123!'),
+    ).rejects.toMatchObject({
+      status: 400,
+      response: {
+        message: 'Reset token is invalid',
+        code: 'RESET_TOKEN_INVALID',
+      },
+    });
+    expect(harness.mocks.findToken).toHaveBeenCalledTimes(1);
+    expect(harness.mocks.findUser).not.toHaveBeenCalled();
+    expect(hashPassword).not.toHaveBeenCalled();
+    expect(harness.mocks.claimToken).not.toHaveBeenCalled();
+    expect(harness.mocks.updateUser).not.toHaveBeenCalled();
+    expect(harness.mocks.invalidateToken).not.toHaveBeenCalled();
+    expect(harness.mocks.invalidateTokens).not.toHaveBeenCalled();
+    expect(harness.mocks.clearUserSessionsBeforeVersion).not.toHaveBeenCalled();
+  });
+
+  it('rejects a missing matching active user before hashing or changing any credentials', async () => {
+    const harness = createService({ currentUser: false });
+    await expect(
+      harness.service.resetPassword('synthetic-token', 'NextPass123!'),
+    ).rejects.toMatchObject({
+      status: 400,
+      response: {
+        message: 'Reset token is invalid',
+        code: 'RESET_TOKEN_INVALID',
+      },
+    });
+    expect(harness.mocks.findUser).toHaveBeenCalledWith({
+      _id: harness.userId,
+      status: UserStatus.Active,
+      credentialVersion: 3,
+      passwordResetRequestedAt: NOW,
+    });
+    expect(hashPassword).not.toHaveBeenCalled();
+    expect(harness.mocks.claimToken).not.toHaveBeenCalled();
+    expect(harness.mocks.updateUser).not.toHaveBeenCalled();
+    expect(harness.mocks.invalidateToken).not.toHaveBeenCalled();
+    expect(harness.mocks.invalidateTokens).not.toHaveBeenCalled();
+    expect(harness.mocks.clearUserSessionsBeforeVersion).not.toHaveBeenCalled();
   });
 
   it('does not claim a token when preparing its new password hash fails', async () => {
@@ -367,20 +450,63 @@ describe('PasswordResetService (no I/O)', () => {
     await expect(
       harness.service.resetPassword('synthetic-token', 'NextPass123!'),
     ).rejects.toThrow('Synthetic hashing failure');
+    expect(harness.mocks.findToken).toHaveBeenCalledTimes(1);
+    expect(harness.mocks.findUser).toHaveBeenCalledTimes(1);
+    expect(hashPassword).toHaveBeenCalledTimes(1);
     expect(harness.mocks.claimToken).not.toHaveBeenCalled();
+    expect(harness.mocks.updateUser).not.toHaveBeenCalled();
+    expect(harness.mocks.invalidateToken).not.toHaveBeenCalled();
+    expect(harness.mocks.invalidateTokens).not.toHaveBeenCalled();
+    expect(harness.mocks.clearUserSessionsBeforeVersion).not.toHaveBeenCalled();
   });
 
-  it('rejects an unknown, used or expired token through the atomic claim', async () => {
+  it('uses the current time after hashing to reject a token that expired during hashing', async () => {
     const harness = createService({ claim: false });
+    const afterHash = new Date(NOW.getTime() + 30 * 60_000);
+    jest.mocked(hashPassword).mockImplementationOnce(() => {
+      jest.setSystemTime(afterHash);
+      return Promise.resolve('synthetic-password-hash');
+    });
     await expect(
       harness.service.resetPassword('synthetic-token', 'NextPass123!'),
     ).rejects.toMatchObject({
+      status: 400,
       response: {
         message: 'Reset token is invalid',
         code: 'RESET_TOKEN_INVALID',
       },
     });
+    expect(harness.mocks.findToken.mock.calls[0]?.[0].expiresAt).toEqual({
+      $gt: NOW,
+    });
+    expect(harness.mocks.claimToken.mock.calls[0]?.[0].expiresAt).toEqual({
+      $gt: afterHash,
+    });
+    expect(harness.mocks.claimToken.mock.calls[0]?.[1]).toEqual({
+      $set: { usedAt: afterHash },
+    });
     expect(harness.mocks.updateUser).not.toHaveBeenCalled();
+    expect(harness.mocks.invalidateToken).not.toHaveBeenCalled();
+    expect(harness.mocks.invalidateTokens).not.toHaveBeenCalled();
+    expect(harness.mocks.clearUserSessionsBeforeVersion).not.toHaveBeenCalled();
+  });
+
+  it('returns the public invalid-token error when claim loses after valid prechecks', async () => {
+    const harness = createService({ claim: false });
+    await expect(
+      harness.service.resetPassword('synthetic-token', 'NextPass123!'),
+    ).rejects.toMatchObject({
+      status: 400,
+      response: {
+        message: 'Reset token is invalid',
+        code: 'RESET_TOKEN_INVALID',
+      },
+    });
+    expect(hashPassword).toHaveBeenCalledTimes(1);
+    expect(harness.mocks.claimToken).toHaveBeenCalledTimes(1);
+    expect(harness.mocks.updateUser).not.toHaveBeenCalled();
+    expect(harness.mocks.invalidateToken).not.toHaveBeenCalled();
+    expect(harness.mocks.invalidateTokens).not.toHaveBeenCalled();
     expect(harness.mocks.clearUserSessionsBeforeVersion).not.toHaveBeenCalled();
   });
 
@@ -389,6 +515,7 @@ describe('PasswordResetService (no I/O)', () => {
     await expect(
       harness.service.resetPassword('synthetic-token', 'NextPass123!'),
     ).rejects.toMatchObject({
+      status: 400,
       response: {
         message: 'Reset token is invalid',
         code: 'RESET_TOKEN_INVALID',

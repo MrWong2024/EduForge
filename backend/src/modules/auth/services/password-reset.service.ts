@@ -137,9 +137,36 @@ export class PasswordResetService {
   ): Promise<{ message: string }> {
     const normalizedToken = token.trim();
     const password = validateNewPassword(newPassword);
+    const tokenHash = this.hashToken(normalizedToken);
+    const validToken = await this.passwordResetTokenModel
+      .findOne({
+        tokenHash,
+        usedAt: null,
+        expiresAt: { $gt: new Date() },
+      })
+      .select('userId credentialVersion requestedAt')
+      .lean<ClaimedResetToken>()
+      .exec();
+    if (!validToken) {
+      throw this.invalidResetToken();
+    }
+
+    const currentUser = await this.userModel
+      .findOne({
+        _id: validToken.userId,
+        status: UserStatus.Active,
+        credentialVersion: validToken.credentialVersion,
+        passwordResetRequestedAt: validToken.requestedAt,
+      })
+      .select('_id')
+      .lean()
+      .exec();
+    if (!currentUser) {
+      throw this.invalidResetToken();
+    }
+
     const nextPasswordHash = await hashPassword(password);
     const now = new Date();
-    const tokenHash = this.hashToken(normalizedToken);
     const resetToken = await this.passwordResetTokenModel
       .findOneAndUpdate(
         {

@@ -85,7 +85,7 @@ Global SoT 只保留理解跨 Service workflow 必需的稳定不变量，不追
 - Consistency / State / Idempotency:
   - 仅可登录用户进入 token/邮件写链。User 单文档按 active、读取版本及 `passwordResetRequestedAt=null 或 <= now-60秒` 原子占位，设置本次 now；只有成功者创建 token、发送邮件，时钟倒退或占位失败不重复签发、不清理其它 token。
   - 数据库只存 `tokenHash`；token 显式保存占位版本和从 User 复制的 `requestedAt`，不从 `createdAt` 推断代次。签发后只使更早 `requestedAt` 的凭据失效；最新 User 时间立即取代旧请求。
-  - 新密码合法性及哈希准备成功后，原子消费仍未使用且未过期的 token；最终 User CAS 必须再次匹配 `_id/active/token版本/passwordResetRequestedAt=token.requestedAt`，同次写新 hash 并递增版本。claim 不替代最终 CAS，旧请求晚插入或 claim 后暂停均不能绕过该边界。
+  - 新密码合法性校验后，先只读确认 token 未使用、未过期，并核对 active User 的凭据版本及 `passwordResetRequestedAt=token.requestedAt`；预检通过后才执行 bcrypt 密码哈希，预检不消费 token 或更新 User。哈希成功后重新取得当前时间，按该时间原子消费仍未使用且未过期的同一 token；最终 User CAS 必须再次匹配 `_id/active/token版本/passwordResetRequestedAt=token.requestedAt`，同次写新 hash 并递增版本。只读预检与 claim 均不替代最终 CAS，旧请求晚插入或预检/claim 后暂停均不能绕过该边界。
   - 密码更新后的 Session/token 清理只处理 `< 本次新版本`，不误删之后签发的凭据；旧版本失效由认证版本条件保证。
 - Isolation: 按 `userId` 及占位时间/凭据版本隔离冷却、请求替代和清理。
 - Side Effects: 原子写 User 占位、写 token、发邮件、CAS 更新密码及版本、清理旧凭据；Service 初始化不主动执行索引 DDL。
