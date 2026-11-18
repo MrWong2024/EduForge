@@ -305,6 +305,10 @@ studentName,studentNo,studentId,score,riskLevel,submittedTasksRate,submissionsCo
 
 CSV 空学号为空单元格，topTags 为 `tag:count` 以分号连接；JSON/CSV 均不返回密码、提交代码或 Provider 私有内容。导出媒体类型与高层行为见 [API Classrooms](./handoff-backend-api-map.md#classrooms)。
 
+CSV 单元格编码保留 `string / number` 区别：字符串首字符为 `=`、`+`、`-`、`@`、`＝`、`＋`、`－`、`＠` 中任一个时，在原文本前添加一个真实 TAB（U+0009），再将整个字段强制用双引号包围，字段内双引号双写。TAB 位于引用字段内部，不是反斜杠与字母 `t`；例如 `=1+1` 的输出字段由“双引号 + U+0009 + =1+1 + 双引号”组成。字符串学号 `"-1"` 同样中和；number 单元格沿用当前数值序列化，不添加 TAB 或文本标记。
+
+普通字符串保持既有 CSV quoting：包含逗号、双引号、CR 或 LF 时引用整个字段，并将内部双引号双写。中和仅发生在 CSV 导出序列化边界，不删除文本、不做 Unicode 归一化或使用 `="..."` 公式包装。姓名与学号进入编码器前仍使用既有 trim 投影；不因此改变数据库原值、JSON 投影、数值指标或查询/评分口径。UTF-8 BOM、上述列及顺序、记录间 LF 换行保持不变。该合同限定导出字节和 CSV 解析，不承诺所有电子表格程序、导入参数或再次另存后的通用安全。
+
 ### Classroom Export Snapshot
 
 来源：[QueryClassroomExportSnapshotDto](../../backend/src/modules/classrooms/dto/query-classroom-export-snapshot.dto.ts)、[ClassroomExportSnapshotService](../../backend/src/modules/classrooms/services/classroom-export-snapshot.service.ts)。

@@ -948,8 +948,10 @@ export class ProcessAssessmentService {
   }
 
   private escapeCsvCell(value: string | number) {
-    const normalized = String(value);
-    if (/[",\n\r]/.test(normalized)) {
+    const needsNeutralization =
+      typeof value === 'string' && /^[=+\-@＝＋－＠]/.test(value);
+    const normalized = needsNeutralization ? `\t${value}` : String(value);
+    if (needsNeutralization || /[",\n\r]/.test(normalized)) {
       return `"${normalized.replace(/"/g, '""')}"`;
     }
     return normalized;

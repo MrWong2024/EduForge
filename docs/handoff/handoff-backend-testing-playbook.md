@@ -112,6 +112,14 @@ npm.cmd run test:e2e -- --listTests --runInBand --runTestsByPath ./test/auth-sec
 npm.cmd run test:e2e -- --runInBand --runTestsByPath ./test/auth-security.e2e-spec.ts ./test/users-me.e2e-spec.ts ./test/users-change-password.e2e-spec.ts
 ```
 
+### 过程性评价 CSV 安全定向验收
+
+`src/modules/classrooms/services/process-assessment.service.spec.ts` 的导出区段使用 `none` 用途，负责 [DTO Process Assessment](./handoff-backend-dto-cheatsheet.md#process-assessment) 的文本中和、准确 TAB/引用/转义、普通文本与数值、BOM/列顺序/空结果及输入 payload 不变；既有聚合、排除项和评分回归继续由同一 Service spec 承担。独立字面 expected 来自锁定合同，含引用换行的行列及内容检查复用 `scripts/import-users-csv.ts` 的 `parseCsv`，不以分隔符 split 冒充 CSV 解析。
+
+`test/process-assessment-csv-security.e2e-spec.ts` 负责正式资料更新到 owner 教师 JSON/CSV 导出的窄 HTTP/Mongo 链路，以及同一导出入口的未认证、学生和非 owner 教师拒绝。它在 AppModule 导入前复用 `test/helpers/auth-test-environment.ts`，并使用 `prepareAuthSessionIndexes`、正式 `configureApp` 和 `assertAuthTestConnection`；环境、身份与限定索引准备沿用[认证与凭据生命周期定向验收](#认证与凭据生命周期定向验收)，不扩大 helper 或全模型索引同步。只准备 namespace 专属合成账号及最小课程、班级、成员，不创建任务/提交/反馈/AI Job；核对资料原值、既有 JSON trim 投影和 CSV 安全编码，按登记 ID 与关联归属精确清理并在 finally 关闭应用/连接、恢复测试环境。
+
+该 HTTP spec 不重复完整编码矩阵或课堂评分 E2E，不证明 Browser、Excel/WPS 实际运行或真实存量对齐。先 discovery 恰好命中所选单个 spec，再在对应独立 `none` / `standard_test` 进程使用相同路径运行；实际执行结果归当次任务报告。
+
 ### import-users 定向离线回归
 
 `scripts/import-users.spec.ts` 与 `scripts/import-users-csv.spec.ts` 使用正式导入逻辑，数据库用途为 `none`：只允许合成输入、测试自有临时配置、fake connection/model 和隔离的无网络 CLI 子进程，不连接任何真实数据库，不加载机器真实 `.env` 或继承真实 Mongo、AI、SMTP 凭据，不启动 AppModule 或业务服务。连接替换必须在任何网络连接前生效；临时目录与子进程由创建它们的测试在 teardown/finally 中收口。

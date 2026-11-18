@@ -2,6 +2,7 @@ import 'reflect-metadata';
 import { plainToInstance } from 'class-transformer';
 import { validate } from 'class-validator';
 import { Types } from 'mongoose';
+import { parseCsv } from '../../../../scripts/import-users-csv';
 import { QueryProcessAssessmentDto } from '../dto/query-process-assessment.dto';
 import { ProcessAssessmentService } from './process-assessment.service';
 
@@ -869,6 +870,177 @@ describe('ProcessAssessmentService getProcessAssessment', () => {
 });
 
 describe('ProcessAssessmentService exportProcessAssessmentCsv', () => {
+  const createCsvPayload = (
+    item: Partial<Awaited<ReturnType<BuildPayload>>['items'][number]> = {},
+  ): Awaited<ReturnType<BuildPayload>> => ({
+    classroomId: '507f1f77bcf86cd799439011',
+    window: 'all',
+    generatedAt: '2026-05-20T00:00:00.000Z',
+    page: 1,
+    limit: 50,
+    total: 1,
+    rubric: { ...RUBRIC },
+    items: [
+      {
+        studentId: '507f1f77bcf86cd799439012',
+        studentName: '张三',
+        studentNo: '2025001',
+        submittedTasksCount: 1,
+        publishedTasksCount: 2,
+        submittedTasksRate: 0.5,
+        submissionsCount: 2,
+        iteratedTasksCount: 1,
+        lateSubmissionsCount: 0,
+        lateTasksCount: 0,
+        aiRequestedCount: 2,
+        aiSucceededCount: 1,
+        aiRequestedTasksCount: 1,
+        aiSucceededTasksCount: 1,
+        avgFeedbackItems: 1.5,
+        avgWarnItems: 0.25,
+        avgErrorItems: 0.5,
+        topTags: [
+          { tag: '中文标签', count: 2 },
+          { tag: '另一标签', count: 1 },
+        ],
+        riskLevel: 'MEDIUM',
+        score: 83,
+        ...item,
+      },
+    ],
+  });
+
+  it('preserves ordinary text, empty student numbers, zeroes and decimal metrics', async () => {
+    const payload = createCsvPayload({ studentNo: null });
+    const service = createService(payload);
+
+    const result = await service.exportProcessAssessmentCsv(
+      payload.classroomId,
+      {},
+      '507f1f77bcf86cd799439013',
+    );
+
+    expect(result).toBe(
+      `\uFEFF${CSV_HEADER}\n张三,,507f1f77bcf86cd799439012,83,MEDIUM,0.5,2,1,0,0,2,1,1,1,0.25,0.5,中文标签:2;另一标签:1`,
+    );
+    const records = parseCsv(result);
+    expect(records).toHaveLength(2);
+    expect(records.every((record) => record.cells.length === 17)).toBe(true);
+    expect(records[1].cells).toEqual([
+      '张三',
+      '',
+      '507f1f77bcf86cd799439012',
+      '83',
+      'MEDIUM',
+      '0.5',
+      '2',
+      '1',
+      '0',
+      '0',
+      '2',
+      '1',
+      '1',
+      '1',
+      '0.25',
+      '0.5',
+      '中文标签:2;另一标签:1',
+    ]);
+  });
+
+  it.each([
+    ['=1+1', '"\t=1+1"', '\t=1+1'],
+    ['+1', '"\t+1"', '\t+1'],
+    ['-1', '"\t-1"', '\t-1'],
+    ['@姓名', '"\t@姓名"', '\t@姓名'],
+    ['＝1+1', '"\t＝1+1"', '\t＝1+1'],
+    ['＋1', '"\t＋1"', '\t＋1'],
+    ['－1', '"\t－1"', '\t－1'],
+    ['＠姓名', '"\t＠姓名"', '\t＠姓名'],
+  ])(
+    'neutralizes dangerous text prefix in name and student number: %s',
+    async (input, encoded, decoded) => {
+      const payload = createCsvPayload({
+        studentName: input,
+        studentNo: input,
+      });
+      const service = createService(payload);
+
+      const result = await service.exportProcessAssessmentCsv(
+        payload.classroomId,
+        {},
+        '507f1f77bcf86cd799439013',
+      );
+
+      expect(result).toBe(
+        `\uFEFF${CSV_HEADER}\n${encoded},${encoded},507f1f77bcf86cd799439012,83,MEDIUM,0.5,2,1,0,0,2,1,1,1,0.25,0.5,中文标签:2;另一标签:1`,
+      );
+      const records = parseCsv(result);
+      expect(records).toHaveLength(2);
+      expect(records.every((record) => record.cells.length === 17)).toBe(true);
+      expect(records[1].cells.slice(0, 2)).toEqual([decoded, decoded]);
+      expect(records[1].cells[0].charCodeAt(0)).toBe(9);
+    },
+  );
+
+  it.each([
+    ['张,三', '"张,三"'],
+    ['张"三', '"张""三"'],
+    ['张\r三', '"张\r三"'],
+    ['张\n三', '"张\n三"'],
+    ['张\r\n三', '"张\r\n三"'],
+  ])('preserves ordinary CSV quoting for %p', async (input, encoded) => {
+    const payload = createCsvPayload({ studentName: input });
+    const service = createService(payload);
+
+    const result = await service.exportProcessAssessmentCsv(
+      payload.classroomId,
+      {},
+      '507f1f77bcf86cd799439013',
+    );
+
+    expect(result).toBe(
+      `\uFEFF${CSV_HEADER}\n${encoded},2025001,507f1f77bcf86cd799439012,83,MEDIUM,0.5,2,1,0,0,2,1,1,1,0.25,0.5,中文标签:2;另一标签:1`,
+    );
+    const records = parseCsv(result);
+    expect(records).toHaveLength(2);
+    expect(records.every((record) => record.cells.length === 17)).toBe(true);
+    expect(records[1].cells[0]).toBe(input);
+  });
+
+  it('keeps quoted dangerous multiline content in its cell without changing payload or JSON', async () => {
+    const payload = createCsvPayload({
+      studentName: '=1,"姓名"\r\n下一行',
+      studentNo: '-1',
+    });
+    const originalPayload = structuredClone(payload);
+    const service = createService(payload);
+
+    const result = await service.exportProcessAssessmentCsv(
+      payload.classroomId,
+      {},
+      '507f1f77bcf86cd799439013',
+    );
+
+    expect(result).toBe(
+      `\uFEFF${CSV_HEADER}\n"\t=1,""姓名""\r\n下一行","\t-1",507f1f77bcf86cd799439012,83,MEDIUM,0.5,2,1,0,0,2,1,1,1,0.25,0.5,中文标签:2;另一标签:1`,
+    );
+    const records = parseCsv(result);
+    expect(records).toHaveLength(2);
+    expect(records.every((record) => record.cells.length === 17)).toBe(true);
+    expect(records[1].cells.slice(0, 2)).toEqual([
+      '\t=1,"姓名"\r\n下一行',
+      '\t-1',
+    ]);
+    expect(payload).toEqual(originalPayload);
+    expect(
+      await service.getProcessAssessment(
+        payload.classroomId,
+        {},
+        '507f1f77bcf86cd799439013',
+      ),
+    ).toEqual(originalPayload);
+  });
+
   it('prefixes CSV with UTF-8 BOM and preserves header order with Chinese text', async () => {
     const service = createService({
       classroomId: 'classroom-1',
@@ -936,6 +1108,9 @@ describe('ProcessAssessmentService exportProcessAssessmentCsv', () => {
     );
 
     expect(result).toBe(`\uFEFF${CSV_HEADER}`);
+    const records = parseCsv(result);
+    expect(records).toHaveLength(1);
+    expect(records[0].cells).toHaveLength(17);
   });
 
   it('exports zero-submission active students with score 0 while preserving BOM and columns', async () => {
