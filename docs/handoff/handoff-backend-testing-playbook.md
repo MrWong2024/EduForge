@@ -131,6 +131,17 @@ npm.cmd run test:e2e -- --listTests --runInBand --runTestsByPath ./test/teaching
 npm.cmd run test:e2e -- --runInBand --runTestsByPath ./test/teaching-resource-write-contract.e2e-spec.ts
 ```
 
+### 课堂报表任务状态定向验收
+
+`test/classroom-report-task-status.e2e-spec.ts` 通过正式发布、关闭、撤回及提交入口，负责过程性评价的撤回排除、关闭任务参与及手工排除关系，并核对 JSON、CSV 与快照 processAssessment 的明示业务预期，以及教师看板空任务时 summary 自身的完整数值字段。有效任务与计分合同见 [Service Card 08G](./handoff-backend-service-map.md#service-card-08g)，公开字段见 [DTO Dashboard](./handoff-backend-dto-cheatsheet.md#teacher--student-dashboard-response-family)；评分边界、CSV 安全编码及非空看板统计继续由既有 Service unit 承担。环境、认证与连接门禁复用[认证与凭据生命周期定向验收](#认证与凭据生命周期定向验收)。
+
+从 `backend` 目录在独立 `standard_test` 进程使用现有 `test:e2e` 入口，先确认 discovery 仅命中该文件，再以相同路径定向执行：
+
+```powershell
+npm.cmd run test:e2e -- --listTests --runInBand --runTestsByPath ./test/classroom-report-task-status.e2e-spec.ts
+npm.cmd run test:e2e -- --runInBand --runTestsByPath ./test/classroom-report-task-status.e2e-spec.ts
+```
+
 ### import-users 定向离线回归
 
 `scripts/import-users.spec.ts` 与 `scripts/import-users-csv.spec.ts` 使用正式导入逻辑，数据库用途为 `none`：只允许合成输入、测试自有临时配置、fake connection/model 和隔离的无网络 CLI 子进程，不连接任何真实数据库，不加载机器真实 `.env` 或继承真实 Mongo、AI、SMTP 凭据，不启动 AppModule 或业务服务。连接替换必须在任何网络连接前生效；临时目录与子进程由创建它们的测试在 teardown/finally 中收口。

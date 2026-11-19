@@ -295,7 +295,7 @@ Global SoT 只保留理解跨 Service workflow 必需的稳定不变量，不追
 - Upstream: 过程性评价 JSON/CSV 入口；Snapshot 经 `getProcessAssessmentForSnapshot` 复用。
 - Downstream / Dependencies: `ClassroomModel`、`ClassroomTaskModel`、`SubmissionModel`、`AiFeedbackJobModel`、`FeedbackModel`、`EnrollmentService`。
 - Consistency / State / Idempotency:
-  - 先按 classroomId 与 window 选择 tasks，再应用 excludedTaskIds 得到 effectiveTaskIds；提交、迟交、AI、反馈与 topTags 均按有效任务重新计算。all 不拼 tasks/submissions/feedback 的 lowerBound；不在课堂/窗口内的合法排除 id 自然无效果。
+  - 先按 classroomId 与既有 publishedAt 窗口选择 tasks，在查询处排除 RECALLED；当前 ACTIVE、CLOSED 均参与。再按 classroomTaskId 应用 excludedTaskIds 得到 effectiveTaskIds，任务分母、覆盖率、提交、迭代、迟交、AI、反馈、topTags、分数与风险均复用该有效任务集合。all 不拼 tasks/submissions/feedback 的 lowerBound；显式排除已撤回或不在课堂/窗口内的合法实例 id 自然无效果，不重复减计。
   - 提交迭代、AI 覆盖/成功按 studentId + classroomTaskId 去重；反馈均值取每名学生每个有效任务“最新一次有 AI 反馈项的提交”。INFO 只进入反馈总均值，WARN 按 0.5、ERROR 按 1 扣分。
   - 计分与公开响应复用同一 rubric 常量，权重见 [DTO Cheatsheet](./handoff-backend-dto-cheatsheet.md#query-dto--public-response读取接口)。无有效任务或无提交时 score 为 0；排除全部任务仍返回 ACTIVE 学生，任务统计归零。
   - 风险判定顺序：无有效任务为 LOW；有任务但无提交为 HIGH；覆盖率 <0.4 或平均 ERROR >=2 为 HIGH；覆盖率 <0.8、平均 ERROR >=1 或平均 WARN >=2 为 MEDIUM；其余 LOW。

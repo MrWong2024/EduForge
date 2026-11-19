@@ -7,6 +7,7 @@ import { InjectModel } from '@nestjs/mongoose';
 import { Model, PipelineStage, Types } from 'mongoose';
 import { Classroom } from '../schemas/classroom.schema';
 import { ClassroomTask } from '../classroom-tasks/schemas/classroom-task.schema';
+import { CLASSROOM_TASK_STATUS_RECALLED } from '../classroom-tasks/classroom-task-status.constants';
 import {
   PROCESS_ASSESSMENT_SORT_FIELDS,
   PROCESS_ASSESSMENT_SORT_ORDERS,
@@ -286,6 +287,7 @@ export class ProcessAssessmentService {
     // tasks are still isolated by classroomId.
     const taskMatch: Record<string, unknown> = {
       classroomId: classroomObjectId,
+      status: { $ne: CLASSROOM_TASK_STATUS_RECALLED },
     };
     if (lowerBound) {
       taskMatch.publishedAt = { $gte: lowerBound };

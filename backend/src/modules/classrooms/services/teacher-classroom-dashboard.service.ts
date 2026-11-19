@@ -196,6 +196,8 @@ export class TeacherClassroomDashboardService {
         summary: {
           studentsCount,
           publishedTasksCount: 0,
+          lateSubmissionsTotal: 0,
+          lateStudentsTotal: 0,
         },
         archiveSuggestion,
         tasks: [],
