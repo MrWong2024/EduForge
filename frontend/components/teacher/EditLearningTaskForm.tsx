@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { ErrorState } from "@/components/blocks/ErrorState";
 import { BrowserFetchJsonError, fetchJson } from "@/lib/api/browser-client";
@@ -9,47 +9,35 @@ import {
   buildErrorDescription,
   extractRawDetail,
 } from "@/lib/api/error-presenter";
-import {
-  toLearningTaskUpdateResponse,
-  type LearningTaskDetailResponse,
-  type LearningTaskStatus,
-  type UpdateLearningTaskRequest,
+import type {
+  LearningTaskDetailResponse,
+  LearningTaskStatus,
 } from "@/lib/api/types-teacher";
-import {
-  TASK_COURSE_LABEL_FORM_OPTIONS,
-  TASK_COURSE_LABEL_UNCLASSIFIED,
-  normalizeTaskCourseLabel,
-} from "@/lib/learning-tasks/course-labels";
+import { TASK_COURSE_LABEL_FORM_OPTIONS } from "@/lib/learning-tasks/course-labels";
 import {
   TASK_DIFFICULTY_HELP,
   TASK_DIFFICULTY_OPTIONS,
   getDifficultyLabel,
-  toDifficultyInputValue,
-  updateDifficultyPayload,
 } from "@/lib/learning-tasks/difficulty";
 import {
   TASK_TEMPLATE_VISIBILITIES,
   TASK_TEMPLATE_VISIBILITY_LABELS,
-  TASK_TEMPLATE_VISIBILITY_SHARED,
-  normalizeTaskTemplateVisibility,
   type TaskTemplateVisibility,
 } from "@/lib/learning-tasks/template-visibility-scope";
 import { toSafeTaskListReturnTo } from "@/lib/routes/task-list-return-to";
 import { getPublisherLabel } from "@/lib/ui/format";
 import { getTaskTemplateStatusLabel } from "@/lib/ui/status";
 import {
-  buildUpdateTaskRubric,
-  getRubricNotes,
-} from "@/lib/learning-tasks/rubric";
-import {
   TaskAiContextRefsEditor,
   TaskAiContextRefsReadOnly,
 } from "@/components/teacher/TaskAiContextRefs";
+import { canEditTaskTemplate } from "@/lib/learning-tasks/ai-context-refs";
 import {
-  buildAiContextRefsPatch,
-  canEditTaskTemplate,
-  formatAiContextRefs,
-} from "@/lib/learning-tasks/ai-context-refs";
+  buildTaskTemplateEditRequest,
+  confirmTaskTemplateEditReceipt,
+  toTaskTemplateEditDraft,
+  type TaskTemplateEditDraft,
+} from "@/lib/learning-tasks/template-edit";
 
 type EditLearningTaskFormProps = {
   taskId: string;
@@ -92,8 +80,11 @@ const getUpdateErrorSummary = (status: number): string => {
   if (status === 404) {
     return "任务模板不存在或功能未启用/不可用。";
   }
+  if (status === 409) {
+    return "任务模板已变化，请刷新后再操作。";
+  }
   if (status >= 500) {
-    return "更新任务模板失败，请稍后重试。";
+    return "保存结果无法确认，请刷新核对后再操作。草稿已保留。";
   }
   return "更新任务模板失败，请稍后重试。";
 };
@@ -102,6 +93,9 @@ const buildUpdateErrorDescription = (
   status: number,
   detail?: string,
 ): string => {
+  if (status === 409) {
+    return getUpdateErrorSummary(status);
+  }
   if (detail?.includes(USED_PUBLISHED_TEMPLATE_REVERT_DETAIL)) {
     return USED_PUBLISHED_TEMPLATE_REVERT_MESSAGE;
   }
@@ -112,6 +106,9 @@ const getLifecycleActionErrorSummary = (
   action: TaskLifecycleAction,
   status: number,
 ): string => {
+  if (status === 409) {
+    return "任务模板已变化，请刷新后再操作。";
+  }
   if (action === "publish") {
     if (status === 400) {
       return "当前模板状态不允许发布。";
@@ -126,7 +123,7 @@ const getLifecycleActionErrorSummary = (
       return "任务模板不存在或已不可用。";
     }
     if (status >= 500) {
-      return "发布任务模板失败，请稍后重试。";
+      return "发布结果无法确认，请刷新核对后再操作。草稿已保留。";
     }
     return "发布任务模板失败，请稍后重试。";
   }
@@ -144,7 +141,7 @@ const getLifecycleActionErrorSummary = (
     return "任务模板不存在或已不可用。";
   }
   if (status >= 500) {
-    return "归档任务模板失败，请稍后重试。";
+    return "归档结果无法确认，请刷新核对后再操作。草稿已保留。";
   }
   return "归档任务模板失败，请稍后重试。";
 };
@@ -158,49 +155,16 @@ export function EditLearningTaskForm({
 }: EditLearningTaskFormProps) {
   const router = useRouter();
   const taskListReturnTo = toSafeTaskListReturnTo(returnTo);
-  const initialCourseLabel = normalizeTaskCourseLabel(initialTask.courseLabel);
-  const rawInitialStatus = toRawStatusUpper(initialTask.status);
-  const hasKnownInitialStatus = isLearningTaskStatus(rawInitialStatus);
-  const initialVisibility =
-    normalizeTaskTemplateVisibility(initialTask.visibility) ??
-    TASK_TEMPLATE_VISIBILITY_SHARED;
-  const publisherLabel = getPublisherLabel(
-    initialTask.publisher,
-    currentUserId,
+  const [confirmedTask, setConfirmedTask] = useState(initialTask);
+  // Keep this edit session stable across ordinary props refreshes.
+  const [baseline, setBaseline] = useState(() =>
+    toTaskTemplateEditDraft(initialTask),
   );
-
-  const [title, setTitle] = useState(initialTask.title ?? "");
-  const [description, setDescription] = useState(initialTask.description ?? "");
-  const [knowledgeModule, setKnowledgeModule] = useState(
-    initialTask.knowledgeModule ?? "",
-  );
-  const [difficultyBaseline, setDifficultyBaseline] = useState(
-    initialTask.difficulty,
-  );
-  const [difficulty, setDifficulty] = useState(() =>
-    toDifficultyInputValue(initialTask.difficulty),
-  );
-  const [courseLabel, setCourseLabel] = useState(
-    initialCourseLabel && initialCourseLabel !== TASK_COURSE_LABEL_UNCLASSIFIED
-      ? initialCourseLabel
-      : "",
-  );
-  const [currentStatus, setCurrentStatus] = useState<LearningTaskStatus>(
-    hasKnownInitialStatus ? rawInitialStatus : "DRAFT",
-  );
-  const [visibility, setVisibility] =
-    useState<TaskTemplateVisibility>(initialVisibility);
-  const [rubricNotes, setRubricNotes] = useState(() =>
-    getRubricNotes(initialTask.rubric),
+  const [draft, setDraft] = useState(() =>
+    toTaskTemplateEditDraft(initialTask),
   );
   const [showAiContextEditor] = useState(
     () => (initialTask.aiContextRefs?.length ?? 0) > 0,
-  );
-  const [aiContextBaseline, setAiContextBaseline] = useState(
-    initialTask.aiContextRefs ?? [],
-  );
-  const [aiContextText, setAiContextText] = useState(() =>
-    formatAiContextRefs(initialTask.aiContextRefs ?? []),
   );
   const [aiContextError, setAiContextError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -210,16 +174,44 @@ export function EditLearningTaskForm({
   const [errorState, setErrorState] =
     useState<EditLearningTaskFormErrorState | null>(null);
 
+  const {
+    title,
+    description,
+    knowledgeModule,
+    courseLabel,
+    visibility,
+    difficulty,
+    rubricNotes,
+    aiContextText,
+  } = draft;
+  const requestPlan = useMemo(
+    () => buildTaskTemplateEditRequest(baseline, draft),
+    [baseline, draft],
+  );
+  const rawStatus = toRawStatusUpper(confirmedTask.status);
+  const hasKnownStatus = isLearningTaskStatus(rawStatus);
+  const currentStatus = hasKnownStatus ? rawStatus : "DRAFT";
+  const publisherLabel = getPublisherLabel(
+    confirmedTask.publisher,
+    currentUserId,
+  );
   const isArchived = currentStatus === "ARCHIVED";
   const ownerCanEdit = canEditTaskTemplate(
     currentUserId,
-    initialTask.createdById,
-    hasKnownInitialStatus ? currentStatus : undefined,
+    confirmedTask.createdById,
+    hasKnownStatus ? currentStatus : undefined,
   );
   const canPublish = !readOnly && ownerCanEdit && currentStatus === "DRAFT";
   const canArchive = !readOnly && ownerCanEdit && currentStatus === "PUBLISHED";
   const isActionPending = isPublishing || isArchiving;
   const effectiveReadOnly = readOnly || !ownerCanEdit;
+
+  function updateDraft<Field extends keyof TaskTemplateEditDraft>(
+    field: Field,
+    value: TaskTemplateEditDraft[Field],
+  ) {
+    setDraft((current) => ({ ...current, [field]: value }));
+  }
 
   const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -227,38 +219,13 @@ export function EditLearningTaskForm({
       return;
     }
 
-    const trimmedTitle = title.trim();
-    const trimmedDescription = description.trim();
-    const trimmedKnowledgeModule = knowledgeModule.trim();
-    const normalizedCourseLabel = normalizeTaskCourseLabel(courseLabel);
-    if (!trimmedTitle) {
-      setErrorState({
-        description: "请填写任务模板标题。",
-      });
-      return;
-    }
-    if (!trimmedDescription) {
-      setErrorState({
-        description: "请填写任务模板描述。",
-      });
-      return;
-    }
-    if (!trimmedKnowledgeModule) {
-      setErrorState({
-        description: "请填写知识模块。",
-      });
-      return;
-    }
-    let aiContextPatch: Pick<UpdateLearningTaskRequest, "aiContextRefs">;
-    try {
-      aiContextPatch = buildAiContextRefsPatch(
-        aiContextText,
-        aiContextBaseline,
-      );
-    } catch (error) {
-      setAiContextError(
-        error instanceof Error ? error.message : "引用 JSON 不合法。",
-      );
+    if (requestPlan.kind === "unchanged") return;
+    if (requestPlan.kind === "invalid") {
+      if (requestPlan.field === "aiContextText") {
+        setAiContextError(requestPlan.message);
+      } else {
+        setErrorState({ description: requestPlan.message });
+      }
       return;
     }
     setAiContextError(null);
@@ -266,16 +233,7 @@ export function EditLearningTaskForm({
     setSuccessMessage(null);
     setErrorState(null);
 
-    const requestBody: UpdateLearningTaskRequest = {
-      title: trimmedTitle,
-      description: trimmedDescription,
-      knowledgeModule: trimmedKnowledgeModule,
-      courseLabel: normalizedCourseLabel ?? "",
-      visibility,
-      rubric: buildUpdateTaskRubric(rubricNotes),
-      ...aiContextPatch,
-      ...updateDifficultyPayload(difficultyBaseline, difficulty),
-    };
+    const requestBody = requestPlan.payload;
 
     try {
       const payload = await fetchJson<unknown>(
@@ -290,20 +248,25 @@ export function EditLearningTaskForm({
         },
       );
 
-      const updated = toLearningTaskUpdateResponse(payload);
+      const receipt = confirmTaskTemplateEditReceipt(
+        taskId,
+        payload,
+        requestBody,
+      );
       if (
-        updated.id !== taskId ||
-        "aiContextRefs" in
-          buildAiContextRefsPatch(aiContextText, updated.aiContextRefs ?? [])
+        receipt.kind === "invalid" ||
+        receipt.task.createdById !== confirmedTask.createdById
       ) {
-        throw new Error("保存结果无法确认");
+        setErrorState({
+          description: "保存结果无法确认，请刷新核对后再操作。草稿已保留。",
+        });
+        return;
       }
-      setAiContextBaseline(updated.aiContextRefs ?? []);
-      setDifficultyBaseline(updated.difficulty);
-      setDifficulty(toDifficultyInputValue(updated.difficulty));
-      setRubricNotes(getRubricNotes(updated.rubric));
-      const suffix = "，评阅标准已更新。";
-      setSuccessMessage(`任务模板更新成功${suffix}`);
+      setConfirmedTask(receipt.task);
+      setBaseline(receipt.draft);
+      setDraft(receipt.draft);
+      setAiContextError(null);
+      setSuccessMessage("任务模板更新成功。");
       router.refresh();
     } catch (error) {
       if (error instanceof BrowserFetchJsonError) {
@@ -314,7 +277,7 @@ export function EditLearningTaskForm({
         });
       } else {
         setErrorState({
-          description: "更新任务模板失败，请稍后重试。",
+          description: "保存结果无法确认，请刷新核对后再操作。草稿已保留。",
         });
       }
     } finally {
@@ -352,7 +315,7 @@ export function EditLearningTaskForm({
     setErrorState(null);
 
     try {
-      await fetchJson<unknown>(
+      const payload = await fetchJson<unknown>(
         `learning-tasks/tasks/${encodeURIComponent(taskId)}/${action}`,
         {
           method: "POST",
@@ -362,7 +325,24 @@ export function EditLearningTaskForm({
         },
       );
       const nextStatus = action === "publish" ? "PUBLISHED" : "ARCHIVED";
-      setCurrentStatus(nextStatus);
+      const receipt = confirmTaskTemplateEditReceipt(taskId, payload, {});
+      if (
+        receipt.kind === "invalid" ||
+        receipt.task.createdById !== confirmedTask.createdById ||
+        receipt.task.status !== nextStatus
+      ) {
+        setErrorState({
+          title: action === "publish" ? "发布任务模板失败" : "归档任务模板失败",
+          description: "操作结果无法确认，请刷新核对后再操作。草稿已保留。",
+        });
+        return;
+      }
+      setConfirmedTask(receipt.task);
+      if (action === "archive") {
+        setBaseline(receipt.draft);
+        setDraft(receipt.draft);
+        setAiContextError(null);
+      }
       setSuccessMessage(
         action === "publish" ? "任务模板已发布。" : "任务模板已归档。",
       );
@@ -379,10 +359,7 @@ export function EditLearningTaskForm({
       } else {
         setErrorState({
           title: action === "publish" ? "发布任务模板失败" : "归档任务模板失败",
-          description:
-            action === "publish"
-              ? "发布任务模板失败，请稍后重试。"
-              : "归档任务模板失败，请稍后重试。",
+          description: "操作结果无法确认，请刷新核对后再操作。草稿已保留。",
         });
       }
     } finally {
@@ -417,7 +394,7 @@ export function EditLearningTaskForm({
           当前任务模板已归档，不能直接编辑。后续如需复用，可复制为新草稿。
         </p>
       ) : null}
-      {!readOnly && !hasKnownInitialStatus ? (
+      {!readOnly && !hasKnownStatus ? (
         <p className="mt-2 rounded-md border border-zinc-200 bg-zinc-50 px-3 py-2 text-sm text-zinc-700">
           当前任务模板状态暂不可用，暂不允许编辑。
         </p>
@@ -434,7 +411,7 @@ export function EditLearningTaskForm({
               <input
                 disabled={effectiveReadOnly}
                 value={title}
-                onChange={(event) => setTitle(event.target.value)}
+                onChange={(event) => updateDraft("title", event.target.value)}
                 placeholder="请输入任务模板标题"
                 className="w-full rounded-md border border-zinc-300 px-3 py-2"
               />
@@ -445,7 +422,9 @@ export function EditLearningTaskForm({
               <input
                 disabled={effectiveReadOnly}
                 value={knowledgeModule}
-                onChange={(event) => setKnowledgeModule(event.target.value)}
+                onChange={(event) =>
+                  updateDraft("knowledgeModule", event.target.value)
+                }
                 placeholder="例如：GENERAL"
                 className="w-full rounded-md border border-zinc-300 px-3 py-2"
               />
@@ -458,7 +437,9 @@ export function EditLearningTaskForm({
               <select
                 disabled={effectiveReadOnly}
                 value={courseLabel}
-                onChange={(event) => setCourseLabel(event.target.value)}
+                onChange={(event) =>
+                  updateDraft("courseLabel", event.target.value)
+                }
                 className="w-full rounded-md border border-zinc-300 px-3 py-2"
               >
                 <option value="">未分类（通用模板）</option>
@@ -479,7 +460,10 @@ export function EditLearningTaskForm({
                 disabled={effectiveReadOnly}
                 value={visibility}
                 onChange={(event) =>
-                  setVisibility(event.target.value as TaskTemplateVisibility)
+                  updateDraft(
+                    "visibility",
+                    event.target.value as TaskTemplateVisibility,
+                  )
                 }
                 className="w-full rounded-md border border-zinc-300 px-3 py-2"
               >
@@ -504,7 +488,9 @@ export function EditLearningTaskForm({
             ) : (
               <select
                 value={difficulty}
-                onChange={(event) => setDifficulty(event.target.value)}
+                onChange={(event) =>
+                  updateDraft("difficulty", event.target.value)
+                }
                 className="w-full rounded-md border border-zinc-300 px-3 py-2"
               >
                 <option value="">未设置</option>
@@ -523,7 +509,9 @@ export function EditLearningTaskForm({
             <textarea
               readOnly={effectiveReadOnly}
               value={description}
-              onChange={(event) => setDescription(event.target.value)}
+              onChange={(event) =>
+                updateDraft("description", event.target.value)
+              }
               rows={10}
               placeholder={`建议按以下内容编写，让学生清楚“做什么、怎样核验、提交什么”：
 
@@ -547,7 +535,7 @@ export function EditLearningTaskForm({
               <span className="mb-1 block text-zinc-700">当前状态</span>
               <div className="rounded-md border border-zinc-200 bg-zinc-50 px-3 py-2 text-zinc-700">
                 {getTaskTemplateStatusLabel(
-                  hasKnownInitialStatus ? currentStatus : initialTask.status,
+                  hasKnownStatus ? currentStatus : confirmedTask.status,
                 )}
               </div>
               <p className="mt-1 text-xs text-zinc-500">
@@ -561,7 +549,9 @@ export function EditLearningTaskForm({
             <textarea
               readOnly={effectiveReadOnly}
               value={rubricNotes}
-              onChange={(event) => setRubricNotes(event.target.value)}
+              onChange={(event) =>
+                updateDraft("rubricNotes", event.target.value)
+              }
               rows={10}
               placeholder={`建议与任务描述逐项对应，写清“看什么、凭什么判断、怎样帮助学生改进”：
 
@@ -588,11 +578,11 @@ export function EditLearningTaskForm({
         </fieldset>
 
         {effectiveReadOnly ? (
-          <TaskAiContextRefsReadOnly refs={aiContextBaseline} />
+          <TaskAiContextRefsReadOnly refs={confirmedTask.aiContextRefs ?? []} />
         ) : showAiContextEditor ? (
           <TaskAiContextRefsEditor
             value={aiContextText}
-            onChange={setAiContextText}
+            onChange={(value) => updateDraft("aiContextText", value)}
             error={aiContextError}
             onError={setAiContextError}
             disabled={isSubmitting || isActionPending}
@@ -603,7 +593,11 @@ export function EditLearningTaskForm({
           {!effectiveReadOnly ? (
             <button
               type="submit"
-              disabled={isSubmitting || isActionPending}
+              disabled={
+                isSubmitting ||
+                isActionPending ||
+                requestPlan.kind === "unchanged"
+              }
               className="rounded-md bg-zinc-900 px-4 py-2 text-sm font-medium text-white disabled:cursor-not-allowed disabled:bg-zinc-400"
             >
               {isSubmitting ? "保存中..." : "保存修改"}

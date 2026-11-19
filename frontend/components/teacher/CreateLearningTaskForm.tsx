@@ -123,7 +123,7 @@ export function CreateLearningTaskForm() {
 
     const requestBody: CreateLearningTaskRequest = {
       title: trimmedTitle,
-      description: trimmedDescription,
+      description,
       knowledgeModule: trimmedKnowledgeModule,
       visibility,
       status: action === "publish" ? "PUBLISHED" : "DRAFT",

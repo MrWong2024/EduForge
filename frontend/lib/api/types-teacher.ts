@@ -350,9 +350,9 @@ export type CreateLearningTaskRequest = {
 
 export type UpdateLearningTaskRequest = {
   difficulty?: string;
-  title: string;
-  description: string;
-  knowledgeModule: string;
+  title?: string;
+  description?: string;
+  knowledgeModule?: string;
   courseLabel?: string;
   visibility?: TaskTemplateVisibility;
   rubric?: Record<string, unknown>;
@@ -1221,7 +1221,10 @@ export const toLearningTaskOption = (value: unknown): LearningTaskOption => {
       typeof record.difficulty === "string" ? record.difficulty : undefined,
     id: asString(record.id) ?? asString(record.taskId),
     title: asString(record.title),
-    description: asString(record.description),
+    description:
+      typeof record.description === "string" && record.description.trim()
+        ? record.description
+        : undefined,
     status: asString(record.status),
     knowledgeModule: asString(record.knowledgeModule),
     courseLabel: asString(record.courseLabel),
