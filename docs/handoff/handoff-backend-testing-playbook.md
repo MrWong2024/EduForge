@@ -135,6 +135,8 @@ npm.cmd run test:e2e -- --runInBand --runTestsByPath ./test/teaching-resource-wr
 
 `test/classroom-report-task-status.e2e-spec.ts` 通过正式发布、关闭、撤回及提交入口，负责过程性评价的撤回排除、关闭任务参与及手工排除关系，并核对 JSON、CSV 与快照 processAssessment 的明示业务预期，以及教师看板空任务时 summary 自身的完整数值字段。有效任务与计分合同见 [Service Card 08G](./handoff-backend-service-map.md#service-card-08g)，公开字段见 [DTO Dashboard](./handoff-backend-dto-cheatsheet.md#teacher--student-dashboard-response-family)；评分边界、CSV 安全编码及非空看板统计继续由既有 Service unit 承担。环境、认证与连接门禁复用[认证与凭据生命周期定向验收](#认证与凭据生命周期定向验收)。
 
+该 spec 同时承担教师对同一课堂任务实例的配置/状态并发条件写入证据，通过正式 HTTP 与 Mongo 终态核对成功、按当前资源/状态安全拒绝以及不覆盖已生效修改；正常顺序更新与 ACTIVE/CLOSED 配置编辑仍按既有门禁验证。公开竞争结果与无自动重试边界见 [API Classroom Tasks](./handoff-backend-api-map.md#classroom-tasksclassrooms-子资源)。
+
 从 `backend` 目录在独立 `standard_test` 进程使用现有 `test:e2e` 入口，先确认 discovery 仅命中该文件，再以相同路径定向执行：
 
 ```powershell

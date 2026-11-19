@@ -21,6 +21,7 @@ import {
   CLASSROOM_TASK_STATUS_RECALLED,
 } from '../classroom-task-status.constants';
 import { ClassroomTasksService } from './classroom-tasks.service';
+import type { UpdateClassroomTaskDto } from '../dto/update-classroom-task.dto';
 
 type SubmissionFixture = Pick<
   Submission,
@@ -58,6 +59,7 @@ const objectId = () => new Types.ObjectId();
 
 const makeQuery = <T>(result: T) => {
   const chain = {
+    read: jest.fn(),
     select: jest.fn(),
     sort: jest.fn(),
     skip: jest.fn(),
@@ -65,6 +67,7 @@ const makeQuery = <T>(result: T) => {
     lean: jest.fn(),
     exec: jest.fn().mockResolvedValue(result),
   };
+  chain.read.mockReturnValue(chain);
   chain.select.mockReturnValue(chain);
   chain.sort.mockReturnValue(chain);
   chain.skip.mockReturnValue(chain);
@@ -152,6 +155,7 @@ const createHarness = (options: HarnessOptions = {}) => {
   const courseModel = {};
   const classroomTaskModel = {
     findOne: jest.fn(() => makeQuery(classroomTask)),
+    findOneAndUpdate: jest.fn(() => makeQuery(classroomTask)),
   };
   const taskModel = {
     findById: jest.fn(() => makeQuery(task)),
@@ -189,6 +193,7 @@ const createHarness = (options: HarnessOptions = {}) => {
     });
   };
   const submissionModel = {
+    exists: jest.fn().mockResolvedValue(null),
     find: jest.fn((filter: Record<string, unknown>) =>
       makeQuery(filterSubmissions(filter)),
     ),
@@ -257,6 +262,11 @@ const createHarness = (options: HarnessOptions = {}) => {
 
   return {
     service,
+    classroomModel,
+    classroomTaskModel,
+    classroomTask,
+    submissionModel,
+    taskModel,
     feedbackModel,
     learningTasksService,
     ids: { studentId, classroomId, classroomTaskId, taskId },
@@ -1321,4 +1331,427 @@ describe('ClassroomTasksService getMyTaskDetail completionStatus', () => {
       aiWorstSeverity: FeedbackSeverity.Error,
     });
   });
+});
+
+describe('ClassroomTasksService conditional classroom task writes', () => {
+  const activeSource = {
+    $expr: {
+      $not: [{ $in: [{ $ifNull: ['$status', null] }, ['CLOSED', 'RECALLED']] }],
+    },
+  };
+  const closedSource = {
+    $expr: { $eq: [{ $ifNull: ['$status', null] }, 'CLOSED'] },
+  };
+  const editableSettings = {
+    $expr: { $ne: [{ $ifNull: ['$status', null] }, 'RECALLED'] },
+  };
+  const conflictMessage = '课堂任务状态已变化，请刷新后再操作。';
+
+  const setup = (status: unknown, options: HarnessOptions = {}) => {
+    const harness = createHarness({ ...options, userRoles: ['teacher'] });
+    const initialTask = {
+      ...harness.classroomTask,
+      status,
+      createdBy: harness.ids.studentId,
+    };
+    harness.classroomTaskModel.findOne.mockReturnValueOnce(
+      makeQuery(initialTask),
+    );
+    harness.classroomTaskModel.findOneAndUpdate.mockReturnValue(
+      makeQuery(initialTask),
+    );
+    const scope = {
+      _id: harness.ids.classroomTaskId,
+      classroomId: harness.ids.classroomId,
+    };
+    return {
+      ...harness,
+      initialTask,
+      scope,
+      setStatus: (nextStatus: ClassroomTask['status']) =>
+        harness.service.updateClassroomTaskStatus(
+          harness.ids.classroomId.toString(),
+          harness.ids.classroomTaskId.toString(),
+          { status: nextStatus },
+          harness.ids.studentId.toString(),
+        ),
+      setSettings: (dto: UpdateClassroomTaskDto) =>
+        harness.service.updateClassroomTask(
+          harness.ids.classroomId.toString(),
+          harness.ids.classroomTaskId.toString(),
+          dto,
+          harness.ids.studentId.toString(),
+        ),
+    };
+  };
+
+  const loseWrite = (
+    harness: ReturnType<typeof setup>,
+    latest: { status?: unknown } | null,
+  ) => {
+    harness.classroomTaskModel.findOneAndUpdate.mockReturnValueOnce(
+      makeQuery(null),
+    );
+    const reread = makeQuery(latest);
+    harness.classroomTaskModel.findOne.mockReturnValueOnce(reread);
+    return reread;
+  };
+
+  const expectScopedRereadWithoutReplay = (
+    harness: ReturnType<typeof setup>,
+    reread: ReturnType<typeof makeQuery>,
+  ) => {
+    expect(harness.classroomTaskModel.findOneAndUpdate).toHaveBeenCalledTimes(
+      1,
+    );
+    expect(harness.classroomTaskModel.findOne).toHaveBeenCalledTimes(2);
+    expect(harness.classroomTaskModel.findOne).toHaveBeenNthCalledWith(
+      2,
+      harness.scope,
+    );
+    expect(reread.read).toHaveBeenCalledWith('primary');
+    expect(reread.select).toHaveBeenCalledWith('status');
+    expect(reread.read.mock.invocationCallOrder[0]).toBeLessThan(
+      reread.select.mock.invocationCallOrder[0],
+    );
+    expect(reread.select.mock.invocationCallOrder[0]).toBeLessThan(
+      reread.lean.mock.invocationCallOrder[0],
+    );
+    expect(reread.lean.mock.invocationCallOrder[0]).toBeLessThan(
+      reread.exec.mock.invocationCallOrder[0],
+    );
+    expect(reread.lean).toHaveBeenCalledTimes(1);
+    expect(reread.exec).toHaveBeenCalledTimes(1);
+    expect(harness.classroomModel.findOne).toHaveBeenCalledTimes(1);
+    expect(harness.taskModel.findById).not.toHaveBeenCalled();
+  };
+
+  const expectPlainConflict = async (action: Promise<unknown>) => {
+    const failure: unknown = await action.catch((error: unknown) => error);
+    expect(failure).toMatchObject({ status: 409, message: conflictMessage });
+    expect(failure).toHaveProperty('response', {
+      message: conflictMessage,
+      error: 'Conflict',
+      statusCode: 409,
+    });
+  };
+
+  it.each([
+    ['ACTIVE', CLASSROOM_TASK_STATUS_ACTIVE],
+    ['missing status', undefined],
+    ['null status', null],
+    ['unknown status', 'UNKNOWN'],
+    ['CLOSED inside an array', ['CLOSED']],
+    ['RECALLED inside an array', ['RECALLED']],
+  ] as const)(
+    'closes the normalized ACTIVE source group for %s with the exact scoped predicate',
+    async (_description, status) => {
+      const harness = setup(status);
+      harness.classroomTaskModel.findOneAndUpdate.mockReturnValueOnce(
+        makeQuery({ ...harness.initialTask, status: 'CLOSED' }),
+      );
+
+      await expect(
+        harness.setStatus(CLASSROOM_TASK_STATUS_CLOSED),
+      ).resolves.toMatchObject({ status: 'CLOSED' });
+
+      expect(harness.classroomTaskModel.findOneAndUpdate).toHaveBeenCalledWith(
+        { ...harness.scope, ...activeSource },
+        { $set: { status: 'CLOSED' } },
+        { returnDocument: 'after' },
+      );
+      expect(harness.classroomTaskModel.findOneAndUpdate).toHaveBeenCalledTimes(
+        1,
+      );
+      expect(harness.classroomTaskModel.findOne).toHaveBeenCalledTimes(1);
+      expect(harness.submissionModel.exists).not.toHaveBeenCalled();
+    },
+  );
+
+  it('recalls a submission-free ACTIVE task with a guarded single write', async () => {
+    const harness = setup(CLASSROOM_TASK_STATUS_ACTIVE);
+    harness.classroomTaskModel.findOneAndUpdate.mockReturnValueOnce(
+      makeQuery({ ...harness.initialTask, status: 'RECALLED' }),
+    );
+
+    await expect(
+      harness.setStatus(CLASSROOM_TASK_STATUS_RECALLED),
+    ).resolves.toMatchObject({ status: 'RECALLED' });
+
+    expect(harness.submissionModel.exists).toHaveBeenCalledWith({
+      classroomTaskId: harness.ids.classroomTaskId,
+    });
+    expect(harness.submissionModel.exists).toHaveBeenCalledTimes(1);
+    expect(harness.classroomTaskModel.findOneAndUpdate).toHaveBeenCalledWith(
+      { ...harness.scope, ...activeSource },
+      { $set: { status: 'RECALLED' } },
+      { returnDocument: 'after' },
+    );
+  });
+
+  it('reopens only an exact CLOSED source with a guarded single write', async () => {
+    const harness = setup(CLASSROOM_TASK_STATUS_CLOSED);
+    harness.classroomTaskModel.findOneAndUpdate.mockReturnValueOnce(
+      makeQuery({ ...harness.initialTask, status: 'ACTIVE' }),
+    );
+
+    await expect(
+      harness.setStatus(CLASSROOM_TASK_STATUS_ACTIVE),
+    ).resolves.toMatchObject({ status: 'ACTIVE' });
+
+    expect(harness.classroomTaskModel.findOneAndUpdate).toHaveBeenCalledWith(
+      { ...harness.scope, ...closedSource },
+      { $set: { status: 'ACTIVE' } },
+      { returnDocument: 'after' },
+    );
+    expect(harness.classroomTaskModel.findOneAndUpdate).toHaveBeenCalledTimes(
+      1,
+    );
+    expect(harness.submissionModel.exists).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['ACTIVE', 'ACTIVE', 'Classroom task status is already ACTIVE'],
+    ['CLOSED', 'CLOSED', 'Classroom task status is already CLOSED'],
+    ['RECALLED', 'RECALLED', 'Classroom task status is already RECALLED'],
+    [
+      'RECALLED',
+      'ACTIVE',
+      'Recalled classroom tasks cannot be reopened or closed',
+    ],
+    [
+      'RECALLED',
+      'CLOSED',
+      'Recalled classroom tasks cannot be reopened or closed',
+    ],
+    ['CLOSED', 'RECALLED', 'Transition from CLOSED to RECALLED is not allowed'],
+  ] as const)(
+    'keeps the existing %s to %s rejection before writing',
+    async (source, target, message) => {
+      const harness = setup(source);
+
+      await expect(harness.setStatus(target)).rejects.toMatchObject({
+        status: 400,
+        message,
+      });
+
+      expect(
+        harness.classroomTaskModel.findOneAndUpdate,
+      ).not.toHaveBeenCalled();
+      expect(harness.classroomTaskModel.findOne).toHaveBeenCalledTimes(1);
+      expect(harness.submissionModel.exists).not.toHaveBeenCalled();
+    },
+  );
+
+  it('keeps recall blocked by an existing submission without attempting a write', async () => {
+    const harness = setup(CLASSROOM_TASK_STATUS_ACTIVE);
+    harness.submissionModel.exists.mockResolvedValueOnce({ _id: objectId() });
+
+    await expect(
+      harness.setStatus(CLASSROOM_TASK_STATUS_RECALLED),
+    ).rejects.toMatchObject({
+      status: 400,
+      message:
+        'Classroom task already has submissions and cannot be recalled; close it instead',
+    });
+
+    expect(harness.submissionModel.exists).toHaveBeenCalledTimes(1);
+    expect(harness.classroomTaskModel.findOneAndUpdate).not.toHaveBeenCalled();
+  });
+
+  it.each(['status', 'settings'] as const)(
+    'returns 404 when the target disappears after a missed %s write',
+    async (operation) => {
+      const harness = setup(CLASSROOM_TASK_STATUS_ACTIVE);
+      const reread = loseWrite(harness, null);
+      const action =
+        operation === 'status'
+          ? harness.setStatus(CLASSROOM_TASK_STATUS_CLOSED)
+          : harness.setSettings({ allowLate: false });
+
+      await expect(action).rejects.toMatchObject({
+        status: 404,
+        message: 'Classroom task not found',
+      });
+
+      expectScopedRereadWithoutReplay(harness, reread);
+      expect(harness.submissionModel.exists).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each([
+    ['ACTIVE', 'CLOSED', 'CLOSED', 'Classroom task status is already CLOSED'],
+    ['CLOSED', 'ACTIVE', 'ACTIVE', 'Classroom task status is already ACTIVE'],
+    [
+      'ACTIVE',
+      'RECALLED',
+      'RECALLED',
+      'Classroom task status is already RECALLED',
+    ],
+    [
+      'ACTIVE',
+      'CLOSED',
+      'RECALLED',
+      'Recalled classroom tasks cannot be reopened or closed',
+    ],
+    [
+      'ACTIVE',
+      'RECALLED',
+      'CLOSED',
+      'Transition from CLOSED to RECALLED is not allowed',
+    ],
+  ] as const)(
+    'returns the existing 400 when %s to %s loses to current state %s',
+    async (source, target, current, message) => {
+      const harness = setup(source);
+      const reread = loseWrite(harness, { status: current });
+
+      await expect(harness.setStatus(target)).rejects.toMatchObject({
+        status: 400,
+        message,
+      });
+
+      expectScopedRereadWithoutReplay(harness, reread);
+      expect(harness.submissionModel.exists).toHaveBeenCalledTimes(
+        target === 'RECALLED' ? 1 : 0,
+      );
+    },
+  );
+
+  it.each([
+    ['ACTIVE', 'CLOSED', 'ACTIVE'],
+    ['CLOSED', 'ACTIVE', 'CLOSED'],
+    ['ACTIVE', 'RECALLED', 'ACTIVE'],
+    ['ACTIVE', 'CLOSED', ['RECALLED']],
+  ] as const)(
+    'returns plain 409 without replay when %s to %s remains allowed after a miss',
+    async (source, target, current) => {
+      const harness = setup(source);
+      const reread = loseWrite(harness, { status: current });
+
+      await expectPlainConflict(harness.setStatus(target));
+
+      expectScopedRereadWithoutReplay(harness, reread);
+      expect(harness.submissionModel.exists).toHaveBeenCalledTimes(
+        target === 'RECALLED' ? 1 : 0,
+      );
+    },
+  );
+
+  it.each([
+    ['ACTIVE', CLASSROOM_TASK_STATUS_ACTIVE],
+    ['CLOSED', CLASSROOM_TASK_STATUS_CLOSED],
+    ['missing status', undefined],
+    ['null status', null],
+    ['unknown status', 'UNKNOWN'],
+    ['RECALLED inside an array', ['RECALLED']],
+  ] as const)(
+    'keeps settings editable for %s while excluding only exact RECALLED at the write',
+    async (_description, status) => {
+      const harness = setup(status, {
+        classroomStatus: ClassroomStatus.Archived,
+        taskStatus: TaskStatus.Archived,
+      });
+      const dueAt = new Date('2026-02-01T00:00:00.000Z');
+      harness.classroomTaskModel.findOneAndUpdate.mockReturnValueOnce(
+        makeQuery({
+          ...harness.initialTask,
+          dueAt,
+          settings: { allowLate: false },
+        }),
+      );
+
+      await expect(
+        harness.setSettings({ dueAt: dueAt.toISOString(), allowLate: false }),
+      ).resolves.toMatchObject({
+        dueAt,
+        settings: { allowLate: false },
+        task: { title: 'Published task', status: TaskStatus.Archived },
+      });
+
+      expect(harness.classroomTaskModel.findOneAndUpdate).toHaveBeenCalledWith(
+        { ...harness.scope, ...editableSettings },
+        { $set: { dueAt, 'settings.allowLate': false } },
+        { returnDocument: 'after' },
+      );
+      expect(harness.classroomTaskModel.findOneAndUpdate).toHaveBeenCalledTimes(
+        1,
+      );
+      expect(harness.classroomTaskModel.findOne).toHaveBeenCalledTimes(1);
+      expect(harness.submissionModel.exists).not.toHaveBeenCalled();
+    },
+  );
+
+  it('clears dueAt with unset and preserves omitted settings', async () => {
+    const harness = setup(CLASSROOM_TASK_STATUS_CLOSED);
+
+    await expect(harness.setSettings({ dueAt: null })).resolves.toMatchObject({
+      status: 'CLOSED',
+      dueAt: undefined,
+    });
+
+    expect(harness.classroomTaskModel.findOneAndUpdate).toHaveBeenCalledWith(
+      { ...harness.scope, ...editableSettings },
+      { $unset: { dueAt: 1 } },
+      { returnDocument: 'after' },
+    );
+  });
+
+  it.each([
+    [
+      'RECALLED',
+      { allowLate: false },
+      'Recalled classroom tasks cannot be updated',
+    ],
+    ['ACTIVE', {}, 'At least one updatable field is required'],
+  ] as const)(
+    'keeps the existing settings rejection for %s before writing',
+    async (status, dto, message) => {
+      const harness = setup(status);
+
+      await expect(harness.setSettings(dto)).rejects.toMatchObject({
+        status: 400,
+        message,
+      });
+
+      expect(
+        harness.classroomTaskModel.findOneAndUpdate,
+      ).not.toHaveBeenCalled();
+      expect(harness.classroomTaskModel.findOne).toHaveBeenCalledTimes(1);
+    },
+  );
+
+  it('returns the existing settings 400 after a concurrent recall', async () => {
+    const harness = setup(CLASSROOM_TASK_STATUS_ACTIVE);
+    const reread = loseWrite(harness, { status: 'RECALLED' });
+
+    await expect(
+      harness.setSettings({ allowLate: false }),
+    ).rejects.toMatchObject({
+      status: 400,
+      message: 'Recalled classroom tasks cannot be updated',
+    });
+
+    expectScopedRereadWithoutReplay(harness, reread);
+    expect(harness.submissionModel.exists).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['ACTIVE', 'ACTIVE'],
+    ['CLOSED', 'CLOSED'],
+    ['missing status', undefined],
+    ['null status', null],
+    ['RECALLED inside an array', ['RECALLED']],
+  ] as const)(
+    'returns plain 409 without replay when settings remain editable for %s',
+    async (_description, status) => {
+      const harness = setup(CLASSROOM_TASK_STATUS_ACTIVE);
+      const reread = loseWrite(harness, { status });
+
+      await expectPlainConflict(harness.setSettings({ allowLate: false }));
+
+      expectScopedRereadWithoutReplay(harness, reread);
+      expect(harness.submissionModel.exists).not.toHaveBeenCalled();
+    },
+  );
 });

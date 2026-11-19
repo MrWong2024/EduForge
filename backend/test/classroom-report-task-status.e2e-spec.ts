@@ -58,6 +58,15 @@ type Row = {
   roles?: string[];
   status?: string;
   publishedAt?: Date;
+  dueAt?: Date;
+  settings?: { allowLate?: boolean };
+  updatedAt?: Date;
+};
+type ClassroomTaskResponse = {
+  id: string;
+  status: string;
+  dueAt?: string;
+  settings: { allowLate?: boolean };
 };
 type AssessmentItem = {
   studentId: string;
@@ -189,6 +198,118 @@ describe('Classroom report task status (real HTTP and Mongo)', () => {
     });
     expect(persisted).toHaveLength(1);
     expect(persisted[0].status).toBe(status);
+  }
+  const instancePath = (id: string, targetClassroomId = classroomId) =>
+    `/api/classrooms/${targetClassroomId}/tasks/${id}`;
+  const patchStatus = (
+    id: string,
+    status: 'ACTIVE' | 'CLOSED' | 'RECALLED',
+    targetClassroomId = classroomId,
+  ) =>
+    teacher
+      .patch(`${instancePath(id, targetClassroomId)}/status`)
+      .timeout(timeout)
+      .send({ status });
+  const patchSettings = (
+    id: string,
+    body: Record<string, unknown>,
+    targetClassroomId = classroomId,
+  ) =>
+    teacher
+      .patch(instancePath(id, targetClassroomId))
+      .timeout(timeout)
+      .send(body);
+  async function storedInstance(id: string): Promise<Row> {
+    const persisted = await rows('classroomtasks', {
+      _id: new Types.ObjectId(id),
+      classroomId: new Types.ObjectId(classroomId),
+      createdBy: teacherId,
+    });
+    expect(persisted).toHaveLength(1);
+    return persisted[0];
+  }
+  async function settleRequests(
+    requests: request.Test[],
+  ): Promise<request.Response[]> {
+    const settled = await Promise.allSettled(requests);
+    return settled.map((result) => {
+      if (result.status !== 'fulfilled')
+        throw new Error('REPORT_STATUS_OVERLAPPING_HTTP_FAILED');
+      return result.value;
+    });
+  }
+  function expectPublicRejection(
+    response: request.Response,
+    status: 400 | 404,
+    path: string,
+    message?: string,
+  ): void {
+    expect(response.status).toBe(status);
+    const body = response.body as Record<string, unknown>;
+    expect(Object.keys(body).sort()).toEqual([
+      'message',
+      'path',
+      'statusCode',
+      'timestamp',
+    ]);
+    expect(body.statusCode).toBe(status);
+    expect(body.path).toBe(path);
+    expect(typeof body.timestamp).toBe('string');
+    expect(typeof body.message).toBe('string');
+    expect(body.message).not.toBe('');
+    if (message !== undefined) expect(body.message).toBe(message);
+  }
+  function logMutation(stage: string, response: request.Response): void {
+    const body = response.body as Partial<ClassroomTaskResponse>;
+    console.info(
+      JSON.stringify({
+        stage,
+        httpStatus: response.status,
+        status: body.status,
+        dueAt: body.dueAt,
+        allowLate: body.settings?.allowLate,
+      }),
+    );
+  }
+  async function expectInstanceState(
+    id: string,
+    status: string,
+    allowLate: boolean,
+    dueAt?: string,
+  ): Promise<Row> {
+    const response = await get(instancePath(id)).expect(200);
+    const body = response.body as ClassroomTaskResponse;
+    const persisted = await storedInstance(id);
+    console.info(
+      JSON.stringify({
+        stage: 'instance-readback',
+        classroomTaskId: id,
+        response: {
+          status: body.status,
+          dueAt: body.dueAt,
+          allowLate: body.settings.allowLate,
+        },
+        mongo: {
+          status: persisted.status,
+          dueAt: persisted.dueAt?.toISOString(),
+          allowLate: persisted.settings?.allowLate,
+        },
+      }),
+    );
+    expect(body.id).toBe(id);
+    expect(body.status).toBe(status);
+    expect(body.settings.allowLate).toBe(allowLate);
+    expect(persisted.status).toBe(status);
+    expect(persisted.settings?.allowLate).toBe(allowLate);
+    if (dueAt === undefined) {
+      expect(body.dueAt).toBeUndefined();
+      expect(persisted.dueAt).toBeUndefined();
+    } else {
+      expect(body.dueAt).toBe(dueAt);
+      expect(persisted.dueAt).toBeInstanceOf(Date);
+      expect(persisted.dueAt?.toISOString()).toBe(dueAt);
+    }
+    return persisted;
   }
 
   beforeAll(async () => {
@@ -714,5 +835,293 @@ describe('Classroom report task status (real HTTP and Mongo)', () => {
       submissionsCount: 1,
     });
     expect(await businessSnapshot()).toEqual(facts);
+  });
+
+  it('allows exactly one of normal overlapping close and recall requests to commit', async () => {
+    const id = await publish('close-recall-race');
+    const before = await storedInstance(id);
+    const requested = ['CLOSED', 'RECALLED'] as const;
+    const responses = await settleRequests([
+      patchStatus(id, requested[0]),
+      patchStatus(id, requested[1]),
+    ]);
+    responses.forEach((response, index) =>
+      logMutation(`close-recall-${requested[index]}`, response),
+    );
+    const persisted = await storedInstance(id);
+    console.info(
+      JSON.stringify({ stage: 'close-recall-final', status: persisted.status }),
+    );
+    expect(responses.map(({ status }) => status).sort()).toEqual([200, 400]);
+    const winnerIndex = responses.findIndex(({ status }) => status === 200);
+    const winner = requested[winnerIndex];
+    const winnerBody = responses[winnerIndex].body as ClassroomTaskResponse;
+    expect(winnerBody.status).toBe(winner);
+    const loser = responses.find(({ status }) => status === 400);
+    if (!loser) throw new Error('REPORT_STATUS_RACE_REJECTION_MISSING');
+    expectPublicRejection(loser, 400, `${instancePath(id)}/status`);
+    const after = await expectInstanceState(id, winner, true);
+    expect({ ...after, updatedAt: before.updatedAt }).toEqual({
+      ...before,
+      status: winner,
+    });
+  });
+
+  it('independently rejects close, reopen and settings changes on an already recalled instance', async () => {
+    const terminalId = await publish('independent-recalled-terminal');
+    await patchStatus(terminalId, 'RECALLED').expect(200);
+    const before = await storedInstance(terminalId);
+    expect(before.status).toBe('RECALLED');
+    for (const target of ['CLOSED', 'ACTIVE'] as const) {
+      const response = await patchStatus(terminalId, target);
+      logMutation(`recalled-reject-${target}`, response);
+      expectPublicRejection(
+        response,
+        400,
+        `${instancePath(terminalId)}/status`,
+        'Recalled classroom tasks cannot be reopened or closed',
+      );
+      expect(await storedInstance(terminalId)).toEqual(before);
+    }
+    const response = await patchSettings(terminalId, { allowLate: false });
+    logMutation('recalled-reject-settings', response);
+    expectPublicRejection(
+      response,
+      400,
+      instancePath(terminalId),
+      'Recalled classroom tasks cannot be updated',
+    );
+    expect(await storedInstance(terminalId)).toEqual(before);
+    await expectInstanceState(terminalId, 'RECALLED', true);
+  });
+
+  it('keeps a normal settings/recall race consistent and checks the opposite order with a sequential control', async () => {
+    const id = await publish('settings-recall-race');
+    expect((await storedInstance(id)).settings?.allowLate).toBe(true);
+    const [settingsResponse, recallResponse] = await settleRequests([
+      patchSettings(id, { allowLate: false }),
+      patchStatus(id, 'RECALLED'),
+    ]);
+    logMutation('settings-recall-settings', settingsResponse);
+    logMutation('settings-recall-recall', recallResponse);
+    const final = await storedInstance(id);
+    console.info(
+      JSON.stringify({
+        stage: 'settings-recall-final',
+        status: final.status,
+        allowLate: final.settings?.allowLate,
+      }),
+    );
+    expect(recallResponse.status).toBe(200);
+    expect([200, 400]).toContain(settingsResponse.status);
+    const recallBody = recallResponse.body as ClassroomTaskResponse;
+    expect(recallBody.status).toBe('RECALLED');
+    const settingsCommitted = settingsResponse.status === 200;
+    if (settingsCommitted) {
+      const settingsBody = settingsResponse.body as ClassroomTaskResponse;
+      expect(settingsBody.status).toBe('ACTIVE');
+      expect(settingsBody.settings.allowLate).toBe(false);
+      expect(recallBody.settings.allowLate).toBe(false);
+    } else {
+      expectPublicRejection(settingsResponse, 400, instancePath(id));
+      expect(recallBody.settings.allowLate).toBe(true);
+    }
+    await expectInstanceState(id, 'RECALLED', !settingsCommitted);
+
+    const controlId = await publish('settings-recall-order-control');
+    console.info(
+      JSON.stringify({
+        stage: 'settings-recall-control',
+        order: settingsCommitted
+          ? 'recall-then-settings'
+          : 'settings-then-recall',
+      }),
+    );
+    if (settingsCommitted) {
+      const recalled = await patchStatus(controlId, 'RECALLED').expect(200);
+      expect((recalled.body as ClassroomTaskResponse).settings.allowLate).toBe(
+        true,
+      );
+      const beforeRejectedSettings = await storedInstance(controlId);
+      const rejected = await patchSettings(controlId, { allowLate: false });
+      expectPublicRejection(
+        rejected,
+        400,
+        instancePath(controlId),
+        'Recalled classroom tasks cannot be updated',
+      );
+      expect(await storedInstance(controlId)).toEqual(beforeRejectedSettings);
+      await expectInstanceState(controlId, 'RECALLED', true);
+    } else {
+      const changed = await patchSettings(controlId, {
+        allowLate: false,
+      }).expect(200);
+      expect((changed.body as ClassroomTaskResponse).status).toBe('ACTIVE');
+      expect((changed.body as ClassroomTaskResponse).settings.allowLate).toBe(
+        false,
+      );
+      const recalled = await patchStatus(controlId, 'RECALLED').expect(200);
+      expect((recalled.body as ClassroomTaskResponse).settings.allowLate).toBe(
+        false,
+      );
+      await expectInstanceState(controlId, 'RECALLED', false);
+    }
+  });
+
+  it('preserves independent precise dueAt and false allowLate patches while ACTIVE or CLOSED and clears dueAt without changing false', async () => {
+    const editableId = await publish('independent-settings');
+    const firstDate = new Date(Date.now() + 2 * 86400000);
+    firstDate.setUTCSeconds(37, 456);
+    const dueAt = firstDate.toISOString();
+    const nextDate = new Date(firstDate.getTime() + 86400000);
+    nextDate.setUTCSeconds(49, 789);
+    const laterDueAt = nextDate.toISOString();
+    const [dueResponse, initialAllowLateResponse] = await settleRequests([
+      patchSettings(editableId, { dueAt }),
+      patchSettings(editableId, { allowLate: false }),
+    ]);
+    logMutation('overlapping-dueAt-only', dueResponse);
+    logMutation('overlapping-allowLate-only', initialAllowLateResponse);
+    expect([dueResponse.status, initialAllowLateResponse.status]).toEqual([
+      200, 200,
+    ]);
+    expect((dueResponse.body as ClassroomTaskResponse).status).toBe('ACTIVE');
+    expect((dueResponse.body as ClassroomTaskResponse).dueAt).toBe(dueAt);
+    expect(
+      (initialAllowLateResponse.body as ClassroomTaskResponse).status,
+    ).toBe('ACTIVE');
+    expect(
+      (initialAllowLateResponse.body as ClassroomTaskResponse).settings
+        .allowLate,
+    ).toBe(false);
+    await expectInstanceState(editableId, 'ACTIVE', false, dueAt);
+    const allowLateResponse = await patchSettings(editableId, {
+      allowLate: false,
+    }).expect(200);
+    logMutation('active-allowLate-only', allowLateResponse);
+    expect((allowLateResponse.body as ClassroomTaskResponse).dueAt).toBe(dueAt);
+    expect(
+      (allowLateResponse.body as ClassroomTaskResponse).settings.allowLate,
+    ).toBe(false);
+    await expectInstanceState(editableId, 'ACTIVE', false, dueAt);
+
+    const beforeClose = await storedInstance(editableId);
+    const closed = await patchStatus(editableId, 'CLOSED').expect(200);
+    expect((closed.body as ClassroomTaskResponse).status).toBe('CLOSED');
+    const afterClose = await expectInstanceState(
+      editableId,
+      'CLOSED',
+      false,
+      dueAt,
+    );
+    expect({ ...afterClose, updatedAt: beforeClose.updatedAt }).toEqual({
+      ...beforeClose,
+      status: 'CLOSED',
+    });
+    const changedWhileClosed = await patchSettings(editableId, {
+      dueAt: laterDueAt,
+    }).expect(200);
+    logMutation('closed-dueAt-only', changedWhileClosed);
+    expect((changedWhileClosed.body as ClassroomTaskResponse).status).toBe(
+      'CLOSED',
+    );
+    await expectInstanceState(editableId, 'CLOSED', false, laterDueAt);
+    const clearedNull = await patchSettings(editableId, { dueAt: null }).expect(
+      200,
+    );
+    logMutation('closed-clear-null', clearedNull);
+    expect((clearedNull.body as ClassroomTaskResponse).settings.allowLate).toBe(
+      false,
+    );
+    await expectInstanceState(editableId, 'CLOSED', false);
+    await patchSettings(editableId, { dueAt }).expect(200);
+    await expectInstanceState(editableId, 'CLOSED', false, dueAt);
+    const clearedEmpty = await patchSettings(editableId, { dueAt: '' }).expect(
+      200,
+    );
+    logMutation('closed-clear-empty', clearedEmpty);
+    expect(
+      (clearedEmpty.body as ClassroomTaskResponse).settings.allowLate,
+    ).toBe(false);
+    await expectInstanceState(editableId, 'CLOSED', false);
+    const beforeReopen = await storedInstance(editableId);
+    const reopened = await patchStatus(editableId, 'ACTIVE').expect(200);
+    logMutation('normal-reopen', reopened);
+    expect((reopened.body as ClassroomTaskResponse).status).toBe('ACTIVE');
+    const afterReopen = await expectInstanceState(editableId, 'ACTIVE', false);
+    expect({ ...afterReopen, updatedAt: beforeReopen.updatedAt }).toEqual({
+      ...beforeReopen,
+      status: 'ACTIVE',
+    });
+  });
+
+  it('keeps the original submitted-instance recall rejection after a legal reopen', async () => {
+    const submissions = await rows('submissions', { studentId });
+    expect(submissions).toHaveLength(1);
+    const id = submissions[0].classroomTaskId?.toHexString();
+    if (!id) throw new Error('REPORT_STATUS_SUBMITTED_INSTANCE_MISSING');
+    expect((await storedInstance(id)).status).toBe('CLOSED');
+    const reopened = await patchStatus(id, 'ACTIVE').expect(200);
+    expect((reopened.body as ClassroomTaskResponse).status).toBe('ACTIVE');
+    const before = await storedInstance(id);
+    const response = await patchStatus(id, 'RECALLED');
+    logMutation('submitted-recall-rejected', response);
+    expectPublicRejection(
+      response,
+      400,
+      `${instancePath(id)}/status`,
+      'Classroom task already has submissions and cannot be recalled; close it instead',
+    );
+    expect(await storedInstance(id)).toEqual(before);
+    expect(await rows('submissions', { studentId })).toEqual(submissions);
+  });
+
+  it('returns 404 for the same instance ID under another owned classroom on both patch routes without writing', async () => {
+    const crossClassInstanceId = await publish('cross-class-scope');
+    const created = await post(teacher, '/api/classrooms', {
+      courseId,
+      name: `${namespace}-scope-check`,
+    }).expect(201);
+    const otherClassroomId = (created.body as { id: string }).id;
+    expect(Types.ObjectId.isValid(otherClassroomId)).toBe(true);
+    const before = await storedInstance(crossClassInstanceId);
+    expect(before.status).toBe('ACTIVE');
+    expect(before.settings?.allowLate).toBe(true);
+    const otherBefore = await rows('classrooms', {
+      _id: new Types.ObjectId(otherClassroomId),
+      teacherId,
+    });
+    expect(otherBefore).toHaveLength(1);
+    const statusResponse = await patchStatus(
+      crossClassInstanceId,
+      'CLOSED',
+      otherClassroomId,
+    );
+    const settingsResponse = await patchSettings(
+      crossClassInstanceId,
+      { allowLate: false },
+      otherClassroomId,
+    );
+    logMutation('cross-class-status', statusResponse);
+    logMutation('cross-class-settings', settingsResponse);
+    expectPublicRejection(
+      statusResponse,
+      404,
+      `${instancePath(crossClassInstanceId, otherClassroomId)}/status`,
+      'Classroom task not found',
+    );
+    expectPublicRejection(
+      settingsResponse,
+      404,
+      instancePath(crossClassInstanceId, otherClassroomId),
+      'Classroom task not found',
+    );
+    expect(await storedInstance(crossClassInstanceId)).toEqual(before);
+    expect(
+      await rows('classrooms', {
+        _id: new Types.ObjectId(otherClassroomId),
+        teacherId,
+      }),
+    ).toEqual(otherBefore);
   });
 });

@@ -139,6 +139,7 @@ Notes:
 - 发布需校验教师拥有班级且班级可发布，模板为 PUBLISHED 且属于该教师或共享可见；已知 ID 不能绕过可见性，他人不可见模板返回 404。服务端发布时保存教学内容，模板之后编辑/归档不改写实例；发布和更新均不接受 AI 策略字段，普通 PATCH 继续拒绝快照等禁止字段。外链文字被保存，不保证外部文件内容固定。
 - 新实例默认 ACTIVE；生命周期允许 `ACTIVE -> CLOSED`、`ACTIVE -> RECALLED`、`CLOSED -> ACTIVE`；撤回要求无提交。拒绝 RECALLED 恢复/再次流转以及 CLOSED -> RECALLED；已有提交而试图撤回返回 `400`，提示只能关闭。
 - 实例配置 PATCH 与状态 PATCH 分离：仅 ACTIVE/CLOSED 可编辑发布参数，RECALLED 不可编辑；恢复 ACTIVE 只恢复提交状态，不自动延长截止时间或更改迟交/尝试次数规则。输入/返回字段及旧实例默认状态见 [DTO ClassroomTask](./handoff-backend-dto-cheatsheet.md#classroomtask-dto--response-family)。
+- 教师对同一实例的配置或状态竞争写入使用条件更新，成功仍为 `200`。条件未命中后按原班级范围复读实例状态。实例不存在时返回 `404`，当前状态拒绝该操作时沿用 `400`，当前状态仍允许时返回普通 `409` 并提示刷新后再操作。服务端不自动重试，不增加业务错误码。
 - 课堂提交要求班级 ACTIVE、实例 ACTIVE、学生 Enrollment ACTIVE，且实例已保存发布快照；无需关联模板仍为 PUBLISHED，模板归档不拒绝既有实例提交。有截止时间、禁止迟交且已超过截止时间时，返回 `403`，`code=LATE_SUBMISSION_NOT_ALLOWED`。
 - 同一 studentId + classroomTaskId 在冷却窗口内重复提交返回 `429`，`code=SUBMISSION_COOLDOWN_ACTIVE`，并提供重试时间提示；配置与默认窗口见 [Config Matrix](./handoff-backend-config-matrix.md)，提示数据见 [DTO Submission](./handoff-backend-dto-cheatsheet.md#submission-request--response-family)。
 - 实例提交列表非 owner 返回 `404`；严格按 classroomTaskId 读取，默认只包含当前 ACTIVE 学生的 submissions，total 与 items 的成员范围一致。默认提交时间倒序及实现见 [Service Card 07](./handoff-backend-service-map.md#service-card-07)；公开列表、全来源 feedbackCount 与详情内容暴露区别见 DTO Submission。

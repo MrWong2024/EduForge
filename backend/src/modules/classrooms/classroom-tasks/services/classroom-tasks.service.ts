@@ -373,22 +373,21 @@ export class ClassroomTasksService {
       throw new NotFoundException('Classroom not found');
     }
 
+    const scope = {
+      _id: classroomTaskObjectId,
+      classroomId: classroomObjectId,
+    };
     const classroomTask = await this.classroomTaskModel
-      .findOne({ _id: classroomTaskObjectId, classroomId: classroomObjectId })
+      .findOne(scope)
       .lean<ClassroomTaskWithMeta>()
       .exec();
     if (!classroomTask) {
       throw new NotFoundException('Classroom task not found');
     }
 
-    const currentStatus = this.toClassroomTaskStatusForRead(
-      classroomTask.status,
+    this.assertSettingsEditable(
+      this.toClassroomTaskStatusForRead(classroomTask.status),
     );
-    if (currentStatus === CLASSROOM_TASK_STATUS_RECALLED) {
-      throw new BadRequestException(
-        'Recalled classroom tasks cannot be updated',
-      );
-    }
 
     const hasDueAt = dto.dueAt !== undefined;
     const hasAllowLate = dto.allowLate !== undefined;
@@ -423,14 +422,23 @@ export class ClassroomTasksService {
 
     const updatedClassroomTask = await this.classroomTaskModel
       .findOneAndUpdate(
-        { _id: classroomTaskObjectId, classroomId: classroomObjectId },
+        {
+          ...scope,
+          $expr: {
+            $ne: [
+              { $ifNull: ['$status', null] },
+              CLASSROOM_TASK_STATUS_RECALLED,
+            ],
+          },
+        },
         updatePatch,
         { returnDocument: 'after' },
       )
       .lean<ClassroomTaskWithMeta>()
       .exec();
     if (!updatedClassroomTask) {
-      throw new NotFoundException('Classroom task not found');
+      this.assertSettingsEditable(await this.readStatusAfterWriteMiss(scope));
+      throw new ConflictException('课堂任务状态已变化，请刷新后再操作。');
     }
 
     const task = await this.taskModel
@@ -471,8 +479,12 @@ export class ClassroomTasksService {
       throw new NotFoundException('Classroom not found');
     }
 
+    const scope = {
+      _id: classroomTaskObjectId,
+      classroomId: classroomObjectId,
+    };
     const classroomTask = await this.classroomTaskModel
-      .findOne({ _id: classroomTaskObjectId, classroomId: classroomObjectId })
+      .findOne(scope)
       .lean<ClassroomTaskWithMeta>()
       .exec();
     if (!classroomTask) {
@@ -483,54 +495,51 @@ export class ClassroomTasksService {
       classroomTask.status,
     );
     const targetStatus = dto.status;
-
-    if (targetStatus === currentStatus) {
-      throw new BadRequestException(
-        `Classroom task status is already ${currentStatus}`,
-      );
-    }
-
-    if (currentStatus === CLASSROOM_TASK_STATUS_RECALLED) {
-      throw new BadRequestException(
-        'Recalled classroom tasks cannot be reopened or closed',
-      );
-    }
-
-    if (currentStatus === CLASSROOM_TASK_STATUS_ACTIVE) {
-      if (targetStatus === CLASSROOM_TASK_STATUS_CLOSED) {
-        // ACTIVE -> CLOSED is always allowed.
-      } else if (targetStatus === CLASSROOM_TASK_STATUS_RECALLED) {
-        const hasSubmissions = await this.submissionModel.exists({
-          classroomTaskId: classroomTask._id,
-        });
-        if (hasSubmissions) {
-          throw new BadRequestException(
-            'Classroom task already has submissions and cannot be recalled; close it instead',
-          );
-        }
-      } else {
+    this.assertStatusTransition(currentStatus, targetStatus);
+    if (targetStatus === CLASSROOM_TASK_STATUS_RECALLED) {
+      const hasSubmissions = await this.submissionModel.exists({
+        classroomTaskId: classroomTask._id,
+      });
+      if (hasSubmissions) {
         throw new BadRequestException(
-          `Transition from ${currentStatus} to ${targetStatus} is not allowed`,
-        );
-      }
-    } else if (currentStatus === CLASSROOM_TASK_STATUS_CLOSED) {
-      if (targetStatus !== CLASSROOM_TASK_STATUS_ACTIVE) {
-        throw new BadRequestException(
-          `Transition from ${currentStatus} to ${targetStatus} is not allowed`,
+          'Classroom task already has submissions and cannot be recalled; close it instead',
         );
       }
     }
 
+    // Compare the whole value just as toClassroomTaskStatusForRead does.
+    // Anything other than the two exact terminal/closed values reads as ACTIVE.
+    const storedStatus = { $ifNull: ['$status', null] };
+    const sourceStatus =
+      currentStatus === CLASSROOM_TASK_STATUS_CLOSED
+        ? { $eq: [storedStatus, CLASSROOM_TASK_STATUS_CLOSED] }
+        : {
+            $not: [
+              {
+                $in: [
+                  storedStatus,
+                  [
+                    CLASSROOM_TASK_STATUS_CLOSED,
+                    CLASSROOM_TASK_STATUS_RECALLED,
+                  ],
+                ],
+              },
+            ],
+          };
     const updatedClassroomTask = await this.classroomTaskModel
       .findOneAndUpdate(
-        { _id: classroomTaskObjectId, classroomId: classroomObjectId },
+        { ...scope, $expr: sourceStatus },
         { $set: { status: targetStatus } },
         { returnDocument: 'after' },
       )
       .lean<ClassroomTaskWithMeta>()
       .exec();
     if (!updatedClassroomTask) {
-      throw new NotFoundException('Classroom task not found');
+      this.assertStatusTransition(
+        await this.readStatusAfterWriteMiss(scope),
+        targetStatus,
+      );
+      throw new ConflictException('课堂任务状态已变化，请刷新后再操作。');
     }
 
     const task = await this.taskModel
@@ -542,6 +551,54 @@ export class ClassroomTasksService {
     }
 
     return this.toClassroomTaskResponse(updatedClassroomTask, task);
+  }
+
+  private async readStatusAfterWriteMiss(scope: {
+    _id: Types.ObjectId;
+    classroomId: Types.ObjectId;
+  }): Promise<ClassroomTaskStatus> {
+    const task = await this.classroomTaskModel
+      .findOne(scope)
+      .read('primary')
+      .select('status')
+      .lean<Pick<ClassroomTask, 'status'> & WithId>()
+      .exec();
+    if (!task) throw new NotFoundException('Classroom task not found');
+    return this.toClassroomTaskStatusForRead(task.status);
+  }
+
+  private assertSettingsEditable(status: ClassroomTaskStatus): void {
+    if (status === CLASSROOM_TASK_STATUS_RECALLED) {
+      throw new BadRequestException(
+        'Recalled classroom tasks cannot be updated',
+      );
+    }
+  }
+
+  private assertStatusTransition(
+    currentStatus: ClassroomTaskStatus,
+    targetStatus: ClassroomTaskStatus,
+  ): void {
+    if (targetStatus === currentStatus) {
+      throw new BadRequestException(
+        `Classroom task status is already ${currentStatus}`,
+      );
+    }
+    if (currentStatus === CLASSROOM_TASK_STATUS_RECALLED) {
+      throw new BadRequestException(
+        'Recalled classroom tasks cannot be reopened or closed',
+      );
+    }
+    const allowed =
+      currentStatus === CLASSROOM_TASK_STATUS_ACTIVE
+        ? targetStatus === CLASSROOM_TASK_STATUS_CLOSED ||
+          targetStatus === CLASSROOM_TASK_STATUS_RECALLED
+        : targetStatus === CLASSROOM_TASK_STATUS_ACTIVE;
+    if (!allowed) {
+      throw new BadRequestException(
+        `Transition from ${currentStatus} to ${targetStatus} is not allowed`,
+      );
+    }
   }
 
   async listPublishableTaskTemplates(
