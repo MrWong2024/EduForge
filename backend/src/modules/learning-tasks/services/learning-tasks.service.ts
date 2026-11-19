@@ -11,7 +11,8 @@ import {
 import { AiContextReaderService } from '../ai-context/ai-context-reader.service';
 import { ConfigService } from '@nestjs/config';
 import { InjectModel } from '@nestjs/mongoose';
-import { Model, Types } from 'mongoose';
+import { Model, mongo, Types } from 'mongoose';
+import { isDeepStrictEqual } from 'node:util';
 import { MISSING_TASK_SNAPSHOT_MESSAGE } from '../../classrooms/classroom-tasks/classroom-task-content';
 import {
   Enrollment,
@@ -98,6 +99,10 @@ type IdOnly = WithId;
 type SubmissionCooldownSource = Pick<Submission, 'submittedAt'> &
   WithId &
   WithTimestamps;
+type SubmissionAttemptScope = {
+  classroomTaskId: Types.ObjectId;
+  studentId: Types.ObjectId;
+};
 
 @Injectable()
 export class LearningTasksService {
@@ -120,6 +125,7 @@ export class LearningTasksService {
   private static readonly SUBMISSION_COOLDOWN_ACTIVE_CODE =
     'SUBMISSION_COOLDOWN_ACTIVE';
   private static readonly DEFAULT_SUBMISSION_COOLDOWN_MS = 300000;
+  private static readonly MAX_SUBMISSION_INSERT_ATTEMPTS = 3;
   private readonly logger = new Logger(LearningTasksService.name);
 
   constructor(
@@ -1139,75 +1145,84 @@ export class LearningTasksService {
       classroomTask,
       'submit',
     );
-    const submittedAt = new Date();
-    const dueAt = classroomTask.dueAt ?? undefined;
-    const allowLate = classroomTask.settings?.allowLate !== false;
-    const isLate = !!dueAt && submittedAt.getTime() > dueAt.getTime();
-    const lateBySeconds =
-      dueAt && isLate
-        ? Math.floor((submittedAt.getTime() - dueAt.getTime()) / 1000)
-        : 0;
-    if (isLate && !allowLate) {
-      throw new ForbiddenException({
-        statusCode: 403,
-        code: LearningTasksService.LATE_SUBMISSION_NOT_ALLOWED_CODE,
-        message: 'Late submission is not allowed for this classroom task',
-      });
-    }
-
-    await this.ensureSubmissionCooldownNotHit(
-      studentObjectId,
-      classroomTaskObjectId,
-      submittedAt,
-    );
-    const attemptScopeFilter = {
+    const cooldownMs = this.getSubmissionCooldownMs();
+    const attemptScope: SubmissionAttemptScope = {
       classroomTaskId: classroomTaskObjectId,
       studentId: studentObjectId,
     };
 
-    for (let attempt = 0; attempt < 3; attempt += 1) {
-      const lastSubmission = await this.submissionModel
-        .findOne(attemptScopeFilter)
+    let submission: SubmissionWithMeta | undefined;
+    for (
+      let round = 0;
+      round < LearningTasksService.MAX_SUBMISSION_INSERT_ATTEMPTS;
+      round += 1
+    ) {
+      // Read the max number first. A concurrent insert is either visible to
+      // the cooldown read or conflicts with the allocated next number.
+      const highestAttempt = await this.submissionModel
+        .findOne(attemptScope)
+        .read('primary')
         .sort({ attemptNo: -1 })
         .select('attemptNo')
-        .lean()
+        .lean<Pick<Submission, 'attemptNo'> & WithId>()
         .exec();
-
-      const attemptNo = (lastSubmission?.attemptNo ?? 0) + 1;
+      const timing = await this.getSubmissionTiming(
+        attemptScope,
+        classroomTask,
+        cooldownMs,
+      );
       try {
-        const submission = await this.submissionModel.create({
+        submission = await this.submissionModel.create({
           taskId: taskObjectId,
-          classroomTaskId: classroomTaskObjectId,
-          studentId: studentObjectId,
-          attemptNo,
+          ...attemptScope,
+          attemptNo: (highestAttempt?.attemptNo ?? 0) + 1,
           contentRevision: 0,
-          submittedAt,
-          isLate,
-          lateBySeconds,
+          ...timing,
           content: dto.content,
           meta: dto.meta,
           status: SubmissionStatus.Submitted,
         });
-
-        const editing = await this.getSubmissionEditing(
-          submission,
-          { id: userId, roles: [...STUDENT_ROLES] },
-          classroomTask,
-        );
-        return this.toSubmissionResponse(
-          submission,
-          AiFeedbackStatus.NotRequested,
-          editing,
-        );
       } catch (error) {
-        const mongoError = error as { code?: number };
-        if (mongoError.code !== 11000 || attempt === 2) {
-          throw error;
-        }
+        if (!this.isSubmissionAttemptCollision(error)) throw error;
+        continue;
       }
+      break;
+    }
+    if (!submission) {
+      await this.getSubmissionTiming(attemptScope, classroomTask, cooldownMs);
+      throw new ConflictException('提交编号分配冲突，请刷新提交记录后重试。');
     }
 
-    throw new BadRequestException('Unable to allocate attempt number');
+    const editing = await this.getSubmissionEditing(
+      submission,
+      { id: userId, roles: [...STUDENT_ROLES] },
+      classroomTask,
+    );
+    return this.toSubmissionResponse(
+      submission,
+      AiFeedbackStatus.NotRequested,
+      editing,
+    );
+  }
+
+  private isSubmissionAttemptCollision(error: unknown): boolean {
+    if (
+      !(error instanceof mongo.MongoServerError) ||
+      error.code !== 11000 ||
+      error.writeConcernError !== undefined
+    ) {
+      return false;
+    }
+    const pattern: unknown = error.keyPattern;
+    return (
+      pattern !== null &&
+      typeof pattern === 'object' &&
+      isDeepStrictEqual(Object.entries(pattern), [
+        ['classroomTaskId', 1],
+        ['studentId', 1],
+        ['attemptNo', 1],
+      ])
+    );
   }
 
   private isValidDate(value: unknown): value is Date {
@@ -1514,41 +1529,51 @@ export class LearningTasksService {
     return LearningTasksService.DEFAULT_SUBMISSION_COOLDOWN_MS;
   }
 
-  private async ensureSubmissionCooldownNotHit(
-    studentId: Types.ObjectId,
-    classroomTaskId: Types.ObjectId,
-    submittedAt: Date,
+  private async getSubmissionTiming(
+    attemptScope: SubmissionAttemptScope,
+    classroomTask: ClassroomTaskDeadlineConfig,
+    cooldownMs: number,
   ) {
-    const cooldownMs = this.getSubmissionCooldownMs();
-    if (cooldownMs <= 0) {
-      return;
+    const latestSubmission =
+      cooldownMs > 0
+        ? await this.submissionModel
+            .findOne(attemptScope)
+            .read('primary')
+            .sort({ submittedAt: -1, _id: -1 })
+            .select('_id submittedAt createdAt')
+            .lean<SubmissionCooldownSource>()
+            .exec()
+        : null;
+    const submittedAt = new Date();
+    const dueAt = classroomTask.dueAt;
+    const isLate = !!dueAt && submittedAt.getTime() > dueAt.getTime();
+    if (isLate && classroomTask.settings?.allowLate === false) {
+      throw new ForbiddenException({
+        statusCode: 403,
+        code: LearningTasksService.LATE_SUBMISSION_NOT_ALLOWED_CODE,
+        message: 'Late submission is not allowed for this classroom task',
+      });
     }
-
-    const latestSubmission = await this.submissionModel
-      .findOne({
-        studentId,
-        classroomTaskId,
-      })
-      .sort({ submittedAt: -1, _id: -1 })
-      .select('_id submittedAt createdAt')
-      .lean<SubmissionCooldownSource>()
-      .exec();
-    if (!latestSubmission) {
-      return;
-    }
-
     const latestSubmittedAt =
-      latestSubmission.submittedAt ?? latestSubmission.createdAt;
-    if (!latestSubmittedAt) {
-      return;
+      latestSubmission?.submittedAt ?? latestSubmission?.createdAt;
+    if (latestSubmittedAt) {
+      const elapsedMs = submittedAt.getTime() - latestSubmittedAt.getTime();
+      if (elapsedMs < cooldownMs) {
+        this.rejectSubmissionCooldown(cooldownMs, elapsedMs);
+      }
     }
+    const lateBySeconds =
+      dueAt && isLate
+        ? Math.floor((submittedAt.getTime() - dueAt.getTime()) / 1000)
+        : 0;
+    return { submittedAt, isLate, lateBySeconds };
+  }
 
-    const elapsedMs = submittedAt.getTime() - latestSubmittedAt.getTime();
-    if (elapsedMs >= cooldownMs) {
-      return;
-    }
-
-    const retryAfterMs = Math.max(1, cooldownMs - elapsedMs);
+  private rejectSubmissionCooldown(
+    cooldownMs: number,
+    elapsedMs: number,
+  ): never {
+    const retryAfterMs = cooldownMs - Math.max(0, elapsedMs);
     const retryAfterSeconds = Math.ceil(retryAfterMs / 1000);
     const cooldownSeconds = Math.ceil(cooldownMs / 1000);
     throw new HttpException(

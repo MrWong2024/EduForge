@@ -1,7 +1,7 @@
 import { AiContextReaderService } from '../ai-context/ai-context-reader.service';
 import { Enrollment } from '../../classrooms/enrollments/schemas/enrollment.schema';
 import { ConfigService } from '@nestjs/config';
-import { Model, Mongoose, Schema, Types } from 'mongoose';
+import { Model, mongo, Mongoose, Schema, Types } from 'mongoose';
 import { ClassroomTask } from '../../classrooms/classroom-tasks/schemas/classroom-task.schema';
 import {
   CLASSROOM_TASK_STATUS_ACTIVE,
@@ -34,6 +34,7 @@ const objectId = () => new Types.ObjectId();
 
 const makeQuery = <T>(result: T) => {
   const chain = {
+    read: jest.fn(),
     select: jest.fn(),
     sort: jest.fn(),
     skip: jest.fn(),
@@ -41,6 +42,7 @@ const makeQuery = <T>(result: T) => {
     lean: jest.fn(),
     exec: jest.fn().mockResolvedValue(result),
   };
+  chain.read.mockReturnValue(chain);
   chain.select.mockReturnValue(chain);
   chain.sort.mockReturnValue(chain);
   chain.skip.mockReturnValue(chain);
@@ -62,6 +64,9 @@ const createHarness = (
     classroomTaskStatus?: string;
     taskStatus?: TaskStatus;
     submissionStudentId?: Types.ObjectId;
+    submissionCooldownMs?: number;
+    dueAt?: Date;
+    allowLate?: boolean;
   } = {},
 ) => {
   const studentId = objectId();
@@ -95,7 +100,8 @@ const createHarness = (
       description: 'Published description',
       knowledgeModule: 'Module',
     },
-    settings: {},
+    dueAt: options.dueAt,
+    settings: { allowLate: options.allowLate },
   };
   const classroom = {
     _id: classroomId,
@@ -108,7 +114,7 @@ const createHarness = (
     new Schema<Enrollment>(),
   );
   jest.spyOn(enrollmentModel, 'exists').mockResolvedValue({ _id: objectId() });
-  const configService = { get: jest.fn() };
+  const configService = { get: jest.fn(() => options.submissionCooldownMs) };
   const taskModel = { findById: jest.fn(() => makeQuery(task)) };
   const submissionModel = {
     findById: jest.fn(() => makeQuery(submission)),
@@ -1048,5 +1054,210 @@ describe('Submission classroom association contract (no database)', () => {
         contentRevision: 0,
       }),
     );
+  });
+});
+
+describe('Classroom submission attempt allocation (no database)', () => {
+  const now = new Date('2026-01-02T00:00:00.000Z');
+  const duplicate = (
+    keyPattern: Record<string, number> = {
+      classroomTaskId: 1,
+      studentId: 1,
+      attemptNo: 1,
+    },
+  ) => new mongo.MongoServerError({ code: 11000, keyPattern });
+
+  const setup = (options: Parameters<typeof createHarness>[0] = {}) => {
+    const h = createHarness(options);
+    h.submissionModel.create.mockImplementation((payload) =>
+      Promise.resolve({ ...payload, _id: objectId() }),
+    );
+    const submit = () =>
+      h.service.createSubmissionForClassroomTask(
+        h.ids.taskId.toString(),
+        h.ids.classroomTaskId.toString(),
+        submissionDto,
+        h.ids.studentId.toString(),
+      );
+    return { ...h, submit };
+  };
+
+  beforeEach(() => {
+    jest.useFakeTimers().setSystemTime(now);
+  });
+
+  afterEach(() => jest.useRealTimers());
+
+  it('allows the exact cooldown boundary and stores the same round time and lateness', async () => {
+    const h = setup({ dueAt: new Date(now.getTime() - 1900) });
+    jest.setSystemTime(now.getTime() - 1);
+    const maxAttempt = makeQuery({ attemptNo: 4 });
+    const recentSubmission = makeQuery({
+      submittedAt: new Date(now.getTime() - 300000),
+    });
+    recentSubmission.exec.mockImplementationOnce(() => {
+      jest.setSystemTime(now);
+      return Promise.resolve({ submittedAt: new Date(now.getTime() - 300000) });
+    });
+    h.submissionModel.findOne
+      .mockReturnValueOnce(maxAttempt)
+      .mockReturnValueOnce(recentSubmission);
+
+    await expect(h.submit()).resolves.toMatchObject({ attemptNo: 5 });
+    expect(maxAttempt.read).toHaveBeenCalledWith('primary');
+    expect(recentSubmission.read).toHaveBeenCalledWith('primary');
+    expect(maxAttempt.sort).toHaveBeenCalledWith({ attemptNo: -1 });
+    expect(recentSubmission.sort).toHaveBeenCalledWith({
+      submittedAt: -1,
+      _id: -1,
+    });
+    expect(maxAttempt.exec.mock.invocationCallOrder[0]).toBeLessThan(
+      recentSubmission.exec.mock.invocationCallOrder[0],
+    );
+    expect(h.submissionModel.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        attemptNo: 5,
+        submittedAt: now,
+        isLate: true,
+        lateBySeconds: 1,
+        contentRevision: 0,
+      }),
+    );
+  });
+
+  it('rechecks the newest time after a target collision and caps future timestamps at the full window', async () => {
+    const h = setup({ submissionCooldownMs: 1501 });
+    h.submissionModel.findOne
+      .mockReturnValueOnce(makeQuery(null))
+      .mockReturnValueOnce(makeQuery(null))
+      .mockReturnValueOnce(
+        makeQuery({
+          attemptNo: 7,
+          submittedAt: new Date(now.getTime() - 5000),
+        }),
+      )
+      .mockReturnValueOnce(
+        makeQuery({ submittedAt: new Date(now.getTime() + 10) }),
+      );
+    h.submissionModel.create.mockRejectedValueOnce(duplicate());
+
+    await expect(h.submit()).rejects.toMatchObject({
+      status: 429,
+      response: {
+        code: 'SUBMISSION_COOLDOWN_ACTIVE',
+        cooldownMs: 1501,
+        cooldownSeconds: 2,
+        retryAfterMs: 1501,
+        retryAfterSeconds: 2,
+        message:
+          '提交过于频繁。当前设置的提交冷却时间为 2 秒，请约 2 秒后再试。',
+      },
+    });
+    expect(h.submissionModel.findOne).toHaveBeenCalledTimes(4);
+    expect(h.submissionModel.create).toHaveBeenCalledTimes(1);
+  });
+
+  it('reallocates an attempt and refreshes the recorded time after a collision with cooldown disabled', async () => {
+    const h = setup({ submissionCooldownMs: 0 });
+    h.submissionModel.findOne
+      .mockReturnValueOnce(makeQuery(null))
+      .mockReturnValueOnce(makeQuery({ attemptNo: 1 }));
+    const nextTime = new Date(now.getTime() + 1000);
+    h.submissionModel.create.mockImplementationOnce(() => {
+      jest.setSystemTime(nextTime);
+      return Promise.reject(duplicate());
+    });
+
+    await expect(h.submit()).resolves.toMatchObject({ attemptNo: 2 });
+    expect(h.submissionModel.findOne).toHaveBeenCalledTimes(2);
+    expect(h.submissionModel.create).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({ attemptNo: 2, submittedAt: nextTime }),
+    );
+    expect(
+      h.aiFeedbackJobService.ensureJobForSubmission,
+    ).not.toHaveBeenCalled();
+  });
+
+  it('prefers the established late-submission error even when a retry also hits cooldown', async () => {
+    const h = setup({ dueAt: now, allowLate: false });
+    h.submissionModel.findOne
+      .mockReturnValueOnce(makeQuery(null))
+      .mockReturnValueOnce(makeQuery(null))
+      .mockReturnValueOnce(makeQuery({ attemptNo: 1 }))
+      .mockReturnValueOnce(makeQuery({ submittedAt: now }));
+    h.submissionModel.create.mockImplementationOnce(() => {
+      jest.setSystemTime(now.getTime() + 1);
+      return Promise.reject(duplicate());
+    });
+
+    await expect(h.submit()).rejects.toMatchObject({
+      status: 403,
+      response: {
+        code: 'LATE_SUBMISSION_NOT_ALLOWED',
+        message: 'Late submission is not allowed for this classroom task',
+      },
+    });
+    expect(h.submissionModel.create).toHaveBeenCalledTimes(1);
+  });
+
+  it('stops after three confirmed collisions and returns a plain conflict when cooldown is disabled', async () => {
+    const h = setup({ submissionCooldownMs: 0 });
+    h.submissionModel.create.mockRejectedValue(duplicate());
+
+    await expect(h.submit()).rejects.toMatchObject({
+      status: 409,
+      message: '提交编号分配冲突，请刷新提交记录后重试。',
+    });
+    expect(h.submissionModel.create).toHaveBeenCalledTimes(3);
+    expect(h.submissionModel.findOne).toHaveBeenCalledTimes(3);
+  });
+
+  it('checks cooldown once more after the third collision without attempting a fourth insert', async () => {
+    const h = setup({ submissionCooldownMs: 2100 });
+    h.submissionModel.create.mockRejectedValue(duplicate());
+    for (let index = 0; index < 6; index += 1) {
+      h.submissionModel.findOne.mockReturnValueOnce(makeQuery(null));
+    }
+    h.submissionModel.findOne.mockReturnValueOnce(
+      makeQuery({ submittedAt: new Date(now.getTime() - 1100) }),
+    );
+
+    await expect(h.submit()).rejects.toMatchObject({
+      status: 429,
+      response: {
+        code: 'SUBMISSION_COOLDOWN_ACTIVE',
+        cooldownMs: 2100,
+        cooldownSeconds: 3,
+        retryAfterMs: 1000,
+        retryAfterSeconds: 1,
+      },
+    });
+    expect(h.submissionModel.create).toHaveBeenCalledTimes(3);
+    expect(h.submissionModel.findOne).toHaveBeenCalledTimes(7);
+  });
+
+  it.each([
+    ['unrelated uniqueness error', duplicate({ _id: 1 })],
+    [
+      'wrong key order',
+      duplicate({ attemptNo: 1, studentId: 1, classroomTaskId: 1 }),
+    ],
+    ['unknown write result', new Error('connection lost during insert')],
+  ] as const)('propagates a %s without retrying', async (_name, error) => {
+    const h = setup();
+    h.submissionModel.create.mockRejectedValueOnce(error);
+
+    await expect(h.submit()).rejects.toBe(error);
+    expect(h.submissionModel.create).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not reinsert after an editing read fails following a successful insert', async () => {
+    const h = setup();
+    const error = duplicate();
+    h.aiFeedbackJobService.getReviewJob.mockRejectedValueOnce(error);
+
+    await expect(h.submit()).rejects.toBe(error);
+    expect(h.submissionModel.create).toHaveBeenCalledTimes(1);
   });
 });

@@ -38,7 +38,8 @@
 
 - 新密码先 trim，规范化后至少 8 个 Unicode 码点，UTF-8 最多 72 字节；登录密码与 `currentPassword` 保留原文、不 trim，分别至少 6 个和 1 个 Unicode 码点，UTF-8 同样最多 72 字节。字符数量不使用 UTF-16 length，超字节输入不截断，也不进行旧超长密码兼容比较。
 - DTO 负责字符串等结构校验，Service 与正式导入复用共享密码 helper；字符串密码策略拒绝返回 400 与 `PASSWORD_POLICY_VIOLATION`，非字符串、非法邮箱等结构校验仍为 400。新密码不能与当前密码相同，原有拒绝语义保留。
-- 全局错误 JSON 为 `{statusCode,timestamp,path,message,code?}`；本批仅在对应 400 响应保留 `PASSWORD_POLICY_VIOLATION`、`RESET_TOKEN_INVALID` 两个公开 code，不透传任意异常字段。无效重置凭据的 message 为 `Reset token is invalid`；所有 5xx 的公开 message 统一为 `Internal server error`，其它 4xx 沿用既有 message 口径。
+- 全局错误 JSON 的基础结构为 `{statusCode,timestamp,path,message}`；可选 code 仅按 HTTP 状态与已公开业务码配对白名单投影。除下述认证 400 外，[API Courses](./handoff-backend-api-map.md#courses)、[Classrooms](./handoff-backend-api-map.md#classrooms) 与 [Classroom Tasks](./handoff-backend-api-map.md#classroom-tasksclassrooms-子资源) 已承诺的非空删除、禁止迟交和提交冷却错误保留对应 code；指定冷却响应额外公开四项数值，完整形状与单位见 [Submission](#submission-request--response-family)。不展开任意异常对象，不透传作品版本/评阅冲突的内部 code/reason 或其它扩展字段。4xx 保留现有中英文 message 原文及格式；所有 5xx 仅保留基础结构，message 统一为 `Internal server error`。
+- 认证 400 继续仅公开 `PASSWORD_POLICY_VIOLATION`、`RESET_TOKEN_INVALID` 两个 code；无效重置凭据的 message 为 `Reset token is invalid`。
 
 ### Auth public responses
 
@@ -193,7 +194,8 @@ my-task-detail 另稳定返回 `participationStatus={readOnly,canSubmit,canReque
 - `QueryClassroomTaskSubmissionsDto` 只有分页校验，默认 `page=1,limit=20`；返回 `{items,total,page,limit}`。item 为 `{id,taskId,classroomTaskId,student,attemptNo,submittedAt,isLate,lateBySeconds,status,aiFeedbackStatus,feedbackCount}`。
 - 列表 `student={id,email,roles,status,name,studentNo,employeeNo}`，后三项文本可为 null。`attemptNo` 是该学生在当前 classroomTaskId 下的独立序号，从 1 递增。
 - 列表 `feedbackCount` 为该 submission 的全来源 Feedback 总条数，没有反馈时为 0；它不是 AI-only 的 `feedbackSummary.totalItems`。
-- 详情允许公开 `content.codeText`；课堂任务提交列表不返回 codeText；以上投影均不返回 passwordHash。冷却错误携带公开重试提示 `retryAfterMs/retryAfterSeconds`；触发条件及错误码见 [API Classroom Tasks](./handoff-backend-api-map.md#classroom-tasksclassrooms-子资源)。
+- 详情允许公开 `content.codeText`；课堂任务提交列表不返回 codeText；以上投影均不返回 passwordHash。
+- 指定提交冷却错误除基础错误字段及公开 code 外，携带 `cooldownMs/cooldownSeconds/retryAfterMs/retryAfterSeconds` 四个正整数。cooldownMs 是完整冷却窗口毫秒数，retryAfterMs 是当前剩余等待毫秒数，满足 `0 < retryAfterMs <= cooldownMs`；两项秒数分别为对应毫秒数除以 1000 后向上取整。保留既有中文 message 原文及格式，不因较早请求读到较晚提交而给出超过完整窗口的重试时间；触发条件、HTTP 状态与业务码见 [API Classroom Tasks](./handoff-backend-api-map.md#classroom-tasksclassrooms-子资源)。
 
 ### My-task-detail / AI feedback summary family
 

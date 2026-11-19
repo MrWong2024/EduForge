@@ -7,6 +7,16 @@ import {
 } from '@nestjs/common';
 import { HttpAdapterHost } from '@nestjs/core';
 
+type SubmissionCooldownDetails = {
+  cooldownMs: number;
+  cooldownSeconds: number;
+  retryAfterMs: number;
+  retryAfterSeconds: number;
+};
+
+const isPositiveInteger = (value: unknown): value is number =>
+  typeof value === 'number' && Number.isInteger(value) && value > 0;
+
 @Catch()
 export class AllExceptionsFilter implements ExceptionFilter {
   constructor(private readonly httpAdapterHost: HttpAdapterHost) {}
@@ -24,25 +34,56 @@ export class AllExceptionsFilter implements ExceptionFilter {
 
     let message = 'Internal server error';
     let code: string | undefined;
+    let cooldownDetails: SubmissionCooldownDetails | undefined;
 
     if (status < 500 && exception instanceof HttpException) {
       const responseBody = exception.getResponse();
       if (typeof responseBody === 'string') {
         message = responseBody;
       } else if (responseBody && typeof responseBody === 'object') {
-        const maybeMessage = (responseBody as { message?: unknown }).message;
+        const body = responseBody as Record<string, unknown>;
+        const maybeMessage = body.message;
         if (typeof maybeMessage === 'string') {
           message = maybeMessage;
         } else if (Array.isArray(maybeMessage)) {
           message = maybeMessage.filter(Boolean).join('; ');
         }
-        const candidate = (responseBody as { code?: unknown }).code;
+        const candidate = body.code;
         if (
-          status === 400 &&
-          (candidate === 'RESET_TOKEN_INVALID' ||
-            candidate === 'PASSWORD_POLICY_VIOLATION')
+          (status === 400 &&
+            (candidate === 'RESET_TOKEN_INVALID' ||
+              candidate === 'PASSWORD_POLICY_VIOLATION')) ||
+          (status === 403 && candidate === 'LATE_SUBMISSION_NOT_ALLOWED') ||
+          (status === 409 &&
+            (candidate === 'COURSE_NOT_EMPTY' ||
+              candidate === 'CLASSROOM_NOT_EMPTY')) ||
+          (status === 429 && candidate === 'SUBMISSION_COOLDOWN_ACTIVE')
         ) {
           code = candidate;
+        }
+        if (code === 'SUBMISSION_COOLDOWN_ACTIVE') {
+          const {
+            cooldownMs,
+            cooldownSeconds,
+            retryAfterMs,
+            retryAfterSeconds,
+          } = body;
+          if (
+            isPositiveInteger(cooldownMs) &&
+            isPositiveInteger(cooldownSeconds) &&
+            isPositiveInteger(retryAfterMs) &&
+            isPositiveInteger(retryAfterSeconds) &&
+            retryAfterMs <= cooldownMs &&
+            cooldownSeconds === Math.ceil(cooldownMs / 1000) &&
+            retryAfterSeconds === Math.ceil(retryAfterMs / 1000)
+          ) {
+            cooldownDetails = {
+              cooldownMs,
+              cooldownSeconds,
+              retryAfterMs,
+              retryAfterSeconds,
+            };
+          }
         }
       }
     }
@@ -57,6 +98,7 @@ export class AllExceptionsFilter implements ExceptionFilter {
         path,
         message,
         ...(code === undefined ? {} : { code }),
+        ...cooldownDetails,
       },
       status,
     );

@@ -142,6 +142,19 @@ npm.cmd run test:e2e -- --listTests --runInBand --runTestsByPath ./test/classroo
 npm.cmd run test:e2e -- --runInBand --runTestsByPath ./test/classroom-report-task-status.e2e-spec.ts
 ```
 
+### 课堂提交冷却定向验收
+
+既有 `test/classroom-task-submission-cooldown.e2e-spec.ts` 使用正式 configureApp、HTTP 路由及 Mongo 回读，负责同一作用域正冷却并发的单条受理与等待字段、零冷却的独立尝试编号、不同作用域隔离、顺序提交及窗口过去后的后续提交，并复用同批 fixture 验证禁止迟交和课程/班级非空删除的公开错误投影。作用域与重试边界见 [Service Card 08](./handoff-backend-service-map.md#service-card-08)，公开字段与单位见 [DTO Submission](./handoff-backend-dto-cheatsheet.md#submission-request--response-family)，状态/业务码见 [API Map](./handoff-backend-api-map.md)。受控时钟、确定性的目标编号竞争、三轮耗尽、无关 E11000 及写后失败不再插入由 LearningTasksService unit 承担；状态/code 配对与内部字段脱敏由 AllExceptionsFilter unit 承担，不用 HTTP 反复碰撞代替确定性分支证据。
+
+环境与身份复用[认证与凭据生命周期定向验收](#认证与凭据生命周期定向验收)，业务测试关闭自动建索引；写 fixture 前读回现行 Submission 作用域唯一索引，仅缺少该索引且对应 Submission 测试集合为空时按正式 Schema 精确补齐并复核，定义冲突不删除/替换或全库同步。该准备不代表生产索引已核查；按本轮合成学生、实例及归属回查实际提交并精确清理，覆盖未取得响应 ID 的写入。
+
+从 `backend` 目录在独立 `standard_test` 进程使用现有 `test:e2e` 入口，先确认 discovery 仅命中既有冷却 spec，再以相同路径定向执行：
+
+```powershell
+npm.cmd run test:e2e -- --listTests --runInBand --runTestsByPath ./test/classroom-task-submission-cooldown.e2e-spec.ts
+npm.cmd run test:e2e -- --runInBand --runTestsByPath ./test/classroom-task-submission-cooldown.e2e-spec.ts
+```
+
 ### import-users 定向离线回归
 
 `scripts/import-users.spec.ts` 与 `scripts/import-users-csv.spec.ts` 使用正式导入逻辑，数据库用途为 `none`：只允许合成输入、测试自有临时配置、fake connection/model 和隔离的无网络 CLI 子进程，不连接任何真实数据库，不加载机器真实 `.env` 或继承真实 Mongo、AI、SMTP 凭据，不启动 AppModule 或业务服务。连接替换必须在任何网络连接前生效；临时目录与子进程由创建它们的测试在 teardown/finally 中收口。
