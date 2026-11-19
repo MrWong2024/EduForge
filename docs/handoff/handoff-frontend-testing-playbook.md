@@ -68,6 +68,7 @@ npm run build
 - `task-ai-context-refs.contract.spec.ts` 负责教师模板引用适配、结构拒绝、路径/顺序保持、仅格式化不改变语义、PATCH 省略/清空与响应基准、明确作者及状态门禁；expected 来自任务约束与 Backend DTO，不读取 ZIP 或启动服务。
 - `task-rubric.contract.spec.ts` 通过生产表单与展示调用的纯 helper 验证 notes-only 请求构造、创建空白省略与编辑清空、中文多行及首尾 trim、只读/列表填写状态和候选缺字段提示；expected 来自评阅标准文字合同，不证明真实表单连续保存、刷新或发布快照，这些事实由当次 Agent-assisted smoke 负责。
 - `task-difficulty.contract.spec.ts` 通过生产表单和展示复用的纯 helper 验证四状态输入、安全显示、异常值归为未设置、创建省略、编辑未变保留与显式清空、未知初值不隐式回写及输入不变；同时通过页面/组件实际使用的解析函数与 buildQueryString 验证严格单值筛选、非法 URL/数组回到全部、全部省略和参数编码。`text-task-adapters.contract.spec.ts` 保留模板上游原值、师生正式 task 投影来源及 raw 引用合同，不代表支持自定义难度写入。expected 来自 [Frontend API Map](./handoff-frontend-api-map.md#33-teacher-任务--提交--反馈)，不证明真实 Browser 控件、导航竞争或视觉表现；HTTP 写入、查询与快照职责由既有 `classroom-text-task-contract.e2e-spec.ts` 承担。
+- `classroom-task-settings.contract.spec.ts` 通过实际表单复用的纯 helper 验证按编辑基准逐字段构造最小 PATCH、未改截止省略以保留秒/毫秒、false 与明确清除的 null，以及无净变更和非法非空日期的区分。expected 使用固定业务样例，不由生产转换函数生成；部分更新与普通 409 的权威合同见 [Backend API Classroom Tasks](./handoff-backend-api-map.md#classroom-tasksclassrooms-子资源)。该 contract 不证明真实页面的跨标签页保存或可见竞争提示。
 - `ai-learning-analytics.contract.spec.ts` 负责三类 V1.2 响应、nullable/真实0、比较版本/来源元信息、小非零数字格式、零事件关注提示和对应提交链接的纯合同；expected 来自锁定方法学与固定输入，不从后端实际结果反推。不证明 Browser 页面、统计持久终态或模型/课堂效果；后端规则与HTTP职责见 [Backend Testing Playbook](./handoff-backend-testing-playbook.md#2-current-test-baseline)。
 - 文档-only 变化只做文档、链接、diff 与范围门禁，不机械运行 frontend build。
 - 仅 lint 配置、开发依赖与静态 contract 变化时不为形式强制 build；应用源码变化后按影响执行，build 不替代 lint 验收。

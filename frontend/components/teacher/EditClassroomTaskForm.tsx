@@ -5,10 +5,12 @@ import { useRouter } from "next/navigation";
 import { ErrorState } from "@/components/blocks/ErrorState";
 import { BrowserFetchJsonError, fetchJson } from "@/lib/api/browser-client";
 import { buildErrorDescription, extractRawDetail } from "@/lib/api/error-presenter";
+import { normalizeClassroomTaskStatus } from "@/lib/api/types-teacher";
 import {
-  normalizeClassroomTaskStatus,
-  type UpdateClassroomTaskRequest,
-} from "@/lib/api/types-teacher";
+  buildClassroomTaskSettingsRequest,
+  toClassroomTaskDueAtLocalValue,
+  type ClassroomTaskSettingsDraft,
+} from "@/lib/classroom-task-settings";
 
 type EditClassroomTaskFormProps = {
   classroomId: string;
@@ -22,34 +24,6 @@ type EditClassroomTaskFormErrorState = {
   status?: number;
   summary: string;
   detail?: string;
-};
-
-const toDateTimeLocalValue = (iso: string | undefined): string => {
-  if (!iso) {
-    return "";
-  }
-  const date = new Date(iso);
-  if (Number.isNaN(date.getTime())) {
-    return "";
-  }
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, "0");
-  const day = String(date.getDate()).padStart(2, "0");
-  const hour = String(date.getHours()).padStart(2, "0");
-  const minute = String(date.getMinutes()).padStart(2, "0");
-  return `${year}-${month}-${day}T${hour}:${minute}`;
-};
-
-const toIsoDateTime = (value: string): string | undefined => {
-  const trimmed = value.trim();
-  if (!trimmed) {
-    return undefined;
-  }
-  const date = new Date(trimmed);
-  if (Number.isNaN(date.getTime())) {
-    return undefined;
-  }
-  return date.toISOString();
 };
 
 export function EditClassroomTaskForm({
@@ -66,23 +40,34 @@ export function EditClassroomTaskForm({
   const [errorState, setErrorState] = useState<EditClassroomTaskFormErrorState | null>(null);
   const [nextDueAt, setNextDueAt] = useState("");
   const [nextAllowLate, setNextAllowLate] = useState<boolean>(true);
+  const [editingBaseline, setEditingBaseline] = useState<ClassroomTaskSettingsDraft>({
+    dueAtLocal: "",
+    allowLate: true,
+  });
 
   const statusValue = normalizeClassroomTaskStatus(status) ?? "ACTIVE";
   const canEdit = Boolean(classroomTaskId) && (statusValue === "ACTIVE" || statusValue === "CLOSED");
 
-  const hasChanges = useMemo(() => {
-    const originalDueAt = toDateTimeLocalValue(dueAt);
-    const originalAllowLate = typeof allowLate === "boolean" ? allowLate : true;
-    return nextDueAt !== originalDueAt || nextAllowLate !== originalAllowLate;
-  }, [allowLate, dueAt, nextAllowLate, nextDueAt]);
+  const settingsRequest = useMemo(
+    () => buildClassroomTaskSettingsRequest(editingBaseline, {
+      dueAtLocal: nextDueAt,
+      allowLate: nextAllowLate,
+    }),
+    [editingBaseline, nextAllowLate, nextDueAt]
+  );
 
   if (!canEdit) {
     return null;
   }
 
   const handleExpand = () => {
-    setNextDueAt(toDateTimeLocalValue(dueAt));
-    setNextAllowLate(typeof allowLate === "boolean" ? allowLate : true);
+    const baseline = {
+      dueAtLocal: toClassroomTaskDueAtLocalValue(dueAt),
+      allowLate: typeof allowLate === "boolean" ? allowLate : true,
+    };
+    setEditingBaseline(baseline);
+    setNextDueAt(baseline.dueAtLocal);
+    setNextAllowLate(baseline.allowLate);
     setIsExpanded(true);
   };
 
@@ -90,18 +75,15 @@ export function EditClassroomTaskForm({
     setIsExpanded(false);
     setErrorState(null);
     setSuccessMessage(null);
-    setNextDueAt(toDateTimeLocalValue(dueAt));
-    setNextAllowLate(typeof allowLate === "boolean" ? allowLate : true);
   };
 
   const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    if (!classroomTaskId || isSubmitting) {
+    if (!classroomTaskId || !canEdit || isSubmitting || settingsRequest.kind === "unchanged") {
       return;
     }
 
-    const dueAtIso = toIsoDateTime(nextDueAt);
-    if (nextDueAt.trim() && !dueAtIso) {
+    if (settingsRequest.kind === "invalid-date") {
       setErrorState({
         summary: "截止时间格式不合法，请重新选择。",
       });
@@ -112,11 +94,6 @@ export function EditClassroomTaskForm({
     setErrorState(null);
     setSuccessMessage(null);
 
-    const payload: UpdateClassroomTaskRequest = {
-      dueAt: dueAtIso ?? null,
-      allowLate: nextAllowLate,
-    };
-
     try {
       await fetchJson<unknown>(
         `classrooms/${encodeURIComponent(classroomId)}/tasks/${encodeURIComponent(classroomTaskId)}`,
@@ -126,7 +103,7 @@ export function EditClassroomTaskForm({
             accept: "application/json",
             "content-type": "application/json",
           },
-          body: JSON.stringify(payload),
+          body: JSON.stringify(settingsRequest.payload),
         }
       );
       setSuccessMessage("课堂任务设置已更新。");
@@ -139,6 +116,7 @@ export function EditClassroomTaskForm({
           401: "登录状态已失效，请重新登录。",
           403: "无权限编辑该课堂任务。",
           404: "课堂任务不存在或已不可用。",
+          409: "课堂任务状态已变化，请刷新后再操作。",
         };
         setErrorState({
           status: error.status,
@@ -189,7 +167,7 @@ export function EditClassroomTaskForm({
           <div className="flex flex-wrap items-center gap-2">
             <button
               type="submit"
-              disabled={isSubmitting || !hasChanges}
+              disabled={isSubmitting || settingsRequest.kind !== "changed"}
               className="rounded-md bg-zinc-900 px-2.5 py-1 text-xs font-medium text-white disabled:cursor-not-allowed disabled:bg-zinc-400"
             >
               {isSubmitting ? "保存中..." : "保存设置"}
