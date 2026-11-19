@@ -12,6 +12,7 @@ import { AiContextReaderService } from '../ai-context/ai-context-reader.service'
 import { ConfigService } from '@nestjs/config';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, mongo, Types } from 'mongoose';
+import type { QueryFilter, UpdateQuery } from 'mongoose';
 import { isDeepStrictEqual } from 'node:util';
 import { MISSING_TASK_SNAPSHOT_MESSAGE } from '../../classrooms/classroom-tasks/classroom-task-content';
 import {
@@ -115,6 +116,8 @@ export class LearningTasksService {
     'Archived task templates cannot be published';
   private static readonly ONLY_PUBLISHED_TASK_TEMPLATE_ARCHIVE_MESSAGE =
     'Only published task templates can be archived';
+  private static readonly TASK_TEMPLATE_WRITE_CONFLICT_MESSAGE =
+    '任务模板已变化，请刷新后再操作。';
   private static readonly RESTORE_TASK_TEMPLATE_DISABLED_MESSAGE =
     'Archived task templates cannot be restored to draft; clone as draft instead';
   private static readonly LATE_SUBMISSION_NOT_ALLOWED_CODE =
@@ -169,98 +172,178 @@ export class LearningTasksService {
   }
 
   async updateTask(id: string, dto: UpdateTaskDto, userId: string) {
-    const task = await this.taskModel.findOne({
+    const scope = {
       _id: id,
       createdBy: new Types.ObjectId(userId),
-    });
-    if (!task) {
-      throw new NotFoundException('Task not found');
-    }
-    if (task.status === TaskStatus.Archived) {
-      throw new BadRequestException('Archived tasks cannot be updated');
-    }
-    if (dto.status !== undefined && dto.status !== task.status) {
-      throw new BadRequestException(
-        LearningTasksService.TASK_TEMPLATE_STATUS_ACTION_REQUIRED_MESSAGE,
-      );
-    }
-    await this.aiContextReader.validateForSave(
-      dto.aiContextRefs === undefined ? task.aiContextRefs : dto.aiContextRefs,
+    };
+    const task = await this.readTaskTemplateForWrite(scope);
+    this.assertTaskTemplateEditable(task.status, dto.status);
+    const usesStoredReferences = dto.aiContextRefs === undefined;
+    const references = usesStoredReferences
+      ? task.aiContextRefs
+      : dto.aiContextRefs;
+    await this.aiContextReader.validateForSave(references);
+
+    const courseLabel = this.toSanitizedCourseLabel(dto.courseLabel);
+    const fields = {
+      title: dto.title,
+      description: dto.description,
+      knowledgeModule: dto.knowledgeModule,
+      difficulty: dto.difficulty,
+      rubric: dto.rubric,
+      visibility: this.toSanitizedTaskVisibility(dto.visibility),
+      courseLabel,
+      aiContextRefs: dto.aiContextRefs,
+    };
+    const set = Object.fromEntries(
+      Object.entries(fields).filter(([, value]) => value !== undefined),
     );
-    if (dto.aiContextRefs !== undefined) {
-      task.aiContextRefs = dto.aiContextRefs;
+    const clearsCourseLabel =
+      dto.courseLabel !== undefined && courseLabel === undefined;
+    const hasSetFields = Object.keys(set).length > 0;
+    const hasWrite = hasSetFields || clearsCourseLabel;
+    if (hasWrite) {
+      const updated = await this.writeTaskTemplate(
+        {
+          ...scope,
+          status: dto.status ?? {
+            $in: [TaskStatus.Draft, TaskStatus.Published],
+          },
+          ...(usesStoredReferences &&
+            this.taskTemplateReferencesCondition(references)),
+        },
+        {
+          ...(hasSetFields && { $set: set }),
+          ...(clearsCourseLabel && { $unset: { courseLabel: 1 } }),
+        },
+      );
+      if (updated) return this.toTaskResponse(updated);
     }
-    const nextVisibility = this.toSanitizedTaskVisibility(dto.visibility);
-    const hasVisibility = nextVisibility !== undefined;
-    if (dto.title !== undefined) {
-      task.title = dto.title;
+
+    const current = await this.readTaskTemplateForWrite(scope);
+    this.assertTaskTemplateEditable(current.status, dto.status);
+    if (!hasWrite && isDeepStrictEqual(current.aiContextRefs, references)) {
+      return this.toTaskResponse(current);
     }
-    if (dto.description !== undefined) {
-      task.description = dto.description;
-    }
-    if (dto.knowledgeModule !== undefined) {
-      task.knowledgeModule = dto.knowledgeModule;
-    }
-    if (dto.difficulty !== undefined) {
-      task.difficulty = dto.difficulty;
-    }
-    if (dto.rubric !== undefined) {
-      task.rubric = dto.rubric;
-    }
-    if (dto.courseLabel !== undefined) {
-      task.courseLabel = this.toSanitizedCourseLabel(dto.courseLabel);
-    }
-    if (hasVisibility) {
-      task.visibility = nextVisibility;
-    }
-    await task.save();
-    return this.toTaskResponse(task);
+    throw new ConflictException(
+      LearningTasksService.TASK_TEMPLATE_WRITE_CONFLICT_MESSAGE,
+    );
   }
 
   async publishTask(id: string, userId: string) {
-    const task = await this.taskModel.findOne({
-      _id: id,
-      createdBy: new Types.ObjectId(userId),
-    });
-    if (!task) {
-      throw new NotFoundException('Task not found');
-    }
-    if (task.status === TaskStatus.Archived) {
-      throw new BadRequestException(
-        LearningTasksService.ARCHIVED_TASK_TEMPLATE_PUBLISH_MESSAGE,
-      );
-    }
-    if (task.status === TaskStatus.Published) {
-      return this.toTaskResponse(task);
-    }
-    if (task.status !== TaskStatus.Draft) {
-      throw new BadRequestException(
-        'Only draft task templates can be published',
-      );
-    }
+    const scope = { _id: id, createdBy: new Types.ObjectId(userId) };
+    const task = await this.readTaskTemplateForWrite(scope);
+    this.assertTaskTemplatePublishable(task.status);
+    if (task.status === TaskStatus.Published) return this.toTaskResponse(task);
+
     await this.aiContextReader.validateForSave(task.aiContextRefs);
-    task.status = TaskStatus.Published;
-    task.publishedAt = new Date();
-    await task.save();
-    return this.toTaskResponse(task);
+    const published = await this.writeTaskTemplate(
+      {
+        ...scope,
+        status: TaskStatus.Draft,
+        ...this.taskTemplateReferencesCondition(task.aiContextRefs),
+      },
+      { $set: { status: TaskStatus.Published, publishedAt: new Date() } },
+    );
+    if (published) return this.toTaskResponse(published);
+
+    const current = await this.readTaskTemplateForWrite(scope);
+    this.assertTaskTemplatePublishable(current.status);
+    if (current.status === TaskStatus.Published)
+      return this.toTaskResponse(current);
+    throw new ConflictException(
+      LearningTasksService.TASK_TEMPLATE_WRITE_CONFLICT_MESSAGE,
+    );
   }
 
   async archiveTask(id: string, teacherId: string) {
-    const task = await this.taskModel.findById(id).exec();
-    if (!task) {
-      throw new NotFoundException('Task not found');
-    }
-    if (task.createdBy.toString() !== teacherId) {
+    const archived = await this.writeTaskTemplate(
+      {
+        _id: id,
+        createdBy: new Types.ObjectId(teacherId),
+        status: TaskStatus.Published,
+      },
+      { $set: { status: TaskStatus.Archived } },
+    );
+    if (archived) return this.toTaskResponse(archived);
+
+    const current = await this.readTaskTemplateForWrite({ _id: id });
+    if (current.createdBy.toString() !== teacherId) {
       throw new ForbiddenException('Not allowed to archive task');
     }
-    if (task.status !== TaskStatus.Published) {
+    if (current.status !== TaskStatus.Published) {
       throw new BadRequestException(
         LearningTasksService.ONLY_PUBLISHED_TASK_TEMPLATE_ARCHIVE_MESSAGE,
       );
     }
-    task.status = TaskStatus.Archived;
-    await task.save();
-    return this.toTaskResponse(task);
+    throw new ConflictException(
+      LearningTasksService.TASK_TEMPLATE_WRITE_CONFLICT_MESSAGE,
+    );
+  }
+
+  private async readTaskTemplateForWrite(filter: {
+    _id: string;
+    createdBy?: Types.ObjectId;
+  }): Promise<TaskWithMeta> {
+    const task = await this.taskModel
+      .findOne(filter)
+      .read('primary')
+      .lean<TaskWithMeta>()
+      .exec();
+    if (!task) throw new NotFoundException('Task not found');
+    return task;
+  }
+
+  private writeTaskTemplate(
+    filter: QueryFilter<Task>,
+    update: UpdateQuery<Task>,
+  ) {
+    return this.taskModel
+      .findOneAndUpdate(filter, update, {
+        returnDocument: 'after',
+        runValidators: true,
+      })
+      .lean<TaskWithMeta>()
+      .exec();
+  }
+
+  private taskTemplateReferencesCondition(
+    references: Task['aiContextRefs'],
+  ): QueryFilter<Task> {
+    if (references === undefined) return { aiContextRefs: { $exists: false } };
+    // Compare the stored array as a value, preserving archive and entry order.
+    return {
+      $expr: {
+        $eq: [{ $ifNull: ['$aiContextRefs', null] }, { $literal: references }],
+      },
+    };
+  }
+
+  private assertTaskTemplateEditable(
+    status: TaskStatus,
+    requested?: TaskStatus,
+  ): void {
+    if (status === TaskStatus.Archived) {
+      throw new BadRequestException('Archived tasks cannot be updated');
+    }
+    if (requested !== undefined && requested !== status) {
+      throw new BadRequestException(
+        LearningTasksService.TASK_TEMPLATE_STATUS_ACTION_REQUIRED_MESSAGE,
+      );
+    }
+  }
+
+  private assertTaskTemplatePublishable(status: TaskStatus): void {
+    if (status === TaskStatus.Archived) {
+      throw new BadRequestException(
+        LearningTasksService.ARCHIVED_TASK_TEMPLATE_PUBLISH_MESSAGE,
+      );
+    }
+    if (status !== TaskStatus.Draft && status !== TaskStatus.Published) {
+      throw new BadRequestException(
+        'Only draft task templates can be published',
+      );
+    }
   }
 
   async restoreTask(id: string, userId: string) {

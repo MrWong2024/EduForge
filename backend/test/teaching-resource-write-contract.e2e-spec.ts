@@ -14,6 +14,9 @@ import request from 'supertest';
 import type { App } from 'supertest/types';
 import { AppModule } from '../src/app.module';
 import { configureApp } from '../src/app.setup';
+import { AiContextReaderService } from '../src/modules/learning-tasks/ai-context/ai-context-reader.service';
+import { LearningTasksService } from '../src/modules/learning-tasks/services/learning-tasks.service';
+import { Task } from '../src/modules/learning-tasks/schemas/task.schema';
 import { hashPassword } from '../src/modules/users/password.utils';
 import {
   User,
@@ -43,8 +46,48 @@ type Resource = {
 type ResourceResponse = {
   id: string;
   courseLabel?: string;
+  publishedAt?: string;
   [field: string]: unknown;
 };
+type HttpOutcome = { response: request.Response } | { error: unknown };
+
+async function bounded<T>(
+  operation: Promise<T>,
+  label: string,
+  milliseconds = 10000,
+): Promise<T> {
+  let timer: NodeJS.Timeout | undefined;
+  try {
+    return await Promise.race([
+      operation,
+      new Promise<never>((_resolve, reject) => {
+        timer = setTimeout(() => reject(new Error(label)), milliseconds);
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
+const startHttp = (
+  operation: PromiseLike<request.Response>,
+): Promise<HttpOutcome> =>
+  Promise.resolve(operation).then(
+    (response) => ({ response }),
+    (error: unknown) => ({ error }),
+  );
+
+async function httpResponse(
+  operation: Promise<HttpOutcome>,
+): Promise<request.Response> {
+  const outcome = await bounded(
+    operation,
+    'RESOURCE_WRITE_HTTP_DRAIN_TIMEOUT',
+    30000,
+  );
+  if ('error' in outcome) throw outcome.error;
+  return outcome.response;
+}
 function expectValidation400(
   response: request.Response,
   field: string,
@@ -148,6 +191,117 @@ describe('Teaching resource writes (real HTTP and Mongo)', () => {
   async function establishJavaClassification(): Promise<void> {
     await patch('task', { courseLabel: 'Java 程序设计' }).expect(200);
     expect((await raw('task'))?.courseLabel).toBe('Java 程序设计');
+  }
+
+  async function createLifecycleTask(status: 'DRAFT' | 'PUBLISHED' = 'DRAFT') {
+    const response = await post('task', {
+      ...validCreate('task'),
+      status,
+      rubric: { notes: 'Initial grading guidance' },
+    }).expect(201);
+    const body = response.body as ResourceResponse;
+    expect(Types.ObjectId.isValid(body.id)).toBe(true);
+    return body.id;
+  }
+
+  const lifecycle = (id: string, action: 'publish' | 'archive') =>
+    agent.post(`${paths.task}/${id}/${action}`).timeout(timeout).send({});
+  const fetchTask = (id: string) =>
+    agent.get(`${paths.task}/${id}`).timeout(timeout);
+  const storedTask = (id: string) =>
+    collection('task').findOne(
+      { _id: new Types.ObjectId(id), createdBy: teacherId },
+      {
+        projection: {
+          _id: 1,
+          status: 1,
+          publishedAt: 1,
+          title: 1,
+          description: 1,
+          rubric: 1,
+        },
+        maxTimeMS: 5000,
+      },
+    );
+
+  function observeTaskRequests() {
+    if (!app) throw new Error('RESOURCE_WRITE_APPLICATION_REQUIRED');
+    const service = app.get<LearningTasksService>(LearningTasksService);
+    // These spies call through unchanged and retain the server-side promises.
+    // A client timeout must not allow fixture cleanup to race an ongoing write.
+    const handlers = [
+      jest.spyOn(service, 'publishTask'),
+      jest.spyOn(service, 'updateTask'),
+      jest.spyOn(service, 'archiveTask'),
+    ];
+    return async (requests: Promise<HttpOutcome>[]) => {
+      try {
+        await bounded(
+          Promise.allSettled(requests),
+          'RESOURCE_WRITE_HTTP_DRAIN_TIMEOUT',
+          30000,
+        );
+        const pending: Promise<unknown>[] = [];
+        for (const handler of handlers) {
+          for (const result of handler.mock.results) {
+            if (result.type === 'return')
+              pending.push(Promise.resolve(result.value));
+          }
+        }
+        await bounded(
+          Promise.allSettled(pending),
+          'RESOURCE_WRITE_HANDLER_DRAIN_TIMEOUT',
+          30000,
+        );
+      } finally {
+        for (const handler of handlers) handler.mockRestore();
+      }
+    };
+  }
+
+  function pauseNextValidatedSave() {
+    if (!app) throw new Error('RESOURCE_WRITE_APPLICATION_REQUIRED');
+    const reader = app.get<AiContextReaderService>(AiContextReaderService);
+    const validate = reader.validateForSave.bind(
+      reader,
+    ) as AiContextReaderService['validateForSave'];
+    const closeRequests = observeTaskRequests();
+    let entered: () => void = () => undefined;
+    let release: () => void = () => undefined;
+    const reached = new Promise<void>((resolve) => {
+      entered = resolve;
+    });
+    const released = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let held = false;
+    const spy = jest
+      .spyOn(reader, 'validateForSave')
+      .mockImplementation(async (references) => {
+        await validate(references);
+        if (!held) {
+          held = true;
+          entered();
+          await bounded(
+            released,
+            'RESOURCE_WRITE_VALIDATION_RELEASE_TIMEOUT',
+            20000,
+          );
+        }
+      });
+    return {
+      reached: () =>
+        bounded(reached, 'RESOURCE_WRITE_VALIDATION_ENTRY_TIMEOUT', 5000),
+      release,
+      close: async (requests: Promise<HttpOutcome>[]) => {
+        release();
+        try {
+          await closeRequests(requests);
+        } finally {
+          spy.mockRestore();
+        }
+      },
+    };
   }
 
   beforeAll(async () => {
@@ -474,4 +628,344 @@ describe('Teaching resource writes (real HTTP and Mongo)', () => {
       });
     },
   );
+
+  it('rejects a delayed publish after another request publishes and archives the draft', async () => {
+    const id = await createLifecycleTask();
+    const gate = pauseNextValidatedSave();
+    const delayed = startHttp(
+      agent
+        .post(`${paths.task}/${id}/publish`)
+        .timeout({ response: 25000, deadline: 30000 })
+        .send({}),
+    );
+    try {
+      await gate.reached();
+      const published = await lifecycle(id, 'publish').expect(201);
+      const firstPublishedAt = (published.body as ResourceResponse).publishedAt;
+      expect(typeof firstPublishedAt).toBe('string');
+      const archived = await lifecycle(id, 'archive').expect(201);
+      expect((archived.body as ResourceResponse).publishedAt).toBe(
+        firstPublishedAt,
+      );
+      expect(await storedTask(id)).toMatchObject({
+        status: 'ARCHIVED',
+        publishedAt: new Date(firstPublishedAt as string),
+      });
+
+      gate.release();
+      const delayedResponse = await httpResponse(delayed);
+      const fetched = await fetchTask(id).expect(200);
+      const stored = await storedTask(id);
+      console.info(
+        'Teaching resource lifecycle a:',
+        JSON.stringify({
+          id,
+          delayedStatus: delayedResponse.status,
+          firstPublishedAt,
+          getStatus: (fetched.body as ResourceResponse).status,
+          getPublishedAt: (fetched.body as ResourceResponse).publishedAt,
+          mongoStatus: stored?.status,
+          mongoPublishedAt: stored?.publishedAt,
+        }),
+      );
+      expect({
+        delayedStatus: delayedResponse.status,
+        getStatus: (fetched.body as ResourceResponse).status,
+        mongoStatus: stored?.status,
+        getPublishedAt: (fetched.body as ResourceResponse).publishedAt,
+        mongoPublishedAt: stored?.publishedAt,
+      }).toEqual({
+        delayedStatus: 400,
+        getStatus: 'ARCHIVED',
+        mongoStatus: 'ARCHIVED',
+        getPublishedAt: firstPublishedAt,
+        mongoPublishedAt: new Date(firstPublishedAt as string),
+      });
+      expect((delayedResponse.body as Record<string, unknown>).message).toBe(
+        'Archived task templates cannot be published',
+      );
+      expect(fetched.body).toMatchObject({
+        status: 'ARCHIVED',
+        publishedAt: firstPublishedAt,
+      });
+      expect(stored).toMatchObject({
+        status: 'ARCHIVED',
+        publishedAt: new Date(firstPublishedAt as string),
+      });
+    } finally {
+      await gate.close([delayed]);
+    }
+  });
+
+  it('rejects a delayed content PATCH after another request archives the published template', async () => {
+    const id = await createLifecycleTask('PUBLISHED');
+    const original = (await fetchTask(id).expect(200)).body as ResourceResponse;
+    const gate = pauseNextValidatedSave();
+    const delayed = startHttp(
+      agent
+        .patch(`${paths.task}/${id}`)
+        .timeout({ response: 25000, deadline: 30000 })
+        .send({
+          title: `${namespace}-must-not-land`,
+          description: 'Pending replacement description',
+        }),
+    );
+    try {
+      await gate.reached();
+      await lifecycle(id, 'archive').expect(201);
+      gate.release();
+      const response = await httpResponse(delayed);
+      const fetched = (await fetchTask(id).expect(200))
+        .body as ResourceResponse;
+      const stored = await storedTask(id);
+      console.info(
+        'Teaching resource lifecycle b:',
+        JSON.stringify({
+          id,
+          delayedStatus: response.status,
+          getStatus: fetched.status,
+          mongoStatus: stored?.status,
+          getContentUnchanged:
+            fetched.title === original.title &&
+            fetched.description === original.description,
+          mongoContentUnchanged:
+            stored?.title === original.title &&
+            stored?.description === original.description,
+          getPublishedAt: fetched.publishedAt,
+          mongoPublishedAt: stored?.publishedAt,
+        }),
+      );
+      expect(response.status).toBe(400);
+      expect((response.body as Record<string, unknown>).message).toBe(
+        'Archived tasks cannot be updated',
+      );
+      expect(fetched).toMatchObject({
+        status: 'ARCHIVED',
+        title: original.title,
+        description: original.description,
+        publishedAt: original.publishedAt,
+      });
+      expect(stored).toMatchObject({
+        status: 'ARCHIVED',
+        title: original.title,
+        description: original.description,
+        publishedAt: new Date(original.publishedAt as string),
+      });
+    } finally {
+      await gate.close([delayed]);
+    }
+  });
+
+  it('publishes one draft once and returns its first publishedAt to both interleaved requests', async () => {
+    const id = await createLifecycleTask();
+    if (!connection) throw new Error('RESOURCE_WRITE_DATABASE_REQUIRED');
+    const taskCollection = connection.model<Task>(Task.name).collection;
+    const writes = jest.spyOn(taskCollection, 'findOneAndUpdate');
+    const legacyWrites = jest.spyOn(taskCollection, 'updateOne');
+    const gate = pauseNextValidatedSave();
+    const delayed = startHttp(
+      agent
+        .post(`${paths.task}/${id}/publish`)
+        .timeout({ response: 25000, deadline: 30000 })
+        .send({}),
+    );
+    try {
+      await gate.reached();
+      const first = await lifecycle(id, 'publish').expect(201);
+      const firstPublishedAt = (first.body as ResourceResponse).publishedAt;
+      expect(typeof firstPublishedAt).toBe('string');
+      const beforeRelease = await storedTask(id);
+      expect(beforeRelease).toMatchObject({
+        status: 'PUBLISHED',
+        publishedAt: new Date(firstPublishedAt as string),
+      });
+
+      gate.release();
+      const second = await httpResponse(delayed);
+      const fetched = (await fetchTask(id).expect(200))
+        .body as ResourceResponse;
+      const stored = await storedTask(id);
+      // Observe real driver receipts: one conditional write matched, the other
+      // returned null. No database behavior or HTTP response is substituted.
+      const receipts: unknown[] = [];
+      for (const result of writes.mock.results) {
+        expect(result.type).toBe('return');
+        if (result.type === 'return') receipts.push(await result.value);
+      }
+      const matched = receipts.filter((receipt) => receipt !== null);
+      const missed = receipts.filter((receipt) => receipt === null);
+      console.info(
+        'Teaching resource lifecycle c:',
+        JSON.stringify({
+          id,
+          statuses: [first.status, second.status],
+          firstPublishedAt,
+          secondPublishedAt: (second.body as ResourceResponse).publishedAt,
+          getPublishedAt: fetched.publishedAt,
+          mongoPublishedAt: stored?.publishedAt,
+          matchedPublicationWrites: matched.length,
+          conditionalMisses: missed.length,
+        }),
+      );
+      expect(second.status).toBe(201);
+      expect((second.body as ResourceResponse).publishedAt).toBe(
+        firstPublishedAt,
+      );
+      expect(writes).toHaveBeenCalledTimes(2);
+      for (const [filter] of writes.mock.calls) {
+        expect(filter).toMatchObject({
+          _id: new Types.ObjectId(id),
+          createdBy: teacherId,
+          status: 'DRAFT',
+        });
+      }
+      expect(matched).toHaveLength(1);
+      expect(missed).toHaveLength(1);
+      expect(matched[0]).toMatchObject({
+        _id: new Types.ObjectId(id),
+        status: 'PUBLISHED',
+        publishedAt: new Date(firstPublishedAt as string),
+      });
+      expect(legacyWrites).not.toHaveBeenCalled();
+      expect(fetched).toMatchObject({
+        status: 'PUBLISHED',
+        publishedAt: firstPublishedAt,
+      });
+      expect(stored).toMatchObject({
+        status: 'PUBLISHED',
+        publishedAt: new Date(firstPublishedAt as string),
+      });
+    } finally {
+      try {
+        await gate.close([delayed]);
+      } finally {
+        writes.mockRestore();
+        legacyWrites.mockRestore();
+      }
+    }
+  });
+
+  it('archives a published template only once for overlapping HTTP requests', async () => {
+    const id = await createLifecycleTask('PUBLISHED');
+    const original = (await fetchTask(id).expect(200)).body as ResourceResponse;
+    const closeRequests = observeTaskRequests();
+    const first = startHttp(lifecycle(id, 'archive'));
+    const second = startHttp(lifecycle(id, 'archive'));
+    try {
+      const responses = await Promise.all([
+        httpResponse(first),
+        httpResponse(second),
+      ]);
+      const fetched = (await fetchTask(id).expect(200))
+        .body as ResourceResponse;
+      const stored = await storedTask(id);
+      const statuses = responses
+        .map((response) => response.status)
+        .sort((a, b) => a - b);
+      console.info(
+        'Teaching resource lifecycle d archive:',
+        JSON.stringify({
+          id,
+          statuses,
+          getStatus: fetched.status,
+          mongoStatus: stored?.status,
+          firstPublishedAt: original.publishedAt,
+          getPublishedAt: fetched.publishedAt,
+          mongoPublishedAt: stored?.publishedAt,
+        }),
+      );
+      expect(statuses).toEqual([201, 400]);
+      const failure = responses.find((response) => response.status === 400);
+      expect(failure?.body).toMatchObject({
+        message: 'Only published task templates can be archived',
+      });
+      const success = responses.find((response) => response.status === 201);
+      expect(success?.body).toMatchObject({
+        status: 'ARCHIVED',
+        publishedAt: original.publishedAt,
+      });
+      expect(fetched).toMatchObject({
+        status: 'ARCHIVED',
+        publishedAt: original.publishedAt,
+      });
+      expect(stored).toMatchObject({
+        status: 'ARCHIVED',
+        publishedAt: new Date(original.publishedAt as string),
+      });
+    } finally {
+      await closeRequests([first, second]);
+    }
+  });
+
+  it('preserves disjoint PATCH changes across publication when the earlier validated request finishes last', async () => {
+    const id = await createLifecycleTask();
+    const title = `${namespace}-interleaved-title`;
+    expect((await storedTask(id))?.rubric).toEqual({
+      notes: 'Initial grading guidance',
+    });
+    const gate = pauseNextValidatedSave();
+    const delayed = startHttp(
+      agent
+        .patch(`${paths.task}/${id}`)
+        .timeout({ response: 25000, deadline: 30000 })
+        .send({ title: `  ${title}  ` }),
+    );
+    try {
+      await gate.reached();
+      const published = await lifecycle(id, 'publish').expect(201);
+      const firstPublishedAt = (published.body as ResourceResponse).publishedAt;
+      expect(typeof firstPublishedAt).toBe('string');
+      const first = await agent
+        .patch(`${paths.task}/${id}`)
+        .timeout(timeout)
+        .send({ description: updatedDescription, rubric: {} })
+        .expect(200);
+      gate.release();
+      const second = await httpResponse(delayed);
+      const fetched = (await fetchTask(id).expect(200))
+        .body as ResourceResponse;
+      const stored = await storedTask(id);
+      console.info(
+        'Teaching resource lifecycle d partial PATCH:',
+        JSON.stringify({
+          id,
+          statuses: [first.status, second.status],
+          getStatus: fetched.status,
+          mongoStatus: stored?.status,
+          getTitle: fetched.title,
+          mongoTitle: stored?.title,
+          getDescriptionPreserved: fetched.description === updatedDescription,
+          mongoDescriptionPreserved: stored?.description === updatedDescription,
+          getRubric: fetched.rubric,
+          mongoRubric: stored?.rubric,
+          firstPublishedAt,
+          getPublishedAt: fetched.publishedAt,
+          mongoPublishedAt: stored?.publishedAt,
+        }),
+      );
+      expect(second.status).toBe(200);
+      expect(second.body).toMatchObject({
+        status: 'PUBLISHED',
+        title,
+        description: updatedDescription,
+        publishedAt: firstPublishedAt,
+      });
+      expect(fetched).toMatchObject({
+        status: 'PUBLISHED',
+        title,
+        description: updatedDescription,
+        publishedAt: firstPublishedAt,
+      });
+      expect(stored).toMatchObject({
+        status: 'PUBLISHED',
+        title,
+        description: updatedDescription,
+        publishedAt: new Date(firstPublishedAt as string),
+      });
+      expect(fetched.rubric).toEqual({});
+      expect(stored?.rubric).toEqual({});
+    } finally {
+      await gate.close([delayed]);
+    }
+  });
 });

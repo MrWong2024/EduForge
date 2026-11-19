@@ -1,4 +1,5 @@
 import { AiContextReaderService } from '../ai-context/ai-context-reader.service';
+import type { AiContextRef } from '../ai-context/ai-context.types';
 import { Enrollment } from '../../classrooms/enrollments/schemas/enrollment.schema';
 import { ConfigService } from '@nestjs/config';
 import { Model, mongo, Mongoose, Schema, Types } from 'mongoose';
@@ -180,17 +181,35 @@ const createHarness = (
   };
 };
 
+const makeTaskQuery = (result: unknown) => {
+  const query = makeQuery(result);
+  const then: PromiseLike<unknown>['then'] = (fulfilled, rejected) =>
+    Promise.resolve<unknown>(query.exec()).then(fulfilled, rejected);
+  return { ...query, then };
+};
+
+type TaskManagementWrite = {
+  $set?: Partial<Task>;
+  $unset?: Record<string, unknown>;
+};
+
 const createTaskManagementHarness = (
   options: {
     taskStatus?: TaskStatus;
     createdBy?: Types.ObjectId;
     findByIdResult?: unknown;
     findOneResult?: unknown;
+    aiContextRefs?: AiContextRef[];
   } = {},
 ) => {
   const teacherId = objectId();
   const taskId = objectId();
-  const task = {
+  const task: Task & {
+    _id: Types.ObjectId;
+    createdAt: Date;
+    updatedAt: Date;
+    save: jest.Mock<Promise<void>, []>;
+  } = {
     _id: taskId,
     title: 'Task',
     description: 'Description',
@@ -199,12 +218,15 @@ const createTaskManagementHarness = (
     createdBy: options.createdBy ?? teacherId,
     createdAt: new Date('2026-01-01T00:00:00.000Z'),
     updatedAt: new Date('2026-01-02T00:00:00.000Z'),
-    save: jest.fn().mockResolvedValue(undefined),
+    ...(options.aiContextRefs === undefined
+      ? {}
+      : { aiContextRefs: options.aiContextRefs }),
+    save: jest.fn<Promise<void>, []>().mockResolvedValue(undefined),
   };
   const findByIdResult =
     'findByIdResult' in options ? options.findByIdResult : task;
   const findOneResult =
-    'findOneResult' in options ? options.findOneResult : task;
+    'findOneResult' in options ? options.findOneResult : findByIdResult;
   const taskModel = {
     create: jest.fn((payload: Record<string, unknown>) => ({
       _id: taskId,
@@ -212,11 +234,31 @@ const createTaskManagementHarness = (
       updatedAt: new Date('2026-01-02T00:00:00.000Z'),
       ...payload,
     })),
-    findById: jest.fn(() => ({
-      exec: jest.fn().mockResolvedValue(findByIdResult),
-    })),
-    findOne: jest.fn().mockResolvedValue(findOneResult),
+    findById: jest.fn(() => makeTaskQuery(findByIdResult)),
+    findOne: jest.fn((_filter: Record<string, unknown>) => {
+      void _filter;
+      return makeTaskQuery(findOneResult);
+    }),
+    findOneAndUpdate: jest.fn(
+      (
+        _filter: Record<string, unknown>,
+        update: TaskManagementWrite,
+        _options?: Record<string, unknown>,
+      ) => {
+        void _filter;
+        void _options;
+        Object.assign(task, update.$set);
+        for (const field of Object.keys(update.$unset ?? {})) {
+          Reflect.deleteProperty(task, field);
+        }
+        return makeTaskQuery({ ...task });
+      },
+    ),
   };
+  const aiContextReader = new AiContextReaderService();
+  const validateForSave = jest
+    .spyOn(aiContextReader, 'validateForSave')
+    .mockResolvedValue(undefined);
   const classroomTaskModel = {};
   const service = new LearningTasksService(
     { get: jest.fn() } as unknown as ConfigService,
@@ -228,13 +270,14 @@ const createTaskManagementHarness = (
     {} as unknown as Model<User>,
     {} as unknown as AiFeedbackJobService,
     {} as Model<Enrollment>,
-    new AiContextReaderService(),
+    aiContextReader,
   );
 
   return {
     service,
     taskModel,
     task,
+    validateForSave,
     ids: { teacherId, taskId },
   };
 };
@@ -401,7 +444,8 @@ describe('LearningTasksService task template lifecycle', () => {
     expect(harness.task.status).toBe(TaskStatus.Published);
     expect(harness.task.title).toBe('Updated title');
     expect(harness.task.description).toBe('Updated description');
-    expect(harness.task.save).toHaveBeenCalledTimes(1);
+    expect(harness.taskModel.findOneAndUpdate).toHaveBeenCalledTimes(1);
+    expect(harness.task.save).not.toHaveBeenCalled();
   });
 
   it('publishes DRAFT task templates', async () => {
@@ -420,7 +464,8 @@ describe('LearningTasksService task template lifecycle', () => {
     });
     expect(result.publishedAt).toBeDefined();
     expect(harness.task.status).toBe(TaskStatus.Published);
-    expect(harness.task.save).toHaveBeenCalledTimes(1);
+    expect(harness.taskModel.findOneAndUpdate).toHaveBeenCalledTimes(1);
+    expect(harness.task.save).not.toHaveBeenCalled();
   });
 
   it('rejects publishing ARCHIVED task templates', async () => {
@@ -452,13 +497,15 @@ describe('LearningTasksService task template lifecycle', () => {
       status: TaskStatus.Archived,
     });
     expect(harness.task.status).toBe(TaskStatus.Archived);
-    expect(harness.task.save).toHaveBeenCalledTimes(1);
+    expect(harness.taskModel.findOneAndUpdate).toHaveBeenCalledTimes(1);
+    expect(harness.task.save).not.toHaveBeenCalled();
   });
 
   it('rejects archiving DRAFT task templates', async () => {
     const harness = createTaskManagementHarness({
       taskStatus: TaskStatus.Draft,
     });
+    harness.taskModel.findOneAndUpdate.mockReturnValueOnce(makeTaskQuery(null));
 
     await expect(
       harness.service.archiveTask(
@@ -473,6 +520,7 @@ describe('LearningTasksService task template lifecycle', () => {
     const harness = createTaskManagementHarness({
       taskStatus: TaskStatus.Archived,
     });
+    harness.taskModel.findOneAndUpdate.mockReturnValueOnce(makeTaskQuery(null));
 
     await expect(
       harness.service.archiveTask(
@@ -488,6 +536,7 @@ describe('LearningTasksService task template lifecycle', () => {
       taskStatus: TaskStatus.Published,
       createdBy: objectId(),
     });
+    harness.taskModel.findOneAndUpdate.mockReturnValueOnce(makeTaskQuery(null));
 
     await expect(
       harness.service.archiveTask(
@@ -500,6 +549,7 @@ describe('LearningTasksService task template lifecycle', () => {
 
   it('rejects archiving a missing task template', async () => {
     const harness = createTaskManagementHarness({ findByIdResult: null });
+    harness.taskModel.findOneAndUpdate.mockReturnValueOnce(makeTaskQuery(null));
 
     await expect(
       harness.service.archiveTask(
@@ -523,7 +573,8 @@ describe('LearningTasksService task template lifecycle', () => {
       id: harness.ids.taskId.toString(),
       status: TaskStatus.Archived,
     });
-    expect(harness.task.save).toHaveBeenCalledTimes(1);
+    expect(harness.taskModel.findOneAndUpdate).toHaveBeenCalledTimes(1);
+    expect(harness.task.save).not.toHaveBeenCalled();
   });
 
   it('rejects restoring an archived task template with the clone-as-draft message', async () => {
@@ -564,6 +615,410 @@ describe('LearningTasksService task template lifecycle', () => {
       ),
     ).rejects.toThrow('Task not found');
   });
+});
+
+describe('LearningTasksService task template conditional writes (no database)', () => {
+  type Operation = 'patch' | 'publish' | 'archive';
+  const references = (archive = 'unit-a.zip'): AiContextRef[] => [
+    { archivePath: archive, entryPaths: ['first.md', 'second.md'] },
+  ];
+  const invoke = (
+    harness: ReturnType<typeof createTaskManagementHarness>,
+    operation: Operation,
+  ) => {
+    const id = harness.ids.taskId.toString();
+    const author = harness.ids.teacherId.toString();
+    if (operation === 'patch') {
+      return harness.service.updateTask(id, { title: 'Changed title' }, author);
+    }
+    return operation === 'publish'
+      ? harness.service.publishTask(id, author)
+      : harness.service.archiveTask(id, author);
+  };
+  const setup = (operation: Operation) =>
+    createTaskManagementHarness({
+      taskStatus:
+        operation === 'publish' ? TaskStatus.Draft : TaskStatus.Published,
+      aiContextRefs: references(),
+    });
+
+  it.each(['patch', 'publish'] as const)(
+    '%s preserves author-scoped not-found without attempting a write',
+    async (operation) => {
+      const h = createTaskManagementHarness({ findOneResult: null });
+      await expect(invoke(h, operation)).rejects.toMatchObject({
+        status: 404,
+        message: 'Task not found',
+      });
+      expect(h.taskModel.findOne).toHaveBeenCalledWith({
+        _id: h.ids.taskId.toString(),
+        createdBy: h.ids.teacherId,
+      });
+      expect(h.taskModel.findOneAndUpdate).not.toHaveBeenCalled();
+      expect(h.validateForSave).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each(['archive', 'restore'] as const)(
+    '%s keeps an existing foreign template forbidden instead of author-scoped 404',
+    async (operation) => {
+      const h = createTaskManagementHarness({
+        taskStatus: TaskStatus.Published,
+        createdBy: objectId(),
+      });
+      h.taskModel.findOneAndUpdate.mockReturnValueOnce(makeTaskQuery(null));
+      const request =
+        operation === 'archive'
+          ? h.service.archiveTask(
+              h.ids.taskId.toString(),
+              h.ids.teacherId.toString(),
+            )
+          : h.service.restoreTask(
+              h.ids.taskId.toString(),
+              h.ids.teacherId.toString(),
+            );
+      await expect(request).rejects.toMatchObject({
+        status: 403,
+        message: `Not allowed to ${operation} task`,
+      });
+      expect(h.task.save).not.toHaveBeenCalled();
+      if (operation === 'archive') {
+        expect(h.taskModel.findOne).toHaveBeenCalledWith({
+          _id: h.ids.taskId.toString(),
+        });
+      } else {
+        expect(h.taskModel.findOneAndUpdate).not.toHaveBeenCalled();
+      }
+    },
+  );
+
+  it.each(['patch', 'publish', 'archive'] as const)(
+    '%s returns the atomic after-document rather than its pre-read object',
+    async (operation) => {
+      const h = setup(operation);
+      const written = {
+        ...h.task,
+        title: 'Authoritative after-document',
+        status:
+          operation === 'archive' ? TaskStatus.Archived : TaskStatus.Published,
+        publishedAt: new Date('2026-03-01T01:02:03.456Z'),
+        updatedAt: new Date('2026-03-02T01:02:03.456Z'),
+      };
+      h.taskModel.findOneAndUpdate.mockReturnValueOnce(makeTaskQuery(written));
+      await expect(invoke(h, operation)).resolves.toMatchObject({
+        title: 'Authoritative after-document',
+        status: written.status,
+        publishedAt: new Date('2026-03-01T01:02:03.456Z'),
+        updatedAt: new Date('2026-03-02T01:02:03.456Z'),
+      });
+      expect(h.task.title).toBe('Task');
+      expect(h.taskModel.findOneAndUpdate).toHaveBeenCalledTimes(1);
+      expect(h.taskModel.findOneAndUpdate.mock.calls[0]?.[0]).toMatchObject({
+        _id: h.ids.taskId.toString(),
+        createdBy: h.ids.teacherId,
+        status:
+          operation === 'patch'
+            ? { $in: [TaskStatus.Draft, TaskStatus.Published] }
+            : operation === 'publish'
+              ? TaskStatus.Draft
+              : TaskStatus.Published,
+      });
+      expect(h.taskModel.findOneAndUpdate.mock.calls[0]?.[2]).toMatchObject({
+        returnDocument: 'after',
+        runValidators: true,
+      });
+      expect(h.task.save).not.toHaveBeenCalled();
+    },
+  );
+
+  it('allows omitted status to span DRAFT to PUBLISHED while only writing requested fields', async () => {
+    const h = createTaskManagementHarness({ taskStatus: TaskStatus.Draft });
+    const written = {
+      ...h.task,
+      title: 'Changed title',
+      status: TaskStatus.Published,
+      publishedAt: new Date('2026-03-01T01:02:03.456Z'),
+    };
+    h.taskModel.findOneAndUpdate.mockReturnValueOnce(makeTaskQuery(written));
+    await expect(invoke(h, 'patch')).resolves.toMatchObject({
+      title: 'Changed title',
+      status: TaskStatus.Published,
+    });
+    const [filter, update] = h.taskModel.findOneAndUpdate.mock.calls[0] ?? [];
+    expect(filter).toMatchObject({
+      _id: h.ids.taskId.toString(),
+      createdBy: h.ids.teacherId,
+      status: { $in: [TaskStatus.Draft, TaskStatus.Published] },
+    });
+    expect(update).toEqual({ $set: { title: 'Changed title' } });
+  });
+
+  it('requires explicit status to remain equal at the conditional write', async () => {
+    const h = createTaskManagementHarness({ taskStatus: TaskStatus.Draft });
+    const reread = { ...h.task, status: TaskStatus.Published };
+    h.taskModel.findOne
+      .mockReturnValueOnce(makeTaskQuery(h.task))
+      .mockReturnValueOnce(makeTaskQuery(reread));
+    h.taskModel.findOneAndUpdate.mockReturnValueOnce(makeTaskQuery(null));
+    await expect(
+      h.service.updateTask(
+        h.ids.taskId.toString(),
+        { title: 'Changed title', status: TaskStatus.Draft },
+        h.ids.teacherId.toString(),
+      ),
+    ).rejects.toMatchObject({
+      status: 400,
+      message: 'Task template status must be changed through lifecycle actions',
+    });
+    expect(h.taskModel.findOneAndUpdate.mock.calls[0]?.[0]).toMatchObject({
+      status: TaskStatus.Draft,
+    });
+    expect(h.taskModel.findOneAndUpdate).toHaveBeenCalledTimes(1);
+    expect(h.taskModel.findOne).toHaveBeenCalledTimes(2);
+  });
+
+  it.each([
+    ['empty PATCH', {}],
+    ['same-status-only PATCH', { status: TaskStatus.Published }],
+  ] as const)(
+    '%s validates references and returns a fresh permitted read without writing timestamps',
+    async (_name, dto) => {
+      const h = setup('patch');
+      const reread = {
+        ...h.task,
+        title: 'Unrelated concurrent edit',
+        updatedAt: new Date('2026-03-02T01:02:03.456Z'),
+      };
+      const initialQuery = makeTaskQuery(h.task);
+      const rereadQuery = makeTaskQuery(reread);
+      h.taskModel.findOne
+        .mockReturnValueOnce(initialQuery)
+        .mockReturnValueOnce(rereadQuery);
+      await expect(
+        h.service.updateTask(
+          h.ids.taskId.toString(),
+          dto,
+          h.ids.teacherId.toString(),
+        ),
+      ).resolves.toMatchObject({
+        title: 'Unrelated concurrent edit',
+        updatedAt: new Date('2026-03-02T01:02:03.456Z'),
+      });
+      expect(h.validateForSave).toHaveBeenCalledWith(references());
+      expect(h.taskModel.findOne).toHaveBeenCalledTimes(2);
+      expect(initialQuery.read).toHaveBeenCalledWith('primary');
+      expect(rereadQuery.read).toHaveBeenCalledWith('primary');
+      expect(h.taskModel.findOneAndUpdate).not.toHaveBeenCalled();
+      expect(h.task.save).not.toHaveBeenCalled();
+    },
+  );
+
+  it('rejects an empty PATCH when references change after its required validation', async () => {
+    const h = setup('patch');
+    h.taskModel.findOne
+      .mockReturnValueOnce(makeTaskQuery(h.task))
+      .mockReturnValueOnce(
+        makeTaskQuery({ ...h.task, aiContextRefs: references('unit-b.zip') }),
+      );
+    await expect(
+      h.service.updateTask(
+        h.ids.taskId.toString(),
+        {},
+        h.ids.teacherId.toString(),
+      ),
+    ).rejects.toMatchObject({
+      status: 409,
+      message: '任务模板已变化，请刷新后再操作。',
+    });
+    expect(h.validateForSave).toHaveBeenCalledTimes(1);
+    expect(h.taskModel.findOneAndUpdate).not.toHaveBeenCalled();
+  });
+
+  it('still rejects an empty PATCH if the template is archived during reference validation', async () => {
+    const h = setup('patch');
+    h.taskModel.findOne
+      .mockReturnValueOnce(makeTaskQuery(h.task))
+      .mockReturnValueOnce(
+        makeTaskQuery({ ...h.task, status: TaskStatus.Archived }),
+      );
+    await expect(
+      h.service.updateTask(
+        h.ids.taskId.toString(),
+        {},
+        h.ids.teacherId.toString(),
+      ),
+    ).rejects.toMatchObject({
+      status: 400,
+      message: 'Archived tasks cannot be updated',
+    });
+    expect(h.validateForSave).toHaveBeenCalledTimes(1);
+    expect(h.taskModel.findOneAndUpdate).not.toHaveBeenCalled();
+    expect(h.task.save).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['patch', TaskStatus.Archived, 'Archived tasks cannot be updated'],
+    [
+      'publish',
+      TaskStatus.Archived,
+      'Archived task templates cannot be published',
+    ],
+    [
+      'archive',
+      TaskStatus.Archived,
+      'Only published task templates can be archived',
+    ],
+    [
+      'archive',
+      TaskStatus.Draft,
+      'Only published task templates can be archived',
+    ],
+  ] as const)(
+    '%s classifies a write miss with current %s as its original 400',
+    async (operation, status, message) => {
+      const h = setup(operation);
+      const initialQuery = makeTaskQuery(h.task);
+      const rereadQuery = makeTaskQuery({ ...h.task, status });
+      if (operation !== 'archive')
+        h.taskModel.findOne.mockReturnValueOnce(initialQuery);
+      h.taskModel.findOne.mockReturnValueOnce(rereadQuery);
+      h.taskModel.findOneAndUpdate.mockReturnValueOnce(makeTaskQuery(null));
+      await expect(invoke(h, operation)).rejects.toMatchObject({
+        status: 400,
+        message,
+      });
+      expect(h.taskModel.findOneAndUpdate).toHaveBeenCalledTimes(1);
+      expect(h.taskModel.findOne).toHaveBeenCalledTimes(
+        operation === 'archive' ? 1 : 2,
+      );
+      expect(rereadQuery.read).toHaveBeenCalledWith('primary');
+      expect(h.task.save).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each(['patch', 'publish', 'archive'] as const)(
+    '%s preserves missing-resource 404 after one write miss reread',
+    async (operation) => {
+      const h = setup(operation);
+      if (operation !== 'archive')
+        h.taskModel.findOne.mockReturnValueOnce(makeTaskQuery(h.task));
+      h.taskModel.findOne.mockReturnValueOnce(makeTaskQuery(null));
+      h.taskModel.findOneAndUpdate.mockReturnValueOnce(makeTaskQuery(null));
+      await expect(invoke(h, operation)).rejects.toMatchObject({
+        status: 404,
+        message: 'Task not found',
+      });
+      expect(h.taskModel.findOneAndUpdate).toHaveBeenCalledTimes(1);
+      const finalScope = h.taskModel.findOne.mock.calls.at(-1)?.[0];
+      expect(finalScope).toEqual(
+        operation === 'archive'
+          ? { _id: h.ids.taskId.toString() }
+          : { _id: h.ids.taskId.toString(), createdBy: h.ids.teacherId },
+      );
+    },
+  );
+
+  it.each(['patch', 'publish', 'archive'] as const)(
+    '%s rejects a still-eligible write miss as ordinary 409 without replay',
+    async (operation) => {
+      const h = setup(operation);
+      const current = { ...h.task, aiContextRefs: references('unit-b.zip') };
+      if (operation !== 'archive')
+        h.taskModel.findOne.mockReturnValueOnce(makeTaskQuery(h.task));
+      h.taskModel.findOne.mockReturnValueOnce(makeTaskQuery(current));
+      h.taskModel.findOneAndUpdate.mockReturnValueOnce(makeTaskQuery(null));
+      await expect(invoke(h, operation)).rejects.toMatchObject({
+        status: 409,
+        message: '任务模板已变化，请刷新后再操作。',
+      });
+      expect(h.taskModel.findOneAndUpdate).toHaveBeenCalledTimes(1);
+      expect(h.task.save).not.toHaveBeenCalled();
+    },
+  );
+
+  it('returns the winning first publishedAt after another request published the draft', async () => {
+    const h = setup('publish');
+    const publishedAt = new Date('2026-03-01T01:02:03.456Z');
+    h.taskModel.findOne
+      .mockReturnValueOnce(makeTaskQuery(h.task))
+      .mockReturnValueOnce(
+        makeTaskQuery({
+          ...h.task,
+          status: TaskStatus.Published,
+          publishedAt,
+          aiContextRefs: references('unit-b.zip'),
+        }),
+      );
+    h.taskModel.findOneAndUpdate.mockReturnValueOnce(makeTaskQuery(null));
+    await expect(invoke(h, 'publish')).resolves.toMatchObject({
+      status: TaskStatus.Published,
+      publishedAt,
+    });
+    expect(h.taskModel.findOneAndUpdate).toHaveBeenCalledTimes(1);
+    expect(h.validateForSave).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not validate ZIP or rewrite time for an already-published template', async () => {
+    const h = setup('patch');
+    h.task.publishedAt = new Date('2026-03-01T01:02:03.456Z');
+    await expect(invoke(h, 'publish')).resolves.toMatchObject({
+      publishedAt: new Date('2026-03-01T01:02:03.456Z'),
+    });
+    expect(h.validateForSave).not.toHaveBeenCalled();
+    expect(h.taskModel.findOneAndUpdate).not.toHaveBeenCalled();
+    expect(h.task.save).not.toHaveBeenCalled();
+  });
+
+  it.each(['patch', 'publish'] as const)(
+    '%s propagates reference validation failures without a partial write',
+    async (operation) => {
+      const h = setup(operation);
+      const error = new Error('reference validation failed');
+      h.validateForSave.mockRejectedValueOnce(error);
+      await expect(invoke(h, operation)).rejects.toBe(error);
+      expect(h.taskModel.findOneAndUpdate).not.toHaveBeenCalled();
+      expect(h.taskModel.findOne).toHaveBeenCalledTimes(1);
+      expect(h.task.save).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each(['patch', 'publish', 'archive'] as const)(
+    '%s propagates unknown write outcomes without fallback reads or replay',
+    async (operation) => {
+      const h = setup(operation);
+      const error = new Error('write acknowledgement unavailable');
+      const write = makeTaskQuery(null);
+      write.exec.mockRejectedValueOnce(error);
+      h.taskModel.findOneAndUpdate.mockReturnValueOnce(write);
+      await expect(invoke(h, operation)).rejects.toBe(error);
+      expect(h.taskModel.findOneAndUpdate).toHaveBeenCalledTimes(1);
+      expect(h.taskModel.findOne).toHaveBeenCalledTimes(
+        operation === 'archive' ? 0 : 1,
+      );
+      expect(h.task.save).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each(['patch', 'publish', 'archive'] as const)(
+    '%s never replays an atomic success when response mapping fails',
+    async (operation) => {
+      const h = setup(operation);
+      const error = new Error('response mapping failed');
+      const written = { ...h.task };
+      Object.defineProperty(written, 'title', {
+        get: () => {
+          throw error;
+        },
+      });
+      h.taskModel.findOneAndUpdate.mockReturnValueOnce(makeTaskQuery(written));
+      await expect(invoke(h, operation)).rejects.toBe(error);
+      expect(h.taskModel.findOneAndUpdate).toHaveBeenCalledTimes(1);
+      expect(h.taskModel.findOne).toHaveBeenCalledTimes(
+        operation === 'archive' ? 0 : 1,
+      );
+      expect(h.task.save).not.toHaveBeenCalled();
+    },
+  );
 });
 
 describe('LearningTasksService task template publisher contract', () => {

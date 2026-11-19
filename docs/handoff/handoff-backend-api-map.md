@@ -178,6 +178,7 @@ Notes:
 - 创建/保存模板先验证最终生效的 ZIP 引用；创建 PUBLISHED、DRAFT 实际 publish 及课堂发布均须读取验证。DTO 非法和缺失/损坏/不可读/不支持/超限资料返回 400，使用引用/条目序号及安全原因，不暴露系统路径；不保存部分编辑、不创建无效实例。模板已 PUBLISHED 的重复 publish 保持既有幂等语义。配置及公开投影见 [DTO ZIP 资料引用](./handoff-backend-dto-cheatsheet.md#zip-资料引用配置)。
 - publish 为 teacher only、作者 only；DRAFT 可发布，PUBLISHED 幂等返回当前模板，ARCHIVED 返回 `400 Archived task templates cannot be published`。
 - archive 为 teacher only、作者 only；仅 PUBLISHED 可归档，其余返回 `400 Only published task templates can be archived`。被 ClassroomTask 引用仍可归档，不影响已发布实例运行。
+- 并发发布的成功响应返回同一首次发布时间。同一模板的并发归档只有一个请求可成功，归档后的发布或编辑继续返回原 `400`。写入前已校验的 ZIP 引用被替换且操作仍需依赖该校验时，返回普通 `409`「任务模板已变化，请刷新后再操作。」。服务端不重放请求。
 - restore 仅作为 teacher/作者的兼容入口，稳定返回 `400 Archived task templates cannot be restored to draft; clone as draft instead`，不再恢复归档模板。
 - 列表 scope 语义：mine 是本人全部模板；shared 是共享池（包含本人共享模板和旧数据缺省 visibility）；all 是本人全部与共享池的可见全集。createdBy 仅保留字段兼容，不能成为越权筛选入口。详情允许作者读取，其他人仅可读共享模板（旧数据缺省也视为共享），他人的 PRIVATE 模板返回 `404`。
 - 新作品只经课堂实例入口创建；旧通用提交 POST 返回 409，message=“请从班级任务入口提交。”。模板级 submissions/stats/common-issues 继续要求模板作者权限，仅纳入该教师自有班级中属于当前模板的课堂实例；范围过滤先于分页、total、学生去重和反馈聚合。共享模板不授予作者访问他人班级作品的权限。学生 mine 仍仅本人；这些列表及学生看板只接受标量 ObjectId 的 classroomTaskId，不纳入无关联或非法类型提交，不按 taskId 推测归属。

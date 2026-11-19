@@ -189,7 +189,7 @@ Global SoT 只保留理解跨 Service workflow 必需的稳定不变量，不追
 - Upstream: 任务/提交/反馈入口；`ClassroomTasksService` 的实例提交流程。
 - Downstream / Dependencies: `ConfigService`、`TaskModel`、`SubmissionModel`、`FeedbackModel`、`ClassroomTaskModel`、`ClassroomModel`、`UserModel`、`EnrollmentModel`、`AiFeedbackJobService`、`AiContextReaderService`。
 - Consistency / State / Idempotency:
-  - 保存模板前由 AiContextReaderService 验证最终生效引用，再应用全部编辑；创建 PUBLISHED 和实际 publish 同样验证，幂等 publish 不重建内容。
+  - 编辑、首次发布和归档以作者及允许的状态执行单文档条件更新，成功响应取写后文档。PATCH 仅写入提交的字段，显式 status 作为状态条件。编辑依赖现有 ZIP 引用或实际发布草稿时，写入同时匹配 AiContextReaderService 已验证的引用数组及顺序。显式替换引用时验证并写入替换值。首次发布时间与 DRAFT → PUBLISHED 在同一次更新中写入。条件未命中后从主节点复读并按入口归属判定结果，公开合同见 [API Learning Tasks](./handoff-backend-api-map.md#learning-tasks)。
   - 模板承担资产管理，ClassroomTask 承担教学运行态；内容编辑不得隐式改变状态，同状态输入忽略后继续编辑，归档内容不可改。重复发布保持幂等；归档不检查/级联 ClassroomTask 引用，兼容 restore 入口不恢复归档模板。
   - 模板读范围由当前教师与共享可见性构造；legacy 缺省 visibility 兼容 SHARED，兼容 createdBy query 不突破当前教师范围；共享不转移作者写权限。分类为治理坐标，不作为 Course 外键或发布一致性约束；“未分类”查询兼容字段缺省任务。
   - listTasks 的难度条件按保存值精确匹配，并与既有 scope、status、knowledgeModule、courseLabel 及作者范围取交集；同一完整 filter 在 skip/limit 前应用于 items 与 countDocuments，保留原排序。省略难度时不排除未知、缺失或空串值；查询值域见 [DTO Cheatsheet](./handoff-backend-dto-cheatsheet.md#task-template-dto--response-family)。

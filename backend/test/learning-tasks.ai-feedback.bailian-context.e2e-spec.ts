@@ -26,6 +26,7 @@ import {
   FeedbackSource,
 } from '../src/modules/learning-tasks/schemas/feedback.schema';
 import { AiFeedbackProcessor } from '../src/modules/learning-tasks/ai-feedback/services/ai-feedback-processor.service';
+import { LearningTasksService } from '../src/modules/learning-tasks/services/learning-tasks.service';
 import {
   AiFeedbackJob,
   AiFeedbackJobStatus,
@@ -41,6 +42,16 @@ jest.setTimeout(30000);
 
 type CreatedTaskResponse = {
   id: string;
+};
+
+type ReferenceTaskEvidence = {
+  _id: Types.ObjectId;
+  title: string;
+  description: string;
+  status: string;
+  aiContextRefs?: AiContextRef[];
+  publishedAt?: Date;
+  updatedAt: Date;
 };
 
 type CreatedSubmissionResponse = {
@@ -311,6 +322,103 @@ describe('LearningTasks AI Feedback Bailian Context (e2e)', () => {
     },
     { archivePath: 'book/teacher.zip', entryPaths: ['teacher/guide.md'] },
   ];
+  const replacementRefs: AiContextRef[] = [
+    { archivePath: 'book/teacher.zip', entryPaths: ['teacher/alternate.md'] },
+    { archivePath: 'book/student.zip', entryPaths: ['src/C++.cpp'] },
+  ];
+  const readReferenceTask = async (id: string) => {
+    const database = taskModel.db.db;
+    if (!database) throw new Error('Missing connected test database');
+    const task = await database
+      .collection<ReferenceTaskEvidence>(taskModel.collection.collectionName)
+      .findOne(
+        { _id: new Types.ObjectId(id) },
+        {
+          projection: {
+            title: 1,
+            description: 1,
+            status: 1,
+            aiContextRefs: 1,
+            publishedAt: 1,
+            updatedAt: 1,
+          },
+          maxTimeMS: 5000,
+        },
+      );
+    if (!task) throw new Error('Missing owned reference task');
+    return task;
+  };
+  const holdValidatedReferences = () => {
+    const reader = app.get<AiContextReaderService>(AiContextReaderService);
+    const validate = reader.validateForSave.bind(
+      reader,
+    ) as AiContextReaderService['validateForSave'];
+    const service = app.get<LearningTasksService>(LearningTasksService);
+    // Call-through spies retain the real server promises, including requests
+    // whose clients time out before their business operations finish.
+    const handlers = [
+      jest.spyOn(service, 'updateTask'),
+      jest.spyOn(service, 'publishTask'),
+    ];
+    let release!: () => void;
+    let reached!: () => void;
+    let held = false;
+    const resumed = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const validated = new Promise<void>((resolve) => {
+      reached = resolve;
+    });
+    const withinDeadline = async (
+      operation: Promise<void>,
+      timeoutMs: number,
+      message = 'Reference validation barrier timed out',
+    ) => {
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      try {
+        await Promise.race([
+          operation,
+          new Promise<never>((_, reject) => {
+            timer = setTimeout(() => reject(new Error(message)), timeoutMs);
+          }),
+        ]);
+      } finally {
+        clearTimeout(timer);
+      }
+    };
+    const spy = jest
+      .spyOn(reader, 'validateForSave')
+      .mockImplementation(async (references) => {
+        await validate(references);
+        if (!held && JSON.stringify(references) === JSON.stringify(refs)) {
+          held = true;
+          reached();
+          await withinDeadline(resumed, 10000);
+        }
+      });
+    return {
+      waitUntilValidated: () => withinDeadline(validated, 5000),
+      release,
+      waitForRequests: async () => {
+        const requests: Promise<unknown>[] = [];
+        for (const handler of handlers) {
+          for (const result of handler.mock.results) {
+            if (result.type === 'return')
+              requests.push(Promise.resolve(result.value));
+          }
+        }
+        await withinDeadline(
+          Promise.allSettled(requests).then(() => undefined),
+          15000,
+          'Reference task handler drain timed out',
+        );
+      },
+      restore: () => {
+        spy.mockRestore();
+        for (const handler of handlers) handler.mockRestore();
+      },
+    };
+  };
   const contextTask = async (aiContextRefs = refs, status = 'PUBLISHED') => {
     const response = await teacherAgent
       .post('/api/learning-tasks/tasks')
@@ -1510,6 +1618,9 @@ describe('LearningTasks AI Feedback Bailian Context (e2e)', () => {
   it('revalidates effective saves and real template/classroom publish before any write', async () => {
     const draft = await contextTask(refs, 'DRAFT');
     const published = await contextTask();
+    const clearable = await contextTask(refs, 'DRAFT');
+    const publishedBefore = await readReferenceTask(published);
+    expect(publishedBefore.publishedAt).toBeInstanceOf(Date);
     await rm(resolve(contextRoot, 'book/teacher.zip'));
     try {
       await teacherAgent
@@ -1521,6 +1632,14 @@ describe('LearningTasks AI Feedback Bailian Context (e2e)', () => {
         status: 'DRAFT',
         aiContextRefs: refs,
       });
+      const unchangedDraft = await readReferenceTask(draft);
+      for (const patch of [{}, { status: 'DRAFT' }]) {
+        await teacherAgent
+          .patch('/api/learning-tasks/tasks/' + draft)
+          .send(patch)
+          .expect(400);
+        expect(await readReferenceTask(draft)).toEqual(unchangedDraft);
+      }
       await teacherAgent
         .post('/api/learning-tasks/tasks/' + draft + '/publish')
         .send({})
@@ -1537,6 +1656,56 @@ describe('LearningTasks AI Feedback Bailian Context (e2e)', () => {
           .get<Model<ClassroomTask>>(getModelToken(ClassroomTask.name))
           .countDocuments({ taskId: published }),
       ).toBe(0);
+      const validation = jest.spyOn(
+        app.get(AiContextReaderService),
+        'validateForSave',
+      );
+      try {
+        const repeated = await teacherAgent
+          .post('/api/learning-tasks/tasks/' + published + '/publish')
+          .send({})
+          .expect(201);
+        expect(validation).not.toHaveBeenCalled();
+        expect(repeated.body).toMatchObject({
+          status: 'PUBLISHED',
+          aiContextRefs: refs,
+          publishedAt: publishedBefore.publishedAt?.toISOString(),
+        });
+        const detail = await teacherAgent
+          .get('/api/learning-tasks/tasks/' + published)
+          .expect(200);
+        expect(detail.body).toMatchObject({
+          status: 'PUBLISHED',
+          aiContextRefs: refs,
+          publishedAt: publishedBefore.publishedAt?.toISOString(),
+        });
+        expect(await readReferenceTask(published)).toEqual(publishedBefore);
+      } finally {
+        validation.mockRestore();
+      }
+      await teacherAgent
+        .patch('/api/learning-tasks/tasks/' + clearable)
+        .send({ aiContextRefs: [] })
+        .expect(200);
+      expect(await readReferenceTask(clearable)).toMatchObject({
+        status: 'DRAFT',
+        aiContextRefs: [],
+      });
+      await teacherAgent
+        .post('/api/learning-tasks/tasks/' + clearable + '/publish')
+        .send({})
+        .expect(201);
+      const cleared = await teacherAgent
+        .get('/api/learning-tasks/tasks/' + clearable)
+        .expect(200);
+      expect(cleared.body).toMatchObject({
+        status: 'PUBLISHED',
+        aiContextRefs: [],
+      });
+      expect(await readReferenceTask(clearable)).toMatchObject({
+        status: 'PUBLISHED',
+        aiContextRefs: [],
+      });
     } finally {
       await copyFile(
         resolve(__dirname, 'fixtures/ai-context/teacher.zip'),
@@ -1555,6 +1724,131 @@ describe('LearningTasks AI Feedback Bailian Context (e2e)', () => {
     expect((await taskModel.findById(draft).lean())?.publishedAt).toEqual(
       before?.publishedAt,
     );
+  });
+
+  it('rejects an omitted-reference edit after validated ZIP references change', async () => {
+    const id = await contextTask(refs, 'DRAFT');
+    const barrier = holdValidatedReferences();
+    const pending = teacherAgent
+      .patch('/api/learning-tasks/tasks/' + id)
+      .timeout({ response: 12000, deadline: 15000 })
+      .send({ title: 'STALE_ZIP_EDIT_MUST_NOT_SAVE' })
+      .then((response) => response);
+    const settled = Promise.allSettled([pending]);
+    try {
+      await barrier.waitUntilValidated();
+      const replacement = await teacherAgent
+        .patch('/api/learning-tasks/tasks/' + id)
+        .timeout({ response: 5000, deadline: 10000 })
+        .send({ aiContextRefs: replacementRefs })
+        .expect(200);
+      expect(replacement.body).toMatchObject({
+        title: 'ZIP task',
+        status: 'DRAFT',
+        aiContextRefs: replacementRefs,
+      });
+      const afterReplacement = await readReferenceTask(id);
+      expect(afterReplacement.aiContextRefs).toEqual(replacementRefs);
+      barrier.release();
+      const rejected = await pending;
+      expect(rejected.status).toBe(409);
+      expect(rejected.body).toMatchObject({
+        statusCode: 409,
+        message: '任务模板已变化，请刷新后再操作。',
+      });
+      expect(rejected.body).not.toHaveProperty('code');
+      const detail = await teacherAgent
+        .get('/api/learning-tasks/tasks/' + id)
+        .expect(200);
+      expect(detail.body).toMatchObject({
+        title: 'ZIP task',
+        description: 'ZIP_REQUIREMENTS',
+        status: 'DRAFT',
+        aiContextRefs: replacementRefs,
+      });
+      const final = await readReferenceTask(id);
+      expect(final).toEqual(afterReplacement);
+      expect(final.publishedAt).toBeUndefined();
+      console.info('ZIP reference edit race', {
+        taskId: id,
+        sequence: 'validate old refs -> replace refs HTTP 200 -> release edit',
+        status: rejected.status,
+        finalStatus: final.status,
+        finalTitle: final.title,
+        finalRefs: final.aiContextRefs,
+      });
+    } finally {
+      barrier.release();
+      try {
+        await settled;
+        await barrier.waitForRequests();
+      } finally {
+        barrier.restore();
+      }
+    }
+  });
+
+  it('rejects draft publication after validated ZIP references change', async () => {
+    const id = await contextTask(refs, 'DRAFT');
+    const barrier = holdValidatedReferences();
+    const pending = teacherAgent
+      .post('/api/learning-tasks/tasks/' + id + '/publish')
+      .timeout({ response: 12000, deadline: 15000 })
+      .send({})
+      .then((response) => response);
+    const settled = Promise.allSettled([pending]);
+    try {
+      await barrier.waitUntilValidated();
+      const replacement = await teacherAgent
+        .patch('/api/learning-tasks/tasks/' + id)
+        .timeout({ response: 5000, deadline: 10000 })
+        .send({ aiContextRefs: replacementRefs })
+        .expect(200);
+      expect(replacement.body).toMatchObject({
+        status: 'DRAFT',
+        aiContextRefs: replacementRefs,
+      });
+      const afterReplacement = await readReferenceTask(id);
+      expect(afterReplacement.aiContextRefs).toEqual(replacementRefs);
+      expect(afterReplacement.publishedAt).toBeUndefined();
+      barrier.release();
+      const rejected = await pending;
+      expect(rejected.status).toBe(409);
+      expect(rejected.body).toMatchObject({
+        statusCode: 409,
+        message: '任务模板已变化，请刷新后再操作。',
+      });
+      expect(rejected.body).not.toHaveProperty('code');
+      const detail = await teacherAgent
+        .get('/api/learning-tasks/tasks/' + id)
+        .expect(200);
+      expect(detail.body).toMatchObject({
+        title: 'ZIP task',
+        description: 'ZIP_REQUIREMENTS',
+        status: 'DRAFT',
+        aiContextRefs: replacementRefs,
+      });
+      const final = await readReferenceTask(id);
+      expect(final).toEqual(afterReplacement);
+      expect(final.publishedAt).toBeUndefined();
+      console.info('ZIP reference publish race', {
+        taskId: id,
+        sequence:
+          'validate old refs -> replace refs HTTP 200 -> release publish',
+        status: rejected.status,
+        finalStatus: final.status,
+        finalRefs: final.aiContextRefs,
+        hasPublishedAt: final.publishedAt !== undefined,
+      });
+    } finally {
+      barrier.release();
+      try {
+        await settled;
+        await barrier.waitForRequests();
+      } finally {
+        barrier.restore();
+      }
+    }
   });
 
   it('sends multiple exact files in the actual HTTP model request from the frozen instance and hides references in member responses', async () => {
