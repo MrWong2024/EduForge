@@ -184,7 +184,6 @@ export class LearningTasksService {
     if (dto.aiContextRefs !== undefined) {
       task.aiContextRefs = dto.aiContextRefs;
     }
-    const hasCourseLabel = 'courseLabel' in dto;
     const nextVisibility = this.toSanitizedTaskVisibility(dto.visibility);
     const hasVisibility = nextVisibility !== undefined;
     if (dto.title !== undefined) {
@@ -202,7 +201,7 @@ export class LearningTasksService {
     if (dto.rubric !== undefined) {
       task.rubric = dto.rubric;
     }
-    if (hasCourseLabel) {
+    if (dto.courseLabel !== undefined) {
       task.courseLabel = this.toSanitizedCourseLabel(dto.courseLabel);
     }
     if (hasVisibility) {

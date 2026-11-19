@@ -5,6 +5,7 @@ import {
   IsObject,
   IsOptional,
   IsString,
+  Matches,
   ValidateIf,
 } from 'class-validator';
 import { Transform } from 'class-transformer';
@@ -20,7 +21,7 @@ const trimCourseLabelInput = ({ value }: { value: unknown }): unknown => {
     return value;
   }
   const trimmed = value.trim();
-  return trimmed ? trimmed : undefined;
+  return trimmed ? trimmed : null;
 };
 
 const trimVisibilityInput = ({ value }: { value: unknown }): unknown => {
@@ -32,22 +33,25 @@ const trimVisibilityInput = ({ value }: { value: unknown }): unknown => {
 };
 
 export class UpdateTaskDto extends TaskAiContextDto {
-  @IsOptional()
+  @ValidateIf((_object, value: unknown) => value !== undefined)
   @IsString()
+  @Matches(/\S/u)
   title?: string;
 
-  @IsOptional()
+  @ValidateIf((_object, value: unknown) => value !== undefined)
   @IsString()
+  @Matches(/\S/u)
   description?: string;
 
-  @IsOptional()
+  @ValidateIf((_object, value: unknown) => value !== undefined)
   @IsString()
+  @Matches(/\S/u)
   knowledgeModule?: string;
 
   @IsOptional()
   @Transform(trimCourseLabelInput)
   @IsIn(TASK_COURSE_LABELS)
-  courseLabel?: TaskCourseLabel;
+  courseLabel?: TaskCourseLabel | null;
 
   @IsOptional()
   @Transform(trimVisibilityInput)

@@ -4,6 +4,7 @@ import {
   IsObject,
   IsOptional,
   IsString,
+  Matches,
   ValidateIf,
 } from 'class-validator';
 import { Transform } from 'class-transformer';
@@ -37,12 +38,15 @@ const trimVisibilityInput = ({ value }: { value: unknown }): unknown => {
 
 export class CreateTaskDto extends TaskAiContextDto {
   @IsString()
+  @Matches(/\S/u)
   title!: string;
 
   @IsString()
+  @Matches(/\S/u)
   description!: string;
 
   @IsString()
+  @Matches(/\S/u)
   knowledgeModule!: string;
 
   @IsOptional()

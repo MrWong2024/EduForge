@@ -1,5 +1,12 @@
 import { Transform } from 'class-transformer';
-import { IsEnum, IsIn, IsOptional, IsString } from 'class-validator';
+import {
+  IsEnum,
+  IsIn,
+  IsOptional,
+  IsString,
+  Matches,
+  ValidateIf,
+} from 'class-validator';
 import { TASK_COURSE_LABELS } from '../../learning-tasks/task-course-labels.constants';
 import type { TaskCourseLabel } from '../../learning-tasks/task-course-labels.constants';
 import { CourseStatus } from '../schemas/course.schema';
@@ -13,16 +20,19 @@ const trimCourseLabelInput = ({ value }: { value: unknown }): unknown => {
 };
 
 export class UpdateCourseDto {
-  @IsOptional()
+  @ValidateIf((_object, value: unknown) => value !== undefined)
   @IsString()
+  @Matches(/\S/u)
   code?: string;
 
-  @IsOptional()
+  @ValidateIf((_object, value: unknown) => value !== undefined)
   @IsString()
+  @Matches(/\S/u)
   name?: string;
 
-  @IsOptional()
+  @ValidateIf((_object, value: unknown) => value !== undefined)
   @IsString()
+  @Matches(/\S/u)
   term?: string;
 
   @IsOptional()
@@ -30,7 +40,7 @@ export class UpdateCourseDto {
   @IsIn(TASK_COURSE_LABELS)
   courseLabel?: TaskCourseLabel | null;
 
-  @IsOptional()
+  @ValidateIf((_object, value: unknown) => value !== undefined)
   @IsEnum(CourseStatus)
   status?: CourseStatus;
 }

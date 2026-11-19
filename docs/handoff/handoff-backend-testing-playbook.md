@@ -120,6 +120,17 @@ npm.cmd run test:e2e -- --runInBand --runTestsByPath ./test/auth-security.e2e-sp
 
 该 HTTP spec 不重复完整编码矩阵或课堂评分 E2E，不证明 Browser、Excel/WPS 实际运行或真实存量对齐。先 discovery 恰好命中所选单个 spec，再在对应独立 `none` / `standard_test` 进程使用相同路径运行；实际执行结果归当次任务报告。
 
+### 教学资源写入定向验收
+
+`test/teaching-resource-write-contract.e2e-spec.ts` 通过正式 HTTP、ValidationPipe 和 Mongo 回读，负责课程/班级/模板必填文本与课程/班级 PATCH status 的拒绝及无写入副作用、合法局部更新、模板分类省略保留与显式清空，以及合法文本保真。字段合同由 [DTO Courses](./handoff-backend-dto-cheatsheet.md#course-dto--response-family)、[Classrooms](./handoff-backend-dto-cheatsheet.md#classroom-与正式成员-family) 与 [Task template](./handoff-backend-dto-cheatsheet.md#task-template-dto--response-family) 维护；环境、认证与连接门禁复用[认证与凭据生命周期定向验收](#认证与凭据生命周期定向验收)，不运行 Browser。
+
+从 `backend` 目录在独立 `standard_test` 进程使用现有 `test:e2e` 入口，先确认 discovery 仅命中该文件，再以相同路径定向执行：
+
+```powershell
+npm.cmd run test:e2e -- --listTests --runInBand --runTestsByPath ./test/teaching-resource-write-contract.e2e-spec.ts
+npm.cmd run test:e2e -- --runInBand --runTestsByPath ./test/teaching-resource-write-contract.e2e-spec.ts
+```
+
 ### import-users 定向离线回归
 
 `scripts/import-users.spec.ts` 与 `scripts/import-users-csv.spec.ts` 使用正式导入逻辑，数据库用途为 `none`：只允许合成输入、测试自有临时配置、fake connection/model 和隔离的无网络 CLI 子进程，不连接任何真实数据库，不加载机器真实 `.env` 或继承真实 Mongo、AI、SMTP 凭据，不启动 AppModule 或业务服务。连接替换必须在任何网络连接前生效；临时目录与子进程由创建它们的测试在 teardown/finally 中收口。

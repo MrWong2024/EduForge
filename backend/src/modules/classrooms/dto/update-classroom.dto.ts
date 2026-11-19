@@ -1,12 +1,13 @@
-import { IsEnum, IsOptional, IsString } from 'class-validator';
+import { IsEnum, IsString, Matches, ValidateIf } from 'class-validator';
 import { ClassroomStatus } from '../schemas/classroom.schema';
 
 export class UpdateClassroomDto {
-  @IsOptional()
+  @ValidateIf((_object, value: unknown) => value !== undefined)
   @IsString()
+  @Matches(/\S/u)
   name?: string;
 
-  @IsOptional()
+  @ValidateIf((_object, value: unknown) => value !== undefined)
   @IsEnum(ClassroomStatus)
   status?: ClassroomStatus;
 }

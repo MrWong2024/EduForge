@@ -1,5 +1,5 @@
 import { Transform } from 'class-transformer';
-import { IsIn, IsOptional, IsString } from 'class-validator';
+import { IsIn, IsOptional, IsString, Matches } from 'class-validator';
 import { TASK_COURSE_LABELS } from '../../learning-tasks/task-course-labels.constants';
 import type { TaskCourseLabel } from '../../learning-tasks/task-course-labels.constants';
 
@@ -13,12 +13,15 @@ const trimCourseLabelInput = ({ value }: { value: unknown }): unknown => {
 
 export class CreateCourseDto {
   @IsString()
+  @Matches(/\S/u)
   code!: string;
 
   @IsString()
+  @Matches(/\S/u)
   name!: string;
 
   @IsString()
+  @Matches(/\S/u)
   term!: string;
 
   @IsOptional()

@@ -70,9 +70,11 @@
 
 | DTO | 字段合同 |
 | --- | --- |
-| `CreateCourseDto` | 必填字符串 `code/name/term`；可选 `courseLabel`，trim，空白转 undefined，`IsIn(TASK_COURSE_LABELS)`。 |
-| `UpdateCourseDto` | 可选字符串 `code/name/term`；可选 `status: ACTIVE \| ARCHIVED`；`courseLabel` 共用分类白名单，trim 后空白转 null，表示清空。 |
+| `CreateCourseDto` | 必填含非空白内容的字符串 `code/name/term`；可选 `courseLabel`，trim，空白转 undefined，`IsIn(TASK_COURSE_LABELS)`。 |
+| `UpdateCourseDto` | `code/name/term` 允许省略并保留原值，提供时须为含非空白内容的字符串；`status: ACTIVE \| ARCHIVED` 允许省略并保留原状态，仅 undefined 跳过，显式 null 或非法枚举返回 400；`courseLabel` 共用分类白名单，trim 后空白转 null，表示清空。 |
 | `QueryCourseDto` | 可选字符串 `term`、枚举 `status: ACTIVE \| ARCHIVED`，以及分页校验。 |
+
+`code/name/term` 在 POST 中不得缺失；POST/PATCH 显式 null、非字符串、空串或纯空白均在 DTO 校验阶段返回 400，PATCH 仅省略时跳过。非空白判断不转换合法文本：`code` 沿用 Schema trim，`name/term` 保留原文。
 
 `CourseResponseDto`：`{id,code,name,term,courseLabel?,status,createdBy,createdAt,updatedAt}`。`courseLabel` 与 Task 共用 `TASK_COURSE_LABELS`，是可空的单选课程分类，不是外键。课程状态及归档期间编辑边界见 [API Courses](./handoff-backend-api-map.md#courses)；总览数据见[课程总览](#课程总览)。
 
@@ -82,7 +84,7 @@
 
 来源：[CreateClassroomDto](../../backend/src/modules/classrooms/dto/create-classroom.dto.ts)、[UpdateClassroomDto](../../backend/src/modules/classrooms/dto/update-classroom.dto.ts)、[JoinClassroomDto](../../backend/src/modules/classrooms/dto/join-classroom.dto.ts)、[QueryClassroomDto](../../backend/src/modules/classrooms/dto/query-classroom.dto.ts)、[ClassroomResponseDto](../../backend/src/modules/classrooms/dto/classroom-response.dto.ts)。
 
-- 创建必填 `courseId`（`IsMongoId`）、`name`（`IsString`）；更新允许可选字符串 `name` 与枚举 `status: ACTIVE | ARCHIVED`；入班必填字符串 `joinCode`。
+- 创建必填 `courseId`（`IsMongoId`）及含非空白内容的字符串 `name`；更新可省略 `name/status` 并保留原值，仅 undefined 跳过校验。POST/PATCH 的 `name` 显式 null、非字符串、空串或纯空白均返回 400，POST 缺失 name 同样拒绝；合法 name 保留原文。更新 `status` 仅接受 `ACTIVE | ARCHIVED`，显式 null 或非法枚举返回 400；入班必填字符串 `joinCode`。
 - `QueryClassroomDto`：可选 MongoId `courseId`、枚举 `status: ACTIVE | ARCHIVED` 与分页校验。
 - `ClassroomResponseDto`：`{id,courseId,course?,name,teacherId,joinCode,status,createdAt,updatedAt}`，不再输出 `studentIds`。只读 `course` 是 `{id,code?,name?,term?,courseLabel?,status?}`；关联缺失可省略，`courseId` 保留。成员权威边界见 [API Classrooms](./handoff-backend-api-map.md#classrooms)。
 - [QueryClassroomStudentsDto](../../backend/src/modules/classrooms/dto/query-classroom-students.dto.ts)：分页校验，默认 `page=1,limit=20`；`includeRemoved?` 用 `IsBooleanString`，默认 false，`1/true` 启用。返回 `{items,total,page,limit}`，成员 item 为 `{id,email,roles,status,name,studentNo,employeeNo,joinedAt}`，不返回 `passwordHash`。成员状态筛选及默认排序见 API / [Service Card 04](./handoff-backend-service-map.md#service-card-04)。
@@ -400,12 +402,13 @@ summary、taskTrend 和学生 metrics 均有 `evidenceSummary={sourceUncertainCo
 
 | DTO | 字段与校验 |
 | --- | --- |
-| `CreateTaskDto` | 必填字符串 `title/description/knowledgeModule`；可选 `difficulty`（写入值域见下方）、对象 `rubric:Record<string,unknown>`、`courseLabel`、`visibility` 与 `status:DRAFT \| PUBLISHED`；status 默认 DRAFT。 |
+| `CreateTaskDto` | 必填含非空白内容的字符串 `title/description/knowledgeModule`；可选 `difficulty`（写入值域见下方）、对象 `rubric:Record<string,unknown>`、`courseLabel`、`visibility` 与 `status:DRAFT \| PUBLISHED`；status 默认 DRAFT。 |
 | `UpdateTaskDto` | 上述字段可选；status 的校验集合为 `DRAFT \| PUBLISHED \| ARCHIVED`，其编辑行为见 API；rubric 不静态约束内部 key。 |
 | `QueryTaskDto` | 可选 `scope:mine \| shared \| all`，默认 mine，trim + lowercase，空白视为未传；可选 status、字符串 knowledgeModule、courseLabel、difficulty（见下方查询合同）；分页校验；兼容 `createdBy` 用 IsMongoId。 |
 
 - Task 的创建、更新、模板列表及发布候选查询不接受 `stage`，严格白名单对旧参数返回 400；公开模板、课堂内容、学生详情及教师看板均不投影旧记录中的该字段。新 Task 和新快照不写入该字段；迁移完成状态见[退役运维记录](./handoff-backend-config-matrix.md#taskstage-定向退役运维)。
-- knowledgeModule 无枚举白名单。`courseLabel` 使用 `TASK_COURSE_LABELS` 单选白名单（如未分类、通用编程、Java 程序设计、数据结构、人工智能）；trim 后空白转 undefined。更新中显式传入空白 courseLabel 表示清空；不是 Course 外键。
+- `title/description/knowledgeModule` 的 POST 必须提供，PATCH 省略保留原值，仅 undefined 跳过；显式 null、非字符串、空串或纯空白均返回 400。非空白判断不统一 trim：title/knowledgeModule 沿用 Schema trim，description 的换行、缩进及首尾空白原样保留。knowledgeModule 无枚举白名单。
+- `courseLabel` 使用 `TASK_COURSE_LABELS` 单选白名单（如未分类、通用编程、Java 程序设计、数据结构、人工智能），不是 Course 外键。创建沿用 trim 后空白视为未设置；PATCH 省略保留原分类，合法分类 trim 后更新，显式空串、纯空白或 null 清空并采用既有可选字段表示；非法枚举或类型返回 400。列表“未分类”查询语义不变。
 - Task 的新写入值域由 CreateTaskDto / UpdateTaskDto 与 Schema 共同约束：字段缺失或空串 `""` 表示未设置，三个准确英文值 `easy/medium/hard` 表示标准档位。创建省略不设置默认档位，PATCH 省略保留原值，显式空串清空；仅 undefined 跳过字段校验，null、空白、未知值、中文标签、大小写或首尾空格变体、数组、对象及数字均拒绝，不做值转换。UI 选项与安全显示约定由 [Frontend API Map](./handoff-frontend-api-map.md#33-teacher-任务--提交--反馈) 维护。
 - 难度查询合同：`QueryTaskDto` 与 `QueryPublishableTaskTemplateDto` 的可选 `difficulty` 仅接受准确单值 `easy/medium/hard`；省略表示不限制。显式空串、空白、未知值、大小写变体或数组均返回 400，不 trim、不转大小写、不推断别名。写入允许空串不代表查询也允许空串。
 - `visibility: PRIVATE | SHARED`，trim + uppercase，空白视为未传；创建默认 PRIVATE；公开读取旧数据缺省时按 SHARED 兼容。
