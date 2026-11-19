@@ -35,6 +35,7 @@ import { canEditTaskTemplate } from "@/lib/learning-tasks/ai-context-refs";
 import {
   buildTaskTemplateEditRequest,
   confirmTaskTemplateEditReceipt,
+  reconcileTaskTemplatePublishedDraft,
   toTaskTemplateEditDraft,
   type TaskTemplateEditDraft,
 } from "@/lib/learning-tasks/template-edit";
@@ -338,9 +339,13 @@ export function EditLearningTaskForm({
         return;
       }
       setConfirmedTask(receipt.task);
+      setBaseline(receipt.draft);
+      setDraft(
+        action === "publish"
+          ? reconcileTaskTemplatePublishedDraft(baseline, draft, receipt.draft)
+          : receipt.draft,
+      );
       if (action === "archive") {
-        setBaseline(receipt.draft);
-        setDraft(receipt.draft);
         setAiContextError(null);
       }
       setSuccessMessage(

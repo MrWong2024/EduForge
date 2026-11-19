@@ -8,6 +8,7 @@ import {
 import {
   buildTaskTemplateEditRequest,
   confirmTaskTemplateEditReceipt,
+  reconcileTaskTemplatePublishedDraft,
   toTaskTemplateEditDraft,
   type TaskTemplateEditDraft,
 } from "../../lib/learning-tasks/template-edit";
@@ -49,6 +50,16 @@ const baseline: TaskTemplateEditDraft = {
   difficulty: "easy",
   rubricNotes: "  旧评阅文字\n ",
   aiContextText: JSON.stringify(refs),
+};
+const published: TaskTemplateEditDraft = {
+  title: "发布时的远端标题",
+  description: "  发布时的描述\n    保留缩进\n",
+  knowledgeModule: "发布时的知识模块",
+  courseLabel: "软件工程",
+  visibility: "SHARED",
+  difficulty: "hard",
+  rubricNotes: "发布时的评阅文字",
+  aiContextText: JSON.stringify(latestRefs, null, 2),
 };
 
 test("detail, create and update adapters preserve description text through the edit draft", () => {
@@ -344,6 +355,272 @@ test("wrong targets and incomplete receipts cannot confirm a save", () => {
   }
 });
 
+test("unsubmitted numeric rubric notes do not invalidate content or lifecycle receipts", () => {
+  for (const { status, submitted } of [
+    { status: "DRAFT", submitted: { title: "新标题" } },
+    { status: "PUBLISHED", submitted: {} },
+    { status: "ARCHIVED", submitted: {} },
+  ]) {
+    const result = confirmTaskTemplateEditReceipt(
+      "task-1",
+      {
+        ...receipt,
+        title: "新标题",
+        status,
+        rubric: { notes: 7, scoring: { correctness: 70 } },
+      },
+      submitted,
+    );
+    expect(result.kind).toBe("valid");
+    if (result.kind !== "valid")
+      throw new Error("Expected a confirmed receipt");
+    expect(result.task.raw.rubric).toStrictEqual({
+      notes: 7,
+      scoring: { correctness: 70 },
+    });
+    expect(result.draft.rubricNotes).toBe("");
+  }
+});
+
+test("unsubmitted rubric internal values and outer null retain the existing notes display semantics", () => {
+  for (const rubric of [
+    null,
+    { notes: null },
+    { notes: false },
+    { notes: ["文字"] },
+    { notes: { text: "文字" }, arbitrary: [1, null, true] },
+  ]) {
+    for (const submitted of [{ title: "新标题" }, {}]) {
+      const result = confirmTaskTemplateEditReceipt(
+        "task-1",
+        { ...receipt, title: "新标题", rubric },
+        submitted,
+      );
+      expect(result.kind).toBe("valid");
+      if (result.kind !== "valid")
+        throw new Error("Expected a confirmed receipt");
+      expect(result.task.raw.rubric).toStrictEqual(rubric);
+      expect(result.draft.rubricNotes).toBe("");
+    }
+  }
+});
+
+test("explicit notes replacement confirms only the exact raw notes-only receipt", () => {
+  const submitted = { rubric: { notes: "新评阅文字\n保留换行" } };
+  const result = confirmTaskTemplateEditReceipt(
+    "task-1",
+    { ...receipt, rubric: { notes: "新评阅文字\n保留换行" } },
+    submitted,
+  );
+  expect(result.kind).toBe("valid");
+  if (result.kind !== "valid") throw new Error("Expected a confirmed receipt");
+  expect(result.draft.rubricNotes).toBe("新评阅文字\n保留换行");
+  for (const rubric of [
+    undefined,
+    null,
+    {},
+    [],
+    { notes: 7 },
+    { notes: "另一页的文字" },
+    { notes: "  新评阅文字\n保留换行  " },
+    { notes: "新评阅文字\n保留换行", scoring: { correctness: 70 } },
+  ]) {
+    expect(
+      confirmTaskTemplateEditReceipt(
+        "task-1",
+        { ...receipt, rubric },
+        submitted,
+      ).kind,
+    ).toBe("invalid");
+  }
+});
+
+test("explicit rubric clear requires the raw empty object despite mapper folding", () => {
+  const result = confirmTaskTemplateEditReceipt(
+    "task-1",
+    { ...receipt, rubric: {} },
+    { rubric: {} },
+  );
+  expect(result.kind).toBe("valid");
+  if (result.kind !== "valid") throw new Error("Expected a confirmed receipt");
+  expect(result.task.rubric).toBeUndefined();
+  expect(result.task.raw.rubric).toStrictEqual({});
+  expect(result.draft.rubricNotes).toBe("");
+  for (const rubric of [
+    undefined,
+    null,
+    [],
+    { notes: "" },
+    { notes: 7 },
+    { scoring: { correctness: 70 } },
+  ]) {
+    expect(
+      confirmTaskTemplateEditReceipt(
+        "task-1",
+        { ...receipt, rubric },
+        { rubric: {} },
+      ).kind,
+    ).toBe("invalid");
+  }
+});
+
+test("publishing a clean draft adopts every server field as the new comparison baseline", () => {
+  const reconciled = reconcileTaskTemplatePublishedDraft(
+    baseline,
+    { ...baseline },
+    published,
+  );
+  expect(reconciled).toStrictEqual(published);
+  expect(buildTaskTemplateEditRequest(published, reconciled)).toStrictEqual({
+    kind: "unchanged",
+  });
+});
+
+const unsavedFields: {
+  field: keyof TaskTemplateEditDraft;
+  value: string;
+}[] = [
+  { field: "title", value: "  本地未保存标题\n " },
+  { field: "description", value: "  本地未保存描述\n    保留缩进\n\n" },
+  { field: "knowledgeModule", value: " \n本地知识模块  " },
+  { field: "courseLabel", value: "" },
+  { field: "visibility", value: "SHARED" },
+  { field: "difficulty", value: "" },
+  { field: "rubricNotes", value: "  本地评阅文字\n内部保留  " },
+  { field: "aiContextText", value: " [ ]\n" },
+];
+for (const { field, value } of unsavedFields) {
+  test(`publishing preserves the unsaved ${field} input and synchronizes other fields`, () => {
+    expect(
+      reconcileTaskTemplatePublishedDraft(
+        baseline,
+        { ...baseline, [field]: value },
+        published,
+      ),
+    ).toStrictEqual({ ...published, [field]: value });
+  });
+}
+
+test("publishing preserves a local description draft while adopting another page's new title", () => {
+  const reconciled = reconcileTaskTemplatePublishedDraft(
+    baseline,
+    { ...baseline, description: "  尚未保存第一行\n    第二行\n\n" },
+    published,
+  );
+  expect(reconciled.title).toBe("发布时的远端标题");
+  expect(reconciled.description).toBe("  尚未保存第一行\n    第二行\n\n");
+  expect(buildTaskTemplateEditRequest(published, reconciled)).toStrictEqual({
+    kind: "changed",
+    payload: { description: "  尚未保存第一行\n    第二行\n\n" },
+  });
+});
+
+test("publishing adopts server values after restored edits and equivalent formatting", () => {
+  const original = { ...baseline, courseLabel: "" };
+  const equivalent = {
+    ...original,
+    title: " \n原标题  ",
+    knowledgeModule: "  原知识模块\n ",
+    courseLabel: "未分类",
+    rubricNotes: "旧评阅文字",
+    aiContextText: JSON.stringify(refs, null, 4),
+  };
+  expect(
+    reconcileTaskTemplatePublishedDraft(original, equivalent, published),
+  ).toStrictEqual(published);
+  const edited = {
+    ...baseline,
+    title: "曾经修改的标题",
+    description: "曾经修改的描述",
+    rubricNotes: "曾经修改的评阅文字",
+    aiContextText: "[]",
+  };
+  const restored = { ...edited, ...baseline };
+  expect(
+    reconcileTaskTemplatePublishedDraft(baseline, restored, published),
+  ).toStrictEqual(published);
+});
+
+test("a preserved local edit equivalent to the published baseline produces no PATCH", () => {
+  const local = {
+    ...published,
+    title: "  发布时的远端标题\n ",
+    knowledgeModule: " 发布时的知识模块 ",
+    rubricNotes: " \n发布时的评阅文字  ",
+    aiContextText: JSON.stringify(latestRefs),
+  };
+  const reconciled = reconcileTaskTemplatePublishedDraft(
+    baseline,
+    local,
+    published,
+  );
+  expect(reconciled).toStrictEqual(local);
+  expect(buildTaskTemplateEditRequest(published, reconciled)).toStrictEqual({
+    kind: "unchanged",
+  });
+});
+
+test("publishing preserves description whitespace changes and significant reference ordering", () => {
+  const reordered = [
+    refs[1],
+    { ...refs[0], entryPaths: ["teacher/alternate.md", "teacher/guide.md"] },
+  ];
+  const local = {
+    ...baseline,
+    description: description + "\n",
+    aiContextText: JSON.stringify(reordered, null, 4),
+  };
+  const reconciled = reconcileTaskTemplatePublishedDraft(
+    baseline,
+    local,
+    published,
+  );
+  expect(reconciled).toStrictEqual({
+    ...published,
+    description: "  原文第一行\n    内部缩进\n末行\n\n\n",
+    aiContextText: JSON.stringify(reordered, null, 4),
+  });
+  expect(buildTaskTemplateEditRequest(published, reconciled)).toStrictEqual({
+    kind: "changed",
+    payload: {
+      description: "  原文第一行\n    内部缩进\n末行\n\n\n",
+      aiContextRefs: reordered,
+    },
+  });
+});
+
+for (const field of ["title", "description", "knowledgeModule"] as const) {
+  test(`publishing preserves temporarily blank ${field} without blocking other field synchronization`, () => {
+    const reconciled = reconcileTaskTemplatePublishedDraft(
+      baseline,
+      { ...baseline, [field]: " \n\t " },
+      published,
+    );
+    expect(reconciled).toStrictEqual({ ...published, [field]: " \n\t " });
+    const request = buildTaskTemplateEditRequest(published, reconciled);
+    expect(request.kind).toBe("invalid");
+    if (request.kind === "invalid") expect(request.field).toBe(field);
+  });
+}
+
+test("publishing preserves unfinished reference JSON and other invalid inputs independently", () => {
+  for (const title of [baseline.title, " \n "]) {
+    const reconciled = reconcileTaskTemplatePublishedDraft(
+      baseline,
+      { ...baseline, title, aiContextText: '[\n {"archivePath":' },
+      published,
+    );
+    expect(reconciled).toStrictEqual({
+      ...published,
+      title: title === baseline.title ? "发布时的远端标题" : " \n ",
+      aiContextText: '[\n {"archivePath":',
+    });
+    expect(buildTaskTemplateEditRequest(published, reconciled).kind).toBe(
+      "invalid",
+    );
+  }
+});
+
 test("invalid source fields cannot become a successful receipt through adapter fallbacks", () => {
   for (const invalid of [
     { title: 3 },
@@ -356,7 +633,6 @@ test("invalid source fields cannot become a successful receipt through adapter f
     { courseLabel: {} },
     { difficulty: 0 },
     { rubric: [] },
-    { rubric: { notes: 7 } },
     { aiContextRefs: null },
     { aiContextRefs: {} },
     { aiContextRefs: [{ ...refs[0], entryPaths: [] }] },

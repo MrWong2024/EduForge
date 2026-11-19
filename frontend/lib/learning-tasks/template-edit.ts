@@ -67,6 +67,78 @@ export function toTaskTemplateEditDraft(
   };
 }
 
+function diffTaskTemplateEditDraft(
+  baseline: Readonly<TaskTemplateEditDraft>,
+  draft: Readonly<TaskTemplateEditDraft>,
+) {
+  const difficultyPatch = updateDifficultyPayload(
+    baseline.difficulty,
+    draft.difficulty,
+  );
+  const references = (() => {
+    try {
+      const patch: Pick<UpdateLearningTaskRequest, "aiContextRefs"> =
+        buildAiContextRefsPatch(
+          draft.aiContextText,
+          parseAiContextRefsJson(baseline.aiContextText),
+        );
+      return { kind: "valid" as const, patch };
+    } catch (error) {
+      return {
+        kind: "invalid" as const,
+        message: error instanceof Error ? error.message : "引用 JSON 不合法。",
+      };
+    }
+  })();
+  return {
+    changed: {
+      title: draft.title.trim() !== baseline.title.trim(),
+      description: draft.description !== baseline.description,
+      knowledgeModule:
+        draft.knowledgeModule.trim() !== baseline.knowledgeModule.trim(),
+      courseLabel:
+        courseLabelInput(draft.courseLabel) !==
+        courseLabelInput(baseline.courseLabel),
+      visibility: draft.visibility !== baseline.visibility,
+      difficulty: difficultyPatch.difficulty !== undefined,
+      rubricNotes: draft.rubricNotes.trim() !== baseline.rubricNotes.trim(),
+      aiContextText:
+        references.kind === "invalid" ||
+        references.patch.aiContextRefs !== undefined,
+    },
+    difficultyPatch,
+    references,
+  };
+}
+
+export function reconcileTaskTemplatePublishedDraft(
+  baseline: Readonly<TaskTemplateEditDraft>,
+  draft: Readonly<TaskTemplateEditDraft>,
+  published: Readonly<TaskTemplateEditDraft>,
+): TaskTemplateEditDraft {
+  const { changed } = diffTaskTemplateEditDraft(baseline, draft);
+  return {
+    title: changed.title ? draft.title : published.title,
+    description: changed.description
+      ? draft.description
+      : published.description,
+    knowledgeModule: changed.knowledgeModule
+      ? draft.knowledgeModule
+      : published.knowledgeModule,
+    courseLabel: changed.courseLabel
+      ? draft.courseLabel
+      : published.courseLabel,
+    visibility: changed.visibility ? draft.visibility : published.visibility,
+    difficulty: changed.difficulty ? draft.difficulty : published.difficulty,
+    rubricNotes: changed.rubricNotes
+      ? draft.rubricNotes
+      : published.rubricNotes,
+    aiContextText: changed.aiContextText
+      ? draft.aiContextText
+      : published.aiContextText,
+  };
+}
+
 export function buildTaskTemplateEditRequest(
   baseline: Readonly<TaskTemplateEditDraft>,
   draft: Readonly<TaskTemplateEditDraft>,
@@ -79,43 +151,35 @@ export function buildTaskTemplateEditRequest(
     if (!draft[field].trim()) return { kind: "invalid", field, message };
   }
 
-  let refsPatch: Pick<UpdateLearningTaskRequest, "aiContextRefs">;
-  try {
-    refsPatch = buildAiContextRefsPatch(
-      draft.aiContextText,
-      parseAiContextRefsJson(baseline.aiContextText),
-    );
-  } catch (error) {
+  const diff = diffTaskTemplateEditDraft(baseline, draft);
+  if (diff.references.kind === "invalid") {
     return {
       kind: "invalid",
       field: "aiContextText",
-      message: error instanceof Error ? error.message : "引用 JSON 不合法。",
+      message: diff.references.message,
     };
   }
 
   const payload: UpdateLearningTaskRequest = {
-    ...updateDifficultyPayload(baseline.difficulty, draft.difficulty),
-    ...refsPatch,
+    ...diff.difficultyPatch,
+    ...diff.references.patch,
   };
-  if (draft.title.trim() !== baseline.title.trim()) {
+  if (diff.changed.title) {
     payload.title = draft.title.trim();
   }
-  if (draft.description !== baseline.description) {
+  if (diff.changed.description) {
     payload.description = draft.description;
   }
-  if (draft.knowledgeModule.trim() !== baseline.knowledgeModule.trim()) {
+  if (diff.changed.knowledgeModule) {
     payload.knowledgeModule = draft.knowledgeModule.trim();
   }
-  if (
-    courseLabelInput(draft.courseLabel) !==
-    courseLabelInput(baseline.courseLabel)
-  ) {
+  if (diff.changed.courseLabel) {
     payload.courseLabel = courseLabelInput(draft.courseLabel);
   }
-  if (draft.visibility !== baseline.visibility) {
+  if (diff.changed.visibility) {
     payload.visibility = draft.visibility;
   }
-  if (draft.rubricNotes.trim() !== baseline.rubricNotes.trim()) {
+  if (diff.changed.rubricNotes) {
     payload.rubric = buildUpdateTaskRubric(draft.rubricNotes);
   }
   return Object.keys(payload).length
@@ -155,11 +219,31 @@ export function confirmTaskTemplateEditReceipt(
       (source.difficulty !== undefined &&
         typeof source.difficulty !== "string") ||
       (source.rubric !== undefined &&
-        (!isRecord(source.rubric) ||
-          (source.rubric.notes !== undefined &&
-            typeof source.rubric.notes !== "string")))
+        source.rubric !== null &&
+        !isRecord(source.rubric))
     ) {
       return invalid;
+    }
+    if (submittedPayload.rubric !== undefined) {
+      const submittedRubric = submittedPayload.rubric;
+      const returnedRubric = source.rubric;
+      if (!isRecord(submittedRubric) || !isRecord(returnedRubric)) {
+        return invalid;
+      }
+      const submittedKeys = Object.keys(submittedRubric);
+      const returnedKeys = Object.keys(returnedRubric);
+      if (submittedKeys.length === 0) {
+        if (returnedKeys.length !== 0) return invalid;
+      } else if (
+        submittedKeys.length !== 1 ||
+        submittedKeys[0] !== "notes" ||
+        typeof submittedRubric.notes !== "string" ||
+        returnedKeys.length !== 1 ||
+        returnedKeys[0] !== "notes" ||
+        returnedRubric.notes !== submittedRubric.notes
+      ) {
+        return invalid;
+      }
     }
     if (submittedPayload.aiContextRefs !== undefined) {
       const returnedRefs = readAiContextRefs(source.aiContextRefs);

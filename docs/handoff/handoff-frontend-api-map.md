@@ -94,7 +94,7 @@
 - 任务模板编辑/生命周期：`EditLearningTaskForm` -> `/api/proxy/learning-tasks/tasks/:id*`。
   - 对应后端：`GET/PATCH /api/learning-tasks/tasks/:id`、`POST /publish`、`POST /archive`。
   - 内容 PATCH 逐字段提交净变化。标题和知识模块比较 trim 值，描述逐字比较。未改的课程分类或可见性省略，从具体分类改为未分类发空串。评阅标准只按可编辑的 notes 判断变化，未改时省略整个 `rubric`，改动时以 `{notes: …}` 或清空用的 `{}` 替换。生命周期走独立入口，普通 `409` 提示刷新后再操作。权限与状态合同见 [Backend API Learning Tasks](./handoff-backend-api-map.md#learning-tasks)。
-  - 教师模板类型及 create/detail/update/list 适配保留 `aiContextRefs`。创建页面省略引用，编辑仅在引用语义改变时发送完整数组，显式 `[]` 清空。确认保存时验证目标 ID、正式表单字段及引用。显式提交引用须与回包相符，省略引用时采用回包中的最新合法引用。完整字段、验证与快照合同见 [Backend DTO ZIP 资料引用配置](./handoff-backend-dto-cheatsheet.md#zip-资料引用配置)。课堂公开接口及学生消费不补取教师模板资料。
+  - 教师模板类型及 create/detail/update/list 适配保留 `aiContextRefs`。创建页面省略引用，编辑仅在引用语义改变时发送完整数组，显式 `[]` 清空。确认保存时验证目标 ID、正式表单字段及引用。省略 `rubric` 的保存或无 body 的生命周期操作不因其 `notes` 类型否定成功；显式提交文字或清空则按原始回执核对，不靠展示 mapper 确认空对象。显式提交引用须与回包相符，省略引用时采用回包中的最新合法引用。完整字段、验证与快照合同见 [Backend DTO ZIP 资料引用配置](./handoff-backend-dto-cheatsheet.md#zip-资料引用配置)。课堂公开接口及学生消费不补取教师模板资料。
   - `difficulty` 的写入 UI 仅有四状态，由 `lib/learning-tasks/difficulty.ts` 维护：未设置 `""`、基础 `easy`、进阶 `medium`、挑战 `hard`；后端写入约束见 [Task template DTO](./handoff-backend-dto-cheatsheet.md#task-template-dto--response-family)。创建未选时省略字段，选定时发送英文值；编辑未变省略，明确清空发送 `difficulty:""`，不发送 null 或自定义值。编辑下拉框不提供动态旧值选项，意外未知初值映射为未设置，未改难度时仍省略，不随标题修改隐式清理数据库。成功创建重置难度，编辑成功按正式响应同步，失败保留草稿。
   - 模板顶层 `difficulty` 原值进入模板 view model，mapper 不转换或改写上游数据，raw 引用保持；表单只读、模板列表、发布选择及师生课堂详情复用同一安全显示函数：只有准确三档显示基础/进阶/挑战，缺失、null、空白、未知字符串或非法类型统一显示未设置。不做别名、大小写或自动判级，也不将安全显示回写数据库。难度只用于教学定位，不影响评阅标准或统计校正。
 - 班级发布候选：`PublishClassroomTaskForm` -> `/api/proxy/classrooms/:id/publishable-task-templates`。
