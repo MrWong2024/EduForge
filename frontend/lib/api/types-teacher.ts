@@ -1020,7 +1020,12 @@ export const toCourseDetailResponse = (
   const record = asRecord(payload);
   const dataRecord = asRecord(safeGet(record, "data", undefined));
   const source = Object.keys(dataRecord).length > 0 ? dataRecord : record;
-  return toCourseSummary(source);
+  const { name, term } = source;
+  return {
+    ...toCourseSummary(source),
+    name: typeof name === "string" && name.trim() ? name : undefined,
+    term: typeof term === "string" && term.trim() ? term : undefined,
+  };
 };
 
 export const toCourseUpdateResponse = (

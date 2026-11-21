@@ -65,6 +65,7 @@ npm run build
 - 纯展示映射、序列化、资格判断等逻辑如果可以脱离 React/Browser 独立证明，应优先复用现有 contracts runner，不因假设未来需求新增依赖或并行 runner。
 - `ui-display.contract.spec.ts` 负责按领域划分的中文状态、问题类型/严重程度/预设反馈标签的“英文 value - 中文”双语及来源中文显示、空缺/非法/未知值、选项 value/顺序和输入不变、标签 helper 与 label 一致且无重复前缀，以及原始错误内部提取与最终业务 summary 的边界；复用公开消息适配验证版本冲突、迟交与冷却等提示保留，不证明 Browser 页面流程。
 - 同次提交修改的严格详情/资格解析、原文请求白名单和草稿版本判断，以及教师/AI 反馈分类、各组时间倒序与输入不变、未知/缺失来源保留和空集合区分，由 `text-task-adapters.contract.spec.ts` 负责；AI 展示版本与未知结果资格由 `submission-ai-review.contract.spec.ts` 负责。师生草稿在真实刷新/冲突中的保留与显式核对操作由第 8 节 Agent-assisted smoke 负责，权限、真实竞争与持久终态引用后端 `submission-edit.e2e-spec.ts`，不新增 scripted UI 回归或组件快照。
+- `course-edit.contract.spec.ts` 通过生产课程详情解析器和 `lib/course-edit.ts` 的 `buildCourseEditPatch` 验证合法文本原文、必填校验、逐字段净变化请求及分类省略/清空，并区分非法输入与无净变化；expected 使用独立写定的样例。真实输入框初值、按钮及 Enter 不发无变化请求、旧页面分别保存后保留另一字段与成功导航，由第 8 节 Agent-assisted Browser smoke 承担，不能由纯合同或直接 API 调用替代。
 - `task-ai-context-refs.contract.spec.ts` 负责教师模板引用适配、结构拒绝、路径/顺序保持、仅格式化不改变语义、PATCH 省略/清空与响应基准、明确作者及状态门禁；expected 来自任务约束与 Backend DTO，不读取 ZIP 或启动服务。
 - `task-rubric.contract.spec.ts` 通过生产表单与展示调用的纯 helper 验证 notes-only 请求构造、创建空白省略与编辑清空、中文多行及首尾 trim、只读/列表填写状态和候选缺字段提示；expected 来自评阅标准文字合同，不证明真实表单连续保存、刷新或发布快照，这些事实由当次 Agent-assisted smoke 负责。
 - `task-template-edit.contract.spec.ts` 负责模板描述保真、逐字段净变化 PATCH 和正式回执确认。真实页面中创建后重开、旧标签页分别保存、后台更换引用后成功同步，以及三个操作的可见冲突提示由第 8 节 Agent-assisted 验收承担。请求及回执合同见 [Frontend API Map](./handoff-frontend-api-map.md#33-teacher-任务--提交--反馈)。

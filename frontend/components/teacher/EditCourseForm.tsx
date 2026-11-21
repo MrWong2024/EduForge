@@ -9,13 +9,9 @@ import { buildErrorDescription, extractRawDetail } from "@/lib/api/error-present
 import {
   type CourseDetailResponse,
   toCourseUpdateResponse,
-  type UpdateCourseRequest,
 } from "@/lib/api/types-teacher";
-import {
-  normalizeTaskCourseLabel,
-  TASK_COURSE_LABEL_FORM_OPTIONS,
-  TASK_COURSE_LABEL_UNCLASSIFIED,
-} from "@/lib/learning-tasks/course-labels";
+import { buildCourseEditPatch, toCourseEditFields } from "@/lib/course-edit";
+import { TASK_COURSE_LABEL_FORM_OPTIONS } from "@/lib/learning-tasks/course-labels";
 import { paths } from "@/lib/routes/paths";
 
 type EditCourseFormProps = {
@@ -49,26 +45,24 @@ const getUpdateErrorSummary = (status: number): string => {
 
 export function EditCourseForm({ courseId, initialCourse }: EditCourseFormProps) {
   const router = useRouter();
-  const [code, setCode] = useState(initialCourse.code ?? "");
-  const [name, setName] = useState(initialCourse.name ?? "");
-  const [term, setTerm] = useState(initialCourse.term ?? "");
-  const [courseLabel, setCourseLabel] = useState(
-    initialCourse.courseLabel && initialCourse.courseLabel !== TASK_COURSE_LABEL_UNCLASSIFIED
-      ? initialCourse.courseLabel
-      : ""
-  );
+  const [baseline] = useState(() => toCourseEditFields(initialCourse));
+  const [code, setCode] = useState(baseline.code);
+  const [name, setName] = useState(baseline.name);
+  const [term, setTerm] = useState(baseline.term);
+  const [courseLabel, setCourseLabel] = useState(baseline.courseLabel);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [errorState, setErrorState] = useState<EditCourseFormErrorState | null>(null);
+  const requestBody = buildCourseEditPatch(baseline, { code, name, term, courseLabel });
+  const isUnchanged = requestBody !== null && Object.keys(requestBody).length === 0;
 
   const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    const trimmedCode = code.trim();
-    const trimmedName = name.trim();
-    const trimmedTerm = term.trim();
-    const normalizedCourseLabel = normalizeTaskCourseLabel(courseLabel);
+    if (isSubmitting || isUnchanged) {
+      return;
+    }
 
-    if (!trimmedCode || !trimmedName || !trimmedTerm) {
+    if (!requestBody) {
       setErrorState({
         description: "请填写课程代码、课程名称和学期。",
       });
@@ -78,13 +72,6 @@ export function EditCourseForm({ courseId, initialCourse }: EditCourseFormProps)
     setIsSubmitting(true);
     setSuccessMessage(null);
     setErrorState(null);
-
-    const requestBody: UpdateCourseRequest = {
-      code: trimmedCode,
-      name: trimmedName,
-      term: trimmedTerm,
-      courseLabel: normalizedCourseLabel ?? "",
-    };
 
     try {
       const payload = await fetchJson<unknown>(`courses/${encodeURIComponent(courseId)}`, {
@@ -176,7 +163,7 @@ export function EditCourseForm({ courseId, initialCourse }: EditCourseFormProps)
         <div className="md:col-span-4 flex flex-wrap items-center gap-3">
           <button
             type="submit"
-            disabled={isSubmitting}
+            disabled={isSubmitting || isUnchanged}
             className="rounded-md bg-zinc-900 px-4 py-2 text-sm font-medium text-white disabled:cursor-not-allowed disabled:bg-zinc-400"
           >
             {isSubmitting ? "保存中..." : "保存修改"}
