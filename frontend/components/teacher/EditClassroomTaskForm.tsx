@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { startTransition, useMemo, useOptimistic, useState } from "react";
 import { useRouter } from "next/navigation";
 import { ErrorState } from "@/components/blocks/ErrorState";
 import { BrowserFetchJsonError, fetchJson } from "@/lib/api/browser-client";
@@ -8,7 +8,8 @@ import { buildErrorDescription, extractRawDetail } from "@/lib/api/error-present
 import { normalizeClassroomTaskStatus } from "@/lib/api/types-teacher";
 import {
   buildClassroomTaskSettingsRequest,
-  toClassroomTaskDueAtLocalValue,
+  readSavedClassroomTaskSettings,
+  toClassroomTaskSettingsBaseline,
   type ClassroomTaskSettingsDraft,
 } from "@/lib/classroom-task-settings";
 
@@ -44,6 +45,9 @@ export function EditClassroomTaskForm({
     dueAtLocal: "",
     allowLate: true,
   });
+  const [openBaseline, setOpenBaseline] = useOptimistic(
+    toClassroomTaskSettingsBaseline({ dueAt, allowLate }),
+  );
 
   const statusValue = normalizeClassroomTaskStatus(status) ?? "ACTIVE";
   const canEdit = Boolean(classroomTaskId) && (statusValue === "ACTIVE" || statusValue === "CLOSED");
@@ -61,13 +65,9 @@ export function EditClassroomTaskForm({
   }
 
   const handleExpand = () => {
-    const baseline = {
-      dueAtLocal: toClassroomTaskDueAtLocalValue(dueAt),
-      allowLate: typeof allowLate === "boolean" ? allowLate : true,
-    };
-    setEditingBaseline(baseline);
-    setNextDueAt(baseline.dueAtLocal);
-    setNextAllowLate(baseline.allowLate);
+    setEditingBaseline(openBaseline);
+    setNextDueAt(openBaseline.dueAtLocal);
+    setNextAllowLate(openBaseline.allowLate);
     setIsExpanded(true);
   };
 
@@ -95,7 +95,7 @@ export function EditClassroomTaskForm({
     setSuccessMessage(null);
 
     try {
-      await fetchJson<unknown>(
+      const payload = await fetchJson<unknown>(
         `classrooms/${encodeURIComponent(classroomId)}/tasks/${encodeURIComponent(classroomTaskId)}`,
         {
           method: "PATCH",
@@ -106,9 +106,18 @@ export function EditClassroomTaskForm({
           body: JSON.stringify(settingsRequest.payload),
         }
       );
+      const saved = readSavedClassroomTaskSettings(
+        payload,
+        classroomId,
+        classroomTaskId,
+      );
       setSuccessMessage("课堂任务设置已更新。");
       setIsExpanded(false);
-      router.refresh();
+      // The receipt is the opening baseline while refreshed list props are pending.
+      startTransition(() => {
+        setOpenBaseline(saved);
+        router.refresh();
+      });
     } catch (error) {
       if (error instanceof BrowserFetchJsonError) {
         const summaryByStatus: Record<number, string> = {

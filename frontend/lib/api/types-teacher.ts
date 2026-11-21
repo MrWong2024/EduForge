@@ -941,13 +941,27 @@ export const toClassroomCreateResponse = (
   };
 };
 
+const getClassroomDetailSource = (payload: unknown) => {
+  const record = asRecord(payload);
+  const dataRecord = asRecord(safeGet(record, "data", undefined));
+  return Object.keys(dataRecord).length > 0 ? dataRecord : record;
+};
+
 export const toClassroomDetailResponse = (
   payload: unknown,
 ): ClassroomDetailResponse => {
-  const record = asRecord(payload);
-  const dataRecord = asRecord(safeGet(record, "data", undefined));
-  const source = Object.keys(dataRecord).length > 0 ? dataRecord : record;
-  return toClassroomSummary(source);
+  return toClassroomSummary(getClassroomDetailSource(payload));
+};
+
+export const toClassroomEditDetailResponse = (
+  payload: unknown,
+): ClassroomDetailResponse => {
+  const source = getClassroomDetailSource(payload);
+  const name = source.name;
+  return {
+    ...toClassroomSummary(source),
+    name: typeof name === "string" && name.trim() ? name : undefined,
+  };
 };
 
 export const toClassroomUpdateResponse = (

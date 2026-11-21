@@ -9,8 +9,11 @@ import { buildErrorDescription, extractRawDetail } from "@/lib/api/error-present
 import {
   type ClassroomDetailResponse,
   toClassroomUpdateResponse,
-  type UpdateClassroomRequest,
 } from "@/lib/api/types-teacher";
+import {
+  buildClassroomEditPatch,
+  toClassroomNameInputValue,
+} from "@/lib/classroom-edit";
 import { paths } from "@/lib/routes/paths";
 import { toDisplayText } from "@/lib/ui/format";
 import { getClassroomStatusLabel } from "@/lib/ui/status";
@@ -82,17 +85,22 @@ const getClassroomCourseDisplay = (
 
 export function EditClassroomForm({ classroomId, initialClassroom }: EditClassroomFormProps) {
   const router = useRouter();
-  const [name, setName] = useState(initialClassroom.name ?? "");
+  const [baselineName] = useState(initialClassroom.name ?? "");
+  const [name, setName] = useState(() => toClassroomNameInputValue(baselineName));
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [errorState, setErrorState] = useState<EditClassroomFormErrorState | null>(null);
   const courseDisplay = getClassroomCourseDisplay(initialClassroom);
+  const requestBody = buildClassroomEditPatch(baselineName, name);
+  const isUnchanged = requestBody !== null && Object.keys(requestBody).length === 0;
 
   const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    const trimmedName = name.trim();
+    if (isSubmitting || isUnchanged) {
+      return;
+    }
 
-    if (!trimmedName) {
+    if (!requestBody) {
       setErrorState({
         title: "更新班级失败",
         description: "请填写班级名称。",
@@ -103,10 +111,6 @@ export function EditClassroomForm({ classroomId, initialClassroom }: EditClassro
     setIsSubmitting(true);
     setSuccessMessage(null);
     setErrorState(null);
-
-    const requestBody: UpdateClassroomRequest = {
-      name: trimmedName,
-    };
 
     try {
       const payload = await fetchJson<unknown>(`classrooms/${encodeURIComponent(classroomId)}`, {
@@ -174,7 +178,7 @@ export function EditClassroomForm({ classroomId, initialClassroom }: EditClassro
         <div className="md:col-span-2 flex flex-wrap items-center gap-3">
           <button
             type="submit"
-            disabled={isSubmitting}
+            disabled={isSubmitting || isUnchanged}
             className="rounded-md bg-zinc-900 px-4 py-2 text-sm font-medium text-white disabled:cursor-not-allowed disabled:bg-zinc-400"
           >
             {isSubmitting ? "保存中..." : "保存修改"}

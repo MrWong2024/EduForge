@@ -1,4 +1,8 @@
-import type { UpdateClassroomTaskRequest } from "./api/types-teacher";
+import {
+  toClassroomTask,
+  type ClassroomTask,
+  type UpdateClassroomTaskRequest,
+} from "./api/types-teacher";
 
 export type ClassroomTaskSettingsDraft = {
   dueAtLocal: string;
@@ -25,6 +29,28 @@ export function toClassroomTaskDueAtLocalValue(dueAt?: string): string {
   }
   const date = new Date(dueAt);
   return Number.isNaN(date.getTime()) ? "" : formatLocalMinute(date);
+}
+
+export function toClassroomTaskSettingsBaseline({
+  dueAt,
+  allowLate,
+}: Pick<ClassroomTask, "dueAt" | "allowLate">): ClassroomTaskSettingsDraft {
+  return {
+    dueAtLocal: toClassroomTaskDueAtLocalValue(dueAt),
+    allowLate: allowLate ?? true,
+  };
+}
+
+export function readSavedClassroomTaskSettings(
+  payload: unknown,
+  classroomId: string,
+  classroomTaskId: string,
+): ClassroomTaskSettingsDraft {
+  const task = toClassroomTask(payload);
+  if (task.classroomId !== classroomId || task.id !== classroomTaskId) {
+    throw new Error("Unexpected classroom task settings response");
+  }
+  return toClassroomTaskSettingsBaseline(task);
 }
 
 export function buildClassroomTaskSettingsRequest(

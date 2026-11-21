@@ -1,6 +1,7 @@
 import { expect, test } from "@playwright/test";
 import {
   buildClassroomTaskSettingsRequest,
+  readSavedClassroomTaskSettings,
   toClassroomTaskDueAtLocalValue,
   type ClassroomTaskSettingsDraft,
 } from "../../lib/classroom-task-settings";
@@ -102,6 +103,57 @@ test("untouched and restored drafts produce no request", () => {
       { dueAtLocal: "", allowLate: false },
     ),
   ).toStrictEqual({ kind: "unchanged" });
+});
+
+test("reopening uses both values from the saved instance response", () => {
+  const saved = readSavedClassroomTaskSettings(
+    {
+      id: "task-1",
+      classroomId: "class-1",
+      dueAt: "2026-11-22T01:43:00.000Z",
+      settings: { allowLate: false },
+    },
+    "class-1",
+    "task-1",
+  );
+
+  expect(saved).toStrictEqual({
+    dueAtLocal: "2026-11-22T09:43",
+    allowLate: false,
+  });
+  expect(buildClassroomTaskSettingsRequest(saved, { ...saved })).toStrictEqual({
+    kind: "unchanged",
+  });
+  expect(
+    buildClassroomTaskSettingsRequest(saved, { ...saved, allowLate: true }),
+  ).toStrictEqual({ kind: "changed", payload: { allowLate: true } });
+});
+
+test("an absent deadline in the saved instance becomes an empty opening value", () => {
+  const saved = readSavedClassroomTaskSettings(
+    { id: "task-1", classroomId: "class-1", settings: { allowLate: false } },
+    "class-1",
+    "task-1",
+  );
+
+  expect(saved).toStrictEqual({ dueAtLocal: "", allowLate: false });
+  expect(buildClassroomTaskSettingsRequest(saved, { ...saved })).toStrictEqual({
+    kind: "unchanged",
+  });
+});
+
+test("a response for a different instance cannot supply the opening baseline", () => {
+  expect(() =>
+    readSavedClassroomTaskSettings(
+      {
+        id: "other-task",
+        classroomId: "class-1",
+        settings: { allowLate: false },
+      },
+      "class-1",
+      "task-1",
+    ),
+  ).toThrow("Unexpected classroom task settings response");
 });
 
 for (const dueAtLocal of [

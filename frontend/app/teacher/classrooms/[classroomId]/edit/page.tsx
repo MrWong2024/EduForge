@@ -4,7 +4,7 @@ import { PageHeader } from "@/components/blocks/PageHeader";
 import { EditClassroomForm } from "@/components/teacher/EditClassroomForm";
 import { fetchJson, FetchJsonError } from "@/lib/api/client";
 import { buildErrorDescription, extractRawDetail } from "@/lib/api/error-presenter";
-import { toClassroomDetailResponse } from "@/lib/api/types-teacher";
+import { toClassroomEditDetailResponse } from "@/lib/api/types-teacher";
 import { paths } from "@/lib/routes/paths";
 import { getCommonErrorSummary } from "@/lib/ui/status";
 import { toDisplayText } from "@/lib/ui/format";
@@ -17,7 +17,7 @@ type EditClassroomViewModel =
   | {
       mode: "ready";
       classroomId: string;
-      classroom: ReturnType<typeof toClassroomDetailResponse>;
+      classroom: ReturnType<typeof toClassroomEditDetailResponse>;
     }
   | { mode: "error"; status: number; description: string };
 
@@ -47,7 +47,7 @@ export default async function EditClassroomPage({ params }: EditClassroomPagePro
     viewModel = {
       mode: "ready",
       classroomId,
-      classroom: toClassroomDetailResponse(payload),
+      classroom: toClassroomEditDetailResponse(payload),
     };
   } catch (error) {
     if (error instanceof FetchJsonError) {
