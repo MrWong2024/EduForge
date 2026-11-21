@@ -55,6 +55,69 @@ test("an untouched draft has no PATCH keys", () => {
   expect(buildCourseEditPatch(baseline, { ...baseline })).toStrictEqual({});
 });
 
+test("course CRLF name restored in a single-line input leaves only a term PATCH", () => {
+  const loaded = toCourseEditFields(
+    toCourseDetailResponse({
+      ...courseResponse,
+      name: " 程序\r\n设计基础 ",
+    }),
+  );
+
+  expect(loaded.name).toBe(" 程序\r\n设计基础 ");
+  expect(
+    buildCourseEditPatch(loaded, {
+      ...loaded,
+      name: " 程序设计基础 ",
+      term: " 2027 春 ",
+    }),
+  ).toStrictEqual({ term: " 2027 春 " });
+  expect(
+    buildCourseEditPatch(loaded, { ...loaded, name: " 程序设计基础 " }),
+  ).toStrictEqual({});
+  expect(loaded.name).toBe(" 程序\r\n设计基础 ");
+});
+
+for (const { field, original, restored } of [
+  {
+    field: "code",
+    original: " C\rS\n1\r\n01 ",
+    restored: "  CS101 \t",
+  },
+  {
+    field: "term",
+    original: " 2026\r春\n第\r\n一学期 ",
+    restored: " 2026春第一学期 ",
+  },
+] as const) {
+  test(`restored single-line course ${field} removes internal CR and LF without adding spaces`, () => {
+    const loaded = toCourseEditFields(
+      toCourseDetailResponse({ ...courseResponse, [field]: original }),
+    );
+
+    expect(
+      buildCourseEditPatch(loaded, { ...loaded, [field]: restored }),
+    ).toStrictEqual({});
+  });
+}
+
+test("course name and term boundary-space edits remain significant after removing display newlines", () => {
+  const loaded = toCourseEditFields(
+    toCourseDetailResponse({
+      ...courseResponse,
+      name: " 程序\r\n设计基础 ",
+      term: " 2026\r春 ",
+    }),
+  );
+
+  expect(
+    buildCourseEditPatch(loaded, {
+      ...loaded,
+      name: "程序设计基础",
+      term: "2026春",
+    }),
+  ).toStrictEqual({ name: "程序设计基础", term: "2026春" });
+});
+
 const singleFieldEdits = [
   {
     field: "code",

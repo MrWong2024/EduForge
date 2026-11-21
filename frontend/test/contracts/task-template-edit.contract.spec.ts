@@ -62,6 +62,188 @@ const published: TaskTemplateEditDraft = {
   aiContextText: JSON.stringify(latestRefs, null, 2),
 };
 
+const newlineReceipt = {
+  ...receipt,
+  title: " 原\r\n标\r题\n ",
+  description: "  原文第一行\r\n    内部缩进\r末行\n\n",
+  knowledgeModule: " 原\r知\n识\r\n模块 ",
+  rubric: {
+    notes: "  旧评阅文字\r\n    内部说明\r末行\n\n",
+    criterion: { correctness: 70 },
+  },
+};
+const newlineBaseline = Object.freeze(
+  toTaskTemplateEditDraft(toLearningTaskDetailResponse(newlineReceipt)),
+);
+
+test("template CRLF description and notes restored in textareas leave only knowledgeModule", () => {
+  expect(newlineBaseline.description).toBe(
+    "  原文第一行\r\n    内部缩进\r末行\n\n",
+  );
+  expect(newlineBaseline.rubricNotes).toBe(
+    "  旧评阅文字\r\n    内部说明\r末行\n\n",
+  );
+  expect(
+    buildTaskTemplateEditRequest(newlineBaseline, {
+      ...newlineBaseline,
+      description: "  原文第一行\n    内部缩进\n末行\n\n",
+      rubricNotes: "  旧评阅文字\n    内部说明\n末行\n\n",
+      knowledgeModule: "  新知识模块  ",
+    }),
+  ).toStrictEqual({
+    kind: "changed",
+    payload: { knowledgeModule: "新知识模块" },
+  });
+});
+
+test("restored template multiline text omits the complete rubric and produces no PATCH", () => {
+  expect(
+    buildTaskTemplateEditRequest(newlineBaseline, {
+      ...newlineBaseline,
+      description: "  原文第一行\n    内部缩进\n末行\n\n",
+      rubricNotes: "  旧评阅文字\n    内部说明\n末行\n\n",
+    }),
+  ).toStrictEqual({ kind: "unchanged" });
+});
+
+for (const { field, restored } of [
+  { field: "title", restored: "  原标题  " },
+  { field: "knowledgeModule", restored: " 原知识模块 " },
+] as const) {
+  test(`restored single-line template ${field} removes CR and LF before its existing trim comparison`, () => {
+    expect(
+      buildTaskTemplateEditRequest(newlineBaseline, {
+        ...newlineBaseline,
+        [field]: restored,
+      }),
+    ).toStrictEqual({ kind: "unchanged" });
+  });
+}
+
+for (const { label, value, expected } of [
+  {
+    label: "adding an internal line",
+    value: "  原文第一行\n    内部缩进\n新增一行\n末行\n\n",
+    expected: {
+      description: "  原文第一行\n    内部缩进\n新增一行\n末行\n\n",
+    },
+  },
+  {
+    label: "removing an internal line",
+    value: "  原文第一行\n末行\n\n",
+    expected: { description: "  原文第一行\n末行\n\n" },
+  },
+  {
+    label: "changing indentation",
+    value: "  原文第一行\n  内部缩进\n末行\n\n",
+    expected: { description: "  原文第一行\n  内部缩进\n末行\n\n" },
+  },
+  {
+    label: "adding a trailing blank line",
+    value: "  原文第一行\n    内部缩进\n末行\n\n\n",
+    expected: { description: "  原文第一行\n    内部缩进\n末行\n\n\n" },
+  },
+  {
+    label: "removing a trailing blank line",
+    value: "  原文第一行\n    内部缩进\n末行\n",
+    expected: { description: "  原文第一行\n    内部缩进\n末行\n" },
+  },
+  {
+    label: "editing raw text with mixed line endings",
+    value: "  新首行\r\n    原样缩进\r末行\n\n",
+    expected: { description: "  新首行\r\n    原样缩进\r末行\n\n" },
+  },
+]) {
+  test(`${label} remains a verbatim description-only PATCH`, () => {
+    expect(
+      buildTaskTemplateEditRequest(newlineBaseline, {
+        ...newlineBaseline,
+        description: value,
+      }),
+    ).toStrictEqual({ kind: "changed", payload: expected });
+  });
+}
+
+test("a real multiline rubric edit keeps its existing trim-only serialization", () => {
+  expect(
+    buildTaskTemplateEditRequest(newlineBaseline, {
+      ...newlineBaseline,
+      rubricNotes: "  新\r\n评阅\r文字\n保留  ",
+    }),
+  ).toStrictEqual({
+    kind: "changed",
+    payload: { rubric: { notes: "新\r\n评阅\r文字\n保留" } },
+  });
+});
+
+test("clearing newline-containing rubric notes still sends the empty object", () => {
+  expect(
+    buildTaskTemplateEditRequest(newlineBaseline, {
+      ...newlineBaseline,
+      rubricNotes: " \r\n \r \n\t ",
+    }),
+  ).toStrictEqual({ kind: "changed", payload: { rubric: {} } });
+});
+
+test("publishing adopts receipt description and notes after newline-only restoration while keeping a real local title draft", () => {
+  const publishedDraft = toTaskTemplateEditDraft(
+    toLearningTaskUpdateResponse({
+      ...receipt,
+      title: "发布回执新标题",
+      description: "  发布回执描述\r\n    新缩进\r\n",
+      rubric: {
+        notes: " 发布回执\r\n新评阅 ",
+        criterion: { correctness: 90 },
+      },
+      status: "PUBLISHED",
+    }),
+  );
+  const reconciled = reconcileTaskTemplatePublishedDraft(
+    newlineBaseline,
+    {
+      ...newlineBaseline,
+      title: "  本地未保存标题  ",
+      description: "  原文第一行\n    内部缩进\n末行\n\n",
+      rubricNotes: "  旧评阅文字\n    内部说明\n末行\n\n",
+    },
+    publishedDraft,
+  );
+
+  expect(reconciled.title).toBe("  本地未保存标题  ");
+  expect(reconciled.description).toBe("  发布回执描述\r\n    新缩进\r\n");
+  expect(reconciled.rubricNotes).toBe(" 发布回执\r\n新评阅 ");
+  expect(
+    buildTaskTemplateEditRequest(publishedDraft, reconciled),
+  ).toStrictEqual({
+    kind: "changed",
+    payload: { title: "本地未保存标题" },
+  });
+});
+
+test("publishing keeps real local description and rubric drafts verbatim while adopting a restored title", () => {
+  const reconciled = reconcileTaskTemplatePublishedDraft(
+    newlineBaseline,
+    {
+      ...newlineBaseline,
+      title: "原标题",
+      description: "  原文第一行\n  本地缩进\n末行\n\n\n",
+      rubricNotes: "  本地评阅\r\n    保留缩进\n ",
+    },
+    published,
+  );
+
+  expect(reconciled.title).toBe("发布时的远端标题");
+  expect(reconciled.description).toBe("  原文第一行\n  本地缩进\n末行\n\n\n");
+  expect(reconciled.rubricNotes).toBe("  本地评阅\r\n    保留缩进\n ");
+  expect(buildTaskTemplateEditRequest(published, reconciled)).toStrictEqual({
+    kind: "changed",
+    payload: {
+      description: "  原文第一行\n  本地缩进\n末行\n\n\n",
+      rubric: { notes: "本地评阅\r\n    保留缩进" },
+    },
+  });
+});
+
 test("detail, create and update adapters preserve description text through the edit draft", () => {
   for (const adapt of [
     toLearningTaskDetailResponse,

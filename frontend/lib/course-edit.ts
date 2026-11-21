@@ -2,6 +2,7 @@ import type {
   CourseDetailResponse,
   UpdateCourseRequest,
 } from "@/lib/api/types-teacher";
+import { toSingleLineInputValue } from "./form-text-values";
 import {
   normalizeTaskCourseLabel,
   TASK_COURSE_LABEL_UNCLASSIFIED,
@@ -42,9 +43,18 @@ export function buildCourseEditPatch(
 
   const courseLabel = toEditCourseLabel(draft.courseLabel);
   const patch: UpdateCourseRequest = {};
-  if (code !== baseline.code.trim()) patch.code = code;
-  if (name !== baseline.name) patch.name = name;
-  if (term !== baseline.term) patch.term = term;
+  if (
+    toSingleLineInputValue(draft.code).trim() !==
+    toSingleLineInputValue(baseline.code).trim()
+  ) {
+    patch.code = code;
+  }
+  if (toSingleLineInputValue(name) !== toSingleLineInputValue(baseline.name)) {
+    patch.name = name;
+  }
+  if (toSingleLineInputValue(term) !== toSingleLineInputValue(baseline.term)) {
+    patch.term = term;
+  }
   if (courseLabel !== toEditCourseLabel(baseline.courseLabel))
     patch.courseLabel = courseLabel;
   return patch;

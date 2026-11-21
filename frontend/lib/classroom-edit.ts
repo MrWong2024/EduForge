@@ -1,7 +1,7 @@
 import type { UpdateClassroomRequest } from "@/lib/api/types-teacher";
+import { toSingleLineInputValue } from "./form-text-values";
 
-export const toClassroomNameInputValue = (name: string): string =>
-  name.replace(/[\r\n]/g, "");
+export const toClassroomNameInputValue = toSingleLineInputValue;
 
 export function buildClassroomEditPatch(
   baselineName: string,

@@ -4,6 +4,10 @@ import {
   type UpdateLearningTaskRequest,
 } from "../api/types-teacher";
 import {
+  toMultilineInputValue,
+  toSingleLineInputValue,
+} from "../form-text-values";
+import {
   buildAiContextRefsPatch,
   formatAiContextRefs,
   parseAiContextRefsJson,
@@ -92,16 +96,23 @@ function diffTaskTemplateEditDraft(
   })();
   return {
     changed: {
-      title: draft.title.trim() !== baseline.title.trim(),
-      description: draft.description !== baseline.description,
+      title:
+        toSingleLineInputValue(draft.title).trim() !==
+        toSingleLineInputValue(baseline.title).trim(),
+      description:
+        toMultilineInputValue(draft.description) !==
+        toMultilineInputValue(baseline.description),
       knowledgeModule:
-        draft.knowledgeModule.trim() !== baseline.knowledgeModule.trim(),
+        toSingleLineInputValue(draft.knowledgeModule).trim() !==
+        toSingleLineInputValue(baseline.knowledgeModule).trim(),
       courseLabel:
         courseLabelInput(draft.courseLabel) !==
         courseLabelInput(baseline.courseLabel),
       visibility: draft.visibility !== baseline.visibility,
       difficulty: difficultyPatch.difficulty !== undefined,
-      rubricNotes: draft.rubricNotes.trim() !== baseline.rubricNotes.trim(),
+      rubricNotes:
+        toMultilineInputValue(draft.rubricNotes).trim() !==
+        toMultilineInputValue(baseline.rubricNotes).trim(),
       aiContextText:
         references.kind === "invalid" ||
         references.patch.aiContextRefs !== undefined,
