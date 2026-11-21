@@ -23,6 +23,8 @@ import {
   countCodePoints,
   getSubmissionTextError,
   buildUpdateSubmissionRequest,
+  captureSubmissionEditBaseline,
+  planSubmissionEdit,
   canEditSubmission,
   isDraftRevisionCurrent,
   isSavedSubmissionRevision,
@@ -793,6 +795,380 @@ test("language labels do not replace raw request or student and teacher response
       expect(detail.raw).toBe(payload);
     }
   }
+});
+
+test("student and teacher adapters preserve every nonempty raw language string", () => {
+  for (const { language, expected } of [
+    { language: " Python ", expected: " Python " },
+    { language: " CuStOm-Lang ", expected: " CuStOm-Lang " },
+    { language: " \t\r\n ", expected: " \t\r\n " },
+  ]) {
+    const payload = {
+      content: { language, codeText: "print(1)\r\n", submissionNote: "原说明" },
+    };
+    for (const detail of [
+      toSubmissionDetailResponse(payload),
+      toTeacherDetail(payload),
+    ]) {
+      expect(detail.language).toBe(expected);
+      expect(detail.content.language).toBe(expected);
+      expect(detail.raw).toBe(payload);
+    }
+  }
+});
+
+test("editing only a submission note preserves original CRLF code in the whole request", () => {
+  const detail = toSubmissionDetailResponse({
+    contentRevision: 2,
+    editing: { canEdit: true, reason: null, message: null },
+    content: {
+      language: "python",
+      codeText: "if True:\r\n    print(1)\r\n",
+      submissionNote: "原说明",
+    },
+  });
+  const baseline = captureSubmissionEditBaseline(detail);
+  expect(baseline).not.toBeNull();
+  if (baseline === null) throw new Error("An editable baseline is required");
+
+  expect(
+    planSubmissionEdit(baseline, {
+      language: "python",
+      codeText: "if True:\n    print(1)\n",
+      submissionNote: "新说明",
+    }),
+  ).toStrictEqual({
+    expectedRevision: 2,
+    content: {
+      language: "python",
+      codeText: "if True:\r\n    print(1)\r\n",
+      submissionNote: "新说明",
+    },
+  });
+});
+
+const submissionEditSource = Object.freeze({
+  id: "submission-edit-plan",
+  studentId: "student-edit-plan",
+  contentRevision: 7,
+  editing: Object.freeze({ canEdit: true, reason: null, message: null }),
+  content: Object.freeze({
+    language: " CuStOm-Lang ",
+    codeText: "  first\r\n    second\rtail\n\n",
+    submissionNote: "  原说明\r\n    说明缩进\r末行\n\n",
+  }),
+  meta: Object.freeze({ aiUsageDeclaration: "原声明" }),
+});
+
+const captureEditBaseline = (payload: unknown = submissionEditSource) => {
+  const baseline = captureSubmissionEditBaseline(
+    toSubmissionDetailResponse(payload),
+  );
+  expect(baseline).not.toBeNull();
+  if (baseline === null) throw new Error("An editable baseline is required");
+  return Object.freeze({
+    ...baseline,
+    content: Object.freeze(baseline.content),
+  });
+};
+
+test("capturing an editable submission keeps the displayed revision and exact raw content whitelist", () => {
+  expect(captureEditBaseline()).toStrictEqual({
+    expectedRevision: 7,
+    content: {
+      language: " CuStOm-Lang ",
+      codeText: "  first\r\n    second\rtail\n\n",
+      submissionNote: "  原说明\r\n    说明缩进\r末行\n\n",
+    },
+  });
+});
+
+test("capturing an edit baseline fails closed without valid revision or explicit permission", () => {
+  for (const payload of [
+    { ...submissionEditSource, contentRevision: null },
+    { ...submissionEditSource, contentRevision: "7" },
+    {
+      ...submissionEditSource,
+      editing: {
+        canEdit: false,
+        reason: "REVIEW_STARTED",
+        message: "已进入评阅",
+      },
+    },
+    { ...submissionEditSource, editing: { canEdit: true } },
+  ]) {
+    expect(
+      captureSubmissionEditBaseline(toSubmissionDetailResponse(payload)),
+    ).toBeNull();
+  }
+});
+
+test("a nonempty whitespace-only stored language stays exact when captured and compared", () => {
+  const baseline = captureEditBaseline({
+    ...submissionEditSource,
+    content: { ...submissionEditSource.content, language: " \t " },
+  });
+
+  expect(baseline).toStrictEqual({
+    expectedRevision: 7,
+    content: {
+      language: " \t ",
+      codeText: "  first\r\n    second\rtail\n\n",
+      submissionNote: "  原说明\r\n    说明缩进\r末行\n\n",
+    },
+  });
+  expect(
+    planSubmissionEdit(baseline, {
+      language: " \t ",
+      codeText: "  first\n    second\ntail\n\n",
+      submissionNote: "  原说明\n    说明缩进\n末行\n\n",
+    }),
+  ).toBeNull();
+});
+
+test("language-only edits use exact raw spelling, case and whitespace while retaining both original textarea values", () => {
+  const baseline = captureEditBaseline();
+  for (const { language, expected } of [
+    { language: "CuStOm-Lang", expected: "CuStOm-Lang" },
+    { language: " custom-lang ", expected: " custom-lang " },
+    { language: " CuStOm-\r\nLang ", expected: " CuStOm-\r\nLang " },
+    { language: " \t ", expected: " \t " },
+    { language: "python", expected: "python" },
+  ]) {
+    expect(
+      planSubmissionEdit(baseline, {
+        language,
+        codeText: "  first\n    second\ntail\n\n",
+        submissionNote: "  原说明\n    说明缩进\n末行\n\n",
+      }),
+    ).toStrictEqual({
+      expectedRevision: 7,
+      content: {
+        language: expected,
+        codeText: "  first\r\n    second\rtail\n\n",
+        submissionNote: "  原说明\r\n    说明缩进\r末行\n\n",
+      },
+    });
+  }
+});
+
+for (const { label, codeText, submissionNote, draftCode, draftNote } of [
+  {
+    label: "CRLF",
+    codeText: "first\r\n\r\n    last\r\n",
+    submissionNote: "说明\r\n\r\n    末行\r\n",
+    draftCode: "first\n\n    last\n",
+    draftNote: "说明\n\n    末行\n",
+  },
+  {
+    label: "standalone CR",
+    codeText: "first\r\r    last\r",
+    submissionNote: "说明\r\r    末行\r",
+    draftCode: "first\n\n    last\n",
+    draftNote: "说明\n\n    末行\n",
+  },
+  {
+    label: "existing LF",
+    codeText: "first\n\n    last\n",
+    submissionNote: "说明\n\n    末行\n",
+    draftCode: "first\n\n    last\n",
+    draftNote: "说明\n\n    末行\n",
+  },
+  {
+    label: "mixed CRLF, CR and LF",
+    codeText: "first\r\n\r    middle\nlast\r\n\n",
+    submissionNote: "说明\r\n\r    中行\n末行\r\n\n",
+    draftCode: "first\n\n    middle\nlast\n\n",
+    draftNote: "说明\n\n    中行\n末行\n\n",
+  },
+  {
+    label: "LF baseline and CRLF draft",
+    codeText: "first\n\n    last\n",
+    submissionNote: "说明\n\n    末行\n",
+    draftCode: "first\r\n\r\n    last\r\n",
+    draftNote: "说明\r\n\r\n    末行\r\n",
+  },
+]) {
+  test(`unchanged multiline values with ${label} produce no edit request`, () => {
+    const baseline = captureEditBaseline({
+      ...submissionEditSource,
+      content: {
+        language: " CuStOm-Lang ",
+        codeText,
+        submissionNote,
+      },
+    });
+    const draft = Object.freeze({
+      language: " CuStOm-Lang ",
+      codeText: draftCode,
+      submissionNote: draftNote,
+    });
+
+    expect(planSubmissionEdit(baseline, draft)).toBeNull();
+  });
+}
+
+for (const { label, codeText, submissionNote, expected } of [
+  {
+    label: "code indentation",
+    codeText: "  first\n  second\ntail\n\n",
+    submissionNote: "  原说明\n    说明缩进\n末行\n\n",
+    expected: {
+      expectedRevision: 7,
+      content: {
+        language: " CuStOm-Lang ",
+        codeText: "  first\n  second\ntail\n\n",
+        submissionNote: "  原说明\r\n    说明缩进\r末行\n\n",
+      },
+    },
+  },
+  {
+    label: "code trailing blank line",
+    codeText: "  first\n    second\ntail\n\n\n",
+    submissionNote: "  原说明\n    说明缩进\n末行\n\n",
+    expected: {
+      expectedRevision: 7,
+      content: {
+        language: " CuStOm-Lang ",
+        codeText: "  first\n    second\ntail\n\n\n",
+        submissionNote: "  原说明\r\n    说明缩进\r末行\n\n",
+      },
+    },
+  },
+  {
+    label: "note indentation",
+    codeText: "  first\n    second\ntail\n\n",
+    submissionNote: "  原说明\n  说明缩进\n末行\n\n",
+    expected: {
+      expectedRevision: 7,
+      content: {
+        language: " CuStOm-Lang ",
+        codeText: "  first\r\n    second\rtail\n\n",
+        submissionNote: "  原说明\n  说明缩进\n末行\n\n",
+      },
+    },
+  },
+  {
+    label: "note trailing blank line",
+    codeText: "  first\n    second\ntail\n\n",
+    submissionNote: "  原说明\n    说明缩进\n末行\n\n\n",
+    expected: {
+      expectedRevision: 7,
+      content: {
+        language: " CuStOm-Lang ",
+        codeText: "  first\r\n    second\rtail\n\n",
+        submissionNote: "  原说明\n    说明缩进\n末行\n\n\n",
+      },
+    },
+  },
+  {
+    label: "real raw code with mixed newlines",
+    codeText: "  changed\r\n    code\rtail\n\n",
+    submissionNote: "  原说明\n    说明缩进\n末行\n\n",
+    expected: {
+      expectedRevision: 7,
+      content: {
+        language: " CuStOm-Lang ",
+        codeText: "  changed\r\n    code\rtail\n\n",
+        submissionNote: "  原说明\r\n    说明缩进\r末行\n\n",
+      },
+    },
+  },
+]) {
+  test(`a real ${label} edit keeps the current raw draft and the other original fields`, () => {
+    expect(
+      planSubmissionEdit(captureEditBaseline(), {
+        language: " CuStOm-Lang ",
+        codeText,
+        submissionNote,
+      }),
+    ).toStrictEqual(expected);
+  });
+}
+
+test("explicitly clearing a submission note sends an empty string with the original code and language", () => {
+  expect(
+    planSubmissionEdit(captureEditBaseline(), {
+      language: " CuStOm-Lang ",
+      codeText: "  first\n    second\ntail\n\n",
+      submissionNote: "",
+    }),
+  ).toStrictEqual({
+    expectedRevision: 7,
+    content: {
+      language: " CuStOm-Lang ",
+      codeText: "  first\r\n    second\rtail\n\n",
+      submissionNote: "",
+    },
+  });
+});
+
+test("explicitly adopting a checked baseline makes an equivalent preserved draft a no-op", () => {
+  const openingBaseline = captureEditBaseline();
+  const draft = Object.freeze({
+    language: "python",
+    codeText: "fresh\n    server\n",
+    submissionNote: "新的\n说明\n",
+  });
+  const checkedBaseline = captureEditBaseline({
+    ...submissionEditSource,
+    contentRevision: 11,
+    content: {
+      language: "python",
+      codeText: "fresh\r\n    server\r\n",
+      submissionNote: "新的\r说明\r",
+    },
+  });
+
+  expect(openingBaseline.expectedRevision).toBe(7);
+  expect(openingBaseline.content.codeText).toBe(
+    "  first\r\n    second\rtail\n\n",
+  );
+  expect(checkedBaseline).toStrictEqual({
+    expectedRevision: 11,
+    content: {
+      language: "python",
+      codeText: "fresh\r\n    server\r\n",
+      submissionNote: "新的\r说明\r",
+    },
+  });
+  expect(planSubmissionEdit(checkedBaseline, draft)).toBeNull();
+  expect(draft).toStrictEqual({
+    language: "python",
+    codeText: "fresh\n    server\n",
+    submissionNote: "新的\n说明\n",
+  });
+});
+
+test("explicitly adopting a newer baseline keeps a different draft and uses its revision and untouched raw fields", () => {
+  const draft = Object.freeze({
+    language: "pyTHon ",
+    codeText: "remote\n    code\ntail\n\n",
+    submissionNote: "  本地未保存\n说明\n\n",
+  });
+  const checkedBaseline = captureEditBaseline({
+    ...submissionEditSource,
+    contentRevision: 12,
+    content: {
+      language: "pyTHon ",
+      codeText: "remote\r\n    code\rtail\n\n",
+      submissionNote: "服务端\r\n说明\r尾行\n",
+    },
+  });
+
+  expect(planSubmissionEdit(checkedBaseline, draft)).toStrictEqual({
+    expectedRevision: 12,
+    content: {
+      language: "pyTHon ",
+      codeText: "remote\r\n    code\rtail\n\n",
+      submissionNote: "  本地未保存\n说明\n\n",
+    },
+  });
+  expect(draft).toStrictEqual({
+    language: "pyTHon ",
+    codeText: "remote\n    code\ntail\n\n",
+    submissionNote: "  本地未保存\n说明\n\n",
+  });
 });
 
 test("late duration keeps the existing second, minute, hour and day boundaries", () => {

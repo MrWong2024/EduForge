@@ -1,5 +1,6 @@
 import { paths } from "../routes/paths";
 import { getCommonErrorSummary } from "../ui/status";
+import { toMultilineInputValue } from "../form-text-values";
 import type {
   CreateSubmissionRequest,
   SubmissionDetailResponse,
@@ -60,6 +61,44 @@ export function buildUpdateSubmissionRequest(
   if (!isValidContentRevision(expectedRevision))
     throw new Error("A valid displayed content revision is required");
   return { expectedRevision, content: { codeText, language, submissionNote } };
+}
+
+export function captureSubmissionEditBaseline(
+  detail: SubmissionDetailResponse,
+): UpdateSubmissionRequest | null {
+  const revision = detail.contentRevision;
+  if (!isValidContentRevision(revision) || detail.editing.canEdit !== true)
+    return null;
+
+  return buildUpdateSubmissionRequest(
+    revision,
+    detail.content.codeText ?? "",
+    detail.content.language ?? "auto",
+    detail.content.submissionNote ?? "",
+  );
+}
+
+export function planSubmissionEdit(
+  baseline: Readonly<UpdateSubmissionRequest>,
+  draft: Readonly<UpdateSubmissionRequest["content"]>,
+): UpdateSubmissionRequest | null {
+  const original = baseline.content;
+  const codeChanged =
+    toMultilineInputValue(draft.codeText) !==
+    toMultilineInputValue(original.codeText);
+  const noteChanged =
+    toMultilineInputValue(draft.submissionNote) !==
+    toMultilineInputValue(original.submissionNote);
+
+  if (draft.language === original.language && !codeChanged && !noteChanged)
+    return null;
+
+  return buildUpdateSubmissionRequest(
+    baseline.expectedRevision,
+    codeChanged ? draft.codeText : original.codeText,
+    draft.language,
+    noteChanged ? draft.submissionNote : original.submissionNote,
+  );
 }
 
 export const isDraftRevisionCurrent = (

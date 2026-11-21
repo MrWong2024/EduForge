@@ -9,26 +9,25 @@ import { BrowserFetchJsonError, fetchJson } from "@/lib/api/browser-client";
 import {
   toSubmissionDetailResponse,
   type SubmissionDetailResponse,
+  type UpdateSubmissionRequest,
 } from "@/lib/api/types-student";
 import {
-  buildUpdateSubmissionRequest,
   canEditSubmission,
+  captureSubmissionEditBaseline,
   countCodePoints,
   getSubmissionRevisionError,
   getSubmissionTextError,
   isDraftRevisionCurrent,
   isSavedSubmissionRevision,
   isValidContentRevision,
+  planSubmissionEdit,
   selectSubmissionDisplayDetail,
 } from "@/lib/learning-tasks/text-submission";
 import { SUBMISSION_LANGUAGE_OPTIONS } from "@/lib/learning-tasks/submission-language";
 import { toDisplayDate } from "@/lib/ui/format";
 
-type Draft = {
-  baseRevision: number;
-  language: string;
-  codeText: string;
-  submissionNote: string;
+type Draft = UpdateSubmissionRequest["content"] & {
+  baseline: UpdateSubmissionRequest;
 };
 
 export function EditSubmissionForm({
@@ -48,37 +47,35 @@ export function EditSubmissionForm({
   const [refreshing, startTransition] = useTransition();
   const inFlight = useRef(false);
   const current = selectSubmissionDisplayDetail(detail, saved);
-  const changed =
+  const revisionChanged =
     draft !== null &&
-    !isDraftRevisionCurrent(draft.baseRevision, current.contentRevision);
-  const recovering = blocked || changed;
+    !isDraftRevisionCurrent(
+      draft.baseline.expectedRevision,
+      current.contentRevision,
+    );
+  const recovering = blocked || revisionChanged;
+  const request = draft && planSubmissionEdit(draft.baseline, draft);
+  const checkedBaseline = checked && captureSubmissionEditBaseline(checked);
   const canConfirmCurrent =
     recovering &&
     draft !== null &&
-    checked !== null &&
-    canEditSubmission(checked) &&
+    checkedBaseline !== null &&
     canEditSubmission(current) &&
-    isValidContentRevision(checked.contentRevision) &&
-    isValidContentRevision(current.contentRevision) &&
-    checked.contentRevision === current.contentRevision;
+    checkedBaseline.expectedRevision === current.contentRevision;
+  const customLanguages = draft
+    ? [...new Set([draft.baseline.content.language, draft.language])].filter(
+        (language) =>
+          !SUBMISSION_LANGUAGE_OPTIONS.some(
+            (option) => option.value === language,
+          ),
+      )
+    : [];
   const path = `learning-tasks/submissions/${encodeURIComponent(submissionId)}`;
 
   const startEdit = () => {
-    if (
-      blocked ||
-      busy ||
-      refreshing ||
-      inFlight.current ||
-      !canEditSubmission(current) ||
-      !isValidContentRevision(current.contentRevision)
-    )
-      return;
-    setDraft({
-      baseRevision: current.contentRevision,
-      language: current.content.language ?? "auto",
-      codeText: current.content.codeText ?? "",
-      submissionNote: current.content.submissionNote ?? "",
-    });
+    const baseline = captureSubmissionEditBaseline(current);
+    if (blocked || busy || refreshing || inFlight.current || !baseline) return;
+    setDraft({ baseline, ...baseline.content });
     setBlocked(false);
     setChecked(null);
     setMessage(null);
@@ -124,20 +121,15 @@ export function EditSubmissionForm({
   };
   const confirmCurrent = () => {
     if (
-      !recovering ||
+      !canConfirmCurrent ||
       !draft ||
-      !checked ||
-      !canEditSubmission(checked) ||
-      !canEditSubmission(current) ||
-      !isValidContentRevision(checked.contentRevision) ||
-      !isValidContentRevision(current.contentRevision) ||
-      checked.contentRevision !== current.contentRevision ||
+      !checkedBaseline ||
       busy ||
       refreshing ||
       inFlight.current
     )
       return;
-    setDraft({ ...draft, baseRevision: checked.contentRevision });
+    setDraft({ ...draft, baseline: checkedBaseline });
     setBlocked(false);
     setChecked(null);
     setMessage(
@@ -146,7 +138,7 @@ export function EditSubmissionForm({
   };
   const cancelEdit = () => {
     if (busy || refreshing || inFlight.current) return;
-    if (changed) setBlocked(true);
+    if (revisionChanged) setBlocked(true);
     setDraft(null);
     setMessage(null);
     setChecked(null);
@@ -154,29 +146,23 @@ export function EditSubmissionForm({
   const save = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (
-      !draft ||
+      !request ||
       busy ||
       refreshing ||
       inFlight.current ||
       blocked ||
-      changed ||
+      revisionChanged ||
       !canEditSubmission(current)
     )
       return;
     const textError = getSubmissionTextError(
-      draft.codeText,
-      draft.submissionNote,
+      request.content.codeText,
+      request.content.submissionNote,
     );
     if (textError) {
       setMessage(textError);
       return;
     }
-    const body = buildUpdateSubmissionRequest(
-      draft.baseRevision,
-      draft.codeText,
-      draft.language,
-      draft.submissionNote,
-    );
     inFlight.current = true;
     setBusy(true);
     setMessage(null);
@@ -190,12 +176,15 @@ export function EditSubmissionForm({
             "content-type": "application/json",
             accept: "application/json",
           },
-          body: JSON.stringify(body),
+          body: JSON.stringify(request),
         }),
       );
       if (
         result.id !== submissionId ||
-        !isSavedSubmissionRevision(draft.baseRevision, result.contentRevision)
+        !isSavedSubmissionRevision(
+          request.expectedRevision,
+          result.contentRevision,
+        )
       ) {
         setBlocked(true);
         setMessage(
@@ -269,13 +258,11 @@ export function EditSubmissionForm({
                       {option.label}
                     </option>
                   ))}
-                  {!SUBMISSION_LANGUAGE_OPTIONS.some(
-                    (option) => option.value === draft.language,
-                  ) ? (
-                    <option value={draft.language}>
-                      当前值：{draft.language}
+                  {customLanguages.map((language) => (
+                    <option key={language} value={language}>
+                      原语言值：{language}
                     </option>
-                  ) : null}
+                  ))}
                 </select>
               </label>
               <label className="block">
@@ -311,7 +298,7 @@ export function EditSubmissionForm({
                 {canEditSubmission(current) ? (
                   <button
                     type="submit"
-                    disabled={recovering || busy || refreshing}
+                    disabled={!request || recovering || busy || refreshing}
                     className="rounded-md bg-zinc-900 px-4 py-2 text-white disabled:bg-zinc-400"
                   >
                     {busy ? "保存中…" : "保存本次修改"}
@@ -341,7 +328,7 @@ export function EditSubmissionForm({
             <p className="text-amber-900">
               {!isValidContentRevision(current.contentRevision)
                 ? "当前已保存作品的版本信息不可用，请先查看最新已保存作品再核对。"
-                : changed
+                : revisionChanged
                   ? "已保存作品的版本已变化。当前输入仍基于开始修改时的版本，未保存的修改已保留；请核对后明确继续。"
                   : draft
                     ? "当前修改需要先核对最新已保存作品，确认当前版本与修改资格后再继续。"

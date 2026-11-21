@@ -556,9 +556,11 @@ export const toSubmissionDetailResponse = (
         : undefined;
   const originalText = (value: unknown): string | null | undefined =>
     value === null ? null : typeof value === "string" ? value : undefined;
+  const originalLanguage = (value: unknown) =>
+    value === "" ? undefined : originalText(value);
   const language =
-    asNullableString(source.language) ??
-    asNullableString(contentRecord.language);
+    originalLanguage(source.language) ??
+    originalLanguage(contentRecord.language);
 
   return {
     contentRevision:

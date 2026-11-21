@@ -134,7 +134,8 @@
 - 学生 submission detail：`student/submissions/:id/page.tsx` -> `/api/proxy/learning-tasks/submissions/:id*`。
   - 对应后端：submission detail、feedback list。
   - 注意：学生任务草稿页仅显式刷新；学生提交详情仅在处理中或已安排重试时状态驱动刷新，复用现有读源，无历史详情 N+1。
-  - `EditSubmissionForm` 经同源 BFF PATCH 同一 submission，使用编辑开始时的 `expectedRevision` 和允许 content 字段，正常保存显式发送说明；取消不写，成功采用权威详情。mapper 严格消费 revision/editing，缺失或未知关闭入口；冲突/未知结果保留草稿，读取作品并由用户明确核对，不自动换新 attempt、合并或重放。
+  - `EditSubmissionForm` 经同源 BFF PATCH 同一 submission，无净变化时按钮禁用且提交入口不发请求。多行文本仅在比较时将 CRLF/CR 视为 LF，不据此改写发送值；language 保留非空字符串原文，包括纯空白，不 trim 或替换为默认值。真实保存按 [Backend DTO Submission](./handoff-backend-dto-cheatsheet.md#submission-request--response-family) 发送与已明确接纳的原文基准绑定的 `expectedRevision` 及完整 `content`：未改字段取该基准原文，改动字段取当前输入，说明仍显式发送。取消不写，成功采用权威详情；mapper 严格消费 revision/editing，缺失或未知关闭入口。
+  - 冲突或结果未知时保留草稿，不自动换新 attempt、合并或重放。显式读取最新作品并由用户确认继续后，将原文内容基准与 revision 一起推进到同一已核对版本，保留当前输入；普通 props 刷新或仅取得新 revision 不自动推进编辑基准。
 
 ### 3.5 AI Feedback / 报表 / 导出
 
