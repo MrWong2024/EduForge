@@ -207,23 +207,55 @@ describe('ZIP context reader (no database)', () => {
   it('rejects realpath escapes and oversize physical archives; cleans its own files', async () => {
     const scratch = await fs.mkdtemp(resolve(tmpdir(), 'eduforge-zip-'));
     const root = resolve(scratch, 'root');
+    const outside = resolve(scratch, 'outside');
+    const outsideArchive = resolve(outside, 'book.zip');
     try {
       await fs.mkdir(root);
-      await fs.mkdir(resolve(scratch, 'outside'));
+      await fs.mkdir(outside);
       await fs.copyFile(
         resolve(fixtures, 'ai-context/student.zip'),
-        resolve(scratch, 'outside/book.zip'),
+        outsideArchive,
       );
-      await fs.symlink(
-        resolve(scratch, 'outside'),
-        resolve(root, 'escape'),
-        'junction',
-      );
-      await expect(
-        reader(root).read([
-          { archivePath: 'escape/book.zip', entryPaths: ['src/C++.cpp'] },
-        ]),
-      ).rejects.toMatchObject({ code: 'AI_CONTEXT_UNAVAILABLE' });
+      let realpathSpy: jest.SpiedFunction<typeof fs.realpath> | undefined;
+      try {
+        await fs.symlink(outside, resolve(root, 'escape'), 'junction');
+      } catch (error: unknown) {
+        if (
+          process.platform !== 'win32' ||
+          typeof error !== 'object' ||
+          error === null ||
+          !('code' in error) ||
+          error.code !== 'EPERM'
+        ) {
+          throw error;
+        }
+        const realpath = fs.realpath;
+        const escapedArchive = resolve(await realpath(root), 'escape/book.zip');
+        realpathSpy = jest
+          .spyOn(fs, 'realpath')
+          .mockImplementation((path, ...options) =>
+            realpath(
+              path === escapedArchive ? outsideArchive : path,
+              ...options,
+            ),
+          );
+        console.info(
+          'AI context reader uses the Windows junction EPERM fixture',
+        );
+      }
+      try {
+        await expect(
+          reader(root).read([
+            { archivePath: 'escape/book.zip', entryPaths: ['src/C++.cpp'] },
+          ]),
+        ).rejects.toMatchObject({
+          code: 'AI_CONTEXT_UNAVAILABLE',
+          referenceNo: 1,
+          message: '资料引用 1：ZIP 路径越界',
+        });
+      } finally {
+        realpathSpy?.mockRestore();
+      }
       await fs.mkdir(resolve(root, 'own'));
       const file = await fs.open(resolve(root, 'own/huge.zip'), 'w');
       try {
