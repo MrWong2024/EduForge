@@ -333,7 +333,7 @@ describe('AI Feedback providers (fake fetch only)', () => {
       configService({
         NODE_ENV: 'development',
         AI_FEEDBACK_DUMP_REQUEST_BODY: true,
-        AI_FEEDBACK_MAX_INPUT_BYTES: 16384,
+        AI_FEEDBACK_MAX_INPUT_BYTES: 24 * 1024,
       }),
     );
     provider.assertInputEligible(context);
