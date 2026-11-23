@@ -8,6 +8,7 @@ import { Model, Types } from 'mongoose';
 import request from 'supertest';
 import { App } from 'supertest/types';
 import { AppModule } from '../src/app.module';
+import { isLocalSingleNodeReplicaSetPrimary } from '../src/config/local-mongo-replica-set';
 import { Session } from '../src/modules/auth/schemas/session.schema';
 import { ClassroomTask } from '../src/modules/classrooms/classroom-tasks/schemas/classroom-task.schema';
 import { Enrollment } from '../src/modules/classrooms/enrollments/schemas/enrollment.schema';
@@ -197,17 +198,16 @@ describe('B1-2 submission content edits and review admission (HTTP)', () => {
       .get(AiFeedbackJobService, { strict: true });
     expect(process.env.NODE_ENV).toBe('test');
     expect(process.env.EDUFORGE_DATABASE_PURPOSE).toBe('standard_test');
-    expect(users.db.name).toBe('eduforge_test');
-    expect(users.db.host).toBe('127.0.0.1');
-    expect(users.db.port).toBe(27017);
     users.db.set('maxTimeMS', 10000);
     const database = users.db.db;
     if (!database) throw new Error('Missing connected test database');
-    const build = (await database.command(
-      { buildInfo: 1 },
-      { timeoutMS: 5000 },
-    )) as { version: string };
-    expect(build.version).toBe('9.0.4');
+    expect(database.databaseName).toBe('eduforge_test');
+    const hello: unknown = await database
+      .admin()
+      .command({ hello: 1 }, { timeoutMS: 5000, readPreference: 'primary' });
+    const seedAddress = users.db.getClient().options.hosts[0]?.toString() ?? '';
+    if (!isLocalSingleNodeReplicaSetPrimary(hello, seedAddress))
+      throw new Error('SUBMISSION_EDIT_LOCAL_RS0_PRIMARY_REQUIRED');
     const auth = await database.command(
       { connectionStatus: 1, showPrivileges: false },
       { timeoutMS: 5000 },
@@ -267,7 +267,7 @@ describe('B1-2 submission content edits and review admission (HTTP)', () => {
         .send({ joinCode: classroom.joinCode })
         .expect(201);
     console.info(
-      'B1-2 database gate: standard_test / eduforge_test / 127.0.0.1:27017 / MongoDB 9.0.4 / root@admin verified; namespace=' +
+      'B1-2 database gate: standard_test / eduforge_test / loopback rs0 PRIMARY / root@admin verified; namespace=' +
         namespace,
     );
   });

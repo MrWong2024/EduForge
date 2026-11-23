@@ -8,7 +8,7 @@
 
 ## 1) 数据库、连接串与索引治理
 
-数据库兼容目标为 MongoDB 9.0.4（本地）与 8.3（服务器），使用同一套后端依赖；Mongoose 及其实际 MongoDB Node.js Driver 版本以 `backend/package-lock.json` 为准。选择驱动时核对 [MongoDB 官方兼容矩阵](https://www.mongodb.com/docs/drivers/compatibility/?driver-language=javascript&javascript-driver-framework=nodejs) 对两个 Server 主版本及 Node.js 24 的支持，不通过 `overrides` 强行替换 Mongoose 的驱动。官方支持范围、纯测试与构建结果不等于两个实际环境的业务回归已通过；真实数据库回归须遵守 Testing Playbook 的隔离边界，不以生产库作为升级测试靶场。
+数据库兼容目标为 MongoDB 9.0.8（本地）与 8.3（服务器），使用同一套后端依赖；Mongoose 及其实际 MongoDB Node.js Driver 版本以 `backend/package-lock.json` 为准。选择驱动时核对 [MongoDB 官方兼容矩阵](https://www.mongodb.com/docs/drivers/compatibility/?driver-language=javascript&javascript-driver-framework=nodejs) 对两个 Server 主版本及 Node.js 24 的支持，不通过 `overrides` 强行替换 Mongoose 的驱动。官方支持范围、纯测试与构建结果不等于两个实际环境的业务回归已通过；真实数据库回归须遵守 Testing Playbook 的隔离边界，不以生产库作为升级测试靶场。
 
 数据库按环境与测试用途使用独立 database 实现 database-level isolation；`browser_acceptance` 是独立数据库用途，不是新的 `NODE_ENV`：
 
