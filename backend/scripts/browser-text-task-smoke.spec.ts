@@ -89,7 +89,7 @@ describe('B1-2 thin smoke support gates (no database)', () => {
   };
 
   const localRootUri =
-    'mongodb://root:synthetic%40password@127.0.0.1:1/eduforge_browser_test?authSource=admin';
+    'mongodb://root:synthetic%40password@127.0.0.1:1/eduforge_browser_test?authSource=admin&replicaSet=rs0';
   it('reuses fail-closed declared-purpose and actual-database gates', () => {
     const file = {
       EDUFORGE_DATABASE_PURPOSE: 'browser_acceptance',
@@ -182,10 +182,11 @@ describe('B1-2 thin smoke support gates (no database)', () => {
         }),
       ).toThrow('SMOKE_DATABASE_AUTHENTICATION_MISMATCH');
   });
-  it('rejects remote hosts and explicit replica-set or proxy options', () => {
+  it('rejects remote hosts, absent or wrong replica sets and proxy options', () => {
     for (const mongoUri of [
       localRootUri.replace('127.0.0.1', 'remote.example.invalid'),
-      localRootUri + '&replicaSet=synthetic',
+      localRootUri.replace('&replicaSet=rs0', ''),
+      localRootUri.replace('replicaSet=rs0', 'replicaSet=synthetic'),
       localRootUri + '&proxyHost=127.0.0.1',
     ])
       expect(() =>

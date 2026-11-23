@@ -25,12 +25,20 @@ const record: AuthSmokeRecord = {
   studentId: '000000000000000000000002',
 };
 const mongoUri =
-  'mongodb://root:offline-only@127.0.0.1:27017/eduforge_browser_test?authSource=admin';
+  'mongodb://root:offline-only@127.0.0.1:27017/eduforge_browser_test?authSource=admin&replicaSet=rs0';
+const member = 'localhost:27017';
 const connection = {
   mongoUri,
   databaseName: 'eduforge_browser_test',
-  connectedHost: '127.0.0.1',
-  hello: { isWritablePrimary: true },
+  connectedAddress: '127.0.0.1:27017',
+  seedPort: 27017,
+  hello: {
+    setName: 'rs0',
+    isWritablePrimary: true,
+    hosts: [member],
+    primary: member,
+    me: member,
+  },
   authInfo: {
     authenticatedUsers: [{ user: 'root', db: 'admin' }],
     authenticatedUserRoles: [{ role: 'root', db: 'admin' }],
@@ -168,41 +176,73 @@ describe('narrow Browser auth smoke support (offline, purpose none)', () => {
     expect(environment.SMTP_PASSWORD).toBeUndefined();
     expect(environment.BAILIAN_API_KEY).toBeUndefined();
   });
-  it('rejects actual database, server, topology and identity mismatches', () => {
+  it('accepts a local rs0 primary whose member address uses a loopback alias', () => {
     expect(() => assertAuthSmokeConnection(connection)).not.toThrow();
-    for (const input of [
-      { ...connection, databaseName: 'eduforge_test' },
-      { ...connection, connectedHost: 'remote.invalid' },
-      { ...connection, hello: { isWritablePrimary: true, setName: 'foreign' } },
-      { ...connection, hello: { isWritablePrimary: true, msg: 'isdbgrid' } },
-      {
+  });
+  it('checks the actual database before the topology or authentication', () => {
+    expect(() =>
+      assertAuthSmokeConnection({
         ...connection,
-        authInfo: {
-          ...connection.authInfo,
-          authenticatedUsers: [{ user: 'someone', db: 'admin' }],
-        },
-      },
-      {
+        databaseName: 'eduforge_test',
+        hello: {},
+      }),
+    ).toThrow('DATABASE_CONNECTED_NAME_MISMATCH');
+  });
+  it.each([
+    ['a remote selected address', { connectedAddress: 'remote.invalid:27017' }],
+    ['a different selected port', { connectedAddress: '127.0.0.1:27018' }],
+    ['a different seed port', { seedPort: 27018 }],
+    ['a standalone', { hello: { isWritablePrimary: true } }],
+    [
+      'a wrong replica set',
+      { hello: { ...connection.hello, setName: 'foreign' } },
+    ],
+    [
+      'a non-primary',
+      { hello: { ...connection.hello, isWritablePrimary: false } },
+    ],
+    ['a router', { hello: { ...connection.hello, msg: 'isdbgrid' } }],
+    [
+      'extra hosts',
+      { hello: { ...connection.hello, hosts: [member, 'localhost:27018'] } },
+    ],
+    [
+      'a passive member',
+      { hello: { ...connection.hello, passives: ['localhost:27018'] } },
+    ],
+    [
+      'an arbiter',
+      { hello: { ...connection.hello, arbiters: ['localhost:27018'] } },
+    ],
+    [
+      'a non-local advertised member',
+      { hello: { ...connection.hello, hosts: ['remote.invalid:27017'] } },
+    ],
+  ])('rejects %s before fixture operations', (_name, override) => {
+    expect(() =>
+      assertAuthSmokeConnection({ ...connection, ...override }),
+    ).toThrow('AUTH_SMOKE_LOCAL_RS0_PRIMARY_REQUIRED');
+  });
+  it.each([
+    { authenticatedUsers: [{ user: 'someone', db: 'admin' }] },
+    {
+      authenticatedUserRoles: [
+        { role: 'readWrite', db: 'eduforge_browser_test' },
+      ],
+    },
+    {
+      authenticatedUsers: [
+        ...connection.authInfo.authenticatedUsers,
+        { user: 'other', db: 'admin' },
+      ],
+    },
+  ])('rejects a mismatched actual authentication identity (%#)', (override) => {
+    expect(() =>
+      assertAuthSmokeConnection({
         ...connection,
-        authInfo: {
-          ...connection.authInfo,
-          authenticatedUserRoles: [
-            { role: 'readWrite', db: 'eduforge_browser_test' },
-          ],
-        },
-      },
-      {
-        ...connection,
-        authInfo: {
-          ...connection.authInfo,
-          authenticatedUsers: [
-            ...connection.authInfo.authenticatedUsers,
-            { user: 'other', db: 'admin' },
-          ],
-        },
-      },
-    ])
-      expect(() => assertAuthSmokeConnection(input)).toThrow();
+        authInfo: { ...connection.authInfo, ...override },
+      }),
+    ).toThrow('AUTH_SMOKE_DATABASE_IDENTITY_MISMATCH');
   });
   it('plans only the verified legacy token index and current required Session definitions', () => {
     const plan = planAuthSmokeSessionIndexes([

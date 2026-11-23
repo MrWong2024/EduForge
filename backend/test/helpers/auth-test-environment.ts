@@ -3,7 +3,9 @@ import { resolve } from 'node:path';
 import { ConfigModule } from '@nestjs/config';
 import { parse } from 'dotenv';
 import mongoose, { type Connection } from 'mongoose';
+import { assertConnectedDatabaseMatchesPurpose } from '../../src/config/database-purpose';
 import { envValidationSchema } from '../../src/config/env.validation';
+import { isLocalSingleNodeReplicaSetPrimary } from '../../src/config/local-mongo-replica-set';
 import {
   assertLocalStandardTestAuthentication,
   assertLocalStandardTestEnvironment,
@@ -81,19 +83,18 @@ export async function assertAuthTestConnection(
   connection: Connection,
 ): Promise<void> {
   if (!connection.db) throw new Error('AUTH_TEST_CONNECTION_REQUIRED');
-  const hello = (await connection.db
-    .admin()
-    .command({ hello: 1 }, { timeoutMS: 5000 })) as {
-    isWritablePrimary?: boolean;
-    setName?: unknown;
-    msg?: unknown;
+  const environment = {
+    nodeEnv: 'test',
+    purpose: 'standard_test',
+    databaseName: connection.db.databaseName,
   };
-  if (
-    hello.isWritablePrimary !== true ||
-    hello.setName !== undefined ||
-    hello.msg === 'isdbgrid'
-  )
-    throw new Error('AUTH_TEST_STANDALONE_REQUIRED');
+  assertConnectedDatabaseMatchesPurpose(environment);
+  const hello: unknown = await connection.db
+    .admin()
+    .command({ hello: 1 }, { timeoutMS: 5000, readPreference: 'primary' });
+  const seedAddress = connection.getClient().options.hosts[0]?.toString() ?? '';
+  if (!isLocalSingleNodeReplicaSetPrimary(hello, seedAddress))
+    throw new Error('AUTH_TEST_LOCAL_RS0_PRIMARY_REQUIRED');
   const auth = (await connection.db
     .admin()
     .command(
@@ -101,10 +102,8 @@ export async function assertAuthTestConnection(
       { timeoutMS: 5000 },
     )) as { authInfo?: unknown };
   assertLocalStandardTestAuthentication({
-    nodeEnv: 'test',
-    purpose: 'standard_test',
+    ...environment,
     mongoUri,
-    databaseName: connection.db.databaseName,
     connectedHost: connection.host,
     authInfo: auth.authInfo,
   });

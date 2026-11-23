@@ -1,10 +1,9 @@
-import { mongo } from 'mongoose';
 import {
   assertConnectedDatabaseMatchesPurpose,
   DatabaseGateError,
-  readDeclaredDatabaseName,
   TEST_DATABASE_NAMES,
 } from '../../src/config/database-purpose';
+import { isLocalRootMongoReplicaSetUri } from '../../src/config/local-mongo-replica-set';
 
 type TestDatabaseEnvironment = {
   nodeEnv: string | undefined;
@@ -14,50 +13,17 @@ type TestDatabaseEnvironment = {
 
 const loopbackHosts = ['127.0.0.1', 'localhost', '::1'];
 
-function isLocalRootTestUri(mongoUri: string | undefined): boolean {
-  if (
-    !mongoUri?.startsWith('mongodb://') ||
-    readDeclaredDatabaseName(mongoUri) !== TEST_DATABASE_NAMES.standard_test
-  )
-    return false;
-  try {
-    const keys = [...new URL(mongoUri).searchParams.keys()].map((key) =>
-      key.toLowerCase(),
-    );
-    if (
-      new Set(keys).size !== keys.length ||
-      keys.some((key) =>
-        /^(proxy|replicaset$|loadbalanced$|srv|dbname$)/.test(key),
-      )
-    )
-      return false;
-    // URI parsing only: the helper never connects or authenticates a client.
-    const options = new mongo.MongoClient(mongoUri).options;
-    const { credentials, hosts } = options;
-    return (
-      hosts.length === 1 &&
-      loopbackHosts.includes(hosts[0].host ?? '') &&
-      !hosts[0].socketPath &&
-      options.dbName === TEST_DATABASE_NAMES.standard_test &&
-      credentials?.username === 'root' &&
-      credentials.source === 'admin' &&
-      credentials.password.length > 0 &&
-      ['DEFAULT', 'SCRAM-SHA-1', 'SCRAM-SHA-256'].includes(
-        credentials.mechanism,
-      ) &&
-      Object.keys(credentials.mechanismProperties).length === 0
-    );
-  } catch {
-    return false;
-  }
-}
-
 export function assertLocalStandardTestEnvironment(
   input: TestDatabaseEnvironment,
 ): void {
   if (input.nodeEnv !== 'test' || input.purpose !== 'standard_test')
     throw new DatabaseGateError('LOCAL_STANDARD_TEST_ENVIRONMENT_REQUIRED');
-  if (!isLocalRootTestUri(input.mongoUri))
+  if (
+    !isLocalRootMongoReplicaSetUri(
+      input.mongoUri,
+      TEST_DATABASE_NAMES.standard_test,
+    )
+  )
     throw new DatabaseGateError('LOCAL_STANDARD_TEST_URI_REQUIRED');
 }
 

@@ -12,6 +12,10 @@ import {
   TEST_DATABASE_NAMES,
 } from '../src/config/database-purpose';
 import {
+  isLocalSingleNodeReplicaSetPrimary,
+  readLocalMongoPort,
+} from '../src/config/local-mongo-replica-set';
+import {
   Session,
   SessionSchema,
 } from '../src/modules/auth/schemas/session.schema';
@@ -113,11 +117,11 @@ type Result = {
 let client: mongo.MongoClient | undefined;
 let db: mongo.Db | undefined;
 let managementUri: string;
-let standaloneAddress: string | undefined;
+let primaryAddress: string | undefined;
 const owned = new Map<string, string>();
 const closeCliConnections = new Set<() => Promise<void>>();
 
-async function assertLocalStandalone(
+async function assertLocalReplicaSet(
   connected: mongo.Db,
   connectedClient: mongo.MongoClient,
   timeoutMS?: number,
@@ -136,40 +140,28 @@ async function assertLocalStandalone(
     }
   };
   connectedClient.on('commandSucceeded', captureHello);
-  try {
-    const hello: unknown = await connected
-      .admin()
-      .command({ hello: 1 }, { timeoutMS })
-      .catch(() => {
-        throw new Error('SYNC_INDEXES_E2E_HELLO_UNAVAILABLE');
-      });
-    if (
-      !hello ||
-      typeof hello !== 'object' ||
-      !('isWritablePrimary' in hello) ||
-      hello.isWritablePrimary !== true ||
-      'setName' in hello ||
-      ('isreplicaset' in hello && hello.isreplicaset === true) ||
-      ('msg' in hello && hello.msg === 'isdbgrid')
-    ) {
-      throw new Error('SYNC_INDEXES_E2E_WRITABLE_STANDALONE_REQUIRED');
-    }
-  } finally {
-    connectedClient.off('commandSucceeded', captureHello);
-  }
+  const hello: unknown = await connected
+    .admin()
+    .command({ hello: 1 }, { timeoutMS })
+    .catch(() => {
+      throw new Error('SYNC_INDEXES_E2E_HELLO_UNAVAILABLE');
+    })
+    .finally(() => {
+      connectedClient.off('commandSucceeded', captureHello);
+    });
 
-  const match = /^(127\.0\.0\.1|\[::1\]|\[::ffff:7f00:1\]):(\d+)$/.exec(
-    address ?? '',
-  );
+  // Discovery can replace a loopback seed with a different loopback alias.
+  const actualPort = readLocalMongoPort(address);
   if (
     !address ||
-    !match ||
-    Number(match[2]) !== connectedClient.options.hosts[0]?.port ||
-    (standaloneAddress !== undefined && address !== standaloneAddress)
+    actualPort === undefined ||
+    actualPort !== connectedClient.options.hosts[0]?.port
   ) {
     throw new Error('SYNC_INDEXES_E2E_ACTUAL_NODE_NOT_LOCAL');
   }
-  standaloneAddress = address;
+  if (!isLocalSingleNodeReplicaSetPrimary(hello, address)) {
+    throw new Error('SYNC_INDEXES_E2E_LOCAL_RS0_PRIMARY_REQUIRED');
+  }
 
   // The topology and authentication checks share cleanup's original time budget.
   const authTimeoutMS =
@@ -187,14 +179,19 @@ async function assertLocalStandalone(
     .catch(() => {
       throw new Error('SYNC_INDEXES_E2E_AUTHENTICATION_UNAVAILABLE');
     });
+  const addressHost = address.slice(0, address.lastIndexOf(':'));
+  const host = addressHost.startsWith('[')
+    ? addressHost.slice(1, -1)
+    : addressHost;
   assertLocalStandardTestAuthentication({
     nodeEnv: testEnvironment.NODE_ENV,
     purpose: testEnvironment.EDUFORGE_DATABASE_PURPOSE,
     mongoUri: managementUri,
     databaseName: connected.databaseName,
-    connectedHost: match[1] === '[::1]' ? '::1' : '127.0.0.1',
+    connectedHost: host.startsWith('::ffff:') ? '127.0.0.1' : host,
     authInfo: auth.authInfo,
   });
+  primaryAddress = address;
 }
 
 async function connectLocal(clientToCheck: mongo.MongoClient) {
@@ -205,7 +202,7 @@ async function connectLocal(clientToCheck: mongo.MongoClient) {
     throw new Error('SYNC_INDEXES_E2E_CONNECTION_UNAVAILABLE');
   }
   const connected = clientToCheck.db();
-  await assertLocalStandalone(connected, clientToCheck);
+  await assertLocalReplicaSet(connected, clientToCheck);
   return connected;
 }
 
@@ -311,7 +308,7 @@ async function runCli(argv: string[], models = normalModels) {
         uri,
         monitoredOptions,
         models,
-        assertLocalStandalone,
+        assertLocalReplicaSet,
       );
       let closing: Promise<void> | undefined;
       const close = () =>
@@ -410,7 +407,16 @@ describe('sync-indexes against an isolated MongoDB namespace', () => {
       } catch {
         throw new Error('SYNC_INDEXES_E2E_ENV_FILE_UNAVAILABLE');
       }
-      const mongoUri = parse(file).MONGO_URI;
+      const environment = parse(file);
+      if (
+        (environment.NODE_ENV !== undefined &&
+          environment.NODE_ENV !== nodeEnv) ||
+        (environment.EDUFORGE_DATABASE_PURPOSE !== undefined &&
+          environment.EDUFORGE_DATABASE_PURPOSE !== purpose)
+      ) {
+        throw new Error('SYNC_INDEXES_E2E_ENV_FILE_MISMATCH');
+      }
+      const mongoUri = environment.MONGO_URI;
       if (!mongoUri)
         throw new Error('SYNC_INDEXES_E2E_MANAGEMENT_URI_REQUIRED');
       assertLocalStandardTestEnvironment({ nodeEnv, purpose, mongoUri });
@@ -421,25 +427,7 @@ describe('sync-indexes against an isolated MongoDB namespace', () => {
       } catch {
         throw new Error('SYNC_INDEXES_E2E_MANAGEMENT_URI_INVALID');
       }
-      const {
-        hosts,
-        srvHost,
-        replicaSet,
-        loadBalanced,
-        proxyHost,
-        directConnection,
-      } = client.options;
-      if (
-        srvHost ||
-        replicaSet !== undefined ||
-        loadBalanced ||
-        proxyHost !== undefined ||
-        hosts.length !== 1 ||
-        !['127.0.0.1', 'localhost', '::1'].includes(hosts[0].host ?? '')
-      ) {
-        throw new Error('SYNC_INDEXES_E2E_LOCAL_STANDALONE_URI_REQUIRED');
-      }
-      if (directConnection || client.writeConcern?.w === 0) {
+      if (client.options.directConnection || client.writeConcern?.w === 0) {
         throw new Error('SYNC_INDEXES_E2E_CLI_CONNECTION_GATE');
       }
       // Check the seed itself before any client can discover other replica members.
@@ -459,7 +447,7 @@ describe('sync-indexes against an isolated MongoDB namespace', () => {
         }
       }
       console.info(
-        `sync-indexes e2e database=${testDatabase} node=${standaloneAddress ?? 'unconfirmed'} topology=standalone identity=root@admin role=root@admin prefix=${prefix}`,
+        `sync-indexes e2e database=${testDatabase} node=${primaryAddress ?? 'unconfirmed'} topology=rs0/PRIMARY identity=root@admin role=root@admin prefix=${prefix}`,
       );
     }),
   );
@@ -479,7 +467,7 @@ describe('sync-indexes against an isolated MongoDB namespace', () => {
         fixtureDb && fixtureClient
           ? {
               verify: (timeoutMS) =>
-                assertLocalStandalone(fixtureDb, fixtureClient, timeoutMS),
+                assertLocalReplicaSet(fixtureDb, fixtureClient, timeoutMS),
               assertOwned,
               drop: (name, timeoutMS) =>
                 fixtureDb.collection(name).drop({ timeoutMS }),

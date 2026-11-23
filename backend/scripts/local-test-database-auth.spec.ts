@@ -1,11 +1,12 @@
 import { mongo } from 'mongoose';
+import { isLocalSingleNodeReplicaSetPrimary } from '../src/config/local-mongo-replica-set';
 import {
   assertLocalStandardTestAuthentication,
   assertLocalStandardTestEnvironment,
 } from '../test/helpers/local-test-database-auth';
 
 const uri = (host = '127.0.0.1:27017', options = '') =>
-  `mongodb://root:synthetic-password@${host}/eduforge_test?authSource=admin${options}`;
+  `mongodb://root:synthetic-password@${host}/eduforge_test?authSource=admin&replicaSet=rs0${options}`;
 const environment = {
   nodeEnv: 'test',
   purpose: 'standard_test',
@@ -53,7 +54,7 @@ describe('local standard-test database authentication (no connection)', () => {
         assertLocalStandardTestAuthentication({
           ...authenticated,
           mongoUri:
-            'mongodb://%72oot:synthetic%40%3A%2F%23%25@localhost/eduforge_test?authSource=%61dmin',
+            'mongodb://%72oot:synthetic%40%3A%2F%23%25@localhost/eduforge_test?authSource=%61dmin&replicaSet=rs0',
         }),
       ).not.toThrow();
       expect(connect).not.toHaveBeenCalled();
@@ -83,7 +84,9 @@ describe('local standard-test database authentication (no connection)', () => {
     ['multiple hosts', uri('localhost:27017,127.0.0.1:27017')],
     ['SRV', uri('localhost').replace('mongodb://', 'mongodb+srv://')],
     ['proxy', uri(undefined, '&proxyHost=example.invalid')],
-    ['replica set', uri(undefined, '&replicaSet=synthetic')],
+    ['missing replica set', uri().replace('&replicaSet=rs0', '')],
+    ['wrong replica set', uri().replace('replicaSet=rs0', 'replicaSet=rs1')],
+    ['duplicate replica set', uri(undefined, '&REPLICASET=rs0')],
     ['load balancing', uri(undefined, '&loadBalanced=false')],
     ['wrong URI user', uri().replace('root:', 'synthetic-app:')],
     [
@@ -169,5 +172,38 @@ describe('local standard-test database authentication (no connection)', () => {
     expect(() =>
       assertLocalStandardTestAuthentication({ ...authenticated, authInfo }),
     ).toThrow('LOCAL_STANDARD_TEST_AUTHENTICATION_REQUIRED');
+  });
+});
+
+describe('local MongoDB hello gate', () => {
+  const member = 'localhost:27017';
+  const hello = {
+    setName: 'rs0',
+    isWritablePrimary: true,
+    hosts: [member],
+    me: member,
+    primary: member,
+  };
+
+  it.each(['127.0.0.1:27017', '[::1]:27017', '[::ffff:7f00:1]:27017'])(
+    'accepts a loopback alias on the advertised member port (%s)',
+    (address) => {
+      expect(isLocalSingleNodeReplicaSetPrimary(hello, address)).toBe(true);
+    },
+  );
+
+  it.each([
+    ['standalone', { isWritablePrimary: true }],
+    ['another set', { ...hello, setName: 'rs1' }],
+    ['secondary', { ...hello, isWritablePrimary: false }],
+    ['extra host', { ...hello, hosts: [member, '127.0.0.1:27018'] }],
+    ['non-loopback host', { ...hello, hosts: ['example.invalid:27017'] }],
+    ['passive', { ...hello, passives: ['localhost:27018'] }],
+    ['arbiter', { ...hello, arbiters: ['localhost:27018'] }],
+    ['different self address', { ...hello, me: 'localhost:27018' }],
+    ['different primary', { ...hello, primary: 'localhost:27018' }],
+    ['different port', { ...hello, hosts: ['localhost:27018'] }],
+  ])('rejects %s', (_label, response) => {
+    expect(isLocalSingleNodeReplicaSetPrimary(response, member)).toBe(false);
   });
 });

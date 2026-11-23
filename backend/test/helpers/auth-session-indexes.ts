@@ -136,7 +136,7 @@ export async function prepareAuthSessionIndexes(): Promise<void> {
     )
       throw new Error('AUTH_TEST_INDEX_VERIFICATION_FAILED');
     console.info(
-      'Auth test gate: standard_test / eduforge_test / loopback standalone / root@admin; Session indexes verified.',
+      'Auth test gate: standard_test / eduforge_test / loopback rs0 PRIMARY / root@admin; Session indexes verified.',
     );
   } finally {
     await connection.close();

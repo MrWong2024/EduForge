@@ -18,7 +18,7 @@ import { envValidationSchema } from './env.validation';
 const uri = (database: string, user = 'synthetic-app') =>
   `mongodb://${user}:synthetic-password@127.0.0.1:1/${database}`;
 const localRootUri = (host = '127.0.0.1:27017') =>
-  `mongodb://root:synthetic-password@${host}/eduforge_browser_test?authSource=admin`;
+  `mongodb://root:synthetic-password@${host}/eduforge_browser_test?authSource=admin&replicaSet=rs0`;
 const browserFile = {
   EDUFORGE_DATABASE_PURPOSE: 'browser_acceptance',
   MONGO_URI: localRootUri('127.0.0.1:1'),
@@ -194,22 +194,19 @@ describe('local root Browser URI gate (no database connection)', () => {
     ['omitted', ''],
     ['false', '&directConnection=false'],
     ['true', '&directConnection=true'],
-  ])(
-    'accepts directConnection %s for the local standalone URI',
-    (_name, option) => {
-      const mongoUri = localRootUri() + option;
-      expect(isLocalRootBrowserUri(mongoUri)).toBe(true);
-      expect(
-        createBrowserAcceptanceEnvironment(
-          {
-            ...browserFile,
-            MONGO_URI: mongoUri,
-          },
-          {},
-        ).MONGO_URI,
-      ).toBe(mongoUri);
-    },
-  );
+  ])('accepts directConnection %s for the local rs0 URI', (_name, option) => {
+    const mongoUri = localRootUri() + option;
+    expect(isLocalRootBrowserUri(mongoUri)).toBe(true);
+    expect(
+      createBrowserAcceptanceEnvironment(
+        {
+          ...browserFile,
+          MONGO_URI: mongoUri,
+        },
+        {},
+      ).MONGO_URI,
+    ).toBe(mongoUri);
+  });
 
   it('decodes credentials and authSource without connecting', () => {
     const connect = jest
@@ -220,7 +217,7 @@ describe('local root Browser URI gate (no database connection)', () => {
     try {
       expect(
         isLocalRootBrowserUri(
-          'mongodb://%72oot:synthetic%40%3A%2F%3F%23%25@localhost/eduforge_browser_test?authSource=%61dmin&authMechanism=SCRAM-SHA-256',
+          'mongodb://%72oot:synthetic%40%3A%2F%3F%23%25@localhost/eduforge_browser_test?authSource=%61dmin&replicaSet=rs0&authMechanism=SCRAM-SHA-256',
         ),
       ).toBe(true);
       expect(connect).not.toHaveBeenCalled();
@@ -241,10 +238,15 @@ describe('local root Browser URI gate (no database connection)', () => {
       'wrong auth source',
       localRootUri().replace('authSource=admin', 'authSource=other'),
     ],
-    ['missing auth source', localRootUri().replace('?authSource=admin', '')],
+    ['missing auth source', localRootUri().replace('authSource=admin&', '')],
     ['missing password', localRootUri().replace(':synthetic-password@', '@')],
     ['proxy', localRootUri() + '&proxyHost=example.invalid'],
-    ['explicit replica set', localRootUri() + '&replicaSet=synthetic'],
+    ['missing replica set', localRootUri().replace('&replicaSet=rs0', '')],
+    [
+      'wrong replica set',
+      localRootUri().replace('replicaSet=rs0', 'replicaSet=synthetic'),
+    ],
+    ['duplicate replica set', localRootUri() + '&REPLICASET=rs0'],
     ['load balancing', localRootUri() + '&loadBalanced=true'],
     ['load balancing option', localRootUri() + '&loadBalanced=false'],
     ['SRV option', localRootUri() + '&srvServiceName=synthetic'],

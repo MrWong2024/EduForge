@@ -90,7 +90,7 @@ npm run test:e2e -- --runInBand --runTestsByPath ./test/users-me.e2e-spec.ts
 
 `test/auth-security.e2e-spec.ts` 与既有 `users-me/users-change-password` HTTP E2E 使用正式 configureApp、Cookie parser、ValidationPipe、SessionAuthGuard 和异常过滤器。认证安全 spec 以真实 HTTP/Mongo 及受控 Promise 屏障证明 tokenHash 存储、Cookie 输入边界、active/版本认证、改密当前会话保留、重置/找回竞争和正式导入 Store 的凭据轮换；不以 sleep 排程，不发送真实邮件或调用真实模型，也不证明第二批前端交互。
 
-窄准备逻辑 `test/helpers/auth-test-environment.ts` 在 AppModule 导入前建立独立 `test/standard_test` 进程环境，仅解析 `.env.test` 的目标连接，清除继承连接与外部服务配置，在测试层阻止 AppModule 叠加加载其它环境文件。`auth-session-indexes.ts` 先经本机 standalone、实际 `eduforge_test`、root@admin 身份/角色门禁并确认认证集合无外来数据，再以正式 SessionSchema 及现有 sync-indexes CLI 预览、限定 apply 和读回；只允许删除已核实定义的旧 `token_1`，建立当前 Session 必需索引，发现其它删改计划即停止。
+窄准备逻辑 `test/helpers/auth-test-environment.ts` 在 AppModule 导入前建立独立 `test/standard_test` 进程环境，仅解析 `.env.test` 的目标连接，清除继承连接与外部服务配置，在测试层阻止 AppModule 叠加加载其它环境文件。`auth-session-indexes.ts` 先核对实际库名 `eduforge_test`、本机单节点 `rs0` 的可写 PRIMARY 和 `root@admin` 身份及角色，并确认认证集合无外来数据，再以正式 SessionSchema 及现有 sync-indexes CLI 预览、限定 apply 和读回。只允许删除已核实定义的旧 `token_1`，建立当前 Session 必需索引，发现其它删改计划即停止。
 
 同一认证集合的实库 spec 串行运行，与 sync-indexes 的独立集合集成分开进程。合成记录按 spec 登记 ID 清理，核对 User/Session/reset token 零残留后关闭 app 与独立 Store 连接；不清空未知记录或数据库。配置或门禁不符时停止对应实库验收，实际通过、失败和未执行状态归当次任务报告。
 
@@ -189,7 +189,7 @@ npm.cmd run test -- --listTests --runInBand --runTestsByPath ./scripts/sync-inde
 npm.cmd run test -- --runInBand --runTestsByPath ./scripts/sync-indexes.spec.ts
 ```
 
-**真实数据库集成。** `test/sync-indexes.e2e-spec.ts` 使用 purpose `standard_test` 和现有 `test:e2e` runner。独立进程只从 `backend/.env.test` 读取 `MONGO_URI`，目标限于本机可写 standalone MongoDB 的 `eduforge_test`。驱动解析后须恰有一个 loopback seed，SRV、副本集和负载均衡配置会被拒绝。准备、正式 CLI 与清理均核验实际选中服务器地址、standalone 类型和实际库名。通过正式 Schema 克隆映射到本轮唯一前缀的专属集合，调用正式 CLI 的连接、盘点、执行及验收路径。HTTP 应用和其他业务服务均不启动。
+**真实数据库集成。** `test/sync-indexes.e2e-spec.ts` 使用 purpose `standard_test` 和现有 `test:e2e` runner。独立进程只从 `backend/.env.test` 读取 `MONGO_URI`，目标限于本机单节点副本集 `rs0` 上的 `eduforge_test`。URI 须声明 `replicaSet=rs0`，驱动解析后须恰有一个 loopback seed，并符合正式 CLI 对 `directConnection` 的限制。在驱动进行副本集发现前，测试用独立直连探针安全核验 seed。准备、正式 CLI 连接和清理前均复核实际库名、选中地址、本机唯一公布成员、可写 PRIMARY 以及 `root@admin` 身份和角色。同端口的 `127.0.0.1` seed 和 `localhost` 公布地址可指向同一本机成员。通过正式 Schema 克隆映射到本轮唯一前缀的专属集合，调用正式 CLI 的连接、盘点、执行及验收路径。HTTP 应用和其他业务服务均不启动。
 
 测试期限早于 Jest 外层超时，停止后禁止发起新的测试写入。`afterAll` 从入口计算独立的清理总预算，早于 Jest 的 90 秒期限，覆盖在途调用收束、目标核验、归属查询、删除、残留报告与连接关闭，并为报告和关闭保留时间。确认已发出的写命令结果与实际目标后，每次删除分别在集合名称及 UUID 归属查询前、查询返回后且发出删除前检查期限。到期停止发起新删除，已发出的删除按实际完成或未确认记录。删除未确认时保留登记，残留或连接关闭无法确认时如实报告。超时、Promise 拒绝或关闭连接本身均不足以证明服务端已取消写入。清理期限及未确认状态使用受控时钟和 Promise 做离线回归，实库验收覆盖正常收尾。
 
@@ -319,7 +319,7 @@ node -r ts-node/register -r tsconfig-paths/register ./scripts/browser-auth-smoke
 node -r ts-node/register -r tsconfig-paths/register ./scripts/browser-auth-smoke.ts cleanup --namespace auth-batch2-<unique>
 ```
 
-- CLI 仅解析 `.env.browser-acceptance`，复用 Browser 环境构造与用途门禁；连接后核对实际库名、单 loopback writable standalone，以及唯一 `root@admin` 认证身份和角色。导入模块不执行 CLI，也不导入 AppModule。每次运行有 120 秒总截止，连接、查询和索引操作有有限超时，连接在 finally 关闭。
+- CLI 仅解析 `.env.browser-acceptance`，复用 Browser 环境构造与用途门禁。连接后核对实际库名、实际连接节点为本机单节点 `rs0` 的可写 PRIMARY，以及唯一 `root@admin` 认证身份和角色。导入模块不执行 CLI，也不导入 AppModule。每次运行有 120 秒总截止，连接、查询和索引操作有有限超时，连接在 finally 关闭。
 - `prepare` 不覆盖已有恢复记录或 namespace 账号。须先由操作者确认 APP 和其它认证写入者均已停止；脚本再次核对认证三集合为空、没有在途认证操作，才盘点并补齐正式 SessionSchema 索引。仅允许删除精确定义为 `{token:1}, unique:true` 的旧 `token_1`；保留正确的 `_id_`、TTL、userId、tokenHash 唯一索引，未知定义或漂移立即拒绝，不调用其它用途的索引 CLI/helper。检查空集合与 currentOp 不代替独占进程审计。
 - 随后仅创建 namespace 专属 teacher/student 两名 active 合成账号。初始和改密场景的固定合成密码由脚本常量维护；`inspect` 只读核对 ID/email/role 归属、账号状态和当前凭据是否匹配已知合成状态，不输出密码或哈希。部分准备失败时只清理本次记录且归属已核实的精确目标。
 - 恢复记录位于 ignored `.local/deliverables/browser-auth-smoke/<namespace>.json`，仅保存 namespace 和两个 User ID。所有写入结果不明时先检查精确目标，不直接重试；恢复记录保留到收尾明确。

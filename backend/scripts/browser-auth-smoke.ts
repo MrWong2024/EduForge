@@ -18,6 +18,10 @@ import {
   assertConnectedDatabaseMatchesPurpose,
   DatabaseGateError,
 } from '../src/config/database-purpose';
+import {
+  isLocalSingleNodeReplicaSetPrimary,
+  readLocalMongoPort,
+} from '../src/config/local-mongo-replica-set';
 import { SessionSchema } from '../src/modules/auth/schemas/session.schema';
 import {
   comparePassword,
@@ -91,9 +95,10 @@ export function assertAuthSmokeRecord(record: AuthSmokeRecord): void {
 export function assertAuthSmokeConnection(input: {
   mongoUri: string | undefined;
   databaseName: string | undefined;
-  connectedHost: string;
-  hello: { isWritablePrimary?: boolean; setName?: unknown; msg?: unknown };
-  authInfo: {
+  connectedAddress: string | undefined;
+  seedPort: number | undefined;
+  hello: unknown;
+  authInfo?: {
     authenticatedUsers?: { user: string; db: string }[];
     authenticatedUserRoles?: { role: string; db: string }[];
   };
@@ -105,17 +110,16 @@ export function assertAuthSmokeConnection(input: {
   });
   if (
     !isLocalRootBrowserUri(input.mongoUri) ||
-    !['127.0.0.1', 'localhost', '::1'].includes(input.connectedHost) ||
-    input.hello.isWritablePrimary !== true ||
-    input.hello.setName !== undefined ||
-    input.hello.msg === 'isdbgrid'
+    !input.connectedAddress ||
+    readLocalMongoPort(input.connectedAddress) !== input.seedPort ||
+    !isLocalSingleNodeReplicaSetPrimary(input.hello, input.connectedAddress)
   )
-    fail('AUTH_SMOKE_LOCAL_STANDALONE_REQUIRED');
+    fail('AUTH_SMOKE_LOCAL_RS0_PRIMARY_REQUIRED');
   if (
-    !isDeepStrictEqual(input.authInfo.authenticatedUsers, [
+    !isDeepStrictEqual(input.authInfo?.authenticatedUsers, [
       { user: 'root', db: 'admin' },
     ]) ||
-    !isDeepStrictEqual(input.authInfo.authenticatedUserRoles, [
+    !isDeepStrictEqual(input.authInfo?.authenticatedUserRoles, [
       { role: 'root', db: 'admin' },
     ])
   )
@@ -408,13 +412,25 @@ export async function verifyAuthSmokeConnection(
 ): Promise<void> {
   const db = connection.db;
   if (!db) return fail('AUTH_SMOKE_DATABASE_NOT_CONNECTED');
-  const hello = (await db
-    .admin()
-    .command({ hello: 1 }, { timeoutMS: 5000 })) as {
-    isWritablePrimary?: boolean;
-    setName?: unknown;
-    msg?: unknown;
+  assertConnectedDatabaseMatchesPurpose({
+    nodeEnv: 'test',
+    purpose: 'browser_acceptance',
+    databaseName: db.databaseName,
+  });
+  const client = connection.getClient();
+  let connectedAddress: string | undefined;
+  const captureHello = (event: mongo.CommandSucceededEvent) => {
+    if (event.commandName === 'hello' && event.databaseName === 'admin') {
+      connectedAddress = event.address;
+    }
   };
+  client.on('commandSucceeded', captureHello);
+  let hello: unknown;
+  try {
+    hello = await db.admin().command({ hello: 1 }, { timeoutMS: 5000 });
+  } finally {
+    client.off('commandSucceeded', captureHello);
+  }
   const status = (await db
     .admin()
     .command(
@@ -426,7 +442,8 @@ export async function verifyAuthSmokeConnection(
   assertAuthSmokeConnection({
     mongoUri,
     databaseName: db.databaseName,
-    connectedHost: connection.host,
+    connectedAddress,
+    seedPort: client.options.hosts[0]?.port,
     hello,
     authInfo: status.authInfo,
   });
@@ -475,6 +492,7 @@ export async function runAuthSmokeCli(args: string[]): Promise<void> {
       serverSelectionTimeoutMS: 5000,
       connectTimeoutMS: 5000,
       timeoutMS: 10000,
+      monitorCommands: true,
       retryReads: false,
       retryWrites: false,
     });
@@ -529,7 +547,7 @@ export async function runAuthSmokeCli(args: string[]): Promise<void> {
         namespace,
         databaseName: connection.db?.databaseName,
         identity: 'root@admin',
-        topology: 'loopback standalone',
+        topology: 'loopback rs0 PRIMARY',
         accounts,
         ...(command === 'cleanup'
           ? { residual: { users: 0, sessions: 0, resetTokens: 0 } }
