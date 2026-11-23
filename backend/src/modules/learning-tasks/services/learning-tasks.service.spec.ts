@@ -35,6 +35,7 @@ const objectId = () => new Types.ObjectId();
 
 const makeQuery = <T>(result: T) => {
   const chain = {
+    session: jest.fn(),
     read: jest.fn(),
     select: jest.fn(),
     sort: jest.fn(),
@@ -43,6 +44,7 @@ const makeQuery = <T>(result: T) => {
     lean: jest.fn(),
     exec: jest.fn().mockResolvedValue(result),
   };
+  chain.session.mockReturnValue(chain);
   chain.read.mockReturnValue(chain);
   chain.select.mockReturnValue(chain);
   chain.sort.mockReturnValue(chain);
@@ -58,6 +60,11 @@ const submissionDto: CreateSubmissionDto = {
     language: 'javascript',
   },
 };
+
+type SubmissionTestSession = { id: Types.ObjectId };
+type SubmissionTransaction = (
+  session: SubmissionTestSession,
+) => Promise<unknown>;
 
 const createHarness = (
   options: {
@@ -122,14 +129,23 @@ const createHarness = (
     findOne: jest.fn<ReturnType<typeof makeQuery>, [Record<string, unknown>]>(
       () => makeQuery(null),
     ),
-    create: jest.fn<Promise<unknown>, [Record<string, unknown>]>(),
+    create: jest.fn<
+      Promise<unknown[]>,
+      [Record<string, unknown>[], { session: SubmissionTestSession }]
+    >(),
     findOneAndUpdate: jest.fn(() =>
       makeQuery({ ...submission, reviewStartedAt: new Date() }),
     ),
   };
   const feedbackModel = { exists: jest.fn().mockResolvedValue(null) };
   const classroomTaskModel = {
+    db: {
+      transaction: jest.fn((run: SubmissionTransaction) =>
+        run({ id: objectId() }),
+      ),
+    },
     findById: jest.fn(() => makeQuery(classroomTask)),
+    findOneAndUpdate: jest.fn(() => makeQuery(classroomTask)),
     exists: jest.fn(() => ({ exec: jest.fn().mockResolvedValue(null) })),
   };
   const classroomModel = {
@@ -1274,19 +1290,21 @@ describe('LearningTasksService student participation status gates', () => {
   it('allows classroom submissions for archived task templates when runtime state is active', async () => {
     const harness = createHarness({ taskStatus: TaskStatus.Archived });
 
-    harness.submissionModel.create.mockResolvedValue({
-      _id: objectId(),
-      taskId: harness.ids.taskId,
-      classroomTaskId: harness.ids.classroomTaskId,
-      studentId: harness.ids.studentId,
-      attemptNo: 1,
-      submittedAt: new Date('2026-01-02T00:00:00.000Z'),
-      isLate: false,
-      lateBySeconds: 0,
-      content: submissionDto.content,
-      meta: undefined,
-      status: 'SUBMITTED',
-    });
+    harness.submissionModel.create.mockResolvedValue([
+      {
+        _id: objectId(),
+        taskId: harness.ids.taskId,
+        classroomTaskId: harness.ids.classroomTaskId,
+        studentId: harness.ids.studentId,
+        attemptNo: 1,
+        submittedAt: new Date('2026-01-02T00:00:00.000Z'),
+        isLate: false,
+        lateBySeconds: 0,
+        content: submissionDto.content,
+        meta: undefined,
+        status: 'SUBMITTED',
+      },
+    ]);
 
     await expect(
       harness.service.createSubmissionForClassroomTask(
@@ -1300,9 +1318,9 @@ describe('LearningTasksService student participation status gates', () => {
       classroomTaskId: harness.ids.classroomTaskId.toString(),
     });
     expect(harness.submissionModel.create).toHaveBeenCalledTimes(1);
-    expect(harness.submissionModel.create.mock.calls[0][0]).not.toHaveProperty(
-      'reviewStartedAt',
-    );
+    expect(
+      harness.submissionModel.create.mock.calls[0][0][0],
+    ).not.toHaveProperty('reviewStartedAt');
     expect(
       harness.aiFeedbackJobService.ensureJobForSubmission,
     ).not.toHaveBeenCalled();
@@ -1487,8 +1505,15 @@ describe('Submission classroom association contract (no database)', () => {
 
   it('allocates attempts and checks cooldown only within the classroom instance', async () => {
     const h = createHarness();
-    h.submissionModel.create.mockImplementation((payload) =>
-      Promise.resolve({ ...payload, _id: objectId() }),
+    const highestAttempt = makeQuery(null);
+    const recentSubmission = makeQuery(null);
+    const classroomQuery = makeQuery(h.classroom);
+    h.classroomModel.findById.mockReturnValueOnce(classroomQuery);
+    h.submissionModel.findOne
+      .mockReturnValueOnce(highestAttempt)
+      .mockReturnValueOnce(recentSubmission);
+    h.submissionModel.create.mockImplementation(([payload]) =>
+      Promise.resolve([{ ...payload, _id: objectId() }]),
     );
     await h.service.createSubmissionForClassroomTask(
       h.ids.taskId.toString(),
@@ -1502,12 +1527,25 @@ describe('Submission classroom association contract (no database)', () => {
         studentId: h.ids.studentId,
         classroomTaskId: h.ids.classroomTaskId,
       });
+    const [, { session }] = h.submissionModel.create.mock.calls[0];
+    expect(h.classroomTaskModel.db.transaction).toHaveBeenCalledTimes(1);
+    expect(h.classroomTaskModel.findOneAndUpdate).toHaveBeenCalledWith(
+      { _id: h.ids.classroomTaskId },
+      { $inc: { __v: 1 } },
+      { session, timestamps: false, returnDocument: 'after' },
+    );
+    expect(classroomQuery.session).toHaveBeenCalledWith(session);
+    expect(highestAttempt.session).toHaveBeenCalledWith(session);
+    expect(recentSubmission.session).toHaveBeenCalledWith(session);
     expect(h.submissionModel.create).toHaveBeenCalledWith(
-      expect.objectContaining({
-        classroomTaskId: h.ids.classroomTaskId,
-        attemptNo: 1,
-        contentRevision: 0,
-      }),
+      [
+        expect.objectContaining({
+          classroomTaskId: h.ids.classroomTaskId,
+          attemptNo: 1,
+          contentRevision: 0,
+        }),
+      ],
+      { session },
     );
   });
 });
@@ -1524,8 +1562,8 @@ describe('Classroom submission attempt allocation (no database)', () => {
 
   const setup = (options: Parameters<typeof createHarness>[0] = {}) => {
     const h = createHarness(options);
-    h.submissionModel.create.mockImplementation((payload) =>
-      Promise.resolve({ ...payload, _id: objectId() }),
+    h.submissionModel.create.mockImplementation(([payload]) =>
+      Promise.resolve([{ ...payload, _id: objectId() }]),
     );
     const submit = () =>
       h.service.createSubmissionForClassroomTask(
@@ -1569,15 +1607,13 @@ describe('Classroom submission attempt allocation (no database)', () => {
     expect(maxAttempt.exec.mock.invocationCallOrder[0]).toBeLessThan(
       recentSubmission.exec.mock.invocationCallOrder[0],
     );
-    expect(h.submissionModel.create).toHaveBeenCalledWith(
-      expect.objectContaining({
-        attemptNo: 5,
-        submittedAt: now,
-        isLate: true,
-        lateBySeconds: 1,
-        contentRevision: 0,
-      }),
-    );
+    expect(h.submissionModel.create.mock.calls[0][0][0]).toMatchObject({
+      attemptNo: 5,
+      submittedAt: now,
+      isLate: true,
+      lateBySeconds: 1,
+      contentRevision: 0,
+    });
   });
 
   it('rechecks the newest time after a target collision and caps future timestamps at the full window', async () => {
@@ -1614,9 +1650,11 @@ describe('Classroom submission attempt allocation (no database)', () => {
 
   it('reallocates an attempt and refreshes the recorded time after a collision with cooldown disabled', async () => {
     const h = setup({ submissionCooldownMs: 0 });
+    const firstRead = makeQuery(null);
+    const retryRead = makeQuery({ attemptNo: 1 });
     h.submissionModel.findOne
-      .mockReturnValueOnce(makeQuery(null))
-      .mockReturnValueOnce(makeQuery({ attemptNo: 1 }));
+      .mockReturnValueOnce(firstRead)
+      .mockReturnValueOnce(retryRead);
     const nextTime = new Date(now.getTime() + 1000);
     h.submissionModel.create.mockImplementationOnce(() => {
       jest.setSystemTime(nextTime);
@@ -1624,11 +1662,14 @@ describe('Classroom submission attempt allocation (no database)', () => {
     });
 
     await expect(h.submit()).resolves.toMatchObject({ attemptNo: 2 });
+    expect(h.classroomTaskModel.db.transaction).toHaveBeenCalledTimes(2);
     expect(h.submissionModel.findOne).toHaveBeenCalledTimes(2);
-    expect(h.submissionModel.create).toHaveBeenNthCalledWith(
-      2,
-      expect.objectContaining({ attemptNo: 2, submittedAt: nextTime }),
-    );
+    const [[, firstOptions], [[retryPayload], retryOptions]] =
+      h.submissionModel.create.mock.calls;
+    expect(retryOptions.session).not.toBe(firstOptions.session);
+    expect(firstRead.session).toHaveBeenCalledWith(firstOptions.session);
+    expect(retryRead.session).toHaveBeenCalledWith(retryOptions.session);
+    expect(retryPayload).toMatchObject({ attemptNo: 2, submittedAt: nextTime });
     expect(
       h.aiFeedbackJobService.ensureJobForSubmission,
     ).not.toHaveBeenCalled();
@@ -1705,6 +1746,21 @@ describe('Classroom submission attempt allocation (no database)', () => {
 
     await expect(h.submit()).rejects.toBe(error);
     expect(h.submissionModel.create).toHaveBeenCalledTimes(1);
+  });
+
+  it('propagates an unknown commit outcome without replaying the insert', async () => {
+    const h = setup();
+    const error = duplicate();
+    error.addErrorLabel('UnknownTransactionCommitResult');
+    h.classroomTaskModel.db.transaction.mockImplementationOnce(async (run) => {
+      await run({ id: objectId() });
+      throw error;
+    });
+
+    await expect(h.submit()).rejects.toBe(error);
+    expect(h.classroomTaskModel.db.transaction).toHaveBeenCalledTimes(1);
+    expect(h.submissionModel.create).toHaveBeenCalledTimes(1);
+    expect(h.aiFeedbackJobService.getReviewJob).not.toHaveBeenCalled();
   });
 
   it('does not reinsert after an editing read fails following a successful insert', async () => {

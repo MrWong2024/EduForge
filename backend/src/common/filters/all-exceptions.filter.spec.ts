@@ -106,6 +106,11 @@ describe('AllExceptionsFilter', () => {
       'CLASSROOM_NOT_EMPTY',
       '该班级已有成员或任务记录，不能删除，只能归档',
     ],
+    [
+      409,
+      'CLASSROOM_TASK_NOT_EMPTY',
+      '课堂任务已有作品或 AI 反馈任务，不能删除。',
+    ],
   ] as const)(
     'projects only the public code for %s %s and preserves its message',
     (status, code, message) => {
@@ -248,6 +253,7 @@ describe('AllExceptionsFilter', () => {
     [403, 'LATE_SUBMISSION_NOT_ALLOWED'],
     [409, 'COURSE_NOT_EMPTY'],
     [409, 'CLASSROOM_NOT_EMPTY'],
+    [409, 'CLASSROOM_TASK_NOT_EMPTY'],
     [429, 'SUBMISSION_COOLDOWN_ACTIVE'],
   ];
   const wrongStatusPairs = publicCodePairs.flatMap(([allowedStatus, code]) =>

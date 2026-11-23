@@ -125,6 +125,7 @@ Notes:
 | GET    | `/api/classrooms/:id/tasks/:classroomTaskId`                              | 教师/学生查看班级任务详情。                                       |
 | PATCH  | `/api/classrooms/:classroomId/tasks/:classroomTaskId`                     | 教师更新课堂任务实例级发布参数（截止时间/迟交/尝试次数）。        |
 | PATCH  | `/api/classrooms/:classroomId/tasks/:classroomTaskId/status`              | 教师更新课堂任务实例生命周期状态（关闭/撤回/恢复提交）。          |
+| DELETE | `/api/classrooms/:classroomId/tasks/:classroomTaskId`                     | 教师删除自己班级中没有关联记录的课堂任务实例。                    |
 | POST   | `/api/classrooms/:classroomId/tasks/:classroomTaskId/submissions`         | 班级发布实例提交入口（绑定 `classroomTaskId`）。                  |
 | GET    | `/api/classrooms/:classroomId/tasks/:classroomTaskId/submissions`         | 教师分页查看课堂任务实例提交列表（仅 `classroomTaskId`）。        |
 | GET    | `/api/classrooms/:classroomId/tasks/:classroomTaskId/my-task-detail`      | 学生端任务聚合详情（Z3）。                                        |
@@ -140,6 +141,8 @@ Notes:
 - 新实例默认 ACTIVE；生命周期允许 `ACTIVE -> CLOSED`、`ACTIVE -> RECALLED`、`CLOSED -> ACTIVE`；撤回要求无提交。拒绝 RECALLED 恢复/再次流转以及 CLOSED -> RECALLED；已有提交而试图撤回返回 `400`，提示只能关闭。
 - 实例配置 PATCH 与状态 PATCH 分离：仅 ACTIVE/CLOSED 可编辑发布参数，RECALLED 不可编辑；恢复 ACTIVE 只恢复提交状态，不自动延长截止时间或更改迟交/尝试次数规则。输入/返回字段及旧实例默认状态见 [DTO ClassroomTask](./handoff-backend-dto-cheatsheet.md#classroomtask-dto--response-family)。
 - 教师对同一实例的配置或状态竞争写入使用条件更新，成功仍为 `200`。条件未命中后按原班级范围复读实例状态。实例不存在时返回 `404`，当前状态拒绝该操作时沿用 `400`，当前状态仍允许时返回普通 `409` 并提示刷新后再操作。服务端不自动重试，不增加业务错误码。
+- 删除要求教师是路径中班级的 owner，且实例属于该班级。班级不可见、实例不存在或实例与班级不匹配时返回 `404`。无直接关联记录时返回 `200` 和 `{ ok: true }`，保留班级、源模板及其他班级的同模板实例。只要有 `Submission` 或 `AiFeedbackJob` 的 `classroomTaskId` 指向该实例，就返回 `409` 和 `code=CLASSROOM_TASK_NOT_EMPTY`，实例及关联记录全部保留。删除不级联，也不触发撤回。成功后再次删除或向该实例提交返回 `404`。
+- 教师删除与学生首次提交竞争同一空的 ACTIVE 实例时，删除先提交则 DELETE `200`、POST `404`，实例与作品均不存在。学生先提交则 POST `201`、DELETE `409`（`CLASSROOM_TASK_NOT_EMPTY`），实例保留，且该学生恰有一条 `attemptNo=1` 的作品。事务内的父实例写入见 [Service Card 07](./handoff-backend-service-map.md#service-card-07) 和 [08](./handoff-backend-service-map.md#service-card-08)。
 - 课堂提交要求班级 ACTIVE、实例 ACTIVE、学生 Enrollment ACTIVE，且实例已保存发布快照；无需关联模板仍为 PUBLISHED，模板归档不拒绝既有实例提交。有截止时间、禁止迟交且已超过截止时间时，返回 `403`，`code=LATE_SUBMISSION_NOT_ALLOWED`。
 - 同一 studentId + classroomTaskId 在冷却窗口内重复提交返回 `429`，`code=SUBMISSION_COOLDOWN_ACTIVE`，并提供重试时间提示；配置与默认窗口见 [Config Matrix](./handoff-backend-config-matrix.md)，提示数据见 [DTO Submission](./handoff-backend-dto-cheatsheet.md#submission-request--response-family)。
 - 实例提交列表非 owner 返回 `404`；严格按 classroomTaskId 读取，默认只包含当前 ACTIVE 学生的 submissions，total 与 items 的成员范围一致。默认提交时间倒序及实现见 [Service Card 07](./handoff-backend-service-map.md#service-card-07)；公开列表、全来源 feedbackCount 与详情内容暴露区别见 DTO Submission。

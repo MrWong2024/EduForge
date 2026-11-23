@@ -104,6 +104,21 @@ type SubmissionAttemptScope = {
   classroomTaskId: Types.ObjectId;
   studentId: Types.ObjectId;
 };
+type CommittedClassroomSubmission = {
+  submission: SubmissionWithMeta;
+  classroomTask: ClassroomTaskDeadlineConfig;
+};
+
+const SUBMISSION_TRANSACTION_OPTIONS = {
+  readPreference: 'primary',
+  timeoutMS: 10000,
+} as const;
+
+class SubmissionAttemptCollision extends Error {
+  constructor(cause: mongo.MongoServerError) {
+    super('Classroom submission attempt number collision', { cause });
+  }
+}
 
 @Injectable()
 export class LearningTasksService {
@@ -1210,15 +1225,114 @@ export class LearningTasksService {
       throw new ConflictException('Submission has no valid classroom task');
     }
     const classroomTaskObjectId = new Types.ObjectId(classroomTaskId);
-    const classroomTask = await this.classroomTaskModel
-      .findById(classroomTaskObjectId)
+    const cooldownMs = this.getSubmissionCooldownMs();
+    const attemptScope: SubmissionAttemptScope = {
+      classroomTaskId: classroomTaskObjectId,
+      studentId: studentObjectId,
+    };
+
+    for (
+      let round = 0;
+      round < LearningTasksService.MAX_SUBMISSION_INSERT_ATTEMPTS;
+      round += 1
+    ) {
+      let committed: CommittedClassroomSubmission;
+      try {
+        committed = await this.classroomTaskModel.db.transaction(
+          async (session) => {
+            const classroomTask = await this.loadClassroomTaskForSubmission(
+              classroomTaskObjectId,
+              taskObjectId,
+              session,
+            );
+            const highestAttempt = await this.submissionModel
+              .findOne(attemptScope)
+              .session(session)
+              .read('primary')
+              .sort({ attemptNo: -1 })
+              .select('attemptNo')
+              .lean<Pick<Submission, 'attemptNo'> & WithId>()
+              .exec();
+            const timing = await this.getSubmissionTiming(
+              attemptScope,
+              classroomTask,
+              cooldownMs,
+              session,
+            );
+            try {
+              const [submission] = await this.submissionModel.create(
+                [
+                  {
+                    taskId: taskObjectId,
+                    ...attemptScope,
+                    attemptNo: (highestAttempt?.attemptNo ?? 0) + 1,
+                    contentRevision: 0,
+                    ...timing,
+                    content: dto.content,
+                    meta: dto.meta,
+                    status: SubmissionStatus.Submitted,
+                  },
+                ],
+                { session },
+              );
+              return { submission, classroomTask };
+            } catch (error) {
+              if (this.isSubmissionAttemptCollision(error)) {
+                throw new SubmissionAttemptCollision(error);
+              }
+              throw error;
+            }
+          },
+          SUBMISSION_TRANSACTION_OPTIONS,
+        );
+      } catch (error) {
+        if (!(error instanceof SubmissionAttemptCollision)) throw error;
+        continue;
+      }
+
+      const { submission, classroomTask } = committed;
+      const editing = await this.getSubmissionEditing(
+        submission,
+        { id: userId, roles: [...STUDENT_ROLES] },
+        classroomTask,
+      );
+      return this.toSubmissionResponse(
+        submission,
+        AiFeedbackStatus.NotRequested,
+        editing,
+      );
+    }
+
+    const classroomTask = await this.loadClassroomTaskForSubmission(
+      classroomTaskObjectId,
+      taskObjectId,
+    );
+    await this.getSubmissionTiming(attemptScope, classroomTask, cooldownMs);
+    throw new ConflictException('提交编号分配冲突，请刷新提交记录后重试。');
+  }
+
+  private async loadClassroomTaskForSubmission(
+    classroomTaskId: Types.ObjectId,
+    taskId: Types.ObjectId,
+    session?: mongo.ClientSession,
+  ): Promise<ClassroomTaskDeadlineConfig> {
+    // Hold a write on the same document that the teacher deletes until the
+    // submission commits. The version key also works on documents lacking it.
+    const query = session
+      ? this.classroomTaskModel.findOneAndUpdate(
+          { _id: classroomTaskId },
+          { $inc: { __v: 1 } },
+          { session, timestamps: false, returnDocument: 'after' },
+        )
+      : this.classroomTaskModel.findById(classroomTaskId);
+    const classroomTask = await query
       .select('_id classroomId taskId status dueAt settings taskSnapshot')
       .lean<ClassroomTaskDeadlineConfig>()
       .exec();
     if (!classroomTask) {
       throw new NotFoundException('Classroom task not found');
     }
-    if (classroomTask.taskId.toString() !== taskObjectId.toString()) {
+    if (classroomTask.taskId.toString() !== taskId.toString()) {
       throw new ConflictException('Classroom task does not match task');
     }
     if (!classroomTask.taskSnapshot) {
@@ -1227,71 +1341,18 @@ export class LearningTasksService {
     await this.ensureStudentParticipationContextIsActive(
       classroomTask,
       'submit',
+      session,
     );
-    const cooldownMs = this.getSubmissionCooldownMs();
-    const attemptScope: SubmissionAttemptScope = {
-      classroomTaskId: classroomTaskObjectId,
-      studentId: studentObjectId,
-    };
-
-    let submission: SubmissionWithMeta | undefined;
-    for (
-      let round = 0;
-      round < LearningTasksService.MAX_SUBMISSION_INSERT_ATTEMPTS;
-      round += 1
-    ) {
-      // Read the max number first. A concurrent insert is either visible to
-      // the cooldown read or conflicts with the allocated next number.
-      const highestAttempt = await this.submissionModel
-        .findOne(attemptScope)
-        .read('primary')
-        .sort({ attemptNo: -1 })
-        .select('attemptNo')
-        .lean<Pick<Submission, 'attemptNo'> & WithId>()
-        .exec();
-      const timing = await this.getSubmissionTiming(
-        attemptScope,
-        classroomTask,
-        cooldownMs,
-      );
-      try {
-        submission = await this.submissionModel.create({
-          taskId: taskObjectId,
-          ...attemptScope,
-          attemptNo: (highestAttempt?.attemptNo ?? 0) + 1,
-          contentRevision: 0,
-          ...timing,
-          content: dto.content,
-          meta: dto.meta,
-          status: SubmissionStatus.Submitted,
-        });
-      } catch (error) {
-        if (!this.isSubmissionAttemptCollision(error)) throw error;
-        continue;
-      }
-      break;
-    }
-    if (!submission) {
-      await this.getSubmissionTiming(attemptScope, classroomTask, cooldownMs);
-      throw new ConflictException('提交编号分配冲突，请刷新提交记录后重试。');
-    }
-
-    const editing = await this.getSubmissionEditing(
-      submission,
-      { id: userId, roles: [...STUDENT_ROLES] },
-      classroomTask,
-    );
-    return this.toSubmissionResponse(
-      submission,
-      AiFeedbackStatus.NotRequested,
-      editing,
-    );
+    return classroomTask;
   }
 
-  private isSubmissionAttemptCollision(error: unknown): boolean {
+  private isSubmissionAttemptCollision(
+    error: unknown,
+  ): error is mongo.MongoServerError {
     if (
       !(error instanceof mongo.MongoServerError) ||
       error.code !== 11000 ||
+      error.hasErrorLabel('UnknownTransactionCommitResult') ||
       error.writeConcernError !== undefined
     ) {
       return false;
@@ -1616,11 +1677,13 @@ export class LearningTasksService {
     attemptScope: SubmissionAttemptScope,
     classroomTask: ClassroomTaskDeadlineConfig,
     cooldownMs: number,
+    session?: mongo.ClientSession,
   ) {
     const latestSubmission =
       cooldownMs > 0
         ? await this.submissionModel
             .findOne(attemptScope)
+            .session(session ?? null)
             .read('primary')
             .sort({ submittedAt: -1, _id: -1 })
             .select('_id submittedAt createdAt')
@@ -1736,12 +1799,14 @@ export class LearningTasksService {
   private async ensureStudentParticipationContextIsActive(
     classroomTask: ClassroomTaskDeadlineConfig,
     operation: 'submit' | 'requestAi',
+    session?: mongo.ClientSession,
   ) {
-    const classroom = await this.classroomModel
+    const classroomQuery = this.classroomModel
       .findById(classroomTask.classroomId)
       .select('_id status')
-      .lean<ParticipationClassroomLean>()
-      .exec();
+      .lean<ParticipationClassroomLean>();
+    if (session) classroomQuery.session(session);
+    const classroom = await classroomQuery.exec();
     if (!classroom) {
       throw new NotFoundException('Classroom not found');
     }

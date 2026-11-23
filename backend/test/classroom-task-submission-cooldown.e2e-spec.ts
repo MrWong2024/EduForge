@@ -9,13 +9,15 @@ import type { Server } from 'node:http';
 import { isDeepStrictEqual } from 'node:util';
 import type { INestApplication } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { getConnectionToken } from '@nestjs/mongoose';
+import { getConnectionToken, getModelToken } from '@nestjs/mongoose';
 import { Test, type TestingModule } from '@nestjs/testing';
-import { type Connection, type mongo, STATES, Types } from 'mongoose';
+import { type Connection, type Model, mongo, STATES, Types } from 'mongoose';
 import request from 'supertest';
 import type { App } from 'supertest/types';
 import { AppModule } from '../src/app.module';
 import { configureApp } from '../src/app.setup';
+import { ClassroomTask } from '../src/modules/classrooms/classroom-tasks/schemas/classroom-task.schema';
+import { AiFeedbackJobStatus } from '../src/modules/learning-tasks/ai-feedback/schemas/ai-feedback-job.schema';
 import { SubmissionSchema } from '../src/modules/learning-tasks/schemas/submission.schema';
 import { hashPassword } from '../src/modules/users/password.utils';
 import {
@@ -46,6 +48,11 @@ const accounts = [
     email: `${namespace}.other@example.invalid`,
     role: 'student',
   },
+  {
+    id: new Types.ObjectId(),
+    email: `${namespace}.t2@example.invalid`,
+    role: 'teacher',
+  },
 ];
 // Dedicated synthetic application credential, unrelated to real accounts.
 const password = 'SubmissionCooldown123!';
@@ -66,6 +73,7 @@ type Row = {
   email?: string;
   roles?: string[];
   status?: string;
+  updatedAt?: Date;
 };
 type SubmissionRow = Row & {
   classroomTaskId: Types.ObjectId;
@@ -102,6 +110,14 @@ type Instance = {
   classroomTaskId: string;
   taskId: string;
 };
+type DirectJob = {
+  _id: Types.ObjectId;
+  classroomTaskId: Types.ObjectId;
+  submissionId: Types.ObjectId;
+  taskId: Types.ObjectId;
+  studentId: Types.ObjectId;
+};
+type ParentWriter = 'delete' | 'submit';
 type IndexRow = {
   name: string;
   key: Record<string, unknown>;
@@ -110,7 +126,36 @@ type IndexRow = {
   [field: string]: unknown;
 };
 
-describe('Classroom task submission cooldown (real HTTP and Mongo)', () => {
+function checkpoint() {
+  let signal!: () => void;
+  const reached = new Promise<void>((resolve) => {
+    signal = resolve;
+  });
+  return { reached, signal };
+}
+
+async function waitForWrite(
+  reached: Promise<void>,
+  http: Promise<request.Response>,
+  label: string,
+): Promise<void> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    await Promise.race([
+      reached,
+      http.then(({ status }) => {
+        throw new Error(`${label}_MISSING: HTTP ${status}`);
+      }),
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(() => reject(new Error(`${label}_TIMEOUT`)), 5000);
+      }),
+    ]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+describe('Classroom task submission cooldown and deletion (real HTTP and Mongo)', () => {
   let app: INestApplication<App> | undefined;
   let moduleFixture: TestingModule | undefined;
   let connection: Connection | undefined;
@@ -120,9 +165,13 @@ describe('Classroom task submission cooldown (real HTTP and Mongo)', () => {
   let teacher: Agent;
   let student: Agent;
   let otherStudent: Agent;
+  let otherTeacher: Agent;
+  let classroomTaskModel: Model<ClassroomTask>;
   let courseId = '';
   let mainClassroomId = '';
   let otherClassroomId = '';
+  const published = new Map<string, Instance>();
+  let directJob: DirectJob | undefined;
   function database(): mongo.Db {
     if (!db) throw new Error('COOLDOWN_DATABASE_REQUIRED');
     return db;
@@ -139,24 +188,35 @@ describe('Classroom task submission cooldown (real HTTP and Mongo)', () => {
       .toArray();
   const post = (agent: Agent, path: string, body: Record<string, unknown>) =>
     agent.post(path).timeout(httpTimeout).send(body);
+  const instancePath = (instance: Instance) =>
+    `/api/classrooms/${instance.classroomId}/tasks/${instance.classroomTaskId}`;
   const submissionPath = (instance: Instance) =>
-    `/api/classrooms/${instance.classroomId}/tasks/${instance.classroomTaskId}/submissions`;
+    `${instancePath(instance)}/submissions`;
+  const remove = (instance: Instance, agent = teacher) =>
+    agent.delete(instancePath(instance)).timeout(httpTimeout);
   const submit = (instance: Instance, codeText: string, agent = student) =>
     post(agent, submissionPath(instance), {
       content: { codeText, language: 'typescript' },
     });
-  const storedSubmissions = (instance: Instance, id = studentId) =>
+  const storedSubmissions = (
+    instance: Instance,
+    id: Types.ObjectId | null = studentId,
+  ) =>
     database()
       .collection<SubmissionRow>('submissions')
       .find(
         {
           classroomTaskId: new Types.ObjectId(instance.classroomTaskId),
-          studentId: id,
+          ...(id ? { studentId: id } : {}),
         },
         { maxTimeMS: 5000 },
       )
       .sort({ attemptNo: 1 })
       .toArray();
+  const storedInstances = (instance: Instance) =>
+    rows('classroomtasks', {
+      _id: new Types.ObjectId(instance.classroomTaskId),
+    });
   async function noJobs(): Promise<void> {
     expect(
       await database()
@@ -180,6 +240,121 @@ describe('Classroom task submission cooldown (real HTTP and Mongo)', () => {
         throw new Error('COOLDOWN_OVERLAPPING_HTTP_FAILED');
       return result.value;
     });
+  }
+  async function raceDeleteAndSubmit(
+    instance: Instance,
+    first: ParentWriter,
+    codeText: string,
+  ): Promise<Record<ParentWriter, request.Response>> {
+    const collection: {
+      deleteOne: mongo.Collection['deleteOne'];
+      findOneAndUpdate(
+        filter: mongo.Filter<mongo.Document>,
+        update: mongo.UpdateFilter<mongo.Document> | mongo.Document[],
+        options?: mongo.FindOneAndUpdateOptions,
+      ): Promise<mongo.Document | null>;
+    } = classroomTaskModel.collection;
+    const deleteOne = collection.deleteOne.bind(
+      collection,
+    ) as typeof collection.deleteOne;
+    const updateOne = collection.findOneAndUpdate.bind(
+      collection,
+    ) as typeof collection.findOneAndUpdate;
+    const targetId = new Types.ObjectId(instance.classroomTaskId);
+    const holdingWrite = checkpoint();
+    const releaseWrite = checkpoint();
+    const writeConflict = checkpoint();
+    let winnerSession: mongo.ClientSession | undefined;
+    async function observeParentWrite<Result>(
+      writer: ParentWriter,
+      documentId: unknown,
+      session: mongo.ClientSession | undefined,
+      execute: () => Promise<Result>,
+      wrote: (result: Result) => boolean,
+    ): Promise<Result> {
+      if (
+        !(documentId instanceof Types.ObjectId) ||
+        !documentId.equals(targetId)
+      )
+        return execute();
+      if (!session?.inTransaction())
+        throw new Error('PARENT_WRITE_WITHOUT_TRANSACTION');
+      let result: Result;
+      try {
+        result = await execute();
+      } catch (error: unknown) {
+        if (
+          writer !== first &&
+          winnerSession &&
+          session !== winnerSession &&
+          error instanceof mongo.MongoServerError &&
+          error.code === 112
+        )
+          writeConflict.signal();
+        throw error;
+      }
+      if (writer === first && !winnerSession) {
+        // Pause only after the real write succeeds, while its transaction owns the document.
+        expect(wrote(result)).toBe(true);
+        winnerSession = session;
+        holdingWrite.signal();
+        await releaseWrite.reached;
+      }
+      return result;
+    }
+    const deleteSpy = jest
+      .spyOn(collection, 'deleteOne')
+      .mockImplementation((filter, options) =>
+        observeParentWrite(
+          'delete',
+          filter?._id,
+          options?.session,
+          () => deleteOne(filter, options),
+          (result) => result.deletedCount === 1,
+        ),
+      );
+    const updateSpy = jest
+      .spyOn(collection, 'findOneAndUpdate')
+      .mockImplementation((filter, update, options) =>
+        observeParentWrite(
+          'submit',
+          filter._id,
+          options?.session,
+          () => updateOne(filter, update, options),
+          (result) => result !== null,
+        ),
+      );
+    const requests: Promise<request.Response>[] = [];
+    const send = (kind: ParentWriter) => {
+      const pending = (
+        kind === 'delete' ? remove(instance) : submit(instance, codeText)
+      ).then((response) => response);
+      requests.push(pending);
+      return pending;
+    };
+    try {
+      const winner = send(first);
+      await waitForWrite(holdingWrite.reached, winner, 'FIRST_PARENT_WRITE');
+      const loser = send(first === 'delete' ? 'submit' : 'delete');
+      await waitForWrite(
+        writeConflict.reached,
+        loser,
+        'MONGO_PARENT_WRITE_CONFLICT',
+      );
+      releaseWrite.signal();
+      const [won, lost] = await Promise.all([winner, loser]);
+      return first === 'delete'
+        ? { delete: won, submit: lost }
+        : { delete: lost, submit: won };
+    } finally {
+      releaseWrite.signal();
+      try {
+        await Promise.allSettled(requests);
+      } finally {
+        deleteSpy.mockRestore();
+        updateSpy.mockRestore();
+      }
+    }
   }
   function assertSuccess(
     response: request.Response,
@@ -301,7 +476,9 @@ describe('Classroom task submission cooldown (real HTTP and Mongo)', () => {
     ).expect(201);
     const classroomTaskId = (response.body as { id: string }).id;
     expect(Types.ObjectId.isValid(classroomTaskId)).toBe(true);
-    return { taskId, classroomId, classroomTaskId };
+    const instance = { taskId, classroomId, classroomTaskId };
+    published.set(classroomTaskId, instance);
+    return instance;
   }
   const freshInstance = async (key: string) =>
     publish(await createTemplate(key));
@@ -438,6 +615,9 @@ describe('Classroom task submission cooldown (real HTTP and Mongo)', () => {
     await app.init();
     await assertAuthTestConnection(app.get<Connection>(getConnectionToken()));
     config = app.get(ConfigService);
+    classroomTaskModel = app.get<Model<ClassroomTask>>(
+      getModelToken(ClassroomTask.name),
+    );
     const passwordHash = await hashPassword(password);
     for (const account of accounts)
       await connection.model(User.name, UserSchema).create({
@@ -453,7 +633,13 @@ describe('Classroom task submission cooldown (real HTTP and Mongo)', () => {
     teacher = request.agent(httpServer);
     student = request.agent(httpServer);
     otherStudent = request.agent(httpServer);
-    for (const [index, agent] of [teacher, student, otherStudent].entries())
+    otherTeacher = request.agent(httpServer);
+    for (const [index, agent] of [
+      teacher,
+      student,
+      otherStudent,
+      otherTeacher,
+    ].entries())
       await post(agent, '/api/auth/login', {
         email: accounts[index].email,
         password,
@@ -547,7 +733,10 @@ describe('Classroom task submission cooldown (real HTTP and Mongo)', () => {
           )
         )
           throw new Error('COOLDOWN_INSTANCE_OWNERSHIP_MISMATCH');
-        const instanceIds = instances.map(({ _id }) => _id);
+        const instanceIds = [
+          ...instances.map(({ _id }) => _id),
+          ...Array.from(published.keys(), (id) => new Types.ObjectId(id)),
+        ];
         const submissionFilter = {
           $or: [
             { studentId: { $in: studentIds } },
@@ -557,15 +746,22 @@ describe('Classroom task submission cooldown (real HTTP and Mongo)', () => {
         };
         const submissions = await rows('submissions', submissionFilter);
         if (
-          submissions.some(
-            (row) =>
+          submissions.some((row) => {
+            const instance = published.get(
+              row.classroomTaskId?.toHexString() ?? '',
+            );
+            const ownedInstance =
+              (instance && row.taskId?.equals(instance.taskId)) ||
+              instances.some(
+                (stored) =>
+                  stored._id.equals(row.classroomTaskId) &&
+                  stored.taskId?.equals(row.taskId),
+              );
+            return (
               !studentIds.some((id) => id.equals(row.studentId)) ||
-              !instances.some(
-                (instance) =>
-                  instance._id.equals(row.classroomTaskId) &&
-                  instance.taskId?.equals(row.taskId),
-              ),
-          )
+              !ownedInstance
+            );
+          })
         )
           throw new Error('COOLDOWN_SUBMISSION_OWNERSHIP_MISMATCH');
         const submissionIds = submissions.map(({ _id }) => _id);
@@ -586,13 +782,14 @@ describe('Classroom task submission cooldown (real HTTP and Mongo)', () => {
         if (
           jobs.some(
             (row) =>
-              !studentIds.some((id) => id.equals(row.studentId)) ||
-              !submissions.some(
-                (submission) =>
-                  submission._id.equals(row.submissionId) &&
-                  submission.classroomTaskId?.equals(row.classroomTaskId) &&
-                  submission.taskId?.equals(row.taskId),
-              ),
+              !(directJob && isDeepStrictEqual(row, directJob)) &&
+              (!studentIds.some((id) => id.equals(row.studentId)) ||
+                !submissions.some(
+                  (submission) =>
+                    submission._id.equals(row.submissionId) &&
+                    submission.classroomTaskId?.equals(row.classroomTaskId) &&
+                    submission.taskId?.equals(row.taskId),
+                )),
           )
         )
           throw new Error('COOLDOWN_JOB_OWNERSHIP_MISMATCH');
@@ -968,4 +1165,150 @@ describe('Classroom task submission cooldown (real HTTP and Mongo)', () => {
       ]),
     ).toEqual(before);
   });
+
+  it('deletes only the empty instance in the owned classroom and returns 404 for future requests', async () => {
+    const taskId = await createTemplate('delete-empty');
+    const target = await publish(taskId);
+    const sibling = await publish(taskId, otherClassroomId);
+    const parent = await storedInstances(target);
+    const classroom = await rows('classrooms', {
+      _id: new Types.ObjectId(mainClassroomId),
+    });
+    const template = await rows('tasks', { _id: new Types.ObjectId(taskId) });
+    const otherParent = await storedInstances(sibling);
+    for (const expected of [parent, classroom, template, otherParent])
+      expect(expected).toHaveLength(1);
+
+    await remove(target, student).expect(403);
+    await remove(target, otherTeacher).expect(404);
+    await remove({ ...target, classroomId: otherClassroomId }).expect(404);
+    await remove({ ...target, classroomTaskId: 'invalid-id' }).expect(400);
+    expect(await storedInstances(target)).toEqual(parent);
+
+    await remove(target).expect(200, { ok: true });
+    await remove(target).expect(404);
+    await submit(target, 'const removedInstance = 1;').expect(404);
+    expect(await storedInstances(target)).toEqual([]);
+    expect(await storedSubmissions(target, null)).toEqual([]);
+    expect(await storedInstances(sibling)).toEqual(otherParent);
+    expect(
+      await rows('classrooms', { _id: new Types.ObjectId(mainClassroomId) }),
+    ).toEqual(classroom);
+    expect(await rows('tasks', { _id: new Types.ObjectId(taskId) })).toEqual(
+      template,
+    );
+  });
+
+  it('returns the classroom task conflict code and retains the parent and its submission', async () => {
+    const target = await freshInstance('delete-with-submission');
+    const code = 'const retainedSubmission = 1;';
+    const created = await submit(target, code);
+    const submissions = await storedSubmissions(target, null);
+    expect(submissions).toHaveLength(1);
+    assertSuccess(created, code, submissions);
+    const parent = await storedInstances(target);
+    expect(parent).toHaveLength(1);
+
+    assertError(
+      await remove(target),
+      409,
+      'CLASSROOM_TASK_NOT_EMPTY',
+      instancePath(target),
+    );
+    expect(await storedInstances(target)).toEqual(parent);
+    expect(await storedSubmissions(target, null)).toEqual(submissions);
+  });
+
+  it('retains an instance linked directly by an AI job without relying on a submission', async () => {
+    const target = await freshInstance('delete-with-job');
+    const parent = await storedInstances(target);
+    expect(parent).toHaveLength(1);
+    expect(await storedSubmissions(target, null)).toEqual([]);
+    directJob = {
+      _id: new Types.ObjectId(),
+      classroomTaskId: new Types.ObjectId(target.classroomTaskId),
+      taskId: new Types.ObjectId(target.taskId),
+      studentId,
+      submissionId: new Types.ObjectId(),
+    };
+    const jobs = database().collection<
+      DirectJob & {
+        status: AiFeedbackJobStatus;
+        attempts: number;
+        maxAttempts: number;
+      }
+    >('aifeedbackjobs');
+    await jobs.insertOne(
+      {
+        ...directJob,
+        status: AiFeedbackJobStatus.Dead,
+        attempts: 3,
+        maxAttempts: 3,
+      },
+      { timeoutMS: 5000 },
+    );
+
+    assertError(
+      await remove(target),
+      409,
+      'CLASSROOM_TASK_NOT_EMPTY',
+      instancePath(target),
+    );
+    expect(await storedInstances(target)).toEqual(parent);
+    expect(await storedSubmissions(target, null)).toEqual([]);
+    expect(
+      await jobs.findOne({ _id: directJob._id }, { timeoutMS: 5000 }),
+    ).toMatchObject(directJob);
+  });
+
+  it.each(['delete', 'submit'] as const)(
+    'keeps consistent terminal state after MongoDB write contention when %s commits first',
+    async (first) => {
+      const target = await freshInstance(`delete-overlap-${first}`);
+      const before = await storedInstances(target);
+      expect(before).toHaveLength(1);
+      expect(before[0].status).toBe('ACTIVE');
+      expect(before[0].updatedAt).toBeInstanceOf(Date);
+      expect(await storedSubmissions(target, null)).toEqual([]);
+      const code = 'const firstSubmission = 1;';
+      const responses = await raceDeleteAndSubmit(target, first, code);
+      const parent = await storedInstances(target);
+      const submissions = await storedSubmissions(target, null);
+      console.info(
+        JSON.stringify({
+          stage: 'delete-submission-contention',
+          first,
+          delete: responses.delete.status,
+          submit: responses.submit.status,
+          parents: parent.length,
+          submissions: submissions.length,
+          attempts: submissions.map(({ attemptNo }) => attemptNo),
+        }),
+      );
+
+      if (first === 'delete') {
+        expect(responses.delete.status).toBe(200);
+        expect(responses.delete.body).toEqual({ ok: true });
+        expect(responses.submit.status).toBe(404);
+        expect(parent).toEqual([]);
+        expect(submissions).toEqual([]);
+      } else {
+        assertError(
+          responses.delete,
+          409,
+          'CLASSROOM_TASK_NOT_EMPTY',
+          instancePath(target),
+        );
+        expect(parent).toHaveLength(1);
+        expect(parent[0].updatedAt).toEqual(before[0].updatedAt);
+        expect(submissions).toHaveLength(1);
+        expect(submissions[0].studentId).toEqual(studentId);
+        expect(submissions[0].classroomTaskId.toHexString()).toBe(
+          target.classroomTaskId,
+        );
+        expect(submissions[0].attemptNo).toBe(1);
+        assertSuccess(responses.submit, code, submissions);
+      }
+    },
+  );
 });

@@ -55,6 +55,7 @@ import { Submission } from '../../../learning-tasks/schemas/submission.schema';
 import { User } from '../../../users/schemas/user.schema';
 import { ClassroomStatus } from '../../schemas/classroom.schema';
 import { LearningTasksService } from '../../../learning-tasks/services/learning-tasks.service';
+import { AiFeedbackJob } from '../../../learning-tasks/ai-feedback/schemas/ai-feedback-job.schema';
 import { AiFeedbackJobService } from '../../../learning-tasks/ai-feedback/services/ai-feedback-job.service';
 import { AiFeedbackStatus } from '../../../learning-tasks/ai-feedback/interfaces/ai-feedback-status.enum';
 import { EnrollmentService } from '../../enrollments/services/enrollment.service';
@@ -277,6 +278,8 @@ export class ClassroomTasksService {
     @InjectModel(Task.name) private readonly taskModel: Model<Task>,
     @InjectModel(Submission.name)
     private readonly submissionModel: Model<Submission>,
+    @InjectModel(AiFeedbackJob.name)
+    private readonly aiFeedbackJobModel: Model<AiFeedbackJob>,
     @InjectModel(Feedback.name) private readonly feedbackModel: Model<Feedback>,
     @InjectModel(User.name) private readonly userModel: Model<User>,
     private readonly enrollmentService: EnrollmentService,
@@ -347,6 +350,64 @@ export class ClassroomTasksService {
       }
       throw error;
     }
+  }
+
+  async deleteClassroomTask(
+    classroomId: string,
+    classroomTaskId: string,
+    teacherId: string,
+  ) {
+    await this.ensureTeacher(teacherId);
+    const classroomObjectId = this.parseObjectId(classroomId, 'classroomId');
+    const classroomTaskObjectId = this.parseObjectId(
+      classroomTaskId,
+      'classroomTaskId',
+    );
+    const ownedClassroom = await this.classroomModel
+      .exists({
+        _id: classroomObjectId,
+        teacherId: new Types.ObjectId(teacherId),
+      })
+      .exec();
+    if (!ownedClassroom) {
+      throw new NotFoundException('Classroom not found');
+    }
+
+    const transactionOptions = {
+      readPreference: 'primary',
+      timeoutMS: 10000,
+    } as const;
+    return this.classroomTaskModel.db.transaction(async (session) => {
+      // Deleting the parent competes with the parent write made by submission.
+      const { deletedCount } = await this.classroomTaskModel
+        .deleteOne(
+          { _id: classroomTaskObjectId, classroomId: classroomObjectId },
+          { session },
+        )
+        .exec();
+      if (deletedCount === 0) {
+        throw new NotFoundException('Classroom task not found');
+      }
+
+      const scope = { classroomTaskId: classroomTaskObjectId };
+      const submission = await this.submissionModel
+        .exists(scope)
+        .session(session)
+        .exec();
+      const aiFeedbackJob = await this.aiFeedbackJobModel
+        .exists(scope)
+        .session(session)
+        .exec();
+      if (submission || aiFeedbackJob) {
+        throw new ConflictException({
+          statusCode: 409,
+          code: 'CLASSROOM_TASK_NOT_EMPTY',
+          message: '课堂任务已有作品或 AI 反馈任务，不能删除。',
+        });
+      }
+
+      return { ok: true };
+    }, transactionOptions);
   }
 
   async updateClassroomTask(

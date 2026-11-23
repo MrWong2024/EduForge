@@ -168,11 +168,12 @@ Global SoT 只保留理解跨 Service workflow 必需的稳定不变量，不追
 - Service: `backend/src/modules/classrooms/classroom-tasks/services/classroom-tasks.service.ts`
 - Domain / Responsibility: 发布与管理课堂任务实例，查询可发布模板，组织实例提交与 Z3/Z4 聚合。
 - Upstream: 课堂任务管理、实例提交及实例聚合入口。
-- Downstream / Dependencies: `ClassroomModel`、`ClassroomTaskModel`、`TaskModel`、`SubmissionModel`、`FeedbackModel`、`UserModel`、`EnrollmentService`、`AiFeedbackJobService`、`LearningTasksService`、`AiContextReaderService`。
+- Downstream / Dependencies: `ClassroomModel`、`ClassroomTaskModel`、`TaskModel`、`SubmissionModel`、`AiFeedbackJobModel`、`FeedbackModel`、`UserModel`、`EnrollmentService`、`AiFeedbackJobService`、`LearningTasksService`、`AiContextReaderService`。
 - Consistency / State / Idempotency:
   - 发布前检查班级 owner/运行态与模板发布态/可见性，从同一次 Task 读取形成候选 taskSnapshot（深复制引用），通过 AiContextReaderService 验证候选引用后保存同一份快照；`unique(classroomId,taskId)` 防重复发布，重复键转为受控拒绝。旧实例缺省状态按 ACTIVE 兼容。
   - 新课堂发布写路径同时检查来源难度符合 [Task 写入值域](./handoff-backend-dto-cheatsheet.md#task-template-dto--response-family) 或缺失；非法值返回 400，提示先修改模板难度，不生成非法新快照。校验不放入兼供历史读取的 snapshotTask helper，已有快照及旧实例只读 fallback 保持可读，不因显示归一化回写。
-  - 实例配置更新与生命周期分开处理；撤回前检查无提交，RECALLED 保持封闭。恢复提交仅改状态，不隐式改截止与提交设置；不支持撤回后重发同模板。
+  - 实例配置更新与生命周期分开处理。撤回前检查无提交，保留的 RECALLED 实例仍占用同班模板唯一键。恢复提交仅改状态，保留截止与提交设置。
+  - 教师删除事务先按班级和实例主键写入父文档删除，再在同一 session 顺序检查 `Submission` 和 `AiFeedbackJob` 的直接引用。有任一引用即抛出业务冲突，回滚父文档删除。删除与 [Card 08](#service-card-08) 的提交协调写竞争同一 ClassroomTask。并发终态及公开错误见 [API Map](./handoff-backend-api-map.md#classroom-tasksclassrooms-子资源)。
   - 发布返回、列表/详情、my-task-detail、教师/学生看板、提交详情标题及 AI 分析标题统一优先读实例快照；旧实例仅当前模板只读 fallback，不回填；课堂成员响应由 publicTaskContent 明确投影，避免展开内部引用。模板库/候选仍读当前 Task，资产状态保持当前值。
   - 发布候选查询同时应用当前教师可见性、模板发布状态及已发布 taskId 排除；难度按保存值精确匹配，与既有课程分类、知识模块和 onlyMine 条件取交集，同一最终 filter 用于分页前查询与 countDocuments。未显式指定课程分类时仍按班级课程分类优先排序，不对已发布课堂任务列表增加难度过滤；参数校验见 [DTO Cheatsheet](./handoff-backend-dto-cheatsheet.md#发布候选模板)。
   - 提交入口检查学生身份、Enrollment ACTIVE、课堂归属及班级/实例 ACTIVE，再通过 `createSubmissionForClassroomTask` 绑定实例主键；真正写 Submission 前，由 [Card 08](#service-card-08) 再次 enforce 运行态及截止/迟交边界。
@@ -193,9 +194,9 @@ Global SoT 只保留理解跨 Service workflow 必需的稳定不变量，不追
   - 模板承担资产管理，ClassroomTask 承担教学运行态；内容编辑不得隐式改变状态，同状态输入忽略后继续编辑，归档内容不可改。重复发布保持幂等；归档不检查/级联 ClassroomTask 引用，兼容 restore 入口不恢复归档模板。
   - 模板读范围由当前教师与共享可见性构造；legacy 缺省 visibility 兼容 SHARED，兼容 createdBy query 不突破当前教师范围；共享不转移作者写权限。分类为治理坐标，不作为 Course 外键或发布一致性约束；“未分类”查询兼容字段缺省任务。
   - listTasks 的难度条件按保存值精确匹配，并与既有 scope、status、knowledgeModule、courseLabel 及作者范围取交集；同一完整 filter 在 skip/limit 前应用于 items 与 countDocuments，保留原排序。省略难度时不排除未知、缺失或空串值；查询值域见 [DTO Cheatsheet](./handoff-backend-dto-cheatsheet.md#task-template-dto--response-family)。
-  - Submission 的 classroomTaskId 在 Schema 与内部创建入口必填；attemptNo 分配、冷却及创建时的既有提交查询始终按 classroomTaskId + studentId，不推测实例或按模板分配编号。旧通用写入口拒绝；新实例提交要求实际快照并逐次保存源码与说明，写 Submission 前重验班级/实例 ACTIVE，不以模板当前状态阻断既有实例。
-  - 编号分配最多 3 轮：每轮从主节点先读同作用域最大 attemptNo，开启冷却时才顺序读取最近 submittedAt，随后统一采样 now；禁止迟交且已过截止时优先拒绝，再判断冷却。放行判断、保存的 submittedAt、isLate 与 lateBySeconds 使用同一时间口径；窗口等值允许提交，冷却关闭时跳过窗口限制。仅本轮 insert 已确认未成功且 E11000 的 keyPattern 精确命中现行 `{classroomTaskId:1,studentId:1,attemptNo:1}` 唯一键时重读重判，不直接换号插入。未知写入结果、其它唯一键冲突和插入成功后的编辑资格读取/响应构造失败均不重试创建。三轮耗尽后不再写入，开启冷却时仅复读最新提交，零冷却不增加该读取；仍优先核对截止，命中冷却返回正式 429，否则普通 409 提示刷新提交记录后重试。轮数是请求内部上限，不是学生提交次数限制。
-  - 首提与后续提交均只保存作品，不创建 AI Job、不写 reviewStartedAt；无 Job 时返回 NOT_REQUESTED。手工请求复用 `ensureJobForSubmission`，不重复创建已有 Job；ensure 前统一校验提交/实例关联与快照，学生还重验本人、Enrollment ACTIVE 和班级/实例运行态，教师保留班级 ownership 评阅边界。缺失或残留的旧策略字段均不参与判断。
+  - Submission 的 classroomTaskId 在 Schema 与内部创建入口必填；attemptNo 分配、冷却及创建时的既有提交查询始终按 classroomTaskId + studentId，不推测实例或按模板分配编号。旧通用写入口拒绝；新实例提交要求实际快照并逐次保存源码与说明，写 Submission 前重验班级/实例 ACTIVE，不以模板当前状态阻断既有实例。提交在同一事务内递增父 ClassroomTask 的现有版本键，关闭该操作的时间戳更新，并插入 Submission。父实例协调写与作品插入共同提交或回滚，外部仍读取原有的课堂任务 `updatedAt`。
+  - 编号分配最多 3 轮：每轮从主节点先读同作用域最大 attemptNo，开启冷却时才顺序读取最近 submittedAt，随后统一采样 now；禁止迟交且已过截止时优先拒绝，再判断冷却。放行判断、保存的 submittedAt、isLate 与 lateBySeconds 使用同一时间口径；窗口等值允许提交，冷却关闭时跳过窗口限制。仅本轮 insert 已确认未成功且 E11000 的 keyPattern 精确命中现行 `{classroomTaskId:1,studentId:1,attemptNo:1}` 唯一键时在新事务中重读重判，不直接换号插入。未知提交结果、其它唯一键冲突和事务提交成功后的编辑资格读取/响应构造失败均不重试创建。三轮耗尽后不再写入，开启冷却时仅复读最新提交，零冷却不增加该读取；仍优先核对截止，命中冷却返回正式 429，否则普通 409 提示刷新提交记录后重试。轮数是请求内部上限，不是学生提交次数限制。
+  - 首提与后续提交保存作品，不创建 AI Job、不写 reviewStartedAt；无 Job 时返回 NOT_REQUESTED。手工请求复用 `ensureJobForSubmission`，不重复创建已有 Job；ensure 前统一校验提交/实例关联与快照，学生还重验本人、Enrollment ACTIVE 和班级/实例运行态，教师保留班级 ownership 评阅边界。缺失或残留的旧策略字段均不参与判断。
   - 教师反馈修改复用 submission 管理上下文，校验反馈属于该提交、来源为 TEACHER 且已有作者与当前教师一致。旧教师反馈无 createdBy 时在授权更新中补写，不批量迁移历史数据。
   - 同次作品修改：身份、课堂关联/快照、成员、运行态、输入、截止及历史 Feedback/Job 检查完成后，按 `_id + expectedRevision + 未进入评阅` 单文档条件更新，原子替换允许内容、成对写修改时间/迟交事实并递增 revision。revision=0 的条件显式兼容字段缺失；已有非法版本/评阅状态 fail-closed。任何历史 Feedback/任意状态 Job 都禁止编辑，不要求最新 attempt；不建新 Submission、不增加 attempt、不触发 AI，也不套用创建冷却。首次提交/报表事实保持不变。
   - 评阅固定：新增教师反馈与师生手动 AI request 先完成全部权限、关联、快照及业务输入校验，再以同一 revision 条件原子写入 reviewStartedAt，成功即正式受理；已有有效固定时间且 revision 相同允许继续合法评阅。学生先保存则旧评阅 409；评阅先受理则旧编辑 409，绝不读取新版替换 expectedRevision 重放。GET/轮询/资格读取无固定写入。
@@ -203,7 +204,7 @@ Global SoT 只保留理解跨 Service workflow 必需的稳定不变量，不追
   - 教师反馈创建显式挑选规范业务 payload，版本前置不 spread 进文档；仅捕获预期复合唯一键重复，查回后核对 submission、作者及完整规范 source/type/severity/message/suggestion/tags/scoreHint。完全一致返回既有反馈，不同明确冲突；其它 E11000 继续失败。教师反馈 PATCH 不增加第二套版本机制。历史缺字段只读兼容、不迁移、不修复。
   - 提交详情复用 `buildAiReviewSummary` 对同一 Job 的所有预留请求（含失败尝试）构造用量摘要：各细分独立检查完整性，派生项先逐请求验证再汇总，避免跨请求异常相互抵消；未知及超安全范围不输出失真数值。摘要只读派生，不写回 requests 或升级 budgetVersion；公开字段、包含关系及历史口径见 [Submission DTO](./handoff-backend-dto-cheatsheet.md#submission-request--response-family)。
 - Isolation: 学生只访问本人 Submission；单条读取及写入复用课堂关联上下文校验，教师管理权仅沿实例定位所属班级 owner。Schema required 不替代运行时异常数据保护，关联失败早于内容更新、评阅固定和关联写入；AI 明细仍在授权之后读取。教师默认提交列表与计数共同过滤当前 Enrollment ACTIVE，移除学生历史记录保留。模板级 list/stats 与 ReportsService 共用 teacherSubmissionScope，在分页/计数/去重/反馈聚合前限定自有班级中属于当前 Task 的实例及标量 ObjectId 关联；listMySubmissions 同样排除无关联和非法类型记录。
-- Side Effects: 写模板、Submission、Feedback；正式手工申请委托 JobService 确保 Job。课堂提交冷却及 AI 执行参数见 [Config Matrix](./handoff-backend-config-matrix.md)。
+- Side Effects: 写模板、课堂任务版本键、Submission、Feedback；正式手工申请委托 JobService 确保 Job。课堂提交冷却及 AI 执行参数见 [Config Matrix](./handoff-backend-config-matrix.md)。
 - Important Performance / Recovery: 列表筛选在数据库中组合执行；批量关联发布者与 Job 状态。发布候选复合索引分别以 `createdBy` 或 `visibility` 为前缀，后接 `status,courseLabel,knowledgeModule,updatedAt,createdAt`，支持本人及共享分支；模板列表另有 `{status:1,knowledgeModule:1,createdAt:-1}`。Submission 已移除无课堂关联的 `{taskId:1,studentId:1,attemptNo:1}` 唯一索引声明；本地 `eduforge_dev`、`eduforge_test`、`eduforge_browser_test` 和生产 `eduforge` 的对应旧索引均已完成定向清理，现行 `{classroomTaskId:1,studentId:1,attemptNo:1}` 唯一索引及其 ObjectId partial 条件、其他索引和集合元数据保持不变。缺快照历史实例的读取投影及既有写入门禁继续保留；编号重试耗尽安全拒绝。
 - SoT: `backend/src/modules/learning-tasks/services/learning-tasks.service.ts`；`backend/src/modules/learning-tasks/schemas/task.schema.ts`；`backend/src/modules/learning-tasks/schemas/submission.schema.ts`；`backend/src/modules/learning-tasks/ai-feedback/services/ai-feedback-job.service.ts`；`backend/src/modules/learning-tasks/ai-feedback/lib/ai-review-summary.ts`。
 - Boundary / Non-responsibility: 公开生命周期、提交详情读源及 detail/list 内容暴露差异见 [API Map](./handoff-backend-api-map.md#learning-tasks)，字段/validation 见 [DTO Cheatsheet](./handoff-backend-dto-cheatsheet.md#learning-tasks)；本 Service 不执行 Provider 推理，不用模板资产状态代替课堂运行态。

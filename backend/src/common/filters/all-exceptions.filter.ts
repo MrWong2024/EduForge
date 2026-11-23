@@ -56,7 +56,8 @@ export class AllExceptionsFilter implements ExceptionFilter {
           (status === 403 && candidate === 'LATE_SUBMISSION_NOT_ALLOWED') ||
           (status === 409 &&
             (candidate === 'COURSE_NOT_EMPTY' ||
-              candidate === 'CLASSROOM_NOT_EMPTY')) ||
+              candidate === 'CLASSROOM_NOT_EMPTY' ||
+              candidate === 'CLASSROOM_TASK_NOT_EMPTY')) ||
           (status === 429 && candidate === 'SUBMISSION_COOLDOWN_ACTIVE')
         ) {
           code = candidate;

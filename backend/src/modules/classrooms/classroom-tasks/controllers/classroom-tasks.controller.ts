@@ -1,6 +1,7 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
   Param,
   Patch,
@@ -112,6 +113,21 @@ export class ClassroomTasksController {
       classroomId,
       classroomTaskId,
       dto,
+      user.id,
+    );
+  }
+
+  @UseGuards(RolesGuard)
+  @Roles(...TEACHER_ROLES)
+  @Delete(':classroomId/tasks/:classroomTaskId')
+  deleteClassroomTask(
+    @Param('classroomId') classroomId: string,
+    @Param('classroomTaskId') classroomTaskId: string,
+    @CurrentUser() user: { id: string },
+  ) {
+    return this.classroomTasksService.deleteClassroomTask(
+      classroomId,
+      classroomTaskId,
       user.id,
     );
   }

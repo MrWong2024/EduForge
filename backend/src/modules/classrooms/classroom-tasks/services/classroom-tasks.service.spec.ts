@@ -12,6 +12,7 @@ import {
 } from '../../../learning-tasks/schemas/feedback.schema';
 import { User, UserStatus } from '../../../users/schemas/user.schema';
 import { EnrollmentService } from '../../enrollments/services/enrollment.service';
+import { AiFeedbackJob } from '../../../learning-tasks/ai-feedback/schemas/ai-feedback-job.schema';
 import { AiFeedbackJobService } from '../../../learning-tasks/ai-feedback/services/ai-feedback-job.service';
 import { LearningTasksService } from '../../../learning-tasks/services/learning-tasks.service';
 import { WithId } from '../../../../common/types/with-id.type';
@@ -149,11 +150,19 @@ const createHarness = (options: HarnessOptions = {}) => {
   };
 
   const classroomModel = {
+    exists: jest.fn(() => makeExecOnly({ _id: classroomId })),
     findById: jest.fn(() => makeQuery(classroom)),
     findOne: jest.fn(() => makeQuery({ ...classroom, teacherId: studentId })),
   };
   const courseModel = {};
+  const transactionSession = {};
   const classroomTaskModel = {
+    db: {
+      transaction: jest.fn((run: (session: object) => Promise<unknown>) =>
+        run(transactionSession),
+      ),
+    },
+    deleteOne: jest.fn(() => makeExecOnly({ deletedCount: 1 })),
     findOne: jest.fn(() => makeQuery(classroomTask)),
     findOneAndUpdate: jest.fn(() => makeQuery(classroomTask)),
   };
@@ -201,6 +210,7 @@ const createHarness = (options: HarnessOptions = {}) => {
       Promise.resolve(filterSubmissions(filter).length),
     ),
   };
+  const aiFeedbackJobModel = { exists: jest.fn() };
   const feedbackModel = {
     find: jest.fn((filter: Record<string, unknown>) => {
       const submissionId = filter.submissionId as Types.ObjectId;
@@ -252,6 +262,7 @@ const createHarness = (options: HarnessOptions = {}) => {
     classroomTaskModel as unknown as Model<ClassroomTask>,
     taskModel as unknown as Model<Task>,
     submissionModel as unknown as Model<Submission>,
+    aiFeedbackJobModel as unknown as Model<AiFeedbackJob>,
     feedbackModel as unknown as Model<Feedback>,
     userModel as unknown as Model<User>,
     enrollmentService as unknown as EnrollmentService,
@@ -266,6 +277,8 @@ const createHarness = (options: HarnessOptions = {}) => {
     classroomTaskModel,
     classroomTask,
     submissionModel,
+    aiFeedbackJobModel,
+    transactionSession,
     taskModel,
     feedbackModel,
     learningTasksService,
@@ -342,6 +355,77 @@ const submissionDto = {
     language: 'javascript',
   },
 };
+
+describe('ClassroomTasksService deleteClassroomTask', () => {
+  const setup = (
+    submissionId: Types.ObjectId | null = null,
+    jobId: Types.ObjectId | null = null,
+  ) => {
+    const harness = createHarness({ userRoles: ['teacher'] });
+    const { ids } = harness;
+    const submissionQuery = makeExecOnly(
+      submissionId ? { _id: submissionId } : null,
+    );
+    const jobQuery = makeExecOnly(jobId ? { _id: jobId } : null);
+    const submissionSession = jest.fn(() => submissionQuery);
+    const jobSession = jest.fn(() => jobQuery);
+    harness.submissionModel.exists.mockReturnValueOnce({
+      session: submissionSession,
+    });
+    harness.aiFeedbackJobModel.exists.mockReturnValueOnce({
+      session: jobSession,
+    });
+    return {
+      ...harness,
+      submissionSession,
+      jobSession,
+      remove: () =>
+        harness.service.deleteClassroomTask(
+          ids.classroomId.toString(),
+          ids.classroomTaskId.toString(),
+          ids.studentId.toString(),
+        ),
+    };
+  };
+
+  it('uses the same session for the scoped parent delete and both existence checks', async () => {
+    const harness = setup();
+    await expect(harness.remove()).resolves.toEqual({ ok: true });
+    expect(harness.classroomModel.exists).toHaveBeenCalledWith({
+      _id: harness.ids.classroomId,
+      teacherId: harness.ids.studentId,
+    });
+    expect(harness.classroomTaskModel.db.transaction).toHaveBeenCalledTimes(1);
+    expect(harness.classroomTaskModel.deleteOne).toHaveBeenCalledWith(
+      {
+        _id: harness.ids.classroomTaskId,
+        classroomId: harness.ids.classroomId,
+      },
+      { session: harness.transactionSession },
+    );
+    const scope = { classroomTaskId: harness.ids.classroomTaskId };
+    expect(harness.submissionModel.exists).toHaveBeenCalledWith(scope);
+    expect(harness.aiFeedbackJobModel.exists).toHaveBeenCalledWith(scope);
+    expect(harness.submissionSession).toHaveBeenCalledWith(
+      harness.transactionSession,
+    );
+    expect(harness.jobSession).toHaveBeenCalledWith(harness.transactionSession);
+  });
+
+  it.each(['submission', 'job'])(
+    'rejects the transaction when a directly linked %s exists',
+    async (kind) => {
+      const linkedId = objectId();
+      const harness = setup(
+        kind === 'submission' ? linkedId : null,
+        kind === 'job' ? linkedId : null,
+      );
+      await expect(harness.remove()).rejects.toMatchObject({
+        response: { statusCode: 409, code: 'CLASSROOM_TASK_NOT_EMPTY' },
+      });
+    },
+  );
+});
 
 describe('ClassroomTasksService createClassroomTaskSubmission participation status', () => {
   it('allows ACTIVE classroom, ACTIVE classroomTask and PUBLISHED task submissions', async () => {
@@ -615,6 +699,7 @@ describe('ClassroomTasksService listClassroomTasks publisher contract', () => {
       classroomTaskModel as unknown as Model<ClassroomTask>,
       {} as unknown as Model<Task>,
       {} as unknown as Model<Submission>,
+      {} as unknown as Model<AiFeedbackJob>,
       {} as unknown as Model<Feedback>,
       userModel as unknown as Model<User>,
       {} as unknown as EnrollmentService,
@@ -743,6 +828,7 @@ describe('ClassroomTasksService listPublishableTaskTemplates publisher contract'
       classroomTaskModel as unknown as Model<ClassroomTask>,
       taskModel as unknown as Model<Task>,
       {} as unknown as Model<Submission>,
+      {} as unknown as Model<AiFeedbackJob>,
       {} as unknown as Model<Feedback>,
       userModel as unknown as Model<User>,
       {} as unknown as EnrollmentService,
@@ -813,6 +899,7 @@ describe('ClassroomTasksService listPublishableTaskTemplates publisher contract'
       classroomTaskModel as unknown as Model<ClassroomTask>,
       taskModel as unknown as Model<Task>,
       {} as unknown as Model<Submission>,
+      {} as unknown as Model<AiFeedbackJob>,
       {} as unknown as Model<Feedback>,
       userModel as unknown as Model<User>,
       {} as unknown as EnrollmentService,
