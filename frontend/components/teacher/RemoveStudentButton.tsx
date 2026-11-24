@@ -1,7 +1,16 @@
 "use client";
 
-import { useState } from "react";
+import {
+  createContext,
+  type ReactNode,
+  useCallback,
+  useContext,
+  useRef,
+  useState,
+  useTransition,
+} from "react";
 import { useRouter } from "next/navigation";
+import { ConfirmDialog } from "@/components/blocks/ConfirmDialog";
 import { ErrorState } from "@/components/blocks/ErrorState";
 import { BrowserFetchJsonError, fetchJson } from "@/lib/api/browser-client";
 import { buildErrorDescription, extractRawDetail } from "@/lib/api/error-presenter";
@@ -10,6 +19,7 @@ import { getCommonErrorSummary } from "@/lib/ui/status";
 type RemoveStudentButtonProps = {
   classroomId: string;
   studentUserId: string;
+  studentName: string;
   disabled?: boolean;
 };
 
@@ -19,29 +29,83 @@ type RemoveErrorState = {
   detail?: string;
 };
 
+type RemovalFeedback =
+  | { kind: "success"; message: string }
+  | { kind: "error"; error: RemoveErrorState };
+
+const RemovalFeedbackContext = createContext<
+  ((feedback: RemovalFeedback | null, moveFocus?: boolean) => void) | null
+>(null);
+
+export function ClassroomMemberRemovalFeedback({
+  children,
+  summary,
+}: {
+  children: ReactNode;
+  summary: ReactNode;
+}) {
+  const summaryRef = useRef<HTMLDivElement>(null);
+  const [feedback, setFeedback] = useState<RemovalFeedback | null>(null);
+  const reportFeedback = useCallback(
+    (result: RemovalFeedback | null, moveFocus = false) => {
+      setFeedback(result);
+      if (moveFocus) summaryRef.current?.focus();
+    },
+    [],
+  );
+
+  return (
+    <RemovalFeedbackContext.Provider value={reportFeedback}>
+      <div className="space-y-4">
+        <div ref={summaryRef} tabIndex={-1} className="text-sm text-zinc-600">
+          <p>{summary}</p>
+          {feedback?.kind === "success" ? (
+            <p role="status" className="mt-2 text-emerald-700">
+              {feedback.message}
+            </p>
+          ) : null}
+          {feedback?.kind === "error" ? (
+            <div role="alert" className="mt-2">
+              <ErrorState
+                status={feedback.error.status}
+                title="移除成员失败"
+                description={buildErrorDescription(feedback.error.summary, feedback.error.detail)}
+              />
+            </div>
+          ) : null}
+        </div>
+        {children}
+      </div>
+    </RemovalFeedbackContext.Provider>
+  );
+}
+
 export function RemoveStudentButton({
   classroomId,
   studentUserId,
+  studentName,
   disabled = false,
 }: RemoveStudentButtonProps) {
   const router = useRouter();
+  const reportFeedback = useContext(RemovalFeedbackContext);
+  const [isConfirming, setIsConfirming] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [successMessage, setSuccessMessage] = useState<string | null>(null);
-  const [errorState, setErrorState] = useState<RemoveErrorState | null>(null);
+  const [isRefreshing, startRefresh] = useTransition();
+  const submittingRef = useRef(false);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const isBusy = isSubmitting || isRefreshing;
+
+  if (!reportFeedback) {
+    throw new Error("RemoveStudentButton requires a classroom member feedback area.");
+  }
 
   const handleRemove = async () => {
-    if (disabled || isSubmitting) {
-      return;
-    }
+    if (disabled || !isConfirming || isBusy || submittingRef.current) return;
 
-    const confirmed = window.confirm("确认将该学生移出班级？此操作不会删除历史记录。");
-    if (!confirmed) {
-      return;
-    }
-
+    submittingRef.current = true;
+    setIsConfirming(false);
     setIsSubmitting(true);
-    setErrorState(null);
-    setSuccessMessage(null);
+    reportFeedback(null);
 
     try {
       await fetchJson<unknown>(
@@ -53,8 +117,12 @@ export function RemoveStudentButton({
           },
         }
       );
-      setSuccessMessage("已移除（不删除历史记录）。");
-      router.refresh();
+      const rowHasFocus = triggerRef.current?.closest("tr")?.contains(document.activeElement);
+      reportFeedback(
+        { kind: "success", message: `已将${studentName}移出班级。历史记录已保留。` },
+        rowHasFocus,
+      );
+      startRefresh(() => router.refresh());
     } catch (error) {
       if (error instanceof BrowserFetchJsonError) {
         const detail = extractRawDetail(error.data);
@@ -62,17 +130,18 @@ export function RemoveStudentButton({
           error.status === 403
             ? "无权限管理该班级成员。"
             : getCommonErrorSummary(error.status, "移除成员");
-        setErrorState({
-          status: error.status,
-          summary,
-          detail,
+        reportFeedback({
+          kind: "error",
+          error: { status: error.status, summary, detail },
         });
       } else {
-        setErrorState({
-          summary: "移除成员失败，请稍后重试。",
+        reportFeedback({
+          kind: "error",
+          error: { summary: "移除成员失败，请稍后重试。" },
         });
       }
     } finally {
+      submittingRef.current = false;
       setIsSubmitting(false);
     }
   };
@@ -80,21 +149,29 @@ export function RemoveStudentButton({
   return (
     <div className="space-y-2">
       <button
+        ref={triggerRef}
         type="button"
-        onClick={handleRemove}
-        disabled={disabled || isSubmitting}
-        className="rounded-md bg-red-600 px-3 py-1.5 text-xs font-medium text-white disabled:cursor-not-allowed disabled:bg-zinc-400"
+        onClick={(event) => {
+          if (disabled || isBusy || isConfirming || submittingRef.current) return;
+          event.currentTarget.focus();
+          setIsConfirming(true);
+        }}
+        disabled={disabled}
+        aria-disabled={disabled || isBusy}
+        aria-haspopup="dialog"
+        className="rounded-md bg-red-600 px-3 py-1.5 text-xs font-medium text-white aria-disabled:cursor-not-allowed aria-disabled:bg-zinc-400"
       >
         {isSubmitting ? "移除中..." : "移除"}
       </button>
 
-      {successMessage ? <p className="text-xs text-emerald-700">{successMessage}</p> : null}
-
-      {errorState ? (
-        <ErrorState
-          status={errorState.status}
-          title="移除成员失败"
-          description={buildErrorDescription(errorState.summary, errorState.detail)}
+      {isConfirming ? (
+        <ConfirmDialog
+          title={`移出成员：${studentName}`}
+          description="移出后，该成员将从当前班级名单中移除。已有提交等历史记录会保留。"
+          confirmLabel="移出成员"
+          destructive
+          onCancel={() => setIsConfirming(false)}
+          onConfirm={handleRemove}
         />
       ) : null}
     </div>

@@ -2,7 +2,10 @@ import Link from "next/link";
 import { EmptyState } from "@/components/blocks/EmptyState";
 import { ErrorState } from "@/components/blocks/ErrorState";
 import { PageHeader } from "@/components/blocks/PageHeader";
-import { RemoveStudentButton } from "@/components/teacher/RemoveStudentButton";
+import {
+  ClassroomMemberRemovalFeedback,
+  RemoveStudentButton,
+} from "@/components/teacher/RemoveStudentButton";
 import { fetchJson, FetchJsonError } from "@/lib/api/client";
 import { buildErrorDescription, extractRawDetail } from "@/lib/api/error-presenter";
 import {
@@ -172,91 +175,93 @@ export default async function ClassroomMembersPage({ params, searchParams }: Mem
         </div>
       </section>
 
-      <section className="text-sm text-zinc-600">
-        <p>
-          共 {viewModel.total} 名成员，当前显示 {viewModel.students.length} 名
-        </p>
-      </section>
+      <ClassroomMemberRemovalFeedback
+        key={classroomId}
+        summary={<>共 {viewModel.total} 名成员，当前显示 {viewModel.students.length} 名</>}
+      >
+        {viewModel.students.length === 0 ? (
+          <EmptyState title="暂无成员" description="当前筛选条件下没有可展示成员。" />
+        ) : (
+          <div className="overflow-x-auto rounded-lg border border-zinc-200 bg-white">
+            <table className="min-w-full border-collapse text-sm">
+              <thead className="bg-zinc-50 text-left text-zinc-600">
+                <tr>
+                  <th className="px-4 py-3">学生</th>
+                  <th className="px-4 py-3">学号</th>
+                  <th className="px-4 py-3">状态</th>
+                  <th className="px-4 py-3">加入时间</th>
+                  <th className="px-4 py-3">操作</th>
+                </tr>
+              </thead>
+              <tbody>
+                {viewModel.students.map((student, index) => {
+                  const statusUpper = toStatusUpper(student.status);
+                  const displayName = student.name ?? student.email ?? `成员 ${index + 1}`;
 
-      {viewModel.students.length === 0 ? (
-        <EmptyState title="暂无成员" description="当前筛选条件下没有可展示成员。" />
-      ) : (
-        <div className="overflow-x-auto rounded-lg border border-zinc-200 bg-white">
-          <table className="min-w-full border-collapse text-sm">
-            <thead className="bg-zinc-50 text-left text-zinc-600">
-              <tr>
-                <th className="px-4 py-3">学生</th>
-                <th className="px-4 py-3">学号</th>
-                <th className="px-4 py-3">状态</th>
-                <th className="px-4 py-3">加入时间</th>
-                <th className="px-4 py-3">操作</th>
-              </tr>
-            </thead>
-            <tbody>
-              {viewModel.students.map((student, index) => {
-                const statusUpper = toStatusUpper(student.status);
-                const displayName = student.name ?? student.email ?? `成员 ${index + 1}`;
+                  return (
+                    <tr key={student.userId ?? `member-${index}`} className="border-t border-zinc-100 align-top">
+                      <td className="px-4 py-3">
+                        <p className="font-medium text-zinc-900">{displayName}</p>
+                        {student.email ? <p className="text-xs text-zinc-500">{student.email}</p> : null}
+                      </td>
+                      <td className="px-4 py-3">{toDisplayText(student.studentNo)}</td>
+                      <td className="px-4 py-3">{getEnrollmentStatusLabel(student.status)}</td>
+                      <td className="px-4 py-3">{toDisplayDate(student.enrolledAt)}</td>
+                      <td className="px-4 py-3">
+                        {statusUpper === "REMOVED" ? (
+                          <span className="text-zinc-500">已移除</span>
+                        ) : student.userId ? (
+                          <RemoveStudentButton
+                            classroomId={classroomId}
+                            studentUserId={student.userId}
+                            studentName={displayName}
+                          />
+                        ) : (
+                          <span className="text-zinc-500">缺少成员标识</span>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
 
-                return (
-                  <tr key={student.userId ?? `member-${index}`} className="border-t border-zinc-100 align-top">
-                    <td className="px-4 py-3">
-                      <p className="font-medium text-zinc-900">{displayName}</p>
-                      {student.email ? <p className="text-xs text-zinc-500">{student.email}</p> : null}
-                    </td>
-                    <td className="px-4 py-3">{toDisplayText(student.studentNo)}</td>
-                    <td className="px-4 py-3">{getEnrollmentStatusLabel(student.status)}</td>
-                    <td className="px-4 py-3">{toDisplayDate(student.enrolledAt)}</td>
-                    <td className="px-4 py-3">
-                      {statusUpper === "REMOVED" ? (
-                        <span className="text-zinc-500">已移除</span>
-                      ) : student.userId ? (
-                        <RemoveStudentButton classroomId={classroomId} studentUserId={student.userId} />
-                      ) : (
-                        <span className="text-zinc-500">缺少成员标识</span>
-                      )}
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
-      )}
-
-      {viewModel.total > MEMBERS_PAGE_SIZE ? (
-        <div className="flex flex-wrap items-center gap-4 text-sm">
-          <span className="text-zinc-600">
-            第 {viewModel.currentPage} / {viewModel.totalPages} 页
-          </span>
-          {viewModel.currentPage > 1 ? (
-            <Link
-              href={buildMembersHref(classroomId, {
-                includeRemoved: viewModel.query.includeRemoved,
-                page: viewModel.currentPage - 1,
-              })}
-              className="text-blue-700 hover:underline"
-            >
-              上一页
-            </Link>
-          ) : (
-            <span className="text-zinc-400">上一页</span>
-          )}
-          {viewModel.currentPage < viewModel.totalPages ? (
-            <Link
-              href={buildMembersHref(classroomId, {
-                includeRemoved: viewModel.query.includeRemoved,
-                page: viewModel.currentPage + 1,
-              })}
-              className="text-blue-700 hover:underline"
-            >
-              下一页
-            </Link>
-          ) : (
-            <span className="text-zinc-400">下一页</span>
-          )}
-        </div>
-      ) : null}
-
+        {viewModel.total > MEMBERS_PAGE_SIZE ? (
+          <div className="flex flex-wrap items-center gap-4 text-sm">
+            <span className="text-zinc-600">
+              第 {viewModel.currentPage} / {viewModel.totalPages} 页
+            </span>
+            {viewModel.currentPage > 1 ? (
+              <Link
+                href={buildMembersHref(classroomId, {
+                  includeRemoved: viewModel.query.includeRemoved,
+                  page: viewModel.currentPage - 1,
+                })}
+                className="text-blue-700 hover:underline"
+              >
+                上一页
+              </Link>
+            ) : (
+              <span className="text-zinc-400">上一页</span>
+            )}
+            {viewModel.currentPage < viewModel.totalPages ? (
+              <Link
+                href={buildMembersHref(classroomId, {
+                  includeRemoved: viewModel.query.includeRemoved,
+                  page: viewModel.currentPage + 1,
+                })}
+                className="text-blue-700 hover:underline"
+              >
+                下一页
+              </Link>
+            ) : (
+              <span className="text-zinc-400">下一页</span>
+            )}
+          </div>
+        ) : null}
+      </ClassroomMemberRemovalFeedback>
     </section>
   );
 }

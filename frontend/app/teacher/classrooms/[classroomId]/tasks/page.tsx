@@ -4,7 +4,7 @@ import { ErrorState } from "@/components/blocks/ErrorState";
 import { PageHeader } from "@/components/blocks/PageHeader";
 import { EditClassroomTaskForm } from "@/components/teacher/EditClassroomTaskForm";
 import { ClassroomTaskLifecycleActions } from "@/components/teacher/ClassroomTaskLifecycleActions";
-import { ClassroomTaskListInteractions } from "@/components/teacher/ClassroomTaskListInteractions";
+import { ClassroomTaskDeletionNotice, ClassroomTaskListInteractions } from "@/components/teacher/ClassroomTaskListInteractions";
 import { PublishClassroomTaskForm } from "@/components/teacher/PublishClassroomTaskForm";
 import { fetchJson, FetchJsonError } from "@/lib/api/client";
 import {
@@ -400,6 +400,7 @@ export default async function ClassroomTasksPage({
       <h2 id={PUBLISHED_TASKS_HEADING_ID} tabIndex={-1} className="text-base font-semibold text-zinc-900">
         已发布的课堂任务
       </h2>
+      <ClassroomTaskDeletionNotice />
       <p className="text-sm text-zinc-600">
         共 {totalPublishedTasks} 个课堂任务，当前显示{" "}
         {viewModel.taskList.items.length} 个

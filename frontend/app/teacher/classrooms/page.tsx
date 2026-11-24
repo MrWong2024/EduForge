@@ -6,6 +6,7 @@ import { PageHeader } from "@/components/blocks/PageHeader";
 import { Tabs } from "@/components/blocks/Tabs";
 import { CreateClassroomForm } from "@/components/teacher/CreateClassroomForm";
 import { ClassroomLifecycleActions } from "@/components/teacher/ClassroomLifecycleActions";
+import { TeacherLifecycleList, TeacherLifecycleListSummary } from "@/components/teacher/TeacherLifecycleList";
 import { fetchJson, FetchJsonError } from "@/lib/api/client";
 import { buildErrorDescription, extractRawDetail } from "@/lib/api/error-presenter";
 import {
@@ -230,7 +231,7 @@ export default async function TeacherClassroomsPage({ searchParams }: TeacherCla
   );
 
   return (
-    <section className="space-y-4">
+    <TeacherLifecycleList>
       <PageHeader
         title="班级"
         description={`当前视图：${CLASSROOM_STATUS_VIEW_LABEL[viewModel.statusView]} · 第 ${currentPage} 页，每页 ${currentLimit} 条`}
@@ -240,9 +241,9 @@ export default async function TeacherClassroomsPage({ searchParams }: TeacherCla
 
       <CreateClassroomForm courses={viewModel.courses} initialCourseId={viewModel.selectedCourseId} />
 
-      <div className="text-sm text-zinc-600">
+      <TeacherLifecycleListSummary>
         共 {totalClassroomsCount} 个班级，当前显示 {displayedClassroomsCount} 个
-      </div>
+      </TeacherLifecycleListSummary>
 
       {viewModel.response.items.length === 0 ? (
         <EmptyState
@@ -276,6 +277,7 @@ export default async function TeacherClassroomsPage({ searchParams }: TeacherCla
             <tbody>
               {viewModel.response.items.map((item, index) => {
                 const classroomId = item.id;
+                const displayName = toDisplayText(item.name, "未命名班级");
                 const courseName = item.courseId ? courseNameMap.get(item.courseId) : undefined;
                 const statusMeta =
                   item.status && (item.status === "ACTIVE" || item.status === "ARCHIVED")
@@ -284,7 +286,7 @@ export default async function TeacherClassroomsPage({ searchParams }: TeacherCla
 
                 return (
                   <tr key={classroomId ?? `classroom-${index}`} className="border-t border-zinc-100">
-                    <td className="px-4 py-3">{toDisplayText(item.name, "未命名班级")}</td>
+                    <td className="px-4 py-3">{displayName}</td>
                     <td className="px-4 py-3">
                       {statusMeta ? (
                         <div className="space-y-1">
@@ -319,7 +321,12 @@ export default async function TeacherClassroomsPage({ searchParams }: TeacherCla
                             </Link>
                           </div>
 
-                          <ClassroomLifecycleActions classroomId={classroomId} status={item.status} />
+                          <ClassroomLifecycleActions
+                            classroomId={classroomId}
+                            displayName={displayName}
+                            status={item.status}
+                            hasStatusFilter={statusFilter !== undefined}
+                          />
                         </div>
                       ) : (
                         <span className="text-zinc-500">缺少班级标识</span>
@@ -372,7 +379,7 @@ export default async function TeacherClassroomsPage({ searchParams }: TeacherCla
           )}
         </div>
       ) : null}
-    </section>
+    </TeacherLifecycleList>
   );
 }
 

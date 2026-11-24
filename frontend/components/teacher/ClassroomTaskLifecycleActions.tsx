@@ -1,6 +1,6 @@
 "use client";
 
-import { type ReactNode, useRef, useState, useTransition } from "react";
+import { type ReactNode, useLayoutEffect, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { ConfirmDialog } from "@/components/blocks/ConfirmDialog";
 import { ErrorState } from "@/components/blocks/ErrorState";
@@ -11,7 +11,7 @@ import {
   type UpdateClassroomTaskStatusRequest,
 } from "@/lib/api/types-teacher";
 import { getClassroomTaskStatusLabel } from "@/lib/ui/status";
-import { useClassroomTaskPublishReceipt } from "./ClassroomTaskListInteractions";
+import { useClassroomTaskListInteractions } from "./ClassroomTaskListInteractions";
 
 type ClassroomTaskLifecycleActionsProps = {
   classroomId: string;
@@ -106,7 +106,7 @@ export function ClassroomTaskLifecycleActions({
   listHeadingId,
 }: ClassroomTaskLifecycleActionsProps) {
   const router = useRouter();
-  const [, setPublishedTaskId] = useClassroomTaskPublishReceipt();
+  const { receipt: [, setPublishedTaskId], setDeletionNotice } = useClassroomTaskListInteractions();
   const [pendingAction, setPendingAction] = useState<PendingAction | null>(null);
   const [runningAction, setRunningAction] = useState<LifecycleAction | null>(null);
   const [isRefreshing, startRefresh] = useTransition();
@@ -115,12 +115,22 @@ export function ClassroomTaskLifecycleActions({
   const confirmingRef = useRef(false);
   const actionsRef = useRef<HTMLDivElement>(null);
   const deleteButtonRef = useRef<HTMLButtonElement>(null);
+  const restoreListFocusOnRemoval = useRef(false);
 
   const statusValue = normalizeClassroomTaskStatus(status);
   const statusBadge = statusValue ? STATUS_BADGE[statusValue] : UNKNOWN_STATUS_BADGE;
   const canRecall = statusValue === "ACTIVE" || statusValue === "CLOSED";
   const isBusy = runningAction !== null || isRefreshing;
   const primaryAction = statusValue === "ACTIVE" ? "CLOSED" : "ACTIVE";
+
+  useLayoutEffect(() => {
+    const row = actionsRef.current?.closest("tr");
+    return () => {
+      if (restoreListFocusOnRemoval.current && row?.contains(document.activeElement)) {
+        document.getElementById(listHeadingId)?.focus();
+      }
+    };
+  }, [listHeadingId]);
 
   const handleConfirm = async () => {
     if (!pendingAction || confirmingRef.current) return;
@@ -133,14 +143,19 @@ export function ClassroomTaskLifecycleActions({
     setRunningAction(action);
     setSuccessMessage(null);
     setErrorState(null);
+    if (action === "DELETE") setDeletionNotice(null);
+
+    const clearMatchingReceipt = () => {
+      setPublishedTaskId((publishedId) => publishedId === targetId ? null : publishedId);
+    };
 
     try {
       if (action === "DELETE") {
         const response = await fetchJson<{ ok?: boolean } | null>(path, { method: "DELETE", signal });
         if (response?.ok !== true) throw new Error("Unexpected classroom task deletion response");
 
-        setPublishedTaskId((publishedId) => publishedId === targetId ? null : publishedId);
-        if (actionsRef.current?.contains(document.activeElement)) {
+        clearMatchingReceipt();
+        if (actionsRef.current?.closest("tr")?.contains(document.activeElement)) {
           document.getElementById(listHeadingId)?.focus();
         }
       } else {
@@ -163,12 +178,21 @@ export function ClassroomTaskLifecycleActions({
       const notEmpty = action === "DELETE" && httpStatus === 409
         && data !== null && typeof data === "object" && "code" in data
         && data.code === "CLASSROOM_TASK_NOT_EMPTY";
-      const unconfirmed = httpStatus === undefined || httpStatus >= 500;
-      setErrorState({
-        action,
-        status: httpStatus,
-        reason: notEmpty ? "notEmpty" : unconfirmed ? "unconfirmed" : undefined,
-      });
+      const unconfirmed = httpStatus === undefined || httpStatus >= 500
+        || (action === "DELETE" && httpStatus === 408);
+      if (action === "DELETE" && (httpStatus === 404 || unconfirmed)) {
+        clearMatchingReceipt();
+        restoreListFocusOnRemoval.current = true;
+        setDeletionNotice(httpStatus === 404
+          ? `“${taskTitle}”已不可用，请核对任务列表。`
+          : `无法确认是否已删除“${taskTitle}”，请核对任务列表后再操作。`);
+      } else {
+        setErrorState({
+          action,
+          status: httpStatus,
+          reason: notEmpty ? "notEmpty" : unconfirmed ? "unconfirmed" : undefined,
+        });
+      }
       if (unconfirmed || httpStatus === 404 || httpStatus === 409) {
         startRefresh(() => router.refresh());
       }

@@ -1,12 +1,13 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode, type RefObject } from "react";
 import { createPortal } from "react-dom";
 
 type FloatingMoreMenuProps = {
   isOpen: boolean;
   onOpenChange: (open: boolean) => void;
   disabled?: boolean;
+  triggerRef?: RefObject<HTMLButtonElement | null>;
   label?: string;
   menuClassName?: string;
   children: ReactNode;
@@ -26,11 +27,13 @@ export function FloatingMoreMenu({
   isOpen,
   onOpenChange,
   disabled = false,
+  triggerRef: providedTriggerRef,
   label = "更多",
   menuClassName,
   children,
 }: FloatingMoreMenuProps) {
-  const triggerRef = useRef<HTMLButtonElement | null>(null);
+  const localTriggerRef = useRef<HTMLButtonElement>(null);
+  const triggerRef = providedTriggerRef ?? localTriggerRef;
   const menuRef = useRef<HTMLDivElement | null>(null);
   const [position, setPosition] = useState<MenuPosition | null>(null);
 
@@ -67,7 +70,7 @@ export function FloatingMoreMenu({
     }
 
     setPosition({ top, left });
-  }, []);
+  }, [triggerRef]);
 
   useEffect(() => {
     if (!isOpen) {
@@ -116,7 +119,7 @@ export function FloatingMoreMenu({
       window.removeEventListener("resize", handleViewportChange);
       window.removeEventListener("scroll", handleViewportChange, true);
     };
-  }, [closeMenu, isOpen, updatePosition]);
+  }, [closeMenu, isOpen, triggerRef, updatePosition]);
 
   return (
     <>
@@ -125,6 +128,7 @@ export function FloatingMoreMenu({
           ref={triggerRef}
           type="button"
           onClick={() => {
+            if (disabled) return;
             if (isOpen) {
               closeMenu();
               return;
@@ -132,10 +136,10 @@ export function FloatingMoreMenu({
             setPosition(null);
             onOpenChange(true);
           }}
-          disabled={disabled}
+          aria-disabled={disabled}
           aria-haspopup="menu"
           aria-expanded={isOpen}
-          className="rounded-md border border-zinc-300 px-2.5 py-1 text-xs font-medium text-zinc-700 hover:bg-zinc-50 disabled:cursor-not-allowed disabled:bg-zinc-100 disabled:text-zinc-400"
+          className="rounded-md border border-zinc-300 px-2.5 py-1 text-xs font-medium text-zinc-700 hover:bg-zinc-50 aria-disabled:cursor-not-allowed aria-disabled:bg-zinc-100 aria-disabled:text-zinc-400"
         >
           {label}
         </button>

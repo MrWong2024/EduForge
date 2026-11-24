@@ -6,6 +6,7 @@ import { PageHeader } from "@/components/blocks/PageHeader";
 import { Tabs } from "@/components/blocks/Tabs";
 import { CreateCourseForm } from "@/components/teacher/CreateCourseForm";
 import { CourseLifecycleActions } from "@/components/teacher/CourseLifecycleActions";
+import { TeacherLifecycleList, TeacherLifecycleListSummary } from "@/components/teacher/TeacherLifecycleList";
 import { fetchJson, FetchJsonError } from "@/lib/api/client";
 import { buildErrorDescription, extractRawDetail } from "@/lib/api/error-presenter";
 import {
@@ -191,7 +192,7 @@ export default async function TeacherCoursesPage({ searchParams }: TeacherCourse
   const archivedEmptyActionHref = buildCourseListHref(1, currentLimit, "active");
 
   return (
-    <section className="space-y-4">
+    <TeacherLifecycleList>
       <PageHeader
         title="课程"
         description={`当前视图：${COURSE_STATUS_VIEW_LABEL[viewModel.statusView]} · 第 ${currentPage} 页，每页 ${currentLimit} 条`}
@@ -206,9 +207,9 @@ export default async function TeacherCoursesPage({ searchParams }: TeacherCourse
 
       <CreateCourseForm />
 
-      <div className="text-sm text-zinc-600">
+      <TeacherLifecycleListSummary>
         共 {totalCoursesCount} 门课程，当前显示 {displayedCoursesCount} 门
-      </div>
+      </TeacherLifecycleListSummary>
 
       {viewModel.response.items.length === 0 ? (
         <EmptyState
@@ -243,12 +244,13 @@ export default async function TeacherCoursesPage({ searchParams }: TeacherCourse
             <tbody>
               {viewModel.response.items.map((course, index) => {
                 const courseId = course.id;
+                const displayName = toDisplayText(course.name);
                 const statusMeta = course.status ? COURSE_STATUS_META[course.status] : undefined;
 
                 return (
                   <tr key={courseId ?? `course-${index}`} className="border-t border-zinc-100">
                     <td className="px-4 py-3">{toDisplayText(course.code)}</td>
-                    <td className="px-4 py-3">{toDisplayText(course.name)}</td>
+                    <td className="px-4 py-3">{displayName}</td>
                     <td className="px-4 py-3">{toDisplayText(course.term)}</td>
                     <td className="px-4 py-3">
                       <span
@@ -299,7 +301,12 @@ export default async function TeacherCoursesPage({ searchParams }: TeacherCourse
                             </Link>
                           </div>
 
-                          <CourseLifecycleActions courseId={courseId} status={course.status} />
+                          <CourseLifecycleActions
+                            courseId={courseId}
+                            displayName={displayName}
+                            status={course.status}
+                            hasStatusFilter={statusFilter !== undefined}
+                          />
                         </div>
                       ) : (
                         <span className="text-zinc-500">缺少课程标识</span>
@@ -340,7 +347,7 @@ export default async function TeacherCoursesPage({ searchParams }: TeacherCourse
           )}
         </div>
       ) : null}
-    </section>
+    </TeacherLifecycleList>
   );
 }
 

@@ -28,7 +28,7 @@
 | RefreshButton | `components/blocks/RefreshButton.tsx` | 复用 router.refresh 的显式刷新入口，不持久化草稿、不轮询 |
 | Tabs | `components/blocks/Tabs.tsx` | 任务工作区 tab 导航展示；不在三件套页面重复实现 |
 | FloatingMoreMenu | `components/blocks/FloatingMoreMenu.tsx` | 生命周期“更多”菜单的共享浮层基础：Portal 定位、视口边界与外部点击/Esc/滚动关闭；业务组件拥有菜单开关与具体动作，不在业务层复制浮层机制 |
-| ConfirmDialog | `components/blocks/ConfirmDialog.tsx` | 通过原生 `<dialog>` 和 `showModal()` 展示可访问的标题、说明及确认/取消动作，处理初始焦点、Esc 取消与关闭后的焦点交接。调用方提供具体文案、业务请求与结果状态；当前用于教师课堂任务列表的关闭、恢复提交、撤回和删除 |
+| ConfirmDialog | `components/blocks/ConfirmDialog.tsx` | 使用原生 `<dialog>` 和 `showModal()` 关联标题、说明及确认/取消按钮，默认聚焦取消。取消和 Esc 关闭，点击遮罩不触发确认。调用方提供对象名称、业务请求与结果状态。用于教师端课程和班级的归档、恢复、删除，任务模板的发布和归档，成员移出，以及课堂任务的关闭、恢复提交、撤回和删除 |
 
 ## 4) Auth / Account
 
@@ -69,6 +69,7 @@
 |---|---|---|
 | CreateCourseForm | `components/teacher/CreateCourseForm.tsx` | 建课表单与成功导航，课程分类复用共享候选；学期示例不自动成为输入值 |
 | CourseLifecycleActions | `components/teacher/CourseLifecycleActions.tsx` | 课程列表“更多”菜单、动作 pending/确认/结果状态，组合 FloatingMoreMenu；负责归档、恢复与删除，保留当前列表视图；空对象删除条件由后端判定 |
+| TeacherLifecycleList | `components/teacher/TeacherLifecycleList.tsx` | 课程与班级列表共享的页面级结果提示及可聚焦摘要。操作后行离开当前视图时，摘要接回仍位于该行的焦点，结果在刷新后保留 |
 | EditCourseForm | `components/teacher/EditCourseForm.tsx` | 课程基础信息编辑，复用 `lib/course-edit.ts` 判断并只提交字段净变化，无净变化不发请求；课程分类未改省略、明确清空发送空串；失败保留草稿，成功返回课程总览并刷新，不承担列表加载 |
 | CourseOverviewPage | `app/teacher/courses/[courseId]/overview/page.tsx` | 服务端加载、窗口/排序/分页及只读班级明细组合；页面摘要只汇总当前页，指标字段适配与含义遵循 API Owner，不把分页摘要当全课程统计 |
 | CreateClassroomForm | `components/teacher/CreateClassroomForm.tsx` | 建班表单及局部输入/提交状态，不负责班级列表加载；名称示例不自动成为输入值 |
@@ -82,12 +83,12 @@
 | LearningTaskFilters | `components/teacher/LearningTaskFilters.tsx` | 模板视图/筛选（含难度）的 URL 状态、分页、列表展示与编辑/查看入口；清空及活动筛选判断包含难度，控件由 URL/初始 props 恢复；“评阅标准”列复用纯 helper 显示文字已填写/未填写，“分类”单元格内复用共享难度显示；桌面五列、窄屏纵向条目，无需横向滚动；保留列表返回上下文，筛选后回首屏；复用共享可见性和排序模块，不在当前页伪造完整候选或发起发布/归档 |
 | ClassroomTasksPage | `app/teacher/classrooms/[classroomId]/tasks/page.tsx` | 班级任务与发布候选分别 SSR 加载，解析并下传候选难度。按权威列表总数计算越界时的有效页地址，保留候选条件；提供列表标题作为焦点回退目标，具体调用合同见 API Map |
 | PublishClassroomTaskForm | `components/teacher/PublishClassroomTaskForm.tsx` | 可见已发布模板的筛选、候选追加加载、选择状态与实例发布；难度及既有筛选变化时清除选择并重置候选，复用请求 epoch 和局部等待状态，过期响应不污染新候选；等待及当前候选成员校验同时作用于控件和提交入口，截止/迟交草稿独立保留，详细状态合同见 API Map。课程分类复用共享候选；发布者来源与已选模板摘要由本组件展示，候选及摘要复用共享难度显示；评阅标准摘要复用纯 helper，候选未提供 rubric 时提示到模板详情核对，不宣称未填写。不提供 AI 策略选择，不创建/编辑模板，不自行判定后端候选全集 |
-| ClassroomTaskListInteractions | `components/teacher/ClassroomTaskListInteractions.tsx` | 共享同一班级任务页内的发布回执实例 ID。发布表单写入回执并渲染详情链接，删除成功时仅清除匹配的回执。列表页越界时按服务端提供的地址执行客户端同页替换，保留页面外壳、发布草稿和列表标题焦点 |
+| ClassroomTaskListInteractions | `components/teacher/ClassroomTaskListInteractions.tsx` | 共享同一班级任务页的发布回执实例 ID 与列表级删除提示。删除成功、返回 404 或结果不明时仅清除仍指向本次实例的详情链接，非空 409 保留链接。404 提示实例已不可用，结果不明提示核对列表，提示在任务行消失后仍可见。列表页越界时按服务端提供的地址执行客户端同页替换，保留发布草稿和列表标题焦点 |
 | TeacherTaskDetailPage | `app/teacher/classrooms/[classroomId]/tasks/[classroomTaskId]/page.tsx` | 加载课堂任务正式投影，基础信息展示难度并组合共享 rubric；难度显示复用共享 helper，字段读源见 API Map |
 | ClassroomTaskLifecycleActions | `components/teacher/ClassroomTaskLifecycleActions.tsx` | 展示实例状态，持有本次确认的动作与实例，提供与动作相关的后果说明。确认后锁定本次请求并处理结果与刷新；删除行将消失时以列表标题承接行内焦点。调用与错误适配见 API Map |
 | EditClassroomTaskForm | `components/teacher/EditClassroomTaskForm.tsx` | 列表行内展开，截止时间按浏览器本地分钟显示和比较，未改分钟省略，实际改动转换为 UTC 或明确清空；仅保存逐字段净变化，无变化不发请求。成功后立即重开采用正式回执设置，后续打开可采用更新列表；展开期间的刷新不重绑草稿。失败保留草稿及基准，普通 409 提示刷新且不重放；ACTIVE/CLOSED 可编辑，RECALLED 无入口，不修改模板或状态流；部分更新与竞争结果见 [Backend API](./handoff-backend-api-map.md#classroom-tasksclassrooms-子资源) |
 | PublishTaskStatusButton | `components/teacher/PublishTaskStatusButton.tsx` | 单一模板发布操作；当前 classroomTask 详情页不使用，模板生命周期入口留在模板层 |
-| RemoveStudentButton | `components/teacher/RemoveStudentButton.tsx` | 单个成员移除及动作结果，不负责成员列表或成员关系判定 |
+| RemoveStudentButton | `components/teacher/RemoveStudentButton.tsx` | 确认移出当前展示姓名对应的成员。页面级汇总保留移出结果，在行移除时承接仍位于该行的焦点。成员关系与历史记录由后端维护 |
 | TeacherFeedbackForm | `components/teacher/TeacherFeedbackForm.tsx` | 教师反馈创建输入与提交，复用统一反馈选项；评语草稿绑定实际查看版本，刷新不重绑，冲突/未知结果保留草稿并显式核对当前作品与反馈后确认继续；标签可选，不提供 scoreHint 入口，合同与归一化归 API Owner |
 | TeacherFeedbackHistory | `components/teacher/TeacherFeedbackHistory.tsx` | 教师与 AI 反馈历史组合及编辑态切换，同一时间只展开一个编辑表单；仅明确 TEACHER 且有 id 的反馈可修改，AI 只读；未知或缺失来源有记录时才展示“其他反馈（来源未识别）”只读兜底，不作为正式业务来源 |
 | TeacherFeedbackEditForm | `components/teacher/TeacherFeedbackEditForm.tsx` | 单条教师反馈原地编辑、请求/错误状态、保存后退出编辑；与创建表单保持输入能力一致，不展示或编辑 scoreHint，不承担历史列表状态 |

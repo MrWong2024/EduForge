@@ -1,17 +1,21 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
+import { ConfirmDialog } from "@/components/blocks/ConfirmDialog";
 import { ErrorState } from "@/components/blocks/ErrorState";
 import { FloatingMoreMenu } from "@/components/blocks/FloatingMoreMenu";
 import { BrowserFetchJsonError, fetchJson } from "@/lib/api/browser-client";
 import { buildErrorDescription, extractRawDetail } from "@/lib/api/error-presenter";
 import { getCommonErrorSummary } from "@/lib/ui/status";
 import { type ClassroomStatus, type UpdateClassroomRequest } from "@/lib/api/types-teacher";
+import { useTeacherLifecycleList } from "./TeacherLifecycleList";
 
 type ClassroomLifecycleActionsProps = {
   classroomId: string;
+  displayName: string;
   status?: ClassroomStatus;
+  hasStatusFilter: boolean;
 };
 
 type ClassroomLifecycleAction = "archive" | "restore" | "delete";
@@ -80,110 +84,106 @@ const getDeleteSummary = (status: number, code?: string): string => {
   return getCommonErrorSummary(status, "删除班级");
 };
 
-export function ClassroomLifecycleActions({ classroomId, status }: ClassroomLifecycleActionsProps) {
+const ACTION_DETAILS = {
+  archive: {
+    label: "归档班级",
+    description: "归档后，该班级默认不再显示在进行中列表，历史数据会保留。",
+    success: "已归档",
+  },
+  restore: {
+    label: "恢复班级",
+    description: "恢复后，该班级将重新出现在进行中列表。",
+    success: "已恢复为进行中",
+  },
+  delete: {
+    label: "删除班级",
+    description: "仅空班级允许删除。删除后不可恢复。",
+    success: "已删除",
+  },
+} satisfies Record<ClassroomLifecycleAction, { label: string; description: string; success: string }>;
+
+export function ClassroomLifecycleActions({
+  classroomId,
+  displayName,
+  status,
+  hasStatusFilter,
+}: ClassroomLifecycleActionsProps) {
   const router = useRouter();
-  const [pendingAction, setPendingAction] = useState<ClassroomLifecycleAction | null>(null);
-  const [successMessage, setSuccessMessage] = useState<string | null>(null);
+  const { clearFeedback, showSuccess } = useTeacherLifecycleList();
+  const [confirmation, setConfirmation] = useState<ClassroomLifecycleAction | null>(null);
+  const [runningAction, setRunningAction] = useState<ClassroomLifecycleAction | null>(null);
   const [errorState, setErrorState] = useState<ClassroomLifecycleErrorState | null>(null);
   const [isMenuOpen, setIsMenuOpen] = useState(false);
+  const [isRefreshing, startRefresh] = useTransition();
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const isRequestInFlight = useRef(false);
 
-  const isSubmitting = pendingAction !== null;
-  const isArchived = status === "ARCHIVED";
+  const isBusy = runningAction !== null || isRefreshing;
+  const statusAction = status === "ARCHIVED" ? "restore" : "archive";
 
-  const handleStatusUpdate = async (targetStatus: ClassroomStatus) => {
-    const action: "archive" | "restore" = targetStatus === "ARCHIVED" ? "archive" : "restore";
-    if (isSubmitting) {
-      return;
-    }
+  const openConfirmation = (action: ClassroomLifecycleAction) => {
+    if (isBusy || confirmation || isRequestInFlight.current) return;
+
+    // The selected menu item will unmount. Let the dialog restore focus to More.
+    triggerRef.current?.focus({ preventScroll: true });
     setIsMenuOpen(false);
-
-    const confirmed = window.confirm(
-      action === "archive"
-        ? "归档班级\n归档后该班级默认不再显示在进行中列表，但历史数据会保留。"
-        : "恢复班级\n恢复后该班级将重新出现在进行中列表。"
-    );
-    if (!confirmed) {
-      return;
-    }
-
-    setPendingAction(action);
-    setSuccessMessage(null);
-    setErrorState(null);
-
-    const payload: UpdateClassroomRequest = {
-      status: targetStatus,
-    };
-
-    try {
-      await fetchJson<unknown>(`classrooms/${encodeURIComponent(classroomId)}`, {
-        method: "PATCH",
-        headers: {
-          accept: "application/json",
-          "content-type": "application/json",
-        },
-        body: JSON.stringify(payload),
-      });
-      setSuccessMessage(action === "archive" ? "班级已归档。" : "班级已恢复为进行中。");
-      router.refresh();
-    } catch (error) {
-      if (error instanceof BrowserFetchJsonError) {
-        const detail = extractRawDetail(error.data);
-        setErrorState({
-          status: error.status,
-          summary: getStatusActionSummary(error.status, action),
-          detail,
-        });
-      } else {
-        setErrorState({
-          summary: action === "archive" ? "归档班级失败，请稍后重试。" : "恢复班级失败，请稍后重试。",
-        });
-      }
-    } finally {
-      setPendingAction(null);
-    }
+    setConfirmation(action);
   };
 
-  const handleDelete = async () => {
-    if (isSubmitting) {
-      return;
-    }
-    setIsMenuOpen(false);
+  const handleConfirm = async () => {
+    if (!confirmation || isRequestInFlight.current) return;
 
-    const confirmed = window.confirm("删除班级\n仅空班级允许删除。删除后不可恢复。");
-    if (!confirmed) {
-      return;
-    }
-
-    setPendingAction("delete");
-    setSuccessMessage(null);
+    const action = confirmation;
+    const path = `classrooms/${encodeURIComponent(classroomId)}`;
+    isRequestInFlight.current = true;
+    setConfirmation(null);
+    setRunningAction(action);
+    clearFeedback();
     setErrorState(null);
 
     try {
-      await fetchJson<unknown>(`classrooms/${encodeURIComponent(classroomId)}`, {
-        method: "DELETE",
-        headers: {
-          accept: "application/json",
-        },
-      });
-      setSuccessMessage("班级已删除。");
-      router.refresh();
+      if (action === "delete") {
+        await fetchJson<unknown>(path, {
+          method: "DELETE",
+          headers: { accept: "application/json" },
+        });
+      } else {
+        const payload: UpdateClassroomRequest = {
+          status: action === "archive" ? "ARCHIVED" : "ACTIVE",
+        };
+        await fetchJson<unknown>(path, {
+          method: "PATCH",
+          headers: {
+            accept: "application/json",
+            "content-type": "application/json",
+          },
+          body: JSON.stringify(payload),
+        });
+      }
+
+      const departingRow = action === "delete" || hasStatusFilter
+        ? triggerRef.current?.closest("tr")
+        : null;
+      showSuccess(`班级「${displayName}」${ACTION_DETAILS[action].success}。`, departingRow);
+      startRefresh(() => router.refresh());
     } catch (error) {
       if (error instanceof BrowserFetchJsonError) {
-        const code = extractErrorCode(error.data);
-        const detail = extractRawDetail(error.data);
-        const summary = getDeleteSummary(error.status, code);
+        const summary = action === "delete"
+          ? getDeleteSummary(error.status, extractErrorCode(error.data))
+          : getStatusActionSummary(error.status, action);
         setErrorState({
           status: error.status,
           summary,
-          detail: summary === CLASSROOM_NOT_EMPTY_MESSAGE ? undefined : detail,
+          detail: summary === CLASSROOM_NOT_EMPTY_MESSAGE ? undefined : extractRawDetail(error.data),
         });
       } else {
         setErrorState({
-          summary: "删除班级失败，请稍后重试。",
+          summary: `${ACTION_DETAILS[action].label}失败，请稍后重试。`,
         });
       }
     } finally {
-      setPendingAction(null);
+      isRequestInFlight.current = false;
+      setRunningAction(null);
     }
   };
 
@@ -192,59 +192,49 @@ export function ClassroomLifecycleActions({ classroomId, status }: ClassroomLife
       <FloatingMoreMenu
         isOpen={isMenuOpen}
         onOpenChange={setIsMenuOpen}
-        disabled={isSubmitting}
-        label={isSubmitting ? "处理中..." : "更多"}
+        triggerRef={triggerRef}
+        disabled={isBusy}
+        label={isBusy ? "处理中..." : "更多"}
       >
-        {isArchived ? (
-          <button
-            type="button"
-            role="menuitem"
-            onClick={() => handleStatusUpdate("ACTIVE")}
-            disabled={isSubmitting}
-            className="block w-full px-3 py-1.5 text-left text-xs text-zinc-700 hover:bg-zinc-50 disabled:cursor-not-allowed disabled:text-zinc-400"
-          >
-            恢复
-          </button>
-        ) : (
-          <button
-            type="button"
-            role="menuitem"
-            onClick={() => handleStatusUpdate("ARCHIVED")}
-            disabled={isSubmitting}
-            className="block w-full px-3 py-1.5 text-left text-xs text-zinc-700 hover:bg-zinc-50 disabled:cursor-not-allowed disabled:text-zinc-400"
-          >
-            归档
-          </button>
-        )}
+        <button
+          type="button"
+          role="menuitem"
+          aria-haspopup="dialog"
+          onClick={() => openConfirmation(statusAction)}
+          disabled={isBusy}
+          className="block w-full px-3 py-1.5 text-left text-xs text-zinc-700 hover:bg-zinc-50 disabled:cursor-not-allowed disabled:text-zinc-400"
+        >
+          {statusAction === "archive" ? "归档" : "恢复"}
+        </button>
 
         <div className="my-1 border-t border-zinc-100" />
 
         <button
           type="button"
           role="menuitem"
-          onClick={handleDelete}
-          disabled={isSubmitting}
+          aria-haspopup="dialog"
+          onClick={() => openConfirmation("delete")}
+          disabled={isBusy}
           className="block w-full px-3 py-1.5 text-left text-xs text-red-600 hover:bg-red-50 disabled:cursor-not-allowed disabled:text-zinc-400"
         >
           删除
         </button>
       </FloatingMoreMenu>
 
-      {isArchived ? (
-        pendingAction === "restore" ? (
-          <p className="text-xs text-zinc-500">正在恢复班级...</p>
-        ) : null
-      ) : (
-        pendingAction === "archive" ? (
-          <p className="text-xs text-zinc-500">正在归档班级...</p>
-        ) : null
-      )}
-
-      {pendingAction === "delete" ? (
-        <p className="text-xs text-zinc-500">正在删除班级...</p>
+      {confirmation ? (
+        <ConfirmDialog
+          title={`${ACTION_DETAILS[confirmation].label}：${displayName}`}
+          description={ACTION_DETAILS[confirmation].description}
+          confirmLabel={ACTION_DETAILS[confirmation].label}
+          destructive={confirmation === "delete"}
+          onCancel={() => setConfirmation(null)}
+          onConfirm={handleConfirm}
+        />
       ) : null}
 
-      {successMessage ? <p className="text-xs text-emerald-700">{successMessage}</p> : null}
+      {runningAction ? (
+        <p className="text-xs text-zinc-500">正在{ACTION_DETAILS[runningAction].label}...</p>
+      ) : null}
 
       {errorState ? (
         <ErrorState

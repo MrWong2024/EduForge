@@ -1,8 +1,9 @@
 "use client";
 
 import Link from "next/link";
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
+import { ConfirmDialog } from "@/components/blocks/ConfirmDialog";
 import { ErrorState } from "@/components/blocks/ErrorState";
 import { BrowserFetchJsonError, fetchJson } from "@/lib/api/browser-client";
 import {
@@ -25,7 +26,7 @@ import {
   type TaskTemplateVisibility,
 } from "@/lib/learning-tasks/template-visibility-scope";
 import { toSafeTaskListReturnTo } from "@/lib/routes/task-list-return-to";
-import { getPublisherLabel } from "@/lib/ui/format";
+import { getPublisherLabel, toDisplayText } from "@/lib/ui/format";
 import { getTaskTemplateStatusLabel } from "@/lib/ui/status";
 import {
   TaskAiContextRefsEditor,
@@ -55,6 +56,19 @@ type EditLearningTaskFormErrorState = {
 };
 
 type TaskLifecycleAction = "publish" | "archive";
+
+const TASK_LIFECYCLE_CONFIRMATION = {
+  publish: {
+    label: "发布模板",
+    description:
+      "发布后，该模板将进入班级发布候选列表，可用于创建课堂任务。未保存的编辑草稿会保留。",
+  },
+  archive: {
+    label: "归档模板",
+    description:
+      "归档后，模板将从班级发布候选列表移除。已发布的课堂任务、学生提交和统计会保留。当前未保存的修改将舍弃，页面会展示正式保存的内容。",
+  },
+};
 
 const USED_PUBLISHED_TEMPLATE_REVERT_DETAIL =
   "Published task templates used by classrooms cannot be changed back to draft";
@@ -171,9 +185,14 @@ export function EditLearningTaskForm({
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isPublishing, setIsPublishing] = useState(false);
   const [isArchiving, setIsArchiving] = useState(false);
+  const [pendingLifecycleAction, setPendingLifecycleAction] =
+    useState<TaskLifecycleAction | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [errorState, setErrorState] =
     useState<EditLearningTaskFormErrorState | null>(null);
+  const writeInProgress = useRef(false);
+  const headingRef = useRef<HTMLHeadingElement>(null);
+  const lifecycleTriggerRef = useRef<HTMLButtonElement>(null);
 
   const {
     title,
@@ -216,7 +235,7 @@ export function EditLearningTaskForm({
 
   const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    if (effectiveReadOnly || isSubmitting || isActionPending) {
+    if (effectiveReadOnly || pendingLifecycleAction || writeInProgress.current) {
       return;
     }
 
@@ -230,6 +249,7 @@ export function EditLearningTaskForm({
       return;
     }
     setAiContextError(null);
+    writeInProgress.current = true;
     setIsSubmitting(true);
     setSuccessMessage(null);
     setErrorState(null);
@@ -282,31 +302,30 @@ export function EditLearningTaskForm({
         });
       }
     } finally {
+      writeInProgress.current = false;
       setIsSubmitting(false);
     }
   };
 
-  const handleLifecycleAction = async (action: TaskLifecycleAction) => {
-    if (effectiveReadOnly || isSubmitting || isActionPending) {
-      return;
-    }
+  const openLifecycleConfirmation = (
+    action: TaskLifecycleAction,
+    trigger: HTMLButtonElement,
+  ) => {
+    if (pendingLifecycleAction || writeInProgress.current) return;
 
-    if (action === "publish" && !canPublish) {
-      return;
-    }
-    if (action === "archive" && !canArchive) {
-      return;
-    }
+    lifecycleTriggerRef.current = trigger;
+    trigger.focus();
+    setPendingLifecycleAction(action);
+  };
 
-    const confirmed = window.confirm(
-      action === "publish"
-        ? "确认发布该任务模板吗？发布后，该模板将进入班级发布候选列表，可被用于创建课堂任务。"
-        : "确认归档该任务模板吗？归档后，该模板将不再出现在班级发布候选列表中；已经发布到班级的课堂任务、学生提交和统计数据不受影响。",
-    );
-    if (!confirmed) {
-      return;
-    }
+  const handleLifecycleAction = async () => {
+    const action = pendingLifecycleAction;
+    if (!action || writeInProgress.current) return;
 
+    setPendingLifecycleAction(null);
+    if (action === "publish" ? !canPublish : !canArchive) return;
+
+    writeInProgress.current = true;
     if (action === "publish") {
       setIsPublishing(true);
     } else {
@@ -338,6 +357,9 @@ export function EditLearningTaskForm({
         });
         return;
       }
+      if (document.activeElement === lifecycleTriggerRef.current) {
+        headingRef.current?.focus();
+      }
       setConfirmedTask(receipt.task);
       setBaseline(receipt.draft);
       setDraft(
@@ -368,6 +390,7 @@ export function EditLearningTaskForm({
         });
       }
     } finally {
+      writeInProgress.current = false;
       if (action === "publish") {
         setIsPublishing(false);
       } else {
@@ -378,7 +401,7 @@ export function EditLearningTaskForm({
 
   return (
     <section className="rounded-lg border border-zinc-200 bg-white p-4">
-      <h2 className="text-base font-semibold text-zinc-900">
+      <h2 ref={headingRef} tabIndex={-1} className="text-base font-semibold text-zinc-900">
         {effectiveReadOnly ? "查看任务模板" : "编辑任务模板"}
       </h2>
       <p className="mt-1 text-sm text-zinc-600">
@@ -611,9 +634,10 @@ export function EditLearningTaskForm({
           {canPublish ? (
             <button
               type="button"
-              onClick={() => void handleLifecycleAction("publish")}
-              disabled={isSubmitting || isActionPending}
-              className="rounded-md border border-emerald-300 px-4 py-2 text-sm font-medium text-emerald-700 enabled:hover:bg-emerald-50 disabled:cursor-not-allowed disabled:opacity-60"
+              onClick={(event) => openLifecycleConfirmation("publish", event.currentTarget)}
+              aria-disabled={isSubmitting || isActionPending}
+              aria-haspopup="dialog"
+              className="rounded-md border border-emerald-300 px-4 py-2 text-sm font-medium text-emerald-700 hover:bg-emerald-50 aria-disabled:cursor-not-allowed aria-disabled:opacity-60"
             >
               {isPublishing ? "发布中..." : "发布模板"}
             </button>
@@ -621,9 +645,10 @@ export function EditLearningTaskForm({
           {canArchive ? (
             <button
               type="button"
-              onClick={() => void handleLifecycleAction("archive")}
-              disabled={isSubmitting || isActionPending}
-              className="rounded-md border border-amber-300 px-4 py-2 text-sm font-medium text-amber-700 enabled:hover:bg-amber-50 disabled:cursor-not-allowed disabled:opacity-60"
+              onClick={(event) => openLifecycleConfirmation("archive", event.currentTarget)}
+              aria-disabled={isSubmitting || isActionPending}
+              aria-haspopup="dialog"
+              className="rounded-md border border-amber-300 px-4 py-2 text-sm font-medium text-amber-700 hover:bg-amber-50 aria-disabled:cursor-not-allowed aria-disabled:opacity-60"
             >
               {isArchiving ? "归档中..." : "归档模板"}
             </button>
@@ -637,8 +662,19 @@ export function EditLearningTaskForm({
         </div>
       </form>
 
+      {pendingLifecycleAction ? (
+        <ConfirmDialog
+          title={`${TASK_LIFECYCLE_CONFIRMATION[pendingLifecycleAction].label}：${toDisplayText(confirmedTask.title, "未命名模板")}`}
+          description={TASK_LIFECYCLE_CONFIRMATION[pendingLifecycleAction].description}
+          confirmLabel={TASK_LIFECYCLE_CONFIRMATION[pendingLifecycleAction].label}
+          destructive={pendingLifecycleAction === "archive"}
+          onCancel={() => setPendingLifecycleAction(null)}
+          onConfirm={handleLifecycleAction}
+        />
+      ) : null}
+
       {successMessage ? (
-        <p className="mt-3 text-sm text-emerald-700">{successMessage}</p>
+        <p role="status" className="mt-3 text-sm text-emerald-700">{successMessage}</p>
       ) : null}
 
       {errorState ? (
