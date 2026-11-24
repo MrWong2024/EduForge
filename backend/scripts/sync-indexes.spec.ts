@@ -2,6 +2,7 @@ import { spawnSync } from 'node:child_process';
 import { resolve } from 'node:path';
 import { Writable } from 'node:stream';
 import mongoose, { type mongo, type Schema } from 'mongoose';
+import { readMongoIndexes } from '../src/lib/mongo-index-cursor';
 import { SubmissionSchema } from '../src/modules/learning-tasks/schemas/submission.schema';
 import {
   cleanupSyncIndexesCollections,
@@ -1540,6 +1541,8 @@ function realComparisonHarness(
       { name: string; key: mongo.IndexDescriptionInfo['key'] }
     >;
     indexBatchDelays?: readonly [firstMs: number, nextMs: number];
+    nextIndexBatchLeavesCursorOpen?: boolean;
+    originalCursorServerUnavailable?: boolean;
     dropAckLost?: boolean;
     readbackFails?: boolean;
   } = {},
@@ -1591,8 +1594,14 @@ function realComparisonHarness(
   );
   let trackedCollection: string | undefined;
   let client: mongo.MongoClient | undefined;
-  const rawOptions: mongo.RunCommandOptions[] = [];
+  const rawOptions: mongo.RunCursorCommandOptions[] = [];
   const rawCommands: mongo.Document[] = [];
+  const cursorRoutes: Array<{
+    operation: 'listIndexes' | 'getMore' | 'killCursors';
+    server: 'original' | 'new-primary';
+    primary: 'original' | 'new-primary';
+  }> = [];
+  let primary: 'original' | 'new-primary' = 'original';
   const collectionOptions: (mongo.ListCollectionsOptions | undefined)[] = [];
   let pagedCollection: string | undefined;
 
@@ -1633,16 +1642,6 @@ function realComparisonHarness(
           );
           client = driverClient;
           const driverDb = driverClient.db();
-          const startSession = driverClient.startSession.bind(
-            driverClient,
-          ) as typeof driverClient.startSession;
-          jest
-            .spyOn(driverClient, 'startSession')
-            .mockImplementation((options) => {
-              const session = startSession(options);
-              indexClosures.push(jest.spyOn(session, 'endSession'));
-              return session;
-            });
           Object.defineProperty(native, 'model', {
             value: (name: string, schema: Schema) => {
               const model = disconnectedModel(name, schema);
@@ -1685,9 +1684,6 @@ function realComparisonHarness(
                 if (!options.signal) throw new Error('EXPECTED_COMMAND_SIGNAL');
                 if (command.hello === 1) return hello(command);
                 rawCommands.push(command);
-                if (typeof command.killCursors === 'string') {
-                  return { ok: 1, cursorsKilled: command.cursors as unknown[] };
-                }
                 if (typeof command.dropIndexes === 'string') {
                   const model = registrations.find(
                     ([, , collection]) => collection === command.dropIndexes,
@@ -1710,58 +1706,111 @@ function realComparisonHarness(
                   }
                   return { ok: 1 };
                 }
-                const name: unknown = command.listIndexes ?? command.collection;
+                return forbidden();
+              },
+              runCursorCommand: (
+                command: mongo.Document,
+                options: mongo.RunCursorCommandOptions,
+              ) => {
+                const name: unknown = command.listIndexes;
                 if (typeof name !== 'string') return forbidden();
-                if (
-                  fixture.readbackFails &&
-                  dropped.length &&
-                  name === trackedCollection
-                ) {
-                  throw new Error('READBACK_UNAVAILABLE');
-                }
                 rawOptions.push(options);
-                const ns = `${driverDb.databaseName}.${name}`;
-                if (
-                  'getMore' in command &&
-                  fixture.indexBatchDelays &&
-                  name === pagedCollection
-                ) {
-                  return delayedReply(
-                    { ok: 1, cursor: { id: 0, ns, nextBatch: [] } },
-                    fixture.indexBatchDelays[1],
-                    options.signal,
-                  );
-                }
+                const server = primary;
                 expect(command).toMatchObject({ includeBuildUUIDs: true });
-                const bytes =
-                  name === trackedCollection &&
-                  recheckedBytes &&
-                  rawReads.length
-                    ? recheckedBytes
-                    : fixtureBytes.get(name);
-                if (!bytes) throw new Error('EXPECTED_BSON_FIXTURE');
-                const decoded: unknown = BSON.deserialize(
-                  bytes,
-                  options,
-                ).indexes;
-                if (!Array.isArray(decoded))
-                  throw new Error('EXPECTED_INDEX_METADATA');
-                const indexes = decoded as mongo.IndexDescriptionInfo[];
-                if (name === trackedCollection) rawReads.push(indexes);
-                const response = {
-                  ok: 1,
-                  cursor: { id: 0, ns, firstBatch: indexes },
-                };
-                if (fixture.indexBatchDelays && !pagedCollection) {
-                  pagedCollection = name;
-                  response.cursor.id = 123;
-                  return delayedReply(
-                    response,
-                    fixture.indexBatchDelays[0],
-                    options.signal,
-                  );
-                }
-                return response;
+                const cursor = driverDb.runCursorCommand(command, options);
+                const namespace = cursor.namespace.withCollection(name);
+                jest
+                  .spyOn(cursor, 'namespace', 'get')
+                  .mockReturnValue(namespace);
+                const long = BSON.Long.fromNumber(123);
+                let id: mongo.BSON.Long | undefined;
+                let buffered: mongo.IndexDescriptionInfo[] = [];
+                let nextBatchEntry: mongo.IndexDescriptionInfo | undefined;
+                jest.spyOn(cursor, 'id', 'get').mockImplementation(() => id);
+                jest
+                  .spyOn(cursor, 'readBufferedDocuments')
+                  .mockImplementation(() => buffered.splice(0));
+                jest.spyOn(cursor, 'tryNext').mockImplementation(async () => {
+                  if (id !== undefined) {
+                    if (id.isZero()) return forbidden();
+                    cursorRoutes.push({
+                      operation: 'getMore',
+                      server,
+                      primary,
+                    });
+                    rawCommands.push({ getMore: id, collection: name });
+                    if (fixture.originalCursorServerUnavailable) {
+                      throw new Error('ORIGINAL_SERVER_UNAVAILABLE');
+                    }
+                    if (fixture.indexBatchDelays) {
+                      await new Promise<void>((resolve) =>
+                        setTimeout(resolve, fixture.indexBatchDelays?.[1]),
+                      );
+                    }
+                    if (!fixture.nextIndexBatchLeavesCursorOpen) {
+                      id = BSON.Long.ZERO;
+                    }
+                    const next = nextBatchEntry;
+                    nextBatchEntry = undefined;
+                    return next ?? null;
+                  }
+                  cursorRoutes.push({
+                    operation: 'listIndexes',
+                    server,
+                    primary,
+                  });
+                  rawCommands.push(command);
+                  if (
+                    fixture.readbackFails &&
+                    dropped.length &&
+                    name === trackedCollection
+                  ) {
+                    throw new Error('READBACK_UNAVAILABLE');
+                  }
+                  const bytes =
+                    name === trackedCollection &&
+                    recheckedBytes &&
+                    rawReads.length
+                      ? recheckedBytes
+                      : fixtureBytes.get(name);
+                  if (!bytes) throw new Error('EXPECTED_BSON_FIXTURE');
+                  const decoded: unknown = BSON.deserialize(
+                    bytes,
+                    options,
+                  ).indexes;
+                  if (!Array.isArray(decoded))
+                    throw new Error('EXPECTED_INDEX_METADATA');
+                  buffered = decoded as mongo.IndexDescriptionInfo[];
+                  if (name === trackedCollection) rawReads.push([...buffered]);
+                  if (fixture.indexBatchDelays && !pagedCollection) {
+                    pagedCollection = name;
+                    nextBatchEntry = buffered.pop();
+                    await new Promise<void>((resolve) =>
+                      setTimeout(resolve, fixture.indexBatchDelays?.[0]),
+                    );
+                    primary = 'new-primary';
+                    id = long;
+                  } else {
+                    id = BSON.Long.ZERO;
+                  }
+                  return buffered.shift() ?? null;
+                });
+                const close = cursor.close.bind(cursor) as typeof cursor.close;
+                const closeSpy = jest
+                  .spyOn(cursor, 'close')
+                  .mockImplementation(async () => {
+                    if (id && !id.isZero()) {
+                      cursorRoutes.push({
+                        operation: 'killCursors',
+                        server,
+                        primary,
+                      });
+                      rawCommands.push({ killCursors: name, cursors: [id] });
+                    }
+                    await close();
+                  });
+                indexClosures.push(closeSpy);
+                return cursor;
               },
               listCollections: (
                 { name }: { name: string },
@@ -1811,6 +1860,7 @@ function realComparisonHarness(
     rawReads,
     rawOptions,
     rawCommands,
+    cursorRoutes,
     registrations,
     metadata,
     hello,
@@ -2402,19 +2452,36 @@ describe('sync-indexes driver and Schema adapter (offline)', () => {
     async ({ delays, exit }) => {
       jest.useFakeTimers();
       try {
-        const a = realComparisonHarness({ indexBatchDelays: delays });
-        const result = a.run(apply);
+        const a = realComparisonHarness({
+          indexBatchDelays: delays,
+          nextIndexBatchLeavesCursorOpen: exit === 1,
+        });
+        let settled = false;
+        const result = a.run(apply).finally(() => {
+          settled = true;
+        });
         await jest.advanceTimersByTimeAsync(delays[0]);
-        const [first, next] = a.rawOptions;
-        expect(next?.signal).toBe(first?.signal);
-        expect(next?.session).toBe(first?.session);
+        expect(a.rawCommands[0]?.maxTimeMS).toBe(65_000);
         expect(a.rawCommands[1]).toMatchObject({
           getMore: mongoose.mongo.BSON.Long.fromNumber(123),
         });
+        expect(a.cursorRoutes.slice(0, 2)).toEqual([
+          { operation: 'listIndexes', server: 'original', primary: 'original' },
+          { operation: 'getMore', server: 'original', primary: 'new-primary' },
+        ]);
         await jest.advanceTimersByTimeAsync(65_000 - delays[0]);
-        expect(await result).toBe(exit);
         if (exit === 1) {
-          expect(first?.signal?.aborted).toBe(true);
+          // The application cannot close while the public cursor is still fetching.
+          expect(settled).toBe(false);
+          expect(a.rawCommands).toHaveLength(2);
+          await jest.advanceTimersByTimeAsync(delays[0] + delays[1] - 65_000);
+          expect(a.cursorRoutes.slice(2)).toEqual([
+            {
+              operation: 'killCursors',
+              server: 'original',
+              primary: 'new-primary',
+            },
+          ]);
           expect(a.rawCommands[2]?.killCursors).toBe(
             a.rawCommands[0]?.listIndexes,
           );
@@ -2423,9 +2490,11 @@ describe('sync-indexes driver and Schema adapter (offline)', () => {
           ]);
           expect(output(a.h)).not.toContain('"event":"plan"');
           expect(jsonEvent(a.h, 'result')).toMatchObject({
+            error: { code: 'INDEX_CURSOR_CLOSE_UNCONFIRMED' },
             writesAttempted: false,
           });
         }
+        expect(await result).toBe(exit);
         expect(a.dropped).toHaveLength(0);
         expect(a.forbidden).not.toHaveBeenCalled();
         expectComparisonResourcesClosed(a);
@@ -2434,6 +2503,91 @@ describe('sync-indexes driver and Schema adapter (offline)', () => {
       }
     },
   );
+
+  it('awaits closing on the original node without another read when the first batch finishes after the deadline', async () => {
+    jest.useFakeTimers();
+    try {
+      const a = realComparisonHarness({ indexBatchDelays: [66_000, 1_000] });
+      const result = a.run(apply);
+      await jest.advanceTimersByTimeAsync(65_000);
+      expect(a.cursorRoutes).toEqual([
+        { operation: 'listIndexes', server: 'original', primary: 'original' },
+      ]);
+      await jest.advanceTimersByTimeAsync(1_000);
+      expect(await result).toBe(1);
+      expect(a.cursorRoutes).toEqual([
+        { operation: 'listIndexes', server: 'original', primary: 'original' },
+        {
+          operation: 'killCursors',
+          server: 'original',
+          primary: 'new-primary',
+        },
+      ]);
+      expect(jsonEvent(a.h, 'result')).toMatchObject({
+        error: { code: 'INDEX_CURSOR_CLOSE_UNCONFIRMED' },
+        writesAttempted: false,
+      });
+      expect(output(a.h)).not.toContain('"event":"plan"');
+      expectComparisonResourcesClosed(a);
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  it('reports incomplete inventory even when the failed original-node cleanup resolves locally', async () => {
+    jest.useFakeTimers();
+    try {
+      const a = realComparisonHarness({
+        indexBatchDelays: [25, 0],
+        originalCursorServerUnavailable: true,
+        dropFixtures: new Map([
+          ['Session', { name: 'session_stale', key: { stale: 1 } }],
+        ]),
+      });
+      const result = a.run([...apply, '--allow-drop']);
+      await jest.advanceTimersByTimeAsync(25);
+      expect(await result).toBe(1);
+      expect(a.cursorRoutes).toEqual([
+        { operation: 'listIndexes', server: 'original', primary: 'original' },
+        { operation: 'getMore', server: 'original', primary: 'new-primary' },
+        {
+          operation: 'killCursors',
+          server: 'original',
+          primary: 'new-primary',
+        },
+      ]);
+      expect(jsonEvent(a.h, 'result')).toMatchObject({
+        error: { code: 'INDEX_CURSOR_CLOSE_UNCONFIRMED' },
+        writesAttempted: false,
+      });
+      expect(output(a.h)).not.toContain('"event":"plan"');
+      expect(a.dropped).toHaveLength(0);
+      expect(a.forbidden).not.toHaveBeenCalled();
+      expectComparisonResourcesClosed(a);
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  it('preserves an initial namespace-not-found reply for fixture callers', async () => {
+    const client = new mongoose.mongo.MongoClient(adminUri);
+    try {
+      const db = client.db();
+      const cursor = db.runCursorCommand({ listIndexes: 'missing' });
+      jest.spyOn(db, 'runCursorCommand').mockReturnValue(cursor);
+      const error = new mongoose.mongo.MongoServerError({
+        message: 'fixture namespace not found',
+        code: 26,
+      });
+      jest.spyOn(cursor, 'tryNext').mockRejectedValueOnce(error);
+      const close = jest.spyOn(cursor, 'close');
+
+      await expect(readMongoIndexes(db, 'missing', 5_000)).rejects.toBe(error);
+      expect(close).toHaveBeenCalledTimes(1);
+    } finally {
+      await client.close();
+    }
+  });
 
   it.each([false, true])(
     'stops later DDL after an unknown reply and reports readback (unavailable: %s)',
@@ -2522,7 +2676,7 @@ describe('sync-indexes driver and Schema adapter (offline)', () => {
       promoteBuffers: false,
       readPreference: 'primary',
     });
-    expect(a.rawOptions[0]?.signal).toBeInstanceOf(AbortSignal);
+    expect(a.rawOptions[0]).not.toHaveProperty('signal');
     expect(a.collectionOptions[0]).toMatchObject({ promoteBuffers: false });
     expect(a.rawReads[0]).toEqual(matchingSessionIndexes);
     expect(jsonEvent(a.h, 'result')).toHaveProperty(

@@ -36,6 +36,7 @@ Browser acceptance 配置：
 - Browser 本机 URI 门禁仅接受单一 loopback seed 的 `mongodb://` URI，用户名为 `root`，显式配置 `authSource=admin` 和 `replicaSet=rs0`，库名为 `eduforge_browser_test`。普通测试和 Browser 的本机 URI 门禁接受省略 `directConnection` 或显式设置 `false`、`true`，均拒绝非 loopback、SRV、多主机、代理、`loadBalanced` 和重复参数。[sync-indexes](#sync-indexes-普通索引同步) 有独立限制。
 - Browser 连接后先核对实际 `databaseName`。窄认证和文本任务 Smoke 的夹具连接均校验实际连接节点是 `rs0` 的可写 PRIMARY，且副本集只公布同端口的一个本机成员，并核验 `authenticatedUsers` 中的唯一 `root@admin` 身份和 `authenticatedUserRoles` 中的唯一 `root@admin` 角色。任一门禁不符均停止。
 - Browser backend 的固定网络配置为 `127.0.0.1`、CORS origin `http://localhost:3000`；`BACKEND_PORT` 默认 `5000`，是唯一允许 shell 覆写的配置项。AI/Mail 配置组合见第 3 节。
+- 默认连接与课堂事务连接采用相同的启动重试策略。Browser backend 首次连接失败即退出，其余用途沿用原有的 Nest Mongoose 启动重试策略。
 - Browser acceptance 使用独立 purpose 与专属环境文件中的单一 `MONGO_URI`；具体 process roles、启动门禁、环境隔离、连接核验及 fixture/verifier 边界见 [Backend Testing Playbook](./handoff-backend-testing-playbook.md)。
 
 索引与 `autoIndex`：
@@ -65,7 +66,7 @@ npm run sync-indexes -- --apply --confirm-db <精确库名> --allow-drop
 - 无参数等价于只读 `--dry-run`，`--help` 独立于环境配置和数据库连接。CLI 拒绝未知、重复和冲突参数。普通执行要求调用进程显式设置 `NODE_ENV` 为 `development`、`test` 或 `production`。文件来源仅为对应的 `backend/.env.<NODE_ENV>`，按 `env.MONGO_URI ?? file.MONGO_URI` 选择；不叠加通用 `.env`，不改写 `process.env`，文件不能改变已选定的 `NODE_ENV`。缺失或显式空值以 `MONGO_URI_REQUIRED` 拒绝，不回退旧管理键；非法 purpose 或任一来源声明 `browser_acceptance` 均拒绝。所选文件缺失且进程配置足够时可继续。连接前校验 URI 声明库名，连接后校验实际库名。
 - 独立 Mongoose 连接和正式模型 Schema 克隆均禁用自动建集合和索引。CLI 按主节点读取，拒绝有效的 `directConnection=true`，apply 额外拒绝有效的 `w=0`。生产副本集名称由生产 URI 决定。正式连接和原生元数据读取固定 `promoteBuffers: false`、`promoteValues: true`、`promoteLongs: true`、`useBigInt64: false`，独立连接另固定 `raw: false`。原生索引盘点开启 `includeBuildUUIDs`，使用有界游标期限，结束后关闭游标和连接。
 - 正式连接就绪后执行只读握手。检测到 `mongos` 或握手失败时，停止模型维护。工具的运维范围限于非分片部署，操作者须排除直接连接 shard 节点的情况，因为握手门禁仅识别 `mongos`。
-- 握手、集合元数据读取、建集合、删索引和建索引各有 65 秒操作预算。一次索引盘点由首批和后续 `getMore` 共享同一单调截止时间，游标收尾另有有限等待。盘点不完整时停止相应阶段，保留完整盘点作为计划和写前复查的前提。
+- 握手、集合元数据读取、建集合、删索引和建索引各有 65 秒操作预算。一次索引盘点由首批和后续 `getMore` 共享同一单调截止时间。驱动游标将后续取批和关闭发送给创建游标的节点。到期时应用停止发起新的游标读取调用，等待已发调用和本地游标收尾。该公开读取接口不支持取消，传输阶段的等待可能超过 65 秒。驱动的公开关闭接口可能吞掉服务端关闭错误，未耗尽游标的异常路径按关闭未确认报告。盘点不完整时停止相应阶段，保留完整盘点作为计划和写前复查的前提。
 - 先用 `--dry-run` 审阅。apply 重新生成本次完整计划，包含待建集合、待删索引的原始定义和待建索引定义。库名确认、删除授权和计划输出成功后才进入写入阶段。含删除的计划必须同传 `--allow-drop`。逐模型执行前用集合 UUID 与原始计划复查目标，按冻结计划逐项等待删建。首个写前检查或 DDL 错误即停止后续写入。后续模型发生漂移时，前面操作可能已完成。
 - 每个阶段读取集合存在性、类型、默认 collation 和 `info.uuid`。预检只接受普通集合及默认 simple collation，发现 `encryptedFields` 即拒绝。初始盘点、写前复查和最终回读时，若 `options.capped === true`，以 `CAPPED_COLLECTION_UNSUPPORTED` 拒绝。集合元数据发现 `options.clusteredIndex` 时以 `CLUSTERED_COLLECTION_UNSUPPORTED` 拒绝，有无 `expireAfterSeconds` 均适用。已存在的集合须有合法 UUID，新建集合后立即记录 UUID 作为验收的身份基线。发现同名集合替换时，即使索引盘点或校验随后失败，也会同时报告已确认的 UUID 变化和索引错误。索引读取不完整时标记无法确认。UUID 复查与实际写入之间仍有竞争窗口。
 - 构建中、全文、`hidden: true`、`prepareUnique: true` 和不支持的键方向仍拒绝。复合键含会被 JS 对象重新排序的字段，或待建索引名称已被保留索引占用时，预检拒绝。模型注册前检查 Schema 自身的 `options.collation`，允许缺省或合法的 `{ locale: 'simple' }`，非 simple 或非法配置以 `SCHEMA_COLLATION_UNSUPPORTED` 拒绝。Schema 的单个索引显式声明 `options.name` 或非 simple collation 时同样拒绝。实际索引的名称继续用于盘点与执行，集合默认 simple 时仍可按计划替换具有非 simple collation 的实际索引。

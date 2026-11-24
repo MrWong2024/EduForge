@@ -16,6 +16,14 @@ function mongoError(
   return error;
 }
 
+function shutdownDuringCommit(): mongo.MongoServerError {
+  return new mongo.MongoServerError({
+    code: 91,
+    codeName: 'ShutdownInProgress',
+    errorLabels: [mongo.MongoErrorLabel.RetryableWriteError],
+  });
+}
+
 function setup() {
   const session = {
     startTransaction: jest.fn<void, [mongo.TransactionOptions]>(),
@@ -207,21 +215,121 @@ describe('classroom task transaction deadline', () => {
     expect(session.endSession).toHaveBeenCalledTimes(1);
   });
 
-  it('does not confirm an unknown commit after the admission deadline', async () => {
+  it('confirms the first code-91 reply on the same transaction when the driver has no retry left', async () => {
     const { connection, session } = setup();
-    const unknown = mongoError('UnknownTransactionCommitResult');
+    const commits: { session: unknown; transaction: number }[] = [];
+    const error = shutdownDuringCommit();
+    session.commitTransaction
+      .mockImplementationOnce(async function (this: typeof session) {
+        commits.push({
+          session: this,
+          transaction: session.startTransaction.mock.calls.length,
+        });
+        await delay(4_000);
+        throw error;
+      })
+      .mockImplementationOnce(async function (this: typeof session) {
+        commits.push({
+          session: this,
+          transaction: session.startTransaction.mock.calls.length,
+        });
+        await delay(7_000);
+      });
+    const run = jest.fn().mockResolvedValue('saved');
+    const transaction = runClassroomTaskTransaction(connection, run);
+    const result = expect(transaction).resolves.toBe('saved');
+
+    await jest.advanceTimersByTimeAsync(4_000);
+    expect(commits.map(({ transaction }) => transaction)).toEqual([1, 1]);
+    expect(commits.every((commit) => commit.session === session)).toBe(true);
+    expect(connection.startSession).toHaveBeenCalledTimes(1);
+    expect(session.startTransaction).toHaveBeenCalledTimes(1);
+    expect(run).toHaveBeenCalledTimes(1);
+    await jest.advanceTimersByTimeAsync(6_000);
+    expect(session.endSession).not.toHaveBeenCalled();
+    await jest.advanceTimersByTimeAsync(1_000);
+    await result;
+    expect(session.abortTransaction).not.toHaveBeenCalled();
+    expect(session.endSession).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
+    mongoError('UnknownTransactionCommitResult'),
+    shutdownDuringCommit(),
+  ])('does not confirm %p after the admission deadline', async (unknown) => {
+    const { connection, session } = setup();
     session.commitTransaction.mockImplementationOnce(async () => {
       await delay(10_000);
       throw unknown;
     });
-    const transaction = runClassroomTaskTransaction(connection, () =>
-      Promise.resolve('saved'),
-    );
+    const run = jest.fn().mockResolvedValue('saved');
+    const transaction = runClassroomTaskTransaction(connection, run);
     const rejection = expect(transaction).rejects.toBe(unknown);
     await jest.advanceTimersByTimeAsync(10_000);
     await rejection;
+    expect(run).toHaveBeenCalledTimes(1);
     expect(session.commitTransaction).toHaveBeenCalledTimes(1);
     expect(session.startTransaction).toHaveBeenCalledTimes(1);
+    expect(session.endSession).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
+    ['server validation failure', new mongo.MongoServerError({ code: 2 })],
+    [
+      'unsupported write concern',
+      new mongo.MongoWriteConcernError({
+        ok: 1,
+        writeConcernError: { code: 100, errmsg: 'UnsatisfiableWriteConcern' },
+        errorLabels: [mongo.MongoErrorLabel.RetryableWriteError],
+      }),
+    ],
+    [
+      'unknown replica-set write concern',
+      new mongo.MongoServerError({
+        code: 79,
+        errorLabels: [mongo.MongoErrorLabel.RetryableWriteError],
+      }),
+    ],
+    [
+      'named write-concern configuration failure',
+      new mongo.MongoServerError({
+        codeName: 'CannotSatisfyWriteConcern',
+        errorLabels: [mongo.MongoErrorLabel.RetryableWriteError],
+      }),
+    ],
+    [
+      'server commit deadline',
+      new mongo.MongoServerError({
+        code: 50,
+        errorLabels: [mongo.MongoErrorLabel.UnknownTransactionCommitResult],
+      }),
+    ],
+    [
+      'server commit deadline reported in write concern',
+      new mongo.MongoServerError({
+        writeConcernError: { code: 50 },
+        errorLabels: [mongo.MongoErrorLabel.UnknownTransactionCommitResult],
+      }),
+    ],
+    [
+      'non-driver error with a retryable label',
+      Object.assign(new Error('not a MongoDB error'), {
+        code: 91,
+        errorLabels: [mongo.MongoErrorLabel.RetryableWriteError],
+      }),
+    ],
+  ] as const)('does not confirm or replay a %s', async (_case, error) => {
+    const { connection, session } = setup();
+    const run = jest.fn().mockResolvedValue('saved');
+    session.commitTransaction.mockRejectedValueOnce(error);
+
+    await expect(runClassroomTaskTransaction(connection, run)).rejects.toBe(
+      error,
+    );
+
+    expect(run).toHaveBeenCalledTimes(1);
+    expect(session.startTransaction).toHaveBeenCalledTimes(1);
+    expect(session.commitTransaction).toHaveBeenCalledTimes(1);
     expect(session.endSession).toHaveBeenCalledTimes(1);
   });
 

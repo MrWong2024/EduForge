@@ -33,7 +33,6 @@ function databaseOptions(
       ? {
           autoCreate: false,
           bufferCommands: false,
-          retryAttempts: 1,
           // Transport bounds for the session API, independent of its shared application deadline.
           connectTimeoutMS: 10000,
           waitQueueTimeoutMS: 10000,

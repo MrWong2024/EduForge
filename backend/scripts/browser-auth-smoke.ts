@@ -552,6 +552,7 @@ export async function runAuthSmokeCli(
       autoIndex: false,
       serverSelectionTimeoutMS: connectTimeoutMS,
       connectTimeoutMS,
+      waitQueueTimeoutMS: connectTimeoutMS,
       socketTimeoutMS: deadline.remaining(10000),
       monitorCommands: true,
       retryReads: false,

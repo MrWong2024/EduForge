@@ -1,7 +1,6 @@
 import mongoose, { type mongo } from 'mongoose';
 import { withMongoOperationDeadline } from './mongo-operation-deadline';
 
-const cursorCloseBudgetMs = 5_000;
 const indexBsonOptions = {
   raw: false,
   promoteBuffers: false,
@@ -10,42 +9,9 @@ const indexBsonOptions = {
   useBigInt64: false,
 } as const;
 
-function asDocument(value: unknown): Record<string, unknown> {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) {
-    throw new Error('INVALID_INDEX_CURSOR_RESPONSE');
-  }
-  return value as Record<string, unknown>;
-}
-
-function readCursorId(value: unknown) {
-  const { Long } = mongoose.mongo.BSON;
-  if (Long.isLong(value)) return value;
-  if (typeof value === 'number' && Number.isSafeInteger(value)) {
-    return Long.fromNumber(value);
-  }
-  throw new Error('INVALID_INDEX_CURSOR_ID');
-}
-
-async function closeIndexCursor(
-  db: mongo.Db,
-  collection: string,
-  session: mongo.ClientSession,
-  id: mongo.BSON.Long,
-) {
-  const result: unknown = await db.command(
-    { killCursors: collection, cursors: [id] },
-    {
-      readPreference: 'primary',
-      session,
-      signal: AbortSignal.timeout(cursorCloseBudgetMs),
-    },
-  );
-  const reply = asDocument(result);
-  if (
-    (!Array.isArray(reply.cursorsKilled) || !reply.cursorsKilled.length) &&
-    (!Array.isArray(reply.cursorsNotFound) || !reply.cursorsNotFound.length)
-  ) {
-    throw new Error('INDEX_CURSOR_CLOSE_UNCONFIRMED');
+export class IndexCursorCloseUnconfirmedError extends Error {
+  constructor(cause: unknown) {
+    super('INDEX_CURSOR_CLOSE_UNCONFIRMED', { cause });
   }
 }
 
@@ -55,50 +21,59 @@ export async function readMongoIndexes(
   budgetMs: number,
   includeBuildUUIDs = false,
 ): Promise<unknown[]> {
-  const session = db.client.startSession();
-  let id: mongo.BSON.Long | undefined;
-  try {
-    return await withMongoOperationDeadline(budgetMs, async (deadline) => {
-      // The typed listIndexes and runCursorCommand APIs do not expose a signal.
-      const options: mongo.RunCommandOptions = {
-        ...indexBsonOptions,
-        readPreference: 'primary',
-        session,
-        signal: deadline.signal,
-      };
-      let command: mongo.Document = {
+  return withMongoOperationDeadline(budgetMs, async (deadline) => {
+    // The driver cursor keeps the original server and session for getMore and close.
+    const cursor = db.runCursorCommand(
+      {
         listIndexes: collection,
         cursor: {},
         ...(includeBuildUUIDs && { includeBuildUUIDs: true }),
         maxTimeMS: deadline.remainingMs(),
-      };
-      let batchKey = 'firstBatch';
-      const indexes: unknown[] = [];
+      },
+      { ...indexBsonOptions, readPreference: 'primary' },
+    );
+    let mayHaveOpenCursor = false;
+    let failure: { error: unknown } | undefined;
+    const indexes: unknown[] = [];
+    try {
       for (;;) {
         deadline.remainingMs();
-        const response = asDocument(await db.command(command, options));
-        const cursor = asDocument(response.cursor);
-        if (cursor.ns !== `${db.databaseName}.${collection}`) {
+        mayHaveOpenCursor = true;
+        // This API has no signal. Await the fetch before checking time or closing.
+        const first: unknown = await cursor.tryNext();
+        const id = cursor.id;
+        mayHaveOpenCursor = id?.isZero() !== true;
+        deadline.remainingMs();
+        if (!id) throw new Error('INVALID_INDEX_CURSOR_ID');
+        if (
+          cursor.namespace.toString() !== `${db.databaseName}.${collection}`
+        ) {
           throw new Error('INVALID_INDEX_CURSOR_NAMESPACE');
         }
-        id = readCursorId(cursor.id);
-        const batch = cursor[batchKey];
-        if (!Array.isArray(batch))
-          throw new Error('INVALID_INDEX_CURSOR_BATCH');
-        indexes.push(...(batch as unknown[]));
-        deadline.remainingMs();
-        if (id.isZero()) return indexes;
-        command = { getMore: id, collection };
-        batchKey = 'nextBatch';
+        if (first !== null) indexes.push(first);
+        const buffered: unknown[] = cursor.readBufferedDocuments();
+        indexes.push(...buffered);
+        if (id.isZero()) break;
       }
-    });
-  } finally {
-    try {
-      if (id && !id.isZero()) {
-        await closeIndexCursor(db, collection, session, id);
-      }
-    } finally {
-      await session.endSession();
+    } catch (error: unknown) {
+      const collectionMissing =
+        cursor.id === undefined &&
+        error instanceof mongoose.mongo.MongoServerError &&
+        error.code === 26;
+      // Driver close can finish locally even if the server never confirms the kill.
+      failure = {
+        error:
+          mayHaveOpenCursor && !collectionMissing
+            ? new IndexCursorCloseUnconfirmedError(error)
+            : error,
+      };
     }
-  }
+    try {
+      await cursor.close();
+    } catch (error: unknown) {
+      failure ??= { error: new IndexCursorCloseUnconfirmedError(error) };
+    }
+    if (failure) throw failure.error;
+    return indexes;
+  });
 }

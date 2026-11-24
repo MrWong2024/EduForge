@@ -4,6 +4,9 @@ import { withMongoOperationDeadline } from './mongo-operation-deadline';
 
 const TRANSACTION_BUDGET_MS = 10_000;
 const RETRY_DELAY_MS = 10;
+const MAX_TIME_MS_EXPIRED = 50;
+const UNKNOWN_REPL_WRITE_CONCERN = 79;
+const UNSATISFIABLE_WRITE_CONCERN = 100;
 const logger = new Logger('ClassroomTaskTransaction');
 
 export const CLASSROOM_TASK_TRANSACTION_CONNECTION = 'classroomTaskTransaction';
@@ -29,20 +32,46 @@ export function getClassroomTaskTransactionModel<T>(
   return connection.model<T>(source.modelName, schema, source.collection.name);
 }
 
-function isUnknownCommitResult(error: unknown): boolean {
+function excludesCommitConfirmation(code: unknown, codeName: unknown): boolean {
+  return (
+    code === MAX_TIME_MS_EXPIRED ||
+    code === UNKNOWN_REPL_WRITE_CONCERN ||
+    code === UNSATISFIABLE_WRITE_CONCERN ||
+    codeName === 'CannotSatisfyWriteConcern' ||
+    codeName === 'UnknownReplWriteConcern' ||
+    codeName === 'UnsatisfiableWriteConcern'
+  );
+}
+
+function canConfirmCommit(error: unknown): boolean {
+  if (!(error instanceof mongo.MongoError)) return false;
+  if (
+    error instanceof mongo.MongoServerError &&
+    (excludesCommitConfirmation(error.code, error.codeName) ||
+      excludesCommitConfirmation(
+        error.writeConcernError?.code,
+        error.writeConcernError?.codeName,
+      ))
+  ) {
+    return false;
+  }
+  // With no adaptive retries, 7.9.1 can throw the first reply before labeling its commit outcome.
   return (
     error instanceof mongo.MongoNetworkError ||
     error instanceof mongo.MongoWriteConcernError ||
-    (error instanceof mongo.MongoError &&
-      error.hasErrorLabel('UnknownTransactionCommitResult'))
+    error.hasErrorLabel(mongo.MongoErrorLabel.UnknownTransactionCommitResult) ||
+    error.hasErrorLabel(mongo.MongoErrorLabel.RetryableWriteError) ||
+    error.hasErrorLabel(mongo.MongoErrorLabel.PoolRequestedRetry)
   );
 }
 
 function isTransientTransaction(error: unknown): boolean {
   return (
     error instanceof mongo.MongoError &&
-    !error.hasErrorLabel('UnknownTransactionCommitResult') &&
-    error.hasErrorLabel('TransientTransactionError')
+    !error.hasErrorLabel(
+      mongo.MongoErrorLabel.UnknownTransactionCommitResult,
+    ) &&
+    error.hasErrorLabel(mongo.MongoErrorLabel.TransientTransactionError)
   );
 }
 
@@ -88,7 +117,7 @@ export async function runClassroomTaskTransaction<T>(
           await session.commitTransaction();
           return value;
         } catch (error) {
-          if (isUnknownCommitResult(error)) {
+          if (canConfirmCommit(error)) {
             // An inconclusive commit may only be confirmed on this transaction.
             try {
               deadline.remainingMs();

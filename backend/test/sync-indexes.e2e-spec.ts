@@ -15,6 +15,7 @@ import {
   isLocalSingleNodeReplicaSetPrimary,
   readLocalMongoPort,
 } from '../src/config/local-mongo-replica-set';
+import { runMongoWriteCommand } from '../src/lib/mongo-command';
 import { readMongoIndexes } from '../src/lib/mongo-index-cursor';
 import { withMongoOperationDeadline } from '../src/lib/mongo-operation-deadline';
 import {
@@ -141,20 +142,9 @@ function fixtureCommand(
 async function fixtureWrite(
   database: mongo.Db,
   command: mongo.Document,
-  budgetMs?: number,
+  budgetMs = lifecycle.remainingMs(fixtureOperationBudgetMs),
 ) {
-  const writeConcern = database.writeConcern;
-  if (writeConcern) {
-    mongoose.mongo.WriteConcern.apply(command, writeConcern);
-  }
-  const reply = await fixtureCommand(database, command, budgetMs);
-  if (
-    reply.ok !== 1 ||
-    'writeConcernError' in reply ||
-    (Array.isArray(reply.writeErrors) && reply.writeErrors.length > 0)
-  ) {
-    throw new Error('SYNC_INDEXES_E2E_WRITE_UNCONFIRMED');
-  }
+  await runMongoWriteCommand(database, command, budgetMs);
   return true;
 }
 

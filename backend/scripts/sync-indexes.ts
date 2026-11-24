@@ -12,7 +12,10 @@ import {
   assertConnectedDatabaseMatchesPurpose,
   DatabaseGateError,
 } from '../src/config/database-purpose';
-import { readMongoIndexes } from '../src/lib/mongo-index-cursor';
+import {
+  IndexCursorCloseUnconfirmedError,
+  readMongoIndexes,
+} from '../src/lib/mongo-index-cursor';
 import { withMongoOperationDeadline } from '../src/lib/mongo-operation-deadline';
 import {
   parseSyncIndexesArguments,
@@ -774,6 +777,11 @@ type SafeFailure = { code: string; driverCode?: number; indexName?: string };
 function safeFailure(error: unknown, fallback: string): SafeFailure {
   if (error instanceof UnconfirmedIndexWrite) {
     return { code: error.code, driverCode: error.driverCode };
+  }
+  if (error instanceof IndexCursorCloseUnconfirmedError) {
+    return error.cause instanceof mongoose.mongo.MongoServerError
+      ? safeFailure(error.cause, 'INDEX_CURSOR_CLOSE_UNCONFIRMED')
+      : { code: 'INDEX_CURSOR_CLOSE_UNCONFIRMED' };
   }
   if (
     (error instanceof SyncIndexesError || error instanceof DatabaseGateError) &&

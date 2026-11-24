@@ -174,7 +174,7 @@ Global SoT 只保留理解跨 Service workflow 必需的稳定不变量，不追
   - 新课堂发布写路径同时检查来源难度符合 [Task 写入值域](./handoff-backend-dto-cheatsheet.md#task-template-dto--response-family) 或缺失；非法值返回 400，提示先修改模板难度，不生成非法新快照。校验不放入兼供历史读取的 snapshotTask helper，已有快照及旧实例只读 fallback 保持可读，不因显示归一化回写。
   - 实例配置更新与生命周期分开处理。状态写入以班级、实例和读取到的源状态作条件，未命中则复读主节点判断当前状态。撤回与首次提交的父实例协调写竞争同一文档；状态更新不以关联作品为前置条件，保留的 RECALLED 实例仍占用同班模板唯一键。公开转换与竞争结果见 [API Map](./handoff-backend-api-map.md#classroom-tasksclassrooms-子资源)。
   - 教师删除事务先按班级和实例主键写入父文档删除，再在同一 session 顺序检查 `Submission` 和 `AiFeedbackJob` 的直接引用。有任一引用即抛出业务冲突，回滚父文档删除。删除与 [Card 08](#service-card-08) 的提交协调写竞争同一 ClassroomTask。并发终态及公开错误见 [API Map](./handoff-backend-api-map.md#classroom-tasksclassrooms-子资源)。
-  - 删除和学生提交共用本节的事务执行规则。每次事务调用从单调时钟计算 10 秒截止，事务体、明确可重试的尝试、提交和确认共用剩余量。到期不发起业务写入、新尝试或提交确认。在途提交明确成功时按成功处理。提交结果未知时只允许预算内确认同一 session 的同一事务，不能重跑事务体。
+  - 删除和学生提交共用本节的事务执行规则。每次事务调用从单调时钟计算 10 秒截止，事务体、明确可重试的尝试、提交和确认共用剩余量。到期不发起业务写入、新尝试或提交确认。在途提交明确成功时按成功处理。事务专池关闭驱动自适应重试，首次提交可能只带 `RetryableWriteError` 标签。应用按公开错误类型、标签和明确排除项判断，结果未知时只允许在预算内确认一次同一 session 的同一事务，不重跑事务体。
   - 两条事务使用同一数据库内的专用连接池。驱动公开会话 API 的收尾使用该池的有限连接、排队及 socket 阶段，并等待已发操作、必要的 abort 和 session 释放。10 秒约束应用发起操作的时间，完成收尾和 HTTP 返回可能晚于该截止。
   - 发布返回、列表/详情、my-task-detail、教师/学生看板、提交详情标题及 AI 分析标题统一优先读实例快照；旧实例仅当前模板只读 fallback，不回填；课堂成员响应由 publicTaskContent 明确投影，避免展开内部引用。模板库/候选仍读当前 Task，资产状态保持当前值。
   - 发布候选查询同时应用当前教师可见性、模板发布状态及已发布 taskId 排除；难度按保存值精确匹配，与既有课程分类、知识模块和 onlyMine 条件取交集，同一最终 filter 用于分页前查询与 countDocuments。未显式指定课程分类时仍按班级课程分类优先排序，不对已发布课堂任务列表增加难度过滤；参数校验见 [DTO Cheatsheet](./handoff-backend-dto-cheatsheet.md#发布候选模板)。

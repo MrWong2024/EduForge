@@ -1,4 +1,4 @@
-import type { mongo } from 'mongoose';
+import { mongo } from 'mongoose';
 
 export class MongoWriteCommandRejectedError extends Error {
   constructor(readonly code?: number) {
@@ -7,13 +7,14 @@ export class MongoWriteCommandRejectedError extends Error {
 }
 
 type WriteReply = mongo.Document & {
+  acknowledged?: boolean;
   writeErrors?: { code?: number }[];
   writeConcernError?: object;
 };
 
 export async function runMongoWriteCommand(
   db: mongo.Db,
-  command: mongo.Document,
+  command: mongo.Document & mongo.WriteConcernOptions,
   remainingMs: number,
   options?: { signal?: AbortSignal },
 ): Promise<mongo.Document> {
@@ -27,12 +28,32 @@ export async function runMongoWriteCommand(
     : deadline;
   signal.throwIfAborted();
 
-  // The raw command API supports cancellation and preserves individual write replies.
-  const reply = (await db.command(
-    { ...command, maxTimeMS: milliseconds },
+  // The raw command API does not inherit database write concern.
+  const databaseConcern = db.writeConcern;
+  const operationConcern = mongo.WriteConcern.fromOptions(command);
+  const w = operationConcern?.w ?? databaseConcern?.w;
+  if (w === 0) throw new Error('MONGO_WRITE_COMMAND_UNACKNOWLEDGED');
+  const confirmationMs = Math.min(
+    milliseconds,
+    ...[databaseConcern?.wtimeoutMS, operationConcern?.wtimeoutMS].filter(
+      (timeout): timeout is number =>
+        timeout !== undefined && timeout > 0 && Number.isFinite(timeout),
+    ),
+  );
+  const concern = new mongo.WriteConcern(
+    w,
+    confirmationMs,
+    operationConcern?.journal ?? databaseConcern?.journal,
+  );
+  const reply: WriteReply = await db.command(
+    mongo.WriteConcern.apply({ ...command, maxTimeMS: milliseconds }, concern),
     { readPreference: 'primary', signal },
-  )) as WriteReply;
-  if (reply.writeConcernError) {
+  );
+  if (
+    reply.ok !== 1 ||
+    reply.acknowledged === false ||
+    'writeConcernError' in reply
+  ) {
     throw new Error('MONGO_WRITE_COMMAND_UNCONFIRMED');
   }
   if (reply.writeErrors?.length) {

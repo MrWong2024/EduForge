@@ -261,6 +261,10 @@ Browser launcher foundation 负责受控启动、正常初始化所需索引元�
 - 写入超时或连接结果未知时不得直接重跑；先只读核对 app、数据库和任务 namespace 的实际状态。
 - 第 5 节的 Browser Acceptance foundation 不自动要求 fixture、verifier 或 cleanup 资产；只有 Browser 持久写入或复杂跨进程终态无法由已有低层证据充分证明时，才允许评估新资产。
 
+认证和文本 Browser 夹具 CLI 正常返回或抛错时，经 `finally` 等待连接关闭。120 秒 watchdog 触发时会尝试输出 `sideEffects: "unknown"`，再用 `process.exit(124)` 直接退出。此路径无法保证执行 `finally`，也无法据此确认已发操作、写入或者清理的终态。退出码 `124` 也可能来自正常错误处理。遇到硬退出或缺少完整收尾证据时，保留恢复记录，先核对自有进程、连接、在途操作及对应 namespace 的实库状态，确认归属和终态后再决定是否清理。
+
+使用共享原生命令助手的夹具写入显式发送合并后的写关注。操作级 `w` 和 journal 设置优先，写确认期限取已有正值和本次剩余预算的最小值。未确认的结果或写关注错误按结果不明处理。
+
 `test/submission-edit.e2e-spec.ts`、`test/classroom-ai-learning-analytics.e2e-spec.ts`、`test/classroom-text-task-contract.e2e-spec.ts` 和 `test/learning-tasks.ai-feedback.bailian-context.e2e-spec.ts` 使用独立 `standard_test` 进程，并在真实连接后同时核对 `authenticatedUsers` 与 `authenticatedUserRoles`，按 [Config Matrix](./handoff-backend-config-matrix.md#1-数据库连接串与索引治理) 确认本机 root 账号，不能只凭 URI 或角色名称通过门禁。按文件串行运行，正常初始化可建立集合和索引元数据；业务写入及 cleanup 限于各 spec 的合成 namespace、记录 ID 和关联资源，清理后核对残留并关闭自有 app/连接，不清空整个数据库。
 
 fixture、verifier、support 与 Browser infrastructure 的通用复杂度止损遵循 [Codex instruction spec](../codex-instruction-spec.md) §3.10；本节只维护当前 EduForge 测试资产与 lifecycle 事实，不建立额外治理体系。
@@ -307,7 +311,7 @@ npm run browser:text-smoke -- cleanup --namespace b1-2-<unique> --confirm-namesp
 - 处理前核对 Job→Submission→ClassroomTask→合成师生/班级的完整 ownership；全库 PENDING/FAILED/RUNNING 必须恰好只有目标，且为 budgetVersion=1、PENDING、attempts=0。外来、多目标或 legacy 非终态立即拒绝，不修改它们。随后只调用真实 `AiFeedbackProcessor.processOnce(1)` 一次，读取该目标及实际 stub 反馈核对结果，finally 等待上下文关闭。
 - `processOnce` 是全库扫描入口，上述查询不是并发锁。操作者必须独占验收时段，排除其他 Worker/Profile/生产者并串行形成、消费目标；`--confirm-exclusive` 记录的是该运行前提，不能代替隔离审计。不启用长期 Worker、debug HTTP 或真实模型。
 - 最小恢复记录仅保存 namespace、端口、准确资源 ID，位于仓库根目录下 ignored `.local/deliverables/browser-text-task-smoke/<namespace>.json`；Cookie 仅在准备过程内存中使用，不持久化 Cookie、Session、Mongo URI 或基础设施凭据。`.local/deliverables/` 包含恢复资料，不能整体当作可清空缓存。
-- CLI 使用单调时钟的 120 秒总截止。HTTP 请求最多 15 秒，ADMIN 数据库操作按原操作预算和总截止的剩余量取较小值。连接在 finally 中关闭。写入或 cleanup 结果不明时保留恢复记录，先用 `inspect` 和进程/端口审计确认实际状态，不直接重放。
+- CLI 使用单调时钟的 120 秒总截止。HTTP 请求最多 15 秒，ADMIN 数据库操作按原操作预算和总截止的剩余量取较小值。正常收尾、watchdog 和结果不明的核对规则见 [§6.1](#61-current-state)。
 - 清理前停止本轮写入与处理并等待在途动作结束。cleanup 使用准确 ID 和关联 ownership，顺序为 Feedback/Job → Submission → ClassroomTask/Task → Enrollment/Classroom/Course → 合成用户 Session/必要 PasswordResetToken → User；拒绝仍在 RUNNING 的自有 Job，不 dropDatabase、不清空集合。完成后核对业务与认证关联残留为零；同一 namespace 的 cleanup 可安全重复，恢复记录在确认资源收尾后再删除。
 - 支持纯测试为 `scripts/browser-text-task-smoke.spec.ts`；沿第 4 节 Jest runner 用相同目标参数先 discovery，再执行。它只证明新增门禁、ownership、固定密码和 cleanup 选择，不证明真实 Browser 流程。
 
@@ -321,7 +325,7 @@ node -r ts-node/register -r tsconfig-paths/register ./scripts/browser-auth-smoke
 node -r ts-node/register -r tsconfig-paths/register ./scripts/browser-auth-smoke.ts cleanup --namespace auth-batch2-<unique>
 ```
 
-- CLI 仅解析 `.env.browser-acceptance`，复用 Browser 环境构造与用途门禁。连接后核对实际库名、实际连接节点为本机单节点 `rs0` 的可写 PRIMARY，以及唯一 `root@admin` 认证身份和角色。导入模块不执行 CLI，也不导入 AppModule。每次运行使用单调时钟的 120 秒总截止，查询、写入和索引盘点按各自操作预算与总截止的剩余量取较小值。一次索引游标的所有批次共用一个操作期限。连接在 finally 关闭。
+- CLI 仅解析 `.env.browser-acceptance`，复用 Browser 环境构造与用途门禁。连接后核对实际库名、实际连接节点为本机单节点 `rs0` 的可写 PRIMARY，以及唯一 `root@admin` 认证身份和角色。导入模块不执行 CLI，也不导入 AppModule。每次运行使用单调时钟的 120 秒总截止，查询、写入和索引盘点按各自操作预算与总截止的剩余量取较小值。一次索引游标的所有批次共用一个操作期限。正常收尾与 watchdog 见 [§6.1](#61-current-state)。
 - `prepare` 不覆盖已有恢复记录或 namespace 账号。须先由操作者确认 APP 和其它认证写入者均已停止；脚本再次核对认证三集合为空、没有在途认证操作，才盘点并补齐正式 SessionSchema 索引。仅允许删除精确定义为 `{token:1}, unique:true` 的旧 `token_1`；保留正确的 `_id_`、TTL、userId、tokenHash 唯一索引，未知定义或漂移立即拒绝，不调用其它用途的索引 CLI/helper。检查空集合与 currentOp 不代替独占进程审计。
 - 随后仅创建 namespace 专属 teacher/student 两名 active 合成账号。初始和改密场景的固定合成密码由脚本常量维护；`inspect` 只读核对 ID/email/role 归属、账号状态和当前凭据是否匹配已知合成状态，不输出密码或哈希。部分准备失败时只清理本次记录且归属已核实的精确目标。
 - 恢复记录位于 ignored `.local/deliverables/browser-auth-smoke/<namespace>.json`，仅保存 namespace 和两个 User ID。所有写入结果不明时先检查精确目标，不直接重试；恢复记录保留到收尾明确。
