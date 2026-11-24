@@ -28,6 +28,7 @@
 | RefreshButton | `components/blocks/RefreshButton.tsx` | 复用 router.refresh 的显式刷新入口，不持久化草稿、不轮询 |
 | Tabs | `components/blocks/Tabs.tsx` | 任务工作区 tab 导航展示；不在三件套页面重复实现 |
 | FloatingMoreMenu | `components/blocks/FloatingMoreMenu.tsx` | 生命周期“更多”菜单的共享浮层基础：Portal 定位、视口边界与外部点击/Esc/滚动关闭；业务组件拥有菜单开关与具体动作，不在业务层复制浮层机制 |
+| ConfirmDialog | `components/blocks/ConfirmDialog.tsx` | 通过原生 `<dialog>` 和 `showModal()` 展示可访问的标题、说明及确认/取消动作，处理初始焦点、Esc 取消与关闭后的焦点交接。调用方提供具体文案、业务请求与结果状态；当前用于教师课堂任务列表的关闭、恢复提交、撤回和删除 |
 
 ## 4) Auth / Account
 
@@ -79,10 +80,11 @@
 | ai-context-refs | `lib/learning-tasks/ai-context-refs.ts` | 引用基本结构解析、稳定格式化、语义差异与局部作者编辑判断；保持路径及数组顺序，不复制后端 ZIP 安全校验 |
 | TeacherLearningTasksPage | `app/teacher/tasks/page.tsx` | 模板列表 SSR 参数解析、数据加载与外层实际分页链接；难度复用共享筛选解析并传给 LearningTaskFilters，保留列表和来源班级上下文，不在页面过滤已分页结果 |
 | LearningTaskFilters | `components/teacher/LearningTaskFilters.tsx` | 模板视图/筛选（含难度）的 URL 状态、分页、列表展示与编辑/查看入口；清空及活动筛选判断包含难度，控件由 URL/初始 props 恢复；“评阅标准”列复用纯 helper 显示文字已填写/未填写，“分类”单元格内复用共享难度显示；桌面五列、窄屏纵向条目，无需横向滚动；保留列表返回上下文，筛选后回首屏；复用共享可见性和排序模块，不在当前页伪造完整候选或发起发布/归档 |
-| ClassroomTasksPage | `app/teacher/classrooms/[classroomId]/tasks/page.tsx` | 班级任务与发布候选分别 SSR 加载，解析并下传候选难度；已发布列表请求不使用候选难度，其分页链接保留候选条件，具体调用合同见 API Map |
+| ClassroomTasksPage | `app/teacher/classrooms/[classroomId]/tasks/page.tsx` | 班级任务与发布候选分别 SSR 加载，解析并下传候选难度。按权威列表总数计算越界时的有效页地址，保留候选条件；提供列表标题作为焦点回退目标，具体调用合同见 API Map |
 | PublishClassroomTaskForm | `components/teacher/PublishClassroomTaskForm.tsx` | 可见已发布模板的筛选、候选追加加载、选择状态与实例发布；难度及既有筛选变化时清除选择并重置候选，复用请求 epoch 和局部等待状态，过期响应不污染新候选；等待及当前候选成员校验同时作用于控件和提交入口，截止/迟交草稿独立保留，详细状态合同见 API Map。课程分类复用共享候选；发布者来源与已选模板摘要由本组件展示，候选及摘要复用共享难度显示；评阅标准摘要复用纯 helper，候选未提供 rubric 时提示到模板详情核对，不宣称未填写。不提供 AI 策略选择，不创建/编辑模板，不自行判定后端候选全集 |
+| ClassroomTaskListInteractions | `components/teacher/ClassroomTaskListInteractions.tsx` | 共享同一班级任务页内的发布回执实例 ID。发布表单写入回执并渲染详情链接，删除成功时仅清除匹配的回执。列表页越界时按服务端提供的地址执行客户端同页替换，保留页面外壳、发布草稿和列表标题焦点 |
 | TeacherTaskDetailPage | `app/teacher/classrooms/[classroomId]/tasks/[classroomTaskId]/page.tsx` | 加载课堂任务正式投影，基础信息展示难度并组合共享 rubric；难度显示复用共享 helper，字段读源见 API Map |
-| ClassroomTaskLifecycleActions | `components/teacher/ClassroomTaskLifecycleActions.tsx` | 实例状态展示、关闭/恢复提交及确认/请求状态；普通 409 显示刷新后再操作的提示，不自动重放；恢复只改变运行状态，不自动改截止或迟交设置；RECALLED 无动作，不做物理删除或发布表单 |
+| ClassroomTaskLifecycleActions | `components/teacher/ClassroomTaskLifecycleActions.tsx` | 展示实例状态，持有本次确认的动作与实例，提供与动作相关的后果说明。确认后锁定本次请求并处理结果与刷新；删除行将消失时以列表标题承接行内焦点。调用与错误适配见 API Map |
 | EditClassroomTaskForm | `components/teacher/EditClassroomTaskForm.tsx` | 列表行内展开，截止时间按浏览器本地分钟显示和比较，未改分钟省略，实际改动转换为 UTC 或明确清空；仅保存逐字段净变化，无变化不发请求。成功后立即重开采用正式回执设置，后续打开可采用更新列表；展开期间的刷新不重绑草稿。失败保留草稿及基准，普通 409 提示刷新且不重放；ACTIVE/CLOSED 可编辑，RECALLED 无入口，不修改模板或状态流；部分更新与竞争结果见 [Backend API](./handoff-backend-api-map.md#classroom-tasksclassrooms-子资源) |
 | PublishTaskStatusButton | `components/teacher/PublishTaskStatusButton.tsx` | 单一模板发布操作；当前 classroomTask 详情页不使用，模板生命周期入口留在模板层 |
 | RemoveStudentButton | `components/teacher/RemoveStudentButton.tsx` | 单个成员移除及动作结果，不负责成员列表或成员关系判定 |

@@ -1,179 +1,242 @@
 "use client";
 
-import { type ReactNode, useState } from "react";
+import { type ReactNode, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
+import { ConfirmDialog } from "@/components/blocks/ConfirmDialog";
 import { ErrorState } from "@/components/blocks/ErrorState";
 import { BrowserFetchJsonError, fetchJson } from "@/lib/api/browser-client";
-import { buildErrorDescription, extractRawDetail } from "@/lib/api/error-presenter";
-import { getClassroomTaskStatusLabel } from "@/lib/ui/status";
 import {
   normalizeClassroomTaskStatus,
   type ClassroomTaskStatus,
   type UpdateClassroomTaskStatusRequest,
 } from "@/lib/api/types-teacher";
+import { getClassroomTaskStatusLabel } from "@/lib/ui/status";
+import { useClassroomTaskPublishReceipt } from "./ClassroomTaskListInteractions";
 
 type ClassroomTaskLifecycleActionsProps = {
   classroomId: string;
   classroomTaskId?: string;
+  taskTitle: string;
   status?: string;
   submissionWindowBadge?: ReactNode;
+  listHeadingId: string;
 };
 
-type StatusActionErrorState = {
+type LifecycleAction = ClassroomTaskStatus | "DELETE";
+
+type PendingAction = {
+  action: LifecycleAction;
+  classroomTaskId: string;
+};
+
+type ActionError = {
+  action: LifecycleAction;
   status?: number;
-  summary: string;
-  detail?: string;
+  reason?: "notEmpty" | "unconfirmed";
 };
 
-type StatusActionTarget = "ACTIVE" | "CLOSED";
+const STATUS_BADGE: Record<ClassroomTaskStatus, string> = {
+  ACTIVE: "border-emerald-300 bg-emerald-50 text-emerald-700",
+  CLOSED: "border-zinc-300 bg-zinc-100 text-zinc-700",
+  RECALLED: "border-amber-300 bg-amber-50 text-amber-700",
+};
 
-const STATUS_META: Record<
-  ClassroomTaskStatus,
-  {
-    badgeClassName: string;
-  }
-> = {
-  ACTIVE: {
-    badgeClassName: "border-emerald-300 bg-emerald-50 text-emerald-700",
-  },
+const UNKNOWN_STATUS_BADGE = "border-zinc-300 bg-zinc-50 text-zinc-600";
+
+const ACTION_DETAILS = {
   CLOSED: {
-    badgeClassName: "border-zinc-300 bg-zinc-100 text-zinc-700",
+    label: "关闭任务",
+    description: "关闭后停止新提交。已有作品和反馈会保留，任务仍计入过程性评价。之后可恢复提交。",
+    success: "已关闭任务。",
+    style: "border-zinc-300 text-zinc-700 hover:bg-zinc-100",
+  },
+  ACTIVE: {
+    label: "恢复提交",
+    description: "任务恢复开放。原截止时间和迟交设置继续生效，学生能否提交以这些规则为准。",
+    success: "已恢复提交。",
+    style: "border-emerald-300 text-emerald-700 hover:bg-emerald-50",
   },
   RECALLED: {
-    badgeClassName: "border-amber-300 bg-amber-50 text-amber-700",
+    label: "撤回任务",
+    description: "撤回后停止新提交，保留作品和反馈。该任务及其贡献退出过程性评价，撤回后不可恢复。",
+    success: "已撤回任务。",
+    style: "border-amber-300 text-amber-800 hover:bg-amber-50",
   },
+  DELETE: {
+    label: "删除任务",
+    description: "仅删除当前班级的发布实例，源模板保留。仅无关联作品和 AI 反馈任务的实例可删除。删除后，学生不能提交，此实例不会计入过程性评价，也无法恢复。",
+    success: "已删除任务。",
+    style: "border-red-300 text-red-700 hover:bg-red-50",
+  },
+} satisfies Record<LifecycleAction, {
+  label: string;
+  description: string;
+  success: string;
+  style: string;
+}>;
+
+const ERROR_SUMMARY: Record<number, string> = {
+  400: "当前任务状态不允许此操作，请核对任务状态后再操作。",
+  401: "登录状态已失效，请重新登录。",
+  403: "无权限管理该课堂任务。",
+  404: "课堂任务不存在或已不可用。",
+  409: "课堂任务状态已变化，请核对最新状态后再操作。",
 };
 
-const UNKNOWN_STATUS_META = {
-  badgeClassName: "border-zinc-300 bg-zinc-50 text-zinc-600",
-};
+function describeActionError(error: ActionError, canRecall: boolean) {
+  const label = ACTION_DETAILS[error.action].label;
+  if (error.reason === "notEmpty") {
+    return canRecall
+      ? "该任务已有作品或 AI 反馈任务，无法删除。若要停止提交并保留记录，可选择撤回任务。"
+      : "该任务已有作品或 AI 反馈任务，无法删除。";
+  }
+  if (error.reason === "unconfirmed") {
+    return `无法确认是否已完成“${label}”，请核对任务列表后再操作。`;
+  }
+  return (error.status ? ERROR_SUMMARY[error.status] : undefined)
+    ?? `${label}失败，请稍后再试。`;
+}
 
 export function ClassroomTaskLifecycleActions({
   classroomId,
   classroomTaskId,
+  taskTitle,
   status,
   submissionWindowBadge,
+  listHeadingId,
 }: ClassroomTaskLifecycleActionsProps) {
   const router = useRouter();
-  const [isSubmitting, setIsSubmitting] = useState(false);
-  const [pendingTargetStatus, setPendingTargetStatus] = useState<StatusActionTarget | null>(null);
+  const [, setPublishedTaskId] = useClassroomTaskPublishReceipt();
+  const [pendingAction, setPendingAction] = useState<PendingAction | null>(null);
+  const [runningAction, setRunningAction] = useState<LifecycleAction | null>(null);
+  const [isRefreshing, startRefresh] = useTransition();
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
-  const [errorState, setErrorState] = useState<StatusActionErrorState | null>(null);
+  const [errorState, setErrorState] = useState<ActionError | null>(null);
+  const confirmingRef = useRef(false);
+  const actionsRef = useRef<HTMLDivElement>(null);
+  const deleteButtonRef = useRef<HTMLButtonElement>(null);
 
   const statusValue = normalizeClassroomTaskStatus(status);
-  const statusMeta = statusValue ? STATUS_META[statusValue] : UNKNOWN_STATUS_META;
-  const canClose = Boolean(classroomTaskId) && statusValue === "ACTIVE";
-  const canReopen = Boolean(classroomTaskId) && statusValue === "CLOSED";
+  const statusBadge = statusValue ? STATUS_BADGE[statusValue] : UNKNOWN_STATUS_BADGE;
+  const canRecall = statusValue === "ACTIVE" || statusValue === "CLOSED";
+  const isBusy = runningAction !== null || isRefreshing;
+  const primaryAction = statusValue === "ACTIVE" ? "CLOSED" : "ACTIVE";
 
-  const handleStatusTransition = async (targetStatus: StatusActionTarget) => {
-    const canTransition = targetStatus === "CLOSED" ? canClose : canReopen;
-    if (!classroomTaskId || !canTransition || isSubmitting) {
-      return;
-    }
+  const handleConfirm = async () => {
+    if (!pendingAction || confirmingRef.current) return;
 
-    const confirmMessage =
-      targetStatus === "CLOSED"
-        ? "确认关闭该课堂任务？关闭后将停止继续提交，已有记录会保留。"
-        : "确认恢复该课堂任务的提交？恢复后学生可继续提交；截止时间与迟交设置不会自动修改。";
-
-    const confirmed = window.confirm(confirmMessage);
-    if (!confirmed) {
-      return;
-    }
-
-    setIsSubmitting(true);
-    setPendingTargetStatus(targetStatus);
+    const { action, classroomTaskId: targetId } = pendingAction;
+    const path = `classrooms/${encodeURIComponent(classroomId)}/tasks/${encodeURIComponent(targetId)}`;
+    const signal = AbortSignal.timeout(30_000);
+    confirmingRef.current = true;
+    setPendingAction(null);
+    setRunningAction(action);
     setSuccessMessage(null);
     setErrorState(null);
 
-    const payload: UpdateClassroomTaskStatusRequest = { status: targetStatus };
-
     try {
-      await fetchJson<unknown>(
-        `classrooms/${encodeURIComponent(classroomId)}/tasks/${encodeURIComponent(classroomTaskId)}/status`,
-        {
-          method: "PATCH",
-          headers: {
-            accept: "application/json",
-            "content-type": "application/json",
-          },
-          body: JSON.stringify(payload),
+      if (action === "DELETE") {
+        const response = await fetchJson<{ ok?: boolean } | null>(path, { method: "DELETE", signal });
+        if (response?.ok !== true) throw new Error("Unexpected classroom task deletion response");
+
+        setPublishedTaskId((publishedId) => publishedId === targetId ? null : publishedId);
+        if (actionsRef.current?.contains(document.activeElement)) {
+          document.getElementById(listHeadingId)?.focus();
         }
-      );
-      setSuccessMessage(targetStatus === "CLOSED" ? "已关闭任务。" : "已恢复提交。");
-      router.refresh();
-    } catch (error) {
-      if (error instanceof BrowserFetchJsonError) {
-        const detail = extractRawDetail(error.data);
-        const summaryByStatus: Record<number, string> = targetStatus === "CLOSED" ? {
-          400: "当前任务状态不允许关闭，可能已不是开放中状态。",
-          401: "登录状态已失效，请重新登录。",
-          403: "无权限管理该课堂任务。",
-          404: "课堂任务不存在或已不可用。",
-          409: "课堂任务状态已变化，请刷新后再操作。",
-        } : {
-          400: "当前任务状态不允许恢复提交，可能已不是已关闭状态。",
-          401: "登录状态已失效，请重新登录。",
-          403: "无权限管理该课堂任务。",
-          404: "课堂任务不存在或已不可用。",
-          409: "课堂任务状态已变化，请刷新后再操作。",
-        };
-        setErrorState({
-          status: error.status,
-          summary: summaryByStatus[error.status] ?? (targetStatus === "CLOSED"
-            ? "关闭任务失败，请稍后重试。"
-            : "恢复提交失败，请稍后重试。"),
-          detail,
-        });
       } else {
-        setErrorState({
-          summary: targetStatus === "CLOSED"
-            ? "关闭任务失败，请稍后重试。"
-            : "恢复提交失败，请稍后重试。",
+        const payload: UpdateClassroomTaskStatusRequest = { status: action };
+        await fetchJson<unknown>(`${path}/status`, {
+          method: "PATCH",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify(payload),
+          signal,
         });
+        if (action === "RECALLED" && actionsRef.current?.contains(document.activeElement)) {
+          deleteButtonRef.current?.focus();
+        }
+      }
+      setSuccessMessage(ACTION_DETAILS[action].success);
+      startRefresh(() => router.refresh());
+    } catch (error) {
+      const httpStatus = error instanceof BrowserFetchJsonError ? error.status : undefined;
+      const data = error instanceof BrowserFetchJsonError ? error.data : null;
+      const notEmpty = action === "DELETE" && httpStatus === 409
+        && data !== null && typeof data === "object" && "code" in data
+        && data.code === "CLASSROOM_TASK_NOT_EMPTY";
+      const unconfirmed = httpStatus === undefined || httpStatus >= 500;
+      setErrorState({
+        action,
+        status: httpStatus,
+        reason: notEmpty ? "notEmpty" : unconfirmed ? "unconfirmed" : undefined,
+      });
+      if (unconfirmed || httpStatus === 404 || httpStatus === 409) {
+        startRefresh(() => router.refresh());
       }
     } finally {
-      setIsSubmitting(false);
-      setPendingTargetStatus(null);
+      confirmingRef.current = false;
+      setRunningAction(null);
     }
   };
 
+  const renderAction = (action: LifecycleAction, ref?: typeof deleteButtonRef) => {
+    const { label, style } = ACTION_DETAILS[action];
+    return (
+      <button
+        ref={ref}
+        type="button"
+        aria-haspopup="dialog"
+        aria-disabled={isBusy}
+        onClick={(event) => {
+          if (!classroomTaskId || isBusy || pendingAction || confirmingRef.current) return;
+          event.currentTarget.focus();
+          setPendingAction({ action, classroomTaskId });
+        }}
+        className={`rounded-md border px-2.5 py-1 text-xs font-medium aria-disabled:cursor-not-allowed aria-disabled:bg-zinc-100 aria-disabled:text-zinc-400 ${style}`}
+      >
+        {label}
+      </button>
+    );
+  };
+
   return (
-    <div className="space-y-2">
-      <span className={`inline-flex rounded border px-2 py-0.5 text-xs font-semibold ${statusMeta.badgeClassName}`}>
+    <div ref={actionsRef} className="space-y-2">
+      <span className={`inline-flex rounded border px-2 py-0.5 text-xs font-semibold ${statusBadge}`}>
         {getClassroomTaskStatusLabel(status)}
       </span>
       {submissionWindowBadge ? <div>{submissionWindowBadge}</div> : null}
 
       {!classroomTaskId ? (
-        <p className="text-xs text-zinc-500">缺少课堂任务标识，无法更新状态。</p>
-      ) : canClose ? (
-        <button
-          type="button"
-          onClick={() => handleStatusTransition("CLOSED")}
-          disabled={isSubmitting}
-          className="rounded-md border border-zinc-300 px-2.5 py-1 text-xs font-medium text-zinc-700 hover:bg-zinc-100 disabled:cursor-not-allowed disabled:bg-zinc-100 disabled:text-zinc-400"
-        >
-          {isSubmitting && pendingTargetStatus === "CLOSED" ? "关闭中..." : "关闭任务"}
-        </button>
-      ) : canReopen ? (
-        <button
-          type="button"
-          onClick={() => handleStatusTransition("ACTIVE")}
-          disabled={isSubmitting}
-          className="rounded-md border border-emerald-300 px-2.5 py-1 text-xs font-medium text-emerald-700 hover:bg-emerald-50 disabled:cursor-not-allowed disabled:bg-zinc-100 disabled:text-zinc-400"
-        >
-          {isSubmitting && pendingTargetStatus === "ACTIVE" ? "恢复中..." : "恢复提交"}
-        </button>
+        <p className="text-xs text-zinc-500">缺少课堂任务标识，无法管理任务。</p>
+      ) : statusValue ? (
+        <div className="flex flex-wrap gap-2">
+          {canRecall ? renderAction(primaryAction) : null}
+          {canRecall ? renderAction("RECALLED") : null}
+          {renderAction("DELETE", deleteButtonRef)}
+        </div>
       ) : null}
 
-      {successMessage ? <p className="text-xs text-emerald-700">{successMessage}</p> : null}
+      {pendingAction ? (
+        <ConfirmDialog
+          title={`${ACTION_DETAILS[pendingAction.action].label}：${taskTitle}`}
+          description={ACTION_DETAILS[pendingAction.action].description}
+          confirmLabel={ACTION_DETAILS[pendingAction.action].label}
+          destructive={pendingAction.action === "DELETE" || pendingAction.action === "RECALLED"}
+          onCancel={() => setPendingAction(null)}
+          onConfirm={handleConfirm}
+        />
+      ) : null}
+
+      {runningAction ? (
+        <p role="status" className="text-xs text-zinc-600">正在处理…</p>
+      ) : successMessage ? (
+        <p role="status" className="text-xs text-emerald-700">{successMessage}</p>
+      ) : null}
 
       {errorState ? (
         <ErrorState
           status={errorState.status}
-          title="更新课堂任务状态失败"
-          description={buildErrorDescription(errorState.summary, errorState.detail)}
+          title={`${ACTION_DETAILS[errorState.action].label}失败`}
+          description={describeActionError(errorState, canRecall)}
         />
       ) : null}
     </div>

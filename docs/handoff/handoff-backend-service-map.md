@@ -172,7 +172,7 @@ Global SoT 只保留理解跨 Service workflow 必需的稳定不变量，不追
 - Consistency / State / Idempotency:
   - 发布前检查班级 owner/运行态与模板发布态/可见性，从同一次 Task 读取形成候选 taskSnapshot（深复制引用），通过 AiContextReaderService 验证候选引用后保存同一份快照；`unique(classroomId,taskId)` 防重复发布，重复键转为受控拒绝。旧实例缺省状态按 ACTIVE 兼容。
   - 新课堂发布写路径同时检查来源难度符合 [Task 写入值域](./handoff-backend-dto-cheatsheet.md#task-template-dto--response-family) 或缺失；非法值返回 400，提示先修改模板难度，不生成非法新快照。校验不放入兼供历史读取的 snapshotTask helper，已有快照及旧实例只读 fallback 保持可读，不因显示归一化回写。
-  - 实例配置更新与生命周期分开处理。撤回前检查无提交，保留的 RECALLED 实例仍占用同班模板唯一键。恢复提交仅改状态，保留截止与提交设置。
+  - 实例配置更新与生命周期分开处理。状态写入以班级、实例和读取到的源状态作条件，未命中则复读主节点判断当前状态。撤回与首次提交的父实例协调写竞争同一文档；状态更新不以关联作品为前置条件，保留的 RECALLED 实例仍占用同班模板唯一键。公开转换与竞争结果见 [API Map](./handoff-backend-api-map.md#classroom-tasksclassrooms-子资源)。
   - 教师删除事务先按班级和实例主键写入父文档删除，再在同一 session 顺序检查 `Submission` 和 `AiFeedbackJob` 的直接引用。有任一引用即抛出业务冲突，回滚父文档删除。删除与 [Card 08](#service-card-08) 的提交协调写竞争同一 ClassroomTask。并发终态及公开错误见 [API Map](./handoff-backend-api-map.md#classroom-tasksclassrooms-子资源)。
   - 发布返回、列表/详情、my-task-detail、教师/学生看板、提交详情标题及 AI 分析标题统一优先读实例快照；旧实例仅当前模板只读 fallback，不回填；课堂成员响应由 publicTaskContent 明确投影，避免展开内部引用。模板库/候选仍读当前 Task，资产状态保持当前值。
   - 发布候选查询同时应用当前教师可见性、模板发布状态及已发布 taskId 排除；难度按保存值精确匹配，与既有课程分类、知识模块和 onlyMine 条件取交集，同一最终 filter 用于分页前查询与 countDocuments。未显式指定课程分类时仍按班级课程分类优先排序，不对已发布课堂任务列表增加难度过滤；参数校验见 [DTO Cheatsheet](./handoff-backend-dto-cheatsheet.md#发布候选模板)。
@@ -228,7 +228,7 @@ Global SoT 只保留理解跨 Service workflow 必需的稳定不变量，不追
 - Domain / Responsibility: 计算班级进度、风险未提交成员及 AI 健康汇总。
 - Upstream: `ClassroomsService`；Snapshot 通过 `getWeeklyReportByLowerBound` 复用聚合。
 - Downstream / Dependencies: `ClassroomModel`、`ClassroomTaskModel`、`SubmissionModel`、`EnrollmentService`、`AiFeedbackMetricsAggregator`。
-- Consistency / State / Idempotency: 窗口过滤统一使用 createdAt；all 不拼 lowerBound；风险集合为有效成员全集减去去重已提交学生，迟交统计随同一任务/提交范围计算。空任务或空成员返回零值聚合。
+- Consistency / State / Idempotency: 窗口过滤统一使用 createdAt；all 不拼 lowerBound；任务范围按班级和时间窗口确定，包含窗口内已撤回实例，后续活动沿用各自的时间窗口。风险集合为有效成员全集减去去重已提交学生，迟交统计随同一任务/提交范围计算。空任务或空成员返回零值聚合。
 - Isolation: 校验班级 owner；成员全集来自 Enrollment ACTIVE，任务/提交/AI 统计按 classroomId 与 classroomTaskId。
 - Side Effects: 只读。
 - Important Performance / Recovery: 以 classroomTaskIds 批次聚合，避免逐 task 查询。
@@ -327,7 +327,7 @@ Global SoT 只保留理解跨 Service workflow 必需的稳定不变量，不追
 - Upstream: `ClassroomsService` 校验教师角色后委托总览、学生列表或详情计算。
 - Downstream / Dependencies: `ClassroomModel`、`CourseModel`、`ClassroomTaskModel`、`TaskModel`、`SubmissionModel`、`AiFeedbackJobModel`、`FeedbackModel`、`UserModel`、`EnrollmentService`；同文件纯计算入口 `buildAiLearningAnalyticsStandardSamples`。
 - Consistency / State / Idempotency:
-  - 三个读取入口使用同一有效任务集合：按 classroomId、ClassroomTask.publishedAt 窗口及排除项筛选，保留 ACTIVE/CLOSED 与既有缺省状态兼容，排除 RECALLED 和未知状态；按 `publishedAt asc, classroomTaskId asc` 稳定排序。任务入选后保留完整提交链，不按窗口裁剪提交。正式撤回只允许无提交实例，此筛选修复有效任务数与空任务行，不代表撤回实例曾污染正常改善率分母。
+  - 三个读取入口使用同一有效任务集合：按 classroomId、ClassroomTask.publishedAt 窗口及排除项筛选，保留 ACTIVE/CLOSED 与既有缺省状态兼容，排除 RECALLED 和未知状态；按 `publishedAt asc, classroomTaskId asc` 稳定排序。任务入选后保留完整提交链，不按窗口裁剪提交。已撤回实例的提交链也随实例排除。
   - 每个 studentId + classroomTaskId 最多一个标准样本；稳定提交顺序为 `attemptNo asc, submittedAt asc, submissionId asc`。requested 表示存在任意 Job；delivered 要求 SUCCEEDED Job 加该提交至少一条实际 AI Feedback，排除已知 stub。成功空反馈没有可用评价；实际 INFO 条目可以有零 ERROR/WARN 负荷。历史来源缺失的实际反馈可作记录对照，但不能被推定为真实 Provider 或相同模型。
   - V1.2 取代旧“首个后续版本”口径：基线从有效反馈中按可确认的 Job.updatedAt 完成时间取最早项，同刻以稳定提交顺序打破平局。较早 attempt 后补评不能把基线移向更晚。内容形成时间使用可靠 lastEditedAt，未编辑或符合旧初始版本约定时用 submittedAt；contentRevision>0 缺可靠编辑时间时保持未知，不用申请时间、完成时间或当前时间补造。
   - 后续版本必须是基线以外的提交，且内容形成时间严格晚于基线反馈完成时间，不要求 attemptNo 更大；反馈前创建、反馈后修改的旧 attempt 可以入选。从有有效反馈的后续版本中，按内容形成时间取最新比较终点，同刻稳定打破平局，不按 Job 完成先后选择。基线已冻结，不虚构同一提交的历史 revision；每次只读重算，不持久化结果。

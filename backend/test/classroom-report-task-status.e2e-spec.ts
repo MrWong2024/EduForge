@@ -38,6 +38,11 @@ const accounts = [
     email: `${namespace}.student@example.invalid`,
     role: 'student',
   },
+  {
+    id: new Types.ObjectId(),
+    email: `${namespace}.other-teacher@example.invalid`,
+    role: 'teacher',
+  },
 ];
 // Dedicated synthetic application credential, unrelated to real accounts.
 const password = 'ReportStatus123!';
@@ -97,6 +102,7 @@ describe('Classroom report task status (real HTTP and Mongo)', () => {
   let httpServer: Server | undefined;
   let teacher: Agent;
   let student: Agent;
+  let otherTeacher: Agent;
   let courseId = '';
   let classroomId = '';
   let recalledId = '';
@@ -124,6 +130,19 @@ describe('Classroom report task status (real HTTP and Mongo)', () => {
       .query(excludedTaskIds === undefined ? {} : { excludedTaskIds })
       .expect(200);
     return response.body as Assessment;
+  };
+  const weeklyActivity = async () => {
+    const response = await get(`${classroomPath()}/weekly-report`)
+      .query({ window: '7d' })
+      .expect(200);
+    const body = response.body as {
+      progress: {
+        distinctStudentsSubmitted: number;
+        publishedClassroomTasks: number;
+      };
+      aiHealth: { jobs: { total: number } };
+    };
+    return { progress: body.progress, jobs: body.aiHealth.jobs };
   };
   function studentItem(body: Assessment): AssessmentItem {
     expect(body.total).toBe(1);
@@ -343,12 +362,17 @@ describe('Classroom report task status (real HTTP and Mongo)', () => {
     httpServer = app.getHttpServer() as Server;
     teacher = request.agent(httpServer);
     student = request.agent(httpServer);
+    otherTeacher = request.agent(httpServer);
     await post(teacher, '/api/auth/login', {
       email: accounts[0].email,
       password,
     }).expect(201);
     await post(student, '/api/auth/login', {
       email: accounts[1].email,
+      password,
+    }).expect(201);
+    await post(otherTeacher, '/api/auth/login', {
+      email: accounts[2].email,
       password,
     }).expect(201);
     const createdCourse = await post(teacher, '/api/courses', {
@@ -837,36 +861,6 @@ describe('Classroom report task status (real HTTP and Mongo)', () => {
     expect(await businessSnapshot()).toEqual(facts);
   });
 
-  it('allows exactly one of normal overlapping close and recall requests to commit', async () => {
-    const id = await publish('close-recall-race');
-    const before = await storedInstance(id);
-    const requested = ['CLOSED', 'RECALLED'] as const;
-    const responses = await settleRequests([
-      patchStatus(id, requested[0]),
-      patchStatus(id, requested[1]),
-    ]);
-    responses.forEach((response, index) =>
-      logMutation(`close-recall-${requested[index]}`, response),
-    );
-    const persisted = await storedInstance(id);
-    console.info(
-      JSON.stringify({ stage: 'close-recall-final', status: persisted.status }),
-    );
-    expect(responses.map(({ status }) => status).sort()).toEqual([200, 400]);
-    const winnerIndex = responses.findIndex(({ status }) => status === 200);
-    const winner = requested[winnerIndex];
-    const winnerBody = responses[winnerIndex].body as ClassroomTaskResponse;
-    expect(winnerBody.status).toBe(winner);
-    const loser = responses.find(({ status }) => status === 400);
-    if (!loser) throw new Error('REPORT_STATUS_RACE_REJECTION_MISSING');
-    expectPublicRejection(loser, 400, `${instancePath(id)}/status`);
-    const after = await expectInstanceState(id, winner, true);
-    expect({ ...after, updatedAt: before.updatedAt }).toEqual({
-      ...before,
-      status: winner,
-    });
-  });
-
   it('independently rejects close, reopen and settings changes on an already recalled instance', async () => {
     const terminalId = await publish('independent-recalled-terminal');
     await patchStatus(terminalId, 'RECALLED').expect(200);
@@ -1055,27 +1049,6 @@ describe('Classroom report task status (real HTTP and Mongo)', () => {
     });
   });
 
-  it('keeps the original submitted-instance recall rejection after a legal reopen', async () => {
-    const submissions = await rows('submissions', { studentId });
-    expect(submissions).toHaveLength(1);
-    const id = submissions[0].classroomTaskId?.toHexString();
-    if (!id) throw new Error('REPORT_STATUS_SUBMITTED_INSTANCE_MISSING');
-    expect((await storedInstance(id)).status).toBe('CLOSED');
-    const reopened = await patchStatus(id, 'ACTIVE').expect(200);
-    expect((reopened.body as ClassroomTaskResponse).status).toBe('ACTIVE');
-    const before = await storedInstance(id);
-    const response = await patchStatus(id, 'RECALLED');
-    logMutation('submitted-recall-rejected', response);
-    expectPublicRejection(
-      response,
-      400,
-      `${instancePath(id)}/status`,
-      'Classroom task already has submissions and cannot be recalled; close it instead',
-    );
-    expect(await storedInstance(id)).toEqual(before);
-    expect(await rows('submissions', { studentId })).toEqual(submissions);
-  });
-
   it('returns 404 for the same instance ID under another owned classroom on both patch routes without writing', async () => {
     const crossClassInstanceId = await publish('cross-class-scope');
     const created = await post(teacher, '/api/classrooms', {
@@ -1094,7 +1067,7 @@ describe('Classroom report task status (real HTTP and Mongo)', () => {
     expect(otherBefore).toHaveLength(1);
     const statusResponse = await patchStatus(
       crossClassInstanceId,
-      'CLOSED',
+      'RECALLED',
       otherClassroomId,
     );
     const settingsResponse = await patchSettings(
@@ -1124,4 +1097,129 @@ describe('Classroom report task status (real HTTP and Mongo)', () => {
       }),
     ).toEqual(otherBefore);
   });
+
+  it.each(['ACTIVE', 'CLOSED'] as const)(
+    'recalls a submitted %s instance and preserves authorized history and weekly activity',
+    async (source) => {
+      const baseline = studentItem(await report());
+      const baselineWeekly = await weeklyActivity();
+      const id = await publish(`submitted-recall-${source.toLowerCase()}`);
+      const classroomTaskId = new Types.ObjectId(id);
+      const submissionsUrl = `${instancePath(id)}/submissions`;
+      const content = {
+        codeText: 'const answer = 42;',
+        language: 'javascript',
+      };
+      const submitted = await post(student, submissionsUrl, { content }).expect(
+        201,
+      );
+      const work = submitted.body as { id: string; contentRevision: number };
+      const submissionId = new Types.ObjectId(work.id);
+      const submissionUrl = `/api/learning-tasks/submissions/${work.id}`;
+      await post(student, `${submissionUrl}/ai-feedback/request`, {
+        expectedRevision: work.contentRevision,
+      }).expect(200);
+      const feedback = await post(teacher, `${submissionUrl}/feedback`, {
+        expectedRevision: work.contentRevision,
+        source: 'TEACHER',
+        type: 'STYLE',
+        severity: 'WARN',
+        message: 'Use clearer naming.',
+        tags: ['readability'],
+      }).expect(201);
+      const feedbackId = (feedback.body as { id: string }).id;
+      if (source === 'CLOSED') await setStatus(id, 'CLOSED');
+      const instanceBefore = await storedInstance(id);
+      expect(instanceBefore.status).toBe(source);
+
+      const history = () =>
+        Promise.all([
+          rows('submissions', { classroomTaskId }),
+          rows('feedbacks', { submissionId }),
+          rows('aifeedbackjobs', { submissionId }),
+        ]);
+      const before = await history();
+      expect(before.map((records) => records.length)).toEqual([1, 1, 1]);
+      expect(before[0][0]).toMatchObject({
+        _id: submissionId,
+        classroomTaskId,
+        studentId,
+        taskId: instanceBefore.taskId,
+        attemptNo: 1,
+        content,
+      });
+      expect(before[1][0]).toMatchObject({
+        _id: new Types.ObjectId(feedbackId),
+        submissionId,
+      });
+      expect(before[2][0]).toMatchObject({
+        submissionId,
+        classroomTaskId,
+        studentId,
+        taskId: instanceBefore.taskId,
+      });
+      const beforeAssessment = studentItem(await report());
+      expect(beforeAssessment).toMatchObject({
+        submittedTasksCount: baseline.submittedTasksCount + 1,
+        publishedTasksCount: baseline.publishedTasksCount + 1,
+        submissionsCount: baseline.submissionsCount + 1,
+        aiRequestedCount: 1,
+      });
+      const beforeWeekly = await weeklyActivity();
+      expect(beforeWeekly.progress.distinctStudentsSubmitted).toBe(1);
+      expect(beforeWeekly.progress.publishedClassroomTasks).toBe(
+        baselineWeekly.progress.publishedClassroomTasks + 1,
+      );
+      expect(beforeWeekly.jobs.total).toBe(baselineWeekly.jobs.total + 1);
+
+      await otherTeacher
+        .patch(`${instancePath(id)}/status`)
+        .timeout(timeout)
+        .send({ status: 'RECALLED' })
+        .expect(404);
+      await student
+        .patch(`${instancePath(id)}/status`)
+        .timeout(timeout)
+        .send({ status: 'RECALLED' })
+        .expect(403);
+      expect(await storedInstance(id)).toEqual(instanceBefore);
+      await setStatus(id, 'RECALLED');
+      const terminal = await expectInstanceState(id, 'RECALLED', true);
+      expect({ ...terminal, updatedAt: instanceBefore.updatedAt }).toEqual({
+        ...instanceBefore,
+        status: 'RECALLED',
+      });
+      expectPublicRejection(
+        await patchStatus(id, 'ACTIVE'),
+        400,
+        `${instancePath(id)}/status`,
+        'Recalled classroom tasks cannot be reopened or closed',
+      );
+      await post(student, submissionsUrl, { content }).expect(409);
+      for (const agent of [teacher, student]) {
+        const detail = await agent
+          .get(submissionUrl)
+          .timeout(timeout)
+          .expect(200);
+        expect(detail.body).toMatchObject({
+          id: work.id,
+          attemptNo: 1,
+          content,
+        });
+        const feedbackList = await agent
+          .get(`${submissionUrl}/feedback`)
+          .timeout(timeout)
+          .expect(200);
+        expect(feedbackList.body).toEqual([feedback.body]);
+      }
+      await otherTeacher.get(submissionUrl).timeout(timeout).expect(403);
+      await otherTeacher
+        .get(`${submissionUrl}/feedback`)
+        .timeout(timeout)
+        .expect(403);
+      expect(await history()).toEqual(before);
+      expect(studentItem(await report())).toEqual(baseline);
+      expect(await weeklyActivity()).toEqual(beforeWeekly);
+    },
+  );
 });

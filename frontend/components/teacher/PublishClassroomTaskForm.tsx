@@ -26,6 +26,7 @@ import {
 } from "@/lib/learning-tasks/difficulty";
 import { buildQueryString, getPublisherLabel } from "@/lib/ui/format";
 import { getTaskTemplateStatusLabel } from "@/lib/ui/status";
+import { useClassroomTaskPublishReceipt } from "./ClassroomTaskListInteractions";
 
 type PublishClassroomTaskFormProps = {
   classroomId: string;
@@ -140,7 +141,7 @@ export function PublishClassroomTaskForm({
   const [allowLate, setAllowLate] = useState<boolean>(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errorState, setErrorState] = useState<PublishErrorState | null>(null);
-  const [createdTaskId, setCreatedTaskId] = useState<string | null>(null);
+  const [createdTaskId, setCreatedTaskId] = useClassroomTaskPublishReceipt();
   const [loadedTasks, setLoadedTasks] =
     useState<LearningTaskOption[]>(availableTasks);
   const [loadedTotal, setLoadedTotal] = useState<number>(
@@ -296,7 +297,7 @@ export function PublishClassroomTaskForm({
     );
   }, [loadedTasks, knowledgeModuleFilter]);
 
-  if (taskId && !loadedTasks.some((task) => task.id === taskId)) {
+  if (taskId && !selectedTask && loadedTasks.length >= loadedTotal) {
     setTaskId("");
   }
 
@@ -585,6 +586,7 @@ export function PublishClassroomTaskForm({
 
       const response = toSubmitTaskResponse(payload);
       setCreatedTaskId(response.id ?? null);
+      setTaskId("");
       router.refresh();
     } catch (error) {
       if (error instanceof BrowserFetchJsonError) {
@@ -783,6 +785,9 @@ export function PublishClassroomTaskForm({
                 ? "当前筛选下无可选模板"
                 : "请选择已发布任务"}
             </option>
+            {taskId && !selectedTask ? (
+              <option value={taskId} disabled>加载更多候选模板以核对原有选择</option>
+            ) : null}
             {loadedTasks.map((task) => (
               <option key={task.id ?? task.title} value={task.id}>
                 {task.title ?? "未命名任务"} |{" "}

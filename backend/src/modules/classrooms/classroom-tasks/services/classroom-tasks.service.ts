@@ -557,16 +557,6 @@ export class ClassroomTasksService {
     );
     const targetStatus = dto.status;
     this.assertStatusTransition(currentStatus, targetStatus);
-    if (targetStatus === CLASSROOM_TASK_STATUS_RECALLED) {
-      const hasSubmissions = await this.submissionModel.exists({
-        classroomTaskId: classroomTask._id,
-      });
-      if (hasSubmissions) {
-        throw new BadRequestException(
-          'Classroom task already has submissions and cannot be recalled; close it instead',
-        );
-      }
-    }
 
     // Compare the whole value just as toClassroomTaskStatusForRead does.
     // Anything other than the two exact terminal/closed values reads as ACTIVE.
@@ -651,10 +641,10 @@ export class ClassroomTasksService {
       );
     }
     const allowed =
-      currentStatus === CLASSROOM_TASK_STATUS_ACTIVE
-        ? targetStatus === CLASSROOM_TASK_STATUS_CLOSED ||
-          targetStatus === CLASSROOM_TASK_STATUS_RECALLED
-        : targetStatus === CLASSROOM_TASK_STATUS_ACTIVE;
+      targetStatus === CLASSROOM_TASK_STATUS_RECALLED ||
+      (currentStatus === CLASSROOM_TASK_STATUS_ACTIVE
+        ? targetStatus === CLASSROOM_TASK_STATUS_CLOSED
+        : targetStatus === CLASSROOM_TASK_STATUS_ACTIVE);
     if (!allowed) {
       throw new BadRequestException(
         `Transition from ${currentStatus} to ${targetStatus} is not allowed`,

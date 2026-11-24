@@ -1311,4 +1311,151 @@ describe('Classroom task submission cooldown and deletion (real HTTP and Mongo)'
       }
     },
   );
+
+  it.each(['recall', 'submit', 'close'] as const)(
+    'keeps the recall and parent writes consistent when %s wins',
+    async (first) => {
+      const target = await freshInstance(`recall-overlap-${first}`);
+      const targetId = new Types.ObjectId(target.classroomTaskId);
+      const statusPath = `${instancePath(target)}/status`;
+      const code = 'const firstSubmission = 1;';
+      const waiting = checkpoint();
+      const release = checkpoint();
+      const recallStarted = checkpoint();
+      const collection: {
+        findOneAndUpdate(
+          filter: mongo.Filter<mongo.Document>,
+          update: mongo.UpdateFilter<mongo.Document> | mongo.Document[],
+          options?: mongo.FindOneAndUpdateOptions,
+        ): Promise<mongo.Document | null>;
+      } = classroomTaskModel.collection;
+      const updateParent = collection.findOneAndUpdate.bind(
+        collection,
+      ) as typeof collection.findOneAndUpdate;
+      const spy = jest
+        .spyOn(collection, 'findOneAndUpdate')
+        .mockImplementation(async (filter, update, options) => {
+          if (
+            !(filter._id instanceof Types.ObjectId) ||
+            !filter._id.equals(targetId)
+          )
+            return updateParent(filter, update, options);
+          const isRecall =
+            !Array.isArray(update) && update.$set?.status === 'RECALLED';
+          const isSubmit = options?.session?.inTransaction() === true;
+
+          if (first === 'close' && isRecall) {
+            // The recall prepared its predicate from ACTIVE before the close writes.
+            waiting.signal();
+            await release.reached;
+          }
+          const pendingWrite = updateParent(filter, update, options);
+          if (first === 'submit' && isRecall) recallStarted.signal();
+          const result = await pendingWrite;
+          if (
+            (first === 'recall' && isRecall) ||
+            (first === 'submit' && isSubmit)
+          ) {
+            expect(result).not.toBeNull();
+            waiting.signal();
+            await release.reached;
+          }
+          return result;
+        });
+      const requests: Promise<request.Response>[] = [];
+      const send = (test: request.Test) => {
+        const response = test.then((value) => value);
+        requests.push(response);
+        return response;
+      };
+      const changeStatus = (status: 'CLOSED' | 'RECALLED') =>
+        send(teacher.patch(statusPath).timeout(httpTimeout).send({ status }));
+      const firstRequest =
+        first === 'submit'
+          ? send(submit(target, code))
+          : changeStatus('RECALLED');
+      try {
+        await waitForWrite(
+          waiting.reached,
+          firstRequest,
+          'RECALL_PARENT_WRITE',
+        );
+        if (first === 'close') {
+          const closed = await changeStatus('CLOSED');
+          expect(closed.status).toBe(200);
+          release.signal();
+          const staleRecall = await firstRequest;
+          expect(staleRecall.status).toBe(409);
+          expect(staleRecall.body).toMatchObject({
+            message: '课堂任务状态已变化，请刷新后再操作。',
+          });
+          expect(await storedInstances(target)).toMatchObject([
+            { status: 'CLOSED' },
+          ]);
+          const freshRecall = await changeStatus('RECALLED');
+          expect(freshRecall.status).toBe(200);
+          expect(await storedInstances(target)).toMatchObject([
+            { status: 'RECALLED' },
+          ]);
+          expect(await storedSubmissions(target, null)).toEqual([]);
+          return;
+        }
+
+        const overlapping =
+          first === 'submit'
+            ? changeStatus('RECALLED')
+            : send(submit(target, code));
+        if (first === 'submit') {
+          // The real recall write starts while the submission transaction holds the parent.
+          await waitForWrite(
+            recallStarted.reached,
+            overlapping,
+            'RECALL_WRITE_AFTER_SUBMIT_LOCK',
+          );
+          release.signal();
+        } else {
+          // The recall write committed, while its HTTP response is still pending.
+          expect((await overlapping).status).toBe(409);
+          release.signal();
+        }
+        const [recallResponse, submitResponse] = await Promise.all(
+          first === 'recall'
+            ? [firstRequest, overlapping]
+            : [overlapping, firstRequest],
+        );
+        const parent = await storedInstances(target);
+        const submissions = await storedSubmissions(target, null);
+        console.info(
+          JSON.stringify({
+            stage: 'recall-submission-order',
+            first,
+            recall: recallResponse.status,
+            submit: submitResponse.status,
+            status: parent[0]?.status,
+            submissions: submissions.length,
+            attempts: submissions.map(({ attemptNo }) => attemptNo),
+          }),
+        );
+        expect(recallResponse.status).toBe(200);
+        expect(recallResponse.body).toMatchObject({ status: 'RECALLED' });
+        expect(parent).toMatchObject([{ status: 'RECALLED' }]);
+        if (first === 'recall') {
+          expect(submitResponse.status).toBe(409);
+          expect(submissions).toEqual([]);
+        } else {
+          expect(submissions).toMatchObject([
+            { classroomTaskId: targetId, studentId, attemptNo: 1 },
+          ]);
+          assertSuccess(submitResponse, code, submissions);
+        }
+      } finally {
+        release.signal();
+        try {
+          await Promise.allSettled(requests);
+        } finally {
+          spy.mockRestore();
+        }
+      }
+    },
+  );
 });

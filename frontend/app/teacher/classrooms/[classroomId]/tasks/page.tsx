@@ -4,6 +4,7 @@ import { ErrorState } from "@/components/blocks/ErrorState";
 import { PageHeader } from "@/components/blocks/PageHeader";
 import { EditClassroomTaskForm } from "@/components/teacher/EditClassroomTaskForm";
 import { ClassroomTaskLifecycleActions } from "@/components/teacher/ClassroomTaskLifecycleActions";
+import { ClassroomTaskListInteractions } from "@/components/teacher/ClassroomTaskListInteractions";
 import { PublishClassroomTaskForm } from "@/components/teacher/PublishClassroomTaskForm";
 import { fetchJson, FetchJsonError } from "@/lib/api/client";
 import {
@@ -42,6 +43,7 @@ type ClassroomTasksPageProps = {
 };
 
 const CLASSROOM_TASKS_PAGE_SIZE = 100;
+const PUBLISHED_TASKS_HEADING_ID = "published-classroom-tasks";
 
 type TasksViewModel =
   | {
@@ -308,8 +310,7 @@ export default async function ClassroomTasksPage({
     responsePublishedTasksPage,
     totalPublishedTaskPages,
   );
-  const showPublishedTasksPagination =
-    totalPublishedTasks > CLASSROOM_TASKS_PAGE_SIZE;
+  const showPublishedTasksPagination = totalPublishedTaskPages > 1;
   const buildPublishedTasksHref = (page: number) =>
     `${paths.teacher.classroomTasks(classroomId)}?${buildQueryString({
       page,
@@ -319,7 +320,13 @@ export default async function ClassroomTasksPage({
       difficulty: initialDifficultyFilter,
     })}`;
 
-  return (
+  const validPageHref =
+    typeof viewModel.taskList.total === "number" &&
+    currentPublishedTasksPage > totalPublishedTaskPages
+      ? buildPublishedTasksHref(totalPublishedTaskPages)
+      : undefined;
+
+  const taskPage = (
     <section className="space-y-4">
       <PageHeader
         title="课堂任务"
@@ -390,12 +397,17 @@ export default async function ClassroomTasksPage({
         initialDifficultyFilter={viewModel.initialDifficultyFilter}
       />
 
+      <h2 id={PUBLISHED_TASKS_HEADING_ID} tabIndex={-1} className="text-base font-semibold text-zinc-900">
+        已发布的课堂任务
+      </h2>
       <p className="text-sm text-zinc-600">
         共 {totalPublishedTasks} 个课堂任务，当前显示{" "}
         {viewModel.taskList.items.length} 个
       </p>
 
-      {viewModel.taskList.items.length === 0 ? (
+      {validPageHref ? (
+        <p role="status" className="text-sm text-zinc-600">正在加载课堂任务列表…</p>
+      ) : viewModel.taskList.items.length === 0 ? (
         <EmptyState
           title="还没有课堂任务"
           description="当前班级还没有已发布任务。请先准备可见的已发布模板（含共享模板），再回到本页发布到当前班级。"
@@ -440,6 +452,7 @@ export default async function ClassroomTasksPage({
             <tbody>
               {viewModel.taskList.items.map((task, index) => {
                 const classroomTaskId = task.classroomTaskId;
+                const taskTitle = toDisplayText(task.title, "未命名任务");
                 const dueTimeStatus = getDueTimeStatus(task.dueAt);
                 const submissionWindowStatus = getSubmissionWindowStatus(
                   task.status,
@@ -461,7 +474,7 @@ export default async function ClassroomTasksPage({
                     <td className="px-4 py-3">
                       <div className="space-y-1">
                         <p className="font-medium text-zinc-900">
-                          {toDisplayText(task.title, "未命名任务")}
+                          {taskTitle}
                         </p>
                         {publisherLabel ? (
                           <div>
@@ -511,7 +524,9 @@ export default async function ClassroomTasksPage({
                       <ClassroomTaskLifecycleActions
                         classroomId={classroomId}
                         classroomTaskId={classroomTaskId}
+                        taskTitle={taskTitle}
                         status={task.status}
+                        listHeadingId={PUBLISHED_TASKS_HEADING_ID}
                         submissionWindowBadge={
                           <span
                             title={submissionWindowStatus.title}
@@ -628,5 +643,11 @@ export default async function ClassroomTasksPage({
         </div>
       ) : null}
     </section>
+  );
+
+  return (
+    <ClassroomTaskListInteractions key={classroomId} validPageHref={validPageHref}>
+      {taskPage}
+    </ClassroomTaskListInteractions>
   );
 }

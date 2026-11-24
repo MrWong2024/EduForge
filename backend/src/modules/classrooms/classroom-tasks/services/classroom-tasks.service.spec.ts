@@ -1555,26 +1555,32 @@ describe('ClassroomTasksService conditional classroom task writes', () => {
     },
   );
 
-  it('recalls a submission-free ACTIVE task with a guarded single write', async () => {
-    const harness = setup(CLASSROOM_TASK_STATUS_ACTIVE);
-    harness.classroomTaskModel.findOneAndUpdate.mockReturnValueOnce(
-      makeQuery({ ...harness.initialTask, status: 'RECALLED' }),
-    );
+  it.each([
+    [CLASSROOM_TASK_STATUS_ACTIVE, activeSource],
+    [CLASSROOM_TASK_STATUS_CLOSED, closedSource],
+  ] as const)(
+    'recalls a %s task with one scoped source-state write and no submission check',
+    async (status, predicate) => {
+      const harness = setup(status);
+      harness.classroomTaskModel.findOneAndUpdate.mockReturnValueOnce(
+        makeQuery({ ...harness.initialTask, status: 'RECALLED' }),
+      );
 
-    await expect(
-      harness.setStatus(CLASSROOM_TASK_STATUS_RECALLED),
-    ).resolves.toMatchObject({ status: 'RECALLED' });
+      await expect(
+        harness.setStatus(CLASSROOM_TASK_STATUS_RECALLED),
+      ).resolves.toMatchObject({ status: 'RECALLED' });
 
-    expect(harness.submissionModel.exists).toHaveBeenCalledWith({
-      classroomTaskId: harness.ids.classroomTaskId,
-    });
-    expect(harness.submissionModel.exists).toHaveBeenCalledTimes(1);
-    expect(harness.classroomTaskModel.findOneAndUpdate).toHaveBeenCalledWith(
-      { ...harness.scope, ...activeSource },
-      { $set: { status: 'RECALLED' } },
-      { returnDocument: 'after' },
-    );
-  });
+      expect(harness.submissionModel.exists).not.toHaveBeenCalled();
+      expect(harness.classroomTaskModel.findOneAndUpdate).toHaveBeenCalledTimes(
+        1,
+      );
+      expect(harness.classroomTaskModel.findOneAndUpdate).toHaveBeenCalledWith(
+        { ...harness.scope, ...predicate },
+        { $set: { status: 'RECALLED' } },
+        { returnDocument: 'after' },
+      );
+    },
+  );
 
   it('reopens only an exact CLOSED source with a guarded single write', async () => {
     const harness = setup(CLASSROOM_TASK_STATUS_CLOSED);
@@ -1611,7 +1617,6 @@ describe('ClassroomTasksService conditional classroom task writes', () => {
       'CLOSED',
       'Recalled classroom tasks cannot be reopened or closed',
     ],
-    ['CLOSED', 'RECALLED', 'Transition from CLOSED to RECALLED is not allowed'],
   ] as const)(
     'keeps the existing %s to %s rejection before writing',
     async (source, target, message) => {
@@ -1629,22 +1634,6 @@ describe('ClassroomTasksService conditional classroom task writes', () => {
       expect(harness.submissionModel.exists).not.toHaveBeenCalled();
     },
   );
-
-  it('keeps recall blocked by an existing submission without attempting a write', async () => {
-    const harness = setup(CLASSROOM_TASK_STATUS_ACTIVE);
-    harness.submissionModel.exists.mockResolvedValueOnce({ _id: objectId() });
-
-    await expect(
-      harness.setStatus(CLASSROOM_TASK_STATUS_RECALLED),
-    ).rejects.toMatchObject({
-      status: 400,
-      message:
-        'Classroom task already has submissions and cannot be recalled; close it instead',
-    });
-
-    expect(harness.submissionModel.exists).toHaveBeenCalledTimes(1);
-    expect(harness.classroomTaskModel.findOneAndUpdate).not.toHaveBeenCalled();
-  });
 
   it.each(['status', 'settings'] as const)(
     'returns 404 when the target disappears after a missed %s write',
@@ -1681,12 +1670,6 @@ describe('ClassroomTasksService conditional classroom task writes', () => {
       'RECALLED',
       'Recalled classroom tasks cannot be reopened or closed',
     ],
-    [
-      'ACTIVE',
-      'RECALLED',
-      'CLOSED',
-      'Transition from CLOSED to RECALLED is not allowed',
-    ],
   ] as const)(
     'returns the existing 400 when %s to %s loses to current state %s',
     async (source, target, current, message) => {
@@ -1699,9 +1682,7 @@ describe('ClassroomTasksService conditional classroom task writes', () => {
       });
 
       expectScopedRereadWithoutReplay(harness, reread);
-      expect(harness.submissionModel.exists).toHaveBeenCalledTimes(
-        target === 'RECALLED' ? 1 : 0,
-      );
+      expect(harness.submissionModel.exists).not.toHaveBeenCalled();
     },
   );
 
@@ -1709,6 +1690,7 @@ describe('ClassroomTasksService conditional classroom task writes', () => {
     ['ACTIVE', 'CLOSED', 'ACTIVE'],
     ['CLOSED', 'ACTIVE', 'CLOSED'],
     ['ACTIVE', 'RECALLED', 'ACTIVE'],
+    ['ACTIVE', 'RECALLED', 'CLOSED'],
     ['ACTIVE', 'CLOSED', ['RECALLED']],
   ] as const)(
     'returns plain 409 without replay when %s to %s remains allowed after a miss',
@@ -1719,9 +1701,7 @@ describe('ClassroomTasksService conditional classroom task writes', () => {
       await expectPlainConflict(harness.setStatus(target));
 
       expectScopedRereadWithoutReplay(harness, reread);
-      expect(harness.submissionModel.exists).toHaveBeenCalledTimes(
-        target === 'RECALLED' ? 1 : 0,
-      );
+      expect(harness.submissionModel.exists).not.toHaveBeenCalled();
     },
   );
 

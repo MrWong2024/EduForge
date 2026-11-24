@@ -103,8 +103,10 @@
   - 注意：模板可见性、发布资格及本班已发布排除由后端候选接口决定，前端不自行伪造候选全集。当前候选 DTO 不提供 rubric，缺少该字段只能提示到模板详情核对，不能判断模板未填写评阅标准。
   - 候选难度沿用上述筛选选项与解析口径，首次 SSR 查询和加载更多都传同一规范化条件；URL/权威 props 恢复控件与已应用条件。共用入口的筛选实际变化或清空即清除已选 taskId、使旧加载更多请求失效，保留截止/迟交草稿；更新期间禁止选择、加载更多及发布，submit handler 同时校验等待状态和当前候选成员。权威新结果替换候选池并同步页码/总数/limit，旧请求的成功、错误及 finally 均不得覆盖新状态，不自动选首条或重放发布；失败沿用原错误呈现并允许显式重试。
 - 班级任务实例：`/teacher/classrooms/:id/tasks/page.tsx` + 发布/生命周期/编辑组件 -> `/api/proxy/classrooms/:id/tasks*`。
-  - 对应后端：`GET/POST/PATCH /api/classrooms/:id/tasks*` 与 `/status`。
+  - 对应后端：`GET/POST /api/classrooms/:classroomId/tasks`、`GET/PATCH/DELETE /api/classrooms/:classroomId/tasks/:classroomTaskId` 及 `PATCH /api/classrooms/:classroomId/tasks/:classroomTaskId/status`。
   - 注意：发布表单只发送既有截止/迟交设置，不发送 AI 策略字段。列表/详情消费快照可用性及投影教学内容，不另取当前模板覆盖，不适配或展示旧策略。实例配置与状态动作分开发送；学生或教师可在提交详情主动申请 AI 反馈。
+  - `ClassroomTaskLifecycleActions` 用实例的 `classroomTaskId` 发起状态 PATCH 或实例 DELETE；源模板 `taskId` 用于发布。删除仅凭 `409` 且 `code=CLASSROOM_TASK_NOT_EMPTY` 展示非空拒绝，空实例资格由后端判定。删除请求失败或结果不明时，后续写入须由教师重新确认；状态、删除与历史读取合同见 [Backend API](./handoff-backend-api-map.md#classroom-tasksclassrooms-子资源)。
+  - 删除成功后以服务端返回的列表、总数和候选刷新当前筛选视图；当前已发布列表页超出有效范围时按服务端总数回到有效页。撤回成功后以服务端状态更新保留的实例行。
   - 发布请求仍仅使用 `taskId/dueAt/settings`，不传 difficulty；教师课堂详情的难度由 `toClassroomTask` 读取正式 `task.difficulty` 原值，后端负责发布快照。模板修改不覆盖已发布快照，前端不另查实时模板或回填缺失难度。
   - 班级页面的 difficulty 只作用于待发布候选，已发布课堂任务请求不带该参数；已发布任务的分页链接保留规范化候选难度，避免翻页丢失候选条件。
 - 课堂任务工作区名称：现有 Server `tasks/:classroomTaskId/layout.tsx` 经固定 SSR origin、请求内 Cookie/BFF 与 `no-store` 并行读取 `GET classrooms/:classroomId` 和 `GET classrooms/:classroomId/tasks/:classroomTaskId`，分别由 `toClassroomDetailResponse`、`toClassroomTask` 提取展示名称；任务标题沿用课堂实例正式投影，不另查当前模板。两项辅助读取各自有限超时、独立降级为明确占位，不替换 children 或子页主体错误处理。

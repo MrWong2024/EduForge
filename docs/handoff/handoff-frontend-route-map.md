@@ -39,7 +39,7 @@
 | `/teacher/classrooms/[classroomId]/edit` | 班级基础信息编辑 | Classroom 详情 / 更新 | 当前只编辑班级名称，所属课程、状态及加入码只读；保存后回看板，不影响成员、课堂任务和历史提交；不提供归档/恢复/删除，生命周期动作在列表“更多”菜单 | Done |
 | `/teacher/classrooms/[classroomId]` | 班级入口 | 无数据依赖 | 重定向到本班 dashboard | Done |
 | `/teacher/classrooms/[classroomId]/dashboard` | 班级看板 | Classroom dashboard API | 默认展示 ACTIVE 任务，可显式包含 CLOSED；展示模板归档提示和非本人模板发布者，进入任务与分析页。统计及归档建议直接消费后端结果，不二次过滤重算或自动归档 | Done |
-| `/teacher/classrooms/[classroomId]/tasks` | 课堂任务列表与发布 | ClassroomTask / 发布候选池 | 按课程分类、仅我的、知识模块检索可见已发布模板，候选支持加载更多，已发布任务支持分页；候选排除本班已发布模板，课程优先排序，展示发布者与模板归档提示。配置截止、迟交、次数后发布实例；列表展示快照状态，不提供 AI 策略配置；ACTIVE 可关闭、CLOSED 可恢复提交，两者可编辑实例设置，RECALLED 仅展示。生命周期、截止与提交窗口分别表达，前端提示不替代后端权限；可进入详情/提交/三件套及模板页，不在此维护模板 | Done |
+| `/teacher/classrooms/[classroomId]/tasks` | 课堂任务列表与发布 | ClassroomTask / 发布候选池 | 按课程分类、仅我的、知识模块或难度检索可见已发布模板，候选支持加载更多，已发布任务支持分页。可配置截止和迟交后发布。列表展示快照状态与提交窗口，关闭、恢复提交、撤回、删除均须确认。撤回后保留历史入口，移除编辑及恢复入口，空实例删除资格由后端判定。操作后保留当前筛选；可进入详情、提交、三件套及模板页 | Done |
 | `/teacher/classrooms/[classroomId]/tasks/[classroomTaskId]` | 课堂任务详情 | ClassroomTask 详情 | 只读展示发布快照状态、教学说明及评阅标准，提示师生在提交详情主动申请 AI，进入三件套或提交管理；实例状态动作在任务列表，模板生命周期在模板层 | Done |
 | `/teacher/classrooms/[classroomId]/tasks/[classroomTaskId]/submissions` | 课堂任务提交管理 | ClassroomTask submissions | 按课堂任务实例查看与分页，进入提交批阅；保留班级看板、任务列表/详情及三件套导航上下文 | Done |
 | `/teacher/submissions/[submissionId]` | 教师提交详情与批阅 | 正式 submission detail / feedback（[调用链](./handoff-frontend-api-map.md)） | 查看完整源码、独立说明、已有声明、实例评阅标准及安全 AI 摘要，按后端资格申请辅助反馈；AI 申请局部显示结果，仅显式刷新，保护人工反馈草稿；查看首次提交与最近修改时间；新增评语绑定查看的作品版本，冲突保留草稿，重新查看并明确确认后继续；有标识且明确为 TEACHER 的反馈可原地编辑，AI 与未知来源反馈只读，不展示或编辑 scoreHint。按可用上下文返回班级看板、任务提交列表或详情；导航上下文不作为主体数据 SoT | Done |
