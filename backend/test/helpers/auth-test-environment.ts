@@ -6,6 +6,7 @@ import mongoose, { type Connection } from 'mongoose';
 import { assertConnectedDatabaseMatchesPurpose } from '../../src/config/database-purpose';
 import { envValidationSchema } from '../../src/config/env.validation';
 import { isLocalSingleNodeReplicaSetPrimary } from '../../src/config/local-mongo-replica-set';
+import { createAuthTestModelReadConnection } from './auth-test-model-read-deadline';
 import {
   assertLocalStandardTestAuthentication,
   assertLocalStandardTestEnvironment,
@@ -110,17 +111,23 @@ export async function assertAuthTestConnection(
   });
 }
 
-export async function openAuthTestConnection(): Promise<Connection> {
-  const connection = mongoose.createConnection(authTestEnvironment.mongoUri, {
+export async function openAuthTestConnection({
+  budgetModelReads = false,
+}: { budgetModelReads?: boolean } = {}): Promise<Connection> {
+  const options = {
     autoCreate: false,
     autoIndex: false,
     serverSelectionTimeoutMS: 5000,
     connectTimeoutMS: 5000,
     socketTimeoutMS: 10000,
     waitQueueTimeoutMS: 10000,
+    monitorCommands: true,
     retryReads: false,
     retryWrites: false,
-  });
+  };
+  const connection = budgetModelReads
+    ? createAuthTestModelReadConnection(authTestEnvironment.mongoUri, options)
+    : mongoose.createConnection(authTestEnvironment.mongoUri, options);
   try {
     await connection.asPromise();
     await assertAuthTestConnection(connection);

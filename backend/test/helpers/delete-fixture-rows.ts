@@ -1,5 +1,5 @@
 import type { mongo } from 'mongoose';
-import { runMongoWriteCommand } from '../../src/lib/mongo-command';
+import { runAuthTestWrite } from './auth-test-writes';
 
 export async function deleteFixtureRows(
   db: mongo.Db,
@@ -7,10 +7,13 @@ export async function deleteFixtureRows(
   filter: mongo.Document,
   limit: 0 | 1 = 1,
   budgetMs = 5000,
+  serverMaxTimeMS?: number,
 ): Promise<void> {
-  await runMongoWriteCommand(
+  await runAuthTestWrite(
     db,
     { delete: collection, deletes: [{ q: filter, limit }] },
+    { collection, filter },
     budgetMs,
+    serverMaxTimeMS,
   );
 }

@@ -4,42 +4,34 @@ import {
   openAuthTestConnection,
 } from './helpers/auth-test-environment';
 import { prepareAuthSessionIndexes } from './helpers/auth-session-indexes';
+import { assertAuthTestWritesConfirmed } from './helpers/auth-test-writes';
+import { createFixtureUser } from './helpers/create-fixture-user';
+import { deleteFixtureRows } from './helpers/delete-fixture-rows';
 import { randomUUID } from 'node:crypto';
 import type { INestApplication } from '@nestjs/common';
-import { getConnectionToken } from '@nestjs/mongoose';
+import { getConnectionToken, getModelToken } from '@nestjs/mongoose';
 import { Test, type TestingModule } from '@nestjs/testing';
-import { type Connection, type Model, STATES, Types } from 'mongoose';
+import {
+  type Connection,
+  type Model,
+  type mongo,
+  STATES,
+  Types,
+} from 'mongoose';
 import request from 'supertest';
 import type { App } from 'supertest/types';
 import { AppModule } from '../src/app.module';
 import { configureApp } from '../src/app.setup';
 import { parseCsv } from '../scripts/import-users-csv';
 import { hashPassword } from '../src/modules/users/password.utils';
-import {
-  User,
-  UserSchema,
-  UserStatus,
-} from '../src/modules/users/schemas/user.schema';
-import {
-  Session,
-  SessionSchema,
-} from '../src/modules/auth/schemas/session.schema';
-import {
-  PasswordResetToken,
-  PasswordResetTokenSchema,
-} from '../src/modules/auth/schemas/password-reset-token.schema';
-import {
-  Course,
-  CourseSchema,
-} from '../src/modules/courses/schemas/course.schema';
-import {
-  Classroom,
-  ClassroomSchema,
-} from '../src/modules/classrooms/schemas/classroom.schema';
+import { User, UserStatus } from '../src/modules/users/schemas/user.schema';
+import { Session } from '../src/modules/auth/schemas/session.schema';
+import { PasswordResetToken } from '../src/modules/auth/schemas/password-reset-token.schema';
+import { Course } from '../src/modules/courses/schemas/course.schema';
+import { Classroom } from '../src/modules/classrooms/schemas/classroom.schema';
 import {
   Enrollment,
   EnrollmentRole,
-  EnrollmentSchema,
   EnrollmentStatus,
 } from '../src/modules/classrooms/enrollments/schemas/enrollment.schema';
 
@@ -49,6 +41,12 @@ const namespace = `csv-security-${randomUUID()}`;
 // Synthetic application account credential; unrelated to infrastructure credentials.
 const password = 'CsvSecurity123!';
 const HTTP_TIMEOUT = { response: 10000, deadline: 15000 };
+const DATABASE_OPERATION_BUDGET_MS = 10000;
+const SERVER_MAX_TIME_MS = 5000;
+const readOptions = () => ({
+  maxTimeMS: SERVER_MAX_TIME_MS,
+  signal: AbortSignal.timeout(DATABASE_OPERATION_BUDGET_MS),
+});
 type Agent = ReturnType<typeof request.agent>;
 type Profile = { id: string; name?: string; studentNo?: string };
 type AssessmentItem = {
@@ -149,17 +147,7 @@ describe('Process assessment CSV security (real HTTP and Mongo)', () => {
       `CSV security fixture: ${namespace}; user IDs: ${userIds.join(',')}`,
     );
     await prepareAuthSessionIndexes();
-    connection = await openAuthTestConnection();
-    users = connection.model(User.name, UserSchema);
-    sessions = connection.model(Session.name, SessionSchema);
-    resets = connection.model(
-      PasswordResetToken.name,
-      PasswordResetTokenSchema,
-    );
-    courses = connection.model(Course.name, CourseSchema);
-    classrooms = connection.model(Classroom.name, ClassroomSchema);
-    enrollments = connection.model(Enrollment.name, EnrollmentSchema);
-
+    connection = await openAuthTestConnection({ budgetModelReads: true });
     // Inject the already gated real connection with autoIndex/autoCreate disabled.
     // HTTP, Guards, models and persistence remain real; only the explicit Session
     // preparation above may perform DDL in this narrow security test.
@@ -171,13 +159,21 @@ describe('Process assessment CSV security (real HTTP and Mongo)', () => {
     configureApp(app);
     await app.init();
     await assertAuthTestConnection(app.get<Connection>(getConnectionToken()));
+    sessions = app.get<Model<Session>>(getModelToken(Session.name));
+    resets = app.get<Model<PasswordResetToken>>(
+      getModelToken(PasswordResetToken.name),
+    );
+    courses = app.get<Model<Course>>(getModelToken(Course.name));
+    classrooms = app.get<Model<Classroom>>(getModelToken(Classroom.name));
+    enrollments = app.get<Model<Enrollment>>(getModelToken(Enrollment.name));
+    users = app.get<Model<User>>(getModelToken(User.name));
 
     ownerAgent = request.agent(server());
     otherTeacherAgent = request.agent(server());
     studentAgent = request.agent(server());
     const passwordHash = await hashPassword(password);
     for (const fixture of fixtures) {
-      await users.create({
+      await createFixtureUser(users, {
         _id: fixture.id,
         email: fixture.email,
         roles: [fixture.role],
@@ -187,6 +183,27 @@ describe('Process assessment CSV security (real HTTP and Mongo)', () => {
         passwordResetRequestedAt: null,
       });
     }
+    const storedStudent = await users
+      .findById(student.id)
+      .select({
+        email: 1,
+        roles: 1,
+        credentialVersion: 1,
+        createdAt: 1,
+        updatedAt: 1,
+        __v: 1,
+      })
+      .setOptions(readOptions())
+      .lean<{ createdAt: Date; updatedAt: Date }>()
+      .exec();
+    expect(storedStudent).toMatchObject({
+      email: student.email,
+      roles: ['student'],
+      credentialVersion: 0,
+      __v: 0,
+    });
+    expect(storedStudent?.createdAt).toBeInstanceOf(Date);
+    expect(storedStudent?.updatedAt).toEqual(storedStudent?.createdAt);
     for (const [index, agent] of [
       ownerAgent,
       otherTeacherAgent,
@@ -228,7 +245,7 @@ describe('Process assessment CSV security (real HTTP and Mongo)', () => {
         role: EnrollmentRole;
         status: EnrollmentStatus;
       }>()
-      .maxTimeMS(5000)
+      .setOptions(readOptions())
       .exec();
     if (!membership) throw new Error('CSV_SECURITY_MEMBERSHIP_REQUIRED');
     enrollmentId = membership._id.toHexString();
@@ -240,11 +257,27 @@ describe('Process assessment CSV security (real HTTP and Mongo)', () => {
     try {
       if (connection && users) {
         await assertAuthTestConnection(connection);
+        const db = connection.db;
+        if (!db) throw new Error('CSV_SECURITY_DATABASE_REQUIRED');
+        assertAuthTestWritesConfirmed(db);
+        const deleteOwnedRows = (
+          collection: string,
+          filter: mongo.Document,
+          limit: 0 | 1 = 1,
+        ) =>
+          deleteFixtureRows(
+            db,
+            collection,
+            filter,
+            limit,
+            DATABASE_OPERATION_BUDGET_MS,
+            SERVER_MAX_TIME_MS,
+          );
         const accountRows = await users
           .find(userFilter)
           .select({ _id: 1, email: 1, roles: 1 })
           .lean<UserOwnership[]>()
-          .maxTimeMS(5000)
+          .setOptions(readOptions())
           .exec();
         for (const row of accountRows) {
           const fixture = fixtures.find(({ id }) => id.equals(row._id));
@@ -266,7 +299,7 @@ describe('Process assessment CSV security (real HTTP and Mongo)', () => {
           .find(courseFilter)
           .select({ _id: 1, code: 1, createdBy: 1 })
           .lean<CourseOwnership[]>()
-          .maxTimeMS(5000)
+          .setOptions(readOptions())
           .exec();
         if (
           courseRows.some(
@@ -289,7 +322,7 @@ describe('Process assessment CSV security (real HTTP and Mongo)', () => {
           .find(classroomFilter)
           .select({ _id: 1, name: 1, courseId: 1, teacherId: 1 })
           .lean<ClassroomOwnership[]>()
-          .maxTimeMS(5000)
+          .setOptions(readOptions())
           .exec();
         if (
           classroomRows.some(
@@ -311,7 +344,7 @@ describe('Process assessment CSV security (real HTTP and Mongo)', () => {
           .find(enrollmentFilter)
           .select({ _id: 1, classroomId: 1, userId: 1 })
           .lean<EnrollmentOwnership[]>()
-          .maxTimeMS(5000)
+          .setOptions(readOptions())
           .exec();
         if (
           membershipRows.some(
@@ -326,7 +359,7 @@ describe('Process assessment CSV security (real HTTP and Mongo)', () => {
           .find({ userId: { $in: userIds } })
           .select({ _id: 0, userId: 1, email: 1 })
           .lean<{ userId: Types.ObjectId; email: string }[]>()
-          .maxTimeMS(5000)
+          .setOptions(readOptions())
           .exec();
         if (
           resetRows.some(
@@ -340,65 +373,61 @@ describe('Process assessment CSV security (real HTTP and Mongo)', () => {
           throw new Error('CSV_SECURITY_RESET_OWNERSHIP_MISMATCH');
 
         for (const membership of membershipRows)
-          await enrollments
-            .deleteOne({
-              _id: membership._id,
-              classroomId: membership.classroomId,
-              userId: membership.userId,
-            })
-            .maxTimeMS(5000)
-            .exec();
+          await deleteOwnedRows(enrollments.collection.name, {
+            _id: membership._id,
+            classroomId: membership.classroomId,
+            userId: membership.userId,
+          });
         for (const classroom of classroomRows)
-          await classrooms
-            .deleteOne({
-              _id: classroom._id,
-              teacherId: owner.id,
-              courseId: classroom.courseId,
-              name: namespace,
-            })
-            .maxTimeMS(5000)
-            .exec();
+          await deleteOwnedRows(classrooms.collection.name, {
+            _id: classroom._id,
+            teacherId: owner.id,
+            courseId: classroom.courseId,
+            name: namespace,
+          });
         for (const course of courseRows)
-          await courses
-            .deleteOne({
-              _id: course._id,
-              createdBy: owner.id,
-              code: namespace,
-            })
-            .maxTimeMS(5000)
-            .exec();
-        await sessions
-          .deleteMany({ userId: { $in: userIds } })
-          .maxTimeMS(5000)
-          .exec();
-        await resets
-          .deleteMany({
-            $or: fixtures.map(({ id, email }) => ({ userId: id, email })),
-          })
-          .maxTimeMS(5000)
-          .exec();
+          await deleteOwnedRows(courses.collection.name, {
+            _id: course._id,
+            createdBy: owner.id,
+            code: namespace,
+          });
+        await deleteOwnedRows(
+          sessions.collection.name,
+          { userId: { $in: userIds } },
+          0,
+        );
+        for (const { id, email } of fixtures) {
+          await deleteOwnedRows(
+            resets.collection.name,
+            { userId: id, email },
+            0,
+          );
+        }
         for (const fixture of fixtures)
-          await users
-            .deleteOne({
-              _id: fixture.id,
-              email: fixture.email,
-              roles: [fixture.role],
-            })
-            .maxTimeMS(5000)
-            .exec();
+          await deleteOwnedRows(users.collection.name, {
+            _id: fixture.id,
+            email: fixture.email,
+            roles: [fixture.role],
+          });
         const residual = await Promise.all([
-          enrollments.countDocuments(enrollmentFilter).maxTimeMS(5000).exec(),
-          classrooms.countDocuments(classroomFilter).maxTimeMS(5000).exec(),
-          courses.countDocuments(courseFilter).maxTimeMS(5000).exec(),
+          enrollments
+            .countDocuments(enrollmentFilter)
+            .setOptions(readOptions())
+            .exec(),
+          classrooms
+            .countDocuments(classroomFilter)
+            .setOptions(readOptions())
+            .exec(),
+          courses.countDocuments(courseFilter).setOptions(readOptions()).exec(),
           sessions
             .countDocuments({ userId: { $in: userIds } })
-            .maxTimeMS(5000)
+            .setOptions(readOptions())
             .exec(),
           resets
             .countDocuments({ userId: { $in: userIds } })
-            .maxTimeMS(5000)
+            .setOptions(readOptions())
             .exec(),
-          users.countDocuments(userFilter).maxTimeMS(5000).exec(),
+          users.countDocuments(userFilter).setOptions(readOptions()).exec(),
         ]);
         expect(residual).toEqual([0, 0, 0, 0, 0, 0]);
         console.info(
@@ -433,12 +462,29 @@ describe('Process assessment CSV security (real HTTP and Mongo)', () => {
       .findOne({ _id: student.id, email: student.email })
       .select({ _id: 0, name: 1, studentNo: 1 })
       .lean<{ name: string; studentNo: string }>()
-      .maxTimeMS(5000)
+      .setOptions(readOptions())
       .exec();
     expect(storedProfile).toEqual({ name: expectedName, studentNo: '-1' });
-    const me = await get(studentAgent, '/api/users/me').expect(200);
-    expect((me.body as Profile).name).toBe(expectedName);
-    expect((me.body as Profile).studentNo).toBe('-1');
+    const sessionRead = jest.spyOn(sessions.collection, 'findOne');
+    try {
+      const me = await get(studentAgent, '/api/users/me').expect(200);
+      expect((me.body as Profile).name).toBe(expectedName);
+      expect((me.body as Profile).studentNo).toBe('-1');
+      expect(
+        sessionRead.mock.calls.some(
+          ([, options]) =>
+            options?.signal instanceof AbortSignal &&
+            typeof options.maxTimeMS === 'number' &&
+            options.maxTimeMS > 0 &&
+            options.maxTimeMS <= DATABASE_OPERATION_BUDGET_MS,
+        ),
+      ).toBe(true);
+      console.info(
+        'GET /api/users/me session model read supplied a signal and positive maxTimeMS within 10s.',
+      );
+    } finally {
+      sessionRead.mockRestore();
+    }
 
     const jsonResponse = await get(
       ownerAgent,
@@ -509,7 +555,7 @@ describe('Process assessment CSV security (real HTTP and Mongo)', () => {
         .findOne({ _id: student.id, email: student.email })
         .select({ _id: 0, name: 1, studentNo: 1 })
         .lean<{ name: string; studentNo: string }>()
-        .maxTimeMS(5000)
+        .setOptions(readOptions())
         .exec(),
     ).toEqual(storedProfile);
     const after = await get(

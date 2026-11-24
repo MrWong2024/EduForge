@@ -153,7 +153,7 @@ Mock Bailian 等测试组合的执行方案见 [Backend Testing Playbook](./hand
 | `SMTP_SECURE`                                  | `true`                                              | Joi                                                  | SMTP 是否启用 TLS/SMTPS。                                                       |
 | `SMTP_USER`                                    | 无                                                  | Joi                                                  | SMTP 用户名；必填条件见下文。                                  |
 | `SMTP_PASS`                                    | 无                                                  | Joi                                                  | SMTP 密码；必填条件见下文，不得写入日志。                    |
-| `MONGO_SERVER_SELECTION_TIMEOUT_MS`            | `5000`                                              | Joi                                                  | Mongo 连接超时。                                                                |
+| `MONGO_SERVER_SELECTION_TIMEOUT_MS`            | `5000`                                              | Joi                                                  | MongoDB 服务器选择等待上限（毫秒）。                                            |
 | `AI_FEEDBACK_PROVIDER` | `stub` | Joi | Provider 选择：`stub`、`bailian`；Key 条件见下文。 |
 | `AI_FEEDBACK_MAX_INPUT_BYTES` | `65536` | Joi / Provider fallback | 完整 system/user messages 序列化 UTF-8 字节限额；整数 `16384..262144`，不是准确 Token 或金额预算。 |
 | `AI_FEEDBACK_MAX_OUTPUT_TOKENS` | `2048` | Joi / Provider fallback | 上游 max_tokens；整数 `256..4096`。 |

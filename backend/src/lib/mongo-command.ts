@@ -16,11 +16,18 @@ export async function runMongoWriteCommand(
   db: mongo.Db,
   command: mongo.Document & mongo.WriteConcernOptions,
   remainingMs: number,
-  options?: { signal?: AbortSignal },
+  options?: { signal?: AbortSignal; serverMaxTimeMS?: number },
 ): Promise<mongo.Document> {
   const milliseconds = Math.floor(remainingMs);
   if (!Number.isFinite(milliseconds) || milliseconds <= 0) {
     throw new Error('MONGO_WRITE_DEADLINE_EXPIRED');
+  }
+  const serverLimit = options?.serverMaxTimeMS;
+  if (
+    serverLimit !== undefined &&
+    (!Number.isSafeInteger(serverLimit) || serverLimit <= 0)
+  ) {
+    throw new Error('MONGO_WRITE_SERVER_DEADLINE_INVALID');
   }
   const deadline = AbortSignal.timeout(milliseconds);
   const signal = options?.signal
@@ -45,8 +52,9 @@ export async function runMongoWriteCommand(
     confirmationMs,
     operationConcern?.journal ?? databaseConcern?.journal,
   );
+  const maxTimeMS = Math.min(milliseconds, serverLimit ?? milliseconds);
   const reply: WriteReply = await db.command(
-    mongo.WriteConcern.apply({ ...command, maxTimeMS: milliseconds }, concern),
+    mongo.WriteConcern.apply({ ...command, maxTimeMS }, concern),
     { readPreference: 'primary', signal },
   );
   if (

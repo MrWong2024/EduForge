@@ -5,23 +5,27 @@ import {
   openAuthTestConnection,
 } from './helpers/auth-test-environment';
 import { prepareAuthSessionIndexes } from './helpers/auth-session-indexes';
+import { assertAuthTestWritesConfirmed } from './helpers/auth-test-writes';
+import { createFixtureUser } from './helpers/create-fixture-user';
 import { randomUUID } from 'node:crypto';
 import type { Server } from 'node:http';
 import type { INestApplication } from '@nestjs/common';
-import { getConnectionToken } from '@nestjs/mongoose';
+import { getConnectionToken, getModelToken } from '@nestjs/mongoose';
 import { Test, type TestingModule } from '@nestjs/testing';
-import { type Connection, type mongo, STATES, Types } from 'mongoose';
+import {
+  type Connection,
+  type Model,
+  type mongo,
+  STATES,
+  Types,
+} from 'mongoose';
 import request from 'supertest';
 import type { App } from 'supertest/types';
 import { AppModule } from '../src/app.module';
 import { configureApp } from '../src/app.setup';
 import { parseCsv } from '../scripts/import-users-csv';
 import { hashPassword } from '../src/modules/users/password.utils';
-import {
-  User,
-  UserSchema,
-  UserStatus,
-} from '../src/modules/users/schemas/user.schema';
+import { User, UserStatus } from '../src/modules/users/schemas/user.schema';
 
 jest.setTimeout(60000);
 
@@ -341,7 +345,7 @@ describe('Classroom report task status (real HTTP and Mongo)', () => {
       `Classroom report fixture: ${namespace}; user IDs: ${teacherId.toHexString()},${studentId.toHexString()}`,
     );
     await prepareAuthSessionIndexes();
-    connection = await openAuthTestConnection();
+    connection = await openAuthTestConnection({ budgetModelReads: true });
     db = connection.db;
     if (!db) throw new Error('REPORT_STATUS_DATABASE_REQUIRED');
     moduleFixture = await Test.createTestingModule({ imports: [AppModule] })
@@ -352,10 +356,10 @@ describe('Classroom report task status (real HTTP and Mongo)', () => {
     configureApp(app);
     await app.init();
     await assertAuthTestConnection(app.get<Connection>(getConnectionToken()));
-    const users = connection.model(User.name, UserSchema);
+    const users = app.get<Model<User>>(getModelToken(User.name));
     const passwordHash = await hashPassword(password);
     for (const account of accounts)
-      await users.create({
+      await createFixtureUser(users, {
         _id: account.id,
         email: account.email,
         roles: [account.role],
@@ -408,6 +412,7 @@ describe('Classroom report task status (real HTTP and Mongo)', () => {
     try {
       if (connection && db) {
         await assertAuthTestConnection(connection);
+        assertAuthTestWritesConfirmed(db);
         const userIds = accounts.map(({ id }) => id);
         const userFilter = {
           $or: [

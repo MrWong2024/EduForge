@@ -5,12 +5,20 @@ import {
   openAuthTestConnection,
 } from './helpers/auth-test-environment';
 import { prepareAuthSessionIndexes } from './helpers/auth-session-indexes';
+import { assertAuthTestWritesConfirmed } from './helpers/auth-test-writes';
+import { createFixtureUser } from './helpers/create-fixture-user';
 import { randomUUID } from 'node:crypto';
 import type { Server } from 'node:http';
 import type { INestApplication } from '@nestjs/common';
-import { getConnectionToken } from '@nestjs/mongoose';
+import { getConnectionToken, getModelToken } from '@nestjs/mongoose';
 import { Test, type TestingModule } from '@nestjs/testing';
-import { type Connection, type mongo, STATES, Types } from 'mongoose';
+import {
+  type Connection,
+  type Model,
+  type mongo,
+  STATES,
+  Types,
+} from 'mongoose';
 import request from 'supertest';
 import type { App } from 'supertest/types';
 import { AppModule } from '../src/app.module';
@@ -19,11 +27,7 @@ import { AiContextReaderService } from '../src/modules/learning-tasks/ai-context
 import { LearningTasksService } from '../src/modules/learning-tasks/services/learning-tasks.service';
 import { Task } from '../src/modules/learning-tasks/schemas/task.schema';
 import { hashPassword } from '../src/modules/users/password.utils';
-import {
-  User,
-  UserSchema,
-  UserStatus,
-} from '../src/modules/users/schemas/user.schema';
+import { User, UserStatus } from '../src/modules/users/schemas/user.schema';
 
 jest.setTimeout(60000);
 
@@ -314,7 +318,7 @@ describe('Teaching resource writes (real HTTP and Mongo)', () => {
       `Teaching resource fixture: ${namespace}; teacher ID: ${teacherId.toHexString()}`,
     );
     await prepareAuthSessionIndexes();
-    connection = await openAuthTestConnection();
+    connection = await openAuthTestConnection({ budgetModelReads: true });
     db = connection.db;
     if (!db) throw new Error('RESOURCE_WRITE_DATABASE_REQUIRED');
     // Real HTTP/models use the gated real connection without automatic DDL.
@@ -326,7 +330,8 @@ describe('Teaching resource writes (real HTTP and Mongo)', () => {
     configureApp(app);
     await app.init();
     await assertAuthTestConnection(app.get<Connection>(getConnectionToken()));
-    await connection.model(User.name, UserSchema).create({
+    const users = app.get<Model<User>>(getModelToken(User.name));
+    await createFixtureUser(users, {
       _id: teacherId,
       email,
       roles: ['teacher'],
@@ -354,6 +359,7 @@ describe('Teaching resource writes (real HTTP and Mongo)', () => {
     try {
       if (connection && db) {
         await assertAuthTestConnection(connection);
+        assertAuthTestWritesConfirmed(db);
         const userRows = await db
           .collection<{ _id: Types.ObjectId; email: string; roles: string[] }>(
             'users',

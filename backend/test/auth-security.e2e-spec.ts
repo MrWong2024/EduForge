@@ -4,12 +4,14 @@ import {
   openAuthTestConnection,
 } from './helpers/auth-test-environment';
 import { prepareAuthSessionIndexes } from './helpers/auth-session-indexes';
+import { assertAuthTestWritesConfirmed } from './helpers/auth-test-writes';
+import { budgetImportStoreWrites } from './helpers/budget-import-store-writes';
 import { deleteFixtureRows } from './helpers/delete-fixture-rows';
 import { createHash, randomUUID } from 'node:crypto';
 import { INestApplication } from '@nestjs/common';
 import { getConnectionToken, getModelToken } from '@nestjs/mongoose';
 import { Test } from '@nestjs/testing';
-import mongoose, { Model, Types, type Connection } from 'mongoose';
+import mongoose, { Model, Types, type Connection, type mongo } from 'mongoose';
 import request from 'supertest';
 import { App } from 'supertest/types';
 import { AppModule } from '../src/app.module';
@@ -174,8 +176,9 @@ describe('Authentication security (real HTTP and Mongo)', () => {
     sessions = app.get(getModelToken(Session.name));
     resets = app.get(getModelToken(PasswordResetToken.name));
     sessionService = app.get(SessionService);
-    importConnection = await openAuthTestConnection();
+    importConnection = await openAuthTestConnection({ budgetModelReads: true });
     importStore = createMongooseStore(importConnection);
+    budgetImportStoreWrites(importConnection, ids);
   });
 
   afterEach(() => {
@@ -184,6 +187,9 @@ describe('Authentication security (real HTTP and Mongo)', () => {
   afterAll(async () => {
     try {
       if (users && ids.length) {
+        if (importConnection?.db) {
+          assertAuthTestWritesConfirmed(importConnection.db);
+        }
         await assertAuthTestConnection(users.db);
         const db = users.db.db;
         if (!db) throw new Error('AUTH_TEST_CLEANUP_DATABASE_REQUIRED');
@@ -562,8 +568,33 @@ describe('Authentication security (real HTTP and Mongo)', () => {
     const cookie = cookieFrom(await login(user).expect(201));
     await forgot(user).expect(200);
     const token = latestToken(user);
-    const result = await imported(user, undefined, true);
+    const client = importConnection?.getClient();
+    if (!client) throw new Error('AUTH_TEST_IMPORT_CONNECTION_REQUIRED');
+    const observed: Array<{ command: string; maxTimeMS: unknown }> = [];
+    const observe = (event: mongo.CommandStartedEvent) => {
+      if (['find', 'update', 'delete'].includes(event.commandName)) {
+        observed.push({
+          command: event.commandName,
+          maxTimeMS: event.command.maxTimeMS,
+        });
+      }
+    };
+    client.on('commandStarted', observe);
+    const result = await imported(user, undefined, true).finally(() => {
+      client.off('commandStarted', observe);
+    });
     expect(result.updated).toBe(1);
+    expect(observed.map(({ command }) => command)).toEqual([
+      'find',
+      'update',
+      'delete',
+      'update',
+    ]);
+    for (const { maxTimeMS } of observed) {
+      expect(typeof maxTimeMS).toBe('number');
+      expect(maxTimeMS).toBeGreaterThan(0);
+      expect(maxTimeMS).toBeLessThanOrEqual(5000);
+    }
     const updated = await users
       .findById(user.id)
       .select('+passwordHash')

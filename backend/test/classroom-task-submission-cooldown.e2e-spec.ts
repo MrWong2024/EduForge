@@ -5,6 +5,11 @@ import {
   openAuthTestConnection,
 } from './helpers/auth-test-environment';
 import { prepareAuthSessionIndexes } from './helpers/auth-session-indexes';
+import {
+  assertAuthTestWritesConfirmed,
+  runAuthTestWrite,
+} from './helpers/auth-test-writes';
+import { createFixtureUser } from './helpers/create-fixture-user';
 import { randomUUID } from 'node:crypto';
 import type { Server } from 'node:http';
 import { isDeepStrictEqual } from 'node:util';
@@ -29,11 +34,7 @@ import { AiFeedbackJobService } from '../src/modules/learning-tasks/ai-feedback/
 import { LearningTasksModule } from '../src/modules/learning-tasks/learning-tasks.module';
 import { SubmissionSchema } from '../src/modules/learning-tasks/schemas/submission.schema';
 import { hashPassword } from '../src/modules/users/password.utils';
-import {
-  User,
-  UserSchema,
-  UserStatus,
-} from '../src/modules/users/schemas/user.schema';
+import { User, UserStatus } from '../src/modules/users/schemas/user.schema';
 
 jest.setTimeout(60000);
 const namespace = `submission-cooldown-${randomUUID()}`;
@@ -635,7 +636,7 @@ describe('Classroom task submission cooldown and deletion (real HTTP and Mongo)'
       `Cooldown fixture: ${namespace}; user IDs: ${accounts.map(({ id }) => id.toHexString()).join(',')}`,
     );
     await prepareAuthSessionIndexes();
-    connection = await openAuthTestConnection();
+    connection = await openAuthTestConnection({ budgetModelReads: true });
     db = connection.db;
     if (!db) throw new Error('COOLDOWN_DATABASE_REQUIRED');
     await prepareSubmissionIndex();
@@ -659,9 +660,10 @@ describe('Classroom task submission cooldown and deletion (real HTTP and Mongo)'
       transactionConnection,
       classroomTaskModel,
     );
+    const users = app.get<Model<User>>(getModelToken(User.name));
     const passwordHash = await hashPassword(password);
     for (const account of accounts)
-      await connection.model(User.name, UserSchema).create({
+      await createFixtureUser(users, {
         _id: account.id,
         email: account.email,
         roles: [account.role],
@@ -716,10 +718,15 @@ describe('Classroom task submission cooldown and deletion (real HTTP and Mongo)'
     expect(memberships.every(({ status }) => status === 'ACTIVE')).toBe(true);
   });
 
+  beforeEach(() => {
+    if (db) assertAuthTestWritesConfirmed(db);
+  });
+
   afterAll(async () => {
     try {
       if (connection && db) {
         await assertAuthTestConnection(connection);
+        assertAuthTestWritesConfirmed(db);
         const userIds = accounts.map(({ id }) => id);
         const userFilter = {
           $or: [
@@ -1050,17 +1057,18 @@ describe('Classroom task submission cooldown and deletion (real HTTP and Mongo)'
     assertCooldown(rejected, instance);
     // Preserve the prior test's passage-of-window fixture adjustment, limited to
     // this exact committed record, without a five-minute sleep or a global clock.
-    const aged = await runMongoWriteCommand(
+    const ownedSubmission = {
+      _id: firstRows[0]._id,
+      classroomTaskId: new Types.ObjectId(instance.classroomTaskId),
+      studentId,
+    };
+    const aged = await runAuthTestWrite(
       database(),
       {
         update: 'submissions',
         updates: [
           {
-            q: {
-              _id: firstRows[0]._id,
-              classroomTaskId: new Types.ObjectId(instance.classroomTaskId),
-              studentId,
-            },
+            q: ownedSubmission,
             u: {
               $set: {
                 submittedAt: new Date(Date.now() - positiveCooldownMs - 1000),
@@ -1070,6 +1078,7 @@ describe('Classroom task submission cooldown and deletion (real HTTP and Mongo)'
           },
         ],
       },
+      { collection: 'submissions', filter: ownedSubmission },
       5000,
     );
     expect(aged).toMatchObject({ n: 1 });
@@ -1318,7 +1327,7 @@ describe('Classroom task submission cooldown and deletion (real HTTP and Mongo)'
         maxAttempts: number;
       }
     >('aifeedbackjobs');
-    await runMongoWriteCommand(
+    await runAuthTestWrite(
       database(),
       {
         insert: jobs.collectionName,
@@ -1331,6 +1340,7 @@ describe('Classroom task submission cooldown and deletion (real HTTP and Mongo)'
           },
         ],
       },
+      { collection: jobs.collectionName, filter: { _id: directJob._id } },
       5000,
     );
 
