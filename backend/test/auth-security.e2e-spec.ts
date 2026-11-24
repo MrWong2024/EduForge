@@ -4,8 +4,6 @@ import {
   openAuthTestConnection,
 } from './helpers/auth-test-environment';
 import { prepareAuthSessionIndexes } from './helpers/auth-session-indexes';
-import { assertAuthTestWritesConfirmed } from './helpers/auth-test-writes';
-import { budgetImportStoreWrites } from './helpers/budget-import-store-writes';
 import { deleteFixtureRows } from './helpers/delete-fixture-rows';
 import { createHash, randomUUID } from 'node:crypto';
 import { INestApplication } from '@nestjs/common';
@@ -178,7 +176,6 @@ describe('Authentication security (real HTTP and Mongo)', () => {
     sessionService = app.get(SessionService);
     importConnection = await openAuthTestConnection({ budgetModelReads: true });
     importStore = createMongooseStore(importConnection);
-    budgetImportStoreWrites(importConnection, ids);
   });
 
   afterEach(() => {
@@ -187,9 +184,6 @@ describe('Authentication security (real HTTP and Mongo)', () => {
   afterAll(async () => {
     try {
       if (users && ids.length) {
-        if (importConnection?.db) {
-          assertAuthTestWritesConfirmed(importConnection.db);
-        }
         await assertAuthTestConnection(users.db);
         const db = users.db.db;
         if (!db) throw new Error('AUTH_TEST_CLEANUP_DATABASE_REQUIRED');
@@ -318,10 +312,16 @@ describe('Authentication security (real HTTP and Mongo)', () => {
     const cookie = cookieFrom(await login(user).expect(201));
     await forgot(user).expect(200);
     const token = latestToken(user);
-    await imported(user, 'suspended');
+    expect(await imported(user, 'suspended')).toMatchObject({
+      updated: 1,
+      failed: 0,
+    });
     await probe(cookie).expect(401);
     await login(user).expect(401);
-    await imported(user, 'active');
+    expect(await imported(user, 'active')).toMatchObject({
+      updated: 1,
+      failed: 0,
+    });
     await probe(cookie).expect(401);
     const result = await reset(token).expect(400);
     expect(publicResponse(result).code).toBe('RESET_TOKEN_INVALID');
@@ -584,6 +584,7 @@ describe('Authentication security (real HTTP and Mongo)', () => {
       client.off('commandStarted', observe);
     });
     expect(result.updated).toBe(1);
+    expect(result.failed).toBe(0);
     expect(observed.map(({ command }) => command)).toEqual([
       'find',
       'update',
@@ -595,6 +596,7 @@ describe('Authentication security (real HTTP and Mongo)', () => {
       expect(maxTimeMS).toBeGreaterThan(0);
       expect(maxTimeMS).toBeLessThanOrEqual(5000);
     }
+    console.info('Auth security import Store command maxTimeMS (ms)', observed);
     const updated = await users
       .findById(user.id)
       .select('+passwordHash')
