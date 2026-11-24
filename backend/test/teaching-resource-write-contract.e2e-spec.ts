@@ -1,3 +1,4 @@
+import { deleteFixtureRows } from './helpers/delete-fixture-rows';
 import {
   authTestEnvironment,
   assertAuthTestConnection,
@@ -156,13 +157,16 @@ describe('Teaching resource writes (real HTTP and Mongo)', () => {
     family === 'classroom' ? { teacherId } : { createdBy: teacherId };
   const ownedRows = (family: Family) =>
     collection(family)
-      .find(ownership(family), { maxTimeMS: 5000 })
+      .find(ownership(family), {
+        maxTimeMS: 5000,
+        signal: AbortSignal.timeout(5000),
+      })
       .sort({ _id: 1 })
       .toArray();
   const raw = (family: Family) =>
     collection(family).findOne(
       { _id: new Types.ObjectId(ids[family]), ...ownership(family) },
-      { maxTimeMS: 5000 },
+      { maxTimeMS: 5000, signal: AbortSignal.timeout(5000) },
     );
   const post = (family: Family, body: Record<string, unknown>) =>
     agent.post(paths[family]).timeout(timeout).send(body);
@@ -221,6 +225,7 @@ describe('Teaching resource writes (real HTTP and Mongo)', () => {
           rubric: 1,
         },
         maxTimeMS: 5000,
+        signal: AbortSignal.timeout(5000),
       },
     );
 
@@ -355,7 +360,11 @@ describe('Teaching resource writes (real HTTP and Mongo)', () => {
           )
           .find(
             { $or: [{ _id: teacherId }, { email }] },
-            { projection: { _id: 1, email: 1, roles: 1 }, maxTimeMS: 5000 },
+            {
+              projection: { _id: 1, email: 1, roles: 1 },
+              maxTimeMS: 5000,
+              signal: AbortSignal.timeout(5000),
+            },
           )
           .toArray();
         if (
@@ -372,52 +381,63 @@ describe('Teaching resource writes (real HTTP and Mongo)', () => {
         // creates a record with no usable name/code, or its response was lost.
         for (const family of ['task', 'classroom', 'course'] as const) {
           for (const row of await ownedRows(family)) {
-            await collection(family).deleteOne(
-              { _id: row._id, ...ownership(family) },
-              { timeoutMS: 5000 },
-            );
+            await deleteFixtureRows(db, collection(family).collectionName, {
+              _id: row._id,
+              ...ownership(family),
+            });
           }
         }
-        await db
-          .collection('sessions')
-          .deleteMany({ userId: teacherId }, { timeoutMS: 5000 });
+        await deleteFixtureRows(db, 'sessions', { userId: teacherId }, 0);
         const resetRows = await db
           .collection<{ userId: Types.ObjectId; email: string }>(
             'passwordresettokens',
           )
           .find(
             { userId: teacherId },
-            { projection: { _id: 0, userId: 1, email: 1 }, maxTimeMS: 5000 },
+            {
+              projection: { _id: 0, userId: 1, email: 1 },
+              maxTimeMS: 5000,
+              signal: AbortSignal.timeout(5000),
+            },
           )
           .toArray();
         if (resetRows.some((row) => row.email !== email))
           throw new Error('RESOURCE_WRITE_RESET_OWNERSHIP_MISMATCH');
-        await db
-          .collection('passwordresettokens')
-          .deleteMany({ userId: teacherId, email }, { timeoutMS: 5000 });
-        await db
-          .collection('users')
-          .deleteOne(
-            { _id: teacherId, email, roles: ['teacher'] },
-            { timeoutMS: 5000 },
-          );
+        await deleteFixtureRows(
+          db,
+          'passwordresettokens',
+          { userId: teacherId, email },
+          0,
+        );
+        await deleteFixtureRows(db, 'users', {
+          _id: teacherId,
+          email,
+          roles: ['teacher'],
+        });
         const residual = await Promise.all([
           ...(['task', 'classroom', 'course'] as const).map((family) =>
             collection(family).countDocuments(ownership(family), {
               maxTimeMS: 5000,
+              signal: AbortSignal.timeout(5000),
             }),
           ),
           db
             .collection('sessions')
-            .countDocuments({ userId: teacherId }, { maxTimeMS: 5000 }),
+            .countDocuments(
+              { userId: teacherId },
+              { maxTimeMS: 5000, signal: AbortSignal.timeout(5000) },
+            ),
           db
             .collection('passwordresettokens')
-            .countDocuments({ userId: teacherId }, { maxTimeMS: 5000 }),
+            .countDocuments(
+              { userId: teacherId },
+              { maxTimeMS: 5000, signal: AbortSignal.timeout(5000) },
+            ),
           db
             .collection('users')
             .countDocuments(
               { $or: [{ _id: teacherId }, { email }] },
-              { maxTimeMS: 5000 },
+              { maxTimeMS: 5000, signal: AbortSignal.timeout(5000) },
             ),
         ]);
         expect(residual).toEqual([0, 0, 0, 0, 0, 0]);

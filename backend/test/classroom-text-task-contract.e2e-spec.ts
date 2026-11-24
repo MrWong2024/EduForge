@@ -205,7 +205,7 @@ describe('A1 classroom text task backend contract (HTTP)', () => {
     if (!database) throw new Error('Missing connected test database');
     const auth = await database.command(
       { connectionStatus: 1, showPrivileges: false },
-      { timeoutMS: 5000 },
+      { signal: AbortSignal.timeout(5000), readPreference: 'primary' },
     );
     assertLocalStandardTestAuthentication({
       nodeEnv: process.env.NODE_ENV,
@@ -1465,6 +1465,7 @@ describe('A1 classroom text task backend contract (HTTP)', () => {
       },
     );
     const before = await instances.collection.findOne({ _id: objectId });
+    expect(before).toMatchObject({ __v: 0 });
     const url = '/api/classrooms/' + classA.id + '/tasks';
     const detail = (await teacherA.get(url + '/' + instance.id).expect(200))
       .body as ClassroomTaskResponseDto;
@@ -1509,9 +1510,10 @@ describe('A1 classroom text task backend contract (HTTP)', () => {
         submissionId: new Types.ObjectId(created.id),
       }),
     ).toBe(1);
-    expect(await instances.collection.findOne({ _id: objectId })).toEqual(
-      before,
-    );
+    expect(await instances.collection.findOne({ _id: objectId })).toEqual({
+      ...before,
+      __v: 1,
+    });
   });
 
   it('keeps historical reads without backfill, rejects new legacy actions, and kills ineligible jobs without Provider', async () => {

@@ -4,6 +4,7 @@ import {
   openAuthTestConnection,
 } from './helpers/auth-test-environment';
 import { prepareAuthSessionIndexes } from './helpers/auth-session-indexes';
+import { deleteFixtureRows } from './helpers/delete-fixture-rows';
 import { createHash, randomUUID } from 'node:crypto';
 import { INestApplication } from '@nestjs/common';
 import { getConnectionToken, getModelToken } from '@nestjs/mongoose';
@@ -183,14 +184,54 @@ describe('Authentication security (real HTTP and Mongo)', () => {
   afterAll(async () => {
     try {
       if (users && ids.length) {
+        await assertAuthTestConnection(users.db);
+        const db = users.db.db;
+        if (!db) throw new Error('AUTH_TEST_CLEANUP_DATABASE_REQUIRED');
         const filter = { userId: { $in: ids } };
-        await sessions.deleteMany(filter).exec();
-        await resets.deleteMany(filter).exec();
-        await users.deleteMany({ _id: { $in: ids } }).exec();
+        const userFilter = { _id: { $in: ids } };
+        const timeout = 10000;
+        const targetSessions = db.collection(sessions.collection.name);
+        const targetResets = db.collection(resets.collection.name);
+        const targetUsers = db.collection(users.collection.name);
+        try {
+          await deleteFixtureRows(
+            db,
+            targetSessions.collectionName,
+            filter,
+            0,
+            timeout,
+          );
+          await deleteFixtureRows(
+            db,
+            targetResets.collectionName,
+            filter,
+            0,
+            timeout,
+          );
+          await deleteFixtureRows(
+            db,
+            targetUsers.collectionName,
+            userFilter,
+            0,
+            timeout,
+          );
+        } catch (error) {
+          console.error(
+            'Auth security cleanup requires read-only reconciliation for owned user IDs.',
+            ids.map((id) => id.toString()),
+          );
+          throw error;
+        }
         const residual = await Promise.all([
-          sessions.countDocuments(filter),
-          resets.countDocuments(filter),
-          users.countDocuments({ _id: { $in: ids } }),
+          targetSessions.countDocuments(filter, {
+            signal: AbortSignal.timeout(timeout),
+          }),
+          targetResets.countDocuments(filter, {
+            signal: AbortSignal.timeout(timeout),
+          }),
+          targetUsers.countDocuments(userFilter, {
+            signal: AbortSignal.timeout(timeout),
+          }),
         ]);
         if (residual.some((count) => count !== 0))
           throw new Error('AUTH_TEST_CLEANUP_RESIDUAL');

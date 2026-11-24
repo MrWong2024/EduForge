@@ -1,5 +1,6 @@
 import { Types } from 'mongoose';
 import { createBrowserAcceptanceEnvironment } from '../src/config/browser-acceptance-environment';
+import { DatabaseGateError } from '../src/config/database-purpose';
 import {
   comparePassword,
   hashPassword,
@@ -50,6 +51,7 @@ function harness() {
   let sessions: Types.ObjectId[] = [];
   let tokens: { userId: Types.ObjectId; email: string }[] = [];
   const store: AuthSmokeStore = {
+    assertIdle: jest.fn(() => Promise.resolve()),
     assertEmptyAndIdle: jest.fn(() => {
       if (users.length || sessions.length || tokens.length)
         return Promise.reject(new Error('AUTH_SMOKE_FOREIGN_AUTH_DATA'));
@@ -403,6 +405,43 @@ describe('narrow Browser auth smoke support (offline, purpose none)', () => {
     await expect(cleanupAuthSmoke(h.store, record)).rejects.toThrow(
       'AUTH_SMOKE_RESET_TOKEN_OWNERSHIP_MISMATCH',
     );
+    expect(h.store.deleteSessions).not.toHaveBeenCalled();
+  });
+  it('preserves the recovery record and avoids cleanup after an unconfirmed insert', async () => {
+    const h = harness();
+    const error = new DatabaseGateError('AUTH_SMOKE_INSERT_RESULT_UNKNOWN');
+    jest.mocked(h.store.insertUser).mockImplementationOnce((user) => {
+      h.setUsers([user]);
+      return Promise.reject(error);
+    });
+    await expect(prepareAuthSmoke(h.store, record, h.recovery)).rejects.toBe(
+      error,
+    );
+    expect(h.recovery.save).toHaveBeenCalledTimes(1);
+    expect(h.recovery.remove).not.toHaveBeenCalled();
+    expect(h.store.insertUser).toHaveBeenCalledTimes(1);
+    expect(h.store.deleteSessions).not.toHaveBeenCalled();
+    expect(h.store.deleteUser).not.toHaveBeenCalled();
+    expect(h.users()).toHaveLength(1);
+  });
+  it('retains recovery when an index write does not return a definite result', async () => {
+    const h = harness();
+    const error = new Error('unconfirmed DDL');
+    jest.mocked(h.store.createIndex).mockRejectedValueOnce(error);
+    await expect(prepareAuthSmoke(h.store, record, h.recovery)).rejects.toBe(
+      error,
+    );
+    expect(h.recovery.save).toHaveBeenCalledTimes(1);
+    expect(h.recovery.remove).not.toHaveBeenCalled();
+    expect(h.store.createIndex).toHaveBeenCalledTimes(1);
+    expect(h.store.insertUser).not.toHaveBeenCalled();
+  });
+  it('refuses cleanup before any delete while a fixture operation is in flight', async () => {
+    const h = harness();
+    const error = new Error('AUTH_SMOKE_CONCURRENT_AUTH_OPERATIONS');
+    jest.mocked(h.store.assertIdle).mockRejectedValueOnce(error);
+    await expect(cleanupAuthSmoke(h.store, record)).rejects.toBe(error);
+    expect(h.store.users).not.toHaveBeenCalled();
     expect(h.store.deleteSessions).not.toHaveBeenCalled();
   });
 });

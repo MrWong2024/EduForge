@@ -1,3 +1,4 @@
+import { deleteFixtureRows } from './helpers/delete-fixture-rows';
 import {
   authTestEnvironment,
   assertAuthTestConnection,
@@ -118,7 +119,11 @@ describe('Classroom report task status (real HTTP and Mongo)', () => {
   ) =>
     database()
       .collection<Row>(name)
-      .find(filter, { projection, maxTimeMS: 5000 })
+      .find(filter, {
+        projection,
+        maxTimeMS: 5000,
+        signal: AbortSignal.timeout(5000),
+      })
       .sort({ _id: 1 })
       .toArray();
   const post = (agent: Agent, path: string, body: Record<string, unknown>) =>
@@ -541,112 +546,124 @@ describe('Classroom report task status (real HTTP and Mongo)', () => {
         // All discoveries above are restricted to registered users and verified
         // ownership links, including records whose create response was lost.
         for (const row of feedback)
-          await db
-            .collection('feedbacks')
-            .deleteOne(
-              { _id: row._id, submissionId: row.submissionId },
-              { timeoutMS: 5000 },
-            );
+          await deleteFixtureRows(db, 'feedbacks', {
+            _id: row._id,
+            submissionId: row.submissionId,
+          });
         for (const row of jobs)
-          await db
-            .collection('aifeedbackjobs')
-            .deleteOne({ _id: row._id, studentId }, { timeoutMS: 5000 });
+          await deleteFixtureRows(db, 'aifeedbackjobs', {
+            _id: row._id,
+            studentId,
+          });
         for (const row of submissions)
-          await db
-            .collection('submissions')
-            .deleteOne(
-              { _id: row._id, studentId, classroomTaskId: row.classroomTaskId },
-              { timeoutMS: 5000 },
-            );
+          await deleteFixtureRows(db, 'submissions', {
+            _id: row._id,
+            studentId,
+            classroomTaskId: row.classroomTaskId,
+          });
         for (const row of instances)
-          await db.collection('classroomtasks').deleteOne(
-            {
-              _id: row._id,
-              createdBy: teacherId,
-              classroomId: row.classroomId,
-              taskId: row.taskId,
-            },
-            { timeoutMS: 5000 },
-          );
+          await deleteFixtureRows(db, 'classroomtasks', {
+            _id: row._id,
+            createdBy: teacherId,
+            classroomId: row.classroomId,
+            taskId: row.taskId,
+          });
         for (const row of tasks)
-          await db
-            .collection('tasks')
-            .deleteOne(
-              { _id: row._id, createdBy: teacherId },
-              { timeoutMS: 5000 },
-            );
+          await deleteFixtureRows(db, 'tasks', {
+            _id: row._id,
+            createdBy: teacherId,
+          });
         for (const row of memberships)
-          await db
-            .collection('enrollments')
-            .deleteOne(
-              { _id: row._id, userId: studentId, classroomId: row.classroomId },
-              { timeoutMS: 5000 },
-            );
+          await deleteFixtureRows(db, 'enrollments', {
+            _id: row._id,
+            userId: studentId,
+            classroomId: row.classroomId,
+          });
         for (const row of classrooms)
-          await db
-            .collection('classrooms')
-            .deleteOne(
-              { _id: row._id, teacherId, courseId: row.courseId },
-              { timeoutMS: 5000 },
-            );
+          await deleteFixtureRows(db, 'classrooms', {
+            _id: row._id,
+            teacherId,
+            courseId: row.courseId,
+          });
         for (const row of courses)
-          await db
-            .collection('courses')
-            .deleteOne(
-              { _id: row._id, createdBy: teacherId },
-              { timeoutMS: 5000 },
-            );
-        await db
-          .collection('sessions')
-          .deleteMany({ userId: { $in: userIds } }, { timeoutMS: 5000 });
+          await deleteFixtureRows(db, 'courses', {
+            _id: row._id,
+            createdBy: teacherId,
+          });
+        await deleteFixtureRows(
+          db,
+          'sessions',
+          { userId: { $in: userIds } },
+          0,
+        );
         for (const account of accounts) {
-          await db
-            .collection('passwordresettokens')
-            .deleteMany(
-              { userId: account.id, email: account.email },
-              { timeoutMS: 5000 },
-            );
-          await db
-            .collection('users')
-            .deleteOne(
-              { _id: account.id, email: account.email, roles: [account.role] },
-              { timeoutMS: 5000 },
-            );
+          await deleteFixtureRows(
+            db,
+            'passwordresettokens',
+            { userId: account.id, email: account.email },
+            0,
+          );
+          await deleteFixtureRows(db, 'users', {
+            _id: account.id,
+            email: account.email,
+            roles: [account.role],
+          });
         }
         const residual = await Promise.all([
-          db
-            .collection('feedbacks')
-            .countDocuments(feedbackFilter, { maxTimeMS: 5000 }),
-          db
-            .collection('aifeedbackjobs')
-            .countDocuments(jobFilter, { maxTimeMS: 5000 }),
-          db
-            .collection('submissions')
-            .countDocuments(submissionFilter, { maxTimeMS: 5000 }),
-          db
-            .collection('classroomtasks')
-            .countDocuments(taskFilter, { maxTimeMS: 5000 }),
+          db.collection('feedbacks').countDocuments(feedbackFilter, {
+            maxTimeMS: 5000,
+            signal: AbortSignal.timeout(5000),
+          }),
+          db.collection('aifeedbackjobs').countDocuments(jobFilter, {
+            maxTimeMS: 5000,
+            signal: AbortSignal.timeout(5000),
+          }),
+          db.collection('submissions').countDocuments(submissionFilter, {
+            maxTimeMS: 5000,
+            signal: AbortSignal.timeout(5000),
+          }),
+          db.collection('classroomtasks').countDocuments(taskFilter, {
+            maxTimeMS: 5000,
+            signal: AbortSignal.timeout(5000),
+          }),
           db
             .collection('tasks')
-            .countDocuments({ createdBy: teacherId }, { maxTimeMS: 5000 }),
-          db
-            .collection('enrollments')
-            .countDocuments(enrollmentFilter, { maxTimeMS: 5000 }),
+            .countDocuments(
+              { createdBy: teacherId },
+              { maxTimeMS: 5000, signal: AbortSignal.timeout(5000) },
+            ),
+          db.collection('enrollments').countDocuments(enrollmentFilter, {
+            maxTimeMS: 5000,
+            signal: AbortSignal.timeout(5000),
+          }),
           db
             .collection('classrooms')
-            .countDocuments({ teacherId }, { maxTimeMS: 5000 }),
+            .countDocuments(
+              { teacherId },
+              { maxTimeMS: 5000, signal: AbortSignal.timeout(5000) },
+            ),
           db
             .collection('courses')
-            .countDocuments({ createdBy: teacherId }, { maxTimeMS: 5000 }),
+            .countDocuments(
+              { createdBy: teacherId },
+              { maxTimeMS: 5000, signal: AbortSignal.timeout(5000) },
+            ),
           db
             .collection('sessions')
-            .countDocuments({ userId: { $in: userIds } }, { maxTimeMS: 5000 }),
+            .countDocuments(
+              { userId: { $in: userIds } },
+              { maxTimeMS: 5000, signal: AbortSignal.timeout(5000) },
+            ),
           db
             .collection('passwordresettokens')
-            .countDocuments({ userId: { $in: userIds } }, { maxTimeMS: 5000 }),
-          db
-            .collection('users')
-            .countDocuments(userFilter, { maxTimeMS: 5000 }),
+            .countDocuments(
+              { userId: { $in: userIds } },
+              { maxTimeMS: 5000, signal: AbortSignal.timeout(5000) },
+            ),
+          db.collection('users').countDocuments(userFilter, {
+            maxTimeMS: 5000,
+            signal: AbortSignal.timeout(5000),
+          }),
         ]);
         expect(residual).toEqual(Array<number>(11).fill(0));
         console.info(
@@ -839,7 +856,10 @@ describe('Classroom report task status (real HTTP and Mongo)', () => {
     expect(
       await database()
         .collection('aifeedbackjobs')
-        .countDocuments({ studentId }, { maxTimeMS: 5000 }),
+        .countDocuments(
+          { studentId },
+          { maxTimeMS: 5000, signal: AbortSignal.timeout(5000) },
+        ),
     ).toBe(0);
     const facts = await businessSnapshot();
     const mixed = studentItem(await report());

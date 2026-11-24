@@ -174,6 +174,8 @@ Global SoT 只保留理解跨 Service workflow 必需的稳定不变量，不追
   - 新课堂发布写路径同时检查来源难度符合 [Task 写入值域](./handoff-backend-dto-cheatsheet.md#task-template-dto--response-family) 或缺失；非法值返回 400，提示先修改模板难度，不生成非法新快照。校验不放入兼供历史读取的 snapshotTask helper，已有快照及旧实例只读 fallback 保持可读，不因显示归一化回写。
   - 实例配置更新与生命周期分开处理。状态写入以班级、实例和读取到的源状态作条件，未命中则复读主节点判断当前状态。撤回与首次提交的父实例协调写竞争同一文档；状态更新不以关联作品为前置条件，保留的 RECALLED 实例仍占用同班模板唯一键。公开转换与竞争结果见 [API Map](./handoff-backend-api-map.md#classroom-tasksclassrooms-子资源)。
   - 教师删除事务先按班级和实例主键写入父文档删除，再在同一 session 顺序检查 `Submission` 和 `AiFeedbackJob` 的直接引用。有任一引用即抛出业务冲突，回滚父文档删除。删除与 [Card 08](#service-card-08) 的提交协调写竞争同一 ClassroomTask。并发终态及公开错误见 [API Map](./handoff-backend-api-map.md#classroom-tasksclassrooms-子资源)。
+  - 删除和学生提交共用本节的事务执行规则。每次事务调用从单调时钟计算 10 秒截止，事务体、明确可重试的尝试、提交和确认共用剩余量。到期不发起业务写入、新尝试或提交确认。在途提交明确成功时按成功处理。提交结果未知时只允许预算内确认同一 session 的同一事务，不能重跑事务体。
+  - 两条事务使用同一数据库内的专用连接池。驱动公开会话 API 的收尾使用该池的有限连接、排队及 socket 阶段，并等待已发操作、必要的 abort 和 session 释放。10 秒约束应用发起操作的时间，完成收尾和 HTTP 返回可能晚于该截止。
   - 发布返回、列表/详情、my-task-detail、教师/学生看板、提交详情标题及 AI 分析标题统一优先读实例快照；旧实例仅当前模板只读 fallback，不回填；课堂成员响应由 publicTaskContent 明确投影，避免展开内部引用。模板库/候选仍读当前 Task，资产状态保持当前值。
   - 发布候选查询同时应用当前教师可见性、模板发布状态及已发布 taskId 排除；难度按保存值精确匹配，与既有课程分类、知识模块和 onlyMine 条件取交集，同一最终 filter 用于分页前查询与 countDocuments。未显式指定课程分类时仍按班级课程分类优先排序，不对已发布课堂任务列表增加难度过滤；参数校验见 [DTO Cheatsheet](./handoff-backend-dto-cheatsheet.md#发布候选模板)。
   - 提交入口检查学生身份、Enrollment ACTIVE、课堂归属及班级/实例 ACTIVE，再通过 `createSubmissionForClassroomTask` 绑定实例主键；真正写 Submission 前，由 [Card 08](#service-card-08) 再次 enforce 运行态及截止/迟交边界。
@@ -195,6 +197,7 @@ Global SoT 只保留理解跨 Service workflow 必需的稳定不变量，不追
   - 模板读范围由当前教师与共享可见性构造；legacy 缺省 visibility 兼容 SHARED，兼容 createdBy query 不突破当前教师范围；共享不转移作者写权限。分类为治理坐标，不作为 Course 外键或发布一致性约束；“未分类”查询兼容字段缺省任务。
   - listTasks 的难度条件按保存值精确匹配，并与既有 scope、status、knowledgeModule、courseLabel 及作者范围取交集；同一完整 filter 在 skip/limit 前应用于 items 与 countDocuments，保留原排序。省略难度时不排除未知、缺失或空串值；查询值域见 [DTO Cheatsheet](./handoff-backend-dto-cheatsheet.md#task-template-dto--response-family)。
   - Submission 的 classroomTaskId 在 Schema 与内部创建入口必填；attemptNo 分配、冷却及创建时的既有提交查询始终按 classroomTaskId + studentId，不推测实例或按模板分配编号。旧通用写入口拒绝；新实例提交要求实际快照并逐次保存源码与说明，写 Submission 前重验班级/实例 ACTIVE，不以模板当前状态阻断既有实例。提交在同一事务内递增父 ClassroomTask 的现有版本键，关闭该操作的时间戳更新，并插入 Submission。父实例协调写与作品插入共同提交或回滚，外部仍读取原有的课堂任务 `updatedAt`。
+  - 每轮编号冲突重读启动的事务有独立的 10 秒预算，遵循 [Card 07](#service-card-07) 的共同事务规则。外层轮数和提交后的读取不共用单个事务截止。
   - 编号分配最多 3 轮：每轮从主节点先读同作用域最大 attemptNo，开启冷却时才顺序读取最近 submittedAt，随后统一采样 now；禁止迟交且已过截止时优先拒绝，再判断冷却。放行判断、保存的 submittedAt、isLate 与 lateBySeconds 使用同一时间口径；窗口等值允许提交，冷却关闭时跳过窗口限制。仅本轮 insert 已确认未成功且 E11000 的 keyPattern 精确命中现行 `{classroomTaskId:1,studentId:1,attemptNo:1}` 唯一键时在新事务中重读重判，不直接换号插入。未知提交结果、其它唯一键冲突和事务提交成功后的编辑资格读取/响应构造失败均不重试创建。三轮耗尽后不再写入，开启冷却时仅复读最新提交，零冷却不增加该读取；仍优先核对截止，命中冷却返回正式 429，否则普通 409 提示刷新提交记录后重试。轮数是请求内部上限，不是学生提交次数限制。
   - 首提与后续提交保存作品，不创建 AI Job、不写 reviewStartedAt；无 Job 时返回 NOT_REQUESTED。手工请求复用 `ensureJobForSubmission`，不重复创建已有 Job；ensure 前统一校验提交/实例关联与快照，学生还重验本人、Enrollment ACTIVE 和班级/实例运行态，教师保留班级 ownership 评阅边界。缺失或残留的旧策略字段均不参与判断。
   - 教师反馈修改复用 submission 管理上下文，校验反馈属于该提交、来源为 TEACHER 且已有作者与当前教师一致。旧教师反馈无 createdBy 时在授权更新中补写，不批量迁移历史数据。

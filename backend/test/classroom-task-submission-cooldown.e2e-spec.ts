@@ -1,3 +1,4 @@
+import { deleteFixtureRows } from './helpers/delete-fixture-rows';
 import {
   authTestEnvironment,
   assertAuthTestConnection,
@@ -16,8 +17,16 @@ import request from 'supertest';
 import type { App } from 'supertest/types';
 import { AppModule } from '../src/app.module';
 import { configureApp } from '../src/app.setup';
+import {
+  CLASSROOM_TASK_TRANSACTION_CONNECTION,
+  getClassroomTaskTransactionModel,
+} from '../src/lib/classroom-task-transaction';
+import { runMongoWriteCommand } from '../src/lib/mongo-command';
+import { readMongoIndexes } from '../src/lib/mongo-index-cursor';
 import { ClassroomTask } from '../src/modules/classrooms/classroom-tasks/schemas/classroom-task.schema';
 import { AiFeedbackJobStatus } from '../src/modules/learning-tasks/ai-feedback/schemas/ai-feedback-job.schema';
+import { AiFeedbackJobService } from '../src/modules/learning-tasks/ai-feedback/services/ai-feedback-job.service';
+import { LearningTasksModule } from '../src/modules/learning-tasks/learning-tasks.module';
 import { SubmissionSchema } from '../src/modules/learning-tasks/schemas/submission.schema';
 import { hashPassword } from '../src/modules/users/password.utils';
 import {
@@ -167,6 +176,7 @@ describe('Classroom task submission cooldown and deletion (real HTTP and Mongo)'
   let otherStudent: Agent;
   let otherTeacher: Agent;
   let classroomTaskModel: Model<ClassroomTask>;
+  let transactionClassroomTaskModel: Model<ClassroomTask>;
   let courseId = '';
   let mainClassroomId = '';
   let otherClassroomId = '';
@@ -183,7 +193,11 @@ describe('Classroom task submission cooldown and deletion (real HTTP and Mongo)'
   ) =>
     database()
       .collection<Row>(name)
-      .find(filter, { projection, maxTimeMS: 5000 })
+      .find(filter, {
+        projection,
+        maxTimeMS: 5000,
+        signal: AbortSignal.timeout(5000),
+      })
       .sort({ _id: 1 })
       .toArray();
   const post = (agent: Agent, path: string, body: Record<string, unknown>) =>
@@ -209,7 +223,7 @@ describe('Classroom task submission cooldown and deletion (real HTTP and Mongo)'
           classroomTaskId: new Types.ObjectId(instance.classroomTaskId),
           ...(id ? { studentId: id } : {}),
         },
-        { maxTimeMS: 5000 },
+        { maxTimeMS: 5000, signal: AbortSignal.timeout(5000) },
       )
       .sort({ attemptNo: 1 })
       .toArray();
@@ -223,7 +237,7 @@ describe('Classroom task submission cooldown and deletion (real HTTP and Mongo)'
         .collection('aifeedbackjobs')
         .countDocuments(
           { studentId: { $in: studentIds } },
-          { maxTimeMS: 5000 },
+          { maxTimeMS: 5000, signal: AbortSignal.timeout(5000) },
         ),
     ).toBe(0);
   }
@@ -253,7 +267,7 @@ describe('Classroom task submission cooldown and deletion (real HTTP and Mongo)'
         update: mongo.UpdateFilter<mongo.Document> | mongo.Document[],
         options?: mongo.FindOneAndUpdateOptions,
       ): Promise<mongo.Document | null>;
-    } = classroomTaskModel.collection;
+    } = transactionClassroomTaskModel.collection;
     const deleteOne = collection.deleteOne.bind(
       collection,
     ) as typeof collection.deleteOne;
@@ -499,13 +513,14 @@ describe('Classroom task submission cooldown and deletion (real HTTP and Mongo)'
     )
       throw new Error('COOLDOWN_SUBMISSION_SCHEMA_INDEX_MISMATCH');
     async function readIndex(): Promise<IndexRow | undefined> {
-      const cursor = database().runCursorCommand(
-        { listIndexes: 'submissions', cursor: {}, includeBuildUUIDs: true },
-        { timeoutMS: 5000, timeoutMode: 'cursorLifetime' },
-      );
       let indexes: IndexRow[];
       try {
-        indexes = (await cursor.toArray()) as IndexRow[];
+        indexes = (await readMongoIndexes(
+          database(),
+          'submissions',
+          5000,
+          true,
+        )) as IndexRow[];
       } catch (error: unknown) {
         if (
           typeof error === 'object' &&
@@ -517,8 +532,6 @@ describe('Classroom task submission cooldown and deletion (real HTTP and Mongo)'
         throw new Error('COOLDOWN_SUBMISSION_INDEX_READ_FAILED', {
           cause: error,
         });
-      } finally {
-        await cursor.close();
       }
       if (
         indexes.some(
@@ -562,25 +575,45 @@ describe('Classroom task submission cooldown and deletion (real HTTP and Mongo)'
     let created = false;
     if (!(await readIndex())) {
       for (const entry of await database()
-        .listCollections({}, { nameOnly: true })
+        .listCollections(
+          {},
+          { nameOnly: true, signal: AbortSignal.timeout(10000) },
+        )
         .toArray()) {
         if (
           entry.type === 'collection' &&
           (await database()
             .collection(entry.name)
-            .countDocuments({}, { limit: 1, maxTimeMS: 5000 }))
+            .countDocuments(
+              {},
+              { limit: 1, maxTimeMS: 5000, signal: AbortSignal.timeout(5000) },
+            ))
         )
           throw new Error(
             'COOLDOWN_INDEX_PREPARATION_REQUIRES_EMPTY_TEST_COLLECTIONS',
           );
       }
       if (!(await readIndex())) {
-        await database().collection('submissions').createIndex(key, {
-          name: indexName,
-          unique: true,
-          partialFilterExpression,
-          timeoutMS: 10000,
-        });
+        try {
+          await runMongoWriteCommand(
+            database(),
+            {
+              createIndexes: 'submissions',
+              indexes: [
+                { key, name: indexName, unique: true, partialFilterExpression },
+              ],
+            },
+            10000,
+          );
+        } catch (error) {
+          const verification = await readIndex().then(
+            (index) => (index ? 'PRESENT' : 'MISSING'),
+            () => 'UNKNOWN',
+          );
+          throw new Error(`COOLDOWN_INDEX_CREATE_UNCONFIRMED_${verification}`, {
+            cause: error,
+          });
+        }
         created = true;
       }
     }
@@ -617,6 +650,14 @@ describe('Classroom task submission cooldown and deletion (real HTTP and Mongo)'
     config = app.get(ConfigService);
     classroomTaskModel = app.get<Model<ClassroomTask>>(
       getModelToken(ClassroomTask.name),
+    );
+    const transactionConnection = app.get<Connection>(
+      getConnectionToken(CLASSROOM_TASK_TRANSACTION_CONNECTION),
+    );
+    await assertAuthTestConnection(transactionConnection);
+    transactionClassroomTaskModel = getClassroomTaskTransactionModel(
+      transactionConnection,
+      classroomTaskModel,
     );
     const passwordHash = await hashPassword(password);
     for (const account of accounts)
@@ -831,119 +872,124 @@ describe('Classroom task submission cooldown and deletion (real HTTP and Mongo)'
         // All discoveries above are restricted to registered users and verified
         // ownership links, including records whose create response was lost.
         for (const row of feedback)
-          await db
-            .collection('feedbacks')
-            .deleteOne(
-              { _id: row._id, submissionId: row.submissionId },
-              { timeoutMS: 5000 },
-            );
+          await deleteFixtureRows(db, 'feedbacks', {
+            _id: row._id,
+            submissionId: row.submissionId,
+          });
         for (const row of jobs)
-          await db
-            .collection('aifeedbackjobs')
-            .deleteOne(
-              { _id: row._id, studentId: row.studentId },
-              { timeoutMS: 5000 },
-            );
+          await deleteFixtureRows(db, 'aifeedbackjobs', {
+            _id: row._id,
+            studentId: row.studentId,
+          });
         for (const row of submissions)
-          await db.collection('submissions').deleteOne(
-            {
-              _id: row._id,
-              studentId: row.studentId,
-              classroomTaskId: row.classroomTaskId,
-            },
-            { timeoutMS: 5000 },
-          );
+          await deleteFixtureRows(db, 'submissions', {
+            _id: row._id,
+            studentId: row.studentId,
+            classroomTaskId: row.classroomTaskId,
+          });
         for (const row of instances)
-          await db.collection('classroomtasks').deleteOne(
-            {
-              _id: row._id,
-              createdBy: teacherId,
-              classroomId: row.classroomId,
-              taskId: row.taskId,
-            },
-            { timeoutMS: 5000 },
-          );
+          await deleteFixtureRows(db, 'classroomtasks', {
+            _id: row._id,
+            createdBy: teacherId,
+            classroomId: row.classroomId,
+            taskId: row.taskId,
+          });
         for (const row of tasks)
-          await db
-            .collection('tasks')
-            .deleteOne(
-              { _id: row._id, createdBy: teacherId },
-              { timeoutMS: 5000 },
-            );
+          await deleteFixtureRows(db, 'tasks', {
+            _id: row._id,
+            createdBy: teacherId,
+          });
         for (const row of memberships)
-          await db.collection('enrollments').deleteOne(
-            {
-              _id: row._id,
-              userId: row.userId,
-              classroomId: row.classroomId,
-            },
-            { timeoutMS: 5000 },
-          );
+          await deleteFixtureRows(db, 'enrollments', {
+            _id: row._id,
+            userId: row.userId,
+            classroomId: row.classroomId,
+          });
         for (const row of classrooms)
-          await db
-            .collection('classrooms')
-            .deleteOne(
-              { _id: row._id, teacherId, courseId: row.courseId },
-              { timeoutMS: 5000 },
-            );
+          await deleteFixtureRows(db, 'classrooms', {
+            _id: row._id,
+            teacherId,
+            courseId: row.courseId,
+          });
         for (const row of courses)
-          await db
-            .collection('courses')
-            .deleteOne(
-              { _id: row._id, createdBy: teacherId },
-              { timeoutMS: 5000 },
-            );
-        await db
-          .collection('sessions')
-          .deleteMany({ userId: { $in: userIds } }, { timeoutMS: 5000 });
+          await deleteFixtureRows(db, 'courses', {
+            _id: row._id,
+            createdBy: teacherId,
+          });
+        await deleteFixtureRows(
+          db,
+          'sessions',
+          { userId: { $in: userIds } },
+          0,
+        );
         for (const account of accounts) {
-          await db
-            .collection('passwordresettokens')
-            .deleteMany(
-              { userId: account.id, email: account.email },
-              { timeoutMS: 5000 },
-            );
-          await db
-            .collection('users')
-            .deleteOne(
-              { _id: account.id, email: account.email, roles: [account.role] },
-              { timeoutMS: 5000 },
-            );
+          await deleteFixtureRows(
+            db,
+            'passwordresettokens',
+            { userId: account.id, email: account.email },
+            0,
+          );
+          await deleteFixtureRows(db, 'users', {
+            _id: account.id,
+            email: account.email,
+            roles: [account.role],
+          });
         }
         const residual = await Promise.all([
-          db
-            .collection('feedbacks')
-            .countDocuments(feedbackFilter, { maxTimeMS: 5000 }),
-          db
-            .collection('aifeedbackjobs')
-            .countDocuments(jobFilter, { maxTimeMS: 5000 }),
-          db
-            .collection('submissions')
-            .countDocuments(submissionFilter, { maxTimeMS: 5000 }),
-          db
-            .collection('classroomtasks')
-            .countDocuments(taskFilter, { maxTimeMS: 5000 }),
+          db.collection('feedbacks').countDocuments(feedbackFilter, {
+            maxTimeMS: 5000,
+            signal: AbortSignal.timeout(5000),
+          }),
+          db.collection('aifeedbackjobs').countDocuments(jobFilter, {
+            maxTimeMS: 5000,
+            signal: AbortSignal.timeout(5000),
+          }),
+          db.collection('submissions').countDocuments(submissionFilter, {
+            maxTimeMS: 5000,
+            signal: AbortSignal.timeout(5000),
+          }),
+          db.collection('classroomtasks').countDocuments(taskFilter, {
+            maxTimeMS: 5000,
+            signal: AbortSignal.timeout(5000),
+          }),
           db
             .collection('tasks')
-            .countDocuments({ createdBy: teacherId }, { maxTimeMS: 5000 }),
-          db
-            .collection('enrollments')
-            .countDocuments(enrollmentFilter, { maxTimeMS: 5000 }),
+            .countDocuments(
+              { createdBy: teacherId },
+              { maxTimeMS: 5000, signal: AbortSignal.timeout(5000) },
+            ),
+          db.collection('enrollments').countDocuments(enrollmentFilter, {
+            maxTimeMS: 5000,
+            signal: AbortSignal.timeout(5000),
+          }),
           db
             .collection('classrooms')
-            .countDocuments({ teacherId }, { maxTimeMS: 5000 }),
+            .countDocuments(
+              { teacherId },
+              { maxTimeMS: 5000, signal: AbortSignal.timeout(5000) },
+            ),
           db
             .collection('courses')
-            .countDocuments({ createdBy: teacherId }, { maxTimeMS: 5000 }),
+            .countDocuments(
+              { createdBy: teacherId },
+              { maxTimeMS: 5000, signal: AbortSignal.timeout(5000) },
+            ),
           db
             .collection('sessions')
-            .countDocuments({ userId: { $in: userIds } }, { maxTimeMS: 5000 }),
+            .countDocuments(
+              { userId: { $in: userIds } },
+              { maxTimeMS: 5000, signal: AbortSignal.timeout(5000) },
+            ),
           db
             .collection('passwordresettokens')
-            .countDocuments({ userId: { $in: userIds } }, { maxTimeMS: 5000 }),
-          db
-            .collection('users')
-            .countDocuments(userFilter, { maxTimeMS: 5000 }),
+            .countDocuments(
+              { userId: { $in: userIds } },
+              { maxTimeMS: 5000, signal: AbortSignal.timeout(5000) },
+            ),
+          db.collection('users').countDocuments(userFilter, {
+            maxTimeMS: 5000,
+            signal: AbortSignal.timeout(5000),
+          }),
         ]);
         expect(residual).toEqual(Array<number>(11).fill(0));
         console.info(
@@ -1004,28 +1050,62 @@ describe('Classroom task submission cooldown and deletion (real HTTP and Mongo)'
     assertCooldown(rejected, instance);
     // Preserve the prior test's passage-of-window fixture adjustment, limited to
     // this exact committed record, without a five-minute sleep or a global clock.
-    const aged = await database()
-      .collection('submissions')
-      .updateOne(
-        {
-          _id: firstRows[0]._id,
-          classroomTaskId: new Types.ObjectId(instance.classroomTaskId),
-          studentId,
-        },
-        {
-          $set: {
-            submittedAt: new Date(Date.now() - positiveCooldownMs - 1000),
+    const aged = await runMongoWriteCommand(
+      database(),
+      {
+        update: 'submissions',
+        updates: [
+          {
+            q: {
+              _id: firstRows[0]._id,
+              classroomTaskId: new Types.ObjectId(instance.classroomTaskId),
+              studentId,
+            },
+            u: {
+              $set: {
+                submittedAt: new Date(Date.now() - positiveCooldownMs - 1000),
+              },
+            },
+            multi: false,
           },
-        },
-        { timeoutMS: 5000 },
-      );
-    expect(aged.matchedCount).toBe(1);
+        ],
+      },
+      5000,
+    );
+    expect(aged).toMatchObject({ n: 1 });
     const next = await submit(instance, 'const sequentialAfterWindow = 3;');
     const stored = await storedSubmissions(instance);
     logReadings('after-window', [next], stored);
     expect(stored.map(({ attemptNo }) => attemptNo)).toEqual([1, 2]);
     assertSuccess(next, 'const sequentialAfterWindow = 3;', stored);
     await noJobs();
+  });
+
+  it('keeps one committed attempt when the response read fails after commit', async () => {
+    if (!app) throw new Error('COOLDOWN_APPLICATION_REQUIRED');
+    const target = await freshInstance('committed-response-read-failure');
+    const before = await storedInstances(target);
+    const code = 'const committedBeforeReadFailure = 1;';
+    const jobs = app
+      .select(LearningTasksModule)
+      .get(AiFeedbackJobService, { strict: true });
+    const read = jest.spyOn(jobs, 'getReviewJob').mockRejectedValueOnce(
+      new mongo.MongoServerError({
+        code: 11000,
+        message: 'Injected post-commit editing read failure',
+        keyPattern: { classroomTaskId: 1, studentId: 1, attemptNo: 1 },
+      }),
+    );
+    try {
+      expect((await submit(target, code)).status).toBe(500);
+      expect(read).toHaveBeenCalledTimes(1);
+      expect(await storedInstances(target)).toEqual([{ ...before[0], __v: 1 }]);
+      expect(await storedSubmissions(target, null)).toMatchObject([
+        { studentId, attemptNo: 1, content: { codeText: code } },
+      ]);
+    } finally {
+      read.mockRestore();
+    }
   });
   it('allocates distinct attempts to zero-cooldown overlapping submissions and still accepts a consecutive submission', async () => {
     config.set('LEARNING_TASK_SUBMISSION_COOLDOWN_MS', 0);
@@ -1238,14 +1318,20 @@ describe('Classroom task submission cooldown and deletion (real HTTP and Mongo)'
         maxAttempts: number;
       }
     >('aifeedbackjobs');
-    await jobs.insertOne(
+    await runMongoWriteCommand(
+      database(),
       {
-        ...directJob,
-        status: AiFeedbackJobStatus.Dead,
-        attempts: 3,
-        maxAttempts: 3,
+        insert: jobs.collectionName,
+        documents: [
+          {
+            ...directJob,
+            status: AiFeedbackJobStatus.Dead,
+            attempts: 3,
+            maxAttempts: 3,
+          },
+        ],
       },
-      { timeoutMS: 5000 },
+      5000,
     );
 
     assertError(
@@ -1257,7 +1343,10 @@ describe('Classroom task submission cooldown and deletion (real HTTP and Mongo)'
     expect(await storedInstances(target)).toEqual(parent);
     expect(await storedSubmissions(target, null)).toEqual([]);
     expect(
-      await jobs.findOne({ _id: directJob._id }, { timeoutMS: 5000 }),
+      await jobs.findOne(
+        { _id: directJob._id },
+        { signal: AbortSignal.timeout(5000) },
+      ),
     ).toMatchObject(directJob);
   });
 
@@ -1322,46 +1411,51 @@ describe('Classroom task submission cooldown and deletion (real HTTP and Mongo)'
       const waiting = checkpoint();
       const release = checkpoint();
       const recallStarted = checkpoint();
-      const collection: {
+      const collections: {
         findOneAndUpdate(
           filter: mongo.Filter<mongo.Document>,
           update: mongo.UpdateFilter<mongo.Document> | mongo.Document[],
           options?: mongo.FindOneAndUpdateOptions,
         ): Promise<mongo.Document | null>;
-      } = classroomTaskModel.collection;
-      const updateParent = collection.findOneAndUpdate.bind(
-        collection,
-      ) as typeof collection.findOneAndUpdate;
-      const spy = jest
-        .spyOn(collection, 'findOneAndUpdate')
-        .mockImplementation(async (filter, update, options) => {
-          if (
-            !(filter._id instanceof Types.ObjectId) ||
-            !filter._id.equals(targetId)
-          )
-            return updateParent(filter, update, options);
-          const isRecall =
-            !Array.isArray(update) && update.$set?.status === 'RECALLED';
-          const isSubmit = options?.session?.inTransaction() === true;
+      }[] = [
+        classroomTaskModel.collection,
+        transactionClassroomTaskModel.collection,
+      ];
+      const spies = collections.map((collection) => {
+        const updateParent = collection.findOneAndUpdate.bind(
+          collection,
+        ) as typeof collection.findOneAndUpdate;
+        return jest
+          .spyOn(collection, 'findOneAndUpdate')
+          .mockImplementation(async (filter, update, options) => {
+            if (
+              !(filter._id instanceof Types.ObjectId) ||
+              !filter._id.equals(targetId)
+            )
+              return updateParent(filter, update, options);
+            const isRecall =
+              !Array.isArray(update) && update.$set?.status === 'RECALLED';
+            const isSubmit = options?.session?.inTransaction() === true;
 
-          if (first === 'close' && isRecall) {
-            // The recall prepared its predicate from ACTIVE before the close writes.
-            waiting.signal();
-            await release.reached;
-          }
-          const pendingWrite = updateParent(filter, update, options);
-          if (first === 'submit' && isRecall) recallStarted.signal();
-          const result = await pendingWrite;
-          if (
-            (first === 'recall' && isRecall) ||
-            (first === 'submit' && isSubmit)
-          ) {
-            expect(result).not.toBeNull();
-            waiting.signal();
-            await release.reached;
-          }
-          return result;
-        });
+            if (first === 'close' && isRecall) {
+              // The recall prepared its predicate from ACTIVE before the close writes.
+              waiting.signal();
+              await release.reached;
+            }
+            const pendingWrite = updateParent(filter, update, options);
+            if (first === 'submit' && isRecall) recallStarted.signal();
+            const result = await pendingWrite;
+            if (
+              (first === 'recall' && isRecall) ||
+              (first === 'submit' && isSubmit)
+            ) {
+              expect(result).not.toBeNull();
+              waiting.signal();
+              await release.reached;
+            }
+            return result;
+          });
+      });
       const requests: Promise<request.Response>[] = [];
       const send = (test: request.Test) => {
         const response = test.then((value) => value);
@@ -1453,7 +1547,7 @@ describe('Classroom task submission cooldown and deletion (real HTTP and Mongo)'
         try {
           await Promise.allSettled(requests);
         } finally {
-          spy.mockRestore();
+          for (const spy of spies) spy.mockRestore();
         }
       }
     },

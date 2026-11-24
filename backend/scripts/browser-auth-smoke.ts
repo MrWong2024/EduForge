@@ -22,12 +22,24 @@ import {
   isLocalSingleNodeReplicaSetPrimary,
   readLocalMongoPort,
 } from '../src/config/local-mongo-replica-set';
+import {
+  MongoWriteCommandRejectedError,
+  runMongoWriteCommand,
+} from '../src/lib/mongo-command';
+import { readMongoIndexes } from '../src/lib/mongo-index-cursor';
 import { SessionSchema } from '../src/modules/auth/schemas/session.schema';
 import {
   comparePassword,
   hashPassword,
 } from '../src/modules/users/password.utils';
 import { UserStatus } from '../src/modules/users/schemas/user.schema';
+import {
+  createSmokeDeadline,
+  readSmokePrimary,
+  SMOKE_TOTAL_MS,
+  SmokeDeadlineExpiredError,
+  type SmokeDeadline,
+} from './browser-smoke-deadline';
 
 // Isolated application fixtures only; never infrastructure or real-person credentials.
 export const AUTH_SMOKE_INITIAL_PASSWORD = 'AuthSmoke123!';
@@ -57,6 +69,7 @@ type DesiredIndex = {
   options: { name: string; unique?: boolean; expireAfterSeconds?: number };
 };
 export type AuthSmokeStore = {
+  assertIdle: () => Promise<void>;
   assertEmptyAndIdle: () => Promise<void>;
   indexes: () => Promise<SessionIndex[]>;
   dropIndex: (name: string) => Promise<void>;
@@ -211,6 +224,7 @@ export async function cleanupAuthSmoke(
   store: AuthSmokeStore,
   record: AuthSmokeRecord,
 ): Promise<void> {
+  await store.assertIdle();
   const users = await store.users(record);
   assertAuthSmokeOwnership(record, users);
   const resetTokens = await store.resetTokens(record);
@@ -245,6 +259,8 @@ export async function prepareAuthSmoke(
   await store.assertEmptyAndIdle();
   const before = await store.indexes();
   const plan = planAuthSmokeSessionIndexes(before);
+  // Preserve the namespace through an uncertain index or account write.
+  recovery.save(record);
   for (const name of plan.drop) {
     await store.assertEmptyAndIdle();
     if (!planAuthSmokeSessionIndexes(await store.indexes()).drop.includes(name))
@@ -264,7 +280,6 @@ export async function prepareAuthSmoke(
   const after = planAuthSmokeSessionIndexes(await store.indexes());
   if (after.drop.length || after.create.length)
     fail('AUTH_SMOKE_SESSION_INDEX_VERIFICATION_FAILED');
-  recovery.save(record);
   try {
     const passwordHash = await hashPassword(AUTH_SMOKE_INITIAL_PASSWORD);
     for (const role of ROLES)
@@ -277,14 +292,22 @@ export async function prepareAuthSmoke(
         credentialVersion: 0,
       });
   } catch (error: unknown) {
-    // Audit exact planned IDs and ownership even when an insert result was lost.
+    if (
+      error instanceof DatabaseGateError &&
+      error.code === 'AUTH_SMOKE_INSERT_RESULT_UNKNOWN'
+    )
+      throw error;
+    // Only a definite insert failure can enter immediate ownership-checked cleanup.
     await cleanupAuthSmoke(store, record);
     recovery.remove();
     throw error;
   }
 }
 
-function createStore(connection: Connection): AuthSmokeStore {
+function createStore(
+  connection: Connection,
+  deadline: SmokeDeadline,
+): AuthSmokeStore {
   const db = connection.db;
   if (!db) return fail('AUTH_SMOKE_DATABASE_NOT_CONNECTED');
   const users = db.collection<AuthSmokeUser>('users');
@@ -304,30 +327,57 @@ function createStore(connection: Connection): AuthSmokeStore {
       { email: { $in: ROLES.map((role) => authSmokeEmail(record, role)) } },
     ],
   });
-  return {
-    async assertEmptyAndIdle() {
-      const active = (await db
-        .admin()
-        .command({ currentOp: 1, active: true }, { timeoutMS: 5000 })) as {
-        inprog?: { ns?: string }[];
-      };
-      if (
-        active.inprog?.some((operation) =>
-          ['users', 'sessions', 'passwordresettokens'].some(
-            (name) => operation.ns === `${db.databaseName}.${name}`,
-          ),
-        )
+  const authCollections = ['users', 'sessions', 'passwordresettokens'];
+  const assertIdle = async () => {
+    const { maxTimeMS, signal } = deadline.operation(5000);
+    const active = (await db.client
+      .db('admin')
+      .command(
+        { currentOp: 1, active: true, maxTimeMS },
+        { signal, readPreference: 'primary' },
+      )) as {
+      inprog?: { ns?: string; command?: Record<string, unknown> }[];
+    };
+    if (
+      active.inprog?.some((operation) =>
+        authCollections.some(
+          (name) =>
+            operation.ns === `${db.databaseName}.${name}` ||
+            (operation.command?.$db === db.databaseName &&
+              [
+                'insert',
+                'update',
+                'delete',
+                'createIndexes',
+                'dropIndexes',
+              ].some((key) => operation.command?.[key] === name)),
+        ),
       )
-        fail('AUTH_SMOKE_CONCURRENT_AUTH_OPERATIONS');
+    )
+      fail('AUTH_SMOKE_CONCURRENT_AUTH_OPERATIONS');
+  };
+  const write = (command: mongo.Document) =>
+    runMongoWriteCommand(db, command, deadline.remaining(5000));
+  return {
+    assertIdle,
+    async assertEmptyAndIdle() {
+      await assertIdle();
       for (const collection of [users, sessions, resetTokens])
-        if (await collection.countDocuments({}, { limit: 1, maxTimeMS: 5000 }))
+        if (
+          await collection.countDocuments(
+            {},
+            { limit: 1, ...deadline.operation(5000) },
+          )
+        )
           fail('AUTH_SMOKE_FOREIGN_AUTH_DATA');
     },
     async indexes() {
       try {
-        return (await sessions
-          .listIndexes({ timeoutMS: 5000 })
-          .toArray()) as SessionIndex[];
+        return (await readMongoIndexes(
+          db,
+          sessions.collectionName,
+          deadline.remaining(5000),
+        )) as SessionIndex[];
       } catch (error: unknown) {
         if (error instanceof mongo.MongoServerError && error.code === 26)
           return [];
@@ -335,17 +385,17 @@ function createStore(connection: Connection): AuthSmokeStore {
       }
     },
     async dropIndex(name) {
-      await sessions.dropIndex(name, { timeoutMS: 5000 });
+      await write({ dropIndexes: sessions.collectionName, index: name });
     },
     async createIndex(index) {
-      await sessions.createIndex(index.key, {
-        ...index.options,
-        timeoutMS: 5000,
+      await write({
+        createIndexes: sessions.collectionName,
+        indexes: [{ key: index.key, ...index.options }],
       });
     },
     async users(record) {
       return users
-        .find(userFilter(record), { maxTimeMS: 5000 })
+        .find(userFilter(record), deadline.operation(5000))
         .project<AuthSmokeUser>({
           _id: 1,
           email: 1,
@@ -364,11 +414,21 @@ function createStore(connection: Connection): AuthSmokeStore {
         createdAt: now,
         updatedAt: now,
       };
-      await users.insertOne(row, { timeoutMS: 5000 });
+      const remaining = deadline.remaining(5000);
+      try {
+        await runMongoWriteCommand(
+          db,
+          { insert: users.collectionName, documents: [row] },
+          remaining,
+        );
+      } catch (error: unknown) {
+        if (error instanceof MongoWriteCommandRejectedError) throw error;
+        fail('AUTH_SMOKE_INSERT_RESULT_UNKNOWN');
+      }
     },
     async resetTokens(record) {
       return resetTokens
-        .find(resetFilter(record), { maxTimeMS: 5000 })
+        .find(resetFilter(record), deadline.operation(5000))
         .project<{ userId: Types.ObjectId; email: string }>({
           userId: 1,
           email: 1,
@@ -376,32 +436,42 @@ function createStore(connection: Connection): AuthSmokeStore {
         .toArray();
     },
     async deleteSessions(userIds) {
-      await sessions.deleteMany(
-        { userId: { $in: userIds } },
-        { timeoutMS: 5000 },
-      );
+      await write({
+        delete: sessions.collectionName,
+        deletes: [{ q: { userId: { $in: userIds } }, limit: 0 }],
+      });
     },
     async deleteResetTokens(record) {
-      await resetTokens.deleteMany(
-        {
-          $or: ROLES.map((role) => ({
-            userId: new Types.ObjectId(record[`${role}Id`]),
-            email: authSmokeEmail(record, role),
-          })),
-        },
-        { timeoutMS: 5000 },
-      );
+      await write({
+        delete: resetTokens.collectionName,
+        deletes: [
+          {
+            q: {
+              $or: ROLES.map((role) => ({
+                userId: new Types.ObjectId(record[`${role}Id`]),
+                email: authSmokeEmail(record, role),
+              })),
+            },
+            limit: 0,
+          },
+        ],
+      });
     },
     async deleteUser(user) {
-      await users.deleteOne(
-        { _id: user._id, email: user.email, roles: user.roles },
-        { timeoutMS: 5000 },
-      );
+      await write({
+        delete: users.collectionName,
+        deletes: [
+          {
+            q: { _id: user._id, email: user.email, roles: user.roles },
+            limit: 1,
+          },
+        ],
+      });
     },
     async countSessions(userIds) {
       return sessions.countDocuments(
         { userId: { $in: userIds } },
-        { maxTimeMS: 5000 },
+        deadline.operation(5000),
       );
     },
   };
@@ -409,6 +479,7 @@ function createStore(connection: Connection): AuthSmokeStore {
 export async function verifyAuthSmokeConnection(
   connection: Connection,
   mongoUri: string | undefined,
+  deadline: SmokeDeadline,
 ): Promise<void> {
   const db = connection.db;
   if (!db) return fail('AUTH_SMOKE_DATABASE_NOT_CONNECTED');
@@ -417,34 +488,20 @@ export async function verifyAuthSmokeConnection(
     purpose: 'browser_acceptance',
     databaseName: db.databaseName,
   });
-  const client = connection.getClient();
-  let connectedAddress: string | undefined;
-  const captureHello = (event: mongo.CommandSucceededEvent) => {
-    if (event.commandName === 'hello' && event.databaseName === 'admin') {
-      connectedAddress = event.address;
-    }
-  };
-  client.on('commandSucceeded', captureHello);
-  let hello: unknown;
-  try {
-    hello = await db.admin().command({ hello: 1 }, { timeoutMS: 5000 });
-  } finally {
-    client.off('commandSucceeded', captureHello);
-  }
-  const status = (await db
-    .admin()
+  const primary = await readSmokePrimary(db, deadline);
+  const { maxTimeMS, signal } = deadline.operation(5000);
+  const status = (await db.client
+    .db('admin')
     .command(
-      { connectionStatus: 1, showPrivileges: false },
-      { timeoutMS: 5000 },
+      { connectionStatus: 1, showPrivileges: false, maxTimeMS },
+      { signal, readPreference: 'primary' },
     )) as {
     authInfo: Parameters<typeof assertAuthSmokeConnection>[0]['authInfo'];
   };
   assertAuthSmokeConnection({
     mongoUri,
     databaseName: db.databaseName,
-    connectedAddress,
-    seedPort: client.options.hosts[0]?.port,
-    hello,
+    ...primary,
     authInfo: status.authInfo,
   });
 }
@@ -457,7 +514,10 @@ function statePath(namespace: string): string {
   );
 }
 
-export async function runAuthSmokeCli(args: string[]): Promise<void> {
+export async function runAuthSmokeCli(
+  args: string[],
+  deadline = createSmokeDeadline(),
+): Promise<void> {
   if (
     args.length !== 3 ||
     !['prepare', 'inspect', 'cleanup'].includes(args[0]) ||
@@ -486,19 +546,24 @@ export async function runAuthSmokeCli(args: string[]): Promise<void> {
   process.env = environment;
   let connection: Connection | undefined;
   try {
+    const connectTimeoutMS = deadline.remaining(5000);
     connection = mongoose.createConnection(environment.MONGO_URI!, {
       autoCreate: false,
       autoIndex: false,
-      serverSelectionTimeoutMS: 5000,
-      connectTimeoutMS: 5000,
-      timeoutMS: 10000,
+      serverSelectionTimeoutMS: connectTimeoutMS,
+      connectTimeoutMS,
+      socketTimeoutMS: deadline.remaining(10000),
       monitorCommands: true,
       retryReads: false,
       retryWrites: false,
     });
     await connection.asPromise();
-    await verifyAuthSmokeConnection(connection, environment.MONGO_URI);
-    const store = createStore(connection);
+    await verifyAuthSmokeConnection(
+      connection,
+      environment.MONGO_URI,
+      deadline,
+    );
+    const store = createStore(connection, deadline);
     const recovery = {
       save(value: AuthSmokeRecord) {
         mkdirSync(dirname(path), { recursive: true });
@@ -516,7 +581,7 @@ export async function runAuthSmokeCli(args: string[]): Promise<void> {
       await cleanupAuthSmoke(store, record);
       recovery.remove();
     }
-    const rows = await store.users(record);
+    const rows = command === 'cleanup' ? [] : await store.users(record);
     assertAuthSmokeOwnership(record, rows);
     if (command !== 'cleanup' && rows.length !== 2)
       fail('AUTH_SMOKE_ACCOUNT_MISSING');
@@ -559,7 +624,8 @@ export async function runAuthSmokeCli(args: string[]): Promise<void> {
   }
 }
 if (require.main === module) {
-  const deadline = setTimeout(() => {
+  const deadline = createSmokeDeadline();
+  const watchdog = setTimeout(() => {
     console.error(
       JSON.stringify({
         ok: false,
@@ -568,19 +634,21 @@ if (require.main === module) {
       }),
     );
     process.exit(124);
-  }, 120000);
-  void runAuthSmokeCli(process.argv.slice(2))
+  }, SMOKE_TOTAL_MS);
+  void runAuthSmokeCli(process.argv.slice(2), deadline)
     .catch((error: unknown) => {
       console.error(
         JSON.stringify({
           ok: false,
           code:
-            error instanceof DatabaseGateError
-              ? error.code
-              : 'AUTH_SMOKE_FAILED_AUDIT_BEFORE_RETRY',
+            error instanceof SmokeDeadlineExpiredError
+              ? 'AUTH_SMOKE_TIMED_OUT_AUDIT_BEFORE_RETRY'
+              : error instanceof DatabaseGateError
+                ? error.code
+                : 'AUTH_SMOKE_FAILED_AUDIT_BEFORE_RETRY',
         }),
       );
-      process.exitCode = 1;
+      process.exitCode = error instanceof SmokeDeadlineExpiredError ? 124 : 1;
     })
-    .finally(() => clearTimeout(deadline));
+    .finally(() => clearTimeout(watchdog));
 }

@@ -998,10 +998,12 @@ describe('sync-indexes integration lifecycle (offline)', () => {
       const expired = expect(running).rejects.toThrow(
         'SYNC_INDEXES_E2E_DEADLINE',
       );
+      const onFinish = jest.fn();
+      void running.then(onFinish, onFinish);
       await jest.advanceTimersByTimeAsync(0);
       expect(write).toHaveBeenCalledTimes(1);
       await jest.advanceTimersByTimeAsync(100);
-      await expired;
+      expect(onFinish).not.toHaveBeenCalled();
       await expect(lifecycle.write(nextWrite)).rejects.toThrow(
         'SYNC_INDEXES_E2E_STOPPED',
       );
@@ -1017,6 +1019,7 @@ describe('sync-indexes integration lifecycle (offline)', () => {
       expect(cleanup).not.toHaveBeenCalled();
 
       release();
+      await expired;
       const afterSettlement = await lifecycle.stopAndWait(1000);
       if (afterSettlement.cleanupAllowed) cleanup();
       expect(afterSettlement).toEqual({
@@ -1179,17 +1182,20 @@ describe('sync-indexes integration cleanup deadline (offline)', () => {
 
   it('keeps the registration and does not claim success when a drop is still unconfirmed', async () => {
     const fixture = cleanupFixture();
-    let acknowledgeDrop!: (dropped: boolean) => void;
-    fixture.target.drop.mockReturnValueOnce(
-      new Promise<boolean>((resolve) => {
-        acknowledgeDrop = resolve;
-      }),
+    fixture.target.drop.mockImplementationOnce(
+      (_name, budgetMs) =>
+        new Promise<boolean>((_resolve, reject) => {
+          setTimeout(
+            () => reject(new Error('simulated drop deadline')),
+            budgetMs,
+          );
+        }),
     );
 
     const cleanup = fixture.run();
     await jest.advanceTimersByTimeAsync(0);
     expect(fixture.target.drop).toHaveBeenCalledWith('first', 10_000);
-    await jest.advanceTimersByTimeAsync(65_000);
+    await jest.advanceTimersByTimeAsync(10_000);
 
     expect(await cleanup).toMatchObject({
       cleanupIssue: 'drop-unconfirmed:first',
@@ -1200,7 +1206,6 @@ describe('sync-indexes integration cleanup deadline (offline)', () => {
     });
     expect(fixture.target.drop).toHaveBeenCalledTimes(1);
     expect(fixture.closeConnections).toHaveBeenCalledTimes(1);
-    acknowledgeDrop(true);
   });
 
   it('bounds residual verification and connection closure separately under the total deadline', async () => {
@@ -1534,6 +1539,9 @@ function realComparisonHarness(
       string,
       { name: string; key: mongo.IndexDescriptionInfo['key'] }
     >;
+    indexBatchDelays?: readonly [firstMs: number, nextMs: number];
+    dropAckLost?: boolean;
+    readbackFails?: boolean;
   } = {},
 ) {
   const h = harness();
@@ -1552,6 +1560,7 @@ function realComparisonHarness(
   const { BSON } = mongoose.mongo;
   const native = new mongoose.Connection();
   const fixtureBytes = new Map<string, Uint8Array>();
+  const afterDropBytes = new Map<string, Uint8Array>();
   const recheckedBytes =
     fixture.recheckedIndexes &&
     BSON.serialize({ indexes: fixture.recheckedIndexes });
@@ -1582,8 +1591,32 @@ function realComparisonHarness(
   );
   let trackedCollection: string | undefined;
   let client: mongo.MongoClient | undefined;
-  const rawOptions: (mongo.RunCursorCommandOptions | undefined)[] = [];
+  const rawOptions: mongo.RunCommandOptions[] = [];
+  const rawCommands: mongo.Document[] = [];
   const collectionOptions: (mongo.ListCollectionsOptions | undefined)[] = [];
+  let pagedCollection: string | undefined;
+
+  function delayedReply(
+    reply: mongo.Document,
+    delayMs: number,
+    signal: AbortSignal,
+  ) {
+    return new Promise<mongo.Document>((resolve, reject) => {
+      const onAbort = () => {
+        clearTimeout(timer);
+        reject(
+          new Error('Simulated command deadline', {
+            cause: signal.reason as unknown,
+          }),
+        );
+      };
+      const timer = setTimeout(() => {
+        signal.removeEventListener('abort', onAbort);
+        resolve(reply);
+      }, delayMs);
+      signal.addEventListener('abort', onAbort, { once: true });
+    });
+  }
 
   function run(args: readonly string[]) {
     jest
@@ -1600,6 +1633,16 @@ function realComparisonHarness(
           );
           client = driverClient;
           const driverDb = driverClient.db();
+          const startSession = driverClient.startSession.bind(
+            driverClient,
+          ) as typeof driverClient.startSession;
+          jest
+            .spyOn(driverClient, 'startSession')
+            .mockImplementation((options) => {
+              const session = startSession(options);
+              indexClosures.push(jest.spyOn(session, 'endSession'));
+              return session;
+            });
           Object.defineProperty(native, 'model', {
             value: (name: string, schema: Schema) => {
               const model = disconnectedModel(name, schema);
@@ -1619,26 +1662,13 @@ function realComparisonHarness(
                 model.collection.name,
                 BSON.serialize({ indexes }),
               );
+              afterDropBytes.set(
+                model.collection.name,
+                BSON.serialize({ indexes: initialIndexes }),
+              );
               if (tracked) fixture.configureSchema?.(model.schema);
               jest.spyOn(model, 'listIndexes').mockImplementation(forbidden);
-              jest
-                .spyOn(model, 'cleanIndexes')
-                .mockImplementation((options) => {
-                  const indexName = dropFixture?.name;
-                  if (
-                    !indexName ||
-                    options?.toDrop?.length !== 1 ||
-                    options.toDrop[0] !== indexName
-                  ) {
-                    return forbidden();
-                  }
-                  dropped.push({ model: name, index: indexName });
-                  fixtureBytes.set(
-                    model.collection.name,
-                    BSON.serialize({ indexes: initialIndexes }),
-                  );
-                  return Promise.resolve([indexName]);
-                });
+              jest.spyOn(model, 'cleanIndexes').mockImplementation(forbidden);
               jest.spyOn(model, 'createIndexes').mockImplementation(forbidden);
               return model;
             },
@@ -1646,7 +1676,93 @@ function realComparisonHarness(
           Object.defineProperty(native, 'db', {
             value: {
               databaseName: driverDb.databaseName,
-              command: hello,
+              client: driverClient,
+              command: async (
+                command: mongo.Document,
+                options: mongo.RunCommandOptions,
+              ) => {
+                expect(options.readPreference).toBe('primary');
+                if (!options.signal) throw new Error('EXPECTED_COMMAND_SIGNAL');
+                if (command.hello === 1) return hello(command);
+                rawCommands.push(command);
+                if (typeof command.killCursors === 'string') {
+                  return { ok: 1, cursorsKilled: command.cursors as unknown[] };
+                }
+                if (typeof command.dropIndexes === 'string') {
+                  const model = registrations.find(
+                    ([, , collection]) => collection === command.dropIndexes,
+                  )?.[0];
+                  const indexName =
+                    model && fixture.dropFixtures?.get(model)?.name;
+                  const indexes = afterDropBytes.get(command.dropIndexes);
+                  if (
+                    !model ||
+                    !indexName ||
+                    command.index !== indexName ||
+                    !indexes
+                  ) {
+                    return forbidden();
+                  }
+                  dropped.push({ model, index: indexName });
+                  fixtureBytes.set(command.dropIndexes, indexes);
+                  if (fixture.dropAckLost) {
+                    return delayedReply({ ok: 1 }, 70_000, options.signal);
+                  }
+                  return { ok: 1 };
+                }
+                const name: unknown = command.listIndexes ?? command.collection;
+                if (typeof name !== 'string') return forbidden();
+                if (
+                  fixture.readbackFails &&
+                  dropped.length &&
+                  name === trackedCollection
+                ) {
+                  throw new Error('READBACK_UNAVAILABLE');
+                }
+                rawOptions.push(options);
+                const ns = `${driverDb.databaseName}.${name}`;
+                if (
+                  'getMore' in command &&
+                  fixture.indexBatchDelays &&
+                  name === pagedCollection
+                ) {
+                  return delayedReply(
+                    { ok: 1, cursor: { id: 0, ns, nextBatch: [] } },
+                    fixture.indexBatchDelays[1],
+                    options.signal,
+                  );
+                }
+                expect(command).toMatchObject({ includeBuildUUIDs: true });
+                const bytes =
+                  name === trackedCollection &&
+                  recheckedBytes &&
+                  rawReads.length
+                    ? recheckedBytes
+                    : fixtureBytes.get(name);
+                if (!bytes) throw new Error('EXPECTED_BSON_FIXTURE');
+                const decoded: unknown = BSON.deserialize(
+                  bytes,
+                  options,
+                ).indexes;
+                if (!Array.isArray(decoded))
+                  throw new Error('EXPECTED_INDEX_METADATA');
+                const indexes = decoded as mongo.IndexDescriptionInfo[];
+                if (name === trackedCollection) rawReads.push(indexes);
+                const response = {
+                  ok: 1,
+                  cursor: { id: 0, ns, firstBatch: indexes },
+                };
+                if (fixture.indexBatchDelays && !pagedCollection) {
+                  pagedCollection = name;
+                  response.cursor.id = 123;
+                  return delayedReply(
+                    response,
+                    fixture.indexBatchDelays[0],
+                    options.signal,
+                  );
+                }
+                return response;
+              },
               listCollections: (
                 { name }: { name: string },
                 options?: mongo.ListCollectionsOptions,
@@ -1676,47 +1792,6 @@ function realComparisonHarness(
                 });
                 return cursor;
               },
-              runCursorCommand: (
-                command: mongo.Document,
-                options?: mongo.RunCursorCommandOptions,
-              ) => {
-                const name: unknown = command.listIndexes;
-                if (typeof name !== 'string')
-                  throw new Error('EXPECTED_LIST_INDEXES');
-                expect(command).toMatchObject({ includeBuildUUIDs: true });
-                rawOptions.push(options);
-                const cursor = driverDb.runCursorCommand(command, options);
-                jest.spyOn(cursor, 'toArray').mockImplementation(() => {
-                  const bytes =
-                    name === trackedCollection &&
-                    recheckedBytes &&
-                    rawReads.length
-                      ? recheckedBytes
-                      : fixtureBytes.get(name);
-                  const decoderOptions: unknown = Reflect.get(
-                    cursor,
-                    'deserializationOptions',
-                  );
-                  if (
-                    !bytes ||
-                    !decoderOptions ||
-                    typeof decoderOptions !== 'object'
-                  )
-                    throw new Error('EXPECTED_BSON_FIXTURE_AND_CURSOR_OPTIONS');
-                  const decoded: unknown = BSON.deserialize(
-                    bytes,
-                    decoderOptions,
-                  ).indexes;
-                  if (!Array.isArray(decoded))
-                    throw new Error('EXPECTED_INDEX_METADATA');
-                  const indexes = decoded as mongo.IndexDescriptionInfo[];
-                  if (name === trackedCollection) rawReads.push(indexes);
-                  return Promise.resolve(indexes);
-                });
-                indexClosures.push(jest.spyOn(cursor, 'close'));
-                return cursor;
-              },
-              createCollection: forbidden,
             },
           });
           jest.spyOn(native, 'asPromise').mockResolvedValue(native);
@@ -1735,6 +1810,7 @@ function realComparisonHarness(
     run,
     rawReads,
     rawOptions,
+    rawCommands,
     registrations,
     metadata,
     hello,
@@ -2318,6 +2394,105 @@ describe('sync-indexes driver and Schema adapter (offline)', () => {
     },
   );
 
+  it.each([
+    { delays: [35_000, 29_000] as const, exit: 0 },
+    { delays: [40_000, 30_000] as const, exit: 1 },
+  ])(
+    'shares one budget across listIndexes and getMore ($exit)',
+    async ({ delays, exit }) => {
+      jest.useFakeTimers();
+      try {
+        const a = realComparisonHarness({ indexBatchDelays: delays });
+        const result = a.run(apply);
+        await jest.advanceTimersByTimeAsync(delays[0]);
+        const [first, next] = a.rawOptions;
+        expect(next?.signal).toBe(first?.signal);
+        expect(next?.session).toBe(first?.session);
+        expect(a.rawCommands[1]).toMatchObject({
+          getMore: mongoose.mongo.BSON.Long.fromNumber(123),
+        });
+        await jest.advanceTimersByTimeAsync(65_000 - delays[0]);
+        expect(await result).toBe(exit);
+        if (exit === 1) {
+          expect(first?.signal?.aborted).toBe(true);
+          expect(a.rawCommands[2]?.killCursors).toBe(
+            a.rawCommands[0]?.listIndexes,
+          );
+          expect(a.rawCommands[2]?.cursors).toEqual([
+            mongoose.mongo.BSON.Long.fromNumber(123),
+          ]);
+          expect(output(a.h)).not.toContain('"event":"plan"');
+          expect(jsonEvent(a.h, 'result')).toMatchObject({
+            writesAttempted: false,
+          });
+        }
+        expect(a.dropped).toHaveLength(0);
+        expect(a.forbidden).not.toHaveBeenCalled();
+        expectComparisonResourcesClosed(a);
+      } finally {
+        jest.useRealTimers();
+      }
+    },
+  );
+
+  it.each([false, true])(
+    'stops later DDL after an unknown reply and reports readback (unavailable: %s)',
+    async (readbackFails) => {
+      jest.useFakeTimers();
+      try {
+        const a = realComparisonHarness({
+          dropAckLost: true,
+          readbackFails,
+          dropFixtures: new Map([
+            ['Session', { name: 'session_stale', key: { stale: 1 } }],
+            ['PasswordResetToken', { name: 'token_stale', key: { stale: 1 } }],
+          ]),
+        });
+        const result = a.run([...apply, '--allow-drop']);
+        await jest.advanceTimersByTimeAsync(65_000);
+        expect(await result).toBe(1);
+        expect(a.dropped).toEqual([
+          { model: 'Session', index: 'session_stale' },
+        ]);
+        expect(
+          a.rawCommands.filter((command) => 'dropIndexes' in command),
+        ).toHaveLength(1);
+        expect(jsonEvent(a.h, 'result')).toMatchObject({
+          error: { code: 'INDEX_WRITE_UNCONFIRMED' },
+          writesAttempted: true,
+        });
+        expect(jsonEvent(a.h, 'result')).toHaveProperty(
+          'models',
+          expect.arrayContaining([
+            expect.objectContaining({
+              model: 'Session',
+              operations: [
+                expect.objectContaining({
+                  kind: 'dropIndex',
+                  status: 'unconfirmed',
+                }),
+              ],
+              terminalState: readbackFails ? 'unconfirmed' : 'verified',
+            }),
+            expect.objectContaining({
+              model: 'PasswordResetToken',
+              operations: [
+                expect.objectContaining({
+                  kind: 'dropIndex',
+                  status: 'not-executed',
+                }),
+              ],
+            }),
+          ]),
+        );
+        expect(a.forbidden).not.toHaveBeenCalled();
+        expectComparisonResourcesClosed(a);
+      } finally {
+        jest.useRealTimers();
+      }
+    },
+  );
+
   it('pins BSON numeric and UUID decoding in real driver cursors despite URI options', async () => {
     const indexes = [
       ...matchingSessionIndexes.slice(0, -1),
@@ -2345,8 +2520,9 @@ describe('sync-indexes driver and Schema adapter (offline)', () => {
       promoteLongs: true,
       useBigInt64: false,
       promoteBuffers: false,
-      timeoutMode: 'cursorLifetime',
+      readPreference: 'primary',
     });
+    expect(a.rawOptions[0]?.signal).toBeInstanceOf(AbortSignal);
     expect(a.collectionOptions[0]).toMatchObject({ promoteBuffers: false });
     expect(a.rawReads[0]).toEqual(matchingSessionIndexes);
     expect(jsonEvent(a.h, 'result')).toHaveProperty(

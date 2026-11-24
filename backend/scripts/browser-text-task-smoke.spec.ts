@@ -1,3 +1,4 @@
+import { setTimeout } from 'node:timers/promises';
 import { Types } from 'mongoose';
 import { createBrowserAcceptanceEnvironment } from '../src/config/browser-acceptance-environment';
 import { assertConnectedDatabaseMatchesPurpose } from '../src/config/database-purpose';
@@ -16,8 +17,26 @@ import {
   SMOKE_TASK_KEYS,
   isSmokeTaskTitle,
 } from './browser-text-task-smoke';
+import {
+  createSmokeDeadline,
+  SMOKE_TOTAL_MS,
+  SmokeDeadlineExpiredError,
+} from './browser-smoke-deadline';
 
 describe('B1-2 thin smoke support gates (no database)', () => {
+  it('shares the monotonic CLI deadline across operations and actually aborts a capped signal', async () => {
+    let time = 400;
+    const deadline = createSmokeDeadline(() => time);
+    expect(deadline.operation(5000).maxTimeMS).toBe(5000);
+    expect(deadline.remaining(10000)).toBe(10000);
+    time += SMOKE_TOTAL_MS - 1;
+    const finalRead = deadline.operation(5000);
+    expect(finalRead.maxTimeMS).toBe(1);
+    await setTimeout(10);
+    expect(finalRead.signal.aborted).toBe(true);
+    time += 1;
+    expect(() => deadline.operation(15000)).toThrow(SmokeDeadlineExpiredError);
+  });
   it('uses stable local fixture titles and accepts exact old titles only for cleanup', () => {
     expect(SMOKE_TASK_KEYS).toEqual([
       'EDIT',

@@ -177,7 +177,7 @@ describe('Enrollment Only Regression Lock (e2e)', () => {
     if (!database) throw new Error('Missing connected test database');
     const auth = await database.command(
       { connectionStatus: 1, showPrivileges: false, maxTimeMS: 5000 },
-      { timeoutMS: 5000 },
+      { signal: AbortSignal.timeout(5000), readPreference: 'primary' },
     );
     assertLocalStandardTestAuthentication({
       nodeEnv: process.env.NODE_ENV,

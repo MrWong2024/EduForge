@@ -3,6 +3,7 @@ import type { AiContextRef } from '../ai-context/ai-context.types';
 import { Enrollment } from '../../classrooms/enrollments/schemas/enrollment.schema';
 import { ConfigService } from '@nestjs/config';
 import { Model, mongo, Mongoose, Schema, Types } from 'mongoose';
+import type { Connection } from 'mongoose';
 import { ClassroomTask } from '../../classrooms/classroom-tasks/schemas/classroom-task.schema';
 import {
   CLASSROOM_TASK_STATUS_ACTIVE,
@@ -42,6 +43,7 @@ const makeQuery = <T>(result: T) => {
     skip: jest.fn(),
     limit: jest.fn(),
     lean: jest.fn(),
+    setOptions: jest.fn(),
     exec: jest.fn().mockResolvedValue(result),
   };
   chain.session.mockReturnValue(chain);
@@ -51,6 +53,7 @@ const makeQuery = <T>(result: T) => {
   chain.skip.mockReturnValue(chain);
   chain.limit.mockReturnValue(chain);
   chain.lean.mockReturnValue(chain);
+  chain.setOptions.mockReturnValue(chain);
   return chain;
 };
 
@@ -61,10 +64,15 @@ const submissionDto: CreateSubmissionDto = {
   },
 };
 
-type SubmissionTestSession = { id: Types.ObjectId };
-type SubmissionTransaction = (
-  session: SubmissionTestSession,
-) => Promise<unknown>;
+const makeSubmissionTestSession = () => ({
+  id: objectId(),
+  startTransaction: jest.fn(),
+  inTransaction: jest.fn().mockReturnValue(true),
+  abortTransaction: jest.fn().mockResolvedValue(undefined),
+  commitTransaction: jest.fn().mockResolvedValue(undefined),
+  endSession: jest.fn().mockResolvedValue(undefined),
+});
+type SubmissionTestSession = ReturnType<typeof makeSubmissionTestSession>;
 
 const createHarness = (
   options: {
@@ -125,6 +133,7 @@ const createHarness = (
   const configService = { get: jest.fn(() => options.submissionCooldownMs) };
   const taskModel = { findById: jest.fn(() => makeQuery(task)) };
   const submissionModel = {
+    modelName: Submission.name,
     findById: jest.fn(() => makeQuery(submission)),
     findOne: jest.fn<ReturnType<typeof makeQuery>, [Record<string, unknown>]>(
       () => makeQuery(null),
@@ -139,17 +148,24 @@ const createHarness = (
   };
   const feedbackModel = { exists: jest.fn().mockResolvedValue(null) };
   const classroomTaskModel = {
-    db: {
-      transaction: jest.fn((run: SubmissionTransaction) =>
-        run({ id: objectId() }),
-      ),
-    },
+    modelName: ClassroomTask.name,
     findById: jest.fn(() => makeQuery(classroomTask)),
     findOneAndUpdate: jest.fn(() => makeQuery(classroomTask)),
     exists: jest.fn(() => ({ exec: jest.fn().mockResolvedValue(null) })),
   };
   const classroomModel = {
+    modelName: Classroom.name,
     findById: jest.fn(() => makeQuery(classroom)),
+  };
+  const transactionModels: Record<string, unknown> = {
+    [ClassroomTask.name]: classroomTaskModel,
+    [Classroom.name]: classroomModel,
+    [Submission.name]: submissionModel,
+  };
+  const transactionConnection = {
+    startSession: jest.fn(() => Promise.resolve(makeSubmissionTestSession())),
+    models: transactionModels,
+    model: jest.fn((name: string) => transactionModels[name]),
   };
   const userModel = { findById: jest.fn(() => makeQuery(null)) };
   const aiFeedbackJobService = {
@@ -171,6 +187,7 @@ const createHarness = (
     aiFeedbackJobService as unknown as AiFeedbackJobService,
     enrollmentModel,
     new AiContextReaderService(),
+    transactionConnection as unknown as Connection,
   );
 
   return {
@@ -181,6 +198,7 @@ const createHarness = (
     enrollmentModel,
     classroomTaskModel,
     classroomModel,
+    transactionConnection,
     feedbackModel,
     submission,
     task,
@@ -287,6 +305,7 @@ const createTaskManagementHarness = (
     {} as unknown as AiFeedbackJobService,
     {} as Model<Enrollment>,
     aiContextReader,
+    {} as Connection,
   );
 
   return {
@@ -1090,6 +1109,7 @@ describe('LearningTasksService task template publisher contract', () => {
       {} as unknown as AiFeedbackJobService,
       {} as Model<Enrollment>,
       new AiContextReaderService(),
+      {} as Connection,
     );
 
     const result = await service.listTasks(
@@ -1144,6 +1164,7 @@ describe('LearningTasksService task template publisher contract', () => {
       {} as unknown as AiFeedbackJobService,
       {} as Model<Enrollment>,
       new AiContextReaderService(),
+      {} as Connection,
     );
 
     const result = await service.getTask(
@@ -1528,11 +1549,15 @@ describe('Submission classroom association contract (no database)', () => {
         classroomTaskId: h.ids.classroomTaskId,
       });
     const [, { session }] = h.submissionModel.create.mock.calls[0];
-    expect(h.classroomTaskModel.db.transaction).toHaveBeenCalledTimes(1);
+    expect(h.transactionConnection.startSession).toHaveBeenCalledTimes(1);
     expect(h.classroomTaskModel.findOneAndUpdate).toHaveBeenCalledWith(
       { _id: h.ids.classroomTaskId },
       { $inc: { __v: 1 } },
-      { session, timestamps: false, returnDocument: 'after' },
+      expect.objectContaining({
+        session,
+        timestamps: false,
+        returnDocument: 'after',
+      }),
     );
     expect(classroomQuery.session).toHaveBeenCalledWith(session);
     expect(highestAttempt.session).toHaveBeenCalledWith(session);
@@ -1662,7 +1687,7 @@ describe('Classroom submission attempt allocation (no database)', () => {
     });
 
     await expect(h.submit()).resolves.toMatchObject({ attemptNo: 2 });
-    expect(h.classroomTaskModel.db.transaction).toHaveBeenCalledTimes(2);
+    expect(h.transactionConnection.startSession).toHaveBeenCalledTimes(2);
     expect(h.submissionModel.findOne).toHaveBeenCalledTimes(2);
     const [[, firstOptions], [[retryPayload], retryOptions]] =
       h.submissionModel.create.mock.calls;
@@ -1752,13 +1777,13 @@ describe('Classroom submission attempt allocation (no database)', () => {
     const h = setup();
     const error = duplicate();
     error.addErrorLabel('UnknownTransactionCommitResult');
-    h.classroomTaskModel.db.transaction.mockImplementationOnce(async (run) => {
-      await run({ id: objectId() });
-      throw error;
-    });
+    const session = makeSubmissionTestSession();
+    session.commitTransaction.mockRejectedValue(error);
+    h.transactionConnection.startSession.mockResolvedValueOnce(session);
 
     await expect(h.submit()).rejects.toBe(error);
-    expect(h.classroomTaskModel.db.transaction).toHaveBeenCalledTimes(1);
+    expect(h.transactionConnection.startSession).toHaveBeenCalledTimes(1);
+    expect(session.commitTransaction).toHaveBeenCalledTimes(2);
     expect(h.submissionModel.create).toHaveBeenCalledTimes(1);
     expect(h.aiFeedbackJobService.getReviewJob).not.toHaveBeenCalled();
   });
@@ -1770,5 +1795,25 @@ describe('Classroom submission attempt allocation (no database)', () => {
 
     await expect(h.submit()).rejects.toBe(error);
     expect(h.submissionModel.create).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not start inserting when a required read finishes after the transaction budget', async () => {
+    const h = setup();
+    const cooldown = makeQuery(null);
+    cooldown.exec.mockImplementationOnce(
+      () => new Promise((resolve) => setTimeout(() => resolve(null), 10_001)),
+    );
+    h.submissionModel.findOne
+      .mockReturnValueOnce(makeQuery(null))
+      .mockReturnValueOnce(cooldown);
+
+    const submission = h.submit();
+    const rejection = expect(submission).rejects.toMatchObject({
+      name: 'TimeoutError',
+    });
+    await jest.advanceTimersByTimeAsync(10_001);
+    await rejection;
+    expect(h.submissionModel.create).not.toHaveBeenCalled();
+    expect(h.transactionConnection.startSession).toHaveBeenCalledTimes(1);
   });
 });

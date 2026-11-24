@@ -8,7 +8,7 @@
 
 ## 1) 数据库、连接串与索引治理
 
-数据库兼容目标为 MongoDB 9.0.8（本地）与 8.3（服务器），使用同一套后端依赖；Mongoose 及其实际 MongoDB Node.js Driver 版本以 `backend/package-lock.json` 为准。选择驱动时核对 [MongoDB 官方兼容矩阵](https://www.mongodb.com/docs/drivers/compatibility/?driver-language=javascript&javascript-driver-framework=nodejs) 对两个 Server 主版本及 Node.js 24 的支持，不通过 `overrides` 强行替换 Mongoose 的驱动。官方支持范围、纯测试与构建结果不等于两个实际环境的业务回归已通过；真实数据库回归须遵守 Testing Playbook 的隔离边界，不以生产库作为升级测试靶场。
+本机验收使用 MongoDB 9.0.8，服务器兼容目标为 8.3，使用同一套后端依赖。Node.js 24.x 下，Mongoose 9.13.0 正常解析其间接依赖 MongoDB Node.js Driver 7.9.1，准确版本以 `backend/package-lock.json` 为准。驱动从 7.8 起停用 `timeoutMS` 和 `timeoutMode`。事务、索引及测试夹具以各自的应用期限和驱动公开的操作约束控制。服务器 8.3 的业务兼容性须独立验证，实库回归遵守 Testing Playbook 的隔离边界。[MongoDB 官方兼容矩阵](https://www.mongodb.com/docs/drivers/compatibility/?driver-language=javascript&javascript-driver-framework=nodejs)
 
 数据库按环境与测试用途使用独立 database 实现 database-level isolation；`browser_acceptance` 是独立数据库用途，不是新的 `NODE_ENV`：
 
@@ -34,7 +34,7 @@ Browser acceptance 配置：
 - `backend/.env.browser-acceptance` 是本机 ignored 文件，tracked 模板为 `backend/.env.browser-acceptance.example`；仅声明 `EDUFORGE_DATABASE_PURPOSE=browser_acceptance` 和 `MONGO_URI`。Browser 连接只选择该专属文件的 `MONGO_URI`，不接受继承变量或旧连接键补齐，不叠加其他环境文件。
 - Browser backend、`process-ai` 与管理 CLI 共用该 URI，仍各自在独立进程中运行；APP/ADMIN 只表示应用与管理职责，不再表示两个配置入口或专用数据库账号分支。
 - Browser 本机 URI 门禁仅接受单一 loopback seed 的 `mongodb://` URI，用户名为 `root`，显式配置 `authSource=admin` 和 `replicaSet=rs0`，库名为 `eduforge_browser_test`。普通测试和 Browser 的本机 URI 门禁接受省略 `directConnection` 或显式设置 `false`、`true`，均拒绝非 loopback、SRV、多主机、代理、`loadBalanced` 和重复参数。[sync-indexes](#sync-indexes-普通索引同步) 有独立限制。
-- Browser 连接后先核对实际 `databaseName`。窄认证 Smoke 还校验实际连接节点是 `rs0` 的可写 PRIMARY，且副本集只公布同端口的一个本机成员，并核验 `authenticatedUsers` 中的唯一 `root@admin` 身份和 `authenticatedUserRoles` 中的唯一 `root@admin` 角色。任一门禁不符均停止。
+- Browser 连接后先核对实际 `databaseName`。窄认证和文本任务 Smoke 的夹具连接均校验实际连接节点是 `rs0` 的可写 PRIMARY，且副本集只公布同端口的一个本机成员，并核验 `authenticatedUsers` 中的唯一 `root@admin` 身份和 `authenticatedUserRoles` 中的唯一 `root@admin` 角色。任一门禁不符均停止。
 - Browser backend 的固定网络配置为 `127.0.0.1`、CORS origin `http://localhost:3000`；`BACKEND_PORT` 默认 `5000`，是唯一允许 shell 覆写的配置项。AI/Mail 配置组合见第 3 节。
 - Browser acceptance 使用独立 purpose 与专属环境文件中的单一 `MONGO_URI`；具体 process roles、启动门禁、环境隔离、连接核验及 fixture/verifier 边界见 [Backend Testing Playbook](./handoff-backend-testing-playbook.md)。
 
@@ -65,6 +65,7 @@ npm run sync-indexes -- --apply --confirm-db <精确库名> --allow-drop
 - 无参数等价于只读 `--dry-run`，`--help` 独立于环境配置和数据库连接。CLI 拒绝未知、重复和冲突参数。普通执行要求调用进程显式设置 `NODE_ENV` 为 `development`、`test` 或 `production`。文件来源仅为对应的 `backend/.env.<NODE_ENV>`，按 `env.MONGO_URI ?? file.MONGO_URI` 选择；不叠加通用 `.env`，不改写 `process.env`，文件不能改变已选定的 `NODE_ENV`。缺失或显式空值以 `MONGO_URI_REQUIRED` 拒绝，不回退旧管理键；非法 purpose 或任一来源声明 `browser_acceptance` 均拒绝。所选文件缺失且进程配置足够时可继续。连接前校验 URI 声明库名，连接后校验实际库名。
 - 独立 Mongoose 连接和正式模型 Schema 克隆均禁用自动建集合和索引。CLI 按主节点读取，拒绝有效的 `directConnection=true`，apply 额外拒绝有效的 `w=0`。生产副本集名称由生产 URI 决定。正式连接和原生元数据读取固定 `promoteBuffers: false`、`promoteValues: true`、`promoteLongs: true`、`useBigInt64: false`，独立连接另固定 `raw: false`。原生索引盘点开启 `includeBuildUUIDs`，使用有界游标期限，结束后关闭游标和连接。
 - 正式连接就绪后执行只读握手。检测到 `mongos` 或握手失败时，停止模型维护。工具的运维范围限于非分片部署，操作者须排除直接连接 shard 节点的情况，因为握手门禁仅识别 `mongos`。
+- 握手、集合元数据读取、建集合、删索引和建索引各有 65 秒操作预算。一次索引盘点由首批和后续 `getMore` 共享同一单调截止时间，游标收尾另有有限等待。盘点不完整时停止相应阶段，保留完整盘点作为计划和写前复查的前提。
 - 先用 `--dry-run` 审阅。apply 重新生成本次完整计划，包含待建集合、待删索引的原始定义和待建索引定义。库名确认、删除授权和计划输出成功后才进入写入阶段。含删除的计划必须同传 `--allow-drop`。逐模型执行前用集合 UUID 与原始计划复查目标，按冻结计划逐项等待删建。首个写前检查或 DDL 错误即停止后续写入。后续模型发生漂移时，前面操作可能已完成。
 - 每个阶段读取集合存在性、类型、默认 collation 和 `info.uuid`。预检只接受普通集合及默认 simple collation，发现 `encryptedFields` 即拒绝。初始盘点、写前复查和最终回读时，若 `options.capped === true`，以 `CAPPED_COLLECTION_UNSUPPORTED` 拒绝。集合元数据发现 `options.clusteredIndex` 时以 `CLUSTERED_COLLECTION_UNSUPPORTED` 拒绝，有无 `expireAfterSeconds` 均适用。已存在的集合须有合法 UUID，新建集合后立即记录 UUID 作为验收的身份基线。发现同名集合替换时，即使索引盘点或校验随后失败，也会同时报告已确认的 UUID 变化和索引错误。索引读取不完整时标记无法确认。UUID 复查与实际写入之间仍有竞争窗口。
 - 构建中、全文、`hidden: true`、`prepareUnique: true` 和不支持的键方向仍拒绝。复合键含会被 JS 对象重新排序的字段，或待建索引名称已被保留索引占用时，预检拒绝。模型注册前检查 Schema 自身的 `options.collation`，允许缺省或合法的 `{ locale: 'simple' }`，非 simple 或非法配置以 `SCHEMA_COLLATION_UNSUPPORTED` 拒绝。Schema 的单个索引显式声明 `options.name` 或非 simple collation 时同样拒绝。实际索引的名称继续用于盘点与执行，集合默认 simple 时仍可按计划替换具有非 simple collation 的实际索引。

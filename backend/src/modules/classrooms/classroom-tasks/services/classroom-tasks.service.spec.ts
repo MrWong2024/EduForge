@@ -1,5 +1,6 @@
 import { AiContextReaderService } from '../../../learning-tasks/ai-context/ai-context-reader.service';
 import { Model, Types } from 'mongoose';
+import type { Connection } from 'mongoose';
 import { Classroom, ClassroomStatus } from '../../schemas/classroom.schema';
 import { Course } from '../../../courses/schemas/course.schema';
 import { ClassroomTask } from '../schemas/classroom-task.schema';
@@ -155,13 +156,15 @@ const createHarness = (options: HarnessOptions = {}) => {
     findOne: jest.fn(() => makeQuery({ ...classroom, teacherId: studentId })),
   };
   const courseModel = {};
-  const transactionSession = {};
+  const transactionSession = {
+    startTransaction: jest.fn(),
+    inTransaction: jest.fn().mockReturnValue(true),
+    abortTransaction: jest.fn().mockResolvedValue(undefined),
+    commitTransaction: jest.fn().mockResolvedValue(undefined),
+    endSession: jest.fn().mockResolvedValue(undefined),
+  };
   const classroomTaskModel = {
-    db: {
-      transaction: jest.fn((run: (session: object) => Promise<unknown>) =>
-        run(transactionSession),
-      ),
-    },
+    modelName: ClassroomTask.name,
     deleteOne: jest.fn(() => makeExecOnly({ deletedCount: 1 })),
     findOne: jest.fn(() => makeQuery(classroomTask)),
     findOneAndUpdate: jest.fn(() => makeQuery(classroomTask)),
@@ -202,6 +205,7 @@ const createHarness = (options: HarnessOptions = {}) => {
     });
   };
   const submissionModel = {
+    modelName: Submission.name,
     exists: jest.fn().mockResolvedValue(null),
     find: jest.fn((filter: Record<string, unknown>) =>
       makeQuery(filterSubmissions(filter)),
@@ -210,7 +214,20 @@ const createHarness = (options: HarnessOptions = {}) => {
       Promise.resolve(filterSubmissions(filter).length),
     ),
   };
-  const aiFeedbackJobModel = { exists: jest.fn() };
+  const aiFeedbackJobModel = {
+    modelName: AiFeedbackJob.name,
+    exists: jest.fn(),
+  };
+  const transactionModels: Record<string, unknown> = {
+    [ClassroomTask.name]: classroomTaskModel,
+    [Submission.name]: submissionModel,
+    [AiFeedbackJob.name]: aiFeedbackJobModel,
+  };
+  const transactionConnection = {
+    startSession: jest.fn().mockResolvedValue(transactionSession),
+    models: transactionModels,
+    model: jest.fn((name: string) => transactionModels[name]),
+  };
   const feedbackModel = {
     find: jest.fn((filter: Record<string, unknown>) => {
       const submissionId = filter.submissionId as Types.ObjectId;
@@ -269,6 +286,7 @@ const createHarness = (options: HarnessOptions = {}) => {
     aiFeedbackJobService as unknown as AiFeedbackJobService,
     learningTasksService as unknown as LearningTasksService,
     new AiContextReaderService(),
+    transactionConnection as unknown as Connection,
   );
 
   return {
@@ -279,6 +297,7 @@ const createHarness = (options: HarnessOptions = {}) => {
     submissionModel,
     aiFeedbackJobModel,
     transactionSession,
+    transactionConnection,
     taskModel,
     feedbackModel,
     learningTasksService,
@@ -367,8 +386,12 @@ describe('ClassroomTasksService deleteClassroomTask', () => {
       submissionId ? { _id: submissionId } : null,
     );
     const jobQuery = makeExecOnly(jobId ? { _id: jobId } : null);
-    const submissionSession = jest.fn(() => submissionQuery);
-    const jobSession = jest.fn(() => jobQuery);
+    const submissionSession = jest.fn(() => ({
+      setOptions: jest.fn(() => submissionQuery),
+    }));
+    const jobSession = jest.fn(() => ({
+      setOptions: jest.fn(() => jobQuery),
+    }));
     harness.submissionModel.exists.mockReturnValueOnce({
       session: submissionSession,
     });
@@ -395,13 +418,13 @@ describe('ClassroomTasksService deleteClassroomTask', () => {
       _id: harness.ids.classroomId,
       teacherId: harness.ids.studentId,
     });
-    expect(harness.classroomTaskModel.db.transaction).toHaveBeenCalledTimes(1);
+    expect(harness.transactionConnection.startSession).toHaveBeenCalledTimes(1);
     expect(harness.classroomTaskModel.deleteOne).toHaveBeenCalledWith(
       {
         _id: harness.ids.classroomTaskId,
         classroomId: harness.ids.classroomId,
       },
-      { session: harness.transactionSession },
+      expect.objectContaining({ session: harness.transactionSession }),
     );
     const scope = { classroomTaskId: harness.ids.classroomTaskId };
     expect(harness.submissionModel.exists).toHaveBeenCalledWith(scope);
@@ -423,6 +446,12 @@ describe('ClassroomTasksService deleteClassroomTask', () => {
       await expect(harness.remove()).rejects.toMatchObject({
         response: { statusCode: 409, code: 'CLASSROOM_TASK_NOT_EMPTY' },
       });
+      expect(harness.transactionSession.abortTransaction).toHaveBeenCalledTimes(
+        1,
+      );
+      expect(
+        harness.transactionSession.commitTransaction,
+      ).not.toHaveBeenCalled();
     },
   );
 });
@@ -706,6 +735,7 @@ describe('ClassroomTasksService listClassroomTasks publisher contract', () => {
       {} as unknown as AiFeedbackJobService,
       {} as unknown as LearningTasksService,
       new AiContextReaderService(),
+      {} as Connection,
     );
 
     const result = await service.listClassroomTasks(
@@ -835,6 +865,7 @@ describe('ClassroomTasksService listPublishableTaskTemplates publisher contract'
       {} as unknown as AiFeedbackJobService,
       {} as unknown as LearningTasksService,
       new AiContextReaderService(),
+      {} as Connection,
     );
 
     const result = await service.listPublishableTaskTemplates(
@@ -906,6 +937,7 @@ describe('ClassroomTasksService listPublishableTaskTemplates publisher contract'
       {} as unknown as AiFeedbackJobService,
       {} as unknown as LearningTasksService,
       new AiContextReaderService(),
+      {} as Connection,
     );
 
     await service.listPublishableTaskTemplates(

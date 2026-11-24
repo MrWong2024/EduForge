@@ -4,6 +4,7 @@ import {
   createMongooseConnection,
   runSyncIndexesCli,
 } from '../../scripts/sync-indexes';
+import { readMongoIndexes } from '../../src/lib/mongo-index-cursor';
 import {
   Session,
   SessionSchema,
@@ -18,9 +19,13 @@ export async function prepareAuthSessionIndexes(): Promise<void> {
   try {
     const db = connection.db;
     if (!db) throw new Error('AUTH_TEST_DATABASE_REQUIRED');
-    const operations = (await db
-      .admin()
-      .command({ currentOp: 1, active: true }, { timeoutMS: 5000 })) as {
+    const operations = (await connection
+      .getClient()
+      .db('admin')
+      .command(
+        { currentOp: 1, active: true },
+        { signal: AbortSignal.timeout(5000), readPreference: 'primary' },
+      )) as {
       inprog?: { ns?: string }[];
     };
     if (
@@ -35,9 +40,14 @@ export async function prepareAuthSessionIndexes(): Promise<void> {
       throw new Error('AUTH_TEST_CONCURRENT_AUTH_OPERATIONS');
     for (const name of ['users', 'sessions', 'passwordresettokens']) {
       if (
-        (await db
-          .collection(name)
-          .countDocuments({}, { limit: 1, maxTimeMS: 5000 })) !== 0
+        (await db.collection(name).countDocuments(
+          {},
+          {
+            limit: 1,
+            maxTimeMS: 5000,
+            signal: AbortSignal.timeout(5000),
+          },
+        )) !== 0
       )
         throw new Error('AUTH_TEST_FOREIGN_AUTH_DATA');
     }
@@ -124,10 +134,11 @@ export async function prepareAuthSessionIndexes(): Promise<void> {
       )) !== 0
     )
       throw new Error('AUTH_TEST_INDEX_APPLY_FAILED');
-    const indexes = (await db
-      .collection('sessions')
-      .listIndexes()
-      .toArray()) as mongoose.mongo.IndexDescriptionInfo[];
+    const indexes = (await readMongoIndexes(
+      db,
+      'sessions',
+      10000,
+    )) as mongoose.mongo.IndexDescriptionInfo[];
     if (
       indexes.some((index) => index.name === 'token_1') ||
       !indexes.some(

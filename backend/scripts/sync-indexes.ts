@@ -12,6 +12,8 @@ import {
   assertConnectedDatabaseMatchesPurpose,
   DatabaseGateError,
 } from '../src/config/database-purpose';
+import { readMongoIndexes } from '../src/lib/mongo-index-cursor';
+import { withMongoOperationDeadline } from '../src/lib/mongo-operation-deadline';
 import {
   parseSyncIndexesArguments,
   resolveSyncIndexesConfig,
@@ -19,6 +21,7 @@ import {
 } from './sync-indexes-config';
 import { SYNC_INDEX_SCHEMAS } from './sync-indexes-models';
 
+const operationBudgetMs = 65_000;
 const CONNECTION_OPTIONS = {
   autoCreate: false,
   autoIndex: false,
@@ -29,8 +32,8 @@ const CONNECTION_OPTIONS = {
   useBigInt64: false,
   serverSelectionTimeoutMS: 5000,
   connectTimeoutMS: 5000,
+  waitQueueTimeoutMS: 5000,
   socketTimeoutMS: 70000,
-  timeoutMS: 65000,
   retryReads: false,
   retryWrites: false,
   readPreference: 'primary',
@@ -130,39 +133,105 @@ async function listReadyIndexes(
   collectionName: string,
 ): Promise<mongo.IndexDescriptionInfo[]> {
   // A plain listIndexes response can include an in-progress build without marking it.
-  const cursor = db.runCursorCommand(
-    {
-      listIndexes: collectionName,
-      cursor: {},
-      includeBuildUUIDs: true,
-    },
-    {
-      promoteBuffers: CONNECTION_OPTIONS.promoteBuffers,
-      promoteValues: CONNECTION_OPTIONS.promoteValues,
-      promoteLongs: CONNECTION_OPTIONS.promoteLongs,
-      useBigInt64: CONNECTION_OPTIONS.useBigInt64,
-      timeoutMS: CONNECTION_OPTIONS.timeoutMS,
-      timeoutMode: 'cursorLifetime',
-    },
+  const indexes = await readMongoIndexes(
+    db,
+    collectionName,
+    operationBudgetMs,
+    true,
   );
-  try {
-    const indexes: unknown[] = await cursor.toArray();
-    return indexes.map((index) => {
-      if (!isRecord(index))
-        throw new SyncIndexesError('INVALID_INDEX_METADATA');
-      if (
-        'buildUUID' in index ||
-        'indexBuildInfo' in index ||
-        index.ready === false
-      ) {
-        throw new SyncIndexesError('INDEX_BUILD_IN_PROGRESS');
-      }
-      return readIndexDescription(index);
-    });
-  } finally {
-    await cursor.close();
+  return indexes.map((index) => {
+    if (!isRecord(index)) throw new SyncIndexesError('INVALID_INDEX_METADATA');
+    if (
+      'buildUUID' in index ||
+      'indexBuildInfo' in index ||
+      index.ready === false
+    ) {
+      throw new SyncIndexesError('INDEX_BUILD_IN_PROGRESS');
+    }
+    return readIndexDescription(index);
+  });
+}
+
+class UnconfirmedIndexWrite extends SyncIndexesError {
+  readonly driverCode: number | undefined;
+
+  constructor(cause?: unknown) {
+    super('INDEX_WRITE_UNCONFIRMED');
+    this.driverCode =
+      cause instanceof mongoose.mongo.MongoServerError &&
+      typeof cause.code === 'number' &&
+      Number.isSafeInteger(cause.code)
+        ? cause.code
+        : undefined;
   }
 }
+
+const rejectedDdlCodes = new Set([
+  2, // BadValue
+  13, // Unauthorized
+  26, // NamespaceNotFound
+  27, // IndexNotFound
+  48, // NamespaceExists
+  67, // CannotCreateIndex
+  85, // IndexOptionsConflict
+  86, // IndexKeySpecsConflict
+  11000, // DuplicateKey
+]);
+
+async function runIndexDdl(
+  db: mongo.Db,
+  command: mongo.Document,
+  writeConcern = db.writeConcern,
+) {
+  return withMongoOperationDeadline(operationBudgetMs, async (deadline) => {
+    const request = { ...command, maxTimeMS: deadline.remainingMs() };
+    if (writeConcern) {
+      mongoose.mongo.WriteConcern.apply(request, writeConcern);
+    }
+    try {
+      const reply: unknown = await db.command(request, {
+        readPreference: 'primary',
+        signal: deadline.signal,
+      });
+      if (!isRecord(reply) || reply.ok !== 1 || 'writeConcernError' in reply) {
+        throw new UnconfirmedIndexWrite();
+      }
+    } catch (error: unknown) {
+      if (
+        error instanceof UnconfirmedIndexWrite ||
+        (error instanceof mongoose.mongo.MongoServerError &&
+          !(error instanceof mongoose.mongo.MongoWriteConcernError) &&
+          typeof error.code === 'number' &&
+          rejectedDdlCodes.has(error.code))
+      ) {
+        throw error;
+      }
+      throw new UnconfirmedIndexWrite(error);
+    }
+  });
+}
+
+const indexDefinitionOptions = new Set([
+  'background',
+  'unique',
+  'partialFilterExpression',
+  'sparse',
+  'hidden',
+  'expireAfterSeconds',
+  'storageEngine',
+  'collation',
+  'version',
+  'weights',
+  'default_language',
+  'language_override',
+  'textIndexVersion',
+  '2dsphereIndexVersion',
+  'bits',
+  'min',
+  'max',
+  'bucketSize',
+  'wildcardProjection',
+]);
 
 function assertSupportedIndexDirections(key: Record<string, unknown>) {
   const fields = Object.keys(key);
@@ -312,16 +381,53 @@ export function registerSyncIndexModels(
           }),
         };
       },
-      // All registered schemas use ordinary collections. Model.createCollection()
-      // suppresses NamespaceExists, which can signal drift after our last check.
+      // Db.command exposes AbortSignal for DDL. Its commands retain the
+      // explicit write concern and the existing single-operation ordering.
       createCollection: () =>
-        connectedDb(connection).createCollection(collectionName),
-      cleanIndexes: (options) => model.cleanIndexes(options),
-      createIndexes: (options) => {
-        // The locked Mongoose implementation supports toCreate at runtime.
-        const mongooseOptions: mongo.CreateIndexesOptions & typeof options =
-          options;
-        return model.createIndexes(mongooseOptions);
+        runIndexDdl(connectedDb(connection), { create: collectionName }),
+      cleanIndexes: async ({ toDrop }) => {
+        for (const index of toDrop) {
+          await runIndexDdl(connectedDb(connection), {
+            dropIndexes: collectionName,
+            index,
+          });
+        }
+      },
+      createIndexes: async ({ toCreate }) => {
+        const db = connectedDb(connection);
+        for (const [key, options] of toCreate) {
+          const indexOptions = Object.fromEntries(
+            Object.entries(options)
+              .filter(
+                ([name, value]) =>
+                  indexDefinitionOptions.has(name) && value !== undefined,
+              )
+              .map(([name, value]) => [name === 'version' ? 'v' : name, value]),
+          );
+          const collation = options.collation ?? modelSchema.options.collation;
+          const writeConcern = mongoose.mongo.WriteConcern.fromOptions(
+            { writeConcern: modelSchema.options.writeConcern },
+            db.writeConcern,
+          );
+          await runIndexDdl(
+            db,
+            {
+              createIndexes: collectionName,
+              indexes: [
+                {
+                  ...indexOptions,
+                  key,
+                  name: options.name ?? defaultIndexName(key),
+                  ...(collation && { collation }),
+                },
+              ],
+              ...(options.commitQuorum != null && {
+                commitQuorum: options.commitQuorum,
+              }),
+            },
+            writeConcern,
+          );
+        }
       },
     };
   });
@@ -343,7 +449,11 @@ export function createMongooseConnection(
     writeConcernW: () => connection.getClient().writeConcern?.w,
     assertSupportedTopology: async () => {
       const db = connectedDb(connection);
-      const hello: unknown = await db.command({ hello: 1 });
+      const hello: unknown = await withMongoOperationDeadline(
+        operationBudgetMs,
+        ({ signal }) =>
+          db.command({ hello: 1 }, { signal, readPreference: 'primary' }),
+      );
       if (!isRecord(hello) || hello.ok !== 1) {
         throw new SyncIndexesError('TOPOLOGY_CHECK_FAILED');
       }
@@ -354,59 +464,71 @@ export function createMongooseConnection(
     },
     models: () => registerSyncIndexModels(connection, schemas),
     collectionMetadata: async (name) => {
-      const cursor = connectedDb(connection).listCollections(
-        { name },
-        { promoteBuffers: CONNECTION_OPTIONS.promoteBuffers },
+      const entry: unknown = await withMongoOperationDeadline(
+        operationBudgetMs,
+        async (deadline) => {
+          const cursor = connectedDb(connection).listCollections(
+            { name },
+            {
+              promoteBuffers: CONNECTION_OPTIONS.promoteBuffers,
+              maxTimeMS: deadline.remainingMs(),
+              readPreference: 'primary',
+              signal: deadline.signal,
+            },
+          );
+          try {
+            const entry = await cursor.next();
+            deadline.remainingMs();
+            return entry;
+          } finally {
+            await cursor.close();
+          }
+        },
       );
-      try {
-        const entry: unknown = await cursor.next();
-        if (entry === null) return null;
-        if (
-          !isDocument(entry) ||
-          entry.name !== name ||
-          typeof entry.type !== 'string' ||
-          entry.type.length === 0
-        ) {
-          throw new SyncIndexesError('COLLECTION_METADATA_INVALID');
-        }
-        if (entry.type !== 'collection') {
-          throw new SyncIndexesError('COLLECTION_TYPE_UNSUPPORTED');
-        }
-        if (!isDocument(entry.options)) {
-          throw new SyncIndexesError('COLLECTION_METADATA_INVALID');
-        }
-        if ('encryptedFields' in entry.options) {
-          throw new SyncIndexesError('ENCRYPTED_COLLECTION_UNSUPPORTED');
-        }
-        if ('clusteredIndex' in entry.options) {
-          throw new SyncIndexesError('CLUSTERED_COLLECTION_UNSUPPORTED');
-        }
-        if (entry.options.capped === true) {
-          throw new SyncIndexesError('CAPPED_COLLECTION_UNSUPPORTED');
-        }
-        const uuid = isDocument(entry.info) ? entry.info.uuid : undefined;
-        if (
-          !(uuid instanceof mongoose.mongo.BSON.Binary) ||
-          uuid.sub_type !== mongoose.mongo.BSON.Binary.SUBTYPE_UUID ||
-          uuid.length() !== 16
-        ) {
-          throw new SyncIndexesError('COLLECTION_UUID_INVALID');
-        }
-        const uuidHex = uuid.toUUID().toHexString(false);
-        if (!('collation' in entry.options))
-          return { uuid: uuidHex, collation: undefined };
-        const { collation } = entry.options;
-        if (
-          !isDocument(collation) ||
-          typeof collation.locale !== 'string' ||
-          !collation.locale.trim()
-        ) {
-          throw new SyncIndexesError('COLLECTION_METADATA_INVALID');
-        }
-        return { uuid: uuidHex, collation };
-      } finally {
-        await cursor.close();
+      if (entry === null) return null;
+      if (
+        !isDocument(entry) ||
+        entry.name !== name ||
+        typeof entry.type !== 'string' ||
+        entry.type.length === 0
+      ) {
+        throw new SyncIndexesError('COLLECTION_METADATA_INVALID');
       }
+      if (entry.type !== 'collection') {
+        throw new SyncIndexesError('COLLECTION_TYPE_UNSUPPORTED');
+      }
+      if (!isDocument(entry.options)) {
+        throw new SyncIndexesError('COLLECTION_METADATA_INVALID');
+      }
+      if ('encryptedFields' in entry.options) {
+        throw new SyncIndexesError('ENCRYPTED_COLLECTION_UNSUPPORTED');
+      }
+      if ('clusteredIndex' in entry.options) {
+        throw new SyncIndexesError('CLUSTERED_COLLECTION_UNSUPPORTED');
+      }
+      if (entry.options.capped === true) {
+        throw new SyncIndexesError('CAPPED_COLLECTION_UNSUPPORTED');
+      }
+      const uuid = isDocument(entry.info) ? entry.info.uuid : undefined;
+      if (
+        !(uuid instanceof mongoose.mongo.BSON.Binary) ||
+        uuid.sub_type !== mongoose.mongo.BSON.Binary.SUBTYPE_UUID ||
+        uuid.length() !== 16
+      ) {
+        throw new SyncIndexesError('COLLECTION_UUID_INVALID');
+      }
+      const uuidHex = uuid.toUUID().toHexString(false);
+      if (!('collation' in entry.options))
+        return { uuid: uuidHex, collation: undefined };
+      const { collation } = entry.options;
+      if (
+        !isDocument(collation) ||
+        typeof collation.locale !== 'string' ||
+        !collation.locale.trim()
+      ) {
+        throw new SyncIndexesError('COLLECTION_METADATA_INVALID');
+      }
+      return { uuid: uuidHex, collation };
     },
     close: async () => {
       await connection.close();
@@ -650,6 +772,9 @@ function matchesIndex(
 
 type SafeFailure = { code: string; driverCode?: number; indexName?: string };
 function safeFailure(error: unknown, fallback: string): SafeFailure {
+  if (error instanceof UnconfirmedIndexWrite) {
+    return { code: error.code, driverCode: error.driverCode };
+  }
   if (
     (error instanceof SyncIndexesError || error instanceof DatabaseGateError) &&
     /^[A-Z][A-Z0-9_]{0,79}$/.test(error.code)
@@ -674,7 +799,10 @@ type Operation = (
   | { kind: 'createCollection' }
   | { kind: 'dropIndex'; name: string }
   | ({ kind: 'createIndex' } & IndexDefinitionReport)
-) & { status: 'completed' | 'failed' | 'not-executed'; error?: SafeFailure };
+) & {
+  status: 'completed' | 'failed' | 'unconfirmed' | 'not-executed';
+  error?: SafeFailure;
+};
 
 type IndexDifferences = {
   missingCollection?: true;
@@ -754,7 +882,6 @@ async function executeModelPlan(
           await model.cleanIndexes({ toDrop: [operation.name] });
           break;
         case 'createIndex':
-          // Mongoose may continue after item errors when it receives multiple definitions.
           await model.createIndexes({
             toCreate: [[operation.key, operation.options]],
           });
@@ -773,7 +900,8 @@ async function executeModelPlan(
       const failure = safeFailure(error, 'INDEX_APPLY_FAILED');
       outcome.status = 'failed';
       if (operation.status !== 'completed') {
-        operation.status = 'failed';
+        operation.status =
+          error instanceof UnconfirmedIndexWrite ? 'unconfirmed' : 'failed';
         operation.error = failure;
       }
       return failure;

@@ -10,10 +10,15 @@ import {
 } from '@nestjs/common';
 import { AiContextReaderService } from '../ai-context/ai-context-reader.service';
 import { ConfigService } from '@nestjs/config';
-import { InjectModel } from '@nestjs/mongoose';
+import { InjectConnection, InjectModel } from '@nestjs/mongoose';
 import { Model, mongo, Types } from 'mongoose';
-import type { QueryFilter, UpdateQuery } from 'mongoose';
+import type { Connection, QueryFilter, UpdateQuery } from 'mongoose';
 import { isDeepStrictEqual } from 'node:util';
+import {
+  CLASSROOM_TASK_TRANSACTION_CONNECTION,
+  runClassroomTaskTransaction,
+  type ClassroomTaskTransaction,
+} from '../../../lib/classroom-task-transaction';
 import { MISSING_TASK_SNAPSHOT_MESSAGE } from '../../classrooms/classroom-tasks/classroom-task-content';
 import {
   Enrollment,
@@ -109,11 +114,6 @@ type CommittedClassroomSubmission = {
   classroomTask: ClassroomTaskDeadlineConfig;
 };
 
-const SUBMISSION_TRANSACTION_OPTIONS = {
-  readPreference: 'primary',
-  timeoutMS: 10000,
-} as const;
-
 class SubmissionAttemptCollision extends Error {
   constructor(cause: mongo.MongoServerError) {
     super('Classroom submission attempt number collision', { cause });
@@ -161,6 +161,8 @@ export class LearningTasksService {
     @InjectModel(Enrollment.name)
     private readonly enrollmentModel: Model<Enrollment>,
     private readonly aiContextReader: AiContextReaderService,
+    @InjectConnection(CLASSROOM_TASK_TRANSACTION_CONNECTION)
+    private readonly classroomTaskTransactionConnection: Connection,
   ) {}
 
   async createTask(dto: CreateTaskDto, userId: string) {
@@ -1238,29 +1240,34 @@ export class LearningTasksService {
     ) {
       let committed: CommittedClassroomSubmission;
       try {
-        committed = await this.classroomTaskModel.db.transaction(
-          async (session) => {
+        committed = await runClassroomTaskTransaction(
+          this.classroomTaskTransactionConnection,
+          async (transaction) => {
+            const { session } = transaction;
+            const submissionModel = transaction.model(this.submissionModel);
             const classroomTask = await this.loadClassroomTaskForSubmission(
               classroomTaskObjectId,
               taskObjectId,
-              session,
+              transaction,
             );
-            const highestAttempt = await this.submissionModel
+            const highestAttempt = await submissionModel
               .findOne(attemptScope)
               .session(session)
               .read('primary')
               .sort({ attemptNo: -1 })
               .select('attemptNo')
               .lean<Pick<Submission, 'attemptNo'> & WithId>()
+              .setOptions(transaction.readOptions())
               .exec();
             const timing = await this.getSubmissionTiming(
               attemptScope,
               classroomTask,
               cooldownMs,
-              session,
+              transaction,
             );
+            transaction.remainingMs();
             try {
-              const [submission] = await this.submissionModel.create(
+              const [submission] = await submissionModel.create(
                 [
                   {
                     taskId: taskObjectId,
@@ -1283,7 +1290,6 @@ export class LearningTasksService {
               throw error;
             }
           },
-          SUBMISSION_TRANSACTION_OPTIONS,
         );
       } catch (error) {
         if (!(error instanceof SubmissionAttemptCollision)) throw error;
@@ -1314,15 +1320,20 @@ export class LearningTasksService {
   private async loadClassroomTaskForSubmission(
     classroomTaskId: Types.ObjectId,
     taskId: Types.ObjectId,
-    session?: mongo.ClientSession,
+    transaction?: ClassroomTaskTransaction,
   ): Promise<ClassroomTaskDeadlineConfig> {
     // Hold a write on the same document that the teacher deletes until the
     // submission commits. The version key also works on documents lacking it.
-    const query = session
-      ? this.classroomTaskModel.findOneAndUpdate(
+    const query = transaction
+      ? transaction.model(this.classroomTaskModel).findOneAndUpdate(
           { _id: classroomTaskId },
           { $inc: { __v: 1 } },
-          { session, timestamps: false, returnDocument: 'after' },
+          {
+            session: transaction.session,
+            maxTimeMS: transaction.remainingMs(),
+            timestamps: false,
+            returnDocument: 'after',
+          },
         )
       : this.classroomTaskModel.findById(classroomTaskId);
     const classroomTask = await query
@@ -1341,7 +1352,7 @@ export class LearningTasksService {
     await this.ensureStudentParticipationContextIsActive(
       classroomTask,
       'submit',
-      session,
+      transaction,
     );
     return classroomTask;
   }
@@ -1677,19 +1688,23 @@ export class LearningTasksService {
     attemptScope: SubmissionAttemptScope,
     classroomTask: ClassroomTaskDeadlineConfig,
     cooldownMs: number,
-    session?: mongo.ClientSession,
+    transaction?: ClassroomTaskTransaction,
   ) {
-    const latestSubmission =
+    const submissionModel = transaction
+      ? transaction.model(this.submissionModel)
+      : this.submissionModel;
+    const latestQuery =
       cooldownMs > 0
-        ? await this.submissionModel
+        ? submissionModel
             .findOne(attemptScope)
-            .session(session ?? null)
+            .session(transaction?.session ?? null)
             .read('primary')
             .sort({ submittedAt: -1, _id: -1 })
             .select('_id submittedAt createdAt')
             .lean<SubmissionCooldownSource>()
-            .exec()
         : null;
+    if (transaction) latestQuery?.setOptions(transaction.readOptions());
+    const latestSubmission = await latestQuery?.exec();
     const submittedAt = new Date();
     const dueAt = classroomTask.dueAt;
     const isLate = !!dueAt && submittedAt.getTime() > dueAt.getTime();
@@ -1799,13 +1814,20 @@ export class LearningTasksService {
   private async ensureStudentParticipationContextIsActive(
     classroomTask: ClassroomTaskDeadlineConfig,
     operation: 'submit' | 'requestAi',
-    session?: mongo.ClientSession,
+    transaction?: ClassroomTaskTransaction,
   ) {
-    const classroomQuery = this.classroomModel
+    const classroomModel = transaction
+      ? transaction.model(this.classroomModel)
+      : this.classroomModel;
+    const classroomQuery = classroomModel
       .findById(classroomTask.classroomId)
       .select('_id status')
       .lean<ParticipationClassroomLean>();
-    if (session) classroomQuery.session(session);
+    if (transaction) {
+      classroomQuery
+        .session(transaction.session)
+        .setOptions(transaction.readOptions());
+    }
     const classroom = await classroomQuery.exec();
     if (!classroom) {
       throw new NotFoundException('Classroom not found');

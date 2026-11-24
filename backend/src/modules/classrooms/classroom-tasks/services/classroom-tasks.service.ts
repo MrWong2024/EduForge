@@ -6,8 +6,13 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { AiContextReaderService } from '../../../learning-tasks/ai-context/ai-context-reader.service';
-import { InjectModel } from '@nestjs/mongoose';
+import { InjectConnection, InjectModel } from '@nestjs/mongoose';
 import { Model, PipelineStage, Types } from 'mongoose';
+import type { Connection } from 'mongoose';
+import {
+  CLASSROOM_TASK_TRANSACTION_CONNECTION,
+  runClassroomTaskTransaction,
+} from '../../../../lib/classroom-task-transaction';
 import { Classroom } from '../../schemas/classroom.schema';
 import { Course } from '../../../courses/schemas/course.schema';
 import {
@@ -286,6 +291,8 @@ export class ClassroomTasksService {
     private readonly aiFeedbackJobService: AiFeedbackJobService,
     private readonly learningTasksService: LearningTasksService,
     private readonly aiContextReader: AiContextReaderService,
+    @InjectConnection(CLASSROOM_TASK_TRANSACTION_CONNECTION)
+    private readonly classroomTaskTransactionConnection: Connection,
   ) {}
 
   async createClassroomTask(
@@ -373,41 +380,46 @@ export class ClassroomTasksService {
       throw new NotFoundException('Classroom not found');
     }
 
-    const transactionOptions = {
-      readPreference: 'primary',
-      timeoutMS: 10000,
-    } as const;
-    return this.classroomTaskModel.db.transaction(async (session) => {
-      // Deleting the parent competes with the parent write made by submission.
-      const { deletedCount } = await this.classroomTaskModel
-        .deleteOne(
-          { _id: classroomTaskObjectId, classroomId: classroomObjectId },
-          { session },
-        )
-        .exec();
-      if (deletedCount === 0) {
-        throw new NotFoundException('Classroom task not found');
-      }
+    return runClassroomTaskTransaction(
+      this.classroomTaskTransactionConnection,
+      async (transaction) => {
+        const { session } = transaction;
+        // Deleting the parent competes with the parent write made by submission.
+        const { deletedCount } = await transaction
+          .model(this.classroomTaskModel)
+          .deleteOne(
+            { _id: classroomTaskObjectId, classroomId: classroomObjectId },
+            { session, maxTimeMS: transaction.remainingMs() },
+          )
+          .exec();
+        if (deletedCount === 0) {
+          throw new NotFoundException('Classroom task not found');
+        }
 
-      const scope = { classroomTaskId: classroomTaskObjectId };
-      const submission = await this.submissionModel
-        .exists(scope)
-        .session(session)
-        .exec();
-      const aiFeedbackJob = await this.aiFeedbackJobModel
-        .exists(scope)
-        .session(session)
-        .exec();
-      if (submission || aiFeedbackJob) {
-        throw new ConflictException({
-          statusCode: 409,
-          code: 'CLASSROOM_TASK_NOT_EMPTY',
-          message: '课堂任务已有作品或 AI 反馈任务，不能删除。',
-        });
-      }
+        const scope = { classroomTaskId: classroomTaskObjectId };
+        const submission = await transaction
+          .model(this.submissionModel)
+          .exists(scope)
+          .session(session)
+          .setOptions(transaction.readOptions())
+          .exec();
+        const aiFeedbackJob = await transaction
+          .model(this.aiFeedbackJobModel)
+          .exists(scope)
+          .session(session)
+          .setOptions(transaction.readOptions())
+          .exec();
+        if (submission || aiFeedbackJob) {
+          throw new ConflictException({
+            statusCode: 409,
+            code: 'CLASSROOM_TASK_NOT_EMPTY',
+            message: '课堂任务已有作品或 AI 反馈任务，不能删除。',
+          });
+        }
 
-      return { ok: true };
-    }, transactionOptions);
+        return { ok: true };
+      },
+    );
   }
 
   async updateClassroomTask(

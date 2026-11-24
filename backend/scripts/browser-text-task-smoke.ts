@@ -9,7 +9,7 @@ import {
 import { dirname, resolve } from 'node:path';
 import { createRequire } from 'node:module';
 import { parse } from 'dotenv';
-import mongoose, { type Connection, Types } from 'mongoose';
+import mongoose, { type Connection, type mongo, Types } from 'mongoose';
 import type { INestApplicationContext, Type } from '@nestjs/common';
 import {
   createBrowserAcceptanceEnvironment,
@@ -19,6 +19,11 @@ import {
   assertConnectedDatabaseMatchesPurpose,
   DatabaseGateError,
 } from '../src/config/database-purpose';
+import {
+  isLocalSingleNodeReplicaSetPrimary,
+  readLocalMongoPort,
+} from '../src/config/local-mongo-replica-set';
+import { runMongoWriteCommand } from '../src/lib/mongo-command';
 import {
   User,
   UserSchema,
@@ -64,6 +69,13 @@ import {
   AiFeedbackJobSchema,
   AiFeedbackJobStatus,
 } from '../src/modules/learning-tasks/ai-feedback/schemas/ai-feedback-job.schema';
+import {
+  createSmokeDeadline,
+  readSmokePrimary,
+  SMOKE_TOTAL_MS,
+  SmokeDeadlineExpiredError,
+  type SmokeDeadline,
+} from './browser-smoke-deadline';
 
 export const SYNTHETIC_PASSWORD = '12345678';
 export const SMOKE_TASK_KEYS = [
@@ -289,6 +301,8 @@ function readEnvironment(): {
 async function verifyConnection(
   connection: Connection,
   mongoUri: string | undefined,
+  deadline: SmokeDeadline,
+  processRole: 'ADMIN' | 'APP',
 ): Promise<void> {
   assertConnectedDatabaseMatchesPurpose({
     nodeEnv: 'test',
@@ -296,9 +310,21 @@ async function verifyConnection(
     databaseName: connection.db?.databaseName,
   });
   if (!connection.db) fail('SMOKE_DATABASE_NOT_CONNECTED');
+  const primary = await readSmokePrimary(connection.db, deadline);
+  // The normal APP connection does not enable command monitoring.
+  const address =
+    primary.connectedAddress ??
+    (processRole === 'APP' ? readObject(primary.hello).me : undefined);
+  if (
+    typeof address !== 'string' ||
+    readLocalMongoPort(address) !== primary.seedPort ||
+    !isLocalSingleNodeReplicaSetPrimary(primary.hello, address)
+  )
+    fail('SMOKE_DATABASE_LOCAL_RS0_PRIMARY_REQUIRED');
+  const { maxTimeMS, signal } = deadline.operation(5000);
   const status: unknown = await connection.db.command(
-    { connectionStatus: 1, showPrivileges: false },
-    { timeoutMS: 5000 },
+    { connectionStatus: 1, showPrivileges: false, maxTimeMS },
+    { signal, readPreference: 'primary' },
   );
   const authInfo = readObject(readObject(status).authInfo);
   const rawRoles = authInfo.authenticatedUserRoles;
@@ -329,43 +355,78 @@ function models(connection: Connection) {
     enrollments: connection.model(Enrollment.name, EnrollmentSchema),
   };
 }
+function collections(connection: Connection) {
+  const db = connection.db;
+  if (!db) fail('SMOKE_DATABASE_NOT_CONNECTED');
+  const m = models(connection);
+  return {
+    users: db.collection<UserRow>(m.users.collection.name),
+    courses: db.collection<CourseRow>(m.courses.collection.name),
+    classrooms: db.collection<ClassroomRow>(m.classrooms.collection.name),
+    tasks: db.collection<TaskRow>(m.tasks.collection.name),
+    classroomTasks: db.collection<ClassroomTaskRow>(
+      m.classroomTasks.collection.name,
+    ),
+    submissions: db.collection<SubmissionRow>(m.submissions.collection.name),
+    jobs: db.collection<JobRow>(m.jobs.collection.name),
+    feedback: db.collection<FeedbackRow>(m.feedback.collection.name),
+    enrollments: db.collection<
+      IdRow & Pick<Enrollment, 'classroomId' | 'userId'>
+    >(m.enrollments.collection.name),
+  };
+}
+
 async function inventory(
   connection: Connection,
   record: SmokeRecord,
+  deadline: SmokeDeadline,
   cleanupLegacy = false,
 ) {
-  const m = models(connection);
+  const store = collections(connection);
+  const readOptions = () => ({
+    ...deadline.operation(5000),
+    readPreference: 'primary' as const,
+  });
   const teacherId = new Types.ObjectId(record.teacherId);
   const studentId = new Types.ObjectId(record.studentId);
-  const users = await m.users
-    .find({ _id: { $in: [teacherId, studentId] } })
-    .select('+passwordHash')
-    .lean<UserRow[]>()
-    .maxTimeMS(5000)
-    .exec();
+  const users = await store.users
+    .find(
+      { _id: { $in: [teacherId, studentId] } },
+      {
+        ...readOptions(),
+        projection: { email: 1, roles: 1, status: 1, passwordHash: 1 },
+      },
+    )
+    .toArray();
   for (const user of users) {
     const role = user._id.equals(teacherId) ? 'teacher' : 'student';
     if (user.email !== record.namespace + '.' + role + '@example.invalid')
       fail('SMOKE_USER_OWNERSHIP_MISMATCH');
   }
-  const courses = await m.courses
-    .find({ createdBy: teacherId })
-    .select('_id createdBy code')
-    .lean<CourseRow[]>()
-    .maxTimeMS(5000)
-    .exec();
-  const tasks = await m.tasks
-    .find({ createdBy: teacherId })
-    .select('_id createdBy title status visibility')
-    .lean<TaskRow[]>()
-    .maxTimeMS(5000)
-    .exec();
-  const classrooms = await m.classrooms
-    .find({ teacherId })
-    .select('_id courseId teacherId name joinCode')
-    .lean<ClassroomRow[]>()
-    .maxTimeMS(5000)
-    .exec();
+  const courses = await store.courses
+    .find(
+      { createdBy: teacherId },
+      { ...readOptions(), projection: { createdBy: 1, code: 1 } },
+    )
+    .toArray();
+  const tasks = await store.tasks
+    .find(
+      { createdBy: teacherId },
+      {
+        ...readOptions(),
+        projection: { createdBy: 1, title: 1, status: 1, visibility: 1 },
+      },
+    )
+    .toArray();
+  const classrooms = await store.classrooms
+    .find(
+      { teacherId },
+      {
+        ...readOptions(),
+        projection: { courseId: 1, teacherId: 1, name: 1, joinCode: 1 },
+      },
+    )
+    .toArray();
   if (
     courses.some(
       (row) =>
@@ -384,17 +445,20 @@ async function inventory(
     fail('SMOKE_CONTAINER_OWNERSHIP_MISMATCH');
   const taskIds = tasks.map((row) => row._id);
   const classroomIds = classrooms.map((row) => row._id);
-  const classroomTasks = await m.classroomTasks
-    .find({
-      $or: [
-        { classroomId: { $in: classroomIds } },
-        { taskId: { $in: taskIds } },
-      ],
-    })
-    .select('_id classroomId taskId createdBy status')
-    .lean<ClassroomTaskRow[]>()
-    .maxTimeMS(5000)
-    .exec();
+  const classroomTasks = await store.classroomTasks
+    .find(
+      {
+        $or: [
+          { classroomId: { $in: classroomIds } },
+          { taskId: { $in: taskIds } },
+        ],
+      },
+      {
+        ...readOptions(),
+        projection: { classroomId: 1, taskId: 1, createdBy: 1, status: 1 },
+      },
+    )
+    .toArray();
   if (
     classroomTasks.some(
       (row) =>
@@ -405,18 +469,27 @@ async function inventory(
   )
     fail('SMOKE_CLASSROOM_TASK_OWNERSHIP_MISMATCH');
   const classroomTaskIds = classroomTasks.map((row) => row._id);
-  const submissions = await m.submissions
-    .find({
-      $or: [
-        { studentId },
-        { classroomTaskId: { $in: classroomTaskIds } },
-        { taskId: { $in: taskIds } },
-      ],
-    })
-    .select('_id studentId classroomTaskId taskId attemptNo content')
-    .lean<SubmissionRow[]>()
-    .maxTimeMS(5000)
-    .exec();
+  const submissions = await store.submissions
+    .find(
+      {
+        $or: [
+          { studentId },
+          { classroomTaskId: { $in: classroomTaskIds } },
+          { taskId: { $in: taskIds } },
+        ],
+      },
+      {
+        ...readOptions(),
+        projection: {
+          studentId: 1,
+          classroomTaskId: 1,
+          taskId: 1,
+          attemptNo: 1,
+          content: 1,
+        },
+      },
+    )
+    .toArray();
   if (
     submissions.some(
       (row) =>
@@ -427,17 +500,18 @@ async function inventory(
   )
     fail('SMOKE_SUBMISSION_OWNERSHIP_MISMATCH');
   const submissionIds = submissions.map((row) => row._id);
-  const jobs = await m.jobs
-    .find({
-      $or: [
-        { studentId },
-        { submissionId: { $in: submissionIds } },
-        { classroomTaskId: { $in: classroomTaskIds } },
-      ],
-    })
-    .lean<JobRow[]>()
-    .maxTimeMS(5000)
-    .exec();
+  const jobs = await store.jobs
+    .find(
+      {
+        $or: [
+          { studentId },
+          { submissionId: { $in: submissionIds } },
+          { classroomTaskId: { $in: classroomTaskIds } },
+        ],
+      },
+      readOptions(),
+    )
+    .toArray();
   const completeRecord = {
     ...record,
     classroomId: classrooms[0]?._id.toString(),
@@ -453,25 +527,28 @@ async function inventory(
     if (!submission || !classroomTask) fail('SMOKE_JOB_ASSOCIATION_MISSING');
     assertTargetOwnership(completeRecord, job, submission, classroomTask);
   }
-  const feedback = await m.feedback
-    .find({ submissionId: { $in: submissionIds } })
-    .select('_id submissionId createdBy source message')
-    .lean<FeedbackRow[]>()
-    .maxTimeMS(5000)
-    .exec();
+  const feedback = await store.feedback
+    .find(
+      { submissionId: { $in: submissionIds } },
+      {
+        ...readOptions(),
+        projection: { submissionId: 1, createdBy: 1, source: 1, message: 1 },
+      },
+    )
+    .toArray();
   if (feedback.some((row) => row.createdBy && !row.createdBy.equals(teacherId)))
     fail('SMOKE_FEEDBACK_OWNERSHIP_MISMATCH');
-  const enrollments = await m.enrollments
-    .find({
-      $or: [{ classroomId: { $in: classroomIds } }, { userId: studentId }],
-    })
-    .select('_id classroomId userId')
-    .lean<(IdRow & Pick<Enrollment, 'classroomId' | 'userId'>)[]>()
-    .maxTimeMS(5000)
-    .exec();
+  const enrollments = await store.enrollments
+    .find(
+      {
+        $or: [{ classroomId: { $in: classroomIds } }, { userId: studentId }],
+      },
+      { ...readOptions(), projection: { classroomId: 1, userId: 1 } },
+    )
+    .toArray();
   assertEnrollmentOwnership(enrollments, studentId, classroomIds);
   return {
-    m,
+    store,
     users,
     courses,
     tasks,
@@ -564,6 +641,7 @@ async function prepare(
   namespace: string,
   frontendPort: number,
   backendPort: number,
+  deadline: SmokeDeadline,
 ): Promise<void> {
   if (existsSync(statePath(namespace)))
     fail('SMOKE_NAMESPACE_ALREADY_RECORDED_INSPECT_FIRST');
@@ -576,24 +654,27 @@ async function prepare(
     taskIds: [],
   };
   saveRecord(record); // Ownership persists before the first possible write.
+  const db = connection.db;
+  if (!db) fail('SMOKE_DATABASE_NOT_CONNECTED');
   const m = models(connection);
-  const existing = await m.users
-    .countDocuments({
+  const existing = await db.collection(m.users.collection.name).countDocuments(
+    {
       email: {
         $in: [
           namespace + '.teacher@example.invalid',
           namespace + '.student@example.invalid',
         ],
       },
-    })
-    .maxTimeMS(5000)
-    .exec();
+    },
+    { ...deadline.operation(5000), readPreference: 'primary' },
+  );
   if (existing) fail('SMOKE_SYNTHETIC_EMAIL_ALREADY_EXISTS');
   const passwordHash = await hashPassword(
     validateNewPassword(SYNTHETIC_PASSWORD),
   );
   for (const role of ['teacher', 'student'] as const) {
     const id = role === 'teacher' ? record.teacherId : record.studentId;
+    const now = new Date();
     const user = new m.users({
       _id: new Types.ObjectId(id),
       email: namespace + '.' + role + '@example.invalid',
@@ -601,9 +682,21 @@ async function prepare(
       roles: [role],
       status: UserStatus.Active,
       name: '合成 ' + role,
+      createdAt: now,
+      updatedAt: now,
+      __v: 0,
     });
     await user.validate();
-    await user.save({ wtimeout: 5000 });
+    const remaining = deadline.remaining(5000);
+    await runMongoWriteCommand(
+      db,
+      {
+        insert: m.users.collection.name,
+        documents: [user.toBSON()],
+        writeConcern: { wtimeout: remaining },
+      },
+      remaining,
+    );
   }
   let cookie = '';
   const origin = 'http://127.0.0.1:' + frontendPort;
@@ -615,7 +708,7 @@ async function prepare(
         ...(cookie ? { Cookie: cookie } : {}),
       },
       body: JSON.stringify(body),
-      signal: AbortSignal.timeout(15000),
+      signal: AbortSignal.timeout(deadline.remaining(15000)),
     });
     if (!response.ok) fail('SMOKE_HTTP_' + response.status);
     if (path === 'auth/login') {
@@ -678,14 +771,15 @@ async function prepare(
   } finally {
     cookie = '';
   } // Never replay an uncertain write: inspect ownership first.
-  await inspect(connection, record, true);
+  await inspect(connection, record, deadline, true);
 }
 async function inspect(
   connection: Connection,
   record: SmokeRecord,
+  deadline: SmokeDeadline,
   requirePrepared = false,
 ): Promise<void> {
-  const owned = await inventory(connection, record);
+  const owned = await inventory(connection, record, deadline);
   if (requirePrepared) {
     for (const role of ['teacher', 'student'] as const) {
       const id = role === 'teacher' ? record.teacherId : record.studentId;
@@ -771,8 +865,9 @@ async function inspect(
 async function cleanup(
   connection: Connection,
   record: SmokeRecord,
+  deadline: SmokeDeadline,
 ): Promise<void> {
-  const owned = await inventory(connection, record, true);
+  const owned = await inventory(connection, record, deadline, true);
   if (owned.jobs.some((job) => job.status === AiFeedbackJobStatus.Running))
     fail('SMOKE_IN_FLIGHT_JOB_REFUSES_CLEANUP');
   const strings = (rows: IdRow[]) => rows.map((row) => row._id.toString());
@@ -786,7 +881,15 @@ async function cleanup(
     feedbackIds: strings(owned.feedback),
     enrollmentIds: strings(owned.enrollments),
   });
-  if (!connection.db) fail('SMOKE_DATABASE_NOT_CONNECTED');
+  const db = connection.db;
+  if (!db) fail('SMOKE_DATABASE_NOT_CONNECTED');
+  const deleteOwned = async (collection: string, filter: mongo.Document) => {
+    await runMongoWriteCommand(
+      db,
+      { delete: collection, deletes: [{ q: filter, limit: 0 }] },
+      deadline.remaining(5000),
+    );
+  };
   for (const name of [
     'feedback',
     'jobs',
@@ -797,17 +900,12 @@ async function cleanup(
     'classrooms',
     'courses',
   ] as const)
-    await connection.db
-      .collection(owned.m[name].collection.name)
-      .deleteMany(filters[name], { maxTimeMS: 5000 });
-  if (!connection.db) fail('SMOKE_DATABASE_NOT_CONNECTED');
+    await deleteOwned(owned.store[name].collectionName, filters[name]);
   for (const name of ['sessions', 'passwordresettokens'])
-    await connection.db
-      .collection(name)
-      .deleteMany(filters.sessions, { maxTimeMS: 5000 });
-  await owned.m.users.deleteMany(filters.users).maxTimeMS(5000).exec();
-  await inspect(connection, record);
-  const residual = await inventory(connection, record, true);
+    await deleteOwned(name, filters.sessions);
+  await deleteOwned(owned.store.users.collectionName, filters.users);
+  await inspect(connection, record, deadline);
+  const residual = await inventory(connection, record, deadline, true);
   if (
     residual.users.length ||
     residual.courses.length ||
@@ -822,9 +920,10 @@ async function cleanup(
     fail('SMOKE_CLEANUP_RESIDUAL');
   for (const name of ['sessions', 'passwordresettokens'])
     if (
-      await connection.db
-        .collection(name)
-        .countDocuments(filters.sessions, { maxTimeMS: 5000 })
+      await db.collection(name).countDocuments(filters.sessions, {
+        ...deadline.operation(5000),
+        readPreference: 'primary',
+      })
     )
       fail('SMOKE_AUTH_RESIDUAL');
   console.log(
@@ -836,7 +935,11 @@ async function cleanup(
     }),
   );
 }
-async function processAi(record: SmokeRecord, jobId: string): Promise<void> {
+async function processAi(
+  record: SmokeRecord,
+  jobId: string,
+  deadline: SmokeDeadline,
+): Promise<void> {
   if (!Types.ObjectId.isValid(jobId)) fail('SMOKE_JOB_ID_INVALID');
   process.env = readEnvironment().environment;
   const load = createRequire(__filename); // App imports follow the dedicated-file gate.
@@ -864,43 +967,53 @@ async function processAi(record: SmokeRecord, jobId: string): Promise<void> {
     )
       fail('SMOKE_PROCESSOR_CONFIGURATION_MISMATCH');
     const connection = app.get<Connection>(getConnectionToken());
-    await verifyConnection(connection, config.get<string>('mongo.uri'));
-    const owned = await inventory(connection, record);
+    await verifyConnection(
+      connection,
+      config.get<string>('mongo.uri'),
+      deadline,
+      'APP',
+    );
+    const owned = await inventory(connection, record, deadline);
     const job = owned.jobs.find((row) => row._id.toString() === jobId);
     if (!job) fail('SMOKE_TARGET_JOB_NOT_OWNED');
     // processOnce is global. The operator must serialize producers/consumers in
     // an exclusive acceptance window; the following query is not a lock.
-    const pending = await owned.m.jobs
-      .find({
-        status: {
-          $in: [
-            AiFeedbackJobStatus.Pending,
-            AiFeedbackJobStatus.Failed,
-            AiFeedbackJobStatus.Running,
-          ],
+    const pending = await owned.store.jobs
+      .find(
+        {
+          status: {
+            $in: [
+              AiFeedbackJobStatus.Pending,
+              AiFeedbackJobStatus.Failed,
+              AiFeedbackJobStatus.Running,
+            ],
+          },
         },
-      })
-      .select('_id status budgetVersion attempts')
-      .lean<Pick<JobRow, '_id' | 'status' | 'budgetVersion' | 'attempts'>[]>()
-      .maxTimeMS(5000)
-      .exec();
+        {
+          ...deadline.operation(5000),
+          readPreference: 'primary',
+          projection: { status: 1, budgetVersion: 1, attempts: 1 },
+        },
+      )
+      .toArray();
     assertExclusiveJob(jobId, pending);
+    deadline.remaining(SMOKE_TOTAL_MS);
     const result = await app.get(AiFeedbackProcessor).processOnce(1);
-    const actual = await owned.m.jobs
-      .findById(jobId)
-      .select('_id status provider attempts requests')
-      .lean<
-        Pick<JobRow, '_id' | 'status' | 'provider' | 'attempts' | 'requests'>
-      >()
-      .maxTimeMS(5000)
-      .exec();
-    const feedback = await owned.m.feedback
-      .countDocuments({
+    const actual = await owned.store.jobs.findOne(
+      { _id: new Types.ObjectId(jobId) },
+      {
+        ...deadline.operation(5000),
+        readPreference: 'primary',
+        projection: { status: 1, provider: 1, attempts: 1, requests: 1 },
+      },
+    );
+    const feedback = await owned.store.feedback.countDocuments(
+      {
         submissionId: job.submissionId,
         source: FeedbackSource.AI,
-      })
-      .maxTimeMS(5000)
-      .exec();
+      },
+      { ...deadline.operation(5000), readPreference: 'primary' },
+    );
     if (
       result.processed !== 1 ||
       result.succeeded !== 1 ||
@@ -931,7 +1044,7 @@ async function processAi(record: SmokeRecord, jobId: string): Promise<void> {
     if (app) await app.close();
   }
 }
-async function main(): Promise<void> {
+async function main(deadline: SmokeDeadline): Promise<void> {
   const [command, ...args] = process.argv.slice(2);
   if (command === '--help' || !command) {
     console.log(
@@ -959,22 +1072,26 @@ async function main(): Promise<void> {
   if (command === 'process-ai') {
     if (option('--confirm-exclusive') !== namespace)
       fail('SMOKE_EXCLUSIVE_WINDOW_CONFIRMATION_REQUIRED');
-    await processAi(loadRecord(namespace), option('--job-id') ?? '');
+    await processAi(loadRecord(namespace), option('--job-id') ?? '', deadline);
     return;
   }
   const { file, environment } = readEnvironment();
   process.env = environment;
   let connection: Connection | undefined;
   try {
+    const connectTimeoutMS = deadline.remaining(5000);
     connection = mongoose.createConnection(file.MONGO_URI, {
       autoIndex: false,
       autoCreate: false,
-      serverSelectionTimeoutMS: 5000,
-      connectTimeoutMS: 5000,
-      socketTimeoutMS: 10000,
+      serverSelectionTimeoutMS: connectTimeoutMS,
+      connectTimeoutMS,
+      socketTimeoutMS: deadline.remaining(10000),
+      monitorCommands: true,
+      retryReads: false,
+      retryWrites: false,
     });
     await connection.asPromise();
-    await verifyConnection(connection, file.MONGO_URI);
+    await verifyConnection(connection, file.MONGO_URI, deadline, 'ADMIN');
     if (command === 'prepare') {
       const frontendPort = Number(option('--frontend-port') ?? 3100);
       const backendPort = Number(option('--backend-port') ?? 5100);
@@ -988,30 +1105,33 @@ async function main(): Promise<void> {
         )
       )
         fail('SMOKE_PORT_INVALID');
-      await prepare(connection, namespace, frontendPort, backendPort);
+      await prepare(connection, namespace, frontendPort, backendPort, deadline);
     } else if (command === 'replace') {
       const previous = loadRecord(namespace);
-      await cleanup(connection, previous);
+      await cleanup(connection, previous, deadline);
       unlinkSync(statePath(namespace));
       await prepare(
         connection,
         namespace,
         previous.frontendPort,
         previous.backendPort,
+        deadline,
       );
     } else if (command === 'inspect')
       await inspect(
         connection,
         loadRecord(namespace),
+        deadline,
         args.includes('--prepared'),
       );
-    else await cleanup(connection, loadRecord(namespace));
+    else await cleanup(connection, loadRecord(namespace), deadline);
   } finally {
     if (connection) await connection.close();
   }
 }
 if (require.main === module) {
-  const deadline = setTimeout(() => {
+  const deadline = createSmokeDeadline();
+  const watchdog = setTimeout(() => {
     console.error(
       JSON.stringify({
         ok: false,
@@ -1020,19 +1140,21 @@ if (require.main === module) {
       }),
     );
     process.exit(124);
-  }, 120000);
-  void main()
+  }, SMOKE_TOTAL_MS);
+  void main(deadline)
     .catch((error: unknown) => {
       console.error(
         JSON.stringify({
           ok: false,
           code:
-            error instanceof DatabaseGateError
-              ? error.code
-              : 'SMOKE_COMMAND_FAILED_INSPECT_BEFORE_RETRY',
+            error instanceof SmokeDeadlineExpiredError
+              ? 'SMOKE_TIMED_OUT_AUDIT_BEFORE_RETRY'
+              : error instanceof DatabaseGateError
+                ? error.code
+                : 'SMOKE_COMMAND_FAILED_INSPECT_BEFORE_RETRY',
         }),
       );
-      process.exitCode = 1;
+      process.exitCode = error instanceof SmokeDeadlineExpiredError ? 124 : 1;
     })
-    .finally(() => clearTimeout(deadline));
+    .finally(() => clearTimeout(watchdog));
 }

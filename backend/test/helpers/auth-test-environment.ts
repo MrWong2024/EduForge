@@ -89,18 +89,19 @@ export async function assertAuthTestConnection(
     databaseName: connection.db.databaseName,
   };
   assertConnectedDatabaseMatchesPurpose(environment);
-  const hello: unknown = await connection.db
-    .admin()
-    .command({ hello: 1 }, { timeoutMS: 5000, readPreference: 'primary' });
-  const seedAddress = connection.getClient().options.hosts[0]?.toString() ?? '';
+  const client = connection.getClient();
+  const admin = client.db('admin');
+  const hello: unknown = await admin.command(
+    { hello: 1 },
+    { signal: AbortSignal.timeout(5000), readPreference: 'primary' },
+  );
+  const seedAddress = client.options.hosts[0]?.toString() ?? '';
   if (!isLocalSingleNodeReplicaSetPrimary(hello, seedAddress))
     throw new Error('AUTH_TEST_LOCAL_RS0_PRIMARY_REQUIRED');
-  const auth = (await connection.db
-    .admin()
-    .command(
-      { connectionStatus: 1, showPrivileges: false },
-      { timeoutMS: 5000 },
-    )) as { authInfo?: unknown };
+  const auth = (await admin.command(
+    { connectionStatus: 1, showPrivileges: false },
+    { signal: AbortSignal.timeout(5000), readPreference: 'primary' },
+  )) as { authInfo?: unknown };
   assertLocalStandardTestAuthentication({
     ...environment,
     mongoUri,
@@ -115,7 +116,8 @@ export async function openAuthTestConnection(): Promise<Connection> {
     autoIndex: false,
     serverSelectionTimeoutMS: 5000,
     connectTimeoutMS: 5000,
-    timeoutMS: 10000,
+    socketTimeoutMS: 10000,
+    waitQueueTimeoutMS: 10000,
     retryReads: false,
     retryWrites: false,
   });

@@ -24,6 +24,17 @@ export function createSyncIndexesLifecycle() {
   return {
     assertRunning,
 
+    remainingMs(limit: number) {
+      assertRunning();
+      if (deadlineAt === undefined) return limit;
+      const remaining = Math.min(
+        limit,
+        Math.floor(deadlineAt - performance.now()),
+      );
+      if (remaining <= 0) throw new Error('SYNC_INDEXES_E2E_DEADLINE');
+      return remaining;
+    },
+
     async run<T>(deadlineMs: number, operation: () => Promise<T>) {
       assertRunning();
       const expiresAt = performance.now() + deadlineMs;
@@ -32,21 +43,24 @@ export function createSyncIndexesLifecycle() {
         assertRunning();
         return operation();
       });
-      let timer: ReturnType<typeof setTimeout> | undefined;
-      const deadline = new Promise<never>((_, reject) => {
-        timer = setTimeout(() => {
-          stopped = true;
-          reject(new Error('SYNC_INDEXES_E2E_DEADLINE'));
-        }, deadlineMs);
-      });
+      const timer = setTimeout(() => {
+        stopped = true;
+      }, deadlineMs);
       try {
-        const result = await Promise.race([call, deadline]);
+        const result = await call;
         if (performance.now() >= expiresAt) {
           throw new Error('SYNC_INDEXES_E2E_DEADLINE');
         }
         return result;
       } catch (error) {
         stopped = true;
+        if (
+          performance.now() >= expiresAt &&
+          error instanceof Error &&
+          error.message === 'SYNC_INDEXES_E2E_STOPPED'
+        ) {
+          throw new Error('SYNC_INDEXES_E2E_DEADLINE', { cause: error });
+        }
         throw error;
       } finally {
         clearTimeout(timer);
@@ -209,10 +223,7 @@ export async function cleanupSyncIndexesCollections({
         }
         try {
           // No await between the last deadline check and issuing the drop.
-          const dropped = await observeCleanupUntil(
-            dropObservationDeadline,
-            target.drop(name, timeoutMS),
-          );
+          const dropped = await target.drop(name, timeoutMS);
           if (!dropped) throw new Error('SYNC_INDEXES_E2E_DROP_UNCONFIRMED');
           owned.delete(name);
           completed.push(name);

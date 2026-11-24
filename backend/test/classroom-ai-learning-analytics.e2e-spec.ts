@@ -467,7 +467,7 @@ describe('Classroom AI learning analytics (e2e)', () => {
     if (!database) throw new Error('Missing connected test database');
     const auth = await database.command(
       { connectionStatus: 1, showPrivileges: false },
-      { timeoutMS: 5000 },
+      { signal: AbortSignal.timeout(5000), readPreference: 'primary' },
     );
     const config = app.get(ConfigService);
     assertLocalStandardTestAuthentication({

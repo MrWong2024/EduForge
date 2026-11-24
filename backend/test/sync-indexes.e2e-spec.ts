@@ -15,6 +15,8 @@ import {
   isLocalSingleNodeReplicaSetPrimary,
   readLocalMongoPort,
 } from '../src/config/local-mongo-replica-set';
+import { readMongoIndexes } from '../src/lib/mongo-index-cursor';
+import { withMongoOperationDeadline } from '../src/lib/mongo-operation-deadline';
 import {
   Session,
   SessionSchema,
@@ -59,10 +61,12 @@ const cleanupBudgetMs = 80_000;
 const cleanupReportReserveMs = 10_000;
 const cleanupCloseReserveMs = 10_000;
 const drainWaitMs = 10_000;
+const fixtureOperationBudgetMs = 10_000;
 const fixtureClientOptions = {
   serverSelectionTimeoutMS: 5000,
   connectTimeoutMS: 5000,
-  timeoutMS: 10000,
+  waitQueueTimeoutMS: 5000,
+  socketTimeoutMS: fixtureOperationBudgetMs,
   retryReads: false,
   retryWrites: false,
   readPreference: 'primary',
@@ -121,6 +125,39 @@ let primaryAddress: string | undefined;
 const owned = new Map<string, string>();
 const closeCliConnections = new Set<() => Promise<void>>();
 
+function fixtureCommand(
+  database: mongo.Db,
+  command: mongo.Document,
+  budgetMs = lifecycle.remainingMs(fixtureOperationBudgetMs),
+) {
+  return withMongoOperationDeadline(budgetMs, (deadline) =>
+    database.command(
+      { ...command, maxTimeMS: deadline.remainingMs() },
+      { signal: deadline.signal, readPreference: 'primary' },
+    ),
+  );
+}
+
+async function fixtureWrite(
+  database: mongo.Db,
+  command: mongo.Document,
+  budgetMs?: number,
+) {
+  const writeConcern = database.writeConcern;
+  if (writeConcern) {
+    mongoose.mongo.WriteConcern.apply(command, writeConcern);
+  }
+  const reply = await fixtureCommand(database, command, budgetMs);
+  if (
+    reply.ok !== 1 ||
+    'writeConcernError' in reply ||
+    (Array.isArray(reply.writeErrors) && reply.writeErrors.length > 0)
+  ) {
+    throw new Error('SYNC_INDEXES_E2E_WRITE_UNCONFIRMED');
+  }
+  return true;
+}
+
 async function assertLocalReplicaSet(
   connected: mongo.Db,
   connectedClient: mongo.MongoClient,
@@ -140,9 +177,8 @@ async function assertLocalReplicaSet(
     }
   };
   connectedClient.on('commandSucceeded', captureHello);
-  const hello: unknown = await connected
-    .admin()
-    .command({ hello: 1 }, { timeoutMS })
+  const admin = connectedClient.db('admin');
+  const hello: unknown = await fixtureCommand(admin, { hello: 1 }, timeoutMS)
     .catch(() => {
       throw new Error('SYNC_INDEXES_E2E_HELLO_UNAVAILABLE');
     })
@@ -166,19 +202,17 @@ async function assertLocalReplicaSet(
   // The topology and authentication checks share cleanup's original time budget.
   const authTimeoutMS =
     timeoutMS === undefined
-      ? fixtureClientOptions.timeoutMS
+      ? lifecycle.remainingMs(fixtureOperationBudgetMs)
       : Math.floor(timeoutMS - (performance.now() - startedAt));
   if (authTimeoutMS <= 0)
     throw new Error('SYNC_INDEXES_E2E_AUTHENTICATION_DEADLINE');
-  const auth = await connected
-    .admin()
-    .command(
-      { connectionStatus: 1, showPrivileges: false },
-      { timeoutMS: authTimeoutMS },
-    )
-    .catch(() => {
-      throw new Error('SYNC_INDEXES_E2E_AUTHENTICATION_UNAVAILABLE');
-    });
+  const auth = await fixtureCommand(
+    admin,
+    { connectionStatus: 1, showPrivileges: false },
+    authTimeoutMS,
+  ).catch(() => {
+    throw new Error('SYNC_INDEXES_E2E_AUTHENTICATION_UNAVAILABLE');
+  });
   const addressHost = address.slice(0, address.lastIndexOf(':'));
   const host = addressHost.startsWith('[')
     ? addressHost.slice(1, -1)
@@ -216,15 +250,26 @@ function runTest(name: string, operation: () => Promise<void>) {
 }
 
 async function collectionInfo(name: string, timeoutMS?: number) {
-  const cursor = database().listCollections(
-    { name },
-    { nameOnly: false, timeoutMS },
+  return withMongoOperationDeadline(
+    timeoutMS ?? lifecycle.remainingMs(fixtureOperationBudgetMs),
+    async (deadline) => {
+      const cursor = database().listCollections(
+        { name },
+        {
+          nameOnly: false,
+          maxTimeMS: deadline.remainingMs(),
+          signal: deadline.signal,
+        },
+      );
+      try {
+        const result = await cursor.next();
+        deadline.remainingMs();
+        return result;
+      } finally {
+        await cursor.close();
+      }
+    },
   );
-  try {
-    return await cursor.next();
-  } finally {
-    await cursor.close();
-  }
 }
 
 function uuidFromInfo(info: mongo.CollectionInfo | null, name: string) {
@@ -240,24 +285,20 @@ async function collectionUuid(name: string, timeoutMS?: number) {
 }
 
 async function indexes(name: string) {
-  const cursor = database().collection(name).listIndexes();
-  try {
-    const entries: unknown[] = await cursor.toArray();
-    return entries as mongo.IndexDescriptionInfo[];
-  } finally {
-    await cursor.close();
-  }
+  const entries = await readMongoIndexes(
+    database(),
+    name,
+    lifecycle.remainingMs(fixtureOperationBudgetMs),
+  );
+  return entries as mongo.IndexDescriptionInfo[];
 }
 
 async function createOwned(name: string) {
   if (!allowedNames.includes(name) || (await collectionInfo(name))) {
     throw new Error('SYNC_INDEXES_E2E_NAMESPACE_NOT_EMPTY');
   }
-  const collection = await lifecycle.write(() =>
-    database().createCollection(name),
-  );
+  await lifecycle.write(() => fixtureWrite(database(), { create: name }));
   owned.set(name, await collectionUuid(name));
-  return collection;
 }
 
 async function assertOwned(name: string, timeoutMS?: number) {
@@ -273,7 +314,7 @@ async function assertOwned(name: string, timeoutMS?: number) {
 
 async function dropOwned(name: string) {
   await assertOwned(name);
-  await lifecycle.write(() => database().collection(name).drop());
+  await lifecycle.write(() => fixtureWrite(database(), { drop: name }));
   owned.delete(name);
 }
 
@@ -460,7 +501,7 @@ describe('sync-indexes against an isolated MongoDB namespace', () => {
       owned,
       totalBudgetMs: cleanupBudgetMs,
       drainWaitMs,
-      requestTimeoutMs: fixtureClientOptions.timeoutMS,
+      requestTimeoutMs: fixtureOperationBudgetMs,
       reportReserveMs: cleanupReportReserveMs,
       closeReserveMs: cleanupCloseReserveMs,
       target:
@@ -470,7 +511,7 @@ describe('sync-indexes against an isolated MongoDB namespace', () => {
                 assertLocalReplicaSet(fixtureDb, fixtureClient, timeoutMS),
               assertOwned,
               drop: (name, timeoutMS) =>
-                fixtureDb.collection(name).drop({ timeoutMS }),
+                fixtureWrite(fixtureDb, { drop: name }, timeoutMS),
               readResidual: async (timeoutMS) => {
                 const observed = await Promise.all(
                   allowedNames.map(async (name) =>
@@ -596,18 +637,24 @@ describe('sync-indexes against an isolated MongoDB namespace', () => {
       const preserved = BSON.serialize({
         metadata: await readMetadata(targets),
       });
-      const createdIndex = await lifecycle.write(() =>
-        database()
-          .collection(name)
-          .createIndex(
-            { taskId: 1, studentId: 1, attemptNo: 1 },
+      await lifecycle.write(() =>
+        fixtureWrite(database(), {
+          createIndexes: name,
+          indexes: [
             {
+              key: { taskId: 1, studentId: 1, attemptNo: 1 },
+              name: legacyIndexName,
               unique: true,
               partialFilterExpression: { classroomTaskId: null },
             },
-          ),
+          ],
+        }),
       );
-      expect(createdIndex).toBe(legacyIndexName);
+      expect(await indexes(name)).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ name: legacyIndexName }),
+        ]),
+      );
       const before = BSON.serialize({ metadata: await readMetadata(targets) });
       const preview = await runCli(['--dry-run']);
       expect(preview.exitCode).toBe(0);
@@ -676,17 +723,25 @@ describe('sync-indexes against an isolated MongoDB namespace', () => {
   runTest(
     'stops at a real duplicate-key failure and verifies the partial result',
     async () => {
-      const collection = await createOwned(collections.failingSessions);
+      await createOwned(collections.failingSessions);
       const duplicateHash = createHash('sha256')
         .update('synthetic-duplicate-session')
         .digest('hex');
       await lifecycle.write(() =>
-        collection.insertMany([
-          { tokenHash: duplicateHash, credentialVersion: 0 },
-          { tokenHash: duplicateHash, credentialVersion: 0 },
-        ]),
+        fixtureWrite(database(), {
+          insert: collections.failingSessions,
+          documents: [
+            { tokenHash: duplicateHash, credentialVersion: 0 },
+            { tokenHash: duplicateHash, credentialVersion: 0 },
+          ],
+        }),
       );
-      await lifecycle.write(() => collection.createIndex({ legacyOnly: 1 }));
+      await lifecycle.write(() =>
+        fixtureWrite(database(), {
+          createIndexes: collections.failingSessions,
+          indexes: [{ key: { legacyOnly: 1 }, name: 'legacyOnly_1' }],
+        }),
+      );
       const models = [
         modelFor(Session.name, SessionSchema, collections.failingSessions),
         modelFor(

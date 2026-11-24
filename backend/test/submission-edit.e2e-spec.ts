@@ -202,15 +202,19 @@ describe('B1-2 submission content edits and review admission (HTTP)', () => {
     const database = users.db.db;
     if (!database) throw new Error('Missing connected test database');
     expect(database.databaseName).toBe('eduforge_test');
-    const hello: unknown = await database
-      .admin()
-      .command({ hello: 1 }, { timeoutMS: 5000, readPreference: 'primary' });
+    const hello: unknown = await users.db
+      .getClient()
+      .db('admin')
+      .command(
+        { hello: 1 },
+        { signal: AbortSignal.timeout(5000), readPreference: 'primary' },
+      );
     const seedAddress = users.db.getClient().options.hosts[0]?.toString() ?? '';
     if (!isLocalSingleNodeReplicaSetPrimary(hello, seedAddress))
       throw new Error('SUBMISSION_EDIT_LOCAL_RS0_PRIMARY_REQUIRED');
     const auth = await database.command(
       { connectionStatus: 1, showPrivileges: false },
-      { timeoutMS: 5000 },
+      { signal: AbortSignal.timeout(5000), readPreference: 'primary' },
     );
     assertLocalStandardTestAuthentication({
       nodeEnv: process.env.NODE_ENV,

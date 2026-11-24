@@ -94,6 +94,8 @@ npm run test:e2e -- --runInBand --runTestsByPath ./test/users-me.e2e-spec.ts
 
 同一认证集合的实库 spec 串行运行，与 sync-indexes 的独立集合集成分开进程。合成记录按 spec 登记 ID 清理，核对 User/Session/reset token 零残留后关闭 app 与独立 Store 连接；不清空未知记录或数据库。配置或门禁不符时停止对应实库验收，实际通过、失败和未执行状态归当次任务报告。
 
+真实门禁、索引盘点和定向清理使用各操作现有的有限期限。原来共享截止时间的流程继续传递剩余量。清理回执不明时停止后续删除，保留准确目标供只读核对。
+
 从 `backend` 目录先 discovery；结果须恰好命中同一显式集合，再正式运行。以下离线命令使用独立 `none` 进程，不加载真实环境文件、不继承真实 Mongo/SMTP/Provider 凭据：
 
 ```powershell
@@ -148,7 +150,7 @@ npm.cmd run test:e2e -- --runInBand --runTestsByPath ./test/classroom-report-tas
 
 ### 课堂提交冷却定向验收
 
-既有 `test/classroom-task-submission-cooldown.e2e-spec.ts` 使用正式 configureApp、HTTP 路由及 Mongo 回读，负责同一作用域正冷却并发的单条受理与等待字段、零冷却的独立尝试编号、不同作用域隔离、顺序提交及窗口过去后的后续提交，并复用同批 fixture 验证禁止迟交和课程/班级非空删除的公开错误投影。作用域与重试边界见 [Service Card 08](./handoff-backend-service-map.md#service-card-08)，公开字段与单位见 [DTO Submission](./handoff-backend-dto-cheatsheet.md#submission-request--response-family)，状态/业务码见 [API Map](./handoff-backend-api-map.md)。受控时钟、确定性的目标编号竞争、三轮耗尽、无关 E11000 及写后失败不再插入由 LearningTasksService unit 承担；状态/code 配对与内部字段脱敏由 AllExceptionsFilter unit 承担，不用 HTTP 反复碰撞代替确定性分支证据。
+既有 `test/classroom-task-submission-cooldown.e2e-spec.ts` 使用正式 configureApp、HTTP 路由及 Mongo 回读，负责同一作用域正冷却并发的单条受理与等待字段、零冷却的独立尝试编号、不同作用域隔离、顺序提交及窗口过去后的后续提交，并复用同批 fixture 验证禁止迟交和课程/班级非空删除的公开错误投影。提交后响应读取失败使用受控故障，真实数据库回读验证只保留一份作品及一次父实例版本更新。作用域与重试边界见 [Service Card 08](./handoff-backend-service-map.md#service-card-08)，公开字段与单位见 [DTO Submission](./handoff-backend-dto-cheatsheet.md#submission-request--response-family)，状态/业务码见 [API Map](./handoff-backend-api-map.md)。受控时钟、确定性的目标编号竞争、三轮耗尽及无关 E11000 由 LearningTasksService unit 承担。状态/code 配对与内部字段脱敏由 AllExceptionsFilter unit 承担。
 
 环境与身份复用[认证与凭据生命周期定向验收](#认证与凭据生命周期定向验收)，业务测试关闭自动建索引；写 fixture 前读回现行 Submission 作用域唯一索引，仅缺少该索引且对应 Submission 测试集合为空时按正式 Schema 精确补齐并复核，定义冲突不删除/替换或全库同步。该准备不代表生产索引已核查；按本轮合成学生、实例及归属回查实际提交并精确清理，覆盖未取得响应 ID 的写入。
 
@@ -305,7 +307,7 @@ npm run browser:text-smoke -- cleanup --namespace b1-2-<unique> --confirm-namesp
 - 处理前核对 Job→Submission→ClassroomTask→合成师生/班级的完整 ownership；全库 PENDING/FAILED/RUNNING 必须恰好只有目标，且为 budgetVersion=1、PENDING、attempts=0。外来、多目标或 legacy 非终态立即拒绝，不修改它们。随后只调用真实 `AiFeedbackProcessor.processOnce(1)` 一次，读取该目标及实际 stub 反馈核对结果，finally 等待上下文关闭。
 - `processOnce` 是全库扫描入口，上述查询不是并发锁。操作者必须独占验收时段，排除其他 Worker/Profile/生产者并串行形成、消费目标；`--confirm-exclusive` 记录的是该运行前提，不能代替隔离审计。不启用长期 Worker、debug HTTP 或真实模型。
 - 最小恢复记录仅保存 namespace、端口、准确资源 ID，位于仓库根目录下 ignored `.local/deliverables/browser-text-task-smoke/<namespace>.json`；Cookie 仅在准备过程内存中使用，不持久化 Cookie、Session、Mongo URI 或基础设施凭据。`.local/deliverables/` 包含恢复资料，不能整体当作可清空缓存。
-- CLI 总截止为 120 秒，HTTP 请求 15 秒；ADMIN 连接建立/选择和查询采用有限超时，连接在 finally 中关闭。写入或 cleanup 结果不明时保留恢复记录，先用 `inspect` 和进程/端口审计确认实际状态，不直接重放。
+- CLI 使用单调时钟的 120 秒总截止。HTTP 请求最多 15 秒，ADMIN 数据库操作按原操作预算和总截止的剩余量取较小值。连接在 finally 中关闭。写入或 cleanup 结果不明时保留恢复记录，先用 `inspect` 和进程/端口审计确认实际状态，不直接重放。
 - 清理前停止本轮写入与处理并等待在途动作结束。cleanup 使用准确 ID 和关联 ownership，顺序为 Feedback/Job → Submission → ClassroomTask/Task → Enrollment/Classroom/Course → 合成用户 Session/必要 PasswordResetToken → User；拒绝仍在 RUNNING 的自有 Job，不 dropDatabase、不清空集合。完成后核对业务与认证关联残留为零；同一 namespace 的 cleanup 可安全重复，恢复记录在确认资源收尾后再删除。
 - 支持纯测试为 `scripts/browser-text-task-smoke.spec.ts`；沿第 4 节 Jest runner 用相同目标参数先 discovery，再执行。它只证明新增门禁、ownership、固定密码和 cleanup 选择，不证明真实 Browser 流程。
 
@@ -319,7 +321,7 @@ node -r ts-node/register -r tsconfig-paths/register ./scripts/browser-auth-smoke
 node -r ts-node/register -r tsconfig-paths/register ./scripts/browser-auth-smoke.ts cleanup --namespace auth-batch2-<unique>
 ```
 
-- CLI 仅解析 `.env.browser-acceptance`，复用 Browser 环境构造与用途门禁。连接后核对实际库名、实际连接节点为本机单节点 `rs0` 的可写 PRIMARY，以及唯一 `root@admin` 认证身份和角色。导入模块不执行 CLI，也不导入 AppModule。每次运行有 120 秒总截止，连接、查询和索引操作有有限超时，连接在 finally 关闭。
+- CLI 仅解析 `.env.browser-acceptance`，复用 Browser 环境构造与用途门禁。连接后核对实际库名、实际连接节点为本机单节点 `rs0` 的可写 PRIMARY，以及唯一 `root@admin` 认证身份和角色。导入模块不执行 CLI，也不导入 AppModule。每次运行使用单调时钟的 120 秒总截止，查询、写入和索引盘点按各自操作预算与总截止的剩余量取较小值。一次索引游标的所有批次共用一个操作期限。连接在 finally 关闭。
 - `prepare` 不覆盖已有恢复记录或 namespace 账号。须先由操作者确认 APP 和其它认证写入者均已停止；脚本再次核对认证三集合为空、没有在途认证操作，才盘点并补齐正式 SessionSchema 索引。仅允许删除精确定义为 `{token:1}, unique:true` 的旧 `token_1`；保留正确的 `_id_`、TTL、userId、tokenHash 唯一索引，未知定义或漂移立即拒绝，不调用其它用途的索引 CLI/helper。检查空集合与 currentOp 不代替独占进程审计。
 - 随后仅创建 namespace 专属 teacher/student 两名 active 合成账号。初始和改密场景的固定合成密码由脚本常量维护；`inspect` 只读核对 ID/email/role 归属、账号状态和当前凭据是否匹配已知合成状态，不输出密码或哈希。部分准备失败时只清理本次记录且归属已核实的精确目标。
 - 恢复记录位于 ignored `.local/deliverables/browser-auth-smoke/<namespace>.json`，仅保存 namespace 和两个 User ID。所有写入结果不明时先检查精确目标，不直接重试；恢复记录保留到收尾明确。
