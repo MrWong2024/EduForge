@@ -8,7 +8,7 @@ import { INestApplication, ValidationPipe } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Test, TestingModule } from '@nestjs/testing';
 import { getConnectionToken, getModelToken } from '@nestjs/mongoose';
-import { Model, Types, type Connection, type mongo } from 'mongoose';
+import { Model, STATES, Types, type Connection, type mongo } from 'mongoose';
 import * as bcrypt from 'bcryptjs';
 import cookieParser from 'cookie-parser';
 import request from 'supertest';
@@ -216,7 +216,12 @@ describe('Course Overview (e2e)', () => {
           classroomTaskCId,
         ]);
         const taskIds = objectIds([taskId, secondaryTaskId]);
-        const userIds = objectIds([teacherId, studentAId, studentBId, studentCId]);
+        const userIds = objectIds([
+          teacherId,
+          studentAId,
+          studentBId,
+          studentCId,
+        ]);
         const submissionObjectIds = objectIds(submissionIds);
         const targets: Array<[string, mongo.Document]> = [];
         const addTargets = (
@@ -278,7 +283,8 @@ describe('Course Overview (e2e)', () => {
         await app?.close();
       } finally {
         try {
-          if (connection && connection.readyState !== 0) await connection.close();
+          if (connection && connection.readyState !== STATES.disconnected)
+            await connection.close();
         } finally {
           authTestEnvironment.restore();
         }
@@ -457,7 +463,8 @@ describe('Course Overview (e2e)', () => {
       })
       .maxTimeMS(5000)
       .exec();
-    if (foreignJob) throw new Error('Course overview requires a fixture-only AI queue.');
+    if (foreignJob)
+      throw new Error('Course overview requires a fixture-only AI queue.');
     expect(await aiFeedbackProcessor.processOnce(20)).toEqual({
       processed: 3,
       succeeded: 3,

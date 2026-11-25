@@ -14,7 +14,7 @@ import { INestApplication, ValidationPipe } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Test, TestingModule } from '@nestjs/testing';
 import { getConnectionToken, getModelToken } from '@nestjs/mongoose';
-import { Model, Types, type Connection, type mongo } from 'mongoose';
+import { Model, STATES, Types, type Connection, type mongo } from 'mongoose';
 import * as bcrypt from 'bcryptjs';
 import cookieParser from 'cookie-parser';
 import request from 'supertest';
@@ -305,7 +305,7 @@ describe('Classroom Process Assessment (e2e)', () => {
         await app?.close();
       } finally {
         try {
-          if (connection && connection.readyState !== 0)
+          if (connection && connection.readyState !== STATES.disconnected)
             await connection.close();
         } finally {
           authTestEnvironment.restore();
