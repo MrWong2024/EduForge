@@ -1,4 +1,4 @@
-import { Model, Types } from 'mongoose';
+import { Model, PipelineStage, Types } from 'mongoose';
 import { Classroom, ClassroomStatus } from '../schemas/classroom.schema';
 import { ClassroomTask } from '../classroom-tasks/schemas/classroom-task.schema';
 import {
@@ -13,6 +13,7 @@ import {
 } from '../../learning-tasks/schemas/feedback.schema';
 import { TaskStatus } from '../../learning-tasks/schemas/task.schema';
 import { AiFeedbackJobService } from '../../learning-tasks/ai-feedback/services/ai-feedback-job.service';
+import { AiFeedbackStatus } from '../../learning-tasks/ai-feedback/interfaces/ai-feedback-status.enum';
 import { EnrollmentService } from '../enrollments/services/enrollment.service';
 import { StudentLearningDashboardService } from './student-learning-dashboard.service';
 import { User } from '../../users/schemas/user.schema';
@@ -50,13 +51,16 @@ type ClassroomTaskFixture = {
   dueAt?: Date | null;
 };
 
-type SubmissionFixture = {
+type LatestSubmissionFixture = {
   _id: Types.ObjectId;
-  classroomTaskId?: Types.ObjectId | Types.ObjectId[] | string | null;
-  taskId: Types.ObjectId;
-  studentId: Types.ObjectId;
-  attemptNo: number;
-  createdAt: Date;
+  attemptNo?: number | null;
+  createdAt?: Date | null;
+};
+
+type SubmissionStatsFixture = {
+  _id: Types.ObjectId;
+  count: number;
+  latest: LatestSubmissionFixture;
 };
 
 type FeedbackFixture = {
@@ -66,9 +70,10 @@ type FeedbackFixture = {
 };
 
 type HarnessData = {
+  studentId?: Types.ObjectId;
   classrooms?: ClassroomFixture[];
   classroomTasks?: ClassroomTaskFixture[];
-  submissions?: SubmissionFixture[];
+  submissionStats?: SubmissionStatsFixture[];
   feedbacks?: FeedbackFixture[];
   users?: TeacherFixture[];
   courses?: CourseFixture[];
@@ -102,22 +107,30 @@ const makeAggregate = <T>(result: T) => ({
 const toIdSet = (values: Types.ObjectId[]) =>
   new Set(values.map((value) => value.toString()));
 
+const submissionStatsFor = (
+  submission: LatestSubmissionFixture & { classroomTaskId: Types.ObjectId },
+  count = 1,
+): SubmissionStatsFixture => ({
+  _id: submission.classroomTaskId,
+  count,
+  latest: {
+    _id: submission._id,
+    attemptNo: submission.attemptNo,
+    createdAt: submission.createdAt,
+  },
+});
+
 const createHarness = (data: HarnessData = {}) => {
-  const studentId = data.submissions?.[0]?.studentId ?? objectId();
+  const studentId = data.studentId ?? objectId();
   const classroomId =
     data.classrooms?.[0]?._id ??
     data.classroomTasks?.[0]?.classroomId ??
     objectId();
-  const taskId =
-    data.classroomTasks?.[0]?.taskId ??
-    data.submissions?.[0]?.taskId ??
-    objectId();
-  const submissionClassroomTaskId = data.submissions?.[0]?.classroomTaskId;
+  const taskId = data.classroomTasks?.[0]?.taskId ?? objectId();
   const classroomTaskId =
     data.classroomTasks?.[0]?._id ??
-    (submissionClassroomTaskId instanceof Types.ObjectId
-      ? submissionClassroomTaskId
-      : objectId());
+    data.submissionStats?.[0]?._id ??
+    objectId();
   const classroom: ClassroomFixture = {
     _id: classroomId,
     name: 'Class A',
@@ -160,7 +173,6 @@ const createHarness = (data: HarnessData = {}) => {
         : CLASSROOM_TASK_STATUS_ACTIVE,
     }),
   );
-  const submissions = data.submissions ?? [];
   const feedbacks = data.feedbacks ?? [];
   const filterClassrooms = (filter: Record<string, unknown>) => {
     const idFilter = filter._id as { $in?: Types.ObjectId[] } | undefined;
@@ -210,32 +222,6 @@ const createHarness = (data: HarnessData = {}) => {
           (task.taskStatus ?? TaskStatus.Published) === taskStatus),
     );
   };
-  const filterSubmissions = (filter: Record<string, unknown>) => {
-    const studentId = filter.studentId as Types.ObjectId | undefined;
-    const classroomTaskFilter = filter.classroomTaskId as
-      { $in?: Types.ObjectId[] } | undefined;
-    const classroomTaskIds = toIdSet(classroomTaskFilter?.$in ?? []);
-    return submissions.filter((submission) => {
-      if (
-        studentId &&
-        submission.studentId.toString() !== studentId.toString()
-      ) {
-        return false;
-      }
-      const association = submission.classroomTaskId;
-      if (filter.$expr && !(association instanceof Types.ObjectId)) {
-        return false;
-      }
-      // MongoDB $in also matches an ObjectId inside an array without the scalar guard.
-      const values = Array.isArray(association) ? association : [association];
-      return values.some(
-        (value) =>
-          value instanceof Types.ObjectId &&
-          classroomTaskIds.has(value.toString()),
-      );
-    });
-  };
-
   const classroomModel = {
     find: jest.fn((filter: Record<string, unknown>) =>
       makeQuery(filterClassrooms(filter)),
@@ -272,9 +258,10 @@ const createHarness = (data: HarnessData = {}) => {
     ),
   };
   const submissionModel = {
-    find: jest.fn((filter: Record<string, unknown>) =>
-      makeQuery(filterSubmissions(filter)),
-    ),
+    aggregate: jest.fn<
+      ReturnType<typeof makeAggregate<SubmissionStatsFixture[]>>,
+      [PipelineStage[]]
+    >(() => makeAggregate(data.submissionStats ?? [])),
   };
   const userModel = {
     find: jest.fn((filter: Record<string, unknown>) =>
@@ -633,10 +620,13 @@ describe('StudentLearningDashboardService', () => {
   });
 
   it('returns NOT_SUBMITTED when the student has no submissions', async () => {
-    const { service, feedbackModel, ids } = createHarness();
+    const { service, feedbackModel, aiFeedbackJobService, ids } =
+      createHarness();
 
     const task = await getFirstTask(service, ids.studentId);
 
+    expect(task.myLatestSubmission).toBeNull();
+    expect(task.mySubmissionsCount).toBe(0);
     expect(task.completionStatus).toEqual({
       status: 'NOT_SUBMITTED',
       severity: null,
@@ -648,6 +638,9 @@ describe('StudentLearningDashboardService', () => {
       aiWorstSeverity: null,
     });
     expect(feedbackModel.find).not.toHaveBeenCalled();
+    expect(
+      aiFeedbackJobService.getStatusMapBySubmissionIds,
+    ).not.toHaveBeenCalled();
   });
 
   it('returns NO_FEEDBACK when the latest submission has no teacher or AI feedback', async () => {
@@ -659,10 +652,16 @@ describe('StudentLearningDashboardService', () => {
       attemptNo: 1,
       createdAt: new Date('2026-01-02T00:00:00.000Z'),
     };
-    const harness = createHarness({ submissions: [submission] });
+    const harness = createHarness({
+      studentId: submission.studentId,
+      submissionStats: [submissionStatsFor(submission)],
+    });
 
     const task = await getFirstTask(harness.service, harness.ids.studentId);
 
+    expect(task.myLatestSubmission?.aiFeedbackStatus).toBe(
+      AiFeedbackStatus.NotRequested,
+    );
     expect(task.completionStatus).toMatchObject({
       status: 'NO_FEEDBACK',
       severity: null,
@@ -671,59 +670,36 @@ describe('StudentLearningDashboardService', () => {
     });
   });
 
-  it('only counts scalar classroom associations without inferring a unique template match', async () => {
+  it('scopes submission stats to the student and scalar classroom task IDs', async () => {
     const classroomTaskId = objectId();
-    const taskId = objectId();
     const studentId = objectId();
-    const firstSubmission = {
+    const latestSubmission = {
       _id: objectId(),
       classroomTaskId,
-      taskId,
-      studentId,
-      attemptNo: 1,
-      createdAt: new Date('2026-01-02T00:00:00.000Z'),
-    };
-    const latestSubmission = {
-      ...firstSubmission,
-      _id: objectId(),
       attemptNo: 2,
       createdAt: new Date('2026-01-03T00:00:00.000Z'),
     };
-    const invalidSubmissions = [
-      undefined,
-      null,
-      classroomTaskId.toString(),
-      [classroomTaskId],
-    ].map((association) => ({
-      _id: objectId(),
-      ...(association === undefined ? {} : { classroomTaskId: association }),
-      taskId,
-      studentId,
-      attemptNo: 100,
-      createdAt: new Date('2026-01-04T00:00:00.000Z'),
-    }));
     const harness = createHarness({
-      submissions: [firstSubmission, latestSubmission, ...invalidSubmissions],
+      studentId,
+      submissionStats: [submissionStatsFor(latestSubmission, 2)],
       feedbacks: [
         {
           submissionId: latestSubmission._id,
           source: FeedbackSource.Teacher,
           severity: FeedbackSeverity.Info,
         },
-        ...invalidSubmissions.map((submission) => ({
-          submissionId: submission._id,
-          source: FeedbackSource.Teacher,
-          severity: FeedbackSeverity.Error,
-        })),
       ],
     });
 
     const task = await getFirstTask(harness.service, studentId);
 
-    expect(harness.submissionModel.find).toHaveBeenCalledWith({
-      classroomTaskId: { $in: [classroomTaskId] },
-      $expr: { $eq: [{ $type: '$classroomTaskId' }, 'objectId'] },
-      studentId,
+    expect(harness.submissionModel.aggregate).toHaveBeenCalledTimes(1);
+    expect(harness.submissionModel.aggregate.mock.calls[0][0][0]).toEqual({
+      $match: {
+        classroomTaskId: { $in: [classroomTaskId] },
+        $expr: { $eq: [{ $type: '$classroomTaskId' }, 'objectId'] },
+        studentId,
+      },
     });
     expect(task.mySubmissionsCount).toBe(2);
     expect(task.myLatestSubmission?.submissionId).toBe(
@@ -737,8 +713,92 @@ describe('StudentLearningDashboardService', () => {
     });
     expect(
       harness.aiFeedbackJobService.getStatusMapBySubmissionIds,
-    ).toHaveBeenCalledWith([firstSubmission._id, latestSubmission._id]);
+    ).toHaveBeenCalledTimes(1);
+    expect(
+      harness.aiFeedbackJobService.getStatusMapBySubmissionIds,
+    ).toHaveBeenCalledWith([latestSubmission._id]);
   });
+
+  it('selects the top attempt with a date tie-breaker and preserves the original projected fields', async () => {
+    const { service, submissionModel, ids } = createHarness();
+
+    await getFirstTask(service, ids.studentId);
+
+    const [, project, group] = submissionModel.aggregate.mock.calls[0][0];
+    expect(project).toEqual({
+      $project: {
+        _id: 1,
+        classroomTaskId: 1,
+        attemptNo: 1,
+        createdAt: 1,
+        attemptSort: { $ifNull: ['$attemptNo', 0] },
+        createdAtSort: { $ifNull: ['$createdAt', new Date(0)] },
+      },
+    });
+    expect(group).toEqual({
+      $group: {
+        _id: '$classroomTaskId',
+        count: { $sum: 1 },
+        latest: {
+          $top: {
+            sortBy: { attemptSort: -1, createdAtSort: -1, createdAt: -1 },
+            output: {
+              _id: '$_id',
+              attemptNo: '$attemptNo',
+              createdAt: '$createdAt',
+            },
+          },
+        },
+      },
+    });
+    if (
+      !('$group' in group) ||
+      !('latest' in group.$group) ||
+      !('$top' in group.$group.latest)
+    ) {
+      throw new Error('Expected the latest submission accumulator');
+    }
+    expect(Object.keys(group.$group.latest.$top.sortBy)).toEqual([
+      'attemptSort',
+      'createdAtSort',
+      'createdAt',
+    ]);
+  });
+
+  it.each([
+    ['missing', {}, {}],
+    [
+      'explicit null',
+      { attemptNo: null, createdAt: null },
+      { attemptNo: null },
+    ],
+  ])(
+    'preserves %s attemptNo in dashboard JSON and displays an epoch date',
+    async (_label, fields, expectedAttempt) => {
+      const submissionId = objectId();
+      const { service, ids } = createHarness({
+        submissionStats: [
+          {
+            _id: objectId(),
+            count: 1,
+            latest: { _id: submissionId, ...fields },
+          },
+        ],
+      });
+
+      const task = await getFirstTask(service, ids.studentId);
+      const expected = {
+        submissionId: submissionId.toString(),
+        ...expectedAttempt,
+        createdAt: '1970-01-01T00:00:00.000Z',
+        aiFeedbackStatus: AiFeedbackStatus.NotRequested,
+      };
+
+      expect(JSON.parse(JSON.stringify(task.myLatestSubmission))).toStrictEqual(
+        expected,
+      );
+    },
+  );
 
   it.each([
     [FeedbackSeverity.Info, 'QUALIFIED'],
@@ -754,6 +814,7 @@ describe('StudentLearningDashboardService', () => {
       createdAt: new Date('2026-01-02T00:00:00.000Z'),
     };
     const harness = createHarness({
+      studentId: submission.studentId,
       classroomTasks: [
         {
           _id: submission.classroomTaskId,
@@ -763,7 +824,7 @@ describe('StudentLearningDashboardService', () => {
           publishedAt: addDays(-1),
         },
       ],
-      submissions: [submission],
+      submissionStats: [submissionStatsFor(submission)],
       feedbacks: [
         {
           submissionId: submission._id,
@@ -794,6 +855,7 @@ describe('StudentLearningDashboardService', () => {
       createdAt: new Date('2026-01-02T00:00:00.000Z'),
     };
     const harness = createHarness({
+      studentId: submission.studentId,
       classroomTasks: [
         {
           _id: submission.classroomTaskId,
@@ -803,7 +865,7 @@ describe('StudentLearningDashboardService', () => {
           publishedAt: addDays(-1),
         },
       ],
-      submissions: [submission],
+      submissionStats: [submissionStatsFor(submission)],
       feedbacks: [
         {
           submissionId: submission._id,
@@ -841,6 +903,7 @@ describe('StudentLearningDashboardService', () => {
       createdAt: new Date('2026-01-02T00:00:00.000Z'),
     };
     const harness = createHarness({
+      studentId: submission.studentId,
       classroomTasks: [
         {
           _id: submission.classroomTaskId,
@@ -850,7 +913,7 @@ describe('StudentLearningDashboardService', () => {
           publishedAt: addDays(-1),
         },
       ],
-      submissions: [submission],
+      submissionStats: [submissionStatsFor(submission)],
       feedbacks: [
         {
           submissionId: submission._id,
@@ -891,6 +954,7 @@ describe('StudentLearningDashboardService', () => {
       createdAt: new Date('2026-01-02T00:00:00.000Z'),
     };
     const harness = createHarness({
+      studentId: submission.studentId,
       classroomTasks: [
         {
           _id: submission.classroomTaskId,
@@ -900,7 +964,7 @@ describe('StudentLearningDashboardService', () => {
           publishedAt: addDays(-1),
         },
       ],
-      submissions: [submission],
+      submissionStats: [submissionStatsFor(submission)],
       feedbacks: [
         {
           submissionId: submission._id,
@@ -947,6 +1011,7 @@ describe('StudentLearningDashboardService', () => {
     };
     const unrelatedSubmissionId = objectId();
     const harness = createHarness({
+      studentId: oldSubmission.studentId,
       classroomTasks: [
         {
           _id: classroomTaskId,
@@ -956,7 +1021,7 @@ describe('StudentLearningDashboardService', () => {
           publishedAt: addDays(-1),
         },
       ],
-      submissions: [latestSubmission, oldSubmission],
+      submissionStats: [submissionStatsFor(latestSubmission, 2)],
       feedbacks: [
         {
           submissionId: oldSubmission._id,
@@ -975,9 +1040,18 @@ describe('StudentLearningDashboardService', () => {
         },
       ],
     });
+    harness.aiFeedbackJobService.getStatusMapBySubmissionIds.mockResolvedValue(
+      new Map([[oldSubmission._id.toString(), AiFeedbackStatus.Succeeded]]),
+    );
 
     const task = await getFirstTask(harness.service, oldSubmission.studentId);
 
+    expect(
+      harness.aiFeedbackJobService.getStatusMapBySubmissionIds,
+    ).toHaveBeenCalledWith([latestSubmission._id]);
+    expect(task.myLatestSubmission?.aiFeedbackStatus).toBe(
+      AiFeedbackStatus.NotRequested,
+    );
     expect(task.completionStatus).toMatchObject({
       status: 'QUALIFIED',
       severity: FeedbackSeverity.Info,
@@ -1017,6 +1091,7 @@ describe('StudentLearningDashboardService', () => {
       createdAt: new Date('2026-01-03T00:00:00.000Z'),
     };
     const harness = createHarness({
+      studentId,
       classrooms: [
         {
           _id: classroomId,
@@ -1043,7 +1118,7 @@ describe('StudentLearningDashboardService', () => {
           publishedAt: addDays(-1),
         },
       ],
-      submissions: [activeSubmission, closedSubmission],
+      submissionStats: [submissionStatsFor(activeSubmission)],
       feedbacks: [
         {
           submissionId: activeSubmission._id,
@@ -1073,12 +1148,13 @@ describe('StudentLearningDashboardService', () => {
         source: FeedbackSource.AI,
       },
     });
-    const submissionFilter = harness.submissionModel.find.mock.calls[0][0] as {
-      classroomTaskId: { $in: Types.ObjectId[] };
-    };
-    expect(
-      submissionFilter.classroomTaskId.$in.map((id) => id.toString()),
-    ).toEqual([activeClassroomTaskId.toString()]);
+    expect(harness.submissionModel.aggregate.mock.calls[0][0][0]).toEqual({
+      $match: {
+        classroomTaskId: { $in: [activeClassroomTaskId] },
+        $expr: { $eq: [{ $type: '$classroomTaskId' }, 'objectId'] },
+        studentId,
+      },
+    });
   });
 
   it('removes classrooms that only have CLOSED classroomTasks and counts final items', async () => {
@@ -1114,7 +1190,7 @@ describe('StudentLearningDashboardService', () => {
 
     expect(dashboard.items).toEqual([]);
     expect(dashboard.total).toBe(0);
-    expect(harness.submissionModel.find).not.toHaveBeenCalled();
+    expect(harness.submissionModel.aggregate).not.toHaveBeenCalled();
     expect(harness.feedbackModel.find).not.toHaveBeenCalled();
   });
 
@@ -1295,15 +1371,14 @@ describe('StudentLearningDashboardService', () => {
           publishedAt: addDays(-91),
         },
       ],
-      submissions: [
-        {
+      studentId,
+      submissionStats: [
+        submissionStatsFor({
           _id: objectId(),
           classroomTaskId: longExpiredClassroomTaskId,
-          taskId: objectId(),
-          studentId,
           attemptNo: 1,
           createdAt: addDays(-30),
-        },
+        }),
       ],
     });
 
@@ -1314,7 +1389,7 @@ describe('StudentLearningDashboardService', () => {
 
     expect(dashboard.items).toEqual([]);
     expect(dashboard.total).toBe(0);
-    expect(harness.submissionModel.find).not.toHaveBeenCalled();
+    expect(harness.submissionModel.aggregate).not.toHaveBeenCalled();
     expect(harness.feedbackModel.find).not.toHaveBeenCalled();
   });
 

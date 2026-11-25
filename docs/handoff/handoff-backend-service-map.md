@@ -159,7 +159,7 @@ Global SoT 只保留理解跨 Service workflow 必需的稳定不变量，不追
 - Consistency / State / Idempotency: 先取得 ACTIVE Enrollment 班级，再筛选 ACTIVE 班级与 ACTIVE 实例；模板当前状态不参与运行态过滤。按公开的到期/历史时间规则形成最终任务集合，再分页班级分组；无可见任务的班级不形成空分组，total 从最终分组计算。
 - Isolation: 提交查询限定学生本人及最终返回的 `classroomTaskIds`，同时校验字段 BSON 类型为标量 ObjectId；不查询无关联提交，也不以同模板唯一实例推测归属。完成态只读取 `myLatestSubmission.submissionId` 的反馈，不按 taskId、classroomTaskId 或 studentId 粗聚合历史反馈。
 - Side Effects: 只读。
-- Important Performance / Recovery: 当前页班级的课程/教师批量查找，提交、job 状态及完成态批量计算。无提交保留空最新提交状态；无 job 使用 NOT_REQUESTED。完成态来源/严重度优先级同 [Card 08D](#service-card-08dfeature-my-task-detail-z3)。
+- Important Performance / Recovery: 批量读取当前页班级的课程和教师。MongoDB 按任务实例返回实际提交条数和最近一次提交的轻量字段，按尝试号、创建时间依次判定最近记录。只用这些最近提交 ID 批量查询 AI 状态与完成态反馈。无提交保留空最新提交状态；无 job 使用 NOT_REQUESTED。完成态来源/严重度优先级同 [Card 08D](#service-card-08dfeature-my-task-detail-z3)。
 - SoT: `backend/src/modules/classrooms/services/student-learning-dashboard.service.ts`；`backend/src/modules/classrooms/enrollments/services/enrollment.service.ts`。
 - Boundary / Non-responsibility: 公开历史窗口、状态展示及关联摘要的空值合同见 [API Map](./handoff-backend-api-map.md#classrooms)；不把模板资产状态当成学生运行态。
 

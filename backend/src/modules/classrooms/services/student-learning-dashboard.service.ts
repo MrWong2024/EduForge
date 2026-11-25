@@ -14,7 +14,6 @@ import { AiFeedbackJobService } from '../../learning-tasks/ai-feedback/services/
 import { AiFeedbackStatus } from '../../learning-tasks/ai-feedback/interfaces/ai-feedback-status.enum';
 import { EnrollmentService } from '../enrollments/services/enrollment.service';
 import { WithId } from '../../../common/types/with-id.type';
-import { WithTimestamps } from '../../../common/types/with-timestamps.type';
 import { User } from '../../users/schemas/user.schema';
 import { Course } from '../../courses/schemas/course.schema';
 import {
@@ -22,15 +21,23 @@ import {
   buildCompletionStatus,
   buildNotSubmittedCompletionStatus,
   groupCompletionFeedbacksBySubmissionId,
-  toLatestSubmissionObjectIds,
 } from './student-task-completion-status';
 
 type ClassroomLean = Classroom & WithId;
-type SubmissionWithMeta = Submission & WithId & WithTimestamps;
 type TeacherLean = Pick<User, 'name' | 'employeeNo'> & WithId;
 type CourseLean = Pick<Course, 'name' | 'term' | 'code'> & WithId;
 type StudentTaskVisibilityStatus =
   'CURRENT' | 'RECENTLY_EXPIRED' | 'HISTORICAL';
+
+type SubmissionStats = {
+  _id: Types.ObjectId;
+  count: number;
+  latest: {
+    _id: Types.ObjectId;
+    attemptNo?: number | null;
+    createdAt?: Date | null;
+  };
+};
 
 type ClassroomTaskStudentAggregateItem = {
   _id: Types.ObjectId;
@@ -233,54 +240,64 @@ export class StudentLearningDashboardService {
     );
 
     const classroomTaskIds = classroomTasks.map((task) => task._id);
-    const submissions =
+    const submissionStatsRows =
       classroomTaskIds.length === 0
         ? []
         : await this.submissionModel
-            .find({
-              classroomTaskId: { $in: classroomTaskIds },
-              $expr: { $eq: [{ $type: '$classroomTaskId' }, 'objectId'] },
-              studentId: new Types.ObjectId(userId),
-            })
-            .sort({ createdAt: -1 })
-            .lean<SubmissionWithMeta[]>()
+            .aggregate<SubmissionStats>([
+              {
+                $match: {
+                  classroomTaskId: { $in: classroomTaskIds },
+                  $expr: { $eq: [{ $type: '$classroomTaskId' }, 'objectId'] },
+                  studentId: new Types.ObjectId(userId),
+                },
+              },
+              {
+                $project: {
+                  _id: 1,
+                  classroomTaskId: 1,
+                  attemptNo: 1,
+                  createdAt: 1,
+                  attemptSort: { $ifNull: ['$attemptNo', 0] },
+                  createdAtSort: { $ifNull: ['$createdAt', new Date(0)] },
+                },
+              },
+              {
+                $group: {
+                  _id: '$classroomTaskId',
+                  count: { $sum: 1 },
+                  latest: {
+                    $top: {
+                      // For equal effective times, preserve the original date ordering.
+                      sortBy: {
+                        attemptSort: -1,
+                        createdAtSort: -1,
+                        createdAt: -1,
+                      },
+                      output: {
+                        _id: '$_id',
+                        attemptNo: '$attemptNo',
+                        createdAt: '$createdAt',
+                      },
+                    },
+                  },
+                },
+              },
+            ])
             .exec();
 
-    const submissionIds = submissions.map((submission) => submission._id);
-    const statusMap =
-      await this.aiFeedbackJobService.getStatusMapBySubmissionIds(
-        submissionIds,
-      );
-
-    const submissionStatsMap = new Map<
-      string,
-      { count: number; latest?: SubmissionWithMeta }
-    >();
-    for (const submission of submissions) {
-      const key = submission.classroomTaskId.toString();
-      const entry = submissionStatsMap.get(key) ?? { count: 0 };
-      entry.count += 1;
-      if (!entry.latest) {
-        entry.latest = submission;
-      } else {
-        const latestAttempt = entry.latest.attemptNo ?? 0;
-        const currentAttempt = submission.attemptNo ?? 0;
-        const latestCreatedAt = entry.latest.createdAt?.getTime() ?? 0;
-        const currentCreatedAt = submission.createdAt?.getTime() ?? 0;
-        if (
-          currentAttempt > latestAttempt ||
-          (currentAttempt === latestAttempt &&
-            currentCreatedAt > latestCreatedAt)
-        ) {
-          entry.latest = submission;
-        }
-      }
-      submissionStatsMap.set(key, entry);
-    }
-
-    const latestSubmissionIds = toLatestSubmissionObjectIds(
-      Array.from(submissionStatsMap.values()).map((entry) => entry.latest?._id),
+    const submissionStatsMap = new Map(
+      submissionStatsRows.map((entry) => [entry._id.toString(), entry]),
     );
+    const latestSubmissionIds = submissionStatsRows.map(
+      (entry) => entry.latest._id,
+    );
+    const statusMap =
+      latestSubmissionIds.length === 0
+        ? new Map<string, AiFeedbackStatus>()
+        : await this.aiFeedbackJobService.getStatusMapBySubmissionIds(
+            latestSubmissionIds,
+          );
     const completionFeedbacks =
       latestSubmissionIds.length === 0
         ? []

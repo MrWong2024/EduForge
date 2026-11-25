@@ -1,14 +1,18 @@
+import {
+  assertAuthTestConnection,
+  authTestEnvironment,
+} from './helpers/auth-test-environment';
 import { Enrollment } from '../src/modules/classrooms/enrollments/schemas/enrollment.schema';
 import { INestApplication, ValidationPipe } from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
-import { getModelToken } from '@nestjs/mongoose';
-import { Model, Types } from 'mongoose';
+import { getConnectionToken, getModelToken } from '@nestjs/mongoose';
+import { Connection, Model, Types } from 'mongoose';
 import * as bcrypt from 'bcryptjs';
 import cookieParser from 'cookie-parser';
 import request from 'supertest';
 import { App } from 'supertest/types';
-process.env.AI_FEEDBACK_DEBUG_ENABLED = 'true';
 import { AppModule } from '../src/app.module';
+import { CLASSROOM_TASK_TRANSACTION_CONNECTION } from '../src/lib/classroom-task-transaction';
 import { User } from '../src/modules/users/schemas/user.schema';
 import { Session } from '../src/modules/auth/schemas/session.schema';
 import { Course } from '../src/modules/courses/schemas/course.schema';
@@ -17,15 +21,10 @@ import { ClassroomTask } from '../src/modules/classrooms/classroom-tasks/schemas
 import { Task } from '../src/modules/learning-tasks/schemas/task.schema';
 import { Submission } from '../src/modules/learning-tasks/schemas/submission.schema';
 import { Feedback } from '../src/modules/learning-tasks/schemas/feedback.schema';
-import { AiFeedbackJob } from '../src/modules/learning-tasks/ai-feedback/schemas/ai-feedback-job.schema';
-
-const ensureMongoUri = () => {
-  if (!process.env.MONGO_URI) {
-    throw new Error(
-      'MONGO_URI is required for classroom dashboard isolation e2e.',
-    );
-  }
-};
+import {
+  AiFeedbackJob,
+  AiFeedbackJobStatus,
+} from '../src/modules/learning-tasks/ai-feedback/schemas/ai-feedback-job.schema';
 
 type CreatedCourseResponse = {
   id: string;
@@ -75,6 +74,8 @@ type StudentDashboardTask = {
   mySubmissionsCount: number;
   myLatestSubmission: {
     submissionId: string;
+    attemptNo?: number | null;
+    createdAt: string;
     aiFeedbackStatus: string;
   } | null;
 };
@@ -101,14 +102,17 @@ describe('Classroom Dashboard Isolation (e2e)', () => {
   let teacherAgent: ReturnType<typeof request.agent>;
   let student1Agent: ReturnType<typeof request.agent>;
   let student2Agent: ReturnType<typeof request.agent>;
+  let databaseVerified = false;
 
+  const teacherId = new Types.ObjectId();
+  const student1Id = new Types.ObjectId();
+  const student2Id = new Types.ObjectId();
+  const createdUserIds = [teacherId, student1Id, student2Id];
   const createdClassroomIds: string[] = [];
   const createdClassroomTaskIds: string[] = [];
   const createdSubmissionIds: string[] = [];
   let courseId = '';
   let taskId = '';
-  let previousWorkerEnabled: string | undefined;
-  let previousDebugEnabled: string | undefined;
 
   const teacherEmail = `teacher.iso.${Date.now()}@example.com`;
   const student1Email = `student1.iso.${Date.now()}@example.com`;
@@ -127,26 +131,24 @@ describe('Classroom Dashboard Isolation (e2e)', () => {
       .send({ email, password })
       .expect((res) => {
         if (![200, 201].includes(res.status)) {
-          throw new Error(
-            `Unexpected login status ${res.status}, body=${JSON.stringify(res.body)}`,
-          );
+          throw new Error(`Unexpected login status ${res.status}`);
         }
       });
   };
 
   beforeAll(async () => {
-    ensureMongoUri();
-
-    previousWorkerEnabled = process.env.AI_FEEDBACK_WORKER_ENABLED;
-    process.env.AI_FEEDBACK_WORKER_ENABLED = 'false';
-    previousDebugEnabled = process.env.AI_FEEDBACK_DEBUG_ENABLED;
-    process.env.AI_FEEDBACK_DEBUG_ENABLED = 'true';
-
     const moduleFixture: TestingModule = await Test.createTestingModule({
       imports: [AppModule],
     }).compile();
 
     app = moduleFixture.createNestApplication();
+    userModel = app.get(getModelToken(User.name));
+    await assertAuthTestConnection(userModel.db);
+    await assertAuthTestConnection(
+      app.get<Connection>(
+        getConnectionToken(CLASSROOM_TASK_TRANSACTION_CONNECTION),
+      ),
+    );
     app.setGlobalPrefix('api');
     app.useGlobalPipes(
       new ValidationPipe({
@@ -162,7 +164,6 @@ describe('Classroom Dashboard Isolation (e2e)', () => {
     student1Agent = request.agent(app.getHttpServer());
     student2Agent = request.agent(app.getHttpServer());
 
-    userModel = app.get(getModelToken(User.name));
     sessionModel = app.get(getModelToken(Session.name));
     courseModel = app.get(getModelToken(Course.name));
     classroomModel = app.get(getModelToken(Classroom.name));
@@ -171,6 +172,7 @@ describe('Classroom Dashboard Isolation (e2e)', () => {
     submissionModel = app.get(getModelToken(Submission.name));
     feedbackModel = app.get(getModelToken(Feedback.name));
     aiFeedbackJobModel = app.get(getModelToken(AiFeedbackJob.name));
+    databaseVerified = true;
 
     const [teacherHash, student1Hash, student2Hash] = await Promise.all([
       bcrypt.hash(teacherPassword, 10),
@@ -180,16 +182,19 @@ describe('Classroom Dashboard Isolation (e2e)', () => {
 
     await Promise.all([
       userModel.create({
+        _id: teacherId,
         email: teacherEmail,
         passwordHash: teacherHash,
         roles: ['teacher'],
       }),
       userModel.create({
+        _id: student1Id,
         email: student1Email,
         passwordHash: student1Hash,
         roles: ['student'],
       }),
       userModel.create({
+        _id: student2Id,
         email: student2Email,
         passwordHash: student2Hash,
         roles: ['student'],
@@ -197,18 +202,8 @@ describe('Classroom Dashboard Isolation (e2e)', () => {
     ]);
   });
 
-  afterAll(async () => {
-    if (previousWorkerEnabled === undefined) {
-      delete process.env.AI_FEEDBACK_WORKER_ENABLED;
-    } else {
-      process.env.AI_FEEDBACK_WORKER_ENABLED = previousWorkerEnabled;
-    }
-    if (previousDebugEnabled === undefined) {
-      delete process.env.AI_FEEDBACK_DEBUG_ENABLED;
-    } else {
-      process.env.AI_FEEDBACK_DEBUG_ENABLED = previousDebugEnabled;
-    }
-
+  const cleanupOwnedFixtures = async () => {
+    await assertAuthTestConnection(userModel.db);
     const cleanup: Promise<unknown>[] = [];
     if (createdSubmissionIds.length > 0) {
       const submissionObjectIds = createdSubmissionIds.map(
@@ -253,26 +248,30 @@ describe('Classroom Dashboard Isolation (e2e)', () => {
       );
     }
 
-    const users = await userModel
-      .find({ email: { $in: [teacherEmail, student1Email, student2Email] } })
-      .select('_id')
-      .lean()
-      .exec();
-    const userIds = users.map((user) => user._id);
-    if (userIds.length > 0) {
-      cleanup.push(sessionModel.deleteMany({ userId: { $in: userIds } }));
-      cleanup.push(userModel.deleteMany({ _id: { $in: userIds } }));
+    cleanup.push(sessionModel.deleteMany({ userId: { $in: createdUserIds } }));
+    cleanup.push(userModel.deleteMany({ _id: { $in: createdUserIds } }));
+    if (createdClassroomIds.length > 0) {
+      await app
+        .get<Model<Enrollment>>(getModelToken(Enrollment.name))
+        .deleteMany({
+          classroomId: {
+            $in: createdClassroomIds.map((id) => new Types.ObjectId(id)),
+          },
+        });
     }
-
-    await app
-      .get<Model<Enrollment>>(getModelToken(Enrollment.name))
-      .deleteMany({
-        classroomId: {
-          $in: createdClassroomIds.map((id) => new Types.ObjectId(id)),
-        },
-      });
     await Promise.all(cleanup);
-    await app.close();
+  };
+
+  afterAll(async () => {
+    try {
+      if (databaseVerified) await cleanupOwnedFixtures();
+    } finally {
+      try {
+        await app?.close();
+      } finally {
+        authTestEnvironment.restore();
+      }
+    }
   });
 
   it('isolates submissions and AI stats per classroomTaskId', async () => {
@@ -382,22 +381,13 @@ describe('Classroom Dashboard Isolation (e2e)', () => {
       .send({ expectedRevision: submissionABody.contentRevision })
       .expect(200);
 
-    const processedJobs = await teacherAgent
-      .post('/api/learning-tasks/ai-feedback/jobs/process-once')
-      .send({})
-      .expect((res) => {
-        if (![200, 201].includes(res.status)) {
-          throw new Error(
-            `Unexpected process-once status ${res.status}, body=${JSON.stringify(res.body)}`,
-          );
-        }
-      });
-    expect(processedJobs.body).toMatchObject({
-      processed: 1,
-      succeeded: 1,
-      failed: 0,
-      dead: 0,
-    });
+    const jobA = await aiFeedbackJobModel
+      .updateOne(
+        { submissionId: new Types.ObjectId(submissionABody.id) },
+        { $set: { status: AiFeedbackJobStatus.Succeeded, attempts: 1 } },
+      )
+      .exec();
+    expect(jobA.modifiedCount).toBe(1);
 
     const teacherDashboardA = await teacherAgent
       .get(`/api/classrooms/${classroomABody.id}/dashboard`)
@@ -437,15 +427,64 @@ describe('Classroom Dashboard Isolation (e2e)', () => {
       notRequested: 1,
     });
 
+    await student2Agent
+      .post('/api/classrooms/join')
+      .send({ joinCode: classroomABody.joinCode })
+      .expect(201);
+    const otherStudentSubmission = await student2Agent
+      .post(
+        `/api/classrooms/${classroomABody.id}/tasks/${classroomTaskABody.id}/submissions`,
+      )
+      .send({
+        content: {
+          codeText: 'function otherStudentInA() { return true; }',
+          language: 'typescript',
+        },
+      })
+      .expect(201);
+    const otherStudentSubmissionBody =
+      otherStudentSubmission.body as CreatedSubmissionResponse;
+    createdSubmissionIds.push(otherStudentSubmissionBody.id);
+
+    const db = submissionModel.db.db;
+    if (!db)
+      throw new Error('Dashboard isolation fixture database is required');
+    const submissions = db.collection(submissionModel.collection.name);
+    const classroomTaskAId = new Types.ObjectId(classroomTaskABody.id);
+    // Use the raw collection for historical BSON shapes the current schema rejects.
+    const invalidAssociations = [
+      {},
+      { classroomTaskId: null },
+      { classroomTaskId: classroomTaskABody.id },
+      { classroomTaskId: [classroomTaskAId] },
+    ].map((association, index) => ({
+      _id: new Types.ObjectId(),
+      studentId: student1Id,
+      taskId: new Types.ObjectId(taskId),
+      attemptNo: index + 2,
+      createdAt: new Date(),
+      ...association,
+    }));
+    createdSubmissionIds.push(
+      ...invalidAssociations.map(({ _id }) => _id.toHexString()),
+    );
+    await submissions.insertMany(invalidAssociations);
+
+    const missingFields = await submissions.updateOne(
+      { _id: new Types.ObjectId(submissionABody.id), studentId: student1Id },
+      { $unset: { attemptNo: '', createdAt: '' } },
+    );
+    const nullFields = await submissions.updateOne(
+      { _id: new Types.ObjectId(submissionBBody.id), studentId: student2Id },
+      { $set: { attemptNo: null, createdAt: null } },
+    );
+    expect(missingFields.modifiedCount).toBe(1);
+    expect(nullFields.modifiedCount).toBe(1);
+
     const student1Dashboard = await student1Agent
       .get('/api/classrooms/mine/dashboard')
       .query({ status: 'ACTIVE', page: 1, limit: 20 })
-      .expect((res) => {
-        if (res.status !== 200) {
-          // 直接把 400 的校验错误打印出来
-          console.log('student dashboard error', res.status, res.body);
-        }
-      });
+      .expect(200);
     const student1Body = student1Dashboard.body as StudentDashboardResponse;
     const student1ClassA = student1Body.items.find(
       (item) => item.classroom.id === classroomABody.id,
@@ -456,17 +495,14 @@ describe('Classroom Dashboard Isolation (e2e)', () => {
     const student1TaskA = student1ClassA?.tasks.find(
       (task) => task.classroomTaskId === classroomTaskABody.id,
     );
-    const student1TaskB = student1ClassB?.tasks.find(
-      (task) => task.classroomTaskId === classroomTaskBBody.id,
-    );
     expect(student1TaskA?.mySubmissionsCount).toBe(1);
-    expect(student1TaskA?.myLatestSubmission).toBeDefined();
-    expect(student1TaskA?.myLatestSubmission).toMatchObject({
+    expect(student1TaskA?.myLatestSubmission).toEqual({
       submissionId: submissionABody.id,
+      createdAt: '1970-01-01T00:00:00.000Z',
       aiFeedbackStatus: 'SUCCEEDED',
     });
-    expect(student1TaskB?.mySubmissionsCount ?? 0).toBe(0);
-    expect(student1TaskB?.myLatestSubmission ?? null).toBeNull();
+    expect(student1TaskA?.myLatestSubmission).not.toHaveProperty('attemptNo');
+    expect(student1ClassB).toBeUndefined();
 
     const student2Dashboard = await student2Agent
       .get('/api/classrooms/mine/dashboard')
@@ -486,12 +522,32 @@ describe('Classroom Dashboard Isolation (e2e)', () => {
       (task) => task.classroomTaskId === classroomTaskBBody.id,
     );
     expect(student2TaskB?.mySubmissionsCount).toBe(1);
-    expect(student2TaskB?.myLatestSubmission).toBeDefined();
-    expect(student2TaskB?.myLatestSubmission).toMatchObject({
+    expect(student2TaskB?.myLatestSubmission).toEqual({
       submissionId: submissionBBody.id,
+      attemptNo: null,
+      createdAt: '1970-01-01T00:00:00.000Z',
       aiFeedbackStatus: 'NOT_REQUESTED',
     });
-    expect(student2TaskA?.mySubmissionsCount ?? 0).toBe(0);
-    expect(student2TaskA?.myLatestSubmission ?? null).toBeNull();
+    expect(student2TaskA?.mySubmissionsCount).toBe(1);
+    expect(student2TaskA?.myLatestSubmission).toMatchObject({
+      submissionId: otherStudentSubmissionBody.id,
+      attemptNo: 1,
+      aiFeedbackStatus: 'NOT_REQUESTED',
+    });
+    console.info('Dashboard isolation readback', {
+      invalidAssociationRows: invalidAssociations.length,
+      student1TaskA: {
+        count: student1TaskA?.mySubmissionsCount,
+        latest: student1TaskA?.myLatestSubmission,
+      },
+      student2TaskA: {
+        count: student2TaskA?.mySubmissionsCount,
+        latest: student2TaskA?.myLatestSubmission,
+      },
+      student2TaskB: {
+        count: student2TaskB?.mySubmissionsCount,
+        latest: student2TaskB?.myLatestSubmission,
+      },
+    });
   });
 });
