@@ -566,7 +566,7 @@ export default async function ReviewPackPage({ params, searchParams }: ReviewPac
 
                       return card.distributionItems.map((item) => {
                         const count = typeof item.count === "number" && Number.isFinite(item.count) ? item.count : 0;
-                        const fillPercent = maxCount > 0 ? Math.max((count / maxCount) * 100, 6) : 6;
+                        const fillPercent = count > 0 ? Math.max((count / maxCount) * 100, 6) : 0;
 
                         return (
                           <div key={item.key} className="grid grid-cols-[2.5rem_1fr_3rem] items-center gap-2 text-xs">

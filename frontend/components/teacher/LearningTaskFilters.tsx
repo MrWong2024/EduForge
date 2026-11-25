@@ -148,10 +148,8 @@ export function LearningTaskFilters({
     typeof total === "number" && total >= 0 ? total : tasks.length;
   const totalPages = Math.max(1, Math.ceil(totalCount / limit));
   const canGoPrevious = currentPage > 1;
-  const canGoNext = currentPage < totalPages;
   const previousPage =
     currentPage > totalPages ? totalPages : Math.max(1, currentPage - 1);
-  const nextPage = currentPage + 1;
 
   const knowledgeModuleOptions = useMemo(() => {
     const moduleSet = new Set<string>();
@@ -406,9 +404,6 @@ export function LearningTaskFilters({
             </button>
           </div>
         </div>
-        <p className="mt-3 text-xs text-zinc-500">
-          当前页显示 {sortedTasks.length} 条，共 {totalCount} 条模板
-        </p>
       </section>
 
       {sortedTasks.length === 0 && totalCount === 0 && !hasActiveFilters ? (
@@ -703,34 +698,6 @@ export function LearningTaskFilters({
           </table>
         </div>
       )}
-
-      {(totalPages > 1 || currentPage > 1) && totalCount > 0 ? (
-        <section className="rounded-lg border border-zinc-200 bg-white p-3">
-          <div className="flex flex-wrap items-center justify-between gap-3 text-sm">
-            <p className="text-zinc-600">
-              第 {currentPage} / {totalPages} 页，共 {totalCount} 条
-            </p>
-            <div className="flex items-center gap-2">
-              <button
-                type="button"
-                onClick={() => goToPage(previousPage)}
-                disabled={!canGoPrevious}
-                className="rounded-md border border-zinc-300 px-3 py-1.5 text-zinc-700 enabled:hover:bg-zinc-100 disabled:cursor-not-allowed disabled:opacity-50"
-              >
-                上一页
-              </button>
-              <button
-                type="button"
-                onClick={() => goToPage(nextPage)}
-                disabled={!canGoNext}
-                className="rounded-md border border-zinc-300 px-3 py-1.5 text-zinc-700 enabled:hover:bg-zinc-100 disabled:cursor-not-allowed disabled:opacity-50"
-              >
-                下一页
-              </button>
-            </div>
-          </div>
-        </section>
-      ) : null}
 
       {hasActiveFilters ? (
         <p className="text-xs text-zinc-500">

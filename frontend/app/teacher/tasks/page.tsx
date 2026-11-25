@@ -255,20 +255,18 @@ export default async function TeacherLearningTasksPage({
         {viewModel.taskList.items.length} 个
       </p>
 
-      <div className="[&>section:nth-of-type(2)>p:last-child]:hidden [&>section:nth-of-type(3)]:hidden">
-        <LearningTaskFilters
-          tasks={viewModel.taskList.items}
-          currentUserId={viewModel.currentUserId}
-          initialScope={initialScope}
-          initialStatus={initialStatusFilter}
-          initialKnowledgeModule={initialKnowledgeModuleFilter}
-          initialCourseLabel={initialCourseLabelFilter}
-          initialDifficultyFilter={initialDifficultyFilter}
-          initialPage={viewModel.taskList.page ?? initialPage}
-          initialLimit={viewModel.taskList.limit ?? TASK_TEMPLATE_PAGE_LIMIT}
-          total={viewModel.taskList.total}
-        />
-      </div>
+      <LearningTaskFilters
+        tasks={viewModel.taskList.items}
+        currentUserId={viewModel.currentUserId}
+        initialScope={initialScope}
+        initialStatus={initialStatusFilter}
+        initialKnowledgeModule={initialKnowledgeModuleFilter}
+        initialCourseLabel={initialCourseLabelFilter}
+        initialDifficultyFilter={initialDifficultyFilter}
+        initialPage={viewModel.taskList.page ?? initialPage}
+        initialLimit={viewModel.taskList.limit ?? TASK_TEMPLATE_PAGE_LIMIT}
+        total={viewModel.taskList.total}
+      />
 
       {showTaskTemplatePagination ? (
         <div className="flex items-center gap-4 text-sm">

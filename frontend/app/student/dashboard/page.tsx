@@ -232,7 +232,7 @@ const getTaskVisibilityBadge = (
   if (task.studentVisibilityStatus === "HISTORICAL" || task.isHistorical) {
     return {
       label: "历史任务",
-      title: "长期过期任务，仅在显示历史任务时展示",
+      title: "打开“显示历史任务”后可查看此任务。",
       tone: "neutral",
     };
   }
@@ -382,7 +382,7 @@ export default async function StudentDashboardPage({
           description={
             includeHistorical
               ? "当前没有可展示的学习任务。"
-              : "默认仅显示当前任务与近期过期任务；如需回看长期过期任务，可打开“显示历史任务”。"
+              : "默认显示当前任务与近期过期任务。打开“显示历史任务”可查看更多任务。"
           }
           actions={
             <div className="flex flex-wrap justify-center gap-3">
