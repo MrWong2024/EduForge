@@ -129,13 +129,12 @@ export class TeacherClassroomWeeklyReportService {
       .lean<ClassroomTaskWithMeta[]>()
       .exec();
     const classroomTaskIds = classroomTasks.map((task) => task._id);
-    const [studentsCount, classroomStudentIdsRaw] = await Promise.all([
-      this.enrollmentService.countStudents(classroom._id.toString()),
-      this.enrollmentService.listActiveStudentIds(classroom._id),
-    ]);
+    const classroomStudentIdsRaw =
+      await this.enrollmentService.listActiveStudentIds(classroom._id);
     const classroomStudentIds = [...classroomStudentIdsRaw].sort(
       (left, right) => left.localeCompare(right),
     );
+    const studentsCount = classroomStudentIds.length;
     const classroomStudentObjectIds = classroomStudentIds.map(
       (studentId) => new Types.ObjectId(studentId),
     );

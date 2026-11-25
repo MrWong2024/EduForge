@@ -208,9 +208,9 @@ type LearningTrajectoryStudentPublic = {
   email: string | null;
 };
 type LearningTrajectoryTrend = {
-  errorCountFirst: number;
-  errorCountLatest: number;
-  errorDelta: number;
+  errorCountFirst: number | null;
+  errorCountLatest: number | null;
+  errorDelta: number | null;
   topTagsFirst: Array<{ tag: string; count: number }>;
   topTagsLatest: Array<{ tag: string; count: number }>;
 };
@@ -1101,7 +1101,7 @@ export class ClassroomTasksService {
     // 1) submissions are isolated by classroomTaskId and filtered by submissions.createdAt window.
     // 2) Students are sourced from Enrollment ACTIVE only (STUDENT role).
     // 3) sort is applied within the paged enrollment slice (page-local sort), not globally.
-    // 4) errorRate(v1) uses latest attempt ERROR count for deterministic sorting.
+    // 4) errorRate(v1) sorts by latest AI ERROR count, with unknown counts last.
     const [classroom, classroomTask] = await Promise.all([
       this.classroomModel
         .findOne({
@@ -1214,9 +1214,9 @@ export class ClassroomTasksService {
           latestAttemptAt: null,
           latestAiFeedbackStatus: null,
           trend: {
-            errorCountFirst: 0,
-            errorCountLatest: 0,
-            errorDelta: 0,
+            errorCountFirst: null,
+            errorCountLatest: null,
+            errorDelta: null,
             topTagsFirst: [],
             topTagsLatest: [],
           },
@@ -1228,12 +1228,14 @@ export class ClassroomTasksService {
         this.findFirstAttemptSubmission(studentSubmissions);
       const latestSubmission =
         this.findLatestAttemptSubmission(studentSubmissions);
-      const firstSummary =
-        feedbackSummaryMap.get(firstSubmission._id.toString()) ??
-        this.getEmptyFeedbackSummary();
-      const latestSummary =
-        feedbackSummaryMap.get(latestSubmission._id.toString()) ??
-        this.getEmptyFeedbackSummary();
+      const firstSummary = feedbackSummaryMap.get(
+        firstSubmission._id.toString(),
+      );
+      const latestSummary = feedbackSummaryMap.get(
+        latestSubmission._id.toString(),
+      );
+      const errorCountFirst = firstSummary?.severityBreakdown.ERROR ?? null;
+      const errorCountLatest = latestSummary?.severityBreakdown.ERROR ?? null;
       const latestAiFeedbackStatus =
         statusMap.get(latestSubmission._id.toString()) ??
         AiFeedbackStatus.NotRequested;
@@ -1270,13 +1272,16 @@ export class ClassroomTasksService {
         ).toISOString(),
         latestAiFeedbackStatus,
         trend: {
-          errorCountFirst: firstSummary.severityBreakdown.ERROR,
-          errorCountLatest: latestSummary.severityBreakdown.ERROR,
+          errorCountFirst,
+          errorCountLatest,
           errorDelta:
-            latestSummary.severityBreakdown.ERROR -
-            firstSummary.severityBreakdown.ERROR,
-          topTagsFirst: firstSummary.topTags,
-          topTagsLatest: latestSummary.topTags,
+            !firstSubmission._id.equals(latestSubmission._id) &&
+            errorCountFirst !== null &&
+            errorCountLatest !== null
+              ? errorCountLatest - errorCountFirst
+              : null,
+          topTagsFirst: firstSummary?.topTags ?? [],
+          topTagsLatest: latestSummary?.topTags ?? [],
         },
         attempts,
       };
@@ -1742,11 +1747,13 @@ export class ClassroomTasksService {
       sort === 'attemptsCount'
         ? right.attemptsCount
         : right.trend.errorCountLatest;
-    if (leftValue !== rightValue) {
-      const diff = leftValue - rightValue;
-      return order === 'asc' ? diff : -diff;
+    if (leftValue === rightValue) {
+      return left.studentId.localeCompare(right.studentId);
     }
-    return left.studentId.localeCompare(right.studentId);
+    if (leftValue === null) return 1;
+    if (rightValue === null) return -1;
+    const diff = leftValue - rightValue;
+    return order === 'asc' ? diff : -diff;
   }
 
   private getSharedVisibilityFilter(): Record<string, unknown>[] {

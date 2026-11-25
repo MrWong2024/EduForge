@@ -9,6 +9,14 @@ const buildItem = (partial: Partial<AiFeedbackItem>): AiFeedbackItem => ({
   ...partial,
 });
 
+const syntaxError = (message: string, suggestion?: string) =>
+  buildItem({
+    type: FeedbackType.Syntax,
+    severity: FeedbackSeverity.Error,
+    message,
+    suggestion,
+  });
+
 describe('compactAiFeedbackItems', () => {
   it('merges repeated semicolon syntax issues into one primary feedback', () => {
     const items: AiFeedbackItem[] = [
@@ -38,6 +46,88 @@ describe('compactAiFeedbackItems', () => {
     expect(compacted[0].severity).toBe(FeedbackSeverity.Error);
     expect(compacted[0].message).toContain('多处');
     expect(compacted[0].message).toContain('分号');
+  });
+
+  it('uses the missing-semicolon fallback suggestion only for explicit diagnoses', () => {
+    const compacted = compactAiFeedbackItems([
+      syntaxError('第 12 行缺少分号'),
+      syntaxError('Line 26 is missing a semicolon.'),
+    ]);
+
+    expect(compacted).toHaveLength(1);
+    expect(compacted[0].message).toContain('多处语句末尾缺少分号');
+    expect(compacted[0].suggestion).toContain('补齐语句末尾分号');
+  });
+
+  it.each(['多写分号', '多余的分号', 'extra semicolon'])(
+    'preserves the removal direction of repeated %s diagnoses',
+    (diagnosis) => {
+      const firstMessage = `Syntax error ${diagnosis} after the return expression at line 12.`;
+      const secondMessage = `Syntax error ${diagnosis} after the return expression at line 26.`;
+      const compacted = compactAiFeedbackItems([
+        syntaxError(firstMessage, '删除第 12 行多余的分号。'),
+        syntaxError(secondMessage, '删除第 26 行多余的分号。'),
+      ]);
+
+      expect(compacted).toHaveLength(1);
+      expect(compacted[0].message).toBe(
+        `${firstMessage}（同类问题共 2 处，已合并提示）`,
+      );
+      expect(compacted[0].suggestion).toBe(
+        '删除第 12 行多余的分号。；删除第 26 行多余的分号。',
+      );
+    },
+  );
+
+  it.each([false, true])(
+    'keeps opposite diagnoses separate even when their text is similar (extra first: %s)',
+    (extraFirst) => {
+      const missing = syntaxError(
+        'Parser fails at the end of the return expression because of a missing semicolon.',
+        'Add the missing semicolon.',
+      );
+      const extra = syntaxError(
+        'Parser fails at the end of the return expression because of an extra semicolon.',
+        'Remove the extra semicolon.',
+      );
+      const items = extraFirst ? [extra, missing] : [missing, extra];
+      const compacted = compactAiFeedbackItems(items);
+
+      expect(compacted).toHaveLength(1);
+      expect(compacted[0].message).toBe(items[0].message);
+      expect(compacted[0].suggestion).toBe(items[0].suggestion);
+    },
+  );
+
+  it('keeps the original diagnostic direction when only advice mentions semicolons', () => {
+    const firstMessage =
+      'Compiler cannot parse the return expression at line 12.';
+    const secondMessage =
+      'Compiler cannot parse the return expression at line 26.';
+    const suggestion = '检查括号和分号是否位于正确位置。';
+    const compacted = compactAiFeedbackItems([
+      syntaxError(firstMessage, suggestion),
+      syntaxError(secondMessage, suggestion),
+    ]);
+
+    expect(compacted).toHaveLength(1);
+    expect(compacted[0].message).toBe(
+      `${firstMessage}（同类问题共 2 处，已合并提示）`,
+    );
+    expect(compacted[0].suggestion).toBe(suggestion);
+  });
+
+  it('never treats a negated missing-semicolon diagnosis as affirmative', () => {
+    const message = '第 12 行不是缺少分号，而是括号不匹配。';
+    const suggestion = '检查 return 表达式的括号配对。';
+    const compacted = compactAiFeedbackItems([
+      syntaxError(message, suggestion),
+      syntaxError('第 26 行不是缺少分号，而是括号不匹配。', suggestion),
+    ]);
+
+    expect(compacted).toHaveLength(1);
+    expect(compacted[0].message).toContain(message);
+    expect(compacted[0].suggestion).toBe(suggestion);
   });
 
   it.each([

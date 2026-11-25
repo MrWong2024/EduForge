@@ -231,7 +231,7 @@ Global SoT 只保留理解跨 Service workflow 必需的稳定不变量，不追
 - Domain / Responsibility: 计算班级进度、风险未提交成员及 AI 健康汇总。
 - Upstream: `ClassroomsService`；Snapshot 通过 `getWeeklyReportByLowerBound` 复用聚合。
 - Downstream / Dependencies: `ClassroomModel`、`ClassroomTaskModel`、`SubmissionModel`、`EnrollmentService`、`AiFeedbackMetricsAggregator`。
-- Consistency / State / Idempotency: 窗口过滤统一使用 createdAt；all 不拼 lowerBound；任务范围按班级和时间窗口确定，包含窗口内已撤回实例，后续活动沿用各自的时间窗口。风险集合为有效成员全集减去去重已提交学生，迟交统计随同一任务/提交范围计算。空任务或空成员返回零值聚合。
+- Consistency / State / Idempotency: 窗口过滤统一使用 createdAt；all 不拼 lowerBound；任务范围按班级和时间窗口确定，包含窗口内已撤回实例，后续活动沿用各自的时间窗口。每次仅读取一份 ACTIVE 学生名单，用于总人数、提交、迟交和未提交人数；风险样本来自名单中尚未提交的学生。空任务或空成员返回零值聚合。
 - Isolation: 校验班级 owner；成员全集来自 Enrollment ACTIVE，任务/提交/AI 统计按 classroomId 与 classroomTaskId。
 - Side Effects: 只读。
 - Important Performance / Recovery: 以 classroomTaskIds 批次聚合，避免逐 task 查询。
@@ -273,7 +273,7 @@ Global SoT 只保留理解跨 Service workflow 必需的稳定不变量，不追
 - Domain / Responsibility: 按学生汇总实例提交轨迹、可选 attempts 与 tag 明细。
 - Upstream: 教师学习轨迹入口。
 - Downstream / Dependencies: `ClassroomModel`、`ClassroomTaskModel`、`SubmissionModel`、`UserModel`、`EnrollmentService`、`AiFeedbackJobService`、`FeedbackModel`。
-- Consistency / State / Idempotency: all 不对 submissions 拼 createdAt 下界；未提交学生仍参与。先分页 Enrollment，再做 page-local sort。关闭 tag 明细时跳过 tags 展开聚合；attempt feedbackCount 按全来源计算，AI 摘要保持独立，缺失计数补零、缺 Job 使用 NOT_REQUESTED。
+- Consistency / State / Idempotency: all 不对 submissions 拼 createdAt 下界；未提交学生仍参与。先分页 Enrollment，再做页内排序。`errorRate` 按最近一次提交的 AI ERROR 数排序，未知值在升序、降序都排在末尾。趋势只依据对应提交的实际 AI 反馈条目，关闭尝试明细不影响趋势。关闭 tag 明细时跳过 tags 展开聚合；attempt feedbackCount 按全来源计算，AI 摘要保持独立，缺 Job 使用 NOT_REQUESTED。
 - Isolation: 校验班级 owner；成员取 Enrollment ACTIVE，全链路按 classroomTaskId，页内查询再限 studentIds。
 - Side Effects: 只读。
 - Important Performance / Recovery: 按页批量读取用户与提交，再按 submissionIds 批量取状态、AI 摘要和全来源反馈数，避免 N+1。

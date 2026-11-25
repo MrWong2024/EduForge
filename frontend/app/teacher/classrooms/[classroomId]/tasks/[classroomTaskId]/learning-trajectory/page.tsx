@@ -222,7 +222,7 @@ const toAttemptFeedbackSummary = (attempt: Record<string, unknown>): string => {
   const aiSummaryCount = toFiniteNumber(safeGet(attempt, "feedbackSummary.totalItems", undefined));
   const pieces: string[] = [];
   pieces.push(`总反馈 ${totalFeedbackCount}`);
-  if (errorCount !== null) {
+  if (aiSummaryCount !== null && aiSummaryCount > 0 && errorCount !== null) {
     pieces.push(`错误 ${errorCount}`);
   }
   if (aiSummaryCount !== null) {

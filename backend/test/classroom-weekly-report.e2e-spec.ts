@@ -11,10 +11,17 @@ import { User } from '../src/modules/users/schemas/user.schema';
 import { Session } from '../src/modules/auth/schemas/session.schema';
 import { Course } from '../src/modules/courses/schemas/course.schema';
 import { Classroom } from '../src/modules/classrooms/schemas/classroom.schema';
-import { Enrollment } from '../src/modules/classrooms/enrollments/schemas/enrollment.schema';
+import {
+  Enrollment,
+  EnrollmentStatus,
+} from '../src/modules/classrooms/enrollments/schemas/enrollment.schema';
+import { EnrollmentService } from '../src/modules/classrooms/enrollments/services/enrollment.service';
 import { ClassroomTask } from '../src/modules/classrooms/classroom-tasks/schemas/classroom-task.schema';
 import { Task } from '../src/modules/learning-tasks/schemas/task.schema';
-import { Submission } from '../src/modules/learning-tasks/schemas/submission.schema';
+import {
+  Submission,
+  SubmissionStatus,
+} from '../src/modules/learning-tasks/schemas/submission.schema';
 import { Feedback } from '../src/modules/learning-tasks/schemas/feedback.schema';
 import {
   AiFeedbackJob,
@@ -49,6 +56,12 @@ type WeeklyReportResponse = {
     dueClassroomTasks: number;
     distinctStudentsSubmitted: number;
     submissionRate: number;
+    lateSubmissionsCount: number;
+    lateStudentsCount: number;
+  };
+  atRisk: {
+    notSubmittedStudentsCount: number;
+    sampleStudentIds: string[];
   };
   aiHealth: {
     jobs: {
@@ -86,13 +99,17 @@ describe('Classroom Weekly Report (e2e)', () => {
   let classroomTaskId = '';
   let taskId = '';
   let submissionId = '';
+  let removedSubmissionId = '';
   let teacherId = '';
   let studentId = '';
+  let pendingStudentId = '';
+  let removedStudentId = '';
   let previousWorkerEnabled: string | undefined;
   let previousDebugEnabled: string | undefined;
 
-  const teacherEmail = `teacher.weekly.${Date.now()}@example.com`;
-  const studentEmail = `student.weekly.${Date.now()}@example.com`;
+  const stamp = Date.now();
+  const teacherEmail = `teacher.weekly.${stamp}@example.com`;
+  const studentEmail = `student.weekly.${stamp}@example.com`;
   const teacherPassword = 'TeacherPass123!';
   const studentPassword = 'StudentPass123!';
 
@@ -171,6 +188,24 @@ describe('Classroom Weekly Report (e2e)', () => {
     ]);
     teacherId = teacher._id.toString();
     studentId = student._id.toString();
+    const pendingStudentObjectId = new Types.ObjectId();
+    const removedStudentObjectId = new Types.ObjectId();
+    pendingStudentId = pendingStudentObjectId.toString();
+    removedStudentId = removedStudentObjectId.toString();
+    await userModel.insertMany([
+      {
+        _id: pendingStudentObjectId,
+        email: `student.weekly.pending.${stamp}@example.com`,
+        passwordHash: studentHash,
+        roles: ['student'],
+      },
+      {
+        _id: removedStudentObjectId,
+        email: `student.weekly.removed.${stamp}@example.com`,
+        passwordHash: studentHash,
+        roles: ['student'],
+      },
+    ]);
   });
 
   afterAll(async () => {
@@ -188,18 +223,24 @@ describe('Classroom Weekly Report (e2e)', () => {
     const cleanupErrors: unknown[] = [];
     try {
       const cleanup: Promise<unknown>[] = [];
-      const userIds = [teacherId, studentId]
+      const userIds = [teacherId, studentId, pendingStudentId, removedStudentId]
         .filter(Boolean)
         .map((id) => new Types.ObjectId(id));
-      if (submissionId) {
-        const submissionObjectId = new Types.ObjectId(submissionId);
+      const submissionIds = [submissionId, removedSubmissionId]
+        .filter(Boolean)
+        .map((id) => new Types.ObjectId(id));
+      if (submissionIds.length > 0) {
         cleanup.push(
-          feedbackModel.deleteMany({ submissionId: submissionObjectId }),
+          feedbackModel.deleteMany({ submissionId: { $in: submissionIds } }),
         );
         cleanup.push(
-          aiFeedbackJobModel.deleteMany({ submissionId: submissionObjectId }),
+          aiFeedbackJobModel.deleteMany({
+            submissionId: { $in: submissionIds },
+          }),
         );
-        cleanup.push(submissionModel.deleteOne({ _id: submissionObjectId }));
+        cleanup.push(
+          submissionModel.deleteMany({ _id: { $in: submissionIds } }),
+        );
       }
       if (classroomTaskId) {
         cleanup.push(
@@ -260,7 +301,7 @@ describe('Classroom Weekly Report (e2e)', () => {
     }
   });
 
-  it('returns teacher classroom weekly report with progress, ai health and tags', async () => {
+  it('uses a single active roster for weekly progress and carries it into the snapshot', async () => {
     await login(teacherAgent, teacherEmail, teacherPassword);
     await login(studentAgent, studentEmail, studentPassword);
 
@@ -311,6 +352,21 @@ describe('Classroom Weekly Report (e2e)', () => {
       createdClassroomTask.body as CreatedClassroomTaskResponse
     ).id;
 
+    const emptyReport = await teacherAgent
+      .get(`/api/classrooms/${classroomId}/weekly-report`)
+      .query({ window: '7d', includeRiskStudentIds: true })
+      .expect(200);
+    expect(emptyReport.body).toMatchObject({
+      progress: {
+        studentsCount: 0,
+        distinctStudentsSubmitted: 0,
+        submissionRate: 0,
+        lateSubmissionsCount: 0,
+        lateStudentsCount: 0,
+      },
+      atRisk: { notSubmittedStudentsCount: 0, sampleStudentIds: [] },
+    });
+
     await studentAgent
       .post('/api/classrooms/join')
       .send({ joinCode: classroomBody.joinCode })
@@ -328,6 +384,56 @@ describe('Classroom Weekly Report (e2e)', () => {
       })
       .expect(201);
     submissionId = (createdSubmission.body as CreatedSubmissionResponse).id;
+
+    const classroomObjectId = new Types.ObjectId(classroomId);
+    const removedStudentObjectId = new Types.ObjectId(removedStudentId);
+    await enrollmentModel.insertMany([
+      {
+        classroomId: classroomObjectId,
+        userId: pendingStudentId,
+        status: EnrollmentStatus.Active,
+      },
+      {
+        classroomId: classroomObjectId,
+        userId: removedStudentObjectId,
+        status: EnrollmentStatus.Active,
+      },
+    ]);
+    const removedSubmissionObjectId = new Types.ObjectId();
+    removedSubmissionId = removedSubmissionObjectId.toString();
+    await submissionModel.create({
+      _id: removedSubmissionObjectId,
+      classroomTaskId: new Types.ObjectId(classroomTaskId),
+      taskId: new Types.ObjectId(taskId),
+      studentId: removedStudentObjectId,
+      attemptNo: 1,
+      isLate: true,
+      lateBySeconds: 600,
+      content: {
+        codeText: 'const historicalAttempt = true;',
+        language: 'typescript',
+      },
+      contentRevision: 0,
+      status: SubmissionStatus.Submitted,
+    });
+    await teacherAgent
+      .post(
+        `/api/classrooms/${classroomId}/students/${removedStudentId}/remove`,
+      )
+      .expect(201);
+    expect(
+      await enrollmentModel.exists({
+        classroomId: classroomObjectId,
+        userId: removedStudentObjectId,
+        status: EnrollmentStatus.Removed,
+      }),
+    ).not.toBeNull();
+    expect(
+      await submissionModel.exists({
+        _id: removedSubmissionObjectId,
+        isLate: true,
+      }),
+    ).not.toBeNull();
 
     await teacherAgent
       .post(
@@ -357,19 +463,57 @@ describe('Classroom Weekly Report (e2e)', () => {
       .exec();
     expect(completedJob?.status).toBe(AiFeedbackJobStatus.Succeeded);
 
-    const report = await teacherAgent
-      .get(`/api/classrooms/${classroomId}/weekly-report`)
-      .query({ window: '7d', includeRiskStudentIds: true })
-      .expect(200);
-    const body = report.body as WeeklyReportResponse;
+    const enrollmentService = app.get(EnrollmentService);
+    const listActiveStudentIds = jest.spyOn(
+      enrollmentService,
+      'listActiveStudentIds',
+    );
+    const countStudents = jest.spyOn(enrollmentService, 'countStudents');
+    let body: WeeklyReportResponse;
+    try {
+      const report = await teacherAgent
+        .get(`/api/classrooms/${classroomId}/weekly-report`)
+        .query({ window: '7d', includeRiskStudentIds: true })
+        .expect(200);
+      expect(listActiveStudentIds).toHaveBeenCalledTimes(1);
+      expect(listActiveStudentIds).toHaveBeenCalledWith(classroomObjectId);
+      expect(countStudents).not.toHaveBeenCalled();
+      body = report.body as WeeklyReportResponse;
+    } finally {
+      listActiveStudentIds.mockRestore();
+      countStudents.mockRestore();
+    }
 
     expect(body.window).toBe('7d');
-    expect(body.progress.studentsCount).toBeGreaterThanOrEqual(1);
-    expect(body.progress.publishedClassroomTasks).toBeGreaterThanOrEqual(1);
+    expect(body.progress).toMatchObject({
+      studentsCount: 2,
+      publishedClassroomTasks: 1,
+      distinctStudentsSubmitted: 1,
+      submissionRate: 0.5,
+      lateSubmissionsCount: 0,
+      lateStudentsCount: 0,
+    });
+    expect(body.atRisk).toEqual({
+      notSubmittedStudentsCount: 1,
+      sampleStudentIds: [pendingStudentId],
+    });
+    expect(
+      body.progress.distinctStudentsSubmitted +
+        body.atRisk.notSubmittedStudentsCount,
+    ).toBe(body.progress.studentsCount);
     expect(body.aiHealth.jobs.total).toBe(1);
     expect(body.aiHealth.jobs.succeeded).toBe(1);
     expect(body.aiHealth.successRate).toBe(1);
     expect(Array.isArray(body.topTags)).toBe(true);
+
+    const snapshot = await teacherAgent
+      .get(`/api/classrooms/${classroomId}/export/snapshot`)
+      .query({ window: '7d', includePerTask: false })
+      .expect(200);
+    const snapshotSummary = snapshot.body as {
+      summary: { progress: WeeklyReportResponse['progress'] };
+    };
+    expect(snapshotSummary.summary.progress).toEqual(body.progress);
 
     const defaultWindowReport = await teacherAgent
       .get(`/api/classrooms/${classroomId}/weekly-report`)
@@ -384,6 +528,10 @@ describe('Classroom Weekly Report (e2e)', () => {
     const allWindowBody = allWindowReport.body as WeeklyReportResponse;
 
     expect(defaultWindowBody.progress).toEqual(allWindowBody.progress);
+    expect(allWindowBody.atRisk).toEqual({
+      notSubmittedStudentsCount: 1,
+      sampleStudentIds: [],
+    });
     expect(defaultWindowBody.aiHealth.jobs).toEqual(
       allWindowBody.aiHealth.jobs,
     );

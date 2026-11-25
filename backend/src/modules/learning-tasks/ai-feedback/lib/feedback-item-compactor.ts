@@ -44,9 +44,19 @@ const BLOCKING_PATTERNS = [
   /语法|编译|运行|无法执行|无法运行|报错|错误/u,
 ];
 
-const SEMICOLON_PATTERNS = [
-  /semicolon|missing ;/i,
-  /分号|缺少;|缺少；|漏写分号/u,
+const MISSING_SEMICOLON_PATTERNS = [
+  /\bmissing\s+(?:(?:a|the)\s+)?(?:semicolons?\b|['"`]?;)/i,
+  /(?:缺少|缺失|漏写|漏掉|少写)(?:了)?\s*(?:(?:语句末尾|行末)的?)?\s*(?:分号|['"`]?[;；])/u,
+];
+
+const EXTRA_SEMICOLON_PATTERNS = [
+  /\b(?:extra|unnecessary|unexpected|redundant)\s+(?:semicolons?\b|['"`]?;)/i,
+  /(?:多写了?|多余的?|额外的?|重复的?)\s*(?:(?:一|两|若干|\d+)\s*个?)?\s*(?:分号|['"`]?[;；])/u,
+];
+
+const NON_AFFIRMATIVE_MISSING_PATTERNS = [
+  /\b(?:not|no|whether|possibly|might be|may be|could be)\b[^.!?\r\n]*\bmissing\b/i,
+  /(?:(?:不是|并非|没有|不存在|并未|未发现|是否|可能|疑似)[^，。；！？：\r\n]*|[不非]\s*)(?:缺少|缺失|漏写|漏掉|少写)/u,
 ];
 
 const cleanDisplayText = (value: string) =>
@@ -230,26 +240,18 @@ const collectMergedSuggestion = (items: AiFeedbackItem[]) => {
   return `${suggestions[0]}；${suggestions[1]}`;
 };
 
-const isRepeatedSemicolonIssue = (items: AiFeedbackItem[]) => {
-  if (items.length < 2) {
-    return false;
-  }
-  if (!items.every((item) => item.type === FeedbackType.Syntax)) {
-    return false;
-  }
-  let matched = 0;
-  for (const item of items) {
-    const text = `${item.message} ${item.suggestion ?? ''}`;
-    if (SEMICOLON_PATTERNS.some((pattern) => pattern.test(text))) {
-      matched += 1;
-    }
-  }
-  return matched >= 2;
-};
-
-const isSemicolonIssue = (item: AiFeedbackItem) => {
-  const text = `${item.message} ${item.suggestion ?? ''}`;
-  return SEMICOLON_PATTERNS.some((pattern) => pattern.test(text));
+const getSemicolonDirection = (item: AiFeedbackItem) => {
+  const extra = EXTRA_SEMICOLON_PATTERNS.some((pattern) =>
+    pattern.test(item.message),
+  );
+  const missing =
+    MISSING_SEMICOLON_PATTERNS.some((pattern) => pattern.test(item.message)) &&
+    !NON_AFFIRMATIVE_MISSING_PATTERNS.some((pattern) =>
+      pattern.test(item.message),
+    );
+  if (missing && !extra) return 'missing';
+  if (extra && !missing) return 'extra';
+  return 'other';
 };
 
 const mergeCluster = (cluster: Cluster): AiFeedbackItem => {
@@ -265,7 +267,10 @@ const mergeCluster = (cluster: Cluster): AiFeedbackItem => {
       suggestion: mergedSuggestion ?? primary.suggestion,
     };
   }
-  if (isRepeatedSemicolonIssue(cluster.items)) {
+  if (
+    cluster.type === FeedbackType.Syntax &&
+    cluster.items.every((item) => getSemicolonDirection(item) === 'missing')
+  ) {
     return {
       type: FeedbackType.Syntax,
       severity: cluster.severity,
@@ -294,14 +299,12 @@ const shouldMergeInCluster = (cluster: Cluster, candidate: AiFeedbackItem) => {
   ) {
     return false;
   }
-  if (
-    cluster.type === FeedbackType.Syntax &&
-    cluster.items.some((item) => isSemicolonIssue(item)) &&
-    isSemicolonIssue(candidate)
-  ) {
-    return true;
-  }
   const primary = pickPrimaryItem(cluster.items) ?? cluster.items[0];
+  if (cluster.type === FeedbackType.Syntax) {
+    const direction = getSemicolonDirection(candidate);
+    if (direction !== getSemicolonDirection(primary)) return false;
+    if (direction === 'missing') return true;
+  }
   return (
     textSimilarity(primary.message, candidate.message) >=
     MESSAGE_SIMILARITY_THRESHOLD

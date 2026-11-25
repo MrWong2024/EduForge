@@ -1,8 +1,8 @@
 import { INestApplication, ValidationPipe } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Test, TestingModule } from '@nestjs/testing';
-import { getModelToken } from '@nestjs/mongoose';
-import { Model, Types } from 'mongoose';
+import { getConnectionToken, getModelToken } from '@nestjs/mongoose';
+import { Connection, Model, Types } from 'mongoose';
 import * as bcrypt from 'bcryptjs';
 import cookieParser from 'cookie-parser';
 import request from 'supertest';
@@ -22,18 +22,16 @@ import {
   FeedbackSource,
   FeedbackType,
 } from '../src/modules/learning-tasks/schemas/feedback.schema';
-import { AiFeedbackJob } from '../src/modules/learning-tasks/ai-feedback/schemas/ai-feedback-job.schema';
-import { AiFeedbackProcessor } from '../src/modules/learning-tasks/ai-feedback/services/ai-feedback-processor.service';
+import {
+  AiFeedbackJob,
+  AiFeedbackJobStatus,
+} from '../src/modules/learning-tasks/ai-feedback/schemas/ai-feedback-job.schema';
+import {
+  assertLocalStandardTestAuthentication,
+  assertLocalStandardTestEnvironment,
+} from './helpers/local-test-database-auth';
 
 jest.setTimeout(30000);
-
-const ensureMongoUri = () => {
-  if (!process.env.MONGO_URI) {
-    throw new Error(
-      'MONGO_URI is required for classroom learning trajectory e2e.',
-    );
-  }
-};
 
 type CreatedCourseResponse = { id: string };
 type CreatedClassroomResponse = { id: string; joinCode: string };
@@ -63,9 +61,9 @@ type LearningTrajectoryResponse = {
     latestAttemptAt: string | null;
     latestAiFeedbackStatus: string | null;
     trend: {
-      errorCountFirst: number;
-      errorCountLatest: number;
-      errorDelta: number;
+      errorCountFirst: number | null;
+      errorCountLatest: number | null;
+      errorDelta: number | null;
       topTagsFirst: Array<{ tag: string; count: number }>;
       topTagsLatest: Array<{ tag: string; count: number }>;
     };
@@ -85,6 +83,13 @@ type LearningTrajectoryResponse = {
   }>;
 };
 
+function errorTrend(item?: LearningTrajectoryResponse['items'][number]) {
+  const trend = item?.trend;
+  return (
+    trend && [trend.errorCountFirst, trend.errorCountLatest, trend.errorDelta]
+  );
+}
+
 describe('Classroom Learning Trajectory (e2e)', () => {
   let app: INestApplication<App>;
   let userModel: Model<User>;
@@ -97,7 +102,6 @@ describe('Classroom Learning Trajectory (e2e)', () => {
   let submissionModel: Model<Submission>;
   let feedbackModel: Model<Feedback>;
   let aiFeedbackJobModel: Model<AiFeedbackJob>;
-  let aiFeedbackProcessor: AiFeedbackProcessor;
   let configService: ConfigService;
   let teacherAgent: ReturnType<typeof request.agent>;
   let studentAAgent: ReturnType<typeof request.agent>;
@@ -114,7 +118,6 @@ describe('Classroom Learning Trajectory (e2e)', () => {
   let studentBId = '';
 
   let previousWorkerEnabled: string | undefined;
-  let previousDebugEnabled: string | undefined;
   let previousSubmissionCooldownMs: string | undefined;
 
   const teacherEmail = `teacher.trajectory.${Date.now()}@example.com`;
@@ -126,9 +129,6 @@ describe('Classroom Learning Trajectory (e2e)', () => {
   const studentBNo = `S-B-${Date.now()}`;
   const teacherPassword = 'TeacherPass123!';
   const studentPassword = 'StudentPass123!';
-
-  const waitMs = (ms: number) =>
-    new Promise((resolve) => setTimeout(resolve, ms));
 
   const login = async (
     agent: ReturnType<typeof request.agent>,
@@ -147,12 +147,20 @@ describe('Classroom Learning Trajectory (e2e)', () => {
       });
   };
 
-  const fetchTrajectory = async (window?: '7d' | 'all') => {
+  const fetchTrajectory = async (
+    window?: '7d' | 'all',
+    options?: {
+      includeAttempts?: boolean;
+      sort?: 'errorRate';
+      order?: 'asc' | 'desc';
+    },
+  ) => {
     const query: Record<string, unknown> = {
       page: 1,
       limit: 20,
       includeAttempts: true,
       includeTagDetails: true,
+      ...options,
     };
     if (window !== undefined) {
       query.window = window;
@@ -167,12 +175,15 @@ describe('Classroom Learning Trajectory (e2e)', () => {
   };
 
   beforeAll(async () => {
-    ensureMongoUri();
+    const environment = {
+      nodeEnv: process.env.NODE_ENV,
+      purpose: process.env.EDUFORGE_DATABASE_PURPOSE,
+      mongoUri: process.env.MONGO_URI,
+    };
+    assertLocalStandardTestEnvironment(environment);
 
     previousWorkerEnabled = process.env.AI_FEEDBACK_WORKER_ENABLED;
     process.env.AI_FEEDBACK_WORKER_ENABLED = 'false';
-    previousDebugEnabled = process.env.AI_FEEDBACK_DEBUG_ENABLED;
-    process.env.AI_FEEDBACK_DEBUG_ENABLED = 'true';
     previousSubmissionCooldownMs =
       process.env.LEARNING_TASK_SUBMISSION_COOLDOWN_MS;
     process.env.LEARNING_TASK_SUBMISSION_COOLDOWN_MS = '0';
@@ -192,6 +203,19 @@ describe('Classroom Learning Trajectory (e2e)', () => {
     );
     app.use(cookieParser());
     await app.init();
+    const connection = app.get<Connection>(getConnectionToken());
+    const database = connection.db;
+    if (!database) throw new Error('Missing connected test database');
+    const auth = await database.command(
+      { connectionStatus: 1, showPrivileges: false, maxTimeMS: 5000 },
+      { signal: AbortSignal.timeout(5000), readPreference: 'primary' },
+    );
+    assertLocalStandardTestAuthentication({
+      ...environment,
+      databaseName: database.databaseName,
+      connectedHost: connection.host,
+      authInfo: auth.authInfo,
+    });
     configService = app.get(ConfigService);
     configService.set('LEARNING_TASK_SUBMISSION_COOLDOWN_MS', 0);
 
@@ -209,7 +233,6 @@ describe('Classroom Learning Trajectory (e2e)', () => {
     submissionModel = app.get(getModelToken(Submission.name));
     feedbackModel = app.get(getModelToken(Feedback.name));
     aiFeedbackJobModel = app.get(getModelToken(AiFeedbackJob.name));
-    aiFeedbackProcessor = app.get(AiFeedbackProcessor);
 
     const [teacherHash, studentAHash, studentBHash] = await Promise.all([
       bcrypt.hash(teacherPassword, 10),
@@ -253,11 +276,6 @@ describe('Classroom Learning Trajectory (e2e)', () => {
       delete process.env.AI_FEEDBACK_WORKER_ENABLED;
     } else {
       process.env.AI_FEEDBACK_WORKER_ENABLED = previousWorkerEnabled;
-    }
-    if (previousDebugEnabled === undefined) {
-      delete process.env.AI_FEEDBACK_DEBUG_ENABLED;
-    } else {
-      process.env.AI_FEEDBACK_DEBUG_ENABLED = previousDebugEnabled;
     }
     if (previousSubmissionCooldownMs === undefined) {
       delete process.env.LEARNING_TASK_SUBMISSION_COOLDOWN_MS;
@@ -319,9 +337,11 @@ describe('Classroom Learning Trajectory (e2e)', () => {
       cleanup.push(sessionModel.deleteMany({ userId: { $in: userObjectIds } }));
       cleanup.push(userModel.deleteMany({ _id: { $in: userObjectIds } }));
     }
-    await Promise.all(cleanup);
-
-    await app.close();
+    try {
+      await Promise.all(cleanup);
+    } finally {
+      await app?.close();
+    }
   });
 
   it('returns per-student trajectory with attempts, AI statuses and trend summary', async () => {
@@ -475,33 +495,62 @@ describe('Classroom Learning Trajectory (e2e)', () => {
       })
       .expect(200);
 
-    let hasSucceeded = false;
-    for (let index = 0; index < 10; index += 1) {
-      await aiFeedbackProcessor.processOnce(10);
-      const trajectory = await fetchTrajectory('7d');
-      const studentAItem = trajectory.items.find(
-        (item) => item.studentId === studentAId,
-      );
-      const succeeded = !!studentAItem?.attempts.some(
-        (attempt) =>
-          attempt.submissionId === secondSubmissionBody.id &&
-          attempt.aiFeedbackStatus === 'SUCCEEDED',
-      );
-      if (succeeded) {
-        hasSucceeded = true;
-        break;
-      }
-      await waitMs(80);
-    }
-    expect(hasSucceeded).toBe(true);
+    const secondSubmissionObjectId = new Types.ObjectId(
+      secondSubmissionBody.id,
+    );
+    const succeededJob = await aiFeedbackJobModel.updateOne(
+      { submissionId: secondSubmissionObjectId },
+      { $set: { status: AiFeedbackJobStatus.Succeeded } },
+    );
+    expect(succeededJob.modifiedCount).toBe(1);
+
+    const jobWithoutFeedback = (await fetchTrajectory('7d')).items.find(
+      (item) => item.studentId === studentAId,
+    );
+    expect(errorTrend(jobWithoutFeedback)).toEqual([null, null, null]);
+    expect(jobWithoutFeedback?.attempts).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          submissionId: secondSubmissionBody.id,
+          aiFeedbackStatus: 'SUCCEEDED',
+          feedbackCount: 0,
+          feedbackSummary: {
+            totalItems: 0,
+            severityBreakdown: { INFO: 0, WARN: 0, ERROR: 0 },
+            topTags: [],
+          },
+        }),
+      ]),
+    );
 
     await feedbackModel.insertMany([
       {
-        submissionId: new Types.ObjectId(secondSubmissionBody.id),
+        submissionId: firstSubmissionObjectId,
+        source: FeedbackSource.AI,
+        type: FeedbackType.Style,
+        severity: FeedbackSeverity.Error,
+        message: 'First attempt AI error one',
+      },
+      {
+        submissionId: firstSubmissionObjectId,
+        source: FeedbackSource.AI,
+        type: FeedbackType.Style,
+        severity: FeedbackSeverity.Error,
+        message: 'First attempt AI error two',
+      },
+      {
+        submissionId: secondSubmissionObjectId,
+        source: FeedbackSource.AI,
+        type: FeedbackType.Style,
+        severity: FeedbackSeverity.Warn,
+        message: 'Second attempt AI warning',
+      },
+      {
+        submissionId: secondSubmissionObjectId,
         source: FeedbackSource.Teacher,
         type: FeedbackType.Style,
-        severity: FeedbackSeverity.Info,
-        message: `Trajectory teacher feedback ${Date.now()}`,
+        severity: FeedbackSeverity.Error,
+        message: 'Second attempt teacher error',
       },
     ]);
 
@@ -536,8 +585,8 @@ describe('Classroom Learning Trajectory (e2e)', () => {
     });
     expect(studentAItem?.attemptsCount).toBe(3);
     expect(studentBItem?.attemptsCount).toBe(0);
-    expect(typeof studentAItem?.trend.errorCountFirst).toBe('number');
-    expect(typeof studentAItem?.trend.errorCountLatest).toBe('number');
+    expect(errorTrend(studentAItem)).toEqual([2, null, null]);
+    expect(errorTrend(studentBItem)).toEqual([null, null, null]);
     expect(JSON.stringify(trajectoryAll)).not.toContain('passwordHash');
     const secondAttempt = studentAItem?.attempts.find(
       (attempt) => attempt.submissionId === secondSubmissionBody.id,
@@ -547,10 +596,11 @@ describe('Classroom Learning Trajectory (e2e)', () => {
     );
     expect(secondAttempt).toBeDefined();
     expect(thirdAttempt).toBeDefined();
-    expect(secondAttempt?.feedbackSummary.totalItems).toBeGreaterThan(0);
-    expect(secondAttempt?.feedbackCount).toBeGreaterThan(
-      secondAttempt?.feedbackSummary.totalItems ?? 0,
-    );
+    expect(secondAttempt?.aiFeedbackStatus).toBe('SUCCEEDED');
+    expect(secondAttempt?.feedbackSummary.totalItems).toBe(1);
+    expect(secondAttempt?.feedbackSummary.severityBreakdown.ERROR).toBe(0);
+    expect(secondAttempt?.feedbackCount).toBe(2);
+    expect(thirdAttempt?.aiFeedbackStatus).toBe('NOT_REQUESTED');
     expect(thirdAttempt?.feedbackSummary.totalItems).toBe(0);
     expect(thirdAttempt?.feedbackCount).toBe(0);
     for (const attempt of studentAItem?.attempts ?? []) {
@@ -565,6 +615,7 @@ describe('Classroom Learning Trajectory (e2e)', () => {
       (item) => item.studentId === studentAId,
     );
     expect(studentAIn7d?.attemptsCount).toBe(2);
+    expect(errorTrend(studentAIn7d)).toEqual([0, null, null]);
 
     const trajectoryLimit100 = await teacherAgent
       .get(
@@ -592,5 +643,83 @@ describe('Classroom Learning Trajectory (e2e)', () => {
         includeTagDetails: true,
       })
       .expect(400);
+
+    const studentBSubmission = await studentBAgent
+      .post(
+        `/api/classrooms/${classroomId}/tasks/${classroomTaskId}/submissions`,
+      )
+      .send({
+        content: {
+          codeText: 'const trajectoryB = true;',
+          language: 'typescript',
+        },
+      })
+      .expect(201);
+    const studentBSubmissionBody =
+      studentBSubmission.body as CreatedSubmissionResponse;
+    submissionIds.push(studentBSubmissionBody.id);
+    const studentBSubmissionId = new Types.ObjectId(studentBSubmissionBody.id);
+    await feedbackModel.create({
+      submissionId: studentBSubmissionId,
+      source: FeedbackSource.Teacher,
+      type: FeedbackType.Style,
+      severity: FeedbackSeverity.Error,
+      message: 'Only teacher feedback for this attempt',
+    });
+    const teacherOnly = (await fetchTrajectory()).items.find(
+      (item) => item.studentId === studentBId,
+    );
+    expect(errorTrend(teacherOnly)).toEqual([null, null, null]);
+    expect(teacherOnly?.attempts[0]?.feedbackCount).toBe(1);
+    expect(teacherOnly?.attempts[0]?.feedbackSummary.totalItems).toBe(0);
+
+    await feedbackModel.create({
+      submissionId: studentBSubmissionId,
+      source: FeedbackSource.AI,
+      type: FeedbackType.Style,
+      severity: FeedbackSeverity.Info,
+      message: 'Student B has AI feedback without errors',
+    });
+    for (const order of ['asc', 'desc'] as const) {
+      const sorted = await fetchTrajectory('all', { sort: 'errorRate', order });
+      expect(sorted.items.map((item) => item.studentId)).toEqual([
+        studentBId,
+        studentAId,
+      ]);
+      expect(sorted.items[0]?.attemptsCount).toBe(1);
+      expect(errorTrend(sorted.items[0])).toEqual([0, 0, null]);
+      expect(errorTrend(sorted.items[1])).toEqual([2, null, null]);
+    }
+
+    await feedbackModel.create({
+      submissionId: new Types.ObjectId(thirdSubmissionBody.id),
+      source: FeedbackSource.AI,
+      type: FeedbackType.Style,
+      severity: FeedbackSeverity.Info,
+      message: 'Third attempt AI info',
+    });
+    const withDetails = await fetchTrajectory('all');
+    const withoutDetails = await fetchTrajectory('all', {
+      includeAttempts: false,
+    });
+    expect(
+      errorTrend(
+        withDetails.items.find((item) => item.studentId === studentAId),
+      ),
+    ).toEqual([2, 0, -2]);
+    expect(
+      withoutDetails.items.map(({ studentId, trend }) => ({
+        studentId,
+        trend,
+      })),
+    ).toEqual(
+      withDetails.items.map(({ studentId, trend }) => ({ studentId, trend })),
+    );
+    expect(withoutDetails.items.map((item) => item.attempts)).toEqual([[], []]);
+
+    const bothRecent = (await fetchTrajectory('7d')).items.find(
+      (item) => item.studentId === studentAId,
+    );
+    expect(errorTrend(bothRecent)).toEqual([0, 0, 0]);
   });
 });
