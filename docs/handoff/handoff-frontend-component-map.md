@@ -69,7 +69,7 @@
 |---|---|---|
 | CreateCourseForm | `components/teacher/CreateCourseForm.tsx` | 建课表单与成功导航，课程分类复用共享候选；学期示例不自动成为输入值 |
 | CourseLifecycleActions | `components/teacher/CourseLifecycleActions.tsx` | 课程列表“更多”菜单、动作 pending/确认/结果状态，组合 FloatingMoreMenu；负责归档、恢复与删除，保留当前列表视图；空对象删除条件由后端判定 |
-| TeacherLifecycleList | `components/teacher/TeacherLifecycleList.tsx` | 课程与班级列表共享的页面级结果提示及可聚焦摘要。操作后行离开当前视图时，摘要接回仍位于该行的焦点，结果在刷新后保留 |
+| TeacherLifecycleList | `components/teacher/TeacherLifecycleList.tsx` | 课程与班级列表共享的页面级结果提示及可聚焦摘要。操作后行离开当前视图时，摘要接回仍位于该行的焦点。页面提供有效页链接时执行同路由替换，保留结果提示 |
 | EditCourseForm | `components/teacher/EditCourseForm.tsx` | 课程基础信息编辑，复用 `lib/course-edit.ts` 判断并只提交字段净变化，无净变化不发请求；课程分类未改省略、明确清空发送空串；失败保留草稿，成功返回课程总览并刷新，不承担列表加载 |
 | CourseOverviewPage | `app/teacher/courses/[courseId]/overview/page.tsx` | 服务端加载、窗口/排序/分页及只读班级明细组合；页面摘要只汇总当前页，指标字段适配与含义遵循 API Owner，不把分页摘要当全课程统计 |
 | CreateClassroomForm | `components/teacher/CreateClassroomForm.tsx` | 建班表单及局部输入/提交状态，不负责班级列表加载；名称示例不自动成为输入值 |
@@ -88,7 +88,7 @@
 | ClassroomTaskLifecycleActions | `components/teacher/ClassroomTaskLifecycleActions.tsx` | 展示实例状态，持有本次确认的动作与实例，提供与动作相关的后果说明。确认后锁定本次请求并处理结果与刷新；删除行将消失时以列表标题承接行内焦点。调用与错误适配见 API Map |
 | EditClassroomTaskForm | `components/teacher/EditClassroomTaskForm.tsx` | 列表行内展开，截止时间按浏览器本地分钟显示和比较，未改分钟省略，实际改动转换为 UTC 或明确清空；仅保存逐字段净变化，无变化不发请求。成功后立即重开采用正式回执设置，后续打开可采用更新列表；展开期间的刷新不重绑草稿。失败保留草稿及基准，普通 409 提示刷新且不重放；ACTIVE/CLOSED 可编辑，RECALLED 无入口，不修改模板或状态流；部分更新与竞争结果见 [Backend API](./handoff-backend-api-map.md#classroom-tasksclassrooms-子资源) |
 | PublishTaskStatusButton | `components/teacher/PublishTaskStatusButton.tsx` | 单一模板发布操作；当前 classroomTask 详情页不使用，模板生命周期入口留在模板层 |
-| RemoveStudentButton | `components/teacher/RemoveStudentButton.tsx` | 确认移出当前展示姓名对应的成员。页面级汇总保留移出结果，在行移除时承接仍位于该行的焦点。成员关系与历史记录由后端维护 |
+| RemoveStudentButton | `components/teacher/RemoveStudentButton.tsx` | 确认移出当前展示姓名对应的成员。页面级汇总保留移出结果，在行移除时承接仍位于该行的焦点，并在页面提供有效页链接时执行同路由替换。成员关系与历史记录由后端维护 |
 | TeacherFeedbackForm | `components/teacher/TeacherFeedbackForm.tsx` | 教师反馈创建输入与提交，复用统一反馈选项；评语草稿绑定实际查看版本，刷新不重绑，冲突/未知结果保留草稿并显式核对当前作品与反馈后确认继续；标签可选，不提供 scoreHint 入口，合同与归一化归 API Owner |
 | TeacherFeedbackHistory | `components/teacher/TeacherFeedbackHistory.tsx` | 教师与 AI 反馈历史组合及编辑态切换，同一时间只展开一个编辑表单；仅明确 TEACHER 且有 id 的反馈可修改，AI 只读；未知或缺失来源有记录时才展示“其他反馈（来源未识别）”只读兜底，不作为正式业务来源 |
 | TeacherFeedbackEditForm | `components/teacher/TeacherFeedbackEditForm.tsx` | 单条教师反馈原地编辑、请求/错误状态、保存后退出编辑；与创建表单保持输入能力一致，不展示或编辑 scoreHint，不承担历史列表状态 |

@@ -1,6 +1,7 @@
 "use client";
 
-import { createContext, useContext, useRef, useState, type ReactNode, type RefObject } from "react";
+import { useRouter } from "next/navigation";
+import { createContext, useContext, useEffect, useRef, useState, type ReactNode, type RefObject } from "react";
 
 type LifecycleListFeedback = {
   message: string | null;
@@ -11,9 +12,20 @@ type LifecycleListFeedback = {
 
 const LifecycleListContext = createContext<LifecycleListFeedback | null>(null);
 
-export function TeacherLifecycleList({ children }: { children: ReactNode }) {
+export function TeacherLifecycleList({
+  children,
+  validPageHref,
+}: {
+  children: ReactNode;
+  validPageHref?: string;
+}) {
+  const router = useRouter();
   const [message, setMessage] = useState<string | null>(null);
   const summaryRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (validPageHref) router.replace(validPageHref, { scroll: false });
+  }, [router, validPageHref]);
 
   const showSuccess = (message: string, departingRow?: HTMLTableRowElement | null) => {
     setMessage(message);

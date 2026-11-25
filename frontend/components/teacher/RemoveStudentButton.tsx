@@ -5,6 +5,7 @@ import {
   type ReactNode,
   useCallback,
   useContext,
+  useEffect,
   useRef,
   useState,
   useTransition,
@@ -40,12 +41,20 @@ const RemovalFeedbackContext = createContext<
 export function ClassroomMemberRemovalFeedback({
   children,
   summary,
+  validPageHref,
 }: {
   children: ReactNode;
   summary: ReactNode;
+  validPageHref?: string;
 }) {
+  const router = useRouter();
   const summaryRef = useRef<HTMLDivElement>(null);
   const [feedback, setFeedback] = useState<RemovalFeedback | null>(null);
+
+  useEffect(() => {
+    if (validPageHref) router.replace(validPageHref, { scroll: false });
+  }, [router, validPageHref]);
+
   const reportFeedback = useCallback(
     (result: RemovalFeedback | null, moveFocus = false) => {
       setFeedback(result);
@@ -58,7 +67,9 @@ export function ClassroomMemberRemovalFeedback({
     <RemovalFeedbackContext.Provider value={reportFeedback}>
       <div className="space-y-4">
         <div ref={summaryRef} tabIndex={-1} className="text-sm text-zinc-600">
-          <p>{summary}</p>
+          <p role={validPageHref ? "status" : undefined}>
+            {validPageHref ? "正在加载班级成员列表…" : summary}
+          </p>
           {feedback?.kind === "success" ? (
             <p role="status" className="mt-2 text-emerald-700">
               {feedback.message}
@@ -74,7 +85,7 @@ export function ClassroomMemberRemovalFeedback({
             </div>
           ) : null}
         </div>
-        {children}
+        {validPageHref ? null : children}
       </div>
     </RemovalFeedbackContext.Provider>
   );

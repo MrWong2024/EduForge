@@ -15,6 +15,7 @@ import {
   type ClassroomStatus,
 } from "@/lib/api/types-teacher";
 import { paths } from "@/lib/routes/paths";
+import { findLastPageForOutOfRangeRequest } from "@/lib/routes/teacher-list-pagination";
 import { getClassroomStatusLabel, getCommonErrorSummary } from "@/lib/ui/status";
 import { toDisplayText } from "@/lib/ui/format";
 
@@ -172,9 +173,15 @@ export default async function TeacherClassroomsPage({ searchParams }: TeacherCla
       ? viewModel.response.page
       : page;
   const currentLimit =
-    typeof viewModel.response.limit === "number" && viewModel.response.limit > 0
+    typeof viewModel.response.limit === "number" &&
+    Number.isSafeInteger(viewModel.response.limit) &&
+    viewModel.response.limit > 0
       ? viewModel.response.limit
       : limit;
+  const lastValidPage = findLastPageForOutOfRangeRequest(page, currentLimit, viewModel.response.total);
+  const validPageHref = lastValidPage === undefined
+    ? undefined
+    : buildClassroomListHref(lastValidPage, limit, viewModel.selectedCourseId, viewModel.statusView);
   const displayedClassroomsCount = viewModel.response.items.length;
   const totalClassroomsCount =
     typeof viewModel.response.total === "number"
@@ -231,10 +238,10 @@ export default async function TeacherClassroomsPage({ searchParams }: TeacherCla
   );
 
   return (
-    <TeacherLifecycleList>
+    <TeacherLifecycleList validPageHref={validPageHref}>
       <PageHeader
         title="班级"
-        description={`当前视图：${CLASSROOM_STATUS_VIEW_LABEL[viewModel.statusView]} · 第 ${currentPage} 页，每页 ${currentLimit} 条`}
+        description={`当前视图：${CLASSROOM_STATUS_VIEW_LABEL[viewModel.statusView]}${validPageHref ? "" : ` · 第 ${currentPage} 页，每页 ${currentLimit} 条`}`}
       />
 
       <Tabs items={tabItems} activeHref={activeTabHref} />
@@ -242,10 +249,12 @@ export default async function TeacherClassroomsPage({ searchParams }: TeacherCla
       <CreateClassroomForm courses={viewModel.courses} initialCourseId={viewModel.selectedCourseId} />
 
       <TeacherLifecycleListSummary>
-        共 {totalClassroomsCount} 个班级，当前显示 {displayedClassroomsCount} 个
+        {!validPageHref ? <>共 {totalClassroomsCount} 个班级，当前显示 {displayedClassroomsCount} 个</> : null}
       </TeacherLifecycleListSummary>
 
-      {viewModel.response.items.length === 0 ? (
+      {validPageHref ? (
+        <p role="status" className="text-sm text-zinc-600">正在加载班级列表…</p>
+      ) : viewModel.response.items.length === 0 ? (
         <EmptyState
           title={emptyStateTitle}
           description={emptyStateDescription}
@@ -340,7 +349,7 @@ export default async function TeacherClassroomsPage({ searchParams }: TeacherCla
         </div>
       )}
 
-      {showPagination ? (
+      {!validPageHref && showPagination ? (
         <div className="mt-4 flex items-center gap-4 text-sm">
           <span className="text-zinc-600">
             第 {currentPage} / {totalPages} 页

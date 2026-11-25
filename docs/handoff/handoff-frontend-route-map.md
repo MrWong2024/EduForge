@@ -30,12 +30,12 @@
 |---|---|---|---|---|
 | `/teacher` | 教师入口 | 无数据依赖 | 重定向到班级列表 | Done |
 | `/teacher/account` | 账户设置 | 当前用户 / 改密能力 | 查看本人资料、修改密码；无资料编辑 UI；可返回班级列表 | Done |
-| `/teacher/courses` | 课程列表与创建 | Course 列表 / 生命周期 | 按进行中、已归档、全部查看并分页；创建含课程分类，进入编辑/总览；列表“更多”提供 ACTIVE 归档/删除、ARCHIVED 恢复/删除，删除需确认且仅空课程允许；操作保留当前视图 | Done |
+| `/teacher/courses` | 课程列表与创建 | Course 列表 / 生命周期 | 按进行中、已归档、全部查看并分页；创建含课程分类，进入编辑/总览；列表“更多”提供 ACTIVE 归档/删除、ARCHIVED 恢复/删除，删除需确认且仅空课程允许。读取到可信总数且页码越界时回到最后有效页，保留 `statusView` 和 `limit` | Done |
 | `/teacher/courses/[courseId]/overview` | 课程总览 | Course overview API | 切换统计窗口、班级排序与分页并进入班级；主窗口 all/7d、默认 all，旧链接窗口继续兼容。班级总数取总量，班级数、平均任务完成度与平均 AI 成功率摘要基于当前页；任务完成度与学生触达率分别展示，无 AI 活动时成功率显示缺省；页面只读 | Done |
 | `/teacher/courses/[courseId]/edit` | 课程基础信息编辑 | Course 详情 / 更新 | 从列表或总览进入，编辑编号、名称、学期、课程分类，保存后回总览；总览保持展示职责 | Done |
 | `/teacher/tasks` | 任务模板列表与创建 | Task template 查询 / 创建 | 默认我的模板，可切换我的/共享/全部并按课程分类、状态、知识模块筛选及分页；创建为草稿或发布模板；展示可见性、发布者和评阅标准填写状态。作者的 DRAFT/PUBLISHED 可编辑，ARCHIVED 及非作者模板仅查看；保留班级来源和列表回跳上下文 | Done |
 | `/teacher/tasks/[taskId]/edit` | 模板编辑或只读查看 | Task template 详情 / 生命周期 | 作者编辑 DRAFT/PUBLISHED 的内容、可见性与文字评阅标准；保存内容与生命周期动作分离；DRAFT 可发布、PUBLISHED 可归档，均需确认。ARCHIVED、非作者共享模板及未知状态只读；无恢复入口，归档复用提示不代表已有复制功能；returnTo 仅接受规范化后路径严格为 `/teacher/tasks` 的站内地址，保留有效列表上下文；非法或缺失时回退模板列表 | Done |
-| `/teacher/classrooms` | 班级列表与创建 | Classroom 列表 / Course 关联 | 按课程及进行中、已归档、全部筛选并分页；创建、进入编辑/看板。列表“更多”提供 ACTIVE 归档/删除、ARCHIVED 恢复/删除，删除需确认且仅空班级允许；非空限制由后端判定，操作保留当前视图 | Done |
+| `/teacher/classrooms` | 班级列表与创建 | Classroom 列表 / Course 关联 | 按课程及进行中、已归档、全部筛选并分页；创建、进入编辑/看板。列表“更多”提供 ACTIVE 归档/删除、ARCHIVED 恢复/删除，删除需确认且仅空班级允许；非空限制由后端判定。读取到可信总数且页码越界时回到最后有效页，保留 `courseId`、`statusView` 和 `limit` | Done |
 | `/teacher/classrooms/[classroomId]/edit` | 班级基础信息编辑 | Classroom 详情 / 更新 | 当前只编辑班级名称，所属课程、状态及加入码只读；保存后回看板，不影响成员、课堂任务和历史提交；不提供归档/恢复/删除，生命周期动作在列表“更多”菜单 | Done |
 | `/teacher/classrooms/[classroomId]` | 班级入口 | 无数据依赖 | 重定向到本班 dashboard | Done |
 | `/teacher/classrooms/[classroomId]/dashboard` | 班级看板 | Classroom dashboard API | 默认展示 ACTIVE 任务，可显式包含 CLOSED；展示模板归档提示和非本人模板发布者，进入任务与分析页。统计及归档建议直接消费后端结果，不二次过滤重算或自动归档 | Done |
@@ -46,7 +46,7 @@
 | `/teacher/classrooms/[classroomId]/tasks/[classroomTaskId]/learning-trajectory` | 学习轨迹 | Learning trajectory API | 切换窗口、排序及分页，查看最近与首次错误数变化、展开提交尝试和标签明细；主窗口 all/7d、默认 all，旧链接窗口继续兼容；保留班级看板、任务列表及提交管理导航 | Done |
 | `/teacher/classrooms/[classroomId]/tasks/[classroomTaskId]/review-pack` | 课堂复盘 | Review pack API | 查看问题聚合、典型样例与学生分层，调整窗口及样例范围，样例可进入对应提交；主窗口 all/7d、默认 all，旧链接窗口继续兼容；保留课堂任务上下文导航 | Done |
 | `/teacher/classrooms/[classroomId]/tasks/[classroomTaskId]/ai-metrics` | AI 指标 | AI metrics API | 切换 1h/24h/7d 窗口及标签扩展，查看任务 AI 情况；保留班级看板、任务列表及提交管理导航 | Done |
-| `/teacher/classrooms/[classroomId]/members` | 班级成员管理 | Classroom 成员读源 | 查看、分页和移除成员，可包含已移除成员；成员关系以正式读源为准，不回退 legacy studentIds | Done |
+| `/teacher/classrooms/[classroomId]/members` | 班级成员管理 | Classroom 成员读源 | 查看、分页和移除成员，可包含已移除成员；成员关系以正式读源为准，不回退 legacy studentIds。读取到可信总数且页码越界时回到本班最后有效页，保留 `includeRemoved`，每页 100 名 | Done |
 | `/teacher/classrooms/[classroomId]/weekly-report` | 班级周报 | Weekly report API | 汇总型分析页，查看摘要、风险与问题概览；主窗口 7d/30d/all、默认 all，旧链接窗口继续兼容；不宣称已有独立周报明细能力 | Done |
 | `/teacher/classrooms/[classroomId]/process-assessment` | 过程性评价 | Process assessment JSON/CSV / 课堂任务选项 | 主窗口 7d/30d/all，旧链接仅兼容 term；查看分页评价、摘要与评分说明，临时排除/清空任务并导出同口径 CSV。排除不持久化，不重算后端评分；任务选项失败只警告，不阻断评价主体，未显示的已选任务继续保留 | Done |
 | `/teacher/classrooms/[classroomId]/ai-learning-analytics` | AI 反馈介入成效分析 | Analytics 总览 / ACTIVE 学生列表 / 任务选项 | 切换窗口、临时排除任务，查看班级/任务/学生 V1.2 分析、可比子集与来源证据提示；区分作品更新和新增提交。姓名/学号搜索、总体结果和参与阶段筛选仅作用于学生列表。分页、详情进入和返回保留筛选上下文，学生筛选/分页后定位学生分析区；区分无 ACTIVE 学生、筛选无结果和空分页。任务选项或学生列表失败局部降级，总览失败为页面错误；直接展示后端结果，不从学生分页重算摘要，不将总体结果当时间趋势或能力/因果结论 | Done |

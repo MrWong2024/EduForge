@@ -14,6 +14,7 @@ import {
   type ClassroomStudent,
 } from "@/lib/api/types-teacher";
 import { paths } from "@/lib/routes/paths";
+import { findLastPageForOutOfRangeRequest } from "@/lib/routes/teacher-list-pagination";
 import { getCommonErrorSummary, getEnrollmentStatusLabel } from "@/lib/ui/status";
 import {
   buildQueryString,
@@ -63,6 +64,7 @@ type MembersViewModel =
       currentPage: number;
       totalPages: number;
       query: MembersQueryState;
+      validPageHref?: string;
     }
   | {
       mode: "error";
@@ -108,6 +110,11 @@ export default async function ClassroomMembersPage({ params, searchParams }: Mem
 
     const classroom = toClassroomSummary(classroomPayload);
     const studentsResponse = toClassroomStudentsResponse(studentsPayload);
+    const lastValidPage = findLastPageForOutOfRangeRequest(
+      queryState.page,
+      MEMBERS_PAGE_SIZE,
+      Array.isArray(studentsPayload) ? undefined : studentsResponse.total,
+    );
     const total = studentsResponse.total ?? studentsResponse.items.length;
     const totalPages = Math.max(1, Math.ceil(total / MEMBERS_PAGE_SIZE));
     const currentPage = Math.min(
@@ -123,6 +130,10 @@ export default async function ClassroomMembersPage({ params, searchParams }: Mem
       currentPage,
       totalPages,
       query: queryState,
+      validPageHref:
+        lastValidPage === undefined
+          ? undefined
+          : buildMembersHref(classroomId, { ...queryState, page: lastValidPage }),
     };
   } catch (error) {
     if (error instanceof FetchJsonError) {
@@ -178,6 +189,7 @@ export default async function ClassroomMembersPage({ params, searchParams }: Mem
       <ClassroomMemberRemovalFeedback
         key={classroomId}
         summary={<>共 {viewModel.total} 名成员，当前显示 {viewModel.students.length} 名</>}
+        validPageHref={viewModel.validPageHref}
       >
         {viewModel.students.length === 0 ? (
           <EmptyState title="暂无成员" description="当前筛选条件下没有可展示成员。" />
