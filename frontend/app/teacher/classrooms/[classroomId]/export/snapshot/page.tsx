@@ -5,75 +5,22 @@ import { PageHeader } from "@/components/blocks/PageHeader";
 import { fetchJson, FetchJsonError } from "@/lib/api/client";
 import { buildErrorDescription, extractRawDetail } from "@/lib/api/error-presenter";
 import { toExportSnapshotResponse } from "@/lib/api/types-teacher";
-import { paths } from "@/lib/routes/paths";
-import { getCommonErrorSummary } from "@/lib/ui/status";
 import {
-  buildQueryString,
-  getSingleSearchParam,
-  parseBool01,
-  parseEnum,
-  parsePositiveInt,
-  toDisplayText,
-} from "@/lib/ui/format";
+  buildSnapshotApiPath,
+  buildSnapshotHref,
+  resolveSnapshotQuery,
+  SNAPSHOT_WINDOWS,
+  type SnapshotQueryState,
+  type SnapshotSearchParams,
+} from "@/lib/classroom-export-snapshot-query";
+import { buildClassroomExportSnapshotSummary } from "@/lib/classroom-export-snapshot-summary";
+import { paths } from "@/lib/routes/paths";
+import { toDisplayText } from "@/lib/ui/format";
+import { getCommonErrorSummary } from "@/lib/ui/status";
 
 type SnapshotExportPageProps = {
   params: Promise<{ classroomId: string }>;
-  searchParams: Promise<{
-    window?: string | string[];
-    includePerTask?: string | string[];
-    limitStudents?: string | string[];
-    limitAssessment?: string | string[];
-  }>;
-};
-
-const SNAPSHOT_WINDOWS = ["24h", "7d", "30d"] as const;
-type SnapshotWindow = (typeof SNAPSHOT_WINDOWS)[number];
-
-type SnapshotQueryState = {
-  window: SnapshotWindow;
-  includePerTask: boolean;
-  limitStudents: number;
-  limitAssessment: number;
-};
-
-const resolveQueryState = (
-  query: Awaited<SnapshotExportPageProps["searchParams"]>
-): SnapshotQueryState => ({
-  window: parseEnum(getSingleSearchParam(query.window), SNAPSHOT_WINDOWS, "7d"),
-  includePerTask: parseBool01(getSingleSearchParam(query.includePerTask), true),
-  limitStudents: parsePositiveInt(getSingleSearchParam(query.limitStudents), 50, {
-    min: 1,
-    max: 200,
-  }),
-  limitAssessment: parsePositiveInt(getSingleSearchParam(query.limitAssessment), 200, {
-    min: 1,
-    max: 1000,
-  }),
-});
-
-const toQueryRecord = (query: SnapshotQueryState): Record<string, string> => ({
-  window: query.window,
-  includePerTask: String(query.includePerTask),
-  limitStudents: String(query.limitStudents),
-  limitAssessment: String(query.limitAssessment),
-});
-
-const buildHref = (
-  classroomId: string,
-  current: Record<string, string>,
-  next: Partial<Record<string, string | undefined>>
-): string => {
-  const merged = new URLSearchParams(current);
-  for (const [key, value] of Object.entries(next)) {
-    if (!value) {
-      merged.delete(key);
-      continue;
-    }
-    merged.set(key, value);
-  }
-  const query = merged.toString();
-  const basePath = paths.teacher.classroomExportSnapshot(classroomId);
-  return query ? `${basePath}?${query}` : basePath;
+  searchParams: Promise<SnapshotSearchParams>;
 };
 
 type SnapshotViewModel =
@@ -93,9 +40,7 @@ export default async function SnapshotExportPage({
   searchParams,
 }: SnapshotExportPageProps) {
   const { classroomId } = await params;
-  const rawQuery = await searchParams;
-  const queryState = resolveQueryState(rawQuery);
-  const queryString = buildQueryString(toQueryRecord(queryState));
+  const queryState = resolveSnapshotQuery(await searchParams);
 
   let viewModel: SnapshotViewModel = {
     mode: "error",
@@ -105,7 +50,7 @@ export default async function SnapshotExportPage({
 
   try {
     const payload = await fetchJson<unknown>(
-      `classrooms/${encodeURIComponent(classroomId)}/export/snapshot?${queryString}`,
+      buildSnapshotApiPath(classroomId, queryState),
       {
         cache: "no-store",
       }
@@ -142,10 +87,44 @@ export default async function SnapshotExportPage({
     );
   }
 
-  const queryRecord = toQueryRecord(viewModel.query);
-  const metaEntries = Object.entries(viewModel.data.meta);
-  const summaryEntries = Object.entries(viewModel.data.summary);
+  const query = viewModel.query;
+  const metaEntries = Object.entries(viewModel.data.meta).filter(([key]) => key !== "notes");
   const hasData = Object.keys(viewModel.data.raw).length > 0;
+  const { progress, aiHealth, commonIssues, late } =
+    buildClassroomExportSnapshotSummary(viewModel.data.summary);
+  const summaryCards = [
+    {
+      title: "班级进度",
+      metrics: [
+        ["班级人数", progress.studentsCount],
+        ["已提交人数", progress.distinctStudentsSubmitted],
+        ["提交率", progress.submissionRate],
+      ],
+    },
+    {
+      title: "AI 运行",
+      metrics: [
+        ["AI 作业总数", aiHealth.jobsTotal],
+        ["成功数", aiHealth.jobsSucceeded],
+        ["成功率", aiHealth.successRate],
+      ],
+    },
+    {
+      title: "常见问题",
+      metrics: [
+        ["标签", commonIssues.topTags],
+        ["类型", commonIssues.topTypes],
+        ["严重程度", commonIssues.topSeverities],
+      ],
+    },
+    {
+      title: "迟交",
+      metrics: [
+        ["迟交人数", late.lateStudentsCount],
+        ["迟交次数", late.lateSubmissionsCount],
+      ],
+    },
+  ];
 
   return (
     <section className="space-y-4">
@@ -171,11 +150,12 @@ export default async function SnapshotExportPage({
           <div className="flex items-center gap-2">
             <span>窗口:</span>
             {SNAPSHOT_WINDOWS.map((windowValue) => {
-              const active = windowValue === viewModel.query.window;
+              const active = windowValue === query.window;
               return (
                 <Link
                   key={windowValue}
-                  href={buildHref(classroomId, queryRecord, { window: windowValue })}
+                  href={buildSnapshotHref(classroomId, query, { window: windowValue })}
+                  aria-current={active ? "page" : undefined}
                   className={active ? "font-semibold text-blue-700" : "text-blue-700 hover:underline"}
                 >
                   {windowValue}
@@ -187,23 +167,24 @@ export default async function SnapshotExportPage({
           <div className="flex items-center gap-2">
             <span>包含每任务明细:</span>
             <Link
-              href={buildHref(classroomId, queryRecord, {
-                includePerTask: String(!viewModel.query.includePerTask),
+              href={buildSnapshotHref(classroomId, query, {
+                includePerTask: !query.includePerTask,
               })}
               className="text-blue-700 hover:underline"
             >
-              {viewModel.query.includePerTask ? "开" : "关"}
+              {query.includePerTask ? "开" : "关"}
             </Link>
           </div>
 
           <div className="flex items-center gap-2">
-            <span>学生上限:</span>
+            <span>学生上限: 当前 {query.limitStudents}</span>
             {[50, 100, 200].map((limitValue) => {
-              const active = limitValue === viewModel.query.limitStudents;
+              const active = limitValue === query.limitStudents;
               return (
                 <Link
                   key={limitValue}
-                  href={buildHref(classroomId, queryRecord, { limitStudents: String(limitValue) })}
+                  href={buildSnapshotHref(classroomId, query, { limitStudents: limitValue })}
+                  aria-current={active ? "page" : undefined}
                   className={active ? "font-semibold text-blue-700" : "text-blue-700 hover:underline"}
                 >
                   {limitValue}
@@ -213,13 +194,14 @@ export default async function SnapshotExportPage({
           </div>
 
           <div className="flex items-center gap-2">
-            <span>评价上限:</span>
+            <span>评价上限: 当前 {query.limitAssessment}</span>
             {[200, 500, 1000].map((limitValue) => {
-              const active = limitValue === viewModel.query.limitAssessment;
+              const active = limitValue === query.limitAssessment;
               return (
                 <Link
                   key={limitValue}
-                  href={buildHref(classroomId, queryRecord, { limitAssessment: String(limitValue) })}
+                  href={buildSnapshotHref(classroomId, query, { limitAssessment: limitValue })}
+                  aria-current={active ? "page" : undefined}
                   className={active ? "font-semibold text-blue-700" : "text-blue-700 hover:underline"}
                 >
                   {limitValue}
@@ -259,20 +241,24 @@ export default async function SnapshotExportPage({
             </section>
           ) : null}
 
-          {summaryEntries.length > 0 ? (
-            <section className="rounded-lg border border-zinc-200 bg-white p-4">
-              <h2 className="text-sm font-semibold text-zinc-900">快照预检摘要</h2>
-              <div className="mt-2 grid gap-3 md:grid-cols-2">
-                {summaryEntries.map(([key, value]) => (
-                  <div key={key} className="rounded border border-zinc-200 p-3 text-sm">
-                    <p className="text-zinc-500">{key}</p>
-                    <p className="mt-1 font-medium text-zinc-900">{toDisplayText(value)}</p>
-                  </div>
-                ))}
-              </div>
-            </section>
-          ) : null}
-
+          <section className="rounded-lg border border-zinc-200 bg-white p-4">
+            <h2 className="text-sm font-semibold text-zinc-900">快照预检摘要</h2>
+            <div className="mt-2 grid gap-3 md:grid-cols-2">
+              {summaryCards.map(({ title, metrics }) => (
+                <section key={title} className="rounded border border-zinc-200 p-3 text-sm">
+                  <h3 className="font-semibold text-zinc-900">{title}</h3>
+                  <dl className="mt-2 space-y-1">
+                    {metrics.map(([label, value]) => (
+                      <div key={label} className="flex flex-wrap justify-between gap-x-3">
+                        <dt className="text-zinc-500">{label}</dt>
+                        <dd className="font-medium text-zinc-900">{value}</dd>
+                      </div>
+                    ))}
+                  </dl>
+                </section>
+              ))}
+            </div>
+          </section>
         </>
       )}
 

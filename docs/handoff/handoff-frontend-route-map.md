@@ -51,7 +51,7 @@
 | `/teacher/classrooms/[classroomId]/process-assessment` | 过程性评价 | Process assessment JSON/CSV / 课堂任务选项 | 主窗口 7d/30d/all，旧链接仅兼容 term；查看分页评价、摘要与评分说明，临时排除/清空任务并导出同口径 CSV。排除不持久化，不重算后端评分；任务选项失败只警告，不阻断评价主体，未显示的已选任务继续保留 | Done |
 | `/teacher/classrooms/[classroomId]/ai-learning-analytics` | AI 反馈介入成效分析 | Analytics 总览 / ACTIVE 学生列表 / 任务选项 | 切换窗口、临时排除任务，查看班级/任务/学生 V1.2 分析、可比子集与来源证据提示；区分作品更新和新增提交。姓名/学号搜索、总体结果和参与阶段筛选仅作用于学生列表。分页、详情进入和返回保留筛选上下文，学生筛选/分页后定位学生分析区；区分无 ACTIVE 学生、筛选无结果和空分页。任务选项或学生列表失败局部降级，总览失败为页面错误；直接展示后端结果，不从学生分页重算摘要，不将总体结果当时间趋势或能力/因果结论 | Done |
 | `/teacher/classrooms/[classroomId]/ai-learning-analytics/students/[studentId]` | 单学生 AI 反馈介入分析 | Analytics student detail API | 展示后端总体结果、参与阶段、逐任务反馈条目负荷、实际比较版本与对应提交链接、来源和较新未比较提示；不连接不同任务，不把不可比较或未知值画为0。列表筛选与页码仅用于返回并恢复学生分析区上下文，不改变详情数据范围 | Done |
-| `/teacher/classrooms/[classroomId]/export/snapshot` | 教学快照预检（内部） | Snapshot export API | 调整统计窗口、逐任务范围与截断范围，查看预检摘要和截断提示；保留直达路由，不作为教师高频入口 | Done |
+| `/teacher/classrooms/[classroomId]/export/snapshot` | 教学快照预检（内部） | [Snapshot export API](./handoff-backend-dto-cheatsheet.md#classroom-export-snapshot) | 回显实际查询窗口、两个数量上限与每任务明细开关，显示进度、AI 运行、常见问题和迟交摘要；保留服务端提示及原始数据折叠入口 | Done |
 
 ## 3) Student 路由
 
