@@ -194,6 +194,7 @@ Notes:
 - 提交详情在原有读取授权之后增加安全 aiReview，师生获得相同的失败、用量和覆盖事实，当前用户动作资格可不同；轻量列表不扩展摘要。字段与 null/0 语义见 [DTO Submission](./handoff-backend-dto-cheatsheet.md#submission-request--response-family)，页面不依赖 debug/ops。
 - 有效课堂关联但缺快照的旧实例保留已有作品/反馈读取及现行教师反馈权限和写入边界，不迁移或读时回填；新提交和新 AI 请求返回 409，message=“该课堂任务未保存发布内容，请教师重新布置后继续。”，作品编辑保留缺快照门禁。旧模板投影不代表发布时原文；可用性字段见 DTO Owner。
 - 公开教师创建反馈只接受 source=TEACHER；非 TEACHER 值返回 400，不写反馈或 AI Job。内部 Processor 仍保存 AI 来源。
+- 教师反馈 PATCH 保存时，若本作品已有相同类型、严重程度和正文的教师反馈，返回 `409`，公开 message 为「该作品已有相同类型、严重程度和正文的教师反馈，请核对后修改本条反馈。」。成功仍返回 `200` 和路径指定的反馈 ID。
 - Submission PATCH 只允许具备学生角色的提交本人；校验有效课堂关联、发布快照、ACTIVE Enrollment 与班级/课堂任务运行态及保存时截止规则，不以是否最新 attempt 代替资格。已进入评阅或已有任何 Feedback/Job 均禁止修改；请求及详情字段见 [DTO Submission](./handoff-backend-dto-cheatsheet.md#submission-request--response-family)。
 - 新增教师反馈与产品 AI request 均要求必填 `expectedRevision`，先完成权限、关联、快照和输入校验，再正式受理评阅；已有 Job 也不能跳过本次版本和权限校验。竞争失败明确返回 409；查看详情、反馈列表及轮询不固定作品，不回填、清理历史字段或改写时间戳。既有冻结及 Job/反馈/用量事实保留；符合既有执行条件的 Job 继续处理，不补建或重置。版本竞争、固定成功后关联写失败的续行与幂等由 [Service Card 08](./handoff-backend-service-map.md#service-card-08) 维护；教师反馈 PATCH 保留原合同。
 - 教师反馈更新要求有效课堂关联及所属班级 owner 管理权；feedback 不存在或不属于该 submission 返回 `404`。仅 TEACHER 来源可改，非 TEACHER 返回 `403 Only teacher feedback can be updated`；已有 createdBy 时还必须是该作者，否则 `403 Not allowed to update feedback`。

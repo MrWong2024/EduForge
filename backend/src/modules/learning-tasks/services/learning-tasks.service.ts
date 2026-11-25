@@ -739,23 +739,7 @@ export class LearningTasksService {
       const feedback = await this.feedbackModel.create(payload);
       return this.toFeedbackResponse(feedback);
     } catch (error) {
-      const mongoError = error as {
-        code?: number;
-        keyPattern?: Record<string, number>;
-      };
-      const uniqueFields = [
-        'submissionId',
-        'source',
-        'type',
-        'severity',
-        'message',
-      ];
-      if (
-        mongoError.code !== 11000 ||
-        !mongoError.keyPattern ||
-        Object.keys(mongoError.keyPattern).length !== uniqueFields.length ||
-        !uniqueFields.every((field) => mongoError.keyPattern?.[field] === 1)
-      ) {
+      if (!this.isFeedbackUniqueKeyViolation(error)) {
         throw error;
       }
       const existing = await this.feedbackModel
@@ -851,7 +835,16 @@ export class LearningTasksService {
       feedback.createdBy = new Types.ObjectId(userId);
     }
 
-    await feedback.save();
+    try {
+      await feedback.save();
+    } catch (error) {
+      if (this.isFeedbackUniqueKeyViolation(error)) {
+        throw new ConflictException(
+          '该作品已有相同类型、严重程度和正文的教师反馈，请核对后修改本条反馈。',
+        );
+      }
+      throw error;
+    }
     return this.toFeedbackResponse(feedback);
   }
 
@@ -1916,6 +1909,28 @@ export class LearningTasksService {
       dto.suggestion !== undefined ||
       dto.tags !== undefined ||
       dto.scoreHint !== undefined
+    );
+  }
+
+  private isFeedbackUniqueKeyViolation(error: unknown): boolean {
+    if (
+      typeof error !== 'object' ||
+      error === null ||
+      !('code' in error) ||
+      error.code !== 11000 ||
+      !('keyPattern' in error)
+    ) {
+      return false;
+    }
+
+    const { keyPattern } = error;
+    return (
+      typeof keyPattern === 'object' &&
+      keyPattern !== null &&
+      isDeepStrictEqual(
+        { ...keyPattern },
+        { submissionId: 1, source: 1, type: 1, severity: 1, message: 1 },
+      )
     );
   }
 

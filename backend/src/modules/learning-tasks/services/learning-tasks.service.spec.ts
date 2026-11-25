@@ -19,7 +19,7 @@ import { AiFeedbackStatus } from '../ai-feedback/interfaces/ai-feedback-status.e
 import { AiFeedbackJobStatus } from '../ai-feedback/schemas/ai-feedback-job.schema';
 import { AiFeedbackJobService } from '../ai-feedback/services/ai-feedback-job.service';
 import { CreateSubmissionDto } from '../dto/create-submission.dto';
-import { Feedback } from '../schemas/feedback.schema';
+import { Feedback, FeedbackSource } from '../schemas/feedback.schema';
 import {
   Submission,
   SubmissionSchema,
@@ -146,7 +146,10 @@ const createHarness = (
       makeQuery({ ...submission, reviewStartedAt: new Date() }),
     ),
   };
-  const feedbackModel = { exists: jest.fn().mockResolvedValue(null) };
+  const feedbackModel = {
+    exists: jest.fn().mockResolvedValue(null),
+    findById: jest.fn<ReturnType<typeof makeQuery>, [string]>(),
+  };
   const classroomTaskModel = {
     modelName: ClassroomTask.name,
     findById: jest.fn(() => makeQuery(classroomTask)),
@@ -1572,6 +1575,37 @@ describe('Submission classroom association contract (no database)', () => {
       ],
       { session },
     );
+  });
+});
+
+describe('Teacher feedback edit error handling (no database)', () => {
+  it.each([
+    ['another unique index', { code: 11000, keyPattern: { _id: 1 } }],
+    ['a missing key pattern', { code: 11000 }],
+  ])('propagates a duplicate-key error for %s', async (_label, details) => {
+    const h = createHarness();
+    const feedbackId = objectId().toString();
+    const error = new mongo.MongoServerError(details);
+    const save = jest.fn().mockRejectedValue(error);
+    h.feedbackModel.findById.mockReturnValue(
+      makeQuery({
+        submissionId: h.ids.submissionId,
+        source: FeedbackSource.Teacher,
+        createdBy: h.ids.teacherId,
+        save,
+      }),
+    );
+
+    await expect(
+      h.service.updateFeedback(
+        h.ids.submissionId.toString(),
+        feedbackId,
+        { message: 'Updated feedback' },
+        h.ids.teacherId.toString(),
+      ),
+    ).rejects.toBe(error);
+    expect(h.feedbackModel.findById).toHaveBeenCalledWith(feedbackId);
+    expect(save).toHaveBeenCalledTimes(1);
   });
 });
 

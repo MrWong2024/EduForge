@@ -791,6 +791,129 @@ describe('B1-2 submission content edits and review admission (HTTP)', () => {
     expect((await detail(student, created.id)).reviewStartedAt).toBe(firstPin);
   });
 
+  it('rejects duplicate teacher feedback edits without changing either record', async () => {
+    const uniqueKey = {
+      submissionId: 1,
+      source: 1,
+      type: 1,
+      severity: 1,
+      message: 1,
+    };
+    const indexes = await feedback.collection.indexes();
+    expect(indexes).toContainEqual(
+      expect.objectContaining({ key: uniqueKey, unique: true }),
+    );
+
+    const created = await submit(await publish());
+    const url = submissionUrl(created.id) + '/feedback';
+    const payloadA = { ...reviewPayload, message: 'B19 feedback A.' };
+    const payloadB = {
+      ...reviewPayload,
+      message: 'B19 feedback B.',
+      suggestion: 'B19 suggestion B.',
+      tags: ['readability'],
+    };
+    const a = (await giveFeedback(created.id, 0, payloadA).expect(201))
+      .body as Resource;
+    const b = (await giveFeedback(created.id, 0, payloadB).expect(201))
+      .body as Resource;
+    expect(a.id).not.toBe(b.id);
+
+    type FeedbackSnapshot = Feedback & { _id: Types.ObjectId; updatedAt: Date };
+    const readPersisted = async () => {
+      const records = await feedback
+        .find({ submissionId: new Types.ObjectId(created.id) })
+        .lean<FeedbackSnapshot[]>()
+        .exec();
+      expect(records).toHaveLength(2);
+      const recordA = records.find((record) => record._id.toString() === a.id);
+      const recordB = records.find((record) => record._id.toString() === b.id);
+      if (!recordA || !recordB) throw new Error('Expected feedback A and B');
+      return { recordA, recordB };
+    };
+    const before = await readPersisted();
+    expect(before.recordA).toMatchObject(payloadA);
+    expect(before.recordB).toMatchObject(payloadB);
+    expect(before.recordA.updatedAt).toBeInstanceOf(Date);
+    expect(before.recordB.updatedAt).toBeInstanceOf(Date);
+
+    const target = `${url}/${b.id}`;
+    const duplicate = await teacher
+      .patch(target)
+      .send({
+        message: payloadA.message,
+        suggestion: 'B19 unsaved draft suggestion.',
+        tags: ['correctness'],
+      })
+      .expect(409);
+    const duplicateMessage =
+      '该作品已有相同类型、严重程度和正文的教师反馈，请核对后修改本条反馈。';
+    expect(duplicate.body).toMatchObject({
+      statusCode: 409,
+      message: duplicateMessage,
+    });
+    expect(duplicate.body).not.toHaveProperty('code');
+    const afterDuplicate = await readPersisted();
+    expect(afterDuplicate).toStrictEqual(before);
+
+    const correctedMessage = 'B19 feedback C.';
+    const corrected = await teacher
+      .patch(target)
+      .send({ message: correctedMessage })
+      .expect(200);
+    expect(corrected.body).toMatchObject({
+      id: b.id,
+      message: correctedMessage,
+    });
+    const afterCorrected = await readPersisted();
+    expect(afterCorrected.recordA).toStrictEqual(before.recordA);
+    expect(afterCorrected.recordB).toMatchObject({
+      ...payloadB,
+      message: correctedMessage,
+    });
+
+    const suggestion = 'B19 corrected suggestion.';
+    const suggestionOnly = await teacher
+      .patch(target)
+      .send({ suggestion })
+      .expect(200);
+    expect(suggestionOnly.body).toMatchObject({
+      id: b.id,
+      message: correctedMessage,
+      suggestion,
+    });
+    const afterSuggestion = await readPersisted();
+    expect(afterSuggestion.recordA).toStrictEqual(before.recordA);
+    expect(afterSuggestion.recordB).toMatchObject({
+      ...payloadB,
+      message: correctedMessage,
+      suggestion,
+    });
+    console.info('B19 teacher feedback PATCH verified', {
+      submissionId: created.id,
+      feedbackA: a.id,
+      feedbackB: b.id,
+      duplicate: {
+        status: duplicate.status,
+        message: duplicateMessage,
+        beforeAndAfter: {
+          aUpdatedAt: afterDuplicate.recordA.updatedAt,
+          bUpdatedAt: afterDuplicate.recordB.updatedAt,
+        },
+      },
+      corrected: {
+        status: corrected.status,
+        id: b.id,
+        message: afterCorrected.recordB.message,
+      },
+      suggestionOnly: {
+        status: suggestionOnly.status,
+        id: b.id,
+        suggestion: afterSuggestion.recordB.suggestion,
+      },
+    });
+  });
+
   it('fails closed for historical feedback or any historical job state even without reviewStartedAt', async () => {
     // Internal historical fixtures cannot be constructed through the new review endpoints.
     for (const status of Object.values(AiFeedbackJobStatus)) {

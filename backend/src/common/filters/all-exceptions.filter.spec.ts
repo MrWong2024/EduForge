@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  ConflictException,
   HttpException,
   InternalServerErrorException,
   UnauthorizedException,
@@ -315,6 +316,23 @@ describe('AllExceptionsFilter', () => {
         timestamp: expect.any(String) as unknown,
         path: '/synthetic',
         message: 'conflict message',
+      },
+      409,
+    );
+  });
+
+  it('preserves the public duplicate teacher feedback edit message without a code', () => {
+    const message =
+      '该作品已有相同类型、严重程度和正文的教师反馈，请核对后修改本条反馈。';
+    const { reply, response } = capture(new ConflictException(message));
+
+    expect(reply).toHaveBeenCalledWith(
+      response,
+      {
+        statusCode: 409,
+        timestamp: expect.any(String) as unknown,
+        path: '/synthetic',
+        message,
       },
       409,
     );

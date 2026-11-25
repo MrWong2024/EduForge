@@ -26,6 +26,7 @@ import {
   FEEDBACK_TAG_OPTIONS,
   type FeedbackTagValue,
 } from "@/lib/ui/feedback-tags";
+import { safeGet } from "@/lib/ui/format";
 
 type TeacherFeedbackEditFormProps = {
   feedback: TeacherFeedbackItem;
@@ -49,7 +50,16 @@ const sameStringArray = (left: string[], right: string[]): boolean =>
   left.length === right.length &&
   left.every((item, index) => item === right[index]);
 
-const getUpdateFeedbackErrorSummary = (status: number): string => {
+const DUPLICATE_FEEDBACK_MESSAGE =
+  "该作品已有相同类型、严重程度和正文的教师反馈，请核对后修改本条反馈。";
+
+const getUpdateFeedbackErrorSummary = (status: number, data: unknown): string => {
+  if (
+    status === 409 &&
+    safeGet<unknown>(data, "message", undefined) === DUPLICATE_FEEDBACK_MESSAGE
+  ) {
+    return DUPLICATE_FEEDBACK_MESSAGE;
+  }
   if (status === 400) {
     return "反馈内容不完整或格式不正确，请检查后再保存。";
   }
@@ -169,7 +179,7 @@ export function TeacherFeedbackEditForm({
       if (error instanceof BrowserFetchJsonError) {
         setErrorState({
           status: error.status,
-          summary: getUpdateFeedbackErrorSummary(error.status),
+          summary: getUpdateFeedbackErrorSummary(error.status, error.data),
           detail: extractRawDetail(error.data),
         });
       } else {
