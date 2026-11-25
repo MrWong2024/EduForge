@@ -14,6 +14,11 @@ import {
   toCourseListResponse,
   type ClassroomStatus,
 } from "@/lib/api/types-teacher";
+import {
+  classroomCourseName,
+  classroomCoursePagePath,
+  resolveClassroomCreationCourses,
+} from "@/lib/classroom-creation-courses";
 import { paths } from "@/lib/routes/paths";
 import { findLastPageForOutOfRangeRequest } from "@/lib/routes/teacher-list-pagination";
 import { getClassroomStatusLabel, getCommonErrorSummary } from "@/lib/ui/status";
@@ -95,7 +100,7 @@ type ClassroomsViewModel =
       mode: "ready";
       response: ReturnType<typeof toClassroomListResponse>;
       selectedCourseId?: string;
-      courses: ReturnType<typeof toCourseListResponse>["items"];
+      creationCourses: Awaited<ReturnType<typeof resolveClassroomCreationCourses>>;
       statusView: ClassroomStatusView;
     }
   | { mode: "error"; status: number; description: string };
@@ -107,7 +112,7 @@ export default async function TeacherClassroomsPage({ searchParams }: TeacherCla
     parsePositiveInt(getSingleSearchParam(query.limit), CLASSROOMS_PAGE_SIZE),
     100
   );
-  const selectedCourseId = getSingleSearchParam(query.courseId)?.trim() || undefined;
+  const selectedCourseId = getSingleSearchParam(query.courseId)?.trim();
   const statusView = parseStatusView(getSingleSearchParam(query.statusView));
   const statusFilter = toStatusFilter(statusView);
 
@@ -133,18 +138,22 @@ export default async function TeacherClassroomsPage({ searchParams }: TeacherCla
       fetchJson<unknown>(`classrooms?${requestQuery.toString()}`, {
         cache: "no-store",
       }),
-      fetchJson<unknown>("courses?page=1&limit=100", {
+      fetchJson<unknown>(classroomCoursePagePath(1), {
         cache: "no-store",
       }),
     ]);
 
     const list = toClassroomListResponse(classroomsPayload);
-    const courses = toCourseListResponse(coursesPayload).items;
+    const creationCourses = await resolveClassroomCreationCourses(
+      toCourseListResponse(coursesPayload),
+      selectedCourseId,
+      (id) => fetchJson<unknown>(`courses/${encodeURIComponent(id)}`, { cache: "no-store" }),
+    );
     viewModel = {
       mode: "ready",
       response: list,
       selectedCourseId,
-      courses,
+      creationCourses,
       statusView,
     };
   } catch (error) {
@@ -194,9 +203,7 @@ export default async function TeacherClassroomsPage({ searchParams }: TeacherCla
   const hasNext = currentPage < totalPages;
 
   const courseNameMap = new Map(
-    viewModel.courses
-      .filter((course) => course.id)
-      .map((course) => [course.id as string, toDisplayText(course.name, "未命名课程")])
+    viewModel.creationCourses.courses.map((course) => [course.id, course.name]),
   );
 
   const tabItems = [
@@ -246,7 +253,10 @@ export default async function TeacherClassroomsPage({ searchParams }: TeacherCla
 
       <Tabs items={tabItems} activeHref={activeTabHref} />
 
-      <CreateClassroomForm courses={viewModel.courses} initialCourseId={viewModel.selectedCourseId} />
+      <CreateClassroomForm
+        key={viewModel.selectedCourseId === undefined ? "all-courses" : `course:${viewModel.selectedCourseId}`}
+        {...viewModel.creationCourses}
+      />
 
       <TeacherLifecycleListSummary>
         {!validPageHref ? <>共 {totalClassroomsCount} 个班级，当前显示 {displayedClassroomsCount} 个</> : null}
@@ -287,7 +297,7 @@ export default async function TeacherClassroomsPage({ searchParams }: TeacherCla
               {viewModel.response.items.map((item, index) => {
                 const classroomId = item.id;
                 const displayName = toDisplayText(item.name, "未命名班级");
-                const courseName = item.courseId ? courseNameMap.get(item.courseId) : undefined;
+                const courseName = classroomCourseName(item, courseNameMap);
                 const statusMeta =
                   item.status && (item.status === "ACTIVE" || item.status === "ARCHIVED")
                     ? CLASSROOM_STATUS_META[item.status]
@@ -310,7 +320,7 @@ export default async function TeacherClassroomsPage({ searchParams }: TeacherCla
                         <span className="text-zinc-500">{getClassroomStatusLabel(item.status)}</span>
                       )}
                     </td>
-                    <td className="px-4 py-3">{courseName ?? "未知课程"}</td>
+                    <td className="px-4 py-3">{courseName}</td>
                     <td className="px-4 py-3">{toDisplayText(item.joinCode)}</td>
                     <td className="px-4 py-3 align-top">
                       {classroomId ? (
@@ -403,7 +413,7 @@ const buildClassroomListHref = (
     limit: String(limit),
     statusView,
   });
-  if (courseId) {
+  if (courseId !== undefined) {
     query.set("courseId", courseId);
   }
   return `${paths.teacher.classrooms}?${query.toString()}`;

@@ -1,20 +1,29 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { ErrorState } from "@/components/blocks/ErrorState";
 import { BrowserFetchJsonError, fetchJson } from "@/lib/api/browser-client";
 import { buildErrorDescription, extractRawDetail } from "@/lib/api/error-presenter";
 import {
-  type CourseSummary,
   type CreateClassroomRequest,
   toClassroomCreateResponse,
+  toCourseListResponse,
 } from "@/lib/api/types-teacher";
+import {
+  classroomCoursePagePath,
+  mergeClassroomCourseOptions,
+  nextClassroomCoursePage,
+  type ClassroomCourseOption,
+} from "@/lib/classroom-creation-courses";
 import { paths } from "@/lib/routes/paths";
 
 type CreateClassroomFormProps = {
-  courses: CourseSummary[];
+  courses: ClassroomCourseOption[];
   initialCourseId?: string;
+  targetUnavailable: boolean;
+  nextPage?: number;
 };
 
 type CreateClassroomFormErrorState = {
@@ -53,29 +62,57 @@ const getCreateErrorSummary = (status: number): string => {
   return "操作失败，请稍后重试。";
 };
 
-export function CreateClassroomForm({ courses, initialCourseId }: CreateClassroomFormProps) {
+export function CreateClassroomForm({
+  courses,
+  initialCourseId,
+  targetUnavailable,
+  nextPage,
+}: CreateClassroomFormProps) {
   const router = useRouter();
-  const availableCourses = useMemo(() => courses.filter((course) => Boolean(course.id)), [courses]);
-  const defaultCourseId = useMemo(() => {
-    if (initialCourseId && availableCourses.some((course) => course.id === initialCourseId)) {
-      return initialCourseId;
-    }
-    return availableCourses[0]?.id ?? "";
-  }, [availableCourses, initialCourseId]);
-
-  const [courseId, setCourseId] = useState(defaultCourseId);
+  const [loadedCourses, setLoadedCourses] = useState(courses);
+  const [loadedPage, setLoadedPage] = useState<{ nextPage?: number } | null>(null);
+  const [isLoadingMore, setIsLoadingMore] = useState(false);
+  const [loadMoreError, setLoadMoreError] = useState(false);
+  const [selectedCourseId, setSelectedCourseId] = useState(initialCourseId);
   const [name, setName] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [errorState, setErrorState] = useState<CreateClassroomFormErrorState | null>(null);
   const classroomNamePlaceholder = getClassroomNamePlaceholder();
+  const availableCourses = useMemo(
+    () => mergeClassroomCourseOptions(courses, loadedCourses),
+    [courses, loadedCourses],
+  );
+  const courseId = selectedCourseId ?? initialCourseId ?? availableCourses[0]?.id ?? "";
+  const nextPageToLoad = loadedPage ? loadedPage.nextPage : nextPage;
+
+  const handleLoadMore = async () => {
+    if (targetUnavailable || isLoadingMore || nextPageToLoad === undefined) {
+      return;
+    }
+
+    setIsLoadingMore(true);
+    setLoadMoreError(false);
+    try {
+      const payload = await fetchJson<unknown>(classroomCoursePagePath(nextPageToLoad));
+      const response = toCourseListResponse(payload);
+      setLoadedCourses((current) => mergeClassroomCourseOptions(current, response.items));
+      setLoadedPage({ nextPage: nextClassroomCoursePage(response, nextPageToLoad) });
+    } catch {
+      setLoadMoreError(true);
+    } finally {
+      setIsLoadingMore(false);
+    }
+  };
 
   const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+    if (targetUnavailable || isSubmitting) {
+      return;
+    }
     const trimmedName = name.trim();
-    const trimmedCourseId = courseId.trim();
 
-    if (!trimmedCourseId) {
+    if (!availableCourses.some((course) => course.id === courseId)) {
       setErrorState({
         description: "请先选择课程。",
       });
@@ -93,7 +130,7 @@ export function CreateClassroomForm({ courses, initialCourseId }: CreateClassroo
     setErrorState(null);
 
     const requestBody: CreateClassroomRequest = {
-      courseId: trimmedCourseId,
+      courseId,
       name: trimmedName,
     };
 
@@ -141,15 +178,23 @@ export function CreateClassroomForm({ courses, initialCourseId }: CreateClassroo
         先选择课程再创建班级，成功后将自动进入班级看板。
       </p>
 
-      {availableCourses.length === 0 ? (
+      {targetUnavailable ? (
+        <p className="mt-3 text-sm text-amber-800">
+          无法确认入口指定的课程。请
+          <Link href={paths.teacher.classrooms} className="text-blue-700 underline">
+            返回班级列表重新选择课程
+          </Link>
+          。
+        </p>
+      ) : availableCourses.length === 0 && nextPageToLoad === undefined ? (
         <p className="mt-3 text-sm text-amber-700">当前暂无可选课程，请先在课程页创建课程。</p>
-      ) : (
+      ) : availableCourses.length > 0 ? (
         <form onSubmit={handleSubmit} className="mt-4 grid gap-3 md:grid-cols-2">
           <label className="block text-sm">
             <span className="mb-1 block text-zinc-700">所属课程</span>
             <select
               value={courseId}
-              onChange={(event) => setCourseId(event.target.value)}
+              onChange={(event) => setSelectedCourseId(event.target.value)}
               className="w-full rounded-md border border-zinc-300 px-3 py-2"
             >
               {availableCourses.map((course) => (
@@ -180,7 +225,21 @@ export function CreateClassroomForm({ courses, initialCourseId }: CreateClassroo
             </button>
           </div>
         </form>
-      )}
+      ) : null}
+
+      {!targetUnavailable && nextPageToLoad !== undefined ? (
+        <button
+          type="button"
+          onClick={handleLoadMore}
+          disabled={isLoadingMore}
+          className="mt-3 rounded-md border border-zinc-300 px-3 py-2 text-sm text-zinc-700 hover:bg-zinc-50 disabled:opacity-60"
+        >
+          {isLoadingMore ? "正在加载课程…" : "加载更多课程"}
+        </button>
+      ) : null}
+      {loadMoreError ? (
+        <p role="status" className="mt-2 text-sm text-amber-800">加载更多课程失败，请重试。</p>
+      ) : null}
 
       {successMessage ? <p className="mt-3 text-sm text-emerald-700">{successMessage}</p> : null}
 

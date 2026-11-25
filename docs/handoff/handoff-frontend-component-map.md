@@ -72,7 +72,7 @@
 | TeacherLifecycleList | `components/teacher/TeacherLifecycleList.tsx` | 课程与班级列表共享的页面级结果提示及可聚焦摘要。操作后行离开当前视图时，摘要接回仍位于该行的焦点。页面提供有效页链接时执行同路由替换，保留结果提示 |
 | EditCourseForm | `components/teacher/EditCourseForm.tsx` | 课程基础信息编辑，复用 `lib/course-edit.ts` 判断并只提交字段净变化，无净变化不发请求；课程分类未改省略、明确清空发送空串；失败保留草稿，成功返回课程总览并刷新，不承担列表加载 |
 | CourseOverviewPage | `app/teacher/courses/[courseId]/overview/page.tsx` | 服务端加载、窗口/排序/分页及只读班级明细组合；页面摘要只汇总当前页，指标字段适配与含义遵循 API Owner，不把分页摘要当全课程统计 |
-| CreateClassroomForm | `components/teacher/CreateClassroomForm.tsx` | 建班表单及局部输入/提交状态，不负责班级列表加载；名称示例不自动成为输入值 |
+| CreateClassroomForm | `components/teacher/CreateClassroomForm.tsx` | 管理建班选课、班名和提交。提交使用当前可见选择。按需加载后续课程并按 ID 去重，失败保留候选和草稿，可重试。同一课程上下文保留草稿，切换课程上下文时重新初始化。名称示例不自动成为输入值，班级列表由页面加载 |
 | EditClassroomForm | `components/teacher/EditClassroomForm.tsx` | 只编辑班名，合法原文提交，按单行控件去除 CR/LF 后的基准判断净变化，无变化不发请求；失败保留草稿，成功返回看板。所属课程、状态与加入码只读，归档、恢复、删除等生命周期动作归 ClassroomLifecycleActions |
 | ClassroomLifecycleActions | `components/teacher/ClassroomLifecycleActions.tsx` | 班级列表生命周期“更多”菜单：ACTIVE 归档/删除，ARCHIVED 恢复/删除；拥有菜单、pending、确认与结果状态，组合 FloatingMoreMenu 并保留当前列表视图；删除限制由后端判定，不混入基础编辑表单 |
 | CreateLearningTaskForm | `components/teacher/CreateLearningTaskForm.tsx` | 模板内容、课程分类、可见性、可选任务难度及单一“评阅标准（可选）”多行文字输入。描述仅检查非空白并按输入原文发出。difficulty/rubric 请求构造复用各自纯 helper，难度成功创建后重置。描述和评阅标准默认均为10行且可纵向调整。提供草稿和直接发布，创建省略资料引用，失败保留全部输入 |

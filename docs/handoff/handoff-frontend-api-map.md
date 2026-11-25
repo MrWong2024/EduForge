@@ -64,7 +64,8 @@
 ### 3.2 Teacher 课程 / 班级 / 成员
 
 - 课程列表与详情：Server pages -> `client.fetchJson("courses...")` -> `/api/proxy/courses*` -> `GET /api/courses*`。
-  - 调用页面：`/teacher/courses`、`/teacher/courses/:courseId/overview`、`/teacher/courses/:courseId/edit`。
+  - 调用页面：`/teacher/courses`、`/teacher/courses/:courseId/overview`、`/teacher/courses/:courseId/edit`、`/teacher/classrooms`。
+  - 班级页服务端读取首批课程，显式指定的课程未命中首批时再请求 `GET /api/courses/:id`，核对响应 ID。教师点击「加载更多课程」时，`CreateClassroomForm` 经浏览器 API 客户端和 BFF 请求 `GET /api/courses` 的下一页。
   - 注意：课程总览请求参数见 [Backend DTO](./handoff-backend-dto-cheatsheet.md#课程总览)，页面交互由 Route Map 维护。
 - 课程创建/编辑：`CreateCourseForm`、`EditCourseForm` -> `/api/proxy/courses*` -> `POST/PATCH /api/courses*`。
   - 调用页面：`/teacher/courses*`。

@@ -35,7 +35,7 @@
 | `/teacher/courses/[courseId]/edit` | 课程基础信息编辑 | Course 详情 / 更新 | 从列表或总览进入，编辑编号、名称、学期、课程分类，保存后回总览；总览保持展示职责 | Done |
 | `/teacher/tasks` | 任务模板列表与创建 | Task template 查询 / 创建 | 默认我的模板，可切换我的/共享/全部并按课程分类、状态、知识模块筛选及分页；创建为草稿或发布模板；展示可见性、发布者和评阅标准填写状态。作者的 DRAFT/PUBLISHED 可编辑，ARCHIVED 及非作者模板仅查看；保留班级来源和列表回跳上下文 | Done |
 | `/teacher/tasks/[taskId]/edit` | 模板编辑或只读查看 | Task template 详情 / 生命周期 | 作者编辑 DRAFT/PUBLISHED 的内容、可见性与文字评阅标准；保存内容与生命周期动作分离；DRAFT 可发布、PUBLISHED 可归档，均需确认。ARCHIVED、非作者共享模板及未知状态只读；无恢复入口，归档复用提示不代表已有复制功能；returnTo 仅接受规范化后路径严格为 `/teacher/tasks` 的站内地址，保留有效列表上下文；非法或缺失时回退模板列表 | Done |
-| `/teacher/classrooms` | 班级列表与创建 | Classroom 列表 / Course 关联 | 按课程及进行中、已归档、全部筛选并分页；创建、进入编辑/看板。列表“更多”提供 ACTIVE 归档/删除、ARCHIVED 恢复/删除，删除需确认且仅空班级允许；非空限制由后端判定。读取到可信总数且页码越界时回到最后有效页，保留 `courseId`、`statusView` 和 `limit` | Done |
+| `/teacher/classrooms` | 班级列表与创建 | Classroom 列表 / Course 关联 | 按课程及进行中、已归档、全部筛选并分页；创建、进入编辑/看板。`courseId` 同时指定列表筛选和建班表单初始课程，表单改选只影响创建。目标课程无法确认时保留可读列表，建班区提示并提供返回普通班级页的入口。班级行优先显示行内课程名称，缺失时用已加载课程名称。列表“更多”提供 ACTIVE 归档/删除、ARCHIVED 恢复/删除，删除需确认且仅空班级允许；非空限制由后端判定。读取到可信总数且页码越界时回到最后有效页，保留 `courseId`、`statusView` 和 `limit` | Done |
 | `/teacher/classrooms/[classroomId]/edit` | 班级基础信息编辑 | Classroom 详情 / 更新 | 当前只编辑班级名称，所属课程、状态及加入码只读；保存后回看板，不影响成员、课堂任务和历史提交；不提供归档/恢复/删除，生命周期动作在列表“更多”菜单 | Done |
 | `/teacher/classrooms/[classroomId]` | 班级入口 | 无数据依赖 | 重定向到本班 dashboard | Done |
 | `/teacher/classrooms/[classroomId]/dashboard` | 班级看板 | Classroom dashboard API | 默认展示 ACTIVE 任务，可显式包含 CLOSED；展示模板归档提示和非本人模板发布者，进入任务与分析页。空结果说明当前筛选暂无可展示任务，归档班级提供「查看任务列表」。统计及归档建议直接消费后端结果，不二次过滤重算或自动归档 | Done |
