@@ -6,7 +6,7 @@ import { fetchJson, FetchJsonError } from "@/lib/api/client";
 import { buildErrorDescription, extractRawDetail } from "@/lib/api/error-presenter";
 import { toReviewPackResponse } from "@/lib/api/types-teacher";
 import { paths } from "@/lib/routes/paths";
-import { getAiStatusLabel, getCommonErrorSummary } from "@/lib/ui/status";
+import { getCommonErrorSummary } from "@/lib/ui/status";
 import { getFeedbackTagLabel } from "@/lib/ui/feedback-tags";
 import {
   getFeedbackSeverityLabel,
@@ -21,6 +21,12 @@ import {
   safeGet,
   toDisplayText,
 } from "@/lib/ui/format";
+import {
+  buildReviewPackStudentGroups,
+  describeRepeatSubmissions,
+  ReviewPackStudentGroupCards,
+  summarizeReviewPackStudentGroups,
+} from "./review-pack-student-groups";
 
 type ReviewPackPageProps = {
   params: Promise<{ classroomId: string; classroomTaskId: string }>;
@@ -81,8 +87,6 @@ type ExampleCardView = {
   source?: string;
   attemptNo?: number;
 };
-
-const STUDENT_TIER_PREVIEW_COUNT = 6;
 
 const resolveQueryState = (
   query: Awaited<ReviewPackPageProps["searchParams"]>
@@ -256,75 +260,6 @@ const toExampleCards = (
     };
   });
 
-type StudentTierCardView = {
-  key: string;
-  title: string;
-  description: string;
-  students: Array<{
-    key: string;
-    studentId: string;
-    studentName: string;
-    studentNo?: string;
-    attemptsCount?: number;
-    latestErrorCount?: number;
-    latestAiStatus?: string;
-  }>;
-};
-
-type StudentTierStudentView = StudentTierCardView["students"][number];
-
-const toStudentTierCard = (
-  source: ReturnType<typeof toReviewPackResponse>["studentTiers"],
-  key: "good" | "watch" | "notSubmitted",
-  title: string,
-  description: string
-): StudentTierCardView => {
-  const rows = source[key] ?? [];
-  const students = rows.map((item, index) => {
-    const studentId = toOptionalText(item.studentId) ?? `unknown-${key}-${index + 1}`;
-    const studentName = toOptionalText(item.studentName) ?? "未知学生";
-    const studentNo = toOptionalText(item.studentNo);
-    return {
-      key: `${key}-${studentId}-${index}`,
-      studentId,
-      studentName,
-      studentNo,
-      attemptsCount: typeof item.attemptsCount === "number" ? item.attemptsCount : undefined,
-      latestErrorCount: typeof item.latestErrorCount === "number" ? item.latestErrorCount : undefined,
-      latestAiStatus: toOptionalText(item.latestAiFeedbackStatus),
-    };
-  });
-
-  return { key, title, description, students };
-};
-
-const buildStudentTierCards = (
-  studentTiers: ReturnType<typeof toReviewPackResponse>["studentTiers"]
-): StudentTierCardView[] => [
-  toStudentTierCard(studentTiers, "good", "稳定完成", "完成情况较好，可作为正向参考。"),
-  toStudentTierCard(studentTiers, "watch", "需要关注", "有提交但错误较多，建议课堂重点跟进。"),
-  toStudentTierCard(studentTiers, "notSubmitted", "未提交", "当前窗口内未形成有效提交记录。"),
-];
-
-const renderStudentTierRow = (
-  student: StudentTierStudentView,
-  tierKey: StudentTierCardView["key"]
-): React.ReactElement => (
-  <li key={student.key} className="rounded border border-zinc-200 bg-white px-2 py-1 text-xs">
-    <p className="font-medium text-zinc-800">{student.studentName}</p>
-    {student.studentNo ? <p className="text-zinc-500">学号：{student.studentNo}</p> : null}
-    {tierKey !== "notSubmitted" ? (
-      <p className="text-zinc-500">
-        尝试：{typeof student.attemptsCount === "number" ? student.attemptsCount : "—"} · 最近错误：
-        {typeof student.latestErrorCount === "number" ? student.latestErrorCount : "—"}
-      </p>
-    ) : null}
-    {tierKey !== "notSubmitted" && student.latestAiStatus ? (
-      <p className="text-zinc-500">AI：{getAiStatusLabel(student.latestAiStatus)}</p>
-    ) : null}
-  </li>
-);
-
 const buildOverviewMetricCards = (
   overview: unknown,
   window: ReviewWindow,
@@ -412,7 +347,7 @@ const buildSummaryHighlights = (
   window: ReviewWindow,
   topTagItems: IssueDistributionItem[],
   examplesCount: number,
-  studentTierCards: StudentTierCardView[]
+  studentGroups: ReturnType<typeof buildReviewPackStudentGroups>
 ): string[] => {
   const studentsCount = pickNumber(overview, ["studentsCount", "studentCount", "totalStudents"]);
   const submittedStudentsCount = pickNumber(overview, [
@@ -434,12 +369,7 @@ const buildSummaryHighlights = (
       ? `当前窗口（${WINDOW_LABELS[window]}）提交覆盖 ${submittedStudentsCount}/${studentsCount}（提交率 ${toPercentText(submissionRateComputed)}）。`
       : `当前窗口（${WINDOW_LABELS[window]}）提交覆盖数据暂不完整。`;
 
-  const coverageIteration =
-    typeof attemptThreePlus === "number" && attemptThreePlus > 0
-      ? `有 ${attemptThreePlus} 名学生达到 3 次及以上尝试，建议优先核查反复修改但仍未稳定通过的问题。`
-      : typeof attemptTwo === "number" && attemptTwo > 0
-        ? `有 ${attemptTwo} 名学生进行了 2 次尝试，课堂讲评可重点说明常见返工原因。`
-        : "多数学生尝试次数处于稳定区间，可结合典型样例做集中讲评。";
+  const repeatedSubmissions = describeRepeatSubmissions(attemptTwo, attemptThreePlus);
 
   const topTag = topTagItems[0];
   const issueFocus = topTag
@@ -448,19 +378,11 @@ const buildSummaryHighlights = (
       ? `当前未形成明显的单一高频标签，可从 ${examplesCount} 条去重样例中挑选共性问题组织讲评。`
       : "当前未返回高频标签与典型样例，建议先结合提交管理页核查主要问题。";
 
-  const goodCount = studentTierCards.find((card) => card.key === "good")?.students.length ?? 0;
-  const watchCount = studentTierCards.find((card) => card.key === "watch")?.students.length ?? 0;
-  const notSubmittedCount = studentTierCards.find((card) => card.key === "notSubmitted")?.students.length ?? 0;
-  const tierTotal = goodCount + watchCount + notSubmittedCount;
-
-  const tierFocus =
-    tierTotal === 0
-      ? "当前未返回有效学生分层数据。"
-      : watchCount > 0 || notSubmittedCount > 0
-        ? `学生分层显示：稳定完成 ${goodCount} 人、需要关注 ${watchCount} 人、未提交 ${notSubmittedCount} 人。`
-        : `学生分层显示：当前窗口内学生整体处于稳定完成态（${goodCount} 人）。`;
-
-  return [`${coverageBase}${coverageIteration}`, issueFocus, tierFocus];
+  return [
+    `${coverageBase}${repeatedSubmissions}`,
+    issueFocus,
+    summarizeReviewPackStudentGroups(studentGroups),
+  ];
 };
 
 type ReviewPackViewModel =
@@ -525,8 +447,8 @@ export default async function ReviewPackPage({ params, searchParams }: ReviewPac
   const topTypeItems = toIssueDistributionItems(topTypes, ["type", "name", "label", "value"]);
   const topSeverityItems = toIssueDistributionItems(topSeverities, ["severity", "level", "name", "value"]);
   const exampleCards = toExampleCards(viewModel.data.examples);
-  const studentTierCards = buildStudentTierCards(viewModel.data.studentTiers);
-  const hasStudentTierData = studentTierCards.some((card) => card.students.length > 0);
+  const studentGroups = buildReviewPackStudentGroups(viewModel.data.studentTiers);
+  const hasStudentTierData = studentGroups.some((group) => group.students.length > 0);
   const overviewMetricCards = buildOverviewMetricCards(
     viewModel.data.overview,
     viewModel.query.window,
@@ -537,7 +459,7 @@ export default async function ReviewPackPage({ params, searchParams }: ReviewPac
     viewModel.query.window,
     topTagItems,
     exampleCards.length,
-    studentTierCards
+    studentGroups
   );
   const allSectionsEmpty =
     topTagItems.length === 0 &&
@@ -800,43 +722,7 @@ export default async function ReviewPackPage({ params, searchParams }: ReviewPac
             )}
           </section>
 
-          <section className="rounded-lg border border-zinc-200 bg-white p-4">
-            <h2 className="text-sm font-semibold text-zinc-900">学生分层</h2>
-            <div className="mt-3 grid gap-3 md:grid-cols-3">
-              {studentTierCards.map((tierCard) => (
-                <article key={tierCard.key} className="rounded-md border border-zinc-200 bg-zinc-50 p-3 text-sm text-zinc-700">
-                  <p className="font-medium text-zinc-900">
-                    {tierCard.title}（{tierCard.students.length}）
-                  </p>
-                  <p className="mt-1 text-xs text-zinc-500">{tierCard.description}</p>
-                  {tierCard.students.length > 0 ? (
-                    <>
-                      <ul className="mt-2 space-y-1">
-                        {tierCard.students
-                          .slice(0, STUDENT_TIER_PREVIEW_COUNT)
-                          .map((student) => renderStudentTierRow(student, tierCard.key))}
-                      </ul>
-                      {tierCard.students.length > STUDENT_TIER_PREVIEW_COUNT ? (
-                        <details className="group mt-2">
-                          <summary className="cursor-pointer text-xs text-blue-700 hover:underline">
-                            <span className="group-open:hidden">展开全部</span>
-                            <span className="hidden group-open:inline">收起</span>
-                          </summary>
-                          <ul className="mt-2 space-y-1">
-                            {tierCard.students
-                              .slice(STUDENT_TIER_PREVIEW_COUNT)
-                              .map((student) => renderStudentTierRow(student, tierCard.key))}
-                          </ul>
-                        </details>
-                      ) : null}
-                    </>
-                  ) : (
-                    <p className="mt-2 text-xs text-zinc-600">当前分组暂无学生。</p>
-                  )}
-                </article>
-              ))}
-            </div>
-          </section>
+          <ReviewPackStudentGroupCards groups={studentGroups} />
         </>
       )}
 
