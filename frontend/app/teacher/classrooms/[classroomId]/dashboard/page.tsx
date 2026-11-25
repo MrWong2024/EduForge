@@ -203,6 +203,7 @@ type DashboardViewModel =
   | {
       mode: "ready";
       classroomName?: string;
+      classroomArchived: boolean;
       dashboard: ReturnType<typeof toDashboardResponse>;
       dashboardItems: ReturnType<typeof getDashboardItems>;
       studentsCount: number;
@@ -261,6 +262,7 @@ export default async function ClassroomDashboardPage({
     viewModel = {
       mode: "ready",
       classroomName: classroom.name,
+      classroomArchived: classroom.status === "ARCHIVED",
       dashboard,
       dashboardItems,
       studentsCount,
@@ -638,16 +640,18 @@ export default async function ClassroomDashboardPage({
           <EmptyState
             title="暂无看板任务数据"
             description={
-              viewModel.includeClosedTasks
-                ? "当前班级还没有可展示的任务概览，请先发布课堂任务。"
-                : "当前班级暂无进行中的课堂任务；如需复盘已关闭任务，可打开“显示已关闭任务”。"
+              !viewModel.classroomArchived && !viewModel.includeClosedTasks
+                ? "当前筛选下暂无可展示的任务。如需复盘已关闭任务，可打开“显示已关闭任务”。"
+                : "当前筛选下暂无可展示的任务。"
             }
             actions={
               <Link
                 href={paths.teacher.classroomTasks(classroomId)}
                 className="text-sm text-blue-700 hover:underline"
               >
-                去任务列表发布任务
+                {viewModel.classroomArchived
+                  ? "查看任务列表"
+                  : "去任务列表发布任务"}
               </Link>
             }
           />

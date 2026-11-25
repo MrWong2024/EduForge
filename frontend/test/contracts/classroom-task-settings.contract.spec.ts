@@ -1,6 +1,7 @@
 import { expect, test } from "@playwright/test";
 import {
   buildClassroomTaskSettingsRequest,
+  getClassroomTaskSubmissionWindowStatus,
   readSavedClassroomTaskSettings,
   toClassroomTaskDueAtLocalValue,
   type ClassroomTaskSettingsDraft,
@@ -23,6 +24,39 @@ test.afterAll(() => {
   } else {
     process.env.TZ = originalTimeZone;
   }
+});
+
+test("an archived classroom blocks submission on open, late-allowed, and closed tasks", () => {
+  const expired = "2000-01-01T00:00:00.000Z";
+  const archivedWindows = [
+    getClassroomTaskSubmissionWindowStatus(true, "ACTIVE", null, false),
+    getClassroomTaskSubmissionWindowStatus(true, "ACTIVE", expired, true),
+    getClassroomTaskSubmissionWindowStatus(true, "CLOSED", null, true),
+  ];
+
+  for (const window of archivedWindows) {
+    expect(window).toMatchObject({
+      label: "不可提交",
+      title: "班级已归档，学生不能新提交。",
+    });
+  }
+});
+
+test("an active classroom keeps the instance submission window rules", () => {
+  const expired = "2000-01-01T00:00:00.000Z";
+  expect(
+    getClassroomTaskSubmissionWindowStatus(false, "ACTIVE", null, false).label,
+  ).toBe("可提交");
+  expect(
+    getClassroomTaskSubmissionWindowStatus(false, "ACTIVE", expired, true).label,
+  ).toBe("允许迟交");
+  expect(
+    getClassroomTaskSubmissionWindowStatus(false, "ACTIVE", expired, false)
+      .label,
+  ).toBe("不可提交");
+  expect(
+    getClassroomTaskSubmissionWindowStatus(false, "CLOSED", null, true).label,
+  ).toBe("不可提交");
 });
 
 test("switch-only edit omits a deadline whose original instant includes seconds and milliseconds", () => {

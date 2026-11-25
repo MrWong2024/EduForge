@@ -15,6 +15,7 @@ import { useClassroomTaskListInteractions } from "./ClassroomTaskListInteraction
 
 type ClassroomTaskLifecycleActionsProps = {
   classroomId: string;
+  classroomArchived: boolean;
   classroomTaskId?: string;
   taskTitle: string;
   status?: string;
@@ -75,6 +76,20 @@ const ACTION_DETAILS = {
   style: string;
 }>;
 
+const ARCHIVED_CLASSROOM_ACTION_DETAILS = {
+  ...ACTION_DETAILS,
+  CLOSED: {
+    ...ACTION_DETAILS.CLOSED,
+    description: "关闭后，已有作品和反馈会保留，任务仍计入过程性评价。班级归档期间学生仍不能提交。",
+  },
+  ACTIVE: {
+    ...ACTION_DETAILS.ACTIVE,
+    label: "重新开放任务",
+    description: "重新开放后，班级归档期间学生仍不能提交。原截止时间和迟交设置保持不变。",
+    success: "已重新开放任务。班级归档期间学生仍不能提交。",
+  },
+};
+
 const ERROR_SUMMARY: Record<number, string> = {
   400: "当前任务状态不允许此操作，请核对任务状态后再操作。",
   401: "登录状态已失效，请重新登录。",
@@ -83,8 +98,7 @@ const ERROR_SUMMARY: Record<number, string> = {
   409: "课堂任务状态已变化，请核对最新状态后再操作。",
 };
 
-function describeActionError(error: ActionError, canRecall: boolean) {
-  const label = ACTION_DETAILS[error.action].label;
+function describeActionError(error: ActionError, label: string, canRecall: boolean) {
   if (error.reason === "notEmpty") {
     return canRecall
       ? "该任务已有作品或 AI 反馈任务，无法删除。若要停止提交并保留记录，可选择撤回任务。"
@@ -99,6 +113,7 @@ function describeActionError(error: ActionError, canRecall: boolean) {
 
 export function ClassroomTaskLifecycleActions({
   classroomId,
+  classroomArchived,
   classroomTaskId,
   taskTitle,
   status,
@@ -117,6 +132,7 @@ export function ClassroomTaskLifecycleActions({
   const deleteButtonRef = useRef<HTMLButtonElement>(null);
   const restoreListFocusOnRemoval = useRef(false);
 
+  const actionDetails = classroomArchived ? ARCHIVED_CLASSROOM_ACTION_DETAILS : ACTION_DETAILS;
   const statusValue = normalizeClassroomTaskStatus(status);
   const statusBadge = statusValue ? STATUS_BADGE[statusValue] : UNKNOWN_STATUS_BADGE;
   const canRecall = statusValue === "ACTIVE" || statusValue === "CLOSED";
@@ -170,7 +186,7 @@ export function ClassroomTaskLifecycleActions({
           deleteButtonRef.current?.focus();
         }
       }
-      setSuccessMessage(ACTION_DETAILS[action].success);
+      setSuccessMessage(actionDetails[action].success);
       startRefresh(() => router.refresh());
     } catch (error) {
       const httpStatus = error instanceof BrowserFetchJsonError ? error.status : undefined;
@@ -203,7 +219,7 @@ export function ClassroomTaskLifecycleActions({
   };
 
   const renderAction = (action: LifecycleAction, ref?: typeof deleteButtonRef) => {
-    const { label, style } = ACTION_DETAILS[action];
+    const { label, style } = actionDetails[action];
     return (
       <button
         ref={ref}
@@ -241,9 +257,9 @@ export function ClassroomTaskLifecycleActions({
 
       {pendingAction ? (
         <ConfirmDialog
-          title={`${ACTION_DETAILS[pendingAction.action].label}：${taskTitle}`}
-          description={ACTION_DETAILS[pendingAction.action].description}
-          confirmLabel={ACTION_DETAILS[pendingAction.action].label}
+          title={`${actionDetails[pendingAction.action].label}：${taskTitle}`}
+          description={actionDetails[pendingAction.action].description}
+          confirmLabel={actionDetails[pendingAction.action].label}
           destructive={pendingAction.action === "DELETE" || pendingAction.action === "RECALLED"}
           onCancel={() => setPendingAction(null)}
           onConfirm={handleConfirm}
@@ -259,8 +275,8 @@ export function ClassroomTaskLifecycleActions({
       {errorState ? (
         <ErrorState
           status={errorState.status}
-          title={`${ACTION_DETAILS[errorState.action].label}失败`}
-          description={describeActionError(errorState, canRecall)}
+          title={`${actionDetails[errorState.action].label}失败`}
+          description={describeActionError(errorState, actionDetails[errorState.action].label, canRecall)}
         />
       ) : null}
     </div>

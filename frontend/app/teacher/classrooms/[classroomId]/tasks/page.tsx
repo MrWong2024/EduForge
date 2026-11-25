@@ -17,6 +17,7 @@ import {
   toPublishableTaskTemplateListResponse,
 } from "@/lib/api/types-teacher";
 import { getMe } from "@/lib/auth/session";
+import { getClassroomTaskSubmissionWindowStatus } from "@/lib/classroom-task-settings";
 import { normalizeTaskCourseLabel } from "@/lib/learning-tasks/course-labels";
 import { parseDifficultyFilter } from "@/lib/learning-tasks/difficulty";
 import { getTaskSnapshotMessage } from "@/lib/learning-tasks/ai-review";
@@ -49,6 +50,7 @@ type TasksViewModel =
   | {
       mode: "ready";
       classroomName?: string;
+      classroomArchived: boolean;
       taskList: ReturnType<typeof toClassroomTasksResponse>;
       availableTasks: ReturnType<
         typeof toPublishableTaskTemplateListResponse
@@ -111,64 +113,6 @@ const getDueTimeStatus = (
   };
 };
 
-const getSubmissionWindowStatus = (
-  status: string | undefined,
-  dueAt: string | null | undefined,
-  allowLate: boolean | undefined,
-): {
-  label: "可提交" | "允许迟交" | "不可提交" | "状态未知";
-  title: string;
-  badgeClassName: string;
-} => {
-  if (status !== "ACTIVE") {
-    return {
-      label: "不可提交",
-      title: "课堂任务未处于开放状态，学生不能继续提交。",
-      badgeClassName: "border-slate-200 bg-slate-50 text-slate-600",
-    };
-  }
-
-  if (!dueAt) {
-    return {
-      label: "可提交",
-      title: "课堂任务开放且未设置截止时间；能否提交还需符合当前任务要求。",
-      badgeClassName: "border-emerald-200 bg-emerald-50 text-emerald-700",
-    };
-  }
-
-  const dueTime = new Date(dueAt).getTime();
-  if (!Number.isFinite(dueTime)) {
-    return {
-      label: "状态未知",
-      title: "截止时间格式异常，无法判断提交窗口状态。",
-      badgeClassName: "border-slate-200 bg-slate-50 text-slate-600",
-    };
-  }
-
-  if (dueTime >= Date.now()) {
-    return {
-      label: "可提交",
-      title: "课堂任务开放且尚未截止；能否提交还需符合当前任务要求。",
-      badgeClassName: "border-emerald-200 bg-emerald-50 text-emerald-700",
-    };
-  }
-
-  if (allowLate === true) {
-    return {
-      label: "允许迟交",
-      title:
-        "课堂任务已截止，但当前设置允许迟交；能否提交还需符合当前任务要求。",
-      badgeClassName: "border-amber-200 bg-amber-50 text-amber-700",
-    };
-  }
-
-  return {
-    label: "不可提交",
-    title: "课堂任务已截止且未允许迟交。",
-    badgeClassName: "border-slate-200 bg-slate-50 text-slate-600",
-  };
-};
-
 const getTemplateStatusBadge = (
   status: string | null | undefined,
 ): { label: string; className: string } | null => {
@@ -221,39 +165,38 @@ export default async function ClassroomTasksPage({
       page: currentPublishedTasksPage,
       limit: CLASSROOM_TASKS_PAGE_SIZE,
     });
-    const [classroomPayload, tasksPayload, learningTasksPayload, me] =
-      await Promise.all([
-        fetchJson<unknown>(`classrooms/${encodeURIComponent(classroomId)}`, {
-          cache: "no-store",
-        }),
-        fetchJson<unknown>(
-          `classrooms/${encodeURIComponent(classroomId)}/tasks?${publishedTasksQuery}`,
-          {
-            cache: "no-store",
-          },
-        ),
-        fetchJson<unknown>(
+    const classroomPromise = fetchJson<unknown>(
+      `classrooms/${encodeURIComponent(classroomId)}`,
+      { cache: "no-store" },
+    ).then(toClassroomSummary);
+    const [classroom, tasksPayload, learningTasks, me] = await Promise.all([
+      classroomPromise,
+      fetchJson<unknown>(
+        `classrooms/${encodeURIComponent(classroomId)}/tasks?${publishedTasksQuery}`,
+        { cache: "no-store" },
+      ),
+      classroomPromise.then(async ({ status }) => {
+        if (status === "ARCHIVED") {
+          return undefined;
+        }
+        const candidates = await fetchJson<unknown>(
           `classrooms/${encodeURIComponent(classroomId)}/publishable-task-templates?${publishableQuery}`,
-          {
-            cache: "no-store",
-          },
-        ),
-        getMe().catch(() => null),
-      ]);
-
-    const classroom = toClassroomSummary(classroomPayload);
-    const taskList = toClassroomTasksResponse(tasksPayload);
-    const learningTasks =
-      toPublishableTaskTemplateListResponse(learningTasksPayload);
+          { cache: "no-store" },
+        );
+        return toPublishableTaskTemplateListResponse(candidates);
+      }),
+      getMe().catch(() => null),
+    ]);
 
     viewModel = {
       mode: "ready",
       classroomName: classroom.name,
-      taskList,
-      availableTasks: learningTasks.items,
-      availableTasksTotal: learningTasks.total,
-      availableTasksPage: learningTasks.page,
-      availableTasksLimit: learningTasks.limit,
+      classroomArchived: classroom.status === "ARCHIVED",
+      taskList: toClassroomTasksResponse(tasksPayload),
+      availableTasks: learningTasks?.items ?? [],
+      availableTasksTotal: learningTasks?.total,
+      availableTasksPage: learningTasks?.page,
+      availableTasksLimit: learningTasks?.limit,
       initialCourseLabelFilter,
       initialOnlyMineFilter,
       initialKnowledgeModuleFilter,
@@ -352,7 +295,11 @@ export default async function ClassroomTasksPage({
               成员管理
             </Link>
             <Link
-              href={paths.teacher.tasksFromClassroom(classroomId)}
+              href={
+                viewModel.classroomArchived
+                  ? paths.teacher.tasks
+                  : paths.teacher.tasksFromClassroom(classroomId)
+              }
               className="text-blue-700 hover:underline"
             >
               任务模板页
@@ -361,41 +308,48 @@ export default async function ClassroomTasksPage({
         }
       />
 
-      <section className="rounded-lg border border-zinc-200 bg-white p-4 text-sm text-zinc-700">
-        <p>此页管理本班课堂任务。</p>
-        <p className="mt-1">
-          这里先选择已发布任务模板，再配置截止时间与迟交设置后发布到班级。
+      {viewModel.classroomArchived ? (
+        <p className="rounded-lg border border-zinc-200 bg-white p-4 text-sm text-zinc-700">
+          班级已归档，不能发布新任务，学生不能新提交。
         </p>
-        <p className="mt-1">
-          候选模板按当前班级与筛选条件实时检索，包含你自己的模板与可见共享模板。
-        </p>
-        <p className="mt-1">
-          候选列表不包含已布置到本班的模板，并优先显示与课程分类匹配的模板。
-        </p>
-        <p className="mt-2">
-          若没有合适模板，请先前往
-          <Link
-            href={paths.teacher.tasksFromClassroom(classroomId)}
-            className="mx-1 text-blue-700 hover:underline"
-          >
-            任务模板页
-          </Link>
-          准备已发布模板，再回到本页发布到班级。
-        </p>
-      </section>
-
-      <PublishClassroomTaskForm
-        classroomId={classroomId}
-        currentUserId={viewModel.currentUserId}
-        availableTasks={viewModel.availableTasks}
-        initialAvailableTasksTotal={viewModel.availableTasksTotal}
-        initialAvailableTasksPage={viewModel.availableTasksPage}
-        initialAvailableTasksLimit={viewModel.availableTasksLimit}
-        initialCourseLabelFilter={viewModel.initialCourseLabelFilter}
-        initialOnlyMineFilter={viewModel.initialOnlyMineFilter}
-        initialKnowledgeModuleFilter={viewModel.initialKnowledgeModuleFilter}
-        initialDifficultyFilter={viewModel.initialDifficultyFilter}
-      />
+      ) : (
+        <>
+          <section className="rounded-lg border border-zinc-200 bg-white p-4 text-sm text-zinc-700">
+            <p>此页管理本班课堂任务。</p>
+            <p className="mt-1">
+              这里先选择已发布任务模板，再配置截止时间与迟交设置后发布到班级。
+            </p>
+            <p className="mt-1">
+              候选模板按当前班级与筛选条件实时检索，包含你自己的模板与可见共享模板。
+            </p>
+            <p className="mt-1">
+              候选列表不包含已布置到本班的模板，并优先显示与课程分类匹配的模板。
+            </p>
+            <p className="mt-2">
+              若没有合适模板，请先前往
+              <Link
+                href={paths.teacher.tasksFromClassroom(classroomId)}
+                className="mx-1 text-blue-700 hover:underline"
+              >
+                任务模板页
+              </Link>
+              准备已发布模板，再回到本页发布到班级。
+            </p>
+          </section>
+          <PublishClassroomTaskForm
+            classroomId={classroomId}
+            currentUserId={viewModel.currentUserId}
+            availableTasks={viewModel.availableTasks}
+            initialAvailableTasksTotal={viewModel.availableTasksTotal}
+            initialAvailableTasksPage={viewModel.availableTasksPage}
+            initialAvailableTasksLimit={viewModel.availableTasksLimit}
+            initialCourseLabelFilter={viewModel.initialCourseLabelFilter}
+            initialOnlyMineFilter={viewModel.initialOnlyMineFilter}
+            initialKnowledgeModuleFilter={viewModel.initialKnowledgeModuleFilter}
+            initialDifficultyFilter={viewModel.initialDifficultyFilter}
+          />
+        </>
+      )}
 
       <h2 id={PUBLISHED_TASKS_HEADING_ID} tabIndex={-1} className="text-base font-semibold text-zinc-900">
         已发布的课堂任务
@@ -411,27 +365,35 @@ export default async function ClassroomTasksPage({
       ) : viewModel.taskList.items.length === 0 ? (
         <EmptyState
           title="还没有课堂任务"
-          description="当前班级还没有已发布任务。请先准备可见的已发布模板（含共享模板），再回到本页发布到当前班级。"
+          description={
+            viewModel.classroomArchived
+              ? "当前列表没有课堂任务。"
+              : "当前班级还没有已发布任务。请先准备可见的已发布模板（含共享模板），再回到本页发布到当前班级。"
+          }
           actions={
             <div className="flex flex-wrap items-center gap-3">
-              <Link
-                href={`${buildPublishedTasksHref(currentPublishedTaskPage)}#publish-task-form`}
-                className="rounded-md bg-zinc-900 px-3 py-1.5 text-sm font-medium text-white hover:bg-zinc-700"
-              >
-                发布任务
-              </Link>
+              {!viewModel.classroomArchived ? (
+                <Link
+                  href={`${buildPublishedTasksHref(currentPublishedTaskPage)}#publish-task-form`}
+                  className="rounded-md bg-zinc-900 px-3 py-1.5 text-sm font-medium text-white hover:bg-zinc-700"
+                >
+                  发布任务
+                </Link>
+              ) : null}
               <Link
                 href={paths.teacher.classroomDashboard(classroomId)}
                 className="text-sm text-blue-700 hover:underline"
               >
                 返回班级看板
               </Link>
-              <Link
-                href={paths.teacher.tasksFromClassroom(classroomId)}
-                className="text-sm text-blue-700 hover:underline"
-              >
-                去创建任务模板
-              </Link>
+              {!viewModel.classroomArchived ? (
+                <Link
+                  href={paths.teacher.tasksFromClassroom(classroomId)}
+                  className="text-sm text-blue-700 hover:underline"
+                >
+                  去创建任务模板
+                </Link>
+              ) : null}
             </div>
           }
         />
@@ -455,7 +417,8 @@ export default async function ClassroomTasksPage({
                 const classroomTaskId = task.classroomTaskId;
                 const taskTitle = toDisplayText(task.title, "未命名任务");
                 const dueTimeStatus = getDueTimeStatus(task.dueAt);
-                const submissionWindowStatus = getSubmissionWindowStatus(
+                const submissionWindowStatus = getClassroomTaskSubmissionWindowStatus(
+                  viewModel.classroomArchived,
                   task.status,
                   task.dueAt,
                   task.allowLate,
@@ -527,6 +490,7 @@ export default async function ClassroomTasksPage({
                         classroomTaskId={classroomTaskId}
                         taskTitle={taskTitle}
                         status={task.status}
+                        classroomArchived={viewModel.classroomArchived}
                         listHeadingId={PUBLISHED_TASKS_HEADING_ID}
                         submissionWindowBadge={
                           <span
