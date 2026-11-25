@@ -130,6 +130,7 @@
 - 学生任务详情：`student/classrooms/:cid/tasks/:ctid/page.tsx` -> `/api/proxy/classrooms/:cid/tasks/:ctid/my-task-detail`。
   - 对应后端：`GET /api/classrooms/:classroomId/tasks/:classroomTaskId/my-task-detail`。
   - 注意：消费 `participationStatus`；模板当前状态不作为前端阻断依据。前端历史展示按 `createdAt` 倒序，排序不改变后端 latest、完成状态及参与资格。
+  - AI 反馈预览沿用该 GET 的 `includeFeedbackItems`（默认 `true`）和 `feedbackLimit`（默认 `5`，页面档位为 `3`、`5`、`10`、`20`）。上限按每次提交计算，提交历史只按返回顺序展示各项自己的 `submissions[i].feedbackItems`。
   - 基础信息难度直接读取正式响应的 `viewModel.data.task.difficulty`，复用上述共享显示规则；沿用后端 task 投影，不查询实时模板补值。
 - 学生提交：`SubmissionForm` -> `/api/proxy/classrooms/:cid/tasks/:ctid/submissions`。
   - 对应后端：`POST /api/classrooms/:classroomId/tasks/:classroomTaskId/submissions`。

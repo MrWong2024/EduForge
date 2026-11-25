@@ -10,6 +10,7 @@ import {
   getTaskSnapshotMessage,
 } from "@/lib/learning-tasks/ai-review";
 import { SubmissionForm } from "@/components/student/SubmissionForm";
+import { TaskSubmissionHistoryEntry } from "@/components/student/TaskSubmissionHistoryEntry";
 import { getDifficultyLabel } from "@/lib/learning-tasks/difficulty";
 import { fetchJson, FetchJsonError } from "@/lib/api/client";
 import {
@@ -567,47 +568,6 @@ export default async function StudentTaskDetailPage({
         helpHref={paths.student.aiHelp}
       />
 
-      <section className="rounded-lg border border-zinc-200 bg-white p-4 text-sm">
-        <p className="font-medium text-zinc-900">参数</p>
-        <div className="mt-2 flex flex-wrap items-center gap-4 text-zinc-700">
-          <div className="flex items-center gap-2">
-            <span>反馈明细:</span>
-            <Link
-              href={buildHref(routePath, queryRecord, {
-                includeFeedbackItems: String(
-                  !viewModel.query.includeFeedbackItems,
-                ),
-              })}
-              className="text-blue-700 hover:underline"
-            >
-              {viewModel.query.includeFeedbackItems ? "开" : "关"}
-            </Link>
-          </div>
-
-          <div className="flex items-center gap-2">
-            <span>反馈条数:</span>
-            {[3, 5, 10, 20].map((limitValue) => {
-              const active = limitValue === viewModel.query.feedbackLimit;
-              return (
-                <Link
-                  key={limitValue}
-                  href={buildHref(routePath, queryRecord, {
-                    feedbackLimit: String(limitValue),
-                  })}
-                  className={
-                    active
-                      ? "font-semibold text-blue-700"
-                      : "text-blue-700 hover:underline"
-                  }
-                >
-                  {limitValue}
-                </Link>
-              );
-            })}
-          </div>
-        </div>
-      </section>
-
       {canSubmit ? (
         <SubmissionForm
           classroomId={classroomId}
@@ -634,6 +594,57 @@ export default async function StudentTaskDetailPage({
       >
         提交历史
       </h2>
+      <div className="flex flex-wrap items-center gap-4 rounded-lg border border-zinc-200 bg-white p-4 text-sm text-zinc-700">
+        <div className="flex items-center gap-2">
+          <span>AI 反馈预览</span>
+          <Link
+            href={buildHref(routePath, queryRecord, {
+              includeFeedbackItems: String(
+                !viewModel.query.includeFeedbackItems,
+              ),
+            })}
+            aria-label={
+              viewModel.query.includeFeedbackItems
+                ? "关闭 AI 反馈预览"
+                : "开启 AI 反馈预览"
+            }
+            className="text-blue-700 hover:underline"
+            prefetch={false}
+            scroll={false}
+          >
+            {viewModel.query.includeFeedbackItems ? "开" : "关"}
+          </Link>
+        </div>
+
+        <div
+          className="flex items-center gap-2"
+          role="group"
+          aria-label="每次提交最多显示"
+        >
+          <span>每次提交最多显示</span>
+          {[3, 5, 10, 20].map((limitValue) => {
+            const active = limitValue === viewModel.query.feedbackLimit;
+            return (
+              <Link
+                key={limitValue}
+                href={buildHref(routePath, queryRecord, {
+                  feedbackLimit: String(limitValue),
+                })}
+                aria-current={active ? "true" : undefined}
+                className={
+                  active
+                    ? "font-semibold text-blue-700"
+                    : "text-blue-700 hover:underline"
+                }
+                prefetch={false}
+                scroll={false}
+              >
+                {limitValue}
+              </Link>
+            );
+          })}
+        </div>
+      </div>
       {viewModel.data.submissions.length === 0 ? (
         <EmptyState
           title="暂无提交记录"
@@ -650,64 +661,39 @@ export default async function StudentTaskDetailPage({
                 <th className="px-4 py-3">操作</th>
               </tr>
             </thead>
-            <tbody>
-              {viewModel.data.submissions.map((submission, index) => {
-                const submissionId = safeGet<string | undefined>(
-                  submission,
-                  "id",
-                  undefined,
-                );
-                const submissionAiStatus = safeGet<string | undefined>(
-                  submission,
-                  "aiFeedbackStatus",
-                  undefined,
-                );
-                const submissionAiStatusBadge = getAiFeedbackStatusBadge(
-                  submissionAiStatus,
-                  true,
-                );
-                const feedbackHref = submissionId
-                  ? buildSubmissionFeedbackHref(
-                      submissionId,
-                      classroomId,
-                      classroomTaskId,
-                    )
-                  : null;
+            {viewModel.data.submissions.map((submission, index) => {
+              const submissionId = safeGet<string | undefined>(
+                submission,
+                "id",
+                undefined,
+              );
+              const submissionAiStatus = safeGet<string | undefined>(
+                submission,
+                "aiFeedbackStatus",
+                undefined,
+              );
+              const submissionAiStatusBadge = getAiFeedbackStatusBadge(
+                submissionAiStatus,
+                true,
+              );
+              const feedbackHref = submissionId
+                ? buildSubmissionFeedbackHref(
+                    submissionId,
+                    classroomId,
+                    classroomTaskId,
+                  )
+                : null;
 
-                return (
-                  <tr
-                    key={String(submissionId ?? `submission-${index}`)}
-                    className="border-t border-zinc-100"
-                  >
-                    <td className="px-4 py-3">
-                      {toDisplayText(
-                        safeGet(submission, "attemptNo", undefined),
-                      )}
-                    </td>
-                    <td className="px-4 py-3">
-                      {toDisplayDate(
-                        safeGet<string | null>(submission, "createdAt", null),
-                      )}
-                    </td>
-                    <td className="px-4 py-3">
-                      <StatusBadge badge={submissionAiStatusBadge} />
-                    </td>
-                    <td className="px-4 py-3">
-                      {feedbackHref ? (
-                        <Link
-                          href={feedbackHref}
-                          className="text-blue-700 hover:underline"
-                        >
-                          查看反馈
-                        </Link>
-                      ) : (
-                        <span className="text-zinc-500">缺少提交标识</span>
-                      )}
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
+              return (
+                <TaskSubmissionHistoryEntry
+                  key={String(submissionId ?? `submission-${index}`)}
+                  submission={submission}
+                  aiStatus={<StatusBadge badge={submissionAiStatusBadge} />}
+                  feedbackHref={feedbackHref}
+                  includeFeedbackItems={viewModel.query.includeFeedbackItems}
+                />
+              );
+            })}
           </table>
         </div>
       )}
