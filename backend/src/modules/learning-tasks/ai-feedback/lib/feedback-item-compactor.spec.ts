@@ -130,6 +130,35 @@ describe('compactAiFeedbackItems', () => {
     expect(compacted[0].suggestion).toBe(suggestion);
   });
 
+  it('preserves a missing-semicolon diagnosis that was ruled out', () => {
+    const message = '第 12 行缺少分号的可能性已排除，应检查括号配对。';
+    const compacted = compactAiFeedbackItems([
+      syntaxError(message),
+      syntaxError('第 26 行缺少分号的可能性已排除，应检查括号配对。'),
+    ]);
+
+    expect(
+      compacted.map(({ message, suggestion }) => ({ message, suggestion })),
+    ).toEqual([{ message, suggestion: undefined }]);
+  });
+
+  it('preserves a question about a missing semicolon', () => {
+    const message = 'Is line 12 missing a semicolon?';
+    const compacted = compactAiFeedbackItems([
+      syntaxError(message),
+      syntaxError('Is line 26 missing a semicolon?'),
+    ]);
+
+    expect(
+      compacted.map(({ message, suggestion }) => ({ message, suggestion })),
+    ).toEqual([
+      {
+        message: `${message}（同类问题共 2 处，已合并提示）`,
+        suggestion: undefined,
+      },
+    ]);
+  });
+
   it.each([
     {
       difference: 'case',

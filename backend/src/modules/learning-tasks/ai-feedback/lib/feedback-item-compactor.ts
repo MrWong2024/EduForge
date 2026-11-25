@@ -56,7 +56,9 @@ const EXTRA_SEMICOLON_PATTERNS = [
 
 const NON_AFFIRMATIVE_MISSING_PATTERNS = [
   /\b(?:not|no|whether|possibly|might be|may be|could be)\b[^.!?\r\n]*\bmissing\b/i,
+  /\bmissing\b[^.!?。！？\r\n]*[?？]/i,
   /(?:(?:不是|并非|没有|不存在|并未|未发现|是否|可能|疑似)[^，。；！？：\r\n]*|[不非]\s*)(?:缺少|缺失|漏写|漏掉|少写)/u,
+  /(?:缺少|缺失|漏写|漏掉|少写)[^，。；！？：,.!?;:\r\n]*(?:排除|不成立)/u,
 ];
 
 const cleanDisplayText = (value: string) =>
