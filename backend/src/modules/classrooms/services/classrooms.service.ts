@@ -13,7 +13,10 @@ import { UpdateClassroomDto } from '../dto/update-classroom.dto';
 import { QueryClassroomDto } from '../dto/query-classroom.dto';
 import { JoinClassroomDto } from '../dto/join-classroom.dto';
 import { QueryClassroomWeeklyReportDto } from '../dto/query-classroom-weekly-report.dto';
-import { QueryProcessAssessmentDto } from '../dto/query-process-assessment.dto';
+import {
+  QueryProcessAssessmentCsvDto,
+  QueryProcessAssessmentDto,
+} from '../dto/query-process-assessment.dto';
 import { QueryClassroomExportSnapshotDto } from '../dto/query-classroom-export-snapshot.dto';
 import { QueryClassroomStudentsDto } from '../dto/query-classroom-students.dto';
 import {
@@ -396,7 +399,7 @@ export class ClassroomsService {
 
   async exportProcessAssessmentCsv(
     classroomId: string,
-    query: QueryProcessAssessmentDto,
+    query: QueryProcessAssessmentCsvDto,
     userId: string,
   ) {
     await this.ensureTeacher(userId);

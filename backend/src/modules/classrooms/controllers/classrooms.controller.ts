@@ -20,7 +20,10 @@ import { QueryClassroomDto } from '../dto/query-classroom.dto';
 import { QueryStudentDashboardDto } from '../dto/query-student-dashboard.dto';
 import { JoinClassroomDto } from '../dto/join-classroom.dto';
 import { QueryClassroomWeeklyReportDto } from '../dto/query-classroom-weekly-report.dto';
-import { QueryProcessAssessmentDto } from '../dto/query-process-assessment.dto';
+import {
+  QueryProcessAssessmentCsvDto,
+  QueryProcessAssessmentDto,
+} from '../dto/query-process-assessment.dto';
 import { QueryClassroomExportSnapshotDto } from '../dto/query-classroom-export-snapshot.dto';
 import { QueryClassroomStudentsDto } from '../dto/query-classroom-students.dto';
 import {
@@ -186,7 +189,7 @@ export class ClassroomsController {
   @Get(':classroomId/process-assessment.csv')
   exportProcessAssessmentCsv(
     @Param('classroomId') classroomId: string,
-    @Query() query: QueryProcessAssessmentDto,
+    @Query() query: QueryProcessAssessmentCsvDto,
     @CurrentUser() user: { id: string },
   ) {
     return this.classroomsService.exportProcessAssessmentCsv(

@@ -7,6 +7,7 @@ import {
   IsOptional,
   Max,
   Min,
+  ValidateIf,
 } from 'class-validator';
 
 export const PROCESS_ASSESSMENT_WINDOWS = ['7d', '30d', 'term', 'all'] as const;
@@ -69,4 +70,10 @@ export class QueryProcessAssessmentDto {
   @IsArray()
   @IsMongoId({ each: true })
   excludedTaskIds?: string[];
+}
+
+export class QueryProcessAssessmentCsvDto extends QueryProcessAssessmentDto {
+  @ValidateIf((_object, value: unknown) => value !== undefined)
+  @IsIn(['all'])
+  scope?: 'all';
 }

@@ -306,7 +306,7 @@ Global SoT 只保留理解跨 Service workflow 必需的稳定不变量，不追
   - 风险判定顺序：无有效任务为 LOW；有任务但无提交为 HIGH；覆盖率 <0.4 或平均 ERROR >=2 为 HIGH；覆盖率 <0.8、平均 ERROR >=1 或平均 WARN >=2 为 MEDIUM；其余 LOW。
 - Isolation: 校验班级 owner；成员全集与分页来自 Enrollment ACTIVE，所有聚合限定 effectiveTaskIds。
 - Side Effects: 只读；临时排除条件不持久化，不修改教学记录。
-- Important Performance / Recovery: Enrollment 稳定分页后页内排序；JSON 与 CSV 使用同一 payload，仅在 CSV 单元格序列化边界中和危险文本并保留数值类型，不修改原始数据或另建计分/窗口链。具体中和、quoting 与输出合同见 [DTO Process Assessment](./handoff-backend-dto-cheatsheet.md#process-assessment)。
+- Important Performance / Recovery: 分页模式按 Enrollment 稳定分页后页内排序。全班 CSV 复用 `buildPayload` 的 `forceAllActiveStudents` 分支，用当次查询参数计算并排序全部 ACTIVE 学生。两种 CSV 模式共用单元格序列化，危险文本中和与 quoting 合同见 [DTO Process Assessment](./handoff-backend-dto-cheatsheet.md#process-assessment)。
 - SoT: `backend/src/modules/classrooms/services/process-assessment.service.ts`；`backend/src/modules/classrooms/dto/query-process-assessment.dto.ts`。
 - Boundary / Non-responsibility: 不维护完整公开字段/CSV 列清单或窗口枚举，分别见 [DTO Cheatsheet](./handoff-backend-dto-cheatsheet.md#query-dto--public-response读取接口) 与 [API Map](./handoff-backend-api-map.md#classrooms)。
 

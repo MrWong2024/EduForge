@@ -280,17 +280,17 @@ my-task-detail 另稳定返回 `participationStatus={readOnly,canSubmit,canReque
 
 ### Process Assessment
 
-来源：[QueryProcessAssessmentDto](../../backend/src/modules/classrooms/dto/query-process-assessment.dto.ts)、[ProcessAssessmentService](../../backend/src/modules/classrooms/services/process-assessment.service.ts)。
+来源：[QueryProcessAssessmentDto 和 QueryProcessAssessmentCsvDto](../../backend/src/modules/classrooms/dto/query-process-assessment.dto.ts)、[ProcessAssessmentService](../../backend/src/modules/classrooms/services/process-assessment.service.ts)。
 
 | Query | validation / default |
 | --- | --- |
 | `window?` | `IsIn`：`term \| 7d \| 30d \| all`；默认 all；term 仅兼容窗口，**24h 不合法**。 |
-| `page? / limit?` | 分页校验；默认 `1 / 50`。 |
+| `page? / limit?` | 分页校验，默认 `1 / 50`，`limit` 上限为 100。适用于 JSON 和省略 `scope` 的 CSV，包含只传 `window=all` 的请求。 |
 | `sort?` | `score \| submissionsCount \| submittedTasksCount \| aiRequestedCount \| riskLevel`，默认 score。 |
 | `order?` | `asc \| desc`，默认 desc。 |
 | `excludedTaskIds?` | 接受逗号分隔或 repeated query；拆分、trim、去空后形成字符串数组，`IsArray + IsMongoId(each)`。每项指课堂任务实例 id。 |
 
-JSON 与 CSV 复用同一 Query DTO，包括 window、排除项与分页口径。返回 JSON 为 `{classroomId,window,generatedAt,page,limit,total,rubric,items}`。
+CSV 专用 DTO 继承以上字段，额外接受可选的 `scope`。唯一显式合法值为 `all`，此时每名当前 ACTIVE 学生一行，包含零提交学生，空班仅返回表头。窗口、排除项和排序参数仍生效。`scope=all` 与显式 `page` 或 `limit` 同传时返回 400，非法 `scope` 也返回 400。JSON 沿用原 DTO，携带 `scope` 时按白名单校验返回 400。返回 JSON 为 `{classroomId,window,generatedAt,page,limit,total,rubric,items}`。
 
 | Item 字段 family | 稳定形状 / 语义 |
 | --- | --- |

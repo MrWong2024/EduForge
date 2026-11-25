@@ -15,6 +15,7 @@ import {
   ProcessAssessmentSortField,
   ProcessAssessmentSortOrder,
   ProcessAssessmentWindow,
+  QueryProcessAssessmentCsvDto,
   QueryProcessAssessmentDto,
 } from '../dto/query-process-assessment.dto';
 import { Submission } from '../../learning-tasks/schemas/submission.schema';
@@ -191,10 +192,21 @@ export class ProcessAssessmentService {
 
   async exportProcessAssessmentCsv(
     classroomId: string,
-    query: QueryProcessAssessmentDto,
+    query: QueryProcessAssessmentCsvDto,
     teacherId: string,
   ) {
-    const payload = await this.buildPayload(classroomId, query, teacherId);
+    const forceAllActiveStudents = query.scope === 'all';
+    if (
+      forceAllActiveStudents &&
+      (query.page !== undefined || query.limit !== undefined)
+    ) {
+      throw new BadRequestException(
+        'scope=all cannot be combined with page or limit',
+      );
+    }
+    const payload = await this.buildPayload(classroomId, query, teacherId, {
+      forceAllActiveStudents,
+    });
     const headers = [
       'studentName',
       'studentNo',

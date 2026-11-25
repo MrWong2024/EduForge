@@ -538,10 +538,11 @@ export default async function ProcessAssessmentPage({
     `classrooms/${encodeURIComponent(classroomId)}/process-assessment.csv`
   );
   const csvQuery = buildQueryString({
+    scope: "all",
     window: queryState.window,
     excludedTaskIds: toExcludedTaskIdsQueryValue(queryState.excludedTaskIds),
   });
-  const csvHref = csvQuery ? `${csvBasePath}?${csvQuery}` : csvBasePath;
+  const csvHref = `${csvBasePath}?${csvQuery}`;
 
   let viewModel: ProcessAssessmentViewModel = {
     mode: "error",
@@ -655,7 +656,7 @@ export default async function ProcessAssessmentPage({
               rel="noreferrer"
               className="font-medium text-blue-700 hover:underline"
             >
-              下载 CSV
+              下载全班 CSV
             </a>
             <Link href={paths.teacher.classroomDashboard(classroomId)} className="text-blue-700 hover:underline">
               返回班级看板

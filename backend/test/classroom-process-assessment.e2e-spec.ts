@@ -1,34 +1,54 @@
+import {
+  assertAuthTestConnection,
+  authTestEnvironment,
+  openAuthTestConnection,
+} from './helpers/auth-test-environment';
+import {
+  assertAuthTestWritesConfirmed,
+  runAuthTestWrite,
+} from './helpers/auth-test-writes';
+import { createFixtureUser } from './helpers/create-fixture-user';
+import { deleteFixtureRows } from './helpers/delete-fixture-rows';
+import { randomUUID } from 'node:crypto';
 import { INestApplication, ValidationPipe } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Test, TestingModule } from '@nestjs/testing';
-import { getModelToken } from '@nestjs/mongoose';
-import { Model, Types } from 'mongoose';
+import { getConnectionToken, getModelToken } from '@nestjs/mongoose';
+import { Model, Types, type Connection, type mongo } from 'mongoose';
 import * as bcrypt from 'bcryptjs';
 import cookieParser from 'cookie-parser';
 import request from 'supertest';
 import { App } from 'supertest/types';
+import { parseCsv } from '../scripts/import-users-csv';
 import { AppModule } from '../src/app.module';
-import { User } from '../src/modules/users/schemas/user.schema';
+import { User, UserStatus } from '../src/modules/users/schemas/user.schema';
 import { Session } from '../src/modules/auth/schemas/session.schema';
 import { Course } from '../src/modules/courses/schemas/course.schema';
 import { Classroom } from '../src/modules/classrooms/schemas/classroom.schema';
 import { ClassroomTask } from '../src/modules/classrooms/classroom-tasks/schemas/classroom-task.schema';
-import { Enrollment } from '../src/modules/classrooms/enrollments/schemas/enrollment.schema';
+import {
+  Enrollment,
+  EnrollmentRole,
+  EnrollmentStatus,
+} from '../src/modules/classrooms/enrollments/schemas/enrollment.schema';
 import { Task } from '../src/modules/learning-tasks/schemas/task.schema';
-import { Submission } from '../src/modules/learning-tasks/schemas/submission.schema';
+import {
+  Submission,
+  SubmissionStatus,
+} from '../src/modules/learning-tasks/schemas/submission.schema';
 import { Feedback } from '../src/modules/learning-tasks/schemas/feedback.schema';
-import { AiFeedbackJob } from '../src/modules/learning-tasks/ai-feedback/schemas/ai-feedback-job.schema';
+import {
+  AiFeedbackJob,
+  AiFeedbackJobStatus,
+} from '../src/modules/learning-tasks/ai-feedback/schemas/ai-feedback-job.schema';
 import { AiFeedbackProcessor } from '../src/modules/learning-tasks/ai-feedback/services/ai-feedback-processor.service';
 
 jest.setTimeout(30000);
 
-const ensureMongoUri = () => {
-  if (!process.env.MONGO_URI) {
-    throw new Error(
-      'MONGO_URI is required for classroom process-assessment e2e.',
-    );
-  }
-};
+const readFixtureOptions = () => ({
+  maxTimeMS: 5000,
+  signal: AbortSignal.timeout(5000),
+});
 
 type CreatedCourseResponse = { id: string };
 type CreatedClassroomResponse = { id: string; joinCode: string };
@@ -69,6 +89,7 @@ type ProcessAssessmentResponse = {
 
 describe('Classroom Process Assessment (e2e)', () => {
   let app: INestApplication<App>;
+  let connection: Connection | undefined;
   let userModel: Model<User>;
   let sessionModel: Model<Session>;
   let courseModel: Model<Course>;
@@ -90,19 +111,18 @@ describe('Classroom Process Assessment (e2e)', () => {
   let studentBId = '';
   let courseId = '';
   let classroomId = '';
+  let emptyClassroomId = '';
   let classroomTaskAId = '';
   let classroomTaskBId = '';
   let taskAId = '';
   let taskBId = '';
   const submissionIds: string[] = [];
+  const addedStudentIds: Types.ObjectId[] = [];
 
-  let previousWorkerEnabled: string | undefined;
-  let previousDebugEnabled: string | undefined;
-  let previousSubmissionCooldownMs: string | undefined;
-
-  const teacherEmail = `teacher.process.assessment.${Date.now()}@example.com`;
-  const studentAEmail = `studentA.process.assessment.${Date.now()}@example.com`;
-  const studentBEmail = `studentB.process.assessment.${Date.now()}@example.com`;
+  const namespace = `pa-csv-${randomUUID()}`;
+  const teacherEmail = `${namespace}.teacher@example.invalid`;
+  const studentAEmail = `${namespace}.student-a@example.invalid`;
+  const studentBEmail = `${namespace}.student-b@example.invalid`;
   const teacherPassword = 'TeacherPass123!';
   const studentPassword = 'StudentPass123!';
 
@@ -127,21 +147,18 @@ describe('Classroom Process Assessment (e2e)', () => {
   };
 
   beforeAll(async () => {
-    ensureMongoUri();
-
-    previousWorkerEnabled = process.env.AI_FEEDBACK_WORKER_ENABLED;
-    process.env.AI_FEEDBACK_WORKER_ENABLED = 'false';
-    previousDebugEnabled = process.env.AI_FEEDBACK_DEBUG_ENABLED;
     process.env.AI_FEEDBACK_DEBUG_ENABLED = 'true';
-    previousSubmissionCooldownMs =
-      process.env.LEARNING_TASK_SUBMISSION_COOLDOWN_MS;
-    process.env.LEARNING_TASK_SUBMISSION_COOLDOWN_MS = '0';
 
+    connection = await openAuthTestConnection();
     const moduleFixture: TestingModule = await Test.createTestingModule({
       imports: [AppModule],
-    }).compile();
+    })
+      .overrideProvider(getConnectionToken())
+      .useValue(connection)
+      .compile();
 
     app = moduleFixture.createNestApplication();
+    await assertAuthTestConnection(app.get<Connection>(getConnectionToken()));
     app.setGlobalPrefix('api');
     app.useGlobalPipes(
       new ValidationPipe({
@@ -177,30 +194,39 @@ describe('Classroom Process Assessment (e2e)', () => {
       bcrypt.hash(studentPassword, 10),
     ]);
 
-    const [teacher, studentA, studentB] = await Promise.all([
-      userModel.create({
+    teacherId = new Types.ObjectId().toString();
+    studentAId = new Types.ObjectId().toString();
+    studentBId = new Types.ObjectId().toString();
+    const defaults = {
+      credentialVersion: 0,
+      passwordResetRequestedAt: null,
+      status: UserStatus.Active,
+    };
+    for (const fixture of [
+      {
+        _id: new Types.ObjectId(teacherId),
         email: teacherEmail,
         passwordHash: teacherHash,
         roles: ['teacher'],
-      }),
-      userModel.create({
+      },
+      {
+        _id: new Types.ObjectId(studentAId),
         email: studentAEmail,
         passwordHash: studentAHash,
         roles: ['student'],
         name: '学生甲',
         studentNo: 'S-A-001',
-      }),
-      userModel.create({
+      },
+      {
+        _id: new Types.ObjectId(studentBId),
         email: studentBEmail,
         passwordHash: studentBHash,
         roles: ['student'],
         name: '   ',
-      }),
-    ]);
-
-    teacherId = teacher._id.toString();
-    studentAId = studentA._id.toString();
-    studentBId = studentB._id.toString();
+      },
+    ]) {
+      await createFixtureUser(userModel, { ...defaults, ...fixture });
+    }
 
     await login(teacherAgent, teacherEmail, teacherPassword);
     await login(studentAAgent, studentAEmail, studentPassword);
@@ -208,81 +234,84 @@ describe('Classroom Process Assessment (e2e)', () => {
   });
 
   afterAll(async () => {
-    if (previousWorkerEnabled === undefined) {
-      delete process.env.AI_FEEDBACK_WORKER_ENABLED;
-    } else {
-      process.env.AI_FEEDBACK_WORKER_ENABLED = previousWorkerEnabled;
-    }
-    if (previousDebugEnabled === undefined) {
-      delete process.env.AI_FEEDBACK_DEBUG_ENABLED;
-    } else {
-      process.env.AI_FEEDBACK_DEBUG_ENABLED = previousDebugEnabled;
-    }
-    if (previousSubmissionCooldownMs === undefined) {
-      delete process.env.LEARNING_TASK_SUBMISSION_COOLDOWN_MS;
-    } else {
-      process.env.LEARNING_TASK_SUBMISSION_COOLDOWN_MS =
-        previousSubmissionCooldownMs;
-    }
+    try {
+      if (connection?.db && teacherId) {
+        await assertAuthTestConnection(connection);
+        const db = connection.db;
+        assertAuthTestWritesConfirmed(db);
 
-    const cleanup: Promise<unknown>[] = [];
-    if (submissionIds.length > 0) {
-      const submissionObjectIds = submissionIds.map(
-        (id) => new Types.ObjectId(id),
-      );
-      cleanup.push(
-        feedbackModel.deleteMany({
-          submissionId: { $in: submissionObjectIds },
-        }),
-      );
-      cleanup.push(
-        aiFeedbackJobModel.deleteMany({
-          submissionId: { $in: submissionObjectIds },
-        }),
-      );
-      cleanup.push(
-        submissionModel.deleteMany({ _id: { $in: submissionObjectIds } }),
-      );
-    }
-    if (classroomTaskAId || classroomTaskBId) {
-      const classroomTaskIds = [classroomTaskAId, classroomTaskBId]
-        .filter(Boolean)
-        .map((id) => new Types.ObjectId(id));
-      cleanup.push(
-        classroomTaskModel.deleteMany({ _id: { $in: classroomTaskIds } }),
-      );
-    }
-    if (taskAId || taskBId) {
-      const taskIds = [taskAId, taskBId]
-        .filter(Boolean)
-        .map((id) => new Types.ObjectId(id));
-      cleanup.push(taskModel.deleteMany({ _id: { $in: taskIds } }));
-    }
-    if (classroomId) {
-      cleanup.push(
-        enrollmentModel.deleteMany({
-          classroomId: new Types.ObjectId(classroomId),
-        }),
-      );
-      cleanup.push(
-        classroomModel.deleteOne({ _id: new Types.ObjectId(classroomId) }),
-      );
-    }
-    if (courseId) {
-      cleanup.push(
-        courseModel.deleteOne({ _id: new Types.ObjectId(courseId) }),
-      );
-    }
-    const userObjectIds = [teacherId, studentAId, studentBId]
-      .filter(Boolean)
-      .map((id) => new Types.ObjectId(id));
-    if (userObjectIds.length > 0) {
-      cleanup.push(sessionModel.deleteMany({ userId: { $in: userObjectIds } }));
-      cleanup.push(userModel.deleteMany({ _id: { $in: userObjectIds } }));
-    }
-    await Promise.all(cleanup);
+        const objectIds = (...ids: string[]) =>
+          ids.filter(Boolean).map((id) => new Types.ObjectId(id));
+        const classroomIds = objectIds(classroomId, emptyClassroomId);
+        const userIds = [
+          ...objectIds(teacherId, studentAId, studentBId),
+          ...addedStudentIds,
+        ];
+        const submissionObjectIds = objectIds(...submissionIds);
+        const targets: Array<[string, mongo.Document]> = [
+          [
+            feedbackModel.collection.name,
+            { submissionId: { $in: submissionObjectIds } },
+          ],
+          [
+            aiFeedbackJobModel.collection.name,
+            { submissionId: { $in: submissionObjectIds } },
+          ],
+          [
+            submissionModel.collection.name,
+            { _id: { $in: submissionObjectIds } },
+          ],
+          [
+            classroomTaskModel.collection.name,
+            { _id: { $in: objectIds(classroomTaskAId, classroomTaskBId) } },
+          ],
+          [
+            taskModel.collection.name,
+            { _id: { $in: objectIds(taskAId, taskBId) } },
+          ],
+          [
+            enrollmentModel.collection.name,
+            { classroomId: { $in: classroomIds }, userId: { $in: userIds } },
+          ],
+          [classroomModel.collection.name, { _id: { $in: classroomIds } }],
+          [courseModel.collection.name, { _id: { $in: objectIds(courseId) } }],
+          [sessionModel.collection.name, { userId: { $in: userIds } }],
+          [userModel.collection.name, { _id: { $in: userIds } }],
+        ];
 
-    await app.close();
+        for (const [collectionName, filter] of targets) {
+          const collection = db.collection(collectionName);
+          const rows = await collection
+            .find(filter, { projection: { _id: 1 }, ...readFixtureOptions() })
+            .toArray();
+          if (rows.length) {
+            await deleteFixtureRows(
+              db,
+              collectionName,
+              { _id: { $in: rows.map(({ _id }) => _id) } },
+              0,
+            );
+          }
+          expect(
+            await collection.countDocuments(filter, readFixtureOptions()),
+          ).toBe(0);
+        }
+        console.info(
+          'Process assessment fixture cleanup verified zero residual.',
+        );
+      }
+    } finally {
+      try {
+        await app?.close();
+      } finally {
+        try {
+          if (connection && connection.readyState !== 0)
+            await connection.close();
+        } finally {
+          authTestEnvironment.restore();
+        }
+      }
+    }
   });
 
   it('returns process-assessment panel and csv export', async () => {
@@ -439,6 +468,22 @@ describe('Classroom Process Assessment (e2e)', () => {
       })
       .expect(200);
 
+    const foreignJob = await aiFeedbackJobModel
+      .exists({
+        submissionId: {
+          $nin: submissionIds.map((id) => new Types.ObjectId(id)),
+        },
+        status: {
+          $in: [
+            AiFeedbackJobStatus.Pending,
+            AiFeedbackJobStatus.Failed,
+            AiFeedbackJobStatus.Running,
+          ],
+        },
+      })
+      .setOptions(readFixtureOptions());
+    if (foreignJob)
+      throw new Error('Process assessment requires a fixture-only AI queue.');
     for (let index = 0; index < 8; index += 1) {
       await aiFeedbackProcessor.processOnce(20);
       await waitMs(70);
@@ -510,9 +555,10 @@ describe('Classroom Process Assessment (e2e)', () => {
     expect(csvText).toContain('S-A-001');
     expect(csvText).toContain(studentAId);
     expect(csvText).not.toContain('codeText');
-    const csvLines = csvText.trim().split('\n');
-    expect(csvLines.length - 1).toBe(body.items.length);
-    const csvStudentIds = csvLines.slice(1).map((line) => line.split(',')[2]);
+    const [header, ...rows] = parseCsv(csvText);
+    expect(rows).toHaveLength(body.items.length);
+    const idColumn = header.cells.indexOf('studentId');
+    const csvStudentIds = rows.map(({ cells }) => cells[idColumn]);
     expect(csvStudentIds.sort()).toEqual(
       body.items.map((item) => item.studentId).sort(),
     );
@@ -523,5 +569,218 @@ describe('Classroom Process Assessment (e2e)', () => {
       .get(`/api/classrooms/${classroomId}/process-assessment`)
       .query({ window: 'not-supported' })
       .expect(400);
+  });
+
+  it('exports all 101 active students with scope=all while retaining legacy pagination', async () => {
+    const db = connection?.db;
+    if (!db) throw new Error('Process assessment test requires MongoDB.');
+    const insertOwned = async (
+      collection: string,
+      documents: Array<mongo.Document & { _id: Types.ObjectId }>,
+    ) => {
+      const inserted = await runAuthTestWrite(
+        db,
+        { insert: collection, documents },
+        {
+          collection,
+          filter: { _id: { $in: documents.map(({ _id }) => _id) } },
+        },
+      );
+      expect(inserted.n).toBe(documents.length);
+    };
+
+    // The original class has two active members. These IDs sort after both of them.
+    const activeIds = Array.from({ length: 99 }, () => new Types.ObjectId());
+    const removedId = new Types.ObjectId();
+    addedStudentIds.push(...activeIds, removedId);
+    const stableIds = [studentAId, studentBId, ...activeIds.map(String)].sort();
+    const finalPageStudentId = activeIds[activeIds.length - 1];
+    expect(stableIds[100]).toBe(finalPageStudentId.toString());
+    const now = new Date();
+    const timestamps = { createdAt: now, updatedAt: now };
+    const passwordHash = await bcrypt.hash(studentPassword, 10);
+    await insertOwned(
+      userModel.collection.name,
+      addedStudentIds.map((_id, index) => ({
+        _id,
+        email: `${namespace}.bulk-${index}@example.invalid`,
+        roles: ['student'],
+        status: UserStatus.Active,
+        passwordHash,
+        credentialVersion: 0,
+        passwordResetRequestedAt: null,
+        ...timestamps,
+      })),
+    );
+    await insertOwned(
+      enrollmentModel.collection.name,
+      addedStudentIds.map((userId) => ({
+        _id: new Types.ObjectId(),
+        classroomId: new Types.ObjectId(classroomId),
+        userId,
+        role: EnrollmentRole.Student,
+        status: userId.equals(removedId)
+          ? EnrollmentStatus.Removed
+          : EnrollmentStatus.Active,
+        joinedAt: now,
+        ...timestamps,
+      })),
+    );
+
+    const old = new Date(now.getTime() - 8 * 24 * 60 * 60 * 1000);
+    const finalPageSubmissions = [
+      {
+        classroomTaskId: classroomTaskAId,
+        taskId: taskAId,
+        attemptNo: 1,
+        createdAt: old,
+      },
+      {
+        classroomTaskId: classroomTaskAId,
+        taskId: taskAId,
+        attemptNo: 2,
+        createdAt: old,
+      },
+      {
+        classroomTaskId: classroomTaskAId,
+        taskId: taskAId,
+        attemptNo: 3,
+        createdAt: now,
+      },
+      {
+        classroomTaskId: classroomTaskBId,
+        taskId: taskBId,
+        attemptNo: 1,
+        createdAt: now,
+      },
+    ].map(({ classroomTaskId, taskId, attemptNo, createdAt }) => ({
+      _id: new Types.ObjectId(),
+      classroomTaskId: new Types.ObjectId(classroomTaskId),
+      taskId: new Types.ObjectId(taskId),
+      studentId: finalPageStudentId,
+      attemptNo,
+      createdAt,
+      submittedAt: createdAt,
+      updatedAt: createdAt,
+      content: { codeText: 'const csvScope = true;', language: 'typescript' },
+      contentRevision: 0,
+      isLate: false,
+      lateBySeconds: 0,
+      status: SubmissionStatus.Submitted,
+    }));
+    submissionIds.push(
+      ...finalPageSubmissions.map(({ _id }) => _id.toString()),
+    );
+    await insertOwned(submissionModel.collection.name, finalPageSubmissions);
+
+    const jsonPath = `/api/classrooms/${classroomId}/process-assessment`;
+    const csvPath = `${jsonPath}.csv`;
+    const httpTimeout = { response: 10000, deadline: 15000 };
+    const getCsv = async (query: Record<string, string | number>) => {
+      const response = await teacherAgent
+        .get(csvPath)
+        .query(query)
+        .timeout(httpTimeout)
+        .expect(200);
+      const [header, ...records] = parseCsv(response.text);
+      const column = (name: string) => header.cells.indexOf(name);
+      return {
+        header: header.cells,
+        rows: records.map(({ cells }) => ({
+          studentId: cells[column('studentId')],
+          submissionsCount: Number(cells[column('submissionsCount')]),
+          submittedTasksRate: Number(cells[column('submittedTasksRate')]),
+        })),
+      };
+    };
+    const lastId = finalPageStudentId.toString();
+    const idsOf = (rows: Array<{ studentId: string }>) =>
+      rows.map(({ studentId }) => studentId);
+    const all = await getCsv({
+      scope: 'all',
+      sort: 'submissionsCount',
+      order: 'desc',
+    });
+    const allIds = idsOf(all.rows);
+    expect([...allIds].sort()).toEqual(stableIds);
+    expect(new Set(allIds).size).toBe(101);
+    expect(allIds).not.toContain(removedId.toString());
+    expect(allIds).toEqual([
+      lastId,
+      studentAId,
+      ...stableIds.filter((id) => id !== lastId && id !== studentAId),
+    ]);
+    expect(all.rows[0]).toEqual({
+      studentId: lastId,
+      submissionsCount: 4,
+      submittedTasksRate: 1,
+    });
+    expect(all.rows.find(({ studentId }) => studentId === studentBId)).toEqual({
+      studentId: studentBId,
+      submissionsCount: 0,
+      submittedTasksRate: 0,
+    });
+
+    const defaultPage = await getCsv({ window: 'all' });
+    expect(idsOf(defaultPage.rows).sort()).toEqual(stableIds.slice(0, 50));
+    const secondPage = await getCsv({ page: 2, limit: 100 });
+    expect(idsOf(secondPage.rows)).toEqual([lastId]);
+
+    const filtered = await getCsv({
+      scope: 'all',
+      window: '7d',
+      excludedTaskIds: classroomTaskBId,
+      sort: 'submissionsCount',
+      order: 'asc',
+    });
+    // Two old A attempts and the recent B attempt leave one recent A submission.
+    expect(filtered.rows.slice(-2)).toEqual([
+      { studentId: lastId, submissionsCount: 1, submittedTasksRate: 1 },
+      { studentId: studentAId, submissionsCount: 2, submittedTasksRate: 1 },
+    ]);
+    expect(idsOf(filtered.rows).sort()).toEqual(stableIds);
+
+    for (const query of [
+      { scope: 'all', page: 1 },
+      { scope: 'all', limit: 50 },
+      { scope: 'page' },
+      { limit: 101 },
+    ]) {
+      await teacherAgent
+        .get(csvPath)
+        .query(query)
+        .timeout(httpTimeout)
+        .expect(400);
+    }
+    await teacherAgent
+      .get(jsonPath)
+      .query({ scope: 'all' })
+      .timeout(httpTimeout)
+      .expect(400);
+
+    const empty = await teacherAgent
+      .post('/api/classrooms')
+      .send({
+        courseId,
+        name: 'Process-Assessment-Empty-CSV-Classroom',
+      })
+      .timeout(httpTimeout)
+      .expect(201);
+    emptyClassroomId = (empty.body as CreatedClassroomResponse).id;
+    const emptyCsv = await teacherAgent
+      .get(`/api/classrooms/${emptyClassroomId}/process-assessment.csv`)
+      .query({ scope: 'all' })
+      .timeout(httpTimeout)
+      .expect(200);
+    expect(parseCsv(emptyCsv.text).map(({ cells }) => cells)).toEqual([
+      all.header,
+    ]);
+
+    console.info('Process assessment CSV scope verified', {
+      all: all.rows.length,
+      defaultPage: defaultPage.rows.length,
+      secondPage: secondPage.rows.length,
+      allIdsMatch: true,
+    });
   });
 });

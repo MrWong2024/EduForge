@@ -160,7 +160,7 @@
   - 注意：`excludedTaskIds` 仅适配为 URL 查询条件；直接消费后端任务维度指标（`iteratedTasksCount/aiRequestedTasksCount/aiSucceededTasksCount/avgWarnItems`），不重算评分。
 - 过程性评价 CSV：`process-assessment/page.tsx` -> `buildProxyPath("classrooms/:id/process-assessment.csv")`。
   - 对应后端：`GET /api/classrooms/:classroomId/process-assessment.csv`。
-  - 注意：下载链接继续走 `/api/proxy/**`，与页面 JSON 使用同一排除口径；CSV 字段由后端导出实现决定。
+  - “下载全班 CSV”继续走 `/api/proxy/**`，固定传 `scope=all`，使用页面解析后的 `window` 和 `excludedTaskIds`，不携带页面 `page` 或 `limit`。
 - AI 反馈介入成效分析总览：`ai-learning-analytics/page.tsx` -> `client.fetchJson("classrooms/:id/ai-learning-analytics?..." )` -> `/api/proxy/classrooms/:id/ai-learning-analytics` -> `GET /api/classrooms/:classroomId/ai-learning-analytics`。
   - 使用 `toAiLearningAnalyticsOverviewResponse`；query 仅为 `window=all|7d|30d` 与逗号分隔的 `excludedTaskIds`，不携带学生搜索、筛选或分页参数。
   - 三类响应方法学均为 V1.2，`scope/sampleUnit/qualityProxy` 标识保持；mapper 直接映射班级与任务计数、作品更新率、evidenceSummary 和后端 nullable 指标，未知不补0。
