@@ -1,19 +1,25 @@
 import Link from "next/link";
+import { redirect } from "next/navigation";
 import { EmptyState } from "@/components/blocks/EmptyState";
 import { ErrorState } from "@/components/blocks/ErrorState";
 import { PageHeader } from "@/components/blocks/PageHeader";
 import { fetchJson, FetchJsonError } from "@/lib/api/client";
 import { buildErrorDescription, extractRawDetail } from "@/lib/api/error-presenter";
 import { toCourseOverviewResponse } from "@/lib/api/types-teacher";
-import { buildCourseOverviewSummary, formatCourseOverviewRatio } from "@/lib/course-overview";
+import {
+  buildCourseOverviewSummary,
+  COURSE_OVERVIEW_PAGE_SIZE,
+  formatCourseOverviewRatio,
+  resolveCourseOverviewPagination,
+} from "@/lib/course-overview";
 import { toTaskCourseLabelDisplayText } from "@/lib/learning-tasks/course-labels";
 import { paths } from "@/lib/routes/paths";
+import { findLastPageForOutOfRangeRequest } from "@/lib/routes/teacher-list-pagination";
 import { getCommonErrorSummary } from "@/lib/ui/status";
 import {
   buildQueryString,
   getSingleSearchParam,
   parseEnum,
-  parsePositiveInt,
   toDisplayDate,
   toDisplayText,
 } from "@/lib/ui/format";
@@ -40,7 +46,6 @@ const SORT_FIELDS = [
   "failedJobs",
 ] as const;
 const SORT_ORDERS = ["asc", "desc"] as const;
-const COURSE_OVERVIEW_PAGE_SIZE = 100;
 
 type CourseOverviewWindow = (typeof OVERVIEW_WINDOWS)[number];
 type CourseOverviewDisplayWindow = (typeof DISPLAY_WINDOWS)[number];
@@ -80,11 +85,7 @@ const resolveQueryState = (
   window: parseEnum(getSingleSearchParam(query.window), OVERVIEW_WINDOWS, "all"),
   sort: parseEnum(getSingleSearchParam(query.sort), SORT_FIELDS, "overallSubmissionCoverage"),
   order: parseEnum(getSingleSearchParam(query.order), SORT_ORDERS, "desc"),
-  page: parsePositiveInt(getSingleSearchParam(query.page), 1, { min: 1, max: 100 }),
-  limit: parsePositiveInt(getSingleSearchParam(query.limit), COURSE_OVERVIEW_PAGE_SIZE, {
-    min: 1,
-    max: COURSE_OVERVIEW_PAGE_SIZE,
-  }),
+  ...resolveCourseOverviewPagination(query),
 });
 
 type CourseOverviewViewModel =
@@ -95,6 +96,7 @@ type CourseOverviewViewModel =
       currentPage: number;
       totalClassrooms: number;
       totalPages: number;
+      lastValidPage: number | undefined;
       showPagination: boolean;
       hasPrev: boolean;
       hasNext: boolean;
@@ -128,15 +130,15 @@ export default async function CourseOverviewPage({ params, searchParams }: Cours
     const data = toCourseOverviewResponse(payload);
     const totalClassrooms = typeof data.total === "number" ? data.total : data.items.length;
     const responseLimit =
-      typeof data.limit === "number" && Number.isFinite(data.limit) && data.limit > 0
-        ? Math.floor(data.limit)
+      typeof data.limit === "number" &&
+      Number.isSafeInteger(data.limit) &&
+      data.limit > 0 &&
+      data.limit <= COURSE_OVERVIEW_PAGE_SIZE
+        ? data.limit
         : query.limit;
-    const responsePage =
-      typeof data.page === "number" && Number.isFinite(data.page) && data.page > 0
-        ? Math.floor(data.page)
-        : query.page;
     const totalPages = Math.max(1, Math.ceil(totalClassrooms / responseLimit));
-    const currentPage = Math.min(responsePage, totalPages);
+    const currentPage = query.page;
+    const lastValidPage = findLastPageForOutOfRangeRequest(currentPage, responseLimit, data.total);
     const showPagination = totalClassrooms > responseLimit;
     const hasPrev = showPagination && currentPage > 1;
     const hasNext = showPagination && currentPage < totalPages;
@@ -147,6 +149,7 @@ export default async function CourseOverviewPage({ params, searchParams }: Cours
       currentPage,
       totalClassrooms,
       totalPages,
+      lastValidPage,
       showPagination,
       hasPrev,
       hasNext,
@@ -188,6 +191,9 @@ export default async function CourseOverviewPage({ params, searchParams }: Cours
       limit: merged.limit,
     })}`;
   };
+  if (viewModel.lastValidPage !== undefined) {
+    redirect(buildHref({ page: viewModel.lastValidPage }));
+  }
 
   const windowItems = DISPLAY_WINDOWS.map((windowValue: CourseOverviewDisplayWindow) => ({
     value: windowValue,

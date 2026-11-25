@@ -1,6 +1,25 @@
 import { expect, test } from "@playwright/test";
 import { toCourseOverviewResponse } from "../../lib/api/types-teacher";
-import { buildCourseOverviewSummary, formatCourseOverviewRatio } from "../../lib/course-overview";
+import {
+  buildCourseOverviewSummary,
+  formatCourseOverviewRatio,
+  resolveCourseOverviewPagination,
+} from "../../lib/course-overview";
+
+test("course overview accepts page 101 while keeping the limit capped at 100", () => {
+  expect(resolveCourseOverviewPagination({ page: "101", limit: "1" })).toEqual({
+    page: 101,
+    limit: 1,
+  });
+  expect(resolveCourseOverviewPagination({ page: "101", limit: "101" })).toEqual({
+    page: 101,
+    limit: 100,
+  });
+  expect(resolveCourseOverviewPagination({ page: "0", limit: "0" })).toEqual({
+    page: 1,
+    limit: 100,
+  });
+});
 
 const singleClassroomCases = [
   { ratio: 0.005, display: "0.5%" },

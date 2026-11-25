@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { redirect } from "next/navigation";
 import { EmptyState } from "@/components/blocks/EmptyState";
 import { ErrorState } from "@/components/blocks/ErrorState";
 import { PageHeader } from "@/components/blocks/PageHeader";
@@ -6,6 +7,7 @@ import { fetchJson, FetchJsonError } from "@/lib/api/client";
 import { buildErrorDescription, extractRawDetail } from "@/lib/api/error-presenter";
 import { toLearningTrajectoryResponse } from "@/lib/api/types-teacher";
 import { paths } from "@/lib/routes/paths";
+import { findLastPageForOutOfRangeRequest } from "@/lib/routes/teacher-list-pagination";
 import { getAiStatusLabel, getCommonErrorSummary } from "@/lib/ui/status";
 import { getFeedbackTagLabel } from "@/lib/ui/feedback-tags";
 import {
@@ -52,7 +54,7 @@ const TRAJECTORY_WINDOW_LABELS: Record<TrajectoryWindow, string> = {
 const TRAJECTORY_SORT_FIELD_LABELS: Record<TrajectorySortField, string> = {
   latestAttemptAt: "最近提交时间",
   attemptsCount: "提交次数",
-  errorRate: "错误率",
+  errorRate: "最近一次 AI 错误数",
   notSubmitted: "未提交优先",
 };
 
@@ -285,20 +287,30 @@ export default async function LearningTrajectoryPage({
 
   const routePath = paths.teacher.classroomTaskTrajectory(classroomId, classroomTaskId);
   const queryRecord = toQueryRecord(viewModel.query);
-  const displayedStudentsCount = viewModel.data.items.length;
-  const totalStudentsCount =
-    typeof viewModel.data.total === "number" ? viewModel.data.total : displayedStudentsCount;
   const currentLimit =
-    typeof viewModel.data.limit === "number" && viewModel.data.limit > 0
+    typeof viewModel.data.limit === "number" &&
+    Number.isSafeInteger(viewModel.data.limit) &&
+    viewModel.data.limit > 0 &&
+    viewModel.data.limit <= LEARNING_TRAJECTORY_PAGE_SIZE
       ? viewModel.data.limit
       : viewModel.query.limit;
+  const currentPage = viewModel.query.page;
+  const lastValidPage = findLastPageForOutOfRangeRequest(
+    currentPage,
+    currentLimit,
+    viewModel.data.total,
+  );
+  if (lastValidPage !== undefined) {
+    redirect(buildHref(routePath, queryRecord, { page: String(lastValidPage) }));
+  }
+
+  const displayedStudentsCount = viewModel.data.items.length;
+  const responseTotal = viewModel.data.total;
+  const hasTrustedTotal =
+    typeof responseTotal === "number" && Number.isSafeInteger(responseTotal) && responseTotal >= 0;
+  const totalStudentsCount = hasTrustedTotal ? responseTotal : displayedStudentsCount;
   const totalPages = Math.max(1, Math.ceil(totalStudentsCount / currentLimit));
-  const currentPageSource =
-    typeof viewModel.data.page === "number" && viewModel.data.page > 0
-      ? viewModel.data.page
-      : viewModel.query.page;
-  const currentPage = Math.min(currentPageSource, totalPages);
-  const showPagination = totalStudentsCount > currentLimit;
+  const showPagination = hasTrustedTotal && totalStudentsCount > currentLimit;
   const hasPrev = currentPage > 1;
   const hasNext = currentPage < totalPages;
 
@@ -349,7 +361,7 @@ export default async function LearningTrajectoryPage({
           </div>
 
           <div className="flex items-center gap-2">
-            <span>排序:</span>
+            <span>本页排序</span>
             {TRAJECTORY_SORT_FIELDS.map((sortValue) => {
               const active = sortValue === viewModel.query.sort;
               return (
@@ -364,18 +376,20 @@ export default async function LearningTrajectoryPage({
             })}
           </div>
 
-          <div className="flex items-center gap-2">
-            <span>顺序:</span>
-            <Link
-              href={buildHref(routePath, queryRecord, {
-                order: viewModel.query.order === "asc" ? "desc" : "asc",
-                page: "1",
-              })}
-              className="text-blue-700 hover:underline"
-            >
-              {TRAJECTORY_SORT_ORDER_LABELS[viewModel.query.order]}
-            </Link>
-          </div>
+          {viewModel.query.sort !== "notSubmitted" ? (
+            <div className="flex items-center gap-2">
+              <span>顺序:</span>
+              <Link
+                href={buildHref(routePath, queryRecord, {
+                  order: viewModel.query.order === "asc" ? "desc" : "asc",
+                  page: "1",
+                })}
+                className="text-blue-700 hover:underline"
+              >
+                {TRAJECTORY_SORT_ORDER_LABELS[viewModel.query.order]}
+              </Link>
+            </div>
+          ) : null}
 
           <div className="flex items-center gap-2">
             <span>包含尝试详情:</span>
@@ -403,6 +417,11 @@ export default async function LearningTrajectoryPage({
             </Link>
           </div>
         </div>
+        {viewModel.query.sort === "errorRate" ? (
+          <p className="mt-2 text-zinc-600">
+            按当前窗口内最近一次提交的 AI 错误级反馈条数排序，未知值排在最后。
+          </p>
+        ) : null}
       </section>
 
       <div className="text-sm text-zinc-600">

@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import Link from "next/link";
+import { redirect } from "next/navigation";
 import { ErrorState } from "@/components/blocks/ErrorState";
 import { PageHeader } from "@/components/blocks/PageHeader";
 import { CreateLearningTaskForm } from "@/components/teacher/CreateLearningTaskForm";
@@ -22,6 +23,7 @@ import {
   normalizeTaskTemplateScope,
 } from "@/lib/learning-tasks/template-visibility-scope";
 import { paths } from "@/lib/routes/paths";
+import { findLastPageForOutOfRangeRequest } from "@/lib/routes/teacher-list-pagination";
 import {
   buildQueryString,
   getSingleSearchParam,
@@ -148,16 +150,35 @@ export default async function TeacherLearningTasksPage({
     );
   }
 
+  const buildTaskTemplatePageHref = (page: number) =>
+    `${paths.teacher.tasks}?${buildQueryString({
+      fromClassroomId,
+      page,
+      status: initialStatusFilter,
+      knowledgeModule: initialKnowledgeModuleFilter,
+      courseLabel: initialCourseLabelFilter,
+      difficulty: initialDifficultyFilter,
+      scope: initialScope,
+    })}`;
+  const taskTemplateLimit =
+    typeof viewModel.taskList.limit === "number" &&
+    Number.isSafeInteger(viewModel.taskList.limit) &&
+    viewModel.taskList.limit > 0
+      ? viewModel.taskList.limit
+      : TASK_TEMPLATE_PAGE_LIMIT;
+  const lastValidPage = findLastPageForOutOfRangeRequest(
+    initialPage,
+    taskTemplateLimit,
+    viewModel.taskList.total,
+  );
+  if (lastValidPage !== undefined) {
+    redirect(buildTaskTemplatePageHref(lastValidPage));
+  }
+
   const totalTaskTemplates =
     typeof viewModel.taskList.total === "number"
       ? viewModel.taskList.total
       : viewModel.taskList.items.length;
-  const taskTemplateLimit =
-    typeof viewModel.taskList.limit === "number" &&
-    Number.isFinite(viewModel.taskList.limit) &&
-    viewModel.taskList.limit > 0
-      ? Math.floor(viewModel.taskList.limit)
-      : TASK_TEMPLATE_PAGE_LIMIT;
   const responseTaskTemplatePage =
     typeof viewModel.taskList.page === "number" &&
     Number.isFinite(viewModel.taskList.page) &&
@@ -174,16 +195,6 @@ export default async function TeacherLearningTasksPage({
   );
   const showTaskTemplatePagination =
     totalTaskTemplates > TASK_TEMPLATE_PAGE_LIMIT;
-  const buildTaskTemplatePageHref = (page: number) =>
-    `${paths.teacher.tasks}?${buildQueryString({
-      fromClassroomId,
-      page,
-      status: initialStatusFilter,
-      knowledgeModule: initialKnowledgeModuleFilter,
-      courseLabel: initialCourseLabelFilter,
-      difficulty: initialDifficultyFilter,
-      scope: initialScope,
-    })}`;
 
   return (
     <section className="space-y-4">

@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { redirect } from "next/navigation";
 import { EmptyState } from "@/components/blocks/EmptyState";
 import { ErrorState } from "@/components/blocks/ErrorState";
 import { PageHeader } from "@/components/blocks/PageHeader";
@@ -17,6 +18,7 @@ import {
   toProcessAssessmentResponse,
 } from "@/lib/api/types-teacher";
 import { paths } from "@/lib/routes/paths";
+import { findLastPageForOutOfRangeRequest } from "@/lib/routes/teacher-list-pagination";
 import { getClassroomTaskStatusLabel, getCommonErrorSummary } from "@/lib/ui/status";
 import { getFeedbackTagLabel } from "@/lib/ui/feedback-tags";
 import {
@@ -608,6 +610,17 @@ export default async function ProcessAssessmentPage({
         title="过程性评价加载失败"
         description={viewModel.description}
       />
+    );
+  }
+
+  const lastValidPage = findLastPageForOutOfRangeRequest(
+    queryState.page,
+    PROCESS_ASSESSMENT_PAGE_SIZE,
+    viewModel.data.total,
+  );
+  if (lastValidPage !== undefined) {
+    redirect(
+      buildPageHref(classroomId, viewModel.window, lastValidPage, viewModel.excludedTaskIds),
     );
   }
 

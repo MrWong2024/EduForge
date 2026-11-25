@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { redirect } from "next/navigation";
 import { EmptyState } from "@/components/blocks/EmptyState";
 import { ErrorState } from "@/components/blocks/ErrorState";
 import { PageHeader } from "@/components/blocks/PageHeader";
@@ -6,6 +7,7 @@ import { fetchJson, FetchJsonError } from "@/lib/api/client";
 import { buildErrorDescription, extractRawDetail } from "@/lib/api/error-presenter";
 import { toClassroomTaskSubmissionsResponse, toClassroomSummary } from "@/lib/api/types-teacher";
 import { paths } from "@/lib/routes/paths";
+import { findLastPageForOutOfRangeRequest } from "@/lib/routes/teacher-list-pagination";
 import { getAiStatusLabel, getCommonErrorSummary } from "@/lib/ui/status";
 import {
   buildQueryString,
@@ -120,6 +122,17 @@ export default async function ClassroomTaskSubmissionsPage({
   }
 
   const routePath = paths.teacher.classroomTaskSubmissions(classroomId, classroomTaskId);
+  const lastValidPage = findLastPageForOutOfRangeRequest(
+    queryState.page,
+    SUBMISSIONS_PAGE_SIZE,
+    Array.isArray(viewModel.submissionsResponse.raw)
+      ? undefined
+      : viewModel.submissionsResponse.total,
+  );
+  if (lastValidPage !== undefined) {
+    redirect(buildPageHref(routePath, lastValidPage));
+  }
+
   const submissions = viewModel.submissionsResponse.items;
   const displayedSubmissionsCount = submissions.length;
   const totalSubmissionsCount =

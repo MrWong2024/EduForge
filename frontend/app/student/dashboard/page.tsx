@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import Link from "next/link";
+import { redirect } from "next/navigation";
 import { EmptyState } from "@/components/blocks/EmptyState";
 import { ErrorState } from "@/components/blocks/ErrorState";
 import { PageHeader } from "@/components/blocks/PageHeader";
@@ -14,6 +15,7 @@ import {
   toStudentDashboardResponse,
 } from "@/lib/api/types-student";
 import { paths } from "@/lib/routes/paths";
+import { findLastPageForOutOfRangeRequest } from "@/lib/routes/teacher-list-pagination";
 import {
   getAiStatusLabel,
   getClassroomStatusLabel,
@@ -300,15 +302,22 @@ export default async function StudentDashboardPage({
       ? viewModel.data.total
       : classroomItems.length;
   const dashboardLimit =
-    typeof viewModel.data.limit === "number" && viewModel.data.limit > 0
-      ? Math.floor(viewModel.data.limit)
+    typeof viewModel.data.limit === "number" &&
+    Number.isSafeInteger(viewModel.data.limit) &&
+    viewModel.data.limit > 0 &&
+    viewModel.data.limit <= STUDENT_DASHBOARD_PAGE_SIZE
+      ? viewModel.data.limit
       : STUDENT_DASHBOARD_PAGE_SIZE;
-  const currentDashboardPage =
-    typeof viewModel.data.page === "number" && viewModel.data.page > 0
-      ? Math.floor(viewModel.data.page)
-      : currentPage;
+  const lastValidPage = findLastPageForOutOfRangeRequest(
+    currentPage,
+    dashboardLimit,
+    viewModel.data.total,
+  );
+  if (lastValidPage !== undefined) {
+    redirect(getDashboardHref(lastValidPage, includeHistorical));
+  }
   const totalPages = Math.max(1, Math.ceil(totalClassrooms / dashboardLimit));
-  const showPagination = totalClassrooms > STUDENT_DASHBOARD_PAGE_SIZE;
+  const showPagination = totalClassrooms > dashboardLimit;
 
   return (
     <section>
@@ -542,14 +551,14 @@ export default async function StudentDashboardPage({
           {showPagination ? (
             <section className="flex flex-col gap-3 rounded-lg border border-zinc-200 bg-white px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
               <p className="text-sm text-zinc-600">
-                第 {toDisplayText(currentDashboardPage, "1")} /{" "}
+                第 {toDisplayText(currentPage, "1")} /{" "}
                 {toDisplayText(totalPages, "1")} 页
               </p>
               <div className="flex items-center gap-3 text-sm">
-                {currentDashboardPage > 1 ? (
+                {currentPage > 1 ? (
                   <Link
                     href={getDashboardHref(
-                      currentDashboardPage - 1,
+                      currentPage - 1,
                       includeHistorical,
                     )}
                     className="text-blue-700 hover:underline"
@@ -557,10 +566,10 @@ export default async function StudentDashboardPage({
                     上一页
                   </Link>
                 ) : null}
-                {currentDashboardPage < totalPages ? (
+                {currentPage < totalPages ? (
                   <Link
                     href={getDashboardHref(
-                      currentDashboardPage + 1,
+                      currentPage + 1,
                       includeHistorical,
                     )}
                     className="text-blue-700 hover:underline"

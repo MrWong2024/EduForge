@@ -1,4 +1,18 @@
 import type { CourseOverviewResponse } from "./api/types-teacher";
+import { getSingleSearchParam, parsePositiveInt } from "./ui/format";
+
+export const COURSE_OVERVIEW_PAGE_SIZE = 100;
+
+export const resolveCourseOverviewPagination = ({ page, limit }: {
+  page?: string | string[];
+  limit?: string | string[];
+}) => ({
+  page: parsePositiveInt(getSingleSearchParam(page), 1, { min: 1 }),
+  limit: parsePositiveInt(getSingleSearchParam(limit), COURSE_OVERVIEW_PAGE_SIZE, {
+    min: 1,
+    max: COURSE_OVERVIEW_PAGE_SIZE,
+  }),
+});
 
 type CourseOverviewSummary = {
   classroomsTotal: number;
