@@ -61,6 +61,15 @@ export type AiFeedbackAggregatedJobMetrics = {
 export class AiFeedbackMetricsAggregator {
   private static readonly KNOWN_ERROR_CODES: AiFeedbackProviderErrorCode[] =
     Object.values(AI_FEEDBACK_ERROR_CODES);
+  private static readonly WORKER_CODES_BY_LAST_ERROR = new Map<string, string>(
+    [
+      'AI_CONTEXT_UNAVAILABLE',
+      'AI_CONTEXT_LIMIT_EXCEEDED',
+      'TASK_INELIGIBLE',
+      'LEGACY_JOB_UNSUPPORTED',
+      'INTERNAL_ERROR',
+    ].map((code) => [`AI_FEEDBACK: ${code}`, code] as const),
+  );
 
   constructor(
     @InjectModel(AiFeedbackJob.name)
@@ -266,8 +275,8 @@ export class AiFeedbackMetricsAggregator {
     return rows;
   }
 
-  // Errors are only normalized from concise metadata (`code`) or known tokens.
-  // This avoids parsing potentially long free-form messages.
+  // Worker-only failures use the exact persisted message. Legacy Provider and
+  // structured code extraction follow the existing normalization rules.
   private extractErrorCode(lastError: unknown): string | null {
     if (typeof lastError === 'object' && lastError !== null) {
       const code = (lastError as { code?: unknown }).code;
@@ -294,9 +303,11 @@ export class AiFeedbackMetricsAggregator {
     }
 
     return (
+      AiFeedbackMetricsAggregator.WORKER_CODES_BY_LAST_ERROR.get(trimmed) ??
       AiFeedbackMetricsAggregator.KNOWN_ERROR_CODES.find((code) =>
         trimmed.includes(code),
-      ) ?? null
+      ) ??
+      null
     );
   }
 

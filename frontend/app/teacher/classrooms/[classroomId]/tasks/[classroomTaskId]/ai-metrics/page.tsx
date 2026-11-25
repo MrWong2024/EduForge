@@ -132,7 +132,6 @@ export default async function AiMetricsPage({ params, searchParams }: AiMetricsP
   const summary = viewModel.data.summary;
   const statusEntries = Object.entries(viewModel.data.statusBreakdown);
   const tags = viewModel.data.tags;
-  const hasCoreData = statusEntries.length > 0 || viewModel.data.errors.length > 0;
   const avgLatencyMs = safeGet<unknown>(summary, "avgLatencyMs", null);
   const hasAvgLatency = typeof avgLatencyMs === "number" && Number.isFinite(avgLatencyMs);
 
@@ -193,7 +192,7 @@ export default async function AiMetricsPage({ params, searchParams }: AiMetricsP
         </div>
       </section>
 
-      {!hasCoreData ? (
+      {!viewModel.data.hasCoreData ? (
         <EmptyState title="暂无 AI 指标数据" description="当前窗口下尚未返回可展示的 AI 指标。" />
       ) : null}
 
@@ -207,7 +206,7 @@ export default async function AiMetricsPage({ params, searchParams }: AiMetricsP
           <p className="mt-1 text-lg font-semibold text-zinc-900">{toPercent(safeGet(summary, "successRate", undefined))}</p>
         </div>
         <div className="rounded-lg border border-zinc-200 bg-white p-4">
-          <p className="text-xs text-zinc-500">AI 平均重试次数</p>
+          <p className="text-xs text-zinc-500">平均处理尝试次数（含首次）</p>
           <p className="mt-1 text-lg font-semibold text-zinc-900">{toDisplayText(safeGet(summary, "avgAttempts", undefined))}</p>
         </div>
         {hasAvgLatency ? (

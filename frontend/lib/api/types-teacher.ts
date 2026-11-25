@@ -559,6 +559,7 @@ export type AiMetricsResponse = {
   statusBreakdown: UnknownRecord;
   tags: UnknownRecord[];
   errors: UnknownRecord[];
+  hasCoreData: boolean;
   raw: UnknownRecord;
 };
 
@@ -1544,26 +1545,54 @@ export const toReviewPackResponse = (payload: unknown): ReviewPackResponse => {
   };
 };
 
+const AI_METRICS_JOB_STATES = new Set([
+  "pending", "running", "succeeded", "failed", "dead",
+]);
+const AI_METRICS_BREAKDOWN_STATES = new Set([...AI_METRICS_JOB_STATES, "not_requested"]);
+
+const toAiMetricsStatusBreakdown = (
+  value: unknown,
+  allowedStates: ReadonlySet<string>,
+): UnknownRecord =>
+  Object.fromEntries(
+    Object.entries(asRecord(value)).filter(([state, count]) =>
+      allowedStates.has(state.trim().toLowerCase()) && (asNumber(count) ?? -1) >= 0,
+    ),
+  );
+
+const hasPositiveCount = (value: unknown): boolean => (asNumber(value) ?? 0) > 0;
+
 export const toAiMetricsResponse = (payload: unknown): AiMetricsResponse => {
   const record = asRecord(payload);
   const summary = asRecord(safeGet(record, "summary", undefined));
-  const statusBreakdown =
-    asRecord(safeGet(record, "statusBreakdown", undefined)) ||
-    asRecord(safeGet(summary, "statusBreakdown", undefined));
   const jobsBreakdown = asRecord(safeGet(summary, "jobs", undefined));
+  const statusBreakdown = pickFirstNonEmptyRecord(
+    toAiMetricsStatusBreakdown(record.statusBreakdown, AI_METRICS_BREAKDOWN_STATES),
+    toAiMetricsStatusBreakdown(summary.statusBreakdown, AI_METRICS_BREAKDOWN_STATES),
+    toAiMetricsStatusBreakdown(jobsBreakdown, AI_METRICS_JOB_STATES),
+  );
+  const topLevelTags = asRecordArray(record.tags);
+  const tags =
+    topLevelTags.length > 0
+      ? topLevelTags
+      : asRecordArray(safeGet(record, "feedback.topTags", undefined));
+  const errors = asRecordArray(record.errors);
+  const hasCoreData =
+    hasPositiveCount(jobsBreakdown.total) ||
+    Object.values(statusBreakdown).some(hasPositiveCount) ||
+    hasPositiveCount(safeGet(record, "feedback.totalItems", undefined)) ||
+    tags.some((item) => hasPositiveCount(item.count)) ||
+    errors.some((item) => hasPositiveCount(item.count));
 
   return {
     classroomId: asString(record.classroomId),
     classroomTaskId: asString(record.classroomTaskId),
     window: asString(record.window),
     summary,
-    statusBreakdown:
-      Object.keys(statusBreakdown).length > 0 ? statusBreakdown : jobsBreakdown,
-    tags:
-      asRecordArray(safeGet(record, "tags", undefined)).length > 0
-        ? asRecordArray(safeGet(record, "tags", undefined))
-        : asRecordArray(safeGet(record, "feedback.topTags", undefined)),
-    errors: asRecordArray(safeGet(record, "errors", undefined)),
+    statusBreakdown,
+    tags,
+    errors,
+    hasCoreData,
     raw: record,
   };
 };

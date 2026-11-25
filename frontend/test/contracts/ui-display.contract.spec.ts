@@ -1,4 +1,5 @@
 import { expect, test } from "@playwright/test";
+import { toAiMetricsResponse } from "../../lib/api/types-teacher";
 import {
   getAccountStatusLabel,
   getAiFailureReasonLabel,
@@ -228,15 +229,87 @@ test("AI error distribution labels explain known reasons while hiding unknown in
     ["TIMEOUT", "AI 处理超时"],
     ["BAD_RESPONSE", "AI 返回内容暂不可用"],
     ["MISSING_API_KEY", "AI 服务尚未配置完成"],
+    ["AI_CONTEXT_UNAVAILABLE", "评阅材料暂不可用"],
+    ["AI_CONTEXT_LIMIT_EXCEEDED", "评阅材料超出容量限制"],
+    ["TASK_INELIGIBLE", "任务不满足 AI 评阅条件"],
+    ["LEGACY_JOB_UNSUPPORTED", "旧版作业不支持 AI 评阅"],
+    ["INTERNAL_ERROR", "AI 处理发生内部错误"],
   ]) {
     expect(getAiFailureReasonLabel(value)).toBe(expected);
   }
   for (const missing of [undefined, null, "", " \n "]) {
     expect(getAiFailureReasonLabel(missing)).toBe("—");
   }
-  for (const unknown of ["PRIVATE_INTERNAL_CODE", "__proto__", {}, 1]) {
+  for (const unknown of [
+    "PRIVATE_INTERNAL_CODE", "private synthetic stack", "__proto__", {}, 1,
+  ]) {
     expect(getAiFailureReasonLabel(unknown)).toBe("其他处理失败原因");
   }
+});
+
+const noAiJobs = {
+  total: 0,
+  pending: 0,
+  running: 0,
+  succeeded: 0,
+  failed: 0,
+  dead: 0,
+};
+
+test("the AI metrics page can show one successful job without treating its total as a state", () => {
+  const data = toAiMetricsResponse({
+    summary: { jobs: { ...noAiJobs, total: 1, succeeded: 1 }, avgAttempts: 1 },
+    feedback: { totalItems: 0, topTags: [] },
+    errors: [],
+  });
+
+  expect(data.statusBreakdown).toEqual({
+    pending: 0,
+    running: 0,
+    succeeded: 1,
+    failed: 0,
+    dead: 0,
+  });
+  expect(Object.entries(data.statusBreakdown).map(([status, count]) => [
+    getAiStatusLabel(status), count,
+  ])).toContainEqual(["处理完成", 1]);
+  expect(data.summary).toMatchObject({ jobs: { total: 1 }, avgAttempts: 1 });
+  expect(data.hasCoreData).toBe(true);
+});
+
+test("AI metrics preserve explicit state counts from either supported status breakdown", () => {
+  const summary = {
+    jobs: { ...noAiJobs, total: 3, succeeded: 3 },
+    statusBreakdown: { running: 3 },
+  };
+
+  expect(toAiMetricsResponse({
+    summary,
+    statusBreakdown: { SUCCEEDED: 2, FAILED: 1, NOT_REQUESTED: 1, total: 3 },
+  }).statusBreakdown).toEqual({ SUCCEEDED: 2, FAILED: 1, NOT_REQUESTED: 1 });
+  expect(toAiMetricsResponse({ summary, statusBreakdown: { total: 3 } }).statusBreakdown)
+    .toEqual({ running: 3 });
+});
+
+test("the AI metrics empty state distinguishes all-zero data from untagged feedback", () => {
+  const base = { summary: { jobs: noAiJobs, avgAttempts: 0 }, errors: [] };
+
+  const empty = toAiMetricsResponse({
+    ...base, feedback: { totalItems: 0, topTags: [] },
+  });
+  expect(empty.summary.avgAttempts).toBe(0);
+  expect(empty.hasCoreData).toBe(false);
+
+  // With includeTags=false the feedback count is still present, but the tag list is empty.
+  const feedbackOnly = toAiMetricsResponse({
+    ...base, feedback: { totalItems: 1, topTags: [] },
+  });
+  expect(feedbackOnly.tags).toEqual([]);
+  expect(feedbackOnly.hasCoreData).toBe(true);
+
+  expect(toAiMetricsResponse({ statusBreakdown: { RUNNING: 1 } }).hasCoreData).toBe(true);
+  expect(toAiMetricsResponse({ tags: [{ tag: "readability", count: 1 }] }).hasCoreData).toBe(true);
+  expect(toAiMetricsResponse({ errors: [{ code: "INTERNAL_ERROR", count: 1 }] }).hasCoreData).toBe(true);
 });
 
 test("internal error details remain extractable but cannot be appended to the business summary", () => {

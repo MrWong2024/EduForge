@@ -105,6 +105,11 @@ export const getAiStatusLabel = (status?: unknown): string => {
 };
 
 const AI_FAILURE_REASON_LABELS: Readonly<Record<string, string>> = {
+  AI_CONTEXT_UNAVAILABLE: "评阅材料暂不可用",
+  AI_CONTEXT_LIMIT_EXCEEDED: "评阅材料超出容量限制",
+  TASK_INELIGIBLE: "任务不满足 AI 评阅条件",
+  LEGACY_JOB_UNSUPPORTED: "旧版作业不支持 AI 评阅",
+  INTERNAL_ERROR: "AI 处理发生内部错误",
   INPUT_BUDGET_EXCEEDED: "评阅材料超出处理范围",
   OUTPUT_LIMIT_REACHED: "反馈内容超出长度限制",
   UNAUTHORIZED: "AI 服务授权失败",

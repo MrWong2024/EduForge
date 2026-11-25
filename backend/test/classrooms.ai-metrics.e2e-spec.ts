@@ -1,3 +1,7 @@
+import {
+  assertAuthTestConnection,
+  authTestEnvironment,
+} from './helpers/auth-test-environment';
 import { Enrollment } from '../src/modules/classrooms/enrollments/schemas/enrollment.schema';
 import { INestApplication, ValidationPipe } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
@@ -19,17 +23,14 @@ import { Submission } from '../src/modules/learning-tasks/schemas/submission.sch
 import { Feedback } from '../src/modules/learning-tasks/schemas/feedback.schema';
 import { AiFeedbackGuardsService } from '../src/modules/learning-tasks/ai-feedback/services/ai-feedback-guards.service';
 import { AiFeedbackProcessor } from '../src/modules/learning-tasks/ai-feedback/services/ai-feedback-processor.service';
-import { AiFeedbackJob } from '../src/modules/learning-tasks/ai-feedback/schemas/ai-feedback-job.schema';
+import {
+  AiFeedbackJob,
+  AiFeedbackJobStatus,
+} from '../src/modules/learning-tasks/ai-feedback/schemas/ai-feedback-job.schema';
 
 jest.setTimeout(30000);
 
 const DEFAULT_MAX_PER_MINUTE = '30';
-
-const ensureMongoUri = () => {
-  if (!process.env.MONGO_URI) {
-    throw new Error('MONGO_URI is required for classrooms ai-metrics e2e.');
-  }
-};
 
 type CreatedCourseResponse = {
   id: string;
@@ -85,6 +86,15 @@ type AiMetricsResponse = {
   };
 };
 
+type WeeklyAiHealthResponse = {
+  aiHealth: {
+    jobs: AiMetricsResponse['summary']['jobs'];
+    rateLimitRatio: number;
+    timeoutRatio: number;
+    errors: AiMetricsResponse['errors'];
+  };
+};
+
 describe('Classrooms AI Metrics (e2e)', () => {
   let app: INestApplication<App>;
   let userModel: Model<User>;
@@ -107,17 +117,16 @@ describe('Classrooms AI Metrics (e2e)', () => {
   let classroomBId = '';
   let classroomTaskAId = '';
   let classroomTaskBId = '';
+  let classroomSyntheticId = '';
+  let classroomTaskSyntheticId = '';
   const submissionIds: string[] = [];
+  let databaseVerified = false;
 
-  let previousWorkerEnabled: string | undefined;
-  let previousDebugEnabled: string | undefined;
-  let previousMaxPerMinute: string | undefined;
-  let previousSubmissionCooldownMs: string | undefined;
-
+  const teacherId = new Types.ObjectId();
+  const studentId = new Types.ObjectId();
   const teacherEmail = `teacher.metrics.${Date.now()}@example.com`;
   const studentEmail = `student.metrics.${Date.now()}@example.com`;
-  const teacherPassword = 'TeacherPass123!';
-  const studentPassword = 'StudentPass123!';
+  const syntheticPassword = '12345678';
 
   const login = async (
     agent: ReturnType<typeof request.agent>,
@@ -181,19 +190,27 @@ describe('Classrooms AI Metrics (e2e)', () => {
     return submission.id;
   };
 
-  beforeAll(async () => {
-    ensureMongoUri();
+  const processOwnedJobs = async (
+    batchSize: number,
+  ): Promise<ProcessOnceResponse> => {
+    const foreignJob = await aiFeedbackJobModel.exists({
+      status: {
+        $in: [
+          AiFeedbackJobStatus.Pending,
+          AiFeedbackJobStatus.Failed,
+          AiFeedbackJobStatus.Running,
+        ],
+      },
+      submissionId: { $nin: submissionIds.map((id) => new Types.ObjectId(id)) },
+    });
+    if (foreignJob)
+      throw new Error('AI metrics fixture cannot claim foreign jobs');
+    return aiFeedbackProcessor.processOnce(batchSize);
+  };
 
-    previousWorkerEnabled = process.env.AI_FEEDBACK_WORKER_ENABLED;
-    process.env.AI_FEEDBACK_WORKER_ENABLED = 'false';
-    previousDebugEnabled = process.env.AI_FEEDBACK_DEBUG_ENABLED;
-    process.env.AI_FEEDBACK_DEBUG_ENABLED = 'true';
-    previousMaxPerMinute =
-      process.env.AI_FEEDBACK_MAX_PER_CLASSROOMTASK_PER_MINUTE;
+  beforeAll(async () => {
     process.env.AI_FEEDBACK_MAX_PER_CLASSROOMTASK_PER_MINUTE =
       DEFAULT_MAX_PER_MINUTE;
-    previousSubmissionCooldownMs =
-      process.env.LEARNING_TASK_SUBMISSION_COOLDOWN_MS;
     process.env.LEARNING_TASK_SUBMISSION_COOLDOWN_MS = '0';
 
     const moduleFixture: TestingModule = await Test.createTestingModule({
@@ -228,26 +245,33 @@ describe('Classrooms AI Metrics (e2e)', () => {
     aiFeedbackJobModel = app.get(getModelToken(AiFeedbackJob.name));
     aiFeedbackProcessor = app.get(AiFeedbackProcessor);
 
-    const [teacherHash, studentHash] = await Promise.all([
-      bcrypt.hash(teacherPassword, 10),
-      bcrypt.hash(studentPassword, 10),
-    ]);
+    await assertAuthTestConnection(userModel.db);
+    databaseVerified = true;
+    expect(configService.get('AI_FEEDBACK_PROVIDER')).toBe('stub');
+    expect(configService.get('AI_FEEDBACK_WORKER_ENABLED')).toBe(false);
+    console.info(
+      'AI metrics database gate: standard_test / eduforge_test / local rs0 / root@admin verified',
+    );
+
+    const passwordHash = await bcrypt.hash(syntheticPassword, 10);
 
     await Promise.all([
       userModel.create({
+        _id: teacherId,
         email: teacherEmail,
-        passwordHash: teacherHash,
+        passwordHash,
         roles: ['teacher'],
       }),
       userModel.create({
+        _id: studentId,
         email: studentEmail,
-        passwordHash: studentHash,
+        passwordHash,
         roles: ['student'],
       }),
     ]);
 
-    await login(teacherAgent, teacherEmail, teacherPassword);
-    await login(studentAgent, studentEmail, studentPassword);
+    await login(teacherAgent, teacherEmail, syntheticPassword);
+    await login(studentAgent, studentEmail, syntheticPassword);
     applyMaxPerMinuteFromEnv();
 
     const createdCourse = await teacherAgent
@@ -321,36 +345,15 @@ describe('Classrooms AI Metrics (e2e)', () => {
   });
 
   afterEach(() => {
+    if (!databaseVerified) return;
     process.env.AI_FEEDBACK_MAX_PER_CLASSROOMTASK_PER_MINUTE =
       DEFAULT_MAX_PER_MINUTE;
     applyMaxPerMinuteFromEnv();
     resetGuardsState();
   });
 
-  afterAll(async () => {
-    if (previousWorkerEnabled === undefined) {
-      delete process.env.AI_FEEDBACK_WORKER_ENABLED;
-    } else {
-      process.env.AI_FEEDBACK_WORKER_ENABLED = previousWorkerEnabled;
-    }
-    if (previousDebugEnabled === undefined) {
-      delete process.env.AI_FEEDBACK_DEBUG_ENABLED;
-    } else {
-      process.env.AI_FEEDBACK_DEBUG_ENABLED = previousDebugEnabled;
-    }
-    if (previousMaxPerMinute === undefined) {
-      delete process.env.AI_FEEDBACK_MAX_PER_CLASSROOMTASK_PER_MINUTE;
-    } else {
-      process.env.AI_FEEDBACK_MAX_PER_CLASSROOMTASK_PER_MINUTE =
-        previousMaxPerMinute;
-    }
-    if (previousSubmissionCooldownMs === undefined) {
-      delete process.env.LEARNING_TASK_SUBMISSION_COOLDOWN_MS;
-    } else {
-      process.env.LEARNING_TASK_SUBMISSION_COOLDOWN_MS =
-        previousSubmissionCooldownMs;
-    }
-
+  const cleanupOwnedFixtures = async () => {
+    await assertAuthTestConnection(userModel.db);
     const submissionObjectIds = submissionIds.map(
       (id) => new Types.ObjectId(id),
     );
@@ -363,44 +366,46 @@ describe('Classrooms AI Metrics (e2e)', () => {
       });
       await submissionModel.deleteMany({ _id: { $in: submissionObjectIds } });
     }
-    if (classroomTaskAId || classroomTaskBId) {
-      const classroomTaskIds = [classroomTaskAId, classroomTaskBId]
-        .filter(Boolean)
-        .map((id) => new Types.ObjectId(id));
-      if (classroomTaskIds.length > 0) {
-        await classroomTaskModel.deleteMany({
-          _id: { $in: classroomTaskIds },
-        });
-      }
+    const classroomTaskIds = [
+      classroomTaskAId,
+      classroomTaskBId,
+      classroomTaskSyntheticId,
+    ]
+      .filter(Boolean)
+      .map((id) => new Types.ObjectId(id));
+    if (classroomTaskIds.length > 0) {
+      await classroomTaskModel.deleteMany({ _id: { $in: classroomTaskIds } });
     }
     if (taskId) {
       await taskModel.deleteOne({ _id: new Types.ObjectId(taskId) });
     }
-    if (classroomAId || classroomBId) {
-      const classroomIds = [classroomAId, classroomBId]
-        .filter(Boolean)
-        .map((id) => new Types.ObjectId(id));
-      if (classroomIds.length > 0) {
-        await app
-          .get<Model<Enrollment>>(getModelToken(Enrollment.name))
-          .deleteMany({ classroomId: { $in: classroomIds } });
-        await classroomModel.deleteMany({ _id: { $in: classroomIds } });
-      }
+    const classroomIds = [classroomAId, classroomBId, classroomSyntheticId]
+      .filter(Boolean)
+      .map((id) => new Types.ObjectId(id));
+    if (classroomIds.length > 0) {
+      await app
+        .get<Model<Enrollment>>(getModelToken(Enrollment.name))
+        .deleteMany({ classroomId: { $in: classroomIds } });
+      await classroomModel.deleteMany({ _id: { $in: classroomIds } });
     }
     if (courseId) {
       await courseModel.deleteOne({ _id: new Types.ObjectId(courseId) });
     }
-    const users = await userModel
-      .find({ email: { $in: [teacherEmail, studentEmail] } })
-      .select('_id')
-      .lean()
-      .exec();
-    const userIds = users.map((user) => user._id);
-    if (userIds.length > 0) {
-      await sessionModel.deleteMany({ userId: { $in: userIds } });
-      await userModel.deleteMany({ _id: { $in: userIds } });
+    const userIds = [teacherId, studentId];
+    await sessionModel.deleteMany({ userId: { $in: userIds } });
+    await userModel.deleteMany({ _id: { $in: userIds } });
+  };
+
+  afterAll(async () => {
+    try {
+      if (databaseVerified) await cleanupOwnedFixtures();
+    } finally {
+      try {
+        await app?.close();
+      } finally {
+        authTestEnvironment.restore();
+      }
     }
-    await app.close();
   });
 
   it('returns classroomTask-scoped AI runtime metrics', async () => {
@@ -428,8 +433,7 @@ describe('Classrooms AI Metrics (e2e)', () => {
       .send({ expectedRevision: 0 })
       .expect(200);
 
-    const processBody: ProcessOnceResponse =
-      await aiFeedbackProcessor.processOnce(10);
+    const processBody = await processOwnedJobs(10);
     expect(processBody.processed).toBeGreaterThanOrEqual(2);
 
     const responseA = await teacherAgent
@@ -444,7 +448,8 @@ describe('Classrooms AI Metrics (e2e)', () => {
     expect(bodyA.classroomTaskId).toBe(classroomTaskAId);
     expect(bodyA.classroomTaskId).not.toBe(classroomTaskBId);
     expect(bodyA.summary.jobs.total).toBeGreaterThanOrEqual(1);
-    expect(bodyA.summary.jobs.succeeded).toBeGreaterThanOrEqual(1);
+    expect(bodyA.summary.jobs.succeeded).toBe(1);
+    expect(bodyA.summary.avgAttempts).toBe(1);
     expect(bodyA.feedback.totalItems).toBeGreaterThanOrEqual(1);
     expect(Array.isArray(bodyA.errors)).toBe(true);
 
@@ -496,10 +501,8 @@ describe('Classrooms AI Metrics (e2e)', () => {
       .send({ expectedRevision: 0 })
       .expect(200);
 
-    const firstProcess: ProcessOnceResponse =
-      await aiFeedbackProcessor.processOnce(1);
-    const secondProcess: ProcessOnceResponse =
-      await aiFeedbackProcessor.processOnce(1);
+    const firstProcess = await processOwnedJobs(1);
+    const secondProcess = await processOwnedJobs(1);
     expect(firstProcess.processed).toBeGreaterThanOrEqual(1);
     expect(secondProcess.processed).toBeGreaterThanOrEqual(1);
 
@@ -517,5 +520,125 @@ describe('Classrooms AI Metrics (e2e)', () => {
     expect(rateLimitLocal).toBeDefined();
     expect(rateLimitLocal?.count ?? 0).toBeGreaterThanOrEqual(1);
     expect(metricsBody.feedback.topTags).toEqual([]);
+  });
+
+  it('counts processing attempts, Worker errors and specific Provider errors through HTTP', async () => {
+    const classroom = await teacherAgent
+      .post('/api/classrooms')
+      .send({ courseId, name: 'Metrics synthetic jobs' })
+      .expect(201);
+    const classroomBody = classroom.body as CreatedClassroomResponse;
+    classroomSyntheticId = classroomBody.id;
+    const classroomTask = await teacherAgent
+      .post(`/api/classrooms/${classroomSyntheticId}/tasks`)
+      .send({ taskId })
+      .expect(201);
+    classroomTaskSyntheticId = (
+      classroomTask.body as CreatedClassroomTaskResponse
+    ).id;
+    await studentAgent
+      .post('/api/classrooms/join')
+      .send({ joinCode: classroomBody.joinCode })
+      .expect(201);
+
+    const readMetrics = async () => {
+      const response = await teacherAgent
+        .get(
+          `/api/classrooms/${classroomSyntheticId}/tasks/${classroomTaskSyntheticId}/ai-metrics`,
+        )
+        .query({ window: '24h' })
+        .expect(200);
+      return response.body as AiMetricsResponse;
+    };
+    const insertOwnedJob = async (
+      status: AiFeedbackJobStatus,
+      attempts: number,
+      failure?: {
+        failureCode: AiFeedbackJob['failureCode'];
+        lastError: string | { code: string };
+      },
+    ) => {
+      const submissionId = await createSubmissionForClassroomTask(
+        classroomSyntheticId,
+        classroomTaskSyntheticId,
+        `export const metricsFixture = ${submissionIds.length};`,
+      );
+      const now = new Date();
+      // Direct insert also exercises the legacy structured lastError reader.
+      await aiFeedbackJobModel.collection.insertOne({
+        submissionId: new Types.ObjectId(submissionId),
+        classroomTaskId: new Types.ObjectId(classroomTaskSyntheticId),
+        taskId: new Types.ObjectId(taskId),
+        studentId,
+        status,
+        attempts,
+        maxAttempts: 3,
+        createdAt: now,
+        updatedAt: now,
+        ...failure,
+      });
+    };
+
+    const empty = await readMetrics();
+    expect(empty.summary.jobs.total).toBe(0);
+    expect(empty.summary.avgAttempts).toBe(0);
+    await insertOwnedJob(AiFeedbackJobStatus.Pending, 0);
+    await insertOwnedJob(AiFeedbackJobStatus.Succeeded, 2);
+    const mixed = await readMetrics();
+    expect(mixed.summary.jobs).toMatchObject({
+      total: 2,
+      pending: 1,
+      succeeded: 1,
+    });
+    expect(mixed.summary.avgAttempts).toBe(1);
+
+    const workerCodes = [
+      'AI_CONTEXT_UNAVAILABLE',
+      'AI_CONTEXT_LIMIT_EXCEEDED',
+      'TASK_INELIGIBLE',
+      'LEGACY_JOB_UNSUPPORTED',
+      'INTERNAL_ERROR',
+    ] as const;
+    for (const code of workerCodes) {
+      await insertOwnedJob(AiFeedbackJobStatus.Dead, 1, {
+        failureCode: code,
+        lastError: `AI_FEEDBACK: ${code}`,
+      });
+    }
+    await insertOwnedJob(AiFeedbackJobStatus.Dead, 1, {
+      failureCode: 'RATE_LIMITED',
+      lastError: 'AI_FEEDBACK: RATE_LIMIT_LOCAL',
+    });
+    await insertOwnedJob(AiFeedbackJobStatus.Dead, 1, {
+      failureCode: 'RATE_LIMITED',
+      lastError: '{"code":"RATE_LIMIT_UPSTREAM"}',
+    });
+    await insertOwnedJob(AiFeedbackJobStatus.Dead, 1, {
+      failureCode: 'UPSTREAM_UNAVAILABLE',
+      lastError: { code: 'TIMEOUT' },
+    });
+
+    const metrics = await readMetrics();
+    expect(metrics.summary.jobs).toMatchObject({ total: 10, dead: 8 });
+    const weekly = await teacherAgent
+      .get(`/api/classrooms/${classroomSyntheticId}/weekly-report`)
+      .query({ window: '7d' })
+      .expect(200);
+    const { aiHealth } = weekly.body as WeeklyAiHealthResponse;
+    expect(aiHealth.jobs.total).toBe(10);
+    expect(aiHealth.rateLimitRatio).toBe(0.2);
+    expect(aiHealth.timeoutRatio).toBe(0.1);
+
+    expect(metrics.errors).toEqual([
+      { code: 'AI_CONTEXT_LIMIT_EXCEEDED', count: 1 },
+      { code: 'AI_CONTEXT_UNAVAILABLE', count: 1 },
+      { code: 'INTERNAL_ERROR', count: 1 },
+      { code: 'LEGACY_JOB_UNSUPPORTED', count: 1 },
+      { code: 'RATE_LIMIT_LOCAL', count: 1 },
+      { code: 'RATE_LIMIT_UPSTREAM', count: 1 },
+      { code: 'TASK_INELIGIBLE', count: 1 },
+      { code: 'TIMEOUT', count: 1 },
+    ]);
+    expect(aiHealth.errors).toEqual(metrics.errors);
   });
 });

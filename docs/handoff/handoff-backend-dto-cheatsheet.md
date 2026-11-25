@@ -262,7 +262,7 @@ my-task-detail 另稳定返回 `participationStatus={readOnly,canSubmit,canReque
 顶层为 `{classroomId,classroomTaskId,generatedAt,window,summary,errors,feedback}`：
 
 - `summary={jobs,successRate,avgAttempts,avgLatencyMs}`；`jobs={total,pending,running,succeeded,failed,dead}`，均为数量。
-- `successRate/avgAttempts` 无样本时为 0；`avgLatencyMs: number | null`，**当前实现固定返回 null**，不是 0。
+- `successRate/avgAttempts` 无作业时为 0。`avgAttempts` 为窗口内作业的平均认领处理次数，含首次认领，尚未认领的作业按 0 次计入。`avgLatencyMs: number | null`，**当前实现固定返回 null**，不是 0。
 - `errors` 为 `{code:string,count:number}[]`；只暴露归类后的 code/count，不返回原始 Provider 响应。
 - `feedback={avgItemsPerSubmission,totalItems,topTags}`，为 AI 反馈统计；无反馈时平均数/总量为 0。`topTags` 为最多 5 项 `{tag,count}[]`，省略 includeTags 时正常返回；关闭或无数据时为 `[]`，不是缺省字段。
 - 不返回代码、prompt、API key 或用户凭据。指标算法及内部 latency 限制原因仅见 [Service Card 11](./handoff-backend-service-map.md#service-card-11)。
