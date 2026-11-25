@@ -220,6 +220,7 @@ my-task-detail 另稳定返回 `participationStatus={readOnly,canSubmit,canReque
 - `window?: all | 1h | 24h | 7d`，`IsIn`，默认 all；`1h/24h/7d` 兼容可用。
 - `sort?: studentsCount | submissionRate | overallSubmissionCoverage | aiSuccessRate | pendingJobs | failedJobs`，默认 aiSuccessRate；`order?: asc | desc`，默认 desc。
 - 分页校验，默认 `page=1,limit=20`。
+- 各班的学生数、提交人数、触达率、任务完成度和迟交统计均按该班当前 `role=STUDENT`、`status=ACTIVE` 的 Enrollment 计算。迟交人数按学生去重，迟交次数按实际迟交提交数计算。
 - item 的 `submissionRate` 保持“至少提交过一次的学生覆盖率”：`distinctStudentsSubmitted / studentsCount`，零分母为 0。
 - `overallSubmissionCoverage` 是全部已发布课堂任务整体提交覆盖度：`sum(distinctStudentsSubmitted per classroomTask) / (studentsCount * publishedClassroomTasks)`，零分母为 0；不能与 submissionRate 互换。
 - `ai.aiSuccessRate` 在 `jobsTotal=0` 时为 null，否则为 `succeededJobs / jobsTotal`。上述是公开字段定义；查询与聚合实现仅见 [Service Card 08C](./handoff-backend-service-map.md#service-card-08c)。

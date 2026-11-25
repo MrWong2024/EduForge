@@ -5,6 +5,7 @@ import { PageHeader } from "@/components/blocks/PageHeader";
 import { fetchJson, FetchJsonError } from "@/lib/api/client";
 import { buildErrorDescription, extractRawDetail } from "@/lib/api/error-presenter";
 import { toCourseOverviewResponse } from "@/lib/api/types-teacher";
+import { buildCourseOverviewSummary, formatCourseOverviewRatio } from "@/lib/course-overview";
 import { toTaskCourseLabelDisplayText } from "@/lib/learning-tasks/course-labels";
 import { paths } from "@/lib/routes/paths";
 import { getCommonErrorSummary } from "@/lib/ui/status";
@@ -73,13 +74,6 @@ type CourseOverviewQueryState = {
   limit: number;
 };
 
-type CourseOverviewSummary = {
-  classroomsTotal: number;
-  classroomsInPage: number;
-  averageOverallSubmissionCoverageInPage?: number;
-  averageAiSuccessRateInPage?: number;
-};
-
 const resolveQueryState = (
   query: Awaited<CourseOverviewPageProps["searchParams"]>
 ): CourseOverviewQueryState => ({
@@ -92,58 +86,6 @@ const resolveQueryState = (
     max: COURSE_OVERVIEW_PAGE_SIZE,
   }),
 });
-
-const toPercentNumber = (value: number | null | undefined): number | undefined => {
-  if (typeof value !== "number" || !Number.isFinite(value) || value < 0) {
-    return undefined;
-  }
-  return value <= 1 ? value * 100 : value;
-};
-
-const toPercentText = (value: number | null | undefined): string => {
-  const percent = toPercentNumber(value);
-  if (typeof percent !== "number") {
-    return "—";
-  }
-  const rounded = Math.round(percent * 10) / 10;
-  return Number.isInteger(rounded) ? `${rounded}%` : `${rounded.toFixed(1)}%`;
-};
-
-const buildOverviewSummary = (
-  data: ReturnType<typeof toCourseOverviewResponse>
-): CourseOverviewSummary => {
-  const items = data.items;
-  const classroomsInPage = items.length;
-  let overallSubmissionCoverageSum = 0;
-  let overallSubmissionCoverageCount = 0;
-  let aiSuccessRateSum = 0;
-  let aiSuccessRateCount = 0;
-
-  for (const item of items) {
-    const overallSubmissionCoverage = toPercentNumber(item.overallSubmissionCoverage);
-    if (typeof overallSubmissionCoverage === "number") {
-      overallSubmissionCoverageSum += overallSubmissionCoverage;
-      overallSubmissionCoverageCount += 1;
-    }
-
-    const aiSuccessRate = toPercentNumber(item.aiSuccessRate);
-    if (typeof aiSuccessRate === "number") {
-      aiSuccessRateSum += aiSuccessRate;
-      aiSuccessRateCount += 1;
-    }
-  }
-
-  return {
-    classroomsTotal: typeof data.total === "number" ? data.total : items.length,
-    classroomsInPage,
-    averageOverallSubmissionCoverageInPage:
-      overallSubmissionCoverageCount > 0
-        ? overallSubmissionCoverageSum / overallSubmissionCoverageCount
-        : undefined,
-    averageAiSuccessRateInPage:
-      aiSuccessRateCount > 0 ? aiSuccessRateSum / aiSuccessRateCount : undefined,
-  };
-};
 
 type CourseOverviewViewModel =
   | {
@@ -235,7 +177,7 @@ export default async function CourseOverviewPage({ params, searchParams }: Cours
   }
 
   const course = viewModel.data.course;
-  const summary = buildOverviewSummary(viewModel.data);
+  const summary = buildCourseOverviewSummary(viewModel.data);
   const buildHref = (next: Partial<CourseOverviewQueryState>): string => {
     const merged = { ...viewModel.query, ...next };
     return `${paths.teacher.courseOverview(courseId)}?${buildQueryString({
@@ -368,13 +310,13 @@ export default async function CourseOverviewPage({ params, searchParams }: Cours
           <div className="rounded-md border border-zinc-200 bg-zinc-50 p-3">
             <p className="text-xs text-zinc-500">当前页平均任务完成度</p>
             <p className="mt-1 text-lg font-semibold text-zinc-900">
-              {toPercentText(summary.averageOverallSubmissionCoverageInPage)}
+              {formatCourseOverviewRatio(summary.averageOverallSubmissionCoverageInPage)}
             </p>
           </div>
           <div className="rounded-md border border-zinc-200 bg-zinc-50 p-3">
             <p className="text-xs text-zinc-500">当前页平均 AI 成功率</p>
             <p className="mt-1 text-lg font-semibold text-zinc-900">
-              {toPercentText(summary.averageAiSuccessRateInPage)}
+              {formatCourseOverviewRatio(summary.averageAiSuccessRateInPage)}
             </p>
           </div>
         </div>
@@ -413,9 +355,9 @@ export default async function CourseOverviewPage({ params, searchParams }: Cours
                       <p className="font-medium text-zinc-900">{toDisplayText(item.name, "未命名班级")}</p>
                     </td>
                     <td className="px-4 py-3">{toDisplayText(item.studentsCount)}</td>
-                    <td className="px-4 py-3">{toPercentText(item.overallSubmissionCoverage)}</td>
-                    <td className="px-4 py-3">{toPercentText(item.submissionRate)}</td>
-                    <td className="px-4 py-3">{toPercentText(item.aiSuccessRate)}</td>
+                    <td className="px-4 py-3">{formatCourseOverviewRatio(item.overallSubmissionCoverage)}</td>
+                    <td className="px-4 py-3">{formatCourseOverviewRatio(item.submissionRate)}</td>
+                    <td className="px-4 py-3">{formatCourseOverviewRatio(item.aiSuccessRate)}</td>
                     <td className="px-4 py-3">{toDisplayText(item.aiPendingJobs)}</td>
                     <td className="px-4 py-3">{toDisplayText(item.aiFailedJobs)}</td>
                     <td className="px-4 py-3">

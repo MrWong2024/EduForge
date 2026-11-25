@@ -13,9 +13,9 @@ type EnrollmentStudentRow = {
 type EnrollmentClassroomRow = {
   classroomId: Types.ObjectId;
 };
-type EnrollmentGroupedCountRow = {
-  _id: Types.ObjectId;
-  count: number;
+type EnrollmentClassroomStudentRow = {
+  classroomId: Types.ObjectId;
+  userId: Types.ObjectId;
 };
 export type ActiveStudentEnrollmentRow = {
   userId: Types.ObjectId;
@@ -192,32 +192,29 @@ export class EnrollmentService {
     });
   }
 
-  async countStudentsGroupedByClassroomIds(classroomIds: Types.ObjectId[]) {
-    const result = new Map<string, number>();
+  async listActiveStudentIdsGroupedByClassroomIds(
+    classroomIds: Types.ObjectId[],
+  ) {
+    const result = new Map<string, Set<string>>();
     if (classroomIds.length === 0) {
       return result;
     }
 
     const rows = await this.enrollmentModel
-      .aggregate<EnrollmentGroupedCountRow>([
-        {
-          $match: {
-            classroomId: { $in: classroomIds },
-            role: EnrollmentRole.Student,
-            status: EnrollmentStatus.Active,
-          },
-        },
-        {
-          $group: {
-            _id: '$classroomId',
-            count: { $sum: 1 },
-          },
-        },
-      ])
+      .find({
+        classroomId: { $in: classroomIds },
+        role: EnrollmentRole.Student,
+        status: EnrollmentStatus.Active,
+      })
+      .select({ _id: 0, classroomId: 1, userId: 1 })
+      .lean<EnrollmentClassroomStudentRow[]>()
       .exec();
 
     for (const row of rows) {
-      result.set(row._id.toString(), row.count);
+      const classroomId = row.classroomId.toString();
+      const students = result.get(classroomId) ?? new Set<string>();
+      students.add(row.userId.toString());
+      result.set(classroomId, students);
     }
     return result;
   }

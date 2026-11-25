@@ -166,8 +166,8 @@ export class CourseOverviewService {
       };
     }
 
-    const enrollmentCountMap =
-      await this.enrollmentService.countStudentsGroupedByClassroomIds(
+    const activeStudentIdsByClassroomId =
+      await this.enrollmentService.listActiveStudentIdsGroupedByClassroomIds(
         classroomIds,
       );
 
@@ -251,16 +251,20 @@ export class CourseOverviewService {
       const classroomId = classroomIdByTaskId.get(
         pair._id.classroomTaskId.toString(),
       );
-      if (!classroomId) {
+      const studentId = pair._id.studentId.toString();
+      if (
+        !classroomId ||
+        !activeStudentIdsByClassroomId.get(classroomId)?.has(studentId)
+      ) {
         continue;
       }
       const current = distinctStudentsMap.get(classroomId) ?? new Set<string>();
-      current.add(pair._id.studentId.toString());
+      current.add(studentId);
       distinctStudentsMap.set(classroomId, current);
       if (pair.hasLate > 0) {
         const lateStudents =
           lateStudentsMap.get(classroomId) ?? new Set<string>();
-        lateStudents.add(pair._id.studentId.toString());
+        lateStudents.add(studentId);
         lateStudentsMap.set(classroomId, lateStudents);
       }
       const lateSubmissionsCount =
@@ -313,7 +317,8 @@ export class CourseOverviewService {
 
     const items = classrooms.map((classroom) => {
       const classroomId = classroom._id.toString();
-      const studentsCount = enrollmentCountMap.get(classroomId) ?? 0;
+      const studentsCount =
+        activeStudentIdsByClassroomId.get(classroomId)?.size ?? 0;
       const distinctStudentsSubmitted =
         distinctStudentsMap.get(classroomId)?.size ?? 0;
       const ai = aiByClassroomId.get(classroomId) ?? {

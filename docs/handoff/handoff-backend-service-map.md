@@ -245,7 +245,7 @@ Global SoT 只保留理解跨 Service workflow 必需的稳定不变量，不追
 - Upstream: 课程总览入口。
 - Downstream / Dependencies: `CourseModel`、`ClassroomModel`、`ClassroomTaskModel`、`SubmissionModel`、`EnrollmentService`、`AiFeedbackMetricsAggregator`。
 - Consistency / State / Idempotency: 先按课堂任务关联统计再归并到班级；all 时任务、提交与 Job 不拼时间下界；保留迟交统计。空班级页返回空聚合。
-- Isolation: 校验 course.createdBy 与当前教师一致；仅纳入该教师名下 classrooms；成员数从 EnrollmentService 批量取得，禁止跨班 taskId 兜底。
+- Isolation: 校验 course.createdBy 与当前教师一致；仅纳入该教师名下 classrooms；从 EnrollmentService 一次批量取得当前页各班有效学生名单，同一批名单用于班级人数和提交归并，禁止跨班 taskId 兜底。
 - Side Effects: 只读。
 - Important Performance / Recovery: 先分页 classrooms，再做 page-scope 聚合与页内排序，非全量排序。
 - SoT: `backend/src/modules/courses/services/course-overview.service.ts`；`backend/src/modules/classrooms/enrollments/services/enrollment.service.ts`。
