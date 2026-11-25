@@ -7,6 +7,7 @@ import { ErrorState } from "@/components/blocks/ErrorState";
 import { fetchJson, BrowserFetchJsonError } from "@/lib/api/browser-client";
 import { buildErrorDescription, extractRawDetail } from "@/lib/api/error-presenter";
 import { paths } from "@/lib/routes/paths";
+import { safeGet } from "@/lib/ui/format";
 import { getCommonErrorSummary } from "@/lib/ui/status";
 
 type JoinErrorState = {
@@ -14,6 +15,53 @@ type JoinErrorState = {
   summary: string;
   detail?: string;
 };
+
+const JOIN_REQUEST_FAILURE = "加入班级请求失败，请稍后重试。";
+
+export const normalizeJoinCodeInput = (value: string): string =>
+  value.replace(/[a-z]/g, (letter) => letter.toUpperCase());
+
+export async function submitJoinClassroom(
+  joinCode: string,
+  request: (path: string, init: RequestInit) => Promise<unknown> = fetchJson,
+): Promise<JoinErrorState | null> {
+  const normalizedJoinCode = joinCode.trim();
+  if (!normalizedJoinCode) {
+    return { summary: "请输入班级加入码后再提交。" };
+  }
+
+  try {
+    await request("classrooms/join", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        accept: "application/json",
+      },
+      body: JSON.stringify({ joinCode: normalizedJoinCode }),
+    });
+    return null;
+  } catch (error) {
+    if (!(error instanceof BrowserFetchJsonError)) {
+      return { summary: JOIN_REQUEST_FAILURE };
+    }
+
+    const summaryByStatus: Partial<Record<number, string>> = {
+      400: "加入码无效或班级不存在，请检查后重试。",
+      403: "当前账号无权限加入该班级。",
+      404: "加入码无效或班级不存在，请检查后重试。",
+    };
+    const archived =
+      error.status === 400 &&
+      safeGet<unknown>(error.data, "message", undefined) === "Classroom is archived";
+    return {
+      status: error.status,
+      summary: archived
+        ? "该班级已归档，暂时无法加入。请联系任课教师确认。"
+        : summaryByStatus[error.status] ?? getCommonErrorSummary(error.status, "加入班级"),
+      detail: extractRawDetail(error.data),
+    };
+  }
+}
 
 export function JoinClassroomForm() {
   const router = useRouter();
@@ -23,11 +71,7 @@ export function JoinClassroomForm() {
 
   const handleSubmit: SubmitEventHandler<HTMLFormElement> = async (event) => {
     event.preventDefault();
-    const normalizedJoinCode = joinCode.trim();
-    if (!normalizedJoinCode) {
-      setErrorState({
-        summary: "请输入班级加入码后再提交。",
-      });
+    if (isSubmitting) {
       return;
     }
 
@@ -35,36 +79,16 @@ export function JoinClassroomForm() {
     setErrorState(null);
 
     try {
-      await fetchJson<unknown>("classrooms/join", {
-        method: "POST",
-        headers: {
-          "content-type": "application/json",
-          accept: "application/json",
-        },
-        body: JSON.stringify({ joinCode: normalizedJoinCode }),
-      });
+      const failure = await submitJoinClassroom(joinCode);
+      if (failure) {
+        setErrorState(failure);
+        return;
+      }
 
       router.push(paths.student.dashboard);
       router.refresh();
-    } catch (error) {
-      if (error instanceof BrowserFetchJsonError) {
-        const detail = extractRawDetail(error.data);
-        const summaryByStatus: Partial<Record<number, string>> = {
-          400: "加入码无效或班级不存在，请检查后重试。",
-          403: "当前账号无权限加入该班级。",
-          404: "加入码无效或班级不存在，请检查后重试。",
-        };
-        const summary = summaryByStatus[error.status] ?? getCommonErrorSummary(error.status, "加入班级");
-        setErrorState({
-          status: error.status,
-          summary,
-          detail,
-        });
-      } else {
-        setErrorState({
-          summary: "加入班级请求失败，请稍后重试。",
-        });
-      }
+    } catch {
+      setErrorState({ summary: JOIN_REQUEST_FAILURE });
     } finally {
       setIsSubmitting(false);
     }
@@ -82,8 +106,8 @@ export function JoinClassroomForm() {
             type="text"
             required
             value={joinCode}
-            onChange={(event) => setJoinCode(event.target.value)}
-            className="w-full rounded-md border border-zinc-300 px-3 py-2 text-sm uppercase outline-none focus:border-zinc-500"
+            onChange={(event) => setJoinCode(normalizeJoinCodeInput(event.target.value))}
+            className="w-full rounded-md border border-zinc-300 px-3 py-2 text-sm outline-none focus:border-zinc-500"
             placeholder="例如：ABCD12"
           />
         </div>
