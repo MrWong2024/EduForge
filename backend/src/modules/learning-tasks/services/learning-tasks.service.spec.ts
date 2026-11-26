@@ -19,7 +19,13 @@ import { AiFeedbackStatus } from '../ai-feedback/interfaces/ai-feedback-status.e
 import { AiFeedbackJobStatus } from '../ai-feedback/schemas/ai-feedback-job.schema';
 import { AiFeedbackJobService } from '../ai-feedback/services/ai-feedback-job.service';
 import { CreateSubmissionDto } from '../dto/create-submission.dto';
-import { Feedback, FeedbackSource } from '../schemas/feedback.schema';
+import type { UpdateFeedbackDto } from '../dto/update-feedback.dto';
+import {
+  Feedback,
+  FeedbackSeverity,
+  FeedbackSource,
+  FeedbackType,
+} from '../schemas/feedback.schema';
 import {
   Submission,
   SubmissionSchema,
@@ -149,6 +155,14 @@ const createHarness = (
   const feedbackModel = {
     exists: jest.fn().mockResolvedValue(null),
     findById: jest.fn<ReturnType<typeof makeQuery>, [string]>(),
+    findOneAndUpdate: jest.fn<
+      ReturnType<typeof makeQuery>,
+      [
+        Record<string, unknown>,
+        Record<string, unknown>,
+        Record<string, unknown>,
+      ]
+    >(),
   };
   const classroomTaskModel = {
     modelName: ClassroomTask.name,
@@ -1578,34 +1592,201 @@ describe('Submission classroom association contract (no database)', () => {
   });
 });
 
-describe('Teacher feedback edit error handling (no database)', () => {
+describe('Teacher feedback atomic edit (no database)', () => {
+  const setup = () => {
+    const h = createHarness();
+    const feedback = {
+      _id: objectId(),
+      submissionId: h.ids.submissionId,
+      source: FeedbackSource.Teacher,
+      createdBy: h.ids.teacherId,
+      type: FeedbackType.Style,
+      severity: FeedbackSeverity.Info,
+      message: 'Original feedback',
+      suggestion: 'Original suggestion',
+      tags: ['style'],
+      scoreHint: 50,
+      createdAt: new Date('2026-01-01T00:00:00.000Z'),
+      updatedAt: new Date('2026-01-01T01:00:00.000Z'),
+    };
+    h.feedbackModel.findById.mockReturnValue(makeQuery(feedback));
+    const update = (dto: UpdateFeedbackDto) =>
+      h.service.updateFeedback(
+        h.ids.submissionId.toString(),
+        feedback._id.toString(),
+        dto,
+        h.ids.teacherId.toString(),
+      );
+    return { ...h, feedback, update };
+  };
+
+  it('updates only supplied fields and serializes the record returned by the write', async () => {
+    const h = setup();
+    const dto = {
+      type: FeedbackType.Design,
+      message: '  Updated feedback\n',
+      suggestion: '',
+      tags: [],
+      scoreHint: 0,
+      source: FeedbackSource.AI,
+      createdBy: h.ids.studentId,
+    };
+    const after = {
+      ...h.feedback,
+      type: FeedbackType.Design,
+      severity: FeedbackSeverity.Warn,
+      message: dto.message,
+      suggestion: '',
+      tags: ['other'],
+      scoreHint: 0,
+      updatedAt: new Date('2026-01-01T02:00:00.000Z'),
+    };
+    h.feedbackModel.findOneAndUpdate.mockReturnValue(makeQuery(after));
+
+    await expect(h.update(dto)).resolves.toEqual({
+      id: h.feedback._id.toString(),
+      submissionId: h.ids.submissionId.toString(),
+      createdBy: h.ids.teacherId.toString(),
+      source: FeedbackSource.Teacher,
+      type: FeedbackType.Design,
+      severity: FeedbackSeverity.Warn,
+      message: dto.message,
+      suggestion: '',
+      tags: ['other'],
+      scoreHint: 0,
+      createdAt: h.feedback.createdAt,
+      updatedAt: after.updatedAt,
+    });
+    expect(h.feedbackModel.findById).toHaveBeenCalledTimes(1);
+    expect(h.feedbackModel.findOneAndUpdate).toHaveBeenCalledTimes(1);
+    expect(h.feedbackModel.findOneAndUpdate).toHaveBeenCalledWith(
+      {
+        _id: h.feedback._id,
+        submissionId: h.ids.submissionId,
+        source: FeedbackSource.Teacher,
+        $or: [{ createdBy: h.ids.teacherId }, { createdBy: null }],
+      },
+      {
+        $set: {
+          type: FeedbackType.Design,
+          message: dto.message,
+          suggestion: '',
+          tags: ['other'],
+          scoreHint: 0,
+        },
+      },
+      { returnDocument: 'after', runValidators: true },
+    );
+  });
+
+  it('backfills the author on a same-value patch without writing omitted fields', async () => {
+    const h = setup();
+    h.feedbackModel.findById.mockReturnValue(
+      makeQuery({ ...h.feedback, createdBy: undefined }),
+    );
+    h.feedbackModel.findOneAndUpdate.mockReturnValue(makeQuery(h.feedback));
+
+    await expect(
+      h.update({ message: h.feedback.message }),
+    ).resolves.toMatchObject({
+      createdBy: h.ids.teacherId.toString(),
+      message: h.feedback.message,
+      tags: h.feedback.tags,
+    });
+    const [[filter, update]] = h.feedbackModel.findOneAndUpdate.mock.calls;
+    expect(filter.$or).toEqual([
+      { createdBy: h.ids.teacherId },
+      { createdBy: null },
+    ]);
+    expect(update).toEqual({
+      $set: { message: h.feedback.message, createdBy: h.ids.teacherId },
+    });
+  });
+
+  it.each([
+    {
+      reason: 'the record is gone',
+      latest: null,
+      status: 404,
+      message: 'Feedback not found',
+    },
+    {
+      reason: 'the record belongs to another submission',
+      latest: { submissionId: objectId() },
+      status: 404,
+      message: 'Feedback not found',
+    },
+    {
+      reason: 'the source is no longer teacher feedback',
+      latest: { source: FeedbackSource.AI },
+      status: 403,
+      message: 'Only teacher feedback can be updated',
+    },
+    {
+      reason: 'another teacher became the author',
+      latest: { createdBy: objectId() },
+      status: 403,
+      message: 'Not allowed to update feedback',
+    },
+  ])(
+    'classifies a missed write when $reason',
+    async ({ latest, status, message }) => {
+      const h = setup();
+      h.feedbackModel.findById.mockReturnValueOnce(makeQuery(h.feedback));
+      h.feedbackModel.findById.mockReturnValueOnce(
+        makeQuery(latest && { ...h.feedback, ...latest }),
+      );
+      h.feedbackModel.findOneAndUpdate.mockReturnValue(makeQuery(null));
+
+      await expect(
+        h.update({ message: 'Updated feedback' }),
+      ).rejects.toMatchObject({
+        status,
+        message,
+      });
+      expect(h.feedbackModel.findOneAndUpdate).toHaveBeenCalledTimes(1);
+      expect(h.feedbackModel.findById).toHaveBeenCalledTimes(2);
+    },
+  );
+
   it.each([
     ['another unique index', { code: 11000, keyPattern: { _id: 1 } }],
     ['a missing key pattern', { code: 11000 }],
   ])('propagates a duplicate-key error for %s', async (_label, details) => {
-    const h = createHarness();
-    const feedbackId = objectId().toString();
+    const h = setup();
     const error = new mongo.MongoServerError(details);
-    const save = jest.fn().mockRejectedValue(error);
-    h.feedbackModel.findById.mockReturnValue(
-      makeQuery({
-        submissionId: h.ids.submissionId,
-        source: FeedbackSource.Teacher,
-        createdBy: h.ids.teacherId,
-        save,
+    const write = makeQuery(null);
+    write.exec.mockRejectedValue(error);
+    h.feedbackModel.findOneAndUpdate.mockReturnValue(write);
+
+    await expect(h.update({ message: 'Updated feedback' })).rejects.toBe(error);
+    expect(h.feedbackModel.findOneAndUpdate).toHaveBeenCalledTimes(1);
+  });
+
+  it('reports a conflict only for the exact feedback unique key', async () => {
+    const h = setup();
+    const write = makeQuery(null);
+    write.exec.mockRejectedValue(
+      new mongo.MongoServerError({
+        code: 11000,
+        keyPattern: {
+          submissionId: 1,
+          source: 1,
+          type: 1,
+          severity: 1,
+          message: 1,
+        },
       }),
     );
+    h.feedbackModel.findOneAndUpdate.mockReturnValue(write);
 
     await expect(
-      h.service.updateFeedback(
-        h.ids.submissionId.toString(),
-        feedbackId,
-        { message: 'Updated feedback' },
-        h.ids.teacherId.toString(),
-      ),
-    ).rejects.toBe(error);
-    expect(h.feedbackModel.findById).toHaveBeenCalledWith(feedbackId);
-    expect(save).toHaveBeenCalledTimes(1);
+      h.update({ message: 'Updated feedback' }),
+    ).rejects.toMatchObject({
+      status: 409,
+      message:
+        '该作品已有相同类型、严重程度和正文的教师反馈，请核对后修改本条反馈。',
+    });
   });
 });
 

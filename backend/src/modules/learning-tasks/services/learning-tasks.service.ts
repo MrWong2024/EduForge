@@ -813,30 +813,44 @@ export class LearningTasksService {
       throw new ForbiddenException('Not allowed to update feedback');
     }
 
+    const authorId = feedback.createdBy ?? new Types.ObjectId(userId);
+    const fields: Partial<Feedback> = {};
     if (dto.type !== undefined) {
-      feedback.type = dto.type;
+      fields.type = dto.type;
     }
     if (dto.severity !== undefined) {
-      feedback.severity = dto.severity;
+      fields.severity = dto.severity;
     }
     if (dto.message !== undefined) {
-      feedback.message = dto.message;
+      fields.message = dto.message;
     }
     if (dto.suggestion !== undefined) {
-      feedback.suggestion = dto.suggestion;
+      fields.suggestion = dto.suggestion;
     }
     if (dto.tags !== undefined) {
-      feedback.tags = this.normalizeTeacherFeedbackTags(dto.tags);
+      fields.tags = this.normalizeTeacherFeedbackTags(dto.tags);
     }
     if (dto.scoreHint !== undefined) {
-      feedback.scoreHint = dto.scoreHint;
+      fields.scoreHint = dto.scoreHint;
     }
     if (!feedback.createdBy) {
-      feedback.createdBy = new Types.ObjectId(userId);
+      fields.createdBy = authorId;
     }
 
+    let updated: FeedbackWithMeta | null;
     try {
-      await feedback.save();
+      updated = await this.feedbackModel
+        .findOneAndUpdate(
+          {
+            _id: feedback._id,
+            submissionId: feedback.submissionId,
+            source: FeedbackSource.Teacher,
+            $or: [{ createdBy: authorId }, { createdBy: null }],
+          },
+          { $set: fields },
+          { returnDocument: 'after', runValidators: true },
+        )
+        .exec();
     } catch (error) {
       if (this.isFeedbackUniqueKeyViolation(error)) {
         throw new ConflictException(
@@ -845,7 +859,18 @@ export class LearningTasksService {
       }
       throw error;
     }
-    return this.toFeedbackResponse(feedback);
+
+    if (!updated) {
+      const current = await this.feedbackModel.findById(feedbackId).exec();
+      if (!current || current.submissionId.toString() !== submissionId) {
+        throw new NotFoundException('Feedback not found');
+      }
+      if (current.source !== FeedbackSource.Teacher) {
+        throw new ForbiddenException('Only teacher feedback can be updated');
+      }
+      throw new ForbiddenException('Not allowed to update feedback');
+    }
+    return this.toFeedbackResponse(updated);
   }
 
   async listFeedback(

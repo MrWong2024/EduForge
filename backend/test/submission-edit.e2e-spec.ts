@@ -1,14 +1,19 @@
-import { INestApplication, ValidationPipe } from '@nestjs/common';
+import {
+  assertAuthTestConnection,
+  authTestEnvironment,
+  openAuthTestConnection,
+} from './helpers/auth-test-environment';
+import { INestApplication } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { getModelToken } from '@nestjs/mongoose';
+import { getConnectionToken, getModelToken } from '@nestjs/mongoose';
 import { Test } from '@nestjs/testing';
 import * as bcrypt from 'bcryptjs';
-import cookieParser from 'cookie-parser';
-import { Model, Types } from 'mongoose';
+import { type Connection, Model, mongo, STATES, Types } from 'mongoose';
 import request from 'supertest';
 import { App } from 'supertest/types';
 import { AppModule } from '../src/app.module';
-import { isLocalSingleNodeReplicaSetPrimary } from '../src/config/local-mongo-replica-set';
+import { configureApp } from '../src/app.setup';
+import { CLASSROOM_TASK_TRANSACTION_CONNECTION } from '../src/lib/classroom-task-transaction';
 import { Session } from '../src/modules/auth/schemas/session.schema';
 import { ClassroomTask } from '../src/modules/classrooms/classroom-tasks/schemas/classroom-task.schema';
 import { Enrollment } from '../src/modules/classrooms/enrollments/schemas/enrollment.schema';
@@ -20,6 +25,7 @@ import {
 } from '../src/modules/learning-tasks/ai-feedback/schemas/ai-feedback-job.schema';
 import { AiFeedbackJobService } from '../src/modules/learning-tasks/ai-feedback/services/ai-feedback-job.service';
 import { LearningTasksModule } from '../src/modules/learning-tasks/learning-tasks.module';
+import type { FeedbackResponseDto } from '../src/modules/learning-tasks/dto/feedback-response.dto';
 import {
   Feedback,
   FeedbackSeverity,
@@ -29,10 +35,6 @@ import {
 import { Submission } from '../src/modules/learning-tasks/schemas/submission.schema';
 import { Task } from '../src/modules/learning-tasks/schemas/task.schema';
 import { User } from '../src/modules/users/schemas/user.schema';
-import {
-  assertLocalStandardTestAuthentication,
-  assertLocalStandardTestEnvironment,
-} from './helpers/local-test-database-auth';
 
 jest.setTimeout(90000);
 type Agent = ReturnType<typeof request.agent>;
@@ -52,6 +54,15 @@ type Detail = Resource & {
   content: { language: string; codeText: string; submissionNote: string };
 };
 type Published = Resource & { taskId: string };
+type FeedbackReceipt = Omit<FeedbackResponseDto, 'createdAt' | 'updatedAt'> & {
+  createdAt: string;
+  updatedAt: string;
+};
+type StoredFeedback = Feedback & {
+  _id: Types.ObjectId;
+  createdAt: Date;
+  updatedAt: Date;
+};
 const original = {
   language: 'javascript',
   codeText: '  const A = "😀";\n\tA;\n',
@@ -72,8 +83,42 @@ const reviewPayload = {
   scoreHint: 75,
 };
 
+function feedbackReadCheckpoint() {
+  let resolve!: () => void;
+  const promise = new Promise<void>((done) => {
+    resolve = done;
+  });
+  return { promise, resolve };
+}
+
+async function waitForFeedbackRead(
+  reached: Promise<void>,
+  request: Promise<request.Response>,
+) {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    await Promise.race([
+      reached,
+      request.then(({ status }) => {
+        throw new Error(
+          `Feedback PATCH completed before its read pause: ${status}`,
+        );
+      }),
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(
+          () => reject(new Error('Feedback PATCH read pause timed out')),
+          5000,
+        );
+      }),
+    ]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 describe('B1-2 submission content edits and review admission (HTTP)', () => {
   let app: INestApplication<App>;
+  let connection: Connection | undefined;
   let config: ConfigService;
   let jobService: AiFeedbackJobService;
   let users: Model<User>, sessions: Model<Session>, courses: Model<Course>;
@@ -161,24 +206,17 @@ describe('B1-2 submission content edits and review admission (HTTP)', () => {
   };
 
   beforeAll(async () => {
-    assertLocalStandardTestEnvironment({
-      nodeEnv: process.env.NODE_ENV,
-      purpose: process.env.EDUFORGE_DATABASE_PURPOSE,
-      mongoUri: process.env.MONGO_URI,
-    });
-    const module = await Test.createTestingModule({
-      imports: [AppModule],
-    }).compile();
+    connection = await openAuthTestConnection();
+    const module = await Test.createTestingModule({ imports: [AppModule] })
+      .overrideProvider(getConnectionToken())
+      .useValue(connection)
+      .compile();
     app = module.createNestApplication();
-    app.setGlobalPrefix('api');
-    app.use(cookieParser());
-    app.useGlobalPipes(
-      new ValidationPipe({
-        whitelist: true,
-        transform: true,
-        forbidNonWhitelisted: true,
-      }),
+    const transactionConnection = app.get<Connection>(
+      getConnectionToken(CLASSROOM_TASK_TRANSACTION_CONNECTION),
     );
+    await assertAuthTestConnection(transactionConnection);
+    configureApp(app);
     await app.init();
     users = app.get(getModelToken(User.name));
     sessions = app.get(getModelToken(Session.name));
@@ -200,30 +238,27 @@ describe('B1-2 submission content edits and review admission (HTTP)', () => {
     expect(process.env.EDUFORGE_DATABASE_PURPOSE).toBe('standard_test');
     users.db.set('maxTimeMS', 10000);
     const database = users.db.db;
-    if (!database) throw new Error('Missing connected test database');
-    expect(database.databaseName).toBe('eduforge_test');
-    const hello: unknown = await users.db
-      .getClient()
-      .db('admin')
-      .command(
-        { hello: 1 },
-        { signal: AbortSignal.timeout(5000), readPreference: 'primary' },
-      );
-    const seedAddress = users.db.getClient().options.hosts[0]?.toString() ?? '';
-    if (!isLocalSingleNodeReplicaSetPrimary(hello, seedAddress))
-      throw new Error('SUBMISSION_EDIT_LOCAL_RS0_PRIMARY_REQUIRED');
-    const auth = await database.command(
-      { connectionStatus: 1, showPrivileges: false },
-      { signal: AbortSignal.timeout(5000), readPreference: 'primary' },
-    );
-    assertLocalStandardTestAuthentication({
-      nodeEnv: process.env.NODE_ENV,
-      purpose: process.env.EDUFORGE_DATABASE_PURPOSE,
-      mongoUri: config.get<string>('MONGO_URI'),
-      databaseName: database.databaseName,
-      connectedHost: users.db.host,
-      authInfo: auth.authInfo,
-    });
+    if (!database || users.db !== connection)
+      throw new Error('Missing guarded fixture connection');
+    for (const model of [
+      users,
+      sessions,
+      courses,
+      classrooms,
+      enrollments,
+      instances,
+      tasks,
+      submissions,
+      feedback,
+      jobs,
+    ]) {
+      const name = model.collection.name;
+      const collectionExists = await database
+        .listCollections({ name }, { signal: AbortSignal.timeout(5000) })
+        .hasNext();
+      if (!collectionExists)
+        throw new Error('SUBMISSION_EDIT_REQUIRED_COLLECTION_MISSING: ' + name);
+    }
     expect(config.get('AI_FEEDBACK_PROVIDER')).toBe('stub');
     expect(config.get('MAIL_PROVIDER')).toBe('log');
     expect(config.get('AI_FEEDBACK_WORKER_ENABLED')).not.toBe(true);
@@ -271,7 +306,7 @@ describe('B1-2 submission content edits and review admission (HTTP)', () => {
         .send({ joinCode: classroom.joinCode })
         .expect(201);
     console.info(
-      'B1-2 database gate: standard_test / eduforge_test / loopback rs0 PRIMARY / root@admin verified; namespace=' +
+      'B1-2 database gate: standard_test / default+transaction eduforge_test / loopback rs0 PRIMARY / root@admin verified; namespace=' +
         namespace,
     );
   });
@@ -349,10 +384,17 @@ describe('B1-2 submission content edits and review admission (HTTP)', () => {
         );
       }
     } finally {
-      if (app) {
-        await app.close();
-        if (users) expect(users.db.readyState).toBe(0);
-        console.info('B1-2 app/DB closed');
+      try {
+        if (app) await app.close();
+      } finally {
+        try {
+          if (connection?.readyState === STATES.connected)
+            await connection.close();
+          if (users) expect(users.db.readyState).toBe(STATES.disconnected);
+          console.info('B1-2 app/DB closed');
+        } finally {
+          authTestEnvironment.restore();
+        }
       }
     }
   });
@@ -791,6 +833,203 @@ describe('B1-2 submission content edits and review admission (HTTP)', () => {
     expect((await detail(student, created.id)).reviewStartedAt).toBe(firstPin);
   });
 
+  it('returns each teacher feedback PATCH from its own write with overlapping disjoint edits', async () => {
+    const created = await submit(await publish());
+    const url = submissionUrl(created.id) + '/feedback';
+    const initial = (
+      await giveFeedback(created.id, 0, {
+        ...reviewPayload,
+        message: '旧正文',
+        severity: FeedbackSeverity.Info,
+      }).expect(201)
+    ).body as FeedbackReceipt;
+    const target = `${url}/${initial.id}`;
+    const id = new Types.ObjectId(initial.id);
+    const payloadA = { message: '新正文' };
+    const payloadB = { severity: FeedbackSeverity.Warn };
+    const timeout = { response: 15000, deadline: 20000 };
+
+    // Pause both real reads before either request can reach its write.
+    const reached = Array.from({ length: 2 }, feedbackReadCheckpoint);
+    const released = Array.from({ length: 2 }, feedbackReadCheckpoint);
+    const readSnapshots: Array<Pick<Feedback, 'message' | 'severity'>> = [];
+    const collection: {
+      findOne(
+        filter: mongo.Filter<StoredFeedback>,
+        options?: mongo.FindOptions,
+      ): Promise<StoredFeedback | null>;
+    } = feedback.collection;
+    const findOne = collection.findOne.bind(
+      collection,
+    ) as typeof collection.findOne;
+    const spy = jest
+      .spyOn(collection, 'findOne')
+      .mockImplementation(async (filter, options) => {
+        const record = await findOne(filter, options);
+        const index = readSnapshots.length;
+        if (record && id.equals(record._id) && index < reached.length) {
+          readSnapshots.push({
+            message: record.message,
+            severity: record.severity,
+          });
+          reached[index].resolve();
+          await released[index].promise;
+        }
+        return record;
+      });
+    const pending: Promise<request.Response>[] = [];
+    let receiptA: FeedbackReceipt;
+    let receiptB: FeedbackReceipt;
+    try {
+      const requestA = teacher
+        .patch(target)
+        .timeout(timeout)
+        .send(payloadA)
+        .then((response) => response);
+      pending.push(requestA);
+      await waitForFeedbackRead(reached[0].promise, requestA);
+      const requestB = teacher
+        .patch(target)
+        .timeout(timeout)
+        .send(payloadB)
+        .then((response) => response);
+      pending.push(requestB);
+      await waitForFeedbackRead(reached[1].promise, requestB);
+      expect(readSnapshots).toEqual([
+        { message: '旧正文', severity: FeedbackSeverity.Info },
+        { message: '旧正文', severity: FeedbackSeverity.Info },
+      ]);
+
+      released[0].resolve();
+      const a = await requestA;
+      expect(a.status).toBe(200);
+      receiptA = a.body as FeedbackReceipt;
+      released[1].resolve();
+      const b = await requestB;
+      expect(b.status).toBe(200);
+      receiptB = b.body as FeedbackReceipt;
+    } finally {
+      for (const pause of released) pause.resolve();
+      try {
+        await Promise.allSettled(pending);
+      } finally {
+        spy.mockRestore();
+      }
+    }
+    const { updatedAt: updatedAtA, ...bodyA } = receiptA;
+    const { updatedAt: updatedAtB, ...bodyB } = receiptB;
+    const { updatedAt: initialUpdatedAt, ...initialBody } = initial;
+    expect(initialBody).toEqual({
+      ...reviewPayload,
+      id: id.toHexString(),
+      submissionId: created.id,
+      createdBy: userIds[0].toHexString(),
+      message: '旧正文',
+      severity: FeedbackSeverity.Info,
+      createdAt: initial.createdAt,
+    });
+    expect(bodyA).toEqual({ ...initialBody, ...payloadA });
+    expect(bodyB).toEqual({ ...initialBody, ...payloadA, ...payloadB });
+    for (const time of [
+      initial.createdAt,
+      initialUpdatedAt,
+      updatedAtA,
+      updatedAtB,
+    ])
+      expect(new Date(time).toISOString()).toBe(time);
+
+    const stored = await feedback.findById(id).lean<StoredFeedback>().exec();
+    expect(stored).toMatchObject({
+      ...reviewPayload,
+      _id: id,
+      submissionId: new Types.ObjectId(created.id),
+      createdBy: userIds[0],
+      ...payloadA,
+      ...payloadB,
+      createdAt: new Date(initial.createdAt),
+      updatedAt: new Date(updatedAtB),
+    });
+    const list = (await teacher.get(url).expect(200)).body as FeedbackReceipt[];
+    expect(list).toEqual([receiptB]);
+    console.info('Concurrent teacher feedback PATCH verified', {
+      writeOrder: 'A then B; both reads held before A completed',
+      a: {
+        request: payloadA,
+        message: receiptA.message,
+        severity: receiptA.severity,
+      },
+      b: {
+        request: payloadB,
+        message: receiptB.message,
+        severity: receiptB.severity,
+      },
+      mongo: { message: stored?.message, severity: stored?.severity },
+      list: { message: list[0].message, severity: list[0].severity },
+    });
+  });
+
+  it('keeps teacher feedback PATCH compatible with missing authors, explicit clears and same values', async () => {
+    const created = await submit(await publish());
+    const url = submissionUrl(created.id) + '/feedback';
+    const initial = (await giveFeedback(created.id).expect(201))
+      .body as FeedbackReceipt;
+    const id = new Types.ObjectId(initial.id);
+    const scope = { _id: id, submissionId: new Types.ObjectId(created.id) };
+    const target = `${url}/${initial.id}`;
+    await student.patch(target).send({ suggestion: 'denied' }).expect(403);
+    await teacher.patch(target).send({}).expect(400);
+    await teacher.patch(target).send({ severity: 'invalid' }).expect(400);
+    expect((await teacher.get(url).expect(200)).body).toEqual([initial]);
+
+    const changedAuthor = await feedback.collection.updateOne(
+      { ...scope, createdBy: userIds[0] },
+      { $set: { createdBy: userIds[1] } },
+    );
+    expect(changedAuthor.modifiedCount).toBe(1);
+    await teacher.patch(target).send({ suggestion: 'denied' }).expect(403);
+    expect((await teacher.get(url).expect(200)).body).toEqual([
+      { ...initial, createdBy: userIds[1].toHexString() },
+    ]);
+
+    const update = await feedback.collection.updateOne(
+      { ...scope, createdBy: userIds[1] },
+      { $unset: { createdBy: '' } },
+    );
+    expect(update.modifiedCount).toBe(1);
+
+    const response = await teacher
+      .patch(target)
+      .send({ suggestion: '', tags: [], scoreHint: 0 })
+      .expect(200);
+    const edited = response.body as FeedbackReceipt;
+    const { updatedAt: editedAt, ...editedBody } = edited;
+    const { updatedAt: originalAt, ...initialBody } = initial;
+    expect(editedBody).toEqual({
+      ...initialBody,
+      suggestion: '',
+      tags: ['other'],
+      scoreHint: 0,
+    });
+    expect(new Date(editedAt).getTime()).toBeGreaterThanOrEqual(
+      new Date(originalAt).getTime(),
+    );
+    const sameValue = (
+      await teacher.patch(target).send({ message: edited.message }).expect(200)
+    ).body as FeedbackReceipt;
+    const { updatedAt, ...sameBody } = sameValue;
+    expect(sameBody).toEqual(editedBody);
+    expect(
+      await feedback.findById(id).lean<StoredFeedback>().exec(),
+    ).toMatchObject({
+      _id: id,
+      createdBy: userIds[0],
+      suggestion: '',
+      tags: ['other'],
+      scoreHint: 0,
+      updatedAt: new Date(updatedAt),
+    });
+  });
+
   it('rejects duplicate teacher feedback edits without changing either record', async () => {
     const uniqueKey = {
       submissionId: 1,
@@ -855,6 +1094,24 @@ describe('B1-2 submission content edits and review admission (HTTP)', () => {
     expect(duplicate.body).not.toHaveProperty('code');
     const afterDuplicate = await readPersisted();
     expect(afterDuplicate).toStrictEqual(before);
+
+    const unrelated = new mongo.MongoServerError({
+      code: 11000,
+      errmsg: 'Synthetic unrelated feedback duplicate key',
+      keyPattern: { _id: 1 },
+    });
+    const failNextWrite = jest
+      .spyOn(feedback.collection, 'findOneAndUpdate')
+      .mockRejectedValueOnce(unrelated);
+    try {
+      await teacher
+        .patch(target)
+        .send({ suggestion: 'Should not be persisted.' })
+        .expect(500);
+    } finally {
+      failNextWrite.mockRestore();
+    }
+    expect(await readPersisted()).toStrictEqual(before);
 
     const correctedMessage = 'B19 feedback C.';
     const corrected = await teacher
