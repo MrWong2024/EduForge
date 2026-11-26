@@ -1,5 +1,6 @@
-import { Types } from 'mongoose';
-import { ClassroomStatus } from '../schemas/classroom.schema';
+import { mongo, Types } from 'mongoose';
+import { Course } from '../../courses/schemas/course.schema';
+import { Classroom, ClassroomStatus } from '../schemas/classroom.schema';
 import { ClassroomsService } from './classrooms.service';
 
 const objectId = () => new Types.ObjectId();
@@ -25,10 +26,12 @@ const createService = ({
   classrooms = [],
   courses = [],
   userRoles = ['teacher'],
+  transactionConnection,
 }: {
   classrooms?: Array<Record<string, unknown>>;
   courses?: Array<Record<string, unknown>>;
   userRoles?: string[];
+  transactionConnection?: unknown;
 }) => {
   const classroomFindQuery = makeQuery(classrooms);
   const classroomFindByIdQuery = makeQuery(classrooms[0] ?? null);
@@ -36,11 +39,13 @@ const createService = ({
   const courseFindByIdQuery = makeQuery(courses[0] ?? null);
   const userFindByIdQuery = makeQuery({ roles: userRoles });
   const classroomModel = {
+    modelName: Classroom.name,
     find: jest.fn().mockReturnValue(classroomFindQuery),
     findById: jest.fn().mockReturnValue(classroomFindByIdQuery),
     countDocuments: jest.fn().mockResolvedValue(classrooms.length),
   };
   const courseModel = {
+    modelName: Course.name,
     find: jest.fn().mockReturnValue(courseFindQuery),
     findById: jest.fn().mockReturnValue(courseFindByIdQuery),
   };
@@ -65,6 +70,7 @@ const createService = ({
     {} as never,
     {} as never,
     {} as never,
+    transactionConnection as never,
   );
 
   return {
@@ -76,6 +82,162 @@ const createService = ({
     enrollmentService,
   };
 };
+
+const makeSession = () => ({
+  startTransaction: jest.fn(),
+  inTransaction: jest.fn().mockReturnValue(true),
+  commitTransaction: jest.fn<Promise<void>, []>().mockResolvedValue(undefined),
+  abortTransaction: jest.fn<Promise<void>, []>().mockResolvedValue(undefined),
+  endSession: jest.fn<Promise<void>, []>().mockResolvedValue(undefined),
+});
+
+const setupClassroomCreation = () => {
+  const courseId = objectId();
+  const teacherId = objectId();
+  const classroomId = objectId();
+  const courseQuery = makeQuery({
+    _id: courseId,
+    code: 'CS101',
+    name: 'Intro CS',
+    term: '2026 Spring',
+    status: 'ARCHIVED',
+  });
+  const updateCourse = jest.fn().mockReturnValue(courseQuery);
+  const insertClassroom = jest.fn<
+    Promise<Array<Classroom & { _id: Types.ObjectId }>>,
+    [Classroom[], { session: ReturnType<typeof makeSession> }]
+  >(([classroom]) => Promise.resolve([{ ...classroom, _id: classroomId }]));
+  const sessions = Array.from({ length: 8 }, makeSession);
+  const startSession = jest.fn<Promise<ReturnType<typeof makeSession>>, []>();
+  for (const session of sessions) startSession.mockResolvedValueOnce(session);
+  const models = {
+    [Course.name]: { findOneAndUpdate: updateCourse },
+    [Classroom.name]: { create: insertClassroom },
+  };
+  const { service } = createService({
+    transactionConnection: {
+      startSession,
+      models,
+      model: (name: string) => models[name],
+    },
+  });
+  const create = () =>
+    service.createClassroom(
+      { courseId: courseId.toString(), name: 'Class A' },
+      teacherId.toString(),
+    );
+  return {
+    create,
+    courseId,
+    teacherId,
+    sessions,
+    startSession,
+    updateCourse,
+    insertClassroom,
+  };
+};
+
+function duplicateKey(keyPattern: Record<string, number>) {
+  return new mongo.MongoServerError({
+    code: 11000,
+    errmsg: 'duplicate key',
+    keyPattern,
+  });
+}
+
+describe('ClassroomsService createClassroom transaction', () => {
+  it('aborts a join-code collision before using a fresh session and code', async () => {
+    const {
+      create,
+      courseId,
+      teacherId,
+      sessions,
+      startSession,
+      updateCourse,
+      insertClassroom,
+    } = setupClassroomCreation();
+    const [firstSession, secondSession] = sessions;
+    const collision = duplicateKey({ joinCode: 1 });
+    const random = jest.spyOn(Math, 'random').mockReturnValue(0);
+    insertClassroom.mockImplementationOnce(() => {
+      random.mockReturnValue(0.5);
+      return Promise.reject(collision);
+    });
+    try {
+      await expect(create()).resolves.toMatchObject({
+        courseId: courseId.toString(),
+        course: { id: courseId.toString(), status: 'ARCHIVED' },
+      });
+    } finally {
+      random.mockRestore();
+    }
+
+    expect(startSession).toHaveBeenCalledTimes(2);
+    expect(updateCourse).toHaveBeenNthCalledWith(
+      1,
+      { _id: courseId.toString(), createdBy: teacherId },
+      { $inc: { __v: 1 } },
+      expect.objectContaining({ session: firstSession, timestamps: false }),
+    );
+    expect(updateCourse).toHaveBeenNthCalledWith(
+      2,
+      { _id: courseId.toString(), createdBy: teacherId },
+      { $inc: { __v: 1 } },
+      expect.objectContaining({ session: secondSession, timestamps: false }),
+    );
+    expect(firstSession.abortTransaction).toHaveBeenCalledTimes(1);
+    expect(firstSession.commitTransaction).not.toHaveBeenCalled();
+    expect(firstSession.endSession.mock.invocationCallOrder[0]).toBeLessThan(
+      secondSession.startTransaction.mock.invocationCallOrder[0],
+    );
+    const [[firstClassrooms, firstOptions], [secondClassrooms, secondOptions]] =
+      insertClassroom.mock.calls;
+    expect(firstOptions.session).toBe(firstSession);
+    expect(secondOptions.session).toBe(secondSession);
+    expect(secondClassrooms[0].joinCode).not.toBe(firstClassrooms[0].joinCode);
+    expect(secondSession.commitTransaction).toHaveBeenCalledTimes(1);
+  });
+
+  it('rethrows the insert error after eight join-code collisions', async () => {
+    const { create, sessions, startSession, insertClassroom } =
+      setupClassroomCreation();
+    const collision = duplicateKey({ joinCode: 1 });
+    insertClassroom.mockRejectedValue(collision);
+
+    await expect(create()).rejects.toBe(collision);
+    expect(startSession).toHaveBeenCalledTimes(8);
+    expect(insertClassroom).toHaveBeenCalledTimes(8);
+    for (const session of sessions) {
+      expect(session.abortTransaction).toHaveBeenCalledTimes(1);
+      expect(session.commitTransaction).not.toHaveBeenCalled();
+    }
+  });
+
+  it('does not retry an insert collision on a different unique key', async () => {
+    const { create, startSession, insertClassroom } = setupClassroomCreation();
+    const collision = duplicateKey({ _id: 1 });
+    insertClassroom.mockRejectedValue(collision);
+
+    await expect(create()).rejects.toBe(collision);
+    expect(startSession).toHaveBeenCalledTimes(1);
+    expect(insertClassroom).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not replay an insert when confirming the commit remains inconclusive', async () => {
+    const { create, sessions, startSession, insertClassroom } =
+      setupClassroomCreation();
+    const uncertainCommit = duplicateKey({ joinCode: 1 });
+    uncertainCommit.addErrorLabel(
+      mongo.MongoErrorLabel.UnknownTransactionCommitResult,
+    );
+    sessions[0].commitTransaction.mockRejectedValue(uncertainCommit);
+
+    await expect(create()).rejects.toBe(uncertainCommit);
+    expect(sessions[0].commitTransaction).toHaveBeenCalledTimes(2);
+    expect(startSession).toHaveBeenCalledTimes(1);
+    expect(insertClassroom).toHaveBeenCalledTimes(1);
+  });
+});
 
 describe('ClassroomsService classroom responses', () => {
   it('returns courseId and course summary for classroom detail', async () => {

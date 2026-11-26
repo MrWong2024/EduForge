@@ -110,8 +110,8 @@ Global SoT 只保留理解跨 Service workflow 必需的稳定不变量，不追
 - Service: `backend/src/modules/courses/services/courses.service.ts`
 - Domain / Responsibility: 课程持久化、状态动作及空课程删除。
 - Upstream: 课程管理入口。
-- Downstream / Dependencies: `CourseModel`、`ClassroomModel`、`UserModel`。
-- Consistency / State / Idempotency: `unique(createdBy,code)` 防重复课程；归档与恢复收口到统一状态更新链路，归档内容不可编辑。删除前必须确认 `Classroom.exists({ courseId })===false`。
+- Downstream / Dependencies: `CourseModel`、`ClassroomModel`、`UserModel`，删除复用既有课堂事务连接。
+- Consistency / State / Idempotency: `unique(createdBy,code)` 防重复课程。归档与恢复收口到统一状态更新链路，归档内容不可编辑。删除在事务内先按课程 ID 和归属删除父文档，再用同一 session 检查全部班级引用，有引用即回滚。删除与 [Card 04](#service-card-04) 的建班协调写竞争同一 Course，遵循 [Card 07](#service-card-07) 的事务期限与重试规则。
 - Isolation: Service 内 `ensureTeacher` 校验及 `createdBy` 归属过滤；课程分类只是分类坐标，不是额外实体绑定。
 - Side Effects: 写入、更新或删除课程记录。
 - Important Performance / Recovery: 分页查询与计数并行；重复键转为受控业务拒绝，不绕过唯一约束。
@@ -123,13 +123,15 @@ Global SoT 只保留理解跨 Service workflow 必需的稳定不变量，不追
 - Service: `backend/src/modules/classrooms/services/classrooms.service.ts`
 - Domain / Responsibility: 班级管理、加入/移除成员，以及看板、周报、过程性评价、导出与 AI 分析的委托入口。
 - Upstream: 班级与班级统计入口。
-- Downstream / Dependencies: `ClassroomModel`、`ClassroomTaskModel`、`EnrollmentModel`、`CourseModel`、`UserModel`、`EnrollmentService`；教师/学生看板、周报、过程性评价、导出、AI Learning Analytics 专用 Service。
+- Downstream / Dependencies: `ClassroomModel`、`ClassroomTaskModel`、`EnrollmentModel`、`CourseModel`、`UserModel`、`EnrollmentService`，以及教师/学生看板、周报、过程性评价、导出、AI Learning Analytics 专用 Service。建班复用既有课堂事务连接。
 - Consistency / State / Idempotency:
-  - joinCode 分配最多尝试 8 次；归档状态下禁止普通信息编辑，状态恢复走专用状态处理。
+  - 建班在同一事务内按课程 ID 和作者递增 Course 的现有版本键，关闭该操作的时间戳更新，再写入 Classroom。与 [Card 03](#service-card-03) 的课程删除竞争同一文档，遵循 [Card 07](#service-card-07) 的事务规则。
+  - joinCode 分配最多尝试 8 次。仅本轮 Classroom 插入明确命中 joinCode 唯一键且事务已结束时才换码开启新事务。提交结果不明时只按共用规则确认原事务。
+  - 归档状态下禁止普通信息编辑，状态恢复走专用状态处理。
   - 只有无 ClassroomTask 且无任何 Enrollment 历史（含 REMOVED）的班级可删除；旧成员数组残留不参与删除判断。
   - join/remove 仅通过 Enrollment upsert/update 写 ACTIVE/REMOVED，保留成员历史，不维护或回填 Classroom 成员数组。
 - Isolation: Service 负责管理/加入角色及 `teacherId` 归属边界；成员判定委托 EnrollmentService。向统计 Service 委托前保留角色校验，下游按课堂任务隔离。
-- Side Effects: 班级管理写 Classroom；join/remove 只写 Enrollment，不再因成员镜像更新 Classroom.updatedAt；统计委托本身不写业务数据。
+- Side Effects: 班级管理写 Classroom，建班事务同时写 Course 版本键。join/remove 只写 Enrollment，不再因成员镜像更新 Classroom.updatedAt；统计委托本身不写业务数据。
 - Important Performance / Recovery: 班级列表按页批量查 Course，成员列表按页批量查 User，避免 N+1；关联课程缺失不阻断班级读取。
 - SoT: `backend/src/modules/classrooms/services/classrooms.service.ts`；`backend/src/modules/classrooms/enrollments/services/enrollment.service.ts`；`backend/src/modules/classrooms/enrollments/schemas/enrollment.schema.ts`。
 - Boundary / Non-responsibility: 不在入口 Service 重算专用报表；公开生命周期与成员读取行为见 [API Map](./handoff-backend-api-map.md#classrooms)，公开数据见 [DTO Cheatsheet](./handoff-backend-dto-cheatsheet.md#classrooms)。

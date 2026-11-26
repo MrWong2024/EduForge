@@ -5,8 +5,13 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { InjectModel } from '@nestjs/mongoose';
+import { InjectConnection, InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
+import type { Connection } from 'mongoose';
+import {
+  CLASSROOM_TASK_TRANSACTION_CONNECTION,
+  runClassroomTaskTransaction,
+} from '../../../lib/classroom-task-transaction';
 import { Course, CourseStatus } from '../schemas/course.schema';
 import { Classroom } from '../../classrooms/schemas/classroom.schema';
 import { CreateCourseDto } from '../dto/create-course.dto';
@@ -34,6 +39,8 @@ export class CoursesService {
     @InjectModel(Classroom.name)
     private readonly classroomModel: Model<Classroom>,
     @InjectModel(User.name) private readonly userModel: Model<User>,
+    @InjectConnection(CLASSROOM_TASK_TRANSACTION_CONNECTION)
+    private readonly classroomTaskTransactionConnection: Connection,
   ) {}
 
   async createCourse(dto: CreateCourseDto, userId: string) {
@@ -148,10 +155,38 @@ export class CoursesService {
 
   async deleteCourse(id: string, userId: string) {
     await this.ensureTeacher(userId);
-    const course = await this.findOwnedCourseOrThrow(id, userId);
-    await this.assertCourseCanBeDeleted(course._id);
-    await this.courseModel.deleteOne({ _id: course._id }).exec();
-    return { ok: true };
+    return runClassroomTaskTransaction(
+      this.classroomTaskTransactionConnection,
+      async (transaction) => {
+        const { session } = transaction;
+        // Coordinate with the Course write held by classroom creation.
+        const { deletedCount } = await transaction
+          .model(this.courseModel)
+          .deleteOne(
+            { _id: id, createdBy: new Types.ObjectId(userId) },
+            { session, maxTimeMS: transaction.remainingMs() },
+          )
+          .exec();
+        if (deletedCount === 0) {
+          throw new NotFoundException('Course not found');
+        }
+
+        const classroom = await transaction
+          .model(this.classroomModel)
+          .exists({ courseId: new Types.ObjectId(id) })
+          .session(session)
+          .setOptions(transaction.readOptions())
+          .exec();
+        if (classroom) {
+          throw new ConflictException({
+            statusCode: 409,
+            code: CoursesService.COURSE_NOT_EMPTY_CODE,
+            message: CoursesService.COURSE_NOT_EMPTY_MESSAGE,
+          });
+        }
+        return { ok: true };
+      },
+    );
   }
 
   private async ensureTeacher(userId: string) {
@@ -196,16 +231,5 @@ export class CoursesService {
       throw new NotFoundException('Course not found');
     }
     return course;
-  }
-
-  private async assertCourseCanBeDeleted(courseId: Types.ObjectId) {
-    const classroom = await this.classroomModel.exists({ courseId }).exec();
-    if (classroom) {
-      throw new ConflictException({
-        statusCode: 409,
-        code: CoursesService.COURSE_NOT_EMPTY_CODE,
-        message: CoursesService.COURSE_NOT_EMPTY_MESSAGE,
-      });
-    }
   }
 }

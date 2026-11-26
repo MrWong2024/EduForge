@@ -5,8 +5,13 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { InjectModel } from '@nestjs/mongoose';
-import { Model, Types } from 'mongoose';
+import { InjectConnection, InjectModel } from '@nestjs/mongoose';
+import { Model, Types, mongo, type Connection } from 'mongoose';
+import { isDeepStrictEqual } from 'node:util';
+import {
+  CLASSROOM_TASK_TRANSACTION_CONNECTION,
+  runClassroomTaskTransaction,
+} from '../../../lib/classroom-task-transaction';
 import { Classroom, ClassroomStatus } from '../schemas/classroom.schema';
 import { CreateClassroomDto } from '../dto/create-classroom.dto';
 import { UpdateClassroomDto } from '../dto/update-classroom.dto';
@@ -78,6 +83,12 @@ type ListClassroomStudentsResponse = {
   limit: number;
 };
 
+class ClassroomJoinCodeCollision extends Error {
+  constructor(error: mongo.MongoServerError) {
+    super('Classroom join code collision', { cause: error });
+  }
+}
+
 @Injectable()
 export class ClassroomsService {
   private static readonly JOIN_CODE_ATTEMPTS = 8;
@@ -105,18 +116,13 @@ export class ClassroomsService {
     private readonly processAssessmentService: ProcessAssessmentService,
     private readonly classroomExportSnapshotService: ClassroomExportSnapshotService,
     private readonly aiLearningAnalyticsService: AiLearningAnalyticsService,
+    @InjectConnection(CLASSROOM_TASK_TRANSACTION_CONNECTION)
+    private readonly classroomTaskTransactionConnection: Connection,
   ) {}
 
   async createClassroom(dto: CreateClassroomDto, userId: string) {
     await this.ensureTeacher(userId);
-    const course = await this.courseModel
-      .findOne({ _id: dto.courseId, createdBy: new Types.ObjectId(userId) })
-      .select('_id code name term courseLabel status')
-      .lean<CourseSummaryLean>()
-      .exec();
-    if (!course) {
-      throw new NotFoundException('Course not found');
-    }
+    const teacherId = new Types.ObjectId(userId);
 
     for (
       let attempt = 0;
@@ -125,24 +131,62 @@ export class ClassroomsService {
     ) {
       const joinCode = this.generateJoinCode();
       try {
-        const classroom = await this.classroomModel.create({
-          courseId: new Types.ObjectId(dto.courseId),
-          name: dto.name,
-          teacherId: new Types.ObjectId(userId),
-          joinCode,
-          status: ClassroomStatus.Active,
-        });
+        const { classroom, course } = await runClassroomTaskTransaction(
+          this.classroomTaskTransactionConnection,
+          async (transaction) => {
+            const { session } = transaction;
+            // Coordinate with course deletion without changing business timestamps.
+            const course = await transaction
+              .model(this.courseModel)
+              .findOneAndUpdate(
+                { _id: dto.courseId, createdBy: teacherId },
+                { $inc: { __v: 1 } },
+                {
+                  session,
+                  maxTimeMS: transaction.remainingMs(),
+                  timestamps: false,
+                  returnDocument: 'after',
+                },
+              )
+              .select('_id code name term courseLabel status')
+              .lean<CourseSummaryLean>()
+              .exec();
+            if (!course) {
+              throw new NotFoundException('Course not found');
+            }
+
+            const classroomModel = transaction.model(this.classroomModel);
+            transaction.remainingMs();
+            try {
+              const [classroom] = await classroomModel.create(
+                [
+                  {
+                    courseId: course._id,
+                    name: dto.name,
+                    teacherId,
+                    joinCode,
+                    status: ClassroomStatus.Active,
+                  },
+                ],
+                { session },
+              );
+              return { classroom, course };
+            } catch (error) {
+              if (this.isJoinCodeCollision(error)) {
+                throw new ClassroomJoinCodeCollision(error);
+              }
+              throw error;
+            }
+          },
+        );
         return this.toClassroomResponse(
           classroom,
           this.toCourseSummary(course),
         );
       } catch (error) {
-        const mongoError = error as { code?: number };
-        if (
-          mongoError.code !== 11000 ||
-          attempt === ClassroomsService.JOIN_CODE_ATTEMPTS - 1
-        ) {
-          throw error;
+        if (!(error instanceof ClassroomJoinCodeCollision)) throw error;
+        if (attempt === ClassroomsService.JOIN_CODE_ATTEMPTS - 1) {
+          throw error.cause;
         }
       }
     }
@@ -509,6 +553,18 @@ export class ClassroomsService {
       code += ClassroomsService.JOIN_CODE_CHARS[index];
     }
     return code;
+  }
+
+  private isJoinCodeCollision(error: unknown): error is mongo.MongoServerError {
+    return (
+      error instanceof mongo.MongoServerError &&
+      error.code === 11000 &&
+      !error.hasErrorLabel(
+        mongo.MongoErrorLabel.UnknownTransactionCommitResult,
+      ) &&
+      error.writeConcernError === undefined &&
+      isDeepStrictEqual(error.keyPattern, { joinCode: 1 })
+    );
   }
 
   private async toClassroomResponse(

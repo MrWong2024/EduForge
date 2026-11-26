@@ -74,6 +74,7 @@ Notes:
 - 总览是当前课程口径下的提交覆盖与 AI 运行概览，支持无时间下界的历史读取；各窗口、兼容提交率与整体覆盖率的区别见 [DTO 课程总览](./handoff-backend-dto-cheatsheet.md#课程总览)，聚合见 [Service Card 08C](./handoff-backend-service-map.md#service-card-08c)。
 - 课程状态为 `ACTIVE | ARCHIVED`；PATCH 支持归档与恢复。已归档课程可通过状态更新恢复，但不允许普通内容编辑。
 - 仅无任何班级引用的空课程可删除；非空时返回 `409 Conflict`，`code=COURSE_NOT_EMPTY`，message=`该课程下已有班级记录，不能删除，只能归档`。
+- 有权限的教师同时删除空课程并为该课程建班时，若删除先提交，DELETE 返回 `200 { ok: true }`，POST 返回 `404`。若建班先提交，POST 返回 `201`，DELETE 返回上述 `409 COURSE_NOT_EMPTY`。
 - 兼容保留 POST archive，收口到相同归档行为；引用检查与内部一致性见 [Service Card 03](./handoff-backend-service-map.md#service-card-03)。课程分类是对齐坐标，不构成外键或额外权限边界；字段与返回数据见 [DTO Courses](./handoff-backend-dto-cheatsheet.md#courses)。
 
 ## Classrooms
