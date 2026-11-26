@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { EmptyState } from "@/components/blocks/EmptyState";
 import { TeacherFeedbackEditForm } from "@/components/teacher/TeacherFeedbackEditForm";
 import {
@@ -61,6 +61,8 @@ export function TeacherFeedbackHistory({
   const [editingFeedbackId, setEditingFeedbackId] = useState<string | null>(
     null,
   );
+  const saveInFlight = useRef(false);
+  const [isSaving, setIsSaving] = useState(false);
   const [confirmedFeedback, setConfirmedFeedback] = useState(
     () => new Map<string, TeacherFeedbackItem>(),
   );
@@ -69,6 +71,26 @@ export function TeacherFeedbackHistory({
       item.id ? resolveTeacherFeedbackItem(item, confirmedFeedback.get(item.id)) : item,
     ),
   );
+
+  const changeEditingFeedback = (id: string | null) => {
+    if (!saveInFlight.current) {
+      setEditingFeedbackId(id);
+    }
+  };
+
+  const startSaving = () => {
+    if (saveInFlight.current) {
+      return false;
+    }
+    saveInFlight.current = true;
+    setIsSaving(true);
+    return true;
+  };
+
+  const finishSaving = () => {
+    saveInFlight.current = false;
+    setIsSaving(false);
+  };
 
   const handleSaved = (feedback: TeacherFeedbackItem) => {
     const id = feedback.id;
@@ -137,12 +159,13 @@ export function TeacherFeedbackHistory({
                       {canEdit ? (
                         <button
                           type="button"
+                          disabled={isSaving}
                           onClick={() =>
-                            setEditingFeedbackId(
+                            changeEditingFeedback(
                               isEditing ? null : (item.id ?? null),
                             )
                           }
-                          className="rounded-md border border-zinc-300 px-3 py-1 text-xs font-medium text-zinc-700 hover:bg-white"
+                          className="rounded-md border border-zinc-300 px-3 py-1 text-xs font-medium text-zinc-700 enabled:hover:bg-white disabled:cursor-not-allowed disabled:text-zinc-400"
                         >
                           {isEditing ? "收起修改" : "修改"}
                         </button>
@@ -155,7 +178,10 @@ export function TeacherFeedbackHistory({
                       <TeacherFeedbackEditForm
                         feedback={item}
                         submissionId={submissionId}
-                        onCancel={() => setEditingFeedbackId(null)}
+                        isSaving={isSaving}
+                        onCancel={() => changeEditingFeedback(null)}
+                        onSaveStart={startSaving}
+                        onSaveFinish={finishSaving}
                         onSaved={handleSaved}
                       />
                     ) : null}

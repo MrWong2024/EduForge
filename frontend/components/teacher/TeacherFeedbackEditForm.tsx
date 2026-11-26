@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { ErrorState } from "@/components/blocks/ErrorState";
 import { BrowserFetchJsonError, fetchJson } from "@/lib/api/browser-client";
@@ -33,7 +33,10 @@ import { safeGet } from "@/lib/ui/format";
 type TeacherFeedbackEditFormProps = {
   feedback: TeacherFeedbackItem;
   submissionId: string;
+  isSaving: boolean;
   onCancel: () => void;
+  onSaveStart: () => boolean;
+  onSaveFinish: () => void;
   onSaved: (feedback: TeacherFeedbackItem) => void;
 };
 
@@ -71,7 +74,10 @@ const getUpdateFeedbackErrorSummary = (status: number, data: unknown): string =>
 export function TeacherFeedbackEditForm({
   feedback,
   submissionId,
+  isSaving,
   onCancel,
+  onSaveStart,
+  onSaveFinish,
   onSaved,
 }: TeacherFeedbackEditFormProps) {
   const router = useRouter();
@@ -86,8 +92,6 @@ export function TeacherFeedbackEditForm({
   const [selectedTags, setSelectedTags] = useState<FeedbackTagValue[]>(
     initialValues.tags,
   );
-  const [isSubmitting, setIsSubmitting] = useState(false);
-  const submitting = useRef(false);
   const [validationError, setValidationError] = useState<string | null>(null);
   const [errorState, setErrorState] = useState<FeedbackErrorState | null>(null);
 
@@ -110,7 +114,7 @@ export function TeacherFeedbackEditForm({
 
   const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    if (submitting.current) {
+    if (isSaving) {
       return;
     }
     setValidationError(null);
@@ -129,8 +133,9 @@ export function TeacherFeedbackEditForm({
       return;
     }
 
-    submitting.current = true;
-    setIsSubmitting(true);
+    if (!onSaveStart()) {
+      return;
+    }
     try {
       const response = await fetchJson<unknown>(
         `learning-tasks/submissions/${encodeURIComponent(
@@ -169,8 +174,7 @@ export function TeacherFeedbackEditForm({
         });
       }
     } finally {
-      submitting.current = false;
-      setIsSubmitting(false);
+      onSaveFinish();
     }
   };
 
@@ -183,6 +187,7 @@ export function TeacherFeedbackEditForm({
         <label className="block text-sm">
           <span className="mb-1 block text-zinc-700">类型</span>
           <select
+            disabled={isSaving}
             value={type}
             onChange={(event) =>
               setType(event.target.value as FeedbackTypeValue)
@@ -200,6 +205,7 @@ export function TeacherFeedbackEditForm({
         <label className="block text-sm">
           <span className="mb-1 block text-zinc-700">严重级别</span>
           <select
+            disabled={isSaving}
             value={severity}
             onChange={(event) =>
               setSeverity(event.target.value as FeedbackSeverityValue)
@@ -218,6 +224,7 @@ export function TeacherFeedbackEditForm({
       <label className="mt-3 block text-sm">
         <span className="mb-1 block text-zinc-700">反馈内容</span>
         <textarea
+          disabled={isSaving}
           value={message}
           onChange={(event) => setMessage(event.target.value)}
           rows={4}
@@ -229,6 +236,7 @@ export function TeacherFeedbackEditForm({
       <label className="mt-3 block text-sm">
         <span className="mb-1 block text-zinc-700">建议（可选）</span>
         <textarea
+          disabled={isSaving}
           value={suggestion}
           onChange={(event) => setSuggestion(event.target.value)}
           rows={3}
@@ -237,7 +245,7 @@ export function TeacherFeedbackEditForm({
         />
       </label>
 
-      <fieldset className="mt-3 block text-sm">
+      <fieldset disabled={isSaving} className="mt-3 block text-sm">
         <legend className="mb-2 block text-zinc-700">
           标签（可选，多选；不选将归为“其他”）
         </legend>
@@ -267,15 +275,15 @@ export function TeacherFeedbackEditForm({
       <div className="mt-4 flex flex-wrap items-center gap-3">
         <button
           type="submit"
-          disabled={isSubmitting || !hasChanges}
+          disabled={isSaving || !hasChanges}
           className="rounded-md bg-zinc-900 px-4 py-2 text-sm font-medium text-white disabled:cursor-not-allowed disabled:bg-zinc-400"
         >
-          {isSubmitting ? "保存中..." : "保存修改"}
+          {isSaving ? "保存中..." : "保存修改"}
         </button>
         <button
           type="button"
           onClick={onCancel}
-          disabled={isSubmitting}
+          disabled={isSaving}
           className="rounded-md border border-zinc-300 px-4 py-2 text-sm font-medium text-zinc-700 disabled:cursor-not-allowed disabled:text-zinc-400"
         >
           取消
