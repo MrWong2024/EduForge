@@ -21,6 +21,8 @@ import {
 type SubmissionFormProps = {
   classroomId: string;
   classroomTaskId: string;
+  canSubmit: boolean;
+  submitDisabledMessage: string;
 };
 
 type SubmissionErrorState = {
@@ -31,6 +33,8 @@ type SubmissionErrorState = {
 export function SubmissionForm({
   classroomId,
   classroomTaskId,
+  canSubmit,
+  submitDisabledMessage,
 }: SubmissionFormProps) {
   const router = useRouter();
   const [language, setLanguage] = useState("auto");
@@ -48,11 +52,14 @@ export function SubmissionForm({
     href: string;
   } | null>(null);
   const noteLength = countCodePoints(submissionNote);
+  const hasDraft =
+    language !== "auto" || codeText !== "" || submissionNote !== "";
 
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
 
     if (
+      !canSubmit ||
       !canCreateTextSubmission(
         inFlight.current,
         resultUncertain,
@@ -132,12 +139,38 @@ export function SubmissionForm({
     }
   };
 
+  if (
+    !canSubmit &&
+    !hasDraft &&
+    !isSubmitting &&
+    !savedSubmission &&
+    !resultUncertain
+  ) {
+    return (
+      <section className="rounded-lg border border-zinc-200 bg-zinc-50 p-4 text-sm">
+        <h2 className="text-sm font-semibold text-zinc-900">提交作业</h2>
+        <p className="mt-2 text-zinc-600">{submitDisabledMessage}</p>
+        <button
+          type="button"
+          disabled
+          title={submitDisabledMessage}
+          className="mt-3 rounded-md bg-zinc-300 px-4 py-2 text-sm font-medium text-zinc-600 disabled:cursor-not-allowed"
+        >
+          提交作业
+        </button>
+      </section>
+    );
+  }
+
   return (
     <section className="rounded-lg border border-zinc-200 bg-white p-4 text-zinc-900">
       <h2 className="text-sm font-semibold text-zinc-900">提交作业</h2>
+      {canSubmit ? null : (
+        <p className="mt-2 text-sm text-zinc-600">{submitDisabledMessage}</p>
+      )}
       <form onSubmit={handleSubmit} className="mt-3">
         <fieldset
-          disabled={isSubmitting || savedSubmission !== null}
+          disabled={canSubmit && (isSubmitting || savedSubmission !== null)}
           className="min-w-0 space-y-3"
         >
           <div className="space-y-1">
@@ -150,6 +183,7 @@ export function SubmissionForm({
             <select
               id="submission-language"
               required
+              disabled={!canSubmit}
               value={language}
               onChange={(event) => setLanguage(event.target.value)}
               className="w-full rounded-md border border-zinc-300 px-3 py-2 text-sm outline-none focus:border-zinc-500"
@@ -174,7 +208,8 @@ export function SubmissionForm({
             </label>
             <textarea
               id="submission-code-text"
-              required
+              required={canSubmit}
+              readOnly={!canSubmit}
               value={codeText}
               onChange={(event) => setCodeText(event.target.value)}
               rows={16}
@@ -210,6 +245,7 @@ export function SubmissionForm({
             </label>
             <textarea
               id="submission-note"
+              readOnly={!canSubmit}
               value={submissionNote}
               onChange={(event) => setSubmissionNote(event.target.value)}
               rows={16}
@@ -234,6 +270,7 @@ export function SubmissionForm({
           <button
             type="submit"
             disabled={
+              !canSubmit ||
               !canCreateTextSubmission(
                 isSubmitting,
                 resultUncertain,

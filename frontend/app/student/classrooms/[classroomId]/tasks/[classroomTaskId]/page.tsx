@@ -568,25 +568,17 @@ export default async function StudentTaskDetailPage({
         helpHref={paths.student.aiHelp}
       />
 
-      {canSubmit ? (
-        <SubmissionForm
-          classroomId={classroomId}
-          classroomTaskId={classroomTaskId}
-        />
-      ) : (
-        <section className="rounded-lg border border-zinc-200 bg-zinc-50 p-4 text-sm">
-          <h2 className="text-sm font-semibold text-zinc-900">提交作业</h2>
-          <p className="mt-2 text-zinc-600">{submitDisabledMessage}</p>
-          <button
-            type="button"
-            disabled
-            title={submitDisabledMessage}
-            className="mt-3 rounded-md bg-zinc-300 px-4 py-2 text-sm font-medium text-zinc-600 disabled:cursor-not-allowed"
-          >
-            提交作业
-          </button>
-        </section>
-      )}
+      <SubmissionForm
+        key={JSON.stringify([
+          viewModel.data.me.studentId,
+          classroomId,
+          classroomTaskId,
+        ])}
+        classroomId={classroomId}
+        classroomTaskId={classroomTaskId}
+        canSubmit={canSubmit}
+        submitDisabledMessage={submitDisabledMessage}
+      />
 
       <h2
         id="submission-history"
