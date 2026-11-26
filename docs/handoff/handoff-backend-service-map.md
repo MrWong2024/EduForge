@@ -123,15 +123,16 @@ Global SoT 只保留理解跨 Service workflow 必需的稳定不变量，不追
 - Service: `backend/src/modules/classrooms/services/classrooms.service.ts`
 - Domain / Responsibility: 班级管理、加入/移除成员，以及看板、周报、过程性评价、导出与 AI 分析的委托入口。
 - Upstream: 班级与班级统计入口。
-- Downstream / Dependencies: `ClassroomModel`、`ClassroomTaskModel`、`EnrollmentModel`、`CourseModel`、`UserModel`、`EnrollmentService`，以及教师/学生看板、周报、过程性评价、导出、AI Learning Analytics 专用 Service。建班复用既有课堂事务连接。
+- Downstream / Dependencies: `ClassroomModel`、`ClassroomTaskModel`、`EnrollmentModel`、`CourseModel`、`UserModel`、`EnrollmentService`，以及教师/学生看板、周报、过程性评价、导出、AI Learning Analytics 专用 Service。建班、删班与入班复用既有课堂事务连接。
 - Consistency / State / Idempotency:
   - 建班在同一事务内按课程 ID 和作者递增 Course 的现有版本键，关闭该操作的时间戳更新，再写入 Classroom。与 [Card 03](#service-card-03) 的课程删除竞争同一文档，遵循 [Card 07](#service-card-07) 的事务规则。
   - joinCode 分配最多尝试 8 次。仅本轮 Classroom 插入明确命中 joinCode 唯一键且事务已结束时才换码开启新事务。提交结果不明时只按共用规则确认原事务。
   - 归档状态下禁止普通信息编辑，状态恢复走专用状态处理。
-  - 只有无 ClassroomTask 且无任何 Enrollment 历史（含 REMOVED）的班级可删除；旧成员数组残留不参与删除判断。
-  - join/remove 仅通过 Enrollment upsert/update 写 ACTIVE/REMOVED，保留成员历史，不维护或回填 Classroom 成员数组。
+  - 删班在事务内按班级 ID 和归属删除 Classroom，再用同一 session 顺序检查 Enrollment 和 ClassroomTask 引用。任一关联都会回滚删除，包括 REMOVED 历史和任意任务状态。旧成员数组不参与判断。
+  - 入班先将加入码绑定到班级 ID，在事务内以同一 ID 与加入码校验可入班状态，递增 Classroom 版本键并关闭该次时间戳更新，再由 EnrollmentService 在同一 session upsert。重复加入收敛到一条 ACTIVE 关系，保留首次 `joinedAt`，恢复已移除成员时清空 `removedAt`。
+  - 删班、入班与 [Card 07](#service-card-07) 的发布协调写竞争同一 Classroom。入班与移出均不维护或回填旧成员数组。
 - Isolation: Service 负责管理/加入角色及 `teacherId` 归属边界；成员判定委托 EnrollmentService。向统计 Service 委托前保留角色校验，下游按课堂任务隔离。
-- Side Effects: 班级管理写 Classroom，建班事务同时写 Course 版本键。join/remove 只写 Enrollment，不再因成员镜像更新 Classroom.updatedAt；统计委托本身不写业务数据。
+- Side Effects: 班级管理写 Classroom，建班事务同时写 Course 版本键。入班写 Classroom 版本键和 Enrollment，移出只写 Enrollment。入班保留原 `Classroom.updatedAt`，统计委托本身不写业务数据。
 - Important Performance / Recovery: 班级列表按页批量查 Course，成员列表按页批量查 User，避免 N+1；关联课程缺失不阻断班级读取。
 - SoT: `backend/src/modules/classrooms/services/classrooms.service.ts`；`backend/src/modules/classrooms/enrollments/services/enrollment.service.ts`；`backend/src/modules/classrooms/enrollments/schemas/enrollment.schema.ts`。
 - Boundary / Non-responsibility: 不在入口 Service 重算专用报表；公开生命周期与成员读取行为见 [API Map](./handoff-backend-api-map.md#classrooms)，公开数据见 [DTO Cheatsheet](./handoff-backend-dto-cheatsheet.md#classrooms)。
@@ -172,17 +173,17 @@ Global SoT 只保留理解跨 Service workflow 必需的稳定不变量，不追
 - Upstream: 课堂任务管理、实例提交及实例聚合入口。
 - Downstream / Dependencies: `ClassroomModel`、`ClassroomTaskModel`、`TaskModel`、`SubmissionModel`、`AiFeedbackJobModel`、`FeedbackModel`、`UserModel`、`EnrollmentService`、`AiFeedbackJobService`、`LearningTasksService`、`AiContextReaderService`。
 - Consistency / State / Idempotency:
-  - 发布前检查班级 owner/运行态与模板发布态/可见性，从同一次 Task 读取形成候选 taskSnapshot（深复制引用），通过 AiContextReaderService 验证候选引用后保存同一份快照；`unique(classroomId,taskId)` 防重复发布，重复键转为受控拒绝。旧实例缺省状态按 ACTIVE 兼容。
+  - 发布前检查班级 owner/运行态与模板发布态/可见性。从同一次 Task 读取形成候选 taskSnapshot（深复制引用），在事务外通过 AiContextReaderService 校验一次，事务重试沿用该快照。事务内重验所属班级可发布，递增 Classroom 版本键并关闭该次时间戳更新，再用同一 session 插入 ClassroomTask。与 [Card 04](#service-card-04) 的删班和入班竞争同一 Classroom。仅实例插入明确命中 `unique(classroomId,taskId)` 时按重复发布拒绝。旧实例缺省状态按 ACTIVE 兼容。
   - 新课堂发布写路径同时检查来源难度符合 [Task 写入值域](./handoff-backend-dto-cheatsheet.md#task-template-dto--response-family) 或缺失；非法值返回 400，提示先修改模板难度，不生成非法新快照。校验不放入兼供历史读取的 snapshotTask helper，已有快照及旧实例只读 fallback 保持可读，不因显示归一化回写。
   - 实例配置更新与生命周期分开处理。状态写入以班级、实例和读取到的源状态作条件，未命中则复读主节点判断当前状态。撤回与首次提交的父实例协调写竞争同一文档；状态更新不以关联作品为前置条件，保留的 RECALLED 实例仍占用同班模板唯一键。公开转换与竞争结果见 [API Map](./handoff-backend-api-map.md#classroom-tasksclassrooms-子资源)。
   - 教师删除事务先按班级和实例主键写入父文档删除，再在同一 session 顺序检查 `Submission` 和 `AiFeedbackJob` 的直接引用。有任一引用即抛出业务冲突，回滚父文档删除。删除与 [Card 08](#service-card-08) 的提交协调写竞争同一 ClassroomTask。并发终态及公开错误见 [API Map](./handoff-backend-api-map.md#classroom-tasksclassrooms-子资源)。
-  - 删除和学生提交共用本节的事务执行规则。每次事务调用从单调时钟计算 10 秒截止，事务体、明确可重试的尝试、提交和确认共用剩余量。到期不发起业务写入、新尝试或提交确认。在途提交明确成功时按成功处理。事务专池关闭驱动自适应重试，首次提交可能只带 `RetryableWriteError` 标签。应用按公开错误类型、标签和明确排除项判断，结果未知时只允许在预算内确认一次同一 session 的同一事务，不重跑事务体。
-  - 两条事务使用同一数据库内的专用连接池。驱动公开会话 API 的收尾使用该池的有限连接、排队及 socket 阶段，并等待已发操作、必要的 abort 和 session 释放。10 秒约束应用发起操作的时间，完成收尾和 HTTP 返回可能晚于该截止。
+  - 复用课堂事务执行器的写入路径共用本节规则。每次事务调用从单调时钟计算 10 秒截止，事务体、明确可重试的尝试、提交和确认共用剩余量。到期不发起业务写入、新尝试或提交确认。在途提交明确成功时按成功处理。事务专池关闭驱动自适应重试，首次提交可能只带 `RetryableWriteError` 标签。应用按公开错误类型、标签和明确排除项判断，结果未知时只允许在预算内确认一次同一 session 的同一事务，不重跑事务体。
+  - 事务使用同一数据库内的专用连接池。驱动公开会话 API 的收尾使用该池的有限连接、排队及 socket 阶段，并等待已发操作、必要的 abort 和 session 释放。10 秒约束应用发起操作的时间，完成收尾和 HTTP 返回可能晚于该截止。
   - 发布返回、列表/详情、my-task-detail、教师/学生看板、提交详情标题及 AI 分析标题统一优先读实例快照；旧实例仅当前模板只读 fallback，不回填；课堂成员响应由 publicTaskContent 明确投影，避免展开内部引用。模板库/候选仍读当前 Task，资产状态保持当前值。
   - 发布候选查询同时应用当前教师可见性、模板发布状态及已发布 taskId 排除；难度按保存值精确匹配，与既有课程分类、知识模块和 onlyMine 条件取交集，同一最终 filter 用于分页前查询与 countDocuments。未显式指定课程分类时仍按班级课程分类优先排序，不对已发布课堂任务列表增加难度过滤；参数校验见 [DTO Cheatsheet](./handoff-backend-dto-cheatsheet.md#发布候选模板)。
   - 提交入口检查学生身份、Enrollment ACTIVE、课堂归属及班级/实例 ACTIVE，再通过 `createSubmissionForClassroomTask` 绑定实例主键；真正写 Submission 前，由 [Card 08](#service-card-08) 再次 enforce 运行态及截止/迟交边界。
 - Isolation: 查询与统计按 `classroomTaskId`，成员全集来自 Enrollment ACTIVE；不得按底层 taskId 跨班兜底。模板状态不决定既有实例学生运行态。
-- Side Effects: 写 ClassroomTask；学生提交委托 LearningTasksService 写 Submission，不创建 AI Job 或自动固定评阅版本。
+- Side Effects: 写 ClassroomTask，发布事务同时写 Classroom 版本键。学生提交委托 LearningTasksService 写 Submission，不创建 AI Job 或自动固定评阅版本。
 - Important Performance / Recovery: 列表用 aggregate 构造页数据与计数；模板发布者批量查 User。提交列表按页批量关联公开用户信息、job 状态及全来源 feedbackCount，缺失计数补零，避免 N+1。
 - SoT: `backend/src/modules/classrooms/classroom-tasks/services/classroom-tasks.service.ts`；`backend/src/modules/classrooms/classroom-tasks/schemas/classroom-task.schema.ts`；`backend/src/modules/classrooms/enrollments/services/enrollment.service.ts`。
 - Boundary / Non-responsibility: 完整状态转换/拒绝与 participationStatus 的公开合同见 [API Map](./handoff-backend-api-map.md#classroom-tasksclassrooms-子资源)，输入与返回数据见 [DTO Cheatsheet](./handoff-backend-dto-cheatsheet.md#classroom-tasksclassrooms-子资源)。公开 settings 仅白名单投影 allowLate，不展开 Mongo Mixed 残留；participation 投影结合快照可用性，不计算截止、迟交或冷却；动作写入口仍是最终校验。

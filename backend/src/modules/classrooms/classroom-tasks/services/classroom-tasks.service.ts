@@ -5,9 +5,10 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
+import { isDeepStrictEqual } from 'node:util';
 import { AiContextReaderService } from '../../../learning-tasks/ai-context/ai-context-reader.service';
 import { InjectConnection, InjectModel } from '@nestjs/mongoose';
-import { Model, PipelineStage, Types } from 'mongoose';
+import { Model, mongo, PipelineStage, Types } from 'mongoose';
 import type { Connection } from 'mongoose';
 import {
   CLASSROOM_TASK_TRANSACTION_CONNECTION,
@@ -301,8 +302,9 @@ export class ClassroomTasksService {
     userId: string,
   ) {
     await this.ensureTeacher(userId);
+    const teacherId = new Types.ObjectId(userId);
     const classroom = await this.classroomModel
-      .findOne({ _id: classroomId, teacherId: new Types.ObjectId(userId) })
+      .findOne({ _id: classroomId, teacherId })
       .lean()
       .exec();
     if (!classroom) {
@@ -339,24 +341,88 @@ export class ClassroomTasksService {
       allowLate: dto.settings?.allowLate ?? true,
     };
 
-    try {
-      const classroomTask = await this.classroomTaskModel.create({
-        classroomId: new Types.ObjectId(classroomId),
-        taskId: new Types.ObjectId(dto.taskId),
-        taskSnapshot: candidateSnapshot,
-        publishedAt,
-        dueAt,
-        settings,
-        createdBy: new Types.ObjectId(userId),
-      });
-      return this.toClassroomTaskResponse(classroomTask, task);
-    } catch (error) {
-      const mongoError = error as { code?: number };
-      if (mongoError.code === 11000) {
-        throw new BadRequestException('Task already published to classroom');
-      }
-      throw error;
+    const classroomObjectId = new Types.ObjectId(classroomId);
+    const taskObjectId = new Types.ObjectId(dto.taskId);
+    const classroomTask = await runClassroomTaskTransaction(
+      this.classroomTaskTransactionConnection,
+      async (transaction) => {
+        const { session } = transaction;
+        // Hold a write on the same parent that classroom deletion removes.
+        const currentClassroom = await transaction
+          .model(this.classroomModel)
+          .findOneAndUpdate(
+            { _id: classroomObjectId, teacherId },
+            { $inc: { __v: 1 } },
+            {
+              session,
+              maxTimeMS: transaction.remainingMs(),
+              timestamps: false,
+              returnDocument: 'after',
+            },
+          )
+          .select('status')
+          .lean<Pick<Classroom, 'status'>>()
+          .exec();
+        if (!currentClassroom) {
+          throw new NotFoundException('Classroom not found');
+        }
+        if (currentClassroom.status === ClassroomStatus.Archived) {
+          throw new BadRequestException(
+            'Archived classrooms cannot publish tasks',
+          );
+        }
+
+        const classroomTaskModel = transaction.model(this.classroomTaskModel);
+        transaction.remainingMs();
+        try {
+          const [instance] = await classroomTaskModel.create(
+            [
+              {
+                classroomId: classroomObjectId,
+                taskId: taskObjectId,
+                taskSnapshot: candidateSnapshot,
+                publishedAt,
+                dueAt,
+                settings,
+                createdBy: teacherId,
+              },
+            ],
+            { session },
+          );
+          return instance;
+        } catch (error) {
+          if (this.isClassroomTaskPublishCollision(error)) {
+            throw new BadRequestException(
+              'Task already published to classroom',
+            );
+          }
+          throw error;
+        }
+      },
+    );
+    return this.toClassroomTaskResponse(classroomTask, task);
+  }
+
+  private isClassroomTaskPublishCollision(error: unknown): boolean {
+    if (
+      !(error instanceof mongo.MongoServerError) ||
+      error.code !== 11000 ||
+      error.hasErrorLabel(
+        mongo.MongoErrorLabel.UnknownTransactionCommitResult,
+      ) ||
+      error.writeConcernError !== undefined
+    ) {
+      return false;
     }
+    const pattern: unknown = error.keyPattern;
+    return (
+      pattern !== null &&
+      typeof pattern === 'object' &&
+      isDeepStrictEqual(Object.entries(pattern), [
+        ['classroomId', 1],
+        ['taskId', 1],
+      ])
+    );
   }
 
   async deleteClassroomTask(

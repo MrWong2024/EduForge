@@ -116,6 +116,15 @@ Notes:
 - Snapshot 是 teacher owner 的体积受控教学数据快照导出，超量数据附带截断提示；Query、meta/notes、公开投影与敏感省略见 [DTO Snapshot](./handoff-backend-dto-cheatsheet.md#classroom-export-snapshot)，组合与截断策略见 [Service Card 08H](./handoff-backend-service-map.md#service-card-08h)。
 - 班级状态为 `ACTIVE | ARCHIVED`，PATCH 支持归档/恢复，保留 POST archive。仅无 ClassroomTask 且无 Enrollment 记录（包含 REMOVED 历史）的空班级可删除；只有旧 studentIds 残留不再阻止删除。非空时返回 `409 Conflict`，`code=CLASSROOM_NOT_EMPTY`，message=`该班级已有成员或任务记录，不能删除，只能归档`。
 
+对同一初始为空的 ACTIVE 班级，合法删班请求分别与入班或发布请求并发时，结果如下。删班成功不级联删除关联资源。
+
+| 并发 POST | 先提交方 | DELETE | POST | 终态 |
+| --- | --- | --- | --- | --- |
+| `/api/classrooms/join` | 删班 | `200 { ok: true }` | `404 Classroom not found` | 班级已删除，无成员关系或课堂任务 |
+| `/api/classrooms/join` | 入班 | `409 CLASSROOM_NOT_EMPTY` | `201` | 班级保留，新增一条 ACTIVE 成员关系 |
+| `/api/classrooms/:id/tasks` | 删班 | `200 { ok: true }` | `404 Classroom not found` | 班级已删除，无成员关系或课堂任务 |
+| `/api/classrooms/:id/tasks` | 发布 | `409 CLASSROOM_NOT_EMPTY` | `201` | 班级保留，新增一个课堂任务实例 |
+
 ## Classroom Tasks（Classrooms 子资源）
 
 | Method | Path                                                                      | 用途                                                              |

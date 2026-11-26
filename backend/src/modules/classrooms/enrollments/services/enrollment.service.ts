@@ -1,6 +1,7 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
+import type { ClassroomTaskTransaction } from '../../../../lib/classroom-task-transaction';
 import {
   Enrollment,
   EnrollmentRole,
@@ -36,35 +37,33 @@ export class EnrollmentService {
 
   // Idempotent semantics:
   // repeated enroll calls always converge to ACTIVE with removedAt cleared.
-  async enrollStudent(classroomId: string, userId: string) {
-    const classroomObjectId = this.parseObjectId(classroomId, 'classroomId');
+  async enrollStudent(
+    classroomId: Types.ObjectId,
+    userId: string,
+    transaction: ClassroomTaskTransaction,
+  ) {
     const userObjectId = this.parseObjectId(userId, 'userId');
-    const now = new Date();
-
-    try {
-      await this.enrollmentModel
-        .updateOne(
-          { classroomId: classroomObjectId, userId: userObjectId },
-          {
-            $setOnInsert: {
-              role: EnrollmentRole.Student,
-              joinedAt: now,
-            },
-            $set: {
-              status: EnrollmentStatus.Active,
-              removedAt: null,
-            },
+    await transaction
+      .model(this.enrollmentModel)
+      .updateOne(
+        { classroomId, userId: userObjectId },
+        {
+          $setOnInsert: {
+            role: EnrollmentRole.Student,
+            joinedAt: new Date(),
           },
-          { upsert: true },
-        )
-        .exec();
-    } catch (error) {
-      const mongoError = error as { code?: number };
-      // Concurrent upsert races should converge to the same ACTIVE enrollment.
-      if (mongoError.code !== 11000) {
-        throw error;
-      }
-    }
+          $set: {
+            status: EnrollmentStatus.Active,
+            removedAt: null,
+          },
+        },
+        {
+          session: transaction.session,
+          maxTimeMS: transaction.remainingMs(),
+          upsert: true,
+        },
+      )
+      .exec();
   }
 
   // Soft-delete and idempotent semantics:

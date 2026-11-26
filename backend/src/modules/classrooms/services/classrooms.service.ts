@@ -219,10 +219,45 @@ export class ClassroomsService {
 
   async deleteClassroom(id: string, userId: string) {
     await this.ensureTeacher(userId);
-    const classroom = await this.findOwnedClassroomOrThrow(id, userId);
-    await this.assertClassroomCanBeDeleted(classroom._id);
-    await this.classroomModel.deleteOne({ _id: classroom._id }).exec();
-    return { ok: true };
+    return runClassroomTaskTransaction(
+      this.classroomTaskTransactionConnection,
+      async (transaction) => {
+        const { session } = transaction;
+        // Compete with the parent writes made by joining and publishing.
+        const { deletedCount } = await transaction
+          .model(this.classroomModel)
+          .deleteOne(
+            { _id: id, teacherId: new Types.ObjectId(userId) },
+            { session, maxTimeMS: transaction.remainingMs() },
+          )
+          .exec();
+        if (deletedCount === 0) {
+          throw new NotFoundException('Classroom not found');
+        }
+
+        const scope = { classroomId: new Types.ObjectId(id) };
+        const enrollment = await transaction
+          .model(this.enrollmentModel)
+          .exists(scope)
+          .session(session)
+          .setOptions(transaction.readOptions())
+          .exec();
+        const classroomTask = await transaction
+          .model(this.classroomTaskModel)
+          .exists(scope)
+          .session(session)
+          .setOptions(transaction.readOptions())
+          .exec();
+        if (enrollment || classroomTask) {
+          throw new ConflictException({
+            statusCode: 409,
+            code: ClassroomsService.CLASSROOM_NOT_EMPTY_CODE,
+            message: ClassroomsService.CLASSROOM_NOT_EMPTY_MESSAGE,
+          });
+        }
+        return { ok: true };
+      },
+    );
   }
 
   async listClassrooms(query: QueryClassroomDto, userId: string) {
@@ -477,20 +512,54 @@ export class ClassroomsService {
 
   async joinClassroom(dto: JoinClassroomDto, userId: string) {
     await this.ensureStudent(userId);
-    const classroom = await this.classroomModel
+    const target = await this.classroomModel
       .findOne({ joinCode: dto.joinCode })
-      .lean<ClassroomWithMeta>()
+      .select('_id')
+      .lean<WithId>()
       .exec();
-    if (!classroom) {
+    if (!target) {
       throw new NotFoundException('Classroom not found');
     }
-    if (classroom.status === ClassroomStatus.Archived) {
-      throw new BadRequestException('Classroom is archived');
-    }
 
-    await this.enrollmentService.enrollStudent(
-      classroom._id.toString(),
-      userId,
+    // Keep retries bound to this classroom even if its join code is reused.
+    const scope = { _id: target._id, joinCode: dto.joinCode };
+    const classroom = await runClassroomTaskTransaction(
+      this.classroomTaskTransactionConnection,
+      async (transaction) => {
+        const { session } = transaction;
+        const classroomModel = transaction.model(this.classroomModel);
+        const joinedClassroom = await classroomModel
+          .findOneAndUpdate(
+            { ...scope, status: { $ne: ClassroomStatus.Archived } },
+            { $inc: { __v: 1 } },
+            {
+              session,
+              maxTimeMS: transaction.remainingMs(),
+              timestamps: false,
+              returnDocument: 'after',
+            },
+          )
+          .lean<ClassroomWithMeta>()
+          .exec();
+        if (!joinedClassroom) {
+          const archivedClassroom = await classroomModel
+            .exists({ ...scope, status: ClassroomStatus.Archived })
+            .session(session)
+            .setOptions(transaction.readOptions())
+            .exec();
+          if (archivedClassroom) {
+            throw new BadRequestException('Classroom is archived');
+          }
+          throw new NotFoundException('Classroom not found');
+        }
+
+        await this.enrollmentService.enrollStudent(
+          joinedClassroom._id,
+          userId,
+          transaction,
+        );
+        return joinedClassroom;
+      },
     );
     return this.toClassroomResponse(classroom);
   }
@@ -696,21 +765,5 @@ export class ClassroomsService {
       throw new NotFoundException('Classroom not found');
     }
     return classroom;
-  }
-
-  private async assertClassroomCanBeDeleted(classroomId: Types.ObjectId) {
-    const [classroomTask, enrollment] = await Promise.all([
-      this.classroomTaskModel.exists({ classroomId }).exec(),
-      this.enrollmentModel.exists({ classroomId }).exec(),
-    ]);
-    const hasClassroomTask = !!classroomTask;
-    const hasEnrollment = !!enrollment;
-    if (hasClassroomTask || hasEnrollment) {
-      throw new ConflictException({
-        statusCode: 409,
-        code: ClassroomsService.CLASSROOM_NOT_EMPTY_CODE,
-        message: ClassroomsService.CLASSROOM_NOT_EMPTY_MESSAGE,
-      });
-    }
   }
 }

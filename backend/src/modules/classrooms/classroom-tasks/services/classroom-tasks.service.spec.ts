@@ -1,5 +1,5 @@
 import { AiContextReaderService } from '../../../learning-tasks/ai-context/ai-context-reader.service';
-import { Model, Types } from 'mongoose';
+import { Model, mongo, Types } from 'mongoose';
 import type { Connection } from 'mongoose';
 import { Classroom, ClassroomStatus } from '../../schemas/classroom.schema';
 import { Course } from '../../../courses/schemas/course.schema';
@@ -148,12 +148,15 @@ const createHarness = (options: HarnessOptions = {}) => {
     description: 'Task Description',
     knowledgeModule: 'module',
     status: options.taskStatus ?? TaskStatus.Published,
+    createdBy: studentId,
   };
 
   const classroomModel = {
+    modelName: Classroom.name,
     exists: jest.fn(() => makeExecOnly({ _id: classroomId })),
     findById: jest.fn(() => makeQuery(classroom)),
     findOne: jest.fn(() => makeQuery({ ...classroom, teacherId: studentId })),
+    findOneAndUpdate: jest.fn(() => makeQuery(classroom)),
   };
   const courseModel = {};
   const transactionSession = {
@@ -165,6 +168,9 @@ const createHarness = (options: HarnessOptions = {}) => {
   };
   const classroomTaskModel = {
     modelName: ClassroomTask.name,
+    create: jest.fn((instances: ClassroomTask[]) =>
+      Promise.resolve([{ ...instances[0], _id: classroomTaskId }]),
+    ),
     deleteOne: jest.fn(() => makeExecOnly({ deletedCount: 1 })),
     findOne: jest.fn(() => makeQuery(classroomTask)),
     findOneAndUpdate: jest.fn(() => makeQuery(classroomTask)),
@@ -219,6 +225,7 @@ const createHarness = (options: HarnessOptions = {}) => {
     exists: jest.fn(),
   };
   const transactionModels: Record<string, unknown> = {
+    [Classroom.name]: classroomModel,
     [ClassroomTask.name]: classroomTaskModel,
     [Submission.name]: submissionModel,
     [AiFeedbackJob.name]: aiFeedbackJobModel,
@@ -272,6 +279,7 @@ const createHarness = (options: HarnessOptions = {}) => {
       id: objectId().toString(),
     }),
   };
+  const aiContextReader = new AiContextReaderService();
 
   const service = new ClassroomTasksService(
     classroomModel as unknown as Model<Classroom>,
@@ -285,7 +293,7 @@ const createHarness = (options: HarnessOptions = {}) => {
     enrollmentService as unknown as EnrollmentService,
     aiFeedbackJobService as unknown as AiFeedbackJobService,
     learningTasksService as unknown as LearningTasksService,
-    new AiContextReaderService(),
+    aiContextReader,
     transactionConnection as unknown as Connection,
   );
 
@@ -299,6 +307,8 @@ const createHarness = (options: HarnessOptions = {}) => {
     transactionSession,
     transactionConnection,
     taskModel,
+    task,
+    aiContextReader,
     feedbackModel,
     learningTasksService,
     ids: { studentId, classroomId, classroomTaskId, taskId },
@@ -454,6 +464,103 @@ describe('ClassroomTasksService deleteClassroomTask', () => {
       ).not.toHaveBeenCalled();
     },
   );
+});
+
+describe('ClassroomTasksService createClassroomTask transaction', () => {
+  function setup() {
+    const harness = createHarness({ userRoles: ['teacher'] });
+    const publish = () =>
+      harness.service.createClassroomTask(
+        harness.ids.classroomId.toString(),
+        { taskId: harness.ids.taskId.toString() },
+        harness.ids.studentId.toString(),
+      );
+    return { ...harness, publish };
+  }
+
+  it('reuses the same validated snapshot if the transaction body retries', async () => {
+    const harness = setup();
+    const reference = { archivePath: 'task.zip', entryPaths: ['chapter.md'] };
+    const description = harness.task.description;
+    const template = { ...harness.task, aiContextRefs: [reference] };
+    harness.taskModel.findById.mockReturnValueOnce(makeQuery(template));
+    const validate = jest
+      .spyOn(harness.aiContextReader, 'validateForSave')
+      .mockResolvedValue(undefined);
+    const writeConflict = new mongo.MongoServerError({ code: 112 });
+    writeConflict.addErrorLabel(
+      mongo.MongoErrorLabel.TransientTransactionError,
+    );
+    const losingWrite = makeQuery(null);
+    losingWrite.exec.mockImplementationOnce(() => {
+      template.description = 'Changed template description';
+      reference.entryPaths[0] = 'replaced.md';
+      return Promise.reject(writeConflict);
+    });
+    harness.classroomModel.findOneAndUpdate.mockReturnValueOnce(losingWrite);
+
+    await expect(harness.publish()).resolves.toMatchObject({
+      taskSnapshotAvailable: true,
+      task: { description },
+    });
+    expect(harness.taskModel.findById).toHaveBeenCalledTimes(1);
+    expect(validate).toHaveBeenCalledTimes(1);
+    expect(validate).toHaveBeenCalledWith([
+      { archivePath: 'task.zip', entryPaths: ['chapter.md'] },
+    ]);
+    expect(harness.classroomModel.findOneAndUpdate).toHaveBeenCalledTimes(2);
+    expect(harness.transactionSession.abortTransaction).toHaveBeenCalledTimes(
+      1,
+    );
+    expect(harness.transactionSession.commitTransaction).toHaveBeenCalledTimes(
+      1,
+    );
+    expect(harness.classroomTaskModel.create).toHaveBeenCalledTimes(1);
+    expect(harness.classroomTaskModel.create).toHaveBeenCalledWith(
+      [
+        expect.objectContaining({
+          taskSnapshot: expect.objectContaining({
+            description,
+            aiContextRefs: [
+              { archivePath: 'task.zip', entryPaths: ['chapter.md'] },
+            ],
+          }) as unknown,
+        }),
+      ],
+      { session: harness.transactionSession },
+    );
+  });
+
+  it('maps an insert collision on the classroom and task unique key to 400', async () => {
+    const harness = setup();
+    harness.classroomTaskModel.create.mockRejectedValueOnce(
+      new mongo.MongoServerError({
+        code: 11000,
+        keyPattern: { classroomId: 1, taskId: 1 },
+      }),
+    );
+
+    await expect(harness.publish()).rejects.toMatchObject({
+      status: 400,
+      message: 'Task already published to classroom',
+    });
+    expect(harness.transactionSession.abortTransaction).toHaveBeenCalledTimes(
+      1,
+    );
+    expect(harness.transactionSession.commitTransaction).not.toHaveBeenCalled();
+  });
+
+  it('propagates an insert collision on a different unique key', async () => {
+    const harness = setup();
+    const collision = new mongo.MongoServerError({
+      code: 11000,
+      keyPattern: { _id: 1 },
+    });
+    harness.classroomTaskModel.create.mockRejectedValueOnce(collision);
+
+    await expect(harness.publish()).rejects.toBe(collision);
+    expect(harness.classroomTaskModel.create).toHaveBeenCalledTimes(1);
+  });
 });
 
 describe('ClassroomTasksService createClassroomTaskSubmission participation status', () => {

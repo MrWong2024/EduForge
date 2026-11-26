@@ -167,6 +167,19 @@ npm.cmd run test:e2e -- --listTests --runInBand --runTestsByPath ./test/course-l
 npm.cmd run test:e2e -- --runInBand --runTestsByPath ./test/course-lifecycle.e2e-spec.ts
 ```
 
+### 班级删除与入班、发布定向验收
+
+`test/classroom-lifecycle.e2e-spec.ts` 经正式 HTTP 路由验证删班与入班、删班与发布各自的两种提交顺序。测试在一方实际写入 Classroom 后暂停，观察另一事务在同一文档上的 Mongo 写冲突，再放行指定一方提交。双响应与独立 Mongo 回读核对班级、成员、课堂任务、回执、发布快照和班级时间戳。该套件同时覆盖重复入班、重加入、历史成员和任务阻止删除、仅有旧成员数组时允许删除、归档与归属拒绝、重复发布。公开结果由 [API Classrooms](./handoff-backend-api-map.md#classrooms) 维护。
+
+环境复用本地 `standard_test` 门禁，验证默认连接和事务连接的实际库名及事务可提交后才写入本批夹具。仅使用既有索引。即使断言失败也释放暂停点并等待在途请求，再按本批班级归属清理及回读关联记录，覆盖未取得回执的写入。
+
+从 `backend` 目录在独立 `standard_test` 进程执行。Discovery 必须只命中该文件。
+
+```powershell
+npm.cmd run test:e2e -- --listTests --runInBand --runTestsByPath ./test/classroom-lifecycle.e2e-spec.ts
+npm.cmd run test:e2e -- --runInBand --runTestsByPath ./test/classroom-lifecycle.e2e-spec.ts
+```
+
 ### 课堂提交冷却定向验收
 
 既有 `test/classroom-task-submission-cooldown.e2e-spec.ts` 使用正式 configureApp、HTTP 路由及 Mongo 回读，负责同一作用域正冷却并发的单条受理与等待字段、零冷却的独立尝试编号、不同作用域隔离、顺序提交及窗口过去后的后续提交，并复用同批 fixture 验证禁止迟交和课程/班级非空删除的公开错误投影。提交后响应读取失败使用受控故障，真实数据库回读验证只保留一份作品及一次父实例版本更新。作用域与重试边界见 [Service Card 08](./handoff-backend-service-map.md#service-card-08)，公开字段与单位见 [DTO Submission](./handoff-backend-dto-cheatsheet.md#submission-request--response-family)，状态/业务码见 [API Map](./handoff-backend-api-map.md)。受控时钟、确定性的目标编号竞争、三轮耗尽及无关 E11000 由 LearningTasksService unit 承担。状态/code 配对与内部字段脱敏由 AllExceptionsFilter unit 承担。
