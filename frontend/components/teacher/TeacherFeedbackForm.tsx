@@ -277,6 +277,7 @@ export function TeacherFeedbackForm({
           <span className="mb-1 block text-zinc-700">反馈内容</span>
           <textarea
             value={message}
+            disabled={isSubmitting}
             onChange={(event) => setMessage(event.target.value)}
             rows={4}
             className="w-full rounded-md border border-zinc-300 px-3 py-2"
@@ -288,6 +289,7 @@ export function TeacherFeedbackForm({
           <span className="mb-1 block text-zinc-700">建议（可选）</span>
           <textarea
             value={suggestion}
+            disabled={isSubmitting}
             onChange={(event) => setSuggestion(event.target.value)}
             rows={3}
             className="w-full rounded-md border border-zinc-300 px-3 py-2"
@@ -300,6 +302,7 @@ export function TeacherFeedbackForm({
             <span className="mb-1 block text-zinc-700">类型</span>
             <select
               value={type}
+              disabled={isSubmitting}
               onChange={(event) =>
                 setType(event.target.value as FeedbackTypeValue)
               }
@@ -317,6 +320,7 @@ export function TeacherFeedbackForm({
             <span className="mb-1 block text-zinc-700">严重级别</span>
             <select
               value={severity}
+              disabled={isSubmitting}
               onChange={(event) =>
                 setSeverity(event.target.value as FeedbackSeverityValue)
               }
@@ -331,7 +335,7 @@ export function TeacherFeedbackForm({
           </label>
         </div>
 
-        <fieldset className="block text-sm">
+        <fieldset disabled={isSubmitting} className="block text-sm">
           <legend className="mb-2 block text-zinc-700">
             标签（可选，多选；不选将归为“其他”）
           </legend>
