@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { ErrorState } from "@/components/blocks/ErrorState";
 import { BrowserFetchJsonError, fetchJson } from "@/lib/api/browser-client";
@@ -8,17 +8,19 @@ import {
   buildErrorDescription,
   extractRawDetail,
 } from "@/lib/api/error-presenter";
-import type {
-  TeacherFeedbackItem,
-  UpdateTeacherFeedbackRequest,
+import {
+  toUpdateTeacherFeedbackResponse,
+  type TeacherFeedbackItem,
 } from "@/lib/api/types-teacher";
+import {
+  buildTeacherFeedbackEditPatch,
+  toTeacherFeedbackEditValues,
+} from "@/lib/learning-tasks/teacher-feedback-edit";
 import {
   FEEDBACK_SEVERITIES,
   FEEDBACK_TYPES,
   getFeedbackTypeLabel,
   getFeedbackSeverityLabel,
-  normalizeFeedbackSeverity,
-  normalizeFeedbackType,
   type FeedbackSeverityValue,
   type FeedbackTypeValue,
 } from "@/lib/ui/feedback-options";
@@ -32,7 +34,7 @@ type TeacherFeedbackEditFormProps = {
   feedback: TeacherFeedbackItem;
   submissionId: string;
   onCancel: () => void;
-  onSaved?: () => void;
+  onSaved: (feedback: TeacherFeedbackItem) => void;
 };
 
 type FeedbackErrorState = {
@@ -40,15 +42,6 @@ type FeedbackErrorState = {
   summary: string;
   detail?: string;
 };
-
-const normalizeFeedbackTags = (tags: string[]): FeedbackTagValue[] =>
-  tags.filter((tag): tag is FeedbackTagValue =>
-    FEEDBACK_TAG_OPTIONS.some((option) => option.value === tag),
-  );
-
-const sameStringArray = (left: string[], right: string[]): boolean =>
-  left.length === right.length &&
-  left.every((item, index) => item === right[index]);
 
 const DUPLICATE_FEEDBACK_MESSAGE =
   "该作品已有相同类型、严重程度和正文的教师反馈，请核对后修改本条反馈。";
@@ -82,16 +75,7 @@ export function TeacherFeedbackEditForm({
   onSaved,
 }: TeacherFeedbackEditFormProps) {
   const router = useRouter();
-  const initialValues = useMemo(
-    () => ({
-      type: normalizeFeedbackType(feedback.type),
-      severity: normalizeFeedbackSeverity(feedback.severity),
-      message: feedback.message?.trim() ?? "",
-      suggestion: feedback.suggestion?.trim() ?? "",
-      tags: normalizeFeedbackTags(feedback.tags),
-    }),
-    [feedback],
-  );
+  const [initialValues] = useState(() => toTeacherFeedbackEditValues(feedback));
 
   const [type, setType] = useState<FeedbackTypeValue>(initialValues.type);
   const [severity, setSeverity] = useState<FeedbackSeverityValue>(
@@ -103,17 +87,18 @@ export function TeacherFeedbackEditForm({
     initialValues.tags,
   );
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const submitting = useRef(false);
   const [validationError, setValidationError] = useState<string | null>(null);
   const [errorState, setErrorState] = useState<FeedbackErrorState | null>(null);
 
-  const normalizedMessage = message.trim();
-  const normalizedSuggestion = suggestion.trim();
-  const hasChanges =
-    type !== initialValues.type ||
-    severity !== initialValues.severity ||
-    normalizedMessage !== initialValues.message ||
-    normalizedSuggestion !== initialValues.suggestion ||
-    !sameStringArray(selectedTags, initialValues.tags);
+  const payload = buildTeacherFeedbackEditPatch(initialValues, {
+    type,
+    severity,
+    message,
+    suggestion,
+    tags: selectedTags,
+  });
+  const hasChanges = Object.keys(payload).length > 0;
 
   const toggleTag = (tagValue: FeedbackTagValue) => {
     setSelectedTags((prev) =>
@@ -125,6 +110,9 @@ export function TeacherFeedbackEditForm({
 
   const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+    if (submitting.current) {
+      return;
+    }
     setValidationError(null);
     setErrorState(null);
 
@@ -132,7 +120,7 @@ export function TeacherFeedbackEditForm({
       setValidationError("当前反馈缺少标识，无法保存修改。");
       return;
     }
-    if (!normalizedMessage) {
+    if (!message.trim()) {
       setValidationError("反馈内容不能为空。");
       return;
     }
@@ -141,26 +129,10 @@ export function TeacherFeedbackEditForm({
       return;
     }
 
-    const payload: UpdateTeacherFeedbackRequest = {};
-    if (type !== initialValues.type) {
-      payload.type = type;
-    }
-    if (severity !== initialValues.severity) {
-      payload.severity = severity;
-    }
-    if (normalizedMessage !== initialValues.message) {
-      payload.message = normalizedMessage;
-    }
-    if (normalizedSuggestion !== initialValues.suggestion) {
-      payload.suggestion = normalizedSuggestion;
-    }
-    if (!sameStringArray(selectedTags, initialValues.tags)) {
-      payload.tags = selectedTags;
-    }
-
+    submitting.current = true;
     setIsSubmitting(true);
     try {
-      await fetchJson<unknown>(
+      const response = await fetchJson<unknown>(
         `learning-tasks/submissions/${encodeURIComponent(
           submissionId,
         )}/feedback/${encodeURIComponent(feedback.id)}`,
@@ -173,7 +145,16 @@ export function TeacherFeedbackEditForm({
           body: JSON.stringify(payload),
         },
       );
-      onSaved?.();
+      const savedFeedback = toUpdateTeacherFeedbackResponse(
+        response,
+        submissionId,
+        feedback.id,
+      );
+      if (!savedFeedback) {
+        setErrorState({ summary: "无法确认保存结果，请刷新页面核对。" });
+        return;
+      }
+      onSaved(savedFeedback);
       router.refresh();
     } catch (error) {
       if (error instanceof BrowserFetchJsonError) {
@@ -188,6 +169,7 @@ export function TeacherFeedbackEditForm({
         });
       }
     } finally {
+      submitting.current = false;
       setIsSubmitting(false);
     }
   };

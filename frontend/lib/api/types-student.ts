@@ -422,7 +422,7 @@ const toStringArray = (value: unknown): string[] =>
     ? value.filter((item): item is string => typeof item === "string")
     : [];
 
-const toFeedbackItem = (value: unknown): FeedbackItem => {
+export const toFeedbackItem = (value: unknown): FeedbackItem => {
   const record = asRecord(value);
 
   return {
@@ -432,8 +432,8 @@ const toFeedbackItem = (value: unknown): FeedbackItem => {
     source: asString(record.source),
     type: asString(record.type),
     severity: asString(record.severity),
-    message: asString(record.message),
-    suggestion: asString(record.suggestion),
+    message: typeof record.message === "string" ? record.message : undefined,
+    suggestion: typeof record.suggestion === "string" ? record.suggestion : undefined,
     tags: toStringArray(record.tags),
     scoreHint: asNumber(record.scoreHint),
     createdAt: asString(record.createdAt),

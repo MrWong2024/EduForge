@@ -5,6 +5,7 @@ import { EmptyState } from "@/components/blocks/EmptyState";
 import { TeacherFeedbackEditForm } from "@/components/teacher/TeacherFeedbackEditForm";
 import {
   groupTeacherFeedbackItems,
+  resolveTeacherFeedbackItem,
   type TeacherFeedbackItem,
 } from "@/lib/api/types-teacher";
 import { toDisplayDate, toDisplayText } from "@/lib/ui/format";
@@ -33,10 +34,10 @@ const hasUpdatedAtChanged = (item: TeacherFeedbackItem): boolean => {
 const FeedbackReadonlyBody = ({ item }: { item: TeacherFeedbackItem }) => (
   <>
     <p className="mt-3 whitespace-pre-wrap break-words text-sm text-zinc-900">
-      {toDisplayText(item.message)}
+      {item.source === "TEACHER" ? item.message || "—" : toDisplayText(item.message)}
     </p>
     <p className="mt-2 whitespace-pre-wrap break-words text-sm text-zinc-700">
-      建议：{toDisplayText(item.suggestion)}
+      建议：{item.source === "TEACHER" ? item.suggestion || "—" : toDisplayText(item.suggestion)}
     </p>
     <p className="mt-1 break-words text-sm text-zinc-700">
       标签：
@@ -60,7 +61,24 @@ export function TeacherFeedbackHistory({
   const [editingFeedbackId, setEditingFeedbackId] = useState<string | null>(
     null,
   );
-  const groupedFeedback = groupTeacherFeedbackItems(items);
+  const [confirmedFeedback, setConfirmedFeedback] = useState(
+    () => new Map<string, TeacherFeedbackItem>(),
+  );
+  const groupedFeedback = groupTeacherFeedbackItems(
+    items.map((item) =>
+      item.id ? resolveTeacherFeedbackItem(item, confirmedFeedback.get(item.id)) : item,
+    ),
+  );
+
+  const handleSaved = (feedback: TeacherFeedbackItem) => {
+    const id = feedback.id;
+    if (!id || feedback.submissionId !== submissionId) {
+      return;
+    }
+    setConfirmedFeedback((previous) => new Map(previous).set(id, feedback));
+    setEditingFeedbackId((current) => (current === id ? null : current));
+  };
+
   const groupedSections = [
     { key: "teacher", title: "教师反馈", items: groupedFeedback.teacher },
     { key: "ai", title: "AI 辅助反馈", items: groupedFeedback.ai },
@@ -138,7 +156,7 @@ export function TeacherFeedbackHistory({
                         feedback={item}
                         submissionId={submissionId}
                         onCancel={() => setEditingFeedbackId(null)}
-                        onSaved={() => setEditingFeedbackId(null)}
+                        onSaved={handleSaved}
                       />
                     ) : null}
                   </li>

@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { ErrorState } from "@/components/blocks/ErrorState";
 import { BrowserFetchJsonError, fetchJson } from "@/lib/api/browser-client";
@@ -50,15 +50,16 @@ export function EditCourseForm({ courseId, initialCourse }: EditCourseFormProps)
   const [name, setName] = useState(baseline.name);
   const [term, setTerm] = useState(baseline.term);
   const [courseLabel, setCourseLabel] = useState(baseline.courseLabel);
-  const [isSubmitting, setIsSubmitting] = useState(false);
-  const [successMessage, setSuccessMessage] = useState<string | null>(null);
+  const submitLocked = useRef(false);
+  const [saveStatus, setSaveStatus] = useState<"idle" | "submitting" | "saved">("idle");
   const [errorState, setErrorState] = useState<EditCourseFormErrorState | null>(null);
   const requestBody = buildCourseEditPatch(baseline, { code, name, term, courseLabel });
   const isUnchanged = requestBody !== null && Object.keys(requestBody).length === 0;
+  const isLocked = saveStatus !== "idle";
 
   const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    if (isSubmitting || isUnchanged) {
+    if (submitLocked.current || isUnchanged) {
       return;
     }
 
@@ -69,10 +70,11 @@ export function EditCourseForm({ courseId, initialCourse }: EditCourseFormProps)
       return;
     }
 
-    setIsSubmitting(true);
-    setSuccessMessage(null);
+    submitLocked.current = true;
+    setSaveStatus("submitting");
     setErrorState(null);
 
+    let nextCourseId: string;
     try {
       const payload = await fetchJson<unknown>(`courses/${encodeURIComponent(courseId)}`, {
         method: "PATCH",
@@ -84,10 +86,7 @@ export function EditCourseForm({ courseId, initialCourse }: EditCourseFormProps)
       });
 
       const response = toCourseUpdateResponse(payload);
-      const nextCourseId = response.id?.trim() || courseId;
-      setSuccessMessage("课程更新成功。");
-      router.push(paths.teacher.courseOverview(nextCourseId));
-      router.refresh();
+      nextCourseId = response.id?.trim() || courseId;
     } catch (error) {
       if (error instanceof BrowserFetchJsonError) {
         const summary = getUpdateErrorSummary(error.status);
@@ -101,9 +100,14 @@ export function EditCourseForm({ courseId, initialCourse }: EditCourseFormProps)
           description: "更新课程失败，请稍后重试。",
         });
       }
-    } finally {
-      setIsSubmitting(false);
+      submitLocked.current = false;
+      setSaveStatus("idle");
+      return;
     }
+
+    setSaveStatus("saved");
+    router.push(paths.teacher.courseOverview(nextCourseId));
+    router.refresh();
   };
 
   return (
@@ -118,6 +122,7 @@ export function EditCourseForm({ courseId, initialCourse }: EditCourseFormProps)
           <span className="mb-1 block text-zinc-700">课程代码</span>
           <input
             value={code}
+            disabled={isLocked}
             onChange={(event) => setCode(event.target.value)}
             placeholder="例如 CS101"
             className="w-full rounded-md border border-zinc-300 px-3 py-2"
@@ -128,6 +133,7 @@ export function EditCourseForm({ courseId, initialCourse }: EditCourseFormProps)
           <span className="mb-1 block text-zinc-700">课程名称</span>
           <input
             value={name}
+            disabled={isLocked}
             onChange={(event) => setName(event.target.value)}
             placeholder="例如 程序设计基础"
             className="w-full rounded-md border border-zinc-300 px-3 py-2"
@@ -138,6 +144,7 @@ export function EditCourseForm({ courseId, initialCourse }: EditCourseFormProps)
           <span className="mb-1 block text-zinc-700">学期</span>
           <input
             value={term}
+            disabled={isLocked}
             onChange={(event) => setTerm(event.target.value)}
             placeholder="例如 2026 春"
             className="w-full rounded-md border border-zinc-300 px-3 py-2"
@@ -148,6 +155,7 @@ export function EditCourseForm({ courseId, initialCourse }: EditCourseFormProps)
           <span className="mb-1 block text-zinc-700">课程分类</span>
           <select
             value={courseLabel}
+            disabled={isLocked}
             onChange={(event) => setCourseLabel(event.target.value)}
             className="w-full rounded-md border border-zinc-300 px-3 py-2"
           >
@@ -163,10 +171,10 @@ export function EditCourseForm({ courseId, initialCourse }: EditCourseFormProps)
         <div className="md:col-span-4 flex flex-wrap items-center gap-3">
           <button
             type="submit"
-            disabled={isSubmitting || isUnchanged}
+            disabled={isLocked || isUnchanged}
             className="rounded-md bg-zinc-900 px-4 py-2 text-sm font-medium text-white disabled:cursor-not-allowed disabled:bg-zinc-400"
           >
-            {isSubmitting ? "保存中..." : "保存修改"}
+            {saveStatus === "submitting" ? "保存中..." : "保存修改"}
           </button>
           <Link href={paths.teacher.courses} className="text-sm text-blue-700 hover:underline">
             返回课程列表
@@ -177,7 +185,11 @@ export function EditCourseForm({ courseId, initialCourse }: EditCourseFormProps)
         </div>
       </form>
 
-      {successMessage ? <p className="mt-3 text-sm text-emerald-700">{successMessage}</p> : null}
+      {saveStatus === "saved" ? (
+        <p role="status" className="mt-3 text-sm text-emerald-700">
+          课程更新成功。
+        </p>
+      ) : null}
 
       {errorState ? (
         <div className="mt-4">

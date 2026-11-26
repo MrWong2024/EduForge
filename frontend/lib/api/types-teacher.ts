@@ -13,6 +13,7 @@ import {
   type TaskTemplateVisibility,
 } from "@/lib/learning-tasks/template-visibility-scope";
 import {
+  toFeedbackItem,
   toListFeedbackResponse,
   toSubmissionDetailResponse as toStudentSubmissionDetailResponse,
   type FeedbackItem,
@@ -2404,6 +2405,19 @@ export const toTeacherFeedbackListResponse = (
   payload: unknown,
 ): TeacherFeedbackListResponse => toListFeedbackResponse(payload);
 
+export const toUpdateTeacherFeedbackResponse = (
+  payload: unknown,
+  submissionId: string,
+  feedbackId: string,
+): TeacherFeedbackItem | null => {
+  const item = toFeedbackItem(payload);
+  return item.id === feedbackId &&
+    item.submissionId === submissionId &&
+    item.source === "TEACHER"
+    ? item
+    : null;
+};
+
 export const toSubmissionDetailResponse = (
   payload: unknown,
 ): SubmissionDetailResponse => toStudentSubmissionDetailResponse(payload);
@@ -2414,6 +2428,25 @@ const toEpochTime = (iso: string | undefined): number => {
   }
   const timestamp = new Date(iso).getTime();
   return Number.isFinite(timestamp) ? timestamp : Number.NEGATIVE_INFINITY;
+};
+
+export const resolveTeacherFeedbackItem = (
+  item: TeacherFeedbackItem,
+  confirmed: TeacherFeedbackItem | undefined,
+): TeacherFeedbackItem => {
+  if (
+    !confirmed ||
+    confirmed.source !== "TEACHER" ||
+    item.source !== "TEACHER" ||
+    confirmed.id !== item.id ||
+    confirmed.submissionId !== item.submissionId
+  ) {
+    return item;
+  }
+  return toEpochTime(item.updatedAt ?? item.createdAt) >
+    toEpochTime(confirmed.updatedAt)
+    ? item
+    : confirmed;
 };
 
 const sortFeedbackByCreatedAtDesc = (

@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { ErrorState } from "@/components/blocks/ErrorState";
 import { BrowserFetchJsonError, fetchJson } from "@/lib/api/browser-client";
@@ -87,16 +87,17 @@ export function EditClassroomForm({ classroomId, initialClassroom }: EditClassro
   const router = useRouter();
   const [baselineName] = useState(initialClassroom.name ?? "");
   const [name, setName] = useState(() => toClassroomNameInputValue(baselineName));
-  const [isSubmitting, setIsSubmitting] = useState(false);
-  const [successMessage, setSuccessMessage] = useState<string | null>(null);
+  const submitLocked = useRef(false);
+  const [saveStatus, setSaveStatus] = useState<"idle" | "submitting" | "saved">("idle");
   const [errorState, setErrorState] = useState<EditClassroomFormErrorState | null>(null);
   const courseDisplay = getClassroomCourseDisplay(initialClassroom);
   const requestBody = buildClassroomEditPatch(baselineName, name);
   const isUnchanged = requestBody !== null && Object.keys(requestBody).length === 0;
+  const isLocked = saveStatus !== "idle";
 
   const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    if (isSubmitting || isUnchanged) {
+    if (submitLocked.current || isUnchanged) {
       return;
     }
 
@@ -108,10 +109,11 @@ export function EditClassroomForm({ classroomId, initialClassroom }: EditClassro
       return;
     }
 
-    setIsSubmitting(true);
-    setSuccessMessage(null);
+    submitLocked.current = true;
+    setSaveStatus("submitting");
     setErrorState(null);
 
+    let nextClassroomId: string;
     try {
       const payload = await fetchJson<unknown>(`classrooms/${encodeURIComponent(classroomId)}`, {
         method: "PATCH",
@@ -123,10 +125,7 @@ export function EditClassroomForm({ classroomId, initialClassroom }: EditClassro
       });
 
       const response = toClassroomUpdateResponse(payload);
-      const nextClassroomId = response.id?.trim() || classroomId;
-      setSuccessMessage("班级更新成功。");
-      router.push(paths.teacher.classroomDashboard(nextClassroomId));
-      router.refresh();
+      nextClassroomId = response.id?.trim() || classroomId;
     } catch (error) {
       if (error instanceof BrowserFetchJsonError) {
         const detail = extractRawDetail(error.data);
@@ -141,9 +140,14 @@ export function EditClassroomForm({ classroomId, initialClassroom }: EditClassro
           description: "更新班级失败，请稍后重试。",
         });
       }
-    } finally {
-      setIsSubmitting(false);
+      submitLocked.current = false;
+      setSaveStatus("idle");
+      return;
     }
+
+    setSaveStatus("saved");
+    router.push(paths.teacher.classroomDashboard(nextClassroomId));
+    router.refresh();
   };
 
   return (
@@ -169,6 +173,7 @@ export function EditClassroomForm({ classroomId, initialClassroom }: EditClassro
           <span className="mb-1 block text-zinc-700">班级名称</span>
           <input
             value={name}
+            disabled={isLocked}
             onChange={(event) => setName(event.target.value)}
             placeholder="例如 2026 春-1 班"
             className="w-full rounded-md border border-zinc-300 px-3 py-2"
@@ -178,10 +183,10 @@ export function EditClassroomForm({ classroomId, initialClassroom }: EditClassro
         <div className="md:col-span-2 flex flex-wrap items-center gap-3">
           <button
             type="submit"
-            disabled={isSubmitting || isUnchanged}
+            disabled={isLocked || isUnchanged}
             className="rounded-md bg-zinc-900 px-4 py-2 text-sm font-medium text-white disabled:cursor-not-allowed disabled:bg-zinc-400"
           >
-            {isSubmitting ? "保存中..." : "保存修改"}
+            {saveStatus === "submitting" ? "保存中..." : "保存修改"}
           </button>
           <Link href={paths.teacher.classrooms} className="text-sm text-blue-700 hover:underline">
             返回班级列表
@@ -192,7 +197,11 @@ export function EditClassroomForm({ classroomId, initialClassroom }: EditClassro
         </div>
       </form>
 
-      {successMessage ? <p className="mt-3 text-sm text-emerald-700">{successMessage}</p> : null}
+      {saveStatus === "saved" ? (
+        <p role="status" className="mt-3 text-sm text-emerald-700">
+          班级更新成功。
+        </p>
+      ) : null}
 
       {errorState ? (
         <div className="mt-4">
