@@ -187,7 +187,7 @@ detail 主视图需要稳定读取 `taskTitle/studentName/language/submittedAt/a
 **Consequences**  
 前端 submission detail 页统一改接 `GET /api/learning-tasks/submissions/:id`。  
 列表接口继续保持“轻量、分页、无 `content.codeText`”约束。  
-权限边界需稳定执行：学生本人可读；若 `classroomTaskId` 存在仅所属班级 owner teacher 可读；若 `classroomTaskId` 为空仅 task owner teacher 可读。  
+读取提交详情须有有效的课堂任务关联。学生可读取本人的提交，教师可读取自己负责班级的提交。关联校验及错误语义见 [Backend API Map](./handoff-backend-api-map.md#learning-tasks)。
 
 ## 14) AI 默认联调/验收模式采用 `Stub + worker`，`process-once` 仅作 debug/ops
 
