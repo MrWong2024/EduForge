@@ -9,12 +9,9 @@ import {
   extractRawDetail,
 } from "@/lib/api/error-presenter";
 import type { CreateTeacherFeedbackRequest } from "@/lib/api/types-teacher";
-import {
-  toListFeedbackResponse,
-  toSubmissionDetailResponse,
-  type SubmissionDetailResponse,
-} from "@/lib/api/types-student";
+import type { SubmissionDetailResponse } from "@/lib/api/types-student";
 import { SubmissionContent } from "@/components/submissions/SubmissionContent";
+import { readSubmissionWithFeedback } from "@/lib/learning-tasks/read-submission-with-feedback";
 import {
   getSubmissionRevisionError,
   isDraftRevisionCurrent,
@@ -187,24 +184,16 @@ export function TeacherFeedbackForm({
     setChecked(null);
     setFeedbackCheck(null);
     try {
-      const path = `learning-tasks/submissions/${encodeURIComponent(submissionId)}`;
-      const latest = toSubmissionDetailResponse(
-        await fetchJson<unknown>(path, {
-          cache: "no-store",
-          signal: AbortSignal.timeout(30_000),
-        }),
-      );
-      const history = toListFeedbackResponse(
-        await fetchJson<unknown>(path + "/feedback", {
-          cache: "no-store",
-          signal: AbortSignal.timeout(30_000),
-        }),
-      );
-      if (
-        latest.id !== submissionId ||
-        !isValidContentRevision(latest.contentRevision)
-      )
+      const { detail: latest, feedback: history } =
+        await readSubmissionWithFeedback(submissionId, (path, options) =>
+          fetchJson<unknown>(path, {
+            ...options,
+            signal: options.signal ?? AbortSignal.timeout(30_000),
+          }),
+        );
+      if (!isValidContentRevision(latest.contentRevision)) {
         throw new Error("Incomplete detail");
+      }
       setChecked(latest);
       setFeedbackCheck(
         history.items.length === 0

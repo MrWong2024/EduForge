@@ -29,9 +29,40 @@ export const buildTextSubmissionRequest = (
 export const isValidContentRevision = (value: unknown): value is number =>
   typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
 
+export const isSubmissionReviewStarted = (
+  detail: SubmissionDetailResponse,
+): boolean =>
+  detail.editing.reason === "REVIEW_STARTED" ||
+  (typeof detail.reviewStartedAt === "string" &&
+    Number.isFinite(Date.parse(detail.reviewStartedAt)));
+
 export const canEditSubmission = (detail: SubmissionDetailResponse): boolean =>
   isValidContentRevision(detail.contentRevision) &&
-  detail.editing.canEdit === true;
+  detail.editing.canEdit === true &&
+  !isSubmissionReviewStarted(detail);
+
+export function acceptSubmissionEditingRead(
+  local: SubmissionDetailResponse | null,
+  received: SubmissionDetailResponse,
+  readSequence: number,
+  currentSequence: number,
+): SubmissionDetailResponse | null {
+  if (
+    readSequence !== currentSequence ||
+    !isValidContentRevision(received.contentRevision)
+  )
+    return local;
+  if (
+    local &&
+    isValidContentRevision(local.contentRevision) &&
+    (local.contentRevision > received.contentRevision ||
+      (local.contentRevision === received.contentRevision &&
+        isSubmissionReviewStarted(local) &&
+        !isSubmissionReviewStarted(received)))
+  )
+    return local;
+  return received;
+}
 
 export function selectSubmissionDisplayDetail(
   pageDetail: SubmissionDetailResponse,
@@ -45,8 +76,8 @@ export function selectSubmissionDisplayDetail(
     isValidContentRevision(savedDetail.contentRevision) &&
     (savedDetail.contentRevision > pageDetail.contentRevision ||
       (savedDetail.contentRevision === pageDetail.contentRevision &&
-        !savedDetail.editing.canEdit &&
-        pageDetail.editing.canEdit))
+        !canEditSubmission(savedDetail) &&
+        canEditSubmission(pageDetail)))
   )
     return savedDetail;
   return pageDetail;
@@ -67,7 +98,7 @@ export function captureSubmissionEditBaseline(
   detail: SubmissionDetailResponse,
 ): UpdateSubmissionRequest | null {
   const revision = detail.contentRevision;
-  if (!isValidContentRevision(revision) || detail.editing.canEdit !== true)
+  if (!isValidContentRevision(revision) || !canEditSubmission(detail))
     return null;
 
   return buildUpdateSubmissionRequest(
@@ -115,7 +146,7 @@ export const isSavedSubmissionRevision = (
   isValidContentRevision(returnedRevision) &&
   returnedRevision > baseRevision;
 
-export function getSubmissionRevisionError(data: unknown): string {
+export function isSubmissionReviewStartedError(data: unknown): boolean {
   const code =
     data && typeof data === "object" && "code" in data ? data.code : undefined;
   const message =
@@ -124,11 +155,21 @@ export function getSubmissionRevisionError(data: unknown): string {
       : undefined;
   // The public exception filter preserves the message but may omit code.
   // Match only the complete known public strings; never display raw errors.
-  if (
+  return (
     code === "SUBMISSION_REVIEW_STARTED" ||
     message ===
       "本次提交已进入评阅，不能再修改作品；草稿仍保留，请核对提交详情。"
-  )
+  );
+}
+
+export function getSubmissionRevisionError(data: unknown): string {
+  const code =
+    data && typeof data === "object" && "code" in data ? data.code : undefined;
+  const message =
+    data && typeof data === "object" && "message" in data
+      ? data.message
+      : undefined;
+  if (isSubmissionReviewStartedError(data))
     return "本次提交已进入评阅，不能再修改作品。未保存的修改已保留，请在本页核对当前作品与反馈。";
   if (
     code === "SUBMISSION_REVISION_CONFLICT" ||

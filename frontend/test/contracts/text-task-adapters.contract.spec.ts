@@ -16,6 +16,7 @@ import {
   getTaskSnapshotMessage,
 } from "../../lib/learning-tasks/ai-review";
 import {
+  acceptSubmissionEditingRead,
   buildTextSubmissionRequest,
   canCreateTextSubmission,
   getSavedSubmissionHref,
@@ -31,6 +32,7 @@ import {
   selectSubmissionDisplayDetail,
   getSubmissionRevisionError,
 } from "../../lib/learning-tasks/text-submission";
+import { readSubmissionWithFeedback } from "../../lib/learning-tasks/read-submission-with-feedback";
 import {
   SUBMISSION_LANGUAGE_OPTIONS,
   toDisplaySubmissionLanguage,
@@ -519,6 +521,193 @@ test("saved work bridges an old page response but cannot revive permission from 
   });
   expect(selectSubmissionDisplayDetail(locked, saved)).toBe(locked);
   expect(selectSubmissionDisplayDetail(saved, locked)).toBe(locked);
+});
+
+test("only a newly started authoritative editing read can clear an equal-revision refusal", () => {
+  const open = toSubmissionDetailResponse({
+    id: "submission-1",
+    contentRevision: 3,
+    content: { codeText: "unchanged" },
+    editing: { canEdit: true, reason: null, message: null },
+  });
+  const closed = toSubmissionDetailResponse({
+    ...open.raw,
+    editing: {
+      canEdit: false,
+      reason: "CLASSROOM_TASK_CLOSED",
+      message: "课堂任务已关闭，不能修改本次提交。",
+    },
+  });
+  const afterLateRead = acceptSubmissionEditingRead(closed, open, 1, 2);
+  expect(afterLateRead).toBe(closed);
+  expect(selectSubmissionDisplayDetail(open, afterLateRead)).toBe(closed);
+
+  const reopened = acceptSubmissionEditingRead(closed, open, 3, 3);
+  expect(reopened).toBe(open);
+  expect(selectSubmissionDisplayDetail(open, reopened)).toBe(open);
+  expect(canEditSubmission(open)).toBe(true);
+  expect(selectSubmissionDisplayDetail(closed, reopened)).toBe(closed);
+  expect(open.contentRevision).toBe(closed.contentRevision);
+  expect(open.content.codeText).toBe(closed.content.codeText);
+});
+
+test("a same-version confirmation preserves review locks and a newer save", () => {
+  const open = toSubmissionDetailResponse({
+    id: "submission-1",
+    contentRevision: 3,
+    editing: { canEdit: true, reason: null, message: null },
+  });
+  for (const reviewStartedAt of [null, "2026-10-28T01:00:00Z"]) {
+    const reviewed = toSubmissionDetailResponse({
+      ...open.raw,
+      reviewStartedAt,
+      editing: {
+        canEdit: false,
+        reason: "REVIEW_STARTED",
+        message: "本次提交已进入评阅，不能修改作品。",
+      },
+    });
+    const retained = acceptSubmissionEditingRead(reviewed, open, 4, 4);
+    expect(retained).toBe(reviewed);
+    expect(selectSubmissionDisplayDetail(open, retained)).toBe(reviewed);
+    expect(canEditSubmission(reviewed)).toBe(false);
+    expect(captureSubmissionEditBaseline(reviewed)).toBeNull();
+  }
+  const newerSave = toSubmissionDetailResponse({
+    ...open.raw,
+    contentRevision: 4,
+    content: { codeText: "saved revision 4" },
+  });
+  expect(acceptSubmissionEditingRead(newerSave, open, 4, 4)).toBe(newerSave);
+
+  const invalid = toSubmissionDetailResponse({
+    ...open.raw,
+    contentRevision: null,
+  });
+  expect(acceptSubmissionEditingRead(newerSave, invalid, 4, 4)).toBe(newerSave);
+  expect(canEditSubmission(selectSubmissionDisplayDetail(invalid, newerSave))).toBe(
+    false,
+  );
+});
+
+const reviewedSubmissionPath = "learning-tasks/submissions/submission-1";
+const reviewedFeedbackPath = reviewedSubmissionPath + "/feedback";
+const oldSubmissionRead = {
+  id: "submission-1",
+  contentRevision: 2,
+  content: { codeText: "version A" },
+  editing: { canEdit: true, reason: null, message: null },
+};
+const currentReviewedSubmissionRead = {
+  ...oldSubmissionRead,
+  contentRevision: 3,
+  content: { codeText: "version B" },
+  editing: { canEdit: false, reason: "REVIEW_STARTED", message: "已进入评阅" },
+};
+const reviewedFeedback = {
+  items: [
+    {
+      id: "feedback-1",
+      submissionId: "submission-1",
+      source: "TEACHER",
+      message: "feedback for version B",
+    },
+  ],
+};
+
+function submissionReadFixture(...responses: unknown[]) {
+  const calls: Array<{ path: string; options: RequestInit }> = [];
+  const read = readSubmissionWithFeedback(
+    "submission-1",
+    async (path, options) => {
+      calls.push({ path, options });
+      if (!responses.length) throw new Error("unexpected read");
+      const next = responses.shift();
+      if (next instanceof Error) throw next;
+      return next;
+    },
+  );
+  return { calls, read };
+}
+
+test("submission and feedback use two reads when there is no feedback or the first body is fixed", async () => {
+  const noFeedback = submissionReadFixture(oldSubmissionRead, { items: [] });
+  const open = await noFeedback.read;
+  expect(open.feedback.items).toHaveLength(0);
+  expect(open.detail.content.codeText).toBe("version A");
+  expect(canEditSubmission(open.detail)).toBe(true);
+  expect(noFeedback.calls.map(({ path }) => path)).toEqual([
+    reviewedSubmissionPath,
+    reviewedFeedbackPath,
+  ]);
+
+  const alreadyFrozen = submissionReadFixture(
+    {
+      ...currentReviewedSubmissionRead,
+      reviewStartedAt: "2026-10-28T01:00:00Z",
+    },
+    reviewedFeedback,
+  );
+  const fixed = await alreadyFrozen.read;
+  expect(fixed.detail.content.codeText).toBe("version B");
+  expect(fixed.feedback.items[0]?.message).toBe("feedback for version B");
+  expect(canEditSubmission(fixed.detail)).toBe(false);
+  expect(alreadyFrozen.calls.map(({ path }) => path)).toEqual([
+    reviewedSubmissionPath,
+    reviewedFeedbackPath,
+  ]);
+});
+
+test("feedback after the first detail requires a fresh body even when the first detail says REVIEW_STARTED", async () => {
+  // A later evaluation check can set the reason after the first body was read.
+  const oldWithReviewReason = {
+    ...oldSubmissionRead,
+    editing: currentReviewedSubmissionRead.editing,
+  };
+  for (const first of [oldSubmissionRead, oldWithReviewReason]) {
+    for (const reviewStartedAt of [null, "2026-10-28T01:00:00Z"]) {
+      const fixture = submissionReadFixture(first, reviewedFeedback, {
+        ...currentReviewedSubmissionRead,
+        reviewStartedAt,
+      });
+      const result = await fixture.read;
+      expect(first.content.codeText).toBe("version A");
+      expect(result.detail.content.codeText).toBe("version B");
+      expect(result.detail.contentRevision).toBe(3);
+      expect(result.feedback.items[0]?.message).toBe("feedback for version B");
+      expect(canEditSubmission(result.detail)).toBe(false);
+      expect(fixture.calls.map(({ path }) => path)).toEqual([
+        reviewedSubmissionPath,
+        reviewedFeedbackPath,
+        reviewedSubmissionPath,
+      ]);
+      expect(fixture.calls[2]?.options.signal).toBeInstanceOf(AbortSignal);
+    }
+  }
+});
+
+test("failed or contradictory conditional detail reads do not return a mixed result", async () => {
+  const unavailable = new Error("HTTP 503");
+  const failed = submissionReadFixture(oldSubmissionRead, reviewedFeedback, unavailable);
+  await expect(failed.read).rejects.toBe(unavailable);
+  expect(failed.calls).toHaveLength(3);
+  for (const contradictory of [
+    { ...currentReviewedSubmissionRead, id: "different-submission" },
+    oldSubmissionRead,
+    {
+      ...currentReviewedSubmissionRead,
+      reviewStartedAt: "2026-10-28T01:00:00Z",
+      editing: { canEdit: true, reason: null, message: null },
+    },
+  ]) {
+    const fixture = submissionReadFixture(
+      oldSubmissionRead,
+      reviewedFeedback,
+      contradictory,
+    );
+    await expect(fixture.read).rejects.toThrow();
+    expect(fixture.calls).toHaveLength(3);
+  }
 });
 
 test("preserves source, independent note and declaration without trimming", () => {

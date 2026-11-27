@@ -17,10 +17,11 @@ import {
 } from "@/lib/api/error-presenter";
 import {
   toClassroomTask,
-  toSubmissionDetailResponse,
-  toTeacherFeedbackListResponse,
+  type SubmissionDetailResponse,
+  type TeacherFeedbackListResponse,
   type TeacherSubmissionContext,
 } from "@/lib/api/types-teacher";
+import { readSubmissionWithFeedback } from "@/lib/learning-tasks/read-submission-with-feedback";
 import { paths } from "@/lib/routes/paths";
 import { getCommonErrorSummary } from "@/lib/ui/status";
 import { toDisplaySubmissionLanguage } from "@/lib/learning-tasks/submission-language";
@@ -54,7 +55,7 @@ const getTeacherSubmissionErrorSummary = (status: number): string => {
 
 const buildContext = (
   submissionId: string,
-  detail: ReturnType<typeof toSubmissionDetailResponse>,
+  detail: SubmissionDetailResponse,
   query: Awaited<TeacherSubmissionDetailPageProps["searchParams"]>,
 ): TeacherSubmissionContext => ({
   submissionId,
@@ -74,8 +75,8 @@ const buildContext = (
 type SubmissionFeedbackViewModel =
   | {
       mode: "ready";
-      detail: ReturnType<typeof toSubmissionDetailResponse>;
-      feedback: ReturnType<typeof toTeacherFeedbackListResponse>;
+      detail: SubmissionDetailResponse;
+      feedback: TeacherFeedbackListResponse;
       context: TeacherSubmissionContext;
     }
   | {
@@ -112,25 +113,12 @@ export default async function TeacherSubmissionDetailPage({
   };
 
   try {
-    const detailPayload = await fetchJson<unknown>(
-      `learning-tasks/submissions/${encodeURIComponent(submissionId)}`,
-      { cache: "no-store" },
-    );
-    const feedbackPayload = await fetchJson<unknown>(
-      `learning-tasks/submissions/${encodeURIComponent(submissionId)}/feedback`,
-      { cache: "no-store" },
-    );
-
-    const detail = toSubmissionDetailResponse(detailPayload);
-    const feedback = toTeacherFeedbackListResponse(feedbackPayload);
-    if (detail.id === confirmedSubmissionId) {
-      viewModel = {
-        mode: "ready",
-        detail,
-        feedback,
-        context: buildContext(submissionId, detail, query),
-      };
-    }
+    const result = await readSubmissionWithFeedback(submissionId, fetchJson);
+    viewModel = {
+      mode: "ready",
+      ...result,
+      context: buildContext(submissionId, result.detail, query),
+    };
   } catch (error) {
     if (error instanceof FetchJsonError) {
       const detail = extractRawDetail(error);

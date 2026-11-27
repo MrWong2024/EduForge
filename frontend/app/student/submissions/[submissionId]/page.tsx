@@ -14,10 +14,11 @@ import {
   buildErrorDescription,
   extractRawDetail,
 } from "@/lib/api/error-presenter";
-import {
-  toListFeedbackResponse,
-  toSubmissionDetailResponse,
+import type {
+  ListFeedbackResponse,
+  SubmissionDetailResponse,
 } from "@/lib/api/types-student";
+import { readSubmissionWithFeedback } from "@/lib/learning-tasks/read-submission-with-feedback";
 import { paths } from "@/lib/routes/paths";
 import { getCommonErrorSummary } from "@/lib/ui/status";
 import {
@@ -58,8 +59,8 @@ const getStudentSubmissionErrorSummary = (status: number): string => {
 type SubmissionFeedbackViewModel =
   | {
       mode: "ready";
-      detail: ReturnType<typeof toSubmissionDetailResponse>;
-      feedback: ReturnType<typeof toListFeedbackResponse>;
+      detail: SubmissionDetailResponse;
+      feedback: ListFeedbackResponse;
     }
   | {
       mode: "error";
@@ -102,20 +103,8 @@ export default async function StudentSubmissionDetailPage({
   };
 
   try {
-    const detailPayload = await fetchJson<unknown>(
-      `learning-tasks/submissions/${encodeURIComponent(submissionId)}`,
-      { cache: "no-store" },
-    );
-    const feedbackPayload = await fetchJson<unknown>(
-      `learning-tasks/submissions/${encodeURIComponent(submissionId)}/feedback`,
-      { cache: "no-store" },
-    );
-
-    const detail = toSubmissionDetailResponse(detailPayload);
-    const feedback = toListFeedbackResponse(feedbackPayload);
-    if (detail.id === submissionId.toLowerCase()) {
-      viewModel = { mode: "ready", detail, feedback };
-    }
+    const result = await readSubmissionWithFeedback(submissionId, fetchJson);
+    viewModel = { mode: "ready", ...result };
   } catch (error) {
     if (error instanceof FetchJsonError) {
       const detail = extractRawDetail(error);

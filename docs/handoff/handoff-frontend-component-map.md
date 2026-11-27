@@ -89,10 +89,10 @@
 | EditClassroomTaskForm | `components/teacher/EditClassroomTaskForm.tsx` | 列表行内展开，截止时间按浏览器本地分钟显示和比较，未改分钟省略，实际改动转换为 UTC 或明确清空；仅保存逐字段净变化，无变化不发请求。成功后立即重开采用正式回执设置，后续打开可采用更新列表；展开期间的刷新不重绑草稿。失败保留草稿及基准，普通 409 提示刷新且不重放；ACTIVE/CLOSED 可编辑，RECALLED 无入口，不修改模板或状态流；部分更新与竞争结果见 [Backend API](./handoff-backend-api-map.md#classroom-tasksclassrooms-子资源) |
 | PublishTaskStatusButton | `components/teacher/PublishTaskStatusButton.tsx` | 单一模板发布操作；当前 classroomTask 详情页不使用，模板生命周期入口留在模板层 |
 | RemoveStudentButton | `components/teacher/RemoveStudentButton.tsx` | 确认移出当前展示姓名对应的成员。页面级汇总保留移出结果，在行移除时承接仍位于该行的焦点，并在页面提供有效页链接时执行同路由替换。成员关系与历史记录由后端维护 |
-| TeacherFeedbackForm | `components/teacher/TeacherFeedbackForm.tsx` | 教师反馈创建输入与提交，复用统一反馈选项；评语草稿绑定实际查看版本，刷新不重绑，冲突/未知结果保留草稿并显式核对当前作品与反馈后确认继续；标签可选，不提供 scoreHint 入口，合同与归一化归 API Owner。新增反馈提交期间锁定输入。必需读取暂态失败期间保留输入、起始版本和核对状态，暂停表单展示与操作 |
+| TeacherFeedbackForm | `components/teacher/TeacherFeedbackForm.tsx` | 教师反馈创建输入与提交，复用统一反馈选项；评语草稿绑定实际查看版本，刷新不重绑。冲突或未知结果时保留草稿，显式核对复用作品与反馈的组合读取，完整展示后才可确认继续。标签可选，不提供 scoreHint 入口，合同与归一化归 API Owner。新增反馈提交期间锁定输入。必需读取暂态失败期间保留输入、起始版本和核对状态，暂停表单展示与操作 |
 | TeacherFeedbackHistory | `components/teacher/TeacherFeedbackHistory.tsx` | 组合教师与 AI 反馈历史，管理单条历史编辑会话、共享保存状态和 PATCH 正式回执。列表暂态不可用时保留原反馈 ID、起始值和当前输入，恢复前以最新列表核对同一作品上的同一条教师反馈。保存期间暂停收起和切换编辑项，确认回执后收起表单并更新历史。AI 与来源不明的反馈只读 |
 | TeacherFeedbackEditForm | `components/teacher/TeacherFeedbackEditForm.tsx` | 用历史列表持有的编辑会话渲染行内控件，按起始值计算净变更并 PATCH 原反馈。等待期间按历史列表的共享保存状态禁用控件。匹配公开消息的重复反馈 409 展示专属页内提示，保存失败保留编辑会话。输入字段与创建表单一致，scoreHint 除外 |
-| TeacherSubmissionDetailPage | `app/teacher/submissions/[submissionId]/page.tsx` | 顺序读取权威详情与完整反馈列表，两项成功后核对作品 ID 及教师会话。暂态失败时仅显示错误与原页重试，明确拒绝结束旧批阅状态。负责返回导航与作品展示；可选评阅标准复用 TaskRubric，正式实例读源与失败边界见 API Map |
+| TeacherSubmissionDetailPage | `app/teacher/submissions/[submissionId]/page.tsx` | 按学生作品详情页相同规则读取作品与反馈，完整读取后核对作品 ID 及教师会话。暂态失败时仅显示错误与原页重试，明确拒绝结束旧批阅状态。负责返回导航与作品展示；可选评阅标准复用 TaskRubric，正式实例读源与失败边界见 API Map |
 | TeacherSubmissionReview | `components/teacher/TeacherSubmissionReview.tsx` | 以当前教师和作品身份维持新增反馈、历史编辑和 AI 操作三个组件的生命周期。必需读取出错时暂停展示及操作，完整读取确认同一身份后恢复。两份草稿及回执分别由新增表单与历史列表持有。AI 申请局部更新，保持显式刷新 |
 
 ## 6) Teacher Analytics / Reports
@@ -115,12 +115,12 @@
 |---|---|---|
 | JoinClassroomForm | `components/student/JoinClassroomForm.tsx` | 将加入码输入中的 ASCII 小写字母转为大写，提交时去除首尾空白。后端返回已归档时显示专属页内提示，失败保留输入 |
 | SubmissionForm | `components/student/SubmissionForm.tsx` | 原文源码与独立可选说明输入、码点校验、请求防重复及公开业务错误安全适配；同一学生、班级与课堂任务在当前页成功刷新后保留内存草稿，失去提交资格时显示原因并保留语言选择、可复制的只读源码和说明，资格恢复后可继续编辑；任务详情暂态读取失败时隐藏表单与历史，页内重试确认同一身份后按最新资格恢复原文及待核对状态，明确拒绝或身份变化结束原草稿保留；成功保存后锁住当前表单，导航恢复只打开同一提交详情，结果未确认先核对历史；多文件粘贴格式提示与示例由此维护，单文件无需 FILE 标记；不提供上传/结构化文件提交，不以模板当前状态自行阻断 |
-| EditSubmissionForm | `components/student/EditSubmissionForm.tsx` | 同次提交的受控代码/语言/说明与 baseRevision，语言复用共享选项；正常保存采用权威详情、取消不写入，刷新不覆盖未保存输入或静默换版；冲突或未知结果保留当前输入并锁住保存，通过本页显式读取作品、核对确认后继续，异常取消不绕过核对门禁；评阅已受理时保留可复制的未保存修改，学生作品展示与共享 AI 区块使用同一当前详情。暂态读取失败时暂停展示与操作，保留原稿、基线、保存结果和共享 AI 核对状态，确认同一访问者和作品后按最新详情恢复 |
+| EditSubmissionForm | `components/student/EditSubmissionForm.tsx` | 同次提交的受控代码/语言/说明与 baseRevision，语言复用共享选项。正常保存采用权威详情、取消不写入，刷新不覆盖未保存输入或静默换版。可逆拒绝后新发起的普通详情刷新成功，可恢复同版本编辑资格；已进入评阅持续只读，较新保存回执优先，版本无效时关闭编辑。冲突或未知结果仍保留当前输入并锁住保存，通过本页显式读取作品、核对确认后继续，异常取消不绕过核对门禁。评阅时保留可复制的未保存修改，作品展示与共享 AI 区块使用同一当前详情。暂态读取失败时暂停展示与操作，保留原稿、基线、保存结果和 AI 核对状态，确认同一访问者和作品后恢复 |
 | RequestAiFeedbackButton | `components/student/RequestAiFeedbackButton.tsx` | 师生复用的申请按钮展示；disabled/pending 与动作回调由 SubmissionAiReview 提供，不独立持有资格或请求时序 |
 | AiProcessingHint | `components/student/AiProcessingHint.tsx` | 统一 AI 处理中提示；通用状态文案复用 UI Status |
 | SubmissionAutoRefresh | `components/student/SubmissionAutoRefresh.tsx` | 仅学生提交详情：以共享区块已接纳状态在 PENDING/RUNNING 或 FAILED 且计划重试时调用局部读取；操作中和待显式确认时暂停；终态及信息不足停止；沿用退避、失焦暂停和定时器清理，不用于草稿页 |
 | StudentTaskDetailPage | `app/student/classrooms/[classroomId]/tasks/[classroomTaskId]/page.tsx` | 实例教学内容与历史提交加载，基础信息复用共享难度显示，字段读源见 API Map；明确快照/后端参与资格控制提交，消费 completionStatus；组合共享 rubric 和提交表单，仅显式刷新，提示师生在提交详情主动申请 AI |
-| StudentSubmissionDetailPage | `app/student/submissions/[submissionId]/page.tsx` | 权威详情/反馈加载、返回导航及共享作品/AI 展示，限定状态自动刷新；query 不补业务事实。按顺序读取作品详情及反馈，任一暂态失败时移除作品、反馈和操作界面，在原页提供重试并维持编辑器位置。两项读取成功后核对会话访问者与作品 ID，明确拒绝时结束原编辑状态 |
+| StudentSubmissionDetailPage | `app/student/submissions/[submissionId]/page.tsx` | 权威详情/反馈加载、返回导航及共享作品/AI 展示，限定状态自动刷新；query 不补业务事实。先读作品再读反馈；反馈非空且首次详情缺有效固定时间时，另一次权威读取须确认同一作品已进入评阅，才组合展示。必需读取暂态失败时移除作品、反馈和操作，在原页提供重试并维持编辑器位置。确认会话访问者与作品 ID 后恢复编辑器；明确拒绝时结束原编辑状态 |
 
 共享文本教学展示：
 

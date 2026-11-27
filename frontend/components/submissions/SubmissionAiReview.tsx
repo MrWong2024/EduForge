@@ -13,6 +13,7 @@ import { fetchJson, BrowserFetchJsonError } from "@/lib/api/browser-client";
 import {
   toRequestAiFeedbackResponse,
   toSubmissionDetailResponse,
+  type SubmissionDetailResponse,
 } from "@/lib/api/types-student";
 import { SubmissionAiOperations } from "@/lib/learning-tasks/submission-ai-operations";
 import { RequestAiFeedbackButton } from "@/components/student/RequestAiFeedbackButton";
@@ -40,6 +41,9 @@ type Props = {
   autoRefresh: boolean;
   contentRevision?: number | null;
   suspended?: boolean;
+  beginExplicitDetailRead?: () =>
+    | ((detail: SubmissionDetailResponse) => void)
+    | undefined;
 };
 export function SubmissionAiReview(props: Props) {
   return <SubmissionAiReviewPanel key={props.submissionId} {...props} />;
@@ -51,6 +55,7 @@ function SubmissionAiReviewPanel({
   autoRefresh,
   contentRevision,
   suspended = false,
+  beginExplicitDetailRead,
 }: Props) {
   const router = useRouter();
   const [operations] = useState(
@@ -86,6 +91,7 @@ function SubmissionAiReviewPanel({
       if (suspendedRef.current || isPageRefreshing) return;
       const operation = operations.beginRead(explicit);
       if (!operation) return;
+      const receiveDetail = explicit ? beginExplicitDetailRead?.() : undefined;
       const abort = new AbortController();
       activeAbort.current = abort;
       setView(operations.view);
@@ -101,10 +107,8 @@ function SubmissionAiReviewPanel({
             ]),
           },
         );
-        const accepted = operations.finishRead(
-          operation,
-          toSubmissionDetailResponse(payload),
-        );
+        const detail = toSubmissionDetailResponse(payload);
+        const accepted = operations.finishRead(operation, detail);
         if (accepted === null) return;
         setView(operations.view);
         if (!accepted) {
@@ -117,6 +121,7 @@ function SubmissionAiReviewPanel({
         // Only this after-operation read updates the AI block. RSC props arriving
         // from an earlier refresh cannot replace its accepted status/eligibility.
         if (!suspendedRef.current && (explicit || autoRefresh)) {
+          receiveDetail?.(detail);
           startTransition(() => router.refresh());
         }
       } catch (error) {
@@ -131,7 +136,14 @@ function SubmissionAiReviewPanel({
         if (activeAbort.current === abort) activeAbort.current = null;
       }
     },
-    [autoRefresh, isPageRefreshing, operations, router, submissionId],
+    [
+      autoRefresh,
+      beginExplicitDetailRead,
+      isPageRefreshing,
+      operations,
+      router,
+      submissionId,
+    ],
   );
   const autoRead = useCallback(() => readDetail(false), [readDetail]);
   const handleRequest = async () => {

@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState, useTransition } from "react";
+import { useCallback, useRef, useState, useTransition } from "react";
 import type { FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import { SubmissionContent } from "@/components/submissions/SubmissionContent";
@@ -12,6 +12,7 @@ import {
   type UpdateSubmissionRequest,
 } from "@/lib/api/types-student";
 import {
+  acceptSubmissionEditingRead,
   canEditSubmission,
   captureSubmissionEditBaseline,
   countCodePoints,
@@ -19,6 +20,8 @@ import {
   getSubmissionTextError,
   isDraftRevisionCurrent,
   isSavedSubmissionRevision,
+  isSubmissionReviewStarted,
+  isSubmissionReviewStartedError,
   isValidContentRevision,
   planSubmissionEdit,
   selectSubmissionDisplayDetail,
@@ -75,10 +78,33 @@ function SubmissionEditor({
   const [checked, setChecked] = useState<SubmissionDetailResponse | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [reviewLocked, setReviewLocked] = useState(false);
   const [refreshing, startTransition] = useTransition();
   const inFlight = useRef(false);
+  const readSequence = useRef(0);
+  const acceptRead = useCallback(
+    (result: SubmissionDetailResponse, sequence: number) => {
+      if (result.id !== submissionId) return;
+      const latestSequence = readSequence.current;
+      setSaved((local) =>
+        acceptSubmissionEditingRead(local, result, sequence, latestSequence),
+      );
+    },
+    [submissionId],
+  );
+  const beginExplicitDetailRead = useCallback(() => {
+    if (inFlight.current) return;
+    const sequence = ++readSequence.current;
+    return (result: SubmissionDetailResponse) => acceptRead(result, sequence);
+  }, [acceptRead]);
   const current = detail && selectSubmissionDisplayDetail(detail, saved);
-  const canEdit = current !== null && canEditSubmission(current);
+  const observedReview =
+    (detail !== null && isSubmissionReviewStarted(detail)) ||
+    (saved !== null && isSubmissionReviewStarted(saved));
+  if (observedReview && !reviewLocked) setReviewLocked(true);
+  const isReviewLocked = reviewLocked || observedReview;
+  const canEdit =
+    current !== null && !isReviewLocked && canEditSubmission(current);
   const revisionChanged =
     current !== null &&
     draft !== null &&
@@ -107,7 +133,8 @@ function SubmissionEditor({
 
   const startEdit = () => {
     const baseline = current && captureSubmissionEditBaseline(current);
-    if (blocked || busy || refreshing || inFlight.current || !baseline) return;
+    if (blocked || busy || refreshing || inFlight.current || !canEdit || !baseline)
+      return;
     setDraft({ baseline, ...baseline.content });
     setBlocked(false);
     setChecked(null);
@@ -118,6 +145,7 @@ function SubmissionEditor({
       return;
     }
     inFlight.current = true;
+    const sequence = ++readSequence.current;
     setBusy(true);
     setBlocked(true);
     setChecked(null);
@@ -133,7 +161,7 @@ function SubmissionEditor({
         !isValidContentRevision(result.contentRevision)
       )
         throw new Error("Incomplete detail");
-      setSaved(result);
+      acceptRead(result, sequence);
       setChecked(result);
       if (!draft) setBlocked(false);
       setMessage(
@@ -199,6 +227,8 @@ function SubmissionEditor({
       return;
     }
     inFlight.current = true;
+    // A detail read begun before this save cannot clear its refusal.
+    const sequence = ++readSequence.current;
     setBusy(true);
     setMessage(null);
     setChecked(null);
@@ -234,6 +264,22 @@ function SubmissionEditor({
     } catch (error) {
       if (error instanceof BrowserFetchJsonError && error.status < 500) {
         setBlocked(error.status === 409 || error.status === 403);
+        if (error.status === 403 && current) {
+          acceptRead(
+            {
+              ...current,
+              editing: {
+                canEdit: false,
+                reason: null,
+                message: "当前无修改资格或已超过截止时间。",
+              },
+            },
+            sequence,
+          );
+        }
+        if (error.status === 409 && isSubmissionReviewStartedError(error.data)) {
+          setReviewLocked(true);
+        }
         setMessage(
           error.status === 409
             ? getSubmissionRevisionError(error.data)
@@ -350,8 +396,10 @@ function SubmissionEditor({
         )}
         {!canEdit ? (
           <p className="whitespace-pre-wrap break-words">
-            {current.editing.message ??
-              "当前修改资格不可用，请核对已保存作品或联系任课教师。"}
+            {isReviewLocked
+              ? "本次提交已进入评阅，不能再修改作品。"
+              : (current.editing.message ??
+                "当前修改资格不可用，请核对已保存作品或联系任课教师。")}
             {draft ? "当前输入仍保留，可复制或取消修改。" : ""}
           </p>
         ) : null}
@@ -428,6 +476,7 @@ function SubmissionEditor({
         review={current?.aiReview}
         autoRefresh
         suspended={!current}
+        beginExplicitDetailRead={beginExplicitDetailRead}
       />
     </>
   );
