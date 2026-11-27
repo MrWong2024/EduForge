@@ -1,18 +1,30 @@
+import {
+  assertAuthTestConnection,
+  authTestEnvironment,
+  openAuthTestConnection,
+} from './helpers/auth-test-environment';
 import { INestApplication, ValidationPipe } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { Test } from '@nestjs/testing';
-import { getModelToken } from '@nestjs/mongoose';
-import { Model, Types } from 'mongoose';
+import { Test, type TestingModule } from '@nestjs/testing';
+import { getConnectionToken, getModelToken } from '@nestjs/mongoose';
+import {
+  Aggregate,
+  Model,
+  Query,
+  Types,
+  type Connection,
+  type mongo,
+} from 'mongoose';
 import * as bcrypt from 'bcryptjs';
 import cookieParser from 'cookie-parser';
 import request from 'supertest';
 import { App } from 'supertest/types';
 import { AppModule } from '../src/app.module';
+import {
+  CLASSROOM_TASK_TRANSACTION_CONNECTION,
+  runClassroomReadSnapshot,
+} from '../src/lib/classroom-task-transaction';
 import { User } from '../src/modules/users/schemas/user.schema';
-import { Session } from '../src/modules/auth/schemas/session.schema';
-import { Course } from '../src/modules/courses/schemas/course.schema';
-import { Classroom } from '../src/modules/classrooms/schemas/classroom.schema';
-import { Enrollment } from '../src/modules/classrooms/enrollments/schemas/enrollment.schema';
 import { ClassroomTask } from '../src/modules/classrooms/classroom-tasks/schemas/classroom-task.schema';
 import { Task } from '../src/modules/learning-tasks/schemas/task.schema';
 import {
@@ -34,15 +46,35 @@ import { DefaultStubAiFeedbackProvider } from '../src/modules/learning-tasks/ai-
 import { ClassroomTaskResponseDto } from '../src/modules/classrooms/classroom-tasks/dto/classroom-task-response.dto';
 import { SubmissionResponseDto } from '../src/modules/learning-tasks/dto/submission-response.dto';
 import { SubmissionDetailResponseDto } from '../src/modules/learning-tasks/dto/submission-detail-response.dto';
-import {
-  assertLocalStandardTestAuthentication,
-  assertLocalStandardTestEnvironment,
-} from './helpers/local-test-database-auth';
+import { FeedbackResponseDto } from '../src/modules/learning-tasks/dto/feedback-response.dto';
 
 jest.setTimeout(90000);
 type Agent = ReturnType<typeof request.agent>;
 type Resource = { id: string; joinCode?: string };
 type List = { total: number; items: Array<{ id: string }> };
+type TemplateSummary = {
+  submissionsCount: number;
+  distinctStudentsCount: number;
+};
+type TemplateStats = TemplateSummary & { topTags: string[] };
+type TemplateIssues = {
+  summary: TemplateSummary;
+  topTags: unknown[];
+  topTypes: unknown[];
+  examples: unknown[];
+};
+const dbOptions = { timeoutMS: 5000, readPreference: 'primary' } as const;
+
+function withinReadBarrier<T>(promise: Promise<T>): Promise<T> {
+  let timer: ReturnType<typeof setTimeout>;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(
+      () => reject(new Error('33C report read barrier expired')),
+      7000,
+    );
+  });
+  return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
+}
 const missingSnapshot = '该课堂任务未保存发布内容，请教师重新布置后继续。';
 const oldContent = {
   title: 'Frozen A requirements',
@@ -67,13 +99,10 @@ const note = '  NOTE_ONLY_A1_独立标记\n\t说明保留缩进和换行。\n';
 
 describe('A1 classroom text task backend contract (HTTP)', () => {
   let app: INestApplication<App>;
-  let users: Model<User>,
-    sessions: Model<Session>,
-    courses: Model<Course>,
-    classrooms: Model<Classroom>;
-  let enrollments: Model<Enrollment>,
-    instances: Model<ClassroomTask>,
-    tasks: Model<Task>;
+  let moduleFixture: TestingModule | undefined;
+  let independent: Connection | undefined;
+  let fixtureWritesAllowed = false;
+  let instances: Model<ClassroomTask>, tasks: Model<Task>;
   let submissions: Model<Submission>,
     feedback: Model<Feedback>,
     jobs: Model<AiFeedbackJob>;
@@ -85,12 +114,15 @@ describe('A1 classroom text task backend contract (HTTP)', () => {
   let first: SubmissionResponseDto,
     second: SubmissionResponseDto,
     foreign: SubmissionResponseDto;
-  const userIds: Types.ObjectId[] = [],
-    courseIds: string[] = [],
-    classIds: string[] = [],
-    taskIds: string[] = [],
-    instanceIds: string[] = [];
+  const userIds = Array.from({ length: 4 }, () => new Types.ObjectId());
+  const teacherIds = userIds.slice(0, 2);
+  const studentIds = userIds.slice(2);
   const namespace = 'a1-text-' + Date.now();
+
+  const database = () => {
+    if (!independent?.db) throw new Error('Missing independent test database');
+    return independent.db;
+  };
 
   const makeTask = async (
     agent: Agent,
@@ -102,7 +134,6 @@ describe('A1 classroom text task backend contract (HTTP)', () => {
       .send({ ...content, visibility, status: 'PUBLISHED' })
       .expect(201);
     const id = (res.body as Resource).id;
-    taskIds.push(id);
     return id;
   };
   const publish = async (agent: Agent, classroom: Resource, id: string) => {
@@ -114,7 +145,6 @@ describe('A1 classroom text task backend contract (HTTP)', () => {
       })
       .expect(201);
     const body = res.body as ClassroomTaskResponseDto;
-    instanceIds.push(body.id);
     return body;
   };
   const submit = async (
@@ -168,15 +198,11 @@ describe('A1 classroom text task backend contract (HTTP)', () => {
     return app.get(AiFeedbackProcessor).processOnce(batch);
   };
   beforeAll(async () => {
-    assertLocalStandardTestEnvironment({
-      nodeEnv: process.env.NODE_ENV,
-      purpose: process.env.EDUFORGE_DATABASE_PURPOSE,
-      mongoUri: process.env.MONGO_URI,
-    });
-    const module = await Test.createTestingModule({
+    independent = await openAuthTestConnection();
+    moduleFixture = await Test.createTestingModule({
       imports: [AppModule],
     }).compile();
-    app = module.createNestApplication();
+    app = moduleFixture.createNestApplication();
     app.setGlobalPrefix('api');
     app.use(cookieParser());
     app.useGlobalPipes(
@@ -186,35 +212,33 @@ describe('A1 classroom text task backend contract (HTTP)', () => {
         forbidNonWhitelisted: true,
       }),
     );
-    await app.init();
-    users = app.get(getModelToken(User.name));
-    sessions = app.get(getModelToken(Session.name));
-    courses = app.get(getModelToken(Course.name));
-    classrooms = app.get(getModelToken(Classroom.name));
-    enrollments = app.get(getModelToken(Enrollment.name));
+    const appConnection = app.get<Connection>(getConnectionToken());
+    const transactionConnection = app.get<Connection>(
+      getConnectionToken(CLASSROOM_TASK_TRANSACTION_CONNECTION),
+    );
+    await assertAuthTestConnection(appConnection);
+    await assertAuthTestConnection(transactionConnection);
+    const users = app.get<Model<User>>(getModelToken(User.name));
     instances = app.get(getModelToken(ClassroomTask.name));
     tasks = app.get(getModelToken(Task.name));
     submissions = app.get(getModelToken(Submission.name));
     feedback = app.get(getModelToken(Feedback.name));
     jobs = app.get(getModelToken(AiFeedbackJob.name));
-    expect(process.env.NODE_ENV).toBe('test');
-    expect(process.env.EDUFORGE_DATABASE_PURPOSE).toBe('standard_test');
-    expect(users.db.name).toBe('eduforge_test');
-    users.db.set('maxTimeMS', 10000);
-    const database = users.db.db;
-    if (!database) throw new Error('Missing connected test database');
-    const auth = await database.command(
-      { connectionStatus: 1, showPrivileges: false },
-      { signal: AbortSignal.timeout(5000), readPreference: 'primary' },
+    await runClassroomReadSnapshot(transactionConnection, (snapshot) =>
+      snapshot
+        .model(submissions)
+        .exists({ _id: new Types.ObjectId() })
+        .session(snapshot.session)
+        .setOptions(snapshot.readOptions())
+        .exec(),
     );
-    assertLocalStandardTestAuthentication({
-      nodeEnv: process.env.NODE_ENV,
-      purpose: process.env.EDUFORGE_DATABASE_PURPOSE,
-      mongoUri: app.get(ConfigService).get<string>('MONGO_URI'),
-      databaseName: database.databaseName,
-      connectedHost: users.db.host,
-      authInfo: auth.authInfo,
-    });
+    const config = app.get(ConfigService);
+    expect(config.get('AI_FEEDBACK_PROVIDER')).toBe('stub');
+    expect(config.get('AI_FEEDBACK_WORKER_ENABLED')).toBe(false);
+    expect(config.get('MAIL_PROVIDER')).toBe('log');
+    config.set('LEARNING_TASK_SUBMISSION_COOLDOWN_MS', 0);
+    appConnection.set('maxTimeMS', 10000);
+    await app.init();
     expect(
       await jobs.countDocuments({
         status: {
@@ -226,23 +250,24 @@ describe('A1 classroom text task backend contract (HTTP)', () => {
         },
       }),
     ).toBe(0);
-    console.info(
-      'A1 database gate: standard_test / eduforge_test / local root@admin verified; namespace=' +
-        namespace,
-    );
-    const config = app.get(ConfigService);
-    expect(config.get('AI_FEEDBACK_PROVIDER')).toBe('stub');
-    expect(config.get('MAIL_PROVIDER')).toBe('log');
-    config.set('LEARNING_TASK_SUBMISSION_COOLDOWN_MS', 0);
+    console.info('A1 database gates passed', {
+      purpose: 'standard_test',
+      default: appConnection.db?.databaseName,
+      transaction: transactionConnection.db?.databaseName,
+      independent: database().databaseName,
+      snapshot: 'committed',
+      namespace,
+    });
     const agents: Agent[] = [];
+    fixtureWritesAllowed = true;
     for (const role of ['teacher', 'teacher', 'student', 'student']) {
       const email = namespace + '-' + agents.length + '@example.invalid';
-      const user = await users.create({
+      await users.create({
+        _id: userIds[agents.length],
         email,
         passwordHash: await bcrypt.hash('TeacherPass123!', 10),
         roles: [role],
       });
-      userIds.push(user._id);
       const agent = request
         .agent(app.getHttpServer())
         .timeout({ response: 5000, deadline: 10000 });
@@ -265,14 +290,12 @@ describe('A1 classroom text task backend contract (HTTP)', () => {
           })
           .expect(201)
       ).body as Resource;
-      courseIds.push(course.id);
       const classroom = (
         await agent
           .post('/api/classrooms')
           .send({ courseId: course.id, name: 'Synthetic A1 Classroom' })
           .expect(201)
       ).body as Resource;
-      classIds.push(classroom.id);
       created.push(classroom);
     }
     [classA, classB] = created;
@@ -288,79 +311,70 @@ describe('A1 classroom text task backend contract (HTTP)', () => {
 
   afterAll(async () => {
     try {
-      if (users) {
-        const ownedSubmissions = await submissions
-          .find({ studentId: { $in: userIds } })
-          .select('_id')
-          .lean()
-          .exec();
-        const ids = ownedSubmissions.map((item) => item._id);
-        await feedback.deleteMany({ submissionId: { $in: ids } });
-        await jobs.deleteMany({ submissionId: { $in: ids } });
-        await submissions.deleteMany({ _id: { $in: ids } });
-        await instances.deleteMany({
-          _id: { $in: instanceIds.map((id) => new Types.ObjectId(id)) },
-        });
-        await tasks.deleteMany({
-          _id: { $in: taskIds.map((id) => new Types.ObjectId(id)) },
-        });
-        await enrollments.deleteMany({
-          classroomId: { $in: classIds.map((id) => new Types.ObjectId(id)) },
-        });
-        await classrooms.deleteMany({
-          _id: { $in: classIds.map((id) => new Types.ObjectId(id)) },
-        });
-        await courses.deleteMany({
-          _id: { $in: courseIds.map((id) => new Types.ObjectId(id)) },
-        });
-        await sessions.deleteMany({ userId: { $in: userIds } });
-        await users.deleteMany({ _id: { $in: userIds } });
-        expect(
-          await feedback.countDocuments({ submissionId: { $in: ids } }),
-        ).toBe(0);
-        expect(await jobs.countDocuments({ submissionId: { $in: ids } })).toBe(
-          0,
-        );
-        expect(await submissions.countDocuments({ _id: { $in: ids } })).toBe(0);
-        expect(
-          await instances.countDocuments({
-            _id: { $in: instanceIds.map((id) => new Types.ObjectId(id)) },
-          }),
-        ).toBe(0);
-        expect(
-          await enrollments.countDocuments({
-            classroomId: { $in: classIds.map((id) => new Types.ObjectId(id)) },
-          }),
-        ).toBe(0);
-        expect(await users.countDocuments({ _id: { $in: userIds } })).toBe(0);
-        expect(
-          await sessions.countDocuments({ userId: { $in: userIds } }),
-        ).toBe(0);
-        expect(
-          await tasks.countDocuments({
-            _id: { $in: taskIds.map((id) => new Types.ObjectId(id)) },
-          }),
-        ).toBe(0);
-        expect(
-          await classrooms.countDocuments({
-            _id: { $in: classIds.map((id) => new Types.ObjectId(id)) },
-          }),
-        ).toBe(0);
-        expect(
-          await courses.countDocuments({
-            _id: { $in: courseIds.map((id) => new Types.ObjectId(id)) },
-          }),
-        ).toBe(0);
-        console.info('A1 scoped cleanup verified: ' + namespace);
+      try {
+        if (app) await app.close();
+        else await moduleFixture?.close();
+      } finally {
+        if (fixtureWritesAllowed) await cleanupFixtures();
       }
     } finally {
-      if (app) {
-        await app.close();
-        if (users) expect(users.db.readyState).toBe(0);
-        console.info('A1 app/DB closed');
+      try {
+        await independent?.close();
+      } finally {
+        authTestEnvironment.restore();
       }
     }
   });
+
+  async function cleanupFixtures() {
+    const db = database();
+    const findIds = async (
+      collection: string,
+      filter: mongo.Filter<mongo.Document>,
+    ) =>
+      (
+        await db
+          .collection(collection)
+          .find(filter, { ...dbOptions, projection: { _id: 1 } })
+          .toArray()
+      ).map(({ _id }) => _id);
+    const ownClassrooms = { teacherId: { $in: teacherIds } };
+    const ownInstances = {
+      classroomId: { $in: await findIds('classrooms', ownClassrooms) },
+    };
+    const ownSubmissions = { studentId: { $in: studentIds } };
+    const submissionLinks = {
+      submissionId: { $in: await findIds('submissions', ownSubmissions) },
+    };
+    const authorScope = { createdBy: { $in: teacherIds } };
+    const accountLinks = { userId: { $in: userIds } };
+    const owned: [string, mongo.Filter<mongo.Document>][] = [
+      ['feedbacks', submissionLinks],
+      ['aifeedbackjobs', submissionLinks],
+      ['submissions', ownSubmissions],
+      ['enrollments', { ...ownInstances, ...accountLinks }],
+      ['classroomtasks', ownInstances],
+      ['classrooms', ownClassrooms],
+      ['tasks', authorScope],
+      ['courses', authorScope],
+      ['sessions', accountLinks],
+      ['passwordresettokens', accountLinks],
+      ['users', { _id: { $in: userIds } }],
+    ];
+    for (const [collection, filter] of owned) {
+      await db.collection(collection).deleteMany(filter, { timeoutMS: 5000 });
+    }
+    const residual: Record<string, number> = {};
+    for (const [collection, filter] of owned) {
+      residual[collection] = await db
+        .collection(collection)
+        .countDocuments(filter, dbOptions);
+    }
+    console.info('A1 independent scoped cleanup', residual);
+    expect(Object.values(residual)).toEqual(
+      Array<number>(owned.length).fill(0),
+    );
+  }
 
   it('removes task stage across task and classroom contracts', async () => {
     const templatesUrl = '/api/learning-tasks/tasks';
@@ -512,7 +526,6 @@ describe('A1 classroom text task backend contract (HTTP)', () => {
       })
       .expect(201);
     const template = created.body as Resource & { difficulty?: string };
-    taskIds.push(template.id);
     const objectId = new Types.ObjectId(template.id);
     const taskUrl = templatesUrl + '/' + template.id;
     expect(template.difficulty).toBe('easy');
@@ -549,7 +562,6 @@ describe('A1 classroom text task backend contract (HTTP)', () => {
       })
       .expect(201);
     const omittedTemplate = omitted.body as Resource;
-    taskIds.push(omittedTemplate.id);
     expect(omitted.body as object).not.toHaveProperty('difficulty');
     expect(
       await tasks.collection.findOne({
@@ -620,7 +632,6 @@ describe('A1 classroom text task backend contract (HTTP)', () => {
         })
         .expect(201);
       const id = (response.body as Resource).id;
-      taskIds.push(id);
       expect((response.body as { difficulty?: string }).difficulty).toBe(
         difficulty,
       );
@@ -1024,15 +1035,14 @@ describe('A1 classroom text task backend contract (HTTP)', () => {
       await teacherA
         .get('/api/learning-tasks/tasks/' + taskId + '/reports/common-issues')
         .expect(200)
-    ).body as {
-      summary: { submissionsCount: number; distinctStudentsCount: number };
-      topTags: unknown[];
-    };
+    ).body as TemplateIssues;
     expect(report.summary).toEqual({
       submissionsCount: 3,
       distinctStudentsCount: 1,
     });
     expect(report.topTags).toEqual([]);
+    expect(report.topTypes).toEqual([]);
+    expect(report.examples).toEqual([]);
     const mine = (
       await studentA
         .get('/api/learning-tasks/tasks/' + taskId + '/submissions/mine')
@@ -1053,6 +1063,222 @@ describe('A1 classroom text task backend contract (HTTP)', () => {
       }),
     ).toBe(0);
   });
+
+  it.each(['stats', 'reports/common-issues'] as const)(
+    '33C %s reads one authorized submission set during a first submit',
+    async (endpoint) => {
+      const template = await makeTask(teacherA);
+      const instance = await publish(teacherA, classA, template);
+      const path = `/api/learning-tasks/tasks/${template}/${endpoint}`;
+      const readReport = async () => {
+        const response = await teacherA.get(path).expect(200);
+        const body: unknown = response.body;
+        if (endpoint === 'stats') return body as TemplateStats;
+        const { summary, topTags, topTypes, examples } = body as TemplateIssues;
+        return { summary, topTags, topTypes, examples };
+      };
+      const emptyCounts = { submissionsCount: 0, distinctStudentsCount: 0 };
+      const emptyReport =
+        endpoint === 'stats'
+          ? { ...emptyCounts, topTags: [] }
+          : { summary: emptyCounts, topTags: [], topTypes: [], examples: [] };
+      expect(await readReport()).toEqual(emptyReport);
+
+      let reach = () => {};
+      let release = () => {};
+      const reached = new Promise<void>((resolve) => {
+        reach = resolve;
+      });
+      const released = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      const order: string[] = [];
+      const holdCounts = async (observation: string) => {
+        order.push(observation);
+        reach();
+        await withinReadBarrier(released);
+      };
+      const isTemplateScope = (filter: Record<string, unknown>) =>
+        filter.taskId instanceof Types.ObjectId &&
+        filter.taskId.equals(template) &&
+        filter.classroomTaskId !== undefined;
+
+      const queryExec = Object.getOwnPropertyDescriptor(Query.prototype, 'exec')
+        ?.value as (this: Query<unknown, unknown>) => Promise<unknown>;
+      const querySpy = jest
+        .spyOn(Query.prototype, 'exec')
+        .mockImplementation(async function (this: Query<unknown, unknown>) {
+          const query = this as Query<unknown, unknown> & { op: string };
+          if (
+            this.model.modelName !== Submission.name ||
+            !isTemplateScope(this.getFilter())
+          ) {
+            return Reflect.apply(queryExec, this, []);
+          }
+          if (query.op === 'distinct') {
+            await withinReadBarrier(released);
+            const rows = (await Reflect.apply(
+              queryExec,
+              this,
+              [],
+            )) as Types.ObjectId[];
+            order.push(`distinct returned ${rows.length}`);
+            return rows;
+          }
+          const result = await Reflect.apply(queryExec, this, []);
+          if (query.op === 'countDocuments') {
+            expect(result).toBe(0);
+            await holdCounts('count returned 0');
+          }
+          return result;
+        });
+      const aggregateExec = Object.getOwnPropertyDescriptor(
+        Aggregate.prototype,
+        'exec',
+      )?.value as (this: Aggregate<unknown>) => Promise<unknown>;
+      const aggregateSpy = jest
+        .spyOn(Aggregate.prototype, 'exec')
+        .mockImplementation(async function (this: Aggregate<unknown>) {
+          const model = this.model().modelName;
+          const pipeline = this.pipeline();
+          const [first, lookup] = pipeline;
+          if (model === Feedback.name && lookup && '$lookup' in lookup) {
+            const match = lookup.$lookup.pipeline?.[0];
+            if (match && '$match' in match && isTemplateScope(match.$match)) {
+              await withinReadBarrier(released);
+            }
+          }
+
+          const result = await Reflect.apply(aggregateExec, this, []);
+          const isSummary =
+            model === Submission.name &&
+            first &&
+            '$match' in first &&
+            isTemplateScope(first.$match) &&
+            pipeline.some(
+              (stage) =>
+                '$group' in stage && 'distinctStudentsCount' in stage.$group,
+            );
+          if (isSummary) {
+            const [summary] = result as TemplateSummary[];
+            expect(summary ?? emptyCounts).toEqual(emptyCounts);
+            await holdCounts('summary returned 0/0');
+          }
+          return result;
+        });
+      const pending = readReport();
+      void pending.catch(() => undefined);
+      const tag = 'naming';
+      const message = '33C first teacher feedback';
+      const suggestion = 'Use consistent names.';
+      let created: SubmissionResponseDto;
+      let during: TemplateStats | TemplateIssues;
+      try {
+        await withinReadBarrier(
+          Promise.race([
+            reached,
+            pending.then(() => {
+              throw new Error(
+                '33C report completed without reaching its submission read',
+              );
+            }),
+          ]),
+        );
+        created = await submit(studentA, classA, instance);
+        order.push('student POST returned 201');
+        const storedSubmission = await database()
+          .collection('submissions')
+          .findOne({ _id: new Types.ObjectId(created.id) }, dbOptions);
+        expect(storedSubmission).toMatchObject({
+          studentId: studentIds[0],
+          classroomTaskId: new Types.ObjectId(instance.id),
+          taskId: new Types.ObjectId(template),
+        });
+        const result = await teacherA
+          .post(`/api/learning-tasks/submissions/${created.id}/feedback`)
+          .send({
+            expectedRevision: 0,
+            source: FeedbackSource.Teacher,
+            type: FeedbackType.Other,
+            severity: FeedbackSeverity.Warn,
+            message,
+            suggestion,
+            tags: [tag],
+          })
+          .expect(201);
+        const feedbackId = (result.body as FeedbackResponseDto).id;
+        const storedFeedback = await database()
+          .collection('feedbacks')
+          .findOne({ _id: new Types.ObjectId(feedbackId) }, dbOptions);
+        expect(storedFeedback).toMatchObject({
+          submissionId: new Types.ObjectId(created.id),
+          createdBy: teacherIds[0],
+          source: FeedbackSource.Teacher,
+          tags: [tag],
+        });
+        order.push(
+          'teacher feedback POST returned 201 and both rows were read independently',
+        );
+        order.push('report released');
+        release();
+        during = await pending;
+      } finally {
+        release();
+        await pending.catch(() => undefined);
+        aggregateSpy.mockRestore();
+        querySpy.mockRestore();
+      }
+
+      const next = await readReport();
+      const expectedAfter = (submissionsCount: number) => {
+        const counts = { submissionsCount, distinctStudentsCount: 1 };
+        return endpoint === 'stats'
+          ? { ...counts, topTags: [tag] }
+          : {
+              summary: counts,
+              topTags: [
+                {
+                  tag,
+                  count: 1,
+                  severityBreakdown: { INFO: 0, WARN: 1, ERROR: 0 },
+                },
+              ],
+              topTypes: [{ type: FeedbackType.Other, count: 1 }],
+              examples: [
+                {
+                  tag,
+                  count: 1,
+                  samples: [
+                    {
+                      submissionId: created.id,
+                      message,
+                      suggestion,
+                      severity: FeedbackSeverity.Warn,
+                    },
+                  ],
+                },
+              ],
+            };
+      };
+      const secondSubmission = await submit(studentA, classA, instance);
+      const repeated = await readReport();
+      console.info(
+        `33C ${endpoint} formal HTTP evidence ${JSON.stringify({
+          order,
+          submissionId: created.id,
+          secondSubmissionId: secondSubmission.id,
+          studentId: studentIds[0],
+          during,
+          next,
+          repeated,
+        })}`,
+      );
+      expect(secondSubmission.id).not.toBe(created.id);
+      expect(next).toEqual(expectedAfter(1));
+      expect(repeated).toEqual(expectedAfter(2));
+      expect(during).toEqual(emptyReport);
+    },
+  );
 
   it('excludes native invalid classroom links from lists and rejects their public operations without writes', async () => {
     const template = await makeTask(teacherA);
@@ -1089,15 +1315,17 @@ describe('A1 classroom text task backend contract (HTTP)', () => {
       status: SubmissionStatus.Submitted,
     }));
     await nativeSubmissions.insertMany(invalid);
-    const existingFeedback = await feedback.create({
-      submissionId: invalid[0]._id,
-      createdBy: userIds[0],
-      source: FeedbackSource.Teacher,
-      type: FeedbackType.Other,
-      severity: FeedbackSeverity.Warn,
-      message: 'Native unbound feedback fixture',
-      tags: ['naming'],
-    });
+    const [existingFeedback] = await feedback.insertMany(
+      invalid.map(({ _id }) => ({
+        submissionId: _id,
+        createdBy: userIds[0],
+        source: FeedbackSource.Teacher,
+        type: FeedbackType.Other,
+        severity: FeedbackSeverity.Warn,
+        message: 'Native unbound feedback fixture',
+        tags: ['naming'],
+      })),
+    );
     const filter = { _id: { $in: invalid.map((item) => item._id) } };
     const before = await nativeSubmissions
       .find(filter)
@@ -1150,15 +1378,14 @@ describe('A1 classroom text task backend contract (HTTP)', () => {
       await teacherA
         .get('/api/learning-tasks/tasks/' + template + '/reports/common-issues')
         .expect(200)
-    ).body as {
-      summary: { submissionsCount: number; distinctStudentsCount: number };
-      topTags: unknown[];
-    };
+    ).body as TemplateIssues;
     expect(report.summary).toEqual({
       submissionsCount: 1,
       distinctStudentsCount: 1,
     });
     expect(report.topTags).toEqual([]);
+    expect(report.topTypes).toEqual([]);
+    expect(report.examples).toEqual([]);
 
     const url = '/api/learning-tasks/submissions/' + invalid[0]._id.toString();
     const invalidMessage = 'Submission has no valid classroom task';
@@ -1206,7 +1433,7 @@ describe('A1 classroom text task backend contract (HTTP)', () => {
       await feedback.collection.findOne({ _id: existingFeedback._id }),
     ).toEqual(feedbackBefore);
     const related = { submissionId: { $in: invalid.map((item) => item._id) } };
-    expect(await feedback.countDocuments(related)).toBe(1);
+    expect(await feedback.countDocuments(related)).toBe(invalid.length);
     expect(await jobs.countDocuments(related)).toBe(0);
   });
 
@@ -1229,7 +1456,6 @@ describe('A1 classroom text task backend contract (HTTP)', () => {
         })
         .expect(201);
       const instance = response.body as ClassroomTaskResponseDto;
-      instanceIds.push(instance.id);
       created.push(instance);
       expect(instance.settings).toEqual({ allowLate: example.allowLate });
       const stored = await instances.collection.findOne({
@@ -1534,7 +1760,6 @@ describe('A1 classroom text task backend contract (HTTP)', () => {
       publishedAt: new Date(),
       status: 'ACTIVE',
     });
-    instanceIds.push(old._id.toString());
     const legacyInstanceBefore = await instances.collection.findOne({
       _id: old._id,
     });

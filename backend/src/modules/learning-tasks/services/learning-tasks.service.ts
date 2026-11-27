@@ -16,7 +16,9 @@ import type { Connection, QueryFilter, UpdateQuery } from 'mongoose';
 import { isDeepStrictEqual } from 'node:util';
 import {
   CLASSROOM_TASK_TRANSACTION_CONNECTION,
+  runClassroomReadSnapshot,
   runClassroomTaskTransaction,
+  type ClassroomReadSnapshot,
   type ClassroomTaskTransaction,
 } from '../../../lib/classroom-task-transaction';
 import { MISSING_TASK_SNAPSHOT_MESSAGE } from '../../classrooms/classroom-tasks/classroom-task-content';
@@ -25,7 +27,10 @@ import {
   EnrollmentRole,
   EnrollmentStatus,
 } from '../../classrooms/enrollments/schemas/enrollment.schema';
-import { teacherSubmissionScope } from './teacher-submission-scope';
+import {
+  aggregateScopedSubmissionCounts,
+  teacherSubmissionScope,
+} from './teacher-submission-scope';
 import { Task, TaskStatus } from '../schemas/task.schema';
 import { Submission, SubmissionStatus } from '../schemas/submission.schema';
 import { Feedback, FeedbackSource } from '../schemas/feedback.schema';
@@ -101,7 +106,6 @@ type SubmissionDetailClassroomLean = Pick<Classroom, 'teacherId'> & WithId;
 type ParticipationClassroomLean = Pick<Classroom, 'status'> & WithId;
 type PublisherSummary = { id: string; name?: string };
 type PublisherUserLean = Pick<User, 'name'> & WithId;
-type IdOnly = WithId;
 type SubmissionCooldownSource = Pick<Submission, 'submittedAt'> &
   WithId &
   WithTimestamps;
@@ -967,9 +971,24 @@ export class LearningTasksService {
   }
 
   async getStats(taskId: string, userId: string) {
-    const task = await this.taskModel
+    return runClassroomReadSnapshot(
+      this.classroomTaskTransactionConnection,
+      (snapshot) => this.readStats(taskId, userId, snapshot),
+    );
+  }
+
+  private async readStats(
+    taskId: string,
+    userId: string,
+    snapshot: ClassroomReadSnapshot,
+  ) {
+    const task = await snapshot
+      .model(this.taskModel)
       .findById(taskId)
-      .lean<TaskWithMeta>()
+      .select('createdBy')
+      .session(snapshot.session)
+      .setOptions(snapshot.readOptions())
+      .lean<Pick<Task, 'createdBy'>>()
       .exec();
     if (!task) {
       throw new NotFoundException('Task not found');
@@ -983,35 +1002,39 @@ export class LearningTasksService {
       userId,
       this.classroomModel,
       this.classroomTaskModel,
+      snapshot,
     );
-    const [submissionsCount, distinctStudents] = await Promise.all([
-      this.submissionModel.countDocuments(filter),
-      this.submissionModel.distinct('studentId', filter),
-    ]);
-
-    const submissionIds: IdOnly[] = await this.submissionModel
-      .find(filter)
-      .select('_id')
-      .lean()
-      .exec();
-
-    let topTags: string[] = [];
-    if (submissionIds.length > 0) {
-      const ids = submissionIds.map((item) => item._id);
-      const tagStats = await this.feedbackModel.aggregate<TagStat>([
-        { $match: { submissionId: { $in: ids } } },
-        { $unwind: '$tags' },
-        { $group: { _id: '$tags', count: { $sum: 1 } } },
+    const counts = await aggregateScopedSubmissionCounts(
+      this.submissionModel,
+      filter,
+      snapshot,
+    );
+    const tagStats = await snapshot
+      .model(this.submissionModel)
+      .aggregate<TagStat>([
+        { $match: filter },
+        { $project: { _id: 1 } },
+        {
+          $lookup: {
+            from: this.feedbackModel.collection.name,
+            localField: '_id',
+            foreignField: 'submissionId',
+            pipeline: [{ $project: { _id: 0, tags: 1 } }],
+            as: 'feedback',
+          },
+        },
+        { $unwind: '$feedback' },
+        { $unwind: '$feedback.tags' },
+        { $group: { _id: '$feedback.tags', count: { $sum: 1 } } },
         { $sort: { count: -1 } },
         { $limit: LearningTasksService.TOP_TAGS_LIMIT },
-      ]);
-      topTags = tagStats.map((tag) => tag._id);
-    }
+      ])
+      .option({ session: snapshot.session, ...snapshot.readOptions() })
+      .exec();
 
     return {
-      submissionsCount,
-      distinctStudentsCount: distinctStudents.length,
-      topTags,
+      ...counts,
+      topTags: tagStats.map((tag) => tag._id),
     };
   }
 

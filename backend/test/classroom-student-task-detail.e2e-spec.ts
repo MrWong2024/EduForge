@@ -616,17 +616,21 @@ describe('Classroom Student Task Detail (e2e)', () => {
     };
     const detailUrl = `/api/classrooms/${classroomId}/tasks/${classroomTaskId}/my-task-detail`;
     const service = app.get<{
-      getFeedbackSummariesBySubmissionIds(
+      getFeedbackStatsBySubmissionIds(
         ids: Types.ObjectId[],
         includeTagDetails?: boolean,
-      ): Promise<Map<string, SubmissionDetailItem['feedbackSummary']>>;
+        includeAllSourceCounts?: boolean,
+      ): Promise<{
+        summaryMap: Map<string, SubmissionDetailItem['feedbackSummary']>;
+        countMap: Map<string, number>;
+      }>;
       getCompletionFeedbacksBySubmissionId(
         id: Types.ObjectId,
       ): Promise<CompletionFeedback[]>;
     }>(ClassroomTasksService);
-    const readSummaries = service.getFeedbackSummariesBySubmissionIds.bind(
+    const readFeedbackStats = service.getFeedbackStatsBySubmissionIds.bind(
       service,
-    ) as typeof service.getFeedbackSummariesBySubmissionIds;
+    ) as typeof service.getFeedbackStatsBySubmissionIds;
     const readCompletion = service.getCompletionFeedbacksBySubmissionId.bind(
       service,
     ) as typeof service.getCompletionFeedbacksBySubmissionId;
@@ -651,16 +655,20 @@ describe('Classroom Student Task Detail (e2e)', () => {
       );
     };
     const summarySpy = jest
-      .spyOn(service, 'getFeedbackSummariesBySubmissionIds')
-      .mockImplementation(async (ids, includeTags) => {
-        const summaries = await readSummaries(ids, includeTags);
+      .spyOn(service, 'getFeedbackStatsBySubmissionIds')
+      .mockImplementation(async (ids, includeTags, includeAllCounts) => {
+        const stats = await readFeedbackStats(
+          ids,
+          includeTags,
+          includeAllCounts,
+        );
         if (ids.some((id) => id.equals(submissionId))) {
           await hold(
             'summary aggregate',
-            summaries.get(submission.id)?.totalItems ?? 0,
+            stats.summaryMap.get(submission.id)?.totalItems ?? 0,
           );
         }
-        return summaries;
+        return stats;
       });
     const completionSpy = jest
       .spyOn(service, 'getCompletionFeedbacksBySubmissionId')

@@ -1243,18 +1243,15 @@ export class ClassroomTasksService {
     }
 
     const submissionIds = submissions.map((submission) => submission._id);
-    const [statusMap, feedbackSummaryMap, feedbackCountMap] = await Promise.all(
-      [
+    const [statusMap, { summaryMap: feedbackSummaryMap, countMap }] =
+      await Promise.all([
         this.aiFeedbackJobService.getStatusMapBySubmissionIds(submissionIds),
-        this.getFeedbackSummariesBySubmissionIds(
+        this.getFeedbackStatsBySubmissionIds(
           submissionIds,
           includeTagDetails,
+          includeAttempts,
         ),
-        includeAttempts
-          ? this.getFeedbackCountsBySubmissionIds(submissionIds)
-          : Promise.resolve(new Map<string, number>()),
-      ],
-    );
+      ]);
 
     const submissionsByStudentId = new Map<
       string,
@@ -1323,8 +1320,7 @@ export class ClassroomTasksService {
               aiFeedbackStatus:
                 statusMap.get(submission._id.toString()) ??
                 AiFeedbackStatus.NotRequested,
-              feedbackCount:
-                feedbackCountMap.get(submission._id.toString()) ?? 0,
+              feedbackCount: countMap.get(submission._id.toString()) ?? 0,
               feedbackSummary,
             };
           })
@@ -1436,22 +1432,23 @@ export class ClassroomTasksService {
     const submissionIds = submissions.map((submission) => submission._id);
     const latestSubmissionId = submissionIds.at(-1);
     const historyIds = submissionIds.slice(0, -1);
-    const [statusMap, feedbackSummaryMap, feedbackItemsMap, latestFeedbacks] =
-      await Promise.all([
-        this.aiFeedbackJobService.getStatusMapBySubmissionIds(submissionIds),
-        this.getFeedbackSummariesBySubmissionIds(historyIds),
-        includeFeedbackItems
-          ? this.getFeedbackItemsPreviewBySubmissionIds(
-              historyIds,
-              feedbackLimit,
-            )
-          : Promise.resolve(
-              new Map<string, SubmissionDetailItem['feedbackItems']>(),
-            ),
-        latestSubmissionId
-          ? this.getCompletionFeedbacksBySubmissionId(latestSubmissionId)
-          : Promise.resolve([]),
-      ]);
+    const [
+      statusMap,
+      { summaryMap: feedbackSummaryMap },
+      feedbackItemsMap,
+      latestFeedbacks,
+    ] = await Promise.all([
+      this.aiFeedbackJobService.getStatusMapBySubmissionIds(submissionIds),
+      this.getFeedbackStatsBySubmissionIds(historyIds),
+      includeFeedbackItems
+        ? this.getFeedbackItemsPreviewBySubmissionIds(historyIds, feedbackLimit)
+        : Promise.resolve(
+            new Map<string, SubmissionDetailItem['feedbackItems']>(),
+          ),
+      latestSubmissionId
+        ? this.getCompletionFeedbacksBySubmissionId(latestSubmissionId)
+        : Promise.resolve([]),
+    ]);
     const latestAiFeedbacks = latestFeedbacks.filter(
       (feedback) => feedback.source === FeedbackSource.AI,
     );
@@ -1667,24 +1664,33 @@ export class ClassroomTasksService {
     return summary;
   }
 
-  private async getFeedbackSummariesBySubmissionIds(
+  private async getFeedbackStatsBySubmissionIds(
     ids: Types.ObjectId[],
     includeTagDetails = true,
+    includeAllSourceCounts = false,
   ) {
     const summaryMap = new Map<string, SubmissionFeedbackSummary>();
+    const countMap = new Map<string, number>();
     if (ids.length === 0) {
-      return summaryMap;
+      return { summaryMap, countMap };
     }
 
     type FeedbackSummaryFacetResult = {
       totals: Array<{ _id: Types.ObjectId; totalItems: number }>;
       severities: FeedbackSummarySeverityAgg[];
       tags?: FeedbackSummaryTagAgg[];
+      allCounts?: FeedbackCountAgg[];
     };
 
-    const facet: Record<string, PipelineStage[]> = {
-      totals: [{ $group: { _id: '$submissionId', totalItems: { $sum: 1 } } }],
+    const aiMatchStages: PipelineStage.FacetPipelineStage[] =
+      includeAllSourceCounts ? [{ $match: { source: FeedbackSource.AI } }] : [];
+    const facet: PipelineStage.Facet['$facet'] = {
+      totals: [
+        ...aiMatchStages,
+        { $group: { _id: '$submissionId', totalItems: { $sum: 1 } } },
+      ],
       severities: [
+        ...aiMatchStages,
         {
           $group: {
             _id: {
@@ -1696,8 +1702,14 @@ export class ClassroomTasksService {
         },
       ],
     };
+    if (includeAllSourceCounts) {
+      facet.allCounts = [
+        { $group: { _id: '$submissionId', count: { $sum: 1 } } },
+      ];
+    }
     if (includeTagDetails) {
       facet.tags = [
+        ...aiMatchStages,
         { $match: { tags: { $exists: true, $ne: [] } } },
         { $unwind: '$tags' },
         {
@@ -1718,14 +1730,17 @@ export class ClassroomTasksService {
         {
           $match: {
             submissionId: { $in: ids },
-            source: FeedbackSource.AI,
+            ...(includeAllSourceCounts ? {} : { source: FeedbackSource.AI }),
           },
         },
         { $facet: facet },
-      ] as PipelineStage[])
+      ])
       .exec();
 
     const aggregate = result[0] ?? { totals: [], severities: [], tags: [] };
+    for (const row of aggregate.allCounts ?? []) {
+      countMap.set(row._id.toString(), row.count);
+    }
 
     for (const total of aggregate.totals) {
       summaryMap.set(total._id.toString(), {
@@ -1762,7 +1777,7 @@ export class ClassroomTasksService {
       }
     }
 
-    return summaryMap;
+    return { summaryMap, countMap };
   }
 
   private findFirstAttemptSubmission(

@@ -270,6 +270,12 @@ const createHarness = (options: HarnessOptions = {}) => {
       .mockResolvedValue(
         activeStudentIds.map((studentId) => studentId.toString()),
       ),
+    countStudents: jest.fn().mockResolvedValue(activeStudentIds.length),
+    listActiveStudentIdsByClassroomPage: jest
+      .fn()
+      .mockResolvedValue(
+        activeStudentIds.map((studentId) => studentId.toString()),
+      ),
   };
   const aiFeedbackJobService = {
     getStatusMapBySubmissionIds: jest.fn().mockResolvedValue(new Map()),
@@ -1083,6 +1089,79 @@ describe('ClassroomTasksService listPublishableTaskTemplates publisher contract'
     });
     expect(itemsPipeline).toContainEqual({ $skip: 10 });
     expect(itemsPipeline).toContainEqual({ $limit: 10 });
+  });
+});
+
+describe('ClassroomTasksService getLearningTrajectory feedback', () => {
+  it('reads all attempt counts and AI summary in one scoped aggregation', async () => {
+    const base = createHarness();
+    const submission = submissionFixture({
+      classroomTaskId: base.ids.classroomTaskId,
+      taskId: base.ids.taskId,
+      studentId: base.ids.studentId,
+      attemptNo: 1,
+    });
+    const harness = createHarness({ submissions: [submission] });
+    harness.feedbackModel.aggregate.mockReturnValueOnce(
+      makeAggregate([
+        {
+          allCounts: [{ _id: submission._id, count: 2 }],
+          totals: [{ _id: submission._id, totalItems: 1 }],
+          severities: [
+            {
+              _id: {
+                submissionId: submission._id,
+                severity: FeedbackSeverity.Info,
+              },
+              count: 1,
+            },
+          ],
+        },
+      ]),
+    );
+    const response = await harness.service.getLearningTrajectory(
+      harness.ids.classroomId.toString(),
+      harness.ids.classroomTaskId.toString(),
+      { includeTagDetails: 'false' },
+      harness.ids.studentId.toString(),
+    );
+    expect(harness.feedbackModel.aggregate).toHaveBeenCalledTimes(1);
+    expect(harness.feedbackModel.aggregate).toHaveBeenCalledWith([
+      { $match: { submissionId: { $in: [submission._id] } } },
+      {
+        $facet: {
+          allCounts: [{ $group: { _id: '$submissionId', count: { $sum: 1 } } }],
+          totals: [
+            { $match: { source: FeedbackSource.AI } },
+            { $group: { _id: '$submissionId', totalItems: { $sum: 1 } } },
+          ],
+          severities: [
+            { $match: { source: FeedbackSource.AI } },
+            {
+              $group: {
+                _id: { submissionId: '$submissionId', severity: '$severity' },
+                count: { $sum: 1 },
+              },
+            },
+          ],
+        },
+      },
+    ]);
+    expect(response.items[0]?.attempts[0]).toMatchObject({
+      feedbackCount: 2,
+      feedbackSummary: {
+        totalItems: 1,
+        severityBreakdown: { INFO: 1, WARN: 0, ERROR: 0 },
+        topTags: [],
+      },
+    });
+    expect(response.items[0]?.trend).toEqual({
+      errorCountFirst: 0,
+      errorCountLatest: 0,
+      errorDelta: null,
+      topTagsFirst: [],
+      topTagsLatest: [],
+    });
   });
 });
 

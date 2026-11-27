@@ -209,6 +209,7 @@ Global SoT 只保留理解跨 Service workflow 必需的稳定不变量，不追
   - Submission 与 Feedback/Job 不组成跨集合事务。固定后关联写失败、超时或返回不确定均不解锁；详情仍显示不能修改，客户端保留草稿，先读权威详情/反馈列表再由用户明确续行。Job 始终沿 submissionId 唯一键幂等，不重置 FAILED/DEAD/SUCCEEDED、不重新排队。
   - 教师反馈 POST 显式挑选规范业务 payload，版本前置不 spread 进文档。命中反馈复合唯一键时，查回后核对 submission、作者及完整规范 source/type/severity/message/suggestion/tags/scoreHint，完全一致返回既有反馈，不同明确冲突。其它 E11000 继续失败。历史缺字段只读兼容、不迁移、不修复。
   - 提交详情复用 `buildAiReviewSummary` 对同一 Job 的所有预留请求（含失败尝试）构造用量摘要：各细分独立检查完整性，派生项先逐请求验证再汇总，避免跨请求异常相互抵消；未知及超安全范围不输出失真数值。摘要只读派生，不写回 requests 或升级 budgetVersion；公开字段、包含关系及历史口径见 [Submission DTO](./handoff-backend-dto-cheatsheet.md#submission-request--response-family)。
+  - 模板统计和共性问题各自在既有命名连接上开启一笔只读快照。作者、班级与实例范围、作品数、去重学生数及反馈均读取同一时点。模板统计在数据库内关联反馈，保留全来源标签和最多 5 项的口径。共性问题见 [Card 09](#service-card-09)。
 - Isolation: 学生只访问本人 Submission；单条读取及写入复用课堂关联上下文校验，教师管理权仅沿实例定位所属班级 owner。Schema required 不替代运行时异常数据保护，关联失败早于内容更新、评阅固定和关联写入；AI 明细仍在授权之后读取。教师默认提交列表与计数共同过滤当前 Enrollment ACTIVE，移除学生历史记录保留。模板级 list/stats 与 ReportsService 共用 teacherSubmissionScope，在分页/计数/去重/反馈聚合前限定自有班级中属于当前 Task 的实例及标量 ObjectId 关联；listMySubmissions 同样排除无关联和非法类型记录。
 - Side Effects: 写模板、课堂任务版本键、Submission、Feedback；正式手工申请委托 JobService 确保 Job。课堂提交冷却及 AI 执行参数见 [Config Matrix](./handoff-backend-config-matrix.md)。
 - Important Performance / Recovery: 列表筛选在数据库中组合执行；批量关联发布者与 Job 状态。发布候选复合索引分别以 `createdBy` 或 `visibility` 为前缀，后接 `status,courseLabel,knowledgeModule,updatedAt,createdAt`，支持本人及共享分支；模板列表另有 `{status:1,knowledgeModule:1,createdAt:-1}`。Submission 已移除无课堂关联的 `{taskId:1,studentId:1,attemptNo:1}` 唯一索引声明；本地 `eduforge_dev`、`eduforge_test`、`eduforge_browser_test` 和生产 `eduforge` 的对应旧索引均已完成定向清理，现行 `{classroomTaskId:1,studentId:1,attemptNo:1}` 唯一索引及其 ObjectId partial 条件、其他索引和集合元数据保持不变。缺快照历史实例的读取投影及既有写入门禁继续保留；编号重试耗尽安全拒绝。
@@ -277,10 +278,10 @@ Global SoT 只保留理解跨 Service workflow 必需的稳定不变量，不追
 - Domain / Responsibility: 按学生汇总实例提交轨迹、可选 attempts 与 tag 明细。
 - Upstream: 教师学习轨迹入口。
 - Downstream / Dependencies: `ClassroomModel`、`ClassroomTaskModel`、`SubmissionModel`、`UserModel`、`EnrollmentService`、`AiFeedbackJobService`、`FeedbackModel`。
-- Consistency / State / Idempotency: all 不对 submissions 拼 createdAt 下界；未提交学生仍参与。先分页 Enrollment，再做页内排序。`errorRate` 按最近一次提交的 AI ERROR 数排序，未知值在升序、降序都排在末尾。趋势只依据对应提交的实际 AI 反馈条目，关闭尝试明细不影响趋势。关闭 tag 明细时跳过 tags 展开聚合；attempt feedbackCount 按全来源计算，AI 摘要保持独立，缺 Job 使用 NOT_REQUESTED。
+- Consistency / State / Idempotency: all 不对 submissions 拼 createdAt 下界，未提交学生仍参与。先分页 Enrollment，再做页内排序。`errorRate` 按最近一次提交的 AI ERROR 数排序，未知值在升序、降序都排在末尾。同一次反馈聚合按 submissionId 派生 attempt 的全来源反馈数和 AI 摘要，趋势沿用该 AI 摘要。关闭尝试明细仍保留趋势，关闭标签明细时跳过标签展开。成员分页和 Job 状态沿用即时读取，缺 Job 使用 NOT_REQUESTED。
 - Isolation: 校验班级 owner；成员取 Enrollment ACTIVE，全链路按 classroomTaskId，页内查询再限 studentIds。
 - Side Effects: 只读。
-- Important Performance / Recovery: 按页批量读取用户与提交，再按 submissionIds 批量取状态、AI 摘要和全来源反馈数，避免 N+1。
+- Important Performance / Recovery: 按页批量读取用户与提交，再按 submissionIds 分别批量读取 Job 状态和反馈。只有标签统计分支展开标签，反馈数和严重度按条目计算。
 - SoT: `backend/src/modules/classrooms/classroom-tasks/services/classroom-tasks.service.ts`；`backend/src/modules/classrooms/classroom-tasks/dto/query-learning-trajectory.dto.ts`。
 - Boundary / Non-responsibility: 公开窗口、分页上限、结构化学生信息与字段语义见 [DTO Cheatsheet](./handoff-backend-dto-cheatsheet.md#query-dto--public-response读取接口) 和 [API Map](./handoff-backend-api-map.md#classroom-tasksclassrooms-子资源)；不把页内排序称为全局排序。
 
@@ -365,7 +366,7 @@ Global SoT 只保留理解跨 Service workflow 必需的稳定不变量，不追
 - Domain / Responsibility: 聚合通用 Task 的共性问题、类型与典型样例。
 - Upstream: 任务共性问题报表入口。
 - Downstream / Dependencies: `TaskModel`、`SubmissionModel`、`FeedbackModel`、`ClassroomModel`、`ClassroomTaskModel`、teacherSubmissionScope。
-- Consistency / State / Idempotency: 统计仅纳入 AI/TEACHER 反馈；聚合 limit 收敛到 1..10，每个 tag 的样例最多 3 条；无反馈返回空聚合。
+- Consistency / State / Idempotency: 沿用 [Card 08](#service-card-08) 的单请求只读快照，作品数、去重学生数和反馈聚合复用同一受权范围。仅纳入 AI/TEACHER 反馈，limit 收敛到 1..10，每个标签最多返回 3 条最新样例，无反馈返回空聚合。
 - Isolation: 校验任务作者；沿 teacherSubmissionScope 先限制该教师自有班级中属于当前 Task 的实例及标量 ObjectId 关联，再统计/去重/聚合反馈，不能跨教师班级。
 - Side Effects: 只读。
 - Important Performance / Recovery: 单次 aggregate + facet 同时形成 tags、types 与样例，避免重复扫描。

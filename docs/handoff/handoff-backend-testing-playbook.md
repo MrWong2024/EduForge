@@ -140,6 +140,17 @@ npm.cmd run test:e2e -- --listTests --runInBand --runTestsByPath ./test/process-
 
 导出用正式学生迟交和教师发布交错验证汇总、逐任务及内嵌评分。评分用真实事务在读取期间同时提交 Job 成功与首条 AI ERROR，经正式 JSON 和 CSV 验证在途与再次读取。屏障设在测试侧，按本轮资源匹配，结束后独立回读和精确清理。事务选项、参考时间及重试另由 `src/lib/classroom-task-transaction.spec.ts` 覆盖。读取合同见 [Card 08G](./handoff-backend-service-map.md#service-card-08g) 和 [Card 08H](./handoff-backend-service-map.md#service-card-08h)。
 
+### 学习轨迹与模板报表读取交错
+
+从 `backend` 目录按第 4 节使用独立 `standard_test` 进程，关闭定时 Worker。分别确认 discovery 只命中目标文件，再去掉 `--listTests` 串行执行。
+
+```powershell
+npm.cmd run test:e2e -- --listTests --runInBand --runTestsByPath ./test/classroom-learning-trajectory.e2e-spec.ts
+npm.cmd run test:e2e -- --listTests --runInBand --runTestsByPath ./test/classroom-text-task-contract.e2e-spec.ts
+```
+
+学习轨迹在测试侧暂停真实反馈读取的结果交付，以首条双标签 AI ERROR 核对全来源、AI 摘要、趋势和标签。模板统计和共性问题分别在计数读取后完成正式首次提交与教师反馈，再释放报表，验证在途响应和再次读取的作品及反馈范围。两组测试均独立回读并按夹具归属清理。学生详情摘要和非空模板报表的定向回归分别使用 `classroom-student-task-detail.e2e-spec.ts` 和 `classroom-learning-loop.e2e-spec.ts`。
+
 ### 教学资源写入定向验收
 
 `test/teaching-resource-write-contract.e2e-spec.ts` 通过正式 HTTP、ValidationPipe 和 Mongo 回读，负责课程/班级/模板必填文本与课程/班级 PATCH status 的拒绝及无写入副作用、合法局部更新、模板分类省略保留与显式清空，以及合法文本保真。字段合同由 [DTO Courses](./handoff-backend-dto-cheatsheet.md#course-dto--response-family)、[Classrooms](./handoff-backend-dto-cheatsheet.md#classroom-与正式成员-family) 与 [Task template](./handoff-backend-dto-cheatsheet.md#task-template-dto--response-family) 维护；环境、认证与连接门禁复用[认证与凭据生命周期定向验收](#认证与凭据生命周期定向验收)，不运行 Browser。

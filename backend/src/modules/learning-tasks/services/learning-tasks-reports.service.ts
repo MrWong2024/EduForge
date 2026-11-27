@@ -3,11 +3,19 @@
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { InjectModel } from '@nestjs/mongoose';
-import { Model, Types } from 'mongoose';
+import { InjectConnection, InjectModel } from '@nestjs/mongoose';
+import { Model, Types, type Connection } from 'mongoose';
+import {
+  CLASSROOM_TASK_TRANSACTION_CONNECTION,
+  runClassroomReadSnapshot,
+  type ClassroomReadSnapshot,
+} from '../../../lib/classroom-task-transaction';
 import { Classroom } from '../../classrooms/schemas/classroom.schema';
 import { ClassroomTask } from '../../classrooms/classroom-tasks/schemas/classroom-task.schema';
-import { teacherSubmissionScope } from './teacher-submission-scope';
+import {
+  aggregateScopedSubmissionCounts,
+  teacherSubmissionScope,
+} from './teacher-submission-scope';
 import { Task } from '../schemas/task.schema';
 import { Submission } from '../schemas/submission.schema';
 import { Feedback } from '../schemas/feedback.schema';
@@ -45,10 +53,32 @@ export class LearningTasksReportsService {
     private readonly classroomModel: Model<Classroom>,
     @InjectModel(ClassroomTask.name)
     private readonly classroomTaskModel: Model<ClassroomTask>,
+    @InjectConnection(CLASSROOM_TASK_TRANSACTION_CONNECTION)
+    private readonly classroomTaskTransactionConnection: Connection,
   ) {}
 
   async getCommonIssuesReport(taskId: string, userId: string, limit = 10) {
-    const task = await this.taskModel.findById(taskId).lean().exec();
+    return runClassroomReadSnapshot(
+      this.classroomTaskTransactionConnection,
+      (snapshot) =>
+        this.readCommonIssuesReport(taskId, userId, limit, snapshot),
+    );
+  }
+
+  private async readCommonIssuesReport(
+    taskId: string,
+    userId: string,
+    limit: number,
+    snapshot: ClassroomReadSnapshot,
+  ) {
+    const task = await snapshot
+      .model(this.taskModel)
+      .findById(taskId)
+      .select('createdBy')
+      .session(snapshot.session)
+      .setOptions(snapshot.readOptions())
+      .lean<Pick<Task, 'createdBy'>>()
+      .exec();
     if (!task) {
       throw new NotFoundException('Task not found');
     }
@@ -66,131 +96,135 @@ export class LearningTasksReportsService {
       userId,
       this.classroomModel,
       this.classroomTaskModel,
+      snapshot,
     );
 
-    const [submissionsCount, distinctStudentIds, report] = await Promise.all([
-      this.submissionModel.countDocuments(filter),
-      this.submissionModel.distinct('studentId', filter),
-      this.feedbackModel
-        .aggregate<CommonIssuesReportAggregation>([
-          {
-            $match: {
-              source: {
-                $in: LearningTasksReportsService.COMMON_ISSUES_SOURCES,
+    const summary = await aggregateScopedSubmissionCounts(
+      this.submissionModel,
+      filter,
+      snapshot,
+    );
+    const [report] = await snapshot
+      .model(this.feedbackModel)
+      .aggregate<CommonIssuesReportAggregation>([
+        {
+          $match: {
+            source: {
+              $in: LearningTasksReportsService.COMMON_ISSUES_SOURCES,
+            },
+          },
+        },
+        {
+          $lookup: {
+            from: this.submissionModel.collection.name,
+            let: { submissionId: '$submissionId' },
+            pipeline: [
+              { $match: filter },
+              {
+                $match: {
+                  $expr: {
+                    $and: [
+                      { $eq: ['$_id', '$$submissionId'] },
+                      { $eq: ['$taskId', taskObjectId] },
+                    ],
+                  },
+                },
               },
-            },
+              { $project: { _id: 1 } },
+            ],
+            as: 'submission',
           },
-          {
-            $lookup: {
-              from: this.submissionModel.collection.name,
-              let: { submissionId: '$submissionId' },
-              pipeline: [
-                { $match: filter },
-                {
-                  $match: {
-                    $expr: {
-                      $and: [
-                        { $eq: ['$_id', '$$submissionId'] },
-                        { $eq: ['$taskId', taskObjectId] },
-                      ],
+        },
+        { $unwind: '$submission' },
+        {
+          $facet: {
+            topTags: [
+              { $match: { tags: { $exists: true, $ne: [] } } },
+              { $unwind: '$tags' },
+              {
+                $group: {
+                  _id: '$tags',
+                  count: { $sum: 1 },
+                  infoCount: {
+                    $sum: {
+                      $cond: [{ $eq: ['$severity', 'INFO'] }, 1, 0],
+                    },
+                  },
+                  warnCount: {
+                    $sum: {
+                      $cond: [{ $eq: ['$severity', 'WARN'] }, 1, 0],
+                    },
+                  },
+                  errorCount: {
+                    $sum: {
+                      $cond: [{ $eq: ['$severity', 'ERROR'] }, 1, 0],
                     },
                   },
                 },
-                { $project: { _id: 1 } },
-              ],
-              as: 'submission',
-            },
+              },
+              { $sort: { count: -1, _id: 1 } },
+              { $limit: safeLimit },
+              {
+                $project: {
+                  _id: 0,
+                  tag: '$_id',
+                  count: 1,
+                  severityBreakdown: {
+                    INFO: '$infoCount',
+                    WARN: '$warnCount',
+                    ERROR: '$errorCount',
+                  },
+                },
+              },
+            ],
+            topTypes: [
+              {
+                $group: {
+                  _id: '$type',
+                  count: { $sum: 1 },
+                },
+              },
+              { $sort: { count: -1, _id: 1 } },
+              { $limit: safeLimit },
+              { $project: { _id: 0, type: '$_id', count: 1 } },
+            ],
+            examples: [
+              { $match: { tags: { $exists: true, $ne: [] } } },
+              { $unwind: '$tags' },
+              { $match: { severity: { $in: ['INFO', 'WARN', 'ERROR'] } } },
+              { $sort: { createdAt: -1 } },
+              {
+                $group: {
+                  _id: '$tags',
+                  count: { $sum: 1 },
+                  samples: {
+                    $push: {
+                      submissionId: '$submissionId',
+                      message: '$message',
+                      suggestion: '$suggestion',
+                      severity: '$severity',
+                    },
+                  },
+                },
+              },
+              { $sort: { count: -1, _id: 1 } },
+              { $limit: safeLimit },
+              {
+                $project: {
+                  _id: 0,
+                  tag: '$_id',
+                  count: 1,
+                  samples: { $slice: ['$samples', 3] },
+                },
+              },
+            ],
           },
-          { $unwind: '$submission' },
-          {
-            $facet: {
-              topTags: [
-                { $match: { tags: { $exists: true, $ne: [] } } },
-                { $unwind: '$tags' },
-                {
-                  $group: {
-                    _id: '$tags',
-                    count: { $sum: 1 },
-                    infoCount: {
-                      $sum: {
-                        $cond: [{ $eq: ['$severity', 'INFO'] }, 1, 0],
-                      },
-                    },
-                    warnCount: {
-                      $sum: {
-                        $cond: [{ $eq: ['$severity', 'WARN'] }, 1, 0],
-                      },
-                    },
-                    errorCount: {
-                      $sum: {
-                        $cond: [{ $eq: ['$severity', 'ERROR'] }, 1, 0],
-                      },
-                    },
-                  },
-                },
-                { $sort: { count: -1, _id: 1 } },
-                { $limit: safeLimit },
-                {
-                  $project: {
-                    _id: 0,
-                    tag: '$_id',
-                    count: 1,
-                    severityBreakdown: {
-                      INFO: '$infoCount',
-                      WARN: '$warnCount',
-                      ERROR: '$errorCount',
-                    },
-                  },
-                },
-              ],
-              topTypes: [
-                {
-                  $group: {
-                    _id: '$type',
-                    count: { $sum: 1 },
-                  },
-                },
-                { $sort: { count: -1, _id: 1 } },
-                { $limit: safeLimit },
-                { $project: { _id: 0, type: '$_id', count: 1 } },
-              ],
-              examples: [
-                { $match: { tags: { $exists: true, $ne: [] } } },
-                { $unwind: '$tags' },
-                { $match: { severity: { $in: ['INFO', 'WARN', 'ERROR'] } } },
-                { $sort: { createdAt: -1 } },
-                {
-                  $group: {
-                    _id: '$tags',
-                    count: { $sum: 1 },
-                    samples: {
-                      $push: {
-                        submissionId: '$submissionId',
-                        message: '$message',
-                        suggestion: '$suggestion',
-                        severity: '$severity',
-                      },
-                    },
-                  },
-                },
-                { $sort: { count: -1, _id: 1 } },
-                { $limit: safeLimit },
-                {
-                  $project: {
-                    _id: 0,
-                    tag: '$_id',
-                    count: 1,
-                    samples: { $slice: ['$samples', 3] },
-                  },
-                },
-              ],
-            },
-          },
-        ])
-        .exec(),
-    ]);
+        },
+      ])
+      .option({ session: snapshot.session, ...snapshot.readOptions() })
+      .exec();
 
-    const reportPayload: CommonIssuesReportAggregation = report[0] ?? {
+    const reportPayload: CommonIssuesReportAggregation = report ?? {
       topTags: [],
       topTypes: [],
       examples: [],
@@ -199,10 +233,7 @@ export class LearningTasksReportsService {
     return {
       taskId,
       generatedAt: new Date(),
-      summary: {
-        submissionsCount,
-        distinctStudentsCount: distinctStudentIds.length,
-      },
+      summary,
       topTags: reportPayload.topTags,
       topTypes: reportPayload.topTypes,
       examples: reportPayload.examples,
