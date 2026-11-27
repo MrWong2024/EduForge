@@ -113,7 +113,7 @@
 | Component / Module | File | Responsibility / Boundary |
 |---|---|---|
 | JoinClassroomForm | `components/student/JoinClassroomForm.tsx` | 将加入码输入中的 ASCII 小写字母转为大写，提交时去除首尾空白。后端返回已归档时显示专属页内提示，失败保留输入 |
-| SubmissionForm | `components/student/SubmissionForm.tsx` | 原文源码与独立可选说明输入、码点校验、请求防重复及公开业务错误安全适配；同一学生、班级与课堂任务在当前页成功刷新后保留内存草稿，失去提交资格时显示原因并保留语言选择、可复制的只读源码和说明，资格恢复后可继续编辑；成功保存后锁住当前表单，导航恢复只打开同一提交详情，结果未确认先核对历史；多文件粘贴格式提示与示例由此维护，单文件无需 FILE 标记；不提供上传/结构化文件提交，不以模板当前状态自行阻断 |
+| SubmissionForm | `components/student/SubmissionForm.tsx` | 原文源码与独立可选说明输入、码点校验、请求防重复及公开业务错误安全适配；同一学生、班级与课堂任务在当前页成功刷新后保留内存草稿，失去提交资格时显示原因并保留语言选择、可复制的只读源码和说明，资格恢复后可继续编辑；任务详情暂态读取失败时隐藏表单与历史，页内重试确认同一身份后按最新资格恢复原文及待核对状态，明确拒绝或身份变化结束原草稿保留；成功保存后锁住当前表单，导航恢复只打开同一提交详情，结果未确认先核对历史；多文件粘贴格式提示与示例由此维护，单文件无需 FILE 标记；不提供上传/结构化文件提交，不以模板当前状态自行阻断 |
 | EditSubmissionForm | `components/student/EditSubmissionForm.tsx` | 同次提交的受控代码/语言/说明与 baseRevision，语言复用共享选项；正常保存采用权威详情、取消不写入，刷新不覆盖未保存输入或静默换版；冲突或未知结果保留当前输入并锁住保存，通过本页显式读取作品、核对确认后继续，异常取消不绕过核对门禁；评阅已受理时保留可复制的未保存修改，学生作品展示与共享 AI 区块使用同一当前详情 |
 | RequestAiFeedbackButton | `components/student/RequestAiFeedbackButton.tsx` | 师生复用的申请按钮展示；disabled/pending 与动作回调由 SubmissionAiReview 提供，不独立持有资格或请求时序 |
 | AiProcessingHint | `components/student/AiProcessingHint.tsx` | 统一 AI 处理中提示；通用状态文案复用 UI Status |

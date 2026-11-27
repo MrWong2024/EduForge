@@ -18,11 +18,22 @@ import {
   SUBMISSION_NOTE_MAX_CODE_POINTS,
 } from "@/lib/learning-tasks/text-submission";
 
-type SubmissionFormProps = {
-  classroomId: string;
-  classroomTaskId: string;
+type SubmissionEligibility = {
   canSubmit: boolean;
   submitDisabledMessage: string;
+};
+
+export type SubmissionFormDetail = SubmissionEligibility & {
+  identity: string;
+};
+
+type SubmissionTarget = {
+  classroomId: string;
+  classroomTaskId: string;
+};
+
+type SubmissionFormProps = SubmissionTarget & {
+  detail: SubmissionFormDetail | null;
 };
 
 type SubmissionErrorState = {
@@ -30,12 +41,24 @@ type SubmissionErrorState = {
   summary: string;
 };
 
-export function SubmissionForm({
+export function SubmissionForm({ detail, ...target }: SubmissionFormProps) {
+  const [lastConfirmedIdentity, setLastConfirmedIdentity] = useState(
+    detail?.identity ?? null,
+  );
+  const identity = detail?.identity ?? lastConfirmedIdentity;
+  if (identity !== lastConfirmedIdentity) {
+    setLastConfirmedIdentity(identity);
+  }
+  if (identity === null) return null;
+
+  return <SubmissionEditor key={identity} {...target} eligibility={detail} />;
+}
+
+function SubmissionEditor({
   classroomId,
   classroomTaskId,
-  canSubmit,
-  submitDisabledMessage,
-}: SubmissionFormProps) {
+  eligibility,
+}: SubmissionTarget & { eligibility: SubmissionEligibility | null }) {
   const router = useRouter();
   const [language, setLanguage] = useState("auto");
   const [codeText, setCodeText] = useState("");
@@ -59,7 +82,7 @@ export function SubmissionForm({
     event.preventDefault();
 
     if (
-      !canSubmit ||
+      !eligibility?.canSubmit ||
       !canCreateTextSubmission(
         inFlight.current,
         resultUncertain,
@@ -139,6 +162,9 @@ export function SubmissionForm({
     }
   };
 
+  if (!eligibility) return null;
+
+  const { canSubmit, submitDisabledMessage } = eligibility;
   if (
     !canSubmit &&
     !hasDraft &&

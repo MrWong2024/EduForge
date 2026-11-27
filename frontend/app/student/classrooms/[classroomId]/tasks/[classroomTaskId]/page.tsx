@@ -1,4 +1,5 @@
 import Link from "next/link";
+import type { ReactNode } from "react";
 import { EmptyState } from "@/components/blocks/EmptyState";
 import { ErrorState } from "@/components/blocks/ErrorState";
 import { PageHeader } from "@/components/blocks/PageHeader";
@@ -10,6 +11,7 @@ import {
   getTaskSnapshotMessage,
 } from "@/lib/learning-tasks/ai-review";
 import { SubmissionForm } from "@/components/student/SubmissionForm";
+import type { SubmissionFormDetail } from "@/components/student/SubmissionForm";
 import { TaskSubmissionHistoryEntry } from "@/components/student/TaskSubmissionHistoryEntry";
 import { getDifficultyLabel } from "@/lib/learning-tasks/difficulty";
 import { fetchJson, FetchJsonError } from "@/lib/api/client";
@@ -302,6 +304,7 @@ type TaskDetailViewModel =
       mode: "ready";
       data: ReturnType<typeof toMyTaskDetailResponse>;
       query: TaskDetailQueryState;
+      submissionIdentity: string;
     }
   | {
       mode: "error";
@@ -317,6 +320,22 @@ export default async function StudentTaskDetailPage({
   const rawQuery = await searchParams;
   const queryState = resolveQueryState(rawQuery);
   const queryString = buildQueryString(toQueryRecord(queryState));
+  const renderTaskDetail = (
+    overview: ReactNode,
+    submissionDetail: SubmissionFormDetail | null,
+    history?: ReactNode,
+  ) => (
+    <section className="min-w-0 space-y-4">
+      {overview}
+      <SubmissionForm
+        key={JSON.stringify([classroomId, classroomTaskId])}
+        classroomId={classroomId}
+        classroomTaskId={classroomTaskId}
+        detail={submissionDetail}
+      />
+      {history}
+    </section>
+  );
 
   let viewModel: TaskDetailViewModel = {
     mode: "error",
@@ -334,11 +353,20 @@ export default async function StudentTaskDetailPage({
       },
     );
 
-    viewModel = {
-      mode: "ready",
-      data: toMyTaskDetailResponse(payload),
-      query: queryState,
-    };
+    const data = toMyTaskDetailResponse(payload);
+    const identity = [
+      data.me.studentId,
+      data.classroom.id,
+      data.classroomTask.id,
+    ];
+    if (identity.every((id) => typeof id === "string" && id.length > 0)) {
+      viewModel = {
+        mode: "ready",
+        data,
+        query: queryState,
+        submissionIdentity: JSON.stringify(identity),
+      };
+    }
   } catch (error) {
     if (error instanceof FetchJsonError) {
       const detail = extractRawDetail(error);
@@ -356,12 +384,21 @@ export default async function StudentTaskDetailPage({
   }
 
   if (viewModel.mode === "error") {
-    return (
+    const error = (
       <ErrorState
         status={viewModel.status}
         title="任务详情加载失败"
         description={viewModel.description}
       />
+    );
+    if (viewModel.status < 500) return error;
+
+    return renderTaskDetail(
+      <>
+        {error}
+        <RefreshButton label="重试加载任务详情" />
+      </>,
+      null,
     );
   }
 
@@ -459,8 +496,8 @@ export default async function StudentTaskDetailPage({
       )
     : null;
 
-  return (
-    <section className="min-w-0 space-y-4">
+  const overview = (
+    <>
       <PageHeader
         title={taskTitle}
         description={classroomName}
@@ -567,19 +604,10 @@ export default async function StudentTaskDetailPage({
         variant="taskDetail"
         helpHref={paths.student.aiHelp}
       />
-
-      <SubmissionForm
-        key={JSON.stringify([
-          viewModel.data.me.studentId,
-          classroomId,
-          classroomTaskId,
-        ])}
-        classroomId={classroomId}
-        classroomTaskId={classroomTaskId}
-        canSubmit={canSubmit}
-        submitDisabledMessage={submitDisabledMessage}
-      />
-
+    </>
+  );
+  const history = (
+    <>
       <h2
         id="submission-history"
         className="text-base font-semibold text-zinc-900"
@@ -689,6 +717,16 @@ export default async function StudentTaskDetailPage({
           </table>
         </div>
       )}
-    </section>
+    </>
+  );
+
+  return renderTaskDetail(
+    overview,
+    {
+      identity: viewModel.submissionIdentity,
+      canSubmit,
+      submitDisabledMessage,
+    },
+    history,
   );
 }
