@@ -1,13 +1,23 @@
+import {
+  assertAuthTestConnection,
+  authTestEnvironment,
+  openAuthTestConnection,
+} from './helpers/auth-test-environment';
 import { INestApplication, ValidationPipe } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Test, TestingModule } from '@nestjs/testing';
-import { getModelToken } from '@nestjs/mongoose';
-import { Model, Types } from 'mongoose';
+import { getConnectionToken, getModelToken } from '@nestjs/mongoose';
+import { Connection, Model, Types } from 'mongoose';
 import * as bcrypt from 'bcryptjs';
 import cookieParser from 'cookie-parser';
 import request from 'supertest';
 import { App } from 'supertest/types';
 import { Session } from '../src/modules/auth/schemas/session.schema';
+import { PasswordResetToken } from '../src/modules/auth/schemas/password-reset-token.schema';
+import {
+  CLASSROOM_TASK_TRANSACTION_CONNECTION,
+  runClassroomTaskTransaction,
+} from '../src/lib/classroom-task-transaction';
 import {
   Course,
   CourseStatus,
@@ -41,12 +51,25 @@ import {
   AiFeedbackJobStatus,
 } from '../src/modules/learning-tasks/ai-feedback/schemas/ai-feedback-job.schema';
 import { User } from '../src/modules/users/schemas/user.schema';
-import {
-  assertLocalStandardTestAuthentication,
-  assertLocalStandardTestEnvironment,
-} from './helpers/local-test-database-auth';
 
 jest.setTimeout(90000);
+
+async function waitForRead<T>(read: Promise<T>, label: string): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      read,
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(
+          () => reject(new Error(`Timed out: ${label}`)),
+          8000,
+        );
+      }),
+    ]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
 
 type EvidenceSummary = {
   sourceUncertainComparableCount: number;
@@ -200,8 +223,12 @@ type AnalyticsStudentDetail = {
 
 describe('Classroom AI learning analytics (e2e)', () => {
   let app: INestApplication<App>;
+  let independentConnection: Connection;
+  let transactionConnection: Connection;
+  let databaseVerified = false;
   let userModel: Model<User>;
   let sessionModel: Model<Session>;
+  let resetTokenModel: Model<PasswordResetToken>;
   let courseModel: Model<Course>;
   let classroomModel: Model<Classroom>;
   let classroomTaskModel: Model<ClassroomTask>;
@@ -256,9 +283,6 @@ describe('Classroom AI learning analytics (e2e)', () => {
   const foreignStudentEmail = `student.foreign.ai.analytics.${Date.now()}@example.com`;
   const teacherPassword = 'TeacherPass123!';
   const studentPassword = 'StudentPass123!';
-
-  let previousWorkerEnabled: string | undefined;
-  let previousProvider: string | undefined;
 
   const login = async (
     agent: ReturnType<typeof request.agent>,
@@ -414,25 +438,11 @@ describe('Classroom AI learning analytics (e2e)', () => {
   };
 
   beforeAll(async () => {
-    previousWorkerEnabled = process.env.AI_FEEDBACK_WORKER_ENABLED;
-    previousProvider = process.env.AI_FEEDBACK_PROVIDER;
-    process.env.AI_FEEDBACK_WORKER_ENABLED = 'false';
-    process.env.AI_FEEDBACK_PROVIDER = 'stub';
-
+    independentConnection = await openAuthTestConnection();
     const appModuleImport =
       jest.requireActual<typeof import('../src/app.module')>(
         '../src/app.module',
       );
-    if (!process.env.MONGO_URI) {
-      throw new Error(
-        'MONGO_URI is required for classroom AI learning analytics e2e.',
-      );
-    }
-    assertLocalStandardTestEnvironment({
-      nodeEnv: process.env.NODE_ENV,
-      purpose: process.env.EDUFORGE_DATABASE_PURPOSE,
-      mongoUri: process.env.MONGO_URI,
-    });
     const moduleFixture: TestingModule = await Test.createTestingModule({
       imports: [appModuleImport.AppModule],
     }).compile();
@@ -446,10 +456,10 @@ describe('Classroom AI learning analytics (e2e)', () => {
       }),
     );
     app.use(cookieParser());
-    await app.init();
 
     userModel = app.get(getModelToken(User.name));
     sessionModel = app.get(getModelToken(Session.name));
+    resetTokenModel = app.get(getModelToken(PasswordResetToken.name));
     courseModel = app.get(getModelToken(Course.name));
     classroomModel = app.get(getModelToken(Classroom.name));
     classroomTaskModel = app.get(getModelToken(ClassroomTask.name));
@@ -459,32 +469,38 @@ describe('Classroom AI learning analytics (e2e)', () => {
     feedbackModel = app.get(getModelToken(Feedback.name));
     aiFeedbackJobModel = app.get(getModelToken(AiFeedbackJob.name));
 
-    expect(process.env.NODE_ENV).toBe('test');
-    expect(process.env.EDUFORGE_DATABASE_PURPOSE).toBe('standard_test');
-    expect(userModel.db.name).toBe('eduforge_test');
+    transactionConnection = app.get<Connection>(
+      getConnectionToken(CLASSROOM_TASK_TRANSACTION_CONNECTION),
+    );
     userModel.db.set('maxTimeMS', 10000);
-    const database = userModel.db.db;
-    if (!database) throw new Error('Missing connected test database');
-    const auth = await database.command(
-      { connectionStatus: 1, showPrivileges: false },
-      { signal: AbortSignal.timeout(5000), readPreference: 'primary' },
+    for (const connection of [
+      userModel.db,
+      transactionConnection,
+      independentConnection,
+    ]) {
+      await assertAuthTestConnection(connection);
+      expect(connection.getClient().options.readPreference.mode).toBe(
+        'primary',
+      );
+    }
+    await runClassroomTaskTransaction(transactionConnection, (transaction) =>
+      transaction
+        .model(feedbackModel)
+        .exists({ _id: new Types.ObjectId() })
+        .session(transaction.session)
+        .setOptions(transaction.readOptions())
+        .exec(),
     );
     const config = app.get(ConfigService);
-    assertLocalStandardTestAuthentication({
-      nodeEnv: process.env.NODE_ENV,
-      purpose: process.env.EDUFORGE_DATABASE_PURPOSE,
-      mongoUri: config.get<string>('MONGO_URI'),
-      databaseName: database.databaseName,
-      connectedHost: userModel.db.host,
-      authInfo: auth.authInfo,
-    });
     expect(config.get('AI_FEEDBACK_PROVIDER')).toBe('stub');
     expect(config.get('AI_FEEDBACK_WORKER_ENABLED')).not.toBe(true);
     expect(config.get('MAIL_PROVIDER')).toBe('log');
     config.set('LEARNING_TASK_SUBMISSION_COOLDOWN_MS', 0);
+    databaseVerified = true;
     console.info(
-      'Analytics V1.2 gate: standard_test / eduforge_test / local root@admin verified / worker=false / stub / mail=log',
+      'Analytics DB gate: default, transaction and independent use standard_test / eduforge_test, local writable rs0; read-only transaction committed; worker disabled',
     );
+    await app.init();
     teacherAgent = request
       .agent(app.getHttpServer())
       .timeout({ response: 10000, deadline: 15000 });
@@ -1126,66 +1142,72 @@ describe('Classroom AI learning analytics (e2e)', () => {
 
   afterAll(async () => {
     try {
-      if (app && userModel) {
-        await Promise.all([
-          feedbackModel.deleteMany({
-            submissionId: { $in: createdSubmissionIds },
-          }),
-          aiFeedbackJobModel.deleteMany({
-            submissionId: { $in: createdSubmissionIds },
-          }),
-          submissionModel.deleteMany({ _id: { $in: createdSubmissionIds } }),
-          enrollmentModel.deleteMany({
-            classroomId: { $in: createdClassroomIds },
-          }),
-          classroomTaskModel.deleteMany({
-            _id: { $in: createdClassroomTaskIds },
-          }),
-          taskModel.deleteMany({ _id: { $in: createdTaskIds } }),
-          classroomModel.deleteMany({ _id: { $in: createdClassroomIds } }),
-          courseModel.deleteMany({ _id: { $in: createdCourseIds } }),
-          sessionModel.deleteMany({ userId: { $in: createdUserIds } }),
-          userModel.deleteMany({ _id: { $in: createdUserIds } }),
-        ]);
-        const residual = await Promise.all([
-          feedbackModel.countDocuments({
-            submissionId: { $in: createdSubmissionIds },
-          }),
-          aiFeedbackJobModel.countDocuments({
-            submissionId: { $in: createdSubmissionIds },
-          }),
-          submissionModel.countDocuments({
-            _id: { $in: createdSubmissionIds },
-          }),
-          enrollmentModel.countDocuments({
-            classroomId: { $in: createdClassroomIds },
-          }),
-          classroomTaskModel.countDocuments({
-            _id: { $in: createdClassroomTaskIds },
-          }),
-          taskModel.countDocuments({ _id: { $in: createdTaskIds } }),
-          classroomModel.countDocuments({ _id: { $in: createdClassroomIds } }),
-          courseModel.countDocuments({ _id: { $in: createdCourseIds } }),
-          sessionModel.countDocuments({ userId: { $in: createdUserIds } }),
-          userModel.countDocuments({ _id: { $in: createdUserIds } }),
-        ]);
-        expect(residual).toEqual(Array<number>(10).fill(0));
-        console.info(
-          'Analytics scoped fixture cleanup: 10 collections residual=0',
-        );
-      }
+      if (app) await app.close();
+      if (userModel) expect(userModel.db.readyState).toBe(0);
+      if (transactionConnection)
+        expect(transactionConnection.readyState).toBe(0);
     } finally {
       try {
-        if (app) await app.close();
-        if (userModel) expect(userModel.db.readyState).toBe(0);
-        if (app) console.info('Analytics app/DB closed');
+        const db = independentConnection?.db;
+        if (databaseVerified && db) {
+          const ownedRows = [
+            [
+              feedbackModel.collection.name,
+              { submissionId: { $in: createdSubmissionIds } },
+            ],
+            [
+              aiFeedbackJobModel.collection.name,
+              { submissionId: { $in: createdSubmissionIds } },
+            ],
+            [
+              submissionModel.collection.name,
+              { _id: { $in: createdSubmissionIds } },
+            ],
+            [
+              enrollmentModel.collection.name,
+              { classroomId: { $in: createdClassroomIds } },
+            ],
+            [
+              classroomTaskModel.collection.name,
+              { _id: { $in: createdClassroomTaskIds } },
+            ],
+            [taskModel.collection.name, { _id: { $in: createdTaskIds } }],
+            [
+              classroomModel.collection.name,
+              { _id: { $in: createdClassroomIds } },
+            ],
+            [courseModel.collection.name, { _id: { $in: createdCourseIds } }],
+            [sessionModel.collection.name, { userId: { $in: createdUserIds } }],
+            [
+              resetTokenModel.collection.name,
+              { userId: { $in: createdUserIds } },
+            ],
+            [userModel.collection.name, { _id: { $in: createdUserIds } }],
+          ] as const;
+          for (const [collection, filter] of ownedRows) {
+            await db
+              .collection(collection)
+              .deleteMany(filter, { timeoutMS: 5000 });
+            expect(
+              await db.collection(collection).countDocuments(filter, {
+                readPreference: 'primary',
+                timeoutMS: 5000,
+              }),
+            ).toBe(0);
+          }
+          console.info(
+            'Analytics scoped fixture cleanup: 11 collections residual=0 after app close',
+          );
+        }
       } finally {
-        if (previousWorkerEnabled === undefined)
-          delete process.env.AI_FEEDBACK_WORKER_ENABLED;
-        else process.env.AI_FEEDBACK_WORKER_ENABLED = previousWorkerEnabled;
-        if (previousProvider === undefined)
-          delete process.env.AI_FEEDBACK_PROVIDER;
-        else process.env.AI_FEEDBACK_PROVIDER = previousProvider;
+        try {
+          if (independentConnection) {
+            await independentConnection.close();
+            expect(independentConnection.readyState).toBe(0);
+          }
+        } finally {
+          authTestEnvironment.restore();
+        }
       }
     }
   });
@@ -2250,5 +2272,238 @@ describe('Classroom AI learning analytics (e2e)', () => {
     console.info(
       'Analytics multi-round result: WARN baseline at 02:00 -> ERROR third content at 06:00; INFO second review completing at 12:00 does not replace it',
     );
+  });
+
+  it('12 reads the Job before the first committed AI feedback', async () => {
+    const instance = await publishOwnedTask('Owned analytics completion race');
+    const classroomTaskId = new Types.ObjectId(instance.id);
+    const taskId = new Types.ObjectId(instance.taskId);
+    const submission = await createSubmission({
+      classroomTaskId,
+      taskId,
+      studentId: activeStudentId,
+      attemptNo: 1,
+      submittedAt: new Date(),
+      codeText: 'Coherent first review',
+    });
+    const lockOwner = 'analytics-completion-race';
+    const job = await aiFeedbackJobModel.create({
+      submissionId: submission._id,
+      classroomTaskId,
+      taskId,
+      studentId: activeStudentId,
+      status: AiFeedbackJobStatus.Running,
+      provider: 'bailian',
+      attempts: 1,
+      maxAttempts: 3,
+      lockOwner,
+      lockedAt: new Date(),
+      budgetVersion: 1,
+    });
+    const db = independentConnection.db;
+    if (!db) throw new Error('Missing independent analytics read connection');
+    const feedbackFilter = {
+      submissionId: submission._id,
+      source: FeedbackSource.AI,
+    };
+    const primary = { readPreference: 'primary', timeoutMS: 5000 } as const;
+    const readIndependent = async () => {
+      const storedJob = await db
+        .collection<AiFeedbackJob>(aiFeedbackJobModel.collection.name)
+        .findOne({ _id: job._id }, primary);
+      return {
+        job: storedJob?.status,
+        feedback: await db
+          .collection(feedbackModel.collection.name)
+          .countDocuments(feedbackFilter, primary),
+      };
+    };
+    const before = await readIndependent();
+    expect(before).toEqual({ job: 'RUNNING', feedback: 0 });
+
+    const requestDetail = () =>
+      teacherAgent
+        .get(
+          `/api/classrooms/${classroomId.toString()}/ai-learning-analytics/students/${activeStudentId.toString()}`,
+        )
+        .query({
+          excludedTaskIds: createdClassroomTaskIds
+            .filter((id) => !id.equals(classroomTaskId))
+            .map((id) => id.toString())
+            .join(','),
+        })
+        .expect(200)
+        .then(({ body }) => body as AnalyticsStudentDetail);
+    const readResult = (detail: AnalyticsStudentDetail) => {
+      const point = detail.taskPoints.find(
+        ({ classroomTaskId }) => classroomTaskId === instance.id,
+      );
+      if (!point)
+        throw new Error('Response omitted the owned analytics sample');
+      return {
+        requested: point.aiRequested,
+        delivered: point.aiDelivered,
+        deliveredTasks: detail.summary.aiDeliveredTasksCount,
+        emptyFeedback: point.comparisonWarnings.includes('EMPTY_FEEDBACK'),
+      };
+    };
+
+    let notifyJobStarted!: () => void;
+    const jobStarted = new Promise<void>((resolve) => {
+      notifyJobStarted = resolve;
+    });
+    let releaseJob!: () => void;
+    const allowJob = new Promise<void>((resolve) => {
+      releaseJob = resolve;
+    });
+    let releaseFeedback!: () => void;
+    const allowFeedback = new Promise<void>((resolve) => {
+      releaseFeedback = resolve;
+    });
+    let reportJob!: (status: AiFeedbackJobStatus) => void;
+    const jobRead = new Promise<AiFeedbackJobStatus>((resolve) => {
+      reportJob = resolve;
+    });
+    let reportFeedback!: (count: number) => void;
+    const feedbackRead = new Promise<number>((resolve) => {
+      reportFeedback = resolve;
+    });
+    let feedbackStarted = false;
+    const findJob = aiFeedbackJobModel.find.bind(
+      aiFeedbackJobModel,
+    ) as typeof aiFeedbackJobModel.find;
+    const jobSpy = jest
+      .spyOn(aiFeedbackJobModel, 'find')
+      .mockImplementationOnce((filter) => {
+        expect(filter).toEqual({ submissionId: { $in: [submission._id] } });
+        const query = findJob(filter);
+        const execute = query.exec.bind(query) as typeof query.exec;
+        jest.spyOn(query, 'exec').mockImplementationOnce(async () => {
+          notifyJobStarted();
+          await waitForRead(allowJob, 'release analytics Job query');
+          const jobs = await execute();
+          expect(jobs).toHaveLength(1);
+          reportJob(jobs[0].status);
+          return jobs;
+        });
+        return query;
+      });
+    const findFeedback = feedbackModel.find.bind(
+      feedbackModel,
+    ) as typeof feedbackModel.find;
+    const feedbackSpy = jest
+      .spyOn(feedbackModel, 'find')
+      .mockImplementationOnce((filter) => {
+        expect(filter).toEqual({
+          submissionId: { $in: [submission._id] },
+          source: FeedbackSource.AI,
+        });
+        const query = findFeedback(filter);
+        const execute = query.exec.bind(query) as typeof query.exec;
+        jest.spyOn(query, 'exec').mockImplementationOnce(async () => {
+          feedbackStarted = true;
+          await waitForRead(allowFeedback, 'release analytics feedback query');
+          const feedback = await execute();
+          reportFeedback(feedback.length);
+          return feedback;
+        });
+        return query;
+      });
+
+    const pending = requestDetail();
+    const respondedEarly = pending.then(() => {
+      throw new Error('Analytics responded before the read barrier');
+    });
+    const waitForRequestRead = <T>(read: Promise<T>, label: string) =>
+      waitForRead(Promise.race([read, respondedEarly]), label);
+    let during: AnalyticsStudentDetail;
+    try {
+      await waitForRequestRead(jobStarted, 'analytics Job query started');
+      // In the baseline the Feedback query starts synchronously alongside
+      // the held Job query. The fixed path never waits for that parallel start.
+      if (feedbackStarted) {
+        releaseFeedback();
+        expect(
+          await waitForRequestRead(feedbackRead, 'read pre-commit feedback'),
+        ).toBe(0);
+      } else {
+        releaseJob();
+        expect(await waitForRequestRead(jobRead, 'read pre-commit Job')).toBe(
+          'RUNNING',
+        );
+      }
+      await runClassroomTaskTransaction(
+        transactionConnection,
+        async (transaction) => {
+          const { session } = transaction;
+          const complete = await transaction
+            .model(aiFeedbackJobModel)
+            .updateOne(
+              {
+                _id: job._id,
+                status: AiFeedbackJobStatus.Running,
+                attempts: 1,
+                lockOwner,
+              },
+              {
+                $set: { status: AiFeedbackJobStatus.Succeeded },
+                $unset: { lockedAt: 1, lockOwner: 1 },
+              },
+              { session, maxTimeMS: transaction.remainingMs() },
+            )
+            .exec();
+          expect(complete.modifiedCount).toBe(1);
+          const inserted = await transaction.model(feedbackModel).insertMany(
+            [
+              {
+                ...feedbackFilter,
+                type: FeedbackType.Bug,
+                severity: FeedbackSeverity.Error,
+                message: 'First AI feedback committed with the Job',
+              },
+            ],
+            { session, ordered: true },
+          );
+          expect(inserted).toHaveLength(1);
+        },
+      );
+      releaseJob();
+      releaseFeedback();
+      during = await pending;
+    } finally {
+      releaseJob();
+      releaseFeedback();
+      await Promise.allSettled([pending]);
+      jobSpy.mockRestore();
+      feedbackSpy.mockRestore();
+    }
+    const after = await readIndependent();
+    const duringResult = {
+      jobRead: await waitForRead(jobRead, 'Job read result'),
+      feedbackRead: await waitForRead(feedbackRead, 'feedback read result'),
+      ...readResult(during),
+    };
+    const next = readResult(await requestDetail());
+    console.info('12 analytics completion interleave:', {
+      before,
+      during: duringResult,
+      after,
+      next,
+    });
+    expect(after).toEqual({ job: 'SUCCEEDED', feedback: 1 });
+    expect(next).toEqual({
+      requested: true,
+      delivered: true,
+      deliveredTasks: 1,
+      emptyFeedback: false,
+    });
+    expect(duringResult).toEqual({
+      jobRead: 'RUNNING',
+      feedbackRead: 1,
+      requested: true,
+      delivered: false,
+      deliveredTasks: 0,
+      emptyFeedback: false,
+    });
   });
 });

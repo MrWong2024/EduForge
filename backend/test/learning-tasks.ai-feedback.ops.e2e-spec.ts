@@ -16,6 +16,10 @@ import { ConfigService } from '@nestjs/config';
 import { Server } from 'node:http';
 import { AiFeedbackProcessor } from '../src/modules/learning-tasks/ai-feedback/services/ai-feedback-processor.service';
 import { AiFeedbackWorker } from '../src/modules/learning-tasks/ai-feedback/services/ai-feedback-worker.service';
+import {
+  AI_FEEDBACK_PROVIDER_TOKEN,
+  type AiFeedbackProvider,
+} from '../src/modules/learning-tasks/ai-feedback/interfaces/ai-feedback-provider.interface';
 import { Test, TestingModule } from '@nestjs/testing';
 import { getConnectionToken, getModelToken } from '@nestjs/mongoose';
 import { Connection, Model, Types } from 'mongoose';
@@ -318,6 +322,7 @@ describe('LearningTasks AI Feedback Ops (e2e) - pipeline & debug gate ON', () =>
 
   afterAll(async () => {
     try {
+      await app?.close();
       if (databaseVerified)
         await cleanupOpsFixtures(
           app,
@@ -333,7 +338,7 @@ describe('LearningTasks AI Feedback Ops (e2e) - pipeline & debug gate ON', () =>
           'manual',
         );
     } finally {
-      await Promise.all([app?.close(), independentConnection?.close()]);
+      await independentConnection?.close();
     }
   });
 
@@ -584,7 +589,7 @@ describe('LearningTasks AI Feedback Ops (e2e) - stub worker default loop', () =>
   let app: INestApplication<App>;
   let independentConnection: Connection;
   let databaseVerified = false;
-  let processOnceSpy: jest.SpiedFunction<AiFeedbackProcessor['processOnce']>;
+  let appClosing: Promise<void> | undefined;
   let aiFeedbackJobModel: Model<AiFeedbackJob>;
   let teacherAgent: ReturnType<typeof request.agent>;
   let studentAgent: ReturnType<typeof request.agent>;
@@ -601,6 +606,7 @@ describe('LearningTasks AI Feedback Ops (e2e) - stub worker default loop', () =>
   const studentEmail = `student.worker.${Date.now()}@example.com`;
   const teacherPassword = 'TeacherPass123!';
   const studentPassword = 'StudentPass123!';
+  const closeApp = () => (appClosing ??= app.close());
 
   const login = async (
     agent: ReturnType<typeof request.agent>,
@@ -670,8 +676,6 @@ describe('LearningTasks AI Feedback Ops (e2e) - stub worker default loop', () =>
     configService.set('AI_FEEDBACK_WORKER_ENABLED', true);
     configService.set('AI_FEEDBACK_WORKER_INTERVAL_MS', 120);
     configService.set('AI_FEEDBACK_WORKER_BATCH_SIZE', 2);
-    // Observe real processing without replacing the stub worker lifecycle.
-    processOnceSpy = jest.spyOn(app.get(AiFeedbackProcessor), 'processOnce');
     await app.init();
     app.get(ConfigService).set('LEARNING_TASK_SUBMISSION_COOLDOWN_MS', 0);
 
@@ -744,14 +748,8 @@ describe('LearningTasks AI Feedback Ops (e2e) - stub worker default loop', () =>
 
   afterAll(async () => {
     try {
+      if (app) await closeApp();
       if (!databaseVerified) return;
-      // Stop new ticks and drain already started work before fixture/DB cleanup.
-      app.get(AiFeedbackWorker).onModuleDestroy();
-      const inFlight = processOnceSpy.mock.results
-        .filter((result) => result.type === 'return')
-        .map((result) => result.value);
-      const drained = await Promise.allSettled(inFlight);
-      processOnceSpy.mockRestore();
       await cleanupOpsFixtures(
         app,
         independentConnection,
@@ -765,9 +763,8 @@ describe('LearningTasks AI Feedback Ops (e2e) - stub worker default loop', () =>
         },
         'stub worker',
       );
-      expect(drained.every(({ status }) => status === 'fulfilled')).toBe(true);
     } finally {
-      await Promise.all([app?.close(), independentConnection?.close()]);
+      await independentConnection?.close();
     }
 
     expect(aiFeedbackJobModel.db.readyState).toBe(0);
@@ -865,5 +862,202 @@ describe('LearningTasks AI Feedback Ops (e2e) - stub worker default loop', () =>
     expect((detail.body as SubmissionDetailBody).aiFeedbackStatus).toBe(
       'NOT_REQUESTED',
     );
+  });
+
+  it('drains a claimed review before closing and leaves the next Job pending', async () => {
+    const createSubmission = async (codeText: string) => {
+      const response = await studentAgent
+        .post(
+          `/api/classrooms/${classroomId}/tasks/${classroomTaskId}/submissions`,
+        )
+        .send({ content: { codeText, language: 'typescript' } })
+        .expect(201);
+      const submission = response.body as CreatedSubmissionResponse;
+      submissionIds.push(submission.id);
+      return submission;
+    };
+    const requestReview = async (submission: CreatedSubmissionResponse) => {
+      const response = await studentAgent
+        .post(
+          `/api/learning-tasks/submissions/${submission.id}/ai-feedback/request`,
+        )
+        .send({ expectedRevision: submission.contentRevision })
+        .expect(200);
+      return (response.body as RequestAiFeedbackResponse).jobId;
+    };
+    const readState = async (jobIds: string[]) => {
+      const db = independentConnection.db;
+      if (!db) throw new Error('AI feedback shutdown verifier unavailable.');
+      const jobs = db.collection<AiFeedbackJob>(
+        aiFeedbackJobModel.collection.name,
+      );
+      const feedback = db.collection(
+        app.get<Model<Feedback>>(getModelToken(Feedback.name)).collection.name,
+      );
+      return Promise.all(
+        jobIds.map(async (jobId) => {
+          const options = {
+            timeoutMS: 5000,
+            readPreference: 'primary',
+          } as const;
+          const job = await jobs.findOne(
+            { _id: new Types.ObjectId(jobId) },
+            options,
+          );
+          if (!job)
+            throw new Error('AI feedback shutdown fixture Job missing.');
+          return {
+            status: job.status,
+            attempts: job.attempts,
+            feedback: await feedback.countDocuments(
+              { submissionId: job.submissionId, source: 'AI' },
+              options,
+            ),
+          };
+        }),
+      );
+    };
+    const defer = <T>() => {
+      let resolve!: (value: T) => void;
+      const promise = new Promise<T>((complete) => {
+        resolve = complete;
+      });
+      return { promise, resolve };
+    };
+    const within = async <T>(
+      promise: Promise<T>,
+      description: string,
+      timeoutMS = 5000,
+    ) => {
+      let timer: NodeJS.Timeout | undefined;
+      try {
+        return await Promise.race([
+          promise,
+          new Promise<never>((_resolve, reject) => {
+            timer = setTimeout(
+              () => reject(new Error(`Shutdown E2E timed out: ${description}`)),
+              timeoutMS,
+            );
+          }),
+        ]);
+      } finally {
+        clearTimeout(timer);
+      }
+    };
+
+    const first = await createSubmission('TODO: finish the claimed review');
+    const second = await createSubmission('TODO: keep the next review queued');
+    await assertNoForeignJobs(
+      independentConnection,
+      aiFeedbackJobModel,
+      submissionIds,
+    );
+    const aEntered = defer<void>();
+    const releaseA = defer<void>();
+    const hookEntered = defer<{ waiting: boolean }>();
+    const stages: string[] = [];
+    const provider = app.get<AiFeedbackProvider>(AI_FEEDBACK_PROVIDER_TOKEN);
+    const analyze = provider.analyzeSubmission.bind(
+      provider,
+    ) as AiFeedbackProvider['analyzeSubmission'];
+    const providerSpy = jest
+      .spyOn(provider, 'analyzeSubmission')
+      .mockImplementation(async (context, execution) => {
+        if (context.submissionId === first.id) {
+          aEntered.resolve();
+          await within(releaseA.promise, 'release of A');
+        }
+        return analyze(context, execution);
+      });
+    const worker = app.get(AiFeedbackWorker);
+    const destroy = worker.onModuleDestroy.bind(
+      worker,
+    ) as AiFeedbackWorker['onModuleDestroy'];
+    const destroySpy = jest
+      .spyOn(worker, 'onModuleDestroy')
+      .mockImplementation(() => {
+        const result = destroy();
+        stages.push('close-hook-entered');
+        hookEntered.resolve({ waiting: result !== undefined });
+        return result;
+      });
+    // On a red baseline the closed app does not own the still-running batch.
+    // This observer is used only after actual close and barrier release to
+    // prevent a failed baseline from leaking unfinished test work.
+    const batchSpy = jest.spyOn(app.get(AiFeedbackProcessor), 'processOnce');
+    let prematurelyClosed = false;
+    let jobIds: string[];
+    let beforeRelease: Awaited<ReturnType<typeof readState>>;
+    let modelCalls: string[];
+    try {
+      jobIds = [await requestReview(first), await requestReview(second)];
+      await within(aEntered.promise, 'Worker claim of A');
+      expect(await readState(jobIds)).toEqual([
+        { status: 'RUNNING', attempts: 1, feedback: 0 },
+        { status: 'PENDING', attempts: 0, feedback: 0 },
+      ]);
+      stages.push('close-requested');
+      const closing = closeApp().then(() => {
+        stages.push('close-complete');
+      });
+      void closing.catch(() => undefined);
+      const hook = await within(hookEntered.promise, 'entry of close hook');
+      // The baseline hook stops the timer synchronously and never waits.
+      // Keep A parked until the actual application finishes closing in that path.
+      if (!hook.waiting) {
+        await within(closing, 'baseline close while A is held');
+      }
+      prematurelyClosed = stages.includes('close-complete');
+      beforeRelease = await readState(jobIds);
+      stages.push('release-A');
+      releaseA.resolve();
+      await within(closing, 'application close after release');
+    } finally {
+      releaseA.resolve();
+      try {
+        await within(closeApp(), 'application close in teardown');
+        if (prematurelyClosed) {
+          const activeBatch = batchSpy.mock.results.at(-1);
+          if (activeBatch?.type === 'return') {
+            await within(
+              Promise.allSettled([activeBatch.value]),
+              'baseline batch recovery after early close',
+              12000,
+            );
+          }
+        }
+      } finally {
+        modelCalls = providerSpy.mock.calls.map(
+          ([context]) => context.submissionId,
+        );
+        destroySpy.mockRestore();
+        batchSpy.mockRestore();
+        providerSpy.mockRestore();
+      }
+    }
+
+    const afterClose = await readState(jobIds);
+    console.info('09 app.close evidence:', {
+      stages,
+      prematurelyClosed,
+      beforeRelease,
+      afterClose,
+      modelCalls,
+    });
+    expect(stages).toEqual([
+      'close-requested',
+      'close-hook-entered',
+      'release-A',
+      'close-complete',
+    ]);
+    expect(beforeRelease).toEqual([
+      { status: 'RUNNING', attempts: 1, feedback: 0 },
+      { status: 'PENDING', attempts: 0, feedback: 0 },
+    ]);
+    expect(afterClose).toEqual([
+      { status: 'SUCCEEDED', attempts: 1, feedback: 1 },
+      { status: 'PENDING', attempts: 0, feedback: 0 },
+    ]);
+    expect(modelCalls).toEqual([first.id]);
   });
 });

@@ -266,7 +266,7 @@ Global SoT 只保留理解跨 Service workflow 必需的稳定不变量，不追
   - 关闭反馈明细或截断 preview 不影响完成态计算；无 Job 为 NOT_REQUESTED，不能推成正在执行。
 - Isolation: 校验学生及 Enrollment ACTIVE；全链路按 classroomTaskId，完成态只绑定 `latest.submissionId`，不混用历史 submissions 或其他实例。
 - Side Effects: 只读。
-- Important Performance / Recovery: AI 状态、反馈摘要/preview 批量并行；完成态单独读取最新提交的完整反馈，不复用被 feedbackLimit 截断的明细。
+- Important Performance / Recovery: 最新提交的 AI 摘要、完成态及可选预览来自同一次完整的 AI/TEACHER 反馈读取。最新项在 `submissions` 与 `latest` 复用该摘要。历史提交继续批量读取，`feedbackLimit` 只裁剪预览。
 - SoT: `backend/src/modules/classrooms/classroom-tasks/services/classroom-tasks.service.ts`；`backend/src/modules/classrooms/classroom-tasks/dto/query-my-task-detail.dto.ts`。
 - Boundary / Non-responsibility: 不把展示 preview 当成状态计算 SoT；公开 participationStatus 与动作边界见 [API Map](./handoff-backend-api-map.md#classroom-tasksclassrooms-子资源)，本卡只维护完成态推导与查询隔离。
 
@@ -351,6 +351,7 @@ Global SoT 只保留理解跨 Service workflow 必需的稳定不变量，不追
   - 先批量读取 owner 课堂、有效任务、ACTIVE 成员及公开上下文；学生按 `studentNo,studentName,studentId` 稳定排序。q 只对姓名/学号做 trim 后不区分大小写的内存子串匹配，不构造 Mongo regex，不搜索 studentId。
   - 无指标筛选（含 q-only）时先分页 q 结果，再仅为当前页加载 Submission/Job/AI Feedback；有 overallOutcome 或 engagementStatus 筛选时先对 q 候选批量构造 metrics，再做 AND 筛选、计数与分页，并复用已算结果。
   - q 后无候选时跳过样本查询；所有路径使用 projection、lean、批量查询与 Map 配对，避免按学生/任务 N+1；空任务、成员或样本按 DTO 保留空集合、零计数及 null 指标。
+  - 对同一组 submissionIds，先在主节点读完 Job，再在主节点批量读 AI Feedback。若读 Job 时评阅尚未成功，本轮可能暂未计入交付。已读到 SUCCEEDED 且实际有反馈时，完成提交与读序交错不会将其误报为空反馈。
 - SoT: `backend/src/modules/classrooms/services/ai-learning-analytics.service.ts`；`backend/src/modules/classrooms/dto/query-ai-learning-analytics.dto.ts`；`backend/src/modules/classrooms/types/ai-learning-analytics.types.ts`。
 - Boundary / Non-responsibility: 公开方法学版本、枚举/响应投影及解释边界见 [API Map](./handoff-backend-api-map.md#classrooms)，输入/返回类型从上述 SoT 定位；本卡保留内部配对与聚合算法，不将结果升级为成绩、能力或因果判断。
 
@@ -420,6 +421,7 @@ Global SoT 只保留理解跨 Service workflow 必需的稳定不变量，不追
   - Job/Processor 是唯一重试负责人：仅本地/上游限流、上游 5xx 和超时可在剩余机会内 FAILED，并按既有 30 秒起指数退避（最大 10 分钟）；其他不可重试失败和耗尽次数直接 DEAD，清理锁与调度时间，保留安全失败代码。数据库记录/反馈/终态写入异常不能成为再次调用模型的理由。
   - 结果事务先按同一认领条件更新 Job，再按 `submissionId/source/type/severity/message` 查询已有反馈并批量插入缺项。已有同键记录保留原内容和时间戳，教师来源独立；空反馈也经认领校验提交成功。完成态与本次新增反馈共享同一 session，ZIP、Provider、预留、usage、压缩和诊断留在可重试事务之外。
   - `processOnce` 按已认领或旧 Job 终止计 processed，成功事务确认后计 succeeded，FAILED/DEAD 条件写命中后才计对应终态。失效认领不覆盖后来者。提交回执不明时先用事务工具在原事务内确认；仍不明时，只有主节点多数派读得到同 Job、同 attempts 的 SUCCEEDED 才计成功，否则传播未确认错误，不补写失败或重放。
+  - 正常关闭时，Processor 停止接受新批次并在旧 Job 检查返回后再次检查关闭状态。已经发出的认领若返回了 Job，按原处理链完成该 Job 后退出批次。Nest 等待所有已受理的手工及定时处理结束后才关闭连接，单个批次失败也会等待其余批次收尾。
   - 每次真实 HTTP 前通过回调在当前 claim 持久化预留，以 claimNo 标识，最多三条；包含 provider、model、完整输入 bytes、输出 token 上限、reservedAt、usage=null。预留失败或未匹配禁止 fetch；供应商可能已收到的未知预留不归零、不删除。reportUsage 沿现有 `requests.$.usage` 整对象写入实报及可选数值明细，落库先于反馈处理；数据库不保存 prompt/源码副本/完整请求正文/原始响应/密钥/请求头。可选本地诊断副作用见 [Provider Card B](#provider-card-b)。
   - 缺当前版本的 PENDING/FAILED/RUNNING Job 原子终止为 LEGACY_JOB_UNSUPPORTED，不调用 Provider、不补造预算版本或用量；旧 SUCCEEDED/DEAD 只读保持。无迁移、回填、RUNNING 崩溃恢复、租约接管或自动重放。
 - Isolation: 沿 Job 的 classroomTaskId 进入限流桶；成功条件写回校验认领者，不把 Worker 防重入当成 Job 跨入口互斥。
@@ -439,14 +441,14 @@ Global SoT 只保留理解跨 Service workflow 必需的稳定不变量，不追
 
 - Service: `backend/src/modules/learning-tasks/ai-feedback/services/ai-feedback-worker.service.ts`
 - Domain / Responsibility: 按配置启动后台轮询，以批次委托 Processor，并管理自身定时器生命周期。
-- Upstream: Nest 模块初始化/销毁生命周期。
+- Upstream: Nest 模块初始化与正常关闭生命周期。正式启动在 listen 前注册 Nest 关闭钩子。
 - Downstream / Dependencies: `AiFeedbackProcessor`、`ConfigService`。
-- Consistency / State / Idempotency: 仅启用时建立 interval；isRunning 防止本 Worker tick 重入，tick 的 finally 复位；模块销毁时清理 interval。
+- Consistency / State / Idempotency: 仅启用时建立 interval；isRunning 防止本 Worker tick 重入，tick 的 finally 复位。关闭时清理 interval，通过 Processor 统一停止认领并等待在途处理。
 - Isolation: Job 认领与课堂隔离由 Processor 负责，Worker 不建立第二套锁或限流。
 - Side Effects: 周期调度与诊断日志。
 - Important Performance / Recovery: 批处理数量可配置；禁用时无轮询开销。Processor 抛错时捕获记录，轮询进程不因单个 tick 异常退出。
 - SoT: `backend/src/modules/learning-tasks/ai-feedback/services/ai-feedback-worker.service.ts`；`backend/src/modules/learning-tasks/ai-feedback/services/ai-feedback-processor.service.ts`。
-- Boundary / Non-responsibility: Worker 只控制自动消费，不是 Provider 或手工执行总开关；配置职责、validation 和默认值见 [Config Matrix](./handoff-backend-config-matrix.md#4-核心-env-列表与默认值)。
+- Boundary / Non-responsibility: Worker 控制自动消费，手工执行也遵循 Processor 的关闭边界。正常关闭涵盖应用生命周期及宿主转交给 Nest 的可捕获信号，宿主强停和崩溃恢复不在此处处理。配置职责和默认值见 [Config Matrix](./handoff-backend-config-matrix.md#4-核心-env-列表与默认值)。
 
 ## Provider Card A
 

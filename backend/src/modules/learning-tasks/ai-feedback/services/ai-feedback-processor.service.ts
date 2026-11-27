@@ -37,6 +37,12 @@ import {
 import { withMongoOperationDeadline } from '../../../../lib/mongo-operation-deadline';
 
 type AiFeedbackJobWithMeta = AiFeedbackJob & WithId & WithTimestamps;
+type ProcessResult = {
+  processed: number;
+  succeeded: number;
+  failed: number;
+  dead: number;
+};
 type SubmissionAnalysisSource = Pick<
   Submission,
   'taskId' | 'classroomTaskId' | 'attemptNo' | 'content' | 'meta'
@@ -64,6 +70,8 @@ export class AiFeedbackProcessor {
   private static readonly MAX_BACKOFF_MS = 10 * 60 * 1000;
   private static readonly LOCK_OWNER_PREFIX = 'ai-feedback-processor';
   private readonly logger = new Logger(AiFeedbackProcessor.name);
+  private readonly inFlight = new Set<Promise<ProcessResult>>();
+  private shutdown?: Promise<void>;
 
   constructor(
     @InjectModel(AiFeedbackJob.name)
@@ -84,20 +92,37 @@ export class AiFeedbackProcessor {
   ) {}
 
   async processOnce(batchSize = AiFeedbackProcessor.DEFAULT_BATCH_SIZE) {
-    const results = {
+    const results: ProcessResult = {
       processed: 0,
       succeeded: 0,
       failed: 0,
       dead: 0,
     };
+    if (this.shutdown) return results;
 
-    for (let index = 0; index < batchSize; index += 1) {
+    const batch = this.processBatch(batchSize, results);
+    this.inFlight.add(batch);
+    try {
+      return await batch;
+    } finally {
+      this.inFlight.delete(batch);
+    }
+  }
+
+  stopAndDrain(): Promise<void> {
+    this.shutdown ??= Promise.allSettled(this.inFlight).then(() => undefined);
+    return this.shutdown;
+  }
+
+  private async processBatch(batchSize: number, results: ProcessResult) {
+    for (let index = 0; index < batchSize && !this.shutdown; index += 1) {
       const retired = await this.terminateUnsupportedJob();
       if (retired) {
         results.processed += 1;
         results.dead += 1;
         continue;
       }
+      if (this.shutdown) break;
       const job = await this.claimNextJob();
       if (!job) {
         break;

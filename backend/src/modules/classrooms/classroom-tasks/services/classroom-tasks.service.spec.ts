@@ -37,6 +37,7 @@ type FeedbackFixture = {
   submissionId: Types.ObjectId;
   source: FeedbackSource;
   severity: FeedbackSeverity;
+  tags?: string[];
 };
 
 type HarnessOptions = {
@@ -1519,36 +1520,62 @@ describe('ClassroomTasksService getMyTaskDetail completionStatus', () => {
     });
   });
 
-  it('calculates completionStatus from all latest feedback even when feedbackLimit is 1', async () => {
+  it('derives latest summary and completion from one full read and batches history', async () => {
     const base = createHarness();
-    const latest = submissionFixture({
+    const earlier = submissionFixture({
       classroomTaskId: base.ids.classroomTaskId,
       taskId: base.ids.taskId,
       studentId: base.ids.studentId,
       attemptNo: 1,
     });
+    const latest = submissionFixture({
+      classroomTaskId: base.ids.classroomTaskId,
+      taskId: base.ids.taskId,
+      studentId: base.ids.studentId,
+      attemptNo: 2,
+    });
     const harness = createHarness({
-      submissions: [latest],
+      submissions: [earlier, latest],
       feedbacks: [
         {
           submissionId: latest._id,
           source: FeedbackSource.AI,
           severity: FeedbackSeverity.Info,
+          tags: ['style'],
         },
         {
           submissionId: latest._id,
           source: FeedbackSource.AI,
           severity: FeedbackSeverity.Error,
+          tags: ['correctness', 'style'],
         },
       ],
     });
 
-    const detail = await getMyTaskDetailCompletionStatus(
-      harness.service,
-      harness.ids,
+    const detail = await harness.service.getMyTaskDetail(
+      harness.ids.classroomId.toString(),
+      harness.ids.classroomTaskId.toString(),
       { includeFeedbackItems: 'true', feedbackLimit: 1 },
+      harness.ids.studentId.toString(),
     );
 
+    expect(detail.latest).toMatchObject({
+      submissionId: latest._id.toString(),
+      feedbackSummary: {
+        totalItems: 2,
+        severityBreakdown: { INFO: 1, WARN: 0, ERROR: 1 },
+        topTags: [
+          { tag: 'style', count: 2 },
+          { tag: 'correctness', count: 1 },
+        ],
+      },
+      feedbackItems: [
+        { source: FeedbackSource.AI, severity: FeedbackSeverity.Info },
+      ],
+    });
+    expect(detail.latest?.feedbackSummary).toEqual(
+      detail.submissions.at(-1)?.feedbackSummary,
+    );
     expect(detail.completionStatus).toMatchObject({
       status: 'UNQUALIFIED',
       severity: FeedbackSeverity.Error,
@@ -1556,6 +1583,22 @@ describe('ClassroomTasksService getMyTaskDetail completionStatus', () => {
       aiFeedbackCount: 2,
       aiWorstSeverity: FeedbackSeverity.Error,
     });
+    expect(harness.feedbackModel.find).toHaveBeenCalledTimes(1);
+    expect(harness.feedbackModel.aggregate).toHaveBeenCalledTimes(2);
+    const historyOnly = {
+      $match: {
+        submissionId: { $in: [earlier._id] },
+        source: FeedbackSource.AI,
+      },
+    };
+    expect(harness.feedbackModel.aggregate).toHaveBeenNthCalledWith(
+      1,
+      expect.arrayContaining([historyOnly]),
+    );
+    expect(harness.feedbackModel.aggregate).toHaveBeenNthCalledWith(
+      2,
+      expect.arrayContaining([historyOnly]),
+    );
   });
 });
 

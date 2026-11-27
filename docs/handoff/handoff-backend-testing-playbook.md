@@ -164,6 +164,14 @@ npm.cmd run test:e2e -- --runInBand --runTestsByPath ./test/classroom-report-tas
 - `./test/learning-tasks.ai-feedback.ops.e2e-spec.ts` 回归正式手工 process-once 和定时 stub Worker。
 - `./test/classroom-review-pack.e2e-spec.ts` 保留读侧真实聚合屏障，用原子完成夹具核对评阅完成交错中的分组。
 
+### AI 评阅停机与课堂读取交错定向验收
+
+按上一节的 suite discovery 和实库门禁逐文件串行运行。预置记录由独立主节点回读核对，事务屏障在 finally 放行，退出前清理本轮业务及认证记录。
+
+- `./test/learning-tasks.ai-feedback.ops.e2e-spec.ts` 以真实定时 Worker 在途时触发 Nest `app.close()`，验证已认领 Job 能收尾、下一条仍待处理。Worker 和 Processor 单测覆盖旧 Job 检查、在途认领及手工调用的关闭边界。应用生命周期验收与实际系统信号分别报告，宿主强停不作正常关闭证据。
+- `./test/classroom-ai-learning-analytics.e2e-spec.ts` 通过正式教师 GET 验证评阅原子提交与报告读取交错，并保留真正空反馈和 stub 排除的对照。
+- `./test/classroom-student-task-detail.e2e-spec.ts` 通过正式学生 GET 对照最新任务作品的反馈摘要、完成态、可选预览和教师反馈优先级。
+
 ### 课程删除与建班定向验收
 
 `test/course-lifecycle.e2e-spec.ts` 使用正式 `configureApp`、HTTP 路由和 Mongo 回读。它保留课程生命周期和权限回归，并负责删除空课程与建班竞争的两种提交顺序。测试在一方完成真实 Course 写入后暂停该事务，观察另一方争用同一文档，再放行先写入方提交。分别核对两个响应、课程和关联班级的终态以及建班后的课程时间戳。公开结果见 [API Courses](./handoff-backend-api-map.md#courses)，协调写与重试规则见 [Service Card 03](./handoff-backend-service-map.md#service-card-03) 和 [Service Card 04](./handoff-backend-service-map.md#service-card-04)。

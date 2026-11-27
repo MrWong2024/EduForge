@@ -30,11 +30,13 @@ const objectId = () => new Types.ObjectId();
 const makeQuery = <T>(result: T) => {
   const chain = {
     select: jest.fn(),
+    read: jest.fn(),
     sort: jest.fn(),
     lean: jest.fn(),
     exec: jest.fn().mockResolvedValue(result),
   };
   chain.select.mockReturnValue(chain);
+  chain.read.mockReturnValue(chain);
   chain.sort.mockReturnValue(chain);
   chain.lean.mockReturnValue(chain);
   return chain;
@@ -201,6 +203,8 @@ const createServiceHarness = (options: ServiceHarnessOptions = {}) => {
     submissionModel,
     aiFeedbackJobModel,
     feedbackModel,
+    jobQuery,
+    feedbackQuery,
     getCapturedClassroomTaskFilter: () => capturedClassroomTaskFilter,
     getCapturedSubmissionFilter: () => capturedSubmissionFilter,
   };
@@ -1375,6 +1379,92 @@ describe('AI learning analytics standard sample rules', () => {
 });
 
 describe('AiLearningAnalyticsService aggregation boundaries', () => {
+  it('waits for the primary Job batch before starting the primary AI feedback batch', async () => {
+    const studentId = objectId();
+    const classroomTaskId = objectId();
+    const work = submission({
+      studentId,
+      classroomTaskId,
+      attemptNo: 1,
+      submittedAt: '2026-01-01T02:00:00.000Z',
+      codeText: 'work in review',
+    });
+    const jobs = [
+      job({ submissionId: work._id, status: AiFeedbackJobStatus.Running }),
+    ];
+    const {
+      service,
+      classroomId,
+      teacherId,
+      aiFeedbackJobModel,
+      feedbackModel,
+      jobQuery,
+      feedbackQuery,
+    } = createServiceHarness({
+      activeStudentIds: [studentId],
+      classroomTasks: [
+        {
+          _id: classroomTaskId,
+          taskId: objectId(),
+          publishedAt: new Date('2026-01-01T00:00:00.000Z'),
+        },
+      ],
+      submissions: [work],
+      feedbackItems: [
+        feedback({ submissionId: work._id, severity: FeedbackSeverity.Error }),
+      ],
+    });
+    let started!: () => void;
+    const jobStarted = new Promise<void>((resolve) => {
+      started = resolve;
+    });
+    let finishJob!: (value: typeof jobs) => void;
+    const heldJob = new Promise<typeof jobs>((resolve) => {
+      finishJob = resolve;
+    });
+    jobQuery.exec.mockImplementationOnce(() => {
+      started();
+      return heldJob;
+    });
+    const pending = service.getStudentDetail(
+      classroomId.toString(),
+      studentId.toString(),
+      {},
+      teacherId.toString(),
+    );
+    try {
+      await Promise.race([
+        jobStarted,
+        pending.then(() => {
+          throw new Error('Analytics finished before reading the held Job');
+        }),
+      ]);
+      expect(jobQuery.read).toHaveBeenCalledWith('primary');
+      expect(feedbackModel.find).not.toHaveBeenCalled();
+    } finally {
+      finishJob(jobs);
+      await pending;
+    }
+    expect(aiFeedbackJobModel.find).toHaveBeenCalledTimes(1);
+    expect(aiFeedbackJobModel.find).toHaveBeenCalledWith({
+      submissionId: { $in: [work._id] },
+    });
+    expect(feedbackModel.find).toHaveBeenCalledTimes(1);
+    expect(feedbackModel.find).toHaveBeenCalledWith({
+      submissionId: { $in: [work._id] },
+      source: FeedbackSource.AI,
+    });
+    expect(feedbackQuery.read).toHaveBeenCalledWith('primary');
+    const detail = await pending;
+    expect(detail.taskPoints[0]).toMatchObject({
+      aiRequested: true,
+      aiDelivered: false,
+    });
+    expect(detail.taskPoints[0].comparisonWarnings).not.toContain(
+      'EMPTY_FEEDBACK',
+    );
+  });
+
   it('returns a stable empty-classroom overview', async () => {
     const { service, classroomId, teacherId } = createServiceHarness();
 

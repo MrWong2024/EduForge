@@ -46,6 +46,7 @@ export class AiFeedbackWorker implements OnModuleInit, OnModuleDestroy {
       clearInterval(this.intervalId);
       this.intervalId = undefined;
     }
+    return this.processor.stopAndDrain();
   }
 
   private async tick(batchSize: number) {

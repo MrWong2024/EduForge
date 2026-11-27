@@ -6,6 +6,7 @@ import { configureApp } from './app.setup';
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
   configureApp(app);
+  app.enableShutdownHooks();
   const configService = app.get(ConfigService);
   const port = configService.get<number>('app.port') ?? 5000;
   await app.listen(port);

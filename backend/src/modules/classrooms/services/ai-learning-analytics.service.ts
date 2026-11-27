@@ -1050,24 +1050,25 @@ export class AiLearningAnalyticsService {
     }
 
     const submissionIds = submissions.map((submission) => submission._id);
-    const [jobs, feedbackItems] = await Promise.all([
-      this.aiFeedbackJobModel
-        .find({ submissionId: { $in: submissionIds } })
-        .select(
-          '_id submissionId status updatedAt provider attempts requests.claimNo requests.provider requests.model',
-        )
-        .sort({ submissionId: 1, _id: 1 })
-        .lean<AnalyticsJobLean[]>()
-        .exec(),
-      this.feedbackModel
-        .find({
-          submissionId: { $in: submissionIds },
-          source: FeedbackSource.AI,
-        })
-        .select('_id submissionId source severity')
-        .lean<AnalyticsFeedbackLean[]>()
-        .exec(),
-    ]);
+    // A report that sees a committed success must sample its feedback afterwards.
+    const jobs = await this.aiFeedbackJobModel
+      .find({ submissionId: { $in: submissionIds } })
+      .read('primary')
+      .select(
+        '_id submissionId status updatedAt provider attempts requests.claimNo requests.provider requests.model',
+      )
+      .sort({ submissionId: 1, _id: 1 })
+      .lean<AnalyticsJobLean[]>()
+      .exec();
+    const feedbackItems = await this.feedbackModel
+      .find({
+        submissionId: { $in: submissionIds },
+        source: FeedbackSource.AI,
+      })
+      .read('primary')
+      .select('_id submissionId source severity')
+      .lean<AnalyticsFeedbackLean[]>()
+      .exec();
 
     return buildAiLearningAnalyticsStandardSamples(
       submissions,

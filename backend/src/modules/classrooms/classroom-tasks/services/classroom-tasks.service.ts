@@ -186,6 +186,8 @@ type SubmissionDetailItem = {
     tags?: string[];
   }>;
 };
+type LatestSubmissionFeedback = CompletionFeedback &
+  Pick<Feedback, 'type' | 'message' | 'suggestion' | 'tags'>;
 type LearningTrajectorySubmissionRow = Pick<
   Submission,
   'studentId' | 'attemptNo' | 'isLate' | 'lateBySeconds'
@@ -1432,48 +1434,62 @@ export class ClassroomTasksService {
       .exec();
 
     const submissionIds = submissions.map((submission) => submission._id);
-    const [statusMap, feedbackSummaryMap, feedbackItemsMap] = await Promise.all(
-      [
+    const latestSubmissionId = submissionIds.at(-1);
+    const historyIds = submissionIds.slice(0, -1);
+    const [statusMap, feedbackSummaryMap, feedbackItemsMap, latestFeedbacks] =
+      await Promise.all([
         this.aiFeedbackJobService.getStatusMapBySubmissionIds(submissionIds),
-        this.getFeedbackSummariesBySubmissionIds(submissionIds),
+        this.getFeedbackSummariesBySubmissionIds(historyIds),
         includeFeedbackItems
           ? this.getFeedbackItemsPreviewBySubmissionIds(
-              submissionIds,
+              historyIds,
               feedbackLimit,
             )
           : Promise.resolve(
               new Map<string, SubmissionDetailItem['feedbackItems']>(),
             ),
-      ],
+        latestSubmissionId
+          ? this.getCompletionFeedbacksBySubmissionId(latestSubmissionId)
+          : Promise.resolve([]),
+      ]);
+    const latestAiFeedbacks = latestFeedbacks.filter(
+      (feedback) => feedback.source === FeedbackSource.AI,
     );
 
     const submissionItems = submissions.map((submission) => {
       const submissionId = submission._id.toString();
+      const isLatest = submission._id.equals(latestSubmissionId);
       const base: SubmissionDetailItem = {
         id: submissionId,
         attemptNo: submission.attemptNo,
         createdAt: submission.createdAt ?? new Date(0),
         aiFeedbackStatus:
           statusMap.get(submissionId) ?? AiFeedbackStatus.NotRequested,
-        feedbackSummary:
-          feedbackSummaryMap.get(submissionId) ??
-          this.getEmptyFeedbackSummary(),
+        feedbackSummary: isLatest
+          ? this.summarizeLatestAiFeedback(latestAiFeedbacks)
+          : (feedbackSummaryMap.get(submissionId) ??
+            this.getEmptyFeedbackSummary()),
       };
       if (includeFeedbackItems) {
-        base.feedbackItems = feedbackItemsMap.get(submissionId) ?? [];
+        base.feedbackItems = isLatest
+          ? latestAiFeedbacks
+              .slice(0, feedbackLimit)
+              .map(({ source, type, severity, message, suggestion, tags }) => ({
+                source,
+                type,
+                severity,
+                message,
+                suggestion,
+                tags,
+              }))
+          : (feedbackItemsMap.get(submissionId) ?? []);
       }
       return base;
     });
 
-    const latestSubmission = submissionItems[submissionItems.length - 1];
-    const completionFeedbacks =
-      latestSubmission === undefined
-        ? []
-        : await this.getCompletionFeedbacksBySubmissionId(
-            new Types.ObjectId(latestSubmission.id),
-          );
+    const latestSubmission = submissionItems.at(-1);
     const completionStatus = latestSubmission
-      ? buildCompletionStatus(latestSubmission.id, completionFeedbacks)
+      ? buildCompletionStatus(latestSubmission.id, latestFeedbacks)
       : buildNotSubmittedCompletionStatus();
     const classroomTaskStatus = this.toClassroomTaskStatusForRead(
       classroomTask.status,
@@ -1626,6 +1642,29 @@ export class ClassroomTasksService {
       topTags: [],
       severityBreakdown: { INFO: 0, WARN: 0, ERROR: 0 },
     };
+  }
+
+  private summarizeLatestAiFeedback(feedbacks: LatestSubmissionFeedback[]) {
+    const summary = this.getEmptyFeedbackSummary();
+    summary.totalItems = feedbacks.length;
+    const tagCounts = new Map<string, number>();
+    for (const { severity, tags } of feedbacks) {
+      if (
+        severity === FeedbackSeverity.Info ||
+        severity === FeedbackSeverity.Warn ||
+        severity === FeedbackSeverity.Error
+      ) {
+        summary.severityBreakdown[severity] += 1;
+      }
+      for (const tag of tags ?? []) {
+        tagCounts.set(tag, (tagCounts.get(tag) ?? 0) + 1);
+      }
+    }
+    summary.topTags = [...tagCounts]
+      .sort(([, left], [, right]) => right - left)
+      .slice(0, 5)
+      .map(([tag, count]) => ({ tag, count }));
+    return summary;
   }
 
   private async getFeedbackSummariesBySubmissionIds(
@@ -1960,7 +1999,10 @@ export class ClassroomTasksService {
         submissionId: id,
         source: { $in: [FeedbackSource.Teacher, FeedbackSource.AI] },
       })
-      .lean<CompletionFeedback[]>()
+      .read('primary')
+      .sort({ createdAt: -1 })
+      .select('-_id submissionId source severity type message suggestion tags')
+      .lean<LatestSubmissionFeedback[]>()
       .exec();
   }
 

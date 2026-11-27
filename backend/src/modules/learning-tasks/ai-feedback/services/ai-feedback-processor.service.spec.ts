@@ -597,6 +597,150 @@ describe('claim-scoped result commit (no database)', () => {
   );
 });
 
+describe('shutdown of shared AI feedback processing (no database)', () => {
+  afterEach(() => jest.restoreAllMocks());
+
+  function held<T>() {
+    let resolve!: (value: T) => void;
+    let reject!: (reason: Error) => void;
+    const promise = new Promise<T>((done, fail) => {
+      resolve = done;
+      reject = fail;
+    });
+    return { promise, resolve, reject };
+  }
+
+  it.each([false, true])(
+    'does not issue a normal claim after shutdown while legacy handling was pending (retired=%s)',
+    async (retired) => {
+      const h = await harness();
+      const pendingLegacy = held<typeof h.job | null>();
+      const legacy = query(null);
+      legacy.exec.mockReturnValueOnce(pendingLegacy.promise);
+      h.jobModel.findOneAndUpdate.mockReset().mockReturnValueOnce(legacy);
+      const batch = h.processor.processOnce(2);
+
+      try {
+        expect(legacy.exec).toHaveBeenCalledTimes(1);
+        const shutdown = h.processor.stopAndDrain();
+        const closed = jest.fn();
+        void shutdown.then(closed);
+
+        await expect(h.processor.processOnce(2)).resolves.toEqual({
+          processed: 0,
+          succeeded: 0,
+          failed: 0,
+          dead: 0,
+        });
+        expect(closed).not.toHaveBeenCalled();
+        pendingLegacy.resolve(retired ? h.job : null);
+        await expect(batch).resolves.toEqual({
+          processed: retired ? 1 : 0,
+          succeeded: 0,
+          failed: 0,
+          dead: retired ? 1 : 0,
+        });
+        await shutdown;
+        expect(h.jobModel.findOneAndUpdate).toHaveBeenCalledTimes(1);
+        expect(h.session.startTransaction).not.toHaveBeenCalled();
+      } finally {
+        pendingLegacy.resolve(null);
+        await Promise.allSettled([batch, h.processor.stopAndDrain()]);
+        await h.module.close();
+      }
+    },
+  );
+
+  it('finishes a claim issued before shutdown even when the Job returns afterward', async () => {
+    const h = await harness();
+    const claimIssued = held<void>();
+    const pendingClaim = held<typeof h.job | null>();
+    const claim = query(null);
+    claim.exec.mockImplementationOnce(() => {
+      claimIssued.resolve();
+      return pendingClaim.promise;
+    });
+    h.jobModel.findOneAndUpdate
+      .mockReset()
+      .mockReturnValueOnce(query(null))
+      .mockReturnValueOnce(claim);
+    const model = mockModelHttp([]);
+    const batch = h.processor.processOnce(2);
+
+    try {
+      await claimIssued.promise;
+      const shutdown = h.processor.stopAndDrain();
+      pendingClaim.resolve(h.job);
+      await expect(batch).resolves.toEqual({
+        processed: 1,
+        succeeded: 1,
+        failed: 0,
+        dead: 0,
+      });
+      await shutdown;
+      expect(model).toHaveBeenCalledTimes(1);
+      expect(h.session.commitTransaction).toHaveBeenCalledTimes(1);
+      expect(h.jobModel.findOneAndUpdate).toHaveBeenCalledTimes(2);
+    } finally {
+      pendingClaim.resolve(null);
+      await Promise.allSettled([batch, h.processor.stopAndDrain()]);
+      await h.module.close();
+    }
+  });
+
+  it('waits for all admitted manual batches despite one rejection, and shares the shutdown promise', async () => {
+    const h = await harness();
+    const pendingClaim = held<null>();
+    const failedClaim = query(null);
+    failedClaim.exec.mockReturnValueOnce(pendingClaim.promise);
+    h.jobModel.findOneAndUpdate
+      .mockReset()
+      .mockReturnValueOnce(query(null))
+      .mockReturnValueOnce(query(null))
+      .mockReturnValueOnce(query(h.job))
+      .mockReturnValueOnce(failedClaim);
+    const modelEntered = held<void>();
+    const releaseModel = held<AiFeedbackItem[]>();
+    const analyze = jest
+      .spyOn(h.provider, 'analyzeSubmission')
+      .mockImplementation(() => {
+        modelEntered.resolve();
+        return releaseModel.promise;
+      });
+    const first = h.processor.processOnce(2);
+    const second = h.processor.processOnce(2);
+    const failure = expect(second).rejects.toThrow('synthetic claim failure');
+
+    try {
+      await modelEntered.promise;
+      const shutdown = h.processor.stopAndDrain();
+      expect(h.processor.stopAndDrain()).toBe(shutdown);
+      const closed = jest.fn();
+      void shutdown.then(closed);
+      pendingClaim.reject(new Error('synthetic claim failure'));
+      await failure;
+      expect(closed).not.toHaveBeenCalled();
+
+      releaseModel.resolve([]);
+      await expect(first).resolves.toEqual({
+        processed: 1,
+        succeeded: 1,
+        failed: 0,
+        dead: 0,
+      });
+      await shutdown;
+      expect(closed).toHaveBeenCalledTimes(1);
+      expect(analyze).toHaveBeenCalledTimes(1);
+      expect(h.jobModel.findOneAndUpdate).toHaveBeenCalledTimes(4);
+    } finally {
+      pendingClaim.resolve(null);
+      releaseModel.resolve([]);
+      await Promise.allSettled([first, second, h.processor.stopAndDrain()]);
+      await h.module.close();
+    }
+  });
+});
+
 describe('claim-local pre-persistence compaction diagnostics (no database)', () => {
   afterEach(() => jest.restoreAllMocks());
 

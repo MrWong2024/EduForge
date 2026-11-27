@@ -17,6 +17,7 @@ describe('AiFeedbackWorker', () => {
   let module: TestingModule | undefined;
   let worker: AiFeedbackWorker;
   let processOnce: jest.MockedFunction<AiFeedbackProcessor['processOnce']>;
+  let stopAndDrain: jest.MockedFunction<AiFeedbackProcessor['stopAndDrain']>;
   let logSpy: jest.SpiedFunction<Logger['log']>;
   let debugSpy: jest.SpiedFunction<Logger['debug']>;
   let errorSpy: jest.SpiedFunction<Logger['error']>;
@@ -34,7 +35,10 @@ describe('AiFeedbackWorker', () => {
       providers: [
         AiFeedbackWorker,
         { provide: ConfigService, useValue: new ConfigService(values) },
-        { provide: AiFeedbackProcessor, useValue: { processOnce } },
+        {
+          provide: AiFeedbackProcessor,
+          useValue: { processOnce, stopAndDrain },
+        },
       ],
     }).compile();
     worker = module.get(AiFeedbackWorker);
@@ -46,6 +50,7 @@ describe('AiFeedbackWorker', () => {
     processOnce = jest
       .fn<ReturnType<AiFeedbackProcessor['processOnce']>, [number?]>()
       .mockResolvedValue(emptyResult);
+    stopAndDrain = jest.fn<Promise<void>, []>().mockResolvedValue(undefined);
     logSpy = jest
       .spyOn(Logger.prototype, 'log')
       .mockImplementation(() => undefined);
@@ -154,11 +159,30 @@ describe('AiFeedbackWorker', () => {
   it('clears its interval on destroy, including repeated destroy', async () => {
     await createWorker({ AI_FEEDBACK_WORKER_ENABLED: 'true' });
 
-    worker.onModuleDestroy();
-    worker.onModuleDestroy();
+    await worker.onModuleDestroy();
+    await worker.onModuleDestroy();
     await jest.advanceTimersByTimeAsync(20000);
 
     expect(jest.getTimerCount()).toBe(0);
     expect(processOnce).not.toHaveBeenCalled();
+  });
+
+  it('returns the shared manual-work drain even when timed processing is disabled', async () => {
+    await createWorker();
+    let finish!: () => void;
+    const pending = new Promise<void>((resolve) => {
+      finish = resolve;
+    });
+    stopAndDrain.mockReturnValue(pending);
+
+    try {
+      expect(worker.onModuleDestroy()).toBe(pending);
+      expect(stopAndDrain).toHaveBeenCalledTimes(1);
+      expect(processOnce).not.toHaveBeenCalled();
+      expect(jest.getTimerCount()).toBe(0);
+    } finally {
+      finish();
+      await pending;
+    }
   });
 });
