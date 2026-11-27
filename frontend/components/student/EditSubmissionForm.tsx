@@ -30,12 +30,43 @@ type Draft = UpdateSubmissionRequest["content"] & {
   baseline: UpdateSubmissionRequest;
 };
 
+export type EditSubmissionContext = {
+  viewerId: string;
+  detail: SubmissionDetailResponse;
+};
+
 export function EditSubmissionForm({
+  submissionId,
+  context,
+}: {
+  submissionId: string;
+  context: EditSubmissionContext | null;
+}) {
+  const identity = context
+    ? JSON.stringify([context.viewerId, context.detail.id])
+    : null;
+  const [lastConfirmedIdentity, setLastConfirmedIdentity] = useState(identity);
+  if (identity !== null && identity !== lastConfirmedIdentity) {
+    setLastConfirmedIdentity(identity);
+  }
+  const editorKey = identity ?? lastConfirmedIdentity;
+  if (editorKey === null) return null;
+
+  return (
+    <SubmissionEditor
+      key={editorKey}
+      submissionId={submissionId}
+      detail={context?.detail ?? null}
+    />
+  );
+}
+
+function SubmissionEditor({
   submissionId,
   detail,
 }: {
   submissionId: string;
-  detail: SubmissionDetailResponse;
+  detail: SubmissionDetailResponse | null;
 }) {
   const router = useRouter();
   const [saved, setSaved] = useState<SubmissionDetailResponse | null>(null);
@@ -46,8 +77,10 @@ export function EditSubmissionForm({
   const [busy, setBusy] = useState(false);
   const [refreshing, startTransition] = useTransition();
   const inFlight = useRef(false);
-  const current = selectSubmissionDisplayDetail(detail, saved);
+  const current = detail && selectSubmissionDisplayDetail(detail, saved);
+  const canEdit = current !== null && canEditSubmission(current);
   const revisionChanged =
+    current !== null &&
     draft !== null &&
     !isDraftRevisionCurrent(
       draft.baseline.expectedRevision,
@@ -60,8 +93,8 @@ export function EditSubmissionForm({
     recovering &&
     draft !== null &&
     checkedBaseline !== null &&
-    canEditSubmission(current) &&
-    checkedBaseline.expectedRevision === current.contentRevision;
+    canEdit &&
+    checkedBaseline.expectedRevision === current?.contentRevision;
   const customLanguages = draft
     ? [...new Set([draft.baseline.content.language, draft.language])].filter(
         (language) =>
@@ -73,7 +106,7 @@ export function EditSubmissionForm({
   const path = `learning-tasks/submissions/${encodeURIComponent(submissionId)}`;
 
   const startEdit = () => {
-    const baseline = captureSubmissionEditBaseline(current);
+    const baseline = current && captureSubmissionEditBaseline(current);
     if (blocked || busy || refreshing || inFlight.current || !baseline) return;
     setDraft({ baseline, ...baseline.content });
     setBlocked(false);
@@ -81,7 +114,9 @@ export function EditSubmissionForm({
     setMessage(null);
   };
   const checkCurrent = async () => {
-    if (!recovering || busy || refreshing || inFlight.current) return;
+    if (!current || !recovering || busy || refreshing || inFlight.current) {
+      return;
+    }
     inFlight.current = true;
     setBusy(true);
     setBlocked(true);
@@ -152,7 +187,7 @@ export function EditSubmissionForm({
       inFlight.current ||
       blocked ||
       revisionChanged ||
-      !canEditSubmission(current)
+      !canEdit
     )
       return;
     const textError = getSubmissionTextError(
@@ -218,7 +253,7 @@ export function EditSubmissionForm({
     }
   };
 
-  return (
+  const visibleContent = current && (
     <>
       <section className="space-y-3 rounded-lg border border-zinc-200 bg-white p-4 text-sm text-zinc-700">
         <h2 className="text-base font-semibold text-zinc-900">修改本次提交</h2>
@@ -229,9 +264,7 @@ export function EditSubmissionForm({
           <button
             type="button"
             onClick={startEdit}
-            disabled={
-              blocked || !canEditSubmission(current) || busy || refreshing
-            }
+            disabled={blocked || !canEdit || busy || refreshing}
             className="rounded-md bg-zinc-900 px-4 py-2 text-white disabled:bg-zinc-400"
           >
             修改本次提交
@@ -246,7 +279,7 @@ export function EditSubmissionForm({
                 编程语言
                 <select
                   required
-                  disabled={!canEditSubmission(current)}
+                  disabled={!canEdit}
                   value={draft.language}
                   onChange={(event) =>
                     setDraft({ ...draft, language: event.target.value })
@@ -269,7 +302,7 @@ export function EditSubmissionForm({
                 代码内容
                 <textarea
                   required
-                  readOnly={!canEditSubmission(current)}
+                  readOnly={!canEdit}
                   rows={10}
                   value={draft.codeText}
                   onChange={(event) =>
@@ -281,7 +314,7 @@ export function EditSubmissionForm({
               <label className="block">
                 提交说明（可选）
                 <textarea
-                  readOnly={!canEditSubmission(current)}
+                  readOnly={!canEdit}
                   rows={5}
                   value={draft.submissionNote}
                   onChange={(event) =>
@@ -295,7 +328,7 @@ export function EditSubmissionForm({
                 码点；代码与说明按原文保存。
               </p>
               <div className="flex flex-wrap gap-3">
-                {canEditSubmission(current) ? (
+                {canEdit ? (
                   <button
                     type="submit"
                     disabled={!request || recovering || busy || refreshing}
@@ -315,7 +348,7 @@ export function EditSubmissionForm({
             </fieldset>
           </form>
         )}
-        {!canEditSubmission(current) ? (
+        {!canEdit ? (
           <p className="whitespace-pre-wrap break-words">
             {current.editing.message ??
               "当前修改资格不可用，请核对已保存作品或联系任课教师。"}
@@ -382,12 +415,19 @@ export function EditSubmissionForm({
         ) : null}
       </section>
       <SubmissionContent detail={current} />
+    </>
+  );
+
+  return (
+    <>
+      {visibleContent}
       <SubmissionAiReview
         submissionId={submissionId}
-        contentRevision={current.contentRevision}
-        status={current.aiFeedbackStatus}
-        review={current.aiReview}
-        autoRefresh={true}
+        contentRevision={current?.contentRevision}
+        status={current?.aiFeedbackStatus}
+        review={current?.aiReview}
+        autoRefresh
+        suspended={!current}
       />
     </>
   );

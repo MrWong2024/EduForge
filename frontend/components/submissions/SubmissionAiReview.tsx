@@ -1,5 +1,12 @@
 "use client";
-import { useCallback, useEffect, useRef, useState, useTransition } from "react";
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+  useTransition,
+} from "react";
 import { useRouter } from "next/navigation";
 import { ErrorState } from "@/components/blocks/ErrorState";
 import { fetchJson, BrowserFetchJsonError } from "@/lib/api/browser-client";
@@ -32,6 +39,7 @@ type Props = {
   review?: AiReview;
   autoRefresh: boolean;
   contentRevision?: number | null;
+  suspended?: boolean;
 };
 export function SubmissionAiReview(props: Props) {
   return <SubmissionAiReviewPanel key={props.submissionId} {...props} />;
@@ -42,6 +50,7 @@ function SubmissionAiReviewPanel({
   review: initialReview,
   autoRefresh,
   contentRevision,
+  suspended = false,
 }: Props) {
   const router = useRouter();
   const [operations] = useState(
@@ -60,6 +69,10 @@ function SubmissionAiReviewPanel({
   } | null>(null);
   const [isPageRefreshing, startTransition] = useTransition();
   const activeAbort = useRef<AbortController | null>(null);
+  const suspendedRef = useRef(suspended);
+  useLayoutEffect(() => {
+    suspendedRef.current = suspended;
+  }, [suspended]);
   useEffect(
     () => () => {
       operations.cancelPending();
@@ -70,7 +83,7 @@ function SubmissionAiReviewPanel({
 
   const readDetail = useCallback(
     async (explicit: boolean) => {
-      if (isPageRefreshing) return;
+      if (suspendedRef.current || isPageRefreshing) return;
       const operation = operations.beginRead(explicit);
       if (!operation) return;
       const abort = new AbortController();
@@ -103,7 +116,9 @@ function SubmissionAiReviewPanel({
         }
         // Only this after-operation read updates the AI block. RSC props arriving
         // from an earlier refresh cannot replace its accepted status/eligibility.
-        if (explicit || autoRefresh) startTransition(() => router.refresh());
+        if (!suspendedRef.current && (explicit || autoRefresh)) {
+          startTransition(() => router.refresh());
+        }
       } catch (error) {
         if (operations.finishRead(operation) === null) return;
         setView(operations.view);
@@ -120,7 +135,13 @@ function SubmissionAiReviewPanel({
   );
   const autoRead = useCallback(() => readDetail(false), [readDetail]);
   const handleRequest = async () => {
-    if (isPageRefreshing || view.displayedRevision !== contentRevision) return;
+    if (
+      suspendedRef.current ||
+      isPageRefreshing ||
+      view.displayedRevision !== contentRevision
+    ) {
+      return;
+    }
     const operation = operations.beginRequest();
     if (!operation) return;
     const abort = new AbortController();
@@ -176,6 +197,9 @@ function SubmissionAiReviewPanel({
       if (activeAbort.current === abort) activeAbort.current = null;
     }
   };
+
+  if (suspended) return null;
+
   const currentStatus = view.status,
     review = view.review;
   const refreshEnabled =

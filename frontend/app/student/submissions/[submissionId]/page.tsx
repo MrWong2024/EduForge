@@ -1,9 +1,15 @@
 import Link from "next/link";
+import type { ReactNode } from "react";
 import { EmptyState } from "@/components/blocks/EmptyState";
 import { ErrorState } from "@/components/blocks/ErrorState";
 import { PageHeader } from "@/components/blocks/PageHeader";
-import { EditSubmissionForm } from "@/components/student/EditSubmissionForm";
+import { RefreshButton } from "@/components/blocks/RefreshButton";
+import {
+  EditSubmissionForm,
+  type EditSubmissionContext,
+} from "@/components/student/EditSubmissionForm";
 import { fetchJson, FetchJsonError } from "@/lib/api/client";
+import { requireRole } from "@/lib/auth/session";
 import {
   buildErrorDescription,
   extractRawDetail,
@@ -73,6 +79,21 @@ export default async function StudentSubmissionDetailPage({
     classroomId && classroomTaskId
       ? paths.student.taskDetail(classroomId, classroomTaskId)
       : null;
+  const renderSubmissionDetail = (
+    overview: ReactNode,
+    context: EditSubmissionContext | null,
+    feedback?: ReactNode,
+  ) => (
+    <section className="min-w-0 space-y-4">
+      {overview}
+      <EditSubmissionForm
+        key={submissionId}
+        submissionId={submissionId}
+        context={context}
+      />
+      {feedback}
+    </section>
+  );
 
   let viewModel: SubmissionFeedbackViewModel = {
     mode: "error",
@@ -92,11 +113,9 @@ export default async function StudentSubmissionDetailPage({
 
     const detail = toSubmissionDetailResponse(detailPayload);
     const feedback = toListFeedbackResponse(feedbackPayload);
-    viewModel = {
-      mode: "ready",
-      detail,
-      feedback,
-    };
+    if (detail.id === submissionId.toLowerCase()) {
+      viewModel = { mode: "ready", detail, feedback };
+    }
   } catch (error) {
     if (error instanceof FetchJsonError) {
       const detail = extractRawDetail(error);
@@ -112,13 +131,30 @@ export default async function StudentSubmissionDetailPage({
   }
 
   if (viewModel.mode === "error") {
-    return (
+    const error = (
       <ErrorState
         status={viewModel.status}
         title="提交详情加载失败"
         description={viewModel.description}
       />
     );
+    if (viewModel.status < 500) return error;
+
+    return renderSubmissionDetail(
+      <>
+        {error}
+        <RefreshButton label="重试加载提交详情" />
+      </>,
+      null,
+    );
+  }
+
+  const gate = await requireRole("STUDENT");
+  if (!gate.allowed) {
+    return <ErrorState status={403} />;
+  }
+  if (!gate.me.id) {
+    return <ErrorState status={500} title="当前账号身份无法确认" />;
   }
 
   const lateDurationText =
@@ -126,8 +162,8 @@ export default async function StudentSubmissionDetailPage({
       ? toDisplayLateDuration(viewModel.detail.lateBySeconds)
       : undefined;
 
-  return (
-    <section className="min-w-0 space-y-4">
+  const overview = (
+    <>
       <PageHeader
         title="提交详情 / 反馈"
         description={`任务：${toDisplayText(viewModel.detail.taskTitle, "未命名任务")} | 首次提交时间：${toDisplayDate(viewModel.detail.submittedAt)}`}
@@ -203,13 +239,10 @@ export default async function StudentSubmissionDetailPage({
           </p>
         </div>
       </section>
-
-      <EditSubmissionForm
-        key={submissionId}
-        submissionId={submissionId}
-        detail={viewModel.detail}
-      />
-
+    </>
+  );
+  const feedback = (
+    <>
       {viewModel.feedback.items.length === 0 ? (
         <EmptyState
           title="暂无反馈"
@@ -285,6 +318,12 @@ export default async function StudentSubmissionDetailPage({
           ))}
         </ul>
       )}
-    </section>
+    </>
+  );
+
+  return renderSubmissionDetail(
+    overview,
+    { viewerId: gate.me.id, detail: viewModel.detail },
+    feedback,
   );
 }
