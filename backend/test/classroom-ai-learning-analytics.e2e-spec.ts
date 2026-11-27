@@ -516,20 +516,23 @@ describe('Classroom AI learning analytics (e2e)', () => {
       bcrypt.hash(teacherPassword, 10),
       bcrypt.hash(studentPassword, 10),
     ]);
-    const users = await userModel.create([
+    const userFixtures = [
       {
+        _id: new Types.ObjectId(),
         email: teacherEmail,
         passwordHash: teacherHash,
         roles: ['teacher'],
         name: 'Analytics Teacher',
       },
       {
+        _id: new Types.ObjectId(),
         email: otherTeacherEmail,
         passwordHash: otherTeacherHash,
         roles: ['teacher'],
         name: 'Other Teacher',
       },
       {
+        _id: new Types.ObjectId(),
         email: activeStudentEmail,
         passwordHash: studentHash,
         roles: ['student'],
@@ -537,6 +540,7 @@ describe('Classroom AI learning analytics (e2e)', () => {
         studentNo: 'S-001',
       },
       {
+        _id: new Types.ObjectId(),
         email: zeroStudentEmail,
         passwordHash: studentHash,
         roles: ['student'],
@@ -544,6 +548,7 @@ describe('Classroom AI learning analytics (e2e)', () => {
         studentNo: 'S-002',
       },
       {
+        _id: new Types.ObjectId(),
         email: submittedWithoutAiEmail,
         passwordHash: studentHash,
         roles: ['student'],
@@ -551,6 +556,7 @@ describe('Classroom AI learning analytics (e2e)', () => {
         studentNo: 'S-005',
       },
       {
+        _id: new Types.ObjectId(),
         email: requestedWithoutDeliveryEmail,
         passwordHash: studentHash,
         roles: ['student'],
@@ -558,6 +564,7 @@ describe('Classroom AI learning analytics (e2e)', () => {
         studentNo: 'S-006',
       },
       {
+        _id: new Types.ObjectId(),
         email: deliveredWithoutResubmissionEmail,
         passwordHash: studentHash,
         roles: ['student'],
@@ -565,6 +572,7 @@ describe('Classroom AI learning analytics (e2e)', () => {
         studentNo: 'S-007',
       },
       {
+        _id: new Types.ObjectId(),
         email: resubmittedWithoutComparableEmail,
         passwordHash: studentHash,
         roles: ['student'],
@@ -572,6 +580,7 @@ describe('Classroom AI learning analytics (e2e)', () => {
         studentNo: 'S-008',
       },
       {
+        _id: new Types.ObjectId(),
         email: removedStudentEmail,
         passwordHash: studentHash,
         roles: ['student'],
@@ -579,13 +588,15 @@ describe('Classroom AI learning analytics (e2e)', () => {
         studentNo: 'S-003',
       },
       {
+        _id: new Types.ObjectId(),
         email: foreignStudentEmail,
         passwordHash: studentHash,
         roles: ['student'],
         name: 'Foreign Student',
         studentNo: 'S-004',
       },
-    ]);
+    ];
+    const userIds = userFixtures.map(({ _id }) => _id);
     [
       teacherId,
       otherTeacherId,
@@ -597,8 +608,11 @@ describe('Classroom AI learning analytics (e2e)', () => {
       resubmittedWithoutComparableStudentId,
       removedStudentId,
       foreignStudentId,
-    ] = users.map((user) => user._id);
-    createdUserIds.push(...users.map((user) => user._id));
+    ] = userIds;
+    createdUserIds.push(...userIds);
+    for (const user of userFixtures) {
+      await userModel.create(user);
+    }
 
     await Promise.all([
       login(teacherAgent, teacherEmail, teacherPassword),

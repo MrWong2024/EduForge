@@ -103,6 +103,7 @@ describe('LearningTasks AI Feedback Trigger Policy (e2e)', () => {
   let classroomId = '';
   let classroomTaskId = '';
   let taskId = '';
+  let fixtureWritesAllowed = false;
   const submissionIds: string[] = [];
 
   let previousWorkerEnabled: string | undefined;
@@ -198,18 +199,17 @@ describe('LearningTasks AI Feedback Trigger Policy (e2e)', () => {
       bcrypt.hash(studentPassword, 10),
     ]);
 
-    await Promise.all([
-      userModel.create({
-        email: teacherEmail,
-        passwordHash: teacherHash,
-        roles: ['teacher'],
-      }),
-      userModel.create({
-        email: studentEmail,
-        passwordHash: studentHash,
-        roles: ['student'],
-      }),
-    ]);
+    fixtureWritesAllowed = true;
+    await userModel.create({
+      email: teacherEmail,
+      passwordHash: teacherHash,
+      roles: ['teacher'],
+    });
+    await userModel.create({
+      email: studentEmail,
+      passwordHash: studentHash,
+      roles: ['student'],
+    });
 
     await login(teacherAgent, teacherEmail, teacherPassword);
     await login(studentAgent, studentEmail, studentPassword);
@@ -286,7 +286,7 @@ describe('LearningTasks AI Feedback Trigger Policy (e2e)', () => {
     }
 
     try {
-      if (userModel) {
+      if (fixtureWritesAllowed) {
         const submissionObjectIds = submissionIds.map(
           (id) => new Types.ObjectId(id),
         );

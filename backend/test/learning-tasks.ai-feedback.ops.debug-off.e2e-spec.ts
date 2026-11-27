@@ -89,21 +89,23 @@ describe('LearningTasks AI Feedback Ops (e2e) - debug gate OFF', () => {
       bcrypt.hash(adminPassword, 10),
     ]);
 
-    const [teacher, admin] = await Promise.all([
-      userModel.create({
-        email: teacherEmail,
-        passwordHash: teacherHash,
-        roles: ['teacher'],
-      }),
-      userModel.create({
-        email: adminEmail,
-        passwordHash: adminHash,
-        roles: ['admin'],
-      }),
-    ]);
+    const teacherObjectId = new Types.ObjectId();
+    const adminObjectId = new Types.ObjectId();
+    teacherId = teacherObjectId.toString();
+    adminId = adminObjectId.toString();
 
-    teacherId = teacher._id.toString();
-    adminId = admin._id.toString();
+    await userModel.create({
+      _id: teacherObjectId,
+      email: teacherEmail,
+      passwordHash: teacherHash,
+      roles: ['teacher'],
+    });
+    await userModel.create({
+      _id: adminObjectId,
+      email: adminEmail,
+      passwordHash: adminHash,
+      roles: ['admin'],
+    });
 
     await login(teacherAgent, teacherEmail, teacherPassword);
     await login(adminAgent, adminEmail, adminPassword);

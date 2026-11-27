@@ -174,24 +174,27 @@ describe('Classroom Weekly Report (e2e)', () => {
       bcrypt.hash(studentPassword, 10),
     ]);
 
-    const [teacher, student] = await Promise.all([
-      userModel.create({
-        email: teacherEmail,
-        passwordHash: teacherHash,
-        roles: ['teacher'],
-      }),
-      userModel.create({
-        email: studentEmail,
-        passwordHash: studentHash,
-        roles: ['student'],
-      }),
-    ]);
-    teacherId = teacher._id.toString();
-    studentId = student._id.toString();
+    const teacherObjectId = new Types.ObjectId();
+    const studentObjectId = new Types.ObjectId();
     const pendingStudentObjectId = new Types.ObjectId();
     const removedStudentObjectId = new Types.ObjectId();
+    teacherId = teacherObjectId.toString();
+    studentId = studentObjectId.toString();
     pendingStudentId = pendingStudentObjectId.toString();
     removedStudentId = removedStudentObjectId.toString();
+
+    await userModel.create({
+      _id: teacherObjectId,
+      email: teacherEmail,
+      passwordHash: teacherHash,
+      roles: ['teacher'],
+    });
+    await userModel.create({
+      _id: studentObjectId,
+      email: studentEmail,
+      passwordHash: studentHash,
+      roles: ['student'],
+    });
     await userModel.insertMany([
       {
         _id: pendingStudentObjectId,

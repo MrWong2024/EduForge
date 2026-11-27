@@ -179,72 +179,75 @@ describe('Classroom Students List (e2e)', () => {
       bcrypt.hash(studentPassword, 10),
     ]);
 
-    const [
-      ownerTeacher,
-      otherTeacher,
-      studentA,
-      studentB,
-      removedStudent,
-      pollutedStudent,
-    ] = await Promise.all([
-      userModel.create({
-        email: ownerTeacherEmail,
-        passwordHash: ownerTeacherHash,
-        roles: ['teacher'],
-        name: 'Owner Teacher',
-      }),
-      userModel.create({
-        email: otherTeacherEmail,
-        passwordHash: otherTeacherHash,
-        roles: ['teacher'],
-        name: 'Other Teacher',
-      }),
-      userModel.create({
-        email: studentAEmail,
-        passwordHash: studentAHash,
-        roles: ['student'],
-        name: 'Student A',
-        studentNo: 'S0001',
-        employeeNo: 'NA-A',
-      }),
-      userModel.create({
-        email: studentBEmail,
-        passwordHash: studentBHash,
-        roles: ['student'],
-        name: 'Student B',
-        studentNo: 'S0002',
-        employeeNo: 'NA-B',
-      }),
-      userModel.create({
-        email: removedStudentEmail,
-        passwordHash: removedStudentHash,
-        roles: ['student'],
-        name: 'Removed Student',
-        studentNo: 'S0003',
-        employeeNo: 'NA-C',
-      }),
-      userModel.create({
-        email: pollutedStudentEmail,
-        passwordHash: pollutedStudentHash,
-        roles: ['student'],
-        name: 'Legacy Only',
-        studentNo: 'S9999',
-        employeeNo: 'NA-Z',
-      }),
-    ]);
-
+    const ownerTeacherObjectId = new Types.ObjectId();
+    const otherTeacherObjectId = new Types.ObjectId();
+    const studentAObjectId = new Types.ObjectId();
+    const studentBObjectId = new Types.ObjectId();
+    const removedStudentObjectId = new Types.ObjectId();
+    const pollutedStudentObjectId = new Types.ObjectId();
+    studentAId = studentAObjectId.toString();
+    studentBId = studentBObjectId.toString();
+    removedStudentId = removedStudentObjectId.toString();
+    legacyPollutedStudentId = pollutedStudentObjectId.toString();
     createdUserIds.push(
-      ownerTeacher._id.toString(),
-      otherTeacher._id.toString(),
-      studentA._id.toString(),
-      studentB._id.toString(),
-      removedStudent._id.toString(),
-      pollutedStudent._id.toString(),
+      ownerTeacherObjectId.toString(),
+      otherTeacherObjectId.toString(),
+      studentAId,
+      studentBId,
+      removedStudentId,
+      legacyPollutedStudentId,
     );
-    studentAId = studentA._id.toString();
-    studentBId = studentB._id.toString();
-    removedStudentId = removedStudent._id.toString();
-    legacyPollutedStudentId = pollutedStudent._id.toString();
+
+    await userModel.create({
+      _id: ownerTeacherObjectId,
+      email: ownerTeacherEmail,
+      passwordHash: ownerTeacherHash,
+      roles: ['teacher'],
+      name: 'Owner Teacher',
+    });
+    await userModel.create({
+      _id: otherTeacherObjectId,
+      email: otherTeacherEmail,
+      passwordHash: otherTeacherHash,
+      roles: ['teacher'],
+      name: 'Other Teacher',
+    });
+    await userModel.create({
+      _id: studentAObjectId,
+      email: studentAEmail,
+      passwordHash: studentAHash,
+      roles: ['student'],
+      name: 'Student A',
+      studentNo: 'S0001',
+      employeeNo: 'NA-A',
+    });
+    await userModel.create({
+      _id: studentBObjectId,
+      email: studentBEmail,
+      passwordHash: studentBHash,
+      roles: ['student'],
+      name: 'Student B',
+      studentNo: 'S0002',
+      employeeNo: 'NA-B',
+    });
+    await userModel.create({
+      _id: removedStudentObjectId,
+      email: removedStudentEmail,
+      passwordHash: removedStudentHash,
+      roles: ['student'],
+      name: 'Removed Student',
+      studentNo: 'S0003',
+      employeeNo: 'NA-C',
+    });
+    await userModel.create({
+      _id: pollutedStudentObjectId,
+      email: pollutedStudentEmail,
+      passwordHash: pollutedStudentHash,
+      roles: ['student'],
+      name: 'Legacy Only',
+      studentNo: 'S9999',
+      employeeNo: 'NA-Z',
+    });
 
     await login(ownerTeacherAgent, ownerTeacherEmail, teacherPassword);
     await login(otherTeacherAgent, otherTeacherEmail, teacherPassword);

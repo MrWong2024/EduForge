@@ -782,18 +782,16 @@ describe('LearningTasks AI Feedback Bailian Context (e2e)', () => {
         bcrypt.hash(studentPassword, 10),
       ]);
 
-      await Promise.all([
-        userModel.create({
-          email: teacherEmail,
-          passwordHash: teacherHash,
-          roles: ['teacher'],
-        }),
-        userModel.create({
-          email: studentEmail,
-          passwordHash: studentHash,
-          roles: ['student'],
-        }),
-      ]);
+      await userModel.create({
+        email: teacherEmail,
+        passwordHash: teacherHash,
+        roles: ['teacher'],
+      });
+      await userModel.create({
+        email: studentEmail,
+        passwordHash: studentHash,
+        roles: ['student'],
+      });
 
       await login(teacherAgent, teacherEmail, teacherPassword);
       await login(studentAgent, studentEmail, studentPassword);

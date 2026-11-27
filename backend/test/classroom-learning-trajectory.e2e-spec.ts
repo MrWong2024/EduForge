@@ -254,30 +254,28 @@ describe('Classroom Learning Trajectory (e2e)', () => {
     ]);
 
     fixtureWritesAllowed = true;
-    await Promise.all([
-      userModel.create({
-        _id: teacherObjectId,
-        email: teacherEmail,
-        passwordHash: teacherHash,
-        roles: ['teacher'],
-      }),
-      userModel.create({
-        _id: studentAObjectId,
-        email: studentAEmail,
-        passwordHash: studentAHash,
-        roles: ['student'],
-        name: studentAName,
-        studentNo: studentANo,
-      }),
-      userModel.create({
-        _id: studentBObjectId,
-        email: studentBEmail,
-        passwordHash: studentBHash,
-        roles: ['student'],
-        name: studentBName,
-        studentNo: studentBNo,
-      }),
-    ]);
+    await userModel.create({
+      _id: teacherObjectId,
+      email: teacherEmail,
+      passwordHash: teacherHash,
+      roles: ['teacher'],
+    });
+    await userModel.create({
+      _id: studentAObjectId,
+      email: studentAEmail,
+      passwordHash: studentAHash,
+      roles: ['student'],
+      name: studentAName,
+      studentNo: studentANo,
+    });
+    await userModel.create({
+      _id: studentBObjectId,
+      email: studentBEmail,
+      passwordHash: studentBHash,
+      roles: ['student'],
+      name: studentBName,
+      studentNo: studentBNo,
+    });
 
     await login(teacherAgent, teacherEmail, teacherPassword);
     await login(studentAAgent, studentAEmail, studentPassword);

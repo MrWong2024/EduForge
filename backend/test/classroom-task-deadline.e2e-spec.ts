@@ -175,21 +175,23 @@ describe('Classroom Task Deadline Rules (e2e)', () => {
       bcrypt.hash(studentPassword, 10),
     ]);
 
-    const [teacher, student] = await Promise.all([
-      userModel.create({
-        email: teacherEmail,
-        passwordHash: teacherHash,
-        roles: ['teacher'],
-      }),
-      userModel.create({
-        email: studentEmail,
-        passwordHash: studentHash,
-        roles: ['student'],
-      }),
-    ]);
+    const teacherObjectId = new Types.ObjectId();
+    const studentObjectId = new Types.ObjectId();
+    teacherId = teacherObjectId.toString();
+    studentId = studentObjectId.toString();
 
-    teacherId = teacher._id.toString();
-    studentId = student._id.toString();
+    await userModel.create({
+      _id: teacherObjectId,
+      email: teacherEmail,
+      passwordHash: teacherHash,
+      roles: ['teacher'],
+    });
+    await userModel.create({
+      _id: studentObjectId,
+      email: studentEmail,
+      passwordHash: studentHash,
+      roles: ['student'],
+    });
 
     await login(teacherAgent, teacherEmail, teacherPassword);
     await login(studentAgent, studentEmail, studentPassword);

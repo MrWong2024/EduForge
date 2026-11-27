@@ -255,20 +255,18 @@ describe('Classrooms AI Metrics (e2e)', () => {
 
     const passwordHash = await bcrypt.hash(syntheticPassword, 10);
 
-    await Promise.all([
-      userModel.create({
-        _id: teacherId,
-        email: teacherEmail,
-        passwordHash,
-        roles: ['teacher'],
-      }),
-      userModel.create({
-        _id: studentId,
-        email: studentEmail,
-        passwordHash,
-        roles: ['student'],
-      }),
-    ]);
+    await userModel.create({
+      _id: teacherId,
+      email: teacherEmail,
+      passwordHash,
+      roles: ['teacher'],
+    });
+    await userModel.create({
+      _id: studentId,
+      email: studentEmail,
+      passwordHash,
+      roles: ['student'],
+    });
 
     await login(teacherAgent, teacherEmail, syntheticPassword);
     await login(studentAgent, studentEmail, syntheticPassword);

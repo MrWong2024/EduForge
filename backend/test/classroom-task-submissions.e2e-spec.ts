@@ -186,40 +186,46 @@ describe('Classroom Task Submissions List (e2e)', () => {
         bcrypt.hash(studentPassword, 10),
       ]);
 
-    const [ownerTeacher, otherTeacher, studentA, studentB] = await Promise.all([
-      userModel.create({
-        email: ownerTeacherEmail,
-        passwordHash: ownerTeacherHash,
-        roles: ['teacher'],
-      }),
-      userModel.create({
-        email: otherTeacherEmail,
-        passwordHash: otherTeacherHash,
-        roles: ['teacher'],
-      }),
-      userModel.create({
-        email: studentAEmail,
-        passwordHash: studentAHash,
-        roles: ['student'],
-        name: 'Student Alpha',
-        studentNo: 'A0001',
-      }),
-      userModel.create({
-        email: studentBEmail,
-        passwordHash: studentBHash,
-        roles: ['student'],
-        name: 'Student Beta',
-        studentNo: 'B0001',
-      }),
-    ]);
-
+    const ownerTeacherObjectId = new Types.ObjectId();
+    const otherTeacherObjectId = new Types.ObjectId();
+    const studentAObjectId = new Types.ObjectId();
+    const studentBObjectId = new Types.ObjectId();
+    studentAId = studentAObjectId.toString();
     createdUserIds.push(
-      ownerTeacher._id.toString(),
-      otherTeacher._id.toString(),
-      studentA._id.toString(),
-      studentB._id.toString(),
+      ownerTeacherObjectId.toString(),
+      otherTeacherObjectId.toString(),
+      studentAId,
+      studentBObjectId.toString(),
     );
-    studentAId = studentA._id.toString();
+
+    await userModel.create({
+      _id: ownerTeacherObjectId,
+      email: ownerTeacherEmail,
+      passwordHash: ownerTeacherHash,
+      roles: ['teacher'],
+    });
+    await userModel.create({
+      _id: otherTeacherObjectId,
+      email: otherTeacherEmail,
+      passwordHash: otherTeacherHash,
+      roles: ['teacher'],
+    });
+    await userModel.create({
+      _id: studentAObjectId,
+      email: studentAEmail,
+      passwordHash: studentAHash,
+      roles: ['student'],
+      name: 'Student Alpha',
+      studentNo: 'A0001',
+    });
+    await userModel.create({
+      _id: studentBObjectId,
+      email: studentBEmail,
+      passwordHash: studentBHash,
+      roles: ['student'],
+      name: 'Student Beta',
+      studentNo: 'B0001',
+    });
 
     await login(ownerTeacherAgent, ownerTeacherEmail, teacherPassword);
     await login(otherTeacherAgent, otherTeacherEmail, teacherPassword);

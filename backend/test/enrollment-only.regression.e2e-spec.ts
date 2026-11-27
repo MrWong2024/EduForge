@@ -215,41 +215,16 @@ describe('Enrollment Only Regression Lock (e2e)', () => {
       bcrypt.hash(studentPassword, 10),
     ]);
 
-    const [teacher, studentA, studentB, studentC, studentD] = await Promise.all(
-      [
-        userModel.create({
-          email: teacherEmail,
-          passwordHash: teacherHash,
-          roles: ['teacher'],
-        }),
-        userModel.create({
-          email: studentAEmail,
-          passwordHash: studentAHash,
-          roles: ['student'],
-        }),
-        userModel.create({
-          email: studentBEmail,
-          passwordHash: studentBHash,
-          roles: ['student'],
-        }),
-        userModel.create({
-          email: studentCEmail,
-          passwordHash: studentCHash,
-          roles: ['student'],
-        }),
-        userModel.create({
-          email: studentDEmail,
-          passwordHash: studentDHash,
-          roles: ['student'],
-        }),
-      ],
-    );
-
-    teacherId = teacher._id.toString();
-    studentAId = studentA._id.toString();
-    studentBId = studentB._id.toString();
-    studentCId = studentC._id.toString();
-    studentDId = studentD._id.toString();
+    const teacherObjectId = new Types.ObjectId();
+    const studentAObjectId = new Types.ObjectId();
+    const studentBObjectId = new Types.ObjectId();
+    const studentCObjectId = new Types.ObjectId();
+    const studentDObjectId = new Types.ObjectId();
+    teacherId = teacherObjectId.toString();
+    studentAId = studentAObjectId.toString();
+    studentBId = studentBObjectId.toString();
+    studentCId = studentCObjectId.toString();
+    studentDId = studentDObjectId.toString();
     createdUserIds.push(
       teacherId,
       studentAId,
@@ -257,6 +232,37 @@ describe('Enrollment Only Regression Lock (e2e)', () => {
       studentCId,
       studentDId,
     );
+
+    await userModel.create({
+      _id: teacherObjectId,
+      email: teacherEmail,
+      passwordHash: teacherHash,
+      roles: ['teacher'],
+    });
+    await userModel.create({
+      _id: studentAObjectId,
+      email: studentAEmail,
+      passwordHash: studentAHash,
+      roles: ['student'],
+    });
+    await userModel.create({
+      _id: studentBObjectId,
+      email: studentBEmail,
+      passwordHash: studentBHash,
+      roles: ['student'],
+    });
+    await userModel.create({
+      _id: studentCObjectId,
+      email: studentCEmail,
+      passwordHash: studentCHash,
+      roles: ['student'],
+    });
+    await userModel.create({
+      _id: studentDObjectId,
+      email: studentDEmail,
+      passwordHash: studentDHash,
+      roles: ['student'],
+    });
 
     await login(teacherAgent, teacherEmail, teacherPassword);
     await login(studentAAgent, studentAEmail, studentPassword);

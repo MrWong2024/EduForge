@@ -261,20 +261,18 @@ describe('Classroom Student Task Detail (e2e)', () => {
     teacherId = new Types.ObjectId();
     studentId = new Types.ObjectId();
     fixtureWritesAllowed = true;
-    await Promise.all([
-      userModel.create({
-        _id: teacherId,
-        email: teacherEmail,
-        passwordHash: teacherHash,
-        roles: ['teacher'],
-      }),
-      userModel.create({
-        _id: studentId,
-        email: studentEmail,
-        passwordHash: studentHash,
-        roles: ['student'],
-      }),
-    ]);
+    await userModel.create({
+      _id: teacherId,
+      email: teacherEmail,
+      passwordHash: teacherHash,
+      roles: ['teacher'],
+    });
+    await userModel.create({
+      _id: studentId,
+      email: studentEmail,
+      passwordHash: studentHash,
+      roles: ['student'],
+    });
 
     await login(teacherAgent, teacherEmail, teacherPassword);
     await login(studentAgent, studentEmail, studentPassword);

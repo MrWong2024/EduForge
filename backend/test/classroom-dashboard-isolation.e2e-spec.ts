@@ -180,26 +180,24 @@ describe('Classroom Dashboard Isolation (e2e)', () => {
       bcrypt.hash(student2Password, 10),
     ]);
 
-    await Promise.all([
-      userModel.create({
-        _id: teacherId,
-        email: teacherEmail,
-        passwordHash: teacherHash,
-        roles: ['teacher'],
-      }),
-      userModel.create({
-        _id: student1Id,
-        email: student1Email,
-        passwordHash: student1Hash,
-        roles: ['student'],
-      }),
-      userModel.create({
-        _id: student2Id,
-        email: student2Email,
-        passwordHash: student2Hash,
-        roles: ['student'],
-      }),
-    ]);
+    await userModel.create({
+      _id: teacherId,
+      email: teacherEmail,
+      passwordHash: teacherHash,
+      roles: ['teacher'],
+    });
+    await userModel.create({
+      _id: student1Id,
+      email: student1Email,
+      passwordHash: student1Hash,
+      roles: ['student'],
+    });
+    await userModel.create({
+      _id: student2Id,
+      email: student2Email,
+      passwordHash: student2Hash,
+      roles: ['student'],
+    });
   });
 
   const cleanupOwnedFixtures = async () => {

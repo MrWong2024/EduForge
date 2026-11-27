@@ -206,27 +206,31 @@ describe('Enrollments Authority And Legacy Compatibility (e2e)', () => {
       bcrypt.hash(legacyStudentPassword, 10),
     ]);
 
-    const [teacher, student, legacyStudent] = await Promise.all([
-      userModel.create({
-        email: teacherEmail,
-        passwordHash: teacherHash,
-        roles: ['teacher'],
-      }),
-      userModel.create({
-        email: studentEmail,
-        passwordHash: studentHash,
-        roles: ['student'],
-      }),
-      userModel.create({
-        email: legacyStudentEmail,
-        passwordHash: legacyStudentHash,
-        roles: ['student'],
-      }),
-    ]);
+    const teacherObjectId = new Types.ObjectId();
+    const studentObjectId = new Types.ObjectId();
+    const legacyStudentObjectId = new Types.ObjectId();
+    teacherId = teacherObjectId.toString();
+    studentId = studentObjectId.toString();
+    legacyStudentId = legacyStudentObjectId.toString();
 
-    teacherId = teacher._id.toString();
-    studentId = student._id.toString();
-    legacyStudentId = legacyStudent._id.toString();
+    await userModel.create({
+      _id: teacherObjectId,
+      email: teacherEmail,
+      passwordHash: teacherHash,
+      roles: ['teacher'],
+    });
+    await userModel.create({
+      _id: studentObjectId,
+      email: studentEmail,
+      passwordHash: studentHash,
+      roles: ['student'],
+    });
+    await userModel.create({
+      _id: legacyStudentObjectId,
+      email: legacyStudentEmail,
+      passwordHash: legacyStudentHash,
+      roles: ['student'],
+    });
 
     await login(teacherAgent, teacherEmail, teacherPassword);
     await login(studentAgent, studentEmail, studentPassword);

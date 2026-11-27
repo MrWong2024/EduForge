@@ -171,27 +171,31 @@ describe('LearningTasks (e2e)', () => {
       bcrypt.hash(studentPassword, 10),
     ]);
 
-    const [teacher, otherTeacher, student] = await Promise.all([
-      userModel.create({
-        email: teacherEmail,
-        passwordHash: teacherHash,
-        roles: ['teacher'],
-      }),
-      userModel.create({
-        email: otherTeacherEmail,
-        passwordHash: otherTeacherHash,
-        roles: ['teacher'],
-      }),
-      userModel.create({
-        email: studentEmail,
-        passwordHash: studentHash,
-        roles: ['student'],
-      }),
-    ]);
+    const teacherObjectId = new Types.ObjectId();
+    const otherTeacherObjectId = new Types.ObjectId();
+    const studentObjectId = new Types.ObjectId();
+    teacherId = teacherObjectId.toString();
+    otherTeacherId = otherTeacherObjectId.toString();
+    studentId = studentObjectId.toString();
 
-    teacherId = teacher._id.toString();
-    otherTeacherId = otherTeacher._id.toString();
-    studentId = student._id.toString();
+    await userModel.create({
+      _id: teacherObjectId,
+      email: teacherEmail,
+      passwordHash: teacherHash,
+      roles: ['teacher'],
+    });
+    await userModel.create({
+      _id: otherTeacherObjectId,
+      email: otherTeacherEmail,
+      passwordHash: otherTeacherHash,
+      roles: ['teacher'],
+    });
+    await userModel.create({
+      _id: studentObjectId,
+      email: studentEmail,
+      passwordHash: studentHash,
+      roles: ['student'],
+    });
   });
 
   it('rejects unauthorized and role-mismatched access with expected status codes', async () => {

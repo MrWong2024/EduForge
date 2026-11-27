@@ -304,20 +304,18 @@ describe('LearningTasks AI Feedback Ops (e2e) - pipeline & debug gate ON', () =>
       bcrypt.hash(studentPassword, 10),
     ]);
 
-    await Promise.all([
-      userModel.create({
-        _id: teacherId,
-        email: teacherEmail,
-        passwordHash: teacherHash,
-        roles: ['teacher'],
-      }),
-      userModel.create({
-        _id: studentId,
-        email: studentEmail,
-        passwordHash: studentHash,
-        roles: ['student'],
-      }),
-    ]);
+    await userModel.create({
+      _id: teacherId,
+      email: teacherEmail,
+      passwordHash: teacherHash,
+      roles: ['teacher'],
+    });
+    await userModel.create({
+      _id: studentId,
+      email: studentEmail,
+      passwordHash: studentHash,
+      roles: ['student'],
+    });
   });
 
   afterAll(async () => {
@@ -687,20 +685,18 @@ describe('LearningTasks AI Feedback Ops (e2e) - stub worker default loop', () =>
       bcrypt.hash(studentPassword, 10),
     ]);
 
-    await Promise.all([
-      userModel.create({
-        _id: teacherId,
-        email: teacherEmail,
-        passwordHash: teacherHash,
-        roles: ['teacher'],
-      }),
-      userModel.create({
-        _id: studentId,
-        email: studentEmail,
-        passwordHash: studentHash,
-        roles: ['student'],
-      }),
-    ]);
+    await userModel.create({
+      _id: teacherId,
+      email: teacherEmail,
+      passwordHash: teacherHash,
+      roles: ['teacher'],
+    });
+    await userModel.create({
+      _id: studentId,
+      email: studentEmail,
+      passwordHash: studentHash,
+      roles: ['student'],
+    });
 
     await login(teacherAgent, teacherEmail, teacherPassword);
     await login(studentAgent, studentEmail, studentPassword);

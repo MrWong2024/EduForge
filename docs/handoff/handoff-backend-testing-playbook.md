@@ -346,6 +346,10 @@ Browser launcher foundation 负责受控启动、正常初始化所需索引元�
 
 `test/submission-edit.e2e-spec.ts`、`test/classroom-ai-learning-analytics.e2e-spec.ts`、`test/classroom-text-task-contract.e2e-spec.ts` 和 `test/learning-tasks.ai-feedback.bailian-context.e2e-spec.ts` 使用独立 `standard_test` 进程，并在真实连接后同时核对 `authenticatedUsers` 与 `authenticatedUserRoles`，按 [Config Matrix](./handoff-backend-config-matrix.md#1-数据库连接串与索引治理) 确认本机 root 账号，不能只凭 URI 或角色名称通过门禁。按文件串行运行，正常初始化可建立集合和索引元数据；业务写入及 cleanup 限于各 spec 的合成 namespace、记录 ID 和关联资源，清理后核对残留并关闭自有 app/连接，不清空整个数据库。
 
+标准 E2E 在第一笔账号写入前，将预分配 ID 或套件专属邮箱纳入 teardown 使用的归属条件。预分配 ID 只标记可清理的归属。小批量建号顺序等待，保留并行时须等所有已派发写入结束，再传播准备错误。通过数据库门禁后才允许写入及清理，账号和认证数据按套件持有的精确归属处理。
+
+故障验收须同时确认 Jest 收到指定准备错误、套件清理结束后已无自有残留、独立对照账号仍在。独立回读在验收方兜底清理前完成，取证后再精确清除残留和对照账号。临时屏障须有超时，退出前先释放并等待在途写入。
+
 fixture、verifier、support 与 Browser infrastructure 的通用复杂度止损遵循 [Codex instruction spec](../codex-instruction-spec.md) §3.10；本节只维护当前 EduForge 测试资产与 lifecycle 事实，不建立额外治理体系。
 
 完全隔离于 production 和真实用户的 synthetic application test account（例如测试专用 teacher/student 用户名与密码），只有同时满足以下条件时，才可作为 tracked deterministic test constant：仅存在于测试数据库；不复用生产账号或真实个人密码；不提供基础设施权限；不能取得 Mongo、API、SMTP 或其他外部 Secret 能力。此类凭据是被测应用的普通测试常量，不是 infrastructure Secret。
