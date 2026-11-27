@@ -569,6 +569,7 @@ export function PublishClassroomTaskForm({
     inFlight.current = true;
     setIsSubmitting(true);
     setErrorState(null);
+    setPublishReceipt(null);
 
     try {
       const payload = await fetchJson<unknown>(

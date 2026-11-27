@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useRef, useState } from "react";
+import { startTransition, useMemo, useOptimistic, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { ErrorState } from "@/components/blocks/ErrorState";
 import { BrowserFetchJsonError, fetchJson } from "@/lib/api/browser-client";
@@ -46,24 +46,9 @@ export function EditClassroomTaskForm({
     dueAtLocal: "",
     allowLate: true,
   });
-  const serverSettings = { classroomId, classroomTaskId, dueAt, allowLate };
-  const [openingSettings, setOpeningSettings] = useState(() => ({
-    ...serverSettings,
-    baseline: toClassroomTaskSettingsBaseline(serverSettings),
-  }));
-
-  // Keep the saved baseline while a list refresh still has the previous settings.
-  if (
-    openingSettings.classroomId !== classroomId ||
-    openingSettings.classroomTaskId !== classroomTaskId ||
-    openingSettings.dueAt !== dueAt ||
-    openingSettings.allowLate !== allowLate
-  ) {
-    setOpeningSettings({
-      ...serverSettings,
-      baseline: toClassroomTaskSettingsBaseline(serverSettings),
-    });
-  }
+  const [openBaseline, setOpenBaseline] = useOptimistic(
+    toClassroomTaskSettingsBaseline({ dueAt, allowLate }),
+  );
 
   const statusValue = normalizeClassroomTaskStatus(status) ?? "ACTIVE";
   const canEdit = Boolean(classroomTaskId) && (statusValue === "ACTIVE" || statusValue === "CLOSED");
@@ -82,7 +67,6 @@ export function EditClassroomTaskForm({
 
   const handleExpand = () => {
     if (inFlight.current) return;
-    const openBaseline = openingSettings.baseline;
     setEditingBaseline(openBaseline);
     setNextDueAt(openBaseline.dueAtLocal);
     setNextAllowLate(openBaseline.allowLate);
@@ -137,10 +121,13 @@ export function EditClassroomTaskForm({
         classroomId,
         classroomTaskId,
       );
-      setOpeningSettings((current) => ({ ...current, baseline: saved }));
       setSuccessMessage("课堂任务设置已更新。");
       setIsExpanded(false);
-      router.refresh();
+      // Use the receipt until the refresh commits the list, even if its values are unchanged.
+      startTransition(() => {
+        setOpenBaseline(saved);
+        router.refresh();
+      });
     } catch (error) {
       if (error instanceof BrowserFetchJsonError) {
         const summaryByStatus: Record<number, string> = {
