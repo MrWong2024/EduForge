@@ -89,10 +89,11 @@
 | EditClassroomTaskForm | `components/teacher/EditClassroomTaskForm.tsx` | 列表行内展开，截止时间按浏览器本地分钟显示和比较，未改分钟省略，实际改动转换为 UTC 或明确清空；仅保存逐字段净变化，无变化不发请求。成功后立即重开采用正式回执设置，后续打开可采用更新列表；展开期间的刷新不重绑草稿。失败保留草稿及基准，普通 409 提示刷新且不重放；ACTIVE/CLOSED 可编辑，RECALLED 无入口，不修改模板或状态流；部分更新与竞争结果见 [Backend API](./handoff-backend-api-map.md#classroom-tasksclassrooms-子资源) |
 | PublishTaskStatusButton | `components/teacher/PublishTaskStatusButton.tsx` | 单一模板发布操作；当前 classroomTask 详情页不使用，模板生命周期入口留在模板层 |
 | RemoveStudentButton | `components/teacher/RemoveStudentButton.tsx` | 确认移出当前展示姓名对应的成员。页面级汇总保留移出结果，在行移除时承接仍位于该行的焦点，并在页面提供有效页链接时执行同路由替换。成员关系与历史记录由后端维护 |
-| TeacherFeedbackForm | `components/teacher/TeacherFeedbackForm.tsx` | 教师反馈创建输入与提交，复用统一反馈选项；评语草稿绑定实际查看版本，刷新不重绑，冲突/未知结果保留草稿并显式核对当前作品与反馈后确认继续；标签可选，不提供 scoreHint 入口，合同与归一化归 API Owner。新增反馈提交期间锁定输入。 |
-| TeacherFeedbackHistory | `components/teacher/TeacherFeedbackHistory.tsx` | 组合教师与 AI 反馈历史，管理当前编辑项、共享保存状态和 PATCH 正式回执。保存期间暂停收起和切换编辑项，确认回执后收起表单并更新历史。仅明确 TEACHER 且有 id 的反馈可修改，AI 只读。未知或缺失来源有记录时展示“其他反馈（来源未识别）”只读兜底 |
-| TeacherFeedbackEditForm | `components/teacher/TeacherFeedbackEditForm.tsx` | 编辑单条教师反馈并处理 PATCH 请求和错误。等待期间按历史列表的共享保存状态禁用控件。匹配公开消息的重复反馈 409 展示专属页内提示，保存失败保留编辑表单和草稿。输入字段与创建表单一致，scoreHint 除外 |
-| TeacherSubmissionDetailPage | `app/teacher/submissions/[submissionId]/page.tsx` | 权威详情/反馈加载、返回导航及共享作品/AI 展示；可选评阅标准复用 TaskRubric，正式实例读源与失败边界见 API Map；AI 申请仅更新局部结果，不自动整页刷新，不以 AI 状态改变人工反馈表单 key；新增表单和历史编辑态归 feedback 组件 |
+| TeacherFeedbackForm | `components/teacher/TeacherFeedbackForm.tsx` | 教师反馈创建输入与提交，复用统一反馈选项；评语草稿绑定实际查看版本，刷新不重绑，冲突/未知结果保留草稿并显式核对当前作品与反馈后确认继续；标签可选，不提供 scoreHint 入口，合同与归一化归 API Owner。新增反馈提交期间锁定输入。必需读取暂态失败期间保留输入、起始版本和核对状态，暂停表单展示与操作 |
+| TeacherFeedbackHistory | `components/teacher/TeacherFeedbackHistory.tsx` | 组合教师与 AI 反馈历史，管理单条历史编辑会话、共享保存状态和 PATCH 正式回执。列表暂态不可用时保留原反馈 ID、起始值和当前输入，恢复前以最新列表核对同一作品上的同一条教师反馈。保存期间暂停收起和切换编辑项，确认回执后收起表单并更新历史。AI 与来源不明的反馈只读 |
+| TeacherFeedbackEditForm | `components/teacher/TeacherFeedbackEditForm.tsx` | 用历史列表持有的编辑会话渲染行内控件，按起始值计算净变更并 PATCH 原反馈。等待期间按历史列表的共享保存状态禁用控件。匹配公开消息的重复反馈 409 展示专属页内提示，保存失败保留编辑会话。输入字段与创建表单一致，scoreHint 除外 |
+| TeacherSubmissionDetailPage | `app/teacher/submissions/[submissionId]/page.tsx` | 顺序读取权威详情与完整反馈列表，两项成功后核对作品 ID 及教师会话。暂态失败时仅显示错误与原页重试，明确拒绝结束旧批阅状态。负责返回导航与作品展示；可选评阅标准复用 TaskRubric，正式实例读源与失败边界见 API Map |
+| TeacherSubmissionReview | `components/teacher/TeacherSubmissionReview.tsx` | 以当前教师和作品身份维持新增反馈、历史编辑和 AI 操作三个组件的生命周期。必需读取出错时暂停展示及操作，完整读取确认同一身份后恢复。两份草稿及回执分别由新增表单与历史列表持有。AI 申请局部更新，保持显式刷新 |
 
 ## 6) Teacher Analytics / Reports
 

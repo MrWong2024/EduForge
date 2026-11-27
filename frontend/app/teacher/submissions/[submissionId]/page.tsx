@@ -1,12 +1,16 @@
 import Link from "next/link";
+import type { ReactNode } from "react";
 import { ErrorState } from "@/components/blocks/ErrorState";
-import { SubmissionAiReview } from "@/components/submissions/SubmissionAiReview";
+import { RefreshButton } from "@/components/blocks/RefreshButton";
 import { TaskRubric } from "@/components/learning-tasks/TaskRubric";
 import { SubmissionContent } from "@/components/submissions/SubmissionContent";
 import { PageHeader } from "@/components/blocks/PageHeader";
-import { TeacherFeedbackForm } from "@/components/teacher/TeacherFeedbackForm";
-import { TeacherFeedbackHistory } from "@/components/teacher/TeacherFeedbackHistory";
+import {
+  TeacherSubmissionReview,
+  type TeacherSubmissionReviewContext,
+} from "@/components/teacher/TeacherSubmissionReview";
 import { fetchJson, FetchJsonError } from "@/lib/api/client";
+import { requireRole } from "@/lib/auth/session";
 import {
   buildErrorDescription,
   extractRawDetail,
@@ -86,6 +90,20 @@ export default async function TeacherSubmissionDetailPage({
 }: TeacherSubmissionDetailPageProps) {
   const { submissionId } = await params;
   const query = await searchParams;
+  const confirmedSubmissionId = submissionId.toLowerCase();
+  const renderSubmissionDetail = (
+    overview: ReactNode,
+    context: TeacherSubmissionReviewContext | null,
+  ) => (
+    <section className="min-w-0 space-y-4">
+      {overview}
+      <TeacherSubmissionReview
+        key={confirmedSubmissionId}
+        submissionId={confirmedSubmissionId}
+        context={context}
+      />
+    </section>
+  );
 
   let viewModel: SubmissionFeedbackViewModel = {
     mode: "error",
@@ -105,12 +123,14 @@ export default async function TeacherSubmissionDetailPage({
 
     const detail = toSubmissionDetailResponse(detailPayload);
     const feedback = toTeacherFeedbackListResponse(feedbackPayload);
-    viewModel = {
-      mode: "ready",
-      detail,
-      feedback,
-      context: buildContext(submissionId, detail, query),
-    };
+    if (detail.id === confirmedSubmissionId) {
+      viewModel = {
+        mode: "ready",
+        detail,
+        feedback,
+        context: buildContext(submissionId, detail, query),
+      };
+    }
   } catch (error) {
     if (error instanceof FetchJsonError) {
       const detail = extractRawDetail(error);
@@ -126,13 +146,28 @@ export default async function TeacherSubmissionDetailPage({
   }
 
   if (viewModel.mode === "error") {
-    return (
+    const error = (
       <ErrorState
         status={viewModel.status}
         title="提交详情加载失败"
         description={viewModel.description}
       />
     );
+    if (viewModel.status < 500) return error;
+
+    return renderSubmissionDetail(
+      <>
+        {error}
+        <RefreshButton label="重试加载提交详情" />
+      </>,
+      null,
+    );
+  }
+
+  const gate = await requireRole("TEACHER");
+  if (!gate.allowed) return <ErrorState status={403} />;
+  if (typeof gate.me.id !== "string" || !gate.me.id) {
+    return <ErrorState status={500} title="当前账号身份无法确认" />;
   }
 
   let rubric: Record<string, unknown> | undefined;
@@ -176,8 +211,8 @@ export default async function TeacherSubmissionDetailPage({
       ? toDisplayLateDuration(viewModel.context.lateBySeconds)
       : undefined;
 
-  return (
-    <section className="min-w-0 space-y-4">
+  const overview = (
+    <>
       <PageHeader
         title="提交详情 / 教师批阅"
         description={`任务：${toDisplayText(viewModel.context.taskTitle, "未命名任务")} | 学生：${toDisplayText(
@@ -285,34 +320,12 @@ export default async function TeacherSubmissionDetailPage({
           评阅标准暂不可用，请从任务详情核对。
         </p>
       )}
-      <SubmissionAiReview
-        key={submissionId}
-        submissionId={submissionId}
-        contentRevision={viewModel.detail.contentRevision}
-        status={viewModel.detail.aiFeedbackStatus}
-        review={viewModel.detail.aiReview}
-        autoRefresh={false}
-      />
-
-      <section className="rounded-lg border border-zinc-200 bg-white p-4 text-sm text-zinc-700">
-        <p>
-          此页用于查看作品与反馈，并新增或修改教师反馈。为保护未提交的批阅草稿，仅显式刷新；AI
-          申请后点击刷新查看最新结果。
-        </p>
-      </section>
-
-      <TeacherFeedbackForm
-        submissionId={submissionId}
-        contentRevision={viewModel.detail.contentRevision}
-      />
-
-      <section className="space-y-3">
-        <h2 className="text-base font-semibold text-zinc-900">反馈历史</h2>
-        <TeacherFeedbackHistory
-          items={viewModel.feedback.items}
-          submissionId={submissionId}
-        />
-      </section>
-    </section>
+    </>
   );
+
+  return renderSubmissionDetail(overview, {
+    viewerId: gate.me.id,
+    detail: viewModel.detail,
+    feedback: viewModel.feedback.items,
+  });
 }

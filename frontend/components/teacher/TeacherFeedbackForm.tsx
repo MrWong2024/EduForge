@@ -38,6 +38,7 @@ import {
 type TeacherFeedbackFormProps = {
   submissionId: string;
   contentRevision?: number | null;
+  suspended: boolean;
 };
 
 type FeedbackErrorState = {
@@ -52,6 +53,7 @@ const INVALID_TAGS_MESSAGE =
 export function TeacherFeedbackForm({
   submissionId,
   contentRevision,
+  suspended,
 }: TeacherFeedbackFormProps) {
   const router = useRouter();
   // New props never rebind an existing feedback draft to unseen work.
@@ -83,6 +85,7 @@ export function TeacherFeedbackForm({
   const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (
+      suspended ||
       inFlight.current ||
       needsReview ||
       !isDraftRevisionCurrent(baseRevision, contentRevision) ||
@@ -177,7 +180,7 @@ export function TeacherFeedbackForm({
   };
 
   const checkCurrent = async () => {
-    if (inFlight.current) return;
+    if (suspended || inFlight.current) return;
     inFlight.current = true;
     setChecking(true);
     setNeedsReview(true);
@@ -225,6 +228,8 @@ export function TeacherFeedbackForm({
       setChecking(false);
     }
   };
+
+  if (suspended) return null;
 
   return (
     <section className="rounded-lg border border-zinc-200 bg-white p-4 text-zinc-900">

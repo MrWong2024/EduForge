@@ -2,12 +2,16 @@
 
 import { useRef, useState } from "react";
 import { EmptyState } from "@/components/blocks/EmptyState";
-import { TeacherFeedbackEditForm } from "@/components/teacher/TeacherFeedbackEditForm";
+import {
+  TeacherFeedbackEditForm,
+  type TeacherFeedbackEditSession,
+} from "@/components/teacher/TeacherFeedbackEditForm";
 import {
   groupTeacherFeedbackItems,
   resolveTeacherFeedbackItem,
   type TeacherFeedbackItem,
 } from "@/lib/api/types-teacher";
+import { toTeacherFeedbackEditValues } from "@/lib/learning-tasks/teacher-feedback-edit";
 import { toDisplayDate, toDisplayText } from "@/lib/ui/format";
 import {
   getFeedbackSourceLabel,
@@ -17,9 +21,12 @@ import {
 import { getFeedbackTagLabel } from "@/lib/ui/feedback-tags";
 
 type TeacherFeedbackHistoryProps = {
-  items: TeacherFeedbackItem[];
+  items: TeacherFeedbackItem[] | null;
   submissionId: string;
 };
+
+const canEditFeedback = (item: TeacherFeedbackItem, submissionId: string) =>
+  item.source === "TEACHER" && item.submissionId === submissionId && !!item.id;
 
 const hasUpdatedAtChanged = (item: TeacherFeedbackItem): boolean => {
   if (!item.updatedAt) {
@@ -34,10 +41,15 @@ const hasUpdatedAtChanged = (item: TeacherFeedbackItem): boolean => {
 const FeedbackReadonlyBody = ({ item }: { item: TeacherFeedbackItem }) => (
   <>
     <p className="mt-3 whitespace-pre-wrap break-words text-sm text-zinc-900">
-      {item.source === "TEACHER" ? item.message || "—" : toDisplayText(item.message)}
+      {item.source === "TEACHER"
+        ? item.message || "—"
+        : toDisplayText(item.message)}
     </p>
     <p className="mt-2 whitespace-pre-wrap break-words text-sm text-zinc-700">
-      建议：{item.source === "TEACHER" ? item.suggestion || "—" : toDisplayText(item.suggestion)}
+      建议：
+      {item.source === "TEACHER"
+        ? item.suggestion || "—"
+        : toDisplayText(item.suggestion)}
     </p>
     <p className="mt-1 break-words text-sm text-zinc-700">
       标签：
@@ -58,7 +70,7 @@ export function TeacherFeedbackHistory({
   items,
   submissionId,
 }: TeacherFeedbackHistoryProps) {
-  const [editingFeedbackId, setEditingFeedbackId] = useState<string | null>(
+  const [editing, setEditing] = useState<TeacherFeedbackEditSession | null>(
     null,
   );
   const saveInFlight = useRef(false);
@@ -66,16 +78,36 @@ export function TeacherFeedbackHistory({
   const [confirmedFeedback, setConfirmedFeedback] = useState(
     () => new Map<string, TeacherFeedbackItem>(),
   );
+  if (items === null) return null;
+
+  if (
+    editing &&
+    !items.some(
+      (item) =>
+        item.id === editing.feedbackId && canEditFeedback(item, submissionId),
+    )
+  ) {
+    setEditing(null);
+  }
+
   const groupedFeedback = groupTeacherFeedbackItems(
     items.map((item) =>
-      item.id ? resolveTeacherFeedbackItem(item, confirmedFeedback.get(item.id)) : item,
+      item.id
+        ? resolveTeacherFeedbackItem(item, confirmedFeedback.get(item.id))
+        : item,
     ),
   );
 
-  const changeEditingFeedback = (id: string | null) => {
-    if (!saveInFlight.current) {
-      setEditingFeedbackId(id);
-    }
+  const openEditor = (item: TeacherFeedbackItem) => {
+    if (!item.id || !canEditFeedback(item, submissionId)) return;
+    const initialValues = toTeacherFeedbackEditValues(item);
+    setEditing({
+      feedbackId: item.id,
+      initialValues,
+      draft: initialValues,
+      validationError: null,
+      errorState: null,
+    });
   };
 
   const startSaving = () => {
@@ -98,7 +130,7 @@ export function TeacherFeedbackHistory({
       return;
     }
     setConfirmedFeedback((previous) => new Map(previous).set(id, feedback));
-    setEditingFeedbackId((current) => (current === id ? null : current));
+    setEditing((current) => (current?.feedbackId === id ? null : current));
   };
 
   const groupedSections = [
@@ -115,83 +147,95 @@ export function TeacherFeedbackHistory({
       : []),
   ] as const;
 
-  if (items.length === 0) {
-    return (
-      <EmptyState title="暂无反馈记录" description="可先在上方填写教师反馈。" />
-    );
-  }
-
   return (
-    <>
-      {groupedSections.map((section) => (
-        <section
-          key={section.key}
-          className="min-w-0 rounded-lg border border-zinc-200 bg-white p-4"
-        >
-          <h3 className="text-sm font-semibold text-zinc-900">
-            {section.title}
-          </h3>
-          {section.items.length === 0 ? (
-            <p className="mt-2 text-sm text-zinc-500">暂无该来源反馈。</p>
-          ) : (
-            <ul className="mt-3 space-y-3">
-              {section.items.map((item, index) => {
-                const canEdit = item.source === "TEACHER" && !!item.id;
-                const isEditing = canEdit && editingFeedbackId === item.id;
+    <section className="space-y-3">
+      <h2 className="text-base font-semibold text-zinc-900">反馈历史</h2>
+      {items.length === 0 ? (
+        <EmptyState
+          title="暂无反馈记录"
+          description="可先在上方填写教师反馈。"
+        />
+      ) : (
+        groupedSections.map((section) => (
+          <section
+            key={section.key}
+            className="min-w-0 rounded-lg border border-zinc-200 bg-white p-4"
+          >
+            <h3 className="text-sm font-semibold text-zinc-900">
+              {section.title}
+            </h3>
+            {section.items.length === 0 ? (
+              <p className="mt-2 text-sm text-zinc-500">暂无该来源反馈。</p>
+            ) : (
+              <ul className="mt-3 space-y-3">
+                {section.items.map((item, index) => {
+                  const canEdit = canEditFeedback(item, submissionId);
+                  const session =
+                    canEdit && editing?.feedbackId === item.id ? editing : null;
 
-                return (
-                  <li
-                    key={item.id ?? `${section.key}-${index}`}
-                    className="rounded-md border border-zinc-200 bg-zinc-50 p-3"
-                  >
-                    <div className="flex flex-wrap items-start justify-between gap-3">
-                      <div className="flex flex-wrap gap-2 text-xs">
-                        <span className="rounded-full bg-zinc-900 px-2 py-1 font-medium text-white">
-                          {getFeedbackSourceLabel(item.source)}
-                        </span>
-                        <span className="rounded-full bg-zinc-200 px-2 py-1 text-zinc-700">
-                          {getFeedbackSeverityLabel(item.severity)}
-                        </span>
-                        <span className="rounded-full bg-zinc-200 px-2 py-1 text-zinc-700">
-                          {getFeedbackTypeLabel(item.type)}
-                        </span>
+                  return (
+                    <li
+                      key={item.id ?? `${section.key}-${index}`}
+                      className="rounded-md border border-zinc-200 bg-zinc-50 p-3"
+                    >
+                      <div className="flex flex-wrap items-start justify-between gap-3">
+                        <div className="flex flex-wrap gap-2 text-xs">
+                          <span className="rounded-full bg-zinc-900 px-2 py-1 font-medium text-white">
+                            {getFeedbackSourceLabel(item.source)}
+                          </span>
+                          <span className="rounded-full bg-zinc-200 px-2 py-1 text-zinc-700">
+                            {getFeedbackSeverityLabel(item.severity)}
+                          </span>
+                          <span className="rounded-full bg-zinc-200 px-2 py-1 text-zinc-700">
+                            {getFeedbackTypeLabel(item.type)}
+                          </span>
+                        </div>
+                        {canEdit ? (
+                          <button
+                            type="button"
+                            disabled={isSaving}
+                            onClick={() => {
+                              if (saveInFlight.current) return;
+                              if (session) setEditing(null);
+                              else openEditor(item);
+                            }}
+                            className="rounded-md border border-zinc-300 px-3 py-1 text-xs font-medium text-zinc-700 enabled:hover:bg-white disabled:cursor-not-allowed disabled:text-zinc-400"
+                          >
+                            {session ? "收起修改" : "修改"}
+                          </button>
+                        ) : null}
                       </div>
-                      {canEdit ? (
-                        <button
-                          type="button"
-                          disabled={isSaving}
-                          onClick={() =>
-                            changeEditingFeedback(
-                              isEditing ? null : (item.id ?? null),
+
+                      <FeedbackReadonlyBody item={item} />
+
+                      {session ? (
+                        <TeacherFeedbackEditForm
+                          session={session}
+                          submissionId={submissionId}
+                          isSaving={isSaving}
+                          onChange={(update) =>
+                            setEditing((current) =>
+                              current?.feedbackId === session.feedbackId
+                                ? update(current)
+                                : current,
                             )
                           }
-                          className="rounded-md border border-zinc-300 px-3 py-1 text-xs font-medium text-zinc-700 enabled:hover:bg-white disabled:cursor-not-allowed disabled:text-zinc-400"
-                        >
-                          {isEditing ? "收起修改" : "修改"}
-                        </button>
+                          onCancel={() => {
+                            if (!saveInFlight.current) setEditing(null);
+                          }}
+                          onSaveStart={startSaving}
+                          onSaveFinish={finishSaving}
+                          onSaved={handleSaved}
+                        />
                       ) : null}
-                    </div>
-
-                    <FeedbackReadonlyBody item={item} />
-
-                    {isEditing ? (
-                      <TeacherFeedbackEditForm
-                        feedback={item}
-                        submissionId={submissionId}
-                        isSaving={isSaving}
-                        onCancel={() => changeEditingFeedback(null)}
-                        onSaveStart={startSaving}
-                        onSaveFinish={finishSaving}
-                        onSaved={handleSaved}
-                      />
-                    ) : null}
-                  </li>
-                );
-              })}
-            </ul>
-          )}
-        </section>
-      ))}
-    </>
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
+          </section>
+        ))
+      )}
+    </section>
   );
 }

@@ -1,6 +1,5 @@
 "use client";
 
-import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { ErrorState } from "@/components/blocks/ErrorState";
 import { BrowserFetchJsonError, fetchJson } from "@/lib/api/browser-client";
@@ -14,7 +13,7 @@ import {
 } from "@/lib/api/types-teacher";
 import {
   buildTeacherFeedbackEditPatch,
-  toTeacherFeedbackEditValues,
+  type TeacherFeedbackEditValues,
 } from "@/lib/learning-tasks/teacher-feedback-edit";
 import {
   FEEDBACK_SEVERITIES,
@@ -31,9 +30,12 @@ import {
 import { safeGet } from "@/lib/ui/format";
 
 type TeacherFeedbackEditFormProps = {
-  feedback: TeacherFeedbackItem;
+  session: TeacherFeedbackEditSession;
   submissionId: string;
   isSaving: boolean;
+  onChange: (
+    update: (current: TeacherFeedbackEditSession) => TeacherFeedbackEditSession,
+  ) => void;
   onCancel: () => void;
   onSaveStart: () => boolean;
   onSaveFinish: () => void;
@@ -46,10 +48,21 @@ type FeedbackErrorState = {
   detail?: string;
 };
 
+export type TeacherFeedbackEditSession = {
+  feedbackId: string;
+  initialValues: TeacherFeedbackEditValues;
+  draft: TeacherFeedbackEditValues;
+  validationError: string | null;
+  errorState: FeedbackErrorState | null;
+};
+
 const DUPLICATE_FEEDBACK_MESSAGE =
   "该作品已有相同类型、严重程度和正文的教师反馈，请核对后修改本条反馈。";
 
-const getUpdateFeedbackErrorSummary = (status: number, data: unknown): string => {
+const getUpdateFeedbackErrorSummary = (
+  status: number,
+  data: unknown,
+): string => {
   if (
     status === 409 &&
     safeGet<unknown>(data, "message", undefined) === DUPLICATE_FEEDBACK_MESSAGE
@@ -72,44 +85,46 @@ const getUpdateFeedbackErrorSummary = (status: number, data: unknown): string =>
 };
 
 export function TeacherFeedbackEditForm({
-  feedback,
+  session,
   submissionId,
   isSaving,
+  onChange,
   onCancel,
   onSaveStart,
   onSaveFinish,
   onSaved,
 }: TeacherFeedbackEditFormProps) {
   const router = useRouter();
-  const [initialValues] = useState(() => toTeacherFeedbackEditValues(feedback));
-
-  const [type, setType] = useState<FeedbackTypeValue>(initialValues.type);
-  const [severity, setSeverity] = useState<FeedbackSeverityValue>(
-    initialValues.severity,
-  );
-  const [message, setMessage] = useState(initialValues.message);
-  const [suggestion, setSuggestion] = useState(initialValues.suggestion);
-  const [selectedTags, setSelectedTags] = useState<FeedbackTagValue[]>(
-    initialValues.tags,
-  );
-  const [validationError, setValidationError] = useState<string | null>(null);
-  const [errorState, setErrorState] = useState<FeedbackErrorState | null>(null);
-
-  const payload = buildTeacherFeedbackEditPatch(initialValues, {
-    type,
-    severity,
-    message,
-    suggestion,
-    tags: selectedTags,
-  });
+  const { feedbackId, initialValues, draft, validationError, errorState } =
+    session;
+  const { type, severity, message, suggestion, tags } = draft;
+  const payload = buildTeacherFeedbackEditPatch(initialValues, draft);
   const hasChanges = Object.keys(payload).length > 0;
 
+  const changeDraft = (changes: Partial<TeacherFeedbackEditValues>) => {
+    onChange((current) => ({
+      ...current,
+      draft: { ...current.draft, ...changes },
+    }));
+  };
+
   const toggleTag = (tagValue: FeedbackTagValue) => {
-    setSelectedTags((prev) =>
-      prev.includes(tagValue)
-        ? prev.filter((item) => item !== tagValue)
-        : [...prev, tagValue],
-    );
+    onChange((current) => ({
+      ...current,
+      draft: {
+        ...current.draft,
+        tags: current.draft.tags.includes(tagValue)
+          ? current.draft.tags.filter((tag) => tag !== tagValue)
+          : [...current.draft.tags, tagValue],
+      },
+    }));
+  };
+
+  const setErrors = (
+    validationError: string | null,
+    errorState: FeedbackErrorState | null = null,
+  ) => {
+    onChange((current) => ({ ...current, validationError, errorState }));
   };
 
   const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
@@ -117,30 +132,24 @@ export function TeacherFeedbackEditForm({
     if (isSaving) {
       return;
     }
-    setValidationError(null);
-    setErrorState(null);
-
-    if (!feedback.id) {
-      setValidationError("当前反馈缺少标识，无法保存修改。");
-      return;
-    }
     if (!message.trim()) {
-      setValidationError("反馈内容不能为空。");
+      setErrors("反馈内容不能为空。");
       return;
     }
     if (!hasChanges) {
-      setValidationError("内容未变化。");
+      setErrors("内容未变化。");
       return;
     }
 
     if (!onSaveStart()) {
       return;
     }
+    setErrors(null);
     try {
       const response = await fetchJson<unknown>(
         `learning-tasks/submissions/${encodeURIComponent(
           submissionId,
-        )}/feedback/${encodeURIComponent(feedback.id)}`,
+        )}/feedback/${encodeURIComponent(feedbackId)}`,
         {
           method: "PATCH",
           headers: {
@@ -153,23 +162,23 @@ export function TeacherFeedbackEditForm({
       const savedFeedback = toUpdateTeacherFeedbackResponse(
         response,
         submissionId,
-        feedback.id,
+        feedbackId,
       );
       if (!savedFeedback) {
-        setErrorState({ summary: "无法确认保存结果，请刷新页面核对。" });
+        setErrors(null, { summary: "无法确认保存结果，请刷新页面核对。" });
         return;
       }
       onSaved(savedFeedback);
       router.refresh();
     } catch (error) {
       if (error instanceof BrowserFetchJsonError) {
-        setErrorState({
+        setErrors(null, {
           status: error.status,
           summary: getUpdateFeedbackErrorSummary(error.status, error.data),
           detail: extractRawDetail(error.data),
         });
       } else {
-        setErrorState({
+        setErrors(null, {
           summary: "保存失败，请稍后重试。",
         });
       }
@@ -190,7 +199,7 @@ export function TeacherFeedbackEditForm({
             disabled={isSaving}
             value={type}
             onChange={(event) =>
-              setType(event.target.value as FeedbackTypeValue)
+              changeDraft({ type: event.target.value as FeedbackTypeValue })
             }
             className="w-full rounded-md border border-zinc-300 px-3 py-2"
           >
@@ -208,7 +217,9 @@ export function TeacherFeedbackEditForm({
             disabled={isSaving}
             value={severity}
             onChange={(event) =>
-              setSeverity(event.target.value as FeedbackSeverityValue)
+              changeDraft({
+                severity: event.target.value as FeedbackSeverityValue,
+              })
             }
             className="w-full rounded-md border border-zinc-300 px-3 py-2"
           >
@@ -226,7 +237,7 @@ export function TeacherFeedbackEditForm({
         <textarea
           disabled={isSaving}
           value={message}
-          onChange={(event) => setMessage(event.target.value)}
+          onChange={(event) => changeDraft({ message: event.target.value })}
           rows={4}
           className="w-full rounded-md border border-zinc-300 px-3 py-2"
           placeholder="请输入本次批阅反馈"
@@ -238,7 +249,7 @@ export function TeacherFeedbackEditForm({
         <textarea
           disabled={isSaving}
           value={suggestion}
-          onChange={(event) => setSuggestion(event.target.value)}
+          onChange={(event) => changeDraft({ suggestion: event.target.value })}
           rows={3}
           className="w-full rounded-md border border-zinc-300 px-3 py-2"
           placeholder="可选：给学生的改进建议"
@@ -258,7 +269,7 @@ export function TeacherFeedbackEditForm({
               >
                 <input
                   type="checkbox"
-                  checked={selectedTags.includes(option.value)}
+                  checked={tags.includes(option.value)}
                   onChange={() => toggleTag(option.value)}
                   className="h-4 w-4 rounded border-zinc-300"
                 />
