@@ -25,6 +25,27 @@ export type ClassroomTaskTransaction = {
   readOptions(): { maxTimeMS: number; signal: AbortSignal };
 };
 
+type TransactionConnection = Pick<
+  Connection,
+  'startSession' | 'model' | 'models'
+>;
+
+export type ClassroomReadSnapshot = ClassroomTaskTransaction & {
+  referenceTime: Date;
+};
+
+export function runClassroomReadSnapshot<T>(
+  connection: TransactionConnection,
+  run: (snapshot: ClassroomReadSnapshot) => Promise<T>,
+): Promise<T> {
+  const referenceTime = new Date();
+  return runClassroomTaskTransaction(
+    connection,
+    (transaction) => run({ ...transaction, referenceTime }),
+    { readOnlySnapshot: true },
+  );
+}
+
 export function getClassroomTaskTransactionModel<T>(
   connection: Pick<Connection, 'model' | 'models'>,
   source: Model<T>,
@@ -83,9 +104,12 @@ function isTransientTransaction(error: unknown): boolean {
 }
 
 export async function runClassroomTaskTransaction<T>(
-  connection: Pick<Connection, 'startSession' | 'model' | 'models'>,
+  connection: TransactionConnection,
   run: (transaction: ClassroomTaskTransaction) => Promise<T>,
-  options?: { distinguishUnconfirmedCommit?: boolean },
+  options?: {
+    distinguishUnconfirmedCommit?: boolean;
+    readOnlySnapshot?: boolean;
+  },
 ): Promise<T> {
   return withMongoOperationDeadline(TRANSACTION_BUDGET_MS, async (deadline) => {
     const session = await connection.startSession();
@@ -107,6 +131,12 @@ export async function runClassroomTaskTransaction<T>(
       for (;;) {
         session.startTransaction({
           readPreference: 'primary',
+          ...(options?.readOnlySnapshot
+            ? {
+                readConcern: { level: 'snapshot' },
+                writeConcern: { w: 'majority' },
+              }
+            : {}),
           maxCommitTimeMS: deadline.remainingMs(),
         });
 

@@ -22,6 +22,7 @@ import request from 'supertest';
 import type { App } from 'supertest/types';
 import { AppModule } from '../src/app.module';
 import { configureApp } from '../src/app.setup';
+import { CLASSROOM_TASK_TRANSACTION_CONNECTION } from '../src/lib/classroom-task-transaction';
 import { parseCsv } from '../scripts/import-users-csv';
 import { hashPassword } from '../src/modules/users/password.utils';
 import { User, UserStatus } from '../src/modules/users/schemas/user.schema';
@@ -94,6 +95,7 @@ describe('Process assessment CSV security (real HTTP and Mongo)', () => {
   let app: INestApplication<App> | undefined;
   let moduleFixture: TestingModule | undefined;
   let connection: Connection | undefined;
+  let independentConnection: Connection | undefined;
   let users: Model<User>;
   let sessions: Model<Session>;
   let resets: Model<PasswordResetToken>;
@@ -148,6 +150,7 @@ describe('Process assessment CSV security (real HTTP and Mongo)', () => {
     );
     await prepareAuthSessionIndexes();
     connection = await openAuthTestConnection({ budgetModelReads: true });
+    independentConnection = await openAuthTestConnection();
     // Inject the already gated real connection with autoIndex/autoCreate disabled.
     // HTTP, Guards, models and persistence remain real; only the explicit Session
     // preparation above may perform DDL in this narrow security test.
@@ -158,7 +161,38 @@ describe('Process assessment CSV security (real HTTP and Mongo)', () => {
     app = moduleFixture.createNestApplication();
     configureApp(app);
     await app.init();
-    await assertAuthTestConnection(app.get<Connection>(getConnectionToken()));
+    const defaultConnection = app.get<Connection>(getConnectionToken());
+    const transactionConnection = app.get<Connection>(
+      getConnectionToken(CLASSROOM_TASK_TRANSACTION_CONNECTION),
+    );
+    await assertAuthTestConnection(defaultConnection);
+    await assertAuthTestConnection(transactionConnection);
+    const transactionDb = transactionConnection.db;
+    if (!transactionDb) throw new Error('CSV_SECURITY_SNAPSHOT_DB_REQUIRED');
+    const snapshotSession = await transactionConnection.startSession();
+    try {
+      snapshotSession.startTransaction({
+        readPreference: 'primary',
+        readConcern: { level: 'snapshot' },
+        writeConcern: { w: 'majority' },
+        maxCommitTimeMS: SERVER_MAX_TIME_MS,
+      });
+      await transactionDb
+        .collection('classrooms')
+        .findOne(
+          { _id: new Types.ObjectId() },
+          { session: snapshotSession, ...readOptions() },
+        );
+      await snapshotSession.commitTransaction();
+    } finally {
+      await snapshotSession.endSession();
+    }
+    console.info('CSV security database gates passed', {
+      default: defaultConnection.name,
+      transaction: transactionConnection.name,
+      independent: independentConnection.name,
+      snapshot: 'committed',
+    });
     sessions = app.get<Model<Session>>(getModelToken(Session.name));
     resets = app.get<Model<PasswordResetToken>>(
       getModelToken(PasswordResetToken.name),
@@ -409,25 +443,17 @@ describe('Process assessment CSV security (real HTTP and Mongo)', () => {
             email: fixture.email,
             roles: [fixture.role],
           });
+        const readback = independentConnection?.db;
+        if (!readback) throw new Error('CSV_SECURITY_READBACK_DB_REQUIRED');
+        const count = (collection: string, filter: mongo.Document) =>
+          readback.collection(collection).countDocuments(filter, readOptions());
         const residual = await Promise.all([
-          enrollments
-            .countDocuments(enrollmentFilter)
-            .setOptions(readOptions())
-            .exec(),
-          classrooms
-            .countDocuments(classroomFilter)
-            .setOptions(readOptions())
-            .exec(),
-          courses.countDocuments(courseFilter).setOptions(readOptions()).exec(),
-          sessions
-            .countDocuments({ userId: { $in: userIds } })
-            .setOptions(readOptions())
-            .exec(),
-          resets
-            .countDocuments({ userId: { $in: userIds } })
-            .setOptions(readOptions())
-            .exec(),
-          users.countDocuments(userFilter).setOptions(readOptions()).exec(),
+          count(enrollments.collection.name, enrollmentFilter),
+          count(classrooms.collection.name, classroomFilter),
+          count(courses.collection.name, courseFilter),
+          count(sessions.collection.name, { userId: { $in: userIds } }),
+          count(resets.collection.name, { userId: { $in: userIds } }),
+          count(users.collection.name, userFilter),
         ]);
         expect(residual).toEqual([0, 0, 0, 0, 0, 0]);
         console.info(
@@ -443,7 +469,11 @@ describe('Process assessment CSV security (real HTTP and Mongo)', () => {
           if (connection && connection.readyState !== STATES.disconnected)
             await connection.close();
         } finally {
-          authTestEnvironment.restore();
+          try {
+            await independentConnection?.close();
+          } finally {
+            authTestEnvironment.restore();
+          }
         }
       }
     }

@@ -1,6 +1,7 @@
 import { mongo, Mongoose, Schema } from 'mongoose';
 import {
   getClassroomTaskTransactionModel,
+  runClassroomReadSnapshot,
   runClassroomTaskTransaction,
   UnconfirmedClassroomTaskCommitError,
   type ClassroomTaskTransaction,
@@ -46,6 +47,45 @@ function setup() {
 describe('classroom task transaction deadline', () => {
   beforeEach(() => jest.useFakeTimers());
   afterEach(() => jest.useRealTimers());
+
+  it('retries snapshot reads with one reference time and explicit transaction concerns', async () => {
+    const { connection, session } = setup();
+    const initialTime = new Date('2026-01-12T00:00:00.000Z');
+    jest.setSystemTime(initialTime);
+    const observedTimes: Date[] = [];
+    const result = runClassroomReadSnapshot(connection, async (snapshot) => {
+      observedTimes.push(snapshot.referenceTime);
+      if (observedTimes.length === 1) {
+        await delay(250);
+        throw mongoError('TransientTransactionError');
+      }
+      return 'assembled';
+    });
+    await jest.advanceTimersByTimeAsync(260);
+    await expect(result).resolves.toBe('assembled');
+    expect(observedTimes).toEqual([initialTime, initialTime]);
+    expect(session.startTransaction.mock.calls).toEqual([
+      [
+        {
+          readPreference: 'primary',
+          readConcern: { level: 'snapshot' },
+          writeConcern: { w: 'majority' },
+          maxCommitTimeMS: 10000,
+        },
+      ],
+      [
+        {
+          readPreference: 'primary',
+          readConcern: { level: 'snapshot' },
+          writeConcern: { w: 'majority' },
+          maxCommitTimeMS: 9740,
+        },
+      ],
+    ]);
+    expect(session.abortTransaction).toHaveBeenCalledTimes(1);
+    expect(session.commitTransaction).toHaveBeenCalledTimes(1);
+    expect(session.endSession).toHaveBeenCalledTimes(1);
+  });
 
   it('preserves the model and forwards read deadlines on a separate transport', async () => {
     const mongoose = new Mongoose();

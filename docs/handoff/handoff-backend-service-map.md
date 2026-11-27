@@ -235,6 +235,7 @@ Global SoT 只保留理解跨 Service workflow 必需的稳定不变量，不追
 - Upstream: `ClassroomsService`；Snapshot 通过 `getWeeklyReportByLowerBound` 复用聚合。
 - Downstream / Dependencies: `ClassroomModel`、`ClassroomTaskModel`、`SubmissionModel`、`EnrollmentService`、`AiFeedbackMetricsAggregator`。
 - Consistency / State / Idempotency: 窗口过滤统一使用 createdAt；all 不拼 lowerBound；任务范围按班级和时间窗口确定，包含窗口内已撤回实例，后续活动沿用各自的时间窗口。每次仅读取一份 ACTIVE 学生名单，用于总人数、提交、迟交和未提交人数；风险样本来自名单中尚未提交的学生。空任务或空成员返回零值聚合。
+- 教学快照调用本服务时，班级、任务、成员、提交和 AI 汇总沿用外层读取快照，到期判断沿用外层请求的参考时间。独立周报保持原有读取方式。
 - Isolation: 校验班级 owner；成员全集来自 Enrollment ACTIVE，任务/提交/AI 统计按 classroomId 与 classroomTaskId。
 - Side Effects: 只读。
 - Important Performance / Recovery: 以 classroomTaskIds 批次聚合，避免逐 task 查询。
@@ -303,6 +304,7 @@ Global SoT 只保留理解跨 Service workflow 必需的稳定不变量，不追
 - Upstream: 过程性评价 JSON/CSV 入口；Snapshot 经 `getProcessAssessmentForSnapshot` 复用。
 - Downstream / Dependencies: `ClassroomModel`、`ClassroomTaskModel`、`SubmissionModel`、`AiFeedbackJobModel`、`FeedbackModel`、`EnrollmentService`。
 - Consistency / State / Idempotency:
+  - 独立 JSON 和 CSV 每次各开启一笔只读快照，从同一读取时点取得归属、任务、成员总数及分页、学生公开字段、作品、Job 和反馈。嵌入教学快照时复用外层 session 及参考时间。CSV 在读取成功后格式化。
   - 先按 classroomId 与既有 publishedAt 窗口选择 tasks，在查询处排除 RECALLED；当前 ACTIVE、CLOSED 均参与。再按 classroomTaskId 应用 excludedTaskIds 得到 effectiveTaskIds，任务分母、覆盖率、提交、迭代、迟交、AI、反馈、topTags、分数与风险均复用该有效任务集合。all 不拼 tasks/submissions/feedback 的 lowerBound；显式排除已撤回或不在课堂/窗口内的合法实例 id 自然无效果，不重复减计。
   - 提交迭代、AI 覆盖/成功按 studentId + classroomTaskId 去重；反馈均值取每名学生每个有效任务“最新一次有 AI 反馈项的提交”。INFO 只进入反馈总均值，WARN 按 0.5、ERROR 按 1 扣分。
   - 计分与公开响应复用同一 rubric 常量，权重见 [DTO Cheatsheet](./handoff-backend-dto-cheatsheet.md#query-dto--public-response读取接口)。无有效任务或无提交时 score 为 0；排除全部任务仍返回 ACTIVE 学生，任务统计归零。
@@ -319,7 +321,9 @@ Global SoT 只保留理解跨 Service workflow 必需的稳定不变量，不追
 - Domain / Responsibility: 组合班级、成员、任务及已有聚合，生成受体积约束的教学快照。
 - Upstream: 教学快照导出入口。
 - Downstream / Dependencies: `ClassroomModel`、`CourseModel`、`ClassroomTaskModel`、`SubmissionModel`、`EnrollmentService`、`TeacherClassroomWeeklyReportService`、`ClassReviewPackService`、`ProcessAssessmentService`、`AiFeedbackMetricsAggregator`。
-- Consistency / State / Idempotency: 复用 weekly/common issues/process assessment 聚合，不独立重写评分或统计；按成员/评价限制及是否包含逐任务数据做截断，并记录截断说明。
+- Consistency / State / Idempotency:
+  - 每个导出请求使用既有命名事务连接，以 `primary`、事务级 `snapshot` 读关注和 `majority` 写关注执行只读事务。课程、班级、任务、ACTIVE 成员、周报、AI 指标、共性问题、逐任务统计和评分共用同一 session，数据库操作顺序执行。失败沿用事务错误路径。
+  - 一次请求的业务参考时间用于窗口、周报到期判断、内嵌评分和生成时间。事务体重试沿用该时间。导出任务继续按 `createdAt` 取窗口，评分范围见 [Card 08G](#service-card-08g)。学生统计与评分各按自己的限制截断，并记录相应说明。
 - Isolation: 校验班级 owner；成员来自 Enrollment ACTIVE，统计按 classroomId + classroomTaskId。
 - Side Effects: 只读。
 - Important Performance / Recovery: 复用聚合 Service 与 page-scope 截断，避免无界大对象导出。

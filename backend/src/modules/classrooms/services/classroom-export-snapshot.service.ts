@@ -3,8 +3,13 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { InjectModel } from '@nestjs/mongoose';
-import { Model, PipelineStage, Types } from 'mongoose';
+import { InjectConnection, InjectModel } from '@nestjs/mongoose';
+import { Connection, Model, PipelineStage, Types } from 'mongoose';
+import {
+  CLASSROOM_TASK_TRANSACTION_CONNECTION,
+  runClassroomReadSnapshot,
+  type ClassroomReadSnapshot,
+} from '../../../lib/classroom-task-transaction';
 import { Classroom } from '../schemas/classroom.schema';
 import { Course } from '../../courses/schemas/course.schema';
 import { ClassroomTask } from '../classroom-tasks/schemas/classroom-task.schema';
@@ -23,16 +28,16 @@ import {
 } from '../classroom-tasks/services/class-review-pack.service';
 import { ProcessAssessmentService } from './process-assessment.service';
 import { WithId } from '../../../common/types/with-id.type';
-import { WithTimestamps } from '../../../common/types/with-timestamps.type';
 
-type ClassroomWithMeta = Classroom & WithId & WithTimestamps;
-type CourseWithMeta = Course & WithId & WithTimestamps;
+type ClassroomSnapshotLean = Pick<Classroom, 'name' | 'courseId' | 'status'> &
+  WithId;
+type CourseSnapshotLean = Pick<Course, 'code' | 'name' | 'term' | 'status'> &
+  WithId;
 type ClassroomTaskSnapshotLean = Pick<
   ClassroomTask,
   'taskId' | 'publishedAt' | 'dueAt' | 'settings'
 > &
-  WithId &
-  WithTimestamps;
+  WithId;
 type SubmissionStatsByTaskAgg = {
   _id: Types.ObjectId;
   total: number;
@@ -78,12 +83,25 @@ export class ClassroomExportSnapshotService {
     private readonly aiFeedbackMetricsAggregator: AiFeedbackMetricsAggregator,
     private readonly classReviewPackService: ClassReviewPackService,
     private readonly processAssessmentService: ProcessAssessmentService,
+    @InjectConnection(CLASSROOM_TASK_TRANSACTION_CONNECTION)
+    private readonly transactionConnection: Connection,
   ) {}
 
   async getSnapshot(
     classroomId: string,
     query: QueryClassroomExportSnapshotDto,
     teacherId: string,
+  ) {
+    return runClassroomReadSnapshot(this.transactionConnection, (snapshot) =>
+      this.buildSnapshot(classroomId, query, teacherId, snapshot),
+    );
+  }
+
+  private async buildSnapshot(
+    classroomId: string,
+    query: QueryClassroomExportSnapshotDto,
+    teacherId: string,
+    snapshot: ClassroomReadSnapshot,
   ) {
     const classroomObjectId = this.parseObjectId(classroomId, 'classroomId');
     const window = CLASSROOM_EXPORT_SNAPSHOT_WINDOWS.includes(
@@ -102,7 +120,7 @@ export class ClassroomExportSnapshotService {
       ClassroomExportSnapshotService.DEFAULT_LIMIT_ASSESSMENT,
     );
     const lowerBound = new Date(
-      Date.now() -
+      snapshot.referenceTime.getTime() -
         ClassroomExportSnapshotService.WINDOW_MS_MAP[effectiveWindow],
     );
     const notes: string[] = [];
@@ -112,60 +130,75 @@ export class ClassroomExportSnapshotService {
       );
     }
 
-    const classroom = await this.classroomModel
+    const classroom = await snapshot
+      .model(this.classroomModel)
       .findOne({
         _id: classroomObjectId,
         teacherId: new Types.ObjectId(teacherId),
       })
       .select('_id name courseId status')
-      .lean<ClassroomWithMeta>()
+      .session(snapshot.session)
+      .setOptions(snapshot.readOptions())
+      .lean<ClassroomSnapshotLean>()
       .exec();
     if (!classroom) {
       throw new NotFoundException('Classroom not found');
     }
 
-    const course = await this.courseModel
+    const course = await snapshot
+      .model(this.courseModel)
       .findById(classroom.courseId)
       .select('_id code name term status')
-      .lean<CourseWithMeta>()
+      .session(snapshot.session)
+      .setOptions(snapshot.readOptions())
+      .lean<CourseSnapshotLean>()
       .exec();
     if (!course) {
       throw new NotFoundException('Course not found');
     }
 
     // Snapshot task scope aligns with AA/AB createdAt window semantics for stable cross-endpoint comparison.
-    const classroomTasks = await this.classroomTaskModel
+    const classroomTasks = await snapshot
+      .model(this.classroomTaskModel)
       .find({
         classroomId: classroomObjectId,
         createdAt: { $gte: lowerBound },
       })
       .select('_id taskId publishedAt dueAt settings')
       .sort({ createdAt: 1, _id: 1 })
+      .session(snapshot.session)
+      .setOptions(snapshot.readOptions())
       .lean<ClassroomTaskSnapshotLean[]>()
       .exec();
     const classroomTaskIds = classroomTasks.map((task) => task._id);
 
-    const [activeStudentIds, weeklyReport, aiByTask, processAssessment] =
-      await Promise.all([
-        this.enrollmentService.listActiveStudentIds(classroom._id),
-        this.weeklyReportService.getWeeklyReportByLowerBound(
-          classroom._id.toString(),
-          lowerBound,
-          effectiveWindow,
-          teacherId,
-        ),
-        this.aiFeedbackMetricsAggregator.aggregateJobsGroupedByClassroomTaskIds(
-          classroomTaskIds,
-          lowerBound,
-          'createdAt',
-          ClassroomExportSnapshotService.TOP_K,
-        ),
-        this.processAssessmentService.getProcessAssessmentForSnapshot(
-          classroom._id.toString(),
-          effectiveWindow,
-          teacherId,
-        ),
-      ]);
+    const activeStudentIds = await this.enrollmentService.listActiveStudentIds(
+      classroom._id,
+      snapshot,
+    );
+    const weeklyReport =
+      await this.weeklyReportService.getWeeklyReportByLowerBound(
+        classroom._id.toString(),
+        lowerBound,
+        effectiveWindow,
+        teacherId,
+        snapshot,
+      );
+    const aiByTask =
+      await this.aiFeedbackMetricsAggregator.aggregateJobsGroupedByClassroomTaskIds(
+        classroomTaskIds,
+        lowerBound,
+        'createdAt',
+        ClassroomExportSnapshotService.TOP_K,
+        snapshot,
+      );
+    const processAssessment =
+      await this.processAssessmentService.getProcessAssessmentForSnapshot(
+        classroom._id.toString(),
+        effectiveWindow,
+        teacherId,
+        snapshot,
+      );
     const activeStudentObjectIds = activeStudentIds.map(
       (studentId) => new Types.ObjectId(studentId),
     );
@@ -175,6 +208,7 @@ export class ClassroomExportSnapshotService {
         classroomTaskIds,
         lowerBound,
         activeStudentObjectIds,
+        snapshot,
       );
 
     const submissionIds = Array.from(
@@ -185,20 +219,21 @@ export class ClassroomExportSnapshotService {
       ),
     ).map((submissionId) => new Types.ObjectId(submissionId));
 
-    const [summaryCommonIssues, perTaskCommonIssuesMap] = await Promise.all([
-      this.classReviewPackService.aggregateCommonIssuesBySubmissionIds(
+    const summaryCommonIssues =
+      await this.classReviewPackService.aggregateCommonIssuesBySubmissionIds(
         submissionIds,
         ClassroomExportSnapshotService.TOP_K,
-      ),
-      includePerTask
-        ? this.classReviewPackService.aggregateCommonIssuesByClassroomTaskIds(
-            classroomTaskIds,
-            lowerBound,
-            ClassroomExportSnapshotService.TOP_K,
-            activeStudentObjectIds,
-          )
-        : Promise.resolve(new Map<string, ReviewPackCommonIssues>()),
-    ]);
+        snapshot,
+      );
+    const perTaskCommonIssuesMap = includePerTask
+      ? await this.classReviewPackService.aggregateCommonIssuesByClassroomTaskIds(
+          classroomTaskIds,
+          lowerBound,
+          ClassroomExportSnapshotService.TOP_K,
+          activeStudentObjectIds,
+          snapshot,
+        )
+      : new Map<string, ReviewPackCommonIssues>();
 
     const submissionStatsMap = new Map<string, SubmissionStatsByTaskAgg>();
     for (const row of submissionStatsByTask) {
@@ -288,7 +323,7 @@ export class ClassroomExportSnapshotService {
 
     return {
       meta: {
-        generatedAt: new Date().toISOString(),
+        generatedAt: snapshot.referenceTime.toISOString(),
         window,
         effectiveWindow,
         notes,
@@ -339,12 +374,14 @@ export class ClassroomExportSnapshotService {
     classroomTaskIds: Types.ObjectId[],
     lowerBound: Date,
     activeStudentObjectIds: Types.ObjectId[],
+    snapshot: ClassroomReadSnapshot,
   ) {
     if (classroomTaskIds.length === 0 || activeStudentObjectIds.length === 0) {
       return [] as SubmissionStatsByTaskAgg[];
     }
 
-    return this.submissionModel
+    return snapshot
+      .model(this.submissionModel)
       .aggregate<SubmissionStatsByTaskAgg>([
         {
           $match: {
@@ -367,6 +404,7 @@ export class ClassroomExportSnapshotService {
           },
         },
       ] as PipelineStage[])
+      .option({ session: snapshot.session, ...snapshot.readOptions() })
       .exec();
   }
 

@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, PipelineStage, Types } from 'mongoose';
+import type { ClassroomReadSnapshot } from '../../../../lib/classroom-task-transaction';
 import {
   AiFeedbackJob,
   AiFeedbackJobStatus,
@@ -82,11 +83,14 @@ export class AiFeedbackMetricsAggregator {
     classroomTaskIds: Types.ObjectId[],
     lowerBound: Date | null,
     timeField: 'createdAt' | 'updatedAt' = 'createdAt',
+    snapshot?: ClassroomReadSnapshot,
   ) {
     const grouped = await this.aggregateJobsGroupedByClassroomTaskIds(
       classroomTaskIds,
       lowerBound,
       timeField,
+      undefined,
+      snapshot,
     );
     const jobs = this.createEmptyJobs();
     let weightedAttempts = 0;
@@ -123,6 +127,7 @@ export class AiFeedbackMetricsAggregator {
     lowerBound: Date | null,
     timeField: 'createdAt' | 'updatedAt' = 'createdAt',
     topErrorsLimit?: number,
+    snapshot?: ClassroomReadSnapshot,
   ) {
     const result = new Map<string, AiFeedbackAggregatedJobMetrics>();
     if (classroomTaskIds.length === 0) {
@@ -180,9 +185,14 @@ export class AiFeedbackMetricsAggregator {
       },
     ];
 
-    const aggregated = await this.aiFeedbackJobModel
-      .aggregate<AiJobsAggregationResult>(pipeline)
-      .exec();
+    const model = snapshot
+      ? snapshot.model(this.aiFeedbackJobModel)
+      : this.aiFeedbackJobModel;
+    const aggregation = model.aggregate<AiJobsAggregationResult>(pipeline);
+    if (snapshot) {
+      aggregation.session(snapshot.session).option(snapshot.readOptions());
+    }
+    const aggregated = await aggregation.exec();
     const row = aggregated[0] ?? { summary: [], statusCounts: [], errors: [] };
 
     for (const bucket of row.summary) {
@@ -234,6 +244,7 @@ export class AiFeedbackMetricsAggregator {
     classroomTaskIds: Types.ObjectId[],
     lowerBound: Date | null,
     limit: number,
+    snapshot?: ClassroomReadSnapshot,
   ) {
     if (classroomTaskIds.length === 0 || limit <= 0) {
       return [] as TopTagAgg[];
@@ -246,8 +257,11 @@ export class AiFeedbackMetricsAggregator {
     if (lowerBound) {
       topTagsMatch.createdAt = { $gte: lowerBound };
     }
-    const rows = await this.feedbackModel
-      .aggregate<TopTagAgg>([
+    const model = snapshot
+      ? snapshot.model(this.feedbackModel)
+      : this.feedbackModel;
+    const aggregation = model.aggregate<TopTagAgg>(
+      [
         {
           $match: topTagsMatch,
         },
@@ -269,10 +283,12 @@ export class AiFeedbackMetricsAggregator {
         { $sort: { count: -1, _id: 1 } },
         { $limit: limit },
         { $project: { _id: 0, tag: '$_id', count: 1 } },
-      ])
-      .exec();
-
-    return rows;
+      ],
+      snapshot
+        ? { session: snapshot.session, ...snapshot.readOptions() }
+        : undefined,
+    );
+    return aggregation.exec();
   }
 
   // Worker-only failures use the exact persisted message. Legacy Provider and

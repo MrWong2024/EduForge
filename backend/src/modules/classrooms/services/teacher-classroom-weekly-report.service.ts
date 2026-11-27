@@ -5,6 +5,7 @@ import {
 } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, PipelineStage, Types } from 'mongoose';
+import type { ClassroomReadSnapshot } from '../../../lib/classroom-task-transaction';
 import { Classroom, ClassroomStatus } from '../schemas/classroom.schema';
 import { ClassroomTask } from '../classroom-tasks/schemas/classroom-task.schema';
 import { Submission } from '../../learning-tasks/schemas/submission.schema';
@@ -16,10 +17,11 @@ import { AI_FEEDBACK_ERROR_CODES } from '../../learning-tasks/ai-feedback/interf
 import { AiFeedbackMetricsAggregator } from '../classroom-tasks/services/ai-feedback-metrics-aggregator.service';
 import { EnrollmentService } from '../enrollments/services/enrollment.service';
 import { WithId } from '../../../common/types/with-id.type';
-import { WithTimestamps } from '../../../common/types/with-timestamps.type';
 
-type ClassroomWithMeta = Classroom & WithId & WithTimestamps;
-type ClassroomTaskWithMeta = ClassroomTask & WithId & WithTimestamps;
+type WeeklyClassroomLean = Pick<Classroom, 'name' | 'courseId' | 'status'> &
+  WithId;
+type WeeklyTaskLean = Pick<ClassroomTask, 'dueAt' | 'publishedAt'> &
+  WithId & { createdAt: Date };
 type SubmittedStudentsAgg = {
   _id: null;
   studentIds: Types.ObjectId[];
@@ -78,6 +80,7 @@ export class TeacherClassroomWeeklyReportService {
     lowerBound: Date,
     windowLabel: string,
     teacherId: string,
+    snapshot?: ClassroomReadSnapshot,
   ) {
     const classroomObjectId = this.parseObjectId(classroomId, 'classroomId');
     return this.buildWeeklyReport(
@@ -86,6 +89,7 @@ export class TeacherClassroomWeeklyReportService {
       windowLabel,
       false,
       teacherId,
+      snapshot,
     );
   }
 
@@ -95,17 +99,26 @@ export class TeacherClassroomWeeklyReportService {
     windowLabel: string,
     includeRiskStudentIds: boolean,
     teacherId: string,
+    snapshot?: ClassroomReadSnapshot,
   ) {
-    const now = new Date();
+    const now = snapshot?.referenceTime ?? new Date();
 
-    const classroom = await this.classroomModel
+    const classroomModel = snapshot
+      ? snapshot.model(this.classroomModel)
+      : this.classroomModel;
+    const classroomQuery = classroomModel
       .findOne({
         _id: classroomObjectId,
         teacherId: new Types.ObjectId(teacherId),
       })
       .select('_id name courseId status')
-      .lean<ClassroomWithMeta>()
-      .exec();
+      .lean<WeeklyClassroomLean>();
+    if (snapshot) {
+      classroomQuery
+        .session(snapshot.session)
+        .setOptions(snapshot.readOptions());
+    }
+    const classroom = await classroomQuery.exec();
     if (!classroom) {
       throw new NotFoundException('Classroom not found');
     }
@@ -123,14 +136,26 @@ export class TeacherClassroomWeeklyReportService {
     if (lowerBound) {
       classroomTaskMatch.createdAt = { $gte: lowerBound };
     }
-    const classroomTasks = await this.classroomTaskModel
+    const classroomTaskModel = snapshot
+      ? snapshot.model(this.classroomTaskModel)
+      : this.classroomTaskModel;
+    const classroomTaskQuery = classroomTaskModel
       .find(classroomTaskMatch)
       .select('_id dueAt publishedAt createdAt')
-      .lean<ClassroomTaskWithMeta[]>()
-      .exec();
+      .lean<WeeklyTaskLean[]>();
+    if (snapshot) {
+      classroomTaskQuery
+        .session(snapshot.session)
+        .setOptions(snapshot.readOptions());
+    }
+    const classroomTasks = await classroomTaskQuery.exec();
     const classroomTaskIds = classroomTasks.map((task) => task._id);
-    const classroomStudentIdsRaw =
-      await this.enrollmentService.listActiveStudentIds(classroom._id);
+    const classroomStudentIdsRaw = snapshot
+      ? await this.enrollmentService.listActiveStudentIds(
+          classroom._id,
+          snapshot,
+        )
+      : await this.enrollmentService.listActiveStudentIds(classroom._id);
     const classroomStudentIds = [...classroomStudentIdsRaw].sort(
       (left, right) => left.localeCompare(right),
     );
@@ -142,6 +167,7 @@ export class TeacherClassroomWeeklyReportService {
       classroomTaskIds,
       classroomStudentObjectIds,
       lowerBound,
+      snapshot,
     );
     const submittedStudentIdSet = submissionStats.submittedStudentIdSet;
 
@@ -153,18 +179,23 @@ export class TeacherClassroomWeeklyReportService {
       (studentId) => !submittedStudentIdSet.has(studentId),
     );
 
-    const [{ jobs, errors }, topTags] = await Promise.all([
+    const jobMetricsRead =
       this.aiFeedbackMetricsAggregator.aggregateJobsByClassroomTaskIds(
         classroomTaskIds,
         lowerBound,
         'createdAt',
-      ),
+        snapshot,
+      );
+    const readTopTags = () =>
       this.aiFeedbackMetricsAggregator.aggregateTopTagsByClassroomTaskIds(
         classroomTaskIds,
         lowerBound,
         TeacherClassroomWeeklyReportService.TOP_TAGS_LIMIT,
-      ),
-    ]);
+        snapshot,
+      );
+    const [{ jobs, errors }, topTags] = snapshot
+      ? ([await jobMetricsRead, await readTopTags()] as const)
+      : await Promise.all([jobMetricsRead, readTopTags()]);
 
     const rateLimitErrorCount = errors
       .filter(
@@ -221,6 +252,7 @@ export class TeacherClassroomWeeklyReportService {
     classroomTaskIds: Types.ObjectId[],
     classroomStudentObjectIds: Types.ObjectId[],
     lowerBound: Date | null,
+    snapshot?: ClassroomReadSnapshot,
   ) {
     const result = {
       submittedStudentIdSet: new Set<string>(),
@@ -262,9 +294,14 @@ export class TeacherClassroomWeeklyReportService {
         },
       },
     ];
-    const aggregated = await this.submissionModel
-      .aggregate<SubmittedStudentsAgg>(pipeline)
-      .exec();
+    const model = snapshot
+      ? snapshot.model(this.submissionModel)
+      : this.submissionModel;
+    const aggregation = model.aggregate<SubmittedStudentsAgg>(pipeline);
+    if (snapshot) {
+      aggregation.session(snapshot.session).option(snapshot.readOptions());
+    }
+    const aggregated = await aggregation.exec();
     const studentIds = aggregated[0]?.studentIds ?? [];
     for (const studentId of studentIds) {
       result.submittedStudentIdSet.add(studentId.toString());

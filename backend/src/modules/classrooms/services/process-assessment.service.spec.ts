@@ -2,9 +2,32 @@ import 'reflect-metadata';
 import { plainToInstance } from 'class-transformer';
 import { validate } from 'class-validator';
 import { Types } from 'mongoose';
+import { runClassroomReadSnapshot } from '../../../lib/classroom-task-transaction';
 import { parseCsv } from '../../../../scripts/import-users-csv';
 import { QueryProcessAssessmentDto } from '../dto/query-process-assessment.dto';
 import { ProcessAssessmentService } from './process-assessment.service';
+
+jest.mock('../../../lib/classroom-task-transaction', () => ({
+  ...jest.requireActual<
+    typeof import('../../../lib/classroom-task-transaction')
+  >('../../../lib/classroom-task-transaction'),
+  runClassroomReadSnapshot: jest.fn(),
+}));
+
+beforeEach(() => {
+  jest
+    .mocked(runClassroomReadSnapshot)
+    .mockImplementation((_connection, run) => {
+      const signal = new AbortController().signal;
+      return run({
+        model: (source) => source,
+        session: {} as never,
+        referenceTime: new Date(),
+        remainingMs: () => 10000,
+        readOptions: () => ({ signal, maxTimeMS: 10000 }),
+      });
+    });
+});
 
 const CSV_HEADER =
   'studentName,studentNo,studentId,score,riskLevel,submittedTasksRate,submissionsCount,iteratedTasksCount,lateSubmissionsCount,lateTasksCount,aiRequestedCount,aiSucceededCount,aiRequestedTasksCount,aiSucceededTasksCount,avgWarnItems,avgErrorItems,topTags';
@@ -25,16 +48,25 @@ const makeQuery = <T>(result: T) => {
   const chain = {
     select: jest.fn(),
     lean: jest.fn(),
+    session: jest.fn(),
+    setOptions: jest.fn(),
     exec: jest.fn().mockResolvedValue(result),
   };
   chain.select.mockReturnValue(chain);
   chain.lean.mockReturnValue(chain);
+  chain.session.mockReturnValue(chain);
+  chain.setOptions.mockReturnValue(chain);
   return chain;
 };
 
-const makeAggregate = <T>(result: T) => ({
-  exec: jest.fn().mockResolvedValue(result),
-});
+const makeAggregate = <T>(result: T) => {
+  const aggregate = {
+    option: jest.fn(),
+    exec: jest.fn().mockResolvedValue(result),
+  };
+  aggregate.option.mockReturnValue(aggregate);
+  return aggregate;
+};
 
 const firstMatch = (pipeline: unknown) => {
   const stages = pipeline as AggregatePipelineStage[];
@@ -53,6 +85,7 @@ type BuildPayload = ProcessAssessmentService['buildPayload'];
 
 const createService = (payload: Awaited<ReturnType<BuildPayload>>) => {
   const service = new ProcessAssessmentService(
+    {} as never,
     {} as never,
     {} as never,
     {} as never,
@@ -241,6 +274,7 @@ const createAssessmentHarness = () => {
     feedbackModel as never,
     userModel as never,
     enrollmentService as never,
+    {} as never,
   );
 
   return {
@@ -378,6 +412,7 @@ const createTaskDimensionHarness = (scenario: TaskDimensionScenario) => {
     feedbackModel as never,
     userModel as never,
     enrollmentService as never,
+    {} as never,
   );
 
   return { classroomId, teacherId, studentId, service };

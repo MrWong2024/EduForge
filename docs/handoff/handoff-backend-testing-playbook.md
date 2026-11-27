@@ -128,6 +128,18 @@ npm.cmd run test:e2e -- --runInBand --runTestsByPath ./test/auth-security.e2e-sp
 
 该 HTTP spec 不重复完整编码矩阵或课堂评分 E2E，不证明 Browser、Excel/WPS 实际运行或真实存量对齐。先 discovery 恰好命中所选单个 spec，再在对应独立 `none` / `standard_test` 进程使用相同路径运行；实际执行结果归当次任务报告。
 
+### 教学快照与过程性评分读取时点
+
+从 `backend` 目录按第 4 节使用独立 `standard_test` 进程，关闭定时 Worker。分别确认 discovery 只命中目标文件，再去掉 `--listTests` 串行执行。
+
+```powershell
+npm.cmd run test:e2e -- --listTests --runInBand --runTestsByPath ./test/classroom-export-snapshot.e2e-spec.ts
+npm.cmd run test:e2e -- --listTests --runInBand --runTestsByPath ./test/classroom-process-assessment.e2e-spec.ts
+npm.cmd run test:e2e -- --listTests --runInBand --runTestsByPath ./test/process-assessment-csv-security.e2e-spec.ts
+```
+
+导出用正式学生迟交和教师发布交错验证汇总、逐任务及内嵌评分。评分用真实事务在读取期间同时提交 Job 成功与首条 AI ERROR，经正式 JSON 和 CSV 验证在途与再次读取。屏障设在测试侧，按本轮资源匹配，结束后独立回读和精确清理。事务选项、参考时间及重试另由 `src/lib/classroom-task-transaction.spec.ts` 覆盖。读取合同见 [Card 08G](./handoff-backend-service-map.md#service-card-08g) 和 [Card 08H](./handoff-backend-service-map.md#service-card-08h)。
+
 ### 教学资源写入定向验收
 
 `test/teaching-resource-write-contract.e2e-spec.ts` 通过正式 HTTP、ValidationPipe 和 Mongo 回读，负责课程/班级/模板必填文本与课程/班级 PATCH status 的拒绝及无写入副作用、合法局部更新、模板分类省略保留与显式清空，以及合法文本保真。字段合同由 [DTO Courses](./handoff-backend-dto-cheatsheet.md#course-dto--response-family)、[Classrooms](./handoff-backend-dto-cheatsheet.md#classroom-与正式成员-family) 与 [Task template](./handoff-backend-dto-cheatsheet.md#task-template-dto--response-family) 维护；环境、认证与连接门禁复用[认证与凭据生命周期定向验收](#认证与凭据生命周期定向验收)，不运行 Browser。

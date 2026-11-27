@@ -1,7 +1,10 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
-import type { ClassroomTaskTransaction } from '../../../../lib/classroom-task-transaction';
+import type {
+  ClassroomReadSnapshot,
+  ClassroomTaskTransaction,
+} from '../../../../lib/classroom-task-transaction';
 import {
   Enrollment,
   EnrollmentRole,
@@ -93,11 +96,15 @@ export class EnrollmentService {
     classroomId: string | Types.ObjectId,
     page: number,
     limit: number,
+    snapshot?: ClassroomReadSnapshot,
   ) {
     const classroomObjectId = this.toObjectId(classroomId, 'classroomId');
     const safePage = page < 1 ? 1 : page;
     const safeLimit = limit < 1 ? 1 : limit;
-    const rows = await this.enrollmentModel
+    const model = snapshot
+      ? snapshot.model(this.enrollmentModel)
+      : this.enrollmentModel;
+    const query = model
       .find({
         classroomId: classroomObjectId,
         role: EnrollmentRole.Student,
@@ -107,8 +114,11 @@ export class EnrollmentService {
       .skip((safePage - 1) * safeLimit)
       .limit(safeLimit)
       .select({ _id: 0, userId: 1 })
-      .lean<EnrollmentStudentRow[]>()
-      .exec();
+      .lean<EnrollmentStudentRow[]>();
+    if (snapshot) {
+      query.session(snapshot.session).setOptions(snapshot.readOptions());
+    }
+    const rows = await query.exec();
     return rows.map((row) => row.userId.toString());
   }
 
@@ -162,33 +172,53 @@ export class EnrollmentService {
       .exec();
   }
 
-  async listActiveStudentIds(classroomId: string | Types.ObjectId) {
+  async listActiveStudentIds(
+    classroomId: string | Types.ObjectId,
+    snapshot?: ClassroomReadSnapshot,
+  ) {
     const classroomObjectId = this.toObjectId(classroomId, 'classroomId');
 
-    const rows = await this.enrollmentModel
+    const model = snapshot
+      ? snapshot.model(this.enrollmentModel)
+      : this.enrollmentModel;
+    const query = model
       .find({
         classroomId: classroomObjectId,
         role: EnrollmentRole.Student,
         status: EnrollmentStatus.Active,
       })
       .select({ _id: 0, userId: 1 })
-      .lean<EnrollmentStudentRow[]>()
-      .exec();
+      .lean<EnrollmentStudentRow[]>();
+    if (snapshot) {
+      query.session(snapshot.session).setOptions(snapshot.readOptions());
+    }
+    const rows = await query.exec();
 
     return rows.map((row) => row.userId.toString());
   }
 
-  async countStudents(classroomId: string, includeRemoved = false) {
+  async countStudents(
+    classroomId: string,
+    includeRemoved = false,
+    snapshot?: ClassroomReadSnapshot,
+  ) {
     const classroomObjectId = this.parseObjectId(classroomId, 'classroomId');
     const statuses = includeRemoved
       ? [EnrollmentStatus.Active, EnrollmentStatus.Removed]
       : [EnrollmentStatus.Active];
 
-    return this.enrollmentModel.countDocuments({
+    const model = snapshot
+      ? snapshot.model(this.enrollmentModel)
+      : this.enrollmentModel;
+    const query = model.countDocuments({
       classroomId: classroomObjectId,
       role: EnrollmentRole.Student,
       status: { $in: statuses },
     });
+    if (snapshot) {
+      query.session(snapshot.session).setOptions(snapshot.readOptions());
+    }
+    return query.exec();
   }
 
   async listActiveStudentIdsGroupedByClassroomIds(

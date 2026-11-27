@@ -3,8 +3,13 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { InjectModel } from '@nestjs/mongoose';
-import { Model, PipelineStage, Types } from 'mongoose';
+import { InjectConnection, InjectModel } from '@nestjs/mongoose';
+import { Connection, Model, PipelineStage, Types } from 'mongoose';
+import {
+  CLASSROOM_TASK_TRANSACTION_CONNECTION,
+  runClassroomReadSnapshot,
+  type ClassroomReadSnapshot,
+} from '../../../lib/classroom-task-transaction';
 import { Classroom } from '../schemas/classroom.schema';
 import { ClassroomTask } from '../classroom-tasks/schemas/classroom-task.schema';
 import { CLASSROOM_TASK_STATUS_RECALLED } from '../classroom-tasks/classroom-task-status.constants';
@@ -158,6 +163,8 @@ export class ProcessAssessmentService {
     @InjectModel(User.name)
     private readonly userModel: Model<User>,
     private readonly enrollmentService: EnrollmentService,
+    @InjectConnection(CLASSROOM_TASK_TRANSACTION_CONNECTION)
+    private readonly transactionConnection: Connection,
   ) {}
 
   async getProcessAssessment(
@@ -165,13 +172,16 @@ export class ProcessAssessmentService {
     query: QueryProcessAssessmentDto,
     teacherId: string,
   ) {
-    return this.buildPayload(classroomId, query, teacherId);
+    return runClassroomReadSnapshot(this.transactionConnection, (snapshot) =>
+      this.buildPayload(classroomId, query, teacherId, snapshot),
+    );
   }
 
   async getProcessAssessmentForSnapshot(
     classroomId: string,
     window: ProcessAssessmentWindow | undefined,
     teacherId: string,
+    snapshot: ClassroomReadSnapshot,
   ) {
     return this.buildPayload(
       classroomId,
@@ -183,6 +193,7 @@ export class ProcessAssessmentService {
         order: 'desc',
       },
       teacherId,
+      snapshot,
       {
         forceAllActiveStudents: true,
         maxLimit: 1000,
@@ -204,9 +215,13 @@ export class ProcessAssessmentService {
         'scope=all cannot be combined with page or limit',
       );
     }
-    const payload = await this.buildPayload(classroomId, query, teacherId, {
-      forceAllActiveStudents,
-    });
+    const payload = await runClassroomReadSnapshot(
+      this.transactionConnection,
+      (snapshot) =>
+        this.buildPayload(classroomId, query, teacherId, snapshot, {
+          forceAllActiveStudents,
+        }),
+    );
     const headers = [
       'studentName',
       'studentNo',
@@ -260,6 +275,7 @@ export class ProcessAssessmentService {
     classroomId: string,
     query: QueryProcessAssessmentDto,
     teacherId: string,
+    snapshot: ClassroomReadSnapshot,
     options?: ProcessAssessmentBuildOptions,
   ): Promise<ProcessAssessmentPayload> {
     const classroomObjectId = this.parseObjectId(classroomId, 'classroomId');
@@ -278,17 +294,23 @@ export class ProcessAssessmentService {
     )
       ? (query.order as ProcessAssessmentSortOrder)
       : ProcessAssessmentService.DEFAULT_ORDER;
-    const { window, lowerBound } = this.resolveWindow(query.window);
+    const { window, lowerBound } = this.resolveWindow(
+      query.window,
+      snapshot.referenceTime,
+    );
     const excludedTaskIdSet = this.buildExcludedTaskIdSet(
       query.excludedTaskIds,
     );
 
-    const classroom = await this.classroomModel
+    const classroom = await snapshot
+      .model(this.classroomModel)
       .findOne({
         _id: classroomObjectId,
         teacherId: new Types.ObjectId(teacherId),
       })
       .select('_id')
+      .session(snapshot.session)
+      .setOptions(snapshot.readOptions())
       .lean<WithId>()
       .exec();
     if (!classroom) {
@@ -304,9 +326,12 @@ export class ProcessAssessmentService {
     if (lowerBound) {
       taskMatch.publishedAt = { $gte: lowerBound };
     }
-    const windowClassroomTasks = await this.classroomTaskModel
+    const windowClassroomTasks = await snapshot
+      .model(this.classroomTaskModel)
       .find(taskMatch)
       .select('_id')
+      .session(snapshot.session)
+      .setOptions(snapshot.readOptions())
       .lean<WithId[]>()
       .exec();
     let effectiveClassroomTasks = windowClassroomTasks;
@@ -322,28 +347,34 @@ export class ProcessAssessmentService {
     const effectiveTaskIds = effectiveClassroomTasks.map((task) => task._id);
     const publishedTasksCount = effectiveTaskIds.length;
 
-    const [total, pageStudentIds] = options?.forceAllActiveStudents
-      ? await (async () => {
-          const allStudentIds =
-            await this.enrollmentService.listActiveStudentIds(
-              classroomObjectId,
-            );
-          return [allStudentIds.length, allStudentIds] as const;
-        })()
-      : await Promise.all([
-          this.enrollmentService.countStudents(classroomObjectId.toString()),
-          this.enrollmentService.listActiveStudentIdsByClassroomPage(
-            classroomObjectId,
-            page,
-            limit,
-          ),
-        ]);
+    let total: number;
+    let pageStudentIds: string[];
+    if (options?.forceAllActiveStudents) {
+      pageStudentIds = await this.enrollmentService.listActiveStudentIds(
+        classroomObjectId,
+        snapshot,
+      );
+      total = pageStudentIds.length;
+    } else {
+      total = await this.enrollmentService.countStudents(
+        classroomObjectId.toString(),
+        false,
+        snapshot,
+      );
+      pageStudentIds =
+        await this.enrollmentService.listActiveStudentIdsByClassroomPage(
+          classroomObjectId,
+          page,
+          limit,
+          snapshot,
+        );
+    }
 
     if (pageStudentIds.length === 0) {
       return {
         classroomId,
         window,
-        generatedAt: new Date().toISOString(),
+        generatedAt: snapshot.referenceTime.toISOString(),
         page,
         limit,
         total,
@@ -355,8 +386,10 @@ export class ProcessAssessmentService {
     const pageStudentObjectIds = pageStudentIds.map(
       (studentId) => new Types.ObjectId(studentId),
     );
-    const studentPublicMap =
-      await this.buildStudentPublicInfoMap(pageStudentObjectIds);
+    const studentPublicMap = await this.buildStudentPublicInfoMap(
+      pageStudentObjectIds,
+      snapshot,
+    );
     const submissionMatch: Record<string, unknown> = {
       classroomTaskId: { $in: effectiveTaskIds },
       studentId: { $in: pageStudentObjectIds },
@@ -367,7 +400,8 @@ export class ProcessAssessmentService {
     const submissionAgg =
       effectiveTaskIds.length === 0
         ? []
-        : await this.submissionModel
+        : await snapshot
+            .model(this.submissionModel)
             .aggregate<SubmissionByStudentAgg>([
               {
                 $match: submissionMatch,
@@ -427,6 +461,7 @@ export class ProcessAssessmentService {
                 },
               },
             ] as PipelineStage[])
+            .option({ session: snapshot.session, ...snapshot.readOptions() })
             .exec();
 
     const submissionIds = Array.from(
@@ -444,10 +479,11 @@ export class ProcessAssessmentService {
     if (lowerBound) {
       feedbackMatch.createdAt = { $gte: lowerBound };
     }
-    const [jobsAgg, feedbackFacetAgg] = await Promise.all([
+    const jobsAgg =
       submissionIds.length === 0
-        ? Promise.resolve([] as JobsByStudentAgg[])
-        : this.aiFeedbackJobModel
+        ? []
+        : await snapshot
+            .model(this.aiFeedbackJobModel)
             .aggregate<JobsByStudentAgg>([
               {
                 $match: {
@@ -505,10 +541,13 @@ export class ProcessAssessmentService {
                 },
               },
             ] as PipelineStage[])
-            .exec(),
+            .option({ session: snapshot.session, ...snapshot.readOptions() })
+            .exec();
+    const feedbackFacetAgg =
       submissionIds.length === 0
-        ? Promise.resolve([] as FeedbackFacetResult[])
-        : this.feedbackModel
+        ? []
+        : await snapshot
+            .model(this.feedbackModel)
             .aggregate<FeedbackFacetResult>([
               {
                 $match: feedbackMatch,
@@ -644,8 +683,8 @@ export class ProcessAssessmentService {
                 },
               },
             ] as PipelineStage[])
-            .exec(),
-    ]);
+            .option({ session: snapshot.session, ...snapshot.readOptions() })
+            .exec();
 
     const submissionMap = new Map<
       string,
@@ -803,7 +842,7 @@ export class ProcessAssessmentService {
     return {
       classroomId,
       window,
-      generatedAt: new Date().toISOString(),
+      generatedAt: snapshot.referenceTime.toISOString(),
       page,
       limit,
       total,
@@ -812,7 +851,10 @@ export class ProcessAssessmentService {
     };
   }
 
-  private resolveWindow(window: ProcessAssessmentWindow | undefined) {
+  private resolveWindow(
+    window: ProcessAssessmentWindow | undefined,
+    referenceTime: Date,
+  ) {
     const resolved = PROCESS_ASSESSMENT_WINDOWS.includes(
       window as ProcessAssessmentWindow,
     )
@@ -822,7 +864,8 @@ export class ProcessAssessmentService {
       return { window: resolved, lowerBound: null };
     }
     const lowerBound = new Date(
-      Date.now() - ProcessAssessmentService.WINDOW_MS_MAP[resolved],
+      referenceTime.getTime() -
+        ProcessAssessmentService.WINDOW_MS_MAP[resolved],
     );
     return { window: resolved, lowerBound };
   }
@@ -998,10 +1041,16 @@ export class ProcessAssessmentService {
     return excludedTaskIdSet;
   }
 
-  private async buildStudentPublicInfoMap(studentIds: Types.ObjectId[]) {
-    const students = await this.userModel
+  private async buildStudentPublicInfoMap(
+    studentIds: Types.ObjectId[],
+    snapshot: ClassroomReadSnapshot,
+  ) {
+    const students = await snapshot
+      .model(this.userModel)
       .find({ _id: { $in: studentIds } })
       .select('_id name studentNo')
+      .session(snapshot.session)
+      .setOptions(snapshot.readOptions())
       .lean<Array<WithId & { name?: string; studentNo?: string }>>()
       .exec();
 

@@ -14,15 +14,29 @@ import { INestApplication, ValidationPipe } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Test, TestingModule } from '@nestjs/testing';
 import { getConnectionToken, getModelToken } from '@nestjs/mongoose';
-import { Model, STATES, Types, type Connection, type mongo } from 'mongoose';
+import {
+  Model,
+  STATES,
+  Types,
+  type AggregateOptions,
+  type Connection,
+  type PipelineStage,
+  type mongo,
+} from 'mongoose';
 import * as bcrypt from 'bcryptjs';
 import cookieParser from 'cookie-parser';
 import request from 'supertest';
 import { App } from 'supertest/types';
 import { parseCsv } from '../scripts/import-users-csv';
 import { AppModule } from '../src/app.module';
+import {
+  CLASSROOM_TASK_TRANSACTION_CONNECTION,
+  getClassroomTaskTransactionModel,
+  runClassroomTaskTransaction,
+} from '../src/lib/classroom-task-transaction';
 import { User, UserStatus } from '../src/modules/users/schemas/user.schema';
 import { Session } from '../src/modules/auth/schemas/session.schema';
+import { PasswordResetToken } from '../src/modules/auth/schemas/password-reset-token.schema';
 import { Course } from '../src/modules/courses/schemas/course.schema';
 import { Classroom } from '../src/modules/classrooms/schemas/classroom.schema';
 import { ClassroomTask } from '../src/modules/classrooms/classroom-tasks/schemas/classroom-task.schema';
@@ -36,7 +50,12 @@ import {
   Submission,
   SubmissionStatus,
 } from '../src/modules/learning-tasks/schemas/submission.schema';
-import { Feedback } from '../src/modules/learning-tasks/schemas/feedback.schema';
+import {
+  Feedback,
+  FeedbackSeverity,
+  FeedbackSource,
+  FeedbackType,
+} from '../src/modules/learning-tasks/schemas/feedback.schema';
 import {
   AiFeedbackJob,
   AiFeedbackJobStatus,
@@ -81,6 +100,7 @@ type ProcessAssessmentResponse = {
     aiRequestedTasksCount: number;
     aiSucceededTasksCount: number;
     avgWarnItems: number;
+    avgErrorItems: number;
     riskLevel: 'LOW' | 'MEDIUM' | 'HIGH';
     score: number;
     topTags: Array<{ tag: string; count: number }>;
@@ -90,8 +110,11 @@ type ProcessAssessmentResponse = {
 describe('Classroom Process Assessment (e2e)', () => {
   let app: INestApplication<App>;
   let connection: Connection | undefined;
+  let transactionConnection: Connection;
+  let independentConnection: Connection | undefined;
   let userModel: Model<User>;
   let sessionModel: Model<Session>;
+  let resetTokenModel: Model<PasswordResetToken>;
   let courseModel: Model<Course>;
   let classroomModel: Model<Classroom>;
   let classroomTaskModel: Model<ClassroomTask>;
@@ -118,6 +141,12 @@ describe('Classroom Process Assessment (e2e)', () => {
   let taskBId = '';
   const submissionIds: string[] = [];
   const addedStudentIds: Types.ObjectId[] = [];
+  const overlapFixtures = {
+    courses: [] as string[],
+    classrooms: [] as string[],
+    tasks: [] as string[],
+    classroomTasks: [] as string[],
+  };
 
   const namespace = `pa-csv-${randomUUID()}`;
   const teacherEmail = `${namespace}.teacher@example.invalid`;
@@ -149,7 +178,8 @@ describe('Classroom Process Assessment (e2e)', () => {
   beforeAll(async () => {
     process.env.AI_FEEDBACK_DEBUG_ENABLED = 'true';
 
-    connection = await openAuthTestConnection();
+    connection = await openAuthTestConnection({ budgetModelReads: true });
+    independentConnection = await openAuthTestConnection();
     const moduleFixture: TestingModule = await Test.createTestingModule({
       imports: [AppModule],
     })
@@ -158,7 +188,45 @@ describe('Classroom Process Assessment (e2e)', () => {
       .compile();
 
     app = moduleFixture.createNestApplication();
-    await assertAuthTestConnection(app.get<Connection>(getConnectionToken()));
+    transactionConnection = app.get<Connection>(
+      getConnectionToken(CLASSROOM_TASK_TRANSACTION_CONNECTION),
+    );
+    const defaultConnection = app.get<Connection>(getConnectionToken());
+    const gates = [
+      defaultConnection,
+      transactionConnection,
+      independentConnection,
+    ];
+    expect(new Set(gates.map((item) => item.getClient())).size).toBe(3);
+    for (const gatedConnection of gates) {
+      await assertAuthTestConnection(gatedConnection);
+      const db = gatedConnection.db;
+      if (!db) throw new Error('Process assessment test requires MongoDB.');
+      const session = await gatedConnection.startSession();
+      try {
+        session.startTransaction({
+          readPreference: 'primary',
+          readConcern: { level: 'snapshot' },
+          writeConcern: { w: 'majority', wtimeoutMS: 5000 },
+          maxCommitTimeMS: 5000,
+        });
+        await db
+          .collection('classrooms')
+          .findOne(
+            { _id: new Types.ObjectId() },
+            { session, ...readFixtureOptions() },
+          );
+        await session.commitTransaction();
+      } finally {
+        await session.endSession();
+      }
+    }
+    console.info('Process assessment DB gate', {
+      default: defaultConnection.db?.databaseName,
+      transaction: transactionConnection.db?.databaseName,
+      independent: independentConnection.db?.databaseName,
+      snapshot: 'committed on all connections',
+    });
     app.setGlobalPrefix('api');
     app.useGlobalPipes(
       new ValidationPipe({
@@ -178,6 +246,7 @@ describe('Classroom Process Assessment (e2e)', () => {
 
     userModel = app.get(getModelToken(User.name));
     sessionModel = app.get(getModelToken(Session.name));
+    resetTokenModel = app.get(getModelToken(PasswordResetToken.name));
     courseModel = app.get(getModelToken(Course.name));
     classroomModel = app.get(getModelToken(Classroom.name));
     classroomTaskModel = app.get(getModelToken(ClassroomTask.name));
@@ -235,80 +304,104 @@ describe('Classroom Process Assessment (e2e)', () => {
 
   afterAll(async () => {
     try {
-      if (connection?.db && teacherId) {
-        await assertAuthTestConnection(connection);
-        const db = connection.db;
-        assertAuthTestWritesConfirmed(db);
-
-        const objectIds = (...ids: string[]) =>
-          ids.filter(Boolean).map((id) => new Types.ObjectId(id));
-        const classroomIds = objectIds(classroomId, emptyClassroomId);
-        const userIds = [
-          ...objectIds(teacherId, studentAId, studentBId),
-          ...addedStudentIds,
-        ];
-        const submissionObjectIds = objectIds(...submissionIds);
-        const targets: Array<[string, mongo.Document]> = [
-          [
-            feedbackModel.collection.name,
-            { submissionId: { $in: submissionObjectIds } },
-          ],
-          [
-            aiFeedbackJobModel.collection.name,
-            { submissionId: { $in: submissionObjectIds } },
-          ],
-          [
-            submissionModel.collection.name,
-            { _id: { $in: submissionObjectIds } },
-          ],
-          [
-            classroomTaskModel.collection.name,
-            { _id: { $in: objectIds(classroomTaskAId, classroomTaskBId) } },
-          ],
-          [
-            taskModel.collection.name,
-            { _id: { $in: objectIds(taskAId, taskBId) } },
-          ],
-          [
-            enrollmentModel.collection.name,
-            { classroomId: { $in: classroomIds }, userId: { $in: userIds } },
-          ],
-          [classroomModel.collection.name, { _id: { $in: classroomIds } }],
-          [courseModel.collection.name, { _id: { $in: objectIds(courseId) } }],
-          [sessionModel.collection.name, { userId: { $in: userIds } }],
-          [userModel.collection.name, { _id: { $in: userIds } }],
-        ];
-
-        for (const [collectionName, filter] of targets) {
-          const collection = db.collection(collectionName);
-          const rows = await collection
-            .find(filter, { projection: { _id: 1 }, ...readFixtureOptions() })
-            .toArray();
-          if (rows.length) {
-            await deleteFixtureRows(
-              db,
-              collectionName,
-              { _id: { $in: rows.map(({ _id }) => _id) } },
-              0,
-            );
-          }
-          expect(
-            await collection.countDocuments(filter, readFixtureOptions()),
-          ).toBe(0);
-        }
-        console.info(
-          'Process assessment fixture cleanup verified zero residual.',
-        );
-      }
+      await app?.close();
     } finally {
       try {
-        await app?.close();
+        if (independentConnection?.db && teacherId) {
+          await assertAuthTestConnection(independentConnection);
+          const db = independentConnection.db;
+          assertAuthTestWritesConfirmed(db);
+
+          const objectIds = (...ids: string[]) =>
+            ids.filter(Boolean).map((id) => new Types.ObjectId(id));
+          const classroomIds = objectIds(
+            classroomId,
+            emptyClassroomId,
+            ...overlapFixtures.classrooms,
+          );
+          const userIds = [
+            ...objectIds(teacherId, studentAId, studentBId),
+            ...addedStudentIds,
+          ];
+          const submissionObjectIds = objectIds(...submissionIds);
+          const targets: Array<[string, mongo.Document]> = [
+            [
+              feedbackModel.collection.name,
+              { submissionId: { $in: submissionObjectIds } },
+            ],
+            [
+              aiFeedbackJobModel.collection.name,
+              { submissionId: { $in: submissionObjectIds } },
+            ],
+            [
+              submissionModel.collection.name,
+              { _id: { $in: submissionObjectIds } },
+            ],
+            [
+              classroomTaskModel.collection.name,
+              {
+                _id: {
+                  $in: objectIds(
+                    classroomTaskAId,
+                    classroomTaskBId,
+                    ...overlapFixtures.classroomTasks,
+                  ),
+                },
+              },
+            ],
+            [
+              taskModel.collection.name,
+              {
+                _id: {
+                  $in: objectIds(taskAId, taskBId, ...overlapFixtures.tasks),
+                },
+              },
+            ],
+            [
+              enrollmentModel.collection.name,
+              { classroomId: { $in: classroomIds }, userId: { $in: userIds } },
+            ],
+            [classroomModel.collection.name, { _id: { $in: classroomIds } }],
+            [
+              courseModel.collection.name,
+              { _id: { $in: objectIds(courseId, ...overlapFixtures.courses) } },
+            ],
+            [sessionModel.collection.name, { userId: { $in: userIds } }],
+            [resetTokenModel.collection.name, { userId: { $in: userIds } }],
+            [userModel.collection.name, { _id: { $in: userIds } }],
+          ];
+
+          for (const [collectionName, filter] of targets) {
+            const collection = db.collection(collectionName);
+            const rows = await collection
+              .find(filter, { projection: { _id: 1 }, ...readFixtureOptions() })
+              .toArray();
+            if (rows.length) {
+              await deleteFixtureRows(
+                db,
+                collectionName,
+                { _id: { $in: rows.map(({ _id }) => _id) } },
+                0,
+              );
+            }
+            expect(
+              await collection.countDocuments(filter, readFixtureOptions()),
+            ).toBe(0);
+          }
+          console.info(
+            'Process assessment fixture cleanup verified zero residual.',
+          );
+        }
       } finally {
         try {
           if (connection && connection.readyState !== STATES.disconnected)
             await connection.close();
         } finally {
-          authTestEnvironment.restore();
+          try {
+            await independentConnection?.close();
+          } finally {
+            authTestEnvironment.restore();
+          }
         }
       }
     }
@@ -782,5 +875,342 @@ describe('Classroom Process Assessment (e2e)', () => {
       secondPage: secondPage.rows.length,
       allIdsMatch: true,
     });
+  });
+
+  it('33A keeps JSON and CSV on one read point during AI completion', async () => {
+    const db = independentConnection?.db;
+    if (!independentConnection || !db) {
+      throw new Error('Process assessment requires an independent connection.');
+    }
+    const httpTimeout = { response: 10000, deadline: 15000 };
+    const courseResponse = await teacherAgent
+      .post('/api/courses')
+      .send({
+        code: `PASYNC${Date.now()}`,
+        name: 'Process assessment concurrency',
+        term: '2026-Spring',
+      })
+      .timeout(httpTimeout)
+      .expect(201);
+    const course = (courseResponse.body as CreatedCourseResponse).id;
+    overlapFixtures.courses.push(course);
+    const classroomResponse = await teacherAgent
+      .post('/api/classrooms')
+      .send({ courseId: course, name: 'Process assessment read point' })
+      .timeout(httpTimeout)
+      .expect(201);
+    const classroom = classroomResponse.body as CreatedClassroomResponse;
+    overlapFixtures.classrooms.push(classroom.id);
+    const taskResponse = await teacherAgent
+      .post('/api/learning-tasks/tasks')
+      .send({
+        title: 'Process assessment read point',
+        description: 'Single timely submission with an in-flight AI job.',
+        knowledgeModule: 'process-assessment',
+        status: 'DRAFT',
+      })
+      .timeout(httpTimeout)
+      .expect(201);
+    const task = (taskResponse.body as CreatedTaskResponse).id;
+    overlapFixtures.tasks.push(task);
+    await teacherAgent
+      .post(`/api/learning-tasks/tasks/${task}/publish`)
+      .send({})
+      .timeout(httpTimeout)
+      .expect(201);
+    const classroomTaskResponse = await teacherAgent
+      .post(`/api/classrooms/${classroom.id}/tasks`)
+      .send({ taskId: task })
+      .timeout(httpTimeout)
+      .expect(201);
+    const classroomTask = (
+      classroomTaskResponse.body as CreatedClassroomTaskResponse
+    ).id;
+    overlapFixtures.classroomTasks.push(classroomTask);
+    await studentAAgent
+      .post('/api/classrooms/join')
+      .send({ joinCode: classroom.joinCode })
+      .timeout(httpTimeout)
+      .expect(201);
+    const submitted = await studentAAgent
+      .post(
+        `/api/classrooms/${classroom.id}/tasks/${classroomTask}/submissions`,
+      )
+      .send({ content: { codeText: 'return 1;', language: 'typescript' } })
+      .timeout(httpTimeout)
+      .expect(201);
+    const submission = submitted.body as CreatedSubmissionResponse;
+    submissionIds.push(submission.id);
+    expect(submission.attemptNo).toBe(1);
+    const submissionId = new Types.ObjectId(submission.id);
+    const lockOwner = 'process-assessment-read-point';
+    const job = await aiFeedbackJobModel.create({
+      submissionId,
+      taskId: new Types.ObjectId(task),
+      classroomTaskId: new Types.ObjectId(classroomTask),
+      studentId: new Types.ObjectId(studentAId),
+      status: AiFeedbackJobStatus.Running,
+      attempts: 1,
+      maxAttempts: 3,
+      lockOwner,
+      lockedAt: new Date(),
+      provider: 'bailian',
+      budgetVersion: 1,
+    });
+    const feedbackFilter = { submissionId, source: FeedbackSource.AI };
+    const tag = 'process-read-point';
+    const readStored = async () => {
+      const primary = {
+        ...readFixtureOptions(),
+        readPreference: 'primary',
+      } as const;
+      const stored = await db
+        .collection<Submission>(submissionModel.collection.name)
+        .findOne({ _id: submissionId }, primary);
+      const storedJob = await db
+        .collection<AiFeedbackJob>(aiFeedbackJobModel.collection.name)
+        .findOne({ _id: job._id }, primary);
+      const feedback = await db
+        .collection<Feedback>(feedbackModel.collection.name)
+        .find(feedbackFilter, primary)
+        .toArray();
+      return {
+        studentId: stored?.studentId.toString(),
+        isLate: stored?.isLate,
+        attempts: storedJob?.attempts,
+        status: storedJob?.status,
+        feedback: feedback.map(({ severity, tags }) => ({ severity, tags })),
+      };
+    };
+    const beforeStored = await readStored();
+    expect(beforeStored).toEqual({
+      studentId: studentAId,
+      isLate: false,
+      attempts: 1,
+      status: 'RUNNING',
+      feedback: [],
+    });
+
+    const jsonPath = `/api/classrooms/${classroom.id}/process-assessment`;
+    const getJson = async () => {
+      const response = await teacherAgent
+        .get(jsonPath)
+        .timeout(httpTimeout)
+        .expect(200);
+      const { items } = response.body as ProcessAssessmentResponse;
+      expect(items).toHaveLength(1);
+      const {
+        studentId,
+        aiSucceededTasksCount,
+        avgErrorItems,
+        score,
+        riskLevel,
+        topTags,
+      } = items[0];
+      return {
+        studentId,
+        aiSucceededTasksCount,
+        avgErrorItems,
+        score,
+        riskLevel,
+        topTags,
+      };
+    };
+    const getCsv = async () => {
+      const response = await teacherAgent
+        .get(`${jsonPath}.csv`)
+        .timeout(httpTimeout)
+        .expect(200);
+      const [header, ...rows] = parseCsv(response.text);
+      expect(rows).toHaveLength(1);
+      const value = (name: string) => rows[0].cells[header.cells.indexOf(name)];
+      return {
+        studentId: value('studentId'),
+        aiSucceededTasksCount: Number(value('aiSucceededTasksCount')),
+        avgErrorItems: Number(value('avgErrorItems')),
+        score: Number(value('score')),
+        riskLevel: value('riskLevel'),
+        topTags: value('topTags'),
+      };
+    };
+    const before = {
+      studentId: studentAId,
+      aiSucceededTasksCount: 0,
+      avgErrorItems: 0,
+      score: 94,
+      riskLevel: 'LOW',
+    };
+    expect(await getJson()).toEqual({ ...before, topTags: [] });
+    expect(await getCsv()).toEqual({ ...before, topTags: '' });
+
+    let reportJobReads!: () => void;
+    const ready = new Promise<void>((resolve) => (reportJobReads = resolve));
+    let releaseFeedback!: () => void;
+    const released = new Promise<void>(
+      (resolve) => (releaseFeedback = resolve),
+    );
+    const jobReads: number[] = [];
+    const feedbackReads: number[] = [];
+    const observe = <T>(
+      model: Model<T>,
+      run: (exec: () => Promise<unknown[]>) => Promise<unknown[]>,
+    ) => {
+      const aggregate = model.aggregate.bind(model) as typeof model.aggregate;
+      return jest
+        .spyOn(model, 'aggregate')
+        .mockImplementation(
+          (pipeline?: PipelineStage[], options?: AggregateOptions) => {
+            const query = aggregate<unknown>(pipeline, options);
+            const first = pipeline?.[0];
+            if (!first || !('$match' in first)) return query;
+            const match: unknown = first.$match.submissionId;
+            if (
+              !match ||
+              typeof match !== 'object' ||
+              !('$in' in match) ||
+              !Array.isArray(match.$in) ||
+              !match.$in.some(
+                (id: unknown) =>
+                  id instanceof Types.ObjectId && id.equals(submissionId),
+              )
+            )
+              return query;
+            const exec = query.exec.bind(query) as typeof query.exec;
+            jest.spyOn(query, 'exec').mockImplementationOnce(() => run(exec));
+            return query;
+          },
+        );
+    };
+    const recordJob = async (execute: () => Promise<unknown[]>) => {
+      const rows = (await execute()) as Array<{
+        aiSucceededTasksCount: number;
+      }>;
+      expect(rows).toHaveLength(1);
+      jobReads.push(rows[0].aiSucceededTasksCount);
+      if (jobReads.length === 2) reportJobReads();
+      return rows;
+    };
+    const holdFeedback = async (execute: () => Promise<unknown[]>) => {
+      await released;
+      const rows = (await execute()) as Array<{
+        totals: Array<{ totalErrorItems: number }>;
+      }>;
+      feedbackReads.push(rows[0]?.totals[0]?.totalErrorItems ?? 0);
+      return rows;
+    };
+    const spies = [
+      observe(aiFeedbackJobModel, recordJob),
+      observe(feedbackModel, holdFeedback),
+      observe(
+        getClassroomTaskTransactionModel(
+          transactionConnection,
+          aiFeedbackJobModel,
+        ),
+        recordJob,
+      ),
+      observe(
+        getClassroomTaskTransactionModel(transactionConnection, feedbackModel),
+        holdFeedback,
+      ),
+    ];
+    const pendingJson = getJson();
+    const pendingCsv = getCsv();
+    const pending = Promise.all([pendingJson, pendingCsv]);
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const deadline = new Promise<never>((_, reject) => {
+      timer = setTimeout(
+        () => reject(new Error('33A Job reads did not finish')),
+        5000,
+      );
+    });
+    const during = await (async () => {
+      try {
+        await Promise.race([
+          ready,
+          deadline,
+          pending.then(() => {
+            throw new Error(
+              '33A reported before the feedback read was released',
+            );
+          }),
+        ]);
+        expect(jobReads).toEqual([0, 0]);
+        expect(feedbackReads).toHaveLength(0);
+        await runClassroomTaskTransaction(
+          independentConnection,
+          async (transaction) => {
+            const result = await transaction
+              .model(aiFeedbackJobModel)
+              .updateOne(
+                {
+                  _id: job._id,
+                  status: AiFeedbackJobStatus.Running,
+                  attempts: 1,
+                  lockOwner,
+                },
+                {
+                  $set: { status: AiFeedbackJobStatus.Succeeded },
+                  $unset: { lockOwner: 1, lockedAt: 1 },
+                },
+                { session: transaction.session, ...transaction.readOptions() },
+              )
+              .exec();
+            expect(result.modifiedCount).toBe(1);
+            const inserted = await transaction.model(feedbackModel).insertMany(
+              [
+                {
+                  ...feedbackFilter,
+                  type: FeedbackType.Bug,
+                  severity: FeedbackSeverity.Error,
+                  message: 'First independently committed AI feedback',
+                  tags: [tag],
+                },
+              ],
+              { session: transaction.session, ordered: true },
+            );
+            expect(inserted).toHaveLength(1);
+          },
+        );
+        releaseFeedback();
+        return await pending;
+      } finally {
+        clearTimeout(timer);
+        releaseFeedback();
+        await Promise.allSettled([pendingJson, pendingCsv]);
+        spies.forEach((spy) => spy.mockRestore());
+      }
+    })();
+
+    const afterStored = await readStored();
+    const next = [await getJson(), await getCsv()];
+    console.info('33A process assessment controlled interleave', {
+      jobReads,
+      feedbackReads,
+      during: { json: during[0], csv: during[1] },
+      next: { json: next[0], csv: next[1] },
+      beforeStored,
+      afterStored,
+    });
+    const after = {
+      studentId: studentAId,
+      aiSucceededTasksCount: 1,
+      avgErrorItems: 1,
+      score: 88,
+      riskLevel: 'MEDIUM',
+    };
+    expect(afterStored).toEqual({
+      ...beforeStored,
+      status: 'SUCCEEDED',
+      feedback: [{ severity: 'ERROR', tags: [tag] }],
+    });
+    expect(next).toEqual([
+      { ...after, topTags: [{ tag, count: 1 }] },
+      { ...after, topTags: `${tag}:1` },
+    ]);
+    expect(during).toEqual([
+      { ...before, topTags: [] },
+      { ...before, topTags: '' },
+    ]);
+    expect(feedbackReads).toEqual([0, 0]);
   });
 });

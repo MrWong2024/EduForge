@@ -5,6 +5,7 @@ import {
 } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, PipelineStage, Types } from 'mongoose';
+import type { ClassroomReadSnapshot } from '../../../../lib/classroom-task-transaction';
 import { Classroom } from '../../schemas/classroom.schema';
 import { ClassroomTask } from '../schemas/classroom-task.schema';
 import {
@@ -363,11 +364,14 @@ export class ClassReviewPackService {
   async aggregateCommonIssuesBySubmissionIds(
     submissionIds: Types.ObjectId[],
     topK: number,
+    snapshot?: ClassroomReadSnapshot,
   ): Promise<ReviewPackCommonIssues> {
     const rows = await this.aggregateReviewFeedbackFacets(
       submissionIds,
       topK,
       ClassReviewPackService.DEFAULT_EXAMPLES_PER_TAG,
+      undefined,
+      snapshot,
     );
     const commonIssues = rows[0] ?? {
       topTags: [],
@@ -386,6 +390,7 @@ export class ClassReviewPackService {
     lowerBound: Date,
     topK: number,
     activeStudentIds?: Types.ObjectId[],
+    snapshot?: ClassroomReadSnapshot,
   ) {
     const result = new Map<string, ReviewPackCommonIssues>();
     for (const classroomTaskId of classroomTaskIds) {
@@ -410,8 +415,11 @@ export class ClassReviewPackService {
       submissionMatch.studentId = { $in: activeStudentIds };
     }
 
-    const rows = await this.feedbackModel
-      .aggregate<CommonIssuesByClassroomTaskFacetResult>([
+    const model = snapshot
+      ? snapshot.model(this.feedbackModel)
+      : this.feedbackModel;
+    const aggregation = model.aggregate<CommonIssuesByClassroomTaskFacetResult>(
+      [
         {
           $lookup: {
             from: 'submissions',
@@ -523,8 +531,12 @@ export class ClassReviewPackService {
             ],
           },
         },
-      ] as PipelineStage[])
-      .exec();
+      ] as PipelineStage[],
+      snapshot
+        ? { session: snapshot.session, ...snapshot.readOptions() }
+        : undefined,
+    );
+    const rows = await aggregation.exec();
     const facet = rows[0] ?? { tags: [], types: [], severities: [] };
 
     for (const row of facet.tags) {
@@ -560,6 +572,7 @@ export class ClassReviewPackService {
     topK: number,
     examplesPerTag: number,
     readPreference?: 'primary',
+    snapshot?: ClassroomReadSnapshot,
   ) {
     if (submissionIds.length === 0) {
       return [] as ReviewFeedbackFacetResult[];
@@ -665,8 +678,13 @@ export class ClassReviewPackService {
       },
     ];
 
-    const aggregation =
-      this.feedbackModel.aggregate<ReviewFeedbackFacetResult>(pipeline);
+    const model = snapshot
+      ? snapshot.model(this.feedbackModel)
+      : this.feedbackModel;
+    const aggregation = model.aggregate<ReviewFeedbackFacetResult>(pipeline);
+    if (snapshot) {
+      aggregation.session(snapshot.session).option(snapshot.readOptions());
+    }
     if (readPreference) aggregation.read(readPreference);
     return aggregation.exec();
   }
