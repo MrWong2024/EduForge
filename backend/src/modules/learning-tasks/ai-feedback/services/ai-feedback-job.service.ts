@@ -118,16 +118,18 @@ export class AiFeedbackJobService {
 
   async getStatusMapBySubmissionIds(
     ids: Types.ObjectId[],
+    readPreference?: 'primary',
   ): Promise<Map<string, AiFeedbackStatus>> {
     const statusMap = new Map<string, AiFeedbackStatus>();
     if (ids.length === 0) {
       return statusMap;
     }
-    const jobs = await this.aiFeedbackJobModel
+    const query = this.aiFeedbackJobModel
       .find({ submissionId: { $in: ids } })
       .select('submissionId status')
-      .lean()
-      .exec();
+      .lean<Pick<AiFeedbackJob, 'submissionId' | 'status'>[]>();
+    if (readPreference) query.read(readPreference);
+    const jobs = await query.exec();
 
     for (const job of jobs) {
       statusMap.set(

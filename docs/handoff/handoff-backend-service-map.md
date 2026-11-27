@@ -289,7 +289,7 @@ Global SoT 只保留理解跨 Service workflow 必需的稳定不变量，不追
 - Domain / Responsibility: 构造复盘聚合、典型样例及 ACTIVE 学生分层；提供按 submissionIds/classroomTaskIds 聚合 common issues 的复用入口。
 - Upstream: 教师课堂复盘入口；`ClassroomExportSnapshotService`。
 - Downstream / Dependencies: `ClassroomModel`、`ClassroomTaskModel`、`SubmissionModel`、`FeedbackModel`、`UserModel`、`EnrollmentService`、`AiFeedbackJobService`、`AiFeedbackMetricsAggregator`。
-- Consistency / State / Idempotency: all 不为提交/Job/tags 拼 lowerBound；topTags 按标签展开计数，典型样例按 feedbackId 去重并保留标签归属。学生分层覆盖完整 ACTIVE 集合，不按预览条数截断。
+- Consistency / State / Idempotency: all 不为提交/Job/tags 拼 lowerBound；topTags 按标签展开计数，典型样例按 feedbackId 去重并保留标签归属。学生分层覆盖完整 ACTIVE 集合，不按预览条数截断。先读完每名学生窗口内最新作品的 Job 状态，再通过现有反馈聚合统计 AI ERROR。评阅在两次读取之间完成时，该学生可按本次已读 Job 状态暂列 `watch`。
 - Isolation: 校验班级 owner；成员取 Enrollment ACTIVE，任务统计严格按 classroomTaskId。
 - Side Effects: 只读。
 - Important Performance / Recovery: 样例先按 `severityRank desc, createdAt desc` 排序并按 examplesPerTag 截断候选，再按 feedbackId 去重。

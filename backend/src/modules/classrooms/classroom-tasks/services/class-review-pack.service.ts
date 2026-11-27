@@ -275,14 +275,36 @@ export class ClassReviewPackService {
       attemptsCountByStudentId,
     );
 
-    const [{ jobs, errors }, feedbackFacets] = await Promise.all([
-      this.aiFeedbackMetricsAggregator.aggregateJobsByClassroomTaskIds(
-        [classroomTaskObjectId],
-        lowerBound,
-        'createdAt',
-      ),
-      this.aggregateReviewFeedbackFacets(submissionIds, topK, examplesPerTag),
-    ]);
+    const latestSubmissionIds = Array.from(
+      latestSubmissionByStudentId.values(),
+      (submission) => submission._id,
+    );
+    const latestAiStatusRead =
+      latestSubmissionIds.length > 0
+        ? this.aiFeedbackJobService.getStatusMapBySubmissionIds(
+            latestSubmissionIds,
+            'primary',
+          )
+        : Promise.resolve(new Map<string, AiFeedbackStatus>());
+
+    const [{ jobs, errors }, latestAiStatusMap, feedbackFacets] =
+      await Promise.all([
+        this.aiFeedbackMetricsAggregator.aggregateJobsByClassroomTaskIds(
+          [classroomTaskObjectId],
+          lowerBound,
+          'createdAt',
+        ),
+        latestAiStatusRead,
+        // The worker persists feedback before marking a Job SUCCEEDED.
+        latestAiStatusRead.then(() =>
+          this.aggregateReviewFeedbackFacets(
+            submissionIds,
+            topK,
+            examplesPerTag,
+            'primary',
+          ),
+        ),
+      ]);
     const feedbackFacet = feedbackFacets[0] ?? {
       topTags: [],
       topTypes: [],
@@ -301,15 +323,6 @@ export class ClassReviewPackService {
       submissionAttemptMap,
     );
 
-    const latestSubmissionIds = Array.from(
-      latestSubmissionByStudentId.values(),
-    ).map((submission) => submission._id);
-    const latestAiStatusMap =
-      latestSubmissionIds.length > 0
-        ? await this.aiFeedbackJobService.getStatusMapBySubmissionIds(
-            latestSubmissionIds,
-          )
-        : new Map<string, AiFeedbackStatus>();
     const resolvedStudentTiers = this.buildStudentTiers(
       activeStudentIds,
       attemptsCountByStudentId,
@@ -546,6 +559,7 @@ export class ClassReviewPackService {
     submissionIds: Types.ObjectId[],
     topK: number,
     examplesPerTag: number,
+    readPreference?: 'primary',
   ) {
     if (submissionIds.length === 0) {
       return [] as ReviewFeedbackFacetResult[];
@@ -651,9 +665,10 @@ export class ClassReviewPackService {
       },
     ];
 
-    return this.feedbackModel
-      .aggregate<ReviewFeedbackFacetResult>(pipeline)
-      .exec();
+    const aggregation =
+      this.feedbackModel.aggregate<ReviewFeedbackFacetResult>(pipeline);
+    if (readPreference) aggregation.read(readPreference);
+    return aggregation.exec();
   }
 
   private buildReviewPackExamples(
