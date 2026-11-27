@@ -82,7 +82,6 @@ type EnrollmentRow = Enrollment & { _id: Types.ObjectId };
 type TaskRow = ClassroomTask & { _id: Types.ObjectId };
 type ChildWriter = 'join' | 'publish';
 type ParentWriter = 'delete' | ChildWriter;
-type ClassroomUpdate = 'rename' | 'archive';
 
 function checkpoint() {
   let signal!: () => void;
@@ -233,8 +232,7 @@ describe('Classroom Lifecycle (e2e)', () => {
 
   async function interleaveClassroomUpdate(
     classroom: ClassroomRow,
-    intent: ClassroomUpdate,
-    name: string,
+    delayedBody: UpdateClassroomDto | 'archive',
     ahead: () => request.Test,
   ) {
     const collection: {
@@ -253,6 +251,7 @@ describe('Classroom Lifecycle (e2e)', () => {
     ) as typeof collection.findOneAndUpdate;
     const beforeWrite = checkpoint();
     const releaseWrite = checkpoint();
+    const attemptedUpdatedAt: string[] = [];
     let pausedMethod: 'updateOne' | 'findOneAndUpdate' | undefined;
 
     async function pauseTargetWrite(
@@ -263,13 +262,17 @@ describe('Classroom Lifecycle (e2e)', () => {
       if (!(id instanceof Types.ObjectId) || !id.equals(classroom._id)) return;
       if (Array.isArray(update)) return;
       const fields = update.$set as
-        Pick<UpdateClassroomDto, 'name' | 'status'> | undefined;
+        (UpdateClassroomDto & { updatedAt?: unknown }) | undefined;
       const matchesIntent =
-        intent === 'rename'
-          ? fields?.name === name && fields.status === undefined
-          : fields?.status === ClassroomStatus.Archived &&
-            fields.name === undefined;
+        delayedBody === 'archive' ||
+        delayedBody.status === ClassroomStatus.Archived
+          ? fields?.status === ClassroomStatus.Archived
+          : fields?.name === delayedBody.name && fields?.status === undefined;
       if (!matchesIntent) return;
+      if (fields?.updatedAt instanceof Date) {
+        attemptedUpdatedAt.push(fields.updatedAt.toISOString());
+      }
+      if (pausedMethod) return;
       pausedMethod = method;
       beforeWrite.signal();
       await releaseWrite.reached;
@@ -290,21 +293,25 @@ describe('Classroom Lifecycle (e2e)', () => {
         return findOneAndUpdate(filter, update, options);
       });
     const delayed = (
-      intent === 'rename' ? patch(classroom, { name }) : archive(classroom)
+      delayedBody === 'archive'
+        ? archive(classroom)
+        : patch(classroom, delayedBody)
     ).then((response) => response);
+    let aheadRequest: Promise<request.Response> | undefined;
     try {
       await waitForCheckpoint(
         beforeWrite.reached,
         delayed,
         'DEFAULT_CLASSROOM_UPDATE',
       );
-      const first = await ahead();
+      aheadRequest = ahead().then((response) => response);
+      const first = await aheadRequest;
       releaseWrite.signal();
-      return { first, second: await delayed, pausedMethod };
+      return { first, second: await delayed, pausedMethod, attemptedUpdatedAt };
     } finally {
       releaseWrite.signal();
       try {
-        await Promise.allSettled([delayed]);
+        await Promise.allSettled([delayed, aheadRequest]);
       } finally {
         legacySpy.mockRestore();
         updateSpy.mockRestore();
@@ -716,22 +723,32 @@ describe('Classroom Lifecycle (e2e)', () => {
       name: body.name,
       message: body.message,
       ok: body.ok,
+      updatedAt: body.updatedAt,
     };
   }
 
-  it.each(['archive', 'rename', 'delete'] as const)(
+  it.each(['archive', 'rename', 'rename-explicit-name', 'delete'] as const)(
     'classroom update race: %s completes first',
     async (firstWriter) => {
       const classroom = await createClassroom(`metadata-${firstWriter}-first`);
       const name = assignEditedName(classroom);
+      const archiveBody = {
+        status: ClassroomStatus.Archived,
+        ...(firstWriter === 'rename-explicit-name' && { name: classroom.name }),
+      };
+      const delayedBody =
+        firstWriter === 'archive'
+          ? { name }
+          : firstWriter === 'delete'
+            ? 'archive'
+            : archiveBody;
       const { first, second, pausedMethod } = await interleaveClassroomUpdate(
         classroom,
-        firstWriter === 'archive' ? 'rename' : 'archive',
-        name,
+        delayedBody,
         () => {
           if (firstWriter === 'archive') return archive(classroom);
-          if (firstWriter === 'rename') return patch(classroom, { name });
-          return remove(classroom);
+          if (firstWriter === 'delete') return remove(classroom);
+          return patch(classroom, { name });
         },
       );
       const fetched = await fetch(classroom);
@@ -743,6 +760,16 @@ describe('Classroom Lifecycle (e2e)', () => {
           pausedMethod,
           originalName: classroom.name,
           editedName: name,
+          firstRequest:
+            firstWriter === 'archive'
+              ? { method: 'POST', body: null }
+              : firstWriter === 'delete'
+                ? { method: 'DELETE', body: null }
+                : { method: 'PATCH', body: { name } },
+          delayedRequest:
+            delayedBody === 'archive'
+              ? { method: 'POST', body: null }
+              : { method: 'PATCH', body: delayedBody },
           first: receiptState(first),
           second: receiptState(second),
           get: receiptState(fetched),
@@ -760,7 +787,7 @@ describe('Classroom Lifecycle (e2e)', () => {
         return;
       }
 
-      const expectedName = firstWriter === 'archive' ? classroom.name : name;
+      const expectedName = firstWriter === 'rename' ? name : classroom.name;
       if (firstWriter === 'archive') {
         expect(first.status).toBe(201);
         expectClassroomReceipt(
@@ -774,11 +801,11 @@ describe('Classroom Lifecycle (e2e)', () => {
       } else {
         expect(first.status).toBe(200);
         expectClassroomReceipt(first, classroom, name, ClassroomStatus.Active);
-        expect(second.status).toBe(201);
+        expect(second.status).toBe(200);
         expectClassroomReceipt(
           second,
           classroom,
-          name,
+          expectedName,
           ClassroomStatus.Archived,
         );
       }
@@ -795,6 +822,64 @@ describe('Classroom Lifecycle (e2e)', () => {
       });
     },
   );
+
+  it('preserves the first archive timestamp when two pure archives overlap', async () => {
+    const classroom = await createClassroom('archive-overlap');
+    const winningTime = new Date('2026-02-01T00:00:00.000Z');
+    const delayedTime = new Date('2026-02-02T00:00:00.000Z');
+    const clock = jest.spyOn(classroomModel.base, 'now');
+    clock.mockReturnValue(delayedTime);
+    try {
+      const { first, second, pausedMethod, attemptedUpdatedAt } =
+        await interleaveClassroomUpdate(classroom, 'archive', () => {
+          clock.mockReturnValue(winningTime);
+          return archive(classroom);
+        });
+      const fetched = await fetch(classroom);
+      const stored = await storedClassroom(classroom._id);
+      console.info(
+        JSON.stringify({
+          stage: 'classroom-lifecycle-archive-overlap',
+          pausedMethod,
+          request: { method: 'POST', body: null },
+          attemptedUpdatedAt,
+          first: receiptState(first),
+          second: receiptState(second),
+          get: receiptState(fetched),
+          mongo: stored && {
+            name: stored.name,
+            status: stored.status,
+            updatedAt: stored.updatedAt,
+          },
+        }),
+      );
+      expect(attemptedUpdatedAt).toEqual([
+        delayedTime.toISOString(),
+        winningTime.toISOString(),
+      ]);
+      for (const response of [first, second, fetched]) {
+        expectClassroomReceipt(
+          response,
+          classroom,
+          classroom.name,
+          ClassroomStatus.Archived,
+        );
+        expect((response.body as ClassroomResponseDto).updatedAt).toBe(
+          winningTime.toISOString(),
+        );
+      }
+      expect([first.status, second.status, fetched.status]).toEqual([
+        201, 201, 200,
+      ]);
+      expect(stored).toMatchObject({
+        name: classroom.name,
+        status: ClassroomStatus.Archived,
+        updatedAt: winningTime,
+      });
+    } finally {
+      clock.mockRestore();
+    }
+  });
 
   it('deletes an empty classroom after its confirmed rename', async () => {
     const classroom = await createClassroom('rename-then-delete');
@@ -880,7 +965,14 @@ describe('Classroom Lifecycle (e2e)', () => {
     const name = assignEditedName(classroom);
     const result = await patch(classroom, { name }).expect(200);
     expectClassroomReceipt(result, classroom, name, ClassroomStatus.Active);
-    expect(await storedClassroom(classroom._id)).toMatchObject({ name });
+    const stored = await storedClassroom(classroom._id);
+    expect(stored).toMatchObject({ name });
+    expect(stored).not.toHaveProperty('status');
+    const sameStatus = await patch(classroom, {
+      status: ClassroomStatus.Active,
+    }).expect(200);
+    expect(sameStatus.body).toEqual(result.body);
+    expect(await storedClassroom(classroom._id)).toEqual(stored);
   });
 
   it.each([

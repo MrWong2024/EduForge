@@ -197,43 +197,43 @@ export class ClassroomsService {
   async updateClassroom(id: string, dto: UpdateClassroomDto, userId: string) {
     await this.ensureTeacher(userId);
     const scope = { _id: id, teacherId: new Types.ObjectId(userId) };
-    const classroom = await this.classroomModel.findOne(scope).exec();
-    if (!classroom) {
-      throw new NotFoundException('Classroom not found');
-    }
-    const hasName = dto.name !== undefined;
-    if (classroom.status === ClassroomStatus.Archived && hasName) {
-      throw new BadRequestException('Archived classrooms cannot be updated');
-    }
-
-    if (dto.name !== undefined) {
-      classroom.name = dto.name;
-    }
-    if (dto.status !== undefined) {
-      classroom.status = dto.status;
-    }
-
+    const { name, status } = dto;
+    const hasName = name !== undefined;
     const $set = {
-      ...(classroom.isModified('name') && { name: classroom.name }),
-      ...(classroom.isModified('status') && { status: classroom.status }),
+      ...(hasName && { name }),
+      ...(status !== undefined && { status }),
     };
-    if (!Object.keys($set).length) {
-      return this.toClassroomResponse(classroom);
-    }
+    const differences = Object.entries($set).map(([field, value]) =>
+      field === 'status' && status === ClassroomStatus.Active
+        ? { status: { $exists: true, $ne: ClassroomStatus.Active } }
+        : { [field]: { $ne: value } },
+    );
 
-    const updated = await this.classroomModel
-      .findOneAndUpdate(
-        {
-          ...scope,
-          ...(hasName && { status: { $ne: ClassroomStatus.Archived } }),
-        },
-        { $set },
-        { returnDocument: 'after', runValidators: true },
-      )
-      .exec();
-    if (updated) return this.toClassroomResponse(updated);
-    if (hasName && (await this.classroomModel.exists(scope).exec())) {
-      throw new BadRequestException('Archived classrooms cannot be updated');
+    let classroom = await this.classroomModel.findOne(scope).exec();
+    while (classroom) {
+      if (classroom.status === ClassroomStatus.Archived && hasName) {
+        throw new BadRequestException('Archived classrooms cannot be updated');
+      }
+      if (
+        (!hasName || classroom.name === name) &&
+        (status === undefined || classroom.status === status)
+      ) {
+        return this.toClassroomResponse(classroom);
+      }
+
+      const updated = await this.classroomModel
+        .findOneAndUpdate(
+          {
+            ...scope,
+            ...(hasName && { status: { $ne: ClassroomStatus.Archived } }),
+            $or: differences,
+          },
+          { $set },
+          { returnDocument: 'after', runValidators: true },
+        )
+        .exec();
+      if (updated) return this.toClassroomResponse(updated);
+      classroom = await this.classroomModel.findOne(scope).exec();
     }
     throw new NotFoundException('Classroom not found');
   }

@@ -85,11 +85,14 @@ function summarizeCourseResponse(response: request.Response) {
   const body = response.body as Partial<CourseSummary> & {
     message?: string;
     ok?: boolean;
+    updatedAt?: string;
   };
   return {
     http: response.status,
     name: body.name,
     status: body.status,
+    courseLabel: body.courseLabel,
+    updatedAt: body.updatedAt,
     message: body.message,
     ok: body.ok,
   };
@@ -191,13 +194,22 @@ describe('Course Lifecycle (e2e)', () => {
       .send({ courseId, name });
   };
 
-  async function createCourse(suffix: string) {
+  async function createCourse(
+    suffix: string,
+    overrides: { name?: string; courseLabel?: string | null } = {},
+  ) {
     const code = `${namespace}-${suffix}`;
     courseCodes.add(code);
     const created = await teacherAgent
       .post('/api/courses')
       .timeout(httpTimeout)
-      .send({ code, name: code, term: '2026-Spring', courseLabel: '通用编程' })
+      .send({
+        code,
+        name: code,
+        term: '2026-Spring',
+        courseLabel: '通用编程',
+        ...overrides,
+      })
       .expect(201);
     const { id } = created.body as { id: string };
     expect(Types.ObjectId.isValid(id)).toBe(true);
@@ -235,6 +247,7 @@ describe('Course Lifecycle (e2e)', () => {
     const releaseWrite = checkpoint();
     const target = new Types.ObjectId(courseId);
     let delayedMethod: CourseWriteMethod | undefined;
+    let delayedUpdatedAt: unknown;
 
     async function beforeWrite<Result>(
       method: CourseWriteMethod,
@@ -243,12 +256,14 @@ describe('Course Lifecycle (e2e)', () => {
       execute: () => Promise<Result>,
     ): Promise<Result> {
       if (
+        delayedMethod === undefined &&
         filter?._id instanceof Types.ObjectId &&
         filter._id.equals(target) &&
         !Array.isArray(update) &&
         update.$set?.[intent.field] === intent.value
       ) {
         delayedMethod = method;
+        delayedUpdatedAt = update.$set?.updatedAt;
         reachedWrite.signal();
         await releaseWrite.reached;
       }
@@ -286,7 +301,7 @@ describe('Course Lifecycle (e2e)', () => {
       );
       const first = await start(firstRequest);
       releaseWrite.signal();
-      return { first, delayed: await delayed, delayedMethod };
+      return { first, delayed: await delayed, delayedMethod, delayedUpdatedAt };
     } finally {
       releaseWrite.signal();
       try {
@@ -657,7 +672,7 @@ describe('Course Lifecycle (e2e)', () => {
     expect(restored.body).toMatchObject({ status: 'ACTIVE' });
   });
 
-  it.each(['archive', 'edit', 'delete'] as const)(
+  it.each(['archive', 'delete'] as const)(
     'keeps course write results consistent when %s finishes first',
     async (first) => {
       const courseId = await createCourse(`update-race-${first}`);
@@ -673,15 +688,9 @@ describe('Course Lifecycle (e2e)', () => {
         delayedMethod,
       } = await raceCourseUpdate(
         courseId,
-        first === 'edit'
-          ? { field: 'status', value: CourseStatus.Archived }
-          : { field: 'name', value: newName },
-        first === 'edit' ? archiveCourse : changeName,
-        first === 'archive'
-          ? archiveCourse
-          : first === 'edit'
-            ? changeName
-            : () => remove(courseId),
+        { field: 'name', value: newName },
+        changeName,
+        first === 'archive' ? archiveCourse : () => remove(courseId),
       );
       const fetched = await get(courseId);
       const row = await storedCourse(courseId);
@@ -711,25 +720,15 @@ describe('Course Lifecycle (e2e)', () => {
       const expected = {
         id: courseId,
         code: before.code,
-        name: first === 'edit' ? newName : before.name,
+        name: before.name,
         status: CourseStatus.Archived,
       };
-      if (first === 'archive') {
-        expect(winner.status).toBe(201);
-        expect(winner.body).toMatchObject(expected);
-        expect(delayed.status).toBe(400);
-        expect(delayed.body).toMatchObject({
-          message: 'Archived courses cannot be updated',
-        });
-      } else {
-        expect(winner.status).toBe(200);
-        expect(winner.body).toMatchObject({
-          ...expected,
-          status: CourseStatus.Active,
-        });
-        expect(delayed.status).toBe(201);
-        expect(delayed.body).toMatchObject(expected);
-      }
+      expect(winner.status).toBe(201);
+      expect(winner.body).toMatchObject(expected);
+      expect(delayed.status).toBe(400);
+      expect(delayed.body).toMatchObject({
+        message: 'Archived courses cannot be updated',
+      });
       expect(fetched.status).toBe(200);
       expect(fetched.body).toMatchObject(expected);
       expect(row).toMatchObject({
@@ -740,6 +739,178 @@ describe('Course Lifecycle (e2e)', () => {
       });
     },
   );
+
+  it.each([
+    {
+      mode: 'explicit name',
+      archiveBody: { name: 'A', status: CourseStatus.Archived },
+      expectedName: 'A',
+    },
+    {
+      mode: 'omitted name',
+      archiveBody: { status: CourseStatus.Archived },
+      expectedName: 'B',
+    },
+  ])(
+    'archives a course after a competing rename with $mode',
+    async ({ mode, archiveBody, expectedName }) => {
+      const courseId = await createCourse(`archive-rename-${expectedName}`, {
+        name: 'A',
+      });
+      expect(await storedCourse(courseId)).toMatchObject({
+        name: 'A',
+        status: CourseStatus.Active,
+      });
+      const editBody = { name: 'B' };
+      const {
+        first: edited,
+        delayed: archived,
+        delayedMethod,
+      } = await raceCourseUpdate(
+        courseId,
+        { field: 'status', value: CourseStatus.Archived },
+        () => patch(courseId, archiveBody),
+        () => patch(courseId, editBody),
+      );
+      const fetched = await get(courseId);
+      const row = await storedCourse(courseId);
+      console.info(
+        JSON.stringify({
+          stage: 'course-archive-after-rename',
+          mode,
+          delayedMethod,
+          archiveBody,
+          editBody,
+          edited: summarizeCourseResponse(edited),
+          archived: summarizeCourseResponse(archived),
+          get: summarizeCourseResponse(fetched),
+          mongo: row ? { name: row.name, status: row.status } : null,
+        }),
+      );
+      expect(edited.status).toBe(200);
+      expect(edited.body).toMatchObject({
+        name: 'B',
+        status: CourseStatus.Active,
+      });
+      expect(archived.status).toBe(200);
+      expect(fetched.status).toBe(200);
+      const expected = {
+        name: expectedName,
+        status: CourseStatus.Archived,
+        courseLabel: '通用编程',
+      };
+      expect(archived.body).toMatchObject(expected);
+      expect(fetched.body).toMatchObject(expected);
+      expect(row).toMatchObject(expected);
+    },
+  );
+
+  it('clears a course label explicitly during archive after a competing update sets it', async () => {
+    const courseId = await createCourse('archive-label-clear', {
+      courseLabel: null,
+    });
+    const before = await storedCourse(courseId);
+    expect(before).toMatchObject({ status: CourseStatus.Active });
+    expect(before).not.toHaveProperty('courseLabel');
+    const archiveBody = { courseLabel: null, status: CourseStatus.Archived };
+    const editBody = { courseLabel: 'Python 程序设计' };
+    const {
+      first: edited,
+      delayed: archived,
+      delayedMethod,
+    } = await raceCourseUpdate(
+      courseId,
+      { field: 'status', value: CourseStatus.Archived },
+      () => patch(courseId, archiveBody),
+      () => patch(courseId, editBody),
+    );
+    const fetched = await get(courseId);
+    const row = await storedCourse(courseId);
+    console.info(
+      JSON.stringify({
+        stage: 'course-archive-with-explicit-label-clear',
+        delayedMethod,
+        archiveBody,
+        editBody,
+        edited: summarizeCourseResponse(edited),
+        archived: summarizeCourseResponse(archived),
+        get: summarizeCourseResponse(fetched),
+        mongo: row
+          ? {
+              status: row.status,
+              courseLabel: row.courseLabel,
+              hasCourseLabel: 'courseLabel' in row,
+            }
+          : null,
+      }),
+    );
+    expect(edited.status).toBe(200);
+    expect(edited.body).toMatchObject({
+      courseLabel: editBody.courseLabel,
+      status: CourseStatus.Active,
+    });
+    expect(archived.status).toBe(200);
+    expect(fetched.status).toBe(200);
+    for (const result of [
+      archived.body as CourseSummary,
+      fetched.body as CourseSummary,
+      row,
+    ]) {
+      expect(result).toMatchObject({ status: CourseStatus.Archived });
+      expect(result).not.toHaveProperty('courseLabel');
+    }
+  });
+
+  it('preserves the winning updatedAt when two course archives start while active', async () => {
+    const courseId = await createCourse('concurrent-repeat-archive');
+    expect(await storedCourse(courseId)).toMatchObject({
+      status: CourseStatus.Active,
+    });
+    const firstTime = new Date('2040-01-01T00:00:01Z');
+    const delayedTime = new Date('2040-01-01T00:00:02Z');
+    const now = jest
+      .spyOn(courseModel.base, 'now')
+      .mockReturnValue(delayedTime);
+    const { first, delayed, delayedMethod, delayedUpdatedAt } =
+      await raceCourseUpdate(
+        courseId,
+        { field: 'status', value: CourseStatus.Archived },
+        () => archive(courseId),
+        () => {
+          now.mockReturnValue(firstTime);
+          return archive(courseId);
+        },
+      ).finally(() => now.mockRestore());
+    const fetched = await get(courseId);
+    const row = await storedCourse(courseId);
+    console.info(
+      JSON.stringify({
+        stage: 'course-concurrent-repeat-archive',
+        method: 'POST archive',
+        delayedMethod,
+        delayedUpdatedAt,
+        first: summarizeCourseResponse(first),
+        delayed: summarizeCourseResponse(delayed),
+        get: summarizeCourseResponse(fetched),
+        mongo: row ? { status: row.status, updatedAt: row.updatedAt } : null,
+      }),
+    );
+    expect(delayedUpdatedAt).toEqual(delayedTime);
+    expect(first.status).toBe(201);
+    expect(delayed.status).toBe(201);
+    expect(fetched.status).toBe(200);
+    const expected = {
+      status: CourseStatus.Archived,
+      updatedAt: firstTime.toISOString(),
+    };
+    expect(first.body).toMatchObject(expected);
+    expect(delayed.body).toMatchObject(expected);
+    expect(fetched.body).toMatchObject(expected);
+    expect(row).toMatchObject({
+      status: CourseStatus.Archived,
+      updatedAt: firstTime,
+    });
+  });
 
   it('deletes an empty course after a successful edit', async () => {
     const courseId = await createCourse('edit-then-delete');
@@ -921,9 +1092,16 @@ describe('Course Lifecycle (e2e)', () => {
       name: 'Legacy course edited',
       status: CourseStatus.Active,
     });
-    expect(await storedCourse(courseId)).toMatchObject({
+    const stored = await storedCourse(courseId);
+    expect(stored).toMatchObject({
       name: 'Legacy course edited',
     });
+    expect(stored).not.toHaveProperty('status');
+    const sameStatus = await patch(courseId, {
+      status: CourseStatus.Active,
+    }).expect(200);
+    expect(sameStatus.body).toEqual(edited.body);
+    expect(await storedCourse(courseId)).toEqual(stored);
   });
 
   it('keeps role and course ownership checks for deletion and classroom creation', async () => {

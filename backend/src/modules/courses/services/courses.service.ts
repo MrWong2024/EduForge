@@ -6,7 +6,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InjectConnection, InjectModel } from '@nestjs/mongoose';
-import { Model, Types } from 'mongoose';
+import { Model, Types, type QueryFilter } from 'mongoose';
 import type { Connection } from 'mongoose';
 import {
   CLASSROOM_TASK_TRANSACTION_CONNECTION,
@@ -66,68 +66,66 @@ export class CoursesService {
   async updateCourse(id: string, dto: UpdateCourseDto, userId: string) {
     await this.ensureTeacher(userId);
     const scope = { _id: id, createdBy: new Types.ObjectId(userId) };
-    const course = await this.courseModel.findOne(scope).exec();
-    if (!course) {
-      throw new NotFoundException('Course not found');
-    }
+    const { name, term, status } = dto;
+    const code = dto.code?.trim();
+    const courseLabel = this.toSanitizedCourseLabel(dto.courseLabel);
     const hasCourseLabel = dto.courseLabel !== undefined;
     const hasBaseFieldUpdate =
-      dto.code !== undefined ||
-      dto.name !== undefined ||
-      dto.term !== undefined ||
+      code !== undefined ||
+      name !== undefined ||
+      term !== undefined ||
       hasCourseLabel;
-    if (course.status === CourseStatus.Archived && hasBaseFieldUpdate) {
-      throw new BadRequestException('Archived courses cannot be updated');
-    }
-    if (dto.code !== undefined) {
-      course.code = dto.code;
-    }
-    if (dto.name !== undefined) {
-      course.name = dto.name;
-    }
-    if (dto.term !== undefined) {
-      course.term = dto.term;
-    }
-    if (hasCourseLabel) {
-      course.courseLabel = this.toSanitizedCourseLabel(dto.courseLabel);
-    }
-    if (dto.status !== undefined) {
-      course.status = dto.status;
-    }
-
-    // Only include dirty paths, so schema defaults on old records stay omitted.
+    const clearCourseLabel = hasCourseLabel && courseLabel === undefined;
     const $set = {
-      ...(course.isModified('code') && { code: course.code }),
-      ...(course.isModified('name') && { name: course.name }),
-      ...(course.isModified('term') && { term: course.term }),
-      ...(course.isModified('status') && { status: course.status }),
-      ...(course.isModified('courseLabel') &&
-        course.courseLabel !== undefined && {
-          courseLabel: course.courseLabel,
-        }),
+      ...(code !== undefined && { code }),
+      ...(name !== undefined && { name }),
+      ...(term !== undefined && { term }),
+      ...(status !== undefined && { status }),
+      ...(courseLabel !== undefined && { courseLabel }),
     };
-    const clearCourseLabel =
-      course.isModified('courseLabel') && course.courseLabel === undefined;
-    if (!Object.keys($set).length && !clearCourseLabel) {
-      return this.toCourseResponse(course);
+    const differences: QueryFilter<Course>[] = Object.entries($set).map(
+      ([field, value]) =>
+        field === 'status' && status === CourseStatus.Active
+          ? { status: { $exists: true, $ne: CourseStatus.Active } }
+          : { [field]: { $ne: value } },
+    );
+    if (clearCourseLabel) {
+      differences.push({ courseLabel: { $exists: true } });
     }
 
     try {
-      const updated = await this.courseModel
-        .findOneAndUpdate(
-          {
-            ...scope,
-            ...(hasBaseFieldUpdate && {
-              status: { $ne: CourseStatus.Archived },
-            }),
-          },
-          { $set, ...(clearCourseLabel && { $unset: { courseLabel: 1 } }) },
-          { returnDocument: 'after', runValidators: true },
-        )
-        .exec();
-      if (updated) return this.toCourseResponse(updated);
-      if (hasBaseFieldUpdate && (await this.courseModel.exists(scope).exec())) {
-        throw new BadRequestException('Archived courses cannot be updated');
+      let course = await this.courseModel.findOne(scope).exec();
+      while (course) {
+        if (course.status === CourseStatus.Archived && hasBaseFieldUpdate) {
+          throw new BadRequestException('Archived courses cannot be updated');
+        }
+        if (
+          (code === undefined || course.code === code) &&
+          (name === undefined || course.name === name) &&
+          (term === undefined || course.term === term) &&
+          (status === undefined || course.status === status) &&
+          (courseLabel === undefined || course.courseLabel === courseLabel) &&
+          (!clearCourseLabel || course.courseLabel === undefined)
+        ) {
+          return this.toCourseResponse(course);
+        }
+
+        const updated = await this.courseModel
+          .findOneAndUpdate(
+            {
+              ...scope,
+              ...(hasBaseFieldUpdate && {
+                status: { $ne: CourseStatus.Archived },
+              }),
+              $or: differences,
+            },
+            { $set, ...(clearCourseLabel && { $unset: { courseLabel: 1 } }) },
+            { returnDocument: 'after', runValidators: true },
+          )
+          .exec();
+        if (updated) return this.toCourseResponse(updated);
+        // A miss can mean the patch is already satisfied or the scope changed.
+        course = await this.courseModel.findOne(scope).exec();
       }
       throw new NotFoundException('Course not found');
     } catch (error) {
