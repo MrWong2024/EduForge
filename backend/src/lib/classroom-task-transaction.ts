@@ -11,6 +11,13 @@ const logger = new Logger('ClassroomTaskTransaction');
 
 export const CLASSROOM_TASK_TRANSACTION_CONNECTION = 'classroomTaskTransaction';
 
+export class UnconfirmedClassroomTaskCommitError extends Error {
+  constructor(cause: unknown) {
+    super('MongoDB transaction commit could not be confirmed', { cause });
+    this.name = 'UnconfirmedClassroomTaskCommitError';
+  }
+}
+
 export type ClassroomTaskTransaction = {
   session: mongo.ClientSession;
   model<T>(source: Model<T>): Model<T>;
@@ -78,6 +85,7 @@ function isTransientTransaction(error: unknown): boolean {
 export async function runClassroomTaskTransaction<T>(
   connection: Pick<Connection, 'startSession' | 'model' | 'models'>,
   run: (transaction: ClassroomTaskTransaction) => Promise<T>,
+  options?: { distinguishUnconfirmedCommit?: boolean },
 ): Promise<T> {
   return withMongoOperationDeadline(TRANSACTION_BUDGET_MS, async (deadline) => {
     const session = await connection.startSession();
@@ -124,10 +132,30 @@ export async function runClassroomTaskTransaction<T>(
               await session.commitTransaction();
               return value;
             } catch {
+              if (options?.distinguishUnconfirmedCommit) {
+                throw new UnconfirmedClassroomTaskCommitError(error);
+              }
               throw error;
             }
           }
-          if (!isTransientTransaction(error)) throw error;
+          if (!isTransientTransaction(error)) {
+            // Some ambiguous replies do not permit another commit attempt.
+            if (
+              options?.distinguishUnconfirmedCommit &&
+              error instanceof mongo.MongoError &&
+              (error.hasErrorLabel(
+                mongo.MongoErrorLabel.UnknownTransactionCommitResult,
+              ) ||
+                error instanceof mongo.MongoOperationTimeoutError ||
+                error instanceof mongo.MongoWriteConcernError ||
+                (error instanceof mongo.MongoServerError &&
+                  (error.code === MAX_TIME_MS_EXPIRED ||
+                    error.writeConcernError !== undefined)))
+            ) {
+              throw new UnconfirmedClassroomTaskCommitError(error);
+            }
+            throw error;
+          }
           await waitToRetry();
         }
       }

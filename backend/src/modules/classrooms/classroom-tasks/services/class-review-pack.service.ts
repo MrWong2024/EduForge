@@ -295,7 +295,7 @@ export class ClassReviewPackService {
           'createdAt',
         ),
         latestAiStatusRead,
-        // The worker persists feedback before marking a Job SUCCEEDED.
+        // Avoid pairing a new SUCCEEDED status with feedback read before its commit.
         latestAiStatusRead.then(() =>
           this.aggregateReviewFeedbackFacets(
             submissionIds,

@@ -2,8 +2,8 @@ import { AiContextReaderService } from '../../ai-context/ai-context-reader.servi
 import { AiContextError } from '../../ai-context/ai-context.types';
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { InjectModel } from '@nestjs/mongoose';
-import { Model } from 'mongoose';
+import { InjectConnection, InjectModel } from '@nestjs/mongoose';
+import { type Connection, Model } from 'mongoose';
 import { Feedback, FeedbackSource } from '../../schemas/feedback.schema';
 import { Submission } from '../../schemas/submission.schema';
 import { ClassroomTask } from '../../../classrooms/classroom-tasks/schemas/classroom-task.schema';
@@ -28,6 +28,13 @@ import { WithTimestamps } from '../../../../common/types/with-timestamps.type';
 import { AiSubmissionAnalysisContext } from '../interfaces/ai-submission-analysis-context.interface';
 import { AiReviewFailureCode } from '../lib/ai-review-summary';
 import { compactAiFeedbackItems } from '../lib/feedback-item-compactor';
+import {
+  CLASSROOM_TASK_TRANSACTION_CONNECTION,
+  runClassroomTaskTransaction,
+  UnconfirmedClassroomTaskCommitError,
+  type ClassroomTaskTransaction,
+} from '../../../../lib/classroom-task-transaction';
+import { withMongoOperationDeadline } from '../../../../lib/mongo-operation-deadline';
 
 type AiFeedbackJobWithMeta = AiFeedbackJob & WithId & WithTimestamps;
 type SubmissionAnalysisSource = Pick<
@@ -44,6 +51,9 @@ type TaskAnalysisSource = Pick<
   TaskSnapshot,
   'title' | 'description' | 'rubric'
 >;
+type FeedbackIdentity = Pick<Feedback, 'type' | 'severity' | 'message'>;
+const feedbackIdentity = ({ type, severity, message }: FeedbackIdentity) =>
+  JSON.stringify([type, severity, message]);
 
 @Injectable()
 export class AiFeedbackProcessor {
@@ -69,6 +79,8 @@ export class AiFeedbackProcessor {
     private readonly aiFeedbackGuards: AiFeedbackGuardsService,
     private readonly configService: ConfigService,
     private readonly aiContextReader: AiContextReaderService,
+    @InjectConnection(CLASSROOM_TASK_TRANSACTION_CONNECTION)
+    private readonly transactionConnection: Connection,
   ) {}
 
   async processOnce(batchSize = AiFeedbackProcessor.DEFAULT_BATCH_SIZE) {
@@ -212,7 +224,9 @@ export class AiFeedbackProcessor {
               `AI feedback compacted before persistence: jobId=${job._id.toString()}, submissionId=${job.submissionId.toString()}, originalItems=${items.length}, compactedItems=${compactedItems.length}`,
             );
           }
-          await this.persistFeedback(job, compactedItems);
+          if (await this.commitResult(job, compactedItems)) {
+            results.succeeded += 1;
+          }
         } finally {
           try {
             if (diagnosticHandle && compactionDiagnostic) {
@@ -226,22 +240,12 @@ export class AiFeedbackProcessor {
             release();
           }
         }
-        await this.aiFeedbackJobModel
-          .findOneAndUpdate(this.claimFilter(job), {
-            status: AiFeedbackJobStatus.Succeeded,
-            lockedAt: null,
-            lockOwner: null,
-            notBefore: null,
-            lastError: null,
-            failureCode: null,
-          })
-          .exec();
-        results.succeeded += 1;
       } catch (error) {
+        if (error instanceof UnconfirmedClassroomTaskCommitError) throw error;
         const handled = await this.handleJobFailure(job, error);
         if (handled === AiFeedbackJobStatus.Dead) {
           results.dead += 1;
-        } else {
+        } else if (handled === AiFeedbackJobStatus.Failed) {
           results.failed += 1;
         }
       }
@@ -329,17 +333,101 @@ export class AiFeedbackProcessor {
       .exec();
   }
 
+  private async commitResult(
+    job: AiFeedbackJobWithMeta,
+    items: AiFeedbackItem[],
+  ): Promise<boolean> {
+    try {
+      return await runClassroomTaskTransaction(
+        this.transactionConnection,
+        async (transaction) => {
+          const result = await transaction
+            .model(this.aiFeedbackJobModel)
+            .updateOne(
+              this.claimFilter(job),
+              {
+                $set: {
+                  status: AiFeedbackJobStatus.Succeeded,
+                  lockedAt: null,
+                  lockOwner: null,
+                  notBefore: null,
+                  lastError: null,
+                  failureCode: null,
+                },
+              },
+              { session: transaction.session, ...transaction.readOptions() },
+            )
+            .exec();
+          if (result.matchedCount !== 1) return false;
+
+          await this.persistFeedback(job, items, transaction);
+          return true;
+        },
+        { distinguishUnconfirmedCommit: true },
+      );
+    } catch (error) {
+      if (!(error instanceof UnconfirmedClassroomTaskCommitError)) throw error;
+
+      // Durable success at the same attempt confirms this claim. RUNNING does
+      // not establish that the commit was rolled back.
+      const confirmed = await withMongoOperationDeadline(3000, (deadline) =>
+        this.aiFeedbackJobModel
+          .exists({
+            _id: job._id,
+            attempts: job.attempts,
+            status: AiFeedbackJobStatus.Succeeded,
+          })
+          .read('primary')
+          .readConcern('majority')
+          .setOptions({
+            signal: deadline.signal,
+            maxTimeMS: deadline.remainingMs(),
+          })
+          .exec(),
+      ).catch(() => null);
+      if (confirmed) return true;
+      throw error;
+    }
+  }
+
   private async persistFeedback(
     job: AiFeedbackJobWithMeta,
     items: AiFeedbackItem[],
+    transaction: ClassroomTaskTransaction,
   ) {
     if (items.length === 0) {
       return;
     }
 
-    const docs = items.map((item) => ({
-      submissionId: job.submissionId,
-      source: FeedbackSource.AI,
+    const scope = { submissionId: job.submissionId, source: FeedbackSource.AI };
+    const feedbackModel = transaction.model(this.feedbackModel);
+    const existing = await feedbackModel
+      .find({
+        ...scope,
+        $or: items.map(({ type, severity, message }) => ({
+          type,
+          severity,
+          message,
+        })),
+      })
+      .select('type severity message')
+      .session(transaction.session)
+      .read('primary')
+      .setOptions(transaction.readOptions())
+      .lean<FeedbackIdentity[]>()
+      .exec();
+    const known = new Set(existing.map(feedbackIdentity));
+    const missing = items.filter((item) => {
+      const key = feedbackIdentity(item);
+      if (known.has(key)) return false;
+      known.add(key);
+      return true;
+    });
+    if (missing.length === 0) return;
+
+    transaction.remainingMs();
+    const docs = missing.map((item) => ({
+      ...scope,
       type: item.type,
       severity: item.severity,
       message: item.message,
@@ -348,17 +436,7 @@ export class AiFeedbackProcessor {
       scoreHint: item.scoreHint,
     }));
 
-    try {
-      await this.feedbackModel.insertMany(docs, { ordered: false });
-    } catch (error) {
-      const mongoError = error as { code?: number };
-      if (mongoError.code !== 11000) {
-        throw error;
-      }
-      this.logger.debug(
-        `Duplicate AI feedback ignored: jobId=${job._id.toString()}, submissionId=${job.submissionId.toString()}, items=${items.length}, duplicateKey=true`,
-      );
-    }
+    await feedbackModel.insertMany(docs, { session: transaction.session });
   }
 
   private claimFilter(job: AiFeedbackJobWithMeta) {
@@ -523,7 +601,7 @@ export class AiFeedbackProcessor {
       AiFeedbackProcessor.MAX_BACKOFF_MS,
       AiFeedbackProcessor.BASE_BACKOFF_MS * Math.pow(2, job.attempts - 1),
     );
-    await this.aiFeedbackJobModel
+    const updated = await this.aiFeedbackJobModel
       .findOneAndUpdate(this.claimFilter(job), {
         $set: {
           status,
@@ -535,6 +613,6 @@ export class AiFeedbackProcessor {
         },
       })
       .exec();
-    return status;
+    return updated ? status : null;
   }
 }

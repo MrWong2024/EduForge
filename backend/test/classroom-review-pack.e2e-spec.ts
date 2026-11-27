@@ -3,10 +3,7 @@ import {
   authTestEnvironment,
   openAuthTestConnection,
 } from './helpers/auth-test-environment';
-import {
-  assertAuthTestWritesConfirmed,
-  runAuthTestWrite,
-} from './helpers/auth-test-writes';
+import { assertAuthTestWritesConfirmed } from './helpers/auth-test-writes';
 import { INestApplication, ValidationPipe } from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
 import { getConnectionToken, getModelToken } from '@nestjs/mongoose';
@@ -16,7 +13,10 @@ import cookieParser from 'cookie-parser';
 import request from 'supertest';
 import { App } from 'supertest/types';
 import { AppModule } from '../src/app.module';
-import { CLASSROOM_TASK_TRANSACTION_CONNECTION } from '../src/lib/classroom-task-transaction';
+import {
+  CLASSROOM_TASK_TRANSACTION_CONNECTION,
+  runClassroomTaskTransaction,
+} from '../src/lib/classroom-task-transaction';
 import { User } from '../src/modules/users/schemas/user.schema';
 import { Session } from '../src/modules/auth/schemas/session.schema';
 import { PasswordResetToken } from '../src/modules/auth/schemas/password-reset-token.schema';
@@ -117,6 +117,7 @@ type ReviewPackResponse = {
 describe('Classroom Review Pack (e2e)', () => {
   let app: INestApplication<App>;
   let independentConnection: Connection;
+  let transactionConnection: Connection;
   let databaseVerified = false;
   let userModel: Model<User>;
   let sessionModel: Model<Session>;
@@ -195,7 +196,7 @@ describe('Classroom Review Pack (e2e)', () => {
     aiFeedbackJobModel = app.get(getModelToken(AiFeedbackJob.name));
 
     const appConnection = app.get<Connection>(getConnectionToken());
-    const transactionConnection = app.get<Connection>(
+    transactionConnection = app.get<Connection>(
       getConnectionToken(CLASSROOM_TASK_TRANSACTION_CONNECTION),
     );
     const models = [
@@ -214,6 +215,7 @@ describe('Classroom Review Pack (e2e)', () => {
     const connections = new Set([
       appConnection,
       transactionConnection,
+      independentConnection,
       ...models.map(({ db }) => db),
     ]);
     for (const connection of connections) {
@@ -222,11 +224,20 @@ describe('Classroom Review Pack (e2e)', () => {
         'primary',
       );
     }
+    await runClassroomTaskTransaction(transactionConnection, (transaction) =>
+      transaction
+        .model(feedbackModel)
+        .exists({ _id: new Types.ObjectId() })
+        .session(transaction.session)
+        .setOptions(transaction.readOptions())
+        .exec(),
+    );
     databaseVerified = true;
     console.info('Review pack DB gates passed.', {
       app: appConnection.db?.databaseName,
       transaction: transactionConnection.db?.databaseName,
       independent: independentConnection.db?.databaseName,
+      readOnlyTransaction: 'committed',
       worker: 'disabled',
     });
     await app.init();
@@ -751,12 +762,16 @@ describe('Classroom Review Pack (e2e)', () => {
       content: { codeText: 'return 1;', language: 'typescript' },
       status: SubmissionStatus.Submitted,
     });
+    const lockOwner = `review-pack-race:${scope}`;
     const job = await aiFeedbackJobModel.create({
       submissionId: submission._id,
       classroomTaskId,
       taskId,
       studentId,
       status: AiFeedbackJobStatus.Running,
+      attempts: 1,
+      lockOwner,
+      lockedAt: new Date(),
     });
     const feedbackCollection = feedbackModel.collection.name;
     const jobCollection = aiFeedbackJobModel.collection.name;
@@ -877,50 +892,43 @@ describe('Classroom Review Pack (e2e)', () => {
           )?.count ?? 0;
         expect(readErrorCount).toBe(0);
 
-        // Simulate the Worker's existing write order while the HTTP read is paused.
-        const _id = new Types.ObjectId();
-        const now = new Date();
-        const insert = await runAuthTestWrite(
-          db,
-          {
-            insert: feedbackCollection,
-            documents: [
-              {
-                _id,
-                ...errorFilter,
-                type: FeedbackType.Bug,
-                message: 'AI review completes during the review-pack read',
-                tags: ['logic', 'correctness'],
-                createdAt: now,
-                updatedAt: now,
-              },
-            ],
-          },
-          { collection: feedbackCollection, filter: { _id } },
-          5000,
-        );
-        expect(insert.n).toBe(1);
-        const complete = await runAuthTestWrite(
-          db,
-          {
-            update: jobCollection,
-            updates: [
-              {
-                q: { _id: job._id, status: AiFeedbackJobStatus.Running },
-                u: {
-                  $set: {
-                    status: AiFeedbackJobStatus.Succeeded,
-                    updatedAt: new Date(),
-                  },
+        // Commit the claimed Job and its feedback together while the read is paused.
+        await runClassroomTaskTransaction(
+          transactionConnection,
+          async (transaction) => {
+            const { session } = transaction;
+            const complete = await transaction
+              .model(aiFeedbackJobModel)
+              .updateOne(
+                {
+                  _id: job._id,
+                  status: AiFeedbackJobStatus.Running,
+                  attempts: job.attempts,
+                  lockOwner,
                 },
-              },
-            ],
+                {
+                  $set: { status: AiFeedbackJobStatus.Succeeded },
+                  $unset: { lockedAt: 1, lockOwner: 1 },
+                },
+                { session, maxTimeMS: transaction.remainingMs() },
+              )
+              .exec();
+            expect(complete.matchedCount).toBe(1);
+            expect(complete.modifiedCount).toBe(1);
+            const inserted = await transaction.model(feedbackModel).insertMany(
+              [
+                {
+                  ...errorFilter,
+                  type: FeedbackType.Bug,
+                  message: 'AI review completes during the review-pack read',
+                  tags: ['logic', 'correctness'],
+                },
+              ],
+              { session, ordered: true },
+            );
+            expect(inserted).toHaveLength(1);
           },
-          { collection: jobCollection, filter: { _id: job._id } },
-          5000,
         );
-        expect(complete.n).toBe(1);
-        expect(complete.nModified).toBe(1);
       } finally {
         releaseFacet();
         await Promise.allSettled([pending]);

@@ -411,18 +411,20 @@ Global SoT 只保留理解跨 Service workflow 必需的稳定不变量，不追
 - Service: `backend/src/modules/learning-tasks/ai-feedback/services/ai-feedback-processor.service.ts`
 - Domain / Responsibility: 原子认领 Job、构造分析上下文、经护栏调用 Provider、收敛并持久化反馈、更新执行终态与重试时间。
 - Upstream: `AiFeedbackWorker` 与受诊断门禁保护的手工 process-once，共用处理链。
-- Downstream / Dependencies: `AiFeedbackJobModel`、`SubmissionModel`、`ClassroomTaskModel`、`FeedbackModel`、`AI_FEEDBACK_PROVIDER_TOKEN`、`AiFeedbackGuardsService`、`ConfigService`、`feedback-item-compactor`、`AiContextReaderService`。
+- Downstream / Dependencies: `AiFeedbackJobModel`、`SubmissionModel`、`ClassroomTaskModel`、`FeedbackModel`、`classroomTaskTransaction`、`AI_FEEDBACK_PROVIDER_TOKEN`、`AiFeedbackGuardsService`、`ConfigService`、`feedback-item-compactor`、`AiContextReaderService`。
 - Consistency / State / Idempotency:
   - findOneAndUpdate 按 createdAt 原子 claim，同时检查 PENDING/FAILED、调度到期、budgetVersion=1、attempts < maxAttempts 和既有锁条件，在同一次写入增加 attempts 并设 RUNNING。attempts 表示认领次数，本地限流也消耗机会；失败更新不再递增。所有认领后 Job 记录和终态写入匹配 ID、RUNNING、本次 attempts 及 lockOwner。
   - 每次处理由 AiContextReaderService 只读取所属实例快照指定 ZIP；不回查当前模板、不向数据库保存正文副本。资料读取在 Provider 及 stub 之前，失败安全终止、不调用模型。参考文件以引用序号/条目来源标记为分析数据，与发布要求、评分参考、学生源码和说明/声明分区；参考实现不是唯一合法答案或运行证据，不要求复述全文/内部路径。完整 messages 仍进入 Provider 的现有字节预算。
   - 读取 Submission 后核对 Job/Submission/实例归属，读取所属实例的固定 title/description/rubric 形成 AiSubmissionAnalysisContext，codeText/language/submissionNote/meta.aiUsageDeclaration 完整来自当前 Submission，说明与源码分别标记且不能覆盖教师要求；旧实例策略字段不拒绝既有可执行 Job。调用 Provider 后在写库前以内存 compactor 收敛，同类问题合并，存在 ERROR/WARN 时去掉独立低价值 INFO。compactor 保留展示文本的分段和有效缩进，另用规范化文本比较去重；不凭空改写肯定正文或补写通用建议。
   - 可选诊断 handle 由 Provider 经当前 execution 回调传入，仅保留于本次 Processor 局部变量，不进入模型请求、headers 或数据库。Processor 记录 Job/claim 标识、是否到达 compactor 及其 input/output；失败或 claim 失效未到达时如实标记，未产生的阶段值为 null，合法空结果仍为 `[]`。合并输出是持久化前候选，不证明已经落库；独立 Provider 调用不伪造 Processor 合并文件。
   - Job/Processor 是唯一重试负责人：仅本地/上游限流、上游 5xx 和超时可在剩余机会内 FAILED，并按既有 30 秒起指数退避（最大 10 分钟）；其他不可重试失败和耗尽次数直接 DEAD，清理锁与调度时间，保留安全失败代码。数据库记录/反馈/终态写入异常不能成为再次调用模型的理由。
+  - 结果事务先按同一认领条件更新 Job，再按 `submissionId/source/type/severity/message` 查询已有反馈并批量插入缺项。已有同键记录保留原内容和时间戳，教师来源独立；空反馈也经认领校验提交成功。完成态与本次新增反馈共享同一 session，ZIP、Provider、预留、usage、压缩和诊断留在可重试事务之外。
+  - `processOnce` 按已认领或旧 Job 终止计 processed，成功事务确认后计 succeeded，FAILED/DEAD 条件写命中后才计对应终态。失效认领不覆盖后来者。提交回执不明时先用事务工具在原事务内确认；仍不明时，只有主节点多数派读得到同 Job、同 attempts 的 SUCCEEDED 才计成功，否则传播未确认错误，不补写失败或重放。
   - 每次真实 HTTP 前通过回调在当前 claim 持久化预留，以 claimNo 标识，最多三条；包含 provider、model、完整输入 bytes、输出 token 上限、reservedAt、usage=null。预留失败或未匹配禁止 fetch；供应商可能已收到的未知预留不归零、不删除。reportUsage 沿现有 `requests.$.usage` 整对象写入实报及可选数值明细，落库先于反馈处理；数据库不保存 prompt/源码副本/完整请求正文/原始响应/密钥/请求头。可选本地诊断副作用见 [Provider Card B](#provider-card-b)。
   - 缺当前版本的 PENDING/FAILED/RUNNING Job 原子终止为 LEGACY_JOB_UNSUPPORTED，不调用 Provider、不补造预算版本或用量；旧 SUCCEEDED/DEAD 只读保持。无迁移、回填、RUNNING 崩溃恢复、租约接管或自动重放。
 - Isolation: 沿 Job 的 classroomTaskId 进入限流桶；成功条件写回校验认领者，不把 Worker 防重入当成 Job 跨入口互斥。
 - Side Effects: 外部 Provider 调用、反馈写库、Job 状态/锁/错误/重试时间更新；Provider 调用及反馈持久化使用的信号量在 finally 释放。
-- Important Performance / Recovery: `insertMany(ordered:false)` 批量写反馈并容忍重复键；Submission 缺失作为 INTERNAL_ERROR 终止，实例关联/资格失败不调用 Provider 或反复重试。Provider BAD_RESPONSE 进入失败处理，重复反馈不单独中断 Job；compactor 不追加模型调用。
+- Important Performance / Recovery: 事务内按完整键跳过已有项，插入失败按事务结果处理。Submission 缺失作为 INTERNAL_ERROR 终止，实例关联/资格失败不调用 Provider 或反复重试。Provider BAD_RESPONSE 进入现有失败分类。
 - SoT: `backend/src/modules/learning-tasks/ai-feedback/services/ai-feedback-processor.service.ts`；`backend/src/modules/learning-tasks/ai-feedback/lib/feedback-item-compactor.ts`；`backend/src/modules/learning-tasks/ai-feedback/interfaces/ai-feedback-provider.error-codes.ts`。
 - Boundary / Non-responsibility: 不承担产品请求的资源授权或 Worker 调度；反馈主策略来自 prompt/protocol，compactor 是落库前轻量兜底。运行参数见 [Config Matrix](./handoff-backend-config-matrix.md)，Provider 规则见 [Card B](#provider-card-b)。
 

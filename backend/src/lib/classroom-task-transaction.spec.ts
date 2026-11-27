@@ -2,6 +2,7 @@ import { mongo, Mongoose, Schema } from 'mongoose';
 import {
   getClassroomTaskTransactionModel,
   runClassroomTaskTransaction,
+  UnconfirmedClassroomTaskCommitError,
   type ClassroomTaskTransaction,
 } from './classroom-task-transaction';
 
@@ -364,5 +365,37 @@ describe('classroom task transaction deadline', () => {
     expect(session.startTransaction).toHaveBeenCalledTimes(1);
     expect(session.commitTransaction).toHaveBeenCalledTimes(2);
     expect(session.endSession).toHaveBeenCalledTimes(1);
+  });
+
+  it('can distinguish an unconfirmed commit deadline without retrying it', async () => {
+    const { connection, session } = setup();
+    const error = new mongo.MongoServerError({ code: 50 });
+    session.commitTransaction.mockRejectedValueOnce(error);
+    const run = jest.fn().mockResolvedValue('saved');
+
+    const result = runClassroomTaskTransaction(connection, run, {
+      distinguishUnconfirmedCommit: true,
+    });
+    await expect(result).rejects.toBeInstanceOf(
+      UnconfirmedClassroomTaskCommitError,
+    );
+    await expect(result).rejects.toMatchObject({ cause: error });
+    expect(run).toHaveBeenCalledTimes(1);
+    expect(session.commitTransaction).toHaveBeenCalledTimes(1);
+    expect(session.endSession).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps an aborted body error distinct from an unconfirmed commit', async () => {
+    const { connection, session } = setup();
+    const error = new mongo.MongoNetworkError('body reply lost');
+    const run = jest.fn().mockRejectedValueOnce(error);
+
+    await expect(
+      runClassroomTaskTransaction(connection, run, {
+        distinguishUnconfirmedCommit: true,
+      }),
+    ).rejects.toBe(error);
+    expect(session.abortTransaction).toHaveBeenCalledTimes(1);
+    expect(session.commitTransaction).not.toHaveBeenCalled();
   });
 });

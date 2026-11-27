@@ -1,3 +1,12 @@
+import {
+  assertAuthTestConnection,
+  authTestEnvironment,
+  openAuthTestConnection,
+} from './helpers/auth-test-environment';
+import {
+  CLASSROOM_TASK_TRANSACTION_CONNECTION,
+  runClassroomTaskTransaction,
+} from '../src/lib/classroom-task-transaction';
 import { Course } from '../src/modules/courses/schemas/course.schema';
 import { Classroom } from '../src/modules/classrooms/schemas/classroom.schema';
 import { ClassroomTask } from '../src/modules/classrooms/classroom-tasks/schemas/classroom-task.schema';
@@ -8,16 +17,16 @@ import { Server } from 'node:http';
 import { AiFeedbackProcessor } from '../src/modules/learning-tasks/ai-feedback/services/ai-feedback-processor.service';
 import { AiFeedbackWorker } from '../src/modules/learning-tasks/ai-feedback/services/ai-feedback-worker.service';
 import { Test, TestingModule } from '@nestjs/testing';
-import { getModelToken } from '@nestjs/mongoose';
-import { Model, Types } from 'mongoose';
+import { getConnectionToken, getModelToken } from '@nestjs/mongoose';
+import { Connection, Model, Types } from 'mongoose';
 import * as bcrypt from 'bcryptjs';
 import cookieParser from 'cookie-parser';
 import request from 'supertest';
 import { App } from 'supertest/types';
-process.env.AI_FEEDBACK_DEBUG_ENABLED = 'true';
 import { AppModule } from '../src/app.module';
 import { User } from '../src/modules/users/schemas/user.schema';
 import { Session } from '../src/modules/auth/schemas/session.schema';
+import { PasswordResetToken } from '../src/modules/auth/schemas/password-reset-token.schema';
 import { Task } from '../src/modules/learning-tasks/schemas/task.schema';
 import { Submission } from '../src/modules/learning-tasks/schemas/submission.schema';
 import { Feedback } from '../src/modules/learning-tasks/schemas/feedback.schema';
@@ -31,13 +40,129 @@ jest.setTimeout(30000);
 const waitMs = (ms: number) =>
   new Promise((resolve) => setTimeout(resolve, ms));
 
-const ensureMongoUri = () => {
-  if (!process.env.MONGO_URI) {
-    throw new Error(
-      'MONGO_URI is required for learning-tasks ai-feedback e2e tests.',
+afterAll(() => authTestEnvironment.restore());
+
+function objectIds(ids: string[]) {
+  return { $in: ids.filter(Boolean).map((id) => new Types.ObjectId(id)) };
+}
+
+async function assertNoForeignJobs(
+  connection: Connection,
+  jobs: Model<AiFeedbackJob>,
+  ownedSubmissions: string[] = [],
+) {
+  const db = connection.db;
+  if (!db)
+    throw new Error('AI feedback ops fixture connection is unavailable.');
+  const foreignJobs = await db.collection(jobs.collection.name).countDocuments(
+    {
+      submissionId: { $nin: objectIds(ownedSubmissions).$in },
+      status: {
+        $in: [
+          AiFeedbackJobStatus.Pending,
+          AiFeedbackJobStatus.Failed,
+          AiFeedbackJobStatus.Running,
+        ],
+      },
+    },
+    { timeoutMS: 5000, readPreference: 'primary' },
+  );
+  if (foreignJobs !== 0)
+    throw new Error('AI feedback ops E2E found foreign nonterminal Jobs.');
+}
+
+async function assertOpsDatabaseGate(
+  app: INestApplication<App>,
+  independent: Connection,
+  jobs: Model<AiFeedbackJob>,
+  mode: 'manual' | 'stub worker',
+) {
+  const defaultConnection = app.get<Connection>(getConnectionToken());
+  const transactionConnection = app.get<Connection>(
+    getConnectionToken(CLASSROOM_TASK_TRANSACTION_CONNECTION),
+  );
+  for (const connection of [
+    defaultConnection,
+    transactionConnection,
+    independent,
+  ])
+    await assertAuthTestConnection(connection);
+
+  await runClassroomTaskTransaction(transactionConnection, (transaction) =>
+    transaction
+      .model(jobs)
+      .exists({ _id: new Types.ObjectId() })
+      .session(transaction.session)
+      .setOptions(transaction.readOptions())
+      .exec(),
+  );
+  await assertNoForeignJobs(independent, jobs);
+  console.info('AI feedback ops DB gates passed.', {
+    mode,
+    default: defaultConnection.db?.databaseName,
+    transaction: transactionConnection.db?.databaseName,
+    independent: independent.db?.databaseName,
+    readOnlyTransaction: 'committed',
+    foreignNonterminalJobs: 0,
+  });
+}
+
+async function cleanupOpsFixtures(
+  app: INestApplication<App>,
+  connection: Connection,
+  ids: {
+    userIds: string[];
+    submissionIds: string[];
+    classroomTaskId: string;
+    classroomId: string;
+    taskId: string;
+    courseId: string;
+  },
+  mode: 'manual' | 'stub worker',
+) {
+  const db = connection.db;
+  if (!db)
+    throw new Error('AI feedback ops fixture connection is unavailable.');
+  const userIds = objectIds(ids.userIds);
+  const submissionIds = objectIds(ids.submissionIds);
+  const classroomIds = objectIds([ids.classroomId]);
+  const ownedRows = [
+    [Feedback.name, { submissionId: submissionIds }],
+    [AiFeedbackJob.name, { submissionId: submissionIds }],
+    [Submission.name, { _id: submissionIds }],
+    [Enrollment.name, { classroomId: classroomIds }],
+    [ClassroomTask.name, { _id: objectIds([ids.classroomTaskId]) }],
+    [Classroom.name, { _id: classroomIds }],
+    [Task.name, { _id: objectIds([ids.taskId]) }],
+    [Course.name, { _id: objectIds([ids.courseId]) }],
+    [Session.name, { userId: userIds }],
+    [PasswordResetToken.name, { userId: userIds }],
+    [User.name, { _id: userIds }],
+  ] as const;
+  const collection = (modelName: string) =>
+    db.collection(
+      app.get<Model<unknown>>(getModelToken(modelName)).collection.name,
     );
-  }
-};
+  for (const [name, filter] of ownedRows)
+    await collection(name).deleteMany(filter, { timeoutMS: 5000 });
+
+  const residual = await Promise.all(
+    ownedRows.map(async ([name, filter]) => [
+      name,
+      await collection(name).countDocuments(filter, {
+        timeoutMS: 5000,
+        readPreference: 'primary',
+      }),
+    ]),
+  );
+  console.info('AI feedback ops scoped residual:', {
+    mode,
+    ...Object.fromEntries(residual),
+  });
+  expect(residual.map(([, count]) => count)).toEqual(
+    Array<number>(ownedRows.length).fill(0),
+  );
+}
 
 type CreatedTaskResponse = {
   id: string;
@@ -94,24 +219,21 @@ type CommonIssuesReport = {
 
 describe('LearningTasks AI Feedback Ops (e2e) - pipeline & debug gate ON', () => {
   let app: INestApplication<App>;
+  let independentConnection: Connection;
+  let databaseVerified = false;
   let userModel: Model<User>;
-  let sessionModel: Model<Session>;
-  let taskModel: Model<Task>;
-  let submissionModel: Model<Submission>;
-  let feedbackModel: Model<Feedback>;
   let aiFeedbackJobModel: Model<AiFeedbackJob>;
   let teacherAgent: ReturnType<typeof request.agent>;
   let studentAgent: ReturnType<typeof request.agent>;
 
-  let teacherId = '';
-  let studentId = '';
+  const teacherId = new Types.ObjectId().toHexString();
+  const studentId = new Types.ObjectId().toHexString();
+  const adminId = new Types.ObjectId().toHexString();
   let courseId = '',
     classroomId = '',
     classroomTaskId = '';
   let taskId = '';
   let submissionId = '';
-  let previousWorkerEnabled: string | undefined;
-  let previousDebugEnabled: string | undefined;
 
   const teacherEmail = `teacher.ai.${Date.now()}@example.com`;
   const studentEmail = `student.ai.${Date.now()}@example.com`;
@@ -141,13 +263,7 @@ describe('LearningTasks AI Feedback Ops (e2e) - pipeline & debug gate ON', () =>
     items.find((item) => item.id === id);
 
   beforeAll(async () => {
-    ensureMongoUri();
-
-    previousWorkerEnabled = process.env.AI_FEEDBACK_WORKER_ENABLED;
-    process.env.AI_FEEDBACK_WORKER_ENABLED = 'false';
-    previousDebugEnabled = process.env.AI_FEEDBACK_DEBUG_ENABLED;
-    process.env.AI_FEEDBACK_DEBUG_ENABLED = 'true';
-
+    independentConnection = await openAuthTestConnection();
     const moduleFixture: TestingModule = await Test.createTestingModule({
       imports: [AppModule],
     }).compile();
@@ -162,110 +278,63 @@ describe('LearningTasks AI Feedback Ops (e2e) - pipeline & debug gate ON', () =>
       }),
     );
     app.use(cookieParser());
+
+    userModel = app.get(getModelToken(User.name));
+    aiFeedbackJobModel = app.get(getModelToken(AiFeedbackJob.name));
+    await assertOpsDatabaseGate(
+      app,
+      independentConnection,
+      aiFeedbackJobModel,
+      'manual',
+    );
+    databaseVerified = true;
+    app.get(ConfigService).set('AI_FEEDBACK_DEBUG_ENABLED', 'true');
     await app.init();
     app.get(ConfigService).set('LEARNING_TASK_SUBMISSION_COOLDOWN_MS', 0);
 
     teacherAgent = request.agent(app.getHttpServer());
     studentAgent = request.agent(app.getHttpServer());
 
-    userModel = app.get(getModelToken(User.name));
-    sessionModel = app.get(getModelToken(Session.name));
-    taskModel = app.get(getModelToken(Task.name));
-    submissionModel = app.get(getModelToken(Submission.name));
-    feedbackModel = app.get(getModelToken(Feedback.name));
-    aiFeedbackJobModel = app.get(getModelToken(AiFeedbackJob.name));
-    expect(
-      await aiFeedbackJobModel
-        .countDocuments({
-          status: {
-            $in: [
-              AiFeedbackJobStatus.Pending,
-              AiFeedbackJobStatus.Failed,
-              AiFeedbackJobStatus.Running,
-            ],
-          },
-        })
-        .maxTimeMS(10000),
-    ).toBe(0);
-
     const [teacherHash, studentHash] = await Promise.all([
       bcrypt.hash(teacherPassword, 10),
       bcrypt.hash(studentPassword, 10),
     ]);
 
-    const [teacher, student] = await Promise.all([
+    await Promise.all([
       userModel.create({
+        _id: teacherId,
         email: teacherEmail,
         passwordHash: teacherHash,
         roles: ['teacher'],
       }),
       userModel.create({
+        _id: studentId,
         email: studentEmail,
         passwordHash: studentHash,
         roles: ['student'],
       }),
     ]);
-
-    teacherId = teacher._id.toString();
-    studentId = student._id.toString();
   });
 
   afterAll(async () => {
-    if (previousWorkerEnabled === undefined) {
-      delete process.env.AI_FEEDBACK_WORKER_ENABLED;
-    } else {
-      process.env.AI_FEEDBACK_WORKER_ENABLED = previousWorkerEnabled;
+    try {
+      if (databaseVerified)
+        await cleanupOpsFixtures(
+          app,
+          independentConnection,
+          {
+            userIds: [teacherId, studentId, adminId],
+            submissionIds: [submissionId],
+            classroomTaskId,
+            classroomId,
+            taskId,
+            courseId,
+          },
+          'manual',
+        );
+    } finally {
+      await Promise.all([app?.close(), independentConnection?.close()]);
     }
-    if (previousDebugEnabled === undefined) {
-      delete process.env.AI_FEEDBACK_DEBUG_ENABLED;
-    } else {
-      process.env.AI_FEEDBACK_DEBUG_ENABLED = previousDebugEnabled;
-    }
-
-    const cleanup: Promise<unknown>[] = [];
-    const userIds = [teacherId, studentId]
-      .filter(Boolean)
-      .map((id) => new Types.ObjectId(id));
-    const submissionObjectId = submissionId
-      ? new Types.ObjectId(submissionId)
-      : null;
-
-    if (submissionObjectId) {
-      cleanup.push(
-        feedbackModel.deleteMany({ submissionId: submissionObjectId }),
-      );
-      cleanup.push(
-        aiFeedbackJobModel.deleteMany({ submissionId: submissionObjectId }),
-      );
-      cleanup.push(submissionModel.deleteOne({ _id: submissionObjectId }));
-    }
-    if (taskId) {
-      cleanup.push(taskModel.deleteOne({ _id: taskId }));
-    }
-    if (userIds.length > 0) {
-      cleanup.push(sessionModel.deleteMany({ userId: { $in: userIds } }));
-      cleanup.push(userModel.deleteMany({ _id: { $in: userIds } }));
-    }
-
-    for (const operation of cleanup) await operation;
-    if (classroomTaskId)
-      await app
-        .get<Model<ClassroomTask>>(getModelToken(ClassroomTask.name))
-        .deleteOne({ _id: classroomTaskId });
-    if (classroomId) {
-      await app
-        .get<Model<Enrollment>>(getModelToken(Enrollment.name))
-        .deleteMany({ classroomId: new Types.ObjectId(classroomId) });
-      await app
-        .get<Model<Classroom>>(getModelToken(Classroom.name))
-        .deleteOne({ _id: classroomId });
-    }
-    if (courseId)
-      await app
-        .get<Model<Course>>(getModelToken(Course.name))
-        .deleteOne({ _id: courseId });
-
-    await app.close();
   });
 
   it('worker disabled by default, process-once consumes and creates feedback', async () => {
@@ -378,6 +447,9 @@ describe('LearningTasks AI Feedback Ops (e2e) - pipeline & debug gate ON', () =>
       .send({ batchSize: 0 })
       .expect(400);
 
+    await assertNoForeignJobs(independentConnection, aiFeedbackJobModel, [
+      submissionId,
+    ]);
     const processOnce = await teacherAgent
       .post('/api/learning-tasks/ai-feedback/jobs/process-once')
       .send({})
@@ -390,10 +462,12 @@ describe('LearningTasks AI Feedback Ops (e2e) - pipeline & debug gate ON', () =>
       });
 
     const processBody = processOnce.body as ProcessOnceResponse;
-    expect(typeof processBody.processed).toBe('number');
-    expect(typeof processBody.succeeded).toBe('number');
-    expect(typeof processBody.failed).toBe('number');
-    expect(typeof processBody.dead).toBe('number');
+    expect(processBody).toEqual({
+      processed: 1,
+      succeeded: 1,
+      failed: 0,
+      dead: 0,
+    });
 
     const teacherFeedbackPayload = {
       source: 'TEACHER',
@@ -469,30 +543,30 @@ describe('LearningTasks AI Feedback Ops (e2e) - pipeline & debug gate ON', () =>
     const adminPassword = 'AdminPass123!';
     const adminAgent = request.agent(app.getHttpServer());
     const adminHash = await bcrypt.hash(adminPassword, 10);
-    const admin = await userModel.create({
+    await userModel.create({
+      _id: adminId,
       email: adminEmail,
       passwordHash: adminHash,
       roles: ['admin'],
     });
 
-    try {
-      await login(teacherAgent, teacherEmail, teacherPassword);
-      await login(studentAgent, studentEmail, studentPassword);
-      await login(adminAgent, adminEmail, adminPassword);
+    await login(teacherAgent, teacherEmail, teacherPassword);
+    await login(studentAgent, studentEmail, studentPassword);
+    await login(adminAgent, adminEmail, adminPassword);
 
-      await studentAgent
-        .get('/api/learning-tasks/ai-feedback/jobs')
-        .expect(403);
-      await studentAgent
-        .post('/api/learning-tasks/ai-feedback/jobs/process-once')
-        .send({})
-        .expect(403);
+    await studentAgent.get('/api/learning-tasks/ai-feedback/jobs').expect(403);
+    await studentAgent
+      .post('/api/learning-tasks/ai-feedback/jobs/process-once')
+      .send({})
+      .expect(403);
 
-      await teacherAgent
-        .get('/api/learning-tasks/ai-feedback/jobs')
-        .expect(200);
-      await adminAgent.get('/api/learning-tasks/ai-feedback/jobs').expect(200);
-      await teacherAgent
+    await teacherAgent.get('/api/learning-tasks/ai-feedback/jobs').expect(200);
+    await adminAgent.get('/api/learning-tasks/ai-feedback/jobs').expect(200);
+    for (const agent of [teacherAgent, adminAgent]) {
+      await assertNoForeignJobs(independentConnection, aiFeedbackJobModel, [
+        submissionId,
+      ]);
+      await agent
         .post('/api/learning-tasks/ai-feedback/jobs/process-once')
         .send({})
         .expect((res) => {
@@ -502,48 +576,26 @@ describe('LearningTasks AI Feedback Ops (e2e) - pipeline & debug gate ON', () =>
             );
           }
         });
-      await adminAgent
-        .post('/api/learning-tasks/ai-feedback/jobs/process-once')
-        .send({})
-        .expect((res) => {
-          if (![200, 201].includes(res.status)) {
-            throw new Error(
-              `Unexpected process-once status ${res.status}, body=${JSON.stringify(res.body)}`,
-            );
-          }
-        });
-    } finally {
-      await sessionModel.deleteMany({ userId: admin._id });
-      await userModel.deleteOne({ _id: admin._id });
     }
   });
 });
 
 describe('LearningTasks AI Feedback Ops (e2e) - stub worker default loop', () => {
   let app: INestApplication<App>;
+  let independentConnection: Connection;
+  let databaseVerified = false;
   let processOnceSpy: jest.SpiedFunction<AiFeedbackProcessor['processOnce']>;
-  let userModel: Model<User>;
-  let sessionModel: Model<Session>;
-  let taskModel: Model<Task>;
-  let submissionModel: Model<Submission>;
-  let feedbackModel: Model<Feedback>;
   let aiFeedbackJobModel: Model<AiFeedbackJob>;
   let teacherAgent: ReturnType<typeof request.agent>;
   let studentAgent: ReturnType<typeof request.agent>;
 
-  let teacherId = '';
-  let studentId = '';
+  const teacherId = new Types.ObjectId().toHexString();
+  const studentId = new Types.ObjectId().toHexString();
   let courseId = '',
     classroomId = '',
     classroomTaskId = '';
   let taskId = '';
   const submissionIds: string[] = [];
-
-  let previousWorkerEnabled: string | undefined;
-  let previousDebugEnabled: string | undefined;
-  let previousProvider: string | undefined;
-  let previousIntervalMs: string | undefined;
-  let previousBatchSize: string | undefined;
 
   const teacherEmail = `teacher.worker.${Date.now()}@example.com`;
   const studentEmail = `student.worker.${Date.now()}@example.com`;
@@ -587,19 +639,7 @@ describe('LearningTasks AI Feedback Ops (e2e) - stub worker default loop', () =>
   };
 
   beforeAll(async () => {
-    ensureMongoUri();
-
-    previousWorkerEnabled = process.env.AI_FEEDBACK_WORKER_ENABLED;
-    process.env.AI_FEEDBACK_WORKER_ENABLED = 'true';
-    previousDebugEnabled = process.env.AI_FEEDBACK_DEBUG_ENABLED;
-    process.env.AI_FEEDBACK_DEBUG_ENABLED = 'false';
-    previousProvider = process.env.AI_FEEDBACK_PROVIDER;
-    process.env.AI_FEEDBACK_PROVIDER = 'stub';
-    previousIntervalMs = process.env.AI_FEEDBACK_WORKER_INTERVAL_MS;
-    process.env.AI_FEEDBACK_WORKER_INTERVAL_MS = '120';
-    previousBatchSize = process.env.AI_FEEDBACK_WORKER_BATCH_SIZE;
-    process.env.AI_FEEDBACK_WORKER_BATCH_SIZE = '2';
-
+    independentConnection = await openAuthTestConnection();
     const moduleFixture: TestingModule = await Test.createTestingModule({
       imports: [AppModule],
     }).compile();
@@ -614,8 +654,19 @@ describe('LearningTasks AI Feedback Ops (e2e) - stub worker default loop', () =>
       }),
     );
     app.use(cookieParser());
+
+    const userModel = app.get<Model<User>>(getModelToken(User.name));
+    aiFeedbackJobModel = app.get(getModelToken(AiFeedbackJob.name));
+    await assertOpsDatabaseGate(
+      app,
+      independentConnection,
+      aiFeedbackJobModel,
+      'stub worker',
+    );
+    databaseVerified = true;
     // AppModule validates env at import time; set typed worker overrides before init.
     const configService = app.get(ConfigService);
+    configService.set('AI_FEEDBACK_DEBUG_ENABLED', 'false');
     configService.set('AI_FEEDBACK_WORKER_ENABLED', true);
     configService.set('AI_FEEDBACK_WORKER_INTERVAL_MS', 120);
     configService.set('AI_FEEDBACK_WORKER_BATCH_SIZE', 2);
@@ -627,33 +678,25 @@ describe('LearningTasks AI Feedback Ops (e2e) - stub worker default loop', () =>
     teacherAgent = request.agent(app.getHttpServer());
     studentAgent = request.agent(app.getHttpServer());
 
-    userModel = app.get(getModelToken(User.name));
-    sessionModel = app.get(getModelToken(Session.name));
-    taskModel = app.get(getModelToken(Task.name));
-    submissionModel = app.get(getModelToken(Submission.name));
-    feedbackModel = app.get(getModelToken(Feedback.name));
-    aiFeedbackJobModel = app.get(getModelToken(AiFeedbackJob.name));
-
     const [teacherHash, studentHash] = await Promise.all([
       bcrypt.hash(teacherPassword, 10),
       bcrypt.hash(studentPassword, 10),
     ]);
 
-    const [teacher, student] = await Promise.all([
+    await Promise.all([
       userModel.create({
+        _id: teacherId,
         email: teacherEmail,
         passwordHash: teacherHash,
         roles: ['teacher'],
       }),
       userModel.create({
+        _id: studentId,
         email: studentEmail,
         passwordHash: studentHash,
         roles: ['student'],
       }),
     ]);
-
-    teacherId = teacher._id.toString();
-    studentId = student._id.toString();
 
     await login(teacherAgent, teacherEmail, teacherPassword);
     await login(studentAgent, studentEmail, studentPassword);
@@ -700,87 +743,33 @@ describe('LearningTasks AI Feedback Ops (e2e) - stub worker default loop', () =>
   });
 
   afterAll(async () => {
-    // Stop new ticks and drain already started work before fixture/DB cleanup.
-    app.get(AiFeedbackWorker).onModuleDestroy();
-    await Promise.all(
-      processOnceSpy.mock.results
+    try {
+      if (!databaseVerified) return;
+      // Stop new ticks and drain already started work before fixture/DB cleanup.
+      app.get(AiFeedbackWorker).onModuleDestroy();
+      const inFlight = processOnceSpy.mock.results
         .filter((result) => result.type === 'return')
-        .map((result) => result.value),
-    );
-    processOnceSpy.mockRestore();
-    if (previousWorkerEnabled === undefined) {
-      delete process.env.AI_FEEDBACK_WORKER_ENABLED;
-    } else {
-      process.env.AI_FEEDBACK_WORKER_ENABLED = previousWorkerEnabled;
-    }
-    if (previousDebugEnabled === undefined) {
-      delete process.env.AI_FEEDBACK_DEBUG_ENABLED;
-    } else {
-      process.env.AI_FEEDBACK_DEBUG_ENABLED = previousDebugEnabled;
-    }
-    if (previousProvider === undefined) {
-      delete process.env.AI_FEEDBACK_PROVIDER;
-    } else {
-      process.env.AI_FEEDBACK_PROVIDER = previousProvider;
-    }
-    if (previousIntervalMs === undefined) {
-      delete process.env.AI_FEEDBACK_WORKER_INTERVAL_MS;
-    } else {
-      process.env.AI_FEEDBACK_WORKER_INTERVAL_MS = previousIntervalMs;
-    }
-    if (previousBatchSize === undefined) {
-      delete process.env.AI_FEEDBACK_WORKER_BATCH_SIZE;
-    } else {
-      process.env.AI_FEEDBACK_WORKER_BATCH_SIZE = previousBatchSize;
+        .map((result) => result.value);
+      const drained = await Promise.allSettled(inFlight);
+      processOnceSpy.mockRestore();
+      await cleanupOpsFixtures(
+        app,
+        independentConnection,
+        {
+          userIds: [teacherId, studentId],
+          submissionIds,
+          classroomTaskId,
+          classroomId,
+          taskId,
+          courseId,
+        },
+        'stub worker',
+      );
+      expect(drained.every(({ status }) => status === 'fulfilled')).toBe(true);
+    } finally {
+      await Promise.all([app?.close(), independentConnection?.close()]);
     }
 
-    const cleanup: Promise<unknown>[] = [];
-    const submissionObjectIds = submissionIds.map(
-      (id) => new Types.ObjectId(id),
-    );
-    if (submissionObjectIds.length > 0) {
-      cleanup.push(
-        feedbackModel.deleteMany({
-          submissionId: { $in: submissionObjectIds },
-        }),
-      );
-      cleanup.push(
-        aiFeedbackJobModel.deleteMany({
-          submissionId: { $in: submissionObjectIds },
-        }),
-      );
-      cleanup.push(
-        submissionModel.deleteMany({ _id: { $in: submissionObjectIds } }),
-      );
-    }
-    if (taskId) {
-      cleanup.push(taskModel.deleteOne({ _id: taskId }));
-    }
-    const userIds = [teacherId, studentId]
-      .filter(Boolean)
-      .map((id) => new Types.ObjectId(id));
-    if (userIds.length > 0) {
-      cleanup.push(sessionModel.deleteMany({ userId: { $in: userIds } }));
-      cleanup.push(userModel.deleteMany({ _id: { $in: userIds } }));
-    }
-    for (const operation of cleanup) await operation;
-    if (classroomTaskId)
-      await app
-        .get<Model<ClassroomTask>>(getModelToken(ClassroomTask.name))
-        .deleteOne({ _id: classroomTaskId });
-    if (classroomId) {
-      await app
-        .get<Model<Enrollment>>(getModelToken(Enrollment.name))
-        .deleteMany({ classroomId: new Types.ObjectId(classroomId) });
-      await app
-        .get<Model<Classroom>>(getModelToken(Classroom.name))
-        .deleteOne({ _id: classroomId });
-    }
-    if (courseId)
-      await app
-        .get<Model<Course>>(getModelToken(Course.name))
-        .deleteOne({ _id: courseId });
-    await app.close();
     expect(aiFeedbackJobModel.db.readyState).toBe(0);
     const httpServer: unknown = app.getHttpServer();
     expect(httpServer).toBeInstanceOf(Server);
@@ -811,6 +800,11 @@ describe('LearningTasks AI Feedback Ops (e2e) - stub worker default loop', () =>
       .aiFeedbackStatus;
     expect(detailBeforeStatus).toBe('NOT_REQUESTED');
 
+    await assertNoForeignJobs(
+      independentConnection,
+      aiFeedbackJobModel,
+      submissionIds,
+    );
     const requestResult = await studentAgent
       .post(
         `/api/learning-tasks/submissions/${submissionId}/ai-feedback/request`,

@@ -6,8 +6,8 @@ import type { AiContextRef } from '../src/modules/learning-tasks/ai-context/ai-c
 import { INestApplication, ValidationPipe } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { Test, TestingModule } from '@nestjs/testing';
-import { getModelToken } from '@nestjs/mongoose';
-import { Model, Types } from 'mongoose';
+import { getConnectionToken, getModelToken } from '@nestjs/mongoose';
+import mongoose, { Connection, Model, mongo, Types } from 'mongoose';
 import * as bcrypt from 'bcryptjs';
 import cookieParser from 'cookie-parser';
 import http from 'http';
@@ -19,11 +19,14 @@ import { ClassroomTask } from '../src/modules/classrooms/classroom-tasks/schemas
 import { Enrollment } from '../src/modules/classrooms/enrollments/schemas/enrollment.schema';
 import { User } from '../src/modules/users/schemas/user.schema';
 import { Session } from '../src/modules/auth/schemas/session.schema';
+import { PasswordResetToken } from '../src/modules/auth/schemas/password-reset-token.schema';
 import { Task } from '../src/modules/learning-tasks/schemas/task.schema';
 import { Submission } from '../src/modules/learning-tasks/schemas/submission.schema';
 import {
   Feedback,
+  FeedbackSeverity,
   FeedbackSource,
+  FeedbackType,
 } from '../src/modules/learning-tasks/schemas/feedback.schema';
 import { AiFeedbackProcessor } from '../src/modules/learning-tasks/ai-feedback/services/ai-feedback-processor.service';
 import { LearningTasksService } from '../src/modules/learning-tasks/services/learning-tasks.service';
@@ -32,6 +35,13 @@ import {
   AiFeedbackJobStatus,
 } from '../src/modules/learning-tasks/ai-feedback/schemas/ai-feedback-job.schema';
 import { AiReviewSummary } from '../src/modules/learning-tasks/ai-feedback/lib/ai-review-summary';
+import type { FeedbackResponseDto } from '../src/modules/learning-tasks/dto/feedback-response.dto';
+import { isLocalSingleNodeReplicaSetPrimary } from '../src/config/local-mongo-replica-set';
+import {
+  CLASSROOM_TASK_TRANSACTION_CONNECTION,
+  getClassroomTaskTransactionModel,
+  runClassroomTaskTransaction,
+} from '../src/lib/classroom-task-transaction';
 import type * as AppModuleExports from '../src/app.module';
 import {
   assertLocalStandardTestAuthentication,
@@ -65,6 +75,23 @@ type ProcessOnceResponse = {
   failed: number;
   dead: number;
 };
+
+async function waitForResultBarrier<T>(promise: Promise<T>, label: string) {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(
+          () => reject(new Error('Timed out: ' + label)),
+          5000,
+        );
+      }),
+    ]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
 
 type BailianMessage = {
   role?: string;
@@ -201,11 +228,13 @@ const startMockBailian = () =>
 describe('LearningTasks AI Feedback Bailian Context (e2e)', () => {
   let app: INestApplication<App>;
   let userModel: Model<User>;
-  let sessionModel: Model<Session>;
   let taskModel: Model<Task>;
   let submissionModel: Model<Submission>;
   let feedbackModel: Model<Feedback>;
   let aiFeedbackJobModel: Model<AiFeedbackJob>;
+  let transactionConnection: Connection;
+  let independentConnection: Connection;
+  let databaseVerified = false;
   let aiFeedbackProcessor: AiFeedbackProcessor;
   let teacherAgent: ReturnType<typeof request.agent>;
   let studentAgent: ReturnType<typeof request.agent>;
@@ -484,6 +513,87 @@ describe('LearningTasks AI Feedback Bailian Context (e2e)', () => {
     );
   };
 
+  const holdResultInsert = (
+    submission: Types.ObjectId,
+    message: string,
+    abort: boolean,
+  ) => {
+    let signalReached!: () => void;
+    let release!: () => void;
+    const reached = new Promise<void>((resolve) => {
+      signalReached = resolve;
+    });
+    const released = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const models = [
+      feedbackModel,
+      getClassroomTaskTransactionModel(transactionConnection, feedbackModel),
+    ];
+    const spies = models.map(({ collection, db }) => {
+      const database = db.db;
+      if (!database) throw new Error('Missing feedback write database');
+      const insertMany = collection.insertMany.bind(
+        collection,
+      ) as typeof collection.insertMany;
+      return jest
+        .spyOn(collection, 'insertMany')
+        .mockImplementation(async (docs, options) => {
+          if (
+            !docs.some(
+              (doc) =>
+                submission.equals(doc.submissionId as Types.ObjectId) &&
+                doc.message === message,
+            )
+          ) {
+            return insertMany(docs, options);
+          }
+          const write = await insertMany(docs, options).then(
+            (result) => ({ result }) as const,
+            (error: unknown) => {
+              // Before the fix an unordered write could insert the new row and
+              // report the historical duplicate in the same response.
+              if (
+                options?.session ||
+                !(error instanceof mongo.MongoServerError) ||
+                error.code !== 11000
+              ) {
+                throw error;
+              }
+              return { error } as const;
+            },
+          );
+          if (
+            !(await database.collection(collection.name).findOne(
+              {
+                submissionId: submission,
+                source: FeedbackSource.AI,
+                message,
+              },
+              {
+                session: options?.session,
+                maxTimeMS: 3000,
+                readPreference: 'primary',
+              },
+            ))
+          ) {
+            throw new Error('No new feedback was written at the barrier');
+          }
+          signalReached();
+          await waitForResultBarrier(released, 'release the result write');
+          if (abort)
+            throw new Error('Controlled non-transient result write failure');
+          if ('error' in write) throw write.error;
+          return write.result;
+        });
+    });
+    return {
+      reached: waitForResultBarrier(reached, 'new feedback write'),
+      release,
+      restore: () => spies.forEach((spy) => spy.mockRestore()),
+    };
+  };
+
   beforeAll(async () => {
     contextRoot = await mkdtemp(resolve(tmpdir(), 'eduforge-context-http-'));
     await mkdir(resolve(contextRoot, 'book'));
@@ -562,7 +672,6 @@ describe('LearningTasks AI Feedback Bailian Context (e2e)', () => {
         }),
       );
       app.use(cookieParser());
-      await app.init();
       const configService = app.get(ConfigService);
       expect(configService.get<string>('AI_FEEDBACK_PROVIDER')).toBe('bailian');
       expect(configService.get<string>('BAILIAN_BASE_URL')).toBe(mock.url);
@@ -580,31 +689,73 @@ describe('LearningTasks AI Feedback Bailian Context (e2e)', () => {
         .timeout({ response: 5000, deadline: 10000 });
 
       userModel = app.get(getModelToken(User.name));
-      sessionModel = app.get(getModelToken(Session.name));
       taskModel = app.get(getModelToken(Task.name));
       submissionModel = app.get(getModelToken(Submission.name));
       feedbackModel = app.get(getModelToken(Feedback.name));
       aiFeedbackJobModel = app.get(getModelToken(AiFeedbackJob.name));
       aiFeedbackProcessor = app.get(AiFeedbackProcessor);
-      expect(process.env.EDUFORGE_DATABASE_PURPOSE).toBe('standard_test');
-      expect(userModel.db.name).toBe('eduforge_test');
-      userModel.db.set('maxTimeMS', 10000);
-      const database = userModel.db.db;
-      if (!database) throw new Error('Missing connected test database');
-      const auth = await database.command(
-        { connectionStatus: 1, showPrivileges: false },
-        { signal: AbortSignal.timeout(5000), readPreference: 'primary' },
+      transactionConnection = app.get<Connection>(
+        getConnectionToken(CLASSROOM_TASK_TRANSACTION_CONNECTION),
       );
-      assertLocalStandardTestAuthentication({
+      const mongoUri = configService.getOrThrow<string>('MONGO_URI');
+      const environment = {
         nodeEnv: process.env.NODE_ENV,
         purpose: process.env.EDUFORGE_DATABASE_PURPOSE,
-        mongoUri: configService.get<string>('MONGO_URI'),
-        databaseName: database.databaseName,
-        connectedHost: userModel.db.host,
-        authInfo: auth.authInfo,
+        mongoUri,
+      };
+      assertLocalStandardTestEnvironment(environment);
+      independentConnection = mongoose.createConnection(mongoUri, {
+        autoCreate: false,
+        autoIndex: false,
+        readPreference: 'primary',
+        serverSelectionTimeoutMS: 5000,
+        connectTimeoutMS: 5000,
+        socketTimeoutMS: 5000,
+        waitQueueTimeoutMS: 5000,
       });
+      await independentConnection.asPromise();
+      for (const connection of [
+        userModel.db,
+        transactionConnection,
+        independentConnection,
+      ]) {
+        const database = connection.db;
+        if (!database) throw new Error('Missing connected test database');
+        const options = {
+          signal: AbortSignal.timeout(5000),
+          readPreference: 'primary',
+        } as const;
+        const auth = await database.command(
+          { connectionStatus: 1, showPrivileges: false },
+          options,
+        );
+        assertLocalStandardTestAuthentication({
+          ...environment,
+          databaseName: database.databaseName,
+          connectedHost: connection.host,
+          authInfo: auth.authInfo,
+        });
+        const seed = connection.getClient().options.hosts[0]?.toString() ?? '';
+        const hello: unknown = await database.command({ hello: 1 }, options);
+        expect(isLocalSingleNodeReplicaSetPrimary(hello, seed)).toBe(true);
+      }
+      await runClassroomTaskTransaction(
+        transactionConnection,
+        async (transaction) => {
+          await transaction
+            .model(aiFeedbackJobModel)
+            .findOne({ _id: new Types.ObjectId() })
+            .session(transaction.session)
+            .setOptions(transaction.readOptions())
+            .lean()
+            .exec();
+        },
+      );
+      databaseVerified = true;
+      userModel.db.set('maxTimeMS', 10000);
+      await app.init();
       console.info(
-        'Bailian context E2E gate: standard_test / eduforge_test; envFiles=.env.test; local root@admin verified; local mock / debug=true',
+        'Bailian context E2E gate: default, transaction and independent connections use standard_test / eduforge_test, local writable rs0 and root@admin; read-only transaction committed; envFiles=.env.test; worker=false; local mock',
       );
       expect(
         await aiFeedbackJobModel.countDocuments({
@@ -738,143 +889,296 @@ describe('LearningTasks AI Feedback Bailian Context (e2e)', () => {
     }
 
     try {
-      if (userModel) {
-        const cleanup: Promise<unknown>[] = [];
-        for (const ownedId of submissionIds) {
-          const submissionObjectId = new Types.ObjectId(ownedId);
-          cleanup.push(
-            feedbackModel.deleteMany({ submissionId: submissionObjectId }),
-          );
-          cleanup.push(
-            aiFeedbackJobModel.deleteMany({ submissionId: submissionObjectId }),
-          );
-          cleanup.push(submissionModel.deleteOne({ _id: submissionObjectId }));
-        }
-        if (contextTaskIds.length) {
-          await taskModel.deleteMany({ _id: { $in: contextTaskIds } });
-          expect(
-            await taskModel.countDocuments({ _id: { $in: contextTaskIds } }),
-          ).toBe(0);
-        }
-        if (taskId) {
-          cleanup.push(taskModel.deleteOne({ _id: taskId }));
-        }
+      if (databaseVerified) {
+        const database = independentConnection.db;
+        if (!database) throw new Error('Missing cleanup verification database');
+        const emails = { $in: [teacherEmail, studentEmail] };
         const users = await userModel
-          .find({ email: { $in: [teacherEmail, studentEmail] } })
+          .find({ email: emails })
           .select('_id')
           .lean<Array<{ _id: Types.ObjectId }>>()
           .exec();
-        const userIds = users.map((user) => user._id);
-        if (userIds.length > 0) {
-          cleanup.push(sessionModel.deleteMany({ userId: { $in: userIds } }));
-          cleanup.push(userModel.deleteMany({ _id: { $in: userIds } }));
-        }
-        for (const operation of cleanup) await operation;
-        await app
-          .get<Model<ClassroomTask>>(getModelToken(ClassroomTask.name))
-          .deleteMany({ _id: { $in: instanceIds } });
-        await app
-          .get<Model<Enrollment>>(getModelToken(Enrollment.name))
-          .deleteMany({
-            classroomId: {
-              $in: classroomIds.map((id) => new Types.ObjectId(id)),
-            },
-          });
-        await app
-          .get<Model<Classroom>>(getModelToken(Classroom.name))
-          .deleteMany({ _id: { $in: classroomIds } });
-        if (courseId)
-          await app
-            .get<Model<Course>>(getModelToken(Course.name))
-            .deleteOne({ _id: courseId });
-        if (submissionId) {
-          expect(await feedbackModel.countDocuments({ submissionId })).toBe(0);
+        const owned = (ids: string[]) => ({
+          $in: ids.filter(Boolean).map((id) => new Types.ObjectId(id)),
+        });
+        const ownedSubmissions = owned(submissionIds);
+        const ownedClassrooms = owned(classroomIds);
+        const ownedUsers = { $in: users.map((user) => user._id) };
+        const scopes: Array<[string, Record<string, unknown>]> = [
+          [Feedback.name, { submissionId: ownedSubmissions }],
+          [AiFeedbackJob.name, { submissionId: ownedSubmissions }],
+          [Submission.name, { _id: ownedSubmissions }],
+          [ClassroomTask.name, { _id: owned(instanceIds) }],
+          [Task.name, { _id: owned([taskId, ...contextTaskIds]) }],
+          [Enrollment.name, { classroomId: ownedClassrooms }],
+          [Classroom.name, { _id: ownedClassrooms }],
+          [Course.name, { _id: owned([courseId]) }],
+          [Session.name, { userId: ownedUsers }],
+          [PasswordResetToken.name, { userId: ownedUsers }],
+          [User.name, { email: emails }],
+        ];
+        for (const [name, filter] of scopes) {
+          const model = app.get<Model<unknown>>(getModelToken(name));
+          await model.deleteMany(filter).exec();
           expect(
-            await aiFeedbackJobModel.countDocuments({ submissionId }),
-          ).toBe(0);
-          expect(
-            await submissionModel.countDocuments({ _id: submissionId }),
-          ).toBe(0);
-        }
-        if (taskId)
-          expect(await taskModel.countDocuments({ _id: taskId })).toBe(0);
-        expect(
-          await userModel.countDocuments({
-            email: { $in: [teacherEmail, studentEmail] },
-          }),
-        ).toBe(0);
-        expect(
-          await sessionModel.countDocuments({ userId: { $in: userIds } }),
-        ).toBe(0);
-        const ownedIds = submissionIds.map((id) => new Types.ObjectId(id));
-        expect(
-          await aiFeedbackJobModel.countDocuments({
-            submissionId: { $in: ownedIds },
-          }),
-        ).toBe(0);
-        expect(
-          await feedbackModel.countDocuments({
-            submissionId: { $in: ownedIds },
-          }),
-        ).toBe(0);
-        expect(
-          await submissionModel.countDocuments({ _id: { $in: ownedIds } }),
-        ).toBe(0);
-        for (const [name, filter] of [
-          [
-            ClassroomTask.name,
-            { _id: { $in: instanceIds.map((id) => new Types.ObjectId(id)) } },
-          ],
-          [
-            Enrollment.name,
-            {
-              classroomId: {
-                $in: classroomIds.map((id) => new Types.ObjectId(id)),
-              },
-            },
-          ],
-          [
-            Classroom.name,
-            { _id: { $in: classroomIds.map((id) => new Types.ObjectId(id)) } },
-          ],
-          [Course.name, { _id: new Types.ObjectId(courseId) }],
-        ] as Array<[string, Record<string, unknown>]>) {
-          expect(
-            await app
-              .get<Model<unknown>>(getModelToken(name))
-              .countDocuments(filter),
+            await database
+              .collection(model.collection.name)
+              .countDocuments(filter, {
+                maxTimeMS: 4000,
+                readPreference: 'primary',
+              }),
           ).toBe(0);
         }
-        console.info('Fixture cleanup verified: ' + fixtureNamespace);
+        console.info(
+          'Fixture cleanup independently verified: ' + fixtureNamespace,
+        );
       }
     } finally {
-      if (contextRoot) {
-        await rm(contextRoot, { recursive: true, force: true });
-        await expect(stat(contextRoot)).rejects.toMatchObject({
-          code: 'ENOENT',
-        });
-      }
       try {
-        if (app) {
-          await app.close();
-          if (userModel) expect(userModel.db.readyState).toBe(0);
-          const server = app.getHttpServer();
-          expect(server).toBeInstanceOf(http.Server);
-          if (server instanceof http.Server)
-            expect(server.listening).toBe(false);
+        if (contextRoot) {
+          await rm(contextRoot, { recursive: true, force: true });
+          await expect(stat(contextRoot)).rejects.toMatchObject({
+            code: 'ENOENT',
+          });
         }
       } finally {
-        if (mockServer?.listening) {
-          mockServer.closeAllConnections();
-          await new Promise<void>((resolve) =>
-            mockServer.close(() => resolve()),
-          );
-          expect(mockServer.listening).toBe(false);
-          console.info('A2 app/DB/mock closed; scoped residuals zero');
+        try {
+          if (app) {
+            await app.close();
+            if (userModel) expect(userModel.db.readyState).toBe(0);
+            if (transactionConnection)
+              expect(transactionConnection.readyState).toBe(0);
+            const server = app.getHttpServer();
+            expect(server).toBeInstanceOf(http.Server);
+            if (server instanceof http.Server)
+              expect(server.listening).toBe(false);
+          }
+        } finally {
+          try {
+            if (independentConnection) {
+              await independentConnection.close();
+              expect(independentConnection.readyState).toBe(0);
+            }
+          } finally {
+            if (mockServer?.listening) {
+              mockServer.closeAllConnections();
+              await new Promise<void>((resolve) =>
+                mockServer.close(() => resolve()),
+              );
+              expect(mockServer.listening).toBe(false);
+              console.info('A2 app/DB/mock closed');
+            }
+          }
         }
       }
     }
   });
+
+  it.each([
+    ['commits', false],
+    ['rolls back', true],
+  ] as const)(
+    '08 %s Job success and new AI feedback atomically',
+    async (_outcome, abort) => {
+      clearCapturedPayloads();
+      const duplicate = {
+        type: FeedbackType.Bug,
+        severity: FeedbackSeverity.Warn,
+        message: 'Existing boundary case message',
+      };
+      const novel = {
+        type: FeedbackType.Design,
+        severity: FeedbackSeverity.Error,
+        message: 'Separate the parser from the renderer',
+        tags: ['api-design'],
+      };
+      setResponses([
+        {
+          usage: validUsage,
+          content: JSON.stringify({
+            items: [
+              {
+                ...duplicate,
+                suggestion: 'New draft suggestion',
+                tags: ['correctness'],
+                scoreHint: 31,
+              },
+              novel,
+            ],
+          }),
+        },
+      ]);
+      const id = await submitAndRequest();
+      const submission = new Types.ObjectId(id);
+      const historical = await feedbackModel.create({
+        submissionId: submission,
+        source: FeedbackSource.AI,
+        ...duplicate,
+        suggestion: 'Keep historical suggestion',
+        tags: ['edge-cases'],
+        scoreHint: 72,
+      });
+      const teacher = await feedbackModel.create({
+        submissionId: submission,
+        source: FeedbackSource.Teacher,
+        ...novel,
+      });
+      const database = independentConnection.db;
+      if (!database) throw new Error('Missing result verification database');
+      const jobs = database.collection<AiFeedbackJob>(
+        aiFeedbackJobModel.collection.name,
+      );
+      const feedback = database.collection<Feedback>(
+        feedbackModel.collection.name,
+      );
+      const options = { maxTimeMS: 4000, readPreference: 'primary' } as const;
+      const claim = await jobs.findOne({ submissionId: submission }, options);
+      if (!claim) throw new Error('Missing owned AI Job');
+      const originalRows = await feedback
+        .find({ submissionId: submission }, options)
+        .toArray();
+      const history = originalRows.find((row) =>
+        row._id.equals(historical._id),
+      );
+      const teacherHistory = originalRows.find((row) =>
+        row._id.equals(teacher._id),
+      );
+      expect(history).toBeDefined();
+      expect(teacherHistory).toBeDefined();
+      // Exercise removal of stale failure fields from a successful claim.
+      await aiFeedbackJobModel.updateOne(
+        { _id: claim._id },
+        {
+          $set: {
+            lastError: 'Previous failure',
+            failureCode: 'INTERNAL_ERROR',
+          },
+        },
+      );
+
+      const readEvidence = async (
+        phase: 'paused' | 'committed' | 'rolled-back',
+      ) => {
+        const [job, rows, response] = await Promise.all([
+          jobs.findOne({ _id: claim._id }, options),
+          feedback.find({ submissionId: submission }, options).toArray(),
+          studentAgent
+            .get('/api/learning-tasks/submissions/' + id + '/feedback')
+            .expect(200),
+        ]);
+        const publicRows = response.body as FeedbackResponseDto[];
+        const newCount = rows.filter(
+          (row) =>
+            row.source === FeedbackSource.AI && row.message === novel.message,
+        ).length;
+        const reported = job?.requests?.filter(
+          (item) => item.usage !== null,
+        ).length;
+        console.info('08 result evidence', {
+          phase,
+          submissionId: id,
+          jobId: claim._id.toString(),
+          status: job?.status,
+          historicalAI: rows.filter((row) => row._id.equals(historical._id))
+            .length,
+          newAI: newCount,
+          httpFeedbackStatus: response.status,
+          httpHistoricalAI: publicRows.filter(
+            (row) => row.id === historical._id.toString(),
+          ).length,
+          httpNewAI: publicRows.filter(
+            (row) =>
+              row.source === FeedbackSource.AI && row.message === novel.message,
+          ).length,
+          modelHttp: getCapturedPayloads().length,
+          reserved: job?.requests?.length,
+          reported,
+          attempts: job?.attempts,
+        });
+        expect(rows.find((row) => row._id.equals(historical._id))).toEqual(
+          history,
+        );
+        expect(rows.find((row) => row._id.equals(teacher._id))).toEqual(
+          teacherHistory,
+        );
+        expect(publicRows.map((row) => row.id).sort()).toEqual(
+          rows.map((row) => row._id.toString()).sort(),
+        );
+        expect(getCapturedPayloads()).toHaveLength(1);
+        expect(job?.attempts).toBe(1);
+        expect(job?.requests).toHaveLength(1);
+        expect(job?.requests?.[0]).toMatchObject({
+          claimNo: 1,
+          usage: expectedValidRequestUsage,
+        });
+        return { job, rows, newCount };
+      };
+
+      const barrier = holdResultInsert(submission, novel.message, abort);
+      const processing = processOwned(1);
+      void processing.catch(() => undefined);
+      let paused: Awaited<ReturnType<typeof readEvidence>>;
+      let processed: ProcessOnceResponse;
+      try {
+        let reached = false;
+        await Promise.race([
+          barrier.reached.then(() => {
+            reached = true;
+          }),
+          processing.then(async (result) => {
+            if (reached) return;
+            const ended = await jobs.findOne({ _id: claim._id }, options);
+            throw new Error(
+              'Processing finished before the feedback write barrier: ' +
+                JSON.stringify({
+                  result,
+                  status: ended?.status,
+                  failureCode: ended?.failureCode,
+                  modelHttp: getCapturedPayloads().length,
+                  reserved: ended?.requests?.length,
+                }),
+            );
+          }),
+        ]);
+        paused = await readEvidence('paused');
+      } finally {
+        barrier.release();
+        try {
+          processed = await processing;
+          console.info('08 processOnce evidence', processed);
+        } finally {
+          barrier.restore();
+        }
+      }
+      expect(paused.job?.status).toBe(AiFeedbackJobStatus.Running);
+      expect(paused.job?.lockOwner).toEqual(expect.any(String));
+      // This also reproduces the regression: the legacy write allows one new
+      // item to escape while the still-locked Job is externally RUNNING.
+      expect(paused.newCount).toBe(0);
+      expect(paused.rows).toHaveLength(2);
+
+      const completed = await readEvidence(abort ? 'rolled-back' : 'committed');
+      expect(completed.newCount).toBe(abort ? 0 : 1);
+      expect(completed.rows).toHaveLength(abort ? 2 : 3);
+      expect(completed.job).toMatchObject({
+        status: abort
+          ? AiFeedbackJobStatus.Dead
+          : AiFeedbackJobStatus.Succeeded,
+        lockOwner: null,
+        lockedAt: null,
+        notBefore: null,
+        lastError: abort ? 'AI_FEEDBACK: INTERNAL_ERROR' : null,
+        failureCode: abort ? 'INTERNAL_ERROR' : null,
+      });
+      expect(completed.job?.requests).toEqual(paused.job?.requests);
+      expect(processed).toEqual({
+        processed: 1,
+        succeeded: abort ? 0 : 1,
+        failed: 0,
+        dead: abort ? 1 : 0,
+      });
+    },
+  );
 
   it('passes task context and zh-cn instruction to mock Bailian and keeps feedback pipeline persisted', async () => {
     clearCapturedPayloads();

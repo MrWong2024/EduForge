@@ -154,6 +154,16 @@ npm.cmd run test:e2e -- --listTests --runInBand --runTestsByPath ./test/classroo
 npm.cmd run test:e2e -- --runInBand --runTestsByPath ./test/classroom-report-task-status.e2e-spec.ts
 ```
 
+### AI 反馈与 Job 原子完成定向验收
+
+从 `backend` 先用 `npm.cmd run test -- --listTests --runInBand --runTestsByPath ./src/modules/learning-tasks/ai-feedback/services/ai-feedback-processor.service.spec.ts ./src/lib/classroom-task-transaction.spec.ts` 核对目标，再去掉 `--listTests` 执行无库单测，覆盖认领失效、本地事务重试和提交未确认。
+
+以下实库套件逐文件在独立 `standard_test` 进程串行执行。先用 `npm.cmd run test:e2e -- --listTests --runInBand --runTestsByPath <文件>` 核对发现范围，再去掉 `--listTests` 执行。按第 5、6 节核对默认、命名事务和独立回读连接及精确清理，消费前拒绝外来 Job。
+
+- `./test/learning-tasks.ai-feedback.bailian-context.e2e-spec.ts` 通过正式学生入口创建并申请评阅。定时 Worker 关闭，模型由本机 HTTP 替身返回，Mongo 写入、提交或回滚以及学生反馈 GET 均真实执行。事务测试在实际插入后暂停，用事务外读核对可见性及预留、usage 保留。处理口径见 [Service Card 13](./handoff-backend-service-map.md#service-card-13)。
+- `./test/learning-tasks.ai-feedback.ops.e2e-spec.ts` 回归正式手工 process-once 和定时 stub Worker。
+- `./test/classroom-review-pack.e2e-spec.ts` 保留读侧真实聚合屏障，用原子完成夹具核对评阅完成交错中的分组。
+
 ### 课程删除与建班定向验收
 
 `test/course-lifecycle.e2e-spec.ts` 使用正式 `configureApp`、HTTP 路由和 Mongo 回读。它保留课程生命周期和权限回归，并负责删除空课程与建班竞争的两种提交顺序。测试在一方完成真实 Course 写入后暂停该事务，观察另一方争用同一文档，再放行先写入方提交。分别核对两个响应、课程和关联班级的终态以及建班后的课程时间戳。公开结果见 [API Courses](./handoff-backend-api-map.md#courses)，协调写与重试规则见 [Service Card 03](./handoff-backend-service-map.md#service-card-03) 和 [Service Card 04](./handoff-backend-service-map.md#service-card-04)。

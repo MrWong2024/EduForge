@@ -4,8 +4,8 @@ import { AiContextReaderService } from '../../ai-context/ai-context-reader.servi
 import { Test } from '@nestjs/testing';
 import { Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { getModelToken } from '@nestjs/mongoose';
-import { Types, Mongoose } from 'mongoose';
+import { getConnectionToken, getModelToken } from '@nestjs/mongoose';
+import { mongo, Types, Mongoose } from 'mongoose';
 import fs from 'node:fs/promises';
 import { basename, dirname, resolve } from 'node:path';
 import { AiFeedbackProcessor } from './ai-feedback-processor.service';
@@ -18,6 +18,7 @@ import { Submission } from '../../schemas/submission.schema';
 import {
   Feedback,
   FeedbackSeverity,
+  FeedbackSource,
   FeedbackType,
 } from '../../schemas/feedback.schema';
 import { ClassroomTask } from '../../../classrooms/classroom-tasks/schemas/classroom-task.schema';
@@ -31,9 +32,26 @@ import { BailianFeedbackProvider } from '../providers/real/bailian-feedback.prov
 import { AiFeedbackRequestBodyDumper } from '../lib/ai-feedback-request-body-dumper';
 import { AiFeedbackProviderError } from '../interfaces/ai-feedback-provider.error';
 import * as compactor from '../lib/feedback-item-compactor';
+import {
+  CLASSROOM_TASK_TRANSACTION_CONNECTION,
+  UnconfirmedClassroomTaskCommitError,
+} from '../../../../lib/classroom-task-transaction';
 const query = <T>(value: T) => {
-  const q = { exec: jest.fn().mockResolvedValue(value), lean: jest.fn() };
+  const q = {
+    exec: jest.fn().mockResolvedValue(value),
+    lean: jest.fn(),
+    select: jest.fn(),
+    session: jest.fn(),
+    setOptions: jest.fn(),
+    read: jest.fn(),
+    readConcern: jest.fn(),
+  };
   q.lean.mockReturnValue(q);
+  q.select.mockReturnValue(q);
+  q.session.mockReturnValue(q);
+  q.setOptions.mockReturnValue(q);
+  q.read.mockReturnValue(q);
+  q.readConcern.mockReturnValue(q);
   return q;
 };
 async function harness() {
@@ -49,6 +67,7 @@ async function harness() {
     lockOwner: 'unit-claim',
   };
   const jobModel = {
+    modelName: AiFeedbackJob.name,
     findOneAndUpdate: jest
       .fn<
         ReturnType<typeof query<unknown>>,
@@ -58,14 +77,36 @@ async function harness() {
           Record<string, unknown>?,
         ]
       >()
-      .mockReturnValue(query(null)),
+      .mockReturnValue(query({ _id: job._id })),
     updateOne: jest.fn().mockReturnValue(query({ matchedCount: 1 })),
     exists: jest.fn().mockResolvedValue({ _id: job._id }),
   };
   jobModel.findOneAndUpdate
     .mockReturnValueOnce(query(null))
     .mockReturnValueOnce(query(job));
-  const feedback = { insertMany: jest.fn().mockResolvedValue([]) };
+  const transactionJob = {
+    updateOne: jest.fn().mockReturnValue(query({ matchedCount: 1 })),
+  };
+  const feedback = {
+    find: jest.fn().mockReturnValue(query([])),
+    insertMany: jest.fn().mockResolvedValue([]),
+  };
+  const session = {
+    startTransaction: jest.fn(),
+    inTransaction: jest.fn().mockReturnValue(true),
+    abortTransaction: jest.fn().mockResolvedValue(undefined),
+    commitTransaction: jest.fn().mockResolvedValue(undefined),
+    endSession: jest.fn().mockResolvedValue(undefined),
+  };
+  const transactionModels = {
+    [AiFeedbackJob.name]: transactionJob,
+    [Feedback.name]: feedback,
+  };
+  const transactionConnection = {
+    models: transactionModels,
+    model: jest.fn((name: string) => transactionModels[name]),
+    startSession: jest.fn().mockResolvedValue(session),
+  };
   const release = jest.fn();
   const guards = {
     tryConsume: jest.fn().mockReturnValue(true),
@@ -101,7 +142,14 @@ async function harness() {
         useValue: provider,
       },
       { provide: getModelToken(AiFeedbackJob.name), useValue: jobModel },
-      { provide: getModelToken(Feedback.name), useValue: feedback },
+      {
+        provide: getModelToken(Feedback.name),
+        useValue: { modelName: Feedback.name },
+      },
+      {
+        provide: getConnectionToken(CLASSROOM_TASK_TRANSACTION_CONNECTION),
+        useValue: transactionConnection,
+      },
       {
         provide: getModelToken(Submission.name),
         useValue: {
@@ -142,6 +190,9 @@ async function harness() {
     processor: module.get(AiFeedbackProcessor),
     job,
     jobModel,
+    transactionJob,
+    session,
+    transactionConnection,
     feedback,
     guards,
     release,
@@ -163,6 +214,32 @@ function diagnosticFor(submissionId: string) {
   };
   return { handle, saveCompaction };
 }
+
+function mockModelHttp(items: AiFeedbackItem[]) {
+  return jest.spyOn(globalThis, 'fetch').mockResolvedValue(
+    new Response(
+      JSON.stringify({
+        choices: [
+          {
+            finish_reason: 'stop',
+            message: { content: JSON.stringify({ items }) },
+          },
+        ],
+        usage: {
+          prompt_tokens: 10,
+          completion_tokens: 2,
+          total_tokens: 12,
+        },
+      }),
+    ),
+  );
+}
+
+const feedbackItem = {
+  type: FeedbackType.Style,
+  severity: FeedbackSeverity.Warn,
+  message: 'fixture',
+};
 
 async function removeOwnedDiagnosticDirectory(
   directory: string | undefined,
@@ -239,29 +316,7 @@ describe('claim and paid request persistence gates (no database)', () => {
     'does not retry HTTP when %s persistence fails after a response',
     async (stage) => {
       const h = await harness();
-      const fetchMock = jest.spyOn(globalThis, 'fetch').mockResolvedValue(
-        new Response(
-          JSON.stringify({
-            choices: [
-              {
-                finish_reason: 'stop',
-                message: {
-                  content: JSON.stringify({
-                    items: [
-                      { type: 'STYLE', severity: 'WARN', message: 'fixture' },
-                    ],
-                  }),
-                },
-              },
-            ],
-            usage: {
-              prompt_tokens: 10,
-              completion_tokens: 2,
-              total_tokens: 12,
-            },
-          }),
-        ),
-      );
+      const fetchMock = mockModelHttp([feedbackItem]);
       if (stage === 'usage') {
         h.jobModel.updateOne
           .mockReturnValueOnce(query({ matchedCount: 1 }))
@@ -271,7 +326,10 @@ describe('claim and paid request persistence gates (no database)', () => {
         h.jobModel.updateOne.mockReturnValueOnce(failure);
       } else
         h.feedback.insertMany.mockRejectedValue(
-          new Error('feedback write failed'),
+          new mongo.MongoServerError({
+            code: 11000,
+            errmsg: 'synthetic unexpected duplicate during feedback insertion',
+          }),
         );
       try {
         expect(await h.processor.processOnce(1)).toMatchObject({
@@ -282,6 +340,10 @@ describe('claim and paid request persistence gates (no database)', () => {
         expect(h.jobModel.findOneAndUpdate.mock.calls[2][1]).toMatchObject({
           $set: { failureCode: 'INTERNAL_ERROR', status: 'DEAD' },
         });
+        expect(h.session.abortTransaction).toHaveBeenCalledTimes(
+          stage === 'feedback' ? 1 : 0,
+        );
+        expect(h.session.commitTransaction).not.toHaveBeenCalled();
       } finally {
         await h.module.close();
       }
@@ -334,6 +396,205 @@ describe('claim and paid request persistence gates (no database)', () => {
       await h.module.close();
     }
   });
+});
+
+describe('claim-scoped result commit (no database)', () => {
+  afterEach(() => jest.restoreAllMocks());
+
+  it('skips feedback and terminal counts when the final claim update matches no Job', async () => {
+    const h = await harness();
+    const fetch = mockModelHttp([feedbackItem]);
+    h.transactionJob.updateOne.mockReturnValue(query({ matchedCount: 0 }));
+
+    try {
+      expect(await h.processor.processOnce(1)).toEqual({
+        processed: 1,
+        succeeded: 0,
+        failed: 0,
+        dead: 0,
+      });
+      expect(h.transactionJob.updateOne.mock.calls).toMatchObject([
+        [
+          {
+            _id: h.job._id,
+            status: 'RUNNING',
+            attempts: h.job.attempts,
+            lockOwner: h.job.lockOwner,
+          },
+          { $set: { status: 'SUCCEEDED' } },
+          { session: h.session },
+        ],
+      ]);
+      expect(h.feedback.find).not.toHaveBeenCalled();
+      expect(h.feedback.insertMany).not.toHaveBeenCalled();
+      expect(h.jobModel.findOneAndUpdate).toHaveBeenCalledTimes(2);
+      expect(fetch).toHaveBeenCalledTimes(1);
+      expect(h.release).toHaveBeenCalledTimes(1);
+    } finally {
+      await h.module.close();
+    }
+  });
+
+  it.each([
+    {
+      status: 'FAILED',
+      error: new AiFeedbackProviderError('TIMEOUT', true, 'synthetic timeout'),
+    },
+    { status: 'DEAD', error: new Error('synthetic terminal error') },
+  ])(
+    'does not count an unmatched $status transition',
+    async ({ status, error }) => {
+      const h = await harness();
+      const analyze = jest
+        .spyOn(h.provider, 'analyzeSubmission')
+        .mockRejectedValue(error);
+      h.jobModel.findOneAndUpdate.mockReturnValueOnce(query(null));
+
+      try {
+        expect(await h.processor.processOnce(1)).toEqual({
+          processed: 1,
+          succeeded: 0,
+          failed: 0,
+          dead: 0,
+        });
+        expect(h.jobModel.findOneAndUpdate.mock.calls[2]).toMatchObject([
+          {
+            _id: h.job._id,
+            status: 'RUNNING',
+            attempts: h.job.attempts,
+            lockOwner: h.job.lockOwner,
+          },
+          { $set: { status } },
+        ]);
+        expect(h.transactionConnection.startSession).not.toHaveBeenCalled();
+        expect(h.feedback.insertMany).not.toHaveBeenCalled();
+        expect(analyze).toHaveBeenCalledTimes(1);
+        expect(h.release).toHaveBeenCalledTimes(1);
+      } finally {
+        await h.module.close();
+      }
+    },
+  );
+
+  it('retries a transient result write on the same session without replaying provider, budget, or usage', async () => {
+    const h = await harness();
+    const fetch = mockModelHttp([feedbackItem]);
+    const conflict = new mongo.MongoServerError({
+      code: 112,
+      errmsg: 'synthetic write conflict',
+    });
+    conflict.addErrorLabel(mongo.MongoErrorLabel.TransientTransactionError);
+    h.feedback.insertMany.mockRejectedValueOnce(conflict);
+    const existingFeedback = query([]);
+    h.feedback.find.mockReturnValue(existingFeedback);
+
+    try {
+      expect(await h.processor.processOnce(1)).toEqual({
+        processed: 1,
+        succeeded: 1,
+        failed: 0,
+        dead: 0,
+      });
+      expect(fetch).toHaveBeenCalledTimes(1);
+      expect(h.jobModel.updateOne).toHaveBeenCalledTimes(3);
+      expect(h.jobModel.updateOne.mock.calls[1]).toMatchObject([
+        { _id: h.job._id, 'requests.claimNo': { $ne: h.job.attempts } },
+        { $push: { requests: { claimNo: h.job.attempts, usage: null } } },
+      ]);
+      expect(h.jobModel.updateOne.mock.calls[2]).toMatchObject([
+        { _id: h.job._id, 'requests.claimNo': h.job.attempts },
+        { $set: { 'requests.$.usage': { totalTokens: 12 } } },
+      ]);
+      expect(h.transactionConnection.startSession).toHaveBeenCalledTimes(1);
+      expect(h.session.startTransaction).toHaveBeenCalledTimes(2);
+      expect(h.session.abortTransaction).toHaveBeenCalledTimes(1);
+      expect(h.session.commitTransaction).toHaveBeenCalledTimes(1);
+      expect(h.session.endSession).toHaveBeenCalledTimes(1);
+      expect(h.transactionJob.updateOne).toHaveBeenCalledTimes(2);
+      expect(h.feedback.find).toHaveBeenCalledTimes(2);
+      expect(existingFeedback.session.mock.calls).toEqual([
+        [h.session],
+        [h.session],
+      ]);
+      expect(h.feedback.insertMany).toHaveBeenCalledTimes(2);
+      expect(h.feedback.insertMany).toHaveBeenLastCalledWith(
+        [
+          expect.objectContaining({
+            ...feedbackItem,
+            submissionId: h.job.submissionId,
+            source: FeedbackSource.AI,
+          }),
+        ],
+        expect.objectContaining({ session: h.session }),
+      );
+      expect(h.jobModel.findOneAndUpdate).toHaveBeenCalledTimes(2);
+      expect(h.release).toHaveBeenCalledTimes(1);
+    } finally {
+      await h.module.close();
+    }
+  });
+
+  it.each([true, false])(
+    'requires same-claim success evidence after two inconclusive commit replies (proof=%s)',
+    async (committed) => {
+      const h = await harness();
+      const fetch = mockModelHttp([feedbackItem]);
+      const uncertain = new mongo.MongoServerError({
+        errmsg: 'synthetic unknown commit result',
+      });
+      uncertain.addErrorLabel(
+        mongo.MongoErrorLabel.UnknownTransactionCommitResult,
+      );
+      let committedJob: { _id: Types.ObjectId } | null = null;
+      h.session.commitTransaction
+        .mockImplementationOnce(() => {
+          if (committed) committedJob = { _id: h.job._id };
+          return Promise.reject(uncertain);
+        })
+        .mockRejectedValueOnce(uncertain);
+      const proof = query(null);
+      proof.exec.mockImplementation(() => Promise.resolve(committedJob));
+      h.jobModel.exists
+        .mockResolvedValueOnce({ _id: h.job._id })
+        .mockReturnValueOnce(proof);
+
+      try {
+        const processing = h.processor.processOnce(1);
+        if (committed) {
+          await expect(processing).resolves.toEqual({
+            processed: 1,
+            succeeded: 1,
+            failed: 0,
+            dead: 0,
+          });
+        } else {
+          await expect(processing).rejects.toThrow(
+            UnconfirmedClassroomTaskCommitError,
+          );
+        }
+        expect(h.jobModel.exists).toHaveBeenLastCalledWith({
+          _id: h.job._id,
+          attempts: h.job.attempts,
+          status: 'SUCCEEDED',
+        });
+        expect(proof.read).toHaveBeenCalledWith('primary');
+        expect(proof.readConcern).toHaveBeenCalledWith('majority');
+        expect(proof.exec).toHaveBeenCalledTimes(1);
+        expect(h.transactionConnection.startSession).toHaveBeenCalledTimes(1);
+        expect(h.session.startTransaction).toHaveBeenCalledTimes(1);
+        expect(h.session.commitTransaction).toHaveBeenCalledTimes(2);
+        expect(h.session.abortTransaction).not.toHaveBeenCalled();
+        expect(h.session.endSession).toHaveBeenCalledTimes(1);
+        expect(h.transactionJob.updateOne).toHaveBeenCalledTimes(1);
+        expect(h.feedback.insertMany).toHaveBeenCalledTimes(1);
+        expect(h.jobModel.findOneAndUpdate).toHaveBeenCalledTimes(2);
+        expect(fetch).toHaveBeenCalledTimes(1);
+        expect(h.release).toHaveBeenCalledTimes(1);
+      } finally {
+        await h.module.close();
+      }
+    },
+  );
 });
 
 describe('claim-local pre-persistence compaction diagnostics (no database)', () => {
@@ -539,7 +800,10 @@ describe('claim-local pre-persistence compaction diagnostics (no database)', () 
           }
           return items;
         });
-      if (stage === 'claim') h.jobModel.exists.mockResolvedValue(null);
+      if (stage === 'claim') {
+        h.jobModel.exists.mockResolvedValue(null);
+        h.jobModel.findOneAndUpdate.mockReturnValueOnce(query(null));
+      }
       if (stage === 'compactor') {
         jest
           .spyOn(compactor, 'compactAiFeedbackItems')
@@ -549,11 +813,12 @@ describe('claim-local pre-persistence compaction diagnostics (no database)', () 
       }
 
       try {
-        expect(await h.processor.processOnce(1)).toMatchObject(
-          stage === 'provider'
-            ? { failed: 1, dead: 0 }
-            : { failed: 0, dead: 1 },
-        );
+        expect(await h.processor.processOnce(1)).toEqual({
+          processed: 1,
+          succeeded: 0,
+          failed: stage === 'provider' ? 1 : 0,
+          dead: stage === 'compactor' ? 1 : 0,
+        });
         expect(diagnostic.saveCompaction).toHaveBeenCalledWith({
           jobId: h.job._id.toString(),
           claimNo: 1,
@@ -597,7 +862,7 @@ describe('claim-local pre-persistence compaction diagnostics (no database)', () 
       markStarted();
       await saveFinished;
     });
-    jest
+    const analyze = jest
       .spyOn(h.provider, 'analyzeSubmission')
       .mockImplementation(async (_context, execution) => {
         await execution.onDiagnosticHandle?.(diagnostic.handle);
@@ -624,7 +889,35 @@ describe('claim-local pre-persistence compaction diagnostics (no database)', () 
       expect(h.feedback.insertMany).not.toHaveBeenCalled();
       expect(h.release).not.toHaveBeenCalled();
       finishSave();
-      expect(await processing).toMatchObject({ succeeded: 1, dead: 0 });
+      expect(await processing).toEqual({
+        processed: 1,
+        succeeded: 1,
+        failed: 0,
+        dead: 0,
+      });
+      expect(h.transactionJob.updateOne).toHaveBeenCalledWith(
+        {
+          _id: h.job._id,
+          status: 'RUNNING',
+          attempts: h.job.attempts,
+          lockOwner: h.job.lockOwner,
+        },
+        {
+          $set: {
+            status: 'SUCCEEDED',
+            lockedAt: null,
+            lockOwner: null,
+            notBefore: null,
+            lastError: null,
+            failureCode: null,
+          },
+        },
+        expect.objectContaining({ session: h.session }),
+      );
+      expect(h.feedback.find).not.toHaveBeenCalled();
+      expect(h.feedback.insertMany).not.toHaveBeenCalled();
+      expect(h.session.commitTransaction).toHaveBeenCalledTimes(1);
+      expect(analyze).toHaveBeenCalledTimes(1);
       expect(h.release).toHaveBeenCalledTimes(1);
     } finally {
       finishSave();
