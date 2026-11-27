@@ -196,11 +196,13 @@ export class ClassroomsService {
 
   async updateClassroom(id: string, dto: UpdateClassroomDto, userId: string) {
     await this.ensureTeacher(userId);
-    const classroom = await this.findOwnedClassroomOrThrow(id, userId);
-    if (
-      classroom.status === ClassroomStatus.Archived &&
-      dto.name !== undefined
-    ) {
+    const scope = { _id: id, teacherId: new Types.ObjectId(userId) };
+    const classroom = await this.classroomModel.findOne(scope).exec();
+    if (!classroom) {
+      throw new NotFoundException('Classroom not found');
+    }
+    const hasName = dto.name !== undefined;
+    if (classroom.status === ClassroomStatus.Archived && hasName) {
       throw new BadRequestException('Archived classrooms cannot be updated');
     }
 
@@ -211,10 +213,29 @@ export class ClassroomsService {
       classroom.status = dto.status;
     }
 
-    if (dto.name !== undefined || dto.status !== undefined) {
-      await classroom.save();
+    const $set = {
+      ...(classroom.isModified('name') && { name: classroom.name }),
+      ...(classroom.isModified('status') && { status: classroom.status }),
+    };
+    if (!Object.keys($set).length) {
+      return this.toClassroomResponse(classroom);
     }
-    return this.toClassroomResponse(classroom);
+
+    const updated = await this.classroomModel
+      .findOneAndUpdate(
+        {
+          ...scope,
+          ...(hasName && { status: { $ne: ClassroomStatus.Archived } }),
+        },
+        { $set },
+        { returnDocument: 'after', runValidators: true },
+      )
+      .exec();
+    if (updated) return this.toClassroomResponse(updated);
+    if (hasName && (await this.classroomModel.exists(scope).exec())) {
+      throw new BadRequestException('Archived classrooms cannot be updated');
+    }
+    throw new NotFoundException('Classroom not found');
   }
 
   async deleteClassroom(id: string, userId: string) {
@@ -754,16 +775,5 @@ export class ClassroomsService {
     }
     const normalized = value.trim().toLowerCase();
     return normalized === '1' || normalized === 'true';
-  }
-
-  private async findOwnedClassroomOrThrow(id: string, userId: string) {
-    const classroom = await this.classroomModel.findOne({
-      _id: id,
-      teacherId: new Types.ObjectId(userId),
-    });
-    if (!classroom) {
-      throw new NotFoundException('Classroom not found');
-    }
-    return classroom;
   }
 }

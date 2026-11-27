@@ -73,6 +73,7 @@ Notes:
 - teacher only；资源必须由当前教师创建，课程总览仅涵盖该教师名下班级，并遵守全局 Enrollment-only 与课堂任务隔离边界。
 - 总览是当前课程口径下的提交覆盖与 AI 运行概览，支持无时间下界的历史读取；各窗口、兼容提交率与整体覆盖率的区别见 [DTO 课程总览](./handoff-backend-dto-cheatsheet.md#课程总览)，聚合见 [Service Card 08C](./handoff-backend-service-map.md#service-card-08c)。
 - 课程状态为 `ACTIVE | ARCHIVED`；PATCH 支持归档与恢复。已归档课程可通过状态更新恢复，但不允许普通内容编辑。
+- 编辑与归档交错时，归档先写入则含基础字段的 PATCH 整笔返回 `400 Archived courses cannot be updated`。编辑先写入时两项均可成功，归档回执包含已保存资料。DELETE 先删除空课程时，在途的资料更新或归档返回 `404 Course not found`。PATCH 成功返回 200，兼容 POST archive 成功返回 201。
 - 仅无任何班级引用的空课程可删除；非空时返回 `409 Conflict`，`code=COURSE_NOT_EMPTY`，message=`该课程下已有班级记录，不能删除，只能归档`。
 - 有权限的教师同时删除空课程并为该课程建班时，若删除先提交，DELETE 返回 `200 { ok: true }`，POST 返回 `404`。若建班先提交，POST 返回 `201`，DELETE 返回上述 `409 COURSE_NOT_EMPTY`。
 - 兼容保留 POST archive，收口到相同归档行为；引用检查与内部一致性见 [Service Card 03](./handoff-backend-service-map.md#service-card-03)。课程分类是对齐坐标，不构成外键或额外权限边界；字段与返回数据见 [DTO Courses](./handoff-backend-dto-cheatsheet.md#courses)。
@@ -103,6 +104,7 @@ Notes:
 Notes:
 
 - 教师管理与报表入口要求 teacher owner；班级详情允许 owner teacher 或当前正式学生成员。成员权威来源为 Enrollment，不回退 legacy studentIds。
+- 编辑与归档交错时，归档先写入则含名称的 PATCH 整笔返回 `400 Archived classrooms cannot be updated`。编辑先写入时两项均可成功，归档回执包含已保存名称。DELETE 先删除空班级时，在途的资料更新或归档返回 `404 Classroom not found`。PATCH 成功返回 200，兼容 POST archive 成功返回 201。
 - 正式成员列表仅 owner teacher 可读，非 owner 返回 `404`；默认 ACTIVE，显式包含移除成员时返回 ACTIVE + REMOVED 历史。数据及选项解析见 [DTO Classroom family](./handoff-backend-dto-cheatsheet.md#classrooms)，默认成员排序和读取策略见 [Service Card 04](./handoff-backend-service-map.md#service-card-04)。
 - 教师看板默认仅返回 ACTIVE 课堂任务；显式包含关闭任务时返回 ACTIVE + CLOSED；RECALLED、缺失或未知实例状态不返回。既有实例不因关联模板非 PUBLISHED 而消失。统计范围与返回任务集合一致，默认排除 REMOVED 学生历史提交贡献；归档建议只作提示，不自动改变班级状态。
 - 学生看板要求当前 Enrollment ACTIVE，默认只展示 ACTIVE 班级内 ACTIVE 课堂任务。模板变为 ARCHIVED/DRAFT 不影响既有实例可见性。有截止时间的任务在截止后 30 天内仍显示为近期过期，更早的归为历史；无截止时间的任务在发布后 90 天内显示，更早的归为历史。includeHistorical 仅放开时间窗口，不放开班级或课堂任务状态边界。

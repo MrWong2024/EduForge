@@ -3,7 +3,10 @@ import {
   authTestEnvironment,
   openAuthTestConnection,
 } from './helpers/auth-test-environment';
-import { assertAuthTestWritesConfirmed } from './helpers/auth-test-writes';
+import {
+  assertAuthTestWritesConfirmed,
+  runAuthTestWrite,
+} from './helpers/auth-test-writes';
 import { createFixtureUser } from './helpers/create-fixture-user';
 import { deleteFixtureRows } from './helpers/delete-fixture-rows';
 import { randomUUID } from 'node:crypto';
@@ -23,7 +26,11 @@ import {
 } from '../src/lib/classroom-task-transaction';
 import { Classroom } from '../src/modules/classrooms/schemas/classroom.schema';
 import { ClassroomsService } from '../src/modules/classrooms/services/classrooms.service';
-import { Course } from '../src/modules/courses/schemas/course.schema';
+import {
+  Course,
+  CourseStatus,
+} from '../src/modules/courses/schemas/course.schema';
+import { CoursesService } from '../src/modules/courses/services/courses.service';
 import { hashPassword } from '../src/modules/users/password.utils';
 import { User, UserStatus } from '../src/modules/users/schemas/user.schema';
 
@@ -69,6 +76,24 @@ type CreatedClassroomResponse = {
   course: CourseSummary;
 };
 type ParentWriter = 'delete' | 'create';
+type CourseWriteIntent =
+  | { field: 'name'; value: string }
+  | { field: 'status'; value: CourseStatus.Archived };
+type CourseWriteMethod = 'updateOne' | 'findOneAndUpdate';
+
+function summarizeCourseResponse(response: request.Response) {
+  const body = response.body as Partial<CourseSummary> & {
+    message?: string;
+    ok?: boolean;
+  };
+  return {
+    http: response.status,
+    name: body.name,
+    status: body.status,
+    message: body.message,
+    ok: body.ok,
+  };
+}
 
 function checkpoint() {
   let signal!: () => void;
@@ -103,8 +128,10 @@ describe('Course Lifecycle (e2e)', () => {
   let app: INestApplication<App> | undefined;
   let moduleFixture: TestingModule | undefined;
   let connection: Connection | undefined;
+  let readbackConnection: Connection | undefined;
   let transactionConnection: Connection;
   let fixtureDb: mongo.Db | undefined;
+  let courseModel: Model<Course>;
   let transactionCourseModel: Model<Course>;
   let classroomsService: ClassroomsService;
   let teacherAgent: Agent;
@@ -118,8 +145,9 @@ describe('Course Lifecycle (e2e)', () => {
     `${namespace}.${account.name}@example.invalid`;
 
   function database(): mongo.Db {
-    if (!fixtureDb) throw new Error('COURSE_LIFECYCLE_DATABASE_REQUIRED');
-    return fixtureDb;
+    if (!readbackConnection?.db)
+      throw new Error('COURSE_LIFECYCLE_READBACK_DATABASE_REQUIRED');
+    return readbackConnection.db;
   }
 
   function storedCourse(courseId: string) {
@@ -137,6 +165,18 @@ describe('Course Lifecycle (e2e)', () => {
 
   const remove = (courseId: string, agent = teacherAgent) =>
     agent.delete(`/api/courses/${courseId}`).timeout(httpTimeout);
+
+  const get = (courseId: string) =>
+    teacherAgent.get(`/api/courses/${courseId}`).timeout(httpTimeout);
+
+  const patch = (
+    courseId: string,
+    body: Record<string, unknown>,
+    agent = teacherAgent,
+  ) => agent.patch(`/api/courses/${courseId}`).timeout(httpTimeout).send(body);
+
+  const archive = (courseId: string, agent = teacherAgent) =>
+    agent.post(`/api/courses/${courseId}/archive`).timeout(httpTimeout);
 
   const buildClassroom = (
     courseId: string,
@@ -163,6 +203,105 @@ describe('Course Lifecycle (e2e)', () => {
     expect(Types.ObjectId.isValid(id)).toBe(true);
     courseIds.add(id);
     return id;
+  }
+
+  async function raceCourseUpdate(
+    courseId: string,
+    intent: CourseWriteIntent,
+    delayedRequest: () => request.Test,
+    firstRequest: () => request.Test,
+  ) {
+    if (!app) throw new Error('COURSE_LIFECYCLE_APPLICATION_REQUIRED');
+    const service = app.get(CoursesService);
+    const handlers = [
+      jest.spyOn(service, 'updateCourse'),
+      jest.spyOn(service, 'deleteCourse'),
+    ];
+    const collection: {
+      updateOne: mongo.Collection['updateOne'];
+      findOneAndUpdate(
+        filter: mongo.Filter<mongo.Document>,
+        update: mongo.UpdateFilter<mongo.Document> | mongo.Document[],
+        options?: mongo.FindOneAndUpdateOptions,
+      ): Promise<mongo.Document | null>;
+    } = courseModel.collection;
+    const updateOne = collection.updateOne.bind(
+      collection,
+    ) as typeof collection.updateOne;
+    const findOneAndUpdate = collection.findOneAndUpdate.bind(
+      collection,
+    ) as typeof collection.findOneAndUpdate;
+    const reachedWrite = checkpoint();
+    const releaseWrite = checkpoint();
+    const target = new Types.ObjectId(courseId);
+    let delayedMethod: CourseWriteMethod | undefined;
+
+    async function beforeWrite<Result>(
+      method: CourseWriteMethod,
+      filter: mongo.Filter<mongo.Document>,
+      update: mongo.UpdateFilter<mongo.Document> | mongo.Document[],
+      execute: () => Promise<Result>,
+    ): Promise<Result> {
+      if (
+        filter?._id instanceof Types.ObjectId &&
+        filter._id.equals(target) &&
+        !Array.isArray(update) &&
+        update.$set?.[intent.field] === intent.value
+      ) {
+        delayedMethod = method;
+        reachedWrite.signal();
+        await releaseWrite.reached;
+      }
+      return execute();
+    }
+
+    const spies = [
+      jest
+        .spyOn(collection, 'updateOne')
+        .mockImplementation((filter, update, options) =>
+          beforeWrite('updateOne', filter, update, () =>
+            updateOne(filter, update, options),
+          ),
+        ),
+      jest
+        .spyOn(collection, 'findOneAndUpdate')
+        .mockImplementation((filter, update, options) =>
+          beforeWrite('findOneAndUpdate', filter, update, () =>
+            findOneAndUpdate(filter, update, options),
+          ),
+        ),
+    ];
+    const requests: Promise<request.Response>[] = [];
+    const start = (send: () => request.Test) => {
+      const pending = send().then((response) => response);
+      requests.push(pending);
+      return pending;
+    };
+    try {
+      const delayed = start(delayedRequest);
+      await waitForCheckpoint(
+        reachedWrite.reached,
+        delayed,
+        'COURSE_DEFAULT_CONNECTION_WRITE',
+      );
+      const first = await start(firstRequest);
+      releaseWrite.signal();
+      return { first, delayed: await delayed, delayedMethod };
+    } finally {
+      releaseWrite.signal();
+      try {
+        await Promise.allSettled(requests);
+        // HTTP timeout does not imply the server-side write has finished.
+        const pendingHandlers = handlers.flatMap(({ mock }) =>
+          mock.results.flatMap((result: jest.MockResult<unknown>) =>
+            result.type === 'return' ? [Promise.resolve(result.value)] : [],
+          ),
+        );
+        await Promise.allSettled(pendingHandlers);
+      } finally {
+        for (const spy of [...spies, ...handlers]) spy.mockRestore();
+      }
+    }
   }
 
   async function raceDeleteAndCreate(
@@ -283,6 +422,7 @@ describe('Course Lifecycle (e2e)', () => {
 
   beforeAll(async () => {
     connection = await openAuthTestConnection();
+    readbackConnection = await openAuthTestConnection();
     moduleFixture = await Test.createTestingModule({ imports: [AppModule] })
       .overrideProvider(getConnectionToken())
       .useValue(connection)
@@ -292,9 +432,9 @@ describe('Course Lifecycle (e2e)', () => {
     );
     await assertAuthTestConnection(connection);
     await assertAuthTestConnection(transactionConnection);
-    const courseModel = moduleFixture.get<Model<Course>>(
-      getModelToken(Course.name),
-    );
+    await assertAuthTestConnection(readbackConnection);
+    courseModel = moduleFixture.get<Model<Course>>(getModelToken(Course.name));
+    expect(courseModel.db).toBe(connection);
     transactionCourseModel = getClassroomTaskTransactionModel(
       transactionConnection,
       courseModel,
@@ -319,6 +459,7 @@ describe('Course Lifecycle (e2e)', () => {
         stage: 'course-lifecycle-db-gate',
         defaultDatabase: fixtureDb.databaseName,
         transactionDatabase: transactionConnection.db?.databaseName,
+        readbackDatabase: database().databaseName,
         transactionProbe: 'committed',
         namespace,
       }),
@@ -356,6 +497,7 @@ describe('Course Lifecycle (e2e)', () => {
       if (!connection || !fixtureDb) return;
       await assertAuthTestConnection(connection);
       assertAuthTestWritesConfirmed(fixtureDb);
+      const readbackDb = database();
       const db = fixtureDb;
       const courseFilter = {
         createdBy: ownerId,
@@ -407,16 +549,16 @@ describe('Course Lifecycle (e2e)', () => {
         });
 
       const remaining = {
-        courses: await db
+        courses: await readbackDb
           .collection('courses')
           .countDocuments(courseFilter, databaseRead()),
-        classrooms: await db
+        classrooms: await readbackDb
           .collection('classrooms')
           .countDocuments(classroomFilter, databaseRead()),
-        sessions: await db
+        sessions: await readbackDb
           .collection('sessions')
           .countDocuments(sessionFilter, databaseRead()),
-        users: await db
+        users: await readbackDb
           .collection('users')
           .countDocuments({ _id: sessionFilter.userId }, databaseRead()),
       };
@@ -446,7 +588,12 @@ describe('Course Lifecycle (e2e)', () => {
           if (connection?.readyState === STATES.connected)
             await connection.close();
         } finally {
-          authTestEnvironment.restore();
+          try {
+            if (readbackConnection?.readyState === STATES.connected)
+              await readbackConnection.close();
+          } finally {
+            authTestEnvironment.restore();
+          }
         }
       }
     }
@@ -508,6 +655,275 @@ describe('Course Lifecycle (e2e)', () => {
       .send({ status: 'ACTIVE' })
       .expect(200);
     expect(restored.body).toMatchObject({ status: 'ACTIVE' });
+  });
+
+  it.each(['archive', 'edit', 'delete'] as const)(
+    'keeps course write results consistent when %s finishes first',
+    async (first) => {
+      const courseId = await createCourse(`update-race-${first}`);
+      const before = await storedCourse(courseId);
+      if (!before) throw new Error('COURSE_LIFECYCLE_PARENT_MISSING');
+      expect(await storedClassrooms(courseId)).toEqual([]);
+      const newName = `Course renamed after ${first} race`;
+      const changeName = () => patch(courseId, { name: newName });
+      const archiveCourse = () => archive(courseId);
+      const {
+        first: winner,
+        delayed,
+        delayedMethod,
+      } = await raceCourseUpdate(
+        courseId,
+        first === 'edit'
+          ? { field: 'status', value: CourseStatus.Archived }
+          : { field: 'name', value: newName },
+        first === 'edit' ? archiveCourse : changeName,
+        first === 'archive'
+          ? archiveCourse
+          : first === 'edit'
+            ? changeName
+            : () => remove(courseId),
+      );
+      const fetched = await get(courseId);
+      const row = await storedCourse(courseId);
+      console.info(
+        JSON.stringify({
+          stage: 'course-update-interleaving',
+          first,
+          delayedMethod,
+          originalName: before.name,
+          newName,
+          firstReceipt: summarizeCourseResponse(winner),
+          delayedReceipt: summarizeCourseResponse(delayed),
+          get: summarizeCourseResponse(fetched),
+          mongo: row ? { name: row.name, status: row.status } : null,
+        }),
+      );
+      if (first === 'delete') {
+        expect(winner.status).toBe(200);
+        expect(winner.body).toEqual({ ok: true });
+        expect(delayed.status).toBe(404);
+        expect(delayed.body).toMatchObject({ message: 'Course not found' });
+        expect(fetched.status).toBe(404);
+        expect(fetched.body).toMatchObject({ message: 'Course not found' });
+        expect(row).toBeNull();
+        return;
+      }
+      const expected = {
+        id: courseId,
+        code: before.code,
+        name: first === 'edit' ? newName : before.name,
+        status: CourseStatus.Archived,
+      };
+      if (first === 'archive') {
+        expect(winner.status).toBe(201);
+        expect(winner.body).toMatchObject(expected);
+        expect(delayed.status).toBe(400);
+        expect(delayed.body).toMatchObject({
+          message: 'Archived courses cannot be updated',
+        });
+      } else {
+        expect(winner.status).toBe(200);
+        expect(winner.body).toMatchObject({
+          ...expected,
+          status: CourseStatus.Active,
+        });
+        expect(delayed.status).toBe(201);
+        expect(delayed.body).toMatchObject(expected);
+      }
+      expect(fetched.status).toBe(200);
+      expect(fetched.body).toMatchObject(expected);
+      expect(row).toMatchObject({
+        name: expected.name,
+        status: expected.status,
+        term: before.term,
+        courseLabel: before.courseLabel,
+      });
+    },
+  );
+
+  it('deletes an empty course after a successful edit', async () => {
+    const courseId = await createCourse('edit-then-delete');
+    const edited = await patch(courseId, { name: 'Course saved first' }).expect(
+      200,
+    );
+    expect(edited.body).toMatchObject({
+      id: courseId,
+      name: 'Course saved first',
+      status: CourseStatus.Active,
+    });
+    expect(await storedCourse(courseId)).toMatchObject({
+      name: 'Course saved first',
+      status: CourseStatus.Active,
+    });
+    const removed = await remove(courseId).expect(200);
+    expect(removed.body).toEqual({ ok: true });
+    const fetched = await get(courseId).expect(404);
+    expect(fetched.body).toMatchObject({ message: 'Course not found' });
+    expect(await storedCourse(courseId)).toBeNull();
+    console.info(
+      JSON.stringify({
+        stage: 'course-update-then-delete',
+        firstReceipt: summarizeCourseResponse(edited),
+        deleteReceipt: summarizeCourseResponse(removed),
+        get: summarizeCourseResponse(fetched),
+        mongo: null,
+      }),
+    );
+  });
+
+  it('preserves course timestamps for no-op PATCH and repeated archive, and applies mixed requests as a whole', async () => {
+    const courseId = await createCourse('no-op-and-mixed');
+    const db = fixtureDb;
+    if (!db) throw new Error('COURSE_LIFECYCLE_DATABASE_REQUIRED');
+    const filter = { _id: new Types.ObjectId(courseId), createdBy: ownerId };
+    const referenceTimestamp = new Date('2020-01-01T00:00:00Z');
+    const seedTimestamp = async () => {
+      const seeded = await runAuthTestWrite(
+        db,
+        {
+          update: 'courses',
+          updates: [
+            {
+              q: filter,
+              u: { $set: { updatedAt: referenceTimestamp } },
+            },
+          ],
+        },
+        { collection: 'courses', filter },
+      );
+      expect(seeded.n).toBe(1);
+    };
+    await seedTimestamp();
+    const empty = await patch(courseId, {}).expect(200);
+    const { name } = empty.body as CourseSummary;
+    const same = await patch(courseId, { name }).expect(200);
+    expect(same.body).toEqual(empty.body);
+    expect(empty.body).toMatchObject({
+      updatedAt: referenceTimestamp.toISOString(),
+    });
+    expect((await storedCourse(courseId))?.updatedAt).toEqual(
+      referenceTimestamp,
+    );
+
+    const renamed = 'Renamed while archiving';
+    await patch(courseId, { name: renamed, status: CourseStatus.Archived })
+      .expect(200)
+      .expect(({ body }) => {
+        expect(body).toMatchObject({ name: renamed, status: 'ARCHIVED' });
+      });
+    await seedTimestamp();
+    const repeated = await archive(courseId).expect(201);
+    expect(repeated.body).toMatchObject({
+      name: renamed,
+      status: 'ARCHIVED',
+      updatedAt: referenceTimestamp.toISOString(),
+    });
+    const rejected = await patch(courseId, {
+      name: renamed,
+      status: CourseStatus.Active,
+    }).expect(400);
+    expect(rejected.body).toMatchObject({
+      message: 'Archived courses cannot be updated',
+    });
+    expect(await storedCourse(courseId)).toMatchObject({
+      name: renamed,
+      status: 'ARCHIVED',
+      updatedAt: referenceTimestamp,
+    });
+    console.info(
+      JSON.stringify({
+        stage: 'course-no-op-timestamps',
+        emptyPatch: 200,
+        sameValuePatch: 200,
+        repeatArchive: 201,
+        updatedAtUnchanged: true,
+      }),
+    );
+  });
+
+  it.each([null, '', '   '])(
+    'preserves an omitted course label and removes it for an explicit %p',
+    async (value) => {
+      const suffix = value === null ? 'null' : `blank-${value.length}`;
+      const courseId = await createCourse(`label-clear-${suffix}`);
+      const renamed = await patch(courseId, {
+        name: 'Keep classification',
+      }).expect(200);
+      expect(renamed.body).toMatchObject({ courseLabel: '通用编程' });
+      expect((await storedCourse(courseId))?.courseLabel).toBe('通用编程');
+      const cleared = await patch(courseId, { courseLabel: value }).expect(200);
+      expect(cleared.body).not.toHaveProperty('courseLabel');
+      const stored = await storedCourse(courseId);
+      expect(stored).not.toBeNull();
+      expect(stored).not.toHaveProperty('courseLabel');
+    },
+  );
+
+  it('retains code trimming, duplicate rejection, ownership and role checks', async () => {
+    const courseId = await createCourse('patch-permissions');
+    const duplicateId = await createCourse('duplicate-code');
+    const duplicate = await storedCourse(duplicateId);
+    if (!duplicate) throw new Error('COURSE_LIFECYCLE_DUPLICATE_MISSING');
+    const rejected = await patch(courseId, {
+      code: ` ${duplicate.code} `,
+    }).expect(400);
+    expect(rejected.body).toMatchObject({
+      message: 'Course code already exists',
+    });
+    await patch(courseId, { name: 'Unauthorized' }, studentAgent).expect(403);
+    const forbidden = await patch(
+      courseId,
+      { name: 'Other teacher' },
+      otherTeacherAgent,
+    ).expect(404);
+    expect(forbidden.body).toMatchObject({ message: 'Course not found' });
+    await archive(courseId, studentAgent).expect(403);
+    const hidden = await archive(courseId, otherTeacherAgent).expect(404);
+    expect(hidden.body).toMatchObject({ message: 'Course not found' });
+    const code = `${namespace}-trimmed-code`;
+    courseCodes.add(code);
+    const updated = await patch(courseId, {
+      code: ` ${code} `,
+      courseLabel: '  Python 程序设计  ',
+    }).expect(200);
+    expect(updated.body).toMatchObject({
+      code,
+      courseLabel: 'Python 程序设计',
+    });
+    expect(await storedCourse(courseId)).toMatchObject({
+      code,
+      courseLabel: 'Python 程序设计',
+    });
+  });
+
+  it('edits a legacy course with no stored status using default ACTIVE semantics', async () => {
+    const courseId = await createCourse('legacy-status');
+    const db = fixtureDb;
+    if (!db) throw new Error('COURSE_LIFECYCLE_DATABASE_REQUIRED');
+    const filter = { _id: new Types.ObjectId(courseId), createdBy: ownerId };
+    const seeded = await runAuthTestWrite(
+      db,
+      {
+        update: 'courses',
+        updates: [{ q: filter, u: { $unset: { status: '' } } }],
+      },
+      { collection: 'courses', filter },
+    );
+    expect(seeded.nModified).toBe(1);
+    const legacy = await storedCourse(courseId);
+    expect(legacy).not.toBeNull();
+    expect(legacy).not.toHaveProperty('status');
+
+    const edited = await patch(courseId, {
+      name: 'Legacy course edited',
+    }).expect(200);
+    expect(edited.body).toMatchObject({
+      name: 'Legacy course edited',
+      status: CourseStatus.Active,
+    });
+    expect(await storedCourse(courseId)).toMatchObject({
+      name: 'Legacy course edited',
+    });
   });
 
   it('keeps role and course ownership checks for deletion and classroom creation', async () => {

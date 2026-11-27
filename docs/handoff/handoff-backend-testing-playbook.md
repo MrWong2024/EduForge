@@ -158,6 +158,8 @@ npm.cmd run test:e2e -- --runInBand --runTestsByPath ./test/classroom-report-tas
 
 `test/course-lifecycle.e2e-spec.ts` 使用正式 `configureApp`、HTTP 路由和 Mongo 回读。它保留课程生命周期和权限回归，并负责删除空课程与建班竞争的两种提交顺序。测试在一方完成真实 Course 写入后暂停该事务，观察另一方争用同一文档，再放行先写入方提交。分别核对两个响应、课程和关联班级的终态以及建班后的课程时间戳。公开结果见 [API Courses](./handoff-backend-api-map.md#courses)，协调写与重试规则见 [Service Card 03](./handoff-backend-service-map.md#service-card-03) 和 [Service Card 04](./handoff-backend-service-map.md#service-card-04)。
 
+该套件通过默认连接的目标写入屏障，覆盖编辑与归档的两种顺序、删除先于编辑、成功编辑后删除，并核对归档回执名称、正式 GET 和独立 Mongo 终态。
+
 首次夹具写入前核对默认连接及课堂事务连接的实际库名和本机副本集，并验证事务可用。套件关闭自动建索引，使用现有唯一索引验证实际 joinCode 碰撞、换码成功及首次协调写回滚。清理前释放暂停点并等待已发出的请求，在本批课程归属内回读并清理班级，覆盖未取得响应 ID 的写入。`src/modules/classrooms/services/classrooms.service.spec.ts` 在离线模式检查换码次数上限和禁止重放的错误边界。
 
 从 `backend` 目录在独立 `standard_test` 进程执行以下命令。Discovery 必须只命中该文件。
@@ -170,6 +172,8 @@ npm.cmd run test:e2e -- --runInBand --runTestsByPath ./test/course-lifecycle.e2e
 ### 班级删除与入班、发布定向验收
 
 `test/classroom-lifecycle.e2e-spec.ts` 经正式 HTTP 路由验证删班与入班、删班与发布各自的两种提交顺序。测试在一方实际写入 Classroom 后暂停，观察另一事务在同一文档上的 Mongo 写冲突，再放行指定一方提交。双响应与独立 Mongo 回读核对班级、成员、课堂任务、回执、发布快照和班级时间戳。该套件同时覆盖重复入班、重加入、历史成员和任务阻止删除、仅有旧成员数组时允许删除、归档与归属拒绝、重复发布。公开结果由 [API Classrooms](./handoff-backend-api-map.md#classrooms) 维护。
+
+该套件通过默认连接的目标写入屏障，覆盖编辑与归档的两种顺序、删除先于兼容 POST archive、成功编辑后删除，并核对归档回执名称和课程摘要、正式 GET 和独立 Mongo 终态。
 
 环境复用本地 `standard_test` 门禁，验证默认连接和事务连接的实际库名及事务可提交后才写入本批夹具。仅使用既有索引。即使断言失败也释放暂停点并等待在途请求，再按本批班级归属清理及回读关联记录，覆盖未取得回执的写入。
 

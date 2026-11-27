@@ -26,6 +26,8 @@ import {
 } from '../src/lib/classroom-task-transaction';
 import type { ClassroomTaskResponseDto } from '../src/modules/classrooms/classroom-tasks/dto/classroom-task-response.dto';
 import type { ClassroomTask } from '../src/modules/classrooms/classroom-tasks/schemas/classroom-task.schema';
+import type { ClassroomResponseDto } from '../src/modules/classrooms/dto/classroom-response.dto';
+import type { UpdateClassroomDto } from '../src/modules/classrooms/dto/update-classroom.dto';
 import type { Enrollment } from '../src/modules/classrooms/enrollments/schemas/enrollment.schema';
 import {
   Classroom,
@@ -60,6 +62,8 @@ const classroomNotEmpty = {
   code: 'CLASSROOM_NOT_EMPTY',
   message: '该班级已有成员或任务记录，不能删除，只能归档',
 };
+const classroomNotFound = { message: 'Classroom not found' };
+const archivedUpdate = { message: 'Archived classrooms cannot be updated' };
 const databaseRead = () => ({
   maxTimeMS: 5000,
   signal: AbortSignal.timeout(5000),
@@ -78,6 +82,7 @@ type EnrollmentRow = Enrollment & { _id: Types.ObjectId };
 type TaskRow = ClassroomTask & { _id: Types.ObjectId };
 type ChildWriter = 'join' | 'publish';
 type ParentWriter = 'delete' | ChildWriter;
+type ClassroomUpdate = 'rename' | 'archive';
 
 function checkpoint() {
   let signal!: () => void;
@@ -112,18 +117,27 @@ describe('Classroom Lifecycle (e2e)', () => {
   let app: INestApplication<App> | undefined;
   let moduleFixture: TestingModule | undefined;
   let connection: Connection | undefined;
+  let readbackConnection: Connection | undefined;
   let fixtureDb: mongo.Db | undefined;
+  let classroomModel: Model<Classroom>;
   let transactionClassroomModel: Model<Classroom>;
   let teacherAgent: Agent;
   let otherTeacherAgent: Agent;
   let studentAgent: Agent;
   const classrooms: ClassroomRow[] = [];
+  const renamedClassrooms = new Map<string, string>();
   const emailFor = (account: (typeof accounts)[number]) =>
     `${namespace}.${account.name}@example.invalid`;
 
   function database() {
     if (!fixtureDb) throw new Error('CLASSROOM_LIFECYCLE_DATABASE_REQUIRED');
     return fixtureDb;
+  }
+
+  function readbackDatabase() {
+    if (!readbackConnection?.db)
+      throw new Error('CLASSROOM_LIFECYCLE_READBACK_REQUIRED');
+    return readbackConnection.db;
   }
 
   async function insertFixture(
@@ -139,7 +153,8 @@ describe('Classroom Lifecycle (e2e)', () => {
 
   async function createClassroom(
     suffix: string,
-    extra: Pick<ClassroomRow, 'studentIds'> = {},
+    extra: Partial<Pick<ClassroomRow, 'studentIds' | 'status'>> = {},
+    omitStatus = false,
   ) {
     const classroom: ClassroomRow = {
       _id: new Types.ObjectId(),
@@ -154,12 +169,25 @@ describe('Classroom Lifecycle (e2e)', () => {
       ...extra,
     };
     classrooms.push(classroom);
-    await insertFixture('classrooms', classroom);
+    const record: mongo.Document & { _id: Types.ObjectId } = { ...classroom };
+    if (omitStatus) delete record.status;
+    await insertFixture('classrooms', record);
     return classroom;
   }
 
   const classroomPath = (classroom: ClassroomRow) =>
     `/api/classrooms/${classroom._id.toHexString()}`;
+  const patch = (
+    classroom: ClassroomRow,
+    dto: UpdateClassroomDto,
+    agent = teacherAgent,
+  ) => agent.patch(classroomPath(classroom)).timeout(httpTimeout).send(dto);
+  const archive = (classroom: ClassroomRow) =>
+    teacherAgent
+      .post(`${classroomPath(classroom)}/archive`)
+      .timeout(httpTimeout);
+  const fetch = (classroom: ClassroomRow) =>
+    teacherAgent.get(classroomPath(classroom)).timeout(httpTimeout);
   const remove = (classroom: ClassroomRow) =>
     teacherAgent.delete(classroomPath(classroom)).timeout(httpTimeout);
   const join = (classroom: ClassroomRow) =>
@@ -178,23 +206,110 @@ describe('Classroom Lifecycle (e2e)', () => {
       });
 
   function storedClassroom(classroomId: Types.ObjectId) {
-    return database()
+    return readbackDatabase()
       .collection<ClassroomRow>('classrooms')
       .findOne({ _id: classroomId }, databaseRead());
   }
 
   function storedEnrollments(classroomId: Types.ObjectId) {
-    return database()
+    return readbackDatabase()
       .collection<EnrollmentRow>('enrollments')
       .find({ classroomId }, databaseRead())
       .toArray();
   }
 
   function storedTasks(classroomId: Types.ObjectId) {
-    return database()
+    return readbackDatabase()
       .collection<TaskRow>('classroomtasks')
       .find({ classroomId }, databaseRead())
       .toArray();
+  }
+
+  function assignEditedName(classroom: ClassroomRow) {
+    const name = `${classroom.name}-edited`;
+    renamedClassrooms.set(classroom._id.toHexString(), name);
+    return name;
+  }
+
+  async function interleaveClassroomUpdate(
+    classroom: ClassroomRow,
+    intent: ClassroomUpdate,
+    name: string,
+    ahead: () => request.Test,
+  ) {
+    const collection: {
+      updateOne: mongo.Collection['updateOne'];
+      findOneAndUpdate(
+        filter: mongo.Filter<mongo.Document>,
+        update: mongo.UpdateFilter<mongo.Document> | mongo.Document[],
+        options?: mongo.FindOneAndUpdateOptions,
+      ): Promise<mongo.Document | null>;
+    } = classroomModel.collection;
+    const updateOne = collection.updateOne.bind(
+      collection,
+    ) as typeof collection.updateOne;
+    const findOneAndUpdate = collection.findOneAndUpdate.bind(
+      collection,
+    ) as typeof collection.findOneAndUpdate;
+    const beforeWrite = checkpoint();
+    const releaseWrite = checkpoint();
+    let pausedMethod: 'updateOne' | 'findOneAndUpdate' | undefined;
+
+    async function pauseTargetWrite(
+      method: NonNullable<typeof pausedMethod>,
+      id: unknown,
+      update: mongo.UpdateFilter<mongo.Document> | mongo.Document[],
+    ) {
+      if (!(id instanceof Types.ObjectId) || !id.equals(classroom._id)) return;
+      if (Array.isArray(update)) return;
+      const fields = update.$set as
+        Pick<UpdateClassroomDto, 'name' | 'status'> | undefined;
+      const matchesIntent =
+        intent === 'rename'
+          ? fields?.name === name && fields.status === undefined
+          : fields?.status === ClassroomStatus.Archived &&
+            fields.name === undefined;
+      if (!matchesIntent) return;
+      pausedMethod = method;
+      beforeWrite.signal();
+      await releaseWrite.reached;
+    }
+
+    // Hook only the default model's writes. The deletion transaction uses a
+    // different model even though both connections target the same database.
+    const legacySpy = jest
+      .spyOn(collection, 'updateOne')
+      .mockImplementation(async (filter, update, options) => {
+        await pauseTargetWrite('updateOne', filter._id, update);
+        return updateOne(filter, update, options);
+      });
+    const updateSpy = jest
+      .spyOn(collection, 'findOneAndUpdate')
+      .mockImplementation(async (filter, update, options) => {
+        await pauseTargetWrite('findOneAndUpdate', filter._id, update);
+        return findOneAndUpdate(filter, update, options);
+      });
+    const delayed = (
+      intent === 'rename' ? patch(classroom, { name }) : archive(classroom)
+    ).then((response) => response);
+    try {
+      await waitForCheckpoint(
+        beforeWrite.reached,
+        delayed,
+        'DEFAULT_CLASSROOM_UPDATE',
+      );
+      const first = await ahead();
+      releaseWrite.signal();
+      return { first, second: await delayed, pausedMethod };
+    } finally {
+      releaseWrite.signal();
+      try {
+        await Promise.allSettled([delayed]);
+      } finally {
+        legacySpy.mockRestore();
+        updateSpy.mockRestore();
+      }
+    }
   }
 
   async function race(
@@ -320,6 +435,7 @@ describe('Classroom Lifecycle (e2e)', () => {
 
   beforeAll(async () => {
     connection = await openAuthTestConnection();
+    readbackConnection = await openAuthTestConnection();
     moduleFixture = await Test.createTestingModule({ imports: [AppModule] })
       .overrideProvider(getConnectionToken())
       .useValue(connection)
@@ -329,7 +445,7 @@ describe('Classroom Lifecycle (e2e)', () => {
     );
     await assertAuthTestConnection(connection);
     await assertAuthTestConnection(transactionConnection);
-    const classroomModel = moduleFixture.get<Model<Classroom>>(
+    classroomModel = moduleFixture.get<Model<Classroom>>(
       getModelToken(Classroom.name),
     );
     transactionClassroomModel = getClassroomTaskTransactionModel(
@@ -378,6 +494,7 @@ describe('Classroom Lifecycle (e2e)', () => {
         stage: 'classroom-lifecycle-db-gate',
         defaultDatabase: db.databaseName,
         transactionDatabase: transactionConnection.db?.databaseName,
+        readbackDatabase: readbackDatabase().databaseName,
         transactionProbe: 'committed',
         namespace,
       }),
@@ -432,9 +549,11 @@ describe('Classroom Lifecycle (e2e)', () => {
 
   afterAll(async () => {
     try {
-      if (!connection || !fixtureDb) return;
+      if (!connection || !readbackConnection || !fixtureDb) return;
       await assertAuthTestConnection(connection);
+      await assertAuthTestConnection(readbackConnection);
       const db = fixtureDb;
+      const readbackDb = readbackDatabase();
       assertAuthTestWritesConfirmed(db);
       const accountIds = accounts.map(({ id }) => id);
       const classroomIds = classrooms.map(({ _id }) => _id);
@@ -442,15 +561,15 @@ describe('Classroom Lifecycle (e2e)', () => {
       const classroomScope = { _id: { $in: classroomIds } };
       const sessionScope = { userId: { $in: accountIds } };
       const usersScope = { _id: { $in: accountIds } };
-      const enrollments = await db
+      const enrollments = await readbackDb
         .collection<EnrollmentRow>('enrollments')
         .find(childScope, databaseRead())
         .toArray();
-      const tasks = await db
+      const tasks = await readbackDb
         .collection<TaskRow>('classroomtasks')
         .find(childScope, databaseRead())
         .toArray();
-      const parents = await db
+      const parents = await readbackDb
         .collection<ClassroomRow>('classrooms')
         .find(classroomScope, databaseRead())
         .toArray();
@@ -466,7 +585,10 @@ describe('Classroom Lifecycle (e2e)', () => {
             !ownerId.equals(row.teacherId) ||
             !courseId.equals(row.courseId) ||
             !classrooms.some(
-              ({ _id, name }) => _id.equals(row._id) && name === row.name,
+              ({ _id, name }) =>
+                _id.equals(row._id) &&
+                (name === row.name ||
+                  renamedClassrooms.get(_id.toHexString()) === row.name),
             ),
         )
       )
@@ -509,25 +631,25 @@ describe('Classroom Lifecycle (e2e)', () => {
         });
 
       const remaining = {
-        enrollments: await db
+        enrollments: await readbackDb
           .collection('enrollments')
           .countDocuments(childScope, databaseRead()),
-        classroomTasks: await db
+        classroomTasks: await readbackDb
           .collection('classroomtasks')
           .countDocuments(childScope, databaseRead()),
-        classrooms: await db
+        classrooms: await readbackDb
           .collection('classrooms')
           .countDocuments(classroomScope, databaseRead()),
-        tasks: await db
+        tasks: await readbackDb
           .collection('tasks')
           .countDocuments({ _id: taskId }, databaseRead()),
-        courses: await db
+        courses: await readbackDb
           .collection('courses')
           .countDocuments({ _id: courseId }, databaseRead()),
-        sessions: await db
+        sessions: await readbackDb
           .collection('sessions')
           .countDocuments(sessionScope, databaseRead()),
-        users: await db
+        users: await readbackDb
           .collection('users')
           .countDocuments(usersScope, databaseRead()),
       };
@@ -553,10 +675,212 @@ describe('Classroom Lifecycle (e2e)', () => {
           if (connection?.readyState === STATES.connected)
             await connection.close();
         } finally {
-          authTestEnvironment.restore();
+          try {
+            await readbackConnection?.close();
+          } finally {
+            authTestEnvironment.restore();
+          }
         }
       }
     }
+  });
+
+  function expectClassroomReceipt(
+    response: request.Response,
+    classroom: ClassroomRow,
+    name: string,
+    status: ClassroomStatus,
+  ) {
+    expect(response.body).toMatchObject({
+      id: classroom._id.toHexString(),
+      name,
+      status,
+      course: {
+        id: courseId.toHexString(),
+        code: namespace,
+        name: namespace,
+        term: '2026-Autumn',
+        status: 'ACTIVE',
+      },
+    });
+  }
+
+  function receiptState(response: request.Response) {
+    const body = response.body as Partial<ClassroomResponseDto> & {
+      message?: string;
+      ok?: boolean;
+    };
+    return {
+      http: response.status,
+      status: body.status,
+      name: body.name,
+      message: body.message,
+      ok: body.ok,
+    };
+  }
+
+  it.each(['archive', 'rename', 'delete'] as const)(
+    'classroom update race: %s completes first',
+    async (firstWriter) => {
+      const classroom = await createClassroom(`metadata-${firstWriter}-first`);
+      const name = assignEditedName(classroom);
+      const { first, second, pausedMethod } = await interleaveClassroomUpdate(
+        classroom,
+        firstWriter === 'archive' ? 'rename' : 'archive',
+        name,
+        () => {
+          if (firstWriter === 'archive') return archive(classroom);
+          if (firstWriter === 'rename') return patch(classroom, { name });
+          return remove(classroom);
+        },
+      );
+      const fetched = await fetch(classroom);
+      const stored = await storedClassroom(classroom._id);
+      console.info(
+        JSON.stringify({
+          stage: 'classroom-lifecycle-update-race',
+          firstWriter,
+          pausedMethod,
+          originalName: classroom.name,
+          editedName: name,
+          first: receiptState(first),
+          second: receiptState(second),
+          get: receiptState(fetched),
+          mongo: stored && { name: stored.name, status: stored.status },
+        }),
+      );
+      if (firstWriter === 'delete') {
+        expect(first.status).toBe(200);
+        expect(first.body).toEqual({ ok: true });
+        expect(second.status).toBe(404);
+        expect(second.body).toMatchObject(classroomNotFound);
+        expect(fetched.status).toBe(404);
+        expect(fetched.body).toMatchObject(classroomNotFound);
+        expect(stored).toBeNull();
+        return;
+      }
+
+      const expectedName = firstWriter === 'archive' ? classroom.name : name;
+      if (firstWriter === 'archive') {
+        expect(first.status).toBe(201);
+        expectClassroomReceipt(
+          first,
+          classroom,
+          expectedName,
+          ClassroomStatus.Archived,
+        );
+        expect(second.status).toBe(400);
+        expect(second.body).toMatchObject(archivedUpdate);
+      } else {
+        expect(first.status).toBe(200);
+        expectClassroomReceipt(first, classroom, name, ClassroomStatus.Active);
+        expect(second.status).toBe(201);
+        expectClassroomReceipt(
+          second,
+          classroom,
+          name,
+          ClassroomStatus.Archived,
+        );
+      }
+      expect(fetched.status).toBe(200);
+      expectClassroomReceipt(
+        fetched,
+        classroom,
+        expectedName,
+        ClassroomStatus.Archived,
+      );
+      expect(stored).toMatchObject({
+        name: expectedName,
+        status: ClassroomStatus.Archived,
+      });
+    },
+  );
+
+  it('deletes an empty classroom after its confirmed rename', async () => {
+    const classroom = await createClassroom('rename-then-delete');
+    const name = assignEditedName(classroom);
+    const renamed = await patch(classroom, { name }).expect(200);
+    expectClassroomReceipt(renamed, classroom, name, ClassroomStatus.Active);
+    expect(await storedClassroom(classroom._id)).toMatchObject({
+      name,
+      status: ClassroomStatus.Active,
+    });
+    const deleted = await remove(classroom).expect(200);
+    expect(deleted.body).toEqual({ ok: true });
+    const fetched = await fetch(classroom).expect(404);
+    expect(fetched.body).toMatchObject(classroomNotFound);
+    const stored = await storedClassroom(classroom._id);
+    expect(stored).toBeNull();
+    console.info(
+      JSON.stringify({
+        stage: 'classroom-lifecycle-rename-then-delete',
+        first: receiptState(renamed),
+        second: receiptState(deleted),
+        get: receiptState(fetched),
+        mongo: stored,
+      }),
+    );
+  });
+
+  it('preserves classroom update authorization, no-op timestamps and mixed patch rules', async () => {
+    const classroom = await createClassroom('metadata-contract');
+    const name = assignEditedName(classroom);
+    await patch(classroom, { name }, studentAgent).expect(403);
+    const foreign = await patch(classroom, { name }, otherTeacherAgent).expect(
+      404,
+    );
+    expect(foreign.body).toMatchObject(classroomNotFound);
+    for (const dto of [{}, { name: classroom.name }]) {
+      const result = await patch(classroom, dto).expect(200);
+      expect((result.body as ClassroomResponseDto).updatedAt).toBe(
+        fixtureTime.toISOString(),
+      );
+      expect(await storedClassroom(classroom._id)).toEqual(classroom);
+    }
+
+    const archived = await patch(classroom, {
+      name,
+      status: ClassroomStatus.Archived,
+    }).expect(200);
+    expectClassroomReceipt(archived, classroom, name, ClassroomStatus.Archived);
+    const beforeRejection = await storedClassroom(classroom._id);
+    expect(beforeRejection).toMatchObject({
+      name,
+      status: ClassroomStatus.Archived,
+    });
+    const blocked = await patch(classroom, {
+      name,
+      status: ClassroomStatus.Active,
+    }).expect(400);
+    expect(blocked.body).toMatchObject(archivedUpdate);
+    expect(await storedClassroom(classroom._id)).toEqual(beforeRejection);
+    const restored = await patch(classroom, {
+      status: ClassroomStatus.Active,
+    }).expect(200);
+    expectClassroomReceipt(restored, classroom, name, ClassroomStatus.Active);
+    expect(await storedClassroom(classroom._id)).toMatchObject({
+      name,
+      status: ClassroomStatus.Active,
+    });
+
+    const alreadyArchived = await createClassroom('archived-no-op', {
+      status: ClassroomStatus.Archived,
+    });
+    await archive(alreadyArchived).expect(201);
+    const repeated = await archive(alreadyArchived).expect(201);
+    expect((repeated.body as ClassroomResponseDto).updatedAt).toBe(
+      fixtureTime.toISOString(),
+    );
+    expect(await storedClassroom(alreadyArchived._id)).toEqual(alreadyArchived);
+  });
+
+  it('allows a name update with legacy missing classroom status', async () => {
+    const classroom = await createClassroom('legacy-update-status', {}, true);
+    expect(await storedClassroom(classroom._id)).not.toHaveProperty('status');
+    const name = assignEditedName(classroom);
+    const result = await patch(classroom, { name }).expect(200);
+    expectClassroomReceipt(result, classroom, name, ClassroomStatus.Active);
+    expect(await storedClassroom(classroom._id)).toMatchObject({ name });
   });
 
   it.each([

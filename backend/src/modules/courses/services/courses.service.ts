@@ -65,7 +65,11 @@ export class CoursesService {
 
   async updateCourse(id: string, dto: UpdateCourseDto, userId: string) {
     await this.ensureTeacher(userId);
-    const course = await this.findOwnedCourseOrThrow(id, userId);
+    const scope = { _id: id, createdBy: new Types.ObjectId(userId) };
+    const course = await this.courseModel.findOne(scope).exec();
+    if (!course) {
+      throw new NotFoundException('Course not found');
+    }
     const hasCourseLabel = dto.courseLabel !== undefined;
     const hasBaseFieldUpdate =
       dto.code !== undefined ||
@@ -90,11 +94,42 @@ export class CoursesService {
     if (dto.status !== undefined) {
       course.status = dto.status;
     }
-    try {
-      if (hasBaseFieldUpdate || dto.status !== undefined) {
-        await course.save();
-      }
+
+    // Only include dirty paths, so schema defaults on old records stay omitted.
+    const $set = {
+      ...(course.isModified('code') && { code: course.code }),
+      ...(course.isModified('name') && { name: course.name }),
+      ...(course.isModified('term') && { term: course.term }),
+      ...(course.isModified('status') && { status: course.status }),
+      ...(course.isModified('courseLabel') &&
+        course.courseLabel !== undefined && {
+          courseLabel: course.courseLabel,
+        }),
+    };
+    const clearCourseLabel =
+      course.isModified('courseLabel') && course.courseLabel === undefined;
+    if (!Object.keys($set).length && !clearCourseLabel) {
       return this.toCourseResponse(course);
+    }
+
+    try {
+      const updated = await this.courseModel
+        .findOneAndUpdate(
+          {
+            ...scope,
+            ...(hasBaseFieldUpdate && {
+              status: { $ne: CourseStatus.Archived },
+            }),
+          },
+          { $set, ...(clearCourseLabel && { $unset: { courseLabel: 1 } }) },
+          { returnDocument: 'after', runValidators: true },
+        )
+        .exec();
+      if (updated) return this.toCourseResponse(updated);
+      if (hasBaseFieldUpdate && (await this.courseModel.exists(scope).exec())) {
+        throw new BadRequestException('Archived courses cannot be updated');
+      }
+      throw new NotFoundException('Course not found');
     } catch (error) {
       const mongoError = error as { code?: number };
       if (mongoError.code === 11000) {
@@ -220,16 +255,5 @@ export class CoursesService {
     }
     const trimmed = value.trim();
     return trimmed ? trimmed : undefined;
-  }
-
-  private async findOwnedCourseOrThrow(id: string, userId: string) {
-    const course = await this.courseModel.findOne({
-      _id: id,
-      createdBy: new Types.ObjectId(userId),
-    });
-    if (!course) {
-      throw new NotFoundException('Course not found');
-    }
-    return course;
   }
 }
