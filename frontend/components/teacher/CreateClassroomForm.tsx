@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { ErrorState } from "@/components/blocks/ErrorState";
@@ -75,9 +75,12 @@ export function CreateClassroomForm({
   const [loadMoreError, setLoadMoreError] = useState(false);
   const [selectedCourseId, setSelectedCourseId] = useState(initialCourseId);
   const [name, setName] = useState("");
+  const submitLocked = useRef(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isNavigating, startNavigation] = useTransition();
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [errorState, setErrorState] = useState<CreateClassroomFormErrorState | null>(null);
+  const isLocked = isSubmitting || isNavigating;
   const classroomNamePlaceholder = getClassroomNamePlaceholder();
   const availableCourses = useMemo(
     () => mergeClassroomCourseOptions(courses, loadedCourses),
@@ -85,6 +88,12 @@ export function CreateClassroomForm({
   );
   const courseId = selectedCourseId ?? initialCourseId ?? availableCourses[0]?.id ?? "";
   const nextPageToLoad = loadedPage ? loadedPage.nextPage : nextPage;
+
+  useEffect(() => {
+    if (successMessage && !isLocked) {
+      submitLocked.current = false;
+    }
+  }, [isLocked, successMessage]);
 
   const handleLoadMore = async () => {
     if (targetUnavailable || isLoadingMore || nextPageToLoad === undefined) {
@@ -107,7 +116,7 @@ export function CreateClassroomForm({
 
   const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    if (targetUnavailable || isSubmitting) {
+    if (targetUnavailable || submitLocked.current || isLocked) {
       return;
     }
     const trimmedName = name.trim();
@@ -125,15 +134,18 @@ export function CreateClassroomForm({
       return;
     }
 
-    setIsSubmitting(true);
-    setSuccessMessage(null);
-    setErrorState(null);
-
     const requestBody: CreateClassroomRequest = {
       courseId,
       name: trimmedName,
     };
 
+    submitLocked.current = true;
+    setSelectedCourseId(courseId);
+    setIsSubmitting(true);
+    setSuccessMessage(null);
+    setErrorState(null);
+
+    let classroomId: string | undefined;
     try {
       const payload = await fetchJson<unknown>("classrooms", {
         method: "POST",
@@ -144,15 +156,7 @@ export function CreateClassroomForm({
         body: JSON.stringify(requestBody),
       });
 
-      const response = toClassroomCreateResponse(payload);
-      if (response.id) {
-        router.push(paths.teacher.classroomDashboard(response.id));
-        return;
-      }
-
-      setSuccessMessage("班级已创建。");
-      router.push(paths.teacher.classrooms);
-      router.refresh();
+      classroomId = toClassroomCreateResponse(payload).id;
     } catch (error) {
       if (error instanceof BrowserFetchJsonError) {
         const summary = getCreateErrorSummary(error.status);
@@ -166,9 +170,22 @@ export function CreateClassroomForm({
           description: "操作失败，请稍后重试。",
         });
       }
-    } finally {
+      submitLocked.current = false;
       setIsSubmitting(false);
+      return;
     }
+
+    startNavigation(() => {
+      if (classroomId) {
+        router.push(paths.teacher.classroomDashboard(classroomId));
+      } else {
+        router.push(paths.teacher.classrooms);
+        router.refresh();
+      }
+      setName("");
+      setSuccessMessage("班级已创建。");
+      setIsSubmitting(false);
+    });
   };
 
   return (
@@ -194,6 +211,7 @@ export function CreateClassroomForm({
             <span className="mb-1 block text-zinc-700">所属课程</span>
             <select
               value={courseId}
+              disabled={isLocked}
               onChange={(event) => setSelectedCourseId(event.target.value)}
               className="w-full rounded-md border border-zinc-300 px-3 py-2"
             >
@@ -209,6 +227,7 @@ export function CreateClassroomForm({
             <span className="mb-1 block text-zinc-700">班级名称</span>
             <input
               value={name}
+              disabled={isLocked}
               onChange={(event) => setName(event.target.value)}
               placeholder={classroomNamePlaceholder}
               className="w-full rounded-md border border-zinc-300 px-3 py-2"
@@ -218,10 +237,10 @@ export function CreateClassroomForm({
           <div className="md:col-span-2">
             <button
               type="submit"
-              disabled={isSubmitting}
+              disabled={isLocked}
               className="rounded-md bg-zinc-900 px-4 py-2 text-sm font-medium text-white disabled:cursor-not-allowed disabled:bg-zinc-400"
             >
-              {isSubmitting ? "创建中..." : "创建班级"}
+              {isLocked ? "创建中..." : "创建班级"}
             </button>
           </div>
         </form>

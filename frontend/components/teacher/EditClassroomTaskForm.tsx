@@ -1,6 +1,6 @@
 "use client";
 
-import { startTransition, useMemo, useOptimistic, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { ErrorState } from "@/components/blocks/ErrorState";
 import { BrowserFetchJsonError, fetchJson } from "@/lib/api/browser-client";
@@ -35,6 +35,7 @@ export function EditClassroomTaskForm({
   allowLate,
 }: EditClassroomTaskFormProps) {
   const router = useRouter();
+  const inFlight = useRef(false);
   const [isExpanded, setIsExpanded] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
@@ -45,9 +46,24 @@ export function EditClassroomTaskForm({
     dueAtLocal: "",
     allowLate: true,
   });
-  const [openBaseline, setOpenBaseline] = useOptimistic(
-    toClassroomTaskSettingsBaseline({ dueAt, allowLate }),
-  );
+  const serverSettings = { classroomId, classroomTaskId, dueAt, allowLate };
+  const [openingSettings, setOpeningSettings] = useState(() => ({
+    ...serverSettings,
+    baseline: toClassroomTaskSettingsBaseline(serverSettings),
+  }));
+
+  // Keep the saved baseline while a list refresh still has the previous settings.
+  if (
+    openingSettings.classroomId !== classroomId ||
+    openingSettings.classroomTaskId !== classroomTaskId ||
+    openingSettings.dueAt !== dueAt ||
+    openingSettings.allowLate !== allowLate
+  ) {
+    setOpeningSettings({
+      ...serverSettings,
+      baseline: toClassroomTaskSettingsBaseline(serverSettings),
+    });
+  }
 
   const statusValue = normalizeClassroomTaskStatus(status) ?? "ACTIVE";
   const canEdit = Boolean(classroomTaskId) && (statusValue === "ACTIVE" || statusValue === "CLOSED");
@@ -65,6 +81,8 @@ export function EditClassroomTaskForm({
   }
 
   const handleExpand = () => {
+    if (inFlight.current) return;
+    const openBaseline = openingSettings.baseline;
     setEditingBaseline(openBaseline);
     setNextDueAt(openBaseline.dueAtLocal);
     setNextAllowLate(openBaseline.allowLate);
@@ -72,6 +90,7 @@ export function EditClassroomTaskForm({
   };
 
   const handleCancel = () => {
+    if (inFlight.current) return;
     setIsExpanded(false);
     setErrorState(null);
     setSuccessMessage(null);
@@ -79,7 +98,13 @@ export function EditClassroomTaskForm({
 
   const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    if (!classroomTaskId || !canEdit || isSubmitting || settingsRequest.kind === "unchanged") {
+    if (
+      !classroomTaskId ||
+      !canEdit ||
+      isSubmitting ||
+      inFlight.current ||
+      settingsRequest.kind === "unchanged"
+    ) {
       return;
     }
 
@@ -90,6 +115,7 @@ export function EditClassroomTaskForm({
       return;
     }
 
+    inFlight.current = true;
     setIsSubmitting(true);
     setErrorState(null);
     setSuccessMessage(null);
@@ -111,13 +137,10 @@ export function EditClassroomTaskForm({
         classroomId,
         classroomTaskId,
       );
+      setOpeningSettings((current) => ({ ...current, baseline: saved }));
       setSuccessMessage("课堂任务设置已更新。");
       setIsExpanded(false);
-      // The receipt is the opening baseline while refreshed list props are pending.
-      startTransition(() => {
-        setOpenBaseline(saved);
-        router.refresh();
-      });
+      router.refresh();
     } catch (error) {
       if (error instanceof BrowserFetchJsonError) {
         const summaryByStatus: Record<number, string> = {
@@ -138,6 +161,7 @@ export function EditClassroomTaskForm({
         });
       }
     } finally {
+      inFlight.current = false;
       setIsSubmitting(false);
     }
   };
@@ -159,7 +183,10 @@ export function EditClassroomTaskForm({
             <input
               type="datetime-local"
               value={nextDueAt}
-              onChange={(event) => setNextDueAt(event.target.value)}
+              disabled={isSubmitting}
+              onChange={(event) => {
+                if (!inFlight.current) setNextDueAt(event.target.value);
+              }}
               className="w-full rounded-md border border-zinc-300 px-2 py-1.5 text-xs"
             />
           </label>
@@ -168,7 +195,10 @@ export function EditClassroomTaskForm({
             <input
               type="checkbox"
               checked={nextAllowLate}
-              onChange={(event) => setNextAllowLate(event.target.checked)}
+              disabled={isSubmitting}
+              onChange={(event) => {
+                if (!inFlight.current) setNextAllowLate(event.target.checked);
+              }}
             />
             允许迟交
           </label>

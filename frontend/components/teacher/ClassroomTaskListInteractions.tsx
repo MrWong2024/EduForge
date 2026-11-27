@@ -4,8 +4,17 @@ import { useRouter } from "next/navigation";
 import { createContext, useContext, useEffect, useState } from "react";
 import type { Dispatch, ReactNode, SetStateAction } from "react";
 
+type ClassroomTaskPublishReceipt = {
+  id: string;
+  dueAt?: string;
+  allowLate: boolean;
+};
+
 type ListInteractions = {
-  receipt: [string | null, Dispatch<SetStateAction<string | null>>];
+  receipt: [
+    ClassroomTaskPublishReceipt | null,
+    Dispatch<SetStateAction<ClassroomTaskPublishReceipt | null>>,
+  ];
   deletionNotice: string | null;
   setDeletionNotice: (notice: string | null) => void;
 };
@@ -20,7 +29,7 @@ export function ClassroomTaskListInteractions({
   validPageHref?: string;
 }) {
   const router = useRouter();
-  const receipt = useState<string | null>(null);
+  const receipt = useState<ClassroomTaskPublishReceipt | null>(null);
   const [deletionNotice, setDeletionNotice] = useState<string | null>(null);
 
   useEffect(() => {

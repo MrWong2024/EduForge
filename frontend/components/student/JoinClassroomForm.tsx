@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import type { SubmitEventHandler } from "react";
 import { useRouter } from "next/navigation";
 import { ErrorState } from "@/components/blocks/ErrorState";
@@ -66,32 +66,30 @@ export async function submitJoinClassroom(
 export function JoinClassroomForm() {
   const router = useRouter();
   const [joinCode, setJoinCode] = useState("");
+  const submitLocked = useRef(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errorState, setErrorState] = useState<JoinErrorState | null>(null);
 
   const handleSubmit: SubmitEventHandler<HTMLFormElement> = async (event) => {
     event.preventDefault();
-    if (isSubmitting) {
+    if (submitLocked.current) {
       return;
     }
 
+    submitLocked.current = true;
     setIsSubmitting(true);
     setErrorState(null);
 
-    try {
-      const failure = await submitJoinClassroom(joinCode);
-      if (failure) {
-        setErrorState(failure);
-        return;
-      }
-
-      router.push(paths.student.dashboard);
-      router.refresh();
-    } catch {
-      setErrorState({ summary: JOIN_REQUEST_FAILURE });
-    } finally {
+    const failure = await submitJoinClassroom(joinCode);
+    if (failure) {
+      setErrorState(failure);
+      submitLocked.current = false;
       setIsSubmitting(false);
+      return;
     }
+
+    router.push(paths.student.dashboard);
+    router.refresh();
   };
 
   return (
@@ -106,6 +104,7 @@ export function JoinClassroomForm() {
             type="text"
             required
             value={joinCode}
+            disabled={isSubmitting}
             onChange={(event) => setJoinCode(normalizeJoinCodeInput(event.target.value))}
             className="w-full rounded-md border border-zinc-300 px-3 py-2 text-sm outline-none focus:border-zinc-500"
             placeholder="例如：ABCD12"

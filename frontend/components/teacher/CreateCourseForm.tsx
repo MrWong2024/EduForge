@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { ErrorState } from "@/components/blocks/ErrorState";
 import { BrowserFetchJsonError, fetchJson } from "@/lib/api/browser-client";
@@ -57,13 +57,26 @@ export function CreateCourseForm() {
   const [name, setName] = useState("");
   const [term, setTerm] = useState("");
   const [courseLabel, setCourseLabel] = useState("");
+  const submitLocked = useRef(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isNavigating, startNavigation] = useTransition();
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [errorState, setErrorState] = useState<CreateCourseFormErrorState | null>(null);
+  const isLocked = isSubmitting || isNavigating;
   const termPlaceholder = getTermPlaceholder();
+
+  useEffect(() => {
+    if (successMessage && !isLocked) {
+      submitLocked.current = false;
+    }
+  }, [isLocked, successMessage]);
 
   const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+    if (submitLocked.current || isLocked) {
+      return;
+    }
+
     const trimmedCode = code.trim();
     const trimmedName = name.trim();
     const trimmedTerm = term.trim();
@@ -76,10 +89,6 @@ export function CreateCourseForm() {
       return;
     }
 
-    setIsSubmitting(true);
-    setSuccessMessage(null);
-    setErrorState(null);
-
     const requestBody: CreateCourseRequest = {
       code: trimmedCode,
       name: trimmedName,
@@ -89,6 +98,12 @@ export function CreateCourseForm() {
       requestBody.courseLabel = normalizedCourseLabel;
     }
 
+    submitLocked.current = true;
+    setIsSubmitting(true);
+    setSuccessMessage(null);
+    setErrorState(null);
+
+    let courseId: string | undefined;
     try {
       const payload = await fetchJson<unknown>("courses", {
         method: "POST",
@@ -99,15 +114,7 @@ export function CreateCourseForm() {
         body: JSON.stringify(requestBody),
       });
 
-      const response = toCourseCreateResponse(payload);
-      if (response.id) {
-        router.push(paths.teacher.courseOverview(response.id));
-        return;
-      }
-
-      setSuccessMessage("课程已创建。");
-      router.push(paths.teacher.courses);
-      router.refresh();
+      courseId = toCourseCreateResponse(payload).id;
     } catch (error) {
       if (error instanceof BrowserFetchJsonError) {
         const summary = getCreateErrorSummary(error.status);
@@ -121,9 +128,25 @@ export function CreateCourseForm() {
           description: "操作失败，请稍后重试。",
         });
       }
-    } finally {
+      submitLocked.current = false;
       setIsSubmitting(false);
+      return;
     }
+
+    startNavigation(() => {
+      if (courseId) {
+        router.push(paths.teacher.courseOverview(courseId));
+      } else {
+        router.push(paths.teacher.courses);
+        router.refresh();
+      }
+      setCode("");
+      setName("");
+      setTerm("");
+      setCourseLabel("");
+      setSuccessMessage("课程已创建。");
+      setIsSubmitting(false);
+    });
   };
 
   return (
@@ -138,6 +161,7 @@ export function CreateCourseForm() {
           <span className="mb-1 block text-zinc-700">课程代码</span>
           <input
             value={code}
+            disabled={isLocked}
             onChange={(event) => setCode(event.target.value)}
             placeholder="例如 CS101"
             className="w-full rounded-md border border-zinc-300 px-3 py-2"
@@ -148,6 +172,7 @@ export function CreateCourseForm() {
           <span className="mb-1 block text-zinc-700">课程名称</span>
           <input
             value={name}
+            disabled={isLocked}
             onChange={(event) => setName(event.target.value)}
             placeholder="例如 程序设计基础"
             className="w-full rounded-md border border-zinc-300 px-3 py-2"
@@ -158,6 +183,7 @@ export function CreateCourseForm() {
           <span className="mb-1 block text-zinc-700">学期</span>
           <input
             value={term}
+            disabled={isLocked}
             onChange={(event) => setTerm(event.target.value)}
             placeholder={termPlaceholder}
             className="w-full rounded-md border border-zinc-300 px-3 py-2"
@@ -168,6 +194,7 @@ export function CreateCourseForm() {
           <span className="mb-1 block text-zinc-700">课程分类</span>
           <select
             value={courseLabel}
+            disabled={isLocked}
             onChange={(event) => setCourseLabel(event.target.value)}
             className="w-full rounded-md border border-zinc-300 px-3 py-2"
           >
@@ -183,10 +210,10 @@ export function CreateCourseForm() {
         <div className="md:col-span-4">
           <button
             type="submit"
-            disabled={isSubmitting}
+            disabled={isLocked}
             className="rounded-md bg-zinc-900 px-4 py-2 text-sm font-medium text-white disabled:cursor-not-allowed disabled:bg-zinc-400"
           >
-            {isSubmitting ? "创建中..." : "创建课程"}
+            {isLocked ? "创建中..." : "创建课程"}
           </button>
         </div>
       </form>

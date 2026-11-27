@@ -24,7 +24,7 @@ import {
   getDifficultyLabel,
   parseDifficultyFilter,
 } from "@/lib/learning-tasks/difficulty";
-import { buildQueryString, getPublisherLabel } from "@/lib/ui/format";
+import { buildQueryString, getPublisherLabel, toDisplayDate } from "@/lib/ui/format";
 import { getTaskTemplateStatusLabel } from "@/lib/ui/status";
 import { useClassroomTaskPublishReceipt } from "./ClassroomTaskListInteractions";
 
@@ -140,8 +140,9 @@ export function PublishClassroomTaskForm({
   const [isDueAtPickerActive, setIsDueAtPickerActive] = useState(false);
   const [allowLate, setAllowLate] = useState<boolean>(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const inFlight = useRef(false);
   const [errorState, setErrorState] = useState<PublishErrorState | null>(null);
-  const [createdTaskId, setCreatedTaskId] = useClassroomTaskPublishReceipt();
+  const [publishReceipt, setPublishReceipt] = useClassroomTaskPublishReceipt();
   const [loadedTasks, setLoadedTasks] =
     useState<LearningTaskOption[]>(availableTasks);
   const [loadedTotal, setLoadedTotal] = useState<number>(
@@ -184,7 +185,7 @@ export function PublishClassroomTaskForm({
       initialKnowledgeModuleFilter ||
     previousFilterProps.initialDifficulty !== initialDifficulty;
 
-  if (filterPropsChanged) {
+  if (!isSubmitting && filterPropsChanged) {
     setPreviousFilterProps({
       initialCourseLabelFilter,
       initialOnlyMineFilter,
@@ -195,11 +196,13 @@ export function PublishClassroomTaskForm({
   }
 
   if (
-    filterPropsChanged ||
-    previousTaskProps.availableTasks !== availableTasks ||
-    !Object.is(previousTaskProps.initialAvailableTasksTotal, initialAvailableTasksTotal) ||
-    !Object.is(previousTaskProps.initialAvailableTasksPage, initialAvailableTasksPage) ||
-    !Object.is(previousTaskProps.initialAvailableTasksLimit, initialAvailableTasksLimit)
+    !isSubmitting && (
+      filterPropsChanged ||
+      previousTaskProps.availableTasks !== availableTasks ||
+      !Object.is(previousTaskProps.initialAvailableTasksTotal, initialAvailableTasksTotal) ||
+      !Object.is(previousTaskProps.initialAvailableTasksPage, initialAvailableTasksPage) ||
+      !Object.is(previousTaskProps.initialAvailableTasksLimit, initialAvailableTasksLimit)
+    )
   ) {
     setPreviousTaskProps({
       availableTasks,
@@ -338,7 +341,7 @@ export function PublishClassroomTaskForm({
   };
 
   const setCourseLabelFilterAndSync = (nextValue: string) => {
-    if (isFilterPending || isSubmitting) {
+    if (isFilterPending || isSubmitting || inFlight.current) {
       return;
     }
     if (nextValue !== courseLabelFilter) {
@@ -355,7 +358,7 @@ export function PublishClassroomTaskForm({
   };
 
   const setOnlyMineAndSync = (nextValue: boolean) => {
-    if (isFilterPending || isSubmitting) {
+    if (isFilterPending || isSubmitting || inFlight.current) {
       return;
     }
     if (nextValue !== onlyMine) {
@@ -372,7 +375,7 @@ export function PublishClassroomTaskForm({
   };
 
   const setKnowledgeModuleFilterAndSync = (nextValue: string) => {
-    if (isFilterPending || isSubmitting) {
+    if (isFilterPending || isSubmitting || inFlight.current) {
       return;
     }
     if (nextValue !== knowledgeModuleFilter) {
@@ -389,7 +392,7 @@ export function PublishClassroomTaskForm({
   };
 
   const setDifficultyFilterAndSync = (value: string) => {
-    if (isFilterPending || isSubmitting) {
+    if (isFilterPending || isSubmitting || inFlight.current) {
       return;
     }
     const nextValue = parseDifficultyFilter(value) ?? "";
@@ -407,7 +410,7 @@ export function PublishClassroomTaskForm({
   };
 
   const resetFilters = () => {
-    if (isFilterPending || isSubmitting) {
+    if (isFilterPending || isSubmitting || inFlight.current) {
       return;
     }
     invalidateCandidateSelection();
@@ -435,6 +438,7 @@ export function PublishClassroomTaskForm({
   const handleLoadMore = async () => {
     if (
       isSubmitting ||
+      inFlight.current ||
       isRefreshingCandidates ||
       isLoadingMore ||
       !hasMoreTasks
@@ -527,7 +531,7 @@ export function PublishClassroomTaskForm({
   };
 
   const selectTask = (nextTaskId: string) => {
-    if (isSubmitting || isRefreshingCandidates) {
+    if (isSubmitting || inFlight.current || isRefreshingCandidates) {
       return;
     }
     setTaskId(
@@ -537,41 +541,36 @@ export function PublishClassroomTaskForm({
 
   const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    if (isSubmitting || isRefreshingCandidates) {
+    if (isSubmitting || inFlight.current || isRefreshingCandidates) {
       return;
     }
 
+    const publishTaskId = taskId.trim();
+    if (
+      !publishTaskId ||
+      !loadedTasks.some((task) => task.id === publishTaskId)
+    ) {
+      setTaskId("");
+      setErrorState({
+        summary: "请先选择一个已发布任务模板。",
+      });
+      return;
+    }
+
+    const dueAtIso = toIsoDateTime(dueAt);
+    const body: PublishClassroomTaskRequest = {
+      taskId: publishTaskId,
+      settings: { allowLate },
+    };
+    if (dueAtIso) {
+      body.dueAt = dueAtIso;
+    }
+
+    inFlight.current = true;
     setIsSubmitting(true);
     setErrorState(null);
-    setCreatedTaskId(null);
 
     try {
-      const publishTaskId = taskId.trim();
-      if (
-        !publishTaskId ||
-        !loadedTasks.some((task) => task.id === publishTaskId)
-      ) {
-        setTaskId("");
-        setErrorState({
-          summary: "请先选择一个已发布任务模板。",
-        });
-        return;
-      }
-
-      const dueAtIso = toIsoDateTime(dueAt);
-
-      const settings: NonNullable<PublishClassroomTaskRequest["settings"]> = {
-        allowLate,
-      };
-
-      const body: PublishClassroomTaskRequest = {
-        taskId: publishTaskId,
-        settings,
-      };
-      if (dueAtIso) {
-        body.dueAt = dueAtIso;
-      }
-
       const payload = await fetchJson<unknown>(
         `classrooms/${encodeURIComponent(classroomId)}/tasks`,
         {
@@ -585,7 +584,19 @@ export function PublishClassroomTaskForm({
       );
 
       const response = toSubmitTaskResponse(payload);
-      setCreatedTaskId(response.id ?? null);
+      if (
+        !response.id ||
+        response.classroomId !== classroomId ||
+        response.taskId !== publishTaskId ||
+        typeof response.allowLate !== "boolean"
+      ) {
+        throw new Error("Unexpected classroom task publish response");
+      }
+      setPublishReceipt({
+        id: response.id,
+        dueAt: response.dueAt,
+        allowLate: response.allowLate,
+      });
       setTaskId("");
       router.refresh();
     } catch (error) {
@@ -610,6 +621,7 @@ export function PublishClassroomTaskForm({
         });
       }
     } finally {
+      inFlight.current = false;
       setIsSubmitting(false);
     }
   };
@@ -933,7 +945,10 @@ export function PublishClassroomTaskForm({
               type={dueAtInputType}
               placeholder="YYYY/MM/DD HH:mm"
               value={dueAt}
-              onChange={(event) => setDueAt(event.target.value)}
+              disabled={isSubmitting}
+              onChange={(event) => {
+                if (!inFlight.current) setDueAt(event.target.value);
+              }}
               onFocus={() => setIsDueAtPickerActive(true)}
               onBlur={() => setIsDueAtPickerActive(Boolean(dueAt))}
               className="w-full rounded-md border border-zinc-300 px-3 py-2"
@@ -950,7 +965,10 @@ export function PublishClassroomTaskForm({
           <input
             type="checkbox"
             checked={allowLate}
-            onChange={(event) => setAllowLate(event.target.checked)}
+            disabled={isSubmitting}
+            onChange={(event) => {
+              if (!inFlight.current) setAllowLate(event.target.checked);
+            }}
           />
           允许迟交
         </label>
@@ -964,14 +982,16 @@ export function PublishClassroomTaskForm({
         </button>
       </form>
 
-      {createdTaskId ? (
+      {publishReceipt ? (
         <div className="mt-4 rounded-md border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-800">
           <p>任务发布成功。</p>
+          <p>截止时间：{publishReceipt.dueAt ? toDisplayDate(publishReceipt.dueAt) : "未设置"}</p>
+          <p>允许迟交：{publishReceipt.allowLate ? "是" : "否"}</p>
           <div className="mt-1 flex flex-wrap gap-3">
             <Link
               href={paths.teacher.classroomTaskDetail(
                 classroomId,
-                createdTaskId,
+                publishReceipt.id,
               )}
               className="text-emerald-800 underline"
             >

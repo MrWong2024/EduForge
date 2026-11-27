@@ -121,7 +121,7 @@ export function ClassroomTaskLifecycleActions({
   listHeadingId,
 }: ClassroomTaskLifecycleActionsProps) {
   const router = useRouter();
-  const { receipt: [, setPublishedTaskId], setDeletionNotice } = useClassroomTaskListInteractions();
+  const { receipt: [, setPublishReceipt], setDeletionNotice } = useClassroomTaskListInteractions();
   const [pendingAction, setPendingAction] = useState<PendingAction | null>(null);
   const [runningAction, setRunningAction] = useState<LifecycleAction | null>(null);
   const [isRefreshing, startRefresh] = useTransition();
@@ -162,7 +162,7 @@ export function ClassroomTaskLifecycleActions({
     if (action === "DELETE") setDeletionNotice(null);
 
     const clearMatchingReceipt = () => {
-      setPublishedTaskId((publishedId) => publishedId === targetId ? null : publishedId);
+      setPublishReceipt((receipt) => receipt?.id === targetId ? null : receipt);
     };
 
     try {
