@@ -5,7 +5,8 @@ import { useRouter } from "next/navigation";
 import { ConfirmDialog } from "@/components/blocks/ConfirmDialog";
 import { ErrorState } from "@/components/blocks/ErrorState";
 import { FloatingMoreMenu } from "@/components/blocks/FloatingMoreMenu";
-import { BrowserFetchJsonError, fetchJson } from "@/lib/api/browser-client";
+import { BrowserFetchJsonError } from "@/lib/api/browser-client";
+import { usePageFetch } from "@/lib/api/use-page-fetch";
 import { buildErrorDescription, extractRawDetail } from "@/lib/api/error-presenter";
 import { getCommonErrorSummary } from "@/lib/ui/status";
 import { type ClassroomStatus, type UpdateClassroomRequest } from "@/lib/api/types-teacher";
@@ -108,6 +109,7 @@ export function ClassroomLifecycleActions({
   status,
   hasStatusFilter,
 }: ClassroomLifecycleActionsProps) {
+  const fetchJson = usePageFetch();
   const router = useRouter();
   const { clearFeedback, showSuccess } = useTeacherLifecycleList();
   const [confirmation, setConfirmation] = useState<ClassroomLifecycleAction | null>(null);

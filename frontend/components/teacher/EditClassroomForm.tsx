@@ -4,7 +4,8 @@ import Link from "next/link";
 import { useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { ErrorState } from "@/components/blocks/ErrorState";
-import { BrowserFetchJsonError, fetchJson } from "@/lib/api/browser-client";
+import { BrowserFetchJsonError } from "@/lib/api/browser-client";
+import { usePageFetch } from "@/lib/api/use-page-fetch";
 import { buildErrorDescription, extractRawDetail } from "@/lib/api/error-presenter";
 import {
   type ClassroomDetailResponse,
@@ -85,6 +86,7 @@ const getClassroomCourseDisplay = (
 };
 
 export function EditClassroomForm({ classroomId, initialClassroom }: EditClassroomFormProps) {
+  const fetchJson = usePageFetch();
   const router = useRouter();
   const captureCurrentPage = useCurrentPage();
   const [baselineName] = useState(initialClassroom.name ?? "");

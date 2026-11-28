@@ -4,7 +4,8 @@ import { useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { ErrorState } from "@/components/blocks/ErrorState";
 import { CreateOutcomeReview } from "@/components/teacher/CreateOutcomeReview";
-import { fetchJson, isDefiniteCreateRejection } from "@/lib/api/browser-client";
+import { isDefiniteCreateRejection } from "@/lib/api/browser-client";
+import { usePageFetch } from "@/lib/api/use-page-fetch";
 import {
   buildErrorDescription,
   extractRawDetail,
@@ -55,6 +56,7 @@ const getCreateErrorSummary = (status: number): string => {
 };
 
 export function CreateLearningTaskForm() {
+  const fetchJson = usePageFetch();
   const router = useRouter();
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");

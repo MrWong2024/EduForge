@@ -5,7 +5,8 @@ import type { FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { ErrorState } from "@/components/blocks/ErrorState";
-import { fetchJson, BrowserFetchJsonError } from "@/lib/api/browser-client";
+import { BrowserFetchJsonError } from "@/lib/api/browser-client";
+import { usePageFetch } from "@/lib/api/use-page-fetch";
 import { toSubmissionDetailResponse } from "@/lib/api/types-student";
 import { SUBMISSION_LANGUAGE_OPTIONS } from "@/lib/learning-tasks/submission-language";
 import {
@@ -61,6 +62,7 @@ function SubmissionEditor({
   eligibility,
 }: SubmissionTarget & { eligibility: SubmissionEligibility | null }) {
   const router = useRouter();
+  const fetchJson = usePageFetch();
   const captureCurrentPage = useCurrentPage();
   const [language, setLanguage] = useState("auto");
   const [codeText, setCodeText] = useState("");

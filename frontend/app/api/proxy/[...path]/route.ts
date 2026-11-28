@@ -1,6 +1,7 @@
 export const runtime = "nodejs";
 
 import { NextRequest } from "next/server";
+import { PAGE_ACCOUNT_HEADER, requiresPageAccount } from "@/lib/api/page-account";
 
 type RouteContext = {
   params: Promise<{ path: string[] }>;
@@ -47,7 +48,7 @@ const getBackendOrigin = (): string => {
   return normalizedOrigin;
 };
 
-const buildUpstreamHeaders = (request: NextRequest): Headers => {
+const buildUpstreamHeaders = (request: NextRequest, targetPath: string): Headers => {
   const proxyHeaders = new Headers();
 
   for (const [key, value] of request.headers.entries()) {
@@ -59,6 +60,10 @@ const buildUpstreamHeaders = (request: NextRequest): Headers => {
       continue;
     }
     proxyHeaders.set(normalizedKey, value);
+  }
+  if (requiresPageAccount(targetPath, request.method)) {
+    // A missing page identity must still pass through authentication first.
+    proxyHeaders.set(PAGE_ACCOUNT_HEADER, request.headers.get(PAGE_ACCOUNT_HEADER) ?? "");
   }
 
   return proxyHeaders;
@@ -99,7 +104,7 @@ const forward = async (request: NextRequest, context: RouteContext): Promise<Res
   try {
     const backendOrigin = getBackendOrigin();
     const targetUrl = `${backendOrigin}/api/${targetPath}${request.nextUrl.search}`;
-    const headers = buildUpstreamHeaders(request);
+    const headers = buildUpstreamHeaders(request, targetPath);
 
     const hasBody = request.method !== "GET" && request.method !== "HEAD";
     const rawBody = hasBody ? await request.arrayBuffer() : undefined;

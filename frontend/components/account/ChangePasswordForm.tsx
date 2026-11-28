@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useRef, useState } from "react";
 import { ErrorState } from "@/components/blocks/ErrorState";
-import { fetchJson } from "@/lib/api/browser-client";
+import { usePageFetch } from "@/lib/api/use-page-fetch";
 import { getAuthError, type AuthError } from "@/lib/auth/auth-errors";
 import {
   PASSWORD_RULES,
@@ -12,6 +12,7 @@ import {
 } from "@/lib/auth/password-policy";
 
 export function ChangePasswordForm() {
+  const fetchJson = usePageFetch();
   const [currentPassword, setCurrentPassword] = useState("");
   const [newPassword, setNewPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");

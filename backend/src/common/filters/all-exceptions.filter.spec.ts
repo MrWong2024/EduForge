@@ -112,6 +112,11 @@ describe('AllExceptionsFilter', () => {
       'CLASSROOM_TASK_NOT_EMPTY',
       '课堂任务已有作品或 AI 反馈任务，不能删除。',
     ],
+    [
+      409,
+      'PAGE_ACCOUNT_MISMATCH',
+      '当前登录账号与此页面不一致，请重新打开页面后再操作。',
+    ],
   ] as const)(
     'projects only the public code for %s %s and preserves its message',
     (status, code, message) => {
@@ -255,6 +260,7 @@ describe('AllExceptionsFilter', () => {
     [409, 'COURSE_NOT_EMPTY'],
     [409, 'CLASSROOM_NOT_EMPTY'],
     [409, 'CLASSROOM_TASK_NOT_EMPTY'],
+    [409, 'PAGE_ACCOUNT_MISMATCH'],
     [429, 'SUBMISSION_COOLDOWN_ACTIVE'],
   ];
   const wrongStatusPairs = publicCodePairs.flatMap(([allowedStatus, code]) =>

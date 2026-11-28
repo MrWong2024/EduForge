@@ -700,12 +700,17 @@ async function prepare(
   }
   let cookie = '';
   const origin = 'http://127.0.0.1:' + frontendPort;
-  const request = async (path: string, body: Record<string, unknown>) => {
+  const request = async (
+    path: string,
+    body: Record<string, unknown>,
+    expectedUserId?: string,
+  ) => {
     const response = await fetch(origin + '/api/proxy/' + path, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         ...(cookie ? { Cookie: cookie } : {}),
+        ...(expectedUserId ? { 'X-Expected-User-Id': expectedUserId } : {}),
       },
       body: JSON.stringify(body),
       signal: AbortSignal.timeout(deadline.remaining(15000)),
@@ -727,31 +732,40 @@ async function prepare(
     });
     if (stringField(teacher, 'id') !== record.teacherId)
       fail('SMOKE_LOGIN_ID_MISMATCH');
-    const course = await request('courses', {
-      code: namespace,
-      name: namespace + ' 合成编程验收',
-      term: '2026 合成验收',
-    });
+    const course = await request(
+      'courses',
+      {
+        code: namespace,
+        name: namespace + ' 合成编程验收',
+        term: '2026 合成验收',
+      },
+      record.teacherId,
+    );
     record.courseId = stringField(course, 'id');
     saveRecord(record);
-    const classroom = await request('classrooms', {
-      courseId: record.courseId,
-      name: namespace + ' 合成验收班',
-    });
+    const classroom = await request(
+      'classrooms',
+      { courseId: record.courseId, name: namespace + ' 合成验收班' },
+      record.teacherId,
+    );
     record.classroomId = stringField(classroom, 'id');
     saveRecord(record);
     for (const fixtureKey of SMOKE_TASK_KEYS) {
-      const task = await request('learning-tasks/tasks', {
-        title: namespace + ' ' + fixtureKey,
-        description:
-          '合成编程任务：将数组求和逻辑拆为 sum.js 与 main.js 两个 FILE 片段；提交独立说明并按教师意见修订。此材料仅用于工程验收。',
-        knowledgeModule: '合成数组与函数',
-        status: 'PUBLISHED',
-        visibility: 'PRIVATE',
-        rubric: {
-          notes: '合成验收评阅标准：覆盖空数组及多个元素，并说明修改理由。',
+      const task = await request(
+        'learning-tasks/tasks',
+        {
+          title: namespace + ' ' + fixtureKey,
+          description:
+            '合成编程任务：将数组求和逻辑拆为 sum.js 与 main.js 两个 FILE 片段；提交独立说明并按教师意见修订。此材料仅用于工程验收。',
+          knowledgeModule: '合成数组与函数',
+          status: 'PUBLISHED',
+          visibility: 'PRIVATE',
+          rubric: {
+            notes: '合成验收评阅标准：覆盖空数组及多个元素，并说明修改理由。',
+          },
         },
-      });
+        record.teacherId,
+      );
       record.taskIds.push(stringField(task, 'id'));
       saveRecord(record);
     }
@@ -763,9 +777,11 @@ async function prepare(
     });
     if (stringField(student, 'id') !== record.studentId)
       fail('SMOKE_LOGIN_ID_MISMATCH');
-    await request('classrooms/join', {
-      joinCode: stringField(classroom, 'joinCode'),
-    });
+    await request(
+      'classrooms/join',
+      { joinCode: stringField(classroom, 'joinCode') },
+      record.studentId,
+    );
     await request('auth/logout', {});
     cookie = '';
   } finally {

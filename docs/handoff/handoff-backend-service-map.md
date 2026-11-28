@@ -57,10 +57,10 @@ Global SoT 只保留理解跨 Service workflow 必需的稳定不变量，不追
 - Domain / Responsibility: Session 创建、单个注销与按用户批量失效。
 - Upstream: `AuthService` 登录/注销，`UsersService` 改密，`PasswordResetService` 重置密码。
 - Downstream / Dependencies: `SessionModel`、`randomBytes`、SHA-256。
-- Consistency / State / Idempotency: 32 个安全随机字节形成外部 token，数据库仅存不可逆 `tokenHash` 及显式凭据版本；单用户会话上限保持 5，淘汰查询和最终删除均限定本次签发版本。注销先校验 token 格式，按 hash 删除；不合格式值不进入数据库。
+- Consistency / State / Idempotency: 32 个安全随机字节形成外部 token，数据库仅存不可逆 `tokenHash` 及显式凭据版本。登录创建和改密迁入在写入后执行同一裁剪，同一账号、同一凭据版本的未过期会话在请求收尾后最多保留 5 个。注销先校验 token 格式，再按 hash 删除。
 - Isolation: 按 `userId + credentialVersion` 隔离淘汰与清理。改密仅将指定当前 Session 从精确旧版本晋升到新版本，条件含 `_id/userId/旧版本/未过期`，不 upsert、不重建、不续期；其它旧凭据清理只处理 `< 新版本`。
 - Side Effects: 创建、晋升或删除会话；Service 初始化不主动执行索引 DDL，索引生命周期见 [Config Matrix](./handoff-backend-config-matrix.md#1-数据库连接串与索引治理)。
-- Important Performance / Recovery: 按 `createdAt desc` 排序并 `skip(5)` 淘汰超额会话；迟到旧登录不得删除新版本会话。逻辑有效性由版本及过期校验保障，不依赖物理清理或 TTL 执行时机。
+- Important Performance / Recovery: 以会话进入当前凭据版本的时间降序保留前 5 个。创建和迁入更新 `updatedAt`，历史记录回退到 `createdAt`。同毫秒优先保留迁入的会话，其余并列以 `_id` 降序决定。裁剪删除同账号、同版本条件下选中的有效尾部会话。后续登录仍可按正常额度淘汰迁入会话。逻辑有效性由版本及过期校验保障。
 - SoT: `backend/src/modules/auth/services/session.service.ts`；`backend/src/modules/auth/schemas/session.schema.ts`。
 - Boundary / Non-responsibility: 不校验业务角色或课堂权限；会话有效期与 Cookie 配置见 [Config Matrix](./handoff-backend-config-matrix.md)。
 

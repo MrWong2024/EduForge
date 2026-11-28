@@ -15,8 +15,9 @@
 |---|---|---|
 | TeacherShell | `components/layout/TeacherShell.tsx` | 教师端顶栏、主导航、登出与账户入口的组合；窄屏按组换行，短入口保持整词、账户摘要允许收缩截断；不要在业务页重复教师导航 |
 | StudentShell | `components/layout/StudentShell.tsx` | 学生端顶栏、主导航、登出与账户入口的组合；窄屏按组换行，短入口保持整词、账户摘要允许收缩截断；不要在业务页重复学生导航 |
-| Teacher Gate | `app/teacher/layout.tsx` | 统一调用教师 role gate 并承载角色不匹配 UI；不要在每个页面重复 gate |
-| Student Gate | `app/student/layout.tsx` | 统一调用学生 role gate 并承载角色不匹配 UI；不要在每个页面重复 gate |
+| Teacher Gate | `app/teacher/layout.tsx` | 统一调用教师 role gate 并承载角色不匹配 UI；成功时用 `gate.me.id` 建立教师业务页面的账号边界 |
+| Student Gate | `app/student/layout.tsx` | 统一调用学生 role gate 并承载角色不匹配 UI；成功时用 `gate.me.id` 建立学生业务页面的账号边界 |
+| PageAccountBoundary | `components/layout/PageAccountBoundary.tsx` | 固定当前业务子树的已确认账号。同账号刷新保留局部草稿和操作状态，明确换号结束原编辑会话并提示重新打开页面。写入已收到成功回执、随后暂时无法确认账号时，保留当前草稿并暂停写入，提示先核对结果。重新打开后按当前服务端身份初始化 |
 
 ## 3) Shared Blocks
 
@@ -144,7 +145,7 @@
 | Component / Module | File | Responsibility / Boundary |
 |---|---|---|
 | Server API Client | `lib/api/client.ts` | Server/RSC 请求入口；调用合同见 Frontend API Map，不在页面拼后端绝对 URL |
-| Browser API Client | `lib/api/browser-client.ts` | Client 请求入口与统一错误类型；业务组件复用，不复制 fetch 基础设施 |
+| Browser API Client | `lib/api/browser-client.ts`、`lib/api/use-page-fetch.ts` | Client 请求与错误处理。表单和业务动作通过 `usePageFetch` 使用页面原账号。成功回执经有限时的当前账号探针确认后才交给原操作，同账号会话续期可继续，已经失效的页面不能执行迟到回执的导航 |
 | Error Presenter | `lib/api/error-presenter.ts` | 原始错误提取保留给内部原因识别；最终说明仅展示调用方已生成的业务 summary，不附原始 detail/code，不改变后端语义 |
 | Teacher Types Adapter | `lib/api/types-teacher.ts` | 教师 payload 解析与容错映射的修改落点；字段适配合同归 Frontend API Map，不在 JSX 深层散写访问 |
 | Classroom Task Options | `lib/api/classroom-task-options.ts` | 报表排除选项的共享只读加载模块；分页、去重和 payload 兼容细节见 Frontend API Map，不在各页复制或加入写操作 |

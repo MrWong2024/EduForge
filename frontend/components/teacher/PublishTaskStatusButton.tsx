@@ -3,7 +3,8 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { ErrorState } from "@/components/blocks/ErrorState";
-import { BrowserFetchJsonError, fetchJson } from "@/lib/api/browser-client";
+import { BrowserFetchJsonError } from "@/lib/api/browser-client";
+import { usePageFetch } from "@/lib/api/use-page-fetch";
 import { buildErrorDescription } from "@/lib/api/error-presenter";
 
 type PublishTaskStatusButtonProps = {
@@ -45,6 +46,7 @@ const extractRawDetail = (data: unknown): string | undefined => {
 };
 
 export function PublishTaskStatusButton({ taskId, taskStatus }: PublishTaskStatusButtonProps) {
+  const fetchJson = usePageFetch();
   const router = useRouter();
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errorState, setErrorState] = useState<PublishStatusErrorState | null>(null);

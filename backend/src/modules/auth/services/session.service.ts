@@ -36,24 +36,50 @@ export class SessionService {
       expiresAt,
     });
 
+    await this.pruneUserSessions(userId, credentialVersion);
+    return sessionToken;
+  }
+
+  private async pruneUserSessions(
+    userId: Types.ObjectId,
+    credentialVersion: number,
+  ): Promise<void> {
+    const scope = {
+      userId,
+      credentialVersion,
+      expiresAt: { $gt: new Date(Date.now()) },
+    };
+    // These timestamps stay fixed within a credential version, so overlapping
+    // trims agree. A promotion wins ties with new sessions created in the same
+    // millisecond even if its original ObjectId is older.
     const staleSessions = await this.sessionModel
-      .find({ userId, credentialVersion })
-      .sort({ createdAt: -1 })
-      .skip(this.maxSessionsPerUser)
-      .select('_id')
-      .lean<SessionId[]>()
+      .aggregate<SessionId>([
+        { $match: scope },
+        {
+          $project: {
+            admittedAt: { $ifNull: ['$updatedAt', '$createdAt'] },
+            wasPromoted: {
+              $ne: [
+                { $ifNull: ['$updatedAt', '$createdAt', null] },
+                { $ifNull: ['$createdAt', null] },
+              ],
+            },
+          },
+        },
+        { $sort: { admittedAt: -1, wasPromoted: -1, _id: -1 } },
+        { $skip: this.maxSessionsPerUser },
+        { $project: { _id: 1 } },
+      ])
+      .read('primary')
       .exec();
     if (staleSessions.length > 0) {
       await this.sessionModel
         .deleteMany({
-          userId,
-          credentialVersion,
+          ...scope,
           _id: { $in: staleSessions.map((session) => session._id) },
         })
         .exec();
     }
-
-    return sessionToken;
   }
 
   async deleteSession(token: unknown): Promise<void> {
@@ -99,6 +125,10 @@ export class SessionService {
         { upsert: false },
       )
       .exec();
-    return result.matchedCount === 1;
+    if (result.matchedCount !== 1) {
+      return false;
+    }
+    await this.pruneUserSessions(normalizedUserId, newVersion);
+    return true;
   }
 }

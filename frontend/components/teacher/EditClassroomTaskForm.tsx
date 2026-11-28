@@ -3,7 +3,8 @@
 import { startTransition, useMemo, useOptimistic, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { ErrorState } from "@/components/blocks/ErrorState";
-import { BrowserFetchJsonError, fetchJson } from "@/lib/api/browser-client";
+import { BrowserFetchJsonError } from "@/lib/api/browser-client";
+import { usePageFetch } from "@/lib/api/use-page-fetch";
 import { buildErrorDescription, extractRawDetail } from "@/lib/api/error-presenter";
 import { normalizeClassroomTaskStatus } from "@/lib/api/types-teacher";
 import {
@@ -34,6 +35,7 @@ export function EditClassroomTaskForm({
   dueAt,
   allowLate,
 }: EditClassroomTaskFormProps) {
+  const fetchJson = usePageFetch();
   const router = useRouter();
   const inFlight = useRef(false);
   const [isExpanded, setIsExpanded] = useState(false);

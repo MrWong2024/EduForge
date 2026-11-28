@@ -90,6 +90,8 @@ npm run test:e2e -- --runInBand --runTestsByPath ./test/users-me.e2e-spec.ts
 
 `test/auth-security.e2e-spec.ts` 与既有 `users-me/users-change-password` HTTP E2E 使用正式 configureApp、Cookie parser、ValidationPipe、SessionAuthGuard 和异常过滤器。认证安全 spec 以真实 HTTP/Mongo 及受控 Promise 屏障证明 tokenHash 存储、Cookie 输入边界、active/版本认证、改密当前会话保留、重置/找回竞争和正式导入 Store 的凭据轮换；不以 sleep 排程，不发送真实邮件或调用真实模型，也不证明第二批前端交互。
 
+`auth-security` 还验证页面预期账号与真实会话不一致时，响应为公开 409 且业务处理器未执行。同一账号的新会话、原有直连请求、未认证及角色拒绝分别保留各自结果。`users-change-password` 在真实写入边界交错登录和改密迁入，核对有效会话上限、实际保留对象及旧会话失效。较早重置申请的作废由 HTTP 用例复核，邮件到达顺序属于产品约定。
+
 窄准备逻辑 `test/helpers/auth-test-environment.ts` 在 AppModule 导入前建立独立 `test/standard_test` 进程环境，仅解析 `.env.test` 的目标连接，清除继承连接与外部服务配置，在测试层阻止 AppModule 叠加加载其它环境文件。`auth-session-indexes.ts` 先核对实际库名 `eduforge_test`、本机单节点 `rs0` 的可写 PRIMARY 和 `root@admin` 身份及角色，并确认认证集合无外来数据，再以正式 SessionSchema 及现有 sync-indexes CLI 预览、限定 apply 和读回。只允许删除已核实定义的旧 `token_1`，建立当前 Session 必需索引，发现其它删改计划即停止。
 
 同一认证集合的实库 spec 串行运行，与 sync-indexes 的独立集合集成分开进程。合成记录按 spec 登记 ID 清理，核对 User/Session/reset token 零残留后关闭 app 与独立 Store 连接；不清空未知记录或数据库。配置或门禁不符时停止对应实库验收，实际通过、失败和未执行状态归当次任务报告。

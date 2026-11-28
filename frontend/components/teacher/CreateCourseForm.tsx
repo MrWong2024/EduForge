@@ -3,7 +3,8 @@
 import { useEffect, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { ErrorState } from "@/components/blocks/ErrorState";
-import { BrowserFetchJsonError, fetchJson } from "@/lib/api/browser-client";
+import { BrowserFetchJsonError } from "@/lib/api/browser-client";
+import { usePageFetch } from "@/lib/api/use-page-fetch";
 import { buildErrorDescription, extractRawDetail } from "@/lib/api/error-presenter";
 import {
   type CreateCourseRequest,
@@ -53,6 +54,7 @@ const getCreateErrorSummary = (status: number): string => {
 };
 
 export function CreateCourseForm() {
+  const fetchJson = usePageFetch();
   const router = useRouter();
   const captureCurrentPage = useCurrentPage();
   const [code, setCode] = useState("");

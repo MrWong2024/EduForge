@@ -14,11 +14,15 @@ import request from 'supertest';
 import { App } from 'supertest/types';
 import { AppModule } from '../src/app.module';
 import { configureApp } from '../src/app.setup';
+import { CLASSROOM_TASK_TRANSACTION_CONNECTION } from '../src/lib/classroom-task-transaction';
+import { CoursesService } from '../src/modules/courses/services/courses.service';
 import { User, UserStatus } from '../src/modules/users/schemas/user.schema';
+import type { UserRole } from '../src/modules/users/schemas/user-roles.constants';
 import { Session } from '../src/modules/auth/schemas/session.schema';
 import { PasswordResetToken } from '../src/modules/auth/schemas/password-reset-token.schema';
 import { SessionService } from '../src/modules/auth/services/session.service';
 import { MailService } from '../src/modules/mail/mail.service';
+import { UsersService } from '../src/modules/users/services/users.service';
 import * as passwordUtils from '../src/modules/users/password.utils';
 import { createMongooseStore, importUsers } from '../scripts/import-users';
 import { buildHeaderKeys, parseCsv } from '../scripts/import-users-csv';
@@ -106,6 +110,7 @@ describe('Authentication security (real HTTP and Mongo)', () => {
   }
   async function makeUser(
     status: UserStatus = UserStatus.Active,
+    role: UserRole = 'teacher',
   ): Promise<TestUser> {
     const id = new Types.ObjectId();
     ids.push(id);
@@ -114,7 +119,7 @@ describe('Authentication security (real HTTP and Mongo)', () => {
       _id: id,
       email,
       passwordHash: await passwordUtils.hashPassword(password),
-      roles: ['teacher'],
+      roles: [role],
       status,
     });
     return { id, email };
@@ -170,12 +175,20 @@ describe('Authentication security (real HTTP and Mongo)', () => {
     configureApp(app);
     await app.init();
     await assertAuthTestConnection(app.get<Connection>(getConnectionToken()));
+    await assertAuthTestConnection(
+      app.get<Connection>(
+        getConnectionToken(CLASSROOM_TASK_TRANSACTION_CONNECTION),
+      ),
+    );
     users = app.get(getModelToken(User.name));
     sessions = app.get(getModelToken(Session.name));
     resets = app.get(getModelToken(PasswordResetToken.name));
     sessionService = app.get(SessionService);
     importConnection = await openAuthTestConnection({ budgetModelReads: true });
     importStore = createMongooseStore(importConnection);
+    console.info(
+      'Auth security verified: default, named transaction and independent eduforge_test connections on loopback rs0 PRIMARY.',
+    );
   });
 
   afterEach(() => {
@@ -187,6 +200,10 @@ describe('Authentication security (real HTTP and Mongo)', () => {
         await assertAuthTestConnection(users.db);
         const db = users.db.db;
         if (!db) throw new Error('AUTH_TEST_CLEANUP_DATABASE_REQUIRED');
+        if (!importConnection?.db)
+          throw new Error('AUTH_TEST_INDEPENDENT_READBACK_REQUIRED');
+        await assertAuthTestConnection(importConnection);
+        const readback = importConnection.db;
         const filter = { userId: { $in: ids } };
         const userFilter = { _id: { $in: ids } };
         const timeout = 10000;
@@ -223,15 +240,21 @@ describe('Authentication security (real HTTP and Mongo)', () => {
           throw error;
         }
         const residual = await Promise.all([
-          targetSessions.countDocuments(filter, {
-            signal: AbortSignal.timeout(timeout),
-          }),
-          targetResets.countDocuments(filter, {
-            signal: AbortSignal.timeout(timeout),
-          }),
-          targetUsers.countDocuments(userFilter, {
-            signal: AbortSignal.timeout(timeout),
-          }),
+          readback
+            .collection(targetSessions.collectionName)
+            .countDocuments(filter, {
+              signal: AbortSignal.timeout(timeout),
+            }),
+          readback
+            .collection(targetResets.collectionName)
+            .countDocuments(filter, {
+              signal: AbortSignal.timeout(timeout),
+            }),
+          readback
+            .collection(targetUsers.collectionName)
+            .countDocuments(userFilter, {
+              signal: AbortSignal.timeout(timeout),
+            }),
         ]);
         if (residual.some((count) => count !== 0))
           throw new Error('AUTH_TEST_CLEANUP_RESIDUAL');
@@ -251,6 +274,76 @@ describe('Authentication security (real HTTP and Mongo)', () => {
         }
       }
     }
+  });
+
+  it('binds protected writes to the page account while preserving the real session and route permissions', async () => {
+    if (!app || !importConnection?.db)
+      throw new Error('AUTH_TEST_INDEPENDENT_READBACK_REQUIRED');
+    const independentUsers = importConnection.db.collection<{
+      _id: Types.ObjectId;
+      credentialVersion: number;
+    }>(users.collection.name);
+    const readVersion = async (user: TestUser) =>
+      (
+        await independentUsers.findOne(
+          { _id: user.id },
+          {
+            projection: { credentialVersion: 1 },
+            signal: AbortSignal.timeout(5000),
+          },
+        )
+      )?.credentialVersion;
+    const teacherA = await makeUser();
+    const teacherB = await makeUser();
+    const student = await makeUser(UserStatus.Active, 'student');
+    const originalA = cookieFrom(await login(teacherA).expect(201));
+    const publicProfile = publicResponse(await probe(originalA).expect(200));
+    const pageUserId = teacherA.id.toHexString();
+    expect(publicProfile.id).toBe(pageUserId);
+    const cookieB = cookieFrom(await login(teacherB).expect(201));
+    const studentCookie = cookieFrom(await login(student).expect(201));
+    const header = 'x-expected-user-id';
+    const changePassword = jest.spyOn(app.get(UsersService), 'changePassword');
+    const createCourse = jest.spyOn(app.get(CoursesService), 'createCourse');
+
+    for (const { cookie, expected } of [
+      { cookie: cookieB, expected: pageUserId },
+      { cookie: studentCookie, expected: pageUserId },
+      { cookie: cookieB, expected: '' },
+    ]) {
+      const denied = await change(cookie).set(header, expected).expect(409);
+      expect(publicResponse(denied)).toMatchObject({
+        statusCode: 409,
+        code: 'PAGE_ACCOUNT_MISMATCH',
+        message: '当前登录账号与此页面不一致，请重新打开页面后再操作。',
+      });
+    }
+    await post('/api/users/me/change-password')
+      .set(header, pageUserId)
+      .send({ currentPassword: password, newPassword: nextPassword })
+      .expect(401);
+    await post('/api/courses')
+      .set('Cookie', studentCookie)
+      .set(header, student.id.toHexString())
+      .send({ code: 'AUTH-PAGE-GUARD', name: 'Synthetic', term: '2026' })
+      .expect(403);
+    expect(changePassword.mock.calls).toHaveLength(0);
+    expect(createCourse.mock.calls).toHaveLength(0);
+    expect(
+      await Promise.all([teacherA, teacherB, student].map(readVersion)),
+    ).toEqual([0, 0, 0]);
+
+    // A newer session for the same account still matches the original page.
+    const renewedA = cookieFrom(await login(teacherA).expect(201));
+    await change(renewedA).set(header, pageUserId).expect(200);
+    await probe(renewedA).expect(200);
+    expect(await readVersion(teacherA)).toBe(1);
+    expect(await readVersion(teacherB)).toBe(0);
+
+    // Established direct API callers can continue without the precondition.
+    await change(cookieB).expect(200);
+    expect(await readVersion(teacherB)).toBe(1);
+    expect(await readVersion(student)).toBe(0);
   });
 
   it('uses only the session hash and exposes only public user fields, then logs out', async () => {

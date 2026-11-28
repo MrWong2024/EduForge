@@ -1,3 +1,13 @@
+import {
+  PAGE_ACCOUNT_HEADER,
+  PAGE_ACCOUNT_MISMATCH_CODE,
+  PAGE_ACCOUNT_MISMATCH_MESSAGE,
+  PAGE_ACCOUNT_UNCONFIRMED_SUCCESS_MESSAGE,
+  PAGE_ACCOUNT_UNAVAILABLE_MESSAGE,
+  readPageAccountId,
+  requiresPageAccount,
+} from "./page-account";
+
 const PROXY_PREFIX = "/api/proxy";
 
 const trimSlashes = (value: string) => value.replace(/^\/+|\/+$/g, "");
@@ -40,33 +50,126 @@ export function isDefiniteCreateRejection(
 ): error is BrowserFetchJsonError {
   return (
     error instanceof BrowserFetchJsonError &&
+    !isPageAccountMismatch(error) &&
     error.status >= 400 &&
     error.status < 500
   );
 }
 
-type BrowserFetchJsonOptions = RequestInit;
+export function isPageAccountMismatch(error: unknown): boolean {
+  return (
+    error instanceof BrowserFetchJsonError &&
+    error.status === 409 &&
+    typeof error.data === "object" &&
+    error.data !== null &&
+    "code" in error.data &&
+    error.data.code === PAGE_ACCOUNT_MISMATCH_CODE
+  );
+}
+
+export type PageFetch = <T>(path: string, options?: RequestInit) => Promise<T>;
+
+export type PageAccountScope = {
+  expectedUserId: string;
+  capture: () => () => boolean;
+  canWrite: () => boolean;
+  onMismatch: () => void;
+  onUnconfirmedSuccess: () => void;
+};
 
 export const buildProxyPath = (path: string): string => {
   const cleanPath = trimSlashes(path);
   return `${PROXY_PREFIX}/${cleanPath}`;
 };
 
-export async function fetchJson<T>(
-  path: string,
-  options: BrowserFetchJsonOptions = {}
-): Promise<T> {
-  const { cache, ...requestInit } = options;
-  const response = await fetch(buildProxyPath(path), {
-    ...requestInit,
-    cache: cache ?? "no-store",
-    credentials: "include",
-  });
+async function readCurrentPageAccount(): Promise<string | null> {
+  try {
+    const response = await fetch(buildProxyPath("users/me"), {
+      cache: "no-store",
+      credentials: "include",
+      signal: AbortSignal.timeout(5000),
+    });
+    if (!response.ok) return null;
+    const me: unknown = await response.json();
+    return typeof me === "object" && me !== null && "id" in me
+      ? readPageAccountId(me.id)
+      : null;
+  } catch {
+    return null;
+  }
+}
 
-  const body = await parseResponseBody(response);
-  if (!response.ok) {
-    throw new BrowserFetchJsonError(response.status, body);
+async function requestJson<T>(
+  path: string,
+  options: RequestInit = {},
+  scope?: PageAccountScope,
+): Promise<T> {
+  const { cache, headers: suppliedHeaders, ...requestInit } = options;
+  const headers = new Headers(suppliedHeaders);
+  headers.delete(PAGE_ACCOUNT_HEADER);
+  const needsPageAccount = requiresPageAccount(path, requestInit.method);
+  const expectedUserId = needsPageAccount
+    ? readPageAccountId(scope?.expectedUserId)
+    : null;
+  if (needsPageAccount && !expectedUserId) {
+    throw new Error(PAGE_ACCOUNT_UNAVAILABLE_MESSAGE);
+  }
+  if (expectedUserId && scope) {
+    if (!scope.canWrite()) {
+      throw new Error(PAGE_ACCOUNT_UNCONFIRMED_SUCCESS_MESSAGE);
+    }
+    headers.set(PAGE_ACCOUNT_HEADER, expectedUserId);
   }
 
+  const isCurrent = scope?.capture() ?? (() => true);
+  if (!isCurrent()) throw new Error(PAGE_ACCOUNT_MISMATCH_MESSAGE);
+  let body: unknown;
+  try {
+    const response = await fetch(buildProxyPath(path), {
+      ...requestInit,
+      headers,
+      cache: cache ?? "no-store",
+      credentials: "include",
+    });
+    body = await parseResponseBody(response);
+    if (!response.ok) {
+      throw new BrowserFetchJsonError(response.status, body);
+    }
+  } catch (error) {
+    if (!isCurrent()) {
+      throw new Error(PAGE_ACCOUNT_MISMATCH_MESSAGE, { cause: error });
+    }
+    if (isPageAccountMismatch(error)) scope?.onMismatch();
+    throw error;
+  }
+  if (!isCurrent()) throw new Error(PAGE_ACCOUNT_MISMATCH_MESSAGE);
+  if (expectedUserId && scope) {
+    // The completed write was admitted with its own session. Before letting
+    // its reply drive navigation, check whether the browser still uses it.
+    const currentUserId = await readCurrentPageAccount();
+    if (!isCurrent()) throw new Error(PAGE_ACCOUNT_MISMATCH_MESSAGE);
+    if (!currentUserId) {
+      scope.onUnconfirmedSuccess();
+      throw new Error(PAGE_ACCOUNT_UNCONFIRMED_SUCCESS_MESSAGE);
+    }
+    if (currentUserId !== expectedUserId) {
+      scope.onMismatch();
+      throw new BrowserFetchJsonError(
+        409,
+        { code: PAGE_ACCOUNT_MISMATCH_CODE },
+        PAGE_ACCOUNT_MISMATCH_MESSAGE,
+      );
+    }
+    if (!scope.canWrite()) {
+      throw new Error(PAGE_ACCOUNT_UNCONFIRMED_SUCCESS_MESSAGE);
+    }
+  }
   return body as T;
 }
+
+export function createPageFetch(scope?: PageAccountScope): PageFetch {
+  return <T>(path: string, options?: RequestInit) =>
+    requestJson<T>(path, options, scope);
+}
+
+export const fetchJson = createPageFetch();

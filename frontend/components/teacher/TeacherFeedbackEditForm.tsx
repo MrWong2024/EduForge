@@ -2,7 +2,8 @@
 
 import { useRouter } from "next/navigation";
 import { ErrorState } from "@/components/blocks/ErrorState";
-import { BrowserFetchJsonError, fetchJson } from "@/lib/api/browser-client";
+import { BrowserFetchJsonError } from "@/lib/api/browser-client";
+import { usePageFetch } from "@/lib/api/use-page-fetch";
 import {
   buildErrorDescription,
   extractRawDetail,
@@ -94,6 +95,7 @@ export function TeacherFeedbackEditForm({
   onSaveFinish,
   onSaved,
 }: TeacherFeedbackEditFormProps) {
+  const fetchJson = usePageFetch();
   const router = useRouter();
   const { feedbackId, initialValues, draft, validationError, errorState } =
     session;

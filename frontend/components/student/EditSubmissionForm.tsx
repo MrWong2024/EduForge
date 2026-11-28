@@ -5,7 +5,8 @@ import type { FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import { SubmissionContent } from "@/components/submissions/SubmissionContent";
 import { SubmissionAiReview } from "@/components/submissions/SubmissionAiReview";
-import { BrowserFetchJsonError, fetchJson } from "@/lib/api/browser-client";
+import { BrowserFetchJsonError } from "@/lib/api/browser-client";
+import { usePageFetch } from "@/lib/api/use-page-fetch";
 import {
   toSubmissionDetailResponse,
   type SubmissionDetailResponse,
@@ -72,6 +73,7 @@ function SubmissionEditor({
   detail: SubmissionDetailResponse | null;
 }) {
   const router = useRouter();
+  const fetchJson = usePageFetch();
   const [saved, setSaved] = useState<SubmissionDetailResponse | null>(null);
   const [draft, setDraft] = useState<Draft | null>(null);
   const [blocked, setBlocked] = useState(false);

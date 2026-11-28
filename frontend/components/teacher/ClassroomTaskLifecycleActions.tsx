@@ -4,7 +4,8 @@ import { type ReactNode, useLayoutEffect, useRef, useState, useTransition } from
 import { useRouter } from "next/navigation";
 import { ConfirmDialog } from "@/components/blocks/ConfirmDialog";
 import { ErrorState } from "@/components/blocks/ErrorState";
-import { BrowserFetchJsonError, fetchJson } from "@/lib/api/browser-client";
+import { BrowserFetchJsonError } from "@/lib/api/browser-client";
+import { usePageFetch } from "@/lib/api/use-page-fetch";
 import {
   normalizeClassroomTaskStatus,
   type ClassroomTaskStatus,
@@ -120,6 +121,7 @@ export function ClassroomTaskLifecycleActions({
   submissionWindowBadge,
   listHeadingId,
 }: ClassroomTaskLifecycleActionsProps) {
+  const fetchJson = usePageFetch();
   const router = useRouter();
   const { receipt: [, setPublishReceipt], setDeletionNotice } = useClassroomTaskListInteractions();
   const [pendingAction, setPendingAction] = useState<PendingAction | null>(null);

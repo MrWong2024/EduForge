@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import type { ReactNode } from "react";
 import { ErrorState } from "@/components/blocks/ErrorState";
+import { PageAccountBoundary } from "@/components/layout/PageAccountBoundary";
 import { TeacherShell } from "@/components/layout/TeacherShell";
 import { requireRole } from "@/lib/auth/session";
 
@@ -19,7 +20,7 @@ export default async function TeacherLayout({
   return (
     <TeacherShell currentUser={gate.me}>
       {gate.allowed ? (
-        children
+        <PageAccountBoundary userId={gate.me.id}>{children}</PageAccountBoundary>
       ) : (
         <ErrorState
           status={403}

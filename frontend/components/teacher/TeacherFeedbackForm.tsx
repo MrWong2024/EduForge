@@ -3,7 +3,8 @@
 import { useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { ErrorState } from "@/components/blocks/ErrorState";
-import { BrowserFetchJsonError, fetchJson } from "@/lib/api/browser-client";
+import { BrowserFetchJsonError } from "@/lib/api/browser-client";
+import { usePageFetch } from "@/lib/api/use-page-fetch";
 import {
   buildErrorDescription,
   extractRawDetail,
@@ -52,6 +53,7 @@ export function TeacherFeedbackForm({
   contentRevision,
   suspended,
 }: TeacherFeedbackFormProps) {
+  const fetchJson = usePageFetch();
   const router = useRouter();
   // New props never rebind an existing feedback draft to unseen work.
   const [baseRevision, setBaseRevision] = useState(contentRevision);

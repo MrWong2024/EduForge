@@ -1,6 +1,7 @@
 import {
   authTestEnvironment,
   assertAuthTestConnection,
+  openAuthTestConnection,
 } from './helpers/auth-test-environment';
 import { INestApplication } from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
@@ -14,6 +15,7 @@ import { configureApp } from '../src/app.setup';
 import { User } from '../src/modules/users/schemas/user.schema';
 import { Session } from '../src/modules/auth/schemas/session.schema';
 import { PasswordResetToken } from '../src/modules/auth/schemas/password-reset-token.schema';
+import { CLASSROOM_TASK_TRANSACTION_CONNECTION } from '../src/lib/classroom-task-transaction';
 import { prepareAuthSessionIndexes } from './helpers/auth-session-indexes';
 
 jest.setTimeout(30000);
@@ -47,6 +49,7 @@ describe('Users /me profile update (e2e)', () => {
   let userModel: Model<User>;
   let sessionModel: Model<Session>;
   let resetTokenModel: Model<PasswordResetToken>;
+  let readbackConnection: Connection | undefined;
   let agent: ReturnType<typeof request.agent>;
   let createdUserId = '';
 
@@ -71,6 +74,15 @@ describe('Users /me profile update (e2e)', () => {
     configureApp(app);
     await app.init();
     await assertAuthTestConnection(app.get<Connection>(getConnectionToken()));
+    await assertAuthTestConnection(
+      app.get<Connection>(
+        getConnectionToken(CLASSROOM_TASK_TRANSACTION_CONNECTION),
+      ),
+    );
+    readbackConnection = await openAuthTestConnection();
+    console.info(
+      'Users me verified: default, named transaction and independent eduforge_test connections on loopback rs0 PRIMARY.',
+    );
 
     agent = request.agent(app.getHttpServer());
     userModel = app.get(getModelToken(User.name));
@@ -107,28 +119,35 @@ describe('Users /me profile update (e2e)', () => {
             .exec(),
           userModel.deleteOne({ _id: userObjectId }).maxTimeMS(5000).exec(),
         ]);
+        const db = readbackConnection?.db;
+        if (!db) throw new Error('USERS_ME_READBACK_CONNECTION_REQUIRED');
+        const options = { maxTimeMS: 5000, signal: AbortSignal.timeout(5000) };
         const residual = await Promise.all([
-          sessionModel
-            .countDocuments({ userId: userObjectId })
-            .maxTimeMS(5000)
-            .exec(),
-          resetTokenModel
-            .countDocuments({ userId: userObjectId })
-            .maxTimeMS(5000)
-            .exec(),
-          userModel
-            .countDocuments({ _id: userObjectId })
-            .maxTimeMS(5000)
-            .exec(),
+          db
+            .collection(sessionModel.collection.name)
+            .countDocuments({ userId: userObjectId }, options),
+          db
+            .collection(resetTokenModel.collection.name)
+            .countDocuments({ userId: userObjectId }, options),
+          db
+            .collection(userModel.collection.name)
+            .countDocuments({ _id: userObjectId }, options),
         ]);
         expect(residual).toEqual([0, 0, 0]);
         if (cleanup.some(({ status }) => status === 'rejected')) {
           throw new Error('USERS_ME_AUTH_FIXTURE_CLEANUP_FAILED');
         }
+        console.info(
+          'Users me scoped cleanup: independent User/Session/PasswordResetToken residual=0.',
+        );
       }
     } finally {
       try {
-        await app?.close();
+        try {
+          await app?.close();
+        } finally {
+          await readbackConnection?.close();
+        }
       } finally {
         authTestEnvironment.restore();
       }

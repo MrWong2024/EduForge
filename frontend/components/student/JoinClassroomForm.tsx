@@ -4,7 +4,8 @@ import { useRef, useState } from "react";
 import type { SubmitEventHandler } from "react";
 import { useRouter } from "next/navigation";
 import { ErrorState } from "@/components/blocks/ErrorState";
-import { fetchJson, BrowserFetchJsonError } from "@/lib/api/browser-client";
+import { BrowserFetchJsonError } from "@/lib/api/browser-client";
+import { usePageFetch } from "@/lib/api/use-page-fetch";
 import { buildErrorDescription, extractRawDetail } from "@/lib/api/error-presenter";
 import { paths } from "@/lib/routes/paths";
 import { useCurrentPage } from "@/lib/routes/use-current-page";
@@ -24,7 +25,7 @@ export const normalizeJoinCodeInput = (value: string): string =>
 
 export async function submitJoinClassroom(
   joinCode: string,
-  request: (path: string, init: RequestInit) => Promise<unknown> = fetchJson,
+  request: (path: string, init: RequestInit) => Promise<unknown>,
 ): Promise<JoinErrorState | null> {
   const normalizedJoinCode = joinCode.trim();
   if (!normalizedJoinCode) {
@@ -65,6 +66,7 @@ export async function submitJoinClassroom(
 }
 
 export function JoinClassroomForm() {
+  const fetchJson = usePageFetch();
   const router = useRouter();
   const captureCurrentPage = useCurrentPage();
   const [joinCode, setJoinCode] = useState("");
@@ -83,7 +85,7 @@ export function JoinClassroomForm() {
     setIsSubmitting(true);
     setErrorState(null);
 
-    const failure = await submitJoinClassroom(joinCode);
+    const failure = await submitJoinClassroom(joinCode, fetchJson);
     if (failure) {
       setErrorState(failure);
       submitLocked.current = false;

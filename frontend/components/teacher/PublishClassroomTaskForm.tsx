@@ -4,7 +4,8 @@ import Link from "next/link";
 import { useLayoutEffect, useMemo, useRef, useState, useTransition } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { ErrorState } from "@/components/blocks/ErrorState";
-import { BrowserFetchJsonError, fetchJson } from "@/lib/api/browser-client";
+import { BrowserFetchJsonError } from "@/lib/api/browser-client";
+import { usePageFetch } from "@/lib/api/use-page-fetch";
 import { buildErrorDescription } from "@/lib/api/error-presenter";
 import {
   type LearningTaskOption,
@@ -125,6 +126,7 @@ export function PublishClassroomTaskForm({
   initialKnowledgeModuleFilter,
   initialDifficultyFilter,
 }: PublishClassroomTaskFormProps) {
+  const fetchJson = usePageFetch();
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();

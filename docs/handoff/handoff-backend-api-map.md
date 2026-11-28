@@ -14,6 +14,7 @@
 - 认证使用服务端 Session + HttpOnly Cookie，Cookie 名称 `ef_session`。登录创建服务端 session 并写 Cookie；注销清除 Cookie 并使该 session 失效。
 - 当前用户探针固定为 `GET /api/users/me`，用于确认 Cookie session 与当前用户身份已建立；公开数据见 [DTO Users](./handoff-backend-dto-cheatsheet.md#users)。
 - 全局 `SessionAuthGuard` 通过 `APP_GUARD` 保护非 `@Public()` 路由；公开例外包括登录、忘记密码、重置密码等显式 Public 路由。
+- 已登录师生页面的业务写入可携带 `X-Expected-User-Id`。Guard 先验证该请求的真实会话，未认证返回原有 401。有效会话与页面预期账号不一致，或所传 ID 为空或无效时，返回 409，公开错误码为 `PAGE_ACCOUNT_MISMATCH`，提示重新打开页面。这个字段只约束写入归属，角色和资源权限仍由服务端判定。省略请求头的既有后端直连调用沿用原合同。
 - `RolesGuard` 由 Controller 显式启用；Service 继续执行资源归属校验，前端 role gate 仅承担体验层入口约束，不能替代后端授权。
 - `TEACHER` 管理自己创建/拥有的课程、班级、课堂任务、提交与报表；`STUDENT` 仅访问自己 Enrollment ACTIVE 的班级任务、自己的提交与反馈。
 - 成员与默认教学统计的权威来源为 Enrollment-only（`role=STUDENT,status=ACTIVE`）；旧 `classroom.studentIds` 已退役，不再输出或作为 fallback，公开数据见 [DTO Classroom family](./handoff-backend-dto-cheatsheet.md#classrooms)。

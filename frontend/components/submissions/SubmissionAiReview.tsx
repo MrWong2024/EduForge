@@ -10,7 +10,8 @@ import {
 import { useRouter } from "next/navigation";
 import { ConfirmDialog } from "@/components/blocks/ConfirmDialog";
 import { ErrorState } from "@/components/blocks/ErrorState";
-import { fetchJson, BrowserFetchJsonError } from "@/lib/api/browser-client";
+import { BrowserFetchJsonError } from "@/lib/api/browser-client";
+import { usePageFetch } from "@/lib/api/use-page-fetch";
 import {
   toRequestAiFeedbackResponse,
   toSubmissionDetailResponse,
@@ -61,6 +62,7 @@ function SubmissionAiReviewPanel({
   beginExplicitDetailRead,
 }: Props) {
   const router = useRouter();
+  const fetchJson = usePageFetch();
   const [operations] = useState(
     () =>
       new SubmissionAiOperations(
@@ -145,6 +147,7 @@ function SubmissionAiReviewPanel({
     [
       autoRefresh,
       beginExplicitDetailRead,
+      fetchJson,
       isPageRefreshing,
       operations,
       router,

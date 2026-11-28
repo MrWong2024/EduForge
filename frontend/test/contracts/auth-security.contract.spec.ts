@@ -1,5 +1,12 @@
 import { expect, test } from "@playwright/test";
-import { BrowserFetchJsonError } from "../../lib/api/browser-client";
+import { NextRequest } from "next/server";
+import { GET as proxyGet, POST as proxyPost } from "../../app/api/proxy/[...path]/route";
+import {
+  BrowserFetchJsonError,
+  createPageFetch,
+  fetchJson,
+  isDefiniteCreateRejection,
+} from "../../lib/api/browser-client";
 import { getAuthError } from "../../lib/auth/auth-errors";
 import {
   validateNewPassword,
@@ -7,6 +14,243 @@ import {
 } from "../../lib/auth/password-policy";
 import { getSafeNextPath } from "../../lib/auth/safe-next";
 import { getFrontendOrigin } from "../../lib/http/frontend-origin";
+
+const pageAccountA = "000000000000000000000001";
+const pageAccountB = "000000000000000000000002";
+const pageAccountHeader = "x-expected-user-id";
+
+test("protected writes take their expected identity from the page scope", async () => {
+  const originalFetch = globalThis.fetch;
+  const sent: Array<{ path: string; method?: string; userId: string | null }> = [];
+  let currentUserId = pageAccountA;
+  globalThis.fetch = async (path, options) => {
+    sent.push({
+      path: String(path),
+      method: options?.method,
+      userId: new Headers(options?.headers).get(pageAccountHeader),
+    });
+    return Response.json({ ok: true, id: currentUserId });
+  };
+  try {
+    const scope = {
+      expectedUserId: pageAccountA,
+      capture: () => () => true,
+      canWrite: () => true,
+      onMismatch: () => { throw new Error("unexpected mismatch"); },
+      onUnconfirmedSuccess: () => { throw new Error("unexpected unconfirmed success"); },
+    };
+    const samePage = createPageFetch(scope);
+    const nextAccountPage = createPageFetch({ ...scope, expectedUserId: pageAccountB });
+    await samePage("courses", {
+      method: "POST",
+      headers: { [pageAccountHeader]: pageAccountB },
+    });
+    await samePage("learning-tasks/submissions/fixture", { method: "PATCH" });
+    currentUserId = pageAccountB;
+    await nextAccountPage("classrooms/join", { method: "POST" });
+    await samePage("users/me");
+    for (const entry of ["login", "forgot-password", "reset-password", "logout"]) {
+      await fetchJson(`auth/${entry}`, { method: "POST" });
+    }
+    await expect(fetchJson("courses", { method: "POST" })).rejects.toThrow(
+      "无法确认此页面的账号",
+    );
+    await expect(
+      createPageFetch({ ...scope, expectedUserId: "" })("users/me/change-password", {
+        method: "POST",
+      }),
+    ).rejects.toThrow("无法确认此页面的账号");
+    expect(sent).toEqual([
+      { path: "/api/proxy/courses", method: "POST", userId: pageAccountA },
+      { path: "/api/proxy/users/me", userId: null },
+      { path: "/api/proxy/learning-tasks/submissions/fixture", method: "PATCH", userId: pageAccountA },
+      { path: "/api/proxy/users/me", userId: null },
+      { path: "/api/proxy/classrooms/join", method: "POST", userId: pageAccountB },
+      { path: "/api/proxy/users/me", userId: null },
+      { path: "/api/proxy/users/me", userId: null },
+      ...["login", "forgot-password", "reset-password", "logout"].map((entry) => ({
+        path: `/api/proxy/auth/${entry}`, method: "POST", userId: null,
+      })),
+    ]);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("only a confirmed account mismatch closes the page scope", async () => {
+  const originalFetch = globalThis.fetch;
+  let mismatches = 0;
+  const client = createPageFetch({
+    expectedUserId: pageAccountA,
+    capture: () => () => true,
+    canWrite: () => true,
+    onMismatch: () => { mismatches += 1; },
+    onUnconfirmedSuccess: () => { throw new Error("unexpected unconfirmed success"); },
+  });
+  const write = () => client("courses", { method: "POST" });
+  try {
+    globalThis.fetch = async () => { throw new Error("network unavailable"); };
+    await expect(write()).rejects.toThrow("network unavailable");
+
+    globalThis.fetch = async () =>
+      Response.json({ code: "UNAUTHORIZED" }, { status: 401 });
+    await expect(write()).rejects.toMatchObject({ status: 401 });
+    globalThis.fetch = async () =>
+      Response.json({ code: "REVISION_CONFLICT" }, { status: 409 });
+    await expect(write()).rejects.toMatchObject({
+      status: 409,
+      data: { code: "REVISION_CONFLICT" },
+    });
+    expect(mismatches).toBe(0);
+
+    globalThis.fetch = async () =>
+      Response.json({ code: "PAGE_ACCOUNT_MISMATCH" }, { status: 409 });
+    await expect(write()).rejects.toMatchObject({
+      status: 409,
+      data: { code: "PAGE_ACCOUNT_MISMATCH" },
+    });
+    expect(mismatches).toBe(1);
+    expect(
+      isDefiniteCreateRejection(
+        new BrowserFetchJsonError(409, { code: "PAGE_ACCOUNT_MISMATCH" }),
+      ),
+    ).toBe(false);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("a response cannot complete UI work after its page scope ends", async () => {
+  const originalFetch = globalThis.fetch;
+  const response = Promise.withResolvers<Response>();
+  let live = true;
+  let writes = 0;
+  globalThis.fetch = () => {
+    writes += 1;
+    return response.promise;
+  };
+  try {
+    const client = createPageFetch({
+      expectedUserId: pageAccountA,
+      capture: () => () => live,
+      canWrite: () => true,
+      onMismatch: () => { throw new Error("unexpected mismatch"); },
+      onUnconfirmedSuccess: () => { throw new Error("unexpected unconfirmed success"); },
+    });
+    const started = client("courses", { method: "POST" });
+    expect(writes).toBe(1);
+    live = false;
+    response.resolve(Response.json({ id: "created-for-original-account" }));
+    await expect(started).rejects.toThrow("请重新打开页面");
+    await expect(client("courses", { method: "POST" })).rejects.toThrow(
+      "请重新打开页面",
+    );
+    expect(writes).toBe(1);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("a delayed success is withheld if the browser account changed or is temporarily unconfirmed", async () => {
+  const originalFetch = globalThis.fetch;
+  try {
+    for (const result of ["different-account", "unavailable"] as const) {
+      const response = Promise.withResolvers<Response>();
+      let live = true;
+      let canWrite = true;
+      let writeCount = 0;
+      let identities = 0;
+      globalThis.fetch = (path, options) => {
+        if (path === "/api/proxy/users/me") {
+          identities += 1;
+          expect(options?.cache).toBe("no-store");
+          expect(options?.signal).toBeInstanceOf(AbortSignal);
+          return Promise.resolve(
+            result === "different-account"
+              ? Response.json({ id: pageAccountB })
+              : Response.json({}, { status: 401 }),
+          );
+        }
+        writeCount += 1;
+        return response.promise;
+      };
+      const client = createPageFetch({
+        expectedUserId: pageAccountA,
+        capture: () => () => live,
+        canWrite: () => canWrite,
+        onMismatch: () => { live = false; },
+        onUnconfirmedSuccess: () => { canWrite = false; },
+      });
+      const write = () => client("courses", { method: "POST" });
+      const delayed = write();
+      expect(writeCount).toBe(1);
+      expect(identities).toBe(0);
+      response.resolve(Response.json({ id: "already-created" }, { status: 201 }));
+      if (result === "different-account") {
+        await expect(delayed).rejects.toMatchObject({
+          status: 409,
+          data: { code: "PAGE_ACCOUNT_MISMATCH" },
+        });
+        expect(live).toBe(false);
+        expect(canWrite).toBe(true);
+      } else {
+        await expect(delayed).rejects.toThrow(
+          "操作已收到成功回执，暂时无法确认当前账号，请先核对结果。",
+        );
+        expect(live).toBe(true);
+        expect(canWrite).toBe(false);
+      }
+      await expect(write()).rejects.toThrow();
+      expect(writeCount).toBe(1);
+      expect(identities).toBe(1);
+    }
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("BFF forwards only the expected account on protected writes and preserves authentication results", async () => {
+  const originalFetch = globalThis.fetch;
+  const originalOrigin = process.env.FRONTEND_BACKEND_ORIGIN;
+  const sent: Array<{ userId: string | null; unrelated: string | null }> = [];
+  process.env.FRONTEND_BACKEND_ORIGIN = "http://127.0.0.1:4000";
+  globalThis.fetch = async (_path, options) => {
+    const headers = new Headers(options?.headers);
+    sent.push({
+      userId: headers.get(pageAccountHeader),
+      unrelated: headers.get("x-unrelated"),
+    });
+    return Response.json({ statusCode: 401 }, { status: 401 });
+  };
+  const dispatch = (path: string, requestMethod: "POST" | "GET", account?: string) => {
+    const headers = new Headers({ "x-unrelated": "discard" });
+    if (account) headers.set(pageAccountHeader, account);
+    const handler = requestMethod === "POST" ? proxyPost : proxyGet;
+    return handler(
+      new NextRequest(`http://localhost:3000/api/proxy/${path}`, {
+        method: requestMethod,
+        headers,
+      }),
+      { params: Promise.resolve({ path: path.split("/") }) },
+    );
+  };
+  try {
+    expect((await dispatch("courses", "POST", pageAccountA)).status).toBe(401);
+    expect((await dispatch("courses", "POST")).status).toBe(401);
+    await dispatch("auth/logout", "POST", pageAccountA);
+    await dispatch("users/me", "GET", pageAccountA);
+    expect(sent).toEqual([
+      { userId: pageAccountA, unrelated: null },
+      { userId: "", unrelated: null },
+      { userId: null, unrelated: null },
+      { userId: null, unrelated: null },
+    ]);
+  } finally {
+    globalThis.fetch = originalFetch;
+    if (originalOrigin === undefined) delete process.env.FRONTEND_BACKEND_ORIGIN;
+    else process.env.FRONTEND_BACKEND_ORIGIN = originalOrigin;
+  }
+});
 
 // Expected boundaries come from this batch's locked security contract and the
 // Backend DTO Cheatsheet, not from parsing production source or its outputs.

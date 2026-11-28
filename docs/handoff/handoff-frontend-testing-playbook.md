@@ -188,6 +188,10 @@ npm run test:browser
 
 四认证表单的 Agent-assisted smoke 使用 [Backend 窄认证 fixture](./handoff-backend-testing-playbook.md#窄认证-smoke-支持) 与受控 APP，核对 Login 的失败保留、成功清空与 next、Change 的正式改密和会话恢复、Forgot 通用成功与冷却、Reset 缺失/无效 token；少量代表性操作核对 pending 禁用和重复提交门禁。页面上的探针失败、Reset 成功/策略/普通 400/不确定结果可使用工具原生的精确临时拦截或延迟。受控响应只证明当前真实页面 UI，不证明真实 backend 重置成功或邮件送达；backend 凭据生命周期事实由后端既有 HTTP 证据承担。没有工具支持的具体交互、拦截或延迟逐项记 `not_executed`，归第二批前端交互验收，不能以纯合同/API/源码替代。实际执行和 cleanup 结果归任务报告。
 
+换号后的业务写入由 `auth-security.contract.spec.ts` 核对页面账号请求头、缺少账号时的本地拦截、BFF 转发、普通冲突和账号冲突的区分，以及成功回执到达后再次核对账号。定向执行使用 `npm.cmd run test:contracts:list -- auth-security.contract.spec.ts` 确认发现范围，再用 `npm.cmd run test:contracts -- auth-security.contract.spec.ts` 实跑。同一业务写请求的真实会话校验及业务写入保护由后端 guard 测试和 HTTP E2E 覆盖。
+
+正式页面按 Agent-assisted Browser smoke 验证教师创建、学生提交或入班，并以同账号多标签正常保存作对照。使用隔离的 Browser APP 和合成账号，填写前刷新核对身份。在同一网页登录上下文保留原标签，另一标签换号后从旧标签提交，记录页面提示、浏览器与 APP 请求数、原草稿结束及独立回读的资源归属。若工具能精确延迟一次真实成功回执，可在 APP 接受原账号写入后换号，验证原响应不会驱动新账号页面。迟到登出回执另行记录。证据、未执行场景及精确清理由当次报告记载。
+
 ## 9. Human Smoke
 
 Human smoke 保留以下唯一职责：

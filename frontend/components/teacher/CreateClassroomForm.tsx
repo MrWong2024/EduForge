@@ -5,7 +5,8 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { ErrorState } from "@/components/blocks/ErrorState";
 import { CreateOutcomeReview } from "@/components/teacher/CreateOutcomeReview";
-import { BrowserFetchJsonError, fetchJson, isDefiniteCreateRejection } from "@/lib/api/browser-client";
+import { BrowserFetchJsonError, isDefiniteCreateRejection } from "@/lib/api/browser-client";
+import { usePageFetch } from "@/lib/api/use-page-fetch";
 import { buildErrorDescription, extractRawDetail } from "@/lib/api/error-presenter";
 import {
   type CreateClassroomRequest,
@@ -81,6 +82,7 @@ export function CreateClassroomForm({
   targetUnavailable,
   nextPage,
 }: CreateClassroomFormProps) {
+  const fetchJson = usePageFetch();
   const router = useRouter();
   const captureCurrentPage = useCurrentPage();
   const firstPage = useMemo(() => ({ courses, nextPage }), [courses, nextPage]);
@@ -167,7 +169,7 @@ export function CreateClassroomForm({
     return () => {
       current = false;
     };
-  }, [firstPage, selectedCourseId, selectedCourseOutsidePages]);
+  }, [fetchJson, firstPage, selectedCourseId, selectedCourseOutsidePages]);
 
   useEffect(() => {
     if (successMessage && !isLocked) {

@@ -13,7 +13,8 @@ import {
 import { useRouter } from "next/navigation";
 import { ConfirmDialog } from "@/components/blocks/ConfirmDialog";
 import { ErrorState } from "@/components/blocks/ErrorState";
-import { BrowserFetchJsonError, fetchJson } from "@/lib/api/browser-client";
+import { BrowserFetchJsonError } from "@/lib/api/browser-client";
+import { usePageFetch } from "@/lib/api/use-page-fetch";
 import { buildErrorDescription, extractRawDetail } from "@/lib/api/error-presenter";
 import {
   updateMemberRemovalFeedback,
@@ -104,6 +105,7 @@ export function RemoveStudentButton({
   studentName,
   disabled = false,
 }: RemoveStudentButtonProps) {
+  const fetchJson = usePageFetch();
   const router = useRouter();
   const reportFeedback = useContext(RemovalFeedbackContext);
   const [isConfirming, setIsConfirming] = useState(false);
