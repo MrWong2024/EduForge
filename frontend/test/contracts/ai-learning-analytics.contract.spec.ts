@@ -16,6 +16,52 @@ import {
   parseAiLearningAnalyticsEngagementStatus,
   selectAiLearningAnalyticsTeachingAttention,
 } from "../../lib/ai-learning-analytics";
+import { reconcileTaskExclusionSelection } from "../../lib/learning-tasks/task-exclusion-selection";
+
+test("report exclusion acknowledgement updates applied IDs without losing a later checkbox edit", () => {
+  const pending = {
+    appliedIds: [] as string[],
+    selectedIds: ["A", "B"],
+    requestedIds: ["A"],
+  };
+  expect(reconcileTaskExclusionSelection(pending, [])).toBe(pending);
+  const accepted = reconcileTaskExclusionSelection(pending, ["A"]);
+  expect(accepted).toEqual({
+    appliedIds: ["A"],
+    selectedIds: ["A", "B"],
+    requestedIds: null,
+  });
+  expect(reconcileTaskExclusionSelection(accepted, [" A ", "A"])).toBe(accepted);
+  const reapplied = reconcileTaskExclusionSelection(
+    { ...accepted, requestedIds: ["A", "B"] },
+    ["B", "A"],
+  );
+  expect(reapplied.appliedIds).toEqual(["B", "A"]);
+  expect(reapplied.selectedIds).toEqual(["A", "B"]);
+});
+
+test("report exclusion clear preserves later choices and external navigation rehydrates the applied selection", () => {
+  const cleared = reconcileTaskExclusionSelection(
+    { appliedIds: ["A"], selectedIds: ["B"], requestedIds: [] },
+    [],
+  );
+  expect(cleared).toEqual({
+    appliedIds: [],
+    selectedIds: ["B"],
+    requestedIds: null,
+  });
+  expect(reconcileTaskExclusionSelection(cleared, ["C"])).toEqual({
+    appliedIds: ["C"],
+    selectedIds: ["C"],
+    requestedIds: null,
+  });
+  const ordered = {
+    appliedIds: ["A", "B"],
+    selectedIds: ["A", "B", "C"],
+    requestedIds: null,
+  };
+  expect(reconcileTaskExclusionSelection(ordered, ["B", "A"])).toBe(ordered);
+});
 
 const methodology = { version: "AI_FEEDBACK_INTERVENTION_V1_2" };
 const evidence = {

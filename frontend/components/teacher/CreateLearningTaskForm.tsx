@@ -1,15 +1,16 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { ErrorState } from "@/components/blocks/ErrorState";
-import { BrowserFetchJsonError, fetchJson } from "@/lib/api/browser-client";
+import { CreateOutcomeReview } from "@/components/teacher/CreateOutcomeReview";
+import { fetchJson, isDefiniteCreateRejection } from "@/lib/api/browser-client";
 import {
   buildErrorDescription,
   extractRawDetail,
 } from "@/lib/api/error-presenter";
 import {
-  toLearningTaskCreateResponse,
+  isConfirmedLearningTaskCreateResponse,
   type CreateLearningTaskRequest,
 } from "@/lib/api/types-teacher";
 import {
@@ -28,6 +29,7 @@ import {
   type TaskTemplateVisibility,
 } from "@/lib/learning-tasks/template-visibility-scope";
 import { buildCreateTaskRubric } from "@/lib/learning-tasks/rubric";
+import { paths } from "@/lib/routes/paths";
 
 type CreateLearningTaskFormErrorState = {
   status?: number;
@@ -49,9 +51,6 @@ const getCreateErrorSummary = (status: number): string => {
   if (status === 404) {
     return "功能未启用、不可用或资源不存在。";
   }
-  if (status >= 500) {
-    return "创建任务模板失败，请稍后重试。";
-  }
   return "创建任务模板失败，请稍后重试。";
 };
 
@@ -66,10 +65,12 @@ export function CreateLearningTaskForm() {
     TASK_TEMPLATE_VISIBILITY_PRIVATE,
   );
   const [rubricNotes, setRubricNotes] = useState("");
+  const submitLocked = useRef(false);
   const [pendingAction, setPendingAction] = useState<CreateAction | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [errorState, setErrorState] =
     useState<CreateLearningTaskFormErrorState | null>(null);
+  const [outcomeUncertain, setOutcomeUncertain] = useState(false);
 
   const isSubmitting = pendingAction !== null;
 
@@ -83,13 +84,8 @@ export function CreateLearningTaskForm() {
     setRubricNotes("");
   };
 
-  const submitCreate = async (
-    event: React.FormEvent<HTMLFormElement>,
-    action: CreateAction,
-  ) => {
-    event.preventDefault();
-
-    if (isSubmitting) {
+  const submitCreate = async (action: CreateAction) => {
+    if (submitLocked.current || isSubmitting || outcomeUncertain) {
       return;
     }
 
@@ -117,6 +113,7 @@ export function CreateLearningTaskForm() {
       });
       return;
     }
+    submitLocked.current = true;
     setPendingAction(action);
     setSuccessMessage(null);
     setErrorState(null);
@@ -146,9 +143,9 @@ export function CreateLearningTaskForm() {
         body: JSON.stringify(requestBody),
       });
 
-      const created = toLearningTaskCreateResponse(payload);
-      if (!created.id) {
-        throw new Error("创建结果无法确认");
+      if (!isConfirmedLearningTaskCreateResponse(payload, requestBody.status)) {
+        setOutcomeUncertain(true);
+        return;
       }
       const actionMessage =
         action === "publish" ? "任务模板已发布" : "任务模板已保存为草稿";
@@ -158,32 +155,27 @@ export function CreateLearningTaskForm() {
       );
       resetForm();
       router.refresh();
+      submitLocked.current = false;
     } catch (error) {
-      if (error instanceof BrowserFetchJsonError) {
+      if (isDefiniteCreateRejection(error)) {
         const summary = getCreateErrorSummary(error.status);
         const detail = extractRawDetail(error);
         setErrorState({
           status: error.status,
           description: buildErrorDescription(summary, detail),
         });
+        submitLocked.current = false;
       } else {
-        setErrorState({
-          description: "创建任务模板失败，请稍后重试。",
-        });
+        setOutcomeUncertain(true);
       }
     } finally {
       setPendingAction(null);
     }
   };
 
-  const handleSaveDraft = (event: React.FormEvent<HTMLFormElement>) =>
-    submitCreate(event, "draft");
-
-  const handlePublishTemplate = async () => {
-    const syntheticEvent = {
-      preventDefault() {},
-    } as React.FormEvent<HTMLFormElement>;
-    await submitCreate(syntheticEvent, "publish");
+  const handleSaveDraft = (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    void submitCreate("draft");
   };
 
   return (
@@ -345,21 +337,32 @@ export function CreateLearningTaskForm() {
         <div className="flex flex-wrap items-center gap-3">
           <button
             type="submit"
-            disabled={isSubmitting}
+            disabled={isSubmitting || outcomeUncertain}
             className="rounded-md bg-zinc-900 px-4 py-2 text-sm font-medium text-white disabled:cursor-not-allowed disabled:bg-zinc-400"
           >
             {pendingAction === "draft" ? "保存中..." : "保存为草稿"}
           </button>
           <button
             type="button"
-            onClick={handlePublishTemplate}
-            disabled={isSubmitting}
+            onClick={() => void submitCreate("publish")}
+            disabled={isSubmitting || outcomeUncertain}
             className="rounded-md border border-emerald-300 px-4 py-2 text-sm font-medium text-emerald-700 enabled:hover:bg-emerald-50 disabled:cursor-not-allowed disabled:opacity-60"
           >
             {pendingAction === "publish" ? "发布中..." : "发布模板"}
           </button>
         </div>
       </form>
+
+      {outcomeUncertain ? (
+        <CreateOutcomeReview
+          listHref={`${paths.teacher.tasks}?scope=mine`}
+          listLabel="查看我的模板"
+          onConfirm={() => {
+            setOutcomeUncertain(false);
+            submitLocked.current = false;
+          }}
+        />
+      ) : null}
 
       {successMessage ? (
         <p className="mt-3 text-sm text-emerald-700">{successMessage}</p>

@@ -4,7 +4,8 @@ import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { ErrorState } from "@/components/blocks/ErrorState";
-import { BrowserFetchJsonError, fetchJson } from "@/lib/api/browser-client";
+import { CreateOutcomeReview } from "@/components/teacher/CreateOutcomeReview";
+import { fetchJson, isDefiniteCreateRejection } from "@/lib/api/browser-client";
 import { buildErrorDescription, extractRawDetail } from "@/lib/api/error-presenter";
 import {
   type CreateClassroomRequest,
@@ -56,9 +57,6 @@ const getCreateErrorSummary = (status: number): string => {
   if (status === 404) {
     return "功能未启用、不可用或资源不存在。";
   }
-  if (status >= 500) {
-    return "操作失败，请稍后重试。";
-  }
   return "操作失败，请稍后重试。";
 };
 
@@ -80,6 +78,7 @@ export function CreateClassroomForm({
   const [isNavigating, startNavigation] = useTransition();
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [errorState, setErrorState] = useState<CreateClassroomFormErrorState | null>(null);
+  const [outcomeUncertain, setOutcomeUncertain] = useState(false);
   const isLocked = isSubmitting || isNavigating;
   const classroomNamePlaceholder = getClassroomNamePlaceholder();
   const availableCourses = useMemo(
@@ -116,7 +115,7 @@ export function CreateClassroomForm({
 
   const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    if (targetUnavailable || submitLocked.current || isLocked) {
+    if (targetUnavailable || submitLocked.current || isLocked || outcomeUncertain) {
       return;
     }
     const trimmedName = name.trim();
@@ -158,19 +157,17 @@ export function CreateClassroomForm({
 
       classroomId = toClassroomCreateResponse(payload).id;
     } catch (error) {
-      if (error instanceof BrowserFetchJsonError) {
+      if (isDefiniteCreateRejection(error)) {
         const summary = getCreateErrorSummary(error.status);
         const detail = extractRawDetail(error);
         setErrorState({
           status: error.status,
           description: buildErrorDescription(summary, detail),
         });
+        submitLocked.current = false;
       } else {
-        setErrorState({
-          description: "操作失败，请稍后重试。",
-        });
+        setOutcomeUncertain(true);
       }
-      submitLocked.current = false;
       setIsSubmitting(false);
       return;
     }
@@ -237,7 +234,7 @@ export function CreateClassroomForm({
           <div className="md:col-span-2">
             <button
               type="submit"
-              disabled={isLocked}
+              disabled={isLocked || outcomeUncertain}
               className="rounded-md bg-zinc-900 px-4 py-2 text-sm font-medium text-white disabled:cursor-not-allowed disabled:bg-zinc-400"
             >
               {isLocked ? "创建中..." : "创建班级"}
@@ -261,6 +258,17 @@ export function CreateClassroomForm({
       ) : null}
 
       {successMessage ? <p className="mt-3 text-sm text-emerald-700">{successMessage}</p> : null}
+
+      {outcomeUncertain ? (
+        <CreateOutcomeReview
+          listHref={paths.teacher.classrooms}
+          listLabel="查看班级列表"
+          onConfirm={() => {
+            setOutcomeUncertain(false);
+            submitLocked.current = false;
+          }}
+        />
+      ) : null}
 
       {errorState ? (
         <div className="mt-4">

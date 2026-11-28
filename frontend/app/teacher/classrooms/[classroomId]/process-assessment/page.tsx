@@ -719,6 +719,7 @@ export default async function ProcessAssessmentPage({
           排除任务（临时计算）
         </summary>
         <TaskExclusionPanel
+          key={classroomId}
           mode="process-assessment"
           classroomId={classroomId}
           window={viewModel.window}

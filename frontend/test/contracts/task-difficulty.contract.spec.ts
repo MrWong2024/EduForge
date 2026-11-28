@@ -7,7 +7,48 @@ import {
   updateDifficultyPayload,
   parseDifficultyFilter,
 } from "../../lib/learning-tasks/difficulty";
+import {
+  readTemplateListDifficulty,
+  updateTemplateListQuery,
+} from "../../lib/learning-tasks/template-list-query";
 import { buildQueryString } from "../../lib/ui/format";
+
+test("consecutive template filter choices retain the latest combined query", () => {
+  const source =
+    "scope=mine&courseLabel=Web&knowledgeModule= design &limit=17&page=8&stage=legacy";
+  for (const [first, second] of [
+    [{ status: "PUBLISHED" }, { difficulty: "hard" }],
+    [{ difficulty: "hard" }, { status: "PUBLISHED" }],
+  ]) {
+    const requested = updateTemplateListQuery(source, first);
+    const latest = new URLSearchParams(updateTemplateListQuery(requested, second));
+    expect(Object.fromEntries(latest)).toEqual({
+      scope: "mine",
+      courseLabel: "Web",
+      knowledgeModule: " design ",
+      limit: "17",
+      page: "1",
+      status: "PUBLISHED",
+      difficulty: "hard",
+    });
+  }
+});
+
+test("reset and pagination preserve scope and leave cleared filters absent", () => {
+  const reset = updateTemplateListQuery(
+    "scope=shared&limit=23&status=DRAFT&difficulty=medium&courseLabel=Web&knowledgeModule=HTML&page=4",
+    {
+      status: undefined,
+      courseLabel: undefined,
+      knowledgeModule: undefined,
+      difficulty: undefined,
+    },
+  );
+  expect(reset).toBe("scope=shared&limit=23&page=1");
+  const next = new URLSearchParams(updateTemplateListQuery(reset, { page: "2" }));
+  expect(next.toString()).toBe("scope=shared&limit=23&page=2");
+  expect(readTemplateListDifficulty(next)).toBeUndefined();
+});
 
 test("difficulty filters accept only exact individual values and omit all difficulties", () => {
   expect(parseDifficultyFilter("easy")).toBe("easy");

@@ -15,6 +15,10 @@ import { ConfirmDialog } from "@/components/blocks/ConfirmDialog";
 import { ErrorState } from "@/components/blocks/ErrorState";
 import { BrowserFetchJsonError, fetchJson } from "@/lib/api/browser-client";
 import { buildErrorDescription, extractRawDetail } from "@/lib/api/error-presenter";
+import {
+  updateMemberRemovalFeedback,
+  type MemberRemovalFeedback,
+} from "@/lib/classroom-member-removal";
 import { getCommonErrorSummary } from "@/lib/ui/status";
 
 type RemoveStudentButtonProps = {
@@ -24,18 +28,12 @@ type RemoveStudentButtonProps = {
   disabled?: boolean;
 };
 
-type RemoveErrorState = {
-  status?: number;
-  summary: string;
-  detail?: string;
-};
-
-type RemovalFeedback =
-  | { kind: "success"; message: string }
-  | { kind: "error"; error: RemoveErrorState };
-
 const RemovalFeedbackContext = createContext<
-  ((feedback: RemovalFeedback | null, moveFocus?: boolean) => void) | null
+  ((
+    studentUserId: string,
+    feedback: MemberRemovalFeedback | null,
+    moveFocus?: boolean,
+  ) => void) | null
 >(null);
 
 export function ClassroomMemberRemovalFeedback({
@@ -49,15 +47,23 @@ export function ClassroomMemberRemovalFeedback({
 }) {
   const router = useRouter();
   const summaryRef = useRef<HTMLDivElement>(null);
-  const [feedback, setFeedback] = useState<RemovalFeedback | null>(null);
+  const [feedback, setFeedback] = useState<
+    ReadonlyMap<string, MemberRemovalFeedback>
+  >(() => new Map());
 
   useEffect(() => {
     if (validPageHref) router.replace(validPageHref, { scroll: false });
   }, [router, validPageHref]);
 
   const reportFeedback = useCallback(
-    (result: RemovalFeedback | null, moveFocus = false) => {
-      setFeedback(result);
+    (
+      studentUserId: string,
+      result: MemberRemovalFeedback | null,
+      moveFocus = false,
+    ) => {
+      setFeedback((current) =>
+        updateMemberRemovalFeedback(current, studentUserId, result),
+      );
       if (moveFocus) summaryRef.current?.focus();
     },
     [],
@@ -70,20 +76,21 @@ export function ClassroomMemberRemovalFeedback({
           <p role={validPageHref ? "status" : undefined}>
             {validPageHref ? "正在加载班级成员列表…" : summary}
           </p>
-          {feedback?.kind === "success" ? (
-            <p role="status" className="mt-2 text-emerald-700">
-              {feedback.message}
-            </p>
-          ) : null}
-          {feedback?.kind === "error" ? (
-            <div role="alert" className="mt-2">
-              <ErrorState
-                status={feedback.error.status}
-                title="移除成员失败"
-                description={buildErrorDescription(feedback.error.summary, feedback.error.detail)}
-              />
-            </div>
-          ) : null}
+          {Array.from(feedback, ([studentUserId, result]) =>
+            result.kind === "success" ? (
+              <p key={studentUserId} role="status" className="mt-2 text-emerald-700">
+                {result.message}
+              </p>
+            ) : (
+              <div key={studentUserId} role="alert" className="mt-2">
+                <ErrorState
+                  status={result.status}
+                  title={`移除成员失败：${result.studentName}`}
+                  description={buildErrorDescription(result.summary, result.detail)}
+                />
+              </div>
+            ),
+          )}
         </div>
         {validPageHref ? null : children}
       </div>
@@ -116,7 +123,7 @@ export function RemoveStudentButton({
     submittingRef.current = true;
     setIsConfirming(false);
     setIsSubmitting(true);
-    reportFeedback(null);
+    reportFeedback(studentUserId, null);
 
     try {
       await fetchJson<unknown>(
@@ -130,6 +137,7 @@ export function RemoveStudentButton({
       );
       const rowHasFocus = triggerRef.current?.closest("tr")?.contains(document.activeElement);
       reportFeedback(
+        studentUserId,
         { kind: "success", message: `已将${studentName}移出班级。历史记录已保留。` },
         rowHasFocus,
       );
@@ -141,14 +149,18 @@ export function RemoveStudentButton({
           error.status === 403
             ? "无权限管理该班级成员。"
             : getCommonErrorSummary(error.status, "移除成员");
-        reportFeedback({
+        reportFeedback(studentUserId, {
           kind: "error",
-          error: { status: error.status, summary, detail },
+          studentName,
+          status: error.status,
+          summary,
+          detail,
         });
       } else {
-        reportFeedback({
+        reportFeedback(studentUserId, {
           kind: "error",
-          error: { summary: "移除成员失败，请稍后重试。" },
+          studentName,
+          summary: "移除成员失败，请稍后重试。",
         });
       }
     } finally {

@@ -35,6 +35,16 @@ export class BrowserFetchJsonError extends Error {
   }
 }
 
+export function isDefiniteCreateRejection(
+  error: unknown,
+): error is BrowserFetchJsonError {
+  return (
+    error instanceof BrowserFetchJsonError &&
+    error.status >= 400 &&
+    error.status < 500
+  );
+}
+
 type BrowserFetchJsonOptions = RequestInit;
 
 export const buildProxyPath = (path: string): string => {

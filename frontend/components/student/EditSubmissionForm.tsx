@@ -474,6 +474,7 @@ function SubmissionEditor({
         contentRevision={current?.contentRevision}
         status={current?.aiFeedbackStatus}
         review={current?.aiReview}
+        hasUnsavedChanges={Boolean(request)}
         autoRefresh
         suspended={!current}
         beginExplicitDetailRead={beginExplicitDetailRead}

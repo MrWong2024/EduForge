@@ -8,6 +8,7 @@ import {
   toClassroomTask,
   toClassroomTaskSummary,
   toLearningTaskOption,
+  toPublishableTaskTemplateListResponse,
   toSubmissionDetailResponse as toTeacherDetail,
   toTeacherFeedbackListResponse,
 } from "../../lib/api/types-teacher";
@@ -38,6 +39,54 @@ import {
   toDisplaySubmissionLanguage,
 } from "../../lib/learning-tasks/submission-language";
 import { toDisplayLateDuration } from "../../lib/ui/format";
+import {
+  mergePublishableTemplates,
+  resolvePublishableTemplatePage,
+} from "../../lib/learning-tasks/publishable-template-pagination";
+
+test("publishable template pages advance through repeat rows and stop on an empty response", () => {
+  const items = [{ id: "A" }, { id: "B" }];
+  const first = toPublishableTaskTemplateListResponse({
+    items,
+    page: 1,
+    limit: 2,
+    total: 5,
+  });
+  const second = toPublishableTaskTemplateListResponse({
+    items,
+    page: 2,
+    limit: 2,
+    total: 5,
+  });
+  const cursor = resolvePublishableTemplatePage(first, {
+    page: 1,
+    limit: 50,
+    total: 2,
+  });
+  expect(cursor).toEqual({ page: 1, limit: 2, total: 5, hasMore: true });
+  const next = resolvePublishableTemplatePage(second, { ...cursor, page: 2 });
+  expect(next).toEqual({ page: 2, limit: 2, total: 5, hasMore: true });
+  expect(
+    mergePublishableTemplates(first.items, second.items).map(({ id }) => id),
+  ).toEqual(["A", "B"]);
+  expect(
+    resolvePublishableTemplatePage({ items: [], total: 20 }, { ...next, page: 3 }),
+  ).toEqual({ page: 3, limit: 2, total: 20, hasMore: false });
+});
+
+test("publishable template pagination stops on a short or full last page", () => {
+  const items = [{ id: "C", raw: {} }, { id: "D", raw: {} }];
+  const expected = { page: 2, limit: 2, total: 5 };
+  expect(
+    resolvePublishableTemplatePage({ items: items.slice(0, 1) }, expected),
+  ).toEqual({ ...expected, hasMore: false });
+  expect(
+    resolvePublishableTemplatePage({ items, total: 4 }, expected),
+  ).toEqual({ ...expected, total: 4, hasMore: false });
+  expect(
+    resolvePublishableTemplatePage({ items, page: 1 }, expected).hasMore,
+  ).toBe(false);
+});
 
 test("template difficulty comes from the top level without changing raw values", () => {
   for (const difficulty of ["easy", "综合", "  综合\n设计  ", ""]) {

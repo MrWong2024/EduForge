@@ -8,6 +8,7 @@ import {
   useTransition,
 } from "react";
 import { useRouter } from "next/navigation";
+import { ConfirmDialog } from "@/components/blocks/ConfirmDialog";
 import { ErrorState } from "@/components/blocks/ErrorState";
 import { fetchJson, BrowserFetchJsonError } from "@/lib/api/browser-client";
 import {
@@ -40,6 +41,7 @@ type Props = {
   review?: AiReview;
   autoRefresh: boolean;
   contentRevision?: number | null;
+  hasUnsavedChanges?: boolean;
   suspended?: boolean;
   beginExplicitDetailRead?: () =>
     | ((detail: SubmissionDetailResponse) => void)
@@ -54,6 +56,7 @@ function SubmissionAiReviewPanel({
   review: initialReview,
   autoRefresh,
   contentRevision,
+  hasUnsavedChanges = false,
   suspended = false,
   beginExplicitDetailRead,
 }: Props) {
@@ -73,6 +76,9 @@ function SubmissionAiReviewPanel({
     message: string;
   } | null>(null);
   const [isPageRefreshing, startTransition] = useTransition();
+  const [draftConfirmationRevision, setDraftConfirmationRevision] = useState<
+    number | null
+  >(null);
   const activeAbort = useRef<AbortController | null>(null);
   const suspendedRef = useRef(suspended);
   useLayoutEffect(() => {
@@ -146,11 +152,12 @@ function SubmissionAiReviewPanel({
     ],
   );
   const autoRead = useCallback(() => readDetail(false), [readDetail]);
-  const handleRequest = async () => {
+  const submitRequest = async (expectedRevision: number) => {
     if (
       suspendedRef.current ||
       isPageRefreshing ||
-      view.displayedRevision !== contentRevision
+      expectedRevision !== contentRevision ||
+      !operations.planRequest(expectedRevision, false)
     ) {
       return;
     }
@@ -208,6 +215,32 @@ function SubmissionAiReviewPanel({
     } finally {
       if (activeAbort.current === abort) activeAbort.current = null;
     }
+  };
+
+  const canRequestDisplayedRevision =
+    !suspended &&
+    !isPageRefreshing &&
+    view.canRequest &&
+    view.displayedRevision === contentRevision;
+  const confirmationRevision =
+    hasUnsavedChanges &&
+    canRequestDisplayedRevision &&
+    draftConfirmationRevision === contentRevision
+      ? draftConfirmationRevision
+      : null;
+  if (draftConfirmationRevision !== null && confirmationRevision === null) {
+    setDraftConfirmationRevision(null);
+  }
+
+  const handleRequest = async () => {
+    if (suspendedRef.current || isPageRefreshing) return;
+    const plan = operations.planRequest(contentRevision, hasUnsavedChanges);
+    if (!plan) return;
+    if (plan.needsDraftConfirmation) {
+      setDraftConfirmationRevision(plan.expectedRevision);
+      return;
+    }
+    await submitRequest(plan.expectedRevision);
   };
 
   if (suspended) return null;
@@ -300,13 +333,21 @@ function SubmissionAiReviewPanel({
       ) : null}
       {currentStatus !== "DEAD" ? (
         <RequestAiFeedbackButton
-          disabled={
-            !view.canRequest ||
-            isPageRefreshing ||
-            view.displayedRevision !== contentRevision
-          }
+          disabled={!canRequestDisplayedRevision}
           isSubmitting={view.busy === "request"}
           onRequest={handleRequest}
+        />
+      ) : null}
+      {confirmationRevision !== null ? (
+        <ConfirmDialog
+          title="使用已保存作品申请 AI 反馈"
+          description="AI 将评阅当前已保存的版本。这些修改尚未保存，开始评阅后可能无法再保存。"
+          confirmLabel="按已保存版本继续申请"
+          onCancel={() => setDraftConfirmationRevision(null)}
+          onConfirm={() => {
+            setDraftConfirmationRevision(null);
+            void submitRequest(confirmationRevision);
+          }}
         />
       ) : null}
       {error ? (

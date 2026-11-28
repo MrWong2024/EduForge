@@ -296,6 +296,45 @@ const postResult = (status: string) =>
     aiFeedbackStatus: status,
   });
 
+test("plans a saved-version confirmation without starting an AI request", () => {
+  const operations = makeOperations();
+  expect(operations.planRequest(0, true)).toEqual({
+    expectedRevision: 0,
+    needsDraftConfirmation: true,
+  });
+  expect(operations.view.busy).toBeNull();
+  expect(operations.planRequest(0, false)).toEqual({
+    expectedRevision: 0,
+    needsDraftConfirmation: false,
+  });
+
+  const confirmed = operations.beginRequest();
+  expect(confirmed?.expectedRevision).toBe(0);
+  expect(operations.planRequest(0, true)).toBeNull();
+});
+
+test("draft confirmation follows the existing AI eligibility and displayed revision", () => {
+  const operations = makeOperations();
+  expect(operations.planRequest(null, true)).toBeNull();
+  expect(operations.planRequest(1, true)).toBeNull();
+
+  const refresh = operations.beginRead(true)!;
+  expect(operations.planRequest(0, true)).toBeNull();
+  const revised = toSubmissionDetailResponse({
+    ...makeDetail().raw,
+    contentRevision: 1,
+  });
+  expect(operations.finishRead(refresh, revised)).toBe(true);
+  expect(operations.planRequest(0, true)).toBeNull();
+  expect(operations.planRequest(1, true)).toBeNull();
+  expect(operations.confirmDisplayedRevision(1)).toBe(true);
+  expect(operations.planRequest(1, true)?.expectedRevision).toBe(1);
+
+  const request = operations.beginRequest()!;
+  expect(operations.finishRequest(request)).toBe(false);
+  expect(operations.planRequest(1, true)).toBeNull();
+});
+
 test("orders local reads and POST, and exposes only the real confirmed POST status", () => {
   for (const status of ["PENDING", "SUCCEEDED", "DEAD"]) {
     const operations = makeOperations(),

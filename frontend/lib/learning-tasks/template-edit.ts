@@ -1,4 +1,5 @@
 import {
+  LEARNING_TASK_STATUSES,
   toLearningTaskUpdateResponse,
   type LearningTaskDetailResponse,
   type UpdateLearningTaskRequest,
@@ -69,6 +70,21 @@ export function toTaskTemplateEditDraft(
     rubricNotes: getRubricNotes(task.rubric),
     aiContextText: formatAiContextRefs(task.aiContextRefs ?? []),
   };
+}
+
+export function advanceTaskTemplateLifecycle(
+  taskId: string,
+  current: LearningTaskDetailResponse,
+  observed: LearningTaskDetailResponse,
+): LearningTaskDetailResponse {
+  const states: readonly string[] = LEARNING_TASK_STATUSES;
+  const rank = (task: LearningTaskDetailResponse) =>
+    states.indexOf(task.status?.trim().toUpperCase() ?? "");
+
+  // Archive is terminal. An older refresh must not reopen a confirmed action.
+  return observed.id === taskId && rank(observed) > rank(current)
+    ? observed
+    : current;
 }
 
 function diffTaskTemplateEditDraft(

@@ -59,6 +59,19 @@ export class SubmissionAiOperations {
         this.accepted.review?.canRequest === true,
     };
   }
+  planRequest(contentRevision: unknown, hasUnsavedChanges: boolean) {
+    if (
+      !isValidContentRevision(contentRevision) ||
+      this.displayedRevision !== contentRevision ||
+      !this.view.canRequest
+    ) {
+      return null;
+    }
+    return {
+      expectedRevision: contentRevision,
+      needsDraftConfirmation: hasUnsavedChanges,
+    };
+  }
   beginRequest(): Operation | null {
     if (!this.view.canRequest) return null;
     return this.start("request", false);

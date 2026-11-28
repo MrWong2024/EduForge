@@ -24,6 +24,10 @@ import {
   getDifficultyLabel,
   parseDifficultyFilter,
 } from "@/lib/learning-tasks/difficulty";
+import {
+  mergePublishableTemplates,
+  resolvePublishableTemplatePage,
+} from "@/lib/learning-tasks/publishable-template-pagination";
 import { buildQueryString, getPublisherLabel, toDisplayDate } from "@/lib/ui/format";
 import { getTaskTemplateStatusLabel } from "@/lib/ui/status";
 import { useClassroomTaskPublishReceipt } from "./ClassroomTaskListInteractions";
@@ -143,28 +147,36 @@ export function PublishClassroomTaskForm({
   const inFlight = useRef(false);
   const [errorState, setErrorState] = useState<PublishErrorState | null>(null);
   const [publishReceipt, setPublishReceipt] = useClassroomTaskPublishReceipt();
-  const [loadedTasks, setLoadedTasks] =
-    useState<LearningTaskOption[]>(availableTasks);
-  const [loadedTotal, setLoadedTotal] = useState<number>(
-    typeof initialAvailableTasksTotal === "number"
-      ? initialAvailableTasksTotal
-      : availableTasks.length,
-  );
-  const [loadedPage, setLoadedPage] = useState<number>(
-    typeof initialAvailableTasksPage === "number" &&
-      initialAvailableTasksPage > 0
-      ? initialAvailableTasksPage
-      : 1,
-  );
-  const [loadedLimit, setLoadedLimit] = useState<number>(
-    typeof initialAvailableTasksLimit === "number" &&
-      initialAvailableTasksLimit > 0
-      ? initialAvailableTasksLimit
-      : 50,
-  );
+  const initialCandidatePage = {
+    items: availableTasks,
+    page: initialAvailableTasksPage,
+    limit: initialAvailableTasksLimit,
+    total: initialAvailableTasksTotal,
+  };
+  const initialCandidatePosition = {
+    page: 1,
+    limit: 50,
+    total: availableTasks.length,
+  };
+  const getInitialCandidates = () => ({
+    items: mergePublishableTemplates([], availableTasks),
+    cursor: resolvePublishableTemplatePage(
+      initialCandidatePage,
+      initialCandidatePosition,
+    ),
+  });
+  const [candidates, setCandidates] = useState(getInitialCandidates);
+  const loadedTasks = candidates.items;
+  const {
+    page: loadedPage,
+    limit: loadedLimit,
+    total: loadedTotal,
+    hasMore: hasMoreTasks,
+  } = candidates.cursor;
   const [isLoadingMore, setIsLoadingMore] = useState(false);
   const [loadMoreError, setLoadMoreError] = useState<string | null>(null);
   const loadMoreEpochRef = useRef(0);
+  const loadMoreInFlightEpoch = useRef<number | null>(null);
   const [previousFilterProps, setPreviousFilterProps] = useState({
     initialCourseLabelFilter,
     initialOnlyMineFilter,
@@ -172,6 +184,7 @@ export function PublishClassroomTaskForm({
     initialDifficulty,
   });
   const [previousTaskProps, setPreviousTaskProps] = useState({
+    classroomId,
     availableTasks,
     initialAvailableTasksTotal,
     initialAvailableTasksPage,
@@ -192,19 +205,20 @@ export function PublishClassroomTaskForm({
       initialKnowledgeModuleFilter,
       initialDifficulty,
     });
-    setTaskId("");
   }
 
-  if (
-    !isSubmitting && (
-      filterPropsChanged ||
-      previousTaskProps.availableTasks !== availableTasks ||
-      !Object.is(previousTaskProps.initialAvailableTasksTotal, initialAvailableTasksTotal) ||
-      !Object.is(previousTaskProps.initialAvailableTasksPage, initialAvailableTasksPage) ||
-      !Object.is(previousTaskProps.initialAvailableTasksLimit, initialAvailableTasksLimit)
-    )
-  ) {
+  const classroomChanged = previousTaskProps.classroomId !== classroomId;
+  const candidatePropsChanged =
+    classroomChanged ||
+    filterPropsChanged ||
+    previousTaskProps.availableTasks !== availableTasks ||
+    !Object.is(previousTaskProps.initialAvailableTasksTotal, initialAvailableTasksTotal) ||
+    !Object.is(previousTaskProps.initialAvailableTasksPage, initialAvailableTasksPage) ||
+    !Object.is(previousTaskProps.initialAvailableTasksLimit, initialAvailableTasksLimit);
+
+  if (!isSubmitting && candidatePropsChanged) {
     setPreviousTaskProps({
+      classroomId,
       availableTasks,
       initialAvailableTasksTotal,
       initialAvailableTasksPage,
@@ -214,24 +228,8 @@ export function PublishClassroomTaskForm({
     setOnlyMine(initialOnlyMineFilter);
     setKnowledgeModuleFilter(initialKnowledgeModuleFilter ?? "");
     setDifficultyFilter(initialDifficulty);
-    setLoadedTasks(availableTasks);
-    setLoadedTotal(
-      typeof initialAvailableTasksTotal === "number"
-        ? initialAvailableTasksTotal
-        : availableTasks.length,
-    );
-    setLoadedPage(
-      typeof initialAvailableTasksPage === "number" &&
-        initialAvailableTasksPage > 0
-        ? initialAvailableTasksPage
-        : 1,
-    );
-    setLoadedLimit(
-      typeof initialAvailableTasksLimit === "number" &&
-        initialAvailableTasksLimit > 0
-        ? initialAvailableTasksLimit
-        : 50,
-    );
+    setCandidates(getInitialCandidates());
+    if (classroomChanged) setTaskId("");
     setLoadMoreError(null);
     setIsLoadingMore(false);
   }
@@ -239,6 +237,7 @@ export function PublishClassroomTaskForm({
   useLayoutEffect(() => {
     loadMoreEpochRef.current += 1;
   }, [
+    classroomId,
     availableTasks,
     initialAvailableTasksTotal,
     initialAvailableTasksPage,
@@ -300,10 +299,6 @@ export function PublishClassroomTaskForm({
     );
   }, [loadedTasks, knowledgeModuleFilter]);
 
-  if (taskId && !selectedTask && loadedTasks.length >= loadedTotal) {
-    setTaskId("");
-  }
-
   const isRefreshingCandidates =
     isFilterPending ||
     courseLabelFilter !== (initialCourseLabelFilter ?? "") ||
@@ -311,8 +306,18 @@ export function PublishClassroomTaskForm({
     knowledgeModuleFilter !== (initialKnowledgeModuleFilter ?? "") ||
     difficultyFilter !== initialDifficulty;
 
-  const invalidateCandidateSelection = () => {
+  if (
+    !isSubmitting &&
+    !isRefreshingCandidates &&
+    !candidatePropsChanged &&
+    taskId &&
+    !selectedTask &&
+    !hasMoreTasks
+  ) {
     setTaskId("");
+  }
+
+  const invalidateCandidateRequests = () => {
     loadMoreEpochRef.current += 1;
     setIsLoadingMore(false);
     setLoadMoreError(null);
@@ -345,7 +350,7 @@ export function PublishClassroomTaskForm({
       return;
     }
     if (nextValue !== courseLabelFilter) {
-      invalidateCandidateSelection();
+      invalidateCandidateRequests();
     }
     setCourseLabelFilter(nextValue);
     replaceSearchQuery((params) => {
@@ -362,7 +367,7 @@ export function PublishClassroomTaskForm({
       return;
     }
     if (nextValue !== onlyMine) {
-      invalidateCandidateSelection();
+      invalidateCandidateRequests();
     }
     setOnlyMine(nextValue);
     replaceSearchQuery((params) => {
@@ -379,7 +384,7 @@ export function PublishClassroomTaskForm({
       return;
     }
     if (nextValue !== knowledgeModuleFilter) {
-      invalidateCandidateSelection();
+      invalidateCandidateRequests();
     }
     setKnowledgeModuleFilter(nextValue);
     replaceSearchQuery((params) => {
@@ -397,7 +402,7 @@ export function PublishClassroomTaskForm({
     }
     const nextValue = parseDifficultyFilter(value) ?? "";
     if (nextValue !== difficultyFilter) {
-      invalidateCandidateSelection();
+      invalidateCandidateRequests();
     }
     setDifficultyFilter(nextValue);
     replaceSearchQuery((params) => {
@@ -413,7 +418,7 @@ export function PublishClassroomTaskForm({
     if (isFilterPending || isSubmitting || inFlight.current) {
       return;
     }
-    invalidateCandidateSelection();
+    invalidateCandidateRequests();
     setCourseLabelFilter("");
     setOnlyMine(false);
     setKnowledgeModuleFilter("");
@@ -431,7 +436,6 @@ export function PublishClassroomTaskForm({
     onlyMine ||
     Boolean(knowledgeModuleFilter) ||
     Boolean(difficultyFilter);
-  const hasMoreTasks = loadedTasks.length < loadedTotal;
   const dueAtInputType =
     dueAt || isDueAtPickerActive ? "datetime-local" : "text";
 
@@ -441,6 +445,7 @@ export function PublishClassroomTaskForm({
       inFlight.current ||
       isRefreshingCandidates ||
       isLoadingMore ||
+      loadMoreInFlightEpoch.current === loadMoreEpochRef.current ||
       !hasMoreTasks
     ) {
       return;
@@ -459,53 +464,29 @@ export function PublishClassroomTaskForm({
     setIsLoadingMore(true);
     setLoadMoreError(null);
     const requestEpoch = loadMoreEpochRef.current;
+    loadMoreInFlightEpoch.current = requestEpoch;
 
     try {
       const payload = await fetchJson<unknown>(
         `classrooms/${encodeURIComponent(classroomId)}/publishable-task-templates?${query}`,
       );
       const response = toPublishableTaskTemplateListResponse(payload);
-      const nextItems = response.items;
       if (requestEpoch !== loadMoreEpochRef.current) {
         return;
       }
 
-      setLoadedTasks((previous) => {
-        if (requestEpoch !== loadMoreEpochRef.current) {
-          return previous;
-        }
-        const seenIds = new Set(
-          previous
-            .map((task) => (typeof task.id === "string" ? task.id.trim() : ""))
-            .filter((id) => id.length > 0),
-        );
-        const merged = [...previous];
-
-        for (const item of nextItems) {
-          const itemId = typeof item.id === "string" ? item.id.trim() : "";
-          if (itemId && seenIds.has(itemId)) {
-            continue;
-          }
-          if (itemId) {
-            seenIds.add(itemId);
-          }
-          merged.push(item);
-        }
-
-        return merged;
-      });
-
-      setLoadedPage(
-        typeof response.page === "number" && response.page > 0
-          ? response.page
-          : nextPage,
+      setCandidates((previous) =>
+        requestEpoch === loadMoreEpochRef.current
+          ? {
+              items: mergePublishableTemplates(previous.items, response.items),
+              cursor: resolvePublishableTemplatePage(response, {
+                page: nextPage,
+                limit: loadedLimit,
+                total: loadedTotal,
+              }),
+            }
+          : previous,
       );
-      if (typeof response.limit === "number" && response.limit > 0) {
-        setLoadedLimit(response.limit);
-      }
-      if (typeof response.total === "number" && response.total >= 0) {
-        setLoadedTotal(response.total);
-      }
     } catch (error) {
       if (requestEpoch !== loadMoreEpochRef.current) {
         return;
@@ -524,6 +505,9 @@ export function PublishClassroomTaskForm({
         setLoadMoreError("加载更多候选模板失败，请稍后重试。");
       }
     } finally {
+      if (loadMoreInFlightEpoch.current === requestEpoch) {
+        loadMoreInFlightEpoch.current = null;
+      }
       if (requestEpoch === loadMoreEpochRef.current) {
         setIsLoadingMore(false);
       }
@@ -550,7 +534,7 @@ export function PublishClassroomTaskForm({
       !publishTaskId ||
       !loadedTasks.some((task) => task.id === publishTaskId)
     ) {
-      setTaskId("");
+      if (!hasMoreTasks) setTaskId("");
       setErrorState({
         summary: "请先选择一个已发布任务模板。",
       });
@@ -651,7 +635,7 @@ export function PublishClassroomTaskForm({
           先去创建任务模板
         </Link>
       </p>
-      {!isRefreshingCandidates && loadedTasks.length === 0 ? (
+      {!isRefreshingCandidates && loadedTasks.length === 0 && !hasMoreTasks ? (
         <div className="mt-3 rounded-md border border-zinc-200 bg-zinc-50 px-3 py-2 text-sm text-zinc-700">
           {hasActiveQueryFilters ? (
             <>
@@ -811,7 +795,7 @@ export function PublishClassroomTaskForm({
           </select>
         </label>
 
-        {loadedTasks.length > 0 ? (
+        {loadedTasks.length > 0 || hasMoreTasks ? (
           <section className="rounded-md border border-zinc-200 bg-white p-3">
             <p className="text-sm font-medium text-zinc-900">模板候选列表</p>
             <p className="mt-1 text-xs text-zinc-600">

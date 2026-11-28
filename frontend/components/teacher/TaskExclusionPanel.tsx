@@ -3,6 +3,12 @@
 import { useMemo, useState, useTransition } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { paths } from "@/lib/routes/paths";
+import {
+  haveSameTaskIds,
+  normalizeTaskIds,
+  reconcileTaskExclusionSelection,
+  type TaskExclusionSelection,
+} from "@/lib/learning-tasks/task-exclusion-selection";
 
 export type TaskExclusionPanelMode =
   | "process-assessment"
@@ -26,33 +32,6 @@ type TaskExclusionPanelProps = {
   initialQueryEntries: SearchParamEntry[];
   taskOptionsLoadError?: string;
   currentPathname?: string;
-};
-
-const normalizeTaskIds = (taskIds: string[]): string[] => {
-  const seen = new Set<string>();
-  const normalized: string[] = [];
-
-  for (const rawTaskId of taskIds) {
-    const taskId = rawTaskId.trim();
-    if (!taskId || seen.has(taskId)) {
-      continue;
-    }
-    seen.add(taskId);
-    normalized.push(taskId);
-  }
-
-  return normalized;
-};
-
-const haveSameTaskIds = (left: string[], right: string[]): boolean => {
-  const normalizedLeft = normalizeTaskIds(left);
-  const normalizedRight = normalizeTaskIds(right);
-  if (normalizedLeft.length !== normalizedRight.length) {
-    return false;
-  }
-
-  const rightSet = new Set(normalizedRight);
-  return normalizedLeft.every((taskId) => rightSet.has(taskId));
 };
 
 const getFallbackPathname = (
@@ -87,16 +66,19 @@ export function TaskExclusionPanel({
     () => normalizeTaskIds(initialExcludedTaskIds),
     [initialExcludedTaskIds],
   );
-  const [selectedIds, setSelectedIds] = useState<string[]>(
+  const [selection, setSelection] = useState<TaskExclusionSelection>({
+    appliedIds: normalizedInitialExcludedTaskIds,
+    selectedIds: normalizedInitialExcludedTaskIds,
+    requestedIds: null,
+  });
+  const reconciledSelection = reconcileTaskExclusionSelection(
+    selection,
     normalizedInitialExcludedTaskIds,
   );
-  const [previousInitialExcludedTaskIds, setPreviousInitialExcludedTaskIds] =
-    useState(normalizedInitialExcludedTaskIds);
-
-  if (previousInitialExcludedTaskIds !== normalizedInitialExcludedTaskIds) {
-    setPreviousInitialExcludedTaskIds(normalizedInitialExcludedTaskIds);
-    setSelectedIds(normalizedInitialExcludedTaskIds);
+  if (reconciledSelection !== selection) {
+    setSelection(reconciledSelection);
   }
+  const { selectedIds } = reconciledSelection;
 
   const selectedIdSet = useMemo(() => new Set(selectedIds), [selectedIds]);
   const taskIdSet = useMemo(
@@ -134,11 +116,12 @@ export function TaskExclusionPanel({
   };
 
   const toggleTask = (taskId: string) => {
-    setSelectedIds((previous) =>
-      previous.includes(taskId)
-        ? previous.filter((selectedTaskId) => selectedTaskId !== taskId)
-        : [...previous, taskId],
-    );
+    setSelection((previous) => ({
+      ...previous,
+      selectedIds: previous.selectedIds.includes(taskId)
+        ? previous.selectedIds.filter((selectedTaskId) => selectedTaskId !== taskId)
+        : [...previous.selectedIds, taskId],
+    }));
   };
 
   const applySelectedTasks = () => {
@@ -147,6 +130,7 @@ export function TaskExclusionPanel({
     }
 
     const nextHref = buildNextHref(selectedIds);
+    setSelection((previous) => ({ ...previous, requestedIds: selectedIds }));
     setPendingAction("apply");
     startTransition(() => {
       router.replace(nextHref, { scroll: false });
@@ -158,7 +142,11 @@ export function TaskExclusionPanel({
       return;
     }
 
-    setSelectedIds([]);
+    setSelection((previous) => ({
+      ...previous,
+      selectedIds: [],
+      requestedIds: [],
+    }));
     const nextHref = buildNextHref([]);
     setPendingAction("clear");
     startTransition(() => {

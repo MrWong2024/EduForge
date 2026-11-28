@@ -34,6 +34,7 @@ import {
 } from "@/components/teacher/TaskAiContextRefs";
 import { canEditTaskTemplate } from "@/lib/learning-tasks/ai-context-refs";
 import {
+  advanceTaskTemplateLifecycle,
   buildTaskTemplateEditRequest,
   confirmTaskTemplateEditReceipt,
   reconcileTaskTemplatePublishedDraft,
@@ -171,6 +172,7 @@ export function EditLearningTaskForm({
   const router = useRouter();
   const taskListReturnTo = toSafeTaskListReturnTo(returnTo);
   const [confirmedTask, setConfirmedTask] = useState(initialTask);
+  const [observedTask, setObservedTask] = useState(initialTask);
   // Keep this edit session stable across ordinary props refreshes.
   const [baseline, setBaseline] = useState(() =>
     toTaskTemplateEditDraft(initialTask),
@@ -194,6 +196,21 @@ export function EditLearningTaskForm({
   const headingRef = useRef<HTMLHeadingElement>(null);
   const lifecycleTriggerRef = useRef<HTMLButtonElement>(null);
 
+  const refreshedTask = advanceTaskTemplateLifecycle(
+    taskId,
+    observedTask,
+    initialTask,
+  );
+  if (refreshedTask !== observedTask) {
+    setObservedTask(refreshedTask);
+    setPendingLifecycleAction(null);
+  }
+  const lifecycleTask = advanceTaskTemplateLifecycle(
+    taskId,
+    confirmedTask,
+    refreshedTask,
+  );
+
   const {
     title,
     description,
@@ -208,7 +225,7 @@ export function EditLearningTaskForm({
     () => buildTaskTemplateEditRequest(baseline, draft),
     [baseline, draft],
   );
-  const rawStatus = toRawStatusUpper(confirmedTask.status);
+  const rawStatus = toRawStatusUpper(lifecycleTask.status);
   const hasKnownStatus = isLearningTaskStatus(rawStatus);
   const currentStatus = hasKnownStatus ? rawStatus : "DRAFT";
   const publisherLabel = getPublisherLabel(
@@ -216,9 +233,13 @@ export function EditLearningTaskForm({
     currentUserId,
   );
   const isArchived = currentStatus === "ARCHIVED";
+  const showArchivedDraft =
+    isArchived &&
+    toRawStatusUpper(confirmedTask.status) !== "ARCHIVED" &&
+    !readOnly;
   const ownerCanEdit = canEditTaskTemplate(
     currentUserId,
-    confirmedTask.createdById,
+    lifecycleTask.createdById,
     hasKnownStatus ? currentStatus : undefined,
   );
   const canPublish = !readOnly && ownerCanEdit && currentStatus === "DRAFT";
@@ -230,6 +251,7 @@ export function EditLearningTaskForm({
     field: Field,
     value: TaskTemplateEditDraft[Field],
   ) {
+    if (effectiveReadOnly || writeInProgress.current) return;
     setDraft((current) => ({ ...current, [field]: value }));
   }
 
@@ -312,6 +334,7 @@ export function EditLearningTaskForm({
     trigger: HTMLButtonElement,
   ) => {
     if (pendingLifecycleAction || writeInProgress.current) return;
+    if (action === "publish" ? !canPublish : !canArchive) return;
 
     lifecycleTriggerRef.current = trigger;
     trigger.focus();
@@ -419,7 +442,9 @@ export function EditLearningTaskForm({
       ) : null}
       {isArchived && !readOnly ? (
         <p className="mt-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
-          当前任务模板已归档，不能直接编辑。后续如需复用，可复制为新草稿。
+          {showArchivedDraft
+            ? "当前任务模板已归档。此标签页保留了你的草稿，可以选择、复制内容。"
+            : "当前任务模板已归档，不能直接编辑。后续如需复用，可复制为新草稿。"}
         </p>
       ) : null}
       {!readOnly && !hasKnownStatus ? (
@@ -430,14 +455,14 @@ export function EditLearningTaskForm({
 
       <form onSubmit={handleSubmit} className="mt-4 space-y-4">
         <fieldset
-          disabled={isSubmitting || isActionPending}
+          disabled={!effectiveReadOnly && (isSubmitting || isActionPending)}
           className="min-w-0 space-y-4"
         >
           <div className="grid gap-4 md:grid-cols-2">
             <label className="block text-sm">
               <span className="mb-1 block text-zinc-700">标题</span>
               <input
-                disabled={effectiveReadOnly}
+                readOnly={effectiveReadOnly}
                 value={title}
                 onChange={(event) => updateDraft("title", event.target.value)}
                 placeholder="请输入任务模板标题"
@@ -448,7 +473,7 @@ export function EditLearningTaskForm({
             <label className="block text-sm">
               <span className="mb-1 block text-zinc-700">知识模块</span>
               <input
-                disabled={effectiveReadOnly}
+                readOnly={effectiveReadOnly}
                 value={knowledgeModule}
                 onChange={(event) =>
                   updateDraft("knowledgeModule", event.target.value)
@@ -563,7 +588,7 @@ export function EditLearningTaskForm({
               <span className="mb-1 block text-zinc-700">当前状态</span>
               <div className="rounded-md border border-zinc-200 bg-zinc-50 px-3 py-2 text-zinc-700">
                 {getTaskTemplateStatusLabel(
-                  hasKnownStatus ? currentStatus : confirmedTask.status,
+                  hasKnownStatus ? currentStatus : lifecycleTask.status,
                 )}
               </div>
               <p className="mt-1 text-xs text-zinc-500">
@@ -605,16 +630,17 @@ export function EditLearningTaskForm({
           </label>
         </fieldset>
 
-        {effectiveReadOnly ? (
-          <TaskAiContextRefsReadOnly refs={confirmedTask.aiContextRefs ?? []} />
-        ) : showAiContextEditor ? (
+        {showAiContextEditor && (!effectiveReadOnly || showArchivedDraft) ? (
           <TaskAiContextRefsEditor
             value={aiContextText}
             onChange={(value) => updateDraft("aiContextText", value)}
-            error={aiContextError}
+            error={effectiveReadOnly ? null : aiContextError}
             onError={setAiContextError}
-            disabled={isSubmitting || isActionPending}
+            disabled={!effectiveReadOnly && (isSubmitting || isActionPending)}
+            readOnly={effectiveReadOnly}
           />
+        ) : effectiveReadOnly ? (
+          <TaskAiContextRefsReadOnly refs={lifecycleTask.aiContextRefs ?? []} />
         ) : null}
 
         <div className="flex flex-wrap items-center gap-3">

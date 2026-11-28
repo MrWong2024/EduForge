@@ -1316,6 +1316,14 @@ export const toLearningTaskCreateResponse = (
   return toLearningTaskOption(source);
 };
 
+export function isConfirmedLearningTaskCreateResponse(
+  payload: unknown,
+  status: LearningTaskStatus,
+): boolean {
+  const task = toLearningTaskCreateResponse(payload);
+  return Boolean(task.id && task.status === status);
+}
+
 export const toLearningTaskUpdateResponse = (
   payload: unknown,
 ): LearningTaskUpdateResponse => {

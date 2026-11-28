@@ -359,6 +359,7 @@ export default async function AiLearningAnalyticsPage({
           临时排除课堂任务
         </summary>
         <TaskExclusionPanel
+          key={classroomId}
           mode="ai-learning-analytics"
           classroomId={classroomId}
           window={context.window}

@@ -13,12 +13,14 @@ export function TaskAiContextRefsEditor({
   error,
   onError,
   disabled,
+  readOnly = false,
 }: {
   value: string;
   onChange: (value: string) => void;
   error: string | null;
   onError: (message: string | null) => void;
   disabled: boolean;
+  readOnly?: boolean;
 }) {
   const id = useId();
   return (
@@ -31,10 +33,12 @@ export function TaskAiContextRefsEditor({
         id={id}
         value={value}
         onChange={(event) => {
+          if (readOnly) return;
           onChange(event.target.value);
           onError(null);
         }}
         disabled={disabled}
+        readOnly={readOnly}
         rows={8}
         spellCheck={false}
         aria-invalid={Boolean(error)}
@@ -43,7 +47,7 @@ export function TaskAiContextRefsEditor({
       />
       <button
         type="button"
-        disabled={disabled}
+        disabled={disabled || readOnly}
         onClick={() => {
           try {
             onChange(formatAiContextRefs(parseAiContextRefsJson(value)));

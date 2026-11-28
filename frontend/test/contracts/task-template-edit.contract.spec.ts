@@ -1,11 +1,13 @@
 import { expect, test } from "@playwright/test";
 import {
+  isConfirmedLearningTaskCreateResponse,
   toLearningTaskCreateResponse,
   toLearningTaskDetailResponse,
   toLearningTaskUpdateResponse,
   type UpdateLearningTaskRequest,
 } from "../../lib/api/types-teacher";
 import {
+  advanceTaskTemplateLifecycle,
   buildTaskTemplateEditRequest,
   confirmTaskTemplateEditReceipt,
   reconcileTaskTemplatePublishedDraft,
@@ -51,6 +53,38 @@ const baseline: TaskTemplateEditDraft = {
   rubricNotes: "  旧评阅文字\n ",
   aiContextText: JSON.stringify(refs),
 };
+
+test("both create actions require a usable template ID and the requested state", () => {
+  expect(isConfirmedLearningTaskCreateResponse(receipt, "DRAFT")).toBe(true);
+  expect(
+    isConfirmedLearningTaskCreateResponse(
+      { data: { ...receipt, status: "PUBLISHED" } },
+      "PUBLISHED",
+    ),
+  ).toBe(true);
+  for (const payload of [null, { id: "", status: "DRAFT" }, { id: "task-1" }]) {
+    expect(isConfirmedLearningTaskCreateResponse(payload, "DRAFT")).toBe(false);
+  }
+  expect(isConfirmedLearningTaskCreateResponse(receipt, "PUBLISHED")).toBe(false);
+});
+
+test("an archived snapshot advances only the matching edit session and stale props cannot reopen it", () => {
+  const publishedTask = toLearningTaskDetailResponse({
+    ...receipt,
+    status: "PUBLISHED",
+  });
+  const archivedTask = toLearningTaskDetailResponse({
+    ...receipt,
+    status: "ARCHIVED",
+  });
+  const otherTemplate = { ...archivedTask, id: "task-2" };
+  expect(advanceTaskTemplateLifecycle("task-1", publishedTask, otherTemplate))
+    .toBe(publishedTask);
+  expect(advanceTaskTemplateLifecycle("task-1", publishedTask, archivedTask))
+    .toBe(archivedTask);
+  expect(advanceTaskTemplateLifecycle("task-1", archivedTask, publishedTask))
+    .toBe(archivedTask);
+});
 const published: TaskTemplateEditDraft = {
   title: "发布时的远端标题",
   description: "  发布时的描述\n    保留缩进\n",

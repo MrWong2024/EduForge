@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useMemo } from "react";
+import { useLayoutEffect, useMemo, useOptimistic, useRef, useTransition } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { EmptyState } from "@/components/blocks/EmptyState";
 import { paths } from "@/lib/routes/paths";
@@ -29,6 +29,12 @@ import {
   type TaskTemplateScope,
 } from "@/lib/learning-tasks/template-visibility-scope";
 import { sortTaskTemplatesByScope } from "@/lib/learning-tasks/template-list-sorting";
+import {
+  normalizeTemplateListQuery,
+  readTemplateListDifficulty,
+  updateTemplateListQuery,
+  type TemplateListQueryChanges,
+} from "@/lib/learning-tasks/template-list-query";
 import { getRubricSummary } from "@/lib/learning-tasks/rubric";
 import {
   TASK_DIFFICULTY_OPTIONS,
@@ -112,33 +118,56 @@ export function LearningTaskFilters({
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
+  const committedQuery = searchParams.toString();
+  const [isNavigating, startNavigation] = useTransition();
+  const [displayedQuery, setDisplayedQuery] = useOptimistic(committedQuery);
+  const requestedQuery = useRef<{ pathname: string; query: string } | null>(
+    null,
+  );
+  const displayedParams = useMemo(
+    () => new URLSearchParams(displayedQuery),
+    [displayedQuery],
+  );
+
+  useLayoutEffect(() => {
+    if (!isNavigating) requestedQuery.current = null;
+  }, [committedQuery, isNavigating, pathname]);
+
+  useLayoutEffect(() => {
+    const restoreHistoryQuery = () => {
+      requestedQuery.current = {
+        pathname: window.location.pathname,
+        query: window.location.search.slice(1),
+      };
+    };
+    window.addEventListener("popstate", restoreHistoryQuery);
+    return () => window.removeEventListener("popstate", restoreHistoryQuery);
+  }, []);
 
   const currentScope =
-    normalizeTaskTemplateScope(searchParams.get("scope") ?? initialScope) ??
+    normalizeTaskTemplateScope(displayedParams.get("scope") ?? initialScope) ??
     initialScope;
   const statusFilter = toStatusFilter(
-    searchParams.get("status") ?? initialStatus,
+    displayedParams.get("status") ??
+      (displayedQuery === committedQuery ? initialStatus : undefined),
   );
   const courseLabelFilter =
     normalizeTaskCourseLabel(
-      searchParams.get("courseLabel") ?? initialCourseLabel,
+      displayedParams.get("courseLabel") ??
+        (displayedQuery === committedQuery ? initialCourseLabel : undefined),
     ) ?? "";
-  const difficultyValues = searchParams.getAll("difficulty");
   const difficultyFilter =
-    parseDifficultyFilter(
-      difficultyValues.length === 0
-        ? initialDifficultyFilter
-        : difficultyValues.length === 1
-          ? difficultyValues[0]
-          : difficultyValues,
+    readTemplateListDifficulty(
+      displayedParams,
+      displayedQuery === committedQuery ? initialDifficultyFilter : undefined,
     ) ?? "";
-  const knowledgeModuleFilter = useMemo(() => {
-    const value =
-      searchParams.get("knowledgeModule") ?? initialKnowledgeModule ?? "";
-    return value.trim();
-  }, [searchParams, initialKnowledgeModule]);
+  const knowledgeModuleFilter = (
+    displayedParams.get("knowledgeModule") ??
+    (displayedQuery === committedQuery ? initialKnowledgeModule : undefined) ??
+    ""
+  ).trim();
   const currentPage = parsePositiveInt(
-    searchParams.get("page") ?? String(initialPage),
+    displayedParams.get("page") ?? String(initialPage),
     initialPage,
     { min: 1 },
   );
@@ -171,16 +200,9 @@ export function LearningTaskFilters({
   }, [tasks, knowledgeModuleFilter]);
 
   const currentTaskListUrl = useMemo(() => {
-    const params = new URLSearchParams(searchParams.toString());
-    params.delete("stage");
-    if (difficultyFilter) {
-      params.set("difficulty", difficultyFilter);
-    } else {
-      params.delete("difficulty");
-    }
-    const currentQuery = params.toString();
+    const currentQuery = normalizeTemplateListQuery(committedQuery).toString();
     return currentQuery ? `${pathname}?${currentQuery}` : pathname;
-  }, [pathname, searchParams, difficultyFilter]);
+  }, [pathname, committedQuery]);
 
   const buildTaskEditHref = (taskId: string): string => {
     const params = new URLSearchParams();
@@ -188,86 +210,49 @@ export function LearningTaskFilters({
     return `${paths.teacher.taskEdit(taskId)}?${params.toString()}`;
   };
 
-  const replaceSearchQuery = (updater: (params: URLSearchParams) => void) => {
-    const params = new URLSearchParams(searchParams.toString());
-    params.delete("stage");
-    if (difficultyFilter) {
-      params.set("difficulty", difficultyFilter);
-    } else {
-      params.delete("difficulty");
-    }
-    updater(params);
-    const nextQuery = params.toString();
-    router.replace(nextQuery ? `${pathname}?${nextQuery}` : pathname, {
-      scroll: false,
+  const replaceSearchQuery = (changes: TemplateListQueryChanges) => {
+    const latestQuery =
+      requestedQuery.current?.pathname === pathname
+        ? requestedQuery.current.query
+        : committedQuery;
+    const nextQuery = updateTemplateListQuery(latestQuery, changes);
+    requestedQuery.current = { pathname, query: nextQuery };
+    startNavigation(() => {
+      setDisplayedQuery(nextQuery);
+      router.replace(`${pathname}?${nextQuery}`, { scroll: false });
     });
   };
 
   const setScopeAndSync = (nextScope: TaskTemplateScope) => {
-    replaceSearchQuery((params) => {
-      params.set("scope", nextScope);
-      params.set("page", "1");
-    });
+    replaceSearchQuery({ scope: nextScope });
   };
 
   const setCourseLabelFilterAndSync = (nextValue: string) => {
-    replaceSearchQuery((params) => {
-      if (nextValue) {
-        params.set("courseLabel", nextValue);
-      } else {
-        params.delete("courseLabel");
-      }
-      params.set("page", "1");
-    });
+    replaceSearchQuery({ courseLabel: nextValue });
   };
 
   const setStatusFilterAndSync = (nextValue: TaskStatusFilter) => {
-    replaceSearchQuery((params) => {
-      if (nextValue === "ALL") {
-        params.delete("status");
-      } else {
-        params.set("status", nextValue);
-      }
-      params.set("page", "1");
-    });
+    replaceSearchQuery({ status: nextValue === "ALL" ? undefined : nextValue });
   };
 
   const setKnowledgeModuleFilterAndSync = (nextValue: string) => {
-    replaceSearchQuery((params) => {
-      if (nextValue) {
-        params.set("knowledgeModule", nextValue);
-      } else {
-        params.delete("knowledgeModule");
-      }
-      params.set("page", "1");
-    });
+    replaceSearchQuery({ knowledgeModule: nextValue });
   };
 
   const setDifficultyFilterAndSync = (nextValue: string) => {
-    replaceSearchQuery((params) => {
-      const difficulty = parseDifficultyFilter(nextValue);
-      if (difficulty) {
-        params.set("difficulty", difficulty);
-      } else {
-        params.delete("difficulty");
-      }
-      params.set("page", "1");
-    });
+    replaceSearchQuery({ difficulty: parseDifficultyFilter(nextValue) });
   };
 
   const goToPage = (page: number) => {
-    replaceSearchQuery((params) => {
-      params.set("page", String(Math.max(1, page)));
-    });
+    replaceSearchQuery({ page: String(Math.max(1, page)) });
   };
 
   const handleResetFilters = () => {
-    replaceSearchQuery((params) => {
-      params.delete("status");
-      params.delete("knowledgeModule");
-      params.delete("courseLabel");
-      params.delete("difficulty");
-      params.set("page", "1");
+    replaceSearchQuery({
+      status: undefined,
+      knowledgeModule: undefined,
+      courseLabel: undefined,
+      difficulty: undefined,
     });
   };
 

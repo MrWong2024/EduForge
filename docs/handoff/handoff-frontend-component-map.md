@@ -72,23 +72,23 @@
 | TeacherLifecycleList | `components/teacher/TeacherLifecycleList.tsx` | 课程与班级列表共享的页面级结果提示及可聚焦摘要。操作后行离开当前视图时，摘要接回仍位于该行的焦点。页面提供有效页链接时执行同路由替换，保留结果提示 |
 | EditCourseForm | `components/teacher/EditCourseForm.tsx` | 课程基础信息编辑，复用 `lib/course-edit.ts` 判断并只提交字段净变化，无净变化不发请求；课程分类未改省略、明确清空发送空串；失败保留草稿，成功返回课程总览并刷新，不承担列表加载 |
 | CourseOverviewPage | `app/teacher/courses/[courseId]/overview/page.tsx` | 服务端加载、窗口/排序/分页及只读班级明细组合；页面摘要只汇总当前页，指标字段适配与含义遵循 API Owner，不把分页摘要当全课程统计 |
-| CreateClassroomForm | `components/teacher/CreateClassroomForm.tsx` | 管理建班选课、班名和提交。提交期间锁住所属课程和班级名称，候选加载结果不替换已提交的选择。按需加载后续课程并按 ID 去重，失败保留候选和草稿，可重试。成功后防止旧表单重复发送，仍留在列表时可发起下一次创建。同一课程上下文保留草稿，切换课程上下文时重新初始化。名称示例不自动成为输入值，班级列表由页面加载 |
+| CreateClassroomForm | `components/teacher/CreateClassroomForm.tsx` | 管理建班选课、班名和提交。提交期间锁住所属课程和班级名称，候选加载结果不替换已提交的选择。结果不明时保留输入，需前往班级列表核对并显式确认后才可再次主动建班。按需加载后续课程并按 ID 去重，失败保留候选和草稿，可重试。成功后防止旧表单重复发送，仍留在列表时可发起下一次创建。同一课程上下文保留草稿，切换课程上下文时重新初始化。名称示例不自动成为输入值，班级列表由页面加载 |
 | EditClassroomForm | `components/teacher/EditClassroomForm.tsx` | 只编辑班名，合法原文提交，按单行控件去除 CR/LF 后的基准判断净变化，无变化不发请求；失败保留草稿，成功返回看板。所属课程、状态与加入码只读，归档、恢复、删除等生命周期动作归 ClassroomLifecycleActions |
 | ClassroomLifecycleActions | `components/teacher/ClassroomLifecycleActions.tsx` | 班级列表生命周期“更多”菜单：ACTIVE 归档/删除，ARCHIVED 恢复/删除；拥有菜单、pending、确认与结果状态，组合 FloatingMoreMenu 并保留当前列表视图；删除限制由后端判定，不混入基础编辑表单 |
-| CreateLearningTaskForm | `components/teacher/CreateLearningTaskForm.tsx` | 模板内容、课程分类、可见性、可选任务难度及单一“评阅标准（可选）”多行文字输入。描述仅检查非空白并按输入原文发出。difficulty/rubric 请求构造复用各自纯 helper，难度成功创建后重置。描述和评阅标准默认均为10行且可纵向调整。提供草稿和直接发布，创建省略资料引用，失败保留全部输入 |
-| EditLearningTaskForm | `components/teacher/EditLearningTaskForm.tsx` | 描述和单一“评阅标准（可选）”文字输入默认均为10行，编辑态可纵向调整，只读长文本可滚动。可选难度仅四状态，未知初值不随其他字段保存而隐式回写。按 taskId 建立编辑基准和草稿，同实例刷新保留未保存内容。共用校验与净变化判断，保存确认后用正式回执同步全部字段和状态，失败保留草稿并对普通 409 提示刷新。发布确认后同步未改字段、保留本地净变化及未完成输入，归档后只读展示正式结果。引用栏显隐取首次成功加载结果，清空保存及刷新不隐藏已显示栏目。仅明确身份与作者匹配且状态可编辑时允许写入，保存和生命周期操作共用 pending 边界，保留列表返回上下文。字段写入见 [API Map](./handoff-frontend-api-map.md#33-teacher-任务--提交--反馈) |
+| CreateLearningTaskForm | `components/teacher/CreateLearningTaskForm.tsx` | 模板内容、课程分类、可见性、可选任务难度及单一“评阅标准（可选）”多行文字输入。描述仅检查非空白并按输入原文发出。difficulty/rubric 请求构造复用各自纯 helper，难度成功创建后重置。描述和评阅标准默认均为10行且可纵向调整。提供草稿和直接发布，创建省略资料引用。两个创建动作共用同步提交锁，结果不明时保留全部输入，前往我的模板核对并显式确认后可再主动创建 |
+| EditLearningTaskForm | `components/teacher/EditLearningTaskForm.tsx` | 描述和单一“评阅标准（可选）”文字输入默认均为10行，编辑态可纵向调整，只读长文本可滚动。可选难度仅四状态，未知初值不随其他字段保存而隐式回写。按 taskId 建立编辑基准和草稿，同实例刷新保留未保存内容。共用校验与净变化判断，保存确认后用正式回执同步全部字段和状态，失败保留草稿并对普通 409 提示刷新。发布确认后同步未改字段、保留本地净变化及未完成输入，本页主动归档后只读展示正式结果，同一模板的外部归档刷新则保留可复制的未提交草稿并关闭保存与生命周期操作。引用栏显隐取首次成功加载结果，清空保存及刷新不隐藏已显示栏目。仅明确身份与作者匹配且状态可编辑时允许写入，保存和生命周期操作共用 pending 边界，保留列表返回上下文。字段写入见 [API Map](./handoff-frontend-api-map.md#33-teacher-任务--提交--反馈) |
 | TaskAiContextRefs | `components/teacher/TaskAiContextRefs.tsx` | 普通多行引用 JSON 编辑、就近结构错误与格式化；只读时有引用才按包展示全部路径，无 JSON/复制控件或空配置占位；不渲染路径链接/HTML，不读 ZIP，不进入学生或课堂实例页 |
 | ai-context-refs | `lib/learning-tasks/ai-context-refs.ts` | 引用基本结构解析、稳定格式化、语义差异与局部作者编辑判断；保持路径及数组顺序，不复制后端 ZIP 安全校验 |
 | TeacherLearningTasksPage | `app/teacher/tasks/page.tsx` | 模板列表 SSR 参数解析与数据加载，负责常规分页链接、页码及总数和当前展示数量摘要；根据可信总数纠正越界页，保留列表和来源班级上下文；难度复用共享筛选解析并传给 LearningTaskFilters，不在页面过滤已分页结果 |
-| LearningTaskFilters | `components/teacher/LearningTaskFilters.tsx` | 模板视图/筛选（含难度）的 URL 状态、列表展示与编辑/查看入口；负责空页“返回上一页”及“清空筛选”，清空及活动筛选判断包含难度，控件由 URL/初始 props 恢复；“评阅标准”列复用纯 helper 显示文字已填写/未填写，“分类”单元格内复用共享难度显示；桌面五列、窄屏纵向条目，无需横向滚动；保留列表返回上下文，筛选后回首屏；复用共享可见性和排序模块，不在当前页伪造完整候选或发起发布/归档 |
+| LearningTaskFilters | `components/teacher/LearningTaskFilters.tsx` | 模板视图/筛选（含难度）的 URL 状态、列表展示与编辑/查看入口；负责空页“返回上一页”及“清空筛选”，清空及活动筛选判断包含难度，导航中的连续筛选以最近选择的组合构造 URL，页面提交或浏览器前进后退后按当前 URL 恢复控件；“评阅标准”列复用纯 helper 显示文字已填写/未填写，“分类”单元格内复用共享难度显示；桌面五列、窄屏纵向条目，无需横向滚动；保留列表返回上下文，筛选后回首屏；复用共享可见性和排序模块，不在当前页伪造完整候选或发起发布/归档 |
 | ClassroomTasksPage | `app/teacher/classrooms/[classroomId]/tasks/page.tsx` | 以班级详情状态决定发布区和学生提交窗口。归档班级保留历史列表与管理入口，跳过候选读取和发布表单，模板导航进入普通模板列表。进行中班级解析并下传候选难度。按权威列表总数计算有效页地址，列表标题作为焦点回退目标 |
-| PublishClassroomTaskForm | `components/teacher/PublishClassroomTaskForm.tsx` | 可见已发布模板的筛选、候选追加加载、选择状态与实例发布；难度及既有筛选变化时清除选择并重置候选，复用请求 epoch 和局部等待状态，过期响应不污染新候选。发布期间锁住模板、筛选、候选操作、截止和迟交。选模板和修改草稿时保留上一笔成功提示，新请求通过校验并取得提交锁后清除。成功后清空模板选择、保留两项设置，提示使用刚发布实例回执的截止、迟交和详情链接。失败保留本次草稿。课程分类复用共享候选；发布者来源与已选模板摘要由本组件展示，候选及摘要复用共享难度显示；评阅标准摘要复用纯 helper，候选未提供 rubric 时提示到模板详情核对，不宣称未填写。不提供 AI 策略选择，不创建/编辑模板，不自行判定后端候选全集 |
+| PublishClassroomTaskForm | `components/teacher/PublishClassroomTaskForm.tsx` | 可见已发布模板的筛选、候选追加加载、选择状态与实例发布；筛选变化重置分页，过期响应不污染新候选。按实际返回的页码、页大小、总数及去重前的条数判断是否继续，展示按 ID 去重，失败可重试同一页。候选取完后才清除确实不存在的选择。发布期间锁住模板、筛选、候选操作、截止和迟交。选模板和修改草稿时保留上一笔成功提示，新请求通过校验并取得提交锁后清除。成功后清空模板选择、保留两项设置，提示使用刚发布实例回执的截止、迟交和详情链接。失败保留本次草稿。课程分类复用共享候选；发布者来源与已选模板摘要由本组件展示，候选及摘要复用共享难度显示；评阅标准摘要复用纯 helper，候选未提供 rubric 时提示到模板详情核对，不宣称未填写。不提供 AI 策略选择，不创建/编辑模板，不自行判定后端候选全集 |
 | ClassroomTaskListInteractions | `components/teacher/ClassroomTaskListInteractions.tsx` | 共享同一班级任务页的发布回执实例 ID、回执设置与列表级删除提示。删除成功、返回 404 或结果不明时仅清除对应实例的发布提示，非空 409 保留提示。404 提示实例已不可用，结果不明提示核对列表，提示在任务行消失后仍可见。列表页越界时按服务端提供的地址执行客户端同页替换，保留发布草稿和列表标题焦点 |
 | TeacherTaskDetailPage | `app/teacher/classrooms/[classroomId]/tasks/[classroomTaskId]/page.tsx` | 加载课堂任务正式投影，基础信息展示难度并组合共享 rubric；难度显示复用共享 helper，字段读源见 API Map |
 | ClassroomTaskLifecycleActions | `components/teacher/ClassroomTaskLifecycleActions.tsx` | 展示实例状态，持有本次确认的动作与实例。归档班级对 CLOSED 实例显示「重新开放任务」，确认说明与回执均告知归档期间学生仍不能提交。确认后锁定本次请求并处理结果与刷新；删除行将消失时以列表标题承接行内焦点 |
 | EditClassroomTaskForm | `components/teacher/EditClassroomTaskForm.tsx` | 列表行内展开，截止时间按浏览器本地分钟显示和比较，未改分钟省略，实际改动转换为 UTC 或明确清空。仅保存逐字段净变化，无变化不发请求。保存期间锁住截止、迟交、保存和取消。仅班级与实例匹配的有效回执可收起编辑器。保存后列表刷新交付前，重开采用该次回执；刷新应用后重开采用实际列表设置，包括与保存前相同的值。已展开的编辑器保留打开时的基准与草稿。失败保留草稿及基准，普通 409 提示刷新且不重放。ACTIVE/CLOSED 可编辑，RECALLED 无入口，不修改模板或状态流。部分更新与竞争结果见 [Backend API](./handoff-backend-api-map.md#classroom-tasksclassrooms-子资源) |
 | PublishTaskStatusButton | `components/teacher/PublishTaskStatusButton.tsx` | 单一模板发布操作；当前 classroomTask 详情页不使用，模板生命周期入口留在模板层 |
-| RemoveStudentButton | `components/teacher/RemoveStudentButton.tsx` | 确认移出当前展示姓名对应的成员。页面级汇总保留移出结果，在行移除时承接仍位于该行的焦点，并在页面提供有效页链接时执行同路由替换。成员关系与历史记录由后端维护 |
+| RemoveStudentButton | `components/teacher/RemoveStudentButton.tsx` | 确认移出当前展示姓名对应的成员。页面级汇总按学生 ID 保留具名结果，其他行发起、成功或同班刷新时仍展示未解决的失败。在行移除时承接仍位于该行的焦点，并在页面提供有效页链接时执行同路由替换。成员关系与历史记录由后端维护 |
 | TeacherFeedbackForm | `components/teacher/TeacherFeedbackForm.tsx` | 教师反馈创建输入与提交，复用统一反馈选项；评语草稿绑定实际查看版本，刷新不重绑。冲突或未知结果时保留草稿，显式核对复用作品与反馈的组合读取，完整展示后才可确认继续。标签可选，不提供 scoreHint 入口，合同与归一化归 API Owner。新增反馈提交期间锁定输入。必需读取暂态失败期间保留输入、起始版本和核对状态，暂停表单展示与操作 |
 | TeacherFeedbackHistory | `components/teacher/TeacherFeedbackHistory.tsx` | 组合教师与 AI 反馈历史，管理单条历史编辑会话、共享保存状态和 PATCH 正式回执。列表暂态不可用时保留原反馈 ID、起始值和当前输入，恢复前以最新列表核对同一作品上的同一条教师反馈。保存期间暂停收起和切换编辑项，确认回执后收起表单并更新历史。AI 与来源不明的反馈只读 |
 | TeacherFeedbackEditForm | `components/teacher/TeacherFeedbackEditForm.tsx` | 用历史列表持有的编辑会话渲染行内控件，按起始值计算净变更并 PATCH 原反馈。等待期间按历史列表的共享保存状态禁用控件。匹配公开消息的重复反馈 409 展示专属页内提示，保存失败保留编辑会话。输入字段与创建表单一致，scoreHint 除外 |
@@ -102,7 +102,7 @@
 | ProcessAssessmentPage | `app/teacher/classrooms/[classroomId]/process-assessment/page.tsx` | URL 条件、服务端加载、分页、摘要、评分说明与 CSV 入口组合；明细按七列分行归组，桌面宽度内阅读全部指标，窄屏局部横滚；使用 TaskExclusionPanel 的过程性评价模式及共享任务选项 helper；不重算后端评分或持久化排除条件 |
 | AiLearningAnalyticsPage | `app/teacher/classrooms/[classroomId]/ai-learning-analytics/page.tsx` | Server 页面负责条件解析、总览/学生并行读取、局部错误、任务选项降级和分页；摘要、教学关注、图表、表格与筛选下沉至对应组件，不从学生分页重算摘要 |
 | AiLearningAnalyticsStudentPage | `app/teacher/classrooms/[classroomId]/ai-learning-analytics/students/[studentId]/page.tsx` | Server 页面组合学生摘要、逐任务比较图与全任务明细；明细按五列分行归组，桌面默认可见比较证据，窄屏局部横滚；展示比较端点/最新版本、安全来源与未比较原因并链接对应提交；恢复返回列表上下文，直接消费后端结果，列表状态不扩大详情请求范围 |
-| TaskExclusionPanel | `components/teacher/TaskExclusionPanel.tsx` | 共享临时任务排除 Client Component，支持 process-assessment / ai-learning-analytics 模式；拥有 checkbox 草稿、应用/清空及导航 pending 状态，保留未显示的已选 ID；应用/清空回首屏并保持其他上下文，清空不携带当前 checkbox 选择；不持久化或修改教学数据 |
+| TaskExclusionPanel | `components/teacher/TaskExclusionPanel.tsx` | 共享临时任务排除 Client Component，支持 process-assessment / ai-learning-analytics 模式；区分已应用排除项和待勾选草稿，保留应用期间后续勾选及未展示的已选 ID，同值或顺序变化不会重置草稿，切换班级时重置选择；应用/清空回首屏并保持其他上下文，清空不携带当前 checkbox 选择；不持久化或修改教学数据 |
 | AiLearningAnalyticsStudentFilters | `components/teacher/AiLearningAnalyticsStudentFilters.tsx` | Client Component 仅管理姓名/学号、总体结果与反馈参与阶段的受控草稿，按已应用参数重新初始化并在正常清空点击时重置；保留原生 GET 表单与统计范围，应用/清空回首屏并定位学生分析区，筛选与统计仍由服务端完成 |
 | AiLearningAnalyticsSummary / AiLearningAnalyticsTeachingAttention | `components/teacher/AiLearningAnalyticsSummary.tsx` | 纯 Server 摘要展示后端 V1.2 计数、请求覆盖/可用反馈交付/更新率与证据提示，明确可比子集；教学关注带样本数，零上升/下降事件不生成相应极值提示，全部已更新不提示更新不足，不生成评分或风险等级 |
 | AiLearningAnalyticsTaskTable / AiLearningAnalyticsStudentsTable | `components/teacher/AiLearningAnalyticsTables.tsx` | 任务/学生表及四类结果分布展示，学生表组合总体结果、参与阶段与保留列表状态的详情入口；不做前端排序、过滤或排名 |
@@ -115,7 +115,7 @@
 |---|---|---|
 | JoinClassroomForm | `components/student/JoinClassroomForm.tsx` | 将加入码输入中的 ASCII 小写字母转为大写，提交时去除首尾空白。提交期间锁住加入码，成功后进入学生看板。后端返回已归档时显示专属页内提示，失败保留输入并恢复编辑 |
 | SubmissionForm | `components/student/SubmissionForm.tsx` | 原文源码与独立可选说明输入、码点校验、请求防重复及公开业务错误安全适配；同一学生、班级与课堂任务在当前页成功刷新后保留内存草稿，失去提交资格时显示原因并保留语言选择、可复制的只读源码和说明，资格恢复后可继续编辑；任务详情暂态读取失败时隐藏表单与历史，页内重试确认同一身份后按最新资格恢复原文及待核对状态，明确拒绝或身份变化结束原草稿保留；成功保存后锁住当前表单，导航恢复只打开同一提交详情，结果未确认先核对历史；多文件粘贴格式提示与示例由此维护，单文件无需 FILE 标记；不提供上传/结构化文件提交，不以模板当前状态自行阻断 |
-| EditSubmissionForm | `components/student/EditSubmissionForm.tsx` | 同次提交的受控代码/语言/说明与 baseRevision，语言复用共享选项。正常保存采用权威详情、取消不写入，刷新不覆盖未保存输入或静默换版。可逆拒绝后新发起的普通详情刷新成功，可恢复同版本编辑资格；已进入评阅持续只读，较新保存回执优先，版本无效时关闭编辑。冲突或未知结果仍保留当前输入并锁住保存，通过本页显式读取作品、核对确认后继续，异常取消不绕过核对门禁。评阅时保留可复制的未保存修改，作品展示与共享 AI 区块使用同一当前详情。暂态读取失败时暂停展示与操作，保留原稿、基线、保存结果和 AI 核对状态，确认同一访问者和作品后恢复 |
+| EditSubmissionForm | `components/student/EditSubmissionForm.tsx` | 同次提交的受控代码/语言/说明与 baseRevision，语言复用共享选项。正常保存采用权威详情、取消不写入，刷新不覆盖未保存输入或静默换版。可逆拒绝后新发起的普通详情刷新成功，可恢复同版本编辑资格；已进入评阅持续只读，较新保存回执优先，版本无效时关闭编辑。冲突或未知结果仍保留当前输入并锁住保存，通过本页显式读取作品、核对确认后继续，异常取消不绕过核对门禁。评阅时保留可复制的未保存修改，作品展示与共享 AI 区块使用同一当前详情。复用作品编辑净变化判断，有未保存修改时先确认评阅已保存版本。暂态读取失败时暂停展示与操作，保留原稿、基线、保存结果和 AI 核对状态，确认同一访问者和作品后恢复 |
 | RequestAiFeedbackButton | `components/student/RequestAiFeedbackButton.tsx` | 师生复用的申请按钮展示；disabled/pending 与动作回调由 SubmissionAiReview 提供，不独立持有资格或请求时序 |
 | AiProcessingHint | `components/student/AiProcessingHint.tsx` | 统一 AI 处理中提示；通用状态文案复用 UI Status |
 | SubmissionAutoRefresh | `components/student/SubmissionAutoRefresh.tsx` | 仅学生提交详情：以共享区块已接纳状态在 PENDING/RUNNING 或 FAILED 且计划重试时调用局部读取；操作中和待显式确认时暂停；终态及信息不足停止；沿用退避、失焦暂停和定时器清理，不用于草稿页 |
@@ -128,7 +128,7 @@
 |---|---|---|
 | TaskRubric | `components/learning-tasks/TaskRubric.tsx` | 师生只读“评阅标准”，仅展示字符串 rubric.notes，保留换行、断行与未填写提示；读取复用纯 helper，不推断成绩 |
 | SubmissionContent | `components/submissions/SubmissionContent.tsx` | 师生作品原文展示；源码局部滚动、说明/声明纯文本换行，展示快照状态；白色作品面板保持明确前景色 |
-| SubmissionAiReview | `components/submissions/SubmissionAiReview.tsx` | 师生共享安全 AI 摘要；拥有当前提交的串行 POST/GET、操作标识及统一接纳结果；申请绑定页面实际展示作品版本，轮询不自动升级；成功 Job 持续关闭申请，不确定结果仅由事后显式完整读取重新核对；按提交 ID 隔离并卸载取消。学生组合受限轮询，教师仅显式整页刷新，不管理人工反馈草稿 |
+| SubmissionAiReview | `components/submissions/SubmissionAiReview.tsx` | 师生共享安全 AI 摘要；拥有当前提交的串行 POST/GET、操作标识及统一接纳结果；申请绑定页面实际展示的已保存作品版本，轮询不自动升级。学生有未保存的净变化时，确认后才按该版本发出申请，取消保留草稿；成功 Job 持续关闭申请，不确定结果仅由事后显式完整读取重新核对；按提交 ID 隔离并卸载取消。学生组合受限轮询，教师仅显式整页刷新，不管理人工反馈草稿 |
 
 ## 8) Context / State
 

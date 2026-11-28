@@ -1,5 +1,6 @@
 import { expect, test } from "@playwright/test";
 import {
+  toClassroomCreateResponse,
   toClassroomListResponse,
   toCourseListResponse,
 } from "../../lib/api/types-teacher";
@@ -10,6 +11,10 @@ import {
   nextClassroomCoursePage,
   resolveClassroomCreationCourses,
 } from "../../lib/classroom-creation-courses";
+import {
+  BrowserFetchJsonError,
+  isDefiniteCreateRejection,
+} from "../../lib/api/browser-client";
 
 const firstPage = toCourseListResponse({
   items: [
@@ -86,4 +91,15 @@ test("classroom row names take precedence, then use the known-course mapping", (
 
   expect(rows.map((row) => classroomCourseName(row, names)))
     .toEqual(["后页课程", "行内名称", "课程一", "未知课程"]);
+});
+
+test("an explicit create rejection allows correction while transport and 5xx errors require review", () => {
+  expect(isDefiniteCreateRejection(new BrowserFetchJsonError(400, {}))).toBe(true);
+  expect(isDefiniteCreateRejection(new BrowserFetchJsonError(503, {}))).toBe(false);
+  expect(isDefiniteCreateRejection(new TypeError("connection lost"))).toBe(false);
+});
+
+test("the classroom create receipt may omit its ID for the existing list fallback", () => {
+  expect(toClassroomCreateResponse({ id: "class-1", name: "班级" }).id).toBe("class-1");
+  expect(toClassroomCreateResponse({}).id).toBeUndefined();
 });
