@@ -28,7 +28,11 @@ import type { ClassroomTaskResponseDto } from '../src/modules/classrooms/classro
 import type { ClassroomTask } from '../src/modules/classrooms/classroom-tasks/schemas/classroom-task.schema';
 import type { ClassroomResponseDto } from '../src/modules/classrooms/dto/classroom-response.dto';
 import type { UpdateClassroomDto } from '../src/modules/classrooms/dto/update-classroom.dto';
-import type { Enrollment } from '../src/modules/classrooms/enrollments/schemas/enrollment.schema';
+import {
+  Enrollment,
+  EnrollmentRole,
+  EnrollmentStatus,
+} from '../src/modules/classrooms/enrollments/schemas/enrollment.schema';
 import {
   Classroom,
   ClassroomStatus,
@@ -78,7 +82,7 @@ type ClassroomRow = Classroom & {
   __v?: number;
   studentIds?: Types.ObjectId[];
 };
-type EnrollmentRow = Enrollment & { _id: Types.ObjectId };
+type EnrollmentRow = Enrollment & { _id: Types.ObjectId; updatedAt?: Date };
 type TaskRow = ClassroomTask & { _id: Types.ObjectId };
 type ChildWriter = 'join' | 'publish';
 type ParentWriter = 'delete' | ChildWriter;
@@ -120,6 +124,7 @@ describe('Classroom Lifecycle (e2e)', () => {
   let fixtureDb: mongo.Db | undefined;
   let classroomModel: Model<Classroom>;
   let transactionClassroomModel: Model<Classroom>;
+  let enrollmentModel: Model<Enrollment>;
   let teacherAgent: Agent;
   let otherTeacherAgent: Agent;
   let studentAgent: Agent;
@@ -189,6 +194,13 @@ describe('Classroom Lifecycle (e2e)', () => {
     teacherAgent.get(classroomPath(classroom)).timeout(httpTimeout);
   const remove = (classroom: ClassroomRow) =>
     teacherAgent.delete(classroomPath(classroom)).timeout(httpTimeout);
+  const removeStudent = (classroom: ClassroomRow) =>
+    teacherAgent
+      .post(
+        `${classroomPath(classroom)}/students/${studentId.toHexString()}/remove`,
+      )
+      .timeout(httpTimeout)
+      .send({});
   const join = (classroom: ClassroomRow) =>
     studentAgent
       .post('/api/classrooms/join')
@@ -454,6 +466,9 @@ describe('Classroom Lifecycle (e2e)', () => {
     await assertAuthTestConnection(transactionConnection);
     classroomModel = moduleFixture.get<Model<Classroom>>(
       getModelToken(Classroom.name),
+    );
+    enrollmentModel = moduleFixture.get<Model<Enrollment>>(
+      getModelToken(Enrollment.name),
     );
     transactionClassroomModel = getClassroomTaskTransactionModel(
       transactionConnection,
@@ -1093,13 +1108,7 @@ describe('Classroom Lifecycle (e2e)', () => {
     expect((await remove(classroom).expect(409)).body).toMatchObject(
       classroomNotEmpty,
     );
-    await teacherAgent
-      .post(
-        `${classroomPath(classroom)}/students/${studentId.toHexString()}/remove`,
-      )
-      .timeout(httpTimeout)
-      .send({})
-      .expect(201);
+    await removeStudent(classroom).expect(201);
     const removed = await storedEnrollments(classroom._id);
     expect(removed).toMatchObject([
       {
@@ -1122,6 +1131,197 @@ describe('Classroom Lifecycle (e2e)', () => {
       },
     ]);
     expect(rejoined[0].removedAt ?? null).toBeNull();
+  });
+
+  it('preserves the first effective removal timestamps until the student rejoins', async () => {
+    const classroom = await createClassroom('repeated-removal');
+    await join(classroom).expect(201);
+    const [initial] = await storedEnrollments(classroom._id);
+    expect(initial).toMatchObject({ status: EnrollmentStatus.Active });
+
+    const collection: { updateOne: mongo.Collection['updateOne'] } =
+      enrollmentModel.collection;
+    const updateOne = collection.updateOne.bind(
+      collection,
+    ) as typeof collection.updateOne;
+    const writes = [
+      { entered: checkpoint(), release: checkpoint() },
+      { entered: checkpoint(), release: checkpoint() },
+    ];
+    const observed: Array<{
+      candidateRemovedAt?: Date;
+      candidateUpdatedAt?: Date;
+      matchedCount?: number;
+    }> = [];
+    const writeSpy = jest
+      .spyOn(collection, 'updateOne')
+      .mockImplementation(async (filter, update, options) => {
+        const gate = writes[observed.length];
+        if (!gate || Array.isArray(update))
+          return updateOne(filter, update, options);
+        const classroomId: unknown = filter.classroomId;
+        const userId: unknown = filter.userId;
+        const fields = update.$set as Partial<EnrollmentRow> | undefined;
+        if (
+          !(classroomId instanceof Types.ObjectId) ||
+          !classroomId.equals(classroom._id) ||
+          !(userId instanceof Types.ObjectId) ||
+          !userId.equals(studentId) ||
+          fields?.status !== EnrollmentStatus.Removed
+        )
+          return updateOne(filter, update, options);
+
+        const attempt: (typeof observed)[number] = {
+          candidateRemovedAt: fields.removedAt,
+          candidateUpdatedAt: fields.updatedAt,
+        };
+        observed.push(attempt);
+        gate.entered.signal();
+        await gate.release.reached;
+        const result = await updateOne(filter, update, options);
+        attempt.matchedCount = result.matchedCount;
+        return result;
+      });
+    const pending: Promise<request.Response>[] = [];
+    const send = () => {
+      const response = removeStudent(classroom).then((value) => value);
+      pending.push(response);
+      return response;
+    };
+    const firstTime = Date.now() + 1000;
+    // Keep network, Mongo and barrier timers real. Only assign distinct
+    // application timestamps to the two requests and the next removal cycle.
+    jest.useFakeTimers({
+      now: firstTime,
+      doNotFake: [
+        'hrtime',
+        'nextTick',
+        'performance',
+        'queueMicrotask',
+        'setImmediate',
+        'clearImmediate',
+        'setInterval',
+        'clearInterval',
+        'setTimeout',
+        'clearTimeout',
+      ],
+    });
+    try {
+      const first = send();
+      await waitForCheckpoint(
+        writes[0].entered.reached,
+        first,
+        'FIRST_REMOVAL',
+      );
+      jest.setSystemTime(firstTime + 1000);
+      const second = send();
+      await waitForCheckpoint(
+        writes[1].entered.reached,
+        second,
+        'REPEATED_REMOVAL',
+      );
+      expect(await storedEnrollments(classroom._id)).toEqual([initial]);
+
+      writes[0].release.signal();
+      const firstResponse = await first;
+      const firstRows = await storedEnrollments(classroom._id);
+      writes[1].release.signal();
+      const secondResponse = await second;
+      const secondRows = await storedEnrollments(classroom._id);
+
+      jest.setSystemTime(firstTime + 2000);
+      const rejoin = await join(classroom).expect(201);
+      const rejoinedRows = await storedEnrollments(classroom._id);
+      const nextRemovalTime = new Date(firstTime + 3000);
+      jest.setSystemTime(nextRemovalTime);
+      const nextRemoval = await removeStudent(classroom).expect(201);
+      const nextRows = await storedEnrollments(classroom._id);
+
+      console.info(
+        JSON.stringify({
+          stage: 'repeated-removal-26',
+          namespace,
+          status: [
+            firstResponse.status,
+            secondResponse.status,
+            rejoin.status,
+            nextRemoval.status,
+          ],
+          observed,
+          firstRows,
+          secondRows,
+          rejoinedRows,
+          nextRows,
+        }),
+      );
+      expect(firstResponse.status).toBe(201);
+      expect(secondResponse.status).toBe(201);
+      expect(firstResponse.body).toMatchObject({
+        id: classroom._id.toHexString(),
+      });
+      expect(secondResponse.body).toEqual(firstResponse.body);
+      const identity = { _id: initial._id, joinedAt: initial.joinedAt };
+      const firstRemovalTime = new Date(firstTime);
+      expect(firstRows).toMatchObject([
+        {
+          ...identity,
+          status: EnrollmentStatus.Removed,
+          removedAt: firstRemovalTime,
+          updatedAt: firstRemovalTime,
+        },
+      ]);
+      expect(rejoinedRows).toMatchObject([
+        { ...identity, status: EnrollmentStatus.Active, removedAt: null },
+      ]);
+      expect(nextRows).toMatchObject([
+        {
+          ...identity,
+          status: EnrollmentStatus.Removed,
+          removedAt: nextRemovalTime,
+          updatedAt: nextRemovalTime,
+        },
+      ]);
+      expect(secondRows).toEqual(firstRows);
+      const repeatedRemovalTime = new Date(firstTime + 1000);
+      expect(observed).toEqual([
+        {
+          candidateRemovedAt: firstRemovalTime,
+          candidateUpdatedAt: firstRemovalTime,
+          matchedCount: 1,
+        },
+        {
+          candidateRemovedAt: repeatedRemovalTime,
+          candidateUpdatedAt: repeatedRemovalTime,
+          matchedCount: 0,
+        },
+      ]);
+    } finally {
+      for (const { release } of writes) release.signal();
+      try {
+        await Promise.allSettled(pending);
+      } finally {
+        writeSpy.mockRestore();
+        jest.useRealTimers();
+      }
+    }
+  });
+
+  it('does not create an absent enrollment or invent a timestamp for a legacy removed row', async () => {
+    const classroom = await createClassroom('legacy-removal');
+    const absent = await removeStudent(classroom).expect(201);
+    expect(await storedEnrollments(classroom._id)).toEqual([]);
+    const legacy = {
+      _id: new Types.ObjectId(),
+      classroomId: classroom._id,
+      userId: studentId,
+      role: EnrollmentRole.Student,
+      status: EnrollmentStatus.Removed,
+      joinedAt: fixtureTime,
+    };
+    await insertFixture('enrollments', legacy);
+    const repeated = await removeStudent(classroom).expect(201);
+    expect(repeated.body).toEqual(absent.body);
+    expect(await storedEnrollments(classroom._id)).toEqual([legacy]);
   });
 
   it('allows deletion with only legacy studentIds', async () => {

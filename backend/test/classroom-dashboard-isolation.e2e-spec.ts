@@ -1,6 +1,7 @@
 import {
   assertAuthTestConnection,
   authTestEnvironment,
+  openAuthTestConnection,
 } from './helpers/auth-test-environment';
 import { Enrollment } from '../src/modules/classrooms/enrollments/schemas/enrollment.schema';
 import { INestApplication, ValidationPipe } from '@nestjs/common';
@@ -15,6 +16,7 @@ import { AppModule } from '../src/app.module';
 import { CLASSROOM_TASK_TRANSACTION_CONNECTION } from '../src/lib/classroom-task-transaction';
 import { User } from '../src/modules/users/schemas/user.schema';
 import { Session } from '../src/modules/auth/schemas/session.schema';
+import { PasswordResetToken } from '../src/modules/auth/schemas/password-reset-token.schema';
 import { Course } from '../src/modules/courses/schemas/course.schema';
 import { Classroom } from '../src/modules/classrooms/schemas/classroom.schema';
 import { ClassroomTask } from '../src/modules/classrooms/classroom-tasks/schemas/classroom-task.schema';
@@ -102,6 +104,7 @@ describe('Classroom Dashboard Isolation (e2e)', () => {
   let teacherAgent: ReturnType<typeof request.agent>;
   let student1Agent: ReturnType<typeof request.agent>;
   let student2Agent: ReturnType<typeof request.agent>;
+  let readbackConnection: Connection | undefined;
   let databaseVerified = false;
 
   const teacherId = new Types.ObjectId();
@@ -149,6 +152,7 @@ describe('Classroom Dashboard Isolation (e2e)', () => {
         getConnectionToken(CLASSROOM_TASK_TRANSACTION_CONNECTION),
       ),
     );
+    readbackConnection = await openAuthTestConnection();
     app.setGlobalPrefix('api');
     app.useGlobalPipes(
       new ValidationPipe({
@@ -173,6 +177,9 @@ describe('Classroom Dashboard Isolation (e2e)', () => {
     feedbackModel = app.get(getModelToken(Feedback.name));
     aiFeedbackJobModel = app.get(getModelToken(AiFeedbackJob.name));
     databaseVerified = true;
+    console.info(
+      'Dashboard isolation database gate: standard_test / default+transaction+independent eduforge_test / loopback rs0 PRIMARY verified',
+    );
 
     const [teacherHash, student1Hash, student2Hash] = await Promise.all([
       bcrypt.hash(teacherPassword, 10),
@@ -202,62 +209,54 @@ describe('Classroom Dashboard Isolation (e2e)', () => {
 
   const cleanupOwnedFixtures = async () => {
     await assertAuthTestConnection(userModel.db);
-    const cleanup: Promise<unknown>[] = [];
-    if (createdSubmissionIds.length > 0) {
-      const submissionObjectIds = createdSubmissionIds.map(
-        (id) => new Types.ObjectId(id),
+    const writeDb = userModel.db.db;
+    const readDb = readbackConnection?.db;
+    if (!writeDb || !readDb)
+      throw new Error(
+        'Missing guarded dashboard isolation cleanup connections',
       );
-      cleanup.push(
-        feedbackModel.deleteMany({
-          submissionId: { $in: submissionObjectIds },
+    const enrollmentModel = app.get<Model<Enrollment>>(
+      getModelToken(Enrollment.name),
+    );
+    const resetTokenModel = app.get<Model<PasswordResetToken>>(
+      getModelToken(PasswordResetToken.name),
+    );
+    const owned = (ids: string[]) => ({
+      $in: ids.map((id) => new Types.ObjectId(id)),
+    });
+    const submissions = owned(createdSubmissionIds);
+    const classrooms = owned(createdClassroomIds);
+    const users = { $in: createdUserIds };
+    const scopes = [
+      [feedbackModel.collection.name, { submissionId: submissions }],
+      [aiFeedbackJobModel.collection.name, { submissionId: submissions }],
+      [submissionModel.collection.name, { _id: submissions }],
+      [
+        classroomTaskModel.collection.name,
+        { _id: owned(createdClassroomTaskIds) },
+      ],
+      [taskModel.collection.name, { _id: owned(taskId ? [taskId] : []) }],
+      [enrollmentModel.collection.name, { classroomId: classrooms }],
+      [classroomModel.collection.name, { _id: classrooms }],
+      [courseModel.collection.name, { _id: owned(courseId ? [courseId] : []) }],
+      [sessionModel.collection.name, { userId: users }],
+      [resetTokenModel.collection.name, { userId: users }],
+      [userModel.collection.name, { _id: users }],
+    ] as const;
+    for (const [collection, filter] of scopes) {
+      await writeDb
+        .collection(collection)
+        .deleteMany(filter, { timeoutMS: 5000 });
+      expect(
+        await readDb.collection(collection).countDocuments(filter, {
+          timeoutMS: 5000,
+          readPreference: 'primary',
         }),
-      );
-      cleanup.push(
-        aiFeedbackJobModel.deleteMany({
-          submissionId: { $in: submissionObjectIds },
-        }),
-      );
-      cleanup.push(
-        submissionModel.deleteMany({ _id: { $in: submissionObjectIds } }),
-      );
+      ).toBe(0);
     }
-    if (createdClassroomTaskIds.length > 0) {
-      cleanup.push(
-        classroomTaskModel.deleteMany({
-          _id: {
-            $in: createdClassroomTaskIds.map((id) => new Types.ObjectId(id)),
-          },
-        }),
-      );
-    }
-    if (taskId) {
-      cleanup.push(taskModel.deleteOne({ _id: new Types.ObjectId(taskId) }));
-    }
-    if (createdClassroomIds.length > 0) {
-      cleanup.push(
-        classroomModel.deleteMany({
-          _id: { $in: createdClassroomIds.map((id) => new Types.ObjectId(id)) },
-        }),
-      );
-    }
-    if (courseId) {
-      cleanup.push(
-        courseModel.deleteOne({ _id: new Types.ObjectId(courseId) }),
-      );
-    }
-
-    cleanup.push(sessionModel.deleteMany({ userId: { $in: createdUserIds } }));
-    cleanup.push(userModel.deleteMany({ _id: { $in: createdUserIds } }));
-    if (createdClassroomIds.length > 0) {
-      await app
-        .get<Model<Enrollment>>(getModelToken(Enrollment.name))
-        .deleteMany({
-          classroomId: {
-            $in: createdClassroomIds.map((id) => new Types.ObjectId(id)),
-          },
-        });
-    }
-    await Promise.all(cleanup);
+    console.info(
+      'Dashboard isolation independent business/auth cleanup verified: residual=0',
+    );
   };
 
   afterAll(async () => {
@@ -267,7 +266,11 @@ describe('Classroom Dashboard Isolation (e2e)', () => {
       try {
         await app?.close();
       } finally {
-        authTestEnvironment.restore();
+        try {
+          await readbackConnection?.close();
+        } finally {
+          authTestEnvironment.restore();
+        }
       }
     }
   });

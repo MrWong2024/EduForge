@@ -24,7 +24,7 @@ Unit 与 HTTP E2E 可以覆盖同一业务区域，但不得重复承担同一�
 
 `src/modules/auth/services/auth-index-initialization.spec.ts` 的数据库用途为 `none`，通过实际 Nest `TestingModule.init()` 验证 `SessionService` 和 `PasswordResetService` 初始化期间不会主动调用索引写入入口。
 
-`test/submission-edit.e2e-spec.ts` 负责同次作品修改与正式评阅受理的真实 HTTP、版本竞争、首次提交事实、历史兼容及部分失败续行；复用正式鉴权/发布/提交与 spec-owned cleanup，不添加生产测试开关。expectedRevision 变更涉及的既有反馈/AI 请求继续保留各自原业务断言。该套件还控制同一条教师反馈的两个 PATCH 重叠及写入顺序，比较两次 HTTP 回执、独立 Mongo 回读和反馈列表。合同明细引用 [Service Card 08](./handoff-backend-service-map.md#service-card-08)，实际 discovery/执行及退出码归当次报告。
+`test/submission-edit.e2e-spec.ts` 负责同次作品修改与正式评阅受理的真实 HTTP、版本竞争、首次提交事实、历史兼容及部分失败续行；复用正式鉴权/发布/提交与 spec-owned cleanup，不添加生产测试开关。expectedRevision 变更涉及的既有反馈/AI 请求继续保留各自原业务断言。学生作品回执用相邻版本的两次真实 PATCH 交错验证，逐项对照各自回执、最终 GET 与独立 Mongo。教师反馈 PATCH 回归比较两次 HTTP 回执、独立 Mongo 回读和反馈列表。提交争用在 HTTP 层断言状态、公开消息及内部业务码未暴露，过滤器另有白名单单测。合同明细引用 [Service Card 08](./handoff-backend-service-map.md#service-card-08)，实际 discovery/执行及退出码归当次报告。
 
 `src/modules/learning-tasks/task-difficulty-validation.spec.ts` 不连接数据库，通过实际 CreateTaskDto / UpdateTaskDto 和内存 Mongoose Task 模型验证四状态、仅 undefined 跳过及 null/异常输入拒绝，不以常量数组断言替代真实校验。
 
@@ -218,6 +218,8 @@ npm.cmd run test:e2e -- --runInBand --runTestsByPath ./test/course-lifecycle.e2e
 该套件通过默认连接的目标写入屏障，覆盖编辑与归档的两种顺序、删除先于兼容 POST archive、成功编辑后删除，并核对归档回执名称和课程摘要、正式 GET 和独立 Mongo 终态。
 同一屏障还覆盖显式原名随归档写入，以及并发重复归档保留首次写入的时间戳。
 
+成员行为在 `test/classroom-lifecycle.e2e-spec.ts` 验证两笔正式移出的实际写入顺序、首次移出时间、重入后再次移出，以及无成员记录和缺时间的历史关系。 `test/enrollments.authority-and-legacy.e2e-spec.ts` 继续回归成员关系权威性与统计口径，按下列方式替换路径分别运行。
+
 环境复用本地 `standard_test` 门禁，验证默认连接和事务连接的实际库名及事务可提交后才写入本批夹具。仅使用既有索引。即使断言失败也释放暂停点并等待在途请求，再按本批班级归属清理及回读关联记录，覆盖未取得回执的写入。
 
 从 `backend` 目录在独立 `standard_test` 进程执行。Discovery 必须只命中该文件。
@@ -226,6 +228,10 @@ npm.cmd run test:e2e -- --runInBand --runTestsByPath ./test/course-lifecycle.e2e
 npm.cmd run test:e2e -- --listTests --runInBand --runTestsByPath ./test/classroom-lifecycle.e2e-spec.ts
 npm.cmd run test:e2e -- --runInBand --runTestsByPath ./test/classroom-lifecycle.e2e-spec.ts
 ```
+
+### 教师班级看板定向验收
+
+`test/classroom-dashboard.e2e-spec.ts` 在真实任务和模板查询读出结果后暂停交付，使用正式发布请求与独立 Mongo 回读确认新实例，再比较在途和再次读取的任务列表、计数和归档建议。历史缺模板、任务状态与时间阈值继续覆盖。跨班隔离另由 `test/classroom-dashboard-isolation.e2e-spec.ts` 回归。沿第 4 节以 `--runTestsByPath` 逐文件 discovery 后分别执行。业务口径见 [Service Card 05](./handoff-backend-service-map.md#service-card-05)。
 
 ### 课堂提交冷却定向验收
 

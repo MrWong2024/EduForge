@@ -1,6 +1,7 @@
 import {
   assertAuthTestConnection,
   authTestEnvironment,
+  openAuthTestConnection,
 } from './helpers/auth-test-environment';
 import { Enrollment } from '../src/modules/classrooms/enrollments/schemas/enrollment.schema';
 import { INestApplication, ValidationPipe } from '@nestjs/common';
@@ -15,6 +16,7 @@ process.env.AI_FEEDBACK_DEBUG_ENABLED = 'true';
 import { AppModule } from '../src/app.module';
 import { User } from '../src/modules/users/schemas/user.schema';
 import { Session } from '../src/modules/auth/schemas/session.schema';
+import { PasswordResetToken } from '../src/modules/auth/schemas/password-reset-token.schema';
 import { Course } from '../src/modules/courses/schemas/course.schema';
 import { Classroom } from '../src/modules/classrooms/schemas/classroom.schema';
 import { ClassroomTask } from '../src/modules/classrooms/classroom-tasks/schemas/classroom-task.schema';
@@ -57,9 +59,32 @@ type CreatedSubmissionResponse = {
 };
 
 type TeacherDashboardResponse = {
-  summary: { studentsCount: number };
+  summary: { studentsCount: number; publishedTasksCount: number };
+  archiveSuggestion: {
+    suggested: boolean;
+    reason: string | null;
+    lastSubmissionAt: string | null;
+  };
   tasks: Array<{ classroomTaskId: string; taskId: string }>;
 };
+
+async function waitForDashboardBarrier<T>(
+  signal: Promise<T>,
+  phase: string,
+  timeoutMs: number,
+): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      signal,
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(() => reject(new Error(phase)), timeoutMs);
+      }),
+    ]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
 
 type StudentDashboardResponse = {
   items: Array<{
@@ -111,6 +136,14 @@ describe('Classroom Dashboards (e2e)', () => {
   const ownedInstanceIds: Types.ObjectId[] = [];
   const ownedSubmissionIds: Types.ObjectId[] = [];
   const ownedUserIds = [teacherId, studentId];
+  let racePublication:
+    | {
+        classroomId: Types.ObjectId;
+        taskId: Types.ObjectId;
+        createdBy: Types.ObjectId;
+      }
+    | undefined;
+  let readbackConnection: Connection | undefined;
   let databaseVerified = false;
 
   const teacherEmail = `teacher.dashboard.${Date.now()}@example.com`;
@@ -183,6 +216,7 @@ describe('Classroom Dashboards (e2e)', () => {
         getConnectionToken(CLASSROOM_TASK_TRANSACTION_CONNECTION),
       ),
     );
+    readbackConnection = await openAuthTestConnection();
     await app.init();
 
     teacherAgent = request.agent(app.getHttpServer());
@@ -197,6 +231,9 @@ describe('Classroom Dashboards (e2e)', () => {
     feedbackModel = app.get(getModelToken(Feedback.name));
     aiFeedbackJobModel = app.get(getModelToken(AiFeedbackJob.name));
     databaseVerified = true;
+    console.info(
+      'Dashboard database gate: standard_test / default+transaction+independent eduforge_test / loopback rs0 PRIMARY verified',
+    );
 
     const [teacherHash, studentHash] = await Promise.all([
       bcrypt.hash(teacherPassword, 10),
@@ -222,10 +259,20 @@ describe('Classroom Dashboards (e2e)', () => {
       if (!databaseVerified) return;
       await assertAuthTestConnection(userModel.db);
       const ownedSubmissionRef = { submissionId: { $in: ownedSubmissionIds } };
+      const ownedInstanceFilter = {
+        $or: [
+          { _id: { $in: ownedInstanceIds } },
+          ...(racePublication ? [racePublication] : []),
+        ],
+      };
+      const resetTokenModel = app.get<Model<PasswordResetToken>>(
+        getModelToken(PasswordResetToken.name),
+      );
+      const ownedAuthRef = { userId: { $in: ownedUserIds } };
       await feedbackModel.deleteMany(ownedSubmissionRef);
       await aiFeedbackJobModel.deleteMany(ownedSubmissionRef);
       await submissionModel.deleteMany({ _id: { $in: ownedSubmissionIds } });
-      await classroomTaskModel.deleteMany({ _id: { $in: ownedInstanceIds } });
+      await classroomTaskModel.deleteMany(ownedInstanceFilter);
       await taskModel.deleteMany({ _id: { $in: ownedTaskIds } });
       const enrollmentModel = app.get<Model<Enrollment>>(
         getModelToken(Enrollment.name),
@@ -235,42 +282,275 @@ describe('Classroom Dashboards (e2e)', () => {
       });
       await classroomModel.deleteMany({ _id: { $in: ownedClassroomIds } });
       await courseModel.deleteMany({ _id: { $in: ownedCourseIds } });
-      await sessionModel.deleteMany({ userId: { $in: ownedUserIds } });
+      await sessionModel.deleteMany(ownedAuthRef);
+      await resetTokenModel.deleteMany(ownedAuthRef);
       await userModel.deleteMany({ _id: { $in: ownedUserIds } });
-      expect(await feedbackModel.countDocuments(ownedSubmissionRef)).toBe(0);
-      expect(await aiFeedbackJobModel.countDocuments(ownedSubmissionRef)).toBe(
-        0,
+      const db = readbackConnection?.db;
+      if (!db) throw new Error('Missing guarded dashboard cleanup readback');
+      const ownedScopes = [
+        [feedbackModel.collection.name, ownedSubmissionRef],
+        [aiFeedbackJobModel.collection.name, ownedSubmissionRef],
+        [submissionModel.collection.name, { _id: { $in: ownedSubmissionIds } }],
+        [classroomTaskModel.collection.name, ownedInstanceFilter],
+        [taskModel.collection.name, { _id: { $in: ownedTaskIds } }],
+        [
+          enrollmentModel.collection.name,
+          { classroomId: { $in: ownedClassroomIds } },
+        ],
+        [classroomModel.collection.name, { _id: { $in: ownedClassroomIds } }],
+        [courseModel.collection.name, { _id: { $in: ownedCourseIds } }],
+        [sessionModel.collection.name, ownedAuthRef],
+        [resetTokenModel.collection.name, ownedAuthRef],
+        [userModel.collection.name, { _id: { $in: ownedUserIds } }],
+      ] as const;
+      for (const [collection, filter] of ownedScopes) {
+        expect(
+          await db.collection(collection).countDocuments(filter, {
+            readPreference: 'primary',
+            timeoutMS: 5000,
+          }),
+        ).toBe(0);
+      }
+      console.info(
+        'Dashboard independent business/auth cleanup verified: residual=0',
       );
-      expect(
-        await submissionModel.countDocuments({
-          _id: { $in: ownedSubmissionIds },
-        }),
-      ).toBe(0);
-      expect(
-        await enrollmentModel.countDocuments({
-          classroomId: { $in: ownedClassroomIds },
-        }),
-      ).toBe(0);
-      expect(
-        await sessionModel.countDocuments({ userId: { $in: ownedUserIds } }),
-      ).toBe(0);
-      expect(
-        await userModel.countDocuments({ _id: { $in: ownedUserIds } }),
-      ).toBe(0);
-      expect(
-        await classroomModel.countDocuments({
-          _id: { $in: ownedClassroomIds },
-        }),
-      ).toBe(0);
-      console.info('Dashboard fixture cleanup verified');
     } finally {
       try {
         await app?.close();
       } finally {
-        authTestEnvironment.restore();
+        try {
+          await readbackConnection?.close();
+        } finally {
+          authTestEnvironment.restore();
+        }
       }
     }
   });
+  it('keeps the task list and archive advice on the same read during publication', async () => {
+    await login(teacherAgent, teacherEmail, teacherPassword);
+    const courseResponse = await teacherAgent
+      .post('/api/courses')
+      .send({
+        code: `D34-${teacherId.toHexString()}`,
+        name: 'Dashboard publication race',
+        term: 'e2e',
+      })
+      .expect(201);
+    const raceCourse = courseResponse.body as CreatedCourseResponse;
+    ownedCourseIds.push(new Types.ObjectId(raceCourse.id));
+    const classroomResponse = await teacherAgent
+      .post('/api/classrooms')
+      .send({ courseId: raceCourse.id, name: 'Old empty classroom' })
+      .expect(201);
+    const raceClassroom = classroomResponse.body as CreatedClassroomResponse;
+    const raceClassroomId = new Types.ObjectId(raceClassroom.id);
+    ownedClassroomIds.push(raceClassroomId);
+    const backdated = await classroomModel.collection.updateOne(
+      { _id: raceClassroomId, teacherId },
+      { $set: { createdAt: new Date('2024-01-01T00:00:00.000Z') } },
+      { timeoutMS: 5000 },
+    );
+    expect(backdated.modifiedCount).toBe(1);
+
+    const templateResponse = await teacherAgent
+      .post('/api/learning-tasks/tasks')
+      .send({
+        title: 'Publish during a dashboard read',
+        description: 'Synthetic template for the dashboard consistency check.',
+        knowledgeModule: 'basics',
+        status: 'PUBLISHED',
+      })
+      .expect(201);
+    const template = templateResponse.body as CreatedTaskResponse;
+    const templateId = new Types.ObjectId(template.id);
+    ownedTaskIds.push(templateId);
+    racePublication = {
+      classroomId: raceClassroomId,
+      taskId: templateId,
+      createdBy: teacherId,
+    };
+    const db = readbackConnection?.db;
+    if (!db) throw new Error('Missing guarded dashboard publication readback');
+
+    const getDashboard = () =>
+      teacherAgent
+        .get(`/api/classrooms/${raceClassroom.id}/dashboard`)
+        .timeout({ deadline: 18000 })
+        .expect(200);
+    const summarize = (body: TeacherDashboardResponse) => ({
+      taskIds: body.tasks.map((task) => task.classroomTaskId),
+      publishedTasksCount: body.summary.publishedTasksCount,
+      suggested: body.archiveSuggestion.suggested,
+      reason: body.archiveSuggestion.reason,
+    });
+    const expectedEmpty = {
+      taskIds: [],
+      publishedTasksCount: 0,
+      suggested: true,
+      reason: 'NO_ACTIVE_TASKS_AND_NO_RECENT_SUBMISSIONS',
+    };
+    const before = summarize(
+      (await getDashboard()).body as TeacherDashboardResponse,
+    );
+    expect(before).toEqual(expectedEmpty);
+
+    let readCompleted!: (ids: string[]) => void;
+    const observedRead = new Promise<string[]>((resolve) => {
+      readCompleted = resolve;
+    });
+    let releaseRead!: () => void;
+    const readReleased = new Promise<void>((resolve) => {
+      releaseRead = resolve;
+    });
+    const aggregate = classroomTaskModel.aggregate.bind(
+      classroomTaskModel,
+    ) as typeof classroomTaskModel.aggregate;
+    let held = false;
+    const aggregateSpy = jest
+      .spyOn(classroomTaskModel, 'aggregate')
+      .mockImplementation((pipeline) => {
+        const query = aggregate<{ _id: Types.ObjectId }>(pipeline);
+        const match = query.pipeline()[0];
+        if (!held && match && '$match' in match) {
+          const target: unknown = match.$match.classroomId;
+          if (
+            target instanceof Types.ObjectId &&
+            target.equals(raceClassroomId)
+          ) {
+            held = true;
+            const execute = query.exec.bind(query) as typeof query.exec;
+            jest.spyOn(query, 'exec').mockImplementationOnce(async () => {
+              const rows = await execute();
+              readCompleted(rows.map(({ _id }) => _id.toHexString()));
+              await waitForDashboardBarrier(
+                readReleased,
+                'Release dashboard task read',
+                12000,
+              );
+              return rows;
+            });
+          }
+        }
+        return query;
+      });
+    const pending = getDashboard().then((response) => response);
+
+    let published!: CreatedClassroomTaskResponse;
+    let persisted!: { id: string; status: string; dueAt: Date | null };
+    let taskIdsRead!: string[];
+    try {
+      taskIdsRead = await waitForDashboardBarrier(
+        Promise.race([
+          observedRead,
+          pending.then(() => {
+            throw new Error(
+              'Dashboard responded before the task read was held',
+            );
+          }),
+        ]),
+        'Read actual classroom task aggregation',
+        5000,
+      );
+      expect(taskIdsRead).toEqual([]);
+      const publication = await teacherAgent
+        .post(`/api/classrooms/${raceClassroom.id}/tasks`)
+        .send({ taskId: template.id })
+        .timeout({ deadline: 6000 })
+        .expect(201);
+      published = publication.body as CreatedClassroomTaskResponse;
+      const instanceId = new Types.ObjectId(published.id);
+      ownedInstanceIds.push(instanceId);
+      const instance = await db
+        .collection<ClassroomTask>(classroomTaskModel.collection.name)
+        .findOne(
+          { _id: instanceId, ...racePublication },
+          { readPreference: 'primary', timeoutMS: 5000 },
+        );
+      if (!instance)
+        throw new Error(
+          'Published instance was missing from independent Mongo readback',
+        );
+      expect(instance.status).toBe('ACTIVE');
+      expect(instance.dueAt ?? null).toBeNull();
+      persisted = {
+        id: instance._id.toHexString(),
+        status: instance.status,
+        dueAt: instance.dueAt ?? null,
+      };
+    } finally {
+      releaseRead();
+      await Promise.allSettled([pending]);
+      aggregateSpy.mockRestore();
+    }
+
+    const during = summarize((await pending).body as TeacherDashboardResponse);
+    const after = summarize(
+      (await getDashboard()).body as TeacherDashboardResponse,
+    );
+    console.info(
+      'Dashboard publication race:',
+      JSON.stringify({
+        before,
+        taskIdsRead,
+        publication: { httpStatus: 201, id: published.id },
+        persisted,
+        during,
+        after,
+      }),
+    );
+    expect(after).toEqual({
+      taskIds: [published.id],
+      publishedTasksCount: 1,
+      suggested: false,
+      reason: null,
+    });
+    expect(during).toEqual(expectedEmpty);
+
+    // Legacy history can reference an instance whose template no longer exists.
+    const orphanInstanceId = new Types.ObjectId();
+    const orphanTemplateId = new Types.ObjectId();
+    const recentSubmissionAt = new Date();
+    const recentSubmissionId = new Types.ObjectId();
+    ownedInstanceIds.push(orphanInstanceId);
+    ownedSubmissionIds.push(recentSubmissionId);
+    await classroomTaskModel.collection.insertOne({
+      _id: orphanInstanceId,
+      classroomId: raceClassroomId,
+      taskId: orphanTemplateId,
+      status: 'ACTIVE',
+      publishedAt: recentSubmissionAt,
+      createdBy: teacherId,
+    });
+    await submissionModel.collection.insertOne({
+      _id: recentSubmissionId,
+      studentId,
+      classroomTaskId: orphanInstanceId,
+      taskId: orphanTemplateId,
+      content: { codeText: 'return true;', language: 'typescript' },
+      contentRevision: 0,
+      attemptNo: 1,
+      status: SubmissionStatus.Submitted,
+      submittedAt: recentSubmissionAt,
+      createdAt: recentSubmissionAt,
+      updatedAt: recentSubmissionAt,
+      isLate: false,
+      lateBySeconds: 0,
+    });
+    const legacy = (await getDashboard()).body as TeacherDashboardResponse;
+    expect(summarize(legacy)).toEqual(after);
+    expect(legacy.archiveSuggestion.lastSubmissionAt).toBe(
+      recentSubmissionAt.toISOString(),
+    );
+    console.info(
+      'Dashboard missing-template history:',
+      JSON.stringify({
+        orphanInstanceId,
+        displayedTaskIds: summarize(legacy).taskIds,
+        lastSubmissionAt: legacy.archiveSuggestion.lastSubmissionAt,
+      }),
+    );
+  });
+
   it('teacher and student dashboards reflect classroom task and AI status change', async () => {
     await login(teacherAgent, teacherEmail, teacherPassword);
     await login(studentAgent, studentEmail, studentPassword);

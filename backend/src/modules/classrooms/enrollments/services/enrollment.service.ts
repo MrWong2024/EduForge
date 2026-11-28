@@ -69,15 +69,18 @@ export class EnrollmentService {
       .exec();
   }
 
-  // Soft-delete and idempotent semantics:
-  // removing an already REMOVED enrollment remains REMOVED and does not throw.
+  // Only a transition out of ACTIVE records a removal time.
   async removeStudent(classroomId: string, userId: string) {
     const classroomObjectId = this.parseObjectId(classroomId, 'classroomId');
     const userObjectId = this.parseObjectId(userId, 'userId');
 
     await this.enrollmentModel
       .updateOne(
-        { classroomId: classroomObjectId, userId: userObjectId },
+        {
+          classroomId: classroomObjectId,
+          userId: userObjectId,
+          status: EnrollmentStatus.Active,
+        },
         {
           $set: {
             status: EnrollmentStatus.Removed,

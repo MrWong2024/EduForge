@@ -26,8 +26,9 @@ type ClassroomTaskFixture = {
   knowledgeModule: string;
   publishedAt: Date;
   dueAt?: Date;
-  taskStatus?: string;
+  taskStatus?: string | null;
   taskCreatedBy?: Types.ObjectId;
+  hasTaskTemplate?: boolean;
 };
 
 type UserFixture = {
@@ -148,31 +149,6 @@ const createHarness = (data: HarnessData = {}) => {
   const filterClassroomTasks = (pipeline: unknown[]) => {
     const match = getPipelineMatch(pipeline);
     const classroomIdValue = match.classroomId as Types.ObjectId | undefined;
-    const statusFilter = match.status as { $in?: string[] } | undefined;
-    const statuses = new Set(statusFilter?.$in ?? []);
-    return classroomTasks
-      .filter(
-        (task) =>
-          (!classroomIdValue ||
-            task.classroomId.toString() === classroomIdValue.toString()) &&
-          statuses.has(task.status ?? ''),
-      )
-      .map((task) => ({
-        _id: task._id,
-        taskId: task.taskId,
-        taskPublisherId: task.taskCreatedBy ?? defaultPublisherId,
-        classroomTaskStatus: task.status ?? '',
-        taskTemplateStatus: task.taskStatus ?? TaskStatus.Published,
-        publishedAt: task.publishedAt,
-        dueAt: task.dueAt,
-        title: task.title,
-        knowledgeModule: task.knowledgeModule,
-      }));
-  };
-
-  const filterArchiveCandidates = (pipeline: unknown[]) => {
-    const match = getPipelineMatch(pipeline);
-    const classroomIdValue = match.classroomId as Types.ObjectId | undefined;
     return classroomTasks
       .filter(
         (task) =>
@@ -181,10 +157,20 @@ const createHarness = (data: HarnessData = {}) => {
       )
       .map((task) => ({
         _id: task._id,
-        classroomTaskStatus: task.status,
-        taskStatus: task.taskStatus ?? TaskStatus.Published,
+        taskId: task.taskId,
+        hasTaskTemplate: task.hasTaskTemplate ?? true,
+        taskPublisherId: task.taskCreatedBy ?? defaultPublisherId,
+        classroomTaskStatus: task.status ?? '',
+        taskTemplateStatus:
+          task.hasTaskTemplate === false
+            ? null
+            : task.taskStatus === undefined
+              ? TaskStatus.Published
+              : task.taskStatus,
         publishedAt: task.publishedAt,
         dueAt: task.dueAt,
+        title: task.title,
+        knowledgeModule: task.knowledgeModule,
       }));
   };
 
@@ -342,7 +328,9 @@ const createHarness = (data: HarnessData = {}) => {
     findOne: jest.fn(() => makeQuery(classroom)),
   };
   const classroomTaskModel = {
-    aggregate: jest.fn(),
+    aggregate: jest.fn((pipeline: unknown[]) =>
+      makeAggregate(filterClassroomTasks(pipeline)),
+    ),
   };
   const aiFeedbackJobModel = {
     aggregate: jest.fn((pipeline: unknown[]) =>
@@ -395,15 +383,6 @@ const createHarness = (data: HarnessData = {}) => {
         activeStudentIds.map((studentId) => studentId.toString()),
       ),
   };
-
-  classroomTaskModel.aggregate.mockImplementation((pipeline: unknown[]) => {
-    const match = getPipelineMatch(pipeline);
-    return makeAggregate(
-      match.status
-        ? filterClassroomTasks(pipeline)
-        : filterArchiveCandidates(pipeline),
-    );
-  });
 
   const findActiveSubmissions = (filter: Record<string, unknown>) => {
     const classroomTaskIds = toIdSet(
@@ -1103,6 +1082,61 @@ describe('TeacherClassroomDashboardService', () => {
       suggested: false,
       reason: null,
       lastSubmissionAt: '2026-04-30T00:00:00.000Z',
+    });
+  });
+
+  it('keeps missing-template history in archive advice but excludes it from the task list', async () => {
+    const classroomId = objectId();
+    const historicalTaskId = objectId();
+    const visibleTaskId = objectId();
+    const historyDate = new Date('2026-04-30T00:00:00.000Z');
+    const harness = createHarness({
+      classroom: { createdAt: new Date('2025-01-01T00:00:00.000Z') },
+      classroomTasks: [
+        {
+          _id: historicalTaskId,
+          taskId: objectId(),
+          classroomId,
+          status: CLASSROOM_TASK_STATUS_ACTIVE,
+          title: 'Historical orphan',
+          knowledgeModule: 'module',
+          publishedAt: new Date('2026-01-01T00:00:00.000Z'),
+          hasTaskTemplate: false,
+        },
+        {
+          _id: visibleTaskId,
+          taskId: objectId(),
+          classroomId,
+          status: CLASSROOM_TASK_STATUS_ACTIVE,
+          title: 'Existing template with a missing status',
+          knowledgeModule: 'module',
+          publishedAt: new Date('2026-01-01T00:00:00.000Z'),
+          taskStatus: null,
+        },
+      ],
+      submissions: [
+        {
+          _id: objectId(),
+          classroomTaskId: historicalTaskId,
+          studentId: objectId(),
+          createdAt: historyDate,
+        },
+      ],
+    });
+
+    const dashboard = await harness.service.getDashboard(
+      classroomId.toString(),
+      harness.ids.teacherId.toString(),
+    );
+
+    expect(harness.classroomTaskModel.aggregate).toHaveBeenCalledTimes(1);
+    expect(dashboard.tasks).toMatchObject([
+      { classroomTaskId: visibleTaskId.toString(), taskTemplateStatus: null },
+    ]);
+    expect(dashboard.summary.publishedTasksCount).toBe(1);
+    expect(dashboard.archiveSuggestion).toMatchObject({
+      suggested: false,
+      lastSubmissionAt: historyDate.toISOString(),
     });
   });
 

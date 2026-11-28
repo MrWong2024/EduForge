@@ -144,7 +144,7 @@ Global SoT 只保留理解跨 Service workflow 必需的稳定不变量，不追
 - Upstream: `ClassroomsService.getDashboard`。
 - Downstream / Dependencies: `ClassroomModel`、`ClassroomTaskModel`、`SubmissionModel`、`FeedbackModel`、`AiFeedbackJobModel`、`UserModel`、`EnrollmentService`。
 - Consistency / State / Idempotency:
-  - 在聚合前按 ClassroomTask 状态白名单选任务，并在组装前防御过滤；summary 与任务统计使用同一最终任务集合。普通看板不以模板当前状态过滤既有实例。
+  - 一次批量读取班级 ClassroomTask 与关联模板，展示列表、已发布任务数和归档建议均从这批数据派生。展示只纳入状态符合筛选且有模板的实例，模板当前状态不参与展示筛选。建议计算最近提交时覆盖本批全部实例，包括缺模板的历史实例。
   - 默认教学统计只纳入当前 ACTIVE Enrollment 学生的提交、迟交、AI 与 tags；移除学生的历史记录保留，但不进入这些统计。tags 仅取 AI 来源并保留 top 5；未请求数为 `max(0, submissionsCount-requestedCount)`，缺失聚合补零。
   - 归档建议只针对 ACTIVE 班级，要求无当前活跃任务、最近 30 天无学生提交且通过 30 天新班级保护；建议专用的活跃任务判定要求实例 ACTIVE、模板 PUBLISHED，且截止未超 30 天缓冲，或无截止但发布在 90 天内。该判定不受是否包含关闭任务影响。
 - Isolation: 先校验班级 `teacherId`；后续提交/AI/tags 全部限定最终可见 `classroomTaskIds`。
@@ -204,7 +204,7 @@ Global SoT 只保留理解跨 Service workflow 必需的稳定不变量，不追
   - 编号分配最多 3 轮：每轮从主节点先读同作用域最大 attemptNo，开启冷却时才顺序读取最近 submittedAt，随后统一采样 now；禁止迟交且已过截止时优先拒绝，再判断冷却。放行判断、保存的 submittedAt、isLate 与 lateBySeconds 使用同一时间口径；窗口等值允许提交，冷却关闭时跳过窗口限制。仅本轮 insert 已确认未成功且 E11000 的 keyPattern 精确命中现行 `{classroomTaskId:1,studentId:1,attemptNo:1}` 唯一键时在新事务中重读重判，不直接换号插入。未知提交结果、其它唯一键冲突和事务提交成功后的编辑资格读取/响应构造失败均不重试创建。三轮耗尽后不再写入，开启冷却时仅复读最新提交，零冷却不增加该读取；仍优先核对截止，命中冷却返回正式 429，否则普通 409 提示刷新提交记录后重试。轮数是请求内部上限，不是学生提交次数限制。
   - 首提与后续提交保存作品，不创建 AI Job、不写 reviewStartedAt；无 Job 时返回 NOT_REQUESTED。手工请求复用 `ensureJobForSubmission`，不重复创建已有 Job；ensure 前统一校验提交/实例关联与快照，学生还重验本人、Enrollment ACTIVE 和班级/实例运行态，教师保留班级 ownership 评阅边界。缺失或残留的旧策略字段均不参与判断。
   - 教师反馈 PATCH 复用 submission 管理上下文。按反馈 ID、submissionId、TEACHER 来源和允许的作者条件执行单文档 `findOneAndUpdate`，用 `$set` 更新显式提供的白名单字段。旧教师反馈无 createdBy 时在授权更新中补写。响应通过 `toFeedbackResponse` 投影该写操作直接返回的写后文档。仅命中既有反馈复合唯一键的 E11000 映射为重复反馈冲突，其余错误继续传播。
-  - 同次作品修改：身份、课堂关联/快照、成员、运行态、输入、截止及历史 Feedback/Job 检查完成后，按 `_id + expectedRevision + 未进入评阅` 单文档条件更新，原子替换允许内容、成对写修改时间/迟交事实并递增 revision。revision=0 的条件显式兼容字段缺失；已有非法版本/评阅状态 fail-closed。任何历史 Feedback/任意状态 Job 都禁止编辑，不要求最新 attempt；不建新 Submission、不增加 attempt、不触发 AI，也不套用创建冷却。首次提交/报表事实保持不变。
+  - 同次作品修改：身份、课堂关联/快照、成员、运行态、输入、截止及历史 Feedback/Job 检查完成后，按 `_id + expectedRevision + 未进入评阅` 单文档条件更新，原子替换允许内容、成对写修改时间/迟交事实并递增 revision。PATCH 成功回执中的内容与版本来自本次原子写返回的文档；详情 GET 读取当前作品。回执的编辑资格继续核对当前资格和评阅受理状态。revision=0 的条件显式兼容字段缺失；已有非法版本/评阅状态 fail-closed。任何历史 Feedback/任意状态 Job 都禁止编辑，不要求最新 attempt；不建新 Submission、不增加 attempt、不触发 AI，也不套用创建冷却。首次提交/报表事实保持不变。
   - 评阅固定：新增教师反馈与师生手动 AI request 先完成全部权限、关联、快照及业务输入校验，再以同一 revision 条件原子写入 reviewStartedAt，成功即正式受理；已有有效固定时间且 revision 相同允许继续合法评阅。学生先保存则旧评阅 409；评阅先受理则旧编辑 409，绝不读取新版替换 expectedRevision 重放。GET/轮询/资格读取无固定写入。
   - Submission 与 Feedback/Job 不组成跨集合事务。固定后关联写失败、超时或返回不确定均不解锁；详情仍显示不能修改，客户端保留草稿，先读权威详情/反馈列表再由用户明确续行。Job 始终沿 submissionId 唯一键幂等，不重置 FAILED/DEAD/SUCCEEDED、不重新排队。
   - 教师反馈 POST 显式挑选规范业务 payload，版本前置不 spread 进文档。命中反馈复合唯一键时，按原键回查并核对作者及完整 payload，完全一致返回 `201` 和已有反馈。回查无匹配记录或内容不一致时，返回 `409`，提示「已有反馈与本次内容不同，请核对反馈列表后再继续。」。其它 E11000 继续失败。跨反馈编辑的操作级幂等暂未支持。历史缺字段只读兼容、不迁移、不修复。
@@ -222,7 +222,7 @@ Global SoT 只保留理解跨 Service workflow 必需的稳定不变量，不追
 - Domain / Responsibility: 成员关系写入与成员列表、分页、计数、分组计数的权威读取。
 - Upstream: 班级管理、任务授权及各聚合 Service。
 - Downstream / Dependencies: `EnrollmentModel`。
-- Consistency / State / Idempotency: enroll 使用幂等 upsert，并发重复键收敛到 ACTIVE；remove 软删除为 REMOVED 并写 removedAt，不删除历史关系。
+- Consistency / State / Idempotency: enroll 使用幂等 upsert，并发重复键收敛到 ACTIVE。remove 按 ACTIVE 条件将成员关系改为 REMOVED 并写 removedAt。合法重复移出沿用成功回执与原 `removedAt`、`updatedAt`。重新入班沿用首次 `joinedAt` 并清空 `removedAt`，下一次有效移出记录新时间。
 - Isolation: 学生有效成员 SoT 为 `role=STUDENT,status=ACTIVE`；不读取 `classroom.studentIds` 兜底。
 - Side Effects: 写 Enrollment 集合。
 - Important Performance / Recovery: 提供带加入时间的分页读取与 grouped count，避免调用方逐班计数；并发重复键是收敛分支，不作为重复入班失败。

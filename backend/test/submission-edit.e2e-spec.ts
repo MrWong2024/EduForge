@@ -46,6 +46,7 @@ type Detail = Resource & {
   submittedAt: string;
   isLate: boolean;
   lateBySeconds: number;
+  language: string;
   contentRevision: number | null;
   lastEditedAt: string | null;
   lastEditIsLate: boolean | null;
@@ -83,7 +84,7 @@ const reviewPayload = {
   scoreHint: 75,
 };
 
-function feedbackReadCheckpoint() {
+function requestCheckpoint() {
   let resolve!: () => void;
   const promise = new Promise<void>((done) => {
     resolve = done;
@@ -91,9 +92,10 @@ function feedbackReadCheckpoint() {
   return { promise, resolve };
 }
 
-async function waitForFeedbackRead(
+async function waitForRequestCheckpoint(
   reached: Promise<void>,
   request: Promise<request.Response>,
+  label: string,
 ) {
   let timer: ReturnType<typeof setTimeout> | undefined;
   try {
@@ -101,12 +103,12 @@ async function waitForFeedbackRead(
       reached,
       request.then(({ status }) => {
         throw new Error(
-          `Feedback request completed before its read pause: ${status}`,
+          `${label} request completed before its pause: ${status}`,
         );
       }),
       new Promise<never>((_, reject) => {
         timer = setTimeout(
-          () => reject(new Error('Feedback read pause timed out')),
+          () => reject(new Error(`${label} pause timed out`)),
           5000,
         );
       }),
@@ -749,10 +751,166 @@ describe('B1-2 submission content edits and review admission (HTTP)', () => {
     const final = await detail(student, created.id);
     expect(final.contentRevision).toBe(1);
     expect(final.content).toEqual(winner);
-    expect(
-      (responses.find((r) => r.status === 409)!.body as { code: string }).code,
-    ).toBe('SUBMISSION_REVISION_CONFLICT');
+    const conflict = responses.find((r) => r.status === 409)!.body as object;
+    expect(conflict).toMatchObject({
+      statusCode: 409,
+      message: '作品内容已变化，请查看最新提交并核对草稿后明确继续。',
+    });
+    expect(conflict).not.toHaveProperty('code');
     await noReviewRecords(created.id);
+  });
+
+  it('returns each student PATCH from its own write when a later revision finishes first', async () => {
+    const published = await publish();
+    const created = await submit(published);
+    const submissionId = new Types.ObjectId(created.id);
+    const payloadA = {
+      language: 'typescript',
+      codeText: '  const first = "A";\n\tfirst;\n',
+      submissionNote: '  保存 A\n\t保留原文\n',
+    };
+    const payloadB = {
+      language: 'python',
+      codeText: '  second = "B"\n\tprint(second)\n',
+      submissionNote: '  保存 B\n\t保留原文\n',
+    };
+    const readback = readbackConnection?.db;
+    if (!readback) throw new Error('Missing guarded submission readback');
+    const stored = readback.collection<Submission>(submissions.collection.name);
+    const read = () =>
+      stored.findOne(
+        { _id: submissionId },
+        { readPreference: 'primary', signal: AbortSignal.timeout(5000) },
+      );
+    const reached = requestCheckpoint();
+    const released = requestCheckpoint();
+    const collection: {
+      findOneAndUpdate(
+        filter: mongo.Filter<mongo.Document>,
+        update: mongo.UpdateFilter<mongo.Document> | mongo.Document[],
+        options?: mongo.FindOneAndUpdateOptions,
+      ): Promise<mongo.Document | null>;
+    } = submissions.collection;
+    const write = collection.findOneAndUpdate.bind(
+      collection,
+    ) as typeof collection.findOneAndUpdate;
+    const spy = jest
+      .spyOn(collection, 'findOneAndUpdate')
+      .mockImplementation(async (filter, update, options) => {
+        const result = await write(filter, update, options);
+        const fields = Array.isArray(update)
+          ? undefined
+          : (update.$set as Pick<Submission, 'content'> | undefined);
+        if (
+          result &&
+          filter._id instanceof Types.ObjectId &&
+          submissionId.equals(filter._id) &&
+          fields?.content?.codeText === payloadA.codeText
+        ) {
+          reached.resolve();
+          await released.promise;
+        }
+        return result;
+      });
+    const pending = edit(created.id, 0, payloadA).then((result) => result);
+    let responseA: request.Response;
+    let responseB: request.Response;
+    let firstWritten: mongo.WithId<Submission> | null;
+    try {
+      await waitForRequestCheckpoint(
+        reached.promise,
+        pending,
+        'Student write A',
+      );
+      firstWritten = await read();
+      expect(firstWritten).toMatchObject({
+        content: payloadA,
+        contentRevision: 1,
+        lastEditIsLate: false,
+      });
+      const afterA = await detail(student, created.id);
+      expect(afterA).toMatchObject({ id: created.id, contentRevision: 1 });
+      await teacher
+        .patch(instanceUrl(published.id))
+        .send({ dueAt: '2000-01-01T00:00:00.000Z', allowLate: true })
+        .expect(200);
+      responseB = await edit(created.id, afterA.contentRevision!, payloadB);
+      expect(responseB.status).toBe(200);
+      released.resolve();
+      responseA = await pending;
+    } finally {
+      released.resolve();
+      try {
+        await Promise.allSettled([pending]);
+      } finally {
+        spy.mockRestore();
+      }
+    }
+    const final = await detail(student, created.id);
+    const terminal = await read();
+    expect(terminal).toMatchObject({
+      _id: submissionId,
+      attemptNo: created.attemptNo,
+      content: payloadB,
+      contentRevision: 2,
+      lastEditIsLate: true,
+    });
+    expect(
+      await stored.countDocuments(
+        { classroomTaskId: new Types.ObjectId(published.id) },
+        { readPreference: 'primary', signal: AbortSignal.timeout(5000) },
+      ),
+    ).toBe(1);
+    const savedA = {
+      id: created.id,
+      attemptNo: created.attemptNo,
+      language: payloadA.language,
+      content: payloadA,
+      contentRevision: 1,
+      lastEditedAt: firstWritten?.lastEditedAt?.toISOString(),
+      lastEditIsLate: false,
+    };
+    const savedB = {
+      id: created.id,
+      attemptNo: created.attemptNo,
+      language: payloadB.language,
+      content: payloadB,
+      contentRevision: 2,
+      lastEditedAt: terminal?.lastEditedAt?.toISOString(),
+      lastEditIsLate: true,
+    };
+    expect(savedA.lastEditedAt).toEqual(expect.any(String));
+    expect(savedB.lastEditedAt).toEqual(expect.any(String));
+    expect(responseA.status).toBe(200);
+    const receiptA = responseA.body as Detail;
+    const receiptB = responseB.body as Detail;
+    const savedFields = ({
+      id,
+      attemptNo,
+      language,
+      content,
+      contentRevision,
+      lastEditedAt,
+      lastEditIsLate,
+    }: Detail) => ({
+      id,
+      attemptNo,
+      language,
+      content,
+      contentRevision,
+      lastEditedAt,
+      lastEditIsLate,
+    });
+    console.info('23 student PATCH receipts', {
+      namespace,
+      a: { status: responseA.status, ...savedFields(receiptA) },
+      b: { status: responseB.status, ...savedFields(receiptB) },
+      finalGet: savedFields(final),
+      mongo: savedB,
+    });
+    expect(receiptB).toMatchObject(savedB);
+    expect(final).toMatchObject(savedB);
+    expect(receiptA).toMatchObject(savedA);
   });
 
   it('rejects old feedback and AI revisions after a student save without pinning or creating associated records', async () => {
@@ -802,9 +960,12 @@ describe('B1-2 submission content edits and review admission (HTTP)', () => {
     await giveFeedback(created.id).expect(201);
     const firstPin = (await detail(student, created.id)).reviewStartedAt;
     const denied = await edit(created.id).expect(409);
-    expect((denied.body as { code: string }).code).toBe(
-      'SUBMISSION_REVIEW_STARTED',
-    );
+    expect(denied.body).toMatchObject({
+      statusCode: 409,
+      message:
+        '本次提交已进入评阅，不能再修改作品；草稿仍保留，请核对提交详情。',
+    });
+    expect(denied.body).not.toHaveProperty('code');
     await giveFeedback(created.id, 0, {
       ...reviewPayload,
       message: 'Additional feedback.',
@@ -850,8 +1011,8 @@ describe('B1-2 submission content edits and review admission (HTTP)', () => {
     const timeout = { response: 15000, deadline: 20000 };
 
     // Pause both real reads before either request can reach its write.
-    const reached = Array.from({ length: 2 }, feedbackReadCheckpoint);
-    const released = Array.from({ length: 2 }, feedbackReadCheckpoint);
+    const reached = Array.from({ length: 2 }, requestCheckpoint);
+    const released = Array.from({ length: 2 }, requestCheckpoint);
     const readSnapshots: Array<Pick<Feedback, 'message' | 'severity'>> = [];
     const collection: {
       findOne(
@@ -887,14 +1048,22 @@ describe('B1-2 submission content edits and review admission (HTTP)', () => {
         .send(payloadA)
         .then((response) => response);
       pending.push(requestA);
-      await waitForFeedbackRead(reached[0].promise, requestA);
+      await waitForRequestCheckpoint(
+        reached[0].promise,
+        requestA,
+        'Feedback read A',
+      );
       const requestB = teacher
         .patch(target)
         .timeout(timeout)
         .send(payloadB)
         .then((response) => response);
       pending.push(requestB);
-      await waitForFeedbackRead(reached[1].promise, requestB);
+      await waitForRequestCheckpoint(
+        reached[1].promise,
+        requestB,
+        'Feedback read B',
+      );
       expect(readSnapshots).toEqual([
         { message: '旧正文', severity: FeedbackSeverity.Info },
         { message: '旧正文', severity: FeedbackSeverity.Info },
@@ -1403,8 +1572,8 @@ describe('B1-2 submission content edits and review admission (HTTP)', () => {
     const findOne = collection.findOne.bind(
       collection,
     ) as typeof collection.findOne;
-    const reached = feedbackReadCheckpoint();
-    const released = feedbackReadCheckpoint();
+    const reached = requestCheckpoint();
+    const released = requestCheckpoint();
     const uniqueKey = {
       submissionId: 1,
       source: 1,
@@ -1451,7 +1620,11 @@ describe('B1-2 submission content edits and review admission (HTTP)', () => {
     );
     let response: request.Response;
     try {
-      await waitForFeedbackRead(reached.promise, post);
+      await waitForRequestCheckpoint(
+        reached.promise,
+        post,
+        'Feedback duplicate lookup',
+      );
       expect(duplicate).toEqual({ code: 11000, keyPattern: uniqueKey });
       const patch = await teacher
         .patch(`${url}/${initial.id}`)
@@ -1614,9 +1787,11 @@ describe('B1-2 submission content edits and review admission (HTTP)', () => {
         await askAi(created.id),
       ]) {
         expect(response.status).toBe(409);
-        expect((response.body as { code: string }).code).toBe(
-          'SUBMISSION_INVALID_STATE',
-        );
+        expect(response.body).toMatchObject({
+          statusCode: 409,
+          message: '提交的版本或评阅状态无效，当前操作已停止，请联系教师核对。',
+        });
+        expect(response.body).not.toHaveProperty('code');
       }
       expect(await raw(created.id)).toEqual(before);
       await noReviewRecords(created.id);

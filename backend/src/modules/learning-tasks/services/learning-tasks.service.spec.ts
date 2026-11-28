@@ -1367,6 +1367,58 @@ describe('LearningTasksService student participation status gates', () => {
   });
 });
 
+describe('Student submission save receipt (no database)', () => {
+  afterEach(() => jest.restoreAllMocks());
+
+  it('returns saved content and the current review pin before feedback or Job creation', async () => {
+    const h = createHarness();
+    const content = {
+      language: 'typescript',
+      codeText: '  const saved = 1;\n',
+      submissionNote: '  保存 A\n',
+    };
+    const saved = {
+      ...h.submission,
+      content,
+      contentRevision: 1,
+      lastEditedAt: new Date('2026-01-01T00:01:00.000Z'),
+      lastEditIsLate: false,
+    };
+    const reviewStartedAt = new Date('2026-01-01T00:03:00.000Z');
+    h.submissionModel.findOneAndUpdate.mockReturnValueOnce(makeQuery(saved));
+    h.submissionModel.findById
+      .mockReturnValueOnce(makeQuery(h.submission))
+      .mockReturnValueOnce(
+        makeQuery({
+          ...saved,
+          content: { language: 'python', codeText: 'later = 2' },
+          contentRevision: 2,
+          lastEditedAt: new Date('2026-01-01T00:02:00.000Z'),
+          lastEditIsLate: true,
+          reviewStartedAt,
+        }),
+      );
+    const receipt = await h.service.updateSubmission(
+      h.ids.submissionId.toHexString(),
+      { expectedRevision: 0, content },
+      { id: h.ids.studentId.toHexString(), roles: [USER_ROLE_STUDENT] },
+    );
+    expect(receipt).toMatchObject({
+      id: h.ids.submissionId.toHexString(),
+      attemptNo: 1,
+      language: content.language,
+      content,
+      contentRevision: 1,
+      lastEditedAt: saved.lastEditedAt,
+      lastEditIsLate: false,
+      reviewStartedAt,
+      editing: { canEdit: false, reason: 'REVIEW_STARTED' },
+    });
+    expect(receipt.aiFeedbackStatus).toBe(AiFeedbackStatus.NotRequested);
+    expect(h.feedbackModel.exists).toHaveBeenCalledTimes(1);
+  });
+});
+
 describe('AI review detail eligibility (no database)', () => {
   afterEach(() => jest.restoreAllMocks());
   it('reuses request eligibility for an authorized detail with no Job', async () => {

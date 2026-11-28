@@ -617,8 +617,8 @@ export class LearningTasksService {
       )
       .lean<SubmissionWithMeta>()
       .exec();
-    if (!updated) await this.throwCurrentSubmissionConflict(submission._id);
-    return this.getSubmissionDetail(submissionId, user);
+    if (!updated) return this.throwCurrentSubmissionConflict(submission._id);
+    return this.readSubmissionDetail(submissionId, user, updated);
   }
 
   async listMySubmissions(taskId: string, userId: string) {
@@ -914,6 +914,14 @@ export class LearningTasksService {
     submissionId: string,
     user: { id: string; roles?: string[] },
   ): Promise<SubmissionDetailResponseDto> {
+    return this.readSubmissionDetail(submissionId, user);
+  }
+
+  private async readSubmissionDetail(
+    submissionId: string,
+    user: { id: string; roles?: string[] },
+    savedSubmission?: SubmissionWithMeta,
+  ): Promise<SubmissionDetailResponseDto> {
     const submission = await this.submissionModel
       .findById(submissionId)
       .lean<SubmissionWithMeta>()
@@ -959,8 +967,13 @@ export class LearningTasksService {
       classroomTask,
       Boolean(job),
     );
+    // A save receipt describes its own write. A review admitted after that
+    // write can still stop editing before a feedback record or Job is visible.
+    const receipt = savedSubmission
+      ? { ...savedSubmission, reviewStartedAt: submission.reviewStartedAt }
+      : submission;
     return this.toSubmissionDetailResponse(
-      submission,
+      receipt,
       task,
       classroomTask,
       student ?? null,

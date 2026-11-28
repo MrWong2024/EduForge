@@ -27,9 +27,10 @@ type ClassroomLean = Classroom & WithId & WithTimestamps;
 type SubmissionLean = Submission & WithTimestamps;
 type ActiveSubmissionRef = Pick<Submission, 'classroomTaskId'> & WithId;
 
-type ClassroomTaskDashboardItem = {
+type ClassroomTaskDashboardRow = {
   _id: Types.ObjectId;
   taskId: Types.ObjectId;
+  hasTaskTemplate: boolean;
   taskPublisherId?: Types.ObjectId | null;
   taskTemplateStatus?: TaskStatus | null;
   title: string;
@@ -37,14 +38,6 @@ type ClassroomTaskDashboardItem = {
   publishedAt: Date;
   dueAt?: Date;
   classroomTaskStatus: string;
-};
-
-type ClassroomTaskArchiveCandidate = {
-  _id: Types.ObjectId;
-  classroomTaskStatus?: string;
-  taskStatus?: string;
-  publishedAt?: Date;
-  dueAt?: Date;
 };
 
 type ArchiveSuggestionReason =
@@ -115,23 +108,10 @@ export class TeacherClassroomDashboardService {
     }
 
     const classroomObjectId = new Types.ObjectId(id);
-    const archiveCandidates =
-      await this.getArchiveSuggestionCandidates(classroomObjectId);
-    const archiveSuggestion = await this.buildArchiveSuggestion(
-      classroom,
-      archiveCandidates,
-      new Date(),
-    );
-
     const visibleStatuses =
       this.getVisibleClassroomTaskStatuses(includeClosedTasks);
     const classroomTaskPipeline: PipelineStage[] = [
-      {
-        $match: {
-          classroomId: classroomObjectId,
-          status: { $in: visibleStatuses },
-        },
-      },
+      { $match: { classroomId: classroomObjectId } },
       {
         $lookup: {
           from: 'tasks',
@@ -140,11 +120,14 @@ export class TeacherClassroomDashboardService {
           as: 'task',
         },
       },
-      { $unwind: '$task' },
+      { $unwind: { path: '$task', preserveNullAndEmptyArrays: true } },
       {
         $project: {
           _id: 1,
           taskId: 1,
+          hasTaskTemplate: {
+            $ne: [{ $ifNull: ['$task._id', null] }, null],
+          },
           taskPublisherId: '$task.createdBy',
           classroomTaskStatus: '$status',
           publishedAt: 1,
@@ -169,11 +152,18 @@ export class TeacherClassroomDashboardService {
       { $sort: { publishedAt: -1 } },
     ];
     const classroomTasks = await this.classroomTaskModel
-      .aggregate<ClassroomTaskDashboardItem>(classroomTaskPipeline)
+      .aggregate<ClassroomTaskDashboardRow>(classroomTaskPipeline)
       .exec();
+    // Archive advice uses every instance, including those with a missing template.
+    const archiveSuggestion = await this.buildArchiveSuggestion(
+      classroom,
+      classroomTasks,
+      new Date(),
+    );
     const visibleStatusSet = new Set<string>(visibleStatuses);
-    const visibleClassroomTasks = classroomTasks.filter((task) =>
-      visibleStatusSet.has(task.classroomTaskStatus),
+    const visibleClassroomTasks = classroomTasks.filter(
+      (task) =>
+        task.hasTaskTemplate && visibleStatusSet.has(task.classroomTaskStatus),
     );
 
     const classroomTaskIds = visibleClassroomTasks.map((task) => task._id);
@@ -522,36 +512,9 @@ export class TeacherClassroomDashboardService {
     return trimmed.length > 0 ? trimmed : undefined;
   }
 
-  private async getArchiveSuggestionCandidates(classroomId: Types.ObjectId) {
-    const pipeline: PipelineStage[] = [
-      { $match: { classroomId } },
-      {
-        $lookup: {
-          from: 'tasks',
-          localField: 'taskId',
-          foreignField: '_id',
-          as: 'task',
-        },
-      },
-      { $unwind: { path: '$task', preserveNullAndEmptyArrays: true } },
-      {
-        $project: {
-          _id: 1,
-          classroomTaskStatus: '$status',
-          taskStatus: '$task.status',
-          publishedAt: 1,
-          dueAt: 1,
-        },
-      },
-    ];
-    return this.classroomTaskModel
-      .aggregate<ClassroomTaskArchiveCandidate>(pipeline)
-      .exec();
-  }
-
   private async buildArchiveSuggestion(
     classroom: ClassroomLean,
-    candidates: ClassroomTaskArchiveCandidate[],
+    candidates: ClassroomTaskDashboardRow[],
     now: Date,
   ): Promise<ArchiveSuggestion> {
     const allClassroomTaskIds = candidates.map((candidate) => candidate._id);
@@ -606,13 +569,10 @@ export class TeacherClassroomDashboardService {
     return latestSubmission?.createdAt ?? null;
   }
 
-  private isCurrentActiveTask(
-    candidate: ClassroomTaskArchiveCandidate,
-    now: Date,
-  ) {
+  private isCurrentActiveTask(candidate: ClassroomTaskDashboardRow, now: Date) {
     if (
       candidate.classroomTaskStatus !== CLASSROOM_TASK_STATUS_ACTIVE ||
-      candidate.taskStatus !== TaskStatus.Published
+      candidate.taskTemplateStatus !== TaskStatus.Published
     ) {
       return false;
     }
@@ -643,7 +603,7 @@ export class TeacherClassroomDashboardService {
 
   private isNewClassroomProtected(
     classroom: ClassroomLean,
-    candidates: ClassroomTaskArchiveCandidate[],
+    candidates: ClassroomTaskDashboardRow[],
     now: Date,
   ) {
     const threshold = this.addDays(
@@ -680,7 +640,7 @@ export class TeacherClassroomDashboardService {
     );
   }
 
-  private pickLatestDueAt(candidates: ClassroomTaskArchiveCandidate[]) {
+  private pickLatestDueAt(candidates: ClassroomTaskDashboardRow[]) {
     const dueDates = candidates
       .map((candidate) => this.toValidDate(candidate.dueAt))
       .filter((date): date is Date => Boolean(date));

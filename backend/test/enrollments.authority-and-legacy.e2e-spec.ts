@@ -1,3 +1,8 @@
+import {
+  assertAuthTestConnection,
+  authTestEnvironment,
+  openAuthTestConnection,
+} from './helpers/auth-test-environment';
 import { INestApplication, ValidationPipe } from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
 import { getConnectionToken, getModelToken } from '@nestjs/mongoose';
@@ -7,16 +12,12 @@ import cookieParser from 'cookie-parser';
 import request from 'supertest';
 import { App } from 'supertest/types';
 import { AppModule } from '../src/app.module';
+import { CLASSROOM_TASK_TRANSACTION_CONNECTION } from '../src/lib/classroom-task-transaction';
 import { User } from '../src/modules/users/schemas/user.schema';
 import { Session } from '../src/modules/auth/schemas/session.schema';
 import { Course } from '../src/modules/courses/schemas/course.schema';
 import { Classroom } from '../src/modules/classrooms/schemas/classroom.schema';
 import { Enrollment } from '../src/modules/classrooms/enrollments/schemas/enrollment.schema';
-
-import {
-  assertLocalStandardTestAuthentication,
-  assertLocalStandardTestEnvironment,
-} from './helpers/local-test-database-auth';
 
 jest.setTimeout(30000);
 
@@ -55,6 +56,7 @@ type CourseOverviewResponse = {
 
 describe('Enrollments Authority And Legacy Compatibility (e2e)', () => {
   let app: INestApplication<App>;
+  let readbackConnection: Connection | undefined;
   let userModel: Model<User>;
   let sessionModel: Model<Session>;
   let courseModel: Model<Course>;
@@ -152,17 +154,27 @@ describe('Enrollments Authority And Legacy Compatibility (e2e)', () => {
   };
 
   beforeAll(async () => {
-    assertLocalStandardTestEnvironment({
-      nodeEnv: process.env.NODE_ENV,
-      purpose: process.env.EDUFORGE_DATABASE_PURPOSE,
-      mongoUri: process.env.MONGO_URI,
-    });
-
+    readbackConnection = await openAuthTestConnection();
     const moduleFixture: TestingModule = await Test.createTestingModule({
       imports: [AppModule],
     }).compile();
 
     app = moduleFixture.createNestApplication();
+    const connection = app.get<Connection>(getConnectionToken());
+    const transactionConnection = app.get<Connection>(
+      getConnectionToken(CLASSROOM_TASK_TRANSACTION_CONNECTION),
+    );
+    await assertAuthTestConnection(connection);
+    await assertAuthTestConnection(transactionConnection);
+    console.info(
+      JSON.stringify({
+        stage: 'enrollment-authority-db-gate',
+        defaultDatabase: connection.db?.databaseName,
+        transactionDatabase: transactionConnection.db?.databaseName,
+        readbackDatabase: readbackConnection.db?.databaseName,
+        topology: 'loopback rs0 PRIMARY',
+      }),
+    );
     app.setGlobalPrefix('api');
     app.useGlobalPipes(
       new ValidationPipe({
@@ -173,22 +185,6 @@ describe('Enrollments Authority And Legacy Compatibility (e2e)', () => {
     );
     app.use(cookieParser());
     await app.init();
-
-    const connection = app.get<Connection>(getConnectionToken());
-    const database = connection.db;
-    if (!database) throw new Error('Missing connected test database');
-    const auth = await database.command(
-      { connectionStatus: 1, showPrivileges: false, maxTimeMS: 5000 },
-      { signal: AbortSignal.timeout(5000), readPreference: 'primary' },
-    );
-    assertLocalStandardTestAuthentication({
-      nodeEnv: process.env.NODE_ENV,
-      purpose: process.env.EDUFORGE_DATABASE_PURPOSE,
-      mongoUri: process.env.MONGO_URI,
-      databaseName: database.databaseName,
-      connectedHost: connection.host,
-      authInfo: auth.authInfo,
-    });
 
     teacherAgent = request.agent(app.getHttpServer());
     studentAgent = request.agent(app.getHttpServer());
@@ -273,8 +269,54 @@ describe('Enrollments Authority And Legacy Compatibility (e2e)', () => {
         cleanup.push(userModel.deleteMany({ _id: { $in: userObjectIds } }));
       }
       await Promise.all(cleanup);
+      const readback = readbackConnection?.db;
+      if (readback && userObjectIds.length > 0) {
+        const ownedClassrooms = {
+          $in: createdClassroomIds.map((id) => new Types.ObjectId(id)),
+        };
+        const ownedUsers = { $in: userObjectIds };
+        const scopes = {
+          enrollments: { classroomId: ownedClassrooms },
+          classrooms: { _id: ownedClassrooms },
+          courses: {
+            _id: { $in: createdCourseIds.map((id) => new Types.ObjectId(id)) },
+          },
+          sessions: { userId: ownedUsers },
+          passwordresettokens: { userId: ownedUsers },
+          users: { _id: ownedUsers },
+        };
+        const options = () => ({
+          maxTimeMS: 5000,
+          signal: AbortSignal.timeout(5000),
+          readPreference: 'primary' as const,
+        });
+        const counts = await Promise.all(
+          Object.entries(scopes).map(
+            async ([name, filter]) =>
+              [
+                name,
+                await readback
+                  .collection(name)
+                  .countDocuments(filter, options()),
+              ] as const,
+          ),
+        );
+        const remaining = Object.fromEntries(counts);
+        console.info(
+          JSON.stringify({ stage: 'enrollment-authority-cleanup', remaining }),
+        );
+        for (const [, count] of counts) expect(count).toBe(0);
+      }
     } finally {
-      await app?.close();
+      try {
+        await app?.close();
+      } finally {
+        try {
+          await readbackConnection?.close();
+        } finally {
+          authTestEnvironment.restore();
+        }
+      }
     }
   });
 
