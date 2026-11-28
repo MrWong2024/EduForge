@@ -103,19 +103,20 @@ async function requestJson<T>(
   path: string,
   options: RequestInit = {},
   scope?: PageAccountScope,
+  pageUserId: unknown = scope?.expectedUserId,
 ): Promise<T> {
   const { cache, headers: suppliedHeaders, ...requestInit } = options;
   const headers = new Headers(suppliedHeaders);
   headers.delete(PAGE_ACCOUNT_HEADER);
   const needsPageAccount = requiresPageAccount(path, requestInit.method);
   const expectedUserId = needsPageAccount
-    ? readPageAccountId(scope?.expectedUserId)
+    ? readPageAccountId(pageUserId)
     : null;
   if (needsPageAccount && !expectedUserId) {
     throw new Error(PAGE_ACCOUNT_UNAVAILABLE_MESSAGE);
   }
-  if (expectedUserId && scope) {
-    if (!scope.canWrite()) {
+  if (expectedUserId) {
+    if (scope && !scope.canWrite()) {
       throw new Error(PAGE_ACCOUNT_UNCONFIRMED_SUCCESS_MESSAGE);
     }
     headers.set(PAGE_ACCOUNT_HEADER, expectedUserId);
@@ -173,3 +174,13 @@ export function createPageFetch(scope?: PageAccountScope): PageFetch {
 }
 
 export const fetchJson = createPageFetch();
+
+export function logoutFromPage(pageUserId: unknown): Promise<{ ok: true }> {
+  // A successful logout has revoked its own session and cannot confirm it.
+  return requestJson(
+    "auth/logout",
+    { method: "POST", headers: { accept: "application/json" } },
+    undefined,
+    pageUserId,
+  );
+}

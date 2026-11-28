@@ -769,7 +769,7 @@ async function prepare(
       record.taskIds.push(stringField(task, 'id'));
       saveRecord(record);
     }
-    await request('auth/logout', {});
+    await request('auth/logout', {}, record.teacherId);
     cookie = '';
     const student = await request('auth/login', {
       email: namespace + '.student@example.invalid',
@@ -782,7 +782,7 @@ async function prepare(
       { joinCode: stringField(classroom, 'joinCode') },
       record.studentId,
     );
-    await request('auth/logout', {});
+    await request('auth/logout', {}, record.studentId);
     cookie = '';
   } finally {
     cookie = '';

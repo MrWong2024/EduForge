@@ -818,6 +818,7 @@ export class LearningTasksService {
     }
 
     const authorId = feedback.createdBy ?? new Types.ObjectId(userId);
+    const expectedText: NonNullable<UpdateFeedbackDto['expected']> = {};
     const fields: Partial<Feedback> = {};
     if (dto.type !== undefined) {
       fields.type = dto.type;
@@ -827,9 +828,15 @@ export class LearningTasksService {
     }
     if (dto.message !== undefined) {
       fields.message = dto.message;
+      if (dto.expected?.message !== undefined) {
+        expectedText.message = dto.expected.message;
+      }
     }
     if (dto.suggestion !== undefined) {
       fields.suggestion = dto.suggestion;
+      if (dto.expected?.suggestion !== undefined) {
+        expectedText.suggestion = dto.expected.suggestion;
+      }
     }
     if (dto.tags !== undefined) {
       fields.tags = this.normalizeTeacherFeedbackTags(dto.tags);
@@ -850,6 +857,7 @@ export class LearningTasksService {
             submissionId: feedback.submissionId,
             source: FeedbackSource.Teacher,
             $or: [{ createdBy: authorId }, { createdBy: null }],
+            ...expectedText,
           },
           { $set: fields },
           { returnDocument: 'after', runValidators: true },
@@ -871,6 +879,18 @@ export class LearningTasksService {
       }
       if (current.source !== FeedbackSource.Teacher) {
         throw new ForbiddenException('Only teacher feedback can be updated');
+      }
+      if (current.createdBy && current.createdBy.toString() !== userId) {
+        throw new ForbiddenException('Not allowed to update feedback');
+      }
+      if (
+        expectedText.message !== undefined ||
+        expectedText.suggestion !== undefined
+      ) {
+        throw new ConflictException({
+          code: 'TEACHER_FEEDBACK_TEXT_CONFLICT',
+          message: '这条教师反馈的正文或建议已被修改，请核对最新内容后再保存。',
+        });
       }
       throw new ForbiddenException('Not allowed to update feedback');
     }

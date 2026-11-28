@@ -1,6 +1,7 @@
-import type {
-  TeacherFeedbackItem,
-  UpdateTeacherFeedbackRequest,
+import {
+  toTeacherFeedbackListResponse,
+  type TeacherFeedbackItem,
+  type UpdateTeacherFeedbackRequest,
 } from "@/lib/api/types-teacher";
 import { toMultilineInputValue } from "@/lib/form-text-values";
 import {
@@ -36,21 +37,26 @@ export function toTeacherFeedbackEditValues(
   };
 }
 
-export function buildTeacherFeedbackEditPatch(
+function getTeacherFeedbackEdits(
   baseline: TeacherFeedbackEditValues,
   draft: TeacherFeedbackEditValues,
-): UpdateTeacherFeedbackRequest {
-  const patch: UpdateTeacherFeedbackRequest = {};
+): Partial<TeacherFeedbackEditValues> {
+  const patch: Partial<TeacherFeedbackEditValues> = {};
   if (draft.type !== baseline.type) {
     patch.type = draft.type;
   }
   if (draft.severity !== baseline.severity) {
     patch.severity = draft.severity;
   }
-  if (toMultilineInputValue(draft.message) !== toMultilineInputValue(baseline.message)) {
+  if (
+    toMultilineInputValue(draft.message) !== toMultilineInputValue(baseline.message)
+  ) {
     patch.message = draft.message;
   }
-  if (toMultilineInputValue(draft.suggestion) !== toMultilineInputValue(baseline.suggestion)) {
+  if (
+    toMultilineInputValue(draft.suggestion) !==
+    toMultilineInputValue(baseline.suggestion)
+  ) {
     patch.suggestion = draft.suggestion;
   }
 
@@ -64,4 +70,46 @@ export function buildTeacherFeedbackEditPatch(
     patch.tags = [...new Set(draft.tags)];
   }
   return patch;
+}
+
+export function buildTeacherFeedbackEditPatch(
+  original: TeacherFeedbackItem,
+  draft: TeacherFeedbackEditValues,
+): UpdateTeacherFeedbackRequest {
+  const patch = getTeacherFeedbackEdits(
+    toTeacherFeedbackEditValues(original),
+    draft,
+  );
+  const expected: NonNullable<UpdateTeacherFeedbackRequest["expected"]> = {};
+  if (patch.message !== undefined) expected.message = original.message ?? "";
+  if (patch.suggestion !== undefined) {
+    expected.suggestion = original.suggestion ?? null;
+  }
+
+  return Object.keys(expected).length > 0 ? { ...patch, expected } : patch;
+}
+
+export function findTeacherFeedbackForReview(
+  payload: unknown,
+  submissionId: string,
+  feedbackId: string,
+): TeacherFeedbackItem | undefined {
+  return toTeacherFeedbackListResponse(payload).items.find(
+    (item) =>
+      item.source === "TEACHER" &&
+      item.submissionId === submissionId &&
+      item.id === feedbackId &&
+      typeof item.message === "string",
+  );
+}
+
+export function rebaseTeacherFeedbackDraft(
+  original: TeacherFeedbackItem,
+  draft: TeacherFeedbackEditValues,
+  latest: TeacherFeedbackItem,
+): TeacherFeedbackEditValues {
+  return {
+    ...toTeacherFeedbackEditValues(latest),
+    ...getTeacherFeedbackEdits(toTeacherFeedbackEditValues(original), draft),
+  };
 }

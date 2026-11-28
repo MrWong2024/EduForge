@@ -17,7 +17,7 @@
 - `FRONTEND_URL` 仅未设置时默认 `http://localhost:3000`；显式空值或非法值拒绝，错误不回显配置值。只接受无凭据、路径、query、fragment 的 HTTP(S) origin，允许末尾根斜杠规范化。部署时必须核对 Next 进程实际输入与可达站点拓扑；backend 同名配置不表示 frontend 已收到。
 - Server client 每次在当前请求上下文通过 `getInboundCookieHeader` 取得 Cookie，创建请求内 Headers 并转发；`getMe` 不重复复制 Cookie。固定 `redirect: "manual"`，调用方不可覆盖，3xx 沿非成功响应抛 `FetchJsonError`，不携带上下文自动跟随 Location。
 - Client Component 请求使用 `frontend/lib/api/browser-client.ts`，浏览器自动携带同域 Cookie。师生业务写入通过 `usePageFetch` 将服务端 role gate 已确认的页面账号写入 `x-expected-user-id`；缺少可靠页面账号时，客户端在派发前停止操作。
-- `app/api/proxy/[...path]/route.ts` 固定 `runtime = "nodejs"`，转发 `cookie`、`content-type`、`accept` 和 `user-agent`。受保护的 `POST`、`PUT`、`PATCH`、`DELETE` 另转发 `x-expected-user-id`，缺失时传空值，保留服务端先校验会话再校验页面账号的顺序。GET、登录、忘记密码、重置密码和登出沿用原入口。
+- `app/api/proxy/[...path]/route.ts` 固定 `runtime = "nodejs"`，转发 `cookie`、`content-type`、`accept` 和 `user-agent`。受保护的 `POST`、`PUT`、`PATCH`、`DELETE`（包括退出）另转发 `x-expected-user-id`，缺失时传空值，保留服务端先校验会话再校验页面账号的顺序。GET、登录、忘记密码及重置密码沿用原入口。
 - Nest `SessionAuthGuard` 从同一请求的真实会话取得账号和角色。会话无效沿用 `401`。会话有效但预期账号缺失或不一致时，正式页面收到 `409` 和公开 `code=PAGE_ACCOUNT_MISMATCH`，提示「当前登录账号与此页面不一致，请重新打开页面后再操作。」并结束旧编辑会话。业务授权仍取真实会话。直连后端且省略预期账号的既有调用保持兼容。
 - 受保护的业务写入收到成功回执后，浏览器限时、禁用缓存读取 `users/me`。确认同账号后交付回执。确认已换号时结束旧编辑会话；暂不能确认时保留当前输入、暂停继续写入并提示先核对已获成功回执的操作。账号核对不会重发业务请求。
 - proxy 响应透传 `content-type/content-disposition/cache-control/location/set-cookie`；配置缺失或网络错误返回 `502` + `{ method, path, type }`。
@@ -50,7 +50,7 @@
 - 登录：`LoginForm` -> `browser-client.fetchJson("auth/login")` -> `/api/proxy/auth/login` -> `POST /api/auth/login`。
   - 调用页面：`/login`。
   - 注意：后端写 `ef_session`；登录成功后再以 `users/me` 确认会话与角色。
-- 登出：`LogoutButton` -> `buildProxyPath("auth/logout")` + native fetch -> `/api/proxy/auth/logout` -> `POST /api/auth/logout`。
+- 登出：师生 `LogoutButton` 使用 Shell 持有的服务端页面账号，通过 BFF 发送 `POST /api/auth/logout` 和 `x-expected-user-id`。收到 `409 PAGE_ACCOUNT_MISMATCH` 后提示重新打开页面。成功时沿用清 Cookie 及回首页的处理，以注销回执完成流程。
 - 忘记密码：`ForgotPasswordForm` -> `/api/proxy/auth/forgot-password` -> `POST /api/auth/forgot-password`。
   - 调用页面：`/forgot-password`。
   - 注意：消费后端防枚举响应；客户端 UX 节流不是权威门禁，服务端 cooldown 始终为最终约束。
@@ -119,7 +119,8 @@
 - 提交详情和反馈：Teacher/Student submission pages + feedback forms -> `/api/proxy/learning-tasks/submissions/:id*`。
   - 对应后端：submission detail、feedback list、teacher feedback create/update。
   - 注意：正式 detail API `GET /api/learning-tasks/submissions/:id` 是主体 SoT；每次先 await detail 成功，再请求同一提交的 feedback；师生共用学生侧详情 mapper，保留完整源码、独立说明与已有声明原文，适配 aiReview；URL query 不提供标题、正文、提交时间、次数、迟交或 AI 状态；班级/课堂任务上下文用于返回导航。公开字段与 null/0 语义由 [Backend DTO](./handoff-backend-dto-cheatsheet.md#submission-request--response-family) 维护。
-  - 新增教师反馈发送撰写时绑定的 `expectedRevision`；刷新 props 不重绑旧评语。409/结果不确定保留评语，显式读取权威作品及反馈列表，用户确认适用后再允许继续。教师反馈原地 PATCH 沿用原合同；固定、版本与幂等合同见 [Backend Service Card 08](./handoff-backend-service-map.md#service-card-08)。
+  - 新增教师反馈发送撰写时绑定的 `expectedRevision`；刷新 props 不重绑旧评语。409/结果不确定保留评语，显式读取权威作品及反馈列表，用户确认适用后再允许继续。固定、版本与幂等合同见 [Backend Service Card 08](./handoff-backend-service-map.md#service-card-08)。
+  - 历史反馈 PATCH 提交净变化，真正编辑正文或建议时携带 `expected` 中对应字段的服务端原文。遇 `409 TEACHER_FEEDBACK_TEXT_CONFLICT` 后通过同一作品的反馈列表读取权威原文，保留草稿供核对。读取和确认均无 PATCH。教师确认后再主动保存才发送请求。
 
 - 教师提交页的可选评阅标准：在权威 detail/feedback 成功后，使用上下文 classroomId 与 detail 的权威 classroomTaskId 经 BFF 读取 `GET /api/classrooms/:classroomId/tasks/:classroomTaskId`，复用 `toClassroomTask`；仅当响应 taskId 与提交 detail 一致时展示实例投影 rubric。上下文只定位请求，评阅标准来自正式响应；无上下文、读失败或不匹配时提示从任务详情核对，不替换已保存作品或反馈表单。
 

@@ -18,6 +18,7 @@
 | Teacher Gate | `app/teacher/layout.tsx` | 统一调用教师 role gate 并承载角色不匹配 UI；成功时用 `gate.me.id` 建立教师业务页面的账号边界 |
 | Student Gate | `app/student/layout.tsx` | 统一调用学生 role gate 并承载角色不匹配 UI；成功时用 `gate.me.id` 建立学生业务页面的账号边界 |
 | PageAccountBoundary | `components/layout/PageAccountBoundary.tsx` | 固定当前业务子树的已确认账号。同账号刷新保留局部草稿和操作状态，明确换号结束原编辑会话并提示重新打开页面。写入已收到成功回执、随后暂时无法确认账号时，保留当前草稿并暂停写入，提示先核对结果。重新打开后按当前服务端身份初始化 |
+| LogoutButton | `components/auth/LogoutButton.tsx` | 师生 Shell 以服务端页面账号绑定顶栏退出，并单独处理退出回执。账号缺失或不匹配时提示重新打开页面，成功后回首页 |
 
 ## 3) Shared Blocks
 
@@ -91,8 +92,8 @@
 | PublishTaskStatusButton | `components/teacher/PublishTaskStatusButton.tsx` | 单一模板发布操作；当前 classroomTask 详情页不使用，模板生命周期入口留在模板层 |
 | RemoveStudentButton | `components/teacher/RemoveStudentButton.tsx` | 确认移出当前展示姓名对应的成员。页面级汇总按学生 ID 保留具名结果，其他行发起、成功或同班刷新时仍展示未解决的失败。在行移除时承接仍位于该行的焦点，并在页面提供有效页链接时执行同路由替换。成员关系与历史记录由后端维护 |
 | TeacherFeedbackForm | `components/teacher/TeacherFeedbackForm.tsx` | 教师反馈创建输入与提交，复用统一反馈选项；评语草稿绑定实际查看版本，刷新不重绑。冲突或未知结果时保留草稿，显式核对复用作品与反馈的组合读取，完整展示后才可确认继续。标签可选，不提供 scoreHint 入口，合同与归一化归 API Owner。新增反馈提交期间锁定输入。必需读取暂态失败期间保留输入、起始版本和核对状态，暂停表单展示与操作 |
-| TeacherFeedbackHistory | `components/teacher/TeacherFeedbackHistory.tsx` | 组合教师与 AI 反馈历史，管理单条历史编辑会话、共享保存状态和 PATCH 正式回执。列表暂态不可用时保留原反馈 ID、起始值和当前输入，恢复前以最新列表核对同一作品上的同一条教师反馈。保存期间暂停收起和切换编辑项，确认回执后收起表单并更新历史。AI 与来源不明的反馈只读 |
-| TeacherFeedbackEditForm | `components/teacher/TeacherFeedbackEditForm.tsx` | 用历史列表持有的编辑会话渲染行内控件，按起始值计算净变更并 PATCH 原反馈。等待期间按历史列表的共享保存状态禁用控件。匹配公开消息的重复反馈 409 展示专属页内提示，保存失败保留编辑会话。输入字段与创建表单一致，scoreHint 除外 |
+| TeacherFeedbackHistory | `components/teacher/TeacherFeedbackHistory.tsx` | 组合教师与 AI 反馈历史，管理单条历史编辑会话、共享保存状态和 PATCH 正式回执。列表暂态不可用时保留原反馈 ID、起始值和当前输入，恢复前以最新列表核对同一作品上的同一条教师反馈。冲突核对采用正式反馈 GET 的原文，即使时间戳相等也以该次权威读为准。保存期间暂停收起和切换编辑项，确认回执后收起表单并更新历史。AI 与来源不明的反馈只读 |
+| TeacherFeedbackEditForm | `components/teacher/TeacherFeedbackEditForm.tsx` | 按起始值计算净变更，改正文或建议时同时发送对应服务端原文。文本冲突保留本地草稿，读回后展示双方可复制原文。读取和明确确认都不保存，确认后再主动提交；核对读取失败可重试。重复反馈提示单独处理，上方新增评语保留独立草稿。输入字段与创建表单一致，scoreHint 除外 |
 | TeacherSubmissionDetailPage | `app/teacher/submissions/[submissionId]/page.tsx` | 按学生作品详情页相同规则读取作品与反馈，完整读取后核对作品 ID 及教师会话。暂态失败时仅显示错误与原页重试，明确拒绝结束旧批阅状态。负责返回导航与作品展示；可选评阅标准复用 TaskRubric，正式实例读源与失败边界见 API Map |
 | TeacherSubmissionReview | `components/teacher/TeacherSubmissionReview.tsx` | 以当前教师和作品身份维持新增反馈、历史编辑和 AI 操作三个组件的生命周期。必需读取出错时暂停展示及操作，完整读取确认同一身份后恢复。两份草稿及回执分别由新增表单与历史列表持有。AI 申请局部更新，保持显式刷新 |
 

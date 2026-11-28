@@ -454,6 +454,7 @@ export type UpdateTeacherFeedbackRequest = {
   message?: string;
   suggestion?: string;
   tags?: string[];
+  expected?: { message?: string; suggestion?: string | null };
 };
 
 export type SubmissionDetailResponse = StudentSubmissionDetailResponse;

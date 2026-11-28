@@ -27,7 +27,7 @@ export function TeacherShell({ children, currentUser }: TeacherShellProps) {
             </nav>
             <div className="flex min-w-0 flex-1 items-center justify-end gap-4 sm:flex-initial">
               <AccountNavEntry href={paths.teacher.account} user={currentUser} />
-              <LogoutButton />
+              <LogoutButton key={currentUser.id} pageUserId={currentUser.id} />
             </div>
           </div>
         </div>

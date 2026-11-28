@@ -20,6 +20,7 @@ import { User, UserStatus } from '../src/modules/users/schemas/user.schema';
 import type { UserRole } from '../src/modules/users/schemas/user-roles.constants';
 import { Session } from '../src/modules/auth/schemas/session.schema';
 import { PasswordResetToken } from '../src/modules/auth/schemas/password-reset-token.schema';
+import { AuthService } from '../src/modules/auth/services/auth.service';
 import { SessionService } from '../src/modules/auth/services/session.service';
 import { MailService } from '../src/modules/mail/mail.service';
 import { UsersService } from '../src/modules/users/services/users.service';
@@ -344,6 +345,99 @@ describe('Authentication security (real HTTP and Mongo)', () => {
     await change(cookieB).expect(200);
     expect(await readVersion(teacherB)).toBe(1);
     expect(await readVersion(student)).toBe(0);
+  });
+
+  it('logs out only the session whose account matches the page identity', async () => {
+    if (!app || !importConnection?.db)
+      throw new Error('AUTH_TEST_INDEPENDENT_READBACK_REQUIRED');
+    const teacher = await makeUser();
+    const student = await makeUser(UserStatus.Active, 'student');
+    const teacherLogin = await login(teacher).expect(201);
+    const teacherCookie = cookieFrom(teacherLogin);
+    const otherTeacherCookie = cookieFrom(await login(teacher).expect(201));
+    const studentCookie = cookieFrom(await login(student).expect(201));
+    const teacherId = teacher.id.toHexString();
+    const studentId = student.id.toHexString();
+    const header = 'x-expected-user-id';
+    const logout = jest.spyOn(app.get(AuthService), 'logout');
+    const independentSessions = importConnection.db.collection(
+      sessions.collection.name,
+    );
+    const countSessions = () =>
+      Promise.all(
+        [teacher, student].map(({ id }) =>
+          independentSessions.countDocuments(
+            { userId: id },
+            { signal: AbortSignal.timeout(10000) },
+          ),
+        ),
+      );
+
+    expect(await countSessions()).toEqual([2, 1]);
+    for (const { cookie, pageUserId } of [
+      { cookie: teacherCookie, pageUserId: studentId },
+      { cookie: studentCookie, pageUserId: teacherId },
+      { cookie: teacherCookie, pageUserId: '' },
+    ]) {
+      const denied = await post('/api/auth/logout')
+        .set('Cookie', cookie)
+        .set(header, pageUserId)
+        .expect(409);
+      expect(publicResponse(denied)).toMatchObject({
+        statusCode: 409,
+        code: 'PAGE_ACCOUNT_MISMATCH',
+      });
+      expect(denied.headers['set-cookie'] === undefined).toBe(true);
+    }
+
+    const unauthenticated = await post('/api/auth/logout')
+      .set(header, teacherId)
+      .expect(401);
+    expect(unauthenticated.headers['set-cookie'] === undefined).toBe(true);
+    await post('/api/auth/logout').expect(401);
+    expect(logout.mock.calls.length).toBe(0);
+    expect(await countSessions()).toEqual([2, 1]);
+    expect(publicResponse(await probe(teacherCookie).expect(200)).id).toBe(
+      teacherId,
+    );
+    expect(publicResponse(await probe(studentCookie).expect(200)).id).toBe(
+      studentId,
+    );
+
+    const success = await post('/api/auth/logout')
+      .set('Cookie', teacherCookie)
+      .set(header, teacherId)
+      .expect(201);
+    expect(publicResponse(success)).toEqual({ ok: true });
+    const setCookie: unknown = success.headers['set-cookie'];
+    const loginSetCookie: unknown = teacherLogin.headers['set-cookie'];
+    if (
+      !Array.isArray(setCookie) ||
+      setCookie.length !== 1 ||
+      typeof setCookie[0] !== 'string' ||
+      !Array.isArray(loginSetCookie) ||
+      typeof loginSetCookie[0] !== 'string'
+    ) {
+      throw new Error('AUTH_TEST_CLEAR_COOKIE_REQUIRED');
+    }
+    const [cookieValue, ...attributes] = setCookie[0].split('; ');
+    expect(cookieValue === 'ef_session=').toBe(true);
+    expect(attributes).toEqual(
+      expect.arrayContaining([
+        'Path=/',
+        'Expires=Thu, 01 Jan 1970 00:00:00 GMT',
+        'HttpOnly',
+        'SameSite=Lax',
+      ]),
+    );
+    expect(attributes.includes('Secure')).toBe(
+      loginSetCookie[0].split('; ').includes('Secure'),
+    );
+    expect(logout.mock.calls.length).toBe(1);
+    expect(await countSessions()).toEqual([1, 1]);
+    await probe(teacherCookie).expect(401);
+    await probe(otherTeacherCookie).expect(200);
+    await probe(studentCookie).expect(200);
   });
 
   it('uses only the session hash and exposes only public user fields, then logs out', async () => {

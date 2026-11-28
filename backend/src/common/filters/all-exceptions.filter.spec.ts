@@ -117,6 +117,11 @@ describe('AllExceptionsFilter', () => {
       'PAGE_ACCOUNT_MISMATCH',
       '当前登录账号与此页面不一致，请重新打开页面后再操作。',
     ],
+    [
+      409,
+      'TEACHER_FEEDBACK_TEXT_CONFLICT',
+      '这条教师反馈的正文或建议已被修改，请核对最新内容后再保存。',
+    ],
   ] as const)(
     'projects only the public code for %s %s and preserves its message',
     (status, code, message) => {
@@ -261,6 +266,7 @@ describe('AllExceptionsFilter', () => {
     [409, 'CLASSROOM_NOT_EMPTY'],
     [409, 'CLASSROOM_TASK_NOT_EMPTY'],
     [409, 'PAGE_ACCOUNT_MISMATCH'],
+    [409, 'TEACHER_FEEDBACK_TEXT_CONFLICT'],
     [429, 'SUBMISSION_COOLDOWN_ACTIVE'],
   ];
   const wrongStatusPairs = publicCodePairs.flatMap(([allowedStatus, code]) =>

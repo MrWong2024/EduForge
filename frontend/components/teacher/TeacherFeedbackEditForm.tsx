@@ -1,6 +1,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
+import { useState } from "react";
 import { ErrorState } from "@/components/blocks/ErrorState";
 import { BrowserFetchJsonError } from "@/lib/api/browser-client";
 import { usePageFetch } from "@/lib/api/use-page-fetch";
@@ -14,6 +15,8 @@ import {
 } from "@/lib/api/types-teacher";
 import {
   buildTeacherFeedbackEditPatch,
+  findTeacherFeedbackForReview,
+  rebaseTeacherFeedbackDraft,
   type TeacherFeedbackEditValues,
 } from "@/lib/learning-tasks/teacher-feedback-edit";
 import {
@@ -33,13 +36,14 @@ import { safeGet } from "@/lib/ui/format";
 type TeacherFeedbackEditFormProps = {
   session: TeacherFeedbackEditSession;
   submissionId: string;
-  isSaving: boolean;
+  isBusy: boolean;
   onChange: (
     update: (current: TeacherFeedbackEditSession) => TeacherFeedbackEditSession,
   ) => void;
   onCancel: () => void;
-  onSaveStart: () => boolean;
-  onSaveFinish: () => void;
+  onOperationStart: () => boolean;
+  onOperationFinish: () => void;
+  onLatestRead: (feedback: TeacherFeedbackItem) => void;
   onSaved: (feedback: TeacherFeedbackItem) => void;
 };
 
@@ -51,10 +55,14 @@ type FeedbackErrorState = {
 
 export type TeacherFeedbackEditSession = {
   feedbackId: string;
-  initialValues: TeacherFeedbackEditValues;
+  original: TeacherFeedbackItem;
   draft: TeacherFeedbackEditValues;
   validationError: string | null;
   errorState: FeedbackErrorState | null;
+  conflict:
+    | { state: "required" | "failed" }
+    | { state: "read"; latest: TeacherFeedbackItem }
+    | null;
 };
 
 const DUPLICATE_FEEDBACK_MESSAGE =
@@ -88,20 +96,22 @@ const getUpdateFeedbackErrorSummary = (
 export function TeacherFeedbackEditForm({
   session,
   submissionId,
-  isSaving,
+  isBusy,
   onChange,
   onCancel,
-  onSaveStart,
-  onSaveFinish,
+  onOperationStart,
+  onOperationFinish,
+  onLatestRead,
   onSaved,
 }: TeacherFeedbackEditFormProps) {
   const fetchJson = usePageFetch();
   const router = useRouter();
-  const { feedbackId, initialValues, draft, validationError, errorState } =
+  const { feedbackId, original, draft, validationError, errorState, conflict } =
     session;
   const { type, severity, message, suggestion, tags } = draft;
-  const payload = buildTeacherFeedbackEditPatch(initialValues, draft);
+  const payload = buildTeacherFeedbackEditPatch(original, draft);
   const hasChanges = Object.keys(payload).length > 0;
+  const feedbackPath = `learning-tasks/submissions/${encodeURIComponent(submissionId)}/feedback`;
 
   const changeDraft = (changes: Partial<TeacherFeedbackEditValues>) => {
     onChange((current) => ({
@@ -129,9 +139,53 @@ export function TeacherFeedbackEditForm({
     onChange((current) => ({ ...current, validationError, errorState }));
   };
 
+  const readLatest = async () => {
+    if (!conflict || isBusy || !onOperationStart()) return;
+    onChange((current) => ({ ...current, conflict: { state: "required" } }));
+    try {
+      const response = await fetchJson<unknown>(feedbackPath, {
+        cache: "no-store",
+        signal: AbortSignal.timeout(30_000),
+      });
+      const latest = findTeacherFeedbackForReview(
+        response,
+        submissionId,
+        feedbackId,
+      );
+      if (!latest) throw new Error("Missing teacher feedback");
+      onLatestRead(latest);
+      onChange((current) => ({
+        ...current,
+        conflict: { state: "read", latest },
+      }));
+    } catch {
+      onChange((current) => ({ ...current, conflict: { state: "failed" } }));
+    } finally {
+      onOperationFinish();
+    }
+  };
+
+  const confirmLatest = () => {
+    if (isBusy) return;
+    onChange((current) => {
+      if (current.conflict?.state !== "read") return current;
+      const { latest } = current.conflict;
+      return {
+        ...current,
+        original: latest,
+        draft: rebaseTeacherFeedbackDraft(
+          current.original,
+          current.draft,
+          latest,
+        ),
+        conflict: null,
+      };
+    });
+  };
+
   const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    if (isSaving) {
+    if (isBusy || conflict) {
       return;
     }
     if (!message.trim()) {
@@ -143,15 +197,13 @@ export function TeacherFeedbackEditForm({
       return;
     }
 
-    if (!onSaveStart()) {
+    if (!onOperationStart()) {
       return;
     }
     setErrors(null);
     try {
       const response = await fetchJson<unknown>(
-        `learning-tasks/submissions/${encodeURIComponent(
-          submissionId,
-        )}/feedback/${encodeURIComponent(feedbackId)}`,
+        `${feedbackPath}/${encodeURIComponent(feedbackId)}`,
         {
           method: "PATCH",
           headers: {
@@ -173,7 +225,14 @@ export function TeacherFeedbackEditForm({
       onSaved(savedFeedback);
       router.refresh();
     } catch (error) {
-      if (error instanceof BrowserFetchJsonError) {
+      if (
+        error instanceof BrowserFetchJsonError &&
+        error.status === 409 &&
+        safeGet<unknown>(error.data, "code", undefined) ===
+          "TEACHER_FEEDBACK_TEXT_CONFLICT"
+      ) {
+        onChange((current) => ({ ...current, conflict: { state: "required" } }));
+      } else if (error instanceof BrowserFetchJsonError) {
         setErrors(null, {
           status: error.status,
           summary: getUpdateFeedbackErrorSummary(error.status, error.data),
@@ -185,7 +244,7 @@ export function TeacherFeedbackEditForm({
         });
       }
     } finally {
-      onSaveFinish();
+      onOperationFinish();
     }
   };
 
@@ -198,7 +257,7 @@ export function TeacherFeedbackEditForm({
         <label className="block text-sm">
           <span className="mb-1 block text-zinc-700">类型</span>
           <select
-            disabled={isSaving}
+            disabled={isBusy}
             value={type}
             onChange={(event) =>
               changeDraft({ type: event.target.value as FeedbackTypeValue })
@@ -216,7 +275,7 @@ export function TeacherFeedbackEditForm({
         <label className="block text-sm">
           <span className="mb-1 block text-zinc-700">严重级别</span>
           <select
-            disabled={isSaving}
+            disabled={isBusy}
             value={severity}
             onChange={(event) =>
               changeDraft({
@@ -237,7 +296,7 @@ export function TeacherFeedbackEditForm({
       <label className="mt-3 block text-sm">
         <span className="mb-1 block text-zinc-700">反馈内容</span>
         <textarea
-          disabled={isSaving}
+          disabled={isBusy}
           value={message}
           onChange={(event) => changeDraft({ message: event.target.value })}
           rows={4}
@@ -249,7 +308,7 @@ export function TeacherFeedbackEditForm({
       <label className="mt-3 block text-sm">
         <span className="mb-1 block text-zinc-700">建议（可选）</span>
         <textarea
-          disabled={isSaving}
+          disabled={isBusy}
           value={suggestion}
           onChange={(event) => changeDraft({ suggestion: event.target.value })}
           rows={3}
@@ -258,7 +317,7 @@ export function TeacherFeedbackEditForm({
         />
       </label>
 
-      <fieldset disabled={isSaving} className="mt-3 block text-sm">
+      <fieldset disabled={isBusy} className="mt-3 block text-sm">
         <legend className="mb-2 block text-zinc-700">
           标签（可选，多选；不选将归为“其他”）
         </legend>
@@ -288,15 +347,15 @@ export function TeacherFeedbackEditForm({
       <div className="mt-4 flex flex-wrap items-center gap-3">
         <button
           type="submit"
-          disabled={isSaving || !hasChanges}
+          disabled={isBusy || !!conflict || !hasChanges}
           className="rounded-md bg-zinc-900 px-4 py-2 text-sm font-medium text-white disabled:cursor-not-allowed disabled:bg-zinc-400"
         >
-          {isSaving ? "保存中..." : "保存修改"}
+          {isBusy && !conflict ? "保存中..." : "保存修改"}
         </button>
         <button
           type="button"
           onClick={onCancel}
-          disabled={isSaving}
+          disabled={isBusy}
           className="rounded-md border border-zinc-300 px-4 py-2 text-sm font-medium text-zinc-700 disabled:cursor-not-allowed disabled:text-zinc-400"
         >
           取消
@@ -308,6 +367,46 @@ export function TeacherFeedbackEditForm({
 
       {validationError ? (
         <p className="mt-3 text-sm text-red-700">{validationError}</p>
+      ) : null}
+
+      {conflict ? (
+        <section
+          className="mt-4 space-y-3 rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-zinc-900"
+          aria-label="先核对已保存反馈"
+        >
+          <h4 className="font-medium">先核对已保存反馈</h4>
+          <p>正文或建议已有新保存的内容。你的草稿仍保留，请核对后再继续。</p>
+          {conflict.state === "failed" ? (
+            <p role="alert">读取最新反馈失败。请重试，暂不能保存。</p>
+          ) : null}
+          {conflict.state === "read" ? (
+            <FeedbackTextComparison latest={conflict.latest} draft={draft} />
+          ) : null}
+          <div className="flex flex-wrap items-center gap-3">
+            <button
+              type="button"
+              disabled={isBusy}
+              onClick={() => void readLatest()}
+              className="text-blue-700 underline disabled:text-zinc-500"
+            >
+              {isBusy
+                ? "正在读取已保存反馈…"
+                : conflict.state === "failed"
+                  ? "重试读取已保存反馈"
+                  : "查看最新已保存反馈"}
+            </button>
+            {conflict.state === "read" ? (
+              <button
+                type="button"
+                disabled={isBusy}
+                onClick={confirmLatest}
+                className="text-blue-700 underline disabled:text-zinc-500"
+              >
+                已核对，继续修改
+              </button>
+            ) : null}
+          </div>
+        </section>
       ) : null}
 
       {errorState ? (
@@ -323,5 +422,75 @@ export function TeacherFeedbackEditForm({
         </div>
       ) : null}
     </form>
+  );
+}
+
+function FeedbackTextComparison({
+  latest,
+  draft,
+}: {
+  latest: TeacherFeedbackItem;
+  draft: TeacherFeedbackEditValues;
+}) {
+  const [copyStatus, setCopyStatus] = useState<string | null>(null);
+  const versions = [
+    {
+      title: "最新已保存反馈",
+      message: latest.message,
+      suggestion: latest.suggestion,
+    },
+    { title: "我的草稿", message: draft.message, suggestion: draft.suggestion },
+  ];
+
+  const copy = async (text: string, label: string) => {
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopyStatus(`已复制${label}。`);
+    } catch {
+      setCopyStatus("无法访问剪贴板，可选中文本后复制。");
+    }
+  };
+
+  return (
+    <>
+      <div className="grid gap-3 md:grid-cols-2">
+        {versions.map(({ title, message, suggestion }) => (
+          <section
+            key={title}
+            aria-label={title}
+            className="min-w-0 rounded border border-zinc-200 bg-white p-3"
+          >
+            <h5 className="font-medium">{title}</h5>
+            {[
+              { label: "正文", text: message },
+              { label: "建议", text: suggestion },
+            ].map(({ label, text }) => (
+              <div key={label} className="mt-2">
+                <div className="flex items-center justify-between gap-2">
+                  <p>{label}</p>
+                  {text !== undefined ? (
+                    <button
+                      type="button"
+                      onClick={() => void copy(text, label)}
+                      className="text-blue-700 underline"
+                    >
+                      复制{label}
+                    </button>
+                  ) : null}
+                </div>
+                {text ? (
+                  <pre className="whitespace-pre-wrap break-words font-sans">{text}</pre>
+                ) : (
+                  <p className="text-zinc-500">
+                    {text === undefined ? "无建议" : "空文本"}
+                  </p>
+                )}
+              </div>
+            ))}
+          </section>
+        ))}
+      </div>
+      {copyStatus ? <p role="status">{copyStatus}</p> : null}
+    </>
   );
 }

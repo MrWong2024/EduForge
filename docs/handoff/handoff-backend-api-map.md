@@ -39,6 +39,7 @@
 Notes:
 
 - login/logout 成功均为 HTTP 201；forgot-password/reset-password 成功均为 HTTP 200。
+- 师生顶栏退出发送 `X-Expected-User-Id`，由认证 Guard 比对本次请求的有效会话。账号不一致返回 `409 PAGE_ACCOUNT_MISMATCH`，原会话继续有效且响应不清 Cookie。未认证仍为 `401`。匹配时撤销当前会话并按原属性清除 `ef_session`，省略请求头的后端直连调用兼容。已受理退出的响应可能先于或晚于另一标签的新登录响应。
 - 忘记密码与重置密码是公开入口。忘记密码对邮箱不存在、不可登录用户及正常请求统一返回通用成功提示，避免枚举；只有允许登录的用户才创建 token 并触发邮件。
 - 同一用户 60 秒冷却内只有占位成功者签发；占位失败者不创建 token、不清理其它 token、不发邮件，对外响应不变。邮件发送失败也维持相同通用提示；新的成功请求会取代旧请求。
 - 重置使用一次性 token；无效、已消费、过期、被新请求替代、旧凭据版本或用户不可登录时统一返回 400，公开 message/code 见 [DTO 密码与错误](./handoff-backend-dto-cheatsheet.md#密码与公开错误合同)。正常成功使修改前的全部会话与重置凭据失效，不会自动登录或写入登录 Cookie。竞争失败不恢复已消费 token，应重新申请重置链接；密码已写入后发生后续故障不自动回滚或重放。
@@ -208,6 +209,7 @@ Notes:
 - 有效课堂关联但缺快照的旧实例保留已有作品/反馈读取及现行教师反馈权限和写入边界，不迁移或读时回填；新提交和新 AI 请求返回 409，message=“该课堂任务未保存发布内容，请教师重新布置后继续。”，作品编辑保留缺快照门禁。旧模板投影不代表发布时原文；可用性字段见 DTO Owner。
 - 公开教师创建反馈只接受 source=TEACHER；非 TEACHER 值返回 400，不写反馈或 AI Job。内部 Processor 仍保存 AI 来源。
 - 教师反馈 PATCH 仅更新显式提供的可编辑字段，省略字段保留数据库当前值。成功返回 `200` 和路径指定的完整 `FeedbackResponseDto`，内容以本次原子写入完成时为准。命中既有反馈复合唯一键时返回 `409`，公开 message 为「该作品已有相同类型、严重程度和正文的教师反馈，请核对后修改本条反馈。」。
+- 教师反馈 PATCH 可携带 `expected.message`、`expected.suggestion` 表示编辑起始的服务端原文，只校验同次实际提交更新的长字段。`expected.suggestion: null` 匹配缺省或 null，空字符串按原值比较。任一预期不符时整笔不写，返回 `409 TEACHER_FEEDBACK_TEXT_CONFLICT`。省略整个 `expected` 的旧调用兼容，单独提供 `expected` 仍是空 PATCH。
 - Submission PATCH 只允许具备学生角色的提交本人；校验有效课堂关联、发布快照、ACTIVE Enrollment 与班级/课堂任务运行态及保存时截止规则，不以是否最新 attempt 代替资格。已进入评阅或已有任何 Feedback/Job 均禁止修改；请求及详情字段见 [DTO Submission](./handoff-backend-dto-cheatsheet.md#submission-request--response-family)。
 - 新增教师反馈与产品 AI request 均要求必填 `expectedRevision`，先完成权限、关联、快照和输入校验，再正式受理评阅；已有 Job 也不能跳过本次版本和权限校验。竞争失败明确返回 409；查看详情、反馈列表及轮询不固定作品，不回填、清理历史字段或改写时间戳。既有冻结及 Job/反馈/用量事实保留；符合既有执行条件的 Job 继续处理，不补建或重置。版本竞争、固定成功后关联写失败的续行与幂等由 [Service Card 08](./handoff-backend-service-map.md#service-card-08) 维护；教师反馈 PATCH 保留原合同。
 - 教师反馈更新要求有效课堂关联及所属班级 owner 管理权；feedback 不存在或不属于该 submission 返回 `404`。仅 TEACHER 来源可改，非 TEACHER 返回 `403 Only teacher feedback can be updated`；已有 createdBy 时还必须是该作者，否则 `403 Not allowed to update feedback`。

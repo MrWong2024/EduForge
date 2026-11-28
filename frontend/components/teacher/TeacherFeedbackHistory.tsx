@@ -73,8 +73,8 @@ export function TeacherFeedbackHistory({
   const [editing, setEditing] = useState<TeacherFeedbackEditSession | null>(
     null,
   );
-  const saveInFlight = useRef(false);
-  const [isSaving, setIsSaving] = useState(false);
+  const operationInFlight = useRef(false);
+  const [isBusy, setIsBusy] = useState(false);
   const [confirmedFeedback, setConfirmedFeedback] = useState(
     () => new Map<string, TeacherFeedbackItem>(),
   );
@@ -100,37 +100,40 @@ export function TeacherFeedbackHistory({
 
   const openEditor = (item: TeacherFeedbackItem) => {
     if (!item.id || !canEditFeedback(item, submissionId)) return;
-    const initialValues = toTeacherFeedbackEditValues(item);
     setEditing({
       feedbackId: item.id,
-      initialValues,
-      draft: initialValues,
+      original: item,
+      draft: toTeacherFeedbackEditValues(item),
       validationError: null,
       errorState: null,
+      conflict: null,
     });
   };
 
-  const startSaving = () => {
-    if (saveInFlight.current) {
+  const startOperation = () => {
+    if (operationInFlight.current) {
       return false;
     }
-    saveInFlight.current = true;
-    setIsSaving(true);
+    operationInFlight.current = true;
+    setIsBusy(true);
     return true;
   };
 
-  const finishSaving = () => {
-    saveInFlight.current = false;
-    setIsSaving(false);
+  const finishOperation = () => {
+    operationInFlight.current = false;
+    setIsBusy(false);
+  };
+
+  const rememberFeedback = (feedback: TeacherFeedbackItem) => {
+    const id = feedback.id;
+    if (!id || feedback.submissionId !== submissionId) return null;
+    setConfirmedFeedback((previous) => new Map(previous).set(id, feedback));
+    return id;
   };
 
   const handleSaved = (feedback: TeacherFeedbackItem) => {
-    const id = feedback.id;
-    if (!id || feedback.submissionId !== submissionId) {
-      return;
-    }
-    setConfirmedFeedback((previous) => new Map(previous).set(id, feedback));
-    setEditing((current) => (current?.feedbackId === id ? null : current));
+    const id = rememberFeedback(feedback);
+    if (id) setEditing((current) => (current?.feedbackId === id ? null : current));
   };
 
   const groupedSections = [
@@ -193,9 +196,9 @@ export function TeacherFeedbackHistory({
                         {canEdit ? (
                           <button
                             type="button"
-                            disabled={isSaving}
+                            disabled={isBusy}
                             onClick={() => {
-                              if (saveInFlight.current) return;
+                              if (operationInFlight.current) return;
                               if (session) setEditing(null);
                               else openEditor(item);
                             }}
@@ -212,7 +215,7 @@ export function TeacherFeedbackHistory({
                         <TeacherFeedbackEditForm
                           session={session}
                           submissionId={submissionId}
-                          isSaving={isSaving}
+                          isBusy={isBusy}
                           onChange={(update) =>
                             setEditing((current) =>
                               current?.feedbackId === session.feedbackId
@@ -221,10 +224,11 @@ export function TeacherFeedbackHistory({
                             )
                           }
                           onCancel={() => {
-                            if (!saveInFlight.current) setEditing(null);
+                            if (!operationInFlight.current) setEditing(null);
                           }}
-                          onSaveStart={startSaving}
-                          onSaveFinish={finishSaving}
+                          onOperationStart={startOperation}
+                          onOperationFinish={finishOperation}
+                          onLatestRead={rememberFeedback}
                           onSaved={handleSaved}
                         />
                       ) : null}

@@ -1137,6 +1137,213 @@ describe('B1-2 submission content edits and review admission (HTTP)', () => {
     });
   });
 
+  it.each([
+    ['message', 'message'],
+    ['suggestion', 'suggestion'],
+    ['message', 'suggestion'],
+  ] as const)(
+    'compares only the teacher feedback text edited when saving %s then %s',
+    async (firstField, secondField) => {
+      const submission = await submit(await publish());
+      const listUrl = submissionUrl(submission.id) + '/feedback';
+      const initialMessage = '  初始正文\r\n\t详情\r\n  ';
+      const initialSuggestion = '  初始建议\r\n\t详情\r\n  ';
+      const { id } = (
+        await giveFeedback(submission.id, 0, {
+          ...reviewPayload,
+          message: initialMessage,
+          suggestion: initialSuggestion,
+        }).expect(201)
+      ).body as FeedbackReceipt;
+      const patchUrl = listUrl + '/' + id;
+      const firstOpening = (await teacher.get(listUrl).expect(200))
+        .body as FeedbackReceipt[];
+      const secondOpening = (await teacher.get(listUrl).expect(200))
+        .body as FeedbackReceipt[];
+      expect(firstOpening).toEqual(secondOpening);
+      expect(firstOpening).toEqual([
+        expect.objectContaining({
+          id,
+          message: initialMessage,
+          suggestion: initialSuggestion,
+        }),
+      ]);
+      const firstValue = '  率先保存\r\n\t完整原文\r\n  ';
+      const secondValue = '  后来保存\r\n\t完整原文\r\n  ';
+      const first = await teacher.patch(patchUrl).send({
+        [firstField]: firstValue,
+        expected: { [firstField]: firstOpening[0][firstField] },
+      });
+      const second = await teacher.patch(patchUrl).send({
+        [secondField]: secondValue,
+        expected: {
+          message: secondOpening[0].message,
+          suggestion: secondOpening[0].suggestion,
+        },
+      });
+      const readback = readbackConnection?.db;
+      if (!readback) throw new Error('Missing guarded feedback readback');
+      const stored = await readback
+        .collection<StoredFeedback>(feedback.collection.name)
+        .findOne(
+          { _id: new Types.ObjectId(id) },
+          { readPreference: 'primary', signal: AbortSignal.timeout(5000) },
+        );
+      const finalText = {
+        message: initialMessage,
+        suggestion: initialSuggestion,
+        [firstField]: firstValue,
+      };
+      expect(first.status).toBe(200);
+      expect(first.body).toMatchObject({ id, ...finalText });
+      if (firstField === secondField) {
+        expect(second.status).toBe(409);
+        expect(second.body).toMatchObject({
+          code: 'TEACHER_FEEDBACK_TEXT_CONFLICT',
+          message: '这条教师反馈的正文或建议已被修改，请核对最新内容后再保存。',
+        });
+      } else {
+        finalText[secondField] = secondValue;
+        expect(second.status).toBe(200);
+        expect(second.body).toMatchObject({ id, ...finalText });
+      }
+      expect(stored).toMatchObject(finalText);
+      console.info('Teacher feedback long text comparison', {
+        firstField,
+        secondField,
+        statuses: [first.status, second.status],
+        mongo: { message: stored?.message, suggestion: stored?.suggestion },
+      });
+    },
+  );
+
+  it('rejects every field of a conflicting teacher feedback patch and saves after reviewing the latest text', async () => {
+    const submission = await submit(await publish());
+    const listUrl = submissionUrl(submission.id) + '/feedback';
+    const { id } = (await giveFeedback(submission.id).expect(201))
+      .body as FeedbackReceipt;
+    const patchUrl = listUrl + '/' + id;
+    const updatedSuggestion = '  已保存建议\r\n\t保留原样\r\n  ';
+    await teacher
+      .patch(patchUrl)
+      .send({ suggestion: updatedSuggestion })
+      .expect(200);
+    const draft = {
+      message: '  本地正文\r\n\t详情  ',
+      suggestion: '  本地建议\r\n\t详情  ',
+      severity: FeedbackSeverity.Info,
+    };
+    await teacher
+      .patch(patchUrl)
+      .send({
+        ...draft,
+        expected: {
+          message: reviewPayload.message,
+          suggestion: reviewPayload.suggestion,
+        },
+      })
+      .expect(409)
+      .expect(({ body }) => {
+        expect(body).toMatchObject({ code: 'TEACHER_FEEDBACK_TEXT_CONFLICT' });
+      });
+    const readback = readbackConnection?.db;
+    if (!readback) throw new Error('Missing guarded feedback readback');
+    const readStored = () =>
+      readback
+        .collection<StoredFeedback>(feedback.collection.name)
+        .findOne(
+          { _id: new Types.ObjectId(id) },
+          { readPreference: 'primary', signal: AbortSignal.timeout(5000) },
+        );
+    expect(await readStored()).toMatchObject({
+      message: reviewPayload.message,
+      suggestion: updatedSuggestion,
+      severity: reviewPayload.severity,
+    });
+    const latest = (await teacher.get(listUrl).expect(200))
+      .body as FeedbackReceipt[];
+    expect(latest[0]).toMatchObject({ id, suggestion: updatedSuggestion });
+    const saved = await teacher
+      .patch(patchUrl)
+      .send({
+        ...draft,
+        expected: {
+          message: latest[0].message,
+          suggestion: latest[0].suggestion,
+        },
+      })
+      .expect(200);
+    expect(saved.body).toMatchObject({ id, ...draft });
+    expect(await readStored()).toMatchObject(draft);
+  });
+
+  it.each(['missing', 'null', 'empty'] as const)(
+    'compares historical %s feedback suggestions using their wire meaning',
+    async (kind) => {
+      const submission = await submit(await publish());
+      const listUrl = submissionUrl(submission.id) + '/feedback';
+      const { id } = (
+        await giveFeedback(submission.id, 0, {
+          ...reviewPayload,
+          suggestion: kind === 'empty' ? '' : reviewPayload.suggestion,
+        }).expect(201)
+      ).body as FeedbackReceipt;
+      const selector = { _id: new Types.ObjectId(id) };
+      const database = feedback.db.db;
+      if (!database) throw new Error('Missing guarded fixture connection');
+      const collection = database.collection<{
+        _id: Types.ObjectId;
+        suggestion?: string | null;
+      }>(feedback.collection.name);
+      if (kind === 'missing') {
+        await collection.updateOne(selector, { $unset: { suggestion: '' } });
+      } else if (kind === 'null') {
+        await collection.updateOne(selector, { $set: { suggestion: null } });
+      }
+      const patchUrl = listUrl + '/' + id;
+      const draft = '  新建议\r\n\t细节\r\n  ';
+      if (kind === 'empty') {
+        expect(await collection.findOne(selector)).toMatchObject({
+          suggestion: '',
+        });
+        await teacher
+          .patch(patchUrl)
+          .send({ suggestion: draft, expected: { suggestion: null } })
+          .expect(409);
+      }
+      const response = await teacher
+        .patch(patchUrl)
+        .send({
+          suggestion: draft,
+          expected: { suggestion: kind === 'empty' ? '' : null },
+        })
+        .expect(200);
+      expect(response.body).toMatchObject({ id, suggestion: draft });
+      expect(await collection.findOne(selector)).toMatchObject({
+        suggestion: draft,
+      });
+    },
+  );
+
+  it('rejects expectations without a patch and rejects invalid expected text values', async () => {
+    const submission = await submit(await publish());
+    const { id } = (await giveFeedback(submission.id).expect(201))
+      .body as FeedbackReceipt;
+    const url = submissionUrl(submission.id) + '/feedback/' + id;
+    await teacher
+      .patch(url)
+      .send({ expected: { message: reviewPayload.message } })
+      .expect(400)
+      .expect(({ body }) => {
+        expect(body).toMatchObject({
+          message: 'At least one feedback field is required',
+        });
+      });
+    for (const expected of [null, [], { message: null }, { suggestion: 1 }]) {
+      await teacher.patch(url).send({ message: 'New', expected }).expect(400);
+    }
+  });
+
   it('keeps teacher feedback PATCH compatible with missing authors, explicit clears and same values', async () => {
     const created = await submit(await publish());
     const url = submissionUrl(created.id) + '/feedback';

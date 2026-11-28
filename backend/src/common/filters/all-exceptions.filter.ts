@@ -58,7 +58,8 @@ export class AllExceptionsFilter implements ExceptionFilter {
             (candidate === 'COURSE_NOT_EMPTY' ||
               candidate === 'CLASSROOM_NOT_EMPTY' ||
               candidate === 'CLASSROOM_TASK_NOT_EMPTY' ||
-              candidate === 'PAGE_ACCOUNT_MISMATCH')) ||
+              candidate === 'PAGE_ACCOUNT_MISMATCH' ||
+              candidate === 'TEACHER_FEEDBACK_TEXT_CONFLICT')) ||
           (status === 429 && candidate === 'SUBMISSION_COOLDOWN_ACTIVE')
         ) {
           code = candidate;

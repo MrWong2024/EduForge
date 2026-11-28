@@ -459,16 +459,17 @@ CreateTaskDto / UpdateTaskDto 通过继承 `TaskAiContextDto` 接受嵌套 `aiCo
 
 | 字段 | 公开合同 |
 | --- | --- |
-| `expectedRevision` | 仅创建必填非负安全整数，拒绝缺失/null/字符串/负数/小数；版本前置不进入 Feedback 业务内容，更新沿用原合同。 |
+| `expectedRevision` | 创建必填非负安全整数，拒绝缺失/null/字符串/负数/小数。版本前置不进入 Feedback 业务内容。历史更新使用 `expected` 核对字段原文。 |
 | `source` | 合法来源仅 AI / TEACHER；公开创建只允许 TEACHER（Equals），其余值及 null 为 400；更新不可写。 |
 | `type` | 创建必填，更新可选；`SYNTAX \| STYLE \| DESIGN \| BUG \| PERFORMANCE \| SECURITY \| OTHER`。 |
 | `severity` | 创建必填，更新可选；`INFO \| WARN \| ERROR`。 |
 | `message` | 创建必填字符串；更新可选字符串且 MinLength(1)，空字符串不合法。 |
 | `suggestion` | 可选字符串；更新允许空字符串。 |
+| `expected` | 仅更新可选对象，允许 `message?: string`、`suggestion?: string \| null`。使用服务端原文，保留换行和首尾空白。只用于同次提交更新的对应字段。`suggestion: null` 匹配历史缺省或 null，空字符串精确匹配空字符串。省略整个对象保持旧合同。 |
 | `tags` | 可选字符串数组，IsArray + IsString(each)；教师反馈另有统一词表归一化与白名单约束。 |
 | `scoreHint` | 可选 number，IsNumber，0..100。 |
 
-更新至少一个可写字段；Update DTO 对可选字段采用 `ValidateIf(value !== undefined)`，显式 null 不合法。更新白名单不含 `source/submissionId/createdBy/createdAt/updatedAt` 或任何任务、学生、课堂归属字段。
+更新至少一个可写字段，`expected` 只提供前置条件。更新字段和整个 `expected` 对象都拒绝显式 null，只有 `expected.suggestion` 接受 null。更新白名单不含 `source/submissionId/createdBy/createdAt/updatedAt` 或任何任务、学生、课堂归属字段。
 
 `FeedbackResponseDto`：`{id,submissionId,createdBy?,source,type,severity,message,suggestion?,tags?,scoreHint?,createdAt,updatedAt}`。`createdBy` 为作者 id，不是 User 对象；旧 TEACHER feedback 可缺省，createdAt 是原创建时间。新建/更新时作者补写、可修改来源及权限见 [API Learning Tasks](./handoff-backend-api-map.md#learning-tasks)。
 

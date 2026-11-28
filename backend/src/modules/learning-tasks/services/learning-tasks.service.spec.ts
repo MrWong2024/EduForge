@@ -1804,6 +1804,44 @@ describe('Teacher feedback atomic edit (no database)', () => {
     });
   });
 
+  it('filters the atomic update on the raw expected text of supplied fields', async () => {
+    const h = setup();
+    const message = '  Existing\r\n\ttext  ';
+    h.feedbackModel.findOneAndUpdate.mockReturnValue(makeQuery(h.feedback));
+    await h.update({
+      message: 'New text',
+      expected: { message, suggestion: 'Another tab edited this field' },
+    });
+    expect(h.feedbackModel.findOneAndUpdate).toHaveBeenCalledWith(
+      {
+        _id: h.feedback._id,
+        submissionId: h.ids.submissionId,
+        source: FeedbackSource.Teacher,
+        $or: [{ createdBy: h.ids.teacherId }, { createdBy: null }],
+        message,
+      },
+      { $set: { message: 'New text' } },
+      { returnDocument: 'after', runValidators: true },
+    );
+  });
+
+  it('reports a text conflict for a missed conditional write by the existing author', async () => {
+    const h = setup();
+    h.feedbackModel.findOneAndUpdate.mockReturnValue(makeQuery(null));
+
+    await expect(
+      h.update({ suggestion: '', expected: { suggestion: null } }),
+    ).rejects.toMatchObject({
+      status: 409,
+      response: { code: 'TEACHER_FEEDBACK_TEXT_CONFLICT' },
+    });
+    expect(h.feedbackModel.findOneAndUpdate).toHaveBeenCalledWith(
+      expect.objectContaining({ suggestion: null }),
+      { $set: { suggestion: '' } },
+      { returnDocument: 'after', runValidators: true },
+    );
+  });
+
   it.each([
     {
       reason: 'the record is gone',
@@ -1840,7 +1878,10 @@ describe('Teacher feedback atomic edit (no database)', () => {
       h.feedbackModel.findOneAndUpdate.mockReturnValue(makeQuery(null));
 
       await expect(
-        h.update({ message: 'Updated feedback' }),
+        h.update({
+          message: 'Updated feedback',
+          expected: { message: h.feedback.message },
+        }),
       ).rejects.toMatchObject({
         status,
         message,

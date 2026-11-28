@@ -6,6 +6,8 @@ import {
   createPageFetch,
   fetchJson,
   isDefiniteCreateRejection,
+  isPageAccountMismatch,
+  logoutFromPage,
 } from "../../lib/api/browser-client";
 import { getAuthError } from "../../lib/auth/auth-errors";
 import {
@@ -49,7 +51,7 @@ test("protected writes take their expected identity from the page scope", async 
     currentUserId = pageAccountB;
     await nextAccountPage("classrooms/join", { method: "POST" });
     await samePage("users/me");
-    for (const entry of ["login", "forgot-password", "reset-password", "logout"]) {
+    for (const entry of ["login", "forgot-password", "reset-password"]) {
       await fetchJson(`auth/${entry}`, { method: "POST" });
     }
     await expect(fetchJson("courses", { method: "POST" })).rejects.toThrow(
@@ -68,10 +70,47 @@ test("protected writes take their expected identity from the page scope", async 
       { path: "/api/proxy/classrooms/join", method: "POST", userId: pageAccountB },
       { path: "/api/proxy/users/me", userId: null },
       { path: "/api/proxy/users/me", userId: null },
-      ...["login", "forgot-password", "reset-password", "logout"].map((entry) => ({
+      ...["login", "forgot-password", "reset-password"].map((entry) => ({
         path: `/api/proxy/auth/${entry}`, method: "POST", userId: null,
       })),
     ]);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("logout binds its request to the shell account and accepts success without a session probe", async () => {
+  const originalFetch = globalThis.fetch;
+  const sent: Array<{ path: string; method?: string; userId: string | null }> = [];
+  let status = 201;
+  globalThis.fetch = async (path, options) => {
+    sent.push({
+      path: String(path),
+      method: options?.method,
+      userId: new Headers(options?.headers).get(pageAccountHeader),
+    });
+    expect(options?.credentials).toBe("include");
+    expect(options?.cache).toBe("no-store");
+    const body = status === 201 ? { ok: true } : { code: "PAGE_ACCOUNT_MISMATCH" };
+    return Response.json(body, { status });
+  };
+  try {
+    await expect(logoutFromPage(undefined)).rejects.toThrow("无法确认此页面的账号");
+    await expect(logoutFromPage("malformed")).rejects.toThrow("无法确认此页面的账号");
+    await expect(fetchJson("auth/logout", { method: "POST" })).rejects.toThrow(
+      "无法确认此页面的账号",
+    );
+    expect(sent).toEqual([]);
+    await expect(logoutFromPage(pageAccountA)).resolves.toEqual({ ok: true });
+    status = 409;
+    await expect(logoutFromPage(pageAccountB).catch(isPageAccountMismatch)).resolves.toBe(true);
+    status = 401;
+    await expect(logoutFromPage(pageAccountB)).rejects.toMatchObject({ status: 401 });
+    expect(sent).toEqual([pageAccountA, pageAccountB, pageAccountB].map((userId) => ({
+      path: "/api/proxy/auth/logout",
+      method: "POST",
+      userId,
+    })));
   } finally {
     globalThis.fetch = originalFetch;
   }
@@ -237,14 +276,59 @@ test("BFF forwards only the expected account on protected writes and preserves a
   try {
     expect((await dispatch("courses", "POST", pageAccountA)).status).toBe(401);
     expect((await dispatch("courses", "POST")).status).toBe(401);
-    await dispatch("auth/logout", "POST", pageAccountA);
     await dispatch("users/me", "GET", pageAccountA);
     expect(sent).toEqual([
       { userId: pageAccountA, unrelated: null },
       { userId: "", unrelated: null },
       { userId: null, unrelated: null },
-      { userId: null, unrelated: null },
     ]);
+  } finally {
+    globalThis.fetch = originalFetch;
+    if (originalOrigin === undefined) delete process.env.FRONTEND_BACKEND_ORIGIN;
+    else process.env.FRONTEND_BACKEND_ORIGIN = originalOrigin;
+  }
+});
+
+test("BFF forwards logout identity and preserves the upstream cookie clearing response", async () => {
+  const originalFetch = globalThis.fetch;
+  const originalOrigin = process.env.FRONTEND_BACKEND_ORIGIN;
+  const forwarded: Array<string | null> = [];
+  const clearedCookie = "ef_session=; Path=/; Expires=Thu, 01 Jan 1970 00:00:00 GMT; HttpOnly; SameSite=Lax";
+  let authenticated = true;
+  process.env.FRONTEND_BACKEND_ORIGIN = "http://127.0.0.1:4000";
+  globalThis.fetch = async (url, options) => {
+    expect(String(url)).toBe("http://127.0.0.1:4000/api/auth/logout");
+    const account = new Headers(options?.headers).get(pageAccountHeader);
+    forwarded.push(account);
+    if (!authenticated) return Response.json({}, { status: 401 });
+    if (account !== pageAccountA) {
+      return Response.json({ code: "PAGE_ACCOUNT_MISMATCH" }, { status: 409 });
+    }
+    return Response.json({ ok: true }, { status: 201, headers: { "set-cookie": clearedCookie } });
+  };
+  const logout = (account?: string) => proxyPost(
+    new NextRequest("http://localhost:3000/api/proxy/auth/logout", {
+      method: "POST",
+      headers: account ? { [pageAccountHeader]: account } : undefined,
+    }),
+    { params: Promise.resolve({ path: ["auth", "logout"] }) },
+  );
+  try {
+    const mismatch = await logout(pageAccountB);
+    expect(mismatch.status).toBe(409);
+    await expect(mismatch.json()).resolves.toEqual({ code: "PAGE_ACCOUNT_MISMATCH" });
+    expect(mismatch.headers.has("set-cookie")).toBe(false);
+    const missing = await logout();
+    expect(missing.status).toBe(409);
+    expect(missing.headers.has("set-cookie")).toBe(false);
+    const success = await logout(pageAccountA);
+    expect(success.status).toBe(201);
+    expect(success.headers.get("set-cookie")).toBe(clearedCookie);
+    authenticated = false;
+    const unauthorized = await logout(pageAccountA);
+    expect(unauthorized.status).toBe(401);
+    expect(unauthorized.headers.has("set-cookie")).toBe(false);
+    expect(forwarded).toEqual([pageAccountB, "", pageAccountA, pageAccountA]);
   } finally {
     globalThis.fetch = originalFetch;
     if (originalOrigin === undefined) delete process.env.FRONTEND_BACKEND_ORIGIN;

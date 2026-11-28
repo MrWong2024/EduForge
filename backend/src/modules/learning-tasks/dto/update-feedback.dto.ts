@@ -1,15 +1,28 @@
+import { Type } from 'class-transformer';
 import {
   IsArray,
   IsEnum,
   IsNumber,
+  IsObject,
   IsString,
   Max,
   Min,
   MinLength,
   ValidateIf,
+  ValidateNested,
 } from 'class-validator';
 import { FeedbackSeverity, FeedbackType } from '../schemas/feedback.schema';
 import { FeedbackTag } from '../ai-feedback/lib/feedback-normalizer';
+
+class ExpectedFeedbackTextDto {
+  @ValidateIf((_, value) => value !== undefined)
+  @IsString()
+  message?: string;
+
+  @ValidateIf((_, value) => value !== undefined && value !== null)
+  @IsString()
+  suggestion?: string | null;
+}
 
 export class UpdateFeedbackDto {
   @ValidateIf((_, value) => value !== undefined)
@@ -39,4 +52,10 @@ export class UpdateFeedbackDto {
   @Min(0)
   @Max(100)
   scoreHint?: number;
+
+  @ValidateIf((_, value) => value !== undefined)
+  @IsObject()
+  @ValidateNested()
+  @Type(() => ExpectedFeedbackTextDto)
+  expected?: ExpectedFeedbackTextDto;
 }

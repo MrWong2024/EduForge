@@ -190,6 +190,10 @@ npm run test:browser
 
 换号后的业务写入由 `auth-security.contract.spec.ts` 核对页面账号请求头、缺少账号时的本地拦截、BFF 转发、普通冲突和账号冲突的区分，以及成功回执到达后再次核对账号。定向执行使用 `npm.cmd run test:contracts:list -- auth-security.contract.spec.ts` 确认发现范围，再用 `npm.cmd run test:contracts -- auth-security.contract.spec.ts` 实跑。同一业务写请求的真实会话校验及业务写入保护由后端 guard 测试和 HTTP E2E 覆盖。
 
+师生顶栏退出的合同覆盖页面账号请求头、缺账号时停住及退出成功后直接使用回执。Browser 用同源双标签先建立一个旧页，再换号，核对旧页退出提示及另一标签仍已登录。正常退出另查首页和会话失效。
+
+`teacher-feedback-edit.contract.spec.ts` 覆盖字段级预期原文、换行比较和冲突核对。Browser 用同一教师双标签打开同一反馈，分别验证同字段冲突和不同字段保存。冲突后核对双方可复制文字、查读失败后重试、上方新增评语保留，并比较核对前后 PATCH 次数和最终回执。按第 4 节先定向发现，再实跑合同，正式页面和临时受控读取故障分别记入当次报告。
+
 正式页面按 Agent-assisted Browser smoke 验证教师创建、学生提交或入班，并以同账号多标签正常保存作对照。使用隔离的 Browser APP 和合成账号，填写前刷新核对身份。在同一网页登录上下文保留原标签，另一标签换号后从旧标签提交，记录页面提示、浏览器与 APP 请求数、原草稿结束及独立回读的资源归属。若工具能精确延迟一次真实成功回执，可在 APP 接受原账号写入后换号，验证原响应不会驱动新账号页面。迟到登出回执另行记录。证据、未执行场景及精确清理由当次报告记载。
 
 ## 9. Human Smoke

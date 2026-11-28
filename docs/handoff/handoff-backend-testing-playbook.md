@@ -92,6 +92,8 @@ npm run test:e2e -- --runInBand --runTestsByPath ./test/users-me.e2e-spec.ts
 
 `auth-security` 还验证页面预期账号与真实会话不一致时，响应为公开 409 且业务处理器未执行。同一账号的新会话、原有直连请求、未认证及角色拒绝分别保留各自结果。`users-change-password` 在真实写入边界交错登录和改密迁入，核对有效会话上限、实际保留对象及旧会话失效。较早重置申请的作废由 HTTP 用例复核，邮件到达顺序属于产品约定。
 
+`auth-security` 的退出用例覆盖两种角色的换号拒绝、缺账号的页面请求、未认证、正常清 Cookie、原会话失效和后端直连兼容。`submission-edit` 的教师历史反馈用例从同一初始内容分别编辑正文、建议，核对同字段冲突、不同字段合并、混合写入原子性和历史空建议语义。回执及原文以正式 HTTP 和独立 Mongo 交叉核验。两个实库文件逐个 discovery 后串行实跑。
+
 窄准备逻辑 `test/helpers/auth-test-environment.ts` 在 AppModule 导入前建立独立 `test/standard_test` 进程环境，仅解析 `.env.test` 的目标连接，清除继承连接与外部服务配置，在测试层阻止 AppModule 叠加加载其它环境文件。`auth-session-indexes.ts` 先核对实际库名 `eduforge_test`、本机单节点 `rs0` 的可写 PRIMARY 和 `root@admin` 身份及角色，并确认认证集合无外来数据，再以正式 SessionSchema 及现有 sync-indexes CLI 预览、限定 apply 和读回。只允许删除已核实定义的旧 `token_1`，建立当前 Session 必需索引，发现其它删改计划即停止。
 
 同一认证集合的实库 spec 串行运行，与 sync-indexes 的独立集合集成分开进程。合成记录按 spec 登记 ID 清理，核对 User/Session/reset token 零残留后关闭 app 与独立 Store 连接；不清空未知记录或数据库。配置或门禁不符时停止对应实库验收，实际通过、失败和未执行状态归当次任务报告。
@@ -398,6 +400,7 @@ npm run browser:text-smoke -- cleanup --namespace b1-2-<unique> --confirm-namesp
 - 每次调用为独立进程，仅读取 `backend/.env.browser-acceptance` 中的 `MONGO_URI` 与 purpose，复用环境构造、用途/URI 声明门禁和连接后实际库名门禁；实际认证按 [Config Matrix](./handoff-backend-config-matrix.md#1-数据库连接串与索引治理) 的本机 root 门禁核验，不以进程角色名称推断数据库账号。
 - `prepare` 只通过当前 UserSchema 和密码 helper seed namespace 专属 teacher/student；固定合成应用密码由脚本测试常量统一维护。课程、班级、四个不同已发布私有模板及入班走前端同源 BFF 的正式 HTTP API；模板数量、标题及 ownership 由脚本本地稳定 fixture 标识维护，不依赖业务策略枚举；旧策略标题仅作为历史 namespace 的精确 cleanup 兼容标识，不用于 inspect/process。课堂发布、作品提交、产品 AI 申请和教师反馈留给真实 Browser。
 - `inspect --prepared` 只读核验账号固定值及最小前置；普通 `inspect` 读取 ownership 限定的资源、保存原文版本及 Job/反馈终态。异常前置不自动修复。确需替换时显式运行 `npm run browser:text-smoke -- replace --namespace b1-2-<unique> --confirm-namespace b1-2-<unique>`：先清理并核对旧残留，再重新准备；不得手工改密码或业务状态绕过核验。
+- Browser 夹具经同源 BFF 退出时，使用刚校验过的合成账号 ID 作为预期账号头。教师和学生会话分别按自己的身份注销。
 - `process-ai` 在 Browser 专属文件的用途与单 URI 声明门禁通过后才动态导入 AppModule，以 `createApplicationContext` 启动且不 listen；实际 ConfigService 必须为 Browser 用途、stub、worker=false、debug=false，实际数据库名与 APP 连接的认证门禁也须匹配。正常索引初始化仍可能写入数据库。
 - 处理前核对 Job→Submission→ClassroomTask→合成师生/班级的完整 ownership；全库 PENDING/FAILED/RUNNING 必须恰好只有目标，且为 budgetVersion=1、PENDING、attempts=0。外来、多目标或 legacy 非终态立即拒绝，不修改它们。随后只调用真实 `AiFeedbackProcessor.processOnce(1)` 一次，读取该目标及实际 stub 反馈核对结果，finally 等待上下文关闭。
 - `processOnce` 是全库扫描入口，上述查询不是并发锁。操作者必须独占验收时段，排除其他 Worker/Profile/生产者并串行形成、消费目标；`--confirm-exclusive` 记录的是该运行前提，不能代替隔离审计。不启用长期 Worker、debug HTTP 或真实模型。

@@ -12,7 +12,6 @@ const SESSION_ENTRY_PATHS = new Set([
   "auth/login",
   "auth/forgot-password",
   "auth/reset-password",
-  "auth/logout",
 ]);
 
 export function requiresPageAccount(path: string, method = "GET"): boolean {
