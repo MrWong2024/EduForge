@@ -15,6 +15,7 @@ import {
   toClassroomNameInputValue,
 } from "@/lib/classroom-edit";
 import { paths } from "@/lib/routes/paths";
+import { useCurrentPage } from "@/lib/routes/use-current-page";
 import { toDisplayText } from "@/lib/ui/format";
 import { getClassroomStatusLabel } from "@/lib/ui/status";
 
@@ -85,6 +86,7 @@ const getClassroomCourseDisplay = (
 
 export function EditClassroomForm({ classroomId, initialClassroom }: EditClassroomFormProps) {
   const router = useRouter();
+  const captureCurrentPage = useCurrentPage();
   const [baselineName] = useState(initialClassroom.name ?? "");
   const [name, setName] = useState(() => toClassroomNameInputValue(baselineName));
   const submitLocked = useRef(false);
@@ -109,6 +111,7 @@ export function EditClassroomForm({ classroomId, initialClassroom }: EditClassro
       return;
     }
 
+    const isOriginalPage = captureCurrentPage();
     submitLocked.current = true;
     setSaveStatus("submitting");
     setErrorState(null);
@@ -146,8 +149,10 @@ export function EditClassroomForm({ classroomId, initialClassroom }: EditClassro
     }
 
     setSaveStatus("saved");
-    router.push(paths.teacher.classroomDashboard(nextClassroomId));
-    router.refresh();
+    if (isOriginalPage()) {
+      router.push(paths.teacher.classroomDashboard(nextClassroomId));
+      router.refresh();
+    }
   };
 
   return (

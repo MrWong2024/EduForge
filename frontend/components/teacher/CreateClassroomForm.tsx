@@ -1,11 +1,11 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState, useTransition } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, useTransition } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { ErrorState } from "@/components/blocks/ErrorState";
 import { CreateOutcomeReview } from "@/components/teacher/CreateOutcomeReview";
-import { fetchJson, isDefiniteCreateRejection } from "@/lib/api/browser-client";
+import { BrowserFetchJsonError, fetchJson, isDefiniteCreateRejection } from "@/lib/api/browser-client";
 import { buildErrorDescription, extractRawDetail } from "@/lib/api/error-presenter";
 import {
   type CreateClassroomRequest,
@@ -16,9 +16,12 @@ import {
   classroomCoursePagePath,
   mergeClassroomCourseOptions,
   nextClassroomCoursePage,
+  readClassroomCreationCourse,
+  selectClassroomCreationCourseId,
   type ClassroomCourseOption,
 } from "@/lib/classroom-creation-courses";
 import { paths } from "@/lib/routes/paths";
+import { useCurrentPage } from "@/lib/routes/use-current-page";
 
 type CreateClassroomFormProps = {
   courses: ClassroomCourseOption[];
@@ -31,6 +34,18 @@ type CreateClassroomFormErrorState = {
   status?: number;
   description: string;
 };
+
+type CoursePageSnapshot = Pick<CreateClassroomFormProps, "courses" | "nextPage">;
+
+type LoadedCoursePages = CoursePageSnapshot & {
+  source: CoursePageSnapshot;
+  status: "loading" | "ready" | "failed";
+};
+
+type CourseSelectionCheck = {
+  source: CoursePageSnapshot;
+  courseId: string;
+} & ({ status: "confirmed"; course: ClassroomCourseOption } | { status: "missing" | "unverified" });
 
 const getClassroomNamePlaceholder = (date = new Date()): string => {
   const year = date.getFullYear();
@@ -67,10 +82,12 @@ export function CreateClassroomForm({
   nextPage,
 }: CreateClassroomFormProps) {
   const router = useRouter();
-  const [loadedCourses, setLoadedCourses] = useState(courses);
-  const [loadedPage, setLoadedPage] = useState<{ nextPage?: number } | null>(null);
-  const [isLoadingMore, setIsLoadingMore] = useState(false);
-  const [loadMoreError, setLoadMoreError] = useState(false);
+  const captureCurrentPage = useCurrentPage();
+  const firstPage = useMemo(() => ({ courses, nextPage }), [courses, nextPage]);
+  const activeFirstPage = useRef<CoursePageSnapshot | null>(null);
+  const loadingPage = useRef<CoursePageSnapshot | null>(null);
+  const [loadedPages, setLoadedPages] = useState<LoadedCoursePages>();
+  const [selectionCheck, setSelectionCheck] = useState<CourseSelectionCheck>();
   const [selectedCourseId, setSelectedCourseId] = useState(initialCourseId);
   const [name, setName] = useState("");
   const submitLocked = useRef(false);
@@ -81,12 +98,76 @@ export function CreateClassroomForm({
   const [outcomeUncertain, setOutcomeUncertain] = useState(false);
   const isLocked = isSubmitting || isNavigating;
   const classroomNamePlaceholder = getClassroomNamePlaceholder();
-  const availableCourses = useMemo(
-    () => mergeClassroomCourseOptions(courses, loadedCourses),
-    [courses, loadedCourses],
+  const appliedPages = loadedPages?.source === firstPage ? loadedPages : undefined;
+  const pagedCourses = useMemo(
+    () => appliedPages === undefined
+      ? courses
+      : mergeClassroomCourseOptions(courses, appliedPages.courses),
+    [courses, appliedPages],
   );
-  const courseId = selectedCourseId ?? initialCourseId ?? availableCourses[0]?.id ?? "";
-  const nextPageToLoad = loadedPage ? loadedPage.nextPage : nextPage;
+  const selectedCourseOutsidePages = !targetUnavailable &&
+    selectedCourseId !== undefined &&
+    !pagedCourses.some((course) => course.id === selectedCourseId);
+  const appliedCheck = selectionCheck?.source === firstPage && selectionCheck.courseId === selectedCourseId
+    ? selectionCheck
+    : undefined;
+  const availableCourses = selectedCourseOutsidePages && appliedCheck?.status === "confirmed"
+    ? [...pagedCourses, appliedCheck.course]
+    : pagedCourses;
+  const courseId = selectClassroomCreationCourseId(availableCourses, selectedCourseId ?? initialCourseId);
+  const nextPageToLoad = appliedPages === undefined ? nextPage : appliedPages.nextPage;
+  const isLoadingMore = appliedPages?.status === "loading";
+  const showForm = availableCourses.length > 0 || selectedCourseOutsidePages;
+  let selectionMessage: string | null = null;
+  if (selectedCourseOutsidePages && !courseId) {
+    if (appliedCheck?.status === "missing") {
+      selectionMessage = "所选课程已不可用，请重新选择课程。";
+    } else if (appliedCheck?.status === "unverified") {
+      selectionMessage = "暂时无法确认所选课程，请重新选择课程。";
+    } else {
+      selectionMessage = "正在核对所选课程…";
+    }
+  }
+
+  useLayoutEffect(() => {
+    activeFirstPage.current = firstPage;
+    return () => {
+      activeFirstPage.current = null;
+    };
+  }, [firstPage]);
+
+  useEffect(() => {
+    if (!selectedCourseOutsidePages || selectedCourseId === undefined) {
+      return;
+    }
+
+    let current = true;
+    const check = { source: firstPage, courseId: selectedCourseId };
+    void readClassroomCreationCourse(
+      selectedCourseId,
+      (id) => fetchJson<unknown>(`courses/${encodeURIComponent(id)}`),
+    ).then(
+      (course) => {
+        if (current && activeFirstPage.current === firstPage) {
+          setSelectionCheck(course
+            ? { ...check, status: "confirmed", course }
+            : { ...check, status: "unverified" });
+        }
+      },
+      (error: unknown) => {
+        if (current && activeFirstPage.current === firstPage) {
+          const status = error instanceof BrowserFetchJsonError && error.status === 404
+            ? "missing"
+            : "unverified";
+          setSelectionCheck({ ...check, status });
+        }
+      },
+    );
+
+    return () => {
+      current = false;
+    };
+  }, [firstPage, selectedCourseId, selectedCourseOutsidePages]);
 
   useEffect(() => {
     if (successMessage && !isLocked) {
@@ -95,21 +176,37 @@ export function CreateClassroomForm({
   }, [isLocked, successMessage]);
 
   const handleLoadMore = async () => {
-    if (targetUnavailable || isLoadingMore || nextPageToLoad === undefined) {
+    if (targetUnavailable || loadingPage.current === firstPage || isLoadingMore || nextPageToLoad === undefined) {
       return;
     }
 
-    setIsLoadingMore(true);
-    setLoadMoreError(false);
+    const pending: LoadedCoursePages = {
+      source: firstPage,
+      courses: appliedPages?.courses ?? [],
+      nextPage: nextPageToLoad,
+      status: "loading",
+    };
+    loadingPage.current = firstPage;
+    setLoadedPages(pending);
     try {
       const payload = await fetchJson<unknown>(classroomCoursePagePath(nextPageToLoad));
       const response = toCourseListResponse(payload);
-      setLoadedCourses((current) => mergeClassroomCourseOptions(current, response.items));
-      setLoadedPage({ nextPage: nextClassroomCoursePage(response, nextPageToLoad) });
+      if (activeFirstPage.current === firstPage) {
+        setLoadedPages({
+          ...pending,
+          courses: mergeClassroomCourseOptions(pending.courses, response.items),
+          nextPage: nextClassroomCoursePage(response, nextPageToLoad),
+          status: "ready",
+        });
+      }
     } catch {
-      setLoadMoreError(true);
+      if (activeFirstPage.current === firstPage) {
+        setLoadedPages({ ...pending, status: "failed" });
+      }
     } finally {
-      setIsLoadingMore(false);
+      if (loadingPage.current === firstPage) {
+        loadingPage.current = null;
+      }
     }
   };
 
@@ -120,10 +217,7 @@ export function CreateClassroomForm({
     }
     const trimmedName = name.trim();
 
-    if (!availableCourses.some((course) => course.id === courseId)) {
-      setErrorState({
-        description: "请先选择课程。",
-      });
+    if (!courseId) {
       return;
     }
     if (!trimmedName) {
@@ -138,6 +232,7 @@ export function CreateClassroomForm({
       name: trimmedName,
     };
 
+    const isOriginalPage = captureCurrentPage();
     submitLocked.current = true;
     setSelectedCourseId(courseId);
     setIsSubmitting(true);
@@ -173,11 +268,13 @@ export function CreateClassroomForm({
     }
 
     startNavigation(() => {
-      if (classroomId) {
-        router.push(paths.teacher.classroomDashboard(classroomId));
-      } else {
-        router.push(paths.teacher.classrooms);
-        router.refresh();
+      if (isOriginalPage()) {
+        if (classroomId) {
+          router.push(paths.teacher.classroomDashboard(classroomId));
+        } else {
+          router.push(paths.teacher.classrooms);
+          router.refresh();
+        }
       }
       setName("");
       setSuccessMessage("班级已创建。");
@@ -200,25 +297,31 @@ export function CreateClassroomForm({
           </Link>
           。
         </p>
-      ) : availableCourses.length === 0 && nextPageToLoad === undefined ? (
+      ) : !showForm && nextPageToLoad === undefined ? (
         <p className="mt-3 text-sm text-amber-700">当前暂无可选课程，请先在课程页创建课程。</p>
-      ) : availableCourses.length > 0 ? (
+      ) : showForm ? (
         <form onSubmit={handleSubmit} className="mt-4 grid gap-3 md:grid-cols-2">
-          <label className="block text-sm">
-            <span className="mb-1 block text-zinc-700">所属课程</span>
-            <select
-              value={courseId}
-              disabled={isLocked}
-              onChange={(event) => setSelectedCourseId(event.target.value)}
-              className="w-full rounded-md border border-zinc-300 px-3 py-2"
-            >
-              {availableCourses.map((course) => (
-                <option key={course.id} value={course.id}>
-                  {(course.code ?? "未命名课程") + " - " + (course.name ?? "未命名课程")}
-                </option>
-              ))}
-            </select>
-          </label>
+          <div className="text-sm">
+            <label>
+              <span className="mb-1 block text-zinc-700">所属课程</span>
+              <select
+                value={courseId}
+                disabled={isLocked || availableCourses.length === 0}
+                onChange={(event) => setSelectedCourseId(event.target.value)}
+                className="w-full rounded-md border border-zinc-300 px-3 py-2"
+              >
+                {!courseId ? <option value="" disabled>请选择课程</option> : null}
+                {availableCourses.map((course) => (
+                  <option key={course.id} value={course.id}>
+                    {(course.code ?? "未命名课程") + " - " + (course.name ?? "未命名课程")}
+                  </option>
+                ))}
+              </select>
+            </label>
+            {selectionMessage ? (
+              <p role="status" className="mt-1 text-amber-800">{selectionMessage}</p>
+            ) : null}
+          </div>
 
           <label className="block text-sm">
             <span className="mb-1 block text-zinc-700">班级名称</span>
@@ -234,7 +337,7 @@ export function CreateClassroomForm({
           <div className="md:col-span-2">
             <button
               type="submit"
-              disabled={isLocked || outcomeUncertain}
+              disabled={isLocked || outcomeUncertain || !courseId}
               className="rounded-md bg-zinc-900 px-4 py-2 text-sm font-medium text-white disabled:cursor-not-allowed disabled:bg-zinc-400"
             >
               {isLocked ? "创建中..." : "创建班级"}
@@ -253,7 +356,7 @@ export function CreateClassroomForm({
           {isLoadingMore ? "正在加载课程…" : "加载更多课程"}
         </button>
       ) : null}
-      {loadMoreError ? (
+      {appliedPages?.status === "failed" ? (
         <p role="status" className="mt-2 text-sm text-amber-800">加载更多课程失败，请重试。</p>
       ) : null}
 

@@ -13,6 +13,7 @@ import {
 import { buildCourseEditPatch, toCourseEditFields } from "@/lib/course-edit";
 import { TASK_COURSE_LABEL_FORM_OPTIONS } from "@/lib/learning-tasks/course-labels";
 import { paths } from "@/lib/routes/paths";
+import { useCurrentPage } from "@/lib/routes/use-current-page";
 
 type EditCourseFormProps = {
   courseId: string;
@@ -45,6 +46,7 @@ const getUpdateErrorSummary = (status: number): string => {
 
 export function EditCourseForm({ courseId, initialCourse }: EditCourseFormProps) {
   const router = useRouter();
+  const captureCurrentPage = useCurrentPage();
   const [baseline] = useState(() => toCourseEditFields(initialCourse));
   const [code, setCode] = useState(baseline.code);
   const [name, setName] = useState(baseline.name);
@@ -70,6 +72,7 @@ export function EditCourseForm({ courseId, initialCourse }: EditCourseFormProps)
       return;
     }
 
+    const isOriginalPage = captureCurrentPage();
     submitLocked.current = true;
     setSaveStatus("submitting");
     setErrorState(null);
@@ -106,8 +109,10 @@ export function EditCourseForm({ courseId, initialCourse }: EditCourseFormProps)
     }
 
     setSaveStatus("saved");
-    router.push(paths.teacher.courseOverview(nextCourseId));
-    router.refresh();
+    if (isOriginalPage()) {
+      router.push(paths.teacher.courseOverview(nextCourseId));
+      router.refresh();
+    }
   };
 
   return (

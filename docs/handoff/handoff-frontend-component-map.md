@@ -35,7 +35,7 @@
 | Component / Module | File | Responsibility / Boundary |
 |---|---|---|
 | LoginFrame | `app/(auth)/login/page.tsx` | 登录页各状态共享的 EduForge · 智炼品牌与返回首页入口；承载会话探针和既有角色分流，错误只展示安全摘要，不输出开发环境原始 Detail |
-| LoginForm | `components/auth/LoginForm.tsx` | 登录输入、同步提交门禁与 pending 禁用、safe-next 优先于 role-home 的导航；POST 成功立即清空密码，独立确认当前用户后导航并保持锁定；探针失败提示状态确认失败，提供刷新核对或返回登录，不自动重放登录 |
+| LoginForm | `components/auth/LoginForm.tsx` | 登录输入、同步提交门禁与 pending 禁用、safe-next 优先于 role-home 的导航；POST 成功立即清空密码，独立确认当前用户后仅在原登录页仍有效时导航和刷新，并保持锁定；探针失败提示状态确认失败，提供刷新核对或返回登录，不自动重放登录 |
 | ForgotPasswordForm | `components/auth/ForgotPasswordForm.tsx` | 邮箱输入、空值校验、同步提交门禁与 pending 禁用；成功保留邮箱并显示通用请求已提交提示，60 秒冷却同时约束 handler；不推断邮箱状态或承诺邮件送达，冷却不替代后端安全边界 |
 | ResetPasswordForm | `components/auth/ResetPasswordForm.tsx` | 消费链接 token、新密码与确认校验、同步提交门禁与 pending 禁用；成功清空密码并保持锁定完成态，提供返回登录；缺少 token 时只提供申请入口，不发请求或持久化 token |
 | AccountPageContent | `components/account/AccountPageContent.tsx` | 教师/学生账户页共享组合：资料卡、改密表单与调用方提供的返回入口；登录态加载留在页面 |
@@ -67,13 +67,13 @@
 
 | Component / Module | File | Responsibility / Boundary |
 |---|---|---|
-| CreateCourseForm | `components/teacher/CreateCourseForm.tsx` | 建课表单与成功导航。提交期间锁住课程代码、名称、学期和分类，失败保留原输入。成功后防止旧表单重复发送，仍留在列表时可发起下一次创建。课程分类复用共享候选，学期示例不自动成为输入值 |
+| CreateCourseForm | `components/teacher/CreateCourseForm.tsx` | 建课表单在原页面仍有效时执行成功导航及所需刷新。提交期间锁住课程代码、名称、学期和分类，失败保留原输入。成功后防止旧表单重复发送，仍留在列表时可发起下一次创建。课程分类复用共享候选，学期示例不自动成为输入值 |
 | CourseLifecycleActions | `components/teacher/CourseLifecycleActions.tsx` | 课程列表“更多”菜单、动作 pending/确认/结果状态，组合 FloatingMoreMenu；负责归档、恢复与删除，保留当前列表视图；空对象删除条件由后端判定 |
 | TeacherLifecycleList | `components/teacher/TeacherLifecycleList.tsx` | 课程与班级列表共享的页面级结果提示及可聚焦摘要。操作后行离开当前视图时，摘要接回仍位于该行的焦点。页面提供有效页链接时执行同路由替换，保留结果提示 |
-| EditCourseForm | `components/teacher/EditCourseForm.tsx` | 课程基础信息编辑，复用 `lib/course-edit.ts` 判断并只提交字段净变化，无净变化不发请求；课程分类未改省略、明确清空发送空串；失败保留草稿，成功返回课程总览并刷新，不承担列表加载 |
+| EditCourseForm | `components/teacher/EditCourseForm.tsx` | 课程基础信息编辑，复用 `lib/course-edit.ts` 判断并只提交字段净变化，无净变化不发请求；课程分类未改省略、明确清空发送空串；失败保留草稿，原页面仍有效时成功返回课程总览并刷新，不承担列表加载 |
 | CourseOverviewPage | `app/teacher/courses/[courseId]/overview/page.tsx` | 服务端加载、窗口/排序/分页及只读班级明细组合；页面摘要只汇总当前页，指标字段适配与含义遵循 API Owner，不把分页摘要当全课程统计 |
-| CreateClassroomForm | `components/teacher/CreateClassroomForm.tsx` | 管理建班选课、班名和提交。提交期间锁住所属课程和班级名称，候选加载结果不替换已提交的选择。结果不明时保留输入，需前往班级列表核对并显式确认后才可再次主动建班。按需加载后续课程并按 ID 去重，失败保留候选和草稿，可重试。成功后防止旧表单重复发送，仍留在列表时可发起下一次创建。同一课程上下文保留草稿，切换课程上下文时重新初始化。名称示例不自动成为输入值，班级列表由页面加载 |
-| EditClassroomForm | `components/teacher/EditClassroomForm.tsx` | 只编辑班名，合法原文提交，按单行控件去除 CR/LF 后的基准判断净变化，无变化不发请求；失败保留草稿，成功返回看板。所属课程、状态与加入码只读，归档、恢复、删除等生命周期动作归 ClassroomLifecycleActions |
+| CreateClassroomForm | `components/teacher/CreateClassroomForm.tsx` | 管理建班选课、班名和提交。提交期间锁住所属课程和班级名称，候选加载结果不替换已提交的选择。结果不明时保留输入，需前往班级列表核对并显式确认后才可再次主动建班。按需加载后续课程并按 ID 去重。新首屏替换旧候选，忽略迟到旧页；原选择缺席时只核对该课程，确认有效则恢复，否则保留班名并提示重选。失败保留草稿，可重试。成功导航及所需刷新只作用于仍有效的原页面，成功后防止旧表单重复发送，仍留在列表时可发起下一次创建。同一课程上下文保留草稿，切换课程上下文时重新初始化。名称示例不自动成为输入值，班级列表由页面加载 |
+| EditClassroomForm | `components/teacher/EditClassroomForm.tsx` | 只编辑班名，合法原文提交，按单行控件去除 CR/LF 后的基准判断净变化，无变化不发请求；失败保留草稿，原页面仍有效时成功返回看板并刷新。所属课程、状态与加入码只读，归档、恢复、删除等生命周期动作归 ClassroomLifecycleActions |
 | ClassroomLifecycleActions | `components/teacher/ClassroomLifecycleActions.tsx` | 班级列表生命周期“更多”菜单：ACTIVE 归档/删除，ARCHIVED 恢复/删除；拥有菜单、pending、确认与结果状态，组合 FloatingMoreMenu 并保留当前列表视图；删除限制由后端判定，不混入基础编辑表单 |
 | CreateLearningTaskForm | `components/teacher/CreateLearningTaskForm.tsx` | 模板内容、课程分类、可见性、可选任务难度及单一“评阅标准（可选）”多行文字输入。描述仅检查非空白并按输入原文发出。difficulty/rubric 请求构造复用各自纯 helper，难度成功创建后重置。描述和评阅标准默认均为10行且可纵向调整。提供草稿和直接发布，创建省略资料引用。两个创建动作共用同步提交锁，结果不明时保留全部输入，前往我的模板核对并显式确认后可再主动创建 |
 | EditLearningTaskForm | `components/teacher/EditLearningTaskForm.tsx` | 描述和单一“评阅标准（可选）”文字输入默认均为10行，编辑态可纵向调整，只读长文本可滚动。可选难度仅四状态，未知初值不随其他字段保存而隐式回写。按 taskId 建立编辑基准和草稿，同实例刷新保留未保存内容。共用校验与净变化判断，保存确认后用正式回执同步全部字段和状态，失败保留草稿并对普通 409 提示刷新。发布确认后同步未改字段、保留本地净变化及未完成输入，本页主动归档后只读展示正式结果，同一模板的外部归档刷新则保留可复制的未提交草稿并关闭保存与生命周期操作。引用栏显隐取首次成功加载结果，清空保存及刷新不隐藏已显示栏目。仅明确身份与作者匹配且状态可编辑时允许写入，保存和生命周期操作共用 pending 边界，保留列表返回上下文。字段写入见 [API Map](./handoff-frontend-api-map.md#33-teacher-任务--提交--反馈) |
@@ -113,8 +113,8 @@
 
 | Component / Module | File | Responsibility / Boundary |
 |---|---|---|
-| JoinClassroomForm | `components/student/JoinClassroomForm.tsx` | 将加入码输入中的 ASCII 小写字母转为大写，提交时去除首尾空白。提交期间锁住加入码，成功后进入学生看板。后端返回已归档时显示专属页内提示，失败保留输入并恢复编辑 |
-| SubmissionForm | `components/student/SubmissionForm.tsx` | 原文源码与独立可选说明输入、码点校验、请求防重复及公开业务错误安全适配；同一学生、班级与课堂任务在当前页成功刷新后保留内存草稿，失去提交资格时显示原因并保留语言选择、可复制的只读源码和说明，资格恢复后可继续编辑；任务详情暂态读取失败时隐藏表单与历史，页内重试确认同一身份后按最新资格恢复原文及待核对状态，明确拒绝或身份变化结束原草稿保留；成功保存后锁住当前表单，导航恢复只打开同一提交详情，结果未确认先核对历史；多文件粘贴格式提示与示例由此维护，单文件无需 FILE 标记；不提供上传/结构化文件提交，不以模板当前状态自行阻断 |
+| JoinClassroomForm | `components/student/JoinClassroomForm.tsx` | 将加入码输入中的 ASCII 小写字母转为大写，提交时去除首尾空白。提交期间锁住加入码，成功后在原页面仍有效时进入学生看板并刷新。后端返回已归档时显示专属页内提示，失败保留输入并恢复编辑 |
+| SubmissionForm | `components/student/SubmissionForm.tsx` | 原文源码与独立可选说明输入、码点校验、请求防重复及公开业务错误安全适配；同一学生、班级与课堂任务在当前页成功刷新后保留内存草稿，失去提交资格时显示原因并保留语言选择、可复制的只读源码和说明，资格恢复后可继续编辑；任务详情暂态读取失败时隐藏表单与历史，页内重试确认同一身份后按最新资格恢复原文及待核对状态，明确拒绝或身份变化结束原草稿保留；成功保存后锁住当前表单，自动导航只作用于仍有效的原操作页面，导航恢复只打开同一提交详情，结果未确认先核对历史；多文件粘贴格式提示与示例由此维护，单文件无需 FILE 标记；不提供上传/结构化文件提交，不以模板当前状态自行阻断 |
 | EditSubmissionForm | `components/student/EditSubmissionForm.tsx` | 同次提交的受控代码/语言/说明与 baseRevision，语言复用共享选项。正常保存采用权威详情、取消不写入，刷新不覆盖未保存输入或静默换版。可逆拒绝后新发起的普通详情刷新成功，可恢复同版本编辑资格；已进入评阅持续只读，较新保存回执优先，版本无效时关闭编辑。冲突或未知结果仍保留当前输入并锁住保存，通过本页显式读取作品、核对确认后继续，异常取消不绕过核对门禁。评阅时保留可复制的未保存修改，作品展示与共享 AI 区块使用同一当前详情。复用作品编辑净变化判断，有未保存修改时先确认评阅已保存版本。暂态读取失败时暂停展示与操作，保留原稿、基线、保存结果和 AI 核对状态，确认同一访问者和作品后恢复 |
 | RequestAiFeedbackButton | `components/student/RequestAiFeedbackButton.tsx` | 师生复用的申请按钮展示；disabled/pending 与动作回调由 SubmissionAiReview 提供，不独立持有资格或请求时序 |
 | AiProcessingHint | `components/student/AiProcessingHint.tsx` | 统一 AI 处理中提示；通用状态文案复用 UI Status |

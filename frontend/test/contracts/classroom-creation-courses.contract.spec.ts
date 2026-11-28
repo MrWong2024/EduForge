@@ -9,7 +9,9 @@ import {
   classroomCoursePagePath,
   mergeClassroomCourseOptions,
   nextClassroomCoursePage,
+  readClassroomCreationCourse,
   resolveClassroomCreationCourses,
+  selectClassroomCreationCourseId,
 } from "../../lib/classroom-creation-courses";
 import {
   BrowserFetchJsonError,
@@ -78,6 +80,43 @@ test("an unavailable target never becomes the first available course", async () 
     expect(result.initialCourseId).toBeUndefined();
     expect(result.courses.map(({ id }) => id)).toEqual(["course-001", "course-002"]);
   }
+});
+
+test("a missing selection never submits the old ID or silently picks a replacement", () => {
+  const freshOptions = [{ id: "course-002", code: "C002", name: "课程二" }];
+
+  expect(selectClassroomCreationCourseId(freshOptions, "course-001")).toBe("");
+  expect(selectClassroomCreationCourseId(freshOptions, "course-002")).toBe("course-002");
+  expect(selectClassroomCreationCourseId(freshOptions)).toBe("course-002");
+});
+
+test("an exact read restores a valid later-page selection and uses the latest course label", async () => {
+  const reads: string[] = [];
+  const previousSelection = "course-101";
+  const freshOptions = [{ id: "course-001", code: "C001", name: "课程一" }];
+  expect(selectClassroomCreationCourseId(freshOptions, previousSelection)).toBe("");
+
+  const checked = await readClassroomCreationCourse(previousSelection, async (id) => {
+    reads.push(id);
+    return { data: { id: "course-101", code: "C101", name: "后页课程现名" } };
+  });
+  expect(reads).toEqual(["course-101"]);
+  expect(checked).toEqual({ id: "course-101", code: "C101", name: "后页课程现名" });
+
+  const restoredOptions = mergeClassroomCourseOptions(freshOptions, checked ? [checked] : []);
+  expect(selectClassroomCreationCourseId(restoredOptions, previousSelection)).toBe("course-101");
+});
+
+test("a missing or mismatched exact read cannot restore the absent selection", async () => {
+  const missingCourse = new BrowserFetchJsonError(404, {});
+
+  await expect(readClassroomCreationCourse("course-101", async () => {
+    throw missingCourse;
+  })).rejects.toBe(missingCourse);
+  await expect(readClassroomCreationCourse("course-101", async () => ({
+    id: "course-201",
+    name: "另一门课程",
+  }))).resolves.toBeUndefined();
 });
 
 test("classroom row names take precedence, then use the known-course mapping", () => {

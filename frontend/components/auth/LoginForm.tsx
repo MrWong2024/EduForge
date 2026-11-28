@@ -10,9 +10,11 @@ import { getAuthError, type AuthError } from "@/lib/auth/auth-errors";
 import { PASSWORD_RULES, validatePassword } from "@/lib/auth/password-policy";
 import { getRoleHomePath, type RoleAwareMe } from "@/lib/auth/role-home";
 import { getSafeNextPath } from "@/lib/auth/safe-next";
+import { useCurrentPage } from "@/lib/routes/use-current-page";
 
 export function LoginForm() {
   const router = useRouter();
+  const captureCurrentPage = useCurrentPage();
   const searchParams = useSearchParams();
 
   const [email, setEmail] = useState("");
@@ -33,6 +35,7 @@ export function LoginForm() {
       return;
     }
 
+    const isOriginalPage = captureCurrentPage();
     submittingRef.current = true;
     setIsSubmitting(true);
     setLoginError(null);
@@ -56,6 +59,7 @@ export function LoginForm() {
         method: "GET",
         cache: "no-store",
       });
+      if (!isOriginalPage()) return;
 
       const nextPath = getSafeNextPath(searchParams.get("next"));
       if (nextPath) {

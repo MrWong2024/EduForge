@@ -17,6 +17,7 @@ import {
   getSubmissionTextError,
   SUBMISSION_NOTE_MAX_CODE_POINTS,
 } from "@/lib/learning-tasks/text-submission";
+import { useCurrentPage } from "@/lib/routes/use-current-page";
 
 type SubmissionEligibility = {
   canSubmit: boolean;
@@ -60,6 +61,7 @@ function SubmissionEditor({
   eligibility,
 }: SubmissionTarget & { eligibility: SubmissionEligibility | null }) {
   const router = useRouter();
+  const captureCurrentPage = useCurrentPage();
   const [language, setLanguage] = useState("auto");
   const [codeText, setCodeText] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -101,6 +103,7 @@ function SubmissionEditor({
       normalizedLanguage,
       submissionNote,
     );
+    const isOriginalPage = captureCurrentPage();
     inFlight.current = true;
     setIsSubmitting(true);
     setErrorState(null);
@@ -134,7 +137,7 @@ function SubmissionEditor({
       );
       savedSubmissionIdRef.current = submissionId;
       setSavedSubmission({ id: submissionId, href });
-      router.push(href);
+      if (isOriginalPage()) router.push(href);
     } catch (error) {
       // A navigation failure cannot turn an already saved work into another POST.
       if (savedSubmissionIdRef.current) return;

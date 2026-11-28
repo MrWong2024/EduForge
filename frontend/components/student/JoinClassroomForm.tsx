@@ -7,6 +7,7 @@ import { ErrorState } from "@/components/blocks/ErrorState";
 import { fetchJson, BrowserFetchJsonError } from "@/lib/api/browser-client";
 import { buildErrorDescription, extractRawDetail } from "@/lib/api/error-presenter";
 import { paths } from "@/lib/routes/paths";
+import { useCurrentPage } from "@/lib/routes/use-current-page";
 import { safeGet } from "@/lib/ui/format";
 import { getCommonErrorSummary } from "@/lib/ui/status";
 
@@ -65,6 +66,7 @@ export async function submitJoinClassroom(
 
 export function JoinClassroomForm() {
   const router = useRouter();
+  const captureCurrentPage = useCurrentPage();
   const [joinCode, setJoinCode] = useState("");
   const submitLocked = useRef(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -76,6 +78,7 @@ export function JoinClassroomForm() {
       return;
     }
 
+    const isOriginalPage = captureCurrentPage();
     submitLocked.current = true;
     setIsSubmitting(true);
     setErrorState(null);
@@ -88,8 +91,10 @@ export function JoinClassroomForm() {
       return;
     }
 
-    router.push(paths.student.dashboard);
-    router.refresh();
+    if (isOriginalPage()) {
+      router.push(paths.student.dashboard);
+      router.refresh();
+    }
   };
 
   return (

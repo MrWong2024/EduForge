@@ -101,12 +101,12 @@ async function waitForFeedbackRead(
       reached,
       request.then(({ status }) => {
         throw new Error(
-          `Feedback PATCH completed before its read pause: ${status}`,
+          `Feedback request completed before its read pause: ${status}`,
         );
       }),
       new Promise<never>((_, reject) => {
         timer = setTimeout(
-          () => reject(new Error('Feedback PATCH read pause timed out')),
+          () => reject(new Error('Feedback read pause timed out')),
           5000,
         );
       }),
@@ -119,6 +119,7 @@ async function waitForFeedbackRead(
 describe('B1-2 submission content edits and review admission (HTTP)', () => {
   let app: INestApplication<App>;
   let connection: Connection | undefined;
+  let readbackConnection: Connection | undefined;
   let config: ConfigService;
   let jobService: AiFeedbackJobService;
   let users: Model<User>, sessions: Model<Session>, courses: Model<Course>;
@@ -207,6 +208,7 @@ describe('B1-2 submission content edits and review admission (HTTP)', () => {
 
   beforeAll(async () => {
     connection = await openAuthTestConnection();
+    readbackConnection = await openAuthTestConnection();
     const module = await Test.createTestingModule({ imports: [AppModule] })
       .overrideProvider(getConnectionToken())
       .useValue(connection)
@@ -306,7 +308,7 @@ describe('B1-2 submission content edits and review admission (HTTP)', () => {
         .send({ joinCode: classroom.joinCode })
         .expect(201);
     console.info(
-      'B1-2 database gate: standard_test / default+transaction eduforge_test / loopback rs0 PRIMARY / root@admin verified; namespace=' +
+      'B1-2 database gate: standard_test / default+transaction+independent readback eduforge_test / loopback rs0 PRIMARY verified; namespace=' +
         namespace,
     );
   });
@@ -344,42 +346,36 @@ describe('B1-2 submission content edits and review admission (HTTP)', () => {
         });
         await sessions.deleteMany({ userId: { $in: userIds } });
         await users.deleteMany({ _id: { $in: userIds } });
-        expect(await feedback.countDocuments(related)).toBe(0);
-        expect(await jobs.countDocuments(related)).toBe(0);
-        expect(await submissions.countDocuments({ _id: { $in: ids } })).toBe(0);
-        expect(
-          await instances.countDocuments({
-            _id: { $in: instanceIds.map((id) => new Types.ObjectId(id)) },
-          }),
-        ).toBe(0);
-        expect(
-          await tasks.countDocuments({
-            _id: { $in: taskIds.map((id) => new Types.ObjectId(id)) },
-          }),
-        ).toBe(0);
-        expect(
-          await enrollments.countDocuments({
-            classroomId: {
-              $in: classroomIds.map((id) => new Types.ObjectId(id)),
-            },
-          }),
-        ).toBe(0);
-        expect(
-          await classrooms.countDocuments({
-            _id: { $in: classroomIds.map((id) => new Types.ObjectId(id)) },
-          }),
-        ).toBe(0);
-        expect(
-          await courses.countDocuments({
-            _id: { $in: courseIds.map((id) => new Types.ObjectId(id)) },
-          }),
-        ).toBe(0);
-        expect(
-          await sessions.countDocuments({ userId: { $in: userIds } }),
-        ).toBe(0);
-        expect(await users.countDocuments({ _id: { $in: userIds } })).toBe(0);
+        const readback = readbackConnection?.db;
+        if (!readback) throw new Error('Missing guarded cleanup readback');
+        const idScope = (ownedIds: string[]) => ({
+          $in: ownedIds.map((id) => new Types.ObjectId(id)),
+        });
+        const ownedClassrooms = idScope(classroomIds);
+        const ownedUsers = { $in: userIds };
+        const cleanupChecks = {
+          [feedback.collection.name]: related,
+          [jobs.collection.name]: related,
+          [submissions.collection.name]: { _id: { $in: ids } },
+          [instances.collection.name]: { _id: idScope(instanceIds) },
+          [tasks.collection.name]: { _id: idScope(taskIds) },
+          [enrollments.collection.name]: { classroomId: ownedClassrooms },
+          [classrooms.collection.name]: { _id: ownedClassrooms },
+          [courses.collection.name]: { _id: idScope(courseIds) },
+          [sessions.collection.name]: { userId: ownedUsers },
+          passwordresettokens: { userId: ownedUsers },
+          [users.collection.name]: { _id: ownedUsers },
+        };
+        for (const [name, filter] of Object.entries(cleanupChecks)) {
+          expect(
+            await readback.collection(name).countDocuments(filter, {
+              readPreference: 'primary',
+              signal: AbortSignal.timeout(5000),
+            }),
+          ).toBe(0);
+        }
         console.info(
-          'B1-2 exact cleanup verified: submissions/feedback/jobs/classes/enrollment/session/users residual=0; namespace=' +
+          'B1-2 independent cleanup readback: submissions/feedback/jobs/instances/tasks/courses/classes/enrollment/session/reset tokens/users residual=0; namespace=' +
             namespace,
         );
       }
@@ -391,9 +387,13 @@ describe('B1-2 submission content edits and review admission (HTTP)', () => {
           if (connection?.readyState === STATES.connected)
             await connection.close();
           if (users) expect(users.db.readyState).toBe(STATES.disconnected);
-          console.info('B1-2 app/DB closed');
+          console.info('B1-2 app/default DB closed');
         } finally {
-          authTestEnvironment.restore();
+          try {
+            await readbackConnection?.close();
+          } finally {
+            authTestEnvironment.restore();
+          }
         }
       }
     }
@@ -1373,6 +1373,135 @@ describe('B1-2 submission content edits and review admission (HTTP)', () => {
         submissionId: new Types.ObjectId(aiSubmission.id),
       }),
     ).toBe(1);
+  });
+
+  it('asks the teacher to reconcile an exact duplicate POST when a concurrent PATCH changes its key', async () => {
+    const created = await submit(await publish());
+    const url = submissionUrl(created.id) + '/feedback';
+    const submissionId = new Types.ObjectId(created.id);
+    const payload = { ...reviewPayload, message: '原教师反馈 A' };
+    const updatedMessage = '已修改教师反馈 B';
+    const initial = (await giveFeedback(created.id, 0, payload).expect(201))
+      .body as FeedbackReceipt;
+    const samePayload = (await giveFeedback(created.id, 0, payload).expect(201))
+      .body as FeedbackReceipt;
+    expect(samePayload).toEqual(initial);
+    const otherPayload = await giveFeedback(created.id, 0, {
+      ...payload,
+      suggestion: '同一复合键，不同建议',
+    }).expect(409);
+    const publicConflictMessage =
+      '已有反馈与本次内容不同，请核对反馈列表后再继续。';
+    expect(otherPayload.body).toMatchObject({ message: publicConflictMessage });
+
+    const readback = readbackConnection?.db;
+    if (!readback) throw new Error('Missing guarded feedback readback');
+    const collection = feedback.collection;
+    const insertOne = collection.insertOne.bind(
+      collection,
+    ) as typeof collection.insertOne;
+    const findOne = collection.findOne.bind(
+      collection,
+    ) as typeof collection.findOne;
+    const reached = feedbackReadCheckpoint();
+    const released = feedbackReadCheckpoint();
+    const uniqueKey = {
+      submissionId: 1,
+      source: 1,
+      type: 1,
+      severity: 1,
+      message: 1,
+    };
+    let duplicate: { code?: number; keyPattern?: unknown } | undefined;
+    const insertSpy = jest
+      .spyOn(collection, 'insertOne')
+      .mockImplementation(async (document, options) => {
+        try {
+          return await insertOne(document, options);
+        } catch (error) {
+          if (
+            error instanceof mongo.MongoServerError &&
+            document.message === payload.message
+          ) {
+            const { code, keyPattern } = error as {
+              code?: number;
+              keyPattern?: unknown;
+            };
+            duplicate = { code, keyPattern };
+          }
+          throw error;
+        }
+      });
+    const lookupSpy = jest
+      .spyOn(collection, 'findOne')
+      .mockImplementation(async (filter, options) => {
+        if (
+          filter.submissionId instanceof Types.ObjectId &&
+          submissionId.equals(filter.submissionId) &&
+          filter.message === payload.message
+        ) {
+          reached.resolve();
+          await released.promise;
+        }
+        return findOne(filter, options);
+      });
+
+    const post = giveFeedback(created.id, 0, payload).then(
+      (response) => response,
+    );
+    let response: request.Response;
+    try {
+      await waitForFeedbackRead(reached.promise, post);
+      expect(duplicate).toEqual({ code: 11000, keyPattern: uniqueKey });
+      const patch = await teacher
+        .patch(`${url}/${initial.id}`)
+        .send({ message: updatedMessage })
+        .expect(200);
+      expect(patch.body).toMatchObject({
+        id: initial.id,
+        message: updatedMessage,
+      });
+      released.resolve();
+      response = await post;
+    } finally {
+      released.resolve();
+      try {
+        await Promise.allSettled([post]);
+      } finally {
+        insertSpy.mockRestore();
+        lookupSpy.mockRestore();
+      }
+    }
+
+    const list = (await teacher.get(url).expect(200)).body as FeedbackReceipt[];
+    const documents = await readback
+      .collection<StoredFeedback>(collection.name)
+      .find(
+        { submissionId },
+        { readPreference: 'primary', signal: AbortSignal.timeout(5000) },
+      )
+      .toArray();
+    expect(list).toHaveLength(1);
+    expect(list[0]).toMatchObject({ id: initial.id, message: updatedMessage });
+    expect(documents).toHaveLength(1);
+    expect(documents[0]).toMatchObject({
+      _id: new Types.ObjectId(initial.id),
+      message: updatedMessage,
+    });
+    console.info('06 feedback POST/PATCH race', {
+      namespace,
+      feedbackId: initial.id,
+      actualDuplicateCode: duplicate?.code,
+      postStatus: response.status,
+      listed: { count: list.length, message: list[0].message },
+      independentMongo: {
+        count: documents.length,
+        message: documents[0].message,
+      },
+    });
+    expect(response.status).toBe(409);
+    expect(response.body).toMatchObject({ message: publicConflictMessage });
+    expect(response.body).not.toHaveProperty('code');
   });
 
   it('does not reinterpret an unrelated duplicate-key failure as a successful feedback retry', async () => {

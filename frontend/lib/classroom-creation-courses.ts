@@ -38,6 +38,24 @@ export function mergeClassroomCourseOptions(
   return Array.from(byId.values());
 }
 
+export function selectClassroomCreationCourseId(
+  courses: ClassroomCourseOption[],
+  preferredCourseId?: string,
+): string {
+  if (preferredCourseId === undefined) {
+    return courses[0]?.id ?? "";
+  }
+  return courses.some((course) => course.id === preferredCourseId) ? preferredCourseId : "";
+}
+
+export async function readClassroomCreationCourse(
+  requestedCourseId: string,
+  readCourse: (id: string) => Promise<unknown>,
+): Promise<ClassroomCourseOption | undefined> {
+  const { id, code, name } = toCourseDetailResponse(await readCourse(requestedCourseId));
+  return id === requestedCourseId ? { id, code, name } : undefined;
+}
+
 export async function resolveClassroomCreationCourses(
   firstPage: CourseListResponse,
   requestedCourseId: string | undefined,
@@ -46,8 +64,8 @@ export async function resolveClassroomCreationCourses(
   let courses = mergeClassroomCourseOptions([], firstPage.items);
   if (requestedCourseId && !courses.some((course) => course.id === requestedCourseId)) {
     try {
-      const target = toCourseDetailResponse(await readCourse(requestedCourseId));
-      if (target.id === requestedCourseId) {
+      const target = await readClassroomCreationCourse(requestedCourseId, readCourse);
+      if (target) {
         courses = mergeClassroomCourseOptions(courses, [target]);
       }
     } catch {

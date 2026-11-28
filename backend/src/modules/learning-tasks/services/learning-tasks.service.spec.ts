@@ -153,8 +153,10 @@ const createHarness = (
     ),
   };
   const feedbackModel = {
+    create: jest.fn<Promise<unknown>, [Record<string, unknown>]>(),
     exists: jest.fn().mockResolvedValue(null),
     findById: jest.fn<ReturnType<typeof makeQuery>, [string]>(),
+    findOne: jest.fn<ReturnType<typeof makeQuery>, [Record<string, unknown>]>(),
     findOneAndUpdate: jest.fn<
       ReturnType<typeof makeQuery>,
       [
@@ -1589,6 +1591,53 @@ describe('Submission classroom association contract (no database)', () => {
       ],
       { session },
     );
+  });
+});
+
+describe('Teacher feedback duplicate creation (no database)', () => {
+  it('returns the existing reconciliation conflict code when an exact-key lookup misses', async () => {
+    const h = createHarness();
+    const dto = {
+      expectedRevision: 0,
+      source: FeedbackSource.Teacher,
+      type: FeedbackType.Style,
+      severity: FeedbackSeverity.Info,
+      message: 'Original feedback',
+    };
+    const uniqueKey = {
+      submissionId: 1,
+      source: 1,
+      type: 1,
+      severity: 1,
+      message: 1,
+    };
+    h.feedbackModel.create.mockRejectedValueOnce({
+      code: 11000,
+      keyPattern: uniqueKey,
+    });
+    h.feedbackModel.findOne.mockReturnValueOnce(makeQuery(null));
+
+    await expect(
+      h.service.createFeedback(
+        h.ids.submissionId.toString(),
+        dto,
+        h.ids.teacherId.toString(),
+      ),
+    ).rejects.toMatchObject({
+      status: 409,
+      response: {
+        code: 'FEEDBACK_PAYLOAD_CONFLICT',
+        message: '已有反馈与本次内容不同，请核对反馈列表后再继续。',
+      },
+    });
+    expect(h.feedbackModel.findOne).toHaveBeenCalledWith({
+      submissionId: h.ids.submissionId,
+      source: dto.source,
+      type: dto.type,
+      severity: dto.severity,
+      message: dto.message,
+    });
+    expect(h.feedbackModel.create).toHaveBeenCalledTimes(1);
   });
 });
 

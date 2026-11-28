@@ -756,8 +756,8 @@ export class LearningTasksService {
         })
         .lean<FeedbackWithMeta>()
         .exec();
-      if (!existing) throw error;
       if (
+        !existing ||
         existing.createdBy?.toString() !== userId ||
         (existing.suggestion ?? null) !== (payload.suggestion ?? null) ||
         (existing.scoreHint ?? null) !== (payload.scoreHint ?? null) ||

@@ -14,6 +14,7 @@ import {
   TASK_COURSE_LABEL_FORM_OPTIONS,
 } from "@/lib/learning-tasks/course-labels";
 import { paths } from "@/lib/routes/paths";
+import { useCurrentPage } from "@/lib/routes/use-current-page";
 
 type CreateCourseFormErrorState = {
   status?: number;
@@ -53,6 +54,7 @@ const getCreateErrorSummary = (status: number): string => {
 
 export function CreateCourseForm() {
   const router = useRouter();
+  const captureCurrentPage = useCurrentPage();
   const [code, setCode] = useState("");
   const [name, setName] = useState("");
   const [term, setTerm] = useState("");
@@ -98,6 +100,7 @@ export function CreateCourseForm() {
       requestBody.courseLabel = normalizedCourseLabel;
     }
 
+    const isOriginalPage = captureCurrentPage();
     submitLocked.current = true;
     setIsSubmitting(true);
     setSuccessMessage(null);
@@ -134,11 +137,13 @@ export function CreateCourseForm() {
     }
 
     startNavigation(() => {
-      if (courseId) {
-        router.push(paths.teacher.courseOverview(courseId));
-      } else {
-        router.push(paths.teacher.courses);
-        router.refresh();
+      if (isOriginalPage()) {
+        if (courseId) {
+          router.push(paths.teacher.courseOverview(courseId));
+        } else {
+          router.push(paths.teacher.courses);
+          router.refresh();
+        }
       }
       setCode("");
       setName("");
